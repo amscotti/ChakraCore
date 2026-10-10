@@ -354,3 +354,56 @@ native-check `test-shared-basic : PASS` with 8 static-only tests ignored (expect
 for a shared build). Note the tree links Homebrew ICU 78, far newer than the pinned
 embed-63.2 — system-ICU forward compatibility held at least this far. This is the
 parity target for the Phase 1 `zig build`: same triple, same `ninja check` result.
+
+## 14. Zig `cc` pilot results (2026-10-10, Phase 1 de-risking)
+
+Method: exported `compile_commands.json` (538 TUs) from a `build-zigpilot/`
+configure identical to §13 plus `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`,
+recompiled every TU with `zig c++` 0.17.0 (mise), then re-ran the archive/link
+edges with `zig c++` over the zig-built objects.
+Pilot harness lives in-tree at `tools/zig-pilot/` (`replay.py`, `link.py`,
+`bisect.py`, plus a `README.md` documenting usage and every harness issue found,
+including a critical fake-success runner bug and the output-verification rule
+adopted because of it).
+
+**Compile: 538/538 with one flag addition.** Every TU compiles under `zig c++`
+as-is except `JsrtHelper.cpp`, which trips `-Wdate-time` treated as an error:
+zig's clang 22 emits `expansion of date or time macro` for the `__DATE__` /
+`__TIME__` build-date hashing in the `-O3` configuration where AppleClang stays
+silent, and the promotion survives a trailing bare `-Wno-error` (proven over a
+series of controlled experiments — the five `bisect.py` runs plus minimal-TU
+flag probes; cleared only by `-Wno-date-time` / `-Wno-error=date-time`). Fix:
+append `-Wno-date-time` to zig compile flags — a
+build-required flag move, no engine change. Notable non-findings: all MSVC-compat
+flags (`-fms-extensions`, `-fasm-blocks`, `-fdelayed-template-parsing`, `-fwrapv`),
+the `-mmacosx-version-min=10.9` floor, exceptions/RTTI, and C++17 throughout all
+passed with zero other diagnostics.
+
+**Link: 3/3 with two adjustments.** `libChakraCore.dylib`, `ch`, `GCStress` all
+link under `zig c++` (which uses Zig's own Mach-O linker — evidence: it rejects
+`-exported_symbol` as an unsupported linker arg):
+1. CMake's split `-Wl,-force_load,` + `<lib>` form (trailing comma) fails with
+   `error: .: unrecognized file extension`; joining to `-Wl,-force_load,<lib>`
+   fixes it. `build.zig` should join the flag or link the objects directly.
+2. `ch` needs `-Wl,-u,_OnChakraCoreLoadedEntry`. Zig's linker dead-strips that
+   callback (unreferenced inside `ch` in shared builds), but the dylib resolves
+   it via `dlsym(RTLD_MAIN)` at load to install TestHooks (`TestHooks.cpp:153`,
+   `ChakraCoreShared.cpp:30`). Without it, flag parsing never runs and every
+   flagged invocation silently `exit(0)`s at `ch.cpp:968` (proven via lldb:
+   `argInfo.filename` held the flag text). The `build.zig`-native fix is
+   `export_symbol_names`, not the `-u` workaround.
+
+**Validation: 1958/1959 vs baseline 1959/0.** The zig-built `ch` runs the full
+`disable_jit` suite with one delta: `Regex/regexCharTrieStack.js` expects a stack
+overflow that no longer triggers (clang 22 generates tighter frames for that
+matcher). Stack-overflow *detection* itself was verified identical in both builds
+(deep recursion throws catchable `Out of stack space`), so this is a benign
+codegen/layout delta in a test whose own message anticipates amendment — carried
+as a known item, not a blocker.
+
+**Pilot verdict: toolchain de-risked.** Remaining Phase 1 risk is build-logic
+(authoring `build.zig`), not toolchain capability. Open items for `build.zig`
+authoring: `export_symbol_names` for the `ch` callback, `-Wno-date-time` on
+compile flags, joined `-force_load` (or direct object linking), `jstoc.py` /
+`regenByteCode` / `lttng.py` as build steps, and the `disable_jit`-variant test
+wiring already proven here.
