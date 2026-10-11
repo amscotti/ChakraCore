@@ -8,9 +8,13 @@ doc/build-contract-mac.md, doc/pal-config-contract-mac.md section 5):
   2. Generated zig-out/pal/src/config.h matches the MD5 pinned in both
      contracts; byte-identical to the build-zigpilot/pal/src/config.h
      reference (cmp) when that git-ignored ref exists.
-  3. zig-out/lib/libChakra.Pal.a holds exactly the 91 contract objects
-     (names vs doc/build-contract-mac.md section 4.1 PAL group) and no
-     non-object member besides __.SYMDEF.
+  3. B2-aware archive check: EITHER zig-out/lib/libChakra.Pal.a (B1
+     artifact, stem.o members) OR
+     zig-out/lib/libChakra.Pal.Singular.a (B2 artifact, NNNN-basename.o
+     members, basename keeping its source extension) holds exactly the
+     91 contract objects (names vs doc/build-contract-mac.md section
+     4.1 PAL group: stem.o for B1, NNNN- stripped then basename.o for
+     B2) and no non-object member besides __.SYMDEF.
   4. A fast fail-clearly subset exits nonzero with a loud message:
      missing ICU header, wrong-arch target, wrong-minimum target,
      -Dcpu override, -Doptimize=Debug, wrong-OS target, missing SDK
@@ -43,7 +47,8 @@ EXPECTED_OBJECTS = 91
 REFERENCE_CONFIG = "build-zigpilot/pal/src/config.h"
 GENERATED_CONFIG = "zig-out/pal/src/config.h"
 EXPECTED_CONFIG_MD5 = "855152b0a1b6da1d8abfef52e1f45f4e"
-ARCHIVE = "zig-out/lib/libChakra.Pal.a"
+ARCHIVE_B1 = "zig-out/lib/libChakra.Pal.a"
+ARCHIVE_B2 = "zig-out/lib/libChakra.Pal.Singular.a"
 BUILD_TIMEOUT = 1200
 FAIL_TIMEOUT = 180
 
@@ -216,7 +221,8 @@ def main():
     elif os.path.exists(gen):
         log("config.h-cmp: ref absent — MD5-only")
 
-    # 3. Archive holds exactly the 91 contract objects.
+    # 3. Archive holds exactly the 91 contract objects (B2-aware: accept
+    # EITHER the B1 or the B2 artifact; both require 91 + only __.SYMDEF).
     try:
         doc_files, expected = expected_objects_from_doc()
         log(f"doc section 4.1 PAL group: {len(doc_files)} files -> {len(expected)} unique .o names")
@@ -225,25 +231,49 @@ def main():
             record("archive-objects", f"exactly {EXPECTED_OBJECTS} contract objects",
                    f"doc parse gave {len(doc_files)} files/{len(expected)} names", False)
         else:
-            rc, ar_out, _ = run(["ar", "t", os.path.join(ROOT, ARCHIVE)], FAIL_TIMEOUT)
-            members = [l for l in ar_out.splitlines() if l]
-            objects = sorted(m for m in members if m.endswith(".o"))
-            non_obj = sorted(m for m in members if not m.endswith(".o"))
-            log(f"ar t: {len(members)} members ({len(objects)} .o, non-.o: {non_obj})")
-            missing = sorted(expected - set(objects))
-            extra = sorted(set(objects) - expected)
-            ok = (rc == 0 and not missing and not extra
-                  and len(objects) == EXPECTED_OBJECTS and non_obj == ["__.SYMDEF"])
-            detail = ""
-            if missing:
-                detail += f" missing={missing}"
-            if extra:
-                detail += f" extra={extra}"
-            if non_obj != ["__.SYMDEF"]:
-                detail += f" non-object members={non_obj}"
-            record("archive-objects", f"exactly {EXPECTED_OBJECTS} contract objects + only __.SYMDEF",
-                   f"{len(objects)} .o match" if ok else
-                   f"{len(objects)} .o (ar exit {rc})", ok, detail.strip())
+            path_b1 = os.path.join(ROOT, ARCHIVE_B1)
+            path_b2 = os.path.join(ROOT, ARCHIVE_B2)
+            if os.path.exists(path_b1):
+                archive, is_b2 = path_b1, False
+            elif os.path.exists(path_b2):
+                archive, is_b2 = path_b2, True
+            else:
+                archive, is_b2 = None, False
+            if archive is None:
+                record("archive-objects", f"exactly {EXPECTED_OBJECTS} contract objects + only __.SYMDEF",
+                       f"neither {ARCHIVE_B1} nor {ARCHIVE_B2} exists", False)
+            else:
+                log(f"archive under test: {archive} ({'B2 NNNN- members' if is_b2 else 'B1 basename members'})")
+                rc, ar_out, _ = run(["ar", "t", archive], FAIL_TIMEOUT)
+                members = [l for l in ar_out.splitlines() if l]
+                objects = sorted(m for m in members if m.endswith(".o"))
+                non_obj = sorted(m for m in members if not m.endswith(".o"))
+                log(f"ar t: {len(members)} members ({len(objects)} .o, non-.o: {non_obj})")
+                names = set(objects)
+                want = expected
+                bad_prefix = []
+                if is_b2:
+                    bad_prefix = sorted(m for m in objects if not re.match(r"^\d{4}-", m))
+                    names = set(re.sub(r"^\d{4}-", "", m) for m in objects)
+                    # B2 members keep the source extension (NNNN-file.cpp.o),
+                    # so compare against basename.o, not stem.o.
+                    want = set(os.path.basename(f) + ".o" for f in doc_files)
+                missing = sorted(want - names)
+                extra = sorted(names - want)
+                ok = (rc == 0 and not missing and not extra and not bad_prefix
+                      and len(objects) == EXPECTED_OBJECTS and non_obj == ["__.SYMDEF"])
+                detail = ""
+                if missing:
+                    detail += f" missing={missing}"
+                if extra:
+                    detail += f" extra={extra}"
+                if bad_prefix:
+                    detail += f" members without NNNN- prefix={bad_prefix}"
+                if non_obj != ["__.SYMDEF"]:
+                    detail += f" non-object members={non_obj}"
+                record("archive-objects", f"exactly {EXPECTED_OBJECTS} contract objects + only __.SYMDEF",
+                       f"{len(objects)} .o match" if ok else
+                       f"{len(objects)} .o (ar exit {rc})", ok, detail.strip())
     except SystemExit as e:
         record("archive-objects", f"exactly {EXPECTED_OBJECTS} contract objects", str(e), False)
 

@@ -54,6 +54,7 @@ _DROP/
 *.dpl.*
 *.nupkg
 *.pyc
+__pycache__/
 *.tlog/
 /test/_ttdlog/*
 ComputedEnvironment.cmd

@@ -109,3 +109,19 @@ known behaviors.
   to apple_m1 — observed here as apple_a14 on an Apple M1 Max host
   (exit 1, message above). Only the literal default target
   (aarch64-macos.26.0/apple_m1) is accepted.
+
+## B2 transition note (2026-10-11)
+
+The B1 results recorded above are the historical B1 record and are
+unchanged. `tools/build-contract/verify_b1.py` is now B2-aware in one
+check only: `archive-objects` accepts EITHER the B1 artifact
+(`zig-out/lib/libChakra.Pal.a`, `stem.o` members) OR the B2 artifact
+(`zig-out/lib/libChakra.Pal.Singular.a`, `NNNN-basename.o` members with
+the source extension kept); both require exactly the 91 §4.1 objects
+plus only `__.SYMDEF`, and the B2 branch additionally requires every
+member to carry the `NNNN-` prefix. All other checks (toolchain,
+clean-build, pal-config-checks, config.h-md5/cmp, the nine fail-clearly
+cases) are byte-for-byte the B1 checks. Rationale: the B2 build graph
+no longer produces `libChakra.Pal.a`, so the unmodified check fails
+14/15 on a B2 tree for artifact-name reasons only; the B2-aware form
+restores the script as a regression gate on both trees.
