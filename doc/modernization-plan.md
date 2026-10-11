@@ -1,519 +1,509 @@
 # ChakraCore Modernization Plan
 
-> Status: DRAFT. Pinned to HEAD `97e68c917`. Scope: (1) switch the build to Zig
-> 0.17 for the existing C/C++ project, (2) introduce new Zig code incrementally,
-> (3) close major feature gaps vs V8 / QuickJS-ng / JavaScriptCore with priorities.
->
-> Convention: any claim about Zig 0.17 API, behavior, or version-pinned dependency
-> that was researched against Zig 0.16 locally plus 0.17 release notes is marked
-> **[NEEDS VERIFICATION on Zig 0.17]** and must be re-checked after upgrading the
-> local toolchain. Competitor-internals claims without a primary source are marked
-> **[UNVERIFIED EXTERNAL]**. See §6.
+> Status: foundation and Mac toolchain pilot verified; **B1 is the next work item**.
+> `build.zig` has not been authored. Engine/legacy-build references use baseline
+> `97e68c917`; execution evidence is recorded through 2026-10-10 local time.
+> This is a staged roadmap for a small maintained fork, not a dated delivery promise.
 
-## 0. Goals and non-goals
+## Read this first
+
+The direction is attainable when each milestone produces a usable, tested result:
+
+1. **Own the build:** implement one clean Mac configuration, prove its checks,
+   then add Linux with JIT. Roll out the new build per verified platform.
+2. **Use Zig selectively:** prove one small C-ABI integration when it provides
+   value. JavaScript improvements can proceed in the existing C++ engine.
+3. **Improve compatibility incrementally:** qualify the conformance runner,
+   triage failures, and deliver bounded feature groups. Full ES2025 remains the
+   long-term core-language target, reached across releases.
+
+Terminology: **PAL** is the operating-system compatibility layer; **JsRT** is the
+C embedding API; **JIT** compiles JS to native code; **WABT** supplies WASM tooling.
+A **qualified suite** means its edition selection, host behavior and pass/fail
+handling have been validated before its results are used as a completion gate.
+
+| Milestone | Outcome | Depends on | Status |
+|---|---|---|---|
+| F0 | Compiler, behavior-parity and diagnostic-conformance foundation | — | Verified |
+| B1 | Explicit Mac build/PAL configuration contract | F0 | **Next** |
+| B2 | Source-only Mac `zig build` and `zig build check` | B1 | Planned |
+| B3 | Mac build profiles, incremental correctness and CI | B2 | Planned |
+| B4 | Native x64 Linux JIT/WASM/WABT proof and Zig build | B2; B3 before default rollout | Planned, higher uncertainty |
+| B5 | First release package with controlled dependencies | B3; B4 for a two-platform package | Planned |
+| B6 | Windows feasibility and rollout; later target extensions | Stable build contracts | Separate expansion |
+| Z1 | One useful mixed C++/Zig unit behind a tested C ABI | B3; B4 if the unit ships on Linux | Optional pilot |
+| C1 | Qualified ES2025 test policy and triaged failures | Stable Mac build at B3 | Planned |
+| C2 | Bounded compatibility batches and partial releases | C1; B4 before JIT-wide enablement | Planned |
+| C3 | Larger runtime/object-model feature projects | C1 and their feature prerequisites | Separate projects |
+| C4 | Verified full ES2025 core-language result | Required C2/C3 work and qualified runner | Long-term objective |
+
+**Default execution order:** F0 → B1 → B2 → B3 → B4. Start C1 after B3;
+release/dependency work at B5 and an approved Z1 pilot can then be scheduled without
+holding up C++ compatibility fixes. B6 is an expansion decision, not a prerequisite
+for completing the first Mac/Linux build rollout. All entries marked planned are
+future work; command names below describe the intended build interface.
+
+## 0. Goals and boundaries
 
 Goals:
 
-- Keep ChakraCore a small, embeddable, community-maintained JS engine with a stable
-  flat C (JsRT) API, time-travel debugging (TTD), and out-of-box WASM + Intl in one
-  binary.
-- Replace the CMake + `build.sh` / MSBuild dual-entry build with a single hermetic
-  Zig build, without changing engine behavior first.
-- Add Zig code only behind C-ABI boundaries, file by file, with no big-bang rewrite.
-- Close the highest-cost JS/Intl/WASM gaps so modern test262-era code parses and
-  runs, prioritized by breakage cost.
+- Keep a small embeddable engine with the flat JsRT C API, TTD debugging and
+  JavaScript/Intl/WASM functionality on configurations that actually support it.
+- Use Zig 0.17.0 as the build front end and C/C++ toolchain, preserving engine
+  behavior while declaring platform floors and dependencies explicitly.
+- Replace legacy entry points platform by platform once the replacement has
+  evidence. Maintain a working build and usable partial releases throughout.
+- Introduce Zig implementation code through narrow C-ABI slices where it improves
+  maintainability, tooling or a measured requirement.
+- Target full **ES2025 (ECMA-262)** coverage, while measuring and shipping smaller
+  compatibility gains along the way.
 
-Non-goals:
+Boundaries:
 
-- No DOM / Node runtime, no JS-to-C compiler parity with `qjsc`, no rewrite of the
-  JIT/GC in Zig in this plan.
-- No ABI break in `ChakraCore.h` / `ChakraCommon.h` / `ChakraDebug.h` during
-  Phases 1–2.
-- No commit to exact V8/JSC internal-architecture parity; competitor internals are
-  anchors, not targets.
+- Phases 1–2 preserve public header spellings and the JsRT ABI. New runtime
+  feature/host requirements in Phase 3 need an explicit API/versioning decision.
+- DOM/Node hosting, JIT/GC rewrites, V8/JSC internal-design parity and a language
+  migration percentage are outside this roadmap's completion gates.
+- Intl/ECMA-402 and WASM extensions have their own milestones and coverage claims.
+  Their entire future feature sets do not gate ES2025 core-language completion.
+- Modern OS/tool floors may be raised deliberately. A supported-platform claim
+  requires a declared contract and testing on the relevant platform/floor.
 
-## 1. Current state (where we are)
+## 1. Current evidence and its limits
 
-Detail: [current-state.md](current-state.md), [architecture.md](architecture.md),
-[build.md](build.md).
-
-### 1.1 Version, identity, size
-
-- Version **1.13.0 dev** (`RELEASE=0`) from `lib/Common/ChakraCoreVersion.h`; binary
-  version composes from the same macros via `bin/CoreCommon.ver`.
-- Community project for embedded use. Microsoft ended ChakraCore 1.11 security
-  updates in March 2021; Edge no longer uses Chakra (`README.md:9-13`). No
-  `ARCHIVED`/`DEPRECATED` file in repo; sustainer-scale activity — commits/year
-  (author date) 1×2026 / 23×2025 / 25×2024 / 10×2023 / 36×2022 (recent drivers:
-  VS/ARM64/ICU/clang/C++17 fixes).
-- Working tree ~351M, 7,124 tracked files, single pack (~179 MB pack + index).
-  Language mix dominated
-  by C++ engine + JS test corpus: ~652k lines `.cpp`, ~272k lines `.h`, ~1.73M lines
-  test JS, ~2.7k lines Python. Largest trees: `test/` 122M, `lib/Runtime` 19M,
-  `lib/Backend` 9.4M, `lib/Common` 6.5M, `pal/src` 3.5M.
-- No `src/` directory, no `package.json`/`VERSION` file at root. Only 12 tracked `.md`
-  files; real docs are wiki links (Architecture, Embedding, JSRT Reference,
-  Building, Resources) plus this new `doc/` folder.
-
-### 1.2 Source layout and engine architecture
-
-- There is no `src/`; engine source lives in `lib/` with 11 top-level units:
-  `Backend` (JIT), `Common` (infra: Core, Memory/GC, DataStructures, Util, Codex,
-  Exceptions, PlatformAgnostic), `JITClient` / `JITIDL` / `JITServer`
-  (out-of-process JIT over RPC, Windows or opt-in), `Jsrt` (public C API +
-  implementation), `Parser` (scanner/parser/AST + background parse), `Runtime`
-  (engine: Base, ByteCode, Language, Library, Types, Math, Debug,
-  PlatformAgnostic incl. ICU/Unicode shims), `SCACore` (structured clone),
-  `WasmReader` (WASM binary frontend), `wabt` (vendored WABT).
-- `pal/` is the Rotor-derived Platform Adaptation Layer for Linux/macOS. `bin/ch`
-  is the `ch` developer host shell (minimal host: print-based I/O + WScript compat
-  + debugger/TTD hooks — not print-only, but no DOM/Node); `bin/rl` is the test
-  runner source (built on Windows; not in the xplat CMake); `bin/NativeTests` has
-  C++ embedding tests (`JsRTApiTest`, `JsDiagApiTest`, etc.).
-- Public API is a flat C API: `lib/Jsrt/ChakraCore.h` (ChakraCore-only: `JsParse` /
-  `JsRun` / `JsSerialize`, module-record and serializer handles
-  `JsVarSerializerHandle` / `JsVarDeserializerHandle`) + `ChakraCommon.h` (shared:
-  `JsCreateRuntime` / `JsCreateContext` / `JsSetCurrentContext` / `JsCallFunction`,
-  value/property APIs, `JsRuntimeAttributes`)
-  + `ChakraDebug.h` (diagnostics events). Implementation in `Jsrt.cpp` /
-  `JsrtRuntime.cpp` / `JsrtContext.cpp` plus `lib/Jsrt/Core/`; `JsrtRuntime` wraps
-  `ThreadContext`, `JsrtContext` wraps `ScriptContext` + `JavascriptLibrary`.
-  (No WASM surface in the JsRT headers — WASM is JS builtins under `ENABLE_WASM`;
-  the host-side `JsCreateWeakReference` API lives in `ChakraCore.h`, not
-  `ChakraCommon.h`.)
-- Threading/hosting: one `ThreadContext` per thread (`GetContextForCurrentThread`),
-  one `ScriptContext` per JS global/realm; host may supply
-  `JsThreadServiceCallback` for background JIT/GC work or set
-  `DisableBackgroundWork`; script interruption, idle processing, and
-  no-JIT/no-eval/no-exec modes are runtime attributes.
-- Pipeline: source → Scanner/Parser (`ParseNode` AST, upfront or deferred/background
-  parse) → `ByteCodeGenerator` (register-based bytecode via `ByteCodeWriter`;
-  serializable via `ByteCodeSerializer` / `JsSerialize`) → `InterpreterStackFrame`
-  interpreter loop (shared `InterpreterLoop.inl` with debug/profile variants) →
-  tiered JIT driven by `FunctionExecutionStateMachine` (owned by `FunctionBody`)
-  through AutoProfiling/Profiling interpreter states to SimpleJit then FullJit,
-  using `DynamicProfileInfo` + inline caches. `FunctionProxy` →
-  `ParseableFunctionInfo` → `FunctionBody` with swappable `EntryPointInfo`
-  `jsMethod` thunks (CheckCodeGen, interpreter thunks, native entry points,
-  loop-body entry points).
-- JIT: `lib/Backend` `NativeCodeGenerator` (background job manager) lowers bytecode
-  to arch-specific IR (amd64/arm/arm64/i386); `SimpleLayout` for SimpleJIT; `GlobOpt`
-  (value numbering, type specialization, PRE, array opts, bailouts) +
-  Lower/LinearScan/Encoder/EmitBuffer for FullJIT. Supports in-proc and out-of-proc
-  (`JITServer`) codegen. `DISABLE_JIT` CMake option exists (compile-out; runtime
-  disable also exists as the `NoNative` ConfigFlag).
-- GC: `Memory::Recycler` mark-sweep collector with concurrent/parallel mark,
-  concurrent sweep, partial (generational-style) collection, finalization, weak refs,
-  write barriers, page/bucket heap blocks. No sandbox/heap cage, no pointer
-  compression.
-- Intl: `ENABLE_INTL_OBJECT` + `HAS_ICU`; ICU C API wrapped by
-  `lib/Runtime/PlatformAgnostic/ChakraICU.h`, `UnicodeText` abstraction with non-ICU
-  fallback; `Intl.*` builtins partly in C++ (`IntlEngineInterfaceExtensionObject`)
-  and partly JS (`InJavascript/Intl.js`). Only 4 Intl constructors exist (see §4).
-- WASM: `ENABLE_WASM`; `WasmBinaryReader` decodes MVP binary (v1) into
-  `WasmFunctionInfo`/parse tree; `WasmToAsmJs` reuses the asm.js typed pipeline for
-  codegen; JS API via `WebAssemblyModule`/`Instance`/`Memory`/`Table`/`Environment`
-  (`WasmI64` defaults false — i64 values surface per the flag description, not as
-  JS BigInts); WABT vendored for tooling interop.
-- Serialization/hosting extras: `SCACore` structured-clone Serializer/Deserializer;
-  `Runtime.h` umbrella include pulls Parser + RuntimeCommon; TTD time-travel
-  debugging.
-
-### 1.3 Platforms, build, tests, CI
-
-- Supported per README: x64 on Linux/macOS/Windows; x86 and ARM Windows-only;
-  x86/ARM Linux + ARM macOS stated as future goal. CMake adds AMD64/X86/ARM/ARM64 ×
-  Linux/macOS/Android select, macOS floor 10.9, C++17. ARM64-Linux warns unsupported
-  and ARM64 JIT warns non-functional off-Windows.
-- Unix entry: root `build.sh` (695 lines): usage/arg-parse, CMake invocation,
-  make/ninja build, output `out/<Debug|Release|Test>`. Requires clang ≥3.7,
-  `--cc`/`--cxx` overrides; LTO via `--lto`/`--lto-thin` downloads/builds LLVM 5.0.0
-  + gold plugin via `tools/compile_clang.sh`. There is no `build.cmd` at root.
-- Windows entry: `Build/Chakra.Core.sln` (VS15) via `test/ci.buildone.cmd` →
-  `ci.build.init.cmd` → `test/ci.build.cmd` (`msbuild /m
-  /p:Configuration=<Debug|Test|Release> /p:Platform=<x86|x64|arm>`). Auto toolset
-  v110, v120, v140–v143, v145 (no v144); `stdcpp17`.
-- Root `CMakeLists.txt`: `cmake_minimum_required 3.10`; options `DISABLE_JIT`,
-  `INTL_ICU` (ON), `EMBED_ICU`, `USE_CCACHE`; `_SH`-suffixed vars from `build.sh`
-  unset-from-cache after use; arch mapping x86_64→AMD64, armv7l→ARM,
-  arm64/aarch64→ARM64; Android NDK abi armeabi-v7a API 21; fatal on unknown OS/arch.
-- Deps: Python interpreter (`jstoc.py`/`regenByteCode.py`/`runtests.py`); no libuv.
-  ICU: `--system-icu`/`--custom-icu`/`--embed-icu`/`--no-icu`; `EMBED_ICU` downloads
-  `icu4c-63_2-src.tgz` with SHA512 and builds static; Linux default links `icuuc`+
-  `icui18n`; macOS falls back to `--no-icu` if no path. Windows:
-  `deps/Chakra.ICU/*.vcxproj` with `HAS_ICU`/`INTL_ICU`/`U_STATIC_IMPLEMENTATION`/
-  `WINDOWS10_ICU` modes (`Build/Chakra.Build.props:42-62`).
-- CMake structure: root adds `pal`, `lib`, `bin`, `test`. `lib/` builds
-  `ChakraCoreStatic` from 20 unconditional plus up to 4 conditional object libs
-  (`Backend` only if `BuildJIT`; `WasmReader` only AMD64; `wabt` only
-  `CAN_BUILD_WABT` = non-Release AMD64; LTTng only if `USE_LTTNG`); post-build
-  copies public headers to `<build-root>/include`. `bin/` builds `GCStress`
-  (skipped on Android/Valgrind), `ch` host, `ChakraCore` shared lib unless
-  `STATIC_LIBRARY`.
-- Codegen: `bin/ch/jstoc.py` (JS → C const-char-array header, e.g. `DbgController.js`);
-  `tools/regenByteCode.py` (embedded bytecode headers from `lib/Runtime/Library/
-  InJavascript`, `--verify` in `bytecode-check`); `tools/lttng.py` (ETW `.man` →
-  LTTng); `--trace` is static-only (the static-only FATAL gates
-  `ENABLE_CC_XPLAT_TRACE`, not LTTng); `Build/CMakeFeatureDetect.cmake`
-  (`disable_tail_calls` probe); RecyclerChecker clang plugin
-  (`--wb-check`/`--wb-analyze`); `pal` configure probes. Suspected bug: root
-  CMakeLists.txt:610-613 expands `${CLANG_SANITIZE_SH}` after unsetting it, so
-  `--sanitize` flags may never apply — needs a configured-build probe.
-- Tests: `test/` has 85 top entries, ~2,801 `.js` files (Array, AsmJs, es5/es6/es7,
-  Intl, WasmSpec, wasm, Debugger, Generated, benchmarks, native-tests, …). Xplat
-  `ninja check` = `bytecode-check` + `regression-check` (`python runtests.py
-  --debug|--test … --binary=<build>/ch`; Release only smoke `ch
-  test/Basics/hello.js`) + `native-check` unless NO_ICU/EMBED_ICU. `runtests.py`
-  requires `--debug`/`--test`, default variants `interpreted,dynapogo`, 60s/180s
-  timeouts, auto-excludes `exclude_xplat` + `require_simd` off-Windows and
-  `exclude_mac` on macOS. Windows `runtests.cmd` drives `rl.exe` with arch+config
-  args; `ci.testone.cmd` runs bytecode verify + `runtests.py` + `runnativetests.cmd`
-  (failure codes 2/3/4).
-- CI: `azure-pipelines.yml` (master/release + weekly cron; Style job
-  `check_{copyright,ascii,eol,tabs}.sh`; CMake legs: ubuntu-24.04 ×
-  Debug/NoJit/RelWithDebInfo/Release, ubuntu-22.04 × RelWithDebInfo/Release only,
-  macOS-latest × DebugNoICU-static/RelWithDebInfo/Release — no macOS NoJit leg —
-  via `cmake -GNinja … -DCMAKE_CXX_COMPILER=clang++ … && ninja && ninja check`;
-  MSVC legs: windows-2025 x86/x64 × debug/test/release plus x86-only NoJit, and
-  windows-2022 x86/x64 release-only build, tests only on debug/test/NoJit).
-  `.cirrus.yml`:
-  ARM64 macOS noJit Debug/RelWithDebInfo/Release. Tested-NoJit exists only on
-  ubuntu-24.04 plus Cirrus ARM64-macOS. `.github/workflows/agreement.yml` is
-  CLA-only.
-- Stale floors / health risks (source-inspection only, no build was run): embedded
-  ICU pinned to 63.2 (2018) while `build.sh` help still says 57.1; CMake 3.10 floor;
-  `actions/checkout@v2`; README VS2015/2017 + Win7-era text vs windows-2025/2022 CI;
-  macOS 10.9 floor; ventura image; travis/appveyor badges in vendored wabt README;
-  retired `technet.microsoft.com` URLs; `Microsoft/ChakraCore` vs
-  `chakra-core/ChakraCore` org-URL split.
-
-## 2. Phase 1 — Switch the build to Zig 0.17 for the existing C/C++ project
-
-Pattern: **Zig as a hermetic C/C++ toolchain first, language migration later**
-(Uber pattern: `zig cc` compiles C/C++ behind a build flag; language adoption is a
-separate step — **[UNVERIFIED EXTERNAL]** detail, re-source before citing). Phase 1
-must reproduce the existing outputs with zero engine changes.
-
-### 2.1 Pin and parallel-run
-
-1. Pin Zig **0.17.0** in CI + docs (verified released 2026; release notes: 5 months,
-   206 contributors, 925 commits). Keep CMake + `build.sh` / MSBuild working in
-   parallel until `zig build` reaches full parity, then flip the default.
-2. Add `zig --version` / `zig env` capture to every CI log. The §2.2 facts below
-   were verified against Zig 0.17.0 itself (release notes + installed
-   `lib/std/Build*.zig` sources, 2026-10-10); only the items still carrying
-   **[NEEDS VERIFICATION on Zig 0.17]** remain open.
-3. Pick one pilot target first (recommend: `ch` + `ChakraCoreStatic` for x64 Linux,
-   `RelWithDebInfo`, system ICU), then expand the matrix.
-
-### 2.2 Zig 0.17 facts that shape the build (all version-sensitive)
-
-- Build system rework, verified in the 0.17.0 release notes: configurer/maker
-  split, Build Server Protocol, cache switched to a binary format (~25% smaller),
-  new ELF linker with incremental compilation for x86_64-linux
-  **[NEEDS VERIFICATION on Zig 0.17 for incremental on macOS/Windows]**.
-- **`@cImport` is REMOVED in 0.17** (deprecated in 0.16, both per the 0.17.0 release
-  notes). C headers now go through the external ZSF `translate-c` package:
-  `zig fetch --save git+https://codeberg.org/ziglang/translate-c`, then
-  `const Translator = @import("translate_c").Translator;` +
-  `Translator.init(dep, .{ .c_source_file = ..., .target, .optimize, ... })`
-  (spelling verified against the release-notes upgrade guide). In-repo
-  `Build.addTranslateC` still exists in 0.17 std (`Build.zig:949`) but
-  `Step.TranslateC` is deprecated.
-- Toolchain pins for 0.17, verified in the release notes: LLVM 22.1.8 (covers Clang,
-  libc++, libc++abi, libunwind, libtsan), glibc 2.44, musl 1.2.5. Locally,
-  `zig cc --version` reports clang 22.1.8.
-- **ZLS has no 0.17 release** (latest tag is 0.16.0 as of 2026-10-10; verified on
-  the ZLS releases page). Do not gate Phase 1 on IDE integration; re-check for a
-  0.17-compatible ZLS before promising editor support.
-- C/C++ pattern, spellings verified against installed 0.17.0 `lib/std` sources: one
-  `build.zig` with `b.addExecutable` (`Build.zig:579`) / `b.addLibrary` (`:637`) +
-  `b.createModule(options: Module.CreateOptions)` (`:722`),
-  `Module.addCSourceFile(s)` (`Module.zig:391,415`) with
-  `CSourceFile{ .file, .flags = &.{}, .language = null }` (`:118-122`, language
-  auto-detected per extension so `.c`/`.cpp` sit side by side),
-  `linkSystemLibrary` / `linkLibrary` (`:344,459`), `zig build-exe x.c -lc` for
-  direct C builds, and `zig cc` / `zig c++` as drop-in cross-compilers.
-
-### 2.3 build.zig work items (parity checklist)
-
-- [ ] Top-level `build.zig` with options mirroring CMake: `DISABLE_JIT`, `INTL_ICU`,
-  `EMBED_ICU`, `STATIC_LIBRARY`, `BUILD_TYPE` (Debug/Release/RelWithDebInfo/Test
-  mapping), arch select (AMD64/X86/ARM/ARM64 + Android ARM), `--trace` static-only
-  guard, `--lttng` support (no static requirement).
-- [ ] `zig cc` pilot: compile the existing CMake file list with `zig cc`/`zig c++`
-  before writing `build.zig` logic, to isolate toolchain vs build-logic failures.
-  Micro-pilot already passed (C++17 TU with exceptions, RTTI, and virtual dispatch
-  compiles and runs under 0.17.0 `zig c++`). Still needed: the **C++-at-scale
-  pilot** for ChakraCore's full codebase (per-file `.language` override usage, lld
-  vs self-hosted linker choice for big C++) before committing.
-- [ ] `ChakraCoreStatic` object-lib equivalents (20 unconditional + up to 4
-  conditional: `Backend` only if `BuildJIT`; `WasmReader` only AMD64; `wabt` only
-  non-Release AMD64; LTTng only if `USE_LTTNG`), C++17 flags, arch/OS defines,
-  `PAL` objects, version-header generation (`ChakraCoreVersion.h` →
-  `<build-root>/include` + `ChakraCore.h`/`ChakraCommon.h`/`ChakraDebug.h` copy
-  step).
-- [ ] ICU modes: system / custom path / embed-63.2-static / no-ICU, with Linux
-  `icuuc`+`icui18n` link, macOS `--no-icu` fallback, and Windows `Chakra.ICU` modes
-  preserved for the MSVC path until Zig covers Windows.
-- [ ] Codegen steps as Zig build steps: `jstoc.py` (`DbgController.js`),
-  `regenByteCode.py` (+ `--verify` gate), `lttng.py` manifests, `disable_tail_calls`
-  probe, RecyclerChecker plugin wiring, `pal` configure probes.
-- [ ] Outputs: `ch` host, shared `ChakraCore` (`--whole-archive` + version script
-  parity), `GCStress`, Windows-side `rl` runner; post-build `ch` copy to build root.
-- [ ] Tests: `zig build check` must equal `ninja check` (bytecode-check +
-  `runtests.py --debug|--test … --binary=<build>/ch` + native-check; Release smoke
-  `ch test/Basics/hello.js`). Keep default variants `interpreted,dynapogo` and tag
-  excludes.
-- [ ] CI: mirror the Azure legs (ubuntu-24.04 × Debug/NoJit/RelWithDebInfo/Release;
-  ubuntu-22.04 × RelWithDebInfo/Release; macOS-latest × DebugNoICU-static/
-  RelWithDebInfo/Release; windows-2025 x86/x64 × debug/test/release plus x86-only
-  NoJit; windows-2022 x86/x64 release-only) plus Cirrus ARM64-macOS noJit, with
-  `zig build` and `zig build check` alongside the legacy commands during transition.
-
-Acceptance for Phase 1: clean `zig build` + `zig build check` on the pilot triple,
-then full-matrix parity with CMake/MSBuild, with no engine source changes except
-build-required flag/define moves. Rollback is keeping the legacy entry points until
-the flip.
-
-## 3. Phase 2 — Introduce new Zig code incrementally
-
-Pattern: **file-by-file behind C-ABI boundaries, no rewrite**. Start from
-`translate-c` output for bindings, then hand-maintain the boundary. Link a Zig
-static lib into the C/C++ exe or vice versa; expose Zig to C with `export fn`
-(C ABI).
-
-### 3.1 Boundary rules
-
-- One C-ABI boundary per migrated unit; no C++ exceptions, no RTTI, no STL types
-  across the boundary. Memory ownership and thread affinity (`ThreadContext` per
-  thread, `ScriptContext` per realm) stay on the C++ side until a unit fully moves.
-- Keep the flat JsRT ABI (`JsCreateRuntime`/`JsCreateContext`/`JsSetCurrentContext`/
-  `JsCallFunction`/`JsParse`/`JsRun`/`JsSerialize`, module-record and serializer
-  handles) byte-stable. New Zig code must not change header spellings.
-- `translate-c` is scaffolding, not the final API: generate once via the ZSF package
-  **[NEEDS VERIFICATION on Zig 0.17]**, then narrow to the minimal `extern` surface
-  the Zig unit needs.
-- Each migrated file keeps its existing tests green (`runtests.py` variants + native
-  tests) before the next file starts.
-
-### 3.2 Recommended migration order (leaf-first)
-
-1. **New code first**: build helpers, test helpers, new tooling. Proves `build.zig` +
-   `export fn` + static-lib linking with zero legacy risk.
-2. **Leaf `Common/` utilities**: `Util`, `DataStructures`, `PlatformAgnostic`
-   helpers with no JIT/GC coupling.
-3. **`SCACore`** (structured clone Serializer/Deserializer over
-   StreamWriter/StreamReader): small, well-bounded, handle-based API already
-   (`JsVarSerializerHandle`/`JsVarDeserializerHandle`).
-4. **`WasmReader` frontend** (`WasmBinaryReader` decode): parser-like, testable
-   against `WasmSpec` + `wasm` suites without touching codegen.
-5. **`Parser` helpers** (scanner tables, background-parse jobs): only after 1–4 are
-   stable; keep `ParseNode` AST ownership in C++.
-6. **Defer**: `Runtime` (ByteCode/Library/Types), `Backend`
-   (NativeCodeGenerator/GlobOpt/Encoder), `Common/Memory` (Recycler), `Jsrt`
-   runtime/context wrappers. These own threading, GC safety, and JIT entry-point
-   thunks and move last, if ever.
-
-### 3.3 Per-unit steps
-
-- [ ] Define the C-ABI slice (functions, structs, error codes, ownership).
-- [ ] Generate bindings with ZSF `translate-c`, trim to the slice, check in the
-  trimmed `.zig`.
-- [ ] Implement the unit in Zig behind `export fn`, link as a static lib into
-  `ChakraCoreStatic` (or link C++ into a Zig exe for tools)
-  **[NEEDS VERIFICATION on Zig 0.17 for link API spelling]**.
-- [ ] Run `zig build check` + the focused `runtests.py` tags/variants + related
-  native tests; compare `ch` behavior on `test/Basics/hello.js` smoke and the unit's
-  suite.
-- [ ] Delete the replaced `.cpp` only after CI-matrix green; keep the C header as
-  the contract.
-
-## 4. Phase 3 — Close major feature gaps vs V8 / QuickJS-ng / JavaScriptCore
-
-Baseline: ChakraCore is effectively an **ES2015–ES2019 engine with cherry-picked
-ES2020–ES2023 features**, not a current-spec engine.
-
-**Target: full ES2025 (ES16) conformance as the Phase 3 exit**, verified by
-test262; ES2026 features are stretch, tracked opportunistically after ES2025 is
-green. (Edition contents below verified against the TC39 finished-proposals list,
-2026-10-10. Current published edition is ES2026; ES2025 is chosen as the gate
-because it is fully shipped by all majors and covers everything users mean by
-"modern JavaScript", while the ES2026 delta is small and low-impact.)
-
-| Edition | Have today | Missing → plan level |
-|---|---|---|
-| ES2020 | `??`, import(), import.meta, globalThis, allSettled, for-in order* | `?.`, matchAll, BigInt on → P0 |
-| ES2021 | numeric seps, Promise.any | replaceAll, logical assign, WeakRef → P0/P1 |
-| ES2022 | .at, hasOwn, cause, TLA | class fields, #private, static blocks, d flag → P0 |
-| ES2023 | findLast, hashbang | toSorted family, WeakMap symbols → P0/P1 |
-| ES2024 | none of 7 | groupBy, withResolvers, well-formed strings, v flag, resizable/transfer AB, waitAsync → P1 |
-| ES2025 | none of 10 | escape, eval vars, Float16, try, iterators, JSON modules, import attrs, modifiers, Set methods, dup groups → P1 |
-| ES2026 | none of 7 | Upsert, JSON.parse source, sequencing, base64, sumPrecise, isError, fromAsync → stretch |
-
-\* `for-in` order formalization (ES2020 `for-in` mechanics): ChakraCore predates the
-spec text but de-facto conformance is near-certain — confirm via test262 rather
-than assuming.
-
-Solid today: ES6 incl. modules/generators/proxy, async/await, async iteration,
-dynamic import, `import.meta`, top-level await, nullish `??`, `flat`/`flatMap`/
-`includes`, `fromEntries`, error `cause`, `globalThis`, `Promise.any`/`allSettled`/
-`AggregateError`, `.at()`, `hasOwn`, `findLast`, numeric separators, hashbang, WASM
-MVP + sign-ext/nontrapping, 4-constructor Intl (`Collator`/`DateTimeFormat`/
-`NumberFormat`/`PluralRules`), JsRT C embedding API, 3-tier JIT
-(interp/SimpleJit/FullJit + background JIT) on amd64/i386/arm/arm64.
-
-Flag-gated OFF by default: `BigInt`, `SharedArrayBuffer`/`Atomics`, ES6 RegExp
-symbols. WASM threads + multi-value OFF, SIMD experimental-flag-only.
-
-Advantages to preserve: small embeddable C API, TTD time-travel debugging, out-of-box
-WASM + Intl in one binary.
-
-### P0 — Syntax/builtin blockers (modern code fails to parse/run)
-
-- Optional chaining `?.`, logical assignment (`??=`/`&&=`/`||=`), class fields,
-  `#private` methods (including ergonomic brand checks, `#x in obj`), static
-  blocks. (No engine implementation or feature tests; remaining literal hits are
-  benchmark-internal identifiers and C++-level name collisions.)
-- `String.replaceAll`, `String.matchAll`, `queueMicrotask`, and the ES2023
-  change-array-by-copy family (`toSorted`/`toReversed`/`toSpliced`/`with`, all
-  0 hits). (Absent from `lib/Runtime`; for weak refs only the internal
-  `RecyclerWeakReference` plus the host-side JsRT
-  `JsCreateWeakReference`/`JsGetWeakReferenceValue` exist — no JS language
-  builtins.)
-- Turn `BigInt` ON by default (today all BigInt tests need `-ESBigInt`); decide
-  `SharedArrayBuffer`/`Atomics` default (today needs `-ESSharedArrayBuffer`); turn
-  ES6 RegExp symbols ON.
-- Verify and close, then implement: RegExp `d` flag (ES2022; flag switch handles
-  only i/g/m/s/u/y) and import attributes (ES2025, pulled forward into P0 as
-  syntax-adjacent; 0 repo hits) — confirm each with a runtime probe via `ch`, then
-  build. (RegExp `v` flag + modifiers + duplicate groups are ES2024/ES2025 scope
-  in P1.)
-- Why P0: syntax gaps break parsing of any modern bundle; builtin gaps break startup
-  of common libraries.
-
-### P1 — Ecosystem parity (Intl, modules-adjacent, WASM)
-
-- `WeakRef` / `FinalizationRegistry` (needs Recycler finalization design; distinct
-  from internal weak refs and the host JsRT weak-reference API); symbols as
-  WeakMap keys (ES2023).
-- ES2024 (all 7, all absent): `Object.groupBy`/`Map.groupBy`,
-  `Promise.withResolvers`, `isWellFormed`/`toWellFormed`, RegExp `v` flag,
-  resizable + transferable ArrayBuffers, `Atomics.waitAsync`.
-- ES2025 (all 10, all absent): `RegExp.escape`, redeclarable global `eval` vars,
-  Float16 (TypedArrays/DataView/`Math.f16round`), `Promise.try`, sync Iterator
-  helpers, JSON modules, import attributes (see P0), RegExp modifiers, new Set
-  methods, duplicate named capture groups.
-- Explicit resource management is ES2027-stage (finished, publishes 2027) — track,
-  don't commit. Decorators are still Stage 2.7 (in no published edition) — track,
-  don't commit. Temporal and the ES2027 iterator extras likewise.
-- Intl expansion, in order: `RelativeTimeFormat`, `ListFormat`, `DisplayNames`,
-  `Locale`, `Segmenter`, `DurationFormat` (all 0 hits today). Upgrade embedded ICU
-  from 63.2 (2018); fix macOS `--no-icu` fallback so Intl tests run on macOS.
-- WASM stabilization: threads, multi-value (a `test/WasmSpec.MultiValue/` suite
-  already exists, needs `-WasmMultiValue`), SIMD (all flagged off today; SIMD tests
-  all need `-wasmsimd`). Then track GC, tail calls, exceptions, stringref,
-  extended-const (0 opcode hits today; `WasmSpec/features` tracks only
-  extends/nontrapping/threads). QuickJS-ng WASM story unverified — do not claim
-  parity without sourcing.
-- Why P1: unblocks i18n-heavy apps and WASM workloads; ICU upgrade is also a
-  security/staleness fix.
-
-### P2 — Performance, safety, architecture breadth
-
-- JIT tiers: ChakraCore 3-tier (interp/SimpleJit/FullJit + background JIT) vs V8
-  multi-tier pipeline (exact current V8 tier list **[UNVERIFIED EXTERNAL]**). No
-  tier-addition proposed here; focus on ARM64 JIT off-Windows (warned
-  non-functional) and keeping `DISABLE_JIT` viable for embedded.
-- Memory safety: no sandbox/heap cage (cf. V8 sandbox **[UNVERIFIED EXTERNAL]**),
-  no pointer compression; `Recycler` mark-sweep does have concurrent/parallel mark +
-  concurrent sweep + partial GC — the verified V8 delta is sandboxing/compression,
-  not concurrent collection. Treat sandboxing/compression as research items, not
-  Phase 3 commitments.
-- Platform breadth: x86/ARM Linux + ARM macOS (README future goal); ARM64-Linux
-  unsupported warning; Windows-centric PAL heritage; x86/ARM Windows-only. Expand
-  only after the Zig build covers cross-compilation.
-- JSC specifics (tiers, interpreter, spec coverage) unverified — keep JSC gap claims
-  generic.
-
-### P3 — Tooling and release health (sustainability)
-
-- `ch` is a minimal host with no DOM/Node APIs — intentional; improve host ergonomics
-  and embedding samples instead of building a runtime.
-- Ship a conformance dashboard: publish `runtests.py` + test262 pass rate per build
-  (pass rate unverified today), plus `rlexe.xml`-gated feature matrix, so P0/P1
-  progress is visible. No shipped dashboard exists today.
-- Release cadence: community-maintenance only since 2021 vs QuickJS-ng
-  **[UNVERIFIED EXTERNAL]** (small current-spec engine, frequent releases, `qjs`
-  CLI + `qjsc` JS-to-C compiler — whole characterization unsourced until primary
-  sources are fetched). Adopt a dated,
-  hermetic `zig build` release artifact (headers + static/shared lib + `ch`) before
-  promising cadence.
-- Refresh stale floors separately from features: CMake 3.10, `checkout@v2`,
-  VS2015/2017 + Win7-era README text, macOS 10.9, ventura image, ICU help-text
-  mismatch (57.1 vs 63.2), retired technet URLs, org-URL split, travis/appveyor
-  badges.
-
-## 5. Risks and mitigations
-
-| Risk | Mitigation |
+| Evidence | What it establishes |
 |---|---|
-| Zig 0.17 API drift (build-system + translate-c + Module APIs) | Pin 0.17.0; re-verify every **[NEEDS VERIFICATION on Zig 0.17]** item in §6 before flipping CI default; keep legacy build until parity. |
-| C++17-at-scale link/codegen surprises (exceptions, RTTI, LTO/gold, big-link) | `zig cc` pilot + one-target `build.zig` pilot first; choose linker explicitly per triple. |
-| ZLS/IDE friction slows adoption | Do not gate on IDE; revisit after 0.17 tooling status is verified. |
-| JsRT ABI drift during Zig migration | C-ABI boundary rule + header-stability gate; native-API tests per unit. |
-| WASM/Intl scope creep | P0 before P1 before P2; ICU upgrade and WASM stabilization are separate milestones. |
-| Unverified competitor claims | Keep V8-exact, JSC-specific, and QuickJS-delta claims generic until primary sources are fetched. |
+| Legacy ARM64 Mac `ninja check`: 1959/0, bytecode and shared embedding checks | Behavior-parity reference for the shared/no-JIT Test configuration |
+| Zig 0.17.0: 538/538 units, three linked binaries, 1959/0 plus bytecode/native checks | C++17/C/assembly toolchain capability for that Mac configuration |
+| Explicit `aarch64-macos.26.0`, SDK 26.5, ICU 78.3, 8 MiB stacks and callback retention | Verified local build inputs and artifact metadata; not testing every 26.x host |
+| Pinned test262 diagnostic: 61,565 passed / 31,576 failed in 93,141 scenarios | A reproducible place to investigate feature debt; not an ES2025 score |
+| Sources inspected at `97e68c917` | Architecture/build map and current conditional feature paths |
 
-## 6. Verification checklist (must be green before calling each phase done)
+The Mac pilot does not compile Backend, WasmReader or WABT. It still obtains
+configuration through CMake before replay; B1/B2 must make Zig own that work.
+Windows, Linux JIT, other CPUs, LTO and a hermetic dependency package remain
+unproved. The number of diagnostic failures is neither the number of bugs nor an
+effort estimate: tags overlap, negative tests can pass for unsupported syntax, and
+the corpus contains later proposals (including Temporal).
 
-- [ ] `zig --version` = 0.17.0 in CI logs; remaining **[NEEDS VERIFICATION on
-  Zig 0.17]** items closed (incremental compilation behavior on macOS/Windows,
-  full C++-at-scale pilot incl. linker choice, ZLS 0.17-compatible release).
-- [ ] Phase 1: `zig build` + `zig build check` parity with `ninja check` /
-  `ci.testone.cmd` on every current CI leg (ubuntu-24.04 ×
-  Debug/NoJit/RelWithDebInfo/Release; ubuntu-22.04 × RelWithDebInfo/Release;
-  macOS-latest × DebugNoICU-static/RelWithDebInfo/Release; Cirrus ARM64-macOS
-  noJit × 3; windows-2025 x86/x64 × debug/test/release plus x86-only NoJit;
-  windows-2022 x86/x64 release-only).
-- [ ] Phase 2: per-unit `runtests.py` focused tags + native tests + `ch` smoke green;
-  public headers byte-identical.
-- [ ] Phase 3: full ES2025 green on test262 (Phase 3 exit gate); P0/P1 lists each
-  individually test-verified (not grep-only); test262 pass rate published; ICU
-  upgrade + `--no-icu` macOS behavior demonstrated; WASM flag matrix
-  (threads/multi-value/SIMD) demonstrated.
-- [ ] Still open from research (not gating Phase 1, tracked here): pal configure
-  bodies, `ci.build.init.cmd` / `ci.parsetestargs.cmd` mapping, android/packaging
-  script bodies, clang upper-bound + Windows SDK pin, external link liveness, GitHub
-  archival flag, upstream tag list, actual build/test run on the legacy system,
-  RegExp `d`/`v` + import-attributes runtime probes.
+Reference material:
 
-## Appendix A — In-repo evidence map
+- [Current state](current-state.md): source/feature inventory and platform limits.
+- [Architecture](architecture.md): ownership, execution, JIT, GC and optional units.
+- [Build reference](build.md): legacy flags, source groups, generators, checks and
+  the compiler/linker findings in §13–14.
+- [Conformance baseline](conformance-baseline.md): exact corpus, flags, counts,
+  host skips and limitations.
+- [Pilot harness](../tools/zig-pilot/README.md) and
+  [test262 tooling](../tools/test262/README.md): repeatable evidence workflows.
+- [Memory-management guidance](memory-management.md): source-backed ownership,
+  allocator, GC/FFI and invalidation rules for assistant-authored slices.
 
-Key paths behind this plan (all verified at HEAD `97e68c917`): version
-`lib/Common/ChakraCoreVersion.h`; feature flags `lib/Common/ConfigFlagsList.h`;
-public API `lib/Jsrt/ChakraCore.h`, `ChakraCommon.h`, `ChakraDebug.h`; pipeline
-`lib/Parser/`, `lib/Runtime/ByteCode/`, `lib/Runtime/Base/FunctionBody.h`,
-`lib/Backend/`; GC `lib/Common/Memory/Recycler.h`; Intl
-`lib/Runtime/PlatformAgnostic/ChakraICU.h`, `lib/Runtime/Library/InJavascript/
-Intl.js`; WASM `lib/WasmReader/`, `lib/wabt/`; JS builtins
-`lib/Runtime/Library/InJavascript/Array_prototype.js` (flat :310, flatMap :327,
-includes :453), `InJavascript/Object_constructor.js` (fromEntries); error `cause`
-`lib/Runtime/Library/JavascriptError.cpp:68-71`; Unix build `build.sh`, root
-`CMakeLists.txt`, `lib/CMakeLists.txt`, `bin/*/CMakeLists.txt`; Windows build
-`Build/Chakra.Core.sln`, `test/ci.buildone.cmd`, `test/ci.build.init.cmd`,
-`test/ci.build.cmd`; tests `test/runtests.py`, `test/CMakeLists.txt`,
-`test/ci.testone.cmd`; CI `azure-pipelines.yml`, `.cirrus.yml`.
+## 2. Phase 1 — Own the existing C/C++ build with Zig
 
-## Appendix B — Open verification items (carried from research)
+The initial delivery scope is **native ARM64 macOS, shared/no-JIT, RelWithDebInfo,
+system ICU**, followed by **native x64 Linux with JIT**. Work in small build-graph
+slices and compare each against the recorded reference configuration.
 
-V8 exact feature set; JSC specifics; QuickJS-ng ES2024/ES2025 delta + WASM story;
-full-scale C++ gotchas (linker choice at ChakraCore scale); macOS/Windows
-incremental-compilation behavior; test262 pass rate; RegExp flags; import attributes;
-pal/CI-init/packaging bodies; link liveness; archival flag; tag ambiguity. (Resolved
-since the first draft: `flat`/`flatMap`/`includes` and error `cause` are present; GC
-concurrency confirmed; `--trace` vs LTTng attribution fixed; `rl` is Windows-side;
-20+4-conditional object libs; `ch` is a minimal host, not print-only. Resolved
-2026-10-10: legacy build/test executed green — 1959 passed / 0 failed; all Zig 0.17
-API spellings verified against 0.17.0 sources + release notes; ZLS confirmed to have
-no 0.17 release yet.)
+**Initial build-migration completion:** B1–B4 green for the declared Mac/Linux
+profiles. B5 is the release-package gate; B6 tracks later platform expansion.
+The eventual single build front end remains the goal as those platforms graduate.
+
+### 2.1 Platform, rollout and dependency contract
+
+- Pin **Zig 0.17.0**. Capture `zig version`, `zig env`, target, build flavor,
+  feature defines, dependency versions and artifact metadata in build/CI records.
+- The current Mac pilot deliberately selects **macOS 26.0**, matching the
+  Homebrew ICU 78 dylib minimum, with an explicit SDK. Host 26.6 is not an implicit
+  deployment choice. Release testing must cover the declared minimum, not only
+  inspect its Mach-O header.
+- For B4, choose and record a modern Linux distribution, libc minimum, CPU target
+  and ICU configuration before accepting its baseline. For B6, do the same for
+  Windows/SDK/tooling. Higher floors are acceptable policy choices.
+- The first active Zig matrix is Mac ARM64/no-JIT and Linux x64/JIT after their
+  gates pass. Windows keeps its legacy MSBuild route until its own rollout is
+  verified. x86/ARM/Android and additional OS/architecture combinations enter the
+  supported matrix only through an explicit expansion milestone.
+- Legacy Azure/Cirrus recipes are comparison data, not a requirement to reproduce
+  every old image and compatibility floor. Record replacements/retirements and
+  test coverage when changing the active matrix.
+- First prove a **repeatable system-dependency build**. SDK/ICU/Python acquisition,
+  versions and packaging become controlled inputs at B5. Pinning Zig alone is not
+  a hermetic build, and functional parity is not byte-identical reproducibility.
+- Keep legacy entry points until each replacement passes its platform gate.
+  Default-build changes and release claims name the exact supported configurations.
+
+### 2.2 Milestones and completion gates
+
+#### B1 — Mac configuration contract and the first build slice
+
+Deliver:
+
+1. In-repo source groups, include paths, C/C++/assembly flags and defines extracted
+   from the inspected build. Use compile-database/pilot evidence for comparison;
+   the eventual build must not need a CMake-generated file list.
+2. A PAL configuration contract for the chosen Mac/SDK/toolchain. Classify each
+   relevant `config.h.in` setting as fixed by the declared target, compile-checked,
+   or native-runtime-verified. Document assumptions and fail on unsupported targets.
+   Start with one validated profile rather than a generic cross-platform probe engine.
+3. A build-owned generated `pal/src/config.h` and compiler-attribute decisions,
+   including `disable_tail_calls`. Compile the PAL or another small object group
+   through Zig to test the contract before wiring the whole engine.
+
+Done when that slice builds from source plus declared dependencies, generated
+configuration is comparable to the reference, and missing SDK/ICU/unsupported
+profile choices fail clearly. A copied AppleClang-generated header is comparison
+evidence, not B1 completion (`pal/src/configure.cmake:1045`,
+`Build/CMakeFeatureDetect.cmake:17-34`).
+
+#### B2 — One complete source-only Mac build and check
+
+Deliver the archive, `libChakraCore.dylib`, dynamic `ch`, GCStress and staged public
+headers from the verified shared/no-JIT Test configuration. Preserve per-group
+flags/source membership; the Zig graph need not recreate CMake's 546-edge layout.
+Model generator/input dependencies explicitly:
+
+- `jstoc.py` generates `DbgController.js.h` before its consumers compile.
+- Consume checked-in built-in bytecode to bootstrap the engine, then run
+  `regenByteCode.py --noJit --verify` using the built shell as a **check step**.
+  A build must not depend on regenerating bytecode with a not-yet-built engine.
+- Stage the four public headers unchanged, with platform-appropriate archive,
+  symbol/export and library-loading behavior.
+- Preserve warning suppression, joined force-load/object linking, the dynamic
+  callback and 8 MiB executable stack established by the pilot.
+
+Done when a fresh checkout, with `build-xplat/` and `build-zigpilot/` absent,
+can run the planned **`zig build` and `zig build check`** without CMake/Ninja
+configuration or stale artifacts. Require:
+
+- **1959 passed / 0 failed**, matching the no-JIT variant and tag selection;
+- bytecode verification and the shared embedding test;
+- smoke/flag output, not rc alone;
+- correct macOS minimum, executable stack and public API/export checks.
+
+Land and demonstrate this vertical slice; public packaging has the B5 gate.
+Unsupported optional combinations should produce
+an explicit error rather than silently select a different flavor.
+
+#### B3 — Mac profiles, incremental correctness and CI
+
+Add Debug, static and Release as separate configurations with corresponding legacy
+baselines. Preserve the distinction between CMake **RelWithDebInfo / Test**
+(`-O3 -g`, `ENABLE_DEBUG_CONFIG_OPTIONS`) and Zig optimization modes; a mode name
+alone does not reproduce the engine's defines.
+
+Minimum initial Mac profile set: the shared Test build from B2, a Debug/static
+build covering static embedding, and a Release/shared build. Additional combinations
+are named additions; a static release package also requires its own release-profile
+gate at B5.
+
+Done when:
+
+- each declared profile passes its matching checks; static native tests are no
+  longer assumed covered by the shared build's eight expected skips;
+- source/header/JS-generator/configuration changes rebuild their dependents,
+  flavor switches isolate artifacts, and a no-op rebuild behaves correctly;
+- clean CI runs record inputs and outputs and keep the equivalent legacy leg green;
+- Release artifacts have output-checked, release-compatible smoke/embedding checks.
+  The legacy Release `ninja check` is only a smoke gate, not the full regression suite
+  (`test/CMakeLists.txt:23-45`).
+
+Default the Mac route to Zig only for profiles meeting these gates. No-ICU,
+embedded ICU, tracing, plugins and extra architectures are separate additions.
+
+#### B4 — Native x64 Linux, JIT and previously unbuilt subsystems
+
+Obtain a Linux runner/container/CI environment and first establish its own legacy
+baseline. Run a compiler/linker pilot there before attributing failures to new
+build logic. Include Backend, WasmReader and debug/Test WABT where selected by
+the reference graph (`lib/CMakeLists.txt:86-104`).
+
+Then implement Linux PAL configuration, assembly, archives/version scripts,
+system ICU and native loading in the Zig build. Require bytecode and regression
+checks in the applicable **interpreted/dynapogo** variants, focused JIT/WASM tests,
+native embedding checks, and applicable Debug/Test/Release coverage. Mac's 1959
+count and one no-JIT variant are not the Linux acceptance count.
+
+Done when clean native Linux CI proves behavior/ABI parity for the declared
+configuration and its floor. Runtime behavior must run on the target; linking a
+cross-built binary on a Mac is not the gate. Enable the Linux Zig default per
+verified profile. This is a higher-uncertainty milestone because the Mac proof
+has not exercised those code paths.
+
+#### B5 — First controlled release package
+
+Specify one release profile at a time: headers, static/shared libraries, host shell
+and dependency closure. Choose recorded/pinned ICU and tools; validate loading and
+embedding on a clean machine at the supported floor. Keep the old embedded-63.2
+recipe as reference data while deciding the maintained package's dependency version.
+
+Done when a second clean environment can build/install/test the package with its
+declared inputs, with a documented SDK acquisition contract and versioned artifact
+manifest. A claim of byte-identical reproducibility additionally needs two-build
+comparison and controlled timestamp/build-ID inputs (including the existing
+`__DATE__`/`__TIME__` behavior); it is a separate proof from behavior parity.
+
+#### B6 — Windows and later extensions
+
+Start Windows with a feasibility slice: compiler/ABI and exception behavior,
+DLL exports/loading, native tests, resource/version generation and RPC/MIDL for
+selected JIT modes (`lib/JITIDL/Chakra.JITIDL.vcxproj:26-43`). Decide which native
+SDK tools must remain explicit inputs to a Zig-orchestrated build.
+
+Only after that proof expand Debug/Test/Release and compare against MSBuild.
+Do not promise uniform compiler/tooling behavior from the Unix pilot alone.
+Additional CPUs, Android, LTO, LTTng/`--trace`, RecyclerChecker and alternative ICU
+modes each get a named configuration, baseline and gate. They are not prerequisites
+to a usable first Mac/Linux build or feature release.
+
+### 2.3 Version-sensitive build facts
+
+These are checked against installed 0.17.0 sources and its
+[release notes](https://ziglang.org/download/0.17.0/release-notes.html):
+
+- `b.addExecutable`, `b.addLibrary`, `b.createModule`, module C-source and link APIs
+  are the build primitives. C/C++ and preprocessed assembly remain explicit inputs.
+- Native Mach-O callback retention is
+  `ch.forceUndefinedSymbol("_OnChakraCoreLoadedEntry")`; set
+  `ch.stack_size = 8 * 1024 * 1024`. `Module.export_symbol_names` is WASM-only.
+- `@cImport` is removed; real Zig/C binding work uses a pinned external ZSF
+  `translate-c` package. Its integration belongs to Z1, not the C/C++ build gate.
+- LLVM/Clang 22.1.8 is bundled; the compiler's supplied libc versions are not an
+  automatic policy for our runtime/deployment minimum.
+- ZLS has no 0.17 release at verification time. IDE integration and incremental
+  linker research on macOS/Windows do not gate these build milestones.
+
+## 3. Phase 2 — A bounded, useful Zig integration
+
+Phase 2 proves a maintenance technique, rather than mandating a subsystem rewrite.
+**Z1 is complete after one useful small unit is integrated and tested.** More
+language migration is a separate choice for each unit. C++ compatibility work can
+proceed after its own build/conformance prerequisites without waiting for Z1.
+
+### Z1 — One C-ABI slice
+
+Choose new tooling or a demonstrated leaf helper with no GC/JIT/AST ownership.
+Before selecting it, identify a concrete benefit and a rollback-sized patch.
+Use the [ownership record and verification workflow](memory-management.md#3-write-the-ownership-record)
+for the selected allocation/borrow/root contract.
+
+Deliver:
+
+1. A narrow C header contract: functions, opaque handles or plain structs, error
+   codes, allocation/free responsibility and threading rules.
+2. A pinned binding path. `translate-c` can scaffold C declarations; translate
+   the real selected slice and trim it. C++ templates/STL/classes are not C bindings.
+3. A Zig implementation linked into the active C++ build, with equivalent focused
+   behavior tests and any relevant allocation/performance measurements.
+4. Full active-matrix checks and byte-identical public JsRT headers. Replace the
+   old implementation only once that evidence is green; retain the C contract.
+
+No exceptions, RTTI or STL types cross the boundary. Allocation ownership and
+runtime-owned `ThreadContext`/Recycler lifetime, current TLS/rental-threading rules
+and `ScriptContext` realm ownership remain explicit C++ responsibilities.
+
+Candidate catalog after Z1:
+
+- selected `Common/` utilities with genuinely isolated dependencies;
+- small scanner/table or decoding helpers with C++ ownership retained;
+- a structured-clone or WASM frontend slice after its dependency/GC/AST contract
+  is demonstrated. SCACore accepts `ScriptContext` and `Var` and owns stream
+  readers/writers (`SCACore.h:15-49`); WasmReader feeds existing codegen. Neither
+  is automatically a leaf because its public description sounds bounded.
+
+Runtime/Backend/Recycler/JsRT wrapper rewrites remain outside the required migration.
+Retain a C++ implementation where introducing a boundary adds coupling or cost.
+
+## 4. Phase 3 — Compatibility gains toward full ES2025
+
+**Full ES2025 core-language coverage remains the target.** It is a multi-release
+engine-development objective with uncertain total effort, not a near-term promise
+or a reason to postpone useful partial releases. The current diagnostic cannot
+yet certify an edition result, and 31,576 failures cannot be converted into a
+schedule. Each compatibility batch must have a bounded contract and evidence.
+
+### 4.1 Milestones
+
+#### C1 — Qualify the runner and triage the debt
+
+Deliver an audited manifest/policy of required ES2025 tests, excluding documented
+future/optional-host cases without excluding unsupported required features. Feature
+tags alone do not define the edition: later semantic changes can test an existing
+builtin. Validate scripts/modules, strict/default scenarios, async/jobs/realms,
+and negative parse/resolution/runtime phases with positive and deliberate-failure
+controls. Finish the existing negative-phase gap before certifying a full result.
+
+Group failures by root cause and produce a shortlist with reproduction, subsystem,
+prerequisite, expected test improvement and uncertainty. Separate engine defects,
+disabled-feature incompleteness, host limitations and future proposals. Save both
+the edition-selected baseline and the broad diagnostic so snapshots remain comparable.
+
+Done when test selection, expected skips and host mechanisms are documented and
+the shortlist is backed by reproducible cases. Reforecast feature effort here.
+
+#### C2 — Deliver bounded compatibility batches
+
+Prefer small, demonstrable gains; use the priority inventory below to select them,
+not as a requirement to finish every P0 item before a small P1 improvement.
+Suitable streams are existing-builtin semantic fixes, smaller missing builtins,
+optional chaining/logical assignment, and older RegExp gaps. Take one feature or
+coherent dependency group per batch, with a named owner/work item and supported
+configuration list.
+
+Done per batch when:
+
+- the promised feature subset and focused qualified tests pass, including valid
+  syntax, negative/early-error cases, side effects and relevant cross-realm behavior;
+- inherited regression checks remain green; parser/bytecode changes have regenerated
+  and verified built-in bytecode where required;
+- interpreter and applicable SimpleJIT/FullJIT paths pass before enabling globally
+  on JIT configurations (B4 supplies that environment);
+- the pinned full comparison reports no unexplained new failures; deliberate
+  expected-output changes are reviewed individually;
+- any default-flag change has its own coverage and release note. BigInt/SAB/RegExp
+  support is tested with flags enabled before deciding the default; flipping a
+  switch does not prove conformance.
+
+Publish supported features and remaining gaps after each batch. Partial releases
+must describe their coverage; raw aggregate percentage is not a feature guarantee.
+
+#### C3 — Larger runtime projects
+
+Class fields/private elements/static blocks, WeakRef/FinalizationRegistry/job
+retention, resizable buffers/typed arrays, and advanced RegExp/module work need
+their own design and experiments. Split implementation, interpreter correctness,
+JIT coverage, GC/ownership invariants and default enablement into reviewable parts.
+
+Do not bundle these into one change or assume they are leaf migrations. Keep
+experimental flags until their active-matrix tests pass. If a required host/API
+contract affects embedders, specify versioning and compatibility before rollout.
+
+#### C4 — Full ES2025 core-language acceptance
+
+Done when the qualified, pinned **required ES2025 suite is green** on the declared
+supported engine configurations, required features are enabled in the claimed
+default configuration, and all skips/host applicability are justified. Preserve
+negative-phase validation, regression/bytecode/native checks and a published
+feature/result manifest. Test262 is the executable gate, not proof of every possible
+spec behavior; investigate discovered spec mismatches too.
+
+ECMA-402 constructor expansion and WASM stabilization have independent scope,
+baselines and milestones. They improve the product but do not silently enlarge C4.
+
+### 4.2 Edition/feature inventory and priorities
+
+Substantial ES2015–ES2019 coverage exists with inherited debt, plus cherry-picked
+newer features. Presence is not blanket conformance. Edition assignments below
+were checked against the [TC39 finished-proposals list](https://github.com/tc39/proposals/blob/main/finished-proposals.md).
+
+| Edition | Implemented examples | Debt / priority |
+|---|---|---|
+| ES2015–ES2019 | modules/generators, async/await/iteration, rest/spread, dotAll, flat/flatMap, fromEntries | named groups, lookbehind, property escapes; RegExp symbols/prototype properties default off; inherited semantics → P0/C1 triage |
+| ES2020 | `??`, import(), import.meta, globalThis, allSettled | optional chaining, matchAll, BigInt completeness/default; for-in formalization → P0 |
+| ES2021 | numeric separators, Promise.any | replaceAll, logical assignment, WeakRef/FinalizationRegistry → P0/P1 |
+| ES2022 | .at, hasOwn, cause, TLA | class fields/private elements/static blocks, RegExp d → P0 |
+| ES2023 | findLast, hashbang | copy-by-change arrays/typed arrays, weak-collection symbol keys → P0/P1 |
+| ES2024 | no complete coverage established | groupBy, withResolvers, well-formed strings, v, resizable/transfer buffers, waitAsync → P1 |
+| ES2025 | no complete coverage established | escape, eval-var semantics, Float16, try, iterator helpers, JSON modules/import attributes, modifiers, Set methods, duplicate groups → P1 |
+| ES2026 | stretch after required scope | upsert, JSON.parse source, sequencing, base64, sumPrecise, isError, fromAsync |
+
+**P0 — High-breakage compatibility:** optional chaining/logical assignment;
+class syntax; replaceAll/matchAll and the copy-by-change family; inherited
+ES2018 RegExp gaps and later `d`/import-attribute syntax. Named groups precede
+duplicate named-group behavior. Runtime probes reject named groups, lookbehind,
+property escapes, `d`/`v` and import attributes. Audit BigInt, SAB/Atomics and
+RegExp-symbol/prototype-property flags through enabled conformance runs.
+
+**P1 — Required remaining core and independent ecosystem work:** ES2024/2025
+workstreams above, WeakRef/FinalizationRegistry and weak-collection symbol keys.
+Eval-variable redeclaration is a semantic triage item, not a name-search absence
+claim. Separately expand Intl (RelativeTimeFormat, ListFormat, DisplayNames,
+Locale, Segmenter, DurationFormat) and decide maintained ICU acquisition/versioning;
+separately stabilize WASM multi-value, SIMD and threads, then assess further proposals.
+
+**P2 — Longer-range architecture:** ARM64 JIT off Windows, additional platforms,
+and researched performance/memory designs. Sandboxing/pointer compression and
+competitor tier counts are research, not this migration's completion gates.
+
+**P3 — Release/tooling health:** publish results and feature manifests as batches
+land; improve embedding samples and host ergonomics; refresh old links/images/tool
+floors alongside their relevant build milestone. A dated supported package can
+ship at B5, well before C4.
+
+Decorators remain Stage 2.7 and explicit resource management/Temporal are later
+edition work at verification time. They are tracked stretch items. `queueMicrotask`
+is a host-job-queue decision tied to the embedder's promise/FIFO contract
+(`ChakraCommon.h:757-768`), separate from ECMA-262 edition coverage.
+
+## 5. Attainability, dependencies and stop points
+
+| Work | Assessment | How to keep it bounded |
+|---|---|---|
+| B1/B2 | Concrete near-term goal; compiler evidence is strong, build/configuration ownership is still work | One Mac profile, one build slice at a time, clean-checkout gate |
+| B3/B4 | Achievable staged expansion; Linux JIT is materially less certain | Native baselines, separate profiles and compiler pilots, target-side execution |
+| B5/B6 | Release/Windows work needs its own proof | Controlled dependency package; Windows feasibility before broad toolchain promises |
+| Z1 | Attainable optional experiment | One useful unit; fixed C-ABI ownership; no migration quota |
+| C1/C2 | Measurable compatibility program | Qualified tests, grouped failures, one feature batch and receipts |
+| C3/C4 | High-uncertainty, multi-release engine development | Design spikes, explicit prerequisites, staged flags and reassessed effort |
+
+These assessments are relative work classes, not calendar estimates. Assume a
+small maintenance effort and keep one principal risky engine/build change active
+at a time; independent documentation/CI work can accompany it. Before starting a
+milestone, record its exact configuration, deliverable, success checks and open
+assumptions. After finishing, attach logs/results and choose the next bounded item.
+
+Decision/rollback points:
+
+- If a compiler pilot fails, distinguish toolchain/ABI issues from a pre-existing
+  engine defect before changing the new graph. Keep a working legacy route.
+- If B1 would require a large generic probe framework, finish the one validated
+  target contract first and broaden when another target needs it.
+- If a Zig boundary adds coupling, keep the unit in C++ and continue compatibility
+  work; a useful build is already a successful Zig adoption outcome.
+- If C1 finds the apparent pass-rate gain is a harness/selection change, qualify
+  that change and rebaseline before attributing it to the engine.
+- If a runtime project exceeds a bounded feature change, split it into design,
+  flagged implementation and rollout work rather than holding the whole release.
+
+## 6. Completion checklist and immediate next work
+
+- [x] F0: Mac compiler/linker pilot, behavior parity, artifact metadata and
+  diagnostic-conformance foundation recorded.
+- [ ] B1: Source/flag/PAL configuration contract and first Zig build slice.
+- [ ] B2: Clean source-only Mac `zig build` / `zig build check`, 1959/0,
+  bytecode/shared native/metadata/API gates.
+- [ ] B3: Each declared Mac profile, dependency rebuild behavior and clean CI;
+  scoped default rollout.
+- [ ] B4: Linux native baseline/pilot and JIT/WASM/native/profile CI gates;
+  scoped Linux rollout.
+- [ ] B5: Controlled dependency/artifact package and clean-machine floor testing.
+- [ ] B6: Windows feasibility, then declared-profile parity; further expansions
+  approved individually.
+- [ ] Z1: One useful C-ABI integration, **if selected**; further replacements
+  decided independently.
+- [ ] C1: Edition policy, host/negative-phase qualification and root-cause shortlist.
+- [ ] C2/C3: Feature-specific receipts and partial releases; required work remains
+  tracked until C4, optional ecosystem scope has separate gates.
+- [ ] C4: Published qualified ES2025 result on the claimed default configurations.
+
+**Next implementation:** B1. Extract the current Mac contract from the inspected
+sources/pilot evidence, document PAL assumptions, generate configuration under
+Zig, and compile the first object group. Keep that change small enough to review
+before adding the rest of B2. Do not start by mirroring every CMake switch.
+
+## Appendix — Evidence and deferred research
+
+Important source anchors: `CMakeLists.txt`, `lib/CMakeLists.txt`,
+`bin/ch/CMakeLists.txt`, `test/CMakeLists.txt`, `pal/src/configure.cmake`,
+`pal/src/config.h.in`, `Build/CMakeFeatureDetect.cmake`, `tools/regenByteCode.py`,
+`lib/Jsrt/ChakraCore.h` / `ChakraCommon.h` / `ChakraDebug.h`,
+`lib/Runtime/Base/ThreadContextTlsEntry.cpp`, `lib/SCACore/SCACore.h`,
+`lib/Common/ConfigFlagsList.h`, `azure-pipelines.yml` and `.cirrus.yml`.
+Detailed baseline line references and inventories live in the linked reference docs.
+
+Still to qualify in their milestones: platform SDK/libc floors and native CI,
+Windows tool/exception/RPC behavior, LTO/plugins/trace, release/Android packaging,
+real translate-c integration for a chosen Zig unit, and required-edition/host
+conformance. ZLS, incremental-link behavior and exact V8/JSC/QuickJS-ng internals
+are non-gating research. Verify external comparison claims from primary sources
+before using them; competitor architecture is not a product acceptance criterion.

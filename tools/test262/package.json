@@ -1,0 +1,17 @@
+{
+  "name": "chakracore-conformance-tools",
+  "private": true,
+  "description": "Pinned upstream test262 harness for ChakraCore conformance baselines",
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "test262-harness": "10.0.0"
+  },
+  "overrides": {
+    "argparse": "2.0.1",
+    "cookie": "0.7.2",
+    "debug": "4.4.3",
+    "parseuri": "3.0.2"
+  }
+}

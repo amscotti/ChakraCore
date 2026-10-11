@@ -31,6 +31,7 @@ If you find a security issue in the Master branch of Chakracore but not in 1.11 
 * [API Reference](https://github.com/chakra-core/ChakraCore/wiki/JavaScript-Runtime-%28JSRT%29-Reference)
 * [Contribution guidelines](CONTRIBUTING.md)
 * [Blogs, talks and other resources](https://github.com/chakra-core/ChakraCore/wiki/Resources)
+* [Modernization documentation and verified baselines](doc/README.md)
 
 ## Building ChakraCore
 

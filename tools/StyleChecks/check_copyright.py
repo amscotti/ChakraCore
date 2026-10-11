@@ -19,6 +19,15 @@ copyright_lines = [
     r'.*' # the above should always be followed by at least one other line, so make sure that line is present
 ]
 
+# New contributor-owned files need not claim Microsoft ownership. Keep the
+# existing combined and PAL notices valid while accepting the same license form.
+project_copyright_lines = [
+    r'-------------------------------------------------------------------------------------------------------',
+    r' Copyright \(c\)( \d{4})? ChakraCore Project Contributors\. All rights reserved\.',
+    r' Licensed under the MIT license\. See LICENSE\.txt file in the project root for full license information\.',
+    r'.*'
+]
+
 pal_copyright_lines = [
     r'-------------------------------------------------------------------------------------------------------',
     r' ChakraCore/Pal',
@@ -38,15 +47,7 @@ if not os.path.isfile(file_name):
     print("File does not exist:", file_name, "(not necessarily an error)")
     exit(0)
 
-regexes = []
-if file_name[:4] == "pal/":
-    for line in pal_copyright_lines:
-        pattern = '^.{1,5}%s$' % line
-        regexes.append(re.compile(pattern))
-else:
-    for line in copyright_lines:
-        pattern = '^.{1,5}%s$' % line
-        regexes.append(re.compile(pattern))
+notices = [pal_copyright_lines] if file_name[:4] == "pal/" else [copyright_lines, project_copyright_lines]
 
 def report_incorrect(file_name, pairs, fail_line):
     # found a problem so report the problem to the caller and exit
@@ -60,25 +61,20 @@ def report_incorrect(file_name, pairs, fail_line):
         print("    ", fail_line, end="")
         print()
 
-linecount = 0
-pairs = []
 with open(file_name, 'r') as sourcefile:
     hashbang = sourcefile.readline()
     if not hashbang.startswith("#!"):
         sourcefile.seek(0)
-    pairs += zip(regexes, sourcefile)
+    lines = [sourcefile.readline() for _ in range(max(len(notice) for notice in notices))]
 
-for (regex, line) in pairs:
-    linecount += 1
-    line = line.rstrip()
-    matches = regex.match(line)
-    if not matches:
-        report_incorrect(file_name, pairs, line)
-        exit(1)
-
-if linecount == 0:
-    # the file was empty (e.g. dummy.js) so no problem
+if not any(lines):
     exit(0)
-elif linecount != len(regexes):
-    report_incorrect(file_name, pairs, "")
-    exit(1)
+for notice in notices:
+    regexes = [re.compile('^.{1,5}%s$' % line) for line in notice]
+    pairs = list(zip(regexes, lines))
+    if all(line and regex.match(line.rstrip()) for regex, line in pairs):
+        exit(0)
+
+report_incorrect(file_name, pairs, next((line for regex, line in pairs
+                                       if not line or not regex.match(line.rstrip())), ""))
+exit(1)

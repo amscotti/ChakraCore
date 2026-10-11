@@ -22,7 +22,7 @@ flowchart TD
     subgraph CTX["Runtime / context model"]
         JRR["JsrtRuntime wraps ThreadContext<br/>lib/Jsrt/JsrtRuntime.h:20-31"]
         JRC["JsrtContext wraps ScriptContext + JavascriptLibrary<br/>lib/Jsrt/JsrtContext.h:9-44"]
-        TC["ThreadContext (per thread)<br/>lib/Runtime/Base/ThreadContext.h:1109-1111<br/>owns Recycler"]
+        TC["ThreadContext (owned by JsRT runtime)<br/>lib/Jsrt/Jsrt.cpp:315,374-375<br/>current TLS binding; owns Recycler"]
         SC["ScriptContext (per JS global/realm)"]
     end
     subgraph PIPE["Execution pipeline"]
@@ -61,7 +61,6 @@ flowchart TD
     JRR --> TC
     JRC --> SC
     PAR --> BCG
-    BCG --> SER
     IMPL -.-> SER
     BCG --> INT
     INT --> EP
@@ -241,10 +240,19 @@ across three headers (`ChakraCore.h:29-30`):
 
 ## 6. Threading and hosting
 
-- One `ThreadContext` per thread (`GetContextForCurrentThread()`,
-  `lib/Runtime/Base/ThreadContext.h:1109`; class declared at :307-311); it owns
-  the `Recycler` (`GetRecycler()`, :1111). Script runs single-threaded per
-  `ThreadContext`; a `ScriptContext` represents one JS global/realm.
+- Each JsRT runtime owns a `ThreadContext`, allocated by `CreateRuntimeCore`
+  (`lib/Jsrt/Jsrt.cpp:315,374-375`), and it owns a `Recycler`
+  (`lib/Runtime/Base/ThreadContext.h:1111`). A `ScriptContext` represents one JS
+  global/realm. `GetContextForCurrentThread()` (:1109) retrieves the current TLS
+  binding; it does not imply one lifetime runtime per OS thread.
+- Script execution is single-threaded per runtime. Rental-threading supports
+  serial rebinding across threads when the context is not thread-bound or executing
+  script. A context already active on another thread cannot be bound concurrently
+  (`lib/Runtime/Base/ThreadContextTlsEntry.cpp:70-125,140-162`);
+  `JsSetCurrentContext` uses this binding machinery
+  (`lib/Jsrt/JsrtContext.cpp:72-111`). Multiple inactive runtimes can be managed by
+  one host thread. Phase 2 boundaries preserve runtime ownership and these binding
+  rules.
 - Hosts offload background JIT/GC work through `JsThreadServiceCallback`
   (`ChakraCommon.h:714-725`) or set `DisableBackgroundWork`.
   `JsRuntimeAttributes` (`ChakraCommon.h:434-486`) control script
@@ -253,6 +261,9 @@ across three headers (`ChakraCore.h:29-30`):
   `JsRuntimeHandle chRuntime`, `31`).
 
 ## 7. Garbage collector
+
+For changes touching ownership, allocators, rooting, external data or callbacks,
+use the [coding-assistant memory guide](memory-management.md) alongside this map.
 
 - `Memory::Recycler` (`Common/Memory/Recycler.h:645`) is a mark-sweep
   collector with concurrent/parallel mark and concurrent sweep

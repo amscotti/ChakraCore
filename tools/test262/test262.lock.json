@@ -1,0 +1,6 @@
+{
+  "repository": "https://github.com/tc39/test262.git",
+  "revision": "2e0a56762801e275a9fdf96dc49d90ba0cddcf63",
+  "revision_date": "2026-10-08",
+  "scope": "Diagnostic baseline of the pinned corpus; includes features beyond ES2025. Not an edition-conformance claim."
+}

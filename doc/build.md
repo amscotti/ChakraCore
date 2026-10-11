@@ -1,21 +1,24 @@
 # ChakraCore Build
 
-Pinned to HEAD `97e68c917`. This document describes the build as it exists today:
+Legacy build-source references are pinned to baseline `97e68c917`. This document
+describes the existing reference build:
 a dual-entry system — `build.sh` + CMake on Unix, MSBuild solution + `.cmd` drivers
 on Windows. Every command, option, and path below is cited to a file and line that
 was read at this HEAD.
 
 > Scope caveat: the reference below is source-inspection verified throughout, and
 > the macOS ARM64 baseline in §13 was additionally run-verified green on 2026-10-10
-> (1959 passed / 0 failed). Everything else remains run-unverified; the CI matrix
-> in §11 is the known-good set.
+> (1959 passed / 0 failed). §14 records the Zig pilot and its execution-review
+> corrections. Other platform recipes and the CI matrix in §11 are source-inspected,
+> not independently run-verified. Modern platform floors are policy choices in
+> [modernization-plan.md](modernization-plan.md) §2.1.
 
 ## 1. Overview and entry points
 
 | Platform | Entry | Backend | Output root |
 |---|---|---|---|
 | Linux / macOS | `./build.sh [options]` (695 lines) | CMake 3.10+ → make or ninja | `out/<Debug\|Release\|Test>/` |
-| Linux / macOS (direct) | `cmake … && ninja` (used by CI) | CMake directly, no `build.sh` | caller-chosen `build/` |
+| Linux / macOS (direct) | `cmake … && ninja` (used by CI) | CMake directly, no `build.sh` | caller-chosen `build-xplat/` |
 | Windows | `Build\Chakra.Core.sln` via `test\ci.buildone.cmd <arch> <type>` | MSBuild | `Build\VcBuild\bin\<arch>_<config>\` |
 
 There is no `build.cmd` at the repo root — the Unix and Windows entries are
@@ -76,15 +79,20 @@ Unix, debug static ninja build with explicit compilers:
 ./build.sh --debug --static -n -j --cc=/usr/bin/clang --cxx=/usr/bin/clang++
 ```
 
-Unix, direct CMake exactly as CI does it (Release with debug info + tests):
+Unix, direct CMake using the CI build configuration (Release with debug info +
+tests), from the repository root. A distinct directory name also works on
+case-insensitive macOS filesystems:
 
 ```sh
-mkdir -p build && cd build
-cmake -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-  -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang ..
-ninja
-ninja check
+cmake -S . -B build-xplat -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang
+ninja -C build-xplat
+ninja -C build-xplat check
 ```
+
+For ARM64 macOS, use the run-verified recipe in §13, including `DISABLE_JIT` and
+the ICU include path. The legacy wrapper's 10.9 default is a historical recipe,
+not a promised floor for modernized release artifacts.
 
 Windows (from any prompt at the repo root — `ci.build.init.cmd` locates MSBuild
 itself via `Build/scripts/add_msbuild_path.cmd`, using PATH msbuild or probing
@@ -250,8 +258,9 @@ test binaries).
 
 ## 10. Testing
 
-`test/`: 85 top-level entries, 2801 `.js` files. Suites include test262 (`test/262`
-via `rlexe.xml` gating), Array, AsmJs, es5/es6/es7, Intl, WasmSpec (+
+`test/`: 85 top-level entries, 2801 `.js` files at the engine baseline. Suites
+include one legacy test262 fixture (`test/262/262test.js`, `rlexe.xml`), Array,
+AsmJs, es5/es6/es7, Intl, WasmSpec (+
 `WasmSpec.MultiValue`, `wasm`, `wasm.simd`), Debugger, Generated, benchmarks
 (ARES-6, jetstream, Kraken, Octane, Octane_Closure, SunSpider), native-tests, and
 the UnitTestFramework.
@@ -281,6 +290,12 @@ Windows: `test\runtests.cmd` drives `rl.exe` (usage :37-56, release unsupported
 <type>` runs bytecode-verify (:109) → `runtests.py` (:127) → `runnativetests.cmd`
 (:144) with failure codes 2/3/4 (:113, :131, :150). `ci.parsetestargs.cmd` notes
 ARM tests unsupported.
+
+The full upstream conformance corpus is separately pinned by
+`tools/test262/test262.lock.json`, and its npm runner dependencies by the adjacent
+`package-lock.json`. See [the conformance-tool README](../tools/test262/README.md)
+for controls, baseline commands, raw/per-feature results, and host/edition limits.
+Legacy regression totals do not imply a full test262 pass rate.
 
 ## 11. CI
 
@@ -315,17 +330,21 @@ RelWithDebInfo task omits it), `ninja check` (:6-31).
 - `--wb-check ONE_FILE` requires `--ninja`.
 - `build.sh --arch` help omits `arm64` (accepted anyway); macOS without an ICU path
   silently becomes `--no-icu`; `--target-path` rejects `~/`.
-- Stale floors (all load-bearing until proven otherwise): cmake 3.10, clang floor
+- Legacy floors and tooling: cmake 3.10, clang floor
   3.7 with no ceiling, VS2015/17-era README vs windows-2025/2022 CI, macOS 10.9
   floor, ventura Cirrus image, LLVM 5.0.0 LTO toolchain, ICU 63.2 (2018) + stale
   57.1 help text, `checkout@v2`, `THIRD-PARTY-NOTICES.txt` (34 items) freshness.
+  They are historical inputs to the reference build. The revived project can
+  raise supported floors explicitly; pin target, SDK and dependencies together.
 - ARM64-Linux is warned unsupported and ARM64 JIT warned non-functional
   off-Windows (root CMake :547-555) — use `--no-jit` there.
 - On macOS (case-insensitive FS), do NOT configure in a `build/` directory: it
   collides with the tracked `Build/` folder and pollutes it with CMake artifacts.
   Use `build-xplat/`, `out/` (via `build.sh`), or another distinctly named dir.
-- Open/unread: `pal/src/configure.cmake` + `pal/src/CMakeLists.txt` bodies,
-  `test/ci.build.init.cmd` + `test/ci.parsetestargs.cmd` bodies,
+- Reviewed for the migration: `pal/src/configure.cmake` / `pal/src/CMakeLists.txt`,
+  `test/ci.build.init.cmd` / `test/ci.parsetestargs.cmd`. PAL's configuration uses
+  target-side run probes and generates `pal/src/config.h` (:1045); translating
+  those contracts is an early `build.zig` work item. Still open:
   `tools/android_toolchain.sh`, `tools/create_package.sh`,
   `tools/XPlatInstall/install_ch.sh`, `tools/icu/configure.py`; Windows SDK pin;
   external link liveness; GitHub archival flag; upstream tags (local `git tag`
@@ -353,33 +372,35 @@ test/Basics/hello.js` → `hello world / PASS`; `ninja check` green —
 native-check `test-shared-basic : PASS` with 8 static-only tests ignored (expected
 for a shared build). Note the tree links Homebrew ICU 78, far newer than the pinned
 embed-63.2 — system-ICU forward compatibility held at least this far. This is the
-parity target for the Phase 1 `zig build`: same triple, same `ninja check` result.
+behavioral parity target for Phase 1: the same build configuration, all 1959
+regressions, bytecode verification and the shared embedding check. A deliberate
+modern platform-floor change is recorded separately from behavior parity.
 
 ## 14. Zig `cc` pilot results (2026-10-10, Phase 1 de-risking)
 
-Method: exported `compile_commands.json` (538 TUs) from a `build-zigpilot/`
-configure identical to §13 plus `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`,
-recompiled every TU with `zig c++` 0.17.0 (mise), then re-ran the archive/link
-edges with `zig c++` over the zig-built objects.
-Pilot harness lives in-tree at `tools/zig-pilot/` (`replay.py`, `link.py`,
-`bisect.py`, plus a `README.md` documenting usage and every harness issue found,
-including a critical fake-success runner bug and the output-verification rule
-adopted because of it).
+Method: exported `compile_commands.json` (538 units: 507 C++, 21 C, 10 assembly)
+from a `build-zigpilot/` configure identical to §13 plus
+`-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`; replayed `zig c++` / `zig cc` 0.17.0, then
+archive/link edges over those objects. This is the ARM64 macOS shared/no-JIT
+configuration; it does not exercise Backend, WasmReader or WABT.
+The durable harness is `tools/zig-pilot/` (`replay.py`, `link.py`,
+`warning_bisect.py`, shared `pilot.py`, regression checks and README).
 
-**Compile: 538/538 with one flag addition.** Every TU compiles under `zig c++`
+**Initial compile: 538/538 with one warning-flag addition.** Every unit compiled
 as-is except `JsrtHelper.cpp`, which trips `-Wdate-time` treated as an error:
 zig's clang 22 emits `expansion of date or time macro` for the `__DATE__` /
 `__TIME__` build-date hashing in the `-O3` configuration where AppleClang stays
 silent, and the promotion survives a trailing bare `-Wno-error` (proven over a
-series of controlled experiments — the five `bisect.py` runs plus minimal-TU
+series of controlled experiments — the five warning-bisect runs plus minimal-TU
 flag probes; cleared only by `-Wno-date-time` / `-Wno-error=date-time`). Fix:
 append `-Wno-date-time` to zig compile flags — a
 build-required flag move, no engine change. Notable non-findings: all MSVC-compat
 flags (`-fms-extensions`, `-fasm-blocks`, `-fdelayed-template-parsing`, `-fwrapv`),
-the `-mmacosx-version-min=10.9` floor, exceptions/RTTI, and C++17 throughout all
-passed with zero other diagnostics.
+exceptions/RTTI and C++17 throughout passed. The original compilation accepted
+the inherited deployment flag, but linked metadata did not preserve its floor;
+see the explicit target contract below.
 
-**Link: 3/3 with two adjustments.** `libChakraCore.dylib`, `ch`, `GCStress` all
+**Initial link: 3/3 with two adjustments.** `libChakraCore.dylib`, `ch`, `GCStress` all
 link under `zig c++` (which uses Zig's own Mach-O linker — evidence: it rejects
 `-exported_symbol` as an unsupported linker arg):
 1. CMake's split `-Wl,-force_load,` + `<lib>` form (trailing comma) fails with
@@ -390,20 +411,55 @@ link under `zig c++` (which uses Zig's own Mach-O linker — evidence: it reject
    it via `dlsym(RTLD_MAIN)` at load to install TestHooks (`TestHooks.cpp:153`,
    `ChakraCoreShared.cpp:30`). Without it, flag parsing never runs and every
    flagged invocation silently `exit(0)`s at `ch.cpp:968` (proven via lldb:
-   `argInfo.filename` held the flag text). The `build.zig`-native fix is
-   `export_symbol_names`, not the `-u` workaround.
+   `argInfo.filename` held the flag text). The verified `build.zig` API is
+   `ch.forceUndefinedSymbol("_OnChakraCoreLoadedEntry")` on Mach-O
+   (`std/Build/Step/Compile.zig:583`). `Module.export_symbol_names` is for WASM
+   (`Module.zig:47-48`); a minimal native probe using it failed its dynamic lookup.
 
-**Validation: 1958/1959 vs baseline 1959/0.** The zig-built `ch` runs the full
-`disable_jit` suite with one delta: `Regex/regexCharTrieStack.js` expects a stack
-overflow that no longer triggers (clang 22 generates tighter frames for that
-matcher). Stack-overflow *detection* itself was verified identical in both builds
-(deep recursion throws catchable `Out of stack space`), so this is a benign
-codegen/layout delta in a test whose own message anticipates amendment — carried
-as a known item, not a blocker.
+**Stack parity correction.** The initial 1958/1 result was not evidence of a
+compiler frame-layout regression. `otool -l` showed Zig's `LC_MAIN.stacksize` was
+16 MiB; the legacy executable used the OS default. Relinking the same Zig-built
+objects with `-Wl,-stack_size,0x800000` alone made
+`Regex/regexCharTrieStack.js` pass. A controlled 8 MiB variant ran **1959/0**, plus
+bytecode and shared-native checks. Preserve this build input rather than waiving
+the test:
 
-**Pilot verdict: toolchain de-risked.** Remaining Phase 1 risk is build-logic
-(authoring `build.zig`), not toolchain capability. Open items for `build.zig`
-authoring: `export_symbol_names` for the `ch` callback, `-Wno-date-time` on
-compile flags, joined `-force_load` (or direct object linking), `jstoc.py` /
-`regenByteCode` / `lttng.py` as build steps, and the `disable_jit`-variant test
-wiring already proven here.
+```zig
+ch.forceUndefinedSymbol("_OnChakraCoreLoadedEntry");
+ch.stack_size = 8 * 1024 * 1024;
+```
+
+**Explicit modern target contract.** The initial Zig outputs all declared macOS
+26.6, while the legacy outputs declared 11.0. Both linked Homebrew ICU 78 dylibs
+requiring 26.0, so an 11.0 header alone did not establish 11.0 deployability.
+The revived pilot deliberately chooses **`aarch64-macos.26.0`**, an explicit
+Xcode SDK, and current system ICU. `replay.py --target … --sysroot …` supplies
+the same contract to compilation and linking, replacing inherited deployment
+flags. Framework searches are SDK-relative (`-F /System/Library/Frameworks`);
+compilation also needs the SDK's `usr/include`, and linking its `usr/lib`.
+`link.py` checks each binary's actual minimum and each executable's 8 MiB stack.
+SDK and ICU versions remain separately recorded dependencies; Zig pinning alone
+does not make the current system-dependency pilot hermetic.
+
+**Harness evidence contract.** A run creates isolated object files, dependency
+files and diagnostics, then atomically publishes a manifest covering the compile
+database, Zig executable/version/environment, flags, source/header/SDK hashes and
+object hashes. Partial/failed runs cannot be linked. Ninja enumeration failures,
+changed inputs and missing/tampered objects abort; link/archive/copy outputs are
+removed before their edge runs, then checked for nonempty recreation. This catches
+recent stale-output no-ops as well as the original quoted-`&&` mistake. Fail-fast
+counts only completed work. See the harness README for executable regression checks.
+
+**Pilot verdict:** toolchain capability is demonstrated for this Mac no-JIT
+configuration. First author the corresponding `build.zig` target, including PAL
+configuration, `jstoc.py`, header staging, bytecode verification and native/regression
+checks; then test x64 Linux JIT/WASM/WABT and the declared modern platform matrix.
+The compiler/linker discovery and platform/stack contracts above are explicit
+acceptance criteria, not assumptions to carry into the new build.
+
+**Repaired-pilot verification (2026-10-10):** the manifest-backed replay compiled
+538/538 with the explicit macOS 26.0 target/SDK, linked all three binaries, and
+passed actual minimum/stack metadata checks. The shell ran **1959 passed / 0 failed**
+(52.63s while conformance work ran concurrently), bytecode verification and
+`test-shared-basic : PASS`. The full pinned test262 diagnostic is separately
+recorded in [conformance-baseline.md](conformance-baseline.md).

@@ -43,6 +43,10 @@ Build/VCBuild*/
 buildchk.*
 buildfre.*
 out/
+/build-xplat/
+/build-zigpilot/
+/.zig-cache/
+/zig-out/
 _DROP/
 
 # Generated Files

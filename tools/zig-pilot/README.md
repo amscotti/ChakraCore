@@ -1,94 +1,153 @@
 # Zig pilot harness
 
-Replays the existing CMake build's compile and link edges under `zig cc` /
-`zig c++` to isolate **toolchain risk** (can Zig's toolchain build this code?)
-from **build-logic risk** (authoring `build.zig`) during Phase 1. See
-`doc/build.md` §14 for the pilot results this harness produced.
+Replay a CMake/Ninja configuration with the pinned Zig C/C++ toolchain, separating
+compiler/linker capability from authoring `build.zig`. The current proof is ARM64
+macOS, shared/no-JIT, RelWithDebInfo, system ICU; see `doc/build.md` §13–14.
+The harness requires **Python 3.11+** and a POSIX shell/Ninja build. Windows MSBuild
+and other architectures are separate migration milestones.
 
-## Files
+## Evidence contract
 
-- `replay.py` — recompiles every TU in `compile_commands.json` with `zig c++`
-  / `zig cc`, writing objects to `<build>/zigpilot-obj/tu{N}.o` (never touches
-  the real outputs). Supports `--limit N`, `--jobs J`, `--fail-fast`,
-  `--extra-flags "..."`.
-- `link.py` — re-runs the archive/link/custom edges from `ninja -t commands`
-  for given targets, swapping the linker for `zig c++` and every input `.o`
-  for its zig-built twin (aborting upfront if any twin is missing). Rewrites
-  `@rsp` files the same way (defensive: no rsp files appear in this pilot's
-  edges). Supports `--extra-link-flags "..."`. **Every link/archive edge must
-  prove its `-o`/`ar` outputs exist and are fresh (<20 min old) — a bare rc=0
-  is not accepted** (see issue 1). Pure-custom edges without such outputs
-  (e.g. the `jstoc.py` regen) still pass on rc alone.
-- `bisect.py` — one-off differential harness used to bisect a warning-flag
-  divergence between AppleClang and `zig c++` (kept as a template).
+- `replay.py` creates a fresh `zigpilot-obj/<generation>/` with `tuN.o`, compiler
+  dependency files and complete diagnostic logs. It never redirects compilation
+  into the reference objects. A success requires a nonempty object and readable
+  dependencies, not just rc=0.
+- `zigpilot-obj/manifest.json` records the database digest, explicit target/SDK,
+  extra flags, Zig executable hash/version/environment, all source/header/SDK
+  dependency hashes and object hashes. It is published atomically. Each new
+  attempt invalidates the previous manifest; `--limit` is diagnostic and cannot
+  authorize a full link. Failed/interrupted generations are not linkable.
+- `link.py` validates that complete generation against the current database,
+  toolchain, inputs and objects before planning any edges. Ninja enumeration
+  failure, an empty target, an unmapped `.o` or a missing response file aborts.
+- Archive/link/post-build-copy outputs are removed **before their edge executes**,
+  then checked for nonempty recreation. A recently produced stale file cannot
+  satisfy the check. Pure generators without discoverable outputs are checked on
+  rc plus the compile-input hashes; a regenerated header invalidates the objects.
+- Quoted paths and arguments are parsed separately from `&&`. Only individual
+  argv commands are rewritten; shell operators retain their semantics. This
+  supports the simple POSIX `&&` chains emitted by the reference CMake build;
+  other shell constructs/nested response files fail explicitly.
+- Replays and links in one build directory are locked against concurrent runs.
+  `last-link.json` records the latest invocation, its commands, artifact hashes,
+  metadata and complete/failed status.
 
-## Usage (macOS ARM64 pilot)
+## Explicit modern macOS policy
 
-```sh
-ZIG=$(mise which zig | xargs dirname)   # Zig 0.17.0 via repo mise.toml
-mkdir -p build-zigpilot && cd build-zigpilot
-cmake -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-  -DICU_INCLUDE_PATH=/opt/homebrew/opt/icu4c/include -DDISABLE_JIT=ON \
-  -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang \
-  -DCMAKE_EXPORT_COMPILE_COMMANDS=ON ..
-ninja dbg_controller_h                    # generated headers first (issue 4)
-python3 ../tools/zig-pilot/replay.py . $ZIG --jobs 8 --extra-flags -Wno-date-time
-ls zigpilot-obj/tu*.o | wc -l             # must equal TU count (issue 6)
-python3 ../tools/zig-pilot/link.py . $ZIG \
-  bin/ChakraCore/libChakraCore.dylib bin/GCStress/GCStress
-python3 ../tools/zig-pilot/link.py . $ZIG bin/ch/ch \
-  --extra-link-flags "-Wl,-u,_OnChakraCoreLoadedEntry"
-./ch ../test/Basics/hello.js
-python3 ../test/runtests.py --test --variants=disable_jit --binary=$PWD/ch
+The revival deliberately chooses **macOS 26.0** for this pilot, matching the
+current Homebrew ICU 78 dylibs' minimum. Legacy 10.9/11.0 recipes are reference
+history, not a deployment commitment. Target and SDK must be explicit; `zig env`
+may report the host as 26.6, but that must not select the artifact's floor.
+Other platform floors are declared as their builds are verified.
+
+`replay.py` replaces inherited target/deployment/sysroot flags with
+`--target aarch64-macos.26.0 --sysroot <SDK>`. Zig resolves
+`-F /System/Library/Frameworks` relative to that sysroot. Compilation also needs
+the SDK's `usr/include` (e.g. Security's libDER headers), and linking its `usr/lib`.
+These settings come from the manifest at link time, so stages cannot silently
+choose different targets. SDK settings and headers are fingerprinted; current
+system ICU is recorded as an external dependency, not a hermetic release pin.
+
+Mac executables use an explicit **8 MiB main-thread stack** (`--stack-size`, bytes;
+default `8388608`). Zig's original 16 MiB default caused the lone regex test delta;
+relinking the same objects at 8 MiB restored that test and a full 1959/0 suite.
+`link.py` checks `LC_BUILD_VERSION.minos` and `LC_MAIN.stacksize` with `otool`.
+
+In `build.zig`, retain the dynamic TestHooks callback on `ch` and preserve its stack:
+
+```zig
+ch.forceUndefinedSymbol("_OnChakraCoreLoadedEntry");
+ch.stack_size = 8 * 1024 * 1024;
 ```
 
-Notes: do NOT configure in a `build/` dir on macOS (collides with tracked
-`Build/`); the `-Wno-date-time` and `-u` flags are the pilot's documented
-findings (build.md §14), not harness workarounds; the link runs are split
-because `--extra-link-flags` applies to every target in one invocation and
-`-u _OnChakraCoreLoadedEntry` breaks targets lacking that symbol (GCStress
-fails with `undefined symbol` — verified); the `disable_jit` variant is
-required for no-JIT builds (default dynapogo flags are rejected by any build
-of `ch`, AppleClang included — verified on the baseline).
+Both APIs were exercised under Zig 0.17.0. `Module.export_symbol_names` is
+WASM-only; it did not preserve a Mach-O dynamic lookup. `GCStress` lacks the
+callback, so the callback flag belongs only on the `ch` invocation.
 
-## Issues found in the harness itself (log)
+## Usage (from the repository root)
 
-1. **Fake rc=0 from shell re-quoting (critical, fixed).** An early `link.py`
-   split each edge with `shlex`, substituted argv tokens, re-quoted, and ran
-   with `shell=True`. Quoting turned the `&&` operators into literal arguments,
-   so every `: && ...` edge degraded to the `:` no-op — all "passed" while
-   producing nothing, including a bogus `LINK-PILOT-OK`. Fix: substitute
-   textually on the raw command string (compiler path, `.o` paths, rsp files)
-   and execute it unmodified; additionally every edge must now prove its `-o`
-   / `ar` outputs exist and are fresh, else the edge fails regardless of rc.
-   Lesson: **verify artifacts on disk, never trust rc alone.**
-2. **`ninja -t commands` returns every edge, not just the link.** Output
-   includes all compile commands plus archive/link/custom edges, with `: && `
-   prefixes and `&&`-chained compounds (`cmake -E rm ... && ar qc ... &&
-   ranlib ...`) that cannot be argv-exec'd. `link.py` therefore filters to
-   non-compile edges and runs each through the shell.
-3. **`@rpath/` is not a response file.** macOS link lines contain
-   `-install_name @rpath/libChakraCore.dylib`; the `@`-rsp rewriter skips
-   `@rpath` tokens explicitly (belt-and-suspenders: the is-file guard alone
-   would already skip them since `build/@rpath/...` doesn't exist) plus any
-   `@`-token whose file doesn't exist.
-4. **Generated-header ordering.** `replay.py` needs `DbgController.js.h`
-   (produced by the `jstoc.py` build step) present before compiling `bin/ch`
-   TUs; run `ninja dbg_controller_h` (or a full `ninja`) first. The 8 initial
-   `bin/ch` replay failures were this harness gap, not toolchain failures.
-5. **`-o` redirect discipline.** Compile replay redirects `-o` into
-   `zigpilot-obj/` to keep twins separate from tree outputs; link/archive
-   replay deliberately keeps natural paths so dependent post-build copy edges
-   keep working.
-6. **Twin objects went missing once; cause undetermined.** After a reported
-   538/538 compile replay, only 15 of the `tu{N}.o` files were later found on
-   disk; no executed command in the session explains a deletion (all candidate
-   deleters were audited). A clean re-run reproduced 538/538 with all artifacts
-   verified present. Mitigation: the usage above includes an on-disk count
-   check, and `link.py` aborts upfront if any twin is missing. If it recurs,
-   suspect tooling outside this harness and preserve the full command history.
-7. **Environment incident (non-harness, noted for the record).** Mid-pilot,
-   Homebrew's `/opt/homebrew/bin/cmake` symlink vanished (Cellar intact);
-   restored via `brew unlink cmake && brew link cmake`. Cause unknown; no
-   pilot command touches Homebrew. If CMake edges fail with "No such file",
-   check the link first.
+```sh
+ZIG=$(mise which zig)
+SDK=$(xcrun --show-sdk-path)
+cmake -S . -B build-zigpilot -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DICU_INCLUDE_PATH=/opt/homebrew/opt/icu4c/include -DDISABLE_JIT=ON \
+  -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang \
+  -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+ninja -C build-zigpilot dbg_controller_h
+python3 tools/zig-pilot/replay.py build-zigpilot "$ZIG" \
+  --target aarch64-macos.26.0 --sysroot "$SDK" --jobs 8 \
+  --extra-flags=-Wno-date-time
+python3 tools/zig-pilot/link.py build-zigpilot "$ZIG" \
+  bin/ChakraCore/libChakraCore.dylib bin/GCStress/GCStress
+python3 tools/zig-pilot/link.py build-zigpilot "$ZIG" bin/ch/ch \
+  --extra-link-flags=-Wl,-u,_OnChakraCoreLoadedEntry
+./build-zigpilot/ch -nonative test/Basics/hello.js  # must print hello world / PASS
+python3 tools/regenByteCode.py --noJit --verify --binary="$PWD/build-zigpilot/ch"
+python3 test/runtests.py --test --variants=disable_jit --binary="$PWD/build-zigpilot/ch"
+```
+
+Run the shared embedding check from its runner directory:
+
+```sh
+# REPO is the absolute repository root; invoke in test/native-tests/
+./test_native.sh "$REPO/build-zigpilot/ch" RelWithDebInfo \
+  /usr/bin/clang /usr/bin/clang++ "$REPO"
+```
+
+The manifest verifies object coverage; a manual object count alone is insufficient.
+No-JIT builds require `disable_jit`; dynapogo flags are rejected by the reference
+shell too. `ninja check` in the disposable pilot directory would rebuild missing
+reference objects and overwrite Zig outputs, so invoke the proven check commands
+above directly. Use `build-zigpilot/`, never `build/` on a case-insensitive Mac
+filesystem: the latter collides with tracked `Build/`.
+
+Diagnostics:
+
+```sh
+python3 tools/zig-pilot/replay.py build-zigpilot "$ZIG" \
+  --target aarch64-macos.26.0 --sysroot "$SDK" --limit 1 --fail-fast
+python3 tools/zig-pilot/warning_bisect.py build-zigpilot "$ZIG" \
+  --target aarch64-macos.26.0 --sysroot "$SDK"
+python3 tools/zig-pilot/test_harness.py
+```
+
+`warning_bisect.py` writes to `zigpilot-bisect/` and does not certify or change a
+replay generation. Its controlled warning failures are expected diagnostic output.
+The tests exercise real Ninja edges and controlled compilers: missing artifacts,
+recent stale outputs, partial runs, input/toolchain/database changes, missing or
+tampered objects, response files, quoted paths/`&&`, locks and fail-fast accounting.
+
+## Issue history and corrections
+
+1. **Quoted `&&` gave fake rc=0.** Re-quoting entire shell chains turned the `:`
+   prefix into a no-op. Rewrite individual commands while preserving operators,
+   and prove output recreation.
+2. **Ninja returns compile and non-compile edges.** Identify compiler `-c` commands
+   rather than filtering arbitrary text (e.g. Python's `-c`). Enumerate every
+   requested target successfully before deleting outputs; share repeated edges.
+3. **`@rpath/` is not a response file.** Preserve linker path tokens, rewrite
+   actual response-file objects, and abort on missing response files.
+4. **Generated-header ordering.** Generate `DbgController.js.h` before replaying
+   `bin/ch`. A generator that changes it later requires recompilation.
+5. **Output isolation.** Compile twins stay separate. Link/archive/copy edges use
+   their natural paths inside the disposable build directory.
+6. **Missing twins were once reported after 538/538.** Cause was undetermined.
+   Object existence, size, digest and generation provenance now replace the
+   original manual-count mitigation.
+7. **Homebrew CMake symlink disappeared mid-pilot.** Cellar remained intact;
+   `brew unlink cmake && brew link cmake` restored it. No pilot command touched
+   Homebrew; this remains an environment incident, not a compiler finding.
+8. **Invalid Ninja targets reported success.** Check enumeration rc and reject
+   targets without output-producing edges; never treat zero edges as a proof.
+9. **Twenty-minute freshness was insufficient.** A no-op could accept a recent
+   output. Remove declared outputs before execution and require new artifacts.
+10. **Indexed twins could mix old and new flags.** Fresh generations, complete
+    manifests and input/object hashes prevent partial replay from authorizing links.
+11. **Fail-fast counted uncollected results as successes.** Bound submitted work,
+    drain running tasks, count actual outcomes and report not-run units separately.
+12. **`bisect.py` shadowed Python's standard library.** `tempfile`/`random` imported
+    the diagnostic script as stdlib `bisect`. Rename it to `warning_bisect.py` and
+    guard its entry point.
+13. **Native defaults differed despite green compilation.** Explicit macOS target,
+    SDK/header/framework paths, callback retention and 8 MiB stack are now verified
+    inputs. The regex delta was stack reservation, not a justified test waiver.

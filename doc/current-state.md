@@ -1,6 +1,7 @@
 # Current State of ChakraCore
 
-Pinned to HEAD `97e68c917` (19 Feb 2026; see §7). Version **1.13.0 dev**
+Engine-source baseline `97e68c917` (19 Feb 2026; see §7), with modernization
+execution/decisions updated through 2026-10-10. Version **1.13.0 dev**
 (`lib/Common/ChakraCoreVersion.h:19-21`, `CHAKRA_CORE_VERSION_RELEASE 0` at :58).
 MIT license (`LICENSE.txt`). Every claim below cites an in-repo path; line numbers
 were verified against this HEAD.
@@ -69,9 +70,13 @@ JsrtContext.cpp plus `lib/Jsrt/Core/`; `JsrtRuntime` wraps a `ThreadContext` (`J
 `JsrtContext` is a finalizable object holding the `JavascriptLibrary` plus a
 back-pointer to its runtime (`JsrtContext.h:9-44`).
 
-Threading: one `ThreadContext` per thread (`GetContextForCurrentThread`,
-`lib/Runtime/Base/ThreadContext.h:1109`; `GetRecycler` :1111); one `ScriptContext`
-per realm; single-threaded script execution; the host supplies a
+Threading: each JsRT runtime allocates and owns a `ThreadContext`
+(`lib/Jsrt/Jsrt.cpp:315,374-375`), which owns its Recycler
+(`lib/Runtime/Base/ThreadContext.h:1111`); one `ScriptContext` per realm.
+`GetContextForCurrentThread` (:1109) is a current TLS lookup. Rental-threading
+allows serial rebinding of inactive, non-thread-bound runtimes, not concurrent
+script execution on the same runtime
+(`lib/Runtime/Base/ThreadContextTlsEntry.cpp:70-125,140-162`). The host supplies a
 `JsThreadServiceCallback` or sets DisableBackgroundWork.
 
 Pipeline: `Parser.h` aggregates Scan.h/Parse.h/ptree.h/BackgroundParser.h/
@@ -108,7 +113,8 @@ concurrent sweep (`ENABLE_CONCURRENT_GC` default 1, `lib/Common/CommonDefines.h:
 (`WriteBarrierMacros.h`); blocks/buckets under `Common/Memory`. No heap
 cage/sandbox, no pointer compression (zero hits across lib/).
 
-JS level: ES2015–ES2019 core plus cherry-picked ES2020–ES2023 features. ES6 master
+JS level: substantial ES2015–ES2019 coverage with inherited gaps, plus
+cherry-picked ES2020–ES2023 features; this is not full edition conformance. ES6 master
 flag ON with sub-flags (`lib/Common/ConfigFlagsList.h:625`, :631-667, :1118; ES6Module
 :640, :1144). ES2016/17: async/await, exponent operator, trailing commas,
 values/entries, padding (:698-701; `test/es7/rlexe.xml:36-52` covers the
@@ -131,21 +137,26 @@ unconditional (no ConfigFlags gate) even though nearby flags exist. Also present
 :453`), String includes (C++ builtins), and error `cause`
 (`JavascriptError.cpp:68-71`). OFF by default: SharedArrayBuffer/Atomics (:709,
 :1189; rlexe :80-88), BigInt (:669, :1194; `test/BigInt/rlexe.xml`), ES6 RegExp
-symbols (DEFAULTs :688-696 COMPILE_DISABLE branches; FLAGs :1171, :1180). ABSENT —
+symbols and prototype properties (DEFAULTs :686-696; FLAGs :1171, :1180). ABSENT —
 no engine implementation or feature tests (`?.`, logical assignment, class fields,
 `#private`, static blocks, decorators, `replaceAll`, `matchAll`, `queueMicrotask`,
 `WeakRef`, `FinalizationRegistry`; remaining literal hits are benchmark-internal
 identifiers and C++-level name collisions such as ETW `MatchAllKeyword` and JsRT
-`JsCreateWeakReference`). Absent by code inspection but still needing a runtime probe
-via `ch`: RegExp `d`/`v` flags (flag switch `RegexParser.cpp:2731-2789` handles only
-i/g/m/s/u/y per the 6-member `RegexFlags.h` enum), import attributes (0 hits).
+`JsCreateWeakReference`). Runtime probes on both AppleClang and Zig shells
+(2026-10-10) reject ES2018 named capture groups, lookbehind, and Unicode property
+escapes, as well as RegExp `d`/`v` flags and import attributes. The flag switch
+(`lib/Parser/RegexParser.cpp:2731-2799`) handles only i/g/m/s/u/y. These are
+confirmed gaps, including older RegExp work that must precede newer named-group
+and `v`-flag additions. The repeatable probe is
+`tools/test262/feature-probe.js`; see the modernization plan §4 for priorities.
 
 Intl: only Collator/DateTimeFormat/NumberFormat/PluralRules (`InJavascript/Intl.js`,
 IntlEngineInterfaceExtensionObject.cpp; `ENABLE_INTL_OBJECT` :6-23). The ICU C API is
 wrapped by `lib/Runtime/PlatformAgnostic/ChakraICU.h` (:36-46, 11 ICU headers,
 HAS_ICU, WINDOWS10_ICU variant); `UnicodeText.h` builds on it with non-ICU fallbacks
 (:8-13, :40-58).
-System or embedded ICU 63.2 (root CMakeLists.txt:196-222); macOS `--no-icu` fallback
+Embedded ICU is pinned to 63.2 (root CMakeLists.txt:196-222); system/custom ICU
+is unpinned, with 78.3 run-verified in the current Mac pilot. macOS `--no-icu` fallback
 (:268-275). RelativeTimeFormat/ListFormat/DisplayNames/Segmenter/DurationFormat:
 0 hits.
 
@@ -275,14 +286,19 @@ debug/test/release plus x86-only NoJit, and windows-2022 x86/x64 release-only
 build, via ci.buildone + ci.testone with tests only on debug/test/NoJit (:202-219;
 matrix :127-198). cirrus: 3× ARM64 macOS noJit Debug/RelWithDebInfo/Release (brew ninja
 icu4c, STATIC_LIBRARY=ON except the RelWithDebInfo task, DISABLE_JIT=ON, ninja
-check :6-31). No conformance dashboard; test262 runs only via rlexe.xml gating.
+check :6-31). The legacy `test/262` directory holds one `262test.js` fixture and
+its `rlexe.xml`, not a full test262 checkout. The regression count is not a
+test262 conformance rate. Pinned upstream corpus/runner tooling is now under
+`tools/test262/`, with positive and deliberate-failure controls, raw scenario
+results, and per-feature summaries. Its diagnostic corpus includes newer
+proposals; full ES2025 gating requires a validated edition/host policy.
 Run-verified 2026-10-10 on macOS ARM64 (Cirrus RelWithDebInfo recipe, DISABLE_JIT,
 Homebrew ICU 78): `ninja check` EXIT=0, regression Total passed 1959 / failed 0 —
 see [build.md](build.md) §13. Other platforms/configs remain run-unverified.
 
 ## 7. Activity / health
 
-HEAD `97e68c917` (2026) "ci: use windows 2025 runners (#7048)" by Lukas Kurz; prior
+Baseline HEAD `97e68c917` (2026) "ci: use windows 2025 runners (#7048)" by Lukas Kurz; prior
 work Dec 2025 by Ivan Krasilnikov (clang/ICU/ARM64 + C++17 fixes). Commits per year
 (author date): 1×2026 / 23×2025 / 25×2024 / 10×2023 / 36×2022 (committer-date counts
 differ: 9/15/26/9/36 — the gap is rebased/merged history; either way this is
@@ -291,7 +307,8 @@ small functional fixes (e.g. TryFinally/JIT loop tracking, JIT Generator loops,
 Module API bugs)). Recent-30 authors: Kurz 15, Krasilnikov 7, plus 8 by 4 others
 (Richard 3, Petr Penzin 3, Stephan T. Lavavej 1, rhuanjl 1). Fork:
 `origin git@github.com:amscotti/ChakraCore.git`, master tracking origin/master,
-tracked tree clean with untracked `doc/` present; `git tag` is EMPTY (upstream tags
+the modernization branch starts at this baseline and has committed `doc/`,
+the toolchain pin, and pilot harness; `git tag` was EMPTY at baseline (upstream tags
 unconfirmed). Link risks
 (unchecked): technet.microsoft.com URLs (README :23, CONTRIBUTING :11, retired
 domain); Microsoft/ChakraCore vs chakra-core/ChakraCore + aka.ms mix; wabt
@@ -299,21 +316,26 @@ travis/appveyor badges.
 
 ## 8. Modernization constraints
 
-(a) Frozen ES2019 core: `?.` / logical-assign / class-fields / `#private` /
+(a) Partial ES2015–ES2019 baseline: ES2018 named groups/lookbehind/Unicode property
+escapes are missing, as are `?.` / logical-assign / class-fields / `#private` /
 static-blocks / decorators / `WeakRef` / `FinalizationRegistry` / `replaceAll` /
 `matchAll` / `queueMicrotask` absent — needs a parser + builtins workstream
 (error `cause`, `flat`/`flatMap`/`includes` are already present, so the ES2019 story
-is better than it first looks). (b) Intl 4-constructor subset on ICU 63.2 (2018);
-macOS often `--no-icu` — upgrade is a compat decision. (c) WASM MVP + sign-ext /
+is better than it first looks). (b) Intl 4-constructor subset; embedded ICU 63.2
+(2018), current system-ICU pilot 78.3. ICU upgrade and `--no-icu` behavior need
+explicit dependency/test decisions. (c) WASM MVP + sign-ext /
 nontrapping; threads/multi-value/SIMD gated off; GC/tail-calls/EH/stringref/
 extended-const absent. (d) BigInt / SAB+Atomics / RegExp-symbols OFF by default —
 keep flagged until deliberately enabled. (e) C++17 + Rotor PAL; x86/ARM win-only;
 ARM64 JIT broken off-Windows — PAL/backend first. (f) No sandbox/heap cage, no
 pointer compression; mark-sweep GC with concurrent/parallel mark + concurrent sweep
-— hostile-input handling is a threat-model decision. (g) Stale floors are
-load-bearing: cmake 3.10, VS2015/17 auto toolsets, unpinned clang/SDK, macOS 10.9,
-LLVM5 LTO, ICU 63.2, plus the suspected `--sanitize` flag-drop bug — the CI matrix
-(ubuntu-24.04/22.04, macOS, win-2025/2022) is the only verified set. (h) Release
+— hostile-input handling is a threat-model decision. (g) Legacy floors describe
+the old build, not a compatibility commitment for this revival. Modern floors may
+be raised deliberately with explicit target/SDK/dependency records and CI coverage:
+the current ICU 78 Mac pilot chooses macOS 26.0, rather than inheriting host 26.6.
+Legacy CMake 3.10, VS2015/17, LLVM5 LTO, ICU 63.2 and the suspected `--sanitize`
+flag-drop bug remain reference-build issues. The local ARM64 Mac build is
+run-verified; the broader CI matrix is source-inspected. (h) Release
 tests ~nothing (hello.js smoke); Debug/RelWithDebInfo `check` is the real gate;
 default variants interpreted,dynapogo. (i) Docs live on the wiki — put durable
 decisions in-repo (`doc/`). (j) Sustainer community (~1-36 commits/yr, ~2 authors) —
@@ -322,13 +344,16 @@ single-binary WASM + Intl vs QuickJS-ng (small, current-spec, frequent releases)
 V8 (multi-tier JIT, pointer compression, sandbox), JSC (multi-tier JIT) — competitor
 internals are secondary-sourced anchors, not verified claims. Feature work targets
 full ES2025 conformance — see [modernization-plan.md](modernization-plan.md) §4.
-(l) Zig 0.17 context:
-build rework; `@cImport` removal → external translate-c package; `b.addTranslateC`
-deprecation; Uber pattern (`zig cc`/`c++` as hermetic C/C++ toolchain first, local
-`zig cc` = clang 21.1.8 on the research host); then incremental file-by-file Zig
-behind the C ABI. Caveats: ZLS status on 0.17 unverified; research host had 0.16.0
-so all 0.17 API spellings need re-verification; C++17-at-scale (exceptions/RTTI/
-linker choice) needs a pilot build. See [modernization-plan.md](modernization-plan.md).
+(l) Zig 0.17.0 is installed/pinned and reports Clang 22.1.8. Build rework and
+`@cImport` removal / external `translate-c` APIs were checked against its release
+notes and installed sources. The Mac no-JIT C/C++/assembly-at-scale pilot has run;
+JIT/WASM/WABT and other platforms are subsequent milestones. Native callback
+retention uses `forceUndefinedSymbol`, not WASM-only `export_symbol_names`.
+The original regex delta was a 16 MiB linker stack default: an explicit 8 MiB
+stack restores 1959/0, rather than requiring a test waiver. ZLS has no 0.17 release
+as of this review and does not gate Phase 1. SDK/ICU/tool versions are separate
+inputs to a future hermetic build; pinning Zig alone does not pin them.
+See [modernization-plan.md](modernization-plan.md) and [build.md](build.md) §14.
 
 ## 9. Gaps and open items
 
@@ -336,15 +361,20 @@ Resolved during review: error `cause` PRESENT, `flat`/`flatMap`/includes PRESENT
 velocity counts pinned, GC concurrency confirmed, LTTng-vs-`--trace` attribution
 fixed, `rl` xplat absence explained, `flat` conflict settled by opening
 `Array_prototype.js`. Resolved 2026-10-10 by execution: baseline build/test green
-(1959/0) on macOS ARM64.
+(1959/0) on macOS ARM64; the stack-aligned Zig variant also passed 1959/0 with
+bytecode and shared embedding checks. Runtime `d`/`v`/import-attribute probes
+confirmed absence; ES2018 regex gaps and the runtime/TLS distinction were corrected.
 
-Still open: `pal/src/configure.cmake` + `pal/src/CMakeLists.txt` bodies (exist, use
-Check*-module feature detection — contents not fully read); `ci.build.init.cmd` +
-`ci.parsetestargs.cmd` bodies (exist — REPO_ROOT/msbuild setup, "arm tests not
-supported" — not fully read); android_toolchain.sh, create_package.sh,
+Reviewed: PAL configure/source-list bodies (including target-side run probes and
+`config.h.in` generation), `ci.build.init.cmd` / `ci.parsetestargs.cmd` (MSBuild
+setup and x86/x64 test routing). Still open: android_toolchain.sh, create_package.sh,
 XPlatInstall/install_ch.sh, icu/configure.py bodies unopened. Unpinned: clang
 maximum, Windows SDK. Unverified: link liveness, GitHub archival flag, upstream
 tags, V8/JSC specifics, QuickJS-ng ES2024/25 delta, full-scale C++ build.zig
-gotchas, macOS/Windows incremental behavior, test262 pass rate, RegExp `d`/`v` +
-import attributes (need runtime probes via `ch`). (Legacy build/test executed green
-on macOS ARM64; Zig 0.17 API spellings verified; ZLS confirmed 0.16-only.)
+gotchas, macOS/Windows incremental behavior, and full edition-conformance results.
+The pinned test262 diagnostic baseline is a foundation for measuring older gaps,
+not evidence that any complete edition already passes.
+
+The first [conformance baseline](conformance-baseline.md) ran 93,141 scenarios
+from 48,598 files: 61,565 passed / 31,576 failed, with 902 explicit skips. Its
+corpus includes post-ES2025 proposals and uses default language flags.
