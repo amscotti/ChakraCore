@@ -1,7 +1,8 @@
 # ChakraCore Modernization Plan
 
-> Status: foundation and Mac toolchain pilot verified; **B1 is the next work item**.
-> `build.zig` has not been authored. Engine/legacy-build references use baseline
+> Status: F0 foundation and B1 Mac configuration contract verified; **B2 is the
+> next work item**. The `build.zig` PAL slice (generated config.h, 91 objects)
+> is verified; full-engine wiring is B2. Engine/legacy-build references use baseline
 > `97e68c917`; execution evidence is recorded through 2026-10-10 local time.
 > This is a staged roadmap for a small maintained fork, not a dated delivery promise.
 
@@ -25,8 +26,8 @@ handling have been validated before its results are used as a completion gate.
 | Milestone | Outcome | Depends on | Status |
 |---|---|---|---|
 | F0 | Compiler, behavior-parity and diagnostic-conformance foundation | — | Verified |
-| B1 | Explicit Mac build/PAL configuration contract | F0 | **Next** |
-| B2 | Source-only Mac `zig build` and `zig build check` | B1 | Planned |
+| B1 | Explicit Mac build/PAL configuration contract | F0 | Verified |
+| B2 | Source-only Mac `zig build` and `zig build check` | B1 | **Next** |
 | B3 | Mac build profiles, incremental correctness and CI | B2 | Planned |
 | B4 | Native x64 Linux JIT/WASM/WABT proof and Zig build | B2; B3 before default rollout | Planned, higher uncertainty |
 | B5 | First release package with controlled dependencies | B3; B4 for a two-platform package | Planned |
@@ -469,7 +470,7 @@ Decision/rollback points:
 
 - [x] F0: Mac compiler/linker pilot, behavior parity, artifact metadata and
   diagnostic-conformance foundation recorded.
-- [ ] B1: Source/flag/PAL configuration contract and first Zig build slice.
+- [x] B1: Source/flag/PAL configuration contract and first Zig build slice.
 - [ ] B2: Clean source-only Mac `zig build` / `zig build check`, 1959/0,
   bytecode/shared native/metadata/API gates.
 - [ ] B3: Each declared Mac profile, dependency rebuild behavior and clean CI;
@@ -486,10 +487,10 @@ Decision/rollback points:
   tracked until C4, optional ecosystem scope has separate gates.
 - [ ] C4: Published qualified ES2025 result on the claimed default configurations.
 
-**Next implementation:** B1. Extract the current Mac contract from the inspected
-sources/pilot evidence, document PAL assumptions, generate configuration under
-Zig, and compile the first object group. Keep that change small enough to review
-before adding the rest of B2. Do not start by mirroring every CMake switch.
+**Next implementation:** B2. Extend the verified `build.zig` slice to the full
+Mac graph (archive, dylib, `ch`, GCStress, staged headers), model the
+`jstoc.py`/bytecode generator ordering explicitly, and prove `zig build` plus
+`zig build check` from a fresh checkout with no CMake/Ninja.
 
 ## Appendix — Evidence and deferred research
 
