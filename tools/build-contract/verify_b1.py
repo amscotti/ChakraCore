@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
+#-------------------------------------------------------------------------------------------------------
+# Copyright (c) ChakraCore Project Contributors. All rights reserved.
+# Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+#-------------------------------------------------------------------------------------------------------
 """B1 step 4 — repeatable B1 verification for the Mac reference profile.
 
 Checks (doc/modernization-plan.md section B1 "Done when",
 doc/build-contract-mac.md, doc/pal-config-contract-mac.md section 5):
 
-  1. Clean slice build from source plus declared dependencies exits 0.
-  2. Generated zig-out/pal/src/config.h matches the MD5 pinned in both
+  1. Clean source build in a private cache/install prefix exits 0.
+     Existing .zig-cache/zig-out and other profiles are never wiped.
+  2. Generated <private-prefix>/pal/src/config.h matches the MD5 pinned in both
      contracts; byte-identical to the build-zigpilot/pal/src/config.h
      reference (cmp) when that git-ignored ref exists.
   3. PAL archive check against the CURRENT build graph artifact
-     zig-out/lib/libChakra.Pal.Singular.a (B2 NNNN-basename.o members,
+     <private-prefix>/lib/libChakra.Pal.Singular.a (B2 NNNN-basename.o members,
      basename keeping its source extension): exactly the 91 contract
      objects (NNNN- stripped, then basename.o vs doc/build-contract-
      mac.md section 4.1) and no non-object member besides __.SYMDEF.
@@ -28,6 +33,8 @@ an unparseable -Dtarget still runs all 95 probes before Zig's deferred
 option validation fails it (~30s of wasted probing, exit code stays
 correct; see build.zig gateTarget comment). Prints a PASS/FAIL summary
 and writes an evidence log (default tools/build-contract/verify_b1.log).
+There are 14 required checks and an optional 15th reference comparison.
+CI consumes the final `verify_b1: PASS` verdict, not a local-only tally.
 
 Usage: python3 tools/build-contract/verify_b1.py [--log PATH]
        python3 tools/build-contract/verify_b1.py --self-test
@@ -44,6 +51,9 @@ import time
 from datetime import datetime, timezone
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.join(ROOT, "tools", "build"))
+import common
+
 ZIG = ["mise", "exec", "--", "zig"]
 EXPECTED_ZIG = "0.17.0"
 EXPECTED_OBJECTS = 91
@@ -114,11 +124,13 @@ def log(text=""):
 def run(cmd, timeout, cwd=ROOT):
     t0 = time.time()
     try:
-        p = subprocess.run(cmd, cwd=cwd, stdout=subprocess.PIPE,
-                           stderr=subprocess.STDOUT, text=True, timeout=timeout)
-        return p.returncode, p.stdout, time.time() - t0
+        rc, out, _ = common.run_capture(cmd, timeout=timeout, cwd=cwd,
+                                        merge_stderr=True)
+        return rc, out, time.time() - t0
     except subprocess.TimeoutExpired as e:
-        out = (e.stdout or "") if isinstance(e.stdout, str) else ""
+        out = e.stdout or ""
+        if isinstance(out, bytes):
+            out = out.decode(errors="replace")
         return None, out + f"\n[TIMEOUT after {timeout}s]", time.time() - t0
 
 
@@ -224,7 +236,23 @@ def record(name, expected, observed, ok, detail=""):
         log(f"       {detail}")
 
 
+def artifact_path(prefix, relative):
+    return os.path.join(prefix, os.path.relpath(relative, "zig-out"))
+
+
 def main():
+    if len(sys.argv) == 2 and sys.argv[1] == "--self-test":
+        return self_test()
+    # Own only these outputs. A clean build does not require deleting the
+    # live tree's cache/prefix, and cleanup happens after all child groups
+    # have completed (including timeout/interrupt cleanup in common).
+    with tempfile.TemporaryDirectory(prefix="verify-b1-") as work:
+        return verify_main(os.path.join(work, "cache"), os.path.join(work, "install"))
+
+
+def verify_main(cache, prefix):
+    log_lines.clear()
+    results.clear()
     if len(sys.argv) == 2 and sys.argv[1] == "--self-test":
         return self_test()
     log_path = os.path.join(ROOT, "tools/build-contract/verify_b1.log")
@@ -253,12 +281,12 @@ def main():
     log(env_out.strip())
     log("--- end zig env ---")
 
-    # 1. Wipe caches and run the clean build.
-    for d in (".zig-cache", "zig-out"):
-        shutil.rmtree(os.path.join(ROOT, d), ignore_errors=True)
-    log("wiped .zig-cache/zig-out")
-    rc, build_out, dt = run(ZIG + ["build"], BUILD_TIMEOUT)
-    log(f"$ {' '.join(ZIG + ['build'])} -> exit {rc} in {dt:.1f}s")
+    # 1. A fresh private cache/prefix proves the build without a live-tree wipe.
+    build_args = ["--cache-dir", cache, "--prefix", prefix]
+    build_cmd = ZIG + ["build"] + build_args
+    log(f"private build: cache={cache} prefix={prefix}")
+    rc, build_out, dt = run(build_cmd, BUILD_TIMEOUT)
+    log(f"$ {' '.join(build_cmd)} -> exit {rc} in {dt:.1f}s")
     log("--- zig build output (tail 15 lines) ---")
     log("\n".join(build_out.splitlines()[-15:]))
     log("--- end zig build output ---")
@@ -274,7 +302,7 @@ def main():
 
     # 2. Generated config.h matches the MD5 pinned in both contracts;
     # byte-compare against the git-ignored ref when it exists.
-    gen = os.path.join(ROOT, GENERATED_CONFIG)
+    gen = artifact_path(prefix, GENERATED_CONFIG)
     ref = os.path.join(ROOT, REFERENCE_CONFIG)
     if not os.path.exists(gen):
         record("config.h-md5", f"MD5 {EXPECTED_CONFIG_MD5}",
@@ -303,8 +331,8 @@ def main():
             record("archive-objects", f"exactly {EXPECTED_OBJECTS} contract objects",
                    f"doc parse gave {len(doc_files)} files/{len(expected)} names", False)
         else:
-            path_b1 = os.path.join(ROOT, ARCHIVE_B1)
-            path_b2 = os.path.join(ROOT, ARCHIVE_B2)
+            path_b1 = artifact_path(prefix, ARCHIVE_B1)
+            path_b2 = artifact_path(prefix, ARCHIVE_B2)
             archive, kind = select_archive(path_b1, path_b2)
             if kind == "missing":
                 record("archive-objects", f"exactly {EXPECTED_OBJECTS} contract objects + only __.SYMDEF",
@@ -362,7 +390,7 @@ def main():
             f.write("/* fake header: libs intentionally absent */\n")
         by_name["missing-icu-libs"]["args"] = [f"-Dicu-include={fake_icu}"]
         for case in FAIL_CASES:
-            cmd = ZIG + ["build"] + case["args"]
+            cmd = ZIG + ["build"] + build_args + case["args"]
             rc, out, dt = run(cmd, FAIL_TIMEOUT)
             log(f"$ {' '.join(cmd)} -> exit {rc} in {dt:.1f}s")
             for line in out.splitlines():
@@ -392,6 +420,7 @@ def main():
     failed = sum(1 for r in results if not r[3])
     log(f"SUMMARY: {len(results) - failed}/{len(results)} PASS"
         + (f", {failed} FAIL" if failed else ""))
+    log("verify_b1: " + ("FAIL" if failed else "PASS"))
     try:
         with open(log_path, "w") as f:
             f.write("\n".join(log_lines) + "\n")

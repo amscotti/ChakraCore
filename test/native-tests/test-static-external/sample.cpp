@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 
@@ -70,7 +71,9 @@ JsValueRef createWithProto(JsValueRef callee, bool isConstructCall,
     {
         size_t * mem = (size_t*)buffer;
         if(!(mem[122] - mem[0] == 41976)) abort();
-        delete mem;
+        // Host-owned size_t[123], transferred on successful object creation.
+        // Runtime disposal invokes this finalizer; pair the original new[].
+        delete[] mem;
 
         // test tool needs to see `SUCCESS` to determine if script was
         // successful. So far the test printed `SU`,

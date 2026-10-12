@@ -30,13 +30,21 @@ python3 tools/build-contract/verify_b1.py          # full run (exit 0)
 python3 tools/build-contract/verify_b1.py --log PATH  # alternate log path
 ```
 
-The script wipes `.zig-cache/zig-out`, runs `mise exec -- zig build`,
+The current script uses a fresh private `--cache-dir` and `--prefix`,
+runs `mise exec -- zig build`,
 asserts the generated `config.h` MD5 against the value pinned in both
 contracts (`855152b0a1b6da1d8abfef52e1f45f4e`) and byte-compares with
 `cmp` against the git-ignored `build-zigpilot` reference when it exists
 (otherwise it logs `ref absent — MD5-only` and passes on MD5 alone),
 lists members with `ar t`, and runs the fail-clearly subset, each as an
 exact recorded command (see the log).
+
+The historical 15/15 result includes the optional CMake-reference comparison.
+A clean checkout without `build-zigpilot/` has **14 required checks**; CI now
+consumes the explicit `verify_b1: PASS` verdict and records the actual tally.
+The verifier's private outputs also close the live-cache wipe race recorded
+during B3. See [the B1-B3 review receipt](b1-b3-review.md) for the fixes and
+re-exercised coverage.
 
 ## Results
 

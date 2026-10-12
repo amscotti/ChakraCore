@@ -10,6 +10,11 @@ are unchanged), cross-checked against the `build-legacy-debug/` and
 
 Profiles:
 
+**Review update (2026-10-12):** [the B1-B3 review receipt](b1-b3-review.md)
+records corrections to the verification gates, including the clean-CI B1
+tally, private B1 cache/install outputs, interrupted-check cleanup and static
+native assertions. The original execution evidence below remains historical.
+
 | Zig `-Dprofile` | CMake build type | Library | ch link | dylib |
 |---|---|---|---|---|
 | `test` (default, inherited from B2) | `RelWithDebInfo` | shared | 8 TUs + 3 singular archives + ICU | yes |
@@ -978,7 +983,7 @@ Jobs (matrix legs run on SEPARATE runners — §11.3):
 | Job | Steps | Tally (job output + artifact) |
 |---|---|---|
 | `zig` × test/debug-static/release-shared | setup anchors → `ci_record inputs` → `zig build` → `ci_record manifest` → `zig build check` → `zig build check-selftest` → tally greps | `test: regression=1959/0 …`, `debug-static: regression=2011/0 …`, `release-shared: hello=PASS …` |
-| `b1-contract` | setup → `ci_record inputs` → `verify_b1.py --log` → tally | `b1-contract: 15/15 PASS` |
+| `b1-contract` | setup → `ci_record inputs` → `verify_b1.py --log` → tally | `b1-contract: 14/14 PASS` in a clean checkout; optional reference comparison adds a 15th check |
 | `legacy-test` | setup (no zig) → legacy inputs → cmake configure (F0 recipe) → `ninja` → `ninja check` → tally | `legacy-test: regression=1959/0 …` |
 | `incremental` | setup → `test_incremental.py --quick` (or full on dispatch) → tally | `incremental(quick): 0 FAIL` |
 | `record` | `needs` all four → download all artifacts → assemble `b3-evidence/` (`SUMMARY.md`, tallies, inputs, manifests) → upload | the bundle |
@@ -1060,7 +1065,13 @@ tools/build/test_incremental.py`). If full-on-dispatch
 goes stale from disuse, that is visible (no runs) —
 unlike a silently-skipped local gate.
 
-### 11.3 verify_b1 live-tree wipe race (§9.7): DOCUMENTED, not fixed
+### 11.3 verify_b1 live-tree wipe race (§9.7): CLOSED (2026-10-12 review)
+
+**Superseded by the 2026-10-12 review:** `verify_b1.py` now builds into its
+own temporary cache/install prefix, with child-process cleanup before those
+directories are released. It does not wipe the live `.zig-cache/zig-out`.
+A complete 15/15 run and a concurrent debug-static metadata check passed.
+The account below describes the original B3 implementation and decision.
 
 The race: `verify_b1.py` starts by wiping the live
 `.zig-cache/` and `zig-out/` and rebuilding (§9.7:
@@ -1357,9 +1368,8 @@ never touched the repo (sim wrote to `/tmp`).
   (`.gitignore` outside B3.5's scope) — a future
   step with it in scope should add it beside the
   `/out/` precedent.
-- Scratch-tree `verify_b1.py` (the real §11.3 race
-  fix) stays a B4+ candidate; same-profile
-  concurrency stays excluded.
+- The B1 live-tree wipe race is closed by private cache/install outputs
+  (2026-10-12 review); same-profile installation concurrency stays excluded.
 - Action SHA pins are dependabot territory (floating
   majors documented in §11.1).
 - Full-on-dispatch staleness watch: visible as "no

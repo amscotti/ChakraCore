@@ -3,7 +3,8 @@
 > Status: F0–B3 verified — three Mac profiles green, incremental proofs,
 > CI recipe validated (CONDITIONAL on the first green post-merge Actions run);
 > **B4 is the next work item**. Engine/legacy-build references use baseline
-> `97e68c917`; execution evidence is recorded through 2026-10-10 local time.
+> `97e68c917`; execution evidence and the [B1-B3 review](b1-b3-review.md)
+> are recorded through 2026-10-12 local time.
 > This is a staged roadmap for a small maintained fork, not a dated delivery promise.
 
 ## Read this first

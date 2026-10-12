@@ -229,6 +229,13 @@ Source: `ch.stack_size` / `gs.stack_size = 8 * 1024 * 1024`
 
 ## verify-bytecode purity
 
+**Review update (2026-10-12):** the current wrapper copies the regeneration
+script and its `InJavascript/` inputs into a private scratch tree, using the
+built shell through an absolute `--binary` path. It never rewrites source
+headers, including on interruption. The backup/restore implementation and
+outputs below are the historical B2 receipt; the current failure-path coverage
+is in [the B1-B3 review receipt](b1-b3-review.md).
+
 `regenByteCode.py --verify` REWRITES the checked-in headers even on
 success (observed pre-fix: green run, identical md5s, both nojit-header
 mtimes bumped) and self-heals red-to-green (observed on a `/tmp`

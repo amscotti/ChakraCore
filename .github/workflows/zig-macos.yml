@@ -5,7 +5,8 @@
 #
 #   - each declared profile (test, debug-static, release-shared) builds from
 #     a clean tree and passes its matching `zig build check` + check-selftest;
-#   - the B1 configuration contract stays 15/15;
+#   - all 14 required B1 configuration checks pass (the optional local
+#     CMake-reference comparison adds a 15th check when available);
 #   - the equivalent legacy cmake leg (F0 recipe: RelWithDebInfo, shared,
 #     no-JIT, system ICU) will stay green at 1959/0;
 #   - every run records its inputs (zig version + full `zig env`, target,
@@ -33,9 +34,9 @@
 #     RECORDS versions but pins none of them — only icu4c is brew-installed
 #     (the B1 gate fails clearly when its header/lib are absent).
 #   - Matrix, not one sequential job: the four build jobs run on separate
-#     runners, which is also what makes the verify_b1.py live-tree wipe race
-#     (doc/b3-profiles.md section 9.7/11.3) structurally impossible in CI —
-#     no two writers ever share a tree. Locally the rule stays sequential.
+#     runners for speed. There is no shared-tree hazard: verify_b1.py builds
+#     in a private cache/prefix and never wipes the live tree
+#     (doc/b3-profiles.md section 9.7/11.3). Locally the rule stays sequential.
 #   - `--prefix` appears NOWHERE below: only the test profile honors it
 #     (B3.4 fixed side prefixes for the rest — build.zig cannot read --prefix
 #     in Zig 0.17, so any --prefix contract for non-test profiles would be
@@ -220,7 +221,7 @@ jobs:
           path: ci-evidence/
 
   b1-contract:
-    name: B1 contract (verify_b1.py 15/15)
+    name: B1 contract (verify_b1.py)
     runs-on: macos-26
     timeout-minutes: 60
     outputs:
@@ -238,7 +239,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 tools/build/ci_record.py inputs --profile test --out ci-evidence
-      - name: verify_b1.py (wipes its own runner-local tree only)
+      - name: verify_b1.py (private cache/prefix; live tree untouched)
         run: |
           set -euo pipefail
           python3 tools/build-contract/verify_b1.py --log ci-evidence/verify_b1.log
@@ -246,8 +247,9 @@ jobs:
         id: tally
         run: |
           set -euo pipefail
-          grep -E 'SUMMARY: 15/15 PASS' ci-evidence/verify_b1.log
-          line="b1-contract: 15/15 PASS"
+          grep -Fx 'verify_b1: PASS' ci-evidence/verify_b1.log
+          summary="$(grep -E '^SUMMARY: [0-9]+/[0-9]+ PASS$' ci-evidence/verify_b1.log)"
+          line="b1-contract: ${summary#SUMMARY: }"
           echo "$line" | tee ci-evidence/tally.txt
           echo "tally=$line" >> "$GITHUB_OUTPUT"
           echo "- $line" >> "$GITHUB_STEP_SUMMARY"

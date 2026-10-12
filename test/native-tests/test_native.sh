@@ -1,7 +1,7 @@
 #!/bin/bash
 #-------------------------------------------------------------------------------------------------------
 # Copyright (C) Microsoft. All rights reserved.
-# Copyright (c) 2021 ChakraCore Project Contributors. All rights reserved.
+# Copyright (c) ChakraCore Project Contributors. All rights reserved.
 # Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 #-------------------------------------------------------------------------------------------------------
 
@@ -47,7 +47,14 @@ RUN () {
         echo "Ignoring $TEST_PATH"
     else
         SAFE_RUN "cd $TEST_PATH && make CC=${CC} CXX=${CXX}"
-        RES=$(cd $TEST_PATH; ./sample.o)
+        RES=$(cd "$TEST_PATH" && ./sample.o)
+        local sample_status=$?
+        if [[ $sample_status != 0 ]]; then
+            echo "${TEST_PATH} FAILED"
+            echo "sample.o exited ${sample_status}"
+            echo -e "$RES"
+            exit 1
+        fi
         TEST "SUCCESS"
         SAFE_RUN "cd $TEST_PATH && rm -rf ./sample.o"
     fi

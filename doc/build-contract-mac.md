@@ -1137,4 +1137,3 @@ etc.), resolves them against the group directories plus
 No further uncertainties beyond U1–U2: every other value in this contract
 is cited to a repo source line and, for membership/flags/links, confirmed
 in the reference evidence with zero diffs.
-

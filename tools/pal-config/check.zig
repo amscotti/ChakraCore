@@ -132,7 +132,9 @@ fn compileAndMaybeRun(ctx: *Ctx, c: contract.Check, src: []const u8, tag: []cons
     if (c.params != .run_werror) argv.append(alloc, "-D_FILE_OFFSET_BITS=64") catch @panic("OOM");
     argv.appendSlice(alloc, &.{
         if (isCxx(c)) "-std=gnu++17" else "-std=gnu99",
-        "-O0",         "-isystem", sdk_isystem,
+        "-O0",
+        "-isystem",
+        sdk_isystem,
     }) catch @panic("OOM");
     var extra_flag: ?[]u8 = null;
     defer if (extra_flag) |f| alloc.free(f);
@@ -190,6 +192,10 @@ fn compileAndMaybeRun(ctx: *Ctx, c: contract.Check, src: []const u8, tag: []cons
     }
     var run = std.process.spawn(io, .{
         .argv = &.{exe_path},
+        // Relative filesystem probes must not inspect or write the checkout.
+        // Each configuration owns this fresh directory (including concurrent
+        // profile builds), so "a_nonexistent_file" is really nonexistent.
+        .cwd = .{ .path = ctx.tmpdir },
         .stdin = .ignore,
         .stdout = .ignore,
         .stderr = .ignore,
@@ -359,6 +365,7 @@ pub fn generate(opt: Options) Output {
 
     std.debug.print("pal-config: {d}/{d} checks match the contract ({d} fixed-by-target, {d} compile-checked, {d} runtime-verified) [profile {s}]\n", .{ contract.checks.len, contract.checks.len, contract.num_fixed_by_target, contract.num_compile_checked, contract.num_runtime_verified, opt.profile });
     if (std.Io.Dir.openDirAbsolute(opt.io, "/tmp", .{})) |parent| {
+        defer parent.close(opt.io);
         parent.deleteTree(opt.io, tmpdir["/tmp/".len..]) catch {};
     } else |_| {}
     alloc.free(tmpdir);

@@ -63,6 +63,10 @@ import shutil
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import common
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 ZIG = ["mise", "exec", "--", "zig"]
@@ -117,12 +121,13 @@ def log(text=""):
 def run(cmd, timeout, cwd=ROOT):
     t0 = time.time()
     try:
-        p = subprocess.run(cmd, cwd=cwd, stdout=subprocess.PIPE,
-                           stderr=subprocess.STDOUT, text=True,
-                           timeout=timeout)
-        return p.returncode, p.stdout, time.time() - t0
+        rc, out, _ = common.run_capture(cmd, timeout=timeout, cwd=cwd,
+                                        merge_stderr=True)
+        return rc, out, time.time() - t0
     except subprocess.TimeoutExpired as e:
-        out = e.stdout if isinstance(e.stdout, str) else ""
+        out = e.stdout or ""
+        if isinstance(out, bytes):
+            out = out.decode(errors="replace")
         return None, out + "\n[TIMEOUT after %ds]" % timeout, time.time() - t0
 
 
@@ -243,7 +248,10 @@ class touched:
     def __exit__(self, *exc):
         write_bytes(self.rel, self.orig)
         os.utime(os.path.join(ROOT, self.rel), ns=self.times)
-        return read_bytes(self.rel) == self.orig
+        if read_bytes(self.rel) != self.orig:
+            raise RuntimeError("failed to restore %s" % self.rel)
+        # A successful restore must not suppress a failed build/assertion.
+        return False
 
 
 def build_green(profile, out, rc, what):
@@ -486,26 +494,14 @@ def t_selection():
 def t_concurrent():
     log("== concurrent: test + debug-static no-ops simultaneously ==")
     t0 = time.time()
-    procs = [subprocess.Popen(ZIG + ["build"] + (["-Dprofile=%s" % p]
-                              if p != "test" else []),
-                              cwd=ROOT, stdout=subprocess.PIPE,
-                              stderr=subprocess.STDOUT, text=True)
-             for p in ("test", "debug-static")]
-    outs = []
-    rcs = []
-    for proc in procs:
-        try:
-            out, _ = proc.communicate(timeout=BUILD_TIMEOUT)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            out, _ = proc.communicate()
-            outs.append(out + "\n[TIMEOUT]")
-            rcs.append(None)
-            continue
-        outs.append(out)
-        rcs.append(proc.returncode)
+    profiles = ("test", "debug-static")
+    # Both helpers own their complete process group and start their timeout
+    # when launched, not after the other profile has finished.
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(zig_build, profile) for profile in profiles]
+        results = [future.result() for future in futures]
     dt = time.time() - t0
-    for p, rc, out in zip(("test", "debug-static"), rcs, outs):
+    for p, (rc, out, _) in zip(profiles, results):
         if rc != 0:
             log("--- tail of failed concurrent %s ---" % p)
             log("\n".join(out.splitlines()[-15:]))

@@ -2,8 +2,8 @@
 // Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
-//! B2.2/B2.3: full Mac compile+link graph — all 24 source groups, static
-//! archive(s), libChakraCore.dylib, dynamic ch, GCStress, staged headers —
+//! B2.2/B2.3: full Mac compile+link graph - all 24 source groups, static
+//! archive(s), libChakraCore.dylib, dynamic ch, GCStress, staged headers -
 //! plus the B2.3 `check` aggregation (regression, bytecode, native
 //! embedding, smoke, metadata) and `check-selftest` negative controls.
 //!
@@ -30,18 +30,18 @@
 //! (pilot findings), doc/modernization-plan.md sections B2-B3/2.3 (Zig API facts).
 //!
 //! Link-order note: Zig 0.17's Mach-O linker lays out input objects (and hence
-//! C++ static initializers) sorted lexicographically by object basename —
+//! C++ static initializers) sorted lexicographically by object basename -
 //! input order is ignored (proven by sorted/renamed-object probes). ChakraCore
 //! relies on reference link order for initializer sequencing on Mach-O (its
 //! INIT_PRIORITY attributes are flat there), so every TU compiles to a
 //! zero-padded `NNNN-<base>.o` whose lexicographic order reproduces the
 //! reference link order with two known deviations (see numbering site):
 //! ChakraCoreStatic.cpp.o is numbered first-in-static while the reference
-//! archives it last (static-link idx 522/523 — immaterial: the TU is a dummy
+//! archives it last (static-link idx 522/523 - immaterial: the TU is a dummy
 //! `void EMPTY_FUNCTION(){}` with no initializers), and the PAL section
 //! differs (reference: 18 cruntime C++, 21 safecrt C, 47 C++ debug..threadsusp,
 //! mach pair, 3 asm; ours: mach pair moved first, 65 C++ in
-//! reference-relative order, 21 C, 3 asm — no dynamic initializers
+//! reference-relative order, 21 C, 3 asm - no dynamic initializers
 //! in C/asm by construction; mach pair only constant-initialized POD statics).
 //! One global numbering serves all links: ch objects, GCStress objects, dylib
 //! objects, then the static archive members. The PAL deviation is
@@ -73,13 +73,13 @@ fn gateToolchain() void {
 }
 
 fn gateTarget(b: *std.Build) std.Build.ResolvedTarget {
-    const rt = b.standardTargetOptions(.{.default_target = .{
+    const rt = b.standardTargetOptions(.{ .default_target = .{
         .cpu_arch = .aarch64,
         .cpu_model = .{ .explicit = &std.Target.aarch64.cpu.apple_m1 },
         .os_tag = .macos,
         .os_version_min = .{ .semver = .{ .major = 26, .minor = 0, .patch = 0 } },
         .abi = .none,
-    }});
+    } });
     // Note: an unparseable -Dtarget does NOT fail here. standardTargetOptions
     // marks the input invalid but returns the default query, so the 95 probes
     // below still run; Zig's deferred option validation then fails the build
@@ -99,6 +99,8 @@ fn gateTarget(b: *std.Build) std.Build.ResolvedTarget {
         fail("unsupported OS {t}: this profile builds only aarch64-macos.26.0", .{t.os.tag});
     if (t.abi != .none)
         fail("unsupported ABI {t}: this profile builds only the default macOS ABI (none)", .{t.abi});
+    if (t.ofmt != .macho)
+        fail("unsupported object format {t}: this profile builds only Mach-O", .{t.ofmt});
     if (!std.mem.eql(u8, t.cpu.model.name, "apple_m1"))
         fail("unsupported CPU model {s}: this profile builds only apple_m1 (the aarch64-macos baseline)", .{t.cpu.model.name});
     const min = t.os.version_range.semver.min;
@@ -170,6 +172,8 @@ fn gateSdk(b: *std.Build) []const u8 {
         fail("cannot read {s}: SDK version unverifiable (need MacOSX SDK {s})", .{ settings_path, profile_sdk_version });
     const parsed = std.json.parseFromSlice(std.json.Value, arena, bytes, .{}) catch
         fail("cannot parse {s}: SDK version unverifiable (need MacOSX SDK {s})", .{ settings_path, profile_sdk_version });
+    if (parsed.value != .object)
+        fail("{s}: SDKSettings.json root must be an object (need MacOSX SDK {s})", .{ settings_path, profile_sdk_version });
     const version_value = parsed.value.object.get("Version") orelse
         fail("{s} has no Version key: SDK version unverifiable (need MacOSX SDK {s})", .{ settings_path, profile_sdk_version });
     const sdk_version = switch (version_value) {
@@ -217,7 +221,7 @@ const Lang = enum { cxx, c, asm_ };
 // pass the absolute SDK -F/-L paths (the pilot's sysroot-relative -F
 // /System/Library/Frameworks and -L /usr/lib, doc/build.md section 14).
 // Known deviation: linked binaries stamp LC_BUILD_VERSION sdk 27.0 (otool)
-// while the gate pins MacOSX SDK 26.5 — with no sysroot knob the stamp comes
+// while the gate pins MacOSX SDK 26.5 - with no sysroot knob the stamp comes
 // from the toolchain default; minos 26.0 holds. The reference stamps 27.0
 // too, so this matches the reference.
 fn addSdkLinkPaths(ctx: *const Ctx, mod: *std.Build.Module) void {
@@ -241,7 +245,7 @@ fn createLinkModule(ctx: *const Ctx) *std.Build.Module {
 // NOTHING natively and instead copy out to fixed `out/<profile>/`
 // side prefixes via tools/build/install_profile.py. build.zig cannot
 // read --prefix in 0.17 (no such field on Build/Graph in the shipped
-// std), so fixed destinations are the only enforceable isolation —
+// std), so fixed destinations are the only enforceable isolation -
 // and the mechanism needs no enforcement: every destination is a pure
 // function of -Dprofile, so no invocation can cross the streams.
 
@@ -289,7 +293,7 @@ fn appendTuFlags(ctx: *const Ctx, run: *std.Build.Step.Run, g: *const tables.Gro
             // explicit -g0: `zig c++` emits DWARF unless told
             // otherwise (probed: -O3 -DNDEBUG alone still ships 4
             // __debug sections), while legacy AppleClang defaults
-            // to none — a driver-default correction in the same
+            // to none - a driver-default correction in the same
             // category as -UNDEBUG/-fno-sanitize below.
             switch (ctx.profile) {
                 .@"test" => for ([_][]const u8{ "-O3", "-g" }) |f| run.addArg(f),
@@ -309,7 +313,7 @@ fn appendTuFlags(ctx: *const Ctx, run: *std.Build.Step.Run, g: *const tables.Gro
             // Build-required additions: the SDK C++ headers
             // (-isystem, absolute) and SDK frameworks (-F, sysroot-
             // relative: the driver resolves -F against --sysroot, so an
-            // absolute -F would double the prefix — pilot finding), the
+            // absolute -F would double the prefix - pilot finding), the
             // pinned apple_m1 CPU, and -Wno-date-time (zig clang 22
             // promotes __DATE__/__TIME__; pilot finding). The c++ driver
             // injects no NDEBUG, matching the reference C++ (contract
@@ -335,7 +339,7 @@ fn appendTuFlags(ctx: *const Ctx, run: *std.Build.Step.Run, g: *const tables.Gro
             // C++ RelWithDebInfo variant): test -O2 -g -DNDEBUG, Debug -g,
             // Release -O3 -DNDEBUG. Same builtins cover ASM. Release
             // takes an explicit -g0 (`zig cc` emits DWARF unless told
-            // otherwise — same driver-default correction as C++ above).
+            // otherwise - same driver-default correction as C++ above).
             const opt_flag: ?[]const u8 = switch (ctx.profile) {
                 .@"test" => "-O2",
                 .debug_static => null,
@@ -356,7 +360,7 @@ fn appendTuFlags(ctx: *const Ctx, run: *std.Build.Step.Run, g: *const tables.Gro
             run.addArg("-F");
             run.addArg("/System/Library/Frameworks");
             run.addArg("-mcpu=apple_m1");
-            // Same UBSan default-correction as C++ (see above), C only —
+            // Same UBSan default-correction as C++ (see above), C only -
             // assembler lines take no sanitizer flags.
             if (lang == .c and ctx.profile == .debug_static) run.addArg("-fno-sanitize=undefined");
             run.addArg("-Wno-date-time");
@@ -463,11 +467,11 @@ pub fn build(b: *std.Build) void {
     // header to this step's declared output. Inputs (jstoc.py,
     // DbgController.js, the wrapper) and the header are all tracked. A
     // no-op rebuild changes no artifact bytes (zero hash delta;
-    // regular-file mtimes untouched) — but it still runs the configure
+    // regular-file mtimes untouched) - but it still runs the configure
     // phase (all gates plus the 95 pal-config probes) and re-creates
     // the two versioned-dylib symlinks (same targets, fresh mtimes).
     // Touching the JS re-runs the generator and recompiles all 8 ch
-    // TUs via addFileInput — required-correct, not just conservative:
+    // TUs via addFileInput - required-correct, not just conservative:
     // every ch TU includes stdafx.h -> Debugger.h ->
     // DbgController.js.h (only Debugger.cpp names the controllerScript
     // variable itself).
@@ -497,14 +501,14 @@ pub fn build(b: *std.Build) void {
     };
 
     // Compile every TU once, numbered in reference link order: ch objects,
-    // GCStress objects, dylib objects (shared profiles only — static
+    // GCStress objects, dylib objects (shared profiles only - static
     // builds never add bin/ChakraCore, bin/CMakeLists.txt:8-10), then the
     // static archive members (ChakraCoreStatic.cpp plus the 20 OBJECT
     // groups in TARGET_OBJECTS order). Static ch compiles TestHooks.cpp
     // as a 9th TU (bin/ch/CMakeLists.txt:19-23). Each link consumes its
     // own subsequence; relative order is the reference order in every
     // link, modulo the two deviations in the file doc comment
-    // (ChakraCoreStatic.cpp.o first vs ar-last; PAL section layout —
+    // (ChakraCoreStatic.cpp.o first vs ar-last; PAL section layout -
     // dispositioned in doc/b2-verification.md: the reordered inputs
     // carry no dynamic initializers).
     const is_static = profile.isStatic();
@@ -534,7 +538,7 @@ pub fn build(b: *std.Build) void {
     }
     var static_objs: std.ArrayList(std.Build.LazyPath) = .empty;
     // Singular archives for ch (contract section 5.3), one per group whose
-    // Group.singular_name is set — a single loop, in object_groups order
+    // Group.singular_name is set - a single loop, in object_groups order
     // (Pal, Codex, PlatformAgnostic), driving creation, ch linkage, and
     // install below.
     var singular_libs: std.ArrayList(*std.Build.Step.Compile) = .empty;
@@ -578,7 +582,7 @@ pub fn build(b: *std.Build) void {
 
     const icu_lib = b.fmt("{s}/../lib", .{icu_include});
     // libChakraCore.dylib (contract section 5.6, shared profiles only):
-    // 3 objects plus every engine TU linked directly — the equivalent
+    // 3 objects plus every engine TU linked directly - the equivalent
     // of the reference -force_load of the static archive (Zig's Mach-O
     // linker has no force-load spelling; the pilot joins the flag
     // instead, doc/build.md section 14). ICU via -L + -l; pthread/dl
@@ -597,7 +601,7 @@ pub fn build(b: *std.Build) void {
         // .version 1.0.0: otool confirms LC_ID_DYLIB current 1.0.0 /
         // compatibility 1.0.0 on both our dylib and the reference
         // build-zigpilot/libChakraCore.dylib (minos 26.0 both sides). The
-        // reference CMake sets no VERSION/SOVERSION — 1.0.0 is the toolchain
+        // reference CMake sets no VERSION/SOVERSION - 1.0.0 is the toolchain
         // default on both sides, so the values coincide. Keep.
         const lib = b.addLibrary(.{
             .name = "ChakraCore",
@@ -614,7 +618,7 @@ pub fn build(b: *std.Build) void {
     // the 3 singular archives plus ICU, with no link-time dependency on
     // the dylib (loaded at runtime from the executable's own directory);
     // static profiles link 9 objects (TestHooks in ch) plus every engine
-    // TU directly — the -force_load equivalent, same join as the dylib.
+    // TU directly - the -force_load equivalent, same join as the dylib.
     const ch_mod = createLinkModule(&ctx);
     for (ch_objs.items) |o| ch_mod.addObjectFile(o);
     addSdkLinkPaths(&ctx, ch_mod);
@@ -638,7 +642,7 @@ pub fn build(b: *std.Build) void {
     ch.forceUndefinedSymbol("_OnChakraCoreLoadedEntry");
     ch.headerpad_max_install_names = true;
     // LC_MAIN stacksize (U-B3.1-2): macOS makes RLIMIT_STACK immutable
-    // once LC_MAIN stacksize is nonzero — Apple-clang probes show EVERY
+    // once LC_MAIN stacksize is nonzero - Apple-clang probes show EVERY
     // setrlimit(RLIMIT_STACK) fails EINVAL (even a no-op set to the
     // current value), while stacksize 0 allows any set. PAL_Initialize
     // (pal/src/init/pal.cpp:140-155) lowers the inherited soft limit
@@ -646,7 +650,7 @@ pub fn build(b: *std.Build) void {
     // aborts any Debug ch linked with a nonzero stacksize, while
     // non-Debug builds fail the call silently and run fine. Legacy
     // links stacksize 0 on both executables, so debug-static sets an
-    // explicit 0 (Zig's default would be 16MB — null is NOT zero);
+    // explicit 0 (Zig's default would be 16MB - null is NOT zero);
     // test/release keep the B2 8MB contract (silent-failure path).
     ch.stack_size = if (profile == .debug_static) 0 else 8 * 1024 * 1024;
     ch.step.dependOn(&jstoc.step);
@@ -677,7 +681,7 @@ pub fn build(b: *std.Build) void {
         if (dylib) |lib| b.installArtifact(lib);
         b.installArtifact(static_lib);
         for (singular_libs.items) |lib| b.installArtifact(lib);
-        // Co-location edge (contract §5.6–5.7, shared profiles only): the
+        // Co-location edge (contract sections 5.6-5.7, shared profiles only): the
         // reference POST_BUILD copies both ch and libChakraCore.dylib to the
         // build root so the loader finds the dylib beside the executable
         // (ChakraRtInterface resolves <exe-dir>/libChakraCore.dylib); mirror
@@ -767,12 +771,18 @@ pub fn build(b: *std.Build) void {
         st.stdio = .inherit;
         selftest_top.dependOn(&st.step);
     }
+    const tools_test = b.addSystemCommand(&.{python});
+    tools_test.addFileArg(b.path("tools/build/test_build_tools.py"));
+    tools_test.stdio = .inherit;
+    selftest_top.dependOn(&tools_test.step);
+    const tools_test_top = b.step("check-build-tools", "Failure-path tests for the B1-B3 verification tools (no engine build required)");
+    tools_test_top.dependOn(&tools_test.step);
 
     // B3.3: release-shared checks (legacy baselines in
-    // doc/b3-profiles.md §5). The legacy Release `ninja check` is a
+    // doc/b3-profiles.md section 5). The legacy Release `ninja check` is a
     // SMOKE GATE, not the full suite (test/CMakeLists.txt:23-45):
     // smoke-check (ch hello.js) plus native-check, and nothing
-    // else — no regression leg, no bytecode leg. The zig release
+    // else - no regression leg, no bytecode leg. The zig release
     // check mirrors that scope EXACTLY: output-asserted smoke (ch
     // -v, the Release-silent invalid flag, snippet, hello.js),
     // shared embedding with the legacy-exact Release argv, and
@@ -834,16 +844,16 @@ pub fn build(b: *std.Build) void {
 
         // No regression/bytecode legs: the legacy Release check has
         // neither (test/CMakeLists.txt:23-45), so neither does this
-        // profile — loud failures, not silent skips.
+        // profile - loud failures, not silent skips.
         const no_regression = b.addSystemCommand(&.{python});
         no_regression.addArg("-c");
-        no_regression.addArg("import sys; sys.exit('-Dprofile=release-shared: no regression leg — the legacy Release check is a smoke gate only (test/CMakeLists.txt:23-45), not the full suite')");
+        no_regression.addArg("import sys; sys.exit('-Dprofile=release-shared: no regression leg - the legacy Release check is a smoke gate only (test/CMakeLists.txt:23-45), not the full suite')");
         no_regression.stdio = .inherit;
         const no_regression_top = b.step("check-regression", "Not applicable: legacy Release check has no regression leg (smoke gate only)");
         no_regression_top.dependOn(&no_regression.step);
         const no_verify_bc = b.addSystemCommand(&.{python});
         no_verify_bc.addArg("-c");
-        no_verify_bc.addArg("import sys; sys.exit('-Dprofile=release-shared: no bytecode leg — the legacy Release check has no bytecode-check (test/CMakeLists.txt:23-45)')");
+        no_verify_bc.addArg("import sys; sys.exit('-Dprofile=release-shared: no bytecode leg - the legacy Release check has no bytecode-check (test/CMakeLists.txt:23-45)')");
         no_verify_bc.stdio = .inherit;
         const no_verify_bc_top = b.step("verify-bytecode", "Not applicable: legacy Release check has no bytecode leg");
         no_verify_bc_top.dependOn(&no_verify_bc.step);
@@ -851,13 +861,13 @@ pub fn build(b: *std.Build) void {
     }
 
     // B3.2: debug-static checks (legacy baselines in
-    // doc/b3-profiles.md §5). Same five gates as test, with the
+    // doc/b3-profiles.md section 5). Same five gates as test, with the
     // debug/static expectations: `--debug` regression (2011/0),
     // bytecode --noJit --verify, 8 EXECUTED static native tests
     // (PASS requires build+run to SUCCESS, plus archive-symbol and
     // Makefile linkage evidence), output-asserted smoke, and
-    // static-aware metadata (minos 26.0, LC_MAIN stacksize 0 — the
-    // U-B3.1-2 pin — headers, no dylib, 524-member archive with JsRT
+    // static-aware metadata (minos 26.0, LC_MAIN stacksize 0 - the
+    // U-B3.1-2 pin - headers, no dylib, 524-member archive with JsRT
     // symbols, self-contained ch). B3.4 paths: plain out/debug-static
     // strings (the side prefix is fixed, not --prefix-relative); each
     // step depends on the copy-out (ordering) and fingerprints the
@@ -947,7 +957,7 @@ pub fn build(b: *std.Build) void {
     }
 
     // (2) Bytecode check (contract section 5.10): the build consumes the
-    // CHECKED-IN JsBuiltIn bytecode headers to bootstrap — this check
+    // CHECKED-IN JsBuiltIn bytecode headers to bootstrap - this check
     // step is the ONLY regenByteCode.py reference in the graph, so no
     // build edge regenerates bytecode with the not-yet-built engine
     // (the script gets --binary=<installed ch>, which exists only after
@@ -957,9 +967,9 @@ pub fn build(b: *std.Build) void {
     // Purity: regenByteCode.py --verify REWRITES the checked-in headers
     // even on success (fresh mtimes; on mismatch it leaves the new bytes
     // behind, self-healing red-to-green), so the step runs through
-    // tools/build/verify_bytecode_pure.py, which snapshots the headers,
-    // runs the script, restores every header byte- and mtime-identical,
-    // and exits with the script's verdict.
+    // tools/build/verify_bytecode_pure.py, which runs the script against
+    // a private copy of its inputs and returns its verdict. The checked-in
+    // headers are never overwritten, even temporarily or on interruption.
     const verify_bc = b.addSystemCommand(&.{python});
     verify_bc.addFileArg(b.path("tools/build/verify_bytecode_pure.py"));
     verify_bc.addFileArg(b.path("tools/regenByteCode.py"));
@@ -968,7 +978,7 @@ pub fn build(b: *std.Build) void {
     verify_bc.addPrefixedFileArg("--binary=", .{ .relative = .{ .base = .install_bin, .sub_path = "ch" } });
     verify_bc.step.dependOn(b.getInstallStep());
     verify_bc.stdio = .inherit;
-    const verify_bc_top = b.step("verify-bytecode", "Verify checked-in built-in bytecode with the just-built ch (contract 5.10; pure check, headers restored byte- and mtime-identical; not part of the default build)");
+    const verify_bc_top = b.step("verify-bytecode", "Verify checked-in built-in bytecode with the just-built ch (contract 5.10; pure scratch-tree check; not part of the default build)");
     verify_bc_top.dependOn(&verify_bc.step);
 
     // B2.3 full check aggregation (modernization-plan.md section B2
@@ -987,7 +997,7 @@ pub fn build(b: *std.Build) void {
     const installed_ch: std.Build.LazyPath = .{ .relative = .{ .base = .install_bin, .sub_path = "ch" } };
 
     // (1) Regression suite: runtests.py --test --variants=disable_jit
-    // --binary=<installed ch> — the legacy-exact selection for this
+    // --binary=<installed ch> - the legacy-exact selection for this
     // profile (test/CMakeLists.txt:39-44; no --not-tag since ICU is
     // present). Requires 1959 passed / 0 failed, parsed from the
     // real `Total:` summary line.

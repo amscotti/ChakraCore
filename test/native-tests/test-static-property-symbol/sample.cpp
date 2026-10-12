@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 
@@ -71,16 +72,23 @@ int main()
     if (!hasOwn || !hasObject || fname_copy != fnameString || pdesc == nullptr)
     {
         fprintf(stderr, "JsObject Has/Get/Set etc. Property... failed\n");
+        return 1;
     }
 
-    JsValueRef fname_second_copy;
-    FAIL_CHECK(JsObjectDeleteProperty(object, fname, false, &fname_second_copy));
+    // The result is a runtime-owned Boolean, not the old property value.
+    // Consume it in the current context before runtime disposal.
+    JsValueRef deletion_result;
+    FAIL_CHECK(JsObjectDeleteProperty(object, fname, false, &deletion_result));
 
     FAIL_CHECK(JsObjectHasProperty(object, fname, &hasObject));
 
-    if (hasObject || fname_second_copy != fnameString)
+    bool delete_result = false;
+    FAIL_CHECK(JsBooleanToBool(deletion_result, &delete_result));
+
+    if (hasObject || delete_result == false)
     {
         fprintf(stderr, "JsObjectDeleteProperty failed\n");
+        return 1;
     }
 
     // Run the script.

@@ -23,7 +23,8 @@ zig-out) per the B1/B2 contract; this script never writes there
 Behavior:
 
   * compare-and-copy every --map dest (size, then MD5): unchanged
-    bytes are never rewritten, so a no-op rebuild changes zero
+    bytes are never rewritten; mismatched permissions are repaired
+    without recopying the binary. A no-op rebuild changes zero
     artifact bytes (mtimes untouched too).
   * create/update every --symlink (replaced only when its target
     differs); replicate the native versioned-dylib layout exactly.
@@ -43,6 +44,7 @@ Exit code: 0 iff the prefix holds exactly the managed set.
 import hashlib
 import os
 import shutil
+import stat
 import sys
 
 MANIFEST = ".manifest"
@@ -70,15 +72,22 @@ def safe_rel(value, what):
 
 
 def copy_if_changed(src, dest):
-    """Copy src over dest iff bytes differ; return True when written."""
+    """Repair dest bytes or permissions.
+
+    Return "copied" when bytes were written, "repaired" when only
+    permissions were fixed, None when dest was already identical.
+    """
     if os.path.islink(dest) or not os.path.isfile(dest):
         if os.path.islink(dest) or os.path.exists(dest):
             os.remove(dest)
     elif (os.path.getsize(src) == os.path.getsize(dest)
           and md5_of(src) == md5_of(dest)):
-        return False
+        if stat.S_IMODE(os.stat(src).st_mode) != stat.S_IMODE(os.stat(dest).st_mode):
+            shutil.copymode(src, dest)
+            return "repaired"
+        return None
     shutil.copy2(src, dest)
-    return True
+    return "copied"
 
 
 def symlink_if_changed(target, link):
@@ -139,7 +148,7 @@ def main(argv):
     os.makedirs(dest_abs, exist_ok=True)
 
     managed = []
-    copied = skipped = 0
+    copied = repaired = skipped = 0
     try:
         for m in maps:
             rel, _, src = m.partition("=")
@@ -150,8 +159,11 @@ def main(argv):
             parent = os.path.dirname(out)
             if parent:
                 os.makedirs(parent, exist_ok=True)
-            if copy_if_changed(src, out):
+            result = copy_if_changed(src, out)
+            if result == "copied":
                 copied += 1
+            elif result == "repaired":
+                repaired += 1
             else:
                 skipped += 1
             managed.append(rel)
@@ -226,9 +238,9 @@ def main(argv):
         with open(manifest_path, "w") as f:
             f.write(new_manifest)
 
-    print("install_profile: %s: %d copied, %d unchanged, %d orphans "
-          "removed (%d managed)"
-          % (dest, copied, skipped, removed, len(managed_sorted)))
+    print("install_profile: %s: %d copied, %d repaired, %d unchanged, "
+          "%d orphans removed (%d managed)"
+          % (dest, copied, repaired, skipped, removed, len(managed_sorted)))
     return 0
 
 

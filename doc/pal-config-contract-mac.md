@@ -467,4 +467,3 @@ Open uncertainties:
 - No per-setting value is uncertain: every value is either a source
   line literal/branch or an observed generated value, with the
   surprising mechanisms pinned to log evidence.
-

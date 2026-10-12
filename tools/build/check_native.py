@@ -23,10 +23,12 @@ and the source tree is never written to. Stale generated files
 clean.
 
 Shared mode (default, the B2 test profile) requires: rc 0,
-`test-shared-basic : PASS` in the output, exactly 8
-`Ignoring test-static-...` lines (the 8 static-only suites are skipped
-in a shared build — the legacy baseline behavior), and no failure line
-of the script's exact `<suite> FAILED` form (test_native.sh:34).
+`test-shared-basic : PASS` in the output, one `Ignoring <suite>` line
+for each of the 8 static-only suites (the exact per-suite set is
+required — 8 lines with a wrong or duplicated suite are rejected; the
+suites are skipped in a shared build — the legacy baseline behavior),
+and no failure line of the script's exact `<suite> FAILED` form
+(test_native.sh:34).
 
 Static mode (--static --archive <libChakraCoreStatic.a>) requires: rc
 0, all 8 `test-static-<name> : PASS` lines (each PASS is printed only
@@ -60,6 +62,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections import Counter
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common
@@ -87,10 +90,13 @@ STATIC_REQUIRED_SYMS = (
 )
 # The script's exact failure-line format (`echo "${TEST_PATH} FAILED"`,
 # test_native.sh:34): a bare "FAILED" substring would also match e.g.
-# "XFAILED" notes or compiler chatter mid-line. Note the legacy debug
-# run prints a lowercase "JsObjectDeleteProperty failed" note, which
-# must NOT match this uppercase-anchored form.
+# "XFAILED" notes or compiler chatter mid-line. The formerly tolerated
+# property-test diagnostics are assertion failures, not harmless notes.
 FAILED_RE = re.compile(r"^\S+ FAILED\s*$")
+ASSERTION_FAILURES = frozenset({
+    "JsObjectDeleteProperty failed",
+    "JsObject Has/Get/Set etc. Property... failed",
+})
 
 
 def run_native(sh_path, work_dir, ch, build_type, cc, cxx, repo_root):
@@ -105,13 +111,18 @@ def run_native(sh_path, work_dir, ch, build_type, cc, cxx, repo_root):
 def check_output(text):
     """Return a list of failure strings (empty means green)."""
     failures = []
-    ignores = sum(1 for line in text.splitlines()
-                  if line.startswith("Ignoring test-static-"))
-    if SHARED_PASS not in text:
-        failures.append("missing %r in output" % SHARED_PASS)
-    if ignores != EXPECTED_IGNORES:
-        failures.append("got %d static-test Ignoring lines, require %d"
-                        % (ignores, EXPECTED_IGNORES))
+    lines = Counter(line.strip() for line in text.splitlines())
+    ignores = Counter({line: count for line, count in lines.items()
+                       if line.startswith("Ignoring test-static-")})
+    want_ignores = Counter("Ignoring " + suite for suite in STATIC_SUITES)
+    if lines[SHARED_PASS] != 1:
+        failures.append("got %d exact %r lines, require 1"
+                        % (lines[SHARED_PASS], SHARED_PASS))
+    if ignores != want_ignores:
+        failures.append("static-test ignores differ: got %r, require %r"
+                        % (dict(ignores), dict(want_ignores)))
+    for line in sorted(ASSERTION_FAILURES & lines.keys()):
+        failures.append("native assertion failed: %s" % line)
     failed_lines = [line.strip() for line in text.splitlines()
                     if FAILED_RE.match(line)]
     if failed_lines:
@@ -123,14 +134,22 @@ def check_output(text):
 def check_output_static(text):
     """Return a list of failure strings for static mode (empty: green)."""
     failures = []
+    lines = Counter(line.strip() for line in text.splitlines())
     for suite in STATIC_SUITES:
-        if (suite + " : PASS") not in text:
-            failures.append("missing %r in output" % (suite + " : PASS"))
-    if SHARED_IGNORE not in text:
-        failures.append("missing %r in output" % SHARED_IGNORE)
-    if SHARED_PASS in text:
+        passed = suite + " : PASS"
+        if lines[passed] != 1:
+            failures.append("got %d exact %r lines, require 1"
+                            % (lines[passed], passed))
+        if lines["Ignoring " + suite]:
+            failures.append("%s ignored in a static build" % suite)
+    if lines[SHARED_IGNORE] != 1:
+        failures.append("got %d exact %r lines, require 1"
+                        % (lines[SHARED_IGNORE], SHARED_IGNORE))
+    if lines[SHARED_PASS]:
         failures.append("shared suite ran PASS in a static build (want %r)"
                         % SHARED_IGNORE)
+    for line in sorted(ASSERTION_FAILURES & lines.keys()):
+        failures.append("native assertion failed: %s" % line)
     failed_lines = [line.strip() for line in text.splitlines()
                     if FAILED_RE.match(line)]
     if failed_lines:
@@ -179,25 +198,21 @@ def self_test():
               % (name, "PASS" if nonlocal_bad else "FAIL"))
         return 0 if nonlocal_bad else 1
 
-    good = ("Testing test-static-char\nIgnoring test-static-char\n"
-            "Testing test-shared-basic\ntest-shared-basic : PASS\n")
+    good_ignores = "\n".join("Ignoring " + suite for suite in STATIC_SUITES)
+    good = good_ignores + "\nTesting test-shared-basic\n" + SHARED_PASS + "\n"
     bad += report("8 ignores + PASS accepted",
-                  check_output(good.replace(
-                      "Ignoring test-static-char",
-                      "\n".join("Ignoring test-static-%d" % i
-                                for i in range(8)))) == [])
+                  check_output(good) == [])
     bad += report("missing PASS line rejected",
                   check_output("Ignoring test-static-x\n") != [])
     bad += report("7 ignores rejected",
-                  check_output("\n".join("Ignoring test-static-%d" % i
-                                         for i in range(7))
+                  check_output("\n".join("Ignoring " + suite
+                                         for suite in STATIC_SUITES[:-1])
                                + "\n" + SHARED_PASS + "\n") != [])
     bad += report("FAILED line rejected",
                   check_output(SHARED_PASS + "\nsomething FAILED\n") != [])
     bad += report("exact-format FAILED rejected",
                   check_output(SHARED_PASS + "\ntest-shared-basic FAILED\n"
                                ) != [])
-    good_ignores = "\n".join("Ignoring test-static-%d" % i for i in range(8))
     bad += report("mid-line FAILED substring accepted",
                   check_output(good_ignores + "\n" + SHARED_PASS + "\n"
                                "note: 0 XFAILED suites seen\n") == [])
@@ -207,10 +222,10 @@ def self_test():
                    + SHARED_IGNORE + "\n")
     bad += report("static: 8 PASS + shared ignore accepted",
                   check_output_static(good_static) == [])
-    bad += report("static: lowercase 'failed' note accepted",
+    bad += report("static: property assertion rejected",
                   check_output_static(good_static +
                                       "JsObjectDeleteProperty failed\n")
-                  == [])
+                  != [])
     bad += report("static: 7 PASS rejected",
                   check_output_static("\n".join(
                       s + " : PASS" for s in STATIC_SUITES[:-1]) + "\n"

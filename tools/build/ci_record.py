@@ -44,6 +44,9 @@ import sys
 import tempfile
 from datetime import datetime, timezone
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import common
+
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 ZIG = ["mise", "exec", "--", "zig"]
 TABLES = os.path.join(ROOT, "tools", "build", "tables.zig")
@@ -66,10 +69,9 @@ MINOS = "26.0"
 
 def run(cmd, timeout=120, cwd=ROOT):
     try:
-        p = subprocess.run(cmd, cwd=cwd, stdout=subprocess.PIPE,
-                           stderr=subprocess.STDOUT, text=True,
-                           timeout=timeout)
-        return p.returncode, p.stdout
+        rc, out, _ = common.run_capture(cmd, timeout=timeout, cwd=cwd,
+                                        merge_stderr=True)
+        return rc, out
     except (OSError, subprocess.TimeoutExpired) as e:
         return None, "PROBE-FAILED: %r" % (e,)
 

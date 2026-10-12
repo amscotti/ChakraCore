@@ -1,8 +1,20 @@
 #!/usr/bin/env python3
+#-------------------------------------------------------------------------------------------------------
+# Copyright (c) ChakraCore Project Contributors. All rights reserved.
+# Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+#-------------------------------------------------------------------------------------------------------
 """Validate CMake-enumerated sources for the Mac ARM64 shared/no-JIT
-RelWithDebInfo + ICU-include-path profile against build-zigpilot/compile_commands.json.
-Tiny evaluator for the simple if/elseif/else/endif conditionals in the .txt files."""
-import json, os, re, sys
+RelWithDebInfo + ICU-include-path profile against a compile database and
+the Zig source tables. Any missing, extra or nonexistent source fails.
+
+Tiny evaluator for the simple if/elseif/else/endif conditionals in the .txt files.
+Usage: validate_contract.py [--database PATH] [--tables PATH]
+"""
+import argparse
+import json
+import os
+import re
+import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Profile variable values (truthiness). *_SH vars are unset/absent in direct-CMake configure.
@@ -45,7 +57,7 @@ def eval_cond(expr):
 FILETOK = re.compile(r'[\w][\w\-./]*\.(?:cpp|c|S|gen)\b')
 
 def parse_sources(path):
-    """Return (active_files_in_order, all_seen) honoring conditionals."""
+    """Return active files in listing order, honoring conditionals."""
     with open(path) as f:
         text = f.read()
     # strip full-line and trailing comments (no '#' inside strings in these files)
@@ -110,41 +122,58 @@ GROUPS = {
     'bin/GCStress': 'bin/GCStress/CMakeLists.txt',
 }
 
-cc = json.load(open(os.path.join(ROOT, 'build-zigpilot/compile_commands.json')))
-db_files = set(u['file'] for u in cc)
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--database', default=os.path.join(ROOT, 'build-zigpilot/compile_commands.json'))
+    parser.add_argument('--tables', default=os.path.join(ROOT, 'tools/build/tables.zig'))
+    args = parser.parse_args(argv)
+    try:
+        with open(args.database) as f:
+            cc = json.load(f)
+        db_files = set(os.path.normpath(os.path.join(u.get('directory', ROOT), u['file'])) for u in cc)
+        with open(args.tables) as f:
+            table_text = f.read()
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        print('validate_contract: FAIL: %s' % e, file=sys.stderr)
+        return 1
 
-expected = {}
-for gdir, txt in GROUPS.items():
-    toks = parse_sources(os.path.join(ROOT, txt))
-    # bin/ch static-only TestHooks.cpp uses relative ../ path; STATIC_LIBRARY off so excluded by conditional parse
-    for t in toks:
-        if t.endswith('.gen'):
-            continue
-        ap = os.path.normpath(os.path.join(ROOT, gdir, t))
-        expected.setdefault(ap, []).append(f'{txt}:{t}')
+    expected = {}
+    counts = {}
+    for gdir, txt in GROUPS.items():
+        toks = [t for t in parse_sources(os.path.join(ROOT, txt)) if not t.endswith('.gen')]
+        counts[gdir] = len(toks)
+        # TestHooks.cpp is static-only in ch; shared membership comes from the dylib.
+        for t in toks:
+            ap = os.path.normpath(os.path.join(ROOT, gdir, t))
+            expected.setdefault(ap, []).append(f'{txt}:{t}')
+    expected[os.path.join(ROOT, 'lib/ChakraCoreStatic.cpp')] = ['lib/CMakeLists.txt:22']
+    counts['lib(ChakraCoreStatic.cpp)'] = 1
 
-# lib/ChakraCoreStatic.cpp is listed directly in lib/CMakeLists.txt
-expected[os.path.join(ROOT, 'lib/ChakraCoreStatic.cpp')] = ['lib/CMakeLists.txt:22']
+    # These explicit tables contain quoted repo-relative source paths. Compare
+    # the union: TestHooks.cpp intentionally appears in both profile choices.
+    table_files = set(os.path.normpath(os.path.join(ROOT, src)) for src in
+                      re.findall(r'"((?:pal|lib|bin)/[^"\n]+\.(?:cpp|c|S))"', table_text))
+    missing = sorted(set(expected) - db_files)
+    extra = sorted(db_files - set(expected))
+    nonexistent = sorted(f for f in expected if not os.path.exists(f))
+    table_missing = sorted(set(expected) - table_files)
+    table_extra = sorted(table_files - set(expected))
 
-missing = sorted(set(expected) - db_files)   # in CMake, not compiled
-extra = sorted(db_files - set(expected))     # compiled, not in CMake lists
-nonexistent = [f for f in expected if not os.path.exists(f)]
+    print(f'expected={len(expected)} db={len(db_files)} zig={len(table_files)}')
+    for label, files in [('MISSING from DB', missing), ('EXTRA in DB', extra),
+                         ('NONEXISTENT on disk', nonexistent),
+                         ('MISSING from Zig tables', table_missing),
+                         ('EXTRA in Zig tables', table_extra)]:
+        print(f'{label} ({len(files)}):')
+        for path in files:
+            print('  ', path.replace(ROOT + '/', ''))
+    print('\nper-group counts:')
+    for group, count in counts.items():
+        print(f'  {group}: {count}')
+    failed = any((missing, extra, nonexistent, table_missing, table_extra))
+    print('validate_contract: ' + ('FAIL' if failed else 'PASS'))
+    return 1 if failed else 0
 
-print(f'expected={len(expected)} db={len(db_files)}')
-print(f'MISSING from DB ({len(missing)}):')
-for f in missing:
-    print('  ', f.replace(ROOT + '/', ''), '<-', expected[f])
-print(f'EXTRA in DB ({len(extra)}):')
-for f in extra:
-    print('  ', f.replace(ROOT + '/', ''))
-print(f'NONEXISTENT on disk ({len(nonexistent)}):')
-for f in nonexistent:
-    print('  ', f.replace(ROOT + '/', ''), '<-', expected[f])
 
-# Per-group counts
-from collections import Counter
-print()
-print('per-group counts:')
-for gdir in list(GROUPS) + ['lib(ChakraCoreStatic.cpp)']:
-    n = sum(1 for f in expected if f.startswith(os.path.join(ROOT, gdir.split('(')[0]) + '/') or f == os.path.join(ROOT, 'lib/ChakraCoreStatic.cpp') and 'ChakraCoreStatic' in gdir)
-    print(f'  {gdir}: {n}')
+if __name__ == '__main__':
+    sys.exit(main())
