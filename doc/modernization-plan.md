@@ -1,8 +1,8 @@
 # ChakraCore Modernization Plan
 
-> Status: F0–B2 verified — source-only Mac `zig build` / `zig build check`
-> green (1959/0, legacy-identical selection); **B3 is the next work item**.
-> Engine/legacy-build references use baseline
+> Status: F0–B3 verified — three Mac profiles green, incremental proofs,
+> CI recipe validated (CONDITIONAL on the first green post-merge Actions run);
+> **B4 is the next work item**. Engine/legacy-build references use baseline
 > `97e68c917`; execution evidence is recorded through 2026-10-10 local time.
 > This is a staged roadmap for a small maintained fork, not a dated delivery promise.
 
@@ -28,8 +28,8 @@ handling have been validated before its results are used as a completion gate.
 | F0 | Compiler, behavior-parity and diagnostic-conformance foundation | — | Verified |
 | B1 | Explicit Mac build/PAL configuration contract | F0 | Verified |
 | B2 | Source-only Mac `zig build` and `zig build check` | B1 | Verified |
-| B3 | Mac build profiles, incremental correctness and CI | B2 | **Next** |
-| B4 | Native x64 Linux JIT/WASM/WABT proof and Zig build | B2; B3 before default rollout | Planned, higher uncertainty |
+| B3 | Mac build profiles, incremental correctness and CI | B2 | Verified* |
+| B4 | Native x64 Linux JIT/WASM/WABT proof and Zig build | B2; B3 before default rollout | **Next** (higher uncertainty) |
 | B5 | First release package with controlled dependencies | B3; B4 for a two-platform package | Planned |
 | B6 | Windows feasibility and rollout; later target extensions | Stable build contracts | Separate expansion |
 | Z1 | One useful mixed C++/Zig unit behind a tested C ABI | B3; B4 if the unit ships on Linux | Optional pilot |
@@ -43,6 +43,8 @@ release/dependency work at B5 and an approved Z1 pilot can then be scheduled wit
 holding up C++ compatibility fixes. B6 is an expansion decision, not a prerequisite
 for completing the first Mac/Linux build rollout. All entries marked planned are
 future work; command names below describe the intended build interface.
+(*B3's CI clause is CONDITIONAL on the first green post-merge Actions run;
+the recipe is validated by lint plus literal local simulation.)
 
 ## 0. Goals and boundaries
 
@@ -473,8 +475,9 @@ Decision/rollback points:
 - [x] B1: Source/flag/PAL configuration contract and first Zig build slice.
 - [x] B2: Clean source-only Mac `zig build` / `zig build check`, 1959/0,
   bytecode/shared native/metadata/API gates.
-- [ ] B3: Each declared Mac profile, dependency rebuild behavior and clean CI;
-  scoped default rollout.
+- [x] B3: Each declared Mac profile, dependency rebuild behavior and clean CI;
+  scoped default rollout. (*CONDITIONAL on the first green post-merge
+  Actions run; recipe validated by lint + literal local simulation.)
 - [ ] B4: Linux native baseline/pilot and JIT/WASM/native/profile CI gates;
   scoped Linux rollout.
 - [ ] B5: Controlled dependency/artifact package and clean-machine floor testing.
@@ -487,10 +490,11 @@ Decision/rollback points:
   tracked until C4, optional ecosystem scope has separate gates.
 - [ ] C4: Published qualified ES2025 result on the claimed default configurations.
 
-**Next implementation:** B3. Add Debug, static and Release/shared Mac profiles
-with matching legacy baselines and checks, prove incremental rebuild/isolated
-flavors/no-op behavior, and wire clean CI with recorded inputs while keeping
-the legacy leg green; default the Mac route to Zig per gated profile.
+**Next implementation:** B4. Obtain a Linux (Docker) environment, establish the
+native x64 legacy baseline with JIT, run the compiler/linker pilot there, then
+implement Linux PAL configuration/assembly/archives/ICU/loading in the Zig
+build with interpreted/dynapogo checks plus focused JIT/WASM/native tests —
+proven by native execution on the target, not cross-linking from Mac.
 
 ## Appendix — Evidence and deferred research
 

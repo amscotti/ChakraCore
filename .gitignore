@@ -11,6 +11,8 @@
 *.ilk
 *.lib
 *.log
+# Preserved B3 legacy-baseline evidence logs (reviewed record, not scratch).
+!tools/legacy-baseline/logs/**/*.log
 *.ncb
 *.obj
 *.opendb
@@ -45,6 +47,8 @@ buildfre.*
 out/
 /build-xplat/
 /build-zigpilot/
+/build-legacy-debug/
+/build-legacy-release/
 /.zig-cache/
 /zig-out/
 _DROP/

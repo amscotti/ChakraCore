@@ -5,26 +5,31 @@
 #-------------------------------------------------------------------------------------------------------
 """B2.3 check gate (1): regression suite, legacy-exact selection.
 
-Runs the SAME command the legacy RelWithDebInfo shared/ICU/no-JIT
-`ninja check` runs for its regression leg (test/CMakeLists.txt:39-44):
+Runs the SAME command the legacy `ninja check` runs for its regression
+leg (test/CMakeLists.txt:39-44), with the build-type flag selected by
+--select (TEST_BUILD_TYPE, test/CMakeLists.txt:3-7):
 
-    runtests.py --test --variants=disable_jit --binary=<ch>
+    runtests.py --test --variants=disable_jit --binary=<ch>    (test)
+    runtests.py --debug --variants=disable_jit --binary=<ch>   (debug-static)
 
-No --not-tag: ICU is present in this profile, so TEST_ICU is empty
-(test/CMakeLists.txt:9-11); TEST_BUILD_TYPE is --test (:3-7) and
-TEST_VARIANT is --variants=disable_jit (:13-18). The in-script tag
-selection (exclude_xplat, exclude_mac, Slow, ...) is runtests.py's own
-and therefore identical by construction.
+No --not-tag: ICU is present in these profiles, so TEST_ICU is empty
+(test/CMakeLists.txt:9-11); TEST_VARIANT is --variants=disable_jit
+(:13-18). The in-script tag selection (exclude_xplat, exclude_mac,
+Slow, ...) is runtests.py's own and therefore identical by
+construction.
 
-Requires the legacy baseline counts: 1959 passed / 0 failed. The
-verdict comes from parsing the real `Total: passed N, failed M`
+Requires the legacy baseline counts for the selection: 1959 passed /
+0 failed (--test), 2011 passed / 0 failed (--debug). The --debug
+selection honestly differs from Test's count (doc/b3-profiles.md §5).
+The verdict comes from parsing the real `Total: passed N, failed M`
 summary line (runtests.py:567), not from the exit code alone; a
 nonzero exit, a missing summary, or 2+ summary lines also fails
 loudly. The run has an outer ceiling (common.REGRESSION_TIMEOUT);
 runtests.py's own per-test timeout is untouched.
 
-Usage: check_regression.py <runtests.py> <ch> [--expected-passed N]
-       [--expected-failed M] [--self-test]
+Usage: check_regression.py <runtests.py> <ch> [--select test|debug]
+       [--expected-passed N] [--expected-failed M] [--self-test]
+Defaults: --select test, 1959/0 (the B2 test profile, unchanged).
 Exit code: 0 iff the suite ran green with exactly the expected counts.
 """
 
@@ -39,6 +44,12 @@ import common
 TOTAL_RE = re.compile(r"^Total: passed (\d+), failed (\d+)\s*$")
 EXPECTED_PASSED = 1959
 EXPECTED_FAILED = 0
+# Per-selection legacy baselines (doc/b3-profiles.md §5). --select
+# picks the flag; the counts stay explicit CLI args so a wiring
+# mistake (debug flag with test counts) fails instead of silently
+# passing on a wrong gate.
+SELECT_FLAGS = {"test": "--test", "debug": "--debug"}
+SELECT_COUNTS = {"test": (1959, 0), "debug": (2011, 0)}
 
 
 def parse_total(lines):
@@ -101,6 +112,35 @@ def self_test():
             bad += 1
         print("self-test %-16s -> %s (verdict=%s err=%r)"
               % (name, status, "accept" if ok else "reject", err))
+    # Profile-awareness pins: the --debug baseline (2011/0) must be
+    # accepted under debug expectations and rejected under test
+    # expectations, so a count/selection mismatch can never pass.
+    try:
+        err = check_counts(parse_total(["Total: passed 2011, failed 0"]),
+                           *SELECT_COUNTS["debug"])
+    except ValueError as e:
+        err = str(e)
+    if err is None:
+        print("self-test %-16s -> PASS (verdict=accept)" % "debug 2011/0")
+    else:
+        print("self-test %-16s -> FAIL (verdict=reject err=%r)"
+              % ("debug 2011/0", err))
+        bad += 1
+    try:
+        err = check_counts(parse_total(["Total: passed 2011, failed 0"]),
+                           *SELECT_COUNTS["test"])
+    except ValueError as e:
+        err = str(e)
+    if err is not None:
+        print("self-test %-16s -> PASS (verdict=reject)" % "debug vs test")
+    else:
+        print("self-test %-16s -> FAIL (verdict=accept)" % "debug vs test")
+        bad += 1
+    if SELECT_FLAGS.get("debug") == "--debug":
+        print("self-test %-16s -> PASS" % "debug flag map")
+    else:
+        print("self-test %-16s -> FAIL" % "debug flag map")
+        bad += 1
     # Outer-ceiling pin: a hung child must raise loudly, not hang forever.
     try:
         common.run_tee([sys.executable, "-c",
@@ -121,6 +161,7 @@ def main(argv):
     if "--self-test" in args:
         return self_test()
     exp_passed, exp_failed = EXPECTED_PASSED, EXPECTED_FAILED
+    select = "test"
     rest = []
     i = 0
     while i < len(args):
@@ -130,12 +171,20 @@ def main(argv):
         elif args[i] == "--expected-failed":
             exp_failed = int(args[i + 1])
             i += 2
+        elif args[i] == "--select":
+            select = args[i + 1]
+            i += 2
         else:
             rest.append(args[i])
             i += 1
+    if select not in SELECT_FLAGS:
+        print("check_regression: bad --select %r: expected one of: %s"
+              % (select, ", ".join(sorted(SELECT_FLAGS))), file=sys.stderr)
+        return 2
     if len(rest) != 2:
         print("usage: check_regression.py <runtests.py> <ch> "
-              "[--expected-passed N] [--expected-failed M]",
+              "[--select test|debug] [--expected-passed N] "
+              "[--expected-failed M]",
               file=sys.stderr)
         return 2
     runtests, ch = rest[0], rest[1]
@@ -149,7 +198,7 @@ def main(argv):
     # test's folder (runtests.py:475), so a relative path fails every
     # test with FileNotFoundError (observed 0/1959). Legacy passes
     # ${CMAKE_BINARY_DIR}/ch, which is absolute.
-    cmd = [sys.executable, runtests, "--test",
+    cmd = [sys.executable, runtests, SELECT_FLAGS[select],
            "--variants=disable_jit",
            "--binary=" + os.path.abspath(ch)]
     print("check_regression: running: %s" % " ".join(cmd))

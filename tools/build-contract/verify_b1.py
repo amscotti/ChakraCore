@@ -8,13 +8,15 @@ doc/build-contract-mac.md, doc/pal-config-contract-mac.md section 5):
   2. Generated zig-out/pal/src/config.h matches the MD5 pinned in both
      contracts; byte-identical to the build-zigpilot/pal/src/config.h
      reference (cmp) when that git-ignored ref exists.
-  3. B2-aware archive check: EITHER zig-out/lib/libChakra.Pal.a (B1
-     artifact, stem.o members) OR
-     zig-out/lib/libChakra.Pal.Singular.a (B2 artifact, NNNN-basename.o
-     members, basename keeping its source extension) holds exactly the
-     91 contract objects (names vs doc/build-contract-mac.md section
-     4.1 PAL group: stem.o for B1, NNNN- stripped then basename.o for
-     B2) and no non-object member besides __.SYMDEF.
+  3. PAL archive check against the CURRENT build graph artifact
+     zig-out/lib/libChakra.Pal.Singular.a (B2 NNNN-basename.o members,
+     basename keeping its source extension): exactly the 91 contract
+     objects (NNNN- stripped, then basename.o vs doc/build-contract-
+     mac.md section 4.1) and no non-object member besides __.SYMDEF.
+     A stale pre-B2 zig-out/lib/libChakra.Pal.a is NEVER accepted:
+     beside the B2 artifact it is ignored with a logged note; alone
+     it FAILS loudly as stale (B3.4 upkeep — the old EITHER/OR
+     preferred stale B1 whenever it existed).
   4. A fast fail-clearly subset exits nonzero with a loud message:
      missing ICU header, wrong-arch target, wrong-minimum target,
      -Dcpu override, -Doptimize=Debug, wrong-OS target, missing SDK
@@ -28,6 +30,7 @@ correct; see build.zig gateTarget comment). Prints a PASS/FAIL summary
 and writes an evidence log (default tools/build-contract/verify_b1.log).
 
 Usage: python3 tools/build-contract/verify_b1.py [--log PATH]
+       python3 tools/build-contract/verify_b1.py --self-test
 Exit code: 0 iff every check passes.
 """
 import hashlib
@@ -144,6 +147,73 @@ def expected_objects_from_doc():
     return files, objs
 
 
+def select_archive(path_b1, path_b2):
+    """Choose the PAL archive matching the CURRENT build graph.
+
+    Returns (path, kind): kind "B2" (test it), "STALE-B1" (only a
+    pre-B2 leftover exists — the caller FAILS loudly, never silently
+    passes), or "missing". A stale B1 artifact beside the current B2
+    artifact is ignored with a logged note, never preferred (B3.4
+    upkeep: the old EITHER/OR tested B1 whenever it existed).
+    """
+    if os.path.exists(path_b2):
+        return path_b2, "B2"
+    if os.path.exists(path_b1):
+        return path_b1, "STALE-B1"
+    return None, "missing"
+
+
+def b2_member_names(objects):
+    """Strip NNNN- prefixes; return (names, bad_prefix)."""
+    bad = sorted(m for m in objects if not re.match(r"^\d{4}-", m))
+    return set(re.sub(r"^\d{4}-", "", m) for m in objects), bad
+
+
+def self_test():
+    """Regression test for PAL archive selection (B3.4 upkeep).
+
+    Hermetic: tmpdir existence combos plus synthetic member lists.
+    """
+    bad = 0
+
+    def report(name, cond):
+        print("self-test %-52s -> %s"
+              % (name, "PASS" if cond else "FAIL"))
+        return 0 if cond else 1
+
+    with tempfile.TemporaryDirectory(prefix="verify-b1-selftest-") as tmp:
+        b1 = os.path.join(tmp, "libChakra.Pal.a")
+        b2 = os.path.join(tmp, "libChakra.Pal.Singular.a")
+        open(b1, "w").close()
+        open(b2, "w").close()
+        path, kind = select_archive(b1, b2)
+        bad += report("both present prefers B2",
+                      path == b2 and kind == "B2")
+        os.remove(b1)
+        path, kind = select_archive(b1, b2)
+        bad += report("B2-only selects B2",
+                      path == b2 and kind == "B2")
+        os.remove(b2)
+        open(b1, "w").close()
+        path, kind = select_archive(b1, b2)
+        bad += report("B1-only reports STALE-B1",
+                      path == b1 and kind == "STALE-B1")
+        os.remove(b1)
+        path, kind = select_archive(b1, b2)
+        bad += report("neither reports missing",
+                      path is None and kind == "missing")
+    names, bad_prefix = b2_member_names(
+        ["0007-context.S.o", "0042-pal.cpp.o", "bare.o"])
+    bad += report("B2 strip keeps basename.o",
+                  names == {"context.S.o", "pal.cpp.o", "bare.o"})
+    bad += report("B2 strip flags missing prefix",
+                  bad_prefix == ["bare.o"])
+    print("verify_b1 self-test: %s"
+          % ("ALL SELECTION CONTROLS BEHAVE" if bad == 0
+             else "%d CONTROL(S) MISBEHAVE" % bad))
+    return 1 if bad else 0
+
+
 results = []
 
 
@@ -155,11 +225,13 @@ def record(name, expected, observed, ok, detail=""):
 
 
 def main():
+    if len(sys.argv) == 2 and sys.argv[1] == "--self-test":
+        return self_test()
     log_path = os.path.join(ROOT, "tools/build-contract/verify_b1.log")
     if len(sys.argv) == 3 and sys.argv[1] == "--log":
         log_path = sys.argv[2]
     elif len(sys.argv) != 1:
-        sys.exit("usage: verify_b1.py [--log PATH]")
+        sys.exit("usage: verify_b1.py [--log PATH | --self-test]")
 
     if shutil.which("mise") is None:
         sys.exit("mise not found on PATH; this script uses ONLY mise zig 0.17.0")
@@ -221,8 +293,8 @@ def main():
     elif os.path.exists(gen):
         log("config.h-cmp: ref absent — MD5-only")
 
-    # 3. Archive holds exactly the 91 contract objects (B2-aware: accept
-    # EITHER the B1 or the B2 artifact; both require 91 + only __.SYMDEF).
+    # 3. Archive holds exactly the 91 contract objects (B3.4: the
+    # CURRENT-graph B2 artifact; a stale B1 leftover is never tested).
     try:
         doc_files, expected = expected_objects_from_doc()
         log(f"doc section 4.1 PAL group: {len(doc_files)} files -> {len(expected)} unique .o names")
@@ -233,31 +305,26 @@ def main():
         else:
             path_b1 = os.path.join(ROOT, ARCHIVE_B1)
             path_b2 = os.path.join(ROOT, ARCHIVE_B2)
-            if os.path.exists(path_b1):
-                archive, is_b2 = path_b1, False
-            elif os.path.exists(path_b2):
-                archive, is_b2 = path_b2, True
-            else:
-                archive, is_b2 = None, False
-            if archive is None:
+            archive, kind = select_archive(path_b1, path_b2)
+            if kind == "missing":
                 record("archive-objects", f"exactly {EXPECTED_OBJECTS} contract objects + only __.SYMDEF",
                        f"neither {ARCHIVE_B1} nor {ARCHIVE_B2} exists", False)
+            elif kind == "STALE-B1":
+                record("archive-objects", f"exactly {EXPECTED_OBJECTS} contract objects + only __.SYMDEF",
+                       f"stale pre-B2 {ARCHIVE_B1} only; current graph produces {ARCHIVE_B2} — rebuild", False)
             else:
-                log(f"archive under test: {archive} ({'B2 NNNN- members' if is_b2 else 'B1 basename members'})")
+                if os.path.exists(path_b1):
+                    log(f"note: ignoring stale B1 artifact {ARCHIVE_B1}")
+                log(f"archive under test: {archive} (B2 NNNN- members)")
                 rc, ar_out, _ = run(["ar", "t", archive], FAIL_TIMEOUT)
                 members = [l for l in ar_out.splitlines() if l]
                 objects = sorted(m for m in members if m.endswith(".o"))
                 non_obj = sorted(m for m in members if not m.endswith(".o"))
                 log(f"ar t: {len(members)} members ({len(objects)} .o, non-.o: {non_obj})")
-                names = set(objects)
-                want = expected
-                bad_prefix = []
-                if is_b2:
-                    bad_prefix = sorted(m for m in objects if not re.match(r"^\d{4}-", m))
-                    names = set(re.sub(r"^\d{4}-", "", m) for m in objects)
-                    # B2 members keep the source extension (NNNN-file.cpp.o),
-                    # so compare against basename.o, not stem.o.
-                    want = set(os.path.basename(f) + ".o" for f in doc_files)
+                names, bad_prefix = b2_member_names(objects)
+                # B2 members keep the source extension (NNNN-file.cpp.o),
+                # so compare against basename.o, not stem.o.
+                want = set(os.path.basename(f) + ".o" for f in doc_files)
                 missing = sorted(want - names)
                 extra = sorted(names - want)
                 ok = (rc == 0 and not missing and not extra and not bad_prefix

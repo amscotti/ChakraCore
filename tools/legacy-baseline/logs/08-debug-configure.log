@@ -1,0 +1,5 @@
+-- found ICU libs: /opt/homebrew/opt/icu4c/include/../lib/
+-- Configuring done (0.7s)
+-- Generating done (0.2s)
+-- Build files have been written to: /Users/ascotti/Documents/code/ChakraCore/build-legacy-debug
+exit: 0

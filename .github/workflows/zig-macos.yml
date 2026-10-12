@@ -1,0 +1,412 @@
+# B3.5 — Mac Zig build CI (+ the legacy Test leg it will keep green).
+#
+# What this workflow will prove on every push/PR (doc/b3-profiles.md section 11,
+# doc/modernization-plan.md sections B3/2.1):
+#
+#   - each declared profile (test, debug-static, release-shared) builds from
+#     a clean tree and passes its matching `zig build check` + check-selftest;
+#   - the B1 configuration contract stays 15/15;
+#   - the equivalent legacy cmake leg (F0 recipe: RelWithDebInfo, shared,
+#     no-JIT, system ICU) will stay green at 1959/0;
+#   - every run records its inputs (zig version + full `zig env`, target,
+#     flavor, feature defines, dependency versions) and outputs (artifact
+#     manifest with sizes/hashes, gate tallies) as job outputs + artifacts.
+#
+# Design notes (attack surface documented for reviewers):
+#
+#   - Runner: `macos-26` (ARM64), pinned by major — NOT macos-latest — so an
+#     image retirement cannot silently move the toolchain (macos-14 retires
+#     2026-11-02; macos-26 is GA since 2026-02-26 and carries both Xcode 26.5
+#     and 26.6 with macOS SDK 26.5 — verified against the
+#     actions/runner-images macos-26-arm64 readme, image 20260907.0351.1).
+#   - Xcode: explicitly selected to Xcode_26.5.app (build 17F42, byte-same as
+#     the local B3 baseline toolchain), then the SDK is asserted at 26.5 with
+#     a loud listing of every installed Xcode/SDK when the pin rots. The
+#     default Xcode_26.6 also ships SDK 26.5 today, but its AppleClang may
+#     drift; the pin removes that variable.
+#   - Zig: jdx/mise-action@v4 installs exactly what the repo-root mise.toml
+#     pins (Zig 0.17.0) — one pin for laptop and CI, no second install step
+#     to drift. Every zig invocation below spells `mise exec -- zig ...`,
+#     identical to the local recipe.
+#   - cmake/ninja/clang/python are preinstalled on the image (4.4.3/1.13.2/
+#     21.0.0/3.14.7 at verification time); the workflow asserts presence and
+#     RECORDS versions but pins none of them — only icu4c is brew-installed
+#     (the B1 gate fails clearly when its header/lib are absent).
+#   - Matrix, not one sequential job: the four build jobs run on separate
+#     runners, which is also what makes the verify_b1.py live-tree wipe race
+#     (doc/b3-profiles.md section 9.7/11.3) structurally impossible in CI —
+#     no two writers ever share a tree. Locally the rule stays sequential.
+#   - `--prefix` appears NOWHERE below: only the test profile honors it
+#     (B3.4 fixed side prefixes for the rest — build.zig cannot read --prefix
+#     in Zig 0.17, so any --prefix contract for non-test profiles would be
+#     convention-only). CI uses default prefixes everywhere.
+#   - test_incremental.py scope: --quick (isolation, noop, bzcomment,
+#     selection) on every run; full (~25 min warm locally, ~45+ min on a
+#     3-CPU runner) via workflow_dispatch `incremental: full`. Either choice
+#     is attackable, so the reasoning is explicit: the expensive legs (header
+#     fan-in, scratch-tree full rebuild, jstoc counts, concurrent) prove
+#     LOCAL incremental semantics whose breakage surface is build.zig/depfile
+#     edits — covered by the maintainer-local full gate with its recorded
+#     0-FAIL run (doc/b3-profiles.md section 10.3) before merge. --quick
+#     still cold-builds two profiles (isolation), proves no-op zero-delta
+#     rebuilds, and keeps the B1 archive-selection regression pinned, which
+#     is the regression tripwire CI can actually add on an always-clean tree.
+#   - Record consumption: the `record` job reads per-leg ARTIFACT files, not
+#     `needs.*.outputs` (matrix-leg outputs are not reliably addressable per
+#     leg). Job outputs still carry each tally for the UI; artifacts carry
+#     the durable record.
+#   - Action pins (verified 2026-10-11): actions/checkout@v5 (node24),
+#     actions/upload-artifact@v6 + actions/download-artifact@v6 (same major:
+#     the v4+ artifact wire format must match on both halves), jdx/mise-
+#     action@v4. Tags float on their major; SHAs would be stronger and are
+#     explicitly deferred (dependabot territory, not B3).
+#   - First-run honesty: no push is authorized in the B3.5 session, so this
+#     file is validated by YAML parse + schema eyeball + a LOCAL sequential
+#     simulation of every run step below (section 11.5). The first real Actions
+#     run happens post-merge; that run is the workflow's own proof.
+#
+# Artifacts expire on GitHub's retention clock; the PERMANENT record is the
+# quoted outputs in doc/b3-profiles.md sections 10-11, not the artifact zip.
+
+name: zig-macos (B3 profiles + legacy Test leg)
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      incremental:
+        description: 'test_incremental.py scope (quick = every-run gate, full = maintainer depth)'
+        type: choice
+        options: [quick, full]
+        default: quick
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  zig:
+    name: zig ${{ matrix.profile }} (build + check + selftest)
+    runs-on: macos-26
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [test, debug-static, release-shared]
+    outputs:
+      tally: ${{ steps.tally.outputs.tally }}
+    steps:
+      - &checkout
+        name: Checkout
+        uses: actions/checkout@v5
+      - &mise
+        name: Setup mise (Zig 0.17.0 from mise.toml)
+        uses: jdx/mise-action@v4
+        with:
+          install: true
+          cache: true
+      - name: Assert Zig 0.17.0
+        run: |
+          set -euo pipefail
+          test "$(mise exec -- zig version)" = "0.17.0"
+          mise exec -- zig version
+      - &xcode
+        name: Select Xcode 26.5 (SDK 26.5)
+        run: |
+          set -euo pipefail
+          sudo xcode-select -s /Applications/Xcode_26.5.app/Contents/Developer
+          echo "SDKROOT=$(xcrun --show-sdk-path)" >> "$GITHUB_ENV"
+          python3 - <<'EOF'
+          import glob, json, subprocess
+          sdk = subprocess.run(['xcrun', '--show-sdk-path'], capture_output=True,
+                               text=True, check=True).stdout.strip()
+          ver = json.load(open(sdk + '/SDKSettings.json'))['Version']
+          print('selected SDK:', sdk, 'version:', ver)
+          if ver != '26.5':
+              print('INSTALLED Xcodes/SDKs:')
+              for app in sorted(glob.glob('/Applications/Xcode*.app')):
+                  try:
+                      v = json.load(open(app + '/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/SDKSettings.json'))['Version']
+                  except OSError:
+                      v = 'unreadable'
+                  print(' ', app, v)
+              raise SystemExit('need MacOSX SDK 26.5, have ' + ver)
+          EOF
+      - &icu
+        name: Install ICU 78 (Homebrew)
+        run: |
+          set -euo pipefail
+          brew install icu4c
+          test -f /opt/homebrew/opt/icu4c/include/unicode/uchar.h
+          test -f /opt/homebrew/opt/icu4c/lib/libicuuc.dylib
+          brew list --versions icu4c
+      - name: Record inputs (plan 2.1)
+        run: |
+          set -euo pipefail
+          python3 tools/build/ci_record.py --self-test
+          python3 tools/build/ci_record.py inputs --profile '${{ matrix.profile }}' --out ci-evidence
+      - name: zig build
+        run: |
+          set -euo pipefail
+          args=""
+          if [ '${{ matrix.profile }}' != 'test' ]; then args="-Dprofile=${{ matrix.profile }}"; fi
+          # shellcheck disable=SC2086
+          mise exec -- zig build $args 2>&1 | tee ci-evidence/build.log
+      - name: Record artifact manifest
+        run: |
+          set -euo pipefail
+          case '${{ matrix.profile }}' in
+            test) pfx=zig-out ;;
+            debug-static) pfx=out/debug-static ;;
+            release-shared) pfx=out/release-shared ;;
+          esac
+          python3 tools/build/ci_record.py manifest --prefix "$pfx" --out ci-evidence --label '${{ matrix.profile }}'
+      - name: zig build check
+        run: |
+          set -euo pipefail
+          args=""
+          if [ '${{ matrix.profile }}' != 'test' ]; then args="-Dprofile=${{ matrix.profile }}"; fi
+          # shellcheck disable=SC2086
+          mise exec -- zig build check $args 2>&1 | tee ci-evidence/check.log
+      - name: zig build check-selftest
+        run: |
+          set -euo pipefail
+          args=""
+          if [ '${{ matrix.profile }}' != 'test' ]; then args="-Dprofile=${{ matrix.profile }}"; fi
+          # shellcheck disable=SC2086
+          mise exec -- zig build check-selftest $args 2>&1 | tee ci-evidence/selftest.log
+      - name: Tally gate outputs
+        id: tally
+        run: |
+          set -euo pipefail
+          case '${{ matrix.profile }}' in
+            test)
+              grep -E 'Total: passed 1959, failed 0' ci-evidence/check.log
+              grep -E 'Bytecode is up to date' ci-evidence/check.log
+              grep -E 'test-shared-basic : PASS' ci-evidence/check.log
+              line="test: regression=1959/0 bytecode=up-to-date native=shared-PASS"
+              ;;
+            debug-static)
+              grep -E 'Total: passed 2011, failed 0' ci-evidence/check.log
+              grep -E 'Bytecode is up to date' ci-evidence/check.log
+              test "$(grep -cE 'test-static-.* : PASS' ci-evidence/check.log)" = '8'
+              line="debug-static: regression=2011/0 bytecode=up-to-date native=8x-static-PASS"
+              ;;
+            release-shared)
+              # The hello leg is logged as a one-line repr, not raw
+              # lines (check_smoke.py prints out='hello world\nPASS\n').
+              grep -F "check_smoke: hello -> rc=0 out='hello world\\nPASS" ci-evidence/check.log
+              grep -F 'check_smoke: PASS: version + silent invalid-flag + snippet + hello.js outputs match' ci-evidence/check.log
+              grep -E 'test-shared-basic : PASS' ci-evidence/check.log
+              line="release-shared: hello=PASS native=shared-PASS"
+              ;;
+          esac
+          test "$(grep -c 'ALL NEGATIVE CONTROLS BEHAVE' ci-evidence/selftest.log)" = '4'
+          echo "$line" | tee ci-evidence/tally.txt
+          echo "tally=$line" >> "$GITHUB_OUTPUT"
+          echo "- $line" >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload zig-${{ matrix.profile }} evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: zig-${{ matrix.profile }}
+          path: ci-evidence/
+
+  b1-contract:
+    name: B1 contract (verify_b1.py 15/15)
+    runs-on: macos-26
+    timeout-minutes: 60
+    outputs:
+      tally: ${{ steps.tally.outputs.tally }}
+    steps:
+      - *checkout
+      - *mise
+      - name: Assert Zig 0.17.0
+        run: |
+          set -euo pipefail
+          test "$(mise exec -- zig version)" = "0.17.0"
+      - *xcode
+      - *icu
+      - name: Record inputs (plan 2.1)
+        run: |
+          set -euo pipefail
+          python3 tools/build/ci_record.py inputs --profile test --out ci-evidence
+      - name: verify_b1.py (wipes its own runner-local tree only)
+        run: |
+          set -euo pipefail
+          python3 tools/build-contract/verify_b1.py --log ci-evidence/verify_b1.log
+      - name: Tally gate outputs
+        id: tally
+        run: |
+          set -euo pipefail
+          grep -E 'SUMMARY: 15/15 PASS' ci-evidence/verify_b1.log
+          line="b1-contract: 15/15 PASS"
+          echo "$line" | tee ci-evidence/tally.txt
+          echo "tally=$line" >> "$GITHUB_OUTPUT"
+          echo "- $line" >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload b1-contract evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: b1-contract
+          path: ci-evidence/
+
+  legacy-test:
+    name: legacy cmake Test leg (F0 recipe, 1959/0)
+    runs-on: macos-26
+    timeout-minutes: 90
+    outputs:
+      tally: ${{ steps.tally.outputs.tally }}
+    steps:
+      - *checkout
+      - *xcode
+      - *icu
+      - name: Assert cmake/ninja/clang present, record versions
+        run: |
+          set -euo pipefail
+          mkdir -p ci-evidence
+          {
+            echo '# Legacy Test leg inputs (F0 recipe)'
+            echo
+            echo 'cmake:    ' "$(cmake --version | head -1)"
+            echo 'ninja:    ' "$(ninja --version)"
+            echo 'clang:    ' "$(clang --version | head -1)"
+            echo 'python:   ' "$(python3 --version)"
+            echo 'xcode:    ' "$(xcodebuild -version | head -1)"
+            echo 'sdk:      ' "$(xcrun --show-sdk-path)"
+            echo 'icu4c:    ' "$(brew list --versions icu4c)"
+            echo 'git rev:  ' "$(git rev-parse --short HEAD) ${GITHUB_REF_NAME:-$(git branch --show-current)}"
+          } | tee ci-evidence/legacy-inputs.md
+      - name: cmake configure (F0 recipe)
+        run: |
+          set -euo pipefail
+          cmake -S . -B build-ci-test -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DDISABLE_JIT=ON -DICU_INCLUDE_PATH=/opt/homebrew/opt/icu4c/include \
+            -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang 2>&1 | tee ci-evidence/configure.log
+      - name: ninja build
+        run: |
+          set -euo pipefail
+          ninja -C build-ci-test 2>&1 | tee ci-evidence/build.log
+      - name: ninja check
+        run: |
+          set -euo pipefail
+          ninja -C build-ci-test check 2>&1 | tee ci-evidence/check.log
+      - name: Tally gate outputs + artifact sizes
+        id: tally
+        run: |
+          set -euo pipefail
+          grep -E 'Total: passed 1959, failed 0' ci-evidence/check.log
+          grep -E 'test-shared-basic : PASS' ci-evidence/check.log
+          ls -l build-ci-test/ch | tee -a ci-evidence/check.log
+          # The legacy dylib lands at the build root (observed in the
+          # B3.5 sim), not under bin/ — both paths asserted, no `|| true`.
+          shasum -a 256 build-ci-test/ch build-ci-test/libChakraCore.dylib | tee ci-evidence/shasum.txt
+          line="legacy-test: regression=1959/0 native=shared-PASS"
+          echo "$line" | tee ci-evidence/tally.txt
+          echo "tally=$line" >> "$GITHUB_OUTPUT"
+          echo "- $line" >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload legacy-test evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: legacy-test
+          path: ci-evidence/
+
+  incremental:
+    name: incremental proofs (test_incremental.py ${{ inputs.incremental || 'quick' }})
+    runs-on: macos-26
+    timeout-minutes: 150
+    outputs:
+      tally: ${{ steps.tally.outputs.tally }}
+    steps:
+      - *checkout
+      - *mise
+      - name: Assert Zig 0.17.0
+        run: |
+          set -euo pipefail
+          test "$(mise exec -- zig version)" = "0.17.0"
+      - *xcode
+      - *icu
+      - name: Record inputs (plan 2.1)
+        run: |
+          set -euo pipefail
+          python3 tools/build/ci_record.py inputs --profile test --out ci-evidence
+          echo 'incremental scope: ${{ inputs.incremental || 'quick' }} (this leg rebuilds test+debug-static itself; per-profile inputs live in the zig-* legs)' >> ci-evidence/scope.txt
+      - name: test_incremental.py
+        run: |
+          set -euo pipefail
+          # Shell-side scope select (NOT a GHA && / || expression: the ''
+          # middle renders falsy, so the expression form always yields
+          # --quick and the dispatch-full escape hatch would be dead).
+          scope='${{ inputs.incremental || 'quick' }}'
+          args="--quick"
+          if [ "$scope" = 'full' ]; then args=""; fi
+          # shellcheck disable=SC2086
+          python3 tools/build/test_incremental.py $args 2>&1 | tee ci-evidence/incr.log
+          if [ -d /tmp/b34-incr-logs ]; then mkdir -p ci-evidence/incr-logs && cp -r /tmp/b34-incr-logs/. ci-evidence/incr-logs/; fi
+      - name: Tally gate outputs
+        id: tally
+        run: |
+          set -euo pipefail
+          grep -E 'SUMMARY: 0 FAIL' ci-evidence/incr.log
+          line="incremental(${{ inputs.incremental || 'quick' }}): 0 FAIL"
+          echo "$line" | tee ci-evidence/tally.txt
+          echo "tally=$line" >> "$GITHUB_OUTPUT"
+          echo "- $line" >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload incremental evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: incremental
+          path: ci-evidence/
+
+  record:
+    name: record (assemble B3 evidence bundle)
+    # macos-26 for runner uniformity with the legs (validated); ubuntu-latest is a future cost option — this job is download+bash only.
+    runs-on: macos-26
+    timeout-minutes: 15
+    needs: [zig, b1-contract, legacy-test, incremental]
+    if: ${{ !cancelled() }}
+    steps:
+      - name: Download all leg evidence
+        uses: actions/download-artifact@v6
+        with:
+          path: evidence-in
+      - name: Assemble b3-evidence bundle
+        run: |
+          set -euo pipefail
+          mkdir -p b3-evidence/tallies b3-evidence/inputs b3-evidence/manifests
+          {
+            echo "# B3 evidence bundle"
+            echo
+            echo "run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }} (attempt ${{ github.run_attempt }})"
+            echo "ref: ${{ github.ref }} sha: ${{ github.sha }}"
+            echo
+            echo "## Tallies"
+            echo
+          } > b3-evidence/SUMMARY.md
+          for d in evidence-in/*/; do
+            leg="$(basename "$d")"
+            echo "### $leg" >> b3-evidence/SUMMARY.md
+            if [ -f "$d/tally.txt" ]; then cat "$d/tally.txt" >> b3-evidence/SUMMARY.md; cp "$d/tally.txt" "b3-evidence/tallies/$leg.txt"; else echo "(no tally.txt)" >> b3-evidence/SUMMARY.md; fi
+            echo >> b3-evidence/SUMMARY.md
+            for f in "$d"/inputs.md "$d"/inputs.json "$d"/zig-env.txt; do [ -f "$f" ] && cp "$f" "b3-evidence/inputs/$leg-$(basename "$f")" || true; done
+            for f in "$d"/manifest-*.md "$d"/manifest-*.json; do [ -f "$f" ] && cp "$f" b3-evidence/manifests/ || true; done
+            [ -f "$d/legacy-inputs.md" ] && cp "$d/legacy-inputs.md" "b3-evidence/inputs/$leg-legacy-inputs.md" || true
+          done
+          echo '## Tallies' >> "$GITHUB_STEP_SUMMARY"
+          for t in b3-evidence/tallies/*.txt; do [ -e "$t" ] || continue; echo "- $(cat "$t")" >> "$GITHUB_STEP_SUMMARY"; done
+          cat b3-evidence/SUMMARY.md
+      - name: Upload b3-evidence bundle
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: b3-evidence
+          path: b3-evidence/

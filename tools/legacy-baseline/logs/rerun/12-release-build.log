@@ -1,0 +1,4 @@
+ninja: Entering directory `build-legacy-release'
+[1/1] cd /Users/ascotti/Documents/code/ChakraCore/build-legacy-release/bin/ch && /opt/homebrew/Frameworks/Python.framework/Versions/3.14/bin/python3.14 /Users/ascotti/Documents/code/ChakraCore/bin/ch/jstoc.py /Users/ascotti/Documents/code/ChakraCore/bin/ch/DbgController.js controllerScript
+-- DbgController.js.h is up to date. skipping.
+exit: 0

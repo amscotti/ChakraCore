@@ -27,6 +27,12 @@ pub const Options = struct {
     zig_exe: []const u8,
     target: []const u8,
     sysroot: []const u8,
+    /// B3.1 build profile name ("test", "debug-static", "release-shared").
+    /// Provenance only: the probe set and fixed values are identical for
+    /// every profile (pal/src/configure.cmake, pal/src/CMakeLists.txt and
+    /// pal/CMakeLists.txt contain no CMAKE_BUILD_TYPE references), so the
+    /// generated config.h bytes do not depend on it.
+    profile: []const u8,
 };
 
 pub const Output = struct {
@@ -351,7 +357,7 @@ pub fn generate(opt: Options) Output {
         }
     }
 
-    std.debug.print("pal-config: {d}/{d} checks match the contract ({d} fixed-by-target, {d} compile-checked, {d} runtime-verified)\n", .{ contract.checks.len, contract.checks.len, contract.num_fixed_by_target, contract.num_compile_checked, contract.num_runtime_verified });
+    std.debug.print("pal-config: {d}/{d} checks match the contract ({d} fixed-by-target, {d} compile-checked, {d} runtime-verified) [profile {s}]\n", .{ contract.checks.len, contract.checks.len, contract.num_fixed_by_target, contract.num_compile_checked, contract.num_runtime_verified, opt.profile });
     if (std.Io.Dir.openDirAbsolute(opt.io, "/tmp", .{})) |parent| {
         parent.deleteTree(opt.io, tmpdir["/tmp/".len..]) catch {};
     } else |_| {}

@@ -109,6 +109,133 @@ pub const pal_defines: []const []const u8 = &.{
     "-D__arm64__=1",
 };
 
+// B3.1 profiles (doc/b3-profiles.md): same tables minus
+// ENABLE_DEBUG_CONFIG_OPTIONS (RelWithDebInfo-only,
+// CMakeLists.txt:505-508), plus the Debug/static deltas. Positions mirror
+// the legacy ninja command lines (alphabetical among the defines).
+pub const engine_defines_debug_static: []const []const u8 = &.{
+    "-DBIT64=1",
+    "-DCHAKRA_STATIC_LIBRARY=1",
+    "-DCLANG_HAS_DISABLE_TAIL_CALLS=1",
+    "-DDBG=1",
+    "-DDBG_DUMP=1",
+    "-DDEBUG=1",
+    "-DDISABLE_JIT=1",
+    "-DFEATURE_PAL",
+    "-DHAS_ICU",
+    "-DHAS_REAL_ICU=1",
+    "-DINTL_ICU=1",
+    "-DNO_PAL_MINMAX",
+    "-DPAL_STDCPP_COMPAT",
+    "-DPLATFORM_UNIX",
+    "-DPLATFORM_UNIX=1",
+    "-DSTACK_ALIGN=16",
+    "-DTARGET_64",
+    "-DUNICODE",
+    "-D_ARM64_",
+    "-D_ARM64_=1",
+    "-D_CHAKRACOREBUILD",
+    "-D_DEBUG=1",
+    "-D_M_ARM32_OR_ARM64",
+    "-D_M_ARM64",
+    "-D_SAFECRT_USE_CPP_OVERLOADS=1",
+    "-D__STDC_WANT_LIB_EXT1__=1",
+    "-D__aarch64__",
+    "-D__arm64__=1",
+};
+
+pub const pal_defines_debug_static: []const []const u8 = &.{
+    "-DBIT64=1",
+    "-DCHAKRA_STATIC_LIBRARY=1",
+    "-DCLANG_HAS_DISABLE_TAIL_CALLS=1",
+    "-DDBG=1",
+    "-DDBG_DUMP=1",
+    "-DDEBUG=1",
+    "-DDISABLE_JIT=1",
+    "-DFEATURE_PAL",
+    "-DFEATURE_PAL=1",
+    "-DHAS_ICU",
+    "-DHAS_REAL_ICU=1",
+    "-DINTL_ICU=1",
+    "-DLP64COMPATIBLE=1",
+    "-DPIC=1",
+    "-DPLATFORM_UNIX",
+    "-DPLATFORM_UNIX=1",
+    "-DSTACK_ALIGN=16",
+    "-DTARGET_64",
+    "-DUNICODE",
+    "-D_ARM64_",
+    "-D_ARM64_=1",
+    "-D_CHAKRACOREBUILD",
+    "-D_DEBUG=1",
+    "-D_FILE_OFFSET_BITS=64",
+    "-D_M_ARM32_OR_ARM64",
+    "-D_M_ARM64",
+    "-D_SAFECRT_USE_CPP_OVERLOADS=1",
+    "-D_WIN64=1",
+    "-D__STDC_WANT_LIB_EXT1__=1",
+    "-D__aarch64__",
+    "-D__arm64__=1",
+};
+
+// Release/shared: Test tables minus ENABLE_DEBUG_CONFIG_OPTIONS; NDEBUG
+// arrives via the -O3 -DNDEBUG flag slot (CMake builtin
+// CMAKE_<LANG>_FLAGS_RELEASE), not the define list.
+pub const engine_defines_release: []const []const u8 = &.{
+    "-DBIT64=1",
+    "-DCLANG_HAS_DISABLE_TAIL_CALLS=1",
+    "-DDISABLE_JIT=1",
+    "-DFEATURE_PAL",
+    "-DHAS_ICU",
+    "-DHAS_REAL_ICU=1",
+    "-DINTL_ICU=1",
+    "-DNO_PAL_MINMAX",
+    "-DPAL_STDCPP_COMPAT",
+    "-DPLATFORM_UNIX",
+    "-DPLATFORM_UNIX=1",
+    "-DSTACK_ALIGN=16",
+    "-DTARGET_64",
+    "-DUNICODE",
+    "-D_ARM64_",
+    "-D_ARM64_=1",
+    "-D_CHAKRACOREBUILD",
+    "-D_M_ARM32_OR_ARM64",
+    "-D_M_ARM64",
+    "-D_SAFECRT_USE_CPP_OVERLOADS=1",
+    "-D__STDC_WANT_LIB_EXT1__=1",
+    "-D__aarch64__",
+    "-D__arm64__=1",
+};
+
+pub const pal_defines_release: []const []const u8 = &.{
+    "-DBIT64=1",
+    "-DCLANG_HAS_DISABLE_TAIL_CALLS=1",
+    "-DDISABLE_JIT=1",
+    "-DFEATURE_PAL",
+    "-DFEATURE_PAL=1",
+    "-DHAS_ICU",
+    "-DHAS_REAL_ICU=1",
+    "-DINTL_ICU=1",
+    "-DLP64COMPATIBLE=1",
+    "-DPIC=1",
+    "-DPLATFORM_UNIX",
+    "-DPLATFORM_UNIX=1",
+    "-DSTACK_ALIGN=16",
+    "-DTARGET_64",
+    "-DUNICODE",
+    "-D_ARM64_",
+    "-D_ARM64_=1",
+    "-D_CHAKRACOREBUILD",
+    "-D_FILE_OFFSET_BITS=64",
+    "-D_M_ARM32_OR_ARM64",
+    "-D_M_ARM64",
+    "-D_SAFECRT_USE_CPP_OVERLOADS=1",
+    "-D_WIN64=1",
+    "-D__STDC_WANT_LIB_EXT1__=1",
+    "-D__aarch64__",
+    "-D__arm64__=1",
+};
+
 // 25 -Wno-* suppressions, in observed order (root CMakeLists.txt:410-436).
 pub const warnings: []const []const u8 = &.{
     "-Wno-ignored-attributes",
@@ -910,6 +1037,12 @@ pub const ch_group = Group{
     },
     .target_define = "-Dch_EXPORTS",
     .pic = .pie,
+};
+
+// B3.1: static builds compile TestHooks.cpp into ch as a 9th TU
+// (bin/ch/CMakeLists.txt:19-23); shared builds get it via the dylib.
+pub const ch_static_extra_cxx: []const []const u8 = &.{
+    "bin/ChakraCore/TestHooks.cpp",
 };
 
 // ChakraCore dynamic library sources (contract section 4.23). The Q1 bogus

@@ -1,0 +1,40 @@
+ninja: Entering directory `build-legacy-release'
+[1/13] cd /Users/ascotti/Documents/code/ChakraCore/build-legacy-release/bin/ch && /opt/homebrew/Frameworks/Python.framework/Versions/3.14/bin/python3.14 /Users/ascotti/Documents/code/ChakraCore/bin/ch/jstoc.py /Users/ascotti/Documents/code/ChakraCore/bin/ch/DbgController.js controllerScript
+-- DbgController.js.h is up to date. skipping.
+[1/13] cd /Users/ascotti/Documents/code/ChakraCore/build-legacy-release/test && echo Running\ Hello\ World\ test && /Users/ascotti/Documents/code/ChakraCore/build-legacy-release/ch /Users/ascotti/Documents/code/ChakraCore/test/Basics/hello.js
+Running Hello World test
+hello world
+PASS
+[2/13] cd /Users/ascotti/Documents/code/ChakraCore/test/native-tests && ./test_native.sh /Users/ascotti/Documents/code/ChakraCore/build-legacy-release/ch Release /usr/bin/clang /usr/bin/clang++ /Users/ascotti/Documents/code/ChakraCore
+
+########## Running POSIX Native Tests ###########
+Using CC [/usr/bin/clang]
+Using CXX [/usr/bin/clang++]
+
+Testing test-static-c98
+Ignoring test-static-c98
+Testing test-static-char
+Ignoring test-static-char
+Testing test-static-char16
+Ignoring test-static-char16
+Testing test-static-external
+Ignoring test-static-external
+Testing test-static-native
+Ignoring test-static-native
+Testing test-static-pal
+Ignoring test-static-pal
+Testing test-static-property
+Ignoring test-static-property
+Testing test-static-property-symbol
+Ignoring test-static-property-symbol
+Testing test-shared-basic
+test-shared-basic : PASS
+[9/13] Building CXX object lib/Runtime/Library/CMakeFiles/Chakra.Runtime.Library.dir/JavascriptString.cpp.o
+[11/13] Building CXX object lib/Runtime/Library/CMakeFiles/Chakra.Runtime.Library.dir/JavascriptLibrary.cpp.o
+[12/13] Linking CXX static library lib/libChakraCoreStatic.a
+[13/13] Linking CXX shared library bin/ChakraCore/libChakraCore.dylib
+ld: warning: -undefined error is deprecated
+ld: warning: building for macOS-11.0, but linking with dylib '/opt/homebrew/opt/icu4c@78/lib/libicuuc.78.dylib' which was built for newer version 26.0
+ld: warning: building for macOS-11.0, but linking with dylib '/opt/homebrew/opt/icu4c@78/lib/libicui18n.78.dylib' which was built for newer version 26.0
+ld: warning: building for macOS-11.0, but linking with dylib '/opt/homebrew/opt/icu4c@78/lib/libicudata.78.dylib' which was built for newer version 26.0
+exit: 0

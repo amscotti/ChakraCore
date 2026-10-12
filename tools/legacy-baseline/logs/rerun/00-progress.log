@@ -1,0 +1,36 @@
+===== run-baselines.sh: phase=build tree=both started: Sun Oct 11 16:17:05 EDT 2026 =====
+src: /Users/ascotti/Documents/code/ChakraCore
+log: /tmp/b3-baselines/rerun
+cmake: cmake version 4.4.0
+ninja: 1.13.2
+clang: Apple clang version 21.0.0 (clang-2100.1.1.101)
+python: Python 3.12.13
+ncpu: 10
+git: c3d11e7db modernize/baseline
+
+===== [debug-build] started: Sun Oct 11 16:17:05 EDT 2026 =====
+cmd: ninja -C build-legacy-debug
+===== [debug-build] done: Sun Oct 11 16:17:05 EDT 2026 wall: 0s exit: 0 (log: /tmp/b3-baselines/rerun/10-debug-build.log) =====
+
+===== [release-build] started: Sun Oct 11 16:17:05 EDT 2026 =====
+cmd: ninja -C build-legacy-release
+===== [release-build] done: Sun Oct 11 16:17:05 EDT 2026 wall: 0s exit: 0 (log: /tmp/b3-baselines/rerun/12-release-build.log) =====
+===== run-baselines.sh finished: Sun Oct 11 16:17:05 EDT 2026 failed=0 =====
+===== run-baselines.sh: phase=check tree=both started: Sun Oct 11 16:17:10 EDT 2026 =====
+src: /Users/ascotti/Documents/code/ChakraCore
+log: /tmp/b3-baselines/rerun
+cmake: cmake version 4.4.0
+ninja: 1.13.2
+clang: Apple clang version 21.0.0 (clang-2100.1.1.101)
+python: Python 3.12.13
+ncpu: 10
+git: c3d11e7db modernize/baseline
+
+===== [debug-check] started: Sun Oct 11 16:17:10 EDT 2026 =====
+cmd: ninja -C build-legacy-debug check
+===== [debug-check] done: Sun Oct 11 16:20:03 EDT 2026 wall: 173s exit: 0 (log: /tmp/b3-baselines/rerun/11-debug-check.log) =====
+
+===== [release-check] started: Sun Oct 11 16:20:03 EDT 2026 =====
+cmd: ninja -C build-legacy-release check
+===== [release-check] done: Sun Oct 11 16:20:14 EDT 2026 wall: 11s exit: 0 (log: /tmp/b3-baselines/rerun/13-release-check.log) =====
+===== run-baselines.sh finished: Sun Oct 11 16:20:14 EDT 2026 failed=0 =====

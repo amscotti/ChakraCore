@@ -1,0 +1,31 @@
+ninja: Entering directory `build-legacy-release'
+[1/3] cd /Users/ascotti/Documents/code/ChakraCore/build-legacy-release/bin/ch && /opt/homebrew/Frameworks/Python.framework/Versions/3.14/bin/python3.14 /Users/ascotti/Documents/code/ChakraCore/bin/ch/jstoc.py /Users/ascotti/Documents/code/ChakraCore/bin/ch/DbgController.js controllerScript
+-- DbgController.js.h is up to date. skipping.
+[1/3] cd /Users/ascotti/Documents/code/ChakraCore/build-legacy-release/test && echo Running\ Hello\ World\ test && /Users/ascotti/Documents/code/ChakraCore/build-legacy-release/ch /Users/ascotti/Documents/code/ChakraCore/test/Basics/hello.js
+Running Hello World test
+hello world
+PASS
+[2/3] cd /Users/ascotti/Documents/code/ChakraCore/test/native-tests && ./test_native.sh /Users/ascotti/Documents/code/ChakraCore/build-legacy-release/ch Release /usr/bin/clang /usr/bin/clang++ /Users/ascotti/Documents/code/ChakraCore
+
+########## Running POSIX Native Tests ###########
+Using CC [/usr/bin/clang]
+Using CXX [/usr/bin/clang++]
+
+Testing test-static-c98
+Ignoring test-static-c98
+Testing test-static-char
+Ignoring test-static-char
+Testing test-static-char16
+Ignoring test-static-char16
+Testing test-static-external
+Ignoring test-static-external
+Testing test-static-native
+Ignoring test-static-native
+Testing test-static-pal
+Ignoring test-static-pal
+Testing test-static-property
+Ignoring test-static-property
+Testing test-static-property-symbol
+Ignoring test-static-property-symbol
+Testing test-shared-basic
+test-shared-basic : PASS

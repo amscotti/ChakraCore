@@ -1,0 +1,38 @@
+===== B3.1 legacy baselines started: Sun Oct 11 15:22:41 EDT 2026 =====
+cmake: cmake version 4.4.0
+ninja: 1.13.2
+clang: Apple clang version 21.0.0 (clang-2100.1.1.101)
+python: Python 3.12.13
+ncpu: 10
+git: c3d11e7db modernize/baseline
+
+===== [1/4] build-legacy-debug: ninja (default target) started: Sun Oct 11 15:22:41 EDT 2026 =====
+[1/4] done: Sun Oct 11 15:24:25 EDT 2026 -- debug-build exit: logged
+
+===== [2/4] build-legacy-debug: ninja check started: Sun Oct 11 15:24:25 EDT 2026 =====
+[2/4] done: Sun Oct 11 15:27:26 EDT 2026
+
+===== [3/4] build-legacy-release: ninja (default target) started: Sun Oct 11 15:27:26 EDT 2026 =====
+[3/4] done: Sun Oct 11 15:29:19 EDT 2026
+
+===== [4/4] build-legacy-release: ninja check started: Sun Oct 11 15:29:19 EDT 2026 =====
+[4/4] done: Sun Oct 11 15:29:21 EDT 2026
+===== B3.1 legacy baselines finished: Sun Oct 11 15:29:21 EDT 2026 =====
+===== run-baselines.sh: phase=configure tree=both started: Sun Oct 11 16:16:48 EDT 2026 =====
+src: /Users/ascotti/Documents/code/ChakraCore
+log: /tmp/b3-baselines
+cmake: cmake version 4.4.0
+ninja: 1.13.2
+clang: Apple clang version 21.0.0 (clang-2100.1.1.101)
+python: Python 3.12.13
+ncpu: 10
+git: c3d11e7db modernize/baseline
+
+===== [debug-configure] started: Sun Oct 11 16:16:48 EDT 2026 =====
+cmd: cmake -S . -B build-legacy-debug -GNinja -DCMAKE_BUILD_TYPE=Debug -DSTATIC_LIBRARY=1 -DDISABLE_JIT=ON -DICU_INCLUDE_PATH=/opt/homebrew/opt/icu4c/include -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang
+===== [debug-configure] done: Sun Oct 11 16:16:49 EDT 2026 wall: 1s exit: 0 (log: /tmp/b3-baselines/08-debug-configure.log) =====
+
+===== [release-configure] started: Sun Oct 11 16:16:49 EDT 2026 =====
+cmd: cmake -S . -B build-legacy-release -GNinja -DCMAKE_BUILD_TYPE=Release -DDISABLE_JIT=ON -DICU_INCLUDE_PATH=/opt/homebrew/opt/icu4c/include -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang
+===== [release-configure] done: Sun Oct 11 16:16:49 EDT 2026 wall: 0s exit: 0 (log: /tmp/b3-baselines/09-release-configure.log) =====
+===== run-baselines.sh finished: Sun Oct 11 16:16:49 EDT 2026 failed=0 =====
