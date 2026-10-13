@@ -1,0 +1,44 @@
+# B4 Linux baseline environment: native x64 (amd64) Ubuntu with JIT-capable toolchain.
+#
+# Chosen from legacy CI (azure-pipelines.yml, CMake job): the primary Linux
+# matrix legs run on `ubuntu-24.04` with deps
+# `ninja-build clang libicu-dev`, configured with
+# `cmake -GNinja -DCMAKE_BUILD_TYPE=<type>
+#   -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang ..`
+# followed by `ninja` and `ninja check`.
+#
+# GitHub-hosted ubuntu-24.04 runners already contain a base toolchain
+# (build-essential, cmake, python3), so the Dockerfile installs those
+# explicitly on top of the minimal ubuntu:24.04 image. Resolved package
+# versions are recorded in doc/b4-linux.md (environment contract).
+#
+# The engine source is NOT baked into the image: mount it at /src so the
+# same image serves any commit, e.g.
+#   docker run --rm --platform linux/amd64 -v /path/to/ChakraCore:/src \
+#       chakracore/b4-linux-x64 <configure/build/check commands>
+#
+# NOTE (2026-10-12, ARM64 Mac host): amd64 containers execute under qemu-user
+# emulation registered in the Linux VM that hosts dockerd. The rootless
+# dockerd in this project's lima VM cannot execute foreign-arch binaries
+# ("exec format error"); the rootful system dockerd in the same VM can.
+# See doc/b4-linux.md for the full environment contract and measurements.
+
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
+        clang \
+        cmake \
+        ninja-build \
+        python3 \
+        libicu-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+
+# Smoke gate for the environment contract: toolchain present and coherent.
+RUN clang++ --version && cmake --version | head -1 && ninja --version \
+    && python3 --version && dpkg-query -W libicu-dev

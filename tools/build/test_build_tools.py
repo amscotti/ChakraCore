@@ -241,6 +241,36 @@ class NativeVerdictTests(unittest.TestCase):
             self.assertIn("test-static-char FAILED", proc.stdout + proc.stderr)
 
 
+class EngineInitAbortTests(unittest.TestCase):
+    def test_abort_signed_string_is_engine_init_abort(self):
+        text = ("Testing test-shared-basic\n"
+                "qemu-x86_64: uncaught target signal 6 (Aborted) - "
+                "core dumped\n")
+        self.assertTrue(check_native.is_engine_init_abort(134, text))
+        self.assertTrue(check_native.is_engine_init_abort(-6, text))
+
+    def test_abort_signed_lines_is_engine_init_abort(self):
+        lines = ["Failed to generate 64bit JsBuiltin Bytecode\n",
+                 "Aborted (core dumped)\n"]
+        self.assertTrue(check_native.is_engine_init_abort(1, lines))
+
+    def test_pass_containing_output_is_not_engine_init_abort(self):
+        text = "test-shared-basic : PASS\nAborted (core dumped)\n"
+        self.assertFalse(check_native.is_engine_init_abort(134, text))
+
+    def test_abort_free_failure_is_not_engine_init_abort(self):
+        self.assertFalse(check_native.is_engine_init_abort(
+            1, "test-static-char FAILED\n"))
+        self.assertFalse(check_native.is_engine_init_abort(134, "output\n"))
+        self.assertFalse(check_native.is_engine_init_abort(
+            0, "Aborted (core dumped)\n"))
+
+    def test_bytecode_gate_uses_the_shared_predicate(self):
+        import verify_bytecode_pure
+        self.assertIs(verify_bytecode_pure.check_native.is_engine_init_abort,
+                      check_native.is_engine_init_abort)
+
+
 class BytecodePurityTests(unittest.TestCase):
     def make_fixture(self, root, verdict=0, interrupt=False):
         js_dir = root / "lib/Runtime/Library/InJavascript"
@@ -306,11 +336,25 @@ class BytecodePurityTests(unittest.TestCase):
 
 @unittest.skipUnless(os.name == "posix", "Mac check helpers use POSIX process groups")
 class SubprocessLifetimeTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        # The budgets below assume a fast interpreter startup; under
+        # emulation (qemu-user) startup alone can exceed them, so measure
+        # once and scale every budget. The mechanism under test (kill the
+        # group, bound the drain) is identical at any scale, and scaling
+        # up is assertion-safe (every bound is an upper bound or a
+        # presence check). Fast hosts keep SCALE=1: byte-identical budgets.
+        t0 = time.monotonic()
+        subprocess.run([sys.executable, "-c", "pass"], check=True,
+                       stdout=subprocess.DEVNULL)
+        cls.SCALE = 10 if time.monotonic() - t0 > 0.1 else 1
+
     def check_timeout(self, tee, parent_exits=False):
+        s = self.SCALE
         with tempfile.TemporaryDirectory(prefix="check-timeout-test-") as tmp:
             marker = Path(tmp) / "surviving-descendant"
-            grandchild = ("import time; from pathlib import Path; time.sleep(1); "
-                          "Path(%r).write_text('still running')" % str(marker))
+            grandchild = ("import time; from pathlib import Path; time.sleep(%d); "
+                          "Path(%r).write_text('still running')" % (s, str(marker)))
             parent = ("import subprocess, sys, time; "
                       "subprocess.Popen([sys.executable, '-c', %r]); "
                       "print('descendant-ready', flush=True); "
@@ -321,16 +365,16 @@ class SubprocessLifetimeTests(unittest.TestCase):
             with contextlib.redirect_stdout(output):
                 with self.assertRaises(subprocess.TimeoutExpired) as raised:
                     if tee:
-                        common.run_tee(cmd, timeout=0.3)
+                        common.run_tee(cmd, timeout=0.3 * s)
                     else:
-                        common.run_capture(cmd, timeout=0.3)
+                        common.run_capture(cmd, timeout=0.3 * s)
             elapsed = time.monotonic() - start
             if tee:
                 self.assertIn("descendant-ready", output.getvalue())
             else:
                 self.assertIn(b"descendant-ready", raised.exception.output)
-            self.assertLess(elapsed, 0.9, "timeout also has to bound pipe draining")
-            time.sleep(1.1)
+            self.assertLess(elapsed, 0.9 * s, "timeout also has to bound pipe draining")
+            time.sleep(1.1 * s)
             self.assertFalse(marker.exists(), "descendant survived the failed check")
 
     def test_tee_timeout_kills_descendants(self):

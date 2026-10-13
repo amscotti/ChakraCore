@@ -67,8 +67,12 @@ fn gateToolchain() void {
     if (builtin.zig_version.major != 0 or builtin.zig_version.minor != 17 or builtin.zig_version.patch != 0) {
         fail("requires Zig 0.17.0 (mise.toml pin); running {f}", .{builtin.zig_version});
     }
-    if (builtin.os.tag != .macos or builtin.cpu.arch != .aarch64) {
-        fail("profile is native-only: build machine must be ARM64 macOS for native run probes, have {t}-{t}", .{ builtin.cpu.arch, builtin.os.tag });
+    // B4.3: the Linux x86_64 graph (tools/build/linux.zig) runs natively
+    // in-container; the Mac graph below keeps its ARM64 macOS requirement.
+    const is_mac = builtin.os.tag == .macos and builtin.cpu.arch == .aarch64;
+    const is_linux = builtin.os.tag == .linux and builtin.cpu.arch == .x86_64;
+    if (!is_mac and !is_linux) {
+        fail("profile is native-only: build machine must be ARM64 macOS or x86_64 Linux for native run probes, have {t}-{t}", .{ builtin.cpu.arch, builtin.os.tag });
     }
 }
 
@@ -424,6 +428,11 @@ pub fn build(b: *std.Build) void {
     // Gate order: cheap toolchain/host check first, profile second --
     // a -Dprofile typo fails in ~0.2s, before any slow gate.
     gateToolchain();
+    // B4.3: Linux builds dispatch to the Linux graph (own gates inside).
+    if (builtin.os.tag == .linux) {
+        @import("tools/build/linux.zig").build(b);
+        return;
+    }
     const profile = gateProfile(b);
     const target = gateTarget(b);
     const optimize = gateOptimize(b, profile);

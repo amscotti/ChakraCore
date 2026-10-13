@@ -31,6 +31,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common
+import check_native
 
 
 def main(argv):
@@ -64,12 +65,21 @@ def main(argv):
             # reach the original headers through a retained symlink.
             scratch_js = os.path.join(tmp, "lib", "Runtime", "Library", "InJavascript")
             shutil.copytree(js_dir, scratch_js)
-            rc, _ = common.run_tee([sys.executable, scratch_regen] + rest, cwd=tmp)
+            rc, out = common.run_tee([sys.executable, scratch_regen] + rest, cwd=tmp)
     except subprocess.TimeoutExpired:
         print("verify_bytecode_pure: FAIL: verifier timed out", file=sys.stderr)
         return 1
     except OSError as e:
         print("verify_bytecode_pure: FAIL: %s" % e, file=sys.stderr)
+        return 1
+    if check_native.is_engine_init_abort(rc, out):
+        # B4.3: the verifier ch aborted in engine init (SIGABRT before
+        # main; see doc/b4-linux.md section 8) — BLOCKED (nothing was
+        # generated, so nothing was verified), not FAIL. Any other
+        # nonzero exit stays FAIL. No-op where aborts never happen.
+        print("verify_bytecode_pure: BLOCKED: bytecode ch aborted in "
+              "engine init; 0 verified, not 0/N "
+              "(doc/b4-linux.md section 8)", file=sys.stderr)
         return 1
     print("verify_bytecode_pure: source headers unchanged; regen exit %d" % rc)
     return rc
