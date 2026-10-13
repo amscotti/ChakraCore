@@ -25,8 +25,19 @@ ChakraAgent.prototype.createChildProcess = async function(...args) {
     }
     return child;
 };
+// eshost's lib/dependencies.js caches module/fixture source by basename
+// only (rawSourceCache) and never clears it, so within one run a later test
+// whose fixture shares a basename with an earlier test's fixture silently
+// receives the first test's source. Upstream exports rawSource.clear() but
+// nothing calls it; clear before each scenario instead. This is safe with
+// the 8-agent pool: ConsoleAgent.evalScript reads the cache
+// (getDependencies/rawSource.get) entirely within its synchronous prefix,
+// before its first await, so no other agent can interleave between the
+// clear and the reads. Cost is re-reading dependency files per scenario.
+const { rawSource } = require('eshost/lib/dependencies');
 const evaluate = ChakraAgent.prototype.evalScript;
 ChakraAgent.prototype.evalScript = async function(...args) {
+    rawSource.clear();
     const result = await evaluate.apply(this, args);
     result.exitStatus = this.exitStatus;
     return result;

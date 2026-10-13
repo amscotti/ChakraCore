@@ -18,13 +18,17 @@ repeatable upstream baseline **before** feature implementation.
   selected in a separately named run.
 
 The corpus follows the current draft and includes **post-ES2025 proposals**.
-Its pass rate is diagnostic, not an ES2025 conformance claim. An edition-policy
-filter, full host validation and negative-phase validation are required before
-using it as the Phase 3 exit gate.
+Its broad pass rate is diagnostic, not an ES2025 conformance claim. The C1
+edition policy (`edition-policy.json`, method in
+[doc/c1-triage.md](../../doc/c1-triage.md)) plus `analyze.py` produce the
+edition-selected score; full host validation and explicit negative-phase
+reporting are still required before using any result as the Phase 3 exit gate.
 
 The initial [recorded Mac baseline](../../doc/conformance-baseline.md) is
-61,565 passed / 31,576 failed across 93,141 scenarios. Passing negative tests
-for unsupported syntax do not prove that the feature is implemented.
+61,565 passed / 31,576 failed across 93,141 scenarios; edition-selected it is
+60,896 / 19,648 across 80,544 scenarios (`c1-baseline-analysis.json`).
+Passing negative tests for unsupported syntax do not prove that the feature
+is implemented.
 
 The npm overrides keep the pinned harness's dependency graph current at the
 specific affected leaves: debug/parseuri/cookie and the js-yaml CLI's unused
@@ -63,11 +67,28 @@ conformance check just because a host invocation returned zero.
 
 ## Controls and host adaptation
 
-Each run first verifies ten fixtures under `controls/test/`: successful sync,
+Each run first verifies eighteen fixtures under `controls/test/`: successful sync,
 async, module, parse-negative, runtime-negative, realm and buffer-detachment cases;
 plus deliberately failing assertions, wrong negative error types, and nonzero
 empty-output exits. All expected outcomes must match. This catches the shell's
 previously discovered silent rc=0 callback failure.
+
+Eight C1 fixtures additionally qualify negative **phases**: a parse negative
+whose preceding side-effect statements must not execute, a resolution
+(module-link) negative, a runtime `eval` SyntaxError negative, and five
+deliberate wrong-phase masquerades (code that executes and throws
+`SyntaxError` where parse/resolution was declared — including silent
+variants and a throw from a function named `code` — plus a parse error
+declared as runtime). The upstream validator checks only the error name
+and passes the masquerades, so `run.py` downgrades
+a control pass whose recorded evidence contradicts the declared phase:
+stdout execution markers, the tab-prefixed `\tat code (` parse frame, the
+`thrown at …:` module-loader prefix together with an empty JS stack, and
+Global/Module code runtime frames. This
+phase-evidence check applies to controls only; corpus scenarios are audited
+after the fact by `analyze.py` (next section). Limits are recorded in
+[doc/c1-triage.md](../../doc/c1-triage.md) §3 — qualification is CONDITIONAL,
+not full phase certification.
 
 `harness.js` retains the upstream compiler, error parser and runner, adding only
 testing-host adaptation:
@@ -102,10 +123,37 @@ the corpus total. Strict/default scenarios count separately, except module/raw
 tests. Preserve the revision, configuration and host skips when comparing runs.
 
 The upstream validator checks negative **error names**, not every distinction
-between parse, resolution and runtime phases. Native host limitations and newer
-proposal tests remain distinguishable from established edition coverage in the
-raw records. Resolve those limitations and validate an ES2025 policy before
-calling a full edition green; baseline data alone cannot certify it.
+between parse, resolution and runtime phases. C1 narrows that gap for the
+controls (above) and audits recorded corpus data, but explicit host-reported
+phase is still required before calling a full edition green; baseline data
+alone cannot certify it.
+
+## Edition policy and analysis (C1)
+
+`edition-policy.json` classifies every feature tag in the recorded baseline
+(151 required-ES2025, 27 post-ES2025-proposal, plus the host-optional
+`IsHTMLDDA`/`CanBlockIsFalse` skips), each exclusion with a one-line
+rationale anchored to the TC39 finished-proposals list or the corpus's own
+`features.txt`. A scenario is edition-selected iff none of its tags is
+post-ES2025 or host-optional; untagged scenarios stay in, and unknown tags
+are treated as required (never excluded on doubt).
+
+```sh
+python3 tools/test262/analyze.py --self-test
+python3 tools/test262/analyze.py --results out/test262-zig/results.json \
+  --summary out/test262-zig/summary.json \
+  --out-json tools/test262/c1-baseline-analysis.json
+```
+
+`analyze.py` (Python stdlib only) emits a small JSON + text report: broad vs
+edition-selected passed/failed/skipped and unique files, per-feature
+edition counts, failure buckets (required-feature-missing,
+engine-defect-on-existing, disabled-flag, host, post-ES2025 — first-match
+rules in the module docstring), top failure messages with co-occurring
+tags, and the negative-phase audit heuristic over passed negatives. The
+recorded-baseline output is committed as `c1-baseline-analysis.json`; the
+triage and shortlist built on it are in
+[doc/c1-triage.md](../../doc/c1-triage.md).
 
 ## Small feature observations
 

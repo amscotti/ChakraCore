@@ -4,7 +4,10 @@
 > CI recipe validated (CONDITIONAL on the first green post-merge Actions run);
 > **B4 is BLOCKED-with-green-build** — the Linux Zig build is green, but zero
 > behavior checks have run anywhere ([B4 gate verdict](b4-gate.md),
-> [post-B4 review](b4-review.md)). Engine/legacy-build references use baseline
+> [post-B4 review](b4-review.md)). **C1 is recorded (CONDITIONAL)** — edition
+> policy, triage and shortlist are in [c1-triage.md](c1-triage.md);
+> qualification is conditional on explicit host-reported negative phase
+> before any full result is certified. Engine/legacy-build references use baseline
 > `97e68c917`; execution evidence and the [B1-B3 review](b1-b3-review.md)
 > are recorded through 2026-10-12 local time.
 > This is a staged roadmap for a small maintained fork, not a dated delivery promise.
@@ -36,7 +39,7 @@ handling have been validated before its results are used as a completion gate.
 | B5 | First release package with controlled dependencies | B3; B4 for a two-platform package | Planned |
 | B6 | Windows feasibility and rollout; later target extensions | Stable build contracts | Separate expansion |
 | Z1 | One useful mixed C++/Zig unit behind a tested C ABI | B3; B4 if the unit ships on Linux | Optional pilot |
-| C1 | Qualified ES2025 test policy and triaged failures | Stable Mac build at B3 | Planned |
+| C1 | Qualified ES2025 test policy and triaged failures | Stable Mac build at B3 | Recorded (CONDITIONAL) |
 | C2 | Bounded compatibility batches and partial releases | C1; B4 before JIT-wide enablement | Planned |
 | C3 | Larger runtime/object-model feature projects | C1 and their feature prerequisites | Separate projects |
 | C4 | Verified full ES2025 core-language result | Required C2/C3 work and qualified runner | Long-term objective |
@@ -354,6 +357,28 @@ the edition-selected baseline and the broad diagnostic so snapshots remain compa
 Done when test selection, expected skips and host mechanisms are documented and
 the shortlist is backed by reproducible cases. Reforecast feature effort here.
 
+**Record (2026-10-13, HEAD `3c597e4cc`):** done, with a CONDITIONAL
+qualification. The edition policy (`tools/test262/edition-policy.json`,
+151 required / 27 post-ES2025 tags, conservative required-on-doubt rule),
+the analysis tool (`tools/test262/analyze.py`) and the triage/shortlist
+([c1-triage.md](c1-triage.md)) are recorded over the pinned baseline
+without re-running the corpus: edition-selected **60,896 passed / 19,648
+failed of 80,544 scenarios** against the broad 61,565 / 31,576 of 93,141,
+with failure buckets and a 14-item shortlist. Controls grew 10 → 18 and
+now catch deliberate wrong-phase negatives through observable phase
+evidence, and the recorded negatives audit finds 0 parse / 12 resolution
+/ 0 runtime suspects — but the evidence is host-shaped and cannot see
+every wrong phase, so **the negative-phase gap is narrowed, not finished**:
+explicit host-reported phase remains required before certifying any full
+(C4) result, exactly as scoped above. Enabled-flag measurement runs for
+BigInt/SAB/RegExp-symbol surfaces and B4 native x64 JIT verification stay
+open as shortlist prerequisites, not C1 blockers. A post-record review
+also found and fixed an eshost fixture-cache collision in the harness
+wrapper (2 measured scenario flips at `--jobs=1` over the affected
+directories; 888 recorded scenarios exposed); the baseline above was
+recorded pre-fix, so rerunning the affected subsets is owed before any C4
+certification ([c1-triage.md](c1-triage.md) §3/§8).
+
 #### C2 — Deliver bounded compatibility batches
 
 Prefer small, demonstrable gains; use the priority inventory below to select them,
@@ -496,7 +521,10 @@ Decision/rollback points:
   approved individually.
 - [ ] Z1: One useful C-ABI integration, **if selected**; further replacements
   decided independently.
-- [ ] C1: Edition policy, host/negative-phase qualification and root-cause shortlist.
+- [x] C1: Edition policy, host/negative-phase qualification and root-cause shortlist.
+  (*CONDITIONAL on explicit host-reported negative phase before any full
+  result is certified; policy, triage and shortlist are recorded in
+  [c1-triage.md](c1-triage.md), qualification limits in its §3.)
 - [ ] C2/C3: Feature-specific receipts and partial releases; required work remains
   tracked until C4, optional ecosystem scope has separate gates.
 - [ ] C4: Published qualified ES2025 result on the claimed default configurations.

@@ -92,3 +92,16 @@ builtins can also have semantic failures despite passing their legacy suites.
   every host mechanism is complete.
 - A new runtime/builtin implementation starts with focused test262 triage and a
   comparable baseline; keep the legacy behavior-parity gate green alongside it.
+
+## C1 addendum (2026-10-13)
+
+The edition policy, edition-selected baseline and root-cause triage for this
+recorded data are in [c1-triage.md](c1-triage.md), computed by
+`tools/test262/analyze.py` against `tools/test262/edition-policy.json`
+without re-running the corpus: **60,896 passed / 19,648 failed across
+80,544 edition-selected scenarios**, versus the broad 61,565 / 31,576
+above. The committed analysis is `tools/test262/c1-baseline-analysis.json`.
+Negative-phase qualification there is **CONDITIONAL** (controls now detect
+the demonstrated wrong-phase masquerades; explicit host phase reporting is
+still required before certifying a full result), so the limits above stand
+for any edition *claim*.

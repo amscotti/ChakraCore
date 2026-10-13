@@ -1,0 +1,966 @@
+{
+  "categories": {
+    "host-optional": "Applicability depends on the host, not the edition; already skipped by tools/test262/host-filter.js before execution, so zero scenarios appear in results.json.",
+    "post-ES2025-proposal": "Finished for ES2026/ES2027 or still a proposal; excluded from the edition-selected score, retained in the broad diagnostic.",
+    "required-ES2025": "In ECMA-262 at or before ES2025; counted in the edition-selected score."
+  },
+  "corpus_revision": "2e0a56762801e275a9fdf96dc49d90ba0cddcf63",
+  "finished_proposals_provenance": {
+    "url": "https://github.com/tc39/proposals/blob/main/finished-proposals.md",
+    "fetched": "2026-10-13",
+    "list_revision": "ee92ecf4754feca09a333fcf615b75422bf2c0f9",
+    "note": "Latest commit touching finished-proposals.md at fetch time (commit dated 2026-09-29). The 13 year-based post-ES2025 exclusions rest solely on this list's expected publication years; the pinned corpus features.txt Standard section already lists them (it is stale) and is not used as required-evidence for that set."
+  },
+  "disabled_by_default_flags": {
+    "ES6RegExPrototypeProperties": {
+      "features": [],
+      "rationale": "DEFAULT_CONFIG_ES6RegExPrototypeProperties is false (lib/Common/ConfigFlagsList.h:687-690; flag registered at lib/Common/ConfigFlagsList.h:1171); no dedicated feature tag exists, so failures surface under RegExp/Symbol tags and cannot be isolated by tag alone."
+    },
+    "ES6RegExSymbols": {
+      "features": [
+        "Symbol.match",
+        "Symbol.matchAll",
+        "Symbol.replace",
+        "Symbol.search",
+        "Symbol.split"
+      ],
+      "rationale": "DEFAULT_CONFIG_ES6RegExSymbols is false (lib/Common/ConfigFlagsList.h:692-696; flag registered at lib/Common/ConfigFlagsList.h:1180), so the RegExp.prototype[Symbol.*] protocol surface is off by default."
+    },
+    "ESBigInt": {
+      "features": [
+        "BigInt"
+      ],
+      "rationale": "DEFAULT_CONFIG_ESBigInt is false (lib/Common/ConfigFlagsList.h:669,1194); baseline host flags do not enable it."
+    },
+    "ESSharedArrayBuffer": {
+      "features": [
+        "SharedArrayBuffer",
+        "Atomics",
+        "Atomics.waitAsync"
+      ],
+      "rationale": "DEFAULT_CONFIG_ESSharedArrayBuffer is false (lib/Common/ConfigFlagsList.h:709,1189); Atomics tests in the selected trees exercise the SAB-gated surface."
+    }
+  },
+  "features": {
+    "AggregateError": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "Array.fromAsync": {
+      "category": "post-ES2025-proposal",
+      "rationale": "Finished proposal \"Array.fromAsync\" has expected publication year 2026, after ES2025; excluded from the edition-selected score only.",
+      "source": "TC39 finished-proposals list (plan \u00a74.2 anchor), expected publication year"
+    },
+    "Array.prototype.at": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "Array.prototype.flat": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "Array.prototype.flatMap": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "Array.prototype.includes": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "Array.prototype.values": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "ArrayBuffer": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "Atomics": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "Atomics.pause": {
+      "category": "post-ES2025-proposal",
+      "rationale": "Finished proposal \"Atomics.pause\" has expected publication year 2027, after ES2025; excluded from the edition-selected score only.",
+      "source": "TC39 finished-proposals list (plan \u00a74.2 anchor), expected publication year"
+    },
+    "Atomics.waitAsync": {
+      "category": "required-ES2025",
+      "rationale": "ES2024 (finished proposals, 2024: Atomics.waitAsync).",
+      "source": "TC39 finished-proposals list (plan \u00a74.2 anchor), expected publication year"
+    },
+    "BigInt": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "DataView": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "DataView.prototype.getFloat32": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "DataView.prototype.getFloat64": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "DataView.prototype.getInt16": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "DataView.prototype.getInt32": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "DataView.prototype.getInt8": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "DataView.prototype.getUint16": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "DataView.prototype.getUint32": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "DataView.prototype.setUint8": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "Error.isError": {
+      "category": "post-ES2025-proposal",
+      "rationale": "Finished proposal \"Error.isError\" has expected publication year 2026, after ES2025; excluded from the edition-selected score only.",
+      "source": "TC39 finished-proposals list (plan \u00a74.2 anchor), expected publication year"
+    },
+    "FinalizationRegistry": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "Float16Array": {
+      "category": "required-ES2025",
+      "rationale": "ES2025 (finished proposals, 2025: Float16 on TypedArrays/DataView/Math.f16round).",
+      "source": "TC39 finished-proposals list (plan \u00a74.2 anchor), expected publication year"
+    },
+    "Float32Array": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "Float64Array": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "Int16Array": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "Int32Array": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "Int8Array": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "Intl.Era-monthcode": {
+      "category": "post-ES2025-proposal",
+      "rationale": "Intl Era Monthcode proposal (ECMA-402 track); not a finished proposal for any edition <= ES2025; excluded from the edition-selected score only.",
+      "source": "corpus features.txt at pinned revision 2e0a5676: listed under \"Proposed language features\""
+    },
+    "Iterator.prototype.join": {
+      "category": "post-ES2025-proposal",
+      "rationale": "Iterator Join proposal; the pinned corpus's features.txt lists it under \"Proposed language features\", not in any published edition <= ES2025; excluded from the edition-selected score only.",
+      "source": "corpus features.txt at pinned revision 2e0a5676: listed under \"Proposed language features\""
+    },
+    "Map": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "Math.sumPrecise": {
+      "category": "post-ES2025-proposal",
+      "rationale": "Finished proposal \"Math.sumPrecise\" has expected publication year 2026, after ES2025; excluded from the edition-selected score only.",
+      "source": "TC39 finished-proposals list (plan \u00a74.2 anchor), expected publication year"
+    },
+    "Object.fromEntries": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "Object.hasOwn": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "Object.is": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "Promise": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "Promise.allSettled": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "Promise.any": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "Promise.prototype.finally": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "Proxy": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "Reflect": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "Reflect.construct": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "Reflect.set": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "Reflect.setPrototypeOf": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "RegExp.escape": {
+      "category": "required-ES2025",
+      "rationale": "ES2025 (finished proposals, 2025: RegExp.escape).",
+      "source": "TC39 finished-proposals list (plan \u00a74.2 anchor), expected publication year"
+    },
+    "Set": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "ShadowRealm": {
+      "category": "post-ES2025-proposal",
+      "rationale": "ShadowRealm proposal; not a finished proposal for any edition <= ES2025; excluded from the edition-selected score only.",
+      "source": "corpus features.txt at pinned revision 2e0a5676: listed under \"Proposed language features\""
+    },
+    "SharedArrayBuffer": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "String.fromCodePoint": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "String.prototype.at": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "String.prototype.endsWith": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "String.prototype.includes": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "String.prototype.isWellFormed": {
+      "category": "required-ES2025",
+      "rationale": "ES2024 (finished proposals, 2024: Well-Formed Unicode Strings).",
+      "source": "TC39 finished-proposals list (plan \u00a74.2 anchor), expected publication year"
+    },
+    "String.prototype.matchAll": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "String.prototype.replaceAll": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "String.prototype.toWellFormed": {
+      "category": "required-ES2025",
+      "rationale": "ES2024 (finished proposals, 2024: Well-Formed Unicode Strings).",
+      "source": "TC39 finished-proposals list (plan \u00a74.2 anchor), expected publication year"
+    },
+    "String.prototype.trimEnd": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "String.prototype.trimStart": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "Symbol": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "Symbol.asyncIterator": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "Symbol.hasInstance": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "Symbol.isConcatSpreadable": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "Symbol.iterator": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "Symbol.match": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "Symbol.matchAll": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "Symbol.prototype.description": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "Symbol.replace": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "Symbol.search": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "Symbol.species": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "Symbol.split": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "Symbol.toPrimitive": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "Symbol.toStringTag": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "Symbol.unscopables": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "Temporal": {
+      "category": "post-ES2025-proposal",
+      "rationale": "Finished proposal \"Temporal\" has expected publication year 2027, after ES2025; excluded from the edition-selected score only.",
+      "source": "TC39 finished-proposals list (plan \u00a74.2 anchor), expected publication year"
+    },
+    "TypedArray": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "TypedArray.prototype.at": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "Uint16Array": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "Uint32Array": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "Uint8Array": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "Uint8ClampedArray": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "WeakMap": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "WeakRef": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "WeakSet": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "__getter__": {
+      "category": "required-ES2025",
+      "rationale": "Annex B (ECMA-262); selected test/annexB tree is in scope, kept required by the conservative rule.",
+      "source": "ECMA-262 edition knowledge"
+    },
+    "__proto__": {
+      "category": "required-ES2025",
+      "rationale": "Annex B (ECMA-262); selected test/annexB tree is in scope, kept required by the conservative rule.",
+      "source": "ECMA-262 edition knowledge"
+    },
+    "__setter__": {
+      "category": "required-ES2025",
+      "rationale": "Annex B (ECMA-262); selected test/annexB tree is in scope, kept required by the conservative rule.",
+      "source": "ECMA-262 edition knowledge"
+    },
+    "align-detached-buffer-semantics-with-web-reality": {
+      "category": "required-ES2025",
+      "rationale": "Normative ECMA-262 change (features.txt cites tc39/ecma262#2164), pre-ES2025.",
+      "source": "ECMA-262 edition knowledge"
+    },
+    "arbitrary-module-namespace-names": {
+      "category": "required-ES2025",
+      "rationale": "Normative ECMA-262 change (features.txt cites tc39/ecma262#2154), pre-ES2025.",
+      "source": "ECMA-262 edition knowledge"
+    },
+    "array-find-from-last": {
+      "category": "required-ES2025",
+      "rationale": "ES2023 (finished proposals, 2023: Array find from last).",
+      "source": "TC39 finished-proposals list (plan \u00a74.2 anchor), expected publication year"
+    },
+    "array-grouping": {
+      "category": "required-ES2025",
+      "rationale": "ES2024 (finished proposals, 2024: Array Grouping).",
+      "source": "TC39 finished-proposals list (plan \u00a74.2 anchor), expected publication year"
+    },
+    "arraybuffer-transfer": {
+      "category": "required-ES2025",
+      "rationale": "ES2024 (finished proposals, 2024: ArrayBuffer transfer).",
+      "source": "TC39 finished-proposals list (plan \u00a74.2 anchor), expected publication year"
+    },
+    "arrow-function": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "async-functions": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "async-iteration": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "await-dictionary": {
+      "category": "post-ES2025-proposal",
+      "rationale": "Await Dictionary proposal; not a finished proposal for any edition <= ES2025; excluded from the edition-selected score only.",
+      "source": "corpus features.txt at pinned revision 2e0a5676: listed under \"Proposed language features\""
+    },
+    "caller": {
+      "category": "required-ES2025",
+      "rationale": "Annex B function caller/arguments properties; kept required by the conservative rule.",
+      "source": "ECMA-262 edition knowledge"
+    },
+    "change-array-by-copy": {
+      "category": "required-ES2025",
+      "rationale": "ES2023 (finished proposals, 2023: Change Array by Copy).",
+      "source": "TC39 finished-proposals list (plan \u00a74.2 anchor), expected publication year"
+    },
+    "class": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "class-fields-private": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "class-fields-private-in": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "class-fields-public": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "class-methods-private": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "class-static-block": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "class-static-fields-private": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "class-static-fields-public": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "class-static-methods-private": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "coalesce-expression": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "computed-property-names": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "const": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "cross-realm": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "decorators": {
+      "category": "post-ES2025-proposal",
+      "rationale": "Decorators proposal (plan \u00a74.2: Stage 2.7 stretch); not a finished proposal for any edition <= ES2025; excluded from the edition-selected score only.",
+      "source": "corpus features.txt at pinned revision 2e0a5676: listed under \"Proposed language features\""
+    },
+    "default-parameters": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "destructuring-assignment": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "destructuring-binding": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "dynamic-import": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "error-cause": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "error-stack-accessor": {
+      "category": "post-ES2025-proposal",
+      "rationale": "Error Stack Accessor proposal; not a finished proposal for any edition <= ES2025; excluded from the edition-selected score only.",
+      "source": "corpus features.txt at pinned revision 2e0a5676: listed under \"Proposed language features\""
+    },
+    "explicit-resource-management": {
+      "category": "post-ES2025-proposal",
+      "rationale": "Finished proposal \"Explicit Resource Management\" has expected publication year 2027, after ES2025; excluded from the edition-selected score only.",
+      "source": "TC39 finished-proposals list (plan \u00a74.2 anchor), expected publication year"
+    },
+    "exponentiation": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "export-star-as-namespace-from-module": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "for-in-order": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "for-of": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "generators": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "globalThis": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "hashbang": {
+      "category": "required-ES2025",
+      "rationale": "ES2023 (finished proposals, 2023: Hashbang Grammar).",
+      "source": "TC39 finished-proposals list (plan \u00a74.2 anchor), expected publication year"
+    },
+    "immutable-arraybuffer": {
+      "category": "post-ES2025-proposal",
+      "rationale": "Immutable Array Buffer proposal; not a finished proposal for any edition <= ES2025; excluded from the edition-selected score only.",
+      "source": "corpus features.txt at pinned revision 2e0a5676: listed under \"Proposed language features\""
+    },
+    "import-attributes": {
+      "category": "required-ES2025",
+      "rationale": "ES2025 (finished proposals, 2025: Import Attributes).",
+      "source": "TC39 finished-proposals list (plan \u00a74.2 anchor), expected publication year"
+    },
+    "import-bytes": {
+      "category": "post-ES2025-proposal",
+      "rationale": "Import Bytes proposal; not a finished proposal for any edition <= ES2025; excluded from the edition-selected score only.",
+      "source": "corpus features.txt at pinned revision 2e0a5676: listed under \"Proposed language features\""
+    },
+    "import-defer": {
+      "category": "post-ES2025-proposal",
+      "rationale": "Deferred import evaluation proposal; not a finished proposal for any edition <= ES2025; excluded from the edition-selected score only.",
+      "source": "corpus features.txt at pinned revision 2e0a5676: listed under \"Proposed language features\""
+    },
+    "import-text": {
+      "category": "post-ES2025-proposal",
+      "rationale": "Import Text proposal; not a finished proposal for any edition <= ES2025; excluded from the edition-selected score only.",
+      "source": "corpus features.txt at pinned revision 2e0a5676: listed under \"Proposed language features\""
+    },
+    "import.meta": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "iterator-chunking": {
+      "category": "post-ES2025-proposal",
+      "rationale": "Finished proposal \"iterator chunking\" has expected publication year 2027, after ES2025; excluded from the edition-selected score only.",
+      "source": "TC39 finished-proposals list (plan \u00a74.2 anchor), expected publication year"
+    },
+    "iterator-helpers": {
+      "category": "required-ES2025",
+      "rationale": "ES2025 (finished proposals, 2025: Sync Iterator helpers).",
+      "source": "TC39 finished-proposals list (plan \u00a74.2 anchor), expected publication year"
+    },
+    "iterator-includes": {
+      "category": "post-ES2025-proposal",
+      "rationale": "Finished proposal \"Iterator Includes\" has expected publication year 2027, after ES2025; excluded from the edition-selected score only.",
+      "source": "TC39 finished-proposals list (plan \u00a74.2 anchor), expected publication year"
+    },
+    "iterator-sequencing": {
+      "category": "post-ES2025-proposal",
+      "rationale": "Finished proposal \"Iterator Sequencing\" has expected publication year 2026, after ES2025; excluded from the edition-selected score only.",
+      "source": "TC39 finished-proposals list (plan \u00a74.2 anchor), expected publication year"
+    },
+    "joint-iteration": {
+      "category": "post-ES2025-proposal",
+      "rationale": "Finished proposal \"Joint Iteration\" has expected publication year 2027, after ES2025; excluded from the edition-selected score only.",
+      "source": "TC39 finished-proposals list (plan \u00a74.2 anchor), expected publication year"
+    },
+    "json-modules": {
+      "category": "required-ES2025",
+      "rationale": "ES2025 (finished proposals, 2025: JSON Modules).",
+      "source": "TC39 finished-proposals list (plan \u00a74.2 anchor), expected publication year"
+    },
+    "json-parse-with-source": {
+      "category": "post-ES2025-proposal",
+      "rationale": "Finished proposal \"JSON.parse source text access\" has expected publication year 2026, after ES2025; excluded from the edition-selected score only.",
+      "source": "TC39 finished-proposals list (plan \u00a74.2 anchor), expected publication year"
+    },
+    "json-superset": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "legacy-regexp": {
+      "category": "post-ES2025-proposal",
+      "rationale": "Legacy RegExp features proposal; not a finished proposal for any edition <= ES2025; excluded from the edition-selected score only.",
+      "source": "corpus features.txt at pinned revision 2e0a5676: listed under \"Proposed language features\""
+    },
+    "let": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "logical-assignment-operators": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "new.target": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "nonextensible-applies-to-private": {
+      "category": "post-ES2025-proposal",
+      "rationale": "Non-extensible Applies to Private proposal; not a finished proposal for any edition <= ES2025; excluded from the edition-selected score only.",
+      "source": "corpus features.txt at pinned revision 2e0a5676: listed under \"Proposed language features\""
+    },
+    "numeric-separator-literal": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "object-rest": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "object-spread": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "optional-catch-binding": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "optional-chaining": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "promise-try": {
+      "category": "required-ES2025",
+      "rationale": "ES2025 (finished proposals, 2025: Promise.try).",
+      "source": "TC39 finished-proposals list (plan \u00a74.2 anchor), expected publication year"
+    },
+    "promise-with-resolvers": {
+      "category": "required-ES2025",
+      "rationale": "ES2024 (finished proposals, 2024: Promise.withResolvers).",
+      "source": "TC39 finished-proposals list (plan \u00a74.2 anchor), expected publication year"
+    },
+    "proxy-missing-checks": {
+      "category": "required-ES2025",
+      "rationale": "Normative ECMA-262 change (features.txt cites tc39/ecma262#666), pre-ES2025.",
+      "source": "ECMA-262 edition knowledge"
+    },
+    "regexp-dotall": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "regexp-duplicate-named-groups": {
+      "category": "required-ES2025",
+      "rationale": "ES2025 (finished proposals, 2025: Duplicate named capture groups).",
+      "source": "TC39 finished-proposals list (plan \u00a74.2 anchor), expected publication year"
+    },
+    "regexp-lookbehind": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "regexp-match-indices": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "regexp-modifiers": {
+      "category": "required-ES2025",
+      "rationale": "ES2025 (finished proposals, 2025: RegExp Modifiers).",
+      "source": "TC39 finished-proposals list (plan \u00a74.2 anchor), expected publication year"
+    },
+    "regexp-named-groups": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "regexp-unicode-property-escapes": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "regexp-v-flag": {
+      "category": "required-ES2025",
+      "rationale": "ES2024 (finished proposals, 2024: RegExp v flag).",
+      "source": "TC39 finished-proposals list (plan \u00a74.2 anchor), expected publication year"
+    },
+    "resizable-arraybuffer": {
+      "category": "required-ES2025",
+      "rationale": "ES2024 (finished proposals, 2024: Resizable and growable ArrayBuffers).",
+      "source": "TC39 finished-proposals list (plan \u00a74.2 anchor), expected publication year"
+    },
+    "rest-parameters": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "set-methods": {
+      "category": "required-ES2025",
+      "rationale": "ES2025 (finished proposals, 2025: New Set methods).",
+      "source": "TC39 finished-proposals list (plan \u00a74.2 anchor), expected publication year"
+    },
+    "source-phase-imports": {
+      "category": "post-ES2025-proposal",
+      "rationale": "Source Phase Imports proposal; not a finished proposal for any edition <= ES2025; excluded from the edition-selected score only.",
+      "source": "corpus features.txt at pinned revision 2e0a5676: listed under \"Proposed language features\""
+    },
+    "source-phase-imports-module-source": {
+      "category": "post-ES2025-proposal",
+      "rationale": "Source Phase Imports proposal (test262 special specifier); not a finished proposal for any edition <= ES2025; excluded from the edition-selected score only.",
+      "source": "corpus features.txt at pinned revision 2e0a5676: listed under \"Proposed language features\""
+    },
+    "stable-array-sort": {
+      "category": "required-ES2025",
+      "rationale": "Normative ECMA-262 change (features.txt cites tc39/ecma262#1340), ES2019.",
+      "source": "ECMA-262 edition knowledge"
+    },
+    "stable-typedarray-sort": {
+      "category": "required-ES2025",
+      "rationale": "Normative ECMA-262 change (features.txt cites tc39/ecma262#1433), pre-ES2025.",
+      "source": "ECMA-262 edition knowledge"
+    },
+    "string-trimming": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "super": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "symbols-as-weakmap-keys": {
+      "category": "required-ES2025",
+      "rationale": "ES2023 (finished proposals, 2023: Symbols as WeakMap keys).",
+      "source": "TC39 finished-proposals list (plan \u00a74.2 anchor), expected publication year"
+    },
+    "tail-call-optimization": {
+      "category": "required-ES2025",
+      "rationale": "ES2015 proper tail calls; in ECMA-262 since ES2015, kept required by the conservative rule despite wide non-implementation.",
+      "source": "ECMA-262 edition knowledge"
+    },
+    "template": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "top-level-await": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "u180e": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    },
+    "uint8array-base64": {
+      "category": "post-ES2025-proposal",
+      "rationale": "Finished proposal \"Uint8Array to/from Base64\" has expected publication year 2026, after ES2025; excluded from the edition-selected score only.",
+      "source": "TC39 finished-proposals list (plan \u00a74.2 anchor), expected publication year"
+    },
+    "upsert": {
+      "category": "post-ES2025-proposal",
+      "rationale": "Finished proposal \"Upsert\" has expected publication year 2026, after ES2025; excluded from the edition-selected score only.",
+      "source": "TC39 finished-proposals list (plan \u00a74.2 anchor), expected publication year"
+    },
+    "well-formed-json-stringify": {
+      "category": "required-ES2025",
+      "rationale": "corpus features.txt at pinned revision 2e0a5676: listed under \"Standard language features\" (published ECMA-262), no post-ES2025 finished-proposal year; required by the conservative rule.",
+      "source": "corpus features.txt at pinned revision 2e0a5676"
+    }
+  },
+  "host_optional": [
+    {
+      "category": "host-optional",
+      "name": "IsHTMLDDA",
+      "rationale": "Optional $262.IsHTMLDDA exotic (document.all) exists only in HTML hosts; this host defines no fake exotic (harness.js deletes it).",
+      "recorded_skips": 70,
+      "scenarios_in_results": 0,
+      "source": "corpus features.txt \"Test-Harness Features\"; INTERPRETING.md $262.IsHTMLDDA; host-filter.js"
+    },
+    {
+      "category": "host-optional",
+      "name": "CanBlockIsFalse",
+      "rationale": "Tests requiring a non-blocking main agent (CanBlockIsFalse flag); the ch host agent can block, so these do not apply.",
+      "recorded_skips": 4,
+      "scenarios_in_results": 0,
+      "source": "INTERPRETING.md agent/CanBlock; host-filter.js (attrs.flags.CanBlockIsFalse)"
+    }
+  ],
+  "limits": [
+    "Tag granularity: a scenario tagged only with required tags (or untagged) can still encode a post-ES2025 draft semantic change to an existing builtin; features.txt asks proposal tests to carry a dedicated flag, but compliance is upstream discipline, not verified here.",
+    "Exclusion affects only the edition-selected score; excluded scenarios remain in the broad diagnostic totals and in results.json.",
+    "Annex B tags are kept required; whether Annex B is claimed for non-browser embedders is a product decision recorded in doc/c1-triage.md, not silently filtered here."
+  ],
+  "policy": "ES2025 edition selection over the pinned test262 corpus (C1)",
+  "rule": "A scenario is edition-selected iff none of its attrs.features tags is post-ES2025-proposal or host-optional. Scenarios with no feature tags (recorded as \"untagged\" in summary.json) are edition-selected: feature tags alone do not define the edition (plan C1), and untagged semantic tests of existing builtins stay in. Anything uncertain stays required; no required feature is ever excluded on doubt.",
+  "selected_patterns": [
+    "test/language/**/*.js",
+    "test/built-ins/**/*.js",
+    "test/annexB/**/*.js"
+  ]
+}

@@ -5,14 +5,17 @@
 #-------------------------------------------------------------------------------------------------------
 """Run a pinned, control-checked test262 diagnostic baseline with ChakraCore."""
 import argparse
+import atexit
 from collections import Counter
 from datetime import datetime, timezone
 import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
+import tempfile
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
@@ -50,55 +53,135 @@ def checkout(directory, prepare):
         raise ValueError('test262 checkout is modified; use a clean pinned checkout')
 
 
-def harness(binary, corpus, patterns, output, args, controls=False):
-    temporary = output.parent / ('control-temp' if controls else 'harness-temp')
-    temporary.mkdir(exist_ok=True)
-    command = [args.node, str(HERE / 'harness.js'), '--host-type=ch',
-               f'--host-path={binary}', f'--host-args={args.host_flags}',
-               f'--test262-dir={corpus}', f'--includes-dir={args.checkout / "harness"}',
-               f'--temp-dir={temporary}', f'--threads={args.jobs}', f'--timeout={args.timeout}',
-               '--reporter=json', '--reporter-keys=file,relative,attrs,scenario,result,rawResult',
-               f'--preprocessor={HERE / "host-filter.js"}', *patterns]
-    print(f'Running {"controls" if controls else "corpus"}: {patterns}', flush=True)
-    records, opened, closed = [], False, False
-    errors = output.with_suffix('.stderr.log')
-    environment = os.environ.copy()
-    environment['TMPDIR'] = str(temporary)
-    with output.open('w') as raw, errors.open('w') as stderr:
-        process = subprocess.Popen(command, cwd=corpus, stdout=subprocess.PIPE,
-                                   stderr=stderr, text=True, encoding='utf-8', env=environment)
+def acquire_output_lock(output):
+    # Two runs sharing one --output interleave controls.json/results.json
+    # into unparseable JSON while both exit 0; refuse instead. atexit covers
+    # normal returns and the sys.exit error paths; a hard-killed run leaves
+    # a stale lock, which the error message tells the user how to clear.
+    lock = output / '.run.lock'
+    try:
+        fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
         try:
-            for line in process.stdout:
-                raw.write(line)
-                content = line.strip().lstrip(',')
-                if content == '[':
-                    if opened:
-                        raise ValueError('harness emitted a duplicate result-array start')
-                    opened = True
-                    continue
-                if content == ']':
-                    closed = True
-                    continue
-                if not content:
-                    continue
-                if not opened or closed:
-                    raise ValueError('harness emitted results outside its result array')
-                record = json.loads(content)
-                if not isinstance(record.get('result', {}).get('pass'), bool):
-                    raise ValueError('harness emitted an invalid result')
-                records.append(record)
-                if len(records) % 5000 == 0:
-                    print(f'  {len(records)} scenarios completed', flush=True)
-        except BaseException:
-            process.kill()
-            process.wait()
-            raise
-        rc = process.wait()
-    if rc or not records or not opened or not closed:
-        raise ValueError(f'harness failed or emitted no scenarios (rc={rc}); see {errors}')
-    skips = [json.loads(line[len('TEST262_SKIP:'):]) for line in errors.read_text().splitlines()
-             if line.startswith('TEST262_SKIP:')]
-    return records, command, skips
+            holder = lock.read_text().strip()
+        except OSError:
+            holder = 'unknown pid'
+        raise ValueError(f'output directory is locked by another run ({holder}): {output}; '
+                         f'if no run is active, delete {lock} and retry')
+    os.write(fd, f'pid {os.getpid()}\n'.encode())
+    os.close(fd)
+    atexit.register(lock.unlink, missing_ok=True)
+
+
+def harness(binary, corpus, patterns, output, args, controls=False):
+    # Unique temp dir per run: a shared, never-cleaned dir lets stale files
+    # from an earlier (or concurrent) run leak into this one and flip
+    # outcomes, so never reuse a fixed location.
+    temporary = Path(tempfile.mkdtemp(
+        prefix='control-temp-' if controls else 'harness-temp-', dir=output.parent))
+    try:
+        command = [args.node, str(HERE / 'harness.js'), '--host-type=ch',
+                   f'--host-path={binary}', f'--host-args={args.host_flags}',
+                   f'--test262-dir={corpus}', f'--includes-dir={args.checkout / "harness"}',
+                   f'--temp-dir={temporary}', f'--threads={args.jobs}', f'--timeout={args.timeout}',
+                   '--reporter=json', '--reporter-keys=file,relative,attrs,scenario,result,rawResult',
+                   f'--preprocessor={HERE / "host-filter.js"}', *patterns]
+        print(f'Running {"controls" if controls else "corpus"}: {patterns}', flush=True)
+        records, opened, closed = [], False, False
+        errors = output.with_suffix('.stderr.log')
+        environment = os.environ.copy()
+        environment['TMPDIR'] = str(temporary)
+        with output.open('w') as raw, errors.open('w') as stderr:
+            process = subprocess.Popen(command, cwd=corpus, stdout=subprocess.PIPE,
+                                       stderr=stderr, text=True, encoding='utf-8', env=environment)
+            try:
+                for line in process.stdout:
+                    raw.write(line)
+                    content = line.strip().lstrip(',')
+                    if content == '[':
+                        if opened:
+                            raise ValueError('harness emitted a duplicate result-array start')
+                        opened = True
+                        continue
+                    if content == ']':
+                        closed = True
+                        continue
+                    if not content:
+                        continue
+                    if not opened or closed:
+                        raise ValueError('harness emitted results outside its result array')
+                    record = json.loads(content)
+                    if not isinstance(record.get('result', {}).get('pass'), bool):
+                        raise ValueError('harness emitted an invalid result')
+                    records.append(record)
+                    if len(records) % 5000 == 0:
+                        print(f'  {len(records)} scenarios completed', flush=True)
+            except BaseException:
+                process.kill()
+                process.wait()
+                raise
+            rc = process.wait()
+        if rc or not records or not opened or not closed:
+            raise ValueError(f'harness failed or emitted no scenarios (rc={rc}); see {errors}')
+        skips = [json.loads(line[len('TEST262_SKIP:'):]) for line in errors.read_text().splitlines()
+                 if line.startswith('TEST262_SKIP:')]
+        return records, command, skips
+    finally:
+        shutil.rmtree(temporary, ignore_errors=True)
+
+
+def phase_evidence(record):
+    """Observable phase shape of a control's recorded error (C1).
+
+    The upstream validator checks the negative error *name* only. For the
+    qualification controls we additionally require the observable shape to be
+    compatible with the declared phase: this host reports parse errors with a
+    tab-prefixed "\\tat code (f-...js:L:C)" frame (a runtime throw from a
+    function literally named ``code`` frames as "   at code (...)" with
+    spaces and must not match), module-link (resolution) errors with a
+    "thrown at <file>:" loader prefix *and* no JS stack (a loader prefix
+    accompanied by a JS stack falls through to frame classification, and an
+    empty stack without the loader prefix is no evidence at all), and
+    runtime errors with any frame shape other than the parse frame (a
+    Global/Module/eval frame is positive runtime evidence, but loader and
+    empty-stack shapes are also accepted for runtime by design: in the
+    recorded baseline, runtime negatives thrown before a frame is pushed
+    surface through the loader channel — see doc/c1-triage.md §3). Test code
+    must not have executed (no stdout) for parse/resolution phases. Keep in
+    sync with the audit heuristic in analyze.py; corpus-wide limits are in
+    doc/c1-triage.md.
+    """
+    raw = record.get('rawResult') or {}
+    stack = (raw.get('error') or {}).get('stack') or []
+    if (raw.get('stderr') or '').startswith('thrown at ') and not stack:
+        return 'loader-prefix'
+    if not stack:
+        return 'empty-stack'
+    source = stack[0].get('source') or ''
+    if 'Global code' in source or 'Module code' in source or 'eval code' in source:
+        return 'runtime-frame'
+    if '\tat code (' in source:
+        return 'parse-frame'
+    return 'other-frame'
+
+
+def control_passed(record):
+    """Harness outcome downgraded by negative-phase evidence (controls only)."""
+    if not record['result']['pass']:
+        return False
+    negative = (record.get('attrs') or {}).get('negative') or {}
+    phase = negative.get('phase')
+    if not phase:
+        return True
+    shape = phase_evidence(record)
+    executed = bool((record.get('rawResult') or {}).get('stdout'))
+    if phase == 'parse':
+        return not executed and shape in ('parse-frame', 'loader-prefix')
+    if phase == 'resolution':
+        return not executed and shape == 'loader-prefix'
+    if phase == 'runtime':
+        return shape != 'parse-frame'
+    return True
 
 
 def main():
@@ -122,6 +205,7 @@ def main():
     if not (HERE / 'node_modules/test262-harness/bin/run.js').is_file():
         parser.error('run npm ci --ignore-scripts in tools/test262 first')
     args.output.mkdir(parents=True, exist_ok=True)
+    acquire_output_lock(args.output)
     checkout(args.checkout, args.prepare)
     identity = artifact_identity(args.binary)
     controls, _, _ = harness(args.binary, HERE / 'controls', ['test/*.js'],
@@ -132,8 +216,9 @@ def main():
     for record in controls:
         name = Path(record['file']).name
         observed[name] += 1
-        if record['result']['pass'] != expected.get(name):
-            raise ValueError(f'control {name} produced the wrong outcome: {record["result"]}')
+        if control_passed(record) != expected.get(name):
+            raise ValueError(f'control {name} produced the wrong outcome: {record["result"]} '
+                             f'(phase evidence: {phase_evidence(record)})')
     if set(observed) != set(expected) or any(count != 1 for count in observed.values()):
         raise ValueError('control coverage is incomplete')
     print(f'Controls passed: {len(controls)} scenarios (including deliberate failures)', flush=True)
@@ -169,8 +254,11 @@ def main():
         'passed': totals['passed'], 'failed': totals['failed'], 'features': features,
         'controls': len(controls),
         'input_identity': identity,
-        'limitations': ['upstream validator checks negative error type, not every negative phase',
-                        'corpus includes post-ES2025 proposals; this is a diagnostic baseline'],
+        'limitations': ['upstream validator checks negative error type, not every negative phase; '
+                        'controls add phase-evidence checks and analyze.py audits recorded phases '
+                        '(see doc/c1-triage.md for the residual heuristic limits)',
+                        'corpus includes post-ES2025 proposals; use edition-policy.json + analyze.py '
+                        'for the edition-selected score'],
     }
     (args.output / 'summary.json').write_text(json.dumps(summary, indent=2, sort_keys=True) + '\n')
     print(f'test262: {totals["passed"]} passed / {totals["failed"]} failed; '
