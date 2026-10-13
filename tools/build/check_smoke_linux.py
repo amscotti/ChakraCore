@@ -24,7 +24,9 @@ Legs 3-5 need engine execution, which currently aborts during
 runtime init under qemu-user (see doc/b4-linux.md section 8: the
 same binary profile is green on native CI, so the abort is
 environmental). A leg that observes the abort signature (SIGABRT,
-silent stdout, qemu's `uncaught target signal` stderr line)
+silent stdout, and a pure qemu signal-6 stderr observation — at
+least one `uncaught target signal 6 (` occurrence and no other
+qemu-phrased signal occurrence)
 reports BLOCKED, not FAIL — but the gate still exits 1: BLOCKED
 is not green. The qemu-line requirement pins BLOCKED to guest
 deaths observed by qemu-user; a silent SIGABRT without it (a
@@ -55,12 +57,21 @@ ABORT_RCS = (134, -6)
 
 
 def is_abort(rc, out, err):
-    """True when the probe died in engine-init abort (qemu; b4-linux §8)."""
+    """True when the probe died in engine-init abort (qemu; b4-linux §8).
+
+    Pure signal 6 only: at least one qemu signal-6 occurrence in
+    err and zero occurrences of any other qemu-phrased signal
+    number (occurrence-based via common.qemu_target_signals, so a
+    mixed signal-6 + signal-11 stderr vetos BLOCKED on separate
+    lines or on one line carrying both), on top of the abort-rc
+    and empty-stdout conditions.
+    """
     if rc not in ABORT_RCS:
         return False
     if out.strip() != "":
         return False
-    return "uncaught target signal" in err
+    signals = common.qemu_target_signals(err)
+    return bool(signals) and all(n == 6 for n in signals)
 
 
 def blocked(name):
@@ -206,6 +217,30 @@ def self_test():
         bad += report("noisy rc-134 decoy is FAIL not BLOCKED",
                       (lambda e: e is not None and not e.startswith("BLOCKED"))(
                           check_snippet(decoy_noisy, snippet)))
+        # Signal 61 must not substring-match the signal-6 signature.
+        decoy_sig61 = decoy(
+            "decoy-sig61.sh",
+            "#!/bin/sh\necho 'qemu-x86_64: uncaught target signal 61 "
+            "(Real-time event 61) - core dumped' >&2\nexit 134\n")
+        bad += report("signal-61 rc-134 decoy is FAIL not BLOCKED",
+                      (lambda e: e is not None and not e.startswith("BLOCKED"))(
+                          check_snippet(decoy_sig61, snippet)))
+        bad += report("is_abort is False for signal 61",
+                      not is_abort(134, "",
+                                   "qemu-x86_64: uncaught target signal 61 "
+                                   "(Real-time event 61) - core dumped"))
+        sig6_line = ("qemu-x86_64: uncaught target signal 6 (Aborted) "
+                     "- core dumped")
+        sig11_line = ("qemu-x86_64: uncaught target signal 11 "
+                      "(Segmentation fault) - core dumped")
+        bad += report("is_abort is True for pure signal 6",
+                      is_abort(134, "", sig6_line))
+        bad += report("is_abort is False for mixed sig6+sig11 lines",
+                      not is_abort(134, "", sig6_line + "\n" + sig11_line))
+        bad += report("is_abort is False for mixed sig11+sig6 lines",
+                      not is_abort(134, "", sig11_line + "\n" + sig6_line))
+        bad += report("is_abort is False for mixed sig6+sig11 same line",
+                      not is_abort(134, "", sig6_line + "; " + sig11_line))
         # Positive pins: exact-text decoys pass their gates.
         decoy_ver = decoy("decoy-ver.sh",
                           "#!/bin/sh\necho 'ch version 1.13.0.0-beta'\nexit 0\n")

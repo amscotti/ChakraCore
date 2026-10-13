@@ -224,7 +224,10 @@ FINDING (environmental — no Chakra code is implicated):
   `/tmp/m1b.log`, image `chakracore/b4-linux-x64:rebuild-nocache`,
   `preload-probe` container) — all removed during review (the
   container by the reviewer's prune). No `.deb`s, shim sources, or
-  foreign binfmt images remain.
+  foreign binfmt images remain. (Temporal annotation: true at
+  B4.1 review time; superseded later — a `tonistiigi/binfmt`
+  image was subsequently observed in the rootful daemon, recorded
+  in [b4-gate.md](b4-gate.md) §1.3.)
 
 Consequence: no `ch`-executing baseline (smoke or `ninja check`) is
 obtainable under this qemu. The build itself is a valid artifact
@@ -267,7 +270,10 @@ reviews.
   accidentally pruned post-verification during review; key facts
   (exit 0, timestamps, 690/690 tail, diagnostics scan) are attested
   in the B4.1 reviews, and build artifacts survive in `build-xplat/`.
-  All reproducible from the Dockerfile + `git archive` above.
+  The image and source tree are reproducible from the Dockerfile +
+  `git archive` above; the qemu-user/binfmt handler is host-VM
+  provisioning outside the image, so execution results are not
+  reproducible from the image alone.
 
 ## 7. B4.2 toolchain pilot (appended 2026-10-12; reviewed §§1–6 above untouched)
 
@@ -551,8 +557,10 @@ marked.
 
 ### 8.4 First online PAL-config execution: 95/95
 
-- The B4.3 configure runs all 95 PAL checks natively in-container
-  (first online execution; B4.2 verified offline only). First run:
+- The B4.3 configure runs all 95 PAL checks in-container under
+  qemu-user emulation — online, but emulated, not native execution
+  (PAL-contract sensitivity S1; first online execution; B4.2
+  verified offline only). First run:
   **94/95** — only `HAVE_SYSCTL` deviated (contract 0, observed
   1).
 - The deviation exposed a probe-link infidelity (contract quirk
@@ -714,7 +722,9 @@ deleted after (finisher hygiene).
   metadata-gated — but no JS has executed under the zig-built
   engine, so behavior parity is unproven.
 - `zig ar` (LLVM) vs GNU `ar qc` archive-byte differences are not
-  analyzed (member order/content asserted, bytes not compared).
+  analyzed (member counts asserted by the metadata gate;
+  construction order comes from the generated tables; bytes not
+  compared).
 - The 8.2.2→10.2.3 qemu upgrade path is unrecorded (predecessor
   spike): a from-scratch B4 rebuild would need to re-derive the
   10.2.3 install (B5 owns the Dockerfile).

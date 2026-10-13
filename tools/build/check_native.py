@@ -108,25 +108,6 @@ def run_native(sh_path, work_dir, ch, build_type, cc, cxx, repo_root):
     return rc, "".join(lines)
 
 
-def is_engine_init_abort(rc, text):
-    """True when a failed run died in engine-init abort (qemu; §8).
-
-    B4.3 (doc/b4-linux.md section 8): under qemu-user every ch
-    invocation aborts in engine init (SIGABRT before main); the
-    aborting side prints an "Aborted" line into the (stderr-merged)
-    output. Shared by check_native (text is one string) and
-    verify_bytecode_pure (text is a line list). A zero exit is
-    never an abort, and any " : PASS" line means something
-    executed past init, so the run grades on its merits instead.
-    """
-    if rc == 0:
-        return False
-    joined = text if isinstance(text, str) else "".join(text)
-    if " : PASS" in joined:
-        return False
-    return "Aborted" in joined
-
-
 def check_output(text):
     """Return a list of failure strings (empty means green)."""
     failures = []
@@ -470,11 +451,16 @@ def main(argv):
         failures.append(makefile_err)
     if rc != 0:
         failures.insert(0, "test_native.sh exited %d" % rc)
-    # B4.3: the suite ch aborted in engine init (SIGABRT before main;
-    # see doc/b4-linux.md section 8) with zero passes — BLOCKED (0 ran),
-    # not FAIL. Any pass, or any abort-free failure, stays FAIL. No-op
-    # where aborts never happen.
-    if is_engine_init_abort(rc, text):
+    # B4.3: the suite ch died as an observed qemu guest SIGABRT in
+    # engine init (qemu-signature-only classifier in common; see
+    # doc/b4-linux.md section 8) with zero passes — BLOCKED (0 ran),
+    # not FAIL. Any pass, or any other failure, stays FAIL. No-op
+    # where qemu aborts never happen. The computed failure
+    # diagnostics print first either way: BLOCKED must not discard
+    # what the run actually showed.
+    if common.is_engine_init_abort(rc, text):
+        for f in failures:
+            print("check_native: BLOCKED: %s" % f, file=sys.stderr)
         print("check_native: BLOCKED: native ch aborted in engine init; "
               "0 ran, not 0/N (doc/b4-linux.md section 8)", file=sys.stderr)
         return 1

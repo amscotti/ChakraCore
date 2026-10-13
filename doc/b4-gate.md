@@ -106,7 +106,7 @@ cores each for no new fact).
   source files with "core" in the name (`test/WasmSpec/.../core`,
   Zig libc headers). Nothing deleted, nothing to delete.
 - `git status` / diff file-set: 4 modified + 14 untracked entries —
-  recorded verbatim in §5. `lib/`/`pal/`/`bin/`/`test/`/CMake clean.
+  landed as `9cba073d0` (§5). `lib/`/`pal/`/`bin/`/`test/`/CMake clean.
 - Legacy `/tmp/chakra-b4` intact: `build-xplat/ch` 2756104 bytes,
   `ELF 64-bit LSB pie executable, x86-64, ... with debug_info, not
   stripped`; `pal/src/config.h` MD5 `f73cd5b2968beaad6b6266a2cb61b06a`
@@ -149,7 +149,7 @@ Every B4.1–B4.3 doc pointer checked still resolves; **zero dangles**:
 | B4.1 execution | BLOCKED by qemu 8.2.2 `maps` SIGSEGV (Chakra-free repro, 4/4) | 0 tests ran | [b4-linux.md](b4-linux.md) §4 |
 | B4.2 pilot | `zig c++` compiles+links a PAL/Backend/WasmReader slice, exact reference flags | 5/5 compiles, 1/1 link, 0-byte logs both sides | [b4-linux.md](b4-linux.md) §7 |
 | B4.2 PAL contract | 127 settings classified, offline render byte-identical to reference | 4839 B, MD5 `f73cd5b2…` | [pal-config-contract-linux.md](pal-config-contract-linux.md), [b4-linux.md](b4-linux.md) §7.4 |
-| B4.3 PAL online | first native execution of the 95 checks; L14 link fix, no value changed | 94/95 → 95/95 | [b4-linux.md](b4-linux.md) §8.4 |
+| B4.3 PAL online | first online execution of the 95 checks, in-container under qemu-user emulation (not native; PAL-contract S1); L14 link fix, no value changed | 94/95 → 95/95 | [b4-linux.md](b4-linux.md) §8.4 |
 | B4.3 Zig build | full Linux graph green incl. Backend/WasmReader/wabt | 682/682, rc=0, 15 artifacts | [b4-linux.md](b4-linux.md) §8.5, [build-contract-linux.md](build-contract-linux.md) |
 | B4.3 metadata | artifact-identity gate green | .so 236/236, ch 1248⊇1, archives 667/90/1/11 | [b4-linux.md](b4-linux.md) §8.6, re-run §1.2 |
 | B4.3 execution | BLOCKED by root-caused qemu 10.2.3 address-layout abort (guest stack ~247TB vs PAL 128TB ceiling); legacy binary aborts identically | 0 JS ran on either binary | [b4-linux.md](b4-linux.md) §8.2 |
@@ -170,8 +170,17 @@ Every B4.1–B4.3 doc pointer checked still resolves; **zero dangles**:
 | 9 | "Done when clean native Linux CI proves behavior/ABI parity for the declared configuration and its floor. Runtime behavior must run on the target" | **NOT MET** | no native CI exists; no JS has executed on either binary; qemu is not the target |
 | 10 | enable the Linux Zig default per verified profile | **NO** | zero profiles verified for behavior; Test is build-verified only |
 
+> Errata (post-B4 review): see [b4-review.md](b4-review.md) — row 4 is
+> corrected PASS → PARTIAL there (`dlopen` never returned, so native
+> loading is unproven, and the PAL run probes were emulated per S1),
+> with a note on row 1. The grades above are preserved as recorded.
+
 Overall: **BLOCKED-with-green-build.** Build/probe/artifact clauses
-(2, 3, 4) are genuinely PASS with quoted numbers; every
+(2, 3, 4) are genuinely PASS with quoted numbers (row 4 as recorded;
+see the errata above — post-B4 review corrects row 4 PASS → PARTIAL
+in [b4-review.md](b4-review.md), since `dlopen` never returned so
+native loading is unproven and the PAL run probes were emulated per
+S1); every
 behavior clause (5, 6, 7) is BLOCKED with 0 ran; the "Done when"
 clause (9) is therefore unmet — not partially, but structurally:
 there is no behavior/ABI parity evidence at all, and the plan
@@ -217,64 +226,9 @@ container (changes the arch the baseline covers — plan §B4 wants
 x64), or weakening the gate to metadata-only (that is exactly what
 the "Done when" clause forbids).
 
-## 5. Scope audit (commit prep — DO NOT COMMIT; orchestrator commits after review)
+## 5. Scope audit
 
-`git status --short` at verdict time:
-
-```
- M build.zig
- M tools/build/check_native.py
- M tools/build/test_build_tools.py
- M tools/build/verify_bytecode_pure.py
-?? doc/b4-gate.md
-?? doc/b4-linux.md
-?? doc/build-contract-linux.md
-?? doc/pal-config-contract-linux.md
-?? tools/build/check_metadata_linux.py
-?? tools/build/check_regression_linux.py
-?? tools/build/check_smoke_linux.py
-?? tools/build/gen_tables_linux.py
-?? tools/build/linux.zig
-?? tools/build/linux_exports_ch.txt
-?? tools/build/linux_exports_so.txt
-?? tools/build/tables_linux.zig
-?? tools/docker/
-?? tools/pal-config-linux/
-```
-
-Exact `git add` set:
-
-```
-git add build.zig tools/build/check_native.py tools/build/test_build_tools.py tools/build/verify_bytecode_pure.py doc/b4-linux.md doc/build-contract-linux.md doc/pal-config-contract-linux.md doc/b4-gate.md tools/build/check_metadata_linux.py tools/build/check_regression_linux.py tools/build/check_smoke_linux.py tools/build/gen_tables_linux.py tools/build/linux.zig tools/build/linux_exports_ch.txt tools/build/linux_exports_so.txt tools/build/tables_linux.zig tools/docker/Dockerfile.ubuntu-x64 tools/pal-config-linux/contract.zig tools/pal-config-linux/probes.zig tools/pal-config-linux/check.zig
-```
-
-Suggested commit message (B1–B3 style):
-
-```
-B4: Linux x64/JIT Zig build green, behavior checks blocked on qemu (BLOCKED)
-
-Environment: ubuntu:24.04 container (chakracore/b4-linux-x64) under
-rootful dockerd + qemu-user; legacy x64/JIT build 690/690 green but
-ninja check unrunnable (qemu 8.2.2 maps SIGSEGV, then qemu 10.2.3
-address-layout engine-init abort — both root-caused, both hit the
-legacy binary identically, 0 tests ran anywhere).
-
-Toolchain pilot 5/5 compiles + 1/1 link on both compilers, zero
-warnings. Linux PAL contract: 127 settings, offline render
-byte-identical to reference, first online run 95/95. Linux Zig
-graph: 682/682 incl. Backend/WasmReader/wabt, metadata gate PASS
-(so exports 236/236, archives 667/90/1/11), selftests green.
-Bytecode/regression/native/JIT/WASM: BLOCKED, 0 ran.
-
-Mac no-regression: 1959/0 + 27-test tools file OK on the end-state
-tree. No Linux default rollout; path to green is a native x64
-runner (preferred) or a bounded qemu guest-base spike. See
-doc/b4-gate.md for the clause-by-clause verdict.
-```
-
-`lib/`/`pal/`/`bin/`/`test/`/CMake: ZERO diff. Untracked
-`tools/docker/` holds exactly `Dockerfile.ubuntu-x64`;
-`tools/pal-config-linux/` holds exactly the 3 `.zig` files.
+Landed as commit `9cba073d0` ("B4: Linux x64/JIT Zig build green, behavior checks blocked on qemu (BLOCKED)"); the pre-commit scope audit that stood here is superseded by that commit.
 
 ## 6. Lessons for future phases
 

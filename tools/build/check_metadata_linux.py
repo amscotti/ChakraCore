@@ -18,10 +18,32 @@ Sub-checks against the install prefix (zig-out):
      the reference .so has no libstdc++ NEEDED either, via
      -static-libstdc++ — same property, different runtime).
   3. Version-script exports (`nm -D --defined-only`): the EXACT
-     committed reference set for the .so
-     (tools/build/linux_exports_so.txt: 236 T symbols incl. DllMain
-     + Js* — export membership is source- and script-determined, so
-     any delta is a real finding). ch is a MEMBERSHIP gate, not an
+     committed set for the .so (tools/build/linux_exports_so.txt:
+     236 symbols incl. DllMain + Js* at B4 record time — export
+     membership is source- and script-determined, so any delta is
+     a real finding). Provenance honesty: the B4 record does NOT
+     document whether linux_exports_*.txt were captured from the
+     legacy reference artifacts or from the Zig-built artifacts,
+     so today this gate proves stability against the committed
+     lists, not parity with the legacy reference. Before any
+     parity claim, the lists must be regenerated from the legacy
+     artifacts on the first native host and diffed against the
+     committed files (the third field of every 3-field
+     `nm -D --defined-only` line regardless of its type letter
+     — exactly what nm_defined below collects — sorted):
+
+         nm -D --defined-only <legacy libChakraCore.so> \
+           | awk 'NF==3 {print $3}' | LC_ALL=C sort \
+           > /tmp/linux_exports_so.txt
+         nm -D --defined-only <legacy ch> \
+           | awk 'NF==3 {print $3}' | LC_ALL=C sort \
+           > /tmp/linux_exports_ch.txt
+         diff /tmp/linux_exports_so.txt linux_exports_so.txt
+         diff /tmp/linux_exports_ch.txt linux_exports_ch.txt
+
+     An empty export reference fails loudly in both export checks:
+     an emptied list must never make an exact-set or subset gate
+     vacuous. ch is a MEMBERSHIP gate, not an
      exact-set gate: GNU ld constrains ch's --export-dynamic by the
      version script (reference: exactly OnChakraCoreLoadedEntry),
      but LLD has no equivalent spelling — --export-dynamic exports
@@ -184,12 +206,20 @@ def nm_defined(path):
     return names
 
 
+def read_export_ref(ref_file):
+    """Sorted nonblank symbol names from a committed export list."""
+    with open(ref_file) as f:
+        return sorted(line.strip() for line in f if line.strip())
+
+
 def check_exports(path, ref_file):
     try:
-        with open(ref_file) as f:
-            want = sorted(line.strip() for line in f if line.strip())
+        want = read_export_ref(ref_file)
     except OSError as e:
         return "cannot read %s: %s" % (ref_file, e)
+    if not want:
+        return ("%s: export reference %s is empty; refusing a "
+                "vacuous exact-set gate" % (path, ref_file))
     try:
         have = sorted(nm_defined(path))
     except (OSError, ValueError) as e:
@@ -206,10 +236,12 @@ def check_exports(path, ref_file):
 
 def check_exports_subset(path, ref_file):
     try:
-        with open(ref_file) as f:
-            want = sorted(line.strip() for line in f if line.strip())
+        want = read_export_ref(ref_file)
     except OSError as e:
         return "cannot read %s: %s" % (ref_file, e)
+    if not want:
+        return ("%s: export reference %s is empty; refusing a "
+                "vacuous subset gate" % (path, ref_file))
     try:
         have = sorted(nm_defined(path))
     except (OSError, ValueError) as e:
@@ -336,6 +368,74 @@ def self_test():
                       check_file_bytes(p_cfg, markers=("NOPE\n",)) is not None)
         bad += report("missing file fails bytes gate",
                       check_file_bytes(os.path.join(tmp, "nope")) is not None)
+        # Export-reference pins: an empty reference must fail loudly
+        # in both export gates before any nm invocation (an emptied
+        # ch list previously made the subset gate vacuous).
+        p_empty = os.path.join(tmp, "empty-exports.txt")
+        with open(p_empty, "w") as f:
+            f.write("\n")
+        # Assert the guard's own "empty" wording, not mere failure:
+        # a plain `is not None` also passes via the nm error on this
+        # text file, so it would not notice the guard being removed.
+        empty_exact = check_exports(p_txt, p_empty)
+        bad += report("empty ref fails exact-set export gate naming empty",
+                      empty_exact is not None and "empty" in empty_exact)
+        empty_subset = check_exports_subset(p_txt, p_empty)
+        bad += report("empty ref fails subset export gate naming empty",
+                      empty_subset is not None and "empty" in empty_subset)
+        bad += report("missing ref fails exact-set export gate",
+                      check_exports(p_txt, os.path.join(tmp, "nope.txt"))
+                      is not None)
+        bad += report("missing ref fails subset export gate",
+                      check_exports_subset(p_txt,
+                                           os.path.join(tmp, "nope.txt"))
+                      is not None)
+        p_ref = os.path.join(tmp, "exports.txt")
+        with open(p_ref, "w") as f:
+            f.write("JsCreateRuntime\n")
+        bad += report("non-ELF target fails exact-set export gate",
+                      check_exports(p_txt, p_ref) is not None)
+        bad += report("non-ELF target fails subset export gate",
+                      check_exports_subset(p_txt, p_ref) is not None)
+        # Archive pins: a synthetic archive passes only at its real
+        # member count; a non-archive fails outright. The member
+        # count is observed via `ar t` itself (the tool the gate
+        # already assumes), so no count convention is hard-coded.
+        bad += report("text file fails archive gate",
+                      check_archive(p_txt, 1) is not None)
+        p_member = os.path.join(tmp, "member.o")
+        with open(p_member, "wb") as f:
+            f.write(good)
+        p_ar = os.path.join(tmp, "synthetic.a")
+        rc_ar, _, _ = common.run_capture(["ar", "rc", p_ar, p_member])
+        rc_t, out_t, _ = ((common.run_capture(["ar", "t", p_ar])
+                           if rc_ar == 0 else (1, "", "")))
+        n_members = len([line for line in out_t.splitlines()
+                         if line.strip()])
+        bad += report("synthetic archive passes at its member count",
+                      rc_ar == 0 and rc_t == 0 and n_members > 0
+                      and check_archive(p_ar, n_members) is None)
+        bad += report("archive count mismatch fails archive gate",
+                      rc_ar == 0 and rc_t == 0
+                      and check_archive(p_ar, n_members + 1) is not None)
+        # Header pins against a real lib/ source: identical staged
+        # bytes pass, tampered or missing staged bytes fail.
+        staged_rel, src_rel = HEADERS[0]
+        with open(os.path.join(ROOT, src_rel), "rb") as f:
+            real_header = f.read()
+        staged_path = os.path.join(tmp, staged_rel)
+        os.makedirs(os.path.dirname(staged_path))
+        with open(staged_path, "wb") as f:
+            f.write(real_header)
+        bad += report("identical staged header passes header gate",
+                      check_header(staged_rel, src_rel, tmp) is None)
+        with open(staged_path, "wb") as f:
+            f.write(real_header + b"\n// tampered\n")
+        bad += report("tampered staged header fails header gate",
+                      check_header(staged_rel, src_rel, tmp) is not None)
+        bad += report("missing staged header fails header gate",
+                      check_header("include/NoSuchHeader.h", src_rel, tmp)
+                      is not None)
     finally:
         import shutil
         shutil.rmtree(tmp, ignore_errors=True)
@@ -413,7 +513,9 @@ def main(argv):
                   file=sys.stderr)
         return 1
     print("check_metadata_linux: PASS: ELF + SONAME/NEEDED + exports "
-          "(236/1) + configs + headers + archives + marker all match")
+          "(%d/%d) + configs + headers + archives + marker all match"
+          % (len(read_export_ref(EXPORTS_SO)),
+             len(read_export_ref(EXPORTS_CH))))
     return 0
 
 

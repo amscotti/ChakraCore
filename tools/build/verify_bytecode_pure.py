@@ -31,7 +31,6 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common
-import check_native
 
 
 def main(argv):
@@ -72,11 +71,13 @@ def main(argv):
     except OSError as e:
         print("verify_bytecode_pure: FAIL: %s" % e, file=sys.stderr)
         return 1
-    if check_native.is_engine_init_abort(rc, out):
-        # B4.3: the verifier ch aborted in engine init (SIGABRT before
-        # main; see doc/b4-linux.md section 8) — BLOCKED (nothing was
-        # generated, so nothing was verified), not FAIL. Any other
-        # nonzero exit stays FAIL. No-op where aborts never happen.
+    if common.is_engine_init_abort(rc, out):
+        # B4.3: the verifier ch died as an observed qemu guest
+        # SIGABRT in engine init (qemu-signature-only classifier in
+        # common; see doc/b4-linux.md section 8) — BLOCKED (nothing
+        # was generated, so nothing was verified), not FAIL. Any
+        # other nonzero exit stays FAIL. No-op where qemu aborts
+        # never happen.
         print("verify_bytecode_pure: BLOCKED: bytecode ch aborted in "
               "engine init; 0 verified, not 0/N "
               "(doc/b4-linux.md section 8)", file=sys.stderr)

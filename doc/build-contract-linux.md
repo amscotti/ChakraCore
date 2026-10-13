@@ -367,7 +367,9 @@ the default build.
   metadata-gated — but no JS has executed under the zig-built
   engine, so behavior parity is unproven.
 - `zig ar` (LLVM) vs GNU `ar qc` archive-byte differences are not
-  analyzed (member order/content asserted, bytes not compared).
+  analyzed (member counts asserted by the metadata gate;
+  construction order comes from the generated tables; bytes not
+  compared).
 - Binary size (+44–102% vs reference, all debug info; ch
   roughly doubles at +101.5%, the rest +44–57%) is unattributed
   in detail (apparent DWARF-format verbosity; uninvestigated)

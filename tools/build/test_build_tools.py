@@ -34,6 +34,7 @@ ROOT = HERE.parent.parent
 sys.path.insert(0, str(HERE))
 import common
 import check_native
+import check_regression_linux
 import install_profile
 import test_incremental
 
@@ -242,33 +243,197 @@ class NativeVerdictTests(unittest.TestCase):
 
 
 class EngineInitAbortTests(unittest.TestCase):
-    def test_abort_signed_string_is_engine_init_abort(self):
-        text = ("Testing test-shared-basic\n"
-                "qemu-x86_64: uncaught target signal 6 (Aborted) - "
-                "core dumped\n")
-        self.assertTrue(check_native.is_engine_init_abort(134, text))
-        self.assertTrue(check_native.is_engine_init_abort(-6, text))
+    # Strict semantics: BLOCKED means an observed qemu guest SIGABRT
+    # only — at least one qemu `uncaught target signal 6 (`
+    # occurrence and zero occurrences of any other qemu-phrased
+    # signal number (occurrence-based; 61 never reads as 6),
+    # nonzero rc, and no ` : PASS` anywhere. A bare shell
+    # `Aborted` with no signal-6 occurrence, any other
+    # qemu-phrased signal, or a native abort grades FAIL.
+    QEMU_SIGABRT = ("qemu-x86_64: uncaught target signal 6 (Aborted) - "
+                    "core dumped\n")
 
-    def test_abort_signed_lines_is_engine_init_abort(self):
+    def test_qemu_signal6_string_is_engine_init_abort(self):
+        text = "Testing test-shared-basic\n" + self.QEMU_SIGABRT
+        self.assertTrue(common.is_engine_init_abort(134, text))
+        self.assertTrue(common.is_engine_init_abort(-6, text))
+        self.assertTrue(common.is_engine_init_abort(1, text))
+
+    def test_qemu_signal6_lines_is_engine_init_abort(self):
         lines = ["Failed to generate 64bit JsBuiltin Bytecode\n",
-                 "Aborted (core dumped)\n"]
-        self.assertTrue(check_native.is_engine_init_abort(1, lines))
+                 self.QEMU_SIGABRT]
+        self.assertTrue(common.is_engine_init_abort(1, lines))
+
+    def test_bare_shell_aborted_is_not_engine_init_abort(self):
+        self.assertFalse(common.is_engine_init_abort(
+            134, "Aborted (core dumped)\n"))
+        self.assertFalse(common.is_engine_init_abort(
+            -6, "Aborted (core dumped)\n"))
+        self.assertFalse(common.is_engine_init_abort(
+            1, ["Aborted (core dumped)\n"]))
+
+    def test_signal11_is_not_engine_init_abort(self):
+        text = ("qemu-x86_64: uncaught target signal 11 "
+                "(Segmentation fault) - core dumped\n")
+        self.assertFalse(common.is_engine_init_abort(139, text))
+        self.assertFalse(common.is_engine_init_abort(-11, text))
+
+    def test_mixed_signal6_and_signal11_separate_lines_is_not_abort(self):
+        sig11 = ("qemu-x86_64: uncaught target signal 11 "
+                 "(Segmentation fault) - core dumped\n")
+        self.assertFalse(common.is_engine_init_abort(
+            134, self.QEMU_SIGABRT + sig11))
+        self.assertFalse(common.is_engine_init_abort(
+            134, sig11 + self.QEMU_SIGABRT))
+        self.assertFalse(common.is_engine_init_abort(
+            134, [sig11, self.QEMU_SIGABRT]))
+
+    def test_mixed_signal6_and_signal11_same_line_is_not_abort(self):
+        same_line = ("qemu-x86_64: uncaught target signal 6 (Aborted) - "
+                     "core dumped; qemu-x86_64: uncaught target signal 11 "
+                     "(Segmentation fault) - core dumped\n")
+        self.assertFalse(common.is_engine_init_abort(134, same_line))
+        reverse = ("qemu-x86_64: uncaught target signal 11 "
+                   "(Segmentation fault) - core dumped; "
+                   "qemu-x86_64: uncaught target signal 6 (Aborted) - "
+                   "core dumped\n")
+        self.assertFalse(common.is_engine_init_abort(134, reverse))
+
+    def test_signal61_is_not_engine_init_abort(self):
+        # "signal 6" must not substring-match signals 60-69.
+        text = ("qemu-x86_64: uncaught target signal 61 "
+                "(Real-time event 61) - core dumped\n")
+        self.assertFalse(common.is_engine_init_abort(134, text))
+        self.assertFalse(common.is_engine_init_abort(1, text))
 
     def test_pass_containing_output_is_not_engine_init_abort(self):
-        text = "test-shared-basic : PASS\nAborted (core dumped)\n"
-        self.assertFalse(check_native.is_engine_init_abort(134, text))
+        text = "test-shared-basic : PASS\n" + self.QEMU_SIGABRT
+        self.assertFalse(common.is_engine_init_abort(134, text))
 
     def test_abort_free_failure_is_not_engine_init_abort(self):
-        self.assertFalse(check_native.is_engine_init_abort(
+        self.assertFalse(common.is_engine_init_abort(
             1, "test-static-char FAILED\n"))
-        self.assertFalse(check_native.is_engine_init_abort(134, "output\n"))
-        self.assertFalse(check_native.is_engine_init_abort(
+        self.assertFalse(common.is_engine_init_abort(134, "output\n"))
+        self.assertFalse(common.is_engine_init_abort(
             0, "Aborted (core dumped)\n"))
+        self.assertFalse(common.is_engine_init_abort(0, self.QEMU_SIGABRT))
 
     def test_bytecode_gate_uses_the_shared_predicate(self):
         import verify_bytecode_pure
-        self.assertIs(verify_bytecode_pure.check_native.is_engine_init_abort,
-                      check_native.is_engine_init_abort)
+        self.assertIs(verify_bytecode_pure.common.is_engine_init_abort,
+                      common.is_engine_init_abort)
+        self.assertFalse(hasattr(verify_bytecode_pure, "check_native"))
+
+
+class RegressionLinuxGradeTests(unittest.TestCase):
+    SIG6 = "qemu: uncaught target signal 6 (Aborted) - core dumped"
+    SIG11 = "qemu: uncaught target signal 11 (Segmentation fault) - core dumped"
+    SIG61 = "qemu: uncaught target signal 61 (Real-time event 61) - core dumped"
+
+    def setUp(self):
+        self._saved_baseline = check_regression_linux.RECORDED_BASELINE
+        check_regression_linux.RECORDED_BASELINE = {
+            "interpreted": (10, 0), "dynapogo": (10, 0)}
+
+    def tearDown(self):
+        check_regression_linux.RECORDED_BASELINE = self._saved_baseline
+
+    def test_rc0_matching_counts_passes(self):
+        verdict, _ = check_regression_linux.grade_variant(
+            "interpreted", 0, ["Total: passed 10, failed 0"])
+        self.assertEqual(verdict, "PASS")
+
+    def test_nonzero_rc_with_matching_counts_fails_and_names_rc(self):
+        verdict, detail = check_regression_linux.grade_variant(
+            "interpreted", 139, ["Total: passed 10, failed 0"])
+        self.assertEqual(verdict, "FAIL")
+        self.assertIn("139", detail)
+
+    def test_count_mismatch_at_rc0_fails(self):
+        verdict, _ = check_regression_linux.grade_variant(
+            "interpreted", 0, ["Total: passed 9, failed 1"])
+        self.assertEqual(verdict, "FAIL")
+
+    def test_all_signal6_zero_pass_is_blocked_despite_nonzero_rc(self):
+        verdict, _ = check_regression_linux.grade_variant(
+            "interpreted", 1,
+            ["Total: passed 0, failed 2", self.SIG6, self.SIG6])
+        self.assertEqual(verdict, "BLOCKED")
+
+    def test_all_signal11_zero_pass_fails(self):
+        verdict, _ = check_regression_linux.grade_variant(
+            "interpreted", 139,
+            ["Total: passed 0, failed 2", self.SIG11, self.SIG11])
+        self.assertEqual(verdict, "FAIL")
+
+    def test_summary_less_signal11_fails(self):
+        verdict, _ = check_regression_linux.grade_variant(
+            "interpreted", 139, ["some harness output", self.SIG11])
+        self.assertEqual(verdict, "FAIL")
+
+    def test_summary_less_signal6_is_blocked(self):
+        verdict, _ = check_regression_linux.grade_variant(
+            "interpreted", 134, ["some harness output", self.SIG6])
+        self.assertEqual(verdict, "BLOCKED")
+
+    def test_summary_less_signal61_fails(self):
+        verdict, _ = check_regression_linux.grade_variant(
+            "interpreted", 134, ["some harness output", self.SIG61])
+        self.assertEqual(verdict, "FAIL")
+
+    def test_all_signal61_zero_pass_fails(self):
+        verdict, _ = check_regression_linux.grade_variant(
+            "interpreted", 134,
+            ["Total: passed 0, failed 2", self.SIG61, self.SIG61])
+        self.assertEqual(verdict, "FAIL")
+
+    def test_mixed_signal6_and_signal11_zero_pass_fails(self):
+        # A non-signal-6 qemu death vetos BLOCKED even when the
+        # signal-6 count alone covers `failed`.
+        verdict, _ = check_regression_linux.grade_variant(
+            "interpreted", 1,
+            ["Total: passed 0, failed 2", self.SIG6, self.SIG11, self.SIG6])
+        self.assertEqual(verdict, "FAIL")
+
+    def test_mixed_same_line_zero_pass_fails(self):
+        # One physical line carrying both signals must still veto:
+        # the veto is per occurrence, not per line.
+        mixed_line = self.SIG6 + "; " + self.SIG11
+        verdict, _ = check_regression_linux.grade_variant(
+            "interpreted", 1,
+            ["Total: passed 0, failed 2", mixed_line, self.SIG6])
+        self.assertEqual(verdict, "FAIL")
+
+    def test_two_signal6_occurrences_on_one_line_count_as_two(self):
+        # The counting path counts signal-6 occurrences, not lines.
+        verdict, _ = check_regression_linux.grade_variant(
+            "interpreted", 1,
+            ["Total: passed 0, failed 2", self.SIG6 + "; " + self.SIG6])
+        self.assertEqual(verdict, "BLOCKED")
+
+    def test_summary_less_mixed_separate_lines_fails(self):
+        for lines in (["some harness output", self.SIG11, self.SIG6],
+                      ["some harness output", self.SIG6, self.SIG11]):
+            verdict, _ = check_regression_linux.grade_variant(
+                "interpreted", 134, lines)
+            self.assertEqual(verdict, "FAIL")
+
+    def test_summary_less_mixed_same_line_fails(self):
+        mixed_line = self.SIG6 + "; " + self.SIG11
+        verdict, _ = check_regression_linux.grade_variant(
+            "interpreted", 134, ["some harness output", mixed_line])
+        self.assertEqual(verdict, "FAIL")
+
+    def test_all_signal6_zero_pass_at_rc0_is_not_blocked(self):
+        verdict, _ = check_regression_linux.grade_variant(
+            "interpreted", 0,
+            ["Total: passed 0, failed 2", self.SIG6, self.SIG6])
+        self.assertEqual(verdict, "FAIL")
+
+    def test_summary_less_signal6_at_rc0_is_not_blocked(self):
+        verdict, _ = check_regression_linux.grade_variant(
+            "interpreted", 0, ["some harness output", self.SIG6])
+        self.assertEqual(verdict, "FAIL")
 
 
 class BytecodePurityTests(unittest.TestCase):

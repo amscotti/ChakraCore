@@ -2,7 +2,9 @@
 
 > Status: F0–B3 verified — three Mac profiles green, incremental proofs,
 > CI recipe validated (CONDITIONAL on the first green post-merge Actions run);
-> **B4 is the next work item**. Engine/legacy-build references use baseline
+> **B4 is BLOCKED-with-green-build** — the Linux Zig build is green, but zero
+> behavior checks have run anywhere ([B4 gate verdict](b4-gate.md),
+> [post-B4 review](b4-review.md)). Engine/legacy-build references use baseline
 > `97e68c917`; execution evidence and the [B1-B3 review](b1-b3-review.md)
 > are recorded through 2026-10-12 local time.
 > This is a staged roadmap for a small maintained fork, not a dated delivery promise.
@@ -30,7 +32,7 @@ handling have been validated before its results are used as a completion gate.
 | B1 | Explicit Mac build/PAL configuration contract | F0 | Verified |
 | B2 | Source-only Mac `zig build` and `zig build check` | B1 | Verified |
 | B3 | Mac build profiles, incremental correctness and CI | B2 | Verified* |
-| B4 | Native x64 Linux JIT/WASM/WABT proof and Zig build | B2; B3 before default rollout | **Next** (higher uncertainty) |
+| B4 | Native x64 Linux JIT/WASM/WABT proof and Zig build | B2; B3 before default rollout | **BLOCKED-with-green-build** (native baseline pending) |
 | B5 | First release package with controlled dependencies | B3; B4 for a two-platform package | Planned |
 | B6 | Windows feasibility and rollout; later target extensions | Stable build contracts | Separate expansion |
 | Z1 | One useful mixed C++/Zig unit behind a tested C ABI | B3; B4 if the unit ships on Linux | Optional pilot |
@@ -85,8 +87,10 @@ Boundaries:
 
 The Mac pilot does not compile Backend, WasmReader or WABT. It still obtains
 configuration through CMake before replay; B1/B2 must make Zig own that work.
-Windows, Linux JIT, other CPUs, LTO and a hermetic dependency package remain
-unproved. The number of diagnostic failures is neither the number of bugs nor an
+Windows, other CPUs, LTO and a hermetic dependency package remain
+unproved; Linux x64 JIT compiles and links in the B4 Zig graph, but its
+behavior is unproved — zero Linux behavior checks have run (B4 is
+BLOCKED-with-green-build). The number of diagnostic failures is neither the number of bugs nor an
 effort estimate: tags overlap, negative tests can pass for unsupported syntax, and
 the corpus contains later proposals (including Temporal).
 
@@ -102,6 +106,11 @@ Reference material:
   [test262 tooling](../tools/test262/README.md): repeatable evidence workflows.
 - [Memory-management guidance](memory-management.md): source-backed ownership,
   allocator, GC/FFI and invalidation rules for assistant-authored slices.
+- [B4 Linux baseline](b4-linux.md), [Linux build contract](build-contract-linux.md)
+  and [Linux PAL contract](pal-config-contract-linux.md): Linux environment,
+  sources/flags/links and configuration contracts.
+- [B4 gate verdict](b4-gate.md) and [post-B4 review](b4-review.md):
+  BLOCKED-with-green-build clause grades, errata and gate-fix record.
 
 ## 2. Phase 1 — Own the existing C/C++ build with Zig
 
@@ -480,7 +489,8 @@ Decision/rollback points:
   scoped default rollout. (*CONDITIONAL on the first green post-merge
   Actions run; recipe validated by lint + literal local simulation.)
 - [ ] B4: Linux native baseline/pilot and JIT/WASM/native/profile CI gates;
-  scoped Linux rollout.
+  scoped Linux rollout. (**BLOCKED-with-green-build**: the Zig build is
+  green, but zero behavior checks have run — [b4-gate.md](b4-gate.md).)
 - [ ] B5: Controlled dependency/artifact package and clean-machine floor testing.
 - [ ] B6: Windows feasibility, then declared-profile parity; further expansions
   approved individually.
@@ -491,11 +501,11 @@ Decision/rollback points:
   tracked until C4, optional ecosystem scope has separate gates.
 - [ ] C4: Published qualified ES2025 result on the claimed default configurations.
 
-**Next implementation:** B4. Obtain a Linux (Docker) environment, establish the
-native x64 legacy baseline with JIT, run the compiler/linker pilot there, then
-implement Linux PAL configuration/assembly/archives/ICU/loading in the Zig
-build with interpreted/dynapogo checks plus focused JIT/WASM/native tests —
-proven by native execution on the target, not cross-linking from Mac.
+**Next implementation:** B4 native execution. Provision a native x64 Linux
+runner via the preferred path to green in [b4-gate.md](b4-gate.md) §4(a),
+record the legacy then Zig interpreted/dynapogo counts natively, and judge
+behavior/ABI parity only from that native execution — not from emulation
+or cross-linking from Mac.
 
 ## Appendix — Evidence and deferred research
 

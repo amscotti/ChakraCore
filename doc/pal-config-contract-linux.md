@@ -551,7 +551,14 @@ this one and `tools/pal-config-linux/`):
   (every setting emitted exactly once, no fixed/checked overlap).
   Method: `python3 verify_contract.py` (B4.2 scratch, kept at
   `/Users/ascotti/b4-pilot-tmp/verify_contract.py`; rerun on the
-  lima VM, which sees both the repo and the reference tree).
+  lima VM, which sees both the repo and the reference tree). This
+  byte-exact comparison is an offline/VM procedure, not in-repo
+  enforcement: the in-repo wired test (the `offline render` test in
+  `tools/pal-config-linux/check.zig`, run by the Linux
+  `check-selftest` step via `tools/linux-gate-tests.zig`) asserts
+  that the rendered header carries the contract values, and
+  byte-exact equality with the reference header remains the
+  offline/VM procedure above until a native host exists.
 - Compile verification: B4.2 verified `contract.zig` and
   `check.zig` via standalone `zig build-obj` with a `mac_probes`
   module import (rc=0 both files, 0-byte logs; review-validated argv
@@ -593,7 +600,8 @@ Open uncertainties:
   x64; the MUST above stands.
 - **S2 (online check unexecuted):** RESOLVED by the first online
   execution (B4.3, 2026-10-12, qemu-user 10.2.3): `generate()` ran
-  all 95 checks natively in-container — 95/95 match after the L14
+  all 95 checks in-container under qemu-user emulation (not
+  natively; S1) — 95/95 match after the L14
   probe-link fix (the first run was 94/95 with only HAVE_SYSCTL
   deviating; the fix changed no contract value). See
   [b4-linux.md](b4-linux.md) §8.

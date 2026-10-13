@@ -66,12 +66,19 @@ def grade_variant(variant, rc, lines):
     if parsed is None:
         # No summary: either the run aborted early (engine init abort
         # under qemu shows up here) or the harness errored. Report what
-        # the log shows; grade BLOCKED only on qemu's `uncaught target
-        # signal` line (stderr-merged into the log). A bare abort rc,
-        # or the shell's "Aborted" echo without qemu's own line, is
-        # FAIL: the death wasn't observed as a qemu guest abort.
-        tail = "".join(lines[-15:]) if lines else ""
-        if "uncaught target signal" in tail:
+        # the log shows; grade BLOCKED only on a pure qemu signal-6
+        # observation over the whole log (stderr-merged): at least
+        # one `uncaught target signal 6 (` occurrence and zero
+        # occurrences of any other qemu-phrased signal number, with
+        # a nonzero rc — an observed qemu guest SIGABRT, aligned with
+        # common.is_engine_init_abort (occurrence-based, so a mixed
+        # signal-6 + signal-11 log vetos BLOCKED on separate lines
+        # or on one line carrying both). Any other qemu-phrased
+        # signal occurrence, rc == 0, a bare abort rc, or the shell's
+        # "Aborted" echo without a qemu signal-6 occurrence is FAIL:
+        # the death wasn't observed as a pure qemu guest SIGABRT.
+        signals = common.qemu_target_signals(lines)
+        if rc != 0 and signals and all(n == 6 for n in signals):
             return ("BLOCKED",
                     "no Total summary; engine init abort under qemu "
                     "(doc/b4-linux.md section 8); 0 ran, not 0/N")
@@ -80,16 +87,43 @@ def grade_variant(variant, rc, lines):
     passed, failed = parsed
     if passed == 0 and failed > 0:
         # A Total summary exists but nothing ran: every failure is
-        # qemu-abort-signed (the §8.2 init abort prints one `uncaught
-        # target signal` line per test; the qemu line itself contains
-        # `(Aborted)`). The >= is self-checking: a genuine
-        # failure without the signature falls through to FAIL below.
-        aborts = sum(1 for line in lines if "uncaught target signal" in line)
-        if aborts >= failed:
+        # qemu-abort-signed (the §8.2 init abort prints one
+        # `uncaught target signal 6 (` occurrence per test). Only
+        # signal-6 occurrences count, and any other qemu-phrased
+        # signal occurrence vetos BLOCKED — per occurrence, not per
+        # line, so one line carrying both 6 and 11 vetos and one
+        # line carrying two 6s counts two; a qemu signal-11 death
+        # or a bare "Aborted" with no signal-6 occurrence is a
+        # genuine failure. BLOCKED also requires rc != 0, aligned
+        # with common.is_engine_init_abort. Residual limitations:
+        # the >= counts signal-6 occurrences, not tests, so
+        # duplicate echoes of a signal-6 occurrence (e.g. a
+        # shell/tee repeat) could still inflate the count and mask
+        # a genuinely unsigned failure; and a death with no qemu
+        # signal line at all (e.g. a bare "Segmentation fault
+        # (core dumped)") carries no occurrence to veto or count,
+        # so it is not detectable by counting. The veto covers
+        # qemu-phrased other-signal occurrences only; duplicate
+        # signal-6 echoes and non-qemu-phrased deaths remain the
+        # residual limitations. This BLOCKED case is evaluated
+        # before the generic nonzero-rc FAIL: the harness exits
+        # nonzero precisely because every test died.
+        signals = common.qemu_target_signals(lines)
+        aborts = signals.count(6)
+        vetoed = any(n != 6 for n in signals)
+        if rc != 0 and not vetoed and aborts >= failed:
             return ("BLOCKED",
                     "passed 0 / failed %d, every failure abort-signed "
                     "(engine init abort under qemu; doc/b4-linux.md "
                     "section 8); 0 ran, not 0/N" % failed)
+    if rc != 0:
+        # A Total parsed, but the harness itself exited nonzero: the
+        # module contract fails loudly on nonzero exit regardless of
+        # counts — PASS requires rc == 0.
+        return ("FAIL",
+                "runtests.py exited rc=%d (passed %d / failed %d); "
+                "a nonzero exit fails loudly regardless of counts"
+                % (rc, passed, failed))
     base = RECORDED_BASELINE[variant]
     if base is None:
         return ("FAIL",
@@ -233,6 +267,81 @@ def self_test():
                                 ["Total: passed 0, failed 2",
                                  "Aborted", "Aborted"])[0]
                   == "FAIL")
+    # Baseline-fed controls: temporarily monkeypatch RECORDED_BASELINE
+    # with a synthetic recorded pair, then restore it (the all-None
+    # pin above must still hold afterwards).
+    segv2 = ["qemu: uncaught target signal 11 (Segmentation fault) - "
+             "core dumped"] * 2
+    saved_baseline = RECORDED_BASELINE
+    try:
+        globals()["RECORDED_BASELINE"] = {
+            "interpreted": (10, 0), "dynapogo": (10, 0)}
+        bad += report("recorded baseline + rc=0 grades PASS",
+                      grade_variant("interpreted", 0,
+                                    ["Total: passed 10, failed 0"])[0]
+                      == "PASS")
+        verdict, detail = grade_variant("interpreted", 139,
+                                        ["Total: passed 10, failed 0"])
+        bad += report("matching counts + rc=139 grades FAIL naming rc",
+                      verdict == "FAIL" and "139" in detail)
+        bad += report("all-signal-11 0/N grades FAIL",
+                      grade_variant("interpreted", 139,
+                                    ["Total: passed 0, failed 2"]
+                                    + segv2)[0]
+                      == "FAIL")
+        bad += report("summary-less signal-11 grades FAIL",
+                      grade_variant("interpreted", 139,
+                                    ["some harness output", segv2[0]])[0]
+                      == "FAIL")
+        sig61 = ("qemu: uncaught target signal 61 (Real-time event 61) "
+                 "- core dumped")
+        bad += report("all-signal-61 0/N grades FAIL",
+                      grade_variant("interpreted", 134,
+                                    ["Total: passed 0, failed 2",
+                                     sig61, sig61])[0]
+                      == "FAIL")
+        bad += report("summary-less signal-61 grades FAIL",
+                      grade_variant("interpreted", 134,
+                                    ["some harness output", sig61])[0]
+                      == "FAIL")
+        bad += report("mixed sig6+sig11 0/N grades FAIL (veto)",
+                      grade_variant("interpreted", 1,
+                                    ["Total: passed 0, failed 2",
+                                     abort2[0], segv2[0], abort2[0]])[0]
+                      == "FAIL")
+        mixed_line = abort2[0] + "; " + segv2[0]
+        bad += report("mixed sig6+sig11 same-line 0/N grades FAIL (veto)",
+                      grade_variant("interpreted", 1,
+                                    ["Total: passed 0, failed 2",
+                                     mixed_line, abort2[0]])[0]
+                      == "FAIL")
+        bad += report("two sig6 on one line 0/2 grades BLOCKED",
+                      grade_variant("interpreted", 1,
+                                    ["Total: passed 0, failed 2",
+                                     abort2[0] + "; " + abort2[0]])[0]
+                      == "BLOCKED")
+        bad += report("summary-less mixed sig6+sig11 grades FAIL (veto)",
+                      grade_variant("interpreted", 134,
+                                    ["some harness output", segv2[0],
+                                     abort2[0]])[0]
+                      == "FAIL")
+        bad += report("summary-less mixed same-line grades FAIL (veto)",
+                      grade_variant("interpreted", 134,
+                                    ["some harness output", mixed_line])[0]
+                      == "FAIL")
+        bad += report("all-signal-6 0/N at rc=0 grades FAIL not BLOCKED",
+                      grade_variant("interpreted", 0,
+                                    ["Total: passed 0, failed 2"]
+                                    + abort2)[0]
+                      == "FAIL")
+        bad += report("summary-less signal-6 at rc=0 grades FAIL",
+                      grade_variant("interpreted", 0,
+                                    ["some harness output", abort2[0]])[0]
+                      == "FAIL")
+    finally:
+        globals()["RECORDED_BASELINE"] = saved_baseline
+    bad += report("baseline restored to all-None after controls",
+                  all(v is None for v in RECORDED_BASELINE.values()))
     print("check_regression_linux self-test: %s"
           % ("ALL NEGATIVE CONTROLS BEHAVE" if bad == 0
              else "%d CONTROL(S) MISBEHAVE" % bad))

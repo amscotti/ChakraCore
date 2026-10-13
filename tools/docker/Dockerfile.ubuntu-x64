@@ -23,7 +23,13 @@
 # ("exec format error"); the rootful system dockerd in the same VM can.
 # See doc/b4-linux.md for the full environment contract and measurements.
 
-FROM ubuntu:24.04
+# Base pinned by the digest recorded in doc/b4-linux.md section 1.
+# apt package versions are recorded in doc/b4-linux.md section 1 and
+# deliberately not version-pinned here (controlled dependencies are
+# B5, plan section 2.1), and qemu-user/binfmt is host-VM provisioning
+# outside this image, so execution verdicts are not reproducible
+# from the image alone.
+FROM ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55
 
 ENV DEBIAN_FRONTEND=noninteractive
 

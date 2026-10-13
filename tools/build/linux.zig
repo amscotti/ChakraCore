@@ -94,16 +94,34 @@ fn gateTarget(b: *std.Build) void {
         fail("unsupported object format {t}: this profile builds only ELF", .{t.ofmt});
 }
 
+fn glibcFirstLineMatches(first: []const u8) bool {
+    // First line looks like "ldd (Ubuntu GLIBC 2.39-0ubuntu8.9) 2.39".
+    // Exact-match the trailing bare version token (the Mac gateSdk
+    // exact-compare pattern in build.zig): a substring search for
+    // "2.39" would also pass on e.g. a "12.39" vendor string or a
+    // "2.390" token while the actual glibc version differs.
+    const trimmed = std.mem.trimEnd(u8, first, " \t\r");
+    const sp = std.mem.lastIndexOfScalar(u8, trimmed, ' ') orelse return false;
+    return std.mem.eql(u8, trimmed[sp + 1 ..], profile_glibc);
+}
+
+test "glibc gate exact-matches the trailing version token" {
+    try std.testing.expect(glibcFirstLineMatches("ldd (Ubuntu GLIBC 2.39-0ubuntu8.9) 2.39"));
+    try std.testing.expect(!glibcFirstLineMatches("ldd (Ubuntu GLIBC 2.39-0ubuntu8.9) 2.40"));
+    try std.testing.expect(!glibcFirstLineMatches("ldd (vendor 12.39) 2.38"));
+    try std.testing.expect(!glibcFirstLineMatches("ldd (GNU libc) 2.390"));
+    try std.testing.expect(!glibcFirstLineMatches(""));
+}
+
 fn gateGlibc(b: *std.Build) void {
     const res = b.runFallible(&.{ "ldd", "--version" }, .{});
     const out: []const u8 = switch (res) {
         .success => |o| o,
         else => fail("cannot run ldd --version: glibc floor unverifiable (need {s})", .{profile_glibc}),
     };
-    // First line looks like "ldd (Ubuntu GLIBC 2.39-0ubuntu8.9) 2.39".
     var it = std.mem.splitScalar(u8, out, '\n');
     const first = it.next() orelse fail("cannot parse ldd --version: glibc floor unverifiable (need {s})", .{profile_glibc});
-    if (std.mem.indexOf(u8, first, profile_glibc) == null)
+    if (!glibcFirstLineMatches(first))
         fail("unsupported glibc ({s}): this profile requires the Ubuntu 24.04 floor glibc {s}", .{ first, profile_glibc });
 }
 
@@ -550,6 +568,18 @@ pub fn build(b: *std.Build) void {
     tools_test.addFileArg(b.path("tools/build/test_build_tools.py"));
     tools_test.stdio = .inherit;
     selftest_top.dependOn(&tools_test.step);
+    // Zig unit tests for the Linux gates: the PAL-config offline
+    // render test (pal-config-linux/check.zig) and the gate-helper
+    // tests above, collected via the tools/linux-gate-tests.zig
+    // test root (see that file for why the root lives at tools/).
+    const gate_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/linux-gate-tests.zig"),
+            .target = b.graph.host,
+            .optimize = .debug,
+        }),
+    });
+    selftest_top.dependOn(&b.addRunArtifact(gate_tests).step);
     const tools_test_top = b.step("check-build-tools", "Failure-path tests for the verification tools (no engine build required)");
     tools_test_top.dependOn(&tools_test.step);
 
