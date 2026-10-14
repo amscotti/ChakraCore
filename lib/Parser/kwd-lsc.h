@@ -185,6 +185,10 @@ TOK_DCL(tkStrTmplEnd    , No, knopNone   , No, knopNone   ) // }...`         Sin
 
 TOK_DCL(tkComment       , No, knopNone, No, knopNone ) // Comment for syntax coloring
 TOK_DCL(tkScanError     , No, knopNone, No, knopNone ) // Error in syntax coloring
+TOK_DCL(tkOptChain      , No, knopNone   , No, knopNone   ) // ?.
+TOK_DCL(tkAsgLogAnd     ,Asg, knopAsgLogAnd , No, knopNone   ) // &&=
+TOK_DCL(tkAsgLogOr      ,Asg, knopAsgLogOr  , No, knopNone   ) // ||=
+TOK_DCL(tkAsgCoalesce   ,Asg, knopAsgCoalesce, No, knopNone   ) // ??=
 
 
 #undef TOK_DCL

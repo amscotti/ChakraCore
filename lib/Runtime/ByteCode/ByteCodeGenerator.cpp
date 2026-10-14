@@ -268,6 +268,7 @@ void Visit(ParseNode *pnode, ByteCodeGenerator* byteCodeGenerator, PrefixFn pref
     case knopCall:
         Visit(pnode->AsParseNodeCall()->pnodeTarget, byteCodeGenerator, prefix, postfix);
         Visit(pnode->AsParseNodeCall()->pnodeArgs, byteCodeGenerator, prefix, postfix);
+        Visit(pnode->AsParseNodeCall()->pnodeThisOverride, byteCodeGenerator, prefix, postfix);
 
         if (pnode->AsParseNodeCall()->isSuperCall)
         {
@@ -290,6 +291,12 @@ void Visit(ParseNode *pnode, ByteCodeGenerator* byteCodeGenerator, PrefixFn pref
         Visit(pnode->AsParseNodeTri()->pnode1, byteCodeGenerator, prefix, postfix);
         Visit(pnode->AsParseNodeTri()->pnode2, byteCodeGenerator, prefix, postfix);
         Visit(pnode->AsParseNodeTri()->pnode3, byteCodeGenerator, prefix, postfix);
+        break;
+    case knopOptChain:
+        // pnode3 is the segment temp; it carries no expression to bind and is
+        // reached through the tail's temp refs.
+        Visit(pnode->AsParseNodeTri()->pnode1, byteCodeGenerator, prefix, postfix);
+        Visit(pnode->AsParseNodeTri()->pnode2, byteCodeGenerator, prefix, postfix);
         break;
     case knopList:
         VisitList(pnode, byteCodeGenerator, prefix, postfix);
@@ -4814,6 +4821,49 @@ void AssignAwaitRegisters(ByteCodeGenerator* byteCodeGenerator)
 // These include constants (null, 3.7, this) and locals that use registers as their home locations.
 // Assign the location fields of parse nodes whose values are constants/locals with permanent/known registers.
 // Re-usable expression temps are assigned during the final Emit pass.
+// For a knopOptChain segment opened by '?.()' on a member target, find the
+// temp node holding the member base ('this') value, or nullptr for other
+// chain forms. The optional call sits on the tail's left spine. A nested
+// '?.()' segment in the tail (o.m?.().g?.()) continues that spine through
+// its base, which is where the earlier segment's call landed when the
+// later segment was opened without closing this one, so the walk descends
+// into a nested segment's base and returns the first override found: on
+// that extended spine the topmost override is this segment's own (a
+// value-form segment on the spine has no override below it, because
+// opening a value form closes any open call-form segment first). Keep in
+// sync with GetOptChainThisTempNode in ByteCodeEmitter.cpp, which decides
+// how the segment base is emitted; the two must agree on every shape or
+// the temp is written/read through an unassigned register.
+ParseNode * GetOptChainThisTemp(ParseNodeTri * pnodeChain)
+{
+    ParseNode * pnode = pnodeChain->pnode2;
+    while (pnode != nullptr)
+    {
+        if (pnode->nop == knopCall)
+        {
+            ParseNode * thisOverride = pnode->AsParseNodeCall()->pnodeThisOverride;
+            if (thisOverride != nullptr)
+            {
+                return thisOverride->AsParseNodeUni()->pnode1;
+            }
+            pnode = pnode->AsParseNodeCall()->pnodeTarget;
+        }
+        else if (pnode->nop == knopDot || pnode->nop == knopIndex)
+        {
+            pnode = pnode->AsParseNodeBin()->pnode1;
+        }
+        else if (pnode->nop == knopOptChain)
+        {
+            pnode = pnode->AsParseNodeTri()->pnode1;
+        }
+        else
+        {
+            return nullptr;
+        }
+    }
+    return nullptr;
+}
+
 void AssignRegisters(ParseNode *pnode, ByteCodeGenerator *byteCodeGenerator)
 {
     if (pnode == nullptr)
@@ -5024,8 +5074,48 @@ void AssignRegisters(ParseNode *pnode, ByteCodeGenerator *byteCodeGenerator)
         CheckMaybeEscapedUse(pnode->AsParseNodeUni()->pnode1, byteCodeGenerator);
         break;
     case knopCoalesce:
+    case knopAsgCoalesce:
+        byteCodeGenerator->AssignNullConstRegister();
+        // Both children need the same escaped-use walk the default case
+        // gives other binary operators (||, &&, &&=, ||=): without it a
+        // function expression as a direct operand (y ?? function(){},
+        // y ??= function(){}) is never marked as maybe-escaped, so it can
+        // be stack-allocated and then returned/stored past its frame.
+        // Like &&=/||= (which reach this through the default case), the
+        // assignment form deliberately does not use CheckFuncAssignment:
+        // that is plain '='s stack-nested-func optimization for an
+        // unconditional store, while the conditional store here takes the
+        // conservative escaped marking instead. EmitAssignment's shared
+        // store path handles slot commitment at emit time.
+        CheckMaybeEscapedUse(pnode->AsParseNodeBin()->pnode1, byteCodeGenerator);
+        CheckMaybeEscapedUse(pnode->AsParseNodeBin()->pnode2, byteCodeGenerator);
+        break;
     case knopObject:
         byteCodeGenerator->AssignNullConstRegister();
+        break;
+    case knopOptChain:
+        {
+            byteCodeGenerator->AssignNullConstRegister();
+            byteCodeGenerator->AssignUndefinedConstRegister();
+
+            // Give the segment temps var registers, like loop-inversion temps:
+            // they must survive evaluation of the whole chain tail and be
+            // initialized on function entry paths that skip the segment.
+            FuncInfo * funcInfo = byteCodeGenerator->TopFuncInfo();
+            ParseNode * tempNode = pnode->AsParseNodeTri()->pnode3;
+            tempNode->location = byteCodeGenerator->NextVarRegister();
+            funcInfo->nonUserNonTempRegistersToInitialize.Add(tempNode->location);
+
+            ParseNode * thisTempNode = GetOptChainThisTemp(pnode->AsParseNodeTri());
+            if (thisTempNode != nullptr)
+            {
+                thisTempNode->location = byteCodeGenerator->NextVarRegister();
+                funcInfo->nonUserNonTempRegistersToInitialize.Add(thisTempNode->location);
+            }
+
+            CheckMaybeEscapedUse(pnode->AsParseNodeTri()->pnode1, byteCodeGenerator);
+            CheckMaybeEscapedUse(pnode->AsParseNodeTri()->pnode2, byteCodeGenerator);
+        }
         break;
     case knopClassDecl:
         {

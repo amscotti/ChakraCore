@@ -459,6 +459,11 @@ standard matrix still applies). Effort: **C2** batch, size set by the data
 decision.
 
 **S4. Optional chaining + logical assignment.** Repro: `python3 tools/test262/run.py --binary zig-out/bin/ch --output out/test262-c1-optchain 'test/language/expressions/optional-chaining/**/*.js' 'test/language/expressions/logical-assignment/**/*.js'`.
+*Status: implemented, interpreter-verified, and default-enabled in C2
+batch S4 — see [c2-s4.md](c2-s4.md) (44/164 → 154 passed / 54 failed of 208
+on the repro; remaining failures are class-private, BigInt, and a
+pre-existing key-ordering issue; x64 JIT verification gated on B4 before
+any JIT-configuration claim).*
 Subsystem: Parser + ByteCodeGenerator + Backend. Prerequisite: none beyond
 the usual bytecode regeneration. Expected gain: 226 tagged edition
 failures exactly (58 `optional-chaining` + 168

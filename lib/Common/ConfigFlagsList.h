@@ -673,6 +673,8 @@ PHASE(All)
 #define DEFAULT_CONFIG_ESArrayFindFromLast     (true)
 #define DEFAULT_CONFIG_ESPromiseAny            (true)
 #define DEFAULT_CONFIG_ESNullishCoalescingOperator (true)
+#define DEFAULT_CONFIG_ESOptionalChaining      (true)
+#define DEFAULT_CONFIG_ESLogicalAssignment     (true)
 #define DEFAULT_CONFIG_ESGlobalThis            (true)
 
 // Jitting generator functions is not functional on ARM
@@ -1198,6 +1200,12 @@ FLAGR(Boolean, ESNumericSeparator, "Enable Numeric Separator flag", DEFAULT_CONF
 
 // ES Nullish coalescing operator support (??)
 FLAGR(Boolean, ESNullishCoalescingOperator, "Enable nullish coalescing operator", DEFAULT_CONFIG_ESNullishCoalescingOperator)
+
+// ES Optional chaining support (?.)
+FLAGR(Boolean, ESOptionalChaining, "Enable optional chaining operator", DEFAULT_CONFIG_ESOptionalChaining)
+
+// ES Logical assignment support (&&=, ||=, ??=)
+FLAGR(Boolean, ESLogicalAssignment, "Enable logical assignment operators", DEFAULT_CONFIG_ESLogicalAssignment)
 
 // ES Hashbang support for interpreter directive syntax
 FLAGR(Boolean, ESHashbang, "Enable Hashbang syntax", DEFAULT_CONFIG_ESHashbang)

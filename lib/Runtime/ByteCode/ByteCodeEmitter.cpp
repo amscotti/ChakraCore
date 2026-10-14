@@ -8,6 +8,8 @@
 #include "Language/AsmJs.h"
 #include "ConfigFlagsList.h"
 
+void EmitMethodFld(ParseNode *pnode, Js::RegSlot callObjLocation, Js::PropertyId propertyId, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo, bool registerCacheIdForCall);
+void EmitMethodElem(ParseNode *pnode, Js::RegSlot callObjLocation, Js::RegSlot indexLocation, ByteCodeGenerator *byteCodeGenerator);
 void EmitReference(ParseNode *pnode, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo);
 void EmitAssignment(ParseNode *asgnNode, ParseNode *lhs, Js::RegSlot rhsLocation, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo);
 void EmitLoad(ParseNode *rhs, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo);
@@ -111,6 +113,13 @@ BOOL MayHaveSideEffectOnNode(ParseNode *pnode, ParseNode *pnodeSE, ByteCodeGener
             pNodeSEStack.Push(pnodeTriSE->pnode2);
             pNodeSEStack.Push(pnodeTriSE->pnode3);
         }
+        else if (currPnodeSE->nop == knopOptChain)
+        {
+            ParseNodeTri * pnodeTriSE = currPnodeSE->AsParseNodeTri();
+
+            pNodeSEStack.Push(pnodeTriSE->pnode1);
+            pNodeSEStack.Push(pnodeTriSE->pnode2);
+        }
         else if (currPnodeSE->nop == knopCall || currPnodeSE->nop == knopNew)
         {
             pNodeSEStack.Push(currPnodeSE->AsParseNodeCall()->pnodeTarget);
@@ -182,6 +191,15 @@ bool IsArguments(ParseNode *pnode)
             }
 
             pnode = pnode->AsParseNodeTri()->pnode3;
+            break;
+
+        case knopOptChain:
+            if (IsArguments(pnode->AsParseNodeTri()->pnode1))
+            {
+                return true;
+            }
+
+            pnode = pnode->AsParseNodeTri()->pnode2;
             break;
 
             //
@@ -7402,6 +7420,218 @@ void EmitLoad(
     }
 }
 
+// For a knopOptChain segment opened by '?.()' on a member target, find the
+// temp node holding the member base ('this') value, or nullptr for other
+// chain forms. The optional call sits on the tail's left spine; a nested
+// '?.()' segment in the tail continues that spine through its base (see
+// the extended-spine argument there). Mirror of GetOptChainThisTemp in
+// ByteCodeGenerator.cpp, which assigns the temp's register: the two walks
+// must stay in sync so every temp emitted through here has a register and
+// every registered temp is filled by EmitOptChainBase below.
+ParseNode * GetOptChainThisTempNode(ParseNodeTri * pnodeChain)
+{
+    ParseNode * pnode = pnodeChain->pnode2;
+    while (pnode != nullptr)
+    {
+        if (pnode->nop == knopCall)
+        {
+            ParseNode * thisOverride = pnode->AsParseNodeCall()->pnodeThisOverride;
+            if (thisOverride != nullptr)
+            {
+                return thisOverride->AsParseNodeUni()->pnode1;
+            }
+            pnode = pnode->AsParseNodeCall()->pnodeTarget;
+        }
+        else if (pnode->nop == knopDot || pnode->nop == knopIndex)
+        {
+            pnode = pnode->AsParseNodeBin()->pnode1;
+        }
+        else if (pnode->nop == knopOptChain)
+        {
+            pnode = pnode->AsParseNodeTri()->pnode1;
+        }
+        else
+        {
+            return nullptr;
+        }
+    }
+    return nullptr;
+}
+
+void EmitOptChainReference(ParseNode * pnodeChainNode, Js::RegSlot * pThisLocation, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo);
+
+// Evaluate the base of an optional chain segment once and stash it in the
+// segment temp (pnode3), which the tail reads through its temp ref. For the
+// '?.()' member-target form, the segment temp receives the callee value and
+// the 'this' temp receives the member base; the member load runs once.
+void EmitOptChainBase(ParseNodeTri * pnodeChain, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo)
+{
+    ParseNode * base = pnodeChain->pnode1;
+    ParseNode * tempNode = pnodeChain->pnode3;
+    ParseNode * thisTempNode = GetOptChainThisTempNode(pnodeChain);
+
+    if (thisTempNode == nullptr)
+    {
+        Emit(base, byteCodeGenerator, funcInfo, false);
+        byteCodeGenerator->Writer()->Reg2(Js::OpCode::Ld_A, tempNode->location, base->location);
+        funcInfo->ReleaseLoc(base);
+        return;
+    }
+
+    if (base->nop == knopOptChain)
+    {
+        // Parenthesized chain as the '?.()' target: evaluate it as a
+        // reference so both the callee value and its base are recovered.
+        Js::RegSlot thisLocation = Js::Constants::NoRegister;
+        funcInfo->AcquireLoc(base);
+        EmitOptChainReference(base, &thisLocation, byteCodeGenerator, funcInfo);
+        byteCodeGenerator->Writer()->Reg2(Js::OpCode::Ld_A, tempNode->location, base->location);
+        byteCodeGenerator->Writer()->Reg2(Js::OpCode::Ld_A, thisTempNode->location, thisLocation);
+        if (funcInfo->IsTmpReg(thisLocation))
+        {
+            funcInfo->ReleaseTmpRegister(thisLocation);
+        }
+        funcInfo->ReleaseLoc(base);
+        return;
+    }
+
+    if (ByteCodeGenerator::IsSuper(base->AsParseNodeBin()->pnode1))
+    {
+        // Stash 'this' first; emitting the super reference as a value below
+        // re-emits (and may reallocate) its 'this' operand.
+        Emit(base->AsParseNodeSuperReference()->pnodeThis, byteCodeGenerator, funcInfo, false);
+        byteCodeGenerator->Writer()->Reg2(Js::OpCode::Ld_A, thisTempNode->location, base->AsParseNodeSuperReference()->pnodeThis->location);
+        funcInfo->ReleaseLoc(base->AsParseNodeSuperReference()->pnodeThis);
+
+        Emit(base, byteCodeGenerator, funcInfo, false);
+        byteCodeGenerator->Writer()->Reg2(Js::OpCode::Ld_A, tempNode->location, base->location);
+        funcInfo->ReleaseLoc(base);
+    }
+    else
+    {
+        EmitLoad(base, byteCodeGenerator, funcInfo);
+        byteCodeGenerator->Writer()->Reg2(Js::OpCode::Ld_A, tempNode->location, base->location);
+        byteCodeGenerator->Writer()->Reg2(Js::OpCode::Ld_A, thisTempNode->location, base->AsParseNodeBin()->pnode1->location);
+        funcInfo->ReleaseLoad(base);
+    }
+}
+
+// Emit an optional chain as a reference (for call targets and '?.()'
+// bases): the chain node's location must already be acquired and receives
+// the chain value; *pThisLocation receives a temp register holding the base
+// object of the final member step, or undefined when the chain does not end
+// in a member reference or short-circuits. The temp stays acquired for the
+// caller to release (mirroring EmitCallTarget's member cases).
+void EmitOptChainReference(ParseNode * pnodeChainNode, Js::RegSlot * pThisLocation, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo)
+{
+    ParseNodeTri * pnodeChain = pnodeChainNode->AsParseNodeTri();
+    ParseNode * tail = pnodeChain->pnode2;
+    Js::ByteCodeLabel doneLabel = byteCodeGenerator->Writer()->DefineLabel();
+    Js::ByteCodeLabel tailLabel = byteCodeGenerator->Writer()->DefineLabel();
+    Js::RegSlot thisLocation = funcInfo->AcquireTmpRegister();
+    *pThisLocation = thisLocation;
+
+    EmitOptChainBase(pnodeChain, byteCodeGenerator, funcInfo);
+    byteCodeGenerator->Writer()->BrReg2(Js::OpCode::BrNeq_A, tailLabel, pnodeChain->pnode3->location, funcInfo->nullConstantRegister);
+    byteCodeGenerator->Writer()->Reg2(Js::OpCode::Ld_A, pnodeChainNode->location, funcInfo->undefinedConstantRegister);
+    byteCodeGenerator->Writer()->Reg2(Js::OpCode::Ld_A, thisLocation, funcInfo->undefinedConstantRegister);
+    byteCodeGenerator->Writer()->Br(doneLabel);
+
+    byteCodeGenerator->Writer()->MarkLabel(tailLabel);
+    if (tail->nop == knopDot)
+    {
+        Emit(tail->AsParseNodeBin()->pnode1, byteCodeGenerator, funcInfo, false);
+        funcInfo->AcquireLoc(tail);
+        Js::PropertyId propertyId = tail->AsParseNodeBin()->pnode2->AsParseNodeName()->PropertyIdFromNameNode();
+        // Do not register the LdFld cache id for a following call: the
+        // value is copied out of the tail register below (and typically
+        // reaches any call through the segment temp), so no call is ever
+        // emitted with the tail register and the writer's map entry would
+        // go stale, tripping its assert when the register is reused.
+        EmitMethodFld(tail->AsParseNodeBin(), tail->AsParseNodeBin()->pnode1->location, propertyId, byteCodeGenerator, funcInfo, false);
+        byteCodeGenerator->Writer()->Reg2(Js::OpCode::Ld_A_ReuseLoc, pnodeChainNode->location, tail->location);
+        funcInfo->ReleaseLoc(tail);
+        byteCodeGenerator->Writer()->Reg2(Js::OpCode::Ld_A_ReuseLoc, thisLocation, tail->AsParseNodeBin()->pnode1->location);
+        funcInfo->ReleaseLoc(tail->AsParseNodeBin()->pnode1);
+    }
+    else if (tail->nop == knopIndex)
+    {
+        Emit(tail->AsParseNodeBin()->pnode1, byteCodeGenerator, funcInfo, false);
+        Emit(tail->AsParseNodeBin()->pnode2, byteCodeGenerator, funcInfo, false);
+        funcInfo->AcquireLoc(tail);
+        EmitMethodElem(tail, tail->AsParseNodeBin()->pnode1->location, tail->AsParseNodeBin()->pnode2->location, byteCodeGenerator);
+        byteCodeGenerator->Writer()->Reg2(Js::OpCode::Ld_A_ReuseLoc, pnodeChainNode->location, tail->location);
+        funcInfo->ReleaseLoc(tail);
+        funcInfo->ReleaseLoc(tail->AsParseNodeBin()->pnode2);
+        byteCodeGenerator->Writer()->Reg2(Js::OpCode::Ld_A_ReuseLoc, thisLocation, tail->AsParseNodeBin()->pnode1->location);
+        funcInfo->ReleaseLoc(tail->AsParseNodeBin()->pnode1);
+    }
+    else if (tail->nop == knopOptChain)
+    {
+        Js::RegSlot innerThisLocation = Js::Constants::NoRegister;
+        funcInfo->AcquireLoc(tail);
+        EmitOptChainReference(tail, &innerThisLocation, byteCodeGenerator, funcInfo);
+        byteCodeGenerator->Writer()->Reg2(Js::OpCode::Ld_A_ReuseLoc, pnodeChainNode->location, tail->location);
+        byteCodeGenerator->Writer()->Reg2(Js::OpCode::Ld_A_ReuseLoc, thisLocation, innerThisLocation);
+        funcInfo->ReleaseTmpRegister(innerThisLocation);
+        funcInfo->ReleaseLoc(tail);
+    }
+    else
+    {
+        Emit(tail, byteCodeGenerator, funcInfo, false);
+        byteCodeGenerator->Writer()->Reg2(Js::OpCode::Ld_A_ReuseLoc, pnodeChainNode->location, tail->location);
+        funcInfo->ReleaseLoc(tail);
+        byteCodeGenerator->Writer()->Reg2(Js::OpCode::Ld_A_ReuseLoc, thisLocation, funcInfo->undefinedConstantRegister);
+    }
+
+    byteCodeGenerator->Writer()->MarkLabel(doneLabel);
+}
+
+// Emit 'delete' of an optional chain: true when the chain short-circuits,
+// otherwise delete the tail member reference. The delete node's location
+// has already been acquired by the caller. Nested chain tails recurse so
+// every segment gets its own short-circuit check.
+void EmitDeleteOptChain(ParseNode *pnodeDelete, ParseNodeTri * pnodeChain, Js::ByteCodeLabel doneLabel, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo)
+{
+    ParseNode * tail = pnodeChain->pnode2;
+    Js::ByteCodeLabel shortLabel = byteCodeGenerator->Writer()->DefineLabel();
+
+    EmitOptChainBase(pnodeChain, byteCodeGenerator, funcInfo);
+    byteCodeGenerator->Writer()->BrReg2(Js::OpCode::BrEq_A, shortLabel, pnodeChain->pnode3->location, funcInfo->nullConstantRegister);
+
+    if (tail->nop == knopOptChain)
+    {
+        EmitDeleteOptChain(pnodeDelete, tail->AsParseNodeTri(), doneLabel, byteCodeGenerator, funcInfo);
+    }
+    else if (tail->nop == knopDot)
+    {
+        Emit(tail->AsParseNodeBin()->pnode1, byteCodeGenerator, funcInfo, false);
+        funcInfo->ReleaseLoc(tail->AsParseNodeBin()->pnode1);
+        Js::PropertyId propertyId = tail->AsParseNodeBin()->pnode2->AsParseNodeName()->PropertyIdFromNameNode();
+        byteCodeGenerator->Writer()->Property(Js::OpCode::DeleteFld, pnodeDelete->location, tail->AsParseNodeBin()->pnode1->location,
+            funcInfo->FindOrAddReferencedPropertyId(propertyId), byteCodeGenerator->forceStrictModeForClassComputedPropertyName);
+    }
+    else if (tail->nop == knopIndex)
+    {
+        EmitBinaryOpnds(tail->AsParseNodeBin()->pnode1, tail->AsParseNodeBin()->pnode2, byteCodeGenerator, funcInfo);
+        funcInfo->ReleaseLoc(tail->AsParseNodeBin()->pnode2);
+        funcInfo->ReleaseLoc(tail->AsParseNodeBin()->pnode1);
+        byteCodeGenerator->Writer()->Element(Js::OpCode::DeleteElemI_A, pnodeDelete->location, tail->AsParseNodeBin()->pnode1->location, tail->AsParseNodeBin()->pnode2->location);
+    }
+    else
+    {
+        // Non-reference tail (e.g. a call): evaluate it, result is true.
+        Emit(tail, byteCodeGenerator, funcInfo, false);
+        funcInfo->ReleaseLoc(tail);
+        byteCodeGenerator->Writer()->Reg1(Js::OpCode::LdTrue, pnodeDelete->location);
+    }
+    byteCodeGenerator->Writer()->Br(doneLabel);
+
+    byteCodeGenerator->Writer()->MarkLabel(shortLabel);
+    byteCodeGenerator->Writer()->Reg1(Js::OpCode::LdTrue_ReuseLoc, pnodeDelete->location);
+    byteCodeGenerator->Writer()->Br(doneLabel);
+}
+
 void EmitList(ParseNode *pnode, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo)
 {
     if (pnode != nullptr)
@@ -8152,6 +8382,16 @@ void EmitCallTarget(
         {
             funcInfo->ReleaseLoc(pnodeTarget->AsParseNodeBin()->pnode1);
         }
+        break;
+    }
+
+    case knopOptChain:
+    {
+        // A parenthesized optional chain used as a call target preserves
+        // its member reference, so emit it in reference mode to recover
+        // both the callee value and its base object as 'this'.
+        funcInfo->AcquireLoc(pnodeTarget);
+        EmitOptChainReference(pnodeTarget, thisLocation, byteCodeGenerator, funcInfo);
         break;
     }
 
@@ -10105,7 +10345,7 @@ void EmitBinaryOpnds(ParseNode* pnode1, ParseNode* pnode2, ByteCodeGenerator* by
     Emit(pnode2, byteCodeGenerator, funcInfo, false, false, computedPropertyLocation);
 }
 
-void EmitBinaryReference(ParseNode *pnode1, ParseNode *pnode2, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo, BOOL fLoadLhs)
+void EmitBinaryReference(ParseNode *pnode1, ParseNode *pnode2, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo, BOOL fLoadLhs, BOOL fEmitRhs = TRUE)
 {
     // Make sure that the RHS of an assignment doesn't kill the opnd's of the expression on the LHS.
     switch (pnode1->nop)
@@ -10163,8 +10403,11 @@ void EmitBinaryReference(ParseNode *pnode1, ParseNode *pnode2, ByteCodeGenerator
         EmitReference(pnode1, byteCodeGenerator, funcInfo);
     }
 
-    // Evaluate the RHS.
-    Emit(pnode2, byteCodeGenerator, funcInfo, false);
+    // Evaluate the RHS (logical assignment defers this past its branch).
+    if (fEmitRhs)
+    {
+        Emit(pnode2, byteCodeGenerator, funcInfo, false);
+    }
 }
 
 void EmitUseBeforeDeclarationRuntimeError(ByteCodeGenerator * byteCodeGenerator, Js::RegSlot location)
@@ -11539,6 +11782,14 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
             byteCodeGenerator->Writer()->Element(Js::OpCode::DeleteElemI_A, pnode->location, pexpr->AsParseNodeBin()->pnode1->location, pexpr->AsParseNodeBin()->pnode2->location);
             break;
         }
+        case knopOptChain:
+        {
+            Js::ByteCodeLabel doneLabel = byteCodeGenerator->Writer()->DefineLabel();
+            funcInfo->AcquireLoc(pnode);
+            EmitDeleteOptChain(pnode, pexpr->AsParseNodeTri(), doneLabel, byteCodeGenerator, funcInfo);
+            byteCodeGenerator->Writer()->MarkLabel(doneLabel);
+            break;
+        }
         default:
         {
             Emit(pexpr, byteCodeGenerator, funcInfo, false);
@@ -11569,6 +11820,28 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
             funcInfo->ReleaseLoc(args);
             funcInfo->AcquireLoc(pnodeCall);
             byteCodeGenerator->Writer()->Reg2(Js::OpCode::ImportCall, pnodeCall->location, args->location);
+        }
+        else if (pnodeCall->pnodeThisOverride != nullptr)
+        {
+            // Optional call on a member target: the callee is in a temp ref
+            // and the member base was stashed as the explicit 'this'.
+            // EmitCall does not release an override 'this' temp
+            // (releaseThisLocation is false for overrides), so this caller
+            // owns it; temp registers are a LIFO stack, so acquire the call
+            // result slot BEFORE the 'this' temp, as EmitSuperCall does for
+            // its override. EmitCallI then reuses the pre-acquired result
+            // slot instead of acquiring a new temp above the 'this' temp,
+            // and releasing 'this' after the call is top-of-stack (the
+            // callee temp above it is released inside EmitCallI). The
+            // result slot stays acquired for our caller to release.
+            if (pnodeCall->isUsed || fReturnValue)
+            {
+                funcInfo->AcquireLoc(pnodeCall);
+            }
+            Emit(pnodeCall->pnodeThisOverride, byteCodeGenerator, funcInfo, false);
+            Js::RegSlot thisLocation = pnodeCall->pnodeThisOverride->location;
+            EmitCall(pnodeCall, byteCodeGenerator, funcInfo, fReturnValue, /*fEvaluateComponents*/ true, thisLocation);
+            funcInfo->ReleaseLoc(pnodeCall->pnodeThisOverride);
         }
         else
         {
@@ -11795,6 +12068,31 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
         ENDSTATEMENET_IFTOPLEVEL(isTopLevel, pnode);
         break;
     }
+    // Optional chain segment: evaluate the base once into its temp; when it
+    // is null or undefined the whole tail is skipped and the result is
+    // undefined. The tail is an ordinary member/call tree over a temp ref.
+    case knopOptChain:
+    {
+        STARTSTATEMENET_IFTOPLEVEL(isTopLevel, pnode);
+        ParseNodeTri * pnodeChain = pnode->AsParseNodeTri();
+        Js::ByteCodeLabel doneLabel = byteCodeGenerator->Writer()->DefineLabel();
+        Js::ByteCodeLabel tailLabel = byteCodeGenerator->Writer()->DefineLabel();
+        funcInfo->AcquireLoc(pnode);
+
+        EmitOptChainBase(pnodeChain, byteCodeGenerator, funcInfo);
+        byteCodeGenerator->Writer()->BrReg2(Js::OpCode::BrNeq_A, tailLabel, pnodeChain->pnode3->location, funcInfo->nullConstantRegister);
+        byteCodeGenerator->Writer()->Reg2(Js::OpCode::Ld_A, pnode->location, funcInfo->undefinedConstantRegister);
+        byteCodeGenerator->Writer()->Br(doneLabel);
+
+        byteCodeGenerator->Writer()->MarkLabel(tailLabel);
+        Emit(pnodeChain->pnode2, byteCodeGenerator, funcInfo, false);
+        byteCodeGenerator->Writer()->Reg2(Js::OpCode::Ld_A_ReuseLoc, pnode->location, pnodeChain->pnode2->location);
+        funcInfo->ReleaseLoc(pnodeChain->pnode2);
+
+        byteCodeGenerator->Writer()->MarkLabel(doneLabel);
+        ENDSTATEMENET_IFTOPLEVEL(isTopLevel, pnode);
+        break;
+    }
     // PTNODE(knopQmark      , "?"            ,None    ,Tri  ,fnopBin)
     case knopQmark:
     {
@@ -11877,6 +12175,50 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
             byteCodeGenerator->Writer()->Reg3(nopToOp[pnode->nop], lhs->location, lhs->location, rhs->location);
             EmitAssignment(nullptr, lhs, lhs->location, byteCodeGenerator, funcInfo);
         }
+        funcInfo->ReleaseLoad(lhs);
+
+        byteCodeGenerator->EndStatement(pnode);
+        break;
+    }
+
+    // Logical assignment (&&=, ||=, ??=): evaluate the LHS reference and its
+    // value once; evaluate and assign the RHS only when the loaded value
+    // does not short-circuit. The expression result is the loaded or the
+    // newly assigned value.
+    case knopAsgLogAnd:
+    case knopAsgLogOr:
+    case knopAsgCoalesce:
+    {
+        byteCodeGenerator->StartStatement(pnode);
+
+        ParseNode *lhs = pnode->AsParseNodeBin()->pnode1;
+        ParseNode *rhs = pnode->AsParseNodeBin()->pnode2;
+
+        funcInfo->AcquireLoc(pnode);
+        Js::ByteCodeLabel doneLabel = byteCodeGenerator->Writer()->DefineLabel();
+
+        EmitBinaryReference(lhs, rhs, byteCodeGenerator, funcInfo, true, false);
+        byteCodeGenerator->Writer()->Reg2(Js::OpCode::Ld_A, pnode->location, lhs->location);
+
+        if (pnode->nop == knopAsgLogAnd)
+        {
+            byteCodeGenerator->Writer()->BrReg1(Js::OpCode::BrFalse_A, doneLabel, lhs->location);
+        }
+        else if (pnode->nop == knopAsgLogOr)
+        {
+            byteCodeGenerator->Writer()->BrReg1(Js::OpCode::BrTrue_A, doneLabel, lhs->location);
+        }
+        else
+        {
+            byteCodeGenerator->Writer()->BrReg2(Js::OpCode::BrNeq_A, doneLabel, lhs->location, funcInfo->nullConstantRegister);
+        }
+
+        Emit(rhs, byteCodeGenerator, funcInfo, false);
+        EmitAssignment(nullptr, lhs, rhs->location, byteCodeGenerator, funcInfo);
+        byteCodeGenerator->Writer()->Reg2(Js::OpCode::Ld_A_ReuseLoc, pnode->location, rhs->location);
+        funcInfo->ReleaseLoc(rhs);
+
+        byteCodeGenerator->Writer()->MarkLabel(doneLabel);
         funcInfo->ReleaseLoad(lhs);
 
         byteCodeGenerator->EndStatement(pnode);

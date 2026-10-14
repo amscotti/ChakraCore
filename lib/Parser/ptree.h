@@ -784,6 +784,10 @@ public:
 
     ParseNodePtr pnodeTarget;
     ParseNodePtr pnodeArgs;
+    // For an optional call on a member target (a.b?.()), the tail call built by
+    // the parser has a temp-ref target; this holds a temp-ref to the member
+    // base so the emitter can pass it as the explicit 'this'. Null otherwise.
+    ParseNodePtr pnodeThisOverride;
     uint16 argCount;
     uint16 spreadArgCount;
     BYTE callOfConstants : 1;

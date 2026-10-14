@@ -32,7 +32,7 @@ ParseNodeBin * ParseNode::AsParseNodeBin()
 
 ParseNodeTri * ParseNode::AsParseNodeTri()
 {
-    Assert(this->nop == knopQmark);
+    Assert(this->nop == knopQmark || this->nop == knopOptChain);
     return reinterpret_cast<ParseNodeTri *>(this);
 }
 
@@ -488,6 +488,7 @@ ParseNodeCall::ParseNodeCall(OpCode nop, charcount_t ichMin, charcount_t ichLim,
 {
     this->pnodeTarget = pnodeTarget;
     this->pnodeArgs = pnodeArgs;
+    this->pnodeThisOverride = nullptr;
     this->argCount = 0;
     this->spreadArgCount = 0;
     this->callOfConstants = false;

@@ -1,6 +1,6 @@
 # Pinned test262 diagnostic baseline
 
-The legacy `test/262` directory contains **one** fixture; the 1959-case regression
+The legacy `test/262` directory contains **one** fixture; the 1961-case regression
 gate is not a current ECMAScript conformance score. This tooling establishes a
 repeatable upstream baseline **before** feature implementation.
 

@@ -1775,10 +1775,32 @@ LEof:
         case '?':
             Assert(chType == _C_QUE);
             token = tkQMark;
-            if (m_scriptContext->GetConfig()->IsESNullishCoalescingOperatorEnabled() && this->PeekFirst(p, last) == '?')
+            if (this->PeekFirst(p, last) == '?')
+            {
+                // '??=' is the assignment form of '??': it requires both
+                // flags, so disabling the nullish operator disables it too
+                // (disabling logical assignment alone leaves plain '??').
+                if (m_scriptContext->GetConfig()->IsESNullishCoalescingOperatorEnabled() &&
+                    m_scriptContext->GetConfig()->IsESLogicalAssignmentEnabled() && this->PeekFirst(p + 1, last) == '=')
+                {
+                    p += 2;
+                    token = tkAsgCoalesce;
+                }
+                else if (m_scriptContext->GetConfig()->IsESNullishCoalescingOperatorEnabled())
+                {
+                    p++;
+                    token = tkCoalesce;
+                }
+                break;
+            }
+            // Optional chaining: '?.' is a punctuator only when not followed by a
+            // decimal digit, so 'a?.5:3' remains a conditional expression.
+            if (m_scriptContext->GetConfig()->IsESOptionalChainingEnabled() &&
+                this->PeekFirst(p, last) == '.' &&
+                !Js::NumberUtilities::IsDigit(this->PeekFirst(p + 1, last)))
             {
                 p++;
-                token = tkCoalesce;
+                token = tkOptChain;
                 break;
             }
             break;
@@ -2182,6 +2204,11 @@ LCommentLineBreak:
             case '|':
                 p++;
                 token = tkLogOr;
+                if (m_scriptContext->GetConfig()->IsESLogicalAssignmentEnabled() && this->PeekFirst(p, last) == '=')
+                {
+                    p++;
+                    token = tkAsgLogOr;
+                }
                 break;
             }
             break;
@@ -2197,6 +2224,11 @@ LCommentLineBreak:
             case '&':
                 p++;
                 token = tkLogAnd;
+                if (m_scriptContext->GetConfig()->IsESLogicalAssignmentEnabled() && this->PeekFirst(p, last) == '=')
+                {
+                    p++;
+                    token = tkAsgLogAnd;
+                }
                 break;
             }
             break;

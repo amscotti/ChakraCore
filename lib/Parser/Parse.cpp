@@ -281,6 +281,10 @@ LPCWSTR Parser::GetTokenString(tokens token)
     case tkLogOr: return _u("||");
     case tkLogAnd: return _u("&&");
     case tkCoalesce: return _u("??");
+    case tkOptChain: return _u("?.");
+    case tkAsgLogAnd: return _u("&&=");
+    case tkAsgLogOr: return _u("||=");
+    case tkAsgCoalesce: return _u("?\?=");
     case tkOr: return _u("|");
     case tkXor: return _u("^");
     case tkAnd: return _u("&");
@@ -3240,7 +3244,9 @@ ParseNodePtr Parser::ParseTerm(BOOL fAllowCall,
     _Inout_opt_ BOOL* pfLikelyPattern /*= nullptr*/,
     _Out_opt_ bool* pfIsDotOrIndex /*= nullptr*/,
     _Inout_opt_ charcount_t *plastRParen /*= nullptr*/,
-    _Out_opt_ bool* looseCoalesce /*= nullptr*/)
+    _Out_opt_ bool* looseCoalesce /*= nullptr*/,
+    _Out_opt_ bool* pfHasOptChain /*= nullptr*/,
+    _Out_opt_ bool* pfIsCallResult /*= nullptr*/)
 {
     ParseNodePtr pnode = nullptr;
     PidRefStack *savedTopAsyncRef = nullptr;
@@ -3256,6 +3262,7 @@ ParseNodePtr Parser::ParseTerm(BOOL fAllowCall,
     bool isLambdaExpr = false;
     bool isSpecialName = false;
     IdentPtr pid = nullptr;
+    bool fIsCallResult = false;
     Assert(pToken == nullptr || pToken->tk == tkNone); // Must be empty initially
 
     PROBE_STACK_NO_DISPOSE(m_scriptContext, Js::Constants::MinStackParseOneTerm);
@@ -3433,7 +3440,7 @@ ParseNodePtr Parser::ParseTerm(BOOL fAllowCall,
         AutoDeferErrorsRestore deferErrorRestore(this);
 
         this->m_funcParenExprDepth++;
-        pnode = ParseExpr<buildAST>(koplNo, &fCanAssign, TRUE, FALSE, nullptr, nullptr /*nameLength*/, nullptr  /*pShortNameOffset*/, &term, true, nullptr, plastRParen, looseCoalesce);
+        pnode = ParseExpr<buildAST>(koplNo, &fCanAssign, TRUE, FALSE, nullptr, nullptr /*nameLength*/, nullptr  /*pShortNameOffset*/, &term, true, nullptr, plastRParen, looseCoalesce, &fIsCallResult);
         this->m_funcParenExprDepth--;
 
         if (buildAST && plastRParen)
@@ -3594,7 +3601,14 @@ ParseNodePtr Parser::ParseTerm(BOOL fAllowCall,
         }
         else
         {
-            ParseNodePtr pnodeExpr = ParseTerm<buildAST>(FALSE, pNameHint, pHintLength, pShortNameOffset, nullptr, false, TRUE, nullptr, nullptr, nullptr, plastRParen);
+            bool fTargetHasOptChain = false;
+            ParseNodePtr pnodeExpr = ParseTerm<buildAST>(FALSE, pNameHint, pHintLength, pShortNameOffset, nullptr, false, TRUE, nullptr, nullptr, nullptr, plastRParen, nullptr, &fTargetHasOptChain);
+            if (fTargetHasOptChain)
+            {
+                // An optional chain cannot be the target of 'new' (a
+                // parenthesized chain does not set this flag).
+                Error(ERRsyntax);
+            }
             if (buildAST)
             {
                 pnode = CreateCallNode(knopNew, pnodeExpr, nullptr);
@@ -3782,7 +3796,7 @@ ParseNodePtr Parser::ParseTerm(BOOL fAllowCall,
         break;
     }
 
-    pnode = ParsePostfixOperators<buildAST>(pnode, fAllowCall, fInNew, isAsyncExpr, fCanAssignToCall, &fCanAssign, &term, pfIsDotOrIndex);
+    pnode = ParsePostfixOperators<buildAST>(pnode, fAllowCall, fInNew, isAsyncExpr, fCanAssignToCall, &fCanAssign, &term, pfIsDotOrIndex, pfHasOptChain, &fIsCallResult);
 
     if (savedTopAsyncRef != nullptr &&
         this->m_token.tk == tkDArrow)
@@ -3805,6 +3819,11 @@ ParseNodePtr Parser::ParseTerm(BOOL fAllowCall,
     if (pfCanAssign)
     {
         *pfCanAssign = fCanAssign;
+    }
+
+    if (pfIsCallResult)
+    {
+        *pfIsCallResult = fIsCallResult;
     }
 
     return pnode;
@@ -3900,7 +3919,9 @@ ParseNodePtr Parser::ParsePostfixOperators(
     BOOL fCanAssignToCallResult,
     BOOL *pfCanAssign,
     _Inout_ IdentToken* pToken,
-    _Out_opt_ bool* pfIsDotOrIndex /*= nullptr */)
+    _Out_opt_ bool* pfIsDotOrIndex /*= nullptr */,
+    _Out_opt_ bool* pfHasOptChain /*= nullptr */,
+    _Inout_opt_ bool* pfIsCallResult /*= nullptr */)
 {
     uint16 count = 0;
     bool callOfConstants = false;
@@ -3908,10 +3929,171 @@ ParseNodePtr Parser::ParsePostfixOperators(
     {
         *pfIsDotOrIndex = false;
     }
+    // pfIsCallResult is not reset here: the incoming value describes the
+    // term before any postfix operator (propagated through parentheses by
+    // ParseTerm, like pfCanAssign), and each postfix case below overwrites
+    // it when it transforms the expression.
+
+    // Optional chaining (?.): when a '?.' is seen, the expression built so far
+    // becomes the base of an open chain segment. The remainder of the postfix
+    // chain is built over a knopTempRef placeholder for the base value and is
+    // wrapped in a knopOptChain node when the segment closes, so byte code gen
+    // can evaluate the base once and skip the whole tail when it is nullish.
+    // Segments form a stack: '?.()' on a member tail (a?.b?.()) nests a new
+    // segment inside the open one so the member base remains available as the
+    // call's 'this'; the value-only forms close the innermost segment first.
+    struct OptChainFrame
+    {
+        ParseNodePtr base;
+        ParseNodeVar * temp;
+        OptChainFrame * next;
+    };
+    OptChainFrame * chainStack = nullptr;
+    ParseNodeVar * pendingOptCallThisTemp = nullptr;
+    bool inOptChain = false;
+    if (pfHasOptChain)
+    {
+        *pfHasOptChain = false;
+    }
+
+    auto closeInnermostChain = [&]() {
+        Assert(buildAST && chainStack != nullptr);
+        OptChainFrame * frame = chainStack;
+        chainStack = frame->next;
+        ParseNodeTri * chainNode = CreateTriNode(knopOptChain, frame->base, pnode, frame->temp);
+        chainNode->ichMin = frame->base->ichMin;
+        chainNode->ichLim = pnode->ichLim;
+        pnode = chainNode;
+    };
 
     for (;;)
     {
         uint16 spreadArgCount = 0;
+
+        if (m_token.tk == tkOptChain)
+        {
+            // Early errors: no optional chain in a 'new' target or on 'super'.
+            if (fInNew)
+            {
+                Error(ERRsyntax);
+            }
+            if (buildAST && pnode != nullptr && this->NodeIsSuperName(pnode))
+            {
+                Error(ERRsyntax);
+            }
+            if (buildAST && pnode != nullptr && pnode->nop == knopImport)
+            {
+                Error(ERRsyntax);
+            }
+            inOptChain = true;
+            if (pfHasOptChain)
+            {
+                *pfHasOptChain = true;
+            }
+            if (pfCanAssign)
+            {
+                *pfCanAssign = FALSE;
+            }
+
+            this->GetScanner()->Scan();
+            const bool isCallForm = (m_token.tk == tkLParen);
+            if (isCallForm && !fAllowCall)
+            {
+                Error(ERRsyntax);
+            }
+
+            if (buildAST)
+            {
+                // A member target for '?.()' is a dot/index expression, or a
+                // parenthesized optional chain ending in one: both evaluate
+                // to a property reference whose base is the call's 'this'.
+                ParseNodePtr memberNode = pnode;
+                while (memberNode != nullptr && memberNode->nop == knopOptChain)
+                {
+                    memberNode = memberNode->AsParseNodeTri()->pnode2;
+                }
+                const bool isMemberTarget = memberNode != nullptr && (memberNode->nop == knopDot || memberNode->nop == knopIndex);
+                if (!(isCallForm && isMemberTarget) && chainStack != nullptr)
+                {
+                    // Value-only form: close the innermost open segment; its
+                    // value is the base of the new segment.
+                    closeInnermostChain();
+                }
+
+                OptChainFrame * frame = Anew(&m_nodeAllocator, OptChainFrame);
+                frame->base = pnode;
+                frame->temp = Parser::StaticCreateTempNode(nullptr, &m_nodeAllocator);
+                frame->temp->ichMin = pnode->ichMin;
+                frame->temp->ichLim = pnode->ichLim;
+                frame->next = chainStack;
+                chainStack = frame;
+
+                // For '?.()' on a member target, the byte code generator loads
+                // the callee value and the member base ('this') into separate
+                // temps; remember the 'this' temp for the call node built below.
+                if (isCallForm && isMemberTarget)
+                {
+                    pendingOptCallThisTemp = Parser::StaticCreateTempNode(nullptr, &m_nodeAllocator);
+                    pendingOptCallThisTemp->ichMin = pnode->ichMin;
+                    pendingOptCallThisTemp->ichLim = pnode->ichLim;
+                }
+                pnode = Parser::StaticCreateTempRef(frame->temp, &m_nodeAllocator);
+                pnode->ichMin = frame->base->ichMin;
+                pnode->ichLim = frame->base->ichLim;
+            }
+            else
+            {
+                pnode = nullptr;
+                pToken->tk = tkNone;
+            }
+            if (pfIsDotOrIndex)
+            {
+                *pfIsDotOrIndex = false;
+            }
+
+            if (m_token.tk != tkLBrack && m_token.tk != tkLParen)
+            {
+                // '?.' name form: the current token is the property name.
+                if (!m_token.IsIdentifier() && !m_token.IsReservedWord())
+                {
+                    IdentifierExpectedError(m_token);
+                }
+                if (buildAST)
+                {
+                    // Mirror the tkDot case, including the NaN/Infinity
+                    // conversion to an index operation (see comment there).
+                    ParseNodePtr name = nullptr;
+                    if (Parser::IsNaNOrInfinityLiteral<false>(m_token.GetIdentifier(this->GetHashTbl())->Psz()))
+                    {
+                        name = CreateStrNode(m_token.GetIdentifier(this->GetHashTbl()));
+                        pnode = CreateBinNode(knopIndex, pnode, name);
+                    }
+                    else
+                    {
+                        name = CreateNameNode(m_token.GetIdentifier(this->GetHashTbl()));
+                        pnode = CreateBinNode(knopDot, pnode, name);
+                    }
+                }
+                else
+                {
+                    pnode = nullptr;
+                    pToken->tk = tkNone;
+                }
+                if (pfIsDotOrIndex)
+                {
+                    *pfIsDotOrIndex = true;
+                }
+                if (pfIsCallResult)
+                {
+                    *pfIsCallResult = false;
+                }
+                this->GetScanner()->Scan();
+                continue;
+            }
+            // '?.[' and '?.(' fall through to the tkLBrack/tkLParen cases below,
+            // which now build over the placeholder.
+        }
+
         switch (m_token.tk)
         {
         case tkLParen:
@@ -3948,6 +4130,13 @@ ParseNodePtr Parser::ParsePostfixOperators(
             {
                 if (!fAllowCall)
                 {
+                    if (buildAST)
+                    {
+                        while (chainStack != nullptr)
+                        {
+                            closeInnermostChain();
+                        }
+                    }
                     return pnode;
                 }
 
@@ -4050,6 +4239,10 @@ ParseNodePtr Parser::ParsePostfixOperators(
             {
                 *pfIsDotOrIndex = false;
             }
+            if (pfIsCallResult)
+            {
+                *pfIsCallResult = true;
+            }
             break;
         }
         case tkLBrack:
@@ -4086,6 +4279,10 @@ ParseNodePtr Parser::ParsePostfixOperators(
             if (pfIsDotOrIndex)
             {
                 *pfIsDotOrIndex = true;
+            }
+            if (pfIsCallResult)
+            {
+                *pfIsCallResult = false;
             }
 
             PidRefStack * topPidRef = nullptr;
@@ -4222,6 +4419,10 @@ ParseNodePtr Parser::ParsePostfixOperators(
             {
                 *pfIsDotOrIndex = true;
             }
+            if (pfIsCallResult)
+            {
+                *pfIsCallResult = false;
+            }
             this->GetScanner()->Scan();
 
             break;
@@ -4230,6 +4431,11 @@ ParseNodePtr Parser::ParsePostfixOperators(
         case tkStrTmplBasic:
         case tkStrTmplBegin:
         {
+            // An optional chain cannot be a tagged template tag.
+            if (inOptChain)
+            {
+                Error(ERRsyntax);
+            }
             ParseNode* templateNode = nullptr;
             if (pnode != nullptr)
             {
@@ -4255,10 +4461,37 @@ ParseNodePtr Parser::ParsePostfixOperators(
             {
                 *pfIsDotOrIndex = false;
             }
+            if (pfIsCallResult)
+            {
+                *pfIsCallResult = false;
+            }
             break;
         }
         default:
+            if (buildAST)
+            {
+                while (chainStack != nullptr)
+                {
+                    closeInnermostChain();
+                }
+            }
             return pnode;
+        }
+
+        if (pendingOptCallThisTemp != nullptr)
+        {
+            Assert(buildAST && pnode != nullptr && pnode->nop == knopCall);
+            ParseNodeUni * thisRef = Parser::StaticCreateTempRef(pendingOptCallThisTemp, &m_nodeAllocator);
+            thisRef->ichMin = pnode->ichMin;
+            thisRef->ichLim = pnode->ichLim;
+            pnode->AsParseNodeCall()->pnodeThisOverride = thisRef;
+            pendingOptCallThisTemp = nullptr;
+        }
+        if (inOptChain && pfCanAssign)
+        {
+            // Nothing built over an optional chain in this postfix chain is an
+            // assignment or update target.
+            *pfCanAssign = FALSE;
         }
     }
 }
@@ -8815,7 +9048,8 @@ ParseNodePtr Parser::ParseExpr(int oplMin,
     bool fUnaryOrParen,
     _Inout_opt_ bool* pfLikelyPattern,
     _Inout_opt_ charcount_t *plastRParen,
-    _Out_opt_ bool* looseCoalesce)
+    _Out_opt_ bool* looseCoalesce,
+    _Out_opt_ bool* pfIsCallResult)
 {
     Assert(pToken == nullptr || pToken->tk == tkNone); // Must be empty initially
     int opl;
@@ -8826,6 +9060,7 @@ ParseNodePtr Parser::ParseExpr(int oplMin,
     BOOL fCanAssign = TRUE;
     bool assignmentStmt = false;
     bool fIsDotOrIndex = false;
+    bool fIsCallResult = false;
     IdentToken term;
     RestorePoint termStart;
     uint32 hintLength = 0;
@@ -9047,7 +9282,7 @@ ParseNodePtr Parser::ParseExpr(int oplMin,
     else
     {
         ichMin = this->GetScanner()->IchMinTok();
-        pnode = ParseTerm<buildAST>(TRUE, pNameHint, &hintLength, &hintOffset, &term, fUnaryOrParen, TRUE, &fCanAssign, &fLikelyPattern, &fIsDotOrIndex, plastRParen, &localCoalesce);
+        pnode = ParseTerm<buildAST>(TRUE, pNameHint, &hintLength, &hintOffset, &term, fUnaryOrParen, TRUE, &fCanAssign, &fLikelyPattern, &fIsDotOrIndex, plastRParen, &localCoalesce, nullptr, &fIsCallResult);
         if (looseCoalesce != nullptr)
         {
             *looseCoalesce = localCoalesce;
@@ -9137,6 +9372,7 @@ ParseNodePtr Parser::ParseExpr(int oplMin,
             }
             TrackAssignment<buildAST>(pnode, &term);
             fCanAssign = FALSE;
+            fIsCallResult = false;
             if (buildAST)
             {
                 if (IsStrictMode() && pnode->nop == knopName)
@@ -9223,6 +9459,13 @@ ParseNodePtr Parser::ParseExpr(int oplMin,
                 Error(ERRInvalidAsgTarget);
                 // No recovery necessary since this is a semantic, not structural, error.
             }
+            if ((nop == knopAsgLogAnd || nop == knopAsgLogOr || nop == knopAsgCoalesce) &&
+                (fIsCallResult || (buildAST && pnode != nullptr && (pnode->nop == knopCall || pnode->nop == knopNew))))
+            {
+                // Logical assignment requires a simple assignment target and
+                // has no phase-gated leniency for call results.
+                Error(ERRInvalidAsgTarget);
+            }
         }
         else if (opl == koplExpo)
         {
@@ -9244,6 +9487,7 @@ ParseNodePtr Parser::ParseExpr(int oplMin,
         // Precedence is high enough. Consume the operator token.
         this->GetScanner()->Scan();
         fCanAssign = !!fLikelyPattern;
+        fIsCallResult = false;
 
         // Special case the "?:" operator
         if (nop == knopQmark)
@@ -9419,6 +9663,11 @@ ParseNodePtr Parser::ParseExpr(int oplMin,
     if (NULL != pfCanAssign)
     {
         *pfCanAssign = fCanAssign;
+    }
+
+    if (NULL != pfIsCallResult)
+    {
+        *pfIsCallResult = fIsCallResult;
     }
 
     // Pass back identifier if requested
@@ -12787,6 +13036,9 @@ ParseNode* Parser::CopyPnode(ParseNode *pnode) {
         //PTNODE(knopIndex      , "[]"        ,None    ,Bin  ,fnopBin)
         //PTNODE(knopList       , "<list>"    ,None    ,Bin  ,fnopNone)
 
+    case knopAsgLogAnd:
+    case knopAsgLogOr:
+    case knopAsgCoalesce:
     case knopIndex:
     case knopList:
         return CreateBinNode(pnode->nop, CopyPnode(pnode->AsParseNodeBin()->pnode1),
@@ -12796,12 +13048,27 @@ ParseNode* Parser::CopyPnode(ParseNode *pnode) {
         //PTNODE(knopNew        , "new"        ,None    ,Bin  ,fnopBin)
     case knopNew:
     case knopCall:
-        return CreateCallNode(pnode->nop, CopyPnode(pnode->AsParseNodeCall()->pnodeTarget),
+    {
+        ParseNodeCall * callCopy = CreateCallNode(pnode->nop, CopyPnode(pnode->AsParseNodeCall()->pnodeTarget),
             CopyPnode(pnode->AsParseNodeCall()->pnodeArgs), pnode->ichMin, pnode->ichLim);
+        if (pnode->AsParseNodeCall()->pnodeThisOverride != nullptr)
+        {
+            callCopy->pnodeThisOverride = CopyPnode(pnode->AsParseNodeCall()->pnodeThisOverride);
+        }
+        return callCopy;
+    }
         //PTNODE(knopQmark      , "?"            ,None    ,Tri  ,fnopBin)
     case knopQmark:
         return CreateTriNode(pnode->nop, CopyPnode(pnode->AsParseNodeTri()->pnode1),
             CopyPnode(pnode->AsParseNodeTri()->pnode2), CopyPnode(pnode->AsParseNodeTri()->pnode3),
+            pnode->ichMin, pnode->ichLim);
+    case knopTempRef:
+        // Share the temp node so the copy refers to the same temp as the
+        // copied knopOptChain's pnode3 (also shared, below).
+        return Parser::StaticCreateTempRef(pnode->AsParseNodeUni()->pnode1, &m_nodeAllocator);
+    case knopOptChain:
+        return CreateTriNode(pnode->nop, CopyPnode(pnode->AsParseNodeTri()->pnode1),
+            CopyPnode(pnode->AsParseNodeTri()->pnode2), pnode->AsParseNodeTri()->pnode3,
             pnode->ichMin, pnode->ichLim);
         // General nodes.
         //PTNODE(knopVarDecl    , "varDcl"    ,None    ,Var  ,fnopNone)
@@ -14043,6 +14310,30 @@ void PrintPnodeWIndent(ParseNode *pnode, int indentAmt) {
         Output::Print(_u("??\n"));
         PrintPnodeWIndent(pnode->AsParseNodeBin()->pnode1, indentAmt + INDENT_SIZE);
         PrintPnodeWIndent(pnode->AsParseNodeBin()->pnode2, indentAmt + INDENT_SIZE);
+        break;
+    case knopAsgLogAnd:
+        Indent(indentAmt);
+        Output::Print(_u("&&=\n"));
+        PrintPnodeWIndent(pnode->AsParseNodeBin()->pnode1, indentAmt + INDENT_SIZE);
+        PrintPnodeWIndent(pnode->AsParseNodeBin()->pnode2, indentAmt + INDENT_SIZE);
+        break;
+    case knopAsgLogOr:
+        Indent(indentAmt);
+        Output::Print(_u("||=\n"));
+        PrintPnodeWIndent(pnode->AsParseNodeBin()->pnode1, indentAmt + INDENT_SIZE);
+        PrintPnodeWIndent(pnode->AsParseNodeBin()->pnode2, indentAmt + INDENT_SIZE);
+        break;
+    case knopAsgCoalesce:
+        Indent(indentAmt);
+        Output::Print(_u("?\?=\n"));
+        PrintPnodeWIndent(pnode->AsParseNodeBin()->pnode1, indentAmt + INDENT_SIZE);
+        PrintPnodeWIndent(pnode->AsParseNodeBin()->pnode2, indentAmt + INDENT_SIZE);
+        break;
+    case knopOptChain:
+        Indent(indentAmt);
+        Output::Print(_u("?.\n"));
+        PrintPnodeWIndent(pnode->AsParseNodeTri()->pnode1, indentAmt + INDENT_SIZE);
+        PrintPnodeWIndent(pnode->AsParseNodeTri()->pnode2, indentAmt + INDENT_SIZE);
         break;
         //PTNODE(knopLsh        , "<<"        ,Lsh     ,Bin  ,fnopBin)
     case knopLsh:

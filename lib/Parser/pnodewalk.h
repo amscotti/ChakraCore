@@ -132,6 +132,19 @@ private:
         return result;
     }
 
+    // Optional chain: walk the base and tail expressions. The pnode3 temp
+    // holds no expression and is reached through the tail's temp refs.
+    ResultType WalkOptChain(ParseNodeTri *pnode, Context context)
+    {
+        ResultType result = WalkFirstChild(pnode->pnode1, context);
+        if (ContinueWalk(result))
+        {
+            result = WalkNode(pnode, context);
+            if (ContinueWalk(result)) result = WalkSecondChild(pnode->pnode2, context);
+        }
+        return result;
+    }
+
     ResultType WalkCall(ParseNodeCall *pnode, Context context)
     {
         ResultType result = WalkFirstChild(pnode->pnodeTarget, context);
@@ -139,6 +152,7 @@ private:
         {
             result = WalkNode(pnode, context);
             if (ContinueWalk(result)) result = WalkList(pnode, pnode->pnodeArgs, context);
+            if (ContinueWalk(result) && pnode->pnodeThisOverride != nullptr) result = WalkNthChild(pnode, pnode->pnodeThisOverride, context);
         }
         return result;
     }
@@ -437,6 +451,9 @@ private:
         //PTNODE(knopQmark      , "?"            ,None    ,Tri  ,fnopBin)
         case knopQmark:
             return WalkTernary(pnode->AsParseNodeTri(), context);
+
+        case knopOptChain:
+            return WalkOptChain(pnode->AsParseNodeTri(), context);
 
         // General nodes.
         //PTNODE(knopList       , "<list>"    ,None    ,Bin  ,fnopNone)

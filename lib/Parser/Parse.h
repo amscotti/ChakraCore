@@ -944,7 +944,8 @@ private:
         bool fUnaryOrParen = false,
         _Inout_opt_ bool* pfLikelyPattern = nullptr,
         _Inout_opt_ charcount_t *plastRParen = nullptr,
-        _Out_opt_ bool* looseCoalesce = nullptr);
+        _Out_opt_ bool* looseCoalesce = nullptr,
+        _Out_opt_ bool* pfIsCallResult = nullptr);
 
     template<bool buildAST> ParseNodePtr ParseTerm(
         BOOL fAllowCall = TRUE,
@@ -958,7 +959,9 @@ private:
         _Inout_opt_ BOOL* pfLikelyPattern = nullptr,
         _Out_opt_ bool* pfIsDotOrIndex = nullptr,
         _Inout_opt_ charcount_t *plastRParen = nullptr,
-        _Out_opt_ bool* looseCoalesce = nullptr);
+        _Out_opt_ bool* looseCoalesce = nullptr,
+        _Out_opt_ bool* pfHasOptChain = nullptr,
+        _Out_opt_ bool* pfIsCallResult = nullptr);
 
     template<bool buildAST> ParseNodePtr ParsePostfixOperators(
         ParseNodePtr pnode,
@@ -968,7 +971,9 @@ private:
         BOOL fCanAssignToCallResult,
         BOOL *pfCanAssign, 
         _Inout_ IdentToken* pToken, 
-        _Out_opt_ bool* pfIsDotOrIndex = nullptr);
+        _Out_opt_ bool* pfIsDotOrIndex = nullptr,
+        _Out_opt_ bool* pfHasOptChain = nullptr,
+        _Inout_opt_ bool* pfIsCallResult = nullptr);
 
     void ThrowNewTargetSyntaxErrForGlobalScope();
 

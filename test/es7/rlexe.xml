@@ -148,4 +148,16 @@
       <compile-flags>-args summary -endargs</compile-flags>
     </default>
   </test>
+  <test>
+    <default>
+      <files>optionalchaining.js</files>
+      <compile-flags>-args summary -endargs</compile-flags>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>logicalassignment.js</files>
+      <compile-flags>-forcedeferparse -args summary -endargs</compile-flags>
+    </default>
+  </test>
 </regress-exe>

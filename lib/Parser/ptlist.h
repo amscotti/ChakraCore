@@ -157,6 +157,17 @@ PTNODE(knopArrayPattern, "[] = "           , Nop      , ArrLit      , fnopUni   
 PTNODE(knopParamPattern, "({[]})"          , Nop      , ParamPattern, fnopUni                , "DestructurePattern"            )
 PTNODE(knopExportDefault, "export default" , Nop      , ExportDefault,fnopNone               , "ExportDefault"                 )
 
+/***************************************************************************
+ES2020/ES2021: optional chaining and logical assignment. Appended at the
+end so existing node values and the compact ranges above do not shift.
+knopOptChain is a Tri node: pnode1 = chain base expression, pnode2 =
+chain tail built over a knopTempRef placeholder, pnode3 = the knopTemp
+holding the base (or callee) value. See Parser::ParsePostfixOperators.
+***************************************************************************/
+PTNODE(knopAsgLogAnd  , "&&="              , Nop      , Bin         , fnopBin|fnopAsg       , "LogAndAssignExpr"               )
+PTNODE(knopAsgLogOr   , "||="              , Nop      , Bin         , fnopBin|fnopAsg       , "LogOrAssignExpr"                )
+PTNODE(knopAsgCoalesce, "?\?="             , Nop      , Bin         , fnopBin|fnopAsg       , "NullishAssignExpr"              )
+PTNODE(knopOptChain   , "?."               , Nop      , Tri         , fnopNone              , "OptionalChainExpr"              )
 
 #undef PTNODE
 #undef OP

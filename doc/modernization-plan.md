@@ -405,6 +405,18 @@ Done per batch when:
 Publish supported features and remaining gaps after each batch. Partial releases
 must describe their coverage; raw aggregate percentage is not a feature guarantee.
 
+Batch receipts: S4 optional chaining + logical assignment —
+[c2-s4.md](c2-s4.md) (interpreter-verified, default-enabled; JIT matrix still
+gated on B4). Recorded decision for S4's global defaults: the feature flags
+are not JIT-scoped per function (no `Jit*` companions), because S4 emits only
+pre-existing opcodes and the `JitES6Generators` precedent gates an intrinsic
+function kind, not a syntax form — see the receipt's "Round 3" section. The
+defaults therefore carry Mac no-JIT evidence only: **B4 must run the S4
+test262 corpus and the es7 tests under SimpleJIT/FullJIT (dynapogo) before
+any JIT-configuration default or release claim for these features.** Kill
+switches if a JIT issue appears: `-ESOptionalChaining-`,
+`-ESLogicalAssignment-`.
+
 #### C3 — Larger runtime projects
 
 Class fields/private elements/static blocks, WeakRef/FinalizationRegistry/job
