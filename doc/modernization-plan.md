@@ -415,7 +415,13 @@ defaults therefore carry Mac no-JIT evidence only: **B4 must run the S4
 test262 corpus and the es7 tests under SimpleJIT/FullJIT (dynapogo) before
 any JIT-configuration default or release claim for these features.** Kill
 switches if a JIT issue appears: `-ESOptionalChaining-`,
-`-ESLogicalAssignment-`.
+`-ESLogicalAssignment-`. S5 Iterator helpers — [c2-s5.md](c2-s5.md)
+(closed: interpreter-verified and default-enabled, including the
+review follow-up; pure C++ runtime-library helpers with traced
+helper objects, no new opcodes and no bytecode change). As with S4,
+the default carries Mac no-JIT evidence only: B4 must run the S5
+test262 corpus and the es7 test under SimpleJIT/FullJIT before any
+JIT-configuration claim. Kill switch: `-ESIteratorHelpers-`.
 
 #### C3 — Larger runtime projects
 
@@ -541,7 +547,14 @@ Decision/rollback points:
   tracked until C4, optional ecosystem scope has separate gates.
 - [ ] C4: Published qualified ES2025 result on the claimed default configurations.
 
-**Next implementation:** B4 native execution. Provision a native x64 Linux
+**C2 batch status:** S4 and S5 are closed on Mac no-JIT. JIT-configuration
+claims for both still wait on B4. The next bounded compatibility batch on
+this machine is S11 `String.prototype.replaceAll` (plan P0, no
+prerequisite, C2-small; `matchAll` stays behind the S7 RegExp-symbol
+audit). S10 copy-by-change is the larger library alternative. S3 stays
+behind the Unicode property-data decision.
+
+**Next platform gate:** B4 native execution. Provision a native x64 Linux
 runner via the preferred path to green in [b4-gate.md](b4-gate.md) §4(a),
 record the legacy then Zig interpreted/dynapogo counts natively, and judge
 behavior/ABI parity only from that native execution — not from emulation

@@ -90,6 +90,7 @@ var controllerObj = (function () {
             "Int32Array",
             "Int8Array",
             "Intl",
+            "Iterator",
             "isFinite",
             "isNaN",
             "JSON",

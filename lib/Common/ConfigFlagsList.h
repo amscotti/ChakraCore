@@ -675,6 +675,7 @@ PHASE(All)
 #define DEFAULT_CONFIG_ESNullishCoalescingOperator (true)
 #define DEFAULT_CONFIG_ESOptionalChaining      (true)
 #define DEFAULT_CONFIG_ESLogicalAssignment     (true)
+#define DEFAULT_CONFIG_ESIteratorHelpers       (true)
 #define DEFAULT_CONFIG_ESGlobalThis            (true)
 
 // Jitting generator functions is not functional on ARM
@@ -1206,6 +1207,9 @@ FLAGR(Boolean, ESOptionalChaining, "Enable optional chaining operator", DEFAULT_
 
 // ES Logical assignment support (&&=, ||=, ??=)
 FLAGR(Boolean, ESLogicalAssignment, "Enable logical assignment operators", DEFAULT_CONFIG_ESLogicalAssignment)
+
+// ES Iterator helpers support (Iterator global, Iterator.from, Iterator.prototype methods)
+FLAGR(Boolean, ESIteratorHelpers, "Enable Iterator helpers", DEFAULT_CONFIG_ESIteratorHelpers)
 
 // ES Hashbang support for interpreter directive syntax
 FLAGR(Boolean, ESHashbang, "Enable Hashbang syntax", DEFAULT_CONFIG_ESHashbang)

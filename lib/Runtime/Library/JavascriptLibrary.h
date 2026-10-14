@@ -98,6 +98,8 @@ namespace Js
     };
 
     class MissingPropertyTypeHandler;
+    class JavascriptIteratorHelper;
+    enum class IteratorHelperKind;
     class SourceTextModuleRecord;
     class ArrayBufferBase;
     class SharedContents;
@@ -411,6 +413,9 @@ namespace Js
 
         Field(RuntimeFunction*) sharedArrayBufferConstructor;
         Field(DynamicObject*) sharedArrayBufferPrototype;
+        Field(RuntimeFunction*) iteratorConstructor;
+        Field(DynamicObject*) iteratorHelperPrototype;
+        Field(DynamicObject*) wrapForValidIteratorPrototype;
         Field(DynamicObject*) atomicsObject;
 
         Field(DynamicObject*) webAssemblyCompileErrorPrototype;
@@ -938,6 +943,11 @@ namespace Js
         JavascriptGenerator* CreateGenerator(Arguments& args, ScriptFunction* scriptFunction, RecyclableObject* prototype);
         JavascriptAsyncGenerator* CreateAsyncGenerator(Arguments& args, ScriptFunction* scriptFunction, RecyclableObject* prototype);
         JavascriptAsyncFromSyncIterator* CreateAsyncFromSyncIterator(RecyclableObject* syncIterator);
+        JavascriptIteratorHelper* CreateIteratorHelper(IteratorHelperKind kind, RecyclableObject* iterator, Var nextMethod, Var callback, double remaining);
+        JavascriptIteratorHelper* CreateWrapForValidIterator(RecyclableObject* iterator, Var nextMethod);
+        JavascriptFunction* GetIteratorConstructor() const { return iteratorConstructor; }
+        DynamicObject* GetIteratorHelperPrototype() const { return iteratorHelperPrototype; }
+        DynamicObject* GetWrapForValidIteratorPrototype() const { return wrapForValidIteratorPrototype; }
         JavascriptFunction* CreateNonProfiledFunction(FunctionInfo * functionInfo);
         template <class MethodType>
         JavascriptExternalFunction* CreateIdMappedExternalFunction(MethodType entryPoint, DynamicType *pPrototypeType);
@@ -1294,6 +1304,9 @@ namespace Js
 
         static bool __cdecl JavascriptLibrary::InitializeAsyncIteratorPrototype(DynamicObject* asyncIteratorPrototype, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode);
         static bool __cdecl InitializeIteratorPrototype(DynamicObject* iteratorPrototype, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode);
+        static bool __cdecl InitializeIteratorConstructor(DynamicObject* iteratorConstructor, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode);
+        static bool __cdecl InitializeIteratorHelperPrototype(DynamicObject* iteratorHelperPrototype, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode);
+        static bool __cdecl InitializeWrapForValidIteratorPrototype(DynamicObject* wrapForValidIteratorPrototype, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode);
         static bool __cdecl InitializeArrayIteratorPrototype(DynamicObject* arrayIteratorPrototype, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode);
         static bool __cdecl InitializeMapIteratorPrototype(DynamicObject* mapIteratorPrototype, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode);
         static bool __cdecl InitializeSetIteratorPrototype(DynamicObject* setIteratorPrototype, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode);

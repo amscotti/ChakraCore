@@ -18,9 +18,9 @@ No --not-tag: ICU is present in these profiles, so TEST_ICU is empty
 Slow, ...) is runtests.py's own and therefore identical by
 construction.
 
-Requires the legacy baseline counts for the selection: 1961 passed /
-0 failed (--test), 2013 passed / 0 failed (--debug) (counts per the
-C2-S4 receipt, doc/c2-s4.md). The --debug selection honestly differs
+Requires the legacy baseline counts for the selection: 1962 passed /
+0 failed (--test), 2014 passed / 0 failed (--debug) (counts per the
+C2-S5 receipt, doc/c2-s5.md). The --debug selection honestly differs
 from Test's count (doc/b3-profiles.md §5).
 The verdict comes from parsing the real `Total: passed N, failed M`
 summary line (runtests.py:567), not from the exit code alone; a
@@ -30,8 +30,8 @@ runtests.py's own per-test timeout is untouched.
 
 Usage: check_regression.py <runtests.py> <ch> [--select test|debug]
        [--expected-passed N] [--expected-failed M] [--self-test]
-Defaults: --select test, 1961/0 (the B2 test profile; count raised
-by C2-S4 when it registered two es7 tests, doc/c2-s4.md).
+Defaults: --select test, 1962/0 (the B2 test profile; count raised
+by C2-S5 when it registered one es7 test, doc/c2-s5.md).
 Exit code: 0 iff the suite ran green with exactly the expected counts.
 """
 
@@ -44,15 +44,15 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common
 
 TOTAL_RE = re.compile(r"^Total: passed (\d+), failed (\d+)\s*$")
-EXPECTED_PASSED = 1961
+EXPECTED_PASSED = 1962
 EXPECTED_FAILED = 0
-# Per-selection legacy baselines (counts: doc/c2-s4.md; why the
+# Per-selection legacy baselines (counts: doc/c2-s5.md; why the
 # selections differ: doc/b3-profiles.md §5). --select
 # picks the flag; the counts stay explicit CLI args so a wiring
 # mistake (debug flag with test counts) fails instead of silently
 # passing on a wrong gate.
 SELECT_FLAGS = {"test": "--test", "debug": "--debug"}
-SELECT_COUNTS = {"test": (1961, 0), "debug": (2013, 0)}
+SELECT_COUNTS = {"test": (1962, 0), "debug": (2014, 0)}
 
 
 def parse_total(lines):
@@ -88,19 +88,19 @@ def self_test():
     """Negative controls: the parser/verdict must reject doctored logs."""
     cases = [
         ("exact baseline",
-         ["Total: passed 1961, failed 0"], True),
+         ["Total: passed 1962, failed 0"], True),
         ("one failure",
          ["Total: passed 1960, failed 1"], False),
         ("wrong total",
-         ["Total: passed 1961, failed 0", "Total: passed 10, failed 0"], False),
+         ["Total: passed 1962, failed 0", "Total: passed 10, failed 0"], False),
         ("duplicate summary",
-         ["Total: passed 1961, failed 0",
-          "Total: passed 1961, failed 0"], False),
+         ["Total: passed 1962, failed 0",
+          "Total: passed 1962, failed 0"], False),
         ("missing summary",
          ["############ Results ###########", "Success!"], False),
         ("lookalike line",
-         ["XTotal: passed 1961, failed 0",
-          "Total: passed 1961, failed 0 wisely"], False),
+         ["XTotal: passed 1962, failed 0",
+          "Total: passed 1962, failed 0 wisely"], False),
     ]
     bad = 0
     for name, lines, want_ok in cases:
@@ -115,22 +115,22 @@ def self_test():
             bad += 1
         print("self-test %-16s -> %s (verdict=%s err=%r)"
               % (name, status, "accept" if ok else "reject", err))
-    # Profile-awareness pins: the --debug baseline (2013/0) must be
+    # Profile-awareness pins: the --debug baseline (2014/0) must be
     # accepted under debug expectations and rejected under test
     # expectations, so a count/selection mismatch can never pass.
     try:
-        err = check_counts(parse_total(["Total: passed 2013, failed 0"]),
+        err = check_counts(parse_total(["Total: passed 2014, failed 0"]),
                            *SELECT_COUNTS["debug"])
     except ValueError as e:
         err = str(e)
     if err is None:
-        print("self-test %-16s -> PASS (verdict=accept)" % "debug 2013/0")
+        print("self-test %-16s -> PASS (verdict=accept)" % "debug 2014/0")
     else:
         print("self-test %-16s -> FAIL (verdict=reject err=%r)"
-              % ("debug 2013/0", err))
+              % ("debug 2014/0", err))
         bad += 1
     try:
-        err = check_counts(parse_total(["Total: passed 2013, failed 0"]),
+        err = check_counts(parse_total(["Total: passed 2014, failed 0"]),
                            *SELECT_COUNTS["test"])
     except ValueError as e:
         err = str(e)

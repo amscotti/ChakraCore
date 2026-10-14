@@ -112,7 +112,7 @@ namespace Js
       TypeIds_MapIterator = 66,
       TypeIds_SetIterator = 67,
       TypeIds_StringIterator = 68,
-      // 69 - deleted
+      TypeIds_IteratorHelper = 69, // reclaimed (was VariantDate, removed long ago)
       TypeIds_Generator = 70,
       TypeIds_AsyncGenerator = 71,
       TypeIds_AsyncFromSyncIterator = 72,

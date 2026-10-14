@@ -386,6 +386,19 @@ namespace Js
             DynamicType::New(scriptContext, TypeIds_Object, objectPrototype, nullptr,
             DeferredTypeHandler<InitializeIteratorPrototype, DefaultDeferredTypeFilter, true>::GetDefaultInstance()));
 
+        iteratorConstructor = nullptr;
+        iteratorHelperPrototype = nullptr;
+        wrapForValidIteratorPrototype = nullptr;
+        if (scriptContext->GetConfig()->IsESIteratorHelpersEnabled())
+        {
+            iteratorHelperPrototype = DynamicObject::New(recycler,
+                DynamicType::New(scriptContext, TypeIds_Object, iteratorPrototype, nullptr,
+                DeferredTypeHandler<InitializeIteratorHelperPrototype, DefaultDeferredTypeFilter, true>::GetDefaultInstance()));
+            wrapForValidIteratorPrototype = DynamicObject::New(recycler,
+                DynamicType::New(scriptContext, TypeIds_Object, iteratorPrototype, nullptr,
+                DeferredTypeHandler<InitializeWrapForValidIteratorPrototype, DefaultDeferredTypeFilter, true>::GetDefaultInstance()));
+        }
+
         if (!scriptContext->IsJsBuiltInEnabled())
         {
             arrayIteratorPrototype = DynamicObject::New(recycler,
@@ -1727,6 +1740,13 @@ namespace Js
         weakSetConstructor = CreateBuiltinConstructor(&JavascriptWeakSet::EntryInfo::NewInstance,
             DeferredTypeHandler<InitializeWeakSetConstructor>::GetDefaultInstance());
         AddFunction(globalObject, PropertyIds::WeakSet, weakSetConstructor);
+
+        if (scriptContext->GetConfig()->IsESIteratorHelpersEnabled())
+        {
+            iteratorConstructor = CreateBuiltinConstructor(&JavascriptIterator::EntryInfo::NewInstance,
+                DeferredTypeHandler<InitializeIteratorConstructor>::GetDefaultInstance());
+            AddFunction(globalObject, scriptContext->GetOrAddPropertyIdTracked(_u("Iterator")), iteratorConstructor);
+        }
 
         generatorFunctionConstructor = nullptr;
 
@@ -4685,16 +4705,102 @@ namespace Js
 
     bool JavascriptLibrary::InitializeIteratorPrototype(DynamicObject* iteratorPrototype, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)
     {
-        typeHandler->Convert(iteratorPrototype, mode, 1);
+        JavascriptLibrary* library = iteratorPrototype->GetLibrary();
+        ScriptContext* scriptContext = library->GetScriptContext();
+        bool iteratorHelpersEnabled = scriptContext->GetConfig()->IsESIteratorHelpersEnabled();
+
+        typeHandler->Convert(iteratorPrototype, mode, iteratorHelpersEnabled ? 16 : 1);
         // Note: Any new function addition/deletion/modification should also be updated in JavascriptLibrary::ProfilerRegisterIterator
         // so that the update is in sync with profiler
-
-        JavascriptLibrary* library = iteratorPrototype->GetLibrary();
 
         library->AddFunctionToLibraryObjectWithName(iteratorPrototype, PropertyIds::_symbolIterator, PropertyIds::_RuntimeFunctionNameId_iterator,
             &JavascriptIterator::EntryInfo::SymbolIterator, 0);
 
+        if (iteratorHelpersEnabled)
+        {
+            // Iterator.prototype is %IteratorPrototype%. The constructor and
+            // @@toStringTag properties are accessors whose setters are
+            // SetterThatIgnoresPrototypeProperties (see JavascriptIterator).
+            library->AddAccessorsToLibraryObject(iteratorPrototype, PropertyIds::constructor,
+                &JavascriptIterator::EntryInfo::GetterConstructor, &JavascriptIterator::EntryInfo::SetterConstructor);
+            library->AddAccessorsToLibraryObjectWithName(iteratorPrototype, PropertyIds::_symbolToStringTag,
+                PropertyIds::_RuntimeFunctionNameId_toStringTag,
+                &JavascriptIterator::EntryInfo::GetterToStringTag, &JavascriptIterator::EntryInfo::SetterToStringTag);
+
+            library->AddFunctionToLibraryObject(iteratorPrototype, PropertyIds::map, &JavascriptIterator::EntryInfo::Map, 1);
+            library->AddFunctionToLibraryObject(iteratorPrototype, PropertyIds::filter, &JavascriptIterator::EntryInfo::Filter, 1);
+            library->AddFunctionToLibraryObjectWithPropertyName(iteratorPrototype, _u("take"), &JavascriptIterator::EntryInfo::Take, 1);
+            library->AddFunctionToLibraryObjectWithPropertyName(iteratorPrototype, _u("drop"), &JavascriptIterator::EntryInfo::Drop, 1);
+            library->AddFunctionToLibraryObject(iteratorPrototype, PropertyIds::flatMap, &JavascriptIterator::EntryInfo::FlatMap, 1);
+            library->AddFunctionToLibraryObject(iteratorPrototype, PropertyIds::reduce, &JavascriptIterator::EntryInfo::Reduce, 1);
+            library->AddFunctionToLibraryObjectWithPropertyName(iteratorPrototype, _u("toArray"), &JavascriptIterator::EntryInfo::ToArray, 0);
+            library->AddFunctionToLibraryObject(iteratorPrototype, PropertyIds::forEach, &JavascriptIterator::EntryInfo::ForEach, 1);
+            library->AddFunctionToLibraryObject(iteratorPrototype, PropertyIds::some, &JavascriptIterator::EntryInfo::Some, 1);
+            library->AddFunctionToLibraryObject(iteratorPrototype, PropertyIds::every, &JavascriptIterator::EntryInfo::Every, 1);
+            library->AddFunctionToLibraryObject(iteratorPrototype, PropertyIds::find, &JavascriptIterator::EntryInfo::Find, 1);
+        }
+
         return true;
+    }
+
+    bool JavascriptLibrary::InitializeIteratorConstructor(DynamicObject* iteratorConstructor, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)
+    {
+        typeHandler->Convert(iteratorConstructor, mode, 4);
+
+        JavascriptLibrary* library = iteratorConstructor->GetLibrary();
+
+        library->AddMember(iteratorConstructor, PropertyIds::length, TaggedInt::ToVarUnchecked(0), PropertyConfigurable);
+        library->AddMember(iteratorConstructor, PropertyIds::prototype, library->iteratorPrototype, PropertyNone);
+        library->AddMember(iteratorConstructor, PropertyIds::name, library->CreateStringFromCppLiteral(_u("Iterator")), PropertyConfigurable);
+        library->AddFunctionToLibraryObject(iteratorConstructor, PropertyIds::from, &JavascriptIterator::EntryInfo::From, 1);
+
+        iteratorConstructor->SetHasNoEnumerableProperties(true);
+
+        return true;
+    }
+
+    bool JavascriptLibrary::InitializeIteratorHelperPrototype(DynamicObject* iteratorHelperPrototype, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)
+    {
+        typeHandler->Convert(iteratorHelperPrototype, mode, 3);
+
+        JavascriptLibrary* library = iteratorHelperPrototype->GetLibrary();
+
+        library->AddFunctionToLibraryObject(iteratorHelperPrototype, PropertyIds::next, &JavascriptIteratorHelper::EntryInfo::Next, 0);
+        library->AddFunctionToLibraryObject(iteratorHelperPrototype, PropertyIds::return_, &JavascriptIteratorHelper::EntryInfo::Return, 0);
+        // Same feature gate as Iterator.prototype's @@toStringTag accessor
+        // (ESIteratorHelpers). This prototype is not created unless that
+        // flag is on, so the tag is not also behind ES6ToStringTag.
+        library->AddMember(iteratorHelperPrototype, PropertyIds::_symbolToStringTag, library->CreateStringFromCppLiteral(_u("Iterator Helper")), PropertyConfigurable);
+
+        iteratorHelperPrototype->SetHasNoEnumerableProperties(true);
+
+        return true;
+    }
+
+    bool JavascriptLibrary::InitializeWrapForValidIteratorPrototype(DynamicObject* wrapForValidIteratorPrototype, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)
+    {
+        typeHandler->Convert(wrapForValidIteratorPrototype, mode, 2);
+
+        JavascriptLibrary* library = wrapForValidIteratorPrototype->GetLibrary();
+
+        library->AddFunctionToLibraryObject(wrapForValidIteratorPrototype, PropertyIds::next, &JavascriptIteratorHelper::EntryInfo::WrapNext, 0);
+        library->AddFunctionToLibraryObject(wrapForValidIteratorPrototype, PropertyIds::return_, &JavascriptIteratorHelper::EntryInfo::WrapReturn, 0);
+
+        wrapForValidIteratorPrototype->SetHasNoEnumerableProperties(true);
+
+        return true;
+    }
+
+    JavascriptIteratorHelper* JavascriptLibrary::CreateIteratorHelper(IteratorHelperKind kind, RecyclableObject* iterator, Var nextMethod, Var callback, double remaining)
+    {
+        DynamicType* type = DynamicType::New(scriptContext, TypeIds_IteratorHelper, iteratorHelperPrototype, nullptr, NullTypeHandler<false>::GetDefaultInstance());
+        return RecyclerNew(this->GetRecycler(), JavascriptIteratorHelper, type, kind, iterator, nextMethod, callback, remaining);
+    }
+
+    JavascriptIteratorHelper* JavascriptLibrary::CreateWrapForValidIterator(RecyclableObject* iterator, Var nextMethod)
+    {
+        DynamicType* type = DynamicType::New(scriptContext, TypeIds_IteratorHelper, wrapForValidIteratorPrototype, nullptr, NullTypeHandler<false>::GetDefaultInstance());
+        return RecyclerNew(this->GetRecycler(), JavascriptIteratorHelper, type, IteratorHelperKind::Wrap, iterator, nextMethod, nullptr, 0);
     }
 
     bool JavascriptLibrary::InitializeAsyncIteratorPrototype(DynamicObject* asyncIteratorPrototype, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)
@@ -8015,6 +8121,32 @@ namespace Js
         DEFINE_OBJECT_NAME(Iterator);
 
         REG_OBJECTS_LIB_FUNC2(_symbolIterator, _u("[Symbol.iterator]"), JavascriptIterator::EntrySymbolIterator);
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("get constructor"), 15, JavascriptIterator::EntryGetterConstructor);
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("set constructor"), 15, JavascriptIterator::EntrySetterConstructor);
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("get [Symbol.toStringTag]"), 24, JavascriptIterator::EntryGetterToStringTag);
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("set [Symbol.toStringTag]"), 24, JavascriptIterator::EntrySetterToStringTag);
+        REG_OBJECTS_LIB_FUNC(map, JavascriptIterator::EntryMap);
+        REG_OBJECTS_LIB_FUNC(filter, JavascriptIterator::EntryFilter);
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("take"), 4, JavascriptIterator::EntryTake);
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("drop"), 4, JavascriptIterator::EntryDrop);
+        REG_OBJECTS_LIB_FUNC(flatMap, JavascriptIterator::EntryFlatMap);
+        REG_OBJECTS_LIB_FUNC(reduce, JavascriptIterator::EntryReduce);
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("toArray"), 7, JavascriptIterator::EntryToArray);
+        REG_OBJECTS_LIB_FUNC(forEach, JavascriptIterator::EntryForEach);
+        REG_OBJECTS_LIB_FUNC(some, JavascriptIterator::EntrySome);
+        REG_OBJECTS_LIB_FUNC(every, JavascriptIterator::EntryEvery);
+        REG_OBJECTS_LIB_FUNC(find, JavascriptIterator::EntryFind);
+        REG_OBJECTS_LIB_FUNC(from, JavascriptIterator::EntryFrom);
+        {
+            const char16 *pwszObjectName = _u("Iterator Helper");
+            REG_OBJECTS_LIB_FUNC(next, JavascriptIteratorHelper::EntryNext);
+            REG_OBJECTS_LIB_FUNC(return_, JavascriptIteratorHelper::EntryReturn);
+        }
+        {
+            const char16 *pwszObjectName = _u("WrapForValidIterator");
+            REG_OBJECTS_LIB_FUNC(next, JavascriptIteratorHelper::EntryWrapNext);
+            REG_OBJECTS_LIB_FUNC(return_, JavascriptIteratorHelper::EntryWrapReturn);
+        }
 
         return hr;
     }

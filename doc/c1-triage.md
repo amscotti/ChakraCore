@@ -476,6 +476,15 @@ value-per-risk first batch.
 
 **S5. Iterator helpers (`Iterator.prototype.*`, `Iterator.from`).** Repro:
 `python3 tools/test262/run.py --binary zig-out/bin/ch --output out/test262-c1-iter 'test/built-ins/Iterator/**/*.js'`.
+*Status: closed in C2 batch S5 — see [c2-s5.md](c2-s5.md). Mac no-JIT
+verified and default-enabled (directory edition selection 22/766 →
+776 passed / 12 failed of 788; every remaining failure is a
+BigInt-literal parse in the test or its includes). The review
+follow-up is in the same batch: wrap `next` returns the underlying
+result unchanged, and suspended-start `return()` reentry returns a
+done result. Post-fix regression: test 1962/0, debug-static 2014/0.
+x64 JIT verification stays gated on B4 before any JIT-configuration
+claim.*
 Subsystem: Runtime/Library (new `Iterator` global and helper intrinsics).
 Prerequisite: none identified. Expected gain: 772 edition failures at 14
 passed. Uncertainty: low-medium (self-contained builtins; laziness/closing
