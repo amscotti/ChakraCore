@@ -1711,6 +1711,353 @@ case_2:
         }
     }
 
+    Var JavascriptString::EntryReplaceAll(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+        ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+
+        PCWSTR const varName = _u("String.prototype.replaceAll");
+
+        AUTO_TAG_NATIVE_LIBRARY_ENTRY(function, callInfo, varName);
+
+        Assert(!(callInfo.Flags & CallFlags_New));
+
+        if (args.Info.Count == 0 || !JavascriptConversion::CheckObjectCoercible(args[0], scriptContext))
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NullOrUndefined, varName);
+        }
+
+        Var searchValue = (args.Info.Count > 1) ? args[1] : scriptContext->GetLibrary()->GetUndefined();
+        Var replaceValue = (args.Info.Count > 2) ? args[2] : scriptContext->GetLibrary()->GetUndefined();
+
+        // ES2025 String.prototype.replaceAll. IsRegExp, and only then the flags
+        // check, happens before @@replace is read. @@replace is read only when
+        // searchValue is an Object. A primitive does not consult
+        // String.prototype[@@replace] or the other primitive prototypes.
+        // String.prototype.replace still does; that lookup is pre-existing debt.
+        // A missing flags property on a real regexp uses the internal global bit
+        // (HasProperty, prototype chain, no getters). An own or inherited flags
+        // value is Get'd; proxies and other regexp-like objects only Get("flags").
+        // Undefined and null flags throw JSERR_NeedObject. Code unit 'g' counts
+        // ('G' does not). JSERR_RegExpInvalid does not exist; the missing-g
+        // TypeError is JSERR_FunctionArgument_Invalid. With ES6RegExSymbols on, a
+        // missing or null/undefined @@replace falls through to the string path,
+        // including for a real regexp. A non-callable @@replace throws. With
+        // symbols off, a real regexp that passed the g check uses RegexReplace.
+        if (!JavascriptOperators::IsUndefinedOrNull(searchValue))
+        {
+            const bool isRegExp = JavascriptRegExp::IsRegExpLike(searchValue, scriptContext);
+            if (isRegExp)
+            {
+                bool hasGlobal = false;
+                bool useInternalGlobal = false;
+                if (VarIs<JavascriptRegExp>(searchValue))
+                {
+                    JavascriptRegExp* regEx = VarTo<JavascriptRegExp>(searchValue);
+                    // Instance HasProperty is own-only. Operators::HasProperty walks
+                    // the prototype and does not invoke getters.
+                    if (!JavascriptOperators::HasProperty(regEx, PropertyIds::flags))
+                    {
+                        hasGlobal = (regEx->GetFlags() & UnifiedRegex::GlobalRegexFlag) != 0;
+                        useInternalGlobal = true;
+                    }
+                }
+                if (!useInternalGlobal)
+                {
+                    Var flags = JavascriptOperators::OP_GetProperty(searchValue, PropertyIds::flags, scriptContext);
+                    TypeId flagsType = JavascriptOperators::GetTypeId(flags);
+                    if (flagsType == TypeIds_Undefined || flagsType == TypeIds_Null)
+                    {
+                        JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedObject, varName);
+                    }
+                    else
+                    {
+                        JavascriptString* flagsString = JavascriptConversion::ToString(flags, scriptContext);
+                        const char16* flagsBuf = flagsString->GetString();
+                        const CharCount flagsLength = flagsString->GetLength();
+                        for (CharCount i = 0; i < flagsLength; i++)
+                        {
+                            if (flagsBuf[i] == _u('g'))
+                            {
+                                hasGlobal = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (!hasGlobal)
+                {
+                    JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_Invalid, varName);
+                }
+            }
+
+            if (scriptContext->GetConfig()->IsES6RegExSymbolsEnabled())
+            {
+                // Non-objects skip @@replace. IsRegExpLike already returned
+                // false for them, so this does not skip a flags check.
+                if (JavascriptOperators::IsObject(searchValue))
+                {
+                    Var symbolFn = GetRegExSymbolFunction(searchValue, PropertyIds::_symbolReplace, scriptContext);
+                    if (!JavascriptOperators::IsUndefinedOrNull(symbolFn))
+                    {
+                        if (!JavascriptConversion::IsCallable(symbolFn))
+                        {
+                            JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_Invalid, varName);
+                        }
+                        RecyclableObject* fnObj = UnsafeVarTo<RecyclableObject>(symbolFn);
+                        ThreadContext* threadContext = scriptContext->GetThreadContext();
+                        Var replaceArg = (args.Info.Count >= 3) ? args[2] : scriptContext->GetLibrary()->GetUndefined();
+                        return threadContext->ExecuteImplicitCall(fnObj, ImplicitCall_Accessor, [=]() -> Js::Var
+                        {
+                            return CALL_FUNCTION(
+                                threadContext,
+                                fnObj,
+                                CallInfo(CallFlags_Value, 3),
+                                searchValue,
+                                args[0],
+                                replaceArg);
+                        });
+                    }
+                }
+            }
+            else if (isRegExp && VarIs<JavascriptRegExp>(searchValue))
+            {
+                JavascriptString* input = JavascriptConversion::ToString(args[0], scriptContext);
+                RecyclableObject* replacefn = nullptr;
+                JavascriptString* replace = nullptr;
+                ReplaceValueHelper(scriptContext, replaceValue, &replacefn, &replace);
+                JavascriptRegExp* regEx = VarTo<JavascriptRegExp>(searchValue);
+                if (replacefn != nullptr)
+                {
+                    return RegexHelper::RegexReplaceFunction(scriptContext, regEx, input, replacefn);
+                }
+                return RegexHelper::RegexReplace(
+                    scriptContext, regEx, input, replace, RegexHelper::IsResultNotUsed(callInfo.Flags));
+            }
+        }
+
+        JavascriptString* input = nullptr;
+        GetThisStringArgument(args, scriptContext, varName, &input);
+        JavascriptString* search = JavascriptConversion::ToString(searchValue, scriptContext);
+        return DoStringReplaceAll(input, search, replaceValue, scriptContext);
+    }
+
+    Var JavascriptString::DoStringReplaceAll(JavascriptString* input, JavascriptString* search, Var replaceValue, ScriptContext* scriptContext)
+    {
+        const CharCount inputLength = input->GetLength();
+        const CharCount searchLength = search->GetLength();
+
+        // strstr's empty needle always returns 0 and ignores start. Never use it
+        // to walk an empty search. Empty search matches every boundary, including
+        // both ends: "ab" -> 3 matches, "" -> 1 match.
+        CharCount matchCount = 0;
+        if (searchLength == 0)
+        {
+            matchCount = inputLength + 1;
+        }
+        else
+        {
+            CharCount start = 0;
+            for (;;)
+            {
+                CharCount found = strstr(input, search, true, start);
+                if (found == CharCountFlag)
+                {
+                    break;
+                }
+                matchCount++;
+                start = found + searchLength;
+            }
+        }
+
+        // Spec ToString(replaceValue) happens before any replacer call, and only
+        // when replaceValue is not callable. ReplaceValueHelper does that.
+        // Zero matches still convert a non-callable replacement; a callable is not invoked.
+        RecyclableObject* replacefn = nullptr;
+        JavascriptString* replace = nullptr;
+        ReplaceValueHelper(scriptContext, replaceValue, &replacefn, &replace);
+
+        if (matchCount == 0)
+        {
+            return input;
+        }
+
+        // Positions are temp-allocator integers, not a JS object. Release the
+        // arena if a replacer throws. The builder's result is a recycler string
+        // materialized before this guard dies. Do not capture the guard in a lambda.
+        struct ReplaceAllTemp
+        {
+            ScriptContext* scriptContext;
+            TempArenaAllocatorObject* temp;
+            ArenaAllocator* alloc;
+            ReplaceAllTemp(ScriptContext* sc)
+                : scriptContext(sc)
+                , temp(sc->GetTemporaryAllocator(_u("replaceAll")))
+                , alloc(temp->GetAllocator())
+            {
+            }
+            ~ReplaceAllTemp()
+            {
+                scriptContext->ReleaseTemporaryAllocator(temp);
+            }
+            ReplaceAllTemp(const ReplaceAllTemp&) = delete;
+            ReplaceAllTemp& operator=(const ReplaceAllTemp&) = delete;
+        };
+
+        JavascriptString* result = nullptr;
+        {
+            ReplaceAllTemp tempAlloc(scriptContext);
+            CharCount* positions = AnewArray(tempAlloc.alloc, CharCount, matchCount);
+
+            if (searchLength == 0)
+            {
+                for (CharCount i = 0; i < matchCount; i++)
+                {
+                    positions[i] = i;
+                }
+            }
+            else
+            {
+                CharCount start = 0;
+                for (CharCount n = 0; n < matchCount; n++)
+                {
+                    CharCount found = strstr(input, search, true, start);
+                    Assert(found != CharCountFlag);
+                    positions[n] = found;
+                    start = found + searchLength;
+                }
+            }
+
+            // Stable copy of the replacement text. Append can flatten the
+            // JavascriptString, so the $ scan must not hold its GetString() pointer.
+            const CharCount replaceLength = (replacefn == nullptr) ? replace->GetLength() : 0;
+            char16* replaceBuf = nullptr;
+            if (replacefn == nullptr && replaceLength != 0)
+            {
+                replaceBuf = AnewArray(tempAlloc.alloc, char16, replaceLength);
+                const char16* src = replace->GetString();
+                for (CharCount k = 0; k < replaceLength; k++)
+                {
+                    replaceBuf[k] = src[k];
+                }
+            }
+
+            CompoundString::Builder<64 * sizeof(void *) / sizeof(char16)> builder(scriptContext);
+            CharCount endOfLastMatch = 0;
+
+            for (CharCount n = 0; n < matchCount; n++)
+            {
+                const CharCount position = positions[n];
+                JavascriptString* functionalReplacement = nullptr;
+
+                if (replacefn != nullptr)
+                {
+                    ThreadContext* threadContext = scriptContext->GetThreadContext();
+                    Var replaceVar = threadContext->ExecuteImplicitCall(replacefn, ImplicitCall_Accessor,
+                        [threadContext, replacefn, scriptContext, search, position, input]() -> Js::Var
+                        {
+                            Var pThis = scriptContext->GetLibrary()->GetUndefined();
+                            return CALL_FUNCTION(
+                                threadContext,
+                                replacefn,
+                                CallInfo(4),
+                                pThis,
+                                search,
+                                JavascriptNumber::ToVar((int)position, scriptContext),
+                                input);
+                        });
+                    functionalReplacement = JavascriptConversion::ToString(replaceVar, scriptContext);
+                }
+
+                if (position > endOfLastMatch)
+                {
+                    builder.Append(input, endOfLastMatch, position - endOfLastMatch);
+                }
+
+                if (replacefn != nullptr)
+                {
+                    if (functionalReplacement->GetLength() != 0)
+                    {
+                        builder.Append(functionalReplacement);
+                    }
+                }
+                else if (replaceLength != 0)
+                {
+                    // Same empty-capture GetSubstitution as RegexHelper::StringReplace,
+                    // per match. $$ -> $, $& -> matched text, $` -> prefix, $' -> suffix.
+                    // $1, $<name>, and any other $ escape stay literal, including the $.
+                    // The default arm must ++j so the character after $ is not parsed again.
+                    CharCount i = 0;
+                    CharCount j = 0;
+                    for (; j < replaceLength; ++j)
+                    {
+                        if (replaceBuf[j] == _u('$') && j + 1 < replaceLength)
+                        {
+                            switch (replaceBuf[j + 1])
+                            {
+                            case _u('$'):
+                                ++j;
+                                builder.Append(replace, i, j - i);
+                                i = j + 1;
+                                break;
+
+                            case _u('&'):
+                                builder.Append(replace, i, j - i);
+                                builder.Append(searchLength == 0
+                                    ? scriptContext->GetLibrary()->GetEmptyString()
+                                    : VarTo<JavascriptString>(JavascriptString::SubstringCore(
+                                        input, (int)position, (int)searchLength, scriptContext)));
+                                ++j;
+                                i = j + 1;
+                                break;
+
+                            case _u('`'):
+                                builder.Append(replace, i, j - i);
+                                if (position != 0)
+                                {
+                                    builder.Append(input, 0, position);
+                                }
+                                ++j;
+                                i = j + 1;
+                                break;
+
+                            case _u('\''):
+                                builder.Append(replace, i, j - i);
+                                if (position + searchLength < inputLength)
+                                {
+                                    builder.Append(input, position + searchLength, inputLength - position - searchLength);
+                                }
+                                ++j;
+                                i = j + 1;
+                                break;
+
+                            default:
+                                ++j;
+                                break;
+                            }
+                        }
+                    }
+                    if (i < replaceLength)
+                    {
+                        builder.Append(replace, i, replaceLength - i);
+                    }
+                }
+
+                endOfLastMatch = position + searchLength;
+            }
+
+            if (endOfLastMatch < inputLength)
+            {
+                builder.Append(input, endOfLastMatch, inputLength - endOfLastMatch);
+            }
+
+            result = builder.ToString();
+        }
+        return result;
+    }
+
     void JavascriptString::SearchValueHelper(ScriptContext* scriptContext, Var aValue, JavascriptRegExp ** ppSearchRegEx, JavascriptString ** ppSearchString)
     {
         *ppSearchRegEx = nullptr;

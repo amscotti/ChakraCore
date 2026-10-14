@@ -422,6 +422,15 @@ helper objects, no new opcodes and no bytecode change). As with S4,
 the default carries Mac no-JIT evidence only: B4 must run the S5
 test262 corpus and the es7 test under SimpleJIT/FullJIT before any
 JIT-configuration claim. Kill switch: `-ESIteratorHelpers-`.
+S11 `String.prototype.replaceAll` — [c2-s11.md](c2-s11.md)
+(interpreter-verified, unconditional library method, no feature flag
+and no kill switch, no new opcodes). The default carries Mac no-JIT
+evidence only: **B4 must run the S11 test262 corpus and both es7
+tests under SimpleJIT/FullJIT (dynapogo) before any JIT-configuration
+claim.** Documented gaps, not S11 defects: the default profile has no
+`RegExp.prototype.flags`, so a deleted `flags` property does not
+throw; named capture groups are unsupported. `@@replace` dispatch
+requires `-ES6RegExSymbols` and applies only to Object search values.
 
 #### C3 — Larger runtime projects
 
@@ -547,12 +556,9 @@ Decision/rollback points:
   tracked until C4, optional ecosystem scope has separate gates.
 - [ ] C4: Published qualified ES2025 result on the claimed default configurations.
 
-**C2 batch status:** S4 and S5 are closed on Mac no-JIT. JIT-configuration
-claims for both still wait on B4. The next bounded compatibility batch on
-this machine is S11 `String.prototype.replaceAll` (plan P0, no
-prerequisite, C2-small; `matchAll` stays behind the S7 RegExp-symbol
-audit). S10 copy-by-change is the larger library alternative. S3 stays
-behind the Unicode property-data decision.
+**C2 batch status:** S4, S5, and S11 `String.prototype.replaceAll` are
+closed on Mac no-JIT. JIT claims still wait on B4. `matchAll` stays
+behind S7. The next bounded C2 batch is the copy-by-change half of S10.
 
 **Next platform gate:** B4 native execution. Provision a native x64 Linux
 runner via the preferred path to green in [b4-gate.md](b4-gate.md) §4(a),

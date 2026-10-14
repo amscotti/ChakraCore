@@ -26,11 +26,6 @@
             "fromCodePoint": "function <large string>",
             "raw": "function <large string>"
           },
-          "at": {
-            "#__proto__": "function <large string>",
-            "length": "number 1",
-            "name": "string at"
-          },
           "indexOf": {
             "#__proto__": "function <large string>",
             "length": "number 1",
@@ -45,6 +40,11 @@
             "#__proto__": "function <large string>",
             "length": "number 2",
             "name": "string replace"
+          },
+          "replaceAll": {
+            "#__proto__": "function <large string>",
+            "length": "number 2",
+            "name": "string replaceAll"
           },
           "search": {
             "#__proto__": "function <large string>",
@@ -65,6 +65,11 @@
             "#__proto__": "function <large string>",
             "length": "number 0",
             "name": "string normalize"
+          },
+          "at": {
+            "#__proto__": "function <large string>",
+            "length": "number 1",
+            "name": "string at"
           },
           "charAt": {
             "#__proto__": "function <large string>",
@@ -338,11 +343,6 @@
               "length": "number 2",
               "name": "string slice"
             },
-            "sort": {
-              "#__proto__": "function <large string>",
-              "length": "number 1",
-              "name": "string sort"
-            },
             "splice": {
               "#__proto__": "function <large string>",
               "length": "number 2",
@@ -363,10 +363,10 @@
               "length": "number 1",
               "name": "string unshift"
             },
-            "every": {
+            "sort": {
               "#__proto__": "function <large string>",
               "length": "number 1",
-              "name": "string every"
+              "name": "string sort"
             },
             "lastIndexOf": {
               "#__proto__": "function <large string>",
@@ -378,35 +378,25 @@
               "length": "number 1",
               "name": "string map"
             },
-            "reduce": {
-              "#__proto__": "function <large string>",
-              "length": "number 1",
-              "name": "string reduce"
-            },
             "reduceRight": {
               "#__proto__": "function <large string>",
               "length": "number 1",
               "name": "string reduceRight"
-            },
-            "some": {
-              "#__proto__": "function <large string>",
-              "length": "number 1",
-              "name": "string some"
             },
             "find": {
               "#__proto__": "function <large string>",
               "length": "number 1",
               "name": "string find"
             },
-            "findLast": {
-              "#__proto__": "function <large string>",
-              "length": "number 1",
-              "name": "string findLast"
-            },
             "findIndex": {
               "#__proto__": "function <large string>",
               "length": "number 1",
               "name": "string findIndex"
+            },
+            "findLast": {
+              "#__proto__": "function <large string>",
+              "length": "number 1",
+              "name": "string findLast"
             },
             "findLastIndex": {
               "#__proto__": "function <large string>",
@@ -458,20 +448,40 @@
               "length": "number 1",
               "name": "string forEach"
             },
+            "some": {
+              "#__proto__": "function <large string>",
+              "length": "number 1",
+              "name": "string some"
+            },
+            "every": {
+              "#__proto__": "function <large string>",
+              "length": "number 1",
+              "name": "string every"
+            },
+            "includes": {
+              "#__proto__": "function <large string>",
+              "length": "number 1",
+              "name": "string includes"
+            },
+            "reduce": {
+              "#__proto__": "function <large string>",
+              "length": "number 1",
+              "name": "string reduce"
+            },
             "Symbol.unscopables": {
               "at": "boolean true",
               "copyWithin": "boolean true",
               "entries": "boolean true",
               "fill": "boolean true",
               "find": "boolean true",
-              "findLast": "boolean true",
               "findIndex": "boolean true",
-              "findLastIndex": "boolean true",
               "flat": "boolean true",
               "flatMap": "boolean true",
               "includes": "boolean true",
               "keys": "boolean true",
-              "values": "boolean true"
+              "values": "boolean true",
+              "findLast": "boolean true",
+              "findLastIndex": "boolean true"
             },
             "fill": {
               "#__proto__": "function <large string>",
@@ -482,11 +492,6 @@
               "#__proto__": "function <large string>",
               "length": "number 2",
               "name": "string copyWithin"
-            },
-            "includes": {
-              "#__proto__": "function <large string>",
-              "length": "number 1",
-              "name": "string includes"
             },
             "length": "number 0"
           },
@@ -585,11 +590,6 @@
               "length": "number 2",
               "name": "string slice"
             },
-            "sort": {
-              "#__proto__": "function <large string>",
-              "length": "number 1",
-              "name": "string sort"
-            },
             "splice": {
               "#__proto__": "function <large string>",
               "length": "number 2",
@@ -610,10 +610,10 @@
               "length": "number 1",
               "name": "string unshift"
             },
-            "every": {
+            "sort": {
               "#__proto__": "function <large string>",
               "length": "number 1",
-              "name": "string every"
+              "name": "string sort"
             },
             "lastIndexOf": {
               "#__proto__": "function <large string>",
@@ -625,35 +625,25 @@
               "length": "number 1",
               "name": "string map"
             },
-            "reduce": {
-              "#__proto__": "function <large string>",
-              "length": "number 1",
-              "name": "string reduce"
-            },
             "reduceRight": {
               "#__proto__": "function <large string>",
               "length": "number 1",
               "name": "string reduceRight"
-            },
-            "some": {
-              "#__proto__": "function <large string>",
-              "length": "number 1",
-              "name": "string some"
             },
             "find": {
               "#__proto__": "function <large string>",
               "length": "number 1",
               "name": "string find"
             },
-            "findLast": {
-              "#__proto__": "function <large string>",
-              "length": "number 1",
-              "name": "string findLast"
-            },
             "findIndex": {
               "#__proto__": "function <large string>",
               "length": "number 1",
               "name": "string findIndex"
+            },
+            "findLast": {
+              "#__proto__": "function <large string>",
+              "length": "number 1",
+              "name": "string findLast"
             },
             "findLastIndex": {
               "#__proto__": "function <large string>",
@@ -705,20 +695,40 @@
               "length": "number 1",
               "name": "string forEach"
             },
+            "some": {
+              "#__proto__": "function <large string>",
+              "length": "number 1",
+              "name": "string some"
+            },
+            "every": {
+              "#__proto__": "function <large string>",
+              "length": "number 1",
+              "name": "string every"
+            },
+            "includes": {
+              "#__proto__": "function <large string>",
+              "length": "number 1",
+              "name": "string includes"
+            },
+            "reduce": {
+              "#__proto__": "function <large string>",
+              "length": "number 1",
+              "name": "string reduce"
+            },
             "Symbol.unscopables": {
               "at": "boolean true",
               "copyWithin": "boolean true",
               "entries": "boolean true",
               "fill": "boolean true",
               "find": "boolean true",
-              "findLast": "boolean true",
               "findIndex": "boolean true",
-              "findLastIndex": "boolean true",
               "flat": "boolean true",
               "flatMap": "boolean true",
               "includes": "boolean true",
               "keys": "boolean true",
-              "values": "boolean true"
+              "values": "boolean true",
+              "findLast": "boolean true",
+              "findLastIndex": "boolean true"
             },
             "fill": {
               "#__proto__": "function <large string>",
@@ -729,11 +739,6 @@
               "#__proto__": "function <large string>",
               "length": "number 2",
               "name": "string copyWithin"
-            },
-            "includes": {
-              "#__proto__": "function <large string>",
-              "length": "number 1",
-              "name": "string includes"
             },
             "length": "number 0"
           },

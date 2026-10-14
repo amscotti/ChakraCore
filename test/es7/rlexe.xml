@@ -166,4 +166,16 @@
       <compile-flags>-args summary -endargs</compile-flags>
     </default>
   </test>
+  <test>
+    <default>
+      <files>replaceall.js</files>
+      <compile-flags>-args summary -endargs</compile-flags>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>replaceall-symbols.js</files>
+      <compile-flags>-ES6RegExSymbols -args summary -endargs</compile-flags>
+    </default>
+  </test>
 </regress-exe>
