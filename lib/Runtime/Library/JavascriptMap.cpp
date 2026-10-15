@@ -322,6 +322,131 @@ Var JavascriptMap::EntryValues(RecyclableObject* function, CallInfo callInfo, ..
     return scriptContext->GetLibrary()->CreateMapIterator(map, JavascriptMapIteratorKind::Value);
 }
 
+// ---- Map.groupBy (ES2025 sec-map.groupby) ----
+// GroupBy(items, callbackfn, coercion=zero): the same walk as Object.groupBy
+// (JavascriptObject.cpp) except keys are not coerced to property keys. The
+// result is a fresh Map; -0 keys are normalized to +0 (CanonicalizeKeyedCollectionKey)
+// and group lookup uses the Map's own SameValueZero internals, so no user-visible
+// Map method is called on the result.
+
+static RecyclableObject* MapGroupByGetIterator(Var items, ScriptContext* scriptContext)
+{
+    JS_REENTRANCY_LOCK(jsReentLock, scriptContext->GetThreadContext());
+    RecyclableObject* iterator = nullptr;
+    JS_REENTRANT(jsReentLock, iterator = JavascriptOperators::GetIterator(items, scriptContext));
+    return iterator;
+}
+
+static RecyclableObject* MapGroupByCacheIteratorNext(RecyclableObject* iterator, ScriptContext* scriptContext)
+{
+    JS_REENTRANCY_LOCK(jsReentLock, scriptContext->GetThreadContext());
+    RecyclableObject* next = nullptr;
+    JS_REENTRANT(jsReentLock, next = JavascriptOperators::CacheIteratorNext(iterator, scriptContext));
+    return next;
+}
+
+static bool MapGroupByIteratorStepAndValue(RecyclableObject* iterator, RecyclableObject* next, Var* valueOut, ScriptContext* scriptContext)
+{
+    JS_REENTRANCY_LOCK(jsReentLock, scriptContext->GetThreadContext());
+    bool hasValue = false;
+    JS_REENTRANT(jsReentLock, hasValue = JavascriptOperators::IteratorStepAndValue(iterator, scriptContext, next, valueOut));
+    return hasValue;
+}
+
+static Var MapGroupByCallCallback(RecyclableObject* callback, Var value, uint32 index, ScriptContext* scriptContext)
+{
+    JS_REENTRANCY_LOCK(jsReentLock, scriptContext->GetThreadContext());
+    Var key = nullptr;
+    JS_REENTRANT(jsReentLock,
+        key = CALL_FUNCTION(scriptContext->GetThreadContext(), callback, CallInfo(CallFlags_Value, 3),
+            scriptContext->GetLibrary()->GetUndefined(), value, JavascriptNumber::ToVar(index, scriptContext)));
+    return key;
+}
+
+Var JavascriptMap::EntryGroupBy(RecyclableObject* function, CallInfo callInfo, ...)
+{
+    PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+    ARGUMENTS(args, callInfo);
+    ScriptContext* scriptContext = function->GetScriptContext();
+
+    AUTO_TAG_NATIVE_LIBRARY_ENTRY(function, callInfo, _u("Map.groupBy"));
+
+    Assert(!(callInfo.Flags & CallFlags_New));
+
+    // 1-2. If IsCallable(callbackfn) is false, throw a TypeError exception,
+    // before items is touched.
+    Var callbackVar = args.Info.Count > 2 ? args[2] : scriptContext->GetLibrary()->GetUndefined();
+    if (!JavascriptConversion::IsCallable(callbackVar))
+    {
+        JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_NeedFunction, _u("Map.groupBy"));
+    }
+    RecyclableObject* callback = VarTo<RecyclableObject>(callbackVar);
+
+    Var items = args.Info.Count > 1 ? args[1] : scriptContext->GetLibrary()->GetUndefined();
+
+    // 3. Let map be a new empty Map. Groups live on it directly: each key maps
+    // to the group's Array.
+    JavascriptLibrary* library = scriptContext->GetLibrary();
+    JavascriptMap* map = library->CreateMap();
+
+    // 4. Let iteratorRecord be ? GetIterator(items).
+    RecyclableObject* iterator = MapGroupByGetIterator(items, scriptContext);
+    RecyclableObject* next = MapGroupByCacheIteratorNext(iterator, scriptContext);
+
+    // 5-6. Repeat: IteratorStepValue, Call callbackfn, append. IteratorStepValue
+    // sits OUTSIDE the close-wrapping try: an abrupt next() (a throwing call,
+    // done/value getter, or non-object result) propagates without closing
+    // (IteratorStepValue has no IfAbruptCloseIterator; Node 26.5.0 matches).
+    // Map.groupBy has no key coercion, so the single spec close site is the
+    // Call callbackfn below.
+    uint32 k = 0;
+    Var value = nullptr;
+    while (MapGroupByIteratorStepAndValue(iterator, next, &value, scriptContext))
+    {
+        Var key = nullptr;
+        try
+        {
+            key = MapGroupByCallCallback(callback, value, k, scriptContext);
+        }
+        catch (const JavascriptException& err)
+        {
+            // IfAbruptCloseIterator at the Call callbackfn site: the original
+            // error wins; the close is best effort
+            // (JavascriptOperators::IteratorClose swallows a throwing
+            // return(), a pre-existing engine-wide behavior).
+            JavascriptExceptionObject* exception = err.GetAndClear();
+            JavascriptOperators::IteratorClose(iterator, scriptContext);
+            throw JavascriptException(scriptContext->GetThreadContext(), exception);
+        }
+
+        if (JavascriptNumber::Is(key) && JavascriptNumber::IsNegZero(JavascriptNumber::GetValue(key)))
+        {
+            // Normalize -0 to +0
+            key = JavascriptNumber::New(0.0, scriptContext);
+        }
+
+        JavascriptArray* group = nullptr;
+        Var existing = nullptr;
+        if (map->Get(key, &existing) && VarIs<JavascriptArray>(existing))
+        {
+            group = VarTo<JavascriptArray>(existing);
+            group->DirectSetItemAt(group->GetLength(), value);
+        }
+        else
+        {
+            group = library->CreateArray(0);
+            group->DirectSetItemAt(0, value);
+            map->Set(key, group);
+        }
+
+        k++;
+    }
+
+    // 7. Return map.
+    return map;
+}
+
 void
 JavascriptMap::Clear()
 {

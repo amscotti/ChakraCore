@@ -130,7 +130,7 @@ var tests = [
             assert.areEqual(['$1','$2','$3','$4','$5','$6','$7','$8','$9','input','rightContext','leftContext','lastParen','lastMatch'], result, "Object.keys returns the same set of properties for RegExp as for..in");
             
             var result = Object.getOwnPropertyNames(RegExp);
-            assert.areEqual(['$1','$2','$3','$4','$5','$6','$7','$8','$9','input','rightContext','leftContext','lastParen','lastMatch','length','prototype','name','$_','$&','$+','$`',"$'",'index'], result, "Object.getOwnPropertyNames returns special non-enumerable properties too");
+            assert.areEqual(['$1','$2','$3','$4','$5','$6','$7','$8','$9','input','rightContext','leftContext','lastParen','lastMatch','length','prototype','name','escape','$_','$&','$+','$`',"$'",'index'], result, "Object.getOwnPropertyNames returns special non-enumerable properties too");
         }
     },
     {

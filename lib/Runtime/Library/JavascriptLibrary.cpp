@@ -2730,6 +2730,8 @@ namespace Js
         library->AddFunctionToLibraryObject(promiseConstructor, PropertyIds::race, &JavascriptPromise::EntryInfo::Race, 1);
         library->AddFunctionToLibraryObject(promiseConstructor, PropertyIds::reject, &JavascriptPromise::EntryInfo::Reject, 1);
         library->AddMember(promiseConstructor, PropertyIds::resolve, library->EnsurePromiseResolveFunction(), PropertyBuiltInMethodDefaults);
+        library->AddFunctionToLibraryObjectWithPropertyName(promiseConstructor, _u("try"), &JavascriptPromise::EntryInfo::Try, 1);
+        library->AddFunctionToLibraryObjectWithPropertyName(promiseConstructor, _u("withResolvers"), &JavascriptPromise::EntryInfo::WithResolvers, 0);
 
         promiseConstructor->SetHasNoEnumerableProperties(true);
 
@@ -4242,6 +4244,8 @@ namespace Js
         scriptContext->SetBuiltInLibraryFunction(JavascriptObject::EntryInfo::HasOwn.GetOriginalEntryPoint(),
             library->AddFunctionToLibraryObject(objectConstructor, PropertyIds::hasOwn, &JavascriptObject::EntryInfo::HasOwn, 2));
 
+        library->AddFunctionToLibraryObjectWithPropertyName(objectConstructor, _u("groupBy"), &JavascriptObject::EntryInfo::GroupBy, 2);
+
 #ifdef ENABLE_JS_BUILTINS
         if (scriptContext->IsJsBuiltInEnabled())
         {
@@ -4313,6 +4317,7 @@ namespace Js
         library->AddMember(regexConstructor, PropertyIds::prototype, library->regexPrototype, PropertyNone);
         library->AddSpeciesAccessorsToLibraryObject(regexConstructor, &JavascriptRegExp::EntryInfo::GetterSymbolSpecies);
         library->AddMember(regexConstructor, PropertyIds::name, scriptContext->GetPropertyString(PropertyIds::RegExp), PropertyConfigurable);
+        library->AddFunctionToLibraryObjectWithPropertyName(regexConstructor, _u("escape"), &JavascriptRegExp::EntryInfo::Escape, 1);
 
         regexConstructor->SetHasNoEnumerableProperties(true);
 
@@ -4455,7 +4460,7 @@ namespace Js
 
     bool JavascriptLibrary::InitializeStringPrototype(DynamicObject* stringPrototype, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)
     {
-        typeHandler->Convert(stringPrototype, mode, 40);
+        typeHandler->Convert(stringPrototype, mode, 42);
         // Note: Any new function addition/deletion/modification should also be updated in JavascriptLibrary::ProfilerRegisterString
         // so that the update is in sync with profiler
         ScriptContext* scriptContext = stringPrototype->GetScriptContext();
@@ -4468,6 +4473,8 @@ namespace Js
         builtinFuncs[BuiltinFunction::JavascriptString_LastIndexOf]   = library->AddFunctionToLibraryObject(stringPrototype, PropertyIds::lastIndexOf,        &JavascriptString::EntryInfo::LastIndexOf,          1);
         builtinFuncs[BuiltinFunction::JavascriptString_Replace]       = library->AddFunctionToLibraryObject(stringPrototype, PropertyIds::replace,            &JavascriptString::EntryInfo::Replace,              2);
         library->AddFunctionToLibraryObjectWithPropertyName(stringPrototype, _u("replaceAll"), &JavascriptString::EntryInfo::ReplaceAll, 2);
+        library->AddFunctionToLibraryObjectWithPropertyName(stringPrototype, _u("isWellFormed"), &JavascriptString::EntryInfo::IsWellFormed, 0);
+        library->AddFunctionToLibraryObjectWithPropertyName(stringPrototype, _u("toWellFormed"), &JavascriptString::EntryInfo::ToWellFormed, 0);
         builtinFuncs[BuiltinFunction::JavascriptString_Search]        = library->AddFunctionToLibraryObject(stringPrototype, PropertyIds::search,             &JavascriptString::EntryInfo::Search,               1);
         builtinFuncs[BuiltinFunction::JavascriptString_Slice]         = library->AddFunctionToLibraryObject(stringPrototype, PropertyIds::slice,              &JavascriptString::EntryInfo::Slice,                2);
 
@@ -4547,6 +4554,7 @@ namespace Js
         library->AddMember(mapConstructor, PropertyIds::prototype, library->mapPrototype, PropertyNone);
         library->AddSpeciesAccessorsToLibraryObject(mapConstructor, &JavascriptMap::EntryInfo::GetterSymbolSpecies);
         library->AddMember(mapConstructor, PropertyIds::name, scriptContext->GetPropertyString(PropertyIds::Map), PropertyConfigurable);
+        library->AddFunctionToLibraryObjectWithPropertyName(mapConstructor, _u("groupBy"), &JavascriptMap::EntryInfo::GroupBy, 2);
 
         mapConstructor->SetHasNoEnumerableProperties(true);
 
@@ -7667,6 +7675,8 @@ namespace Js
         REG_OBJECTS_LIB_FUNC(getOwnPropertySymbols, JavascriptObject::EntryGetOwnPropertySymbols);
 
         REG_OBJECTS_LIB_FUNC(hasOwn, JavascriptObject::EntryHasOwn);
+
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("groupBy"), 7, JavascriptObject::EntryGroupBy);
         REG_OBJECTS_LIB_FUNC(hasOwnProperty, JavascriptObject::EntryHasOwnProperty);
         REG_OBJECTS_LIB_FUNC(propertyIsEnumerable, JavascriptObject::EntryPropertyIsEnumerable);
         REG_OBJECTS_LIB_FUNC(isPrototypeOf, JavascriptObject::EntryIsPrototypeOf);
@@ -8004,6 +8014,9 @@ namespace Js
         REG_OBJECTS_LIB_FUNC(padStart, JavascriptString::EntryPadStart);
         REG_OBJECTS_LIB_FUNC(padEnd, JavascriptString::EntryPadEnd);
 
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("isWellFormed"), 12, JavascriptString::EntryIsWellFormed);
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("toWellFormed"), 12, JavascriptString::EntryToWellFormed);
+
         return hr;
     }
 
@@ -8019,6 +8032,8 @@ namespace Js
         REG_OBJECTS_LIB_FUNC(toString, JavascriptRegExp::EntryToString);
         // Note: This is deprecated
         REG_OBJECTS_LIB_FUNC(compile, JavascriptRegExp::EntryCompile);
+
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("escape"), 6, JavascriptRegExp::EntryEscape);
 
         return hr;
     }
@@ -8102,6 +8117,8 @@ namespace Js
         REG_OBJECTS_LIB_FUNC(entries, JavascriptMap::EntryEntries);
         REG_OBJECTS_LIB_FUNC(keys, JavascriptMap::EntryKeys);
         REG_OBJECTS_LIB_FUNC(values, JavascriptMap::EntryValues);
+
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("groupBy"), 7, JavascriptMap::EntryGroupBy);
 
         return hr;
     }
@@ -8287,6 +8304,9 @@ namespace Js
         REG_OBJECTS_LIB_FUNC(race, JavascriptPromise::EntryRace);
         REG_OBJECTS_LIB_FUNC(resolve, JavascriptPromise::EntryResolve);
         REG_OBJECTS_LIB_FUNC(then, JavascriptPromise::EntryThen);
+
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("try"), 3, JavascriptPromise::EntryTry);
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("withResolvers"), 13, JavascriptPromise::EntryWithResolvers);
 
         return hr;
     }

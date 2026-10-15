@@ -1,6 +1,10 @@
 *.baseline -crlf whitespace=cr-at-eol
 *.cmd -crlf
 test/**/*.js -crlf
+# CRLF in-tree test source whose exact lines are pinned by the suite;
+# edits must not be flagged as trailing whitespace (same rationale as
+# *.baseline above). Added for the S11-remainder escape-line edit.
+test/Object/forinnonenumerableshadowing.js whitespace=cr-at-eol
 test/es6/HTMLComments.js binary diff=cpp
 *.wasm binary
 lib/**/*.js eol=lf diff=cpp

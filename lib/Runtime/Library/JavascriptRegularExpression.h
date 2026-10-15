@@ -154,6 +154,7 @@ namespace Js
             static FunctionInfo GetterSticky;
             static FunctionInfo GetterUnicode;
             static FunctionInfo GetterDotAll;
+            static FunctionInfo Escape;
             // v5.8 only
             static FunctionInfo Compile;
         };
@@ -177,6 +178,7 @@ namespace Js
         static Var EntryGetterSticky(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryGetterUnicode(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryGetterDotAll(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryEscape(RecyclableObject* function, CallInfo callInfo, ...);
         // v5.8 only
         static Var EntryCompile(RecyclableObject* function, CallInfo callInfo, ...);
 

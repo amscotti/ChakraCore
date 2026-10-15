@@ -134,6 +134,8 @@
           "lastIndexOf": "function <large string>",
           "replace": "function <large string>",
           "replaceAll": "function <large string>",
+          "isWellFormed": "function <large string>",
+          "toWellFormed": "function <large string>",
           "search": "function <large string>",
           "slice": "function <large string>",
           "codePointAt": "function <large string>",

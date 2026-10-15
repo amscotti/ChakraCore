@@ -830,6 +830,132 @@ namespace Js
         return PromiseResolve(constructor, x, scriptContext);
     }
 
+    // Promise.try (ES2025 sec-promise.try). The callback runs synchronously with
+    // the forwarded arguments and this = undefined. A normal return goes through
+    // PromiseResolve(C, value), so a promise whose constructor is C is returned
+    // unwrapped; an abrupt completion goes through PromiseReject(C, value).
+    Var JavascriptPromise::EntryTry(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+        RUNTIME_ARGUMENTS(args, callInfo);
+        Assert(!(callInfo.Flags & CallFlags_New));
+
+        ScriptContext* scriptContext = function->GetScriptContext();
+
+        AUTO_TAG_NATIVE_LIBRARY_ENTRY(function, callInfo, _u("Promise.try"));
+
+        JavascriptLibrary* library = scriptContext->GetLibrary();
+
+        // 1. Let C be the this value.
+        Var constructor = args[0];
+
+        // 2. If IsConstructor(C) is false, throw a TypeError exception.
+        if (!JavascriptOperators::IsConstructor(constructor))
+        {
+            JavascriptError::ThrowTypeErrorVar(scriptContext, JSERR_NeedConstructor, _u("Promise.try"));
+        }
+
+        Var callback = args.Info.Count > 1 ? args[1] : library->GetUndefined();
+
+        // 3. Let result be Completion(Call(callback, undefined, args)). The call
+        // is synchronous; only its completion decides resolve vs reject.
+        Var resultValue = nullptr;
+        JavascriptExceptionObject* exception = nullptr;
+        if (JavascriptConversion::IsCallable(callback))
+        {
+            RecyclableObject* callbackFunc = VarTo<RecyclableObject>(callback);
+
+            // Forward args[2..] with undefined as the callback's this: shift the
+            // receiver over the constructor and the callback.
+            for (uint i = 2; i < args.Info.Count; ++i)
+            {
+                args.Values[i - 1] = args.Values[i];
+            }
+            args.Values[0] = library->GetUndefined();
+            args.Info.Count--;
+
+            try
+            {
+                BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+                {
+                    resultValue = JavascriptFunction::CallFunction<true>(callbackFunc, callbackFunc->GetEntryPoint(), args, true /*useLargeArgCount*/);
+                }
+                END_SAFE_REENTRANT_CALL
+            }
+            catch (const JavascriptException& err)
+            {
+                exception = err.GetAndClear();
+            }
+        }
+        else
+        {
+            // Call() on a non-callable is an abrupt completion: it rejects the
+            // returned promise instead of throwing out of Promise.try.
+            try
+            {
+                JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedFunction, _u("Promise.try"));
+            }
+            catch (const JavascriptException& err)
+            {
+                exception = err.GetAndClear();
+            }
+        }
+
+        // 4. If result is an abrupt completion, return ? PromiseReject(C, result.[[Value]]).
+        if (exception != nullptr)
+        {
+            Var thrownObject = exception->GetThrownObject(scriptContext);
+            if (thrownObject == nullptr)
+            {
+                thrownObject = library->GetUndefined();
+            }
+            return CreateRejectedPromise(thrownObject, scriptContext, constructor);
+        }
+
+        // 5. Return ? PromiseResolve(C, result.[[Value]]). A throw from C's
+        // construction propagates; it is not converted into a rejection.
+        return PromiseResolve(constructor, resultValue, scriptContext);
+    }
+
+    // Promise.withResolvers (ES2025 sec-promise.withresolvers). A static: the
+    // constructor comes from the this value, and the result is a plain object
+    // with own enumerable promise/resolve/reject properties.
+    Var JavascriptPromise::EntryWithResolvers(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+        ARGUMENTS(args, callInfo);
+        Assert(!(callInfo.Flags & CallFlags_New));
+
+        ScriptContext* scriptContext = function->GetScriptContext();
+
+        AUTO_TAG_NATIVE_LIBRARY_ENTRY(function, callInfo, _u("Promise.withResolvers"));
+
+        // 1. Let C be the this value.
+        Var constructor = args[0];
+
+        // 2. If IsConstructor(C) is false, throw a TypeError exception.
+        if (!JavascriptOperators::IsConstructor(constructor))
+        {
+            JavascriptError::ThrowTypeErrorVar(scriptContext, JSERR_NeedConstructor, _u("Promise.withResolvers"));
+        }
+
+        // 3. Let promiseCapability be ? NewPromiseCapability(C). A throwing
+        // custom constructor propagates from here.
+        JavascriptPromiseCapability* promiseCapability = NewPromiseCapability(constructor, scriptContext);
+
+        // 4-8. OrdinaryObject(%Object.prototype%) with own data properties
+        // promise, resolve, and reject, in that order.
+        JavascriptLibrary* library = scriptContext->GetLibrary();
+        DynamicObject* obj = library->CreateObject();
+
+        JavascriptOperators::SetProperty(obj, obj, scriptContext->GetOrAddPropertyIdTracked(_u("promise")), promiseCapability->GetPromise(), scriptContext);
+        JavascriptOperators::SetProperty(obj, obj, PropertyIds::resolve, promiseCapability->GetResolve(), scriptContext);
+        JavascriptOperators::SetProperty(obj, obj, PropertyIds::reject, promiseCapability->GetReject(), scriptContext);
+
+        // 9. Return obj.
+        return obj;
+    }
+
     JavascriptPromise* JavascriptPromise::InternalPromiseResolve(Var value, ScriptContext* scriptContext)
     {
         Var constructor = scriptContext->GetLibrary()->GetPromiseConstructor();

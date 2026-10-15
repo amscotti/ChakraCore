@@ -42,7 +42,6 @@
               "getOwnPropertyDescriptor": "function <large string>",
               "getOwnPropertyDescriptors": "function <large string>",
               "defineProperties": "function <large string>",
-              "hasOwn": "function <large string>",
               "create": "function <large string>",
               "seal": "function <large string>",
               "freeze": "function <large string>",
@@ -59,6 +58,8 @@
               "assign": "function <large string>",
               "values": "function <large string>",
               "entries": "function <large string>",
+              "hasOwn": "function <large string>",
+              "groupBy": "function <large string>",
               "fromEntries": "function <large string>"
             },
             "hasOwnProperty": {
@@ -192,7 +193,6 @@
               "getOwnPropertyDescriptor": "function <large string>",
               "getOwnPropertyDescriptors": "function <large string>",
               "defineProperties": "function <large string>",
-              "hasOwn": "function <large string>",
               "create": "function <large string>",
               "seal": "function <large string>",
               "freeze": "function <large string>",
@@ -209,6 +209,8 @@
               "assign": "function <large string>",
               "values": "function <large string>",
               "entries": "function <large string>",
+              "hasOwn": "function <large string>",
+              "groupBy": "function <large string>",
               "fromEntries": "function <large string>"
             },
             "hasOwnProperty": {
@@ -360,7 +362,6 @@
               "getOwnPropertyDescriptor": "function <large string>",
               "getOwnPropertyDescriptors": "function <large string>",
               "defineProperties": "function <large string>",
-              "hasOwn": "function <large string>",
               "create": "function <large string>",
               "seal": "function <large string>",
               "freeze": "function <large string>",
@@ -377,6 +378,8 @@
               "assign": "function <large string>",
               "values": "function <large string>",
               "entries": "function <large string>",
+              "hasOwn": "function <large string>",
+              "groupBy": "function <large string>",
               "fromEntries": "function <large string>"
             },
             "hasOwnProperty": {

@@ -431,6 +431,12 @@ claim.** Documented gaps, not S11 defects: the default profile has no
 `RegExp.prototype.flags`, so a deleted `flags` property does not
 throw; named capture groups are unsupported. `@@replace` dispatch
 requires `-ES6RegExSymbols` and applies only to Object search values.
+S11 remainder (`Object.groupBy`, `Map.groupBy`, `RegExp.escape`,
+`Promise.try`, `Promise.withResolvers`, `isWellFormed`, `toWellFormed`)
+— same receipt: interpreter-verified, unconditional library methods,
+no feature flag, no kill switch, no new opcodes; B4 must run its
+test262 corpus and `test/es7/s11-builtins.js` under SimpleJIT/FullJIT
+before any JIT-configuration claim. `matchAll` stays behind S7.
 S10 change-array-by-copy + Set methods — [c2-s10.md](c2-s10.md)
 (closed: interpreter-verified, unconditional library methods, no
 feature flag and no kill switch, no new opcodes). The default carries Mac no-JIT evidence only: **B4 must run both S10
@@ -567,13 +573,13 @@ Decision/rollback points:
   tracked until C4, optional ecosystem scope has separate gates.
 - [ ] C4: Published qualified ES2025 result on the claimed default configurations.
 
-**C2 batch status:** S4, S5, S11 `String.prototype.replaceAll`, and
-all of S10 (the copy-by-change half and the Set-methods half) are
-closed on Mac no-JIT
+**C2 batch status:** S4, S5, all of S10 (the copy-by-change half and
+the Set-methods half), and all of S11 except `matchAll` are closed on
+Mac no-JIT
 ([c2-s4.md](c2-s4.md), [c2-s5.md](c2-s5.md), [c2-s11.md](c2-s11.md),
 [c2-s10.md](c2-s10.md)). JIT claims still wait on B4. The next bounded
-C2 batch is drawn from the remaining S11 builtins; `matchAll` stays
-behind S7.
+C2 batch is drawn from the S12 import-attributes cluster or a C3
+slice; `matchAll` stays behind S7.
 
 **Next platform gate:** B4 native execution. Provision a native x64 Linux
 runner via the preferred path to green in [b4-gate.md](b4-gate.md) §4(a),

@@ -90,6 +90,7 @@ namespace Js
             static FunctionInfo Keys;
             static FunctionInfo Values;
             static FunctionInfo GetterSymbolSpecies;
+            static FunctionInfo GroupBy;
         };
         static Var NewInstance(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryClear(RecyclableObject* function, CallInfo callInfo, ...);
@@ -103,6 +104,7 @@ namespace Js
         static Var EntryKeys(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryValues(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryGetterSymbolSpecies(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryGroupBy(RecyclableObject* function, CallInfo callInfo, ...);
 
 #if ENABLE_TTD
     public:

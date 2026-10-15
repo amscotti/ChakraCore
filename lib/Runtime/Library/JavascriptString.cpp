@@ -1844,6 +1844,133 @@ case_2:
         return DoStringReplaceAll(input, search, replaceValue, scriptContext);
     }
 
+    // String.prototype.isWellFormed (ES2025 sec-string.prototype.iswellformed).
+    // IsStringWellFormedUnicode: a string is well formed when every leading or
+    // trailing surrogate code unit is paired with its counterpart. No user code
+    // runs after the receiver coercion.
+    Var JavascriptString::EntryIsWellFormed(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+        ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+        JS_REENTRANCY_LOCK(jsReentLock, scriptContext->GetThreadContext());
+
+        Assert(!(callInfo.Flags & CallFlags_New));
+
+        // 1. Let O be ? RequireObjectCoercible(this value).
+        // 2. Let S be ? ToString(O).
+        JavascriptString* pThis = nullptr;
+        JS_REENTRANT(jsReentLock, GetThisStringArgument(args, scriptContext, _u("String.prototype.isWellFormed"), &pThis));
+
+        // 3. Return IsStringWellFormedUnicode(S).
+        const char16* str = pThis->GetString();
+        charcount_t len = pThis->GetLength();
+        for (charcount_t i = 0; i < len; i++)
+        {
+            if (str[i] < 0xD800u || str[i] >= 0xE000u)
+            {
+                continue;
+            }
+            if (str[i] < 0xDC00u)
+            {
+                // Leading surrogate: well formed only when followed by a trailing one.
+                if (i + 1 < len && str[i + 1] >= 0xDC00u && str[i + 1] < 0xE000u)
+                {
+                    i++;
+                    continue;
+                }
+                return scriptContext->GetLibrary()->GetFalse();
+            }
+            // A trailing surrogate not preceded by a leading one is lone.
+            if (i == 0 || str[i - 1] < 0xD800u || str[i - 1] >= 0xDC00u)
+            {
+                return scriptContext->GetLibrary()->GetFalse();
+            }
+        }
+        return scriptContext->GetLibrary()->GetTrue();
+    }
+
+    // String.prototype.toWellFormed (ES2025 sec-string.prototype.towellformed).
+    // Each lone surrogate code unit is replaced with U+FFFD; paired surrogates
+    // and all other code units pass through untouched. The receiver itself is
+    // returned when it is already well formed.
+    Var JavascriptString::EntryToWellFormed(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+        ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+        JS_REENTRANCY_LOCK(jsReentLock, scriptContext->GetThreadContext());
+
+        Assert(!(callInfo.Flags & CallFlags_New));
+
+        // 1. Let O be ? RequireObjectCoercible(this value).
+        // 2. Let S be ? ToString(O).
+        JavascriptString* pThis = nullptr;
+        JS_REENTRANT(jsReentLock, GetThisStringArgument(args, scriptContext, _u("String.prototype.toWellFormed"), &pThis));
+
+        // 3-11. Walk the code units; the first lone surrogate forces a copy, the
+        // rest of the copy replaces each remaining lone surrogate with U+FFFD.
+        const char16* str = pThis->GetString();
+        charcount_t len = pThis->GetLength();
+        charcount_t i = 0;
+        for (; i < len; i++)
+        {
+            bool isLoneSurrogate =
+                (str[i] >= 0xD800u && str[i] < 0xDC00u &&
+                    !(i + 1 < len && str[i + 1] >= 0xDC00u && str[i + 1] < 0xE000u)) ||
+                (str[i] >= 0xDC00u && str[i] < 0xE000u &&
+                    !(i > 0 && str[i - 1] >= 0xD800u && str[i - 1] < 0xDC00u));
+            if (isLoneSurrogate)
+            {
+                break;
+            }
+            if (str[i] >= 0xD800u && str[i] < 0xDC00u)
+            {
+                i++; // skip the paired trailing surrogate
+            }
+        }
+        if (i >= len)
+        {
+            return pThis;
+        }
+
+        BufferStringBuilder builder(len, scriptContext);
+        char16* out = builder.DangerousGetWritableBuffer();
+        for (charcount_t j = 0; j < i; j++)
+        {
+            out[j] = str[j];
+        }
+        for (; i < len; i++)
+        {
+            if (str[i] >= 0xD800u && str[i] < 0xDC00u)
+            {
+                // Leading surrogate: copy it only when paired, U+FFFD when lone.
+                if (i + 1 < len && str[i + 1] >= 0xDC00u && str[i + 1] < 0xE000u)
+                {
+                    out[i] = str[i];
+                    i++;
+                    out[i] = str[i];
+                }
+                else
+                {
+                    out[i] = 0xFFFD;
+                }
+            }
+            else if (str[i] >= 0xDC00u && str[i] < 0xE000u)
+            {
+                // Trailing surrogate: lone here (any pairing was consumed above).
+                out[i] = 0xFFFD;
+            }
+            else
+            {
+                out[i] = str[i];
+            }
+        }
+        return builder.ToString();
+    }
+
     Var JavascriptString::DoStringReplaceAll(JavascriptString* input, JavascriptString* search, Var replaceValue, ScriptContext* scriptContext)
     {
         const CharCount inputLength = input->GetLength();

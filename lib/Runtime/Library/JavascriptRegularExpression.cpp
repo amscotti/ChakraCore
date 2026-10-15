@@ -690,6 +690,212 @@ using namespace Js;
         }
     }
 
+    // ---- RegExp.escape (ES2025 sec-regexp.escape) ----
+    // EncodeForRegExpEscape walks code points: a leading surrogate paired with
+    // a trailing one is one code point and never escaped (step 6); only a LONE
+    // surrogate is escaped (step 5's surrogate clause). No user code runs.
+
+    // SyntaxCharacter (sec-patterns-syntax-character) plus U+002F SOLIDUS:
+    // backslash-escaped verbatim (step 1).
+    static bool EscapeIsSyntaxCharOrSolidus(char16 c)
+    {
+        return c == _u('^') || c == _u('$') || c == _u('\\') || c == _u('.') ||
+            c == _u('*') || c == _u('+') || c == _u('?') || c == _u('(') ||
+            c == _u(')') || c == _u('[') || c == _u(']') || c == _u('{') ||
+            c == _u('}') || c == _u('|') || c == _u('/');
+    }
+
+    // Table 64 ControlEscape (step 2): U+0009 t, U+000A n, U+000B v,
+    // U+000C f, U+000D r.
+    static char16 EscapeControlEscapeForChar(char16 c)
+    {
+        switch (c)
+        {
+        case 0x0009: return _u('t');
+        case 0x000A: return _u('n');
+        case 0x000B: return _u('v');
+        case 0x000C: return _u('f');
+        case 0x000D: return _u('r');
+        default: return 0;
+        }
+    }
+
+    // otherPunctuators (step 3): ",-=<>#&!%:;@~'`" plus U+0022.
+    static bool EscapeIsOtherPunctuator(char16 c)
+    {
+        return c == _u(',') || c == _u('-') || c == _u('=') || c == _u('<') ||
+            c == _u('>') || c == _u('#') || c == _u('&') || c == _u('!') ||
+            c == _u('%') || c == _u(':') || c == _u(';') || c == _u('@') ||
+            c == _u('~') || c == _u('\'') || c == _u('`') || c == _u('"');
+    }
+
+    // The WhiteSpace ∪ LineTerminator set (sec-white-space, sec-line-terminators)
+    // minus the five code points Table 64 already handled above. Same 25-member
+    // set as JavascriptString.cpp's IsWhiteSpaceCharacter.
+    static bool EscapeIsEsWhitespaceOrLineTerminator(char16 c)
+    {
+        // U+0009-U+000D reach EscapeControlEscapeForChar first, but keeping the
+        // full set here mirrors the spec text and stays correct if order changes.
+        if (c <= 0x000D)
+        {
+            return c >= 0x0009;
+        }
+        if (c == 0x0020 || c == 0x00A0 || c == 0x1680)
+        {
+            return true;
+        }
+        if (c >= 0x2000 && c <= 0x200A)
+        {
+            return true;
+        }
+        return c == 0x2028 || c == 0x2029 || c == 0x202F || c == 0x205F ||
+            c == 0x3000 || c == 0xFEFF;
+    }
+
+    static bool EscapeIsAsciiLetterOrDigit(char16 c)
+    {
+        return (c >= _u('0') && c <= _u('9')) ||
+            (c >= _u('a') && c <= _u('z')) ||
+            (c >= _u('A') && c <= _u('Z'));
+    }
+
+    static const char16 EscapeHexDigits[] = _u("0123456789abcdef");
+
+    // Appends "\\xNN" (c <= 0xFF) or "\\uNNNN" for the escape step 5 forms.
+    static charcount_t EscapeAppendHexEscape(char16* out, char16 c)
+    {
+        out[0] = _u('\\');
+        if (c <= 0xFF)
+        {
+            out[1] = _u('x');
+            out[2] = EscapeHexDigits[(c >> 4) & 0xF];
+            out[3] = EscapeHexDigits[c & 0xF];
+            return 4;
+        }
+        out[1] = _u('u');
+        out[2] = EscapeHexDigits[(c >> 12) & 0xF];
+        out[3] = EscapeHexDigits[(c >> 8) & 0xF];
+        out[4] = EscapeHexDigits[(c >> 4) & 0xF];
+        out[5] = EscapeHexDigits[c & 0xF];
+        return 6;
+    }
+
+    // The length in code units that EncodeForRegExpEscape produces for c.
+    static charcount_t EscapeEncodedLength(char16 c, bool isInitialLetterOrDigit)
+    {
+        if (isInitialLetterOrDigit)
+        {
+            return 4; // "\xNN"
+        }
+        if (EscapeIsSyntaxCharOrSolidus(c))
+        {
+            return 2; // "\c"
+        }
+        if (EscapeControlEscapeForChar(c) != 0)
+        {
+            return 2; // "\t" "\n" "\v" "\f" "\r"
+        }
+        if (EscapeIsOtherPunctuator(c) || EscapeIsEsWhitespaceOrLineTerminator(c) ||
+            (c >= 0xD800 && c < 0xE000))
+        {
+            return c <= 0xFF ? 4 : 6; // "\xNN" or "\uNNNN"
+        }
+        return 1;
+    }
+
+    Var JavascriptRegExp::EntryEscape(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+        ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+
+        AUTO_TAG_NATIVE_LIBRARY_ENTRY(function, callInfo, _u("RegExp.escape"));
+
+        Assert(!(callInfo.Flags & CallFlags_New));
+
+        // 1. If string is not a String, throw a TypeError exception.
+        Var stringVar = args.Info.Count > 1 ? args[1] : scriptContext->GetLibrary()->GetUndefined();
+        if (!VarIs<JavascriptString>(stringVar))
+        {
+            JavascriptError::ThrowTypeErrorVar(scriptContext, JSERR_FunctionArgument_Invalid, _u("RegExp.escape"));
+        }
+
+        // 2-5. Walk the code points. The first code point, when it is an ASCII
+        // letter or decimal digit, is always "\xNN" so the output is never read
+        // as an escape-sequence continuation.
+        JavascriptString* input = VarTo<JavascriptString>(stringVar);
+        const char16* str = input->GetString();
+        charcount_t len = input->GetLength();
+        if (len == 0)
+        {
+            return scriptContext->GetLibrary()->GetEmptyString();
+        }
+
+        // Pass 1: exact output length (a surrogate pair is one code point and
+        // contributes its two verbatim units; a lone surrogate is \uNNNN).
+        charcount_t outLen = 0;
+        bool initial = true;
+        for (charcount_t i = 0; i < len; i++)
+        {
+            char16 c = str[i];
+            if (c >= 0xD800 && c < 0xDC00 &&
+                i + 1 < len && str[i + 1] >= 0xDC00 && str[i + 1] < 0xE000)
+            {
+                outLen += 2;
+                i++; // consume the trailing half of the pair
+            }
+            else
+            {
+                outLen += EscapeEncodedLength(c, initial && EscapeIsAsciiLetterOrDigit(c));
+            }
+            initial = false;
+        }
+
+        // Pass 2: fill the exact-size buffer.
+        BufferStringBuilder builder(outLen, scriptContext);
+        char16* out = builder.DangerousGetWritableBuffer();
+        charcount_t j = 0;
+        initial = true;
+        for (charcount_t i = 0; i < len; i++)
+        {
+            char16 c = str[i];
+            if (c >= 0xD800 && c < 0xDC00 &&
+                i + 1 < len && str[i + 1] >= 0xDC00 && str[i + 1] < 0xE000)
+            {
+                out[j++] = c;
+                out[j++] = str[i + 1];
+                i++; // consume the trailing half of the pair
+            }
+            else if (initial && EscapeIsAsciiLetterOrDigit(c))
+            {
+                j += EscapeAppendHexEscape(out + j, c);
+            }
+            else if (EscapeIsSyntaxCharOrSolidus(c))
+            {
+                out[j++] = _u('\\');
+                out[j++] = c;
+            }
+            else if (EscapeControlEscapeForChar(c) != 0)
+            {
+                out[j++] = _u('\\');
+                out[j++] = EscapeControlEscapeForChar(c);
+            }
+            else if (EscapeIsOtherPunctuator(c) || EscapeIsEsWhitespaceOrLineTerminator(c) ||
+                (c >= 0xD800 && c < 0xE000))
+            {
+                j += EscapeAppendHexEscape(out + j, c);
+            }
+            else
+            {
+                out[j++] = c;
+            }
+            initial = false;
+        }
+        Assert(j == outLen);
+        return builder.ToString();
+    }
+
     Var JavascriptRegExp::EntrySymbolMatch(RecyclableObject* function, CallInfo callInfo, ...)
     {
         PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);

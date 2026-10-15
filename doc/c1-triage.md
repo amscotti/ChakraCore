@@ -564,7 +564,10 @@ Expected gains: `String.prototype.replaceAll` 80,
 `String.prototype.isWellFormed/toWellFormed` 16 + 16,
 `promise-with-resolvers` 11. Prerequisite: matchAll rides on S7.
 Uncertainty: low. JIT-x64? **no**. Effort: **C2-small** — good filler
-batches alongside a C3 item. `String.prototype.replaceAll` is landed on Mac no-JIT (see [c2-s11.md](c2-s11.md)); the other S11 builtins are unstarted; matchAll still rides on S7.
+batches alongside a C3 item. `String.prototype.replaceAll` is landed on Mac no-JIT (see [c2-s11.md](c2-s11.md)),
+as is the S11 remainder (`Object.groupBy`, `Map.groupBy`, `RegExp.escape`,
+`Promise.try`, `Promise.withResolvers`, `String.prototype.isWellFormed`,
+`String.prototype.toWellFormed` — same receipt); matchAll still rides on S7.
 
 **S12. Import attributes + JSON modules, and the module host-loader
 cluster.** Repro: `python3 tools/test262/run.py --binary zig-out/bin/ch --output out/test262-c1-importattrs 'test/language/import/**/*.js' 'test/language/module-code/**/*.js'`.

@@ -52,6 +52,7 @@ namespace Js
             static FunctionInfo Assign;
             static FunctionInfo Values;
             static FunctionInfo Entries;
+            static FunctionInfo GroupBy;
         };
 
         static Var NewInstance(RecyclableObject* function, CallInfo callInfo, ...);
@@ -86,6 +87,7 @@ namespace Js
         static Var EntryAssign(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryValues(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryEntries(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryGroupBy(RecyclableObject* function, CallInfo callInfo, ...);
 
         static Var GetPrototypeOf(RecyclableObject* obj, ScriptContext* scriptContext);
         static BOOL ChangePrototype(RecyclableObject* object, RecyclableObject* newPrototype, bool validate, ScriptContext* scriptContext);

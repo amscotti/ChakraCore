@@ -46,6 +46,16 @@
             "length": "number 2",
             "name": "string replaceAll"
           },
+          "isWellFormed": {
+            "#__proto__": "function <large string>",
+            "length": "number 0",
+            "name": "string isWellFormed"
+          },
+          "toWellFormed": {
+            "#__proto__": "function <large string>",
+            "length": "number 0",
+            "name": "string toWellFormed"
+          },
           "search": {
             "#__proto__": "function <large string>",
             "length": "number 1",

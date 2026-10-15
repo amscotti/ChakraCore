@@ -253,6 +253,8 @@ namespace Js
             static FunctionInfo Includes;
             static FunctionInfo PadStart;
             static FunctionInfo PadEnd;
+            static FunctionInfo IsWellFormed;
+            static FunctionInfo ToWellFormed;
 
 #ifdef TAGENTRY
 #undef TAGENTRY
@@ -314,6 +316,8 @@ namespace Js
         static Var EntrySymbolIterator(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryPadStart(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryPadEnd(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryIsWellFormed(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryToWellFormed(RecyclableObject* function, CallInfo callInfo, ...);
 
         static JavascriptString* RepeatCore(JavascriptString* currentString, charcount_t count, ScriptContext* scriptContext);
         static JavascriptString* PadCore(ArgumentReader& args, JavascriptString *mainString, bool isPadStart, ScriptContext* scriptContext);

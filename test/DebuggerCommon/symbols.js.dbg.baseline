@@ -16,7 +16,6 @@
                 "defineProperty": "function <large string>",
                 "getOwnPropertyDescriptor": "function <large string>",
                 "getOwnPropertyDescriptors": "function <large string>",
-                "hasOwn": "function <large string>",
                 "defineProperties": "function <large string>",
                 "create": "function <large string>",
                 "seal": "function <large string>",
@@ -34,6 +33,8 @@
                 "assign": "function <large string>",
                 "values": "function <large string>",
                 "entries": "function <large string>",
+                "hasOwn": "function <large string>",
+                "groupBy": "function <large string>",
                 "fromEntries": "function <large string>"
               },
               "hasOwnProperty": {

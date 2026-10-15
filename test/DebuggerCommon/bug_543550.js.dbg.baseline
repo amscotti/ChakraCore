@@ -21,7 +21,8 @@
           "length": "number 0",
           "prototype": "Object {...}",
           "Symbol.species": "function function Map() { [native code] }",
-          "name": "string Map"
+          "name": "string Map",
+          "groupBy": "function function groupBy() { [native code] }"
         },
         "clear": {
           "#__proto__": "function function() {\n    [native code]\n}",

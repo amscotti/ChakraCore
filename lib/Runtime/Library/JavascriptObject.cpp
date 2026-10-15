@@ -1189,6 +1189,145 @@ Var JavascriptObject::EntryEntries(RecyclableObject* function, CallInfo callInfo
     return GetValuesOrEntries(object, false /*valuesToReturn*/, scriptContext);
 }
 
+// ---- Object.groupBy (ES2025 sec-object.groupby) ----
+// GroupBy(items, callbackfn, coercion=property): consume items through the
+// iterator protocol, Call callbackfn with (value, index) and this = undefined,
+// ToPropertyKey each result, and collect the values per key. The result is a
+// fresh null-prototype object whose own properties are plain Arrays in
+// first-encounter key order.
+
+// GetIterator runs the @@iterator method; wrap user code like the Set
+// methods do (JavascriptSet.cpp).
+static RecyclableObject* GroupByGetIterator(Var items, ScriptContext* scriptContext)
+{
+    JS_REENTRANCY_LOCK(jsReentLock, scriptContext->GetThreadContext());
+    RecyclableObject* iterator = nullptr;
+    JS_REENTRANT(jsReentLock, iterator = JavascriptOperators::GetIterator(items, scriptContext));
+    return iterator;
+}
+
+// GetMethod(iterator, "next"): the property read may run a getter.
+static RecyclableObject* GroupByCacheIteratorNext(RecyclableObject* iterator, ScriptContext* scriptContext)
+{
+    JS_REENTRANCY_LOCK(jsReentLock, scriptContext->GetThreadContext());
+    RecyclableObject* next = nullptr;
+    JS_REENTRANT(jsReentLock, next = JavascriptOperators::CacheIteratorNext(iterator, scriptContext));
+    return next;
+}
+
+// IteratorStepValue: call next, require an Object result, Get "done", then
+// Get "value". False means the iterator is exhausted.
+static bool GroupByIteratorStepAndValue(RecyclableObject* iterator, RecyclableObject* next, Var* valueOut, ScriptContext* scriptContext)
+{
+    JS_REENTRANCY_LOCK(jsReentLock, scriptContext->GetThreadContext());
+    bool hasValue = false;
+    JS_REENTRANT(jsReentLock, hasValue = JavascriptOperators::IteratorStepAndValue(iterator, scriptContext, next, valueOut));
+    return hasValue;
+}
+
+// Call(callbackfn, undefined, « value, k »). The CallInfo count includes the
+// receiver, so 3 covers undefined this plus the two arguments.
+static Var GroupByCallCallback(RecyclableObject* callback, Var value, uint32 index, ScriptContext* scriptContext)
+{
+    JS_REENTRANCY_LOCK(jsReentLock, scriptContext->GetThreadContext());
+    Var key = nullptr;
+    JS_REENTRANT(jsReentLock,
+        key = CALL_FUNCTION(scriptContext->GetThreadContext(), callback, CallInfo(CallFlags_Value, 3),
+            scriptContext->GetLibrary()->GetUndefined(), value, JavascriptNumber::ToVar(index, scriptContext)));
+    return key;
+}
+
+Var JavascriptObject::EntryGroupBy(RecyclableObject* function, CallInfo callInfo, ...)
+{
+    PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+    ARGUMENTS(args, callInfo);
+    ScriptContext* scriptContext = function->GetScriptContext();
+
+    AUTO_TAG_NATIVE_LIBRARY_ENTRY(function, callInfo, _u("Object.groupBy"));
+
+    Assert(!(callInfo.Flags & CallFlags_New));
+
+    // 1-2. If IsCallable(callbackfn) is false, throw a TypeError exception.
+    // This runs before items is touched.
+    Var callbackVar = args.Info.Count > 2 ? args[2] : scriptContext->GetLibrary()->GetUndefined();
+    if (!JavascriptConversion::IsCallable(callbackVar))
+    {
+        JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_NeedFunction, _u("Object.groupBy"));
+    }
+    RecyclableObject* callback = VarTo<RecyclableObject>(callbackVar);
+
+    Var items = args.Info.Count > 1 ? args[1] : scriptContext->GetLibrary()->GetUndefined();
+
+    // 3. Let obj be OrdinaryObjectCreate(null). Groups land on it directly:
+    // every key is an own data property holding the group's Array.
+    // GetNull() is the null Var typed as RecyclableObject*, which selects
+    // CreateObject's prototype overload and its cached null-proto type (a
+    // C++ nullptr would miss both).
+    JavascriptLibrary* library = scriptContext->GetLibrary();
+    DynamicObject* obj = library->CreateObject(library->GetNull());
+
+    // 4. Let iteratorRecord be ? GetIterator(items).
+    RecyclableObject* iterator = GroupByGetIterator(items, scriptContext);
+    RecyclableObject* next = GroupByCacheIteratorNext(iterator, scriptContext);
+
+    // 5-6. Repeat: IteratorStepValue, Call callbackfn, ToPropertyKey, append.
+    // IteratorStepValue sits OUTSIDE the close-wrapping try: an abrupt next()
+    // (a throwing call, done/value getter, or non-object result) propagates
+    // without closing (IteratorStepValue has no IfAbruptCloseIterator; Node
+    // 26.5.0 matches). Only the two spec close sites below — Call callbackfn
+    // and ToPropertyKey — close the iterator.
+    uint32 k = 0;
+    Var value = nullptr;
+    while (GroupByIteratorStepAndValue(iterator, next, &value, scriptContext))
+    {
+        Var key = nullptr;
+        const PropertyRecord* propertyRecord = nullptr;
+        try
+        {
+            key = GroupByCallCallback(callback, value, k, scriptContext);
+
+            // ToPropertyKey may run user code (toString/valueOf) and may throw.
+            {
+                JS_REENTRANCY_LOCK(jsReentLock, scriptContext->GetThreadContext());
+                JS_REENTRANT(jsReentLock, JavascriptConversion::ToPropertyKey(key, scriptContext, &propertyRecord, nullptr));
+            }
+        }
+        catch (const JavascriptException& err)
+        {
+            // IfAbruptCloseIterator at the two spec close sites (Call
+            // callbackfn and ToPropertyKey): the original error wins; the
+            // close is best effort (JavascriptOperators::IteratorClose
+            // swallows a throwing return(), a pre-existing engine-wide
+            // behavior).
+            JavascriptExceptionObject* exception = err.GetAndClear();
+            JavascriptOperators::IteratorClose(iterator, scriptContext);
+            throw JavascriptException(scriptContext->GetThreadContext(), exception);
+        }
+        PropertyId propertyId = propertyRecord->GetPropertyId();
+
+        JavascriptArray* group = nullptr;
+        Var existing = nullptr;
+        if (JavascriptOperators::GetProperty(obj, propertyId, &existing, scriptContext) &&
+            VarIs<JavascriptArray>(existing))
+        {
+            group = VarTo<JavascriptArray>(existing);
+            group->DirectSetItemAt(group->GetLength(), value);
+        }
+        else
+        {
+            group = library->CreateArray(0);
+            group->DirectSetItemAt(0, value);
+            JavascriptOperators::SetProperty(obj, obj, propertyId, group, scriptContext);
+        }
+
+        k++;
+    }
+
+    // 7. Return obj.
+    return obj;
+}
+
 JavascriptArray* JavascriptObject::CreateOwnSymbolPropertiesHelper(RecyclableObject* object, ScriptContext* scriptContext)
 {
     return CreateKeysHelper(object, scriptContext, TRUE, true /*includeSymbolsOnly */, false, true /*includeSpecialProperties*/);
