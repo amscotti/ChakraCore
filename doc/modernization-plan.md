@@ -587,7 +587,7 @@ String Iterator and `String.prototype.matchAll` all landed behind
 (primitive `Symbol.*` reads and the `lastIndex` `[[Set]]` bypass,
 including honoring a non-writable `lastIndex` redefine under the flag)
 — the audit's 42 flag-on regressions are 42/42 fixed with 0 new
-pass→fail (134 same-binary fail→pass on the 6,199-scenario universe,
+pass→fail (136 same-binary fail→pass on the 6,199-scenario universe,
 matchAll corpus 132/140; the 8 residue is BigInt/v-flag parse debt
 plus 4 `species-regexp-get-*` scenarios that need the
 `-ES6RegExPrototypeProperties` substrate). The flag stays off by

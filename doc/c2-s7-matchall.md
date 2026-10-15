@@ -6,7 +6,7 @@
 
 # C2-S7: matchAll + the RegExp-symbol flag-on defect fixes
 
-Status: landed on Mac no-JIT, not committed. All four matchAll surfaces
+Status: landed on Mac no-JIT (committed as 2083551b7). All four matchAll surfaces
 plus the two flag-on defect classes from
 [c2-flag-audits.md](c2-flag-audits.md) §S7 are implemented behind
 `ES6RegExSymbols` (still default-off; no default-flag flip in this

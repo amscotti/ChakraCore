@@ -340,7 +340,8 @@ under every flag combination probed (default, symbols, proto, both).
 > [c2-s7-matchall.md](c2-s7-matchall.md) — all four matchAll surfaces
 > plus both defect classes and the groups-coercion edge under
 > `-ES6RegExSymbols`; the 42 flag-on regressions in this audit are
-> 42/42 fixed with 0 new pass→fail (134 same-binary fail→pass), and the
+> 42/42 fixed with 0 new pass→fail (136 same-binary fail→pass after the
+> review fixes), and the
 > flags stay off by default (B4 pending). The numbers below are the
 > pre-batch measurement.
 

@@ -561,7 +561,7 @@ C2-small batch together with the two defect-class fixes.
 **Landed 2026-10-15 as C2-S7** ([c2-s7-matchall.md](c2-s7-matchall.md)):
 all four surfaces are behind `ES6RegExSymbols`, the 42 flag-on
 regressions are 42/42 fixed with 0 new pass→fail on the same universe
-(134 fail→pass total, 4,285→4,419 passes), and the matchAll corpus is
+(136 fail→pass total after review fixes, 4,285→4,421 passes), and the matchAll corpus is
 132/140 — the 8 residue is BigInt/v-flag parse debt plus the 4
 `species-regexp-get-{global,unicode}-throws` scenarios that need the
 `ES6RegExPrototypeProperties` substrate. Default flags and the JIT stay
@@ -621,7 +621,8 @@ Uncertainty: low. JIT-x64? **no**. Effort: **C2-small** — good filler
 batches alongside a C3 item. `String.prototype.replaceAll` is landed on Mac no-JIT (see [c2-s11.md](c2-s11.md)),
 as is the S11 remainder (`Object.groupBy`, `Map.groupBy`, `RegExp.escape`,
 `Promise.try`, `Promise.withResolvers`, `String.prototype.isWellFormed`,
-`String.prototype.toWellFormed` — same receipt); matchAll still rides on S7.
+`String.prototype.toWellFormed` — same receipt); matchAll has since landed
+via S7 ([c2-s7-matchall.md](c2-s7-matchall.md)).
 
 **S12. Import attributes + JSON modules, and the module host-loader
 cluster.** Repro: `python3 tools/test262/run.py --binary zig-out/bin/ch --output out/test262-c1-importattrs 'test/language/import/**/*.js' 'test/language/module-code/**/*.js'`.
