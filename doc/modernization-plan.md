@@ -577,9 +577,23 @@ Decision/rollback points:
 the Set-methods half), and all of S11 except `matchAll` are closed on
 Mac no-JIT
 ([c2-s4.md](c2-s4.md), [c2-s5.md](c2-s5.md), [c2-s11.md](c2-s11.md),
-[c2-s10.md](c2-s10.md)). JIT claims still wait on B4. The next bounded
-C2 batch is drawn from the S12 import-attributes cluster or a C3
-slice; `matchAll` stays behind S7.
+[c2-s10.md](c2-s10.md)). JIT claims still wait on B4. The S2/S6/S7
+enabled-flag measurement audits are done
+([c2-flag-audits.md](c2-flag-audits.md), no engine change): with the S7
+flags on, the RegExp-symbol protocol machinery passes most
+non-parse-dependent tests (346 same-binary fail→pass for
+`-ES6RegExSymbols`, +122 alone / +146 on top for
+`-ES6RegExPrototypeProperties`), against two flag-on defect classes
+plus a groups-coercion edge and no `Symbol.matchAll` anywhere; a
+`matchAll` + defect-fix batch is directly addressable for ≈114–132 of
+the 182 in-set `Symbol.*` residual failures (~50 more are S3/S9/S2
+spillover), which makes it the highest-value measured next C2-small
+batch. S6 shows zero regressions under `-ESSharedArrayBuffer` but needs
+a product/security decision before any default, plus waitAsync/growable/
+non-shared-Atomics work; S2's flagged path is a stub (accidental passes
+only, and a `BigInt()` SIGABRT crash class), so BigInt completion stays
+C3-large. The alternative next batch remains the S12 import-attributes
+cluster or a C3 slice.
 
 **Next platform gate:** B4 native execution. Provision a native x64 Linux
 runner via the preferred path to green in [b4-gate.md](b4-gate.md) §4(a),

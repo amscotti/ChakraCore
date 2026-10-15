@@ -446,6 +446,20 @@ edition failures plus `TypedArray` spillover (927 numeric-literal failures
 co-tagged). Uncertainty: high until the enabled run sizes the flagged
 implementation. JIT-x64? **yes** (mixed-type arithmetic bailouts).
 Effort: measurement **C2-small**, completion/default **C3-large**.
+*(measured 2026-10-15, [c2-flag-audits.md](c2-flag-audits.md) §S2: the
+enabled run on 21,440 scenarios moves only 125 same-binary fail→pass,
+of which 82 BigInt-tagged and all accidental (the stub throws
+`TypeError: Type mismatch` for every mixed op, so `assert.throws(TypeError)`
+tests pass for the wrong reason; `typeof 10n` is `unknown`,
+`10n.toString()` → `[object Object]`, and same-type `1n + 2n` yields a
+placeholder that throws `Internal error` when stringified and
+`Type mismatch` under string-concat coercion);
+hex/binary/octal literals still SyntaxError (82); `BigInt()` with any
+argument SIGABRTs the host (80 scenarios, crash class); asIntN/asUintN and
+BigInt64Array/BigUint64Array absent. Only 456 of the 2,809 broad
+BigInt-tagged C1 failures lie in this file set; the rest cannot move on
+the flag. Completion confirmed **C3-large**; the SIGABRT is a candidate
+one-line defensive fix independent of the feature.)*
 
 **S3. RegExp Unicode property escapes (`\p{…}`, `\P{…}`).** Repro:
 `python3 tools/test262/run.py --binary zig-out/bin/ch --output out/test262-c1-reprop 'test/built-ins/RegExp/property-escapes/**/*.js'`.
@@ -500,6 +514,19 @@ embedder-facing build. Expected gain: `SharedArrayBuffer` 912 and
 within). Uncertainty: medium-high (host agent support in `ch` bounds what
 is even measurable). JIT-x64? **yes** (atomic lowering). Effort: audit
 **C2-small**; completion/default decision **C3**.
+*(measured 2026-10-15, [c2-flag-audits.md](c2-flag-audits.md) §S6: with
+`-ESSharedArrayBuffer`, 461/982 pass on the repro file set with **zero
+regressions** (default run passes 0/982 — both globals are
+ReferenceErrors). Present: constructor, `slice`, `@@species`,
+`@@toStringTag`, core Atomics RMW/wait/notify/isLockFree on shared
+buffers. Missing: `waitAsync` (202 tag scenarios), growable SAB
+(`grow`/`growable`/`maxByteLength`, ~64, option silently ignored),
+non-shared-buffer Atomics per ES2020 (`SharedArrayBuffer object expected`
++ validation-order + harness arg-factory declines, ~58), `Atomics.pause` (post-ES2025). 188 failures are BigInt-literal or
+BigInt64Array spillover. `$262.agent` works in this harness (33 of 224
+agent-file scenarios pass); only ≈44 failures are genuinely
+agent/timing-shaped. Defaulting SAB in an embedder build remains a
+product/security decision; the data alone shows no regression and +461.)*
 
 **S7. RegExp `Symbol.*` protocol + prototype properties enabled-flag
 audit.** Repro: `python3 tools/test262/run.py --binary zig-out/bin/ch --output out/test262-c1-resym --host-flags='-nonative -Test262 -CollectGarbage -ES6RegExSymbols' 'test/built-ins/RegExp/**/*.js' 'test/built-ins/String/**/*.js'`.
@@ -512,6 +539,25 @@ its own before/after compare). Expected gain: `Symbol.match` 146,
 `ConfigFlagsList.h:1177` itself warns to re-check JIT-inlined
 String/RegExp helpers before enabling. JIT-x64? **yes**, for exactly that
 reason. Effort: audit **C2-small**, default flip gated on results.
+*(measured 2026-10-15, [c2-flag-audits.md](c2-flag-audits.md) §S7: the
+symbols flag moves 346 same-binary fail→pass on `RegExp`+`String`
+(6,199 scenarios), all `Symbol.*`-tagged, against 42 regressions that
+are two defect classes plus a groups-coercion edge —
+`match/replace/search/split` still read `Symbol.*` on primitive search
+values (24, the divergence the S11 receipt noted for `replace`), the
+failed-match `lastIndex` reset bypassing the observable `[[Set]]` (16
+across 8 `Symbol.{match,replace}` lastIndex files: a writable
+lastIndex is reset, an accessor/non-writable one never throws), and
+`Symbol.replace/result-coerce-groups-err` (2, a separate
+groups-coercion defect; none involve `@@matchAll`). `ES6RegExPrototypeProperties` (tagless, measured by before/after on
+a 1,558-scenario subset) adds +122 alone and +146 on top of symbols with
+zero regressions; it installs the prototype getters and removes legacy
+instance built-ins. `Symbol.matchAll` is `undefined` under every flag
+combination; `RegExpStringIteratorPrototype`/`Symbol/matchAll` corpus is
+2/36 — matchAll is new engine surface (Symbol.matchAll,
+`RegExp.prototype[@@matchAll]`, RegExp String Iterator,
+`String.prototype.matchAll`), not a flag flip: recommended as the next
+C2-small batch together with the two defect-class fixes.)*
 
 **S8. Resizable/growable ArrayBuffer + transfer (and TypedArray
 consequences).** Repro: `python3 tools/test262/run.py --binary zig-out/bin/ch --output out/test262-c1-rab 'test/built-ins/ArrayBuffer/**/*.js' 'test/built-ins/TypedArray/**/*.js'`.
