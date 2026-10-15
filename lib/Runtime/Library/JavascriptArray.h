@@ -260,6 +260,10 @@ namespace Js
             static FunctionInfo FindIndex;
             static FunctionInfo FindLast;
             static FunctionInfo FindLastIndex;
+            static FunctionInfo ToReversed;
+            static FunctionInfo ToSorted;
+            static FunctionInfo ToSpliced;
+            static FunctionInfo With;
             static FunctionInfo Entries;
             static FunctionInfo Keys;
             static FunctionInfo Values;
@@ -301,6 +305,10 @@ namespace Js
         static Var EntryFindIndex(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryFindLast(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryFindLastIndex(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryToReversed(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryToSorted(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryToSpliced(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryWith(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryEntries(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryKeys(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryValues(RecyclableObject* function, CallInfo callInfo, ...);

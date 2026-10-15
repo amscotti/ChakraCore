@@ -29,9 +29,7 @@
             "fill": "function function fill() { [native code] }",
             "filter": "function function filter() { [native code] }",
             "find": "function function find() { [native code] }",
-            "findLast": "function function findLast() { [native code] }",
             "findIndex": "function function findIndex() { [native code] }",
-            "findLastIndex": "function function findLastIndex() { [native code] }",
             "forEach": "function function forEach() { [native code] }",
             "indexOf": "function function indexOf() { [native code] }",
             "join": "function function join() { [native code] }",
@@ -54,7 +52,12 @@
             "length": "Error 'this' is not a typed array object",
             "Symbol.toStringTag": "undefined undefined",
             "toLocaleString": "function function toLocaleString() { [native code] }",
-            "toString": "function function toString() { [native code] }"
+            "toString": "function function toString() { [native code] }",
+            "findLast": "function function findLast() { [native code] }",
+            "findLastIndex": "function function findLastIndex() { [native code] }",
+            "toReversed": "function function toReversed() { [native code] }",
+            "toSorted": "function function toSorted() { [native code] }",
+            "with": "function function with() { [native code] }"
           },
           "from": {
             "#__proto__": "function function() {\n    [native code]\n}",
@@ -89,9 +92,7 @@
             "fill": "function function fill() { [native code] }",
             "filter": "function function filter() { [native code] }",
             "find": "function function find() { [native code] }",
-            "findLast": "function function findLast() { [native code] }",
             "findIndex": "function function findIndex() { [native code] }",
-            "findLastIndex": "function function findLastIndex() { [native code] }",
             "forEach": "function function forEach() { [native code] }",
             "indexOf": "function function indexOf() { [native code] }",
             "join": "function function join() { [native code] }",
@@ -114,7 +115,12 @@
             "length": "Error 'this' is not a typed array object",
             "Symbol.toStringTag": "undefined undefined",
             "toLocaleString": "function function toLocaleString() { [native code] }",
-            "toString": "function function toString() { [native code] }"
+            "toString": "function function toString() { [native code] }",
+            "findLast": "function function findLast() { [native code] }",
+            "findLastIndex": "function function findLastIndex() { [native code] }",
+            "toReversed": "function function toReversed() { [native code] }",
+            "toSorted": "function function toSorted() { [native code] }",
+            "with": "function function with() { [native code] }"
           },
           "constructor": {
             "#__proto__": "function function() {\n    [native code]\n}",
@@ -143,9 +149,7 @@
             "fill": "function function fill() { [native code] }",
             "filter": "function function filter() { [native code] }",
             "find": "function function find() { [native code] }",
-            "findLast": "function function findLast() { [native code] }",
             "findIndex": "function function findIndex() { [native code] }",
-            "findLastIndex": "function function findLastIndex() { [native code] }",
             "forEach": "function function forEach() { [native code] }",
             "indexOf": "function function indexOf() { [native code] }",
             "join": "function function join() { [native code] }",
@@ -168,7 +172,12 @@
             "length": "number 1",
             "Symbol.toStringTag": "string Int8Array",
             "toLocaleString": "function function toLocaleString() { [native code] }",
-            "toString": "function function toString() { [native code] }"
+            "toString": "function function toString() { [native code] }",
+            "findLast": "function function findLast() { [native code] }",
+            "findLastIndex": "function function findLastIndex() { [native code] }",
+            "toReversed": "function function toReversed() { [native code] }",
+            "toSorted": "function function toSorted() { [native code] }",
+            "with": "function function with() { [native code] }"
           },
           "constructor": {
             "#__proto__": "function function() {\n    [native code]\n}",

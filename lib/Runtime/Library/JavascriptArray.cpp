@@ -8674,6 +8674,307 @@ Case0:
         return JavascriptArray::FindHelper<true, true>(pArr, nullptr, obj, length, args, scriptContext);
     }
 
+    // Copy-by-change helpers. Each user-visible conversion takes its own
+    // reentrancy lock so a nested helper does not observe an outer lock as
+    // already closed. ToInteger matches ToIntegerOrInfinity here: NaN and
+    // -0 become +0, and ±Infinity are preserved. ClampRelativeStart,
+    // ClampDeleteCount, and TryActualIndex stay separate from TypedArray's
+    // TypedTryActualIndex; the NaN/-0 conversion is ToInteger's, not a
+    // second local rule.
+    static double ToIntegerOrInfinity(Var value, ScriptContext* scriptContext)
+    {
+        JS_REENTRANCY_LOCK(jsReentLock, scriptContext->GetThreadContext());
+        double integer = 0;
+        JS_REENTRANT(jsReentLock, integer = JavascriptConversion::ToInteger(value, scriptContext));
+        return integer;
+    }
+
+    // Expands inside an entry so it can call private TryGetArrayAndLength.
+#define LENGTH_OF_ARRAY_LIKE(value, scriptContext, methodName, objOut, lenOut) \
+    do \
+    { \
+        JS_REENTRANCY_LOCK(jsReentLock, (scriptContext)->GetThreadContext()); \
+        JavascriptArray* unusedArray = nullptr; \
+        JS_REENTRANT(jsReentLock, TryGetArrayAndLength((value), (scriptContext), (methodName), &unusedArray, (objOut), (lenOut))); \
+    } while (0)
+
+    static Var GetIndexReent(RecyclableObject* obj, uint64 index, ScriptContext* scriptContext)
+    {
+        JS_REENTRANCY_LOCK(jsReentLock, scriptContext->GetThreadContext());
+        Var value = nullptr;
+        JS_REENTRANT(jsReentLock, value = JavascriptOperators::GetItem(obj, index, scriptContext));
+        return value;
+    }
+
+    static JavascriptArray* ArrayCreateOrThrow(uint64 length, ScriptContext* scriptContext)
+    {
+        // ArrayCreate throws RangeError above 2^32-1. Equal to 2^32-1 is in range.
+        if (length > JavascriptArray::MaxArrayLength)
+        {
+            JavascriptError::ThrowRangeError(scriptContext, JSERR_ArrayLengthConstructIncorrect);
+        }
+        return scriptContext->GetLibrary()->CreateArray(static_cast<uint32>(length));
+    }
+
+    // CreateDataPropertyOrThrow and EnsureHead are private. Expand inside an entry.
+#define DEFINE_INDEX(arr, index, value, scriptContext) \
+    JavascriptArray::CreateDataPropertyOrThrow((arr), static_cast<uint32>(index), (value), (scriptContext))
+
+    static uint64 ClampRelativeStart(double relative, uint64 len)
+    {
+        if (relative < 0)
+        {
+            if (JavascriptNumber::IsNegInf(relative))
+            {
+                return 0;
+            }
+            double magnitude = -relative;
+            if (magnitude >= static_cast<double>(len))
+            {
+                return 0;
+            }
+            return len - static_cast<uint64>(magnitude);
+        }
+        if (JavascriptNumber::IsPosInf(relative) || relative >= static_cast<double>(len))
+        {
+            return len;
+        }
+        return static_cast<uint64>(relative);
+    }
+
+    static uint64 ClampDeleteCount(double deleteCount, uint64 cap)
+    {
+        if (deleteCount <= 0 || JavascriptNumber::IsNegInf(deleteCount))
+        {
+            return 0;
+        }
+        if (JavascriptNumber::IsPosInf(deleteCount) || deleteCount >= static_cast<double>(cap))
+        {
+            return cap;
+        }
+        return static_cast<uint64>(deleteCount);
+    }
+
+    // actualIndex is in [0, len). ±Infinity and every other out-of-range index fail.
+    static bool TryActualIndex(double relative, uint64 len, uint64* actual)
+    {
+        if (JavascriptNumber::IsNegInf(relative) || JavascriptNumber::IsPosInf(relative))
+        {
+            return false;
+        }
+        if (relative >= 0)
+        {
+            if (relative >= static_cast<double>(len))
+            {
+                return false;
+            }
+            *actual = static_cast<uint64>(relative);
+            return true;
+        }
+        double magnitude = -relative;
+        if (magnitude > static_cast<double>(len))
+        {
+            return false;
+        }
+        *actual = len - static_cast<uint64>(magnitude);
+        return true;
+    }
+
+    // Array.prototype.toReversed. ArrayCreate, not species. Receiver is not written.
+    Var JavascriptArray::EntryToReversed(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+        ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+        AUTO_TAG_NATIVE_LIBRARY_ENTRY(function, callInfo, _u("Array.prototype.toReversed"));
+
+        Assert(!(callInfo.Flags & CallFlags_New));
+
+        if (args.Info.Count == 0)
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NullOrUndefined, _u("Array.prototype.toReversed"));
+        }
+
+        RecyclableObject* obj = nullptr;
+        uint64 len = 0;
+        LENGTH_OF_ARRAY_LIKE(args[0], scriptContext, _u("Array.prototype.toReversed"), &obj, &len);
+        JavascriptArray* result = ArrayCreateOrThrow(len, scriptContext);
+        result->EnsureHead<Var>();
+
+        for (uint64 k = 0; k < len; ++k)
+        {
+            Var value = GetIndexReent(obj, len - k - 1, scriptContext);
+            DEFINE_INDEX(result, k, value, scriptContext);
+        }
+        return result;
+    }
+
+    // Array.prototype.toSorted. An invalid comparefn throws before LengthOfArrayLike.
+    // Elements are read into a new dense array, then SortHelper runs on that copy only.
+    Var JavascriptArray::EntryToSorted(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+        ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+        AUTO_TAG_NATIVE_LIBRARY_ENTRY(function, callInfo, _u("Array.prototype.toSorted"));
+
+        Assert(!(callInfo.Flags & CallFlags_New));
+
+        RecyclableObject* compFn = nullptr;
+        if (args.Info.Count > 1)
+        {
+            if (JavascriptConversion::IsCallable(args[1]))
+            {
+                compFn = UnsafeVarTo<RecyclableObject>(args[1]);
+            }
+            else if (JavascriptOperators::GetTypeId(args[1]) != TypeIds_Undefined)
+            {
+                JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_NeedFunction, _u("Array.prototype.toSorted"));
+            }
+        }
+
+        if (args.Info.Count == 0)
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NullOrUndefined, _u("Array.prototype.toSorted"));
+        }
+
+        RecyclableObject* obj = nullptr;
+        uint64 len = 0;
+        LENGTH_OF_ARRAY_LIKE(args[0], scriptContext, _u("Array.prototype.toSorted"), &obj, &len);
+        JavascriptArray* result = ArrayCreateOrThrow(len, scriptContext);
+        result->EnsureHead<Var>();
+
+        for (uint64 k = 0; k < len; ++k)
+        {
+            Var value = GetIndexReent(obj, k, scriptContext);
+            DEFINE_INDEX(result, k, value, scriptContext);
+        }
+
+        JavascriptArray::CompareVarsInfo cvInfo;
+        cvInfo.scriptContext = scriptContext;
+        if (compFn != nullptr)
+        {
+            cvInfo.compFn = compFn;
+            cvInfo.compareType = scriptContext == compFn->GetScriptContext() ? &compareVars : &compareVarsCrossContext;
+            return JavascriptArray::SortHelper<Field(Var)>(result, &cvInfo);
+        }
+        cvInfo.compFn = nullptr;
+        cvInfo.compareType = &stringCompare;
+        return JavascriptArray::SortHelper<StringItem>(result, &cvInfo);
+    }
+
+    // Array.prototype.toSpliced. deleteCount is 0 when the argument is present and undefined.
+    // A missing deleteCount deletes through the end. newLen above 2^53-1 is TypeError;
+    // newLen above 2^32-1 (and at most 2^53-1) is the ArrayCreate RangeError. Both throw
+    // before any element Get. This is not EntrySplice.
+    Var JavascriptArray::EntryToSpliced(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+        ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+        AUTO_TAG_NATIVE_LIBRARY_ENTRY(function, callInfo, _u("Array.prototype.toSpliced"));
+
+        Assert(!(callInfo.Flags & CallFlags_New));
+
+        if (args.Info.Count == 0)
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NullOrUndefined, _u("Array.prototype.toSpliced"));
+        }
+
+        RecyclableObject* obj = nullptr;
+        uint64 len = 0;
+        LENGTH_OF_ARRAY_LIKE(args[0], scriptContext, _u("Array.prototype.toSpliced"), &obj, &len);
+
+        uint64 actualStart = 0;
+        uint64 actualDeleteCount = 0;
+        if (args.Info.Count >= 2)
+        {
+            double relativeStart = ToIntegerOrInfinity(args[1], scriptContext);
+            actualStart = ClampRelativeStart(relativeStart, len);
+            if (args.Info.Count == 2)
+            {
+                actualDeleteCount = len - actualStart;
+            }
+            else
+            {
+                double deleteCount = ToIntegerOrInfinity(args[2], scriptContext);
+                actualDeleteCount = ClampDeleteCount(deleteCount, len - actualStart);
+            }
+        }
+
+        uint32 argCount = args.Info.Count;
+        uint64 insertCount = argCount > 3 ? static_cast<uint64>(argCount - 3) : 0;
+        uint64 newLen = len - actualDeleteCount + insertCount;
+        if (newLen > JavascriptArray::FiftyThirdPowerOfTwoMinusOne)
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_IllegalArraySizeAndLength);
+        }
+
+        JavascriptArray* result = ArrayCreateOrThrow(newLen, scriptContext);
+        result->EnsureHead<Var>();
+        uint64 dest = 0;
+        for (uint64 k = 0; k < actualStart; ++k, ++dest)
+        {
+            Var value = GetIndexReent(obj, k, scriptContext);
+            DEFINE_INDEX(result, dest, value, scriptContext);
+        }
+        for (uint64 i = 0; i < insertCount; ++i, ++dest)
+        {
+            DEFINE_INDEX(result, dest, args[3 + i], scriptContext);
+        }
+        for (uint64 k = actualStart + actualDeleteCount; dest < newLen; ++k, ++dest)
+        {
+            Var value = GetIndexReent(obj, k, scriptContext);
+            DEFINE_INDEX(result, dest, value, scriptContext);
+        }
+        return result;
+    }
+
+    // Array.prototype.with. Out-of-range index is RangeError before ArrayCreate.
+    // The replaced index is not read. The receiver is not written.
+    Var JavascriptArray::EntryWith(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+        ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+        AUTO_TAG_NATIVE_LIBRARY_ENTRY(function, callInfo, _u("Array.prototype.with"));
+
+        Assert(!(callInfo.Flags & CallFlags_New));
+
+        if (args.Info.Count == 0)
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NullOrUndefined, _u("Array.prototype.with"));
+        }
+
+        RecyclableObject* obj = nullptr;
+        uint64 len = 0;
+        LENGTH_OF_ARRAY_LIKE(args[0], scriptContext, _u("Array.prototype.with"), &obj, &len);
+        Var indexValue = args.Info.Count > 1 ? args[1] : scriptContext->GetLibrary()->GetUndefined();
+        double relative = ToIntegerOrInfinity(indexValue, scriptContext);
+        uint64 actual = 0;
+        if (!TryActualIndex(relative, len, &actual))
+        {
+            JavascriptError::ThrowRangeError(scriptContext, JSERR_ArgumentOutOfRange, _u("Array.prototype.with"));
+        }
+
+        Var replacement = args.Info.Count > 2 ? args[2] : scriptContext->GetLibrary()->GetUndefined();
+        JavascriptArray* result = ArrayCreateOrThrow(len, scriptContext);
+        result->EnsureHead<Var>();
+        for (uint64 k = 0; k < len; ++k)
+        {
+            Var value = k == actual ? replacement : GetIndexReent(obj, k, scriptContext);
+            DEFINE_INDEX(result, k, value, scriptContext);
+        }
+        return result;
+    }
+
+#undef LENGTH_OF_ARRAY_LIKE
+#undef DEFINE_INDEX
+
     ///----------------------------------------------------------------------------
     /// Entries() returns a new ArrayIterator object configured to return key-
     /// value pairs matching the elements of the this array/array-like object,

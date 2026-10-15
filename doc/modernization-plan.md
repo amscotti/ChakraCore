@@ -431,6 +431,15 @@ claim.** Documented gaps, not S11 defects: the default profile has no
 `RegExp.prototype.flags`, so a deleted `flags` property does not
 throw; named capture groups are unsupported. `@@replace` dispatch
 requires `-ES6RegExSymbols` and applies only to Object search values.
+S10 change-array-by-copy (half) — [c2-s10.md](c2-s10.md)
+(closed: interpreter-verified, unconditional library methods, no
+feature flag and no kill switch, no new opcodes). Set methods are
+unstarted. The default carries Mac no-JIT evidence only: **B4 must run the S10
+test262 corpus and `test/es7/change-array-by-copy.js` under
+SimpleJIT/FullJIT (dynapogo) before any JIT-configuration claim.**
+Documented gaps, not defects in the seven methods: the typed-array
+default comparator treats `-0` and `+0` as equal (shared with
+`.sort()`); `ESBigInt` is off; resizable ArrayBuffer is S8.
 
 #### C3 — Larger runtime projects
 
@@ -556,9 +565,13 @@ Decision/rollback points:
   tracked until C4, optional ecosystem scope has separate gates.
 - [ ] C4: Published qualified ES2025 result on the claimed default configurations.
 
-**C2 batch status:** S4, S5, and S11 `String.prototype.replaceAll` are
-closed on Mac no-JIT. JIT claims still wait on B4. `matchAll` stays
-behind S7. The next bounded C2 batch is the copy-by-change half of S10.
+**C2 batch status:** S4, S5, S11 `String.prototype.replaceAll`, and the
+copy-by-change half of S10 are closed on Mac no-JIT
+([c2-s4.md](c2-s4.md), [c2-s5.md](c2-s5.md), [c2-s11.md](c2-s11.md),
+[c2-s10.md](c2-s10.md)). JIT claims still wait on B4. The next bounded
+C2 batch is the rest of S10: Set methods (`set-methods` 316),
+unstarted. `matchAll` stays behind S7. The other S11 builtins are
+unstarted.
 
 **Next platform gate:** B4 native execution. Provision a native x64 Linux
 runner via the preferred path to green in [b4-gate.md](b4-gate.md) §4(a),

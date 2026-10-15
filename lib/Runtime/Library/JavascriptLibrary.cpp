@@ -2054,7 +2054,7 @@ namespace Js
 
     bool JavascriptLibrary::InitializeArrayPrototype(DynamicObject* arrayPrototype, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)
     {
-        typeHandler->Convert(arrayPrototype, mode, 27);
+        typeHandler->Convert(arrayPrototype, mode, 31);
         // Note: Any new function addition/deletion/modification should also be updated in JavascriptLibrary::ProfilerRegisterArray
         // so that the update is in sync with profiler
 
@@ -2162,10 +2162,19 @@ namespace Js
             unscopablesList->SetProperty(PropertyIds::findLastIndex, JavascriptBoolean::ToVar(true, scriptContext), PropertyOperation_None, nullptr);
         }
 
+        // `with` is a keyword, so sec-array.prototype-@@unscopables does not list it.
+        unscopablesList->SetProperty(scriptContext->GetOrAddPropertyIdTracked(_u("toReversed")), JavascriptBoolean::ToVar(true, scriptContext), PropertyOperation_None, nullptr);
+        unscopablesList->SetProperty(scriptContext->GetOrAddPropertyIdTracked(_u("toSorted")), JavascriptBoolean::ToVar(true, scriptContext), PropertyOperation_None, nullptr);
+        unscopablesList->SetProperty(scriptContext->GetOrAddPropertyIdTracked(_u("toSpliced")), JavascriptBoolean::ToVar(true, scriptContext), PropertyOperation_None, nullptr);
+
         library->AddMember(arrayPrototype, PropertyIds::_symbolUnscopables, unscopablesList, PropertyConfigurable);
 
         /* No inlining            Array_Fill           */ library->AddFunctionToLibraryObject(arrayPrototype, PropertyIds::fill, &JavascriptArray::EntryInfo::Fill, 1);
         /* No inlining            Array_CopyWithin     */ library->AddFunctionToLibraryObject(arrayPrototype, PropertyIds::copyWithin, &JavascriptArray::EntryInfo::CopyWithin, 2);
+        library->AddFunctionToLibraryObjectWithPropertyName(arrayPrototype, _u("toReversed"), &JavascriptArray::EntryInfo::ToReversed, 0);
+        library->AddFunctionToLibraryObjectWithPropertyName(arrayPrototype, _u("toSorted"), &JavascriptArray::EntryInfo::ToSorted, 1);
+        library->AddFunctionToLibraryObjectWithPropertyName(arrayPrototype, _u("toSpliced"), &JavascriptArray::EntryInfo::ToSpliced, 2);
+        library->AddFunctionToLibraryObjectWithPropertyName(arrayPrototype, _u("with"), &JavascriptArray::EntryInfo::With, 2);
         DebugOnly(CheckRegisteredBuiltIns(builtinFuncs, scriptContext));
 
         arrayPrototype->SetHasNoEnumerableProperties(true);
@@ -2354,7 +2363,7 @@ namespace Js
 
     bool JavascriptLibrary::InitializeTypedArrayPrototype(DynamicObject* typedarrayPrototype, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)
     {
-        typeHandler->Convert(typedarrayPrototype, mode, 31);
+        typeHandler->Convert(typedarrayPrototype, mode, 34);
 
         ScriptContext* scriptContext = typedarrayPrototype->GetScriptContext();
         JavascriptLibrary* library = typedarrayPrototype->GetLibrary();
@@ -2428,6 +2437,10 @@ namespace Js
             library->AddFunctionToLibraryObject(typedarrayPrototype, PropertyIds::findLast, &TypedArrayBase::EntryInfo::FindLast, 1);
             library->AddFunctionToLibraryObject(typedarrayPrototype, PropertyIds::findLastIndex, &TypedArrayBase::EntryInfo::FindLastIndex, 1);
         }
+
+        library->AddFunctionToLibraryObjectWithPropertyName(typedarrayPrototype, _u("toReversed"), &TypedArrayBase::EntryInfo::ToReversed, 0);
+        library->AddFunctionToLibraryObjectWithPropertyName(typedarrayPrototype, _u("toSorted"), &TypedArrayBase::EntryInfo::ToSorted, 1);
+        library->AddFunctionToLibraryObjectWithPropertyName(typedarrayPrototype, _u("with"), &TypedArrayBase::EntryInfo::With, 2);
 
         typedarrayPrototype->SetHasNoEnumerableProperties(true);
 
@@ -7726,6 +7739,11 @@ namespace Js
 
         REG_OBJECTS_LIB_FUNC(includes, JavascriptArray::EntryIncludes);
 
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("toReversed"), 10, JavascriptArray::EntryToReversed);
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("toSorted"), 8, JavascriptArray::EntryToSorted);
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("toSpliced"), 10, JavascriptArray::EntryToSpliced);
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("with"), 4, JavascriptArray::EntryWith);
+
         return hr;
     }
 
@@ -8233,6 +8251,9 @@ namespace Js
         REG_OBJECTS_LIB_FUNC(some, TypedArrayBase::EntrySome);
         REG_OBJECTS_LIB_FUNC(sort, TypedArrayBase::EntrySort);
         REG_OBJECTS_LIB_FUNC(includes, TypedArrayBase::EntryIncludes);
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("toReversed"), 10, TypedArrayBase::EntryToReversed);
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("toSorted"), 8, TypedArrayBase::EntryToSorted);
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("with"), 4, TypedArrayBase::EntryWith);
 
 
         return hr;

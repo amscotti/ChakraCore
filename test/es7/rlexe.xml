@@ -178,4 +178,10 @@
       <compile-flags>-ES6RegExSymbols -args summary -endargs</compile-flags>
     </default>
   </test>
+  <test>
+    <default>
+      <files>change-array-by-copy.js</files>
+      <compile-flags>-args summary -endargs</compile-flags>
+    </default>
+  </test>
 </regress-exe>

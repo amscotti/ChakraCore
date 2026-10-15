@@ -43,6 +43,9 @@ namespace Js
             static FunctionInfo FindIndex;
             static FunctionInfo FindLast;
             static FunctionInfo FindLastIndex;
+            static FunctionInfo ToReversed;
+            static FunctionInfo ToSorted;
+            static FunctionInfo With;
             static FunctionInfo ForEach;
             static FunctionInfo IndexOf;
             static FunctionInfo Includes;
@@ -84,6 +87,9 @@ namespace Js
         static Var EntryFindIndex(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryFindLast(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryFindLastIndex(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryToReversed(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryToSorted(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryWith(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryForEach(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryIndexOf(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryIncludes(RecyclableObject* function, CallInfo callInfo, ...);
@@ -144,6 +150,8 @@ namespace Js
         static TypedArrayBase * ValidateTypedArray(Var aValue, ScriptContext *scriptContext, LPCWSTR apiName);
         static TypedArrayBase * ValidateTypedArray(Arguments &args, ScriptContext *scriptContext, LPCWSTR apiName);
         static Var TypedArrayCreate(Var constructor, Arguments *args, uint32 length, ScriptContext *scriptContext);
+        // Same element type and length. Does not read constructor or @@species.
+        static TypedArrayBase* CreateSameType(TypedArrayBase* exemplar, uint32 length);
 
         virtual BOOL DirectSetItem(_In_ uint32 index, _In_ Js::Var value) = 0;
         virtual BOOL DirectSetItemNoSet(_In_ uint32 index, _In_ Js::Var value) = 0;

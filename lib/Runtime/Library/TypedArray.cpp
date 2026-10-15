@@ -2193,6 +2193,8 @@ namespace Js
         }
         else // simple comparison when no user method provided
         {
+            // `<` treats -0 and +0 as equal. The spec's default comparator
+            // orders -0 first. Shared with TypedArray.prototype.sort; see doc/c2-s10.md.
             return x < y;
         }
     }
@@ -2265,6 +2267,247 @@ namespace Js
         }
 
         return typedArrayBase;
+    }
+
+    // Same-type copy. Does not call the constructor and does not read @@species.
+    // Virtual typed arrays share the element TypeId; Create builds the intrinsic instance.
+    TypedArrayBase* TypedArrayBase::CreateSameType(TypedArrayBase* exemplar, uint32 length)
+    {
+        ScriptContext* scriptContext = exemplar->GetScriptContext();
+        JavascriptLibrary* library = scriptContext->GetLibrary();
+        uint32 byteLength = 0;
+        if (UInt32Math::Mul(length, exemplar->GetBytesPerElement(), &byteLength) ||
+            byteLength > ArrayBuffer::MaxArrayBufferLength)
+        {
+            JavascriptError::ThrowRangeError(scriptContext, JSERR_InvalidTypedArrayLength);
+        }
+
+        ArrayBuffer* arrayBuffer = library->CreateArrayBuffer(byteLength);
+        Var created = nullptr;
+        switch (exemplar->GetTypeId())
+        {
+        case TypeIds_Int8Array:
+            created = Int8Array::Create(arrayBuffer, 0, length, library);
+            break;
+        case TypeIds_Uint8Array:
+            created = Uint8Array::Create(arrayBuffer, 0, length, library);
+            break;
+        case TypeIds_Uint8ClampedArray:
+            created = Uint8ClampedArray::Create(arrayBuffer, 0, length, library);
+            break;
+        case TypeIds_Int16Array:
+            created = Int16Array::Create(arrayBuffer, 0, length, library);
+            break;
+        case TypeIds_Uint16Array:
+            created = Uint16Array::Create(arrayBuffer, 0, length, library);
+            break;
+        case TypeIds_Int32Array:
+            created = Int32Array::Create(arrayBuffer, 0, length, library);
+            break;
+        case TypeIds_Uint32Array:
+            created = Uint32Array::Create(arrayBuffer, 0, length, library);
+            break;
+        case TypeIds_Float32Array:
+            created = Float32Array::Create(arrayBuffer, 0, length, library);
+            break;
+        case TypeIds_Float64Array:
+            created = Float64Array::Create(arrayBuffer, 0, length, library);
+            break;
+        case TypeIds_Int64Array:
+            created = Int64Array::Create(arrayBuffer, 0, length, library);
+            break;
+        case TypeIds_Uint64Array:
+            created = Uint64Array::Create(arrayBuffer, 0, length, library);
+            break;
+        case TypeIds_CharArray:
+            created = CharArray::Create(arrayBuffer, 0, length, library);
+            break;
+        case TypeIds_BoolArray:
+            created = BoolArray::Create(arrayBuffer, 0, length, library);
+            break;
+        default:
+            AssertMsg(false, "CreateSameType: unknown typed array TypeId");
+            Js::Throw::FatalInternalError();
+        }
+        return static_cast<TypedArrayBase*>(created);
+    }
+
+    static double TypedToIntegerOrInfinity(Var value, ScriptContext* scriptContext)
+    {
+        JS_REENTRANCY_LOCK(jsReentLock, scriptContext->GetThreadContext());
+        double integer = 0;
+        JS_REENTRANT(jsReentLock, integer = JavascriptConversion::ToInteger(value, scriptContext));
+        return integer;
+    }
+
+    static double TypedToNumber(Var value, ScriptContext* scriptContext)
+    {
+        JS_REENTRANCY_LOCK(jsReentLock, scriptContext->GetThreadContext());
+        double number = 0;
+        JS_REENTRANT(jsReentLock, number = JavascriptConversion::ToNumber(value, scriptContext));
+        return number;
+    }
+
+    // False for ±Infinity and any index outside [0, len).
+    // Separate from Array's ClampRelativeStart / TryActualIndex. Callers pass
+    // a ToInteger result, so NaN and -0 are already +0.
+    static bool TypedTryActualIndex(double relative, uint32 len, uint32* actual)
+    {
+        if (JavascriptNumber::IsNegInf(relative) || JavascriptNumber::IsPosInf(relative))
+        {
+            return false;
+        }
+        if (relative >= 0)
+        {
+            if (relative >= static_cast<double>(len))
+            {
+                return false;
+            }
+            *actual = static_cast<uint32>(relative);
+            return true;
+        }
+        double magnitude = -relative;
+        if (magnitude > static_cast<double>(len))
+        {
+            return false;
+        }
+        *actual = len - static_cast<uint32>(magnitude);
+        return true;
+    }
+
+    // %TypedArray%.prototype.toReversed. Length 0 is a new empty array of the same type.
+    Var TypedArrayBase::EntryToReversed(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+        ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+        AUTO_TAG_NATIVE_LIBRARY_ENTRY(function, callInfo, _u("[TypedArray].prototype.toReversed"));
+
+        Assert(!(callInfo.Flags & CallFlags_New));
+
+        TypedArrayBase* source = ValidateTypedArray(args, scriptContext, _u("[TypedArray].prototype.toReversed"));
+        uint32 length = source->GetLength();
+        TypedArrayBase* result = CreateSameType(source, length);
+        for (uint32 k = 0; k < length; ++k)
+        {
+            // DirectGetItem throws if the source detaches. Do not cache the byte buffer.
+            Var value = source->DirectGetItem(length - k - 1);
+            result->DirectSetItem(k, value);
+        }
+        return result;
+    }
+
+    // %TypedArray%.prototype.toSorted. comparefn is checked before ValidateTypedArray.
+    // The new buffer is sorted in place. The source is not written back, so a detach
+    // during comparefn after the copy does not throw.
+    Var TypedArrayBase::EntryToSorted(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+        ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+        AUTO_TAG_NATIVE_LIBRARY_ENTRY(function, callInfo, _u("[TypedArray].prototype.toSorted"));
+
+        Assert(!(callInfo.Flags & CallFlags_New));
+
+        RecyclableObject* compareFn = nullptr;
+        if (args.Info.Count > 1 && !JavascriptOperators::IsUndefined(args[1]))
+        {
+            if (!JavascriptConversion::IsCallable(args[1]))
+            {
+                JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_NeedFunction, _u("[TypedArray].prototype.toSorted"));
+            }
+            compareFn = UnsafeVarTo<RecyclableObject>(args[1]);
+        }
+
+        TypedArrayBase* source = ValidateTypedArray(args, scriptContext, _u("[TypedArray].prototype.toSorted"));
+        uint32 length = source->GetLength();
+        TypedArrayBase* result = CreateSameType(source, length);
+
+        if (length > 0)
+        {
+            // CreateArrayBuffer can run finalizers. Re-check before touching bytes.
+            if (source->IsDetachedBuffer())
+            {
+                JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, _u("[TypedArray].prototype.toSorted"));
+            }
+            uint32 byteLength = 0;
+            if (UInt32Math::Mul(length, source->GetBytesPerElement(), &byteLength))
+            {
+                Js::Throw::FatalInternalError();
+            }
+            memcpy(result->GetByteBuffer(), source->GetByteBuffer(), byteLength);
+        }
+
+        if (length >= 2)
+        {
+            // SortHelper's mergesort allocates on this arena. Release it if comparefn throws.
+            // EntrySort's BEGIN_TEMP_ALLOCATOR has no END; this guard releases both ways.
+            struct SortScratch
+            {
+                ScriptContext* scriptContext;
+                TempArenaAllocatorObject* temp;
+                ArenaAllocator* alloc;
+                SortScratch(ScriptContext* sc)
+                    : scriptContext(sc)
+                    , temp(sc->GetTemporaryAllocator(_u("toSorted")))
+                    , alloc(temp->GetAllocator())
+                {
+                }
+                ~SortScratch()
+                {
+                    scriptContext->ReleaseTemporaryAllocator(temp);
+                }
+                SortScratch(const SortScratch&) = delete;
+                SortScratch& operator=(const SortScratch&) = delete;
+            };
+            SortScratch scratch(scriptContext);
+            result->SortHelper(result->GetByteBuffer(), length, compareFn, scriptContext, scratch.alloc);
+        }
+        return result;
+    }
+
+    // %TypedArray%.prototype.with. Order: ToInteger, captured-length index,
+    // ToNumber, then RangeError if the buffer is now detached or the index is
+    // out of range. ToNumber always runs; its throw wins. The copy is later.
+    Var TypedArrayBase::EntryWith(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+        ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+        AUTO_TAG_NATIVE_LIBRARY_ENTRY(function, callInfo, _u("[TypedArray].prototype.with"));
+
+        Assert(!(callInfo.Flags & CallFlags_New));
+
+        TypedArrayBase* source = ValidateTypedArray(args, scriptContext, _u("[TypedArray].prototype.with"));
+        uint32 length = source->GetLength();
+        Var indexValue = args.Info.Count > 1 ? args[1] : scriptContext->GetLibrary()->GetUndefined();
+        double relative = TypedToIntegerOrInfinity(indexValue, scriptContext);
+        uint32 actual = 0;
+        bool inRange = TypedTryActualIndex(relative, length, &actual);
+
+        Var value = args.Info.Count > 2 ? args[2] : scriptContext->GetLibrary()->GetUndefined();
+        double numeric = TypedToNumber(value, scriptContext);
+        if (source->IsDetachedBuffer() || !inRange)
+        {
+            JavascriptError::ThrowRangeError(scriptContext, JSERR_InvalidTypedArrayIndex);
+        }
+        Var boxed = JavascriptNumber::ToVarNoCheck(numeric, scriptContext);
+        TypedArrayBase* result = CreateSameType(source, length);
+        for (uint32 k = 0; k < length; ++k)
+        {
+            if (k == actual)
+            {
+                result->DirectSetItem(k, boxed);
+            }
+            else
+            {
+                result->DirectSetItem(k, source->DirectGetItem(k));
+            }
+        }
+        return result;
     }
 
     Var TypedArrayBase::EntryValues(RecyclableObject* function, CallInfo callInfo, ...)
