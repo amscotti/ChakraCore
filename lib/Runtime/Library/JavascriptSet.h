@@ -99,6 +99,13 @@ namespace Js
             static FunctionInfo Entries;
             static FunctionInfo Values;
             static FunctionInfo GetterSymbolSpecies;
+            static FunctionInfo Union;
+            static FunctionInfo Intersection;
+            static FunctionInfo Difference;
+            static FunctionInfo SymmetricDifference;
+            static FunctionInfo IsSubsetOf;
+            static FunctionInfo IsSupersetOf;
+            static FunctionInfo IsDisjointFrom;
         };
         static Var NewInstance(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryAdd(RecyclableObject* function, CallInfo callInfo, ...);
@@ -110,6 +117,13 @@ namespace Js
         static Var EntryEntries(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryValues(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryGetterSymbolSpecies(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryUnion(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryIntersection(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryDifference(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntrySymmetricDifference(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryIsSubsetOf(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryIsSupersetOf(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryIsDisjointFrom(RecyclableObject* function, CallInfo callInfo, ...);
 
 #if ENABLE_TTD
     public:

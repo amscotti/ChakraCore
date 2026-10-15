@@ -4607,7 +4607,7 @@ namespace Js
 
     bool JavascriptLibrary::InitializeSetPrototype(DynamicObject* setPrototype, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)
     {
-        typeHandler->Convert(setPrototype, mode, 12, true);
+        typeHandler->Convert(setPrototype, mode, 19, true);
         // Note: Any new function addition/deletion/modification should also be updated in JavascriptLibrary::ProfilerRegisterSet
         // so that the update is in sync with profiler
         ScriptContext* scriptContext = setPrototype->GetScriptContext();
@@ -4632,6 +4632,14 @@ namespace Js
         {
             library->AddMember(setPrototype, PropertyIds::_symbolToStringTag, library->CreateStringFromCppLiteral(_u("Set")), PropertyConfigurable);
         }
+
+        library->AddFunctionToLibraryObjectWithPropertyName(setPrototype, _u("union"), &JavascriptSet::EntryInfo::Union, 1);
+        library->AddFunctionToLibraryObjectWithPropertyName(setPrototype, _u("intersection"), &JavascriptSet::EntryInfo::Intersection, 1);
+        library->AddFunctionToLibraryObjectWithPropertyName(setPrototype, _u("difference"), &JavascriptSet::EntryInfo::Difference, 1);
+        library->AddFunctionToLibraryObjectWithPropertyName(setPrototype, _u("symmetricDifference"), &JavascriptSet::EntryInfo::SymmetricDifference, 1);
+        library->AddFunctionToLibraryObjectWithPropertyName(setPrototype, _u("isSubsetOf"), &JavascriptSet::EntryInfo::IsSubsetOf, 1);
+        library->AddFunctionToLibraryObjectWithPropertyName(setPrototype, _u("isSupersetOf"), &JavascriptSet::EntryInfo::IsSupersetOf, 1);
+        library->AddFunctionToLibraryObjectWithPropertyName(setPrototype, _u("isDisjointFrom"), &JavascriptSet::EntryInfo::IsDisjointFrom, 1);
 
         setPrototype->SetHasNoEnumerableProperties(true);
 
@@ -8113,6 +8121,14 @@ namespace Js
 
         REG_OBJECTS_LIB_FUNC(entries, JavascriptSet::EntryEntries);
         REG_OBJECTS_LIB_FUNC(values, JavascriptSet::EntryValues);
+
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("union"), 5, JavascriptSet::EntryUnion);
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("intersection"), 12, JavascriptSet::EntryIntersection);
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("difference"), 10, JavascriptSet::EntryDifference);
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("symmetricDifference"), 19, JavascriptSet::EntrySymmetricDifference);
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("isSubsetOf"), 10, JavascriptSet::EntryIsSubsetOf);
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("isSupersetOf"), 12, JavascriptSet::EntryIsSupersetOf);
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("isDisjointFrom"), 14, JavascriptSet::EntryIsDisjointFrom);
 
         return hr;
     }

@@ -537,16 +537,18 @@ missing construct SyntaxErrors whole test files filed under other tags
 lookbehind may prove **C3**.
 
 **S10. Set methods + copy-by-change family.** Repro: `python3 tools/test262/run.py --binary zig-out/bin/ch --output out/test262-c1-setcopy 'test/built-ins/Set/**/*.js' 'test/built-ins/Array/**/*.js' 'test/built-ins/TypedArray/**/*.js'`.
-*Status: the copy-by-change half is closed on Mac no-JIT — see
-[c2-s10.md](c2-s10.md). Seven unconditional library methods, no flag
-and no opcode. Interpreter evidence: es7 `change-array-by-copy.js`
-pass; the seven prototype directories are 246 passed / 28 failed of
-274 (234 fail→pass, 0 pass→fail against the C1 baseline). The 28 are
-16 BigInt-literal parses, 8 missing `resize`, and 4 resizable-buffer
-cases that expect RangeError. `Symbol.unscopables` for this feature
-is 10/0, and `with` is not an unscopable. x64 JIT verification stays
-gated on B4. `set-methods` 316 stays outstanding and is the next
-bounded C2 batch.*
+*Status: both halves are closed on Mac no-JIT — see
+[c2-s10.md](c2-s10.md). The copy-by-change half landed seven
+unconditional library methods; the Set-methods half (S10 proper) added
+`union`, `intersection`, `difference`, `symmetricDifference`,
+`isSubsetOf`, `isSupersetOf`, and `isDisjointFrom`, with no flag and
+no opcode. Interpreter evidence: es7 `change-array-by-copy.js` and
+`setmethods.js` pass; the seven array/typed-array prototype
+directories are 246 passed / 28 failed of 274 (234 fail→pass, 0
+pass→fail against the C1 baseline; 16 BigInt-literal parses, 8 missing
+`resize`, 4 resizable-buffer RangeError cases); the seven Set
+prototype directories are recorded in the receipt. x64 JIT
+verification stays gated on B4.*
 Subsystem: Runtime/Library. Prerequisite: none identified. Expected gain:
 `set-methods` 316, `change-array-by-copy` 262 edition failures.
 Uncertainty: low (well-specified builtins; set-like protocol edge cases).

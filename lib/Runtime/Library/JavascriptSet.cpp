@@ -268,6 +268,489 @@ Var JavascriptSet::EntryGetterSymbolSpecies(RecyclableObject* function, CallInfo
     return args[0];
 }
 
+// ---- Set.prototype set methods (rest of S10) ----
+// union, intersection, difference, symmetricDifference, isSubsetOf,
+// isSupersetOf, and isDisjointFrom. They read the receiver's internal set
+// data only; they never call add, has, size, or keys on the receiver, and
+// result sets are plain new Sets with no constructor or species lookup.
+// The other argument is consumed through a Set-like record
+// (sec-getsetrecord); its has and keys ARE user-visible and run in the
+// recorded order.
+
+// A Set Record (sec-setrecords): stack-allocated, every member is a
+// recycler pointer the GC traces through the caller's frames. [[Size]] is
+// integer-truncated, non-negative, and may be +Infinity.
+struct SetLikeRecord
+{
+    RecyclableObject* setLike;
+    double size;
+    RecyclableObject* has;
+    RecyclableObject* keys;
+};
+
+// GetIteratorFromMethod state for the record's [[Keys]]: the iterator
+// object and the "next" method read once when the iterator was created.
+struct SetLikeKeysIterator
+{
+    RecyclableObject* iterator;
+    RecyclableObject* next;
+};
+
+// Get(obj, id) where the property may be a user getter.
+static Var SetMethodGetProperty(RecyclableObject* object, PropertyId propertyId, ScriptContext* scriptContext)
+{
+    JS_REENTRANCY_LOCK(jsReentLock, scriptContext->GetThreadContext());
+    Var value = nullptr;
+    JS_REENTRANT(jsReentLock, value = JavascriptOperators::GetPropertyNoCache(object, propertyId, scriptContext));
+    return value;
+}
+
+// Call record.[[Has]] with record.[[SetObject]] as the receiver and
+// ToBoolean the result. The receiver brand check mirrors the other entries.
+static JavascriptSet* SetMethodCheckReceiver(Var thisArg, const char16* methodName, ScriptContext* scriptContext)
+{
+    JavascriptSet* set = JavascriptOperators::TryFromVar<JavascriptSet>(thisArg);
+    if (set == nullptr)
+    {
+        JavascriptError::ThrowTypeErrorVar(scriptContext, JSERR_NeedObjectOfType, methodName, _u("Set"));
+    }
+    return set;
+}
+
+// sec-getsetrecord. The observable order is: the Object check, Get "size",
+// ToNumber, the NaN TypeError, the integer truncation, the negative-size
+// RangeError, Get "has" with its callable check, then Get "keys" with its
+// callable check.
+static SetLikeRecord GetSetLikeRecord(Var other, const char16* methodName, ScriptContext* scriptContext)
+{
+    if (!JavascriptOperators::IsObject(other))
+    {
+        JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedObject);
+    }
+
+    SetLikeRecord record;
+    record.setLike = UnsafeVarTo<RecyclableObject>(other);
+    record.size = 0;
+    record.has = nullptr;
+    record.keys = nullptr;
+
+    Var rawSize = SetMethodGetProperty(record.setLike, PropertyIds::size, scriptContext);
+
+    double numberSize = 0;
+    {
+        JS_REENTRANCY_LOCK(jsReentLock, scriptContext->GetThreadContext());
+        JS_REENTRANT(jsReentLock, numberSize = JavascriptConversion::ToNumber(rawSize, scriptContext));
+    }
+    if (JavascriptNumber::IsNan(numberSize))
+    {
+        JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_Invalid, methodName);
+    }
+    // ToIntegerOrInfinity of the already-converted number. No user code runs here.
+    double intSize = JavascriptConversion::ToInteger(numberSize);
+    if (intSize < 0)
+    {
+        JavascriptError::ThrowRangeError(scriptContext, JSERR_FunctionArgument_Invalid, methodName);
+    }
+    record.size = intSize;
+
+    Var has = SetMethodGetProperty(record.setLike, PropertyIds::has, scriptContext);
+    if (!JavascriptConversion::IsCallable(has))
+    {
+        JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_NeedFunction, methodName);
+    }
+    record.has = VarTo<RecyclableObject>(has);
+
+    Var keys = SetMethodGetProperty(record.setLike, PropertyIds::keys, scriptContext);
+    if (!JavascriptConversion::IsCallable(keys))
+    {
+        JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_NeedFunction, methodName);
+    }
+    record.keys = VarTo<RecyclableObject>(keys);
+
+    return record;
+}
+
+// Call record.[[Has]] with record.[[SetObject]] as the receiver.
+static bool SetMethodCallHas(const SetLikeRecord& record, Var value, ScriptContext* scriptContext)
+{
+    JS_REENTRANCY_LOCK(jsReentLock, scriptContext->GetThreadContext());
+    Var result = nullptr;
+    JS_REENTRANT(jsReentLock,
+        result = CALL_FUNCTION(scriptContext->GetThreadContext(), record.has, CallInfo(CallFlags_Value, 2), record.setLike, value));
+    return JavascriptConversion::ToBool(result, scriptContext);
+}
+
+// GetIteratorFromMethod over record.[[Keys]]: call keys, require an Object
+// result, then read "next" once and require it callable.
+static SetLikeKeysIterator GetSetLikeKeysIterator(const SetLikeRecord& record, ScriptContext* scriptContext)
+{
+    JS_REENTRANCY_LOCK(jsReentLock, scriptContext->GetThreadContext());
+    Var iteratorVar = nullptr;
+    JS_REENTRANT(jsReentLock,
+        iteratorVar = CALL_FUNCTION(scriptContext->GetThreadContext(), record.keys, CallInfo(CallFlags_Value, 1), record.setLike));
+    if (!JavascriptOperators::IsObject(iteratorVar))
+    {
+        JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedObject);
+    }
+
+    SetLikeKeysIterator keysIterator;
+    keysIterator.iterator = VarTo<RecyclableObject>(iteratorVar);
+    JS_REENTRANT(jsReentLock, keysIterator.next = JavascriptOperators::CacheIteratorNext(keysIterator.iterator, scriptContext));
+    return keysIterator;
+}
+
+// IteratorStepValue: call next, require an Object result, Get "done", and
+// only then Get "value". False means the iterator is exhausted.
+static bool SetLikeKeysStep(const SetLikeKeysIterator& keysIterator, Var* valueOut, ScriptContext* scriptContext)
+{
+    JS_REENTRANCY_LOCK(jsReentLock, scriptContext->GetThreadContext());
+    bool hasValue = false;
+    JS_REENTRANT(jsReentLock, hasValue = JavascriptOperators::IteratorStepAndValue(keysIterator.iterator, scriptContext, keysIterator.next, valueOut));
+    return hasValue;
+}
+
+// IteratorClose (sec-iteratorclose) reached on a normal completion. The
+// shared JavascriptOperators::IteratorClose swallows throws because its
+// callers arrive there on an abrupt completion; here the "return" Get, the
+// Call, and the object check on the result are all observable and must
+// propagate per spec.
+static void CloseKeysIteratorNormalCompletion(const SetLikeKeysIterator& keysIterator, ScriptContext* scriptContext)
+{
+    Var returnMethod = SetMethodGetProperty(keysIterator.iterator, PropertyIds::return_, scriptContext);
+    if (JavascriptOperators::IsUndefinedOrNull(returnMethod))
+    {
+        return;
+    }
+    if (!JavascriptConversion::IsCallable(returnMethod))
+    {
+        JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedFunction, _u("return"));
+    }
+
+    RecyclableObject* callable = VarTo<RecyclableObject>(returnMethod);
+    Var result = nullptr;
+    {
+        JS_REENTRANCY_LOCK(jsReentLock, scriptContext->GetThreadContext());
+        JS_REENTRANT(jsReentLock,
+            result = CALL_FUNCTION(scriptContext->GetThreadContext(), callable, CallInfo(CallFlags_Value, 1), keysIterator.iterator));
+    }
+    if (!JavascriptOperators::IsObject(result))
+    {
+        JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedObject);
+    }
+}
+
+// CanonicalizeKeyedCollectionKey for Sets: -0 becomes +0. Values taken from
+// the other argument's iterator pass through here before any Has, Add, or
+// Delete on a result set. Values already stored in a Set are canonical.
+static Var CanonicalizeSetMethodKey(Var value, ScriptContext* scriptContext)
+{
+    if (JavascriptNumber::Is(value) && JavascriptNumber::IsNegZero(JavascriptNumber::GetValue(value)))
+    {
+        return JavascriptNumber::New(0.0, scriptContext);
+    }
+    return value;
+}
+
+// A fresh plain Set holding the receiver's current elements, in order. This
+// is the "copy of set.[[SetData]]" the spec builds after GetSetRecord.
+static JavascriptSet* CopySetData(JavascriptSet* set, ScriptContext* scriptContext)
+{
+    JavascriptSet* result = scriptContext->GetLibrary()->CreateSet();
+    auto iter = set->GetIterator();
+    while (iter.Next())
+    {
+        result->Add(iter.Current());
+    }
+    return result;
+}
+
+// Set.prototype.union. The keys iterator is created before the receiver's
+// data is copied, and each iterated value is appended to the copy when it is
+// not already there. other.has is never consulted.
+Var JavascriptSet::EntryUnion(RecyclableObject* function, CallInfo callInfo, ...)
+{
+    PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+    ARGUMENTS(args, callInfo);
+    ScriptContext* scriptContext = function->GetScriptContext();
+    AUTO_TAG_NATIVE_LIBRARY_ENTRY(function, callInfo, _u("Set.prototype.union"));
+
+    Assert(!(callInfo.Flags & CallFlags_New));
+
+    JavascriptSet* set = SetMethodCheckReceiver(args[0], _u("Set.prototype.union"), scriptContext);
+    Var other = args.Info.Count > 1 ? args[1] : scriptContext->GetLibrary()->GetUndefined();
+    SetLikeRecord record = GetSetLikeRecord(other, _u("Set.prototype.union"), scriptContext);
+
+    SetLikeKeysIterator keysIterator = GetSetLikeKeysIterator(record, scriptContext);
+
+    JavascriptSet* result = CopySetData(set, scriptContext);
+    Var value = nullptr;
+    while (SetLikeKeysStep(keysIterator, &value, scriptContext))
+    {
+        value = CanonicalizeSetMethodKey(value, scriptContext);
+        if (!result->Has(value))
+        {
+            result->Add(value);
+        }
+    }
+    return result;
+}
+
+// Set.prototype.intersection. When the receiver is not larger than the
+// record, the receiver's live data is walked and each entry is passed to
+// other.has; entries deleted by has are skipped, re-added and newly added
+// entries are visited, and the result dedupes. Otherwise other's keys are
+// iterated and each value kept when the live receiver contains it.
+Var JavascriptSet::EntryIntersection(RecyclableObject* function, CallInfo callInfo, ...)
+{
+    PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+    ARGUMENTS(args, callInfo);
+    ScriptContext* scriptContext = function->GetScriptContext();
+    AUTO_TAG_NATIVE_LIBRARY_ENTRY(function, callInfo, _u("Set.prototype.intersection"));
+
+    Assert(!(callInfo.Flags & CallFlags_New));
+
+    JavascriptSet* set = SetMethodCheckReceiver(args[0], _u("Set.prototype.intersection"), scriptContext);
+    Var other = args.Info.Count > 1 ? args[1] : scriptContext->GetLibrary()->GetUndefined();
+    SetLikeRecord record = GetSetLikeRecord(other, _u("Set.prototype.intersection"), scriptContext);
+
+    JavascriptSet* result = scriptContext->GetLibrary()->CreateSet();
+    if (static_cast<double>(set->Size()) <= record.size)
+    {
+        auto iter = set->GetIterator();
+        while (iter.Next())
+        {
+            Var entry = iter.Current();
+            if (SetMethodCallHas(record, entry, scriptContext) && !result->Has(entry))
+            {
+                result->Add(entry);
+            }
+        }
+    }
+    else
+    {
+        SetLikeKeysIterator keysIterator = GetSetLikeKeysIterator(record, scriptContext);
+        Var value = nullptr;
+        while (SetLikeKeysStep(keysIterator, &value, scriptContext))
+        {
+            value = CanonicalizeSetMethodKey(value, scriptContext);
+            if (set->Has(value) && !result->Has(value))
+            {
+                result->Add(value);
+            }
+        }
+    }
+    return result;
+}
+
+// Set.prototype.difference. The copy is taken before any branch; when the
+// receiver is not larger than the record, the copy itself is walked with
+// other.has and matching entries are deleted from the copy (a fixed-extent
+// walk: entries has() adds to the receiver are not visited). Otherwise
+// other's keys are iterated and each value deleted from the copy when the
+// copy still contains it.
+Var JavascriptSet::EntryDifference(RecyclableObject* function, CallInfo callInfo, ...)
+{
+    PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+    ARGUMENTS(args, callInfo);
+    ScriptContext* scriptContext = function->GetScriptContext();
+    AUTO_TAG_NATIVE_LIBRARY_ENTRY(function, callInfo, _u("Set.prototype.difference"));
+
+    Assert(!(callInfo.Flags & CallFlags_New));
+
+    JavascriptSet* set = SetMethodCheckReceiver(args[0], _u("Set.prototype.difference"), scriptContext);
+    Var other = args.Info.Count > 1 ? args[1] : scriptContext->GetLibrary()->GetUndefined();
+    SetLikeRecord record = GetSetLikeRecord(other, _u("Set.prototype.difference"), scriptContext);
+
+    JavascriptSet* result = CopySetData(set, scriptContext);
+    if (static_cast<double>(set->Size()) <= record.size)
+    {
+        auto iter = result->GetIterator();
+        while (iter.Next())
+        {
+            Var entry = iter.Current();
+            if (SetMethodCallHas(record, entry, scriptContext))
+            {
+                result->Delete(entry);
+            }
+        }
+    }
+    else
+    {
+        SetLikeKeysIterator keysIterator = GetSetLikeKeysIterator(record, scriptContext);
+        Var value = nullptr;
+        while (SetLikeKeysStep(keysIterator, &value, scriptContext))
+        {
+            value = CanonicalizeSetMethodKey(value, scriptContext);
+            if (result->Has(value))
+            {
+                result->Delete(value);
+            }
+        }
+    }
+    return result;
+}
+
+// Set.prototype.symmetricDifference. The keys iterator is created before the
+// receiver's data is copied. Each iterated value is removed from the copy
+// when the live receiver still contains it and the copy does too; it is
+// appended when the live receiver does not contain it and neither does the
+// copy.
+Var JavascriptSet::EntrySymmetricDifference(RecyclableObject* function, CallInfo callInfo, ...)
+{
+    PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+    ARGUMENTS(args, callInfo);
+    ScriptContext* scriptContext = function->GetScriptContext();
+    AUTO_TAG_NATIVE_LIBRARY_ENTRY(function, callInfo, _u("Set.prototype.symmetricDifference"));
+
+    Assert(!(callInfo.Flags & CallFlags_New));
+
+    JavascriptSet* set = SetMethodCheckReceiver(args[0], _u("Set.prototype.symmetricDifference"), scriptContext);
+    Var other = args.Info.Count > 1 ? args[1] : scriptContext->GetLibrary()->GetUndefined();
+    SetLikeRecord record = GetSetLikeRecord(other, _u("Set.prototype.symmetricDifference"), scriptContext);
+
+    SetLikeKeysIterator keysIterator = GetSetLikeKeysIterator(record, scriptContext);
+
+    JavascriptSet* result = CopySetData(set, scriptContext);
+    Var value = nullptr;
+    while (SetLikeKeysStep(keysIterator, &value, scriptContext))
+    {
+        value = CanonicalizeSetMethodKey(value, scriptContext);
+        bool alreadyInResult = result->Has(value);
+        if (set->Has(value))
+        {
+            if (alreadyInResult)
+            {
+                result->Delete(value);
+            }
+        }
+        else if (!alreadyInResult)
+        {
+            result->Add(value);
+        }
+    }
+    return result;
+}
+
+// Set.prototype.isSubsetOf. A receiver larger than the record is an
+// immediate false. Otherwise the receiver's live data is walked and each
+// entry is passed to other.has; the first miss is an early false. The
+// record's keys are never read.
+Var JavascriptSet::EntryIsSubsetOf(RecyclableObject* function, CallInfo callInfo, ...)
+{
+    PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+    ARGUMENTS(args, callInfo);
+    ScriptContext* scriptContext = function->GetScriptContext();
+    AUTO_TAG_NATIVE_LIBRARY_ENTRY(function, callInfo, _u("Set.prototype.isSubsetOf"));
+
+    Assert(!(callInfo.Flags & CallFlags_New));
+
+    JavascriptSet* set = SetMethodCheckReceiver(args[0], _u("Set.prototype.isSubsetOf"), scriptContext);
+    Var other = args.Info.Count > 1 ? args[1] : scriptContext->GetLibrary()->GetUndefined();
+    SetLikeRecord record = GetSetLikeRecord(other, _u("Set.prototype.isSubsetOf"), scriptContext);
+
+    if (static_cast<double>(set->Size()) > record.size)
+    {
+        return scriptContext->GetLibrary()->CreateBoolean(false);
+    }
+
+    auto iter = set->GetIterator();
+    while (iter.Next())
+    {
+        if (!SetMethodCallHas(record, iter.Current(), scriptContext))
+        {
+            return scriptContext->GetLibrary()->CreateBoolean(false);
+        }
+    }
+    return scriptContext->GetLibrary()->CreateBoolean(true);
+}
+
+// Set.prototype.isSupersetOf. A receiver smaller than the record is an
+// immediate false. Otherwise other's keys are iterated and each value is
+// checked against the live receiver's data; the first miss closes the
+// iterator and returns false. other.has is never consulted.
+Var JavascriptSet::EntryIsSupersetOf(RecyclableObject* function, CallInfo callInfo, ...)
+{
+    PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+    ARGUMENTS(args, callInfo);
+    ScriptContext* scriptContext = function->GetScriptContext();
+    AUTO_TAG_NATIVE_LIBRARY_ENTRY(function, callInfo, _u("Set.prototype.isSupersetOf"));
+
+    Assert(!(callInfo.Flags & CallFlags_New));
+
+    JavascriptSet* set = SetMethodCheckReceiver(args[0], _u("Set.prototype.isSupersetOf"), scriptContext);
+    Var other = args.Info.Count > 1 ? args[1] : scriptContext->GetLibrary()->GetUndefined();
+    SetLikeRecord record = GetSetLikeRecord(other, _u("Set.prototype.isSupersetOf"), scriptContext);
+
+    if (static_cast<double>(set->Size()) < record.size)
+    {
+        return scriptContext->GetLibrary()->CreateBoolean(false);
+    }
+
+    SetLikeKeysIterator keysIterator = GetSetLikeKeysIterator(record, scriptContext);
+    Var value = nullptr;
+    while (SetLikeKeysStep(keysIterator, &value, scriptContext))
+    {
+        if (!set->Has(value))
+        {
+            CloseKeysIteratorNormalCompletion(keysIterator, scriptContext);
+            return scriptContext->GetLibrary()->CreateBoolean(false);
+        }
+    }
+    return scriptContext->GetLibrary()->CreateBoolean(true);
+}
+
+// Set.prototype.isDisjointFrom. When the receiver is not larger than the
+// record, the receiver's live data is walked and each entry is passed to
+// other.has; the first hit is an early false. Otherwise other's keys are
+// iterated and each value is checked against the live receiver's data; the
+// first hit closes the iterator and returns false.
+Var JavascriptSet::EntryIsDisjointFrom(RecyclableObject* function, CallInfo callInfo, ...)
+{
+    PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+    ARGUMENTS(args, callInfo);
+    ScriptContext* scriptContext = function->GetScriptContext();
+    AUTO_TAG_NATIVE_LIBRARY_ENTRY(function, callInfo, _u("Set.prototype.isDisjointFrom"));
+
+    Assert(!(callInfo.Flags & CallFlags_New));
+
+    JavascriptSet* set = SetMethodCheckReceiver(args[0], _u("Set.prototype.isDisjointFrom"), scriptContext);
+    Var other = args.Info.Count > 1 ? args[1] : scriptContext->GetLibrary()->GetUndefined();
+    SetLikeRecord record = GetSetLikeRecord(other, _u("Set.prototype.isDisjointFrom"), scriptContext);
+
+    if (static_cast<double>(set->Size()) <= record.size)
+    {
+        auto iter = set->GetIterator();
+        while (iter.Next())
+        {
+            if (SetMethodCallHas(record, iter.Current(), scriptContext))
+            {
+                return scriptContext->GetLibrary()->CreateBoolean(false);
+            }
+        }
+        return scriptContext->GetLibrary()->CreateBoolean(true);
+    }
+
+    SetLikeKeysIterator keysIterator = GetSetLikeKeysIterator(record, scriptContext);
+    Var value = nullptr;
+    while (SetLikeKeysStep(keysIterator, &value, scriptContext))
+    {
+        if (set->Has(value))
+        {
+            CloseKeysIteratorNormalCompletion(keysIterator, scriptContext);
+            return scriptContext->GetLibrary()->CreateBoolean(false);
+        }
+    }
+    return scriptContext->GetLibrary()->CreateBoolean(true);
+}
+
+
 template <typename T>
 T*
 JavascriptSet::CreateVarSetFromList(uint initialCapacity)

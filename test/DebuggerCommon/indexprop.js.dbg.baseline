@@ -140,6 +140,13 @@
           "keys": "function <large string>",
           "Symbol.iterator": "function <large string>",
           "Symbol.toStringTag": "string Set",
+          "union": "function <large string>",
+          "intersection": "function <large string>",
+          "difference": "function <large string>",
+          "symmetricDifference": "function <large string>",
+          "isSubsetOf": "function <large string>",
+          "isSupersetOf": "function <large string>",
+          "isDisjointFrom": "function <large string>",
           "[108]": "string 108"
         }
       }

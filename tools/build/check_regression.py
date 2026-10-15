@@ -18,9 +18,11 @@ No --not-tag: ICU is present in these profiles, so TEST_ICU is empty
 Slow, ...) is runtests.py's own and therefore identical by
 construction.
 
-Requires the legacy baseline counts for the selection: 1965 passed /
-0 failed (--test), 2017 passed / 0 failed (--debug) (counts per the
-C2-S10 receipt, doc/c2-s10.md; S11 was 1964/2016, S5 was 1962/2014). The --debug selection honestly differs
+Requires the legacy baseline counts for the selection: 1966 passed /
+0 failed (--test), 2018 passed / 0 failed (--debug) (counts per the
+C2-S10 receipt, doc/c2-s10.md; the Set-methods half registered
+setmethods.js on top of the copy-by-change half's 1965/2017, which in
+turn sat on S11's 1964/2016, S5's 1962/2014). The --debug selection honestly differs
 from Test's count (doc/b3-profiles.md §5).
 The verdict comes from parsing the real `Total: passed N, failed M`
 summary line (runtests.py:567), not from the exit code alone; a
@@ -30,9 +32,9 @@ runtests.py's own per-test timeout is untouched.
 
 Usage: check_regression.py <runtests.py> <ch> [--select test|debug]
        [--expected-passed N] [--expected-failed M] [--self-test]
-Defaults: --select test, 1965/0 (the B2 test profile; count raised
-by C2-S10 when it registered change-array-by-copy.js, on top of S11's
-1964/2016, doc/c2-s10.md).
+Defaults: --select test, 1966/0 (the B2 test profile; count raised
+by C2-S10's Set-methods half when it registered setmethods.js, on top
+of the copy-by-change half's 1965/2017, doc/c2-s10.md).
 Exit code: 0 iff the suite ran green with exactly the expected counts.
 """
 
@@ -45,15 +47,16 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common
 
 TOTAL_RE = re.compile(r"^Total: passed (\d+), failed (\d+)\s*$")
-EXPECTED_PASSED = 1965
+EXPECTED_PASSED = 1966
 EXPECTED_FAILED = 0
-# Per-selection legacy baselines (counts: doc/c2-s10.md; S11 was
-# 1964/2016, S5 was 1962/2014). Why the selections differ:
+# Per-selection legacy baselines (counts: doc/c2-s10.md; the Set-methods
+# half added setmethods.js over the copy-by-change half's 1965/2017;
+# S11 was 1964/2016, S5 was 1962/2014). Why the selections differ:
 # doc/b3-profiles.md §5. --select picks the flag; the counts stay
 # explicit CLI args so a wiring mistake (debug flag with test counts)
 # fails instead of silently passing on a wrong gate.
 SELECT_FLAGS = {"test": "--test", "debug": "--debug"}
-SELECT_COUNTS = {"test": (1965, 0), "debug": (2017, 0)}
+SELECT_COUNTS = {"test": (1966, 0), "debug": (2018, 0)}
 
 
 def parse_total(lines):
@@ -89,7 +92,7 @@ def self_test():
     """Negative controls: the parser/verdict must reject doctored logs."""
     cases = [
         ("exact baseline",
-         ["Total: passed 1965, failed 0"], True),
+         ["Total: passed 1966, failed 0"], True),
         ("one failure",
          ["Total: passed 1960, failed 1"], False),
         ("wrong total",
@@ -116,19 +119,19 @@ def self_test():
             bad += 1
         print("self-test %-16s -> %s (verdict=%s err=%r)"
               % (name, status, "accept" if ok else "reject", err))
-    # Profile-awareness pins: the --debug baseline (2017/0) must be
+    # Profile-awareness pins: the --debug baseline (2018/0) must be
     # accepted under debug expectations and rejected under test
     # expectations, so a count/selection mismatch can never pass.
     try:
-        err = check_counts(parse_total(["Total: passed 2017, failed 0"]),
+        err = check_counts(parse_total(["Total: passed 2018, failed 0"]),
                            *SELECT_COUNTS["debug"])
     except ValueError as e:
         err = str(e)
     if err is None:
-        print("self-test %-16s -> PASS (verdict=accept)" % "debug 2017/0")
+        print("self-test %-16s -> PASS (verdict=accept)" % "debug 2018/0")
     else:
         print("self-test %-16s -> FAIL (verdict=reject err=%r)"
-              % ("debug 2017/0", err))
+              % ("debug 2018/0", err))
         bad += 1
     try:
         err = check_counts(parse_total(["Total: passed 2014, failed 0"]),
