@@ -472,6 +472,8 @@ were checked against the [TC39 finished-proposals list](https://github.com/tc39/
 
 | Edition | Implemented examples | Debt / priority |
 |---|---|---|
+*(Debt column is the C1 triage-time snapshot; landed items stay listed
+there and are tracked as closed in the C2 batch receipts below.)*
 | ES2015–ES2019 | modules/generators, async/await/iteration, rest/spread, dotAll, flat/flatMap, fromEntries | named groups, lookbehind, property escapes; RegExp symbols/prototype properties default off; inherited semantics → P0/C1 triage |
 | ES2020 | `??`, import(), import.meta, globalThis, allSettled | optional chaining, matchAll, BigInt completeness/default; for-in formalization → P0 |
 | ES2021 | numeric separators, Promise.any | replaceAll, logical assignment, WeakRef/FinalizationRegistry → P0/P1 |
