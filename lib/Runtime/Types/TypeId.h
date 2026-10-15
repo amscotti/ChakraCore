@@ -102,7 +102,7 @@ namespace Js
       TypeIds_TypedArrayMax = TypeIds_BoolArray,
       TypeIds_EngineInterfaceObject = 57,
       TypeIds_DataView = 58,
-      // 59 deleted
+      TypeIds_RegExpStringIterator = 59, // reclaimed (deleted long ago)
       TypeIds_Map = 60,
       TypeIds_Set = 61,
       TypeIds_WeakMap = 62,

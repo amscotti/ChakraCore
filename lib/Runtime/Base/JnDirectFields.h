@@ -702,6 +702,13 @@ ENTRY2(_super, _u("*super*"))
 ENTRY2(_superConstructor, _u("*superconstructor*"))
 ENTRY2(_newTarget, _u("*new.target*"))
 
+// Appending new entries at the end of this list keeps every pre-existing
+// built-in PropertyId stable, which is what the checked-in bytecode headers
+// in Library/InJavascript serialize (see the note at the top of this file).
+ENTRY_SYMBOL(_symbolMatchAll, _u("Symbol.matchAll"))
+ENTRY2(_RuntimeFunctionNameId_matchAll, _u("[Symbol.matchAll]"))
+ENTRY(matchAll)
+
 
 // Note: Do not add fields for conditionally-compiled PropertyIds into this file.
 //       The bytecode for internal javascript libraries is built on chk but re-used in fre builds.

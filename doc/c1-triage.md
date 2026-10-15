@@ -557,7 +557,15 @@ combination; `RegExpStringIteratorPrototype`/`Symbol/matchAll` corpus is
 2/36 — matchAll is new engine surface (Symbol.matchAll,
 `RegExp.prototype[@@matchAll]`, RegExp String Iterator,
 `String.prototype.matchAll`), not a flag flip: recommended as the next
-C2-small batch together with the two defect-class fixes.)*
+C2-small batch together with the two defect-class fixes.
+**Landed 2026-10-15 as C2-S7** ([c2-s7-matchall.md](c2-s7-matchall.md)):
+all four surfaces are behind `ES6RegExSymbols`, the 42 flag-on
+regressions are 42/42 fixed with 0 new pass→fail on the same universe
+(134 fail→pass total, 4,285→4,419 passes), and the matchAll corpus is
+132/140 — the 8 residue is BigInt/v-flag parse debt plus the 4
+`species-regexp-get-{global,unicode}-throws` scenarios that need the
+`ES6RegExPrototypeProperties` substrate. Default flags and the JIT stay
+untouched (B4).)*
 
 **S8. Resizable/growable ArrayBuffer + transfer (and TypedArray
 consequences).** Repro: `python3 tools/test262/run.py --binary zig-out/bin/ch --output out/test262-c1-rab 'test/built-ins/ArrayBuffer/**/*.js' 'test/built-ins/TypedArray/**/*.js'`.

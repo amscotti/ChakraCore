@@ -15,6 +15,7 @@ using namespace Js;
         pattern(pattern),
         splitPattern(nullptr),
         lastIndexVar(nullptr),
+        lastIndexNonWritable(false),
         lastIndexOrFlag(0)
     {
         Assert(type->GetTypeId() == TypeIds_RegEx);
@@ -42,6 +43,7 @@ using namespace Js;
         pattern(nullptr),
         splitPattern(nullptr),
         lastIndexVar(nullptr),
+        lastIndexNonWritable(false),
         lastIndexOrFlag(0)
     {
         Assert(type->GetTypeId() == TypeIds_RegEx);
@@ -60,6 +62,7 @@ using namespace Js;
         pattern(instance->GetPattern()),
         splitPattern(instance->GetSplitPattern()),
         lastIndexVar(instance->lastIndexVar),
+        lastIndexNonWritable(instance->lastIndexNonWritable),
         lastIndexOrFlag(instance->lastIndexOrFlag)
     {
         // For boxing stack instance
@@ -917,6 +920,103 @@ using namespace Js;
             RegexHelper::IsResultNotUsed(callInfo.Flags));
     }
 
+    // ES2020 21.2.5.7 RegExp.prototype[@@matchAll](string) (final
+    // formulation, verified against the pinned corpus and Node 26): the this
+    // value must be an Object; then ToString(string); SpeciesConstructor;
+    // ToString(Get(R, "flags")); Construct(C, «R, flags»); global/fullUnicode
+    // derived from the flags STRING (the matcher's "global"/"unicode"
+    // properties are never read); ToLength(Get(R, "lastIndex")) transferred
+    // to the matcher through the observable [[Set]]. R's @@match is only
+    // read inside Construct (RegExp's pattern IsRegExp), exactly once.
+    Var JavascriptRegExp::EntrySymbolMatchAll(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+        ARGUMENTS(args, callInfo);
+        Assert(!(callInfo.Flags & CallFlags_New));
+
+        ScriptContext* scriptContext = function->GetScriptContext();
+
+        PCWSTR const varName = _u("RegExp.prototype[Symbol.matchAll]");
+
+        RecyclableObject* R = GetThisObject(args, varName, scriptContext);
+        JavascriptString* S = GetFirstStringArg(args, scriptContext);
+
+        JavascriptFunction* defaultConstructor = scriptContext->GetLibrary()->GetRegExpConstructor();
+        RecyclableObject* speciesConstructor = JavascriptOperators::SpeciesConstructor(
+            R, defaultConstructor, scriptContext);
+        AssertOrFailFast(JavascriptOperators::IsConstructor(speciesConstructor));
+
+        JavascriptString* flags = nullptr;
+        Var flagsVar = JavascriptOperators::GetProperty(R, PropertyIds::flags, scriptContext);
+        if (JavascriptOperators::IsUndefined(flagsVar)
+            && VarIs<JavascriptRegExp>(R)
+            && !JavascriptOperators::HasProperty(R, PropertyIds::flags))
+        {
+            // ES6RegExPrototypeProperties is off, so RegExp.prototype.flags
+            // is not installed and Get cannot observe the internal flags.
+            // Fall back to the pattern's flags, the same deviation
+            // String.prototype.replaceAll makes for a missing "flags".
+            flags = StringFromFlags(VarTo<JavascriptRegExp>(R)->GetFlags(), scriptContext);
+        }
+        else
+        {
+            flags = JavascriptConversion::ToString(flagsVar, scriptContext);
+        }
+
+        bool isDefaultConstructor = speciesConstructor == defaultConstructor;
+        Var matcherVar = JavascriptOperators::NewObjectCreationHelper_ReentrancySafe(speciesConstructor, isDefaultConstructor, scriptContext->GetThreadContext(), [=]() -> Js::Var
+        {
+            Js::Var newArgs[] = { speciesConstructor, R, flags };
+            Js::CallInfo callInfoNew(Js::CallFlags_New, _countof(newArgs));
+            return JavascriptOperators::NewScObject(
+                speciesConstructor,
+                Js::Arguments(callInfoNew, newArgs),
+                scriptContext);
+        });
+        RecyclableObject* matcher = UnsafeVarTo<RecyclableObject>(matcherVar);
+
+        bool global = false;
+        bool fullUnicode = false;
+        const char16* flagsBuf = flags->GetString();
+        const CharCount flagsLen = flags->GetLength();
+        for (CharCount i = 0; i < flagsLen; i++)
+        {
+            if (flagsBuf[i] == _u('g'))
+            {
+                global = true;
+            }
+            else if (flagsBuf[i] == _u('u'))
+            {
+                fullUnicode = true;
+            }
+        }
+
+        // Transfer ToLength(Get(R, "lastIndex")) as the spec writes it: the
+        // unclamped Number goes to the matcher through the observable Set
+        // (1e300 -> 9007199254740991). GetLastIndexProperty would clamp it to
+        // MaxCharCount, which the matcher's setter can observe.
+        int64 lastIndex = JavascriptConversion::ToLength(
+            JavascriptOperators::GetProperty(R, PropertyIds::lastIndex, scriptContext),
+            scriptContext);
+        SetLastIndexProperty(matcher, JavascriptNumber::ToVar(lastIndex, scriptContext), scriptContext);
+
+        return scriptContext->GetLibrary()->CreateRegExpStringIterator(matcher, S, global, fullUnicode);
+    }
+
+    JavascriptString* JavascriptRegExp::StringFromFlags(UnifiedRegex::RegexFlags flags, ScriptContext* scriptContext)
+    {
+        // Same order as EntryGetterFlags, GetOptions(), and ToString().
+        char16 buf[6];
+        CharCount i = 0;
+        if ((flags & UnifiedRegex::GlobalRegexFlag) != 0) { buf[i++] = _u('g'); }
+        if ((flags & UnifiedRegex::IgnoreCaseRegexFlag) != 0) { buf[i++] = _u('i'); }
+        if ((flags & UnifiedRegex::MultilineRegexFlag) != 0) { buf[i++] = _u('m'); }
+        if ((flags & UnifiedRegex::UnicodeRegexFlag) != 0) { buf[i++] = _u('u'); }
+        if ((flags & UnifiedRegex::DotAllRegexFlag) != 0) { buf[i++] = _u('s'); }
+        if ((flags & UnifiedRegex::StickyRegexFlag) != 0) { buf[i++] = _u('y'); }
+        return JavascriptString::NewCopyBuffer(buf, i, scriptContext);
+    }
+
     bool JavascriptRegExp::HasOriginalRegExType(RecyclableObject* instance)
     {
         JavascriptLibrary* library = instance->GetLibrary();
@@ -1017,12 +1117,22 @@ using namespace Js;
 
         JavascriptString* string = GetFirstStringArg(args, scriptContext);
 
+        // ES2018+ spec: both "lastIndex" Sets run only when the stored value
+        // actually differs (SameValue), so a non-writable "lastIndex" that is
+        // already +0 neither throws on the reset nor on the restore.
         Var previousLastIndex = JavascriptOperators::GetProperty(thisObj, PropertyIds::lastIndex, scriptContext);
-        SetLastIndexProperty(regEx, TaggedInt::ToVarUnchecked(0), scriptContext);
+        if (!JavascriptConversion::SameValue(previousLastIndex, TaggedInt::ToVarUnchecked(0)))
+        {
+            SetLastIndexProperty(regEx, TaggedInt::ToVarUnchecked(0), scriptContext);
+        }
 
         Var result = CallExec(thisObj, string, varName, scriptContext);
 
-        SetLastIndexProperty(regEx, previousLastIndex, scriptContext);
+        Var currentLastIndex = JavascriptOperators::GetProperty(thisObj, PropertyIds::lastIndex, scriptContext);
+        if (!JavascriptConversion::SameValue(currentLastIndex, previousLastIndex))
+        {
+            SetLastIndexProperty(regEx, previousLastIndex, scriptContext);
+        }
 
         return JavascriptOperators::IsNull(result)
             ? TaggedInt::ToVarUnchecked(-1)
@@ -1489,6 +1599,15 @@ using namespace Js;
         switch (propertyId)
         {
         case PropertyIds::lastIndex:
+            if (scriptConfig->IsES6RegExSymbolsEnabled() && this->lastIndexNonWritable)
+            {
+                if (!JavascriptError::ThrowCantAssign(flags, this->GetScriptContext(), PropertyIds::lastIndex))
+                {
+                    JavascriptError::ThrowCantAssignIfStrictMode(flags, this->GetScriptContext());
+                }
+                *result = false;
+                return true;
+            }
             this->lastIndexVar = value;
             lastIndexOrFlag = NotCachedValue;
             *result = true;
@@ -1731,6 +1850,24 @@ using namespace Js;
 #undef IS_CONFIGURABLE
     }
 
+    BOOL JavascriptRegExp::SetWritable(PropertyId propertyId, BOOL value)
+    {
+        // "lastIndex" is a virtual own property, so the descriptor machinery
+        // cannot store its attributes in a type handler slot. Honor the
+        // writability part of a redefine under ES6RegExSymbols (the flag-on
+        // RegExp symbol algorithms Set "lastIndex" through the observable
+        // [[Set]] and must throw on a non-writable one); everything else keeps
+        // the pre-existing no-op.
+        if (propertyId == PropertyIds::lastIndex
+            && this->GetScriptContext()->GetConfig()->IsES6RegExSymbolsEnabled())
+        {
+            this->lastIndexNonWritable = !value;
+            return TRUE;
+        }
+
+        return DynamicObject::SetWritable(propertyId, value);
+    }
+
     BOOL JavascriptRegExp::IsWritable(PropertyId propertyId)
     {
         const ScriptConfiguration* scriptConfig = this->GetScriptContext()->GetConfig();
@@ -1741,7 +1878,7 @@ using namespace Js;
         switch (propertyId)
         {
         case PropertyIds::lastIndex:
-            return true;
+            return !scriptConfig->IsES6RegExSymbolsEnabled() || !this->lastIndexNonWritable;
         case PropertyIds::global:
         case PropertyIds::multiline:
         case PropertyIds::ignoreCase:
@@ -1860,3 +1997,77 @@ using namespace Js;
         this->lastIndexVar = lastVar;
     }
 #endif
+
+    JavascriptRegExpStringIterator::JavascriptRegExpStringIterator(
+        DynamicType* type,
+        RecyclableObject* matchingRegExp,
+        JavascriptString* iteratedString,
+        bool global,
+        bool fullUnicode) :
+        DynamicObject(type),
+        m_matchingRegExp(matchingRegExp),
+        m_iteratedString(iteratedString),
+        m_global(global),
+        m_fullUnicode(fullUnicode),
+        m_done(false)
+    {
+        Assert(type->GetTypeId() == TypeIds_RegExpStringIterator);
+    }
+
+    // ES2020 21.2.7.1 %RegExpStringIteratorPrototype%.next. The matcher's
+    // "exec" is looked up on every call, a non-Object/non-Null exec return
+    // throws, and only a global matcher's empty matches advance "lastIndex"
+    // through the observable [[Set]] (AdvanceStringIndex is +1 per code unit;
+    // the surrogate-pair step is S9 unicode-iteration debt).
+    Var JavascriptRegExpStringIterator::EntryNext(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+        ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+        JavascriptLibrary* library = scriptContext->GetLibrary();
+
+        Assert(!(callInfo.Flags & CallFlags_New));
+
+        PCWSTR const varName = _u("RegExp String Iterator.prototype.next");
+
+        Var thisObj = args[0];
+        if (!VarIs<JavascriptRegExpStringIterator>(thisObj))
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NeedObject, varName);
+        }
+
+        JavascriptRegExpStringIterator* iterator = VarTo<JavascriptRegExpStringIterator>(thisObj);
+
+        if (iterator->m_done)
+        {
+            return library->CreateIteratorResultObjectDone();
+        }
+
+        RecyclableObject* R = iterator->m_matchingRegExp;
+        JavascriptString* S = iterator->m_iteratedString;
+
+        Var match = JavascriptRegExp::CallExec(R, S, varName, scriptContext);
+        if (JavascriptOperators::IsNull(match))
+        {
+            iterator->m_done = true;
+            return library->CreateIteratorResultObjectDone();
+        }
+
+        if (iterator->m_global)
+        {
+            RecyclableObject* matchObj = RegexHelper::ExecResultToRecyclableObject(match);
+            JavascriptString* matchStr = RegexHelper::GetMatchStrFromResult(matchObj, scriptContext);
+            if (matchStr->GetLength() == 0)
+            {
+                CharCount thisIndex = JavascriptRegExp::GetLastIndexProperty(R, scriptContext);
+                CharCount nextIndex = RegexHelper::AdvanceStringIndex(S, thisIndex, iterator->m_fullUnicode);
+                JavascriptRegExp::SetLastIndexProperty(R, nextIndex, scriptContext);
+            }
+        }
+        else
+        {
+            iterator->m_done = true;
+        }
+
+        return library->CreateIteratorResultObject(match);
+    }

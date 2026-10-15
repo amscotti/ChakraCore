@@ -60,7 +60,7 @@ namespace Js
 
         static void InvalidateLastMatchOnCtor(ScriptContext* scriptContext, JavascriptRegExp* regularExpression, JavascriptString* lastInput, bool useSplitPattern = false);
 
-        static bool GetInitialOffset(bool isGlobal, bool isSticky, JavascriptRegExp* regularExpression, CharCount inputLength, CharCount& offset);
+        static bool GetInitialOffset(bool isGlobal, bool isSticky, JavascriptRegExp* regularExpression, CharCount inputLength, CharCount& offset, ScriptContext* scriptContext);
         static JavascriptArray* CreateMatchResult(void *const stackAllocationPointer, ScriptContext* scriptContext, bool isGlobal, int numGroups, JavascriptString* input);
         static void FinalizeMatchResult(ScriptContext* scriptContext, bool isGlobal, JavascriptArray* arr, UnifiedRegex::GroupInfo match);
         static JavascriptArray* CreateExecResult(void *const stackAllocationPointer, ScriptContext* scriptContext, int numGroups, JavascriptString* input, UnifiedRegex::GroupInfo match);
@@ -146,9 +146,11 @@ namespace Js
         static Var RegexEs6TestImpl(ScriptContext* scriptContext, RecyclableObject* thisObj, JavascriptString* input);
         static Var RegexEs5TestImpl(ScriptContext* scriptContext, JavascriptRegExp* regularExpression, JavascriptString* input);
         static int GetReplaceSubstitutions(const char16 * const replaceStr, CharCount const replaceLength, ArenaAllocator * const tempAllocator, CharCount** const substitutionOffsetsOut);
+    public:
         static RecyclableObject* ExecResultToRecyclableObject(Var result);
         static JavascriptString* GetMatchStrFromResult(RecyclableObject* result, ScriptContext* scriptContext);
-        static void AdvanceLastIndex(RecyclableObject* instance, JavascriptString* input, JavascriptString* matchStr, bool unicode, ScriptContext* scriptContext);
         static charcount_t AdvanceStringIndex(JavascriptString* string, charcount_t index, bool isUnicode);
+    private:
+        static void AdvanceLastIndex(RecyclableObject* instance, JavascriptString* input, JavascriptString* matchStr, bool unicode, ScriptContext* scriptContext);
     };
 }

@@ -1482,6 +1482,116 @@ case_2:
         return DelegateToRegExSymbolFunction<1>(args, PropertyIds::_symbolMatch, fallback, varName, scriptContext);
     }
 
+    // ES2020 (2025 revision) String.prototype.matchAll. @@matchAll is read
+    // only when the argument is an Object; primitives fall through to the
+    // string path (RegExpCreate(ToString(regexp), "g") + @@matchAll), the
+    // same primitive guard the other String delegators got in this batch.
+    Var JavascriptString::EntryMatchAll(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+        ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+
+        PCWSTR const varName = _u("String.prototype.matchAll");
+
+        AUTO_TAG_NATIVE_LIBRARY_ENTRY(function, callInfo, varName);
+
+        Assert(!(callInfo.Flags & CallFlags_New));
+
+        if (args.Info.Count == 0 || !JavascriptConversion::CheckObjectCoercible(args[0], scriptContext))
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NullOrUndefined, varName);
+        }
+
+        Var regexp = (args.Info.Count > 1) ? args[1] : scriptContext->GetLibrary()->GetUndefined();
+
+        if (!JavascriptOperators::IsUndefinedOrNull(regexp))
+        {
+            if (JavascriptRegExp::IsRegExpLike(regexp, scriptContext))
+            {
+                Var flags = JavascriptOperators::GetProperty(VarTo<RecyclableObject>(regexp), PropertyIds::flags, scriptContext);
+                if (JavascriptOperators::IsUndefinedOrNull(flags))
+                {
+                    if (VarIs<JavascriptRegExp>(regexp)
+                        && !JavascriptOperators::HasProperty(VarTo<JavascriptRegExp>(regexp), PropertyIds::flags))
+                    {
+                        // ES6RegExPrototypeProperties is off, so a real regexp
+                        // has no "flags" to Get. Use the pattern's flags, the
+                        // same deviation @@matchAll and replaceAll make.
+                        flags = JavascriptRegExp::StringFromFlags(VarTo<JavascriptRegExp>(regexp)->GetFlags(), scriptContext);
+                    }
+                    else
+                    {
+                        JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedObject, varName);
+                    }
+                }
+                JavascriptString* flagsString = JavascriptConversion::ToString(flags, scriptContext);
+                const char16* flagsBuf = flagsString->GetString();
+                const CharCount flagsLength = flagsString->GetLength();
+                bool hasGlobal = false;
+                for (CharCount i = 0; i < flagsLength; i++)
+                {
+                    if (flagsBuf[i] == _u('g'))
+                    {
+                        hasGlobal = true;
+                        break;
+                    }
+                }
+                if (!hasGlobal)
+                {
+                    JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_Invalid, varName);
+                }
+            }
+
+            if (JavascriptOperators::IsObject(regexp))
+            {
+                Var matcher = GetRegExSymbolFunction(regexp, PropertyIds::_symbolMatchAll, scriptContext);
+                if (!JavascriptOperators::IsUndefinedOrNull(matcher))
+                {
+                    return CallRegExSymbolFunction<1>(matcher, regexp, args, varName, scriptContext);
+                }
+            }
+        }
+
+        JavascriptString* S = JavascriptConversion::ToString(args[0], scriptContext);
+        // RegExpCreate(regexp, "g"): the value goes to the RegExp constructor
+        // as-is; an undefined pattern becomes the empty regex (which is why
+        // "a".matchAll(undefined) iterates empty matches), and a regexp
+        // argument is CLONED under the new flags (CreateRegEx alone would
+        // return the same object, whose own @@matchAll could still shadow
+        // the prototype method Invoke is about to look up). Matches Node.
+        JavascriptRegExp* rx = nullptr;
+        if (VarIs<JavascriptRegExp>(regexp))
+        {
+            InternalString source = VarTo<JavascriptRegExp>(regexp)->GetSource();
+            rx = JavascriptRegExp::CreateRegEx(
+                source.GetBuffer(), source.GetLength(), UnifiedRegex::GlobalRegexFlag, scriptContext);
+        }
+        else
+        {
+            rx = JavascriptRegExp::CreateRegExNoCoerce(
+                regexp,
+                scriptContext->GetLibrary()->CreateStringFromCppLiteral(_u("g")),
+                scriptContext);
+        }
+
+        // Invoke(rx, @@matchAll, «S»): a replaced or deleted prototype method
+        // runs here, exactly as a plain call through the property would.
+        PCWSTR const matchAllName = _u("RegExp.prototype[Symbol.matchAll]");
+        Var matchAll = JavascriptOperators::GetProperty(rx, PropertyIds::_symbolMatchAll, scriptContext);
+        if (!JavascriptConversion::IsCallable(matchAll))
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_Invalid, matchAllName);
+        }
+        RecyclableObject* matchAllFn = UnsafeVarTo<RecyclableObject>(matchAll);
+        ThreadContext* threadContext = scriptContext->GetThreadContext();
+        return threadContext->ExecuteImplicitCall(matchAllFn, ImplicitCall_Accessor, [=]() -> Js::Var
+        {
+            return CALL_FUNCTION(threadContext, matchAllFn, CallInfo(CallFlags_Value, 2), rx, S);
+        });
+    }
+
     Var JavascriptString::EntryNormalize(RecyclableObject* function, CallInfo callInfo, ...)
     {
         using namespace PlatformAgnostic;
@@ -2270,10 +2380,18 @@ case_2:
             if (args.Info.Count >= 2 && !JavascriptOperators::IsUndefinedOrNull(args[1]))
             {
                 Var regExp = args[1];
-                Var symbolFn = GetRegExSymbolFunction(regExp, symbolPropertyId, scriptContext);
-                if (!JavascriptOperators::IsUndefinedOrNull(symbolFn))
+                // 2025 spec: GetMethod(regexp, @@xxx) runs only when regexp is
+                // an Object. A primitive never consults String.prototype's or
+                // the other primitive prototypes' Symbol.* property, so a
+                // logged getter there must not fire. Primitives fall through
+                // to the string path below, same as replaceAll.
+                if (JavascriptOperators::IsObject(regExp))
                 {
-                    return CallRegExSymbolFunction<argCount>(symbolFn, regExp, args, varName, scriptContext);
+                    Var symbolFn = GetRegExSymbolFunction(regExp, symbolPropertyId, scriptContext);
+                    if (!JavascriptOperators::IsUndefinedOrNull(symbolFn))
+                    {
+                        return CallRegExSymbolFunction<argCount>(symbolFn, regExp, args, varName, scriptContext);
+                    }
                 }
             }
         }

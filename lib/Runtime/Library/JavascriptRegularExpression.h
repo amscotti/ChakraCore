@@ -10,6 +10,7 @@ namespace Js
     {
         friend class JavascriptRegularExpressionType;
         friend class RegexHelper;
+        friend class JavascriptRegExpStringIterator;
 
     private:
         static PropertyId const specialPropertyIdsAll[];
@@ -28,6 +29,11 @@ namespace Js
         // RegExp object.
         Field(UnifiedRegex::RegexPattern*) splitPattern;
         Field(Var) lastIndexVar;  // null => must build lastIndexVar from current lastIndex
+        // ES6RegExSymbols: a { writable: false } redefine of the otherwise
+        // fully virtual "lastIndex" property, honored by SetWritable/IsWritable/
+        // SetPropertyBuiltIns so the observable [[Set]] can throw (see
+        // doc/c2-s7-matchall.md). Always false with the flag off.
+        Field(bool) lastIndexNonWritable;
 
     public:
         // Three states for lastIndex value:
@@ -69,6 +75,8 @@ namespace Js
         static void SetLastIndexProperty(Var instance, Var lastIndex, ScriptContext* scriptContext);
         static bool GetGlobalProperty(RecyclableObject* instance, ScriptContext* scriptContext);
         static bool GetUnicodeProperty(RecyclableObject* instance, ScriptContext* scriptContext);
+        static JavascriptString* StringFromFlags(UnifiedRegex::RegexFlags flags, ScriptContext* scriptContext);
+        friend class JavascriptString;
 
         static CharCount AddIndex(CharCount base, CharCount offset);
         static CharCount GetIndexOrMax(int64 index);
@@ -141,6 +149,7 @@ namespace Js
             static FunctionInfo Test;
             static FunctionInfo ToString;
             static FunctionInfo SymbolMatch;
+            static FunctionInfo SymbolMatchAll;
             static FunctionInfo SymbolReplace;
             static FunctionInfo SymbolSearch;
             static FunctionInfo SymbolSplit;
@@ -164,6 +173,7 @@ namespace Js
         static Var EntryTest(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryToString(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntrySymbolMatch(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntrySymbolMatchAll(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntrySymbolReplace(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntrySymbolSearch(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntrySymbolSplit(RecyclableObject* function, CallInfo callInfo, ...);
@@ -203,6 +213,7 @@ namespace Js
         virtual BOOL GetSpecialPropertyName(uint32 index, JavascriptString ** propertyName, ScriptContext * requestContext) override;
         virtual uint GetSpecialPropertyCount() const override;
         virtual PropertyId const * GetSpecialPropertyIds() const override;
+        virtual BOOL SetWritable(PropertyId propertyId, BOOL value) override;
 
         static Js::JavascriptRegExp * BoxStackInstance(Js::JavascriptRegExp * instance, bool deepCopy);
 
@@ -224,6 +235,44 @@ namespace Js
     template <> inline bool VarIsImpl<JavascriptRegExp>(RecyclableObject* obj)
     {
         return JavascriptOperators::GetTypeId(obj) == TypeIds_RegEx;
+    }
+
+    // %RegExpStringIteratorPrototype% instances (ES2020 21.2.7, "Properties of
+    // RegExp String Iterator Instances"). Modelled on JavascriptStringIterator:
+    // an ordinary dynamic object with internal slots, no public constructor.
+    class JavascriptRegExpStringIterator : public DynamicObject
+    {
+    private:
+        Field(RecyclableObject*) m_matchingRegExp;
+        Field(JavascriptString*) m_iteratedString;
+        Field(bool) m_global;
+        Field(bool) m_fullUnicode;
+        Field(bool) m_done;
+
+    protected:
+        DEFINE_VTABLE_CTOR(JavascriptRegExpStringIterator, DynamicObject);
+        DEFINE_MARSHAL_OBJECT_TO_SCRIPT_CONTEXT(JavascriptRegExpStringIterator);
+
+    public:
+        JavascriptRegExpStringIterator(
+            DynamicType* type,
+            RecyclableObject* matchingRegExp,
+            JavascriptString* iteratedString,
+            bool global,
+            bool fullUnicode);
+
+        class EntryInfo
+        {
+        public:
+            static FunctionInfo Next;
+        };
+
+        static Var EntryNext(RecyclableObject* function, CallInfo callInfo, ...);
+    };
+
+    template <> inline bool VarIsImpl<JavascriptRegExpStringIterator>(RecyclableObject* obj)
+    {
+        return JavascriptOperators::GetTypeId(obj) == TypeIds_RegExpStringIterator;
     }
 
 } // namespace Js

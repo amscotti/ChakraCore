@@ -228,6 +228,7 @@ namespace Js
             static FunctionInfo LastIndexOf;
             static FunctionInfo LocaleCompare;
             static FunctionInfo Match;
+            static FunctionInfo MatchAll;
             static FunctionInfo Normalize;
             static FunctionInfo Raw;
             static FunctionInfo Replace;
@@ -278,6 +279,7 @@ namespace Js
         static Var EntryLastIndexOf(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryLocaleCompare(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryMatch(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryMatchAll(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryNormalize(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryRaw(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryReplace(RecyclableObject* function, CallInfo callInfo, ...);

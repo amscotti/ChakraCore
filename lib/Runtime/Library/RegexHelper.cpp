@@ -611,7 +611,7 @@ namespace Js
         const bool isSticky = pattern->IsSticky();
         CharCount offset;
         CharCount inputLength = input->GetLength();
-        if (!GetInitialOffset(isGlobal, isSticky, regularExpression, inputLength, offset))
+        if (!GetInitialOffset(isGlobal, isSticky, regularExpression, inputLength, offset, scriptContext))
         {
             return scriptContext->GetLibrary()->GetNull();
         }
@@ -720,7 +720,7 @@ namespace Js
         }
 
         CharCount offset;
-        if (!GetInitialOffset(isGlobal, isSticky, regularExpression, inputLength, offset))
+        if (!GetInitialOffset(isGlobal, isSticky, regularExpression, inputLength, offset, scriptContext))
         {
             if (useCache)
             {
@@ -1048,6 +1048,13 @@ namespace Js
 
         size_t previousNumberOfCapturesToKeep = 0;
         Field(Var)* captures = nullptr;
+        // ES6RegExSymbols gates RegExp.prototype[Symbol.replace] and every
+        // caller of this impl (the flag-off replace paths, including
+        // replaceAll's direct RegexReplace calls, run RegexEs5ReplaceImpl).
+        // Guard the tracked-id lookup so no path can pay it with the flag off.
+        const PropertyId groupsPropertyId = scriptContext->GetConfig()->IsES6RegExSymbolsEnabled()
+            ? scriptContext->GetOrAddPropertyIdTracked(_u("groups"))
+            : Constants::NoProperty;
 
         BEGIN_TEMP_ALLOCATOR(tempAlloc, scriptContext, _u("RegexHelper"))
         {
@@ -1092,6 +1099,24 @@ namespace Js
                     if (i <= numberOfCapturesToKeep)
                     {
                         captures[i] = nextCapture;
+                    }
+                }
+
+                // ES2021 @@replace: "groups" is read after the captures and,
+                // when not undefined, coerced through ToObject (a null
+                // "groups" throws TypeError). The coerced value only feeds
+                // $<name> substitutions, which need named groups (S9 debt);
+                // the coercion itself is observable, so it runs anyway.
+                if (groupsPropertyId != Constants::NoProperty)
+                {
+                    Var namedCaptures = JavascriptOperators::GetProperty(resultObj, groupsPropertyId, scriptContext);
+                    if (!JavascriptOperators::IsUndefined(namedCaptures))
+                    {
+                        RecyclableObject* namedCapturesObject = nullptr;
+                        if (!JavascriptConversion::ToObject(namedCaptures, scriptContext, &namedCapturesObject))
+                        {
+                            JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_NeedObject, _u("RegExp.prototype[Symbol.replace]"));
+                        }
                     }
                 }
 
@@ -2071,6 +2096,29 @@ namespace Js
         , UnifiedRegex::GroupInfo lastSuccessfulMatch
         , UnifiedRegex::GroupInfo lastActualMatch )
     {
+        if (scriptContext->GetConfig()->IsES6RegExSymbolsEnabled())
+        {
+            // ES2018+ RegExpBuiltinExec semantics: "lastIndex" is written
+            // through the observable [[Set]] (Set(R, "lastIndex", …, true)),
+            // so a non-writable or accessor "lastIndex" throws or runs user
+            // code, and a failed match of a non-global, non-sticky regexp
+            // does not touch it at all. See doc/c2-s7-matchall.md.
+            if (lastActualMatch.IsUndefined())
+            {
+                if (isGlobal || isSticky)
+                {
+                    JavascriptRegExp::SetLastIndexProperty(regularExpression, TaggedInt::ToVarUnchecked(0), scriptContext);
+                }
+            }
+            else if (isGlobal || isSticky)
+            {
+                CharCount lastIndex = lastActualMatch.EndOffset();
+                Assert(lastIndex <= MaxCharCount);
+                JavascriptRegExp::SetLastIndexProperty(regularExpression, (int32)lastIndex, scriptContext);
+            }
+            return;
+        }
+
         if (lastActualMatch.IsUndefined())
         {
             regularExpression->SetLastIndex(0);
@@ -2118,7 +2166,7 @@ namespace Js
         scriptContext->GetLibrary()->GetRegExpConstructor()->InvalidateLastMatch(pattern, lastInput);
     }
 
-    bool RegexHelper::GetInitialOffset(bool isGlobal, bool isSticky, JavascriptRegExp* regularExpression, CharCount inputLength, CharCount& offset)
+    bool RegexHelper::GetInitialOffset(bool isGlobal, bool isSticky, JavascriptRegExp* regularExpression, CharCount inputLength, CharCount& offset, ScriptContext* scriptContext)
     {
         if (isGlobal || isSticky)
         {
@@ -2127,7 +2175,20 @@ namespace Js
                 return true;
             else
             {
-                regularExpression->SetLastIndex(0);
+                // "lastIndex" only reaches here clamped above MaxCharCount,
+                // so it is greater than any input length: RegExpBuiltinExec
+                // resets it through the observable Set under ES6RegExSymbols
+                // (a non-writable "lastIndex" throws). A non-global,
+                // non-sticky regexp never takes this path, so its "lastIndex"
+                // is never touched here. Flag-off keeps the internal write.
+                if (scriptContext->GetConfig()->IsES6RegExSymbolsEnabled())
+                {
+                    JavascriptRegExp::SetLastIndexProperty(regularExpression, TaggedInt::ToVarUnchecked(0), scriptContext);
+                }
+                else
+                {
+                    regularExpression->SetLastIndex(0);
+                }
                 return false;
             }
         }
@@ -2182,7 +2243,7 @@ namespace Js
         CharCount offset;
         if (mustMatchEntireInput)
             offset = 0; // needs to match the entire input, so ignore 'lastIndex' and always start from the beginning
-        else if (!GetInitialOffset(isGlobal, isSticky, regularExpression, inputLength, offset))
+        else if (!GetInitialOffset(isGlobal, isSticky, regularExpression, inputLength, offset, scriptContext))
             return false;
 
         if (mustMatchEntireInput || offset <= inputLength)

@@ -5564,6 +5564,7 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
             case TypeIds_SetIterator:
             case TypeIds_StringIterator:
             case TypeIds_IteratorHelper:
+            case TypeIds_RegExpStringIterator:
             case TypeIds_Generator:
             case TypeIds_AsyncGenerator:
             case TypeIds_AsyncFromSyncIterator:

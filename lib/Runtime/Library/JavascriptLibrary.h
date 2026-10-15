@@ -100,6 +100,7 @@ namespace Js
     class MissingPropertyTypeHandler;
     class JavascriptIteratorHelper;
     enum class IteratorHelperKind;
+    class JavascriptRegExpStringIterator;
     class SourceTextModuleRecord;
     class ArrayBufferBase;
     class SharedContents;
@@ -399,6 +400,7 @@ namespace Js
 #endif
 
         Field(JavascriptSymbol*) symbolMatch;
+        Field(JavascriptSymbol*) symbolMatchAll;
         Field(JavascriptSymbol*) symbolReplace;
         Field(JavascriptSymbol*) symbolSearch;
         Field(JavascriptSymbol*) symbolSplit;
@@ -416,6 +418,7 @@ namespace Js
         Field(RuntimeFunction*) iteratorConstructor;
         Field(DynamicObject*) iteratorHelperPrototype;
         Field(DynamicObject*) wrapForValidIteratorPrototype;
+        Field(DynamicObject*) regExpStringIteratorPrototype;
         Field(DynamicObject*) atomicsObject;
 
         Field(DynamicObject*) webAssemblyCompileErrorPrototype;
@@ -602,6 +605,7 @@ namespace Js
         Recycler * GetRecycler() const { return recycler; }
         Var GetTrueOrFalse(BOOL value) { return value ? booleanTrue : booleanFalse; }
         JavascriptSymbol* GetSymbolMatch() { return symbolMatch; }
+        JavascriptSymbol* GetSymbolMatchAll() { return symbolMatchAll; }
         JavascriptSymbol* GetSymbolReplace() { return symbolReplace; }
         JavascriptSymbol* GetSymbolSearch() { return symbolSearch; }
         JavascriptSymbol* GetSymbolSplit() { return symbolSplit; }
@@ -948,6 +952,8 @@ namespace Js
         JavascriptFunction* GetIteratorConstructor() const { return iteratorConstructor; }
         DynamicObject* GetIteratorHelperPrototype() const { return iteratorHelperPrototype; }
         DynamicObject* GetWrapForValidIteratorPrototype() const { return wrapForValidIteratorPrototype; }
+        DynamicObject* GetRegExpStringIteratorPrototype() const { return regExpStringIteratorPrototype; }
+        JavascriptRegExpStringIterator* CreateRegExpStringIterator(RecyclableObject* matchingRegExp, JavascriptString* iteratedString, bool global, bool fullUnicode);
         JavascriptFunction* CreateNonProfiledFunction(FunctionInfo * functionInfo);
         template <class MethodType>
         JavascriptExternalFunction* CreateIdMappedExternalFunction(MethodType entryPoint, DynamicType *pPrototypeType);
@@ -1307,6 +1313,7 @@ namespace Js
         static bool __cdecl InitializeIteratorConstructor(DynamicObject* iteratorConstructor, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode);
         static bool __cdecl InitializeIteratorHelperPrototype(DynamicObject* iteratorHelperPrototype, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode);
         static bool __cdecl InitializeWrapForValidIteratorPrototype(DynamicObject* wrapForValidIteratorPrototype, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode);
+        static bool __cdecl InitializeRegExpStringIteratorPrototype(DynamicObject* regExpStringIteratorPrototype, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode);
         static bool __cdecl InitializeArrayIteratorPrototype(DynamicObject* arrayIteratorPrototype, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode);
         static bool __cdecl InitializeMapIteratorPrototype(DynamicObject* mapIteratorPrototype, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode);
         static bool __cdecl InitializeSetIteratorPrototype(DynamicObject* setIteratorPrototype, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode);

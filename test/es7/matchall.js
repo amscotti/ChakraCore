@@ -1,0 +1,476 @@
+//-------------------------------------------------------------------------------------------------------
+// Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
+// Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+//-------------------------------------------------------------------------------------------------------
+// ES2020 matchAll + the ES6RegExSymbols primitive-Symbol.* and lastIndex
+// [[Set]] defect fixes (doc/c2-s7-matchall.md). This file is registered with
+// -ES6RegExSymbols only: every surface it probes is behind that flag.
+
+WScript.LoadScriptFile("..\\UnitTestFramework\\UnitTestFramework.js");
+
+function collect(iter) {
+    var out = [];
+    for (var m of iter) {
+        out.push(m);
+    }
+    return out;
+}
+
+var tests = [
+    {
+        name: "Symbol.matchAll and all four surfaces exist under the flag",
+        body() {
+            assert.areEqual("symbol", typeof Symbol.matchAll, "Symbol.matchAll");
+            assert.areEqual("Symbol(Symbol.matchAll)", String(Symbol.matchAll), "description");
+            assert.areEqual("function", typeof String.prototype.matchAll, "String.prototype.matchAll");
+            assert.areEqual("function", typeof RegExp.prototype[Symbol.matchAll], "RegExp.prototype[Symbol.matchAll]");
+            assert.areEqual(1, String.prototype.matchAll.length);
+            assert.areEqual("matchAll", String.prototype.matchAll.name);
+            assert.areEqual(1, RegExp.prototype[Symbol.matchAll].length);
+            assert.areEqual("[Symbol.matchAll]", RegExp.prototype[Symbol.matchAll].name);
+            var stringDesc = Object.getOwnPropertyDescriptor(String.prototype, "matchAll");
+            assert.isTrue(stringDesc.writable && !stringDesc.enumerable && stringDesc.configurable);
+            var reDesc = Object.getOwnPropertyDescriptor(RegExp.prototype, Symbol.matchAll);
+            assert.isTrue(reDesc.writable && !reDesc.enumerable && reDesc.configurable);
+        }
+    },
+    {
+        name: "RegExp String Iterator surface",
+        body() {
+            var iter = "a1".matchAll(/\d/g);
+            assert.areEqual("RegExp String Iterator", iter[Symbol.toStringTag]);
+            var proto = Object.getPrototypeOf(iter);
+            assert.areEqual("RegExp String Iterator", proto[Symbol.toStringTag]);
+            var iteratorProto = Object.getPrototypeOf(Object.getPrototypeOf([][Symbol.iterator]()));
+            assert.areEqual(iteratorProto, Object.getPrototypeOf(proto), "%IteratorPrototype% ancestry");
+            assert.areEqual(0, proto.next.length);
+            assert.areEqual("next", proto.next.name);
+        }
+    },
+    {
+        name: "global iteration, non-global single result, done sticks",
+        body() {
+            var matches = collect("a1b2".matchAll(/\d/g));
+            assert.areEqual(2, matches.length);
+            assert.areEqual("1", matches[0][0]);
+            assert.areEqual(1, matches[0].index);
+            assert.areEqual("a1b2", matches[0].input);
+            assert.areEqual("2", matches[1][0]);
+            assert.areEqual(3, matches[1].index);
+
+            var iter = /b/[Symbol.matchAll]("abc");
+            var first = iter.next();
+            assert.isFalse(first.done);
+            assert.areEqual("b", first.value[0]);
+            var second = iter.next();
+            assert.isTrue(second.done);
+            assert.areEqual(undefined, second.value);
+
+            // non-global matchAll never touches the original lastIndex
+            var re = /b/;
+            var it = re[Symbol.matchAll]("abc");
+            it.next();
+            assert.areEqual(0, re.lastIndex);
+        }
+    },
+    {
+        name: "sticky matchAll yields at most one match",
+        body() {
+            var iter = /a/y[Symbol.matchAll]("ab");
+            var first = iter.next();
+            assert.isFalse(first.done);
+            assert.areEqual("a", first.value[0]);
+            assert.isTrue(iter.next().done);
+        }
+    },
+    {
+        name: "empty matches advance by one",
+        body() {
+            var indexes = collect("ab".matchAll(/()/g)).map(m => m.index);
+            assert.areEqual("0,1,2", indexes.join(","));
+        }
+    },
+    {
+        name: "species constructor clones with the flags string; global/unicode come from flags",
+        body() {
+            var args;
+            var re = /\d/gu;
+            re.constructor = {
+                [Symbol.species]: function () {
+                    args = Array.prototype.slice.call(arguments);
+                    return /\w/g;
+                }
+            };
+            var iter = re[Symbol.matchAll]("a*b");
+            assert.areEqual(2, args.length);
+            assert.areEqual(re, args[0]);
+            assert.areEqual("gu", args[1], "flags string (internal fallback, no proto getter)");
+            assert.areEqual("a", iter.next().value[0]);
+            assert.areEqual("b", iter.next().value[0]);
+            assert.isTrue(iter.next().done);
+        }
+    },
+    {
+        name: "the matcher's global/unicode properties are never read",
+        body() {
+            // A plain-object matcher (non-regexp species result) whose
+            // "global" is a throwing getter: global is derived from the
+            // flags string, so nothing reads it.
+            var re = /./g;
+            var execCalls = 0;
+            re.constructor = {
+                [Symbol.species]: function () {
+                    return {
+                        exec: function (input) {
+                            return ++execCalls <= 2 ? { 0: "x", index: 0, input, length: 1 } : null;
+                        },
+                        get global() { throw new Error("global read"); },
+                        get unicode() { throw new Error("unicode read"); }
+                    };
+                }
+            };
+            var iter = re[Symbol.matchAll]("ab");
+            assert.areEqual("x", iter.next().value[0]);
+            assert.areEqual("x", iter.next().value[0]);
+            assert.isTrue(iter.next().done);
+        }
+    },
+    {
+        name: "own flags value overrides; lastIndex is cached at @@matchAll time",
+        body() {
+            var re = /\w/;
+            Object.defineProperty(re, "flags", { value: "g" });
+            var matches = collect(re[Symbol.matchAll]("a*b"));
+            assert.areEqual(2, matches.length);
+
+            var r2 = /./g;
+            r2.lastIndex = 2;
+            var iter = r2[Symbol.matchAll]("abcd");
+            r2.lastIndex = 0;
+            assert.areEqual(2, iter.next().value.index, "cached, not re-read");
+            assert.areEqual(3, iter.next().value.index);
+        }
+    },
+    {
+        name: "brand checks on next",
+        body() {
+            var proto = Object.getPrototypeOf(/./[Symbol.matchAll](""));
+            assert.throws(() => proto.next.call({}), TypeError);
+            assert.throws(() => proto.next.call(Object.create(/./g[Symbol.matchAll]("x"))), TypeError);
+            assert.throws(() => proto.next.call(42), TypeError);
+        }
+    },
+    {
+        name: "custom exec is looked up per next and validated",
+        body() {
+            var re = /./g;
+            var calls = 0;
+            var savedExec = RegExp.prototype.exec;
+            RegExp.prototype.exec = function (s) {
+                calls++;
+                return calls <= 2 ? { 0: "x", index: calls - 1, input: s, length: 1 } : null;
+            };
+            try {
+                var iter = re[Symbol.matchAll]("abc");
+                assert.areEqual("x", iter.next().value[0]);
+                assert.areEqual("x", iter.next().value[0]);
+                assert.isTrue(iter.next().done);
+                assert.areEqual(3, calls);
+            } finally {
+                RegExp.prototype.exec = savedExec;
+            }
+
+            RegExp.prototype.exec = function () { return 42; };
+            try {
+                assert.throws(() => /./g[Symbol.matchAll]("a").next(), TypeError);
+            } finally {
+                RegExp.prototype.exec = savedExec;
+            }
+        }
+    },
+    {
+        name: "String.prototype.matchAll protocol",
+        body() {
+            assert.areEqual("null", collect("-null-".matchAll(null))[0][0], "null becomes /null/g");
+            var empty = "a".matchAll(undefined).next();
+            assert.isFalse(empty.done, "undefined becomes the empty regex");
+            assert.areEqual("", empty.value[0]);
+            assert.areEqual(1, collect("a,b".matchAll(",")).length, "primitive separator");
+
+            var obj = {};
+            obj[Symbol.matchAll] = function (s) { return ["called", s]; };
+            assert.areEqual("called,str", "str".matchAll(obj).join(","), "custom @@matchAll dispatch");
+            assert.throws(() => "".matchAll(/a/), TypeError, "non-global regexp");
+            assert.throws(() => "".matchAll(/a/u), TypeError, "non-global u regexp");
+            var nonglobal = {};
+            Object.defineProperty(nonglobal, "flags", { value: "muyi" });
+            nonglobal[Symbol.match] = true;
+            assert.throws(() => "".matchAll(nonglobal), TypeError, "flags without g");
+            var undefFlags = {};
+            undefFlags[Symbol.match] = true;
+            assert.throws(() => "".matchAll(undefFlags), TypeError, "undefined flags");
+            assert.throws(() => String.prototype.matchAll.call(null, "x"), TypeError, "RequireObjectCoercible");
+            var ret = {};
+            var seenThis;
+            var saved = RegExp.prototype[Symbol.matchAll];
+            RegExp.prototype[Symbol.matchAll] = function () { seenThis = this; return ret; };
+            try {
+                var dispatch = /x/g;
+                assert.areEqual(ret, "".matchAll(dispatch));
+                assert.areEqual(dispatch, seenThis);
+            } finally {
+                RegExp.prototype[Symbol.matchAll] = saved;
+            }
+        }
+    },
+    {
+        name: "matchAll with a regexp whose own @@matchAll is undefined still invokes the prototype method",
+        body() {
+            var ret = {};
+            var arg;
+            var saved = RegExp.prototype[Symbol.matchAll];
+            RegExp.prototype[Symbol.matchAll] = function (s) { arg = s; return ret; };
+            try {
+                var re = /./g;
+                re[Symbol.matchAll] = undefined;
+                assert.areEqual(ret, "abc".matchAll(re));
+                assert.areEqual("abc", arg);
+                // and with null: the clone has no own @@matchAll either
+                re[Symbol.matchAll] = null;
+                assert.areEqual(ret, "abc".matchAll(re));
+                assert.areEqual("abc", arg);
+            } finally {
+                RegExp.prototype[Symbol.matchAll] = saved;
+            }
+        }
+    },
+    {
+        name: "primitive Symbol.* reads: getters on primitive prototypes never run",
+        body() {
+            var hits = 0;
+            function poison(proto, sym) {
+                Object.defineProperty(proto, sym, { get() { hits++; return undefined; }, configurable: true });
+            }
+            poison(String.prototype, Symbol.match);
+            poison(String.prototype, Symbol.replace);
+            poison(String.prototype, Symbol.search);
+            poison(String.prototype, Symbol.split);
+            poison(String.prototype, Symbol.matchAll);
+            try {
+                assert.areEqual("b", "abc".match("b")[0]);
+                assert.areEqual("Xbc", "abc".replace("a", "X"));
+                assert.areEqual(1, "abc".search("b"));
+                assert.areEqual("a,b,c", "a,b,c".split(",").join(","));
+                assert.areEqual(2, collect("a,b,c".matchAll(",")).length);
+                assert.areEqual(0, hits);
+            } finally {
+                delete String.prototype[Symbol.match];
+                delete String.prototype[Symbol.replace];
+                delete String.prototype[Symbol.search];
+                delete String.prototype[Symbol.split];
+                delete String.prototype[Symbol.matchAll];
+            }
+        }
+    },
+    {
+        name: "number and boolean primitives skip Symbol.* too",
+        body() {
+            var hits = 0;
+            Object.defineProperty(Number.prototype, Symbol.match, { get() { hits++; return undefined; }, configurable: true });
+            Object.defineProperty(Boolean.prototype, Symbol.replace, { get() { hits++; return undefined; }, configurable: true });
+            try {
+                "a1".match(1);
+                "atrue".replace(true, "X");
+                assert.areEqual(0, hits);
+            } finally {
+                delete Number.prototype[Symbol.match];
+                delete Boolean.prototype[Symbol.replace];
+            }
+        }
+    },
+    {
+        name: "lastIndex [[Set]]: non-writable lastIndex throws on failed match reset (defect fix 2)",
+        body() {
+            var r = /a/g;
+            Object.defineProperty(r, "lastIndex", { writable: false });
+            assert.throws(() => r[Symbol.match]("b"), TypeError, "global failure reset");
+            assert.areEqual(false, Object.getOwnPropertyDescriptor(r, "lastIndex").writable);
+
+            var ry = /c/y;
+            Object.defineProperty(ry, "lastIndex", { writable: false });
+            assert.throws(() => ry[Symbol.replace]("abc", "x"), TypeError, "sticky failure reset via @@replace");
+            assert.throws(() => ry[Symbol.match]("abc"), TypeError, "sticky failure reset via @@match");
+
+            // sloppy assignment to the non-writable property is silently ignored
+            var r2 = /a/g;
+            Object.defineProperty(r2, "lastIndex", { writable: false });
+            r2.lastIndex = 5;
+            assert.areEqual(0, r2.lastIndex);
+            // and it cannot be made writable again (non-configurable)
+            assert.throws(() => Object.defineProperty(r2, "lastIndex", { writable: true }), TypeError);
+        }
+    },
+    {
+        name: "lastIndex [[Set]]: successful global/sticky match updates lastIndex observably",
+        body() {
+            var r = /b/g;
+            assert.areEqual("b", r.exec("abc")[0]);
+            assert.areEqual(2, r.lastIndex, "exec success Set through [[Set]]");
+
+            // the trailing failed exec of a global @@match resets to 0
+            var rg = /b/g;
+            assert.areEqual("b", rg[Symbol.match]("abc")[0]);
+            assert.areEqual(0, rg.lastIndex, "failed-match reset");
+
+            var rs = /a/y;
+            rs[Symbol.match]("a");
+            assert.areEqual(1, rs.lastIndex, "sticky success Set");
+        }
+    },
+    {
+        name: "matchAll iterator sets lastIndex on empty matches through [[Set]] and can throw",
+        body() {
+            // species returns the same regexp, so the iterator's matcher IS re
+            var re = /()/g;
+            re.constructor = { [Symbol.species]: function () { return re; } };
+            var iter = re[Symbol.matchAll]("ab");
+            assert.areEqual(0, iter.next().value.index);
+            assert.areEqual(1, re.lastIndex, "advanced past the empty match");
+            Object.defineProperty(re, "lastIndex", { writable: false });
+            assert.throws(() => iter.next(), TypeError, "the next exec Set on non-writable lastIndex throws");
+        }
+    },
+    {
+        name: "accessor lastIndex on the iterator's matcher is invoked for the transfer and the advance",
+        body() {
+            var setValues = [];
+            var v = 0;
+            var re = /(|x)/g; // first match is empty
+            re.constructor = {
+                [Symbol.species]: function () {
+                    return {
+                        exec: function (input) {
+                            return { 0: "", index: 0, input, length: 1 };
+                        },
+                        get lastIndex() { return v; },
+                        set lastIndex(x) { setValues.push(x); v = x; }
+                    };
+                }
+            };
+            var iter = re[Symbol.matchAll]("ab");
+            iter.next();
+            // set 0: the lastIndex transfer Set at @@matchAll time; set 1: the
+            // empty-match advance through AdvanceStringIndex
+            assert.areEqual("0,1", setValues.join(","), "both Sets went through the accessor");
+        }
+    },
+    {
+        name: "Symbol.replace coerces a non-undefined groups value (groups-coercion edge)",
+        body() {
+            var r = /./;
+            var coercible = { length: 1, 0: "", index: 0, groups: null };
+            r.exec = function () { return coercible; };
+            assert.throws(() => r[Symbol.replace]("bar", ""), TypeError, "ToObject(null) throws");
+        }
+    },
+    {
+        name: "Symbol.search Sets lastIndex only when the value changes (non-writable +0 succeeds)",
+        body() {
+            // A non-writable "lastIndex" that is already +0 is neither reset
+            // nor restored: both spec Sets are guarded by SameValue.
+            var r0 = /a/;
+            r0.lastIndex = 0;
+            Object.defineProperty(r0, "lastIndex", { writable: false });
+            assert.areEqual(1, "bab".search(r0), "no Set for a +0 lastIndex");
+            assert.areEqual(0, r0.lastIndex, "lastIndex untouched");
+
+            // value != 0: the reset Set(rx, +0) runs and throws
+            var r1 = /a/;
+            r1.lastIndex = 1;
+            Object.defineProperty(r1, "lastIndex", { writable: false });
+            assert.throws(() => "bab".search(r1), TypeError, "reset Set on non-writable value 1");
+
+            // a matching global regexp advances "lastIndex" inside exec; that
+            // Set throws on a non-writable value before any restore
+            var g = /b/g;
+            Object.defineProperty(g, "lastIndex", { writable: false });
+            assert.throws(() => "abc".search(g), TypeError, "exec advance Set throws");
+
+            // writable lastIndex is reset for exec and restored afterwards
+            var w = /b/;
+            w.lastIndex = 2;
+            assert.areEqual(1, "abc".search(w));
+            assert.areEqual(2, w.lastIndex, "previous lastIndex restored");
+            var g2 = /b/g;
+            assert.areEqual(1, "abc".search(g2));
+            assert.areEqual(0, g2.lastIndex, "global exec advance restored to the previous +0");
+        }
+    },
+    {
+        name: "@@matchAll transfers the unclamped ToLength lastIndex to the matcher",
+        body() {
+            var seen;
+            var re = /a/g;
+            re.lastIndex = 1e300;
+            re.constructor = {
+                [Symbol.species]: function () {
+                    return {
+                        exec: function () { return null; },
+                        get lastIndex() { return 0; },
+                        set lastIndex(v) { seen = v; }
+                    };
+                }
+            };
+            re[Symbol.matchAll]("aa");
+            assert.areEqual(9007199254740991, seen, "ToLength(1e300), not the CharCount clamp 2147483646");
+        }
+    },
+    {
+        name: "exec with lastIndex beyond the string length",
+        body() {
+            // non-global: "lastIndex" is never written, not even a non-writable one
+            var r = /b/;
+            r.lastIndex = 3;
+            Object.defineProperty(r, "lastIndex", { writable: false });
+            assert.areEqual(1, r.exec("ab").index);
+            assert.areEqual(3, r.lastIndex, "non-global exec leaves lastIndex alone");
+
+            // global/sticky with lastIndex > length: the failure reset goes
+            // through the observable Set and throws on a non-writable value
+            var g = /b/g;
+            g.lastIndex = 3;
+            Object.defineProperty(g, "lastIndex", { writable: false });
+            assert.throws(() => g.exec("ab"), TypeError, "global reset Set throws");
+            var y = /b/y;
+            y.lastIndex = 3;
+            Object.defineProperty(y, "lastIndex", { writable: false });
+            assert.throws(() => y.exec("ab"), TypeError, "sticky reset Set throws");
+
+            // writable global resets to 0 through [[Set]] and returns null
+            var g2 = /b/g;
+            g2.lastIndex = 3;
+            assert.areEqual(null, g2.exec("ab"));
+            assert.areEqual(0, g2.lastIndex, "reset to 0");
+
+            // lastIndex clamping above MaxCharCount (1e300 -> 2^53-1): the
+            // early-out reset is observable as well
+            var g3 = /b/g;
+            g3.lastIndex = 1e300;
+            assert.areEqual(null, g3.exec("ab"));
+            assert.areEqual(0, g3.lastIndex, "clamped lastIndex reset through [[Set]]");
+            var g4 = /b/g;
+            g4.lastIndex = 1e300;
+            Object.defineProperty(g4, "lastIndex", { writable: false });
+            assert.throws(() => g4.exec("ab"), TypeError, "huge non-writable reset Set throws");
+
+            // non-global ignores even a huge lastIndex
+            var n = /b/;
+            n.lastIndex = 1e300;
+            assert.areEqual(1, n.exec("ab").index);
+            assert.areEqual(1e300, n.lastIndex, "non-global never writes");
+        }
+    },
+];
+
+testRunner.runTests(tests, { verbose: WScript.Arguments[0] != "summary" });

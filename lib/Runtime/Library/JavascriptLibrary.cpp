@@ -389,6 +389,13 @@ namespace Js
         iteratorConstructor = nullptr;
         iteratorHelperPrototype = nullptr;
         wrapForValidIteratorPrototype = nullptr;
+        regExpStringIteratorPrototype = nullptr;
+        if (scriptContext->GetConfig()->IsES6RegExSymbolsEnabled())
+        {
+            regExpStringIteratorPrototype = DynamicObject::New(recycler,
+                DynamicType::New(scriptContext, TypeIds_Object, iteratorPrototype, nullptr,
+                DeferredTypeHandler<InitializeRegExpStringIteratorPrototype, DefaultDeferredTypeFilter, true>::GetDefaultInstance()));
+        }
         if (scriptContext->GetConfig()->IsESIteratorHelpersEnabled())
         {
             iteratorHelperPrototype = DynamicObject::New(recycler,
@@ -1422,6 +1429,7 @@ namespace Js
         if (scriptContext->GetConfig()->IsES6RegExSymbolsEnabled())
         {
             symbolMatch = CreateSymbol(BuiltInPropertyRecords::_symbolMatch);
+            symbolMatchAll = CreateSymbol(BuiltInPropertyRecords::_symbolMatchAll);
             symbolReplace = CreateSymbol(BuiltInPropertyRecords::_symbolReplace);
             symbolSearch = CreateSymbol(BuiltInPropertyRecords::_symbolSearch);
             symbolSplit = CreateSymbol(BuiltInPropertyRecords::_symbolSplit);
@@ -1429,6 +1437,7 @@ namespace Js
         else
         {
             symbolMatch = nullptr;
+            symbolMatchAll = nullptr;
             symbolReplace = nullptr;
             symbolSearch = nullptr;
             symbolSplit = nullptr;
@@ -2624,7 +2633,7 @@ namespace Js
 
     bool JavascriptLibrary::InitializeSymbolConstructor(DynamicObject* symbolConstructor, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)
     {
-        typeHandler->Convert(symbolConstructor, mode, 16);
+        typeHandler->Convert(symbolConstructor, mode, 17);
         // Note: Any new function addition/deletion/modification should also be updated in JavascriptLibrary::ProfilerRegisterSymbol
         // so that the update is in sync with profiler
         JavascriptLibrary* library = symbolConstructor->GetLibrary();
@@ -2659,6 +2668,7 @@ namespace Js
         if (scriptContext->GetConfig()->IsES6RegExSymbolsEnabled())
         {
             library->AddMember(symbolConstructor, PropertyIds::match, library->GetSymbolMatch(), PropertyNone);
+            library->AddMember(symbolConstructor, PropertyIds::matchAll, library->GetSymbolMatchAll(), PropertyNone);
             library->AddMember(symbolConstructor, PropertyIds::replace, library->GetSymbolReplace(), PropertyNone);
             library->AddMember(symbolConstructor, PropertyIds::search, library->GetSymbolSearch(), PropertyNone);
             library->AddMember(symbolConstructor, PropertyIds::split, library->GetSymbolSplit(), PropertyNone);
@@ -4326,7 +4336,7 @@ namespace Js
 
     bool JavascriptLibrary::InitializeRegexPrototype(DynamicObject* regexPrototype, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)
     {
-        typeHandler->Convert(regexPrototype, mode, 26);
+        typeHandler->Convert(regexPrototype, mode, 27);
         // Note: Any new function addition/deletion/modification should also be updated in JavascriptLibrary::ProfilerRegisterRegExp
         // so that the update is in sync with profiler
         JavascriptFunction * func;
@@ -4403,6 +4413,12 @@ namespace Js
                 1);
             library->AddFunctionToLibraryObjectWithName(
                 regexPrototype,
+                PropertyIds::_symbolMatchAll,
+                PropertyIds::_RuntimeFunctionNameId_matchAll,
+                &JavascriptRegExp::EntryInfo::SymbolMatchAll,
+                1);
+            library->AddFunctionToLibraryObjectWithName(
+                regexPrototype,
                 PropertyIds::_symbolReplace,
                 PropertyIds::_RuntimeFunctionNameId_replace,
                 &JavascriptRegExp::EntryInfo::SymbolReplace,
@@ -4460,6 +4476,8 @@ namespace Js
 
     bool JavascriptLibrary::InitializeStringPrototype(DynamicObject* stringPrototype, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)
     {
+        // Property-capacity hint, not an own-property count (matchAll adds
+        // one more under ES6RegExSymbols).
         typeHandler->Convert(stringPrototype, mode, 42);
         // Note: Any new function addition/deletion/modification should also be updated in JavascriptLibrary::ProfilerRegisterString
         // so that the update is in sync with profiler
@@ -4491,6 +4509,10 @@ namespace Js
         // Don't inline String.prototype.localeCompare because it immediately calls back into Intl.js, which can break implicitCallFlags
         /* No inlining                String_LocaleCompare */               library->AddFunctionToLibraryObject(stringPrototype, PropertyIds::localeCompare,      &JavascriptString::EntryInfo::LocaleCompare,        1);
         builtinFuncs[BuiltinFunction::JavascriptString_Match]             = library->AddFunctionToLibraryObject(stringPrototype, PropertyIds::match,              &JavascriptString::EntryInfo::Match,                1);
+        if (scriptContext->GetConfig()->IsES6RegExSymbolsEnabled())
+        {
+            library->AddFunctionToLibraryObjectWithPropertyName(stringPrototype, _u("matchAll"), &JavascriptString::EntryInfo::MatchAll, 1);
+        }
         builtinFuncs[BuiltinFunction::JavascriptString_Split]             = library->AddFunctionToLibraryObject(stringPrototype, PropertyIds::split,              &JavascriptString::EntryInfo::Split,                2);
         builtinFuncs[BuiltinFunction::JavascriptString_Substring]         = library->AddFunctionToLibraryObject(stringPrototype, PropertyIds::substring,          &JavascriptString::EntryInfo::Substring,            2);
         builtinFuncs[BuiltinFunction::JavascriptString_Substr]            = library->AddFunctionToLibraryObject(stringPrototype, PropertyIds::substr,             &JavascriptString::EntryInfo::Substr,               2);
@@ -4831,6 +4853,29 @@ namespace Js
     {
         DynamicType* type = DynamicType::New(scriptContext, TypeIds_IteratorHelper, wrapForValidIteratorPrototype, nullptr, NullTypeHandler<false>::GetDefaultInstance());
         return RecyclerNew(this->GetRecycler(), JavascriptIteratorHelper, type, IteratorHelperKind::Wrap, iterator, nextMethod, nullptr, 0);
+    }
+
+    bool JavascriptLibrary::InitializeRegExpStringIteratorPrototype(DynamicObject* regExpStringIteratorPrototype, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)
+    {
+        typeHandler->Convert(regExpStringIteratorPrototype, mode, 2);
+
+        JavascriptLibrary* library = regExpStringIteratorPrototype->GetLibrary();
+
+        library->AddFunctionToLibraryObject(regExpStringIteratorPrototype, PropertyIds::next, &JavascriptRegExpStringIterator::EntryInfo::Next, 0);
+        // Same feature gate as Iterator.prototype's @@toStringTag accessor
+        // (ES6ToStringTag drives the symbol itself). This prototype is not
+        // created unless ES6RegExSymbols is on, which also installs the tag.
+        library->AddMember(regExpStringIteratorPrototype, PropertyIds::_symbolToStringTag, library->CreateStringFromCppLiteral(_u("RegExp String Iterator")), PropertyConfigurable);
+
+        regExpStringIteratorPrototype->SetHasNoEnumerableProperties(true);
+
+        return true;
+    }
+
+    JavascriptRegExpStringIterator* JavascriptLibrary::CreateRegExpStringIterator(RecyclableObject* matchingRegExp, JavascriptString* iteratedString, bool global, bool fullUnicode)
+    {
+        DynamicType* type = DynamicType::New(scriptContext, TypeIds_RegExpStringIterator, regExpStringIteratorPrototype, nullptr, NullTypeHandler<false>::GetDefaultInstance());
+        return RecyclerNew(this->GetRecycler(), JavascriptRegExpStringIterator, type, matchingRegExp, iteratedString, global, fullUnicode);
     }
 
     bool JavascriptLibrary::InitializeAsyncIteratorPrototype(DynamicObject* asyncIteratorPrototype, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)
@@ -8016,6 +8061,10 @@ namespace Js
 
         REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("isWellFormed"), 12, JavascriptString::EntryIsWellFormed);
         REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("toWellFormed"), 12, JavascriptString::EntryToWellFormed);
+        if (config.IsES6RegExSymbolsEnabled())
+        {
+            REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("matchAll"), 8, JavascriptString::EntryMatchAll);
+        }
 
         return hr;
     }
@@ -8199,6 +8248,10 @@ namespace Js
             const char16 *pwszObjectName = _u("WrapForValidIterator");
             REG_OBJECTS_LIB_FUNC(next, JavascriptIteratorHelper::EntryWrapNext);
             REG_OBJECTS_LIB_FUNC(return_, JavascriptIteratorHelper::EntryWrapReturn);
+        }
+        {
+            const char16 *pwszObjectName = _u("RegExp String Iterator");
+            REG_OBJECTS_LIB_FUNC(next, JavascriptRegExpStringIterator::EntryNext);
         }
 
         return hr;

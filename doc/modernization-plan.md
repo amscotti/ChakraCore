@@ -436,7 +436,8 @@ S11 remainder (`Object.groupBy`, `Map.groupBy`, `RegExp.escape`,
 — same receipt: interpreter-verified, unconditional library methods,
 no feature flag, no kill switch, no new opcodes; B4 must run its
 test262 corpus and `test/es7/s11-builtins.js` under SimpleJIT/FullJIT
-before any JIT-configuration claim. `matchAll` stays behind S7.
+before any JIT-configuration claim. S7 later delivered `matchAll`
+itself (see below).
 S10 change-array-by-copy + Set methods — [c2-s10.md](c2-s10.md)
 (closed: interpreter-verified, unconditional library methods, no
 feature flag and no kill switch, no new opcodes). The default carries Mac no-JIT evidence only: **B4 must run both S10
@@ -574,26 +575,30 @@ Decision/rollback points:
 - [ ] C4: Published qualified ES2025 result on the claimed default configurations.
 
 **C2 batch status:** S4, S5, all of S10 (the copy-by-change half and
-the Set-methods half), and all of S11 except `matchAll` are closed on
+the Set-methods half), all of S11, and S7 are closed on
 Mac no-JIT
 ([c2-s4.md](c2-s4.md), [c2-s5.md](c2-s5.md), [c2-s11.md](c2-s11.md),
-[c2-s10.md](c2-s10.md)). JIT claims still wait on B4. The S2/S6/S7
-enabled-flag measurement audits are done
-([c2-flag-audits.md](c2-flag-audits.md), no engine change): with the S7
-flags on, the RegExp-symbol protocol machinery passes most
-non-parse-dependent tests (346 same-binary fail→pass for
-`-ES6RegExSymbols`, +122 alone / +146 on top for
-`-ES6RegExPrototypeProperties`), against two flag-on defect classes
-plus a groups-coercion edge and no `Symbol.matchAll` anywhere; a
-`matchAll` + defect-fix batch is directly addressable for ≈114–132 of
-the 182 in-set `Symbol.*` residual failures (~50 more are S3/S9/S2
-spillover), which makes it the highest-value measured next C2-small
-batch. S6 shows zero regressions under `-ESSharedArrayBuffer` but needs
-a product/security decision before any default, plus waitAsync/growable/
-non-shared-Atomics work; S2's flagged path is a stub (accidental passes
-only, and a `BigInt()` SIGABRT crash class), so BigInt completion stays
-C3-large. The alternative next batch remains the S12 import-attributes
-cluster or a C3 slice.
+[c2-s10.md](c2-s10.md), [c2-s7-matchall.md](c2-s7-matchall.md)). JIT
+claims still wait on B4. The S2/S6/S7 enabled-flag measurement audits
+([c2-flag-audits.md](c2-flag-audits.md)) drove the S7 implementation
+batch: `Symbol.matchAll`, `RegExp.prototype[@@matchAll]`, the RegExp
+String Iterator and `String.prototype.matchAll` all landed behind
+`-ES6RegExSymbols` together with the two flag-on defect-class fixes
+(primitive `Symbol.*` reads and the `lastIndex` `[[Set]]` bypass,
+including honoring a non-writable `lastIndex` redefine under the flag)
+— the audit's 42 flag-on regressions are 42/42 fixed with 0 new
+pass→fail (134 same-binary fail→pass on the 6,199-scenario universe,
+matchAll corpus 132/140; the 8 residue is BigInt/v-flag parse debt
+plus 4 `species-regexp-get-*` scenarios that need the
+`-ES6RegExPrototypeProperties` substrate). The flag stays off by
+default; the batch also regenerated the checked-in nojit bytecode
+headers (three PropertyIds appended; B4 must regenerate the jit
+variants). S6 shows zero regressions under `-ESSharedArrayBuffer` but
+needs a product/security decision before any default, plus
+waitAsync/growable/non-shared-Atomics work; S2's flagged path is a stub
+(accidental passes only, and a `BigInt()` SIGABRT crash class), so
+BigInt completion stays C3-large. The alternative next batch remains
+the S12 import-attributes cluster or a C3 slice.
 
 **Next platform gate:** B4 native execution. Provision a native x64 Linux
 runner via the preferred path to green in [b4-gate.md](b4-gate.md) §4(a),

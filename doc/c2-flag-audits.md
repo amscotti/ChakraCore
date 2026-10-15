@@ -336,6 +336,14 @@ under every flag combination probed (default, symbols, proto, both).
 
 ## Recommendations (measured value / risk ranking)
 
+> Implemented: recommendation 1 landed 2026-10-15 as
+> [c2-s7-matchall.md](c2-s7-matchall.md) — all four matchAll surfaces
+> plus both defect classes and the groups-coercion edge under
+> `-ES6RegExSymbols`; the 42 flag-on regressions in this audit are
+> 42/42 fixed with 0 new pass→fail (134 same-binary fail→pass), and the
+> flags stay off by default (B4 pending). The numbers below are the
+> pre-batch measurement.
+
 1. **S7 → `matchAll` + the two flag-on defect classes as a C2-small
    batch.** What was measured is that the protocol machinery passes most
    non-parse-dependent tests with the flags on — 346 same-binary

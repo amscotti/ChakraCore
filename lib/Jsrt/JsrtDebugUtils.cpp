@@ -278,6 +278,7 @@ void JsrtDebugUtils::AddPropertyType(Js::DynamicObject * object, Js::IDiagObject
         case Js::TypeIds_AsyncGenerator:
         case Js::TypeIds_AsyncFromSyncIterator:
         case Js::TypeIds_IteratorHelper:
+        case Js::TypeIds_RegExpStringIterator:
         case Js::TypeIds_Promise:
         case Js::TypeIds_GlobalObject:
         case Js::TypeIds_SpreadArgument:
@@ -436,6 +437,7 @@ const char16 * JsrtDebugUtils::GetClassName(Js::TypeId typeId)
     case Js::TypeIds_SetIterator:
     case Js::TypeIds_StringIterator:
     case Js::TypeIds_IteratorHelper:
+    case Js::TypeIds_RegExpStringIterator:
                                             return _u("Object");
 
     case Js::TypeIds_Proxy:                 return _u("Proxy");
