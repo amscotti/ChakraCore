@@ -7,7 +7,8 @@
 # C2 flag audits: S2 BigInt, S6 SharedArrayBuffer/Atomics, S7 RegExp symbols
 
 Status: measurement-only batch. No engine, test, gate, or build change; the
-regression gates stay 1967/0 (test) and 2019/0 (debug-static). This document
+regression gates stayed 1967/0 (test) and 2019/0 (debug-static) at this batch
+(matchAll later moved them to 1968/2020). This document
 records the enabled-flag runs the S2/S6/S7 rows of
 [c1-triage.md](c1-triage.md) asked for, and updates those rows with measured
 numbers. Every number below is observed on the recorded runs; nothing is

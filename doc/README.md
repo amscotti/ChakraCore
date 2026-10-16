@@ -2,7 +2,7 @@
 
 In-repo documentation for the ChakraCore modernization effort. Engine and legacy
 build references are pinned to baseline `97e68c917`; execution results and
-modernization decisions are updated through 2026-10-10. See
+modernization decisions are updated through 2026-10-15. See
 [current-state.md](current-state.md) §7 for activity context.
 
 | Document | Contents |
@@ -10,7 +10,11 @@ modernization decisions are updated through 2026-10-10. See
 | [current-state.md](current-state.md) | What the project is today: inventory, architecture/build/test summaries, platforms, activity, constraints, gaps |
 | [architecture.md](architecture.md) | Engine architecture: component map, execution pipeline, JIT tiers, JsRT API, threading, GC, Intl/WASM, with a Mermaid diagram |
 | [build.md](build.md) | Build process: entry points, prerequisites, Unix + Windows builds, CMake structure, ICU matrix, codegen, outputs, testing, CI, staleness |
-| [modernization-plan.md](modernization-plan.md) | Executable roadmap: next B1 build slice, scoped Mac/Linux rollout, optional Zig integration, compatibility milestones and full ES2025 objective |
+| [modernization-plan.md](modernization-plan.md) | Executable roadmap: staged build/platform rollout (F0–B3 verified, B4 blocked), C2 compatibility batches toward full ES2025, optional Zig integration |
+| [c1-triage.md](c1-triage.md) | C1 record: edition policy, qualified runner, root-cause triage and the measured S-row shortlist |
+| [c2-s4.md](c2-s4.md) / [c2-s5.md](c2-s5.md) / [c2-s10.md](c2-s10.md) / [c2-s11.md](c2-s11.md) / [c2-s7-matchall.md](c2-s7-matchall.md) | C2 batch receipts: optional chaining + logical assignment; iterator helpers; Set methods + copy-by-change; small builtins + replaceAll; matchAll + RegExp symbol-protocol fixes |
+| [c2-flag-audits.md](c2-flag-audits.md) | Measured enabled-flag audits for BigInt, SharedArrayBuffer/Atomics and the RegExp symbol family |
+| [b1-b3-review.md](b1-b3-review.md) / [b4-gate.md](b4-gate.md) / [b4-review.md](b4-review.md) | External reviews and gate verdicts for B1–B3 and B4 |
 | [conformance-baseline.md](conformance-baseline.md) | Pinned upstream diagnostic baseline: configuration, executed/skip counts, feature debt and edition-gate limits |
 | [memory-management.md](memory-management.md) | Coding-assistant ownership guide: TigerStyle/Ghostty/Bun lessons applied to allocators, GC/FFI, callbacks, async lifetime and focused tests |
 

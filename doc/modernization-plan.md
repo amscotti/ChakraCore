@@ -7,9 +7,14 @@
 > [post-B4 review](b4-review.md)). **C1 is recorded (CONDITIONAL)** — edition
 > policy, triage and shortlist are in [c1-triage.md](c1-triage.md);
 > qualification is conditional on explicit host-reported negative phase
-> before any full result is certified. Engine/legacy-build references use baseline
+> before any full result is certified. **C2 is in progress** — batches
+> S4, S5, S10, S11 and S7-matchAll are closed on Mac no-JIT (JIT claims
+> gated on B4), receipts in [c2-s4.md](c2-s4.md), [c2-s5.md](c2-s5.md),
+> [c2-s10.md](c2-s10.md), [c2-s11.md](c2-s11.md),
+> [c2-s7-matchall.md](c2-s7-matchall.md) and
+> [c2-flag-audits.md](c2-flag-audits.md). Engine/legacy-build references use baseline
 > `97e68c917`; execution evidence and the [B1-B3 review](b1-b3-review.md)
-> are recorded through 2026-10-12 local time.
+> are recorded through 2026-10-15 local time.
 > This is a staged roadmap for a small maintained fork, not a dated delivery promise.
 
 ## Read this first
@@ -40,7 +45,7 @@ handling have been validated before its results are used as a completion gate.
 | B6 | Windows feasibility and rollout; later target extensions | Stable build contracts | Separate expansion |
 | Z1 | One useful mixed C++/Zig unit behind a tested C ABI | B3; B4 if the unit ships on Linux | Optional pilot |
 | C1 | Qualified ES2025 test policy and triaged failures | Stable Mac build at B3 | Recorded (CONDITIONAL) |
-| C2 | Bounded compatibility batches and partial releases | C1; B4 before JIT-wide enablement | Planned |
+| C2 | Bounded compatibility batches and partial releases | C1; B4 before JIT-wide enablement | In progress (S4/S5/S10/S11/S7-matchAll closed on Mac no-JIT; JIT claims gated on B4) |
 | C3 | Larger runtime/object-model feature projects | C1 and their feature prerequisites | Separate projects |
 | C4 | Verified full ES2025 core-language result | Required C2/C3 work and qualified runner | Long-term objective |
 
@@ -490,7 +495,8 @@ there and are tracked as closed in the C2 batch receipts below.)*
 | ES2025 | no complete coverage established | escape, eval-var semantics, Float16, try, iterator helpers, JSON modules/import attributes, modifiers, Set methods, duplicate groups → P1 |
 | ES2026 | stretch after required scope | upsert, JSON.parse source, sequencing, base64, sumPrecise, isError, fromAsync |
 
-**P0 — High-breakage compatibility:** optional chaining/logical assignment;
+**P0 — High-breakage compatibility** (landed items are tracked in the C2
+batch receipts below): optional chaining/logical assignment;
 class syntax; replaceAll/matchAll and the copy-by-change family; inherited
 ES2018 RegExp gaps and later `d`/import-attribute syntax. Named groups precede
 duplicate named-group behavior. Runtime probes reject named groups, lookbehind,

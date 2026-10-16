@@ -26,8 +26,9 @@ Inputs (all pre-existing, uncommitted under `out/`):
 The validation binary **differs** from the recorded baseline binary, so the
 headline numbers in §2 remain tied to the recorded baseline. The engine
 source is nevertheless the same lineage: `git diff 97e68c917..HEAD -- lib/
-pal/ bin/` is empty *(observed)*; the tree-wide changes since that commit
-are build/tooling/docs files (`build.zig`, `tools/`, `doc/`, CI and root
+pal/ bin/` was empty when this was recorded on 2026-10-13 *(observed;
+superseded by the C2 batches, which change `lib/`)*; the tree-wide changes
+since that commit at the time were build/tooling/docs files (`build.zig`, `tools/`, `doc/`, CI and root
 metadata) plus `test/native-tests/` helpers — no engine source.
 Controls, the scoped run and the feature probe (§3, §5) therefore validate
 the *tooling and qualification* on the current binary, not a rebaselined
@@ -670,7 +671,8 @@ generally. These do not need new features, only correctness work.
 **Disabled-feature incompleteness** — default-off flags named in the
 policy, with `ConfigFlagsList.h` anchors: `ESBigInt` (false at :669 —
 flagged path observably incomplete, §5), `ESSharedArrayBuffer` (false at
-:709 — globals appear when enabled, conformance unmeasured),
+:709 — measured 2026-10-15 in [c2-flag-audits.md](c2-flag-audits.md) §S6:
+zero regressions; defaulting is a product/security decision),
 `ES6RegExSymbols` (false at :692-696 — protocol appears when enabled,
 JIT-helper warning at :1177), `ES6RegExPrototypeProperties` (false at
 :687-690 — no feature tag; measured only by before/after runs). The
@@ -723,8 +725,10 @@ Unresolved after C1:
   should use `--jobs=1` (or per-agent temp isolation, also owed) so the
   shared-temp agent race in §3 cannot reintroduce flips.
 - Enabled-flag test262 runs for `ESBigInt`, `ESSharedArrayBuffer`,
-  `ES6RegExSymbols`, `ES6RegExPrototypeProperties` (S2/S6/S7) — the
-  measurements that turn tag-implicated buckets into facts.
+  `ES6RegExSymbols`, `ES6RegExPrototypeProperties` (S2/S6/S7) — measured
+  2026-10-15 in [c2-flag-audits.md](c2-flag-audits.md); the S7 follow-up
+  (matchAll + protocol fixes) landed as C2-S7
+  ([c2-s7-matchall.md](c2-s7-matchall.md)).
 - B4 native x64 execution, which every "JIT-x64? yes" item waits on for
   its C2 completion gate.
 - The Unicode/ICU data-version decision behind S3 (and plan P1 Intl).
