@@ -583,8 +583,9 @@ Decision/rollback points:
 - [ ] C4: Published qualified ES2025 result on the claimed default configurations.
 
 **C2 batch status:** S4, S5, all of S10 (the copy-by-change half and
-the Set-methods half), all of S11, S7, and the S9 named-groups core
-sub-batch are closed on Mac no-JIT
+the Set-methods half), all of S11, S7, and the three S9 sub-batches
+(named-groups core, `d` flag/indices, duplicate named groups) are
+closed on Mac no-JIT
 ([c2-s4.md](c2-s4.md), [c2-s5.md](c2-s5.md), [c2-s11.md](c2-s11.md),
 [c2-s10.md](c2-s10.md), [c2-s7-matchall.md](c2-s7-matchall.md),
 [c2-s9-namedgroups.md](c2-s9-namedgroups.md)). JIT

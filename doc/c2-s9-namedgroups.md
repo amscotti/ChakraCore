@@ -457,8 +457,10 @@ in `RegExp.prototype.flags`) is wired under the existing
   stale 2014/1962 fixtures stay), `build.zig` (both profiles),
   `.github/workflows/zig-macos.yml` (test, debug-static, legacy cmake
   legs), and the live baseline sentence in `doc/memory-management.md`.
-
-## Evidence (final tree, `zig-out/bin/ch` + `out/debug-static/bin/ch`)
+  Erratum (milestone review): the workflow legs were actually bumped in
+  the sub-batch-3 commit (`3c4233d88`), not in `704a85b8a` — the two
+  intermediate commits were transiently CI-red on those greps; the
+  final tree is consistent at 1973/2025.
 
 - `mise exec -- zig build` and `-Dprofile=debug-static` — exit 0;
   `zig build check --summary line` — 572/572 steps, `Total: passed
@@ -558,8 +560,8 @@ helpers may inline against).
 
 # C2-S9 sub-batch 3: duplicate named capture groups (ES2025)
 
-Status: complete on Mac no-JIT (commit `<pending>` — this receipt is
-written on the uncommitted tree). A pattern may bind the same group
+Status: complete on Mac no-JIT (committed as `3c4233d88`). A pattern
+may bind the same group
 name in several capture groups, **provided a disjunction separates
 them** (`(?<x>a)|(?<x>b)`; two same-name groups on one alternative
 path — sequential, nested, or joined only through a nested
