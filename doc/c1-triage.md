@@ -612,9 +612,21 @@ under `ES6RegExPrototypeProperties` (corpus-pinned, not own-instance
 built-ins). Corpus: `RegExp/match-indices` 28/28 (default and symbols),
 `RegExp/prototype/hasIndices` + `flags` 42/48 under the proto flag
 (residue: 4 BigInt `4n` parses, 2 `v`-flag SyntaxErrors); resym joins
-28/0 and 28/0. Gates moved 1970/2022 → 1972/2024. Remaining S9 work:
-lookbehind, `v` flag (needs S3), ES2025 duplicate named groups, and the
-modifiers remainder.)*
+28/0 and 28/0. Gates moved 1970/2022 → 1972/2024. Sub-batch 3 —
+ES2025 duplicate named groups — landed 2026-10-16 on Mac no-JIT (same
+receipt, "Sub-batch 3"): duplicate names parse iff a disjunction
+separates them (pass-0 alternative-scope check), `groups`/
+`indices.groups`/`$<name>` resolve to the last participating group
+(undefined when none), and `\k<name>` with duplicates compiles to a
+new regex-internal `MatchNamedGroup` instruction implementing the
+participation rule (participating value must match; empty only when
+no group with the name is live — corpus `duplicate-names-exec.js`).
+Corpus: the 190-scenario named-groups set 182/8 default / 188/2
+symbols (residue: 2 lookbehind + 6 symbols-gated), the 20
+duplicate-name scenarios flipped 0 collateral; match-indices 28/28;
+resym joins 28/0 and 30/0 incremental (224/0 and 252/0 vs C1). Gates
+moved 1972/2024 → 1973/2025. Remaining S9 work: lookbehind, `v` flag
+(needs S3), and the modifiers remainder.)*
 
 **S10. Set methods + copy-by-change family.** Repro: `python3 tools/test262/run.py --binary zig-out/bin/ch --output out/test262-c1-setcopy 'test/built-ins/Set/**/*.js' 'test/built-ins/Array/**/*.js' 'test/built-ins/TypedArray/**/*.js'`.
 *Status: both halves are closed on Mac no-JIT — see

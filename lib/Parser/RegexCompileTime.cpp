@@ -3515,6 +3515,161 @@ namespace UnifiedRegex
 #endif
 
     // ----------------------------------------------------------------------
+    // MatchNamedGroupNode
+    //
+    // Mirrors MatchGroupNode in every pass (a backreference: consumes an
+    // unbounded run, matches no literal prefix, opts out of the scanning
+    // and octoquad machinery). Only Emit differs, emitting the
+    // variable-length MatchNamedGroupInst.
+    // ----------------------------------------------------------------------
+
+    CharCount MatchNamedGroupNode::LiteralLength() const
+    {
+        return 0;
+    }
+
+    bool MatchNamedGroupNode::IsCharOrPositiveSet() const
+    {
+        return false;
+    }
+
+    CharCount MatchNamedGroupNode::TransferPass0(Compiler& compiler, const Char* litbuf)
+    {
+        for (int i = 0; i < numGroupIds; i++)
+            Assert(groupIds[i] > 0 && groupIds[i] < compiler.program->numGroups);
+        return 0;
+    }
+
+    void MatchNamedGroupNode::TransferPass1(Compiler& compiler, const Char* litbuf)
+    {
+    }
+
+    bool MatchNamedGroupNode::IsRefiningAssertion(Compiler& compiler)
+    {
+        return false;
+    }
+
+    void MatchNamedGroupNode::AnnotatePass0(Compiler& compiler)
+    {
+        isWord = false;
+    }
+
+    void MatchNamedGroupNode::AnnotatePass1(Compiler& compiler, bool parentNotInLoop, bool parentAtLeastOnce, bool parentNotSpeculative, bool parentNotNegated)
+    {
+        features = HasMatchGroup;
+        thisConsumes.lower = 0;
+        thisConsumes.upper = CharCountFlag;
+        firstSet = compiler.standardChars->GetFullSet();
+        isFirstExact = false;
+        isThisIrrefutable = false;
+        isThisWillNotProgress = true;
+        isThisWillNotRegress = true;
+        isNotInLoop = parentNotInLoop;
+        isAtLeastOnce = parentAtLeastOnce;
+        isNotSpeculative = parentNotSpeculative;
+        isNotNegated = parentNotNegated;
+    }
+
+    void MatchNamedGroupNode::AnnotatePass2(Compiler& compiler, CountDomain accumConsumes, bool accumPrevWillNotProgress, bool accumPrevWillNotRegress)
+    {
+        prevConsumes = accumConsumes;
+        isPrevWillNotProgress = accumPrevWillNotProgress;
+        isPrevWillNotRegress = accumPrevWillNotRegress;
+    }
+
+    void MatchNamedGroupNode::AnnotatePass3(Compiler& compiler, CountDomain accumConsumes, CharSet<Char>* accumFollow, bool accumFollowIrrefutable, bool accumFollowEOL)
+    {
+        followConsumes = accumConsumes;
+        followSet = accumFollow;
+        isFollowIrrefutable = accumFollowIrrefutable;
+        isFollowEOL = accumFollowEOL;
+    }
+
+    void MatchNamedGroupNode::AnnotatePass4(Compiler& compiler)
+    {
+        isDeterministic = true;
+    }
+
+    bool MatchNamedGroupNode::SupportsPrefixSkipping(Compiler& compiler) const
+    {
+        return false;
+    }
+
+    Node* MatchNamedGroupNode::HeadSyncronizingNode(Compiler& compiler)
+    {
+        return 0;
+    }
+
+    CharCount MatchNamedGroupNode::MinSyncronizingLiteralLength(Compiler& compiler, int& numLiterals) const
+    {
+        return 0;
+    }
+
+    void MatchNamedGroupNode::CollectSyncronizingLiterals(Compiler& compiler, ScannersMixin& scanners) const
+    {
+        Assert(false);
+    }
+
+    void MatchNamedGroupNode::BestSyncronizingNode(Compiler& compiler, Node*& bestNode)
+    {
+    }
+
+    void MatchNamedGroupNode::AccumDefineGroups(Js::ScriptContext* scriptContext, int& minGroup, int& maxGroup)
+    {
+    }
+
+    void MatchNamedGroupNode::Emit(Compiler& compiler, CharCount& skipped)
+    {
+        Assert(skipped == 0);
+        //
+        // Compilation scheme:
+        //
+        //   MatchNamedGroup(numGroupIds, groupIds...)
+        //
+        // The ids trail the instruction header in-line (the instruction
+        // buffer is byte-aligned and the structs are pack(1)).
+        //
+        MatchNamedGroupInst* inst = new (compiler.Emit(sizeof(MatchNamedGroupInst) + numGroupIds * sizeof(int)))
+            MatchNamedGroupInst(numGroupIds);
+        int* emittedGroupIds = reinterpret_cast<int*>(inst + 1);
+        for (int i = 0; i < numGroupIds; i++)
+            emittedGroupIds[i] = groupIds[i];
+    }
+
+    CharCount MatchNamedGroupNode::EmitScan(Compiler& compiler, bool isHeadSyncronizingNode)
+    {
+        Assert(false);
+        return 0;
+    }
+
+    bool MatchNamedGroupNode::IsOctoquad(Compiler& compiler, OctoquadIdentifier* oi)
+    {
+        return false;
+    }
+
+    bool MatchNamedGroupNode::IsCharTrieArm(Compiler& compiler, uint& accNumAlts) const
+    {
+        return false;
+    }
+
+    bool MatchNamedGroupNode::BuildCharTrie(Compiler& compiler, CharTrie* trie, Node* cont, bool isAcceptFirst) const
+    {
+        Assert(false);
+        return false;
+    }
+
+#if ENABLE_REGEX_CONFIG_OPTIONS
+    void MatchNamedGroupNode::Print(DebugWriter* w, const Char* litbuf) const
+    {
+        w->Print(_u("MatchNamedGroup("));
+        for (int i = 0; i < numGroupIds; i++)
+            w->Print(i == 0 ? _u("%d") : _u(",%d"), groupIds[i]);
+        w->PrintEOL(_u(")"));
+        PrintAnnotations(w);
+    }
+#endif
+
+    // ----------------------------------------------------------------------
     // LoopNode
     // ----------------------------------------------------------------------
 

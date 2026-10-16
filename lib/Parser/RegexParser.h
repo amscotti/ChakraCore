@@ -64,13 +64,32 @@ namespace UnifiedRegex
 
         // A named capture group definition (recorded during pass 0), or an
         // unresolved \k<name> reference (groupId unused). Names are decoded
-        // UTF-16 sequences appended to namedGroupBuffer; ES2018 allows at most
-        // one definition per name (duplicate groups are a later sub-batch).
+        // UTF-16 sequences appended to namedGroupBuffer. ES2025 allows a name
+        // to be bound by several groups, but only when a disjunction separates
+        // them (see AltScope below), so one alternative path never passes
+        // through two groups of the same name.
         struct NamedGroup
         {
             CharCount offset; // offset into namedGroupBuffer
             CharCount len;    // length in Char units
             int groupId;      // definition only: capture index, 1-based
+        };
+
+        // Pass-0 alternative-scope state for the duplicate-name rule. The
+        // stack altPathGroupIdx holds indices into namedGroups for every
+        // definition reachable along the current alternative path:
+        // [altFrameStart, altPathCount) are the current alternative's names
+        // while the region below (from the enclosing scope's savedAccStart)
+        // is the accumulator of the alternatives already parsed in this
+        // disjunction. Each open disjunction pushes one AltScope record;
+        // its alternatives start fresh frames, '|' folds a finished frame
+        // into the accumulator, and closing the disjunction checks the
+        // whole accumulator against the enclosing frame (a merge there
+        // would put both same-name groups on one path) and folds it in.
+        struct AltScope
+        {
+            int savedFrameStart; // enclosing alternative's frame start
+            int savedAccStart;   // this disjunction's accumulator start
         };
 
         // Raw span of a \k<...> reference, recorded during pass 0 in encoded
@@ -95,6 +114,13 @@ namespace UnifiedRegex
         CharCount namedGroupBufferCap;
         bool sawBareK;               // '\k' not followed by '<' anywhere
         bool sawClassK;              // '\k' inside a character class anywhere
+        int* altPathGroupIdx;        // namedGroups indices on the current path (ctAllocator)
+        int altPathCount;
+        int altPathCap;
+        AltScope* altScopes;         // open disjunction scopes, innermost last (ctAllocator)
+        int altScopeCount;
+        int altScopeCap;
+        int altFrameStart;           // start of the current alternative's frame
 
         Js::ScriptContext* scriptContext;
         // Arena for nodes and items needed only during compilation
@@ -207,6 +233,12 @@ namespace UnifiedRegex
         void ScanGroupName();
         void RecordNamedGroup(const Char* name, CharCount len, int groupId);
         int FindNamedGroup(const Char* name, CharCount len) const;
+        bool NamedGroupIsAt(const NamedGroup& group, const Char* name, CharCount len) const;
+        void EnsureAltPathCapacity();
+        void EnsureAltScopeCapacity();
+        void PushAltScope();
+        void FoldAlternativeIntoScope();
+        void PopAltScope();
         void ResolveNamedGroupRefs(const EncodedChar* body, const EncodedChar* bodyLim);
         void CaptureGroupNames(Recycler* recycler, Program* program);
 

@@ -1304,7 +1304,10 @@ namespace Js
                     const bool namedSubstitutionEnabled = program->HasNamedGroups();
                     Var undefined = scriptContext->GetLibrary()->GetUndefined();
                     auto getNamedGroup = [=](const char16* name, CharCount nameLen) -> Var {
-                        int groupId = program->FindNamedGroupId(name, nameLen);
+                        // ES2025 duplicate named groups: the substitution
+                        // uses the value of the participating group with
+                        // this name (last participant; at most one is live).
+                        int groupId = ResolveNamedGroupId(program, pattern, name, nameLen);
                         if (groupId < 0)
                         {
                             return undefined;
@@ -2149,14 +2152,45 @@ namespace Js
             CharCount nameLen = 0;
             const char16* name = program->GetGroupName(i, &nameLen);
             PropertyId propertyId = scriptContext->GetOrAddPropertyIdTracked(name, static_cast<int>(nameLen));
+            // ES2025 duplicate named groups: a later entry for the same name
+            // resolves to the same participating group, so the extra set is
+            // an idempotent overwrite and the property keeps its
+            // first-occurrence (textual) position. No group with the name
+            // participating -> undefined.
+            const int groupId = ResolveNamedGroupId(program, pattern, name, nameLen);
+            Var value = groupId < 0 ? undefined
+                : GetString(scriptContext, input, undefined, pattern->GetGroup(groupId));
             // CreateDataProperty semantics: on a null-prototype object the
             // ordinary [[Set]] creates an own writable/enumerable/configurable
             // data property (and "__proto__" is not special without a prototype).
-            Var value = GetString(scriptContext, input, undefined,
-                pattern->GetGroup(program->GetGroupNameGroupId(i)));
             JavascriptOperators::SetProperty(groups, groups, propertyId, value, scriptContext);
         }
         return groups;
+    }
+
+    int RegexHelper::ResolveNamedGroupId(UnifiedRegex::Program* program, UnifiedRegex::RegexPattern* pattern, const char16* name, CharCount nameLen)
+    {
+        int result = -1;
+        const uint32 numGroupNames = program->numGroupNames;
+        for (uint32 i = 0; i < numGroupNames; i++)
+        {
+            CharCount candidateLen = 0;
+            const char16* candidate = program->GetGroupName(i, &candidateLen);
+            if (candidateLen != nameLen)
+                continue;
+            CharCount j = 0;
+            while (j < nameLen && candidate[j] == name[j])
+                j++;
+            if (j != nameLen)
+                continue;
+            // Entries are in textual (= numeric) order; duplicates span
+            // only a disjunction and loop bodies reset their captures each
+            // iteration, so the numeric-order-last participant is the last
+            // participant.
+            if (!pattern->GetGroup(program->GetGroupNameGroupId(i)).IsUndefined())
+                result = program->GetGroupNameGroupId(i);
+        }
+        return result;
     }
 
     Var RegexHelper::GetGroupsVar(ScriptContext* scriptContext, UnifiedRegex::RegexPattern* pattern, JavascriptString* input)
@@ -2213,7 +2247,15 @@ namespace Js
                 CharCount nameLen = 0;
                 const char16* name = program->GetGroupName(i, &nameLen);
                 PropertyId propertyId = scriptContext->GetOrAddPropertyIdTracked(name, static_cast<int>(nameLen));
-                UnifiedRegex::GroupInfo group = pattern->GetGroup(program->GetGroupNameGroupId(i));
+                // Same duplicate-name rule as CreateGroupsObject: the last
+                // participating group with this name supplies the pair
+                // (idempotent for repeated entries); undefined when none.
+                UnifiedRegex::GroupInfo group;
+                const int groupId = ResolveNamedGroupId(program, pattern, name, nameLen);
+                if (groupId < 0)
+                    group.Reset();
+                else
+                    group = pattern->GetGroup(groupId);
                 Var value = undefined;
                 if (!group.IsUndefined())
                 {

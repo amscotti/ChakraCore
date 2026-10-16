@@ -55,6 +55,8 @@ namespace UnifiedRegex
             MatchSet,             // [...], [^...], \b, \B, \d, \D, \s, \S, \w, \W, .
             // AssertionNode
             Assertion             // (?=e), (?!e)
+            // MatchNamedGroupNode
+            , MatchNamedGroup     // \k<name> with a duplicated name (ES2025)
         };
 
         enum Features : uint16
@@ -504,6 +506,27 @@ namespace UnifiedRegex
         NODE_DECL
     };
 
+    // \k<name> with a duplicated name (ES2025 duplicate named groups): the
+    // name is bound by numGroupIds capture groups (always in different
+    // alternatives of a disjunction), listed in textual (= numeric) order.
+    // At match time the reference targets the last participating group and
+    // matches the empty string if none did; a single-group name keeps the
+    // ordinary MatchGroupNode.
+    struct MatchNamedGroupNode : Node
+    {
+        int numGroupIds;
+        int* groupIds;
+
+        inline MatchNamedGroupNode(int numGroupIds, int* groupIds)
+            : Node(MatchNamedGroup)
+            , numGroupIds(numGroupIds)
+            , groupIds(groupIds)
+        {
+        }
+
+        NODE_DECL
+    };
+
     struct LoopNode : Node
     {
         Node* body;
@@ -588,6 +611,7 @@ namespace UnifiedRegex
         friend AltNode;
         friend DefineGroupNode;
         friend MatchGroupNode;
+        friend MatchNamedGroupNode;
         friend LoopNode;
         friend MatchSetNode;
         friend AssertionNode;

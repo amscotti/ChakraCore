@@ -108,6 +108,15 @@ namespace Js
         // null-prototype object with one own data property per named group,
         // in textual order, undefined for groups that did not participate.
         static DynamicObject* CreateGroupsObject(ScriptContext* scriptContext, UnifiedRegex::RegexPattern* pattern, JavascriptString* input);
+        // Value source for a named group (ES2018; under ES2025 duplicate
+        // named groups several groups bind one name): the group id of the
+        // LAST group with this name that participated in the match (entries
+        // are scanned in textual = numeric order, so a later participant
+        // overwrites an earlier one, matching the [[Set]] semantics), or -1
+        // when none did. Alternatives separate duplicate names and loop
+        // bodies reset their groups each iteration, so at most one group
+        // with a given name is ever live.
+        static int ResolveNamedGroupId(UnifiedRegex::Program* program, UnifiedRegex::RegexPattern* pattern, const char16* name, CharCount nameLen);
         // Var to store in the result's "groups" slot: the groups object when
         // the pattern has named captures, undefined otherwise (never allocates
         // on the no-named-groups fast path).

@@ -65,10 +65,12 @@ namespace UnifiedRegex
         Field(int) numLoops;
         Field(RegexFlags) flags;
 
-        // Named capture groups (ES2018). Immutable after compilation; the
-        // chars and entry arrays are recycler-owned leaves (no pointers
-        // inside), scanned through this program's fields. Null/0 when the
-        // pattern has no (?<name>...) groups.
+        // Named capture groups (ES2018; ES2025 allows a name to be bound by
+        // several groups, in different alternatives of a disjunction). One
+        // entry per definition, in textual order. Immutable after
+        // compilation; the chars and entry arrays are recycler-owned leaves
+        // (no pointers inside), scanned through this program's fields.
+        // Null/0 when the pattern has no (?<name>...) groups.
         struct GroupNameEntry
         {
             uint32 offset; // into groupNameChars
@@ -80,8 +82,6 @@ namespace UnifiedRegex
         Field(uint16) numGroupNames;
 
         bool HasNamedGroups() const { return numGroupNames != 0; }
-        // groupId of the named group whose name equals name[0..len), or -1
-        int FindNamedGroupId(const Char* name, CharCount len) const;
         // Name chars of entry i and its capture index
         const Char* GetGroupName(uint32 i, CharCount* nameLen) const;
         uint16 GetGroupNameGroupId(uint32 i) const;
@@ -1230,6 +1230,21 @@ namespace UnifiedRegex
         INST_BODY
     };
 
+    struct MatchNamedGroupInst : Inst
+    {
+        // \k<name> with a duplicated name (ES2025): the name is bound by
+        // several capture groups, always in different alternatives of a
+        // disjunction. numGroupIds int group ids (numeric order) follow this
+        // header in-line; the structs are pack(1), so access them via
+        // reinterpret_cast and advance instPointer past them.
+        const int numGroupIds;
+
+        inline MatchNamedGroupInst(int numGroupIds)
+            : Inst(InstTag::MatchNamedGroup), numGroupIds(numGroupIds) {}
+
+        INST_BODY
+    };
+
     struct BeginDefineGroupInst : Inst, GroupMixin
     {
         inline BeginDefineGroupInst(int groupId) : Inst(InstTag::BeginDefineGroup), GroupMixin(groupId) {}
@@ -1969,6 +1984,15 @@ namespace UnifiedRegex
 
         // Specialized matcher for regex ^literal
         inline bool MatchBOILiteral2(const Char * const input, const CharCount inputLength, CharCount offset, DWORD literal2);
+
+        // Backreference text match shared by MatchGroupInst (numbered and
+        // single-name \k references) and MatchNamedGroupInst (duplicated
+        // names): matches info's captured text at inputOffset (case-folded
+        // under the i flag, code point by code point under i+u), advancing
+        // inputOffset past it. info must belong to a participating group
+        // with a non-empty capture; returns false on mismatch/overflow
+        // (the caller fails the match).
+        inline bool MatchBackrefText(const Char* const input, const CharCount inputLength, CharCount& inputOffset, const GroupInfo* const info);
 
         void SaveInnerGroups(const int fromGroupId, const int toGroupId, const bool reset, const Char *const input, ContStack &contStack);
         void DoSaveInnerGroups(const int fromGroupId, const int toGroupId, const bool reset, const Char *const input, ContStack &contStack);

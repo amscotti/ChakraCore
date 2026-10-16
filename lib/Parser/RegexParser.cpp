@@ -152,6 +152,13 @@ namespace UnifiedRegex
         , namedGroupBufferCap(0)
         , sawBareK(false)
         , sawClassK(false)
+        , altPathGroupIdx(nullptr)
+        , altPathCount(0)
+        , altPathCap(0)
+        , altScopes(nullptr)
+        , altScopeCount(0)
+        , altScopeCap(0)
+        , altFrameStart(0)
         , surrogatePairList(nullptr)
         , currentSurrogatePairNode(nullptr)
         , tempLocationOfSurrogatePair(nullptr)
@@ -777,11 +784,31 @@ namespace UnifiedRegex
     }
 
     template <typename P, const bool IsLiteral>
+    bool Parser<P, IsLiteral>::NamedGroupIsAt(const NamedGroup& group, const Char* name, CharCount len) const
+    {
+        if (group.len != len)
+            return false;
+        const Char* candidate = namedGroupBuffer + group.offset;
+        CharCount j = 0;
+        while (j < len && candidate[j] == name[j])
+            j++;
+        return j == len;
+    }
+
+    template <typename P, const bool IsLiteral>
     void Parser<P, IsLiteral>::RecordNamedGroup(const Char* name, CharCount len, int groupId)
     {
-        // Duplicate names are a SyntaxError until duplicate named groups (ES2025) land.
-        if (FindNamedGroup(name, len) >= 0)
-            Fail(JSERR_RegExpSyntax);
+        // ES2025 duplicate named groups: a name may be bound again by a
+        // later group, but only from a different alternative of some
+        // disjunction (no path may pass through two groups of the same
+        // name). Declaring into the current alternative's frame rejects
+        // duplicates within one alternative, nested or sequential;
+        // PopAltScope rejects the ones a merge would reintroduce.
+        for (int i = this->altFrameStart; i < this->altPathCount; i++)
+        {
+            if (NamedGroupIsAt(this->namedGroups[this->altPathGroupIdx[i]], name, len))
+                Fail(JSERR_RegExpSyntax);
+        }
         if (numNamedGroups == namedGroupsCap)
         {
             int newCap = namedGroupsCap == 0 ? 4 : namedGroupsCap * 2;
@@ -795,6 +822,8 @@ namespace UnifiedRegex
         entry.offset = name - namedGroupBuffer;
         entry.len = len;
         entry.groupId = groupId;
+        EnsureAltPathCapacity();
+        this->altPathGroupIdx[this->altPathCount++] = numNamedGroups - 1;
     }
 
     template <typename P, const bool IsLiteral>
@@ -802,17 +831,80 @@ namespace UnifiedRegex
     {
         for (int i = 0; i < numNamedGroups; i++)
         {
-            if (namedGroups[i].len == len)
-            {
-                const Char* candidate = namedGroupBuffer + namedGroups[i].offset;
-                CharCount j = 0;
-                while (j < len && candidate[j] == name[j])
-                    j++;
-                if (j == len)
-                    return namedGroups[i].groupId;
-            }
+            if (NamedGroupIsAt(namedGroups[i], name, len))
+                return namedGroups[i].groupId;
         }
         return -1;
+    }
+
+    template <typename P, const bool IsLiteral>
+    void Parser<P, IsLiteral>::EnsureAltPathCapacity()
+    {
+        if (this->altPathCount == this->altPathCap)
+        {
+            int newCap = this->altPathCap == 0 ? 16 : this->altPathCap * 2;
+            int* newList = AnewArray(ctAllocator, int, newCap);
+            for (int i = 0; i < this->altPathCount; i++)
+                newList[i] = this->altPathGroupIdx[i];
+            this->altPathGroupIdx = newList;
+            this->altPathCap = newCap;
+        }
+    }
+
+    template <typename P, const bool IsLiteral>
+    void Parser<P, IsLiteral>::EnsureAltScopeCapacity()
+    {
+        if (this->altScopeCount == this->altScopeCap)
+        {
+            int newCap = this->altScopeCap == 0 ? 16 : this->altScopeCap * 2;
+            AltScope* newList = AnewArray(ctAllocator, AltScope, newCap);
+            for (int i = 0; i < this->altScopeCount; i++)
+                newList[i] = this->altScopes[i];
+            this->altScopes = newList;
+            this->altScopeCap = newCap;
+        }
+    }
+
+    template <typename P, const bool IsLiteral>
+    void Parser<P, IsLiteral>::PushAltScope()
+    {
+        EnsureAltScopeCapacity();
+        AltScope& scope = this->altScopes[this->altScopeCount++];
+        scope.savedFrameStart = this->altFrameStart;
+        scope.savedAccStart = this->altPathCount;
+        this->altFrameStart = this->altPathCount;
+    }
+
+    template <typename P, const bool IsLiteral>
+    void Parser<P, IsLiteral>::FoldAlternativeIntoScope()
+    {
+        // The finished alternative's frame joins the disjunction's
+        // accumulator (the contiguous region below), and the next
+        // alternative starts a fresh frame.
+        this->altFrameStart = this->altPathCount;
+    }
+
+    template <typename P, const bool IsLiteral>
+    void Parser<P, IsLiteral>::PopAltScope()
+    {
+        const AltScope& scope = this->altScopes[this->altScopeCount - 1];
+        // The accumulator holds every name bound anywhere in this
+        // disjunction. Merging any of them into the enclosing frame's
+        // names would leave two same-name groups on one path.
+        for (int i = scope.savedAccStart; i < this->altPathCount; i++)
+        {
+            const NamedGroup& acc = this->namedGroups[this->altPathGroupIdx[i]];
+            for (int j = scope.savedFrameStart; j < scope.savedAccStart; j++)
+            {
+                if (NamedGroupIsAt(this->namedGroups[this->altPathGroupIdx[j]],
+                        namedGroupBuffer + acc.offset, acc.len))
+                    Fail(JSERR_RegExpSyntax);
+            }
+        }
+        // The accumulator's entries stay in place and now belong to the
+        // enclosing alternative's frame.
+        this->altFrameStart = scope.savedFrameStart;
+        this->altScopeCount--;
     }
 
     // Runs after pass 0 and option parsing: "\k" is a backreference escape
@@ -987,13 +1079,18 @@ namespace UnifiedRegex
     template <typename P, const bool IsLiteral>
     void Parser<P, IsLiteral>::DisjunctionPass0(int depth)
     {
+        PushAltScope();
         AlternativePass0(depth);
         while (true)
         {
             // Could be terminating 0
             if (ECLookahead() != '|')
+            {
+                PopAltScope();
                 return;
+            }
             ECConsume();
+            FoldAlternativeIntoScope();
             AlternativePass0(depth);
         }
     }
@@ -2084,11 +2181,39 @@ namespace UnifiedRegex
                 ECConsume(); // <
                 CharCount nameOffset = this->namedGroupBufferNext;
                 ScanGroupName();
-                int groupId = FindNamedGroup(this->namedGroupBuffer + nameOffset,
-                    this->namedGroupBufferNext - nameOffset);
-                if (groupId < 0)
+                const Char* name = this->namedGroupBuffer + nameOffset;
+                const CharCount nameLen = this->namedGroupBufferNext - nameOffset;
+                // ES2025 duplicate named groups: the name may be bound by
+                // several groups (always in different alternatives of a
+                // disjunction). The reference compiles to a
+                // MatchNamedGroupNode that targets whichever of them
+                // participates; a single-group name keeps the ordinary
+                // numbered-backreference node. Definition order is
+                // textual order, so the collected ids are in numeric
+                // order too.
+                int numIds = 0;
+                for (int i = 0; i < this->numNamedGroups; i++)
+                {
+                    if (NamedGroupIsAt(this->namedGroups[i], name, nameLen))
+                        numIds++;
+                }
+                if (numIds == 0)
                     Fail(JSERR_RegExpSyntax);
-                node = Anew(ctAllocator, MatchGroupNode, groupId);
+                if (numIds == 1)
+                {
+                    node = Anew(ctAllocator, MatchGroupNode, FindNamedGroup(name, nameLen));
+                }
+                else
+                {
+                    int* groupIds = AnewArray(ctAllocator, int, numIds);
+                    int nextId = 0;
+                    for (int i = 0; i < this->numNamedGroups; i++)
+                    {
+                        if (NamedGroupIsAt(this->namedGroups[i], name, nameLen))
+                            groupIds[nextId++] = this->namedGroups[i].groupId;
+                    }
+                    node = Anew(ctAllocator, MatchNamedGroupNode, numIds, groupIds);
+                }
             }
             else
             {

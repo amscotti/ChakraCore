@@ -511,7 +511,7 @@ in `RegExp.prototype.flags`) is wired under the existing
   getter shapes, `flags` getter coercion) plus both test files mirrored
   green in Node before landing — 0 mismatches.
 
-## Limits
+## Limits (sub-batch 2)
 
 - `RegExp.prototype.hasIndices` (and `d` in `RegExp.prototype.flags`)
   exist only under `-ES6RegExPrototypeProperties`; with the flag off
@@ -542,7 +542,7 @@ in `RegExp.prototype.flags`) is wired under the existing
   hashes here are the authoritative pins — reviewers reproduced every
   number on the pinned binaries).
 
-## JIT (B4)
+## JIT (B4) (sub-batch 2)
 
 All evidence is Mac no-JIT interpreter. No new opcode or bytecode
 change, and the new builtin `GetterHasIndices` is a prototype accessor
@@ -553,3 +553,262 @@ dirs) before any JIT-configuration claim, and (b) re-audit the
 JIT-inlined String/RegExp helpers if any inlined fast path assumes the
 regex-result type's shape (the second result type adds a new shape those
 helpers may inline against).
+
+---
+
+# C2-S9 sub-batch 3: duplicate named capture groups (ES2025)
+
+Status: complete on Mac no-JIT (commit `<pending>` — this receipt is
+written on the uncommitted tree). A pattern may bind the same group
+name in several capture groups, **provided a disjunction separates
+them** (`(?<x>a)|(?<x>b)`; two same-name groups on one alternative
+path — sequential, nested, or joined only through a nested
+disjunction — stay a `SyntaxError`, corpus
+`RegExp/duplicate-named-capturing-groups-syntax.js`). Unconditional
+core syntax: no config flag, no JS-bytecode change, no static
+PropertyIds. Lookbehind, the `v` flag, and the modifiers remainder
+stay deferred (c1-triage §S9).
+
+## Semantics the corpus pins
+
+1. **`groups[name]` / `indices.groups[name]`**: the value of the group
+   with that name that participated in the match — the *last
+   participant* under the [[Set]] rule (a non-participating later
+   duplicate must not clobber an earlier participant's value:
+   `/(?<x>a)|(?<x>b)/.exec("a").groups.x === "a"`), `undefined` (the
+   property still present) when *no* group with the name participated.
+   Property order is the textual order of each name's **first**
+   occurrence, not match order (corpus
+   `named-groups/duplicate-names-group-property-enumeration-order.js`:
+   `/(?<y>a)(?<x>a)|(?<x>b)(?<y>b)/` → keys `["y","x"]` on both
+   inputs; `String/prototype/match/duplicate-named-groups-properties.js`
+   adds the x-before-y-in-source, y-matches-first shape and the same
+   for `indices.groups` in its `-indices-` sibling).
+2. **`$<name>` substitution** resolves to the same participating value
+   (`duplicate-names-replace.js` / `-replaceall.js`: `"ab"` → `"[a]b"`,
+   `"ba"` → `"[b]a"`; `$<x>` beside `$1`/`$2`; the ES5 path without a
+   groups object and the `@@replace` path through the coerced groups
+   object agree because both now read the same resolution).
+3. **`\k<name>` with duplicates** is *not* the plain union
+   `(?:\1|\2|\3)`. Node 26.5.0 and the corpus pin the participation
+   rule: the reference matches the text of **the group with that name
+   that participated**, and if *none* participated it matches the
+   empty string; a participating group's value must match — there is
+   **no empty fallback while any same-name group is live**
+   (`/(?:(?<a>x)|(?<a>y))+\k<a>/.exec("xyx")` is `null` while a union
+   would match "xyx" with an empty backreference). The decisive corpus
+   shapes, in `duplicate-names-exec.js`/`-match.js`:
+   - `(?:(?<x>a)|(?<x>b))\k<x>` binds each alternative's own value
+     ("aa" and "bb" match, "abab" is null);
+   - `(?:(?:(?<x>a)|(?<x>b))\k<x>){2}` on "aabb" → `groups.x === "b"`
+     — the loop's second iteration rebinds the name (the engine
+     already implements the spec RepeatMatcher's per-iteration
+     loop-body capture reset, verified pre-batch:
+     `"xz".match(/^(?:(x)|y|z){2}$/)` → `["xz",null]` in both ch and
+     Node);
+   - `^(?:(?<a>x)|(?<a>y)|z){2}\k<a>$` on "xz" → `["xz", undefined,
+     undefined]` — after the group-less `z` iteration clears the body
+     groups the reference goes empty (and "zz" is null because the
+     empty reference still anchors at `$`); `z` alone matches;
+   - `(?<a>x)|(?:zy\k<a>)` on "zy" — a reference in the *other*
+     alternative sees no participant and matches empty.
+     Numeric-order scanning ("last participant wins") is what the
+     instruction implements; the syntactic separation plus the loop
+     reset make numeric order equal participation order for every
+     pattern this grammar can express (mirrored in Node).
+4. **Syntax scope**: Node pins that `(?<x>a)(?<x>b)`, nesting
+   (`(?<x>a(?<x>b))`), post-disjunction siblings
+   (`(?:(?<x>a)|(?<x>b))(?<x>c)`), and two disjunction groups in
+   sequence (`(?:(?<x>a)|(?<x>b))(?:(?<x>c)|d)`) are `SyntaxError`,
+   while `(?<x>a)|(?<x>b)|(?<x>c)`, inner-disjunction separation
+   (`(?<x>a)|(?:b|(?<x>c))`), and nesting across alternatives
+   (`(?<a>(?<x>a))|(?<x>b)`) parse.
+
+## What landed
+
+1. **Parser** (`lib/Parser/RegexParser.{h,cpp}`): the blanket duplicate
+   rejection in `RecordNamedGroup` is replaced by an alternative-scope
+   check. Pass 0 keeps an arena stack of the named-group definitions
+   reachable along the current alternative path plus one
+   `(savedFrameStart, savedAccStart)` record per open disjunction:
+   declaring a name into the current alternative's frame fails if the
+   frame already binds it (same alternative, sequential or nested);
+   each `|` folds the finished alternative's names into the
+   disjunction's accumulator; closing the disjunction fails if any
+   accumulated name is already bound in the *enclosing* frame (which
+   would put two same-name groups on one path) and otherwise folds the
+   accumulator in. The whole rule is pass-0, so the deferred no-AST
+   scan rejects the same shapes. `\k<name>` pass-1 resolution now
+   collects **all** ids bound to the name (textual order = numeric
+   order): one id keeps `MatchGroupNode`, several emit the new
+   `MatchNamedGroupNode`; `ResolveNamedGroupRefs` still only requires
+   the name to exist.
+2. **Registry** (`RegexRuntime.h`): unchanged shape — entries were
+   already one *per definition* in textual order; duplicates simply
+   stop being rejected. `Program::FindNamedGroupId` (first-occurrence
+   lookup, single-value assumption) is deleted; its only caller moved
+   to the resolver below.
+3. **New regex-internal instruction** (not a JS bytecode opcode):
+   `MatchNamedGroupInst` (RegexOpCodes.h, RegexRuntime.{h,cpp}) carries
+   `numGroupIds` with the ids trailing the header **in-line** in the
+   instruction stream (pack(1) structs; the matcher advances past
+   them, and the debug `Print` reports the full variable size so the
+   bytecode dump cursor stays aligned). Exec scans the ids in numeric
+   order, keeps the last participating group, matches its text (empty
+   if it captured empty) or matches empty when none participated —
+   exactly rule 3 above. The text-matching body (the three
+   case-folding/code-point loops) was factored out of
+   `MatchGroupInst::Exec` into `Matcher::MatchBackrefText` and is
+   shared verbatim, so numbered and single-name `\k` backreferences
+   are byte-for-byte the same logic as before. The compile-time
+   `MatchNamedGroupNode` mirrors `MatchGroupNode` in every optimizer
+   pass (same `HasMatchGroup` feature, full first-set, no prefix
+   skipping/scanning/octoquad) — only `Emit` differs.
+4. **Runtime resolution** (`RegexHelper.{h,cpp}`):
+   `ResolveNamedGroupId(program, pattern, name, len)` scans the
+   registry in textual order and returns the **last participating**
+   group's id, or −1. `CreateGroupsObject`, `CreateIndicesArray`'s
+   `indices.groups`, and the ES5 fast path's `$<name>` resolver use
+   it; repeated entries for one name resolve to the same value, so
+   the extra `[[Set]]` is an idempotent overwrite that preserves
+   first-occurrence property order, and a name with no participant
+   stays present with value `undefined`. The `@@replace` path reads
+   the coerced groups object and follows automatically; replace
+   functions receive the same object (corpus
+   `functional-replace-{global,non-global}.js` shapes).
+
+## Tests and gates
+
+- `test/es7/namedgroups-dup.js` (10 tests, default launch,
+  `-args summary`): the syntax accept/reject matrix (separated
+  alternatives incl. three-way and inner-disjunction shapes vs
+  same-path nesting/sequencing), last-participating/undefined rules,
+  property order + descriptors + null prototype, the backreference
+  matrix (per-alternative binding, three-way, loop rebinding, the
+  RepeatMatcher-clear `xz`/`z`/`zz` shapes, forward references, the
+  no-empty-fallback `xyx`/`xyy` pair), exec/match/replace/replaceAll/
+  `$1`-interplay/search/split/test, replace-function arity,
+  `d`-flag `indices.groups` resolution, constructor/compile/dynamic
+  parity, and the dangling/`\k`-class error matrix. All 74 assertions
+  were mirrored in Node 26.5.0 first (0 mismatches; Node caught four
+  drafting bugs: null-proto objects lack `hasOwnProperty`, the
+  case-insensitive capture is the input text `"B"`, the split slice
+  join, and `$<name>`-of-undefined substituting the empty string).
+- Gates bumped 1972→1973 (test) and 2024→2025 (debug-static) in
+  `tools/build/check_regression.py` (docstring, `EXPECTED_PASSED`,
+  `SELECT_COUNTS`, exact-baseline + debug self-test pins; the
+  deliberate stale 2014/1962 fixtures stay), `build.zig` (both
+  profiles), `.github/workflows/zig-macos.yml` (test, debug-static,
+  legacy cmake legs), and the live baseline sentence in
+  `doc/memory-management.md`.
+
+## Evidence (final tree, `zig-out/bin/ch` + `out/debug-static/bin/ch`)
+
+Provenance pins: launcher `zig-out/bin/ch` `43ffa19e701b…` (thin
+launcher, unchanged across the sub-batches), engine
+`zig-out/lib/libChakraCore.dylib` `50cea0b4868c…`, debug-static
+`out/debug-static/bin/ch` `1ffb27651c50…` (the scoped corpus
+artifacts' `binary_sha256` field records the launcher; the engine
+hashes here are the authoritative pins). The review-time engine
+binaries were `8b8528ad3ba1…`/`e0d4f22e5856…`; the post-review
+comment/test/doc fix round relinked both (comment line shifts only,
+no behavior change) and every focused number below was re-run green
+on the final pair.
+
+- `mise exec -- zig build` and `-Dprofile=debug-static` — exit 0;
+  `zig build check --summary line` — 572/572 steps, `Total: passed
+  1973, failed 0` (DebuggerCommon 208/0 — no baseline churn; es7
+  focused files pass on both binaries: namedgroups 23/23,
+  namedgroups-symbols 7/7, namedgroups-dup 10/10, regexp-indices
+  17/17, regexp-indices-symbols 6/6; bytecode "source headers
+  unchanged; regen exit 0"). `zig build check-regression
+  -Dprofile=debug-static --summary line` — `Total: passed 2025,
+  failed 0`, 545/545 steps.
+- Corpus (pinned test262, `-nonative -Test262 -CollectGarbage`), file
+  set = `RegExp/named-groups/**` +
+  `language/literals/regexp/named-groups/**` (sub-batch 1's set) plus
+  `RegExp/duplicate-named-capturing-groups-syntax.js` and the two
+  `String/prototype/match/duplicate-named-*` files (190 scenarios):
+  **182 passed / 8 failed** default flags
+  (`out/test262-s9-dup-namedgroups`), **188/2** with
+  `-ES6RegExSymbols` (`out/test262-s9-dup-namedgroups-sym`), **182/8**
+  on the debug-static binary (`out/test262-s9-dup-namedgroups-dbg`,
+  asserts on). Residue = 2 lookbehind (deferred sub-batch) + 4
+  `groups-object-subclass{,-sans}` and 2 `duplicate-names-matchall`
+  scenarios that need the symbols flag and pass in the `-sym` run.
+  The sub-batch-1 residue of 20 duplicate-name failures flipped: the
+  incremental join vs `out/test262-s9-namedgroups(-sym)` on the shared
+  184 scenarios is **18 fail→pass / 0 pass→fail** (default; the 2
+  matchAll scenarios complete it to **20/0** under symbols). The 6
+  newly-added scenarios (syntax ×2, String match ×4) all pass.
+- `RegExp/match-indices/**` re-run: **28/28** (`out/test262-s9-dup-indices`)
+  — no sub-batch-2 regression.
+- Joins vs the C1 baseline `out/test262-zig` on the 190-scenario set:
+  **66 fail→pass / 0 pass→fail** (default flags), **72/0** (symbols).
+- Resym universe (`test/built-ins/{RegExp,String}/**/*.js`, 6,199
+  scenarios): default flags `out/test262-s9-dup-resym-base` —
+  **4,077/2,122**; `-ES6RegExSymbols` `out/test262-s9-dup-resym` —
+  **4,537/1,662**. Joins vs the C1 baselines (`out/test262-zig` /
+  `out/test262-audit-resym`): **224 fail→pass / 0 pass→fail**
+  (default) and **252/0** (symbols) — the cumulative S9 total
+  (sub-batches 1–2 contributed 196/224 of those). Incremental joins vs
+  the sub-batch-2 resym artifacts (`out/test262-s9-indices-resym{,-base}`,
+  4,049/4,507 passed): **28 fail→pass / 0 pass→fail** default
+  (14 duplicate-group files × 2 scenarios: the ten
+  `named-groups/duplicate-names-*` minus matchall, the syntax file,
+  the two `RegExp/prototype/exec/duplicate-named-*` properties files,
+  and the two `String/prototype/match/duplicate-named-*` files) and
+  **30/0** with symbols (the same plus `duplicate-names-matchall` ×2).
+- `analyze.py` on the default corpus artifact:
+  `regexp-duplicate-named-groups` 24/2 (the 2 = the matchAll scenarios
+  that pass under symbols); buckets `required-feature-missing` 2
+  (lookbehind), `engine-defect-on-existing` 6 (the 4 subclass + 2
+  matchAll flag-gated scenarios — same families as sub-batch 1's
+  classification; all pass under the symbols flag).
+- Node 26.5.0 oracle: 74 mirrored test assertions plus ~45 ad-hoc
+  probes (three-alternative and inner-disjunction legality, groups/
+  indices key order, participation rules, the loop-clear backreference
+  family, forward references, compile/constructor/literal parity,
+  `i`/`u`/`g` flag matrices, astral names, split/search/test/matchAll)
+  — 0 mismatches.
+
+## Where groups live / allocation strategy (sub-batch 3)
+
+No change to the ownership map: the registry stays on the recycler-
+owned `Program` (one entry per definition — duplicates included);
+per-match state stays in the matcher's group array; the groups/
+indices objects are ordinary recycler allocations unchanged. The new
+instruction's id list is compiled into the pattern's instruction
+buffer (rtAllocator arena, same lifetime as every other instruction);
+`ResolveNamedGroupId` is a pure scan over immutable leaves plus the
+matcher's group array. No new allocation domain, no barrier change.
+
+## Limits (sub-batch 3)
+
+- The observable syntax change is exactly that disjunction-separated
+  duplicate names now parse where they were a `SyntaxError`; same-path
+  duplicates (sequential, nested, post-disjunction) remain errors, so
+  no previously-valid pattern changes meaning — 0 pass→fail in any
+  joined universe.
+- A `\k<name>` with duplicates compiles to one variable-length
+  instruction per reference site; pathological patterns with many
+  same-name groups pay a linear id scan per execution (bounded by the
+  group count; the corpus shapes have 2–3).
+- Lookbehind, `v` flag, modifiers remain deferred; the 2 lookbehind
+  scenarios stay the classified named-groups residue.
+- matchAll/subclass scenarios remain symbols-flag-gated (unchanged
+  classification from sub-batches 1–2).
+- The pre-existing S7-class `g`+non-writable-`lastIndex` divergence
+  recorded in sub-batch 2 is untouched.
+
+## JIT (B4) (sub-batch 3)
+
+All evidence is Mac no-JIT interpreter. The change adds a
+regex-internal instruction (matcher dispatch switch, no JS bytecode,
+no PropertyId) and a compile-time node; no JIT surface reads it. B4
+must (a) run `namedgroups-dup.js` (with `namedgroups.js`,
+`regexp-indices.js` and their symbols twins) and the duplicate-name
+corpus families under SimpleJIT/FullJIT before any JIT-configuration
+claim, and (b) re-audit the JIT-inlined String/RegExp helpers if any
+inlined fast path assumes the matcher's instruction stream shape (the
+variable-length instruction is the first of its kind in that stream).

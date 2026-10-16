@@ -80,6 +80,9 @@ M(SyncToLiteralEquivAndBackup) // SyncToLiteralAndBackupInstT<EquivScannerMixin>
 M(SyncToLiteralEquivTrivialLastPatCharAndBackup) // SyncToLiteralAndBackupInstT<EquivTrivialLastPatCharScannerMixin>
 M(SyncToLiteralsAndBackup)
 M(MatchGroup)
+// \k<name> whose name is bound by several groups (ES2025 duplicate named
+// groups); numGroupIds int group ids trail the instruction in-line
+M(MatchNamedGroup)
 // 0x38
 M(BeginDefineGroup)
 M(EndDefineGroup)

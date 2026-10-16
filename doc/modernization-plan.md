@@ -8,8 +8,8 @@
 > policy, triage and shortlist are in [c1-triage.md](c1-triage.md);
 > qualification is conditional on explicit host-reported negative phase
 > before any full result is certified. **C2 is in progress** — batches
-> S4, S5, S10, S11, S7-matchAll and the S9 named-groups core + `d` flag
-> are closed
+> S4, S5, S10, S11, S7-matchAll and the S9 named-groups core + `d`
+> flag + duplicate named groups are closed
 > on Mac no-JIT (JIT claims gated on B4), receipts in
 > [c2-s4.md](c2-s4.md), [c2-s5.md](c2-s5.md),
 > [c2-s10.md](c2-s10.md), [c2-s11.md](c2-s11.md),
@@ -47,7 +47,7 @@ handling have been validated before its results are used as a completion gate.
 | B6 | Windows feasibility and rollout; later target extensions | Stable build contracts | Separate expansion |
 | Z1 | One useful mixed C++/Zig unit behind a tested C ABI | B3; B4 if the unit ships on Linux | Optional pilot |
 | C1 | Qualified ES2025 test policy and triaged failures | Stable Mac build at B3 | Recorded (CONDITIONAL) |
-| C2 | Bounded compatibility batches and partial releases | C1; B4 before JIT-wide enablement | In progress (S4/S5/S10/S11/S7-matchAll/S9 named-groups + d-flag closed on Mac no-JIT; JIT claims gated on B4) |
+| C2 | Bounded compatibility batches and partial releases | C1; B4 before JIT-wide enablement | In progress (S4/S5/S10/S11/S7-matchAll/S9 named-groups + d-flag + duplicate named groups closed on Mac no-JIT; JIT claims gated on B4) |
 | C3 | Larger runtime/object-model feature projects | C1 and their feature prerequisites | Separate projects |
 | C4 | Verified full ES2025 core-language result | Required C2/C3 work and qualified runner | Long-term objective |
 
@@ -617,8 +617,18 @@ results with `indices.groups` mirroring, `d` parsing and canonical
 same receipt, "Sub-batch 2"): `RegExp/match-indices` 28/28 on both flag
 matrices, hasIndices/flags prototype dirs 42/48 under the proto flag
 (residue 4 BigInt `4n` + 2 `v` flag), resym joins 28/0 and 28/0, gates
-moved to 1972/2024. The remaining S9 work (lookbehind,
-`v` flag after S3, duplicate named groups) stays C2-per-batch.
+moved to 1972/2024. S9 sub-batch 3 landed ES2025 duplicate named
+groups unconditionally (duplicate names parse iff a disjunction
+separates them; `groups`/`indices.groups`/`$<name>` resolve to the
+last participating group; `\k<name>` with duplicates compiles to a
+regex-internal `MatchNamedGroup` instruction with the
+participation-guard semantics — no JS-bytecode or PropertyId change;
+same receipt, "Sub-batch 3"): the named-groups corpus set is 182/8
+default and 188/2 under symbols (residue 2 lookbehind + 6
+symbols-gated), match-indices stays 28/28, resym joins 28/0 and 30/0
+incremental (224/0 and 252/0 vs C1), gates moved to 1973/2025. The
+remaining S9 work (lookbehind, `v` flag after S3, modifiers) stays
+C2-per-batch.
 S6 shows zero regressions under `-ESSharedArrayBuffer` but
 needs a product/security decision before any default, plus
 waitAsync/growable/non-shared-Atomics work; S2's flagged path is a stub

@@ -2624,135 +2624,180 @@ namespace UnifiedRegex
     // MatchGroupInst
     // ----------------------------------------------------------------------
 
+    // Shared backreference text match (see the declaration in
+    // RegexRuntime.h): matches info's captured text at inputOffset,
+    // advancing inputOffset. Returns false on mismatch or overflow; the
+    // callers fail the match.
+    inline bool Matcher::MatchBackrefText(const Char* const input, const CharCount inputLength, CharCount& inputOffset, const GroupInfo* const info)
+    {
+        Assert(!info->IsUndefined() && info->length > 0);
+        if (info->length > inputLength - inputOffset)
+        {
+            return false;
+        }
+
+        CharCount groupOffset = info->offset;
+        const CharCount groupEndOffset = groupOffset + info->length;
+
+        bool isCaseInsensitiveMatch = (program->flags & IgnoreCaseRegexFlag) != 0;
+        bool isCodePointList = (program->flags & UnicodeRegexFlag) != 0;
+
+        // This is the only place in the runtime machinery we need to convert characters to their equivalence class
+        if (isCaseInsensitiveMatch && isCodePointList)
+        {
+            auto getNextCodePoint = [=](CharCount &offset, CharCount endOffset, codepoint_t &codePoint) {
+                if (endOffset <= offset)
+                {
+                    return false;
+                }
+
+                Char lowerPart = input[offset];
+                if (!Js::NumberUtilities::IsSurrogateLowerPart(lowerPart) || offset + 1 == endOffset)
+                {
+                    codePoint = lowerPart;
+                    offset += 1;
+                    return true;
+                }
+
+                Char upperPart = input[offset + 1];
+                if (!Js::NumberUtilities::IsSurrogateUpperPart(upperPart))
+                {
+                    codePoint = lowerPart;
+                    offset += 1;
+                }
+                else
+                {
+                    codePoint = Js::NumberUtilities::SurrogatePairAsCodePoint(lowerPart, upperPart);
+                    offset += 2;
+                }
+
+                return true;
+            };
+
+            codepoint_t equivs[CaseInsensitive::EquivClassSize];
+            while (true)
+            {
+                codepoint_t groupCodePoint;
+                bool hasGroupCodePoint = getNextCodePoint(groupOffset, groupEndOffset, groupCodePoint);
+                if (!hasGroupCodePoint)
+                {
+                    break;
+                }
+
+                // We don't need to verify that there is a valid input code point since at the beginning
+                // of the function, we make sure that the length of the input is at least as long as
+                // the length of the group.
+                codepoint_t inputCodePoint;
+                getNextCodePoint(inputOffset, inputLength, inputCodePoint);
+
+                bool doesMatch = false;
+                if (!Js::NumberUtilities::IsInSupplementaryPlane(groupCodePoint))
+                {
+                    auto toCanonical = [&](codepoint_t c) {
+                        return standardChars->ToCanonical(
+                            CaseInsensitive::MappingSource::CaseFolding,
+                            static_cast<char16>(c));
+                    };
+                    doesMatch = (toCanonical(groupCodePoint) == toCanonical(inputCodePoint));
+                }
+                else
+                {
+                    uint tblidx = 0;
+                    uint acth = 0;
+                    CaseInsensitive::RangeToEquivClass(tblidx, groupCodePoint, groupCodePoint, acth, equivs);
+                    CompileAssert(CaseInsensitive::EquivClassSize == 4);
+                    doesMatch =
+                        inputCodePoint == equivs[0]
+                        || inputCodePoint == equivs[1]
+                        || inputCodePoint == equivs[2]
+                        || inputCodePoint == equivs[3];
+                }
+
+                if (!doesMatch)
+                {
+                    return false;
+                }
+            }
+        }
+        else if (isCaseInsensitiveMatch)
+        {
+            do
+            {
+#if ENABLE_REGEX_CONFIG_OPTIONS
+                CompStats();
+#endif
+                auto toCanonical = [&](CharCount &offset) {
+                    return standardChars->ToCanonical(CaseInsensitive::MappingSource::UnicodeData, input[offset++]);
+                };
+
+                if (toCanonical(groupOffset) != toCanonical(inputOffset))
+                {
+                    return false;
+                }
+            }
+            while (groupOffset < groupEndOffset);
+        }
+        else
+        {
+            do
+            {
+#if ENABLE_REGEX_CONFIG_OPTIONS
+                CompStats();
+#endif
+                if (input[groupOffset++] != input[inputOffset++])
+                {
+                    return false;
+                }
+            }
+            while (groupOffset < groupEndOffset);
+        }
+
+        return true;
+    }
+
     inline bool MatchGroupInst::Exec(REGEX_INST_EXEC_PARAMETERS) const
     {
         GroupInfo* const info = matcher.GroupIdToGroupInfo(groupId);
         if (!info->IsUndefined() && info->length > 0)
         {
-            if (info->length > inputLength - inputOffset)
+            if (!matcher.MatchBackrefText(input, inputLength, inputOffset, info))
             {
                 return matcher.Fail(FAIL_PARAMETERS);
-            }
-
-            CharCount groupOffset = info->offset;
-            const CharCount groupEndOffset = groupOffset + info->length;
-
-            bool isCaseInsensitiveMatch = (matcher.program->flags & IgnoreCaseRegexFlag) != 0;
-            bool isCodePointList = (matcher.program->flags & UnicodeRegexFlag) != 0;
-
-            // This is the only place in the runtime machinery we need to convert characters to their equivalence class
-            if (isCaseInsensitiveMatch && isCodePointList)
-            {
-                auto getNextCodePoint = [=](CharCount &offset, CharCount endOffset, codepoint_t &codePoint) {
-                    if (endOffset <= offset)
-                    {
-                        return false;
-                    }
-
-                    Char lowerPart = input[offset];
-                    if (!Js::NumberUtilities::IsSurrogateLowerPart(lowerPart) || offset + 1 == endOffset)
-                    {
-                        codePoint = lowerPart;
-                        offset += 1;
-                        return true;
-                    }
-
-                    Char upperPart = input[offset + 1];
-                    if (!Js::NumberUtilities::IsSurrogateUpperPart(upperPart))
-                    {
-                        codePoint = lowerPart;
-                        offset += 1;
-                    }
-                    else
-                    {
-                        codePoint = Js::NumberUtilities::SurrogatePairAsCodePoint(lowerPart, upperPart);
-                        offset += 2;
-                    }
-
-                    return true;
-                };
-
-                codepoint_t equivs[CaseInsensitive::EquivClassSize];
-                while (true)
-                {
-                    codepoint_t groupCodePoint;
-                    bool hasGroupCodePoint = getNextCodePoint(groupOffset, groupEndOffset, groupCodePoint);
-                    if (!hasGroupCodePoint)
-                    {
-                        break;
-                    }
-
-                    // We don't need to verify that there is a valid input code point since at the beginning
-                    // of the function, we make sure that the length of the input is at least as long as the
-                    // length of the group.
-                    codepoint_t inputCodePoint;
-                    getNextCodePoint(inputOffset, inputLength, inputCodePoint);
-
-                    bool doesMatch = false;
-                    if (!Js::NumberUtilities::IsInSupplementaryPlane(groupCodePoint))
-                    {
-                        auto toCanonical = [&](codepoint_t c) {
-                            return matcher.standardChars->ToCanonical(
-                                CaseInsensitive::MappingSource::CaseFolding,
-                                static_cast<char16>(c));
-                        };
-                        doesMatch = (toCanonical(groupCodePoint) == toCanonical(inputCodePoint));
-                    }
-                    else
-                    {
-                        uint tblidx = 0;
-                        uint acth = 0;
-                        CaseInsensitive::RangeToEquivClass(tblidx, groupCodePoint, groupCodePoint, acth, equivs);
-                        CompileAssert(CaseInsensitive::EquivClassSize == 4);
-                        doesMatch =
-                            inputCodePoint == equivs[0]
-                            || inputCodePoint == equivs[1]
-                            || inputCodePoint == equivs[2]
-                            || inputCodePoint == equivs[3];
-                    }
-
-                    if (!doesMatch)
-                    {
-                        return matcher.Fail(FAIL_PARAMETERS);
-                    }
-                }
-            }
-            else if (isCaseInsensitiveMatch)
-            {
-                do
-                {
-#if ENABLE_REGEX_CONFIG_OPTIONS
-                    matcher.CompStats();
-#endif
-                    auto toCanonical = [&](CharCount &offset) {
-                        return matcher.standardChars->ToCanonical(CaseInsensitive::MappingSource::UnicodeData, input[offset++]);
-                    };
-
-                    if (toCanonical(groupOffset) != toCanonical(inputOffset))
-                    {
-                        return matcher.Fail(FAIL_PARAMETERS);
-                    }
-                }
-                while (groupOffset < groupEndOffset);
-            }
-            else
-            {
-                do
-                {
-#if ENABLE_REGEX_CONFIG_OPTIONS
-                    matcher.CompStats();
-#endif
-                    if (input[groupOffset++] != input[inputOffset++])
-                    {
-                        return matcher.Fail(FAIL_PARAMETERS);
-                    }
-                }
-                while (groupOffset < groupEndOffset);
             }
         }
         // else: trivially match empty string
 
         instPointer += sizeof(*this);
+        return false;
+    }
+
+    inline bool MatchNamedGroupInst::Exec(REGEX_INST_EXEC_PARAMETERS) const
+    {
+        // ES2025 duplicate named groups: take the last participating group
+        // in numeric order, the same rule result construction applies.
+        // This grammar only admits duplicates across a disjunction and the
+        // engine resets loop-body captures each iteration (spec RepeatMatcher
+        // 2c), so numeric order equals participation order; with none
+        // participating the reference matches the empty string, like a
+        // backreference to a single non-participating group.
+        const int* const groupIds = reinterpret_cast<const int*>(this + 1);
+        const GroupInfo* info = 0;
+        for (int i = 0; i < numGroupIds; i++)
+        {
+            const GroupInfo* const candidate = matcher.GroupIdToGroupInfo(groupIds[i]);
+            if (!candidate->IsUndefined())
+                info = candidate;
+        }
+        if (info != 0 && info->length > 0)
+        {
+            if (!matcher.MatchBackrefText(input, inputLength, inputOffset, info))
+            {
+                return matcher.Fail(FAIL_PARAMETERS);
+            }
+        }
+        // else: trivially match empty string
+
+        instPointer += sizeof(*this) + numGroupIds * sizeof(int);
         return false;
     }
 
@@ -2764,6 +2809,22 @@ namespace UnifiedRegex
         PRINT_RE_BYTECODE_MID();
         PRINT_BYTES(GroupMixin);
         PRINT_RE_BYTECODE_END();
+    }
+
+    int MatchNamedGroupInst::Print(DebugWriter* w, Label label, const Char* litbuf) const
+    {
+        PRINT_RE_BYTECODE_BEGIN("MatchNamedGroup");
+        w->Print(_u("%d ids:"), numGroupIds);
+        const int* const groupIds = reinterpret_cast<const int*>(this + 1);
+        for (int i = 0; i < numGroupIds; i++)
+            w->Print(_u(" %d"), groupIds[i]);
+        PRINT_RE_BYTECODE_MID();
+        PRINT_BYTES(Inst);
+        // Manual ending: the variable-length instruction must report its
+        // full size (the cursor in Program::Print advances by it).
+        w->Unindent();
+        }
+        return sizeof(*this) + numGroupIds * sizeof(int);
     }
 #endif
 
@@ -5722,27 +5783,6 @@ namespace UnifiedRegex
     {
         Assert(i < numGroupNames);
         return groupNameEntries[i].groupId;
-    }
-
-    int Program::FindNamedGroupId(const Chars<char16>::Char* name, CharCount len) const
-    {
-        for (uint32 i = 0; i < numGroupNames; i++)
-        {
-            if (groupNameEntries[i].len == len)
-            {
-                const Char* candidate = groupNameChars + groupNameEntries[i].offset;
-                CharCount j = 0;
-                while (j < len && candidate[j] == name[j])
-                {
-                    j++;
-                }
-                if (j == len)
-                {
-                    return groupNameEntries[i].groupId;
-                }
-            }
-        }
-        return -1;
     }
 
     void Program::FreeBody(ArenaAllocator* rtAllocator)
