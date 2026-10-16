@@ -1867,10 +1867,26 @@ namespace UnifiedRegex
                 // re-parses as an identity escape pass 1 must still see the
                 // structure ('\k<a)' must not swallow the ')').
                 const EncodedChar* afterGt = nullptr;
+                // A backslash escapes the next character. An escaped '/' is
+                // not the end of a literal (`/\k<a\/>/` is the identity
+                // escape 'k' plus "<a/>"), and an escaped '(' is not a
+                // group (`/\k<a\(b)/` is a SyntaxError, matching Node).
+                // '$' is not a stop: it is a valid name character.
+                bool escaped = false;
                 while (!IsEOF())
                 {
+                    if (escaped)
+                    {
+                        NextChar();
+                        escaped = false;
+                        continue;
+                    }
                     switch (ECLookahead())
                     {
+                    case '\\':
+                        ECConsume();
+                        escaped = true;
+                        continue;
                     case '>':
                         ECConsume();
                         afterGt = next;
@@ -1885,11 +1901,7 @@ namespace UnifiedRegex
                     case '?':
                     case '^':
                     case '.':
-                    case '/': // terminates a regex literal body
-                        // Note: '$' is NOT a stop char — it is a valid
-                        // identifier character in group names (same grammar
-                        // as the definitions: IdentifierStart includes '$'),
-                        // so \k<$a> must scan past it (Node parity).
+                    case '/': // unescaped '/' terminates a regex literal body
                         break;
                     default:
                         NextChar();
@@ -3145,6 +3157,14 @@ namespace UnifiedRegex
             }
 
             switch (c) {
+            case 'd':
+                // ES2022 'd' flag: unconditional core syntax (no config flag)
+                if ((flags & HasIndicesRegexFlag) != 0)
+                {
+                    Fail(JSERR_RegExpSyntax);
+                }
+                flags = (RegexFlags)(flags | HasIndicesRegexFlag);
+                break;
             case 'i':
                 if ((flags & IgnoreCaseRegexFlag) != 0)
                 {
@@ -3389,6 +3409,13 @@ namespace UnifiedRegex
         {
             throw ParseError(*deferredIfUnicodeError);
         }
+
+        // ParseLiteral resolves named references here. This no-AST scan is
+        // the one deferred functions get, and a syntax error discovered only
+        // on the later reparse is reported as an internal error, so the
+        // dangling-name and illegal class-\k checks have to run now too.
+        // The call restores the position captured in outTotal* above.
+        ResolveNamedGroupRefs(input, inputLim);
     }
 
     template <typename P, const bool IsLiteral>

@@ -608,8 +608,16 @@ receipt [c2-s9-namedgroups.md](c2-s9-namedgroups.md)): corpus 158/184
 default flags and 162/184 under `-ES6RegExSymbols` with the residue
 being exactly the deferred S9 sub-batches (duplicate names, lookbehind,
 flag-gated subclass scenarios), and resym-universe joins of 168/0 and
-194/0 fail→pass/pass→fail. The remaining S9 work (lookbehind, `d`
-indices, `v` flag after S3, duplicate named groups) stays C2-per-batch.
+194/0 fail→pass/pass→fail. S9 sub-batch 2 landed the `d` flag / match
+`indices` unconditionally (the `indices` array on exec/non-global-match
+results with `indices.groups` mirroring, `d` parsing and canonical
+`dgimsuy` flag-string order in all four builders; `hasIndices` + the
+`flags` getter's `d` under `ES6RegExPrototypeProperties`, corpus-pinned;
+same receipt, "Sub-batch 2"): `RegExp/match-indices` 28/28 on both flag
+matrices, hasIndices/flags prototype dirs 42/48 under the proto flag
+(residue 4 BigInt `4n` + 2 `v` flag), resym joins 28/0 and 28/0, gates
+moved to 1972/2024. The remaining S9 work (lookbehind,
+`v` flag after S3, duplicate named groups) stays C2-per-batch.
 S6 shows zero regressions under `-ESSharedArrayBuffer` but
 needs a product/security decision before any default, plus
 waitAsync/growable/non-shared-Atomics work; S2's flagged path is a stub

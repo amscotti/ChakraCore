@@ -118,6 +118,12 @@ namespace UnifiedRegex
         return GetScriptContext()->GetConfig()->IsES6RegExStickyEnabled() && (rep.unified.program->flags & StickyRegexFlag) != 0;
     }
 
+    bool RegexPattern::IsHasIndices() const
+    {
+        // ES2022 'd' flag is unconditional core syntax: no config flag gates it
+        return (rep.unified.program->flags & HasIndicesRegexFlag) != 0;
+    }
+
     bool RegexPattern::WasLastMatchSuccessful() const
     {
         return rep.unified.matcher != 0 && rep.unified.matcher->WasLastMatchSuccessful();
@@ -197,6 +203,8 @@ namespace UnifiedRegex
             }
         }
         w->Print(_u("/"));
+        if (IsHasIndices())
+            w->Print(_u("d"));
         if (IsIgnoreCase())
             w->Print(_u("i"));
         if (IsGlobal())

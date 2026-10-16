@@ -27,6 +27,12 @@ namespace Js
         {
             switch (str[i])
             {
+            case 'd':
+                // ES2022 'd' flag: unconditional core syntax (no config flag)
+                if ((flags & UnifiedRegex::HasIndicesRegexFlag) != 0)
+                    return false;
+                flags = (UnifiedRegex::RegexFlags)(flags | UnifiedRegex::HasIndicesRegexFlag);
+                break;
             case 'i':
                 if ((flags & UnifiedRegex::IgnoreCaseRegexFlag) != 0)
                     return false;
@@ -481,7 +487,7 @@ namespace Js
 
                 Assert(pattern->IsGlobal());
 
-                JavascriptArray* arrayResult = CreateMatchResult(stackAllocationPointer, scriptContext, /* isGlobal */ true, pattern->NumGroups(), input);
+                JavascriptArray* arrayResult = CreateMatchResult(stackAllocationPointer, scriptContext, /* isGlobal */ true, pattern->NumGroups(), input, /* hasIndices */ false);
                 FinalizeMatchResult(scriptContext, /* isGlobal */ true, arrayResult, lastSuccessfulMatch);
 
                 if (trigramInfo->resultCount > 0)
@@ -549,7 +555,7 @@ namespace Js
             if (!noResult)
             {
                 if (arrayResult == 0)
-                    arrayResult = CreateMatchResult(stackAllocationPointer, scriptContext, isGlobal, pattern->NumGroups(), input);
+                    arrayResult = CreateMatchResult(stackAllocationPointer, scriptContext, isGlobal, pattern->NumGroups(), input, pattern->IsHasIndices());
                 JavascriptString *const matchedString = SubString::New(input, lastActualMatch.offset, lastActualMatch.length);
                 if (isGlobal)
                     arrayResult->DirectSetItemAt(globalIndex, matchedString);
@@ -590,6 +596,10 @@ namespace Js
                 }
             }
             JavascriptRegularExpressionResult::SetGroups(arrayResult, GetGroupsVar(scriptContext, pattern, input));
+            if (pattern->IsHasIndices())
+            {
+                JavascriptRegularExpressionResult::SetIndices(arrayResult, CreateIndicesArray(scriptContext, pattern, input));
+            }
             FinalizeMatchResult(scriptContext, /* isGlobal */ false, arrayResult, lastSuccessfulMatch);
         }
         else
@@ -635,7 +645,8 @@ namespace Js
 
         const int numGroups = pattern->NumGroups();
         Assert(numGroups >= 0);
-        JavascriptArray* result = CreateExecResult(stackAllocationPointer, scriptContext, numGroups, input, match);
+        const bool hasIndices = pattern->IsHasIndices();
+        JavascriptArray* result = CreateExecResult(stackAllocationPointer, scriptContext, numGroups, input, match, hasIndices);
         Var nonMatchValue = NonMatchValue(scriptContext, false);
         Field(Var) *elements = ((SparseArraySegment<Var>*)result->GetHead())->elements;
         for (uint groupId = 0; groupId < (uint)numGroups; groupId++)
@@ -644,6 +655,10 @@ namespace Js
             elements[groupId] = GetGroup(scriptContext, pattern, input, nonMatchValue, groupId);
         }
         JavascriptRegularExpressionResult::SetGroups(result, GetGroupsVar(scriptContext, pattern, input));
+        if (hasIndices)
+        {
+            JavascriptRegularExpressionResult::SetIndices(result, CreateIndicesArray(scriptContext, pattern, input));
+        }
         return result;
     }
 
@@ -2153,6 +2168,76 @@ namespace Js
         return CreateGroupsObject(scriptContext, pattern, input);
     }
 
+    JavascriptArray* RegexHelper::CreateIndicesArray(ScriptContext* scriptContext, UnifiedRegex::RegexPattern* pattern, JavascriptString* input)
+    {
+        Assert(pattern->IsHasIndices());
+        Assert(pattern->WasLastMatchSuccessful());
+
+        JavascriptLibrary* library = scriptContext->GetLibrary();
+        const int numGroups = pattern->NumGroups();
+        Var undefined = library->GetUndefined();
+
+        // A real Array (ArrayCreate(n)) with one [start, end] pair per
+        // capture, in capture order starting at capture 0 (the whole match);
+        // undefined slots for groups that did not participate.
+        JavascriptArray* indices = library->CreateArray(numGroups);
+        for (int groupId = 0; groupId < numGroups; groupId++)
+        {
+            UnifiedRegex::GroupInfo group = pattern->GetGroup(groupId);
+            if (group.IsUndefined())
+            {
+                indices->DirectSetItemAt(groupId, undefined);
+                continue;
+            }
+            JavascriptArray* matchIndices = library->CreateArray(2);
+            matchIndices->DirectSetItemAt(0, JavascriptNumber::ToVar(group.offset, scriptContext));
+            matchIndices->DirectSetItemAt(1, JavascriptNumber::ToVar(group.offset + group.length, scriptContext));
+            indices->DirectSetItemAt(groupId, matchIndices);
+        }
+
+        // Own "groups" data property: the property always exists (spec
+        // MakeIndicesArray creates it unconditionally); its value is a
+        // null-prototype object mirroring the named groups' pairs when the
+        // pattern has named captures, undefined otherwise. CreateDataProperty
+        // semantics: an ordinary [[Set]] here would be observable through
+        // Array.prototype setters (corpus indices-groups-object.js).
+        UnifiedRegex::Program* program = pattern->rep.unified.program;
+        const bool hasNamedGroups = program->HasNamedGroups();
+        Var groupsVar = undefined;
+        if (hasNamedGroups)
+        {
+            DynamicObject* groups = library->CreateObject(library->GetNull()); // null [[Prototype]]
+            const uint32 numGroupNames = program->numGroupNames;
+            for (uint32 i = 0; i < numGroupNames; i++)
+            {
+                CharCount nameLen = 0;
+                const char16* name = program->GetGroupName(i, &nameLen);
+                PropertyId propertyId = scriptContext->GetOrAddPropertyIdTracked(name, static_cast<int>(nameLen));
+                UnifiedRegex::GroupInfo group = pattern->GetGroup(program->GetGroupNameGroupId(i));
+                Var value = undefined;
+                if (!group.IsUndefined())
+                {
+                    JavascriptArray* matchIndices = library->CreateArray(2);
+                    matchIndices->DirectSetItemAt(0, JavascriptNumber::ToVar(group.offset, scriptContext));
+                    matchIndices->DirectSetItemAt(1, JavascriptNumber::ToVar(group.offset + group.length, scriptContext));
+                    value = matchIndices;
+                }
+                // CreateDataProperty semantics on a null-prototype object
+                // (see CreateGroupsObject), including for "__proto__" names.
+                JavascriptOperators::SetProperty(groups, groups, propertyId, value, scriptContext);
+            }
+            groupsVar = groups;
+        }
+        indices->SetPropertyWithAttributes(
+            library->GetRegexGroupsPropertyRecord()->GetPropertyId(),
+            groupsVar,
+            PropertyDynamicTypeDefaults,
+            nullptr,
+            PropertyOperation_None);
+
+        return indices;
+    }
+
     // ======================================================================
     // Match results propagate into three places:
     //  - The match result array. Generally the array has string entries for the overall match substring,
@@ -2327,7 +2412,7 @@ namespace Js
         }
     }
 
-    JavascriptArray* RegexHelper::CreateMatchResult(void *const stackAllocationPointer, ScriptContext* scriptContext, bool isGlobal, int numGroups, JavascriptString* input)
+    JavascriptArray* RegexHelper::CreateMatchResult(void *const stackAllocationPointer, ScriptContext* scriptContext, bool isGlobal, int numGroups, JavascriptString* input, bool hasIndices)
     {
         if (isGlobal)
         {
@@ -2335,7 +2420,7 @@ namespace Js
             return scriptContext->GetLibrary()->CreateArrayOnStack(stackAllocationPointer);
         }
         else
-            return JavascriptRegularExpressionResult::Create(stackAllocationPointer, numGroups, input, scriptContext);
+            return JavascriptRegularExpressionResult::Create(stackAllocationPointer, numGroups, input, scriptContext, hasIndices);
     }
 
     void RegexHelper::FinalizeMatchResult(ScriptContext* scriptContext, bool isGlobal, JavascriptArray* arr, UnifiedRegex::GroupInfo match)
@@ -2345,9 +2430,9 @@ namespace Js
         // else: arr is an ordinary array
     }
 
-    JavascriptArray* RegexHelper::CreateExecResult(void *const stackAllocationPointer, ScriptContext* scriptContext, int numGroups, JavascriptString* input, UnifiedRegex::GroupInfo match)
+    JavascriptArray* RegexHelper::CreateExecResult(void *const stackAllocationPointer, ScriptContext* scriptContext, int numGroups, JavascriptString* input, UnifiedRegex::GroupInfo match, bool hasIndices)
     {
-        JavascriptArray* res = JavascriptRegularExpressionResult::Create(stackAllocationPointer, numGroups, input, scriptContext);
+        JavascriptArray* res = JavascriptRegularExpressionResult::Create(stackAllocationPointer, numGroups, input, scriptContext, hasIndices);
         JavascriptRegularExpressionResult::SetMatch(res, match);
         return res;
     }

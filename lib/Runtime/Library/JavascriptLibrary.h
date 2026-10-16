@@ -331,10 +331,16 @@ namespace Js
         Field(DynamicType *) regexPrototypeType;
         Field(DynamicType *) regexType;
         Field(DynamicType *) regexResultType;
-        // Property record for the exec/match result "groups" own property.
+        // Exec/match result type for 'd'-flag patterns: same shape as
+        // regexResultType plus the "indices" own property (ES2022).
+        Field(DynamicType *) regexResultWithIndicesType;
+        // Property records for the exec/match result "groups"/"indices" own
+        // properties and the RegExp.prototype.hasIndices accessor.
         // Dynamic (no built-in PropertyId) so built-in bytecode headers stay
-        // byte-stable; the record itself is process-lifetime.
+        // byte-stable; the records themselves are process-lifetime.
         Field(const PropertyRecord *) regexGroupsPropertyRecord;
+        Field(const PropertyRecord *) regexIndicesPropertyRecord;
+        Field(const PropertyRecord *) regexHasIndicesPropertyRecord;
         Field(DynamicType *) stringTypeDynamic;
         Field(DynamicType *) mapType;
         Field(DynamicType *) setType;
@@ -785,7 +791,10 @@ namespace Js
         DynamicType * GetRegexPrototypeType() const { return regexPrototypeType; }
         DynamicType * GetRegexType() const { return regexType; }
         DynamicType * GetRegexResultType() const { return regexResultType; }
+        DynamicType * GetRegexResultWithIndicesType() const { return regexResultWithIndicesType; }
         const PropertyRecord * GetRegexGroupsPropertyRecord() const { return regexGroupsPropertyRecord; }
+        const PropertyRecord * GetRegexIndicesPropertyRecord() const { return regexIndicesPropertyRecord; }
+        const PropertyRecord * GetRegexHasIndicesPropertyRecord() const { return regexHasIndicesPropertyRecord; }
         DynamicType * GetArrayBufferType() const { return arrayBufferType; }
         StaticType  * GetStringTypeStatic() const { return stringCache.GetStringTypeStatic(); }
         DynamicType * GetStringTypeDynamic() const { return stringTypeDynamic; }

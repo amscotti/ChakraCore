@@ -742,6 +742,26 @@ namespace Js
         regexResultType = DynamicType::New(scriptContext, TypeIds_Array, arrayPrototype, nullptr,
             PathTypeHandlerNoAttr::New(scriptContext, regexResultPath, regexResultPath->GetPathLength(), JavascriptRegularExpressionResult::InlineSlotCount, sizeof(JavascriptArray), true, true), true, true);
 
+        // 'd'-flag (ES2022 match indices) results additionally carry an
+        // "indices" own property, so they get their own result type: the
+        // no-'d' fast path keeps the byte-identical 3-entry shape above.
+        TypePath *const regexResultWithIndicesPath = TypePath::New(recycler);
+        regexResultWithIndicesPath->Add(BuiltInPropertyRecords::input);
+        regexResultWithIndicesPath->Add(BuiltInPropertyRecords::index);
+        regexResultWithIndicesPath->Add(regexGroupsRecord);
+        const PropertyRecord* regexIndicesRecord = nullptr;
+        scriptContext->GetOrAddPropertyRecord(_u("indices"), 7, &regexIndicesRecord);
+        regexIndicesPropertyRecord = regexIndicesRecord;
+        regexResultWithIndicesPath->Add(regexIndicesRecord);
+        regexResultWithIndicesType = DynamicType::New(scriptContext, TypeIds_Array, arrayPrototype, nullptr,
+            PathTypeHandlerNoAttr::New(scriptContext, regexResultWithIndicesPath, regexResultWithIndicesPath->GetPathLength(), JavascriptRegularExpressionResult::InlineSlotCount, sizeof(JavascriptArray), true, true), true, true);
+
+        // "hasIndices" (the 'd' flag's prototype accessor name, ES2022),
+        // registered as a dynamic property record for the same reason.
+        const PropertyRecord* regexHasIndicesRecord = nullptr;
+        scriptContext->GetOrAddPropertyRecord(_u("hasIndices"), 10, &regexHasIndicesRecord);
+        regexHasIndicesPropertyRecord = regexHasIndicesRecord;
+
         // Initialize string types
         // static type is handled under StringCache.h
         stringTypeDynamic = DynamicType::New(scriptContext, TypeIds_StringObject, stringPrototype, nullptr, NullTypeHandler<false>::GetDefaultInstance(), true, true);
@@ -4408,6 +4428,14 @@ namespace Js
                     (scriptConfig->IsES6UnicodeExtensionsEnabled() ? 0 : 2) - (scriptConfig->IsES6RegExStickyEnabled() ? 0 : 2);
                 Assert(regexPrototype->GetSlot(library->regexDotAllGetterSlotIndex) == library->regexDotAllGetterFunction);
             }
+
+            // 'd' flag (ES2022 match indices) is unconditional core syntax,
+            // so its accessor installs whenever the prototype-properties
+            // substrate is on. Dynamic property record, not a built-in
+            // PropertyId (see the regex types init above).
+            library->AddAccessorsToLibraryObject(regexPrototype,
+                library->GetRegexHasIndicesPropertyRecord()->GetPropertyId(),
+                &JavascriptRegExp::EntryInfo::GetterHasIndices, nullptr);
         }
 
         if (scriptConfig->IsES6RegExSymbolsEnabled())

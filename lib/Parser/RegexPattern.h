@@ -65,6 +65,7 @@ namespace UnifiedRegex
         bool IsDotAll() const;
         bool IsUnicode() const;
         bool IsSticky() const;
+        bool IsHasIndices() const;
         bool WasLastMatchSuccessful() const;
         GroupInfo GetGroup(int groupId) const;
 

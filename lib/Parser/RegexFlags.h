@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #pragma once
@@ -15,6 +16,7 @@ namespace UnifiedRegex
         UnicodeRegexFlag    = 1 << 3,
         StickyRegexFlag     = 1 << 4,
         DotAllRegexFlag     = 1 << 5,
-        AllRegexFlags       = (1 << 6) - 1
+        HasIndicesRegexFlag = 1 << 6,   // ES2022 'd' flag (match indices); unconditional, no config flag
+        AllRegexFlags       = (1 << 7) - 1
     };
 }

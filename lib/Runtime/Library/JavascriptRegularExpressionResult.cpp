@@ -26,11 +26,17 @@ namespace Js
         void *const stackAllocationPointer,
         const int numGroups,
         JavascriptString* input,
-        ScriptContext* const scriptContext)
+        ScriptContext* const scriptContext,
+        const bool hasIndices)
     {
         Assert(numGroups > 0);
 
-        JavascriptArray* arr = JavascriptArray::NewLiteral<JavascriptArray, InlineSlotCount>(stackAllocationPointer, numGroups, scriptContext->GetLibrary()->GetRegexResultType());
+        JavascriptArray* arr = JavascriptArray::NewLiteral<JavascriptArray, InlineSlotCount>(
+            stackAllocationPointer,
+            numGroups,
+            hasIndices
+                ? scriptContext->GetLibrary()->GetRegexResultWithIndicesType()
+                : scriptContext->GetLibrary()->GetRegexResultType());
 
         Assert(JavascriptRegularExpressionResult::Is(arr));
         arr->SetSlot(SetSlotArguments(BuiltInPropertyRecords::input.propertyRecord.GetPropertyId(), InputIndex, input));
@@ -71,6 +77,17 @@ namespace Js
             groups));
     }
 
+    void JavascriptRegularExpressionResult::SetIndices(JavascriptArray* arr, Var indices)
+    {
+        Assert(JavascriptRegularExpressionResult::Is(arr));
+
+        ScriptContext* scriptContext = arr->GetScriptContext();
+        arr->SetSlot(SetSlotArguments(
+            scriptContext->GetLibrary()->GetRegexIndicesPropertyRecord()->GetPropertyId(),
+            IndicesIndex,
+            indices));
+    }
+
     void JavascriptRegularExpressionResult::InstantiateForceInlinedMembers()
     {
         // Force-inlined functions defined in a translation unit need a reference from an extern non-force-inlined function in
@@ -80,7 +97,7 @@ namespace Js
         Assert(false);
 
         Create(nullptr, nullptr, nullptr);
-        Create(nullptr, 0, nullptr, nullptr);
+        Create(nullptr, 0, nullptr, nullptr, false);
     }
 
     CompileAssert(JavascriptRegularExpressionResult::InlineSlotCount >= 2);

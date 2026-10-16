@@ -62,6 +62,13 @@ var tests = [
             compileError("/(?<a\\uDCA4>.)/", "escaped lone trailing surrogate");
             compileError("/(?<=a)b/", "lookbehind stays a SyntaxError");
             compileError("/(?<!a)b/", "negative lookbehind stays a SyntaxError");
+            // Scripts longer than the deferral threshold scan function
+            // bodies without an AST. That scan has to reject these itself;
+            // a hit found only when the function is called is an internal error.
+            var deferredPad = new Array(1500).join("x=1;");
+            compileError("function f(){ /(?<a>a)\\k<b>/; }" + deferredPad, "dangling reference in a deferred function");
+            compileError("function f(){ /(?<a>a)[\\k]/; }" + deferredPad, "class \\k in a deferred function");
+            compileError("/\\k<a\\(b)/", "unescaped ')' after an escaped '('");
         }
     },
     {
@@ -72,6 +79,15 @@ var tests = [
             var m = /\k<a>/.exec("k<a>");
             assert.areEqual(1, m.length, "one element");
             assert.areEqual("k<a>", m[0]);
+            // An escaped slash is not the end of the literal, and an
+            // escaped paren is not a group. Both reparse as identity escapes.
+            assert.isTrue(/\k<a\/>/.test("k<a/>"), "escaped slash stays in the body");
+            assert.isTrue(/\k<a\/>/g.test("k<a/>"), "escaped slash with a flag");
+            assert.isTrue(/\k<a\/b>/.test("k<a/b>"), "escaped slash before '>'");
+            assert.isTrue(/\k<a\(b\)/.test("k<a(b)"), "escaped parens stay literal");
+            assert.isTrue(new RegExp("\\k<a\\(").test("k<a("), "dynamic escaped paren");
+            var deferredPad = new Array(1500).join("x=1;");
+            assert.isTrue(eval("function f(){ return /(?<a>x)\\k<a>/.test('xx'); }" + deferredPad + "f()"), "named group in a deferred function");
         }
     },
     {

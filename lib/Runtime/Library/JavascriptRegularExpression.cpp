@@ -513,6 +513,10 @@ using namespace Js;
 
             // Cross-browser compatibility - flags are listed in alphabetical order in the spec and by other browsers
             // If you change the order of the flags, don't forget to change it in EntryGetterFlags() and GetOptions() too.
+            if (pattern->IsHasIndices())
+            {
+                builder->AppendChars(_u('d'));
+            }
             if (pattern->IsGlobal())
             {
                 builder->AppendChars(_u('g'));
@@ -1006,13 +1010,14 @@ using namespace Js;
     JavascriptString* JavascriptRegExp::StringFromFlags(UnifiedRegex::RegexFlags flags, ScriptContext* scriptContext)
     {
         // Same order as EntryGetterFlags, GetOptions(), and ToString().
-        char16 buf[6];
+        char16 buf[7];
         CharCount i = 0;
+        if ((flags & UnifiedRegex::HasIndicesRegexFlag) != 0) { buf[i++] = _u('d'); }
         if ((flags & UnifiedRegex::GlobalRegexFlag) != 0) { buf[i++] = _u('g'); }
         if ((flags & UnifiedRegex::IgnoreCaseRegexFlag) != 0) { buf[i++] = _u('i'); }
         if ((flags & UnifiedRegex::MultilineRegexFlag) != 0) { buf[i++] = _u('m'); }
-        if ((flags & UnifiedRegex::UnicodeRegexFlag) != 0) { buf[i++] = _u('u'); }
         if ((flags & UnifiedRegex::DotAllRegexFlag) != 0) { buf[i++] = _u('s'); }
+        if ((flags & UnifiedRegex::UnicodeRegexFlag) != 0) { buf[i++] = _u('u'); }
         if ((flags & UnifiedRegex::StickyRegexFlag) != 0) { buf[i++] = _u('y'); }
         return JavascriptString::NewCopyBuffer(buf, i, scriptContext);
     }
@@ -1238,20 +1243,22 @@ using namespace Js;
 
 #define APPEND_FLAG(propertyId, flag) AppendFlagForFlagsProperty(&bs, thisObj, propertyId, flag, scriptContext)
             // If you change the order of the flags, don't forget to change it in GetOptions() and ToString() too.
+            // hasIndices ('d') is ES2022 core syntax: no config flag gates it.
+            APPEND_FLAG(scriptContext->GetLibrary()->GetRegexHasIndicesPropertyRecord()->GetPropertyId(), _u('d'));
             APPEND_FLAG(PropertyIds::global, _u('g'));
             APPEND_FLAG(PropertyIds::ignoreCase, _u('i'));
             APPEND_FLAG(PropertyIds::multiline, _u('m'));
 
             ScriptConfiguration const * scriptConfig = scriptContext->GetConfig();
 
-            if (scriptConfig->IsES6UnicodeExtensionsEnabled())
-            {
-                APPEND_FLAG(PropertyIds::unicode, _u('u'));
-            }
-
             if (scriptConfig->IsES2018RegExDotAllEnabled())
             {
                 APPEND_FLAG(PropertyIds::dotAll, _u('s'));
+            }
+
+            if (scriptConfig->IsES6UnicodeExtensionsEnabled())
+            {
+                APPEND_FLAG(PropertyIds::unicode, _u('u'));
             }
 
             if (scriptConfig->IsES6RegExStickyEnabled())
@@ -1306,6 +1313,10 @@ using namespace Js;
             StringBuilder<ArenaAllocator> bs(tempAlloc, 4);
 
             // If you change the order of the flags, don't forget to change it in EntryGetterFlags() and ToString() too.
+            if (GetPattern()->IsHasIndices())
+            {
+                bs.Append(_u('d'));
+            }
             if(GetPattern()->IsGlobal())
             {
                 bs.Append(_u('g'));
@@ -1375,6 +1386,7 @@ using namespace Js;
     DEFINE_FLAG_GETTER(EntryGetterSticky, sticky, IsSticky)
     DEFINE_FLAG_GETTER(EntryGetterUnicode, unicode, IsUnicode)
     DEFINE_FLAG_GETTER(EntryGetterDotAll, dotAll, IsDotAll)
+    DEFINE_FLAG_GETTER(EntryGetterHasIndices, hasIndices, IsHasIndices)
 
     JavascriptRegExp * JavascriptRegExp::BoxStackInstance(JavascriptRegExp * instance, bool deepCopy)
     {

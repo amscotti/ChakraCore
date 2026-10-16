@@ -230,6 +230,7 @@ BUILTIN(JavascriptRegExp, GetterSource, EntryGetterSource, FunctionInfo::ErrorOn
 BUILTIN(JavascriptRegExp, GetterSticky, EntryGetterSticky, FunctionInfo::ErrorOnNew | FunctionInfo::HasNoSideEffect)
 BUILTIN(JavascriptRegExp, GetterUnicode, EntryGetterUnicode, FunctionInfo::ErrorOnNew | FunctionInfo::HasNoSideEffect)
 BUILTIN(JavascriptRegExp, GetterDotAll, EntryGetterDotAll, FunctionInfo::ErrorOnNew | FunctionInfo::HasNoSideEffect)
+BUILTIN(JavascriptRegExp, GetterHasIndices, EntryGetterHasIndices, FunctionInfo::ErrorOnNew | FunctionInfo::HasNoSideEffect)
 BUILTIN(JavascriptRegExp, Escape, EntryEscape, FunctionInfo::ErrorOnNew)
 BUILTIN(JavascriptString, NewInstance, NewInstance, FunctionInfo::SkipDefaultNewObject)
 BUILTIN(JavascriptString, At, EntryAt, FunctionInfo::ErrorOnNew)

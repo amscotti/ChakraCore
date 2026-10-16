@@ -14,8 +14,8 @@ non-participating groups, property order = textual group order), and
 `$<name>` substitution in `String.prototype.replace`/`replaceAll` on both
 the ES5 legacy fast path and the `@@replace` symbol path. JIT evidence is
 not claimed; see B4 below. Deferred sub-batches: lookbehind, `d`
-flag/`indices`, `v` flag, duplicate named groups (ES2025) — recorded in
-c1-triage §S9.
+flag/`indices` (**landed as sub-batch 2 below**), `v` flag, duplicate
+named groups (ES2025) — recorded in c1-triage §S9.
 
 ## What landed
 
@@ -157,6 +157,21 @@ change: the span re-scan rebinds existing scanner state and restores it;
 `sawClassK` is an arena-lifetime bool on the compile-time parser). Fix 3
 deletes one stop-character case; all remaining stops are structural
 syntax that can never occur inside a name.
+
+Two later parser fixes, same contract (no new allocation domain):
+
+4. **Escapes inside a `\k<...>` span.** The pass-0 span scan treated every
+   `/` and `(` as structure. `/\k<a\/>/` (identity escape `k` plus the
+   literal `<a/>`) was cut at the escaped slash and rejected, and
+   `/\k<a\(b)/` was parsed as a group instead of the SyntaxError Node
+   reports for the unmatched `)`. A backslash now escapes the next
+   character, so only an unescaped stop ends the span.
+5. **Deferred functions.** `ParseLiteralNoAST` (the scan used once a
+   script exceeds the deferral threshold) did not call
+   `ResolveNamedGroupRefs`. A dangling `\k` name or an illegal class `\k`
+   was accepted at parse and became `Error: Internal error` when the
+   function ran, because deferred reparse treats a newly discovered
+   syntax error as internal. The no-AST scan now runs the same check.
 
 ## Where groups live / allocation strategy
 
@@ -314,3 +329,227 @@ the JIT-inlined String/RegExp helpers now that plain `replace` results
 and `$<name>` substitutions flow through `ReplaceFormatString` with the
 new `'<'` arm (the ES5 fast path stays allocation-free for patterns
 without named groups).
+
+---
+
+# C2-S9 sub-batch 2: `d` flag / `indices` (ES2022 match indices)
+
+Status: complete on Mac no-JIT, **not yet committed** (working tree on
+top of d67948eab + the uncommitted sub-batch-1 parser fixes 4–5 above;
+eventual commit: `<pending>`). The `d` flag, the `indices` property on
+exec/non-global-match results, and `indices.groups` are unconditional
+core syntax — no config flag, no new opcodes, no static PropertyIds
+(dynamic tracked records only, so the checked-in bytecode headers are
+unchanged: `verify-bytecode: source headers unchanged; regen exit 0`).
+The prototype accessor surface (`RegExp.prototype.hasIndices`, the `d`
+in `RegExp.prototype.flags`) is wired under the existing
+`ES6RegExPrototypeProperties` substrate (decision below). Lookbehind,
+`v` flag, and duplicate named groups remain deferred.
+
+## What landed
+
+1. **Flag parsing** (`RegexFlags.h` `HasIndicesRegexFlag = 1 << 6`,
+   `AllRegexFlags` widened; both flag parsers: `RegexParser::Options`
+   and `RegexHelper::GetFlags`): `case 'd'` unconditional, duplicate
+   `d` rejected like every other repeated flag. Literals
+   (`ParseLiteral`/`ParseLiteralNoAST`), the constructor, and
+   `.compile()` all flow through these two switches. `RegexPattern::
+   IsHasIndices()` has no config gate (unlike `IsSticky`/`IsUnicode`/
+   `IsDotAll`, whose flags are config-gated).
+2. **Flag-string round-trip** — all four builders emit canonical
+   `d,g,i,m,s,u,y` order: `JavascriptRegExp::ToString`, `GetOptions`
+   (the legacy own-instance `options`), `EntryGetterFlags`
+   (`RegExp.prototype.flags` under the proto flag), and `StringFromFlags`
+   (the `@@matchAll` internal-flags fallback; buffer widened to 7).
+   `EntryGetterFlags` previously appended `u` before `s` ("gimusy");
+   reordered to the spec's `gimsuy` — corpus
+   `RegExp/prototype/flags/get-order.js` pins `'dgimsuy'` and Node 26.5.0
+   agrees (`/x/ydsu.flags` → `"dsuy"`). This legitimately changed one
+   legacy expectation, `test/es6/regexflags.js` "correct order"
+   (`gimusy` → `gimsuy`); that file got `whitespace=cr-at-eol` in
+   `.gitattributes` (the established CRLF-edit pattern) so
+   `git diff --check` stays rc=0.
+3. **`indices` on results** (`RegexHelper`, `JavascriptRegularExpression
+   Result`, `JavascriptLibrary`): exec and non-global
+   `String.prototype.match` results gain an own `indices` data property
+   **only when the pattern has the `d` flag** (corpus
+   `match-indices/no-indices-array.js` pins absence otherwise). Built by
+   `RegexHelper::CreateIndicesArray` from the matcher's group positions:
+   a real Array (`ArrayCreate(n)`, n = captures including capture 0),
+   element *i* a fresh two-element `[start, end]` array
+   (code-unit indices, end exclusive — `u`-flag offsets are already
+   code-unit in this engine, corpus `indices-array-unicode-match.js`) or
+   `undefined` for non-participating groups; quantified groups report
+   the last iteration; captures inside lookaheads get indices. The own
+   `groups` data property **always exists** on the indices array (spec
+   MakeIndicesArray step 5/6; corpus `indices-groups-object-undefined.js`
+   and Node both pin present-with-value-`undefined` without named
+   groups): a null-prototype object mirroring the named groups' pairs in
+   textual order (fresh pair arrays, `undefined` values, `__proto__`
+   names are plain data properties — corpus
+   `indices-groups-object{,-unmatched}.js`, `indices-groups-properties.js`)
+   or `undefined`. It is defined with `SetPropertyWithAttributes(
+   PropertyDynamicTypeDefaults)` (CreateDataProperty semantics) so
+   `Array.prototype.groups` setters are not consulted. Allocation
+   discipline mirrors `groups`: a **second regex-result type**
+   (`regexResultWithIndicesType`, path input/index/groups/indices, still
+   4 inline slots — `RoundUpInlineSlotCapacity(4)` is 4) is selected at
+   `Create` time, so the no-`d` path is byte-identical to sub-batch 1's
+   shape and pays one `SetSlot`; the arrays/objects are ordinary
+   recycler allocations made **only** when `d` is set. Global-match
+   arrays, split, search, and test results get nothing (Node-matching);
+   `@@matchAll` iterator steps return exec results so carry indices
+   automatically; `@@replace` does not read `indices` (spec) — verified
+   by corpus + a custom-exec test.
+
+4. **`hasIndices` substrate decision** (investigated as instructed):
+   `RegExp.prototype.hasIndices` is installed as an accessor getter
+   (`DEFINE_FLAG_GETTER`, name "get hasIndices", length 0, setter
+   undefined) **inside the existing `ES6RegExPrototypeProperties` block**
+   of `InitializeRegexPrototype`, unconditional within that gate (there
+   is no config flag to consult — `d` itself is ungated), using the
+   dynamic `hasIndices` property record; a `BUILTIN(...GetterHasIndices)`
+   entry was added beside `GetterDotAll`. **No own-instance legacy
+   built-in** was added (so `/x/d.hasIndices` stays `undefined` with the
+   proto flag off): every corpus file that pins the accessor reads
+   `RegExp.prototype`'s own descriptor — `RegExp/prototype/hasIndices/
+   {prop-desc,length,name,this-val-regexp,this-val-invalid-obj,
+   this-val-regexp-prototype,cross-realm}.js` — none is satisfiable by
+   an own-instance property, and the own-instance substrate is the
+   legacy-IE compatibility surface (`global`/`multiline`/`source`/
+   `options` plus the three config-gated moderns) that predates ES2022.
+   Audit (b) had counted "hasIndices/unicodeSets getters 20" among the
+   both-flags residue; those hasIndices scenarios now pass under the
+   proto flag. `EntryGetterFlags` reads the same record's id first
+   (order `'dgimsuy'`), which corpus `flags/coercion-hasIndices.js`
+   (Boolean coercion of a plain object's property) and `get-order.js`
+   pin.
+
+## Tests and gates
+
+- `test/es7/regexp-indices.js` (17 tests, default launch, `-args
+  summary`): syntax accept/reject incl. duplicate `d` and deferred-scan
+  shapes, presence rules (no `d` → absent; global arrays never), pair
+  basics (capture-0 first, empty match `[0,0]`, code-unit `u` indices),
+  descriptors (CreateDataProperty, not Set), non-participating/
+  optional/alternation groups, quantified last-iteration, lookahead
+  captures, `indices.groups` present-with-undefined and named rules
+  (null proto, textual order, `__proto__` name, named/unnamed mix),
+  sticky + lastIndex interplay, global exec stepping,
+  constructor/compile/literal parity (incl. compile add/drop `d`),
+  toString round-trips (`/x/dg`, `/x/dsuy`, all-flags canonicalization,
+  empty source), replace/split/search neutrality, non-global
+  `String.prototype.match`. Every assertion was mirrored in Node 26.5.0
+  first (Node caught two test bugs while drafting: null-proto objects
+  lack `hasOwnProperty`; `String.prototype.matchAll` requires `g`).
+- `test/es7/regexp-indices-symbols.js` (6 tests, `-ES6RegExSymbols`
+  registration, matchall.js/namedgroups-symbols.js precedent):
+  matchAll per-step `indices` and `indices.groups`, non-global
+  `@@matchAll`, `@@match` (returns exec result with indices; global
+  array without), `@@replace` ignoring indices (incl. a custom-exec
+  FakeRegExp whose results have none), sticky exec semantics.
+  A second flagged file was needed (the brief's +1/+1 gate projection
+  assumed one): the symbol surfaces do not exist in the default launch,
+  so this coverage cannot live in `regexp-indices.js`.
+- Gates bumped 1970→1972 (test) and 2022→2024 (debug-static) in
+  `tools/build/check_regression.py` (docstring, `EXPECTED_PASSED`,
+  `SELECT_COUNTS`, exact-baseline + debug self-test pins; the deliberate
+  stale 2014/1962 fixtures stay), `build.zig` (both profiles),
+  `.github/workflows/zig-macos.yml` (test, debug-static, legacy cmake
+  legs), and the live baseline sentence in `doc/memory-management.md`.
+
+## Evidence (final tree, `zig-out/bin/ch` + `out/debug-static/bin/ch`)
+
+- `mise exec -- zig build` and `-Dprofile=debug-static` — exit 0;
+  `zig build check --summary line` — 572/572 steps, `Total: passed
+  1972, failed 0` (DebuggerCommon 208/0 — no baseline churn; es7 37/0;
+  bytecode "source headers unchanged; regen exit 0" — no PropertyId
+  change, unlike C2-S7). `zig build check-regression -Dprofile=
+  debug-static --summary line` — `Total: passed 2024, failed 0`,
+  545/545 steps.
+- Focused tests: `pass` on both binaries (verbose 17/17 and 6/6);
+  the reworked `test/es6/regexflags.js` passes under its registered
+  `-version:6 -ES6RegExSticky -ES6Unicode -ES6RegExPrototypeProperties`
+  launch.
+- Corpus (pinned test262, `-nonative -Test262 -CollectGarbage`):
+  - `test/built-ins/RegExp/match-indices/**` — **28/28** default flags
+    (`out/test262-s9-indices`) and **28/28** with `-ES6RegExSymbols`
+    (`out/test262-s9-indices-sym`).
+  - `test/built-ins/RegExp/prototype/{hasIndices,flags}/**` under
+    `-ES6RegExPrototypeProperties` (`out/test262-s9-indices-proto`) —
+    **42/48**: every hasIndices accessor scenario passes (prop-desc,
+    length, name, this-val-regexp{,-prototype}, this-val-invalid-obj,
+    cross-realm), `flags/get-order.js` (`'dgimsuy'`) and
+    `flags/coercion-hasIndices.js` pass. Residue: 4 × `this-val-non-obj`
+    scenarios (BigInt literal `4n` parse — S2 debt) and 2 ×
+    `flags/this-val-regexp` (the `v` flag — S3 property escapes,
+    deferred sub-batch).
+  - `String/prototype/match/duplicate-named-indices-groups-properties.js`
+    — 0/2, duplicate named groups (deferred sub-batch), by design.
+  - No dedicated `d`-flag syntax files exist under
+    `test/language/literals/regexp/` (grepped; the `arithmetic-modifiers`
+    family is the ES2025 modifiers proposal) — flag-parsing coverage
+    lives inside the two corpus dirs above and `regexp-indices.js`.
+- Joins vs the C1 baseline `out/test262-zig` on the union of the scoped
+  file sets (76 common scenarios): **68 fail→pass, 0 pass→fail**.
+- Resym universe (`test/built-ins/{RegExp,String}/**/*.js`, 6,199
+  scenarios; re-run because exec results under the symbol paths are
+  observable): flag-on `out/test262-s9-indices-resym` (4,507/1,692) vs
+  the sub-batch-1 stored `out/test262-s9-resym` — **28 fail→pass, 0
+  pass→fail**; default-flags `out/test262-s9-indices-resym-base`
+  (4,049/2,150) vs `out/test262-s9-resym-base` — **28/0**. The movers:
+  26 match-indices scenarios + `RegExp/duplicate-flags.js` ×2 (its
+  `dd` case now exercises the real duplicate-`d` rejection).
+- `analyze.py` on the match-indices artifact: `regexp-match-indices`
+  28/0 (also `regexp-named-groups` 14/0 there), no failure buckets.
+- Node 26.5.0 oracle: 44 direct probes (presence rules, pairs,
+  non-participating, `indices.groups` descriptor/value rules, null
+  proto, `__proto__` name, order, global/matchAll/sticky/lastIndex,
+  quantified, lookahead, constructor/compile/literal, toString/flags
+  orders incl. `/x/ydsu` → `"dsuy"`, duplicate/invalid flags,
+  replace/split/search neutrality, astral `u` indices, hasIndices
+  getter shapes, `flags` getter coercion) plus both test files mirrored
+  green in Node before landing — 0 mismatches.
+
+## Limits
+
+- `RegExp.prototype.hasIndices` (and `d` in `RegExp.prototype.flags`)
+  exist only under `-ES6RegExPrototypeProperties`; with the flag off
+  `r.hasIndices` is `undefined` and `r.options`/`toString` carry the
+  `d` instead (documented substrate decision above; the corpus dirs
+  that pin the accessor are equally flag-gated).
+- The flags-getter `s`/`u` order fix (spec `gimsuy`) changes
+  `RegExp.prototype.flags` output for `su` regexes under the proto
+  flag ("us" → "su", Node-matching).
+- `indices` is not wired into `@@split`/`search`/`test` results (they
+  have no result shape to carry it; spec agrees) and the trigram
+  fast path (global-only) never sees it.
+- Per-exec cost when `d` is set: one indices array + one pair array per
+  participating capture (+ groups object and pairs when named) — the
+  spec's allocation profile; not claimed under OOM injection or
+  `-RecyclerStress`.
+- **Pre-existing, verified not introduced here** (adversarial review,
+  reproduced identically on the pre-batch legacy binary): a `g` (or
+  `dg`) regexp with a non-writable `lastIndex` does not throw on
+  `exec`/`match` where Node throws `TypeError` (the success-path
+  `lastIndex` advance skips the observable `[[Set]]`; sticky `test`/
+  `exec` already throw). S7-class lastIndex debt — recorded as a
+  follow-up for the S7/S9 remainder slice, not this sub-batch.
+- Sub-batch-2 provenance pins: launcher `zig-out/bin/ch`
+  `43ffa19e701b…`, engine `zig-out/lib/libChakraCore.dylib`
+  `8765eb6719ce…`, debug-static `ce43d65eed7c…` (the scoped corpus
+  artifacts' `binary_sha256` field records the launcher; the engine
+  hashes here are the authoritative pins — reviewers reproduced every
+  number on the pinned binaries).
+
+## JIT (B4)
+
+All evidence is Mac no-JIT interpreter. No new opcode or bytecode
+change, and the new builtin `GetterHasIndices` is a prototype accessor
+installed under a default-off flag. B4 must (a) run `regexp-indices.js`,
+`regexp-indices-symbols.js`, and the two corpus families under
+SimpleJIT/FullJIT (plus the proto/symbols flag matrices for the accessor
+dirs) before any JIT-configuration claim, and (b) re-audit the
+JIT-inlined String/RegExp helpers if any inlined fast path assumes the
+regex-result type's shape (the second result type adds a new shape those
+helpers may inline against).

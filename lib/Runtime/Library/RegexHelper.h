@@ -62,9 +62,9 @@ namespace Js
         static void InvalidateLastMatchOnCtor(ScriptContext* scriptContext, JavascriptRegExp* regularExpression, JavascriptString* lastInput, bool useSplitPattern = false);
 
         static bool GetInitialOffset(bool isGlobal, bool isSticky, JavascriptRegExp* regularExpression, CharCount inputLength, CharCount& offset, ScriptContext* scriptContext);
-        static JavascriptArray* CreateMatchResult(void *const stackAllocationPointer, ScriptContext* scriptContext, bool isGlobal, int numGroups, JavascriptString* input);
+        static JavascriptArray* CreateMatchResult(void *const stackAllocationPointer, ScriptContext* scriptContext, bool isGlobal, int numGroups, JavascriptString* input, bool hasIndices);
         static void FinalizeMatchResult(ScriptContext* scriptContext, bool isGlobal, JavascriptArray* arr, UnifiedRegex::GroupInfo match);
-        static JavascriptArray* CreateExecResult(void *const stackAllocationPointer, ScriptContext* scriptContext, int numGroups, JavascriptString* input, UnifiedRegex::GroupInfo match);
+        static JavascriptArray* CreateExecResult(void *const stackAllocationPointer, ScriptContext* scriptContext, int numGroups, JavascriptString* input, UnifiedRegex::GroupInfo match, bool hasIndices);
         template<typename T> static T CheckCrossContextAndMarshalResult(T value, ScriptContext* targetContext);
 
         //
@@ -112,6 +112,12 @@ namespace Js
         // the pattern has named captures, undefined otherwise (never allocates
         // on the no-named-groups fast path).
         static Var GetGroupsVar(ScriptContext* scriptContext, UnifiedRegex::RegexPattern* pattern, JavascriptString* input);
+        // The "indices" array of the pattern's most recent match ('d' flag
+        // only, ES2022): a real Array of [start, end] pairs, one per capture
+        // including capture 0 (undefined for non-participating groups), with
+        // an own "groups" data property that mirrors the named groups' pairs
+        // (undefined value when the pattern has no named groups).
+        static JavascriptArray* CreateIndicesArray(ScriptContext* scriptContext, UnifiedRegex::RegexPattern* pattern, JavascriptString* input);
 
     public:
         static Var RegexReplaceResultUsed(ScriptContext* entryFunctionContext, JavascriptRegExp* regularExpression, JavascriptString* input, JavascriptString* replace);

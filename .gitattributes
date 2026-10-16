@@ -5,6 +5,10 @@ test/**/*.js -crlf
 # edits must not be flagged as trailing whitespace (same rationale as
 # *.baseline above). Added for the S11-remainder escape-line edit.
 test/Object/forinnonenumerableshadowing.js whitespace=cr-at-eol
+# Same rationale: the S9 sub-batch 2 flags-order fix edits one
+# expectation line in this CRLF file (gimusy -> gimsuy, the ES2018+
+# spec order pinned by test262 flags/get-order.js).
+test/es6/regexflags.js whitespace=cr-at-eol
 test/es6/HTMLComments.js binary diff=cpp
 *.wasm binary
 lib/**/*.js eol=lf diff=cpp

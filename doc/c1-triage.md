@@ -600,9 +600,21 @@ Corpus `RegExp/named-groups` + `language/literals/regexp/named-groups`:
 exactly the deferred sub-batches (20 duplicate-names ES2025, 2
 lookbehind, 4 subclass scenarios that need the symbols flag). Resym
 universe joins: 168/0 (default) and 194/0 (flag-on) fail→pass/pass→fail.
-Gates 1970/2022. Remaining S9 work: lookbehind, `d` flag/`indices`,
-`v` flag (needs S3), ES2025 duplicate named groups, and the modifiers
-remainder.)*
+Gates moved 1968/2020 → 1970/2022.
+Sub-batch 2 — the `d` flag / match `indices` — landed 2026-10-16 on
+Mac no-JIT (same receipt, "Sub-batch 2"): unconditional `d`-flag
+parsing (both flag parsers + the four flag-string builders, canonical
+`dgimsuy` order), the `indices` array on exec/non-global-match results
+(`d` only; own property via a second, 4-entry regex-result type), and
+`indices.groups` (present-with-`undefined` without named groups);
+`RegExp.prototype.hasIndices` and the `flags` getter's `d` are wired
+under `ES6RegExPrototypeProperties` (corpus-pinned, not own-instance
+built-ins). Corpus: `RegExp/match-indices` 28/28 (default and symbols),
+`RegExp/prototype/hasIndices` + `flags` 42/48 under the proto flag
+(residue: 4 BigInt `4n` parses, 2 `v`-flag SyntaxErrors); resym joins
+28/0 and 28/0. Gates moved 1970/2022 → 1972/2024. Remaining S9 work:
+lookbehind, `v` flag (needs S3), ES2025 duplicate named groups, and the
+modifiers remainder.)*
 
 **S10. Set methods + copy-by-change family.** Repro: `python3 tools/test262/run.py --binary zig-out/bin/ch --output out/test262-c1-setcopy 'test/built-ins/Set/**/*.js' 'test/built-ins/Array/**/*.js' 'test/built-ins/TypedArray/**/*.js'`.
 *Status: both halves are closed on Mac no-JIT — see

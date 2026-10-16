@@ -250,7 +250,9 @@ var tests = [
                 dotAll: true,
                 global: true
             };
-            assert.areEqual("gimusy", bindFlagsGetter(object)());
+            // ES2018+ spec order (g,i,m,s,u,y); matches toString() and
+            // test262 flags/get-order.js (with hasIndices: dgimsuy).
+            assert.areEqual("gimsuy", bindFlagsGetter(object)());
         }
     },
 ];
