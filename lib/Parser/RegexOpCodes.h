@@ -123,3 +123,13 @@ M(TryIfSet)
 M(TryMatchSet)
 M(BeginAssertion)
 M(EndAssertion)
+// Lookbehind assertions: the body is executed as a self-contained sub-match
+// over a re-oriented input window (see LookbehindNode and
+// doc/c2-s9-namedgroups.md sub-batch 4). Appended after the ES2018 opcode
+// set to keep earlier tag values stable.
+M(BeginLookbehind)
+M(EndLookbehind)
+M(FrameBOLTest) // ^ inside a lookbehind, tested against the real input
+M(FrameEOLTest) // $ inside a lookbehind, tested against the real input
+MTemplate(FrameWordBoundaryTest, template<bool isNegation>, FrameWordBoundaryTestInst, FrameWordBoundaryTestInst<false>)
+MTemplate(FrameNegatedWordBoundaryTest, template<bool isNegation>, FrameWordBoundaryTestInst, FrameWordBoundaryTestInst<true>)

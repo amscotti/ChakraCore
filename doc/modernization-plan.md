@@ -47,7 +47,7 @@ handling have been validated before its results are used as a completion gate.
 | B6 | Windows feasibility and rollout; later target extensions | Stable build contracts | Separate expansion |
 | Z1 | One useful mixed C++/Zig unit behind a tested C ABI | B3; B4 if the unit ships on Linux | Optional pilot |
 | C1 | Qualified ES2025 test policy and triaged failures | Stable Mac build at B3 | Recorded (CONDITIONAL) |
-| C2 | Bounded compatibility batches and partial releases | C1; B4 before JIT-wide enablement | In progress (S4/S5/S10/S11/S7-matchAll/S9 named-groups + d-flag + duplicate named groups closed on Mac no-JIT; JIT claims gated on B4) |
+| C2 | Bounded compatibility batches and partial releases | C1; B4 before JIT-wide enablement | In progress (S4/S5/S10/S11/S7-matchAll/S9 named-groups + d-flag + duplicate named groups + lookbehind closed on Mac no-JIT; JIT claims gated on B4) |
 | C3 | Larger runtime/object-model feature projects | C1 and their feature prerequisites | Separate projects |
 | C4 | Verified full ES2025 core-language result | Required C2/C3 work and qualified runner | Long-term objective |
 
@@ -488,7 +488,7 @@ were checked against the [TC39 finished-proposals list](https://github.com/tc39/
 |---|---|---|
 *(Debt column is the C1 triage-time snapshot; landed items stay listed
 there and are tracked as closed in the C2 batch receipts below.)*
-| ES2015–ES2019 | modules/generators, async/await/iteration, rest/spread, dotAll, flat/flatMap, fromEntries | named groups, lookbehind, property escapes; RegExp symbols/prototype properties default off; inherited semantics → P0/C1 triage |
+| ES2015–ES2019 | modules/generators, async/await/iteration, rest/spread, dotAll, flat/flatMap, fromEntries | named groups and lookbehind have landed; property escapes; RegExp symbols/prototype properties default off; inherited semantics → P0/C1 triage |
 | ES2020 | `??`, import(), import.meta, globalThis, allSettled | optional chaining, matchAll, BigInt completeness/default; for-in formalization → P0 |
 | ES2021 | numeric separators, Promise.any | replaceAll, logical assignment, WeakRef/FinalizationRegistry → P0/P1 |
 | ES2022 | .at, hasOwn, cause, TLA | class fields/private elements/static blocks, RegExp d → P0 |
@@ -501,8 +501,8 @@ there and are tracked as closed in the C2 batch receipts below.)*
 batch receipts below): optional chaining/logical assignment;
 class syntax; replaceAll/matchAll and the copy-by-change family; inherited
 ES2018 RegExp gaps and import-attribute syntax. Named groups, the `d`
-flag, and duplicate named groups have landed (see the C2-S9 receipt).
-Runtime probes still reject lookbehind, property escapes, `v`, and import
+flag, duplicate named groups, and lookbehind have landed (see the
+C2-S9 receipt). Runtime probes still reject property escapes, `v`, and import
 attributes. Audit BigInt, SAB/Atomics and
 RegExp-symbol/prototype-property flags through enabled conformance runs.
 
@@ -584,8 +584,9 @@ Decision/rollback points:
 - [ ] C4: Published qualified ES2025 result on the claimed default configurations.
 
 **C2 batch status:** S4, S5, all of S10 (the copy-by-change half and
-the Set-methods half), all of S11, S7, and the three S9 sub-batches
-(named-groups core, `d` flag/indices, duplicate named groups) are
+the Set-methods half), all of S11, S7, and the four S9 sub-batches
+(named-groups core, `d` flag/indices, duplicate named groups,
+lookbehind) are
 closed on Mac no-JIT
 ([c2-s4.md](c2-s4.md), [c2-s5.md](c2-s5.md), [c2-s11.md](c2-s11.md),
 [c2-s10.md](c2-s10.md), [c2-s7-matchall.md](c2-s7-matchall.md),
@@ -628,9 +629,21 @@ participation-guard semantics — no JS-bytecode or PropertyId change;
 same receipt, "Sub-batch 3"): the named-groups corpus set is 182/8
 default and 188/2 under symbols (residue 2 lookbehind + 6
 symbols-gated), match-indices stays 28/28, resym joins 28/0 and 30/0
-incremental (224/0 and 252/0 vs C1), gates moved to 1973/2025. The
-remaining S9 work (lookbehind, `v` flag after S3, modifiers) stays
-C2-per-batch.
+incremental (224/0 and 252/0 vs C1), gates moved to 1973/2025. S9
+sub-batch 4 landed ES2018 lookbehind assertions unconditionally
+(`(?<=`/`(?<!` parse, never quantifiable; the body is mirrored at parse
+time and run right-to-left as a sub-match over a reversed window, with
+frame-aware `^`/`$`/`\b` and real-coordinate capture spans; lookaheads
+inside lookbehinds run over the real suffix, nested lookbehinds become
+ordinary lookaheads — reverse-order alternation/greed/capture and
+mirrored-backreference semantics verified against Node; no JS-bytecode
+or PropertyId change; same receipt, "Sub-batch 4"): the whole
+`RegExp/lookBehind/` directory passes, the 190-scenario set is 118/6
+default / 124/124 under symbols (residue only the 6 long-classified
+symbols-gated scenarios), match-indices+duplicate-names 30/30, joins vs
+C1 96/0, 102/0, 28/0, resym universe 4,113/2,086 with 260/0 vs C1
+(36/0 incremental), gates moved to 1974/2026. The remaining S9 work
+(`v` flag after S3, modifiers) stays C2-per-batch.
 S6 shows zero regressions under `-ESSharedArrayBuffer` but
 needs a product/security decision before any default, plus
 waitAsync/growable/non-shared-Atomics work; S2's flagged path is a stub

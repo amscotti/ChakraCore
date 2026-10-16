@@ -838,3 +838,325 @@ corpus families under SimpleJIT/FullJIT before any JIT-configuration
 claim, and (b) re-audit the JIT-inlined String/RegExp helpers if any
 inlined fast path assumes the matcher's instruction stream shape (the
 variable-length instruction is the first of its kind in that stream).
+
+---
+
+# C2-S9 sub-batch 4: RegExp lookbehind assertions (ES2018)
+
+Status: complete on Mac no-JIT (uncommitted tree on top of `05809ff18`).
+`(?<=...)` and `(?<!...)` are **unconditional core syntax**: no config
+flag, no JS-bytecode change, no static PropertyIds. Lookbehinds are
+**never quantifiable** (`(?<=a)*` is a SyntaxError in both modes, unlike
+the Annex B relaxation for lookaheads — corpus
+`language/literals/regexp/invalid-{optional,range,negative-}-lookbehind.js`,
+Node 26.5.0 agrees). The `v` flag (S3 prerequisite) and the modifiers
+remainder stay deferred; with this sub-batch the S9 family is otherwise
+complete.
+
+## Matching strategy — why mirroring
+
+JS lookbehind is a **reverse-direction backtracking match**: the body
+matches a substring *ending* at the current position, alternatives are
+tried in textual order, greedy quantifiers extend *leftward*, and a
+forward reference inside the body runs *before* the group it references
+(Node pins all of this: `a(?<=(a?)(a*))` on `"aaa"` yields
+`["","a"]`; `abbb(?<=(a*)|(?:(bb)))` on `"xabbb"` yields `g1=""`; the
+corpus pins `(?<=(\w+)\1)c` → `"abab"` because `\1` sees the stale
+group). No "try start positions left of here with a forward sub-match"
+scheme can produce these orders (within one start position the *parse*
+order is reversed), so the engine mirrors the body instead:
+
+- **Parse-time mirroring** (`Parser::MirrorLookbehindBody`, run when the
+  lookbehind's `)` closes): concatenation term order is reversed
+  (a singly-linked `ConcatNode` list, relinked; `MatchLiteralNode`s are
+  rebuilt with their characters reversed — without `u` the reversal is
+  unit-wise, which is exactly what the unit-reversed window contains;
+  with `u` both the literal and the runtime window are reversed by CODE
+  POINTS, so surrogate pairs keep their unit order; equivalence classes
+  are a later compile-time expansion, so parse literals are always
+  plain); alternations keep textual order; loops/groups/quantifier
+  greediness/backreference nodes are unchanged (direction-symmetric);
+  the parser's synthetic surrogate-pair class atoms
+  (`Concat(lead, trail)` from astral ranges and the u-mode
+  `.`/`\S`/`\D`/`\W` expansion) are recognized as one code point and
+  their term order is preserved under `u`.
+- **Runtime re-orientation** (`BeginLookbehindInst`): the body is
+  executed as a **self-contained sub-match over a reversed copy of the
+  real input's prefix** `[0, realPos)` (the *real* left context — the
+  current frame may be a suffix view, see review fix 4) — matching the
+  mirrored body forward over that buffer is precisely the spec's
+  right-to-left match over the real left context, ending at the current
+  position. Without `u` the copy reverses UTF-16 units; with `u` it
+  reverses CODE POINTS (surrogate pairs keep their unit order), which
+  is what the code-point-oriented u-mode atoms, classes, and
+  backreferences require; a u-mode sub-match only ever lands on
+  code-point boundaries, where `base - offset` is still the exact real
+  coordinate. The
+  sub-match has private continuation/assertion stacks (a `RegexStacks`
+  on the C++ stack, RAII), runs single-shot from the instruction after
+  the `Begin`, and stops at `EndLookbehindInst`; nothing can backtrack
+  into it afterwards (the same cut semantics as ordinary assertions).
+  A positive lookbehind pushes `SaveInnerGroups` restore continuations
+  on the *outer* stack exactly like `BeginAssertion`, so outer
+  backtracking over the assertion restores body groups; a negative
+  lookbehind that matched resets its body groups and fails outward.
+- **Frames.** The matcher tracks a *current frame* — the buffer
+  instructions run over plus an affine map to the real (level-0) input
+  (`real = reversed ? base - offset : base + offset`); the top frame is
+  the real input and every frame-aware helper is the identity there, so
+  code outside lookbehinds is on the old paths byte for byte. Two
+  re-orientations arise:
+  - a **lookahead inside a lookbehind** must look *forward over the real
+    input*, so the mirroring pass compiles it to a `LookbehindNode` with
+    `isSuffixFrame`, whose sub-match runs unmirrored over the real
+    suffix from the current real position (a pointer view — no copy);
+  - a **lookbehind inside a lookbehind** compiles to a plain
+    `AssertionNode` (start-anchored forward match over the *current*
+    frame's buffer), which the mirroring pass produces directly.
+  The double-reversal identities compose to any nesting depth.
+- **Group spans stay in real coordinates.** Capture writes convert
+  frame offsets to real spans (`FrameBeginGroup`/`FrameEndGroup`/
+  `FrameSetGroupSpan` at the seven span-writing instructions), so result
+  construction, `indices`, the ES5 replace fast path and the duplicate
+  name resolver are frame-agnostic. In a reversed frame a loop rewind
+  can re-*end* a group without re-*beginning* it, so `EndDefineGroup`
+  pushes a `RestoreGroupCont` carrying the span's real end there (a
+  plain `ResetGroupCont` keeps only the undefined flag). Backreference
+  text is read from the level-0 buffer; in a reversed frame the
+  comparison walks the group's text backwards (a reverse-direction
+  backreference matches the *substring* ending at the cursor, which is
+  the group's text mirrored) — plain, case-insensitive, and both `u`
+  walks (code points decoded forward on the frame side, backward on the
+  group side; the case-sensitive `u` walk compares decoded code points,
+  since the u-mode window keeps pairs intact while the group text is
+  walked from its end) are implemented.
+- **Anchors.** `^`, `$`, `\b`, `\B` anywhere inside a lookbehind
+  (including inside nested lookaheads, which also run in a non-top
+  frame) are parsed *frame-aware* and compile to `FrameBOLTest`/
+  `FrameEOLTest`/`FrameWordBoundaryTest`, which evaluate the classic
+  predicates at the real position mapped through the current frame —
+  buffer-relative tests would be wrong at reversed-frame edges (e.g.
+  `\b`'s right neighbor can lie outside the window).
+- **Optimizer gates.** `LookbehindNode` copies `AssertionNode`'s
+  shutdowns (no prefix skipping/sync/octoquad/trie) and its Succ/Fail
+  schemes (`(?<=irrefutable)` always succeeds, `(?<!irrefutable)` always
+  fails). One real difference: its **first set must stay unconstrained**
+  — the body matches against a different window, so its first set says
+  nothing about the characters at the current position (an early build
+  that copied the lookahead's `firstSet = body->firstSet` made
+  follow-first loop exits skip valid lengths: `.*(?<=(xx|xxx))(.*)`
+  matched at the wrong start).
+
+## Costs and ownership
+
+Per lookbehind evaluation the reversed window is copied into a
+`RecyclerNewArrayLeaf` scratch (leaf garbage, no finalizer, no
+barriers; the suffix-frame path — lookaheads inside lookbehinds — is a
+zero-copy view). Worst case this is O(left-context) transient garbage
+per evaluation; corpus inputs are small and the focused test exercises
+repeated evaluations under `CollectGarbage`. The matcher's
+`realInput`/frame fields are raw and untracked by design: the top-level
+`Match` call pins the input on the C++ stack for the whole match, so a
+GC inside `QueryContinue` (which may run script reentrantly on a
+*different* matcher) cannot move it; the fields are cleared when `Match`
+returns. Sub-run stacks are C++-stack objects (pages freed by RAII, also
+on the QC-throw path). `RegexStacks`/`PageAllocator` usage mirrors
+`ScriptContext::AllocRegexStacks`. No new allocation domain, no
+barrier change, no GC-object holds an input-derived pointer between
+matches.
+
+## Tests and gates
+
+- `test/es7/regexp-lookbehind.js` (16 tests, 128 assertions by
+  `grep -c "assert\."`, launch
+  `-CollectGarbage -args summary`): syntax accept/reject matrix
+  (quantified lookbehinds rejected in both modes incl. dynamic and
+  mid-pattern forms), fixed/variable-width positives, the
+  reverse-order semantics shapes (reversed capture order, stale forward
+  references, first-alternative-even-empty), negatives with capture
+  reset, capture persistence/reset-on-backtrack, the backreference
+  family (outer captures replayed, case-insensitive reversed replay,
+  lookahead captures read inside, mutual forward references), named +
+  duplicate named groups inside lookbehinds with `d`-flag
+  `indices.groups`, nested assertions (lookahead-in-lookbehind with
+  captures, lookbehind-in-lookahead, lookbehind-in-lookbehind), anchors
+  and word boundaries incl. multiline, `u`-mode astral shapes,
+  sticky/`lastIndex` (lookbehind consumes nothing; sticky anchors the
+  start), global stepping and replace, constructor/`compile` parity,
+  and a scratch-buffer GC test, plus the review-round sections: the
+  u-mode code-point-reversed window (i+u and u-only astral
+  backreferences incl. the DESERET case-fold pair, multi-code-point
+  groups, astral class ranges, lone-surrogate left contexts, astral
+  capture spans and `d`-flag indices, leftward-greedy loops) and the
+  nested-assertion flag-leak matrix (positive/negative/3-deep/two
+  suffixes/global replace, with genuine-success controls). The whole
+  file was mirrored in Node 26.5.0 first (0 mismatches; Node caught 14
+  drafting bugs, all expectation-side).
+- Gates bumped 1973→1974 (test) and 2025→2026 (debug-static) in
+  `tools/build/check_regression.py` (docstring, `EXPECTED_PASSED`,
+  `SELECT_COUNTS`, exact-baseline + debug self-test pins; the
+  deliberate stale fixtures stay), `build.zig` (both profiles),
+  `.github/workflows/zig-macos.yml` (test, debug-static, legacy cmake
+  legs), and the live baseline sentence in `doc/memory-management.md`.
+
+## Evidence (final tree, `zig-out/bin/ch` + `out/debug-static/bin/ch`)
+
+Provenance pins: launcher `zig-out/bin/ch` `8808eea4771a…`, engine
+`zig-out/lib/libChakraCore.dylib` `61b115391b99…` (the pre-fix-4
+dylib was `55ddb787de2b…`; every scoped artifact below was re-run
+against the final pair), debug-static `out/debug-static/bin/ch`
+`d5641e440fcb…`.
+
+- `mise exec -- zig build` and `-Dprofile=debug-static` — exit 0;
+  `zig build check --summary line` — regression
+  `Total: passed 1974, failed 0`, DebuggerCommon 208/0 (no baseline
+  churn), bytecode "source headers unchanged; regen exit 0" (no
+  PropertyId change). `zig build check-regression -Dprofile=
+  debug-static --summary line` — `Total: passed 2026, failed 0`.
+- Focused tests: `pass` on both binaries (verbose 13/13).
+- Corpus (pinned test262, `-nonative -Test262 -CollectGarbage`), file
+  set = `RegExp/lookBehind/**` (17 files) +
+  `language/literals/regexp/*lookbehind*` (8 invalid-quantifier files)
+  + `annexB/.../non-unicode-malformed-lookbehind.js` + the
+  named-groups set (sub-batch 3's 190-scenario union, whose 2
+  lookbehind residue scenarios flip): **118 passed / 6 failed** of 124
+  default flags, **124/124** with `-ES6RegExSymbols`, **118/6** on the
+  debug-static binary (asserts on). Residue = the 6 long-classified
+  symbols-gated scenarios (4 `groups-object-subclass{,-sans}`, 2
+  `duplicate-names-matchall`), all passing in the `-sym` run. The
+  whole `lookBehind/` directory passes in both modes.
+- `RegExp/match-indices/**` + `duplicate-named-indices-groups-properties`:
+  **30/30** (the 2 indices+duplicate-names scenarios that sub-batch 2
+  left as residue flip too).
+- Joins vs the C1 baseline `out/test262-zig`: **96 fail→pass / 0
+  pass→fail** (default file set), **102/0** (symbols), **28/0**
+  (indices set).
+- Resym universe (`test/built-ins/{RegExp,String}/**/*.js`, 6,199
+  scenarios): default flags `out/test262-s9-lb-resym-base` —
+  **4,113/2,086**, and `-ES6RegExSymbols` `out/test262-s9-lb-resym` —
+  **4,573/1,626**; joins vs the C1 baselines: **260 fail→pass / 0
+  pass→fail** (default; sub-batches 1–3 had contributed 224) and
+  **288/0** (symbols; the prior cumulative was 252); incremental joins
+  vs sub-batch 3's artifacts: **36/0** both (the lookbehind corpus
+  plus lookbehind usage inside other RegExp/String corpus files).
+- `analyze.py`: `regexp-lookbehind` 38/0; buckets
+  `engine-defect-on-existing` 6 (the symbols-gated families, unchanged
+  classification), no bucket moved.
+- Node 26.5.0 oracle: the 128 mirrored test assertions (95 at first
+  landing, 33 added by the review round below) plus ~70 ad-hoc
+  probes (the decisive reverse-order shapes, reversed backreference
+  replay incl. `i` and `i+u` astral, adversarial left contexts,
+  sliced-string lookbehind, nesting up to three assertions deep,
+  anchors at frame edges, sticky/`lastIndex`, dynamic/`compile`
+  parity) — 0 mismatches after the two fix cycles below.
+
+## Review fixes during development (same design)
+
+1. **Reversed-frame backreference compare** compared the group's text
+   forward; the spec's reverse backreference matches the substring
+   ending at the cursor, i.e. the group's text mirrored. Caught by
+   Node on `(?<=a(\2)b(..\1))b` (corpus `mutual-recursive.js` #2);
+   fixed in `MatchBackrefText` (plain/i/i+u reversed walks).
+2. **Loop-rewind re-ending of groups** underflowed the span length in
+   reversed frames (the stored offset had been clobbered by the
+   previous parse's end); caught by corpus
+   `back-references-to-captures.js` #3 (`(?<=\1(\w+))c` lost the
+   capture). Fixed by the `RestoreGroupCont`-carrying-real-end rule
+   described above.
+3. **First-set shutdown** for `LookbehindNode` (the `.*(?<=...)`
+   follow-first bug, corpus `alternations.js` #4).
+4. **The reversed window was built from the current frame's prefix**,
+   which is not the real left context when the current frame is a
+   suffix view (a lookahead inside a lookbehind): a lookbehind nested
+   one level deeper (`(?<=(?=(?<=c))d)`) saw an empty window. The
+   window is now always the reverse of the real input's prefix
+   `[0, realPos)` — at the top frame this is byte-identical to the old
+   construction, so only the deep-nesting shape changed. Caught by the
+   adversarial Node probes (the corpus's own three-deep shapes were
+   narrow enough to pass by luck — their inner lookbehinds' maximum
+   width fit inside the suffix frame's consumed text).
+
+## Review fixes (review round after landing)
+
+Both regular-reviewer [bug]s shared one root cause; the adversarial
+[bug] was independent.
+
+5. **The reversed lookbehind window swapped UTF-16 units, but u-mode
+   instructions are code-point-oriented.** An i+u astral
+   backreference could never compare equal
+   (`/(😀)(?<=\1)/iu` on `"😀😀"` → `null` vs Node `["😀","😀"]`):
+   the unit-reversed window decodes as two lone surrogates while the
+   group decodes as one code point. Fixed on both sides of the frame:
+   `BeginLookbehindInst::Exec` builds the window code-point reversed
+   when the pattern's `u` flag is set (pairs swap as units; non-u keeps
+   unit-wise reversal, so BMP semantics are untouched),
+   `Parser::MirrorLiteral` mirrors literals the same way,
+   `Parser::MirrorLookbehindBody` preserves the term order of the
+   parser's synthetic surrogate-pair class atoms (astral ranges and
+   the u-mode `.`/`\S`/`\D`/`\W` expansion — previously their
+   `lead|trail` concat got term-reversed, killing e.g.
+   `(?<=[\u{10400}-\u{10428}])x/u`), and `Matcher::MatchBackrefText`'s
+   reversed case-sensitive `u` walk compares decoded code points
+   (a unit-wise comparison would test a pair's units against each
+   other). The linear reversed-frame coordinate map stays exact: a
+   u-mode sub-match only lands on code-point boundaries, where
+   `frame_start(cp) + real_end(cp) == realPos`.
+6. **`lookbehindBodySucceeded` leaked from a nested suffix-frame
+   sub-match.** `EndLookbehindInst` of a nested
+   lookahead-inside-lookbehind set the flag; the enclosing
+   `BeginLookbehindInst` cleared it only before its own `Run`, so a
+   nested success followed by an enclosing-body failure reported the
+   enclosing lookbehind as successful: `/(?<=x(?=c)c)y/` on `"aacy"`
+   → `["y"]` vs Node `null` (the negative variant false-negatived;
+   3-deep nesting same). `BeginLookbehindInst::Exec` now saves the
+   flag alongside `savedFrameBase` and restores it after `Run` (nested
+   Begins restore correctly on exit by construction).
+
+Residual, NOT introduced by this batch: the u-mode dot/class expansion
+(`GetNodeWithValidCharacterSet` / surrogate-range disjunctions) admits
+a unit-wise parse — `/../u.exec("😀")` returns a match on the engine
+without this batch too (Node: `null`), because the "lone lead" branch
+plus the trail-in-BMP branch can consume one code point as two units.
+This pre-existing forward-path behavior (the batch diff does not touch
+that expansion) similarly blurs the lookbehind counting shapes
+(`/(?<=..)x/u` over `"😀x"` → `["x"]` vs Node `null`); those shapes
+are left unpinned in the focused test and deferred with it.
+
+## Limits
+
+- A lookbehind evaluation copies its left context into recycler leaf
+  garbage (O(left context) per evaluation, worst case O(n²) transient
+  bytes per match); suffix-frame evaluations (lookaheads inside
+  lookbehinds) are zero-copy. Adversarially quantified on the final
+  binaries: `/(?<=a)a/g` stepped over a 64KB input (the lookbehind
+  evaluated at every position, average left context 32K units) runs in
+  ~0.3s with a peak RSS of ~1.2GB (the review round measured 523ms /
+  1.26GB for the same shape) — the known O(n²) transient; corpus
+  inputs are small and the focused test exercises repeated evaluations
+  under `CollectGarbage`. A per-depth scratch cache is a follow-up
+  if corpus workloads ever grow.
+- The sub-match recursion depth is the syntactic nesting depth of
+  lookbehinds/lookaheads (each level is one C++ frame plus a
+  `RegexStacks`); `PROBE_STACK_NO_DISPOSE` guards the entry like the
+  parser.
+- Lookbehind keeps the existing assertion cut semantics (the engine
+  never backtracks *into* an assertion after it commits) — the same
+  deliberate deviation the lookahead already has, unobservable in the
+  corpus.
+- `RegExp.prototype.hasIndices`/`flags` remain proto-flag-gated
+  (sub-batch 2 substrate); matchAll/subclass scenarios remain
+  symbols-flag-gated (unchanged classification).
+- The pre-existing S7-class `g`+non-writable-`lastIndex` divergence
+  recorded in sub-batch 2 is untouched.
+
+## JIT (B4) (sub-batch 4)
+
+All evidence is Mac no-JIT interpreter. The change adds regex-internal
+instructions (matcher dispatch switch only, no JS bytecode, no
+PropertyId) and a compile-time node; no JIT surface reads them. B4 must
+(a) run `regexp-lookbehind.js` (with the namedgroups/indices twins) and
+the `lookBehind/` corpus family under SimpleJIT/FullJIT before any
+JIT-configuration claim, and (b) re-audit the JIT-inlined String/RegExp
+helpers if any inlined fast path assumes the matcher's instruction
+stream shape (two new zero-width instructions and the variable-size
+sub-match entry are new shapes in that stream).

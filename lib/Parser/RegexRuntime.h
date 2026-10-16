@@ -1537,6 +1537,60 @@ namespace UnifiedRegex
 
         INST_BODY
     };
+
+    // True when the assertion body must run over the real input suffix from
+    // the current real position (a lookahead compiled inside a lookbehind),
+    // false when it runs over the reverse of the current frame's prefix
+    // (source lookbehinds).
+    struct SuffixFrameMixin
+    {
+        bool isSuffixFrame;
+        inline SuffixFrameMixin(bool isSuffixFrame) : isSuffixFrame(isSuffixFrame) {}
+
+#if ENABLE_REGEX_CONFIG_OPTIONS
+        void Print(DebugWriter* w, const char16* litbuf) const;
+#endif
+    };
+
+    struct BeginLookbehindInst : Inst, BodyGroupsMixin, NegationMixin, SuffixFrameMixin, NextLabelMixin
+    {
+        // nextLabel must always be fixed up
+        inline BeginLookbehindInst(bool isNegation, bool isSuffixFrame, int minBodyGroupId, int maxBodyGroupId)
+            : Inst(InstTag::BeginLookbehind), BodyGroupsMixin(minBodyGroupId, maxBodyGroupId), NegationMixin(isNegation),
+              SuffixFrameMixin(isSuffixFrame), NextLabelMixin()
+        {}
+
+        INST_BODY
+    };
+
+    struct EndLookbehindInst : Inst
+    {
+        inline EndLookbehindInst() : Inst(InstTag::EndLookbehind) {}
+
+        INST_BODY
+    };
+
+    struct FrameBOLTestInst : Inst
+    {
+        inline FrameBOLTestInst() : Inst(InstTag::FrameBOLTest) {}
+
+        INST_BODY
+    };
+
+    struct FrameEOLTestInst : Inst
+    {
+        inline FrameEOLTestInst() : Inst(InstTag::FrameEOLTest) {}
+
+        INST_BODY
+    };
+
+    template <bool isNegation>
+    struct FrameWordBoundaryTestInst : Inst
+    {
+        FrameWordBoundaryTestInst();
+
+        INST_BODY
+    };
 #pragma pack(pop)
 
     // ----------------------------------------------------------------------
@@ -1859,6 +1913,42 @@ namespace UnifiedRegex
 
         Field(uint) previousQcTime;
 
+        // ---- Lookbehind frame state (doc/c2-s9-namedgroups.md sub-batch 4) ----
+        // While a match is running, the matcher has a current "frame": the
+        // character buffer the instruction stream currently runs over (the
+        // `input`/`inputLength` every instruction receives) plus the mapping
+        // from frame gap-offsets to real (level-0) input offsets: real =
+        // frameReversed ? frameBase - offset : frameBase + offset. The top
+        // frame is the real input itself (frameBase 0, forward), and in it
+        // every frame-aware helper below is the identity, so instructions
+        // outside lookbehinds behave exactly as before. A lookbehind body
+        // runs as a sub-match over a new frame (BeginLookbehindInst::Exec).
+        //
+        // realInput/realLength are the level-0 input, held only for the
+        // duration of Match. They are safe as untracked raw pointers because
+        // the top-level Match call keeps the same input pointer live on the
+        // C++ stack for the whole match, so any GC triggered from
+        // QueryContinue pins the buffer via conservative stack scanning.
+        FieldNoBarrier(const Char*) realInput;
+        Field(CharCount) realLength;
+        Field(CharCount) frameBase;
+        Field(bool) frameReversed;
+        // Set by EndLookbehindInst so the enclosing BeginLookbehindInst can
+        // distinguish a sub-match that reached the body's end from one that
+        // failed (Run returns in both cases).
+        Field(bool) lookbehindBodySucceeded;
+
+        inline bool InTopFrame() const
+        {
+            return frameBase == 0 && !frameReversed;
+        }
+
+        // Map a gap (position) offset in the current frame to the real input.
+        inline CharCount FrameOffsetToReal(CharCount frameOffset) const
+        {
+            return frameReversed ? frameBase - frameOffset : frameBase + frameOffset;
+        }
+
 #if ENABLE_REGEX_CONFIG_OPTIONS
         FieldNoBarrier(RegexStats*) stats;
         FieldNoBarrier(DebugWriter*) w;
@@ -1921,7 +2011,7 @@ namespace UnifiedRegex
         // As above, but control whether to try backtracking or later matches
         inline bool HardFail(const Char* const input, const CharCount inputLength, CharCount &matchStart, CharCount &inputOffset, const uint8 *&instPointer, ContStack &contStack, AssertionStack &assertionStack, uint &qcTicks, HardFailMode mode);
 
-        inline void Run(const Char* const input, const CharCount inputLength, CharCount &matchStart, CharCount &nextSyncInputOffset, ContStack &contStack, AssertionStack &assertionStack, uint &qcTicks, bool firstIteration);
+        inline void Run(const Char* const input, const CharCount inputLength, CharCount &matchStart, CharCount &nextSyncInputOffset, ContStack &contStack, AssertionStack &assertionStack, uint &qcTicks, bool firstIteration, Label entryLabel = 0);
         inline bool MatchHere(const Char* const input, const CharCount inputLength, CharCount &matchStart, CharCount &nextSyncInputOffset, ContStack &contStack, AssertionStack &assertionStack, uint &qcTicks, bool firstIteration);
 
         // Return true if assertion succeeded
@@ -2000,6 +2090,15 @@ namespace UnifiedRegex
         void DoSaveInnerGroups_AllUndefined(const int fromGroupId, const int toGroupId, const Char *const input, ContStack &contStack);
         void ResetGroup(int groupId);
         void ResetInnerGroups(int minGroupId, int maxGroupId);
+
+        // Capture-group span bookkeeping across frames: groupInfos always
+        // store REAL (level-0) spans, so result construction and the ES5
+        // replace fast path are frame-agnostic; the helpers below convert the
+        // frame offsets the matching instructions naturally produce. In the
+        // top frame they are the identity.
+        inline void FrameBeginGroup(GroupInfo* groupInfo, CharCount inputOffset) const;
+        inline void FrameEndGroup(GroupInfo* groupInfo, CharCount inputOffset) const;
+        inline void FrameSetGroupSpan(GroupInfo* groupInfo, CharCount endInputOffset, CharCount length) const;
 #if DBG
         void ResetLoopInfos();
 #endif

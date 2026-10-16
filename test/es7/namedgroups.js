@@ -60,8 +60,11 @@ var tests = [
             compileError("/(?<a>a)\\k1/", "\\k not followed by < in named mode");
             compileError("/(?<a\\uD801>.)/", "escaped lone leading surrogate");
             compileError("/(?<a\\uDCA4>.)/", "escaped lone trailing surrogate");
-            compileError("/(?<=a)b/", "lookbehind stays a SyntaxError");
-            compileError("/(?<!a)b/", "negative lookbehind stays a SyntaxError");
+            // Lookbehind landed in sub-batch 4; only its quantified forms
+            // stay rejected here (regexp-lookbehind.js has the full matrix).
+            compileOk("/(?<=a)b/", "lookbehind now parses");
+            compileOk("/(?<!a)b/", "negative lookbehind now parses");
+            compileError("/(?<=a)?/", "quantified lookbehind still a SyntaxError");
             // Scripts longer than the deferral threshold scan function
             // bodies without an AST. That scan has to reject these itself;
             // a hit found only when the function is called is an internal error.

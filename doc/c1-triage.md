@@ -625,8 +625,21 @@ Corpus: the 190-scenario named-groups set 182/8 default / 188/2
 symbols (residue: 2 lookbehind + 6 symbols-gated), the 20
 duplicate-name scenarios flipped 0 collateral; match-indices 28/28;
 resym joins 28/0 and 30/0 incremental (224/0 and 252/0 vs C1). Gates
-moved 1972/2024 → 1973/2025. Remaining S9 work: lookbehind, `v` flag
-(needs S3), and the modifiers remainder.)*
+moved 1972/2024 → 1973/2025. Sub-batch 4 — ES2018 lookbehind
+assertions — landed 2026-10-16 on Mac no-JIT (same receipt, "Sub-batch
+4"): `(?<=`/`(?<!` parse (never quantifiable, both modes), the body is
+syntactically mirrored at parse time and executed right-to-left as a
+self-contained sub-match over a reversed window (reverse-order
+alternation/greed/capture semantics per the spec's reverse matcher;
+lookaheads inside lookbehinds run as real-suffix sub-matches, nested
+lookbehinds as ordinary lookaheads; `^`/`$`/`\b` inside are
+frame-aware; group spans stay in real coordinates). The entire
+`RegExp/lookBehind/` corpus directory passes; the 190-scenario set is
+118/6 default (residue: the 6 long-classified symbols-gated scenarios)
+and 124/124 under `-ES6RegExSymbols`; match-indices+duplicate-names
+30/30; joins vs C1 96/0, 102/0, 28/0; resym universe 4,113/2,086 with
+260/0 vs C1 (36/0 incremental). Gates moved 1973/2025 → 1974/2026.
+Remaining S9 work: `v` flag (needs S3) and the modifiers remainder.)*
 
 **S10. Set methods + copy-by-change family.** Repro: `python3 tools/test262/run.py --binary zig-out/bin/ch --output out/test262-c1-setcopy 'test/built-ins/Set/**/*.js' 'test/built-ins/Array/**/*.js' 'test/built-ins/TypedArray/**/*.js'`.
 *Status: both halves are closed on Mac no-JIT — see

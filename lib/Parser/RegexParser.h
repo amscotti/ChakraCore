@@ -243,6 +243,30 @@ namespace UnifiedRegex
         void CaptureGroupNames(Recycler* recycler, Program* program);
 
         //
+        // Lookbehind assertions (ES2018)
+        //
+
+        // > 0 while parsing anywhere inside a lookbehind, including inside
+        // nested lookaheads (whose bodies then also run in a non-top frame).
+        // Anchors and word boundaries parsed while this is non-zero are
+        // frame-aware, and the mirroring pass below applies to lookbehind
+        // bodies.
+        int lookbehindDepth;
+        // Syntactic mirroring of a lookbehind body: reverses term order (and
+        // literal characters) recursively through concatenations, groups,
+        // loops and alternations (alternatives keep textual order), and
+        // re-orients nested assertions (lookahead <-> lookbehind; see
+        // LookbehindNode). The result is a pattern that, matched forward over
+        // a reversed window, is exactly the spec's right-to-left match of the
+        // original body.
+        Node* MirrorLookbehindBody(Node* body);
+        Node* MirrorLiteral(const MatchLiteralNode* lit);
+        // Recognizes the parser's synthetic surrogate-pair atoms (see the
+        // definition in RegexParser.cpp); u-mode mirroring keeps their two
+        // units in order.
+        bool IsSurrogatePairConcat(Node* node);
+
+        //
         // Patterns/Disjunctions/Alternatives
         //
 

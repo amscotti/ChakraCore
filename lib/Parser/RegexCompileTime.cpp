@@ -497,6 +497,14 @@ namespace UnifiedRegex
             break;
         case BOL:
             {
+                if (isFrameAware)
+                {
+                    // Anchors inside a lookbehind must test the real input
+                    // position (the frame buffer may be reversed and/or
+                    // offset), so the multiline flag is consulted at runtime.
+                    EMIT(compiler, FrameBOLTestInst);
+                    break;
+                }
                 if ((compiler.program->flags & MultilineRegexFlag) != 0)
                 {
                     //
@@ -541,6 +549,12 @@ namespace UnifiedRegex
             }
         case EOL:
             {
+                if (isFrameAware)
+                {
+                    // See BOL above.
+                    EMIT(compiler, FrameEOLTestInst);
+                    break;
+                }
                 if ((compiler.program->flags & MultilineRegexFlag) != 0)
                 {
                     //
@@ -747,6 +761,22 @@ namespace UnifiedRegex
         //
         //   WordBoundaryTest
         //
+        if (isFrameAware)
+        {
+            // \b/\B inside a lookbehind must examine the real neighbors of
+            // the real position; in a reversed frame those neighbors sit on
+            // the other side of the current offset, and one may lie outside
+            // the frame's buffer altogether.
+            if (isNegation)
+            {
+                EMIT(compiler, FrameWordBoundaryTestInst<true>);
+            }
+            else
+            {
+                EMIT(compiler, FrameWordBoundaryTestInst<false>);
+            }
+            return;
+        }
         if (isNegation)
         {
             EMIT(compiler, WordBoundaryTestInst<true>);
@@ -4648,6 +4678,259 @@ namespace UnifiedRegex
     void AssertionNode::Print(DebugWriter* w, const Char* litbuf) const
     {
         w->PrintEOL(_u("Assertion(%s)"), isNegation ? _u("negative") : _u("positive"));
+        PrintAnnotations(w);
+        w->PrintEOL(_u("{"));
+        w->Indent();
+        body->Print(w, litbuf);
+        w->Unindent();
+        w->PrintEOL(_u("}"));
+    }
+#endif
+
+    // ----------------------------------------------------------------------
+    // LookbehindNode
+    // ----------------------------------------------------------------------
+
+    CharCount LookbehindNode::LiteralLength() const
+    {
+        return 0;
+    }
+
+    bool LookbehindNode::IsCharOrPositiveSet() const
+    {
+        return false;
+    }
+
+    CharCount LookbehindNode::TransferPass0(Compiler& compiler, const Char* litbuf)
+    {
+        PROBE_STACK_NO_DISPOSE(compiler.scriptContext, Js::Constants::MinStackRegex);
+
+        return body->TransferPass0(compiler, litbuf);
+    }
+
+    void LookbehindNode::TransferPass1(Compiler& compiler, const Char* litbuf)
+    {
+        PROBE_STACK_NO_DISPOSE(compiler.scriptContext, Js::Constants::MinStackRegex);
+
+        body->TransferPass1(compiler, litbuf);
+    }
+
+    bool LookbehindNode::IsRefiningAssertion(Compiler& compiler)
+    {
+        return !isNegation;
+    }
+
+    void LookbehindNode::AnnotatePass0(Compiler& compiler)
+    {
+        PROBE_STACK_NO_DISPOSE(compiler.scriptContext, Js::Constants::MinStackRegex);
+
+        isWord = false;
+        body->AnnotatePass0(compiler);
+    }
+
+    void LookbehindNode::AnnotatePass1(Compiler& compiler, bool parentNotInLoop, bool parentAtLeastOnce, bool parentNotSpeculative, bool parentNotNegated)
+    {
+        PROBE_STACK_NO_DISPOSE(compiler.scriptContext, Js::Constants::MinStackRegex);
+
+        features = HasAssertion;
+        body->AnnotatePass1(compiler, parentNotInLoop, parentAtLeastOnce, false, parentNotNegated && !isNegation);
+        features |= body->features;
+        thisConsumes.Exact(0);
+        // A lookbehind (or a re-oriented lookahead) consumes nothing at the
+        // current position, and its body matches against a different window,
+        // so nothing can be concluded about the characters that may appear
+        // here: the first set must stay unconstrained. (An ordinary lookahead
+        // can use its body's first set because the body matches starting
+        // exactly here.)
+        firstSet = compiler.standardChars->GetFullSet();
+        isFirstExact = false;
+        if (isNegation)
+            // This will always fail
+            isThisIrrefutable = false;
+        else
+            // If body is irrefutable overall assertion is irrefutable
+            isThisIrrefutable = body->isThisIrrefutable;
+        isThisWillNotProgress = true;
+        isThisWillNotRegress = true;
+        isNotInLoop = parentNotInLoop;
+        isAtLeastOnce = parentAtLeastOnce;
+        isNotSpeculative = parentNotSpeculative;
+        isNotNegated = parentNotNegated;
+    }
+
+    void LookbehindNode::AnnotatePass2(Compiler& compiler, CountDomain accumConsumes, bool accumPrevWillNotProgress, bool accumPrevWillNotRegress)
+    {
+        PROBE_STACK_NO_DISPOSE(compiler.scriptContext, Js::Constants::MinStackRegex);
+
+        prevConsumes = accumConsumes;
+        isPrevWillNotProgress = accumPrevWillNotProgress;
+        isPrevWillNotRegress = accumPrevWillNotRegress;
+        body->AnnotatePass2(compiler, accumConsumes, accumPrevWillNotProgress, accumPrevWillNotRegress);
+    }
+
+    void LookbehindNode::AnnotatePass3(Compiler& compiler, CountDomain accumConsumes, CharSet<Char>* accumFollow, bool accumFollowIrrefutable, bool accumFollowEOL)
+    {
+        PROBE_STACK_NO_DISPOSE(compiler.scriptContext, Js::Constants::MinStackRegex);
+
+        followConsumes = accumConsumes;
+        followSet = accumFollow;
+        isFollowIrrefutable = accumFollowIrrefutable;
+        isFollowEOL = accumFollowEOL;
+        // Can't say anything about what the assertion body will see at its end
+        CountDomain innerConsumes;
+        CharSet<Char>* innerFollow = compiler.standardChars->GetFullSet();
+
+        // We can never backtrack into the body of the assertion (the continuation stack is cut)
+        body->AnnotatePass3(compiler, innerConsumes, innerFollow, true, false);
+
+        hasInitialHardFailBOI = body->hasInitialHardFailBOI;
+    }
+
+    void LookbehindNode::AnnotatePass4(Compiler& compiler)
+    {
+        PROBE_STACK_NO_DISPOSE(compiler.scriptContext, Js::Constants::MinStackRegex);
+
+        body->AnnotatePass4(compiler);
+        // Even if body is non-deterministic we cut the choicepoints on exit from the assertion,
+        // so overall assertion is deterministic.
+        isDeterministic = true;
+
+        //
+        // Compilation scheme: Fail
+        //
+        // If body is irrefutable, a negative assertion will always fail (and
+        // will leave groups empty).
+        //
+        if (isNegation && body->isThisIrrefutable)
+        {
+            // ***COMMIT***
+            scheme = Fail;
+            return;
+        }
+
+        //
+        // Compilation scheme: Succ
+        //
+        // If body is irrefutable it can match empty ending at the current
+        // position, so a positive lookbehind always succeeds. If it does not
+        // define groups we can eliminate it altogether.
+        //
+        if (!isNegation && body->isThisIrrefutable && !body->ContainsDefineGroup())
+        {
+            // **COMMIT**
+            scheme = Succ;
+            return;
+        }
+
+        //
+        // Compilation scheme: BeginEnd
+        //
+        scheme = BeginEnd;
+    }
+
+    bool LookbehindNode::SupportsPrefixSkipping(Compiler& compiler) const
+    {
+        return false;
+    }
+
+    Node* LookbehindNode::HeadSyncronizingNode(Compiler& compiler)
+    {
+        return 0;
+    }
+
+    CharCount LookbehindNode::MinSyncronizingLiteralLength(Compiler& compiler, int& numLiterals) const
+    {
+        return 0;
+    }
+
+    void LookbehindNode::CollectSyncronizingLiterals(Compiler& compiler, ScannersMixin& scanners) const
+    {
+        Assert(false);
+    }
+
+    void LookbehindNode::BestSyncronizingNode(Compiler& compiler, Node*& bestNode)
+    {
+    }
+
+    void LookbehindNode::AccumDefineGroups(Js::ScriptContext* scriptContext, int& minGroup, int& maxGroup)
+    {
+        PROBE_STACK_NO_DISPOSE(scriptContext, Js::Constants::MinStackRegex);
+
+        body->AccumDefineGroups(scriptContext, minGroup, maxGroup);
+    }
+
+    void LookbehindNode::Emit(Compiler& compiler, CharCount& skipped)
+    {
+        PROBE_STACK_NO_DISPOSE(compiler.scriptContext, Js::Constants::MinStackRegex);
+
+        Assert(skipped == 0);
+
+        switch (scheme)
+        {
+        case BeginEnd:
+            {
+                //
+                // Compilation scheme:
+                //
+                //          BeginLookbehind Lexit
+                //          <body>
+                //          EndLookbehind
+                //   Lexit:
+                //
+                int minBodyGroupId = compiler.program->numGroups;
+                int maxBodyGroupId = -1;
+                body->AccumDefineGroups(compiler.scriptContext, minBodyGroupId, maxBodyGroupId);
+                Label fixup = compiler.GetFixup(&EMIT(compiler, BeginLookbehindInst, isNegation, isSuffixFrame, minBodyGroupId, maxBodyGroupId)->nextLabel);
+                body->Emit(compiler, skipped);
+                EMIT(compiler, EndLookbehindInst);
+                compiler.DoFixup(fixup, compiler.CurrentLabel());
+                break;
+            }
+        case Succ:
+            {
+                // Nothing to emit
+                break;
+            }
+        case Fail:
+            {
+                //
+                // Compilation scheme:
+                //
+                //     Fail
+                //
+                EMIT(compiler, FailInst);
+                break;
+            }
+        }
+    }
+
+    CharCount LookbehindNode::EmitScan(Compiler& compiler, bool isHeadSyncronizingNode)
+    {
+        Assert(false);
+        return 0;
+    }
+
+    bool LookbehindNode::IsOctoquad(Compiler& compiler, OctoquadIdentifier* oi)
+    {
+        return false;
+    }
+
+    bool LookbehindNode::IsCharTrieArm(Compiler& compiler, uint& accNumAlts) const
+    {
+        return false;
+    }
+
+    bool LookbehindNode::BuildCharTrie(Compiler& compiler, CharTrie* trie, Node* cont, bool isAcceptFirst) const
+    {
+        Assert(false);
+        return false;
+    }
+
+#if ENABLE_REGEX_CONFIG_OPTIONS
+    void LookbehindNode::Print(DebugWriter* w, const Char* litbuf) const
+    {
+        w->PrintEOL(_u("Lookbehind(%s, %s)"), isNegation ? _u("negative") : _u("positive"),
+            isSuffixFrame ? _u("suffix") : _u("reversed"));
         PrintAnnotations(w);
         w->PrintEOL(_u("{"));
         w->Indent();

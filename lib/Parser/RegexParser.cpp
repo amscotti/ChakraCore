@@ -159,6 +159,7 @@ namespace UnifiedRegex
         , altScopeCount(0)
         , altScopeCap(0)
         , altFrameStart(0)
+        , lookbehindDepth(0)
         , surrogatePairList(nullptr)
         , currentSurrogatePairNode(nullptr)
         , tempLocationOfSurrogatePair(nullptr)
@@ -1412,6 +1413,213 @@ namespace UnifiedRegex
     // Terms
     //
 
+    // ----------------------------------------------------------------------
+    // Lookbehind body mirroring (see the declaration in RegexParser.h)
+    // ----------------------------------------------------------------------
+
+    template <typename P, const bool IsLiteral>
+    Node* Parser<P, IsLiteral>::MirrorLiteral(const MatchLiteralNode* lit)
+    {
+        Assert(!lit->isEquivClass); // equiv classes are a compile-time expansion; parse literals are plain
+        MatchLiteralNode* reversed = Anew(ctAllocator, MatchLiteralNode, 0, 0);
+        if (unicodeFlagPresent)
+        {
+            // u-mode: the runtime window is reversed by code points (see
+            // BeginLookbehindInst::Exec), so mirror the literal the same
+            // way — reverse the code points but keep a surrogate pair's two
+            // units in order. (Astral pattern characters are two-unit
+            // literals here; lone surrogates are one-unit code points.)
+            CharCount i = lit->length;
+            while (i > 0)
+            {
+                const Char c = litbuf[lit->offset + i - 1];
+                if (Js::NumberUtilities::IsSurrogateUpperPart(c) && i >= 2
+                    && Js::NumberUtilities::IsSurrogateLowerPart(litbuf[lit->offset + i - 2]))
+                {
+                    MatchCharNode lower(litbuf[lit->offset + i - 2]);
+                    MatchCharNode upper(c);
+                    AccumLiteral(reversed, &lower);
+                    AccumLiteral(reversed, &upper);
+                    i -= 2;
+                }
+                else
+                {
+                    MatchCharNode cNode(c);
+                    AccumLiteral(reversed, &cNode);
+                    i -= 1;
+                }
+            }
+        }
+        else
+        {
+            for (CharCount i = lit->length; i > 0; i--)
+            {
+                MatchCharNode c(litbuf[lit->offset + i - 1]);
+                AccumLiteral(reversed, &c);
+            }
+        }
+        Assert(reversed->length == lit->length);
+        return reversed;
+    }
+
+    // True for the parser's synthetic surrogate-pair atoms: a concat of
+    // exactly two terms, the first a lead-surrogate atom (a lead char or a
+    // set contained in [D800-DBFF]) and the second a trail-surrogate-only
+    // set ([DC00-DFFF] subrange). These are built by
+    // AppendSurrogateRangeToDisjunction (astral ranges in classes) and
+    // GetNodeWithValidCharacterSet (u-mode . / \S / \D / \W); the two units
+    // are ONE code point, so in u-mode (whose reversed window keeps pairs in
+    // unit order) mirroring must preserve their order.
+    template <typename P, const bool IsLiteral>
+    bool Parser<P, IsLiteral>::IsSurrogatePairConcat(Node* node)
+    {
+        if (node->tag != Node::Concat)
+        {
+            return false;
+        }
+        ConcatNode* const c1 = (ConcatNode*)node;
+        if (c1->tail == nullptr || c1->tail->tag != Node::Concat)
+        {
+            return false;
+        }
+        ConcatNode* const c2 = (ConcatNode*)c1->tail;
+        if (c2->tail != nullptr)
+        {
+            // The pair atoms are always spliced in as a whole alternation
+            // term, never extended with more terms.
+            return false;
+        }
+
+        auto setIsSingleRangeWithin = [](CharSet<Char>& set, Char lowerBound, Char upperBound) {
+            Char rangeLower, rangeUpper;
+            if (!set.GetNextRange(0, &rangeLower, &rangeUpper))
+            {
+                return false;
+            }
+            Char nextLower, nextUpper;
+            if (set.GetNextRange(rangeUpper == Char(0xFFFFu) ? Char(0xFFFFu) : Char(rangeUpper + 1), &nextLower, &nextUpper))
+            {
+                return false;
+            }
+            return rangeLower >= lowerBound && rangeUpper <= upperBound;
+        };
+
+        auto isLeadAtom = [&](Node* n) {
+            if (n->tag == Node::MatchChar)
+            {
+                const Char ch = ((MatchCharNode*)n)->cs[0];
+                return ch >= (Char)0xD800u && ch <= (Char)0xDBFFu;
+            }
+            if (n->tag == Node::MatchSet)
+            {
+                return setIsSingleRangeWithin(((MatchSetNode*)n)->set, (Char)0xD800u, (Char)0xDBFFu);
+            }
+            return false;
+        };
+
+        return isLeadAtom(c1->head)
+            && c2->head->tag == Node::MatchSet
+            && setIsSingleRangeWithin(((MatchSetNode*)c2->head)->set, (Char)0xDC00u, (Char)0xDFFFu);
+    }
+
+    template <typename P, const bool IsLiteral>
+    Node* Parser<P, IsLiteral>::MirrorLookbehindBody(Node* body)
+    {
+        PROBE_STACK_NO_DISPOSE(scriptContext, Js::Constants::MinStackRegex);
+
+        switch (body->tag)
+        {
+        case Node::Concat:
+            {
+                // Reverse the term order, mirroring each term. The list's
+                // canonical form (no two consecutive char/literal nodes) is
+                // preserved by reversal. Exception: in u-mode a synthetic
+                // surrogate-pair atom's two units are one code point, which
+                // the code-point-reversed window presents in original unit
+                // order, so such a two-term list is NOT reversed.
+                ConcatNode* prev = nullptr;
+                if (!(unicodeFlagPresent && IsSurrogatePairConcat(body)))
+                {
+                    for (ConcatNode* cur = (ConcatNode*)body; cur != nullptr;)
+                    {
+                        ConcatNode* const next = cur->tail;
+                        cur->tail = prev;
+                        prev = cur;
+                        cur = next;
+                    }
+                }
+                else
+                {
+                    prev = (ConcatNode*)body;
+                }
+                for (ConcatNode* p = prev; p != nullptr; p = p->tail)
+                {
+                    p->head = MirrorLookbehindBody(p->head);
+                }
+                return prev;
+            }
+        case Node::Alt:
+            {
+                // Alternatives keep textual order (the spec's reverse matcher
+                // tries them in textual order); each is mirrored.
+                for (AltNode* alt = (AltNode*)body; alt != nullptr; alt = alt->tail)
+                {
+                    alt->head = MirrorLookbehindBody(alt->head);
+                }
+                return body;
+            }
+        case Node::Loop:
+            {
+                // Greedy/lazy preference and iteration counts are unchanged;
+                // greediness now extends leftward because the whole body runs
+                // over the reversed window.
+                LoopNode* loop = (LoopNode*)body;
+                loop->body = MirrorLookbehindBody(loop->body);
+                return loop;
+            }
+        case Node::DefineGroup:
+            {
+                DefineGroupNode* group = (DefineGroupNode*)body;
+                group->body = MirrorLookbehindBody(group->body);
+                return group;
+            }
+        case Node::Assertion:
+            {
+                // A lookahead inside the lookbehind: at runtime it must look
+                // forward over the real input, which a suffix-frame
+                // LookbehindNode provides. Its body must NOT be re-mirrored
+                // (any lookbehind inside it already baked its own mirrored
+                // body at its close).
+                AssertionNode* assertion = (AssertionNode*)body;
+                return Anew(ctAllocator, LookbehindNode, assertion->isNegation, assertion->body,
+                    /*isSuffixFrame=*/true);
+            }
+        case Node::Lookbehind:
+            {
+                // A source lookbehind inside this body: matching its (already
+                // mirrored) stored body forward over the current frame from
+                // the current position is exactly its reverse match over the
+                // real text, i.e. a plain lookahead here.
+                LookbehindNode* lookbehind = (LookbehindNode*)body;
+                Assert(!lookbehind->isSuffixFrame);
+                return Anew(ctAllocator, AssertionNode, lookbehind->isNegation, lookbehind->body);
+            }
+        case Node::MatchLiteral:
+            // Literal characters are reversed with the term order. In u-mode
+            // both the runtime window and the mirrored literal are reversed
+            // by code points (surrogate pairs stay intact); without u the
+            // reversal is unit-wise, which is what the unit-reversed window
+            // contains.
+            return MirrorLiteral((MatchLiteralNode*)body);
+        default:
+            // MatchChar/MatchSet/classes/dots, numbered and named backrefs,
+            // and (frame-aware) anchors and word boundaries are
+            // direction-symmetric once the frame machinery orients the
+            // window.
+            return body;
+        }
+    }
+
     template <typename P, const bool IsLiteral>
     Node* Parser<P, IsLiteral>::NewLoopNode(CharCount lower, CharCountOrFlag upper, bool isGreedy, Node* body)
     {
@@ -1543,6 +1751,10 @@ namespace UnifiedRegex
         // Either we have a location at the start, or the end, never both. As in between it should have been cleared if surrogate pair
         // Or must be cleared if we didn't perform the check
         bool clearLocationIfPresent = this->tempLocationOfSurrogatePair != nullptr;
+        // Set when this term is a (?<= / (?<! lookbehind assertion: those are
+        // never quantifiable (ES2018 removed the Annex B QuantifiableAssertion
+        // relaxation for them), in either mode.
+        bool thisTermIsLookbehind = false;
 
         switch (ECLookahead())
         {
@@ -1575,10 +1787,20 @@ namespace UnifiedRegex
                     break;
                 case '<':
                     {
-                        // (?<Name>...) named capture group. (?<= and (?<! are
-                        // lookbehind assertions (a later sub-batch) and stay
-                        // SyntaxError.
-                        if (!ECCanConsume(3) || ECLookahead(2) == '=' || ECLookahead(2) == '!')
+                        // (?<Name>...) named capture group, or (?<= / (?<!)
+                        // lookbehind assertions (ES2018). An unparsable name
+                        // after (?< (e.g. (?< followed by EOF or another
+                        // invalid start) is still rejected below by the
+                        // ID_Start check in ScanGroupName.
+                        if (ECCanConsume(3) && (ECLookahead(2) == '=' || ECLookahead(2) == '!'))
+                        {
+                            // Lookbehind assertion: non-capturing, and never
+                            // quantifiable (unlike Annex B lookaheads).
+                            ECConsume(3);
+                            thisTermIsLookbehind = true;
+                            break;
+                        }
+                        if (!ECCanConsume(3))
                             Fail(JSERR_RegExpSyntax);
                         ECConsume(2); // ?<
                         CharCount nameOffset = this->namedGroupBufferNext;
@@ -1656,6 +1878,8 @@ namespace UnifiedRegex
 
         if (AtQuantifier())
         {
+            if (thisTermIsLookbehind)
+                Fail(JSERR_RegExpBadQuant);
             switch (ECLookahead())
             {
             case '*':
@@ -1715,10 +1939,12 @@ namespace UnifiedRegex
         {
         case '^':
             ECConsume();
-            return Anew(ctAllocator, SimpleNode, Node::BOL); // No quantifier allowed
+            // No quantifier allowed. Inside a lookbehind the anchor must be
+            // tested against the real input through the current frame.
+            return Anew(ctAllocator, SimpleNode, Node::BOL, lookbehindDepth > 0);
         case '$':
             ECConsume();
-            return Anew(ctAllocator, SimpleNode, Node::EOL); // No quantifier allowed
+            return Anew(ctAllocator, SimpleNode, Node::EOL, lookbehindDepth > 0); // No quantifier allowed
         case '\\':
             ECConsume();
             if(SurrogatePairPass1(node, deferredCharNode, previousSurrogatePart))
@@ -1739,17 +1965,32 @@ namespace UnifiedRegex
                 {
                 case '=':
                     ECConsume(2); // ?=
-                    node = DisjunctionPass1();
-                    Assert(ECLookahead() == ')');
-                    ECConsume(); // )
-                    node = Anew(ctAllocator, AssertionNode, false, node);
+                    {
+                        // Inside a lookbehind the lookahead body also runs in
+                        // a non-top frame (the real suffix), so anchors within
+                        // it must stay frame-aware.
+                        if (lookbehindDepth > 0)
+                            lookbehindDepth++;
+                        node = DisjunctionPass1();
+                        if (lookbehindDepth > 0)
+                            lookbehindDepth--;
+                        Assert(ECLookahead() == ')');
+                        ECConsume(); // )
+                        node = Anew(ctAllocator, AssertionNode, false, node);
+                    }
                     break; // As per Annex B, allow this to be quantifiable
                 case '!':
                     ECConsume(2); // ?!
-                    node = DisjunctionPass1();
-                    Assert(ECLookahead() == ')');
-                    ECConsume(); // )
-                    node = Anew(ctAllocator, AssertionNode, true, node);
+                    {
+                        if (lookbehindDepth > 0)
+                            lookbehindDepth++;
+                        node = DisjunctionPass1();
+                        if (lookbehindDepth > 0)
+                            lookbehindDepth--;
+                        Assert(ECLookahead() == ')');
+                        ECConsume(); // )
+                        node = Anew(ctAllocator, AssertionNode, true, node);
+                    }
                     break; // As per Annex B, allow this to be quantifiable
                 case ':':
                     ECConsume(2); // ?:
@@ -1759,6 +2000,24 @@ namespace UnifiedRegex
                     break; // fall-through for opt quantifier
                 case '<':
                     {
+                        if (ECCanConsume(3) && (ECLookahead(2) == '=' || ECLookahead(2) == '!'))
+                        {
+                            // (?<=e) / (?<!e) lookbehind: parse the body and
+                            // mirror it so it can be matched forward over the
+                            // reversed left context. Never quantifiable (pass
+                            // 0 rejects the quantifier, so none can reach
+                            // here).
+                            const bool isNegation = ECLookahead(2) == '!';
+                            ECConsume(3); // ?<= or (?<!
+                            lookbehindDepth++;
+                            node = DisjunctionPass1();
+                            lookbehindDepth--;
+                            Assert(ECLookahead() == ')');
+                            ECConsume(); // )
+                            node = Anew(ctAllocator, LookbehindNode, isNegation,
+                                MirrorLookbehindBody(node), /*isSuffixFrame=*/false);
+                            return node; // no quantifier allowed
+                        }
                         // (?<Name>...) — name already validated during pass 0
                         // and resolved against the definition registry.
                         ECConsume(2); // ?<
@@ -2231,10 +2490,10 @@ namespace UnifiedRegex
             switch (c)
             {
             case 'b':
-                node = Anew(ctAllocator, WordBoundaryNode, false);
+                node = Anew(ctAllocator, WordBoundaryNode, false, lookbehindDepth > 0);
                 return true; // Is an assertion
             case 'B':
-                node = Anew(ctAllocator, WordBoundaryNode, true);
+                node = Anew(ctAllocator, WordBoundaryNode, true, lookbehindDepth > 0);
                 return true; // Is an assertion
             case 'f':
                 c = '\f';

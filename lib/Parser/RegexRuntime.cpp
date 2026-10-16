@@ -867,6 +867,13 @@ namespace UnifiedRegex
 #endif
 
 #if ENABLE_REGEX_CONFIG_OPTIONS
+    void SuffixFrameMixin::Print(DebugWriter* w, const char16* litbuf) const
+    {
+        w->Print(_u("isSuffixFrame: %s"), isSuffixFrame ? _u("true") : _u("false"));
+    }
+#endif
+
+#if ENABLE_REGEX_CONFIG_OPTIONS
     void NextLabelMixin::Print(DebugWriter* w, const char16* litbuf) const
     {
         w->Print(_u("nextLabel: L%04x"), Inst::GetPrintLabel(nextLabel));
@@ -2621,6 +2628,55 @@ namespace UnifiedRegex
 #endif
 
     // ----------------------------------------------------------------------
+    // Frame-aware capture-group bookkeeping (see RegexRuntime.h)
+    // ----------------------------------------------------------------------
+
+    inline void Matcher::FrameBeginGroup(GroupInfo* groupInfo, CharCount inputOffset) const
+    {
+        // In forward frames (including the top frame) this records the real
+        // START of the span, as before. In a reversed frame it records the
+        // real END; FrameEndGroup reorders, using this stored value to find
+        // the span's end even when a loop rewind re-ends the group without
+        // re-beginning it (the stored offset is never clobbered in between,
+        // because a defined span always stores realStart + length = realEnd).
+        groupInfo->offset = FrameOffsetToReal(inputOffset);
+    }
+
+    inline void Matcher::FrameEndGroup(GroupInfo* groupInfo, CharCount inputOffset) const
+    {
+        if (frameReversed)
+        {
+            // Real end of the span being closed: either the value stored by
+            // FrameBeginGroup (group still open, length is the undefined
+            // flag) or the previous parse's realStart + length.
+            const CharCount realEnd = groupInfo->offset + (groupInfo->IsUndefined() ? 0 : (CharCount)groupInfo->length);
+            const CharCount realStart = FrameOffsetToReal(inputOffset);
+            Assert(realEnd >= realStart);
+            groupInfo->length = realEnd - realStart;
+            groupInfo->offset = realStart;
+        }
+        else
+        {
+            Assert(FrameOffsetToReal(inputOffset) >= groupInfo->offset);
+            groupInfo->length = FrameOffsetToReal(inputOffset) - groupInfo->offset;
+        }
+    }
+
+    inline void Matcher::FrameSetGroupSpan(GroupInfo* groupInfo, CharCount endInputOffset, CharCount length) const
+    {
+        if (frameReversed)
+        {
+            // The frame end of a reversed span is its real start.
+            groupInfo->offset = FrameOffsetToReal(endInputOffset);
+        }
+        else
+        {
+            groupInfo->offset = FrameOffsetToReal(endInputOffset - length);
+        }
+        groupInfo->length = length;
+    }
+
+    // ----------------------------------------------------------------------
     // MatchGroupInst
     // ----------------------------------------------------------------------
 
@@ -2628,6 +2684,13 @@ namespace UnifiedRegex
     // RegexRuntime.h): matches info's captured text at inputOffset,
     // advancing inputOffset. Returns false on mismatch or overflow; the
     // callers fail the match.
+    // The captured span is always in real (level-0) coordinates, while the
+    // position being matched is in the current frame's coordinates: in a
+    // lookbehind's reversed frame the frame text at inputOffset is the real
+    // text read backwards, which is exactly what a reverse-direction
+    // backreference must compare against. The group text itself is read from
+    // realInput (in the top frame this is the same buffer, so behavior is
+    // unchanged).
     inline bool Matcher::MatchBackrefText(const Char* const input, const CharCount inputLength, CharCount& inputOffset, const GroupInfo* const info)
     {
         Assert(!info->IsUndefined() && info->length > 0);
@@ -2638,20 +2701,23 @@ namespace UnifiedRegex
 
         CharCount groupOffset = info->offset;
         const CharCount groupEndOffset = groupOffset + info->length;
+        const Char* const groupText = this->realInput != nullptr ? this->realInput : input;
 
         bool isCaseInsensitiveMatch = (program->flags & IgnoreCaseRegexFlag) != 0;
         bool isCodePointList = (program->flags & UnicodeRegexFlag) != 0;
 
+        if (!frameReversed)
+        {
         // This is the only place in the runtime machinery we need to convert characters to their equivalence class
         if (isCaseInsensitiveMatch && isCodePointList)
         {
-            auto getNextCodePoint = [=](CharCount &offset, CharCount endOffset, codepoint_t &codePoint) {
+            auto getNextCodePoint = [](const Char* const buf, CharCount &offset, CharCount endOffset, codepoint_t &codePoint) {
                 if (endOffset <= offset)
                 {
                     return false;
                 }
 
-                Char lowerPart = input[offset];
+                Char lowerPart = buf[offset];
                 if (!Js::NumberUtilities::IsSurrogateLowerPart(lowerPart) || offset + 1 == endOffset)
                 {
                     codePoint = lowerPart;
@@ -2659,7 +2725,7 @@ namespace UnifiedRegex
                     return true;
                 }
 
-                Char upperPart = input[offset + 1];
+                Char upperPart = buf[offset + 1];
                 if (!Js::NumberUtilities::IsSurrogateUpperPart(upperPart))
                 {
                     codePoint = lowerPart;
@@ -2678,7 +2744,7 @@ namespace UnifiedRegex
             while (true)
             {
                 codepoint_t groupCodePoint;
-                bool hasGroupCodePoint = getNextCodePoint(groupOffset, groupEndOffset, groupCodePoint);
+                bool hasGroupCodePoint = getNextCodePoint(groupText, groupOffset, groupEndOffset, groupCodePoint);
                 if (!hasGroupCodePoint)
                 {
                     break;
@@ -2688,7 +2754,7 @@ namespace UnifiedRegex
                 // of the function, we make sure that the length of the input is at least as long as
                 // the length of the group.
                 codepoint_t inputCodePoint;
-                getNextCodePoint(inputOffset, inputLength, inputCodePoint);
+                getNextCodePoint(input, inputOffset, inputLength, inputCodePoint);
 
                 bool doesMatch = false;
                 if (!Js::NumberUtilities::IsInSupplementaryPlane(groupCodePoint))
@@ -2726,11 +2792,11 @@ namespace UnifiedRegex
 #if ENABLE_REGEX_CONFIG_OPTIONS
                 CompStats();
 #endif
-                auto toCanonical = [&](CharCount &offset) {
-                    return standardChars->ToCanonical(CaseInsensitive::MappingSource::UnicodeData, input[offset++]);
+                auto toCanonical = [&](const Char* const buf, CharCount &offset) {
+                    return standardChars->ToCanonical(CaseInsensitive::MappingSource::UnicodeData, buf[offset++]);
                 };
 
-                if (toCanonical(groupOffset) != toCanonical(inputOffset))
+                if (toCanonical(groupText, groupOffset) != toCanonical(input, inputOffset))
                 {
                     return false;
                 }
@@ -2744,7 +2810,7 @@ namespace UnifiedRegex
 #if ENABLE_REGEX_CONFIG_OPTIONS
                 CompStats();
 #endif
-                if (input[groupOffset++] != input[inputOffset++])
+                if (groupText[groupOffset++] != input[inputOffset++])
                 {
                     return false;
                 }
@@ -2753,6 +2819,187 @@ namespace UnifiedRegex
         }
 
         return true;
+        }
+        else
+        {
+            // Reversed frame (inside a lookbehind): a reverse-direction
+            // backreference succeeds when the substring ending at the
+            // current real position equals the group's captured substring.
+            // The frame text at inputOffset is that substring read
+            // backwards, so compare it against the group's text reversed.
+
+            // Frame code points are decoded forward; group code points are
+            // decoded in reverse order (the substring ending at the current
+            // real position, mirrored). In u-mode both decodings are
+            // code-point-oriented because the u-mode reversed window keeps
+            // surrogate pairs intact; non-u frames are unit-reversed and use
+            // the unit-wise walks below.
+            auto getNextCodePoint = [](const Char* const buf, CharCount &offset, CharCount endOffset, codepoint_t &codePoint) {
+                if (endOffset <= offset)
+                {
+                    return false;
+                }
+
+                Char lowerPart = buf[offset];
+                if (!Js::NumberUtilities::IsSurrogateLowerPart(lowerPart) || offset + 1 == endOffset)
+                {
+                    codePoint = lowerPart;
+                    offset += 1;
+                    return true;
+                }
+
+                Char upperPart = buf[offset + 1];
+                if (!Js::NumberUtilities::IsSurrogateUpperPart(upperPart))
+                {
+                    codePoint = lowerPart;
+                    offset += 1;
+                }
+                else
+                {
+                    codePoint = Js::NumberUtilities::SurrogatePairAsCodePoint(lowerPart, upperPart);
+                    offset += 2;
+                }
+
+                return true;
+            };
+
+            // Decode the code point that ENDS at offset (bounded below by startOffset).
+            auto getPrevCodePoint = [](const Char* const buf, CharCount &offset, CharCount startOffset, codepoint_t &codePoint) {
+                if (offset <= startOffset)
+                {
+                    return false;
+                }
+
+                Char upperPart = buf[offset - 1];
+                if (!Js::NumberUtilities::IsSurrogateUpperPart(upperPart) || offset - 1 == startOffset)
+                {
+                    codePoint = upperPart;
+                    offset -= 1;
+                    return true;
+                }
+
+                Char lowerPart = buf[offset - 2];
+                if (!Js::NumberUtilities::IsSurrogateLowerPart(lowerPart))
+                {
+                    codePoint = upperPart;
+                    offset -= 1;
+                }
+                else
+                {
+                    codePoint = Js::NumberUtilities::SurrogatePairAsCodePoint(lowerPart, upperPart);
+                    offset -= 2;
+                }
+
+                return true;
+            };
+
+            if (isCaseInsensitiveMatch && isCodePointList)
+            {
+                codepoint_t equivs[CaseInsensitive::EquivClassSize];
+                CharCount groupCursor = groupEndOffset;
+                while (true)
+                {
+                    codepoint_t groupCodePoint;
+                    bool hasGroupCodePoint = getPrevCodePoint(groupText, groupCursor, groupOffset, groupCodePoint);
+                    if (!hasGroupCodePoint)
+                    {
+                        break;
+                    }
+
+                    codepoint_t inputCodePoint;
+                    getNextCodePoint(input, inputOffset, inputLength, inputCodePoint);
+
+                    bool doesMatch = false;
+                    if (!Js::NumberUtilities::IsInSupplementaryPlane(groupCodePoint))
+                    {
+                        auto toCanonical = [&](codepoint_t c) {
+                            return standardChars->ToCanonical(
+                                CaseInsensitive::MappingSource::CaseFolding,
+                                static_cast<char16>(c));
+                        };
+                        doesMatch = (toCanonical(groupCodePoint) == toCanonical(inputCodePoint));
+                    }
+                    else
+                    {
+                        uint tblidx = 0;
+                        uint acth = 0;
+                        CaseInsensitive::RangeToEquivClass(tblidx, groupCodePoint, groupCodePoint, acth, equivs);
+                        CompileAssert(CaseInsensitive::EquivClassSize == 4);
+                        doesMatch =
+                            inputCodePoint == equivs[0]
+                            || inputCodePoint == equivs[1]
+                            || inputCodePoint == equivs[2]
+                            || inputCodePoint == equivs[3];
+                    }
+
+                    if (!doesMatch)
+                    {
+                        return false;
+                    }
+                }
+            }
+            else if (isCaseInsensitiveMatch)
+            {
+                CharCount groupCursor = groupEndOffset;
+                do
+                {
+#if ENABLE_REGEX_CONFIG_OPTIONS
+                    CompStats();
+#endif
+                    if (standardChars->ToCanonical(CaseInsensitive::MappingSource::UnicodeData, groupText[--groupCursor])
+                        != standardChars->ToCanonical(CaseInsensitive::MappingSource::UnicodeData, input[inputOffset++]))
+                    {
+                        return false;
+                    }
+                }
+                while (groupCursor > groupOffset);
+            }
+            else if (isCodePointList)
+            {
+                // Case-sensitive u-mode: compare code points (group decoded
+                // backward, frame forward). The unit-wise walk below would
+                // compare a pair's units against each other, since the
+                // u-mode window keeps pairs intact while the group text is
+                // decoded from its end.
+                CharCount groupCursor = groupEndOffset;
+                while (true)
+                {
+#if ENABLE_REGEX_CONFIG_OPTIONS
+                    CompStats();
+#endif
+                    codepoint_t groupCodePoint;
+                    if (!getPrevCodePoint(groupText, groupCursor, groupOffset, groupCodePoint))
+                    {
+                        break;
+                    }
+
+                    codepoint_t inputCodePoint;
+                    getNextCodePoint(input, inputOffset, inputLength, inputCodePoint);
+
+                    if (groupCodePoint != inputCodePoint)
+                    {
+                        return false;
+                    }
+                }
+            }
+            else
+            {
+                CharCount groupCursor = groupEndOffset;
+                do
+                {
+#if ENABLE_REGEX_CONFIG_OPTIONS
+                    CompStats();
+#endif
+                    if (groupText[--groupCursor] != input[inputOffset++])
+                    {
+                        return false;
+                    }
+                }
+                while (groupCursor > groupOffset);
+            }
+
+            return true;
+        }
     }
 
     inline bool MatchGroupInst::Exec(REGEX_INST_EXEC_PARAMETERS) const
@@ -2836,7 +3083,7 @@ namespace UnifiedRegex
     {
         GroupInfo *const groupInfo = matcher.GroupIdToGroupInfo(groupId);
         Assert(groupInfo->IsUndefined());
-        groupInfo->offset = inputOffset;
+        matcher.FrameBeginGroup(groupInfo, inputOffset);
         Assert(groupInfo->IsUndefined());
 
         instPointer += sizeof(*this);
@@ -2860,19 +3107,31 @@ namespace UnifiedRegex
 
     inline bool EndDefineGroupInst::Exec(REGEX_INST_EXEC_PARAMETERS) const
     {
+        GroupInfo *const groupInfo = matcher.GroupIdToGroupInfo(groupId);
+        Assert(groupInfo->IsUndefined());
         if (!noNeedToSave)
         {
-            // UNDO ACTION: Restore group on backtrack
-            PUSH(contStack, ResetGroupCont, groupId);
+            if (matcher.frameReversed)
+            {
+                // UNDO ACTION: Restore group on backtrack. In a reversed
+                // frame the undo must also restore the stored offset to the
+                // span's real end (the value FrameBeginGroup left), because
+                // a loop rewind can re-end the group without re-beginning
+                // it, and FrameEndGroup recovers the span's end from that
+                // field.
+                PUSH(contStack, RestoreGroupCont, groupId, GroupInfo(groupInfo->offset, CharCountFlag));
+            }
+            else
+            {
+                // UNDO ACTION: Restore group on backtrack
+                PUSH(contStack, ResetGroupCont, groupId);
+            }
 #if ENABLE_REGEX_CONFIG_OPTIONS
             matcher.PushStats(contStack, input);
 #endif
         }
 
-        GroupInfo *const groupInfo = matcher.GroupIdToGroupInfo(groupId);
-        Assert(groupInfo->IsUndefined());
-        Assert(inputOffset >= groupInfo->offset);
-        groupInfo->length = inputOffset - groupInfo->offset;
+        matcher.FrameEndGroup(groupInfo, inputOffset);
 
         instPointer += sizeof(*this);
         return false;
@@ -2908,8 +3167,7 @@ namespace UnifiedRegex
 
         GroupInfo *const groupInfo = matcher.GroupIdToGroupInfo(groupId);
         Assert(groupInfo->IsUndefined());
-        groupInfo->offset = inputOffset - length;
-        groupInfo->length = length;
+        matcher.FrameSetGroupSpan(groupInfo, inputOffset, length);
 
         instPointer += sizeof(*this);
         return false;
@@ -3711,8 +3969,7 @@ namespace UnifiedRegex
 
             // Bind group
             GroupInfo* groupInfo = matcher.GroupIdToGroupInfo(begin->groupId);
-            groupInfo->offset = inputOffset - begin->length;
-            groupInfo->length = begin->length;
+            matcher.FrameSetGroupSpan(groupInfo, inputOffset, begin->length);
 
             instPointer = matcher.LabelToInstPointer(begin->exitLabel);
         }
@@ -3986,8 +4243,7 @@ namespace UnifiedRegex
             }
 
             GroupInfo *const groupInfo = matcher.GroupIdToGroupInfo(groupId);
-            groupInfo->offset = inputStartOffset;
-            groupInfo->length = inputOffset - inputStartOffset;
+            matcher.FrameSetGroupSpan(groupInfo, inputOffset, inputOffset - inputStartOffset);
 
             instPointer += sizeof(*this);
             return false;
@@ -4066,8 +4322,7 @@ namespace UnifiedRegex
             }
 
             GroupInfo *const groupInfo = matcher.GroupIdToGroupInfo(groupId);
-            groupInfo->offset = inputStartOffset;
-            groupInfo->length = inputOffset - inputStartOffset;
+            matcher.FrameSetGroupSpan(groupInfo, inputOffset, inputOffset - inputStartOffset);
 
             instPointer += sizeof(*this);
             return false;
@@ -4234,8 +4489,7 @@ namespace UnifiedRegex
             }
 
             GroupInfo *const groupInfo = matcher.GroupIdToGroupInfo(groupId);
-            groupInfo->offset  = inputOffset - 1;
-            groupInfo->length = 1;
+            matcher.FrameSetGroupSpan(groupInfo, inputOffset, 1);
         }
 
         instPointer += sizeof(*this);
@@ -4503,6 +4757,309 @@ namespace UnifiedRegex
         PRINT_RE_BYTECODE_BEGIN("EndAssertion");
         PRINT_RE_BYTECODE_MID();
         PRINT_BYTES(EndAssertionInst);
+        PRINT_RE_BYTECODE_END();
+    }
+#endif
+
+    // ----------------------------------------------------------------------
+    // BeginLookbehindInst
+    // ----------------------------------------------------------------------
+
+    // Runs the lookbehind body as a self-contained sub-match over a new
+    // frame (see LookbehindNode). The sub-match has its own continuation and
+    // assertion stacks allocated on the C++ stack (freed by RAII), so the
+    // outer match state is untouched and nothing can backtrack into the body
+    // after it concludes, matching the cut semantics of ordinary assertions.
+    // The body's instructions follow this one in the instruction stream; the
+    // outer flow resumes at nextLabel, consuming nothing.
+    inline bool BeginLookbehindInst::Exec(REGEX_INST_EXEC_PARAMETERS) const
+    {
+        Assert(instPointer == (uint8*)this);
+
+        Js::ScriptContext* scriptContext = matcher.pattern->GetScriptContext();
+        PROBE_STACK_NO_DISPOSE(scriptContext, Js::Constants::MinStackRegex);
+
+        const CharCount m = inputOffset;
+
+        // Real position of the assertion.
+        const CharCount realPos = matcher.FrameOffsetToReal(m);
+
+        // Build the sub-frame.
+        const Char* subBuf = nullptr;
+        CharCount subLen = 0;
+        CharCount subBase = 0;
+        bool subReversed = false;
+        if (!isSuffixFrame)
+        {
+            // Reversed copy of the REAL input's prefix [0, realPos).
+            // Matching the (mirrored) body forward over it is the spec's
+            // right-to-left match of the original body over the left
+            // context, ending at the current position. (The current frame
+            // cannot be used here: inside a lookahead-inside-a-lookbehind
+            // it is a suffix view whose prefix is not the real left
+            // context. At the top frame realInput == input and realPos ==
+            // inputOffset, so the common case is unchanged.)
+            subLen = realPos;
+            subBase = realPos;
+            subReversed = true;
+            if (realPos > 0)
+            {
+                Char* const scratch = RecyclerNewArrayLeaf(matcher.recycler, Char, realPos);
+                if ((matcher.program->flags & UnifiedRegex::UnicodeRegexFlag) != 0)
+                {
+                    // u-mode: reverse by CODE POINTS, keeping surrogate pairs'
+                    // units in order, so code-point-oriented u-mode atoms,
+                    // classes, and backreferences see a valid string (unit-wise
+                    // reversal would present every astral character as two
+                    // lone surrogates). Lone surrogates are their own code
+                    // points. Mirrored u-mode literals are code-point
+                    // reversed to match (Parser::MirrorLiteral); all frame
+                    // offsets a u-mode sub-match can land on are code-point
+                    // boundaries, for which frameBase - offset is still the
+                    // exact real coordinate (for a code point at real span
+                    // end e, its frame start is realPos - e).
+                    CharCount o = 0;
+                    CharCount i = realPos;
+                    while (i > 0)
+                    {
+                        const Char c = matcher.realInput[i - 1];
+                        if (Js::NumberUtilities::IsSurrogateUpperPart(c) && i >= 2
+                            && Js::NumberUtilities::IsSurrogateLowerPart(matcher.realInput[i - 2]))
+                        {
+                            scratch[o++] = matcher.realInput[i - 2];
+                            scratch[o++] = c;
+                            i -= 2;
+                        }
+                        else
+                        {
+                            scratch[o++] = c;
+                            i -= 1;
+                        }
+                    }
+                    Assert(o == realPos);
+                }
+                else
+                {
+                    for (CharCount i = 0; i < realPos; i++)
+                    {
+                        scratch[i] = matcher.realInput[realPos - 1 - i];
+                    }
+                }
+                subBuf = scratch;
+            }
+            else
+            {
+                // Nothing can be read from an empty buffer; pass any valid
+                // pointer.
+                subBuf = input;
+            }
+        }
+        else
+        {
+            // A lookahead compiled inside a lookbehind: match the body
+            // forward over the real input from the real position of the
+            // current offset.
+            Assert(realPos <= matcher.realLength);
+            subBuf = matcher.realInput + realPos;
+            subLen = matcher.realLength - realPos;
+            subBase = realPos;
+            subReversed = false;
+        }
+
+        if (!isNegation)
+        {
+            // If the positive assertion binds some groups then on success any RestoreGroup continuations pushed
+            // in the assertion body will be cut. Hence if the entire assertion is backtracked over we must restore
+            // the current inner group bindings.
+            matcher.SaveInnerGroups(minBodyGroupId, maxBodyGroupId, false, input, contStack);
+        }
+
+        // Run the body single-shot from its entry label over the sub-frame.
+        RegexStacks stacks(scriptContext->GetThreadContext()->GetPageAllocator());
+        const Char* const savedRealInput = matcher.realInput;
+        const CharCount savedFrameBase = matcher.frameBase;
+        const bool savedFrameReversed = matcher.frameReversed;
+        // A nested assertion's EndLookbehindInst (a suffix-frame lookahead,
+        // or a deeper lookbehind) sets this flag during our body's Run. Save
+        // and restore it around the Run so a nested sub-match's success
+        // cannot leak out as our own body's result after our body later
+        // fails (and so nested Begins see the value their enclosing Run
+        // expects on unwind).
+        const bool savedBodySucceeded = matcher.lookbehindBodySucceeded;
+        matcher.frameBase = subBase;
+        matcher.frameReversed = subReversed;
+        matcher.lookbehindBodySucceeded = false;
+
+        CharCount subMatchStart = 0;
+        CharCount subNextSyncInputOffset = 0;
+        matcher.Run(subBuf, subLen, subMatchStart, subNextSyncInputOffset, stacks.contStack, stacks.assertionStack,
+            qcTicks, false, matcher.InstPointerToLabel(instPointer) + sizeof(*this));
+
+        matcher.frameBase = savedFrameBase;
+        matcher.frameReversed = savedFrameReversed;
+        matcher.realInput = savedRealInput;
+
+        const bool succeeded = matcher.lookbehindBodySucceeded;
+        matcher.lookbehindBodySucceeded = savedBodySucceeded;
+
+        // succeeded  isNegation  action
+        // ---------  ----------  ---------------------------------------------------------
+        // false      false       Fail into outer continuations (inner group bindings restored by the body's unwind)
+        // true       false       Continue at nextLabel (inner group bindings are now frozen)
+        // false      true        Continue at nextLabel (inner group bindings restored by the body's unwind)
+        // true       true        Fail into outer continuations (inner group binding MUST BE CLEARED)
+
+        if (succeeded && isNegation)
+        {
+            matcher.ResetInnerGroups(minBodyGroupId, maxBodyGroupId);
+        }
+
+        if (succeeded == isNegation)
+        {
+            // Assertion failed
+            return matcher.Fail(FAIL_PARAMETERS);
+        }
+
+        // Assertion succeeded: zero-width, resume after the whole body.
+        inputOffset = m;
+        instPointer = matcher.LabelToInstPointer(nextLabel);
+        return false;
+    }
+
+#if ENABLE_REGEX_CONFIG_OPTIONS
+    int BeginLookbehindInst::Print(DebugWriter* w, Label label, const Char* litbuf) const
+    {
+        PRINT_RE_BYTECODE_BEGIN("BeginLookbehind");
+        PRINT_MIXIN_COMMA(BodyGroupsMixin);
+        PRINT_MIXIN_COMMA(NegationMixin);
+        PRINT_MIXIN_COMMA(SuffixFrameMixin);
+        PRINT_MIXIN(NextLabelMixin);
+        PRINT_RE_BYTECODE_MID();
+        PRINT_BYTES(BodyGroupsMixin);
+        PRINT_BYTES(NegationMixin);
+        PRINT_BYTES(SuffixFrameMixin);
+        PRINT_BYTES(NextLabelMixin);
+        PRINT_RE_BYTECODE_END();
+    }
+#endif
+
+    // ----------------------------------------------------------------------
+    // EndLookbehindInst
+    // ----------------------------------------------------------------------
+
+    inline bool EndLookbehindInst::Exec(REGEX_INST_EXEC_PARAMETERS) const
+    {
+        // Only ever executed inside the sub-match started by the matching
+        // BeginLookbehindInst: report success and stop the sub-match's loop.
+        matcher.lookbehindBodySucceeded = true;
+        return true;
+    }
+
+#if ENABLE_REGEX_CONFIG_OPTIONS
+    int EndLookbehindInst::Print(DebugWriter* w, Label label, const Char* litbuf) const
+    {
+        PRINT_RE_BYTECODE_BEGIN("EndLookbehind");
+        PRINT_RE_BYTECODE_MID();
+        PRINT_BYTES(EndLookbehindInst);
+        PRINT_RE_BYTECODE_END();
+    }
+#endif
+
+    // ----------------------------------------------------------------------
+    // FrameBOLTestInst / FrameEOLTestInst / FrameWordBoundaryTestInst
+    // ----------------------------------------------------------------------
+
+    inline bool FrameBOLTestInst::Exec(REGEX_INST_EXEC_PARAMETERS) const
+    {
+#if ENABLE_REGEX_CONFIG_OPTIONS
+        matcher.CompStats();
+#endif
+        const CharCount realPos = matcher.FrameOffsetToReal(inputOffset);
+        const Char* const realInput = matcher.realInput;
+        if (realPos > 0 &&
+            ((matcher.program->flags & MultilineRegexFlag) == 0 || !matcher.standardChars->IsNewline(realInput[realPos - 1])))
+        {
+            return matcher.Fail(FAIL_PARAMETERS);
+        }
+
+        instPointer += sizeof(*this);
+        return false;
+    }
+
+#if ENABLE_REGEX_CONFIG_OPTIONS
+    int FrameBOLTestInst::Print(DebugWriter* w, Label label, const Char* litbuf) const
+    {
+        PRINT_RE_BYTECODE_BEGIN("FrameBOLTest");
+        PRINT_RE_BYTECODE_MID();
+        PRINT_RE_BYTECODE_END();
+    }
+#endif
+
+    inline bool FrameEOLTestInst::Exec(REGEX_INST_EXEC_PARAMETERS) const
+    {
+#if ENABLE_REGEX_CONFIG_OPTIONS
+        matcher.CompStats();
+#endif
+        const CharCount realPos = matcher.FrameOffsetToReal(inputOffset);
+        const Char* const realInput = matcher.realInput;
+        if (realPos < matcher.realLength &&
+            ((matcher.program->flags & MultilineRegexFlag) == 0 || !matcher.standardChars->IsNewline(realInput[realPos])))
+        {
+            return matcher.Fail(FAIL_PARAMETERS);
+        }
+
+        instPointer += sizeof(*this);
+        return false;
+    }
+
+#if ENABLE_REGEX_CONFIG_OPTIONS
+    int FrameEOLTestInst::Print(DebugWriter* w, Label label, const Char* litbuf) const
+    {
+        PRINT_RE_BYTECODE_BEGIN("FrameEOLTest");
+        PRINT_RE_BYTECODE_MID();
+        PRINT_RE_BYTECODE_END();
+    }
+#endif
+
+    template <bool isNegation>
+    FrameWordBoundaryTestInst<isNegation>::FrameWordBoundaryTestInst()
+        : Inst(isNegation ? InstTag::FrameNegatedWordBoundaryTest : InstTag::FrameWordBoundaryTest)
+    {
+    }
+
+    template <bool isNegation>
+    inline bool FrameWordBoundaryTestInst<isNegation>::Exec(REGEX_INST_EXEC_PARAMETERS) const
+    {
+#if ENABLE_REGEX_CONFIG_OPTIONS
+        matcher.CompStats();
+#endif
+        const CharCount realPos = matcher.FrameOffsetToReal(inputOffset);
+        const Char* const realInput = matcher.realInput;
+        const bool isWordPrev = realPos > 0 && matcher.standardChars->IsWord(realInput[realPos - 1]);
+        const bool isWordNext = realPos < matcher.realLength && matcher.standardChars->IsWord(realInput[realPos]);
+        const bool isBoundary = isWordPrev != isWordNext;
+        if (isBoundary == isNegation)
+        {
+            return matcher.Fail(FAIL_PARAMETERS);
+        }
+
+        instPointer += sizeof(*this);
+        return false;
+    }
+
+#if ENABLE_REGEX_CONFIG_OPTIONS
+    template <bool isNegation>
+    int FrameWordBoundaryTestInst<isNegation>::Print(DebugWriter* w, Label label, const Char* litbuf) const
+    {
+        if (isNegation)
+        {
+            PRINT_RE_BYTECODE_BEGIN("FrameNegatedWordBoundaryTest");
+        }
+        else
+        {
+            PRINT_RE_BYTECODE_BEGIN("FrameWordBoundaryTest");
+        }
+        PRINT_RE_BYTECODE_MID();
         PRINT_RE_BYTECODE_END();
     }
 #endif
@@ -4921,8 +5478,7 @@ namespace UnifiedRegex
         if (loopInfo->number > 0)
         {
             // Bind previous iteration's body
-            groupInfo->offset = inputOffset - begin->length;
-            groupInfo->length = begin->length;
+            matcher.FrameSetGroupSpan(groupInfo, inputOffset, begin->length);
         }
         else
         {
@@ -4985,6 +5541,11 @@ namespace UnifiedRegex
         , literalNextSyncInputOffsets(nullptr)
         , recycler(scriptContext->GetRecycler())
         , previousQcTime(0)
+        , realInput(nullptr)
+        , realLength(0)
+        , frameBase(0)
+        , frameReversed(false)
+        , lookbehindBodySucceeded(false)
 #if ENABLE_REGEX_CONFIG_OPTIONS
         , stats(0)
         , w(0)
@@ -5163,10 +5724,10 @@ namespace UnifiedRegex
     const Inst::InstTag maxInstTag = instTags[(sizeof(instTags) / sizeof(Inst::InstTag)) - 1];
 #endif
 
-    inline void Matcher::Run(const Char* const input, const CharCount inputLength, CharCount &matchStart, CharCount &nextSyncInputOffset, ContStack &contStack, AssertionStack &assertionStack, uint &qcTicks, bool firstIteration)
+    inline void Matcher::Run(const Char* const input, const CharCount inputLength, CharCount &matchStart, CharCount &nextSyncInputOffset, ContStack &contStack, AssertionStack &assertionStack, uint &qcTicks, bool firstIteration, Label entryLabel)
     {
         CharCount inputOffset = matchStart;
-        const uint8 *instPointer = program->rep.insts.insts;
+        const uint8 *instPointer = program->rep.insts.insts + entryLabel;
         Assert(instPointer != 0);
 
         while (true)
@@ -5536,6 +6097,16 @@ namespace UnifiedRegex
         bool loopMatchHere = true;
         Program const *prog = this->program;
         bool isStickyPresent = this->pattern->IsSticky();
+
+        // Establish the top frame (the real input). Held for the whole match;
+        // see the frame-state comment in RegexRuntime.h. Cleared on return so
+        // a stale realInput is never observable between matches.
+        this->realInput = input;
+        this->realLength = inputLength;
+        this->frameBase = 0;
+        this->frameReversed = false;
+        this->lookbehindBodySucceeded = false;
+
         switch (prog->tag)
         {
         case Program::ProgramTag::BOIInstructionsTag:
@@ -5618,6 +6189,9 @@ namespace UnifiedRegex
         this->stats = 0;
         this->w = 0;
 #endif
+
+        // Drop the top frame; realInput must not be observable between matches.
+        this->realInput = nullptr;
 
         return res;
     }

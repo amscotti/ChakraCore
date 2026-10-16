@@ -57,6 +57,8 @@ namespace UnifiedRegex
             Assertion             // (?=e), (?!e)
             // MatchNamedGroupNode
             , MatchNamedGroup     // \k<name> with a duplicated name (ES2025)
+            // LookbehindNode
+            , Lookbehind          // (?<=e), (?<!e) and re-oriented lookaheads (see LookbehindNode)
         };
 
         enum Features : uint16
@@ -319,25 +321,38 @@ namespace UnifiedRegex
                   bool BuildCharTrie(Compiler& compiler, CharTrie* trie, Node* cont, bool isAcceptFirst) const override; \
                   NODE_PRINT
 
+    // isFrameAware is set for anchors (^ and $) parsed anywhere inside a
+    // lookbehind (including inside nested lookaheads): the anchor is then
+    // compiled to an instruction that evaluates the assertion against the
+    // real input at the real position mapped through the matcher's current
+    // frame, instead of against the (possibly reversed) frame buffer.
     struct SimpleNode : Node
     {
-        inline SimpleNode(NodeTag tag)
+        bool isFrameAware;
+
+        inline SimpleNode(NodeTag tag, bool isFrameAware = false)
             : Node(tag)
+            , isFrameAware(isFrameAware)
         {
         }
 
         NODE_DECL
     };
 
+    // See SimpleNode: \b and \B inside a lookbehind are frame-aware, too,
+    // since the boundary test must look at the real neighbors of the real
+    // position even when one of them lies outside the frame's buffer.
     struct WordBoundaryNode : Node
     {
         bool isNegation;
+        bool isFrameAware;
         bool mustIncludeEntering; // isNegation => false
         bool mustIncludeLeaving;  // isNegation => false
 
-        inline WordBoundaryNode(bool isNegation)
+        inline WordBoundaryNode(bool isNegation, bool isFrameAware = false)
             : Node(WordBoundary)
             , isNegation(isNegation)
+            , isFrameAware(isFrameAware)
             , mustIncludeEntering(false)
             , mustIncludeLeaving(false)
         {
@@ -596,6 +611,61 @@ namespace UnifiedRegex
         NODE_DECL
     };
 
+    // Lookbehind assertion (?<=e) / (?<!e), and the re-oriented form a
+    // lookahead takes when it is compiled inside a lookbehind body. The node
+    // runs its body as a self-contained sub-match over a re-oriented window
+    // of the input, anchored at the current position, consuming nothing:
+    //
+    //  - isSuffixFrame == false (source (?<=e) / (?<!e), and (?=e) nested
+    //    inside an odd number of enclosing lookbehinds): the body has been
+    //    syntactically mirrored (terms and literal characters reversed,
+    //    alternation order kept, quantifiers/groups/anchors preserved) and is
+    //    matched forward over the reverse of the current frame's prefix
+    //    [0, current offset). Matching forward over that reversed buffer is
+    //    exactly the spec's right-to-left matching of the original body over
+    //    the real left context, including the reversed exploration order of
+    //    alternatives, greedy loops and capture groups, and the reversed
+    //    temporal order in which forward references and self-references see
+    //    capture groups (see doc/c2-s9-namedgroups.md, sub-batch 4).
+    //
+    //  - isSuffixFrame == true (a lookahead compiled inside a lookbehind):
+    //    the body is unmirrored and is matched forward over the real input
+    //    from the real position of the current offset to the end of input.
+    //    (A real forward lookahead at that position is a start-anchored
+    //    forward match; the re-oriented window is the real suffix.)
+    //
+    // A lookbehind compiled inside a lookbehind body becomes a plain
+    // AssertionNode (start-anchored forward match over the current frame's
+    // buffer), which the parser's mirroring pass produces directly, so no
+    // LookbehindNode is involved for it.
+    struct LookbehindNode : Node
+    {
+        Node* body;
+        bool isNegation;
+        bool isSuffixFrame;
+
+        enum CompilationScheme
+        {
+            BeginEnd,     // Protect assertion with begin/end instructions
+            Succ,         // Assertion will always succeed, without binding groups
+            Fail          // Assertion will always fail
+        };
+
+        // Following determined in pass 4
+        CompilationScheme scheme;
+
+        inline LookbehindNode(bool isNegation, Node* body, bool isSuffixFrame)
+            : Node(Lookbehind)
+            , isNegation(isNegation)
+            , body(body)
+            , isSuffixFrame(isSuffixFrame)
+            , scheme(BeginEnd)
+        {
+        }
+
+        NODE_DECL
+    };
+
     // ----------------------------------------------------------------------
     // Compiler
     // ----------------------------------------------------------------------
@@ -615,6 +685,7 @@ namespace UnifiedRegex
         friend LoopNode;
         friend MatchSetNode;
         friend AssertionNode;
+        friend LookbehindNode;
 
     private:
         static const CharCount initInstBufSize = 128;
