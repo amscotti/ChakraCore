@@ -334,9 +334,9 @@ without named groups).
 
 # C2-S9 sub-batch 2: `d` flag / `indices` (ES2022 match indices)
 
-Status: complete on Mac no-JIT, **not yet committed** (working tree on
-top of d67948eab + the uncommitted sub-batch-1 parser fixes 4–5 above;
-eventual commit: `<pending>`). The `d` flag, the `indices` property on
+Status: complete on Mac no-JIT (committed as `704a85b8a`, together
+with the sub-batch-1 parser fixes 4–5 above). The `d` flag, the
+`indices` property on
 exec/non-global-match results, and `indices.groups` are unconditional
 core syntax — no config flag, no new opcodes, no static PropertyIds
 (dynamic tracked records only, so the checked-in bytecode headers are

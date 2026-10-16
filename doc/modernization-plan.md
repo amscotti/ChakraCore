@@ -8,7 +8,8 @@
 > policy, triage and shortlist are in [c1-triage.md](c1-triage.md);
 > qualification is conditional on explicit host-reported negative phase
 > before any full result is certified. **C2 is in progress** — batches
-> S4, S5, S10, S11, S7-matchAll and the S9 named-groups core are closed
+> S4, S5, S10, S11, S7-matchAll and the S9 named-groups core + `d` flag
+> are closed
 > on Mac no-JIT (JIT claims gated on B4), receipts in
 > [c2-s4.md](c2-s4.md), [c2-s5.md](c2-s5.md),
 > [c2-s10.md](c2-s10.md), [c2-s11.md](c2-s11.md),
@@ -46,7 +47,7 @@ handling have been validated before its results are used as a completion gate.
 | B6 | Windows feasibility and rollout; later target extensions | Stable build contracts | Separate expansion |
 | Z1 | One useful mixed C++/Zig unit behind a tested C ABI | B3; B4 if the unit ships on Linux | Optional pilot |
 | C1 | Qualified ES2025 test policy and triaged failures | Stable Mac build at B3 | Recorded (CONDITIONAL) |
-| C2 | Bounded compatibility batches and partial releases | C1; B4 before JIT-wide enablement | In progress (S4/S5/S10/S11/S7-matchAll/S9-named-groups-core closed on Mac no-JIT; JIT claims gated on B4) |
+| C2 | Bounded compatibility batches and partial releases | C1; B4 before JIT-wide enablement | In progress (S4/S5/S10/S11/S7-matchAll/S9 named-groups + d-flag closed on Mac no-JIT; JIT claims gated on B4) |
 | C3 | Larger runtime/object-model feature projects | C1 and their feature prerequisites | Separate projects |
 | C4 | Verified full ES2025 core-language result | Required C2/C3 work and qualified runner | Long-term objective |
 
