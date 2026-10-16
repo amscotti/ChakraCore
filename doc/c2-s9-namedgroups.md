@@ -6,7 +6,7 @@
 
 # C2-S9 sub-batch 1: RegExp named capture groups (core)
 
-Status: landed on Mac no-JIT (working tree; not committed). ES2018 named
+Status: landed on Mac no-JIT (committed as 1bae6c94a). ES2018 named
 capture groups are **unconditional** (no flag, no new opcodes): the
 `(?<name>...)` syntax, the `\k<name>` backreference, the `groups` property
 on match/exec results (null-prototype object, `undefined` for
@@ -171,7 +171,7 @@ object graph is ordinary recycler objects). Not claimed: OOM injection,
 
 ## Tests and gates
 
-- `test/es7/namedgroups.js` (22 tests, default launch, `-args summary`):
+- `test/es7/namedgroups.js` (23 tests, default launch, `-args summary`):
   syntax accept/reject matrices (incl. escape forms, lookbehind-stays-
   error, `\k` identity fallback), groups-object semantics (null proto,
   undefined for non-participating, order, descriptors, `__proto__` name,
@@ -219,7 +219,7 @@ stash/build cycle while the fixes were being made).
   churn, bytecode "source headers unchanged; regen exit 0"), native,
   smoke, metadata PASS. `zig build check-regression -Dprofile=debug-static
   --summary line` — `Total: passed 2022, failed 0`, 545/545 steps.
-- Focused tests: `pass` on both binaries (verbose 22/22 and 7/7).
+- Focused tests: `pass` on both binaries (verbose 23/23 and 7/7).
 - Corpus (pinned test262, `-nonative -Test262 -CollectGarbage`),
   default flags, artifact `out/test262-s9-namedgroups` (re-run after the
   review fixes):
