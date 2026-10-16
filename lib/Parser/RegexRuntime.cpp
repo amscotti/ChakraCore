@@ -5797,6 +5797,27 @@ namespace UnifiedRegex
         Assert(inst < instEnd);
         do
         {
+            // MatchNamedGroup is the variable-length instruction: numGroupIds
+            // ints are stored inline after the header (see Emit and Exec).
+            // The switch below advances by sizeof(the struct) only, which
+            // treats those ids as the next opcode. Group id 6 is
+            // JumpIfNotSet, and that FreeBody releases a forged character set.
+            if (inst->tag == Inst::InstTag::MatchNamedGroup)
+            {
+                const auto named = static_cast<MatchNamedGroupInst *>(inst);
+                named->FreeBody(rtAllocator);
+                Assert(named->numGroupIds > 1);
+                const size_t stride = sizeof(MatchNamedGroupInst)
+                    + static_cast<size_t>(named->numGroupIds) * sizeof(int);
+                uint8* const next = reinterpret_cast<uint8 *>(named) + stride;
+                Assert(next <= reinterpret_cast<uint8 *>(instEnd));
+                if (next > reinterpret_cast<uint8 *>(instEnd))
+                {
+                    break;
+                }
+                inst = reinterpret_cast<Inst *>(next);
+                continue;
+            }
             switch(inst->tag)
             {
 #define MBase(TagName, ClassName) \

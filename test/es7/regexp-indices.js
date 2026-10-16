@@ -160,6 +160,7 @@ var tests = [
             assert.areEqual(3, mix.indices.length, "three captures including capture 0");
             assertPair(mix.indices[2], 1, 2, "unnamed group pair");
             assertPair(mix.indices.groups.n, 0, 1, "named group pair");
+            assert.isTrue(mix.indices[1] === mix.indices.groups.n, "named pair is the same object as indices[1]");
             assert.isFalse(Object.prototype.hasOwnProperty.call(mix.indices.groups, "length"), "groups mirrors names only");
         }
     },

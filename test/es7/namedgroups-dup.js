@@ -150,6 +150,12 @@ var tests = [
             assert.isUndefined(viaThird.groups.a, "undefined when neither participated");
             var mixed = "aabb".match(/(?:(?:(?<x>a)|(?<x>b))\k<x>){2}/d).indices;
             assert.areEqual("2,3", mixed.groups.x.join(","), "looped duplicate's last iteration pair");
+            var firstAlt = /(?<x>a)|(?<x>b)/d.exec("a");
+            assert.isTrue(firstAlt.indices[1] === firstAlt.indices.groups.x, "first alternative: groups.x is indices[1]");
+            var secondAlt = /(?<x>a)|(?<x>b)/d.exec("b");
+            assert.isTrue(secondAlt.indices[2] === secondAlt.indices.groups.x, "second alternative: groups.x is indices[2]");
+            secondAlt.indices.groups.x[0] = 9;
+            assert.areEqual(9, secondAlt.indices[2][0], "mutating the named pair mutates indices[i]");
         }
     },
     {
@@ -171,6 +177,26 @@ var tests = [
             assert.throws(function () { new RegExp("(?<x>a)|(?<x>b)\\k"); }, SyntaxError, "bare \\k with duplicates");
             assert.throws(function () { new RegExp("(?<x>a)|(?<x>b)[\\k<x>]"); }, SyntaxError, "class \\k with duplicates");
             assert.isTrue(new RegExp("\\k<x>|a").test("k<x>"), "identity escape without named captures crosses the <");
+        }
+    },
+    {
+        name: "duplicate-name pattern finalizes after its last reference is dropped",
+        body() {
+            // Program::FreeBody must stride over MatchNamedGroup's inline id
+            // list. Group ids 1 and 6 make the short stride look like
+            // JumpIfNotSet and free a forged character set. Eval so the
+            // RegExp dies with the eval frame; a local in this function can
+            // stay visible to the stack scan. The dynamic-regex map drops the
+            // pattern on GC only after an inline cache has been used.
+            eval([
+                "(function () { var o = { a: 1 }; return o.a; })();",
+                "var re = new RegExp('(?<a>a)(?<b>b)(?<c>c)(?<d>d)(?<e>e)|(?<a>f)\\\\k<a>X');",
+                "if (re.exec('ffX')[0] !== 'ffX' || re.exec('ffX').groups.a !== 'f') throw new Error('exec');",
+                "re = null;",
+                "for (var i = 0; i < 40; i++) new RegExp('flood-dup-' + i);",
+                "/other/.exec('other');"
+            ].join("\n"));
+            CollectGarbage();
         }
     },];
 

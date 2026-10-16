@@ -131,10 +131,15 @@ namespace Js
         // generate a trivial options string right here on the stack and delegate to the string parsing
         // based implementation.
         //
-        const CharCount OPT_BUF_SIZE = 7;
+        // dgimsuy plus a trailing NUL. Seven flags no longer fit in 7 char16s.
+        const CharCount OPT_BUF_SIZE = 8;
         char16 opts[OPT_BUF_SIZE];
 
         CharCount i = 0;
+        if (flags & UnifiedRegex::HasIndicesRegexFlag)
+        {
+            opts[i++] = _u('d');
+        }
         if (flags & UnifiedRegex::IgnoreCaseRegexFlag)
         {
             opts[i++] = _u('i');
@@ -2250,19 +2255,23 @@ namespace Js
                 // Same duplicate-name rule as CreateGroupsObject: the last
                 // participating group with this name supplies the pair
                 // (idempotent for repeated entries); undefined when none.
-                UnifiedRegex::GroupInfo group;
+                // MakeIndicesArray creates one matchIndexPair and defines that
+                // same object on both indices[i] and indices.groups. The pair
+                // was stored in the loop above; a second array would break
+                // identity (and mutation) with the numbered slot.
                 const int groupId = ResolveNamedGroupId(program, pattern, name, nameLen);
-                if (groupId < 0)
-                    group.Reset();
-                else
-                    group = pattern->GetGroup(groupId);
                 Var value = undefined;
-                if (!group.IsUndefined())
+                if (groupId >= 0)
                 {
-                    JavascriptArray* matchIndices = library->CreateArray(2);
-                    matchIndices->DirectSetItemAt(0, JavascriptNumber::ToVar(group.offset, scriptContext));
-                    matchIndices->DirectSetItemAt(1, JavascriptNumber::ToVar(group.offset + group.length, scriptContext));
-                    value = matchIndices;
+                    Var stored = nullptr;
+                    if (indices->DirectGetItemAt(static_cast<uint32>(groupId), &stored))
+                    {
+                        value = stored;
+                    }
+                    else
+                    {
+                        Assert(false);
+                    }
                 }
                 // CreateDataProperty semantics on a null-prototype object
                 // (see CreateGroupsObject), including for "__proto__" names.

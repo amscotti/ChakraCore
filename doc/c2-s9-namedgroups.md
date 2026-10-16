@@ -13,9 +13,9 @@ on match/exec results (null-prototype object, `undefined` for
 non-participating groups, property order = textual group order), and
 `$<name>` substitution in `String.prototype.replace`/`replaceAll` on both
 the ES5 legacy fast path and the `@@replace` symbol path. JIT evidence is
-not claimed; see B4 below. Deferred sub-batches: lookbehind, `d`
-flag/`indices` (**landed as sub-batch 2 below**), `v` flag, duplicate
-named groups (ES2025) — recorded in c1-triage §S9.
+not claimed; see B4 below. Deferred sub-batches: lookbehind and the `v` flag. `d` flag/`indices`
+landed as sub-batch 2, and duplicate named groups (ES2025) landed as
+sub-batch 3. Both are recorded in c1-triage §S9.
 
 ## What landed
 
@@ -361,6 +361,10 @@ in `RegExp.prototype.flags`) is wired under the existing
    (the legacy own-instance `options`), `EntryGetterFlags`
    (`RegExp.prototype.flags` under the proto flag), and `StringFromFlags`
    (the `@@matchAll` internal-flags fallback; buffer widened to 7).
+   `RegexHelper::CompileDynamic` from a flag bitfield (bytecode restore,
+   SCA deserialization, time-travel debugging) rebuilds that options
+   string; the review fix emits `d` there too, and the stack buffer is
+   8 `char16`s (seven flags plus NUL).
    `EntryGetterFlags` previously appended `u` before `s` ("gimusy");
    reordered to the spec's `gimsuy` — corpus
    `RegExp/prototype/flags/get-order.js` pins `'dgimsuy'` and Node 26.5.0
@@ -385,7 +389,8 @@ in `RegExp.prototype.flags`) is wired under the existing
    MakeIndicesArray step 5/6; corpus `indices-groups-object-undefined.js`
    and Node both pin present-with-value-`undefined` without named
    groups): a null-prototype object mirroring the named groups' pairs in
-   textual order (fresh pair arrays, `undefined` values, `__proto__`
+   textual order (the same array object as `indices[i]` for the
+   participating group, `undefined` values, `__proto__`
    names are plain data properties — corpus
    `indices-groups-object{,-unmatched}.js`, `indices-groups-properties.js`)
    or `undefined`. It is defined with `SetPropertyWithAttributes(
@@ -457,10 +462,11 @@ in `RegExp.prototype.flags`) is wired under the existing
   stale 2014/1962 fixtures stay), `build.zig` (both profiles),
   `.github/workflows/zig-macos.yml` (test, debug-static, legacy cmake
   legs), and the live baseline sentence in `doc/memory-management.md`.
-  Erratum (milestone review): the workflow legs were actually bumped in
-  the sub-batch-3 commit (`3c4233d88`), not in `704a85b8a` — the two
-  intermediate commits were transiently CI-red on those greps; the
-  final tree is consistent at 1973/2025.
+  The workflow legs moved in this same commit (`704a85b8a`), together
+  with the two new rlexe files. Sub-batch 3 (`3c4233d88`) moved them
+  again, 1972/2024 → 1973/2025, when `namedgroups-dup.js` landed. No
+  commit in this range has a workflow total that disagrees with the
+  rlexe count at that commit.
 
 - `mise exec -- zig build` and `-Dprofile=debug-static` — exit 0;
   `zig build check --summary line` — 572/572 steps, `Total: passed
@@ -681,8 +687,8 @@ stay deferred (c1-triage §S9).
 
 ## Tests and gates
 
-- `test/es7/namedgroups-dup.js` (10 tests, default launch,
-  `-args summary`): the syntax accept/reject matrix (separated
+- `test/es7/namedgroups-dup.js` (11 tests, launch
+  `-CollectGarbage -args summary`): the syntax accept/reject matrix (separated
   alternatives incl. three-way and inner-disjunction shapes vs
   same-path nesting/sequencing), last-participating/undefined rules,
   property order + descriptors + null prototype, the backreference
@@ -691,8 +697,14 @@ stay deferred (c1-triage §S9).
   no-empty-fallback `xyx`/`xyy` pair), exec/match/replace/replaceAll/
   `$1`-interplay/search/split/test, replace-function arity,
   `d`-flag `indices.groups` resolution, constructor/compile/dynamic
-  parity, and the dangling/`\k`-class error matrix. All 74 assertions
-  were mirrored in Node 26.5.0 first (0 mismatches; Node caught four
+  parity, and the dangling/`\k`-class error matrix. The review fix
+  added `indices`/`indices.groups` identity (same object, shared
+  mutation) and a finalize test: drop the last reference to
+  `/(?<a>a)(?<b>b)(?<c>c)(?<d>d)(?<e>e)|(?<a>f)\k<a>X/` and call
+  `CollectGarbage`. That pattern's ids are 1 and 6; before the stride
+  fix the short `FreeBody` walk segfaulted on that collection.
+  `-CollectGarbage` only exposes the host function. All 74 original assertions were mirrored in Node 26.5.0
+  first (0 mismatches; Node caught four
   drafting bugs: null-proto objects lack `hasOwnProperty`, the
   case-insensitive capture is the input text `"B"`, the split slice
   join, and `$<name>`-of-undefined substituting the empty string).
@@ -779,11 +791,23 @@ on the final pair.
 No change to the ownership map: the registry stays on the recycler-
 owned `Program` (one entry per definition — duplicates included);
 per-match state stays in the matcher's group array; the groups/
-indices objects are ordinary recycler allocations unchanged. The new
-instruction's id list is compiled into the pattern's instruction
-buffer (rtAllocator arena, same lifetime as every other instruction);
+indices objects are ordinary recycler allocations unchanged.
 `ResolveNamedGroupId` is a pure scan over immutable leaves plus the
 matcher's group array. No new allocation domain, no barrier change.
+
+The id list is not an `rtAllocator` allocation. `Compiler::Emit` grows
+the compile-time instruction buffer with `ctAllocator->Realloc`, and
+`Compiler::CaptureInsts` copies that buffer with `RecyclerNewArrayLeaf`
+into `program->rep.insts.insts`. The `int*` on `MatchNamedGroupNode`
+is a `ctAllocator` scratch array and is not retained. `Program::FreeBody`
+receives `ScriptContext::RegexAllocator()` for instruction-owned side
+allocations (character sets and scanners); it does not free the
+instruction bytes. The walker still has to stride over the inline ids.
+A `sizeof(MatchNamedGroupInst)` step treats them as the next opcode
+(`RegexPattern::Finalize` calls `FreeBody` for a non-shallow pattern
+collected while the context is open). The review fix advances by the
+header plus `numGroupIds` ints, the same span `Emit`, `Exec`, and
+`Print` already use.
 
 ## Limits (sub-batch 3)
 

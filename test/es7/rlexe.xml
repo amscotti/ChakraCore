@@ -199,7 +199,7 @@
   <test>
     <default>
       <files>namedgroups-dup.js</files>
-      <compile-flags>-args summary -endargs</compile-flags>
+      <compile-flags>-CollectGarbage -args summary -endargs</compile-flags>
     </default>
   </test>
   <test>

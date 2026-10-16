@@ -500,9 +500,10 @@ there and are tracked as closed in the C2 batch receipts below.)*
 **P0 — High-breakage compatibility** (landed items are tracked in the C2
 batch receipts below): optional chaining/logical assignment;
 class syntax; replaceAll/matchAll and the copy-by-change family; inherited
-ES2018 RegExp gaps and later `d`/import-attribute syntax. Named groups precede
-duplicate named-group behavior. Runtime probes reject named groups, lookbehind,
-property escapes, `d`/`v` and import attributes. Audit BigInt, SAB/Atomics and
+ES2018 RegExp gaps and import-attribute syntax. Named groups, the `d`
+flag, and duplicate named groups have landed (see the C2-S9 receipt).
+Runtime probes still reject lookbehind, property escapes, `v`, and import
+attributes. Audit BigInt, SAB/Atomics and
 RegExp-symbol/prototype-property flags through enabled conformance runs.
 
 **P1 — Required remaining core and independent ecosystem work:** ES2024/2025
