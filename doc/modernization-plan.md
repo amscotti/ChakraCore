@@ -8,12 +8,13 @@
 > policy, triage and shortlist are in [c1-triage.md](c1-triage.md);
 > qualification is conditional on explicit host-reported negative phase
 > before any full result is certified. **C2 is in progress** — batches
-> S4, S5, S10, S11, S7-matchAll and the S9 named-groups core + `d`
-> flag + duplicate named groups are closed
-> on Mac no-JIT (JIT claims gated on B4), receipts in
+> S4, S5, S10, S11, S7-matchAll and the four S9 sub-batches (named
+> groups, `d` flag/indices, duplicate named groups, lookbehind) are
+> closed on Mac no-JIT (JIT claims gated on B4), receipts in
 > [c2-s4.md](c2-s4.md), [c2-s5.md](c2-s5.md),
 > [c2-s10.md](c2-s10.md), [c2-s11.md](c2-s11.md),
-> [c2-s7-matchall.md](c2-s7-matchall.md) and
+> [c2-s7-matchall.md](c2-s7-matchall.md),
+> [c2-s9-namedgroups.md](c2-s9-namedgroups.md) and
 > [c2-flag-audits.md](c2-flag-audits.md). Engine/legacy-build references use baseline
 > `97e68c917`; execution evidence and the [B1-B3 review](b1-b3-review.md)
 > are recorded through 2026-10-15 local time.

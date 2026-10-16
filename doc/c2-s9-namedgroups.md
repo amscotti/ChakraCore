@@ -843,7 +843,7 @@ variable-length instruction is the first of its kind in that stream).
 
 # C2-S9 sub-batch 4: RegExp lookbehind assertions (ES2018)
 
-Status: complete on Mac no-JIT (uncommitted tree on top of `05809ff18`).
+Status: complete on Mac no-JIT (committed as `eb6b060e9`).
 `(?<=...)` and `(?<!...)` are **unconditional core syntax**: no config
 flag, no JS-bytecode change, no static PropertyIds. Lookbehinds are
 **never quantifiable** (`(?<=a)*` is a SyntaxError in both modes, unlike
@@ -1120,7 +1120,11 @@ plus the trail-in-BMP branch can consume one code point as two units.
 This pre-existing forward-path behavior (the batch diff does not touch
 that expansion) similarly blurs the lookbehind counting shapes
 (`/(?<=..)x/u` over `"😀x"` → `["x"]` vs Node `null`); those shapes
-are left unpinned in the focused test and deferred with it.
+are left unpinned in the focused test and deferred with it. The same
+pre-existing defect affects sticky-`u` mid-pair starts (engine
+`/./uy` lastIndex=1 on `"😀x"` matches a lone trail half; Node snaps
+to the code point) — forward-only, no lookbehind involved, verified
+byte-identical on the pre-batch binary.
 
 ## Limits
 
