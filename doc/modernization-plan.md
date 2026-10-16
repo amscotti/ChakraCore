@@ -581,10 +581,11 @@ Decision/rollback points:
 - [ ] C4: Published qualified ES2025 result on the claimed default configurations.
 
 **C2 batch status:** S4, S5, all of S10 (the copy-by-change half and
-the Set-methods half), all of S11, and S7 are closed on
-Mac no-JIT
+the Set-methods half), all of S11, S7, and the S9 named-groups core
+sub-batch are closed on Mac no-JIT
 ([c2-s4.md](c2-s4.md), [c2-s5.md](c2-s5.md), [c2-s11.md](c2-s11.md),
-[c2-s10.md](c2-s10.md), [c2-s7-matchall.md](c2-s7-matchall.md)). JIT
+[c2-s10.md](c2-s10.md), [c2-s7-matchall.md](c2-s7-matchall.md),
+[c2-s9-namedgroups.md](c2-s9-namedgroups.md)). JIT
 claims still wait on B4. The S2/S6/S7 enabled-flag measurement audits
 ([c2-flag-audits.md](c2-flag-audits.md)) drove the S7 implementation
 batch: `Symbol.matchAll`, `RegExp.prototype[@@matchAll]`, the RegExp
@@ -599,7 +600,16 @@ plus 4 `species-regexp-get-*` scenarios that need the
 `-ES6RegExPrototypeProperties` substrate). The flag stays off by
 default; the batch also regenerated the checked-in nojit bytecode
 headers (three PropertyIds appended; B4 must regenerate the jit
-variants). S6 shows zero regressions under `-ESSharedArrayBuffer` but
+variants). S9 sub-batch 1 then landed the named-groups core
+unconditionally (`(?<name>...)`, `\k<name>`, the `groups` object on
+exec/match results, `$<name>` substitution on both replace paths;
+receipt [c2-s9-namedgroups.md](c2-s9-namedgroups.md)): corpus 158/184
+default flags and 162/184 under `-ES6RegExSymbols` with the residue
+being exactly the deferred S9 sub-batches (duplicate names, lookbehind,
+flag-gated subclass scenarios), and resym-universe joins of 168/0 and
+194/0 fail→pass/pass→fail. The remaining S9 work (lookbehind, `d`
+indices, `v` flag after S3, duplicate named groups) stays C2-per-batch.
+S6 shows zero regressions under `-ESSharedArrayBuffer` but
 needs a product/security decision before any default, plus
 waitAsync/growable/non-shared-Atomics work; S2's flagged path is a stub
 (accidental passes only, and a `BigInt()` SIGABRT crash class), so

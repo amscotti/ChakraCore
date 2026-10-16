@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 //
@@ -63,6 +64,27 @@ namespace UnifiedRegex
         Field(uint16) numGroups;
         Field(int) numLoops;
         Field(RegexFlags) flags;
+
+        // Named capture groups (ES2018). Immutable after compilation; the
+        // chars and entry arrays are recycler-owned leaves (no pointers
+        // inside), scanned through this program's fields. Null/0 when the
+        // pattern has no (?<name>...) groups.
+        struct GroupNameEntry
+        {
+            uint32 offset; // into groupNameChars
+            uint32 len;    // in Char units
+            uint16 groupId; // capture index, 1-based
+        };
+        Field(GroupNameEntry*) groupNameEntries;
+        Field(Char*) groupNameChars;
+        Field(uint16) numGroupNames;
+
+        bool HasNamedGroups() const { return numGroupNames != 0; }
+        // groupId of the named group whose name equals name[0..len), or -1
+        int FindNamedGroupId(const Char* name, CharCount len) const;
+        // Name chars of entry i and its capture index
+        const Char* GetGroupName(uint32 i, CharCount* nameLen) const;
+        uint16 GetGroupNameGroupId(uint32 i) const;
 
     private:
         enum class ProgramTag : uint8

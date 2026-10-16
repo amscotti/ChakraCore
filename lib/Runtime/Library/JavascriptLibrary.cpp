@@ -732,6 +732,13 @@ namespace Js
         TypePath *const regexResultPath = TypePath::New(recycler);
         regexResultPath->Add(BuiltInPropertyRecords::input);
         regexResultPath->Add(BuiltInPropertyRecords::index);
+        // "groups" (ES2018 named capture groups, S9): exists unconditionally
+        // on exec/match result arrays, undefined when the pattern has no
+        // named groups. Registered as a dynamic property record.
+        const PropertyRecord* regexGroupsRecord = nullptr;
+        scriptContext->GetOrAddPropertyRecord(_u("groups"), 6, &regexGroupsRecord);
+        regexGroupsPropertyRecord = regexGroupsRecord;
+        regexResultPath->Add(regexGroupsRecord);
         regexResultType = DynamicType::New(scriptContext, TypeIds_Array, arrayPrototype, nullptr,
             PathTypeHandlerNoAttr::New(scriptContext, regexResultPath, regexResultPath->GetPathLength(), JavascriptRegularExpressionResult::InlineSlotCount, sizeof(JavascriptArray), true, true), true, true);
 

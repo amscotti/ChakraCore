@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #include "ParserPch.h"
@@ -5661,6 +5662,9 @@ namespace UnifiedRegex
         , flags(flags)
         , numGroups(0)
         , numLoops(0)
+        , groupNameEntries(nullptr)
+        , groupNameChars(nullptr)
+        , numGroupNames(0)
     {
         tag = ProgramTag::InstructionsTag;
         rep.insts.insts = nullptr;
@@ -5703,6 +5707,42 @@ namespace UnifiedRegex
         return
             rep.insts.scannersForSyncToLiterals[scannerIndex] =
                 RecyclerNewLeaf(recycler, ScannerInfo, offset, length, isEquivClass);
+    }
+
+    // Named capture groups (ES2018)
+    const Chars<char16>::Char* Program::GetGroupName(uint32 i, CharCount* nameLen) const
+    {
+        Assert(i < numGroupNames);
+        Assert(groupNameEntries != nullptr && groupNameChars != nullptr);
+        *nameLen = groupNameEntries[i].len;
+        return groupNameChars + groupNameEntries[i].offset;
+    }
+
+    uint16 Program::GetGroupNameGroupId(uint32 i) const
+    {
+        Assert(i < numGroupNames);
+        return groupNameEntries[i].groupId;
+    }
+
+    int Program::FindNamedGroupId(const Chars<char16>::Char* name, CharCount len) const
+    {
+        for (uint32 i = 0; i < numGroupNames; i++)
+        {
+            if (groupNameEntries[i].len == len)
+            {
+                const Char* candidate = groupNameChars + groupNameEntries[i].offset;
+                CharCount j = 0;
+                while (j < len && candidate[j] == name[j])
+                {
+                    j++;
+                }
+                if (j == len)
+                {
+                    return groupNameEntries[i].groupId;
+                }
+            }
+        }
+        return -1;
     }
 
     void Program::FreeBody(ArenaAllocator* rtAllocator)

@@ -331,6 +331,10 @@ namespace Js
         Field(DynamicType *) regexPrototypeType;
         Field(DynamicType *) regexType;
         Field(DynamicType *) regexResultType;
+        // Property record for the exec/match result "groups" own property.
+        // Dynamic (no built-in PropertyId) so built-in bytecode headers stay
+        // byte-stable; the record itself is process-lifetime.
+        Field(const PropertyRecord *) regexGroupsPropertyRecord;
         Field(DynamicType *) stringTypeDynamic;
         Field(DynamicType *) mapType;
         Field(DynamicType *) setType;
@@ -781,6 +785,7 @@ namespace Js
         DynamicType * GetRegexPrototypeType() const { return regexPrototypeType; }
         DynamicType * GetRegexType() const { return regexType; }
         DynamicType * GetRegexResultType() const { return regexResultType; }
+        const PropertyRecord * GetRegexGroupsPropertyRecord() const { return regexGroupsPropertyRecord; }
         DynamicType * GetArrayBufferType() const { return arrayBufferType; }
         StaticType  * GetStringTypeStatic() const { return stringCache.GetStringTypeStatic(); }
         DynamicType * GetStringTypeDynamic() const { return stringTypeDynamic; }

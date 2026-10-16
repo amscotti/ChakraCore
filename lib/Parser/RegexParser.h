@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #pragma once
@@ -60,6 +61,40 @@ namespace UnifiedRegex
         };
 
         static const CharCount initLitbufSize = 16;
+
+        // A named capture group definition (recorded during pass 0), or an
+        // unresolved \k<name> reference (groupId unused). Names are decoded
+        // UTF-16 sequences appended to namedGroupBuffer; ES2018 allows at most
+        // one definition per name (duplicate groups are a later sub-batch).
+        struct NamedGroup
+        {
+            CharCount offset; // offset into namedGroupBuffer
+            CharCount len;    // length in Char units
+            int groupId;      // definition only: capture index, 1-based
+        };
+
+        // Raw span of a \k<...> reference, recorded during pass 0 in encoded
+        // characters. Whether the escape is a backreference or an Annex B
+        // identity escape depends on the whole pattern (forward references)
+        // and the u flag, so the span is validated only at resolution time.
+        struct NamedGroupRefSpan
+        {
+            const EncodedChar* nameStart; // first char after '\k<'
+            const EncodedChar* afterGt;   // one past '>', or null when unterminated
+        };
+
+        NamedGroup* namedGroups;        // definitions, in textual order (ctAllocator)
+        int numNamedGroups;
+        int namedGroupsCap;
+        NamedGroupRefSpan* namedGroupRefSpans; // \k<...> occurrences (ctAllocator)
+        int numNamedGroupRefSpans;
+        int namedGroupRefSpansCap;
+        Char* namedGroupBuffer;      // decoded names, concatenated (ctAllocator)
+        CharCount namedGroupBufferLen;  // end of the pass 0 region
+        CharCount namedGroupBufferNext; // append cursor (pass 1/resolution append past ^)
+        CharCount namedGroupBufferCap;
+        bool sawBareK;               // '\k' not followed by '<' anywhere
+        bool sawClassK;              // '\k' inside a character class anywhere
 
         Js::ScriptContext* scriptContext;
         // Arena for nodes and items needed only during compilation
@@ -161,6 +196,19 @@ namespace UnifiedRegex
         void DeferredFailIfNotUnicode(HRESULT error);
         inline void ECMust(EncodedChar ec, HRESULT error);
         inline Char NextChar();
+
+        //
+        // Named capture groups (ES2018)
+        //
+
+        void EnsureNameBuffer(CharCount additionalChars);
+        void AppendNameCodePoint(codepoint_t codePoint);
+        codepoint_t ScanNameUnicodeEscape();
+        void ScanGroupName();
+        void RecordNamedGroup(const Char* name, CharCount len, int groupId);
+        int FindNamedGroup(const Char* name, CharCount len) const;
+        void ResolveNamedGroupRefs(const EncodedChar* body, const EncodedChar* bodyLim);
+        void CaptureGroupNames(Recycler* recycler, Program* program);
 
         //
         // Patterns/Disjunctions/Alternatives

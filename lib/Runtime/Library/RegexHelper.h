@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #pragma once
@@ -88,11 +89,13 @@ namespace Js
         static UnifiedRegex::GroupInfo PrimMatch(RegexMatchState& state, ScriptContext* scriptContext, UnifiedRegex::RegexPattern* pattern, CharCount inputLength, CharCount offset);
         static void PrimEndMatch(RegexMatchState& state, ScriptContext* scriptContext, UnifiedRegex::RegexPattern* pattern);
 
-        template<typename GroupFn>
+        template<typename GroupFn, typename NamedGroupFn>
         static void ReplaceFormatString
             ( ScriptContext* scriptContext
             , int numGroups
             , GroupFn getGroup
+            , bool namedSubstitutionEnabled
+            , NamedGroupFn getNamedGroup
             , JavascriptString* input
             , const char16* matchedString
             , UnifiedRegex::GroupInfo match
@@ -100,6 +103,15 @@ namespace Js
             , int substitutions
             , __in_ecount(substitutions) CharCount* substitutionOffsets
             , CompoundString::Builder<64 * sizeof(void *) / sizeof(char16)>& concatenated );
+
+        // The groups object of the pattern's most recent match: a
+        // null-prototype object with one own data property per named group,
+        // in textual order, undefined for groups that did not participate.
+        static DynamicObject* CreateGroupsObject(ScriptContext* scriptContext, UnifiedRegex::RegexPattern* pattern, JavascriptString* input);
+        // Var to store in the result's "groups" slot: the groups object when
+        // the pattern has named captures, undefined otherwise (never allocates
+        // on the no-named-groups fast path).
+        static Var GetGroupsVar(ScriptContext* scriptContext, UnifiedRegex::RegexPattern* pattern, JavascriptString* input);
 
     public:
         static Var RegexReplaceResultUsed(ScriptContext* entryFunctionContext, JavascriptRegExp* regularExpression, JavascriptString* input, JavascriptString* replace);

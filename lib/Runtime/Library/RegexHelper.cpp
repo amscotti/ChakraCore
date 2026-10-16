@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #include "RuntimeLibraryPch.h"
@@ -588,6 +589,7 @@ namespace Js
                     elements[groupId] = GetGroup(scriptContext, pattern, input, nonMatchValue, groupId);
                 }
             }
+            JavascriptRegularExpressionResult::SetGroups(arrayResult, GetGroupsVar(scriptContext, pattern, input));
             FinalizeMatchResult(scriptContext, /* isGlobal */ false, arrayResult, lastSuccessfulMatch);
         }
         else
@@ -641,6 +643,7 @@ namespace Js
             Assert(groupId < result->GetHead()->left + result->GetHead()->length);
             elements[groupId] = GetGroup(scriptContext, pattern, input, nonMatchValue, groupId);
         }
+        JavascriptRegularExpressionResult::SetGroups(result, GetGroupsVar(scriptContext, pattern, input));
         return result;
     }
 
@@ -759,11 +762,13 @@ namespace Js
         return JavascriptBoolean::ToVar(wasFound, scriptContext);
     }
 
-    template<typename GroupFn>
+    template<typename GroupFn, typename NamedGroupFn>
     void RegexHelper::ReplaceFormatString
         ( ScriptContext* scriptContext
         , int numGroups
         , GroupFn getGroup
+        , bool namedSubstitutionEnabled
+        , NamedGroupFn getNamedGroup
         , JavascriptString* input
         , const char16* matchedString
         , UnifiedRegex::GroupInfo match
@@ -842,6 +847,48 @@ namespace Js
                     }
                     offset = substitutionOffset + 2;
                     break;
+                case _u('<'): // named capture group substitution $<name>
+                    if (namedSubstitutionEnabled)
+                    {
+                        // GetSubstitution: everything through the first '>' is
+                        // consumed as the group name; an unknown or unmatched
+                        // name contributes nothing. Without a closing '>' the
+                        // '$' stays literal. When named substitution is not
+                        // enabled (no named captures / no groups object), the
+                        // '$' stays literal as well (default arm).
+                        CharCount gt = substitutionOffset + 2;
+                        while (gt < replaceLength && replaceStr[gt] != _u('>'))
+                        {
+                            gt++;
+                        }
+                        if (gt >= replaceLength)
+                        {
+                            concatenated.Append(_u('$'));
+                            offset = substitutionOffset + 1;
+                        }
+                        else
+                        {
+                            Var namedCapture = getNamedGroup(
+                                replaceStr + substitutionOffset + 2,
+                                gt - (substitutionOffset + 2));
+                            if (!JavascriptOperators::IsUndefined(namedCapture))
+                            {
+                                JavascriptString* namedCaptureString =
+                                    JavascriptConversion::ToString(namedCapture, scriptContext);
+                                concatenated.Append(namedCaptureString);
+                            }
+                            offset = gt + 1;
+                            // The name may contain '$' characters that the
+                            // substitution pre-scan registered as offsets;
+                            // they are part of this consumed name.
+                            while (i + 1 < substitutions && substitutionOffsets[i + 1] < offset)
+                            {
+                                i++;
+                            }
+                        }
+                        break;
+                    }
+                    // fall-through: literal '$'
                 default:
                     concatenated.Append(_u('$'));
                     offset = substitutionOffset + 1;
@@ -926,7 +973,8 @@ namespace Js
             JavascriptString* matchStr,
             int numberOfCaptures,
             Field(Var)* captures,
-            CharCount position)
+            CharCount position,
+            Var namedCaptures)
         {
             CharCount* substitutionOffsets = nullptr;
             int substitutions = GetReplaceSubstitutions(
@@ -937,12 +985,25 @@ namespace Js
             auto getGroup = [&](int captureIndex, Var nonMatchValue) {
                 return captureIndex <= numberOfCaptures ? PointerValue(captures[captureIndex]) : nonMatchValue;
             };
+            // GetSubstitution receives the coerced "groups" value: when
+            // undefined (pattern without named captures, or an exec result
+            // without a groups property), $<name> stays literal.
+            const bool namedSubstitutionEnabled = !JavascriptOperators::IsUndefined(namedCaptures);
+            RecyclableObject* namedCapturesObject = namedSubstitutionEnabled
+                ? VarTo<RecyclableObject>(namedCaptures)
+                : nullptr;
+            auto getNamedGroup = [=](const char16* name, CharCount nameLen) -> Var {
+                PropertyId propertyId = scriptContext->GetOrAddPropertyIdTracked(name, static_cast<int>(nameLen));
+                return JavascriptOperators::GetProperty(namedCapturesObject, propertyId, scriptContext);
+            };
             UnifiedRegex::GroupInfo match(position, matchStr->GetLength());
             int numGroups = numberOfCaptures + 1; // Take group 0 into account.
             ReplaceFormatString(
                 scriptContext,
                 numGroups,
                 getGroup,
+                namedSubstitutionEnabled,
+                getNamedGroup,
                 input,
                 matchStr->GetString(),
                 match,
@@ -962,7 +1023,8 @@ namespace Js
             JavascriptString* matchStr,
             int numberOfCaptures,
             Field(Var)* captures,
-            CharCount position)
+            CharCount position,
+            Var namedCaptures)
         {
             // replaceFn Arguments:
             //
@@ -973,15 +1035,16 @@ namespace Js
             // N + 1: capture N
             // N + 2: position
             // N + 3: input
+            // N + 4: namedCaptures (only when not undefined, per @@replace)
 
             // Number of captures can be at most 99, so we won't overflow.
             ushort argCount = (ushort) numberOfCaptures + 4;
 
-            PROBE_STACK_NO_DISPOSE(scriptContext, argCount * sizeof(Var));
+            PROBE_STACK_NO_DISPOSE(scriptContext, (argCount + 1) * sizeof(Var));
 
             ThreadContext* threadContext = scriptContext->GetThreadContext();
 
-            Var* args = (Var*) _alloca(argCount * sizeof(Var));
+            Var* args = (Var*) _alloca((argCount + 1) * sizeof(Var));
 
             args[0] = scriptContext->GetLibrary()->GetUndefined();
 #pragma prefast(suppress:6386, "The write is within the bounds")
@@ -992,6 +1055,11 @@ namespace Js
             }
             args[numberOfCaptures + 2] = JavascriptNumber::ToVar(position, scriptContext);
             args[numberOfCaptures + 3] = input;
+            if (!JavascriptOperators::IsUndefined(namedCaptures))
+            {
+                args[argCount] = namedCaptures;
+                argCount++;
+            }
             Js::Var replaceFnResult = threadContext->ExecuteImplicitCall(replaceFn, Js::ImplicitCall_Accessor, [=]()->Js::Var
             {
                 return JavascriptFunction::CallFunction<true>(replaceFn, replaceFn->GetEntryPoint(), Arguments(CallInfo(argCount), args));
@@ -1104,19 +1172,21 @@ namespace Js
 
                 // ES2021 @@replace: "groups" is read after the captures and,
                 // when not undefined, coerced through ToObject (a null
-                // "groups" throws TypeError). The coerced value only feeds
-                // $<name> substitutions, which need named groups (S9 debt);
-                // the coercion itself is observable, so it runs anyway.
+                // "groups" throws TypeError). The coerced value feeds the
+                // $<name> substitutions and, when not undefined, is passed to
+                // a replacement function as the final argument.
+                Var namedCaptures = scriptContext->GetLibrary()->GetUndefined();
                 if (groupsPropertyId != Constants::NoProperty)
                 {
-                    Var namedCaptures = JavascriptOperators::GetProperty(resultObj, groupsPropertyId, scriptContext);
-                    if (!JavascriptOperators::IsUndefined(namedCaptures))
+                    Var namedCapturesValue = JavascriptOperators::GetProperty(resultObj, groupsPropertyId, scriptContext);
+                    if (!JavascriptOperators::IsUndefined(namedCapturesValue))
                     {
                         RecyclableObject* namedCapturesObject = nullptr;
-                        if (!JavascriptConversion::ToObject(namedCaptures, scriptContext, &namedCapturesObject))
+                        if (!JavascriptConversion::ToObject(namedCapturesValue, scriptContext, &namedCapturesObject))
                         {
                             JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_NeedObject, _u("RegExp.prototype[Symbol.replace]"));
                         }
+                        namedCaptures = namedCapturesObject;
                     }
                 }
 
@@ -1125,7 +1195,7 @@ namespace Js
                     CharCount substringLength = position - nextSourcePosition;
                     accumulatedResultBuilder.Append(input, nextSourcePosition, substringLength);
 
-                    appendReplacement(accumulatedResultBuilder, tempAlloc, matchStr, (int) numberOfCapturesToKeep, captures, position);
+                    appendReplacement(accumulatedResultBuilder, tempAlloc, matchStr, (int) numberOfCapturesToKeep, captures, position, namedCaptures);
 
                     nextSourcePosition = JavascriptRegExp::AddIndex(position, matchStr->GetLength());
                 }
@@ -1210,8 +1280,24 @@ namespace Js
                     auto getGroup = [&](int captureIndex, Var nonMatchValue) {
                         return GetGroup(scriptContext, pattern, input, nonMatchValue, captureIndex);
                     };
+                    // $<name> resolves against the pattern's static name
+                    // registry and the live match (the ES5 fast path never
+                    // materializes a groups object here); enabled only when
+                    // the pattern has named captures, matching GetSubstitution
+                    // with namedCaptures undefined otherwise.
+                    UnifiedRegex::Program* program = pattern->rep.unified.program;
+                    const bool namedSubstitutionEnabled = program->HasNamedGroups();
+                    Var undefined = scriptContext->GetLibrary()->GetUndefined();
+                    auto getNamedGroup = [=](const char16* name, CharCount nameLen) -> Var {
+                        int groupId = program->FindNamedGroupId(name, nameLen);
+                        if (groupId < 0)
+                        {
+                            return undefined;
+                        }
+                        return GetString(scriptContext, input, undefined, pattern->GetGroup(groupId));
+                    };
                     const char16* matchedString = inputStr + lastActualMatch.offset;
-                    ReplaceFormatString(scriptContext, pattern->NumGroups(), getGroup, input, matchedString, lastActualMatch, replace, substitutions, substitutionOffsets, concatenated);
+                    ReplaceFormatString(scriptContext, pattern->NumGroups(), getGroup, namedSubstitutionEnabled, getNamedGroup, input, matchedString, lastActualMatch, replace, substitutions, substitutionOffsets, concatenated);
                 }
                 else
                 {
@@ -1334,11 +1420,15 @@ namespace Js
         UnifiedRegex::GroupInfo lastActualMatch;
         UnifiedRegex::GroupInfo lastSuccessfulMatch;
 
-        // Replace function must be called with arguments (<function's this>, group0, ..., groupn, offset, input)
+        // Replace function must be called with arguments (<function's this>, group0, ..., groupn, offset, input, [groups])
         // The garbage collector must know about this array since it is being passed back into script land
         Var* replaceArgs;
-        PROBE_STACK_NO_DISPOSE(scriptContext, (numGroups + 3) * sizeof(Var));
-        replaceArgs = (Var*)_alloca((numGroups + 3) * sizeof(Var));
+        // ES2018: when the pattern has named captures, the final argument is
+        // the match's groups object.
+        const bool hasNamedGroups = pattern->rep.unified.program->HasNamedGroups();
+        const uint16 argCount = UInt16Math::Add(numGroups, hasNamedGroups ? 4u : 3u);
+        PROBE_STACK_NO_DISPOSE(scriptContext, argCount * sizeof(Var));
+        replaceArgs = (Var*)_alloca(argCount * sizeof(Var));
         replaceArgs[0] = scriptContext->GetLibrary()->GetUndefined();
         replaceArgs[numGroups + 2] = input;
 
@@ -1364,6 +1454,10 @@ namespace Js
             for (int groupId = 0;  groupId < numGroups; groupId++)
                 replaceArgs[groupId + 1] = GetGroup(scriptContext, pattern, input, nonMatchValue, groupId);
             replaceArgs[numGroups + 1] = JavascriptNumber::ToVar(lastActualMatch.offset, scriptContext);
+            if (hasNamedGroups)
+            {
+                replaceArgs[numGroups + 3] = CreateGroupsObject(scriptContext, pattern, input);
+            }
 
             // The called function must see the global state updated by the current match
             // (Should the function reach into a RegExp field, the pattern will still be valid, thus there's no
@@ -1375,7 +1469,7 @@ namespace Js
             ThreadContext* threadContext = scriptContext->GetThreadContext();
             Var replaceVar = threadContext->ExecuteImplicitCall(replacefn, ImplicitCall_Accessor, [=]()->Js::Var
             {
-                    return JavascriptFunction::CallFunction<true>(replacefn, replacefn->GetEntryPoint(), Arguments(CallInfo(UInt16Math::Add(numGroups, 3)), replaceArgs));
+                    return JavascriptFunction::CallFunction<true>(replacefn, replacefn->GetEntryPoint(), Arguments(CallInfo(argCount), replaceArgs));
             });
             JavascriptString* replace = JavascriptConversion::ToString(replaceVar, scriptContext);
             concatenated.Append(input, offset, lastActualMatch.offset - offset);
@@ -2023,6 +2117,40 @@ namespace Js
     Var RegexHelper::GetGroup(ScriptContext* scriptContext, UnifiedRegex::RegexPattern* pattern, JavascriptString* input, Var nonMatchValue, int groupId)
     {
         return GetString(scriptContext, input, nonMatchValue, pattern->GetGroup(groupId));
+    }
+
+    DynamicObject* RegexHelper::CreateGroupsObject(ScriptContext* scriptContext, UnifiedRegex::RegexPattern* pattern, JavascriptString* input)
+    {
+        UnifiedRegex::Program* program = pattern->rep.unified.program;
+        Assert(program->HasNamedGroups());
+        Assert(pattern->WasLastMatchSuccessful());
+
+        DynamicObject* groups = scriptContext->GetLibrary()->CreateObject(
+            scriptContext->GetLibrary()->GetNull()); // null [[Prototype]]
+        Var undefined = scriptContext->GetLibrary()->GetUndefined();
+        const uint32 numGroupNames = program->numGroupNames;
+        for (uint32 i = 0; i < numGroupNames; i++)
+        {
+            CharCount nameLen = 0;
+            const char16* name = program->GetGroupName(i, &nameLen);
+            PropertyId propertyId = scriptContext->GetOrAddPropertyIdTracked(name, static_cast<int>(nameLen));
+            // CreateDataProperty semantics: on a null-prototype object the
+            // ordinary [[Set]] creates an own writable/enumerable/configurable
+            // data property (and "__proto__" is not special without a prototype).
+            Var value = GetString(scriptContext, input, undefined,
+                pattern->GetGroup(program->GetGroupNameGroupId(i)));
+            JavascriptOperators::SetProperty(groups, groups, propertyId, value, scriptContext);
+        }
+        return groups;
+    }
+
+    Var RegexHelper::GetGroupsVar(ScriptContext* scriptContext, UnifiedRegex::RegexPattern* pattern, JavascriptString* input)
+    {
+        if (!pattern->rep.unified.program->HasNamedGroups())
+        {
+            return scriptContext->GetLibrary()->GetUndefined();
+        }
+        return CreateGroupsObject(scriptContext, pattern, input);
     }
 
     // ======================================================================

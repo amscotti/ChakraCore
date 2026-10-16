@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 /*
@@ -139,6 +140,18 @@ namespace UnifiedRegex
         , litbuf(0)
         , litbufLen(0)
         , litbufNext(0)
+        , namedGroups(nullptr)
+        , numNamedGroups(0)
+        , namedGroupsCap(0)
+        , namedGroupRefSpans(nullptr)
+        , numNamedGroupRefSpans(0)
+        , namedGroupRefSpansCap(0)
+        , namedGroupBuffer(nullptr)
+        , namedGroupBufferLen(0)
+        , namedGroupBufferNext(0)
+        , namedGroupBufferCap(0)
+        , sawBareK(false)
+        , sawClassK(false)
         , surrogatePairList(nullptr)
         , currentSurrogatePairNode(nullptr)
         , tempLocationOfSurrogatePair(nullptr)
@@ -612,6 +625,268 @@ namespace UnifiedRegex
     }
 
     //
+    // Named capture groups (ES2018)
+    //
+
+    template <typename P, const bool IsLiteral>
+    void Parser<P, IsLiteral>::EnsureNameBuffer(CharCount additionalChars)
+    {
+        CharCount newCap = namedGroupBufferCap;
+        if (namedGroupBuffer != nullptr && namedGroupBufferNext + additionalChars <= namedGroupBufferCap)
+        {
+            return;
+        }
+        if (namedGroupBuffer == nullptr)
+        {
+            newCap = max<CharCount>(16, additionalChars);
+        }
+        else
+        {
+            if (additionalChars > MaxCharCount - namedGroupBufferNext)
+                Fail(JSERR_RegExpSyntax);
+            while (namedGroupBufferNext + additionalChars > newCap)
+                newCap *= 2;
+        }
+        Char* newBuffer = AnewArray(ctAllocator, Char, newCap);
+        if (namedGroupBuffer != nullptr)
+        {
+            for (CharCount i = 0; i < namedGroupBufferNext; i++)
+                newBuffer[i] = namedGroupBuffer[i];
+        }
+        namedGroupBuffer = newBuffer;
+        namedGroupBufferCap = newCap;
+    }
+
+    template <typename P, const bool IsLiteral>
+    void Parser<P, IsLiteral>::AppendNameCodePoint(codepoint_t codePoint)
+    {
+        if (codePoint <= 0xFFFF)
+        {
+            EnsureNameBuffer(1);
+            namedGroupBuffer[namedGroupBufferNext++] = static_cast<Char>(codePoint);
+        }
+        else
+        {
+            EnsureNameBuffer(2);
+            codePoint -= 0x10000;
+            namedGroupBuffer[namedGroupBufferNext++] = static_cast<Char>(0xD800 + (codePoint >> 10));
+            namedGroupBuffer[namedGroupBufferNext++] = static_cast<Char>(0xDC00 + (codePoint & 0x3FF));
+        }
+    }
+
+    // Parses \uXXXX or \u{X...} with the leading "u" already consumed.
+    template <typename P, const bool IsLiteral>
+    codepoint_t Parser<P, IsLiteral>::ScanNameUnicodeEscape()
+    {
+        codepoint_t value = 0;
+        if (ECLookahead() == '{')
+        {
+            ECConsume();
+            CharCount digits = 0;
+            while (!IsEOF() && standardEncodedChars->IsHex(ECLookahead()))
+            {
+                value = value * 16 + standardEncodedChars->DigitValue(ECLookahead());
+                if (value > 0x10FFFF)
+                    Fail(JSERR_RegExpSyntax);
+                digits++;
+                ECConsume();
+            }
+            if (digits == 0 || IsEOF() || ECLookahead() != '}')
+                Fail(JSERR_RegExpSyntax);
+            ECConsume(); // }
+            return value;
+        }
+        for (int i = 0; i < 4; i++)
+        {
+            if (IsEOF() || !standardEncodedChars->IsHex(ECLookahead()))
+                Fail(JSERR_RegExpSyntax);
+            value = value * 16 + standardEncodedChars->DigitValue(ECLookahead());
+            ECConsume();
+        }
+        return value;
+    }
+
+    // Scans a RegExpIdentifierName with the position just after "(?<" or
+    // "\k<". Consumes through and including the terminating '>'. The decoded
+    // name is appended to namedGroupBuffer (caller snapshots
+    // namedGroupBufferNext before/after to get its bounds). Fails on invalid
+    // name characters, escape sequences, lone surrogates, and empty names.
+    template <typename P, const bool IsLiteral>
+    void Parser<P, IsLiteral>::ScanGroupName()
+    {
+        const Js::CharClassifier* classifier = this->scriptContext->GetCharClassifier();
+        bool first = true;
+        for (;;)
+        {
+            if (IsEOF())
+                Fail(JSERR_RegExpSyntax);
+            Char c = NextChar();
+            if (c == '>')
+                break;
+
+            codepoint_t codePoint;
+            if (c == '\\')
+            {
+                if (IsEOF() || ECLookahead() != 'u')
+                    Fail(JSERR_RegExpSyntax);
+                ECConsume(); // u
+                codePoint = ScanNameUnicodeEscape();
+                if (Js::NumberUtilities::IsSurrogateLowerPart(codePoint))
+                {
+                    // An escaped leading surrogate must pair with another \uXXXX escape
+                    if (ECCanConsume(2) && ECLookahead() == '\\' && ECLookahead(1) == 'u')
+                    {
+                        ECConsume(2);
+                        codepoint_t upper = ScanNameUnicodeEscape();
+                        if (!Js::NumberUtilities::IsSurrogateUpperPart(upper))
+                            Fail(JSERR_RegExpSyntax);
+                        codePoint = Js::NumberUtilities::SurrogatePairAsCodePoint(
+                            static_cast<char16>(codePoint), static_cast<char16>(upper));
+                    }
+                    else
+                        Fail(JSERR_RegExpSyntax);
+                }
+                else if (Js::NumberUtilities::IsSurrogateUpperPart(codePoint))
+                    Fail(JSERR_RegExpSyntax);
+            }
+            else if (Js::NumberUtilities::IsSurrogateLowerPart(c))
+            {
+                if (IsEOF())
+                    Fail(JSERR_RegExpSyntax);
+                Char c2 = NextChar();
+                if (!Js::NumberUtilities::IsSurrogateUpperPart(c2))
+                    Fail(JSERR_RegExpSyntax);
+                codePoint = Js::NumberUtilities::SurrogatePairAsCodePoint(c, c2);
+            }
+            else if (Js::NumberUtilities::IsSurrogateUpperPart(c))
+            {
+                Fail(JSERR_RegExpSyntax);
+            }
+            else
+            {
+                codePoint = c;
+            }
+
+            if (first ? !classifier->IsIdStart(codePoint) : !classifier->IsIdContinue(codePoint))
+                Fail(JSERR_RegExpSyntax);
+            first = false;
+            AppendNameCodePoint(codePoint);
+        }
+        if (first)
+            Fail(JSERR_RegExpSyntax); // empty name
+    }
+
+    template <typename P, const bool IsLiteral>
+    void Parser<P, IsLiteral>::RecordNamedGroup(const Char* name, CharCount len, int groupId)
+    {
+        // Duplicate names are a SyntaxError until duplicate named groups (ES2025) land.
+        if (FindNamedGroup(name, len) >= 0)
+            Fail(JSERR_RegExpSyntax);
+        if (numNamedGroups == namedGroupsCap)
+        {
+            int newCap = namedGroupsCap == 0 ? 4 : namedGroupsCap * 2;
+            NamedGroup* newList = AnewArray(ctAllocator, NamedGroup, newCap);
+            for (int i = 0; i < numNamedGroups; i++)
+                newList[i] = namedGroups[i];
+            namedGroups = newList;
+            namedGroupsCap = newCap;
+        }
+        NamedGroup& entry = namedGroups[numNamedGroups++];
+        entry.offset = name - namedGroupBuffer;
+        entry.len = len;
+        entry.groupId = groupId;
+    }
+
+    template <typename P, const bool IsLiteral>
+    int Parser<P, IsLiteral>::FindNamedGroup(const Char* name, CharCount len) const
+    {
+        for (int i = 0; i < numNamedGroups; i++)
+        {
+            if (namedGroups[i].len == len)
+            {
+                const Char* candidate = namedGroupBuffer + namedGroups[i].offset;
+                CharCount j = 0;
+                while (j < len && candidate[j] == name[j])
+                    j++;
+                if (j == len)
+                    return namedGroups[i].groupId;
+            }
+        }
+        return -1;
+    }
+
+    // Runs after pass 0 and option parsing: "\k" is a backreference escape
+    // only when the pattern has named captures or the u flag is present;
+    // otherwise it is an Annex B identity escape. Throws on dangling or
+    // malformed references (pass 1 then trusts the resolution). 'body'/
+    // 'bodyLim' delimit the buffer pass 0 scanned, which holds the recorded
+    // spans.
+    template <typename P, const bool IsLiteral>
+    void Parser<P, IsLiteral>::ResolveNamedGroupRefs(const EncodedChar* body, const EncodedChar* bodyLim)
+    {
+        const bool isNamedMode = this->numNamedGroups > 0 || this->unicodeFlagPresent;
+        if (!isNamedMode)
+            return; // every \k re-parses as the identity escape 'k' in pass 1
+        if (this->sawBareK || this->sawClassK)
+            throw ParseError(true, 0, 0, JSERR_RegExpSyntax);
+
+        // The spans point into the pass 0 buffer, which is not necessarily
+        // the parser's current buffer: ParseDynamic scans the options from a
+        // separate string, so IsEOF and the lookahead bounds still refer to
+        // that options buffer. Re-bind to the body for the re-scan and
+        // restore the caller's position afterwards (ParseLiteral reads it
+        // right after this call).
+        const EncodedChar* savedInput = this->input;
+        const EncodedChar* savedInputLim = this->inputLim;
+        const EncodedChar* savedNext = this->next;
+        const bool savedInBody = this->inBody;
+        const size_t savedMultiUnits = this->GetMultiUnits();
+        SetPosition(body, bodyLim, true);
+
+        for (int i = 0; i < this->numNamedGroupRefSpans; i++)
+        {
+            const NamedGroupRefSpan& span = this->namedGroupRefSpans[i];
+            if (span.afterGt == nullptr)
+                throw ParseError(true, 0, 0, JSERR_RegExpSyntax);
+            this->next = span.nameStart;
+            CharCount nameOffset = this->namedGroupBufferNext;
+            ScanGroupName(); // validates and consumes through '>'
+            if (FindNamedGroup(this->namedGroupBuffer + nameOffset, this->namedGroupBufferNext - nameOffset) < 0)
+                throw ParseError(true, 0, 0, JSERR_RegExpSyntax);
+        }
+
+        this->input = savedInput;
+        this->inputLim = savedInputLim;
+        this->next = savedNext;
+        this->inBody = savedInBody;
+        this->RestoreMultiUnits(savedMultiUnits);
+    }
+
+    // Copies the pass 0 name region and definitions into recycler-owned
+    // program fields (RegexPattern shares programs across script contexts,
+    // so the data must be immutable from here on).
+    template <typename P, const bool IsLiteral>
+    void Parser<P, IsLiteral>::CaptureGroupNames(Recycler* recycler, Program* program)
+    {
+        Assert(this->numNamedGroups >= 0 && this->numNamedGroups <= MAX_NUM_GROUPS);
+        program->numGroupNames = static_cast<uint16>(this->numNamedGroups);
+        if (this->numNamedGroups == 0)
+            return;
+        Assert(this->namedGroupBuffer != nullptr);
+        program->groupNameEntries = RecyclerNewArrayLeafZ(recycler, Program::GroupNameEntry, this->numNamedGroups);
+        program->groupNameChars = RecyclerNewArrayLeaf(recycler, Char, this->namedGroupBufferLen);
+        for (CharCount i = 0; i < this->namedGroupBufferLen; i++)
+            program->groupNameChars[i] = this->namedGroupBuffer[i];
+        for (int i = 0; i < this->numNamedGroups; i++)
+        {
+            program->groupNameEntries[i].offset = this->namedGroups[i].offset;
+            program->groupNameEntries[i].len = this->namedGroups[i].len;
+            program->groupNameEntries[i].groupId = static_cast<uint16>(this->namedGroups[i].groupId);
+        }
+    }
+
+
+    //
     // Patterns/Disjunctions/Alternatives
     //
 
@@ -622,6 +897,10 @@ namespace UnifiedRegex
         this->deferredIfNotUnicodeError = nullptr;
         this->deferredIfUnicodeError = nullptr;
         DisjunctionPass0(0);
+        // Freeze the region of namedGroupBuffer holding pass 0 names; later
+        // re-scans (reference resolution, pass 1) append past this point so
+        // the recorded definitions stay addressable.
+        this->namedGroupBufferLen = this->namedGroupBufferNext;
     }
 
     template <typename P, const bool IsLiteral>
@@ -1197,6 +1476,21 @@ namespace UnifiedRegex
                 case ':':
                     ECConsume(2);
                     break;
+                case '<':
+                    {
+                        // (?<Name>...) named capture group. (?<= and (?<! are
+                        // lookbehind assertions (a later sub-batch) and stay
+                        // SyntaxError.
+                        if (!ECCanConsume(3) || ECLookahead(2) == '=' || ECLookahead(2) == '!')
+                            Fail(JSERR_RegExpSyntax);
+                        ECConsume(2); // ?<
+                        CharCount nameOffset = this->namedGroupBufferNext;
+                        ScanGroupName();
+                        RecordNamedGroup(this->namedGroupBuffer + nameOffset,
+                            this->namedGroupBufferNext - nameOffset, numGroups);
+                        numGroups++;
+                    }
+                    break;
                 default:
                     numGroups++;
                     break;
@@ -1366,6 +1660,19 @@ namespace UnifiedRegex
                     Assert(ECLookahead() == ')');
                     ECConsume(); // )
                     break; // fall-through for opt quantifier
+                case '<':
+                    {
+                        // (?<Name>...) — name already validated during pass 0
+                        // and resolved against the definition registry.
+                        ECConsume(2); // ?<
+                        ScanGroupName();
+                        int thisGroupId = nextGroupId++;
+                        node = DisjunctionPass1();
+                        Assert(ECLookahead() == ')');
+                        ECConsume(); // )
+                        node = Anew(ctAllocator, DefineGroupNode, thisGroupId, node);
+                        break; // fall-through for opt quantifier
+                    }
                 default:
                     {
                         // ? not yet consumed
@@ -1539,6 +1846,77 @@ namespace UnifiedRegex
             }
             return false;
         }
+        else if (ec == 'k')
+        {
+            // \k<Name> named backreference (or Annex B identity escape when
+            // the pattern has no named captures and no u flag). Whether the
+            // escape is a reference cannot be decided here (forward group
+            // definitions), so record the raw span and validate at
+            // resolution time; pass 1 re-parses accordingly.
+            if (ECCanConsume(2) && ECLookahead(1) == '<')
+            {
+                ECConsume(2); // k<
+                const EncodedChar* nameStart = next;
+                // Raw scan to the closing '>'; validation is deferred to
+                // ResolveNamedGroupRefs (an Annex B identity escape must not
+                // be rejected here). NextChar advances multi-unit characters
+                // whole; '>' is ASCII and cannot occur inside a sequence.
+                // Structural characters (group/alternative/quantifier
+                // syntax) stop the scan as "unterminated": when the escape
+                // is a reference the name is invalid anyway, and when it
+                // re-parses as an identity escape pass 1 must still see the
+                // structure ('\k<a)' must not swallow the ')').
+                const EncodedChar* afterGt = nullptr;
+                while (!IsEOF())
+                {
+                    switch (ECLookahead())
+                    {
+                    case '>':
+                        ECConsume();
+                        afterGt = next;
+                        break;
+                    case '(':
+                    case ')':
+                    case '|':
+                    case '[':
+                    case ']':
+                    case '*':
+                    case '+':
+                    case '?':
+                    case '^':
+                    case '.':
+                    case '/': // terminates a regex literal body
+                        // Note: '$' is NOT a stop char — it is a valid
+                        // identifier character in group names (same grammar
+                        // as the definitions: IdentifierStart includes '$'),
+                        // so \k<$a> must scan past it (Node parity).
+                        break;
+                    default:
+                        NextChar();
+                        continue;
+                    }
+                    break;
+                }
+                if (numNamedGroupRefSpans == namedGroupRefSpansCap)
+                {
+                    int newCap = namedGroupRefSpansCap == 0 ? 4 : namedGroupRefSpansCap * 2;
+                    NamedGroupRefSpan* newList = AnewArray(ctAllocator, NamedGroupRefSpan, newCap);
+                    for (int i = 0; i < numNamedGroupRefSpans; i++)
+                        newList[i] = namedGroupRefSpans[i];
+                    namedGroupRefSpans = newList;
+                    namedGroupRefSpansCap = newCap;
+                }
+                NamedGroupRefSpan& span = namedGroupRefSpans[numNamedGroupRefSpans++];
+                span.nameStart = nameStart;
+                span.afterGt = afterGt;
+            }
+            else
+            {
+                sawBareK = true;
+                ECConsume(); // k (identity escape for now)
+            }
+            return false;
+        }
         else
         {
             const EncodedChar *current = next;
@@ -1679,6 +2057,35 @@ namespace UnifiedRegex
             }
             deferredCharNode->cs[0] = c;
             node = deferredCharNode;
+            return false; // not an assertion
+        }
+        else if (ECLookahead() == 'k')
+        {
+            // Named backreference \k<Name>, or Annex B identity escape 'k'
+            // when the pattern has no named captures and no u flag
+            // (ResolveNamedGroupRefs already validated the reference form).
+            if (this->numNamedGroups > 0 || this->unicodeFlagPresent)
+            {
+                ECConsume(); // k
+                if (IsEOF() || ECLookahead() != '<')
+                    Fail(JSERR_RegExpSyntax);
+                ECConsume(); // <
+                CharCount nameOffset = this->namedGroupBufferNext;
+                ScanGroupName();
+                int groupId = FindNamedGroup(this->namedGroupBuffer + nameOffset,
+                    this->namedGroupBufferNext - nameOffset);
+                if (groupId < 0)
+                    Fail(JSERR_RegExpSyntax);
+                node = Anew(ctAllocator, MatchGroupNode, groupId);
+            }
+            else
+            {
+                // Identity escape; the following '<...>' (if any) parses as
+                // literal atoms just like it did before this pass.
+                deferredCharNode->cs[0] = 'k';
+                ECConsume(); // k
+                node = deferredCharNode;
+            }
             return false; // not an assertion
         }
         else
@@ -2550,6 +2957,15 @@ namespace UnifiedRegex
                 else
                     singleton = c;
                 return true;
+            case 'k':
+                // There is no \k<Name> backreference inside classes. '\k' is
+                // the Annex B identity escape 'k' only in non-u patterns with
+                // no named captures (Annex B reserves 'k' for references once
+                // named captures appear, and u mode has no identity escape for
+                // it); ResolveNamedGroupRefs rejects the other combinations.
+                sawClassK = true;
+                singleton = c;
+                return true;
             default:
                 // embedded 0 is ok
                 singleton = c;
@@ -2855,6 +3271,10 @@ namespace UnifiedRegex
             throw ParseError(*deferredIfUnicodeError);
         }
 
+        // Named backreference resolution needs both the full set of group
+        // definitions and the u flag, so it runs only now.
+        ResolveNamedGroupRefs(body, bodyLim);
+
         this->currentSurrogatePairNode = this->surrogatePairList;
 
         // Body, pass 1
@@ -2908,6 +3328,10 @@ namespace UnifiedRegex
         {
             throw ParseError(*deferredIfUnicodeError);
         }
+
+        // Named backreference resolution needs both the full set of group
+        // definitions and the u flag, so it runs only now.
+        ResolveNamedGroupRefs(input, inputLim);
 
         // Used below to proceed to the end of the regex
         const EncodedChar *pastOptions = next;
@@ -3085,6 +3509,8 @@ namespace UnifiedRegex
         {
             program->numGroups = static_cast<uint16>(nextGroupId);
         }
+
+        CaptureGroupNames(recycler, program);
 
         // Remaining to set during compilation: litbuf, litbufLen, numLoops, insts, instsLen, entryPointLabel
     }

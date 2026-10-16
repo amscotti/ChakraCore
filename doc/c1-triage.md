@@ -590,6 +590,19 @@ missing construct SyntaxErrors whole test files filed under other tags
 *(inferred)*. Uncertainty: medium (lookbehind is the deep one). JIT-x64?
 **no** feature-specific work expected. Effort: **C2** per sub-batch;
 lookbehind may prove **C3**.
+*(Sub-batch 1 — named groups core — landed 2026-10-16 on Mac no-JIT, see
+[c2-s9-namedgroups.md](c2-s9-namedgroups.md)): `(?<name>...)`, `\k<name>`,
+the null-prototype `groups` object on exec/match results, and `$<name>`
+substitution in replace/replaceAll on both the ES5 and `@@replace` paths
+— unconditional (ES2018, no flag, no new opcodes, no PropertyId change).
+Corpus `RegExp/named-groups` + `language/literals/regexp/named-groups`:
+158/184 default flags, 162/184 under `-ES6RegExSymbols`; residue is
+exactly the deferred sub-batches (20 duplicate-names ES2025, 2
+lookbehind, 4 subclass scenarios that need the symbols flag). Resym
+universe joins: 168/0 (default) and 194/0 (flag-on) fail→pass/pass→fail.
+Gates 1970/2022. Remaining S9 work: lookbehind, `d` flag/`indices`,
+`v` flag (needs S3), ES2025 duplicate named groups, and the modifiers
+remainder.)*
 
 **S10. Set methods + copy-by-change family.** Repro: `python3 tools/test262/run.py --binary zig-out/bin/ch --output out/test262-c1-setcopy 'test/built-ins/Set/**/*.js' 'test/built-ins/Array/**/*.js' 'test/built-ins/TypedArray/**/*.js'`.
 *Status: both halves are closed on Mac no-JIT — see

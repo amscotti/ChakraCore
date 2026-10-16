@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #include "RuntimeLibraryPch.h"
@@ -57,6 +58,17 @@ namespace Js
 
         ScriptContext* scriptContext = arr->GetScriptContext();
         arr->SetSlot(SetSlotArguments(BuiltInPropertyRecords::index.propertyRecord.GetPropertyId(), IndexIndex, JavascriptNumber::ToVar(match.offset, scriptContext)));
+    }
+
+    void JavascriptRegularExpressionResult::SetGroups(JavascriptArray* arr, Var groups)
+    {
+        Assert(JavascriptRegularExpressionResult::Is(arr));
+
+        ScriptContext* scriptContext = arr->GetScriptContext();
+        arr->SetSlot(SetSlotArguments(
+            scriptContext->GetLibrary()->GetRegexGroupsPropertyRecord()->GetPropertyId(),
+            GroupsIndex,
+            groups));
     }
 
     void JavascriptRegularExpressionResult::InstantiateForceInlinedMembers()
