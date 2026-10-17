@@ -6,7 +6,7 @@
 
 # C2-S2 sub-batch 1: BigInt conversions, stringification, crash safety
 
-Status: `<pending>` (uncommitted; replace with the landed commit hash).
+Status: landed in `f7f396a88` (interpreter-verified; JIT gated at B4).
 Measured on Mac no-JIT (`-nonative`) with `-ESBigInt`; JIT evidence is not
 claimed (see B4 below). `ESBigInt` remains off by default. This sub-batch
 keeps and completes the interrupted implementer's slice; it does not add
