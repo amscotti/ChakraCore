@@ -122,8 +122,9 @@ behavior and were updated deliberately (not silently):
 - `defer3.js` / `defer3.baseline`: the four block-scope
   `var`/`const`/`let` combinations (lines 31–34) are SyntaxErrors.
 - `for-loop.js` / `for-loop.baseline`: the `{ for (var a …) … let a; }`
-  case is a block redeclaration SyntaxError; the separate for-head
-  `let v2`/`var v2` legacy case in `test3` is unchanged.
+  case is a block redeclaration SyntaxError. The separate for-head
+  `let v2`/`var v2` case in `test3` was later made conforming by the
+  statement-level batch (it is a parse error under the ForStatement rule).
 - `test/es6/blockscope-functionbinding.js`: Test 20 removed its direct
   `while`/`for`/`for-in`/`for-of`/`with` function declarations, which were
   non-conforming; its baseline output was already unchanged.

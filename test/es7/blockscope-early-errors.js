@@ -133,6 +133,34 @@ var tests = [
         }
     },
     {
+        name: "for/switch/catch statement-level early errors",
+        body() {
+            assertParseError("for (let x;;) { var x; }");
+            assertParseError("for (let x;;) var x;");
+            assertParseError("for (const x = 0; false;) { var x; }");
+            assertParseError("for (let x of []) { var x; }");
+            assertParseError("for (const x of []) var x;");
+            assertParseError("for (let x in {}) { var x; }");
+            assertParseError("for (let [x] of []) var x;");
+            assertParseError("async function f() { for await (let x of []) { var x; } }");
+            assertParseError("switch (0) { case 0: let x; var x; }");
+            assertParseError("switch (0) { case 0: let x; break; case 1: let x; }");
+            assertParseError("switch (0) { case 0: class x {} break; case 1: var x; }");
+            assertParseError("try {} catch (e) { let e; }");
+            assertParseError("try {} catch (e) { function e() {} }");
+            assertParseError("try {} catch ({ e }) { let e; }");
+            assertParseError("try {} catch ({ e = 1 }) { let e; }");
+            assertParseError("with ({}) function f() {}");
+            assertParseOK("for (let x; false;) { let x; }");
+            assertParseOK("for (var x; false;) { let x; }");
+            assertParseOK("for (let [x] = []; false;) { let x; }");
+            assertParseOK("switch (0) { case 0: let x; break; case 1: { let x; } }");
+            assertParseOK("try {} catch (e) { var e; }");
+            assertParseOK("try {} catch ([e]) { var y; }");
+            assertParseOK("with ({}) { function f() {} }");
+        }
+    },
+    {
         name: "script-level parse applies the same block early errors",
         body() {
             assert.throws(function () {

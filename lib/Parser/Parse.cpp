@@ -57,6 +57,8 @@ struct BlockInfoStack
     BlockInfoName *pnodeLexNames;           // names in this block's LexicallyDeclaredNames
     BlockNameMap *lexicalNameMap;           // duplicate lookup for pnodeLexNames
     BlockNameMap *varNameMap;               // function block only: pid -> var records (innermost source block)
+    BlockInfoName *catchParamNames;         // catch body block only: BoundNames of CatchParameter
+    bool catchParamsPending;                // catch scope waiting to attach names to its body block
     bool isSourceBlock;                     // syntactic Block : { StatementList } (not a for/switch/class scope)
 };
 
@@ -1983,6 +1985,26 @@ void Parser::FinishParseBlock(ParseNodeBlock *pnodeBlock, bool needScanRCurly)
         pnodeBlock->ichLim = this->GetScanner()->IchLimTok();
     }
 
+    if (m_currentBlockInfo->catchParamNames != nullptr)
+    {
+        // CatchParameter BoundNames may not also be LexicallyDeclaredNames
+        // of the directly nested body Block. For a simple BindingIdentifier,
+        // a var-only name remains legal; a destructuring pattern vs var is a
+        // separate residual (Node rejects it).
+        for (BlockInfoName *paramName = m_currentBlockInfo->catchParamNames;
+             paramName != nullptr;
+             paramName = paramName->next)
+        {
+            BlockInfoName *lexicalName = nullptr;
+            if (m_currentBlockInfo->lexicalNameMap != nullptr &&
+                m_currentBlockInfo->lexicalNameMap->TryGetValue(paramName->pid, &lexicalName))
+            {
+                Error(ERRRedeclaration);
+            }
+        }
+        m_currentBlockInfo->catchParamNames = nullptr;
+    }
+
     CheckBlockDeclarations();
 
     BindPidRefs<false>(GetCurrentBlockInfo(), m_nextBlockId - 1);
@@ -2221,6 +2243,14 @@ BlockInfoStack *Parser::PushBlockInfo(ParseNodeBlock * pnodeBlock)
     newBlockInfo->pnodeLexNames = nullptr;
     newBlockInfo->lexicalNameMap = nullptr;
     newBlockInfo->varNameMap = nullptr;
+    newBlockInfo->catchParamNames = nullptr;
+    newBlockInfo->catchParamsPending = false;
+    if (m_currentBlockInfo != nullptr && m_currentBlockInfo->catchParamsPending)
+    {
+        newBlockInfo->catchParamNames = m_currentBlockInfo->catchParamNames;
+        m_currentBlockInfo->catchParamNames = nullptr;
+        m_currentBlockInfo->catchParamsPending = false;
+    }
     newBlockInfo->isSourceBlock = false;
 
     if (pnodeBlock->blockType != PnodeBlockType::Regular)
@@ -10478,6 +10508,43 @@ ParseNodeCatch * Parser::ParseCatch()
             ChkCurTok(tkRParen, ERRnoRparen); //catch(id[:expr])
         }
 
+        if (hasParam)
+        {
+            BlockInfoName *catchParamNames = nullptr;
+            auto addCatchParam = [&](IdentPtr pid)
+            {
+                if (pid != nullptr)
+                {
+                    BlockInfoName *name = Anew(&m_nodeAllocator, BlockInfoName);
+                    name->pid = pid;
+                    name->isFunctionDecl = false;
+                    name->isSloppyFunctionDecl = false;
+                    name->sourceBlockId = 0;
+                    name->next = catchParamNames;
+                    catchParamNames = name;
+                }
+            };
+
+            if (buildAST && pnode != nullptr && pnode->GetParam()->nop == knopParamPattern)
+            {
+                MapBindIdentifier(pnode->GetParam()->AsParseNodeParamPattern()->pnode1,
+                    [&](ParseNodePtr bindNode)
+                    {
+                        addCatchParam(bindNode->AsParseNodeVar()->pid);
+                    });
+            }
+            else if (pidCatch != nullptr)
+            {
+                // Simple catch parameter, including the non-AST/deferred parse.
+                addCatchParam(pidCatch);
+            }
+
+            // Attach to the directly nested body block in PushBlockInfo; the
+            // Block rule itself then handles var-only conflicts separately.
+            m_currentBlockInfo->catchParamNames = catchParamNames;
+            m_currentBlockInfo->catchParamsPending = catchParamNames != nullptr;
+        }
+
         if (tkLCurly != m_token.tk)
         {
             Error(ERRnoLcurly);
@@ -10680,7 +10747,13 @@ LRestart:
                 Error(ERRLabelBeforeGeneratorDeclaration);
             }
         }
-        
+        else if (m_pstmtCur && m_pstmtCur->GetNop() == knopWith)
+        {
+            // A FunctionDeclaration is not a valid Statement for a with body
+            // (the labelled form is diagnosed above with its specific error).
+            Error(ERRsyntax);
+        }
+
         if (isAsyncMethod)
         {
             pnode->AsParseNodeFnc()->cbStringMin = iecpMin;
@@ -10796,6 +10869,11 @@ LRestart:
         ChkCurTok(tkLParen, ERRnoLparen);
 
         pnodeBlock = StartParseBlock<buildAST>(PnodeBlockType::Regular, ScopeType_Block);
+        // The for-head lexical names use the ForStatement early error against
+        // VarDeclaredNames of the body, which is the same lexical-vs-var
+        // relation as a source block. The head block stays current while the
+        // body is parsed, so its close checks the body's var names.
+        m_currentBlockInfo->isSourceBlock = true;
         if (buildAST)
         {
             PushFuncBlockScope(pnodeBlock, &ppnodeScopeSave, &ppnodeExprScopeSave);
@@ -11076,6 +11154,9 @@ LRestart:
         }
         PushStmt<buildAST>(&stmt, pnodeSwitch, knopSwitch, pLabelIdList);
         pnodeBlock = StartParseBlock<buildAST>(PnodeBlockType::Regular, ScopeType_Block);
+        // CaseBlock has the same LexicallyDeclaredNames/VarDeclaredNames
+        // early errors as a source block, including across case clauses.
+        m_currentBlockInfo->isSourceBlock = true;
 
         ParseNodeCase ** ppnodeCase = nullptr;
         if (buildAST)

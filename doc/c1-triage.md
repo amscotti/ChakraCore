@@ -741,6 +741,15 @@ sloppy duplicate block functions. The block-scope corpus moved 167/287 to
 287/287 with exactly 120 fail→pass and 0 pass→fail, including the three
 `in-statement-position-*` loop-body negatives. The remaining S14 stream is
 the separate for-head/switch/catch/eval/with rules recorded in the receipt.
+
+*(S14 sub-batch 2, 2026-10-17, [c2-s14-statement-early-errors.md](c2-s14-statement-early-errors.md):
+closed the measured statement-level early-error clusters: for-head
+lexical-vs-var 4/4, switch CaseBlock 59/59, catch-parameter-vs-body-lexical
+4/4, and unlabelled `with` function declaration 1/1. Corpora moved
+for 736→740, switch 129→188, try 355→359, with 169→170, 68 fail→pass and 0
+pass→fail; block-scope stays 287/287. Gates unchanged at 1976/2028. Residual
+S14: catch pattern/var edge cases, eval-introduced var conflicts and the
+broader defect bucket.)*
 The `test/LetConst` expectations (`letvar`, `defer3`, `for-loop`) that
 asserted the old non-conforming block `var`/`let` behavior were updated
 deliberately. Gates moved 1975/2027 → 1976/2028. No bytecode change; B4

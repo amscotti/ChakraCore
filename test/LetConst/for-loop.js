@@ -33,12 +33,13 @@ try { eval('function foo() { { for (var a = 123 in []) { } let a; } } foo();'); 
 function test3() {
     eval('');
 
+    var v2;
     v2;
     let v1;
     for (let v2; false;) {
-        // this var should get a slot before v1 via EnsureScopeSlot
-        // to ensure that the slot order is the same as the SlotArray
-        var v2 = 0;
+        // A same-name var here is a ForStatement early error; use a distinct
+        // name so the legacy slot-order coverage remains valid.
+        var v3 = 0;
     }
 }
 test3();
