@@ -168,6 +168,8 @@ namespace UnifiedRegex
         , unicodeFlagPresent(false)
         , dotAllFlagPresent(false)
         , caseInsensitiveFlagPresent(false)
+        , multilineFlagPresent(false)
+        , hasScopedModifiers(false)
         , positionAfterLastSurrogate(nullptr)
         , valueOfLastSurrogate(INVALID_CODEPOINT)
         , deferredIfNotUnicodeError(nullptr)
@@ -386,9 +388,9 @@ namespace UnifiedRegex
     template <typename P, const bool IsLiteral>
     Node* Parser<P, IsLiteral>::CreateSurrogatePairAtom(char16 lower, char16 upper)
     {
-        MatchLiteralNode * literalNode = Anew(this->ctAllocator, MatchLiteralNode, 0, 0);
-        MatchCharNode lowerNode(lower);
-        MatchCharNode upperNode(upper);
+        MatchLiteralNode * literalNode = Anew(this->ctAllocator, MatchLiteralNode, 0, 0, caseInsensitiveFlagPresent);
+        MatchCharNode lowerNode(lower, caseInsensitiveFlagPresent);
+        MatchCharNode upperNode(upper, caseInsensitiveFlagPresent);
         AccumLiteral(literalNode, &lowerNode);
         AccumLiteral(literalNode, &upperNode);
 
@@ -451,8 +453,8 @@ namespace UnifiedRegex
             Assert(majorCodePoint - minorCodePoint < 0x400u);
             Assert(lowerMinorCodeUnit == lowerMajorCodeUnit);
 
-            MatchCharNode* lowerCharNode = Anew(ctAllocator, MatchCharNode, lowerMinorCodeUnit);
-            MatchSetNode* setNode = Anew(ctAllocator, MatchSetNode, false, false);
+            MatchCharNode* lowerCharNode = Anew(ctAllocator, MatchCharNode, lowerMinorCodeUnit, caseInsensitiveFlagPresent);
+            MatchSetNode* setNode = Anew(ctAllocator, MatchSetNode, false, false, caseInsensitiveFlagPresent);
             setNode->set.SetRange(ctAllocator, (Char)upperMinorCodeUnit, (Char)upperMajorCodeUnit);
             ConcatNode* concatNode = Anew(ctAllocator, ConcatNode, lowerCharNode, Anew(ctAllocator, ConcatNode, setNode, nullptr));
 
@@ -472,8 +474,8 @@ namespace UnifiedRegex
             else if (minorCodePoint != minorBoundary - 0x400u) // Minor range isn't full
             {
                 Assert(minorBoundary - minorCodePoint < 0x400u);
-                MatchCharNode* lowerCharNode = Anew(ctAllocator, MatchCharNode, (Char)lowerMinorCodeUnit);
-                MatchSetNode* upperSetNode = Anew(ctAllocator, MatchSetNode, false);
+                MatchCharNode* lowerCharNode = Anew(ctAllocator, MatchCharNode, (Char)lowerMinorCodeUnit, caseInsensitiveFlagPresent);
+                MatchSetNode* upperSetNode = Anew(ctAllocator, MatchSetNode, false, true, caseInsensitiveFlagPresent);
                 upperSetNode->set.SetRange(ctAllocator, (Char)upperMinorCodeUnit, (Char)0xDFFFu);
                 prefixNode = Anew(ctAllocator, ConcatNode, lowerCharNode, Anew(ctAllocator, ConcatNode, upperSetNode, nullptr));
             }
@@ -491,8 +493,8 @@ namespace UnifiedRegex
             else if (majorBoundary + 0x3FFu != majorCodePoint) // Major range isn't full
             {
                 Assert(majorCodePoint - majorBoundary < 0x3FFu);
-                MatchCharNode* lowerCharNode = Anew(ctAllocator, MatchCharNode, (Char)lowerMajorCodeUnit);
-                MatchSetNode* upperSetNode = Anew(ctAllocator, MatchSetNode, false, false);
+                MatchCharNode* lowerCharNode = Anew(ctAllocator, MatchCharNode, (Char)lowerMajorCodeUnit, caseInsensitiveFlagPresent);
+                MatchSetNode* upperSetNode = Anew(ctAllocator, MatchSetNode, false, false, caseInsensitiveFlagPresent);
                 upperSetNode->set.SetRange(ctAllocator, (Char)0xDC00u, (Char)upperMajorCodeUnit);
                 suffixNode = Anew(ctAllocator, ConcatNode, lowerCharNode, Anew(ctAllocator, ConcatNode, upperSetNode, nullptr));
                 majorBoundary -= 0x400u;
@@ -526,17 +528,17 @@ namespace UnifiedRegex
                 if (singleFullRange)
                 {
                     // The lower part of the full range is simple a surrogate lower char
-                    lowerOfFullRange = Anew(ctAllocator, MatchCharNode, (Char)lowerMinorBoundary);
+                    lowerOfFullRange = Anew(ctAllocator, MatchCharNode, (Char)lowerMinorBoundary, caseInsensitiveFlagPresent);
                 }
                 else
                 {
 
                     Js::NumberUtilities::CodePointAsSurrogatePair(majorBoundary, &lowerMajorBoundary, &ignore);
-                    MatchSetNode* setNode = Anew(ctAllocator, MatchSetNode, false, false);
+                    MatchSetNode* setNode = Anew(ctAllocator, MatchSetNode, false, false, caseInsensitiveFlagPresent);
                     setNode->set.SetRange(ctAllocator, (Char)lowerMinorBoundary, (Char)lowerMajorBoundary);
                     lowerOfFullRange = setNode;
                 }
-                MatchSetNode* fullUpperRange = Anew(ctAllocator, MatchSetNode, false, false);
+                MatchSetNode* fullUpperRange = Anew(ctAllocator, MatchSetNode, false, false, caseInsensitiveFlagPresent);
                 fullUpperRange->set.SetRange(ctAllocator, (Char)0xDC00u, (Char)0xDFFFu);
 
                 // These are added in the following order [full] [prefix][suffix]
@@ -1017,7 +1019,7 @@ namespace UnifiedRegex
                 else
                 {
                     // Union chars into new set
-                    MatchSetNode* setNode = Anew(ctAllocator, MatchSetNode, false);
+                    MatchSetNode* setNode = Anew(ctAllocator, MatchSetNode, false, true, prevChar->isCaseInsensitive);
                     setNode->set.Set(ctAllocator, prevChar->cs[0]);
                     setNode->set.Set(ctAllocator, currChar->cs[0]);
                     return setNode;
@@ -1032,7 +1034,7 @@ namespace UnifiedRegex
                 else
                 {
                     // Union chars into new set
-                    MatchSetNode* setNode = Anew(ctAllocator, MatchSetNode, false);
+                    MatchSetNode* setNode = Anew(ctAllocator, MatchSetNode, false, true, prevChar->isCaseInsensitive);
                     setNode->set.Set(ctAllocator, prevChar->cs[0]) ;
                     setNode->set.UnionInPlace(ctAllocator, currSet->set);
                     return setNode;
@@ -1241,9 +1243,10 @@ namespace UnifiedRegex
 #endif
             Assert(deferredLiteralNode->offset < litbufNext);
             Assert(deferredLiteralNode->offset + deferredLiteralNode->length <= litbufNext);
+            deferredLiteralNode->isCaseInsensitive = caseInsensitiveFlagPresent;
             if (deferredLiteralNode->length == 1)
             {
-                node = Anew(ctAllocator, MatchCharNode, litbuf[deferredLiteralNode->offset]);
+                node = Anew(ctAllocator, MatchCharNode, litbuf[deferredLiteralNode->offset], caseInsensitiveFlagPresent);
                 if (deferredLiteralNode->offset + deferredLiteralNode->length == litbufNext)
                     // Reclaim last added character
                     litbufNext--;
@@ -1270,8 +1273,8 @@ namespace UnifiedRegex
         if (IsEndOfAlternative())
             return Anew(ctAllocator, SimpleNode, Node::Empty);
 
-        MatchCharNode deferredCharNode(0);
-        MatchLiteralNode deferredLiteralNode(0, 0);
+        MatchCharNode deferredCharNode(0, caseInsensitiveFlagPresent);
+        MatchLiteralNode deferredLiteralNode(0, 0, caseInsensitiveFlagPresent);
 
         // Maintain the invariants:
         //  - concat lists have two or more items
@@ -1421,7 +1424,7 @@ namespace UnifiedRegex
     Node* Parser<P, IsLiteral>::MirrorLiteral(const MatchLiteralNode* lit)
     {
         Assert(!lit->isEquivClass); // equiv classes are a compile-time expansion; parse literals are plain
-        MatchLiteralNode* reversed = Anew(ctAllocator, MatchLiteralNode, 0, 0);
+        MatchLiteralNode* reversed = Anew(ctAllocator, MatchLiteralNode, 0, 0, lit->isCaseInsensitive);
         if (unicodeFlagPresent)
         {
             // u-mode: the runtime window is reversed by code points (see
@@ -1436,15 +1439,15 @@ namespace UnifiedRegex
                 if (Js::NumberUtilities::IsSurrogateUpperPart(c) && i >= 2
                     && Js::NumberUtilities::IsSurrogateLowerPart(litbuf[lit->offset + i - 2]))
                 {
-                    MatchCharNode lower(litbuf[lit->offset + i - 2]);
-                    MatchCharNode upper(c);
+                    MatchCharNode lower(litbuf[lit->offset + i - 2], lit->isCaseInsensitive);
+                    MatchCharNode upper(c, lit->isCaseInsensitive);
                     AccumLiteral(reversed, &lower);
                     AccumLiteral(reversed, &upper);
                     i -= 2;
                 }
                 else
                 {
-                    MatchCharNode cNode(c);
+                    MatchCharNode cNode(c, lit->isCaseInsensitive);
                     AccumLiteral(reversed, &cNode);
                     i -= 1;
                 }
@@ -1454,7 +1457,7 @@ namespace UnifiedRegex
         {
             for (CharCount i = lit->length; i > 0; i--)
             {
-                MatchCharNode c(litbuf[lit->offset + i - 1]);
+                MatchCharNode c(litbuf[lit->offset + i - 1], lit->isCaseInsensitive);
                 AccumLiteral(reversed, &c);
             }
         }
@@ -1583,6 +1586,14 @@ namespace UnifiedRegex
                 group->body = MirrorLookbehindBody(group->body);
                 return group;
             }
+        case Node::Modifier:
+            {
+                // The scoped-modifier wrapper is transparent; mirror its
+                // body so characters inside the modified body reverse too.
+                ModifierNode* modifier = (ModifierNode*)body;
+                modifier->body = MirrorLookbehindBody(modifier->body);
+                return modifier;
+            }
         case Node::Assertion:
             {
                 // A lookahead inside the lookbehind: at runtime it must look
@@ -1618,6 +1629,80 @@ namespace UnifiedRegex
             // window.
             return body;
         }
+    }
+
+    template <typename P, const bool IsLiteral>
+    bool Parser<P, IsLiteral>::TryParseModifierGroup(RegexFlags& addFlags, RegexFlags& removeFlags)
+    {
+        // next points at the '?' that starts the group; the callers have
+        // already consumed the '('.
+        Assert(ECLookahead() == '?');
+        const EncodedChar first = ECLookahead(1);
+        if (first != 'i' && first != 'm' && first != 's' && first != '-')
+            return false;
+
+        // This is an ES2025 modifier group (or a malformed one): after the
+        // first flag character or '-', the grammar admits only i/m/s, one
+        // optional '-' and a terminating ':'. Anything else is a
+        // SyntaxError, never an ordinary group.
+        ECConsume(); // ?
+        auto toFlag = [](EncodedChar ec) -> RegexFlags {
+            switch (Chars<EncodedChar>::CTW(ec))
+            {
+            case 'i': return IgnoreCaseRegexFlag;
+            case 'm': return MultilineRegexFlag;
+            case 's': return DotAllRegexFlag;
+            default: return NoRegexFlags;
+            }
+        };
+
+        addFlags = NoRegexFlags;
+        removeFlags = NoRegexFlags;
+
+        while (true)
+        {
+            const RegexFlags flag = toFlag(ECLookahead());
+            if (flag == NoRegexFlags)
+                break;
+            if ((addFlags & flag) != 0)
+            {
+                Fail(JSERR_RegExpSyntax);
+                return false;
+            }
+            addFlags = (RegexFlags)(addFlags | flag);
+            ECConsume();
+        }
+
+        if (ECLookahead() == '-')
+        {
+            ECConsume();
+            while (true)
+            {
+                const RegexFlags flag = toFlag(ECLookahead());
+                if (flag == NoRegexFlags)
+                    break;
+                // A flag may appear in only one of the two sets.
+                if (((addFlags | removeFlags) & flag) != 0)
+                {
+                    Fail(JSERR_RegExpSyntax);
+                    return false;
+                }
+                removeFlags = (RegexFlags)(removeFlags | flag);
+                ECConsume();
+            }
+        }
+
+        // The arithmetic form requires at least one flag in total, and every
+        // form requires the ':' that starts the modified disjunction.
+        if ((addFlags | removeFlags) == NoRegexFlags || ECLookahead() != ':')
+        {
+            Fail(JSERR_RegExpSyntax);
+            return false;
+        }
+        ECConsume();
+
+        this->hasScopedModifiers = true;
+        return true;
     }
 
     template <typename P, const bool IsLiteral>
@@ -1811,7 +1896,17 @@ namespace UnifiedRegex
                     }
                     break;
                 default:
-                    numGroups++;
+                    {
+                        // ES2025 scoped modifiers: (?ims-ims:Disjunction).
+                        // Non-capturing, so no group number is consumed; the
+                        // common code below parses the body and ')'.
+                        RegexFlags addFlags;
+                        RegexFlags removeFlags;
+                        if (!TryParseModifierGroup(addFlags, removeFlags))
+                        {
+                            numGroups++;
+                        }
+                    }
                     break;
                 }
                 break;
@@ -1820,6 +1915,11 @@ namespace UnifiedRegex
                 break;
             }
             DisjunctionPass0(depth + 1);
+            // A surrogate at the end of a group cannot combine with a low
+            // surrogate after the group; clear the term-level tracker before
+            // consuming the close so pass 1 sees the real group boundary.
+            this->tempLocationOfSurrogatePair = nullptr;
+            this->codePointAtTempLocation = 0;
             ECMust(')', JSERR_RegExpNoParen);
             break;
         case '.':
@@ -1941,10 +2041,10 @@ namespace UnifiedRegex
             ECConsume();
             // No quantifier allowed. Inside a lookbehind the anchor must be
             // tested against the real input through the current frame.
-            return Anew(ctAllocator, SimpleNode, Node::BOL, lookbehindDepth > 0);
+            return Anew(ctAllocator, SimpleNode, Node::BOL, lookbehindDepth > 0, multilineFlagPresent);
         case '$':
             ECConsume();
-            return Anew(ctAllocator, SimpleNode, Node::EOL, lookbehindDepth > 0); // No quantifier allowed
+            return Anew(ctAllocator, SimpleNode, Node::EOL, lookbehindDepth > 0, multilineFlagPresent); // No quantifier allowed
         case '\\':
             ECConsume();
             if(SurrogatePairPass1(node, deferredCharNode, previousSurrogatePart))
@@ -2031,6 +2131,42 @@ namespace UnifiedRegex
                     }
                 default:
                     {
+                        RegexFlags addFlags;
+                        RegexFlags removeFlags;
+                        if (TryParseModifierGroup(addFlags, removeFlags))
+                        {
+                            // ES2025 scoped modifiers: apply UpdateModifiers
+                            // for the body only, then restore. u cannot be
+                            // modified; i affects parse-time folding, sets,
+                            // escapes and backreference matching while s
+                            // selects the dot set and m is recorded on the
+                            // ^/$ nodes.
+                            const bool savedCaseInsensitive = caseInsensitiveFlagPresent;
+                            const bool savedDotAll = dotAllFlagPresent;
+                            const bool savedMultiline = multilineFlagPresent;
+                            if ((addFlags & IgnoreCaseRegexFlag) != 0)
+                                caseInsensitiveFlagPresent = true;
+                            if ((addFlags & DotAllRegexFlag) != 0)
+                                dotAllFlagPresent = true;
+                            if ((addFlags & MultilineRegexFlag) != 0)
+                                multilineFlagPresent = true;
+                            if ((removeFlags & IgnoreCaseRegexFlag) != 0)
+                                caseInsensitiveFlagPresent = false;
+                            if ((removeFlags & DotAllRegexFlag) != 0)
+                                dotAllFlagPresent = false;
+                            if ((removeFlags & MultilineRegexFlag) != 0)
+                                multilineFlagPresent = false;
+
+                            node = DisjunctionPass1();
+                            Assert(ECLookahead() == ')');
+                            ECConsume(); // )
+                            node = Anew(ctAllocator, ModifierNode, node);
+
+                            caseInsensitiveFlagPresent = savedCaseInsensitive;
+                            dotAllFlagPresent = savedDotAll;
+                            multilineFlagPresent = savedMultiline;
+                            break; // fall-through for opt quantifier
+                        }
                         // ? not yet consumed
                         int thisGroupId = nextGroupId++;
                         node = DisjunctionPass1();
@@ -2385,7 +2521,7 @@ namespace UnifiedRegex
                 else
                 {
                     ECConsume(digits);
-                    node = Anew(ctAllocator, MatchGroupNode, n);
+                    node = Anew(ctAllocator, MatchGroupNode, n, caseInsensitiveFlagPresent);
                     return false; // not an assertion
                 }
             }
@@ -2460,7 +2596,7 @@ namespace UnifiedRegex
                     Fail(JSERR_RegExpSyntax);
                 if (numIds == 1)
                 {
-                    node = Anew(ctAllocator, MatchGroupNode, FindNamedGroup(name, nameLen));
+                    node = Anew(ctAllocator, MatchGroupNode, FindNamedGroup(name, nameLen), caseInsensitiveFlagPresent);
                 }
                 else
                 {
@@ -2471,7 +2607,7 @@ namespace UnifiedRegex
                         if (NamedGroupIsAt(this->namedGroups[i], name, nameLen))
                             groupIds[nextId++] = this->namedGroups[i].groupId;
                     }
-                    node = Anew(ctAllocator, MatchNamedGroupNode, numIds, groupIds);
+                    node = Anew(ctAllocator, MatchNamedGroupNode, numIds, groupIds, caseInsensitiveFlagPresent);
                 }
             }
             else
@@ -2490,10 +2626,10 @@ namespace UnifiedRegex
             switch (c)
             {
             case 'b':
-                node = Anew(ctAllocator, WordBoundaryNode, false, lookbehindDepth > 0);
+                node = Anew(ctAllocator, WordBoundaryNode, false, lookbehindDepth > 0, unicodeFlagPresent && caseInsensitiveFlagPresent);
                 return true; // Is an assertion
             case 'B':
-                node = Anew(ctAllocator, WordBoundaryNode, true, lookbehindDepth > 0);
+                node = Anew(ctAllocator, WordBoundaryNode, true, lookbehindDepth > 0, unicodeFlagPresent && caseInsensitiveFlagPresent);
                 return true; // Is an assertion
             case 'f':
                 c = '\f';
@@ -2512,7 +2648,7 @@ namespace UnifiedRegex
                 break; // fall-through for identity escape
             case 'd':
                 {
-                    MatchSetNode *setNode = Anew(ctAllocator, MatchSetNode, false, false);
+                    MatchSetNode *setNode = Anew(ctAllocator, MatchSetNode, false, false, caseInsensitiveFlagPresent);
                     standardChars->SetDigits(ctAllocator, setNode->set);
                     node = setNode;
                     return false; // not an assertion
@@ -2524,7 +2660,7 @@ namespace UnifiedRegex
                 }
             case 's':
                 {
-                    MatchSetNode *setNode = Anew(ctAllocator, MatchSetNode, false, false);
+                    MatchSetNode *setNode = Anew(ctAllocator, MatchSetNode, false, false, caseInsensitiveFlagPresent);
                     standardChars->SetWhitespace(ctAllocator, setNode->set);
                     node = setNode;
                     return false; // not an assertion
@@ -2536,7 +2672,7 @@ namespace UnifiedRegex
                 }
             case 'w':
                 {
-                    MatchSetNode *setNode = Anew(ctAllocator, MatchSetNode, false, false);
+                    MatchSetNode *setNode = Anew(ctAllocator, MatchSetNode, false, false, caseInsensitiveFlagPresent);
                     if (this->unicodeFlagPresent && this->caseInsensitiveFlagPresent)
                     {
                         standardChars->SetWordIUChars(ctAllocator, setNode->set);
@@ -2659,7 +2795,7 @@ namespace UnifiedRegex
                         }
                         else
                         {
-                            equivNode[indexForNextNode] = Anew(ctAllocator, MatchCharNode, (Char)equivClass[i]);
+                            equivNode[indexForNextNode] = Anew(ctAllocator, MatchCharNode, (Char)equivClass[i], caseInsensitiveFlagPresent);
                         }
                         indexForNextNode ++;
                     }
@@ -2918,8 +3054,8 @@ namespace UnifiedRegex
 
         CharSet<codepoint_t> codePointSet;
 
-        MatchSetNode deferredSetNode(false, false);
-        MatchCharNode deferredCharNode(0);
+        MatchSetNode deferredSetNode(false, false, caseInsensitiveFlagPresent);
+        MatchCharNode deferredCharNode(0, caseInsensitiveFlagPresent);
 
         bool isNegation = false;
 
@@ -3075,7 +3211,7 @@ namespace UnifiedRegex
         if (!unicodeFlagPresent)
         {
             Assert(codePointSet.SimpleCharCount() == codePointSet.Count());
-            MatchSetNode *simpleToReturn = Anew(ctAllocator, MatchSetNode, isNegation);
+            MatchSetNode *simpleToReturn = Anew(ctAllocator, MatchSetNode, isNegation, true, caseInsensitiveFlagPresent);
             codePointSet.CloneSimpleCharsTo(ctAllocator, simpleToReturn->set);
             return simpleToReturn;
         }
@@ -3085,7 +3221,7 @@ namespace UnifiedRegex
 
         if (codePointSet.IsEmpty())
         {
-            return Anew(ctAllocator, MatchSetNode, false, false);
+            return Anew(ctAllocator, MatchSetNode, false, false, caseInsensitiveFlagPresent);
         }
 
         Node* prefixNode = nullptr;
@@ -3102,7 +3238,7 @@ namespace UnifiedRegex
 
             if (singleton < 0x10000)
             {
-                toReturn = Anew(ctAllocator, MatchCharNode, (char16)singleton);
+                toReturn = Anew(ctAllocator, MatchCharNode, (char16)singleton, caseInsensitiveFlagPresent);
             }
             else
             {
@@ -3164,7 +3300,7 @@ namespace UnifiedRegex
         uint simpleCharsCount = toUseForTranslation->SimpleCharCount();
         if (totalCodePointsCount == simpleCharsCount)
         {
-            MatchSetNode *simpleToReturn = Anew(ctAllocator, MatchSetNode, isNegation);
+            MatchSetNode *simpleToReturn = Anew(ctAllocator, MatchSetNode, isNegation, true, caseInsensitiveFlagPresent);
             toUseForTranslation->CloneSimpleCharsTo(ctAllocator, simpleToReturn->set);
             return simpleToReturn;
         }
@@ -3173,16 +3309,16 @@ namespace UnifiedRegex
         {
             if (!toUseForTranslation->ContainSurrogateCodeUnits())
             {
-                MatchSetNode *node = Anew(ctAllocator, MatchSetNode, false, false);
+                MatchSetNode *node = Anew(ctAllocator, MatchSetNode, false, false, caseInsensitiveFlagPresent);
                 toUseForTranslation->CloneSimpleCharsTo(ctAllocator, node->set);
                 prefixNode = node;
             }
             else
             {
-                MatchSetNode *node = Anew(ctAllocator, MatchSetNode, false, false);
+                MatchSetNode *node = Anew(ctAllocator, MatchSetNode, false, false, caseInsensitiveFlagPresent);
                 toUseForTranslation->CloneNonSurrogateCodeUnitsTo(ctAllocator, node->set);
                 prefixNode = node;
-                node = Anew(ctAllocator, MatchSetNode, false, false);
+                node = Anew(ctAllocator, MatchSetNode, false, false, caseInsensitiveFlagPresent);
                 toUseForTranslation->CloneSurrogateCodeUnitsTo(ctAllocator, node->set);
                 suffixNode = node;
             }
@@ -3431,10 +3567,24 @@ namespace UnifiedRegex
                 standardChars->SetNonWhitespace(ctAllocator, deferredSetNode->set);
                 return deferredSetNode;
             case 'w':
-                standardChars->SetWordChars(ctAllocator, deferredSetNode->set);
+                if (unicodeFlagPresent && caseInsensitiveFlagPresent)
+                {
+                    standardChars->SetWordIUChars(ctAllocator, deferredSetNode->set);
+                }
+                else
+                {
+                    standardChars->SetWordChars(ctAllocator, deferredSetNode->set);
+                }
                 return deferredSetNode;
             case 'W':
-                standardChars->SetNonWordChars(ctAllocator, deferredSetNode->set);
+                if (unicodeFlagPresent && caseInsensitiveFlagPresent)
+                {
+                    standardChars->SetNonWordIUChars(ctAllocator, deferredSetNode->set);
+                }
+                else
+                {
+                    standardChars->SetNonWordChars(ctAllocator, deferredSetNode->set);
+                }
                 return deferredSetNode;
             case 'c':
                 if (standardEncodedChars->IsWord(ECLookahead())) // terminating 0 is not a word character
@@ -3655,6 +3805,7 @@ namespace UnifiedRegex
             this->unicodeFlagPresent = (flags & UnifiedRegex::UnicodeRegexFlag) == UnifiedRegex::UnicodeRegexFlag;
             this->caseInsensitiveFlagPresent = (flags & UnifiedRegex::IgnoreCaseRegexFlag) == UnifiedRegex::IgnoreCaseRegexFlag;
             this->dotAllFlagPresent = (flags & UnifiedRegex::DotAllRegexFlag) == UnifiedRegex::DotAllRegexFlag;
+            this->multilineFlagPresent = (flags & UnifiedRegex::MultilineRegexFlag) == UnifiedRegex::MultilineRegexFlag;
             Assert(!this->unicodeFlagPresent || scriptContext->GetConfig()->IsES6UnicodeExtensionsEnabled());
             Assert(!this->dotAllFlagPresent || scriptContext->GetConfig()->IsES2018RegExDotAllEnabled());
         }
@@ -3663,6 +3814,7 @@ namespace UnifiedRegex
             this->unicodeFlagPresent = false;
             this->caseInsensitiveFlagPresent = false;
             this->dotAllFlagPresent = false;
+            this->multilineFlagPresent = false;
         }
 
         // If this HR has been set, that means we have an earlier failure than the one caught above.
@@ -3721,6 +3873,7 @@ namespace UnifiedRegex
         this->unicodeFlagPresent = (flags & UnifiedRegex::UnicodeRegexFlag) == UnifiedRegex::UnicodeRegexFlag;
         this->caseInsensitiveFlagPresent = (flags & UnifiedRegex::IgnoreCaseRegexFlag) == UnifiedRegex::IgnoreCaseRegexFlag;
         this->dotAllFlagPresent = (flags & UnifiedRegex::DotAllRegexFlag) == UnifiedRegex::DotAllRegexFlag;
+        this->multilineFlagPresent = (flags & UnifiedRegex::MultilineRegexFlag) == UnifiedRegex::MultilineRegexFlag;
         Assert(!this->unicodeFlagPresent || scriptContext->GetConfig()->IsES6UnicodeExtensionsEnabled());
 
         // If this HR has been set, that means we have an earlier failure than the one caught above.
@@ -3781,6 +3934,7 @@ namespace UnifiedRegex
         this->unicodeFlagPresent = (dummyFlags & UnifiedRegex::UnicodeRegexFlag) == UnifiedRegex::UnicodeRegexFlag;
         this->caseInsensitiveFlagPresent = (dummyFlags & UnifiedRegex::IgnoreCaseRegexFlag) == UnifiedRegex::IgnoreCaseRegexFlag;
         this->dotAllFlagPresent = (dummyFlags & UnifiedRegex::DotAllRegexFlag) == UnifiedRegex::DotAllRegexFlag;
+        this->multilineFlagPresent = (dummyFlags & UnifiedRegex::MultilineRegexFlag) == UnifiedRegex::MultilineRegexFlag;
         outTotalEncodedChars = Chars<EncodedChar>::OSB(next, input);
         outTotalChars = Pos();
 
@@ -3921,6 +4075,7 @@ namespace UnifiedRegex
             program->numGroups = static_cast<uint16>(nextGroupId);
         }
 
+        program->hasScopedModifiers = this->hasScopedModifiers;
         CaptureGroupNames(recycler, program);
 
         // Remaining to set during compilation: litbuf, litbufLen, numLoops, insts, instsLen, entryPointLabel
@@ -3932,16 +4087,16 @@ namespace UnifiedRegex
         Node* nodeToReturn = nullptr;
         if (this->scriptContext->GetConfig()->IsES6UnicodeExtensionsEnabled() && this->unicodeFlagPresent)
         {
-            MatchSetNode *lowerRangeNode = Anew(ctAllocator, MatchSetNode, false, false);
+            MatchSetNode *lowerRangeNode = Anew(ctAllocator, MatchSetNode, false, false, caseInsensitiveFlagPresent);
             lowerRangeNode->set.SetRange(ctAllocator, (Char)0xD800, (Char)0xDBFF);
-            MatchSetNode *upperRangeNode = Anew(ctAllocator, MatchSetNode, false, false);
+            MatchSetNode *upperRangeNode = Anew(ctAllocator, MatchSetNode, false, false, caseInsensitiveFlagPresent);
             upperRangeNode->set.SetRange(ctAllocator, (Char)0xDC00, (Char)0xDFFF);
 
             ConcatNode* surrogateRangePairNode = Anew(ctAllocator, ConcatNode, lowerRangeNode, Anew(ctAllocator, ConcatNode, upperRangeNode, nullptr));
 
             // The MatchSet node will be split into [0-D7FFDC00-FFFF] (minus special characters like newline, whitespace, etc.) as a prefix, and a suffix of [D800-DBFF]
             // i.e. The MatchSet node can be with [0-D7FFDC00-FFFF] (minus special characters like newline, whitespace, etc.) OR [D800-DBFF]
-            MatchSetNode* partialPrefixSetNode = Anew(ctAllocator, MatchSetNode, false, false);
+            MatchSetNode* partialPrefixSetNode = Anew(ctAllocator, MatchSetNode, false, false, caseInsensitiveFlagPresent);
             switch (cc)
             {
             case '.':
@@ -3976,7 +4131,7 @@ namespace UnifiedRegex
 
             partialPrefixSetNode->set.SubtractRange(ctAllocator, (Char)0xD800u, (Char)0xDBFFu);
 
-            MatchSetNode* partialSuffixSetNode = Anew(ctAllocator, MatchSetNode, false, false);
+            MatchSetNode* partialSuffixSetNode = Anew(ctAllocator, MatchSetNode, false, false, caseInsensitiveFlagPresent);
             partialSuffixSetNode->set.SetRange(ctAllocator, (Char)0xD800u, (Char)0xDBFFu);
 
             AltNode* altNode = Anew(ctAllocator, AltNode, partialPrefixSetNode, Anew(ctAllocator, AltNode, surrogateRangePairNode, Anew(ctAllocator, AltNode, partialSuffixSetNode, nullptr)));
@@ -3984,7 +4139,7 @@ namespace UnifiedRegex
         }
         else
         {
-            MatchSetNode* setNode = Anew(ctAllocator, MatchSetNode, false, false);
+            MatchSetNode* setNode = Anew(ctAllocator, MatchSetNode, false, false, caseInsensitiveFlagPresent);
             switch (cc)
             {
             case '.':

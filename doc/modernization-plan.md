@@ -8,13 +8,15 @@
 > policy, triage and shortlist are in [c1-triage.md](c1-triage.md);
 > qualification is conditional on explicit host-reported negative phase
 > before any full result is certified. **C2 is in progress** — batches
-> S4, S5, S10, S11, S7-matchAll, the four S9 sub-batches (named
-> groups, `d` flag/indices, duplicate named groups, lookbehind) and the
+> S4, S5, S10, S11, S7-matchAll, the five S9 sub-batches (named
+> groups, `d` flag/indices, duplicate named groups, lookbehind,
+> ES2025 modifiers) and the
 > S14 block-scope and statement-level early-error clusters are closed on
 > Mac no-JIT (JIT claims gated on B4), receipts in [c2-s4.md](c2-s4.md),
 > [c2-s5.md](c2-s5.md), [c2-s10.md](c2-s10.md),
 > [c2-s11.md](c2-s11.md), [c2-s7-matchall.md](c2-s7-matchall.md),
 > [c2-s9-namedgroups.md](c2-s9-namedgroups.md),
+> [c2-s9-modifiers.md](c2-s9-modifiers.md),
 > [c2-s14-blockscope.md](c2-s14-blockscope.md),
 > [c2-s14-statement-early-errors.md](c2-s14-statement-early-errors.md) and
 > [c2-flag-audits.md](c2-flag-audits.md). Engine/legacy-build references use baseline
@@ -50,7 +52,7 @@ handling have been validated before its results are used as a completion gate.
 | B6 | Windows feasibility and rollout; later target extensions | Stable build contracts | Separate expansion |
 | Z1 | One useful mixed C++/Zig unit behind a tested C ABI | B3; B4 if the unit ships on Linux | Optional pilot |
 | C1 | Qualified ES2025 test policy and triaged failures | Stable Mac build at B3 | Recorded (CONDITIONAL) |
-| C2 | Bounded compatibility batches and partial releases | C1; B4 before JIT-wide enablement | In progress (S4/S5/S10/S11/S7-matchAll/S9 named-groups + d-flag + duplicate named groups + lookbehind/S14 block-scope + statement-level early errors closed on Mac no-JIT; S13 symbols-as-weak-collection-keys landed; JIT claims gated on B4) |
+| C2 | Bounded compatibility batches and partial releases | C1; B4 before JIT-wide enablement | In progress (S4/S5/S10/S11/S7-matchAll/S9 named-groups + d-flag + duplicate named groups + lookbehind + ES2025 modifiers/S14 block-scope + statement-level early errors closed on Mac no-JIT; S13 symbols-as-weak-collection-keys landed; JIT claims gated on B4) |
 | C3 | Larger runtime/object-model feature projects | C1 and their feature prerequisites | Separate projects |
 | C4 | Verified full ES2025 core-language result | Required C2/C3 work and qualified runner | Long-term objective |
 
@@ -587,13 +589,14 @@ Decision/rollback points:
 - [ ] C4: Published qualified ES2025 result on the claimed default configurations.
 
 **C2 batch status:** S4, S5, all of S10 (the copy-by-change half and
-the Set-methods half), all of S11, S7, the four S9 sub-batches
+the Set-methods half), all of S11, S7, the five S9 sub-batches
 (named-groups core, `d` flag/indices, duplicate named groups,
-lookbehind) and the S14 block-scope + statement-level early-error
+lookbehind, ES2025 modifiers) and the S14 block-scope + statement-level early-error
 clusters are closed on Mac no-JIT
 ([c2-s4.md](c2-s4.md), [c2-s5.md](c2-s5.md), [c2-s11.md](c2-s11.md),
 [c2-s10.md](c2-s10.md), [c2-s7-matchall.md](c2-s7-matchall.md),
 [c2-s9-namedgroups.md](c2-s9-namedgroups.md),
+[c2-s9-modifiers.md](c2-s9-modifiers.md),
 [c2-s14-blockscope.md](c2-s14-blockscope.md),
 [c2-s14-statement-early-errors.md](c2-s14-statement-early-errors.md)). JIT
 claims still wait on B4. S14 fixed the `Block : { StatementList }`
@@ -664,8 +667,18 @@ or PropertyId change; same receipt, "Sub-batch 4"): the whole
 default / 124/124 under symbols (residue only the 6 long-classified
 symbols-gated scenarios), match-indices+duplicate-names 30/30, joins vs
 C1 96/0, 102/0, 28/0, resym universe 4,113/2,086 with 260/0 vs C1
-(36/0 incremental), gates moved to 1974/2026. The remaining S9 work
-(`v` flag after S3, modifiers) stays C2-per-batch.
+(36/0 incremental), gates moved to 1974/2026. S9 sub-batch 5 landed
+ES2025 scoped modifiers unconditionally (`(?ims-ims:Disjunction)`,
+non-capturing, nested add/remove with the top-level flags as the base;
+per-node effective i/s/m state drives parsing and the instruction
+compiler, including frame-aware anchors and word boundaries inside
+lookbehinds; whole-program special cases are disabled for modified
+patterns; no JS-bytecode or PropertyId change; receipt
+[c2-s9-modifiers.md](c2-s9-modifiers.md)): the scoped corpus moved
+166/140 to 298/8 with 132 fail→pass and 0 pass→fail, the 8 residue
+being property escapes deferred to S3, and the focused test/gates
+moved to 1978/2030. The remaining S9 work (`v` flag after S3) stays
+C2-per-batch.
 S2 sub-batch 1 then landed the BigInt conversion/stringification/crash
 slice on Mac no-JIT (`BigInt(...)`/ToBigInt, multi-digit NumberToBigInt,
 StringToBigInt, `typeof "bigint"`, `toString` radix 2–36, `valueOf`,

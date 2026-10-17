@@ -1411,9 +1411,11 @@ namespace UnifiedRegex
     // ----------------------------------------------------------------------
 
     template <>
-    WordBoundaryTestInst<true>::WordBoundaryTestInst() : Inst(InstTag::NegatedWordBoundaryTest) {}
+    WordBoundaryTestInst<true>::WordBoundaryTestInst(bool isWordIU)
+        : Inst(InstTag::NegatedWordBoundaryTest), isWordIU(isWordIU) {}
     template <>
-    WordBoundaryTestInst<false>::WordBoundaryTestInst() : Inst(InstTag::WordBoundaryTest) {}
+    WordBoundaryTestInst<false>::WordBoundaryTestInst(bool isWordIU)
+        : Inst(InstTag::WordBoundaryTest), isWordIU(isWordIU) {}
 
     template <bool isNegation>
     inline bool WordBoundaryTestInst<isNegation>::Exec(REGEX_INST_EXEC_PARAMETERS) const
@@ -1421,8 +1423,10 @@ namespace UnifiedRegex
 #if ENABLE_REGEX_CONFIG_OPTIONS
         matcher.CompStats();
 #endif
-        const bool prev = inputOffset > 0 && matcher.standardChars->IsWord(input[inputOffset - 1]);
-        const bool curr = inputOffset < inputLength && matcher.standardChars->IsWord(input[inputOffset]);
+        const bool prev = inputOffset > 0 &&
+            (this->isWordIU ? matcher.standardChars->IsWordIU(input[inputOffset - 1]) : matcher.standardChars->IsWord(input[inputOffset - 1]));
+        const bool curr = inputOffset < inputLength &&
+            (this->isWordIU ? matcher.standardChars->IsWordIU(input[inputOffset]) : matcher.standardChars->IsWord(input[inputOffset]));
         if (isNegation == (prev != curr))
         {
             return matcher.Fail(FAIL_PARAMETERS);
@@ -2691,7 +2695,7 @@ namespace UnifiedRegex
     // backreference must compare against. The group text itself is read from
     // realInput (in the top frame this is the same buffer, so behavior is
     // unchanged).
-    inline bool Matcher::MatchBackrefText(const Char* const input, const CharCount inputLength, CharCount& inputOffset, const GroupInfo* const info)
+    inline bool Matcher::MatchBackrefText(const Char* const input, const CharCount inputLength, CharCount& inputOffset, const GroupInfo* const info, bool isCaseInsensitive)
     {
         Assert(!info->IsUndefined() && info->length > 0);
         if (info->length > inputLength - inputOffset)
@@ -2703,7 +2707,7 @@ namespace UnifiedRegex
         const CharCount groupEndOffset = groupOffset + info->length;
         const Char* const groupText = this->realInput != nullptr ? this->realInput : input;
 
-        bool isCaseInsensitiveMatch = (program->flags & IgnoreCaseRegexFlag) != 0;
+        bool isCaseInsensitiveMatch = isCaseInsensitive;
         bool isCodePointList = (program->flags & UnicodeRegexFlag) != 0;
 
         if (!frameReversed)
@@ -3007,7 +3011,7 @@ namespace UnifiedRegex
         GroupInfo* const info = matcher.GroupIdToGroupInfo(groupId);
         if (!info->IsUndefined() && info->length > 0)
         {
-            if (!matcher.MatchBackrefText(input, inputLength, inputOffset, info))
+            if (!matcher.MatchBackrefText(input, inputLength, inputOffset, info, isCaseInsensitive))
             {
                 return matcher.Fail(FAIL_PARAMETERS);
             }
@@ -3037,7 +3041,7 @@ namespace UnifiedRegex
         }
         if (info != 0 && info->length > 0)
         {
-            if (!matcher.MatchBackrefText(input, inputLength, inputOffset, info))
+            if (!matcher.MatchBackrefText(input, inputLength, inputOffset, info, isCaseInsensitive))
             {
                 return matcher.Fail(FAIL_PARAMETERS);
             }
@@ -4976,8 +4980,7 @@ namespace UnifiedRegex
 #endif
         const CharCount realPos = matcher.FrameOffsetToReal(inputOffset);
         const Char* const realInput = matcher.realInput;
-        if (realPos > 0 &&
-            ((matcher.program->flags & MultilineRegexFlag) == 0 || !matcher.standardChars->IsNewline(realInput[realPos - 1])))
+        if (realPos > 0 && (!this->isMultiline || !matcher.standardChars->IsNewline(realInput[realPos - 1])))
         {
             return matcher.Fail(FAIL_PARAMETERS);
         }
@@ -5002,8 +5005,7 @@ namespace UnifiedRegex
 #endif
         const CharCount realPos = matcher.FrameOffsetToReal(inputOffset);
         const Char* const realInput = matcher.realInput;
-        if (realPos < matcher.realLength &&
-            ((matcher.program->flags & MultilineRegexFlag) == 0 || !matcher.standardChars->IsNewline(realInput[realPos])))
+        if (realPos < matcher.realLength && (!this->isMultiline || !matcher.standardChars->IsNewline(realInput[realPos])))
         {
             return matcher.Fail(FAIL_PARAMETERS);
         }
@@ -5022,8 +5024,9 @@ namespace UnifiedRegex
 #endif
 
     template <bool isNegation>
-    FrameWordBoundaryTestInst<isNegation>::FrameWordBoundaryTestInst()
+    FrameWordBoundaryTestInst<isNegation>::FrameWordBoundaryTestInst(bool isWordIU)
         : Inst(isNegation ? InstTag::FrameNegatedWordBoundaryTest : InstTag::FrameWordBoundaryTest)
+        , isWordIU(isWordIU)
     {
     }
 
@@ -5035,8 +5038,10 @@ namespace UnifiedRegex
 #endif
         const CharCount realPos = matcher.FrameOffsetToReal(inputOffset);
         const Char* const realInput = matcher.realInput;
-        const bool isWordPrev = realPos > 0 && matcher.standardChars->IsWord(realInput[realPos - 1]);
-        const bool isWordNext = realPos < matcher.realLength && matcher.standardChars->IsWord(realInput[realPos]);
+        const bool isWordPrev = realPos > 0 &&
+            (this->isWordIU ? matcher.standardChars->IsWordIU(realInput[realPos - 1]) : matcher.standardChars->IsWord(realInput[realPos - 1]));
+        const bool isWordNext = realPos < matcher.realLength &&
+            (this->isWordIU ? matcher.standardChars->IsWordIU(realInput[realPos]) : matcher.standardChars->IsWord(realInput[realPos]));
         const bool isBoundary = isWordPrev != isWordNext;
         if (isBoundary == isNegation)
         {
@@ -6295,6 +6300,7 @@ namespace UnifiedRegex
         : source(nullptr)
         , sourceLen(0)
         , flags(flags)
+        , hasScopedModifiers(false)
         , numGroups(0)
         , numLoops(0)
         , groupNameEntries(nullptr)

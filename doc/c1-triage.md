@@ -660,7 +660,21 @@ frame-aware; group spans stay in real coordinates). The entire
 and 124/124 under `-ES6RegExSymbols`; match-indices+duplicate-names
 30/30; joins vs C1 96/0, 102/0, 28/0; resym universe 4,113/2,086 with
 260/0 vs C1 (36/0 incremental). Gates moved 1973/2025 → 1974/2026.
-Remaining S9 work: `v` flag (needs S3) and the modifiers remainder.)*
+Sub-batch 5 — ES2025 scoped modifiers — landed 2026-10-17 on Mac no-JIT
+([c2-s9-modifiers.md](c2-s9-modifiers.md)): `(?ims-ims:Disjunction)`
+parses as a non-capturing group in both passes, nested add/remove
+update the current state with the top-level flags as the base, the
+parser saves/restores effective `i`/`s`/`m` around the body, and the
+instruction compiler uses per-node multiline/case state (including
+frame-aware `^`/`$`/`\b` inside lookbehinds); whole-program special
+cases are disabled for modified patterns. The scoped corpus
+(`RegExp/regexp-modifiers/**` plus `language/literals/regexp/
+*modifiers*.js`, 306 scenarios) moved 166/140 → 298/8 with exactly
+132 fail→pass and 0 pass→fail; all 154 top-level negative modifier
+tests stay green (and so do all 166 negative scenarios inside the
+scoped corpus), and the 8 residue are `\p{...}` property escapes
+deferred to S3. Gates moved 1977/2029 → 1978/2030. Remaining S9 work: the `v`
+flag, which needs S3.)*
 
 **S10. Set methods + copy-by-change family.** Repro: `python3 tools/test262/run.py --binary zig-out/bin/ch --output out/test262-c1-setcopy 'test/built-ins/Set/**/*.js' 'test/built-ins/Array/**/*.js' 'test/built-ins/TypedArray/**/*.js'`.
 *Status: both halves are closed on Mac no-JIT — see

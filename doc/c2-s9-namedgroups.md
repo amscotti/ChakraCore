@@ -15,7 +15,9 @@ non-participating groups, property order = textual group order), and
 the ES5 legacy fast path and the `@@replace` symbol path. JIT evidence is
 not claimed; see B4 below. Deferred sub-batches: lookbehind and the `v` flag. `d` flag/`indices`
 landed as sub-batch 2, and duplicate named groups (ES2025) landed as
-sub-batch 3. Both are recorded in c1-triage §S9.
+sub-batch 3. Both are recorded in c1-triage §S9. ES2025 scoped modifiers
+landed as sub-batch 5 in [c2-s9-modifiers.md](c2-s9-modifiers.md); only the
+`v` flag (with property escapes, S3) remains deferred.
 
 ## What landed
 

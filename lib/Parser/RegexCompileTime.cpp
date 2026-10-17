@@ -388,7 +388,7 @@ namespace UnifiedRegex
 
     bool SimpleNode::IsRefiningAssertion(Compiler& compiler)
     {
-        return tag == EOL && (compiler.program->flags & MultilineRegexFlag) != 0;
+        return tag == EOL && isMultiline;
     }
 
     void SimpleNode::AnnotatePass0(Compiler& compiler)
@@ -420,7 +420,7 @@ namespace UnifiedRegex
             break;
         case EOL:
             features = HasEOL;
-            if ((compiler.program->flags & MultilineRegexFlag) != 0)
+            if (isMultiline)
                 firstSet = compiler.standardChars->GetNewlineSet();
             else
                 firstSet = compiler.standardChars->GetEmptySet();
@@ -447,7 +447,7 @@ namespace UnifiedRegex
 
         hasInitialHardFailBOI = ((tag == BOL) &&
             prevConsumes.IsExact(0) &&
-            (compiler.program->flags & MultilineRegexFlag) == 0 &&
+            !isMultiline &&
             isAtLeastOnce &&
             isNotNegated &&
             isPrevWillNotRegress);
@@ -502,10 +502,10 @@ namespace UnifiedRegex
                     // Anchors inside a lookbehind must test the real input
                     // position (the frame buffer may be reversed and/or
                     // offset), so the multiline flag is consulted at runtime.
-                    EMIT(compiler, FrameBOLTestInst);
+                    EMIT(compiler, FrameBOLTestInst, isMultiline);
                     break;
                 }
-                if ((compiler.program->flags & MultilineRegexFlag) != 0)
+                if (isMultiline)
                 {
                     //
                     // Compilation scheme:
@@ -552,10 +552,10 @@ namespace UnifiedRegex
                 if (isFrameAware)
                 {
                     // See BOL above.
-                    EMIT(compiler, FrameEOLTestInst);
+                    EMIT(compiler, FrameEOLTestInst, isMultiline);
                     break;
                 }
-                if ((compiler.program->flags & MultilineRegexFlag) != 0)
+                if (isMultiline)
                 {
                     //
                     // Compilation scheme:
@@ -692,7 +692,7 @@ namespace UnifiedRegex
         isAtLeastOnce = parentAtLeastOnce;
         isNotSpeculative = parentNotSpeculative;
         isNotNegated = parentNotNegated;
-        if (isNegation)
+        if (isNegation || isWordIU)
             firstSet = compiler.standardChars->GetFullSet();
         else
         {
@@ -769,21 +769,21 @@ namespace UnifiedRegex
             // the frame's buffer altogether.
             if (isNegation)
             {
-                EMIT(compiler, FrameWordBoundaryTestInst<true>);
+                EMIT(compiler, FrameWordBoundaryTestInst<true>, isWordIU);
             }
             else
             {
-                EMIT(compiler, FrameWordBoundaryTestInst<false>);
+                EMIT(compiler, FrameWordBoundaryTestInst<false>, isWordIU);
             }
             return;
         }
         if (isNegation)
         {
-            EMIT(compiler, WordBoundaryTestInst<true>);
+            EMIT(compiler, WordBoundaryTestInst<true>, isWordIU);
         }
         else
         {
-            EMIT(compiler, WordBoundaryTestInst<false>);
+            EMIT(compiler, WordBoundaryTestInst<false>, isWordIU);
 
         }
     }
@@ -848,7 +848,7 @@ namespace UnifiedRegex
     CharCount MatchLiteralNode::TransferPass0(Compiler& compiler, const Char* litbuf)
     {
         Assert(length > 1);
-        if ((compiler.program->flags & IgnoreCaseRegexFlag) != 0
+        if (isCaseInsensitive
             && !compiler.standardChars->IsTrivialString(compiler.program->GetCaseMappingSource(), litbuf + offset, length))
         {
             // We'll need to expand each character of literal into its equivalence class
@@ -864,7 +864,7 @@ namespace UnifiedRegex
         CharCount nextLit = compiler.program->rep.insts.litbufLen;
         if (isEquivClass)
         {
-            Assert((compiler.program->flags & IgnoreCaseRegexFlag) != 0);
+            Assert(isCaseInsensitive);
             // Expand literal according to character equivalence classes
             for (CharCount i = 0; i < length; i++)
             {
@@ -1230,7 +1230,7 @@ namespace UnifiedRegex
 
     CharCount MatchCharNode::TransferPass0(Compiler& compiler, const Char* litbuf)
     {
-        if ((compiler.program->flags & IgnoreCaseRegexFlag) != 0)
+        if (isCaseInsensitive)
         {
             // To ensure initialization, we first default-initialize the
             // whole array with a constant, and then individually set it
@@ -1559,7 +1559,7 @@ namespace UnifiedRegex
 
     void MatchSetNode::TransferPass1(Compiler& compiler, const Char* litbuf)
     {
-        if ((compiler.program->flags & IgnoreCaseRegexFlag) != 0 && this->needsEquivClass)
+        if (this->isCaseInsensitive && this->needsEquivClass)
         {
             // If the set is negated, then at this point we could:
             //  (1) take each char in the set to its equivalence class and complement it
@@ -1988,8 +1988,8 @@ namespace UnifiedRegex
             nodes[item]->AnnotatePass3(compiler, accumConsumes, innerFollow, accumFollowIrrefutable, accumFollowEOL);
             if (!nodes[item]->isThisIrrefutable)
                 accumFollowIrrefutable = false;
-            if (!nodes[item]->IsEmptyOnly() && (compiler.program->flags & MultilineRegexFlag) == 0)
-                accumFollowEOL = nodes[item]->tag == EOL;
+            if (!nodes[item]->IsEmptyOnly())
+                accumFollowEOL = nodes[item]->tag == EOL && !((SimpleNode*)nodes[item])->isMultiline;
 
             // ConcatNode has hardfail BOI test if any child has hardfail BOI
             hasInitialHardFailBOI = hasInitialHardFailBOI || nodes[item]->hasInitialHardFailBOI;
@@ -3406,6 +3406,168 @@ namespace UnifiedRegex
 #endif
 
     // ----------------------------------------------------------------------
+    // ModifierNode
+    // ----------------------------------------------------------------------
+
+    CharCount ModifierNode::LiteralLength() const
+    {
+        return 0;
+    }
+
+    bool ModifierNode::IsCharOrPositiveSet() const
+    {
+        return false;
+    }
+
+    CharCount ModifierNode::TransferPass0(Compiler& compiler, const Char* litbuf)
+    {
+        PROBE_STACK_NO_DISPOSE(compiler.GetScriptContext(), Js::Constants::MinStackRegex);
+        return body->TransferPass0(compiler, litbuf);
+    }
+
+    void ModifierNode::TransferPass1(Compiler& compiler, const Char* litbuf)
+    {
+        PROBE_STACK_NO_DISPOSE(compiler.GetScriptContext(), Js::Constants::MinStackRegex);
+        body->TransferPass1(compiler, litbuf);
+    }
+
+    bool ModifierNode::IsRefiningAssertion(Compiler& compiler)
+    {
+        return body->IsRefiningAssertion(compiler);
+    }
+
+    void ModifierNode::AnnotatePass0(Compiler& compiler)
+    {
+        PROBE_STACK_NO_DISPOSE(compiler.GetScriptContext(), Js::Constants::MinStackRegex);
+        body->AnnotatePass0(compiler);
+        isWord = body->isWord;
+    }
+
+    void ModifierNode::AnnotatePass1(Compiler& compiler, bool parentNotInLoop, bool parentAtLeastOnce, bool parentNotSpeculative, bool parentNotNegated)
+    {
+        PROBE_STACK_NO_DISPOSE(compiler.GetScriptContext(), Js::Constants::MinStackRegex);
+
+        body->AnnotatePass1(compiler, parentNotInLoop, parentAtLeastOnce, parentNotSpeculative, parentNotNegated);
+        features = body->features;
+        thisConsumes = body->thisConsumes;
+        firstSet = body->firstSet;
+        isFirstExact = body->isFirstExact;
+        isThisIrrefutable = body->isThisIrrefutable;
+        isThisWillNotProgress = body->isThisWillNotProgress;
+        isThisWillNotRegress = body->isThisWillNotRegress;
+        isNotInLoop = parentNotInLoop;
+        isAtLeastOnce = parentAtLeastOnce;
+        isNotSpeculative = parentNotSpeculative;
+        isNotNegated = parentNotNegated;
+    }
+
+    void ModifierNode::AnnotatePass2(Compiler& compiler, CountDomain accumConsumes, bool accumPrevWillNotProgress, bool accumPrevWillNotRegress)
+    {
+        PROBE_STACK_NO_DISPOSE(compiler.GetScriptContext(), Js::Constants::MinStackRegex);
+
+        prevConsumes = accumConsumes;
+        isPrevWillNotProgress = accumPrevWillNotProgress;
+        isPrevWillNotRegress = accumPrevWillNotRegress;
+        body->AnnotatePass2(compiler, accumConsumes, accumPrevWillNotProgress, accumPrevWillNotRegress);
+    }
+
+    void ModifierNode::AnnotatePass3(Compiler& compiler, CountDomain accumConsumes, CharSet<Char>* accumFollow, bool accumFollowIrrefutable, bool accumFollowEOL)
+    {
+        PROBE_STACK_NO_DISPOSE(compiler.GetScriptContext(), Js::Constants::MinStackRegex);
+
+        followConsumes = accumConsumes;
+        followSet = accumFollow;
+        isFollowIrrefutable = accumFollowIrrefutable;
+        isFollowEOL = accumFollowEOL;
+        body->AnnotatePass3(compiler, accumConsumes, accumFollow, accumFollowIrrefutable, accumFollowEOL);
+        hasInitialHardFailBOI = body->hasInitialHardFailBOI;
+    }
+
+    void ModifierNode::AnnotatePass4(Compiler& compiler)
+    {
+        PROBE_STACK_NO_DISPOSE(compiler.GetScriptContext(), Js::Constants::MinStackRegex);
+        body->AnnotatePass4(compiler);
+        isDeterministic = body->isDeterministic;
+    }
+
+    bool ModifierNode::SupportsPrefixSkipping(Compiler& compiler) const
+    {
+        PROBE_STACK_NO_DISPOSE(compiler.GetScriptContext(), Js::Constants::MinStackRegex);
+        return body->SupportsPrefixSkipping(compiler);
+    }
+
+    Node* ModifierNode::HeadSyncronizingNode(Compiler& compiler)
+    {
+        PROBE_STACK_NO_DISPOSE(compiler.GetScriptContext(), Js::Constants::MinStackRegex);
+        return body->HeadSyncronizingNode(compiler);
+    }
+
+    CharCount ModifierNode::MinSyncronizingLiteralLength(Compiler& compiler, int& numLiterals) const
+    {
+        PROBE_STACK_NO_DISPOSE(compiler.GetScriptContext(), Js::Constants::MinStackRegex);
+        return body->MinSyncronizingLiteralLength(compiler, numLiterals);
+    }
+
+    void ModifierNode::CollectSyncronizingLiterals(Compiler& compiler, ScannersMixin& scanners) const
+    {
+        PROBE_STACK_NO_DISPOSE(compiler.GetScriptContext(), Js::Constants::MinStackRegex);
+        body->CollectSyncronizingLiterals(compiler, scanners);
+    }
+
+    void ModifierNode::BestSyncronizingNode(Compiler& compiler, Node*& bestNode)
+    {
+        PROBE_STACK_NO_DISPOSE(compiler.GetScriptContext(), Js::Constants::MinStackRegex);
+        body->BestSyncronizingNode(compiler, bestNode);
+    }
+
+    void ModifierNode::AccumDefineGroups(Js::ScriptContext* scriptContext, int& minGroup, int& maxGroup)
+    {
+        PROBE_STACK_NO_DISPOSE(scriptContext, Js::Constants::MinStackRegex);
+        body->AccumDefineGroups(scriptContext, minGroup, maxGroup);
+    }
+
+    void ModifierNode::Emit(Compiler& compiler, CharCount& skipped)
+    {
+        PROBE_STACK_NO_DISPOSE(compiler.GetScriptContext(), Js::Constants::MinStackRegex);
+        body->Emit(compiler, skipped);
+    }
+
+    CharCount ModifierNode::EmitScan(Compiler& compiler, bool isHeadSyncronizingNode)
+    {
+        PROBE_STACK_NO_DISPOSE(compiler.GetScriptContext(), Js::Constants::MinStackRegex);
+        return body->EmitScan(compiler, isHeadSyncronizingNode);
+    }
+
+    bool ModifierNode::IsOctoquad(Compiler& compiler, OctoquadIdentifier* oi)
+    {
+        return false;
+    }
+
+    bool ModifierNode::IsCharTrieArm(Compiler& compiler, uint& accNumAlts) const
+    {
+        return false;
+    }
+
+    bool ModifierNode::BuildCharTrie(Compiler& compiler, CharTrie* trie, Node* cont, bool isAcceptFirst) const
+    {
+        Assert(false);
+        return false;
+    }
+
+#if ENABLE_REGEX_CONFIG_OPTIONS
+    void ModifierNode::Print(DebugWriter* w, const Char* litbuf) const
+    {
+        w->PrintEOL(_u("Modifier()"));
+        PrintAnnotations(w);
+        w->PrintEOL(_u("{"));
+        w->Indent();
+        body->Print(w, litbuf);
+        w->Unindent();
+        w->PrintEOL(_u("}"));
+    }
+#endif
+
+    // ----------------------------------------------------------------------
     // MatchGroupNode
     // ----------------------------------------------------------------------
 
@@ -3511,7 +3673,7 @@ namespace UnifiedRegex
         //
         //   MatchGroup
         //
-        EMIT(compiler, MatchGroupInst, groupId);
+        EMIT(compiler, MatchGroupInst, groupId, isCaseInsensitive);
     }
 
     CharCount MatchGroupNode::EmitScan(Compiler& compiler, bool isHeadSyncronizingNode)
@@ -3660,7 +3822,7 @@ namespace UnifiedRegex
         // buffer is byte-aligned and the structs are pack(1)).
         //
         MatchNamedGroupInst* inst = new (compiler.Emit(sizeof(MatchNamedGroupInst) + numGroupIds * sizeof(int)))
-            MatchNamedGroupInst(numGroupIds);
+            MatchNamedGroupInst(numGroupIds, isCaseInsensitive);
         int* emittedGroupIds = reinterpret_cast<int*>(inst + 1);
         for (int i = 0; i < numGroupIds; i++)
             emittedGroupIds[i] = groupIds[i];
@@ -5075,7 +5237,9 @@ namespace UnifiedRegex
 
         bool compiled = false;
 
-        if (REGEX_CONFIG_FLAG(RegexOptimize))
+        const bool allowWholeProgramOptimizations = !program->hasScopedModifiers;
+
+        if (allowWholeProgramOptimizations && REGEX_CONFIG_FLAG(RegexOptimize))
         {
             // SPECIAL CASE: Octoquad/trigrams
             // (must handle before converting to case-insensitive form since the later interferes with octoquad pattern recognizer)
@@ -5119,7 +5283,7 @@ namespace UnifiedRegex
 
         if (!compiled)
         {
-            if (REGEX_CONFIG_FLAG(RegexOptimize))
+            if (allowWholeProgramOptimizations && REGEX_CONFIG_FLAG(RegexOptimize))
             {
                 Char c = 0;
                 if (root->IsSingleChar(compiler, c))
@@ -5226,6 +5390,13 @@ namespace UnifiedRegex
             else
             {
                 program->tag = Program::ProgramTag::InstructionsTag;
+                if ((program->flags & StickyRegexFlag) != 0)
+                {
+                    // Scoped modifiers skip the whole-program optimization
+                    // branch, but sticky semantics still require the BOI
+                    // anchoring tag.
+                    compiler.SetBOIInstructionsProgramForStickyFlagTag();
+                }
                 compiler.CaptureLiterals(root, litbuf);
                 CharCount skipped = 0;
                 root->Emit(compiler, skipped);

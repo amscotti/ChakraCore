@@ -169,6 +169,11 @@ namespace UnifiedRegex
         bool unicodeFlagPresent;
         bool caseInsensitiveFlagPresent;
         bool dotAllFlagPresent;
+        bool multilineFlagPresent;
+        // True once pass 1 parses an ES2025 modifier group (?ims-ims:...).
+        // Copied to Program::hasScopedModifiers so the compiler can disable
+        // whole-program special cases that assume top-level flags.
+        bool hasScopedModifiers;
 
         // The following two variables are used to determine if the the surrogate pair has been encountered
         // First holds the temporary location, second holds the value of the codepoint
@@ -290,6 +295,13 @@ namespace UnifiedRegex
         bool AtQuantifier();
         bool OptNonGreedy();
         CharCount RepeatCount();
+        // ES2025 scoped RegExp modifiers: recognizes (?ims-ims: with the
+        // cursor at the '?' that follows '(' (callers have consumed '('),
+        // validates it, and consumes through ':'. Returns false when the
+        // text is not a modifier group (so the ordinary group/capture
+        // handling continues). Once the first character says modifier
+        // (i, m, s or '-'), malformed input is a SyntaxError.
+        bool TryParseModifierGroup(RegexFlags& addFlags, RegexFlags& removeFlags);
         void TermPass0(int depth);
         Node* TermPass1(MatchCharNode* deferredCharNode, bool& previousSurrogatePart);
         bool AtomEscapePass0();

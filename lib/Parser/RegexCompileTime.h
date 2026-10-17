@@ -59,6 +59,8 @@ namespace UnifiedRegex
             , MatchNamedGroup     // \k<name> with a duplicated name (ES2025)
             // LookbehindNode
             , Lookbehind          // (?<=e), (?<!e) and re-oriented lookaheads (see LookbehindNode)
+            // ModifierNode
+            , Modifier            // (?ims-ims:e), ES2025 scoped modifiers
         };
 
         enum Features : uint16
@@ -326,13 +328,17 @@ namespace UnifiedRegex
     // compiled to an instruction that evaluates the assertion against the
     // real input at the real position mapped through the matcher's current
     // frame, instead of against the (possibly reversed) frame buffer.
+    // isMultiline is the effective m state at the anchor's source position,
+    // which ES2025 (?m:...) / (?-m:...) can differ from the top-level flag.
     struct SimpleNode : Node
     {
         bool isFrameAware;
+        bool isMultiline;
 
-        inline SimpleNode(NodeTag tag, bool isFrameAware = false)
+        inline SimpleNode(NodeTag tag, bool isFrameAware = false, bool isMultiline = false)
             : Node(tag)
             , isFrameAware(isFrameAware)
+            , isMultiline(isMultiline)
         {
         }
 
@@ -342,17 +348,21 @@ namespace UnifiedRegex
     // See SimpleNode: \b and \B inside a lookbehind are frame-aware, too,
     // since the boundary test must look at the real neighbors of the real
     // position even when one of them lies outside the frame's buffer.
+    // isWordIU is the effective (i && u) state at the boundary's source
+    // position: with scoped modifiers it can differ from the top-level flags.
     struct WordBoundaryNode : Node
     {
         bool isNegation;
         bool isFrameAware;
+        bool isWordIU;
         bool mustIncludeEntering; // isNegation => false
         bool mustIncludeLeaving;  // isNegation => false
 
-        inline WordBoundaryNode(bool isNegation, bool isFrameAware = false)
+        inline WordBoundaryNode(bool isNegation, bool isFrameAware = false, bool isWordIU = false)
             : Node(WordBoundary)
             , isNegation(isNegation)
             , isFrameAware(isFrameAware)
+            , isWordIU(isWordIU)
             , mustIncludeEntering(false)
             , mustIncludeLeaving(false)
         {
@@ -365,14 +375,16 @@ namespace UnifiedRegex
     {
         CharCount offset;  // into literal buffer (initially parser's, then program's)
         CharCount length;  // always > 1
+        bool isCaseInsensitive; // effective i state at the literal's source position
         bool isEquivClass; // True if each consecutive triplet of characters of literal represents equivalence
                            // class of characters to match against. Actual literal length will be 3 times the length
                            // given above
 
-        inline MatchLiteralNode(CharCount offset, CharCount length)
+        inline MatchLiteralNode(CharCount offset, CharCount length, bool isCaseInsensitive = false)
             : Node(MatchLiteral)
             , offset(offset)
             , length(length)
+            , isCaseInsensitive(isCaseInsensitive)
             , isEquivClass(false)
         {
         }
@@ -385,11 +397,13 @@ namespace UnifiedRegex
     struct MatchCharNode : Node
     {
         Char cs[CaseInsensitive::EquivClassSize];
+        bool isCaseInsensitive; // effective i state at the character's source position
         bool isEquivClass; // true if above characters represent equivalence class of characters, otherwise only
                            // first character is significant
 
-        inline MatchCharNode(Char c)
+        inline MatchCharNode(Char c, bool isCaseInsensitive = false)
             : Node(MatchChar)
+            , isCaseInsensitive(isCaseInsensitive)
             , isEquivClass(false)
         {
             cs[0] = c;
@@ -416,13 +430,15 @@ namespace UnifiedRegex
     {
         bool isNegation;
         bool needsEquivClass;
+        bool isCaseInsensitive; // effective i state at the set's source position
         CharSet<Char> set; // contents always owned by compile-time allocator
 
         // Set must be filled in
-        inline MatchSetNode(bool isNegation, bool needsEquivClass = true)
+        inline MatchSetNode(bool isNegation, bool needsEquivClass = true, bool isCaseInsensitive = false)
             : Node(MatchSet)
             , isNegation(isNegation)
             , needsEquivClass(true)
+            , isCaseInsensitive(isCaseInsensitive)
         {
         }
 
@@ -508,13 +524,33 @@ namespace UnifiedRegex
         NODE_DECL
     };
 
+    // ES2025 scoped modifier group (?ims-ims:Disjunction). Semantically
+    // transparent (it emits no instruction and is not a capture), but it is
+    // kept as a node so its body is not merged into a surrounding literal or
+    // char run: the body's effective i/s/m state can differ from its
+    // siblings', and literal/char nodes carry that state per node.
+    struct ModifierNode : Node
+    {
+        Node* body;
+
+        inline ModifierNode(Node* body)
+            : Node(Modifier)
+            , body(body)
+        {
+        }
+
+        NODE_DECL
+    };
+
     struct MatchGroupNode : Node
     {
         int groupId;
+        bool isCaseInsensitive; // effective i state at the backreference's source position
 
-        inline MatchGroupNode(int groupId)
+        inline MatchGroupNode(int groupId, bool isCaseInsensitive = false)
             : Node(MatchGroup)
             , groupId(groupId)
+            , isCaseInsensitive(isCaseInsensitive)
         {
         }
 
@@ -531,11 +567,13 @@ namespace UnifiedRegex
     {
         int numGroupIds;
         int* groupIds;
+        bool isCaseInsensitive; // effective i state at the backreference's source position
 
-        inline MatchNamedGroupNode(int numGroupIds, int* groupIds)
+        inline MatchNamedGroupNode(int numGroupIds, int* groupIds, bool isCaseInsensitive = false)
             : Node(MatchNamedGroup)
             , numGroupIds(numGroupIds)
             , groupIds(groupIds)
+            , isCaseInsensitive(isCaseInsensitive)
         {
         }
 
@@ -680,6 +718,7 @@ namespace UnifiedRegex
         friend ConcatNode;
         friend AltNode;
         friend DefineGroupNode;
+        friend ModifierNode;
         friend MatchGroupNode;
         friend MatchNamedGroupNode;
         friend LoopNode;

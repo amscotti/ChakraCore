@@ -64,6 +64,12 @@ namespace UnifiedRegex
         Field(uint16) numGroups;
         Field(int) numLoops;
         Field(RegexFlags) flags;
+        // True when the pattern contains an ES2025 modifier group (?ims-ims:...).
+        // The compiler's whole-program special cases (single char, bounded
+        // word, octoquad/trigram, ^literal, leading/trailing spaces) assume
+        // the top-level flags apply to every node, so they are disabled for
+        // such patterns; per-node state drives the instruction path instead.
+        bool hasScopedModifiers;
 
         // Named capture groups (ES2018; ES2025 allows a name to be bound by
         // several groups, in different alternatives of a disjunction). One
@@ -897,7 +903,9 @@ namespace UnifiedRegex
     template <bool isNegation>
     struct WordBoundaryTestInst : Inst
     {
-        WordBoundaryTestInst();
+        bool isWordIU;
+
+        WordBoundaryTestInst(bool isWordIU);
 
         INST_BODY
     };
@@ -1225,7 +1233,10 @@ namespace UnifiedRegex
 
     struct MatchGroupInst : Inst, GroupMixin
     {
-        inline MatchGroupInst(int groupId) : Inst(InstTag::MatchGroup), GroupMixin(groupId) {}
+        bool isCaseInsensitive;
+
+        inline MatchGroupInst(int groupId, bool isCaseInsensitive)
+            : Inst(InstTag::MatchGroup), GroupMixin(groupId), isCaseInsensitive(isCaseInsensitive) {}
 
         INST_BODY
     };
@@ -1238,9 +1249,10 @@ namespace UnifiedRegex
         // header in-line; the structs are pack(1), so access them via
         // reinterpret_cast and advance instPointer past them.
         const int numGroupIds;
+        const bool isCaseInsensitive;
 
-        inline MatchNamedGroupInst(int numGroupIds)
-            : Inst(InstTag::MatchNamedGroup), numGroupIds(numGroupIds) {}
+        inline MatchNamedGroupInst(int numGroupIds, bool isCaseInsensitive)
+            : Inst(InstTag::MatchNamedGroup), numGroupIds(numGroupIds), isCaseInsensitive(isCaseInsensitive) {}
 
         INST_BODY
     };
@@ -1572,14 +1584,18 @@ namespace UnifiedRegex
 
     struct FrameBOLTestInst : Inst
     {
-        inline FrameBOLTestInst() : Inst(InstTag::FrameBOLTest) {}
+        bool isMultiline;
+
+        inline FrameBOLTestInst(bool isMultiline) : Inst(InstTag::FrameBOLTest), isMultiline(isMultiline) {}
 
         INST_BODY
     };
 
     struct FrameEOLTestInst : Inst
     {
-        inline FrameEOLTestInst() : Inst(InstTag::FrameEOLTest) {}
+        bool isMultiline;
+
+        inline FrameEOLTestInst(bool isMultiline) : Inst(InstTag::FrameEOLTest), isMultiline(isMultiline) {}
 
         INST_BODY
     };
@@ -1587,7 +1603,9 @@ namespace UnifiedRegex
     template <bool isNegation>
     struct FrameWordBoundaryTestInst : Inst
     {
-        FrameWordBoundaryTestInst();
+        bool isWordIU;
+
+        FrameWordBoundaryTestInst(bool isWordIU);
 
         INST_BODY
     };
@@ -2082,7 +2100,7 @@ namespace UnifiedRegex
         // inputOffset past it. info must belong to a participating group
         // with a non-empty capture; returns false on mismatch/overflow
         // (the caller fails the match).
-        inline bool MatchBackrefText(const Char* const input, const CharCount inputLength, CharCount& inputOffset, const GroupInfo* const info);
+        inline bool MatchBackrefText(const Char* const input, const CharCount inputLength, CharCount& inputOffset, const GroupInfo* const info, bool isCaseInsensitive);
 
         void SaveInnerGroups(const int fromGroupId, const int toGroupId, const bool reset, const Char *const input, ContStack &contStack);
         void DoSaveInnerGroups(const int fromGroupId, const int toGroupId, const bool reset, const Char *const input, ContStack &contStack);

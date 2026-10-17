@@ -273,6 +273,14 @@ namespace UnifiedRegex
             return CTU(c) < ASCIIChars::NumChars && ASCIIChars::IsWord(ASCIIChars::UTC(CTU(c)));
         }
 
+        // \b/\B and \w under the u+i combination: ASCII word characters plus
+        // the two non-ASCII characters that canonicalize (CaseFolding) into
+        // one (U+017F LONG S and U+212A KELVIN SIGN). Mirrors wordIUStr.
+        inline bool IsWordIU(Char c) const
+        {
+            return IsWord(c) || CTU(c) == 0x017F || CTU(c) == 0x212A;
+        }
+
         inline bool IsNewline(Char c) const
         {
             return CTU(c) < ASCIIChars::NumChars ? ASCIIChars::IsNewline(ASCIIChars::UTC(CTU(c))) : (CTU(c) & 0xfffe) == 0x2028;
