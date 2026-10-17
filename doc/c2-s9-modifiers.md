@@ -6,8 +6,7 @@
 
 # C2-S9 sub-batch 5: ES2025 scoped RegExp modifiers
 
-Status: `<pending>` (landed in the worktree on Mac no-JIT; not committed by
-this slice). ES2025 modifier groups `(?ims-ims:Disjunction)` are
+Status: landed in `724ad82dd` on Mac no-JIT (JIT gated at B4). ES2025 modifier groups `(?ims-ims:Disjunction)` are
 **unconditional core syntax**: no config flag, no JS-bytecode change, no
 static PropertyIds (`zig build verify-bytecode`: "source headers unchanged;
 regen exit 0"). The `v` flag and property-of-strings escapes remain deferred
