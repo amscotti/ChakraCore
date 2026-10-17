@@ -43,6 +43,13 @@ namespace Js
         //
         typedef JsUtil::BaseDictionary<WeakMapId, Var, Recycler, PowerOf2SizePolicy, RecyclerPointerComparer> WeakMapKeyMap;
 
+        // Symbols are primitives, so they can never be weakly held: a symbol key
+        // has no identity-independent lifetime to observe. Keep symbol entries in
+        // a strong recycler dictionary owned by this WeakMap; both the symbol and
+        // the value stay reachable until delete/clear/finalize. Object keys keep
+        // using the per-key WeakMapKeyMap and weak keySet below.
+        typedef JsUtil::BaseDictionary<JavascriptSymbol*, Var, Recycler, PowerOf2SizePolicy, RecyclerPointerComparer> SymbolMap;
+
 #if ENABLE_WEAK_REFERENCE_REGIONS
         typedef JsUtil::WeakReferenceRegionKeyDictionary<RecyclableObject*, bool, RecyclerPointerComparer> KeySet;
         typedef const RecyclerWeakReferenceRegionItem<RecyclableObject*>& WeakType;
@@ -52,6 +59,8 @@ namespace Js
 #endif
 
         Field(KeySet) keySet;
+        Field(SymbolMap*) symbolMap;
+        void EnsureSymbolMap();
 
         WeakMapKeyMap* GetWeakMapKeyMapFromKey(RecyclableObject* key) const;
         WeakMapKeyMap* AddWeakMapKeyMapToKey(RecyclableObject* key);
@@ -61,7 +70,9 @@ namespace Js
 
         bool KeyMapGet(WeakMapKeyMap* map, Var* value) const;
 
-        DEFINE_VTABLE_CTOR_MEMBER_INIT(JavascriptWeakMap, DynamicObject, keySet);
+        friend class VirtualTableInfo<JavascriptWeakMap>;
+        JavascriptWeakMap(VirtualTableInfoCtorEnum v) : DynamicObject(v), keySet(v), symbolMap(nullptr) {}
+        DEFINE_VALIDATE_VTABLE_REGISTERED(JavascriptWeakMap);
         DEFINE_MARSHAL_OBJECT_TO_SCRIPT_CONTEXT(JavascriptWeakMap);
 
     public:
@@ -69,9 +80,13 @@ namespace Js
 
         void Clear();
         bool Delete(RecyclableObject* key);
+        bool Delete(JavascriptSymbol* key);
         bool Get(RecyclableObject* key, Var* value) const;
+        bool Get(JavascriptSymbol* key, Var* value) const;
         bool Has(RecyclableObject* key) const;
+        bool Has(JavascriptSymbol* key) const;
         void Set(RecyclableObject* key, Var value);
+        void Set(JavascriptSymbol* key, Var value);
 
         virtual void Finalize(bool isShutdown) override
         {
@@ -103,11 +118,11 @@ namespace Js
 
     public:
         // For diagnostics and heap enum provide size and allow enumeration of key value pairs
-        int Size() { keySet.Clean(); return keySet.Count(); }
+        int Size() { keySet.Clean(); return keySet.Count() + (symbolMap != nullptr ? symbolMap->Count() : 0); }
         template <typename Fn>
         void Map(Fn fn)
         {
-            return keySet.Map([&](RecyclableObject* key, bool, WeakType)
+            keySet.Map([&](RecyclableObject* key, bool, WeakType)
             {
                 Var value = nullptr;
                 WeakMapKeyMap* keyMap = GetWeakMapKeyMapFromKey(key);
@@ -123,6 +138,14 @@ namespace Js
                     fn(key, value);
                 }
             });
+
+            if (symbolMap != nullptr)
+            {
+                symbolMap->Map([&](JavascriptSymbol* key, Var value)
+                {
+                    fn(key, value);
+                });
+            }
         }
 
 #if ENABLE_TTD

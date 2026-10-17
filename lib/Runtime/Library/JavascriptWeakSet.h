@@ -17,17 +17,29 @@ namespace Js
         typedef const RecyclerWeakReference<RecyclableObject>* WeakType;
 #endif
 
-        Field(KeySet) keySet;
+        // Symbols are primitives; they cannot be weakly held and stay strongly
+        // reachable here until delete/clear/finalize. Object keys keep using the
+        // weak keySet.
+        typedef JsUtil::BaseDictionary<JavascriptSymbol*, bool, RecyclerNonLeafAllocator, PowerOf2SizePolicy, RecyclerPointerComparer> SymbolMap;
 
-        DEFINE_VTABLE_CTOR_MEMBER_INIT(JavascriptWeakSet, DynamicObject, keySet);
+        Field(KeySet) keySet;
+        Field(SymbolMap*) symbolMap;
+        void EnsureSymbolMap();
+
+        friend class VirtualTableInfo<JavascriptWeakSet>;
+        JavascriptWeakSet(VirtualTableInfoCtorEnum v) : DynamicObject(v), keySet(v), symbolMap(nullptr) {}
+        DEFINE_VALIDATE_VTABLE_REGISTERED(JavascriptWeakSet);
         DEFINE_MARSHAL_OBJECT_TO_SCRIPT_CONTEXT(JavascriptWeakSet);
 
     public:
         JavascriptWeakSet(DynamicType* type);
 
         void Add(RecyclableObject* key);
+        void Add(JavascriptSymbol* key);
         bool Delete(RecyclableObject* key);
+        bool Delete(JavascriptSymbol* key);
         bool Has(RecyclableObject* key);
+        bool Has(JavascriptSymbol* key);
 
         virtual BOOL GetDiagTypeString(StringBuilder<ArenaAllocator>* stringBuilder, ScriptContext* requestContext) override;
 
@@ -47,14 +59,22 @@ namespace Js
 
     public:
         // For diagnostics and heap enum provide size and allow enumeration of key value pairs
-        int Size() { keySet.Clean(); return keySet.Count(); }
+        int Size() { keySet.Clean(); return keySet.Count() + (symbolMap != nullptr ? symbolMap->Count() : 0); }
         template <typename Fn>
         void Map(Fn fn)
         {
-            return keySet.Map([&](RecyclableObject* key, bool, WeakType)
+            keySet.Map([&](RecyclableObject* key, bool, WeakType)
             {
                 fn(key);
             });
+
+            if (symbolMap != nullptr)
+            {
+                symbolMap->Map([&](JavascriptSymbol* key, bool)
+                {
+                    fn(key);
+                });
+            }
         }
 
 #if ENABLE_TTD

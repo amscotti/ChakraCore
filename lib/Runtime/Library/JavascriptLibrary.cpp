@@ -5735,6 +5735,19 @@ namespace Js
 
     void JavascriptLibrary::AddWeakSetElementInflate_TTD(Js::JavascriptWeakSet* set, Var value)
     {
+        if (VarIs<JavascriptSymbol>(value))
+        {
+            // Symbol entries are strongly held by the set; they are not weak
+            // references and must not be added to the replay pin set. Registered
+            // symbols are not eligible weak-collection keys.
+            Js::JavascriptSymbol* symbol = Js::VarTo<Js::JavascriptSymbol>(value);
+            if (!symbol->IsRegistered())
+            {
+                set->Add(symbol);
+            }
+            return;
+        }
+
         set->GetScriptContext()->TTDContextInfo->TTDWeakReferencePinSet->Add(Js::VarTo<Js::DynamicObject>(value));
 
         set->Add(Js::VarTo<Js::DynamicObject>(value));
@@ -5757,6 +5770,19 @@ namespace Js
 
     void JavascriptLibrary::AddWeakMapElementInflate_TTD(Js::JavascriptWeakMap* map, Var key, Var value)
     {
+        if (VarIs<JavascriptSymbol>(key))
+        {
+            // Symbol keys are strongly held by the map; they are not weak
+            // references and must not be added to the replay pin set. Registered
+            // symbols are not eligible weak-collection keys.
+            Js::JavascriptSymbol* symbol = Js::VarTo<Js::JavascriptSymbol>(key);
+            if (!symbol->IsRegistered())
+            {
+                map->Set(symbol, value);
+            }
+            return;
+        }
+
         map->GetScriptContext()->TTDContextInfo->TTDWeakReferencePinSet->Add(Js::VarTo<Js::DynamicObject>(key));
 
         map->Set(Js::VarTo<Js::DynamicObject>(key), value);

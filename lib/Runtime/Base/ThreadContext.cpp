@@ -4303,6 +4303,17 @@ const Js::PropertyRecord* ThreadContext::GetSymbolFromRegistrationMap(const char
     return this->recyclableData->symbolRegistrationMap->LookupWithKey(&propertyName, nullptr);
 }
 
+const Js::PropertyRecord* ThreadContext::TryGetSymbolFromRegistrationMap(const char16* stringKey, charcount_t stringLength)
+{
+    if (this->recyclableData->symbolRegistrationMap == nullptr)
+    {
+        return nullptr;
+    }
+
+    Js::HashedCharacterBuffer<char16> propertyName = Js::HashedCharacterBuffer<char16>(stringKey, stringLength);
+    return this->recyclableData->symbolRegistrationMap->LookupWithKey(&propertyName, nullptr);
+}
+
 const Js::PropertyRecord* ThreadContext::AddSymbolToRegistrationMap(const char16* stringKey, charcount_t stringLength)
 {
     this->EnsureSymbolRegistrationMap();

@@ -8,8 +8,18 @@ namespace Js
 {
     JavascriptWeakSet::JavascriptWeakSet(DynamicType* type)
         : DynamicObject(type),
-        keySet(type->GetScriptContext()->GetRecycler())
+        keySet(type->GetScriptContext()->GetRecycler()),
+        symbolMap(nullptr)
     {
+    }
+
+    void JavascriptWeakSet::EnsureSymbolMap()
+    {
+        if (symbolMap == nullptr)
+        {
+            Recycler* recycler = GetScriptContext()->GetRecycler();
+            symbolMap = RecyclerNew(recycler, SymbolMap, recycler);
+        }
     }
 
     Var JavascriptWeakSet::NewInstance(RecyclableObject* function, CallInfo callInfo, ...)
@@ -89,6 +99,12 @@ namespace Js
 
         Var key = (args.Info.Count > 1) ? args[1] : scriptContext->GetLibrary()->GetUndefined();
 
+        if (VarIs<JavascriptSymbol>(key) && !VarTo<JavascriptSymbol>(key)->IsRegistered())
+        {
+            weakSet->Add(VarTo<JavascriptSymbol>(key));
+            return weakSet;
+        }
+
         if (!JavascriptOperators::IsObject(key) || JavascriptOperators::GetTypeId(key) == TypeIds_HostDispatch)
         {
             // HostDispatch is not expanded so can't have internal property added to it.
@@ -128,7 +144,11 @@ namespace Js
         Var key = (args.Info.Count > 1) ? args[1] : scriptContext->GetLibrary()->GetUndefined();
         bool didDelete = false;
 
-        if (JavascriptOperators::IsObject(key) && JavascriptOperators::GetTypeId(key) != TypeIds_HostDispatch)
+        if (VarIs<JavascriptSymbol>(key) && !VarTo<JavascriptSymbol>(key)->IsRegistered())
+        {
+            didDelete = weakSet->Delete(VarTo<JavascriptSymbol>(key));
+        }
+        else if (JavascriptOperators::IsObject(key) && JavascriptOperators::GetTypeId(key) != TypeIds_HostDispatch)
         {
             RecyclableObject* keyObj = VarTo<RecyclableObject>(key);
 
@@ -169,7 +189,11 @@ namespace Js
         Var key = (args.Info.Count > 1) ? args[1] : scriptContext->GetLibrary()->GetUndefined();
         bool hasValue = false;
 
-        if (JavascriptOperators::IsObject(key) && JavascriptOperators::GetTypeId(key) != TypeIds_HostDispatch)
+        if (VarIs<JavascriptSymbol>(key) && !VarTo<JavascriptSymbol>(key)->IsRegistered())
+        {
+            hasValue = weakSet->Has(VarTo<JavascriptSymbol>(key));
+        }
+        else if (JavascriptOperators::IsObject(key) && JavascriptOperators::GetTypeId(key) != TypeIds_HostDispatch)
         {
             RecyclableObject* keyObj = VarTo<RecyclableObject>(key);
 
@@ -210,6 +234,22 @@ namespace Js
         return keySet.TryGetValue(key, &unused);
     }
 
+    void JavascriptWeakSet::Add(JavascriptSymbol* key)
+    {
+        EnsureSymbolMap();
+        symbolMap->Item(key, true);
+    }
+
+    bool JavascriptWeakSet::Delete(JavascriptSymbol* key)
+    {
+        return symbolMap != nullptr && symbolMap->Remove(key);
+    }
+
+    bool JavascriptWeakSet::Has(JavascriptSymbol* key)
+    {
+        return symbolMap != nullptr && symbolMap->ContainsKey(key);
+    }
+
     BOOL JavascriptWeakSet::GetDiagTypeString(StringBuilder<ArenaAllocator>* stringBuilder, ScriptContext* requestContext)
     {
         stringBuilder->AppendCppLiteral(_u("WeakSet"));
@@ -225,9 +265,23 @@ namespace Js
         {
             this->Map([&](RecyclableObject* key)
             {
-                scriptContext->TTDContextInfo->TTDWeakReferencePinSet->AddNew(key);
+                // Symbols are strongly held by symbolMap and cannot be weak.
+                if (JavascriptOperators::IsObject(key))
+                {
+                    scriptContext->TTDContextInfo->TTDWeakReferencePinSet->AddNew(key);
+                }
             });
         }
+
+        // Weak object keys are reachable elsewhere; strong symbol keys must be
+        // visited so the snapshot contains them.
+        this->Map([&](RecyclableObject* key)
+        {
+            if (VarIs<JavascriptSymbol>(key))
+            {
+                extractor->MarkVisitVar(key);
+            }
+        });
     }
 
     TTD::NSSnapObjects::SnapObjectType JavascriptWeakSet::GetSnapTag_TTD() const

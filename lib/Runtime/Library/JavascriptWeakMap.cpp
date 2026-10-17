@@ -8,8 +8,18 @@ namespace Js
 {
     JavascriptWeakMap::JavascriptWeakMap(DynamicType* type)
         : DynamicObject(type),
-        keySet(type->GetScriptContext()->GetRecycler())
+        keySet(type->GetScriptContext()->GetRecycler()),
+        symbolMap(nullptr)
     {
+    }
+
+    void JavascriptWeakMap::EnsureSymbolMap()
+    {
+        if (symbolMap == nullptr)
+        {
+            Recycler* recycler = GetScriptContext()->GetRecycler();
+            symbolMap = RecyclerNew(recycler, SymbolMap, recycler);
+        }
     }
 
     JavascriptWeakMap::WeakMapKeyMap* JavascriptWeakMap::GetWeakMapKeyMapFromKey(RecyclableObject* key) const
@@ -157,7 +167,11 @@ namespace Js
         Var key = (args.Info.Count > 1) ? args[1] : scriptContext->GetLibrary()->GetUndefined();
         bool didDelete = false;
 
-        if (JavascriptOperators::IsObject(key))
+        if (VarIs<JavascriptSymbol>(key) && !VarTo<JavascriptSymbol>(key)->IsRegistered())
+        {
+            didDelete = weakMap->Delete(VarTo<JavascriptSymbol>(key));
+        }
+        else if (JavascriptOperators::IsObject(key))
         {
             RecyclableObject* keyObj = VarTo<RecyclableObject>(key);
 
@@ -199,7 +213,11 @@ namespace Js
 
         bool loaded = false;
         Var value = nullptr;
-        if (JavascriptOperators::IsObject(key))
+        if (VarIs<JavascriptSymbol>(key) && !VarTo<JavascriptSymbol>(key)->IsRegistered())
+        {
+            loaded = weakMap->Get(VarTo<JavascriptSymbol>(key), &value);
+        }
+        else if (JavascriptOperators::IsObject(key))
         {
             RecyclableObject* keyObj = VarTo<RecyclableObject>(key);
             loaded = weakMap->Get(keyObj, &value);
@@ -239,7 +257,11 @@ namespace Js
         Var key = (args.Info.Count > 1) ? args[1] : scriptContext->GetLibrary()->GetUndefined();
         bool hasValue = false;
 
-        if (JavascriptOperators::IsObject(key))
+        if (VarIs<JavascriptSymbol>(key) && !VarTo<JavascriptSymbol>(key)->IsRegistered())
+        {
+            hasValue = weakMap->Has(VarTo<JavascriptSymbol>(key));
+        }
+        else if (JavascriptOperators::IsObject(key))
         {
             RecyclableObject* keyObj = VarTo<RecyclableObject>(key);
 
@@ -280,6 +302,12 @@ namespace Js
         Var key = (args.Info.Count > 1) ? args[1] : scriptContext->GetLibrary()->GetUndefined();
         Var value = (args.Info.Count > 2) ? args[2] : scriptContext->GetLibrary()->GetUndefined();
 
+        if (VarIs<JavascriptSymbol>(key) && !VarTo<JavascriptSymbol>(key)->IsRegistered())
+        {
+            weakMap->Set(VarTo<JavascriptSymbol>(key), value);
+            return weakMap;
+        }
+
         if (!JavascriptOperators::IsObject(key))
         {
             JavascriptError::ThrowTypeError(scriptContext, JSERR_WeakMapSetKeyNotAnObject, _u("WeakMap.prototype.set"));
@@ -316,6 +344,10 @@ namespace Js
             }
         });
         keySet.Clear();
+        if (symbolMap != nullptr)
+        {
+            symbolMap->Clear();
+        }
     }
 
     bool JavascriptWeakMap::Delete(RecyclableObject* key)
@@ -372,6 +404,27 @@ namespace Js
         keySet.Item(key, true);
     }
 
+    bool JavascriptWeakMap::Delete(JavascriptSymbol* key)
+    {
+        return symbolMap != nullptr && symbolMap->Remove(key);
+    }
+
+    bool JavascriptWeakMap::Get(JavascriptSymbol* key, Var* value) const
+    {
+        return symbolMap != nullptr && symbolMap->TryGetValue(key, value);
+    }
+
+    bool JavascriptWeakMap::Has(JavascriptSymbol* key) const
+    {
+        return symbolMap != nullptr && symbolMap->ContainsKey(key);
+    }
+
+    void JavascriptWeakMap::Set(JavascriptSymbol* key, Var value)
+    {
+        EnsureSymbolMap();
+        symbolMap->Item(key, value);
+    }
+
     BOOL JavascriptWeakMap::GetDiagTypeString(StringBuilder<ArenaAllocator>* stringBuilder, ScriptContext* requestContext)
     {
         stringBuilder->AppendCppLiteral(_u("WeakMap"));
@@ -387,13 +440,25 @@ namespace Js
         {
             this->Map([&](RecyclableObject* key, Js::Var value)
             {
-                scriptContext->TTDContextInfo->TTDWeakReferencePinSet->AddNew(key);
+                // Symbol keys are strongly held by symbolMap, so only object
+                // keys need the replay weak-reference pin.
+                if (JavascriptOperators::IsObject(key))
+                {
+                    scriptContext->TTDContextInfo->TTDWeakReferencePinSet->AddNew(key);
+                }
             });
         }
 
-        //Keys are weak so are always reachable from somewhere else but values are not so we must walk them
+        //Object keys are weak and stay reachable elsewhere; symbol keys are strong
+        //in symbolMap. Values are not strongly reachable elsewhere, so walk them.
         this->Map([&](RecyclableObject* key, Js::Var value)
         {
+            // Symbol keys are strong entries of this map, so the snapshot must
+            // contain them even when no other root references the symbol.
+            if (VarIs<JavascriptSymbol>(key))
+            {
+                extractor->MarkVisitVar(key);
+            }
             extractor->MarkVisitVar(value);
         });
     }

@@ -1474,6 +1474,8 @@ public:
 
     void EnsureSymbolRegistrationMap();
     const Js::PropertyRecord* GetSymbolFromRegistrationMap(const char16* stringKey, charcount_t stringLength);
+    // Lookup without creating the registration map; used by weak-key checks.
+    const Js::PropertyRecord* TryGetSymbolFromRegistrationMap(const char16* stringKey, charcount_t stringLength);
     const Js::PropertyRecord* AddSymbolToRegistrationMap(const char16* stringKey, charcount_t stringLength);
 
 #if ENABLE_TTD

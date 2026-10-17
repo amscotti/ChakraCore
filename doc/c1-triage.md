@@ -717,6 +717,18 @@ cleanup callbacks). Expected gain: `FinalizationRegistry` 98, `WeakRef`
 74, `symbols-as-weakmap-keys` 40. Uncertainty: medium-high (GC timing in
 tests). JIT-x64? **no** feature-specific work expected. Effort:
 symbols-as-keys **C2-small** candidate; WeakRef/FR **C3**.
+*(symbols-as-keys implemented 2026-10-17 as C2-S13 on Mac no-JIT
+([c2-s13-symbol-keys.md](c2-s13-symbol-keys.md), receipt pending):
+unregistered symbols are accepted as `WeakMap`/`WeakSet` keys through a
+lazy, traced per-collection recycler dictionary (WeakSet uses the non-leaf
+allocator), registered `Symbol.for` keys are rejected per
+`CanBeHeldWeakly`, and object keys keep the existing weak path. Scoped
+corpora moved WeakMap 214/281 → 232/49 with 18/0 fail→pass and WeakSet
+154/170 → 168/2 with 14/0; the remaining WeakMap failures are 47 ES2026
+`getOrInsert*` scenarios plus 2 pre-existing `proto-from-ctor-realm`
+failures, and the 2 WeakSet failures are the same cross-realm defect.
+Gates moved 1976/2028 → 1977/2029. WeakRef/FinalizationRegistry stay C3,
+and B4 still owns JIT-configuration claims.)*
 
 **S14. Inherited-semantics defect clusters (existing features).** Repro:
 `python3 tools/test262/run.py --binary zig-out/bin/ch --output out/test262-c1-blockscope 'test/language/block-scope/**/*.js'`

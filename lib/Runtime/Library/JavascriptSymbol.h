@@ -24,6 +24,11 @@ namespace Js
         const PropertyRecord* GetValue() { return propertyRecordUsageCache.GetPropertyRecord(); }
         PropertyRecordUsageCache * GetPropertyRecordUsageCache();
 
+        // A registered symbol (created by Symbol.for) is not eligible to be held
+        // weakly (ES2023 CanBeHeldWeakly). Compare its property record against
+        // the thread-context registration map, exactly as Symbol.keyFor does.
+        bool IsRegistered();
+
         static uint32 GetOffsetOfLdElemInlineCache() { return offsetof(JavascriptSymbol, propertyRecordUsageCache) + PropertyRecordUsageCache::GetOffsetOfLdElemInlineCache(); }
         static uint32 GetOffsetOfStElemInlineCache() { return offsetof(JavascriptSymbol, propertyRecordUsageCache) + PropertyRecordUsageCache::GetOffsetOfStElemInlineCache(); }
         static uint32 GetOffsetOfHitRate() { return offsetof(JavascriptSymbol, propertyRecordUsageCache) + PropertyRecordUsageCache::GetOffsetOfHitRate(); }

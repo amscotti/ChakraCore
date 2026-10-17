@@ -139,6 +139,15 @@ namespace Js
         return scriptContext->GetSymbol(propertyRecord);
     }
 
+    bool JavascriptSymbol::IsRegistered()
+    {
+        const Js::PropertyRecord* propertyRecord = GetValue();
+        const Js::PropertyRecord* registered =
+            GetScriptContext()->GetThreadContext()->TryGetSymbolFromRegistrationMap(
+                propertyRecord->GetBuffer(), propertyRecord->GetLength());
+        return registered != nullptr && registered == propertyRecord;
+    }
+
     // Symbol.keyFor as described in ES 2015
     Var JavascriptSymbol::EntryKeyFor(RecyclableObject* function, CallInfo callInfo, ...)
     {
