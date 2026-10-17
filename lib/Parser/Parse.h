@@ -425,8 +425,11 @@ public:
 
     void CheckPidIsValid(IdentPtr pid, bool autoArgumentsObject = false);
     void AddVarDeclToBlock(ParseNodeVar *pnode);
+    void AddBlockLexicalDecl(IdentPtr pid, bool isFunctionDecl, bool isSloppyFunctionDecl);
+    void AddBlockVarDecl(IdentPtr pid);
+    void CheckBlockDeclarations();
     // Add a var declaration. Only use while parsing. Assumes m_ppnodeVar is pointing to the right place already
-    ParseNodeVar * CreateVarDeclNode(IdentPtr pid, SymbolType symbolType, bool autoArgumentsObject = false, ParseNodePtr pnodeFnc = NULL, bool checkReDecl = true);
+    ParseNodeVar * CreateVarDeclNode(IdentPtr pid, SymbolType symbolType, bool autoArgumentsObject = false, ParseNodePtr pnodeFnc = NULL, bool checkReDecl = true, bool isVarDeclaredName = false);
     // Add a var declaration, during parse tree rewriting. Will setup m_ppnodeVar for the given pnodeFnc
     ParseNodeVar * AddVarDeclNode(IdentPtr pid, ParseNodeFnc * pnodeFnc);
     // Add a 'const' or 'let' declaration.

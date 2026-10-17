@@ -733,6 +733,18 @@ matters (these are the failures no feature flag explains). JIT-x64?
 **case-by-case** (any bytecode-semantics fix re-enters the JIT matrix).
 Effort: **C2-small per cluster**.
 
+*(S14 sub-batch 1, 2026-10-17, [c2-s14-blockscope.md](c2-s14-blockscope.md):
+landed the `Block : { StatementList }` static-semantics early errors for
+lexical-vs-var declarations and duplicate lexical declarations, including
+function/generator/async names and nested blocks, while preserving Annex B
+sloppy duplicate block functions. The block-scope corpus moved 167/287 to
+284/287 with exactly 117 fail→pass and 0 pass→fail; the remaining 3 are the
+`in-statement-position-*` parse negatives, which become the next S14 slice.
+The `test/LetConst` expectations (`letvar`, `defer3`, `for-loop`) that
+asserted the old non-conforming block `var`/`let` behavior were updated
+deliberately. Gates moved 1975/2027 → 1976/2028. No bytecode change; B4
+still owns JIT-configuration claims.)*
+
 ## 7. Separate inventories
 
 **Engine defects on existing features** — the 3,822-failure defect bucket

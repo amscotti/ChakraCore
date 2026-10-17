@@ -26,6 +26,8 @@ try { eval('for (let a = 123 in this) { }'); print('fail'); } catch (e) { print(
 try { eval('for (const a = 123 in this) { }'); print('fail'); } catch (e) { print(e); }
 try { eval('function foo() { for (let a = 123 in this) { } } foo();'); print('fail'); } catch (e) { print(e); }
 try { eval('function foo() { for (const a = 123 in this) { } } foo();'); print('fail'); } catch (e) { print(e); }
+// The var in the for head is in the enclosing block's VarDeclaredNames,
+// so the block redeclaration is a parse-time SyntaxError.
 try { eval('function foo() { { for (var a = 123 in []) { } let a; } } foo();'); print('fail'); } catch (e) { print(e); }
 
 function test3() {

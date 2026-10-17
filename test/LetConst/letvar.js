@@ -20,12 +20,9 @@ try {
 }
 
 
-// var after let in non-function block scope should be valid;
-// var declaration should reassing let bound symbol, but should
-// also introduce function scoped variable, initialized to undefined
-// (Make sure there is no difference whether the let binding is used
-// or not before the var declaration)
-// (Blue bug 145660)
+// var after let in a non-function block scope is a redeclaration
+// SyntaxError under the Block static-semantics early errors, so the
+// block body is never entered.
 try {
     eval(
             "(function () {" +
@@ -48,8 +45,8 @@ try {
     write(e);
 }
 
-// var before let in non-function block scope should raise a
-// Use Berfore Declaration error.
+// var before let in a non-function block scope is the same block
+// redeclaration SyntaxError.
 try {
     eval(
             "(function () {" +

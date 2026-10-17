@@ -6,7 +6,7 @@ SyntaxError: for-in loop head declarations cannot have an initializer
 SyntaxError: for-in loop head declarations cannot have an initializer
 SyntaxError: for-in loop head declarations cannot have an initializer
 SyntaxError: for-in loop head declarations cannot have an initializer
-ReferenceError: Use before declaration
+SyntaxError: Let/Const redeclaration
 a
 b
 a

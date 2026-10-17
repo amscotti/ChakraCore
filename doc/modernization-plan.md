@@ -8,13 +8,14 @@
 > policy, triage and shortlist are in [c1-triage.md](c1-triage.md);
 > qualification is conditional on explicit host-reported negative phase
 > before any full result is certified. **C2 is in progress** — batches
-> S4, S5, S10, S11, S7-matchAll and the four S9 sub-batches (named
-> groups, `d` flag/indices, duplicate named groups, lookbehind) are
-> closed on Mac no-JIT (JIT claims gated on B4), receipts in
-> [c2-s4.md](c2-s4.md), [c2-s5.md](c2-s5.md),
-> [c2-s10.md](c2-s10.md), [c2-s11.md](c2-s11.md),
-> [c2-s7-matchall.md](c2-s7-matchall.md),
-> [c2-s9-namedgroups.md](c2-s9-namedgroups.md) and
+> S4, S5, S10, S11, S7-matchAll, the four S9 sub-batches (named
+> groups, `d` flag/indices, duplicate named groups, lookbehind) and the
+> S14 block-scope early-error cluster are closed on Mac no-JIT (JIT
+> claims gated on B4), receipts in [c2-s4.md](c2-s4.md),
+> [c2-s5.md](c2-s5.md), [c2-s10.md](c2-s10.md),
+> [c2-s11.md](c2-s11.md), [c2-s7-matchall.md](c2-s7-matchall.md),
+> [c2-s9-namedgroups.md](c2-s9-namedgroups.md),
+> [c2-s14-blockscope.md](c2-s14-blockscope.md) and
 > [c2-flag-audits.md](c2-flag-audits.md). Engine/legacy-build references use baseline
 > `97e68c917`; execution evidence and the [B1-B3 review](b1-b3-review.md)
 > are recorded through 2026-10-15 local time.
@@ -48,7 +49,7 @@ handling have been validated before its results are used as a completion gate.
 | B6 | Windows feasibility and rollout; later target extensions | Stable build contracts | Separate expansion |
 | Z1 | One useful mixed C++/Zig unit behind a tested C ABI | B3; B4 if the unit ships on Linux | Optional pilot |
 | C1 | Qualified ES2025 test policy and triaged failures | Stable Mac build at B3 | Recorded (CONDITIONAL) |
-| C2 | Bounded compatibility batches and partial releases | C1; B4 before JIT-wide enablement | In progress (S4/S5/S10/S11/S7-matchAll/S9 named-groups + d-flag + duplicate named groups + lookbehind closed on Mac no-JIT; JIT claims gated on B4) |
+| C2 | Bounded compatibility batches and partial releases | C1; B4 before JIT-wide enablement | In progress (S4/S5/S10/S11/S7-matchAll/S9 named-groups + d-flag + duplicate named groups + lookbehind/S14 block-scope early errors closed on Mac no-JIT; JIT claims gated on B4) |
 | C3 | Larger runtime/object-model feature projects | C1 and their feature prerequisites | Separate projects |
 | C4 | Verified full ES2025 core-language result | Required C2/C3 work and qualified runner | Long-term objective |
 
@@ -585,14 +586,18 @@ Decision/rollback points:
 - [ ] C4: Published qualified ES2025 result on the claimed default configurations.
 
 **C2 batch status:** S4, S5, all of S10 (the copy-by-change half and
-the Set-methods half), all of S11, S7, and the four S9 sub-batches
+the Set-methods half), all of S11, S7, the four S9 sub-batches
 (named-groups core, `d` flag/indices, duplicate named groups,
-lookbehind) are
+lookbehind) and the S14 block-scope early-error cluster are
 closed on Mac no-JIT
 ([c2-s4.md](c2-s4.md), [c2-s5.md](c2-s5.md), [c2-s11.md](c2-s11.md),
 [c2-s10.md](c2-s10.md), [c2-s7-matchall.md](c2-s7-matchall.md),
-[c2-s9-namedgroups.md](c2-s9-namedgroups.md)). JIT
-claims still wait on B4. The S2/S6/S7 enabled-flag measurement audits
+[c2-s9-namedgroups.md](c2-s9-namedgroups.md),
+[c2-s14-blockscope.md](c2-s14-blockscope.md)). JIT
+claims still wait on B4. S14 fixed the `Block : { StatementList }`
+lexical/var early errors (block-scope corpus 167/287 → 284/287, 117/0
+fail→pass) and moved the gates to 1976/2028; its 3
+`in-statement-position-*` parse negatives are the next S14 slice. The S2/S6/S7 enabled-flag measurement audits
 ([c2-flag-audits.md](c2-flag-audits.md)) drove the S7 implementation
 batch: `Symbol.matchAll`, `RegExp.prototype[@@matchAll]`, the RegExp
 String Iterator and `String.prototype.matchAll` all landed behind

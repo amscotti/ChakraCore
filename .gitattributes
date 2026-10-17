@@ -21,3 +21,7 @@ lib/**/*.js eol=lf diff=cpp
 # Same rationale: the S2 sub-batch 1 BigInt prototype expectation edit
 # touches a CRLF file whose historical lines are pinned.
 test/BigInt/global_object.js whitespace=cr-at-eol
+# C2-S14 updates two CRLF LetConst sources whose old comments asserted
+# the pre-spec block var/let behavior; historical lines stay CRLF.
+test/LetConst/letvar.js whitespace=cr-at-eol
+test/LetConst/for-loop.js whitespace=cr-at-eol

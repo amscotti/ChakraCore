@@ -17,7 +17,7 @@ not a claim that TigerBeetle, Ghostty or Bun endorses this guide.
 4. **What happens at every failure/exit point?** Trace partial initialization,
    foreign status errors, OOM, exceptions, cancellation and shutdown.
 5. **Which test observes the promised lifetime?** A successful compile or the
-   1975-case regression baseline does not prove the new ownership contract.
+   1976-case regression baseline does not prove the new ownership contract.
 
 If a lifetime cannot be established from declarations, implementations and callers,
 record the uncertainty and narrow the change. Do not choose an allocator or add a

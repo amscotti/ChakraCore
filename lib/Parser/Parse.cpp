@@ -28,6 +28,25 @@ const uint ParseNode::mpnopgrfnop[knopLim] =
 #include "ptlist.h"
 };
 
+struct BlockInfoStack;
+
+// Parser-only list of names declared in a block. Used for the Block
+// static-semantics early errors; it is not part of the AST. A var record
+// stores the innermost source block where the declaration occurred, not one
+// copy for every enclosing block.
+struct BlockInfoName
+{
+    IdentPtr pid;
+    bool isFunctionDecl;
+    bool isSloppyFunctionDecl;
+    uint32 sourceBlockId;                    // var records only (highest block id seen)
+    BlockInfoName *next;                     // lexical list
+};
+
+// Lazy per-block lexical set (duplicate detection) and per-function
+// name -> var-record list. Arena-backed; lives only for the parse.
+typedef JsUtil::BaseDictionary<IdentPtr, BlockInfoName*, ArenaAllocator, PrimeSizePolicy> BlockNameMap;
+
 struct BlockInfoStack
 {
     StmtNest pstmt;
@@ -35,6 +54,10 @@ struct BlockInfoStack
     ParseNodePtr *m_ppnodeLex;              // lexical variable list tail
     BlockInfoStack *pBlockInfoOuter;        // containing block's BlockInfoStack
     BlockInfoStack *pBlockInfoFunction;     // nearest function's BlockInfoStack (if pnodeBlock is a function, this points to itself)
+    BlockInfoName *pnodeLexNames;           // names in this block's LexicallyDeclaredNames
+    BlockNameMap *lexicalNameMap;           // duplicate lookup for pnodeLexNames
+    BlockNameMap *varNameMap;               // function block only: pid -> var records (innermost source block)
+    bool isSourceBlock;                     // syntactic Block : { StatementList } (not a for/switch/class scope)
 };
 
 #if DEBUG
@@ -1523,7 +1546,7 @@ ParseNodeVar * Parser::CreateModuleImportDeclNode(IdentPtr localName)
     return declNode;
 }
 
-ParseNodeVar * Parser::CreateVarDeclNode(IdentPtr pid, SymbolType symbolType, bool autoArgumentsObject, ParseNodePtr pnodeFnc, bool errorOnRedecl)
+ParseNodeVar * Parser::CreateVarDeclNode(IdentPtr pid, SymbolType symbolType, bool autoArgumentsObject, ParseNodePtr pnodeFnc, bool errorOnRedecl, bool isVarDeclaredName)
 {
     ParseNodeVar * pnode = CreateDeclNode(knopVarDecl, pid, symbolType, errorOnRedecl);
 
@@ -1537,6 +1560,11 @@ ParseNodeVar * Parser::CreateVarDeclNode(IdentPtr pid, SymbolType symbolType, bo
         Assert(pid);
         m_ppnodeVar = &pnode->pnodeNext;
         CheckPidIsValid(pid, autoArgumentsObject);
+
+        if (isVarDeclaredName)
+        {
+            AddBlockVarDecl(pid);
+        }
     }
 
     return pnode;
@@ -1552,6 +1580,7 @@ ParseNodeVar * Parser::CreateBlockScopedDeclNode(IdentPtr pid, OpCode nodeType)
     {
         Assert(pid);
         AddVarDeclToBlock(pnode);
+        AddBlockLexicalDecl(pid, false, false);
         CheckPidIsValid(pid);
     }
 
@@ -1569,6 +1598,144 @@ void Parser::AddVarDeclToBlock(ParseNodeVar *pnode)
     *m_currentBlockInfo->m_ppnodeLex = pnode;
     m_currentBlockInfo->m_ppnodeLex = &pnode->pnodeNext;
     pnode->pnodeNext = nullptr;
+}
+
+// A Block : { StatementList } early-error check applies to regular block
+// scopes. Function bodies, parameter scopes, catch parameter scopes and the
+// global/global-eval blocks have their own static semantics.
+static bool IsLexicalBlockScope(BlockInfoStack *blockInfo)
+{
+    if (blockInfo == nullptr || !blockInfo->isSourceBlock ||
+        blockInfo->pnodeBlock->blockType != PnodeBlockType::Regular)
+    {
+        return false;
+    }
+
+    Scope *scope = blockInfo->pnodeBlock->scope;
+    return scope == nullptr || scope->GetScopeType() == ScopeType_Block;
+}
+
+void Parser::AddBlockLexicalDecl(IdentPtr pid, bool isFunctionDecl, bool isSloppyFunctionDecl)
+{
+    BlockInfoStack *blockInfo = m_currentBlockInfo;
+    if (pid == nullptr || !IsLexicalBlockScope(blockInfo))
+    {
+        return;
+    }
+
+    // LexicallyDeclaredNames must not contain duplicate entries. Annex B
+    // permits duplicate ordinary function declarations in sloppy blocks only.
+    if (blockInfo->lexicalNameMap == nullptr)
+    {
+        blockInfo->lexicalNameMap = Anew(&m_nodeAllocator, BlockNameMap, &m_nodeAllocator);
+    }
+
+    BlockInfoName *existing = nullptr;
+    if (blockInfo->lexicalNameMap->TryGetValue(pid, &existing))
+    {
+        if (!(isFunctionDecl && existing->isFunctionDecl &&
+              isSloppyFunctionDecl && existing->isSloppyFunctionDecl))
+        {
+            Error(ERRRedeclaration);
+        }
+        return;
+    }
+
+    BlockInfoName *name = Anew(&m_nodeAllocator, BlockInfoName);
+    name->pid = pid;
+    name->isFunctionDecl = isFunctionDecl;
+    name->isSloppyFunctionDecl = isSloppyFunctionDecl;
+    name->sourceBlockId = 0;
+    name->next = blockInfo->pnodeLexNames;
+    blockInfo->pnodeLexNames = name;
+    blockInfo->lexicalNameMap->Item(pid, name);
+}
+
+void Parser::AddBlockVarDecl(IdentPtr pid)
+{
+    Assert(pid != nullptr);
+
+    // VarDeclaredNames includes var declarations in nested statements and
+    // blocks, but not across a function boundary. Record the innermost
+    // source block once per name instead of copying the name to every
+    // enclosing block (which made memory O(depth * vars)).
+    BlockInfoStack *functionBlockInfo = GetCurrentFunctionBlockInfo();
+    BlockInfoStack *sourceBlock = nullptr;
+    for (BlockInfoStack *blockInfo = m_currentBlockInfo;
+         blockInfo != nullptr && blockInfo != functionBlockInfo;
+         blockInfo = blockInfo->pBlockInfoOuter)
+    {
+        if (blockInfo->isSourceBlock)
+        {
+            sourceBlock = blockInfo;
+            break;
+        }
+    }
+    if (sourceBlock == nullptr)
+    {
+        return;
+    }
+
+    if (functionBlockInfo->varNameMap == nullptr)
+    {
+        functionBlockInfo->varNameMap = Anew(&m_nodeAllocator, BlockNameMap, &m_nodeAllocator);
+    }
+
+    // A block id is assigned in depth-first parse order. Keeping only the
+    // highest source block id per name is enough: at the close of block B,
+    // any record with id >= B's id was parsed inside B. Repeated declarations
+    // in the same or earlier blocks are O(1) updates, not list growth.
+    uint32 sourceBlockId = sourceBlock->pnodeBlock->blockId;
+    BlockInfoName *existing = nullptr;
+    if (functionBlockInfo->varNameMap->TryGetValue(pid, &existing))
+    {
+        if (sourceBlockId > existing->sourceBlockId)
+        {
+            existing->sourceBlockId = sourceBlockId;
+        }
+        return;
+    }
+
+    BlockInfoName *name = Anew(&m_nodeAllocator, BlockInfoName);
+    name->pid = pid;
+    name->isFunctionDecl = false;
+    name->isSloppyFunctionDecl = false;
+    name->sourceBlockId = sourceBlockId;
+    name->next = nullptr;
+    functionBlockInfo->varNameMap->Item(pid, name);
+}
+
+void Parser::CheckBlockDeclarations()
+{
+    BlockInfoStack *blockInfo = m_currentBlockInfo;
+    if (!IsLexicalBlockScope(blockInfo))
+    {
+        return;
+    }
+
+    // It is a Syntax Error if any element of the LexicallyDeclaredNames of
+    // the block also occurs in its VarDeclaredNames. Var records are keyed
+    // by name and carry their innermost source block; an ancestor match is
+    // a walk up that block's parents.
+    BlockInfoStack *functionBlockInfo = GetCurrentFunctionBlockInfo();
+    BlockNameMap *varMap = functionBlockInfo->varNameMap;
+    if (varMap == nullptr)
+    {
+        return;
+    }
+
+    uint32 blockId = blockInfo->pnodeBlock->blockId;
+    for (BlockInfoName *lexicalName = blockInfo->pnodeLexNames;
+         lexicalName != nullptr;
+         lexicalName = lexicalName->next)
+    {
+        BlockInfoName *varName = nullptr;
+        if (varMap->TryGetValue(lexicalName->pid, &varName) &&
+            varName->sourceBlockId >= blockId)
+        {
+            Error(ERRRedeclaration);
+        }
+    }
 }
 
 void Parser::SetCurrentStatement(StmtNest *stmt)
@@ -1680,6 +1847,7 @@ ParseNodeBlock * Parser::ParseBlock(LabelId* pLabelId)
     ParseNodePtr *ppnodeExprScopeSave = nullptr;
 
     pnodeBlock = StartParseBlock<buildAST>(PnodeBlockType::Regular, ScopeType_Block, pLabelId);
+    m_currentBlockInfo->isSourceBlock = true;
 
     BlockInfoStack* outerBlockInfo = m_currentBlockInfo->pBlockInfoOuter;
     if (outerBlockInfo != nullptr && outerBlockInfo->pnodeBlock != nullptr
@@ -1814,6 +1982,8 @@ void Parser::FinishParseBlock(ParseNodeBlock *pnodeBlock, bool needScanRCurly)
         // have been set already.
         pnodeBlock->ichLim = this->GetScanner()->IchLimTok();
     }
+
+    CheckBlockDeclarations();
 
     BindPidRefs<false>(GetCurrentBlockInfo(), m_nextBlockId - 1);
 
@@ -2048,6 +2218,10 @@ BlockInfoStack *Parser::PushBlockInfo(ParseNodeBlock * pnodeBlock)
     newBlockInfo->pnodeBlock = pnodeBlock;
     newBlockInfo->pBlockInfoOuter = m_currentBlockInfo;
     newBlockInfo->m_ppnodeLex = &pnodeBlock->pnodeLexVars;
+    newBlockInfo->pnodeLexNames = nullptr;
+    newBlockInfo->lexicalNameMap = nullptr;
+    newBlockInfo->varNameMap = nullptr;
+    newBlockInfo->isSourceBlock = false;
 
     if (pnodeBlock->blockType != PnodeBlockType::Regular)
     {
@@ -5653,7 +5827,15 @@ ParseNodeFnc * Parser::ParseFncDeclInternal(ushort flags, LPCOLESTR pNameHint, c
     bool needScanRCurly = true;
     ParseFncDeclHelper<buildAST>(pnodeFnc, pNameHint, flags, fUnaryOrParen, noStmtContext, &needScanRCurly, fModule, &pFncNamePid, fAllowIn);
     AddNestedCapturedNames(pnodeFnc);
-  
+
+    if (fDeclaration && pnodeFnc->pnodeName != nullptr)
+    {
+        // A function declaration in a block is a LexicallyDeclaredName there.
+        // Annex B allows duplicate ordinary function declarations in sloppy code.
+        bool isSloppyFunctionDecl = !IsStrictMode() && !pnodeFnc->IsGenerator() && !pnodeFnc->IsAsync();
+        AddBlockLexicalDecl(pnodeFnc->pnodeName->pid, true, isSloppyFunctionDecl);
+    }
+
     AnalysisAssert(pnodeFnc);
 
     *m_ppnodeVar = nullptr;
@@ -9892,7 +10074,7 @@ ParseNodePtr Parser::ParseVariableDeclaration(
 
             if (declarationType == tkVAR)
             {
-                pnodeThis = CreateVarDeclNode(pid, STVariable);
+                pnodeThis = CreateVarDeclNode(pid, STVariable, false, nullptr, true, /* isVarDeclaredName = */ true);
             }
             else if (declarationType == tkCONST)
             {

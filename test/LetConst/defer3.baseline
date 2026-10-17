@@ -28,10 +28,10 @@ SyntaxError: Let/Const redeclaration
 SyntaxError: Let/Const redeclaration
 SyntaxError: Let/Const redeclaration
 SyntaxError: Let/Const redeclaration
-Syntax check succeeded
-Syntax check succeeded
-Syntax check succeeded
-Syntax check succeeded
+SyntaxError: Let/Const redeclaration
+SyntaxError: Let/Const redeclaration
+SyntaxError: Let/Const redeclaration
+SyntaxError: Let/Const redeclaration
 SyntaxError: Let/Const redeclaration
 SyntaxError: Let/Const redeclaration
 SyntaxError: Let/Const redeclaration

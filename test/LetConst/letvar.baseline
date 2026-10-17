@@ -1,7 +1,3 @@
 SyntaxError: Let/Const redeclaration
-var x
-undefined
-let y
-var y
-undefined
-ReferenceError: Use before declaration
+SyntaxError: Let/Const redeclaration
+SyntaxError: Let/Const redeclaration
