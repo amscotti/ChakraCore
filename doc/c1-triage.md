@@ -718,7 +718,7 @@ cleanup callbacks). Expected gain: `FinalizationRegistry` 98, `WeakRef`
 tests). JIT-x64? **no** feature-specific work expected. Effort:
 symbols-as-keys **C2-small** candidate; WeakRef/FR **C3**.
 *(symbols-as-keys implemented 2026-10-17 as C2-S13 on Mac no-JIT
-([c2-s13-symbol-keys.md](c2-s13-symbol-keys.md), receipt pending):
+([c2-s13-symbol-keys.md](c2-s13-symbol-keys.md)):
 unregistered symbols are accepted as `WeakMap`/`WeakSet` keys through a
 lazy, traced per-collection recycler dictionary (WeakSet uses the non-leaf
 allocator), registered `Symbol.for` keys are rejected per

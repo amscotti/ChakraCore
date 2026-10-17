@@ -50,7 +50,7 @@ handling have been validated before its results are used as a completion gate.
 | B6 | Windows feasibility and rollout; later target extensions | Stable build contracts | Separate expansion |
 | Z1 | One useful mixed C++/Zig unit behind a tested C ABI | B3; B4 if the unit ships on Linux | Optional pilot |
 | C1 | Qualified ES2025 test policy and triaged failures | Stable Mac build at B3 | Recorded (CONDITIONAL) |
-| C2 | Bounded compatibility batches and partial releases | C1; B4 before JIT-wide enablement | In progress (S4/S5/S10/S11/S7-matchAll/S9 named-groups + d-flag + duplicate named groups + lookbehind/S14 block-scope + statement-level early errors closed on Mac no-JIT; S13 symbols-as-weak-collection-keys implemented, receipt pending; JIT claims gated on B4) |
+| C2 | Bounded compatibility batches and partial releases | C1; B4 before JIT-wide enablement | In progress (S4/S5/S10/S11/S7-matchAll/S9 named-groups + d-flag + duplicate named groups + lookbehind/S14 block-scope + statement-level early errors closed on Mac no-JIT; S13 symbols-as-weak-collection-keys landed; JIT claims gated on B4) |
 | C3 | Larger runtime/object-model feature projects | C1 and their feature prerequisites | Separate projects |
 | C4 | Verified full ES2025 core-language result | Required C2/C3 work and qualified runner | Long-term objective |
 
@@ -604,8 +604,7 @@ the measured for-head, switch CaseBlock, catch-parameter and unlabelled
 [c2-s14-statement-early-errors.md](c2-s14-statement-early-errors.md));
 catch pattern/var, eval-var and the broader defect bucket remain the S14
 stream. S13 implemented symbols as `WeakMap`/`WeakSet` keys on Mac
-no-JIT ([c2-s13-symbol-keys.md](c2-s13-symbol-keys.md), receipt
-pending): unregistered symbols use a lazy, traced per-collection recycler dictionary
+no-JIT ([c2-s13-symbol-keys.md](c2-s13-symbol-keys.md)): unregistered symbols use a lazy, traced per-collection recycler dictionary
 (object keys keep the weak path; WeakSet uses the non-leaf allocator),
 registered `Symbol.for` symbols are rejected per ES2023
 `CanBeHeldWeakly`, and diagnostics/TTD count and enumerate symbol

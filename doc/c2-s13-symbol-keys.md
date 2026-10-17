@@ -1,7 +1,7 @@
 # C2-S13: symbols as WeakMap/WeakSet keys
 
-Status: `<pending>` — implemented on Mac no-JIT; JIT evidence is not
-claimed (see B4). No feature flag was added. This slice covers
+Status: landed in `9856166dc` on Mac no-JIT; JIT evidence is not claimed
+(see B4). No feature flag was added. This slice covers
 `symbols-as-weakmap-keys` only; `WeakRef` and `FinalizationRegistry`
 remain C3 work.
 
