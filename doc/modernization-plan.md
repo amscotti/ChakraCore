@@ -595,9 +595,9 @@ closed on Mac no-JIT
 [c2-s9-namedgroups.md](c2-s9-namedgroups.md),
 [c2-s14-blockscope.md](c2-s14-blockscope.md)). JIT
 claims still wait on B4. S14 fixed the `Block : { StatementList }`
-lexical/var early errors (block-scope corpus 167/287 → 284/287, 117/0
-fail→pass) and moved the gates to 1976/2028; its 3
-`in-statement-position-*` parse negatives are the next S14 slice. The S2/S6/S7 enabled-flag measurement audits
+lexical/var early errors (block-scope corpus 167/287 → 287/287, 120/0
+fail→pass) and moved the gates to 1976/2028; the separate for-head/
+switch/catch/eval/with rules remain the S14 stream. The S2/S6/S7 enabled-flag measurement audits
 ([c2-flag-audits.md](c2-flag-audits.md)) drove the S7 implementation
 batch: `Symbol.matchAll`, `RegExp.prototype[@@matchAll]`, the RegExp
 String Iterator and `String.prototype.matchAll` all landed behind

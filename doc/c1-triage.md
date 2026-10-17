@@ -738,8 +738,9 @@ landed the `Block : { StatementList }` static-semantics early errors for
 lexical-vs-var declarations and duplicate lexical declarations, including
 function/generator/async names and nested blocks, while preserving Annex B
 sloppy duplicate block functions. The block-scope corpus moved 167/287 to
-284/287 with exactly 117 fail→pass and 0 pass→fail; the remaining 3 are the
-`in-statement-position-*` parse negatives, which become the next S14 slice.
+287/287 with exactly 120 fail→pass and 0 pass→fail, including the three
+`in-statement-position-*` loop-body negatives. The remaining S14 stream is
+the separate for-head/switch/catch/eval/with rules recorded in the receipt.
 The `test/LetConst` expectations (`letvar`, `defer3`, `for-loop`) that
 asserted the old non-conforming block `var`/`let` behavior were updated
 deliberately. Gates moved 1975/2027 → 1976/2028. No bytecode change; B4

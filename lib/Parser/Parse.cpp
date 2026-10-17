@@ -5946,8 +5946,25 @@ ParseNodeFnc * Parser::ParseFncDeclInternal(ushort flags, LPCOLESTR pNameHint, c
 
 bool Parser::FncDeclAllowedWithoutContext(ushort flags)
 {
-    // Statement context required for strict mode, async functions, and generators.
-    // Note that generators aren't detected yet when this method is called; they're checked elsewhere.
+    // Annex B allows a sloppy function declaration directly in an if clause
+    // (and in blocks), but not as the body of a loop. Labelled functions in a
+    // with statement are rejected later with their specific diagnostic.
+    switch (m_pstmtCur->GetNop())
+    {
+    case knopWhile:
+    case knopDoWhile:
+    case knopFor:
+    case knopForIn:
+    case knopForOf:
+    case knopForAwaitOf:
+        return false;
+    default:
+        break;
+    }
+
+    // Statement context is also required for strict mode and async functions.
+    // Generators aren't detected yet when this method is called; they're
+    // checked in ParseFncDeclInternal.
     return !IsStrictMode() && !(flags & fFncAsync);
 }
 

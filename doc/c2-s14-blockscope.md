@@ -1,6 +1,6 @@
 # C2-S14: block static-semantics early errors
 
-Status: landed in `5366c23f5` on top of `68784ee87` (2026-10-17).
+Status: landed in `5366c23f5` plus the statement-position follow-up `<pending>` on top of `68784ee87` (2026-10-17).
 Interpreter/Mac no-JIT verified; JIT evidence is not claimed (see B4 below).
 No flag was added; this is parser correctness.
 
@@ -22,8 +22,11 @@ ES `sec-block-static-semantics-early-errors`:
   `{ function f() {} }` is accepted, and duplicate ordinary function
   declarations are accepted in sloppy blocks but not in strict code.
 
-The 3 `syntax/function-declarations/in-statement-position-*` parse negatives
-are outside this batch (the next S14 slice; see Residual below).
+Function declarations directly as loop bodies (`while`, `do-while`, `for`,
+`for-in`, `for-of`, `for-await-of`) are also rejected, matching the
+Annex B statement-position rule; the three
+`syntax/function-declarations/in-statement-position-*` negatives now pass.
+Unlabelled `with` function declarations remain inherited (see Residual).
 
 ## Parser design
 
@@ -55,6 +58,11 @@ are outside this batch (the next S14 slice; see Residual below).
   inherited (and separately specified) behavior is unchanged. In
   particular this preserves the existing for-loop head behavior and avoids
   a broader `ForStatement` early-error change in this slice.
+- `FncDeclAllowedWithoutContext` now rejects a sloppy function declaration
+  whose immediate statement is a loop body (`knopWhile`, `knopDoWhile`,
+  `knopFor`, `knopForIn`, `knopForOf`, `knopForAwaitOf`). `if`/label/switch
+  forms remain valid; the existing labelled-function-in-`with` diagnostic is
+  preserved by leaving `with` to that check.
 - The maps live only during parsing. Deferred parsing builds them again;
   no AST/deferred-reparse payload changed, and no bytecode was regenerated.
   The maps are arena-backed; var records are deduplicated per source block,
@@ -73,15 +81,13 @@ Block-scope corpus (pinned test262 `2e0a5676…`, `-nonative -Test262
 | Run | Passed | Failed | Failures |
 |---|---:|---:|---|
 | before (`out/test262-c1-blockscope`) | 167 | 120 | 117 redeclaration + 3 statement-position |
-| after (`out/test262-c2-s14-blockscope-final2`; debug `…-debug2`) | 284 | 3 | 3 statement-position only |
+| after (`out/test262-c2-s14-blockscope-final4`; debug `…-debug4`) | **287** | **0** | none |
 
-Exact flips vs the pre-slice artifact: **117 fail→pass, 0 pass→fail**. Both
+Exact flips vs the pre-slice artifact: **120 fail→pass, 0 pass→fail**. Both
 declaration orders, nested inner blocks, class/function/async/generator/
-async-generator lexical names and function-scope variants are included in
-the flips. The only remaining block-scope failures are the three
-`in-statement-position-*` parse negatives
-(`for-statement`, `while-expression-statement` and
-`do-statement-while-expression`).
+async-generator lexical names, function-scope variants and the three
+statement-position negatives are included in the flips. The block-scope
+corpus is clean.
 
 Focused `test/es7/blockscope-early-errors.js` (registered in
 `test/es7/rlexe.xml` with `-args summary -endargs`) passes on both the test
@@ -89,8 +95,8 @@ and debug-static binaries. It covers valid Annex B blocks and sibling/
 function-boundary cases, both orders for `let`/`const`/class/function/
 generator/async/async-generator, nested blocks, loops/`switch`/`try`/
 `with`, function-scope variants, duplicate lexical functions, strict
-duplicate ordinary functions, and a `WScript.LoadScript` script-level
-parse block.
+duplicate ordinary functions, loop-body negatives, and a
+`WScript.LoadScript` script-level parse block.
 
 Direct `eval` and `WScript.LoadScript` probes (both orders, nested blocks,
 function scopes, Annex B valid cases, strict duplicate functions, catch
@@ -118,6 +124,11 @@ behavior and were updated deliberately (not silently):
 - `for-loop.js` / `for-loop.baseline`: the `{ for (var a …) … let a; }`
   case is a block redeclaration SyntaxError; the separate for-head
   `let v2`/`var v2` legacy case in `test3` is unchanged.
+- `test/es6/blockscope-functionbinding.js`: Test 20 removed its direct
+  `while`/`for`/`for-in`/`for-of`/`with` function declarations, which were
+  non-conforming; its baseline output was already unchanged.
+- `test/strict/21.functionDeclaration.baseline`: the four non-strict loop
+  cases now report `SyntaxError`, matching Node and the spec.
 
 Gates:
 
@@ -136,10 +147,8 @@ debug-static, legacy cmake test) and `doc/memory-management.md`.
 
 ## Residual
 
-The next S14 slice is the 3 statement-position function-declaration
-negatives. They still execute `$DONOTEVALUATE`, and the parse-negative
-stream remains the broader S14 triage item. The following are separate
-early-error rules and remain inherited (all pre-existing; Node rejects):
+The block-scope cluster is complete. The following are separate early-error
+rules and remain inherited (all pre-existing; Node rejects):
 
 - `ForStatement` head lexical-vs-var, e.g. `for (let f;;){ var f; }` and
   `for (let f of []){ var f; }` (4 probe cases).
@@ -147,6 +156,8 @@ early-error rules and remain inherited (all pre-existing; Node rejects):
   names across cases (2 probe cases).
 - `CatchParameter` conflicts, including simple `catch(e){ let e; }` and
   pattern/`var` cases (2 probe cases).
+- Unlabelled `with ({}) function f() {}`; the labelled form retains its
+  specific existing diagnostic.
 - `eval`-introduced var conflicts such as `{ let f; eval('var f'); }`
   (base and current both accept).
 

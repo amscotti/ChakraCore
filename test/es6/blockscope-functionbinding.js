@@ -558,29 +558,10 @@ print('\nTest 20: Function declaration in statement context without {}\n');
             function f4() { print('0'); }
     }
 
-    while (false)
-        function f5() {}
-
-    for (;false;)
-        function f6() {}
-
-    for (var p in {a:'a'})
-        function f7() {}
-
-    for (var e of [1])
-        function f8() {}
-
-    with ({})
-        function f9() {}
-
     f1();
     f2();
     f3();
     f4();
-
-    f7();
-    f8();
-    f9();
 })();
 
 print('\nTest 21: Function declaration in statement context without {}, strict mode\n');

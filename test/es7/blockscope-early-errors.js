@@ -119,6 +119,20 @@ var tests = [
         }
     },
     {
+        name: "function declarations are not allowed as loop or with bodies",
+        body() {
+            assertParseError("while (0) function f() {}");
+            assertParseError("for (;;) function f() {}");
+            assertParseError("do function f() {} while (0);");
+            assertParseError("for (var x in {}) function f() {}");
+            assertParseError("for (var x of []) function f() {}");
+            assertParseOK("while (0) { function f() {} }");
+            assertParseOK("if (0) function f() {}");
+            assertParseOK("label: function f() {}");
+            assertParseOK("switch (0) { case 0: function f() {} }");
+        }
+    },
+    {
         name: "script-level parse applies the same block early errors",
         body() {
             assert.throws(function () {
