@@ -1,6 +1,6 @@
 # C2-S14 sub-batch 2: statement-level static-semantics early errors
 
-Status: `<pending>` — uncommitted on top of `55265de59` (2026-10-17).
+Status: landed in `3fe8d4281` on top of `55265de59` (2026-10-17).
 Interpreter/Mac no-JIT verified; JIT evidence is not claimed (see B4).
 No flag was added; this is parser correctness.
 
