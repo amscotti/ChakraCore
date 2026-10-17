@@ -1,8 +1,8 @@
 # C2-S14: block static-semantics early errors
 
-Status: `<pending>` — landed in the working tree on top of `68784ee87`
-(2026-10-17); not committed. Interpreter/Mac no-JIT verified; JIT evidence is
-not claimed (see B4 below). No flag was added; this is parser correctness.
+Status: landed in `5366c23f5` on top of `68784ee87` (2026-10-17).
+Interpreter/Mac no-JIT verified; JIT evidence is not claimed (see B4 below).
+No flag was added; this is parser correctness.
 
 ## Scope and spec rule
 
