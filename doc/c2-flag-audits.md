@@ -155,6 +155,23 @@ Joins (21,440 common scenarios):
   integration, mixed-type JIT bailouts) remains C3-large; the 82 accidental
   movers must be re-verified against a real implementation.
 
+**Sub-batch 1 update (2026-10-17, receipt
+[c2-s2-bigint.md](c2-s2-bigint.md)).** The scoped
+`test/built-ins/BigInt/**/*.js` corpus is now **94/154** (was 68/154 at
+the interrupted-slice point and 32/154 in the pre-slice artifact) with
+**0 SIGABRT** (was 40); joins are 26 fail→pass / 0 pass→fail against
+`/tmp/s2-bigint` and 62/0 against `out/test262-audit-bigint`. The 86
+remaining pre-completion failures are now exactly 60: 56 missing
+`asIntN`/`asUintN` (the `arithmetic.js` pair is also blocked by
+non-decimal BigInt literal syntax), 2 wrapper arithmetic/equality, and 2
+`toString/a-z` blocked by the fail-closed mixed BigInt/Number relational
+comparison. The measurements above remain the C1-era stub record; the
+sub-batch closes the conversion/stringification/crash classes (including
+correctly rounded `Number(BigInt)`, `ToBoolean(0n) === false`, JSON BigInt
+`toJSON`/replacer handling, and cross-realm wrapper `valueOf` marshal) but
+leaves arithmetic, typed arrays, Map/Set key identity and mixed comparison
+in C3.
+
 ## S6: `-ESSharedArrayBuffer`
 
 Commands (17 s and 14 s wall): same shape as S2 with

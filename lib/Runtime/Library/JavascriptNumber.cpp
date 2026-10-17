@@ -387,9 +387,27 @@ namespace Js
             {
                 result = JavascriptNumber::ToVarNoCheck(VarTo<JavascriptNumberObject>(args[1])->GetValue(), scriptContext);
             }
+            else if (VarIs<JavascriptBigInt>(args[1]))
+            {
+                // Number(bigint) is the one explicit BigInt-to-Number
+                // conversion in the language; ToNumber itself throws.
+                result = JavascriptNumber::ToVarNoCheck(VarTo<JavascriptBigInt>(args[1])->ToDouble(), scriptContext);
+            }
             else
             {
-                result = JavascriptNumber::ToVarNoCheck(JavascriptConversion::ToNumber(args[1], scriptContext), scriptContext);
+                // Number(Object(1n)) and objects whose @@toPrimitive/valueOf
+                // returns a BigInt use ToPrimitive followed by the same
+                // explicit BigInt-to-Number conversion; ToNumber(BigInt)
+                // itself must still throw.
+                Var primitive = JavascriptConversion::ToPrimitive<JavascriptHint::HintNumber>(args[1], scriptContext);
+                if (VarIs<JavascriptBigInt>(primitive))
+                {
+                    result = JavascriptNumber::ToVarNoCheck(VarTo<JavascriptBigInt>(primitive)->ToDouble(), scriptContext);
+                }
+                else
+                {
+                    result = JavascriptNumber::ToVarNoCheck(JavascriptConversion::ToNumber(primitive, scriptContext), scriptContext);
+                }
             }
         }
         else

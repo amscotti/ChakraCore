@@ -55,6 +55,7 @@ PROPERTY_STRING(BooleanTypeDisplay, _u("boolean"))
 PROPERTY_STRING(NumberTypeDisplay, _u("number"))
 PROPERTY_STRING(ModuleTypeDisplay, _u("Module"))
 PROPERTY_STRING(SymbolTypeDisplay, _u("symbol"))
+STRING(BigIntTypeDisplay, _u("bigint"))
 
 #ifdef ENABLE_INTL_OBJECT
 STRING(IntlCaseFirstUpper, _u("upper"))

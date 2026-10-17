@@ -14,7 +14,12 @@ var tests = [
         body: function () {
             assert.isTrue(BigInt.length == 1);
             assert.isTrue(BigInt.name == "BigInt");
-            assert.isTrue(BigInt.prototype == "[object Object]");
+            // ES2020: BigInt.prototype is an ordinary object with
+            // @@toStringTag "BigInt"; it has no [[BigIntData]], so the
+            // BigInt prototype valueOf/toString throw instead of falling
+            // back to Object.prototype helpers (Node 26.5.0 agrees).
+            assert.isTrue(Object.prototype.toString.call(BigInt.prototype) == "[object BigInt]");
+            assert.throws(function () { BigInt.prototype == "[object Object]"; }, TypeError);
             assert.isTrue(BigInt.prototype.constructor === BigInt);
             assert.isTrue(BigInt.__proto__ === Function.prototype);
         }

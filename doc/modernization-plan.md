@@ -645,11 +645,29 @@ symbols-gated scenarios), match-indices+duplicate-names 30/30, joins vs
 C1 96/0, 102/0, 28/0, resym universe 4,113/2,086 with 260/0 vs C1
 (36/0 incremental), gates moved to 1974/2026. The remaining S9 work
 (`v` flag after S3, modifiers) stays C2-per-batch.
+S2 sub-batch 1 then landed the BigInt conversion/stringification/crash
+slice on Mac no-JIT (`BigInt(...)`/ToBigInt, multi-digit NumberToBigInt,
+StringToBigInt, `typeof "bigint"`, `toString` radix 2–36, `valueOf`,
+`@@toStringTag`, wrapper `ToObject`, correctly rounded `Number(BigInt)`
+(including `Number(Object(1n))`), `ToBoolean(0n) === false`, JSON BigInt
+`toJSON`/replacer handling and
+cross-realm wrapper `valueOf` marshal, and controlled `TypeError`s for
+unsupported operator paths; receipt
+[c2-s2-bigint.md](c2-s2-bigint.md)). The scoped corpus is 94/154 (32/154
+pre-slice, 68/154 at the interrupted-slice point) with 62/0 fail→pass vs
+pre-slice and 26/0 vs the interrupted slice; the 40-SIGABRT crash class
+is gone and the 6 JSON BigInt files pass 12/12 on both binaries. The 60
+residual failures are exactly missing `asIntN`/`asUintN` (56;
+`arithmetic.js` also needs non-decimal BigInt literal parsing), wrapper
+arithmetic/equality (2), and the fail-closed mixed relational comparison
+in `toString/a-z.js` (2). Gates moved to 1975/2027. BigInt arithmetic,
+BigInt64Array, Map/Set key identity, mixed comparison and the literal
+grammar stay C3-large.
 S6 shows zero regressions under `-ESSharedArrayBuffer` but
 needs a product/security decision before any default, plus
-waitAsync/growable/non-shared-Atomics work; S2's flagged path is a stub
-(accidental passes only, and a `BigInt()` SIGABRT crash class), so
-BigInt completion stays C3-large. The alternative next batch remains
+waitAsync/growable/non-shared-Atomics work; S2's flagged path no longer
+has a host-crash class but its arithmetic/typed-array completion still
+stays C3-large. The alternative next batch remains
 the S12 import-attributes cluster or a C3 slice.
 
 **Next platform gate:** B4 native execution. Provision a native x64 Linux

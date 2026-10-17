@@ -648,8 +648,12 @@ using namespace Js;
 
         if ((leftType == TypeIds_BigInt) || (rightType == TypeIds_BigInt))
         {
-            // TODO: support comparison with types other than BigInt
-            AssertOrFailFastMsg(leftType == rightType, "do not support comparison with types other than BigInt");
+            if (leftType != rightType)
+            {
+                // TODO(BigInt): mathematical mixed BigInt/Number comparison needs
+                // the real value type; fail closed instead of aborting the host.
+                JavascriptError::ThrowTypeError(scriptContext, VBSERR_TypeMismatch, _u("Compare BigInt"));
+            }
             return JavascriptBigInt::LessThan(aLeft, aRight);
         }
 

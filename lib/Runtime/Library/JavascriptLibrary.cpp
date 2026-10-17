@@ -3725,6 +3725,10 @@ namespace Js
                 typeDisplayStrings[typeId] = GetSymbolTypeDisplayString();
                 break;
 
+            case TypeIds_BigInt:
+                typeDisplayStrings[typeId] = GetBigIntTypeDisplayString();
+                break;
+
             case TypeIds_Integer:
             case TypeIds_Number:
             case TypeIds_Int64Number:
@@ -4155,12 +4159,19 @@ namespace Js
 
     bool JavascriptLibrary::InitializeBigIntPrototype(DynamicObject* bigIntPrototype, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)
     {
-        const int numberOfProperties = 1;
+        const int numberOfProperties = 5;
         typeHandler->Convert(bigIntPrototype, mode, numberOfProperties);
         // TODO(BigInt): Any new function addition/deletion/modification should also be updated in JavascriptLibrary::ProfilerRegisterBigInt
         // so that the update is in sync with profiler
+        ScriptContext* scriptContext = bigIntPrototype->GetScriptContext();
         JavascriptLibrary* library = bigIntPrototype->GetLibrary();
         library->AddMember(bigIntPrototype, PropertyIds::constructor, library->bigIntConstructor);
+        // The spec names are registered as tracked dynamic property ids, so
+        // no new static PropertyIds/bytecode header entries are required.
+        library->AddFunctionToLibraryObjectWithPropertyName(bigIntPrototype, _u("toString"), &JavascriptBigInt::EntryInfo::ToString, 0);
+        library->AddFunctionToLibraryObjectWithPropertyName(bigIntPrototype, _u("toLocaleString"), &JavascriptBigInt::EntryInfo::ToLocaleString, 0);
+        library->AddFunctionToLibraryObjectWithPropertyName(bigIntPrototype, _u("valueOf"), &JavascriptBigInt::EntryInfo::ValueOf, 0);
+        library->AddMember(bigIntPrototype, PropertyIds::_symbolToStringTag, library->CreateStringFromCppLiteral(_u("BigInt")), PropertyConfigurable);
 
         bigIntPrototype->SetHasNoEnumerableProperties(true);
 
@@ -7256,6 +7267,12 @@ namespace Js
         return RecyclerNew(this->GetRecycler(), JavascriptSymbolObject, value, symbolTypeDynamic);
     }
 
+    JavascriptBigIntObject* JavascriptLibrary::CreateBigIntObject(JavascriptBigInt* value)
+    {
+        AssertMsg(bigintTypeDynamic, "Where's bigintTypeDynamic?");
+        return RecyclerNew(this->GetRecycler(), JavascriptBigIntObject, value, bigintTypeDynamic);
+    }
+
     JavascriptNumberObject* JavascriptLibrary::CreateNumberObject(Var number)
     {
         AssertMsg(numberTypeDynamic, "Where's numberTypeDynamic?");
@@ -7696,6 +7713,11 @@ namespace Js
 
         REGISTER_OBJECT(Promise);
 
+        if (config.IsESBigIntEnabled())
+        {
+            REGISTER_OBJECT(BigInt);
+        }
+
         if (config.IsES6ProxyEnabled())
         {
             REGISTER_OBJECT(Proxy);
@@ -7867,8 +7889,12 @@ namespace Js
         HRESULT hr = S_OK;
         REG_GLOBAL_CONSTRUCTOR(BigInt);
 
-        //DEFINE_OBJECT_NAME(BigInt);
-        
+        DEFINE_OBJECT_NAME(BigInt);
+
+        REG_OBJECTS_LIB_FUNC(toString, JavascriptBigInt::EntryToString);
+        REG_OBJECTS_LIB_FUNC(toLocaleString, JavascriptBigInt::EntryToLocaleString);
+        REG_OBJECTS_LIB_FUNC(valueOf, JavascriptBigInt::EntryValueOf);
+
         return hr;
     }
 

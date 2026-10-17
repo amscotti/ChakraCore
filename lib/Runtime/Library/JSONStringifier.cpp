@@ -270,6 +270,12 @@ JSONStringifier::TryConvertPrimitiveObject(_In_ RecyclableObject* value)
             ? this->scriptContext->GetLibrary()->GetTrue()
             : this->scriptContext->GetLibrary()->GetFalse();
     }
+    else if (TypeIds_BigIntObject == id)
+    {
+        // SerializeJSONProperty unwraps [[BigIntData]] before the final
+        // BigInt check, which then throws TypeError for the primitive.
+        return UnsafeVarTo<JavascriptBigIntObject>(value)->GetValue();
+    }
     return nullptr;
 }
 
@@ -761,6 +767,12 @@ JSONStringifier::ReadData(_In_ RecyclableObject* valueObj, _Out_ JSONProperty* p
         this->totalStringLength = UInt32Math::Add(this->totalStringLength, CalculateStringElementLength(prop->stringValue));
         return;
 
+    case TypeIds_BigInt:
+        // SerializeJSONProperty has no wire representation for BigInt and
+        // throws after toJSON/replacer handling.
+        JavascriptError::ThrowTypeError(this->scriptContext, VBSERR_TypeMismatch, _u("JSON.stringify BigInt"));
+        return;
+
     case TypeIds_Symbol:
         // Treat symbols as undefined
     case TypeIds_Undefined:
@@ -841,9 +853,10 @@ JSONStringifier::ReadProperty(
     if (valueObj)
     {
         isObject = JavascriptOperators::IsObject(valueObj) != FALSE;
-        if (isObject)
+        // SerializeJSONProperty consults toJSON for BigInt primitives as
+        // well as objects (ES2020, step 2).
+        if (isObject || JavascriptOperators::GetTypeId(valueObj) == TypeIds_BigInt)
         {
-            // If value is an object, we must first check if it has a ToJSON method
             Var toJSONValue = this->ToJSON(key, valueObj);
             if (toJSONValue != nullptr)
             {

@@ -18,12 +18,13 @@ No --not-tag: ICU is present in these profiles, so TEST_ICU is empty
 Slow, ...) is runtests.py's own and therefore identical by
 construction.
 
-Requires the legacy baseline counts for the selection: 1974 passed /
-0 failed (--test), 2026 passed / 0 failed (--debug) (counts per the
-S9 receipts, doc/c2-s9-namedgroups.md, which registered namedgroups.js,
-namedgroups-symbols.js, regexp-indices.js, regexp-indices-symbols.js,
-namedgroups-dup.js and regexp-lookbehind.js on top of C2-S7's
-1968/2020; earlier rungs:
+Requires the legacy baseline counts for the selection: 1975 passed /
+0 failed (--test), 2027 passed / 0 failed (--debug). C2-S2
+sub-batch 1 registered bigint-basics.js (doc/c2-s2-bigint.md) on top
+of the S9 receipts, doc/c2-s9-namedgroups.md, which registered
+namedgroups.js, namedgroups-symbols.js, regexp-indices.js,
+regexp-indices-symbols.js, namedgroups-dup.js and
+regexp-lookbehind.js on top of C2-S7's 1968/2020; earlier rungs:
 matchall.js 1967/2019, the S11 remainder's s11-builtins.js
 1966/2018, C2-S10's Set-methods/copy-by-change 1965/2017 and
 1966/2018, S11 replaceAll 1964/2016, S5 1962/2014). The --debug selection honestly differs
@@ -36,11 +37,11 @@ runtests.py's own per-test timeout is untouched.
 
 Usage: check_regression.py <runtests.py> <ch> [--select test|debug]
        [--expected-passed N] [--expected-failed M] [--self-test]
-Defaults: --select test, 1974/0 (the B2 test profile; count raised
-by S9's regexp-lookbehind.js registration, on top of namedgroups-dup.js,
-regexp-indices.js, regexp-indices-symbols.js, namedgroups.js and
-namedgroups-symbols.js from the earlier S9 rungs and C2-S7's 1968,
-doc/c2-s9-namedgroups.md).
+Defaults: --select test, 1975/0 (the B2 test profile; count raised
+by S2-b1's bigint-basics.js on top of S9's regexp-lookbehind.js,
+namedgroups-dup.js, regexp-indices.js, regexp-indices-symbols.js,
+namedgroups.js and namedgroups-symbols.js from the earlier S9 rungs
+and C2-S7's 1968, doc/c2-s2-bigint.md, doc/c2-s9-namedgroups.md).
 Exit code: 0 iff the suite ran green with exactly the expected counts.
 """
 
@@ -53,11 +54,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common
 
 TOTAL_RE = re.compile(r"^Total: passed (\d+), failed (\d+)\s*$")
-EXPECTED_PASSED = 1974
+EXPECTED_PASSED = 1975
 EXPECTED_FAILED = 0
-# Per-selection legacy baselines (counts: doc/c2-s9-namedgroups.md; S9
-# added namedgroups.js + namedgroups-symbols.js over C2-S7's 1968/2020,
-# then its sub-batch 2 added regexp-indices.js +
+# Per-selection legacy baselines (counts: doc/c2-s2-bigint.md and
+# doc/c2-s9-namedgroups.md; S2 sub-batch 1 added bigint-basics.js on top
+# of S9, which added namedgroups.js + namedgroups-symbols.js over C2-S7's
+# 1968/2020, then its sub-batch 2 added regexp-indices.js +
 # regexp-indices-symbols.js, sub-batch 3 added namedgroups-dup.js, and
 # sub-batch 4 added regexp-lookbehind.js;
 # before that the rungs were matchall.js
@@ -67,7 +69,7 @@ EXPECTED_FAILED = 0
 # explicit CLI args so a wiring mistake (debug flag with test counts)
 # fails instead of silently passing on a wrong gate.
 SELECT_FLAGS = {"test": "--test", "debug": "--debug"}
-SELECT_COUNTS = {"test": (1974, 0), "debug": (2026, 0)}
+SELECT_COUNTS = {"test": (1975, 0), "debug": (2027, 0)}
 
 
 def parse_total(lines):
@@ -103,7 +105,7 @@ def self_test():
     """Negative controls: the parser/verdict must reject doctored logs."""
     cases = [
         ("exact baseline",
-         ["Total: passed 1974, failed 0"], True),
+         ["Total: passed 1975, failed 0"], True),
         ("one failure",
          ["Total: passed 1960, failed 1"], False),
         ("wrong total",
@@ -130,19 +132,19 @@ def self_test():
             bad += 1
         print("self-test %-16s -> %s (verdict=%s err=%r)"
               % (name, status, "accept" if ok else "reject", err))
-    # Profile-awareness pins: the --debug baseline (2026/0) must be
+    # Profile-awareness pins: the --debug baseline (2027/0) must be
     # accepted under debug expectations and rejected under test
     # expectations, so a count/selection mismatch can never pass.
     try:
-        err = check_counts(parse_total(["Total: passed 2026, failed 0"]),
+        err = check_counts(parse_total(["Total: passed 2027, failed 0"]),
                            *SELECT_COUNTS["debug"])
     except ValueError as e:
         err = str(e)
     if err is None:
-        print("self-test %-16s -> PASS (verdict=accept)" % "debug 2026/0")
+        print("self-test %-16s -> PASS (verdict=accept)" % "debug 2027/0")
     else:
         print("self-test %-16s -> FAIL (verdict=reject err=%r)"
-              % ("debug 2026/0", err))
+              % ("debug 2027/0", err))
         bad += 1
     try:
         err = check_counts(parse_total(["Total: passed 2014, failed 0"]),
@@ -178,7 +180,7 @@ def main(argv):
     args = list(argv[1:])
     if "--self-test" in args:
         return self_test()
-    exp_passed, exp_failed = EXPECTED_PASSED, EXPECTED_FAILED
+    exp_passed, exp_failed = None, None
     select = "test"
     rest = []
     i = 0
@@ -199,6 +201,13 @@ def main(argv):
         print("check_regression: bad --select %r: expected one of: %s"
               % (select, ", ".join(sorted(SELECT_FLAGS))), file=sys.stderr)
         return 2
+    # Fill only the options the caller omitted, so partial overrides such as
+    # --expected-failed alone remain meaningful to the verdict.
+    default_passed, default_failed = SELECT_COUNTS[select]
+    if exp_passed is None:
+        exp_passed = default_passed
+    if exp_failed is None:
+        exp_failed = default_failed
     if len(rest) != 2:
         print("usage: check_regression.py <runtests.py> <ch> "
               "[--select test|debug] [--expected-passed N] "

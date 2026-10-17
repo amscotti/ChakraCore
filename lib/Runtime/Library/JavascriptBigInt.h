@@ -46,11 +46,29 @@ namespace Js
 
         inline BOOL isNegative() { return m_isNegative; }
 
+        // Canonical zero is one zero limb; a zero-length intermediate is also
+        // treated as zero so callers never index past the digit array.
+        bool IsZeroValue() const { return m_length == 0 || (m_length == 1 && m_digits[0] == 0); }
+
         static JavascriptBigInt * CreateZero(ScriptContext * scriptContext);
         static JavascriptBigInt * CreateZeroWithLength(digit_t length, ScriptContext * scriptContext);
         static JavascriptBigInt * CreateOne(ScriptContext * scriptContext);
         static JavascriptBigInt * Create(const char16 * content, charcount_t cchUseLength, bool isNegative, ScriptContext * scriptContext);
+        // Conversion factories backing ToBigInt. Each returns nullptr when the
+        // input has no BigInt representation so the caller owns the error class:
+        // CreateFromNumber rejects NaN, +/-Infinity and non-integral values;
+        // CreateFromString rejects everything outside the StringToBigInt
+        // grammar (decimal, or an unsigned 0x/0o/0b form).
+        static JavascriptBigInt * CreateFromNumber(double value, ScriptContext * scriptContext);
+        static JavascriptBigInt * CreateFromString(const char16 * content, charcount_t cchContent, ScriptContext * scriptContext);
         virtual RecyclableObject * CloneToScriptContext(ScriptContext* requestContext) override;
+        virtual RecyclableObject* ToObject(ScriptContext * requestContext) override;
+        virtual Var GetTypeOfString(ScriptContext * requestContext) override;
+
+        JavascriptString* ToString(ScriptContext * requestContext);
+        JavascriptString* ToString(uint32 radix, ScriptContext * requestContext);
+        double ToDouble() const;
+        static JavascriptBigInt * ThisBigIntValue(Var value, ScriptContext * scriptContext);
 
         class EntryInfo
         {
@@ -58,9 +76,13 @@ namespace Js
             static FunctionInfo NewInstance;
             static FunctionInfo ValueOf;
             static FunctionInfo ToString;
+            static FunctionInfo ToLocaleString;
         };
 
         static Var NewInstance(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryValueOf(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryToString(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryToLocaleString(RecyclableObject* function, CallInfo callInfo, ...);
 
         virtual BOOL Equals(Var other, BOOL* value, ScriptContext * requestContext) override;
 
@@ -73,6 +95,7 @@ namespace Js
         void InitFromCharDigits(const EncodedChar *prgch, uint32 cch, bool isNegative); // init from char of digits
 
         void MulThenAdd(digit_t luMul, digit_t luAdd);
+        static uint32 DivModInPlace(digit_t * digits, digit_t& length, uint32 divisor);
         static bool IsZero(JavascriptBigInt * pbi);
         static void AbsoluteIncrement(JavascriptBigInt * pbi);
         static void AbsoluteDecrement(JavascriptBigInt * pbi);

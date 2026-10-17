@@ -462,6 +462,27 @@ BigInt-tagged C1 failures lie in this file set; the rest cannot move on
 the flag. Completion confirmed **C3-large**; the SIGABRT is a candidate
 one-line defensive fix independent of the feature.)*
 
+*(sub-batch 1, 2026-10-17, [c2-s2-bigint.md](c2-s2-bigint.md): landed the
+scoped conversion/stringification/crash-safety slice on Mac no-JIT. The
+scoped corpus is 94/154 with 0 SIGABRT (pre-slice 32/154 with 40 SIGABRT;
+interrupted-slice pre-completion 68/154), 62 fail→pass and 0 pass→fail vs
+the pre-slice artifact, 26/0 vs the interrupted-slice artifact. `typeof
+10n` is `bigint`, `10n.toString()` is `10` (radix 2–36 and `valueOf`
+landed), multi-digit `NumberToBigInt` and `StringToBigInt` work, `String`/
+template/concat stringify BigInt, `ToBoolean(0n)` is false, `Number(BigInt)`
+is correctly rounded (including `Number(Object(1n))`), `JSON.stringify`
+throws for BigInt unless `toJSON`/a replacer converts it, cross-realm
+wrapper `valueOf` marshals correctly, and
+all unsupported operators now throw a controlled `TypeError` (no
+assert/abort). Remaining scoped failures are
+exactly `asIntN` 28 + `asUintN` 28 (methods absent; `arithmetic.js` also
+blocked by `0x`/`0b`/`0o` BigInt literal parsing), wrapper arithmetic/
+equality 2, and `toString/a-z` 2 (its loop condition is the still
+fail-closed mixed BigInt/Number relational comparison). C3 completion
+therefore still owns asIntN/asUintN, all remaining arithmetic, BigInt64
+typed arrays, mixed comparison/abstract equality, wrapper arithmetic, and
+non-decimal BigInt literal grammar. Gates moved 1974/2026 → 1975/2027.)*
+
 **S3. RegExp Unicode property escapes (`\p{…}`, `\P{…}`).** Repro:
 `python3 tools/test262/run.py --binary zig-out/bin/ch --output out/test262-c1-reprop 'test/built-ins/RegExp/property-escapes/**/*.js'`.
 Subsystem: RegExp (Runtime/Library) + Unicode data/ICU. Prerequisite: a

@@ -18,3 +18,6 @@ lib/**/*.js eol=lf diff=cpp
 *.vcproj text eol=crlf diff=xml
 *.vcxproj text eol=crlf diff=xml
 *.sln text eol=crlf diff=xml
+# Same rationale: the S2 sub-batch 1 BigInt prototype expectation edit
+# touches a CRLF file whose historical lines are pinned.
+test/BigInt/global_object.js whitespace=cr-at-eol

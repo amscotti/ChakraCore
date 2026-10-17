@@ -649,6 +649,9 @@ CommonNumber:
             case TypeIds_Symbol:
                 return UnsafeVarTo<JavascriptSymbol>(aValue)->ToString(scriptContext);
 
+            case TypeIds_BigInt:
+                return UnsafeVarTo<JavascriptBigInt>(aValue)->ToString(scriptContext);
+
             case TypeIds_SymbolObject:
                 return JavascriptSymbol::ToString(UnsafeVarTo<JavascriptSymbolObject>(aValue)->GetValue(), scriptContext);
 
@@ -699,6 +702,9 @@ CommonNumber:
 
         case TypeIds_Symbol:
             return UnsafeVarTo<JavascriptSymbol>(aValue)->ToString(scriptContext);
+
+        case TypeIds_BigInt:
+            return UnsafeVarTo<JavascriptBigInt>(aValue)->ToString(scriptContext);
 
         default:
             {
@@ -758,6 +764,10 @@ CommonNumber:
 
         case TypeIds_Symbol:
             return true;
+
+        case TypeIds_BigInt:
+            // ToBoolean(BigInt): 0n is false; every other BigInt is true.
+            return !UnsafeVarTo<JavascriptBigInt>(aValue)->IsZeroValue();
 
 #if !FLOATVAR
         case TypeIds_Number:
@@ -856,6 +866,7 @@ CommonNumber:
             switch (JavascriptOperators::GetTypeId(aValue))
             {
             case TypeIds_Symbol:
+            case TypeIds_BigInt:
                 JavascriptError::TryThrowTypeError(objectScriptContext, scriptContext, JSERR_NeedNumber);
                 // Fallthrough to return NaN if exceptions are disabled
 
@@ -910,6 +921,7 @@ CommonNumber:
             switch (JavascriptOperators::GetTypeId(aValue))
             {
             case TypeIds_Symbol:
+            case TypeIds_BigInt:
                 JavascriptError::TryThrowTypeError(objectScriptContext, scriptContext, JSERR_NeedNumber);
                 // Fallthrough to return 0 if exceptions are disabled
             case TypeIds_Undefined:
@@ -984,6 +996,7 @@ CommonNumber:
         switch (typeId)
         {
         case TypeIds_Symbol:
+        case TypeIds_BigInt:
             JavascriptError::TryThrowTypeError(objectScriptContext, scriptContext, JSERR_NeedNumber);
             // Fallthrough to return 0 if exceptions are disabled
         case TypeIds_Undefined:
@@ -1025,6 +1038,7 @@ CommonNumber:
         switch (JavascriptOperators::GetTypeId(aValue))
         {
         case TypeIds_Symbol:
+        case TypeIds_BigInt:
             JavascriptError::TryThrowTypeError(objectScriptContext, scriptContext, JSERR_NeedNumber);
             // Fallthrough to return 0 if exceptions are disabled
         case TypeIds_Undefined:
@@ -1078,6 +1092,7 @@ CommonNumber:
             switch (JavascriptOperators::GetTypeId(aValue))
             {
             case TypeIds_Symbol:
+            case TypeIds_BigInt:
                 JavascriptError::TryThrowTypeError(objectScriptContext, scriptContext, JSERR_NeedNumber);
                 // Fallthrough to return false and set result to 0 if exceptions are disabled
             case TypeIds_Undefined:
@@ -1210,6 +1225,7 @@ CommonNumber:
             switch (JavascriptOperators::GetTypeId(aValue))
             {
             case TypeIds_Symbol:
+            case TypeIds_BigInt:
                 JavascriptError::TryThrowTypeError(objectScriptContext, scriptContext, JSERR_NeedNumber);
                 // Fallthrough to return 0 if exceptions are disabled
             case TypeIds_Undefined:
@@ -1288,6 +1304,7 @@ CommonNumber:
             switch (JavascriptOperators::GetTypeId(aValue))
             {
             case TypeIds_Symbol:
+            case TypeIds_BigInt:
                 JavascriptError::TryThrowTypeError(objectScriptContext, scriptContext, JSERR_NeedNumber);
                 // Fallthrough to return 0 if exceptions are disabled
             case TypeIds_Undefined:
@@ -1430,12 +1447,60 @@ CommonNumber:
     JavascriptBigInt *JavascriptConversion::ToBigInt(Var aValue, ScriptContext* scriptContext)
     {
         Assert(scriptContext->GetThreadContext()->IsScriptActive());
-        switch (JavascriptOperators::GetTypeId(aValue))
+
+        Var value = aValue;
+        bool primitiveCoerced = false;
+        for (;;)
         {
-        case TypeIds_BigInt:
-            break;
-        default:
-            AssertOrFailFastMsg(false, "do not support conversion of other types in ToBigInt");
+            switch (JavascriptOperators::GetTypeId(value))
+            {
+            case TypeIds_BigInt:
+                return UnsafeVarTo<JavascriptBigInt>(value);
+
+            case TypeIds_Boolean:
+                return value == scriptContext->GetLibrary()->GetTrue() ?
+                    JavascriptBigInt::CreateOne(scriptContext) :
+                    JavascriptBigInt::CreateZero(scriptContext);
+
+            case TypeIds_Integer:
+            case TypeIds_Number:
+            {
+                double numberValue = TaggedInt::Is(value) ? TaggedInt::ToDouble(value) : JavascriptNumber::GetValue(value);
+                JavascriptBigInt * result = JavascriptBigInt::CreateFromNumber(numberValue, scriptContext);
+                if (result == nullptr)
+                {
+                    // NumberToBigInt: NaN, +/-Infinity and non-integral values
+                    // have no BigInt representation.
+                    JavascriptError::ThrowRangeError(scriptContext, VBSERR_TypeMismatch, _u("NumberToBigInt"));
+                }
+                return result;
+            }
+
+            case TypeIds_String:
+            {
+                JavascriptString * stringValue = UnsafeVarTo<JavascriptString>(value);
+                JavascriptBigInt * result = JavascriptBigInt::CreateFromString(stringValue->GetSz(), stringValue->GetLength(), scriptContext);
+                if (result == nullptr)
+                {
+                    // Not parseable by the StringToBigInt grammar
+                    JavascriptError::ThrowSyntaxError(scriptContext, VBSERR_TypeMismatch, _u("StringToBigInt"));
+                }
+                return result;
+            }
+
+            case TypeIds_Undefined:
+            case TypeIds_Null:
+            case TypeIds_Symbol:
+                JavascriptError::ThrowTypeError(scriptContext, VBSERR_TypeMismatch, _u("ToBigInt"));
+
+            default:
+                if (primitiveCoerced)
+                {
+                    // ToPrimitive returned a non-convertible exotic primitive
+                    JavascriptError::ThrowTypeError(scriptContext, VBSERR_TypeMismatch, _u("ToBigInt"));
+                }
+                value = JavascriptConversion::ToPrimitive<JavascriptHint::HintNumber>(value, scriptContext);
+                primitiveCoerced = true;
+            }
         }
-        return UnsafeVarTo<JavascriptBigInt>(aValue);
     }

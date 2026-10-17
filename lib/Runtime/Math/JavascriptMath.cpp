@@ -491,16 +491,10 @@ StringCommon:
         {
             TypeId typeLeft = JavascriptOperators::GetTypeId(primLeft);
             TypeId typeRight = JavascriptOperators::GetTypeId(primRight);
-            if (typeLeft == TypeIds_BigInt || typeRight == TypeIds_BigInt)
-            {
-                if (typeRight != typeLeft)
-                {
-                    JavascriptError::ThrowTypeError(scriptContext, VBSERR_TypeMismatch, _u("Add BigInt"));
-                }
-                return JavascriptBigInt::Add(primLeft, primRight);
-            }
 
-            // If either side is a string, then the result is also a string
+            // If either side is a string, then the result is also a string.
+            // This precedes the BigInt check: ToString(BigInt) is defined, so
+            // "" + 1n and "x" + 1n concatenate instead of throwing.
             if (typeLeft == TypeIds_String)
             {
                 JavascriptString* stringLeft = UnsafeVarTo<JavascriptString>(primLeft);
@@ -532,6 +526,18 @@ StringCommon:
                     return stringLeft->ConcatDestructive(stringRight);
                 }
                 return JavascriptString::Concat(stringLeft, stringRight);
+            }
+
+            if (typeLeft == TypeIds_BigInt || typeRight == TypeIds_BigInt)
+            {
+                if (typeRight != typeLeft)
+                {
+                    // BigInt + Number (and any other non-String primitive) is
+                    // a TypeError. Fail closed rather than converting through
+                    // ToNumber, which has no BigInt case.
+                    JavascriptError::ThrowTypeError(scriptContext, VBSERR_TypeMismatch, _u("Add BigInt"));
+                }
+                return JavascriptBigInt::Add(primLeft, primRight);
             }
 
             double sum = Add_Helper(primLeft, primRight, scriptContext);

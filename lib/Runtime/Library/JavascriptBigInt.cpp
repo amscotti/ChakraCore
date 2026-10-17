@@ -4,11 +4,152 @@
 //-------------------------------------------------------------------------------------------------------
 #include "RuntimeLibraryPch.h"
 
+#include <cmath>
+#include <limits>
+
 namespace Js
 {
     JavascriptBigInt * JavascriptBigInt::Create(const char16 * content, charcount_t cchUseLength, bool isNegative, ScriptContext * scriptContext)
     {
         return RecyclerNew(scriptContext->GetRecycler(), JavascriptBigInt, content, cchUseLength, isNegative, scriptContext->GetLibrary()->GetBigIntTypeStatic());
+    }
+
+    JavascriptBigInt * JavascriptBigInt::CreateFromNumber(double value, ScriptContext * scriptContext)
+    {
+        // NumberToBigInt: NaN, +/-Infinity and non-integral values have no
+        // BigInt representation and throw (RangeError); the caller checks.
+        if (JavascriptNumber::IsNan(value) || JavascriptNumber::IsPosInf(value) ||
+            JavascriptNumber::IsNegInf(value) || value != floor(value))
+        {
+            return nullptr;
+        }
+
+        // Integral doubles are exact multiples of a power of two, so splitting
+        // the magnitude into half-limb chunks is lossless. A digit_t is
+        // uintptr_t: 64-bit on the main builds, 32-bit on x86/ARM Windows.
+        // Feed the chunks from the most significant one down; MulThenAdd
+        // scales the existing multi-digit value by the chunk base and adds
+        // the chunk. This is NumberToBigInt for every finite integral double
+        // the BigInt representation supports.
+        bool isNegative = value < 0;
+        double remaining = isNegative ? -value : value;
+        if (remaining == 0)
+        {
+            return JavascriptBigInt::CreateZero(scriptContext); // includes -0 -> 0n
+        }
+
+        const uint32 chunkBits = sizeof(digit_t) * 4;
+        const double chunkBase = std::ldexp(1.0, static_cast<int>(chunkBits));
+        uint32 chunks[1024 / (sizeof(digit_t) * 4) + 2]; // 2^1024 / chunkBase + 1
+        uint32 chunkCount = 0;
+        while (remaining >= 1.0)
+        {
+            Assert(chunkCount < sizeof(chunks) / sizeof(chunks[0]));
+            double high = floor(remaining / chunkBase);
+            chunks[chunkCount++] = static_cast<uint32>(remaining - high * chunkBase);
+            remaining = high;
+        }
+
+        JavascriptBigInt * bigintNew = JavascriptBigInt::CreateZero(scriptContext);
+        for (uint32 i = chunkCount; i > 0; i--)
+        {
+            bigintNew->MulThenAdd(static_cast<digit_t>(chunkBase), chunks[i - 1]);
+        }
+        bigintNew->m_isNegative = isNegative;
+        return bigintNew;
+    }
+
+    namespace
+    {
+        // StrWhiteSpace from the StringNumericLiteral grammar (used by StringToBigInt).
+        bool IsBigIntWhiteSpace(char16 character)
+        {
+            return character == 0x0020
+                || (character >= 0x0009 && character <= 0x000D)
+                || character == 0x00A0
+                || character == 0x1680
+                || (character >= 0x2000 && character <= 0x200A)
+                || character == 0x2028
+                || character == 0x2029
+                || character == 0x202F
+                || character == 0x205F
+                || character == 0x3000
+                || character == 0xFEFF;
+        }
+
+        uint32 BigIntDigitValue(char16 character, uint32 radix)
+        {
+            uint32 digitValue;
+            if (character >= _u('0') && character <= _u('9'))
+            {
+                digitValue = character - _u('0');
+            }
+            else if (character >= _u('a') && character <= _u('f'))
+            {
+                digitValue = character - _u('a') + 10;
+            }
+            else if (character >= _u('A') && character <= _u('F'))
+            {
+                digitValue = character - _u('A') + 10;
+            }
+            else
+            {
+                return static_cast<uint32>(-1);
+            }
+            return digitValue < radix ? digitValue : static_cast<uint32>(-1);
+        }
+    }
+
+    JavascriptBigInt * JavascriptBigInt::CreateFromString(const char16 * content, charcount_t cchContent, ScriptContext * scriptContext)
+    {
+        Assert(content != nullptr);
+
+        const char16 * pch = content;
+        const char16 * pchEnd = content + cchContent;
+        while (pch < pchEnd && IsBigIntWhiteSpace(*pch)) pch++;
+        while (pchEnd > pch && IsBigIntWhiteSpace(pchEnd[-1])) pchEnd--;
+        if (pch == pchEnd)
+        {
+            return JavascriptBigInt::CreateZero(scriptContext); // empty/blank string is 0n
+        }
+
+        bool hasSign = (*pch == _u('-') || *pch == _u('+'));
+        bool isNegative = (*pch == _u('-'));
+        if (hasSign) pch++;
+
+        // StringToBigInt grammar: the 0x/0o/0b prefixed forms are unsigned
+        // only, so a sign in front of a prefix (e.g. "-0x1") is a syntax error.
+        uint32 radix = 10;
+        if (pchEnd - pch >= 2 && pch[0] == _u('0'))
+        {
+            char16 radixChar = pch[1];
+            if (radixChar == _u('x') || radixChar == _u('X')) { if (hasSign) return nullptr; radix = 16; pch += 2; }
+            else if (radixChar == _u('o') || radixChar == _u('O')) { if (hasSign) return nullptr; radix = 8; pch += 2; }
+            else if (radixChar == _u('b') || radixChar == _u('B')) { if (hasSign) return nullptr; radix = 2; pch += 2; }
+        }
+        if (pch == pchEnd)
+        {
+            return nullptr; // a lone sign or a bare "0x"/"0o"/"0b" prefix
+        }
+
+        JavascriptBigInt * bigintNew = JavascriptBigInt::CreateZero(scriptContext);
+        for (const char16 * pchDigit = pch; pchDigit < pchEnd; pchDigit++)
+        {
+            uint32 digitValue = BigIntDigitValue(*pchDigit, radix);
+            if (digitValue == static_cast<uint32>(-1))
+            {
+                return nullptr;
+            }
+            bigintNew->MulThenAdd(radix, digitValue);
+        }
+
+        // Canonical form: no high zero digits, no negative zero.
+        while (bigintNew->m_length > 1 && bigintNew->m_digits[bigintNew->m_length - 1] == 0)
+        {
+            bigintNew->m_length--;
+        }
+        bigintNew->m_isNegative = isNegative && !(bigintNew->m_length == 1 && bigintNew->m_digits[0] == 0);
+        return bigintNew;
     }
 
     JavascriptBigInt * JavascriptBigInt::CreateZero(ScriptContext * scriptContext)
@@ -31,6 +172,279 @@ namespace Js
         JavascriptBigInt * bigintNew = JavascriptBigInt::CreateZero(scriptContext);
         bigintNew->m_digits[0] = 1;
         return bigintNew;
+    }
+
+    RecyclableObject* JavascriptBigInt::ToObject(ScriptContext * requestContext)
+    {
+        return requestContext->GetLibrary()->CreateBigIntObject(this);
+    }
+
+    Var JavascriptBigInt::GetTypeOfString(ScriptContext * requestContext)
+    {
+        return requestContext->GetLibrary()->GetBigIntTypeDisplayString();
+    }
+
+    // Divide the positive magnitude in `digits` by a small radix in place and
+    // return the remainder. The divisor is at most 36, so a half-limb at a
+    // time keeps every intermediate inside uint64 without 128-bit math. The
+    // half-limb width follows digit_t (32 bits for 64-bit limbs, 16 bits for
+    // 32-bit limbs), unlike a hard-coded 64-bit assumption.
+    uint32 JavascriptBigInt::DivModInPlace(digit_t * digits, digit_t& length, uint32 divisor)
+    {
+        Assert(divisor >= 2 && divisor <= 36);
+        Assert(length > 0);
+
+        const uint32 halfBits = sizeof(digit_t) * 4;
+        const digit_t halfMask = (static_cast<digit_t>(1) << halfBits) - 1;
+
+        uint64 remainder = 0;
+        for (digit_t i = length; i > 0; i--)
+        {
+            uint64 current = (remainder << halfBits) |
+                (static_cast<uint64>(digits[i - 1]) >> halfBits);
+            uint64 quotientHigh = current / divisor;
+            remainder = current % divisor;
+
+            current = (remainder << halfBits) | (digits[i - 1] & halfMask);
+            uint64 quotientLow = current / divisor;
+            remainder = current % divisor;
+
+            digits[i - 1] = static_cast<digit_t>((quotientHigh << halfBits) | quotientLow);
+        }
+
+        // Drop high zero limbs; a zero quotient becomes length 0, which ends
+        // the caller's digit loop.
+        while (length > 0 && digits[length - 1] == 0)
+        {
+            length--;
+        }
+        return static_cast<uint32>(remainder);
+    }
+
+    JavascriptString* JavascriptBigInt::ToString(uint32 radix, ScriptContext * scriptContext)
+    {
+        Assert(radix >= 2 && radix <= 36);
+        if (IsZeroValue())
+        {
+            return scriptContext->GetLibrary()->CreateStringFromCppLiteral(_u("0"));
+        }
+
+        static const char16 digitChars[] = _u("0123456789abcdefghijklmnopqrstuvwxyz");
+
+        // Base 2 is the longest representation: one character per bit. Check
+        // the representation size before allocating (a string past the engine
+        // limit cannot be produced anyway).
+        size_t maxDigitsSize = static_cast<size_t>(m_length) * (sizeof(digit_t) * 8) + 2;
+        if (!IsValidCharCount(maxDigitsSize))
+        {
+            JavascriptError::ThrowRangeError(scriptContext, JSERR_FunctionArgument_Invalid, _u("BigInt.prototype.toString"));
+        }
+        charcount_t maxDigits = static_cast<charcount_t>(maxDigitsSize);
+
+        digit_t length = m_length;
+        digit_t * digits = RecyclerNewArrayLeaf(scriptContext->GetRecycler(), digit_t, length);
+        js_memcpy_s(digits, length * sizeof(digit_t), m_digits, length * sizeof(digit_t));
+
+        // DivModInPlace yields the least-significant digit first.
+        char16 * reversedDigits = RecyclerNewArrayLeaf(scriptContext->GetRecycler(), char16, maxDigits);
+        charcount_t digitCount = 0;
+        while (length > 0)
+        {
+            uint32 remainder = JavascriptBigInt::DivModInPlace(digits, length, radix);
+            reversedDigits[digitCount++] = digitChars[remainder];
+        }
+        Assert(digitCount <= maxDigits);
+
+        charcount_t resultLength = digitCount + (m_isNegative ? 1 : 0);
+        char16 * result = RecyclerNewArrayLeaf(scriptContext->GetRecycler(), char16, resultLength);
+
+        charcount_t index = 0;
+        if (m_isNegative)
+        {
+            result[index++] = _u('-');
+        }
+        for (charcount_t i = 0; i < digitCount; i++)
+        {
+            result[index++] = reversedDigits[digitCount - 1 - i];
+        }
+
+        return JavascriptString::NewCopyBuffer(result, resultLength, scriptContext);
+    }
+
+    JavascriptString* JavascriptBigInt::ToString(ScriptContext * scriptContext)
+    {
+        return ToString(10, scriptContext);
+    }
+
+    double JavascriptBigInt::ToDouble() const
+    {
+        if (IsZeroValue())
+        {
+            return 0.0;
+        }
+
+        // BigInt-to-Number must be correctly rounded. The magnitude is a
+        // little-endian sequence of digit_t limbs (64-bit on the main builds,
+        // 32-bit on x86/ARM Windows); find its bit length, take the top 53
+        // bits, and round on the guard bit using round-to-nearest,
+        // ties-to-even. The result is significand * 2^dropBits, which is
+        // exact in binary once the 53-bit significand is chosen.
+        const uint32 limbBits = sizeof(digit_t) * 8;
+        const double limbBase = std::ldexp(1.0, static_cast<int>(limbBits));
+        digit_t top = m_digits[m_length - 1];
+        uint64 bitLength = (static_cast<uint64>(m_length) - 1) * limbBits;
+        while (top != 0)
+        {
+            bitLength++;
+            top >>= 1;
+        }
+
+        if (bitLength <= 53)
+        {
+            // Exact: the whole magnitude fits in the 53-bit precision.
+            double value = 0;
+            for (digit_t i = m_length; i > 0; i--)
+            {
+                value = value * limbBase + static_cast<double>(m_digits[i - 1]);
+            }
+            return m_isNegative ? -value : value;
+        }
+
+        uint64 dropBits = bitLength - 53;
+        if (dropBits > 971)
+        {
+            // The smallest value with this exponent already exceeds the
+            // largest finite double (2^1024 - 2^971).
+            double infinity = std::numeric_limits<double>::infinity();
+            return m_isNegative ? -infinity : infinity;
+        }
+
+        uint64 wordIndex = dropBits / limbBits;
+        uint32 bitOffset = static_cast<uint32>(dropBits % limbBits);
+        uint64 significand = 0;
+        uint32 collectedBits = 0;
+        for (uint64 i = wordIndex; i < m_length && collectedBits < 53; i++)
+        {
+            uint32 offset = (i == wordIndex) ? bitOffset : 0;
+            uint64 part = static_cast<uint64>(m_digits[i]) >> offset;
+            uint32 partBits = limbBits - offset;
+            if (partBits > 53 - collectedBits)
+            {
+                partBits = 53 - collectedBits;
+            }
+            part &= (static_cast<uint64>(1) << partBits) - 1;
+            significand |= part << collectedBits;
+            collectedBits += partBits;
+        }
+        Assert(collectedBits == 53);
+        Assert(significand < (static_cast<uint64>(1) << 53));
+
+        uint64 guardIndex = (dropBits - 1) / limbBits;
+        uint32 guardBit = static_cast<uint32>((dropBits - 1) % limbBits);
+        bool guard = ((m_digits[guardIndex] >> guardBit) & 1) != 0;
+        bool sticky = false;
+        for (uint64 i = 0; i < guardIndex; i++)
+        {
+            if (m_digits[i] != 0)
+            {
+                sticky = true;
+                break;
+            }
+        }
+        if (guardBit != 0)
+        {
+            digit_t lowerMask = (static_cast<digit_t>(1) << guardBit) - 1;
+            sticky = sticky || (m_digits[guardIndex] & lowerMask) != 0;
+        }
+
+        if (guard && (sticky || (significand & 1)))
+        {
+            significand++;
+            if (significand == (static_cast<uint64>(1) << 53))
+            {
+                significand >>= 1;
+                dropBits++;
+                if (dropBits > 971)
+                {
+                    double infinity = std::numeric_limits<double>::infinity();
+                    return m_isNegative ? -infinity : infinity;
+                }
+            }
+        }
+
+        double value = std::ldexp(static_cast<double>(significand), static_cast<int>(dropBits));
+        return m_isNegative ? -value : value;
+    }
+
+    JavascriptBigInt * JavascriptBigInt::ThisBigIntValue(Var value, ScriptContext * scriptContext)
+    {
+        TypeId typeId = JavascriptOperators::GetTypeId(value);
+        if (typeId == TypeIds_BigInt)
+        {
+            return UnsafeVarTo<JavascriptBigInt>(value);
+        }
+        if (typeId == TypeIds_BigIntObject)
+        {
+            JavascriptBigIntObject * wrapper = UnsafeVarTo<JavascriptBigIntObject>(value);
+            JavascriptBigInt * bigint = wrapper->GetValue();
+            if (bigint != nullptr)
+            {
+                // The wrapper may belong to another realm; return the
+                // primitive in the caller's script context, as the Symbol
+                // and Number wrapper paths do.
+                return UnsafeVarTo<JavascriptBigInt>(
+                    CrossSite::MarshalVar(scriptContext, bigint, wrapper->GetScriptContext()));
+            }
+        }
+
+        JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NeedObject, _u("BigInt"));
+        return nullptr;
+    }
+
+    Var JavascriptBigInt::EntryValueOf(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+        ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+
+        AssertMsg(args.HasArg(), "Should always have implicit 'this'");
+        return ThisBigIntValue(args[0], scriptContext);
+    }
+
+    Var JavascriptBigInt::EntryToString(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+        ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+
+        AssertMsg(args.HasArg(), "Should always have implicit 'this'");
+        JavascriptBigInt * bigint = ThisBigIntValue(args[0], scriptContext);
+
+        uint32 radix = 10;
+        if (args.Info.Count > 1 && JavascriptOperators::GetTypeId(args[1]) != TypeIds_Undefined)
+        {
+            double radixNumber = JavascriptConversion::ToInteger(args[1], scriptContext);
+            if (!(radixNumber >= 2 && radixNumber <= 36))
+            {
+                JavascriptError::ThrowRangeError(scriptContext, JSERR_FunctionArgument_Invalid, _u("BigInt.prototype.toString"));
+            }
+            radix = static_cast<uint32>(radixNumber);
+        }
+
+        return bigint->ToString(radix, scriptContext);
+    }
+
+    Var JavascriptBigInt::EntryToLocaleString(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+        ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+
+        AssertMsg(args.HasArg(), "Should always have implicit 'this'");
+        return ThisBigIntValue(args[0], scriptContext)->ToString(scriptContext);
     }
 
     JavascriptBigInt * JavascriptBigInt::New(JavascriptBigInt * pbi, ScriptContext * scriptContext)
@@ -65,26 +479,20 @@ namespace Js
         Var newTarget = args.GetNewTarget();
         bool isCtorSuperCall = JavascriptOperators::GetAndAssertIsConstructorSuperCall(args);
 
-        Var result = nullptr;
-
-        if (args.Info.Count > 1)
-        {
-            result = JavascriptConversion::ToBigInt(args[1], scriptContext);
-        }
-        else
-        {
-            // TODO:
-            // v8 throw: cannot convert from undefined to bigint
-            // we can consider creating a Zero BigInt
-            AssertOrFailFast(false);
-        }
-
         if (callInfo.Flags & CallFlags_New)
         {
-            // TODO: handle new constructor
-            // v8 throw: bigint is not a constructor
-            AssertOrFailFast(false);
+            // BigInt is not a constructor (spec sec-bigint-constructor: "If
+            // NewTarget is not undefined, throw a TypeError exception"). The
+            // check runs before any argument coercion, so a throwing
+            // valueOf/toString on the argument is never observed.
+            JavascriptError::ThrowTypeError(scriptContext, VBSERR_TypeMismatch, _u("BigInt construct"));
         }
+
+        // BigInt() with no argument is ToBigInt(undefined): a TypeError, not a
+        // host abort. Route it through the same conversion for one message.
+        Var result = JavascriptConversion::ToBigInt(
+            args.Info.Count > 1 ? args[1] : scriptContext->GetLibrary()->GetUndefined(),
+            scriptContext);
 
         return isCtorSuperCall ?
             JavascriptOperators::OrdinaryCreateFromConstructor(VarTo<RecyclableObject>(newTarget), UnsafeVarTo<RecyclableObject>(result), nullptr, scriptContext) :
@@ -104,7 +512,9 @@ namespace Js
             *value = JavascriptBigInt::Equals(left, right);
             break;
         default:
-            AssertMsg(VarIs<JavascriptBigInt>(right), "do not support comparison with types other than BigInt");
+            // Mixed abstract equality does not ToPrimitive wrapper operands
+            // here (C3 work); treat any non-BigInt operand as unequal rather
+            // than asserting the host.
             *value = FALSE;
             break;
         }
@@ -203,7 +613,7 @@ namespace Js
 
     bool JavascriptBigInt::IsZero(JavascriptBigInt * pbi)
     {
-        return (pbi->m_length == 1 && pbi->m_digits[0] == 0);
+        return pbi->IsZeroValue();
     }
 
     void JavascriptBigInt::AbsoluteIncrement(JavascriptBigInt * pbi)
