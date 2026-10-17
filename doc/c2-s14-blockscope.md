@@ -1,6 +1,6 @@
 # C2-S14: block static-semantics early errors
 
-Status: landed in `5366c23f5` plus the statement-position follow-up `<pending>` on top of `68784ee87` (2026-10-17).
+Status: landed in `5366c23f5` plus the statement-position follow-up `4d2d38e77` on top of `68784ee87` (2026-10-17).
 Interpreter/Mac no-JIT verified; JIT evidence is not claimed (see B4 below).
 No flag was added; this is parser correctness.
 
