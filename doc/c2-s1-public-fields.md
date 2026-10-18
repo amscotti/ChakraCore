@@ -1,8 +1,10 @@
 # C2-S1: public instance class fields (simple identifier names)
 
-Status: `<pending>` — implementation and focused Mac no-JIT evidence are in the
-working tree; integration has not yet recorded a release/commit decision or
-updated the shared C1/C2 status documents.
+Status: **landed in `bd0de1694`** (feature commits `9edcd6b6d`, `5f3703987`,
+`55084e92a`, `5411729ec`, `eba79aac2`); integrated main gates **1988/2040**.
+Final integrated class-elements corpus: **1,989 / 5,897 passed (3,908 failed),
+539 fail→pass / 0 pass→fail**. See the residuals below; private/static/
+computed fields and static blocks remain the follow-up S1 work.
 
 This is the first bounded S1 slice: **non-static public instance fields with
 simple (non-computed) names and optional initializers**, in class declarations

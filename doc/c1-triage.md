@@ -841,6 +841,20 @@ asserted the old non-conforming block `var`/`let` behavior were updated
 deliberately. Gates moved 1975/2027 → 1976/2028. No bytecode change; B4
 still owns JIT-configuration claims.)*
 
+## 6. C2 integration status (2026-10-18)
+
+| Batch | Status | Integrated evidence | Remaining |
+|---|---|---|---|
+| S1 public instance fields | Landed `bd0de1694` | class corpus 1,989/5,897, 539/0; 27 focused cases, normal + forced defer | private/static/computed fields, static blocks, `super.prop`/eval-super property, JIT |
+| S2 arithmetic/bitwise/shift | Landed `1c5d5b2fc` | scoped 444/2, 80/0; broad 1,027/1,027; Node differentials | BigInt64Array/BigUint64Array, Map/Set identity, literal property names, giant ToString, JIT |
+| S8 resizable/transfer | Landed `6ceb23d6d` | focused 424/834, 236/0; ArrayBuffer 358/442; DataView 44/52; Float16 4/4 | TypedArray tracking, immutable buffers, SAB, Float16Array, cross-realm/Reflect order, JsRT/Wasm, JIT |
+| S13 WeakRef | Landed `803331b51` | WeakRef 56/58, 56/0; agent-wide kept set; 200/500-run stability | FinalizationRegistry, symbol WeakMap/WeakSet keys, host-dispatch, concurrent GC/JIT |
+| S14 triage | Landed `f49509aca` | P1 selected: 60 current-confirmed / 112 expanded | P1–P6 implementation; parser clusters wait for S1; untagged bucket not one mechanism |
+
+Full gates at this checkpoint: **1988/0 test**, **2040/0 debug-static**.
+All four active feature branches are merged; the S14 triage branch is
+merged as a plan. The next work item is S14 P1 statement completion values.
+
 ## 7. Separate inventories
 
 **Engine defects on existing features** — the 3,822-failure defect bucket

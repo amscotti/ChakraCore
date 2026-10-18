@@ -10,7 +10,8 @@
 > before any full result is certified. **C2 is in progress** — batches
 > S4, S5, S10, S11, S7-matchAll, the five S9 sub-batches (named
 > groups, `d` flag/indices, duplicate named groups, lookbehind,
-> ES2025 modifiers) and the
+> ES2025 modifiers), S1 public instance fields, S2 arithmetic, S8
+> resizable ArrayBuffer/transfer, S13 WeakRef, and the
 > S14 block-scope and statement-level early-error clusters are closed on
 > Mac no-JIT (JIT claims gated on B4), receipts in [c2-s4.md](c2-s4.md),
 > [c2-s5.md](c2-s5.md), [c2-s10.md](c2-s10.md),
@@ -587,6 +588,20 @@ Decision/rollback points:
 - [ ] C2/C3: Feature-specific receipts and partial releases; required work remains
   tracked until C4, optional ecosystem scope has separate gates.
 - [ ] C4: Published qualified ES2025 result on the claimed default configurations.
+
+**Latest integration checkpoint (2026-10-18):** main is clean at
+`f49509aca`; full `zig build check` is **1988/0** and debug-static
+**2040/0** (572/572 and 546/546 steps). Active lanes merged: S1 public
+instance fields ([c2-s1-public-fields.md](c2-s1-public-fields.md)),
+S2 arithmetic ([c2-s2-bigint-arithmetic.md](c2-s2-bigint-arithmetic.md)),
+S8 resizable ArrayBuffer/transfer ([c2-s8-resizable.md](c2-s8-resizable.md)),
+S13 WeakRef ([c2-s13-weakref.md](c2-s13-weakref.md)), and the S14
+triage plan ([c2-s14-triage.md](c2-s14-triage.md)). Integrated class
+corpus: **1,989/5,897**, **539 fail→pass / 0 pass→fail**. Next bounded
+batch is S14 P1 statement-completion values; S1 private/static/computed,
+S8 typed-array tracking, S2 BigInt64Array/Map-Set identity, and S13
+FinalizationRegistry remain unblocked follow-ups. S3, S12, S6 default,
+B4 and C4 remain externally or gate blocked.
 
 **C2 batch status:** S4, S5, all of S10 (the copy-by-change half and
 the Set-methods half), all of S11, S7, the five S9 sub-batches

@@ -5,7 +5,11 @@
 
 # C2-S8: resizable ArrayBuffer core and transfer (first bounded slice)
 
-Status: `<pending>` — implemented on the `s8-resizable` lane (Mac ARM64 no-JIT).
+Status: **landed in `6ceb23d6d`** (lane commits `4bb25b145`, `ef361fe1d`,
+`488fded74`, `d2c579543`; integration `f1ed9afce`); Mac ARM64 no-JIT.
+Focused resizable corpus **424/834**, **236 fail→pass / 0 pass→fail**;
+ArrayBuffer **358/442**; DataView resizable **44/52**; Float16 resizable
+**4/4**. TypedArray tracking and immutable buffers remain follow-ups.
 This receipt covers the resizable/growable `ArrayBuffer` object and transfer
 family only. TypedArray length-tracking element semantics, `Float16Array`,
 `BigInt64Array`/`BigUint64Array`, immutable ArrayBuffers and JIT-specific paths
