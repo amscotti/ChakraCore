@@ -6,6 +6,10 @@
 
 namespace Js
 {
+    // Used when a detached state must release only its RefCountedBuffer: the
+    // host owns the backing bytes (externalized/external ArrayBuffer).
+    void __cdecl NoOpFree(void* data);
+
     long RefCountedBuffer::AddRef()
     {
         long ref = InterlockedIncrement(&refCount);
@@ -640,32 +644,38 @@ namespace Js
         state->CleanUp();
     }
 
-    static ArrayBuffer* TransferBuffer(ArrayBuffer* source, Var newLength, bool preserveResizability, ScriptContext* scriptContext)
+    static ArrayBuffer* TransferBuffer(ArrayBuffer* source, Var newLength, bool preserveResizability, const char16* funcName, ScriptContext* scriptContext)
     {
         JavascriptLibrary* library = scriptContext->GetLibrary();
 
-        uint32 newByteLength;
+        double newByteLengthValue;
         if (JavascriptOperators::IsUndefined(newLength))
         {
-            newByteLength = source->GetByteLength();
+            newByteLengthValue = (double)source->GetByteLength();
         }
         else
         {
-            double value = JavascriptConversion::ToInteger(newLength, scriptContext);
-            if (source->IsDetached())
-            {
-                JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, _u("ArrayBuffer.prototype.transfer"));
-            }
-            if (value < 0.0 || value > (double)ArrayBuffer::MaxArrayBufferLength)
-            {
-                JavascriptError::ThrowRangeError(scriptContext, JSERR_ArrayLengthConstructIncorrect);
-            }
-            newByteLength = (uint32)value;
+            // ArrayBufferCopyAndDetach performs ToIndex(newLength) before the
+            // detached/range checks; coercion side effects and exceptions win.
+            newByteLengthValue = JavascriptConversion::ToInteger(newLength, scriptContext);
         }
 
         if (source->IsDetached())
         {
-            JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, _u("ArrayBuffer.prototype.transfer"));
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, funcName);
+        }
+
+        if (newByteLengthValue < 0.0 || newByteLengthValue > (double)ArrayBuffer::MaxArrayBufferLength)
+        {
+            JavascriptError::ThrowRangeError(scriptContext, JSERR_ArrayLengthConstructIncorrect);
+        }
+        uint32 newByteLength = (uint32)newByteLengthValue;
+
+        // WebAssembly.Memory buffers cannot be detached. Check before creating
+        // and copying into a destination that would be discarded by the throw.
+        if (source->IsWebAssemblyArrayBuffer())
+        {
+            JavascriptError::ThrowTypeError(scriptContext, WASMERR_CantDetach);
         }
 
         bool resizable = preserveResizability && source->IsResizable();
@@ -706,13 +716,8 @@ namespace Js
         }
 
         ArrayBuffer* arrayBuffer = VarTo<ArrayBuffer>(args[0]);
-        if (arrayBuffer->IsDetached())
-        {
-            JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, _u("ArrayBuffer.prototype.transfer"));
-        }
-
         Var newLength = args.Info.Count > 1 ? args[1] : scriptContext->GetLibrary()->GetUndefined();
-        return TransferBuffer(arrayBuffer, newLength, true, scriptContext);
+        return TransferBuffer(arrayBuffer, newLength, true, _u("ArrayBuffer.prototype.transfer"), scriptContext);
     }
 
     // ArrayBuffer.prototype.transferToFixedLength ( [ newLength ] )
@@ -731,13 +736,8 @@ namespace Js
         }
 
         ArrayBuffer* arrayBuffer = VarTo<ArrayBuffer>(args[0]);
-        if (arrayBuffer->IsDetached())
-        {
-            JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, _u("ArrayBuffer.prototype.transferToFixedLength"));
-        }
-
         Var newLength = args.Info.Count > 1 ? args[1] : scriptContext->GetLibrary()->GetUndefined();
-        return TransferBuffer(arrayBuffer, newLength, false, scriptContext);
+        return TransferBuffer(arrayBuffer, newLength, false, _u("ArrayBuffer.prototype.transferToFixedLength"), scriptContext);
     }
 
     // ArrayBuffer.isView as described in ES6 draft #20 section 24.1.3.1
@@ -906,12 +906,27 @@ namespace Js
             JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, _u("ArrayBuffer.prototype.slice"));
         }
 
-        // Don't bother doing memcpy if we aren't copying any elements
-        if (byteLength > 0)
+        // Re-read the source length after start/end/species/constructor user
+        // code. A resizable source may have shrunk (or grown) since the initial
+        // snapshot; copy only what currently exists and zero-fill the rest.
+        uint32 currentLength = arrayBuffer->GetByteLength();
+        uint32 first = (uint32)start;
+        uint32 copyLength = 0;
+        if (first < currentLength)
+        {
+            uint32 available = currentLength - first;
+            copyLength = byteLength < available ? byteLength : available;
+        }
+
+        if (copyLength > 0)
         {
             AssertMsg(arrayBuffer->GetBuffer() != nullptr, "buffer must not be null when we copy from it");
-
-            js_memcpy_s(newBuffer->GetBuffer(), byteLength, arrayBuffer->GetBuffer() + start, byteLength);
+            js_memcpy_s(newBuffer->GetBuffer(), byteLength, arrayBuffer->GetBuffer() + first, copyLength);
+        }
+        if (copyLength < byteLength)
+        {
+            AssertMsg(newBuffer->GetBuffer() != nullptr, "destination must not be null when zero-filling");
+            ZeroMemory(newBuffer->GetBuffer() + copyLength, byteLength - copyLength);
         }
 
         return newBuffer;
@@ -930,13 +945,18 @@ namespace Js
     {
         Assert(content != nullptr);
         FreeFn freeFn = nullptr;
+        if (this->externalized)
+        {
+            // The host owns the backing allocation; release only the wrapper.
+            freeFn = NoOpFree;
+        }
 #if ENABLE_FAST_ARRAYBUFFER
-        if (!this->isResizable && IsValidVirtualBufferLength(bufferLength))
+        else if (!this->isResizable && IsValidVirtualBufferLength(bufferLength))
         {
             freeFn = FreeMemAlloc;
         }
-        else
 #endif
+        else
         {
             freeFn = free;
         }
@@ -1215,7 +1235,14 @@ namespace Js
     {
         FreeFn freeFn = nullptr;
         ArrayBufferAllocationType allocationType;
-        if (UsesVirtualAllocation())
+        if (this->externalized)
+        {
+            // JsExternalizeArrayBuffer handed the bytes to the host. Detach or
+            // transfer must not free them; the host's free function owns them.
+            allocationType = ArrayBufferAllocationType::Heap;
+            freeFn = NoOpFree;
+        }
+        else if (UsesVirtualAllocation())
         {
             allocationType = ArrayBufferAllocationType::MemAlloc;
             freeFn = FreeMemAlloc;
@@ -1673,7 +1700,7 @@ namespace Js
         HeapDelete(this);
     }
 
-    void NoOpFree(byte* data) { }
+    void __cdecl NoOpFree(void* data) { }
 
     void ExternalArrayBufferDetachedState::DiscardState()
     {

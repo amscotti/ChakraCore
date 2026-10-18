@@ -899,7 +899,7 @@ namespace Js
         ArrayBuffer* CreateProjectionArraybuffer(byte* buffer, uint32 length);
         ArrayBuffer* CreateProjectionArraybuffer(RefCountedBuffer* buffer, uint32 length);
         ArrayBuffer* CreateExternalArrayBuffer(RefCountedBuffer* buffer, uint32 length);
-        DataView* CreateDataView(ArrayBufferBase* arrayBuffer, uint32 offSet, uint32 mappedLength);
+        DataView* CreateDataView(ArrayBufferBase* arrayBuffer, uint32 offSet, uint32 mappedLength, bool lengthTracking);
 
         template <typename TypeName, bool clamped>
         inline DynamicType* GetTypedArrayType(TypeName);

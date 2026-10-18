@@ -6392,9 +6392,9 @@ namespace Js
         return arr;
     }
 
-    DataView* JavascriptLibrary::CreateDataView(ArrayBufferBase* arrayBuffer, uint32 offset, uint32 length)
+    DataView* JavascriptLibrary::CreateDataView(ArrayBufferBase* arrayBuffer, uint32 offset, uint32 length, bool lengthTracking)
     {
-        DataView* dataView = RecyclerNew(this->GetRecycler(), DataView, arrayBuffer, offset, length, dataViewType);
+        DataView* dataView = RecyclerNew(this->GetRecycler(), DataView, arrayBuffer, offset, length, lengthTracking, dataViewType);
 
         return dataView;
     }
