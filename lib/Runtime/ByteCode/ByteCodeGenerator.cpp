@@ -1383,6 +1383,10 @@ static Js::FunctionInfo::Attributes GetFunctionInfoAttributes(ParseNodeFnc * pno
     {
         attributes = (Js::FunctionInfo::Attributes)(attributes | Js::FunctionInfo::Attributes::HomeObj);
     }
+    if (pnodeFnc->isClassFieldInitializerContext)
+    {
+        attributes = (Js::FunctionInfo::Attributes)(attributes | Js::FunctionInfo::Attributes::ClassFieldInitializer);
+    }
     return attributes;
 }
 
@@ -3542,6 +3546,14 @@ void VisitNestedScopes(ParseNode* pnodeScopeList, ParseNode* pnodeParent, ByteCo
                         ParseNodePtr pnodeField = pnodeFields->nop == knopList
                             ? pnodeFields->AsParseNodeBin()->pnode1
                             : pnodeFields;
+                        ParseNodePtr pnodeFieldName = pnodeField->AsParseNodeBin()->pnode1;
+                        Assert(pnodeFieldName->nop == knopStr);
+                        // The field name is not part of the body AST, so bind
+                        // its property id (and string constant for
+                        // NamedEvaluation) explicitly.
+                        byteCodeGenerator->AssignPropertyId(pnodeFieldName->AsParseNodeStr()->pid);
+                        Visit(pnodeFieldName, byteCodeGenerator, prefix, postfix);
+
                         ParseNodePtr pnodeFieldCall = pnodeField->AsParseNodeBin()->pnode2;
                         if (pnodeFieldCall != nullptr)
                         {

@@ -914,7 +914,7 @@ private:
     template<bool buildAST> ParseNodePtr GenerateModuleFunctionWrapper();
 
     IdentPtr ParseClassPropertyName(IdentPtr * hint);
-    ParseNodeFnc * CreateClassFieldInitializerFunction(charcount_t ichMin, size_t cbMin);
+    ParseNodeFnc * CreateClassFieldInitializerFunction(charcount_t ichMin, size_t cbMin, ParseNodePtr * ppnodeInitExpr = nullptr);
     ParseNodeFnc * CreateClassFieldInitializerFastScanStub();
     template<bool buildAST> ParseNodeClass * ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint, uint32 *pHintLength, uint32 *pShortNameOffset);
 

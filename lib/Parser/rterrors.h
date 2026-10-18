@@ -376,6 +376,7 @@ RT_ERROR_MSG(JSERR_UnicodeRegExpRangeContainsCharClass, 5677, "%s", "Character c
 RT_ERROR_MSG(JSERR_DuplicateKeysFromOwnPropertyKeys, 5678, "%s", "Proxy's ownKeys trap returned duplicate keys", kjstTypeError, 0)
 RT_ERROR_MSG(JSERR_InvalidGloFuncDecl, 5679, "The global property %s is not configurable, writable, nor enumerable, therefore cannot be declared as a function", "", kjstTypeError, 0)
 RT_ERROR_MSG(JSERR_YieldStarThrowMissing, 5680, "", "Yielded iterator does not have a 'throw' method", kjstTypeError, 0)
+RT_ERROR_MSG(JSERR_ClassFieldInitializerArguments, 5681, "", "'arguments' is not allowed in class field initializer or static initialization block", kjstSyntaxError, 0)
 
 //Host errors
 RT_ERROR_MSG(JSERR_HostMaybeMissingPromiseContinuationCallback, 5700, "", "Host may not have set any promise continuation callback. Promises may not be executed.", kjstTypeError, 0)

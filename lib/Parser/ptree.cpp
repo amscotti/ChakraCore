@@ -427,6 +427,8 @@ ParseNodeFnc::ParseNodeFnc(OpCode nop, charcount_t ichMin, charcount_t ichLim)
     this->hintLength = 0;
     this->isNameIdentifierRef = true;
     this->nestedFuncEscapes = false;
+    this->hasSuperCallInConstructorLambda = false;
+    this->isClassFieldInitializerContext = false;
     this->pnodeScopes = nullptr;
     this->pnodeBodyScope = nullptr;
     this->pnodeParams = nullptr;

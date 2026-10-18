@@ -352,6 +352,7 @@ namespace Js
         static BOOL SetItemOnTaggedNumber(Var instance, RecyclableObject* object, uint32 index, Var newValue, ScriptContext* requestContext, PropertyOperationFlags propertyOperationFlags);
         static BOOL OP_StFunctionExpression(Var instance, PropertyId propertyId, Var newValue);
         static BOOL OP_InitProperty(Var instance, PropertyId propertyId, Var newValue);
+        static BOOL OP_InitClassField(Var instance, PropertyId propertyId, Var newValue);
         static Var OP_DeleteProperty(Var instance, PropertyId propertyId, ScriptContext* scriptContext, PropertyOperationFlags propertyOperationFlags = PropertyOperation_None);
         static Var OP_DeleteRootProperty(Var instance, PropertyId propertyId, ScriptContext* scriptContext, PropertyOperationFlags propertyOperationFlags = PropertyOperation_None);
 

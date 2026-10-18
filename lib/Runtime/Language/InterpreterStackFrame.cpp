@@ -5010,6 +5010,18 @@ skipThunk:
     }
 
     template <class T>
+    void InterpreterStackFrame::OP_InitClassField(const unaligned T* playout)
+    {
+        // Class fields use CreateDataPropertyOrThrow, not Set/InitProperty:
+        // inherited setters are ignored, failed defines on non-extensible,
+        // non-configurable or proxy objects throw TypeError.
+        JavascriptOperators::OP_InitClassField(
+            GetReg(playout->Instance),
+            GetPropertyIdFromCacheId(playout->inlineCacheIndex),
+            GetReg(playout->Value));
+    }
+
+    template <class T>
     void InterpreterStackFrame::OP_InitLocalProperty(unaligned T* playout)
     {
         DoInitProperty(playout, this->localClosure);

@@ -2398,7 +2398,7 @@ void ByteCodeGenerator::EmitSuperCall(FuncInfo* funcInfo, ParseNodeSuperCall * p
     {
         if (funcInfo == nonLambdaFunc)
         {
-            EmitClassFieldInitializerCalls(nonLambdaFunc->root->pnodeClassFields, funcInfo);
+            EmitClassFieldInitializerCalls(nonLambdaFunc->root->pnodeClassFields, funcInfo, pnodeSuperCall->pnodeThis->location);
         }
         else
         {
@@ -2422,9 +2422,9 @@ void ByteCodeGenerator::EmitSuperCall(FuncInfo* funcInfo, ParseNodeSuperCall * p
 
 // S1: run the hidden per-field initializer helper functions and define each
 // result as an own data property on the instance. The helpers are called with
-// the instance as their explicit receiver; InitFld implements
-// CreateDataProperty semantics (it does not invoke inherited setters).
-void ByteCodeGenerator::EmitClassFieldInitializerCalls(ParseNode * pnodeFields, FuncInfo * funcInfo)
+// the instance as their explicit receiver; InitClassField implements
+// CreateDataPropertyOrThrow semantics (it does not invoke inherited setters).
+void ByteCodeGenerator::EmitClassFieldInitializerCalls(ParseNode * pnodeFields, FuncInfo * funcInfo, Js::RegSlot thisLocationOverride)
 {
     while (pnodeFields != nullptr)
     {
@@ -2438,10 +2438,13 @@ void ByteCodeGenerator::EmitClassFieldInitializerCalls(ParseNode * pnodeFields, 
 
         Assert(pnodeName->nop == knopStr);
 
+        Symbol * thisSym = funcInfo->GetThisSymbol();
+        Assert(thisSym != nullptr);
+        Js::RegSlot thisLocation = thisLocationOverride != Js::Constants::NoRegister
+            ? thisLocationOverride
+            : thisSym->GetLocation();
         Js::RegSlot valueLocation;
-        Js::RegSlot thisLocation;
         bool releaseValueLoc = false;
-        bool releaseThisLoc = false;
 
         if (pnodeCall != nullptr)
         {
@@ -2451,35 +2454,20 @@ void ByteCodeGenerator::EmitClassFieldInitializerCalls(ParseNode * pnodeFields, 
             Emit(pnodeCall, this, funcInfo, false);
             Assert(pnodeCall->location != Js::Constants::NoRegister);
             valueLocation = pnodeCall->location;
-
-            // EmitCall released the explicit receiver after the call; load it
-            // again for the InitFld. (The constructor's `this` is in the same
-            // frame for base/derived constructors; a lambda super-call is
-            // outside this S1 slice.)
-            Emit(pnodeCall->pnodeThisOverride, this, funcInfo, false);
-            thisLocation = pnodeCall->pnodeThisOverride->location;
-            releaseThisLoc = true;
         }
         else
         {
             // No initializer: define the own data property as undefined.
-            Symbol * thisSym = funcInfo->GetThisSymbol();
-            Assert(thisSym != nullptr);
-            thisLocation = thisSym->GetLocation();
-
             valueLocation = funcInfo->AcquireTmpRegister();
             Writer()->Reg1(Js::OpCode::LdUndef, valueLocation);
             releaseValueLoc = true;
         }
 
+        AssignPropertyId(pnodeName->AsParseNodeStr()->pid);
         Js::PropertyId propertyId = pnodeName->AsParseNodeStr()->pid->GetPropertyId();
         uint cacheId = funcInfo->FindOrAddInlineCacheId(thisLocation, propertyId, false, true);
-        Writer()->PatchableProperty(Js::OpCode::InitFld, valueLocation, thisLocation, cacheId);
+        Writer()->PatchableProperty(Js::OpCode::InitClassField, valueLocation, thisLocation, cacheId);
 
-        if (releaseThisLoc)
-        {
-            funcInfo->ReleaseLoc(pnodeCall->pnodeThisOverride);
-        }
         if (releaseValueLoc)
         {
             funcInfo->ReleaseTmpRegister(valueLocation);
@@ -3104,9 +3092,11 @@ void ByteCodeGenerator::EmitOneFunction(ParseNodeFnc *pnodeFnc)
             }
         }
 
-        // S1: base class instance fields initialize after the instance object is
-        // created but before parameter initializers / the constructor body.
-        if (pnodeFnc->IsBaseClassConstructor() && pnodeFnc->pnodeClassFields != nullptr)
+        // S1: with a non-simple parameter list, base fields must run before
+        // default-parameter evaluation. The special-symbol storage above has
+        // already published `this` into its scope slot.
+        if (pnodeFnc->IsBaseClassConstructor() && pnodeFnc->pnodeClassFields != nullptr &&
+            pnodeFnc->HasNonSimpleParameterList())
         {
             EmitClassFieldInitializerCalls(pnodeFnc->pnodeClassFields, funcInfo);
         }
@@ -3133,6 +3123,16 @@ void ByteCodeGenerator::EmitOneFunction(ParseNodeFnc *pnodeFnc)
         }
 
         DefineUserVars(funcInfo);
+
+        // S1: simple parameter lists have no default evaluators, so field
+        // initialization can run after DefineUserVars has published captured /
+        // eval-visible `this` and initialized var bindings, yet still before
+        // the constructor body.
+        if (pnodeFnc->IsBaseClassConstructor() && pnodeFnc->pnodeClassFields != nullptr &&
+            !pnodeFnc->HasNonSimpleParameterList())
+        {
+            EmitClassFieldInitializerCalls(pnodeFnc->pnodeClassFields, funcInfo);
+        }
 
         // Emit all scope-wide function definitions before emitting function bodies
         // so that calls may reference functions they precede lexically.

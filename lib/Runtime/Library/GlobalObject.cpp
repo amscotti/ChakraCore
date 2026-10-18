@@ -488,6 +488,72 @@ using namespace Js;
     }
 
 #endif /* IR_VIEWER */
+    static bool EvalSourceContainsArgumentsIdentifier(char16 const * source, charcount_t sourceLen)
+    {
+        for (charcount_t i = 0; i < sourceLen;)
+        {
+            char16 c = source[i];
+            if (c == _u('/') && i + 1 < sourceLen && source[i + 1] == _u('/'))
+            {
+                i += 2;
+                while (i < sourceLen && source[i] != _u('\n') && source[i] != _u('\r')) { i++; }
+                continue;
+            }
+            if (c == _u('/') && i + 1 < sourceLen && source[i + 1] == _u('*'))
+            {
+                i += 2;
+                while (i + 1 < sourceLen && !(source[i] == _u('*') && source[i + 1] == _u('/'))) { i++; }
+                i = (i + 1 < sourceLen) ? i + 2 : sourceLen;
+                continue;
+            }
+            if (c == _u('\'') || c == _u('"') || c == _u('`'))
+            {
+                char16 quote = c;
+                i++;
+                while (i < sourceLen)
+                {
+                    if (source[i] == _u('\\')) { i += 2; continue; }
+                    if (source[i] == quote) { i++; break; }
+                    i++;
+                }
+                continue;
+            }
+            if ((c >= _u('a') && c <= _u('z')) || (c >= _u('A') && c <= _u('Z')) || c == _u('_') || c == _u('$'))
+            {
+                charcount_t start = i;
+                while (i < sourceLen &&
+                    ((source[i] >= _u('a') && source[i] <= _u('z')) ||
+                     (source[i] >= _u('A') && source[i] <= _u('Z')) ||
+                     (source[i] >= _u('0') && source[i] <= _u('9')) ||
+                     source[i] == _u('_') || source[i] == _u('$')))
+                {
+                    i++;
+                }
+                if (i - start == 9 &&
+                    source[start] == _u('a') && source[start + 1] == _u('r') &&
+                    source[start + 2] == _u('g') && source[start + 3] == _u('u') &&
+                    source[start + 4] == _u('m') && source[start + 5] == _u('e') &&
+                    source[start + 6] == _u('n') && source[start + 7] == _u('t') &&
+                    source[start + 8] == _u('s'))
+                {
+                    charcount_t next = i;
+                    while (next < sourceLen && (source[next] == _u(' ') || source[next] == _u('\t') || source[next] == _u('\r') || source[next] == _u('\n'))) { next++; }
+                    charcount_t prev = start;
+                    while (prev > 0 && (source[prev - 1] == _u(' ') || source[prev - 1] == _u('\t') || source[prev - 1] == _u('\r') || source[prev - 1] == _u('\n'))) { prev--; }
+                    bool isPropertyKey = next < sourceLen && source[next] == _u(':');
+                    bool isPropertyAccess = prev > 0 && source[prev - 1] == _u('.');
+                    if (!isPropertyKey && !isPropertyAccess)
+                    {
+                        return true;
+                    }
+                }
+                continue;
+            }
+            i++;
+        }
+        return false;
+    }
+
     Var GlobalObject::EntryEvalHelper(ScriptContext* scriptContext, RecyclableObject* function, Js::Arguments& args)
     {
         FrameDisplay* environment = (FrameDisplay*)&NullFrameDisplay;
@@ -586,6 +652,25 @@ using namespace Js;
         char16 const * sourceString = argString->GetSz();
         charcount_t sourceLen = argString->GetLength();
         FastEvalMapString key(argString, sourceString, sourceLen, moduleID, strictMode, isLibraryCode);
+
+        // Additional early-error rule for direct eval inside a class field
+        // initializer: the eval body must not contain an `arguments` identifier
+        // reference. This applies through arrow functions created by the
+        // initializer, but ends at ordinary function boundaries.
+        if (args.IsDirectEvalCall() && !isIndirect &&
+            EvalSourceContainsArgumentsIdentifier(sourceString, sourceLen))
+        {
+            JavascriptFunction * pfuncCaller = nullptr;
+            if (JavascriptStackWalker::GetCaller(&pfuncCaller, scriptContext) &&
+                pfuncCaller != nullptr && pfuncCaller->IsScriptFunction())
+            {
+                FunctionBody * callerBody = pfuncCaller->GetFunctionBody();
+                if (callerBody != nullptr && callerBody->GetFunctionInfo()->IsClassFieldInitializer())
+                {
+                    JavascriptError::ThrowSyntaxError(scriptContext, JSERR_ClassFieldInitializerArguments);
+                }
+            }
+        }
 
 
         // PropertyString's buffer references to PropertyRecord's inline buffer, if both PropertyString and PropertyRecord are collected

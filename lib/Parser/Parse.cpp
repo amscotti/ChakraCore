@@ -2447,6 +2447,10 @@ void Parser::CheckArgumentsUse(IdentPtr pid, ParseNodeFnc * pnodeFnc)
 {
     if (pid == wellKnownPropertyPids.arguments)
     {
+        if (m_inClassFieldInitializer)
+        {
+            m_classFieldInitializerUsesArguments = true;
+        }
         if (pnodeFnc != nullptr && pnodeFnc != m_currentNodeProg)
         {
             pnodeFnc->SetUsesArguments(TRUE);
@@ -4376,6 +4380,15 @@ ParseNodePtr Parser::ParsePostfixOperators(
                     // Detect super()
                     if (this->NodeIsSuperName(pnode))
                     {
+                        if (GetCurrentFunctionNode()->IsLambda() &&
+                            m_currentNodeNonLambdaFunc != nullptr &&
+                            m_currentNodeNonLambdaFunc->IsClassConstructor())
+                        {
+                            // S1 rejects super() in a constructor arrow when
+                            // the class has instance fields; remember the
+                            // shape until the field list is complete.
+                            m_currentNodeNonLambdaFunc->hasSuperCallInConstructorLambda = true;
+                        }
                         pnode = CreateSuperCallNode(pnode->AsParseNodeSpecialName(), pnodeArgs);
                         Assert(pnode);
 
@@ -5784,6 +5797,14 @@ ParseNodeFnc * Parser::ParseFncDeclInternal(ushort flags, LPCOLESTR pNameHint, c
     bool fDeclaration = flags & fFncDeclaration;
     bool fModule = (flags & fFncModule) != 0;
     bool fLambda = (flags & fFncLambda) != 0;
+    // FieldDefinition ContainsArguments only sees through arrow functions.
+    // A real function/method boundary (including a function nested in an
+    // initializer) has its own arguments binding and ends the check.
+    bool inClassFieldInitializerSave = m_inClassFieldInitializer;
+    if (!fLambda)
+    {
+        m_inClassFieldInitializer = false;
+    }
     charcount_t ichMin = this->GetScanner()->IchMinTok();
     bool wasInDeferredNestedFunc = false;
 
@@ -5844,6 +5865,7 @@ ParseNodeFnc * Parser::ParseFncDeclInternal(ushort flags, LPCOLESTR pNameHint, c
     AnalysisAssert(pnodeFnc);
     pnodeFnc->SetIsAsync((flags & fFncAsync) != 0);
     pnodeFnc->SetIsLambda(fLambda);
+    pnodeFnc->isClassFieldInitializerContext = m_inClassFieldInitializer;
     pnodeFnc->SetIsMethod((flags & fFncMethod) != 0);
     pnodeFnc->SetIsClassMember((flags & fFncClassMember) != 0);
     pnodeFnc->SetIsModule(fModule);
@@ -5982,6 +6004,7 @@ ParseNodeFnc * Parser::ParseFncDeclInternal(ushort flags, LPCOLESTR pNameHint, c
         }
     }    this->m_tryCatchOrFinallyDepth = tryCatchOrFinallyDepthSave;
 
+    m_inClassFieldInitializer = inClassFieldInitializerSave;
     return pnodeFnc;
 }
 
@@ -6208,7 +6231,12 @@ void Parser::ParseFncDeclHelper(ParseNodeFnc * pnodeFnc, LPCOLESTR pNameHint, us
                 // the synthesized initializer helper. The helper's scope info
                 // is built manually, so keep those nested functions eager
                 // rather than relying on deferred reparse scope state.
-                && !m_inClassFieldInitializer;
+                && !m_inClassFieldInitializer
+                // Keep arrows in class constructors eager: their bodies may
+                // contain super(), which must be validated against the class's
+                // instance-field list before the class AST is discarded.
+                && !(fLambda && m_currentNodeNonLambdaFunc != nullptr &&
+                     m_currentNodeNonLambdaFunc->IsClassConstructor());
 
         pnodeFnc->SetCanBeDeferred(isTopLevelDeferredFunc && ParseNodeFnc::CanBeRedeferred(pnodeFnc->fncFlags));
 
@@ -8358,7 +8386,7 @@ LPCOLESTR Parser::ConstructFinalHintNode(IdentPtr pClassName, IdentPtr pMemberNa
 // initializer are parented to the initializer, not to the class's enclosing
 // function. The source scanner is positioned at the first token of the
 // initializer expression (after '=').
-ParseNodeFnc * Parser::CreateClassFieldInitializerFunction(charcount_t ichMin, size_t cbMin)
+ParseNodeFnc * Parser::CreateClassFieldInitializerFunction(charcount_t ichMin, size_t cbMin, ParseNodePtr * ppnodeInitExpr)
 {
     Assert(!this->m_deferringAST);
 
@@ -8373,6 +8401,7 @@ ParseNodeFnc * Parser::CreateClassFieldInitializerFunction(charcount_t ichMin, s
     pnodeFnc->SetStrictMode();
     pnodeFnc->SetDeclaration(true);
     pnodeFnc->SetHomeObjLocation(Js::Constants::NoRegister);
+    pnodeFnc->isClassFieldInitializerContext = true;
     pnodeFnc->superRestrictionState = SuperRestrictionState::Disallowed;
     pnodeFnc->functionId = (*m_nextFunctionId)++;
     pnodeFnc->lineNumber = this->GetScanner()->LineCur();
@@ -8422,6 +8451,10 @@ ParseNodeFnc * Parser::CreateClassFieldInitializerFunction(charcount_t ichMin, s
     m_ppnodeExprScope = nullptr;
 
     m_ppnodeVar = &pnodeFnc->pnodeVars;
+    // A normal function's built-in arguments binding is needed for direct eval
+    // and for closures created by the initializer. Direct `arguments` in the
+    // initializer is still rejected by the ContainsArguments early error.
+    ParseNodeVar * argNode = AddArgumentsNodeToVars(pnodeFnc);
 
     ParseNodeBlock * pnodeInnerBlock = StartParseBlock<true>(PnodeBlockType::Function, ScopeType_FunctionBody);
     *m_ppnodeScope = pnodeInnerBlock;
@@ -8436,6 +8469,10 @@ ParseNodeFnc * Parser::CreateClassFieldInitializerFunction(charcount_t ichMin, s
     m_inClassFieldInitializer = true;
 
     ParseNodePtr pnodeExpr = ParseExpr<true>(koplAsg, nullptr, TRUE);
+    if (ppnodeInitExpr != nullptr)
+    {
+        *ppnodeInitExpr = pnodeExpr;
+    }
 
     m_classFieldInitializerUsesArguments = m_classFieldInitializerUsesArguments || usesArgumentsSave;
     m_inClassFieldInitializer = inFieldInitializerSave;
@@ -8461,6 +8498,7 @@ ParseNodeFnc * Parser::CreateClassFieldInitializerFunction(charcount_t ichMin, s
     pnodeFnc->cbStringLim = pnodeFnc->cbLim;
 
     FinishParseBlock(pnodeInnerBlock, false);
+    UpdateArgumentsNode(pnodeFnc, argNode);
     CreateSpecialSymbolDeclarations(pnodeFnc);
     FinishParseBlock(pnodeParamBlock, false);
 
@@ -8731,8 +8769,10 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
         // ('get;', 'get = x', 'get }').
         bool isGetOrSetName = memberPid == wellKnownPropertyPids.get || memberPid == wellKnownPropertyPids.set;
         bool fieldTerminator = m_token.tk == tkAsg || m_token.tk == tkSColon || m_token.tk == tkRCurly;
+        bool getSetGeneratorAsi = isGetOrSetName && m_token.tk == tkStar && this->GetScanner()->FHadNewLine();
         bool isFieldDefinition = !isGenerator &&
-            (fieldTerminator || (!isGetOrSetName && this->GetScanner()->FHadNewLine() && m_token.tk != tkLParen));
+            (fieldTerminator || getSetGeneratorAsi ||
+                (!isGetOrSetName && this->GetScanner()->FHadNewLine() && m_token.tk != tkLParen));
 
         if (!isFieldDefinition && scannedFieldName)
         {
@@ -8741,6 +8781,13 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
 
         if (isFieldDefinition)
         {
+            if (isAsyncMethod)
+            {
+                // `async x = 1`, `async x;`, `async get;` and similar spellings
+                // are not fields: the async-modifier path requires an async
+                // method with a parameter list.
+                Error(ERRsyntax);
+            }
             if (isStatic)
             {
                 // Static fields are outside the S1 slice.
@@ -8765,6 +8812,7 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
 
             bool hasInitializer = (m_token.tk == tkAsg);
             ParseNodeFnc * pnodeInitFnc = nullptr;
+            ParseNodePtr pnodeInitExpr = nullptr;
             ParseNodeFnc * pnodeFastScanStub = nullptr;
             ParseNodePtr * ppnodeScopeSave = nullptr;
             ParseNodePtr * ppnodeExprScopeSave = nullptr;
@@ -8798,7 +8846,7 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
 
                 if (buildAST)
                 {
-                    pnodeInitFnc = CreateClassFieldInitializerFunction(ichMin, iecpMin);
+                    pnodeInitFnc = CreateClassFieldInitializerFunction(ichMin, iecpMin, &pnodeInitExpr);
                 }
                 else
                 {
@@ -8849,6 +8897,27 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
                     pnodeCall->pnodeThisOverride = pnodeThis;
                     pnodeCall->isUsed = true;
                     pnodeCall->argCount = 0;
+
+                    // NamedEvaluation: `x = function(){}`, `y = () => {}` and
+                    // `z = class {}` get the field name via the short-name hint
+                    // used by the existing function display-name machinery.
+                    if (pnodeInitExpr != nullptr && pnodeInitExpr->nop == knopFncDecl &&
+                        pnodeInitExpr->AsParseNodeFnc()->pnodeName == nullptr)
+                    {
+                        ParseNodeFnc * pnodeAnon = pnodeInitExpr->AsParseNodeFnc();
+                        pnodeAnon->hint = memberPid->Psz();
+                        pnodeAnon->hintLength = memberPid->Cch();
+                        pnodeAnon->hintOffset = 0;
+                    }
+                    else if (pnodeInitExpr != nullptr && pnodeInitExpr->nop == knopClassDecl &&
+                        pnodeInitExpr->AsParseNodeClass()->pnodeName == nullptr &&
+                        pnodeInitExpr->AsParseNodeClass()->pnodeConstructor != nullptr)
+                    {
+                        ParseNodeFnc * pnodeCtor = pnodeInitExpr->AsParseNodeClass()->pnodeConstructor;
+                        pnodeCtor->hint = memberPid->Psz();
+                        pnodeCtor->hintLength = memberPid->Cch();
+                        pnodeCtor->hintOffset = 0;
+                    }
                 }
 
                 ParseNodeBin * pnodeField = CreateBinNode(knopMember, pnodeMemberName, pnodeCall);
@@ -9059,6 +9128,13 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
 
         if (pnodeInstanceFields != nullptr)
         {
+            if (pnodeConstructor->hasSuperCallInConstructorLambda)
+            {
+                // super() inside an arrow lexically in the constructor cannot
+                // run instance-field initialization in this slice. Reject the
+                // shape instead of silently leaving fields uninitialized.
+                Error(ERRsyntax);
+            }
             pnodeConstructor->pnodeClassFields = pnodeInstanceFields;
 
             // Field initializers run with the constructor's instance as `this`.

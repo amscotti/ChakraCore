@@ -203,6 +203,182 @@ const tests = [
         }
     },
     {
+        name: "field own names do not depend on another property reference",
+        body() {
+            class C {
+                uniqueName = 42;
+                duplicate = 1;
+                duplicate = 2;
+                "stringName" = 3;
+                0 = 4;
+                42;
+            }
+            const c = new C();
+            const names = Object.getOwnPropertyNames(c);
+            assert.areEqual("0,42,uniqueName,duplicate,stringName", names.join(","));
+            assert.areEqual(4, c[0]);
+            assert.areEqual(undefined, c[42]);
+            assert.areEqual(42, c["uniqueName"]);
+            assert.areEqual(2, c["duplicate"]);
+            assert.areEqual(3, c["stringName"]);
+        }
+    },
+    {
+        name: "eval and new Function classes keep field initialization",
+        body() {
+            const evalInstance = eval("(new (class { evalOnly = 10 }))");
+            assert.areEqual("evalOnly", Object.getOwnPropertyNames(evalInstance).join(","));
+            assert.areEqual(10, evalInstance["evalOnly"]);
+
+            const FunctionCtor = new Function("return new (class { functionOnly = 11 })");
+            const fnInstance = FunctionCtor();
+            assert.areEqual("functionOnly", Object.getOwnPropertyNames(fnInstance).join(","));
+            assert.areEqual(11, fnInstance["functionOnly"]);
+        }
+    },
+    {
+        name: "base fields survive captured this, dead eval and eval in constructor arrows",
+        body() {
+            class Captured {
+                x = 1;
+                constructor() { const f = () => this; this.f = f; }
+            }
+            const captured = new Captured();
+            assert.areEqual(1, Object.getOwnPropertyDescriptor(captured, "x").value);
+            assert.areEqual(captured, captured.f());
+
+            class DeadEval {
+                x = 2;
+                constructor() { eval("1"); }
+            }
+            assert.areEqual(2, Object.getOwnPropertyDescriptor(new DeadEval(), "x").value);
+
+            class ArrowEval {
+                x = 3;
+                constructor() { const f = () => eval("this"); this.f = f; }
+            }
+            const arrowEval = new ArrowEval();
+            assert.areEqual(3, Object.getOwnPropertyDescriptor(arrowEval, "x").value);
+            assert.areEqual(arrowEval, arrowEval.f());
+
+            class Base {}
+            class DerivedEmpty extends Base {
+                x;
+                constructor() { const f = () => this; super(); this.f = f; }
+            }
+            const derivedEmpty = new DerivedEmpty();
+            assert.areEqual("x,f", Object.getOwnPropertyNames(derivedEmpty).join(","));
+            assert.areEqual(undefined, derivedEmpty.x);
+            assert.areEqual(derivedEmpty, derivedEmpty.f());
+        }
+    },
+    {
+        name: "class field definition throws when CreateDataProperty fails",
+        body() {
+            class Frozen { a = Object.freeze(this); b = 2; }
+            assert.throws(function () { new Frozen(); }, TypeError, "frozen instance");
+
+            class NonExtensible { a = Object.preventExtensions(this); b = 2; }
+            assert.throws(function () { new NonExtensible(); }, TypeError, "non-extensible instance");
+
+            class NonConfigurable {
+                a = Object.defineProperty(this, "b", { value: 1, configurable: false });
+                b = 2;
+            }
+            assert.throws(function () { new NonConfigurable(); }, TypeError, "non-configurable existing property");
+
+            class Base {
+                constructor() {
+                    return new Proxy(this, { defineProperty() { return false; } });
+                }
+            }
+            class Derived extends Base { x = 1; }
+            assert.throws(function () { new Derived(); }, TypeError, "proxy define trap");
+        }
+    },
+    {
+        name: "arguments static semantics: ordinary functions are boundaries; arrows/shorthand/eval are not",
+        body() {
+            class Ordinary {
+                x = function () { return arguments.length; };
+            }
+            assert.areEqual(2, new Ordinary().x(1, 2));
+
+            assert.throws(function () { eval("class C { x = ({arguments}); }"); }, SyntaxError, "shorthand");
+            assert.throws(function () { eval("class C { x = ({y: arguments}); }"); }, SyntaxError, "destructuring value");
+            assert.throws(function () { eval("class C { x = ({arguments} = {arguments: 1}); }"); }, SyntaxError, "destructuring shorthand");
+            assert.throws(function () { eval("class C { x = () => arguments; }"); }, SyntaxError, "arrow");
+            assert.doesNotThrow(function () { eval("class C { x = { m() { return arguments; } }; }"); }, "method should be allowed");
+            assert.throws(function () {
+                const C = eval("(class { x = eval('arguments'); })");
+                new C();
+            }, SyntaxError, "direct eval is a runtime SyntaxError");
+        }
+    },
+    {
+        name: "direct eval in initializers rejects arguments but permits valid code",
+        body() {
+            class Good { x = eval("({arguments: 7}).arguments"); }
+            assert.areEqual(7, new Good().x);
+
+            let executed = false;
+            class Bad { x = eval("executed = true; arguments;"); }
+            assert.throws(function () { new Bad(); }, SyntaxError, "direct eval arguments");
+            assert.isFalse(executed);
+
+            class BadArrow { x = eval("executed = true; () => arguments;"); }
+            assert.throws(function () { new BadArrow(); }, SyntaxError, "direct eval arguments in arrow");
+            assert.isFalse(executed);
+        }
+    },
+    {
+        name: "async modifier spellings are not field definitions",
+        body() {
+            assert.throws(function () { eval("class C { async x = 1 }"); }, SyntaxError, "async x =");
+            assert.throws(function () { eval("class C { async x; }"); }, SyntaxError, "async x;");
+            assert.throws(function () { eval("class C { async get; }"); }, SyntaxError, "async get;");
+            assert.throws(function () { eval("class C { async static = 1; }"); }, SyntaxError, "async static =");
+
+            class AsyncName { async = 1; }
+            assert.areEqual("async", Object.getOwnPropertyNames(new AsyncName()).join(","));
+
+            const C = eval("(class { async\nam() { return 3; } })");
+            const c = new C();
+            assert.areEqual(undefined, c.async);
+            assert.areEqual(3, c.am());
+        }
+    },
+    {
+        name: "get/set followed by a generator via ASI is a field plus method",
+        body() {
+            const C = eval("(class { get\n*gen() { yield 1; } set\n*gen2() { yield 2; } })");
+            const c = new C();
+            assert.areEqual("get,set", Object.getOwnPropertyNames(c).join(","));
+            assert.areEqual(1, c.gen().next().value);
+            assert.areEqual(2, c.gen2().next().value);
+        }
+    },
+    {
+        name: "anonymous initializer functions and classes receive the field name",
+        body() {
+            class C {
+                x = function () {};
+                y = () => {};
+                z = class {};
+            }
+            const c = new C();
+            assert.areEqual("x,y,z", [c.x.name, c.y.name, c.z.name].join(","));
+        }
+    },
+    {
+        name: "super() in a constructor arrow is rejected when the class has fields",
+        body() {
+            assert.throws(function () {
+                eval("class A { constructor() { this.a = 1; } } class B extends A { b = 2; constructor() { (() => super())(); } }");
+            }, SyntaxError, "super in arrow");
+        }
+    },
+    {
         name: "class expressions and contextual names used as field names",
         body() {
             const K = class {

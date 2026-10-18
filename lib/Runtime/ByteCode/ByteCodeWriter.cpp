@@ -2157,6 +2157,7 @@ StoreCommon:
         case OpCode::InitLetFld:
         case OpCode::InitConstFld:
         case OpCode::InitClassMember:
+        case OpCode::InitClassField:
         case OpCode::ScopedLdMethodFld:
             break;
         default:

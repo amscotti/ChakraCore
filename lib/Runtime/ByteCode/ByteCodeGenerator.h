@@ -340,7 +340,7 @@ public:
     void LoadSuperConstructorObject(FuncInfo *funcInfo);
     void EmitSuperCall(FuncInfo* funcInfo, ParseNodeSuperCall * pnodeSuperCall, BOOL fReturnValue, BOOL fEvaluateComponents);
     void EmitClassConstructorEndCode(FuncInfo *funcInfo);
-    void EmitClassFieldInitializerCalls(ParseNode * pnodeFields, FuncInfo * funcInfo);
+    void EmitClassFieldInitializerCalls(ParseNode * pnodeFields, FuncInfo * funcInfo, Js::RegSlot thisLocation = Js::Constants::NoRegister);
 
     // TODO: home the 'this' argument
     void EmitLoadFormalIntoRegister(ParseNode *pnodeFormal, Js::RegSlot pos, FuncInfo *funcInfo);

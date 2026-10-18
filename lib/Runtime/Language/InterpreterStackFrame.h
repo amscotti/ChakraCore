@@ -596,6 +596,7 @@ namespace Js
         template <class T, bool Root> void ProfiledSetSuperProperty(unaligned T* playout, Var instance, Var thisInstance, PropertyOperationFlags flags);
 
         template <class T> void OP_InitProperty(unaligned T* playout);
+        template <class T> void OP_InitClassField(const unaligned T* playout);
         template <class T> void OP_InitLocalProperty(unaligned T* playout);
         template <class T> void OP_InitRootProperty(unaligned T* playout);
         template <class T> void OP_InitUndeclLetProperty(unaligned T* playout);

@@ -540,6 +540,8 @@ public:
     bool isNameIdentifierRef;
     bool nestedFuncEscapes;
     bool canBeDeferred;
+    bool hasSuperCallInConstructorLambda;
+    bool isClassFieldInitializerContext;
     bool isBodyAndParamScopeMerged; // Indicates whether the param scope and the body scope of the function can be merged together or not.
                                     // We cannot merge both scopes together if there is any closure capture or eval is present in the param scope.
     Js::RegSlot homeObjLocation;    // Stores the RegSlot from where the home object needs to be copied
