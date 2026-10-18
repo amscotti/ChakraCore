@@ -100,10 +100,30 @@ inline int _count_args(const T1&, const T2&, const T3&, const T4&, const T5&, Js
     entryPoint(function, callInfo, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, \
                function, callInfo, ##__VA_ARGS__)
 #else
-// macOS has own bespoke vararg cc (DarwinPCS), varargs always passed via stack.
-// Duplicate function/callInfo so they are pushed onto stack as part of varargs.
+// Apple ARM64 DarwinPCS puts only named parameters in x0-x7. Variadic
+// arguments go on the stack and are not copied into registers. JavascriptMethod
+// names function and callInfo, so a direct call leaves x2-x7 unchanged. A JIT
+// callee homes those registers and treats x2 as `this`.
+//
+// Name eight parameters so the first six real arguments fill x2-x7. Pass
+// function, callInfo, and the real arguments again as the variadic tail. That
+// tail is the stack image [function, callInfo, arg0, ...], which the
+// interpreter thunk reads at fp+16 and a JIT callee reads at fp+80.
+// The Linux branch above stays null-filled: AAPCS already uses x0-x7, and
+// those nulls are what pushes the image out to the stack there.
+template <typename... Args>
+inline Js::Var CallDarwinArm64Method(Js::JavascriptMethod entryPoint, Js::RecyclableObject* function, Js::CallInfo callInfo, Args... args)
+{
+    typedef Js::Var (*DarwinJitMethod)(Js::RecyclableObject*, Js::CallInfo, Js::Var, Js::Var, Js::Var, Js::Var, Js::Var, Js::Var, ...);
+    Js::Var regArgs[] = { ((Js::Var)args)..., nullptr, nullptr, nullptr, nullptr, nullptr, nullptr };
+    return reinterpret_cast<DarwinJitMethod>(entryPoint)(
+        function, callInfo,
+        regArgs[0], regArgs[1], regArgs[2], regArgs[3], regArgs[4], regArgs[5],
+        function, callInfo, args...);
+}
+
 #define CALL_ENTRYPOINT_NOASSERT(entryPoint, function, callInfo, ...) \
-    entryPoint(function, callInfo, function, callInfo, ##__VA_ARGS__)
+    CallDarwinArm64Method(entryPoint, function, callInfo, ##__VA_ARGS__)
 #endif
 #else
 #error CALL_ENTRYPOINT_NOASSERT not yet implemented

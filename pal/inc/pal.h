@@ -3613,6 +3613,19 @@ VirtualProtectEx(
            IN DWORD flNewProtect,
            OUT PDWORD lpflOldProtect);
 
+/*
+ * Apple ARM64 only: open (writeable=TRUE) or close (writeable=FALSE) the
+ * calling thread's MAP_JIT write window with pthread_jit_write_protect_np.
+ * This is the low-level pair used for raw writes that are not bracketed by
+ * VirtualProtect. On every other platform it is a no-op. Calls must not be
+ * nested across a window: closing the inner window also closes the outer one.
+ */
+PALIMPORT
+BOOL
+PALAPI
+VIRTUALJitWriteProtect(
+           IN BOOL writeable);
+
 typedef struct _MEMORYSTATUSEX {
   DWORD     dwLength;
   DWORD     dwMemoryLoad;

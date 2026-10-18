@@ -4,6 +4,9 @@
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #include "Backend.h"
+#if defined(__APPLE__) && defined(_M_ARM64)
+#include "DarwinEhFrame.h"
+#endif
 
 #if ENABLE_NATIVE_CODEGEN
 
@@ -480,6 +483,10 @@ void InterpreterThunkEmitter::FillBuffer(
     PrologEncoder prologEncoder;
     prologEncoder.EncodeSmallProlog(PrologSize, StackAllocSize);
     DWORD pdataSize = prologEncoder.SizeOfPData();
+#elif defined(__APPLE__) && defined(_M_ARM64)
+    // CIE + one FDE for the 16-byte stp/mov fp prologue. The record is copied
+    // into this tail of the executable page, which stays readable (RX).
+    DWORD pdataSize = 64;
 #elif defined(_M_ARM32_OR_ARM64)
     DWORD pdataSize = sizeof(RUNTIME_FUNCTION);
 #else
@@ -569,6 +576,23 @@ void InterpreterThunkEmitter::FillBuffer(
     Assert(bytesRemaining >= pdataSize);
     BYTE* pdata = prologEncoder.Finalize(buffer, functionSize, pdataStart);
     bytesWritten = CopyWithAlignment(pdataStart, bytesRemaining, pdata, pdataSize, EMIT_BUFFER_ALIGNMENT);
+#elif defined(__APPLE__) && defined(_M_ARM64)
+    // Header is stp fp,lr,[sp,#-16]! ; mov fp,sp. Call slots are past those
+    // 8 bytes, so the body FDE is the one a throw returns into.
+    DarwinArm64SavedReg saves[2];
+    saves[0].dwarfReg = 29;
+    saves[0].offsetFromSp = 0;
+    saves[1].dwarfReg = 30;
+    saves[1].offsetFromSp = 8;
+    BYTE ehFrame[64];
+    size_t ehBytes = EmitDarwinArm64EhFrame(ehFrame, sizeof(ehFrame), buffer, functionSize, 8, 16, saves, 2);
+    Assert(ehBytes != 0 && ehBytes <= pdataSize);
+    if (ehBytes == 0)
+    {
+        memset(ehFrame, 0, 4);
+        ehBytes = 4;
+    }
+    bytesWritten = CopyWithAlignment(pdataStart, bytesRemaining, ehFrame, (DWORD)ehBytes, EMIT_BUFFER_ALIGNMENT);
 #elif defined(_M_ARM32_OR_ARM64)
     RUNTIME_FUNCTION pdata;
     GeneratePdata(buffer, functionSize, &pdata);

@@ -13,7 +13,8 @@ namespace Memory
 #ifdef _WIN32
 #define XDATA_SIZE (100)
 #else
-#define XDATA_SIZE (0x80)
+// One CIE+FDE for a fully homed try frame (20 saved registers) fits in 256 bytes.
+#define XDATA_SIZE (0x100)
 #endif
 
     struct XDataAllocation : public SecondaryAllocation

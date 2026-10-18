@@ -10,6 +10,13 @@ using namespace Js;
     {
         JIT_HELPER_NOT_REENTRANT_NOLOCK_HEADER(SimpleProfileParameters);
         auto layout = JavascriptCallStackLayout::FromFramePointer(framePtr);
+#if defined(__APPLE__) && defined(_M_ARM64)
+        // FromFramePointer addresses the homed x0. A JS call on Apple also writes
+        // every slot at the caller's [sp + slot*8], and that image begins after
+        // the 8 homes. Slots 0-7 match either view. Later slots exist only in
+        // the image, 8 pointers past the homed function.
+        layout = reinterpret_cast<JavascriptCallStackLayout*>(reinterpret_cast<Var*>(layout) + 8);
+#endif
         FunctionBody* executeFunction = layout->functionObject->GetFunctionBody();
         const auto dynamicInfo = executeFunction->GetDynamicProfileInfo();
         ArgSlot requiredInParamCount = executeFunction->GetInParamsCount();

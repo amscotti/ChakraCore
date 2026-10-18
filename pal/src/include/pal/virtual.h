@@ -39,12 +39,21 @@ typedef struct _CMI {
 
     DWORD  accessProtection;    /* Initial allocation access protection. */
     DWORD  allocationType;      /* Initial allocation type. */
+    /* Apple ARM64: region was created with MAP_JIT. Commit maps each page
+       RWX once (the only mprotect a MAP_JIT page accepts); write windows
+       are per-thread pthread_jit_write_protect_np toggles afterwards. */
+    BYTE   jitRegion;
 
     BYTE * pAllocState;         /* Individual allocation type tracking for each */
                                 /* page in the region. */
 
     BYTE * pProtectionState;    /* Individual allocation type tracking for each */
                                 /* page in the region. */
+
+#if defined(__APPLE__) && defined(_M_ARM64)
+    BYTE * pJitState;           /* Pages already mprotected RWX. Their write
+                                   windows must never mprotect again. */
+#endif
 #if MMAP_DOESNOT_ALLOW_REMAP
     BYTE * pDirtyPages;         /* Pages that need to be cleared if re-committed */
 #endif // MMAP_DOESNOT_ALLOW_REMAP

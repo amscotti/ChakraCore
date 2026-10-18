@@ -206,7 +206,12 @@ public:
             IR::LabelInstr *    EnsureEHEpilogLabel();
             IR::Instr *         LowerEHRegionReturn(IR::Instr * insertBeforeInstr, IR::Opnd * targetOpnd);
             void                FinishArgLowering();
-            IR::Opnd *          GetOpndForArgSlot(Js::ArgSlot argSlot, IR::Opnd * argOpnd = nullptr);
+            IR::Opnd *          GetOpndForArgSlot(Js::ArgSlot argSlot, IR::Opnd * argOpnd = nullptr, bool jsStackImage = false);
+            void                HomeJsCallArgs(IR::Instr * callInstr, Js::ArgSlot argCount);
+#if defined(__APPLE__)
+            void                StoreAppleJsArgSlot(Js::ArgSlot slot, IR::Opnd * src, IR::Instr * insertBefore);
+            void                ReloadAppleJsCallRegs(IR::Instr * callInstr);
+#endif
             bool                GenerateStackAllocation(IR::Instr *instr, uint32 allocSize, uint32 probeSize);
             void                GenerateStackDeallocation(IR::Instr *instr, uint32 allocSize);
             void                GenerateStackProbe(IR::Instr *instr, bool afterProlog);

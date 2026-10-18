@@ -20,6 +20,17 @@ LPVOID VirtualAllocWrapper::AllocPages(LPVOID lpAddress, size_t pageCount, DWORD
 
     LPVOID address = nullptr;
 
+#if defined(__APPLE__) && defined(_M_ARM64)
+    // The custom heap is JIT code plus its .eh_frame slots. Its reservation
+    // must be MAP_JIT so write windows can use Apple's per-thread
+    // pthread_jit_write_protect_np instead of a process-wide mprotect.
+    // Recycler and ordinary heap reservations keep the normal mapping.
+    if (isCustomHeapAllocation && (allocationType & MEM_RESERVE) != 0)
+    {
+        allocationType |= MEM_RESERVE_EXECUTABLE;
+    }
+#endif
+
 #if defined(ENABLE_JIT_CLAMP)
     bool makeExecutable;
 
@@ -216,10 +227,19 @@ LPVOID PreReservedVirtualAllocWrapper::EnsurePreReservedRegionInternal()
 
     //PreReserve a (bigger) segment
     size_t bytes = PreReservedAllocationSegmentCount * AutoSystemInfo::Data.GetAllocationGranularityPageSize();
+
+    // MEM_RESERVE_EXECUTABLE is a PAL-only flag. On Apple ARM64 it makes the
+    // pre-reserved custom-heap segment a MAP_JIT mapping; Windows has no such
+    // allocation flag, so keep a plain reservation there.
+    DWORD reserveFlags = MEM_RESERVE;
+#if defined(__APPLE__) && defined(_M_ARM64)
+    reserveFlags |= MEM_RESERVE_EXECUTABLE;
+#endif
+
     if (PHASE_FORCE1(Js::PreReservedHeapAllocPhase))
     {
         //This code is used where CFG is not available, but still PreReserve optimization for CFG can be tested
-        startAddress = VirtualAlloc(NULL, bytes, MEM_RESERVE, PAGE_READWRITE);
+        startAddress = VirtualAlloc(NULL, bytes, reserveFlags, PAGE_READWRITE);
         PreReservedHeapTrace(_u("Reserving PreReservedSegment For the first time(CFG Non-Enabled). Address: 0x%p\n"), preReservedStartAddress);
         preReservedStartAddress = startAddress;
         return startAddress;
@@ -247,7 +267,7 @@ LPVOID PreReservedVirtualAllocWrapper::EnsurePreReservedRegionInternal()
 
     if (GlobalSecurityPolicy::IsCFGEnabled() && supportPreReservedRegion)
     {
-        startAddress = VirtualAlloc(NULL, bytes, MEM_RESERVE, PAGE_READWRITE);
+        startAddress = VirtualAlloc(NULL, bytes, reserveFlags, PAGE_READWRITE);
         PreReservedHeapTrace(_u("Reserving PreReservedSegment For the first time(CFG Enabled). Address: 0x%p\n"), preReservedStartAddress);
         preReservedStartAddress = startAddress;
 

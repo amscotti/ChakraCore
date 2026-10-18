@@ -380,6 +380,17 @@ LowererMD::LowerCall(IR::Instr * callInstr, Js::ArgSlot argCount)
     }
     Assert(doubleArgsLeft == 0 && intArgsLeft == 0 && argsLeft == 0);
 
+#if defined(__APPLE__)
+    // Darwin passes variadic arguments on the stack. C++ JavascriptMethod
+    // thunks and the interpreter thunk read [function, callInfo, arg0, ...]
+    // at [sp + slot*8]. Copy the register arguments there too. Stack arguments
+    // already occupy [sp + slot*8], past the 8 register slots.
+    if (argCount > 0)
+    {
+        this->HomeJsCallArgs(callInstr, argCount);
+    }
+#endif
+
     // We're done with the args (if any) now, so clear the param location state.
     this->FinishArgLowering();
 
@@ -392,7 +403,30 @@ LowererMD::LoadDynamicArgument(IR::Instr *instr, uint argNumber)
     Assert(instr->m_opcode == Js::OpCode::ArgOut_A_Dynamic);
     Assert(instr->GetSrc2() == nullptr);
 
+    // On Apple every JS slot, including x0-x7, lives in the argv image at
+    // [sp + slot*8]. A move into x3-x7 here is not kept live until the blr:
+    // callInfo setup reuses those registers. Store the value and reload the
+    // registers immediately before the call. A slot past the eighth is already
+    // that image (user arg 5 is slot 8). Other targets use [sp + (slot-8)*8].
+#if defined(__APPLE__)
+    Js::ArgSlot slot = (Js::ArgSlot)(argNumber - 1);
+    if (slot < NUM_INT_ARG_REGS)
+    {
+        IR::RegOpnd * spOpnd = IR::RegOpnd::New(nullptr, this->GetRegStackPointer(), TyMachReg, this->m_func);
+        IR::IndirOpnd * mem = IR::IndirOpnd::New(spOpnd, (int32)(slot * MachRegInt), TyMachReg, this->m_func);
+        instr->SetDst(mem);
+        instr->m_opcode = Js::OpCode::MOV;
+        LegalizeMD::LegalizeInstr(instr);
+        if (this->m_func->m_argSlotsForFunctionsCalled < NUM_INT_ARG_REGS)
+        {
+            this->m_func->m_argSlotsForFunctionsCalled = NUM_INT_ARG_REGS;
+        }
+        return instr;
+    }
+    IR::Opnd* dst = GetOpndForArgSlot(slot, nullptr, true);
+#else
     IR::Opnd* dst = GetOpndForArgSlot((Js::ArgSlot) (argNumber - 1));
+#endif
     instr->SetDst(dst);
     instr->m_opcode = Js::OpCode::MOV;
     LegalizeMD::LegalizeInstr(instr);
@@ -406,13 +440,20 @@ LowererMD::LoadDynamicArgumentUsingLength(IR::Instr *instr)
     Assert(instr->m_opcode == Js::OpCode::ArgOut_A_Dynamic);
     IR::RegOpnd* src2 = instr->UnlinkSrc2()->AsRegOpnd();
 
-    // We register store the first INT_ARG_REG_COUNT - 3 parameters, since the first 3 register parameters are taken by function object, callinfo, and this pointer
-    IR::Instr *add = IR::Instr::New(Js::OpCode::SUB, IR::RegOpnd::New(src2->GetType(), this->m_func), src2, IR::IntConstOpnd::New(INT_ARG_REG_COUNT - 3, TyInt8, this->m_func), this->m_func);
-    instr->InsertBefore(add);
-    LegalizeMD::LegalizeInstr(add);
-    //We need store nth actuals, so stack location is after function object, callinfo & this pointer
+    // src2 is the user-argument index. apply(arguments) only reaches here
+    // for index >= 5. On Apple that is argv slot index+3, past the 8 homes.
+    // Spread also uses this loop for earlier indices; those land in the homes.
+#if defined(__APPLE__)
+    // Full argv image: user arg N is slot N+3, so arg 5 is [sp+64].
+    IR::Instr *adjust = IR::Instr::New(Js::OpCode::ADD, IR::RegOpnd::New(src2->GetType(), this->m_func), src2, IR::IntConstOpnd::New(3, TyInt8, this->m_func), this->m_func);
+#else
+    // Windows ARM64 puts the first stack user argument at [sp].
+    IR::Instr *adjust = IR::Instr::New(Js::OpCode::SUB, IR::RegOpnd::New(src2->GetType(), this->m_func), src2, IR::IntConstOpnd::New(INT_ARG_REG_COUNT - 3, TyInt8, this->m_func), this->m_func);
+#endif
+    instr->InsertBefore(adjust);
+    LegalizeMD::LegalizeInstr(adjust);
     IR::RegOpnd *stackPointer   = IR::RegOpnd::New(nullptr, GetRegStackPointer(), TyMachReg, this->m_func);
-    IR::IndirOpnd *actualsLocation = IR::IndirOpnd::New(stackPointer, add->GetDst()->AsRegOpnd(), GetDefaultIndirScale(), TyMachReg, this->m_func);
+    IR::IndirOpnd *actualsLocation = IR::IndirOpnd::New(stackPointer, adjust->GetDst()->AsRegOpnd(), GetDefaultIndirScale(), TyMachReg, this->m_func);
     instr->SetDst(actualsLocation);
     instr->m_opcode = Js::OpCode::LDR;
     LegalizeMD::LegalizeInstr(instr);
@@ -462,7 +503,16 @@ LowererMD::LowerCallIDynamic(IR::Instr *callInstr, IR::Instr*saveThisArgOutInstr
     // functionOpnd is the first argument.
     IR::Opnd * opndParam = this->GetOpndForArgSlot(0);
     Lowerer::InsertMove(opndParam, funcObjOpnd, callInstr);
-    return this->LowerCall(callInstr, 0);
+    IR::Instr * lowered = this->LowerCall(callInstr, 0);
+#if defined(__APPLE__)
+    // x0 and x1 are set above, then the entry-point load can reuse x2-x7.
+    // Slots 2+ were stored by LoadDynamicArgument. Put function and callInfo
+    // in the image too, then refill x0-x7 from it as the last uses before the blr.
+    this->StoreAppleJsArgSlot(0, funcObjOpnd, callInstr);
+    this->StoreAppleJsArgSlot(1, argsLength, callInstr);
+    this->ReloadAppleJsCallRegs(callInstr);
+#endif
+    return lowered;
 }
 
 void
@@ -675,7 +725,7 @@ LowererMD::LowerCallArgs(IR::Instr *callInstr, IR::Instr *stackParamInsert, usho
         {
             Js::Throw::OutOfMemory();
         }
-        opndParam = this->GetOpndForArgSlot(argSlotNum + extraParams);
+        opndParam = this->GetOpndForArgSlot(argSlotNum + extraParams, nullptr, true);
 
         src2Opnd = argInstr->UnlinkSrc2();
         argInstr->ReplaceDst(opndParam);
@@ -753,8 +803,73 @@ LowererMD::FinishArgLowering()
     this->helperCallDoubleArgsCount = 0;
 }
 
+#if defined(__APPLE__)
+void
+LowererMD::StoreAppleJsArgSlot(Js::ArgSlot slot, IR::Opnd * src, IR::Instr * insertBefore)
+{
+    Assert(slot < NUM_INT_ARG_REGS);
+    IR::RegOpnd * spOpnd = IR::RegOpnd::New(nullptr, this->GetRegStackPointer(), TyMachReg, this->m_func);
+    IR::IndirOpnd * mem = IR::IndirOpnd::New(spOpnd, (int32)(slot * MachRegInt), TyMachReg, this->m_func);
+    Lowerer::InsertMove(mem, src, insertBefore, false);
+    if (this->m_func->m_argSlotsForFunctionsCalled < NUM_INT_ARG_REGS)
+    {
+        this->m_func->m_argSlotsForFunctionsCalled = NUM_INT_ARG_REGS;
+    }
+}
+
+void
+LowererMD::ReloadAppleJsCallRegs(IR::Instr * callInstr)
+{
+    IR::RegOpnd * spOpnd = IR::RegOpnd::New(nullptr, this->GetRegStackPointer(), TyMachReg, this->m_func);
+    for (Js::ArgSlot slot = 0; slot < NUM_INT_ARG_REGS; ++slot)
+    {
+        IR::IndirOpnd * src = IR::IndirOpnd::New(spOpnd, (int32)(slot * MachRegInt), TyMachReg, this->m_func);
+        IR::RegOpnd * dst = IR::RegOpnd::New(nullptr, (RegNum)(FIRST_INT_ARG_REG + slot), TyMachReg, this->m_func);
+        dst->m_isCallArg = true;
+        IR::Instr * load = IR::Instr::New(Js::OpCode::LDR, dst, src, this->m_func);
+        callInstr->InsertBefore(load);
+        LegalizeMD::LegalizeInstr(load);
+    }
+    if (this->m_func->m_argSlotsForFunctionsCalled < NUM_INT_ARG_REGS)
+    {
+        this->m_func->m_argSlotsForFunctionsCalled = NUM_INT_ARG_REGS;
+    }
+}
+#endif
+
+void
+LowererMD::HomeJsCallArgs(IR::Instr * callInstr, Js::ArgSlot argCount)
+{
+#if defined(__APPLE__)
+    Js::ArgSlot homeCount = argCount < NUM_INT_ARG_REGS ? argCount : (Js::ArgSlot)NUM_INT_ARG_REGS;
+    IR::RegOpnd * spOpnd = IR::RegOpnd::New(nullptr, this->GetRegStackPointer(), TyMachReg, this->m_func);
+    for (Js::ArgSlot slot = 0; slot < homeCount; ++slot)
+    {
+        IR::RegOpnd * argReg = IR::RegOpnd::New(nullptr, (RegNum)(FIRST_INT_ARG_REG + slot), TyMachReg, this->m_func);
+        argReg->m_isCallArg = true;
+        IR::IndirOpnd * dst = IR::IndirOpnd::New(spOpnd, (int32)(slot * MachRegInt), TyMachReg, this->m_func);
+        IR::Instr * store = IR::Instr::New(Js::OpCode::STR, dst, argReg, this->m_func);
+        callInstr->InsertBefore(store);
+        LegalizeMD::LegalizeInstr(store);
+    }
+
+    uint32 slots = homeCount;
+    if ((slots & 1) != 0)
+    {
+        ++slots;
+    }
+    if (this->m_func->m_argSlotsForFunctionsCalled < slots)
+    {
+        this->m_func->m_argSlotsForFunctionsCalled = slots;
+    }
+#else
+    (void)callInstr;
+    (void)argCount;
+#endif
+}
+
 IR::Opnd *
-LowererMD::GetOpndForArgSlot(Js::ArgSlot argSlot, IR::Opnd * argOpnd)
+LowererMD::GetOpndForArgSlot(Js::ArgSlot argSlot, IR::Opnd * argOpnd, bool jsStackImage)
 {
     IR::Opnd * opndParam = nullptr;
 
@@ -774,9 +889,24 @@ LowererMD::GetOpndForArgSlot(Js::ArgSlot argSlot, IR::Opnd * argOpnd)
         else
         {
             // Create a stack slot reference and bump up the size of this function's outgoing param area,
-            // if necessary.
-            argSlot = argSlot - NUM_INT_ARG_REGS;
-            IntConstType offset = argSlot * MachRegInt;
+            // if necessary. Helper calls use the platform ABI: the first stack
+            // argument is at [sp]. A JS call on Apple keeps a full argv image
+            // at [sp + slot*8], so slot 8 is at [sp + 64].
+#if !defined(__APPLE__)
+            (void)jsStackImage;
+#endif
+            IntConstType offset;
+#if defined(__APPLE__)
+            if (jsStackImage)
+            {
+                offset = argSlot * MachRegInt;
+            }
+            else
+#endif
+            {
+                argSlot = argSlot - NUM_INT_ARG_REGS;
+                offset = argSlot * MachRegInt;
+            }
             IR::RegOpnd * spBase = IR::RegOpnd::New(nullptr, this->GetRegStackPointer(), TyMachReg, this->m_func);
             opndParam = IR::IndirOpnd::New(spBase, int32(offset), type, this->m_func);
 
@@ -1390,6 +1520,48 @@ LowererMD::LowerEntryInstr(IR::EntryInstr * entryInstr)
         GenerateStackProbe(insertInstr, true); //stack is already aligned in this case
     }
 
+#if defined(__APPLE__) && defined(_M_ARM64)
+    // Record the finished frame for the DWARF FDE. Offsets are from the final
+    // SP. arm64_CallEhFrame builds this same register area, so a throw inside
+    // a try unwinds back to OP_TryCatch instead of the parent caller.
+    {
+        UnwindInfoManager* unwind = &this->m_func->m_unwindInfo;
+        unwind->ResetDarwinFrame(layout.TotalStackSize());
+        if (!layout.SavedDoubles().IsEmpty())
+        {
+            ULONG offset = layout.SavedDoublesOffset();
+            for (RegNum curReg = FIRST_CALLEE_SAVED_DBL_REG; curReg <= LAST_CALLEE_SAVED_DBL_REG; curReg = RegNum(curReg + 2))
+            {
+                if (layout.SavedDoubles().Test(curReg))
+                {
+                    // RegEncode stores NEONREG_BASE + n. DWARF Vn is 64 + n.
+                    unwind->AddDarwinSave((uint16)(EncoderMD::GetRegEncode(curReg) - NEONREG_BASE + 64), offset);
+                    unwind->AddDarwinSave((uint16)(EncoderMD::GetRegEncode(RegNum(curReg + 1)) - NEONREG_BASE + 64), offset + MachRegDouble);
+                    offset += 2 * MachRegDouble;
+                }
+            }
+        }
+        if (!layout.SavedRegisters().IsEmpty())
+        {
+            ULONG offset = layout.SavedRegistersOffset();
+            for (RegNum curReg = FIRST_CALLEE_SAVED_GP_REG; curReg <= LAST_CALLEE_SAVED_GP_REG; curReg = RegNum(curReg + 2))
+            {
+                if (layout.SavedRegisters().Test(curReg))
+                {
+                    unwind->AddDarwinSave(EncoderMD::GetRegEncode(curReg), offset);
+                    unwind->AddDarwinSave(EncoderMD::GetRegEncode(RegNum(curReg + 1)), offset + MachRegInt);
+                    offset += 2 * MachRegInt;
+                }
+            }
+        }
+        if (layout.HasCalls())
+        {
+            unwind->AddDarwinSave(EncoderMD::GetRegEncode(RegFP), layout.FpLrOffset());
+            unwind->AddDarwinSave(EncoderMD::GetRegEncode(RegLR), layout.FpLrOffset() + MachRegInt);
+        }
+    }
+#endif
+
     return entryInstr;
 }
 
@@ -1638,7 +1810,17 @@ LowererMD::LoadInputParamPtr(IR::Instr * instrInsert, IR::RegOpnd * optionalDstO
     else
     {
         StackSym * paramSym = GetImplicitParamSlotSym(3);
-        return this->m_lowerer->InsertLoadStackAddress(paramSym, instrInsert);
+        IR::Instr * instr = this->m_lowerer->InsertLoadStackAddress(paramSym, instrInsert);
+#if defined(__APPLE__)
+        // InsertLoadStackAddress points at the homed copy of the first user
+        // argument. LoadHeapArguments walks that pointer as one contiguous
+        // argv. On Apple the contiguous image starts 8 register slots later.
+        // Creating the arguments object is a call, so the frame homes all 8.
+        IR::RegOpnd * ptrOpnd = instr->GetDst()->AsRegOpnd();
+        instr = Lowerer::InsertAdd(false, ptrOpnd, ptrOpnd,
+            IR::IntConstOpnd::New(NUM_INT_ARG_REGS * MachRegInt, TyMachReg, this->m_func), instrInsert);
+#endif
+        return instr;
     }
 }
 
@@ -1706,7 +1888,14 @@ LowererMD::LoadStackArgPtr(IR::Instr * instr)
         // dst = ADD r11, "this" offset + sizeof(var)
 
         instr->SetSrc1(IR::RegOpnd::New(nullptr, FRAME_REG, TyMachReg, this->m_func));
-        instr->SetSrc2(IR::IntConstOpnd::New((ArgOffsetFromFramePtr + Js::JavascriptFunctionArgIndex_SecondScriptArg) * sizeof(Js::Var), TyMachReg, this->m_func));
+        int32 stackArgBias = 0;
+#if defined(__APPLE__)
+        // The caller writes every JS slot at [sp + slot*8]. That image sits
+        // above the 8 homed register slots, so the first user arg is 64 bytes
+        // past the homed copy.
+        stackArgBias = NUM_INT_ARG_REGS * MachRegInt;
+#endif
+        instr->SetSrc2(IR::IntConstOpnd::New((ArgOffsetFromFramePtr + Js::JavascriptFunctionArgIndex_SecondScriptArg) * sizeof(Js::Var) + stackArgBias, TyMachReg, this->m_func));
     }
 
     instr->m_opcode = Js::OpCode::ADD;

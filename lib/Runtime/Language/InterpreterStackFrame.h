@@ -416,42 +416,70 @@ namespace Js
 
         const byte* ProcessProfiledExtendedOpcodePrefix(const byte* ip);
         const byte* ProcessUnprofiledExtendedOpcodePrefix(const byte* ip);
-        const byte* ProcessWithDebuggingExtendedOpcodePrefix(const byte* ip);
+#if ENABLE_PROFILE_INFO
+        const byte* ProcessWithDebuggingProfiledExtendedOpcodePrefix(const byte* ip);
+#endif
+        const byte* ProcessWithDebuggingUnprofiledExtendedOpcodePrefix(const byte* ip);
         const byte* ProcessAsmJsExtendedOpcodePrefix(const byte* ip);
 
         const byte* ProcessProfiledMediumLayoutPrefix(const byte* ip, Var&);
         const byte* ProcessUnprofiledMediumLayoutPrefix(const byte* ip, Var&);
-        const byte* ProcessWithDebuggingMediumLayoutPrefix(const byte* ip, Var&);
+#if ENABLE_PROFILE_INFO
+        const byte* ProcessWithDebuggingProfiledMediumLayoutPrefix(const byte* ip, Var&);
+#endif
+        const byte* ProcessWithDebuggingUnprofiledMediumLayoutPrefix(const byte* ip, Var&);
         const byte* ProcessAsmJsMediumLayoutPrefix(const byte* ip, Var&);
 
         const byte* ProcessProfiledExtendedMediumLayoutPrefix(const byte* ip);
         const byte* ProcessUnprofiledExtendedMediumLayoutPrefix(const byte* ip);
-        const byte* ProcessWithDebuggingExtendedMediumLayoutPrefix(const byte* ip);
+#if ENABLE_PROFILE_INFO
+        const byte* ProcessWithDebuggingProfiledExtendedMediumLayoutPrefix(const byte* ip);
+#endif
+        const byte* ProcessWithDebuggingUnprofiledExtendedMediumLayoutPrefix(const byte* ip);
         const byte* ProcessAsmJsExtendedMediumLayoutPrefix(const byte* ip);
 
         const byte* ProcessProfiledLargeLayoutPrefix(const byte* ip, Var&);
         const byte* ProcessUnprofiledLargeLayoutPrefix(const byte* ip, Var&);
-        const byte* ProcessWithDebuggingLargeLayoutPrefix(const byte* ip, Var&);
+#if ENABLE_PROFILE_INFO
+        const byte* ProcessWithDebuggingProfiledLargeLayoutPrefix(const byte* ip, Var&);
+#endif
+        const byte* ProcessWithDebuggingUnprofiledLargeLayoutPrefix(const byte* ip, Var&);
         const byte* ProcessAsmJsLargeLayoutPrefix(const byte* ip, Var&);
 
         const byte* ProcessProfiledExtendedLargeLayoutPrefix(const byte* ip);
         const byte* ProcessUnprofiledExtendedLargeLayoutPrefix(const byte* ip);
-        const byte* ProcessWithDebuggingExtendedLargeLayoutPrefix(const byte* ip);
+#if ENABLE_PROFILE_INFO
+        const byte* ProcessWithDebuggingProfiledExtendedLargeLayoutPrefix(const byte* ip);
+#endif
+        const byte* ProcessWithDebuggingUnprofiledExtendedLargeLayoutPrefix(const byte* ip);
         const byte* ProcessAsmJsExtendedLargeLayoutPrefix(const byte* ip);
 
 #ifdef ENABLE_SCRIPT_DEBUGGING
         Var ProcessWithDebugging();
+#if ENABLE_PROFILE_INFO
+        Var ProcessWithDebuggingProfiled();
+#endif
+        Var ProcessWithDebuggingUnprofiled();
         Var DebugProcess();
         bool IsInDebugMode() const { return this->GetFunctionBody()->IsInDebugMode(); }
 #endif
 
 #if ENABLE_TTD
+#if ENABLE_PROFILE_INFO
+        Var ProcessWithDebuggingProfiled_PreviousStmtTracking();
+        const byte* ProcessWithDebuggingProfiled_PreviousStmtTrackingExtendedOpcodePrefix(const byte* ip);
+        const byte* ProcessWithDebuggingProfiled_PreviousStmtTrackingMediumLayoutPrefix(const byte* ip, Var&);
+        const byte* ProcessWithDebuggingProfiled_PreviousStmtTrackingExtendedMediumLayoutPrefix(const byte* ip);
+        const byte* ProcessWithDebuggingProfiled_PreviousStmtTrackingLargeLayoutPrefix(const byte* ip, Var&);
+        const byte* ProcessWithDebuggingProfiled_PreviousStmtTrackingExtendedLargeLayoutPrefix(const byte* ip);
+#endif
         Var ProcessWithDebugging_PreviousStmtTracking();
-        const byte* ProcessWithDebugging_PreviousStmtTrackingExtendedOpcodePrefix(const byte* ip);
-        const byte* ProcessWithDebugging_PreviousStmtTrackingMediumLayoutPrefix(const byte* ip, Var&);
-        const byte* ProcessWithDebugging_PreviousStmtTrackingExtendedMediumLayoutPrefix(const byte* ip);
-        const byte* ProcessWithDebugging_PreviousStmtTrackingLargeLayoutPrefix(const byte* ip, Var&);
-        const byte* ProcessWithDebugging_PreviousStmtTrackingExtendedLargeLayoutPrefix(const byte* ip);
+        Var ProcessWithDebuggingUnprofiled_PreviousStmtTracking();
+        const byte* ProcessWithDebuggingUnprofiled_PreviousStmtTrackingExtendedOpcodePrefix(const byte* ip);
+        const byte* ProcessWithDebuggingUnprofiled_PreviousStmtTrackingMediumLayoutPrefix(const byte* ip, Var&);
+        const byte* ProcessWithDebuggingUnprofiled_PreviousStmtTrackingExtendedMediumLayoutPrefix(const byte* ip);
+        const byte* ProcessWithDebuggingUnprofiled_PreviousStmtTrackingLargeLayoutPrefix(const byte* ip, Var&);
+        const byte* ProcessWithDebuggingUnprofiled_PreviousStmtTrackingExtendedLargeLayoutPrefix(const byte* ip);
 
 #if ENABLE_TTD_DIAGNOSTICS_TRACING
         Var ProcessUnprofiled_PreviousStmtTracking();

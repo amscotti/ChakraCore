@@ -10,12 +10,12 @@
 ;       varResult = arm64_CallFunction((JavascriptFunction*)function, args.Info, argCount, args.Values, entryPoint);
 ;
 ;   and makes the following call
-;           return entryPoint(function, info, function, info, values[0], values[1], ..., values[n-2], values[n-1]);
+;           return entryPoint(function, info, values[0], values[1], ..., values[n-1]);
 ;   where n = info.Count
 ;
-;   ARM64 on macOS puts upto 6 named parameters into x0-x5 and all other parameters (including ...) on the stack
-;   For the stack walker to work need function and info on stack as well as in x0 and x1
-;   Below logic copies them and all other params to stack
+;   macOS passes variadic arguments on the stack. JIT callees also read the first
+;   values from x2-x7 and home them. Function and callInfo stay in x0 and x1 and
+;   at [sp], [sp+8] for the stack walker and for JavascriptMethod.
 ;
 
 #include "unixasmmacros.inc"
@@ -23,6 +23,9 @@
 NESTED_ENTRY arm64_CallFunction, _TEXT, NoHandler
 
     PROLOG_SAVE_REG_PAIR_INDEXED fp, lr, -16    ; save FP/LR registers, implicitly stores FP in SP
+
+    mov     x16, x4                             ; entry point; x4 is reused as an argument
+    mov     x15, x2                             ; argCount, kept across the copy
 
     add     x5, x2, #3                          ; add 3 to param count
     lsr     x5, x5, #1                          ; divide by 2 
@@ -40,8 +43,27 @@ NESTED_ENTRY arm64_CallFunction, _TEXT, NoHandler
     str     x7, [x6], #8                        ; store param to dest
     bne     LOCAL_LABEL(CopyLoop)               ; loop until all copied
 
+    ; values[0] is slot 2. Load only the slots the copy wrote.
+    cmp     x15, #1
+    blo     LOCAL_LABEL(CallEntryPoint)
+    ldr     x2, [sp, #16]
+    beq     LOCAL_LABEL(CallEntryPoint)
+    ldr     x3, [sp, #24]
+    cmp     x15, #2
+    beq     LOCAL_LABEL(CallEntryPoint)
+    ldr     x4, [sp, #32]
+    cmp     x15, #3
+    beq     LOCAL_LABEL(CallEntryPoint)
+    ldr     x5, [sp, #40]
+    cmp     x15, #4
+    beq     LOCAL_LABEL(CallEntryPoint)
+    ldr     x6, [sp, #48]
+    cmp     x15, #5
+    beq     LOCAL_LABEL(CallEntryPoint)
+    ldr     x7, [sp, #56]
+
     LOCAL_LABEL(CallEntryPoint):
-    blr     x4                                  ; call entry point
+    blr     x16                                 ; call entry point
 
     mov     sp, fp                              ; explicitly restore sp
     EPILOG_RESTORE_REG_PAIR_INDEXED fp, lr, 16  ; restore FP/LR

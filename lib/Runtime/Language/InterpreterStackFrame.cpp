@@ -1849,8 +1849,13 @@ skipThunk:
     bool InterpreterStackFrame::ShouldDoProfile(FunctionBody* executeFunction)
     {
 #if ENABLE_PROFILE_INFO
+        // ProcessWithDebugging() and the TTD debug loop select their profiled
+        // variants with DoInterpreterProfile(). Use the same predicate here so
+        // the debugger frame allocates and records profile info only when the
+        // selected loop was compiled with profile support. Keep the explicit
+        // ProfilingInterpreter arm for frames already running in that mode.
         const bool doProfile = executeFunction->GetInterpreterExecutionMode(false) == ExecutionMode::ProfilingInterpreter ||
-            (executeFunction->IsInDebugMode() && DynamicProfileInfo::IsEnabled(executeFunction));
+            executeFunction->DoInterpreterProfile();
         return doProfile;
 #else
         return false;
@@ -2912,9 +2917,7 @@ skipThunk:
 
         ScriptFunction * funcObj = GetJavascriptFunction();
         ScriptFunction::ReparseAsmJsModule(&funcObj);
-        const bool doProfile =
-            funcObj->GetFunctionBody()->GetInterpreterExecutionMode(false) == ExecutionMode::ProfilingInterpreter ||
-            (funcObj->GetFunctionBody()->IsInDebugMode() && DynamicProfileInfo::IsEnabled(funcObj->GetFunctionBody()));
+        const bool doProfile = ShouldDoProfile(funcObj->GetFunctionBody());
 
         DynamicProfileInfo * dynamicProfileInfo = nullptr;
         if (doProfile)
@@ -3321,36 +3324,74 @@ skipThunk:
 #undef INTERPRETERLOOPNAME
 #endif
 
-// For now, always collect profile data when debugging,
-// otherwise the backend will be confused if there's no profile data.
+// The profiled debug loop needs profile storage to record into. Generate it
+// only when profile info is compiled in; the unprofiled loop can also read
+// byte-code that contains profiled opcodes.
 #ifdef ENABLE_SCRIPT_DEBUGGING
-#define INTERPRETERLOOPNAME ProcessWithDebugging
+#if ENABLE_PROFILE_INFO
+#define INTERPRETERLOOPNAME ProcessWithDebuggingProfiled
 #define PROVIDE_DEBUGGING
-#if ENABLE_PROFILE_INFO
 #define PROVIDE_INTERPRETERPROFILE
-#endif
 #include "InterpreterLoop.inl"
-#if ENABLE_PROFILE_INFO
 #undef PROVIDE_INTERPRETERPROFILE
-#endif
 #undef PROVIDE_DEBUGGING
 #undef INTERPRETERLOOPNAME
 #endif
 
-#if ENABLE_TTD
-#define PROVIDE_INTERPRETER_STMTS
-#define INTERPRETERLOOPNAME ProcessWithDebugging_PreviousStmtTracking
+#define INTERPRETERLOOPNAME ProcessWithDebuggingUnprofiled
 #define PROVIDE_DEBUGGING
-#if ENABLE_PROFILE_INFO
-#define PROVIDE_INTERPRETERPROFILE
-#endif
 #include "InterpreterLoop.inl"
+#undef PROVIDE_DEBUGGING
+#undef INTERPRETERLOOPNAME
+
+    Var InterpreterStackFrame::ProcessWithDebugging()
+    {
 #if ENABLE_PROFILE_INFO
-#undef PROVIDE_INTERPRETERPROFILE
+        // The byte-code reader keeps only byte-code pointers, not the layout it
+        // was generated with. DoInterpreterProfile() is the existing layout
+        // predicate: it is false under -off:InterpreterProfile and in debug
+        // mode with -nonative, when this loop must not record profile data.
+        if (this->m_functionBody->DoInterpreterProfile())
+        {
+            return ProcessWithDebuggingProfiled();
+        }
 #endif
+        return ProcessWithDebuggingUnprofiled();
+    }
+#endif
+
+#if ENABLE_TTD
+#if ENABLE_PROFILE_INFO
+#define PROVIDE_INTERPRETER_STMTS
+#define INTERPRETERLOOPNAME ProcessWithDebuggingProfiled_PreviousStmtTracking
+#define PROVIDE_DEBUGGING
+#define PROVIDE_INTERPRETERPROFILE
+#include "InterpreterLoop.inl"
+#undef PROVIDE_INTERPRETERPROFILE
 #undef PROVIDE_DEBUGGING
 #undef INTERPRETERLOOPNAME
 #undef PROVIDE_INTERPRETER_STMTS
+#endif
+
+#define PROVIDE_INTERPRETER_STMTS
+#define INTERPRETERLOOPNAME ProcessWithDebuggingUnprofiled_PreviousStmtTracking
+#define PROVIDE_DEBUGGING
+#include "InterpreterLoop.inl"
+#undef PROVIDE_DEBUGGING
+#undef INTERPRETERLOOPNAME
+#undef PROVIDE_INTERPRETER_STMTS
+
+    Var InterpreterStackFrame::ProcessWithDebugging_PreviousStmtTracking()
+    {
+#if ENABLE_PROFILE_INFO
+        // Same loop selection as ProcessWithDebugging().
+        if (this->m_functionBody->DoInterpreterProfile())
+        {
+            return ProcessWithDebuggingProfiled_PreviousStmtTracking();
+        }
+#endif
+        return ProcessWithDebuggingUnprofiled_PreviousStmtTracking();
+    }
 #endif
 
     Var InterpreterStackFrame::Process()

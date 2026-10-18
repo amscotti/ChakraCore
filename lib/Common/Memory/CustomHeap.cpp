@@ -18,6 +18,19 @@
 #include <malloc.h>
 #endif
 
+// Apple ARM64 MAP_JIT write windows are per thread. Every other platform has
+// no equivalent state, and the engine does not call into the Unix PAL there.
+#if defined(__APPLE__) && defined(_M_ARM64)
+static inline void CustomHeapJitWriteProtect(BOOL writeable)
+{
+    VIRTUALJitWriteProtect(writeable);
+}
+#else
+static inline void CustomHeapJitWriteProtect(BOOL)
+{
+}
+#endif
+
 namespace Memory
 {
 namespace CustomHeap
@@ -420,7 +433,10 @@ Allocation* Heap<TAlloc, TPreReservedAlloc>::AllocLargeObject(size_t bytes, usho
         {
             return nullptr;
         }
+        // Apple ARM64 MAP_JIT segment: a write window is per thread.
+        CustomHeapJitWriteProtect(TRUE);
         FillDebugBreak((BYTE*)localAddr, pages*AutoSystemInfo::PageSize);
+        CustomHeapJitWriteProtect(FALSE);
         this->codePageAllocators->FreeLocal(localAddr, segment);
 
         if (this->processHandle == GetCurrentProcess())
@@ -528,7 +544,11 @@ DWORD Heap<TAlloc, TPreReservedAlloc>::EnsureAllocationExecuteWriteable(Allocati
     }
     else
     {
+        #if defined(__APPLE__) && defined(_M_ARM64)
+        return EnsureAllocationReadWrite<PAGE_READWRITE>(allocation); // PAGE_EXECUTE_READWRITE banned on Apple Silicon
+        #else
         return EnsureAllocationReadWrite<PAGE_EXECUTE_READWRITE>(allocation);
+        #endif
     }
 }
 
@@ -542,6 +562,9 @@ void Heap<TAlloc, TPreReservedAlloc>::FreeLargeObjects()
 #if PDATA_ENABLED
         Assert(allocation.xdata.IsFreed());
 #endif
+        // Release does not write code bytes; close this thread's window before
+        // it so release/decommit never runs under a caller's write window.
+        CustomHeapJitWriteProtect(FALSE);
         this->codePageAllocators->Release(allocation.address, allocation.GetPageCount(), allocation.largeObjectAllocation.segment);
 
         largeObjectIter.RemoveCurrent(this->auxiliaryAllocator);
@@ -558,6 +581,8 @@ void Heap<TAlloc, TPreReservedAlloc>::FreeLargeObject(Allocation* allocation)
 #if PDATA_ENABLED
     Assert(allocation->xdata.IsFreed());
 #endif
+    // Release does not write code bytes; close this thread's window first.
+    CustomHeapJitWriteProtect(FALSE);
     this->codePageAllocators->Release(allocation->address, allocation->GetPageCount(), allocation->largeObjectAllocation.segment);
 
     this->largeObjectAllocations.RemoveElement(this->auxiliaryAllocator, allocation);
@@ -689,7 +714,10 @@ Page* Heap<TAlloc, TPreReservedAlloc>::AllocNewPage(BucketId bucket, bool canAll
     {
         return nullptr;
     }
+    // Apple ARM64 MAP_JIT segment: a write window is per thread.
+    CustomHeapJitWriteProtect(TRUE);
     FillDebugBreak((BYTE*)localAddr, AutoSystemInfo::PageSize);
+    CustomHeapJitWriteProtect(FALSE);
     this->codePageAllocators->FreeLocal(localAddr, pageSegment);
 
     DWORD protectFlags = 0;
@@ -847,6 +875,7 @@ bool Heap<TAlloc, TPreReservedAlloc>::FreeAllocation(Allocation* object)
             char* localAddr = this->codePageAllocators->AllocLocal(object->address, object->size, page->segment);
             if (!localAddr)
             {
+                CustomHeapJitWriteProtect(FALSE);
                 MemoryOperationLastError::RecordError(JSERR_FatalMemoryExhaustion);
                 return false;
             }
@@ -864,6 +893,10 @@ bool Heap<TAlloc, TPreReservedAlloc>::FreeAllocation(Allocation* object)
             this->totalAllocationSize -= pageSize;
 #endif
             this->auxiliaryAllocator->Free(object, sizeof(Allocation));
+            // The page is gone. The release path does not write code bytes, so
+            // close the per-thread write window opened by
+            // EnsureAllocationWriteable before releasing/decommitting.
+            CustomHeapJitWriteProtect(FALSE);
             {
                 AutoCriticalSection autoLock(&this->codePageAllocators->cs);
                 this->codePageAllocators->ReleasePages(pageAddress, 1, segment);
@@ -883,6 +916,10 @@ bool Heap<TAlloc, TPreReservedAlloc>::FreeAllocation(Allocation* object)
         Assert(page->IsEmpty());
 
         this->buckets[page->currentBucket].RemoveElement(this->auxiliaryAllocator, page);
+        // The page is removed from its bucket. Restore the thread's execute
+        // state before returning; the logical page state stays writable for
+        // the allocator's next reuse of this release path.
+        CustomHeapJitWriteProtect(FALSE);
         return false;
     }
     else
@@ -890,7 +927,7 @@ bool Heap<TAlloc, TPreReservedAlloc>::FreeAllocation(Allocation* object)
         EnsureAllocationExecuteWriteable(object);
         FreeAllocationHelper(object, index, length);
 
-        // after freeing part of the page, the page should be in PAGE_EXECUTE_READWRITE protection, and turning to PAGE_EXECUTE_READ (always with TARGETS_NO_UPDATE state)
+        // after freeing part of the page, the page should be in PAGE_EXECUTE_READWRITE protection (PAGE_READWRITE on Apple Silicon), and turning to PAGE_EXECUTE_READ (always with TARGETS_NO_UPDATE state)
 
         DWORD protectFlags = 0;
 
@@ -903,7 +940,11 @@ bool Heap<TAlloc, TPreReservedAlloc>::FreeAllocation(Allocation* object)
             protectFlags = PAGE_EXECUTE_READ;
         }
 
+        #if defined(__APPLE__) && defined(_M_ARM64)
+        this->codePageAllocators->ProtectPages(page->address, 1, segment, protectFlags, PAGE_READWRITE); // write window is PAGE_READWRITE on Apple Silicon
+        #else
         this->codePageAllocators->ProtectPages(page->address, 1, segment, protectFlags, PAGE_EXECUTE_READWRITE);
+        #endif
 
         return true;
     }
@@ -971,6 +1012,8 @@ void Heap<TAlloc, TPreReservedAlloc>::FreePage(Page* page)
     size_t freeSpace = page->freeBitVector.Count() * Page::Alignment;
 
     VerboseHeapTrace(_u("Removing page in bucket %d, freeSpace: %d\n"), page->currentBucket, freeSpace);
+    // Release does not write code bytes; close this thread's window first.
+    CustomHeapJitWriteProtect(FALSE);
     this->codePageAllocators->ReleasePages(page->address, 1, page->segment);
 
 #if DBG_DUMP

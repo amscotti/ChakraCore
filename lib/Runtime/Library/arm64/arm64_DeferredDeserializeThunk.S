@@ -21,21 +21,28 @@
 ;       [sp+8]    values[1]
 ;       ...
 ;
-;  Save and restore x0 and x1 to ensure they are the same after JavascriptFunction::DeferredDeserialize
+;  Save and restore x0-x7. A JIT callee homes those registers, and the C++ helper
+;  call clobbers x2-x7.
 ;  Move the stack pointer on so values on the stack remain untouched - move it back after JavascriptFunction::DeferredDeserialize
 
 #include "unixasmmacros.inc"
 
 NESTED_ENTRY _ZN2Js18JavascriptFunction24DeferredDeserializeThunkEPNS_16RecyclableObjectENS_8CallInfoEz, _TEXT, NoHandler
 
-    PROLOG_SAVE_REG_PAIR_INDEXED fp, lr, -32   ; save parameter registers
+    PROLOG_SAVE_REG_PAIR_INDEXED fp, lr, -80   ; save parameter registers
     stp     x0, x1, [sp, #16]
+    stp     x2, x3, [sp, #32]
+    stp     x4, x5, [sp, #48]
+    stp     x6, x7, [sp, #64]
 
     bl      C_FUNC(_ZN2Js18JavascriptFunction19DeferredDeserializeEPNS_14ScriptFunctionE) ; retrieve entrypoint
     mov     x16, x0                    ; back up entryPoint in x16
 
+    ldp     x6, x7, [sp, #64]
+    ldp     x4, x5, [sp, #48]
+    ldp     x2, x3, [sp, #32]
     ldp     x0, x1, [sp, #16]
-    EPILOG_RESTORE_REG_PAIR_INDEXED fp, lr, 32
+    EPILOG_RESTORE_REG_PAIR_INDEXED fp, lr, 80
     br x16                             ; tail call to new entryPoint
 
 NESTED_END _ZN2Js18JavascriptFunction24DeferredDeserializeThunkEPNS_16RecyclableObjectENS_8CallInfoEz

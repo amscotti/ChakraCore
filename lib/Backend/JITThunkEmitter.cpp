@@ -294,7 +294,11 @@ JITThunkEmitter<VirtualAllocWrapper>::ProtectPage(void * address)
 #endif
     DWORD oldProtect;
     BOOL result = VirtualProtectEx(this->processHandle, address, ThunkSize, PAGE_EXECUTE_READ, &oldProtect);
+#if defined(__APPLE__) && defined(_M_ARM64)
+    AssertOrFailFast(result && oldProtect == PAGE_READWRITE); // PAGE_EXECUTE_READWRITE banned on Apple Silicon
+#else
     AssertOrFailFast(result && oldProtect == PAGE_EXECUTE_READWRITE);
+#endif
 }
 
 template <> inline
@@ -305,7 +309,11 @@ JITThunkEmitter<VirtualAllocWrapper>::UnprotectPage(void * address)
     AutoEnableDynamicCodeGen enableCodeGen(true);
 #endif
     DWORD oldProtect;
+#if defined(__APPLE__) && defined(_M_ARM64)
+    BOOL result = VirtualProtectEx(this->processHandle, address, ThunkSize, PAGE_READWRITE, &oldProtect); // write window is PAGE_READWRITE on Apple Silicon
+#else
     BOOL result = VirtualProtectEx(this->processHandle, address, ThunkSize, PAGE_EXECUTE_READWRITE, &oldProtect);
+#endif
     AssertOrFailFast(result && oldProtect == PAGE_EXECUTE_READ);
 }
 
