@@ -2,6 +2,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "top": "Object {...}",
       "startTest": "undefined undefined",
       "bar": "function <large string>",
@@ -55,6 +56,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "top": "Object {...}",
       "startTest": "undefined undefined",
       "bar": "function <large string>",
@@ -108,6 +110,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "top": "Object {...}",
       "startTest": "function <large string>",
       "bar": "function <large string>",
@@ -164,6 +167,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "top": "Object {...}",
       "startTest": "function <large string>",
       "bar": "function <large string>",
@@ -207,6 +211,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "top": "Object {...}",
       "startTest": "function <large string>",
       "bar": "function <large string>",
@@ -258,6 +263,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "top": "Object {...}",
       "startTest": "function <large string>",
       "bar": "function <large string>",
@@ -310,6 +316,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "top": "Object {...}",
       "startTest": "function <large string>",
       "bar": "function <large string>",
@@ -362,6 +369,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "top": "Object {...}",
       "startTest": "function <large string>",
       "bar": "function <large string>",
@@ -410,6 +418,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "top": "Object {...}",
       "startTest": "function <large string>",
       "bar": "function <large string>",
@@ -458,6 +467,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "top": "Object {...}",
       "startTest": "function <large string>",
       "bar": "function <large string>",
@@ -506,6 +516,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "top": "Object {...}",
       "startTest": "function <large string>",
       "bar": "function <large string>",
@@ -555,6 +566,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "top": "Object {...}",
       "startTest": "function <large string>",
       "bar": "function <large string>",
@@ -744,6 +756,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "top": "Object {...}",
       "startTest": "function <large string>",
       "bar": "function <large string>",
@@ -815,6 +828,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "top": "Object {...}",
       "startTest": "function <large string>",
       "bar": "function <large string>",
@@ -886,6 +900,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "top": "Object {...}",
       "startTest": "function <large string>",
       "bar": "function <large string>",
@@ -932,6 +947,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "top": "Object {...}",
       "startTest": "function <large string>",
       "bar": "function <large string>",

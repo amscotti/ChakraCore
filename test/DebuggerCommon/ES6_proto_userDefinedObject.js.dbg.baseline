@@ -2,6 +2,12 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": {
+        "#__proto__": "function <large string>",
+        "length": "number 1",
+        "prototype": "Object {...}",
+        "name": "string WeakRef"
+      },
       "a": {
         "#__proto__": "Object {...}",
         "x": "number 2"
@@ -18,10 +24,10 @@
       "MyObj": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
+        "length": "number 0",
         "name": "string MyObj",
         "caller": "object null",
-        "arguments": "object null",
-        "length": "number 0"
+        "arguments": "object null"
       }
     },
     "locals": {
@@ -76,10 +82,10 @@
           "#__proto__": "Object {...}",
           "constructor": "function <large string>"
         },
+        "length": "number 0",
         "name": "string MyObj",
         "caller": "object null",
-        "arguments": "object null",
-        "length": "number 0"
+        "arguments": "object null"
       }
     },
     "globals": {}

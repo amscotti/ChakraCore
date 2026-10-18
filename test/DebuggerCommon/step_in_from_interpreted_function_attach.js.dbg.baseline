@@ -24,6 +24,12 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": {
+        "#__proto__": "function <large string>",
+        "length": "number 1",
+        "prototype": "Object {...}",
+        "name": "string WeakRef"
+      },
       "foo": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",

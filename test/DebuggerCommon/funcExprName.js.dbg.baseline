@@ -2,6 +2,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "foo": "function <large string>",
       "outer": "function <large string>"
     },
@@ -17,10 +18,10 @@
       "closureFoo": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
+        "length": "number 1",
         "name": "string closureFoo",
         "caller": "object null",
-        "arguments": "Object {...}",
-        "length": "number 1"
+        "arguments": "Object {...}"
       }
     },
     "globals": {
@@ -32,6 +33,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "foo": "function <large string>",
       "outer": "function <large string>"
     },
@@ -46,19 +48,19 @@
       "closureFoo": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
+        "length": "number 1",
         "name": "string closureFoo",
         "caller": "object null",
-        "arguments": "Object {...}",
-        "length": "number 1"
+        "arguments": "Object {...}"
       },
       "a": "boolean false",
       "inner": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
+        "length": "number 0",
         "name": "string inner",
         "caller": "object null",
-        "arguments": "object null",
-        "length": "number 0"
+        "arguments": "object null"
       }
     },
     "globals": {
@@ -70,6 +72,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "foo": "function <large string>",
       "outer": "function <large string>"
     },
@@ -92,6 +95,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "foo": "function <large string>",
       "outer": "function <large string>"
     },
@@ -107,10 +111,10 @@
       "foo1": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
+        "length": "number 1",
         "name": "string foo1",
         "caller": "function <large string>",
-        "arguments": "Object {...}",
-        "length": "number 1"
+        "arguments": "Object {...}"
       }
     },
     "globals": {
@@ -122,6 +126,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "foo": "function <large string>",
       "outer": "function <large string>"
     },
@@ -137,10 +142,10 @@
       "closureFoo": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
+        "length": "number 1",
         "name": "string closureFoo",
         "caller": "function <large string>",
-        "arguments": "Object {...}",
-        "length": "number 1"
+        "arguments": "Object {...}"
       }
     },
     "globals": {

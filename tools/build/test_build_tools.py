@@ -142,7 +142,7 @@ class B1VerdictTests(unittest.TestCase):
                 [sys.executable, str(ROOT / "tools/build-contract/validate_contract.py"),
                  "--database", str(database)], capture_output=True, text=True,
                 timeout=30)
-            self.assertIn("MISSING from DB (538)", proc.stdout)
+            self.assertIn("MISSING from DB (539)", proc.stdout)
             self.assertEqual(proc.returncode, 1)
 
     @unittest.skipUnless(sys.platform == "darwin" and platform.machine() in ("arm64", "aarch64")

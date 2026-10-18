@@ -2,6 +2,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "callcount": "number 3",
       "Call": "function <large string>",
       "bar": "function <large string>",
@@ -27,6 +28,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "callcount": "number 3",
       "Call": "function <large string>",
       "bar": "function <large string>",

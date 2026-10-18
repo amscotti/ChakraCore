@@ -2,6 +2,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "a": "Array [1,2,check]",
       "bar": "function <large string>",
       "foo": "function <large string>"

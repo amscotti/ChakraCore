@@ -2,6 +2,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "x": "undefined undefined",
       "bar": "undefined undefined"
     },
@@ -15,6 +16,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "x": "number 1",
       "bar": "function <large string>"
     },
@@ -24,10 +26,10 @@
       "bar": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
+        "length": "number 0",
         "name": "string bar",
         "caller": "object null",
-        "arguments": "object null",
-        "length": "number 0"
+        "arguments": "object null"
       }
     },
     "globals": {}

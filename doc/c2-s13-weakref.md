@@ -10,14 +10,16 @@ covers `WeakRef` only. `FinalizationRegistry` remains a separate C3 follow-up.
    (ES2023 `CanBeHeldWeakly`); primitives and `Symbol.for(...)` targets throw
    `TypeError`.
 2. `WeakRef.prototype.deref()` with the WeakRef brand check; returns the exact
-   live target or `undefined` after the target is cleared.
+   live target or `undefined` after the target is cleared, and keeps a live
+   result alive through the end of the current job.
 3. Constructor/prototype shape: `length` 1, `name` `"WeakRef"`, non-writable
    non-configurable `WeakRef.prototype`, non-enumerable `deref` with `length`
    0, `prototype.constructor`, `Symbol.toStringTag`, subclassing and
    `Reflect.construct`/`NewTarget` prototype selection including a cross-realm
    fallback.
-4. A recycled weak-reference handle that does not retain the target. No feature
-   flag was added and no built-in bytecode property id changed.
+4. A recycled weak-reference handle that does not retain the target, plus the
+   spec's constructor `AddToKeptObjects` step. No feature flag was added and no
+   built-in bytecode property id changed.
 
 Not in scope: `FinalizationRegistry`, `WeakMap.prototype.getOrInsert*`, and
 cross-realm `deref` identity beyond the engine's existing `CrossSite` behavior.
@@ -35,6 +37,12 @@ Domain and owner:
   the handle through Field(RecyclerWeakReference<RecyclableObject>*)
   targetWeakRef. The global Recycler::weakReferenceMap tracks the handle
   weakly for sweep; it is not a strong owner of the target.
+Kept-object set:
+  ScriptContext::keptObjects is a RecyclerRootPtr<JsUtil::List<
+  RecyclableObject*, Recycler>>. The root keeps the list and its pointer array
+  traceable; KeepDuringJob adds a target once, and ClearKeptObjects zeroes and
+  clears the list at the next root job boundary. It is not a permanent strong
+  target reference: the list is empty outside a job.
 Physical allocation / release:
   Recycler-managed leaf entry plus the normal recycler block containing the
   WeakRef object. Nothing is allocated with malloc/HeapNew and there is no
@@ -51,20 +59,24 @@ Borrow invalidation:
 User code/reentrancy:
   NewTarget.prototype lookup can run a getter/proxy trap after the target and
   WeakRef have been created; exceptions from that lookup propagate. The
-  target is validated before the lookup, per spec.
+  constructor calls KeepDuringJob(target) before that lookup, so a getter that
+  runs an exhaustive GC cannot clear the still-live target. The target is
+  validated before the lookup, per spec.
 Thread/context:
-  ScriptContext/Recycler and JS execution thread only. There is no
-  cross-thread access or background mutation in this slice.
+  ScriptContext/Recycler and JS execution thread only. The kept list is
+  cleared only at the outermost root call boundary; nested root entries and
+  forced debugger entries do not clear it.
 Failure/OOM/shutdown:
   Eligibility is checked before allocation. A target with no recycler
   allocation (host-dispatch/external surface) is rejected with TypeError
   instead of being retained strongly or published. OOM follows the recycler
   allocation path; no partial WeakRef is returned. Recycler shutdown clears
-  all weak handles before finalization.
+  and unroots the kept list before finalization.
 Memory accounting:
   One recycler leaf handle per distinct weak target (shared by
-  FindOrCreateWeakReferenceHandle), plus the WeakRef object. No unbounded
-  native owner and no explicit retention after the WeakRef dies.
+  FindOrCreateWeakReferenceHandle), plus the WeakRef object. The kept list is
+  capacity-bounded by the largest single job's distinct kept targets and is
+  cleared/zeroed at each job boundary; it is not process-lifetime retention.
 Tests:
   test/es7/weakref.js and the pinned test262 WeakRef corpus; see Evidence.
 ```
@@ -80,17 +92,33 @@ turns `deref()` into `undefined`, and a dead WeakRef lets the handle be
 removed and reclaimed. The same sweep is used by the existing weak-key regions,
 so object targets shared with `WeakMap`/`WeakSet` clear on the same collection.
 
+A handle may be shared by several WeakRefs for the same target. Sweep keeps it
+only while the handle itself is marked by at least one owner; all WeakRef owners
+for that target must be unmarked before the entry is removed and reclaimed. If
+the target dies first, the still-marked handle stays with `strongRef == null`
+until its WeakRef owners die, so deref correctly returns undefined.
+
 Unregistered symbol targets use the same typed handle. The library's symbol
 cache is already a weak dictionary, so an unregistered symbol with no strong
 root can be cleared. Registered `Symbol.for` symbols are rejected before a
 handle is created.
 
-`WeakRefDeref`'s spec `AddToKeptObjects`/job-scoped retention is not implemented:
-this engine has no job-boundary notification that would let a kept-object set be
-cleared at the end of the current job. Deref still returns a target that is
-otherwise alive, and an unreachable target clears normally. This is recorded as
-a residual liveness refinement; it is not exercised by the pinned WeakRef
-corpus and becomes relevant to the FinalizationRegistry/job work.
+`TypeIds_WeakRef` is `80`, inside `TypeIds_LastBuiltinDynamicObject` (now
+`TypeIds_WeakRef`) and below `TypeIds_LastTrueJavascriptObjectType` (now
+`TypeIds_ModuleRoot = 82`), so `IsSpecialObjectType`/`IsExposedType` and the
+JIT builtin-object range treat it as a normal builtin JavaScript object. The
+subsequent internal type ids are shifted; no serialized property id changed.
+
+`AddToKeptObjects` is implemented by `ScriptContext::KeepDuringJob` and the
+rooted `keptObjects` list. The constructor calls it before the reentrant
+`NewTarget.prototype` lookup, and `deref` calls it before returning a live
+target. `ScriptContext::OnScriptStart`/`OnScriptEnd` clear the list when
+`isRoot && ThreadContext::GetCallRootLevel() == 1`, i.e. at the outermost host
+call boundary. `JsRT` API entry (`BEGIN_ENTER_SCRIPT` with `isCallRoot=true`)
+and `CallRootFunction(inScript=false)` both provide that boundary; timer and
+promise-continuation callbacks are separate host calls. Nested root entries
+(level > 1) and forced debugger entries do not clear the set. `Close` clears and
+unroots the list before recycler shutdown.
 
 ## Host/test262 GC behavior
 
@@ -98,11 +126,17 @@ corpus and becomes relevant to the FinalizationRegistry/job work.
   `detachArrayBuffer`; test262 GC-timing tests cannot use `$262.gc`.
 - The `ch` host provides `-CollectGarbage`, which installs the
   `CollectGarbage()` global (`GlobalObject::EntryCollectGarbage`). The focused
-  test uses that flag and performs real exhaustive collections; it does not
+  tests use that flag and perform real exhaustive collections; they do not
   simulate or time a fake collection.
+- `test/es7/weakref-gc.js` runs its first checks in the top-level job, then
+  schedules a `WScript.SetTimeout` callback. The timer runs through
+  `JsCallFunction`/`ContextAPIWrapper` as a separate outermost host call/job.
+  The callback verifies deref's KeepDuringJob with in-job GC, then collects the
+  job-1 constructor targets. The thresholds require 1000/1000 object,
+  1000/1000 symbol, and 500/500 WeakMap-key targets cleared, and 1000/1000
+  deref targets retained in-job.
 - The pinned `test/built-ins/WeakRef/**/*.js` corpus contains 29 files and 58
-  strict/default scenarios. It has no target-clearing scenario, so the focused
-  test supplies the object/symbol clearing evidence. One file
+  strict/default scenarios and has no GC-timing scenario. One file
   (`prototype/deref/this-does-not-have-internal-target-throws.js`) also requires
   `FinalizationRegistry`, which is intentionally absent and remains a residual
   failure.
@@ -119,7 +153,7 @@ later build could not replace it.
 
 The exact before/after per-file result sets are in
 `out/test262-s13-weakref-before/results.json` and
-`out/test262-s13-weakref-after2/results.json`. The controls gate passed 18/18
+`out/test262-s13-weakref-after3/results.json`. The controls gate passed 18/18
 scenarios on both runs. The only remaining failures are the two scenarios of
 `prototype/deref/this-does-not-have-internal-target-throws.js`, both
 `ReferenceError: 'FinalizationRegistry' is not defined` (the file's
@@ -128,12 +162,17 @@ FinalizationRegistry assertion is outside this slice).
 Focused `test/es7/weakref.js` covers constructor/call behavior, target identity,
 unregistered/registered symbols, descriptors, brand checks, subclassing,
 `Reflect.construct`, abrupt `NewTarget.prototype` lookup, coexistence with
-WeakMap/WeakSet keys, and object/symbol clearing after two exhaustive
-collections. It is registered with `-CollectGarbage -args summary -endargs`
-and passes on the test-profile binary. The same script's independent probe
-reported 999/1000 object targets and 999/1000 unregistered symbol targets
-cleared after two collections; the surviving entries are the expected
-conservative stack remnants, not strong retention by the WeakRef.
+WeakMap/WeakSet keys, and constructor KeepDuringJob: 1000/1000 object and
+1000/1000 symbol targets remain alive through two in-job collections. It is
+registered with `-CollectGarbage -args summary -endargs` and passes on the
+test-profile binary.
+
+`test/es7/weakref-gc.js` adds the job-boundary evidence: constructor targets
+are fully alive in job 1, then 1000/1000 `deref` targets remain alive through an
+in-job GC after job 2 starts, and 1000/1000 object targets, 1000/1000 symbol
+targets, and 500/500 WeakMap key targets are cleared after the job-1 kept set is
+released. The callback exits 1 on any threshold failure so the regression
+runner cannot pass on a printed exception.
 
 Commands (all builds/test262 runs serialized by
 `/tmp/opencode/cc-gate-lock.sh`; cache and checkout are local):
@@ -144,24 +183,34 @@ python3 tools/test262/run.py --binary "$PWD/out/s13-weakref-before-bin/ch" \
   --checkout "$PWD/out/test262" --output "$PWD/out/test262-s13-weakref-before" \
   'test/built-ins/WeakRef/**/*.js'
 python3 tools/test262/run.py --binary "$PWD/zig-out/bin/ch" \
-  --checkout "$PWD/out/test262" --output "$PWD/out/test262-s13-weakref-after2" \
+  --checkout "$PWD/out/test262" --output "$PWD/out/test262-s13-weakref-after3" \
   'test/built-ins/WeakRef/**/*.js'
 (cd test/es7 && ../../zig-out/bin/ch -CollectGarbage -args summary -endargs weakref.js)
+(cd test/es7 && ../../zig-out/bin/ch -CollectGarbage weakref-gc.js)
 ```
 
 The test262 host adds `-nonative -Test262 -CollectGarbage` by default; the
 WeakRef corpus itself does not call `CollectGarbage`.
+
+Gate evidence (both runs serialized by the shared gate lock):
+
+- `mise exec -- zig build check-regression --summary line --cache-dir "$PWD/.zig-cache"`:
+  **1984 passed / 0 failed**, 569/569 steps.
+- `mise exec -- zig build check-regression -Dprofile=debug-static --summary line
+  --cache-dir "$PWD/.zig-cache"`: **2036 passed / 0 failed**, 546/546 steps.
+- `python3 tools/build/check_regression.py --self-test`: all negative controls
+  pass with the 1984/2036 profile pins.
+
+Adding the global `WeakRef` intrinsic changed the debugger's global-property
+view, so 66 shared `.dbg.baseline` files were regenerated from the test run
+(they add the `WeakRef` property and current function-property order). This is
+why the baseline diff is broad; it is not a runtime behavior change.
 
 ## Residual
 
 - `FinalizationRegistry`: not implemented; its cleanup-job contract and
   host-observable finalization remain a separate C3 project. The one WeakRef
   corpus scenario that constructs a FinalizationRegistry stays failed.
-- `AddToKeptObjects`/end-of-job kept set: not implemented because this engine
-  does not expose a job-end notification to the runtime; `deref` can therefore
-  allow a target that is otherwise unreachable to clear before the end of the
-  current job. No pinned WeakRef test observes this, and there is no
-  FinalizationRegistry observer in this slice.
 - S13's symbol entries in `WeakMap`/`WeakSet` remain strongly held by their
   per-collection symbol dictionaries. A symbol that is both a WeakMap key and a
   WeakRef target is therefore kept alive by the WeakMap; this is the
@@ -179,3 +228,6 @@ WeakRef corpus itself does not call `CollectGarbage`.
   baselines; this new TU updates the build/test-table assertions to
   Mac 539 (537 static) and Linux 683 but does not rewrite those historical
   measurement sections.
+- Regression gate pins move by two registered tests (`weakref.js`,
+  `weakref-gc.js`): test 1982 -> 1984 and debug 2034 -> 2036. Both focused gates
+  are green (1984/0 test, 2036/0 debug-static) in this branch.

@@ -10,6 +10,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "F2": "function <large string>",
       "F3": "function <large string>",
       "F5": "function <large string>",
@@ -67,6 +68,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "F2": "function <large string>",
       "F3": "function <large string>",
       "F5": "function <large string>",
@@ -90,10 +92,10 @@
       "f6": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
+        "length": "number 1",
         "name": "string f6",
         "caller": "function <large string>",
-        "arguments": "Object {...}",
-        "length": "number 1"
+        "arguments": "Object {...}"
       }
     },
     "globals": {
@@ -140,6 +142,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "F2": "function <large string>",
       "F3": "function <large string>",
       "F5": "function <large string>",
@@ -197,6 +200,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "F2": "function <large string>",
       "F3": "function <large string>",
       "F5": "function <large string>",
@@ -220,10 +224,10 @@
       "f6": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
+        "length": "number 1",
         "name": "string f6",
         "caller": "function <large string>",
-        "arguments": "Object {...}",
-        "length": "number 1"
+        "arguments": "Object {...}"
       }
     },
     "globals": {
@@ -275,6 +279,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "F2": "function <large string>",
       "F3": "function <large string>",
       "F5": "function <large string>",
@@ -317,6 +322,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "F2": "function <large string>",
       "F3": "function <large string>",
       "F5": "function <large string>",

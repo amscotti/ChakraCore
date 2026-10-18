@@ -2,6 +2,12 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": {
+        "#__proto__": "function <large string>",
+        "length": "number 1",
+        "prototype": "Object {...}",
+        "name": "string WeakRef"
+      },
       "a": {
         "#__proto__": "Array []",
         "length": "number 10",
@@ -19,10 +25,10 @@
       "foo": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
+        "length": "number 0",
         "name": "string foo",
         "caller": "object null",
-        "arguments": "Object {...}",
-        "length": "number 0"
+        "arguments": "Object {...}"
       }
     },
     "arguments": {
@@ -44,15 +50,15 @@
       "callee": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
+        "length": "number 0",
         "name": "string foo",
         "caller": "object null",
-        "arguments": "Object {...}",
-        "length": "number 0"
+        "arguments": "Object {...}"
       },
       "Symbol.iterator": {
         "#__proto__": "function <large string>",
-        "name": "string values",
-        "length": "number 0"
+        "length": "number 0",
+        "name": "string values"
       }
     },
     "locals": {
@@ -77,10 +83,10 @@
       "foo": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
+        "length": "number 0",
         "name": "string foo",
         "caller": "object null",
-        "arguments": "Object {...}",
-        "length": "number 0"
+        "arguments": "Object {...}"
       }
     }
   }

@@ -2,6 +2,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "verify": "function function verify(){}",
       "Run": "function <large string>",
       "Run1": "function <large string>"
@@ -16,10 +17,10 @@
       "level2Func": {
         "#__proto__": "function function() {\n    [native code]\n}",
         "prototype": "Object {...}",
+        "length": "number 1",
         "name": "string level2Func",
         "caller": "object null",
-        "arguments": "object null",
-        "length": "number 1"
+        "arguments": "object null"
       },
       "level_1_identifier_1": "string level1_1",
       "level_1_identifier_0": "string level1_0",
@@ -27,10 +28,10 @@
       "verify": {
         "#__proto__": "function function() {\n    [native code]\n}",
         "prototype": "Object {...}",
+        "length": "number 3",
         "name": "string verify",
         "caller": "object null",
-        "arguments": "object null",
-        "length": "number 3"
+        "arguments": "object null"
       },
       "level_0_identifier_0": "string level0"
     },
@@ -54,6 +55,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "verify": "function function verify(){}",
       "Run": "function <large string>",
       "Run1": "function <large string>"

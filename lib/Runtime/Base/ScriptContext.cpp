@@ -415,6 +415,12 @@ namespace Js
         {
             this->calleeUtf8SourceInfoList.Unroot(this->GetRecycler());
         }
+
+        if (this->keptObjects)
+        {
+            this->keptObjects->ClearAndZero();
+            this->keptObjects.Unroot(this->GetRecycler());
+        }
     }
 
     ScriptContext::~ScriptContext()
@@ -2655,6 +2661,13 @@ ExitTempAllocator:
 
     void ScriptContext::OnScriptStart(bool isRoot, bool isScript)
     {
+        // A new outermost host call starts a new job. Clear any kept objects
+        // left by a previous job (normally already empty from OnScriptEnd).
+        if (isRoot && threadContext->GetCallRootLevel() == 1)
+        {
+            ClearKeptObjects();
+        }
+
         const bool isForcedEnter =
 #ifdef ENABLE_SCRIPT_DEBUGGING
             this->GetDebugContext() != nullptr ? this->GetDebugContext()->GetProbeContainer()->isForcedToEnterScriptStart :
@@ -2682,12 +2695,45 @@ ExitTempAllocator:
 
     void ScriptContext::OnScriptEnd(bool isRoot, bool isForcedEnd)
     {
+        // The outermost host call is the job boundary. Nested root entries
+        // (including forced debugger entries) keep the current job's set.
+        if (isRoot && threadContext->GetCallRootLevel() == 1)
+        {
+            ClearKeptObjects();
+        }
+
         if ((isRoot && threadContext->GetCallRootLevel() == 1) || isForcedEnd)
         {
             if (this->scriptEndEventHandler != nullptr)
             {
                 this->scriptEndEventHandler(this);
             }
+        }
+    }
+
+    void ScriptContext::KeepDuringJob(RecyclableObject* object)
+    {
+        Assert(object != nullptr);
+
+        if (!keptObjects)
+        {
+            keptObjects.Root(RecyclerNew(GetRecycler(), KeptObjectList, GetRecycler()), GetRecycler());
+        }
+
+        if (!keptObjects->Contains(object))
+        {
+            keptObjects->Add(object);
+        }
+    }
+
+    void ScriptContext::ClearKeptObjects()
+    {
+        if (keptObjects)
+        {
+            // Zero the removed slots as well: the list buffer is a recycler
+            // array, and stale target pointers must not survive as conservative
+            // scan roots into the next job.
+            keptObjects->ClearAndZero();
         }
     }
 

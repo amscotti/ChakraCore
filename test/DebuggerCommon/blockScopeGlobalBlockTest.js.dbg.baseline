@@ -1,7 +1,8 @@
 [
   {
     "this": {
-      "Symbol.toStringTag": "string global"
+      "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>"
     },
     "locals": {
       "b": "number 2",

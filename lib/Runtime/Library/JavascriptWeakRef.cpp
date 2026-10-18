@@ -52,6 +52,11 @@ namespace Js
             JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_NeedObject, _u("WeakRef"));
         }
 
+        // KeepDuringJob must precede the reentrant NewTarget.prototype lookup:
+        // a getter/Proxy trap may run an exhaustive GC before the WeakRef is
+        // returned. The target remains strongly reachable until OnScriptEnd.
+        scriptContext->KeepDuringJob(target);
+
         JavascriptWeakRef* weakRef = library->CreateWeakRef(target);
         if (weakRef == nullptr)
         {
@@ -117,6 +122,8 @@ namespace Js
             return requestContext->GetLibrary()->GetUndefined();
         }
 
+        // ES WeakRefDeref: AddToKeptObjects(target) before returning it.
+        requestContext->KeepDuringJob(target);
         return CrossSite::MarshalVar(requestContext, target);
     }
 

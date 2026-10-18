@@ -847,6 +847,13 @@ private:
         typedef JsUtil::List<RecyclerWeakReference<Utf8SourceInfo>*, Recycler, false, Js::FreeListedRemovePolicy> SourceList;
         RecyclerRootPtr<SourceList> sourceList;
 
+        // WeakRef's AddToKeptObjects: targets kept alive until the current
+        // root host call/job ends. The list itself is a recycler root; after
+        // each job ClearAndZero removes the strong entries (and stale buffer
+        // slots), so this is not a process-lifetime retention.
+        typedef JsUtil::List<RecyclableObject*, Recycler> KeptObjectList;
+        RecyclerRootPtr<KeptObjectList> keptObjects;
+
 #ifdef ENABLE_SCRIPT_DEBUGGING
         typedef void(*RaiseMessageToDebuggerFunctionType)(ScriptContext *, DEBUG_EVENT_INFO_TYPE, LPCWSTR, LPCWSTR);
         RaiseMessageToDebuggerFunctionType raiseMessageToDebuggerFunctionType;
@@ -1347,6 +1354,11 @@ private:
 
         void OnScriptStart(bool isRoot, bool isScript);
         void OnScriptEnd(bool isRoot, bool isForcedEnd);
+
+        // ES WeakRef AddToKeptObjects/KeepDuringJob. Targets stay strongly
+        // reachable until the end of the current root host call/job.
+        void KeepDuringJob(RecyclableObject* object);
+        void ClearKeptObjects();
 
         template <bool stackProbe, bool leaveForHost>
         bool LeaveScriptStart(void * frameAddress);

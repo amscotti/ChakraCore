@@ -9,6 +9,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "x": "number 1",
       "y": "number 0"
     },
@@ -23,6 +24,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "x": "number 1",
       "y": "number 1"
     },

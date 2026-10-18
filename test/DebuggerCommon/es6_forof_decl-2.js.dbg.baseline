@@ -9,6 +9,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "x": "number 1"
     },
     "locals": {
@@ -21,6 +22,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "x": "number 1"
     },
     "locals": {

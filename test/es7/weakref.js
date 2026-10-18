@@ -22,14 +22,14 @@ function makeSymbolWeakRefs(count) {
     return refs;
 }
 
-function countCleared(refs) {
-    var cleared = 0;
+function countAlive(refs) {
+    var alive = 0;
     for (var i = 0; i < refs.length; i++) {
-        if (refs[i].deref() === undefined) {
-            cleared++;
+        if (refs[i].deref() !== undefined) {
+            alive++;
         }
     }
-    return cleared;
+    return alive;
 }
 
 var tests = [
@@ -123,35 +123,20 @@ var tests = [
         }
     },
     {
-        name: "unreachable object and symbol targets are cleared by collection",
+        name: "constructor KeepDuringJob retains all targets across in-job collections",
         body() {
-            // Only the WeakRef instances keep these targets observable. The
-            // helper frames have returned, so an implementation that stores a
-            // strong target (or fails to trace the weak handle) leaves every
-            // deref non-undefined and fails this check.
-            var objectRefs = makeObjectWeakRefs(2000);
-            var symbolRefs = makeSymbolWeakRefs(2000);
-
-            // The same object must be cleared when it is also a WeakMap key:
-            // the WeakRef observes that the WeakMap's weak key path did not
-            // start retaining the object.
-            var weakMap = new WeakMap();
-            var weakMapRefs = [];
-            for (var i = 0; i < 1000; i++) {
-                var key = { index: i };
-                weakMap.set(key, i);
-                weakMapRefs.push(new WeakRef(key));
-            }
+            // Every constructed target must remain live until the end of the
+            // current job. A single in-job collection clearing the set would
+            // leave at most a conservative-stack remnant, so require the full
+            // count rather than a nonzero remainder.
+            var objectRefs = makeObjectWeakRefs(1000);
+            var symbolRefs = makeSymbolWeakRefs(1000);
 
             CollectGarbage();
             CollectGarbage();
 
-            var clearedObjects = countCleared(objectRefs);
-            var clearedSymbols = countCleared(symbolRefs);
-            var clearedWeakMapKeys = countCleared(weakMapRefs);
-            assert.isTrue(clearedObjects > 0, "at least one unreachable object target was cleared (got " + clearedObjects + ")");
-            assert.isTrue(clearedSymbols > 0, "at least one unreachable symbol target was cleared (got " + clearedSymbols + ")");
-            assert.isTrue(clearedWeakMapKeys > 0, "at least one WeakMap object key was cleared through its WeakRef (got " + clearedWeakMapKeys + ")");
+            assert.areEqual(1000, countAlive(objectRefs), "all constructed object targets stay alive in-job");
+            assert.areEqual(1000, countAlive(symbolRefs), "all constructed symbol targets stay alive in-job");
         }
     },
     {

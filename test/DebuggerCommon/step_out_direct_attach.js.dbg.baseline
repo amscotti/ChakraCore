@@ -18,6 +18,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "Run": "function <large string>",
       "bar": "function <large string>"
     },
@@ -56,6 +57,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "Run": "function <large string>",
       "bar": "function <large string>"
     },
@@ -107,6 +109,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "Run": "function <large string>",
       "bar": "function <large string>"
     },
@@ -145,6 +148,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "Run": "function <large string>",
       "bar": "function <large string>"
     },

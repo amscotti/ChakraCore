@@ -2,6 +2,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "foo": "function <large string>",
       "bar": "function <large string>",
       "baz": "function <large string>",
@@ -28,6 +29,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "foo": "function <large string>",
       "bar": "function <large string>",
       "baz": "function <large string>",
@@ -59,6 +61,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "foo": "function <large string>",
       "bar": "function <large string>",
       "baz": "function <large string>",
