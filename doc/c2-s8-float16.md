@@ -5,7 +5,7 @@
 
 # C2-S8: bounded ES2025 Float16 slice — DataView get/setFloat16 and Math.f16round
 
-Status: `<pending>` — implemented in the working tree on Mac no-JIT (JIT
+Status: landed in `514ec7d9c` — implemented in the working tree on Mac no-JIT (JIT
 gated at B4). This is the separable Float16 slice named by the S8 triage,
 **not** the full resizable/growable ArrayBuffer project and **not** the
 `Float16Array` constructor/typed-array element type.
