@@ -52,7 +52,7 @@ handling have been validated before its results are used as a completion gate.
 | B6 | Windows feasibility and rollout; later target extensions | Stable build contracts | Separate expansion |
 | Z1 | One useful mixed C++/Zig unit behind a tested C ABI | B3; B4 if the unit ships on Linux | Optional pilot |
 | C1 | Qualified ES2025 test policy and triaged failures | Stable Mac build at B3 | Recorded (CONDITIONAL) |
-| C2 | Bounded compatibility batches and partial releases | C1; B4 before JIT-wide enablement | In progress (S4/S5/S10/S11/S7-matchAll/S9 named-groups + d-flag + duplicate named groups + lookbehind + ES2025 modifiers/S14 block-scope + statement-level early errors closed on Mac no-JIT; S13 symbols-as-weak-collection-keys landed; JIT claims gated on B4) |
+| C2 | Bounded compatibility batches and partial releases | C1; B4 before JIT-wide enablement | In progress (S4/S5/S10/S11/S7-matchAll/S9 named-groups + d-flag + duplicate named groups + lookbehind + ES2025 modifiers/S14 block-scope + statement-level early errors/S2 BigInt-asIntN-asUintN closed on Mac no-JIT; S13 symbols-as-weak-collection-keys landed; JIT claims gated on B4) |
 | C3 | Larger runtime/object-model feature projects | C1 and their feature prerequisites | Separate projects |
 | C4 | Verified full ES2025 core-language result | Required C2/C3 work and qualified runner | Long-term objective |
 
@@ -697,6 +697,19 @@ arithmetic/equality (2), and the fail-closed mixed relational comparison
 in `toString/a-z.js` (2). Gates moved to 1975/2027. BigInt arithmetic,
 BigInt64Array, Map/Set key identity, mixed comparison and the literal
 grammar stay C3-large.
+S2 sub-batch 2 then implemented `BigInt.asIntN`/`asUintN` on Mac no-JIT (working tree)
+(ToIndex coercion/order, descriptors, non-constructibility, exact
+limb-bounded two's-complement truncation, and the spec
+`ToBigInt(Number)` `TypeError` correction; receipt
+[c2-s2-bigint.md](c2-s2-bigint.md)). The scoped corpus moved 94/154 to
+146/154 on both binaries with 52/0 fail→pass; the 8 residue are the four
+`asIntN`/`asUintN` `arithmetic.js` scenarios blocked by non-decimal
+BigInt literals, wrapper arithmetic/equality (2), and the mixed
+relational loop in `toString/a-z.js` (2). The 150/154 target needs the
+excluded literal parser work. Gates moved 1978/2030 → 1979/2031. Full
+BigInt arithmetic, BigInt64Array, Map/Set key identity, mixed
+comparison/equality, wrapper arithmetic and the literal grammar remain
+C3-large.
 S6 shows zero regressions under `-ESSharedArrayBuffer` but
 needs a product/security decision before any default, plus
 waitAsync/growable/non-shared-Atomics work; S2's flagged path no longer

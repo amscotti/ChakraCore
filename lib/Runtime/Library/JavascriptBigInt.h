@@ -54,11 +54,13 @@ namespace Js
         static JavascriptBigInt * CreateZeroWithLength(digit_t length, ScriptContext * scriptContext);
         static JavascriptBigInt * CreateOne(ScriptContext * scriptContext);
         static JavascriptBigInt * Create(const char16 * content, charcount_t cchUseLength, bool isNegative, ScriptContext * scriptContext);
-        // Conversion factories backing ToBigInt. Each returns nullptr when the
-        // input has no BigInt representation so the caller owns the error class:
-        // CreateFromNumber rejects NaN, +/-Infinity and non-integral values;
-        // CreateFromString rejects everything outside the StringToBigInt
-        // grammar (decimal, or an unsigned 0x/0o/0b form).
+        // Conversion factories backing the BigInt constructor and ToBigInt.
+        // Each returns nullptr when the input has no BigInt representation so
+        // the caller owns the error class: CreateFromNumber rejects NaN,
+        // +/-Infinity and non-integral values; CreateFromString rejects
+        // everything outside the StringToBigInt grammar (decimal, or an
+        // unsigned 0x/0o/0b form). ToBigInt(Number) throws before reaching
+        // this factory; only the constructor's NumberToBigInt step uses it.
         static JavascriptBigInt * CreateFromNumber(double value, ScriptContext * scriptContext);
         static JavascriptBigInt * CreateFromString(const char16 * content, charcount_t cchContent, ScriptContext * scriptContext);
         virtual RecyclableObject * CloneToScriptContext(ScriptContext* requestContext) override;
@@ -70,16 +72,26 @@ namespace Js
         double ToDouble() const;
         static JavascriptBigInt * ThisBigIntValue(Var value, ScriptContext * scriptContext);
 
+        // BigInt.asIntN / BigInt.asUintN (ES2020). `bits` has already passed
+        // ToIndex; the result is a new value unless the input is already in
+        // range and immutable (positive asUintN, either sign asIntN).
+        static JavascriptBigInt * AsIntN(JavascriptBigInt * value, uint64 bits, ScriptContext * scriptContext);
+        static JavascriptBigInt * AsUintN(JavascriptBigInt * value, uint64 bits, ScriptContext * scriptContext);
+
         class EntryInfo
         {
         public:
             static FunctionInfo NewInstance;
+            static FunctionInfo AsIntN;
+            static FunctionInfo AsUintN;
             static FunctionInfo ValueOf;
             static FunctionInfo ToString;
             static FunctionInfo ToLocaleString;
         };
 
         static Var NewInstance(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryAsIntN(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryAsUintN(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryValueOf(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryToString(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryToLocaleString(RecyclableObject* function, CallInfo callInfo, ...);
@@ -112,6 +124,16 @@ namespace Js
         int CompareAbsolute(JavascriptBigInt * pbi);
         static BOOL Equals(JavascriptBigInt* left, Var right, BOOL* value, ScriptContext * requestContext);
         void Resize(digit_t length);
+
+        static uint64 ToIndex(Var value, ScriptContext * scriptContext);
+        uint64 GetMagnitudeBitLength() const;
+        bool GetMagnitudeBit(uint64 bit) const;
+        bool HasSingleMagnitudeBit(uint64 bit) const;
+        // Low `bits` bits of the magnitude as a canonical positive BigInt.
+        JavascriptBigInt * TruncateMagnitude(uint64 bits, ScriptContext * scriptContext) const;
+        // 2**bits - magnitude, for a non-zero magnitude < 2**bits.
+        static JavascriptBigInt * TwosComplement(const JavascriptBigInt * magnitude, uint64 bits, ScriptContext * scriptContext);
+        static void MakeNegative(JavascriptBigInt * value);
 
         static JavascriptBigInt * New(JavascriptBigInt * pbi, ScriptContext * scriptContext);
     };

@@ -258,6 +258,12 @@
   </test>
   <test>
     <default>
+      <files>bigint-asintn.js</files>
+      <compile-flags>-ESBigInt -args summary -endargs</compile-flags>
+    </default>
+  </test>
+  <test>
+    <default>
       <files>regexp-modifiers.js</files>
       <compile-flags>-args summary -endargs</compile-flags>
     </default>

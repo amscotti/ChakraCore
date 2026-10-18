@@ -4094,7 +4094,7 @@ namespace Js
 
     bool JavascriptLibrary::InitializeBigIntConstructor(DynamicObject* bigIntConstructor, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)
     {
-        const int numberOfProperties = 3;
+        const int numberOfProperties = 5;
         typeHandler->Convert(bigIntConstructor, mode, numberOfProperties);
 
         // TODO(BigInt): Any new function addition/deletion/modification should also be updated in JavascriptLibrary::ProfilerRegisterBigInt
@@ -4104,6 +4104,11 @@ namespace Js
         library->AddMember(bigIntConstructor, PropertyIds::length, TaggedInt::ToVarUnchecked(1), PropertyConfigurable);
         library->AddMember(bigIntConstructor, PropertyIds::prototype, library->bigintPrototype, PropertyNone);
         library->AddMember(bigIntConstructor, PropertyIds::name, scriptContext->GetPropertyString(PropertyIds::BigInt), PropertyConfigurable);
+        // The spec names are tracked dynamic property ids (no static
+        // PropertyIds/bytecode change) and are writable/configurable by the
+        // AddFunctionToLibraryObject default descriptor.
+        library->AddFunctionToLibraryObjectWithPropertyName(bigIntConstructor, _u("asIntN"), &JavascriptBigInt::EntryInfo::AsIntN, 2);
+        library->AddFunctionToLibraryObjectWithPropertyName(bigIntConstructor, _u("asUintN"), &JavascriptBigInt::EntryInfo::AsUintN, 2);
 
         bigIntConstructor->SetHasNoEnumerableProperties(true);
 
@@ -7917,6 +7922,8 @@ namespace Js
 
         DEFINE_OBJECT_NAME(BigInt);
 
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("asIntN"), 6, JavascriptBigInt::EntryAsIntN);
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("asUintN"), 7, JavascriptBigInt::EntryAsUintN);
         REG_OBJECTS_LIB_FUNC(toString, JavascriptBigInt::EntryToString);
         REG_OBJECTS_LIB_FUNC(toLocaleString, JavascriptBigInt::EntryToLocaleString);
         REG_OBJECTS_LIB_FUNC(valueOf, JavascriptBigInt::EntryValueOf);

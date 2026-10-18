@@ -9,6 +9,36 @@
 
 namespace Js
 {
+    namespace
+    {
+        // ToIndex upper bound: 2**53 - 1, exactly representable as a double.
+        const double BigIntMaxIndex = 9007199254740991.0;
+
+        // Resource bound for results that must materialize 2**bits (a
+        // negative asUintN operand with bits above the operand width). 2**24
+        // limbs is 128 MiB on 64-bit limbs and 64 MiB on 32-bit limbs, far
+        // beyond the corpus; V8 likewise rejects oversized results with
+        // RangeError rather than attempting an unbounded allocation.
+        const uint64 BigIntMaxResultLimbs = 1ull << 24;
+
+        inline uint32 BigIntLimbBits()
+        {
+            return static_cast<uint32>(sizeof(digit_t) * 8);
+        }
+
+        inline digit_t BigIntLimbMask()
+        {
+            return static_cast<digit_t>(~static_cast<digit_t>(0));
+        }
+
+        inline digit_t BigIntTopLimbMask(uint32 topBits)
+        {
+            return topBits == 0
+                ? BigIntLimbMask()
+                : static_cast<digit_t>((static_cast<digit_t>(1) << topBits) - 1);
+        }
+    }
+
     JavascriptBigInt * JavascriptBigInt::Create(const char16 * content, charcount_t cchUseLength, bool isNegative, ScriptContext * scriptContext)
     {
         return RecyclerNew(scriptContext->GetRecycler(), JavascriptBigInt, content, cchUseLength, isNegative, scriptContext->GetLibrary()->GetBigIntTypeStatic());
@@ -376,6 +406,306 @@ namespace Js
         return m_isNegative ? -value : value;
     }
 
+    uint64 JavascriptBigInt::ToIndex(Var value, ScriptContext * scriptContext)
+    {
+        // ToIndex: ToIntegerOrInfinity(ToNumber(value)); reject negative and
+        // values above 2**53 - 1. ToNumber performs ToPrimitive exactly once
+        // and already throws TypeError for BigInt/Symbol primitives (including
+        // wrappers and @@toPrimitive results).
+        double number = JavascriptConversion::ToNumber(value, scriptContext);
+        double integer = JavascriptConversion::ToInteger(number);
+        if (!(integer >= 0) || integer > BigIntMaxIndex)
+        {
+            JavascriptError::ThrowRangeError(scriptContext, JSERR_FunctionArgument_Invalid, _u("BigInt.asIntN/asUintN"));
+        }
+        return static_cast<uint64>(integer);
+    }
+
+    uint64 JavascriptBigInt::GetMagnitudeBitLength() const
+    {
+        digit_t length = m_length;
+        while (length > 0 && m_digits[length - 1] == 0)
+        {
+            length--;
+        }
+        if (length == 0)
+        {
+            return 0;
+        }
+
+        uint64 bitLength = (static_cast<uint64>(length) - 1) * BigIntLimbBits();
+        digit_t top = m_digits[length - 1];
+        while (top != 0)
+        {
+            bitLength++;
+            top >>= 1;
+        }
+        return bitLength;
+    }
+
+    bool JavascriptBigInt::GetMagnitudeBit(uint64 bit) const
+    {
+        uint64 index = bit / BigIntLimbBits();
+        if (index >= m_length)
+        {
+            return false;
+        }
+        return ((m_digits[index] >> (bit % BigIntLimbBits())) & 1) != 0;
+    }
+
+    bool JavascriptBigInt::HasSingleMagnitudeBit(uint64 bit) const
+    {
+        uint64 index = bit / BigIntLimbBits();
+        if (index >= m_length || m_digits[index] != (static_cast<digit_t>(1) << (bit % BigIntLimbBits())))
+        {
+            return false;
+        }
+        for (digit_t i = 0; i < index; i++)
+        {
+            if (m_digits[i] != 0)
+            {
+                return false;
+            }
+        }
+        for (digit_t i = static_cast<digit_t>(index) + 1; i < m_length; i++)
+        {
+            if (m_digits[i] != 0)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    JavascriptBigInt * JavascriptBigInt::TruncateMagnitude(uint64 bits, ScriptContext * scriptContext) const
+    {
+        Assert(bits > 0);
+        const uint32 limbBits = BigIntLimbBits();
+
+        digit_t length = m_length;
+        while (length > 1 && m_digits[length - 1] == 0)
+        {
+            length--;
+        }
+
+        uint64 keep64 = (bits - 1) / limbBits + 1;
+        Assert(keep64 <= length);
+        digit_t keep = static_cast<digit_t>(keep64);
+        JavascriptBigInt * result = CreateZeroWithLength(keep, scriptContext);
+        digit_t copyLength = length < keep ? length : keep;
+        js_memcpy_s(result->m_digits, keep * sizeof(digit_t), m_digits, copyLength * sizeof(digit_t));
+
+        uint32 topBits = static_cast<uint32>(bits % limbBits);
+        if (topBits != 0)
+        {
+            result->m_digits[keep - 1] &= BigIntTopLimbMask(topBits);
+        }
+        while (result->m_length > 1 && result->m_digits[result->m_length - 1] == 0)
+        {
+            result->m_length--;
+        }
+        if (result->IsZeroValue())
+        {
+            result->m_length = 1;
+            result->m_digits[0] = 0;
+        }
+        return result;
+    }
+
+    JavascriptBigInt * JavascriptBigInt::TwosComplement(const JavascriptBigInt * magnitude, uint64 bits, ScriptContext * scriptContext)
+    {
+        Assert(bits > 0);
+        Assert(magnitude != nullptr && !magnitude->IsZeroValue());
+        Assert(magnitude->GetMagnitudeBitLength() <= bits);
+
+        const uint32 limbBits = BigIntLimbBits();
+        uint64 keep64 = (bits - 1) / limbBits + 1;
+        if (keep64 >= BigIntMaxResultLimbs ||
+            keep64 > static_cast<uint64>(BigIntLimbMask()) ||
+            keep64 > SIZE_MAX / sizeof(digit_t))
+        {
+            // The requested result cannot be represented by this engine's
+            // bounded BigInt digit array (see BigIntMaxResultLimbs).
+            JavascriptError::ThrowRangeError(scriptContext, JSERR_FunctionArgument_Invalid, _u("BigInt.asIntN/asUintN"));
+        }
+        digit_t keep = static_cast<digit_t>(keep64);
+        JavascriptBigInt * result = CreateZeroWithLength(keep, scriptContext);
+        digit_t topMask = BigIntTopLimbMask(static_cast<uint32>(bits % limbBits));
+        digit_t carry = 1;
+
+        for (digit_t i = 0; i < keep; i++)
+        {
+            digit_t source = i < magnitude->m_length ? magnitude->m_digits[i] : 0;
+            digit_t digit = static_cast<digit_t>(~source);
+            if (i == keep - 1)
+            {
+                digit &= topMask;
+            }
+            digit_t newCarry = 0;
+            digit = AddDigit(digit, carry, &newCarry);
+            result->m_digits[i] = digit;
+            carry = newCarry;
+        }
+        // The discarded carry is 2**bits; magnitude is non-zero and below
+        // 2**bits, so the exact result fits and no carry may escape.
+        Assert(carry == 0);
+
+        while (result->m_length > 1 && result->m_digits[result->m_length - 1] == 0)
+        {
+            result->m_length--;
+        }
+        Assert(!result->IsZeroValue());
+        return result;
+    }
+
+    void JavascriptBigInt::MakeNegative(JavascriptBigInt * value)
+    {
+        if (!value->IsZeroValue())
+        {
+            value->m_isNegative = true;
+        }
+    }
+
+    JavascriptBigInt * JavascriptBigInt::AsUintN(JavascriptBigInt * value, uint64 bits, ScriptContext * scriptContext)
+    {
+        Assert(value != nullptr);
+        if (bits == 0)
+        {
+            return CreateZero(scriptContext);
+        }
+
+        uint64 bitLength = value->GetMagnitudeBitLength();
+        if (!value->m_isNegative)
+        {
+            // Positive values already below 2**bits are unchanged. This also
+            // keeps huge `bits` from allocating when the result is just the
+            // input (e.g. asUintN(2**53-1, 1n)).
+            return bitLength <= bits ? value : value->TruncateMagnitude(bits, scriptContext);
+        }
+
+        if (bitLength == 0)
+        {
+            return CreateZero(scriptContext);
+        }
+        if (bitLength <= bits)
+        {
+            // 2**bits - |value|, the unsigned two's-complement pattern.
+            return TwosComplement(value, bits, scriptContext);
+        }
+
+        JavascriptBigInt * magnitude = value->TruncateMagnitude(bits, scriptContext);
+        return magnitude->IsZeroValue()
+            ? magnitude
+            : TwosComplement(magnitude, bits, scriptContext);
+    }
+
+    JavascriptBigInt * JavascriptBigInt::AsIntN(JavascriptBigInt * value, uint64 bits, ScriptContext * scriptContext)
+    {
+        Assert(value != nullptr);
+        if (bits == 0)
+        {
+            return CreateZero(scriptContext);
+        }
+
+        uint64 bitLength = value->GetMagnitudeBitLength();
+        if (!value->m_isNegative)
+        {
+            if (bitLength < bits)
+            {
+                // Fits including the sign bit (this also covers 0n).
+                return value;
+            }
+            if (bitLength == bits)
+            {
+                // The highest bit is the sign bit: value - 2**bits.
+                JavascriptBigInt * result = TwosComplement(value, bits, scriptContext);
+                MakeNegative(result);
+                return result;
+            }
+
+            JavascriptBigInt * magnitude = value->TruncateMagnitude(bits, scriptContext);
+            if (magnitude->IsZeroValue() || !magnitude->GetMagnitudeBit(bits - 1))
+            {
+                return magnitude;
+            }
+            JavascriptBigInt * result = TwosComplement(magnitude, bits, scriptContext);
+            MakeNegative(result);
+            return result;
+        }
+
+        if (bitLength < bits)
+        {
+            // |value| < 2**(bits-1), so the signed result is value itself.
+            return value;
+        }
+        if (bitLength == bits)
+        {
+            // Sign bit of the two's-complement pattern is set. Exactly
+            // -2**(bits-1) is its own result; any larger magnitude wraps to
+            // a positive value.
+            return value->HasSingleMagnitudeBit(bits - 1)
+                ? value
+                : TwosComplement(value, bits, scriptContext);
+        }
+
+        JavascriptBigInt * magnitude = value->TruncateMagnitude(bits, scriptContext);
+        if (magnitude->IsZeroValue())
+        {
+            return magnitude;
+        }
+
+        uint64 truncatedBits = magnitude->GetMagnitudeBitLength();
+        if (truncatedBits < bits)
+        {
+            // |value| mod 2**bits is below 2**(bits-1): negative result.
+            MakeNegative(magnitude);
+            return magnitude;
+        }
+        Assert(truncatedBits == bits);
+        if (magnitude->HasSingleMagnitudeBit(bits - 1))
+        {
+            // Exactly -2**(bits-1).
+            MakeNegative(magnitude);
+            return magnitude;
+        }
+        // |value| mod 2**bits exceeds 2**(bits-1): positive wrapped value.
+        return TwosComplement(magnitude, bits, scriptContext);
+    }
+
+    Var JavascriptBigInt::EntryAsIntN(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+        ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+
+        AssertMsg(args.HasArg(), "Should always have implicit 'this'");
+        uint64 bits = ToIndex(
+            args.Info.Count > 1 ? args[1] : scriptContext->GetLibrary()->GetUndefined(),
+            scriptContext);
+        JavascriptBigInt * bigint = JavascriptConversion::ToBigInt(
+            args.Info.Count > 2 ? args[2] : scriptContext->GetLibrary()->GetUndefined(),
+            scriptContext);
+        return AsIntN(bigint, bits, scriptContext);
+    }
+
+    Var JavascriptBigInt::EntryAsUintN(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+        ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+
+        AssertMsg(args.HasArg(), "Should always have implicit 'this'");
+        uint64 bits = ToIndex(
+            args.Info.Count > 1 ? args[1] : scriptContext->GetLibrary()->GetUndefined(),
+            scriptContext);
+        JavascriptBigInt * bigint = JavascriptConversion::ToBigInt(
+            args.Info.Count > 2 ? args[2] : scriptContext->GetLibrary()->GetUndefined(),
+            scriptContext);
+        return AsUintN(bigint, bits, scriptContext);
+    }
+
     JavascriptBigInt * JavascriptBigInt::ThisBigIntValue(Var value, ScriptContext * scriptContext)
     {
         TypeId typeId = JavascriptOperators::GetTypeId(value);
@@ -488,14 +818,35 @@ namespace Js
             JavascriptError::ThrowTypeError(scriptContext, VBSERR_TypeMismatch, _u("BigInt construct"));
         }
 
-        // BigInt() with no argument is ToBigInt(undefined): a TypeError, not a
-        // host abort. Route it through the same conversion for one message.
-        Var result = JavascriptConversion::ToBigInt(
-            args.Info.Count > 1 ? args[1] : scriptContext->GetLibrary()->GetUndefined(),
-            scriptContext);
+        // BigInt(value): ToPrimitive(hint Number), then NumberToBigInt when
+        // that yields a Number; otherwise ToBigInt, which deliberately
+        // rejects Number (spec ToBigInt). BigInt() with no argument is
+        // ToPrimitive(undefined)/ToBigInt(undefined): a TypeError, not a host
+        // abort. BigInt({ valueOf() { return 42; } }) still takes the
+        // NumberToBigInt path.
+        Var value = args.Info.Count > 1 ? args[1] : scriptContext->GetLibrary()->GetUndefined();
+        Var primitive = JavascriptConversion::ToPrimitive<JavascriptHint::HintNumber>(value, scriptContext);
+        JavascriptBigInt * result;
+        TypeId primitiveType = JavascriptOperators::GetTypeId(primitive);
+        if (primitiveType == TypeIds_Integer || primitiveType == TypeIds_Number ||
+            primitiveType == TypeIds_Int64Number || primitiveType == TypeIds_UInt64Number)
+        {
+            result = JavascriptBigInt::CreateFromNumber(
+                JavascriptConversion::ToNumber(primitive, scriptContext), scriptContext);
+            if (result == nullptr)
+            {
+                // NumberToBigInt: NaN, +/-Infinity and non-integral values
+                // have no BigInt representation.
+                JavascriptError::ThrowRangeError(scriptContext, VBSERR_TypeMismatch, _u("NumberToBigInt"));
+            }
+        }
+        else
+        {
+            result = JavascriptConversion::ToBigInt(primitive, scriptContext);
+        }
 
         return isCtorSuperCall ?
-            JavascriptOperators::OrdinaryCreateFromConstructor(VarTo<RecyclableObject>(newTarget), UnsafeVarTo<RecyclableObject>(result), nullptr, scriptContext) :
+            JavascriptOperators::OrdinaryCreateFromConstructor(VarTo<RecyclableObject>(newTarget), result, nullptr, scriptContext) :
             result;
     }
 

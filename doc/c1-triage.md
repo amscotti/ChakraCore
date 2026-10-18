@@ -483,6 +483,22 @@ therefore still owns asIntN/asUintN, all remaining arithmetic, BigInt64
 typed arrays, mixed comparison/abstract equality, wrapper arithmetic, and
 non-decimal BigInt literal grammar. Gates moved 1974/2026 → 1975/2027.)*
 
+*(sub-batch 2, 2026-10-17, [c2-s2-bigint.md](c2-s2-bigint.md): implemented
+`BigInt.asIntN`/`asUintN` in the working tree with ToIndex coercion/order, static descriptors,
+`length=2`, names, `ErrorOnNew`, and bounded limb-accurate
+two's-complement truncation on Mac no-JIT. Also corrected abstract
+`ToBigInt(Number)` to throw `TypeError` (the BigInt constructor performs
+its own NumberToBigInt step), which the asIntN/asUintN fixtures require.
+The scoped corpus is 146/154 on both test and debug-static binaries
+(baseline 94/154), with 52 fail→pass (26+26) and 0 pass→fail. The 8
+residue are the four `arithmetic.js` scenarios blocked first by the
+non-decimal BigInt literal parser gap, wrapper arithmetic/equality 2, and
+the mixed relational comparison in `toString/a-z.js` 2; the 150/154
+target is unreachable without the excluded parser work. Gates moved
+1978/2030 → 1979/2031. Remaining C3 work is unchanged otherwise:
+arithmetic, BigInt64 typed arrays, mixed comparison/abstract equality,
+wrapper arithmetic, Map/Set BigInt keys, and non-decimal literals.)*
+
 **S3. RegExp Unicode property escapes (`\p{…}`, `\P{…}`).** Repro:
 `python3 tools/test262/run.py --binary zig-out/bin/ch --output out/test262-c1-reprop 'test/built-ins/RegExp/property-escapes/**/*.js'`.
 Subsystem: RegExp (Runtime/Library) + Unicode data/ICU. Prerequisite: a

@@ -6,9 +6,12 @@
 
 # C2-S2 sub-batch 1: BigInt conversions, stringification, crash safety
 
-Status: landed in `f7f396a88` (interpreter-verified; JIT gated at B4).
-Measured on Mac no-JIT (`-nonative`) with `-ESBigInt`; JIT evidence is not
-claimed (see B4 below). `ESBigInt` remains off by default. This sub-batch
+Status: sub-batch 1 landed in `f7f396a88` (interpreter-verified; JIT gated at B4).
+Sub-batch 2 (`BigInt.asIntN`/`asUintN`, and the spec correction that
+`ToBigInt(Number)` throws) is implemented in the working tree and is
+likewise interpreter-verified; see "Sub-batch 2" below. Measured on Mac
+no-JIT (`-nonative`) with `-ESBigInt`; JIT evidence is not
+claimed (see B4 below). `ESBigInt` remains off by default. Sub-batch 1
 keeps and completes the interrupted implementer's slice; it does not add
 BigInt arithmetic, `BigInt.asIntN`/`asUintN`, `BigInt64Array`, or mixed
 numeric comparison (C3 completion, residual list below).
@@ -16,7 +19,7 @@ numeric comparison (C3 completion, residual list below).
 ## What landed
 
 1. **ToBigInt and the constructor** (`JavascriptConversion.cpp`,
-   `JavascriptBigInt.{h,cpp}`): BigInt/Boolean/Number/String convert directly;
+   `JavascriptBigInt.{h,cpp}`): BigInt/Boolean/String convert directly;
    Objects convert once via `ToPrimitive(hint Number)` and then re-enter
    `ToBigInt` (no double coercion). `null`, `undefined`, `Symbol`, a
    non-convertible post-ToPrimitive primitive, and `BigInt()` with no
@@ -25,7 +28,11 @@ numeric comparison (C3 completion, residual list below).
    `SyntaxError`. `new BigInt(...)` throws `TypeError` before any argument
    coercion (spec `BigInt` step 1). The 40 pre-slice SIGABRT scenarios
    (constructor/coercion and prototype `toString`/`valueOf` fixtures) are
-   now controlled throws or correct results.
+   now controlled throws or correct results. Sub-batch 2 corrected the
+   abstract `ToBigInt` operation: a Number primitive is a `TypeError`
+   (spec ToBigInt); the BigInt constructor now performs its own
+   ToPrimitive/NumberToBigInt steps, so `BigInt(42)` still succeeds while
+   `BigInt.asIntN(2, 42)` throws as required.
 2. **Multi-digit NumberToBigInt** (`JavascriptBigInt::CreateFromNumber`):
    the interrupted slice stored one 64-bit digit and rejected `>= 2^64`.
    The conversion now splits an integral finite double into 32-bit chunks
@@ -269,8 +276,9 @@ equality or bytes, not `String(number)`.
 
 ## Residual C3 work
 
-- `BigInt.asIntN` / `BigInt.asUintN` (56 scoped scenarios; includes the
-  non-decimal BigInt literal parser gap for `arithmetic.js`).
+- `BigInt.asIntN` / `BigInt.asUintN`: landed in sub-batch 2 above. The
+  four `arithmetic.js` scenarios still depend on the non-decimal BigInt
+  literal parser gap below.
 - Full BigInt arithmetic: `/`, `%`, `**`, shifts, bitwise, same-type
   `BigInt64Array`/`BigUint64Array`; mixed BigInt/Number relational and
   abstract equality (the last currently fails closed, except `==` returns
@@ -361,3 +369,116 @@ Native x64 JIT execution, `Typeof`/`ToString`/`Add` lowering, and the
 `BigInt.prototype` dynamic-property inline caches still require the B4
 native gate before any JIT claim. `ESBigInt` stays off by default until
 the C3 completion and a B4 run.
+
+## Sub-batch 2: BigInt.asIntN / BigInt.asUintN
+
+Status: implemented in the working tree on top of `725be0ccb`, not
+committed. Interpreter-verified on Mac ARM64 no-JIT with `-ESBigInt`;
+JIT is not claimed (same B4 gate as sub-batch 1).
+
+### Scope
+
+- `BigInt.asIntN(bits, bigint)` and `BigInt.asUintN(bits, bigint)`, their
+  static property descriptors, `length = 2`, names, and non-constructibility.
+- `ToIndex(bits)` with the spec error classes and left-to-right coercion
+  order (bits before bigint).
+- The `ToBigInt` correction required by the asIntN/asUintN fixtures:
+  abstract `ToBigInt(Number)` throws `TypeError`; the BigInt constructor
+  performs ToPrimitive(hint Number) and NumberToBigInt itself.
+- Only the low `bits` bits of the magnitude are materialized. Positive
+  in-range results and in-range signed results return the immutable input;
+  `asUintN` negative results allocate exactly `ceil(bits/limbBits)` limbs
+  and fill the two's-complement pattern. `asIntN` sign-extends by testing
+  bit `bits-1` and, when set, converting the pattern to a negative
+  sign-magnitude value with `2**bits - pattern`.
+- Excluded and left C3: BigInt64Array, BigInt arithmetic beyond existing
+  same-type `+`/`-`/`*`, non-decimal BigInt literals, mixed
+  comparison/equality, wrapper arithmetic. No new static PropertyIds were
+  added: both names are tracked dynamic property records, like the
+  prototype methods; bytecode headers remain unchanged (verified).
+
+### Implementation notes
+
+- `JavascriptBigInt.cpp` adds `ToIndex`, `GetMagnitudeBitLength`,
+  `GetMagnitudeBit`, `HasSingleMagnitudeBit`, `TruncateMagnitude`,
+  `TwosComplement`, `AsIntN`/`AsUintN`, and the two entry points. Limb
+  width is derived from `sizeof(digit_t)`, so 32-bit digit builds mask the
+  partial top limb correctly.
+- `asUintN(1000, -1n)` allocates 16 limbs on this build (1000 bits, top
+  limb masked to 40 bits) and returns the exact 2^1000 - 1 decimal string.
+  `asIntN(1000, -1n)` returns `-1n` without allocation; `asIntN(1000,
+  2^999)` returns `-2^999`.
+- Oversized results that a negative `asUintN` would have to materialize
+  are rejected with `RangeError` at **>= 2^24 limbs** (128 MiB on 64-bit
+  limbs, 64 MiB on 32-bit limbs); the exact boundary is rejected before
+  allocation, so it cannot reach `ToString` and abort. This matches the class V8 uses for
+  "Maximum BigInt size exceeded"; positive/in-range signed inputs above
+  that bit count still return the unchanged value. `bits` itself is
+  capped at `ToIndex`'s 2^53 - 1.
+- `JavascriptLibrary.cpp` registers both static methods on the BigInt
+  constructor (deferred capacity 5) with
+  `AddFunctionToLibraryObjectWithPropertyName`; `ProfilerRegisterBigInt`
+  registers the same dynamic names. `JavascriptBuiltInFunctionList.h`
+  adds the `ErrorOnNew` FunctionInfo entries.
+
+### Evidence
+
+- `test/es7/bigint-asintn.js` (new, `test/es7/rlexe.xml` with `-ESBigInt
+  -args summary -endargs`) passes on both the test and debug-static
+  binaries. It covers bits 0/1/8/32/64/65/128/1000, signs, values above
+  and below the bits, partial top limbs, exact 1000-bit `toString`
+  results, ToIndex coercion/errors/order, BigInt/Symbol bits, all
+  bigint-parameter error classes, `new`/`Reflect.construct` rejection,
+  descriptors, and asUintN/asIntN round-trips.
+- `mise exec -- zig build check --summary line`: 1979 passed / 0 failed,
+  bytecode up to date, 572/572 steps.
+- `mise exec -- zig build check -Dprofile=debug-static --summary line`:
+  2031 passed / 0 failed, bytecode up to date, 549/549 steps.
+- `python3 tools/build/check_regression.py --self-test`: all negative
+  controls pass with the 1979/2031 pins.
+- Scoped corpus `test/built-ins/BigInt/**/*.js` with `-nonative
+  -Test262 -CollectGarbage -ESBigInt`, same 154 scenarios:
+  test binary (`out/test262-s2bigint-asintn-final3`) 146/154 and
+  debug-static (`out/test262-s2bigint-asintn-debug-final3`) 146/154
+  (baseline `/tmp/s2-bigint-final` 94/154).
+  52 fail→pass (26 asIntN + 26 asUintN; 52 of the 56 asIntN/asUintN
+  scenarios), 0 pass→fail on both. The 8
+  remaining failures are exactly the four residue classes below; the
+  requested 150/154 target is unreachable without the excluded
+  non-decimal literal parser work (4 arithmetic scenarios).
+- Node v26.5.0 oracle: 400 generated values (0-1100 bits, both signs,
+  bits 0-1024 including partial-limb and 999/1000/1001 boundaries) match
+  exactly for both functions; the error matrix (negative, fractional,
+  +/-Infinity, 2^53, 2^53-1, BigInt/Symbol bits, Number/Symbol/
+  unparseable strings for the bigint parameter, oversized negative
+  asUintN) matches exception classes.
+- `git diff --check` clean; no generated or stray files.
+
+### Residuals (C3)
+
+- `asIntN/arithmetic.js` and `asUintN/arithmetic.js` (4 scenarios) pass
+  the method's numeric behavior only after the parser accepts
+  `0x`/`0b`/`0o` BigInt literals; the file fails at its first such
+  literal. Non-decimal BigInt literal parsing remains C3.
+- `wrapper-object-ordinary-toprimitive.js` (2): wrapper arithmetic and
+  abstract equality remain C3.
+- `prototype/toString/a-z.js` (2): its `i < radix` loop still hits the
+  fail-closed mixed BigInt/Number relational comparison (C3).
+- All earlier residuals remain: BigInt64Array/BigUint64Array, full
+  BigInt arithmetic/bitwise/shift, Map/Set BigInt key identity, wrapper
+  arithmetic/equality, non-decimal literals, and JIT/B4 coverage.
+
+### Ownership record
+
+The new code adds no owned buffers beyond the existing Recycler contract:
+`TruncateMagnitude` and `TwosComplement` allocate a `JavascriptBigInt`
+plus a zeroed digit array in the owning ScriptContext's Recycler and
+publish them only as the return value. `CreateZeroWithLength` bounds the
+array to `ceil(bits/limbBits)` limbs; no foreign allocation or retained
+borrow exists. The input BigInt is immutable and may be returned directly
+when it is already in range; no caller mutates a returned value.
+Reentrancy is confined to `ToIndex`/`ToBigInt`, which run user
+`@@toPrimitive`/`valueOf`/`toString` before any result allocation, in
+spec order. OOM/exception in the result allocation occurs before
+publication; the partial object is Recycler garbage. GC may move all
+objects; no raw pointer is retained across a user-code call.

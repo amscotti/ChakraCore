@@ -1464,17 +1464,14 @@ CommonNumber:
 
             case TypeIds_Integer:
             case TypeIds_Number:
-            {
-                double numberValue = TaggedInt::Is(value) ? TaggedInt::ToDouble(value) : JavascriptNumber::GetValue(value);
-                JavascriptBigInt * result = JavascriptBigInt::CreateFromNumber(numberValue, scriptContext);
-                if (result == nullptr)
-                {
-                    // NumberToBigInt: NaN, +/-Infinity and non-integral values
-                    // have no BigInt representation.
-                    JavascriptError::ThrowRangeError(scriptContext, VBSERR_TypeMismatch, _u("NumberToBigInt"));
-                }
-                return result;
-            }
+            case TypeIds_Int64Number:
+            case TypeIds_UInt64Number:
+            case TypeIds_Undefined:
+            case TypeIds_Null:
+            case TypeIds_Symbol:
+                // ToBigInt(Number) is a TypeError; only the BigInt
+                // constructor's explicit NumberToBigInt step accepts Numbers.
+                JavascriptError::ThrowTypeError(scriptContext, VBSERR_TypeMismatch, _u("ToBigInt"));
 
             case TypeIds_String:
             {
@@ -1487,11 +1484,6 @@ CommonNumber:
                 }
                 return result;
             }
-
-            case TypeIds_Undefined:
-            case TypeIds_Null:
-            case TypeIds_Symbol:
-                JavascriptError::ThrowTypeError(scriptContext, VBSERR_TypeMismatch, _u("ToBigInt"));
 
             default:
                 if (primitiveCoerced)
