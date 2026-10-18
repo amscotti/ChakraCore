@@ -479,6 +479,13 @@ private:
     bool m_hasDeferredShorthandInitError;
     bool m_deferEllipsisError;
     bool m_deferCommaError;
+    // S1 public class field parsing: helper functions for instance field
+    // initializers are synthesized as hidden block-scoped function declarations
+    // so their bodies have their own lexical `this` and correctly parented
+    // nested functions.
+    bool m_inClassFieldInitializer;
+    bool m_classFieldInitializerUsesArguments;
+    uint32 m_classFieldHelperCount;
     uint * m_pnestedCount; // count of functions nested at one level below the current node
 
     struct WellKnownPropertyPids
@@ -821,7 +828,7 @@ private:
 #if ENABLE_BACKGROUND_PARSING
     bool FastScanFormalsAndBody();
 #endif
-    bool ScanAheadToFunctionEnd(uint count);
+    bool ScanAheadToFunctionEnd(uint count, bool *pSawClass = nullptr);
 
     bool DoParallelParse(ParseNodeFnc * pnodeFnc) const;
 
@@ -907,6 +914,8 @@ private:
     template<bool buildAST> ParseNodePtr GenerateModuleFunctionWrapper();
 
     IdentPtr ParseClassPropertyName(IdentPtr * hint);
+    ParseNodeFnc * CreateClassFieldInitializerFunction(charcount_t ichMin, size_t cbMin);
+    ParseNodeFnc * CreateClassFieldInitializerFastScanStub();
     template<bool buildAST> ParseNodeClass * ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint, uint32 *pHintLength, uint32 *pShortNameOffset);
 
     template<bool buildAST> ParseNodePtr ParseStringTemplateDecl(ParseNodePtr pnodeTagFnc);

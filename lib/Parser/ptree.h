@@ -508,6 +508,12 @@ public:
     ParseNodePtr pnodeVars;
     ParseNodePtr pnodeBody;
     ParseNodePtr pnodeRest;
+    // S1: public instance field records for a class constructor. Each list item
+    // is a knopMember whose pnode1 is the field name and whose pnode2 is a call
+    // to a hidden field-initializer function (or null for a field without an
+    // initializer). Lives on the constructor so bytecode generation can run the
+    // initializers in the right frame (base prologue or right after super()).
+    ParseNodePtr pnodeClassFields;
 
     FuncInfo *funcInfo; // function information gathered during byte code generation
     Scope *scope;

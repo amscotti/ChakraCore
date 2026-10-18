@@ -433,6 +433,7 @@ ParseNodeFnc::ParseNodeFnc(OpCode nop, charcount_t ichMin, charcount_t ichLim)
     this->pnodeVars = nullptr;
     this->pnodeBody = nullptr;
     this->pnodeRest = nullptr;
+    this->pnodeClassFields = nullptr;
     
     this->funcInfo = nullptr;
     this->scope = nullptr;

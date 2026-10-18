@@ -107,6 +107,9 @@ Parser::Parser(Js::ScriptContext* scriptContext, BOOL strictMode, PageAllocator 
     m_hasDestructuringPattern(false),
     m_hasDeferredShorthandInitError(false),
     m_deferCommaError(false),
+    m_inClassFieldInitializer(false),
+    m_classFieldInitializerUsesArguments(false),
+    m_classFieldHelperCount(0),
     m_pnestedCount(nullptr),
 
     wellKnownPropertyPids(), // should initialize to nullptrs
@@ -3524,6 +3527,14 @@ ParseNodePtr Parser::ParseTerm(BOOL fAllowCall,
     LIdentifier:
         PidRefStack * ref = nullptr;
 
+        // FieldDefinition early error: ContainsArguments of the initializer
+        // must be false. Record the reference at parse time so both the
+        // AST-building and fast-scan paths reject it.
+        if (m_inClassFieldInitializer && pid == wellKnownPropertyPids.arguments)
+        {
+            m_classFieldInitializerUsesArguments = true;
+        }
+
         // Don't push a reference if this is a single lambda parameter, because we'll reparse with
         // a correct function ID.
         if (m_token.tk != tkDArrow)
@@ -6183,7 +6194,21 @@ void Parser::ParseFncDeclHelper(ParseNodeFnc * pnodeFnc, LPCOLESTR pNameHint, us
                 (m_grfscr & fscrCanDeferFncParse)
                 && !m_InAsmMode
                 // Don't defer a module function wrapper because we need to do export resolution at parse time
-                && !fModule;
+                && !fModule
+                // S1: class constructors carry public instance-field initializer
+                // metadata generated after the member list is parsed, so their
+                // body must be materialized during this parse.
+                && !(flags & fFncClassConstructor)
+                // S1: field helper functions are synthetic siblings of class
+                // methods inside the class block. Keep all class members eager
+                // so the fast-scan nested-function layout and the real parse
+                // cannot disagree about method/helper indices.
+                && !(flags & fFncClassMember)
+                // Functions nested in a field initializer are compiled inside
+                // the synthesized initializer helper. The helper's scope info
+                // is built manually, so keep those nested functions eager
+                // rather than relying on deferred reparse scope state.
+                && !m_inClassFieldInitializer;
 
         pnodeFnc->SetCanBeDeferred(isTopLevelDeferredFunc && ParseNodeFnc::CanBeRedeferred(pnodeFnc->fncFlags));
 
@@ -6337,6 +6362,23 @@ void Parser::ParseFncDeclHelper(ParseNodeFnc * pnodeFnc, LPCOLESTR pNameHint, us
         // We will also temporarily defer all asm.js functions, except for the asm.js
         // module itself, which we will never defer
         bool strictModeTurnedOn = false;
+
+        // S1: class fields synthesize eager initializer helpers whose nested
+        // function layout must be known when the enclosing function body is
+        // compiled. Deferring a function that contains class syntax would
+        // require the fast-scan stub tree to mirror those synthetic functions
+        // exactly; instead keep such functions eager. This is a correctness
+        // trade-off for the slice, not a broad defer-parse change.
+        if (isTopLevelDeferredFunc && !fLambda)
+        {
+            bool sawClass = false;
+            this->ScanAheadToFunctionEnd(0xFFFFFFFFu, &sawClass);
+            if (sawClass)
+            {
+                isTopLevelDeferredFunc = false;
+                pnodeFnc->SetCanBeDeferred(false);
+            }
+        }
 
         if (isTopLevelDeferredFunc &&
             !(this->m_grfscr & fscrEvalCode) &&
@@ -6790,7 +6832,7 @@ bool Parser::DoParallelParse(ParseNodeFnc * pnodeFnc) const
 #endif
 }
 
-bool Parser::ScanAheadToFunctionEnd(uint count)
+bool Parser::ScanAheadToFunctionEnd(uint count, bool *pSawClass)
 {
     bool found = false;
     uint curlyDepth = 0;
@@ -6800,6 +6842,10 @@ bool Parser::ScanAheadToFunctionEnd(uint count)
 
     for (uint i = 0; i < count; i++)
     {
+        if (pSawClass != nullptr && m_token.tk == tkCLASS)
+        {
+            *pSawClass = true;
+        }
         switch (m_token.tk)
         {
         case tkStrTmplBegin:
@@ -8305,6 +8351,169 @@ LPCOLESTR Parser::ConstructFinalHintNode(IdentPtr pClassName, IdentPtr pMemberNa
     return pFinalName;
 }
 
+// S1: synthesize a hidden block-scoped function declaration which evaluates one
+// instance field initializer expression. The function has its own strict `this`
+// binding (the constructor calls it with the instance as the explicit receiver)
+// so that closures, arrow functions and nested function expressions inside the
+// initializer are parented to the initializer, not to the class's enclosing
+// function. The source scanner is positioned at the first token of the
+// initializer expression (after '=').
+ParseNodeFnc * Parser::CreateClassFieldInitializerFunction(charcount_t ichMin, size_t cbMin)
+{
+    Assert(!this->m_deferringAST);
+
+    char16 hiddenName[32];
+    int nameLength = swprintf_s(hiddenName, 32, _u("*s1field%u*"), this->m_classFieldHelperCount++);
+    Assert(nameLength > 0);
+
+    IdentPtr hiddenPid = this->GetHashTbl()->PidHashNameLen(hiddenName, static_cast<uint32>(nameLength));
+
+    ParseNodeFnc * pnodeFnc = CreateAllowDeferNodeForOpT<knopFncDecl>();
+    pnodeFnc->SetNested(m_currentNodeFunc != nullptr);
+    pnodeFnc->SetStrictMode();
+    pnodeFnc->SetDeclaration(true);
+    pnodeFnc->SetHomeObjLocation(Js::Constants::NoRegister);
+    pnodeFnc->superRestrictionState = SuperRestrictionState::Disallowed;
+    pnodeFnc->functionId = (*m_nextFunctionId)++;
+    pnodeFnc->lineNumber = this->GetScanner()->LineCur();
+    pnodeFnc->columnNumber = 0;
+    // The helper is synthetic, so its source range must not coincide exactly
+    // with a real nested function in the initializer (notably an arrow whose
+    // text is the whole initializer). Function body reuse during deferred
+    // reparse keys on start offset + length, so include the field name.
+    pnodeFnc->ichMin = ichMin;
+    pnodeFnc->cbMin = cbMin;
+    pnodeFnc->cbStringMin = pnodeFnc->cbMin;
+
+    pnodeFnc->pnodeName = CreateDeclNode(knopVarDecl, hiddenPid, STFunction);
+    pnodeFnc->pid = hiddenPid;
+    // The constructor (a nested function) loads this binding from the class
+    // block closure. Mark it captured up front so it is allocated a block scope
+    // slot even though the constructor reference is synthesized after parsing.
+    pnodeFnc->pnodeName->sym->SetHasNonLocalReference();
+
+    // Register the hidden function as a block-scoped declaration in the class
+    // body so that class definition evaluation creates the function object and
+    // the constructor can reach it through the class block's closure.
+    AppendFunctionToScopeList(true, pnodeFnc);
+    AddBlockLexicalDecl(hiddenPid, true, false);
+    if (m_pnestedCount)
+    {
+        (*m_pnestedCount)++;
+    }
+
+    ParseNodeFnc * pnodeFncSave = m_currentNodeFunc;
+    ParseNodeFnc * pnodeFncNonLambdaSave = m_currentNodeNonLambdaFunc;
+    ParseNodePtr * ppnodeVarSave = m_ppnodeVar;
+    uint * pnestedCountSave = m_pnestedCount;
+    int32 * pAstSizeSave = m_pCurrentAstSize;
+
+    m_currentNodeFunc = pnodeFnc;
+    m_currentNodeNonLambdaFunc = pnodeFnc;
+    m_pnestedCount = &pnodeFnc->nestedCount;
+    m_pCurrentAstSize = &pnodeFnc->astSize;
+
+    ParseNodeBlock * pnodeParamBlock = StartParseBlock<true>(PnodeBlockType::Parameter, ScopeType_Parameter);
+    pnodeFnc->pnodeScopes = pnodeParamBlock;
+
+    ParseNodePtr * ppnodeScopeSave = m_ppnodeScope;
+    m_ppnodeScope = &pnodeParamBlock->pnodeScopes;
+    ParseNodePtr * ppnodeExprScopeSave = m_ppnodeExprScope;
+    m_ppnodeExprScope = nullptr;
+
+    m_ppnodeVar = &pnodeFnc->pnodeVars;
+
+    ParseNodeBlock * pnodeInnerBlock = StartParseBlock<true>(PnodeBlockType::Function, ScopeType_FunctionBody);
+    *m_ppnodeScope = pnodeInnerBlock;
+    pnodeFnc->pnodeBodyScope = pnodeInnerBlock;
+    m_ppnodeScope = &pnodeInnerBlock->pnodeScopes;
+    pnodeInnerBlock->pnodeStmt = pnodeFnc;
+
+    ParseNodePtr * lastNodeRef = nullptr;
+    bool usesArgumentsSave = m_classFieldInitializerUsesArguments;
+    bool inFieldInitializerSave = m_inClassFieldInitializer;
+    m_classFieldInitializerUsesArguments = false;
+    m_inClassFieldInitializer = true;
+
+    ParseNodePtr pnodeExpr = ParseExpr<true>(koplAsg, nullptr, TRUE);
+
+    m_classFieldInitializerUsesArguments = m_classFieldInitializerUsesArguments || usesArgumentsSave;
+    m_inClassFieldInitializer = inFieldInitializerSave;
+
+    if (m_classFieldInitializerUsesArguments)
+    {
+        Error(ERRsyntax);
+    }
+
+    ParseNodeReturn * pnodeRet = CreateNodeForOpT<knopReturn>();
+    pnodeRet->pnodeExpr = pnodeExpr;
+    pnodeRet->ichMin = pnodeExpr->ichMin;
+    pnodeRet->ichLim = pnodeExpr->ichLim;
+    pnodeRet->grfnop = 0;
+    AddToNodeList(&pnodeFnc->pnodeBody, &lastNodeRef, pnodeRet);
+
+    ParseNodePtr pnodeEnd = CreateNodeForOpT<knopEndCode>(this->GetScanner()->IchLimTok());
+    pnodeEnd->ichLim = pnodeEnd->ichMin;
+    AddToNodeList(&pnodeFnc->pnodeBody, &lastNodeRef, pnodeEnd);
+
+    pnodeFnc->ichLim = this->GetScanner()->IchMinTok();
+    pnodeFnc->cbLim = this->GetScanner()->IecpMinTok();
+    pnodeFnc->cbStringLim = pnodeFnc->cbLim;
+
+    FinishParseBlock(pnodeInnerBlock, false);
+    CreateSpecialSymbolDeclarations(pnodeFnc);
+    FinishParseBlock(pnodeParamBlock, false);
+
+    // Match the bookkeeping ParseFncDeclInternal performs for a real nested
+    // function: verify captured names for the helper's deferred children and
+    // propagate the set to the enclosing function's parser state.
+    ProcessCapturedNames(pnodeFnc);
+
+    Assert(m_ppnodeExprScope == nullptr || *m_ppnodeExprScope == nullptr);
+    m_ppnodeExprScope = ppnodeExprScopeSave;
+    m_ppnodeScope = ppnodeScopeSave;
+    m_ppnodeVar = ppnodeVarSave;
+    m_pnestedCount = pnestedCountSave;
+    m_pCurrentAstSize = pAstSizeSave;
+    m_currentNodeFunc = pnodeFncSave;
+    m_currentNodeNonLambdaFunc = pnodeFncNonLambdaSave;
+
+    AddNestedCapturedNames(pnodeFnc);
+
+    return pnodeFnc;
+}
+
+// S1 fast-scan counterpart of CreateClassFieldInitializerFunction. During the
+// deferred-parse fast scan we cannot build the initializer AST, but the
+// enclosing function's nested count and nested function proxies must already
+// reserve one slot per field helper, otherwise the deferred reparse adds
+// children the original FunctionBody has no room for. Marking the stub
+// IsGeneratedDefault lets BuildDeferredStubTreeHelper skip it (it is generated
+// eagerly during the real parse and has no source-level function syntax).
+ParseNodeFnc * Parser::CreateClassFieldInitializerFastScanStub()
+{
+    ParseNodeFnc * pnodeFnc = CreateAllowDeferNodeForOpT<knopFncDecl>();
+    pnodeFnc->SetNested(m_currentNodeFunc != nullptr);
+    pnodeFnc->SetStrictMode();
+    pnodeFnc->SetDeclaration(true);
+    pnodeFnc->SetIsGeneratedDefault(true);
+    pnodeFnc->SetHomeObjLocation(Js::Constants::NoRegister);
+    pnodeFnc->superRestrictionState = SuperRestrictionState::Disallowed;
+    pnodeFnc->functionId = (*m_nextFunctionId)++;
+    pnodeFnc->lineNumber = this->GetScanner()->LineCur();
+    pnodeFnc->columnNumber = 0;
+    pnodeFnc->ichMin = this->GetScanner()->IchMinTok();
+    pnodeFnc->cbMin = this->GetScanner()->IecpMinTok();
+    pnodeFnc->cbStringMin = pnodeFnc->cbMin;
+
+    AppendFunctionToScopeList(true, pnodeFnc);
+    if (m_pnestedCount)
+    {
+        (*m_pnestedCount)++;
+    }
+    return pnodeFnc;
+}
+
 template<bool buildAST>
 ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint, uint32 *pHintLength, uint32 *pShortNameOffset)
 {
@@ -8316,6 +8525,8 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
     ParseNodePtr pnodeExtends = nullptr;
     ParseNodePtr pnodeMembers = nullptr;
     ParseNodePtr *lastMemberNodeRef = nullptr;
+    ParseNodePtr pnodeInstanceFields = nullptr;
+    ParseNodePtr *lastInstanceFieldNodeRef = nullptr;
     uint32 nameHintLength = pHintLength ? *pHintLength : 0;
     uint32 nameHintOffset = pShortNameOffset ? *pShortNameOffset : 0;
 
@@ -8419,6 +8630,14 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
 
             if (m_token.tk == tkLParen)
             {
+                // 'static() {}' is a method named static.
+                this->GetScanner()->SeekTo(beginStatic);
+            }
+            else if (m_token.tk == tkSColon || m_token.tk == tkAsg || m_token.tk == tkRCurly)
+            {
+                // 'static;' / 'static = 1' / 'static }' are instance fields
+                // named static. Static fields are outside this slice, but this
+                // spelling is a public instance field.
                 this->GetScanner()->SeekTo(beginStatic);
             }
             else
@@ -8448,8 +8667,11 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
             iecpMin = this->GetScanner()->IecpMinTok();
 
             this->GetScanner()->Scan();
-            if (m_token.tk == tkLParen || this->GetScanner()->FHadNewLine())
+            if (m_token.tk == tkLParen || m_token.tk == tkAsg || m_token.tk == tkSColon ||
+                m_token.tk == tkRCurly || this->GetScanner()->FHadNewLine())
             {
+                // 'async()' / 'async = 1' / 'async;' / 'async }' are ordinary
+                // members named async, not async methods.
                 this->GetScanner()->SeekTo(parsedAsync);
             }
             else
@@ -8488,6 +8710,152 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
         if (buildAST && memberPid)
         {
             pnodeMemberName = CreateStrNode(memberPid);
+        }
+
+        // S1: public instance field definition (no computed name, no static).
+        // A field is recognized when the member name is followed by '=', ';',
+        // '}' or a line terminator (ASI), and is not a method ( '(' ). For a
+        // simple name the scanner is still on the name token, so look ahead one
+        // token and restore for the existing method/accessor grammar.
+        RestorePoint afterFieldName;
+        bool scannedFieldName = false;
+        if (!isComputedName && memberPid != nullptr)
+        {
+            this->GetScanner()->Capture(&afterFieldName);
+            this->GetScanner()->ScanForcingPid();
+            scannedFieldName = true;
+        }
+
+        // get/set remain accessor prefixes when followed by a property name,
+        // even across a line terminator; they are fields only when terminated
+        // ('get;', 'get = x', 'get }').
+        bool isGetOrSetName = memberPid == wellKnownPropertyPids.get || memberPid == wellKnownPropertyPids.set;
+        bool fieldTerminator = m_token.tk == tkAsg || m_token.tk == tkSColon || m_token.tk == tkRCurly;
+        bool isFieldDefinition = !isGenerator &&
+            (fieldTerminator || (!isGetOrSetName && this->GetScanner()->FHadNewLine() && m_token.tk != tkLParen));
+
+        if (!isFieldDefinition && scannedFieldName)
+        {
+            this->GetScanner()->SeekTo(afterFieldName);
+        }
+
+        if (isFieldDefinition)
+        {
+            if (isStatic)
+            {
+                // Static fields are outside the S1 slice.
+                Error(ERRsyntax);
+            }
+            if (isComputedName)
+            {
+                // Computed field names are outside the S1 slice.
+                Error(ERRsyntax);
+            }
+            if (memberPid == nullptr || (buildAST && pnodeMemberName == nullptr))
+            {
+                Error(ERRnoMemberIdent);
+            }
+            if (memberPid == wellKnownPropertyPids.constructor)
+            {
+                // ClassElement : FieldDefinition early error: PropName
+                // "constructor" is forbidden (including 'constructor' and
+                // "constructor" literal names).
+                Error(ERRsyntax);
+            }
+
+            bool hasInitializer = (m_token.tk == tkAsg);
+            ParseNodeFnc * pnodeInitFnc = nullptr;
+            ParseNodeFnc * pnodeFastScanStub = nullptr;
+            ParseNodePtr * ppnodeScopeSave = nullptr;
+            ParseNodePtr * ppnodeExprScopeSave = nullptr;
+            uint * pnestedCountSave = nullptr;
+            ParseNodePtr fastScanChildList = nullptr;
+
+            if (hasInitializer)
+            {
+                if (!buildAST)
+                {
+                    // Reserve the helper's nested slot in the fast scan's
+                    // function count/proxy layout before parsing initializer
+                    // children, and parent those children to the skipped stub
+                    // so the enclosing function's nested count matches the
+                    // real parse.
+                    pnodeFastScanStub = CreateClassFieldInitializerFastScanStub();
+                    ppnodeScopeSave = m_ppnodeScope;
+                    ppnodeExprScopeSave = m_ppnodeExprScope;
+                    pnestedCountSave = m_pnestedCount;
+                    m_ppnodeScope = &fastScanChildList;
+                    m_ppnodeExprScope = nullptr;
+                    m_pnestedCount = &pnodeFastScanStub->nestedCount;
+                }
+
+                this->GetScanner()->ScanForcingPid();
+
+                bool usesArgumentsSave = m_classFieldInitializerUsesArguments;
+                bool inFieldInitializerSave = m_inClassFieldInitializer;
+                m_classFieldInitializerUsesArguments = false;
+                m_inClassFieldInitializer = true;
+
+                if (buildAST)
+                {
+                    pnodeInitFnc = CreateClassFieldInitializerFunction(ichMin, iecpMin);
+                }
+                else
+                {
+                    ParseExpr<false>(koplAsg, nullptr, TRUE);
+                }
+
+                m_classFieldInitializerUsesArguments = m_classFieldInitializerUsesArguments || usesArgumentsSave;
+                m_inClassFieldInitializer = inFieldInitializerSave;
+
+                if (m_classFieldInitializerUsesArguments)
+                {
+                    // FieldDefinition early error: Initializer must not contain
+                    // an `arguments` identifier reference.
+                    Error(ERRsyntax);
+                }
+
+                if (!buildAST)
+                {
+                    m_ppnodeScope = ppnodeScopeSave;
+                    m_ppnodeExprScope = ppnodeExprScopeSave;
+                    m_pnestedCount = pnestedCountSave;
+                }
+            }
+
+            if (m_token.tk == tkSColon)
+            {
+                this->GetScanner()->ScanForcingPid();
+            }
+            else if (m_token.tk != tkRCurly && !this->GetScanner()->FHadNewLine())
+            {
+                Error(ERRsyntax);
+            }
+
+            if (buildAST)
+            {
+                ParseNodeCall * pnodeCall = nullptr;
+                if (pnodeInitFnc != nullptr)
+                {
+                    PidRefStack * hiddenRef = Anew(&m_nodeAllocator, PidRefStack);
+                    hiddenRef->SetSym(pnodeInitFnc->pnodeName->sym);
+                    ParseNodeName * pnodeTarget = CreateNameNode(pnodeInitFnc->pnodeName->pid);
+                    pnodeTarget->SetSymRef(hiddenRef);
+
+                    PidRefStack * thisRef = Anew(&m_nodeAllocator, PidRefStack);
+                    ParseNodeSpecialName * pnodeThis = CreateSpecialNameNode(wellKnownPropertyPids._this, thisRef, ichMin, ichMin);
+
+                    pnodeCall = CreateCallNode(knopCall, pnodeTarget, nullptr);
+                    pnodeCall->pnodeThisOverride = pnodeThis;
+                    pnodeCall->isUsed = true;
+                    pnodeCall->argCount = 0;
+                }
+
+                ParseNodeBin * pnodeField = CreateBinNode(knopMember, pnodeMemberName, pnodeCall);
+                AddToNodeList(&pnodeInstanceFields, &lastInstanceFieldNodeRef, pnodeField);
+            }
+
+            continue;
         }
 
         if (!isStatic && memberPid == wellKnownPropertyPids.constructor)
@@ -8688,6 +9056,48 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
     {
         pnodeConstructor->cbStringMin = cbMinConstructor;
         pnodeConstructor->cbStringLim = cbLimConstructor;
+
+        if (pnodeInstanceFields != nullptr)
+        {
+            pnodeConstructor->pnodeClassFields = pnodeInstanceFields;
+
+            // Field initializers run with the constructor's instance as `this`.
+            // Bind the explicit receiver on each helper call to the
+            // constructor's synthetic `this` symbol now that it exists.
+            Symbol * thisSym = nullptr;
+            for (ParseNodePtr pnodeVar = pnodeConstructor->pnodeVars; pnodeVar != nullptr;
+                 pnodeVar = pnodeVar->AsParseNodeVar()->pnodeNext)
+            {
+                Symbol * sym = pnodeVar->AsParseNodeVar()->sym;
+                if (sym != nullptr && sym->IsThis())
+                {
+                    thisSym = sym;
+                    break;
+                }
+            }
+            Assert(thisSym != nullptr);
+
+            ParseNodePtr pnodeFields = pnodeInstanceFields;
+            while (pnodeFields != nullptr)
+            {
+                ParseNodePtr pnodeField = pnodeFields->nop == knopList
+                    ? pnodeFields->AsParseNodeBin()->pnode1
+                    : pnodeFields;
+                ParseNodePtr pnodeCall = pnodeField->AsParseNodeBin()->pnode2;
+                if (pnodeCall != nullptr)
+                {
+                    Assert(pnodeCall->nop == knopCall);
+                    Assert(pnodeCall->AsParseNodeCall()->pnodeThisOverride != nullptr);
+                    *pnodeCall->AsParseNodeCall()->pnodeThisOverride->AsParseNodeSpecialName()->GetSymRef() = thisSym;
+                }
+
+                if (pnodeFields->nop != knopList)
+                {
+                    break;
+                }
+                pnodeFields = pnodeFields->AsParseNodeBin()->pnode2;
+            }
+        }
 
         PopFuncBlockScope(ppnodeScopeSave, ppnodeExprScopeSave);
 

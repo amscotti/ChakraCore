@@ -3530,6 +3530,33 @@ void VisitNestedScopes(ParseNode* pnodeScopeList, ParseNode* pnodeParent, ByteCo
                 byteCodeGenerator->SetCurrentTopStatement(pnode);
                 Visit(pnode, byteCodeGenerator, prefix, postfix);
 
+                // S1: field initializer calls are emitted from the constructor
+                // prologue (base) or right after super() binds `this` (derived),
+                // not from the body list. Register their operands here so the
+                // emitter has resolved symbols and registers.
+                if (pnodeFnc->IsClassConstructor() && pnodeFnc->pnodeClassFields != nullptr)
+                {
+                    ParseNodePtr pnodeFields = pnodeFnc->pnodeClassFields;
+                    while (pnodeFields != nullptr)
+                    {
+                        ParseNodePtr pnodeField = pnodeFields->nop == knopList
+                            ? pnodeFields->AsParseNodeBin()->pnode1
+                            : pnodeFields;
+                        ParseNodePtr pnodeFieldCall = pnodeField->AsParseNodeBin()->pnode2;
+                        if (pnodeFieldCall != nullptr)
+                        {
+                            byteCodeGenerator->SetCurrentTopStatement(pnodeFieldCall);
+                            Visit(pnodeFieldCall, byteCodeGenerator, prefix, postfix);
+                        }
+
+                        if (pnodeFields->nop != knopList)
+                        {
+                            break;
+                        }
+                        pnodeFields = pnodeFields->AsParseNodeBin()->pnode2;
+                    }
+                }
+
                 EndVisitBlock(pnodeFnc->pnodeBodyScope, byteCodeGenerator);
                 EndVisitBlock(pnodeFnc->pnodeScopes, byteCodeGenerator);
             }
