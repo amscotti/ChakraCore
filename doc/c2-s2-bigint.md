@@ -8,13 +8,15 @@
 
 Status: sub-batch 1 landed in `f7f396a88` (interpreter-verified; JIT gated at B4).
 Sub-batch 2 (`BigInt.asIntN`/`asUintN`, and the spec correction that
-`ToBigInt(Number)` throws) is implemented in the working tree and is
-likewise interpreter-verified; see "Sub-batch 2" below. Measured on Mac
-no-JIT (`-nonative`) with `-ESBigInt`; JIT evidence is not
-claimed (see B4 below). `ESBigInt` remains off by default. Sub-batch 1
-keeps and completes the interrupted implementer's slice; it does not add
-BigInt arithmetic, `BigInt.asIntN`/`asUintN`, `BigInt64Array`, or mixed
-numeric comparison (C3 completion, residual list below).
+`ToBigInt(Number)` throws) landed in `41ada630f`; sub-batch 3
+(non-decimal `0x`/`0o`/`0b` BigInt literals) is implemented in the
+working tree. Both are interpreter-verified; see "Sub-batch 2" and
+"Sub-batch 3" below. Measured on Mac no-JIT (`-nonative`) with
+`-ESBigInt`; JIT evidence is not claimed (see B4 below). `ESBigInt`
+remains off by default. Sub-batch 1 keeps and completes the interrupted
+implementer's slice; the batch as a whole still does not add BigInt
+arithmetic, `BigInt64Array`, or mixed numeric comparison (C3 completion,
+residual list below).
 
 ## What landed
 
@@ -276,9 +278,9 @@ equality or bytes, not `String(number)`.
 
 ## Residual C3 work
 
-- `BigInt.asIntN` / `BigInt.asUintN`: landed in sub-batch 2 above. The
-  four `arithmetic.js` scenarios still depend on the non-decimal BigInt
-  literal parser gap below.
+- `BigInt.asIntN` / `BigInt.asUintN`: landed in sub-batch 2; the four
+  `arithmetic.js` scenarios now pass after sub-batch 3's non-decimal
+  literal support.
 - Full BigInt arithmetic: `/`, `%`, `**`, shifts, bitwise, same-type
   `BigInt64Array`/`BigUint64Array`; mixed BigInt/Number relational and
   abstract equality (the last currently fails closed, except `==` returns
@@ -289,8 +291,12 @@ equality or bytes, not `String(number)`.
   is `undefined` because the complex dictionary uses pointer identity for
   BigInt instead of SameValueZero. This is a collections hash/equality
   slice, not a conversion fix.
-- BigInt literal grammar for `0x`/`0b`/`0o` forms (and the `n` suffix on
-  them) remains C3 parser work.
+- BigInt literal property names (`({1n: 1})`, `class C { 0x10n() {} }`)
+  remain a pre-existing parser gap; computed keys and property values are
+  covered.
+- Decimal `ToString` of million-bit BigInts remains quadratic in the
+  existing digit-array converter (the 1M-hex parse is now ~4.3 s, but
+  stringifying that value is still a separate performance debt).
 - `BigInt.prototype.toLocaleString` is decimal-only (no Intl locale data);
   no Intl behavior is claimed.
 - `ToBigInt` covers the user-reachable Number/String/Boolean/object paths;
@@ -482,3 +488,108 @@ Reentrancy is confined to `ToIndex`/`ToBigInt`, which run user
 spec order. OOM/exception in the result allocation occurs before
 publication; the partial object is Recycler garbage. GC may move all
 objects; no raw pointer is retained across a user-code call.
+
+## Sub-batch 3: non-decimal BigInt literals
+
+Status: implemented in the working tree on top of `dbe3bd379`;
+interpreter-verified on Mac ARM64 no-JIT with `-ESBigInt`. JIT is not
+claimed (same B4 gate as sub-batches 1 and 2).
+
+### Scope
+
+- `0x…n`/`0X…n`, `0o…n`/`0O…n` and `0b…n`/`0B…n` in sloppy and strict
+  code, including numeric separators between digits, negative literals,
+  zero, multi-limb magnitudes, property values/computed keys, call
+  arguments and `eval`/`new Function` source.
+- The same scanner error behavior as decimal BigInt and Node: bare or
+  invalid prefixes/digits, leading/trailing/doubled separators, a decimal
+  point, exponent-like forms that are not valid in the base, an uppercase
+  `N` suffix, and an identifier or digit immediately after the literal
+  are `SyntaxError`s. `e`/`E` in a hex literal are digits, so
+  `0x1e2n` is the integer `482n` (Node 26.5.0 agrees), not an exponent.
+  Leading-zero decimal forms (`00n`, `08n`, `09n`, `081n`, `08_1n`,
+  `0_0n`) are rejected; only `0n` is legal.
+- Only literal parsing and construction changed. The decimal grouping path
+  is retained, with a collateral fix that skips validated `_` separators
+  (`1_2n` now correctly yields `12n`); no arithmetic, typed-array, mixed
+  comparison/equality, wrapper or Map/Set behavior was added.
+
+### Implementation notes
+
+- `Scanner::FScanNumber` (`lib/Parser/Scan.cpp`) keeps the existing
+  `DblFromHex`/`DblFromOctal`/`DblFromBinary` digit scan (and its
+  numeric-separator placement rules). When `ESBigInt` is enabled, at
+  least one digit was consumed (`pchT > p + 2`, so a bare `0x`/`0o`/`0b`
+  is not accepted), and the next character is the lowercase `n` suffix,
+  the scanner consumes the suffix, sets
+  `LikelyNumberType::BigInt`, and emits `tkBigIntCon` with the full
+  literal text (prefix + digits/separators + `n`). The shared
+  `LIdCheck` still runs after the suffix, so an identifier start or
+  decimal digit immediately after the literal remains an error.
+- `JavascriptBigInt::InitFromCharDigits`
+  (`lib/Runtime/Library/JavascriptBigInt.cpp`) detects `0x`/`0X`,
+  `0o`/`0O` and `0b`/`0B` after the optional negative flag, strips the
+  final `n`, and parses the prefixed digits with radix 16/8/2 through the
+  existing `MulThenAdd`. Numeric separators are skipped; the scanner has
+  already validated their placement. Non-decimal digits are folded in the
+  largest radix-power chunk that fits a limb (15 hex / 21 octal / 63 binary
+  digits on 64-bit limbs; 7/10/31 on 32-bit), keeping a 1M-hex literal
+  parse around 4.3 s instead of the prior per-digit path. Decimal literals
+  retain the base-1e9 grouping path. The radix loop works for both 32-bit
+  and 64-bit `digit_t`; the sign still comes from the parser's
+  negative flag and all-zero magnitudes canonicalize to `0n`. Invalid
+  digits are only an internal invariant here: debug `Assert`s record a
+  scanner bug, and release skips the character rather than aborting the
+  host.
+- No new static PropertyIds, object layouts, allocations or ownership
+  domains: the literal still becomes one `JavascriptBigInt` and digit
+  array in the owning ScriptContext's Recycler, as in sub-batch 1.
+
+### Evidence
+
+- New `test/es7/bigint-literals.js` (registered in `test/es7/rlexe.xml`
+  with `-ESBigInt -args summary -endargs`) passes on both the test and
+  debug-static binaries. It covers both prefix cases, zero, separators,
+  multi-limb values, negative literals/negative zero, property/key/
+  argument/return positions, `String`/`toString`/template output,
+  equality and `asIntN`/`asUintN`, sloppy/strict functions and class
+  methods, `eval`, `new Function`, and the invalid-form matrix.
+- Node v26.5.0 oracle: 4,966 exhaustive short literal forms (all
+  `0x`/`0o`/`0b` bodies up to three characters over digits, prefix
+  letters, `n`/`N`, separators, dots and signs) plus 4,000 randomized
+  bodies up to 12 characters matched Node byte-for-byte in acceptance,
+  thrown error class and `String(value)` result; an independent review
+  sweep of 27,639 short non-decimal forms found zero mismatches. The
+  hand-written invalid matrix, including the leading-zero forms, matches
+  Node's `SyntaxError` class.
+- `mise exec -- zig build check --summary line`: 1980 passed / 0 failed,
+  bytecode up to date, 572/572 steps.
+- `mise exec -- zig build check -Dprofile=debug-static --summary line`:
+  2032 passed / 0 failed, bytecode up to date, 549/549 steps.
+- `python3 tools/build/check_regression.py --self-test`: all negative
+  controls pass with the 1980/2032 pins.
+- Scoped corpus `test/built-ins/BigInt/**/*.js` with `-nonative
+  -Test262 -CollectGarbage -ESBigInt`, same 154 scenarios: test binary
+  (`/tmp/s2-bigint-literals-final5`) 150/154 and debug-static
+  (`/tmp/s2-bigint-literals-debug-final5`) 150/154. Against the
+  sub-batch 2 artifacts (`out/test262-s2bigint-asintn-final3` and
+  `...-debug-final3`, 146/154), this is exactly the four
+  `asIntN`/`asUintN` `arithmetic.js` scenarios (default + strict each):
+  4 fail→pass, 0 pass→fail on both; against the 94/154 sub-batch 1
+  baseline the aggregate is 56 fail→pass, 0 pass→fail. The requested
+  150/154 target is reached; every remaining failure is classified in
+  the residual list.
+- `git diff --check` clean; no generated or stray files.
+
+### Residuals (C3)
+
+- Full BigInt arithmetic/bitwise/shift beyond the existing same-type
+  `+`/`-`/`*`.
+- `BigInt64Array`/`BigUint64Array`.
+- Mixed BigInt/Number relational and abstract equality (the
+  `toString/a-z.js` loop, 2 scenarios, still fails closed).
+- Wrapper arithmetic/equality (`wrapper-object-ordinary-toprimitive.js`,
+  2 scenarios).
+- `Map`/`Set` BigInt key identity.
+- JIT/native execution and B4 coverage; `ESBigInt` remains off by
+  default.

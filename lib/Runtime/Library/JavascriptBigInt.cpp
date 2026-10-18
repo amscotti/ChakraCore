@@ -905,31 +905,118 @@ namespace Js
     template <typename EncodedChar>
     void JavascriptBigInt::InitFromCharDigits(const EncodedChar *pChar, uint32 charLength, bool isNegative)
     {
-        Assert(charLength >= 0);
+        Assert(charLength > 0);
         Assert(pChar != 0);
 
         const EncodedChar *pCharLimit = pChar + charLength - 1;//'n' at the end
+        Assert(*pCharLimit == _u('n'));
 
         m_length = 0;
         m_digits = RecyclerNewArrayLeaf(this->GetScriptContext()->GetRecycler(), digit_t, m_maxLength);
         m_isNegative = isNegative;
 
-        digit_t digitMul = 1;
-        digit_t digitAdd = 0;
-        for (; pChar < pCharLimit; pChar++)
+        // The scanner keeps the whole literal text in the token pid, so a
+        // 0x/0X, 0o/0O or 0b/0B prefix reaches this constructor as well. The
+        // digits after the prefix may contain numeric separators.
+        uint32 radix = 10;
+        if (charLength >= 3 && pChar[0] == _u('0'))
         {
-            Assert(NumberUtilities::IsDigit(*pChar));
-            if (digitMul == 1e9)
+            switch (pChar[1])
             {
-                MulThenAdd(digitMul, digitAdd);
-                digitMul = 1;
-                digitAdd = 0;
+            case _u('x'):
+            case _u('X'):
+                radix = 16;
+                pChar += 2;
+                break;
+            case _u('o'):
+            case _u('O'):
+                radix = 8;
+                pChar += 2;
+                break;
+            case _u('b'):
+            case _u('B'):
+                radix = 2;
+                pChar += 2;
+                break;
             }
-            digitMul *= 10;
-            digitAdd = digitAdd * 10 + *pChar - '0';
         }
-        Assert(1 < digitMul);
-        MulThenAdd(digitMul, digitAdd);
+
+        if (radix == 10)
+        {
+            digit_t digitMul = 1;
+            digit_t digitAdd = 0;
+            for (; pChar < pCharLimit; pChar++)
+            {
+                if (*pChar == _u('_'))
+                {
+                    // The scanner validated separator placement for decimal
+                    // BigInt literals too; exclude it from the value.
+                    continue;
+                }
+                Assert(NumberUtilities::IsDigit(*pChar));
+                if (digitMul == 1e9)
+                {
+                    MulThenAdd(digitMul, digitAdd);
+                    digitMul = 1;
+                    digitAdd = 0;
+                }
+                digitMul *= 10;
+                digitAdd = digitAdd * 10 + *pChar - '0';
+            }
+            Assert(1 < digitMul);
+            MulThenAdd(digitMul, digitAdd);
+        }
+        else
+        {
+            Assert(radix == 2 || radix == 8 || radix == 16);
+
+            // Accumulate the largest radix power that fits a limb, then fold
+            // that chunk with one MulThenAdd. A per-digit MulThenAdd is
+            // quadratic for long source literals and lets untrusted source
+            // burn minutes in the scanner/constant path.
+            uint32 chunkDigits = 0;
+            digit_t chunkBase = 1;
+            const digit_t maxDigit = static_cast<digit_t>(~static_cast<digit_t>(0));
+            while (chunkBase <= maxDigit / radix)
+            {
+                chunkBase *= radix;
+                chunkDigits++;
+            }
+            Assert(chunkDigits != 0);
+
+            digit_t chunkValue = 0;
+            digit_t chunkMul = 1;
+            uint32 chunkCount = 0;
+            for (; pChar < pCharLimit; pChar++)
+            {
+                if (*pChar == _u('_'))
+                {
+                    // The scanner's base parser already validated separator
+                    // placement (between two digits); just exclude it here.
+                    continue;
+                }
+                uint32 digitValue = BigIntDigitValue(static_cast<char16>(*pChar), radix);
+                Assert(digitValue != static_cast<uint32>(-1));
+                if (digitValue == static_cast<uint32>(-1))
+                {
+                    continue; // unreachable for scanner-produced literals
+                }
+                chunkValue = chunkValue * radix + digitValue;
+                chunkMul *= radix;
+                chunkCount++;
+                if (chunkCount == chunkDigits)
+                {
+                    MulThenAdd(chunkMul, chunkValue);
+                    chunkValue = 0;
+                    chunkMul = 1;
+                    chunkCount = 0;
+                }
+            }
+            if (chunkCount != 0)
+            {
+                MulThenAdd(chunkMul, chunkValue);
+            }
+        }
 
         // make sure this is no negative zero
         if (m_length == 0)

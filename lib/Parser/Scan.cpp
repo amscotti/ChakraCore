@@ -623,6 +623,25 @@ typename Scanner<EncodingPolicy>::EncodedCharPtr Scanner<EncodingPolicy>::FScanN
         }
     };
 
+    // ES2020 BigInt literal suffix for 0x/0o/0b forms. The base parsers stop
+    // at the first character that is not a digit (numeric separators are
+    // consumed only between digits), and return p+2 when no digit was found.
+    // Keeping the suffix in the token text lets JavascriptBigInt parse the
+    // prefixed digits with the matching radix. `e` in a hex literal is a
+    // digit, not an exponent (0x1e2n is 482n).
+    auto tryScanBigIntSuffix = [this, &pchT, &likelyType, p]()
+    {
+        if (m_scriptContext->GetConfig()->IsESBigIntEnabled() &&
+            pchT > p + 2 &&
+            *pchT == 'n')
+        {
+            pchT++;
+            likelyType = LikelyNumberType::BigInt;
+            return true;
+        }
+        return false;
+    };
+
     if ('0' == this->PeekFirst(p, last))
     {
         switch(this->PeekFirst(p + 1, last))
@@ -639,12 +658,20 @@ typename Scanner<EncodingPolicy>::EncodedCharPtr Scanner<EncodingPolicy>::FScanN
         case 'X':
             // Hex
             *pdbl = Js::NumberUtilities::DblFromHex(p + 2, &pchT, m_scriptContext->GetConfig()->IsESNumericSeparatorEnabled());
+            if (tryScanBigIntSuffix())
+            {
+                goto LIdCheck;
+            }
             baseSpecifierCheck();
             goto LIdCheck;
         case 'o':
         case 'O':
             // Octal
             *pdbl = Js::NumberUtilities::DblFromOctal(p + 2, &pchT, m_scriptContext->GetConfig()->IsESNumericSeparatorEnabled());
+            if (tryScanBigIntSuffix())
+            {
+                goto LIdCheck;
+            }
             baseSpecifierCheck();
             goto LIdCheck;
 
@@ -652,6 +679,10 @@ typename Scanner<EncodingPolicy>::EncodedCharPtr Scanner<EncodingPolicy>::FScanN
         case 'B':
             // Binary
             *pdbl = Js::NumberUtilities::DblFromBinary(p + 2, &pchT, m_scriptContext->GetConfig()->IsESNumericSeparatorEnabled());
+            if (tryScanBigIntSuffix())
+            {
+                goto LIdCheck;
+            }
             baseSpecifierCheck();
             goto LIdCheck;
 
@@ -692,6 +723,18 @@ LFloat:
     }
 
 LIdCheck:
+    // Decimal BigInt literals may not use the legacy leading-zero/octal
+    // forms (00n, 08n, 0_0n, ...); only a lone 0n is legal. Prefixed forms
+    // have already been validated by their base parser.
+    if (likelyType == LikelyNumberType::BigInt &&
+        pchT - p > 2 && p[0] == '0' &&
+        p[1] != 'x' && p[1] != 'X' &&
+        p[1] != 'o' && p[1] != 'O' &&
+        p[1] != 'b' && p[1] != 'B')
+    {
+        Error(ERRbadNumber);
+    }
+
     // https://tc39.github.io/ecma262/#sec-literals-numeric-literals
     // The SourceCharacter immediately following a NumericLiteral must not be an IdentifierStart or DecimalDigit.
     // For example : 3in is an error and not the two input elements 3 and in

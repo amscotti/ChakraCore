@@ -499,6 +499,22 @@ target is unreachable without the excluded parser work. Gates moved
 arithmetic, BigInt64 typed arrays, mixed comparison/abstract equality,
 wrapper arithmetic, Map/Set BigInt keys, and non-decimal literals.)*
 
+*(sub-batch 3, 2026-10-17, [c2-s2-bigint.md](c2-s2-bigint.md): accepted
+`0x`/`0o`/`0b` (both prefix cases) BigInt literals with the existing
+numeric-separator placement rules, in sloppy and strict code, on Mac
+no-JIT. Bare prefixes, invalid digits, separator edges, leading-zero
+decimal forms (`08n`, `00n`, `0_0n`), decimal points, bad suffixes and
+trailing identifiers match Node's `SyntaxError` behavior; hex `e` remains
+a digit (`0x1e2n` is 482n). Decimal `_` separators (`1_2n`) are fixed as
+collateral; prefixed digit accumulation is chunked for long literals. The scoped corpus
+is 150/154 on both test and debug-static binaries (sub-batch 2 baseline
+146/154), exactly the four `asIntN`/`asUintN` `arithmetic.js` scenarios
+flipping fail→pass with 0 pass→fail. The 4 residue are wrapper
+arithmetic/equality 2 and the fail-closed mixed relational comparison in
+`toString/a-z.js` 2. Gates moved 1979/2031 → 1980/2032. Remaining C3
+work: full arithmetic, BigInt64 typed arrays, mixed comparison/abstract
+equality, wrapper arithmetic, Map/Set BigInt keys, and JIT/B4.)*
+
 **S3. RegExp Unicode property escapes (`\p{…}`, `\P{…}`).** Repro:
 `python3 tools/test262/run.py --binary zig-out/bin/ch --output out/test262-c1-reprop 'test/built-ins/RegExp/property-escapes/**/*.js'`.
 Subsystem: RegExp (Runtime/Library) + Unicode data/ICU. Prerequisite: a

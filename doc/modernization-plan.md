@@ -705,11 +705,18 @@ limb-bounded two's-complement truncation, and the spec
 146/154 on both binaries with 52/0 fail→pass; the 8 residue are the four
 `asIntN`/`asUintN` `arithmetic.js` scenarios blocked by non-decimal
 BigInt literals, wrapper arithmetic/equality (2), and the mixed
-relational loop in `toString/a-z.js` (2). The 150/154 target needs the
-excluded literal parser work. Gates moved 1978/2030 → 1979/2031. Full
+relational loop in `toString/a-z.js` (2). The 150/154 target needed the
+then-excluded literal parser work. Gates moved 1978/2030 → 1979/2031.
+S2 sub-batch 3 then added `0x`/`0o`/`0b` (both prefix cases) BigInt
+literal parsing with numeric-separator placement, rejection of leading-zero
+decimal forms, the decimal `1_2n` separator fix, and Node-matching syntax
+errors on Mac no-JIT (receipt [c2-s2-bigint.md](c2-s2-bigint.md)).
+The scoped corpus moved 146/154 to 150/154 on both binaries, exactly the
+four `asIntN`/`asUintN` `arithmetic.js` scenarios (4/0 fail→pass); the 4
+residue are wrapper arithmetic/equality (2) and the mixed relational
+loop in `toString/a-z.js` (2). Gates moved 1979/2031 → 1980/2032. Full
 BigInt arithmetic, BigInt64Array, Map/Set key identity, mixed
-comparison/equality, wrapper arithmetic and the literal grammar remain
-C3-large.
+comparison/equality, wrapper arithmetic and JIT/B4 remain C3-large.
 S6 shows zero regressions under `-ESSharedArrayBuffer` but
 needs a product/security decision before any default, plus
 waitAsync/growable/non-shared-Atomics work; S2's flagged path no longer
