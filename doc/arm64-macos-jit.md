@@ -11,11 +11,11 @@ before the branch can merge.
 
 Read [Current state and handoff](#current-state-and-handoff) before editing.
 The port is committed on `jit/arm64-macos`: `07d6965e8` (`jit: native ARM64
-macOS port`) is the port itself, and `2372fcc81` (`build: gate the JIT profile
-on runtime and bytecode checks`) is the follow-up. The branch tip is
-`2372fcc81`; it is not merged.
-The installed binary is `out/jit/bin/libChakraCore.dylib`, 26238216 bytes,
-timestamp 2026-10-18 13:08. `out/jit/bin/ch` is the host (788320 bytes); it
+macOS port`), `2372fcc81` (JIT build/runtime/bytecode checks), `9ccc535a8`
+(XData lifecycle + installer symlink hardening), and `fcbc434c9` (generator
+write-barrier and empty-page leaks). The branch tip is `fcbc434c9`; it is not
+merged. The installed binary is `out/jit/bin/libChakraCore.dylib`, 26238584
+bytes, timestamp 2026-10-18 13:08. `out/jit/bin/ch` is the host (788320 bytes); it
 dlopens the sibling dylib, so trust the dylib timestamp. The suite logs named
 below are ephemeral local artifacts from the original runs; they are not
 checked in.
