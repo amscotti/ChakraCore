@@ -4,6 +4,8 @@
 //-------------------------------------------------------------------------------------------------------
 #pragma once
 
+#include "Float16.h"
+
 namespace Js
 {
     class DataView : public ArrayBufferParent
@@ -25,6 +27,7 @@ namespace Js
             static FunctionInfo GetUint32;
             static FunctionInfo GetFloat32;
             static FunctionInfo GetFloat64;
+            static FunctionInfo GetFloat16;
             static FunctionInfo SetInt8;
             static FunctionInfo SetUint8;
             static FunctionInfo SetInt16;
@@ -33,6 +36,7 @@ namespace Js
             static FunctionInfo SetUint32;
             static FunctionInfo SetFloat32;
             static FunctionInfo SetFloat64;
+            static FunctionInfo SetFloat16;
 
             static FunctionInfo GetterBuffer;
             static FunctionInfo GetterByteLength;
@@ -53,6 +57,7 @@ namespace Js
         static Var EntryGetUint32(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryGetFloat32(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryGetFloat64(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryGetFloat16(RecyclableObject* function, CallInfo callInfo, ...);
 
         static Var EntrySetInt8(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntrySetUint8(RecyclableObject* function, CallInfo callInfo, ...);
@@ -62,6 +67,7 @@ namespace Js
         static Var EntrySetUint32(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntrySetFloat32(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntrySetFloat64(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntrySetFloat16(RecyclableObject* function, CallInfo callInfo, ...);
 
         static Var EntryGetterBuffer(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryGetterByteLength(RecyclableObject* function, CallInfo callInfo, ...);
@@ -89,22 +95,19 @@ namespace Js
         template<> void SwapRoutine(float* input, float* dest) { *((uint32*)dest) = RtlUlongByteSwap(*((uint32*)input)); }
         template<> void SwapRoutine(double* input, double* dest) {*((uint64*)dest) = RtlUlonglongByteSwap(*((uint64*)input)); }
 
+        // ToIndex(requestIndex) is performed before the detached/range checks
+        // (test262 getFloat16/setFloat16 detached-buffer ordering), so these
+        // helpers are shared by the templates and the Float16 entries.
+        uint32 GetViewIndex(Var offset, const char16* funcName);
+        void CheckViewRange(uint32 byteOffset, uint32 elementSize, const char16* funcName);
+
         template<typename TypeName>
         Var GetValue(Var offset, const char16* funcName, BOOL isLittleEndian = FALSE)
         {
             ScriptContext* scriptContext = GetScriptContext();
 
-            uint32 length = GetLength();
-            if (length < sizeof(TypeName))
-            {
-                JavascriptError::ThrowRangeError(scriptContext, JSERR_DataView_InvalidOffset, funcName);
-            }
-
-            uint32 byteOffset = ArrayBuffer::ToIndex(offset, JSERR_DataView_InvalidOffset, scriptContext, length - sizeof(TypeName), false);
-            if (this->GetArrayBuffer()->IsDetached())
-            {
-                JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, funcName);
-            }
+            uint32 byteOffset = GetViewIndex(offset, funcName);
+            CheckViewRange(byteOffset, sizeof(TypeName), funcName);
 
             TypeName item;
             TypeName* typedBuffer = (TypeName*)(buffer + byteOffset);
@@ -130,17 +133,8 @@ namespace Js
         {
             ScriptContext* scriptContext = GetScriptContext();
 
-            uint32 length = GetLength();
-            if (length < sizeof(TypeName))
-            {
-                JavascriptError::ThrowRangeError(scriptContext, JSERR_DataView_InvalidOffset, funcName);
-            }
-
-            uint32 byteOffset = ArrayBuffer::ToIndex(offset, JSERR_DataView_InvalidOffset, scriptContext, length - sizeof(TypeName), false);
-            if (this->GetArrayBuffer()->IsDetached())
-            {
-                JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, funcName);
-            }
+            uint32 byteOffset = GetViewIndex(offset, funcName);
+            CheckViewRange(byteOffset, sizeof(TypeName), funcName);
 
             TypeName item;
             TypeName *typedBuffer = (TypeName*)(buffer + byteOffset);
@@ -164,19 +158,8 @@ namespace Js
         template<typename TypeName, typename PointerAccessTypeName>
         void SetValue(Var offset, TypeName value, BOOL isLittleEndian, const char16 *funcName)
         {
-            ScriptContext* scriptContext = GetScriptContext();
-
-            uint32 length = GetLength();
-            if (length < sizeof(TypeName))
-            {
-                JavascriptError::ThrowRangeError(scriptContext, JSERR_DataView_InvalidOffset, funcName);
-            }
-
-            uint32 byteOffset = ArrayBuffer::ToIndex(offset, JSERR_DataView_InvalidOffset, scriptContext, length - sizeof(TypeName), false);
-            if (this->GetArrayBuffer()->IsDetached())
-            {
-                JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, funcName);
-            }
+            uint32 byteOffset = GetViewIndex(offset, funcName);
+            CheckViewRange(byteOffset, sizeof(TypeName), funcName);
 
             TypeName* typedBuffer = (TypeName*)(buffer + byteOffset);
             if (!isLittleEndian)

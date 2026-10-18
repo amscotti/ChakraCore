@@ -2363,6 +2363,8 @@ namespace Js
         library->AddFunctionToLibraryObject(dataViewPrototype, PropertyIds::getUint32, &DataView::EntryInfo::GetUint32, 1);
         library->AddFunctionToLibraryObject(dataViewPrototype, PropertyIds::getFloat32, &DataView::EntryInfo::GetFloat32, 1);
         library->AddFunctionToLibraryObject(dataViewPrototype, PropertyIds::getFloat64, &DataView::EntryInfo::GetFloat64, 1);
+        library->AddFunctionToLibraryObjectWithPropertyName(dataViewPrototype, _u("getFloat16"), &DataView::EntryInfo::GetFloat16, 1);
+        library->AddFunctionToLibraryObjectWithPropertyName(dataViewPrototype, _u("setFloat16"), &DataView::EntryInfo::SetFloat16, 2);
 
         library->AddAccessorsToLibraryObject(dataViewPrototype, PropertyIds::buffer, &DataView::EntryInfo::GetterBuffer, nullptr);
         library->AddAccessorsToLibraryObject(dataViewPrototype, PropertyIds::byteLength, &DataView::EntryInfo::GetterByteLength, nullptr);
@@ -3363,6 +3365,7 @@ namespace Js
         builtinFuncs[BuiltinFunction::Math_Sin]    = library->AddFunctionToLibraryObject(mathObject, PropertyIds::sin,    &Math::EntryInfo::Sin,    1);
         builtinFuncs[BuiltinFunction::Math_Sqrt]   = library->AddFunctionToLibraryObject(mathObject, PropertyIds::sqrt,   &Math::EntryInfo::Sqrt,   1);
         builtinFuncs[BuiltinFunction::Math_Tan]    = library->AddFunctionToLibraryObject(mathObject, PropertyIds::tan,    &Math::EntryInfo::Tan,    1);
+        library->AddFunctionToLibraryObjectWithPropertyName(mathObject, _u("f16round"), &Math::EntryInfo::F16round, 1);
 
         if (scriptContext->GetConfig()->IsES6MathExtensionsEnabled())
         {
@@ -8032,6 +8035,7 @@ namespace Js
         REG_OBJECTS_LIB_FUNC(sin, Math::Sin);
         REG_OBJECTS_LIB_FUNC(sqrt, Math::Sqrt);
         REG_OBJECTS_LIB_FUNC(tan, Math::Tan);
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("f16round"), 8, Math::F16round);
 
         if (scriptContext->GetConfig()->IsES6MathExtensionsEnabled())
         {

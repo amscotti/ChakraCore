@@ -648,6 +648,16 @@ C3 lists resizable buffers as a larger project. Expected gain:
 `align-detached-buffer-semantics-with-web-reality` failures in the same
 area). Uncertainty: high. JIT-x64? **yes**. Effort: **C3-large**;
 `Float16Array` (76 failures) is a separable smaller TypedArray batch.
+*(Bounded Float16 slice landed 2026-10-18 on Mac no-JIT, receipt
+[c2-s8-float16.md](c2-s8-float16.md): `DataView.prototype.getFloat16`/
+`setFloat16` and `Math.f16round` with a portable integer bit converter.
+The pinned 100-scenario Float16 corpus moved 22/100 -> 94/100 with 72/0
+fail->pass/pass->fail; the 6 residue are 4 `resizable-buffer` scenarios
+blocked on `ArrayBuffer.prototype.resize` (S8 proper) and 2
+`immutable-buffer` scenarios tagged post-ES2025 `immutable-arraybuffer`
+(`transferToImmutable` is absent). The `Float16Array` constructor and
+the typed-array element type remain the separable S8/C3 batch. Gates
+moved 1981/2033 -> 1982/2034.)*
 
 **S9. RegExp named groups family, lookbehind, `d` indices, `v` flag,
 modifiers remainder.** Repro: `python3 tools/test262/run.py --binary zig-out/bin/ch --output out/test262-c1-regroups 'test/built-ins/RegExp/named-groups/**/*.js' 'test/language/literals/regexp/**/*.js'`.

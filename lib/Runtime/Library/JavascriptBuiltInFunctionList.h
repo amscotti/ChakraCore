@@ -580,4 +580,8 @@ BUILTIN(AtomicsObject, Xor, EntryXor, FunctionInfo::ErrorOnNew)
 
 BUILTIN(EngineInterfaceObject, CallInstanceFunction, Entry_CallInstanceFunction, FunctionInfo::ErrorOnNew | FunctionInfo::DoNotProfile)
 
+BUILTIN(DataView, GetFloat16, EntryGetFloat16, FunctionInfo::ErrorOnNew)
+BUILTIN(DataView, SetFloat16, EntrySetFloat16, FunctionInfo::ErrorOnNew)
+BUILTIN(Math, F16round, F16round, FunctionInfo::ErrorOnNew)
+
 #undef BUILTIN_TEMPLATE

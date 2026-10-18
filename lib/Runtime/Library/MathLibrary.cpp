@@ -4,6 +4,7 @@
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #include "RuntimeLibraryPch.h"
+#include "Float16.h"
 #include "Language/JavascriptMathOperators.h"
 #include "Math/CrtSSE2Math.h"
 
@@ -1880,5 +1881,23 @@ namespace Js
         {
             return scriptContext->GetLibrary()->GetNaN();
         }
+    }
+
+    Var Math::F16round(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+        ARGUMENTS(args, callInfo);
+        AssertMsg(args.Info.Count > 0, "Should always have implicit 'this'");
+        ScriptContext* scriptContext = function->GetScriptContext();
+
+        Assert(!(callInfo.Flags & CallFlags_New));
+        CHAKRATEL_LANGSTATS_INC_BUILTINCOUNT(Math_Constructor_f16round);
+
+        double value = args.Info.Count >= 2
+            ? JavascriptConversion::ToNumber(args[1], scriptContext)
+            : JavascriptNumber::NaN;
+
+        return JavascriptNumber::ToVarNoCheck(Float16::Round(value), scriptContext);
     }
 } // namespace Js

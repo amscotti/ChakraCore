@@ -87,6 +87,7 @@ namespace Js {
             static FunctionInfo Imul;
             static FunctionInfo Clz32;
             static FunctionInfo Fround;
+            static FunctionInfo F16round;
         };
 
         static Var Abs(RecyclableObject* function, CallInfo callInfo, ...);
@@ -139,6 +140,7 @@ namespace Js {
         static Var Imul(RecyclableObject* function, CallInfo callInfo, ...);
         static Var Clz32(RecyclableObject* function, CallInfo callInfo, ...);
         static Var Fround(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var F16round(RecyclableObject* function, CallInfo callInfo, ...);
 
         static double NonZeroMin(double x1, double x2, double x3);
 

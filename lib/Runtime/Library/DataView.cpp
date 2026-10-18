@@ -120,6 +120,26 @@ namespace Js
         buffer = arrayBuffer->GetBuffer() + byteoffset;
     }
 
+    uint32 DataView::GetViewIndex(Var offset, const char16* funcName)
+    {
+        return ArrayBuffer::ToIndex(offset, JSERR_DataView_InvalidOffset, GetScriptContext(), ArrayBuffer::MaxArrayBufferLength, false);
+    }
+
+    void DataView::CheckViewRange(uint32 byteOffset, uint32 elementSize, const char16* funcName)
+    {
+        ScriptContext* scriptContext = GetScriptContext();
+        if (this->GetArrayBuffer()->IsDetached())
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, funcName);
+        }
+
+        uint32 length = GetLength();
+        if (length < elementSize || byteOffset > length - elementSize)
+        {
+            JavascriptError::ThrowRangeError(scriptContext, JSERR_DataView_InvalidOffset, funcName);
+        }
+    }
+
     Var DataView::EntryGetInt8(RecyclableObject* function, CallInfo callInfo, ...)
     {
         PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
@@ -324,6 +344,37 @@ namespace Js
 
         DataView* dataView = VarTo<DataView>(args[0]);
         return dataView->GetValueWithCheck<double>(args[1], _u("DataView.prototype.GetFloat64"), isLittleEndian);
+    }
+
+    Var DataView::EntryGetFloat16(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+        ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+        BOOL isLittleEndian = FALSE;
+
+        Assert(!(callInfo.Flags & CallFlags_New));
+
+        if (args.Info.Count == 0 || !VarIs<DataView>(args[0]))
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NeedDataView);
+        }
+        if (args.Info.Count > 2)
+        {
+            isLittleEndian = JavascriptConversion::ToBoolean(args[2], scriptContext);
+        }
+
+        DataView* dataView = VarTo<DataView>(args[0]);
+        Var offset = args.Info.Count > 1 ? args[1] : scriptContext->GetLibrary()->GetUndefined();
+        uint32 byteOffset = dataView->GetViewIndex(offset, _u("DataView.prototype.getFloat16"));
+        dataView->CheckViewRange(byteOffset, sizeof(uint16), _u("DataView.prototype.getFloat16"));
+
+        uint16 half = isLittleEndian
+            ? (uint16)(dataView->buffer[byteOffset] | (dataView->buffer[byteOffset + 1] << 8))
+            : (uint16)((dataView->buffer[byteOffset] << 8) | dataView->buffer[byteOffset + 1]);
+
+        return JavascriptNumber::ToVarWithCheck(Float16::ToDouble(half), scriptContext);
     }
 
     Var DataView::EntrySetInt8(RecyclableObject* function, CallInfo callInfo, ...)
@@ -659,6 +710,56 @@ namespace Js
 
         DataView* dataView = VarTo<DataView>(args[0]);
         dataView->SetValue<double>(args[1], value, _u("DataView.prototype.SetFloat64"), isLittleEndian);
+        return scriptContext->GetLibrary()->GetUndefined();
+    }
+
+    Var DataView::EntrySetFloat16(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+        ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+
+        Assert(!(callInfo.Flags & CallFlags_New));
+
+        if (args.Info.Count == 0 || !VarIs<DataView>(args[0]))
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NeedDataView);
+        }
+
+        DataView* dataView = VarTo<DataView>(args[0]);
+        Var offset = args.Info.Count > 1 ? args[1] : scriptContext->GetLibrary()->GetUndefined();
+
+        // ToIndex(requestIndex) precedes ToNumber(value); the detached and
+        // range checks follow the value conversion (test262 ordering).
+        uint32 byteOffset = dataView->GetViewIndex(offset, _u("DataView.prototype.setFloat16"));
+
+        double value = JavascriptNumber::NaN;
+        if (args.Info.Count > 2)
+        {
+            value = JavascriptConversion::ToNumber(args[2], scriptContext);
+        }
+
+        BOOL isLittleEndian = FALSE;
+        if (args.Info.Count > 3)
+        {
+            isLittleEndian = JavascriptConversion::ToBoolean(args[3], scriptContext);
+        }
+
+        dataView->CheckViewRange(byteOffset, sizeof(uint16), _u("DataView.prototype.setFloat16"));
+
+        uint16 half = Float16::ToBits(value);
+        if (isLittleEndian)
+        {
+            dataView->buffer[byteOffset] = (BYTE)half;
+            dataView->buffer[byteOffset + 1] = (BYTE)(half >> 8);
+        }
+        else
+        {
+            dataView->buffer[byteOffset] = (BYTE)(half >> 8);
+            dataView->buffer[byteOffset + 1] = (BYTE)half;
+        }
+
         return scriptContext->GetLibrary()->GetUndefined();
     }
 

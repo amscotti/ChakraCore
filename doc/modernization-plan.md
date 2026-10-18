@@ -591,12 +591,15 @@ Decision/rollback points:
 **C2 batch status:** S4, S5, all of S10 (the copy-by-change half and
 the Set-methods half), all of S11, S7, the five S9 sub-batches
 (named-groups core, `d` flag/indices, duplicate named groups,
-lookbehind, ES2025 modifiers) and the S14 block-scope + statement-level early-error
+lookbehind, ES2025 modifiers), the bounded S8 Float16 slice
+(`DataView.getFloat16`/`setFloat16` + `Math.f16round`) and the S14
+block-scope + statement-level early-error
 clusters are closed on Mac no-JIT
 ([c2-s4.md](c2-s4.md), [c2-s5.md](c2-s5.md), [c2-s11.md](c2-s11.md),
 [c2-s10.md](c2-s10.md), [c2-s7-matchall.md](c2-s7-matchall.md),
 [c2-s9-namedgroups.md](c2-s9-namedgroups.md),
 [c2-s9-modifiers.md](c2-s9-modifiers.md),
+[c2-s8-float16.md](c2-s8-float16.md),
 [c2-s14-blockscope.md](c2-s14-blockscope.md),
 [c2-s14-statement-early-errors.md](c2-s14-statement-early-errors.md)). JIT
 claims still wait on B4. S14 fixed the `Block : { StatementList }`
@@ -726,6 +729,18 @@ comparison, and wrapper/object `*`; receipt
 Gates moved 1980/2032 → 1981/2033. Full BigInt arithmetic/bitwise/shift,
 BigInt64Array, Map/Set key identity, literal property names, giant
 `ToString` performance and JIT/B4 remain C3-large.
+The bounded S8 Float16 slice then landed ES2025 `DataView.prototype.
+getFloat16`/`setFloat16` and `Math.f16round` on Mac no-JIT with a
+portable integer binary64↔binary16 converter (round-to-nearest,
+ties-to-even, subnormals, overflow/underflow, NaN canonicalization;
+no `__fp16`; dynamic property names, so no PropertyId or bytecode
+change) and `test/es7/float16.js` (receipt
+[c2-s8-float16.md](c2-s8-float16.md)). The pinned 100-scenario corpus
+moved 22/100 to 94/100 with 72/0 fail→pass; the 6 residue are the 4
+`resizable-buffer` scenarios (S8 proper) plus 2 post-ES2025
+`immutable-buffer` scenarios. `Float16Array` and typed-array element
+support stay in the remaining S8/C3 work. Gates moved
+1981/2033 → 1982/2034.
 S6 shows zero regressions under `-ESSharedArrayBuffer` but
 needs a product/security decision before any default, plus
 waitAsync/growable/non-shared-Atomics work; S2's flagged path no longer

@@ -18,9 +18,10 @@ No --not-tag: ICU is present in these profiles, so TEST_ICU is empty
 Slow, ...) is runtests.py's own and therefore identical by
 construction.
 
-Requires the legacy baseline counts for the selection: 1981 passed /
-0 failed (--test), 2033 passed / 0 failed (--debug). The C2-S2
-sub-batch 4 bigint-mixed.js test sits on top of sub-batch 3's
+Requires the legacy baseline counts for the selection: 1982 passed /
+0 failed (--test), 2034 passed / 0 failed (--debug). The C2-S8
+float16.js test sits on top of the C2-S2 sub-batch 4 bigint-mixed.js
+test, which sits on top of sub-batch 3's
 bigint-literals.js (doc/c2-s2-bigint.md), sub-batch 2's asIntN/asUintN
 test, and the C2-S9 modifiers sub-batch's regexp-modifiers.js
 (doc/c2-s9-modifiers.md), C2-S13's
@@ -44,8 +45,8 @@ runtests.py's own per-test timeout is untouched.
 
 Usage: check_regression.py <runtests.py> <ch> [--select test|debug]
        [--expected-passed N] [--expected-failed M] [--self-test]
-Defaults: --select test, 1981/0 (the B2 test profile; count raised
-by S2-b4's bigint-mixed.js, S2-b3's bigint-literals.js,
+Defaults: --select test, 1982/0 (the B2 test profile; count raised
+by C2-S8's float16.js, S2-b4's bigint-mixed.js, S2-b3's bigint-literals.js,
 S2-b2's bigint-asintn.js, the S9 modifiers sub-batch's
 regexp-modifiers.js, S13's
 weakcollections-symbols.js, S14's blockscope-early-errors.js
@@ -66,7 +67,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common
 
 TOTAL_RE = re.compile(r"^Total: passed (\d+), failed (\d+)\s*$")
-EXPECTED_PASSED = 1981
+EXPECTED_PASSED = 1982
 EXPECTED_FAILED = 0
 # Per-selection legacy baselines (counts: doc/c2-s9-modifiers.md,
 # doc/c2-s13-symbol-keys.md, doc/c2-s14-blockscope.md,
@@ -85,8 +86,9 @@ EXPECTED_FAILED = 0
 # doc/b3-profiles.md §5. --select picks the flag; the counts stay
 # explicit CLI args so a wiring mistake (debug flag with test counts)
 # fails instead of silently passing on a wrong gate.
+# C2-S8 added float16.js to both selections (1981/2033 -> 1982/2034).
 SELECT_FLAGS = {"test": "--test", "debug": "--debug"}
-SELECT_COUNTS = {"test": (1981, 0), "debug": (2033, 0)}
+SELECT_COUNTS = {"test": (1982, 0), "debug": (2034, 0)}
 
 
 def parse_total(lines):
@@ -122,7 +124,7 @@ def self_test():
     """Negative controls: the parser/verdict must reject doctored logs."""
     cases = [
         ("exact baseline",
-         ["Total: passed 1981, failed 0"], True),
+         ["Total: passed 1982, failed 0"], True),
         ("one failure",
          ["Total: passed 1960, failed 1"], False),
         ("wrong total",
@@ -149,19 +151,19 @@ def self_test():
             bad += 1
         print("self-test %-16s -> %s (verdict=%s err=%r)"
               % (name, status, "accept" if ok else "reject", err))
-    # Profile-awareness pins: the --debug baseline (2033/0) must be
+    # Profile-awareness pins: the --debug baseline (2034/0) must be
     # accepted under debug expectations and rejected under test
     # expectations, so a count/selection mismatch can never pass.
     try:
-        err = check_counts(parse_total(["Total: passed 2033, failed 0"]),
+        err = check_counts(parse_total(["Total: passed 2034, failed 0"]),
                            *SELECT_COUNTS["debug"])
     except ValueError as e:
         err = str(e)
     if err is None:
-        print("self-test %-16s -> PASS (verdict=accept)" % "debug 2033/0")
+        print("self-test %-16s -> PASS (verdict=accept)" % "debug 2034/0")
     else:
         print("self-test %-16s -> FAIL (verdict=reject err=%r)"
-              % ("debug 2033/0", err))
+              % ("debug 2034/0", err))
         bad += 1
     try:
         err = check_counts(parse_total(["Total: passed 2014, failed 0"]),
