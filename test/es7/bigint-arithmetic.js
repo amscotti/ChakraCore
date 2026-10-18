@@ -130,6 +130,114 @@ var tests = [
         }
     },
     {
+        name: "Multi-limb addition, subtraction and multiplication exact values",
+        body() {
+            var p = 0xFEDCBA9876543210FEDCBA9876543210n;
+            var q = 0x123456789ABCDEF0123456789ABCDEF0n;
+
+            assert.strictEqual(p + q, 0x111111111111111011111111111111100n);
+            assert.strictEqual(p - q, 0xECA8641FDB975320ECA8641FDB975320n);
+            assert.strictEqual(q - p, -0xECA8641FDB975320ECA8641FDB975320n);
+            assert.strictEqual(p * q,
+                0x121FA00AD77D742247ACC9140513B74458FAB20783AF1222236D88FE5618CF00n);
+
+            var a = (1n << 64n) + 5n;
+            var b = (1n << 128n) + 0xABCDEFn;
+            assert.strictEqual(a + b, 0x100000000000000010000000000ABCDF4n);
+            assert.strictEqual(a - b, -0xFFFFFFFFFFFFFFFF0000000000ABCDEAn);
+            assert.strictEqual(b - a, 0xFFFFFFFFFFFFFFFF0000000000ABCDEAn);
+            assert.strictEqual(a * b,
+                0x100000000000000050000000000ABCDEF00000000035B05ABn);
+
+            assert.strictEqual((a + b) - b, a);
+            assert.strictEqual((a - b) + b, a);
+            assert.strictEqual(a - b, -(b - a));
+            assert.strictEqual(a * b, b * a);
+            assert.strictEqual((-a) * b, -(a * b));
+            assert.strictEqual((a * b) / b, a);
+        }
+    },
+    {
+        name: "Multi-limb signed subtraction, compound assignment and comparisons",
+        body() {
+            assert.strictEqual(-1n - (1n << 64n), -0x10000000000000001n);
+            assert.strictEqual(-1n - (1n << 128n),
+                -0x100000000000000000000000000000001n);
+            assert.strictEqual(-5n - (1n << 64n), -0x10000000000000005n);
+            assert.strictEqual(-(1n << 64n) - (1n << 128n),
+                -0x100000000000000010000000000000000n);
+            assert.strictEqual(-((1n << 64n) + 5n) - (1n << 128n),
+                -0x100000000000000010000000000000005n);
+            assert.strictEqual(-((1n << 128n) + 7n) - 1n,
+                -0x100000000000000000000000000000008n);
+
+            var value = -1n;
+            value -= 1n << 64n;
+            assert.strictEqual(value, -0x10000000000000001n);
+            value = -5n;
+            value -= 1n << 128n;
+            assert.strictEqual(value, -0x100000000000000000000000000000005n);
+            value = -(1n << 64n);
+            value -= 1n << 128n;
+            assert.strictEqual(value, -0x100000000000000010000000000000000n);
+
+            assert.isTrue(-1n - (1n << 64n) < 0n);
+            assert.isTrue(-1n - (1n << 64n) < -1n);
+            assert.isTrue(-1n - (1n << 64n) > -(1n << 65n));
+            assert.strictEqual(-1n - (1n << 64n), -1n + -(1n << 64n));
+            assert.strictEqual((1n << 64n) - (-1n), (1n << 64n) + 1n);
+        }
+    },
+    {
+        name: "Deterministic 1..1000-bit signed + - * differential identities",
+        body() {
+            function makeRng(seed) {
+                var state = seed >>> 0;
+                return function () {
+                    state = (state * 1664525 + 1013904223) >>> 0;
+                    return state;
+                };
+            }
+
+            function randomBigInt(rng, maxBits) {
+                var bits = 1 + (rng() % maxBits);
+                var hex = "";
+                var remaining = bits;
+                while (remaining > 0) {
+                    var chunkBits = remaining > 32 ? 32 : remaining;
+                    var chunk = (rng() >>> (32 - chunkBits)) >>> 0;
+                    var chunkHex = chunk.toString(16);
+                    var digits = (chunkBits + 3) >> 2;
+                    while (chunkHex.length < digits) {
+                        chunkHex = "0" + chunkHex;
+                    }
+                    hex += chunkHex;
+                    remaining -= chunkBits;
+                }
+                var value = BigInt("0x" + hex);
+                return (rng() & 1) ? -value : value;
+            }
+
+            var rng = makeRng(0x5EED1234);
+            for (var i = 0; i < 200; i++) {
+                var a = randomBigInt(rng, 1000);
+                var b = randomBigInt(rng, 1000);
+                var label = "iteration " + i;
+
+                assert.strictEqual(a + b, b + a, "commutative add " + label);
+                assert.strictEqual((a + b) - b, a, "add then subtract " + label);
+                assert.strictEqual((a - b) + b, a, "subtract then add " + label);
+                assert.strictEqual(a - b, -(b - a), "subtraction antisymmetry " + label);
+                assert.strictEqual(a + (-b), a - b, "add negation " + label);
+                assert.strictEqual(a * b, b * a, "commutative multiply " + label);
+                assert.strictEqual((-a) * b, -(a * b), "multiply sign " + label);
+                if (b !== 0n) {
+                    assert.strictEqual((a * b) / b, a, "multiply then divide " + label);
+                }
+            }
+        }
+    },
+    {
         name: "Exponentiation values, signs and RangeError bounds",
         body() {
             assert.strictEqual(0n ** 0n, 1n);
@@ -152,12 +260,22 @@ var tests = [
             assert.strictEqual(2n ** 2n ** 0n, 2n);
 
             assert.strictEqual(2n ** 100000n, 1n << 100000n);
+            assert.strictEqual(2n ** 524289n, 1n << 524289n);
+            assert.strictEqual(2n ** 1000000n, 1n << 1000000n);
+            assert.strictEqual(2n ** 1048575n, 1n << 1048575n);
+            assert.strictEqual((-2n) ** 1048575n, -(1n << 1048575n));
+            assert.strictEqual(0n ** 100000000000000000n, 0n);
+
+            var hugeBase = (1n << 2000000n) + 12345n;
+            assert.strictEqual(hugeBase ** 1n, hugeBase);
+            assert.strictEqual((-hugeBase) ** 1n, -hugeBase);
+            assert.throws(function () { return hugeBase ** 2n; }, RangeError);
+            assert.throws(function () { return 2n ** 1048576n; }, RangeError);
 
             assert.throws(function () { return 1n ** -1n; }, RangeError);
             assert.throws(function () { return 0n ** -1n; }, RangeError);
             assert.throws(function () { return (-1n) ** -1n; }, RangeError);
             assert.throws(function () { return 1n ** -100000000000000000n; }, RangeError);
-            assert.throws(function () { return 2n ** 1000000n; }, RangeError);
             assert.throws(function () { return 2n ** 100000000000000000n; }, RangeError);
             assert.throws(function () { return 2n ** Object(-1n); }, RangeError);
         }
@@ -351,12 +469,11 @@ var tests = [
                 function (a, b) { return a << b; },
                 function (a, b) { return a >> b; }
             ];
+            var expectedResults = [6n, 16n, 4n, 0n, 64n, 0n, 10n, 10n, 32n, 2n];
             for (var i = 0; i < operations.length; i++) {
                 var log = [];
                 var result = operations[i](makePrimitive(8n, "left", log), makePrimitive(2n, "right", log));
-                assert.isTrue(result === 6n || result === 4n || result === 16n || result === 10n ||
-                    result === 0n || result === 32n || result === 2n || result === 64n,
-                    "coerced result " + result);
+                assert.strictEqual(result, expectedResults[i], "coerced result " + i);
                 assert.strictEqual(log.join(","), "left:number,right:number", "order " + i);
             }
 

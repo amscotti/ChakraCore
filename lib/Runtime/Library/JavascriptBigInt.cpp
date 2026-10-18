@@ -1585,6 +1585,9 @@ namespace Js
                 return pbi1;
             }
             JavascriptBigInt::AddAbsolute(pbi2, pbi1);
+            // The sum accumulates into the positive dividend whose magnitude
+            // is larger; the mathematical result of -a - b is negative.
+            JavascriptBigInt::MakeNegative(pbi2);
             return pbi2;
         }
         else // both positive 
@@ -2023,11 +2026,24 @@ namespace Js
             JavascriptError::ThrowRangeError(scriptContext, VBSERR_TypeMismatch, _u("Exponentiate BigInt"));
         }
 
-        // Bound the result before multiplying. |base| >= 2 here, so the
-        // result has more than baseBitLength * exponent bits; this estimate
-        // is accurate enough to reject an oversized request in O(1).
+        if (exponent == 1)
+        {
+            // base ** 1 is the base itself; this also accepts an input wider
+            // than the exponentiation result cap, since no growth occurs.
+            return JavascriptBigInt::New(pbiBase, scriptContext);
+        }
+
+        // The result of |base| ** exponent (|base| >= 2 here) has at least
+        // (baseBits - 1) * exponent + 1 bits. Reject impossible requests in
+        // O(1) with an overflow-safe division. The exact width is checked
+        // after each multiplication below, so the accepted set is precisely
+        // "mathematical result fits BigIntMaxExponentResultBits", including
+        // the power-of-two boundary: 2n ** 1048575n is accepted and
+        // 2n ** 1048576n is rejected.
         uint64 baseBits = pbiBase->GetMagnitudeBitLength();
-        if (baseBits == 0 || exponent > BigIntMaxExponentResultBits / baseBits)
+        Assert(baseBits > 1);
+        uint64 growthPerExponent = baseBits - 1;
+        if (exponent > (BigIntMaxExponentResultBits - 1) / growthPerExponent)
         {
             JavascriptError::ThrowRangeError(scriptContext, VBSERR_TypeMismatch, _u("Exponentiate BigInt"));
         }
@@ -2041,11 +2057,19 @@ namespace Js
             if ((exponent & 1) != 0)
             {
                 result = JavascriptBigInt::MulAbsolute(result, factor);
+                if (result->GetMagnitudeBitLength() > BigIntMaxExponentResultBits)
+                {
+                    JavascriptError::ThrowRangeError(scriptContext, VBSERR_TypeMismatch, _u("Exponentiate BigInt"));
+                }
             }
             exponent >>= 1;
             if (exponent != 0)
             {
                 factor = JavascriptBigInt::MulAbsolute(factor, factor);
+                if (factor->GetMagnitudeBitLength() > BigIntMaxExponentResultBits)
+                {
+                    JavascriptError::ThrowRangeError(scriptContext, VBSERR_TypeMismatch, _u("Exponentiate BigInt"));
+                }
             }
         }
         result->m_isNegative = negate;
