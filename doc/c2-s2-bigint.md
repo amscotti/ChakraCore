@@ -593,17 +593,16 @@ claimed (same B4 gate as sub-batches 1 and 2).
 - Full BigInt arithmetic/bitwise/shift beyond the existing same-type
   `+`/`-`/`*`.
 - `BigInt64Array`/`BigUint64Array`.
-- Mixed BigInt/Number relational and abstract equality (the
-  `toString/a-z.js` loop, 2 scenarios, still fails closed).
-- Wrapper arithmetic/equality (`wrapper-object-ordinary-toprimitive.js`,
-  2 scenarios).
+- Mixed BigInt/Number relational and abstract equality and wrapper
+  equality/multiplication are fixed in sub-batch 4; remaining wrapper
+  operators (`/`, `%`, `**`, shifts, bitwise) stay C3.
 - `Map`/`Set` BigInt key identity.
 - JIT/native execution and B4 coverage; `ESBigInt` remains off by
   default.
 
 ## Sub-batch 4: mixed equality, relational comparison, wrapper multiplication
 
-Status: implemented in the working tree on top of `63c7aa340`
+Status: landed in `702aa1d33` on top of `63c7aa340`
 (sub-batch 3). Interpreter-verified on Mac ARM64 no-JIT with
 `-ESBigInt`; JIT is not claimed (same B4 gate as sub-batches 1–3).
 `ESBigInt` remains off by default.
