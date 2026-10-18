@@ -1407,6 +1407,7 @@ namespace Js
         HRESULT ProfilerRegisterSet();
         HRESULT ProfilerRegisterWeakMap();
         HRESULT ProfilerRegisterWeakSet();
+        HRESULT ProfilerRegisterWeakRef();
         HRESULT ProfilerRegisterSymbol();
         HRESULT ProfilerRegisterIterator();
         HRESULT ProfilerRegisterArrayIterator();

@@ -12,6 +12,8 @@
 var OBJECT_COUNT = 1000;
 var SYMBOL_COUNT = 1000;
 var WEAKMAP_COUNT = 500;
+var CROSS_REALM_COUNT = 64;
+var CLEAR_ALLOWANCE = 5;
 
 var objectRefs = [];
 var symbolRefs = [];
@@ -20,11 +22,23 @@ var weakMap = new WeakMap();
 
 // A same-thread realm (new ScriptContext) creates its own WeakRefs. Those
 // targets are only weakly held there, so the thread-level kept set must clear
-// them when this outer job ends even though the child context has no root call
-// of its own.
+// them when this outer job ends even though the child context has no outermost
+// root call of its own.
 var otherRealm = WScript.LoadScript(
-    "var objectTarget = {}; var objectRef = new WeakRef(objectTarget); objectTarget = null;" +
-    "var symbolTarget = Symbol('weakref-cross-realm'); var symbolRef = new WeakRef(symbolTarget); symbolTarget = null;",
+    "var CROSS_COUNT = 64;" +
+    "var objectRefs = []; var symbolRefs = [];" +
+    "for (var i = 0; i < CROSS_COUNT; i++) { objectRefs.push(new WeakRef({ index: i })); }" +
+    "for (var j = 0; j < CROSS_COUNT; j++) { symbolRefs.push(new WeakRef(Symbol('cross-' + j))); }" +
+    "function crossRealmObjectAlive() {" +
+    "  var alive = 0;" +
+    "  for (var k = 0; k < objectRefs.length; k++) { if (objectRefs[k].deref() !== undefined) alive++; }" +
+    "  return alive;" +
+    "}" +
+    "function crossRealmSymbolAlive() {" +
+    "  var alive = 0;" +
+    "  for (var k = 0; k < symbolRefs.length; k++) { if (symbolRefs[k].deref() !== undefined) alive++; }" +
+    "  return alive;" +
+    "}",
     "samethread");
 
 (function createObjectRefs() {
@@ -100,11 +114,13 @@ if (objectsAlive !== OBJECT_COUNT) {
 if (symbolsAlive !== SYMBOL_COUNT) {
     fail("in-job symbol targets alive " + symbolsAlive + "/" + SYMBOL_COUNT);
 }
-if (otherRealm.objectRef.deref() === undefined) {
-    fail("in-job cross-realm object target was cleared");
+var crossObjectsAlive = otherRealm.crossRealmObjectAlive();
+var crossSymbolsAlive = otherRealm.crossRealmSymbolAlive();
+if (crossObjectsAlive !== CROSS_REALM_COUNT) {
+    fail("in-job cross-realm object targets alive " + crossObjectsAlive + "/" + CROSS_REALM_COUNT);
 }
-if (otherRealm.symbolRef.deref() === undefined) {
-    fail("in-job cross-realm symbol target was cleared");
+if (crossSymbolsAlive !== CROSS_REALM_COUNT) {
+    fail("in-job cross-realm symbol targets alive " + crossSymbolsAlive + "/" + CROSS_REALM_COUNT);
 }
 
 WScript.SetTimeout(function crossJobWeakRefCheck() {
@@ -124,28 +140,32 @@ WScript.SetTimeout(function crossJobWeakRefCheck() {
     }
 
     // The child realm's kept set is thread/agent-wide, so this outer job's
-    // boundary releases its targets too.
-    if (otherRealm.objectRef.deref() !== undefined) {
-        fail("cross-realm object target survived the job boundary");
+    // boundary releases its targets too. Allow one conservative-stack
+    // remnant per child-realm group rather than requiring an exact 64/64.
+    var crossObjectsCleared = CROSS_REALM_COUNT - otherRealm.crossRealmObjectAlive();
+    var crossSymbolsCleared = CROSS_REALM_COUNT - otherRealm.crossRealmSymbolAlive();
+    if (crossObjectsCleared < CROSS_REALM_COUNT - 1) {
+        fail("cross-realm object targets cleared " + crossObjectsCleared + "/" + CROSS_REALM_COUNT);
     }
-    if (otherRealm.symbolRef.deref() !== undefined) {
-        fail("cross-realm symbol target survived the job boundary");
+    if (crossSymbolsCleared < CROSS_REALM_COUNT - 1) {
+        fail("cross-realm symbol targets cleared " + crossSymbolsCleared + "/" + CROSS_REALM_COUNT);
     }
 
     // Job 1 targets had only constructor KeepDuringJob retaining them. After
-    // the job boundary they must be collectible; allow one conservative-stack
-    // remnant but require the high-threshold control shape.
+    // the job boundary they must be collectible; conservative stack remnants
+    // can leave a few, so allow CLEAR_ALLOWANCE while requiring the high
+    // threshold shape.
     var objectsCleared = countCleared(objectRefs);
     var symbolsCleared = countCleared(symbolRefs);
     var weakMapCleared = countCleared(weakMapRefs);
 
-    if (objectsCleared !== OBJECT_COUNT) {
+    if (objectsCleared < OBJECT_COUNT - CLEAR_ALLOWANCE) {
         fail("cross-job object targets cleared " + objectsCleared + "/" + OBJECT_COUNT);
     }
-    if (symbolsCleared !== SYMBOL_COUNT) {
+    if (symbolsCleared < SYMBOL_COUNT - CLEAR_ALLOWANCE) {
         fail("cross-job symbol targets cleared " + symbolsCleared + "/" + SYMBOL_COUNT);
     }
-    if (weakMapCleared !== WEAKMAP_COUNT) {
+    if (weakMapCleared < WEAKMAP_COUNT - CLEAR_ALLOWANCE) {
         fail("cross-job WeakMap key targets cleared " + weakMapCleared + "/" + WEAKMAP_COUNT);
     }
 

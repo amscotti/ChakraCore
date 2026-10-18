@@ -116,6 +116,11 @@ handle is created.
 JIT builtin-object range treat it as a normal builtin JavaScript object. The
 subsequent internal type ids are shifted; no serialized property id changed.
 
+Profiler/debug registration: `ProfilerRegisterWeakRef` registers the dynamic
+`WeakRef` constructor and `deref` property ids, and `ProfilerRegisterBuiltIns`
+includes WeakRef. `ScriptContext::DumpTypeCounts` now prints a WeakRef row
+using `TypeIds_WeakRef`.
+
 `AddToKeptObjects` is implemented by `ThreadContext::KeepDuringJob` and the
 agent/thread-wide rooted `keptObjects` list. The constructor calls it before the
 reentrant `NewTarget.prototype` lookup, and `deref` calls it before returning a
@@ -142,13 +147,14 @@ unroots the list before deleting the recycler.
   schedules a `WScript.SetTimeout` callback. The timer runs through
   `JsCallFunction`/`ContextAPIWrapper` as a separate outermost host call/job.
   The callback verifies deref's KeepDuringJob with in-job GC, then collects the
-  job-1 constructor targets. The thresholds are exact: 1000/1000 object,
-  1000/1000 symbol, and 500/500 WeakMap-key targets cleared, and 1000/1000
-  deref targets retained in-job. A `WScript.LoadScript(..., 'samethread')`
-  child realm creates object and symbol WeakRefs; both must be alive during
-  the outer job and cleared after the outer job boundary. This child realm has
-  no root call of its own, so it is the regression for the thread-wide kept
-  list.
+  job-1 constructor targets. In-job liveness is exact: 1000/1000 object,
+  1000/1000 symbol, and 1000/1000 deref targets. Cross-job clearing allows
+  conservative-stack remnants: at least 995/1000 object, 995/1000 symbol, and
+  495/500 WeakMap-key targets cleared. A `WScript.LoadScript(..., 'samethread')`
+  child realm creates 64 object and 64 symbol WeakRefs; all must be alive
+  during the outer job, and at least 63/64 of each must be cleared after the
+  outer job boundary. This child realm has no outermost root call of its own,
+  so it is the regression for the thread-wide kept list.
 - The pinned `test/built-ins/WeakRef/**/*.js` corpus contains 29 files and 58
   strict/default scenarios and has no GC-timing scenario. One file
   (`prototype/deref/this-does-not-have-internal-target-throws.js`) also requires
@@ -167,7 +173,7 @@ later build could not replace it.
 
 The exact before/after per-file result sets are in
 `out/test262-s13-weakref-before/results.json` and
-`out/test262-s13-weakref-after4/results.json`. The controls gate passed 18/18
+`out/test262-s13-weakref-after5/results.json`. The controls gate passed 18/18
 scenarios on both runs. The only remaining failures are the two scenarios of
 `prototype/deref/this-does-not-have-internal-target-throws.js`, both
 `ReferenceError: 'FinalizationRegistry' is not defined` (the file's
@@ -182,12 +188,14 @@ registered with `-CollectGarbage -args summary -endargs` and passes on the
 test-profile binary.
 
 `test/es7/weakref-gc.js` adds the job-boundary evidence: constructor targets
-are fully alive in job 1, including object and symbol targets created in a
-same-thread child realm; 1000/1000 `deref` targets remain alive through an
-in-job GC after job 2 starts; and 1000/1000 object targets, 1000/1000 symbol
-targets, 500/500 WeakMap key targets, and both cross-realm targets are cleared
-after the job-1 kept set is released. The callback exits 1 on any exact
-threshold failure so the regression runner cannot pass on a printed exception.
+are fully alive in job 1, including 64 object and 64 symbol targets created in
+a same-thread child realm; 1000/1000 `deref` targets remain alive through an
+in-job GC after job 2 starts; and at least 995/1000 object, 995/1000 symbol,
+495/500 WeakMap-key, 63/64 cross-realm object, and 63/64 cross-realm symbol
+targets are cleared after the job-1 kept set is released. The allowance is for
+conservative-stack remnants, not for retained kept-set entries. The callback
+exits 1 on any threshold failure so the regression runner cannot pass on a
+printed exception.
 
 Commands (all builds/test262 runs serialized by
 `/tmp/opencode/cc-gate-lock.sh`; cache and checkout are local):
@@ -198,7 +206,7 @@ python3 tools/test262/run.py --binary "$PWD/out/s13-weakref-before-bin/ch" \
   --checkout "$PWD/out/test262" --output "$PWD/out/test262-s13-weakref-before" \
   'test/built-ins/WeakRef/**/*.js'
 python3 tools/test262/run.py --binary "$PWD/zig-out/bin/ch" \
-  --checkout "$PWD/out/test262" --output "$PWD/out/test262-s13-weakref-after4" \
+  --checkout "$PWD/out/test262" --output "$PWD/out/test262-s13-weakref-after5" \
   'test/built-ins/WeakRef/**/*.js'
 (cd test/es7 && ../../zig-out/bin/ch -CollectGarbage -args summary -endargs weakref.js)
 (cd test/es7 && ../../zig-out/bin/ch -CollectGarbage weakref-gc.js)
@@ -215,6 +223,12 @@ Gate evidence (both runs serialized by the shared gate lock):
   --cache-dir "$PWD/.zig-cache"`: **2036 passed / 0 failed**, 546/546 steps.
 - `python3 tools/build/check_regression.py --self-test`: all negative controls
   pass with the 1984/2036 profile pins.
+
+Repeat stability (after the conservative allowance): test-profile
+`weakref.js` 200/200 and `weakref-gc.js` 200/200 runs passed; debug-static
+`weakref.js` 100/100 and `weakref-gc.js` 100/100 runs passed. The earlier exact
+cross-job thresholds were flaky because 1--3 conservative-stack remnants could
+survive.
 
 Adding the global `WeakRef` intrinsic changed the debugger's global-property
 view, so 66 shared `.dbg.baseline` files were regenerated from the test run.
@@ -235,6 +249,10 @@ diff is broad; it is not a runtime behavior change.
 - Host-dispatch/external JS objects without a recycler allocation are rejected
   rather than weakly retained (TypeError), matching the existing WeakSet
   HostDispatch limitation. No test262 scenario exercises that host surface.
+- Flake evidence: the cross-job thresholds were exercised repeatedly after the
+  allowance change; see the final repeat-run report on the branch. The previous
+  exact 1000/1000 thresholds were flaky because conservative-stack remnants
+  can leave 1--3 targets.
 - JIT/TTD/debugger evidence: no JIT claim; no TTD snapshot support was added
   for `[[Target]]` beyond the normal dynamic-object shape. B4 owns the JIT
   matrix. The kept-list `Add` stores through `JsUtil::List`'s

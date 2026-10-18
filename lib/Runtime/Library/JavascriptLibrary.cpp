@@ -4786,6 +4786,9 @@ namespace Js
     bool JavascriptLibrary::InitializeWeakRefConstructor(DynamicObject* weakRefConstructor, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)
     {
         typeHandler->Convert(weakRefConstructor, mode, 3);
+        // Note: Any new function addition/deletion/modification should also be
+        // updated in JavascriptLibrary::ProfilerRegisterWeakRef so the profiler
+        // stays in sync.
         JavascriptLibrary* library = weakRefConstructor->GetLibrary();
         ScriptContext* scriptContext = weakRefConstructor->GetScriptContext();
         library->AddMember(weakRefConstructor, PropertyIds::length, TaggedInt::ToVarUnchecked(1), PropertyConfigurable);
@@ -4800,6 +4803,9 @@ namespace Js
     bool JavascriptLibrary::InitializeWeakRefPrototype(DynamicObject* weakRefPrototype, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)
     {
         typeHandler->Convert(weakRefPrototype, mode, 3);
+        // Note: Any new function addition/deletion/modification should also be
+        // updated in JavascriptLibrary::ProfilerRegisterWeakRef so the profiler
+        // stays in sync.
         ScriptContext* scriptContext = weakRefPrototype->GetScriptContext();
         JavascriptLibrary* library = weakRefPrototype->GetLibrary();
         library->AddMember(weakRefPrototype, PropertyIds::constructor, library->weakRefConstructor);
@@ -7796,6 +7802,7 @@ namespace Js
         REGISTER_OBJECT(Set);
         REGISTER_OBJECT(WeakMap);
         REGISTER_OBJECT(WeakSet);
+        REGISTER_OBJECT(WeakRef);
 
         REGISTER_OBJECT(Symbol);
 
@@ -8307,6 +8314,24 @@ namespace Js
         REG_OBJECTS_LIB_FUNC(add, JavascriptWeakSet::EntryAdd);
         REG_OBJECTS_LIB_FUNC2(delete_, _u("delete"), JavascriptWeakSet::EntryDelete);
         REG_OBJECTS_LIB_FUNC(has, JavascriptWeakSet::EntryHas);
+
+        return hr;
+    }
+
+    HRESULT JavascriptLibrary::ProfilerRegisterWeakRef()
+    {
+        HRESULT hr = S_OK;
+        ScriptContext* scriptContext = this->GetScriptContext();
+
+        // WeakRef uses tracked dynamic property ids (no PropertyIds::WeakRef)
+        // so the checked-in built-in bytecode property-id table stays stable.
+        PropertyId weakRefId = scriptContext->GetOrAddPropertyIdTracked(_u("WeakRef"));
+        REG_LIB_FUNC_CORE(NULL, _u("WeakRef"), weakRefId, JavascriptWeakRef::EntryInfo::NewInstance);
+
+        DEFINE_OBJECT_NAME(WeakRef);
+
+        PropertyId derefId = scriptContext->GetOrAddPropertyIdTracked(_u("deref"));
+        REG_LIB_FUNC_CORE(pwszObjectName, _u("deref"), derefId, JavascriptWeakRef::EntryInfo::Deref);
 
         return hr;
     }
