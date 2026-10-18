@@ -393,8 +393,10 @@ var tests = [
                 assert.areEqual(name + ":valueOf", log.join(","), name + " coercion ran while detached");
 
                 assert.throws(function () { makeDetached()[name](); }, TypeError, name + " no-argument detached");
-                assert.throws(function () { makeDetached()[name](-1); }, TypeError, name + " detached negative length is detached TypeError");
-                assert.throws(function () { makeDetached()[name](0x7FFFFFFF); }, TypeError, name + " detached large length is detached TypeError");
+                assert.throws(function () { makeDetached()[name](-1); }, RangeError, name + " detached negative length is a ToIndex RangeError");
+                assert.throws(function () { makeDetached()[name](Math.pow(2, 53)); }, RangeError, name + " detached 2^53 is a ToIndex RangeError");
+                assert.throws(function () { makeDetached()[name](0x7FFFFFFF); }, TypeError, name + " detached engine-limit length remains detached TypeError");
+                assert.throws(function () { makeDetached()[name](Math.pow(2, 32)); }, TypeError, name + " detached over-engine-limit length remains detached TypeError");
 
                 var caught;
                 try {
@@ -409,8 +411,24 @@ var tests = [
                 buffer = makeDetached();
                 assert.throws(function () {
                     buffer[name]({ valueOf: function () { log.push(name + ":valueOf"); return -1; } });
-                }, TypeError);
+                }, RangeError);
                 assert.areEqual(name + ":valueOf", log.join(","), name + " negative coercion still runs");
+
+                assert.throws(function () { var b = new ArrayBuffer(4); b[name](-1); }, RangeError, name + " attached negative");
+                assert.throws(function () { var b = new ArrayBuffer(4); b[name](Math.pow(2, 53)); }, RangeError, name + " attached 2^53");
+                assert.throws(function () { var b = new ArrayBuffer(4); b[name](Math.pow(2, 32)); }, RangeError, name + " attached engine-limit");
+
+                var nanSource = new ArrayBuffer(4);
+                fill(nanSource, [1, 2, 3, 4]);
+                var nanDest = nanSource[name](NaN);
+                assert.areEqual(0, nanDest.byteLength, name + " NaN coerces to zero");
+                assert.areEqual(0, nanSource.byteLength, name + " NaN transfer detaches source");
+
+                var fractionalSource = new ArrayBuffer(4);
+                fill(fractionalSource, [1, 2, 3, 4]);
+                var fractionalDest = fractionalSource[name](2.9);
+                assert.areEqual(2, fractionalDest.byteLength, name + " fractional length truncates");
+                assertBytes(fractionalDest, [1, 2], name + " fractional transfer data");
             });
 
             var source = new ArrayBuffer(4, { maxByteLength: 8 });
@@ -451,6 +469,19 @@ var tests = [
             dest = source.slice(2, 7);
             assert.areEqual(5, dest.byteLength);
             assertBytes(dest, [2, 0, 0, 0, 0], "slice species shrink");
+
+            source = new ArrayBuffer(8, { maxByteLength: 16 });
+            fill(source, [0, 1, 2, 3, 4, 5, 6, 7]);
+            function PrefilledSpecies(length) {
+                var buffer = new ArrayBuffer(length);
+                new Uint8Array(buffer).fill(0xAA);
+                return buffer;
+            }
+            PrefilledSpecies[Symbol.species] = PrefilledSpecies;
+            source.constructor = PrefilledSpecies;
+            dest = source.slice({ valueOf: function () { source.resize(3); return 2; } }, 7);
+            assert.areEqual(5, dest.byteLength);
+            assertBytes(dest, [2, 0xAA, 0xAA, 0xAA, 0xAA], "slice leaves species destination bytes beyond copy intact");
 
             source = new ArrayBuffer(8, { maxByteLength: 16 });
             fill(source, [0, 1, 2, 3, 4, 5, 6, 7]);
@@ -497,6 +528,39 @@ var tests = [
             assert.throws(function () { fixed.byteLength; }, TypeError, "fixed DataView byteLength OOB");
             assert.throws(function () { fixed.byteOffset; }, TypeError, "fixed DataView byteOffset OOB");
             assert.throws(function () { fixed.getUint8(0); }, TypeError, "fixed DataView access OOB");
+
+            function secondReadTarget(action) {
+                var reads = 0;
+                var target = function () { }.bind(null);
+                Object.defineProperty(target, "prototype", {
+                    get: function () {
+                        reads++;
+                        if (reads === 1) {
+                            return {};
+                        }
+                        return action();
+                    }
+                });
+                return target;
+            }
+
+            buffer = new ArrayBuffer(8, { maxByteLength: 16 });
+            var detachOnSecondRead = secondReadTarget(function () {
+                buffer.transfer();
+                return {};
+            });
+            assert.throws(function () {
+                Reflect.construct(DataView, [buffer, 0, 4], detachOnSecondRead);
+            }, TypeError, "DataView revalidates detach from the final prototype read");
+
+            buffer = new ArrayBuffer(8, { maxByteLength: 16 });
+            var shrinkOnSecondRead = secondReadTarget(function () {
+                buffer.resize(2);
+                return {};
+            });
+            assert.throws(function () {
+                Reflect.construct(DataView, [buffer, 0, 4], shrinkOnSecondRead);
+            }, RangeError, "DataView revalidates shrink from the final prototype read");
 
             buffer = new ArrayBuffer(1);
             var detached = new DataView(buffer);

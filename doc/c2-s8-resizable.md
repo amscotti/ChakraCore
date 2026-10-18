@@ -68,12 +68,21 @@ Resource / creation call / source location:
   only the `RefCountedBuffer` wrapper and never frees host-owned bytes.
   WebAssembly.Memory buffers are rejected before destination allocation/copy
   because their detached-state creation throws.
-- **Transfer coercion order.** `ArrayBufferCopyAndDetach` coerces `newLength`
-  (ToIndex/ToIntegerOrInfinity) before the detached and range checks. Coercion
-  exceptions and side effects therefore propagate first; an already-detached
-  buffer with a coercible argument still ends in TypeError, without the
-  destination being allocated. `transferToFixedLength` reports its own
+- **Transfer coercion order.** `ArrayBufferCopyAndDetach` performs
+  `ToIndex(newLength)` before the detached and range checks. `TransferBuffer`
+  uses the constructor's engine-cap-free ToIndex helper: negative and
+  `>2^53-1` values throw RangeError before detachment; fractional values
+  truncate; NaN becomes 0; explicit `undefined` keeps the source length
+  default. The detached check follows coercion, so an already-detached buffer
+  with a coercible non-negative ToIndex value still ends in TypeError without a
+  destination allocation, while the engine `MaxArrayBufferLength` check
+  happens after the detached check. `transferToFixedLength` reports its own
   function name in detached errors.
+- **`resize` precedence.** `resize` correctly uses ToIntegerOrInfinity rather
+  than ToIndex (fractional truncation, NaN -> 0, no `2^53-1` ToIndex cap). The
+  detached check runs after coercion and before the `maxByteLength` range
+  check; consequently detached `resize(-1)` is a TypeError, matching Node,
+  while attached `resize(-1)` is a RangeError.
 - **User-code / reentrancy points.** Constructor `length` is `ToIndex`, then
   the `maxByteLength` property is read and `ToIndex`'d, then `length >
   maxByteLength` is checked. For model/constructor-newTarget paths the
@@ -81,10 +90,12 @@ Resource / creation call / source location:
   `resize` and `transfer` coerce through `ToIntegerOrInfinity`; the buffer is
   rechecked for detachment after the coercion before any buffer pointer is
   touched. `slice` re-reads the source length after start/end/species/constructor
-  user code, copies `min(newLen, currentLength - first)` and zero-fills the
-  remainder. DataView re-reads the buffer length after `ToIndex(byteLength)` and
-  refuses to construct an out-of-bounds view. No storage pointer is retained
-  across user code.
+  user code and copies only `min(newLen, currentLength - first)`; it does not
+  touch destination bytes beyond that copy (normal destinations are already
+  zeroed, species-returned destinations keep their prefilled bytes). DataView
+  re-reads the buffer length after `ToIndex(byteLength)` and again after the
+  final `OrdinaryCreateFromConstructor` prototype user code, refusing to return
+  an out-of-bounds view. No storage pointer is retained across user code.
 - **Failure.** Fixed-length buffers and non-ArrayBuffers throw TypeError before
   choosing a size. Negative, non-integer (after truncation) or over-limit values
   throw RangeError. Allocation failure keeps the existing OOM/RangeError path.
@@ -114,10 +125,13 @@ covers:
   argument, negative/large values), failed-transfer data integrity, max-0
   buffers, source views plus GC, and reentrancy;
 - `slice` on a resizable source when start/end/species user code shrinks the
-  source: current-length re-read, bounded copy and zero-fill;
-- DataView constructor revalidation after `ToIndex(byteLength)`, auto-length
-  `byteLength` tracking across grow/shrink/boundary/OOB, fixed-length OOB
-  getter/access TypeErrors, and detached getter TypeErrors;
+  source: current-length re-read, bounded copy, and a prefilled species
+  destination whose bytes beyond the copy range must remain intact;
+- DataView constructor revalidation after `ToIndex(byteLength)` and after the
+  final `OrdinaryCreateFromConstructor` prototype read (detach/shrink on the
+  second read), auto-length `byteLength` tracking across
+  grow/shrink/boundary/OOB, fixed-length OOB getter/access TypeErrors, and
+  detached getter TypeErrors;
 - fixed-length ArrayBuffer, `slice`, DataView and TypedArray access remain
   unchanged; TypedArray views remain fixed-length (deferred tracking).
 
@@ -137,9 +151,11 @@ after run used this lane's `zig-out/bin/ch`.
   `test/built-ins/TypedArray/**/*resizable*`,
   `test/built-ins/TypedArray/**/*out-of-bounds*`.
   **188/834 before → 424/834 after**, **236 fail→pass / 0 pass→fail**.
-  Against the previous accepted commit's run (416/834), the follow-up fixes
-  add exactly the eight DataView `byteLength`/`byteOffset` resizable getter
-  scenarios with no pass→fail.
+  Against the second-round run (424/834) the final fixes are **0 flips**
+  (0 fail→pass, 0 pass→fail): the new transfer/slice/DataView cases are covered
+  by the focused JS test and Node differential, not by additional test262
+  scenarios in this corpus. The eight DataView getter scenarios added in the
+  second round remain green.
 - ArrayBuffer corpus only: **166/442 → 358/442**, **192 fail→pass,
   0 pass→fail**. The 84 residue scenarios are immutable-arraybuffer (54),
   SharedArrayBuffer-disabled (18), BigInt-disabled parse cases (8), the
@@ -154,6 +170,12 @@ after run used this lane's `zig-out/bin/ch`.
 - Feature-tag counts in the same run: `resizable-arraybuffer` 14/516 →
   182/516; `arraybuffer-transfer` 0/118 → 102/118; `immutable-arraybuffer`
   remains 4/58; `Float16Array` 0/4 → 4/4.
+- Node v26.5.0 differential for the new order cases: detached
+  `transfer`/`transferToFixedLength` with `-1` and `2^53` → RangeError,
+  detached with `2^32` → TypeError, attached with `-1`/`2^53`/`2^32` →
+  RangeError, `NaN` → zero length, `2.9` → 2; prefilled-species slice after a
+  source shrink leaves bytes beyond the copied range intact. The focused JS
+  test encodes the same results.
 
 ## Residuals
 
@@ -171,6 +193,19 @@ after run used this lane's `zig-out/bin/ch`.
   (TypeError on getters/access) if the buffer shrinks past its range. There is
   no separate DataView length-tracking flag exposed to JIT/SCA; JsRT
   `JsCreateDataView` and SCA reconstruction create fixed-length views.
+- **Generic DataView setter argument order.** `setInt8`/`setUint8`/multi-byte
+  setters still convert `value` before `ToIndex(byteOffset)`; the spec order is
+  ToIndex -> ToNumber(value) -> detached/range. Float16 setters already use the
+  correct order. Fixing every generated setter was left as a separate residual
+  to avoid broadening this patch.
+- **Pre-existing JsRT detach ownership leak.** `JsDetachArrayBuffer` calls
+  `ArrayBuffer::Detach()` directly, which clears `bufferContent` without
+  releasing its `RefCountedBuffer`; it can also discard non-externalized bytes
+  without an engine free. This predates the resizable slice and is not changed
+  here. Engine `transfer`/`transferToFixedLength` use the detached-state +
+  `CleanUp()` path instead. The externalized transfer audit is clean: no-op
+  release leaves host-owned bytes alone; the host must own/free them through
+  `JsGetArrayBufferFreeFunction` and the detached-state round trip caveat above.
 - **Immutable ArrayBuffers.** `transferToImmutable`, `sliceToImmutable`,
   `ArrayBuffer.prototype.immutable` and the `immutable-arraybuffer` proposal are
   not implemented.

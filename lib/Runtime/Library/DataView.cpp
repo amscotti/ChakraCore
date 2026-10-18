@@ -127,9 +127,30 @@ namespace Js
         //14.   Set O's[[ByteOffset]] internal slot to offset.
         //15.   Return O.
         dataView = scriptContext->GetLibrary()->CreateDataView(arrayBuffer, offset, mappedLength, lengthTracking);
-        return isCtorSuperCall ?
+        Var result = isCtorSuperCall ?
             JavascriptOperators::OrdinaryCreateFromConstructor(VarTo<RecyclableObject>(newTarget), dataView, nullptr, scriptContext) :
             dataView;
+
+        // OrdinaryCreateFromConstructor runs newTarget.prototype user code after
+        // the view was built. Revalidate once more so an already-OOB view is
+        // never returned.
+        if (arrayBuffer->IsDetached())
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray);
+        }
+        uint32 finalByteLength = arrayBuffer->GetByteLength();
+        if ((uint32)offset > finalByteLength)
+        {
+            JavascriptError::ThrowRangeError(
+                scriptContext, JSERR_DataView_InvalidArgument, _u("byteOffset"));
+        }
+        if (!lengthTracking && mappedLength > finalByteLength - (uint32)offset)
+        {
+            JavascriptError::ThrowRangeError(
+                scriptContext, JSERR_DataView_InvalidArgument, _u("byteLength"));
+        }
+
+        return result;
     }
 
     DataView::DataView(ArrayBufferBase* arrayBuffer, uint32 byteoffset, uint32 mappedLength, bool lengthTracking, DynamicType* type)

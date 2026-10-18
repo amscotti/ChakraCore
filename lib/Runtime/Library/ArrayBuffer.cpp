@@ -656,8 +656,9 @@ namespace Js
         else
         {
             // ArrayBufferCopyAndDetach performs ToIndex(newLength) before the
-            // detached/range checks; coercion side effects and exceptions win.
-            newByteLengthValue = JavascriptConversion::ToInteger(newLength, scriptContext);
+            // detached/range checks. ToIndex throws for negative or >2^53-1
+            // values here; the engine allocation limit is checked afterward.
+            newByteLengthValue = ToIndexNoEngineCap(newLength, JSERR_ArrayLengthConstructIncorrect, scriptContext);
         }
 
         if (source->IsDetached())
@@ -665,7 +666,7 @@ namespace Js
             JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, funcName);
         }
 
-        if (newByteLengthValue < 0.0 || newByteLengthValue > (double)ArrayBuffer::MaxArrayBufferLength)
+        if (newByteLengthValue > (double)ArrayBuffer::MaxArrayBufferLength)
         {
             JavascriptError::ThrowRangeError(scriptContext, JSERR_ArrayLengthConstructIncorrect);
         }
@@ -923,11 +924,8 @@ namespace Js
             AssertMsg(arrayBuffer->GetBuffer() != nullptr, "buffer must not be null when we copy from it");
             js_memcpy_s(newBuffer->GetBuffer(), byteLength, arrayBuffer->GetBuffer() + first, copyLength);
         }
-        if (copyLength < byteLength)
-        {
-            AssertMsg(newBuffer->GetBuffer() != nullptr, "destination must not be null when zero-filling");
-            ZeroMemory(newBuffer->GetBuffer() + copyLength, byteLength - copyLength);
-        }
+        // Do not touch bytes beyond copyLength: normal destinations are already
+        // zero-initialized, and a species-returned buffer keeps its own bytes.
 
         return newBuffer;
     }
