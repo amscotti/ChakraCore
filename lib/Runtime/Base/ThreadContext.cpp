@@ -485,6 +485,12 @@ ThreadContext::~ThreadContext()
             this->m_jitNumericProperties = nullptr;
         }
 #endif
+        if (keptObjects)
+        {
+            keptObjects->ClearAndZero();
+            keptObjects.Unroot(recycler);
+        }
+
         // Unpin the memory for leak report so we don't report this as a leak.
         recyclableData.Unroot(recycler);
 
@@ -1399,6 +1405,38 @@ ThreadContext::UnregisterCodeGenRecyclableData(Js::CodeGenRecyclableData *const 
 }
 
 
+
+void
+ThreadContext::KeepDuringJob(Js::RecyclableObject* object)
+{
+    Assert(object != nullptr);
+    Assert(recycler != nullptr);
+
+    if (!keptObjects)
+    {
+        keptObjects.Root(RecyclerNew(recycler, KeptObjectList, recycler), recycler);
+    }
+
+    // Linear dedupe keeps the common case simple; the list is bounded by the
+    // number of distinct targets kept alive in one job. Using a recycler set
+    // would remove the O(n^2) worst case for jobs that keep many objects.
+    if (!keptObjects->Contains(object))
+    {
+        // JsUtil::List stores entries as Field(T, Recycler): Add goes through
+        // WriteBarrierPtr on GLOBAL_ENABLE_WRITE_BARRIER builds.
+        keptObjects->Add(object);
+    }
+}
+
+void
+ThreadContext::ClearKeptObjects()
+{
+    if (keptObjects)
+    {
+        // Zero removed slots so stale pointers are not conservative scan roots.
+        keptObjects->ClearAndZero();
+    }
+}
 
 uint
 ThreadContext::EnterScriptStart(Js::ScriptEntryExitRecord * record, bool doCleanup)

@@ -1050,6 +1050,7 @@ namespace Js
         Output::Print(_u("    Set                            %8d   %8d\n"), typeCount[TypeIds_Set], instanceCount[TypeIds_Set]);
         Output::Print(_u("    WeakMap                        %8d   %8d\n"), typeCount[TypeIds_WeakMap], instanceCount[TypeIds_WeakMap]);
         Output::Print(_u("    WeakSet                        %8d   %8d\n"), typeCount[TypeIds_WeakSet], instanceCount[TypeIds_WeakSet]);
+        Output::Print(_u("    WeakRef                        %8d   %8d\n"), typeCount[TypeIds_WeakRef], instanceCount[TypeIds_WeakRef]);
         Output::Print(_u("    ArrayIterator                  %8d   %8d\n"), typeCount[TypeIds_ArrayIterator], instanceCount[TypeIds_ArrayIterator]);
         Output::Print(_u("    MapIterator                    %8d   %8d\n"), typeCount[TypeIds_MapIterator], instanceCount[TypeIds_MapIterator]);
         Output::Print(_u("    SetIterator                    %8d   %8d\n"), typeCount[TypeIds_SetIterator], instanceCount[TypeIds_SetIterator]);
@@ -2655,6 +2656,13 @@ ExitTempAllocator:
 
     void ScriptContext::OnScriptStart(bool isRoot, bool isScript)
     {
+        // A new outermost host call starts a new job. Clear any kept objects
+        // left by a previous job (normally already empty from OnScriptEnd).
+        if (isRoot && threadContext->GetCallRootLevel() == 1)
+        {
+            ClearKeptObjects();
+        }
+
         const bool isForcedEnter =
 #ifdef ENABLE_SCRIPT_DEBUGGING
             this->GetDebugContext() != nullptr ? this->GetDebugContext()->GetProbeContainer()->isForcedToEnterScriptStart :
@@ -2682,6 +2690,13 @@ ExitTempAllocator:
 
     void ScriptContext::OnScriptEnd(bool isRoot, bool isForcedEnd)
     {
+        // The outermost host call is the job boundary. Nested root entries
+        // (including forced debugger entries) keep the current job's set.
+        if (isRoot && threadContext->GetCallRootLevel() == 1)
+        {
+            ClearKeptObjects();
+        }
+
         if ((isRoot && threadContext->GetCallRootLevel() == 1) || isForcedEnd)
         {
             if (this->scriptEndEventHandler != nullptr)
@@ -2689,6 +2704,19 @@ ExitTempAllocator:
                 this->scriptEndEventHandler(this);
             }
         }
+    }
+
+    void ScriptContext::KeepDuringJob(RecyclableObject* object)
+    {
+        GetThreadContext()->KeepDuringJob(object);
+    }
+
+    void ScriptContext::ClearKeptObjects()
+    {
+        // The kept set is thread/agent-wide, not per ScriptContext. A
+        // cross-realm target added from this context is cleared by the
+        // outermost root call, whichever realm owns that call.
+        GetThreadContext()->ClearKeptObjects();
     }
 
 #ifdef FAULT_INJECTION

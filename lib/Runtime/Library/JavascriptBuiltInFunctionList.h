@@ -590,5 +590,9 @@ BUILTIN(ArrayBuffer, GetterResizable, EntryGetterResizable, FunctionInfo::ErrorO
 BUILTIN(ArrayBuffer, Resize, EntryResize, FunctionInfo::ErrorOnNew)
 BUILTIN(ArrayBuffer, Transfer, EntryTransfer, FunctionInfo::ErrorOnNew)
 BUILTIN(ArrayBuffer, TransferToFixedLength, EntryTransferToFixedLength, FunctionInfo::ErrorOnNew)
+// Appended after the existing entries so every pre-existing BuiltInEnum value
+// (and therefore checked-in built-in bytecode) stays stable.
+BUILTIN(JavascriptWeakRef, NewInstance, NewInstance, FunctionInfo::SkipDefaultNewObject)
+BUILTIN(JavascriptWeakRef, Deref, EntryDeref, FunctionInfo::ErrorOnNew)
 
 #undef BUILTIN_TEMPLATE

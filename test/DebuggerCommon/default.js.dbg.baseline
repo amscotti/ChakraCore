@@ -9953,6 +9953,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "glob": "Object {...}"
     },
     "arguments": {
@@ -9974,6 +9975,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "glob": "Object {...}"
     },
     "locals": {
@@ -10005,6 +10007,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "glob": "Object {...}"
     },
     "locals": {
@@ -10033,6 +10036,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "glob": "Object {...}"
     },
     "locals": {
@@ -10046,8 +10050,8 @@
       },
       "c": {
         "#__proto__": "function <large string>",
-        "name": "string c",
-        "length": "number 0"
+        "length": "number 0",
+        "name": "string c"
       },
       "arguments": {
         "#__proto__": "Object {...}",
@@ -10069,6 +10073,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "glob": "Object {...}"
     },
     "arguments": {
@@ -10090,6 +10095,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "glob": "Object {...}"
     },
     "locals": {
@@ -10115,6 +10121,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "glob": "Object {...}"
     },
     "locals": {
@@ -10136,14 +10143,15 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "glob": "Object {...}"
     },
     "locals": {
       "a": "number 1",
       "b": {
         "#__proto__": "function <large string>",
-        "name": "string b",
-        "length": "number 0"
+        "length": "number 0",
+        "name": "string b"
       },
       "arguments": {
         "#__proto__": "Object {...}",
@@ -10165,6 +10173,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "glob": "Object {...}"
     },
     "arguments": {
@@ -10187,6 +10196,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "glob": "Object {...}"
     },
     "locals": {
@@ -10202,10 +10212,10 @@
       "arguments": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
+        "length": "number 0",
         "name": "string arguments",
         "caller": "object null",
-        "arguments": "object null",
-        "length": "number 0"
+        "arguments": "object null"
       },
       "d": {
         "#__proto__": "Object {...}",
@@ -10226,6 +10236,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "glob": "Object {...}"
     },
     "arguments": {
@@ -10247,6 +10258,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "glob": "Object {...}"
     },
     "locals": {
@@ -10261,10 +10273,10 @@
       "arguments": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
+        "length": "number 0",
         "name": "string arguments",
         "caller": "object null",
-        "arguments": "object null",
-        "length": "number 0"
+        "arguments": "object null"
       },
       "c": {
         "#__proto__": "Object {...}",
@@ -10285,6 +10297,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "glob": "Object {...}"
     },
     "locals": {
@@ -10324,6 +10337,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "glob": "Object {...}"
     },
     "locals": {
@@ -10337,16 +10351,16 @@
       },
       "c": {
         "#__proto__": "function <large string>",
-        "name": "string c",
-        "length": "number 0"
+        "length": "number 0",
+        "name": "string c"
       },
       "arguments": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
+        "length": "number 0",
         "name": "string arguments",
         "caller": "object null",
-        "arguments": "object null",
-        "length": "number 0"
+        "arguments": "object null"
       },
       "d": {
         "#__proto__": "Object {...}",
@@ -10366,10 +10380,10 @@
       "arguments": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
+        "length": "number 0",
         "name": "string arguments",
         "caller": "object null",
-        "arguments": "object null",
-        "length": "number 0"
+        "arguments": "object null"
       }
     }
   },
@@ -10379,6 +10393,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "glob": "Object {...}"
     },
     "arguments": {
@@ -10392,8 +10407,8 @@
       "a": "number 1",
       "b": {
         "#__proto__": "function <large string>",
-        "name": "string b",
-        "length": "number 0"
+        "length": "number 0",
+        "name": "string b"
       },
       "c": "undefined undefined"
     },
@@ -10405,6 +10420,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "glob": "Object {...}"
     },
     "arguments": {
@@ -10418,8 +10434,8 @@
       "a": "number 1",
       "b": {
         "#__proto__": "function <large string>",
-        "name": "string b",
-        "length": "number 0"
+        "length": "number 0",
+        "name": "string b"
       },
       "d": "undefined undefined",
       "c": "number 11"
@@ -10432,6 +10448,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "glob": "Object {...}"
     },
     "arguments": {
@@ -10445,14 +10462,14 @@
       "a": "number 1",
       "b": {
         "#__proto__": "function <large string>",
-        "name": "string b",
-        "length": "number 0"
+        "length": "number 0",
+        "name": "string b"
       },
       "d": "number 1",
       "c": {
         "#__proto__": "function <large string>",
-        "name": "string c",
-        "length": "number 0"
+        "length": "number 0",
+        "name": "string c"
       }
     },
     "globals": {
@@ -10466,6 +10483,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "glob": "Object {...}"
     },
     "arguments": {
@@ -10479,8 +10497,8 @@
       "a": "number 1",
       "b": {
         "#__proto__": "function <large string>",
-        "name": "string b",
-        "length": "number 0"
+        "length": "number 0",
+        "name": "string b"
       },
       "c": "undefined undefined"
     },
@@ -10492,6 +10510,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "glob": "Object {...}"
     },
     "arguments": {
@@ -10505,16 +10524,16 @@
       "a": "number 1",
       "b": {
         "#__proto__": "function <large string>",
-        "name": "string b",
-        "length": "number 0"
+        "length": "number 0",
+        "name": "string b"
       },
       "c": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
+        "length": "number 0",
         "name": "string c",
         "caller": "object null",
-        "arguments": "object null",
-        "length": "number 0"
+        "arguments": "object null"
       },
       "d": "undefined undefined"
     },
@@ -10526,6 +10545,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "glob": "Object {...}"
     },
     "arguments": {
@@ -10539,16 +10559,16 @@
       "a": "number 1",
       "b": {
         "#__proto__": "function <large string>",
-        "name": "string b",
-        "length": "number 0"
+        "length": "number 0",
+        "name": "string b"
       },
       "c": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
+        "length": "number 0",
         "name": "string c",
         "caller": "object null",
-        "arguments": "object null",
-        "length": "number 0"
+        "arguments": "object null"
       },
       "d": "number 1"
     },
@@ -10570,10 +10590,10 @@
       "c": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
+        "length": "number 0",
         "name": "string c",
         "caller": "object null",
-        "arguments": "object null",
-        "length": "number 0"
+        "arguments": "object null"
       }
     }
   }

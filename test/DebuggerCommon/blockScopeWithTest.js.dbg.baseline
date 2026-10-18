@@ -2,6 +2,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "blockScopeWithTestFunc": "function <large string>"
     },
     "arguments": {
@@ -29,6 +30,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "blockScopeWithTestFunc": "function <large string>"
     },
     "arguments": {
@@ -54,6 +56,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "blockScopeWithTestFunc": "function <large string>"
     },
     "arguments": {
@@ -78,6 +81,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "blockScopeWithTestFunc": "function <large string>"
     },
     "arguments": {

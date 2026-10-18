@@ -1348,6 +1348,11 @@ private:
         void OnScriptStart(bool isRoot, bool isScript);
         void OnScriptEnd(bool isRoot, bool isForcedEnd);
 
+        // ES WeakRef AddToKeptObjects/KeepDuringJob. Targets stay strongly
+        // reachable until the end of the current root host call/job.
+        void KeepDuringJob(RecyclableObject* object);
+        void ClearKeptObjects();
+
         template <bool stackProbe, bool leaveForHost>
         bool LeaveScriptStart(void * frameAddress);
         template <bool leaveForHost>

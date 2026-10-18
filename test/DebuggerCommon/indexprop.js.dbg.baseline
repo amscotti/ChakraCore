@@ -158,6 +158,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "WeakRef": "function <large string>",
       "[200]": "string 200"
     },
     "locals": {

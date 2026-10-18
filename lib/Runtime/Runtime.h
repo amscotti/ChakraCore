@@ -194,6 +194,7 @@ namespace Js
     class JavascriptSet;
     class JavascriptWeakMap;
     class JavascriptWeakSet;
+    class JavascriptWeakRef;
     class DynamicObject;
     class HostObjectBase;
     class RootObjectBase;
