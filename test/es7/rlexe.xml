@@ -246,6 +246,12 @@
   </test>
   <test>
     <default>
+      <files>weakref.js</files>
+      <compile-flags>-CollectGarbage -args summary -endargs</compile-flags>
+    </default>
+  </test>
+  <test>
+    <default>
       <files>blockscope-early-errors.js</files>
       <compile-flags>-args summary -endargs</compile-flags>
     </default>

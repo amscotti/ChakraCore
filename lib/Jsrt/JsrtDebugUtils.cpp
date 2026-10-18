@@ -273,6 +273,7 @@ void JsrtDebugUtils::AddPropertyType(Js::DynamicObject * object, Js::IDiagObject
         case Js::TypeIds_Set:
         case Js::TypeIds_WeakMap:
         case Js::TypeIds_WeakSet:
+        case Js::TypeIds_WeakRef:
         case Js::TypeIds_SymbolObject:
         case Js::TypeIds_Generator:
         case Js::TypeIds_AsyncGenerator:
@@ -478,6 +479,7 @@ const char16 * JsrtDebugUtils::GetClassName(Js::TypeId typeId)
     case Js::TypeIds_Set:                   return _u("Set");
     case Js::TypeIds_WeakMap:               return _u("WeakMap");
     case Js::TypeIds_WeakSet:               return _u("WeakSet");
+    case Js::TypeIds_WeakRef:               return _u("WeakRef");
     case Js::TypeIds_SymbolObject:          return _u("Symbol");
     case Js::TypeIds_Generator:             return _u("Generator");
     case Js::TypeIds_AsyncGenerator:        return _u("AsyncGenerator");

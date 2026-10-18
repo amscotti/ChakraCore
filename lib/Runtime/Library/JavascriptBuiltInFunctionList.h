@@ -584,4 +584,9 @@ BUILTIN(DataView, GetFloat16, EntryGetFloat16, FunctionInfo::ErrorOnNew)
 BUILTIN(DataView, SetFloat16, EntrySetFloat16, FunctionInfo::ErrorOnNew)
 BUILTIN(Math, F16round, F16round, FunctionInfo::ErrorOnNew)
 
+// Appended after the existing entries so every pre-existing BuiltInEnum value
+// (and therefore checked-in built-in bytecode) stays stable.
+BUILTIN(JavascriptWeakRef, NewInstance, NewInstance, FunctionInfo::SkipDefaultNewObject)
+BUILTIN(JavascriptWeakRef, Deref, EntryDeref, FunctionInfo::ErrorOnNew)
+
 #undef BUILTIN_TEMPLATE

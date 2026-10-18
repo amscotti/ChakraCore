@@ -346,6 +346,7 @@ namespace Js
         Field(DynamicType *) setType;
         Field(DynamicType *) weakMapType;
         Field(DynamicType *) weakSetType;
+        Field(DynamicType *) weakRefType;
         Field(DynamicType *) proxyType;
         Field(StaticType  *) withType;
         Field(DynamicType *) SpreadArgumentType;
@@ -804,6 +805,7 @@ namespace Js
         DynamicType * GetSetType() const { return setType; }
         DynamicType * GetWeakMapType() const { return weakMapType; }
         DynamicType * GetWeakSetType() const { return weakSetType; }
+        DynamicType * GetWeakRefType() const { return weakRefType; }
         DynamicType * GetArrayIteratorType() const { return arrayIteratorType; }
         DynamicType * GetMapIteratorType() const { return mapIteratorType; }
         DynamicType * GetSetIteratorType() const { return setIteratorType; }
@@ -939,6 +941,7 @@ namespace Js
         JavascriptSet* CreateSet();
         JavascriptWeakMap* CreateWeakMap();
         JavascriptWeakSet* CreateWeakSet();
+        JavascriptWeakRef* CreateWeakRef(RecyclableObject* target);
         JavascriptError* CreateError();
         JavascriptError* CreateError(DynamicType* errorType, BOOL isExternal = FALSE);
         JavascriptError* CreateExternalError(ErrorTypeEnum errorTypeEnum);
@@ -1288,6 +1291,7 @@ namespace Js
         STANDARD_INIT(Set);
         STANDARD_INIT(WeakMap);
         STANDARD_INIT(WeakSet);
+        STANDARD_INIT(WeakRef);
         STANDARD_INIT(Promise);
         STANDARD_INIT(GeneratorFunction);
         STANDARD_INIT(AsyncFunction);

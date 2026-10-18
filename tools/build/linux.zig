@@ -5,7 +5,7 @@
 //! B4.3: Linux x86_64 build graph (test profile only).
 //!
 //! Native x86_64 Linux, shared/JIT-on, RelWithDebInfo Test, system ICU,
-//! glibc 2.39 floor. 682 compiles (Backend/WasmReader/wabt included),
+//! glibc 2.39 floor. 683 compiles (Backend/WasmReader/wabt included),
 //! static + 3 singular archives, libChakraCore.so, dynamic ch, GCStress,
 //! staged headers, plus the `check` aggregation (regression, bytecode,
 //! native embedding, smoke, metadata) and `check-selftest` controls.
@@ -424,8 +424,8 @@ pub fn build(b: *std.Build) void {
             n += 1;
         }
     }
-    std.debug.assert(n == 682);
-    std.debug.assert(objs.count() == 682);
+    std.debug.assert(n == 683);
+    std.debug.assert(objs.count() == 683);
 
     // Archives via `zig ar` (reference: cmake `ar qc` + ranlib; member
     // order is the reference edge order).

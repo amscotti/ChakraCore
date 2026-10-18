@@ -375,6 +375,10 @@ namespace Js
             DynamicType::New(scriptContext, TypeIds_Object, objectPrototype, nullptr,
             DeferredTypeHandler<InitializeWeakSetPrototype, DefaultDeferredTypeFilter, true>::GetDefaultInstance()));
 
+        weakRefPrototype = DynamicObject::New(recycler,
+            DynamicType::New(scriptContext, TypeIds_Object, objectPrototype, nullptr,
+            DeferredTypeHandler<InitializeWeakRefPrototype, DefaultDeferredTypeFilter, true>::GetDefaultInstance()));
+
         if (scriptContext->GetConfig()->IsES2018AsyncIterationEnabled())
         {
             asyncIteratorPrototype = DynamicObject::New(recycler,
@@ -779,6 +783,9 @@ namespace Js
             PathTypeHandlerNoAttr::New(scriptContext, this->GetRootPath(), 0, 0, 0, true, true), true, true);
 
         weakSetType = DynamicType::New(scriptContext, TypeIds_WeakSet, weakSetPrototype, nullptr,
+            PathTypeHandlerNoAttr::New(scriptContext, this->GetRootPath(), 0, 0, 0, true, true), true, true);
+
+        weakRefType = DynamicType::New(scriptContext, TypeIds_WeakRef, weakRefPrototype, nullptr,
             PathTypeHandlerNoAttr::New(scriptContext, this->GetRootPath(), 0, 0, 0, true, true), true, true);
 
         TypePath *const iteratorResultPath = TypePath::New(recycler);
@@ -1776,6 +1783,12 @@ namespace Js
         weakSetConstructor = CreateBuiltinConstructor(&JavascriptWeakSet::EntryInfo::NewInstance,
             DeferredTypeHandler<InitializeWeakSetConstructor>::GetDefaultInstance());
         AddFunction(globalObject, PropertyIds::WeakSet, weakSetConstructor);
+
+        // WeakRef is a newer built-in; use a tracked dynamic property id so
+        // the checked-in built-in bytecode property-id table stays stable.
+        weakRefConstructor = CreateBuiltinConstructor(&JavascriptWeakRef::EntryInfo::NewInstance,
+            DeferredTypeHandler<InitializeWeakRefConstructor>::GetDefaultInstance());
+        AddFunction(globalObject, scriptContext->GetOrAddPropertyIdTracked(_u("WeakRef")), weakRefConstructor);
 
         if (scriptContext->GetConfig()->IsESIteratorHelpersEnabled())
         {
@@ -4770,6 +4783,38 @@ namespace Js
         return true;
     }
 
+    bool JavascriptLibrary::InitializeWeakRefConstructor(DynamicObject* weakRefConstructor, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)
+    {
+        typeHandler->Convert(weakRefConstructor, mode, 3);
+        JavascriptLibrary* library = weakRefConstructor->GetLibrary();
+        ScriptContext* scriptContext = weakRefConstructor->GetScriptContext();
+        library->AddMember(weakRefConstructor, PropertyIds::length, TaggedInt::ToVarUnchecked(1), PropertyConfigurable);
+        library->AddMember(weakRefConstructor, PropertyIds::prototype, library->weakRefPrototype, PropertyNone);
+        library->AddMember(weakRefConstructor, PropertyIds::name, library->CreateStringFromCppLiteral(_u("WeakRef")), PropertyConfigurable);
+
+        weakRefConstructor->SetHasNoEnumerableProperties(true);
+
+        return true;
+    }
+
+    bool JavascriptLibrary::InitializeWeakRefPrototype(DynamicObject* weakRefPrototype, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)
+    {
+        typeHandler->Convert(weakRefPrototype, mode, 3);
+        ScriptContext* scriptContext = weakRefPrototype->GetScriptContext();
+        JavascriptLibrary* library = weakRefPrototype->GetLibrary();
+        library->AddMember(weakRefPrototype, PropertyIds::constructor, library->weakRefConstructor);
+        library->AddFunctionToLibraryObjectWithPropertyName(weakRefPrototype, _u("deref"), &JavascriptWeakRef::EntryInfo::Deref, 0);
+
+        if (scriptContext->GetConfig()->IsES6ToStringTagEnabled())
+        {
+            library->AddMember(weakRefPrototype, PropertyIds::_symbolToStringTag, library->CreateStringFromCppLiteral(_u("WeakRef")), PropertyConfigurable);
+        }
+
+        weakRefPrototype->SetHasNoEnumerableProperties(true);
+
+        return true;
+    }
+
     bool JavascriptLibrary::InitializeWeakSetConstructor(DynamicObject* weakSetConstructor, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)
     {
         typeHandler->Convert(weakSetConstructor, mode, 3);
@@ -6435,6 +6480,25 @@ namespace Js
     {
         AssertMsg(weakSetType, "Where's weakSetType?");
         return RecyclerNewFinalized(this->GetRecycler(), JavascriptWeakSet, weakSetType);
+    }
+
+    JavascriptWeakRef* JavascriptLibrary::CreateWeakRef(RecyclableObject* target)
+    {
+        AssertMsg(weakRefType, "Where's weakRefType?");
+        Recycler* recycler = this->GetRecycler();
+
+        // Host dispatch/external values without a recycler allocation cannot
+        // participate in the weak-reference map. NewInstance rejects a null
+        // result with TypeError before anything is published.
+        RecyclerHeapObjectInfo objectInfo;
+        if (!recycler->FindHeapObject(target, FindHeapObjectFlags_NoFlags, objectInfo))
+        {
+            return nullptr;
+        }
+
+        RecyclerWeakReference<RecyclableObject>* targetWeakRef = nullptr;
+        recycler->FindOrCreateWeakReferenceHandle(target, &targetWeakRef);
+        return RecyclerNew(recycler, JavascriptWeakRef, weakRefType, targetWeakRef);
     }
 
     JavascriptPromise* JavascriptLibrary::CreatePromise()

@@ -136,6 +136,7 @@ namespace Js
       TypeIds_ModuleNamespace = 85,
       TypeIds_ListIterator = 86,
       TypeIds_ExternalIterator = 87,
+      TypeIds_WeakRef = 88,
       TypeIds_Limit //add a new TypeId before TypeIds_Limit or before TypeIds_LastTrueJavascriptObjectType
   };
 }

@@ -33,6 +33,7 @@
     <ClCompile Include="$(MsBuildThisFileDirectory)JavascriptSymbolObject.cpp" />
     <ClCompile Include="$(MsBuildThisFileDirectory)JavascriptWeakMap.cpp" />
     <ClCompile Include="$(MsBuildThisFileDirectory)JavascriptWeakSet.cpp" />
+    <ClCompile Include="$(MsBuildThisFileDirectory)JavascriptWeakRef.cpp" />
     <ClCompile Include="$(MsBuildThisFileDirectory)javascripttypednumber.cpp" />
     <ClCompile Include="$(MsBuildThisFileDirectory)JSONParser.cpp" />
     <ClCompile Include="$(MsBuildThisFileDirectory)JSONScanner.cpp" />
@@ -156,6 +157,7 @@
     <ClInclude Include="JavascriptTypedNumber.h" />
     <ClInclude Include="JavascriptWeakMap.h" />
     <ClInclude Include="JavascriptWeakSet.h" />
+    <ClInclude Include="JavascriptWeakRef.h" />
     <ClInclude Include="JSONParser.h" />
     <ClInclude Include="JSONScanner.h" />
     <ClInclude Include="MapOrSetDataList.h" />

@@ -5739,6 +5739,7 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
             case TypeIds_Set:
             case TypeIds_WeakMap:
             case TypeIds_WeakSet:
+            case TypeIds_WeakRef:
             case TypeIds_ArrayIterator:
             case TypeIds_MapIterator:
             case TypeIds_SetIterator:
