@@ -10,11 +10,12 @@ Windows ARM64 frame the backend was written for, and the steps still required
 before the branch can merge.
 
 Read [Current state and handoff](#current-state-and-handoff) before editing.
-The port is committed on `jit/arm64-macos`: `07d6965e8` (`jit: native ARM64
-macOS port`), `2372fcc81` (JIT build/runtime/bytecode checks), `9ccc535a8`
-(XData lifecycle + installer symlink hardening), `fcbc434c9` (generator
-write-barrier and empty-page leaks), and `9e1e4cb55` (full 64-bit
-InlineeCallInfo label). The branch tip is `9e1e4cb55`; it is not merged.
+The functional work is committed on `jit/arm64-macos`: `07d6965e8` (`jit:
+native ARM64 macOS port`), `2372fcc81` (JIT build/runtime/bytecode checks),
+`9ccc535a8` (XData lifecycle + installer symlink hardening), `fcbc434c9`
+(generator write-barrier and empty-page leaks), and `9e1e4cb55` (full 64-bit
+InlineeCallInfo label). This milestone record is committed on top. The local
+tag `jit-arm64-macos-m1` marks the checkpoint; the branch is not merged.
 The installed binary is `out/jit/bin/libChakraCore.dylib`, 26238584 bytes,
 timestamp 2026-10-18 13:58. `out/jit/bin/ch` is the host (788320 bytes); it
 dlopens the sibling dylib, so trust the dylib timestamp. The suite logs named
@@ -26,6 +27,47 @@ Path convention: `<worktree>` is this checkout, and
 `modernize/baseline`. Bare `.js`, `.log`, and `.lldb` names refer to scratch
 files that may no longer exist. In commands, `$TMPDIR` is a scratch directory
 outside the repository.
+
+## Milestone M1 — functional ARM64 macOS JIT gate
+
+Recorded 2026-10-18. Local annotated tag: `jit-arm64-macos-m1` (not pushed).
+
+Scope: Apple ARM64 macOS only. This is the `jit/arm64-macos` worktree port,
+not B4 and not a C2 language batch. The language work stays on the
+modernization branch with `-DDISABLE_JIT=1`. The port is not merged.
+
+Functional gate, measured on `out/jit/bin/libChakraCore.dylib` (13:58,
+26,238,584 bytes):
+
+| Check | Result |
+|---|---|
+| `disable_jit` | **1973 / 0** |
+| `interpreted` | **2367 / 397** — all 397 are the asm.js/WASM feature gap; **zero signals** |
+| `dynapogo` | **1943 / 286** — all 286 are the asm.js/WASM feature gap; **zero signals** |
+| Default no-JIT `zig build check` | green: 1973/0, bytecode, native embedding, metadata |
+| `zig build -Dprofile=jit check` | green: generic smoke, native-symbol + hot-call/rest/apply smoke, `--jit` bytecode verify |
+
+What is closed: the debugger/async hang, all non-asm JIT suite failures, the
+generator-JIT segfaults, the ObjectSpread/concat W^X crashes, the fatal concat
+OOM, the generator-epilogue fault, the JIT-completed generator write-barrier
+leak, the empty-code-page leak, the two StackTrace inlining line diffs, and
+the build-gate/archive/installer defects listed in the swarm queue.
+
+What remains is the documented Mac asm.js/WASM feature gap: the profile does
+not define `ASMJS_PLAT`/`ENABLE_WASM`, and `test/runtests.py` pins
+`arch='x64'` on non-Windows, so the JIT variants run those tests and fail
+their baselines at exit 0. This is the same feature gap as the no-JIT Mac
+profile. Resolve it by a separate ARM64 asm.js/WASM port or an explicit,
+reviewed platform exclusion; do not filter the tests or alter the 1973/0
+no-JIT gate.
+
+Non-blocking follow-ups are listed in
+[Known open engine issues](#known-open-engine-issues) and the
+[Swarm review queue](#swarm-review-queue): JIT-generator
+`arguments.callee` identity, the 4 KiB logical/16 KiB host custom-heap page
+waste, direct-embedder PAL protection semantics, helper-call homing
+discrepancy, suspended-coroutine bytecode lifetime across debugger reparse,
+and unbuilt Windows/ARM32/TTD/hardened-entitlement paths.
 
 ## Current state and handoff
 
