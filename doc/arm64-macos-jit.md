@@ -12,10 +12,11 @@ before the branch can merge.
 Read [Current state and handoff](#current-state-and-handoff) before editing.
 The port is committed on `jit/arm64-macos`: `07d6965e8` (`jit: native ARM64
 macOS port`), `2372fcc81` (JIT build/runtime/bytecode checks), `9ccc535a8`
-(XData lifecycle + installer symlink hardening), and `fcbc434c9` (generator
-write-barrier and empty-page leaks). The branch tip is `fcbc434c9`; it is not
-merged. The installed binary is `out/jit/bin/libChakraCore.dylib`, 26238584
-bytes, timestamp 2026-10-18 13:58. `out/jit/bin/ch` is the host (788320 bytes); it
+(XData lifecycle + installer symlink hardening), `fcbc434c9` (generator
+write-barrier and empty-page leaks), and `9e1e4cb55` (full 64-bit
+InlineeCallInfo label). The branch tip is `9e1e4cb55`; it is not merged.
+The installed binary is `out/jit/bin/libChakraCore.dylib`, 26238584 bytes,
+timestamp 2026-10-18 13:58. `out/jit/bin/ch` is the host (788320 bytes); it
 dlopens the sibling dylib, so trust the dylib timestamp. The suite logs named
 below are ephemeral local artifacts from the original runs; they are not
 checked in.
@@ -45,7 +46,8 @@ try/finally shapes. The three suite runs below were rerun on the 13:08 binary
 - `interpreted` is **2367/397** (`jit-interpreted-inline.log`): 397 asm.js/WASM
   failures, zero signals. The two StackTrace line diffs are fixed.
 
-The branch is committed (`07d6965e8`, follow-up `2372fcc81`) but not merged.
+The branch is committed (`07d6965e8`, `2372fcc81`, `9ccc535a8`, `fcbc434c9`,
+`9e1e4cb55`) but not merged.
 `zig build -Dprofile=jit check` runs the generic smoke, `check_jit.py`, and
 `verify_bytecode_pure.py --jit --verify`. The JIT static archive is
 deterministic (`ZERO_AR_DATE=1`, epoch/0:0 member metadata). The base object
@@ -225,10 +227,9 @@ the [swarm review queue](#swarm-review-queue).
 A multi-lens review swarm (architecture, ABI, memory/GC, concurrency, build,
 test evidence, security, and full-diff hygiene) produced this deduplicated
 queue. All P1 merge blockers and the build-system findings are closed; the
-P2/P3 items below are a mix of fixed-in-working-tree, open, pre-existing, or
-documented gaps. Runtime fixes landed on the 20:39 binary; build/test fixes
-landed in `07d6965e8` and `2372fcc81`; the FDE/allocator/installer fixes are
-in the working tree pending the next commit.
+P2/P3 items below are a mix of fixed, open, pre-existing, or documented gaps.
+Runtime fixes landed across `07d6965e8`, `9ccc535a8`, `fcbc434c9`, and
+`9e1e4cb55`; build/test fixes landed in `2372fcc81`.
 
 **Resolved**
 
@@ -580,7 +581,8 @@ substitution: `ftell` on a FIFO is 0 and an empty script exits 0.
 Edits for this port go in the worktree only. The modernization checkout has
 carried unrelated uncommitted parser work during this effort; that work is not
 part of the JIT port and is not copied here. The port is committed as
-`07d6965e8` plus `2372fcc81`; it is not merged.
+`07d6965e8`, `2372fcc81`, `9ccc535a8`, `fcbc434c9`, and `9e1e4cb55`; it is
+not merged.
 
 The standing arrangement:
 
@@ -793,7 +795,8 @@ Do not attempt to modify these lowering methods without following Section 7.1.
 
 These are committed on `jit/arm64-macos` in `07d6965e8`; `2372fcc81` adds the
 JIT check gate, the deterministic archive, and the independent backend-count
-assert.
+assert; `9ccc535a8`, `fcbc434c9`, and `9e1e4cb55` add the lifecycle, GC, and
+inline-frame fixes.
 
 Build and install:
 
