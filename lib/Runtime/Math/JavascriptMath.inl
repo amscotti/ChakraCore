@@ -104,28 +104,18 @@ namespace Js
 
         inline double JavascriptMath::Decrement_Helper(Var aRight, ScriptContext* scriptContext)
         {
-    #if defined(DBG)
-            if (TaggedInt::Is(aRight))
-            {
-                // The only reason to be here is if TaggedInt increment underflowed
-                AssertMsg(aRight == TaggedInt::MinVal(), "TaggedInt decrement should be handled in generated code.");
-            }
-    #endif
-
+            // ToNumeric on an object wrapper can produce a tagged-int primitive
+            // here even though the ordinary generated-code path handles tagged
+            // ints directly. ToNumber below is valid for that primitive.
             double value = JavascriptConversion::ToNumber(aRight, scriptContext);
             return --value;
         }
 
         inline double JavascriptMath::Increment_Helper(Var aRight, ScriptContext* scriptContext)
         {
-    #if defined(DBG)
-            if (TaggedInt::Is(aRight))
-            {
-                // The only reason to be here is if TaggedInt increment overflowed
-                AssertMsg(aRight == TaggedInt::MaxVal(), "TaggedInt increment should be handled in generated code.");
-            }
-    #endif
-
+            // ToNumeric on an object wrapper can produce a tagged-int primitive
+            // here even though the ordinary generated-code path handles tagged
+            // ints directly. ToNumber below is valid for that primitive.
             double value = JavascriptConversion::ToNumber(aRight, scriptContext);
             return ++value;
         }
