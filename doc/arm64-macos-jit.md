@@ -1,25 +1,30 @@
 # ARM64 macOS JIT
 
-Status of the native JIT port for Apple ARM64, as of 2026-10-17. This is a
+Status of the native JIT port for Apple ARM64, as of 2026-10-18. This is a
 worktree effort. It is not a C2 language batch, and it is not milestone B4.
 B4 in [modernization-plan.md](modernization-plan.md) is the still-blocked
 Linux x64 JIT proof. The language work stays on the modernization branch,
 interpreted, with `-DDISABLE_JIT=1`. This document is the record of what the
 Mac JIT port has proved, how the Apple calling convention differs from the
 Windows ARM64 frame the backend was written for, and the steps still required
-before the worktree can merge.
+before the branch can merge.
 
 Read [Current state and handoff](#current-state-and-handoff) before editing.
-The functional edits are uncommitted. The branch tip is still `05809ff18`
-(`C2-S9: fix named-group finalize, indices identity, and d-flag restore`).
+The port is committed on `jit/arm64-macos`: `07d6965e8` (`jit: native ARM64
+macOS port`) is the port itself, and `2372fcc81` (`build: gate the JIT profile
+on runtime and bytecode checks`) is the follow-up. The branch tip is
+`2372fcc81`; it is not merged.
 The installed binary is `out/jit/bin/libChakraCore.dylib`, 26238216 bytes,
-timestamp 2026-10-17 20:39. `out/jit/bin/ch` is the host (787712 bytes);
-it dlopens the sibling dylib, so trust the dylib timestamp. The dynapogo
-and interpreted suite logs named below were measured on the 18:13/19:09
-builds from the same source; the final `disable_jit` gate was rerun on the
-19:27 binary. Older measurements in sections 5 and 7 name the dylib they
-were taken on. Do not treat a 10:21, 11:25, 12:52, 16:37, or 18:13 result
-as the current binary.
+timestamp 2026-10-18 11:32. `out/jit/bin/ch` is the host (788320 bytes); it
+dlopens the sibling dylib, so trust the dylib timestamp. The suite logs named
+below are ephemeral local artifacts from the original runs; they are not
+checked in.
+
+Path convention: `<worktree>` is this checkout, and
+`<modernization-checkout>` is the sibling ChakraCore checkout on
+`modernize/baseline`. Bare `.js`, `.log`, and `.lldb` names refer to scratch
+files that may no longer exist. In commands, `$TMPDIR` is a scratch directory
+outside the repository.
 
 ## Current state and handoff
 
@@ -27,15 +32,25 @@ The port compiles and runs JavaScript with the JIT on. Throw/catch works.
 An 8-argument `apply(arguments)` with default inlining works. `new.target`
 works for the argument counts that were measured. Generator JIT
 (`-JitES6Generators`) now runs all measured yield/resume/return/throw and
-try/finally shapes. The `disable_jit` gate is **1973/0**, rerun on the 19:27
-binary (`/tmp/jit-disable-final3.log`). `dynapogo` is **1943/286**
-(`/tmp/jit-dynapogo-final3.log`; the 19:09 run is `/tmp/jit-dynapogo-repair3.log`, 488.15 s): every failure is
-the documented asm.js/WASM feature gap and exits 0, so the signal count is
-zero. `interpreted` is **2365/399** (`/tmp/jit-interpreted-final3.log`,
-52.15 s): 397 asm.js/WASM failures plus the two StackTrace line-number
-diffs, zero signals. The final source is unchanged since those runs except
-for reverting an unsuccessful one-line stack-walker experiment; the 19:27
-rebuild is the same code. This tree has not been committed or merged.
+try/finally shapes. The three suite runs below were rerun on the 11:32 binary
+(`jit-*-batch3.log`); the 18:13 and 19:09 builds are not the same object set.
+
+- `disable_jit` is **1973/0** (`jit-disable-batch3.log`; 53.18 s in that log).
+  Wall time varies with host load: the prior 19:27 run was 42.51 s
+  (`jit-disable-final.log`) and the 19:09 run was 54.5 s
+  (`jit-disable-repair3.log`).
+- `dynapogo` is **1943/286** (`jit-dynapogo-batch3.log`, 488.03 s; the 19:09
+  run is `jit-dynapogo-repair3.log`, 488.15 s). Every failure is in an
+  asm.js/WASM folder and exits 0, so the signal count is zero.
+- `interpreted` is **2365/399** (`jit-interpreted-batch3.log`, 50.11 s): 397
+  asm.js/WASM failures plus the two StackTrace line-number diffs, zero signals.
+
+The branch is committed (`07d6965e8`, follow-up `2372fcc81`) but not merged.
+`zig build -Dprofile=jit check` runs the generic smoke, `check_jit.py`, and
+`verify_bytecode_pure.py --jit --verify`. The JIT static archive is
+deterministic (`ZERO_AR_DATE=1`, epoch/0:0 member metadata). The base object
+counts are 538 shared / 536 static; the JIT graph adds 89 backend TUs for 627
+shared.
 
 ### Second-pass fixes on the 16:37 dylib
 
@@ -51,7 +66,7 @@ focused repro; the full logs are named below.
   loop is split into profiled and unprofiled variants selected by
   `DoInterpreterProfile()` (`InterpreterStackFrame.cpp/.h`), including the TTD
   debug loop. The exact command exits 0 and `disable_jit` is 1973/0
-  (`/tmp/jit-disable-reviewfix.log`).
+  (`jit-disable-reviewfix.log`).
 - **Default no-JIT link.** `XDataAllocator.cpp` is in the common object graph
   even with `DISABLE_JIT=1`, but its Apple `mac_fde_wrapper` references were
   compiled unconditionally while `AssemblyCommon.cpp` defines the wrapper only
@@ -83,6 +98,9 @@ focused repro; the full logs are named below.
   not r12 (the ARM32 SCRATCH_REG). All `-JitES6Generators` rlexe variants pass.
 
 ### Third pass: per-thread MAP_JIT write windows (18:13 dylib; rebuilt 19:09)
+
+The 18:13 and 19:09 installs are separate object sets, not two names for one
+build. The 20:39 binary is the current one.
 
 The `PAGE_READWRITE` window from the second pass was still a process-wide
 `mprotect`. A background compiler thread in `BackwardPass` could enter
@@ -179,7 +197,7 @@ all are fixed on the 20:39 binary.
   object, argument 6 read `callInfo`, and an 8-argument read SIGSEGVed.
   `JavascriptStackWalker.cpp` now detects the eight-home native frame by its
   duplicated function/callInfo header and returns the contiguous caller image
-  at `fp+104`. `/tmp/fargs6.js` and `/tmp/fargs8.js` match the interpreter in
+  at `fp+104`. `fargs6.js` and `fargs8.js` match the interpreter in
   `-mic`, `-forceNative`, and `-nonative` modes.
 - **Decommit zero-fill did not flush the instruction cache.** ARM64's
   I-cache is not coherent with the `memset` stores. A standalone PAL probe
@@ -197,105 +215,110 @@ The swarm also confirmed the earlier per-thread MAP_JIT model with a standalone
 probe: `mprotect` after the first RWX transition fails with EACCES (13), a
 base-RX page cannot be written, a writer thread can toggle its own window
 while another thread executes the same page, and a thread created inside a
-parent's window starts write-protected. Open review items that are not
-runtime regressions (commit hygiene, JIT smoke coverage, pre-existing
-allocator/GC edge cases, entitlement documentation) are listed in the
-[swarm review queue](#swarm-review-queue).
+parent's window starts write-protected. Review items that were build hygiene
+or coverage gaps are closed; the remaining pre-existing allocator/GC edge
+cases, entitlement documentation, and latent robustness notes are listed in
+the [swarm review queue](#swarm-review-queue).
 
 ### Swarm review queue
 
 A multi-lens review swarm (architecture, ABI, memory/GC, concurrency, build,
 test evidence, security, and full-diff hygiene) produced this deduplicated
-queue. Items marked fixed are in the 20:39 binary; the rest are open,
-pre-existing, or documented gaps. P1 items are merge blockers.
+queue. All P1 merge blockers and the build-system findings are closed; the
+P2/P3 items below are a mix of fixed-in-working-tree, open, pre-existing, or
+documented gaps. Runtime fixes landed on the 20:39 binary; build/test fixes
+landed in `07d6965e8` and `2372fcc81`; the FDE/allocator/installer fixes are
+in the working tree pending the next commit.
 
-**P1 - merge blockers / required evidence**
+**Resolved**
 
-1. **The build-critical header was untracked.** Fixed by commit `07d6965e8`:
-   `lib/Backend/arm64/DarwinEhFrame.h` and `doc/arm64-macos-jit.md` are now
-   tracked and a clean checkout builds `-Dprofile=jit`. Keep both staged in
-   future commits.
-2. **The JIT `check` target did not exercise JIT code.** Fixed in this pass:
-   `zig build -Dprofile=jit check` now runs `tools/build/check_jit.py`
-   (requires the `NativeCodeGenerator` symbol and executes a hot
-   call/rest/apply script under both `-mic:1 -bgjit-` and
-   `-forceNative -off:simpleJit -bgJitDelay:0`) and
-   `verify_bytecode_pure.py --jit --verify`. The generic `check-smoke` remains
-   interpreter-only. `check_jit: PASS` and `Bytecode is up to date` were
-   observed on the current build.
-3. **`Function.prototype.arguments` read past the homes on native frames.**
-   Fixed on 20:39: `GetJavascriptArgs` now returns the contiguous caller image
-   when the eight-home signature is present. Repros `/tmp/fargs6.js` and
-   `/tmp/fargs8.js` match the interpreter.
-4. **Decommit zero-fill did not flush the I-cache.** Fixed on 20:39:
-   `FlushInstructionCache` is called after the JIT commit/decommit zero-fill.
-5. **Zero/overflow `VirtualProtect` size opened the thread-wide JIT write
-   window.** Fixed on 20:39: zero/wrapping sizes are rejected before the toggle.
+- **Build-critical files were untracked.** `07d6965e8` tracks
+  `lib/Backend/arm64/DarwinEhFrame.h` and this document. A clean checkout
+  builds `-Dprofile=jit`.
+- **The JIT `check` target did not exercise JIT code.** `zig build
+  -Dprofile=jit check` now runs `tools/build/check_jit.py` (requires the
+  `NativeCodeGenerator` symbol and executes a hot call/rest/apply script under
+  both `-mic:1 -bgjit-` and
+  `-forceNative -off:simpleJit -bgJitDelay:0`) and
+  `verify_bytecode_pure.py --jit --verify`. The generic `check-smoke` remains
+  interpreter-only. `check_jit: PASS` and `Bytecode is up to date` were
+  observed on the current build.
+- **`Function.prototype.arguments` read past the homes on native frames.**
+  Fixed on 20:39: `GetJavascriptArgs` now returns the contiguous caller image
+  when the eight-home signature is present. Repros `fargs6.js` and `fargs8.js`
+  match the interpreter.
+- **Decommit zero-fill did not flush the I-cache.** Fixed on 20:39:
+  `FlushInstructionCache` is called after the JIT commit/decommit zero-fill.
+- **Zero/overflow `VirtualProtect` size opened the thread-wide JIT write
+  window.** Fixed on 20:39: zero/wrapping sizes are rejected before the toggle.
+- **JIT static archive was not reproducible.** Fixed in `2372fcc81`: the
+  libtool step runs under `ZERO_AR_DATE=1`; `ar tv` shows the deterministic
+  `Dec 31 19:00 1969` / `0/0` member metadata for the 2.2 GB archive.
+- **`expect_total` was vacuous for the JIT graph.** Fixed in `2372fcc81`:
+  `backend_expected` is the independent sum of
+  `backend_group.{cxx,c,asm_files}.len`, asserted to be 89, and `backend_n`
+  is asserted against it. The shared JIT total is 538 + 89 = 627.
 
 **P2 - ownership, correctness, and release hardening**
 
-6. **Large-object OOM path can release a segment and then touch it.**
-   `CustomHeap.cpp` calls `Release(address, pages, segment)` and then
-   `ReleaseSecondary(xdata, segment)`; for a large allocation the first call
-   can reach `ReleaseSegment`, which destroys the segment. The second call is
-   a use-after-free. Pre-existing, narrow OOM path.
-7. **Empty small-object pages are removed from their bucket without
-   `ReleasePages`.** `CustomHeap.cpp` frees the `Page` node but not the code
-   page, so the segment cannot become fully free. Pre-existing page leak.
-8. **The custom heap fixes a 4 KiB logical page on a 16 KiB host page.**
-   `CustomHeap.h` caps `Page::MaxAllocationSize` at 4096 while
-   `AutoSystemInfo::PageSize` is 16384 on Apple ARM64; 12 KiB of every small
-   page is unusable and the page-sized fast path cannot match a 4 KiB
-   allocation. Pre-existing performance waste, not a correctness failure.
-9. **Completed generators leak software write-barrier registrations.**
-   `JavascriptGenerator::SetState(Completed)` nulls `frame`/`args.Values`, but
-   `Finalize` only unregisters non-null blocks. On non-Windows builds
-   `ForceSoftwareWriteBarrier` is on, so completed generators leave stale
-   entries in `pendingWriteBarrierBlockMap` for later rescans. Pre-existing GC
-   hygiene issue.
-10. **Codegen failure after FDE registration does not unregister on
-    non-Windows.** `CodeGenWorkItem::OnWorkItemProcessFail` cleans XData only
-    under `_WIN32`, then frees the allocation; the slot can be reused and a
-    later `Unregister` can deregister the wrong function's FDE. The
-    `xdataInfo` wrapper is also leaked on non-Windows cleanup. Pre-existing;
-    needs an owned FDE lifecycle.
-11. **PAL API inconsistencies on JIT regions.** `VirtualAlloc(MEM_COMMIT,
-    PAGE_READWRITE)` returns memory that is still write-protected for the
-    calling thread (`VirtualQuery` says writable); `VirtualFree(MEM_RELEASE)`
-    accepts an interior address and unmaps the whole region; `VirtualProtect`
-    queries and protects under separate lock acquisitions. Internal callers
-    compensate; the exported PAL contract is not safe for direct embedders.
-12. **Installer follows symlinked parent directories.** A planted
-    `out/jit/bin -> escape` or `out/jit/sub -> escape` lets `--map` write or
-    the orphan sweep delete outside `out/<profile>`. Pre-existing build-tool
-    security issue; resolve/refuse symlinked components.
-13. **JIT static archive was not reproducible.** Fixed in this pass:
-    the libtool step runs under `ZERO_AR_DATE=1`; `ar tv` now shows the
-    deterministic `Dec 31 19:00 1969` / `0/0` member metadata for the 2.2 GB
-    archive.
-14. **Helper calls are homed, contrary to the doc's ABI rule.** `LowerCall`
-    calls `HomeJsCallArgs` for any `argCount > 0`; helper calls with three
-    arguments (e.g. `HelperWMemCmp`, `HelperMemCpy`) therefore write x0-x2
-    into `[sp]` and raise the outgoing arg area. Focused tests pass; either
-    restrict homing to JS calls or update the contract and add a >8-arg helper
-    test.
-15. **JIT backend objects are linked after SCACore, not in CMake's position.**
-    The JIT dylib has a different initializer order (36 vs 32 init functions)
-    than the no-JIT build. No failure observed. The `build.zig` header now
-    discloses this as a known deviation; matching CMake would require
-    splitting the object-group link, which is not proven necessary.
-16. **`expect_total` was vacuous for the JIT graph.** Fixed in this pass:
-    `backend_expected` is the independent sum of
-    `backend_group.{cxx,c,asm_files}.len`, asserted to be 89, and `backend_n`
-    is asserted against it. The shared jit total is 538 + 89 = 627.
-17. **Remaining test gaps are documented, not hidden.** `interpreted` is
-    2365/399 (397 asm.js/WASM + the two StackTrace line diffs); `dynapogo` is
-    1943/286 (all asm.js/WASM); `disable_jit` is 1973/0. The asm.js/WASM gap
-    needs a separate ARM64 port or a documented platform exclusion; the
-    StackTrace line diffs are full-JIT inline call-site attribution and match
-    the baseline under `-off:inline`/`-nonative`.
+- **Large-object OOM path use-after-free — fixed in the working tree.**
+  `AllocLargeObject` now releases the secondary/xdata slot before
+  `Release(address, pages, segment)`; for allocations above
+  `maxAllocPageCount`, `Release` destroys the segment and its secondary
+  allocator. The pre-fix order was a genuine UAF. The `PrependNode == nullptr`
+  branch itself is still not deterministically injected.
+- **Empty small-object pages are removed from their bucket without
+  `ReleasePages`.** `CustomHeap.cpp` frees the `Page` node but not the code
+  page, so the segment cannot become fully free. Pre-existing page leak.
+- **The custom heap fixes a 4 KiB logical page on a 16 KiB host page.**
+  `CustomHeap.h` caps `Page::MaxAllocationSize` at 4096 while
+  `AutoSystemInfo::PageSize` is 16384 on Apple ARM64; 12 KiB of every small
+  page is unusable and the page-sized fast path cannot match a 4 KiB
+  allocation. Pre-existing performance waste, not a correctness failure.
+- **Completed generators leak software write-barrier registrations.**
+  `JavascriptGenerator::SetState(Completed)` nulls `frame`/`args.Values`, but
+  `Finalize` only unregisters non-null blocks. On non-Windows builds
+  `ForceSoftwareWriteBarrier` is on, so completed generators leave stale
+  entries in `pendingWriteBarrierBlockMap` for later rescans. Pre-existing GC
+  hygiene issue.
+- **Non-Windows FDE/XData ownership — fixed in the working tree, with one
+  test gap.** `CleanupXDataInfo` now deletes the standalone `HeapNewZ`
+  wrapper on non-Windows x64/ARM64 (normal cleanup previously leaked it) and
+  does not delete the interior `&allocation->xdata` on non-Windows ARM32.
+  `OnWorkItemProcessFail` gets a defensive early unregister for a future
+  post-registration failure. The `allocation`/`isAllocationCommitted` free
+  branch is inert in this tree, and `-InduceCodeGenFailure` throws before
+  registration, so the post-`Register` failure path is source-audited rather
+  than runtime-exercised.
+- **PAL API inconsistencies on JIT regions.** `VirtualAlloc(MEM_COMMIT,
+  PAGE_READWRITE)` returns memory that is still write-protected for the
+  calling thread (`VirtualQuery` says writable); `VirtualFree(MEM_RELEASE)`
+  accepts an interior address and unmaps the whole region; `VirtualProtect`
+  queries and protects under separate lock acquisitions. Internal callers
+  compensate; the exported PAL contract is not safe for direct embedders.
+- **Installer symlink escape — fixed in the working tree, with TOCTOU
+  residual.** The installer now rejects a symlinked `out/<profile>` root,
+  rejects every existing symlink component below the prefix (including
+  in-prefix aliases such as `linkdir -> real`), and requires bare
+  `--symlink` targets. `tools/build/test_build_tools.py` adds nine
+  temporary-fixture tests for the prefix/child/alias/orphan/target cases;
+  all 57 build-tool tests pass. Validation and mutation remain separate
+  syscalls, so a concurrent attacker can still race the check; there is no
+  cross-process lock and stale `.tmp` files are not swept.
+- **Helper calls are homed, contrary to the ABI rule in this document.**
+  `LowerCall` calls `HomeJsCallArgs` for any `argCount > 0`; helper calls with
+  three arguments (e.g. `HelperWMemCmp`, `HelperMemCpy`) therefore write x0-x2
+  into `[sp]` and raise the outgoing arg area. Focused tests pass, but this is
+  an unresolved exception to the platform-ABI rule. Either restrict homing to
+  JS calls or update the contract and add a >8-arg helper test.
+- **JIT backend objects are linked after SCACore, not in CMake's position.**
+  The JIT dylib has a different initializer order (36 vs 32 init functions)
+  than the no-JIT build. No failure observed. The `build.zig` header discloses
+  this as a known deviation; matching CMake would require splitting the
+  object-group link, which is not proven necessary. Accepted deviation, not
+  fixed.
 
-**P3 - cleanup and latent robustness**
+**P3 - open cleanup and latent robustness**
 
 - `XDATA_SIZE` 0x100 applies to every non-Windows ARM64 target, not just
   Apple; the Linux ARM64 path does not need the larger Darwin frame.
@@ -313,45 +336,50 @@ pre-existing, or documented gaps. P1 items are merge blockers.
   installer do not document or install the entitlement, and the installed
   binary is ad-hoc signed.
 - ARM32 and Windows behavior are inspection-only; no build/run evidence.
-- Doc hygiene: the dynapogo historical split is 285 asm + 1 non-asm exit-0
-  (not 284 + 2); the StackTraceLimit description understates repeated frames;
-  the disable_jit time is 42.5 s (not 54.5); the 18:13/19:09 builds are not
-  the same object set; the handoff should include the interpreted suite; the
-  `PDataManager` "Windows unwind codes" comment and the `PREAD|PWRITE|PEXEC`
-  comment are stale; the `DeepSeek Flash v4.1` agent-protocol sections and
-  absolute `/tmp`/`file:///` links should be rewritten before a public commit.
 
-### Proved on the 16:37 dylib (historical)
+**Documented gaps (not review actions)**
 
-This table is the second-pass evidence. The current 20:39 dylib keeps those
-results and adds the per-thread write-window fix, the `Function.prototype.
-arguments` caller-image fix, the decommit I-cache flush, and the zero-size
-`VirtualProtect` guard above. The suite table in
-[Suite results](#suite-results) has the current totals.
+- The asm.js/WASM feature gap and the two StackTrace line diffs are recorded in
+  [Suite results](#suite-results) and
+  [Known open engine issues](#known-open-engine-issues). The asm.js/WASM gap
+  needs a separate ARM64 port or an accepted platform exclusion. The StackTrace
+  diffs are inline call-site attribution and match the baseline under
+  `-off:inline`/`-nonative`; they are not execution failures.
 
-Host is `out/jit/bin/ch`. Short scripts were physical files under `/tmp`.
-A single call with `-mic:1` is still interpreted; the second call is the
-native one. Always pass `-bgjit-` with `-mic:1`.
+### Focused repros (historical)
+
+This table accumulated evidence across the port; each row is historical and
+names its binary where the distinction matters. It is not a claim that every
+row was rerun on the 20:39 binary. The current dylib keeps these results and
+adds the per-thread write-window fix, the `Function.prototype.arguments`
+caller-image fix, the decommit I-cache flush, and the zero-size
+`VirtualProtect` guard. The suite table in [Suite results](#suite-results) has
+the current totals.
+
+Host is `out/jit/bin/ch`. Short scripts were physical files in the scratch
+directory; the names below are ephemeral local artifacts. A single call with
+`-mic:1` is still interpreted; the second call is the native one. Always pass
+`-bgjit-` with `-mic:1`.
 
 | Check | Command shape | Result |
 |---|---|---|
 | `test/Function/apply3.js` | `-maxInterpretCount:1 -maxSimpleJitRunCount:1 -bgjit-` | Exit 0. Output matches `apply3.baseline`. The 8-argument line appears three times. |
 | `test/inlining/applyBugs.js` | Same flags. Working directory `test/inlining` (it loads `..\UnitTestFramework\UnitTestFramework.js`). | Exit 0. Six `PASSED` lines. |
-| Hot `apply(arguments)` of `(2, 3, NaN, null, undefined, false, "hello", o)` after direct calls of the callee | `/tmp/apply3_heat_direct.js`, same `-mic` flags | Exit 0, prints `val 2` through `[object Object]`, then `PASS`. |
-| Three inlined `show.apply(this, arguments)` calls | `/tmp/apply_probe.js` | Exit 0, call 3 prints every argument, `PASS`. |
-| Direct 8-argument `arguments[5]` and a formal | `/tmp/direct8.js` | Exit 0, `PASS`. |
-| Spread of 7 arguments, 50 iterations | `/tmp/test_spread.js` | Exit 0, `PASS`. |
-| Caught throw, 50 iterations | `/tmp/test_throw_50.js` | Exit 0, `PASS`. Still true on 12:52. |
-| `new.target` for 2, 4, 5, 7, and 10 user arguments, plus `super(1+2, foo(), ...[1,2,3])` | `/tmp/newtarget.js`, both the `-mic` flags and `-forceNative -off:simpleJit -bgJitDelay:0` | Exit 0, `PASS`. Count 5 must stay unbiased. Count 6 and above need the gap. |
+| Hot `apply(arguments)` of `(2, 3, NaN, null, undefined, false, "hello", o)` after direct calls of the callee | `apply3_heat_direct.js`, same `-mic` flags | Exit 0, prints `val 2` through `[object Object]`, then `PASS`. |
+| Three inlined `show.apply(this, arguments)` calls | `apply_probe.js` | Exit 0, call 3 prints every argument, `PASS`. |
+| Direct 8-argument `arguments[5]` and a formal | `direct8.js` | Exit 0, `PASS`. |
+| Spread of 7 arguments, 50 iterations | `test_spread.js` | Exit 0, `PASS`. |
+| Caught throw, 50 iterations | `test_throw_50.js` | Exit 0, `PASS`. Still true on 12:52. |
+| `new.target` for 2, 4, 5, 7, and 10 user arguments, plus `super(1+2, foo(), ...[1,2,3])` | `newtarget.js`, both the `-mic` flags and `-forceNative -off:simpleJit -bgJitDelay:0` | Exit 0, `PASS`. Count 5 must stay unbiased. Count 6 and above need the gap. |
 | `test/es6/ES6Class_SuperChain.js` | `-forceNative -off:simpleJit -bgJitDelay:0 -args summary -endargs -es6generators` | Prints `pass`, exit 0. On the 12:37 dylib, test 65 failed because `new.target` was the callee. |
 | `test/Strings/length.js` | `-mic` flags, and again with `-forceNative` | Exit 0. Previously a `SIGSEGV` on the 11:25 interpreted suite. |
 | `es6GeneratorJit/generator-jit-bugs.js` and `async-jit-bugs.js` | Every `rlexe.xml` entry: default `-mic` flags, `-JitES6Generators`, `-JitES6Generators -off:simplejit`, `-JitES6Generators -off:fulljit`, `-off:fulljit`; also the dynapogo flags | Exit 0, `pass`. Includes 31 `BailOutForGeneratorYield` records. Default `async-jit-bugs.js` was also 20/20 clean on the 18:13 dylib. |
-| `/tmp/gen_min.js` (two `it.next()`) | `-mic:1 -bgjit- -JitES6Generators` | `{"value":1,"done":false}` then `{"done":true}`, exit 0. |
+| `gen_min.js` (two `it.next()`) | `-mic:1 -bgjit- -JitES6Generators` | `{"value":1,"done":false}` then `{"done":true}`, exit 0. |
 | `test/Operators/strictequal.js` | Exact runner flags | Exit 0, output matches baseline. Previously fatal OOM. |
 | `test/es6/es6IsConcatSpreadable.js` | Exact runner flags (`-es6tolength`) plus `-forceNative -off:simpleJit -bgJitDelay:0` | Exit 0, `pass`; 20/20 clean on the 18:13 dylib. Previously fatal OOM and then `SIGBUS` 11/20. |
 | `test/Object/ObjectSpread_Limits.js` | Plain rlexe flags and `-forceNative -off:simpleJit -bgJitDelay:0` | 30/30 clean in each mode on the 18:13 dylib, output `pass`. Previously `SIGBUS` 10-16 times in 30. |
 | `test/DebuggerCommon/AsyncDynamicAttach.js` | Exact `-nonative` command | Exit 0 in ~0.04 s. Previously a 60 s hang. |
-| `/tmp/fargs6.js`, `/tmp/fargs8.js` (`Function.prototype.arguments`) | `-nonative`, `-mic:1 -bgjit-`, `-forceNative -off:simpleJit -bgJitDelay:0` | All print `6:1,2,3,4,5,6` / `8:1..8`. Before the 20:39 fix, 6 args read the function source for arg 5 and 8 args SIGSEGVed. |
+| `fargs6.js`, `fargs8.js` (`Function.prototype.arguments`) | `-nonative`, `-mic:1 -bgjit-`, `-forceNative -off:simpleJit -bgJitDelay:0` | All print `6:1,2,3,4,5,6` / `8:1..8`. Before the 20:39 fix, 6 args read the function source for arg 5 and 8 args SIGSEGVed. |
 | Decommit I-cache probe | `VirtualFree(MEM_DECOMMIT)` then a stale call | 0/200 stale calls and 200/200 SIGILL after `FlushInstructionCache`; before the flush, 200/200 returned the old value. |
 
 ### Suite results
@@ -368,9 +396,9 @@ one. On this Mac the runner still sets `arch='x64'` and applies
 
 | Variant | Binary | Log | Result |
 |---|---|---|---|
-| `interpreted` (`-maxInterpretCount:1 -maxSimpleJitRunCount:1 -bgjit-`) | 20:39 dylib | `/tmp/jit-interpreted-final3.log`, 52 s | `passed 2365, failed 399`. 397 failures are asm.js or WebAssembly with exit 0; 2 are StackTrace line-number diffs. Zero signals. `EH` 40/0, `TryCatch` 1/0. |
-| `dynapogo` (`-forceNative -off:simpleJit -bgJitDelay:0`) | 20:39 dylib | `/tmp/jit-dynapogo-final3.log` | `passed 1943, failed 286`. All 286 failures are asm.js / WebAssembly baseline mismatches with exit 0. Zero signals, zero non-asm failures. `apply3` and `applyBugs` are absent from the failure list. |
-| `disable_jit` (`-nonative`) | 20:39 dylib | `/tmp/jit-disable-final3.log`, 42.5 s | `passed 1973, failed 0`. The gate. Do not bump it. |
+| `interpreted` (`-maxInterpretCount:1 -maxSimpleJitRunCount:1 -bgjit-`) | 11:32 dylib | `jit-interpreted-batch3.log`, 50.11 s | `passed 2365, failed 399`. 397 failures are asm.js or WebAssembly with exit 0; 2 are StackTrace line-number diffs. Zero signals. `EH` 40/0, `TryCatch` 1/0. |
+| `dynapogo` (`-forceNative -off:simpleJit -bgJitDelay:0`) | 11:32 dylib | `jit-dynapogo-batch3.log`, 488.03 s | `passed 1943, failed 286`. All 286 failures are in asm.js / WebAssembly folders and exit 0. Zero signals. `apply3` and `applyBugs` are absent from the failure list. |
+| `disable_jit` (`-nonative`) | 11:32 dylib | `jit-disable-batch3.log`, 53.18 s | `passed 1973, failed 0`. The gate. Do not bump it. |
 
 All 286 dynapogo failures are the asm.js / WebAssembly baseline gap:
 123 `WasmSpec`, 92 `AsmJs`, 54 `wasm`, 14 `AsmJSFloat`, 2
@@ -385,24 +413,25 @@ that port as part of this worktree; B4 remains the separate Linux x64 proof.
 ### Remaining gaps after the third pass
 
 The debugger hang, the generator-JIT segfault, `ObjectSpread_Limits.js`,
-`strictequal.js`, and `es6IsConcatSpreadable.js` are closed. The 19:09
-`dynapogo` run has **no non-asm failures**: 1943 passed and all 286 failures
-are asm.js / WebAssembly baseline mismatches with exit 0. The two
-stack-trace line-number differences seen on an earlier inlining shape are
-not present in that run; they stay recorded under
+`strictequal.js`, and `es6IsConcatSpreadable.js` are closed. The 20:39
+`dynapogo` run has **no failures outside the asm.js/WASM folders**: 1943
+passed and all 286 failures exit 0. The 20:39
+`interpreted` run still has the two stack-trace line-number differences;
+`dynapogo` does not. They stay recorded under
 [Known open engine issues](#known-open-engine-issues) as an unfixed
-attribution issue in case another shape reproduces them.
+attribution issue.
 
 - `test/StackTrace/ErrorPrototype.js`: one frame reports
   `testErrorPrototypeChain (ErrorPrototype.js:41:5)` where the baseline wants
   `42:5`.
-- `test/StackTrace/StackTraceLimit.js`: a deep closure chain reports one extra
-  `Anonymous function (LongCallStackThrow.js:45:17)` frame before the
-  `47:13` frames.
+- `test/StackTrace/StackTraceLimit.js`: deeper recursion frames are
+  attributed to `Anonymous function (LongCallStackThrow.js:45:17)` where the
+  baseline expects `47:13`. The first mismatch is at baseline line 25; the
+  same `45:17` attribution repeats for the deeper frames.
 
 Both match the baseline with `-off:inline` and under `-nonative`; they are
-attribute mapping for inlined call sites, not execution failures. The exact
-repro is in "Known open engine issues" below.
+attribution mapping for inlined call sites, not execution failures. They are
+tracked under [Known open engine issues](#known-open-engine-issues).
 
 The asm.js and WebAssembly failures are the documented Mac feature gap, not
 compiler failures. The JIT profile is built for `aarch64-macos` and does not
@@ -438,11 +467,14 @@ them as fixed by this port.
   retain/rebase the old FunctionBody/bytecode and its operand metadata, or
   avoid reparsing live coroutine frames. This is an ownership change, not a
   one-line guard.
-- **Inlined call-site line attribution.** `StackTrace/ErrorPrototype.js` and
-  `StackTrace/StackTraceLimit.js` differ only in the line attributed to an
-  inlined caller (`-off:inline` matches the baseline). The native-address to
-  bytecode-offset map and the inlinee frame record are the places to
-  investigate; this is cosmetic and not a crash.
+- **Inlined call-site line attribution.** `StackTrace/ErrorPrototype.js`
+  reports one frame at `41:5` where the baseline wants `42:5`.
+  `StackTrace/StackTraceLimit.js` attributes deeper recursion frames to
+  `LongCallStackThrow.js:45:17` where the baseline expects `47:13`; the first
+  mismatch is at baseline line 25, and the same `45:17` attribution repeats
+  for the deeper frames. Both match the baseline with `-off:inline` and under
+  `-nonative`. The native-address to bytecode-offset map and the inlinee frame
+  record are the places to investigate; this is cosmetic and not a crash.
 - **TTD debug loop selection.** The TTD debug loop is split profiled/unprofiled
   and compile-verified, but there is no supported short TTD+debugger-action
   test in this tree. Record the gap rather than claiming it is exercised.
@@ -498,10 +530,11 @@ them as fixed by this port.
 
 ### Build, git, and trees
 
+From the worktree root:
+
 ```sh
-cd /Users/ascotti/Documents/code/ChakraCore-arm64-jit
-mise x -- zig build -Dprofile=jit > /tmp/chakra-jit-buildN.log 2>&1
-echo BUILD_EXIT:$? >> /tmp/chakra-jit-buildN.log
+mise x -- zig build -Dprofile=jit > "$TMPDIR/chakra-jit-buildN.log" 2>&1
+echo BUILD_EXIT:$? >> "$TMPDIR/chakra-jit-buildN.log"
 ```
 
 Trust `BUILD_EXIT` and a following `install_profile: out/jit:` line. libtool's
@@ -510,14 +543,14 @@ until the link finishes. An incremental `Lower.cpp` or `LowerMD.cpp` rebuild
 has been about one to two minutes. The shell tool's own exit status is the
 `echo`, which is 0 even when `zig build` failed, so read `BUILD_EXIT`.
 
-`git status` without `-C` hits the modernization checkout. Use
-`git -C /Users/ascotti/Documents/code/ChakraCore-arm64-jit`. That checkout
-currently has an unrelated uncommitted `lib/Parser/Parse.cpp`. Leave it
+Run `git` from the worktree root. If your shell starts in the modernization
+checkout, use `git -C <worktree>`. The modernization checkout may carry
+unrelated uncommitted parser work such as `lib/Parser/Parse.cpp`; leave it
 alone. Do not commit, push, merge, or rebase this worktree unless asked.
 Do not delete `out/jit/bin/libChakraCore.dylib`, `~/.cache/zig`, or the
-worktree `.zig-cache`. `rg` is not on `PATH` in the agent shell; `grep` is.
+worktree `.zig-cache`. `rg` is not on `PATH` in this shell; `grep` is.
 
-`lldb --batch -s /tmp/hot.lldb -- ch ...` works. A multi-line `script` block
+`lldb --batch -s "$TMPDIR/hot.lldb" -- ch ...` works. A multi-line `script` block
 in that file drops into the Python prompt and does not run. One `script`
 statement per line does. JIT code addresses change every run. At an
 `Add_Full` crash, the saved `fp` is the JIT callee; `[fp]` and `[fp+8]` are
@@ -534,12 +567,13 @@ substitution: `ftell` on a FIFO is 0 and an empty script exits 0.
 
 | Tree | Path | Branch | Role |
 |---|---|---|---|
-| Modernization checkout | `/Users/ascotti/Documents/code/ChakraCore` | `modernize/baseline` | Interpreter and language features. JIT stays compiled out. |
-| This worktree | `/Users/ascotti/Documents/code/ChakraCore-arm64-jit` | `jit/arm64-macos` | The only tree that builds the ARM64 backend. |
+| Modernization checkout | `<modernization-checkout>` | `modernize/baseline` | Interpreter and language features. JIT stays compiled out. |
+| This worktree | `<worktree>` | `jit/arm64-macos` | The only tree that builds the ARM64 backend. |
 
 Edits for this port go in the worktree only. The modernization checkout has
 carried unrelated uncommitted parser work during this effort; that work is not
-part of the JIT port and is not copied here.
+part of the JIT port and is not copied here. The port is committed as
+`07d6965e8` plus `2372fcc81`; it is not merged.
 
 The standing arrangement:
 
@@ -586,10 +620,9 @@ the suite.
 
 ## 3. How to build and run
 
-From the worktree, with Zig 0.17 on `PATH` through `mise`:
+From the worktree root, with Zig 0.17 on `PATH` through `mise`:
 
 ```sh
-cd /Users/ascotti/Documents/code/ChakraCore-arm64-jit
 mise x -- zig build -Dprofile=jit
 ```
 
@@ -603,9 +636,12 @@ arrays. Those stay off in the `test`, `debug-static`, and `release-shared`
 profiles.
 
 The profile installs to `out/jit/` and does not replace `zig-out/`. Its
-`zig build check` is a smoke of `out/jit/bin/ch` only
-(`build.zig`, the `profile == .jit` branch). It does not run the regression
-suite. The 1973/0 gate stays on the default test profile.
+`zig build check` runs the generic `check_smoke.py`, then `check_jit.py`
+(native backend symbol plus a hot call/rest/apply script under both `-mic:1
+-bgjit-` and `-forceNative -off:simpleJit -bgJitDelay:0`), then
+`verify_bytecode_pure.py --jit --verify` (`build.zig`, the `profile == .jit`
+branch). It does not run the regression suite. The 1973/0 gate stays on the
+default test profile.
 
 Useful host commands, all against `out/jit/bin/ch`:
 
@@ -622,7 +658,8 @@ script's output channel.
 
 The JIT static archive is about 2.2 GB because the objects are built with
 `-g`. Zig 0.17's archiver cannot write an archive that large. This profile
-calls `/usr/bin/libtool -static` instead. libtool prints `has no symbols` for
+calls `/usr/bin/libtool -static` under `ZERO_AR_DATE=1` instead, so member
+metadata is the deterministic epoch/0:0. libtool prints `has no symbols` for
 a few objects and then reprints the whole command line under `failed command:`.
 That reprint is noise when the build then prints `install_profile: out/jit:`
 and exits 0. A new archive content hash is a new file under `.zig-cache/o/`,
@@ -725,9 +762,11 @@ Who writes the image:
 - `GetOpndForArgSlot(..., jsStackImage: true)` places a stack argument at
   `[sp + slot * 8]` as well, so slot 8 is at `[sp + 64]` rather than at
   `[sp + 0]`. `LowerCallArgs` passes `jsStackImage true`.
-- Helper calls use `LowerCall(..., 0)` and are not homed. Their ninth integer
-  argument stays at `[sp + 0]`, which is the platform ABI. Do not home helper
-  calls.
+- Helper calls generally use `LowerCall(..., 0)` and are not homed. Their ninth
+  integer argument stays at `[sp + 0]`, which is the platform ABI. Do not home
+  helper calls. `LowerCall` nevertheless homes any call with `argCount > 0`,
+  so `HelperWMemCmp` (`lib/Backend/Lower.cpp:24564`) is a known exception; see
+  the P2 item in the review queue.
 - `arm64_CallFunction` (`lib/Runtime/Library/arm64/arm64_CallFunction.S`)
   writes `[function, callInfo, values…]` at the new stack pointer, leaves
   `x0`/`x1`, and reloads `x2`–`x7` only for slots the copy wrote. It must not
@@ -745,7 +784,9 @@ Do not attempt to modify these lowering methods without following Section 7.1.
 
 ### 5.1 Edits
 
-All of these are uncommitted modifications on `jit/arm64-macos`.
+These are committed on `jit/arm64-macos` in `07d6965e8`; `2372fcc81` adds the
+JIT check gate, the deterministic archive, and the independent backend-count
+assert.
 
 Build and install:
 
@@ -762,8 +803,12 @@ Executable JIT memory:
 
 - `pal/src/include/pal/virtual.h`, `pal/src/map/virtual.cpp`, and
   `lib/Common/Memory/VirtualAllocWrapper.cpp` reserve custom-heap segments
-  with `MEM_RESERVE_EXECUTABLE`, which PAL creates with `MAP_JIT`. Recycler
-  and ordinary heap allocations keep the normal mapping. The first commit of
+  with `MEM_RESERVE_EXECUTABLE`, which PAL creates with `MAP_JIT`.
+  `MEM_RESERVE_EXECUTABLE` is a PAL allocation flag defined in
+  `pal/inc/pal.h` for every target; it is not an Apple-only concept. The Apple
+  ARM64 branch adds it to the PAL reservation; the Windows PAL path keeps a
+  plain `MEM_RESERVE`. Recycler and ordinary heap allocations keep the normal
+  mapping. The first commit of
   each JIT page performs the one `mprotect` Apple Silicon accepts
   (`PROT_READ|PROT_WRITE|PROT_EXEC`) and zero-fills under a per-thread write
   window. After that, `VirtualProtect` on a JIT region never calls `mprotect`:
@@ -846,7 +891,9 @@ Unwind registration, DWARF `.eh_frame` through `mac_fde_wrapper`:
   file-scope `mac_fde_wrapper` (`__register_frame`/`__deregister_frame`) on
   Apple ARM64; they are not no-ops. Section 7.2 has the encoding and the
   SP-relative CFA. `ARM64UnwindEncoder` still emits Windows ARM64 unwind codes
-  for the non-Apple path. `lib/Common/PlatformAgnostic/AssemblyCommon.h` still
+  for the non-Apple path; the comment in `PDataManager.cpp` that "ARM64 still
+  emits Windows unwind codes" is therefore true only for non-Apple ARM64.
+  `lib/Common/PlatformAgnostic/AssemblyCommon.h` still
   calls `__register_frame` on its ARM64 branch and was left unchanged: editing
   that header rebuilds the world, and AMD64 still uses `mac_fde_wrapper`.
 
@@ -998,8 +1045,8 @@ empty, and the process exits 0.
 ### 5.5 Second-pass fixes on the 16:37 dylib
 
 These are the compiler and allocator fixes that closed the remaining
-non-asm suite failures. They extend the uncommitted worktree diff; none is a
-language batch or a B4 change.
+non-asm suite failures. They are part of the committed port (`07d6965e8`);
+none is a language batch or a B4 change.
 
 #### Debugger attach under `-nonative`
 
@@ -1086,10 +1133,11 @@ test/runtests.py --test --variants=disable_jit --binary=<ch>
 
 and requires `Total: passed 1973, failed 0`. The `disable_jit` variant's host
 flag is `-nonative` (`test/runtests.py`). `zig build check` on the default
-test profile is that gate. `zig build -Dprofile=jit check` does not run it.
-Pointing the official gate at `out/jit/bin/ch` still passes `-nonative`, so a
-green result there says the interpreter inside the JIT-configured binary
-worked. It says nothing about the compiler.
+test profile is that gate. `zig build -Dprofile=jit check` does not run the
+regression gate; it runs the JIT smoke and bytecode verify described in
+section 3. Pointing the official gate at `out/jit/bin/ch` still passes
+`-nonative`, so a green result there says the interpreter inside the
+JIT-configured binary worked. It says nothing about the compiler.
 
 The runner's other two variants are the ones that compile:
 
@@ -1111,15 +1159,15 @@ Both JIT variants consume and write `profile.dpl.*`. Run one at a time. The
 runner also sets `TZ=America/Los_Angeles`.
 
 A throw is a separate gate from the variant flag. On the 11:25 dylib an
-interpreted `throw` is catchable: `out/jit/bin/ch /tmp/test_throw.js` and
-`out/jit/bin/ch /tmp/test_throw_50.js` both print `PASS`. Section 7.2 has the
-`-mic:1` and `-forceNative` results. The `disable_jit` suite has since been
-re-run repeatedly on the current JIT-enabled binary; the final 19:27 gate is
-`1973 passed / 0 failed` (`/tmp/jit-disable-final.log`). The no-JIT `ch` from
+interpreted `throw` is catchable: `out/jit/bin/ch "$TMPDIR/test_throw.js"` and
+`out/jit/bin/ch "$TMPDIR/test_throw_50.js"` both print `PASS`. Section 7.2 has
+the `-mic:1` and `-forceNative` results. The `disable_jit` suite has since been
+re-run repeatedly on the current JIT-enabled binary; the final 11:32 gate is
+`1973 passed / 0 failed` (`jit-disable-batch3.log`). The no-JIT `ch` from
 the modernization checkout remains the rebase oracle. Do not treat the throw
 scripts as a substitute for `1973` passed and `0` failed.
 
-## 7. Still open
+## 7. Root causes, fixes, and remaining work
 
 ### 7.1 JIT spread of `arguments` and C++ `CALL_ENTRYPOINT` on Apple DarwinPCS
 
@@ -1161,7 +1209,7 @@ occurs.
 #### Proved Root Cause
 1. `fwd` is JIT-compiled. When it executes `sum(...arguments)`, it calls the
    runtime helper `Js::JavascriptOperators::OP_LdCustomSpreadIteratorList`
-   ([JavascriptOperators.cpp:1595](file:///Users/ascotti/Documents/code/ChakraCore-arm64-jit/lib/Runtime/Language/JavascriptOperators.cpp#L1595)).
+   (`lib/Runtime/Language/JavascriptOperators.cpp:1597`).
 2. `OP_LdCustomSpreadIteratorList` retrieves `arguments[Symbol.iterator]`,
    which resolves to the builtin `Array.prototype.values`.
 3. It invokes `Array.prototype.values` via C++:
@@ -1169,13 +1217,12 @@ occurs.
    CALL_FUNCTION(threadContext, function, CallInfo(Js::CallFlags_Value, 1), aRight);
    ```
    where `aRight` is `this` (`arguments`).
-4. Look at `CALL_ENTRYPOINT_NOASSERT` in
-   [lib/Runtime/Language/Arguments.h:105-106](file:///Users/ascotti/Documents/code/ChakraCore-arm64-jit/lib/Runtime/Language/Arguments.h#L105-L106):
-   ```cpp
-   #define CALL_ENTRYPOINT_NOASSERT(entryPoint, function, callInfo, ...) \
-       entryPoint(function, callInfo, function, callInfo, ##__VA_ARGS__)
-   ```
-   `entryPoint` has C++ type `JavascriptMethod` (`Var (*)(RecyclableObject*, CallInfo, ...)`).
+4. Before the fix, `CALL_ENTRYPOINT_NOASSERT` in
+   `lib/Runtime/Language/Arguments.h` expanded to
+   `entryPoint(function, callInfo, function, callInfo, ##__VA_ARGS__)`.
+   The Apple ARM64 branch now routes through `CallDarwinArm64Method`
+   (`lib/Runtime/Language/Arguments.h:115-126`). `entryPoint` has C++ type
+   `JavascriptMethod` (`Var (*)(RecyclableObject*, CallInfo, ...)`).
 5. **Apple ARM64 Calling Convention (`DarwinPCS`):**
    Under DarwinPCS, variadic C functions pass ONLY the named parameters in
    registers (`x0 = function`, `x1 = callInfo`). **All variadic arguments**
@@ -1191,18 +1238,19 @@ occurs.
 8. Inside JIT-compiled `Array.prototype.values`, `Object(this)` invoked
    `JavascriptObject::NewInstance(0x1)`, which attempted to read `0x1->type` and
    crashed at memory offset `0x9` (`SIGSEGV`)!
-9. **Scope:** This defect affects *every* runtime call site using `CALL_FUNCTION`
-   or `CALL_ENTRYPOINT` ([JavascriptOperators.cpp](file:///Users/ascotti/Documents/code/ChakraCore-arm64-jit/lib/Runtime/Language/JavascriptOperators.cpp),
-   [InterpreterStackFrame.cpp](file:///Users/ascotti/Documents/code/ChakraCore-arm64-jit/lib/Runtime/Language/InterpreterStackFrame.cpp),
-   [JavascriptProxy.cpp](file:///Users/ascotti/Documents/code/ChakraCore-arm64-jit/lib/Runtime/Language/JavascriptProxy.cpp),
-   [RegexHelper.cpp](file:///Users/ascotti/Documents/code/ChakraCore-arm64-jit/lib/Runtime/Library/RegexHelper.cpp),
-   [JavascriptConversion.cpp](file:///Users/ascotti/Documents/code/ChakraCore-arm64-jit/lib/Runtime/Library/JavascriptConversion.cpp),
-   [GlobalObject.cpp](file:///Users/ascotti/Documents/code/ChakraCore-arm64-jit/lib/Runtime/Library/GlobalObject.cpp))
-   whenever the callee is JIT-compiled!
+9. **Scope:** This defect affected *every* runtime call site using
+   `CALL_FUNCTION` or `CALL_ENTRYPOINT` in
+   `lib/Runtime/Language/JavascriptOperators.cpp`,
+   `lib/Runtime/Language/InterpreterStackFrame.cpp`,
+   `lib/Runtime/Language/JavascriptProxy.cpp`,
+   `lib/Runtime/Library/RegexHelper.cpp`,
+   `lib/Runtime/Library/JavascriptConversion.cpp`, and
+   `lib/Runtime/Library/GlobalObject.cpp`, whenever the callee was
+   JIT-compiled.
 
 #### Fix that landed
-`CallDarwinArm64Method` in `lib/Runtime/Language/Arguments.h` replaces only
-the Apple `#else` under `#elif defined(_ARM64_)`. The Linux null-filled
+`CallDarwinArm64Method` in `lib/Runtime/Language/Arguments.h:115-126` replaces
+only the Apple `#else` under `#elif defined(_ARM64_)`. The Linux null-filled
 macro is unchanged. The template expands the argument pack into six register
 slots padded with null, then calls a function type with eight named
 parameters and the original stack image as the variadic tail. An empty
@@ -1213,27 +1261,37 @@ is not what was compiled.
 
 `LowererMD::LowerCallIDynamic` was the hot `apply(arguments)` crash, and it
 is fixed by the store-and-reload described in the handoff. The cold
-`/tmp/apply_probe.js` path passed before that reload existed, because the
+`apply_probe.js` path passed before that reload existed, because the
 register cascade happened to survive until the `blr`. A hot caller reused
 `x3` for the count. `LoadDynamicArgumentUsingLength` still adds 3 on Apple.
 
 ### 7.2 A `throw` has to be catchable (Unwind / Status 134)
 
-**Status:** Caught on the 2026-10-17 11:25 dylib. `mise x -- zig build -Dprofile=jit` logged `BUILD_EXIT:0` in `/tmp/chakra-jit-build20.log`, and `out/jit/bin/libChakraCore.dylib` was replaced (25MB). These physical scripts printed `PASS` and exited 0:
+**Status:** Caught on the 2026-10-17 11:25 dylib (historical). `mise x -- zig
+build -Dprofile=jit` logged `BUILD_EXIT:0` in `chakra-jit-build20.log`, and
+`out/jit/bin/libChakraCore.dylib` was replaced (25MB). These physical scripts
+printed `PASS` and exited 0:
 
-- `out/jit/bin/ch /tmp/test_throw.js` (one call, no flags)
-- `out/jit/bin/ch /tmp/test_throw_loop.js` (`iter 0` through `iter 3`, then `PASS`)
-- `out/jit/bin/ch -mic:1 -bgjit- /tmp/test_throw_loop.js`
-- `out/jit/bin/ch -forceNative -off:simpleJit -bgJitDelay:0 /tmp/test_throw.js`
-- `out/jit/bin/ch -forceNative -off:simpleJit -bgJitDelay:0 /tmp/test_throw_loop.js`
+- `out/jit/bin/ch "$TMPDIR/test_throw.js"` (one call, no flags)
+- `out/jit/bin/ch "$TMPDIR/test_throw_loop.js"` (`iter 0` through `iter 3`,
+  then `PASS`)
+- `out/jit/bin/ch -mic:1 -bgjit- "$TMPDIR/test_throw_loop.js"`
+- `out/jit/bin/ch -forceNative -off:simpleJit -bgJitDelay:0
+  "$TMPDIR/test_throw.js"`
+- `out/jit/bin/ch -forceNative -off:simpleJit -bgJitDelay:0
+  "$TMPDIR/test_throw_loop.js"`
 
-`/tmp/test_throw_50.js` (50 calls, prints `PASS` only) also exited 0 with no flags, with `-mic:1 -bgjit-`, and with `-forceNative -off:simpleJit -bgJitDelay:0`. The regression suite has not been run on this dylib.
+`test_throw_50.js` (50 calls, prints `PASS` only) also exited 0 with no flags,
+with `-mic:1 -bgjit-`, and with
+`-forceNative -off:simpleJit -bgJitDelay:0`. The regression suite was not run
+on that dylib.
 
 The FDE that landed is SP-relative. `arm64_CallEhFrame` sets `fp` to the parent frame, so an FP-based CFA would skip `OP_TryCatch`. CFA is `SP + TotalStackSize` after the prolog, and saved registers are byte offsets from that SP. The try thunk's first store is `stp d8, d9, [sp, #-240]!` so the 240-byte register area exists. `XDataAllocator::Register` calls the global `::mac_fde_wrapper`. A block-scope `extern` inside that method declared `Memory::mac_fde_wrapper` and was the build19 link failure (`undefined symbol: __ZN6Memory15mac_fde_wrapperEPKcPFvPKvE`).
 
-The notes below are the pre-implementation review. The FP-based sketch in the fix strategy is not the encoding that was built.
+The notes below are the pre-implementation review. The historical FP-based
+sketch later in this section is not the encoding that was built.
 
-Review notes before implementing the recipe below:
+Review notes from before implementing the recipe:
 
 - The dynamic interpreter thunk really is `stp fp, lr, [sp, #-16]!` then
   `mov fp, sp` (`InterpreterThunkEmitter.cpp`, the non-Windows
@@ -1253,7 +1311,8 @@ Review notes before implementing the recipe below:
   Do not edit `AssemblyCommon.h`. A local declaration of the wrapper, with the
   `.cpp` built for `_M_ARM64` as well, is the registration path.
 
-Reproduction script (must be saved to a real `.js` file, e.g. `/tmp/test_throw.js`):
+Reproduction script (must be saved to a real `.js` file, e.g.
+`$TMPDIR/test_throw.js`):
 
 ```javascript
 function inner() { throw 1; }
@@ -1265,12 +1324,11 @@ if (res === 1) { print("PASS"); } else { print("FAIL: " + res); }
 ```
 
 #### Proved Root Cause
-1. **Interpreted `throw` fails on `out/jit/bin/ch`:**
+1. **Interpreted `throw` fails on `out/jit/bin/ch` before the unwind fix:**
    The `jit` profile compiles with `-D_ENABLE_DYNAMIC_THUNKS=1`
-   ([build.zig](file:///Users/ascotti/Documents/code/ChakraCore-arm64-jit/build.zig#L783)).
-   When dynamic thunks are enabled, script function invocations go through dynamically
-   generated code blocks allocated by
-   [lib/Backend/InterpreterThunkEmitter.cpp:183-213](file:///Users/ascotti/Documents/code/ChakraCore-arm64-jit/lib/Backend/InterpreterThunkEmitter.cpp#L183-L213):
+   (`build.zig:295`). When dynamic thunks are enabled, script function
+   invocations go through dynamically generated code blocks in
+   `lib/Backend/InterpreterThunkEmitter.cpp:177-215`:
    ```arm64
    stp  fp, lr, [sp, #-16]!
    mov  fp, sp
@@ -1278,30 +1336,33 @@ if (res === 1) { print("PASS"); } else { print("FAIL: " + res); }
    blr  x1
    ```
    `InterpreterThunkEmitter::GeneratePdata` only generated a Windows
-   `RUNTIME_FUNCTION` struct. Before the fix in section 7.2, on Apple ARM64
-   `PDataManager::RegisterPdata`
-   ([lib/Backend/PDataManager.cpp:73-84](file:///Users/ascotti/Documents/code/ChakraCore-arm64-jit/lib/Backend/PDataManager.cpp#L73-L84))
-   was a complete no-op (`(void)functionStart;`). It now registers the
-   CIE+FDE through `mac_fde_wrapper`.
+   `RUNTIME_FUNCTION` struct. At the time, `PDataManager::RegisterPdata`
+   (`lib/Backend/PDataManager.cpp:73-83`) was a complete no-op
+   (`(void)functionStart;`). It now registers the CIE+FDE through
+   `mac_fde_wrapper`.
    When `throw 1` executes in JavaScript, C++ throws `Js::JavascriptException`.
-   Apple's `libunwind` walks up the C++ call frame from `InterpreterStackFrame::Process`,
-   hits the return address in the dynamically allocated `InterpreterThunk` memory block,
-   finds no registered `.eh_frame` FDE, and aborts with:
-   `libc++abi: terminating due to uncaught exception of type Js::JavascriptException` (status 134 / `SIGABRT`).
-2. **JIT function `throw` fails:**
-   [lib/Backend/arm64/ARM64UnwindEncoder.cpp](file:///Users/ascotti/Documents/code/ChakraCore-arm64-jit/lib/Backend/arm64/ARM64UnwindEncoder.cpp)
-   generates Windows ARM64 `.xdata` opcodes.
-   [lib/Common/Memory/arm64/XDataAllocator.cpp:151-160](file:///Users/ascotti/Documents/code/ChakraCore-arm64-jit/lib/Common/Memory/arm64/XDataAllocator.cpp#L151-L160)
-   notes that `libunwind` cannot parse Windows `.xdata` and explicitly skips registration.
-3. **Correct File Path:**
-   `AssemblyCommon.h` is located at
-   [lib/Common/PlatformAgnostic/AssemblyCommon.h](file:///Users/ascotti/Documents/code/ChakraCore-arm64-jit/lib/Common/PlatformAgnostic/AssemblyCommon.h)
-   (with wrapper in [lib/Runtime/PlatformAgnostic/Platform/Unix/AssemblyCommon.cpp](file:///Users/ascotti/Documents/code/ChakraCore-arm64-jit/lib/Runtime/PlatformAgnostic/Platform/Unix/AssemblyCommon.cpp)).
+   Apple's `libunwind` walks up the C++ call frame from
+   `InterpreterStackFrame::Process`, hits the return address in the
+   dynamically allocated `InterpreterThunk` memory block, finds no registered
+   `.eh_frame` FDE, and aborts with:
+   `libc++abi: terminating due to uncaught exception of type Js::JavascriptException`
+   (status 134 / `SIGABRT`).
+2. **JIT function `throw` fails before the DWARF path:**
+   `lib/Backend/arm64/ARM64UnwindEncoder.cpp` generates Windows ARM64 `.xdata`
+   opcodes. The Apple ARM64 branch in
+   `lib/Common/Memory/arm64/XDataAllocator.cpp:165-176` now registers the
+   emitted CIE+FDE through `mac_fde_wrapper`; before the fix it skipped
+   registration because `libunwind` cannot parse Windows `.xdata`.
+3. **Files involved.** `AssemblyCommon.h` is at
+   `lib/Common/PlatformAgnostic/AssemblyCommon.h` (wrapper in
+   `lib/Runtime/PlatformAgnostic/Platform/Unix/AssemblyCommon.cpp`).
 
-#### Fix Strategy for DeepSeek Flash v4.1
-Apple `libunwind` on ARM64 macOS accepts DWARF `.eh_frame` records registered via
-`__register_frame` using the existing `mac_fde_wrapper` helper in `AssemblyCommon.cpp`.
-Standard ARM64 DWARF unwind encoding:
+#### Historical fix-strategy sketch (FP-based; not what landed)
+The original plan was for Apple `libunwind` on ARM64 macOS to accept DWARF
+`.eh_frame` records registered via `__register_frame` using the existing
+`mac_fde_wrapper` helper in `AssemblyCommon.cpp`. This sketch is retained
+because it documents the DWARF frame model; the SP-relative FDE described above
+is what was built. Standard ARM64 DWARF unwind encoding:
 - DWARF register numbers for ARM64: `fp` = 29, `lr` = 30, `sp` = 31.
 - CIE:
   - Code alignment factor = 1, Data alignment factor = -8, Return address reg = 30.
@@ -1326,15 +1387,17 @@ Run a single variant at a time, from the worktree:
 
 ```sh
 mise x -- python3 test/runtests.py --test --variants=interpreted \
-    --binary=out/jit/bin/ch
+    --binary="$(pwd)/out/jit/bin/ch"
 ```
 
 That is the compiler run that matches the `-mic:1` evidence. The binary path
-has to be absolute. The runner spawns `ch` with the test directory as cwd, so
+has to be absolute; `$(pwd)` produces one when the command runs from the
+worktree root. The runner spawns `ch` with the test directory as cwd, so
 `--binary=out/jit/bin/ch` fails every test with `FileNotFoundError`.
 
-Measured on the 19:09 dylib (`/tmp/jit-interpreted-repair3.log`, 52.15 seconds;
-the pre-repair `/tmp/jit-interpreted-jitwrite.log` took 45.03 seconds):
+The 19:09 run (historical, `jit-interpreted-repair3.log`, 52.15 seconds; the
+pre-repair `jit-interpreted-jitwrite.log` took 45.03 seconds) measured the same
+totals as the current 11:32 run (`jit-interpreted-batch3.log`, 50.11 s):
 
 ```
 Total: passed 2365, failed 399
@@ -1359,16 +1422,17 @@ the `blr`. `LowerCall` is still called with `argCount == 0`, so
 `HomeJsCallArgs` does not store the registers back over that image.
 
 `-ForceNative foo(2, 3)` already prints `5`. Dynapogo on the 12:37 dylib,
-before the `new.target` load change (`/tmp/chakra-jit-dynapogo.log`, about
-494 seconds), was `passed 1916, failed 313`. Of those failures, 284 were
-asm.js or WebAssembly with exit 0. The rest were 21 `SIGABRT` (`-6`, mostly
-debugger tests), 4 `SIGSEGV` (`-11`, both `es6GeneratorJit` files), 1
-`SIGBUS` (`-10`, `Object/ObjectSpread_Limits.js`), 2 exit-0 baseline
-mismatches, and `typedarray/samethread.js` aborted inside a long DataView
-log. That list is historical. On the 19:09 dylib the same suite is
-`passed 1943, failed 286`; every failure is the asm.js / WebAssembly
-baseline gap and exits 0, so the signal count is zero
-(`/tmp/jit-dynapogo-repair3.log`, 488.15 s). `Function/apply3.js` and
+before the `new.target` load change (`chakra-jit-dynapogo.log`, about 494
+seconds), was `passed 1916, failed 313`. Of those failures, 286 exited 0: 285
+were asm.js or WebAssembly baseline failures, and 1 was a non-asm exit-0
+baseline failure (`ASMJSParser`). The other 27 exited on a signal: 22
+`SIGABRT` (`-6`, mostly debugger tests, including `typedarray/samethread.js`
+inside a long DataView log), 4 `SIGSEGV` (`-11`, both `es6GeneratorJit`
+files), and 1 `SIGBUS` (`-10`, `Object/ObjectSpread_Limits.js`). That list is
+historical. On the 11:32 dylib the same suite is `passed 1943, failed 286`;
+all 286 are in asm.js/WASM folders and exit 0, so the signal count is zero
+(`jit-dynapogo-batch3.log`, 488.03 s). The 19:09 run had the
+same totals (`jit-dynapogo-repair3.log`, 488.15 s). `Function/apply3.js` and
 `inlining/applyBugs.js` are not in the failure list.
 
 `es6/ES6Class_SuperChain.js` failed one case on that dylib:
@@ -1381,9 +1445,9 @@ so the gap is applied once. On the 12:52 dylib, direct `new` of 2, 4, 5, 7,
 and 10 arguments and that `super` spread all print `PASS` under `-mic:1
 -bgjit-` and under `-forceNative`.
 
-`disable_jit` on the current binary is `passed 1973, failed 0`
-(`/tmp/jit-disable-final.log`, 19:27 dylib). The earlier 1972/1 run on the
-12:52 dylib missed only `DebuggerCommon/AsyncDynamicAttach.js`, which printed
+`disable_jit` on the current 20:39 binary is `passed 1973, failed 0`
+(`jit-disable-batch3.log`, 53.18 s). The earlier 1972/1 run on the 12:52
+dylib missed only `DebuggerCommon/AsyncDynamicAttach.js`, which printed
 `PASSED` and then hung inside `ScriptContext::DebugProfileProbeThunk`; the
 second-pass `DynamicProfileInfo`/debug-loop split is the fix (see
 [Second-pass fixes](#second-pass-fixes-on-the-1637-dylib)). The modernization
@@ -1402,7 +1466,7 @@ Triage from the `Total:` line and the failing file names:
 
 Do not update the 1973/0 expectation to match a red JIT run.
 
-### 7.4 Known leftovers the suite is likely to name
+### 7.4 Historical leftovers and remaining gaps
 
 #### 1. `-ForceNative` crash in `InlineCache::TryGetProperty` under `InjectJsBuiltInLibraryCode`
 
@@ -1411,14 +1475,14 @@ Do not update the 1973/0 expectation to match a red JIT run.
 
 **Proved root cause:**
 There are 6 assembly transition thunks across:
-- [lib/Runtime/Language/arm64/arm64_Thunks.S](file:///Users/ascotti/Documents/code/ChakraCore-arm64-jit/lib/Runtime/Language/arm64/arm64_Thunks.S):
+- `lib/Runtime/Language/arm64/arm64_Thunks.S`:
   1. `InterpreterStackFrame::DelayDynamicInterpreterThunk`
   2. `DynamicProfileInfo::EnsureDynamicProfileInfoThunk`
   3. `ScriptContext::ProfileModeDeferredParsingThunk`
   4. `ScriptContext::ProfileModeDeferredDeserializeThunk`
-- [lib/Runtime/Library/arm64/arm64_DeferredParsingThunk.S](file:///Users/ascotti/Documents/code/ChakraCore-arm64-jit/lib/Runtime/Library/arm64/arm64_DeferredParsingThunk.S):
+- `lib/Runtime/Library/arm64/arm64_DeferredParsingThunk.S`:
   5. `JavascriptFunction::DeferredParsingThunk`
-- [lib/Runtime/Library/arm64/arm64_DeferredDeserializeThunk.S](file:///Users/ascotti/Documents/code/ChakraCore-arm64-jit/lib/Runtime/Library/arm64/arm64_DeferredDeserializeThunk.S):
+- `lib/Runtime/Library/arm64/arm64_DeferredDeserializeThunk.S`:
   6. `JavascriptFunction::DeferredDeserializeThunk`
 
 All 6 Unix ARM64 thunks were originally written for the interpreter before JIT
@@ -1439,18 +1503,17 @@ The Unix thunks now match that Windows frame. Pairs are stored at
 `x6` and `x7`). `add x0, sp, #16` still addresses the saved function.
 
 #### 2. Spilled overflow formals at bailout
-In [lib/Backend/arm64/EncoderMD.cpp:1515-1522](file:///Users/ascotti/Documents/code/ChakraCore-arm64-jit/lib/Backend/arm64/EncoderMD.cpp#L1515-L1522),
-when an `IsParamSlotSym` has offset >= 64, the encoder adds
-`NUM_INT_ARG_REGS * MachRegInt` (+64 bytes) to reach the caller's stack image
-above the homed parameter area.
-However, in [lib/Backend/BailOut.cpp:278-300](file:///Users/ascotti/Documents/code/ChakraCore-arm64-jit/lib/Backend/BailOut.cpp#L278-L300),
+In `lib/Backend/arm64/EncoderMD.cpp:1511-1536`, when an `IsParamSlotSym` has
+offset >= 64, the encoder adds `NUM_INT_ARG_REGS * MachRegInt` (+64 bytes) to
+reach the caller's stack image above the homed parameter area.
+However, in `lib/Backend/BailOut.cpp:273-302`,
 `BailOutInfo::FinalizeOffsets` calculates:
 ```cpp
 int offset = -(offsets[i] + StackSymBias);
 ```
 without adding the Apple 64-byte offset for `IsParamSlotSym` when slot >= 8.
-Similarly, [lib/Backend/LinearScan.cpp:1228](file:///Users/ascotti/Documents/code/ChakraCore-arm64-jit/lib/Backend/LinearScan.cpp#L1228)
-records `*offset = -((int)stackSym->m_offset + BailOutInfo::StackSymBias);`.
+Similarly, `lib/Backend/LinearScan.cpp:1228` records
+`*offset = -((int)stackSym->m_offset + BailOutInfo::StackSymBias);`.
 When a function with more than 5 user arguments has an overflow parameter spilled
 and encounters a bailout, `FinalizeOffsets` must apply the matching +64 byte bias
 if `stackSym->IsParamSlotSym()` and `offset >= 64`.
@@ -1480,7 +1543,10 @@ These are easy to "simplify" into a bug. Each one was measured.
 - Elided-yield keeps reading `layout->args[0]` and `args[1]`.
 - `LoadStackArgPtr`'s existing 64-byte bias is not applied again.
 - `LoadInputParamCount` stays on the homed `callInfo`.
-- Helper calls stay on the platform ABI. Only JavaScript calls are homed.
+- Helper calls are intended to stay on the platform ABI. Only JavaScript calls
+  should be homed. The `HelperWMemCmp` call at `lib/Backend/Lower.cpp:24564`
+  currently passes `argCount == 3` and is homed anyway; that is the open P2
+  exception, not a second rule.
 - `AssemblyCommon.h` stays out of this change to avoid triggering a global
   rebuild. DWARF unwind registration invokes `mac_fde_wrapper` directly from
   `PDataManager.cpp` and `XDataAllocator.cpp`.
@@ -1520,37 +1586,38 @@ These are easy to "simplify" into a bug. Each one was measured.
 - The Apple index gap lives only in `GenerateLoadStackArgumentByIndex`.
 - The 1973/0 `disable_jit` expectation is unchanged.
 
-## 9. Agent Execution Protocol & Guardrails (for DeepSeek Flash v4.1)
+## 9. Operational protocol and guardrails
 
-A smaller coding agent (such as DeepSeek Flash v4.1) working on this codebase MUST
-follow these strict operational rules, diagnostic maps, and verification procedures:
+These are the operational rules, diagnostic maps, and verification procedures
+for this worktree. They apply to maintainers and coding agents alike; they are
+not tied to a particular assistant.
 
-### 9.1 Critical Footguns to Avoid
+### 9.1 Critical footguns to avoid
 
 > [!CAUTION]
 > **FOOTGUN 1: Never test `ch` using bash process substitution `<(printf '...')` or pipes.**
 > In `bin/ch/Helpers.cpp:LoadScriptFromFile`, file size is measured using `fseek(file, 0, SEEK_END)`
 > and `ftell(file)`. On `/dev/fd/N` (FIFO / named pipe), `ftell` returns `0`. `ch` will read 0 bytes,
 > execute an empty script, print nothing, and exit with code `0`.
-> An automated agent will falsely report a test as "passed" when it was never executed!
-> **RULE:** ALWAYS write test code to a physical file on disk (e.g. `/tmp/test_jit.js`) before invoking `ch`.
+> A non-interactive run can falsely report a test as "passed" when it was never executed.
+> **RULE:** ALWAYS write test code to a physical file on disk (e.g. `$TMPDIR/test_jit.js`) before invoking `ch`.
 
 > [!CAUTION]
 > **FOOTGUN 2: Never run short loops without `-bgjit-` for JIT verification.**
 > Background JIT compilation is asynchronous. In loops with fewer than ~200 iterations, the script will
 > finish entirely inside the interpreter before the background JIT compilation thread has finished
 > generating and installing native code. The test will exit with code 0 without exercising native code!
-> **RULE:** ALWAYS pass `-bgjit-` when testing JIT execution (e.g., `ch -mic:1 -bgjit- /tmp/test_jit.js`),
+> **RULE:** ALWAYS pass `-bgjit-` when testing JIT execution (e.g., `ch -mic:1 -bgjit- $TMPDIR/test_jit.js`),
 > and ALWAYS include an explicit check that prints `"PASS"` at the end, asserting that stdout contains `"PASS"`.
 
 > [!CAUTION]
-> **FOOTGUN 3: Never modify files outside `/Users/ascotti/Documents/code/ChakraCore-arm64-jit`.**
-> Do NOT touch the main modernization repository at `/Users/ascotti/Documents/code/ChakraCore`.
-> Do not commit, do not push, and do not rebase unless explicitly commanded.
+> **FOOTGUN 3: Never modify files outside `<worktree>`.**
+> Do not touch the modernization checkout `<modernization-checkout>`.
+> Do not commit, do not push, and do not rebase unless explicitly asked.
 
-### 9.2 Signal & Crash Diagnostics
+### 9.2 Signal and crash diagnostics
 
-When a test crashes or exits non-zero, use this table to immediately identify the category:
+When a test crashes or exits non-zero, use this table to identify the category:
 
 | Exit Code | Signal | Root Cause / Meaning | Immediate Remediation |
 |---|---|---|---|
@@ -1558,15 +1625,14 @@ When a test crashes or exits non-zero, use this table to immediately identify th
 | **138** | `SIGBUS` | Apple Silicon W^X permission fault (`EXC_BAD_ACCESS` / `KERN_PROTECTION_FAILURE`). | `MAP_JIT` page was modified with the calling thread's write window closed, or that thread executed while its window was open. Check `VIRTUALJitWriteProtect` pairing and `pthread_jit_write_protect_np`; a process-wide `mprotect` window is the old race. |
 | **139** | `SIGSEGV` | Memory segmentation fault. | Inspect faulting address in `lldb`: <br>• `0x0` or `0x8`: Null pointer dereference (e.g., clobbered `x2..x7` register). Check assembly thunks.<br>• `0x1` or `0x9`: Invalid JS `Var` (e.g., `CALL_ENTRYPOINT_NOASSERT` variadic argument failure under DarwinPCS).<br>• Stack address: Misaligned stack pointer (`sp % 16 != 0`). Apple ABI strictly mandates 16-byte SP alignment at all function call boundaries. |
 
-### 9.3 Verification Checklist for the Agent
+### 9.3 Verification checklist
 
-Follow this exact sequential order when implementing fixes:
-
-Stages 1 and 2 are done on the 10:21 dylib. Section 5.4 has those results.
-Stage 3 is done on the 11:25 dylib and still passes on 12:52. Section 7.2
-has the commands. Stage 4 has been run; the totals and the next bug are in
-[Current state and handoff](#current-state-and-handoff). Do not restart at
-stage 1.
+These stages are retained as a reproduction order. All four have been run;
+do not restart at stage 1 unless a regression reopens that area. Stages 1 and
+2 were done on the 10:21 dylib; section 5.4 has those results. Stage 3 was
+done on the 11:25 dylib and still passed on 12:52; section 7.2 has the
+commands. Stage 4 totals are in
+[Current state and handoff](#current-state-and-handoff).
 
 #### Stage 1: Fix Assembly Transition Thunks (§7.4 Bullet 1) — done
 1. Edit:
@@ -1577,11 +1643,11 @@ stage 1.
 2. Build: `mise x -- zig build -Dprofile=jit`
 3. Test:
    ```sh
-   cat << 'EOF' > /tmp/test_forcenative.js
+   cat << 'EOF' > "$TMPDIR/test_forcenative.js"
    function foo(a, b) { return a + b; }
    print(foo(2, 3));
    EOF
-   out/jit/bin/ch -ForceNative /tmp/test_forcenative.js
+   out/jit/bin/ch -ForceNative "$TMPDIR/test_forcenative.js"
    ```
    **Pass Criteria:** Outputs `5` and exits with code `0`. (Previously crashed with `SIGSEGV` in `InlineCache::TryGetProperty`).
 
@@ -1590,7 +1656,7 @@ stage 1.
 2. Build: `mise x -- zig build -Dprofile=jit`
 3. Test:
    ```sh
-   cat << 'EOF' > /tmp/test_spread.js
+   cat << 'EOF' > "$TMPDIR/test_spread.js"
    function sum(a, b, c, d, e, f, g) { return a + b + c + d + e + f + g; }
    function fwd() { return sum(...arguments); }
    for (var i = 0; i < 50; i++) {
@@ -1599,35 +1665,40 @@ stage 1.
    }
    print("PASS");
    EOF
-   out/jit/bin/ch -mic:1 -bgjit- /tmp/test_spread.js
+   out/jit/bin/ch -mic:1 -bgjit- "$TMPDIR/test_spread.js"
    ```
    **Pass Criteria:** Prints `PASS` and exits with code `0`. (Previously crashed at iteration 2 with `SIGSEGV` at `0x9`).
 
 #### Stage 3: Implement ARM64 `.eh_frame` Unwind Registration (§7.2) — done
 1. Emit a CIE+FDE for the dynamic interpreter thunk and register it with the global `mac_fde_wrapper` from `PDataManager::RegisterPdata`.
 2. Emit an SP-relative CIE+FDE for each JIT function and register it from `XDataAllocator::Register`. The declaration of `mac_fde_wrapper` is at file scope. A declaration inside the method names `Memory::mac_fde_wrapper` and does not link.
-3. Build: `mise x -- zig build -Dprofile=jit` (`BUILD_EXIT:0`, `/tmp/chakra-jit-build20.log`).
-4. Measured on the 11:25 dylib, all exit 0 and print `PASS`:
-   - `out/jit/bin/ch /tmp/test_throw.js`
-   - `out/jit/bin/ch /tmp/test_throw_50.js`
-   - `out/jit/bin/ch -mic:1 -bgjit- /tmp/test_throw_50.js`
-   - `out/jit/bin/ch -forceNative -off:simpleJit -bgJitDelay:0 /tmp/test_throw_50.js`
-   A single `-mic:1` call is still interpreted. The 50-iteration script is the one that enters the native frame. The 10:21 dylib aborted 134 on the same catch.
+3. Build: `mise x -- zig build -Dprofile=jit` (`BUILD_EXIT:0`,
+   `chakra-jit-build20.log`).
+4. Measured on the 11:25 dylib (historical), all exit 0 and print `PASS`:
+   - `out/jit/bin/ch "$TMPDIR/test_throw.js"`
+   - `out/jit/bin/ch "$TMPDIR/test_throw_50.js"`
+   - `out/jit/bin/ch -mic:1 -bgjit- "$TMPDIR/test_throw_50.js"`
+   - `out/jit/bin/ch -forceNative -off:simpleJit -bgJitDelay:0
+     "$TMPDIR/test_throw_50.js"`
+   A single `-mic:1` call is still interpreted. The 50-iteration script is the
+   one that enters the native frame. The 10:21 dylib aborted 134 on the same
+   catch.
 
 #### Stage 4: Regression suites
 
-`interpreted` on the 19:09 dylib is 2365/399 (397 asm.js / WebAssembly plus 2
+`interpreted` on the 11:32 dylib is 2365/399 (397 asm.js / WebAssembly plus 2
 StackTrace line diffs, all exit 0, zero signals;
-`/tmp/jit-interpreted-repair3.log`). `dynapogo` on the 19:09 dylib
-is 1943/286 (all asm.js / WebAssembly, all exit 0, zero signals;
-`/tmp/jit-dynapogo-repair3.log`, 488.15 s).
-`disable_jit` on the final 19:27 binary is 1973/0
-(`/tmp/jit-disable-final.log`). The absolute binary and the one-variant rule
-are in the handoff section. The 19:09 suite runs close the `es6GeneratorJit`
-segfaults and `ObjectSpread_Limits.js`; the per-thread write-window fix is
-described in the handoff. The only remaining JIT failures are the documented
+`jit-interpreted-batch3.log`, 50.11 s). `dynapogo` on the 11:32 dylib is
+1943/286 (all 286 failures are in asm.js/WASM folders and exit 0, zero
+signals; `jit-dynapogo-batch3.log`, 488.03 s). `disable_jit` on the same binary
+is 1973/0 (`jit-disable-batch3.log`). The 19:09 runs (`jit-interpreted-repair3.log`,
+`jit-dynapogo-repair3.log`, and `jit-disable-repair3.log`) are the prior object
+set; they showed the same totals. The absolute binary and the one-variant rule
+are in the handoff section. Those runs closed the `es6GeneratorJit` segfaults
+and `ObjectSpread_Limits.js`; the per-thread write-window fix is described in
+the handoff. The only remaining JIT failures are the documented
 asm.js/WASM feature gap and the two StackTrace line diffs; do not filter
-those out of the gate. Re-measure `apply3`, `/tmp/newtarget.js`,
-`/tmp/test_throw_50.js`, and `/tmp/test_spread.js` after any lowering or
-allocator change.
+those out of the gate. Re-measure `apply3`, `newtarget.js`,
+`test_throw_50.js`, and `test_spread.js` after any lowering or allocator
+change.
 

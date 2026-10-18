@@ -481,14 +481,17 @@ Allocation* Heap<TAlloc, TPreReservedAlloc>::AllocLargeObject(size_t bytes, usho
     if (allocation == nullptr)
     {
         AutoCriticalSection autoLock(&this->codePageAllocators->cs);
-        this->codePageAllocators->Release(address, pages, segment);
 
+        // Release the secondary (xdata) allocation before releasing the pages:
+        // for an allocation larger than maxAllocPageCount, Release reaches
+        // ReleaseSegment, which frees the segment and its secondary allocator.
 #if PDATA_ENABLED
         if(pdataCount > 0)
         {
             this->codePageAllocators->ReleaseSecondary(xdata, segment);
         }
 #endif
+        this->codePageAllocators->Release(address, pages, segment);
         return nullptr;
     }
 

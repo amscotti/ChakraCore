@@ -193,6 +193,200 @@ class IncrementalFailureTests(unittest.TestCase):
             self.assertFalse(install_profile.copy_if_changed(str(src), str(dest)))
 
 
+class ProfileInstallerTests(unittest.TestCase):
+    """Confinement and no-op tests for tools/build/install_profile.py.
+
+    Every fixture lives in a private temporary root. main() derives the
+    checkout root from __file__, so the fixture writes its own
+    out/<profile> and never touches the real out/jit.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory(prefix="install-profile-test-")
+        self.root = Path(self._tmp.name)
+        (self.root / "tools/build").mkdir(parents=True)
+        self.script = self.root / "tools/build/install_profile.py"
+        self.script.write_text("# fixture installer path\n")
+        self.src = self.root / "source/ch"
+        self.src.parent.mkdir()
+        self.src.write_bytes(b"fixture ch binary\n")
+        self.src.chmod(0o755)
+        self.dest = self.root / "out/jit"
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def install(self, maps, symlinks=()):
+        argv = ["install_profile.py", "--profile", "jit", "--dest", "out/jit"]
+        argv.extend("--map=" + item for item in maps)
+        argv.extend("--symlink=" + item for item in symlinks)
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with mock.patch.object(install_profile, "__file__", str(self.script)), \
+                contextlib.redirect_stdout(stdout), \
+                contextlib.redirect_stderr(stderr):
+            rc = install_profile.main(argv)
+        return rc, stdout.getvalue(), stderr.getvalue()
+
+    def assert_install_fails(self, result, needle):
+        rc, stdout, stderr = result
+        self.assertEqual(rc, 1, stdout + stderr)
+        self.assertIn("install_profile: FAIL:", stderr)
+        self.assertIn(needle, stderr)
+
+    def test_normal_install_and_noop_preserve_inode_and_mtime(self):
+        result = self.install(["ch=" + str(self.src)],
+                              ["libch.dylib=ch"])
+        self.assertEqual(result[0], 0, result[2])
+        installed = self.dest / "ch"
+        self.assertEqual(installed.read_bytes(), self.src.read_bytes())
+        self.assertEqual(stat.S_IMODE(installed.stat().st_mode), 0o755)
+        self.assertEqual(os.readlink(self.dest / "libch.dylib"), "ch")
+        self.assertEqual((self.dest / ".profile").read_text(), "jit\n")
+        self.assertEqual((self.dest / ".manifest").read_text(),
+                         ".profile\nch\nlibch.dylib\n")
+        first = installed.stat()
+
+        result = self.install(["ch=" + str(self.src)],
+                              ["libch.dylib=ch"])
+        self.assertEqual(result[0], 0, result[2])
+        self.assertIn("0 copied", result[1])
+        second = installed.stat()
+        self.assertEqual(first.st_ino, second.st_ino)
+        self.assertEqual(first.st_mtime_ns, second.st_mtime_ns)
+        self.assertEqual(os.readlink(self.dest / "libch.dylib"), "ch")
+
+    def test_symlinked_profile_root_is_rejected_before_writing_target(self):
+        target = self.root / "out/release-shared"
+        target.mkdir(parents=True)
+        sentinel = target / "keep"
+        sentinel.write_bytes(b"release profile state\n")
+        self.dest.symlink_to("release-shared", target_is_directory=True)
+
+        self.assert_install_fails(self.install(["ch=" + str(self.src)]),
+                                  "linked profile root")
+        self.assertEqual(sentinel.read_bytes(), b"release profile state\n")
+        self.assertEqual(sorted(path.name for path in target.iterdir()),
+                         ["keep"])
+
+    def test_symlinked_profile_root_to_external_path_is_rejected(self):
+        escape = self.root / "escape"
+        self.dest.parent.mkdir(parents=True)
+        self.dest.symlink_to("../escape", target_is_directory=True)
+
+        self.assert_install_fails(self.install(["ch=" + str(self.src)]),
+                                  "linked profile root")
+        self.assertFalse(escape.exists())
+
+    def test_in_prefix_symlinked_parent_blocks_map_without_aliasing(self):
+        (self.dest / "escape").mkdir(parents=True)
+        (self.dest / "bin").symlink_to("escape", target_is_directory=True)
+
+        self.assert_install_fails(
+            self.install(["bin/ch=" + str(self.src)]), "symlinked component")
+        self.assertFalse((self.dest / "escape/ch").exists())
+        self.assertFalse((self.dest / ".profile").exists())
+        self.assertFalse((self.dest / ".manifest").exists())
+
+    def test_map_through_in_prefix_symlink_does_not_overwrite_target(self):
+        real = self.dest / "real"
+        real.mkdir(parents=True)
+        victim = real / "userfile"
+        victim.write_bytes(b"original user data\n")
+        before = victim.stat()
+        (self.dest / "linkdir").symlink_to("real", target_is_directory=True)
+
+        self.assert_install_fails(
+            self.install(["ch=" + str(self.src),
+                          "linkdir/userfile=" + str(self.src)]),
+            "symlinked component")
+        self.assertEqual(victim.read_bytes(), b"original user data\n")
+        after = victim.stat()
+        self.assertEqual(before.st_ino, after.st_ino)
+        self.assertEqual(before.st_mtime_ns, after.st_mtime_ns)
+        self.assertFalse((self.dest / "ch").exists())
+        self.assertFalse((self.dest / ".profile").exists())
+        self.assertFalse((self.dest / ".manifest").exists())
+
+    def test_symlinked_parent_resolving_outside_prefix_is_rejected(self):
+        escape = self.root / "escape"
+        escape.mkdir()
+        self.dest.mkdir(parents=True)
+        (self.dest / "bin").symlink_to(str(escape), target_is_directory=True)
+
+        self.assert_install_fails(
+            self.install(["bin/ch=" + str(self.src)]), "symlinked component")
+        self.assertFalse((escape / "ch").exists())
+
+    def test_orphan_through_in_prefix_symlink_does_not_delete_target(self):
+        real = self.dest / "real"
+        real.mkdir(parents=True)
+        victim = real / "userfile"
+        victim.write_bytes(b"keep this\n")
+        before = victim.stat()
+        (self.dest / "linkdir").symlink_to("real", target_is_directory=True)
+        (self.dest / ".manifest").write_text("linkdir/userfile\n")
+
+        self.assert_install_fails(self.install(["ch=" + str(self.src)]),
+                                  "symlinked component")
+        self.assertEqual(victim.read_bytes(), b"keep this\n")
+        after = victim.stat()
+        self.assertEqual(before.st_ino, after.st_ino)
+        self.assertEqual(before.st_mtime_ns, after.st_mtime_ns)
+        self.assertFalse((self.dest / "ch").exists())
+        self.assertEqual((self.dest / ".manifest").read_text(),
+                         "linkdir/userfile\n")
+
+    def test_symlink_targets_must_be_bare_relative_names(self):
+        targets = ("../escape", "sub/escape", "sub\\escape",
+                   "/tmp/escape", "..", "lib..so")
+        for target in targets:
+            with self.subTest(target=target):
+                self.assert_install_fails(
+                    self.install(["ch=" + str(self.src)],
+                                 ["esc=" + target]),
+                    "bare relative name")
+                self.assertFalse((self.dest / "esc").exists())
+                self.assertFalse((self.dest / "esc").is_symlink())
+                self.assertFalse((self.dest / "ch").exists())
+                self.assertFalse((self.dest / ".profile").exists())
+
+    def test_symlink_replacement_is_atomic_and_targets_untouched(self):
+        self.dest.mkdir(parents=True)
+        old = self.dest / "libch.1.dylib"
+        new = self.dest / "libch.2.dylib"
+        old.write_bytes(b"old target\n")
+        new.write_bytes(b"new target\n")
+        link = self.dest / "libch.dylib"
+        link.symlink_to("libch.1.dylib")
+        old_before = old.stat()
+        new_before = new.stat()
+
+        result = self.install(["ch=" + str(self.src)],
+                              ["libch.dylib=libch.2.dylib"])
+        self.assertEqual(result[0], 0, result[2])
+        self.assertEqual(os.readlink(link), "libch.2.dylib")
+        self.assertEqual(old.read_bytes(), b"old target\n")
+        self.assertEqual(new.read_bytes(), b"new target\n")
+        self.assertEqual(old.stat().st_mtime_ns, old_before.st_mtime_ns)
+        self.assertEqual(new.stat().st_mtime_ns, new_before.st_mtime_ns)
+        self.assertFalse(any(name.endswith(".tmp")
+                             for name in os.listdir(self.dest)))
+
+        # A failed swap leaves the previous link and both targets intact.
+        link.unlink()
+        link.symlink_to("libch.1.dylib")
+        with mock.patch.object(install_profile.os, "replace",
+                               side_effect=OSError("injected replace failure")):
+            with self.assertRaises(OSError):
+                install_profile.symlink_if_changed("libch.2.dylib",
+                                                   str(link))
+        self.assertEqual(os.readlink(link), "libch.1.dylib")
+        self.assertEqual(old.read_bytes(), b"old target\n")
+        self.assertEqual(new.read_bytes(), b"new target\n")
+        self.assertFalse(any(name.endswith(".tmp")
+                             for name in os.listdir(self.dest)))
+
+
 class NativeVerdictTests(unittest.TestCase):
     def test_property_assertion_diagnostic_cannot_pass(self):
         text = "\n".join(suite + " : PASS" for suite in check_native.STATIC_SUITES)
