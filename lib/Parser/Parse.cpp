@@ -9464,7 +9464,11 @@ ParseNodePtr Parser::ParseExpr(int oplMin,
                     }
                     else if (pnode->nop == knopBigInt)
                     {
-                        pnode->AsParseNodeBigInt()->isNegative = true;
+                        // Toggle rather than set: -(-1n) is 1n, and the parser
+                        // folds both unary minuses into the same literal node.
+                        // Zero stays canonical in JavascriptBigInt regardless
+                        // of the sign bit, so -0n is still 0n.
+                        pnode->AsParseNodeBigInt()->isNegative = !pnode->AsParseNodeBigInt()->isNegative;
                     }
                     else 
                     {

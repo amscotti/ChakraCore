@@ -52,6 +52,18 @@ namespace Js
         static Var Decrement(Var aRight);
         static Var Not(Var aRight);
         static Var Negate(Var aRight);
+        // Multiplicative, exponentiation, shift and bitwise operators. The
+        // caller has already applied ToPrimitive(hint Number) to both
+        // operands and rejected mixed BigInt/Number pairs, so these entry
+        // points only see two BigInt primitives.
+        static Var Div(Var aLeft, Var aRight);
+        static Var Modulus(Var aLeft, Var aRight);
+        static Var Exponentiate(Var aLeft, Var aRight);
+        static Var LeftShift(Var aLeft, Var aRight);
+        static Var RightShift(Var aLeft, Var aRight);
+        static Var BitwiseAnd(Var aLeft, Var aRight);
+        static Var BitwiseOr(Var aLeft, Var aRight);
+        static Var BitwiseXor(Var aLeft, Var aRight);
 
         inline BOOL isNegative() { return m_isNegative; }
 
@@ -129,6 +141,13 @@ namespace Js
         static void SubAbsolute(JavascriptBigInt * pbi1, JavascriptBigInt * pbi2);
         static JavascriptBigInt * Mul(JavascriptBigInt * pbi1, JavascriptBigInt * pbi2);
         static JavascriptBigInt * MulAbsolute(JavascriptBigInt * pbi1, JavascriptBigInt * pbi2);
+        static JavascriptBigInt * DivMod(JavascriptBigInt * pbi1, JavascriptBigInt * pbi2, bool wantQuotient);
+        static JavascriptBigInt * Exponentiate(JavascriptBigInt * pbiBase, JavascriptBigInt * pbiExponent);
+        static JavascriptBigInt * ShiftLeftMagnitude(const JavascriptBigInt * pbi, uint64 bits);
+        static JavascriptBigInt * ShiftRightMagnitudeFloor(const JavascriptBigInt * pbi, uint64 bits);
+        static JavascriptBigInt * BitwiseOperation(const JavascriptBigInt * pbiLeft, const JavascriptBigInt * pbiRight, uint32 operation);
+        static JavascriptBigInt * CreateFromUnits(const uint32 * units, uint32 unitCount, bool isNegative, ScriptContext * scriptContext);
+        static uint64 GetMagnitudeAsUInt64(const JavascriptBigInt * pbi, bool* tooLarge);
         int Compare(JavascriptBigInt * pbi) const;
         int CompareAbsolute(JavascriptBigInt * pbi) const;
         int CompareMagnitudeToUInt64(uint64 value) const;

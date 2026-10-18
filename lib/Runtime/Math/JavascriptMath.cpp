@@ -4,6 +4,56 @@
 //-------------------------------------------------------------------------------------------------------
 using namespace Js;
 
+namespace
+{
+    // ToNumeric uses ToPrimitive(hint Number) for every operand. Unary
+    // operators reach this helper for primitives and wrappers; objects that
+    // produce a BigInt are routed to the BigInt implementation, while a
+    // non-BigInt primitive continues through the ordinary Number path.
+    bool TryGetBigIntUnary(Var value, ScriptContext* scriptContext, Var* primitive)
+    {
+        TypeId typeId = JavascriptOperators::GetTypeId(value);
+        if (typeId == TypeIds_BigInt)
+        {
+            *primitive = value;
+            return true;
+        }
+        if (!JavascriptOperators::IsObject(value))
+        {
+            *primitive = value;
+            return false;
+        }
+        *primitive = JavascriptConversion::ToPrimitive<JavascriptHint::HintNumber>(value, scriptContext);
+        return JavascriptOperators::GetTypeId(*primitive) == TypeIds_BigInt;
+    }
+
+    // Binary operators convert each operand with ToNumeric, left before
+    // right. ToNumeric applies ToPrimitive(hint Number) to objects and either
+    // returns a BigInt primitive unchanged or converts the remaining
+    // primitive to Number (a Symbol throws). Only after both conversions do
+    // we require matching types; this preserves the spec's coercion order,
+    // including an abrupt left coercion winning over a right operand that is
+    // never touched. Returns true when both operands are BigInt.
+    bool TryGetBigIntOperands(Var aLeft, Var aRight, ScriptContext* scriptContext, Var* primLeft, Var* primRight)
+    {
+        Var left = JavascriptOperators::ToNumeric(aLeft, scriptContext);
+        Var right = JavascriptOperators::ToNumeric(aRight, scriptContext);
+        TypeId leftType = JavascriptOperators::GetTypeId(left);
+        TypeId rightType = JavascriptOperators::GetTypeId(right);
+        *primLeft = left;
+        *primRight = right;
+        if (leftType == TypeIds_BigInt || rightType == TypeIds_BigInt)
+        {
+            if (leftType != rightType)
+            {
+                JavascriptError::ThrowTypeError(scriptContext, VBSERR_TypeMismatch, _u("BigInt operand"));
+            }
+            return true;
+        }
+        return false;
+    }
+}
+
         Var JavascriptMath::Negate_Full(Var aRight, ScriptContext* scriptContext)
         {
             JIT_HELPER_REENTRANT_HEADER(Op_Negate_Full);
@@ -13,12 +63,13 @@ using namespace Js;
                 return scriptContext->GetLibrary()->GetNegativeZero();
             }
 
-            if (JavascriptOperators::GetTypeId(aRight) == TypeIds_BigInt)
+            Var primitive;
+            if (TryGetBigIntUnary(aRight, scriptContext, &primitive))
             {
-                return JavascriptBigInt::Negate(aRight);
+                return JavascriptBigInt::Negate(primitive);
             }
 
-            double value = Negate_Helper(aRight, scriptContext);
+            double value = Negate_Helper(primitive, scriptContext);
             return JavascriptNumber::ToVarIntCheck(value, scriptContext);
             JIT_HELPER_END(Op_Negate_Full);
         }
@@ -33,12 +84,13 @@ using namespace Js;
                 return scriptContext->GetLibrary()->GetNegativeZero();
             }
 
-            if (JavascriptOperators::GetTypeId(aRight) == TypeIds_BigInt)
+            Var primitive;
+            if (TryGetBigIntUnary(aRight, scriptContext, &primitive))
             {
-                return JavascriptBigInt::Negate(aRight);
+                return JavascriptBigInt::Negate(primitive);
             }
 
-            double value = Negate_Helper(aRight, scriptContext);
+            double value = Negate_Helper(primitive, scriptContext);
             return JavascriptNumber::InPlaceNew(value, scriptContext, result);
             JIT_HELPER_END(Op_NegateInPlace);
         }
@@ -49,12 +101,13 @@ using namespace Js;
 #if _M_IX86
             AssertMsg(!TaggedInt::Is(aRight), "Should be detected");
 #endif
-            if (JavascriptOperators::GetTypeId(aRight) == TypeIds_BigInt)
+            Var primitive;
+            if (TryGetBigIntUnary(aRight, scriptContext, &primitive))
             {
-                return JavascriptBigInt::Not(aRight);
+                return JavascriptBigInt::Not(primitive);
             }
 
-            int nValue = JavascriptConversion::ToInt32(aRight, scriptContext);
+            int nValue = JavascriptConversion::ToInt32(primitive, scriptContext);
             return JavascriptNumber::ToVar(~nValue, scriptContext);
             JIT_HELPER_END(Op_Not_Full);
         }
@@ -65,12 +118,13 @@ using namespace Js;
             JIT_HELPER_REENTRANT_HEADER(Op_NotInPlace);
             AssertMsg(!TaggedInt::Is(aRight), "Should be detected");
 
-            if (JavascriptOperators::GetTypeId(aRight) == TypeIds_BigInt)
+            Var primitive;
+            if (TryGetBigIntUnary(aRight, scriptContext, &primitive))
             {
-                return JavascriptBigInt::Not(aRight);
+                return JavascriptBigInt::Not(primitive);
             }
 
-            int nValue = JavascriptConversion::ToInt32(aRight, scriptContext);
+            int nValue = JavascriptConversion::ToInt32(primitive, scriptContext);
             return JavascriptNumber::ToVarInPlace(~nValue, scriptContext, result);
             JIT_HELPER_END(Op_NotInPlace);
         }
@@ -82,12 +136,13 @@ using namespace Js;
             {
                 return TaggedInt::Increment(aRight, scriptContext);
             }
-            if (VarIs<JavascriptBigInt>(aRight))
+            Var primitive;
+            if (TryGetBigIntUnary(aRight, scriptContext, &primitive))
             {
-                return JavascriptBigInt::Increment(aRight);
+                return JavascriptBigInt::Increment(primitive);
             }
 
-            double inc = Increment_Helper(aRight, scriptContext);
+            double inc = Increment_Helper(primitive, scriptContext);
             return JavascriptNumber::InPlaceNew(inc, scriptContext, result);
             JIT_HELPER_END(Op_IncrementInPlace);
         }
@@ -99,12 +154,13 @@ using namespace Js;
             {
                 return TaggedInt::Increment(aRight, scriptContext);
             }
-            if (VarIs<JavascriptBigInt>(aRight))
+            Var primitive;
+            if (TryGetBigIntUnary(aRight, scriptContext, &primitive))
             {
-                return JavascriptBigInt::Increment(aRight);
+                return JavascriptBigInt::Increment(primitive);
             }
 
-            double inc = Increment_Helper(aRight, scriptContext);
+            double inc = Increment_Helper(primitive, scriptContext);
             return JavascriptNumber::ToVarIntCheck(inc, scriptContext);
             JIT_HELPER_END(Op_Increment_Full);
         }
@@ -117,12 +173,13 @@ using namespace Js;
             {
                 return TaggedInt::Decrement(aRight, scriptContext);
             }
-            if (VarIs<JavascriptBigInt>(aRight))
+            Var primitive;
+            if (TryGetBigIntUnary(aRight, scriptContext, &primitive))
             {
-                return JavascriptBigInt::Decrement(aRight);
+                return JavascriptBigInt::Decrement(primitive);
             }
 
-            double dec = Decrement_Helper(aRight,scriptContext);
+            double dec = Decrement_Helper(primitive, scriptContext);
             return JavascriptNumber::InPlaceNew(dec, scriptContext, result);
             JIT_HELPER_END(Op_DecrementInPlace);
         }
@@ -134,12 +191,13 @@ using namespace Js;
             {
                 return TaggedInt::Decrement(aRight, scriptContext);
             }
-            if (VarIs<JavascriptBigInt>(aRight))
+            Var primitive;
+            if (TryGetBigIntUnary(aRight, scriptContext, &primitive))
             {
-                return JavascriptBigInt::Decrement(aRight);
+                return JavascriptBigInt::Decrement(primitive);
             }
 
-            double dec = Decrement_Helper(aRight,scriptContext);
+            double dec = Decrement_Helper(primitive, scriptContext);
             return JavascriptNumber::ToVarIntCheck(dec, scriptContext);
             JIT_HELPER_END(Op_Decrement_Full);
         }
@@ -147,26 +205,33 @@ using namespace Js;
 
         Var JavascriptMath::Increment_Numeric(Var aRight, ScriptContext* scriptContext)
         {
-            if (VarIs<JavascriptBigInt>(aRight))
+            Var primitive;
+            if (TryGetBigIntUnary(aRight, scriptContext, &primitive))
             {
-                return JavascriptBigInt::Increment(aRight);
+                return JavascriptBigInt::Increment(primitive);
             }
-            return JavascriptMath::Add(aRight, TaggedInt::ToVarUnchecked(1), scriptContext);
+            return JavascriptMath::Add(primitive, TaggedInt::ToVarUnchecked(1), scriptContext);
         }
 
         Var JavascriptMath::Decrement_Numeric(Var aRight, ScriptContext* scriptContext)
         {
-            if (VarIs<JavascriptBigInt>(aRight))
+            Var primitive;
+            if (TryGetBigIntUnary(aRight, scriptContext, &primitive))
             {
-                return JavascriptBigInt::Decrement(aRight);
+                return JavascriptBigInt::Decrement(primitive);
             }
-            return JavascriptMath::Subtract(aRight, TaggedInt::ToVarUnchecked(1), scriptContext);
+            return JavascriptMath::Subtract(primitive, TaggedInt::ToVarUnchecked(1), scriptContext);
         }
             
         Var JavascriptMath::And_Full(Var aLeft, Var aRight, ScriptContext* scriptContext)
         {
             JIT_HELPER_REENTRANT_HEADER(Op_And_Full);
-            int32 value = And_Helper(aLeft, aRight, scriptContext);
+            Var primLeft, primRight;
+            if (TryGetBigIntOperands(aLeft, aRight, scriptContext, &primLeft, &primRight))
+            {
+                return JavascriptBigInt::BitwiseAnd(primLeft, primRight);
+            }
+            int32 value = And_Helper(primLeft, primRight, scriptContext);
             return JavascriptNumber::ToVar(value, scriptContext);
             JIT_HELPER_END(Op_And_Full);
         }
@@ -175,7 +240,12 @@ using namespace Js;
         Var JavascriptMath::And_InPlace(Var aLeft, Var aRight, ScriptContext* scriptContext, JavascriptNumber* result)
         {
             JIT_HELPER_REENTRANT_HEADER(Op_AndInPlace);
-            int32 value = And_Helper(aLeft, aRight, scriptContext);
+            Var primLeft, primRight;
+            if (TryGetBigIntOperands(aLeft, aRight, scriptContext, &primLeft, &primRight))
+            {
+                return JavascriptBigInt::BitwiseAnd(primLeft, primRight);
+            }
+            int32 value = And_Helper(primLeft, primRight, scriptContext);
             return JavascriptNumber::ToVarInPlace(value, scriptContext, result);
             JIT_HELPER_END(Op_AndInPlace);
         }
@@ -183,7 +253,12 @@ using namespace Js;
         Var JavascriptMath::Or_Full(Var aLeft, Var aRight, ScriptContext* scriptContext)
         {
             JIT_HELPER_REENTRANT_HEADER(Op_Or_Full);
-            int32 value = Or_Helper(aLeft, aRight, scriptContext);
+            Var primLeft, primRight;
+            if (TryGetBigIntOperands(aLeft, aRight, scriptContext, &primLeft, &primRight))
+            {
+                return JavascriptBigInt::BitwiseOr(primLeft, primRight);
+            }
+            int32 value = Or_Helper(primLeft, primRight, scriptContext);
             return JavascriptNumber::ToVar(value, scriptContext);
             JIT_HELPER_END(Op_Or_Full);
         }
@@ -192,7 +267,12 @@ using namespace Js;
         Var JavascriptMath::Or_InPlace(Var aLeft, Var aRight, ScriptContext* scriptContext, JavascriptNumber* result)
         {
             JIT_HELPER_REENTRANT_HEADER(Op_OrInPlace);
-            int32 value = Or_Helper(aLeft, aRight, scriptContext);
+            Var primLeft, primRight;
+            if (TryGetBigIntOperands(aLeft, aRight, scriptContext, &primLeft, &primRight))
+            {
+                return JavascriptBigInt::BitwiseOr(primLeft, primRight);
+            }
+            int32 value = Or_Helper(primLeft, primRight, scriptContext);
             return JavascriptNumber::ToVarInPlace(value, scriptContext, result);
             JIT_HELPER_END(Op_OrInPlace);
         }
@@ -200,8 +280,13 @@ using namespace Js;
         Var JavascriptMath::Xor_Full(Var aLeft, Var aRight, ScriptContext* scriptContext)
         {
             JIT_HELPER_REENTRANT_HEADER(Op_Xor_Full);
-            int32 nLeft = TaggedInt::Is(aLeft) ? TaggedInt::ToInt32(aLeft) : JavascriptConversion::ToInt32(aLeft, scriptContext);
-            int32 nRight = TaggedInt::Is(aRight) ? TaggedInt::ToInt32(aRight) : JavascriptConversion::ToInt32(aRight, scriptContext);
+            Var primLeft, primRight;
+            if (TryGetBigIntOperands(aLeft, aRight, scriptContext, &primLeft, &primRight))
+            {
+                return JavascriptBigInt::BitwiseXor(primLeft, primRight);
+            }
+            int32 nLeft = TaggedInt::Is(primLeft) ? TaggedInt::ToInt32(primLeft) : JavascriptConversion::ToInt32(primLeft, scriptContext);
+            int32 nRight = TaggedInt::Is(primRight) ? TaggedInt::ToInt32(primRight) : JavascriptConversion::ToInt32(primRight, scriptContext);
 
             return JavascriptNumber::ToVar(nLeft ^ nRight,scriptContext);
             JIT_HELPER_END(Op_Xor_Full);
@@ -211,8 +296,13 @@ using namespace Js;
         Var JavascriptMath::Xor_InPlace(Var aLeft, Var aRight, ScriptContext* scriptContext,  JavascriptNumber* result)
         {
             JIT_HELPER_REENTRANT_HEADER(Op_XorInPlace);
-            int32 nLeft = TaggedInt::Is(aLeft) ? TaggedInt::ToInt32(aLeft) : JavascriptConversion::ToInt32(aLeft, scriptContext);
-            int32 nRight = TaggedInt::Is(aRight) ? TaggedInt::ToInt32(aRight) : JavascriptConversion::ToInt32(aRight, scriptContext);
+            Var primLeft, primRight;
+            if (TryGetBigIntOperands(aLeft, aRight, scriptContext, &primLeft, &primRight))
+            {
+                return JavascriptBigInt::BitwiseXor(primLeft, primRight);
+            }
+            int32 nLeft = TaggedInt::Is(primLeft) ? TaggedInt::ToInt32(primLeft) : JavascriptConversion::ToInt32(primLeft, scriptContext);
+            int32 nRight = TaggedInt::Is(primRight) ? TaggedInt::ToInt32(primRight) : JavascriptConversion::ToInt32(primRight, scriptContext);
 
             return JavascriptNumber::ToVarInPlace(nLeft ^ nRight, scriptContext, result);
             JIT_HELPER_END(Op_XorInPlace);
@@ -221,8 +311,13 @@ using namespace Js;
         Var JavascriptMath::ShiftLeft_Full(Var aLeft, Var aRight, ScriptContext* scriptContext)
         {
             JIT_HELPER_REENTRANT_HEADER(Op_ShiftLeft_Full);
-            int32 nValue    = JavascriptConversion::ToInt32(aLeft, scriptContext);
-            uint32 nShift   = JavascriptConversion::ToUInt32(aRight, scriptContext);
+            Var primLeft, primRight;
+            if (TryGetBigIntOperands(aLeft, aRight, scriptContext, &primLeft, &primRight))
+            {
+                return JavascriptBigInt::LeftShift(primLeft, primRight);
+            }
+            int32 nValue    = JavascriptConversion::ToInt32(primLeft, scriptContext);
+            uint32 nShift   = JavascriptConversion::ToUInt32(primRight, scriptContext);
             int32 nResult   = nValue << (nShift & 0x1F);
 
             return JavascriptNumber::ToVar(nResult,scriptContext);
@@ -233,8 +328,13 @@ using namespace Js;
         Var JavascriptMath::ShiftRight_Full(Var aLeft, Var aRight, ScriptContext* scriptContext)
         {
             JIT_HELPER_REENTRANT_HEADER(Op_ShiftRight_Full);
-            int32 nValue    = JavascriptConversion::ToInt32(aLeft, scriptContext);
-            uint32 nShift   = JavascriptConversion::ToUInt32(aRight, scriptContext);
+            Var primLeft, primRight;
+            if (TryGetBigIntOperands(aLeft, aRight, scriptContext, &primLeft, &primRight))
+            {
+                return JavascriptBigInt::RightShift(primLeft, primRight);
+            }
+            int32 nValue    = JavascriptConversion::ToInt32(primLeft, scriptContext);
+            uint32 nShift   = JavascriptConversion::ToUInt32(primRight, scriptContext);
 
             int32 nResult   = nValue >> (nShift & 0x1F);
 
@@ -245,8 +345,16 @@ using namespace Js;
         Var JavascriptMath::ShiftRightU_Full(Var aLeft, Var aRight, ScriptContext* scriptContext)
         {
             JIT_HELPER_REENTRANT_HEADER(Op_ShiftRightU_Full);
-            uint32 nValue   = JavascriptConversion::ToUInt32(aLeft, scriptContext);
-            uint32 nShift   = JavascriptConversion::ToUInt32(aRight, scriptContext);
+            Var primLeft, primRight;
+            if (TryGetBigIntOperands(aLeft, aRight, scriptContext, &primLeft, &primRight))
+            {
+                // BigInt::unsignedRightShift always throws TypeError. Both
+                // operands have already been coerced, so an abrupt @@toPrimitive
+                // above wins over this TypeError, as the spec requires.
+                JavascriptError::ThrowTypeError(scriptContext, VBSERR_TypeMismatch, _u("BigInt >>>"));
+            }
+            uint32 nValue   = JavascriptConversion::ToUInt32(primLeft, scriptContext);
+            uint32 nShift   = JavascriptConversion::ToUInt32(primRight, scriptContext);
 
             uint32 nResult  = nValue >> (nShift & 0x1F);
 
@@ -868,22 +976,13 @@ StringCommon:
         {
             JIT_HELPER_REENTRANT_HEADER(Op_Subtract_Full);
 
-            Var aLeftToPrim = JavascriptConversion::ToPrimitive<JavascriptHint::HintNumber>(aLeft, scriptContext);
-            Var aRightToPrim = JavascriptConversion::ToPrimitive<JavascriptHint::HintNumber>(aRight, scriptContext);
-
-            Js::TypeId typeLeft = JavascriptOperators::GetTypeId(aLeftToPrim);
-            Js::TypeId typeRight = JavascriptOperators::GetTypeId(aRightToPrim);
-
-            if (typeLeft == TypeIds_BigInt || typeRight == TypeIds_BigInt)
+            Var primLeft, primRight;
+            if (TryGetBigIntOperands(aLeft, aRight, scriptContext, &primLeft, &primRight))
             {
-                if (typeRight != typeLeft)
-                {
-                    JavascriptError::ThrowTypeError(scriptContext, VBSERR_TypeMismatch, _u("Subtract BigInt"));
-                }
-                return JavascriptBigInt::Sub(aLeftToPrim, aRightToPrim);
+                return JavascriptBigInt::Sub(primLeft, primRight);
             }
 
-            double difference = Subtract_Helper(aLeftToPrim, aRightToPrim, scriptContext);
+            double difference = Subtract_Helper(primLeft, primRight, scriptContext);
             return JavascriptNumber::ToVarIntCheck(difference, scriptContext);
             JIT_HELPER_END(Op_Subtract_Full);
         }
@@ -893,22 +992,13 @@ StringCommon:
         {
             JIT_HELPER_REENTRANT_HEADER(Op_SubtractInPlace);
 
-            Var aLeftToPrim = JavascriptConversion::ToPrimitive<JavascriptHint::HintNumber>(aLeft, scriptContext);
-            Var aRightToPrim = JavascriptConversion::ToPrimitive<JavascriptHint::HintNumber>(aRight, scriptContext);
-
-            Js::TypeId typeLeft = JavascriptOperators::GetTypeId(aLeftToPrim);
-            Js::TypeId typeRight = JavascriptOperators::GetTypeId(aRightToPrim);
-
-            if (typeLeft == TypeIds_BigInt || typeRight == TypeIds_BigInt)
+            Var primLeft, primRight;
+            if (TryGetBigIntOperands(aLeft, aRight, scriptContext, &primLeft, &primRight))
             {
-                if (typeRight != typeLeft)
-                {
-                    JavascriptError::ThrowTypeError(scriptContext, VBSERR_TypeMismatch, _u("Subtract BigInt"));
-                }
-                return JavascriptBigInt::Sub(aLeftToPrim, aRightToPrim);
+                return JavascriptBigInt::Sub(primLeft, primRight);
             }
 
-            double difference = Subtract_Helper(aLeftToPrim, aRightToPrim, scriptContext);
+            double difference = Subtract_Helper(primLeft, primRight, scriptContext);
             return JavascriptNumber::InPlaceNew(difference, scriptContext, result);
             JIT_HELPER_END(Op_SubtractInPlace);
         }
@@ -916,14 +1006,19 @@ StringCommon:
         Var JavascriptMath::Divide_Full(Var aLeft,Var aRight, ScriptContext* scriptContext)
         {
             JIT_HELPER_REENTRANT_HEADER(Op_Divide_Full);
+            Var primLeft, primRight;
+            if (TryGetBigIntOperands(aLeft, aRight, scriptContext, &primLeft, &primRight))
+            {
+                return JavascriptBigInt::Div(primLeft, primRight);
+            }
             // If both arguments are TaggedInt, then try to do integer division
             // This case is not handled by the lowerer.
-            if (TaggedInt::IsPair(aLeft, aRight))
+            if (TaggedInt::IsPair(primLeft, primRight))
             {
-                return TaggedInt::Divide(aLeft, aRight, scriptContext);
+                return TaggedInt::Divide(primLeft, primRight, scriptContext);
             }
 
-            return JavascriptNumber::NewInlined( Divide_Helper(aLeft, aRight, scriptContext), scriptContext );
+            return JavascriptNumber::NewInlined( Divide_Helper(primLeft, primRight, scriptContext), scriptContext );
             JIT_HELPER_END(Op_Divide_Full);
         }
         JIT_HELPER_TEMPLATE(Op_Divide_Full, Op_Divide)
@@ -931,8 +1026,13 @@ StringCommon:
         Var JavascriptMath::Exponentiation_Full(Var aLeft, Var aRight, ScriptContext *scriptContext)
         {
             JIT_HELPER_REENTRANT_HEADER(Op_Exponentiation_Full);
-            double x = JavascriptConversion::ToNumber(aLeft, scriptContext);
-            double y = JavascriptConversion::ToNumber(aRight, scriptContext);
+            Var primLeft, primRight;
+            if (TryGetBigIntOperands(aLeft, aRight, scriptContext, &primLeft, &primRight))
+            {
+                return JavascriptBigInt::Exponentiate(primLeft, primRight);
+            }
+            double x = JavascriptConversion::ToNumber(primLeft, scriptContext);
+            double y = JavascriptConversion::ToNumber(primRight, scriptContext);
             return JavascriptNumber::ToVarIntCheck(Math::Pow(x, y), scriptContext);
             JIT_HELPER_END(Op_Exponentiation_Full);
         }
@@ -941,9 +1041,14 @@ StringCommon:
         Var JavascriptMath::Exponentiation_InPlace(Var aLeft, Var aRight, ScriptContext* scriptContext, JavascriptNumber* result)
         {
             JIT_HELPER_REENTRANT_HEADER(Op_ExponentiationInPlace);
+            Var primLeft, primRight;
+            if (TryGetBigIntOperands(aLeft, aRight, scriptContext, &primLeft, &primRight))
+            {
+                return JavascriptBigInt::Exponentiate(primLeft, primRight);
+            }
             // The IEEE 754 floating point spec ensures that NaNs are preserved in all operations
-            double dblLeft = JavascriptConversion::ToNumber(aLeft, scriptContext);
-            double dblRight = JavascriptConversion::ToNumber(aRight, scriptContext);
+            double dblLeft = JavascriptConversion::ToNumber(primLeft, scriptContext);
+            double dblRight = JavascriptConversion::ToNumber(primRight, scriptContext);
 
             return JavascriptNumber::InPlaceNew(Math::Pow(dblLeft, dblRight), scriptContext, result);
             JIT_HELPER_END(Op_ExponentiationInPlace);
@@ -956,37 +1061,15 @@ StringCommon:
             Assert(aRight != nullptr);
             Assert(scriptContext != nullptr);
 
+            Var primLeft, primRight;
+            if (TryGetBigIntOperands(aLeft, aRight, scriptContext, &primLeft, &primRight))
+            {
+                return JavascriptBigInt::Mul(primLeft, primRight);
+            }
+            aLeft = primLeft;
+            aRight = primRight;
             Js::TypeId typeLeft = JavascriptOperators::GetTypeId(aLeft);
             Js::TypeId typeRight = JavascriptOperators::GetTypeId(aRight);
-            if (typeLeft == TypeIds_BigInt || typeRight == TypeIds_BigInt ||
-                JavascriptOperators::IsObject(aLeft) || JavascriptOperators::IsObject(aRight))
-            {
-                // `*` selects BigInt vs Number only after ToPrimitive(hint
-                // Number) on both operands. This covers wrappers and ordinary
-                // objects whose valueOf/@@toPrimitive produces a BigInt.
-                Var primLeft = JavascriptConversion::ToPrimitive<JavascriptHint::HintNumber>(aLeft, scriptContext);
-                Var primRight = JavascriptConversion::ToPrimitive<JavascriptHint::HintNumber>(aRight, scriptContext);
-                typeLeft = JavascriptOperators::GetTypeId(primLeft);
-                typeRight = JavascriptOperators::GetTypeId(primRight);
-                if (typeLeft == TypeIds_BigInt || typeRight == TypeIds_BigInt)
-                {
-                    if (typeRight != typeLeft)
-                    {
-                        JavascriptError::ThrowTypeError(scriptContext, VBSERR_TypeMismatch, _u("Multiply BigInt"));
-                    }
-                    return JavascriptBigInt::Mul(primLeft, primRight);
-                }
-                aLeft = primLeft;
-                aRight = primRight;
-            }
-            if (typeLeft == TypeIds_BigInt || typeRight == TypeIds_BigInt)
-            {
-                if (typeRight != typeLeft)
-                {
-                    JavascriptError::ThrowTypeError(scriptContext, VBSERR_TypeMismatch, _u("Multiply BigInt"));
-                }
-                return JavascriptBigInt::Mul(aLeft, aRight);
-            }
 
             if(JavascriptNumber::Is(aLeft))
             {
@@ -1023,37 +1106,15 @@ StringCommon:
         {
             JIT_HELPER_REENTRANT_HEADER(Op_MultiplyInPlace);
 
+            Var primLeft, primRight;
+            if (TryGetBigIntOperands(aLeft, aRight, scriptContext, &primLeft, &primRight))
+            {
+                return JavascriptBigInt::Mul(primLeft, primRight);
+            }
+            aLeft = primLeft;
+            aRight = primRight;
             Js::TypeId typeLeft = JavascriptOperators::GetTypeId(aLeft);
             Js::TypeId typeRight = JavascriptOperators::GetTypeId(aRight);
-            if (typeLeft == TypeIds_BigInt || typeRight == TypeIds_BigInt ||
-                JavascriptOperators::IsObject(aLeft) || JavascriptOperators::IsObject(aRight))
-            {
-                // `*` selects BigInt vs Number only after ToPrimitive(hint
-                // Number) on both operands. This covers wrappers and ordinary
-                // objects whose valueOf/@@toPrimitive produces a BigInt.
-                Var primLeft = JavascriptConversion::ToPrimitive<JavascriptHint::HintNumber>(aLeft, scriptContext);
-                Var primRight = JavascriptConversion::ToPrimitive<JavascriptHint::HintNumber>(aRight, scriptContext);
-                typeLeft = JavascriptOperators::GetTypeId(primLeft);
-                typeRight = JavascriptOperators::GetTypeId(primRight);
-                if (typeLeft == TypeIds_BigInt || typeRight == TypeIds_BigInt)
-                {
-                    if (typeRight != typeLeft)
-                    {
-                        JavascriptError::ThrowTypeError(scriptContext, VBSERR_TypeMismatch, _u("Multiply BigInt"));
-                    }
-                    return JavascriptBigInt::Mul(primLeft, primRight);
-                }
-                aLeft = primLeft;
-                aRight = primRight;
-            }
-            if (typeLeft == TypeIds_BigInt || typeRight == TypeIds_BigInt)
-            {
-                if (typeRight != typeLeft)
-                {
-                    JavascriptError::ThrowTypeError(scriptContext, VBSERR_TypeMismatch, _u("Multiply BigInt"));
-                }
-                return JavascriptBigInt::Mul(aLeft, aRight);
-            }
 
             if(JavascriptNumber::Is(aLeft))
             {
@@ -1088,14 +1149,19 @@ StringCommon:
         Var JavascriptMath::Divide_InPlace(Var aLeft, Var aRight, ScriptContext* scriptContext, JavascriptNumber* result)
         {
             JIT_HELPER_REENTRANT_HEADER(Op_DivideInPlace);
+            Var primLeft, primRight;
+            if (TryGetBigIntOperands(aLeft, aRight, scriptContext, &primLeft, &primRight))
+            {
+                return JavascriptBigInt::Div(primLeft, primRight);
+            }
             // If both arguments are TaggedInt, then try to do integer division
             // This case is not handled by the lowerer.
-            if (TaggedInt::IsPair(aLeft, aRight))
+            if (TaggedInt::IsPair(primLeft, primRight))
             {
-                return TaggedInt::DivideInPlace(aLeft, aRight, scriptContext, result);
+                return TaggedInt::DivideInPlace(primLeft, primRight, scriptContext, result);
             }
 
-            double quotient = Divide_Helper(aLeft, aRight, scriptContext);
+            double quotient = Divide_Helper(primLeft, primRight, scriptContext);
             return JavascriptNumber::InPlaceNew(quotient, scriptContext, result);
             JIT_HELPER_END(Op_DivideInPlace);
         }
@@ -1103,14 +1169,19 @@ StringCommon:
         Var JavascriptMath::Modulus_Full(Var aLeft, Var aRight, ScriptContext* scriptContext)
         {
             JIT_HELPER_REENTRANT_HEADER(Op_Modulus_Full);
+            Var primLeft, primRight;
+            if (TryGetBigIntOperands(aLeft, aRight, scriptContext, &primLeft, &primRight))
+            {
+                return JavascriptBigInt::Modulus(primLeft, primRight);
+            }
             // If both arguments are TaggedInt, then try to do integer modulus.
             // This case is not handled by the lowerer.
-            if (TaggedInt::IsPair(aLeft, aRight))
+            if (TaggedInt::IsPair(primLeft, primRight))
             {
-                return TaggedInt::Modulus(aLeft, aRight, scriptContext);
+                return TaggedInt::Modulus(primLeft, primRight, scriptContext);
             }
 
-            double remainder = Modulus_Helper(aLeft, aRight, scriptContext);
+            double remainder = Modulus_Helper(primLeft, primRight, scriptContext);
             return JavascriptNumber::ToVarIntCheck(remainder, scriptContext);
             JIT_HELPER_END(Op_Modulus_Full);
         }
@@ -1123,14 +1194,19 @@ StringCommon:
             Assert(aRight != nullptr);
             Assert(scriptContext != nullptr);
 
+            Var primLeft, primRight;
+            if (TryGetBigIntOperands(aLeft, aRight, scriptContext, &primLeft, &primRight))
+            {
+                return JavascriptBigInt::Modulus(primLeft, primRight);
+            }
             // If both arguments are TaggedInt, then try to do integer division
             // This case is not handled by the lowerer.
-            if (TaggedInt::IsPair(aLeft, aRight))
+            if (TaggedInt::IsPair(primLeft, primRight))
             {
-                return TaggedInt::Modulus(aLeft, aRight, scriptContext);
+                return TaggedInt::Modulus(primLeft, primRight, scriptContext);
             }
 
-            double remainder = Modulus_Helper(aLeft, aRight, scriptContext);
+            double remainder = Modulus_Helper(primLeft, primRight, scriptContext);
             return JavascriptNumber::InPlaceNew(remainder, scriptContext, result);
             JIT_HELPER_END(Op_ModulusInPlace);
         }

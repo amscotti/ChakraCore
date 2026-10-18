@@ -272,21 +272,24 @@ var tests = [
             assert.strictEqual(1, Number(1n));
             assert.isTrue(1n == 1);
 
+            // Same-BigInt arithmetic and shifts are implemented; the mixed
+            // forms below must throw a controlled TypeError, not abort.
+            assert.strictEqual(1n, 1n ** 2n);
+            assert.strictEqual(2n, 1n << 1n);
+            assert.strictEqual(1n, BigInt(1) / BigInt(1));
+
             [
                 function () { return 1n + 1; },
                 function () { return 1n * 1; },
                 function () { return 1n / 1; },
                 function () { return 1n % 1; },
-                // Same-BigInt exponentiation is C3 work; the current slice
-                // must still throw a controlled TypeError, not abort.
-                function () { return 1n ** 2n; },
+                function () { return 1n ** 1; },
                 function () { return +1n; },
                 function () { return 1n & 1; },
-                function () { return 1n << 1n; },
+                function () { return 1n << 1; },
                 function () { return 1n >>> 1; },
                 function () { return BigInt(1) + 1; },
                 function () { return BigInt(1) >>> 1; },
-                function () { return BigInt(1) / BigInt(1); },
                 function () { return 1n + Symbol("x"); }
             ].forEach(function (operation, index) {
                 assert.throws(operation, TypeError, "operation " + index);

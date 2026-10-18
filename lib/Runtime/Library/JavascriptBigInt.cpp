@@ -26,6 +26,26 @@ namespace Js
             return static_cast<uint32>(sizeof(digit_t) * 8);
         }
 
+        // Exponent results are built by repeated schoolbook squaring, so the
+        // limb-count bound used by asUintN (2**24 limbs) is far beyond any
+        // answer this implementation can produce in reasonable time. Keep a
+        // smaller, explicit resource bound: 2**20 bits is 128 KiB and makes a
+        // hostile `2n ** (2n**64n - 1n)` a controlled RangeError instead of an
+        // unbounded allocation. V8 uses a larger maximum (about 2**30 bits);
+        // the observable contract for oversized results is the same.
+        const uint64 BigIntMaxExponentResultBits = 1ull << 20;
+
+        inline uint64 BigIntMaxResultBitCount()
+        {
+            return BigIntMaxResultLimbs * BigIntLimbBits();
+        }
+
+        // Number of uint32 halves in one digit_t limb.
+        inline uint32 BigIntUnitsPerLimb()
+        {
+            return static_cast<uint32>(sizeof(digit_t) / sizeof(uint32));
+        }
+
         inline digit_t BigIntLimbMask()
         {
             return static_cast<digit_t>(~static_cast<digit_t>(0));
@@ -1146,10 +1166,15 @@ namespace Js
             borrow = tempBorrow;
         }
         Assert(borrow == 0);
-        // remove trailing zero
-        if (result->m_digits[result->m_length-1] == 0)
+        // Remove trailing zero limbs and canonicalize a zero result to one
+        // zero limb; 1n - 1n must compare equal to the 0n literal.
+        while (result->m_length > 1 && result->m_digits[result->m_length - 1] == 0)
         {
             result->m_length--;
+        }
+        if (result->m_length == 1 && result->m_digits[0] == 0)
+        {
+            result->m_isNegative = false;
         }
     }
 
@@ -1413,6 +1438,16 @@ namespace Js
     {
         digit_t index;
 
+        // Intermediates can be zero with either a zero limb or a zero length
+        // (AbsoluteDecrement used to leave the latter). Compare mathematical
+        // zeros as equal regardless of their storage shape.
+        bool thisZero = IsZeroValue();
+        bool otherZero = pbi->IsZeroValue();
+        if (thisZero || otherZero)
+        {
+            return thisZero ? (otherZero ? 0 : -1) : 1;
+        }
+
         if (m_length > pbi->m_length)
         {
             return 1;
@@ -1526,7 +1561,9 @@ namespace Js
     {
         if (JavascriptBigInt::IsZero(pbi1))
         {
-            pbi2->m_isNegative = !pbi2->m_isNegative;
+            // Negate through the canonical helper so 0n - 0n stays positive
+            // zero instead of acquiring a negative sign bit.
+            JavascriptBigInt::Negate(pbi2);
             return pbi2;
         }
         if (JavascriptBigInt::IsZero(pbi2))
@@ -1548,6 +1585,9 @@ namespace Js
                 return pbi1;
             }
             JavascriptBigInt::AddAbsolute(pbi2, pbi1);
+            // The sum accumulates into the positive dividend whose magnitude
+            // is larger; the mathematical result of -a - b is negative.
+            JavascriptBigInt::MakeNegative(pbi2);
             return pbi2;
         }
         else // both positive 
@@ -1691,6 +1731,609 @@ namespace Js
         JavascriptBigInt *leftBigInt = VarTo<JavascriptBigInt>(aLeft);
         JavascriptBigInt *rightBigInt = VarTo<JavascriptBigInt>(aRight);
         return JavascriptBigInt::Mul(leftBigInt, rightBigInt);
+    }
+
+    // ------------------------------------------------------------------
+    // Division and remainder
+    // ------------------------------------------------------------------
+    //
+    // Knuth's Algorithm D over 32-bit half-limbs. The BigInt magnitude is a
+    // little-endian array of digit_t, 32 or 64 bits wide; working in uint32
+    // units keeps every intermediate in uint64 (including the 32x32->64
+    // products and the normalized subtraction) without __int128, which is the
+    // same portability rule the existing DivModInPlace/ToDouble code follows.
+    // A zero divisor throws RangeError before any result is published.
+
+    uint64 JavascriptBigInt::GetMagnitudeAsUInt64(const JavascriptBigInt * pbi, bool* tooLarge)
+    {
+        *tooLarge = false;
+        uint64 value = 0;
+        if (BigIntLimbBits() >= 64)
+        {
+            if (pbi->m_length > 1)
+            {
+                *tooLarge = true;
+                return 0;
+            }
+            value = pbi->m_length == 1 ? static_cast<uint64>(pbi->m_digits[0]) : 0;
+        }
+        else
+        {
+            if (pbi->m_length > 2)
+            {
+                *tooLarge = true;
+                return 0;
+            }
+            for (digit_t i = pbi->m_length; i > 0; i--)
+            {
+                value = (value << BigIntLimbBits()) | static_cast<uint64>(pbi->m_digits[i - 1]);
+            }
+        }
+        return value;
+    }
+
+    JavascriptBigInt * JavascriptBigInt::CreateFromUnits(
+        const uint32 * units, uint32 unitCount, bool isNegative, ScriptContext * scriptContext)
+    {
+        Assert(units != nullptr);
+        while (unitCount > 0 && units[unitCount - 1] == 0)
+        {
+            unitCount--;
+        }
+
+        const uint32 unitsPerLimb = BigIntUnitsPerLimb();
+        const uint32 limbCount = unitCount == 0 ? 1 : (unitCount + unitsPerLimb - 1) / unitsPerLimb;
+        JavascriptBigInt * result = JavascriptBigInt::CreateZeroWithLength(limbCount, scriptContext);
+        for (uint32 i = 0; i < unitCount; i++)
+        {
+            result->m_digits[i / unitsPerLimb] |= static_cast<digit_t>(units[i]) << (32 * (i % unitsPerLimb));
+        }
+        while (result->m_length > 1 && result->m_digits[result->m_length - 1] == 0)
+        {
+            result->m_length--;
+        }
+        result->m_isNegative = isNegative && !result->IsZeroValue();
+        return result;
+    }
+
+    JavascriptBigInt * JavascriptBigInt::DivMod(JavascriptBigInt * pbi1, JavascriptBigInt * pbi2, bool wantQuotient)
+    {
+        ScriptContext * scriptContext = pbi1->GetScriptContext();
+        if (pbi2->IsZeroValue())
+        {
+            // BigInt::divide/remainder step 1: a zero divisor is a RangeError.
+            JavascriptError::ThrowRangeError(scriptContext, VBSERR_TypeMismatch, _u("Divide BigInt"));
+        }
+        if (pbi1->IsZeroValue())
+        {
+            return JavascriptBigInt::CreateZero(scriptContext);
+        }
+        if (pbi1->CompareAbsolute(pbi2) < 0)
+        {
+            // |dividend| < |divisor|: quotient is 0n, remainder is the
+            // dividend (with its own sign).
+            return wantQuotient ? JavascriptBigInt::CreateZero(scriptContext) : JavascriptBigInt::New(pbi1, scriptContext);
+        }
+
+        const uint32 unitsPerLimb = BigIntUnitsPerLimb();
+        uint32 uCount = static_cast<uint32>(pbi1->m_length * unitsPerLimb);
+        uint32 vCount = static_cast<uint32>(pbi2->m_length * unitsPerLimb);
+        uint32 * u = RecyclerNewArrayLeafZ(scriptContext->GetRecycler(), uint32, uCount);
+        uint32 * v = RecyclerNewArrayLeafZ(scriptContext->GetRecycler(), uint32, vCount);
+        for (digit_t i = 0; i < pbi1->m_length; i++)
+        {
+            digit_t digit = pbi1->m_digits[i];
+            for (uint32 j = 0; j < unitsPerLimb; j++)
+            {
+                u[i * unitsPerLimb + j] = static_cast<uint32>(digit >> (32 * j));
+            }
+        }
+        for (digit_t i = 0; i < pbi2->m_length; i++)
+        {
+            digit_t digit = pbi2->m_digits[i];
+            for (uint32 j = 0; j < unitsPerLimb; j++)
+            {
+                v[i * unitsPerLimb + j] = static_cast<uint32>(digit >> (32 * j));
+            }
+        }
+        while (uCount > 0 && u[uCount - 1] == 0) uCount--;
+        while (vCount > 0 && v[vCount - 1] == 0) vCount--;
+        Assert(vCount > 0);
+        Assert(uCount > 0);
+
+        if (vCount == 1)
+        {
+            // Single 32-bit divisor: the classic long-division loop.
+            uint32 divisor = v[0];
+            uint32 * quotientUnits = RecyclerNewArrayLeafZ(scriptContext->GetRecycler(), uint32, uCount);
+            uint64 remainder = 0;
+            for (uint32 i = uCount; i > 0; i--)
+            {
+                uint64 current = (remainder << 32) | u[i - 1];
+                quotientUnits[i - 1] = static_cast<uint32>(current / divisor);
+                remainder = current % divisor;
+            }
+            uint32 remainderUnit = static_cast<uint32>(remainder);
+            JavascriptBigInt * quotient = JavascriptBigInt::CreateFromUnits(quotientUnits, uCount, false, scriptContext);
+            quotient->m_isNegative = (pbi1->m_isNegative != pbi2->m_isNegative) && !quotient->IsZeroValue();
+            return wantQuotient ? quotient :
+                JavascriptBigInt::CreateFromUnits(&remainderUnit, 1, pbi1->m_isNegative, scriptContext);
+        }
+
+        // Normalize so the divisor's top bit is set. Shift counts stay below
+        // 32 because the top 32-bit unit of a canonical magnitude is nonzero.
+        uint32 shift = 0;
+        for (uint32 top = v[vCount - 1]; (top & 0x80000000u) == 0; top <<= 1)
+        {
+            shift++;
+        }
+
+        uint32 * normalizedV = RecyclerNewArrayLeafZ(scriptContext->GetRecycler(), uint32, vCount);
+        for (uint32 i = 0; i < vCount; i++)
+        {
+            uint32 low = i == 0 ? 0 : v[i - 1];
+            normalizedV[i] = shift == 0
+                ? v[i]
+                : (v[i] << shift) | (low >> (32 - shift));
+        }
+
+        uint32 * normalizedU = RecyclerNewArrayLeafZ(scriptContext->GetRecycler(), uint32, uCount + 1);
+        normalizedU[uCount] = shift == 0 ? 0 : (u[uCount - 1] >> (32 - shift));
+        for (uint32 i = 0; i < uCount; i++)
+        {
+            uint32 low = i == 0 ? 0 : u[i - 1];
+            normalizedU[i] = shift == 0
+                ? u[i]
+                : (u[i] << shift) | (low >> (32 - shift));
+        }
+
+        const uint32 quotientCount = uCount - vCount + 1;
+        uint32 * quotientUnits = RecyclerNewArrayLeafZ(scriptContext->GetRecycler(), uint32, quotientCount);
+
+        for (uint32 step = quotientCount; step > 0; step--)
+        {
+            uint32 j = step - 1;
+            uint64 numerator = (static_cast<uint64>(normalizedU[j + vCount]) << 32) | normalizedU[j + vCount - 1];
+            uint64 qhat = numerator / normalizedV[vCount - 1];
+            uint64 rhat = numerator % normalizedV[vCount - 1];
+
+            while (qhat > 0xFFFFFFFFull ||
+                (qhat * normalizedV[vCount - 2] >
+                    ((rhat << 32) | normalizedU[j + vCount - 2])))
+            {
+                qhat--;
+                rhat += normalizedV[vCount - 1];
+                if (rhat >= 0x100000000ull)
+                {
+                    break;
+                }
+            }
+
+            // Multiply-subtract qhat * divisor from the current window. `k`
+            // is the borrow, kept in int64 so the final t can be negative.
+            int64 k = 0;
+            for (uint32 i = 0; i < vCount; i++)
+            {
+                uint64 product = qhat * normalizedV[i];
+                int64 t = static_cast<int64>(normalizedU[j + i]) - k -
+                    static_cast<int64>(product & 0xFFFFFFFFull);
+                normalizedU[j + i] = static_cast<uint32>(t);
+                // The borrow beyond this 32-bit unit is ceil(-t / 2**32);
+                // t can need two units when the incoming borrow and the
+                // subtracted low half both exceed the current unit.
+                uint64 borrow = 0;
+                if (t < 0)
+                {
+                    uint64 magnitude = static_cast<uint64>(-(t + 1)) + 1;
+                    borrow = (magnitude + 0xFFFFFFFFull) >> 32;
+                }
+                k = static_cast<int64>(product >> 32) + static_cast<int64>(borrow);
+            }
+            int64 top = static_cast<int64>(normalizedU[j + vCount]) - k;
+            normalizedU[j + vCount] = static_cast<uint32>(top);
+            quotientUnits[j] = static_cast<uint32>(qhat);
+
+            if (top < 0)
+            {
+                // qhat was one too large: add the divisor back.
+                quotientUnits[j]--;
+                uint64 carry = 0;
+                for (uint32 i = 0; i < vCount; i++)
+                {
+                    uint64 sum = static_cast<uint64>(normalizedU[j + i]) + normalizedV[i] + carry;
+                    normalizedU[j + i] = static_cast<uint32>(sum);
+                    carry = sum >> 32;
+                }
+                normalizedU[j + vCount] =
+                    static_cast<uint32>(static_cast<uint64>(normalizedU[j + vCount]) + carry);
+            }
+        }
+
+        Assert(normalizedU[vCount] == 0);
+        uint32 * remainderUnits = RecyclerNewArrayLeafZ(scriptContext->GetRecycler(), uint32, vCount);
+        if (shift == 0)
+        {
+            for (uint32 i = 0; i < vCount; i++)
+            {
+                remainderUnits[i] = normalizedU[i];
+            }
+        }
+        else
+        {
+            for (uint32 i = 0; i < vCount; i++)
+            {
+                uint32 high = i + 1 < vCount ? normalizedU[i + 1] << (32 - shift) : 0;
+                remainderUnits[i] = (normalizedU[i] >> shift) | high;
+            }
+        }
+
+        JavascriptBigInt * quotient = JavascriptBigInt::CreateFromUnits(quotientUnits, quotientCount, false, scriptContext);
+        quotient->m_isNegative = (pbi1->m_isNegative != pbi2->m_isNegative) && !quotient->IsZeroValue();
+        return wantQuotient ? quotient :
+            JavascriptBigInt::CreateFromUnits(remainderUnits, vCount, pbi1->m_isNegative, scriptContext);
+    }
+
+    Var JavascriptBigInt::Div(Var aLeft, Var aRight)
+    {
+        return JavascriptBigInt::DivMod(
+            VarTo<JavascriptBigInt>(aLeft), VarTo<JavascriptBigInt>(aRight), true);
+    }
+
+    Var JavascriptBigInt::Modulus(Var aLeft, Var aRight)
+    {
+        return JavascriptBigInt::DivMod(
+            VarTo<JavascriptBigInt>(aLeft), VarTo<JavascriptBigInt>(aRight), false);
+    }
+
+    // ------------------------------------------------------------------
+    // Exponentiation
+    // ------------------------------------------------------------------
+
+    JavascriptBigInt * JavascriptBigInt::Exponentiate(JavascriptBigInt * pbiBase, JavascriptBigInt * pbiExponent)
+    {
+        ScriptContext * scriptContext = pbiBase->GetScriptContext();
+        if (pbiExponent->m_isNegative)
+        {
+            // BigInt::exponentiate step 1: a negative exponent is a
+            // RangeError, even for 0n or for an exponent that would otherwise
+            // be handled by a trivial case.
+            JavascriptError::ThrowRangeError(scriptContext, VBSERR_TypeMismatch, _u("Exponentiate BigInt"));
+        }
+        if (pbiExponent->IsZeroValue())
+        {
+            return JavascriptBigInt::CreateOne(scriptContext); // includes 0n ** 0n
+        }
+        if (pbiBase->IsZeroValue())
+        {
+            return JavascriptBigInt::CreateZero(scriptContext);
+        }
+
+        if (pbiBase->m_length == 1 && pbiBase->m_digits[0] == 1)
+        {
+            // (+/-1) ** n is always +/-1, independent of the exponent size.
+            JavascriptBigInt * result = JavascriptBigInt::CreateOne(scriptContext);
+            if (pbiBase->m_isNegative && (pbiExponent->m_digits[0] & 1) != 0)
+            {
+                result->m_isNegative = true;
+            }
+            return result;
+        }
+
+        bool exponentTooLarge = false;
+        uint64 exponent = JavascriptBigInt::GetMagnitudeAsUInt64(pbiExponent, &exponentTooLarge);
+        if (exponentTooLarge)
+        {
+            JavascriptError::ThrowRangeError(scriptContext, VBSERR_TypeMismatch, _u("Exponentiate BigInt"));
+        }
+
+        if (exponent == 1)
+        {
+            // base ** 1 is the base itself; this also accepts an input wider
+            // than the exponentiation result cap, since no growth occurs.
+            return JavascriptBigInt::New(pbiBase, scriptContext);
+        }
+
+        // The result of |base| ** exponent (|base| >= 2 here) has at least
+        // (baseBits - 1) * exponent + 1 bits. Reject impossible requests in
+        // O(1) with an overflow-safe division. The exact width is checked
+        // after each multiplication below, so the accepted set is precisely
+        // "mathematical result fits BigIntMaxExponentResultBits", including
+        // the power-of-two boundary: 2n ** 1048575n is accepted and
+        // 2n ** 1048576n is rejected.
+        uint64 baseBits = pbiBase->GetMagnitudeBitLength();
+        Assert(baseBits > 1);
+        uint64 growthPerExponent = baseBits - 1;
+        if (exponent > (BigIntMaxExponentResultBits - 1) / growthPerExponent)
+        {
+            JavascriptError::ThrowRangeError(scriptContext, VBSERR_TypeMismatch, _u("Exponentiate BigInt"));
+        }
+
+        bool negate = pbiBase->m_isNegative && (exponent & 1) != 0;
+        JavascriptBigInt * result = JavascriptBigInt::CreateOne(scriptContext);
+        JavascriptBigInt * factor = JavascriptBigInt::New(pbiBase, scriptContext);
+        factor->m_isNegative = false;
+        while (exponent > 0)
+        {
+            if ((exponent & 1) != 0)
+            {
+                result = JavascriptBigInt::MulAbsolute(result, factor);
+                if (result->GetMagnitudeBitLength() > BigIntMaxExponentResultBits)
+                {
+                    JavascriptError::ThrowRangeError(scriptContext, VBSERR_TypeMismatch, _u("Exponentiate BigInt"));
+                }
+            }
+            exponent >>= 1;
+            if (exponent != 0)
+            {
+                factor = JavascriptBigInt::MulAbsolute(factor, factor);
+                if (factor->GetMagnitudeBitLength() > BigIntMaxExponentResultBits)
+                {
+                    JavascriptError::ThrowRangeError(scriptContext, VBSERR_TypeMismatch, _u("Exponentiate BigInt"));
+                }
+            }
+        }
+        result->m_isNegative = negate;
+        return result;
+    }
+
+    Var JavascriptBigInt::Exponentiate(Var aLeft, Var aRight)
+    {
+        return JavascriptBigInt::Exponentiate(
+            VarTo<JavascriptBigInt>(aLeft), VarTo<JavascriptBigInt>(aRight));
+    }
+
+    // ------------------------------------------------------------------
+    // Shift operators
+    // ------------------------------------------------------------------
+    //
+    // BigInt::leftShift treats a negative count as an arithmetic right shift;
+    // BigInt::signedRightShift likewise reverses a negative count. Right
+    // shifts round toward negative infinity (floor), matching the infinite
+    // two's-complement bit string, so -5n >> 1n is -3n.
+
+    JavascriptBigInt * JavascriptBigInt::ShiftLeftMagnitude(const JavascriptBigInt * pbi, uint64 bits)
+    {
+        ScriptContext * scriptContext = pbi->GetScriptContext();
+        if (pbi->IsZeroValue())
+        {
+            return JavascriptBigInt::CreateZero(scriptContext);
+        }
+        uint64 bitLength = pbi->GetMagnitudeBitLength();
+        if (bits > BigIntMaxResultBitCount() || bitLength > BigIntMaxResultBitCount() - bits)
+        {
+            JavascriptError::ThrowRangeError(scriptContext, VBSERR_TypeMismatch, _u("Shift BigInt"));
+        }
+
+        const uint32 limbBits = BigIntLimbBits();
+        digit_t limbShift = static_cast<digit_t>(bits / limbBits);
+        uint32 bitShift = static_cast<uint32>(bits % limbBits);
+        digit_t resultLength = pbi->m_length + limbShift + (bitShift == 0 ? 0 : 1);
+        if (resultLength > BigIntMaxResultLimbs)
+        {
+            JavascriptError::ThrowRangeError(scriptContext, VBSERR_TypeMismatch, _u("Shift BigInt"));
+        }
+
+        JavascriptBigInt * result = JavascriptBigInt::CreateZeroWithLength(resultLength, scriptContext);
+        for (digit_t i = 0; i < pbi->m_length; i++)
+        {
+            digit_t digit = pbi->m_digits[i];
+            result->m_digits[i + limbShift] |= static_cast<digit_t>(digit << bitShift);
+            if (bitShift != 0)
+            {
+                result->m_digits[i + limbShift + 1] |= static_cast<digit_t>(digit >> (limbBits - bitShift));
+            }
+        }
+        while (result->m_length > 1 && result->m_digits[result->m_length - 1] == 0)
+        {
+            result->m_length--;
+        }
+        result->m_isNegative = pbi->m_isNegative;
+        return result;
+    }
+
+    JavascriptBigInt * JavascriptBigInt::ShiftRightMagnitudeFloor(const JavascriptBigInt * pbi, uint64 bits)
+    {
+        ScriptContext * scriptContext = pbi->GetScriptContext();
+        if (pbi->IsZeroValue())
+        {
+            return JavascriptBigInt::CreateZero(scriptContext);
+        }
+
+        uint64 bitLength = pbi->GetMagnitudeBitLength();
+        if (bits >= bitLength)
+        {
+            // 0 for non-negative values; -1 for negative values (all
+            // remaining bits are the sign extension).
+            JavascriptBigInt * result = JavascriptBigInt::CreateOne(scriptContext);
+            if (pbi->m_isNegative)
+            {
+                result->m_isNegative = true;
+            }
+            else
+            {
+                result->m_digits[0] = 0;
+                result->m_isNegative = false;
+            }
+            return result;
+        }
+
+        const uint32 limbBits = BigIntLimbBits();
+        digit_t limbShift = static_cast<digit_t>(bits / limbBits);
+        uint32 bitShift = static_cast<uint32>(bits % limbBits);
+        digit_t resultLength = pbi->m_length - limbShift;
+        JavascriptBigInt * result = JavascriptBigInt::CreateZeroWithLength(resultLength, scriptContext);
+        for (digit_t i = 0; i < resultLength; i++)
+        {
+            digit_t source = i + limbShift;
+            digit_t digit = pbi->m_digits[source] >> bitShift;
+            if (bitShift != 0 && source + 1 < pbi->m_length)
+            {
+                digit |= pbi->m_digits[source + 1] << (limbBits - bitShift);
+            }
+            result->m_digits[i] = digit;
+        }
+        while (result->m_length > 1 && result->m_digits[result->m_length - 1] == 0)
+        {
+            result->m_length--;
+        }
+
+        if (pbi->m_isNegative)
+        {
+            // floor(-m / 2^bits) = -(m >> bits) when no bit was dropped, and
+            // one larger in magnitude otherwise.
+            bool dropped = false;
+            for (digit_t i = 0; i < limbShift && !dropped; i++)
+            {
+                dropped = pbi->m_digits[i] != 0;
+            }
+            if (!dropped && bitShift != 0)
+            {
+                digit_t mask = (static_cast<digit_t>(1) << bitShift) - 1;
+                dropped = (pbi->m_digits[limbShift] & mask) != 0;
+            }
+            if (dropped)
+            {
+                JavascriptBigInt::AbsoluteIncrement(result);
+            }
+        }
+        result->m_isNegative = pbi->m_isNegative && !result->IsZeroValue();
+        return result;
+    }
+
+    Var JavascriptBigInt::LeftShift(Var aLeft, Var aRight)
+    {
+        JavascriptBigInt * value = VarTo<JavascriptBigInt>(aLeft);
+        JavascriptBigInt * count = VarTo<JavascriptBigInt>(aRight);
+        bool tooLarge = false;
+        uint64 bits = JavascriptBigInt::GetMagnitudeAsUInt64(count, &tooLarge);
+        if (tooLarge)
+        {
+            bits = ~static_cast<uint64>(0);
+        }
+        if (count->m_isNegative)
+        {
+            return JavascriptBigInt::ShiftRightMagnitudeFloor(value, bits);
+        }
+        return JavascriptBigInt::ShiftLeftMagnitude(value, bits);
+    }
+
+    Var JavascriptBigInt::RightShift(Var aLeft, Var aRight)
+    {
+        JavascriptBigInt * value = VarTo<JavascriptBigInt>(aLeft);
+        JavascriptBigInt * count = VarTo<JavascriptBigInt>(aRight);
+        bool tooLarge = false;
+        uint64 bits = JavascriptBigInt::GetMagnitudeAsUInt64(count, &tooLarge);
+        if (tooLarge)
+        {
+            bits = ~static_cast<uint64>(0);
+        }
+        if (count->m_isNegative)
+        {
+            return JavascriptBigInt::ShiftLeftMagnitude(value, bits);
+        }
+        return JavascriptBigInt::ShiftRightMagnitudeFloor(value, bits);
+    }
+
+    // ------------------------------------------------------------------
+    // Bitwise operators
+    // ------------------------------------------------------------------
+    //
+    // JavaScript BigInt bitwise operations use the infinite two's-complement
+    // representation, not the sign-magnitude limbs. Materialize both operands
+    // in an n-limb two's complement window (n = max length + 1, so the extra
+    // limb carries the infinite sign extension), apply the operation, then
+    // convert a negative result back to sign-magnitude.
+
+    JavascriptBigInt * JavascriptBigInt::BitwiseOperation(
+        const JavascriptBigInt * pbiLeft, const JavascriptBigInt * pbiRight, uint32 operation)
+    {
+        ScriptContext * scriptContext = pbiLeft->GetScriptContext();
+        const digit_t limbCount = (pbiLeft->m_length > pbiRight->m_length ? pbiLeft->m_length : pbiRight->m_length) + 1;
+        digit_t * left = RecyclerNewArrayLeafZ(scriptContext->GetRecycler(), digit_t, limbCount);
+        digit_t * right = RecyclerNewArrayLeafZ(scriptContext->GetRecycler(), digit_t, limbCount);
+        digit_t * result = RecyclerNewArrayLeafZ(scriptContext->GetRecycler(), digit_t, limbCount);
+
+        auto fill = [&](const JavascriptBigInt * value, digit_t * target)
+        {
+            for (digit_t i = 0; i < value->m_length; i++)
+            {
+                target[i] = value->m_digits[i];
+            }
+            if (value->m_isNegative)
+            {
+                // Two's complement: complement every limb, then add one,
+                // propagating a 0/1 carry until it stops.
+                bool carry = true;
+                for (digit_t i = 0; i < limbCount; i++)
+                {
+                    target[i] = ~target[i];
+                    if (carry)
+                    {
+                        digit_t sum = target[i] + 1;
+                        carry = sum == 0;
+                        target[i] = sum;
+                    }
+                }
+            }
+        };
+        fill(pbiLeft, left);
+        fill(pbiRight, right);
+
+        for (digit_t i = 0; i < limbCount; i++)
+        {
+            switch (operation)
+            {
+            case 0: result[i] = left[i] & right[i]; break;
+            case 1: result[i] = left[i] | right[i]; break;
+            default: result[i] = left[i] ^ right[i]; break;
+            }
+        }
+
+        bool isNegative = (result[limbCount - 1] >> (BigIntLimbBits() - 1)) != 0;
+        if (isNegative)
+        {
+            bool carry = true;
+            for (digit_t i = 0; i < limbCount; i++)
+            {
+                result[i] = ~result[i];
+                if (carry)
+                {
+                    digit_t sum = result[i] + 1;
+                    carry = sum == 0;
+                    result[i] = sum;
+                }
+            }
+        }
+
+        JavascriptBigInt * value = JavascriptBigInt::CreateZeroWithLength(limbCount, scriptContext);
+        for (digit_t i = 0; i < limbCount; i++)
+        {
+            value->m_digits[i] = result[i];
+        }
+        while (value->m_length > 1 && value->m_digits[value->m_length - 1] == 0)
+        {
+            value->m_length--;
+        }
+        value->m_isNegative = isNegative && !value->IsZeroValue();
+        return value;
+    }
+
+    Var JavascriptBigInt::BitwiseAnd(Var aLeft, Var aRight)
+    {
+        return JavascriptBigInt::BitwiseOperation(
+            VarTo<JavascriptBigInt>(aLeft), VarTo<JavascriptBigInt>(aRight), 0);
+    }
+
+    Var JavascriptBigInt::BitwiseOr(Var aLeft, Var aRight)
+    {
+        return JavascriptBigInt::BitwiseOperation(
+            VarTo<JavascriptBigInt>(aLeft), VarTo<JavascriptBigInt>(aRight), 1);
+    }
+
+    Var JavascriptBigInt::BitwiseXor(Var aLeft, Var aRight)
+    {
+        return JavascriptBigInt::BitwiseOperation(
+            VarTo<JavascriptBigInt>(aLeft), VarTo<JavascriptBigInt>(aRight), 2);
     }
 
 } // namespace Js
