@@ -409,6 +409,69 @@ const tests = [
         }
     },
     {
+        name: "nested classes in eval may call their own super()",
+        body() {
+            class Base { constructor() { this.base = 1; } }
+            class Outer extends Base {
+                x = 1;
+                constructor() {
+                    eval("class E extends Base { constructor() { super(); this.e = 1; } }");
+                    eval("var C = class extends Base { constructor() { super(); this.c = 1; } }");
+                    eval("class P extends Base { constructor(a = super()) { } }");
+                    eval("new (class E2 extends Base { y = 5; constructor() { super(); } })()");
+                    super();
+                }
+            }
+            const outer = new Outer();
+            assert.areEqual(1, Object.getOwnPropertyDescriptor(outer, "x").value);
+            assert.areEqual(1, outer.base);
+        }
+    },
+    {
+        name: "super-bearing eval is deterministic across caller contexts",
+        body() {
+            class Base { constructor() { this.base = 1; } }
+            class Ctor extends Base { constructor() { eval("super()"); this.c = 1; } }
+            class Method { m() { eval("super()"); } }
+            class Fields extends Base { x = 1; constructor() { eval("super()"); } }
+
+            const first = new Ctor();
+            assert.areEqual(1, first.base);
+            assert.areEqual(1, first.c);
+            assert.throws(function () { new Method().m(); }, SyntaxError, "method eval super");
+            // This slice deliberately rejects eval super() when the caller
+            // carries instance fields rather than initializing them in eval.
+            assert.throws(function () { new Fields(); }, SyntaxError, "field-carrying constructor eval super");
+
+            const again = new Ctor();
+            assert.areEqual(1, again.base);
+            assert.areEqual(1, again.c);
+            assert.throws(function () { new Method().m(); }, SyntaxError, "method eval super repeat");
+            assert.throws(function () { new Fields(); }, SyntaxError, "field-carrying constructor repeat");
+        }
+    },
+    {
+        name: "eval arguments labels are rejected",
+        body() {
+            assert.throws(function () {
+                const C = eval("(class { x = eval('arguments: 1;') })");
+                new C();
+            }, SyntaxError, "label");
+            assert.throws(function () {
+                const C = eval("(class { x = eval('arguments: while (true) { break arguments; }') })");
+                new C();
+            }, SyntaxError, "labelled break");
+            assert.throws(function () {
+                const C = eval("(class { x = eval('arguments: for (;;) { continue arguments; }') })");
+                new C();
+            }, SyntaxError, "labelled continue");
+
+            // An ordinary function boundary ends the restriction.
+            class C { x = eval("(function () { arguments: for (;;) { break arguments; } })"); }
+            assert.isTrue(typeof new C().x === "function");
+        }
+    },
+    {
         name: "await and yield are invalid in field initializers in every surrounding shape",
         body() {
             assert.throws(function () { eval("async function f(){ class C { x = await 1 } }"); }, SyntaxError, "async function class declaration");

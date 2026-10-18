@@ -626,9 +626,15 @@ using namespace Js;
 
         // PropertyString's buffer references to PropertyRecord's inline buffer, if both PropertyString and PropertyRecord are collected
         // we'll leave the PropertyRecord's interior buffer pointer in the EvalMap. So do not use evalmap if we are evaluating PropertyString
+        // Any eval code mentioning super is context-sensitive (constructor vs
+        // method / base vs derived / fields present). Do not reuse a FunctionBody
+        // across such callers; the substring test intentionally over-approximates
+        // (a false positive only disables caching).
+        bool mayContainSuper = wcsstr(sourceString, _u("super")) != nullptr;
         bool useEvalMap = !VirtualTableInfo<PropertyString>::HasVirtualTable(argString) &&
             debugEvalScriptContext == nullptr &&
-            !evalInClassFieldInitializer && !evalInDerivedFieldConstructor; // Don't use the cache in case of debugEval or context-sensitive eval
+            !evalInClassFieldInitializer && !evalInDerivedFieldConstructor &&
+            !mayContainSuper; // Don't use the cache in case of debugEval or context-sensitive eval
 
         bool found = useEvalMap && scriptContext->IsInEvalMap(key, isIndirect, &pfuncScript);
         if (!found || (!isIndirect && pfuncScript->GetEnvironment() != &NullFrameDisplay))

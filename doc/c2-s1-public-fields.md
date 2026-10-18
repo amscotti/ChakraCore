@@ -85,7 +85,10 @@ of the field-call list to the arrow, visits/emits it in the arrow frame, and
 initializes fields when (and only when) that arrow actually calls `super()`.
 An uncalled arrow is accepted. Direct eval of `super()` in a derived
 constructor with instance fields is rejected with SyntaxError because the eval
-frame cannot run the field initialization in this slice.
+frame cannot run the field initialization in this slice. The eval-super parse
+flag is cleared for nested class constructors, so classes/class expressions
+defined inside such eval code may use their own `super()` (including their own
+fields and parameter defaults).
 
 ## Bytecode/runtime design
 
@@ -141,9 +144,9 @@ Build (Mac ARM64, Test and Debug/static profiles, `-nonative`):
 - `... -- test/es6module` — **31 / 0**.
 - `... -- test/es5` — **56 / 0**.
 - `... zig build check-smoke check-native ...` — green (version/invalid-flag/snippet and shared native smoke).
-- Debug binary: `class-fields-public.js` normal and `-force:deferparse` both **24/24**, including eval/new Function, capture/eval, define-failure, arguments, await/yield and arrow-super regressions.
+- Debug binary: `class-fields-public.js` normal and `-force:deferparse` both **27/27**, including eval/new Function, capture/eval, define-failure, arguments labels/matrix, await/yield, nested-class eval super, cache sequences and arrow-super regressions.
 - `es7/deferparseclass.js` under `-force:deferparse` — **5 / 0**.
-- Final artifacts: `ch` sha256 `e1c6f94961f4c4d90d01572406a5733351b95d274ce1a8d324482745c606cf56`; `libChakraCore.dylib` sha256 `6b4e8f49eff8d568608bd0b8ee95d5525341f7d3d8af05c65c8d494f21cfce23`; Debug `ch` sha256 `76306a14e4834b0462991c6a7ef82e890468670568c4a5a3d40e4b2caf672a33`.
+- Final artifacts: `ch` sha256 `e1c6f94961f4c4d90d01572406a5733351b95d274ce1a8d324482745c606cf56`; `libChakraCore.dylib` sha256 `58fbb6461204fcce59adc056b0837293109736ee8835934ae82b007c14ff9f5c`; Debug `ch` sha256 `81ccad348be9afba611caf3a523e5d3a17a861fb1a46b67b72822854d3889a58`. The shared `ch` launcher hash is stable; the dylib/static binary hashes postdate the final source edits.
 
 Focused test262 subset (same pinned corpus, `-nonative`, scenarios):
 `test/language/statements/class/elements/**/*.js` +
@@ -202,8 +205,10 @@ Fixed and regression-tested with the Debug/static binary (no SIGABRT/SIGSEGV):
 - `super.prop` inside field initializers; direct eval of `super()` in a
   derived constructor with instance fields is rejected rather than initialized.
 - The eval `arguments` rule is parser-aware (templates, escapes, regexes,
-  strings, comments, nested eval and function/method boundaries); it is tied to
-  direct eval only, matching the additional early-error rule.
+  strings, comments, labels, nested eval and function/method boundaries); it is
+  tied to direct eval only, matching the additional early-error rule. Labels
+  named `arguments` are conservatively syntax errors (also avoiding execution
+  of a labelled loop).
 - Deferred parsing of class members/class-containing functions is disabled as
   described above; direct eval in these contexts is force-parsed.
 - JIT/Backend behavior is unverified: all evidence is Mac ARM64 `-nonative`.
@@ -227,8 +232,10 @@ Fixed and regression-tested with the Debug/static binary (no SIGABRT/SIGSEGV):
   CreateDataPropertyOrThrow path.
 - `lib/Runtime/Library/GlobalObject.cpp`,
   `lib/Runtime/Base/ScriptContext.{h,cpp}`: direct-eval context flags for
-  parser-aware `arguments` detection and eval-`super()` rejection; eval cache
-  bypassed for context-sensitive calls.
+  parser-aware `arguments` detection and eval-`super()` rejection. Any eval
+  source containing `super` bypasses the eval cache (over-approximate substring
+  test), making constructor/method/fields call sequences deterministic.
+  Nested class constructors reset the eval-super restriction.
 - `lib/Runtime/Base/FunctionInfo.h` and `ByteCodeSerializer.cpp`: initializer
   context attribute for arrows/helpers.
 - `test/es7/class-fields-public.js`, `test/es7/rlexe.xml` (normal and forced

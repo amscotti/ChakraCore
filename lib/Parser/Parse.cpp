@@ -5836,6 +5836,13 @@ ParseNodeFnc * Parser::ParseFncDeclInternal(ushort flags, LPCOLESTR pNameHint, c
     {
         m_inClassFieldInitializer = false;
     }
+    // Eval-super rejection belongs to the outer constructor's own super call,
+    // not to nested class constructors defined by the eval code.
+    bool disallowSuperCallInEvalSave = m_disallowSuperCallInEval;
+    if ((flags & fFncClassConstructor) != 0)
+    {
+        m_disallowSuperCallInEval = false;
+    }
     charcount_t ichMin = this->GetScanner()->IchMinTok();
     bool wasInDeferredNestedFunc = false;
 
@@ -6036,6 +6043,7 @@ ParseNodeFnc * Parser::ParseFncDeclInternal(ushort flags, LPCOLESTR pNameHint, c
     }    this->m_tryCatchOrFinallyDepth = tryCatchOrFinallyDepthSave;
 
     m_inClassFieldInitializer = inClassFieldInitializerSave;
+    m_disallowSuperCallInEval = disallowSuperCallInEvalSave;
     return pnodeFnc;
 }
 
@@ -12341,6 +12349,14 @@ LDefaultToken:
 
             if (m_token.tk == tkColon)
             {
+                // ContainsArguments covers labels as well as identifier
+                // references; a label named arguments in eval/field-init code
+                // is a SyntaxError (and this also prevents executing a
+                // labelled loop before the error is reported).
+                if (m_inClassFieldInitializer && pidInner == wellKnownPropertyPids.arguments)
+                {
+                    m_classFieldInitializerUsesArguments = true;
+                }
                 // We have a label.
                 if (LabelExists(pidInner, pLabelIdList))
                 {
