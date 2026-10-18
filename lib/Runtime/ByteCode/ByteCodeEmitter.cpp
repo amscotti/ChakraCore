@@ -2392,6 +2392,24 @@ void ByteCodeGenerator::EmitSuperCall(FuncInfo* funcInfo, ParseNodeSuperCall * p
 
     EmitPropStoreForSpecialSymbol(pnodeSuperCall->pnodeThis->location, thisSym, pnodeSuperCall->pnodeThis->pid, funcInfo, false);
 
+    // S1: derived class instance fields initialize immediately after super()
+    // returns and binds `this`, before the rest of the constructor body.
+    if (nonLambdaFunc->root->pnodeClassFields != nullptr)
+    {
+        if (funcInfo == nonLambdaFunc)
+        {
+            EmitClassFieldInitializerCalls(nonLambdaFunc->root->pnodeClassFields, funcInfo, pnodeSuperCall->pnodeThis->location);
+        }
+        else if (funcInfo->root->pnodeClassFields != nullptr)
+        {
+            // super() inside an arrow that is lexically in the constructor:
+            // the parser attached a copy of the field-call list to the arrow so
+            // its operands are visited/emitted in the arrow's frame. The
+            // helper functions and instance are reached through the closure.
+            EmitClassFieldInitializerCalls(funcInfo->root->pnodeClassFields, funcInfo, pnodeSuperCall->pnodeThis->location);
+        }
+    }
+
     funcInfo->ReleaseTmpRegister(tmpUndeclReg);
     funcInfo->ReleaseTmpRegister(valueForThis);
     funcInfo->ReleaseTmpRegister(thisForSuperCall);
@@ -2399,6 +2417,74 @@ void ByteCodeGenerator::EmitSuperCall(FuncInfo* funcInfo, ParseNodeSuperCall * p
     funcInfo->ReleaseLoc(pnodeSuperCall->pnodeTarget);
     funcInfo->ReleaseLoc(pnodeSuperCall->pnodeNewTarget);
     funcInfo->ReleaseLoc(pnodeSuperCall->pnodeThis);
+}
+
+// S1: run the hidden per-field initializer helper functions and define each
+// result as an own data property on the instance. The helpers are called with
+// the instance as their explicit receiver; InitClassField implements
+// CreateDataPropertyOrThrow semantics (it does not invoke inherited setters).
+void ByteCodeGenerator::EmitClassFieldInitializerCalls(ParseNode * pnodeFields, FuncInfo * funcInfo, Js::RegSlot thisLocationOverride)
+{
+    while (pnodeFields != nullptr)
+    {
+        ParseNode * pnodeField = pnodeFields->nop == knopList
+            ? pnodeFields->AsParseNodeBin()->pnode1
+            : pnodeFields;
+        ParseNode * pnodeName = pnodeField->AsParseNodeBin()->pnode1;
+        ParseNodeCall * pnodeCall = pnodeField->AsParseNodeBin()->pnode2 != nullptr
+            ? pnodeField->AsParseNodeBin()->pnode2->AsParseNodeCall()
+            : nullptr;
+
+        Assert(pnodeName->nop == knopStr);
+
+        Js::RegSlot thisLocation = thisLocationOverride;
+        if (thisLocation == Js::Constants::NoRegister)
+        {
+            Symbol * thisSym = funcInfo->GetThisSymbol();
+            Assert(thisSym != nullptr);
+            thisLocation = thisSym->GetLocation();
+        }
+        Js::RegSlot valueLocation;
+        bool releaseValueLoc = false;
+
+        if (pnodeCall != nullptr)
+        {
+            Assert(pnodeCall->pnodeThisOverride != nullptr);
+            StartStatement(pnodeCall);
+
+            Emit(pnodeCall, this, funcInfo, false);
+            Assert(pnodeCall->location != Js::Constants::NoRegister);
+            valueLocation = pnodeCall->location;
+        }
+        else
+        {
+            // No initializer: define the own data property as undefined.
+            valueLocation = funcInfo->AcquireTmpRegister();
+            Writer()->Reg1(Js::OpCode::LdUndef, valueLocation);
+            releaseValueLoc = true;
+        }
+
+        AssignPropertyId(pnodeName->AsParseNodeStr()->pid);
+        Js::PropertyId propertyId = pnodeName->AsParseNodeStr()->pid->GetPropertyId();
+        uint cacheId = funcInfo->FindOrAddInlineCacheId(thisLocation, propertyId, false, true);
+        Writer()->PatchableProperty(Js::OpCode::InitClassField, valueLocation, thisLocation, cacheId);
+
+        if (releaseValueLoc)
+        {
+            funcInfo->ReleaseTmpRegister(valueLocation);
+        }
+        if (pnodeCall != nullptr)
+        {
+            funcInfo->ReleaseLoc(pnodeCall);
+            EndStatement(pnodeCall);
+        }
+
+        if (pnodeFields->nop != knopList)
+        {
+            break;
+        }
+        pnodeFields = pnodeFields->AsParseNodeBin()->pnode2;
+    }
 }
 
 void ByteCodeGenerator::EmitClassConstructorEndCode(FuncInfo *funcInfo)
@@ -3007,6 +3093,15 @@ void ByteCodeGenerator::EmitOneFunction(ParseNodeFnc *pnodeFnc)
             }
         }
 
+        // S1: with a non-simple parameter list, base fields must run before
+        // default-parameter evaluation. The special-symbol storage above has
+        // already published `this` into its scope slot.
+        if (pnodeFnc->IsBaseClassConstructor() && pnodeFnc->pnodeClassFields != nullptr &&
+            pnodeFnc->HasNonSimpleParameterList())
+        {
+            EmitClassFieldInitializerCalls(pnodeFnc->pnodeClassFields, funcInfo);
+        }
+
         if (pnodeFnc->HasNonSimpleParameterList() || !funcInfo->IsBodyAndParamScopeMerged())
         {
             Assert(pnodeFnc->HasNonSimpleParameterList() || CONFIG_FLAG(ForceSplitScope));
@@ -3029,6 +3124,16 @@ void ByteCodeGenerator::EmitOneFunction(ParseNodeFnc *pnodeFnc)
         }
 
         DefineUserVars(funcInfo);
+
+        // S1: simple parameter lists have no default evaluators, so field
+        // initialization can run after DefineUserVars has published captured /
+        // eval-visible `this` and initialized var bindings, yet still before
+        // the constructor body.
+        if (pnodeFnc->IsBaseClassConstructor() && pnodeFnc->pnodeClassFields != nullptr &&
+            !pnodeFnc->HasNonSimpleParameterList())
+        {
+            EmitClassFieldInitializerCalls(pnodeFnc->pnodeClassFields, funcInfo);
+        }
 
         // Emit all scope-wide function definitions before emitting function bodies
         // so that calls may reference functions they precede lexically.

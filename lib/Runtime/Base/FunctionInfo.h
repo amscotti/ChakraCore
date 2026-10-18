@@ -44,7 +44,9 @@ namespace Js
             ComputedName                   = 0x800000,
             ActiveScript                   = 0x1000000,
             HomeObj                        = 0x2000000,
-            GeneratorWithComplexParams     = 0x8000000 // Generator function with non-simple params needs startup yield
+            GeneratorWithComplexParams     = 0x8000000, // Generator function with non-simple params needs startup yield
+            ClassFieldInitializer          = 0x10000000, // function/arrow is lexically inside a class field initializer
+            ClassConstructorWithFields     = 0x20000000 // class constructor owns instance-field initializers
         };
         FunctionInfo(JavascriptMethod entryPoint, Attributes attributes = None, LocalFunctionId functionId = Js::Constants::NoFunctionId, FunctionProxy* functionBodyImpl = nullptr);
         FunctionInfo(JavascriptMethod entryPoint, _no_write_barrier_tag, Attributes attributes = None, LocalFunctionId functionId = Js::Constants::NoFunctionId, FunctionProxy* functionBodyImpl = nullptr);
@@ -84,6 +86,10 @@ namespace Js
         bool HasComputedName() const { return HasComputedName(this->attributes); }
         static bool HasHomeObj(Attributes attributes) { return (attributes & Attributes::HomeObj) != 0; }
         bool HasHomeObj() const { return HasHomeObj(this->attributes); }
+        static bool IsClassFieldInitializer(Attributes attributes) { return (attributes & Attributes::ClassFieldInitializer) != 0; }
+        bool IsClassFieldInitializer() const { return IsClassFieldInitializer(this->attributes); }
+        static bool IsClassConstructorWithFields(Attributes attributes) { return (attributes & Attributes::ClassConstructorWithFields) != 0; }
+        bool IsClassConstructorWithFields() const { return IsClassConstructorWithFields(this->attributes); }
 
         BOOL HasBody() const { return functionBodyImpl != NULL; }
         BOOL HasParseableInfo() const { return this->HasBody() && !this->IsDeferredDeserializeFunction(); }

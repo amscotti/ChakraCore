@@ -885,6 +885,11 @@ MACRO_BACKEND_ONLY(GeneratorEpilogueNoFrameNullOutLabel,    Empty,  None)
 
 #include "OpCodesSimd.h"
 
+// S1: CreateDataPropertyOrThrow for a public instance class field. Appended
+// after every existing opcode (including SIMD) so no established opcode value
+// shifts.
+MACRO_EXTEND_WMS(       InitClassField,    ElementCP,      OpSideEffect|OpOpndHasImplicitCall|OpPostOpDbgBailOut)
+
 #undef MACRO_WMS_PROFILED
 #undef MACRO_WMS_PROFILED2
 #undef MACRO_WMS_PROFILED_OP

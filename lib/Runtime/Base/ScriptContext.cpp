@@ -108,6 +108,8 @@ namespace Js
         isScriptContextActuallyClosed(false),
         isFinalized(false),
         isEvalRestricted(false),
+        evalInClassFieldInitializer(false),
+        evalInDerivedFieldConstructor(false),
         isInvalidatedForHostObjects(false),
         fastDOMenabled(false),
         directHostTypeId(TypeIds_GlobalObject),

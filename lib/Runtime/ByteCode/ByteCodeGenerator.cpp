@@ -1383,6 +1383,14 @@ static Js::FunctionInfo::Attributes GetFunctionInfoAttributes(ParseNodeFnc * pno
     {
         attributes = (Js::FunctionInfo::Attributes)(attributes | Js::FunctionInfo::Attributes::HomeObj);
     }
+    if (pnodeFnc->isClassFieldInitializerContext)
+    {
+        attributes = (Js::FunctionInfo::Attributes)(attributes | Js::FunctionInfo::Attributes::ClassFieldInitializer);
+    }
+    if (pnodeFnc->hasInstanceFields)
+    {
+        attributes = (Js::FunctionInfo::Attributes)(attributes | Js::FunctionInfo::Attributes::ClassConstructorWithFields);
+    }
     return attributes;
 }
 
@@ -3529,6 +3537,41 @@ void VisitNestedScopes(ParseNode* pnodeScopeList, ParseNode* pnodeParent, ByteCo
                 }
                 byteCodeGenerator->SetCurrentTopStatement(pnode);
                 Visit(pnode, byteCodeGenerator, prefix, postfix);
+
+                // S1: field initializer calls are emitted from the constructor
+                // prologue (base) or right after super() binds `this` (derived),
+                // not from the body list. Register their operands here so the
+                // emitter has resolved symbols and registers.
+                if (pnodeFnc->pnodeClassFields != nullptr)
+                {
+                    ParseNodePtr pnodeFields = pnodeFnc->pnodeClassFields;
+                    while (pnodeFields != nullptr)
+                    {
+                        ParseNodePtr pnodeField = pnodeFields->nop == knopList
+                            ? pnodeFields->AsParseNodeBin()->pnode1
+                            : pnodeFields;
+                        ParseNodePtr pnodeFieldName = pnodeField->AsParseNodeBin()->pnode1;
+                        Assert(pnodeFieldName->nop == knopStr);
+                        // The field name is not part of the body AST, so bind
+                        // its property id (and string constant for
+                        // NamedEvaluation) explicitly.
+                        byteCodeGenerator->AssignPropertyId(pnodeFieldName->AsParseNodeStr()->pid);
+                        Visit(pnodeFieldName, byteCodeGenerator, prefix, postfix);
+
+                        ParseNodePtr pnodeFieldCall = pnodeField->AsParseNodeBin()->pnode2;
+                        if (pnodeFieldCall != nullptr)
+                        {
+                            byteCodeGenerator->SetCurrentTopStatement(pnodeFieldCall);
+                            Visit(pnodeFieldCall, byteCodeGenerator, prefix, postfix);
+                        }
+
+                        if (pnodeFields->nop != knopList)
+                        {
+                            break;
+                        }
+                        pnodeFields = pnodeFields->AsParseNodeBin()->pnode2;
+                    }
+                }
 
                 EndVisitBlock(pnodeFnc->pnodeBodyScope, byteCodeGenerator);
                 EndVisitBlock(pnodeFnc->pnodeScopes, byteCodeGenerator);

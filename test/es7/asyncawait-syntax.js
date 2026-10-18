@@ -152,7 +152,14 @@ var tests = [
             assert.throws(function () { eval("async\nfunction af() { }"); }, ReferenceError, "AsyncFunctionDeclaration", "'async' is not defined");
             assert.throws(function () { eval("var af = async\nfunction () { }"); }, SyntaxError, "AsyncFunctionExpression", "Expected identifier");
             assert.throws(function () { eval("var o = { async\nam() { } };"); }, SyntaxError, "AsyncMethod in object literal", "Expected ':'");
-            assert.throws(function () { eval("class C { async\nam() { } };"); }, SyntaxError, "AsyncMethod in class", "Expected '('");
+            // With public class fields, `async` followed by a line terminator is
+            // a field named async and the next member is an ordinary method.
+            assert.doesNotThrow(function () {
+                var C = eval("(class C { async\nam() { return 3; } })");
+                var c = new C();
+                assert.areEqual(undefined, c.async);
+                assert.areEqual(3, c.am());
+            }, "async field followed by an ordinary method in class");
             assert.throws(function () { eval("var aaf = async\n(x, y) => { };"); }, SyntaxError, "AsyncArrowFunction", "Syntax error");
         }
     },

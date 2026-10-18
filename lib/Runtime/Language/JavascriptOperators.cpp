@@ -3258,6 +3258,22 @@ CommonNumber:
         return JavascriptOperators::InitProperty(VarTo<RecyclableObject>(instance), propertyId, newValue);
     }
 
+    BOOL JavascriptOperators::OP_InitClassField(Var instance, PropertyId propertyId, Var newValue)
+    {
+        Assert(!TaggedNumber::Is(instance));
+        RecyclableObject * object = VarTo<RecyclableObject>(instance);
+        ScriptContext * scriptContext = object->GetScriptContext();
+
+        // CreateDataPropertyOrThrow: define own W/E/C data property and throw
+        // TypeError if the define is rejected.
+        PropertyDescriptor descriptor;
+        descriptor.SetValue(newValue);
+        descriptor.SetWritable(true);
+        descriptor.SetEnumerable(true);
+        descriptor.SetConfigurable(true);
+        return JavascriptObject::DefineOwnPropertyHelper(object, propertyId, descriptor, scriptContext, true);
+    }
+
     BOOL JavascriptOperators::DeleteProperty(RecyclableObject* instance, PropertyId propertyId, PropertyOperationFlags propertyOperationFlags)
     {
         return DeleteProperty_Impl<false>(instance, propertyId, propertyOperationFlags);

@@ -210,6 +210,7 @@ EXDEF3_WMS(CUSTOM_L_Value,          ProfiledStSuperFldStrict,   PROFILEDOP(OP_Pr
   DEF3_WMS(CUSTOM,                  StRootFldStrict,            OP_SetRootPropertyStrict, ElementRootCP)
   DEF3_WMS(CUSTOM,                  ProfiledStRootFldStrict,    PROFILEDOP(OP_ProfiledSetRootPropertyStrict, OP_SetRootPropertyStrict), ElementRootCP)
   DEF3_WMS(CUSTOM,                  InitFld,                    OP_InitProperty, ElementCP)
+EXDEF3_WMS(CUSTOM,                  InitClassField,             OP_InitClassField, ElementCP)
   DEF3_WMS(CUSTOM,                  ProfiledInitFld,            PROFILEDOP(OP_ProfiledInitProperty, OP_InitProperty), ElementCP)
   DEF3_WMS(CUSTOM,                  InitLocalFld,               OP_InitLocalProperty, ElementP)
   DEF3_WMS(CUSTOM,                  ProfiledInitLocalFld,       PROFILEDOP(OP_ProfiledInitLocalProperty, OP_InitLocalProperty), ElementP)

@@ -588,14 +588,63 @@ using namespace Js;
         FastEvalMapString key(argString, sourceString, sourceLen, moduleID, strictMode, isLibraryCode);
 
 
+        // Eval called from a class field initializer or a derived constructor
+        // with instance fields must be parsed with that context; do not reuse a
+        // cached FunctionBody compiled under a different context.
+        bool evalInClassFieldInitializer = false;
+        bool evalInDerivedFieldConstructor = false;
+        if (args.IsDirectEvalCall() && !isIndirect)
+        {
+            JavascriptFunction * pfuncCaller = nullptr;
+            if (JavascriptStackWalker::GetCaller(&pfuncCaller, scriptContext) &&
+                pfuncCaller != nullptr && pfuncCaller->IsScriptFunction())
+            {
+                FunctionInfo * callerInfo = pfuncCaller->GetFunctionBody()->GetFunctionInfo();
+                evalInClassFieldInitializer = callerInfo->IsClassFieldInitializer();
+            }
+
+            // An eval inside an arrow in a constructor has the arrow as its
+            // immediate caller. Walk out to the constructor so super() in that
+            // eval is rejected instead of silently skipping field init.
+            JavascriptStackWalker walker(scriptContext);
+            while (walker.GetCaller(&pfuncCaller))
+            {
+                if (pfuncCaller == nullptr || !pfuncCaller->IsScriptFunction())
+                {
+                    continue;
+                }
+                FunctionInfo * callerInfo = pfuncCaller->GetFunctionBody()->GetFunctionInfo();
+                if (callerInfo->IsClassConstructor())
+                {
+                    evalInDerivedFieldConstructor =
+                        callerInfo->IsClassConstructorWithFields() &&
+                        (callerInfo->GetAttributes() & FunctionInfo::Attributes::BaseConstructorKind) == 0;
+                    break;
+                }
+            }
+        }
+
         // PropertyString's buffer references to PropertyRecord's inline buffer, if both PropertyString and PropertyRecord are collected
         // we'll leave the PropertyRecord's interior buffer pointer in the EvalMap. So do not use evalmap if we are evaluating PropertyString
-        bool useEvalMap = !VirtualTableInfo<PropertyString>::HasVirtualTable(argString) && debugEvalScriptContext == nullptr; // Don't use the cache in case of debugEval
+        // Any eval code mentioning super is context-sensitive (constructor vs
+        // method / base vs derived / fields present). Do not reuse a FunctionBody
+        // across such callers; the substring test intentionally over-approximates
+        // (a false positive only disables caching).
+        bool mayContainSuper = wcsstr(sourceString, _u("super")) != nullptr;
+        bool useEvalMap = !VirtualTableInfo<PropertyString>::HasVirtualTable(argString) &&
+            debugEvalScriptContext == nullptr &&
+            !evalInClassFieldInitializer && !evalInDerivedFieldConstructor &&
+            !mayContainSuper; // Don't use the cache in case of debugEval or context-sensitive eval
 
         bool found = useEvalMap && scriptContext->IsInEvalMap(key, isIndirect, &pfuncScript);
         if (!found || (!isIndirect && pfuncScript->GetEnvironment() != &NullFrameDisplay))
         {
             uint32 grfscr = additionalGrfscr | fscrReturnExpression | fscrEval | fscrEvalCode | fscrGlobalCode;
+            if (evalInClassFieldInitializer || evalInDerivedFieldConstructor)
+            {
+                // Parser context flags are not serialized in deferred stubs.
+                grfscr |= fscrNoDeferParse;
+            }
 
             if (isLibraryCode)
             {
@@ -607,8 +656,34 @@ using namespace Js;
                 grfscr |= fscrCanDeferFncParse;
             }
 
+            struct AutoRestoreEvalContext
+            {
+                ScriptContext * context;
+                bool classField;
+                bool derivedField;
+                AutoRestoreEvalContext(ScriptContext * context) : context(context),
+                    classField(context->IsEvalInClassFieldInitializer()),
+                    derivedField(context->IsEvalInDerivedFieldConstructor()) { }
+                ~AutoRestoreEvalContext()
+                {
+                    context->SetEvalInClassFieldInitializer(classField);
+                    context->SetEvalInDerivedFieldConstructor(derivedField);
+                }
+            } restoreEvalContext(scriptContext);
+            scriptContext->SetEvalInClassFieldInitializer(evalInClassFieldInitializer);
+            scriptContext->SetEvalInDerivedFieldConstructor(evalInDerivedFieldConstructor);
+
             pfuncScript = library->GetGlobalObject()->EvalHelper(scriptContext, argString->GetSz(), argString->GetLength(), moduleID,
                 grfscr, Constants::EvalCode, doRegisterDocument, isIndirect, strictMode);
+
+            if (evalInClassFieldInitializer && pfuncScript != nullptr)
+            {
+                // Nested direct eval inside this eval must inherit the class
+                // field initializer arguments rule.
+                FunctionInfo * evalInfo = pfuncScript->GetFunctionBody()->GetFunctionInfo();
+                evalInfo->SetAttributes((FunctionInfo::Attributes)(
+                    evalInfo->GetAttributes() | FunctionInfo::Attributes::ClassFieldInitializer));
+            }
 
             if (debugEvalScriptContext != nullptr && CrossSite::NeedMarshalVar(pfuncScript, debugEvalScriptContext))
             {
