@@ -415,12 +415,6 @@ namespace Js
         {
             this->calleeUtf8SourceInfoList.Unroot(this->GetRecycler());
         }
-
-        if (this->keptObjects)
-        {
-            this->keptObjects->ClearAndZero();
-            this->keptObjects.Unroot(this->GetRecycler());
-        }
     }
 
     ScriptContext::~ScriptContext()
@@ -2713,28 +2707,15 @@ ExitTempAllocator:
 
     void ScriptContext::KeepDuringJob(RecyclableObject* object)
     {
-        Assert(object != nullptr);
-
-        if (!keptObjects)
-        {
-            keptObjects.Root(RecyclerNew(GetRecycler(), KeptObjectList, GetRecycler()), GetRecycler());
-        }
-
-        if (!keptObjects->Contains(object))
-        {
-            keptObjects->Add(object);
-        }
+        GetThreadContext()->KeepDuringJob(object);
     }
 
     void ScriptContext::ClearKeptObjects()
     {
-        if (keptObjects)
-        {
-            // Zero the removed slots as well: the list buffer is a recycler
-            // array, and stale target pointers must not survive as conservative
-            // scan roots into the next job.
-            keptObjects->ClearAndZero();
-        }
+        // The kept set is thread/agent-wide, not per ScriptContext. A
+        // cross-realm target added from this context is cleared by the
+        // outermost root call, whichever realm owns that call.
+        GetThreadContext()->ClearKeptObjects();
     }
 
 #ifdef FAULT_INJECTION

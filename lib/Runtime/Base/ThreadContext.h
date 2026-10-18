@@ -706,6 +706,14 @@ private:
 #endif
 
     RecyclerRootPtr<RecyclableData> recyclableData;
+
+    // WeakRef KeepDuringJob is agent/thread-wide: a same-thread cross-realm
+    // target belongs to this list even when the active root call is another
+    // ScriptContext. List entries use Field(T, Recycler), i.e. WriteBarrierPtr
+    // on barrier builds, so Add publishes through the recycler barrier.
+    typedef JsUtil::List<Js::RecyclableObject*, Recycler> KeptObjectList;
+    RecyclerRootPtr<KeptObjectList> keptObjects;
+
     uint temporaryArenaAllocatorCount;
     uint temporaryGuestArenaAllocatorCount;
 
@@ -1109,6 +1117,11 @@ public:
     static ThreadContext* GetContextForCurrentThread();
 
     Recycler* GetRecycler() { return recycler; }
+
+    // ES WeakRef AddToKeptObjects/KeepDuringJob, shared by every ScriptContext
+    // (realm) on this agent/thread until the outermost root call ends.
+    void KeepDuringJob(Js::RecyclableObject* object);
+    void ClearKeptObjects();
 
     Recycler* EnsureRecycler();
 

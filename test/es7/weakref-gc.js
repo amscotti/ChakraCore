@@ -18,6 +18,15 @@ var symbolRefs = [];
 var weakMapRefs = [];
 var weakMap = new WeakMap();
 
+// A same-thread realm (new ScriptContext) creates its own WeakRefs. Those
+// targets are only weakly held there, so the thread-level kept set must clear
+// them when this outer job ends even though the child context has no root call
+// of its own.
+var otherRealm = WScript.LoadScript(
+    "var objectTarget = {}; var objectRef = new WeakRef(objectTarget); objectTarget = null;" +
+    "var symbolTarget = Symbol('weakref-cross-realm'); var symbolRef = new WeakRef(symbolTarget); symbolTarget = null;",
+    "samethread");
+
 (function createObjectRefs() {
     for (var i = 0; i < OBJECT_COUNT; i++) {
         objectRefs.push(new WeakRef({ index: i }));
@@ -91,6 +100,12 @@ if (objectsAlive !== OBJECT_COUNT) {
 if (symbolsAlive !== SYMBOL_COUNT) {
     fail("in-job symbol targets alive " + symbolsAlive + "/" + SYMBOL_COUNT);
 }
+if (otherRealm.objectRef.deref() === undefined) {
+    fail("in-job cross-realm object target was cleared");
+}
+if (otherRealm.symbolRef.deref() === undefined) {
+    fail("in-job cross-realm symbol target was cleared");
+}
 
 WScript.SetTimeout(function crossJobWeakRefCheck() {
     // New job: job 1's kept set has been cleared. First give deref something
@@ -108,6 +123,15 @@ WScript.SetTimeout(function crossJobWeakRefCheck() {
         fail("deref KeepDuringJob targets alive " + derefAlive + "/" + OBJECT_COUNT);
     }
 
+    // The child realm's kept set is thread/agent-wide, so this outer job's
+    // boundary releases its targets too.
+    if (otherRealm.objectRef.deref() !== undefined) {
+        fail("cross-realm object target survived the job boundary");
+    }
+    if (otherRealm.symbolRef.deref() !== undefined) {
+        fail("cross-realm symbol target survived the job boundary");
+    }
+
     // Job 1 targets had only constructor KeepDuringJob retaining them. After
     // the job boundary they must be collectible; allow one conservative-stack
     // remnant but require the high-threshold control shape.
@@ -115,13 +139,13 @@ WScript.SetTimeout(function crossJobWeakRefCheck() {
     var symbolsCleared = countCleared(symbolRefs);
     var weakMapCleared = countCleared(weakMapRefs);
 
-    if (objectsCleared < OBJECT_COUNT - 1) {
+    if (objectsCleared !== OBJECT_COUNT) {
         fail("cross-job object targets cleared " + objectsCleared + "/" + OBJECT_COUNT);
     }
-    if (symbolsCleared < SYMBOL_COUNT - 1) {
+    if (symbolsCleared !== SYMBOL_COUNT) {
         fail("cross-job symbol targets cleared " + symbolsCleared + "/" + SYMBOL_COUNT);
     }
-    if (weakMapCleared < WEAKMAP_COUNT - 1) {
+    if (weakMapCleared !== WEAKMAP_COUNT) {
         fail("cross-job WeakMap key targets cleared " + weakMapCleared + "/" + WEAKMAP_COUNT);
     }
 

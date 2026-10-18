@@ -38,11 +38,14 @@ Domain and owner:
   targetWeakRef. The global Recycler::weakReferenceMap tracks the handle
   weakly for sweep; it is not a strong owner of the target.
 Kept-object set:
-  ScriptContext::keptObjects is a RecyclerRootPtr<JsUtil::List<
-  RecyclableObject*, Recycler>>. The root keeps the list and its pointer array
-  traceable; KeepDuringJob adds a target once, and ClearKeptObjects zeroes and
-  clears the list at the next root job boundary. It is not a permanent strong
-  target reference: the list is empty outside a job.
+  ThreadContext::keptObjects is a RecyclerRootPtr<JsUtil::List<
+  RecyclableObject*, Recycler>>, shared by every ScriptContext/realm on the
+  agent/thread. The root keeps the list and its pointer array traceable;
+  KeepDuringJob adds a target once, and ClearKeptObjects zeroes and clears the
+  list at the next outermost root job boundary. It is not a permanent strong
+  target reference: the list is empty outside a job. The list buffer uses
+  Field(RecyclableObject*, Recycler), i.e. WriteBarrierPtr on barrier builds,
+  so Add publishes through the recycler write barrier.
 Physical allocation / release:
   Recycler-managed leaf entry plus the normal recycler block containing the
   WeakRef object. Nothing is allocated with malloc/HeapNew and there is no
@@ -63,20 +66,24 @@ User code/reentrancy:
   runs an exhaustive GC cannot clear the still-live target. The target is
   validated before the lookup, per spec.
 Thread/context:
-  ScriptContext/Recycler and JS execution thread only. The kept list is
-  cleared only at the outermost root call boundary; nested root entries and
-  forced debugger entries do not clear it.
+  ThreadContext/Recycler and the JS execution thread. The kept list is shared
+  across same-thread ScriptContexts/realm loads, and is cleared only at the
+  outermost root call boundary; nested root entries and forced debugger
+  entries do not clear it.
 Failure/OOM/shutdown:
   Eligibility is checked before allocation. A target with no recycler
   allocation (host-dispatch/external surface) is rejected with TypeError
   instead of being retained strongly or published. OOM follows the recycler
-  allocation path; no partial WeakRef is returned. Recycler shutdown clears
-  and unroots the kept list before finalization.
+  allocation path; no partial WeakRef is returned. ThreadContext's destructor
+  clears and unroots the kept list before deleting the recycler; Close does
+  not unroot it.
 Memory accounting:
   One recycler leaf handle per distinct weak target (shared by
   FindOrCreateWeakReferenceHandle), plus the WeakRef object. The kept list is
   capacity-bounded by the largest single job's distinct kept targets and is
   cleared/zeroed at each job boundary; it is not process-lifetime retention.
+  Dedupe is a linear Contains, so a pathological job keeping N distinct
+  targets is O(N^2); the common case is small.
 Tests:
   test/es7/weakref.js and the pinned test262 WeakRef corpus; see Evidence.
 ```
@@ -109,16 +116,19 @@ handle is created.
 JIT builtin-object range treat it as a normal builtin JavaScript object. The
 subsequent internal type ids are shifted; no serialized property id changed.
 
-`AddToKeptObjects` is implemented by `ScriptContext::KeepDuringJob` and the
-rooted `keptObjects` list. The constructor calls it before the reentrant
-`NewTarget.prototype` lookup, and `deref` calls it before returning a live
-target. `ScriptContext::OnScriptStart`/`OnScriptEnd` clear the list when
-`isRoot && ThreadContext::GetCallRootLevel() == 1`, i.e. at the outermost host
-call boundary. `JsRT` API entry (`BEGIN_ENTER_SCRIPT` with `isCallRoot=true`)
-and `CallRootFunction(inScript=false)` both provide that boundary; timer and
-promise-continuation callbacks are separate host calls. Nested root entries
-(level > 1) and forced debugger entries do not clear the set. `Close` clears and
-unroots the list before recycler shutdown.
+`AddToKeptObjects` is implemented by `ThreadContext::KeepDuringJob` and the
+agent/thread-wide rooted `keptObjects` list. The constructor calls it before the
+reentrant `NewTarget.prototype` lookup, and `deref` calls it before returning a
+live target. `ScriptContext::OnScriptStart`/`OnScriptEnd` clear the thread list
+when `isRoot && ThreadContext::GetCallRootLevel() == 1`, i.e. at the outermost
+host call boundary. `JsRT` API entry (`BEGIN_ENTER_SCRIPT` with
+`isCallRoot=true`) and `CallRootFunction(inScript=false)` both provide that
+boundary; timer and promise-continuation callbacks are separate host calls. A
+same-thread child realm created by `WScript.LoadScript(..., 'samethread')` gets
+no independent root call, but its kept targets share this list and are cleared
+by the outer realm's boundary. Nested root entries (level > 1) and forced
+debugger entries do not clear the set. `ThreadContext`'s destructor clears and
+unroots the list before deleting the recycler.
 
 ## Host/test262 GC behavior
 
@@ -132,9 +142,13 @@ unroots the list before recycler shutdown.
   schedules a `WScript.SetTimeout` callback. The timer runs through
   `JsCallFunction`/`ContextAPIWrapper` as a separate outermost host call/job.
   The callback verifies deref's KeepDuringJob with in-job GC, then collects the
-  job-1 constructor targets. The thresholds require 1000/1000 object,
+  job-1 constructor targets. The thresholds are exact: 1000/1000 object,
   1000/1000 symbol, and 500/500 WeakMap-key targets cleared, and 1000/1000
-  deref targets retained in-job.
+  deref targets retained in-job. A `WScript.LoadScript(..., 'samethread')`
+  child realm creates object and symbol WeakRefs; both must be alive during
+  the outer job and cleared after the outer job boundary. This child realm has
+  no root call of its own, so it is the regression for the thread-wide kept
+  list.
 - The pinned `test/built-ins/WeakRef/**/*.js` corpus contains 29 files and 58
   strict/default scenarios and has no GC-timing scenario. One file
   (`prototype/deref/this-does-not-have-internal-target-throws.js`) also requires
@@ -153,7 +167,7 @@ later build could not replace it.
 
 The exact before/after per-file result sets are in
 `out/test262-s13-weakref-before/results.json` and
-`out/test262-s13-weakref-after3/results.json`. The controls gate passed 18/18
+`out/test262-s13-weakref-after4/results.json`. The controls gate passed 18/18
 scenarios on both runs. The only remaining failures are the two scenarios of
 `prototype/deref/this-does-not-have-internal-target-throws.js`, both
 `ReferenceError: 'FinalizationRegistry' is not defined` (the file's
@@ -168,11 +182,12 @@ registered with `-CollectGarbage -args summary -endargs` and passes on the
 test-profile binary.
 
 `test/es7/weakref-gc.js` adds the job-boundary evidence: constructor targets
-are fully alive in job 1, then 1000/1000 `deref` targets remain alive through an
-in-job GC after job 2 starts, and 1000/1000 object targets, 1000/1000 symbol
-targets, and 500/500 WeakMap key targets are cleared after the job-1 kept set is
-released. The callback exits 1 on any threshold failure so the regression
-runner cannot pass on a printed exception.
+are fully alive in job 1, including object and symbol targets created in a
+same-thread child realm; 1000/1000 `deref` targets remain alive through an
+in-job GC after job 2 starts; and 1000/1000 object targets, 1000/1000 symbol
+targets, 500/500 WeakMap key targets, and both cross-realm targets are cleared
+after the job-1 kept set is released. The callback exits 1 on any exact
+threshold failure so the regression runner cannot pass on a printed exception.
 
 Commands (all builds/test262 runs serialized by
 `/tmp/opencode/cc-gate-lock.sh`; cache and checkout are local):
@@ -183,7 +198,7 @@ python3 tools/test262/run.py --binary "$PWD/out/s13-weakref-before-bin/ch" \
   --checkout "$PWD/out/test262" --output "$PWD/out/test262-s13-weakref-before" \
   'test/built-ins/WeakRef/**/*.js'
 python3 tools/test262/run.py --binary "$PWD/zig-out/bin/ch" \
-  --checkout "$PWD/out/test262" --output "$PWD/out/test262-s13-weakref-after3" \
+  --checkout "$PWD/out/test262" --output "$PWD/out/test262-s13-weakref-after4" \
   'test/built-ins/WeakRef/**/*.js'
 (cd test/es7 && ../../zig-out/bin/ch -CollectGarbage -args summary -endargs weakref.js)
 (cd test/es7 && ../../zig-out/bin/ch -CollectGarbage weakref-gc.js)
@@ -202,9 +217,10 @@ Gate evidence (both runs serialized by the shared gate lock):
   pass with the 1984/2036 profile pins.
 
 Adding the global `WeakRef` intrinsic changed the debugger's global-property
-view, so 66 shared `.dbg.baseline` files were regenerated from the test run
-(they add the `WeakRef` property and current function-property order). This is
-why the baseline diff is broad; it is not a runtime behavior change.
+view, so 66 shared `.dbg.baseline` files were regenerated from the test run.
+All 66 add the `WeakRef` property; 24 of them also carry ordering-only changes
+to `arguments`/`length`/`name` in function displays. This is why the baseline
+diff is broad; it is not a runtime behavior change.
 
 ## Residual
 
@@ -221,9 +237,11 @@ why the baseline diff is broad; it is not a runtime behavior change.
   HostDispatch limitation. No test262 scenario exercises that host surface.
 - JIT/TTD/debugger evidence: no JIT claim; no TTD snapshot support was added
   for `[[Target]]` beyond the normal dynamic-object shape. B4 owns the JIT
-  matrix. No concurrent-GC/GCStress run was performed; the handle uses the
-  existing JsRT `RecyclerWeakReference` primitive, but its concurrent-GC
-  behavior must be covered by the B4/GCStress matrix before any such claim.
+  matrix. The kept-list `Add` stores through `JsUtil::List`'s
+  `Field(RecyclableObject*, Recycler)` buffer, which is `WriteBarrierPtr` under
+  `GLOBAL_ENABLE_WRITE_BARRIER`; the weak handle itself still relies on the
+  existing JsRT `RecyclerWeakReference` primitive. No concurrent-GC/GCStress
+  run was performed; B4/GCStress must cover both before any such claim.
 - The repository's build-contract documents record their pinned 538/682 unit
   baselines; this new TU updates the build/test-table assertions to
   Mac 539 (537 static) and Linux 683 but does not rewrite those historical
