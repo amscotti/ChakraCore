@@ -72,16 +72,20 @@ the same; computed expressions are not.
 
 Deferred accounting: helper declarations are synthetic nested functions, so
 class members and functions inside field initializers are kept eager, and
-functions whose body contains `class` are not deferred. A fast-scan stub
-reserves each initialized field helper's nested slot. Constructors are eager.
-Arrows in class constructors are also eager so `super()` validation sees the
-complete constructor AST. These are correctness trade-offs for S1, not a broad
+functions whose body contains `class` are not deferred. The fast scan applies
+the same await/yield restrictions as the real helper parse, so a deferred
+async/generator function cannot hide an invalid initializer until first call.
+A fast-scan stub reserves each initialized field helper's nested slot.
+Constructors and constructor arrows are eager so `super()` sees the complete
+constructor AST. These are correctness trade-offs for S1, not a broad
 defer-parse policy change.
 
-`super()` inside an arrow lexically in a constructor is **rejected with a
-SyntaxError** when the class has instance fields. This is deliberately stricter
-than the spec until the arrow-super field path can be initialized in the
-arrow's frame; it prevents the previous silent skipped initialization.
+`super()` inside a constructor arrow is supported: the parser attaches a copy
+of the field-call list to the arrow, visits/emits it in the arrow frame, and
+initializes fields when (and only when) that arrow actually calls `super()`.
+An uncalled arrow is accepted. Direct eval of `super()` in a derived
+constructor with instance fields is rejected with SyntaxError because the eval
+frame cannot run the field initialization in this slice.
 
 ## Bytecode/runtime design
 
@@ -90,10 +94,14 @@ arrow's frame; it prevents the previous silent skipped initialization.
   constants exist for NamedEvaluation. This fixes the former empty-name bug
   where `class C { uniqueName = 42 }` defined `""` unless another reference
   interned the name.
-- `InitClassField` is an appended extended `ElementCP` opcode. Its runtime
-  helper builds a `{ value, writable, enumerable, configurable }` descriptor and
-  calls `JavascriptObject::DefineOwnPropertyHelper(..., throwOnError=true)`,
-  i.e. `CreateDataPropertyOrThrow`. No static `PropertyIds` were added.
+- `InitClassField` is an extended `ElementCP` opcode appended at the absolute
+  end of the macro-generated opcode list (after SIMD), so no existing opcode
+  value shifts. Its runtime helper builds a
+  `{ value, writable, enumerable, configurable }` descriptor and calls
+  `JavascriptObject::DefineOwnPropertyHelper(..., throwOnError=true)`, i.e.
+  `CreateDataPropertyOrThrow`. No static `PropertyIds` were added. The checked-in
+  nojit bytecode headers remain unchanged, so no release-file version bump was
+  required; the opcode is interpreter-only and JIT-gated at B4.
 - Field-call ASTs are registered during the constructor's visit pass
   (`VisitNestedScopes`) and emitted by
   `ByteCodeGenerator::EmitClassFieldInitializerCalls`.
@@ -132,8 +140,10 @@ Build (Mac ARM64, Test and Debug/static profiles, `-nonative`):
 - `... -- test/es6` — **233 / 0**.
 - `... -- test/es6module` — **31 / 0**.
 - `... -- test/es5` — **56 / 0**.
-- Debug binary: `class-fields-public.js` normal and `-force:deferparse` both **21/21**, including eval/new Function, capture/eval, define-failure, arguments and crash regressions.
+- `... zig build check-smoke check-native ...` — green (version/invalid-flag/snippet and shared native smoke).
+- Debug binary: `class-fields-public.js` normal and `-force:deferparse` both **24/24**, including eval/new Function, capture/eval, define-failure, arguments, await/yield and arrow-super regressions.
 - `es7/deferparseclass.js` under `-force:deferparse` — **5 / 0**.
+- Final artifacts: `ch` sha256 `e1c6f94961f4c4d90d01572406a5733351b95d274ce1a8d324482745c606cf56`; `libChakraCore.dylib` sha256 `6b4e8f49eff8d568608bd0b8ee95d5525341f7d3d8af05c65c8d494f21cfce23`; Debug `ch` sha256 `76306a14e4834b0462991c6a7ef82e890468670568c4a5a3d40e4b2caf672a33`.
 
 Focused test262 subset (same pinned corpus, `-nonative`, scenarios):
 `test/language/statements/class/elements/**/*.js` +
@@ -143,14 +153,14 @@ Focused test262 subset (same pinned corpus, `-nonative`, scenarios):
 | run | passed | failed |
 |---|---:|---:|
 | base binary `10d44c972` before S1 | 1,450 | 4,447 |
-| S1 fixed binary | 1,987 | 3,910 |
+| S1 fixed binary | 1,989 | 3,908 |
 
-Scenario diff: **537 fail→pass, 0 pass→fail**. The prior draft commit's 298
+Scenario diff: **539 fail→pass, 0 pass→fail**. The prior draft commit's 298
 fail→pass was incomplete: 204 simple public-field tests still failed on
 uninterned/empty field names, and constructor/eval/deferred cases silently
 skipped initialization.
 
-Remaining 40 public-only, non-computed, non-static scenarios (outside the
+Remaining 38 public-only, non-computed, non-static scenarios (outside the
 implemented slice despite their tags):
 
 - **24** `*superproperty*` eval cases (direct eval referencing `super` in a
@@ -159,8 +169,6 @@ implemented slice despite their tags):
   (`field-declaration`, `fields-computed-name-propname-constructor`,
   `fields-hash-constructor-is-a-valid-name`, `redeclaration-symbol`).
 - **2** static-field ASI grammar (`static set\n*a`) — static fields excluded.
-- **2** double-`super()` through a constructor arrow — this slice rejects the
-  arrow-super shape rather than running fields twice.
 
 All other remaining failures are private fields/methods/brands, static
 fields/blocks, computed names, decorators, or tests requiring those semantics.
@@ -175,10 +183,14 @@ Fixed and regression-tested with the Debug/static binary (no SIGABRT/SIGSEGV):
   binding/scope state and `this` is published before field calls.
 - fields plus an eval-containing arrow in a constructor formerly segfaulted in
   `ByteCodeWriter::CheckReg`; register release order was corrected and `this`
-  is loaded from the constructor symbol instead of re-emitting a released
-  override.
-- invalid `await`/`yield` in the non-async/non-generator helper produces
-  `SyntaxError`, not an abort.
+  is loaded from the constructor/`super()` register instead of re-emitting a
+  released override.
+- invalid `await`/`yield` in an async/generator outer function is rejected in
+  both the AST helper parse and the fast scan, so large/deferred shapes report
+  SyntaxError instead of aborting in `FuncInfo.h`/`ByteCodeWriter`.
+- `super()` through eval in a derived constructor with fields is a SyntaxError;
+  the arrow-super path now initializes fields correctly (including double
+  super, where the second call throws ReferenceError after one field pass).
 - the new opcode is registered in the patchable-field writer path; Debug runs
   no longer hit the patchable-opcode assertion.
 
@@ -187,14 +199,13 @@ Fixed and regression-tested with the Debug/static binary (no SIGABRT/SIGSEGV):
 - Private fields/methods/brands, `#x in obj`, private-name environments.
 - Static public/private fields and static blocks; computed field names and
   decorators.
-- `super.prop`/`super()` inside field initializers; direct eval of `super` from
-  an initializer.
-- `super()` inside a constructor arrow is rejected with SyntaxError in this
-  slice (never silently skipped).
-- The eval `arguments` check is a source scan limited to direct eval calls and
-  intentionally conservative around unusual property/method names.
+- `super.prop` inside field initializers; direct eval of `super()` in a
+  derived constructor with instance fields is rejected rather than initialized.
+- The eval `arguments` rule is parser-aware (templates, escapes, regexes,
+  strings, comments, nested eval and function/method boundaries); it is tied to
+  direct eval only, matching the additional early-error rule.
 - Deferred parsing of class members/class-containing functions is disabled as
-  described above.
+  described above; direct eval in these contexts is force-parsed.
 - JIT/Backend behavior is unverified: all evidence is Mac ARM64 `-nonative`.
   `InitClassField` has no JIT helper yet, and B4/JIT remains gated.
 
@@ -214,8 +225,10 @@ Fixed and regression-tested with the Debug/static binary (no SIGABRT/SIGSEGV):
   `lib/Runtime/Language/JavascriptOperators.{h,cpp}`,
   `lib/Runtime/ByteCode/ByteCodeWriter.cpp`: `InitClassField` opcode and
   CreateDataPropertyOrThrow path.
-- `lib/Runtime/Library/GlobalObject.cpp`: direct-eval `arguments` early error
-  for field initializer contexts.
+- `lib/Runtime/Library/GlobalObject.cpp`,
+  `lib/Runtime/Base/ScriptContext.{h,cpp}`: direct-eval context flags for
+  parser-aware `arguments` detection and eval-`super()` rejection; eval cache
+  bypassed for context-sensitive calls.
 - `lib/Runtime/Base/FunctionInfo.h` and `ByteCodeSerializer.cpp`: initializer
   context attribute for arrows/helpers.
 - `test/es7/class-fields-public.js`, `test/es7/rlexe.xml` (normal and forced

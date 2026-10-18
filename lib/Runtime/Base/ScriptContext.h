@@ -826,6 +826,8 @@ private:
         bool isScriptContextActuallyClosed;
         bool isFinalized;
         bool isEvalRestricted;
+        bool evalInClassFieldInitializer;
+        bool evalInDerivedFieldConstructor;
 #if DBG
         bool isInitialized;
         bool isCloningGlobal;
@@ -931,6 +933,10 @@ private:
         bool IsActuallyClosed() const { return isScriptContextActuallyClosed; }
         void SetEvalRestriction(bool set) { this->isEvalRestricted = set; }
         bool IsEvalRestriction() const { return this->isEvalRestricted; }
+        void SetEvalInClassFieldInitializer(bool set) { this->evalInClassFieldInitializer = set; }
+        bool IsEvalInClassFieldInitializer() const { return this->evalInClassFieldInitializer; }
+        void SetEvalInDerivedFieldConstructor(bool set) { this->evalInDerivedFieldConstructor = set; }
+        bool IsEvalInDerivedFieldConstructor() const { return this->evalInDerivedFieldConstructor; }
 #if ENABLE_NATIVE_CODEGEN
         bool IsClosedNativeCodeGenerator() const
         {

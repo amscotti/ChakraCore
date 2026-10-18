@@ -371,11 +371,97 @@ const tests = [
         }
     },
     {
-        name: "super() in a constructor arrow is rejected when the class has fields",
+        name: "super() in a constructor arrow initializes fields only when called",
         body() {
+            class Base { constructor() { this.base = 1; } }
+
+            class Uncalled extends Base {
+                x = 2;
+                constructor() { const f = () => super(); super(); }
+            }
+            const uncalled = new Uncalled();
+            assert.areEqual(2, Object.getOwnPropertyDescriptor(uncalled, "x").value);
+            assert.areEqual(1, uncalled.base);
+
+            class Called extends Base {
+                x = 3;
+                constructor() { (() => super())(); this.y = this.x; }
+            }
+            const called = new Called();
+            assert.areEqual(3, Object.getOwnPropertyDescriptor(called, "x").value);
+            assert.areEqual(3, called.y);
+            assert.areEqual(1, called.base);
+
+            // super() through eval cannot run field initialization in this
+            // slice; it must be a clear SyntaxError, not silently skipped.
             assert.throws(function () {
-                eval("class A { constructor() { this.a = 1; } } class B extends A { b = 2; constructor() { (() => super())(); } }");
-            }, SyntaxError, "super in arrow");
+                const C = eval("(class extends Base { x = 4; constructor() { eval('super()'); } })");
+                new C();
+            }, SyntaxError, "eval super");
+            assert.throws(function () {
+                const C = eval("(class extends Base { x = 4; constructor() { (() => eval('super()'))(); } })");
+                new C();
+            }, SyntaxError, "arrow eval super");
+            assert.throws(function () {
+                const C = eval("(class extends Base { x = 4; constructor(a = eval('super()')) { } })");
+                new C();
+            }, SyntaxError, "parameter-default eval super");
+        }
+    },
+    {
+        name: "await and yield are invalid in field initializers in every surrounding shape",
+        body() {
+            assert.throws(function () { eval("async function f(){ class C { x = await 1 } }"); }, SyntaxError, "async function class declaration");
+            assert.throws(function () { eval("function* g(){ class C { x = yield 1 } }"); }, SyntaxError, "generator class declaration");
+            assert.throws(function () { eval("async function f(){ var C = class { x = await 1 }; }"); }, SyntaxError, "async class expression");
+            assert.throws(function () { eval("function* g(){ var o = { *m(){ class C { x = yield 1 } } }; }"); }, SyntaxError, "generator method");
+            assert.throws(function () { eval("var f = async ()=>{ class C { x = await 1 }; };"); }, SyntaxError, "async arrow");
+
+            // Valid await/yield in genuinely nested async/generator functions.
+            class C {
+                a = async () => await 1;
+                b = function* () { yield 2; };
+                c = async function () { return await 3; };
+            }
+            const c = new C();
+            assert.areEqual(2, c.b().next().value);
+        }
+    },
+    {
+        name: "eval arguments detection is parser-aware",
+        body() {
+            // Valid: ordinary function/method boundaries, strings, regexes,
+            // comments and property names.
+            class Valid {
+                a = eval("(function () { return arguments.length; })");
+                b = eval("/arguments/");
+                c = eval("({ arguments() { return 5; } })");
+                d = eval("\"arguments\"");
+                e = eval("/* arguments */ 1");
+                f = eval("({ arguments: 1 }).arguments");
+            }
+            const v = new Valid();
+            assert.areEqual(2, v.a(1, 2));
+            assert.areEqual("arguments", v.b.source);
+            assert.areEqual(5, v.c.arguments());
+            assert.areEqual("arguments", v.d);
+            assert.areEqual(1, v.e);
+            assert.areEqual(1, v.f);
+
+            assert.throws(function () { new (eval("(class Bad { x = eval('`${arguments}`'); })"))(); }, SyntaxError, "template");
+            assert.throws(function () { new (eval("(class Bad { x = eval('arg\\u0075ments'); })"))(); }, SyntaxError, "escaped identifier");
+            assert.throws(function () { new (eval("(class Bad { x = eval(\"eval('arguments')\"); })"))(); }, SyntaxError, "nested eval");
+            assert.throws(function () { new (eval("(class Bad { x = eval('true ? arguments : 0'); })"))(); }, SyntaxError, "conditional reference");
+        }
+    },
+    {
+        name: "large deferred functions reject await/yield field initializers at parse time",
+        body() {
+            const prelude = "var a=1,b=2,c=3,d=4,e=5,f=6,g=7,h=8,i=9,j=10,k=11,l=12,m=13,n=14,o=15,p=16;";
+            const awaitSource = "function big(){" + prelude + " async function f(){ class C { x = await 1 } } return [a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p]; } big();";
+            const yieldSource = "function big(){" + prelude + " function* g(){ class C { x = yield 1 } } return [a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p]; } big();";
+            assert.throws(function () { eval(awaitSource); }, SyntaxError, "deferred await");
+            assert.throws(function () { eval(yieldSource); }, SyntaxError, "deferred yield");
         }
     },
     {

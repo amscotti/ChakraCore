@@ -108,6 +108,7 @@ Parser::Parser(Js::ScriptContext* scriptContext, BOOL strictMode, PageAllocator 
     m_hasDeferredShorthandInitError(false),
     m_deferCommaError(false),
     m_inClassFieldInitializer(false),
+    m_disallowSuperCallInEval(false),
     m_classFieldInitializerUsesArguments(false),
     m_classFieldHelperCount(0),
     m_pnestedCount(nullptr),
@@ -513,6 +514,12 @@ HRESULT Parser::ParseSourceInternal(
 
     m_grfscr = grfscr;
     m_sourceContextInfo = sourceContextInfo;
+    // Direct eval called from a class field initializer context rejects
+    // `arguments` in its statement list; direct eval in a derived constructor
+    // that has instance fields rejects super() (this slice cannot run field
+    // initialization from the eval frame).
+    m_inClassFieldInitializer = m_scriptContext->IsEvalInClassFieldInitializer();
+    m_disallowSuperCallInEval = m_scriptContext->IsEvalInDerivedFieldConstructor();
 
     ParseNodeProg * pnodeBase = NULL;
     HRESULT hr;
@@ -539,6 +546,19 @@ HRESULT Parser::ParseSourceInternal(
         pnodeBase = Parse(pszSrc, offsetInBytes, encodedCharCount, offsetInChars, isUtf8, grfscr, lineNumber, nextFunctionId, pse);
 
         Assert(pnodeBase);
+
+        // Direct eval parsed in a class field initializer context: the eval
+        // StatementList may not contain an arguments identifier reference.
+        // The initializer helper checks its own expression; this catches the
+        // eval top level (including arrows/templates/escaped identifiers).
+        if (m_inClassFieldInitializer && m_classFieldInitializerUsesArguments)
+        {
+            // Re-enter the parse-error path with no completed tree so the
+            // scanner supplies line information (and the code-gen HRESULT
+            // assertion does not see a non-null tree).
+            pnodeBase = nullptr;
+            Error(ERRsyntax);
+        }
 
         // Record the actual number of words parsed.
         m_sourceLim = pnodeBase->ichLim - offsetInChars;
@@ -4380,14 +4400,25 @@ ParseNodePtr Parser::ParsePostfixOperators(
                     // Detect super()
                     if (this->NodeIsSuperName(pnode))
                     {
+                        if (m_disallowSuperCallInEval)
+                        {
+                            // The eval frame cannot run the derived class's
+                            // instance-field initialization in this slice.
+                            Error(ERRsyntax);
+                        }
                         if (GetCurrentFunctionNode()->IsLambda() &&
                             m_currentNodeNonLambdaFunc != nullptr &&
                             m_currentNodeNonLambdaFunc->IsClassConstructor())
                         {
-                            // S1 rejects super() in a constructor arrow when
-                            // the class has instance fields; remember the
-                            // shape until the field list is complete.
-                            m_currentNodeNonLambdaFunc->hasSuperCallInConstructorLambda = true;
+                            // super() in a constructor arrow needs its own
+                            // field-init call list visited in the arrow frame.
+                            ParseNodeFnc * pnodeLambda = GetCurrentFunctionNode();
+                            if (!pnodeLambda->hasSuperCallInConstructorLambda)
+                            {
+                                pnodeLambda->hasSuperCallInConstructorLambda = true;
+                                AddToNodeList(&m_currentNodeNonLambdaFunc->pnodeClassSuperLambdas,
+                                    &m_currentNodeNonLambdaFunc->ppnodeClassSuperLambdasLast, pnodeLambda);
+                            }
                         }
                         pnode = CreateSuperCallNode(pnode->AsParseNodeSpecialName(), pnodeArgs);
                         Assert(pnode);
@@ -8468,7 +8499,16 @@ ParseNodeFnc * Parser::CreateClassFieldInitializerFunction(charcount_t ichMin, s
     m_classFieldInitializerUsesArguments = false;
     m_inClassFieldInitializer = true;
 
+    // A field initializer is not an async/generator body even when the
+    // surrounding class lives in one. Treat await/yield as ordinary tokens so
+    // an invalid use is a SyntaxError instead of building an await/yield node
+    // that the helper FunctionBody cannot execute. Nested async/generator
+    // functions reset these regions in ParseFncDeclInternal.
+    bool previousYieldIsKeyword = this->GetScanner()->SetYieldIsKeywordRegion(false);
+    bool previousAwaitIsKeyword = this->GetScanner()->SetAwaitIsKeywordRegion(false);
     ParseNodePtr pnodeExpr = ParseExpr<true>(koplAsg, nullptr, TRUE);
+    this->GetScanner()->SetYieldIsKeywordRegion(previousYieldIsKeyword);
+    this->GetScanner()->SetAwaitIsKeywordRegion(previousAwaitIsKeyword);
     if (ppnodeInitExpr != nullptr)
     {
         *ppnodeInitExpr = pnodeExpr;
@@ -8519,6 +8559,58 @@ ParseNodeFnc * Parser::CreateClassFieldInitializerFunction(charcount_t ichMin, s
     AddNestedCapturedNames(pnodeFnc);
 
     return pnodeFnc;
+}
+
+// Build a field-call list for an arrow that calls super() from a derived
+// constructor. The arrow has its own bytecode frame, so its field-call operands
+// must be visited/emitted there; the helper functions and instance are still
+// reached through the constructor/class-block closure.
+void Parser::AttachClassFieldsToLambda(ParseNodeFnc * pnodeLambda, ParseNode * pnodeFields, Symbol * thisSym)
+{
+    ParseNodePtr pnodeClonedFields = nullptr;
+    ParseNodePtr * lastClonedField = nullptr;
+
+    ParseNodePtr pnodeFieldsWalker = pnodeFields;
+    while (pnodeFieldsWalker != nullptr)
+    {
+        ParseNodePtr pnodeField = pnodeFieldsWalker->nop == knopList
+            ? pnodeFieldsWalker->AsParseNodeBin()->pnode1
+            : pnodeFieldsWalker;
+        ParseNodePtr pnodeName = pnodeField->AsParseNodeBin()->pnode1;
+        IdentPtr fieldPid = pnodeName->AsParseNodeStr()->pid;
+        ParseNodePtr pnodeOriginalCall = pnodeField->AsParseNodeBin()->pnode2;
+
+        ParseNodeCall * pnodeCall = nullptr;
+        if (pnodeOriginalCall != nullptr)
+        {
+            ParseNodeName * pnodeOriginalTarget = pnodeOriginalCall->AsParseNodeCall()->pnodeTarget->AsParseNodeName();
+            PidRefStack * hiddenRef = Anew(&m_nodeAllocator, PidRefStack);
+            hiddenRef->SetSym(*pnodeOriginalTarget->GetSymRef());
+            ParseNodeName * pnodeTarget = CreateNameNode(fieldPid);
+            pnodeTarget->SetSymRef(hiddenRef);
+
+            PidRefStack * thisRef = Anew(&m_nodeAllocator, PidRefStack);
+            ParseNodeSpecialName * pnodeThis = CreateSpecialNameNode(wellKnownPropertyPids._this, thisRef, 0, 0);
+            *pnodeThis->GetSymRef() = thisSym;
+
+            pnodeCall = CreateCallNode(knopCall, pnodeTarget, nullptr);
+            pnodeCall->pnodeThisOverride = pnodeThis;
+            pnodeCall->isUsed = true;
+            pnodeCall->argCount = 0;
+        }
+
+        ParseNodeStr * pnodeClonedName = CreateStrNode(fieldPid);
+        ParseNodeBin * pnodeClonedField = CreateBinNode(knopMember, pnodeClonedName, pnodeCall);
+        AddToNodeList(&pnodeClonedFields, &lastClonedField, pnodeClonedField);
+
+        if (pnodeFieldsWalker->nop != knopList)
+        {
+            break;
+        }
+        pnodeFieldsWalker = pnodeFieldsWalker->AsParseNodeBin()->pnode2;
+    }
+
+    pnodeLambda->pnodeClassFields = pnodeClonedFields;
 }
 
 // S1 fast-scan counterpart of CreateClassFieldInitializerFunction. During the
@@ -8850,7 +8942,15 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
                 }
                 else
                 {
+                    // Fast scan must apply the same await/yield restriction as
+                    // the real helper parse, otherwise a deferred async/generator
+                    // function can hide an invalid field initializer until its
+                    // body is later compiled.
+                    bool previousYieldIsKeyword = this->GetScanner()->SetYieldIsKeywordRegion(false);
+                    bool previousAwaitIsKeyword = this->GetScanner()->SetAwaitIsKeywordRegion(false);
                     ParseExpr<false>(koplAsg, nullptr, TRUE);
+                    this->GetScanner()->SetYieldIsKeywordRegion(previousYieldIsKeyword);
+                    this->GetScanner()->SetAwaitIsKeywordRegion(previousAwaitIsKeyword);
                 }
 
                 m_classFieldInitializerUsesArguments = m_classFieldInitializerUsesArguments || usesArgumentsSave;
@@ -9128,14 +9228,8 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
 
         if (pnodeInstanceFields != nullptr)
         {
-            if (pnodeConstructor->hasSuperCallInConstructorLambda)
-            {
-                // super() inside an arrow lexically in the constructor cannot
-                // run instance-field initialization in this slice. Reject the
-                // shape instead of silently leaving fields uninitialized.
-                Error(ERRsyntax);
-            }
             pnodeConstructor->pnodeClassFields = pnodeInstanceFields;
+            pnodeConstructor->hasInstanceFields = true;
 
             // Field initializers run with the constructor's instance as `this`.
             // Bind the explicit receiver on each helper call to the
@@ -9172,6 +9266,21 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
                     break;
                 }
                 pnodeFields = pnodeFields->AsParseNodeBin()->pnode2;
+            }
+
+            ParseNodePtr pnodeSuperLambdas = pnodeConstructor->pnodeClassSuperLambdas;
+            while (pnodeSuperLambdas != nullptr)
+            {
+                ParseNodePtr pnodeEntry = pnodeSuperLambdas->nop == knopList
+                    ? pnodeSuperLambdas->AsParseNodeBin()->pnode1
+                    : pnodeSuperLambdas;
+                AttachClassFieldsToLambda(pnodeEntry->AsParseNodeFnc(), pnodeInstanceFields, thisSym);
+
+                if (pnodeSuperLambdas->nop != knopList)
+                {
+                    break;
+                }
+                pnodeSuperLambdas = pnodeSuperLambdas->AsParseNodeBin()->pnode2;
             }
         }
 

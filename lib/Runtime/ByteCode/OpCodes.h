@@ -857,9 +857,6 @@ MACRO_EXTEND_WMS(       StPropIdArrFromVar, ElementSlot,    OpSideEffect|OpHasIm
 MACRO_EXTEND_WMS(       Restify,            Reg4,           OpSideEffect|OpHasImplicitCall)
 MACRO_EXTEND_WMS(       NewPropIdArrForCompProps, Reg1Unsigned1, OpSideEffect)
 
-// S1: CreateDataPropertyOrThrow for a public instance class field.
-MACRO_EXTEND_WMS(       InitClassField,    ElementCP,      OpSideEffect|OpOpndHasImplicitCall|OpPostOpDbgBailOut)
-
 MACRO_BACKEND_ONLY(BigIntLiteral, Empty, None) // Load BigInt literal
 MACRO_EXTEND_WMS(Conv_Numeric, Reg2, OpSideEffect | OpTempNumberProducing | OpTempNumberTransfer | OpTempObjectSources | OpOpndHasImplicitCall | OpProducesNumber) // Convert to Numeric. [[ToNumeric()]]
 MACRO_EXTEND_WMS(Incr_Num_A, Reg2, OpTempNumberProducing | OpOpndHasImplicitCall | OpDoNotTransfer | OpTempNumberSources | OpTempObjectSources | OpCanCSE | OpPostOpDbgBailOut | OpProducesNumber)     // Increment Numeric
@@ -887,6 +884,11 @@ MACRO_BACKEND_ONLY(GeneratorEpilogueNoFrameNullOutLabel,    Empty,  None)
 #define MACRO_SIMD_BACKEND_ONLY_EXTEND(opcode, asmjsLayout, opCodeAttrAsmJs, OpCodeAttr) MACRO_BACKEND_ONLY(opcode, Empty, OpCodeAttr)
 
 #include "OpCodesSimd.h"
+
+// S1: CreateDataPropertyOrThrow for a public instance class field. Appended
+// after every existing opcode (including SIMD) so no established opcode value
+// shifts.
+MACRO_EXTEND_WMS(       InitClassField,    ElementCP,      OpSideEffect|OpOpndHasImplicitCall|OpPostOpDbgBailOut)
 
 #undef MACRO_WMS_PROFILED
 #undef MACRO_WMS_PROFILED2

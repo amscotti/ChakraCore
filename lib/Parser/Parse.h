@@ -484,6 +484,7 @@ private:
     // so their bodies have their own lexical `this` and correctly parented
     // nested functions.
     bool m_inClassFieldInitializer;
+    bool m_disallowSuperCallInEval;
     bool m_classFieldInitializerUsesArguments;
     uint32 m_classFieldHelperCount;
     uint * m_pnestedCount; // count of functions nested at one level below the current node
@@ -915,6 +916,7 @@ private:
 
     IdentPtr ParseClassPropertyName(IdentPtr * hint);
     ParseNodeFnc * CreateClassFieldInitializerFunction(charcount_t ichMin, size_t cbMin, ParseNodePtr * ppnodeInitExpr = nullptr);
+    void AttachClassFieldsToLambda(ParseNodeFnc * pnodeLambda, ParseNode * pnodeFields, Symbol * thisSym);
     ParseNodeFnc * CreateClassFieldInitializerFastScanStub();
     template<bool buildAST> ParseNodeClass * ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint, uint32 *pHintLength, uint32 *pShortNameOffset);
 

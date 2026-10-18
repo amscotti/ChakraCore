@@ -1387,6 +1387,10 @@ static Js::FunctionInfo::Attributes GetFunctionInfoAttributes(ParseNodeFnc * pno
     {
         attributes = (Js::FunctionInfo::Attributes)(attributes | Js::FunctionInfo::Attributes::ClassFieldInitializer);
     }
+    if (pnodeFnc->hasInstanceFields)
+    {
+        attributes = (Js::FunctionInfo::Attributes)(attributes | Js::FunctionInfo::Attributes::ClassConstructorWithFields);
+    }
     return attributes;
 }
 
@@ -3538,7 +3542,7 @@ void VisitNestedScopes(ParseNode* pnodeScopeList, ParseNode* pnodeParent, ByteCo
                 // prologue (base) or right after super() binds `this` (derived),
                 // not from the body list. Register their operands here so the
                 // emitter has resolved symbols and registers.
-                if (pnodeFnc->IsClassConstructor() && pnodeFnc->pnodeClassFields != nullptr)
+                if (pnodeFnc->pnodeClassFields != nullptr)
                 {
                     ParseNodePtr pnodeFields = pnodeFnc->pnodeClassFields;
                     while (pnodeFields != nullptr)

@@ -2400,14 +2400,13 @@ void ByteCodeGenerator::EmitSuperCall(FuncInfo* funcInfo, ParseNodeSuperCall * p
         {
             EmitClassFieldInitializerCalls(nonLambdaFunc->root->pnodeClassFields, funcInfo, pnodeSuperCall->pnodeThis->location);
         }
-        else
+        else if (funcInfo->root->pnodeClassFields != nullptr)
         {
             // super() inside an arrow that is lexically in the constructor:
-            // the field-call operands were registered in the constructor frame,
-            // so they cannot be emitted into the arrow's frame. S1 does not
-            // claim this shape; constructing such a class leaves the fields
-            // uninitialized rather than corrupting the arrow's frame. This is
-            // recorded as a residual limitation in doc/c2-s1-public-fields.md.
+            // the parser attached a copy of the field-call list to the arrow so
+            // its operands are visited/emitted in the arrow's frame. The
+            // helper functions and instance are reached through the closure.
+            EmitClassFieldInitializerCalls(funcInfo->root->pnodeClassFields, funcInfo, pnodeSuperCall->pnodeThis->location);
         }
     }
 
@@ -2438,11 +2437,13 @@ void ByteCodeGenerator::EmitClassFieldInitializerCalls(ParseNode * pnodeFields, 
 
         Assert(pnodeName->nop == knopStr);
 
-        Symbol * thisSym = funcInfo->GetThisSymbol();
-        Assert(thisSym != nullptr);
-        Js::RegSlot thisLocation = thisLocationOverride != Js::Constants::NoRegister
-            ? thisLocationOverride
-            : thisSym->GetLocation();
+        Js::RegSlot thisLocation = thisLocationOverride;
+        if (thisLocation == Js::Constants::NoRegister)
+        {
+            Symbol * thisSym = funcInfo->GetThisSymbol();
+            Assert(thisSym != nullptr);
+            thisLocation = thisSym->GetLocation();
+        }
         Js::RegSlot valueLocation;
         bool releaseValueLoc = false;
 

@@ -488,72 +488,6 @@ using namespace Js;
     }
 
 #endif /* IR_VIEWER */
-    static bool EvalSourceContainsArgumentsIdentifier(char16 const * source, charcount_t sourceLen)
-    {
-        for (charcount_t i = 0; i < sourceLen;)
-        {
-            char16 c = source[i];
-            if (c == _u('/') && i + 1 < sourceLen && source[i + 1] == _u('/'))
-            {
-                i += 2;
-                while (i < sourceLen && source[i] != _u('\n') && source[i] != _u('\r')) { i++; }
-                continue;
-            }
-            if (c == _u('/') && i + 1 < sourceLen && source[i + 1] == _u('*'))
-            {
-                i += 2;
-                while (i + 1 < sourceLen && !(source[i] == _u('*') && source[i + 1] == _u('/'))) { i++; }
-                i = (i + 1 < sourceLen) ? i + 2 : sourceLen;
-                continue;
-            }
-            if (c == _u('\'') || c == _u('"') || c == _u('`'))
-            {
-                char16 quote = c;
-                i++;
-                while (i < sourceLen)
-                {
-                    if (source[i] == _u('\\')) { i += 2; continue; }
-                    if (source[i] == quote) { i++; break; }
-                    i++;
-                }
-                continue;
-            }
-            if ((c >= _u('a') && c <= _u('z')) || (c >= _u('A') && c <= _u('Z')) || c == _u('_') || c == _u('$'))
-            {
-                charcount_t start = i;
-                while (i < sourceLen &&
-                    ((source[i] >= _u('a') && source[i] <= _u('z')) ||
-                     (source[i] >= _u('A') && source[i] <= _u('Z')) ||
-                     (source[i] >= _u('0') && source[i] <= _u('9')) ||
-                     source[i] == _u('_') || source[i] == _u('$')))
-                {
-                    i++;
-                }
-                if (i - start == 9 &&
-                    source[start] == _u('a') && source[start + 1] == _u('r') &&
-                    source[start + 2] == _u('g') && source[start + 3] == _u('u') &&
-                    source[start + 4] == _u('m') && source[start + 5] == _u('e') &&
-                    source[start + 6] == _u('n') && source[start + 7] == _u('t') &&
-                    source[start + 8] == _u('s'))
-                {
-                    charcount_t next = i;
-                    while (next < sourceLen && (source[next] == _u(' ') || source[next] == _u('\t') || source[next] == _u('\r') || source[next] == _u('\n'))) { next++; }
-                    charcount_t prev = start;
-                    while (prev > 0 && (source[prev - 1] == _u(' ') || source[prev - 1] == _u('\t') || source[prev - 1] == _u('\r') || source[prev - 1] == _u('\n'))) { prev--; }
-                    bool isPropertyKey = next < sourceLen && source[next] == _u(':');
-                    bool isPropertyAccess = prev > 0 && source[prev - 1] == _u('.');
-                    if (!isPropertyKey && !isPropertyAccess)
-                    {
-                        return true;
-                    }
-                }
-                continue;
-            }
-            i++;
-        }
-        return false;
-    }
-
     Var GlobalObject::EntryEvalHelper(ScriptContext* scriptContext, RecyclableObject* function, Js::Arguments& args)
     {
         FrameDisplay* environment = (FrameDisplay*)&NullFrameDisplay;
@@ -653,34 +587,58 @@ using namespace Js;
         charcount_t sourceLen = argString->GetLength();
         FastEvalMapString key(argString, sourceString, sourceLen, moduleID, strictMode, isLibraryCode);
 
-        // Additional early-error rule for direct eval inside a class field
-        // initializer: the eval body must not contain an `arguments` identifier
-        // reference. This applies through arrow functions created by the
-        // initializer, but ends at ordinary function boundaries.
-        if (args.IsDirectEvalCall() && !isIndirect &&
-            EvalSourceContainsArgumentsIdentifier(sourceString, sourceLen))
+
+        // Eval called from a class field initializer or a derived constructor
+        // with instance fields must be parsed with that context; do not reuse a
+        // cached FunctionBody compiled under a different context.
+        bool evalInClassFieldInitializer = false;
+        bool evalInDerivedFieldConstructor = false;
+        if (args.IsDirectEvalCall() && !isIndirect)
         {
             JavascriptFunction * pfuncCaller = nullptr;
             if (JavascriptStackWalker::GetCaller(&pfuncCaller, scriptContext) &&
                 pfuncCaller != nullptr && pfuncCaller->IsScriptFunction())
             {
-                FunctionBody * callerBody = pfuncCaller->GetFunctionBody();
-                if (callerBody != nullptr && callerBody->GetFunctionInfo()->IsClassFieldInitializer())
+                FunctionInfo * callerInfo = pfuncCaller->GetFunctionBody()->GetFunctionInfo();
+                evalInClassFieldInitializer = callerInfo->IsClassFieldInitializer();
+            }
+
+            // An eval inside an arrow in a constructor has the arrow as its
+            // immediate caller. Walk out to the constructor so super() in that
+            // eval is rejected instead of silently skipping field init.
+            JavascriptStackWalker walker(scriptContext);
+            while (walker.GetCaller(&pfuncCaller))
+            {
+                if (pfuncCaller == nullptr || !pfuncCaller->IsScriptFunction())
                 {
-                    JavascriptError::ThrowSyntaxError(scriptContext, JSERR_ClassFieldInitializerArguments);
+                    continue;
+                }
+                FunctionInfo * callerInfo = pfuncCaller->GetFunctionBody()->GetFunctionInfo();
+                if (callerInfo->IsClassConstructor())
+                {
+                    evalInDerivedFieldConstructor =
+                        callerInfo->IsClassConstructorWithFields() &&
+                        (callerInfo->GetAttributes() & FunctionInfo::Attributes::BaseConstructorKind) == 0;
+                    break;
                 }
             }
         }
 
-
         // PropertyString's buffer references to PropertyRecord's inline buffer, if both PropertyString and PropertyRecord are collected
         // we'll leave the PropertyRecord's interior buffer pointer in the EvalMap. So do not use evalmap if we are evaluating PropertyString
-        bool useEvalMap = !VirtualTableInfo<PropertyString>::HasVirtualTable(argString) && debugEvalScriptContext == nullptr; // Don't use the cache in case of debugEval
+        bool useEvalMap = !VirtualTableInfo<PropertyString>::HasVirtualTable(argString) &&
+            debugEvalScriptContext == nullptr &&
+            !evalInClassFieldInitializer && !evalInDerivedFieldConstructor; // Don't use the cache in case of debugEval or context-sensitive eval
 
         bool found = useEvalMap && scriptContext->IsInEvalMap(key, isIndirect, &pfuncScript);
         if (!found || (!isIndirect && pfuncScript->GetEnvironment() != &NullFrameDisplay))
         {
             uint32 grfscr = additionalGrfscr | fscrReturnExpression | fscrEval | fscrEvalCode | fscrGlobalCode;
+            if (evalInClassFieldInitializer || evalInDerivedFieldConstructor)
+            {
+                // Parser context flags are not serialized in deferred stubs.
+                grfscr |= fscrNoDeferParse;
+            }
 
             if (isLibraryCode)
             {
@@ -692,8 +650,34 @@ using namespace Js;
                 grfscr |= fscrCanDeferFncParse;
             }
 
+            struct AutoRestoreEvalContext
+            {
+                ScriptContext * context;
+                bool classField;
+                bool derivedField;
+                AutoRestoreEvalContext(ScriptContext * context) : context(context),
+                    classField(context->IsEvalInClassFieldInitializer()),
+                    derivedField(context->IsEvalInDerivedFieldConstructor()) { }
+                ~AutoRestoreEvalContext()
+                {
+                    context->SetEvalInClassFieldInitializer(classField);
+                    context->SetEvalInDerivedFieldConstructor(derivedField);
+                }
+            } restoreEvalContext(scriptContext);
+            scriptContext->SetEvalInClassFieldInitializer(evalInClassFieldInitializer);
+            scriptContext->SetEvalInDerivedFieldConstructor(evalInDerivedFieldConstructor);
+
             pfuncScript = library->GetGlobalObject()->EvalHelper(scriptContext, argString->GetSz(), argString->GetLength(), moduleID,
                 grfscr, Constants::EvalCode, doRegisterDocument, isIndirect, strictMode);
+
+            if (evalInClassFieldInitializer && pfuncScript != nullptr)
+            {
+                // Nested direct eval inside this eval must inherit the class
+                // field initializer arguments rule.
+                FunctionInfo * evalInfo = pfuncScript->GetFunctionBody()->GetFunctionInfo();
+                evalInfo->SetAttributes((FunctionInfo::Attributes)(
+                    evalInfo->GetAttributes() | FunctionInfo::Attributes::ClassFieldInitializer));
+            }
 
             if (debugEvalScriptContext != nullptr && CrossSite::NeedMarshalVar(pfuncScript, debugEvalScriptContext))
             {
