@@ -312,9 +312,19 @@ using namespace Js;
 
     Var JavascriptOperators::ToNumericInPlace(Var aRight, ScriptContext* scriptContext, JavascriptNumber* result)
     {
-        if (JavascriptOperators::GetTypeId(aRight) == TypeIds_BigInt)
+        TypeId typeId = JavascriptOperators::GetTypeId(aRight);
+        if (typeId == TypeIds_BigInt)
         {
             return aRight;
+        }
+        if (JavascriptOperators::IsObjectType(typeId))
+        {
+            Var primitive = JavascriptConversion::ToPrimitive<JavascriptHint::HintNumber>(aRight, scriptContext);
+            if (JavascriptOperators::GetTypeId(primitive) == TypeIds_BigInt)
+            {
+                return primitive;
+            }
+            return JavascriptOperators::ToNumberInPlace(primitive, scriptContext, result);
         }
         return JavascriptOperators::ToNumberInPlace(aRight, scriptContext, result);
     }
@@ -11142,9 +11152,23 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
 
     Var JavascriptOperators::ToNumeric(Var aRight, ScriptContext* scriptContext)
     {
-        if (JavascriptOperators::GetTypeId(aRight) == TypeIds_BigInt)
+        TypeId typeId = JavascriptOperators::GetTypeId(aRight);
+        if (typeId == TypeIds_BigInt)
         {
             return aRight;
+        }
+        if (JavascriptOperators::IsObjectType(typeId))
+        {
+            // ToNumeric: ToPrimitive(value, hint Number); a BigInt primitive is
+            // returned as-is, everything else goes through ToNumber. This is
+            // what lets postfix ++/-- and compound assignment observe a BigInt
+            // wrapper (Conv_Numeric is emitted for postfix operators).
+            Var primitive = JavascriptConversion::ToPrimitive<JavascriptHint::HintNumber>(aRight, scriptContext);
+            if (JavascriptOperators::GetTypeId(primitive) == TypeIds_BigInt)
+            {
+                return primitive;
+            }
+            return JavascriptOperators::ToNumber(primitive, scriptContext);
         }
         return JavascriptOperators::ToNumber(aRight, scriptContext);
     }
