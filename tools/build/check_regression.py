@@ -18,11 +18,11 @@ No --not-tag: ICU is present in these profiles, so TEST_ICU is empty
 Slow, ...) is runtests.py's own and therefore identical by
 construction.
 
-Requires the legacy baseline counts for the selection: 1980 passed /
-0 failed (--test), 2032 passed / 0 failed (--debug). The C2-S2
-sub-batch 3 bigint-literals.js test (doc/c2-s2-bigint.md) sits on top
-of sub-batch 2's asIntN/asUintN test and
-the C2-S9 modifiers sub-batch's regexp-modifiers.js
+Requires the legacy baseline counts for the selection: 1981 passed /
+0 failed (--test), 2033 passed / 0 failed (--debug). The C2-S2
+sub-batch 4 bigint-mixed.js test sits on top of sub-batch 3's
+bigint-literals.js (doc/c2-s2-bigint.md), sub-batch 2's asIntN/asUintN
+test, and the C2-S9 modifiers sub-batch's regexp-modifiers.js
 (doc/c2-s9-modifiers.md), C2-S13's
 weakcollections-symbols.js (doc/c2-s13-symbol-keys.md), itself on
 top of C2-S14's blockscope-early-errors.js
@@ -44,8 +44,9 @@ runtests.py's own per-test timeout is untouched.
 
 Usage: check_regression.py <runtests.py> <ch> [--select test|debug]
        [--expected-passed N] [--expected-failed M] [--self-test]
-Defaults: --select test, 1980/0 (the B2 test profile; count raised
-by S2-b3's bigint-literals.js, S2-b2's bigint-asintn.js, the S9 modifiers sub-batch's
+Defaults: --select test, 1981/0 (the B2 test profile; count raised
+by S2-b4's bigint-mixed.js, S2-b3's bigint-literals.js,
+S2-b2's bigint-asintn.js, the S9 modifiers sub-batch's
 regexp-modifiers.js, S13's
 weakcollections-symbols.js, S14's blockscope-early-errors.js
 and S2-b1's bigint-basics.js on
@@ -65,12 +66,13 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common
 
 TOTAL_RE = re.compile(r"^Total: passed (\d+), failed (\d+)\s*$")
-EXPECTED_PASSED = 1980
+EXPECTED_PASSED = 1981
 EXPECTED_FAILED = 0
 # Per-selection legacy baselines (counts: doc/c2-s9-modifiers.md,
 # doc/c2-s13-symbol-keys.md, doc/c2-s14-blockscope.md,
-# doc/c2-s2-bigint.md and doc/c2-s9-namedgroups.md; the S9 modifiers
-# sub-batch added regexp-modifiers.js on top of S13's
+# doc/c2-s2-bigint.md and doc/c2-s9-namedgroups.md; S2 sub-batch 4
+# added bigint-mixed.js on top of sub-batch 3's bigint-literals.js.
+# The S9 modifiers sub-batch added regexp-modifiers.js on top of S13's
 # weakcollections-symbols.js, itself on top of
 # S14's blockscope-early-errors.js, on top of S2 sub-batch 1's bigint-basics.js on top
 # of S9, which added namedgroups.js + namedgroups-symbols.js over C2-S7's
@@ -84,7 +86,7 @@ EXPECTED_FAILED = 0
 # explicit CLI args so a wiring mistake (debug flag with test counts)
 # fails instead of silently passing on a wrong gate.
 SELECT_FLAGS = {"test": "--test", "debug": "--debug"}
-SELECT_COUNTS = {"test": (1980, 0), "debug": (2032, 0)}
+SELECT_COUNTS = {"test": (1981, 0), "debug": (2033, 0)}
 
 
 def parse_total(lines):
@@ -120,7 +122,7 @@ def self_test():
     """Negative controls: the parser/verdict must reject doctored logs."""
     cases = [
         ("exact baseline",
-         ["Total: passed 1980, failed 0"], True),
+         ["Total: passed 1981, failed 0"], True),
         ("one failure",
          ["Total: passed 1960, failed 1"], False),
         ("wrong total",
@@ -147,19 +149,19 @@ def self_test():
             bad += 1
         print("self-test %-16s -> %s (verdict=%s err=%r)"
               % (name, status, "accept" if ok else "reject", err))
-    # Profile-awareness pins: the --debug baseline (2032/0) must be
+    # Profile-awareness pins: the --debug baseline (2033/0) must be
     # accepted under debug expectations and rejected under test
     # expectations, so a count/selection mismatch can never pass.
     try:
-        err = check_counts(parse_total(["Total: passed 2032, failed 0"]),
+        err = check_counts(parse_total(["Total: passed 2033, failed 0"]),
                            *SELECT_COUNTS["debug"])
     except ValueError as e:
         err = str(e)
     if err is None:
-        print("self-test %-16s -> PASS (verdict=accept)" % "debug 2032/0")
+        print("self-test %-16s -> PASS (verdict=accept)" % "debug 2033/0")
     else:
         print("self-test %-16s -> FAIL (verdict=reject err=%r)"
-              % ("debug 2032/0", err))
+              % ("debug 2033/0", err))
         bad += 1
     try:
         err = check_counts(parse_total(["Total: passed 2014, failed 0"]),

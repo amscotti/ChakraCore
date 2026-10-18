@@ -36,6 +36,15 @@ namespace Js
 
         static bool LessThan(Var aLeft, Var aRight);
         static bool Equals(Var aLeft, Var aRight);
+        // Abstract equality with a BigInt left operand. `right` may be any
+        // primitive or an object (converted once with the default hint).
+        static BOOL Equals(JavascriptBigInt* left, Var right, BOOL* value, ScriptContext * requestContext);
+        // Exact mixed comparison used by the relational operators. The double
+        // form returns false for NaN; otherwise *result is the mathematical
+        // sign of this - value (a fractional value compares against floor).
+        bool CompareToDouble(double value, int* result) const;
+        int CompareToUInt64(bool valueIsNegative, uint64 value) const;
+        int CompareTo(const JavascriptBigInt* other) const;
         static Var Increment(Var aRight);
         static Var Add(Var aLeft, Var aRight);
         static Var Sub(Var aLeft, Var aRight);
@@ -120,9 +129,9 @@ namespace Js
         static void SubAbsolute(JavascriptBigInt * pbi1, JavascriptBigInt * pbi2);
         static JavascriptBigInt * Mul(JavascriptBigInt * pbi1, JavascriptBigInt * pbi2);
         static JavascriptBigInt * MulAbsolute(JavascriptBigInt * pbi1, JavascriptBigInt * pbi2);
-        int Compare(JavascriptBigInt * pbi);
-        int CompareAbsolute(JavascriptBigInt * pbi);
-        static BOOL Equals(JavascriptBigInt* left, Var right, BOOL* value, ScriptContext * requestContext);
+        int Compare(JavascriptBigInt * pbi) const;
+        int CompareAbsolute(JavascriptBigInt * pbi) const;
+        int CompareMagnitudeToUInt64(uint64 value) const;
         void Resize(digit_t length);
 
         static uint64 ToIndex(Var value, ScriptContext * scriptContext);

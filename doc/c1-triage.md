@@ -515,6 +515,24 @@ arithmetic/equality 2 and the fail-closed mixed relational comparison in
 work: full arithmetic, BigInt64 typed arrays, mixed comparison/abstract
 equality, wrapper arithmetic, Map/Set BigInt keys, and JIT/B4.)*
 
+*(sub-batch 4, 2026-10-17, [c2-s2-bigint.md](c2-s2-bigint.md): implemented
+mixed BigInt/Number abstract equality and relational comparison, plus
+wrapper multiplication, on Mac no-JIT. Equality covers Number/String/
+Boolean/null/undefined/Symbol/objects/wrappers with exact large-integer
+and NaN/Infinity/fractional handling; relational comparison does
+ToPrimitive(hint Number) in left-first order, both-string lexicographic
+comparison, exact BigInt/String StringToBigInt (invalid strings compare
+false), mathematical BigInt/Number ordering, and Symbol TypeErrors;
+`Object(1n) * 1n` unwraps the wrapper before operator selection. The
+scoped corpus is **154/154** on both test and debug-static binaries
+(sub-batch 3 baseline 150/154), exactly the four `toString/a-z.js` and
+`wrapper-object-ordinary-toprimitive.js` scenarios flipping fail→pass
+with 0 pass→fail; the requested target is reached. Gates moved
+1980/2032 → 1981/2033. Remaining C3 work is full BigInt
+arithmetic/bitwise/shift, BigInt64 typed arrays, Map/Set BigInt key
+identity, literal property names, giant-`ToString` performance, and
+JIT/B4.)*
+
 **S3. RegExp Unicode property escapes (`\p{…}`, `\P{…}`).** Repro:
 `python3 tools/test262/run.py --binary zig-out/bin/ch --output out/test262-c1-reprop 'test/built-ins/RegExp/property-escapes/**/*.js'`.
 Subsystem: RegExp (Runtime/Library) + Unicode data/ICU. Prerequisite: a

@@ -857,19 +857,79 @@ namespace Js
 
     BOOL JavascriptBigInt::Equals(JavascriptBigInt* left, Var right, BOOL* value, ScriptContext * requestContext)
     {
-        switch (JavascriptOperators::GetTypeId(right))
+        *value = FALSE;
+        TypeId rightType = JavascriptOperators::GetTypeId(right);
+        switch (rightType)
         {
         case TypeIds_BigInt:
-            *value = JavascriptBigInt::Equals(left, right);
+            *value = JavascriptBigInt::Equals(left, right) ? TRUE : FALSE;
+            break;
+        case TypeIds_Integer:
+            {
+                int32 integer = TaggedInt::ToInt32(right);
+                bool isNegative = integer < 0;
+                uint64 magnitude = isNegative
+                    ? static_cast<uint64>(-static_cast<int64>(integer))
+                    : static_cast<uint64>(integer);
+                *value = left->CompareToUInt64(isNegative, magnitude) == 0 ? TRUE : FALSE;
+            }
+            break;
+        case TypeIds_Number:
+            {
+                // BigInt == Number: true only for a finite integral Number
+                // with the same mathematical value. NaN, +/-Infinity and
+                // fractional values are unequal; comparison is exact for
+                // magnitudes beyond 2**53.
+                int comparison;
+                if (left->CompareToDouble(JavascriptNumber::GetValue(right), &comparison))
+                {
+                    *value = comparison == 0 ? TRUE : FALSE;
+                }
+            }
+            break;
+        case TypeIds_Int64Number:
+            {
+                __int64 integer = UnsafeVarTo<JavascriptInt64Number>(right)->GetValue();
+                bool isNegative = integer < 0;
+                uint64 magnitude = isNegative
+                    ? static_cast<uint64>(-(integer + 1)) + 1
+                    : static_cast<uint64>(integer);
+                *value = left->CompareToUInt64(isNegative, magnitude) == 0 ? TRUE : FALSE;
+            }
+            break;
+        case TypeIds_UInt64Number:
+            *value = left->CompareToUInt64(false, UnsafeVarTo<JavascriptUInt64Number>(right)->GetValue()) == 0 ? TRUE : FALSE;
+            break;
+        case TypeIds_String:
+            {
+                // BigInt == String uses StringToBigInt; a string outside the
+                // grammar is simply unequal (not a SyntaxError).
+                JavascriptString* string = UnsafeVarTo<JavascriptString>(right);
+                JavascriptBigInt* parsed = JavascriptBigInt::CreateFromString(
+                    string->GetString(), string->GetLength(), requestContext);
+                *value = (parsed != nullptr && left->Compare(parsed) == 0) ? TRUE : FALSE;
+            }
+            break;
+        case TypeIds_Boolean:
+            *value = left->CompareToUInt64(false, VarTo<JavascriptBoolean>(right)->GetValue() ? 1 : 0) == 0 ? TRUE : FALSE;
+            break;
+        case TypeIds_Null:
+        case TypeIds_Undefined:
+        case TypeIds_Symbol:
+            // Null/undefined only equal each other; Symbol primitives never
+            // equal a BigInt.
             break;
         default:
-            // Mixed abstract equality does not ToPrimitive wrapper operands
-            // here (C3 work); treat any non-BigInt operand as unequal rather
-            // than asserting the host.
-            *value = FALSE;
+            if (JavascriptOperators::IsObjectType(rightType))
+            {
+                // BigInt == Object: ToPrimitive with the default hint, then
+                // re-enter abstract equality exactly once.
+                Var primitive = JavascriptConversion::ToPrimitive<JavascriptHint::None>(right, requestContext);
+                return JavascriptBigInt::Equals(left, primitive, value, requestContext);
+            }
             break;
         }
-        return true;
+        return TRUE;
     }
 
     void JavascriptBigInt::Resize(digit_t length)
@@ -1228,7 +1288,110 @@ namespace Js
         }
     }
 
-    int JavascriptBigInt::Compare(JavascriptBigInt *pbi)
+    // Compare this BigInt's magnitude (m_isNegative is ignored) with an
+    // unsigned 64-bit integer. Returns -1/0/1.
+    int JavascriptBigInt::CompareMagnitudeToUInt64(uint64 value) const
+    {
+        const uint32 limbBits = BigIntLimbBits();
+        uint64 magnitude = 0;
+        if (limbBits >= 64)
+        {
+            // On a 64-bit limb build a canonical value with more than one
+            // limb is at least 2**64, beyond any uint64.
+            if (m_length > 1)
+            {
+                return 1;
+            }
+            magnitude = m_length == 1 ? static_cast<uint64>(m_digits[0]) : 0;
+        }
+        else
+        {
+            if (m_length > 2)
+            {
+                return 1;
+            }
+            for (digit_t i = m_length; i > 0; i--)
+            {
+                magnitude = (magnitude << limbBits) | static_cast<uint64>(m_digits[i - 1]);
+            }
+        }
+        return magnitude > value ? 1 : (magnitude < value ? -1 : 0);
+    }
+
+    int JavascriptBigInt::CompareToUInt64(bool valueIsNegative, uint64 value) const
+    {
+        if (IsZeroValue())
+        {
+            if (value == 0)
+            {
+                return 0;
+            }
+            return valueIsNegative ? 1 : -1;
+        }
+        if (m_isNegative != valueIsNegative)
+        {
+            return m_isNegative ? -1 : 1;
+        }
+        int comparison = CompareMagnitudeToUInt64(value);
+        return m_isNegative ? -comparison : comparison;
+    }
+
+    bool JavascriptBigInt::CompareToDouble(double value, int* result) const
+    {
+        if (JavascriptNumber::IsNan(value))
+        {
+            return false;
+        }
+        if (JavascriptNumber::IsPosInf(value))
+        {
+            *result = -1; // every BigInt is less than +Infinity
+            return true;
+        }
+        if (JavascriptNumber::IsNegInf(value))
+        {
+            *result = 1; // every BigInt is greater than -Infinity
+            return true;
+        }
+        if (value == 0)
+        {
+            *result = IsZeroValue() ? 0 : (m_isNegative ? -1 : 1);
+            return true;
+        }
+
+        bool isIntegral = (value == floor(value));
+        // A fractional double lies strictly between floor(value) and
+        // ceil(value); comparing against floor is exact and handles both
+        // signs. Equality to a fractional value is impossible.
+        double integerValue = isIntegral ? value : floor(value);
+
+        JavascriptBigInt* other = JavascriptBigInt::CreateFromNumber(integerValue, GetScriptContext());
+        if (other == nullptr)
+        {
+            // Unreachable after the NaN/Infinity/integral checks above; fail
+            // closed rather than dereference a null conversion.
+            *result = 0;
+            return false;
+        }
+        int comparison = Compare(other);
+        if (!isIntegral)
+        {
+            // A BigInt not greater than floor(value) is below the double;
+            // otherwise it is above it.
+            *result = comparison <= 0 ? -1 : 1;
+        }
+        else
+        {
+            *result = comparison;
+        }
+        return true;
+    }
+
+    int JavascriptBigInt::CompareTo(const JavascriptBigInt* other) const
+    {
+        return Compare(const_cast<JavascriptBigInt*>(other));
+    }
+
+    int JavascriptBigInt::Compare(JavascriptBigInt *pbi) const
     {
         if (m_isNegative != pbi->m_isNegative)
         {
@@ -1246,7 +1409,7 @@ namespace Js
         return sign * JavascriptBigInt::CompareAbsolute(pbi);
     }
 
-    int JavascriptBigInt::CompareAbsolute(JavascriptBigInt *pbi)
+    int JavascriptBigInt::CompareAbsolute(JavascriptBigInt *pbi) const
     {
         digit_t index;
 

@@ -714,9 +714,18 @@ errors on Mac no-JIT (receipt [c2-s2-bigint.md](c2-s2-bigint.md)).
 The scoped corpus moved 146/154 to 150/154 on both binaries, exactly the
 four `asIntN`/`asUintN` `arithmetic.js` scenarios (4/0 fail→pass); the 4
 residue are wrapper arithmetic/equality (2) and the mixed relational
-loop in `toString/a-z.js` (2). Gates moved 1979/2031 → 1980/2032. Full
-BigInt arithmetic, BigInt64Array, Map/Set key identity, mixed
-comparison/equality, wrapper arithmetic and JIT/B4 remain C3-large.
+loop in `toString/a-z.js` (2). Gates moved 1979/2031 → 1980/2032.
+S2 sub-batch 4 then implemented mixed BigInt/Number abstract equality
+and relational comparison plus wrapper multiplication on Mac no-JIT
+(exact large-number conversion, NaN/Infinity/fractional handling,
+left-first ToPrimitive, exact StringToBigInt equality and relational
+comparison, and wrapper/object `*`; receipt
+[c2-s2-bigint.md](c2-s2-bigint.md)). The scoped corpus moved 150/154 to
+**154/154** on both binaries, exactly the four `toString/a-z.js` and
+`wrapper-object-ordinary-toprimitive.js` scenarios (4/0 fail→pass).
+Gates moved 1980/2032 → 1981/2033. Full BigInt arithmetic/bitwise/shift,
+BigInt64Array, Map/Set key identity, literal property names, giant
+`ToString` performance and JIT/B4 remain C3-large.
 S6 shows zero regressions under `-ESSharedArrayBuffer` but
 needs a product/security decision before any default, plus
 waitAsync/growable/non-shared-Atomics work; S2's flagged path no longer

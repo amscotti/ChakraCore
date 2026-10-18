@@ -690,6 +690,11 @@ namespace Js
             case TypeIds_Null:
             case TypeIds_Symbol:
                 goto ReturnFalse;
+            case TypeIds_BigInt:
+                // BigInt == String uses StringToBigInt, owned by the BigInt
+                // comparison rather than Number equality.
+                *value = JavascriptOperators::Equal_Full(aLeft, aRight, requestContext);
+                return TRUE;
             case TypeIds_String:
                 *value = JavascriptString::Equals(UnsafeVarTo<JavascriptString>(aLeft), UnsafeVarTo<JavascriptString>(aRight));
                 return TRUE;
@@ -702,6 +707,11 @@ namespace Js
             default:
                 goto RedoRight;
             }
+        case TypeIds_BigInt:
+            // Reached after RedoLeft converted an object to a BigInt (or for
+            // a direct caller); the BigInt side owns mixed equality.
+            *value = JavascriptOperators::Equal_Full(aLeft, aRight, requestContext);
+            return TRUE;
         case TypeIds_Boolean:
             switch (rightType)
             {
@@ -765,6 +775,7 @@ namespace Js
             case TypeIds_Number:
             case TypeIds_String:
             case TypeIds_Symbol:
+            case TypeIds_BigInt:
                 goto RedoLeft;
             default:
                 goto ReturnFalse;

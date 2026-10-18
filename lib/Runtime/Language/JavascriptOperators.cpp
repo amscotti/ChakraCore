@@ -558,6 +558,44 @@ using namespace Js;
         }
 
         BOOL result = false;
+        TypeId leftType = JavascriptOperators::GetTypeId(aLeft);
+        TypeId rightType = JavascriptOperators::GetTypeId(aRight);
+
+        // Abstract equality with a BigInt operand. The BigInt side owns the
+        // mathematical comparison; it ToPrimitives a wrapper/object operand
+        // with the default hint and re-enters once. A BigInt wrapper on the
+        // left has no primitive BigInt to dispatch to, so unwrap it here
+        // (object/object stays unequal without conversion, and null or
+        // undefined never triggers a wrapper valueOf).
+        if (leftType == TypeIds_BigInt)
+        {
+            JavascriptBigInt::Equals(UnsafeVarTo<JavascriptBigInt>(aLeft), aRight, &result, requestContext);
+            return result;
+        }
+        if (rightType == TypeIds_BigInt)
+        {
+            JavascriptBigInt::Equals(UnsafeVarTo<JavascriptBigInt>(aRight), aLeft, &result, requestContext);
+            return result;
+        }
+        if (leftType == TypeIds_BigIntObject || rightType == TypeIds_BigIntObject)
+        {
+            if (JavascriptOperators::IsObjectType(leftType) && JavascriptOperators::IsObjectType(rightType))
+            {
+                return false;
+            }
+            if (leftType == TypeIds_Null || leftType == TypeIds_Undefined ||
+                rightType == TypeIds_Null || rightType == TypeIds_Undefined)
+            {
+                return false;
+            }
+            if (leftType == TypeIds_BigIntObject)
+            {
+                Var primitive = JavascriptConversion::ToPrimitive<JavascriptHint::None>(aLeft, requestContext);
+                return Equal_Full(primitive, aRight, requestContext);
+            }
+            Var primitive = JavascriptConversion::ToPrimitive<JavascriptHint::None>(aRight, requestContext);
+            return Equal_Full(aLeft, primitive, requestContext);
+        }
 
         if (TaggedInt::Is(aLeft))
         {
@@ -646,15 +684,153 @@ using namespace Js;
         TypeId leftType = JavascriptOperators::GetTypeId(aLeft);
         TypeId rightType = JavascriptOperators::GetTypeId(aRight);
 
+        // Abstract relational comparison performs ToPrimitive (hint Number)
+        // on both operands before ToNumeric, left first unless the caller
+        // reversed the operands (`>` / `<=`). Do the same here so a BigInt
+        // wrapper or any object with a BigInt valueOf participates in the
+        // mathematical comparison; the recursive call sees primitives only.
+        if (JavascriptOperators::IsObjectType(leftType) || JavascriptOperators::IsObjectType(rightType))
+        {
+            if (leftFirst)
+            {
+                aLeft = JavascriptConversion::ToPrimitive<JavascriptHint::HintNumber>(aLeft, scriptContext);
+                aRight = JavascriptConversion::ToPrimitive<JavascriptHint::HintNumber>(aRight, scriptContext);
+            }
+            else
+            {
+                aRight = JavascriptConversion::ToPrimitive<JavascriptHint::HintNumber>(aRight, scriptContext);
+                aLeft = JavascriptConversion::ToPrimitive<JavascriptHint::HintNumber>(aLeft, scriptContext);
+            }
+            return RelationalComparisonHelper(aLeft, aRight, scriptContext, true, undefinedAs);
+        }
+
         if ((leftType == TypeIds_BigInt) || (rightType == TypeIds_BigInt))
         {
-            if (leftType != rightType)
+            int comparison;
+            if (leftType == TypeIds_BigInt)
             {
-                // TODO(BigInt): mathematical mixed BigInt/Number comparison needs
-                // the real value type; fail closed instead of aborting the host.
-                JavascriptError::ThrowTypeError(scriptContext, VBSERR_TypeMismatch, _u("Compare BigInt"));
+                JavascriptBigInt* leftBigInt = UnsafeVarTo<JavascriptBigInt>(aLeft);
+                switch (rightType)
+                {
+                case TypeIds_BigInt:
+                    return JavascriptBigInt::LessThan(aLeft, aRight);
+                case TypeIds_String:
+                    {
+                        JavascriptString* rightString = UnsafeVarTo<JavascriptString>(aRight);
+                        JavascriptBigInt* parsed = JavascriptBigInt::CreateFromString(
+                            rightString->GetSz(), rightString->GetLength(), scriptContext);
+                        if (parsed == nullptr)
+                        {
+                            return undefinedAs; // StringToBigInt yields undefined
+                        }
+                        comparison = leftBigInt->CompareTo(parsed);
+                    }
+                    break;
+                case TypeIds_Integer:
+                    {
+                        int32 integer = TaggedInt::ToInt32(aRight);
+                        bool isNegative = integer < 0;
+                        uint64 magnitude = isNegative
+                            ? static_cast<uint64>(-static_cast<int64>(integer))
+                            : static_cast<uint64>(integer);
+                        comparison = leftBigInt->CompareToUInt64(isNegative, magnitude);
+                    }
+                    break;
+                case TypeIds_Number:
+                    if (!leftBigInt->CompareToDouble(JavascriptNumber::GetValue(aRight), &comparison))
+                    {
+                        return undefinedAs; // NaN makes the comparison false
+                    }
+                    break;
+                case TypeIds_Int64Number:
+                    {
+                        __int64 integer = UnsafeVarTo<JavascriptInt64Number>(aRight)->GetValue();
+                        bool isNegative = integer < 0;
+                        uint64 magnitude = isNegative
+                            ? static_cast<uint64>(-(integer + 1)) + 1
+                            : static_cast<uint64>(integer);
+                        comparison = leftBigInt->CompareToUInt64(isNegative, magnitude);
+                    }
+                    break;
+                case TypeIds_UInt64Number:
+                    comparison = leftBigInt->CompareToUInt64(
+                        false, UnsafeVarTo<JavascriptUInt64Number>(aRight)->GetValue());
+                    break;
+                default:
+                    {
+                        // String/Boolean/null/undefined go through ToNumeric;
+                        // Symbol throws TypeError.
+                        double rightValue = JavascriptConversion::ToNumber(aRight, scriptContext);
+                        if (!leftBigInt->CompareToDouble(rightValue, &comparison))
+                        {
+                            return undefinedAs;
+                        }
+                    }
+                    break;
+                }
+                return comparison < 0;
             }
-            return JavascriptBigInt::LessThan(aLeft, aRight);
+            else
+            {
+                JavascriptBigInt* rightBigInt = UnsafeVarTo<JavascriptBigInt>(aRight);
+                switch (leftType)
+                {
+                case TypeIds_String:
+                    {
+                        JavascriptString* leftString = UnsafeVarTo<JavascriptString>(aLeft);
+                        JavascriptBigInt* parsed = JavascriptBigInt::CreateFromString(
+                            leftString->GetSz(), leftString->GetLength(), scriptContext);
+                        if (parsed == nullptr)
+                        {
+                            return undefinedAs; // StringToBigInt yields undefined
+                        }
+                        comparison = rightBigInt->CompareTo(parsed);
+                    }
+                    break;
+                case TypeIds_Integer:
+                    {
+                        int32 integer = TaggedInt::ToInt32(aLeft);
+                        bool isNegative = integer < 0;
+                        uint64 magnitude = isNegative
+                            ? static_cast<uint64>(-static_cast<int64>(integer))
+                            : static_cast<uint64>(integer);
+                        comparison = rightBigInt->CompareToUInt64(isNegative, magnitude);
+                    }
+                    break;
+                case TypeIds_Number:
+                    if (!rightBigInt->CompareToDouble(JavascriptNumber::GetValue(aLeft), &comparison))
+                    {
+                        return undefinedAs;
+                    }
+                    break;
+                case TypeIds_Int64Number:
+                    {
+                        __int64 integer = UnsafeVarTo<JavascriptInt64Number>(aLeft)->GetValue();
+                        bool isNegative = integer < 0;
+                        uint64 magnitude = isNegative
+                            ? static_cast<uint64>(-(integer + 1)) + 1
+                            : static_cast<uint64>(integer);
+                        comparison = rightBigInt->CompareToUInt64(isNegative, magnitude);
+                    }
+                    break;
+                case TypeIds_UInt64Number:
+                    comparison = rightBigInt->CompareToUInt64(
+                        false, UnsafeVarTo<JavascriptUInt64Number>(aLeft)->GetValue());
+                    break;
+                default:
+                    {
+                        double leftValue = JavascriptConversion::ToNumber(aLeft, scriptContext);
+                        if (!rightBigInt->CompareToDouble(leftValue, &comparison))
+                        {
+                            return undefinedAs;
+                        }
+                    }
+                    break;
+                }
+                // comparison is sign(rightBigInt - leftValue); the original
+                // expression is leftValue < rightBigInt.
+                return comparison > 0;
+            }
         }
 
         switch (leftType)

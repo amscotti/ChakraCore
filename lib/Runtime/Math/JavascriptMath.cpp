@@ -958,6 +958,27 @@ StringCommon:
 
             Js::TypeId typeLeft = JavascriptOperators::GetTypeId(aLeft);
             Js::TypeId typeRight = JavascriptOperators::GetTypeId(aRight);
+            if (typeLeft == TypeIds_BigInt || typeRight == TypeIds_BigInt ||
+                JavascriptOperators::IsObject(aLeft) || JavascriptOperators::IsObject(aRight))
+            {
+                // `*` selects BigInt vs Number only after ToPrimitive(hint
+                // Number) on both operands. This covers wrappers and ordinary
+                // objects whose valueOf/@@toPrimitive produces a BigInt.
+                Var primLeft = JavascriptConversion::ToPrimitive<JavascriptHint::HintNumber>(aLeft, scriptContext);
+                Var primRight = JavascriptConversion::ToPrimitive<JavascriptHint::HintNumber>(aRight, scriptContext);
+                typeLeft = JavascriptOperators::GetTypeId(primLeft);
+                typeRight = JavascriptOperators::GetTypeId(primRight);
+                if (typeLeft == TypeIds_BigInt || typeRight == TypeIds_BigInt)
+                {
+                    if (typeRight != typeLeft)
+                    {
+                        JavascriptError::ThrowTypeError(scriptContext, VBSERR_TypeMismatch, _u("Multiply BigInt"));
+                    }
+                    return JavascriptBigInt::Mul(primLeft, primRight);
+                }
+                aLeft = primLeft;
+                aRight = primRight;
+            }
             if (typeLeft == TypeIds_BigInt || typeRight == TypeIds_BigInt)
             {
                 if (typeRight != typeLeft)
@@ -1004,6 +1025,27 @@ StringCommon:
 
             Js::TypeId typeLeft = JavascriptOperators::GetTypeId(aLeft);
             Js::TypeId typeRight = JavascriptOperators::GetTypeId(aRight);
+            if (typeLeft == TypeIds_BigInt || typeRight == TypeIds_BigInt ||
+                JavascriptOperators::IsObject(aLeft) || JavascriptOperators::IsObject(aRight))
+            {
+                // `*` selects BigInt vs Number only after ToPrimitive(hint
+                // Number) on both operands. This covers wrappers and ordinary
+                // objects whose valueOf/@@toPrimitive produces a BigInt.
+                Var primLeft = JavascriptConversion::ToPrimitive<JavascriptHint::HintNumber>(aLeft, scriptContext);
+                Var primRight = JavascriptConversion::ToPrimitive<JavascriptHint::HintNumber>(aRight, scriptContext);
+                typeLeft = JavascriptOperators::GetTypeId(primLeft);
+                typeRight = JavascriptOperators::GetTypeId(primRight);
+                if (typeLeft == TypeIds_BigInt || typeRight == TypeIds_BigInt)
+                {
+                    if (typeRight != typeLeft)
+                    {
+                        JavascriptError::ThrowTypeError(scriptContext, VBSERR_TypeMismatch, _u("Multiply BigInt"));
+                    }
+                    return JavascriptBigInt::Mul(primLeft, primRight);
+                }
+                aLeft = primLeft;
+                aRight = primRight;
+            }
             if (typeLeft == TypeIds_BigInt || typeRight == TypeIds_BigInt)
             {
                 if (typeRight != typeLeft)

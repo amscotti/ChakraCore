@@ -270,7 +270,7 @@ var tests = [
             assert.strictEqual(1n, increment);
             assert.strictEqual(-2n, ~1n);
             assert.strictEqual(1, Number(1n));
-            assert.isFalse(1n == 1);
+            assert.isTrue(1n == 1);
 
             [
                 function () { return 1n + 1; },
@@ -280,8 +280,6 @@ var tests = [
                 // Same-BigInt exponentiation is C3 work; the current slice
                 // must still throw a controlled TypeError, not abort.
                 function () { return 1n ** 2n; },
-                function () { return 1n < 1; },
-                function () { return 1n <= 1; },
                 function () { return +1n; },
                 function () { return 1n & 1; },
                 function () { return 1n << 1n; },

@@ -9,13 +9,15 @@
 Status: sub-batch 1 landed in `f7f396a88` (interpreter-verified; JIT gated at B4).
 Sub-batch 2 (`BigInt.asIntN`/`asUintN`, and the spec correction that
 `ToBigInt(Number)` throws) landed in `41ada630f`; sub-batch 3
-(non-decimal `0x`/`0o`/`0b` BigInt literals) is implemented in the
-working tree. Both are interpreter-verified; see "Sub-batch 2" and
-"Sub-batch 3" below. Measured on Mac no-JIT (`-nonative`) with
-`-ESBigInt`; JIT evidence is not claimed (see B4 below). `ESBigInt`
-remains off by default. Sub-batch 1 keeps and completes the interrupted
-implementer's slice; the batch as a whole still does not add BigInt
-arithmetic, `BigInt64Array`, or mixed numeric comparison (C3 completion,
+(non-decimal `0x`/`0o`/`0b` BigInt literals) landed in `eaf97c2e0`;
+sub-batch 4 (mixed abstract equality/relational comparison and wrapper
+multiplication) is implemented in the working tree on top of
+`63c7aa340`. All are interpreter-verified; see "Sub-batch 2",
+"Sub-batch 3" and "Sub-batch 4" below. Measured on Mac no-JIT
+(`-nonative`) with `-ESBigInt`; JIT evidence is not claimed (see B4
+below). `ESBigInt` remains off by default. Sub-batch 1 keeps and
+completes the interrupted implementer's slice; the batch as a whole still
+does not add general BigInt arithmetic or `BigInt64Array` (C3 completion,
 residual list below).
 
 ## What landed
@@ -101,8 +103,9 @@ residual list below).
    `BigInt.prototype.valueOf.call(otherRealm.Object(otherRealm.BigInt(0)))`
    returns a target-context `0n`; before the fix the Debug build asserted
    in `InterpreterStackFrame::ValidateRegValue` (test262 cross-realm
-   `valueOf` failed only on debug-static). Full wrapper arithmetic and
-   abstract equality remain C3 (residual list).
+   `valueOf` failed only on debug-static). Sub-batch 4 adds wrapper
+   abstract equality and multiplication; the remaining wrapper
+   arithmetic paths stay C3 (residual list).
 8. **JSON stringification** (`JSONStringifier.cpp`): `JSON.stringify`
    consults `toJSON` for a BigInt primitive as well as for objects,
    unwraps `[[BigIntData]]` from `JavascriptBigIntObject`, and throws
@@ -116,10 +119,12 @@ residual list below).
      strict `ToInt32Finite` now throw `TypeError` for BigInt instead of
      reaching the "bad type object" assert. This covers `/`, `%`, `**`,
      unary `+`, shifts, bitwise operators and `Math.*` argument coercion.
-   - Relational comparison between BigInt and any non-BigInt remains
-     fail-closed `TypeError` (no `AssertOrFailFast`).
+   - Relational comparison between BigInt and a non-BigInt no longer
+     aborts the host (sub-batch 1 made it fail-closed `TypeError`; sub-batch
+     4 replaces that with the spec comparison).
    - `JavascriptBigInt::Equals(JavascriptBigInt*, Var, ...)` no longer
-     asserts on a non-BigInt operand; it returns `false`.
+     asserts on a non-BigInt operand (sub-batch 4 supplies the mixed
+     equality cases).
    - The `Add` path rejects BigInt with a non-string primitive via a
      controlled `TypeError`; same-BigInt `+`/`-`/`*`, unary `-`, `~`, `++`,
      `--` continue to work.
@@ -281,12 +286,14 @@ equality or bytes, not `String(number)`.
 - `BigInt.asIntN` / `BigInt.asUintN`: landed in sub-batch 2; the four
   `arithmetic.js` scenarios now pass after sub-batch 3's non-decimal
   literal support.
-- Full BigInt arithmetic: `/`, `%`, `**`, shifts, bitwise, same-type
-  `BigInt64Array`/`BigUint64Array`; mixed BigInt/Number relational and
-  abstract equality (the last currently fails closed, except `==` returns
-  `false` instead of ToPrimitive/compare).
-- Wrapper objects in arithmetic and abstract equality (`Object(1n) * 1n`,
-  `Object(1n) == 2n`); wrapper primitive extraction itself is done.
+- Full BigInt arithmetic: `/`, `%`, `**`, shifts and bitwise beyond the
+  existing same-type `+`/`-`/`*`, plus `BigInt64Array`/`BigUint64Array`.
+  Sub-batch 4 covers mixed BigInt/Number abstract equality and relational
+  comparison and wrapper multiplication only; it does not add generic
+  BigInt arithmetic.
+- Wrapper objects in the remaining arithmetic operators (`-`, `/`, `%`,
+  `**`, shifts, bitwise); `Object(1n) * 1n`, `Object(1n) + 1n`, mixed
+  equality and relational comparison work.
 - `Map`/`Set` key identity for BigInt values: `new Map([[1n, 2n]]).get(1n)`
   is `undefined` because the complex dictionary uses pointer identity for
   BigInt instead of SameValueZero. This is a collections hash/equality
@@ -593,3 +600,133 @@ claimed (same B4 gate as sub-batches 1 and 2).
 - `Map`/`Set` BigInt key identity.
 - JIT/native execution and B4 coverage; `ESBigInt` remains off by
   default.
+
+## Sub-batch 4: mixed equality, relational comparison, wrapper multiplication
+
+Status: implemented in the working tree on top of `63c7aa340`
+(sub-batch 3). Interpreter-verified on Mac ARM64 no-JIT with
+`-ESBigInt`; JIT is not claimed (same B4 gate as sub-batches 1–3).
+`ESBigInt` remains off by default.
+
+### Scope
+
+- Abstract equality (`==`) for BigInt vs Number/String/Boolean, null,
+  undefined, Symbol, ordinary objects and `JavascriptBigIntObject`.
+  BigInt/Number is true only for a finite integral Number with the same
+  mathematical value; `NaN`, `±Infinity` and fractional values are
+  unequal, and values above 2**53 compare exactly. BigInt/String uses
+  the non-throwing StringToBigInt parse (invalid strings are merely
+  unequal); BigInt/Boolean compares against 1n/0n; null, undefined and
+  Symbol are unequal. BigInt/Object (in either operand order) applies
+  `ToPrimitive` with the default hint once and re-enters; object/object
+  stays false without user conversion, and wrapper vs null/undefined
+  returns false without calling `valueOf`/`toString`.
+- Relational comparison (`<`, `>`, `<=`, `>=`) for BigInt vs Number,
+  String, Boolean, null, undefined, Symbol, wrappers and ordinary
+  objects. Both operands are `ToPrimitive`d with hint Number in the
+  caller's left-first order, both-string operands compare
+  lexicographically, and BigInt/String uses StringToBigInt (an invalid or
+  non-integer string makes every comparison false; huge strings stay
+  exact). Other primitives use ToNumber. Mixed BigInt/Number is mathematical: NaN comparisons are false,
+  `±Infinity` is handled explicitly, fractional doubles compare against
+  floor(value), and integral doubles are converted to an exact BigInt
+  (no double precision loss). Symbol operands throw TypeError.
+- Multiplication (`*`) unwraps any object operand with
+  `ToPrimitive(hint Number)` before the BigInt/Number type check, so
+  `Object(1n) * 1n` and two ordinary objects whose `valueOf` returns
+  BigInts work. Non-BigInt arithmetic falls through to the existing number
+  fast paths; `/`, `%`, `**`, shifts and bitwise keep their existing
+  BigInt restrictions.
+- Excluded and left C3: `/`, `%`, `**`, shifts, bitwise, generic BigInt
+  arithmetic, `BigInt64Array`/`BigUint64Array`, Map/Set key identity,
+  BigInt property-name literals, JIT/native execution.
+
+### Implementation notes
+
+- `JavascriptBigInt.cpp` adds `CompareToDouble` (exact mixed comparison;
+  returns false for NaN, uses floor for fractional doubles and
+  `CreateFromNumber` for exact integral conversion),
+  `CompareToUInt64`/`CompareMagnitudeToUInt64` (exact Int64Number/
+  UInt64Number and boolean comparison, including 32-bit limb builds), and
+  the full `Equals(JavascriptBigInt*, Var, ...)` switch (Number types,
+  StringToBigInt, Boolean, null/undefined/Symbol, ToPrimitive for
+  objects). `Compare`/`CompareAbsolute` became const; no value mutates.
+- `JavascriptOperators::Equal_Full` dispatches any raw BigInt operand to
+  the BigInt comparison and unwraps a raw `JavascriptBigIntObject` after
+  the object/object and null/undefined guards. After a generic object
+  `ToPrimitive` produces a BigInt, `RecyclableObject::Equals` delegates
+  to `Equal_Full` (setting `*value` and returning TRUE, preserving the
+  virtual `Equals` contract). The string/BigInt and object/BigInt
+  combinations therefore cooperate instead of looping or returning
+  false.
+- `JavascriptOperators::RelationalComparisonHelper` performs the object
+  ToPrimitive pass at the top (honoring `leftFirst`, so `>`/`<=` still
+  evaluate the original left operand first), then handles same-type
+  BigInt and mixed BigInt/Number with the exact helpers above; other
+  primitives keep the existing ToNumber path. The null→0 and
+  undefined→NaN normalization stays where it was.
+- `JavascriptMath::Multiply_Full` and `Multiply_InPlace` pre-convert when
+  either operand is an object or BigInt, then reuse the existing BigInt/
+  number selection; ordinary object/object BigInt coercion is covered. Non-BigInt arithmetic is unchanged; when a
+  wrapper unwraps to a non-BigInt primitive, that primitive falls
+  through to the existing number fast paths.
+
+### Evidence
+
+- New `test/es7/bigint-mixed.js` (registered in `test/es7/rlexe.xml` with
+  `-ESBigInt -args summary -endargs`) covers equality across Number/
+  String/Boolean/objects/wrappers, NaN/Infinity/fractional and large
+  exact values, relational comparison in both directions including
+  `<=`/`>=`, both-string lexicographic versus BigInt/string numeric
+  comparison, wrapper ToPrimitive hint/call behavior, `Object(1n) * 1n`,
+  `Object(1n) * 2`/`2 * Object(1n)`/`Object(1n) * "2"` TypeErrors, and
+  Symbol errors. It passes on both the test and debug-static binaries.
+  `test/es7/bigint-basics.js` was updated from the sub-batch 1
+  `1n == 1`/`1n < 1` fail-closed expectations to the spec results.
+- `mise exec -- zig build check --summary line`: 1981 passed / 0 failed,
+  bytecode up to date, 572/572 steps.
+- `mise exec -- zig build check -Dprofile=debug-static --summary line`:
+  2033 passed / 0 failed, bytecode up to date, 549/549 steps.
+- `python3 tools/build/check_regression.py --self-test`: all negative
+  controls pass with the 1981/2033 pins.
+- Scoped corpus `test/built-ins/BigInt/**/*.js` with `-nonative
+  -Test262 -CollectGarbage -ESBigInt`, same 154 scenarios: test binary
+  (`out/test262-s2bigint-mixed-final2`) **154/154** and debug-static
+  (`out/test262-s2bigint-mixed-debug2`) **154/154**. Against the pre-change
+  artifacts (`/tmp/s2-bigint-b4-before` and
+  `/tmp/s2-bigint-literals-debug-final5`, 150/154), exactly four
+  scenarios flip fail→pass on both: `toString/a-z.js`
+  (default + strict) and `wrapper-object-ordinary-toprimitive.js`
+  (default + strict); 0 pass→fail. The target scoped corpus is reached.
+- Node v26.5.0 oracle: a 104-expression matrix covering the equality,
+  relational, string/boolean/object/wrapper and multiplication edges
+  above, including invalid/fractional/exponent BigInt strings and
+  above-2^53 exact StringToBigInt comparisons, produced byte-identical
+  output in both engines (values and thrown error names).
+- `git diff --check` clean; no generated or stray files.
+
+### Residuals (C3)
+
+- Full BigInt arithmetic/bitwise/shift beyond the existing same-type
+  `+`/`-`/`*`; `BigInt64Array`/`BigUint64Array`.
+- `Map`/`Set` BigInt key identity.
+- BigInt literal property names (`({1n: 1})`); arbitrary-size decimal
+  `ToString` performance (1M-bit stringification remains quadratic), and
+  long BigInt/String equality parsing is likewise uncapped/quadratic.
+- Proxy abstract-equality ToPrimitive remains incomplete (pre-existing).
+- JIT/native execution and B4 coverage; `ESBigInt` remains off by
+  default.
+
+### Ownership record
+
+No new retained-allocation path or ownership domain is added. Mixed
+Number equality/comparison may allocate one temporary `JavascriptBigInt`
+through the existing `CreateFromNumber` factory, and BigInt/String
+equality may allocate one parsed BigInt through `CreateFromString`; both
+are Recycler objects in the owning ScriptContext, are used only for the
+comparison, and become unreachable Recycler garbage. User-code reentry is
+confined to `ToPrimitive` on wrapper/object operands, which runs before
+the comparison allocation and in the same left-first order; the caller
+retains the BigInt `Var` for the duration, and no raw pointer is retained
+after the comparison returns. The existing wrapper/BigInt allocation
+contract in the sub-batch 1 ownership record is unchanged.
