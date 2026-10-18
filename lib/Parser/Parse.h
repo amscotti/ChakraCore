@@ -484,6 +484,7 @@ private:
     // so their bodies have their own lexical `this` and correctly parented
     // nested functions.
     bool m_inClassFieldInitializer;
+    bool m_currentClassHasFields;
     bool m_disallowSuperCallInEval;
     bool m_classFieldInitializerUsesArguments;
     uint32 m_classFieldHelperCount;
@@ -915,6 +916,7 @@ private:
     template<bool buildAST> ParseNodePtr GenerateModuleFunctionWrapper();
 
     IdentPtr ParseClassPropertyName(IdentPtr * hint);
+    bool ClassBodyHasFieldSyntax();
     ParseNodeFnc * CreateClassFieldInitializerFunction(charcount_t ichMin, size_t cbMin, ParseNodePtr * ppnodeInitExpr = nullptr);
     void AttachClassFieldsToLambda(ParseNodeFnc * pnodeLambda, ParseNode * pnodeFields, Symbol * thisSym);
     ParseNodeFnc * CreateClassFieldInitializerFastScanStub();
