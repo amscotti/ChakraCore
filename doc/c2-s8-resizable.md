@@ -78,24 +78,28 @@ Resource / creation call / source location:
   destination allocation, while the engine `MaxArrayBufferLength` check
   happens after the detached check. `transferToFixedLength` reports its own
   function name in detached errors.
-- **`resize` precedence.** `resize` correctly uses ToIntegerOrInfinity rather
-  than ToIndex (fractional truncation, NaN -> 0, no `2^53-1` ToIndex cap). The
-  detached check runs after coercion and before the `maxByteLength` range
-  check; consequently detached `resize(-1)` is a TypeError, matching Node,
-  while attached `resize(-1)` is a RangeError.
+- **`resize` precedence.** `resize` uses ToIntegerOrInfinity (fractional
+  truncation, NaN -> 0, no `2^53-1` ToIndex cap), matching Node and the pinned
+  test262 behavior. Current ECMA-262 writes ToIndex here; the detached check
+  runs after coercion and before the `maxByteLength` range check, so detached
+  `resize(-1)` is a TypeError while attached `resize(-1)` is a RangeError.
+  This is recorded as Node/test262-compatible behavior, not a claim that the
+  existing coercion is spec-identical.
 - **User-code / reentrancy points.** Constructor `length` is `ToIndex`, then
   the `maxByteLength` property is read and `ToIndex`'d, then `length >
   maxByteLength` is checked. For model/constructor-newTarget paths the
   `newTarget.prototype` read happens before data allocation, matching spec order.
-  `resize` and `transfer` coerce through `ToIntegerOrInfinity`; the buffer is
-  rechecked for detachment after the coercion before any buffer pointer is
-  touched. `slice` re-reads the source length after start/end/species/constructor
+  `resize` uses its ToIntegerOrInfinity behavior and `transfer` uses ToIndex;
+  the buffer is rechecked for detachment after coercion before any buffer
+  pointer is touched. `slice` re-reads the source length after start/end/species/constructor
   user code and copies only `min(newLen, currentLength - first)`; it does not
   touch destination bytes beyond that copy (normal destinations are already
   zeroed, species-returned destinations keep their prefilled bytes). DataView
   re-reads the buffer length after `ToIndex(byteLength)` and again after the
   final `OrdinaryCreateFromConstructor` prototype user code, refusing to return
-  an out-of-bounds view. No storage pointer is retained across user code.
+  an out-of-bounds view. The DataView retains the buffer object, not a raw
+  storage pointer; resizable capacity is stable and detach notifies all
+  parents, so retaining that reference across user code is safe.
 - **Failure.** Fixed-length buffers and non-ArrayBuffers throw TypeError before
   choosing a size. Negative, non-integer (after truncation) or over-limit values
   throw RangeError. Allocation failure keeps the existing OOM/RangeError path.
@@ -172,10 +176,15 @@ after run used this lane's `zig-out/bin/ch`.
   remains 4/58; `Float16Array` 0/4 → 4/4.
 - Node v26.5.0 differential for the new order cases: detached
   `transfer`/`transferToFixedLength` with `-1` and `2^53` → RangeError,
-  detached with `2^32` → TypeError, attached with `-1`/`2^53`/`2^32` →
-  RangeError, `NaN` → zero length, `2.9` → 2; prefilled-species slice after a
-  source shrink leaves bytes beyond the copied range intact. The focused JS
-  test encodes the same results.
+  detached with `2^32` → TypeError, attached with `-1`/`2^53` → RangeError,
+  `NaN` → zero length, `2.9` → 2; prefilled-species slice after a source
+  shrink leaves bytes beyond the copied range intact. Chakra rejects an
+  attached `2^32` request with RangeError because of its `MaxArrayBufferLength`
+  engine cap; Node accepts a 4 GiB fixed buffer. That is an engine-limit
+  difference, not a Node-matching claim. The focused JS test encodes the same
+  Chakra results.
+- Evidence hashes: test launcher `b079eaf1…b148`; test dylib
+  `2a302112…c69989` (a launcher hash alone does not identify the engine).
 
 ## Residuals
 
@@ -226,7 +235,10 @@ after run used this lane's `zig-out/bin/ch`.
   `options-maxbytelength-compared-before-object-creation` observe its
   RangeError before that getter; the constructor-side max check and deferred
   engine-limit check are still ordered against `OrdinaryCreateFromConstructor`
-  for normal/subclass construction.
+  for normal/subclass construction. The same inherited pre-read affects
+  `DataView/byteOffset-validated-against-initial-buffer-length.js`, which
+  expects RangeError before the prototype read; it is outside this focused
+  corpus and also fails on the base.
 - **Eager capacity.** A resizable buffer allocates the whole `maxByteLength`
   up front, even when `byteLength` is much smaller. This is spec-permitted and
   keeps view pointers stable, but makes `new ArrayBuffer(0, {maxByteLength:
