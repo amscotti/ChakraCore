@@ -43,9 +43,12 @@ namespace Js
             static FunctionInfo GetterByteOffset;
         };
 
-        DataView(ArrayBufferBase* arrayBuffer, uint32 byteOffset, uint32 mappedLength, DynamicType* type);
+        DataView(ArrayBufferBase* arrayBuffer, uint32 byteOffset, uint32 mappedLength, bool lengthTracking, DynamicType* type);
 
         uint32 GetByteOffset() const { return byteOffset; }
+        bool IsLengthTracking() const { return lengthTracking; }
+        bool IsOutOfBounds(uint32 bufferByteLength) const;
+        uint32 GetEffectiveByteLength(uint32 bufferByteLength) const;
         void ClearLengthAndBufferOnDetach();
 
         static Var NewInstance(RecyclableObject* function, CallInfo callInfo, ...);
@@ -183,6 +186,7 @@ namespace Js
 
         Field(uint32) byteOffset;
         Field(BYTE*) buffer;   // beginning of buffer
+        Field(bool) lengthTracking; // No explicit byteLength: length follows the buffer
 
     };
 

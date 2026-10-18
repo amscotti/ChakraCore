@@ -25,6 +25,7 @@ namespace Js
         int32 offset = 0;
         ArrayBufferBase* arrayBuffer = nullptr;
         DataView* dataView;
+        bool lengthTracking = !(args.Info.Count > 3 && !JavascriptOperators::IsUndefinedObject(args[3]));
 
         //1.    If NewTarget is undefined, throw a TypeError exception.
         if (!(callInfo.Flags & CallFlags_New) || (newTarget && JavascriptOperators::IsUndefinedObject(newTarget)))
@@ -95,10 +96,28 @@ namespace Js
             mappedLength = byteLength - offset;
         }
 
-        // Evaluation of the argument(s) above is reentrant and can detach the array.
+        // Evaluation of the argument(s) above is reentrant and can detach or
+        // resize the buffer. Re-read its current length after ToIndex(byteLength)
+        // and never create an out-of-bounds view.
         if (arrayBuffer->IsDetached())
         {
             JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray);
+        }
+
+        byteLength = arrayBuffer->GetByteLength();
+        if ((uint32)offset > byteLength)
+        {
+            JavascriptError::ThrowRangeError(
+                scriptContext, JSERR_DataView_InvalidArgument, _u("byteOffset"));
+        }
+        if (lengthTracking)
+        {
+            mappedLength = byteLength - offset;
+        }
+        else if (mappedLength > byteLength - (uint32)offset)
+        {
+            JavascriptError::ThrowRangeError(
+                scriptContext, JSERR_DataView_InvalidArgument, _u("byteLength"));
         }
 
         //10.   Let O be OrdinaryCreateFromConstructor(NewTarget, "%DataViewPrototype%", [[DataView]], [[ViewedArrayBuffer]], [[ByteLength]], [[ByteOffset]]).
@@ -107,17 +126,61 @@ namespace Js
         //13.   Set O's[[ByteLength]] internal slot to viewByteLength.
         //14.   Set O's[[ByteOffset]] internal slot to offset.
         //15.   Return O.
-        dataView = scriptContext->GetLibrary()->CreateDataView(arrayBuffer, offset, mappedLength);
-        return isCtorSuperCall ?
+        dataView = scriptContext->GetLibrary()->CreateDataView(arrayBuffer, offset, mappedLength, lengthTracking);
+        Var result = isCtorSuperCall ?
             JavascriptOperators::OrdinaryCreateFromConstructor(VarTo<RecyclableObject>(newTarget), dataView, nullptr, scriptContext) :
             dataView;
+
+        // OrdinaryCreateFromConstructor runs newTarget.prototype user code after
+        // the view was built. Revalidate once more so an already-OOB view is
+        // never returned.
+        if (arrayBuffer->IsDetached())
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray);
+        }
+        uint32 finalByteLength = arrayBuffer->GetByteLength();
+        if ((uint32)offset > finalByteLength)
+        {
+            JavascriptError::ThrowRangeError(
+                scriptContext, JSERR_DataView_InvalidArgument, _u("byteOffset"));
+        }
+        if (!lengthTracking && mappedLength > finalByteLength - (uint32)offset)
+        {
+            JavascriptError::ThrowRangeError(
+                scriptContext, JSERR_DataView_InvalidArgument, _u("byteLength"));
+        }
+
+        return result;
     }
 
-    DataView::DataView(ArrayBufferBase* arrayBuffer, uint32 byteoffset, uint32 mappedLength, DynamicType* type)
+    DataView::DataView(ArrayBufferBase* arrayBuffer, uint32 byteoffset, uint32 mappedLength, bool lengthTracking, DynamicType* type)
         : ArrayBufferParent(type, mappedLength, arrayBuffer),
-          byteOffset(byteoffset)
+          byteOffset(byteoffset),
+          lengthTracking(lengthTracking)
     {
         buffer = arrayBuffer->GetBuffer() + byteoffset;
+    }
+
+    bool DataView::IsOutOfBounds(uint32 bufferByteLength) const
+    {
+        uint32 offset = this->GetByteOffset();
+        if (offset > bufferByteLength)
+        {
+            return true;
+        }
+        // An auto-length view tracks the buffer; a fixed-length view is OOB
+        // once its captured range no longer fits.
+        return !this->lengthTracking && this->GetLength() > bufferByteLength - offset;
+    }
+
+    uint32 DataView::GetEffectiveByteLength(uint32 bufferByteLength) const
+    {
+        if (!this->lengthTracking)
+        {
+            return this->GetLength();
+        }
+        uint32 offset = this->GetByteOffset();
+        return offset < bufferByteLength ? bufferByteLength - offset : 0;
     }
 
     uint32 DataView::GetViewIndex(Var offset, const char16* funcName)
@@ -133,7 +196,17 @@ namespace Js
             JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, funcName);
         }
 
-        uint32 length = GetLength();
+        // A DataView on a resizable buffer becomes out of bounds when the
+        // buffer shrinks below a fixed view's range, or below an auto-length
+        // view's offset. Web-reality semantics throw TypeError, before the
+        // in-view RangeError check below.
+        uint32 bufferByteLength = this->GetArrayBuffer()->GetByteLength();
+        if (this->IsOutOfBounds(bufferByteLength))
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, funcName);
+        }
+
+        uint32 length = this->GetEffectiveByteLength(bufferByteLength);
         if (length < elementSize || byteOffset > length - elementSize)
         {
             JavascriptError::ThrowRangeError(scriptContext, JSERR_DataView_InvalidOffset, funcName);
@@ -810,10 +883,16 @@ namespace Js
         }
         else if (arrayBuffer->IsDetached())
         {
-            return TaggedInt::ToVarUnchecked(0);
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, _u("DataView.prototype.byteLength"));
         }
 
-        return JavascriptNumber::ToVar(dataView->GetLength(), scriptContext);
+        uint32 bufferByteLength = arrayBuffer->GetByteLength();
+        if (dataView->IsOutOfBounds(bufferByteLength))
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, _u("DataView.prototype.byteLength"));
+        }
+
+        return JavascriptNumber::ToVar(dataView->GetEffectiveByteLength(bufferByteLength), scriptContext);
     }
 
     Var DataView::EntryGetterByteOffset(RecyclableObject* function, CallInfo callInfo, ...)
@@ -839,7 +918,12 @@ namespace Js
         }
         else if (arrayBuffer->IsDetached())
         {
-            return TaggedInt::ToVarUnchecked(0);
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, _u("DataView.prototype.byteOffset"));
+        }
+
+        if (dataView->IsOutOfBounds(arrayBuffer->GetByteLength()))
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, _u("DataView.prototype.byteOffset"));
         }
 
         return JavascriptNumber::ToVar(dataView->GetByteOffset(), scriptContext);

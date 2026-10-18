@@ -882,6 +882,7 @@ namespace Js
         JavascriptNativeFloatArray* CreateNativeFloatArray(uint32 length);
         JavascriptArray* CreateArray(uint32 length, uint32 size);
         ArrayBuffer* CreateArrayBuffer(uint32 length);
+        ArrayBuffer* CreateResizableArrayBuffer(uint32 length, uint32 maxByteLength);
         ArrayBuffer* CreateArrayBuffer(byte* buffer, uint32 length);
         ArrayBuffer* CreateArrayBuffer(RefCountedBuffer* buffer, uint32 length);
 #ifdef ENABLE_WASM
@@ -898,7 +899,7 @@ namespace Js
         ArrayBuffer* CreateProjectionArraybuffer(byte* buffer, uint32 length);
         ArrayBuffer* CreateProjectionArraybuffer(RefCountedBuffer* buffer, uint32 length);
         ArrayBuffer* CreateExternalArrayBuffer(RefCountedBuffer* buffer, uint32 length);
-        DataView* CreateDataView(ArrayBufferBase* arrayBuffer, uint32 offSet, uint32 mappedLength);
+        DataView* CreateDataView(ArrayBufferBase* arrayBuffer, uint32 offSet, uint32 mappedLength, bool lengthTracking);
 
         template <typename TypeName, bool clamped>
         inline DynamicType* GetTypedArrayType(TypeName);

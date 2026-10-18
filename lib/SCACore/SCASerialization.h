@@ -323,7 +323,7 @@ namespace Js
             ScriptContext* scriptContext)
         {
             JavascriptLibrary* lib = scriptContext->GetLibrary();
-            return lib->CreateDataView(arrayBuffer, byteOffset, length);
+            return lib->CreateDataView(arrayBuffer, byteOffset, length, false);
         }
         static SCATypeId GetSCATypeId() { return SCA_DataView; }
     };

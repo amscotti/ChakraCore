@@ -2313,7 +2313,13 @@ namespace Js
         library->AddMember(arrayBufferPrototype, PropertyIds::constructor, library->arrayBufferConstructor);
 
         library->AddFunctionToLibraryObject(arrayBufferPrototype, PropertyIds::slice, &ArrayBuffer::EntryInfo::Slice, 2);
+        library->AddFunctionToLibraryObjectWithPropertyName(arrayBufferPrototype, _u("resize"), &ArrayBuffer::EntryInfo::Resize, 1);
+        library->AddFunctionToLibraryObjectWithPropertyName(arrayBufferPrototype, _u("transfer"), &ArrayBuffer::EntryInfo::Transfer, 0);
+        library->AddFunctionToLibraryObjectWithPropertyName(arrayBufferPrototype, _u("transferToFixedLength"), &ArrayBuffer::EntryInfo::TransferToFixedLength, 0);
         library->AddAccessorsToLibraryObject(arrayBufferPrototype, PropertyIds::byteLength, &ArrayBuffer::EntryInfo::GetterByteLength, nullptr);
+        library->AddAccessorsToLibraryObject(arrayBufferPrototype, scriptContext->GetOrAddPropertyIdTracked(_u("detached")), &ArrayBuffer::EntryInfo::GetterDetached, nullptr);
+        library->AddAccessorsToLibraryObject(arrayBufferPrototype, scriptContext->GetOrAddPropertyIdTracked(_u("maxByteLength")), &ArrayBuffer::EntryInfo::GetterMaxByteLength, nullptr);
+        library->AddAccessorsToLibraryObject(arrayBufferPrototype, scriptContext->GetOrAddPropertyIdTracked(_u("resizable")), &ArrayBuffer::EntryInfo::GetterResizable, nullptr);
 
         if (scriptContext->GetConfig()->IsES6ToStringTagEnabled())
         {
@@ -6300,6 +6306,12 @@ namespace Js
         return arr;
     }
 
+    ArrayBuffer* JavascriptLibrary::CreateResizableArrayBuffer(uint32 length, uint32 maxByteLength)
+    {
+        ArrayBuffer* arr = JavascriptArrayBuffer::Create(length, maxByteLength, arrayBufferType);
+        return arr;
+    }
+
     ArrayBuffer* JavascriptLibrary::CreateArrayBuffer(byte* buffer, uint32 length)
     {
         ArrayBuffer* arr = JavascriptArrayBuffer::Create(buffer, length, arrayBufferType);
@@ -6380,9 +6392,9 @@ namespace Js
         return arr;
     }
 
-    DataView* JavascriptLibrary::CreateDataView(ArrayBufferBase* arrayBuffer, uint32 offset, uint32 length)
+    DataView* JavascriptLibrary::CreateDataView(ArrayBufferBase* arrayBuffer, uint32 offset, uint32 length, bool lengthTracking)
     {
-        DataView* dataView = RecyclerNew(this->GetRecycler(), DataView, arrayBuffer, offset, length, dataViewType);
+        DataView* dataView = RecyclerNew(this->GetRecycler(), DataView, arrayBuffer, offset, length, lengthTracking, dataViewType);
 
         return dataView;
     }

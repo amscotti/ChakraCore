@@ -286,4 +286,10 @@
       <compile-flags>-args summary -endargs</compile-flags>
     </default>
   </test>
+  <test>
+    <default>
+      <files>resizable-arraybuffer.js</files>
+      <compile-flags>-CollectGarbage -args summary -endargs</compile-flags>
+    </default>
+  </test>
 </regress-exe>

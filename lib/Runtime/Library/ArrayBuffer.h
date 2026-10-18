@@ -176,6 +176,11 @@ namespace Js
         template <typename Allocator>
         ArrayBuffer(DECLSPEC_GUARD_OVERFLOW uint32 length, DynamicType * type, Allocator allocator);
 
+        // Resizable buffers allocate their full maxByteLength capacity once;
+        // resize only changes bufferLength and never remaps the storage.
+        template <typename Allocator>
+        ArrayBuffer(DECLSPEC_GUARD_OVERFLOW uint32 length, DECLSPEC_GUARD_OVERFLOW uint32 maxByteLength, DynamicType * type, Allocator allocator);
+
         ArrayBuffer(byte* buffer, DECLSPEC_GUARD_OVERFLOW uint32 length, DynamicType * type, bool isExternal = false);
 
         ArrayBuffer(RefCountedBuffer* buffContent, DECLSPEC_GUARD_OVERFLOW uint32 length, DynamicType * type);
@@ -187,6 +192,12 @@ namespace Js
             static FunctionInfo Slice;
             static FunctionInfo IsView;
             static FunctionInfo GetterByteLength;
+            static FunctionInfo GetterDetached;
+            static FunctionInfo GetterMaxByteLength;
+            static FunctionInfo GetterResizable;
+            static FunctionInfo Resize;
+            static FunctionInfo Transfer;
+            static FunctionInfo TransferToFixedLength;
             static FunctionInfo GetterSymbolSpecies;
 #if ENABLE_DEBUG_CONFIG_OPTIONS
             static FunctionInfo Detach;
@@ -197,6 +208,12 @@ namespace Js
         static Var EntrySlice(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryIsView(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryGetterByteLength(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryGetterDetached(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryGetterMaxByteLength(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryGetterResizable(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryResize(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryTransfer(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryTransferToFixedLength(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryGetterSymbolSpecies(RecyclableObject* function, CallInfo callInfo, ...);
 #if ENABLE_DEBUG_CONFIG_OPTIONS
         static Var EntryDetach(RecyclableObject* function, CallInfo callInfo, ...);
@@ -210,6 +227,10 @@ namespace Js
         ArrayBufferDetachedStateBase* DetachAndGetState(bool queueForDelayFree = true);
         virtual uint32 GetByteLength() const override;
         virtual BYTE* GetBuffer() const override;
+        uint32 GetMaxByteLength() const { return isResizable ? maxByteLength : bufferLength; }
+        uint32 GetAllocatedByteLength() const { return allocatedByteLength; }
+        bool IsResizable() const { return isResizable; }
+        void Resize(uint32 newByteLength);
         RefCountedBuffer *GetBufferContent() { return bufferContent;  }
         static int GetBufferContentsOffset() { return offsetof(ArrayBuffer, bufferContent); }
 
@@ -259,7 +280,10 @@ namespace Js
 
         Field(OtherParents*) otherParents;
         FieldNoBarrier(RefCountedBuffer *) bufferContent;
-        Field(uint32) bufferLength;       // Number of bytes allocated
+        Field(uint32) bufferLength;       // Current [[ArrayBufferByteLength]]
+        Field(uint32) maxByteLength;      // Immutable resizable limit; logical length for fixed buffers
+        Field(uint32) allocatedByteLength; // Physical allocation extent (maxByteLength for resizable)
+        Field(bool) isResizable;          // Whether [[ArrayBufferMaxByteLength]] exists
     };
 
     template <> inline bool VarIsImpl<ArrayBuffer>(RecyclableObject* obj)
@@ -308,6 +332,7 @@ namespace Js
 
     public:
         static JavascriptArrayBuffer* Create(DECLSPEC_GUARD_OVERFLOW uint32 length, DynamicType * type);
+        static JavascriptArrayBuffer* Create(DECLSPEC_GUARD_OVERFLOW uint32 length, DECLSPEC_GUARD_OVERFLOW uint32 maxByteLength, DynamicType * type);
         static JavascriptArrayBuffer* Create(byte* buffer, DECLSPEC_GUARD_OVERFLOW uint32 length, DynamicType * type);
         static JavascriptArrayBuffer* Create(RefCountedBuffer* buffer, DECLSPEC_GUARD_OVERFLOW uint32 length, DynamicType * type);
         virtual void Dispose(bool isShutdown) override;
@@ -325,7 +350,11 @@ namespace Js
 
         template<typename Allocator>
         JavascriptArrayBuffer(uint32 length, DynamicType * type, Allocator allocator): ArrayBuffer(length, type, allocator){}
+        template<typename Allocator>
+        JavascriptArrayBuffer(uint32 length, uint32 maxByteLength, DynamicType * type, Allocator allocator): ArrayBuffer(length, maxByteLength, type, allocator){}
+        bool UsesVirtualAllocation() const;
         JavascriptArrayBuffer(uint32 length, DynamicType * type);
+        JavascriptArrayBuffer(uint32 length, uint32 maxByteLength, DynamicType * type);
         JavascriptArrayBuffer(byte* buffer, uint32 length, DynamicType * type);
         JavascriptArrayBuffer(RefCountedBuffer* buffer, uint32 length, DynamicType * type);
 
