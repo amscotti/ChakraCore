@@ -42,6 +42,9 @@ struct JumpCleanupInfo
     Js::ByteCodeLabel label;
     Js::RegSlot regSlot1;
     Js::RegSlot regSlot2;
+    // TryFinally only: holds the try completion value while the finally block runs
+    // on a break/continue cleanup path (eval/global result register).
+    Js::RegSlot saveReturnValueReg;
 };
 
 class ByteCodeGenerator
@@ -471,6 +474,7 @@ public:
             Js::OpCode::Nop,
             0,
             Js::Constants::NoRegister,
+            Js::Constants::NoRegister,
             Js::Constants::NoRegister
         });
     }
@@ -479,9 +483,10 @@ public:
         Js::OpCode tryOp,
         Js::ByteCodeLabel label = 0,
         Js::RegSlot regSlot1 = Js::Constants::NoRegister,
-        Js::RegSlot regSlot2 = Js::Constants::NoRegister)
+        Js::RegSlot regSlot2 = Js::Constants::NoRegister,
+        Js::RegSlot saveReturnValueReg = Js::Constants::NoRegister)
     {
-        this->jumpCleanupList->Prepend({nullptr, 0, tryOp, label, regSlot1, regSlot2});
+        this->jumpCleanupList->Prepend({nullptr, 0, tryOp, label, regSlot1, regSlot2, saveReturnValueReg});
     }
 
     void PopJumpCleanup() { this->jumpCleanupList->RemoveHead(); }
