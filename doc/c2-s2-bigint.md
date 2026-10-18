@@ -491,7 +491,7 @@ objects; no raw pointer is retained across a user-code call.
 
 ## Sub-batch 3: non-decimal BigInt literals
 
-Status: implemented in the working tree on top of `dbe3bd379`;
+Status: landed in `eaf97c2e0` on top of `dbe3bd379`;
 interpreter-verified on Mac ARM64 no-JIT with `-ESBigInt`. JIT is not
 claimed (same B4 gate as sub-batches 1 and 2).
 
