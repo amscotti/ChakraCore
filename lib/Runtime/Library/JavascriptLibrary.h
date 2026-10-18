@@ -882,6 +882,7 @@ namespace Js
         JavascriptNativeFloatArray* CreateNativeFloatArray(uint32 length);
         JavascriptArray* CreateArray(uint32 length, uint32 size);
         ArrayBuffer* CreateArrayBuffer(uint32 length);
+        ArrayBuffer* CreateResizableArrayBuffer(uint32 length, uint32 maxByteLength);
         ArrayBuffer* CreateArrayBuffer(byte* buffer, uint32 length);
         ArrayBuffer* CreateArrayBuffer(RefCountedBuffer* buffer, uint32 length);
 #ifdef ENABLE_WASM

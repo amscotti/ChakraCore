@@ -2313,7 +2313,13 @@ namespace Js
         library->AddMember(arrayBufferPrototype, PropertyIds::constructor, library->arrayBufferConstructor);
 
         library->AddFunctionToLibraryObject(arrayBufferPrototype, PropertyIds::slice, &ArrayBuffer::EntryInfo::Slice, 2);
+        library->AddFunctionToLibraryObjectWithPropertyName(arrayBufferPrototype, _u("resize"), &ArrayBuffer::EntryInfo::Resize, 1);
+        library->AddFunctionToLibraryObjectWithPropertyName(arrayBufferPrototype, _u("transfer"), &ArrayBuffer::EntryInfo::Transfer, 0);
+        library->AddFunctionToLibraryObjectWithPropertyName(arrayBufferPrototype, _u("transferToFixedLength"), &ArrayBuffer::EntryInfo::TransferToFixedLength, 0);
         library->AddAccessorsToLibraryObject(arrayBufferPrototype, PropertyIds::byteLength, &ArrayBuffer::EntryInfo::GetterByteLength, nullptr);
+        library->AddAccessorsToLibraryObject(arrayBufferPrototype, scriptContext->GetOrAddPropertyIdTracked(_u("detached")), &ArrayBuffer::EntryInfo::GetterDetached, nullptr);
+        library->AddAccessorsToLibraryObject(arrayBufferPrototype, scriptContext->GetOrAddPropertyIdTracked(_u("maxByteLength")), &ArrayBuffer::EntryInfo::GetterMaxByteLength, nullptr);
+        library->AddAccessorsToLibraryObject(arrayBufferPrototype, scriptContext->GetOrAddPropertyIdTracked(_u("resizable")), &ArrayBuffer::EntryInfo::GetterResizable, nullptr);
 
         if (scriptContext->GetConfig()->IsES6ToStringTagEnabled())
         {
@@ -6297,6 +6303,12 @@ namespace Js
     ArrayBuffer* JavascriptLibrary::CreateArrayBuffer(uint32 length)
     {
         ArrayBuffer* arr = JavascriptArrayBuffer::Create(length, arrayBufferType);
+        return arr;
+    }
+
+    ArrayBuffer* JavascriptLibrary::CreateResizableArrayBuffer(uint32 length, uint32 maxByteLength)
+    {
+        ArrayBuffer* arr = JavascriptArrayBuffer::Create(length, maxByteLength, arrayBufferType);
         return arr;
     }
 

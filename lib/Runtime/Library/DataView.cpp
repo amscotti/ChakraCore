@@ -133,6 +133,17 @@ namespace Js
             JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, funcName);
         }
 
+        // A fixed-length DataView on a resizable buffer becomes out of bounds
+        // when the buffer shrinks below its [byteOffset, byteOffset + length)
+        // range. Web-reality semantics throw TypeError, before the in-view
+        // RangeError check below.
+        uint32 bufferByteLength = this->GetArrayBuffer()->GetByteLength();
+        if (this->GetByteOffset() > bufferByteLength ||
+            GetLength() > bufferByteLength - this->GetByteOffset())
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, funcName);
+        }
+
         uint32 length = GetLength();
         if (length < elementSize || byteOffset > length - elementSize)
         {

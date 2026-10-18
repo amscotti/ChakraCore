@@ -584,4 +584,11 @@ BUILTIN(DataView, GetFloat16, EntryGetFloat16, FunctionInfo::ErrorOnNew)
 BUILTIN(DataView, SetFloat16, EntrySetFloat16, FunctionInfo::ErrorOnNew)
 BUILTIN(Math, F16round, F16round, FunctionInfo::ErrorOnNew)
 
+BUILTIN(ArrayBuffer, GetterDetached, EntryGetterDetached, FunctionInfo::ErrorOnNew | FunctionInfo::HasNoSideEffect)
+BUILTIN(ArrayBuffer, GetterMaxByteLength, EntryGetterMaxByteLength, FunctionInfo::ErrorOnNew | FunctionInfo::HasNoSideEffect)
+BUILTIN(ArrayBuffer, GetterResizable, EntryGetterResizable, FunctionInfo::ErrorOnNew | FunctionInfo::HasNoSideEffect)
+BUILTIN(ArrayBuffer, Resize, EntryResize, FunctionInfo::ErrorOnNew)
+BUILTIN(ArrayBuffer, Transfer, EntryTransfer, FunctionInfo::ErrorOnNew)
+BUILTIN(ArrayBuffer, TransferToFixedLength, EntryTransferToFixedLength, FunctionInfo::ErrorOnNew)
+
 #undef BUILTIN_TEMPLATE
