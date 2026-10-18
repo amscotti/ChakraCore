@@ -2114,6 +2114,11 @@ private:
     typedef JsUtil::BaseDictionary<void *, size_t, HeapAllocator, PrimeSizePolicy, RecyclerPointerComparer, JsUtil::SimpleDictionaryEntry, JsUtil::AsymetricResizeLock> PendingWriteBarrierBlockMap;
 
     PendingWriteBarrierBlockMap pendingWriteBarrierBlockMap;
+    // Serializes Register/UnRegister against BackgroundRescan's Map walk.
+    // The dictionary's resize lock is asymmetric: Item/Remove may take it
+    // internally, so a separate mutex is used instead of holding LockResize
+    // across a mutating call.
+    CriticalSection wbMapLock;
 public:
     void RegisterPendingWriteBarrierBlock(void* address, size_t bytes);
     void UnRegisterPendingWriteBarrierBlock(void* address);

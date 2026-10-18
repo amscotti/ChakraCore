@@ -42,7 +42,18 @@ public:
 
     void SetState(GeneratorState state)
     {
+        const bool isCompleting = state == GeneratorState::Completed &&
+            this->state != GeneratorState::Completed;
+
         this->state = state;
+        if (isCompleting)
+        {
+            // Completion drops the generator's references to the frame and
+            // argument buffer. Remove their pending software write-barrier
+            // entries while the pointers still identify the registered blocks.
+            UnregisterPendingWriteBarrierBlocks();
+        }
+
         if (state == GeneratorState::Completed)
         {
             frame = nullptr;
@@ -61,7 +72,16 @@ private:
     Field(ScriptFunction*) scriptFunction;
     Field(DynamicObject*) resumeYieldObject;
 
+    // Address of the frame registered with the software write barrier. The JIT
+    // epilogue nulls `frame` before completion is observed, so this retained
+    // address is the only stable way to unregister the pending block.
+    // The low bit is tagged so the conservative heap scan does not treat this
+    // bookkeeping word as a live GC reference. It is cleared when the block is
+    // unregistered and is never used to access the frame.
+    uintptr_t writeBarrierFrame;
+
     void SetResumeYieldProperties(Var value, ResumeYieldKind kind);
+    void UnregisterPendingWriteBarrierBlocks();
 
 protected:
     DEFINE_VTABLE_CTOR_MEMBER_INIT(JavascriptGenerator, DynamicObject, args);

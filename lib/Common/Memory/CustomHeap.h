@@ -53,7 +53,10 @@ struct Page
 
     bool IsEmpty()
     {
-        return freeBitVector.IsFull();
+        // A page tracks MaxAllocationSize / Alignment chunks, which is 32. The
+        // remaining bits of a 64-bit BVUnit are never initialized or set, so
+        // IsFull() (all bits set) cannot be used to detect an empty page.
+        return freeBitVector.Count() == MaxAllocationSize / Alignment;
     }
 
     bool CanAllocate(BucketId targetBucket)

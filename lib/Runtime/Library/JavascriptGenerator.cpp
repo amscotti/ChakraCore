@@ -10,6 +10,24 @@ using namespace Js;
 
 namespace
 {
+    // The retained write-barrier frame is tagged with the low bit (the frame is
+    // at least pointer-aligned) so the recycler's conservative heap scan sees
+    // an unaligned value and does not mark the frame as live.
+    const uintptr_t WriteBarrierFrameTag = 1;
+
+    uintptr_t TagWriteBarrierFrame(InterpreterStackFrame* frame)
+    {
+        Assert(frame != nullptr);
+        Assert((reinterpret_cast<uintptr_t>(frame) & WriteBarrierFrameTag) == 0);
+        return reinterpret_cast<uintptr_t>(frame) | WriteBarrierFrameTag;
+    }
+
+    InterpreterStackFrame* UntagWriteBarrierFrame(uintptr_t taggedFrame)
+    {
+        Assert(taggedFrame != 0);
+        return reinterpret_cast<InterpreterStackFrame*>(taggedFrame & ~WriteBarrierFrameTag);
+    }
+
     // RAII helper to set the state of the generator to completed if an exception is 
     // thrown or if the save state InterpreterStackFrame is never created implying 
     // the generator is JITed and returned without ever yielding
@@ -61,7 +79,8 @@ JavascriptGenerator::JavascriptGenerator(
         frame(nullptr),
         state(GeneratorState::SuspendedStart),
         scriptFunction(scriptFunction),
-        resumeYieldObject(nullptr) {}
+        resumeYieldObject(nullptr),
+        writeBarrierFrame(0) {}
 
 JavascriptGenerator* JavascriptGenerator::New(
     Recycler* recycler,
@@ -123,7 +142,9 @@ void JavascriptGenerator::SetFrame(InterpreterStackFrame* frame, size_t bytes)
 #if GLOBAL_ENABLE_WRITE_BARRIER
     if (CONFIG_FLAG(ForceSoftwareWriteBarrier))
     {
+        Assert(this->writeBarrierFrame == 0);
         GetScriptContext()->GetRecycler()->RegisterPendingWriteBarrierBlock(frame, bytes);
+        this->writeBarrierFrame = TagWriteBarrierFrame(frame);
     }
 #endif
 }
@@ -137,18 +158,49 @@ void JavascriptGenerator::SetFrameSlots(Js::RegSlot slotCount, Field(Var)* frame
         GetFrame()->m_localSlots[i] = frameSlotArray[i];
 }
 
+void JavascriptGenerator::UnregisterPendingWriteBarrierBlocks()
+{
+#if GLOBAL_ENABLE_WRITE_BARRIER
+    if (!CONFIG_FLAG(ForceSoftwareWriteBarrier))
+    {
+        return;
+    }
+
+    auto* recycler = GetScriptContext()->GetRecycler();
+
+    // SetState(Completed) clears these pointers, so each registration is
+    // removed exactly once: here while the generator is still suspended, or
+    // from the completion transition before the pointers are cleared.
+    //
+    // The JIT epilogue nulls `frame` before completion is observed, so prefer
+    // the address retained by SetFrame. Clearing it before the unregister
+    // keeps the cleanup exactly once; the `frame` fallback covers a frame
+    // registered without a retained address.
+    if (this->writeBarrierFrame != 0)
+    {
+        InterpreterStackFrame* registeredFrame = UntagWriteBarrierFrame(this->writeBarrierFrame);
+        this->writeBarrierFrame = 0;
+        recycler->UnRegisterPendingWriteBarrierBlock(registeredFrame);
+    }
+    else if (this->frame)
+    {
+        recycler->UnRegisterPendingWriteBarrierBlock(this->frame);
+    }
+
+    if (this->args.Values)
+    {
+        recycler->UnRegisterPendingWriteBarrierBlock(this->args.Values);
+        recycler->UnRegisterPendingWriteBarrierBlock(&this->args.Values);
+    }
+#endif
+}
+
 #if GLOBAL_ENABLE_WRITE_BARRIER
 void JavascriptGenerator::Finalize(bool isShutdown)
 {
-    if (CONFIG_FLAG(ForceSoftwareWriteBarrier) && !isShutdown)
+    if (!isShutdown)
     {
-        auto* recycler = GetScriptContext()->GetRecycler();
-        
-        if (this->frame)
-            recycler->UnRegisterPendingWriteBarrierBlock(this->frame);
-
-        if (this->args.Values)
-            recycler->UnRegisterPendingWriteBarrierBlock(this->args.Values);
+        UnregisterPendingWriteBarrierBlocks();
     }
 }
 #endif

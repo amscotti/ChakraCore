@@ -853,6 +853,12 @@ bool Heap<TAlloc, TPreReservedAlloc>::FreeAllocation(Allocation* object)
 
     uint freeBitsCount = page->freeBitVector.Count();
 
+    // The page tracks Page::MaxAllocationSize bytes in Page::Alignment chunks
+    // (32 chunks), while BVUnit may have 64 bits. Only the tracked chunks are
+    // initialized and used, so compare against the chunk count rather than
+    // BitsPerWord when deciding whether the page is becoming empty.
+    const uint pageChunkCount = Page::MaxAllocationSize / Page::Alignment;
+
     // Make sure that the section under interest or the whole page has not already been freed
     if (page->IsEmpty() || page->freeBitVector.TestAnyInRange(index, length))
     {
@@ -912,17 +918,30 @@ bool Heap<TAlloc, TPreReservedAlloc>::FreeAllocation(Allocation* object)
     // If the page is about to become empty then we should not need
     // to set it to executable and we don't expect to restore the
     // previous protection settings.
-    if (freeBitsCount == BVUnit::BitsPerWord - length)
+    if (freeBitsCount == pageChunkCount - length)
     {
         EnsureAllocationWriteable(object);
         FreeAllocationHelper(object, index, length);
-        Assert(page->IsEmpty());
+        Assert(page->freeBitVector.Count() == pageChunkCount);
 
-        this->buckets[page->currentBucket].RemoveElement(this->auxiliaryAllocator, page);
+        char* pageAddress = page->address;
+        BucketId bucket = page->currentBucket;
+
+        this->buckets[bucket].RemoveElement(this->auxiliaryAllocator, page);
         // The page is removed from its bucket. Restore the thread's execute
-        // state before returning; the logical page state stays writable for
-        // the allocator's next reuse of this release path.
+        // state before releasing the page; the release path does not write
+        // code bytes.
         CustomHeapJitWriteProtect(FALSE);
+        {
+            AutoCriticalSection autoLock(&this->codePageAllocators->cs);
+            this->codePageAllocators->ReleasePages(pageAddress, 1, segment);
+        }
+        VerboseHeapTrace(_u("Releasing empty page 0x%p in bucket %d\n"), pageAddress, bucket);
+
+#if DBG_DUMP
+        this->freeObjectSize -= pageSize;
+        this->totalAllocationSize -= pageSize;
+#endif
         return false;
     }
     else

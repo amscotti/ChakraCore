@@ -4371,6 +4371,7 @@ Recycler::BackgroundRescan(RescanFlags rescanFlags)
 #if GLOBAL_ENABLE_WRITE_BARRIER
     if (CONFIG_FLAG(ForceSoftwareWriteBarrier))
     {
+        AutoCriticalSection lock(&this->wbMapLock);
         pendingWriteBarrierBlockMap.LockResize();
         pendingWriteBarrierBlockMap.Map([](void* address, size_t size)
         {
@@ -9191,7 +9192,10 @@ Recycler::RegisterPendingWriteBarrierBlock(void* address, size_t bytes)
 #if DBG
         WBSetBitRange((char*)address, (uint)bytes/sizeof(void*));
 #endif
-        pendingWriteBarrierBlockMap.Item(address, bytes);
+        {
+            AutoCriticalSection lock(&this->wbMapLock);
+            pendingWriteBarrierBlockMap.Item(address, bytes);
+        }
         RecyclerWriteBarrierManager::WriteBarrier(address, bytes);
     }
 }
@@ -9200,6 +9204,7 @@ Recycler::UnRegisterPendingWriteBarrierBlock(void* address)
 {
     if (CONFIG_FLAG(ForceSoftwareWriteBarrier))
     {
+        AutoCriticalSection lock(&this->wbMapLock);
         pendingWriteBarrierBlockMap.Remove(address);
     }
 }

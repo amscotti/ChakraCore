@@ -2449,6 +2449,13 @@ VirtualFree(
             bRetVal = FALSE;
             goto VirtualFreeExit;
         }
+        if ( (UINT_PTR)lpAddress != pMemoryToBeReleased->startBoundary )
+        {
+            ERROR( "lpAddress must be the base address returned by VirtualAlloc.\n" );
+            pthrCurrent->SetLastError( ERROR_INVALID_ADDRESS );
+            bRetVal = FALSE;
+            goto VirtualFreeExit;
+        }
         if ( dwSize != 0 )
         {
             ERROR( "dwSize must be 0 if you are releasing the memory.\n" );
