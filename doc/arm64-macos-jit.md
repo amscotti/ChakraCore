@@ -211,18 +211,18 @@ pre-existing, or documented gaps. P1 items are merge blockers.
 
 **P1 - merge blockers / required evidence**
 
-1. **The build-critical header is untracked.** `lib/Backend/arm64/DarwinEhFrame.h`
-   is `??` but is included by `InterpreterThunkEmitter.cpp` and
-   `UnwindInfoManager.cpp`. A `git commit -am` omits it and a clean checkout
-   cannot build `-Dprofile=jit`. `doc/arm64-macos-jit.md` is also untracked and
-   linked from the modified `doc/README.md`. Stage all three explicitly.
-2. **The JIT `check` target does not exercise JIT code.** `build.zig` registers
-   only `check-smoke` for `-Dprofile=jit`; `check_smoke.py` runs a plain
-   interpreter snippet with no `-mic`/`-ForceNative`, and no `verify-bytecode
-   --jit` or regression step. A JIT profile accidentally compiled with
-   `DISABLE_JIT=1`, or one with stale JIT builtin bytecode, would still pass.
-   Add a JIT-specific smoke (`-mic:1 -bgjit-`, assert native output) and a
-   `--jit` bytecode verify.
+1. **The build-critical header was untracked.** Fixed by commit `07d6965e8`:
+   `lib/Backend/arm64/DarwinEhFrame.h` and `doc/arm64-macos-jit.md` are now
+   tracked and a clean checkout builds `-Dprofile=jit`. Keep both staged in
+   future commits.
+2. **The JIT `check` target did not exercise JIT code.** Fixed in this pass:
+   `zig build -Dprofile=jit check` now runs `tools/build/check_jit.py`
+   (requires the `NativeCodeGenerator` symbol and executes a hot
+   call/rest/apply script under both `-mic:1 -bgjit-` and
+   `-forceNative -off:simpleJit -bgJitDelay:0`) and
+   `verify_bytecode_pure.py --jit --verify`. The generic `check-smoke` remains
+   interpreter-only. `check_jit: PASS` and `Bytecode is up to date` were
+   observed on the current build.
 3. **`Function.prototype.arguments` read past the homes on native frames.**
    Fixed on 20:39: `GetJavascriptArgs` now returns the contiguous caller image
    when the eight-home signature is present. Repros `/tmp/fargs6.js` and
@@ -269,10 +269,10 @@ pre-existing, or documented gaps. P1 items are merge blockers.
     `out/jit/bin -> escape` or `out/jit/sub -> escape` lets `--map` write or
     the orphan sweep delete outside `out/<profile>`. Pre-existing build-tool
     security issue; resolve/refuse symlinked components.
-13. **JIT static archive is not reproducible.** `/usr/bin/libtool -static`
-    records real mtimes and uid/gid; the no-JIT archive uses the deterministic
-    epoch/0:0. The 2.4 GB installed archive differs across rebuilds from the
-    same source. Not a behavior gate, but a release/reproducibility gap.
+13. **JIT static archive was not reproducible.** Fixed in this pass:
+    the libtool step runs under `ZERO_AR_DATE=1`; `ar tv` now shows the
+    deterministic `Dec 31 19:00 1969` / `0/0` member metadata for the 2.2 GB
+    archive.
 14. **Helper calls are homed, contrary to the doc's ABI rule.** `LowerCall`
     calls `HomeJsCallArgs` for any `argCount > 0`; helper calls with three
     arguments (e.g. `HelperWMemCmp`, `HelperMemCpy`) therefore write x0-x2
@@ -281,13 +281,13 @@ pre-existing, or documented gaps. P1 items are merge blockers.
     test.
 15. **JIT backend objects are linked after SCACore, not in CMake's position.**
     The JIT dylib has a different initializer order (36 vs 32 init functions)
-    than the no-JIT build. No failure observed, but the file-header deviation
-    list should disclose it or the link order should match CMake.
-16. **`expect_total` is vacuous for the JIT graph.** `build.zig` computes
-    `expect_total = expect_base + backend_n` from the same loop that appends
-    the backend objects, so the assertion cannot detect a missing/duplicated
-    backend source. The doc also says 538/536 and names `tables.zig`; the real
-    jit total is 627 in `build.zig`. Make the backend count independent.
+    than the no-JIT build. No failure observed. The `build.zig` header now
+    discloses this as a known deviation; matching CMake would require
+    splitting the object-group link, which is not proven necessary.
+16. **`expect_total` was vacuous for the JIT graph.** Fixed in this pass:
+    `backend_expected` is the independent sum of
+    `backend_group.{cxx,c,asm_files}.len`, asserted to be 89, and `backend_n`
+    is asserted against it. The shared jit total is 538 + 89 = 627.
 17. **Remaining test gaps are documented, not hidden.** `interpreted` is
     2365/399 (397 asm.js/WASM + the two StackTrace line diffs); `dynapogo` is
     1943/286 (all asm.js/WASM); `disable_jit` is 1973/0. The asm.js/WASM gap
@@ -750,11 +750,12 @@ All of these are uncommitted modifications on `jit/arm64-macos`.
 Build and install:
 
 - `build.zig` adds `-Dprofile=jit`, drops `-DDISABLE_JIT=1` for that profile
-  only, installs to `out/jit/`, and makes `zig build check` a smoke.
+  only, installs to `out/jit/`, and makes `zig build check` run the generic
+  smoke plus a JIT symbol/hot-call smoke and a `--jit` bytecode verify.
 - `tools/build/tables.zig` adds the ARM64 backend group on top of the existing
   object groups. The backend group is not a member of `object_groups`. The
-  shared/static object counts (`expect_total` 538 shared / 536 static) stay
-  the counts of the no-backend graph. JIT adds its objects beside those.
+  base shared/static object counts stay 538/536; the JIT graph adds 89
+  backend TUs and asserts 627 shared.
 - `tools/build/install_profile.py` knows the `jit` install prefix.
 
 Executable JIT memory:
@@ -1508,8 +1509,9 @@ These are easy to "simplify" into a bug. Each one was measured.
 - The no-JIT builtin bytecode headers and
   `ByteCodeCacheReleaseFileVersion.h` stay as the modernization branch has
   them.
-- `expect_total` in `tools/build/tables.zig` stays 536 static / 538 shared.
-  Backend objects are extra, not a new baseline for that assertion.
+- The base object counts stay 536 static / 538 shared. The JIT graph
+  independently asserts 89 backend TUs (`backend_expected`), so its shared
+  total is 627; do not fold the backend count into the base baseline.
 - No kill switch, no `-RecyclerStress`, no second suite in parallel, no
   commit unless the maintainer asks, no push, no merge, and no rebase unless
   modernization has moved.

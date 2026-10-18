@@ -50,7 +50,11 @@
 //! objects, then the static archive members. The PAL deviation is
 //! dispositioned in doc/b2-verification.md: the reordered C/asm/mach
 //! inputs carry no dynamic initializers, so their relative order is
-//! unobservable at startup.
+//! unobservable at startup. The jit profile appends its 89 backend TUs
+//! after the contract objects, while the reference links
+//! ${chakra_backend_objects} between Jsrt.Core and Common.Common. The
+//! backend does have dynamic initializers, so this remains a known,
+//! disclosed deviation rather than a proven equivalence.
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -647,10 +651,17 @@ pub fn build(b: *std.Build) void {
     // JIT-only: ARM64 backend objects join the static archive and the
     // dylib. Numbered after the contract TUs so the test/debug/release
     // object counts and link order stay put. CMake links Backend after
-    // Jsrt.Core; appending here is the first-link order.
+    // Jsrt.Core; appending here is the first-link order (a known
+    // deviation; see the file header).
     var backend_n: u32 = 0;
+    var backend_expected: u32 = 0;
     if (profile == .jit) {
         const g = &tables.backend_group;
+        backend_expected = @intCast(g.cxx.len + g.c.len + g.asm_files.len);
+        // A source added to backend_group must be reflected here. This
+        // catches a table/loop mismatch that the old
+        // `expect_base + backend_n` assertion could not see.
+        std.debug.assert(backend_expected == 89);
         for (g.cxx) |src| {
             static_objs.append(arena, compileTu(&ctx, g, src, .cxx, n)) catch @panic("OOM");
             n += 1;
@@ -666,11 +677,12 @@ pub fn build(b: *std.Build) void {
             n += 1;
             backend_n += 1;
         }
+        std.debug.assert(backend_n == backend_expected);
     }
     // Static: 540 - 3 dylib TUs + TestHooks in ch = 538.
-    // jit adds the backend group on top of the shared 540.
+    // jit adds the 89 backend TUs on top of the shared 540 => 629.
     const expect_base: u32 = if (is_static) 538 else 540;
-    const expect_total: u32 = expect_base + backend_n;
+    const expect_total: u32 = expect_base + backend_expected;
     std.debug.assert(n == expect_total);
     const expect_singular: usize = if (is_static) 0 else 3;
     std.debug.assert(singular_libs.items.len == expect_singular);
@@ -686,7 +698,9 @@ pub fn build(b: *std.Build) void {
         break :blk b.addLibrary(.{ .name = "ChakraCoreStatic", .root_module = static_mod });
     };
     const static_archive: std.Build.LazyPath = if (static_lib) |lib| lib.getEmittedBin() else blk: {
-        const lt = b.addSystemCommand(&.{ "/usr/bin/libtool", "-static", "-o" });
+        // ZERO_AR_DATE makes libtool write the deterministic epoch/0:0
+        // member metadata that Zig's archiver uses for the no-JIT archive.
+        const lt = b.addSystemCommand(&.{ "/usr/bin/env", "ZERO_AR_DATE=1", "/usr/bin/libtool", "-static", "-o" });
         const out = lt.addOutputFileArg("libChakraCoreStatic.a");
         for (static_objs.items) |o| lt.addFileArg(o);
         break :blk out;
@@ -1099,8 +1113,36 @@ pub fn build(b: *std.Build) void {
         jit_smoke.stdio = .inherit;
         const jit_smoke_top = b.step("check-smoke", "Assert jit ch version/flag/snippet output (not part of the default build)");
         jit_smoke_top.dependOn(&jit_smoke.step);
-        const jit_check_top = b.step("check", "Smoke the ARM64 macOS JIT ch (regression stays on the test profile until this binary passes it)");
+
+        // JIT-specific runtime smoke: require the native backend symbol and
+        // execute a hot call/rest/apply script under both -mic and
+        // -forceNative. check_smoke.py alone is interpreter-only.
+        const jit_runtime = b.addSystemCommand(&.{python});
+        jit_runtime.addFileArg(b.path("tools/build/check_jit.py"));
+        jit_runtime.addArg(jit_ch_str);
+        jit_runtime.step.dependOn(cp_step);
+        jit_runtime.stdio = .inherit;
+        const jit_runtime_top = b.step("check-jit", "Require the ARM64 JIT backend symbol and run a JIT hot-call/rest/apply smoke (not part of the default build)");
+        jit_runtime_top.dependOn(&jit_runtime.step);
+
+        // The JIT profile consumes the checked-in JIT builtin bytecode
+        // headers. Verify them with the just-installed ch; the no-JIT
+        // headers are a separate check on the default profile.
+        const jit_verify_bc = b.addSystemCommand(&.{python});
+        jit_verify_bc.addFileArg(b.path("tools/build/verify_bytecode_pure.py"));
+        jit_verify_bc.addFileArg(b.path("tools/regenByteCode.py"));
+        jit_verify_bc.addArg("--jit");
+        jit_verify_bc.addArg("--verify");
+        jit_verify_bc.addArg("--binary=out/jit/bin/ch");
+        jit_verify_bc.step.dependOn(cp_step);
+        jit_verify_bc.stdio = .inherit;
+        const jit_verify_bc_top = b.step("verify-bytecode", "Verify checked-in JIT built-in bytecode with the just-built jit ch (pure scratch-tree check; not part of the default build)");
+        jit_verify_bc_top.dependOn(&jit_verify_bc.step);
+
+        const jit_check_top = b.step("check", "Full ARM64 macOS JIT smoke: generic smoke, native backend symbol, JIT hot-call/rest/apply, and JIT bytecode verification");
         jit_check_top.dependOn(&jit_smoke.step);
+        jit_check_top.dependOn(&jit_runtime.step);
+        jit_check_top.dependOn(&jit_verify_bc.step);
         return;
     }
 
