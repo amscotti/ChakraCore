@@ -15,7 +15,7 @@ macOS port`), `2372fcc81` (JIT build/runtime/bytecode checks), `9ccc535a8`
 (XData lifecycle + installer symlink hardening), and `fcbc434c9` (generator
 write-barrier and empty-page leaks). The branch tip is `fcbc434c9`; it is not
 merged. The installed binary is `out/jit/bin/libChakraCore.dylib`, 26238584
-bytes, timestamp 2026-10-18 13:08. `out/jit/bin/ch` is the host (788320 bytes); it
+bytes, timestamp 2026-10-18 13:58. `out/jit/bin/ch` is the host (788320 bytes); it
 dlopens the sibling dylib, so trust the dylib timestamp. The suite logs named
 below are ephemeral local artifacts from the original runs; they are not
 checked in.
@@ -33,17 +33,17 @@ An 8-argument `apply(arguments)` with default inlining works. `new.target`
 works for the argument counts that were measured. Generator JIT
 (`-JitES6Generators`) now runs all measured yield/resume/return/throw and
 try/finally shapes. The three suite runs below were rerun on the 13:08 binary
-(`jit-*-gc2.log`); the 18:13 and 19:09 builds are not the same object set.
+(`jit-*-inline.log`); the 18:13 and 19:09 builds are not the same object set.
 
-- `disable_jit` is **1973/0** (`jit-disable-gc2.log`; 46.37 s in that log).
+- `disable_jit` is **1973/0** (`jit-disable-inline.log`).
   Wall time varies with host load: the prior 19:27 run was 42.51 s
   (`jit-disable-final.log`) and the 19:09 run was 54.5 s
   (`jit-disable-repair3.log`).
-- `dynapogo` is **1943/286** (`jit-dynapogo-gc2.log`, 489.99 s; the 19:09
+- `dynapogo` is **1943/286** (`jit-dynapogo-inline.log`, 501.49 s; the 19:09
   run is `jit-dynapogo-repair3.log`, 488.15 s). Every failure is in an
   asm.js/WASM folder and exits 0, so the signal count is zero.
-- `interpreted` is **2365/399** (`jit-interpreted-gc2.log`, 44.0 s): 397
-  asm.js/WASM failures plus the two StackTrace line-number diffs, zero signals.
+- `interpreted` is **2367/397** (`jit-interpreted-inline.log`): 397 asm.js/WASM
+  failures, zero signals. The two StackTrace line diffs are fixed.
 
 The branch is committed (`07d6965e8`, follow-up `2372fcc81`) but not merged.
 `zig build -Dprofile=jit check` runs the generic smoke, `check_jit.py`, and
@@ -352,12 +352,12 @@ in the working tree pending the next commit.
 
 **Documented gaps (not review actions)**
 
-- The asm.js/WASM feature gap and the two StackTrace line diffs are recorded in
+- The asm.js/WASM feature gap is recorded in
   [Suite results](#suite-results) and
-  [Known open engine issues](#known-open-engine-issues). The asm.js/WASM gap
-  needs a separate ARM64 port or an accepted platform exclusion. The StackTrace
-  diffs are inline call-site attribution and match the baseline under
-  `-off:inline`/`-nonative`; they are not execution failures.
+  [Known open engine issues](#known-open-engine-issues). It needs a separate
+  ARM64 port or an accepted platform exclusion. The two StackTrace line diffs
+  are fixed by the ARM64 `InlineeCallInfo` legalization change; do not filter
+  the remaining asm/WASM tests out of the gate.
 
 ### Focused repros (historical)
 
@@ -409,9 +409,9 @@ one. On this Mac the runner still sets `arch='x64'` and applies
 
 | Variant | Binary | Log | Result |
 |---|---|---|---|
-| `interpreted` (`-maxInterpretCount:1 -maxSimpleJitRunCount:1 -bgjit-`) | 13:08 dylib | `jit-interpreted-gc2.log`, 44.0 s | `passed 2365, failed 399`. 397 failures are asm.js or WebAssembly with exit 0; 2 are StackTrace line-number diffs. Zero signals. `EH` 40/0, `TryCatch` 1/0. |
-| `dynapogo` (`-forceNative -off:simpleJit -bgJitDelay:0`) | 13:08 dylib | `jit-dynapogo-gc2.log`, 489.99 s | `passed 1943, failed 286`. All 286 failures are in asm.js / WebAssembly folders and exit 0. Zero signals. `apply3` and `applyBugs` are absent from the failure list. |
-| `disable_jit` (`-nonative`) | 13:08 dylib | `jit-disable-gc2.log`, 46.37 s | `passed 1973, failed 0`. The gate. Do not bump it. |
+| `interpreted` (`-maxInterpretCount:1 -maxSimpleJitRunCount:1 -bgjit-`) | 13:58 dylib | `jit-interpreted-inline.log` | `passed 2367, failed 397`. All 397 failures are asm.js or WebAssembly with exit 0. Zero signals. `EH` 40/0, `TryCatch` 1/0. |
+| `dynapogo` (`-forceNative -off:simpleJit -bgJitDelay:0`) | 13:58 dylib | `jit-dynapogo-inline.log`, 501.49 s | `passed 1943, failed 286`. All 286 failures are in asm.js / WebAssembly folders and exit 0. Zero signals. `apply3` and `applyBugs` are absent from the failure list. |
+| `disable_jit` (`-nonative`) | 13:58 dylib | `jit-disable-inline.log` | `passed 1973, failed 0`. The gate. Do not bump it. |
 
 All 286 dynapogo failures are the asm.js / WebAssembly baseline gap:
 123 `WasmSpec`, 92 `AsmJs`, 54 `wasm`, 14 `AsmJSFloat`, 2
@@ -423,28 +423,22 @@ The asm.js / WebAssembly exit-0 pile is a missing compile message or
 `WebAssembly is not defined`. It is not the `apply` segfault. Do not start
 that port as part of this worktree; B4 remains the separate Linux x64 proof.
 
-### Remaining gaps after the third pass
+### Remaining gaps after the final pass
 
 The debugger hang, the generator-JIT segfault, `ObjectSpread_Limits.js`,
-`strictequal.js`, and `es6IsConcatSpreadable.js` are closed. The 20:39
-`dynapogo` run has **no failures outside the asm.js/WASM folders**: 1943
-passed and all 286 failures exit 0. The 20:39
-`interpreted` run still has the two stack-trace line-number differences;
-`dynapogo` does not. They stay recorded under
-[Known open engine issues](#known-open-engine-issues) as an unfixed
-attribution issue.
+`strictequal.js`, `es6IsConcatSpreadable.js`, and the two StackTrace line
+diffs are closed. `interpreted` is **2367/397** (all 397 are asm.js/WASM,
+zero signals); `dynapogo` is **1943/286** (asm.js/WASM only, zero signals);
+`disable_jit` is **1973/0**.
 
-- `test/StackTrace/ErrorPrototype.js`: one frame reports
-  `testErrorPrototypeChain (ErrorPrototype.js:41:5)` where the baseline wants
-  `42:5`.
-- `test/StackTrace/StackTraceLimit.js`: deeper recursion frames are
-  attributed to `Anonymous function (LongCallStackThrow.js:45:17)` where the
-  baseline expects `47:13`. The first mismatch is at baseline line 25; the
-  same `45:17` attribution repeats for the deeper frames.
-
-Both match the baseline with `-off:inline` and under `-nonative`; they are
-attribution mapping for inlined call sites, not execution failures. They are
-tracked under [Known open engine issues](#known-open-engine-issues).
+The StackTrace fix is in `LegalizeMD::LegalizeLDIMM`. The 64-bit
+`InlineeCallInfo` value is `(inlineeStartOffset << 32) | argCount`; the ARM64
+legalizer emitted only the low two half-words for a label offset, so the
+stack walker read `inlineeStartOffset == 0` for inlinees without a frame
+record and attributed the parent to the inlinee's body line. The legalizer
+now emits `MOVK` for bits 32–47 and 48–63 on 64-bit targets. Both
+`StackTrace/ErrorPrototype.js` and `StackTrace/StackTraceLimit.js` now match
+their baselines; the full interpreted suite passed 2367/397 after the fix.
 
 The asm.js and WebAssembly failures are the documented Mac feature gap, not
 compiler failures. The JIT profile is built for `aarch64-macos` and does not
@@ -480,14 +474,14 @@ them as fixed by this port.
   retain/rebase the old FunctionBody/bytecode and its operand metadata, or
   avoid reparsing live coroutine frames. This is an ownership change, not a
   one-line guard.
-- **Inlined call-site line attribution.** `StackTrace/ErrorPrototype.js`
-  reports one frame at `41:5` where the baseline wants `42:5`.
-  `StackTrace/StackTraceLimit.js` attributes deeper recursion frames to
-  `LongCallStackThrow.js:45:17` where the baseline expects `47:13`; the first
-  mismatch is at baseline line 25, and the same `45:17` attribution repeats
-  for the deeper frames. Both match the baseline with `-off:inline` and under
-  `-nonative`. The native-address to bytecode-offset map and the inlinee frame
-  record are the places to investigate; this is cosmetic and not a crash.
+- **JIT-compiled generator `arguments.callee` identity.**
+  With `-JitES6Generators`, `arguments.callee` returns a function object with
+  the same name and source but `!== g`; the interpreter returns the original
+  `g`. `test/es6/generators-apis.js` covers this but runs without
+  `-JitES6Generators`. The generator-JIT path builds the arguments object
+  from a different function object. Flag-off by default; not a crash. The
+  `yield*` completion probe that was also suspected reproduces under
+  `-nonative` and is not attributed to this port.
 - **TTD debug loop selection.** The TTD debug loop is split profiled/unprofiled
   and compile-verified, but there is no supported short TTD+debugger-action
   test in this tree. Record the gap rather than claiming it is exercised.
@@ -1176,7 +1170,7 @@ interpreted `throw` is catchable: `out/jit/bin/ch "$TMPDIR/test_throw.js"` and
 `out/jit/bin/ch "$TMPDIR/test_throw_50.js"` both print `PASS`. Section 7.2 has
 the `-mic:1` and `-forceNative` results. The `disable_jit` suite has since been
 re-run repeatedly on the current JIT-enabled binary; the final 13:08 gate is
-`1973 passed / 0 failed` (`jit-disable-gc2.log`). The no-JIT `ch` from
+`1973 passed / 0 failed` (`jit-disable-inline.log`). The no-JIT `ch` from
 the modernization checkout remains the rebase oracle. Do not treat the throw
 scripts as a substitute for `1973` passed and `0` failed.
 
@@ -1410,17 +1404,15 @@ worktree root. The runner spawns `ch` with the test directory as cwd, so
 
 The 19:09 run (historical, `jit-interpreted-repair3.log`, 52.15 seconds; the
 pre-repair `jit-interpreted-jitwrite.log` took 45.03 seconds) measured the same
-totals as the current 13:08 run (`jit-interpreted-gc2.log`, 44.0 s):
+totals as the current 13:58 run (`jit-interpreted-inline.log`):
 
 ```
-Total: passed 2365, failed 399
+Total: passed 2367, failed 397
 ```
 
-`EH` passed 40/0 and `TryCatch` passed 1/0. Of the 399 failures, 397 are
-asm.js or WebAssembly with exit 0 (the missing `Successfully compiled asm.js
-code` message or `WebAssembly is not defined`), and 2 are the documented
-inlined call-site line diffs in `StackTrace/ErrorPrototype.js` (41 vs 42) and
-`StackTrace/StackTraceLimit.js` (45 vs 47). Zero tests exited on a signal.
+`EH` passed 40/0 and `TryCatch` passed 1/0. All 397 failures are asm.js or
+WebAssembly with exit 0 (the missing `Successfully compiled asm.js code`
+message or `WebAssembly is not defined`). Zero tests exited on a signal.
 
 `test/Function/apply3.js` matches its baseline on the 12:37 dylib with
 default inlining (`-maxInterpretCount:1 -maxSimpleJitRunCount:1 -bgjit-`,
@@ -1442,9 +1434,9 @@ baseline failure (`ASMJSParser`). The other 27 exited on a signal: 22
 `SIGABRT` (`-6`, mostly debugger tests, including `typedarray/samethread.js`
 inside a long DataView log), 4 `SIGSEGV` (`-11`, both `es6GeneratorJit`
 files), and 1 `SIGBUS` (`-10`, `Object/ObjectSpread_Limits.js`). That list is
-historical. On the 13:08 dylib the same suite is `passed 1943, failed 286`;
+historical. On the 13:58 dylib the same suite is `passed 1943, failed 286`;
 all 286 are in asm.js/WASM folders and exit 0, so the signal count is zero
-(`jit-dynapogo-gc2.log`, 489.99 s). The 19:09 run had the
+(`jit-dynapogo-inline.log`, 501.49 s). The 19:09 run had the
 same totals (`jit-dynapogo-repair3.log`, 488.15 s). `Function/apply3.js` and
 `inlining/applyBugs.js` are not in the failure list.
 
@@ -1459,7 +1451,7 @@ and 10 arguments and that `super` spread all print `PASS` under `-mic:1
 -bgjit-` and under `-forceNative`.
 
 `disable_jit` on the current 20:39 binary is `passed 1973, failed 0`
-(`jit-disable-gc2.log`, 46.37 s). The earlier 1972/1 run on the 12:52
+(`jit-disable-inline.log`). The earlier 1972/1 run on the 12:52
 dylib missed only `DebuggerCommon/AsyncDynamicAttach.js`, which printed
 `PASSED` and then hung inside `ScriptContext::DebugProfileProbeThunk`; the
 second-pass `DynamicProfileInfo`/debug-loop split is the fix (see
@@ -1699,19 +1691,18 @@ commands. Stage 4 totals are in
 
 #### Stage 4: Regression suites
 
-`interpreted` on the 13:08 dylib is 2365/399 (397 asm.js / WebAssembly plus 2
-StackTrace line diffs, all exit 0, zero signals;
-`jit-interpreted-gc2.log`, 44.0 s). `dynapogo` on the 13:08 dylib is
+`interpreted` on the 13:58 dylib is 2367/397 (all 397 asm.js / WebAssembly,
+exit 0, zero signals; `jit-interpreted-inline.log`). `dynapogo` on the 13:58 dylib is
 1943/286 (all 286 failures are in asm.js/WASM folders and exit 0, zero
-signals; `jit-dynapogo-gc2.log`, 489.99 s). `disable_jit` on the same binary
-is 1973/0 (`jit-disable-gc2.log`). The 19:09 runs (`jit-interpreted-repair3.log`,
+signals; `jit-dynapogo-inline.log`, 501.49 s). `disable_jit` on the same binary
+is 1973/0 (`jit-disable-inline.log`). The 19:09 runs (`jit-interpreted-repair3.log`,
 `jit-dynapogo-repair3.log`, and `jit-disable-repair3.log`) are the prior object
 set; they showed the same totals. The absolute binary and the one-variant rule
 are in the handoff section. Those runs closed the `es6GeneratorJit` segfaults
 and `ObjectSpread_Limits.js`; the per-thread write-window fix is described in
 the handoff. The only remaining JIT failures are the documented
-asm.js/WASM feature gap and the two StackTrace line diffs; do not filter
-those out of the gate. Re-measure `apply3`, `newtarget.js`,
+asm.js/WASM feature gap; do not filter it out of the gate. Re-measure
+`apply3`, `newtarget.js`,
 `test_throw_50.js`, and `test_spread.js` after any lowering or allocator
 change.
 
