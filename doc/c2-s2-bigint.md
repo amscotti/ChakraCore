@@ -372,8 +372,8 @@ the C3 completion and a B4 run.
 
 ## Sub-batch 2: BigInt.asIntN / BigInt.asUintN
 
-Status: implemented in the working tree on top of `725be0ccb`, not
-committed. Interpreter-verified on Mac ARM64 no-JIT with `-ESBigInt`;
+Status: landed in `41ada630f` on top of `725be0ccb`. Interpreter-verified
+on Mac ARM64 no-JIT with `-ESBigInt`;
 JIT is not claimed (same B4 gate as sub-batch 1).
 
 ### Scope
