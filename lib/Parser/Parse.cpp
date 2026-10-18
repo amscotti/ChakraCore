@@ -108,6 +108,7 @@ Parser::Parser(Js::ScriptContext* scriptContext, BOOL strictMode, PageAllocator 
     m_hasDeferredShorthandInitError(false),
     m_deferCommaError(false),
     m_inClassFieldInitializer(false),
+    m_currentClassHasFields(true),
     m_disallowSuperCallInEval(false),
     m_classFieldInitializerUsesArguments(false),
     m_classFieldHelperCount(0),
@@ -6257,15 +6258,12 @@ void Parser::ParseFncDeclHelper(ParseNodeFnc * pnodeFnc, LPCOLESTR pNameHint, us
                 && !m_InAsmMode
                 // Don't defer a module function wrapper because we need to do export resolution at parse time
                 && !fModule
-                // S1: class constructors carry public instance-field initializer
-                // metadata generated after the member list is parsed, so their
-                // body must be materialized during this parse.
-                && !(flags & fFncClassConstructor)
-                // S1: field helper functions are synthetic siblings of class
-                // methods inside the class block. Keep all class members eager
-                // so the fast-scan nested-function layout and the real parse
-                // cannot disagree about method/helper indices.
-                && !(flags & fFncClassMember)
+                // S1: class constructors carry instance-field metadata built
+                // at the end of the class parse. They must be eager when the
+                // class has fields; when building a parser-state cache for a
+                // field-free class they may stay deferred so class source
+                // ranges survive cache serialization.
+                && !((flags & fFncClassConstructor) != 0 && m_currentClassHasFields)
                 // Functions nested in a field initializer are compiled inside
                 // the synthesized initializer helper. The helper's scope info
                 // is built manually, so keep those nested functions eager
@@ -8418,6 +8416,104 @@ LPCOLESTR Parser::ConstructFinalHintNode(IdentPtr pClassName, IdentPtr pMemberNa
     return pFinalName;
 }
 
+// Cheap conservative look-ahead used only while creating a parser-state cache.
+// It answers "might this class body contain an instance field?" by scanning at
+// class-body depth (outside method bodies/parameter lists/computed names).
+// False positives only keep the constructor eager; ambiguous tokens are treated
+// as fields for safety.
+bool Parser::ClassBodyHasFieldSyntax()
+{
+    RestorePoint start;
+    this->GetScanner()->Capture(&start);
+
+    int curlyDepth = 0;
+    int parenDepth = 0;
+    int bracketDepth = 0;
+    tokens lastToken = tkLCurly;
+    bool sawField = false;
+
+    for (;;)
+    {
+        tokens token = m_token.tk;
+        bool atMemberLevel = curlyDepth == 1 && parenDepth == 0 && bracketDepth == 0;
+
+        if (atMemberLevel)
+        {
+            bool newline = this->GetScanner()->FHadNewLine();
+            bool lastLooksLikeName = lastToken == tkID || lastToken == tkIntCon ||
+                lastToken == tkFltCon || lastToken == tkStrCon || lastToken == tkRBrack ||
+                lastToken == tkStar;
+            bool nextLooksLikeMember = token == tkID || token == tkIntCon ||
+                token == tkFltCon || token == tkStrCon || token == tkLBrack ||
+                token == tkStar || token == tkSTATIC || token == tkRCurly;
+            if (lastLooksLikeName && nextLooksLikeMember && (newline || token == tkRCurly))
+            {
+                // ASI-terminated field, including "x }" and "x\n y".
+                sawField = true;
+            }
+            if (token == tkAsg || token == tkSColon)
+            {
+                sawField = true;
+            }
+        }
+
+        switch (token)
+        {
+        case tkLCurly:
+            curlyDepth++;
+            break;
+        case tkRCurly:
+            if (curlyDepth == 1)
+            {
+                goto Done;
+            }
+            if (curlyDepth > 0)
+            {
+                curlyDepth--;
+            }
+            break;
+        case tkLParen:
+            parenDepth++;
+            break;
+        case tkRParen:
+            if (parenDepth > 0)
+            {
+                parenDepth--;
+            }
+            break;
+        case tkLBrack:
+            bracketDepth++;
+            break;
+        case tkRBrack:
+            if (bracketDepth > 0)
+            {
+                bracketDepth--;
+            }
+            break;
+        case tkStrTmplBegin:
+        case tkStrTmplMid:
+        case tkStrTmplEnd:
+        case tkDiv:
+        case tkAsgDiv:
+        case tkScanError:
+        case tkEOF:
+            // Tokenization is context-sensitive here; assume fields so the
+            // constructor is materialized eagerly.
+            sawField = true;
+            goto Done;
+        default:
+            break;
+        }
+
+        lastToken = token;
+        this->GetScanner()->ScanForcingPid();
+    }
+
+Done:
+    this->GetScanner()->SeekTo(start);
+    return sawField;
+}
+
 // S1: synthesize a hidden block-scoped function declaration which evaluates one
 // instance field initializer expression. The function has its own strict `this`
 // binding (the constructor calls it with the instance as the explicit receiver)
@@ -8732,6 +8828,9 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
     {
         Error(ERRnoLcurly);
     }
+
+    bool previousClassHasFields = m_currentClassHasFields;
+    m_currentClassHasFields = this->IsCreatingStateCache() ? ClassBodyHasFieldSyntax() : true;
 
     OUTPUT_TRACE_DEBUGONLY(Js::ES6VerboseFlag, _u("Parsing class (%s) : %s\n"), GetParseType(), name ? name->Psz() : _u("anonymous class"));
 
@@ -9304,6 +9403,7 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
     FinishParseBlock(pnodeBlock);
 
     m_fUseStrictMode = strictSave;
+    m_currentClassHasFields = previousClassHasFields;
 
     this->GetScanner()->Scan();
 

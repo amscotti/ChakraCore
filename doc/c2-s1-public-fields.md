@@ -76,9 +76,13 @@ functions whose body contains `class` are not deferred. The fast scan applies
 the same await/yield restrictions as the real helper parse, so a deferred
 async/generator function cannot hide an invalid initializer until first call.
 A fast-scan stub reserves each initialized field helper's nested slot.
-Constructors and constructor arrows are eager so `super()` sees the complete
-constructor AST. These are correctness trade-offs for S1, not a broad
-defer-parse policy change.
+Constructor arrows are eager so `super()` sees the complete constructor AST.
+For parser-state-cache creation, a conservative class-body look-ahead
+(`ClassBodyHasFieldSyntax`) keeps constructors eager only for classes that may
+have fields; field-free class constructors may stay deferred so their
+class-level source range survives parser-state serialization. This restores
+exact async/generator/computed method prefixes and class `toString` text when
+running with `-force:DeferParse -UseParserStateCache -ParserStateCache`.
 
 `super()` inside a constructor arrow is supported: the parser attaches a copy
 of the field-call list to the arrow, visits/emits it in the arrow frame, and
@@ -143,10 +147,14 @@ Build (Mac ARM64, Test and Debug/static profiles, `-nonative`):
 - `... -- test/es6` — **233 / 0**.
 - `... -- test/es6module` — **31 / 0**.
 - `... -- test/es5` — **56 / 0**.
+- `... -- test/Function` — **70 / 0**, including the existing exact
+  `toStringAll.js -force:DeferParse -UseParserStateCache -ParserStateCache`
+  entry. Its output is byte-for-byte identical to the normal parse and
+  `toStringAll.baseline` (async/generator/computed prefixes and class source).
 - `... zig build check-smoke check-native ...` — green (version/invalid-flag/snippet and shared native smoke).
 - Debug binary: `class-fields-public.js` normal and `-force:deferparse` both **27/27**, including eval/new Function, capture/eval, define-failure, arguments labels/matrix, await/yield, nested-class eval super, cache sequences and arrow-super regressions.
 - `es7/deferparseclass.js` under `-force:deferparse` — **5 / 0**.
-- Final artifacts: `ch` sha256 `e1c6f94961f4c4d90d01572406a5733351b95d274ce1a8d324482745c606cf56`; `libChakraCore.dylib` sha256 `58fbb6461204fcce59adc056b0837293109736ee8835934ae82b007c14ff9f5c`; Debug `ch` sha256 `81ccad348be9afba611caf3a523e5d3a17a861fb1a46b67b72822854d3889a58`. The shared `ch` launcher hash is stable; the dylib/static binary hashes postdate the final source edits.
+- Final artifacts: `ch` sha256 `e1c6f94961f4c4d90d01572406a5733351b95d274ce1a8d324482745c606cf56`; `libChakraCore.dylib` sha256 `52585bd2b13493be02f34ce2f34167ab202c5c66e730c70fd58294b228b33c4b`; Debug `ch` sha256 `fc2839cefa31bff7e85664548a9f8d24d07463ab04287f9d23477541c7237467`. The shared `ch` launcher hash is stable; the dylib/static binary hashes postdate the final source edits.
 
 Focused test262 subset (same pinned corpus, `-nonative`, scenarios):
 `test/language/statements/class/elements/**/*.js` +
@@ -210,7 +218,10 @@ Fixed and regression-tested with the Debug/static binary (no SIGABRT/SIGSEGV):
   named `arguments` are conservatively syntax errors (also avoiding execution
   of a labelled loop).
 - Deferred parsing of class members/class-containing functions is disabled as
-  described above; direct eval in these contexts is force-parsed.
+  described above; direct eval in these contexts is force-parsed. For
+  parser-state-cache creation, field-free constructors remain deferred but
+  field-bearing classes keep the eager constructor path, so their class-level
+  `toString` source is a separate residual; method `toString` is correct.
 - JIT/Backend behavior is unverified: all evidence is Mac ARM64 `-nonative`.
   `InitClassField` has no JIT helper yet, and B4/JIT remains gated.
 
