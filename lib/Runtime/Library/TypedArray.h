@@ -13,6 +13,11 @@ namespace Js
 
     template<typename T> bool TypedArrayCompareElementsHelper(JavascriptArray::CompareVarsInfo* cvInfo, const void* elem1, const void* elem2);
 
+    // BigInt arrays sort in numeric order and pass BigInt values (not
+    // Numbers) to a user comparefn.
+    template <> bool TypedArrayCompareElementsHelper<int64>(JavascriptArray::CompareVarsInfo* cvInfo, const void* elem1, const void* elem2);
+    template <> bool TypedArrayCompareElementsHelper<uint64>(JavascriptArray::CompareVarsInfo* cvInfo, const void* elem1, const void* elem2);
+
     class TypedArrayBase : public ArrayBufferParent
     {
         friend ArrayBuffer;
@@ -205,6 +210,11 @@ namespace Js
         // The byteOffset getter reports zero while the view is out of bounds.
         uint32 GetEffectiveByteOffset() const { return IsOutOfBounds() ? 0 : byteOffset; }
         uint32 GetBytesPerElement() const { return BYTES_PER_ELEMENT; }
+        bool IsBigIntElementType() const
+        {
+            const TypeId typeId = GetTypeId();
+            return typeId == TypeIds_Int64Array || typeId == TypeIds_Uint64Array;
+        }
         bool IsLengthTracking() const { return lengthTracking; }
         byte*  GetByteBuffer() const { return buffer; };
         bool IsDetachedBuffer() const { return this->GetArrayBuffer()->IsDetached(); }

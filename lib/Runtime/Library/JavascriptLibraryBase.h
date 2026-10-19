@@ -67,6 +67,8 @@ namespace Js
         JavascriptFunction* GetUint32ArrayConstructor() { return Uint32ArrayConstructor; }
         JavascriptFunction* GetFloat32ArrayConstructor() { return Float32ArrayConstructor; }
         JavascriptFunction* GetFloat64ArrayConstructor() { return Float64ArrayConstructor; }
+        JavascriptFunction* GetBigInt64ArrayConstructor() { return BigInt64ArrayConstructor; }
+        JavascriptFunction* GetBigUint64ArrayConstructor() { return BigUint64ArrayConstructor; }
         JavascriptFunction* GetMapConstructor() { return mapConstructor; }
         JavascriptFunction* GetSetConstructor() { return setConstructor; }
         JavascriptFunction* GetWeakMapConstructor() { return weakMapConstructor; }
@@ -182,6 +184,8 @@ namespace Js
         Field(RuntimeFunction*) Uint32ArrayConstructor;
         Field(RuntimeFunction*) Float32ArrayConstructor;
         Field(RuntimeFunction*) Float64ArrayConstructor;
+        Field(RuntimeFunction*) BigInt64ArrayConstructor;
+        Field(RuntimeFunction*) BigUint64ArrayConstructor;
         Field(RuntimeFunction*) arrayBufferConstructor;
         Field(RuntimeFunction*) dataViewConstructor;
         Field(RuntimeFunction*) booleanConstructor;
@@ -249,8 +253,8 @@ namespace Js
         Field(DynamicObject*) Uint32ArrayPrototype;
         Field(DynamicObject*) Float32ArrayPrototype;
         Field(DynamicObject*) Float64ArrayPrototype;
-        Field(DynamicObject*) Int64ArrayPrototype;
-        Field(DynamicObject*) Uint64ArrayPrototype;
+        Field(DynamicObject*) BigInt64ArrayPrototype;
+        Field(DynamicObject*) BigUint64ArrayPrototype;
         Field(DynamicObject*) BoolArrayPrototype;
         Field(DynamicObject*) CharArrayPrototype;
         Field(DynamicObject*) arrayBufferPrototype;

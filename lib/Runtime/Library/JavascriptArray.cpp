@@ -9863,7 +9863,14 @@ Case0:
             fillValue = args[1];
             if (isTypedArrayEntryPoint)
             {
-                JS_REENTRANT_UNLOCK(jsReentLock, fillValue = JavascriptNumber::ToVarNoCheck(JavascriptConversion::ToNumber(fillValue, scriptContext), scriptContext));
+                if (typedArrayBase->IsBigIntElementType())
+                {
+                    JS_REENTRANT_UNLOCK(jsReentLock, fillValue = JavascriptConversion::ToBigInt(fillValue, scriptContext));
+                }
+                else
+                {
+                    JS_REENTRANT_UNLOCK(jsReentLock, fillValue = JavascriptNumber::ToVarNoCheck(JavascriptConversion::ToNumber(fillValue, scriptContext), scriptContext));
+                }
             }
         }
         else

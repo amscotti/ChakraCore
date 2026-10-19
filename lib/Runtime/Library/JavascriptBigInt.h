@@ -84,6 +84,14 @@ namespace Js
         // this factory; only the constructor's NumberToBigInt step uses it.
         static JavascriptBigInt * CreateFromNumber(double value, ScriptContext * scriptContext);
         static JavascriptBigInt * CreateFromString(const char16 * content, charcount_t cchContent, ScriptContext * scriptContext);
+        // Exact 64-bit factories for BigInt64Array/BigUint64Array element
+        // reads. They avoid routing through a double, so every bit pattern
+        // (including INT64_MIN and values above 2**53) is exact.
+        static JavascriptBigInt * CreateFromInt64(int64 value, ScriptContext * scriptContext);
+        static JavascriptBigInt * CreateFromUInt64(uint64 value, ScriptContext * scriptContext);
+        // Low 64 bits of the two's-complement representation (ToBigInt64 /
+        // ToBigUint64). Negative values wrap modulo 2**64.
+        uint64 ToUInt64Low() const;
         virtual RecyclableObject * CloneToScriptContext(ScriptContext* requestContext) override;
         virtual RecyclableObject* ToObject(ScriptContext * requestContext) override;
         virtual Var GetTypeOfString(ScriptContext * requestContext) override;

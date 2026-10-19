@@ -192,6 +192,9 @@ CommonNumber:
                 }
             }
             break;
+        case TypeIds_BigInt:
+            return rightType == TypeIds_BigInt &&
+                JavascriptBigInt::Equals(UnsafeVarTo<JavascriptBigInt>(aLeft), UnsafeVarTo<JavascriptBigInt>(aRight));
         case TypeIds_Boolean:
             return false;
         case TypeIds_String:

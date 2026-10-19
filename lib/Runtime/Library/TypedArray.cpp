@@ -16,6 +16,45 @@
 
 namespace Js
 {
+    namespace
+    {
+        // Reinterpret the low 64 bits as a signed integer without relying on
+        // an implementation-defined uint64-to-int64 conversion.
+        inline int64 BigInt64Bits(uint64 bits)
+        {
+            const uint64 int64Max = 0x7fffffffffffffffULL;
+            if (bits <= int64Max)
+            {
+                return static_cast<int64>(bits);
+            }
+            const int64 int64Min = -0x7fffffffffffffffLL - 1;
+            return static_cast<int64>(bits - (int64Max + 1)) + int64Min;
+        }
+
+        // ToBigInt64 / ToBigUint64 for typed-array element stores. ToBigInt
+        // performs the observable conversion (including user code); the low
+        // 64 bits of the two's-complement value are stored.
+        int64 ToBigInt64Element(Var value, ScriptContext* scriptContext)
+        {
+            return BigInt64Bits(JavascriptConversion::ToBigInt(value, scriptContext)->ToUInt64Low());
+        }
+
+        uint64 ToBigUint64Element(Var value, ScriptContext* scriptContext)
+        {
+            return JavascriptConversion::ToBigInt(value, scriptContext)->ToUInt64Low();
+        }
+
+        inline Var BigInt64ElementAt(int64* buffer, uint32 index, ScriptContext* scriptContext)
+        {
+            return JavascriptBigInt::CreateFromInt64(buffer[index], scriptContext);
+        }
+
+        inline Var BigUint64ElementAt(uint64* buffer, uint32 index, ScriptContext* scriptContext)
+        {
+            return JavascriptBigInt::CreateFromUInt64(buffer[index], scriptContext);
+        }
+    }
+
     // explicitly instantiate these function for the built in entry point FunctionInfo
     INSTANTIATE_BUILT_IN_ENTRYPOINTS(Int8Array)
     INSTANTIATE_BUILT_IN_ENTRYPOINTS(Uint8Array)
@@ -1242,6 +1281,14 @@ namespace Js
             name = scriptContext->GetPropertyString(PropertyIds::Float64Array);
             break;
 
+        case TypeIds_Int64Array:
+            name = scriptContext->GetLibrary()->CreateStringFromCppLiteral(_u("BigInt64Array"));
+            break;
+
+        case TypeIds_Uint64Array:
+            name = scriptContext->GetLibrary()->CreateStringFromCppLiteral(_u("BigUint64Array"));
+            break;
+
         default:
             name = scriptContext->GetLibrary()->GetUndefinedDisplayString();
             break;
@@ -2271,6 +2318,74 @@ namespace Js
         }
     }
 
+    template<>
+    bool TypedArrayCompareElementsHelper<int64>(JavascriptArray::CompareVarsInfo* cvInfo, const void* elem1, const void* elem2)
+    {
+        const int64 x = *static_cast<const int64*>(elem1);
+        const int64 y = *static_cast<const int64*>(elem2);
+        if (cvInfo->compFn == nullptr)
+        {
+            return x < y;
+        }
+
+        ScriptContext* scriptContext = cvInfo->compFn->GetScriptContext();
+        RecyclableObject* compFn = cvInfo->compFn;
+        Var retVal = nullptr;
+        BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+        {
+            retVal = CALL_FUNCTION(scriptContext->GetThreadContext(),
+                compFn, CallInfo(CallFlags_Value, 3),
+                scriptContext->GetLibrary()->GetUndefined(),
+                JavascriptBigInt::CreateFromInt64(x, scriptContext),
+                JavascriptBigInt::CreateFromInt64(y, scriptContext));
+        }
+        END_SAFE_REENTRANT_CALL
+
+        if (TaggedInt::Is(retVal))
+        {
+            return TaggedInt::ToInt32(retVal) < 0;
+        }
+        if (JavascriptNumber::Is_NoTaggedIntCheck(retVal))
+        {
+            return JavascriptNumber::GetValue(retVal) < 0;
+        }
+        return JavascriptConversion::ToNumber_Full(retVal, scriptContext) < 0;
+    }
+
+    template<>
+    bool TypedArrayCompareElementsHelper<uint64>(JavascriptArray::CompareVarsInfo* cvInfo, const void* elem1, const void* elem2)
+    {
+        const uint64 x = *static_cast<const uint64*>(elem1);
+        const uint64 y = *static_cast<const uint64*>(elem2);
+        if (cvInfo->compFn == nullptr)
+        {
+            return x < y;
+        }
+
+        ScriptContext* scriptContext = cvInfo->compFn->GetScriptContext();
+        RecyclableObject* compFn = cvInfo->compFn;
+        Var retVal = nullptr;
+        BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+        {
+            retVal = CALL_FUNCTION(scriptContext->GetThreadContext(),
+                compFn, CallInfo(CallFlags_Value, 3),
+                scriptContext->GetLibrary()->GetUndefined(),
+                JavascriptBigInt::CreateFromUInt64(x, scriptContext),
+                JavascriptBigInt::CreateFromUInt64(y, scriptContext));
+        }
+        END_SAFE_REENTRANT_CALL
+
+        if (TaggedInt::Is(retVal))
+        {
+            return TaggedInt::ToInt32(retVal) < 0;
+        }
+        if (JavascriptNumber::Is_NoTaggedIntCheck(retVal))
+        {
+            return JavascriptNumber::GetValue(retVal) < 0;
+        }
+        return JavascriptConversion::ToNumber_Full(retVal, scriptContext) < 0;
+    }
+
     // TypedArray.prototype.sort entry point
     // Implements #sec-%typedarray%.prototype.sort from ECMA 2023 spec
     // 
@@ -2427,6 +2542,14 @@ namespace Js
         return number;
     }
 
+    static Var TypedToBigInt(Var value, ScriptContext* scriptContext)
+    {
+        JS_REENTRANCY_LOCK(jsReentLock, scriptContext->GetThreadContext());
+        Var bigint = nullptr;
+        JS_REENTRANT(jsReentLock, bigint = JavascriptConversion::ToBigInt(value, scriptContext));
+        return bigint;
+    }
+
     // %TypedArray%.prototype.toReversed. Length 0 is a new empty array of the same type.
     Var TypedArrayBase::EntryToReversed(RecyclableObject* function, CallInfo callInfo, ...)
     {
@@ -2542,24 +2665,35 @@ namespace Js
             : static_cast<double>(length) + relative;
 
         Var value = args.Info.Count > 2 ? args[2] : scriptContext->GetLibrary()->GetUndefined();
-        double numeric = TypedToNumber(value, scriptContext);
+        Var convertedValue = nullptr;
+        if (source->IsBigIntElementType())
+        {
+            // ES2023 %TypedArray%.prototype.with step 7: BigInt content uses
+            // ToBigInt, not ToNumber. The conversion runs before the live
+            // index check and before the copy.
+            convertedValue = TypedToBigInt(value, scriptContext);
+        }
+        else
+        {
+            double numeric = TypedToNumber(value, scriptContext);
+            convertedValue = JavascriptNumber::ToVarNoCheck(numeric, scriptContext);
+        }
 
-        // ToNumber can grow or shrink the buffer. The positive index is not
-        // clamped to the captured length; validity is checked against the
-        // current element length.
+        // The value conversion can grow or shrink the buffer. The positive
+        // index is not clamped to the captured length; validity is checked
+        // against the current element length.
         uint32 currentLength = source->GetLength();
         if (source->IsDetachedBuffer() || actualIndex < 0 || actualIndex >= static_cast<double>(currentLength))
         {
             JavascriptError::ThrowRangeError(scriptContext, JSERR_InvalidTypedArrayIndex);
         }
         uint32 actual = static_cast<uint32>(actualIndex);
-        Var boxed = JavascriptNumber::ToVarNoCheck(numeric, scriptContext);
         TypedArrayBase* result = CreateSameType(source, length);
         for (uint32 k = 0; k < length; ++k)
         {
             if (k == actual)
             {
-                result->DirectSetItem(k, boxed);
+                result->DirectSetItem(k, convertedValue);
             }
             else
             {
@@ -2629,6 +2763,14 @@ namespace Js
 
         case TypeIds_Float64Array:
             stringBuilder->AppendCppLiteral(_u("Object, (Float64Array)"));
+            break;
+
+        case TypeIds_Int64Array:
+            stringBuilder->AppendCppLiteral(_u("Object, (BigInt64Array)"));
+            break;
+
+        case TypeIds_Uint64Array:
+            stringBuilder->AppendCppLiteral(_u("Object, (BigUint64Array)"));
             break;
 
         default:
@@ -2783,6 +2925,10 @@ namespace Js
             return scriptContext->GetLibrary()->GetFloat32ArrayConstructor();
         case TypeId::TypeIds_Float64Array:
             return scriptContext->GetLibrary()->GetFloat64ArrayConstructor();
+        case TypeId::TypeIds_Int64Array:
+            return scriptContext->GetLibrary()->GetBigInt64ArrayConstructor();
+        case TypeId::TypeIds_Uint64Array:
+            return scriptContext->GetLibrary()->GetBigUint64ArrayConstructor();
         default:
             Assert(UNREACHED);
             return nullptr;
@@ -2971,8 +3117,8 @@ namespace Js
     DIRECT_SET_NO_DETACH_CHECK(Float32VirtualArray, JavascriptConversion::ToFloat);
     DIRECT_SET_NO_DETACH_CHECK(Float64Array, JavascriptConversion::ToNumber);
     DIRECT_SET_NO_DETACH_CHECK(Float64VirtualArray, JavascriptConversion::ToNumber);
-    DIRECT_SET_NO_DETACH_CHECK(Int64Array, JavascriptConversion::ToInt64);
-    DIRECT_SET_NO_DETACH_CHECK(Uint64Array, JavascriptConversion::ToUInt64);
+    DIRECT_SET_NO_DETACH_CHECK(Int64Array, ToBigInt64Element);
+    DIRECT_SET_NO_DETACH_CHECK(Uint64Array, ToBigUint64Element);
     DIRECT_SET_NO_DETACH_CHECK(Uint8ClampedArray, JavascriptConversion::ToUInt8Clamped);
     DIRECT_SET_NO_DETACH_CHECK(Uint8ClampedVirtualArray, JavascriptConversion::ToUInt8Clamped);
     DIRECT_SET_NO_DETACH_CHECK(BoolArray, JavascriptConversion::ToBool);
@@ -3003,8 +3149,6 @@ namespace Js
     DIRECT_GET_NO_DETACH_CHECK(Int32VirtualArray);
     DIRECT_GET_NO_DETACH_CHECK(Uint32Array);
     DIRECT_GET_NO_DETACH_CHECK(Uint32VirtualArray);
-    DIRECT_GET_NO_DETACH_CHECK(Int64Array);
-    DIRECT_GET_NO_DETACH_CHECK(Uint64Array);
     DIRECT_GET_NO_DETACH_CHECK(Uint8ClampedArray);
     DIRECT_GET_NO_DETACH_CHECK(Uint8ClampedVirtualArray);
     DIRECT_GET_VAR_CHECK_NO_DETACH_CHECK(Float32Array);
@@ -3516,19 +3660,37 @@ namespace Js
     template<>
     inline BOOL Int64Array::DirectSetItem(_In_ uint32 index, _In_ Js::Var value)
     {
-        return BaseTypedDirectSetItem(index, value, JavascriptConversion::ToInt64);
+        return BaseTypedDirectSetItem(index, value, ToBigInt64Element);
     }
 
     template<>
     inline BOOL Int64Array::DirectSetItemNoSet(_In_ uint32 index, _In_ Js::Var value)
     {
-        return BaseTypedDirectSetItemNoSet(index, value, JavascriptConversion::ToInt64);
+        return BaseTypedDirectSetItemNoSet(index, value, ToBigInt64Element);
     }
 
     template<>
     inline Var Int64Array::DirectGetItem(_In_ uint32 index)
     {
-        return BaseTypedDirectGetItem(index);
+        if (this->IsDetachedBuffer())
+        {
+            JavascriptError::ThrowTypeError(GetScriptContext(), JSERR_DetachedTypedArray);
+        }
+        if (index < GetLength())
+        {
+            Assert((index + 1) * sizeof(int64) + GetByteOffset() <= GetArrayBuffer()->GetByteLength());
+            return BigInt64ElementAt((int64*)buffer, index, GetScriptContext());
+        }
+        return GetLibrary()->GetUndefined();
+    }
+
+    template<>
+    inline Var Int64Array::DirectGetItemNoDetachCheck(_In_ uint32 index)
+    {
+        Assert(!IsDetachedBuffer());
+        Assert(index < GetLength());
+        Assert((index + 1) * sizeof(int64) + GetByteOffset() <= GetArrayBuffer()->GetByteLength());
+        return BigInt64ElementAt((int64*)buffer, index, GetScriptContext());
     }
 
     template<>
@@ -3540,19 +3702,37 @@ namespace Js
     template<>
     inline BOOL Uint64Array::DirectSetItem(_In_ uint32 index, _In_ Js::Var value)
     {
-        return BaseTypedDirectSetItem(index, value, JavascriptConversion::ToUInt64);
+        return BaseTypedDirectSetItem(index, value, ToBigUint64Element);
     }
 
     template<>
     inline BOOL Uint64Array::DirectSetItemNoSet(_In_ uint32 index, _In_ Js::Var value)
     {
-        return BaseTypedDirectSetItemNoSet(index, value, JavascriptConversion::ToUInt64);
+        return BaseTypedDirectSetItemNoSet(index, value, ToBigUint64Element);
     }
 
     template<>
     inline Var Uint64Array::DirectGetItem(_In_ uint32 index)
     {
-        return BaseTypedDirectGetItem(index);
+        if (this->IsDetachedBuffer())
+        {
+            JavascriptError::ThrowTypeError(GetScriptContext(), JSERR_DetachedTypedArray);
+        }
+        if (index < GetLength())
+        {
+            Assert((index + 1) * sizeof(uint64) + GetByteOffset() <= GetArrayBuffer()->GetByteLength());
+            return BigUint64ElementAt((uint64*)buffer, index, GetScriptContext());
+        }
+        return GetLibrary()->GetUndefined();
+    }
+
+    template<>
+    inline Var Uint64Array::DirectGetItemNoDetachCheck(_In_ uint32 index)
+    {
+        Assert(!IsDetachedBuffer());
+        Assert(index < GetLength());
+        Assert((index + 1) * sizeof(uint64) + GetByteOffset() <= GetArrayBuffer()->GetByteLength());
+        return BigUint64ElementAt((uint64*)buffer, index, GetScriptContext());
     }
 
     template<>
