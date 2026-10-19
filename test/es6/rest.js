@@ -29,6 +29,8 @@ var tests = [
       assert.throws(function () { eval("function foo(a = b, ...[b]) {}; foo();")}, ReferenceError, "Rest parameters cannot be referenced in default expressions (use before declaration)", "Use before declaration");
       assert.throws(function () { eval("function foo(a = b, ...{c:b}) {}; foo();")}, ReferenceError, "Rest parameters cannot be referenced in default expressions (use before declaration)", "Use before declaration");
 
+      // Tracked P4 residual: body eval over a non-simple parameter list still over-rejects.
+      // See doc/c2-s14-global-eval-declarations.md; these are not Node-conforming expectations.
       // Redeclaration errors - non-simple in this case means any parameter list with a rest parameter
       assert.doesNotThrow(function () { eval("function foo(...a) { var a; }"); },
                     "Var redeclaration does not throw with a non-simple parameter list");

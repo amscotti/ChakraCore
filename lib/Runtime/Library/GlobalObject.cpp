@@ -1973,6 +1973,22 @@ LHexError:
             JavascriptError::ThrowSyntaxError(GetScriptContext(), ERRRedeclaration);
         }
 
+        bool isAnnexBBlockFunction = false;
+        if (VarIs<JavascriptFunction>(value))
+        {
+            isAnnexBBlockFunction = (VarTo<JavascriptFunction>(value)->GetFunctionInfo()->GetAttributes() &
+                Js::FunctionInfo::Attributes::AnnexBBlockFunction) != 0;
+        }
+
+        if (isAnnexBBlockFunction)
+        {
+            // The synthetic Annex B block-function assignment is an ordinary
+            // SetMutableBinding: writable data is updated in place, an
+            // accessor invokes its setter, and a non-writable data property is
+            // left unchanged rather than redefined.
+            return DynamicObject::SetProperty(propertyId, value, PropertyOperation_None, nullptr);
+        }
+
         // CreateGlobalFunctionBinding (called by EvalDeclarationInstantiation
         // with D = true): a configurable or absent property receives the
         // writable/enumerable/configurable data defaults; a non-configurable
@@ -1981,21 +1997,6 @@ LHexError:
         if (hasRootProperty &&
             JavascriptOperators::GetOwnPropertyDescriptor(this, propertyId, GetScriptContext(), &existing))
         {
-            bool isAnnexBBlockFunction = false;
-            if (VarIs<JavascriptFunction>(value))
-            {
-                isAnnexBBlockFunction = (VarTo<JavascriptFunction>(value)->GetFunctionInfo()->GetAttributes() &
-                    Js::FunctionInfo::Attributes::AnnexBBlockFunction) != 0;
-            }
-
-            // The Annex B synthetic var store keeps a writable property's
-            // attributes. Ordinary eval function bindings use the
-            // CreateGlobalFunctionBinding defaults unless non-configurable.
-            if (existing.IsDataDescriptor() && existing.IsWritable() && isAnnexBBlockFunction)
-            {
-                return DynamicObject::SetPropertyWithAttributes(
-                    propertyId, value, existing.GetAttributes(), nullptr, PropertyOperation_ThrowIfNotExtensible);
-            }
 
             PropertyDescriptor descriptor;
             descriptor.SetValue(value);

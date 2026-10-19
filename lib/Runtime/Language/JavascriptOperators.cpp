@@ -3515,7 +3515,7 @@ CommonNumber:
 
     BOOL JavascriptOperators::OP_InitFuncScoped(FrameDisplay *pScope, PropertyId propertyId, Var newValue, Var defaultInstance, ScriptContext* scriptContext)
     {
-        JIT_HELPER_NOT_REENTRANT_HEADER(Op_InitFuncScoped, reentrancylock, scriptContext->GetThreadContext());
+        JIT_HELPER_REENTRANT_HEADER(Op_InitFuncScoped);
         int i;
         int length = pScope->GetLength();
         DynamicObject *obj;

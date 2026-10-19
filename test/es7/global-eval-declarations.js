@@ -266,6 +266,32 @@ var tests = [
         }
     },
     {
+        name: "Annex B eval block-function stores use SetMutableBinding semantics",
+        body() {
+            loadScript('Object.defineProperty(this, "geAnnexBNonWritable", { value: "original", writable: false, enumerable: false, configurable: false });');
+            loadScript('eval("if (true) { function geAnnexBNonWritable() {} }");');
+            assert.strictEqual(geAnnexBNonWritable, "original", "non-writable data property is unchanged");
+            var descriptor = Object.getOwnPropertyDescriptor(global, "geAnnexBNonWritable");
+            assert.strictEqual(descriptor.writable, false, "non-writable data property remains non-writable");
+            assert.strictEqual(descriptor.configurable, false, "non-writable data property remains non-configurable");
+
+            loadScript('Object.defineProperty(this, "geAnnexBAccessorDirect", { get: function () { return "get"; }, set: function (v) { this.geAnnexBAccessorDirectSet = v; }, enumerable: false, configurable: true }); eval("if (true) { function geAnnexBAccessorDirect() {} }");');
+            assert.strictEqual(geAnnexBAccessorDirect, "get", "direct eval leaves the getter unchanged");
+            assert.strictEqual(typeof geAnnexBAccessorDirectSet, "function", "direct eval invokes the setter");
+
+            loadScript('Object.defineProperty(this, "geAnnexBAccessorIndirect", { get: function () { return "get"; }, set: function (v) { this.geAnnexBAccessorIndirectSet = v; }, enumerable: false, configurable: true }); (0, eval)("if (true) { function geAnnexBAccessorIndirect() {} }");');
+            assert.strictEqual(geAnnexBAccessorIndirect, "get", "indirect eval leaves the getter unchanged");
+            assert.strictEqual(typeof geAnnexBAccessorIndirectSet, "function", "indirect eval invokes the setter");
+
+            loadScript('Object.defineProperty(this, "geAnnexBWritable", { value: "original", writable: true, enumerable: false, configurable: true }); eval("if (true) { function geAnnexBWritable() {} }");');
+            assert.strictEqual(typeof geAnnexBWritable, "function", "writable data property is updated");
+            descriptor = Object.getOwnPropertyDescriptor(global, "geAnnexBWritable");
+            assert.strictEqual(descriptor.enumerable, false, "writable data property keeps enumerable");
+            assert.strictEqual(descriptor.writable, true, "writable data property keeps writable");
+            assert.strictEqual(descriptor.configurable, true, "writable data property keeps configurable");
+        }
+    },
+    {
         name: "CanDeclareGlobalFunction precedes the Annex B synthetic preflight",
         body() {
             Object.defineProperty(global, "geOrderNonDefinable", {

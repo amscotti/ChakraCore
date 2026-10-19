@@ -49,6 +49,8 @@ var tests = [
 
       assert.throws(function () { eval("function foo(a *= 5)"); },                          SyntaxError, "Other assignment operators do not work");
 
+      // Tracked P4 residual: body eval over a non-simple parameter list still over-rejects.
+      // See doc/c2-s14-global-eval-declarations.md; these are not Node-conforming expectations.
       // Redeclaration errors - non-simple in this case means any parameter list with a default expression
       assert.doesNotThrow(function () { eval("function foo(a = 1) { var a; }"); },            "Var redeclaration with a non-simple parameter list");
       assert.doesNotThrow(function () { eval("function foo(a = 1, b) { var b; }"); },         "Var redeclaration does not throw with a non-simple parameter list on a non-default parameter");

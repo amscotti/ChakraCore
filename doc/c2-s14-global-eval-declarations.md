@@ -124,7 +124,7 @@ Pinned corpus `2e0a56762801e275a9fdf96dc49d90ba0cddcf63`, flags
 `out/` caches. Final binary `zig-out/bin/ch` (sha256
 `3a57922e9ae7cfbf10477e17216507034fdca33e16312533bf95db1d6371c35e`) and
 `libChakraCore.dylib` (sha256
-`caaaa547d0302ea2a96f083213d845ff14c097dd5757990fd7d2e1a782afd3e7`). The
+1b3375f41655b1460159943e33553f94bb050edf8765d1d677a73305bab1b33e). The
 "before" dylib is
 `d8e0eb0fb6ab0773c83d800f9cf39262f52951f1f656f8b94ae6d90470a266e9`.
 
@@ -146,7 +146,7 @@ corrected host, **38 fail→pass / 0 pass→fail** and all **112** previously
 passing controls remain green; the other four recorded failures are the
 host-wrapper cases above. Artifacts:
 `out/test262-p4-global-throw-before`, `out/test262-p4-var-env-before`,
-`out/test262-p4-scope-throw-before`, `out/test262-p4-r40-{global,var-env,scope}`.
+`out/test262-p4-scope-throw-before`, `out/test262-p4-r44-{global,var-env,scope}`.
 The split also satisfies the triage's 19+23 batch shape: global-code 19 flips
 (15 engine + 4 host), eval-code 23 flips (7 var-env + 16 parameter-default).
 
@@ -156,7 +156,7 @@ Controls and related selections:
 |---|---:|---:|
 | P3 skip selection (280) | 280/0 | **280/0** |
 | full Annex B three directories (782) | P3 doc: 765/17 | **782/0** |
-| direct/indirect non-definable eval selection (15) | not part of P4 baseline | **15/0** (`out/test262-p4-r40-nondef`) |
+| direct/indirect non-definable eval selection (15) | not part of P4 baseline | **15/0** (`out/test262-p4-r44-nondef`) |
 | `test/language/block-scope/**/*.js` (287) | 287/0 | **287/0** |
 | P1 completion selection (156) | 152/4 known class/using | **152/4** |
 | `test/es7` legacy suite | 57/0 existing (57/1 with new test) | **58/0** |
@@ -244,11 +244,9 @@ against its 31-file blast radius.
   `CanDeclareGlobalVar` opcode. The selected tests pass and the first new var
   throws before body execution; a multi-var script with an earlier already
   existing binding was checked to create no new property before throwing.
-- `InitFuncScoped`/`InitPropertyInEval` preserve attributes for an existing
-  writable data property, which Annex B requires. An ordinary eval function
-  binding over a writable+configurable non-enumerable property therefore keeps
-  its enumerable flag instead of resetting to the function-binding default; no
-  test262 scenario in this selection exercises that combination.
+- The Annex B synthetic block-function assignment uses ordinary
+  `SetMutableBinding` semantics: writable data is updated in place, an accessor
+  setter runs, and a non-writable data property is left unchanged.
 - The interpreter routes eval declaration preflights through the eval
   environment; the JIT lowering still calls the root-only helper. JIT behavior
   and configuration are B4-owned and are not claimed here.
