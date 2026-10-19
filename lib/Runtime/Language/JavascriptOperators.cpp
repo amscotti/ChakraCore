@@ -3164,6 +3164,9 @@ CommonNumber:
         if (VarIs<RootObjectBase>(instance))
         {
             attributes |= PropertyLetConstGlobal;
+            // Global lexical bindings are not properties of the global object
+            // in the spec and must be created even when it is non-extensible.
+            flags = static_cast<PropertyOperationFlags>(flags | PropertyOperation_Force);
         }
 
         instance->SetPropertyWithAttributes(propertyId, newValue, attributes, NULL, (PropertyOperationFlags)(flags | PropertyOperation_AllowUndecl));
@@ -3183,6 +3186,9 @@ CommonNumber:
         if (VarIs<RootObjectBase>(instance))
         {
             attributes |= PropertyLetConstGlobal;
+            // Global lexical bindings are not properties of the global object
+            // in the spec and must be created even when it is non-extensible.
+            flags = static_cast<PropertyOperationFlags>(flags | PropertyOperation_Force);
         }
 
         instance->SetPropertyWithAttributes(propertyId, newValue, attributes, NULL, (PropertyOperationFlags)(flags | PropertyOperation_AllowUndecl));
@@ -3196,7 +3202,7 @@ CommonNumber:
         RecyclableObject* instance = VarTo<RecyclableObject>(obj);
         JIT_HELPER_NOT_REENTRANT_HEADER(Op_InitUndeclRootLetFld, reentrancylock, instance->GetScriptContext()->GetThreadContext());
 
-        PropertyOperationFlags flags = static_cast<PropertyOperationFlags>(PropertyOperation_SpecialValue | PropertyOperation_AllowUndecl);
+        PropertyOperationFlags flags = static_cast<PropertyOperationFlags>(PropertyOperation_SpecialValue | PropertyOperation_AllowUndecl | PropertyOperation_Force);
         PropertyAttributes attributes = PropertyLetDefaults | PropertyLetConstGlobal;
 
         instance->SetPropertyWithAttributes(propertyId, instance->GetLibrary()->GetUndeclBlockVar(), attributes, NULL, flags);
@@ -3210,7 +3216,7 @@ CommonNumber:
         RecyclableObject* instance = VarTo<RecyclableObject>(obj);
         JIT_HELPER_NOT_REENTRANT_HEADER(Op_InitUndeclRootConstFld, reentrancylock, instance->GetScriptContext()->GetThreadContext());
 
-        PropertyOperationFlags flags = static_cast<PropertyOperationFlags>(PropertyOperation_SpecialValue | PropertyOperation_AllowUndecl);
+        PropertyOperationFlags flags = static_cast<PropertyOperationFlags>(PropertyOperation_SpecialValue | PropertyOperation_AllowUndecl | PropertyOperation_Force);
         PropertyAttributes attributes = PropertyConstDefaults | PropertyLetConstGlobal;
 
         instance->SetPropertyWithAttributes(propertyId, instance->GetLibrary()->GetUndeclBlockVar(), attributes, NULL, flags);
@@ -3509,7 +3515,7 @@ CommonNumber:
 
     BOOL JavascriptOperators::OP_InitFuncScoped(FrameDisplay *pScope, PropertyId propertyId, Var newValue, Var defaultInstance, ScriptContext* scriptContext)
     {
-        JIT_HELPER_NOT_REENTRANT_HEADER(Op_InitFuncScoped, reentrancylock, scriptContext->GetThreadContext());
+        JIT_HELPER_REENTRANT_HEADER(Op_InitFuncScoped);
         int i;
         int length = pScope->GetLength();
         DynamicObject *obj;
@@ -8060,6 +8066,87 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
         object = VarTo<RecyclableObject>(defaultInstance);
         object->EnsureNoRedeclProperty(propertyId);
         JIT_HELPER_END(Op_EnsureNoRedeclPropertyScoped);
+    }
+
+    void JavascriptOperators::OP_ScopedEnsureCanDeclGloFunc(FrameDisplay *pDisplay, PropertyId propertyId, Var defaultInstance)
+    {
+        JIT_HELPER_NOT_REENTRANT_NOLOCK_HEADER(Op_ScopedEnsureCanDeclGloFunc);
+        int length = pDisplay->GetLength();
+
+        for (int i = 0; i < length; i++)
+        {
+            Var item = pDisplay->GetItem(i);
+            if (item == nullptr)
+            {
+                continue;
+            }
+            RecyclableObject *object = VarTo<RecyclableObject>(item);
+            if (VarIs<RootObjectBase>(object))
+            {
+                VarTo<RootObjectBase>(object)->EnsureCanDeclGloFunc(propertyId);
+                return;
+            }
+
+            // The first non-block activation object is the eval's var
+            // environment. EvalDeclarationInstantiation calls
+            // CanDeclareGlobalFunction only when that environment is global.
+            if (VarIs<ActivationObject>(object) &&
+                !VarIs<BlockActivationObject>(object) &&
+                !VarIs<PseudoActivationObject>(object))
+            {
+                return;
+            }
+        }
+
+        if (defaultInstance != nullptr)
+        {
+            RecyclableObject *object = VarTo<RecyclableObject>(defaultInstance);
+            if (VarIs<RootObjectBase>(object))
+            {
+                VarTo<RootObjectBase>(object)->EnsureCanDeclGloFunc(propertyId);
+            }
+        }
+        JIT_HELPER_END(Op_ScopedEnsureCanDeclGloFunc);
+    }
+
+    void JavascriptOperators::OP_ScopedEnsureNoGlobalLexical(FrameDisplay *pDisplay, PropertyId propertyId, Var defaultInstance)
+    {
+        JIT_HELPER_NOT_REENTRANT_NOLOCK_HEADER(Op_ScopedEnsureNoGlobalLexical);
+        int length = pDisplay->GetLength();
+
+        for (int i = 0; i < length; i++)
+        {
+            Var item = pDisplay->GetItem(i);
+            if (item == nullptr)
+            {
+                continue;
+            }
+            RecyclableObject *object = VarTo<RecyclableObject>(item);
+            if (VarIs<RootObjectBase>(object))
+            {
+                VarTo<RootObjectBase>(object)->EnsureNoGlobalLexical(propertyId);
+                return;
+            }
+
+            // A local var environment means the synthetic Annex B var belongs
+            // to the caller function, not the global environment.
+            if (VarIs<ActivationObject>(object) &&
+                !VarIs<BlockActivationObject>(object) &&
+                !VarIs<PseudoActivationObject>(object))
+            {
+                return;
+            }
+        }
+
+        if (defaultInstance != nullptr)
+        {
+            RecyclableObject *object = VarTo<RecyclableObject>(defaultInstance);
+            if (VarIs<RootObjectBase>(object))
+            {
+                VarTo<RootObjectBase>(object)->EnsureNoGlobalLexical(propertyId);
+            }
+        }
+        JIT_HELPER_END(Op_ScopedEnsureNoGlobalLexical);
     }
 
     Var JavascriptOperators::IsIn(Var argProperty, Var instance, ScriptContext* scriptContext)

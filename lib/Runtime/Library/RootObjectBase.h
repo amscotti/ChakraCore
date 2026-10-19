@@ -47,6 +47,7 @@ namespace Js
         PropertyIndex GetRootPropertyIndex(PropertyId propertyId);
 
         void EnsureNoProperty(PropertyId propertyId);
+        void EnsureNoGlobalLexical(PropertyId propertyId);
 
         template <typename Fn>
         void MapLetConstGlobals(Fn fn);

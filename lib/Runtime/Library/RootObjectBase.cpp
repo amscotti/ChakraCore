@@ -136,13 +136,42 @@ namespace Js
     void
     RootObjectBase::EnsureCanDeclGloFunc(PropertyId propertyId)
     {
-        // #sec-candeclareglobalfunction states that if an exisiting property is
-        // not configurable, not writable, and not enumerable, return false.
-        if (!IsConfigurable(propertyId) && !IsWritable(propertyId) && !IsEnumerable(propertyId))
+        ScriptContext *scriptContext = GetScriptContext();
+
+        // A lexical declaration in the global environment is not an own
+        // property of the global object, but GlobalDeclarationInstantiation
+        // still rejects a function declaration whose name occurs in
+        // VarDeclaredNames when HasLexicalDeclaration is true.
+        bool noRedecl = false;
+        if (GetTypeHandler()->HasRootProperty(this, propertyId, &noRedecl) && noRedecl)
         {
-            JavascriptError::ThrowTypeError(GetScriptContext(), JSERR_InvalidGloFuncDecl,
-                GetScriptContext()->GetPropertyName(propertyId)->GetBuffer());
+            JavascriptError::ThrowSyntaxError(scriptContext, ERRRedeclaration);
         }
+
+        // #sec-candeclareglobalfunction: an absent property is declarable
+        // only if the global object is extensible; an existing property is
+        // declarable if it is configurable, or a writable+enumerable data
+        // property. Otherwise the declaration is rejected with TypeError.
+        PropertyDescriptor existing;
+        if (!JavascriptOperators::GetOwnPropertyDescriptor(this, propertyId, scriptContext, &existing))
+        {
+            if (!IsExtensible())
+            {
+                JavascriptError::ThrowTypeError(scriptContext, JSERR_InvalidGloFuncDecl,
+                    scriptContext->GetPropertyName(propertyId)->GetBuffer());
+            }
+            return;
+        }
+        if (existing.IsConfigurable())
+        {
+            return;
+        }
+        if (existing.IsDataDescriptor() && existing.IsWritable() && existing.IsEnumerable())
+        {
+            return;
+        }
+        JavascriptError::ThrowTypeError(scriptContext, JSERR_InvalidGloFuncDecl,
+            scriptContext->GetPropertyName(propertyId)->GetBuffer());
     }
 
     BOOL
@@ -155,7 +184,7 @@ namespace Js
         }
         else if (noRedecl)
         {
-            JavascriptError::ThrowReferenceError(GetScriptContext(), ERRRedeclaration);
+            JavascriptError::ThrowSyntaxError(GetScriptContext(), ERRRedeclaration);
         }
         return true;
     }
@@ -215,12 +244,31 @@ namespace Js
     RootObjectBase::EnsureNoProperty(PropertyId propertyId)
     {
         Assert(!Js::IsInternalPropertyId(propertyId));
-        bool isDeclared = false;
+        bool noRedecl = false;
         bool isNonconfigurable = false;
-        if (GetTypeHandler()->HasRootProperty(this, propertyId, nullptr, &isDeclared, &isNonconfigurable) &&
-            (isDeclared || isNonconfigurable))
+        // GlobalDeclarationInstantiation's HasRestrictedGlobalProperty is
+        // true for an existing non-configurable own property (including a
+        // non-strict script var/function binding). A lexical declaration
+        // additionally collides with an existing lexical binding. A
+        // configurable property, such as one introduced by non-strict direct
+        // eval, is not restricted and may be shadowed.
+        if (GetTypeHandler()->HasRootProperty(this, propertyId, &noRedecl, nullptr, &isNonconfigurable) &&
+            (noRedecl || isNonconfigurable))
         {
-            JavascriptError::ThrowReferenceError(this->GetScriptContext(), ERRRedeclaration);
+            JavascriptError::ThrowSyntaxError(this->GetScriptContext(), ERRRedeclaration);
+        }
+    }
+
+    void
+    RootObjectBase::EnsureNoGlobalLexical(PropertyId propertyId)
+    {
+        // The Annex B synthetic global var only needs HasLexicalDeclaration:
+        // an existing non-configurable non-lexical global property is allowed
+        // to absorb a var binding, but a global lexical name is not.
+        bool noRedecl = false;
+        if (GetTypeHandler()->HasRootProperty(this, propertyId, &noRedecl) && noRedecl)
+        {
+            JavascriptError::ThrowSyntaxError(this->GetScriptContext(), ERRRedeclaration);
         }
     }
 

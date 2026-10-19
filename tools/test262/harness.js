@@ -14,6 +14,14 @@ $262.detachArrayBuffer = function(buffer) {
     // the transferred storage (bin/ch/WScriptJsrt.cpp:308-405,443-485).
     WScript.Deserialize(WScript.SerializeObject(buffer, [buffer]));
 };
+// test262's declaration-instantiation tests call
+// assert.throws(SyntaxError, () => $262.evalScript('let x; var x;')). The
+// upstream eshost chakra runtime returns a completion object instead of
+// propagating ScriptEvaluation failures, which hides those required errors.
+$262.evalScript = function(code) {
+    WScript.LoadScript(code);
+    return { type: 'normal', value: undefined };
+};
 `;
 
 const spawn = ChakraAgent.prototype.createChildProcess;

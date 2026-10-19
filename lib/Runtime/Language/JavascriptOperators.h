@@ -176,6 +176,8 @@ namespace Js
         static void OP_EnsureNoRootRedeclProperty(Var instance, PropertyId propertyId);
         static void OP_EnsureCanDeclGloFunc(Var instance, PropertyId propertyId);
         static void OP_ScopedEnsureNoRedeclProperty(FrameDisplay *pDisplay, PropertyId propertyId, Var instanceDefault);
+        static void OP_ScopedEnsureNoGlobalLexical(FrameDisplay *pDisplay, PropertyId propertyId, Var instanceDefault);
+        static void OP_ScopedEnsureCanDeclGloFunc(FrameDisplay *pDisplay, PropertyId propertyId, Var instanceDefault);
         static JavascriptArray*  GetOwnPropertyNames(Var instance, ScriptContext *scriptContext);
         static JavascriptArray*  GetOwnPropertySymbols(Var instance, ScriptContext *scriptContext);
         static JavascriptArray*  GetOwnPropertyKeys(Var instance, ScriptContext *scriptContext);

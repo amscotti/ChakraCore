@@ -1922,7 +1922,26 @@ LHexError:
 
     BOOL GlobalObject::InitPropertyInEval(PropertyId propertyId, Var value, PropertyOperationFlags flags, PropertyValueInfo* info)
     {
-        // This is var/function declared inside the 'eval'
+        // This is a function declared inside 'eval'. EvalDeclarationInstantiation
+        // uses CreateGlobalFunctionBinding(..., true): absent and configurable
+        // properties get writable/enumerable/configurable data defaults, while
+        // a non-configurable existing property is updated by value only so its
+        // attributes are preserved.
+        PropertyDescriptor existing;
+        if (JavascriptOperators::GetOwnPropertyDescriptor(this, propertyId, GetScriptContext(), &existing))
+        {
+            PropertyDescriptor descriptor;
+            descriptor.SetValue(value);
+            if (existing.IsConfigurable())
+            {
+                descriptor.SetWritable(true);
+                descriptor.SetEnumerable(true);
+                descriptor.SetConfigurable(true);
+            }
+            return JavascriptOperators::DefineOwnPropertyDescriptor(
+                this, propertyId, descriptor, true, GetScriptContext());
+        }
+
         PropertyAttributes attributes = PropertyDynamicTypeDefaults | PropertyDeclaredGlobal;
         flags = static_cast<PropertyOperationFlags>(flags | PropertyOperation_ThrowIfNotExtensible);
         return DynamicObject::SetPropertyWithAttributes(propertyId, value, attributes, info, flags);
@@ -1944,17 +1963,55 @@ LHexError:
         // with global scope let/const variables, so do not actually set the
         // property if it exists and is a let/const variable.
         bool noRedecl = false;
-        if (!GetTypeHandler()->HasRootProperty(this, propertyId, &noRedecl) || !noRedecl)
+        bool hasRootProperty = GetTypeHandler()->HasRootProperty(this, propertyId, &noRedecl);
+        if (hasRootProperty && noRedecl)
         {
-            //
-            // var x = 10; variables declared with "var" inside "eval"
-            // These CAN be deleted
-            // in ES5 they are enumerable.
-
-            PropertyAttributes attributes = PropertyDynamicTypeDefaults;
-
-            DynamicObject::SetPropertyWithAttributes(propertyId, value, attributes, NULL, PropertyOperation_ThrowIfNotExtensible);
+            // EvalDeclarationInstantiation's global var-environment check:
+            // a global lexical declaration shadows the synthetic Annex B var.
+            // Global eval reports this as SyntaxError before body execution
+            // rather than silently skipping or writing through the binding.
+            JavascriptError::ThrowSyntaxError(GetScriptContext(), ERRRedeclaration);
         }
+
+        bool isAnnexBBlockFunction = false;
+        if (VarIs<JavascriptFunction>(value))
+        {
+            isAnnexBBlockFunction = (VarTo<JavascriptFunction>(value)->GetFunctionInfo()->GetAttributes() &
+                Js::FunctionInfo::Attributes::AnnexBBlockFunction) != 0;
+        }
+
+        if (isAnnexBBlockFunction)
+        {
+            // The synthetic Annex B block-function assignment is an ordinary
+            // SetMutableBinding: writable data is updated in place, an
+            // accessor invokes its setter, and a non-writable data property is
+            // left unchanged rather than redefined.
+            return DynamicObject::SetProperty(propertyId, value, PropertyOperation_None, nullptr);
+        }
+
+        // CreateGlobalFunctionBinding (called by EvalDeclarationInstantiation
+        // with D = true): a configurable or absent property receives the
+        // writable/enumerable/configurable data defaults; a non-configurable
+        // property is updated by value only, preserving its attributes.
+        PropertyDescriptor existing;
+        if (hasRootProperty &&
+            JavascriptOperators::GetOwnPropertyDescriptor(this, propertyId, GetScriptContext(), &existing))
+        {
+
+            PropertyDescriptor descriptor;
+            descriptor.SetValue(value);
+            if (existing.IsConfigurable())
+            {
+                descriptor.SetWritable(true);
+                descriptor.SetEnumerable(true);
+                descriptor.SetConfigurable(true);
+            }
+            return JavascriptOperators::DefineOwnPropertyDescriptor(
+                this, propertyId, descriptor, true, GetScriptContext());
+        }
+
+        PropertyAttributes attributes = PropertyDynamicTypeDefaults;
+        DynamicObject::SetPropertyWithAttributes(propertyId, value, attributes, NULL, PropertyOperation_ThrowIfNotExtensible);
         return true;
     }
 

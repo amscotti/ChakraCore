@@ -9,7 +9,7 @@
 // fails, a TypeError should be thrown. The following properties predefined in
 // the global object are not configurable, not writable, and not enumerable are
 // undefined, Infinity, and NaN. Because these TypeErrors can only occur in the
-// global scope, eval statements are used. A non eval statement can be found in
+// global scope, separately loaded scripts are used. A non eval statement can be found in
 // CanDeclareGlobalFunctionNonEval.js
 
 WScript.LoadScriptFile("..\\UnitTestFramework\\UnitTestFramework.js");
@@ -20,7 +20,7 @@ var tests = [
         body: function () {
             assert.throws(
                 function () {
-                    eval("function undefined(){}")
+                    WScript.LoadScript("function undefined(){}")
                 },
                 TypeError,
                 "undefined in the global scope is not configurable, not writable, and not \
@@ -30,7 +30,7 @@ nor enumerable, therefore cannot be declared as a function"
             );
             assert.throws(
                 function () {
-                    eval("function Infinity(){}")
+                    WScript.LoadScript("function Infinity(){}")
                 },
                 TypeError,
                 "Infinity in the global scope is not configurable, not writable, and not \
@@ -40,7 +40,7 @@ nor enumerable, therefore cannot be declared as a function"
             );
             assert.throws(
                 function () {
-                    eval("function NaN(){}")
+                    WScript.LoadScript("function NaN(){}")
                 },
                 TypeError,
                 "NaN in the global scope is not configurable, not writable, and not \
@@ -73,7 +73,7 @@ nor enumerable, therefore cannot be declared as a function"
         body: function () {
             assert.throws(
                 function () {
-                    eval("async function undefined(){}")
+                    WScript.LoadScript("async function undefined(){}")
                 },
                 TypeError,
                 "undefined in the global scope is not configurable, not writable, and not \
@@ -83,7 +83,7 @@ nor enumerable, therefore cannot be declared as a function"
             );
             assert.throws(
                 function () {
-                    eval("async function Infinity(){}")
+                    WScript.LoadScript("async function Infinity(){}")
                 },
                 TypeError,
                 "Infinity in the global scope is not configurable, not writable, and not \
@@ -93,7 +93,7 @@ nor enumerable, therefore cannot be declared as a function"
             );
             assert.throws(
                 function () {
-                    eval("async function NaN(){}")
+                    WScript.LoadScript("async function NaN(){}")
                 },
                 TypeError,
                 "NaN in the global scope is not configurable, not writable, and not \
@@ -108,7 +108,7 @@ nor enumerable, therefore cannot be declared as a function"
         body: function () {
             assert.throws(
                 function () {
-                    eval("function* undefined(){}")
+                    WScript.LoadScript("function* undefined(){}")
                 },
                 TypeError,
                 "undefined in the global scope is not configurable, not writable, and not \
@@ -118,7 +118,7 @@ nor enumerable, therefore cannot be declared as a function"
             );
             assert.throws(
                 function () {
-                    eval("function* Infinity(){}")
+                    WScript.LoadScript("function* Infinity(){}")
                 },
                 TypeError,
                 "Infinity in the global scope is not configurable, not writable, and not \
@@ -128,7 +128,7 @@ nor enumerable, therefore cannot be declared as a function"
             );
             assert.throws(
                 function () {
-                    eval("function* NaN(){}")
+                    WScript.LoadScript("function* NaN(){}")
                 },
                 TypeError,
                 "NaN in the global scope is not configurable, not writable, and not \

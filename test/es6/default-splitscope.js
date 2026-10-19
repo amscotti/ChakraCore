@@ -2147,7 +2147,7 @@ var tests = [
     body: function() {
         // Redeclarations of formals - var
         assert.throws(function () { return function (a = eval("var a = 2"), b = a) { return [a, b]; }() },
-                        ReferenceError,
+                        SyntaxError,
                         "Redeclaring the current formal using var inside an eval throws",
                         "Let/Const redeclaration");
         assert.doesNotThrow(function () { "use strict"; return function (a = eval("var a = 2"), b = a) { return [a, b]; }() },
@@ -2156,12 +2156,12 @@ var tests = [
                             "Redeclaring the current formal using var inside a strict mode function eval does not throw");
 
         assert.throws(function () { function foo(a = eval("var b"), b, c = b) { return [a, b, c]; } foo(); },
-                        ReferenceError,
+                        SyntaxError,
                         "Redeclaring a future formal using var inside an eval throws",
                         "Let/Const redeclaration");
 
         assert.throws(function () { function foo(a, b = eval("var a"), c = a) { return [a, b, c]; } foo(); },
-                        ReferenceError,
+                        SyntaxError,
                         "Redeclaring a previous formal using var inside an eval throws",
                         "Let/Const redeclaration");
 

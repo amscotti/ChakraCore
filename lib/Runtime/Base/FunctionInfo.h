@@ -46,7 +46,8 @@ namespace Js
             HomeObj                        = 0x2000000,
             GeneratorWithComplexParams     = 0x8000000, // Generator function with non-simple params needs startup yield
             ClassFieldInitializer          = 0x10000000, // function/arrow is lexically inside a class field initializer
-            ClassConstructorWithFields     = 0x20000000 // class constructor owns instance-field initializers
+            ClassConstructorWithFields     = 0x20000000, // class constructor owns instance-field initializers
+            AnnexBBlockFunction            = 0x40000000 // ordinary block function receiving the Annex B var extension
         };
         FunctionInfo(JavascriptMethod entryPoint, Attributes attributes = None, LocalFunctionId functionId = Js::Constants::NoFunctionId, FunctionProxy* functionBodyImpl = nullptr);
         FunctionInfo(JavascriptMethod entryPoint, _no_write_barrier_tag, Attributes attributes = None, LocalFunctionId functionId = Js::Constants::NoFunctionId, FunctionProxy* functionBodyImpl = nullptr);
