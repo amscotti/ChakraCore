@@ -13,6 +13,11 @@ namespace Js
 
     template<typename T> bool TypedArrayCompareElementsHelper(JavascriptArray::CompareVarsInfo* cvInfo, const void* elem1, const void* elem2);
 
+    // BigInt arrays sort in numeric order and pass BigInt values (not
+    // Numbers) to a user comparefn.
+    template <> bool TypedArrayCompareElementsHelper<int64>(JavascriptArray::CompareVarsInfo* cvInfo, const void* elem1, const void* elem2);
+    template <> bool TypedArrayCompareElementsHelper<uint64>(JavascriptArray::CompareVarsInfo* cvInfo, const void* elem1, const void* elem2);
+
     class TypedArrayBase : public ArrayBufferParent
     {
         friend ArrayBuffer;
@@ -205,6 +210,11 @@ namespace Js
         // The byteOffset getter reports zero while the view is out of bounds.
         uint32 GetEffectiveByteOffset() const { return IsOutOfBounds() ? 0 : byteOffset; }
         uint32 GetBytesPerElement() const { return BYTES_PER_ELEMENT; }
+        bool IsBigIntElementType() const
+        {
+            const TypeId typeId = GetTypeId();
+            return typeId == TypeIds_Int64Array || typeId == TypeIds_Uint64Array;
+        }
         bool IsLengthTracking() const { return lengthTracking; }
         byte*  GetByteBuffer() const { return buffer; };
         bool IsDetachedBuffer() const { return this->GetArrayBuffer()->IsDetached(); }
@@ -504,6 +514,32 @@ namespace Js
             typedBuffer[index] = typedValue;
 
             return TRUE;
+        }
+
+        // BigInt element stores convert first (observable ToBigInt and its
+        // throws) and then silently ignore an OOB or detached store. They do
+        // not throw for a detached buffer once conversion succeeded.
+        inline BOOL BaseTypedBigIntDirectSetItem(_In_ uint32 index, _In_ Js::Var value, TypeName (*convFunc)(Var value, ScriptContext* scriptContext))
+        {
+            TypeName typedValue = convFunc(value, GetScriptContext());
+
+            if (this->IsDetachedBuffer() || index >= GetLength())
+            {
+                return FALSE;
+            }
+
+            Assert((index + 1)* sizeof(TypeName) + GetByteOffset() <= GetArrayBuffer()->GetByteLength());
+            TypeName* typedBuffer = (TypeName*)buffer;
+            typedBuffer[index] = typedValue;
+            return TRUE;
+        }
+
+        inline BOOL BaseTypedBigIntDirectSetItemNoSet(_In_ uint32 index, _In_ Js::Var value, TypeName (*convFunc)(Var value, ScriptContext* scriptContext))
+        {
+            // Invalid canonical numeric indexes still run the observable
+            // ToBigInt conversion, then perform no store.
+            convFunc(value, GetScriptContext());
+            return FALSE;
         }
 
         inline BOOL BaseTypedDirectSetItemNoSet(_In_ uint32 index, _In_ Js::Var value, TypeName (*convFunc)(Var value, ScriptContext* scriptContext))

@@ -244,13 +244,13 @@ namespace Js
             DynamicType::New(scriptContext, TypeIds_Object, typedArrayPrototype, nullptr,
                 DeferredTypeHandler<InitializeFloat64ArrayPrototype, DefaultDeferredTypeFilter, true>::GetDefaultInstance()));
 
-        Int64ArrayPrototype = DynamicObject::New(recycler,
+        BigInt64ArrayPrototype = DynamicObject::New(recycler,
             DynamicType::New(scriptContext, TypeIds_Object, typedArrayPrototype, nullptr,
-                DeferredTypeHandler<InitializeInt64ArrayPrototype, DefaultDeferredTypeFilter, true>::GetDefaultInstance()));
+                DeferredTypeHandler<InitializeBigInt64ArrayPrototype, DefaultDeferredTypeFilter, true>::GetDefaultInstance()));
 
-        Uint64ArrayPrototype = DynamicObject::New(recycler,
+        BigUint64ArrayPrototype = DynamicObject::New(recycler,
             DynamicType::New(scriptContext, TypeIds_Object, typedArrayPrototype, nullptr,
-                DeferredTypeHandler<InitializeUint64ArrayPrototype, DefaultDeferredTypeFilter, true>::GetDefaultInstance()));
+                DeferredTypeHandler<InitializeBigUint64ArrayPrototype, DefaultDeferredTypeFilter, true>::GetDefaultInstance()));
 
         BoolArrayPrototype = DynamicObject::New(recycler,
             DynamicType::New(scriptContext, TypeIds_Object, typedArrayPrototype, nullptr,
@@ -580,8 +580,8 @@ namespace Js
         INIT_SIMPLE_TYPE(uint32ArrayType, TypeIds_Uint32Array, Uint32ArrayPrototype);
         INIT_SIMPLE_TYPE(float32ArrayType, TypeIds_Float32Array, Float32ArrayPrototype);
         INIT_SIMPLE_TYPE(float64ArrayType, TypeIds_Float64Array, Float64ArrayPrototype);
-        INIT_SIMPLE_TYPE(int64ArrayType, TypeIds_Int64Array, Int64ArrayPrototype);
-        INIT_SIMPLE_TYPE(uint64ArrayType, TypeIds_Uint64Array, Uint64ArrayPrototype);
+        INIT_SIMPLE_TYPE(int64ArrayType, TypeIds_Int64Array, BigInt64ArrayPrototype);
+        INIT_SIMPLE_TYPE(uint64ArrayType, TypeIds_Uint64Array, BigUint64ArrayPrototype);
         INIT_SIMPLE_TYPE(boolArrayType, TypeIds_BoolArray, BoolArrayPrototype);
         INIT_SIMPLE_TYPE(charArrayType, TypeIds_CharArray, CharArrayPrototype);
         INIT_SIMPLE_TYPE(errorType, TypeIds_Error, errorPrototype);
@@ -1706,6 +1706,25 @@ namespace Js
             typedArrayConstructor);
         AddFunction(globalObject, PropertyIds::Float64Array, Float64ArrayConstructor);
 
+        // BigInt64Array/BigUint64Array are part of the BigInt feature. Their
+        // element type is stored in the existing Int64Array/Uint64Array slots
+        // (two's-complement 64-bit), but the constructors and prototypes are
+        // only exposed when ESBigInt is enabled.
+        BigInt64ArrayConstructor = nullptr;
+        BigUint64ArrayConstructor = nullptr;
+        if (scriptContext->GetConfig()->IsESBigIntEnabled())
+        {
+            BigInt64ArrayConstructor = CreateBuiltinConstructor(&Int64Array::EntryInfo::NewInstance,
+                DeferredTypeHandler<InitializeBigInt64ArrayConstructor>::GetDefaultInstance(),
+                typedArrayConstructor);
+            AddFunction(globalObject, scriptContext->GetOrAddPropertyIdTracked(_u("BigInt64Array")), BigInt64ArrayConstructor);
+
+            BigUint64ArrayConstructor = CreateBuiltinConstructor(&Uint64Array::EntryInfo::NewInstance,
+                DeferredTypeHandler<InitializeBigUint64ArrayConstructor>::GetDefaultInstance(),
+                typedArrayConstructor);
+            AddFunction(globalObject, scriptContext->GetOrAddPropertyIdTracked(_u("BigUint64Array")), BigUint64ArrayConstructor);
+        }
+
         if (scriptContext->GetConfig()->IsESSharedArrayBufferEnabled())
         {
             sharedArrayBufferConstructor = CreateBuiltinConstructor(&SharedArrayBuffer::EntryInfo::NewInstance,
@@ -2523,6 +2542,23 @@ namespace Js
     INIT_TYPEDARRAY_CONSTRUCTOR(Float32Array, Float32ArrayPrototype, float);
     INIT_TYPEDARRAY_CONSTRUCTOR(Float64Array, Float64ArrayPrototype, double);
 
+#define INIT_TYPEDARRAY_CONSTRUCTOR_NAMED(typedArray, typedArrayDisplayName, typedarrayPrototype, TypeName) \
+    bool  JavascriptLibrary::Initialize##typedArray##Constructor(DynamicObject* typedArrayConstructor, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode) \
+    { \
+        typeHandler->Convert(typedArrayConstructor, mode, 4); \
+        ScriptContext* scriptContext = typedArrayConstructor->GetScriptContext(); \
+        JavascriptLibrary* library = typedArrayConstructor->GetLibrary(); \
+        library->AddMember(typedArrayConstructor, PropertyIds::length, TaggedInt::ToVarUnchecked(3), PropertyConfigurable); \
+        library->AddMember(typedArrayConstructor, PropertyIds::name, library->CreateStringFromCppLiteral(_u(typedArrayDisplayName)), PropertyConfigurable); \
+        library->AddMember(typedArrayConstructor, PropertyIds::BYTES_PER_ELEMENT, TaggedInt::ToVarUnchecked(sizeof(TypeName)), PropertyNone); \
+        library->AddMember(typedArrayConstructor, PropertyIds::prototype, scriptContext->GetLibrary()->##typedarrayPrototype##, PropertyNone); \
+        typedArrayConstructor->SetHasNoEnumerableProperties(true); \
+        return true; \
+    } \
+
+    INIT_TYPEDARRAY_CONSTRUCTOR_NAMED(BigInt64Array, "BigInt64Array", BigInt64ArrayPrototype, int64);
+    INIT_TYPEDARRAY_CONSTRUCTOR_NAMED(BigUint64Array, "BigUint64Array", BigUint64ArrayPrototype, uint64);
+
 #define INIT_TYPEDARRAY_PROTOTYPE(typedArray, typedarrayPrototype, TypeName) \
     bool JavascriptLibrary::Initialize##typedarrayPrototype##(DynamicObject* typedarrayPrototype, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode) \
     { \
@@ -2544,7 +2580,46 @@ namespace Js
     INIT_TYPEDARRAY_PROTOTYPE(Float32Array, Float32ArrayPrototype, float);
     INIT_TYPEDARRAY_PROTOTYPE(Float64Array, Float64ArrayPrototype, double);
 
-    // For Microsoft extension typed array, like Int64Array, BoolArray, we don't have constructor as they can only be created from the projection arguments.
+    // BigInt64Array/BigUint64Array are only exposed with ESBigInt. Without
+    // the flag the slots remain the internal MS projection prototypes and
+    // keep their historical set-only shape.
+    bool JavascriptLibrary::InitializeBigInt64ArrayPrototype(DynamicObject* prototype, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)
+    {
+        JavascriptLibrary* library = prototype->GetLibrary();
+        if (prototype->GetScriptContext()->GetConfig()->IsESBigIntEnabled())
+        {
+            typeHandler->Convert(prototype, mode, 2);
+            library->AddMember(prototype, PropertyIds::constructor, library->BigInt64ArrayConstructor);
+            library->AddMember(prototype, PropertyIds::BYTES_PER_ELEMENT, TaggedInt::ToVarUnchecked(sizeof(int64)), PropertyNone);
+        }
+        else
+        {
+            typeHandler->Convert(prototype, mode, 1);
+            library->AddFunctionToLibraryObject(prototype, PropertyIds::set, &Int64Array::EntryInfo::Set, 2);
+        }
+        prototype->SetHasNoEnumerableProperties(true);
+        return true;
+    }
+
+    bool JavascriptLibrary::InitializeBigUint64ArrayPrototype(DynamicObject* prototype, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)
+    {
+        JavascriptLibrary* library = prototype->GetLibrary();
+        if (prototype->GetScriptContext()->GetConfig()->IsESBigIntEnabled())
+        {
+            typeHandler->Convert(prototype, mode, 2);
+            library->AddMember(prototype, PropertyIds::constructor, library->BigUint64ArrayConstructor);
+            library->AddMember(prototype, PropertyIds::BYTES_PER_ELEMENT, TaggedInt::ToVarUnchecked(sizeof(uint64)), PropertyNone);
+        }
+        else
+        {
+            typeHandler->Convert(prototype, mode, 1);
+            library->AddFunctionToLibraryObject(prototype, PropertyIds::set, &Uint64Array::EntryInfo::Set, 2);
+        }
+        prototype->SetHasNoEnumerableProperties(true);
+        return true;
+    }
+
+    // For Microsoft extension typed array, like BoolArray, we don't have constructor as they can only be created from the projection arguments.
     // there is no subarray method either as that's another way to create typed array.
 #define INIT_MSINTERNAL_TYPEDARRAY_PROTOTYPE(typedArray, typedarrayPrototype) \
     bool JavascriptLibrary::Initialize##typedarrayPrototype##(DynamicObject* typedarrayPrototype, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)  \
@@ -2556,8 +2631,6 @@ namespace Js
         return true; \
     }   \
 
-    INIT_MSINTERNAL_TYPEDARRAY_PROTOTYPE(Int64Array, Int64ArrayPrototype);
-    INIT_MSINTERNAL_TYPEDARRAY_PROTOTYPE(Uint64Array, Uint64ArrayPrototype);
     INIT_MSINTERNAL_TYPEDARRAY_PROTOTYPE(BoolArray, BoolArrayPrototype);
     INIT_MSINTERNAL_TYPEDARRAY_PROTOTYPE(CharArray, CharArrayPrototype);
 
@@ -7513,7 +7586,9 @@ namespace Js
             || constructor == library->GetInt32ArrayConstructor()
             || constructor == library->GetUint32ArrayConstructor()
             || constructor == library->GetFloat32ArrayConstructor()
-            || constructor == library->GetFloat64ArrayConstructor();
+            || constructor == library->GetFloat64ArrayConstructor()
+            || constructor == library->GetBigInt64ArrayConstructor()
+            || constructor == library->GetBigUint64ArrayConstructor();
     }
 
     Field(JavascriptFunction*)* JavascriptLibrary::GetBuiltinFunctions()

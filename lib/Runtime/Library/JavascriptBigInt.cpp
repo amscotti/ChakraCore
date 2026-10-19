@@ -109,6 +109,50 @@ namespace Js
         return bigintNew;
     }
 
+    JavascriptBigInt * JavascriptBigInt::CreateFromUInt64(uint64 value, ScriptContext * scriptContext)
+    {
+        const uint32 limbBits = BigIntLimbBits();
+        const digit_t limbCount = static_cast<digit_t>((64 + limbBits - 1) / limbBits);
+        JavascriptBigInt * bigintNew = JavascriptBigInt::CreateZeroWithLength(limbCount, scriptContext);
+
+        for (digit_t i = 0; i < limbCount; i++)
+        {
+            bigintNew->m_digits[i] = static_cast<digit_t>(value >> (i * limbBits));
+        }
+
+        // Canonical form: one zero limb for 0, and drop high zero limbs.
+        while (bigintNew->m_length > 1 && bigintNew->m_digits[bigintNew->m_length - 1] == 0)
+        {
+            bigintNew->m_length--;
+        }
+        return bigintNew;
+    }
+
+    JavascriptBigInt * JavascriptBigInt::CreateFromInt64(int64 value, ScriptContext * scriptContext)
+    {
+        bool isNegative = value < 0;
+        uint64 magnitude = isNegative
+            ? static_cast<uint64>(-(value + 1)) + 1
+            : static_cast<uint64>(value);
+        JavascriptBigInt * bigintNew = JavascriptBigInt::CreateFromUInt64(magnitude, scriptContext);
+        bigintNew->m_isNegative = isNegative && !bigintNew->IsZeroValue();
+        return bigintNew;
+    }
+
+    uint64 JavascriptBigInt::ToUInt64Low() const
+    {
+        const uint32 limbBits = BigIntLimbBits();
+        uint64 value = 0;
+        for (digit_t i = 0; i < m_length && i * limbBits < 64; i++)
+        {
+            value |= static_cast<uint64>(m_digits[i]) << (i * limbBits);
+        }
+
+        // Two's complement: -x has the bit pattern 2**64 - (x mod 2**64).
+        // A negative value divisible by 2**64 wraps to zero.
+        return m_isNegative ? (0 - value) : value;
+    }
+
     namespace
     {
         // StrWhiteSpace from the StringNumericLiteral grammar (used by StringToBigInt).
