@@ -258,8 +258,8 @@ var tests = [
                 obj[Symbol.unscopables] = {};
                 a = obj[Symbol.unscopables]["a"] = true;
             }
-            assert.areEqual(1, obj.a, " should still be 1");
-            assert.areEqual(true, a, "a.root should be set to true RHS evaluated before assignment");
+            assert.areEqual(true, obj.a, "the captured with object receives the assignment");
+            assert.areEqual(false, a, "the outer binding is not changed");
         }
     },
     {
@@ -503,12 +503,13 @@ var tests = [
             {
                 a += (o[Symbol.unscopables] = {'a' : true }, 2);
                 // This is a modification of Brian's Operator precedence test above
-                // This is a tricky one a is originally not unscopable so the a we use is o.a
-                // then the assignment happens after it is made unscopable
-                assert.areEqual(3, a, "should be 1+2");
+                // a is originally not unscopable so the reference base is o.
+                // The write still goes to o even though the RHS made it
+                // unscopable; a subsequent read resolves to the outer a.
+                assert.areEqual(2, a, "the unscopable read sees the outer binding");
             }
-            assert.areEqual(1, o.a, "root.a should not have changed");
-            assert.areEqual(3, a,   "should be 1+2");
+            assert.areEqual(3, o.a, "the captured with object receives the result");
+            assert.areEqual(2, a,   "the outer binding is not changed");
         }
     },
     {

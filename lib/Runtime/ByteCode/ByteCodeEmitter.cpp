@@ -11,8 +11,9 @@
 void EmitMethodFld(ParseNode *pnode, Js::RegSlot callObjLocation, Js::PropertyId propertyId, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo, bool registerCacheIdForCall);
 void EmitMethodElem(ParseNode *pnode, Js::RegSlot callObjLocation, Js::RegSlot indexLocation, ByteCodeGenerator *byteCodeGenerator);
 void EmitReference(ParseNode *pnode, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo);
-void EmitAssignment(ParseNode *asgnNode, ParseNode *lhs, Js::RegSlot rhsLocation, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo);
-void EmitLoad(ParseNode *rhs, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo);
+void EmitAssignment(ParseNode *asgnNode, ParseNode *lhs, Js::RegSlot rhsLocation, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo, Js::RegSlot referenceBaseLocation = Js::Constants::NoRegister);
+Js::RegSlot EmitAssignmentReferenceBase(ParseNode *lhs, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo);
+void EmitLoad(ParseNode *rhs, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo, Js::RegSlot referenceBaseLocation = Js::Constants::NoRegister);
 void EmitCall(ParseNodeCall* pnodeCall, ByteCodeGenerator* byteCodeGenerator, FuncInfo* funcInfo, BOOL fReturnValue, BOOL fEvaluateComponents, Js::RegSlot overrideThisLocation = Js::Constants::NoRegister, Js::RegSlot newTargetLocation = Js::Constants::NoRegister);
 void EmitStartupYield(ByteCodeGenerator* byteCodeGenerator, FuncInfo* funcInfo);
 void EmitYield(Js::RegSlot resultReg, Js::RegSlot inputReg, ByteCodeGenerator* byteCodeGenerator, FuncInfo* funcInfo);
@@ -4350,7 +4351,7 @@ Js::RegSlot ByteCodeGenerator::PrependLocalScopes(Js::RegSlot evalEnv, Js::RegSl
     return evalEnv;
 }
 
-void ByteCodeGenerator::EmitLoadInstance(Symbol *sym, IdentPtr pid, Js::RegSlot *pThisLocation, Js::RegSlot *pInstLocation, FuncInfo *funcInfo)
+void ByteCodeGenerator::EmitLoadInstance(Symbol *sym, IdentPtr pid, Js::RegSlot *pThisLocation, Js::RegSlot *pInstLocation, FuncInfo *funcInfo, bool *withReference)
 {
     Js::RegSlot scopeLocation = Js::Constants::NoRegister;
     Js::RegSlot thisLocation = *pThisLocation;
@@ -4629,6 +4630,20 @@ void ByteCodeGenerator::EmitLoadInstance(Symbol *sym, IdentPtr pid, Js::RegSlot 
         this->m_writer.MarkLabel(doneLabel);
     }
 
+    if (withReference != nullptr)
+    {
+        *withReference = false;
+        for (int i = 0; i < recList.Count(); i++)
+        {
+            if (recList.Item(i).kind == DynamicLoadKind::LocalWith ||
+                recList.Item(i).kind == DynamicLoadKind::EnvWith)
+            {
+                *withReference = true;
+                break;
+            }
+        }
+    }
+
     *pThisLocation = thisLocation;
     *pInstLocation = instLocation;
 }
@@ -4811,7 +4826,7 @@ ByteCodeGenerator::GetInitFldOp(Scope *scope, Js::RegSlot scopeLocation, FuncInf
     return op;
 }
 
-void ByteCodeGenerator::EmitPropStore(Js::RegSlot rhsLocation, Symbol *sym, IdentPtr pid, FuncInfo *funcInfo, bool isLetDecl, bool isConstDecl, bool isFncDeclVar, bool skipUseBeforeDeclarationCheck)
+void ByteCodeGenerator::EmitPropStore(Js::RegSlot rhsLocation, Symbol *sym, IdentPtr pid, FuncInfo *funcInfo, bool isLetDecl, bool isConstDecl, bool isFncDeclVar, bool skipUseBeforeDeclarationCheck, bool skipDynamicScopes)
 {
     Js::PropertyId envIndex = -1;
     Scope *symScope = sym == nullptr || sym->GetIsGlobal() ? this->globalScope : sym->GetScope();
@@ -4819,6 +4834,9 @@ void ByteCodeGenerator::EmitPropStore(Js::RegSlot rhsLocation, Symbol *sym, Iden
     // isFncDeclVar denotes that the symbol being stored to here is the var
     // binding of a function declaration and we know we want to store directly
     // to it, skipping over any dynamic scopes that may lie in between.
+    // skipDynamicScopes is the same direct-to-owner behavior for the static
+    // fallback of a captured reference: the dynamic bases were already
+    // examined when the reference was evaluated.
     Scope *scope = nullptr;
     Js::RegSlot scopeLocation = Js::Constants::NoRegister;
     Js::OpCode op;
@@ -4834,7 +4852,7 @@ void ByteCodeGenerator::EmitPropStore(Js::RegSlot rhsLocation, Symbol *sym, Iden
         return;
     }
 
-    if (isFncDeclVar)
+    if (isFncDeclVar || skipDynamicScopes)
     {
         // async functions allow for the fncDeclVar to be in the body or parameter scope
         // of the parent function, so we need to calculate envIndex in lieu of the while
@@ -4849,7 +4867,7 @@ void ByteCodeGenerator::EmitPropStore(Js::RegSlot rhsLocation, Symbol *sym, Iden
 
     JsUtil::List<DynamicLoadRecord, ArenaAllocator> recList(this->alloc);
 
-    while (!isFncDeclVar)
+    while (!isFncDeclVar && !skipDynamicScopes)
     {
         scope = this->FindScopeForSym(symScope, scope, &envIndex, funcInfo);
         if (scope == this->globalScope)
@@ -5224,7 +5242,38 @@ void ByteCodeGenerator::EmitPropStoreForSpecialSymbol(Js::RegSlot rhsLocation, S
     }
 }
 
-void ByteCodeGenerator::EmitPropLoad(Js::RegSlot lhsLocation, Symbol *sym, IdentPtr pid, FuncInfo *funcInfo, bool skipUseBeforeDeclarationCheck)
+// Object Environment Record GetBindingValue probes HasProperty before Get.
+// The dynamic with record already passed HasBinding (including unscopables),
+// but the binding object is still probed again for GetBindingValue.
+static void EmitGetBindingValueWithObject(
+    Js::RegSlot lhsLocation,
+    Js::RegSlot bindingObject,
+    Js::PropertyId propertyId,
+    ByteCodeGenerator *byteCodeGenerator,
+    FuncInfo *funcInfo)
+{
+    Js::PropertyIdIndexType propertyIndex = funcInfo->FindOrAddReferencedPropertyId(propertyId);
+    Js::ByteCodeLabel presentLabel = byteCodeGenerator->Writer()->DefineLabel();
+    Js::ByteCodeLabel doneLabel = byteCodeGenerator->Writer()->DefineLabel();
+
+    byteCodeGenerator->Writer()->BrProperty(Js::OpCode::BrOnHasProperty, presentLabel, bindingObject, propertyIndex);
+    if (funcInfo->GetIsStrictMode() || byteCodeGenerator->forceStrictModeForClassComputedPropertyName)
+    {
+        byteCodeGenerator->Writer()->W1(Js::OpCode::RuntimeReferenceError, SCODE_CODE(JSERR_CantAssignTo));
+    }
+    else
+    {
+        byteCodeGenerator->Writer()->Reg1(Js::OpCode::LdUndef, lhsLocation);
+    }
+    byteCodeGenerator->Writer()->Br(doneLabel);
+
+    byteCodeGenerator->Writer()->MarkLabel(presentLabel);
+    uint cacheId = funcInfo->FindOrAddInlineCacheId(bindingObject, propertyId, false, false);
+    byteCodeGenerator->Writer()->PatchableProperty(Js::OpCode::LdFld_ReuseLoc, lhsLocation, bindingObject, cacheId);
+    byteCodeGenerator->Writer()->MarkLabel(doneLabel);
+}
+
+void ByteCodeGenerator::EmitPropLoad(Js::RegSlot lhsLocation, Symbol *sym, IdentPtr pid, FuncInfo *funcInfo, bool skipUseBeforeDeclarationCheck, bool skipDynamicScopes)
 {
     // If sym belongs to a parent frame, get it from the closure environment.
     // If it belongs to this func, but there's a non-local reference, get it from the heap-allocated frame.
@@ -5243,9 +5292,22 @@ void ByteCodeGenerator::EmitPropLoad(Js::RegSlot lhsLocation, Symbol *sym, Ident
         return;
     }
 
+    if (skipDynamicScopes)
+    {
+        // The dynamic bases were already examined when the reference was
+        // evaluated. Resolve the owner directly, without revisiting a with /
+        // eval-calling scope whose HasProperty may now answer differently.
+        do
+        {
+            scope = this->FindScopeForSym(symScope, scope, &envIndex, funcInfo);
+        } while (scope != symScope);
+        Assert(scope == symScope);
+        scopeLocation = scope->GetLocation();
+    }
+
     JsUtil::List<DynamicLoadRecord, ArenaAllocator> recList(this->alloc);
 
-    for (;;)
+    for (; !skipDynamicScopes;)
     {
         scope = this->FindScopeForSym(symScope, scope, &envIndex, funcInfo);
         if (scope == this->globalScope)
@@ -5494,8 +5556,7 @@ void ByteCodeGenerator::EmitPropLoad(Js::RegSlot lhsLocation, Symbol *sym, Ident
                 case DynamicLoadKind::LocalWith:
                     instLocation = funcInfo->AcquireTmpRegister();
                     this->m_writer.Reg2(Js::OpCode::UnwrapWithObj, instLocation, recList.Item(i).instance);
-                    cacheId = funcInfo->FindOrAddInlineCacheId(instLocation, propertyId, false, false);
-                    this->m_writer.PatchableProperty(Js::OpCode::LdFld_ReuseLoc, lhsLocation, instLocation, cacheId);
+                    EmitGetBindingValueWithObject(lhsLocation, instLocation, propertyId, this, funcInfo);
                     funcInfo->ReleaseTmpRegister(instLocation);
                     break;
 
@@ -5503,8 +5564,7 @@ void ByteCodeGenerator::EmitPropLoad(Js::RegSlot lhsLocation, Symbol *sym, Ident
                     instLocation = funcInfo->AcquireTmpRegister();
                     this->m_writer.SlotI1(Js::OpCode::LdEnvObj, instLocation, recList.Item(i).index);
                     this->m_writer.Reg2(Js::OpCode::UnwrapWithObj, instLocation, instLocation);
-                    cacheId = funcInfo->FindOrAddInlineCacheId(instLocation, propertyId, false, false);
-                    this->m_writer.PatchableProperty(Js::OpCode::LdFld_ReuseLoc, lhsLocation, instLocation, cacheId);
+                    EmitGetBindingValueWithObject(lhsLocation, instLocation, propertyId, this, funcInfo);
                     funcInfo->ReleaseTmpRegister(instLocation);
                     break;
 
@@ -6461,6 +6521,171 @@ void EmitReference(ParseNode *pnode, ByteCodeGenerator *byteCodeGenerator, FuncI
         Emit(pnode, byteCodeGenerator, funcInfo, false);
         break;
     }
+}
+
+// Capture the environment record that owns an identifier reference before the
+// RHS is evaluated. The returned register holds the binding object (with any
+// with-scope wrapper removed), or the Undecl sentinel when the reference
+// resolves through a static binding. The caller must release it with
+// ReleaseTmpRegister.
+//
+// This is the reference half of PutValue: the base must not be re-resolved at
+// store time, because the RHS may delete or introduce the binding.
+Js::RegSlot EmitAssignmentReferenceBase(ParseNode *lhs, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo)
+{
+    Assert(lhs->nop == knopName);
+    ParseNodeName *pnodeName = lhs->AsParseNodeName();
+    Symbol *sym = pnodeName->sym;
+
+    if (sym != nullptr && (sym->GetIsModuleExportStorage() || sym->GetIsFuncExpr()))
+    {
+        // These stores have their own (non-reference) error/update paths.
+        return Js::Constants::NoRegister;
+    }
+
+    Js::PropertyId propertyId = sym ? sym->EnsurePosition(byteCodeGenerator) : pnodeName->pid->GetPropertyId();
+    Js::PropertyIdIndexType propertyIndex = funcInfo->FindOrAddReferencedPropertyId(propertyId);
+
+    Scope *symScope = (sym == nullptr || sym->GetIsGlobal()) ? byteCodeGenerator->GetGlobalScope() : sym->GetScope();
+    Assert(symScope);
+
+    Js::PropertyId envIndex = -1;
+    Scope *scope = nullptr;
+    JsUtil::List<DynamicLoadRecord, ArenaAllocator> recList(byteCodeGenerator->GetAllocator());
+
+    for (;;)
+    {
+        scope = byteCodeGenerator->FindScopeForSym(symScope, scope, &envIndex, funcInfo);
+        if (scope == byteCodeGenerator->GetGlobalScope())
+        {
+            break;
+        }
+
+        Js::RegSlot scopeLocation = scope->GetLocation();
+        if (scope == symScope)
+        {
+            break;
+        }
+
+        // A dynamic scope may have added the binding.
+        Assert(scope->GetIsDynamic());
+        AssertOrFailFast(scope->GetIsObject());
+
+        DynamicLoadRecord rec;
+        rec.label = byteCodeGenerator->Writer()->DefineLabel();
+
+        if (scope->GetScopeType() != ScopeType_With)
+        {
+            if (envIndex == -1)
+            {
+                if (scope == funcInfo->GetParamScope() &&
+                    !funcInfo->IsBodyAndParamScopeMerged() &&
+                    funcInfo->GetCurrentChildScope() != scope)
+                {
+                    Js::RegSlot paramObjectReg = funcInfo->AcquireTmpRegister();
+                    byteCodeGenerator->Writer()->Reg1(Js::OpCode::LdParamObj, paramObjectReg);
+                    byteCodeGenerator->Writer()->BrProperty(Js::OpCode::BrOnHasProperty, rec.label, paramObjectReg, propertyIndex);
+                    rec.kind = DynamicLoadKind::ParamObj;
+                    // The label reloads the param object; this temp must be
+                    // released now, before the capture register is acquired,
+                    // because ReleaseTmpRegister is strictly LIFO.
+                    funcInfo->ReleaseTmpRegister(paramObjectReg);
+                }
+                else
+                {
+                    byteCodeGenerator->Writer()->BrLocalProperty(Js::OpCode::BrOnHasLocalProperty, rec.label, propertyIndex);
+                    rec.kind = DynamicLoadKind::Local;
+                    rec.instance = scopeLocation;
+                }
+            }
+            else
+            {
+                uint32 frameDisplayIndex = envIndex + Js::FrameDisplay::GetOffsetOfScopes() / sizeof(Js::Var);
+                byteCodeGenerator->Writer()->BrEnvProperty(Js::OpCode::BrOnHasLocalEnvProperty, rec.label, propertyIndex, frameDisplayIndex);
+                rec.kind = DynamicLoadKind::Env;
+                rec.index = frameDisplayIndex;
+            }
+        }
+        else
+        {
+            if (envIndex == -1)
+            {
+                byteCodeGenerator->Writer()->BrProperty(Js::OpCode::BrOnHasProperty, rec.label, scopeLocation, propertyIndex);
+                rec.kind = DynamicLoadKind::LocalWith;
+                rec.instance = scopeLocation;
+            }
+            else
+            {
+                uint32 frameDisplayIndex = envIndex + Js::FrameDisplay::GetOffsetOfScopes() / sizeof(Js::Var);
+                byteCodeGenerator->Writer()->BrEnvProperty(Js::OpCode::BrOnHasEnvProperty, rec.label, propertyIndex, frameDisplayIndex);
+                rec.kind = DynamicLoadKind::EnvWith;
+                rec.index = frameDisplayIndex;
+            }
+        }
+
+        recList.Add(rec);
+    }
+
+    if (recList.Empty())
+    {
+        return Js::Constants::NoRegister;
+    }
+
+    Js::RegSlot referenceBaseLocation = funcInfo->AcquireTmpRegister();
+    // Undecl is a C++ sentinel that cannot be confused with a JS value; a JS
+    // null/undefined base would pass BrNotNull_A.
+    byteCodeGenerator->Writer()->Reg1(Js::OpCode::InitUndecl, referenceBaseLocation);
+
+    if (!recList.Empty())
+    {
+        Js::ByteCodeLabel doneLabel = byteCodeGenerator->Writer()->DefineLabel();
+        byteCodeGenerator->Writer()->Br(doneLabel);
+
+        for (int i = 0;; i++)
+        {
+            byteCodeGenerator->Writer()->MarkLabel(recList.Item(i).label);
+            switch (recList.Item(i).kind)
+            {
+            case DynamicLoadKind::Local:
+                byteCodeGenerator->Writer()->Reg1(Js::OpCode::LdLocalObj, referenceBaseLocation);
+                break;
+
+            case DynamicLoadKind::ParamObj:
+                byteCodeGenerator->Writer()->Reg1(Js::OpCode::LdParamObj, referenceBaseLocation);
+                break;
+
+            case DynamicLoadKind::Env:
+                byteCodeGenerator->Writer()->SlotI1(Js::OpCode::LdEnvObj, referenceBaseLocation, recList.Item(i).index);
+                break;
+
+            case DynamicLoadKind::LocalWith:
+                byteCodeGenerator->Writer()->Reg2(Js::OpCode::UnwrapWithObj, referenceBaseLocation, recList.Item(i).instance);
+                break;
+
+            case DynamicLoadKind::EnvWith:
+            {
+                Js::RegSlot withLocation = funcInfo->AcquireTmpRegister();
+                byteCodeGenerator->Writer()->SlotI1(Js::OpCode::LdEnvObj, withLocation, recList.Item(i).index);
+                byteCodeGenerator->Writer()->Reg2(Js::OpCode::UnwrapWithObj, referenceBaseLocation, withLocation);
+                funcInfo->ReleaseTmpRegister(withLocation);
+                break;
+            }
+
+            default:
+                AssertOrFailFast(UNREACHED);
+            }
+
+            if (i == recList.Count() - 1)
+            {
+                break;
+            }
+            byteCodeGenerator->Writer()->Br(doneLabel);
+        }
+
+        byteCodeGenerator->Writer()->MarkLabel(doneLabel);
+    }
+
+    return referenceBaseLocation;
 }
 
 void EmitGetIterator(Js::RegSlot iteratorReg, Js::RegSlot iterableReg, ByteCodeGenerator* byteCodeGenerator, FuncInfo* funcInfo);
@@ -7527,7 +7752,8 @@ void EmitAssignment(
     ParseNode *lhs,
     Js::RegSlot rhsLocation,
     ByteCodeGenerator *byteCodeGenerator,
-    FuncInfo *funcInfo)
+    FuncInfo *funcInfo,
+    Js::RegSlot referenceBaseLocation)
 {
     switch (lhs->nop)
     {
@@ -7549,6 +7775,53 @@ void EmitAssignment(
         if (pnodeNameLhs->IsSpecialName())
         {
             byteCodeGenerator->Writer()->W1(Js::OpCode::RuntimeReferenceError, SCODE_CODE(JSERR_CantAssignTo));
+        }
+        else if (referenceBaseLocation != Js::Constants::NoRegister)
+        {
+            // PutValue uses the environment record captured when the reference
+            // was evaluated. Do not re-resolve it: the RHS may have deleted
+            // (with) or introduced (eval var) a binding in the meantime.
+            Symbol *sym = pnodeNameLhs->sym;
+            Js::PropertyId propertyId = sym ? sym->EnsurePosition(byteCodeGenerator) : pnodeNameLhs->pid->GetPropertyId();
+            Js::PropertyIdIndexType propertyIndex = funcInfo->FindOrAddReferencedPropertyId(propertyId);
+            bool isStrict = funcInfo->GetIsStrictMode() || byteCodeGenerator->forceStrictModeForClassComputedPropertyName;
+
+            bool evalReference =
+                (byteCodeGenerator->GetFlags() & (fscrEval | fscrImplicitThis)) != 0 &&
+                (sym == nullptr || sym->GetIsGlobal());
+
+            Js::ByteCodeLabel capturedLabel = byteCodeGenerator->Writer()->DefineLabel();
+            Js::ByteCodeLabel doneLabel = byteCodeGenerator->Writer()->DefineLabel();
+
+            // An undecl base means the reference resolved outside the
+            // eval-local dynamic scopes. In eval code the caller chain is still
+            // resolved by the existing scoped store; elsewhere the static
+            // binding is stored directly without revisiting dynamic scopes.
+            byteCodeGenerator->Writer()->BrReg1(Js::OpCode::BrNotUndecl_A, capturedLabel, referenceBaseLocation);
+            byteCodeGenerator->EmitPropStore(rhsLocation, sym, pnodeNameLhs->pid, funcInfo, false, false, false, false, !evalReference);
+            byteCodeGenerator->Writer()->Br(doneLabel);
+
+            byteCodeGenerator->Writer()->MarkLabel(capturedLabel);
+
+            // SetMutableBinding always probes HasProperty, even with S = false.
+            // In strict mode a missing binding becomes a ReferenceError; in
+            // sloppy mode the fall-through Set recreates it on the captured
+            // object environment record.
+            Js::ByteCodeLabel presentLabel = byteCodeGenerator->Writer()->DefineLabel();
+            byteCodeGenerator->Writer()->BrProperty(Js::OpCode::BrOnHasProperty, presentLabel, referenceBaseLocation, propertyIndex);
+            if (isStrict)
+            {
+                byteCodeGenerator->Writer()->W1(Js::OpCode::RuntimeReferenceError, SCODE_CODE(JSERR_CantAssignTo));
+                byteCodeGenerator->Writer()->Br(doneLabel);
+            }
+            byteCodeGenerator->Writer()->MarkLabel(presentLabel);
+
+            uint cacheId = funcInfo->FindOrAddInlineCacheId(referenceBaseLocation, propertyId, false, true);
+            byteCodeGenerator->Writer()->PatchableProperty(
+                ByteCodeGenerator::GetStFldOpCode(funcInfo, false, false, false, false, byteCodeGenerator->forceStrictModeForClassComputedPropertyName),
+                rhsLocation, referenceBaseLocation, cacheId);
+
+            byteCodeGenerator->Writer()->MarkLabel(doneLabel);
         }
         else
         {
@@ -7649,7 +7922,8 @@ void EmitAssignment(
 void EmitLoad(
     ParseNode *lhs,
     ByteCodeGenerator *byteCodeGenerator,
-    FuncInfo *funcInfo)
+    FuncInfo *funcInfo,
+    Js::RegSlot referenceBaseLocation)
 {
     // Emit the instructions to load the value into the LHS location. Do not assign/free any temps
     // in the process.
@@ -7662,7 +7936,51 @@ void EmitLoad(
     case knopName:
     {
         funcInfo->AcquireLoc(lhs);
-        byteCodeGenerator->EmitPropLoad(lhs->location, lhs->AsParseNodeName()->sym, lhs->AsParseNodeName()->pid, funcInfo);
+        ParseNodeName *pnodeName = lhs->AsParseNodeName();
+        if (referenceBaseLocation == Js::Constants::NoRegister)
+        {
+            byteCodeGenerator->EmitPropLoad(lhs->location, pnodeName->sym, pnodeName->pid, funcInfo);
+            break;
+        }
+
+        // The reference base was captured before the RHS. Read GetValue
+        // through that base so @@unscopables/proxy HasBinding is not repeated
+        // and cannot resolve a different binding.
+        Js::ByteCodeLabel capturedLabel = byteCodeGenerator->Writer()->DefineLabel();
+        Js::ByteCodeLabel doneLabel = byteCodeGenerator->Writer()->DefineLabel();
+        bool evalReference =
+            (byteCodeGenerator->GetFlags() & (fscrEval | fscrImplicitThis)) != 0 &&
+            (pnodeName->sym == nullptr || pnodeName->sym->GetIsGlobal());
+        byteCodeGenerator->Writer()->BrReg1(Js::OpCode::BrNotUndecl_A, capturedLabel, referenceBaseLocation);
+        byteCodeGenerator->EmitPropLoad(lhs->location, pnodeName->sym, pnodeName->pid, funcInfo, false, !evalReference);
+        byteCodeGenerator->Writer()->Br(doneLabel);
+
+        byteCodeGenerator->Writer()->MarkLabel(capturedLabel);
+        Js::PropertyId propertyId = pnodeName->sym ? pnodeName->sym->EnsurePosition(byteCodeGenerator) : pnodeName->pid->GetPropertyId();
+        Js::PropertyIdIndexType propertyIndex = funcInfo->FindOrAddReferencedPropertyId(propertyId);
+        Js::ByteCodeLabel presentLabel = byteCodeGenerator->Writer()->DefineLabel();
+
+        // Object Environment Record GetBindingValue probes HasProperty before
+        // Get. A missing binding is undefined in sloppy mode and a
+        // ReferenceError (before the RHS) in strict mode.
+        byteCodeGenerator->Writer()->BrProperty(Js::OpCode::BrOnHasProperty, presentLabel, referenceBaseLocation, propertyIndex);
+        if (funcInfo->GetIsStrictMode() || byteCodeGenerator->forceStrictModeForClassComputedPropertyName)
+        {
+            byteCodeGenerator->Writer()->W1(Js::OpCode::RuntimeReferenceError, SCODE_CODE(JSERR_CantAssignTo));
+        }
+        else
+        {
+            byteCodeGenerator->Writer()->Reg1(Js::OpCode::LdUndef, lhs->location);
+        }
+        byteCodeGenerator->Writer()->Br(doneLabel);
+
+        byteCodeGenerator->Writer()->MarkLabel(presentLabel);
+        uint cacheId = funcInfo->FindOrAddInlineCacheId(referenceBaseLocation, propertyId, false, false);
+        byteCodeGenerator->Writer()->PatchableProperty(Js::OpCode::LdFld, lhs->location, referenceBaseLocation, cacheId);
+        // A captured declarative base may still be in TDZ. The normal load
+        // path checks this; the direct property load must do so explicitly.
+        byteCodeGenerator->Writer()->Reg1(Js::OpCode::ChkUndecl, lhs->location);
+        byteCodeGenerator->Writer()->MarkLabel(doneLabel);
         break;
     }
 
@@ -8707,11 +9025,43 @@ void EmitCallTarget(
             {
                 SaveOpndValue(pnodeNameTarget, funcInfo);
             }
-            byteCodeGenerator->EmitLoadInstance(pnodeNameTarget->sym, pnodeNameTarget->pid, thisLocation, callObjLocation, funcInfo);
+            bool withReference = false;
+            byteCodeGenerator->EmitLoadInstance(pnodeNameTarget->sym, pnodeNameTarget->pid, thisLocation, callObjLocation, funcInfo, &withReference);
             if (*callObjLocation != Js::Constants::NoRegister)
             {
                 // Load the call target as a property of the instance.
                 Js::PropertyId propertyId = pnodeNameTarget->PropertyIdFromNameNode();
+                if (withReference)
+                {
+                    // Object Environment Record GetBindingValue probes
+                    // HasProperty before Get; the call target load must do
+                    // the same for a dynamic/with instance.
+                    Js::PropertyIdIndexType propertyIndex = funcInfo->FindOrAddReferencedPropertyId(propertyId);
+                    Js::ByteCodeLabel presentLabel = byteCodeGenerator->Writer()->DefineLabel();
+                    Js::ByteCodeLabel doneLabel = byteCodeGenerator->Writer()->DefineLabel();
+                    byteCodeGenerator->Writer()->BrProperty(Js::OpCode::BrOnHasProperty, presentLabel, *callObjLocation, propertyIndex);
+                    if (funcInfo->GetIsStrictMode() || byteCodeGenerator->forceStrictModeForClassComputedPropertyName)
+                    {
+                        byteCodeGenerator->Writer()->W1(Js::OpCode::RuntimeReferenceError, SCODE_CODE(JSERR_CantAssignTo));
+                        byteCodeGenerator->Writer()->Br(doneLabel);
+                    }
+                    else
+                    {
+                        // A missing with binding returns undefined, but an
+                        // unresolvable/global reference still throws.
+                        Js::ByteCodeLabel errorLabel = byteCodeGenerator->Writer()->DefineLabel();
+                        byteCodeGenerator->Writer()->BrReg2(Js::OpCode::BrEq_A, errorLabel, *callObjLocation, ByteCodeGenerator::RootObjectRegister);
+                        byteCodeGenerator->Writer()->Reg1(Js::OpCode::LdUndef, pnodeNameTarget->location);
+                        byteCodeGenerator->Writer()->Br(doneLabel);
+                        byteCodeGenerator->Writer()->MarkLabel(errorLabel);
+                        byteCodeGenerator->Writer()->W1(Js::OpCode::RuntimeReferenceError, SCODE_CODE(JSERR_CantAssignTo));
+                        byteCodeGenerator->Writer()->Br(doneLabel);
+                    }
+                    byteCodeGenerator->Writer()->MarkLabel(presentLabel);
+                    EmitMethodFld(pnodeNameTarget, *callObjLocation, propertyId, byteCodeGenerator, funcInfo);
+                    byteCodeGenerator->Writer()->MarkLabel(doneLabel);
+                    break;
+                }
                 EmitMethodFld(pnodeNameTarget, *callObjLocation, propertyId, byteCodeGenerator, funcInfo);
                 break;
             }
@@ -10708,7 +11058,7 @@ void EmitBinaryOpnds(ParseNode* pnode1, ParseNode* pnode2, ByteCodeGenerator* by
     Emit(pnode2, byteCodeGenerator, funcInfo, false, false, computedPropertyLocation);
 }
 
-void EmitBinaryReference(ParseNode *pnode1, ParseNode *pnode2, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo, BOOL fLoadLhs, BOOL fEmitRhs = TRUE)
+void EmitBinaryReference(ParseNode *pnode1, ParseNode *pnode2, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo, BOOL fLoadLhs, BOOL fEmitRhs = TRUE, Js::RegSlot *referenceBaseLocation = nullptr)
 {
     // Make sure that the RHS of an assignment doesn't kill the opnd's of the expression on the LHS.
     switch (pnode1->nop)
@@ -10755,10 +11105,17 @@ void EmitBinaryReference(ParseNode *pnode1, ParseNode *pnode2, ByteCodeGenerator
         break;
     }
 
+    if (referenceBaseLocation != nullptr && pnode1->nop == knopName && !pnode1->AsParseNodeName()->IsSpecialName())
+    {
+        Assert(*referenceBaseLocation == Js::Constants::NoRegister);
+        *referenceBaseLocation = EmitAssignmentReferenceBase(pnode1, byteCodeGenerator, funcInfo);
+    }
+
     if (fLoadLhs)
     {
         // Emit code to load the value of the LHS.
-        EmitLoad(pnode1, byteCodeGenerator, funcInfo);
+        EmitLoad(pnode1, byteCodeGenerator, funcInfo,
+            referenceBaseLocation != nullptr ? *referenceBaseLocation : Js::Constants::NoRegister);
     }
     else
     {
@@ -11884,8 +12241,14 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
             // Grab a register for the expression result.
             funcInfo->AcquireLoc(pnode);
 
+            Js::RegSlot referenceBaseLocation = Js::Constants::NoRegister;
+            if (pnode1->nop == knopName && !pnode1->AsParseNodeName()->IsSpecialName())
+            {
+                referenceBaseLocation = EmitAssignmentReferenceBase(pnode1, byteCodeGenerator, funcInfo);
+            }
+
             // Load the initial value, convert it (this is the expression result), and increment it.
-            EmitLoad(pnode1, byteCodeGenerator, funcInfo);
+            EmitLoad(pnode1, byteCodeGenerator, funcInfo, referenceBaseLocation);
             const Js::OpCode op2 = isESBigIntEnabled ? Js::OpCode::Conv_Numeric : Js::OpCode::Conv_Num;
             byteCodeGenerator->Writer()->Reg2(op2, pnode->location, pnode1->location);
 
@@ -11909,7 +12272,7 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
             }
 
             // Store the incremented value.
-            EmitAssignment(nullptr, pnode1, incDecResult, byteCodeGenerator, funcInfo);
+            EmitAssignment(nullptr, pnode1, incDecResult, byteCodeGenerator, funcInfo, referenceBaseLocation);
 
             // Release the incremented value and the l-value.
             if (incDecResult != pnode1->location)
@@ -11917,6 +12280,10 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
                 funcInfo->ReleaseTmpRegister(incDecResult);
             }
             funcInfo->ReleaseLoad(pnode1);
+            if (referenceBaseLocation != Js::Constants::NoRegister)
+            {
+                funcInfo->ReleaseTmpRegister(referenceBaseLocation);
+            }
             byteCodeGenerator->EndStatement(pnode);
 
             break;
@@ -11943,25 +12310,39 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
             || funcInfo->RegIsConst(pnode1->location)
             || (pnode1->nop == knopName && pnode1->AsParseNodeName()->sym && pnode1->AsParseNodeName()->sym->GetIsFuncExpr());
 
+        // Acquire the result slot before the captured base. The result stays
+        // live for the enclosing expression, so the base must be above it on
+        // the temp stack and be released first.
+        const Js::RegSlot result_location =
+            need_result_location ? funcInfo->AcquireLoc(pnode) : Js::Constants::NoRegister;
+
+        Js::RegSlot referenceBaseLocation = Js::Constants::NoRegister;
+        if (pnode1->nop == knopName && !pnode1->AsParseNodeName()->IsSpecialName())
+        {
+            referenceBaseLocation = EmitAssignmentReferenceBase(pnode1, byteCodeGenerator, funcInfo);
+        }
+
         if (need_result_location)
         {
-            const Js::RegSlot result_location = funcInfo->AcquireLoc(pnode);
-
-            EmitLoad(pnode1, byteCodeGenerator, funcInfo);
+            EmitLoad(pnode1, byteCodeGenerator, funcInfo, referenceBaseLocation);
             byteCodeGenerator->Writer()->Reg2(op, result_location, pnode1->location);
 
             // Store the incremented value and release the l-value.
-            EmitAssignment(nullptr, pnode1, result_location, byteCodeGenerator, funcInfo);
+            EmitAssignment(nullptr, pnode1, result_location, byteCodeGenerator, funcInfo, referenceBaseLocation);
         }
         else
         {
-            EmitLoad(pnode1, byteCodeGenerator, funcInfo);
+            EmitLoad(pnode1, byteCodeGenerator, funcInfo, referenceBaseLocation);
             byteCodeGenerator->Writer()->Reg2(op, pnode1->location, pnode1->location);
 
             // Store the incremented value and release the l-value.
-            EmitAssignment(nullptr, pnode1, pnode1->location, byteCodeGenerator, funcInfo);
+            EmitAssignment(nullptr, pnode1, pnode1->location, byteCodeGenerator, funcInfo, referenceBaseLocation);
         }
         funcInfo->ReleaseLoad(pnode1);
+        if (referenceBaseLocation != Js::Constants::NoRegister)
+        {
+            funcInfo->ReleaseTmpRegister(referenceBaseLocation);
+        }
 
         byteCodeGenerator->EndStatement(pnode);
         break;
@@ -12303,24 +12684,29 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
     {
         ParseNode *lhs = pnode->AsParseNodeBin()->pnode1;
         ParseNode *rhs = pnode->AsParseNodeBin()->pnode2;
+        Js::RegSlot referenceBaseLocation = Js::Constants::NoRegister;
         byteCodeGenerator->StartStatement(pnode);
         if (pnode->isUsed || fReturnValue)
         {
             // If the assignment result is used, grab a register to hold it and pass it to EmitAssignment,
             // which will copy the assigned value there.
             funcInfo->AcquireLoc(pnode);
-            EmitBinaryReference(lhs, rhs, byteCodeGenerator, funcInfo, false);
-            EmitAssignment(pnode, lhs, rhs->location, byteCodeGenerator, funcInfo);
+            EmitBinaryReference(lhs, rhs, byteCodeGenerator, funcInfo, false, true, &referenceBaseLocation);
+            EmitAssignment(pnode, lhs, rhs->location, byteCodeGenerator, funcInfo, referenceBaseLocation);
         }
         else
         {
-            EmitBinaryReference(lhs, rhs, byteCodeGenerator, funcInfo, false);
-            EmitAssignment(nullptr, lhs, rhs->location, byteCodeGenerator, funcInfo);
+            EmitBinaryReference(lhs, rhs, byteCodeGenerator, funcInfo, false, true, &referenceBaseLocation);
+            EmitAssignment(nullptr, lhs, rhs->location, byteCodeGenerator, funcInfo, referenceBaseLocation);
         }
         funcInfo->ReleaseLoc(rhs);
         if (!lhs->IsPattern())
         {
             funcInfo->ReleaseReference(lhs);
+        }
+        if (referenceBaseLocation != Js::Constants::NoRegister)
+        {
+            funcInfo->ReleaseTmpRegister(referenceBaseLocation);
         }
         byteCodeGenerator->EndStatement(pnode);
         break;
@@ -12518,6 +12904,7 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
 
         ParseNode *lhs = pnode->AsParseNodeBin()->pnode1;
         ParseNode *rhs = pnode->AsParseNodeBin()->pnode2;
+        Js::RegSlot referenceBaseLocation = Js::Constants::NoRegister;
 
         // Assign a register for the result only if the result is used or the LHS can't be assigned to
         // (i.e., is a constant).
@@ -12532,24 +12919,28 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
             const Js::RegSlot result_location = funcInfo->AcquireLoc(pnode);
 
             // Grab a register for the initial value and load it.
-            EmitBinaryReference(lhs, rhs, byteCodeGenerator, funcInfo, true);
+            EmitBinaryReference(lhs, rhs, byteCodeGenerator, funcInfo, true, true, &referenceBaseLocation);
             funcInfo->ReleaseLoc(rhs);
             // Do the arithmetic, store the result, and release the l-value.
             byteCodeGenerator->Writer()->Reg3(nopToOp[pnode->nop], result_location, lhs->location, rhs->location);
 
-            EmitAssignment(pnode, lhs, result_location, byteCodeGenerator, funcInfo);
+            EmitAssignment(pnode, lhs, result_location, byteCodeGenerator, funcInfo, referenceBaseLocation);
         }
         else
         {
             // Grab a register for the initial value and load it. Might modify lhs->location.
-            EmitBinaryReference(lhs, rhs, byteCodeGenerator, funcInfo, true);
+            EmitBinaryReference(lhs, rhs, byteCodeGenerator, funcInfo, true, true, &referenceBaseLocation);
 
             funcInfo->ReleaseLoc(rhs);
             // Do the arithmetic, store the result, and release the l-value.
             byteCodeGenerator->Writer()->Reg3(nopToOp[pnode->nop], lhs->location, lhs->location, rhs->location);
-            EmitAssignment(nullptr, lhs, lhs->location, byteCodeGenerator, funcInfo);
+            EmitAssignment(nullptr, lhs, lhs->location, byteCodeGenerator, funcInfo, referenceBaseLocation);
         }
         funcInfo->ReleaseLoad(lhs);
+        if (referenceBaseLocation != Js::Constants::NoRegister)
+        {
+            funcInfo->ReleaseTmpRegister(referenceBaseLocation);
+        }
 
         byteCodeGenerator->EndStatement(pnode);
         break;
@@ -12567,11 +12958,12 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
 
         ParseNode *lhs = pnode->AsParseNodeBin()->pnode1;
         ParseNode *rhs = pnode->AsParseNodeBin()->pnode2;
+        Js::RegSlot referenceBaseLocation = Js::Constants::NoRegister;
 
         funcInfo->AcquireLoc(pnode);
         Js::ByteCodeLabel doneLabel = byteCodeGenerator->Writer()->DefineLabel();
 
-        EmitBinaryReference(lhs, rhs, byteCodeGenerator, funcInfo, true, false);
+        EmitBinaryReference(lhs, rhs, byteCodeGenerator, funcInfo, true, false, &referenceBaseLocation);
         byteCodeGenerator->Writer()->Reg2(Js::OpCode::Ld_A, pnode->location, lhs->location);
 
         if (pnode->nop == knopAsgLogAnd)
@@ -12588,12 +12980,16 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
         }
 
         Emit(rhs, byteCodeGenerator, funcInfo, false);
-        EmitAssignment(nullptr, lhs, rhs->location, byteCodeGenerator, funcInfo);
+        EmitAssignment(nullptr, lhs, rhs->location, byteCodeGenerator, funcInfo, referenceBaseLocation);
         byteCodeGenerator->Writer()->Reg2(Js::OpCode::Ld_A_ReuseLoc, pnode->location, rhs->location);
         funcInfo->ReleaseLoc(rhs);
 
         byteCodeGenerator->Writer()->MarkLabel(doneLabel);
         funcInfo->ReleaseLoad(lhs);
+        if (referenceBaseLocation != Js::Constants::NoRegister)
+        {
+            funcInfo->ReleaseTmpRegister(referenceBaseLocation);
+        }
 
         byteCodeGenerator->EndStatement(pnode);
         break;

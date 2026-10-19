@@ -2871,6 +2871,47 @@ CommonNumber:
         return SetProperty_Internal<false>(instance, instance, true, propertyId, newValue, info, requestContext, propertyOperationFlags);
     }
 
+    // A canonical numeric string that is not an integer index is a no-op on a
+    // typed array's [[Set]] (IntegerIndexedElementSet). The receiver's ordinary
+    // [[Set]] delegates to the prototype before creating an own property, so
+    // this shape must not fall through to the receiver's SetProperty.
+    static bool IsTypedArrayCanonicalNumericNonIndexPrototype(
+        RecyclableObject* receiverObject, PropertyId propertyId, ScriptContext* requestContext)
+    {
+        const PropertyRecord* propertyRecord = requestContext->GetPropertyName(propertyId);
+        if (propertyRecord->IsSymbol() || propertyRecord->IsNumeric())
+        {
+            return false;
+        }
+
+        double numericIndex;
+        if (!JavascriptConversion::CanonicalNumericIndexString(
+                requestContext->GetPropertyString(propertyId), &numericIndex, requestContext))
+        {
+            return false;
+        }
+
+        if (VarIs<JavascriptProxy>(receiverObject) || receiverObject->HasOwnProperty(propertyId))
+        {
+            return false;
+        }
+
+        RecyclableObject* prototype = receiverObject->GetPrototype();
+        while (prototype != nullptr)
+        {
+            if (DynamicObject::IsAnyTypedArray(prototype))
+            {
+                return true;
+            }
+            if (prototype->HasOwnProperty(propertyId))
+            {
+                return false;
+            }
+            prototype = prototype->GetPrototype();
+        }
+        return false;
+    }
+
     // Returns true if a result was written.
     bool JavascriptOperators::SetAccessorOrNonWritableProperty(
         Var receiver,
@@ -2888,6 +2929,14 @@ CommonNumber:
         Var setterValueOrProxy = nullptr;
         DescriptorFlags flags = None;
         bool receiverNonWritable = false;
+
+        if (!isRoot && JavascriptOperators::IsObject(receiver) &&
+            IsTypedArrayCanonicalNumericNonIndexPrototype(
+                UnsafeVarTo<RecyclableObject>(receiver), propertyId, requestContext))
+        {
+            *result = TRUE;
+            return true;
+        }
 
         if (receiver != object && !isRoot)
         {

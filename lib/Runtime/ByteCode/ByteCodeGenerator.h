@@ -140,6 +140,7 @@ public:
     Js::ScriptContext* GetScriptContext() { return scriptContext; }
 
     Scope *GetCurrentScope() const { return currentScope; }
+    Scope *GetGlobalScope() const { return globalScope; }
 
     void SetCurrentBlock(ParseNodeBlock *pnode) { currentBlock = pnode; }
     ParseNodeBlock *GetCurrentBlock() const { return currentBlock; }
@@ -364,8 +365,8 @@ public:
     void EmitOneFunction(ParseNodeFnc *pnodeFnc);
     void EmitGlobalFncDeclInit(Js::RegSlot rhsLocation, Js::PropertyId propertyId, FuncInfo * funcInfo);
     void EmitLocalPropInit(Js::RegSlot rhsLocation, Symbol *sym, FuncInfo *funcInfo);
-    void EmitPropStore(Js::RegSlot rhsLocation, Symbol *sym, IdentPtr pid, FuncInfo *funcInfo, bool isLet = false, bool isConst = false, bool isFncDeclVar = false, bool skipUseBeforeDeclarationCheck = false);
-    void EmitPropLoad(Js::RegSlot lhsLocation, Symbol *sym, IdentPtr pid, FuncInfo *funcInfo, bool skipUseBeforeDeclarationCheck = false);
+    void EmitPropStore(Js::RegSlot rhsLocation, Symbol *sym, IdentPtr pid, FuncInfo *funcInfo, bool isLet = false, bool isConst = false, bool isFncDeclVar = false, bool skipUseBeforeDeclarationCheck = false, bool skipDynamicScopes = false);
+    void EmitPropLoad(Js::RegSlot lhsLocation, Symbol *sym, IdentPtr pid, FuncInfo *funcInfo, bool skipUseBeforeDeclarationCheck = false, bool skipDynamicScopes = false);
     void EmitPropDelete(Js::RegSlot lhsLocation, Symbol *sym, IdentPtr pid, FuncInfo *funcInfo);
     void EmitPropTypeof(Js::RegSlot lhsLocation, Symbol *sym, IdentPtr pid, FuncInfo *funcInfo);
     void EmitTypeOfFld(FuncInfo * funcInfo, Js::PropertyId propertyId, Js::RegSlot value, Js::RegSlot instance, Js::OpCode op1, bool reuseLoc = false);
@@ -375,7 +376,7 @@ public:
     void EmitPropLoadThis(Js::RegSlot lhsLocation, ParseNodeSpecialName *pnode, FuncInfo *funcInfo, bool chkUndecl);
     void EmitPropStoreForSpecialSymbol(Js::RegSlot rhsLocation, Symbol *sym, IdentPtr pid, FuncInfo *funcInfo, bool init);
 
-    void EmitLoadInstance(Symbol *sym, IdentPtr pid, Js::RegSlot *pThisLocation, Js::RegSlot *pTargetLocation, FuncInfo *funcInfo);
+    void EmitLoadInstance(Symbol *sym, IdentPtr pid, Js::RegSlot *pThisLocation, Js::RegSlot *pTargetLocation, FuncInfo *funcInfo, bool *withReference = nullptr);
     void EmitGlobalBody(FuncInfo *funcInfo);
     void EmitFunctionBody(FuncInfo *funcInfo);
     void EmitAsmFunctionBody(FuncInfo *funcInfo);
