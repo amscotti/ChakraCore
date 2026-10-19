@@ -1,6 +1,6 @@
 # C2-S1: public static class fields (simple names)
 
-Status: **pending** on branch `s1-static` (base `d2ce6703f`). This is the
+Status: **landed in `041a9bb8f`** (feature `c76c75023`; base `d2ce6703f`); current integrated gates **2010/2062**. Evidence: focused static-public subset 75/75, **35 fail→pass / 0 pass→fail**; local es7 75/0. Private static/static blocks/computed static/super.prop/JIT remain residuals. This is the
 follow-up to the landed public/private instance-field slices
 (`doc/c2-s1-public-fields.md`, `doc/c2-s1-private-fields.md`). Static private
 fields, static private methods/accessors, static blocks, computed names and
