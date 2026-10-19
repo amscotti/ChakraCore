@@ -18,10 +18,10 @@ No --not-tag: ICU is present in these profiles, so TEST_ICU is empty
 Slow, ...) is runtests.py's own and therefore identical by
 construction.
 
-Requires the legacy baseline counts for the selection: 1995 passed /
-0 failed (--test), 2047 passed / 0 failed (--debug). The C2-S13
+Requires the legacy baseline counts for the selection: 1996 passed /
+0 failed (--test), 2048 passed / 0 failed (--debug). The C2-S13
 WeakRef slice added weakref.js and weakref-gc.js to both selections
-(1984/2036 -> 1995/2047) on top of the C2-S8 float16.js test, which sits
+(1984/2036 -> 1996/2048) on top of the C2-S8 float16.js test, which sits
 on top of the C2-S2 sub-batch 4 bigint-mixed.js
 test, which sits on top of sub-batch 3's
 bigint-literals.js (doc/c2-s2-bigint.md), sub-batch 2's asIntN/asUintN
@@ -47,7 +47,7 @@ runtests.py's own per-test timeout is untouched.
 
 Usage: check_regression.py <runtests.py> <ch> [--select test|debug]
        [--expected-passed N] [--expected-failed M] [--self-test]
-Defaults: --select test, 1995/0 (the B2 test profile; count raised by
+Defaults: --select test, 1996/0 (the B2 test profile; count raised by
 C2-S13 WeakRef's weakref.js + weakref-gc.js, C2-S8's float16.js,
 S2-b4's bigint-mixed.js, S2-b3's bigint-literals.js,
 S2-b2's bigint-asintn.js, the S9 modifiers sub-batch's
@@ -70,7 +70,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common
 
 TOTAL_RE = re.compile(r"^Total: passed (\d+), failed (\d+)\s*$")
-EXPECTED_PASSED = 1995
+EXPECTED_PASSED = 1996
 EXPECTED_FAILED = 0
 # Per-selection legacy baselines (counts: doc/c2-s9-modifiers.md,
 # doc/c2-s13-symbol-keys.md, doc/c2-s14-blockscope.md,
@@ -90,9 +90,9 @@ EXPECTED_FAILED = 0
 # explicit CLI args so a wiring mistake (debug flag with test counts)
 # fails instead of silently passing on a wrong gate.
 # C2-S8 added float16.js to both selections (1981/2033 -> 1982/2034).
-# C2-S13 WeakRef added weakref.js and weakref-gc.js (1984/2036 -> 1995/2047).
+# C2-S13 WeakRef added weakref.js and weakref-gc.js (1984/2036 -> 1996/2048).
 SELECT_FLAGS = {"test": "--test", "debug": "--debug"}
-SELECT_COUNTS = {"test": (1995, 0), "debug": (2047, 0)}
+SELECT_COUNTS = {"test": (1996, 0), "debug": (2048, 0)}
 
 
 def parse_total(lines):
@@ -128,7 +128,7 @@ def self_test():
     """Negative controls: the parser/verdict must reject doctored logs."""
     cases = [
         ("exact baseline",
-         ["Total: passed 1995, failed 0"], True),
+         ["Total: passed 1996, failed 0"], True),
         ("one failure",
          ["Total: passed 1960, failed 1"], False),
         ("wrong total",
@@ -155,19 +155,19 @@ def self_test():
             bad += 1
         print("self-test %-16s -> %s (verdict=%s err=%r)"
               % (name, status, "accept" if ok else "reject", err))
-    # Profile-awareness pins: the --debug baseline (2047/0) must be
+    # Profile-awareness pins: the --debug baseline (2048/0) must be
     # accepted under debug expectations and rejected under test
     # expectations, so a count/selection mismatch can never pass.
     try:
-        err = check_counts(parse_total(["Total: passed 2047, failed 0"]),
+        err = check_counts(parse_total(["Total: passed 2048, failed 0"]),
                            *SELECT_COUNTS["debug"])
     except ValueError as e:
         err = str(e)
     if err is None:
-        print("self-test %-16s -> PASS (verdict=accept)" % "debug 2047/0")
+        print("self-test %-16s -> PASS (verdict=accept)" % "debug 2048/0")
     else:
         print("self-test %-16s -> FAIL (verdict=reject err=%r)"
-              % ("debug 2047/0", err))
+              % ("debug 2048/0", err))
         bad += 1
     try:
         err = check_counts(parse_total(["Total: passed 2016, failed 0"]),
