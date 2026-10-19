@@ -1,7 +1,9 @@
 # C2-S14 P6: property enumeration order after delete/re-add
 
-Status: **`<pending>`** (implementation and Mac no-JIT evidence recorded; B4 owns
-Linux/JIT/GCStress claims). Base `b50fa4d94`; branch `s14-p6`. This slice fixes
+Status: **landed in `8b52cc063`** (feature `25318a151`; base `b50fa4d94`).
+Mac no-JIT evidence recorded; B4 owns Linux/JIT/GCStress claims. Targeted
+P6 selection **18/18**, **10 fail→pass / 0 pass→fail**; broad
+Object/JSON/for-in **7,150/190** with the same 10 flips. This slice fixes
 only own-property/`for-in` enumeration order for an ordered dictionary after a
 property is deleted and added back, plus the in-flight enumeration snapshot that
 mutation exposes. The unordered dictionary path and integer-index ordering are

@@ -849,11 +849,13 @@ still owns JIT-configuration claims.)*
 | S2 arithmetic/bitwise/shift | Landed `1c5d5b2fc` | scoped 444/2, 80/0; broad 1,027/1,027; Node differentials | BigInt64Array/BigUint64Array, Map/Set identity, literal property names, giant ToString, JIT |
 | S8 resizable/transfer | Landed `6ceb23d6d` | focused 424/834, 236/0; ArrayBuffer 358/442; DataView 44/52; Float16 4/4 | TypedArray tracking, immutable buffers, SAB, Float16Array, cross-realm/Reflect order, JsRT/Wasm, JIT |
 | S13 WeakRef | Landed `803331b51` | WeakRef 56/58, 56/0; agent-wide kept set; 200/500-run stability | FinalizationRegistry, symbol WeakMap/WeakSet keys, host-dispatch, concurrent GC/JIT |
-| S14 triage | Landed `f49509aca` | P1 selected: 60 current-confirmed / 112 expanded | P1–P6 implementation; parser clusters wait for S1; untagged bucket not one mechanism |
+| S14 P1 | Landed `a4eba5a38` | 152/4 on integrated binary; 112/0 | S1 class completion; unsupported `using`; pre-existing labeled-break/finally crash (P7) |
+| S14 P3 | Landed `0a723970e` | 280/0; full Annex B 765/17, 282/0 | 17 P4 declaration-instantiation collisions |
+| S14 P6 | Landed `8b52cc063` | 18/18, 10/0; broad 10/0 | unordered/global/let and dictionary snapshot cost; JIT |
 
-Full gates at this checkpoint: **1988/0 test**, **2040/0 debug-static**.
-All four active feature branches are merged; the S14 triage branch is
-merged as a plan. The next work item is S14 P1 statement completion values.
+Full gates at this checkpoint: **1992/0 test**, **2044/0 debug-static**.
+All active feature/triage worktrees are merged. Next work items are P7
+(labeled-break/finally crash), then P2/P4/P5.
 
 ## 7. Separate inventories
 

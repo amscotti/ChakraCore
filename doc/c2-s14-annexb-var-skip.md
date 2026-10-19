@@ -1,8 +1,10 @@
 # C2-S14 P3: Annex B block-function var-extension skip
 
-Status: **`<pending>`** — follow-up draft commit on `s14-p3` on top of `14722b254`.
+Status: **landed in `0a723970e`** (feature `8731bad6d`; base `b50fa4d94`).
 Interpreter/Mac no-JIT verified; JIT evidence is not claimed (see B4).
-Integration owns the shared plan/triage update and gate counts.
+Targeted Annex B selection **280/0**, full three directories **765/17**
+(**282 fail→pass / 0 pass→fail**); the residual 17 are P4
+declaration-instantiation collisions.
 
 ## Scope and spec rule
 

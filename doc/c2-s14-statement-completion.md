@@ -1,7 +1,9 @@
 # C2-S14 P1: statement completion values (UpdateEmpty)
 
-Status: `<pending>` implementation on `s14-p1` (base `b50fa4d94`), 2026-10-18.
-Interpreter/Mac no-JIT only; JIT evidence is not claimed (see B4).
+Status: **landed in `a4eba5a38`** (feature `e1e271c42`; base `b50fa4d94`),
+2026-10-18. Integrated main gates **1992/2044**; exact selection on the
+integrated binary **152/4**, **112 fail→pass / 0 pass→fail**. Interpreter/Mac
+no-JIT only; JIT evidence is not claimed (see B4).
 
 ## Scope and spec rule
 
