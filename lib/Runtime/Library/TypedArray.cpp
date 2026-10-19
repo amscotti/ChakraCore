@@ -2017,6 +2017,17 @@ namespace Js
     }
 
 
+    // Join walks the captured length but reads only indices that are still
+    // valid; OOB and detached positions stringify as the empty string.
+    static JavascriptString* GetTypedArrayJoinElement(TypedArrayBase* typedArrayBase, uint32 index, ScriptContext* scriptContext)
+    {
+        if (typedArrayBase->IsDetachedBuffer() || index >= typedArrayBase->GetLength())
+        {
+            return scriptContext->GetLibrary()->GetEmptyString();
+        }
+        return JavascriptConversion::ToString(typedArrayBase->DirectGetItem(index), scriptContext);
+    }
+
     Var TypedArrayBase::EntryJoin(RecyclableObject* function, CallInfo callInfo, ...)
     {
         PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
@@ -2048,7 +2059,7 @@ namespace Js
         }
         else if (length == 1)
         {
-            return JavascriptConversion::ToString(typedArrayBase->DirectGetItem(0), scriptContext);
+            return GetTypedArrayJoinElement(typedArrayBase, 0, scriptContext);
         }
 
         bool hasSeparator = (separator->GetLength() != 0);
@@ -2061,9 +2072,7 @@ namespace Js
 
         Assert(length >= 2);
 
-        JavascriptString* element = JavascriptConversion::ToString(typedArrayBase->DirectGetItem(0), scriptContext);
-
-        cs->Append(element);
+        cs->Append(GetTypedArrayJoinElement(typedArrayBase, 0, scriptContext));
 
         for (uint32 i = 1; i < length; i++)
         {
@@ -2072,10 +2081,7 @@ namespace Js
                 cs->Append(separator);
             }
 
-            // Since i < length, we can be certain that the TypedArray contains an item at index i and we don't have to check for undefined
-            element = JavascriptConversion::ToString(typedArrayBase->DirectGetItem(i), scriptContext);
-
-            cs->Append(element);
+            cs->Append(GetTypedArrayJoinElement(typedArrayBase, i, scriptContext));
         }
 
         return cs;
@@ -2317,13 +2323,20 @@ namespace Js
                 // Sort the copied data
                 typedArrayBase->SortHelper(list, length, compareFn, scriptContext, tempAlloc);
 
-                // compare function calls may have detached or made the view OOB
-                if (TypedArrayBase::IsDetachedTypedArray(typedArrayBase) || typedArrayBase->IsOutOfBounds())
+                // A comparison callback may have detached the buffer (throw)
+                // or shrunk it. Write only the indices that are still valid;
+                // an OOB fixed view leaves its retained bytes unchanged.
+                if (typedArrayBase->IsDetachedBuffer())
                 {
                     JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, _u("[TypedArray].prototype.sort"));
                 }
 
-                memcpy(buffer, list, byteLength);
+                uint32 currentLength = typedArrayBase->GetLength();
+                if (currentLength > 0)
+                {
+                    uint32 copyLength = min(length, currentLength);
+                    memcpy(buffer, list, copyLength * elementSize);
+                }
             }
             else
             {
@@ -2412,33 +2425,6 @@ namespace Js
         double number = 0;
         JS_REENTRANT(jsReentLock, number = JavascriptConversion::ToNumber(value, scriptContext));
         return number;
-    }
-
-    // False for ±Infinity and any index outside [0, len).
-    // Separate from Array's ClampRelativeStart / TryActualIndex. Callers pass
-    // a ToInteger result, so NaN and -0 are already +0.
-    static bool TypedTryActualIndex(double relative, uint32 len, uint32* actual)
-    {
-        if (JavascriptNumber::IsNegInf(relative) || JavascriptNumber::IsPosInf(relative))
-        {
-            return false;
-        }
-        if (relative >= 0)
-        {
-            if (relative >= static_cast<double>(len))
-            {
-                return false;
-            }
-            *actual = static_cast<uint32>(relative);
-            return true;
-        }
-        double magnitude = -relative;
-        if (magnitude > static_cast<double>(len))
-        {
-            return false;
-        }
-        *actual = len - static_cast<uint32>(magnitude);
-        return true;
     }
 
     // %TypedArray%.prototype.toReversed. Length 0 is a new empty array of the same type.
@@ -2534,9 +2520,9 @@ namespace Js
         return result;
     }
 
-    // %TypedArray%.prototype.with. Order: ToInteger, captured-length index,
-    // ToNumber, then RangeError if the buffer is now detached or the index is
-    // out of range. ToNumber always runs; its throw wins. The copy is later.
+    // %TypedArray%.prototype.with. Order: ToInteger, negative index relative
+    // to the captured length, ToNumber, then IsValidIntegerIndex against the
+    // live length. ToNumber always runs; its throw wins. The copy is later.
     Var TypedArrayBase::EntryWith(RecyclableObject* function, CallInfo callInfo, ...)
     {
         PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
@@ -2551,19 +2537,22 @@ namespace Js
         uint32 length = source->GetLength();
         Var indexValue = args.Info.Count > 1 ? args[1] : scriptContext->GetLibrary()->GetUndefined();
         double relative = TypedToIntegerOrInfinity(indexValue, scriptContext);
-        uint32 actual = 0;
-        bool inRange = TypedTryActualIndex(relative, length, &actual);
+        double actualIndex = relative >= 0
+            ? relative
+            : static_cast<double>(length) + relative;
 
         Var value = args.Info.Count > 2 ? args[2] : scriptContext->GetLibrary()->GetUndefined();
         double numeric = TypedToNumber(value, scriptContext);
 
-        // ToNumber can shrink the buffer. IsValidIntegerIndex is evaluated
-        // against the current element length, not the captured one.
+        // ToNumber can grow or shrink the buffer. The positive index is not
+        // clamped to the captured length; validity is checked against the
+        // current element length.
         uint32 currentLength = source->GetLength();
-        if (source->IsDetachedBuffer() || !inRange || actual >= currentLength)
+        if (source->IsDetachedBuffer() || actualIndex < 0 || actualIndex >= static_cast<double>(currentLength))
         {
             JavascriptError::ThrowRangeError(scriptContext, JSERR_InvalidTypedArrayIndex);
         }
+        uint32 actual = static_cast<uint32>(actualIndex);
         Var boxed = JavascriptNumber::ToVarNoCheck(numeric, scriptContext);
         TypedArrayBase* result = CreateSameType(source, length);
         for (uint32 k = 0; k < length; ++k)

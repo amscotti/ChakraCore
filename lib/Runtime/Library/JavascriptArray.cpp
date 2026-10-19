@@ -6609,13 +6609,24 @@ Case0:
 
             for (uint32 i = 0; i < newLen; i++)
             {
-                // We only need to call HasItem in the case that we are called from Array.prototype.slice
-                if (!isTypedArrayEntryPoint && !typedArrayBase->HasItem(i + start))
+                uint32 sourceIndex = i + start;
+
+                // A species constructor may have shrunk the source after the
+                // captured range was computed. Leave OOB destination elements
+                // at their zero-initialized values instead of copying
+                // undefined (which would become NaN for float arrays).
+                if (sourceIndex >= typedArrayBase->GetLength())
                 {
                     continue;
                 }
 
-                element = typedArrayBase->DirectGetItem(i + start);
+                // We only need to call HasItem in the case that we are called from Array.prototype.slice
+                if (!isTypedArrayEntryPoint && !typedArrayBase->HasItem(sourceIndex))
+                {
+                    continue;
+                }
+
+                element = typedArrayBase->DirectGetItem(sourceIndex);
 
                 // The object we got back from the constructor might not be a TypedArray. In fact, it could be any object.
                 if (newTypedArray)
@@ -9648,9 +9659,16 @@ Case0:
 
             // Target/start/end coercion may have resized the buffer. The
             // captured indices remain the spec inputs, but the live view can
-            // now be shorter, longer or OOB.
+            // now be shorter, longer or OOB. An OOB receiver fails the
+            // post-coercion boundary check; a valid zero-length receiver is a
+            // no-op.
+            if (typedArrayBase->IsOutOfBounds())
+            {
+                JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, _u("[TypedArray].prototype.copyWithin"));
+            }
+
             uint32 liveLength = typedArrayBase->GetLength();
-            if (typedArrayBase->IsOutOfBounds() || liveLength == 0)
+            if (liveLength == 0)
             {
                 return obj;
             }

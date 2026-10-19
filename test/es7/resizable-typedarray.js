@@ -497,8 +497,10 @@ var tests = [
             var fixedRab = new ArrayBuffer(4, { maxByteLength: 4 });
             var fixed = new Uint8Array(fixedRab, 0, 4);
             fixed.set([0, 1, 2, 3]);
-            fixed.copyWithin({ valueOf() { fixedRab.resize(1); return 0; } }, 1);
-            assert.areEqual(0, fixed.length, "fixed OOB copyWithin is a no-op");
+            assert.throws(function () {
+                fixed.copyWithin({ valueOf() { fixedRab.resize(1); return 0; } }, 1);
+            }, TypeError, "fixed OOB copyWithin after coercion throws");
+            assert.areEqual(0, fixed.length, "fixed view is OOB");
 
             var zeroRab = new ArrayBuffer(2, { maxByteLength: 2 });
             var zero = new Uint8Array(zeroRab);
@@ -596,6 +598,118 @@ var tests = [
             };
             assertSameElements([1, 2, 0, 0], elements(auto.slice()),
                 "auto source copies its live range after species shrink");
+        }
+    },
+    {
+        name: "with validates the index against the live length after growth",
+        body() {
+            var rab = new ArrayBuffer(2, { maxByteLength: 5 });
+            var view = new Int8Array(rab);
+            view[0] = 11;
+            view[1] = 22;
+            var result = view.with(4, { valueOf() { rab.resize(5); return 123; } });
+
+            assert.areEqual(2, result.length, "result keeps captured length");
+            assertSameElements([11, 22], elements(result), "result copies captured range");
+            assert.areEqual(5, view.length, "source grew");
+            assert.areEqual(0, view[4], "grown element stays zero");
+
+            var zeroRab = new ArrayBuffer(0, { maxByteLength: 1 });
+            var zero = new Uint8Array(zeroRab);
+            var zeroResult = zero.with(0, { valueOf() { zeroRab.resize(1); return 1; } });
+            assert.areEqual(0, zeroResult.length, "zero-length source stays empty");
+
+            var negRab = new ArrayBuffer(0, { maxByteLength: 1 });
+            var neg = new Uint8Array(negRab);
+            assert.throws(function () {
+                neg.with(-1, { valueOf() { negRab.resize(1); return 1; } });
+            }, RangeError, "negative index remains invalid after growth");
+        }
+    },
+    {
+        name: "sort tolerates a shrinking comparison callback",
+        body() {
+            var rab = new ArrayBuffer(4, { maxByteLength: 8 });
+            var fixed = new Uint8Array(rab, 0, 4);
+            fixed.set([3, 2, 1, 0]);
+            var calls = 0;
+            fixed.sort(function (a, b) {
+                if (calls++ === 0) {
+                    rab.resize(2);
+                }
+                return a - b;
+            });
+            assert.areEqual(0, fixed.length, "fixed view is OOB");
+            rab.resize(4);
+            assertSameElements([3, 2, 0, 0], elements(fixed), "fixed bytes unchanged");
+
+            var autoRab = new ArrayBuffer(4, { maxByteLength: 8 });
+            var auto = new Uint8Array(autoRab);
+            auto.set([3, 2, 1, 0]);
+            var autoCalls = 0;
+            auto.sort(function (a, b) {
+                if (autoCalls++ === 0) {
+                    autoRab.resize(2);
+                }
+                return a - b;
+            });
+            assert.areEqual(2, auto.length, "auto view shrinks to live length");
+
+            var detachRab = new ArrayBuffer(4, { maxByteLength: 8 });
+            var detached = new Uint8Array(detachRab);
+            detached.set([3, 2, 1, 0]);
+            assert.throws(function () {
+                detached.sort(function () {
+                    detachRab.transfer();
+                    return 0;
+                });
+            }, TypeError, "detached sort still throws");
+        }
+    },
+    {
+        name: "join stringifies OOB and detached positions as empty",
+        body() {
+            var rab = new ArrayBuffer(8, { maxByteLength: 8 });
+            var fixed = new Int8Array(rab);
+            fixed.set([0, 1, 2, 3, 4, 5, 6, 7]);
+            var separator = { toString() { rab.resize(3); return "-"; } };
+            assert.areEqual("0-1-2-----", fixed.join(separator), "fixed OOB empty elements");
+
+            var growRab = new ArrayBuffer(4, { maxByteLength: 8 });
+            var grow = new Int8Array(growRab);
+            grow.set([0, 1, 2, 3]);
+            var growSeparator = { toString() { growRab.resize(6); return "."; } };
+            assert.areEqual("0.1.2.3", grow.join(growSeparator), "growth keeps captured length");
+
+            var detachRab = new ArrayBuffer(4, { maxByteLength: 8 });
+            var detached = new Int8Array(detachRab);
+            detached.set([0, 1, 2, 3]);
+            var detachSeparator = { toString() { detachRab.transfer(); return ","; } };
+            assert.areEqual(",,,", detached.join(detachSeparator), "detached positions are empty");
+        }
+    },
+    {
+        name: "slice skips OOB source elements instead of copying undefined",
+        body() {
+            var rab = new ArrayBuffer(16, { maxByteLength: 32 });
+            var floats = new Float32Array(rab);
+            floats.set([1, 2, 3, 4]);
+            floats.constructor = {
+                [Symbol.species]: function (length) {
+                    var result = new Float32Array(length);
+                    rab.resize(8);
+                    return result;
+                }
+            };
+            var sliced = floats.slice();
+            assertSameElements([1, 2, 0, 0], elements(sliced), "float OOB elements stay zero");
+
+            var zeroRab = new ArrayBuffer(16, { maxByteLength: 16 });
+            var zeroFloats = new Float32Array(zeroRab);
+            zeroFloats.set([1, 2, 3, 4]);
+            var start = { valueOf() { zeroRab.resize(0); return 1; } };
+            assertSameElements([0, 0, 0], elements(zeroFloats.slice(start)),
+                "resize-to-zero source leaves zeros");
         }
     },
     {

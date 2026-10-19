@@ -97,7 +97,10 @@ New `test/es7/resizable-typedarray.js`, registered once in
   and constructor reentrancy after offset coercion;
 - `map` after species-constructor shrink/detach over the captured callback
   range, distinct `%TypedArray%.prototype.toLocaleString` versus generic
-  `Array.prototype.toLocaleString.call`, and DataView auto-length tracking.
+  `Array.prototype.toLocaleString.call`, `with` positive-index growth,
+  `sort` callback shrink/OOB/detach, `join` separator-driven shrink/grow/detach,
+  `slice` OOB skipping (Float32 zeros, not NaN), and DataView auto-length
+  tracking.
 
 ## Evidence
 
@@ -110,9 +113,9 @@ after run) for every count below.
 - `/tmp/opencode/cc-gate-lock.sh zig build --summary line`:
   **567/567 steps succeeded**.
 - New es7 test, base binary (`out/base-bin/ch`, SHA-256 `81de4407…`):
-  **2/18 passed, 16 failed**. Same source with this lane
-  (`zig-out/bin/ch`, launcher `0122769e…`, dylib `d499575d…`):
-  **18/18 passed**.
+  **2/22 passed, 20 failed**. Same source with this lane
+  (`zig-out/bin/ch`, launcher `0122769e…`, dylib `382b8d7c…`):
+  **22/22 passed**.
 - Adjacent `test/es7/resizable-arraybuffer.js` **12/12** and
   `test/es7/float16.js` **10/10** still pass.
 - Focused test262 corpus
@@ -124,6 +127,11 @@ after run) for every count below.
   `.../**/*out-of-bounds*`: combined corpus **378 scenarios / 191 files**,
   **32/378 → 150/378**, **118 fail→pass / 0 pass→fail**; the constructors
   slice alone is **10/38 → 18/38**, **8/0**.
+- Added the 54 TypedArray files that mention `resize`/`maxByteLength` but do
+  not match the `resizable`/`out-of-bounds` name filters:
+  **4/108 before → 58/108 after**, **54 fail→pass / 0 pass→fail**. All 50
+  residuals are BigInt-gated (helper/literal/ReferenceError before later
+  assertions), so only the executed portions are evidenced.
 - The 208 residual scenarios in the 340 slice are BigInt-gated: 178 hit
   `resizableArrayBufferUtils`'s direct `BigInt64Array` reference and 30 contain
   BigInt literal syntax rejected without `-ESBigInt`. These are not all
@@ -151,10 +159,6 @@ after run) for every count below.
   `lengthTracking`; reconstructed views are fixed. `TypedArrayBase::GetBuffer`
   reports the current byte length, but no length-tracking flag is exposed to
   embedders.
-- **Sort callback resize.** `sort` with a comparison callback still writes the
-  captured range after the callback. It is memory-safe because resizable
-  capacity is retained, but a callback that resizes the buffer can diverge from
-  per-element no-op semantics. The focused corpus does not exercise that path.
 - **Integer-indexed Set/Delete residual.** The added constructors corpus exposes
   pre-existing behavior: OOB `Delete`/`Reflect.set` results and
   `resized-out-of-bounds-to-in-bounds-index` (a value coercion that grows the
