@@ -243,8 +243,12 @@ namespace Js
             cells = RecyclerNew(recycler, CellList, recycler);
         }
 
-        // heldValue is a strong Field(Var) in the cell. The target and token
-        // handles are leaf recycler blocks, so the cell never traces them.
+        // heldValue is a strong Field(Var) in the cell, traced with the
+        // cell. The target/token handles are RecyclerWeakReference objects
+        // tracked by the recycler's weak-reference map and cleared by
+        // SweepWeakReference at collect time; the cell holds only the
+        // handle pointers and never traces through them to the
+        // target/token objects.
         cells->Add(RecyclerNew(recycler, FinalizationRegistryCell, targetWeakRef, heldValue, unregisterTokenWeakRef));
     }
 
@@ -384,6 +388,14 @@ namespace Js
                 }
 
                 Var heldValue = cell->heldValue;
+                // The registered heldValue may belong to another script
+                // context; marshal it into this registry's context before
+                // handing it to the cleanup callback, exactly as
+                // WeakRef::Deref marshals its target (identity when the
+                // value is already in this context). Marshal before
+                // removing the cell so a marshaling failure leaves the
+                // cell in place for a later retry instead of losing it.
+                heldValue = CrossSite::MarshalVar(scriptContext, heldValue);
                 cells->RemoveAt(i);
 
                 BEGIN_SAFE_REENTRANT_CALL(threadContext)
