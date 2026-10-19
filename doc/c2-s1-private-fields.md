@@ -32,24 +32,36 @@ static blocks, computed names and decorators remain out of scope.
   field after `preventExtensions` still works.
 - Base fields run before the constructor body; derived fields run immediately
   after `super()` binds `this`. Initializers evaluate with `this` bound to the
-  instance. Public fields/methods are unaffected.
+  instance. Anonymous function/arrow/class initializers receive the private
+  source name including `#` (`#foo`, `#bar`, `#Baz`). Public fields/methods are
+  unaffected.
 
 ## Parser/AST design
 
 `tkPrivateName` is a scanner token whose token range includes `#` while the
 interned identifier excludes it. It is accepted as a field name and after `.`;
 the `[In]` grammar parameter is threaded to `#x in` so `for (#x in ...)` is
-rejected. `#x in` requires a ShiftExpression right operand, so nested
-`#x in #x in obj` is an early error.
+rejected. A parenthesized expression is a valid ShiftExpression right operand,
+so `#x in (o in p)`, `#x in ((o in p))` and `#x in (o in p) in o` are accepted
+(as is left-associative `#x in o in p`); only a bare PrivateIdentifier right
+operand such as `#x in #x in obj` is an early error.
 
-Each class push creates a `PrivateNameScope`. Field declarations add a hidden
-block-scoped `const` (`*s1privateN*`) plus a `PrivateNameEntry`; private
-references are recorded in a deferred list and resolved when the outermost
-class scope pops, which permits forward uses and implements nested-class
-shadowing. A reference becomes a `ParseNodeName` marked `isPrivateName` whose
-`sym` is the hidden const. `BindInstAndMember` must not treat this name as a
-property reference. `ParseNodeClass::pnodePrivateNames` retains the hidden
-declaration list for emission.
+Private-name validation also runs with `buildAST == false`. The parser pushes
+the same lexical `PrivateNameScope` during fast scan, records declarations and
+deferred references without AST/brand nodes, and resolves them at the outermost
+class pop. Consequently a deferred or large function body containing
+`this.#x`, duplicate private fields in nested classes, or an undeclared private
+name reports `SyntaxError` during the initial parse instead of failing later
+when the body is reparsed or called.
+
+Each class push creates a `PrivateNameScope`. In an AST parse, field
+declarations add a hidden block-scoped `const` (`*s1privateN*`) plus a
+`PrivateNameEntry`; private references are recorded in a deferred list and
+resolved when the outermost class scope pops, which permits forward uses and
+implements nested-class shadowing. A reference becomes a `ParseNodeName` marked
+`isPrivateName` whose `sym` is the hidden const. `BindInstAndMember` must not
+treat this name as a property reference. `ParseNodeClass::pnodePrivateNames`
+retains the hidden declaration list for emission.
 
 `ClassBodyHasPrivateSyntax` is a conservative look-ahead used to keep nested
 functions eager when a class may contain private syntax. It bails out as
@@ -110,17 +122,20 @@ Build (Mac ARM64, `-nonative` interpreter evidence):
 - `... zig build -Dprofile=debug-static ...` — green.
 - `... zig build verify-bytecode ...` — green; checked-in bytecode unchanged.
 - Release `zig-out/bin/ch` sha256 `8be2157112dd5b39c25c46616de2fc1101d78fb69dc2b38983ca4667840b606c`;
-  `libChakraCore.dylib` sha256 `9bc519da3a474bf2478fe06fe59bb5900c0e3191023f8231e75268fcdd4e9895`;
-  Debug `out/debug-static/bin/ch` sha256 `d63fcda3c869ce44069365ef0a8b88e76131f90e7fcbda6760ae571dc73417fa`.
+  `libChakraCore.dylib` sha256 `140c3b45dc8c89ef02f0957462ea88bda84efca9bf7c675b3819853a4764a260`;
+  Debug `out/debug-static/bin/ch` sha256 `b80d368db2bfe5b491c76f93aeeed66215f4483f1bec56b20ca7fff47e8307fa`.
 
 Local suites (disable_jit):
 
-- `test/es7/class-private-fields.js` — pass in normal, `-force:deferparse`, and
-  `-force:DeferParse -UseParserStateCache -ParserStateCache` modes (Release and
-  Debug).
-- `test/es7` — 61 passed / 1 failed; the sole failure is the existing
-  `asyncawait-functionality.js` baseline mismatch, reproduced identically with
-  the base binary.
+- `test/es7/class-private-fields.js` — pass in normal, `-force:deferparse`,
+  `-noDeferParse`, and `-force:DeferParse -UseParserStateCache
+  -ParserStateCache` modes (Release and Debug). The file includes deferred fast
+  scan cases for `this.#x`, duplicate private fields, nested duplicate classes,
+  `Function("return this.#x")`, and a 300-statement prefix; parenthesized RHS
+  forms and `#foo`/`#bar`/`#Baz` NamedEvaluation.
+- `test/es7` — **64 passed / 0 failed** (three `class-private-fields.js`
+  entries plus the existing suite). The earlier 61/1 note was the stale
+  `asyncawait-functionality.js` baseline claim; a fresh run is green.
 - `test/es7/class-fields-public.js` — 27/27 (public-field regression control).
 - `test/es6` — 233/0; `test/es6module` — 31/0; `test/Function` — 70/0.
 
@@ -161,6 +176,9 @@ passed, 160 fail -> pass, 0 pass -> fail.
 - Parser look-ahead conservatively treats classes with context-sensitive tokens
   (regex/division/templates) as private-syntax classes, keeping more nested
   functions eager than strictly necessary.
+- Private values depend on the existing `JavascriptWeakMap` weak-key storage
+  (`WeakMapKeyMap` on the instance). Focused test262 runs with `-CollectGarbage`
+  and Debug runs are green; clone/marshal across script contexts is untested.
 - JIT/backend support is unverified. All five opcodes are interpreter-only and
   have no JIT helpers; **B4 must run the S1 private-field corpus and the es7
   tests under SimpleJIT/FullJIT (dynapogo) before any JIT/default claim**.

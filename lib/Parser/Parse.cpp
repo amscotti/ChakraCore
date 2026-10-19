@@ -112,6 +112,8 @@ struct DeferredPrivateRef
     IdentPtr name;
     ParseNodePtr pnode;
     PrivateNameScope * scope;
+    charcount_t ichMin;
+    charcount_t ichLim;
     DeferredPrivateRef * next;
 };
 
@@ -3991,10 +3993,7 @@ ParseNodePtr Parser::ParseTerm(BOOL fAllowCall,
             Error(ERRsyntax);
         }
 
-        if (buildAST)
-        {
-            pnode = CreatePrivateNameReference(pid, ichMin, ichLim);
-        }
+        pnode = CreatePrivateNameReference(pid, ichMin, ichLim, buildAST);
         fCanAssign = FALSE;
         break;
     }
@@ -5019,10 +5018,8 @@ ParseNodePtr Parser::ParsePostfixOperators(
                     // super.#x is not a valid private reference.
                     Error(ERRsyntax);
                 }
-                if (buildAST)
-                {
-                    name = CreatePrivateNameReference(privateName, privateIchMin, privateIchLim);
-                }
+                name = CreatePrivateNameReference(
+                    privateName, privateIchMin, privateIchLim, buildAST);
             }
             else if (!m_token.IsIdentifier())
             {
@@ -8997,7 +8994,7 @@ void Parser::PopPrivateNameScope()
     m_privateNameScope = scope->prev;
 }
 
-PrivateNameEntry * Parser::DeclareClassPrivateName(IdentPtr name)
+PrivateNameEntry * Parser::DeclareClassPrivateName(IdentPtr name, bool buildAST)
 {
     Assert(name != nullptr);
     Assert(m_privateNameScope != nullptr);
@@ -9010,35 +9007,44 @@ PrivateNameEntry * Parser::DeclareClassPrivateName(IdentPtr name)
         }
     }
 
-    char16 hiddenName[48];
-    int nameLength = swprintf_s(hiddenName, 48, _u("*s1private%u*"), this->m_classPrivateNameCount++);
-    Assert(nameLength > 0);
-    IdentPtr hiddenPid = this->GetHashTbl()->PidHashNameLen(hiddenName, static_cast<uint32>(nameLength));
-
-    ParseNodeVar * decl = CreateBlockScopedDeclNode(hiddenPid, knopConstDecl);
-    Assert(decl != nullptr && decl->sym != nullptr);
-    decl->grfpn |= fpnHidden;
-    decl->sym->SetHasNonLocalReference();
-    decl->sym->SetNeedDeclaration(false);
-
-    // Keep a serializable list on the class for EmitClass; the block's own
-    // lexical list owns decl->pnodeNext, so wrap each declaration in a
-    // knopList cell.
-    ParseNodeBin * pnodeListItem = CreateBinNode(knopList, decl, nullptr);
-    *m_privateNameScope->ppnodeDecls = pnodeListItem;
-    m_privateNameScope->ppnodeDecls = &pnodeListItem->pnode2;
-
     PrivateNameEntry * entry = Anew(&m_nodeAllocator, PrivateNameEntry);
     entry->name = name;
-    entry->hiddenPid = hiddenPid;
-    entry->decl = decl;
-    entry->sym = decl->sym;
+    entry->hiddenPid = nullptr;
+    entry->decl = nullptr;
+    entry->sym = nullptr;
     entry->next = m_privateNameScope->names;
     m_privateNameScope->names = entry;
+
+    if (buildAST)
+    {
+        char16 hiddenName[48];
+        int nameLength = swprintf_s(hiddenName, 48, _u("*s1private%u*"), this->m_classPrivateNameCount++);
+        Assert(nameLength > 0);
+        IdentPtr hiddenPid = this->GetHashTbl()->PidHashNameLen(hiddenName, static_cast<uint32>(nameLength));
+
+        ParseNodeVar * decl = CreateBlockScopedDeclNode(hiddenPid, knopConstDecl);
+        Assert(decl != nullptr && decl->sym != nullptr);
+        decl->grfpn |= fpnHidden;
+        decl->sym->SetHasNonLocalReference();
+        decl->sym->SetNeedDeclaration(false);
+
+        // Keep a serializable list on the class for EmitClass; the block's own
+        // lexical list owns decl->pnodeNext, so wrap each declaration in a
+        // knopList cell.
+        ParseNodeBin * pnodeListItem = CreateBinNode(knopList, decl, nullptr);
+        *m_privateNameScope->ppnodeDecls = pnodeListItem;
+        m_privateNameScope->ppnodeDecls = &pnodeListItem->pnode2;
+
+        entry->hiddenPid = hiddenPid;
+        entry->decl = decl;
+        entry->sym = decl->sym;
+    }
+
     return entry;
 }
 
-ParseNodeName * Parser::CreatePrivateNameReference(IdentPtr name, charcount_t ichMin, charcount_t ichLim)
+ParseNodeName * Parser::CreatePrivateNameReference(
+    IdentPtr name, charcount_t ichMin, charcount_t ichLim, bool buildAST)
 {
     Assert(name != nullptr);
     if (m_privateNameScope == nullptr)
@@ -9047,14 +9053,20 @@ ParseNodeName * Parser::CreatePrivateNameReference(IdentPtr name, charcount_t ic
         Error(ERRsyntax);
     }
 
-    ParseNodeName * pnode = Anew(&m_nodeAllocator, ParseNodeName, ichMin, ichLim, name);
-    AddAstSize(sizeof(ParseNodeName));
-    pnode->SetIsPrivateName();
+    ParseNodeName * pnode = nullptr;
+    if (buildAST)
+    {
+        pnode = Anew(&m_nodeAllocator, ParseNodeName, ichMin, ichLim, name);
+        AddAstSize(sizeof(ParseNodeName));
+        pnode->SetIsPrivateName();
+    }
 
     DeferredPrivateRef * deferred = Anew(&m_nodeAllocator, DeferredPrivateRef);
     deferred->name = name;
     deferred->pnode = pnode;
     deferred->scope = m_privateNameScope;
+    deferred->ichMin = ichMin;
+    deferred->ichLim = ichLim;
     deferred->next = m_pendingPrivateRefs;
     m_pendingPrivateRefs = deferred;
     return pnode;
@@ -9082,15 +9094,19 @@ void Parser::ResolvePendingPrivateRefs(PrivateNameScope * outermost)
 
         if (entry == nullptr)
         {
-            // Use of an undeclared private name is a SyntaxError.
-            Error(ERRsyntax, deferred->pnode->ichMin, deferred->pnode->ichLim);
+            // Use of an undeclared private name is a SyntaxError. Fast scan
+            // has no AST node, so use the recorded token range.
+            Error(ERRsyntax, deferred->ichMin, deferred->ichLim);
         }
 
-        PidRefStack * hiddenRef = Anew(&m_nodeAllocator, PidRefStack);
-        hiddenRef->SetSym(entry->sym);
-        deferred->pnode->AsParseNodeName()->SetSymRef(hiddenRef);
-        deferred->pnode->AsParseNodeName()->sym = entry->sym;
-        entry->sym->SetHasNonLocalReference();
+        if (deferred->pnode != nullptr)
+        {
+            PidRefStack * hiddenRef = Anew(&m_nodeAllocator, PidRefStack);
+            hiddenRef->SetSym(entry->sym);
+            deferred->pnode->AsParseNodeName()->SetSymRef(hiddenRef);
+            deferred->pnode->AsParseNodeName()->sym = entry->sym;
+            entry->sym->SetHasNonLocalReference();
+        }
         deferred = next;
     }
     m_pendingPrivateRefs = nullptr;
@@ -9429,12 +9445,8 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
 
     IdentPtr pClassNamePid = pnodeName ? pnodeName->pid : nullptr;
 
-    PrivateNameScope * classPrivateScope = nullptr;
-    if (buildAST)
-    {
-        PushPrivateNameScope();
-        classPrivateScope = m_privateNameScope;
-    }
+    PushPrivateNameScope();
+    PrivateNameScope * classPrivateScope = m_privateNameScope;
 
     for (;;)
     {
@@ -9511,9 +9523,9 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
                 // `#constructor` is not a valid private name.
                 Error(ERRsyntax);
             }
+            privateEntry = DeclareClassPrivateName(privateSource, buildAST);
             if (buildAST)
             {
-                privateEntry = DeclareClassPrivateName(privateSource);
                 PidRefStack * hiddenRef = Anew(&m_nodeAllocator, PidRefStack);
                 hiddenRef->SetSym(privateEntry->sym);
                 ParseNodeName * pnodePrivate = CreateNameNode(privateSource, hiddenRef, ichMin, this->GetScanner()->IchLimTok());
@@ -9752,21 +9764,37 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
                     // `z = class {}` get the field name via the short-name hint
                     // used by the existing function display-name machinery.
                     IdentPtr fieldHint = isPrivateField ? privateSource : memberPid;
-                    if (fieldHint != nullptr && pnodeInitExpr != nullptr && pnodeInitExpr->nop == knopFncDecl &&
+                    LPCOLESTR fieldHintText = fieldHint != nullptr ? fieldHint->Psz() : nullptr;
+                    uint32 fieldHintLength = fieldHint != nullptr ? fieldHint->Cch() : 0;
+                    if (isPrivateField && fieldHint != nullptr)
+                    {
+                        // NamedEvaluation uses the source spelling of a private
+                        // name, including its leading '#'.
+                        fieldHintLength = fieldHint->Cch() + 1;
+                        char16 *privateHint = AnewArray(&m_nodeAllocator, char16, fieldHintLength + 1);
+                        privateHint[0] = _u('#');
+                        for (uint32 i = 0; i < fieldHint->Cch(); i++)
+                        {
+                            privateHint[i + 1] = fieldHint->Psz()[i];
+                        }
+                        privateHint[fieldHintLength] = 0;
+                        fieldHintText = privateHint;
+                    }
+                    if (fieldHintText != nullptr && pnodeInitExpr != nullptr && pnodeInitExpr->nop == knopFncDecl &&
                         pnodeInitExpr->AsParseNodeFnc()->pnodeName == nullptr)
                     {
                         ParseNodeFnc * pnodeAnon = pnodeInitExpr->AsParseNodeFnc();
-                        pnodeAnon->hint = fieldHint->Psz();
-                        pnodeAnon->hintLength = fieldHint->Cch();
+                        pnodeAnon->hint = fieldHintText;
+                        pnodeAnon->hintLength = fieldHintLength;
                         pnodeAnon->hintOffset = 0;
                     }
-                    else if (fieldHint != nullptr && pnodeInitExpr != nullptr && pnodeInitExpr->nop == knopClassDecl &&
+                    else if (fieldHintText != nullptr && pnodeInitExpr != nullptr && pnodeInitExpr->nop == knopClassDecl &&
                         pnodeInitExpr->AsParseNodeClass()->pnodeName == nullptr &&
                         pnodeInitExpr->AsParseNodeClass()->pnodeConstructor != nullptr)
                     {
                         ParseNodeFnc * pnodeCtor = pnodeInitExpr->AsParseNodeClass()->pnodeConstructor;
-                        pnodeCtor->hint = fieldHint->Psz();
-                        pnodeCtor->hintLength = fieldHint->Cch();
+                        pnodeCtor->hint = fieldHintText;
+                        pnodeCtor->hintLength = fieldHintLength;
                         pnodeCtor->hintOffset = 0;
                     }
                 }
@@ -10047,10 +10075,7 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
     }
     FinishParseBlock(pnodeBlock);
 
-    if (buildAST)
-    {
-        PopPrivateNameScope();
-    }
+    PopPrivateNameScope();
 
     m_fUseStrictMode = strictSave;
     m_currentClassHasFields = previousClassHasFields;
@@ -11218,12 +11243,12 @@ ParseNodePtr Parser::ParseExpr(int oplMin,
 
                 if (nop == knopIn && pnode1->nop == knopName &&
                     pnode1->AsParseNodeName()->IsPrivateName() &&
-                    (pnode2->nop == knopIn ||
-                     (pnode2->nop == knopName && pnode2->AsParseNodeName()->IsPrivateName())))
+                    pnode2->nop == knopName && pnode2->AsParseNodeName()->IsPrivateName())
                 {
-                    // The right operand of `#x in` must be a ShiftExpression,
-                    // so another unparenthesized `in` or bare PrivateIdentifier
-                    // is not allowed.
+                    // A bare PrivateIdentifier is not an expression, so it
+                    // cannot be the right operand of `#x in` (parenthesized
+                    // `#x in (#y in o)` is valid because the parenthesized
+                    // expression is a PrimaryExpression).
                     Error(ERRsyntax);
                 }
 

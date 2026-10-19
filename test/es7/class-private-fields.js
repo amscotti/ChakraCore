@@ -191,6 +191,67 @@ const tests = [
         }
     },
     {
+        name: "anonymous private-field initializers receive the private name with '#'",
+        body() {
+            class C {
+                #foo = function () {};
+                #bar = () => {};
+                #Baz = class {};
+                names() { return [this.#foo.name, this.#bar.name, this.#Baz.name]; }
+            }
+            assert.areEqual("#foo,#bar,#Baz", new C().names().join(","));
+        }
+    },
+    {
+        name: "parenthesized in expressions are valid on the right of #x in",
+        body() {
+            assert.doesNotThrow(function () {
+                eval("class C { #x; static f(o, p) { return #x in (o in p); } }");
+            });
+            assert.doesNotThrow(function () {
+                eval("class C { #x; static f(o, p) { return #x in ((o in p)); } }");
+            });
+            assert.doesNotThrow(function () {
+                eval("class C { #x; static f(o, p) { return #x in (o in p) in o; } }");
+            });
+            assert.doesNotThrow(function () {
+                // Node accepts this as (#x in o) in p; only a bare
+                // PrivateIdentifier right operand is invalid.
+                eval("class C { #x; static f(o, p) { return #x in o in p; } }");
+            });
+            assert.throws(function () {
+                eval("class C { #x; static f() { return #x in #x in this; } }");
+            }, SyntaxError);
+
+            class C {
+                #x;
+                static f(o, p) { return #x in (o in p); }
+            }
+            assert.throws(function () { C.f({}, {}); }, TypeError);
+        }
+    },
+    {
+        name: "deferred fast scan still reports private-name syntax errors",
+        body() {
+            assert.throws(function () { eval("function f() { return this.#x; }"); }, SyntaxError);
+            assert.throws(function () { eval("function f() { class C { #x; #x; } }"); }, SyntaxError);
+            assert.throws(function () { eval("function f() { class Outer { #x; class Inner { #y; #y; } } }"); }, SyntaxError);
+            assert.throws(function () { Function("return this.#x"); }, SyntaxError);
+
+            var prefix = "var n = 0;";
+            for (var i = 0; i < 300; i++) {
+                prefix += " n += 1;";
+            }
+            assert.throws(function () {
+                eval("function f() { " + prefix + " return this.#x; }");
+            }, SyntaxError);
+
+            assert.doesNotThrow(function () {
+                eval("function f() { return class C { #x = 1; m() { return this.#x; } }; }");
+            });
+        }
+    },
+    {
         name: "early errors: duplicate names, #constructor, undeclared, and out-of-class use",
         body() {
             assert.throws(function () { eval("class C { #x; #x; }"); }, SyntaxError);

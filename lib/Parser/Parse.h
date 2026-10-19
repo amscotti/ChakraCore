@@ -938,8 +938,8 @@ private:
     bool ClassBodyHasPrivateSyntax();
     void PushPrivateNameScope();
     void PopPrivateNameScope();
-    PrivateNameEntry * DeclareClassPrivateName(IdentPtr name);
-    ParseNodeName * CreatePrivateNameReference(IdentPtr name, charcount_t ichMin, charcount_t ichLim);
+    PrivateNameEntry * DeclareClassPrivateName(IdentPtr name, bool buildAST);
+    ParseNodeName * CreatePrivateNameReference(IdentPtr name, charcount_t ichMin, charcount_t ichLim, bool buildAST);
     void ResolvePendingPrivateRefs(PrivateNameScope * outermost);
     ParseNodeFnc * CreateClassFieldInitializerFunction(charcount_t ichMin, size_t cbMin, ParseNodePtr * ppnodeInitExpr = nullptr);
     void AttachClassFieldsToLambda(ParseNodeFnc * pnodeLambda, ParseNode * pnodeFields, Symbol * thisSym);
