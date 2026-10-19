@@ -374,6 +374,33 @@ namespace Js
         Assert(descriptor != nullptr);
         Assert(!(descriptor->Attributes & (PropertyDeleted | PropertyLetConstGlobal)));
 
+        int targetIndex = -1;
+        for (int i = 0; i < propertyMap->Count(); ++i)
+        {
+            if (propertyMap->GetKeyAt(i) == propertyRecord)
+            {
+                targetIndex = i;
+                break;
+            }
+        }
+        Assert(targetIndex >= 0);
+
+        bool alreadyLast = true;
+        for (int i = targetIndex + 1; i < propertyMap->Count(); ++i)
+        {
+            if (!(propertyMap->GetValueAt(i).Attributes & PropertyDeleted))
+            {
+                alreadyLast = false;
+                break;
+            }
+        }
+        if (alreadyLast)
+        {
+            // No live property follows this one, so its insertion position is already correct. Avoid rebuilding
+            // the map (and allocating a replacement) for repeated delete/re-add of the same key.
+            return propertyMap->GetReferenceAt(targetIndex);
+        }
+
         DictionaryPropertyDescriptor<T> newDescriptor = *descriptor;
 
         PropertyDescriptorMap* newPropertyMap = RecyclerNew(scriptContext->GetRecycler(),
@@ -433,6 +460,31 @@ namespace Js
         T index = ::Math::PostInc(nextPropertyIndex);
 
         DictionaryPropertyDescriptor<T> descriptor(index, attributes);
+#if ENABLE_FIXED_FIELDS
+        Assert((!isFixed && !usedAsFixed) || (!IsInternalPropertyId(propertyRecord->GetPropertyId()) && this->singletonInstance != nullptr));
+        descriptor.SetIsInitialized(isInitialized);
+        descriptor.SetIsFixed(isFixed);
+        descriptor.SetUsedAsFixed(usedAsFixed);
+#endif
+        propertyMap->Add(propertyRecord, descriptor);
+
+        scriptContext->GetLibrary()->GetTypesWithOnlyWritablePropertyProtoChainCache()->ProcessProperty(this, attributes, propertyRecord, scriptContext);
+        scriptContext->GetLibrary()->GetTypesWithNoSpecialPropertyProtoChainCache()->ProcessProperty(this, attributes, propertyRecord, scriptContext);
+    }
+
+    template <typename T>
+    void DictionaryTypeHandlerBase<T>::Add(
+        T propertyIndex,
+        const PropertyRecord* propertyRecord,
+        PropertyAttributes attributes,
+        bool isInitialized, bool isFixed, bool usedAsFixed,
+        ScriptContext *const scriptContext)
+    {
+        // Used when converting a dictionary whose map order is no longer slot order (a deleted property was
+        // re-added at the end while reusing its old slot). Keep the existing slot so the value in the object
+        // does not move; nextPropertyIndex stays the high-water mark.
+        Assert(propertyIndex < this->GetSlotCapacity());
+        DictionaryPropertyDescriptor<T> descriptor(propertyIndex, attributes);
 #if ENABLE_FIXED_FIELDS
         Assert((!isFixed && !usedAsFixed) || (!IsInternalPropertyId(propertyRecord->GetPropertyId()) && this->singletonInstance != nullptr));
         descriptor.SetIsInitialized(isInitialized);

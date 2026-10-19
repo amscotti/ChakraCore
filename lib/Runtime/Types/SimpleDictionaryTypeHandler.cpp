@@ -489,12 +489,29 @@ namespace Js
             propertyKey = propertyMap->GetKeyAt(i);
 
             // newTH->nextPropertyIndex will be less than desc.propertyIndex, when we have function with same name parameters
-            if (newTypeHandler->nextPropertyIndex < static_cast<typename U::PropertyIndexType>(descriptor.propertyIndex))
+            if (descriptor.propertyIndex != NoSlots)
             {
-                newTypeHandler->nextPropertyIndex = static_cast<typename U::PropertyIndexType>(descriptor.propertyIndex);
+                typename U::PropertyIndexType targetIndex = static_cast<typename U::PropertyIndexType>(descriptor.propertyIndex);
+                if (targetIndex < newTypeHandler->nextPropertyIndex)
+                {
+                    // A deleted property that was re-added at the end reused its old slot, so map order is no
+                    // longer slot order. Keep the slot explicitly so the value already in the instance stays
+                    // with this descriptor.
+#if ENABLE_FIXED_FIELDS
+                    Assert(!GetIsShared() || !descriptor.isFixed);
+                    newTypeHandler->Add(targetIndex, TMapKey_ConvertKey<UMapKey>(scriptContext, propertyKey), descriptor.Attributes, descriptor.isInitialized, descriptor.isFixed, transferUsedAsFixed && descriptor.usedAsFixed, scriptContext);
+#else
+                    newTypeHandler->Add(targetIndex, TMapKey_ConvertKey<UMapKey>(scriptContext, propertyKey), descriptor.Attributes, true, false, false, scriptContext);
+#endif
+                    continue;
+                }
+                if (newTypeHandler->nextPropertyIndex < targetIndex)
+                {
+                    newTypeHandler->nextPropertyIndex = targetIndex;
+                }
             }
 
-            Assert(newTypeHandler->nextPropertyIndex == descriptor.propertyIndex);
+            Assert(descriptor.propertyIndex == NoSlots || newTypeHandler->nextPropertyIndex == descriptor.propertyIndex);
 #if ENABLE_FIXED_FIELDS
             Assert(!GetIsShared() || !descriptor.isFixed);
             newTypeHandler->Add(TMapKey_ConvertKey<UMapKey>(scriptContext, propertyKey), descriptor.Attributes, descriptor.isInitialized, descriptor.isFixed, transferUsedAsFixed && descriptor.usedAsFixed, scriptContext);
@@ -1384,7 +1401,7 @@ namespace Js
             // Ordered handlers must enumerate a re-added property at its new insertion position. The unordered
             // handler deliberately reuses deleted slots and has no insertion-order guarantee.
             bool const reAddAtEnd = !isUnordered && !(descriptor->Attributes & PropertyLetConstGlobal);
-            if (reAddAtEnd && this->GetSlotCapacity() <= this->nextPropertyIndex)
+            if (reAddAtEnd && descriptor->propertyIndex == NoSlots && this->GetSlotCapacity() <= this->nextPropertyIndex)
             {
                 if (this->GetSlotCapacity() >= MaxPropertyIndexSize)
                 {
@@ -2453,7 +2470,7 @@ namespace Js
                 // [[DefineOwnProperty]] converts an accessor to data by deleting and re-adding with Force. That is
                 // a redefinition, not a deletion followed by a new insertion, so it must keep the original position.
                 reAddAtEnd = !isUnordered && !(flags & PropertyOperation_Force);
-                if (reAddAtEnd && this->GetSlotCapacity() <= this->nextPropertyIndex)
+                if (reAddAtEnd && descriptor->propertyIndex == NoSlots && this->GetSlotCapacity() <= this->nextPropertyIndex)
                 {
                     if (this->GetSlotCapacity() >= MaxPropertyIndexSize)
                     {
@@ -2730,8 +2747,45 @@ namespace Js
 
         TMapKey mapKey = TMapKey_ConvertKey<TMapKey>(scriptContext, TMapKey_OptionalConvertPropertyIdToPropertyRecord(scriptContext, propertyKey));
 
+        int targetIndex = -1;
+        for (int i = 0; i < propertyMap->Count(); ++i)
+        {
+            if (PropertyRecordStringHashComparer<TMapKey>::Equals(propertyMap->GetKeyAt(i), mapKey))
+            {
+                targetIndex = i;
+                break;
+            }
+        }
+        Assert(targetIndex >= 0);
+
+        bool alreadyLast = true;
+        for (int i = targetIndex + 1; i < propertyMap->Count(); ++i)
+        {
+            if (!(propertyMap->GetValueAt(i).Attributes & PropertyDeleted))
+            {
+                alreadyLast = false;
+                break;
+            }
+        }
+        if (alreadyLast)
+        {
+            // No live property follows this one, so its insertion position is already correct. Avoid rebuilding
+            // the map (and allocating a replacement) for repeated delete/re-add of the same key.
+            if (SupportsSwitchingToUnordered(scriptContext) && numDeletedProperties > 0)
+            {
+                --numDeletedProperties;
+            }
+            return propertyMap->GetReferenceAt(targetIndex);
+        }
+
         SimpleDictionaryPropertyDescriptor<TPropertyIndex> newDescriptor = *descriptor;
-        newDescriptor.propertyIndex = this->nextPropertyIndex;
+        if (newDescriptor.propertyIndex == NoSlots)
+        {
+            // No slot to reuse (for example a property that never had a value slot). The caller reserved a
+            // fresh slot through EnsureSlotCapacity.
+            newDescriptor.propertyIndex = this->nextPropertyIndex;
+            this->nextPropertyIndex = newDescriptor.propertyIndex + 1;
+        }
 
         SimplePropertyDescriptorMap* newPropertyMap = RecyclerNew(scriptContext->GetRecycler(),
             SimplePropertyDescriptorMap, scriptContext->GetRecycler(), propertyMap->Count());
@@ -2770,7 +2824,6 @@ namespace Js
 
         newPropertyMap->Add(mapKey, newDescriptor);
         propertyMap = newPropertyMap;
-        this->nextPropertyIndex = newDescriptor.propertyIndex + 1;
         SetNumDeletedProperties(deletedCount);
 
         return newPropertyMap->GetReferenceAt(newPropertyMap->Count() - 1);

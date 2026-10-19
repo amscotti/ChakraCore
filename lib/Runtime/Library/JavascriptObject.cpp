@@ -1866,7 +1866,9 @@ void JavascriptObject::CopyDataPropertiesForGenericObjects(RecyclableObject* fro
             {
                 if (!JavascriptOperators::GetOwnProperty(from, nextKey, &propValue, scriptContext, &getPropertyInfo))
                 {
-                    JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_NeedObject, GetCopyDataPropertiesEntryName<assign>());
+                    // The source key list is a snapshot. User code (a getter or a target setter) can remove a
+                    // key before we reach it; the spec's descriptor check skips it rather than failing.
+                    continue;
                 }
             }
 

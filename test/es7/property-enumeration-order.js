@@ -168,6 +168,160 @@ var tests = [
                 JSON.stringify(object),
                 "snapshot keys exclude properties added during enumeration");
         }
+    },
+    {
+        name: "for-in does not skip or duplicate when a visited key is deleted and re-added",
+        body() {
+            var object = { a: 1, b: 2, c: 3, d: 4 };
+            Object.defineProperty(object, "x", {
+                enumerable: true,
+                configurable: true,
+                get: function () { return 0; }
+            });
+
+            var seen = [];
+            for (var key in object) {
+                seen.push(key);
+                if (key === "a") {
+                    delete object.a;
+                    object.a = 9;
+                }
+            }
+
+            assert.areEqual(["a", "b", "c", "d", "x"], seen, "snapshot keys are visited once in order");
+        }
+    },
+    {
+        name: "for-in skips a key deleted before it is visited and keeps a re-added key once",
+        body() {
+            var deleted = { a: 1, b: 2, c: 3 };
+            var seenDeleted = [];
+            for (var key in deleted) {
+                seenDeleted.push(key);
+                if (key === "a") {
+                    delete deleted.b;
+                }
+            }
+            assert.areEqual(["a", "c"], seenDeleted, "deleted unvisited key is skipped");
+
+            var reAdded = { a: 1, b: 2, c: 3 };
+            var seenReAdded = [];
+            for (var key in reAdded) {
+                seenReAdded.push(key);
+                if (key === "a") {
+                    delete reAdded.b;
+                    reAdded.b = 9;
+                }
+            }
+            assert.areEqual(["a", "b", "c"], seenReAdded, "re-added unvisited key is still visited exactly once");
+
+            var added = { a: 1, b: 2 };
+            var seenAdded = [];
+            for (var key in added) {
+                seenAdded.push(key);
+                if (key === "a") {
+                    added.c = 3;
+                }
+            }
+            assert.areEqual(["a", "b"], seenAdded, "property added during for-in is not visited");
+        }
+    },
+    {
+        name: "JSON.stringify snapshots keys when a getter deletes and re-adds a property",
+        body() {
+            var self = { a: 1, b: 2, c: 3 };
+            Object.defineProperty(self, "a", {
+                enumerable: true,
+                configurable: true,
+                get: function () {
+                    delete self.a;
+                    self.a = 9;
+                    return "A";
+                }
+            });
+            assert.areEqual('{"a":"A","b":2,"c":3}', JSON.stringify(self), "self re-add is not duplicated and b is kept");
+
+            var other = { a: 1, b: 2, c: 3 };
+            Object.defineProperty(other, "a", {
+                enumerable: true,
+                configurable: true,
+                get: function () {
+                    delete other.b;
+                    other.b = 9;
+                    return "A";
+                }
+            });
+            assert.areEqual('{"a":"A","b":9,"c":3}', JSON.stringify(other), "other re-add uses its new value");
+
+            var removed = { a: 1, b: 2, c: 3 };
+            Object.defineProperty(removed, "a", {
+                enumerable: true,
+                configurable: true,
+                get: function () {
+                    delete removed.b;
+                    return "A";
+                }
+            });
+            assert.areEqual('{"a":"A","c":3}', JSON.stringify(removed), "removed key is skipped");
+        }
+    },
+    {
+        name: "Object.assign and spread snapshot keys while getters or target setters mutate",
+        body() {
+            var source = { a: 1, b: 2, c: 3 };
+            Object.defineProperty(source, "a", {
+                enumerable: true,
+                configurable: true,
+                get: function () {
+                    delete source.a;
+                    source.a = 9;
+                    return "A";
+                }
+            });
+            var assigned = {};
+            Object.assign(assigned, source);
+            assert.areEqual(["a", "b", "c"], Object.keys(assigned), "assign does not duplicate a or lose b");
+            assert.areEqual(["A", 2, 3], Object.values(assigned), "assign uses the getter result and current values");
+
+            var appendSource = { a: 1, b: 2, c: 3 };
+            Object.defineProperty(appendSource, "a", {
+                enumerable: true,
+                configurable: true,
+                get: function () {
+                    delete appendSource.b;
+                    appendSource.b = 9;
+                    return "A";
+                }
+            });
+            var spread = { ...appendSource };
+            assert.areEqual(["a", "b", "c"], Object.keys(spread), "spread does not duplicate a or lose b");
+            assert.areEqual(["A", 9, 3], Object.values(spread), "spread reads the current value");
+
+            var setterSource = { a: 1, b: 2, c: 3 };
+            var setterTarget = {};
+            Object.defineProperty(setterTarget, "a", {
+                enumerable: true,
+                configurable: true,
+                set: function () {
+                    delete setterSource.c;
+                }
+            });
+            Object.assign(setterTarget, setterSource);
+            assert.areEqual(["a", "b"], Object.keys(setterTarget), "target setter mutation skips the removed source key");
+            assert.areEqual(["a", "b"], Object.keys(setterSource), "source reflects the target setter mutation");
+        }
+    },
+    {
+        name: "Repeated delete/re-add reuses its slot and keeps the final key order",
+        body() {
+            var object = { k0: 0, pad: 1 };
+            for (var i = 0; i < 2000; i++) {
+                delete object.k0;
+                object.k0 = i;
+            }
+            assert.areEqual(["pad", "k0"], Object.keys(object), "key order is stable");
+            assert.areEqual(1999, object.k0, "final value");
+        }
     }
 ];
 
