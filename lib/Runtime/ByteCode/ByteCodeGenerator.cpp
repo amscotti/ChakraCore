@@ -327,6 +327,24 @@ void Visit(ParseNode *pnode, ByteCodeGenerator* byteCodeGenerator, PrefixFn pref
         Visit(pnode->AsParseNodeClass()->pnodeName, byteCodeGenerator, prefix, postfix);
         Visit(pnode->AsParseNodeClass()->pnodeConstructor, byteCodeGenerator, prefix, postfix);
         Visit(pnode->AsParseNodeClass()->pnodeMembers, byteCodeGenerator, prefix, postfix);
+        // Static field entries stay in the member list (textual order with
+        // static methods), but unlike method members their initializer calls
+        // are not reached by the function-scope walk. Bind their names and
+        // helper calls explicitly here.
+        for (ParseNodePtr pnodeMember = pnode->AsParseNodeClass()->pnodeMembers;
+             pnodeMember != nullptr;
+             pnodeMember = pnodeMember->nop == knopList ? pnodeMember->AsParseNodeBin()->pnode2 : nullptr)
+        {
+            ParseNodePtr pnodeField = pnodeMember->nop == knopList
+                ? pnodeMember->AsParseNodeBin()->pnode1
+                : pnodeMember;
+            ParseNodePtr pnodeFieldCall = pnodeField->AsParseNodeBin()->pnode2;
+            if (pnodeFieldCall != nullptr && pnodeFieldCall->nop == knopCall)
+            {
+                byteCodeGenerator->SetCurrentTopStatement(pnodeFieldCall);
+                Visit(pnodeFieldCall, byteCodeGenerator, prefix, postfix);
+            }
+        }
         EndVisitBlock(pnode->AsParseNodeClass()->pnodeBlock, byteCodeGenerator);
         break;
     }

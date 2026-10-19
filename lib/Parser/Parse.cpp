@@ -3491,7 +3491,15 @@ ParseNodePtr Parser::ParseDefaultExportClause()
 
         this->GetScanner()->SeekTo(parsedClass);
         ParseNodeClass * pnodeClass;
-        pnode = pnodeClass = ParseClassDecl<buildAST>(classHasName, nullptr, nullptr, nullptr);
+        // An anonymous default-exported class is named "default" before its
+        // static field initializers run (NamedEvaluation at export binding).
+        LPCOLESTR classNameHint = classHasName ? nullptr : _u("default");
+        uint32 classNameHintLength = classHasName ? 0 : 7;
+        uint32 classNameHintOffset = 0;
+        pnode = pnodeClass = ParseClassDecl<buildAST>(
+            classHasName, classNameHint,
+            classHasName ? nullptr : &classNameHintLength,
+            classHasName ? nullptr : &classNameHintOffset);
 
         if (buildAST)
         {
@@ -9660,6 +9668,14 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
             {
                 isStatic = true;
             }
+
+            if (isStatic && m_token.tk == tkLCurly)
+            {
+                // Class static blocks are outside the S1 static-field slice.
+                // Reject explicitly instead of failing later in the member
+                // grammar with an unrelated "member identifier expected".
+                Error(ERRsyntax);
+            }
         }
 
         ushort fncDeclFlags = fFncNoName | fFncMethod | fFncClassMember;
@@ -9769,7 +9785,7 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
             }
         }
 
-        // S1: public instance field definition (no computed name, no static).
+        // S1: public field definition (instance or static, no computed name).
         // A field is recognized when the member name is followed by '=', ';',
         // '}' or a line terminator (ASI), and is not a method ( '(' ). For a
         // simple name the scanner is still on the name token, so look ahead one
@@ -9839,25 +9855,23 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
                 // method with a parameter list.
                 Error(ERRsyntax);
             }
-            if (isStatic)
-            {
-                // Static fields are outside the S1 slice.
-                Error(ERRsyntax);
-            }
             if (isComputedName)
             {
-                // Computed field names are outside the S1 slice.
+                // Computed field names (static or instance) are outside this
+                // slice.
                 Error(ERRsyntax);
             }
             if ((!isPrivateField && memberPid == nullptr) || (buildAST && pnodeMemberName == nullptr))
             {
                 Error(ERRnoMemberIdent);
             }
-            if (memberPid == wellKnownPropertyPids.constructor)
+            if (memberPid == wellKnownPropertyPids.constructor ||
+                (isStatic && memberPid == wellKnownPropertyPids.prototype))
             {
-                // ClassElement : FieldDefinition early error: PropName
-                // "constructor" is forbidden (including 'constructor' and
-                // "constructor" literal names).
+                // FieldDefinition early errors: PropName "constructor" is
+                // forbidden for both instance and static fields; a static
+                // field additionally may not be named "prototype" (including
+                // 'constructor'/"constructor" literal spellings).
                 Error(ERRsyntax);
             }
 
@@ -9949,11 +9963,19 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
                     ParseNodeName * pnodeTarget = CreateNameNode(pnodeInitFnc->pnodeName->pid);
                     pnodeTarget->SetSymRef(hiddenRef);
 
-                    PidRefStack * thisRef = Anew(&m_nodeAllocator, PidRefStack);
-                    ParseNodeSpecialName * pnodeThis = CreateSpecialNameNode(wellKnownPropertyPids._this, thisRef, ichMin, ichMin);
-
+                    // Instance initializer helpers bind `this` to the
+                    // constructor's synthetic instance receiver. Static
+                    // initializer helpers instead receive the constructor
+                    // directly at the class-definition emission site (see
+                    // EmitStaticClassFieldDefinition), so they carry no AST
+                    // `this` override.
                     pnodeCall = CreateCallNode(knopCall, pnodeTarget, nullptr);
-                    pnodeCall->pnodeThisOverride = pnodeThis;
+                    if (!isStatic)
+                    {
+                        PidRefStack * thisRef = Anew(&m_nodeAllocator, PidRefStack);
+                        pnodeCall->pnodeThisOverride = CreateSpecialNameNode(
+                            wellKnownPropertyPids._this, thisRef, ichMin, ichMin);
+                    }
                     pnodeCall->isUsed = true;
                     pnodeCall->argCount = 0;
 
@@ -9997,7 +10019,17 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
                 }
 
                 ParseNodeBin * pnodeField = CreateBinNode(knopMember, pnodeMemberName, pnodeCall);
-                AddToNodeList(&pnodeInstanceFields, &lastInstanceFieldNodeRef, pnodeField);
+                if (isStatic)
+                {
+                    // Static fields stay in the class member list so their
+                    // evaluation is interleaved with static methods in textual
+                    // order. pnode2 is a call (or null), not a function node.
+                    AddToNodeList(&pnodeMembers, &lastMemberNodeRef, pnodeField);
+                }
+                else
+                {
+                    AddToNodeList(&pnodeInstanceFields, &lastInstanceFieldNodeRef, pnodeField);
+                }
             }
 
             continue;

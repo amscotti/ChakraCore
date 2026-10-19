@@ -351,6 +351,7 @@ public:
     void EmitSuperCall(FuncInfo* funcInfo, ParseNodeSuperCall * pnodeSuperCall, BOOL fReturnValue, BOOL fEvaluateComponents);
     void EmitClassConstructorEndCode(FuncInfo *funcInfo);
     void EmitClassFieldInitializerCalls(ParseNode * pnodeFields, FuncInfo * funcInfo, Js::RegSlot thisLocation = Js::Constants::NoRegister);
+    void EmitStaticClassFieldDefinition(ParseNode * pnodeField, Js::RegSlot classLocation, FuncInfo * funcInfo);
     void EmitClassPrivateMethodInits(ParseNode * pnodePrivateMethods, FuncInfo * funcInfo, Js::RegSlot thisLocation = Js::Constants::NoRegister);
 
     // TODO: home the 'this' argument
