@@ -405,6 +405,7 @@ BUILTIN(TypedArrayBase, GetterByteOffset, EntryGetterByteOffset, FunctionInfo::E
 BUILTIN(TypedArrayBase, GetterLength, EntryGetterLength, FunctionInfo::ErrorOnNew | FunctionInfo::HasNoSideEffect)
 BUILTIN(TypedArrayBase, GetterSymbolToStringTag, EntryGetterSymbolToStringTag, FunctionInfo::ErrorOnNew | FunctionInfo::HasNoSideEffect)
 BUILTIN(TypedArrayBase, GetterSymbolSpecies, EntryGetterSymbolSpecies, FunctionInfo::ErrorOnNew)
+BUILTIN(TypedArrayBase, ToLocaleString, EntryToLocaleString, FunctionInfo::ErrorOnNew)
 BUILTIN_TEMPLATE(Int8Array, NewInstance, NewInstance, FunctionInfo::SkipDefaultNewObject)
 BUILTIN_TEMPLATE(Uint8Array, NewInstance, NewInstance, FunctionInfo::SkipDefaultNewObject)
 BUILTIN_TEMPLATE(Uint8ClampedArray, NewInstance, NewInstance, FunctionInfo::SkipDefaultNewObject)
