@@ -847,7 +847,9 @@ still owns JIT-configuration claims.)*
 |---|---|---|---|
 | S1 public instance fields | Landed `bd0de1694` | class corpus 1,989/5,897, 539/0; 27 focused cases, normal + forced defer | private/static/computed fields, static blocks, `super.prop`/eval-super property, JIT |
 | S1 private instance fields | Landed `da0351e8e` | private subset 176/30, 160/0; es7 64/0 | private methods/accessors, static/private-static, computed, eval/optional-chain, JIT |
+| S1 private methods/accessors | Landed `30a81731c` | 202/20, 198/0; es7 68/0 | private statics/static blocks/computed, direct-eval, async/generator private methods, JIT |
 | S2 arithmetic/bitwise/shift | Landed `1c5d5b2fc` | scoped 444/2, 80/0; broad 1,027/1,027; Node differentials | BigInt64Array/BigUint64Array, Map/Set identity, literal property names, giant ToString, JIT |
+| S2 BigInt64Array | Landed `f5f0efef5` | 944/0; 958/1016; ctors 24/24, 166/0; internals 163/0 | DataView BigInt, internals, Map/Set identity, SAB, JIT |
 | S8 resizable/transfer | Landed `6ceb23d6d` | focused 424/834, 236/0; ArrayBuffer 358/442; DataView 44/52; Float16 4/4 | immutable buffers, SAB, Float16Array, cross-realm/Reflect order, JsRT/Wasm, JIT |
 | S8 TypedArray tracking | Landed `859b07d13` | focused 132/340, 110/0; combined 150/378, 118/0; expanded 54/0 | BigInt-gated residual; generic Array helpers, toLocaleString element formatting, JIT/TTD |
 | S13 WeakRef | Landed `803331b51` | WeakRef 56/58, 56/0; agent-wide kept set; 200/500-run stability | FinalizationRegistry, symbol WeakMap/WeakSet keys, host-dispatch, concurrent GC/JIT |
@@ -859,9 +861,9 @@ still owns JIT-configuration claims.)*
 | S14 P5 | Landed `8b5f28c06` | 50/50; broad 50/0; wider 65/0 non-import | eval/function-expression; proxy descriptor; JIT |
 
 Full gates at this checkpoint: **1997/0 test**, **2049/0 debug-static**.
-All active feature/triage worktrees are merged. Next work items are S1 private methods/static/computed elements, S2
-BigInt64Array, and S13 FinalizationRegistry; S8 tracking residuals are
-tracked separately. P5 residual: eval/function-expression
+All active feature/triage worktrees are merged. Next work items are S1 private static/static blocks/computed elements,
+S13 FinalizationRegistry, S6 flag-on gaps, and S2 Map/Set BigInt identity/
+DataView BigInt. S8 tracking residuals are tracked separately. P5 residual: eval/function-expression
 reference paths and pre-existing proxy descriptor duplication.
 
 ## 7. Separate inventories

@@ -5,7 +5,7 @@
 
 # C2-S8: TypedArray views over resizable ArrayBuffers
 
-Status: **landed in `859b07d13`** (feature `1460b884d`; base `1927b9493`); current integrated gates **1997/2049**. Implementation and focused evidence are in this lane;
+Status: **landed in `859b07d13`** (feature `1460b884d`; base `1927b9493`); current integrated gates **2004/2056**. Implementation and focused evidence are in this lane;
 JIT/B4, TTD and review remain open.
 
 This receipt extends the landed resizable `ArrayBuffer` core

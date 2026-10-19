@@ -1,7 +1,7 @@
 # C2-S14 P5: assignment/PutValue reference base
 
 Status: **landed in `8b5f28c06`** (feature `fdd5aff0`; base `fc9dceb93`).
-Current integrated gates **1996/2048**; P5 selection **50/50**, **50 fail→pass /
+Current integrated gates **2004/2056**; P5 selection **50/50**, **50 fail→pass /
 0 pass→fail**; broad assignment/compound **1,445/191** with 50/0, and 65/0
 non-import wider flips. Interpreter/Mac no-JIT only; B4 owns JIT claims.
 Residual: eval/function-expression reference paths and pre-existing proxy

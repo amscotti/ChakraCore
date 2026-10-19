@@ -1,7 +1,6 @@
 # C2-S2 sub-batch: BigInt64Array and BigUint64Array elements
 
-Status: **pending review** (implementation `bf2fe8521`, adversarial follow-up
-on `s2-bigint64`, base `7a2199595`); Mac ARM64 no-JIT evidence only.
+Status: **landed in `f5f0efef5`** (feature `7fe5d092c`; base `7a2199595`); current integrated gates **2004/2056**; Mac ARM64 no-JIT evidence only.
 `ESBigInt` is still off by default and is required to expose these
 constructors; BigInt arithmetic and S8 typed-array tracking are otherwise
 unchanged.

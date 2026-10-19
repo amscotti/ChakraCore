@@ -1,7 +1,7 @@
 # C2-S14 P1: statement completion values (UpdateEmpty)
 
 Status: **landed in `a4eba5a38`** (feature `e1e271c42`; base `b50fa4d94`),
-2026-10-18. At landing 1992/2044; current integrated gates **1996/2048**; exact selection on the
+2026-10-18. At landing 1992/2044; current integrated gates **2004/2056**; exact selection on the
 integrated binary **152/4**, **112 fail→pass / 0 pass→fail**. Interpreter/Mac
 no-JIT only; JIT evidence is not claimed (see B4).
 

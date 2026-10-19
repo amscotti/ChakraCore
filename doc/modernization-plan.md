@@ -590,12 +590,14 @@ Decision/rollback points:
 - [ ] C4: Published qualified ES2025 result on the claimed default configurations.
 
 **Latest integration checkpoint (2026-10-19):** main is clean at the
-**2000/0 test** and **2052/0 debug-static** (573/573 and
+**2004/0 test** and **2056/0 debug-static** (573/573 and
 546/546 steps).
-Merged lanes: S1 public/private instance fields, S2 arithmetic, S8 resizable
-ArrayBuffer/transfer + TypedArray tracking, S13 WeakRef, and S14 P1/P2/P3/P4/P5/P6/P7
+Merged lanes: S1 public/private fields + private methods/accessors, S2
+arithmetic + BigInt64Array/Uint64Array, S8 resizable ArrayBuffer/transfer +
+TypedArray tracking, S13 WeakRef, and S14 P1/P2/P3/P4/P5/P6/P7
 ([c2-s1-public-fields.md](c2-s1-public-fields.md),
 [c2-s1-private-fields.md](c2-s1-private-fields.md),
+[c2-s1-private-methods.md](c2-s1-private-methods.md),
 [c2-s2-bigint-arithmetic.md](c2-s2-bigint-arithmetic.md),
 [c2-s8-resizable.md](c2-s8-resizable.md),
 [c2-s8-typedarray-tracking.md](c2-s8-typedarray-tracking.md),
