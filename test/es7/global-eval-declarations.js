@@ -214,6 +214,79 @@ var tests = [
         }
     },
     {
+        name: "eval Annex B block functions reject global lexical and skip local lexical bindings",
+        body() {
+            loadScript("let geAnnexBGlobalLet = 1; let geAnnexBGlobalSideEffect = false;");
+            assert.throws(function () {
+                loadScript(
+                    "eval('geAnnexBGlobalSideEffect = true; if (true) { function geAnnexBGlobalLet() {} }');");
+            }, SyntaxError, "global eval block function collides with a global lexical binding");
+            assert.strictEqual(geAnnexBGlobalLet, 1, "global lexical value is not overwritten");
+            assert.strictEqual(geAnnexBGlobalSideEffect, false, "eval body did not run");
+            assert.strictEqual(Object.prototype.hasOwnProperty.call(global, "geAnnexBGlobalLet"), false,
+                "global lexical binding is not a global-object property");
+
+            (function () {
+                let geAnnexBLocalLet = 1;
+                let geAnnexBLocalSideEffect = false;
+                eval("geAnnexBLocalSideEffect = true; if (true) { function geAnnexBLocalLet() {} }");
+                assert.strictEqual(geAnnexBLocalLet, 1, "local let binding is unchanged");
+                assert.strictEqual(geAnnexBLocalSideEffect, true, "local eval body still runs");
+            }());
+
+            (function () {
+                const geAnnexBLocalConst = 1;
+                let geAnnexBLocalConstSideEffect = false;
+                eval("geAnnexBLocalConstSideEffect = true; if (true) { function geAnnexBLocalConst() {} }");
+                assert.strictEqual(geAnnexBLocalConst, 1, "local const binding is unchanged");
+                assert.strictEqual(geAnnexBLocalConstSideEffect, true, "local const eval body still runs");
+            }());
+        }
+    },
+    {
+        name: "direct eval runs CanDeclareGlobalFunction before creating any function",
+        body() {
+            Object.defineProperty(global, "geNonDefinableFn", {
+                value: 1,
+                writable: true,
+                enumerable: false,
+                configurable: false
+            });
+            loadScript(
+                "var geNonDefinableCaught = 'none';" +
+                "try { eval('function geEarlierFn() {} function geNonDefinableFn() {}'); }" +
+                "catch (e) { geNonDefinableCaught = e.name; }");
+            assert.strictEqual(geNonDefinableCaught, "TypeError",
+                "non-configurable non-enumerable function binding is rejected");
+            assert.strictEqual(Object.prototype.hasOwnProperty.call(global, "geEarlierFn"), false,
+                "earlier function was not created before the failed preflight");
+            assert.strictEqual(geNonDefinableFn, 1, "existing non-definable binding is unchanged");
+
+            loadScript("let geMaskedLexical = 1;");
+            Object.defineProperty(global, "geMaskedBadFn", {
+                value: 2,
+                writable: true,
+                enumerable: false,
+                configurable: false
+            });
+            loadScript(
+                "var geMaskedCaught = 'none'; var geMaskedSideEffect = false;" +
+                "try { eval('function geMaskedBadFn() {} geMaskedSideEffect = true; var geMaskedLexical;'); }" +
+                "catch (e) { geMaskedCaught = e.name; }");
+            assert.strictEqual(geMaskedCaught, "SyntaxError",
+                "later lexical collision is checked before CanDeclareGlobalFunction");
+            assert.strictEqual(geMaskedSideEffect, false, "eval body did not run after the lexical collision");
+            assert.strictEqual(geMaskedBadFn, 2, "non-definable function binding was not touched");
+            assert.strictEqual(geMaskedLexical, 1, "existing global lexical binding is unchanged");
+
+            (function () {
+                eval("function undefined() {}");
+                assert.strictEqual(typeof undefined, "function",
+                    "local eval does not run the global CanDeclareGlobalFunction preflight");
+            }());
+        }
+    },
+    {
         name: "parameter-default direct eval rejects var collisions before the body",
         body() {
             var callCount = 0;

@@ -1930,6 +1930,12 @@ LHexError:
         PropertyDescriptor existing;
         if (JavascriptOperators::GetOwnPropertyDescriptor(this, propertyId, GetScriptContext(), &existing))
         {
+            if (existing.IsDataDescriptor() && existing.IsWritable())
+            {
+                return DynamicObject::SetPropertyWithAttributes(
+                    propertyId, value, existing.GetAttributes(), nullptr, PropertyOperation_ThrowIfNotExtensible);
+            }
+
             PropertyDescriptor descriptor;
             descriptor.SetValue(value);
             if (existing.IsConfigurable())
@@ -1966,7 +1972,11 @@ LHexError:
         bool hasRootProperty = GetTypeHandler()->HasRootProperty(this, propertyId, &noRedecl);
         if (hasRootProperty && noRedecl)
         {
-            return true;
+            // EvalDeclarationInstantiation's global var-environment check:
+            // a global lexical declaration shadows the synthetic Annex B var.
+            // Global eval reports this as SyntaxError before body execution
+            // rather than silently skipping or writing through the binding.
+            JavascriptError::ThrowSyntaxError(GetScriptContext(), ERRRedeclaration);
         }
 
         // CreateGlobalFunctionBinding (called by EvalDeclarationInstantiation
@@ -1977,6 +1987,12 @@ LHexError:
         if (hasRootProperty &&
             JavascriptOperators::GetOwnPropertyDescriptor(this, propertyId, GetScriptContext(), &existing))
         {
+            if (existing.IsDataDescriptor() && existing.IsWritable())
+            {
+                return DynamicObject::SetPropertyWithAttributes(
+                    propertyId, value, existing.GetAttributes(), nullptr, PropertyOperation_ThrowIfNotExtensible);
+            }
+
             PropertyDescriptor descriptor;
             descriptor.SetValue(value);
             if (existing.IsConfigurable())

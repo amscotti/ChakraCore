@@ -259,6 +259,19 @@ namespace Js
         }
     }
 
+    void
+    RootObjectBase::EnsureNoGlobalLexical(PropertyId propertyId)
+    {
+        // The Annex B synthetic global var only needs HasLexicalDeclaration:
+        // an existing non-configurable non-lexical global property is allowed
+        // to absorb a var binding, but a global lexical name is not.
+        bool noRedecl = false;
+        if (GetTypeHandler()->HasRootProperty(this, propertyId, &noRedecl) && noRedecl)
+        {
+            JavascriptError::ThrowSyntaxError(this->GetScriptContext(), ERRRedeclaration);
+        }
+    }
+
 #if DBG
     bool
     RootObjectBase::IsLetConstGlobal(PropertyId propertyId)

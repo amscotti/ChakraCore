@@ -107,7 +107,7 @@ ReferenceError: 'i' is not defined
 eval blockscoped var j
 ReferenceError: 'k' is not defined
 
-Test 14: Eval leaks vars; a same-named block lexical declaration is a SyntaxError
+Test 14: Eval leaks vars; block lexical bindings remain distinct from the eval var
 
 eval var f
 eval var g
@@ -120,7 +120,7 @@ Test 15: Eval should have TDZ use before declaration error
 
 ReferenceError: Use before declaration
 
-Test 16: Eval function declarations create/assign to a var binding and assign to let binding, and create a let binding if not at eval global scope
+Test 16: Eval function declarations create var bindings without overwriting block lexicals
 
 function h(ineval) { }
 function h(ineval) { }

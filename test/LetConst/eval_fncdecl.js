@@ -8,10 +8,8 @@ function print(x) { WScript.Echo(x+''); }
 const f = 'const f';
 let g = 'let g';
 
-// The block function names do not collide with the outer const/let, so no
-// Annex B var extension is requested in the eval's global variable environment.
-eval("if (false) { function fe() { } }");
-eval("if (true) { function ge() { } }");
+try { eval("if (false) { function f() { } }"); } catch (e) { print(e.name + ': ' + e.message); }
+try { eval("if (true) { function g() { } }"); } catch (e) { print(e.name + ': ' + e.message); }
 
 
 print(f);
@@ -23,8 +21,8 @@ eval("function h(ineval) { }");
 print(h);
 
 {
-    function ib(globalblock) { }
-    eval("function i(ineval) { }");
+    function i(globalblock) { }
+    try { eval("function i(ineval) { }"); } catch (e) { print(e.name + ': ' + e.message); }
     print(i);
 }
 print(i);
@@ -32,9 +30,8 @@ print(i);
 function j(global) { }
 
 {
-    function jb(globalblock) { }
-    eval("function j(ineval) { }");
+    function j(globalblock) { }
+    try { eval("function j(ineval) { }"); } catch (e) { print(e.name + ': ' + e.message); }
     print(j);
 }
 print(j);
-

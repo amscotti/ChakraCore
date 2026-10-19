@@ -60,12 +60,13 @@ Annex B global/eval var extension at their runtime boundaries:
 `lib/Runtime/Library/GlobalObject.cpp`:
 
 - `InitPropertyInEval` and `InitFuncScoped` obtain the existing descriptor. An
-  absent/configurable property is redefined with the global-function defaults;
-  a non-configurable property is redefined by value only, preserving
-  writable/enumerable/configurable (or throwing `TypeError` for a
-  non-configurable accessor, through `DefineOwnPropertyDescriptor`).
-- A lexical eval binding (`noRedecl`) is still left untouched; the eval preflight
-  reports the collision first.
+  existing writable data property is updated by value with its current
+  attributes, which is the Annex B synthetic-var/CreateGlobalVarBinding case.
+  An absent or non-writable/configurable property follows
+  `CreateGlobalFunctionBinding` (writable+enumerable+configurable defaults, or
+  value-only/`TypeError` for a non-configurable descriptor).
+- A global lexical eval binding (`noRedecl`) makes `InitFuncScoped` throw
+  `SyntaxError`; the eval preflight normally reports it before the body.
 
 `lib/Runtime/Language/JavascriptOperators.cpp`:
 
@@ -76,12 +77,17 @@ Annex B global/eval var extension at their runtime boundaries:
 
 `lib/Runtime/ByteCode/ByteCodeEmitter.cpp`:
 
-- `EnsureCanDeclGloFunc` is emitted only for ordinary global script functions;
-  `EvalDeclarationInstantiation` does not call `CanDeclareGlobalFunction`, and
-  the eval path reports failed defines through `CreateGlobalFunctionBinding`.
-- The Annex B synthetic global var store uses a normal scoped store instead of
-  the global-function-binding init, preserving existing descriptors and the
-  "synthetic var does not initialize" rule.
+- `EnsureCanDeclGloFunc` is emitted after the lexical passes for script and
+  eval function declarations. For eval code, `OP_EnsureCanDeclGloFunc` walks the
+  eval environment and applies `CanDeclareGlobalFunction` only when its var
+  environment is global, so direct and indirect global eval check while a
+  caller-function eval does not.
+- A separate preflight walks synthetic Annex B var nodes and checks only
+  `HasLexicalDeclaration` on the eval's global var environment. It rejects a
+  global lexical collision before the eval body; a local lexical environment
+  stops the walk and the synthetic store is skipped by `InitFuncScoped`.
+- The Annex B synthetic global var store uses `InitFuncScoped` so local lexical
+  bindings are never written; existing global properties keep their attributes.
 
 ### Error order
 
@@ -90,9 +96,12 @@ For global scripts, `EnsureNoRedeclarations` is emitted before
 preflights therefore throw before the script can create any binding or execute
 its body. For eval, the same op sequence runs when the eval function body is
 entered, before `DefineUserVars`/`DefineFunctions` and before the evaluated
-statements. For a direct eval in a parameter initializer, the parameter-scope
-activation object is in the eval's environment chain, so the rewrite fails
-before the function body runs. A failed descriptor define throws from the
+statements; the synthetic Annex B lexical preflight is part of that sequence.
+All var-name lexical checks precede the `CanDeclareGlobalFunction` pass, so a
+later lexical collision is not masked by an earlier non-definable function.
+For a direct eval in a parameter initializer, the parameter-scope activation
+object is in the eval's environment chain, so the rewrite fails before the
+function body runs. A failed descriptor define throws from the
 existing `DefineOwnPropertyDescriptor`/property-operation path, whose caller
 unwinds the eval/script without retaining partial C++ state.
 
@@ -115,7 +124,7 @@ Pinned corpus `2e0a56762801e275a9fdf96dc49d90ba0cddcf63`, flags
 `out/` caches. Final binary `zig-out/bin/ch` (sha256
 `3a57922e9ae7cfbf10477e17216507034fdca33e16312533bf95db1d6371c35e`) and
 `libChakraCore.dylib` (sha256
-`2acd5b378c299c86885f69de45723a939875016227e547e48333401623386826`). The
+`90d481b60d36ad095718998e8f2f63657f67f134af3cbac70e0e00c4afeea647`). The
 "before" dylib is
 `d8e0eb0fb6ab0773c83d800f9cf39262f52951f1f656f8b94ae6d90470a266e9`.
 
@@ -137,7 +146,7 @@ corrected host, **38 fail→pass / 0 pass→fail** and all **112** previously
 passing controls remain green; the other four recorded failures are the
 host-wrapper cases above. Artifacts:
 `out/test262-p4-global-throw-before`, `out/test262-p4-var-env-before`,
-`out/test262-p4-scope-throw-before`, `out/test262-p4-verify-{global,var-env,scope}`.
+`out/test262-p4-scope-throw-before`, `out/test262-p4-r17-{global,var-env,scope}`.
 The split also satisfies the triage's 19+23 batch shape: global-code 19 flips
 (15 engine + 4 host), eval-code 23 flips (7 var-env + 16 parameter-default).
 
@@ -147,6 +156,7 @@ Controls and related selections:
 |---|---:|---:|
 | P3 skip selection (280) | 280/0 | **280/0** |
 | full Annex B three directories (782) | P3 doc: 765/17 | **782/0** |
+| direct/indirect non-definable eval selection (15) | not part of P4 baseline | **15/0** (`out/test262-p4-r17-nondef`) |
 | `test/language/block-scope/**/*.js` (287) | 287/0 | **287/0** |
 | P1 completion selection (156) | 152/4 known class/using | **152/4** |
 | `test/es7` legacy suite | 57/0 existing (57/1 with new test) | **58/0** |
@@ -162,7 +172,9 @@ Focused test: `test/es7/global-eval-declarations.js`, registered in
 lexical/var/function collisions, restricted and configurable properties,
 non-extensible global let/const/class and function/var failures with body
 non-execution, descriptor-preserving global/eval function updates, direct and
-indirect lower/global lexical eval collisions, Annex B eval binding preservation,
+indirect lower/global lexical eval collisions, Annex B global/local let/const
+side-effect ordering with own-property checks, direct-eval
+`CanDeclareGlobalFunction` and lexical-before-nondefinable ordering,
 parameter-default direct eval (function, arrow and method), and non-colliding
 controls. `test/es7` is **58/0**, including the existing
 `blockscope-early-errors.js` and `annexb-block-function-var.js`.
@@ -172,13 +184,15 @@ Legacy expectation updates are limited to formerly non-conforming behavior:
 (`test/LetConst/eval1.baseline`, `test/es6/letconst_eval_redecl.baseline`,
 `test/es6/letconst_global_shadow_builtins_nonconfigurable.baseline`,
 `test/es6/default.js`, `test/es6/default-splitscope.js`, `test/es6/rest.js`),
-the known issue-5070 case in `test/LetConst/funcDeclConflict.js`, two
-`test/es6/blockscope-functionbinding.js`/`test/LetConst/eval_fncdecl.js` cases
-rewritten to avoid now-rejected eval/block lexical collisions (with baseline
-updates only in the affected sections), and
+the known issue-5070 case in `test/LetConst/funcDeclConflict.js`, the
+`test/es6/blockscope-functionbinding.js` section titles and local collision
+shape, `test/LetConst/eval_fncdecl.js` restored to its original f/g/i/j names
+with explicit SyntaxError assertions and updated baselines, and
 `test/GlobalFunctions/CanDeclareGlobalFunction.js` using separately loaded
 global scripts rather than local eval for the global `CanDeclareGlobalFunction`
-cases. No unrelated legacy baseline changed.
+cases. `test/Bugs/vso_os_1091425*.js` now accepts the engine's current
+`TypeError` message for a non-configurable accessor. No unrelated legacy
+baseline changed.
 
 ## Ownership record and review receipt
 
@@ -230,5 +244,13 @@ against its 31-file blast radius.
   `CanDeclareGlobalVar` opcode. The selected tests pass and the first new var
   throws before body execution; a multi-var script with an earlier already
   existing binding was checked to create no new property before throwing.
+- `InitFuncScoped`/`InitPropertyInEval` preserve attributes for an existing
+  writable data property, which Annex B requires. An ordinary eval function
+  binding over a writable+configurable non-enumerable property therefore keeps
+  its enumerable flag instead of resetting to the function-binding default; no
+  test262 scenario in this selection exercises that combination.
+- The interpreter routes eval declaration preflights through the eval
+  environment; the JIT lowering still calls the root-only helper. JIT behavior
+  and configuration are B4-owned and are not claimed here.
 - No full `zig build check` or global gate-pin update was run; integration owns
   cumulative counts.

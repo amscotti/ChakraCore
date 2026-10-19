@@ -303,7 +303,7 @@ print('\nTest 13: Eval does not leak let and const bindings\n');
     try { print(k); } catch (e) { print(e); }
 })();
 
-print('\nTest 14: Eval leaks vars; a same-named block lexical declaration is a SyntaxError\n');
+print('\nTest 14: Eval leaks vars; block lexical bindings remain distinct from the eval var\n');
 (function ()
 {
     var f = 'var f';
@@ -334,7 +334,7 @@ print('\nTest 15: Eval should have TDZ use before declaration error\n');
     }
 })();
 
-print('\nTest 16: Eval function declarations create/assign to a var binding and assign to let binding, and create a let binding if not at eval global scope\n');
+print('\nTest 16: Eval function declarations create var bindings without overwriting block lexicals\n');
 (function ()
 {
     function f(notineval) { }

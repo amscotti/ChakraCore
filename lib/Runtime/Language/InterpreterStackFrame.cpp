@@ -6690,8 +6690,16 @@ skipThunk:
 
     void InterpreterStackFrame::OP_EnsureNoRootProperty(uint propertyIdIndex)
     {
+        Js::PropertyId propertyId = this->m_functionBody->GetReferencedPropertyId(propertyIdIndex);
+        if (this->m_functionBody->IsEval())
+        {
+            JavascriptOperators::OP_ScopedEnsureNoGlobalLexical(
+                GetEnvForEvalCode(), propertyId, this->GetRootObject());
+            return;
+        }
+
         Var instance = this->GetRootObject();
-        JavascriptOperators::OP_EnsureNoRootProperty(instance, this->m_functionBody->GetReferencedPropertyId(propertyIdIndex));
+        JavascriptOperators::OP_EnsureNoRootProperty(instance, propertyId);
     }
 
     void InterpreterStackFrame::OP_EnsureNoRootRedeclProperty(uint propertyIdIndex)
@@ -6702,8 +6710,19 @@ skipThunk:
 
     void InterpreterStackFrame::OP_EnsureCanDeclGloFunc(uint propertyIdIndex)
     {
+        Js::PropertyId propertyId = this->m_functionBody->GetReferencedPropertyId(propertyIdIndex);
+        if (this->m_functionBody->IsEval())
+        {
+            // EvalDeclarationInstantiation calls CanDeclareGlobalFunction only
+            // when the eval's var environment is the global environment. The
+            // scoped walk stops at a local activation object.
+            JavascriptOperators::OP_ScopedEnsureCanDeclGloFunc(
+                GetEnvForEvalCode(), propertyId, this->GetRootObject());
+            return;
+        }
+
         Var instance = this->GetRootObject();
-        JavascriptOperators::OP_EnsureCanDeclGloFunc(instance, this->m_functionBody->GetReferencedPropertyId(propertyIdIndex));
+        JavascriptOperators::OP_EnsureCanDeclGloFunc(instance, propertyId);
     }
 
     void InterpreterStackFrame::OP_ScopedEnsureNoRedeclProperty(Var aValue, uint propertyIdIndex, Var aValue2)
