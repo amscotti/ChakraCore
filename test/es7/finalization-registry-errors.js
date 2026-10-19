@@ -28,7 +28,17 @@ var registry = new FinalizationRegistry(function (heldValue) {
 CollectGarbage();
 CollectGarbage();
 
+var attempts = 0;
 WScript.SetTimeout(function checkRetry() {
+    attempts++;
+    // Conservative stack scanning can retain a few targets for more than one
+    // collection. Retry GC at later job boundaries rather than failing on a
+    // single timing sample.
+    CollectGarbage();
+    if (calls < 2 && attempts < 20) {
+        WScript.SetTimeout(checkRetry, 100);
+        return;
+    }
     if (calls < 2) {
         print("finalization-registry-errors: FAIL: no retry after callback throw: " + calls);
         WScript.Quit(1);
