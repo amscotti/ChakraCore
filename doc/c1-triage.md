@@ -855,11 +855,13 @@ still owns JIT-configuration claims.)*
 
 | S14 P4 | Landed `be630c7f6` | 150/0; 112 controls; 38 engine/4 host flips | body eval with non-simple params; R1/R2; JIT |
 | S14 P2 | Landed `526931bc5` | 192/0; 157/0; controls preserved | hidden outer lexical; JSC/Node delete difference; JIT |
+| S14 P5 | Landed `8b5f28c06` | 50/50; broad 50/0; wider 65/0 non-import | eval/function-expression; proxy descriptor; JIT |
 
-Full gates at this checkpoint: **1995/0 test**, **2047/0 debug-static**.
-All active feature/triage worktrees are merged. Next work item is P5
-assignment/PutValue, then S1 private/static, S8 typed-array tracking,
-S2 BigInt64Array, and S13 FinalizationRegistry.
+Full gates at this checkpoint: **1996/0 test**, **2048/0 debug-static**.
+All active feature/triage worktrees are merged. Next work items are S1
+private/static/computed fields, S8 typed-array tracking, S2 BigInt64Array,
+and S13 FinalizationRegistry. P5 residual: eval/function-expression
+reference paths and pre-existing proxy descriptor duplication.
 
 ## 7. Separate inventories
 
