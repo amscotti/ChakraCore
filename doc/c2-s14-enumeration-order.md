@@ -57,15 +57,23 @@ is deliberately no longer assumed to equal the property slot;
 
 Enumeration is now explicitly snapshot-safe for both shared and local caches.
 `DynamicObjectPropertyEnumerator` fills the entire key cache at
-`Initialize` (for lockable types and for a local dictionary snapshot), so no
-in-flight walk consults a map that a getter/setter can rebuild. Cached keys are
-checked for current existence and enumerability when returned: a key deleted
-before its turn is skipped, a deleted-and-re-added key is returned exactly once,
-and keys added after enumeration starts are absent from the snapshot. Shared
-caches remain keyed by the initial locked type and are still used after the
-object converts to a different type. `Object.assign`/spread skip a snapshot key
-whose own property disappeared before the get step, per the spec's descriptor
-check.
+`Initialize`, so no in-flight walk consults a map that a getter/setter can
+rebuild. A local per-enumerator snapshot is used whenever snapshot semantics
+were requested but `PrepareForTypeSnapshotEnumeration()` did not lock the type:
+the dictionary handlers, and every handler under `-TypeSnapshotEnumeration-`.
+Cached keys are checked for current existence and enumerability when returned: a
+key deleted before its turn is skipped, a deleted-and-re-added key is returned
+exactly once, and keys added after enumeration starts are absent from the
+snapshot. Shared caches remain keyed by the initial locked type and are still
+used after the object converts to a different type. `Object.assign`/spread skip
+a snapshot key whose own property disappeared before the get step, per the
+spec's descriptor check.
+
+Enumerability is evaluated against the live property at visit time. Consequently
+a property made non-enumerable after the snapshot but before its turn is skipped,
+where V8/base may still visit it from the snapshot attributes; this is
+spec-defensible and covered by the focused test, as is the reverse case
+(non-enumerable at snapshot, made enumerable during the walk) which stays out.
 
 Two exceptions preserve non-insertion semantics:
 
@@ -141,7 +149,7 @@ python3 tools/test262/run.py --binary "$PWD/out/p6-before-bin/ch" \
 # before: 8 passed / 10 failed; controls 18/18
 
 python3 tools/test262/run.py --binary "$PWD/zig-out/bin/ch" \
-  --checkout "$PWD/out/test262" --output "$PWD/out/test262-p6-final5" \
+  --checkout "$PWD/out/test262" --output "$PWD/out/test262-p6-final6" \
   'test/language/statements/for-in/order-*.js' \
   'test/built-ins/Object/keys/return-order.js' \
   'test/built-ins/Object/values/return-order.js' \
@@ -154,30 +162,36 @@ Broad smoke `test/built-ins/Object/**/*.js`, `test/built-ins/JSON/**/*.js`,
 `test/language/statements/for-in/**/*.js` (7,340 scenarios, 3,696 files):
 before 7,140 passed / 200 failed; after 7,150 passed / 190 failed. Exact result
 diff: **10 fail->pass, 0 pass->fail** (`out/test262-p6-smoke-before`,
-`out/test262-p6-smoke-final5`).
+`out/test262-p6-smoke-final6`).
 
 Focused local test (`test/es7/property-enumeration-order.js`) exercises the
 reproducer, integer-key ordering, overwrite non-movement, accessor-to-data
 `[[DefineOwnProperty]]`, for-in shadowing, repeated delete/re-add, descriptor
 attributes, JSON snapshot exclusion, the two in-flight mutation repros, and
 mutation during for-in/JSON/`Object.assign`/spread including a target setter. It
-is registered in `test/es7/rlexe.xml`. On the base binary: 7/12 bodies pass, 5
-fail; on the fixed binary: 12/12 pass and the runner reports 1 passed / 0
-failed.
+is registered twice in `test/es7/rlexe.xml`, once with default flags and once
+with `-TypeSnapshotEnumeration-`. On the base binary: 7/13 bodies pass, 6 fail;
+on the fixed binary: 13/13 pass under both entries and the runner reports 2
+passed / 0 failed. The registry mutation reproducer is also checked directly:
+
+```sh
+ch -TypeSnapshotEnumeration- /tmp/p6-simplemut-min.js
+# ["k0","k1",...,"k9"]; before the fix ["k0","k2",...,"k9","k0"]
+```
 
 Full local regression (test profile, disable_jit):
 `python3 test/runtests.py --test --variants=disable_jit --binary "$PWD/zig-out/bin/ch"`
-=> **1989 passed / 0 failed**. This is 1,988 previous scenarios plus the new
-es7 test. Integration owns the gate pin count; no pin was changed here.
+=> **1990 passed / 0 failed**. This is 1,988 previous scenarios plus the two
+new es7 entries. Integration owns the gate pin count; no pin was changed here.
 
 Debug-static regression (assertions enabled):
 `mise exec -- zig build -Dprofile=debug-static --cache-dir "$PWD/.zig-cache-debug"`
 => 545/545 steps; `python3 test/runtests.py --debug --variants=disable_jit
---binary "$PWD/out/debug-static/bin/ch"` => **2041 passed / 0 failed**. The P6
+--binary "$PWD/out/debug-static/bin/ch"` => **2042 passed / 0 failed**. The P6
 test262 selection on that binary is also 18/18
-(`out/test262-p6-debug-final`). One earlier debug run hit a pre-existing
+(`out/test262-p6-debug-flag`). One earlier debug run hit a pre-existing
 `DebuggerCommon/evaluate.js` exit-code -11 after printing `pass`; that file
-passed standalone and the full debug rerun was 2041/0.
+passed standalone and the full debug rerun was 2042/0.
 
 Updated local expectations whose encoded order was the old bug:
 
@@ -209,6 +223,15 @@ PAL-config 95/95.
   lazily. This is required for snapshot safety, but a caller that breaks out of a
   very large `for-in` after the first key still pays one full key scan per type.
   The cache is then reused for later enumerations of that type.
+- Under `-TypeSnapshotEnumeration-`, lockable handlers also need a local snapshot
+  per enumeration because their type is not locked. This is correct but not
+  cached: 20,000 properties and 200 early-exit `for-in` loops take about 242 ms
+  versus 4 ms with the default snapshot path and 5 ms on the base binary
+  (roughly 60x). The snapshot allocates O(live properties) recycler memory,
+  reserving `GetPropertyCountForEnum()` entries (tombstones included), and is
+  reclaimed by the collector. This is a performance residual, not a correctness
+  caveat; reserving it here avoids any resize during the scan. A future
+  type/handler generation counter could cache the local snapshot safely.
 - Memory churn: reusing the old slot keeps `nextPropertyIndex` constant, so
   2,000 delete/readds of `k0` stay at about 24 MB RSS (base 24 MB), and 65,000
   stay at about 45 MB (base 45 MB); 65,000 no longer crosses the small-dictionary

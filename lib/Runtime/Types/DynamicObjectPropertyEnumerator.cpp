@@ -128,12 +128,13 @@ namespace Js
         };
         if (!type->PrepareForTypeSnapshotEnumeration())
         {
-            // Non-lockable handlers (the dictionary handlers) cannot freeze their type for the shared
-            // enumerator cache. Snapshot their keys here instead: a setter can delete/re-add a property
-            // while a for-in/JSON/Object.assign/spread enumeration is in flight, and a live map walk would
-            // then skip or duplicate entries. The local cache is owned by this enumerator only; a null
-            // scriptContext marks it as local and keeps the JIT fast path off.
-            if (GetSnapShotSemantics() && !type->GetTypeHandler()->IsLockable())
+            // Snapshot semantics were requested but PrepareForTypeSnapshotEnumeration did not lock the type:
+            // either the handler is not lockable (dictionary) or -TypeSnapshotEnumeration- disabled locking.
+            // Walk the keys now; a setter can delete/re-add a property while a for-in/JSON/Object.assign/spread
+            // enumeration is in flight, and a live map walk would then skip or duplicate entries. The local
+            // cache is owned by this enumerator only; a null scriptContext marks it as local and keeps the JIT
+            // fast path off.
+            if (GetSnapShotSemantics())
             {
                 uint propertyCount = this->object->GetPropertyCountForEnum();
                 if (propertyCount == 0)

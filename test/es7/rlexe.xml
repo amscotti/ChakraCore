@@ -328,4 +328,10 @@
       <compile-flags>-args summary -endargs</compile-flags>
     </default>
   </test>
+  <test>
+    <default>
+      <files>property-enumeration-order.js</files>
+      <compile-flags>-TypeSnapshotEnumeration- -args summary -endargs</compile-flags>
+    </default>
+  </test>
 </regress-exe>

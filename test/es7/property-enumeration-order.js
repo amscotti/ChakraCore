@@ -312,6 +312,31 @@ var tests = [
         }
     },
     {
+        name: "for-in uses current enumerability for a snapshot key",
+        body() {
+            var hidden = { a: 1, b: 2, c: 3 };
+            var seenHidden = [];
+            for (var key in hidden) {
+                seenHidden.push(key);
+                if (key === "a") {
+                    Object.defineProperty(hidden, "b", { enumerable: false });
+                }
+            }
+            assert.areEqual(["a", "c"], seenHidden, "property made non-enumerable before its turn is skipped");
+
+            var shown = { a: 1, b: 2, c: 3 };
+            Object.defineProperty(shown, "b", { enumerable: false, configurable: true });
+            var seenShown = [];
+            for (var key in shown) {
+                seenShown.push(key);
+                if (key === "a") {
+                    Object.defineProperty(shown, "b", { enumerable: true });
+                }
+            }
+            assert.areEqual(["a", "c"], seenShown, "property made enumerable during for-in stays out of the snapshot");
+        }
+    },
+    {
         name: "Repeated delete/re-add reuses its slot and keeps the final key order",
         body() {
             var object = { k0: 0, pad: 1 };
