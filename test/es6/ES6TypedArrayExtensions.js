@@ -375,7 +375,7 @@ var tests = [
             var typedArrayPrototype = Int8Array.prototype.__proto__;
 
             assert.areEqual(Array.prototype.toString, typedArrayPrototype.toString, "Array.prototype.toString === %TypedArray%.prototype.toString");
-            assert.areEqual(Array.prototype.toLocaleString, typedArrayPrototype.toLocaleString, "Array.prototype.toLocaleString === %TypedArray%.prototype.toLocaleString");
+            assert.isFalse(Array.prototype.toLocaleString === typedArrayPrototype.toLocaleString, "Array.prototype.toLocaleString !== %TypedArray%.prototype.toLocaleString");
         }
     },
     {

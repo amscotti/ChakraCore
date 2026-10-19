@@ -96,8 +96,9 @@ New `test/es7/resizable-typedarray.js`, registered once in
   after target/start/end coercion resizes, `with` after ToNumber reentrancy,
   and constructor reentrancy after offset coercion;
 - `map` after species-constructor shrink/detach over the captured callback
-  range, distinct `%TypedArray%.prototype.toLocaleString` versus generic
-  `Array.prototype.toLocaleString.call`, `with` positive-index growth,
+  range, generic `Array.prototype.map` honoring its own `length` property and
+  present-index behavior, distinct `%TypedArray%.prototype.toLocaleString`
+  versus generic `Array.prototype.toLocaleString.call`, `with` positive-index growth,
   `sort` callback shrink/OOB/detach, `join` separator-driven shrink/grow/detach,
   `slice` OOB skipping (Float32 zeros, not NaN), and DataView auto-length
   tracking.
@@ -113,11 +114,18 @@ after run) for every count below.
 - `/tmp/opencode/cc-gate-lock.sh zig build --summary line`:
   **567/567 steps succeeded**.
 - New es7 test, base binary (`out/base-bin/ch`, SHA-256 `81de4407…`):
-  **2/22 passed, 20 failed**. Same source with this lane
-  (`zig-out/bin/ch`, launcher `0122769e…`, dylib `b7ba8716…`):
-  **22/22 passed**.
+  **3/23 passed, 20 failed**. Same source with this lane
+  (`zig-out/bin/ch`, launcher `0122769e…`, dylib `bad3a2a5…`):
+  **23/23 passed**.
 - Adjacent `test/es7/resizable-arraybuffer.js` **12/12** and
   `test/es7/float16.js` **10/10** still pass.
+- Legacy `test/es6/ES6TypedArrayExtensions.js` with its registered
+  `-ES6ObjectLiterals -ESSharedArrayBuffer` flags: **70/70 passed**, including
+  the generic Array map length cases and the updated distinct
+  `toLocaleString` entrypoint expectation.
+- Ordinary-array regression check `test/es6/ES6ArrayAPI.js`
+  (`-ES6ObjectLiterals`): **45/45 passed**.
+
 - Focused test262 corpus
   `test/built-ins/TypedArray/**/*resizable*` +
   `test/built-ins/TypedArray/**/*out-of-bounds*`:

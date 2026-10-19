@@ -733,6 +733,50 @@ var tests = [
         }
     },
     {
+        name: "Array.prototype.map on a TypedArray uses generic length and presence",
+        body() {
+            var source = new Int8Array(8);
+            for (var i = 0; i < 8; i++) {
+                source[i] = i;
+            }
+            var calls = 0;
+            Object.defineProperty(source, "length", { value: 100 });
+            var result = Array.prototype.map.call(source, function (value, index) {
+                assert.areEqual(calls, index, "generic map index order");
+                calls++;
+                return value + 1;
+            });
+
+            assert.areEqual(8, calls, "generic map visits only present typed indices");
+            assert.areEqual(100, result.length, "generic map keeps the generic length");
+            assert.isTrue(Array.isArray(result), "generic map returns an Array");
+            assert.isFalse(ArrayBuffer.isView(result), "generic map result is not a TypedArray");
+            assert.areEqual(1, result[0], "generic map writes present values");
+            assert.areEqual(8, result[7], "generic map writes the last present value");
+
+            var shortSource = new Int8Array(8);
+            Object.defineProperty(shortSource, "length", { value: 5 });
+            var shortCalls = 0;
+            var shortResult = Array.prototype.map.call(shortSource, function (value) {
+                shortCalls++;
+                return value;
+            });
+            assert.areEqual(5, shortCalls, "generic map honors a smaller generic length");
+            assert.areEqual(5, shortResult.length, "generic map result uses the generic length");
+
+            var typedSource = new Int8Array(8);
+            Object.defineProperty(typedSource, "length", { value: 100 });
+            var typedCalls = 0;
+            var typedResult = typedSource.map(function (value) {
+                typedCalls++;
+                return value;
+            });
+            assert.areEqual(8, typedCalls, "TypedArray map ignores the generic length property");
+            assert.isTrue(typedResult instanceof Int8Array, "TypedArray map preserves type");
+            assert.areEqual(8, typedResult.length, "TypedArray map keeps the live length");
+        }
+    },
+    {
         name: "DataView auto-length tracking remains intact",
         body() {
             var rab = new ArrayBuffer(4, { maxByteLength: 12 });
