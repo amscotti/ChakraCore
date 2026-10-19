@@ -850,9 +850,11 @@ still owns JIT-configuration claims.)*
 | S1 private methods/accessors | Landed `30a81731c` | 202/20, 198/0; es7 68/0 | private statics/static blocks/computed, direct-eval, async/generator private methods, JIT |
 | S2 arithmetic/bitwise/shift | Landed `1c5d5b2fc` | scoped 444/2, 80/0; broad 1,027/1,027; Node differentials | BigInt64Array/BigUint64Array, Map/Set identity, literal property names, giant ToString, JIT |
 | S2 BigInt64Array | Landed `f5f0efef5` | 944/0; 958/1016; ctors 24/24, 166/0; internals 163/0 | DataView BigInt, internals, Map/Set identity, SAB, JIT |
+| S2 BigInt collections/DataView | Landed `10154e3f5` | 102/0; 140/4; broad 104/0; class names/DataView length | immutable buffers, SAB, static fields, JIT |
 | S8 resizable/transfer | Landed `6ceb23d6d` | focused 424/834, 236/0; ArrayBuffer 358/442; DataView 44/52; Float16 4/4 | immutable buffers, SAB, Float16Array, cross-realm/Reflect order, JsRT/Wasm, JIT |
 | S8 TypedArray tracking | Landed `859b07d13` | focused 132/340, 110/0; combined 150/378, 118/0; expanded 54/0 | BigInt-gated residual; generic Array helpers, toLocaleString element formatting, JIT/TTD |
 | S13 WeakRef | Landed `803331b51` | WeakRef 56/58, 56/0; agent-wide kept set; 200/500-run stability | FinalizationRegistry, symbol WeakMap/WeakSet keys, host-dispatch, concurrent GC/JIT |
+| S13 FinalizationRegistry | Landed `51787b576` | 94/94; WeakRef 58/58; 94/0; focused 100 | cross-realm Symbol, Reflect.construct double read, host queue, JIT |
 | S14 P1 | Landed `a4eba5a38` | 152/4 on integrated binary; 112/0 | S1 class completion; unsupported `using`; pre-existing labeled-break/finally crash (P7) |
 | S14 P3 | Landed `0a723970e` | 280/0; full Annex B 765/17, 282/0 | 17 P4 declaration-instantiation collisions |
 | S14 P6 | Landed `8b52cc063` | 18/18, 10/0; broad 10/0 | unordered/global/let and dictionary snapshot cost; JIT |
@@ -862,8 +864,7 @@ still owns JIT-configuration claims.)*
 
 Full gates at this checkpoint: **1997/0 test**, **2049/0 debug-static**.
 All active feature/triage worktrees are merged. Next work items are S1 private static/static blocks/computed elements,
-S13 FinalizationRegistry, S6 flag-on gaps, and S2 Map/Set BigInt identity/
-DataView BigInt. S8 tracking residuals are tracked separately. P5 residual: eval/function-expression
+S6 flag-on gaps, and the documented S8/S2/P-eval residuals. P5 residual: eval/function-expression
 reference paths and pre-existing proxy descriptor duplication.
 
 ## 7. Separate inventories

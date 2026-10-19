@@ -1,7 +1,6 @@
 # C2-S13 follow-up: FinalizationRegistry
 
-Status: **pending integration** (branch `s13-fr`, base `1c983ef9c`; initial
-implementation `3d9012a8d`, review fixes `63d77e9a4`). Mac no-JIT only; JIT
+Status: **landed in `51787b576`** (feature `26ad8308d`; base `1c983ef9c`); current integrated gates **2008/2060**. FinalizationRegistry corpus **94/94**, WeakRef **58/58**, focused **100/100**, controls 18/18. Cross-realm Symbol clone identity and inherited Reflect.construct double-prototype read remain residuals; host cleanup queue requirement documented. Mac no-JIT only; JIT
 evidence is not claimed and B4 owns the JIT configuration claims. `WeakRef` remains as recorded in [c2-s13-weakref.md](c2-s13-weakref.md);
 this slice adds the separate `FinalizationRegistry` cleanup-job mechanism.
 

@@ -590,18 +590,21 @@ Decision/rollback points:
 - [ ] C4: Published qualified ES2025 result on the claimed default configurations.
 
 **Latest integration checkpoint (2026-10-19):** main is clean at the
-**2004/0 test** and **2056/0 debug-static** (573/573 and
-546/546 steps).
-Merged lanes: S1 public/private fields + private methods/accessors, S2
-arithmetic + BigInt64Array/Uint64Array, S8 resizable ArrayBuffer/transfer +
-TypedArray tracking, S13 WeakRef, and S14 P1/P2/P3/P4/P5/P6/P7
+**2008/0 test** and **2060/0 debug-static** (574/574 and
+547/547 steps).
+Merged lanes: S1 public/private fields + private methods/accessors, S2 arithmetic + BigInt64Array/Uint64Array + collections/DataView, S8
+resizable ArrayBuffer/transfer + TypedArray tracking, S13 WeakRef +
+FinalizationRegistry, and S14 P1/P2/P3/P4/P5/P6/P7
 ([c2-s1-public-fields.md](c2-s1-public-fields.md),
 [c2-s1-private-fields.md](c2-s1-private-fields.md),
 [c2-s1-private-methods.md](c2-s1-private-methods.md),
 [c2-s2-bigint-arithmetic.md](c2-s2-bigint-arithmetic.md),
+[c2-s2-bigint64array.md](c2-s2-bigint64array.md),
+[c2-s2-bigint-collections.md](c2-s2-bigint-collections.md),
 [c2-s8-resizable.md](c2-s8-resizable.md),
 [c2-s8-typedarray-tracking.md](c2-s8-typedarray-tracking.md),
 [c2-s13-weakref.md](c2-s13-weakref.md),
+[c2-s13-finalization-registry.md](c2-s13-finalization-registry.md),
 [c2-s14-statement-completion.md](c2-s14-statement-completion.md),
 [c2-s14-eval-arguments.md](c2-s14-eval-arguments.md),
 [c2-s14-annexb-var-skip.md](c2-s14-annexb-var-skip.md),
