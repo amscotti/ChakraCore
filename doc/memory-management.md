@@ -117,7 +117,7 @@ being thread-safe does not make a container, callback or JS handle thread-safe.
 - `JsGetArrayBufferStorage` explicitly says the raw buffer pointer is not a GC
   reference (`ChakraCommon.h:2063-2080`). Rooting the ArrayBuffer prevents collection
   while held; it does **not** prevent `JsDetachArrayBuffer` or establish future
-  resize/pointer stability (`ChakraCore.h:1959-2012`).
+  resize/pointer stability (`ChakraCore.h:1959-2010`).
 - Runtime disposal invalidates its resources (`ChakraCommon.h:800-812`). Roots
   must be released through the permitted owner context before disposal; they are
   not a license to use handles after teardown.
@@ -409,7 +409,7 @@ JIT, concurrency or whole-process sanitizer coverage.
 - **[GT-LEAK]** Mitchell Hashimoto,
   [Finding and Fixing Ghostty's Largest Memory Leak](https://mitchellh.com/writing/ghostty-memory-leak-fix)
   (2026-01-10), [fix PR #10251](https://github.com/ghostty-org/ghostty/pull/10251).
-- **[GT-CODE]** [Ghostty PageList, inspected commit](https://github.com/ghostty-org/ghostty/blob/e3ac62012ef2a6c9c4b4bb4231535c1c3c3e4ae3/src/terminal/PageList.zig):
+- **[GT-CODE]** [Ghostty PageList, inspected commit](https://github.com/ghostty-org/ghostty/blob/e3ac62010ef2a6c9c4b4bb4231535c1c3c3e4ae3/src/terminal/PageList.zig):
   explicit backing ownership (:65-93), release/accounting (:5095-5129),
   tracked pin acquisition/release (:5711-5745), invalidation/garbage state (:7191-7211).
 - **[BUN]** Jarred Sumner, [Rewriting Bun in Rust](https://bun.com/blog/bun-in-rust)

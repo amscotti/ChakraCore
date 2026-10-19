@@ -53,7 +53,7 @@ handling have been validated before its results are used as a completion gate.
 | B6 | Windows feasibility and rollout; later target extensions | Stable build contracts | Separate expansion |
 | Z1 | One useful mixed C++/Zig unit behind a tested C ABI | B3; B4 if the unit ships on Linux | Optional pilot |
 | C1 | Qualified ES2025 test policy and triaged failures | Stable Mac build at B3 | Recorded (CONDITIONAL) |
-| C2 | Bounded compatibility batches and partial releases | C1; B4 before JIT-wide enablement | In progress (S4/S5/S10/S11/S7-matchAll/S9 named-groups + d-flag + duplicate named groups + lookbehind + ES2025 modifiers/S14 block-scope + statement-level early errors/S2 BigInt-asIntN-asUintN closed on Mac no-JIT; S13 symbols-as-weak-collection-keys landed; JIT claims gated on B4) |
+| C2 | Bounded compatibility batches and partial releases | C1; B4 before JIT-wide enablement | In progress (S4/S5/S10/S11/S7-matchAll/S9 named-groups + d-flag + duplicate named groups + lookbehind + ES2025 modifiers; S1 class elements: public/private instance+static fields, private methods/accessors; S2 BigInt: operators/literals/asIntN-asUintN, collections, DataView, BigInt64Array; S8 resizable ArrayBuffer + TypedArray tracking + Float16; S13 symbol keys, WeakRef, FinalizationRegistry; S14 P1–P7 — all closed on Mac no-JIT; JIT claims gated on B4) |
 | C3 | Larger runtime/object-model feature projects | C1 and their feature prerequisites | Separate projects |
 | C4 | Verified full ES2025 core-language result | Required C2/C3 work and qualified runner | Long-term objective |
 
@@ -592,7 +592,7 @@ Decision/rollback points:
 **Latest integration checkpoint (2026-10-19):** main is clean at the
 **2012/0 test** and **2064/0 debug-static** (574/574 and
 547/547 steps).
-Merged lanes: S1 public/private fields + private methods/accessors, S1 public/private instance/static fields, private methods/accessors, S2 arithmetic + BigInt64Array/Uint64Array + collections/
+Merged lanes: S1 public/private instance+static fields and private methods/accessors, S2 arithmetic + BigInt64Array/Uint64Array + collections/
 DataView, S8 resizable ArrayBuffer/transfer + TypedArray tracking, S13
 WeakRef + FinalizationRegistry, and S14 P1/P2/P3/P4/P5/P6/P7
 ([c2-s1-public-fields.md](c2-s1-public-fields.md),
@@ -614,8 +614,8 @@ WeakRef + FinalizationRegistry, and S14 P1/P2/P3/P4/P5/P6/P7
 [c2-s14-assignment-reference.md](c2-s14-assignment-reference.md),
 [c2-s14-enumeration-order.md](c2-s14-enumeration-order.md),
 [c2-s14-labeled-break-finally.md](c2-s14-labeled-break-finally.md)). Integrated
-class corpus: **1,989/5,897**, **539 fail→pass / 0 pass→fail**. S14 P5 is landed; next work is S1 private methods/static/computed
-elements, S2 BigInt64Array/Map-Set identity, and S13 FinalizationRegistry. Tracked eval residuals: P4 body eval with
+class corpus: **1,989/5,897**, **539 fail→pass / 0 pass→fail**. All active feature/triage worktrees are merged; next work items are S1 static blocks/private static methods/accessors and
+computed elements, S6 flag-on gaps, and the documented S8/S2/P-eval residuals. Tracked eval residuals: P4 body eval with
 non-simple parameters; P2 hidden outer lexical and JSC/Node delete difference. S3, S12, S6 default, B4 and C4 remain externally or
 gate blocked.
 

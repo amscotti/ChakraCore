@@ -1,5 +1,9 @@
 # Zig pilot harness
 
+**Archived:** this F0-era de-risk harness is not part of the build
+(`build.zig` superseded it). It is retained as the port recipe and
+evidence record for future platforms; nothing invokes it.
+
 Replay a CMake/Ninja configuration with the pinned Zig C/C++ toolchain, separating
 compiler/linker capability from authoring `build.zig`. The current proof is ARM64
 macOS, shared/no-JIT, RelWithDebInfo, system ICU; see `doc/build.md` §13–14.

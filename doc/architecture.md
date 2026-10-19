@@ -2,7 +2,10 @@
 
 > Engine version: 1.13.0 dev (`lib/Common/ChakraCoreVersion.h:19-21`, `RELEASE 0`).
 > Community-maintained, embedded-focused since Microsoft ended 1.11 security updates
-> in March 2021 (`README.md:9-16`). Pinned to HEAD `97e68c917`.
+> in March 2021 (`README.md:9-16`). Originally pinned to upstream HEAD
+> `97e68c917`; the `modernize/baseline` branch has since advanced well past
+> it (current state: `modernization-plan.md` §6) without changing the
+> layering described here.
 > There is no `src/` directory; engine source lives in `lib/`.
 
 ## Overview diagram
