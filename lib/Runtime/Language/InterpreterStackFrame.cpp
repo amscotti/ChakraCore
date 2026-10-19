@@ -5057,6 +5057,48 @@ skipThunk:
     }
 
     template <class T>
+    void InterpreterStackFrame::OP_SetPrivateDefinition(const unaligned T* playout)
+    {
+        SetReg(playout->R0, JavascriptOperators::OP_SetPrivateDefinition(
+            GetReg(playout->R1), GetReg(playout->R0), playout->B2, scriptContext));
+    }
+
+    template <class T>
+    void InterpreterStackFrame::OP_InitPrivateMethod(const unaligned T* playout)
+    {
+        SetReg(playout->R0, JavascriptOperators::OP_InitPrivateMethod(
+            GetReg(playout->R0), GetReg(playout->R1), scriptContext));
+    }
+
+    template <class T>
+    void InterpreterStackFrame::OP_LdPrivateMethod(const unaligned T* playout)
+    {
+        SetReg(playout->R0, JavascriptOperators::OP_LdPrivateMethod(
+            GetReg(playout->R1), GetReg(playout->R2), scriptContext));
+    }
+
+    template <class T>
+    void InterpreterStackFrame::OP_LdPrivateAccessor(const unaligned T* playout)
+    {
+        SetReg(playout->R0, JavascriptOperators::OP_LdPrivateAccessor(
+            GetReg(playout->R1), GetReg(playout->R2), scriptContext));
+    }
+
+    template <class T>
+    void InterpreterStackFrame::OP_StPrivateAccessor(const unaligned T* playout)
+    {
+        SetReg(playout->R0, JavascriptOperators::OP_StPrivateAccessor(
+            GetReg(playout->R1), GetReg(playout->R2), GetReg(playout->R3), scriptContext));
+    }
+
+    template <class T>
+    void InterpreterStackFrame::OP_StPrivateMethod(const unaligned T* playout)
+    {
+        SetReg(playout->R0, JavascriptOperators::OP_StPrivateMethod(
+            GetReg(playout->R1), GetReg(playout->R2), scriptContext));
+    }
+
+    template <class T>
     void InterpreterStackFrame::OP_InitLocalProperty(unaligned T* playout)
     {
         DoInitProperty(playout, this->localClosure);

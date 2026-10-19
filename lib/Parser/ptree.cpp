@@ -305,10 +305,11 @@ ParseNodeBin::ParseNodeBin(OpCode nop, charcount_t ichMin, charcount_t ichLim, P
     : ParseNode(nop, ichMin, ichLim)
 {
     // Member name is either a string, a computed name, or (for instance
-    // private fields only) a private name node.
+    // private fields/methods/accessors) a private name node.
     Assert((nop != knopMember && nop != knopMemberShort && nop != knopObjectPatternMember && nop != knopGetMember && nop != knopSetMember) 
         || (pnode1->nop == knopStr || pnode1->nop == knopComputedName ||
-            (nop == knopMember && pnode1->nop == knopName && pnode1->AsParseNodeName()->IsPrivateName())));
+            ((nop == knopMember || nop == knopGetMember || nop == knopSetMember) &&
+             pnode1->nop == knopName && pnode1->AsParseNodeName()->IsPrivateName())));
 
     // Dot's rhs has to be a name;
     Assert(nop != knopDot || pnode2->nop == knopName);
@@ -371,6 +372,7 @@ ParseNodeName::ParseNodeName(charcount_t ichMin, charcount_t ichLim, IdentPtr na
     this->symRef = nullptr;
     this->isSpecialName = false;
     this->isPrivateName = false;
+    this->privateKind = PrivateNameKind::Unknown;
 }
 
 void ParseNodeName::SetSymRef(PidRefStack * ref)
@@ -443,6 +445,7 @@ ParseNodeFnc::ParseNodeFnc(OpCode nop, charcount_t ichMin, charcount_t ichLim)
     this->pnodeBody = nullptr;
     this->pnodeRest = nullptr;
     this->pnodeClassFields = nullptr;
+    this->pnodeClassPrivateMethods = nullptr;
     
     this->funcInfo = nullptr;
     this->scope = nullptr;

@@ -380,6 +380,9 @@ RT_ERROR_MSG(JSERR_YieldStarThrowMissing, 5680, "", "Yielded iterator does not h
 //Host errors
 RT_ERROR_MSG(JSERR_HostMaybeMissingPromiseContinuationCallback, 5700, "", "Host may not have set any promise continuation callback. Promises may not be executed.", kjstTypeError, 0)
 RT_ERROR_MSG(JSERR_PrivateFieldBrandCheck, 5701, "", "Cannot access private field on an object whose class did not declare it", kjstTypeError, 0)
+RT_ERROR_MSG(JSERR_PrivateMethodNotWritable, 5702, "", "Cannot write to a private method", kjstTypeError, 0)
+RT_ERROR_MSG(JSERR_PrivateAccessorMissingGetter, 5703, "", "Private accessor was defined without a getter", kjstTypeError, 0)
+RT_ERROR_MSG(JSERR_PrivateAccessorMissingSetter, 5704, "", "Private accessor was defined without a setter", kjstTypeError, 0)
 
 // Built In functions Errors
 RT_ERROR_MSG(JSERR_BuiltInNotAvailable, 5800, "", "Built In functions are not available.", kjstTypeError, 0)

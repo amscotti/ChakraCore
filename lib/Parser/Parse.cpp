@@ -96,6 +96,10 @@ struct PrivateNameEntry
     IdentPtr hiddenPid;
     ParseNodeVar * decl;
     Symbol * sym;
+    PrivateNameKind kind;
+    bool hasGetter;
+    bool hasSetter;
+    bool methodInitAdded;
     PrivateNameEntry * next;
 };
 
@@ -8994,24 +8998,17 @@ void Parser::PopPrivateNameScope()
     m_privateNameScope = scope->prev;
 }
 
-PrivateNameEntry * Parser::DeclareClassPrivateName(IdentPtr name, bool buildAST)
+PrivateNameEntry * Parser::CreateClassPrivateNameEntry(IdentPtr name, bool buildAST)
 {
-    Assert(name != nullptr);
-    Assert(m_privateNameScope != nullptr);
-
-    for (PrivateNameEntry * existing = m_privateNameScope->names; existing != nullptr; existing = existing->next)
-    {
-        if (existing->name == name)
-        {
-            Error(ERRsyntax);
-        }
-    }
-
     PrivateNameEntry * entry = Anew(&m_nodeAllocator, PrivateNameEntry);
     entry->name = name;
     entry->hiddenPid = nullptr;
     entry->decl = nullptr;
     entry->sym = nullptr;
+    entry->kind = PrivateNameKind::Unknown;
+    entry->hasGetter = false;
+    entry->hasSetter = false;
+    entry->methodInitAdded = false;
     entry->next = m_privateNameScope->names;
     m_privateNameScope->names = entry;
 
@@ -9040,6 +9037,49 @@ PrivateNameEntry * Parser::DeclareClassPrivateName(IdentPtr name, bool buildAST)
         entry->sym = decl->sym;
     }
 
+    return entry;
+}
+
+PrivateNameEntry * Parser::DeclareClassPrivateName(IdentPtr name, bool buildAST)
+{
+    Assert(name != nullptr);
+    Assert(m_privateNameScope != nullptr);
+
+    for (PrivateNameEntry * existing = m_privateNameScope->names; existing != nullptr; existing = existing->next)
+    {
+        if (existing->name == name)
+        {
+            Error(ERRsyntax);
+        }
+    }
+
+    return CreateClassPrivateNameEntry(name, buildAST);
+}
+
+// A get/set pair shares one private name binding (and therefore one brand).
+// Reuse the existing entry only when the other half of the pair was already
+// declared; any other duplicate spelling is an early error.
+PrivateNameEntry * Parser::DeclareClassPrivateAccessor(IdentPtr name, bool isGetter, bool buildAST)
+{
+    Assert(name != nullptr);
+    Assert(m_privateNameScope != nullptr);
+
+    for (PrivateNameEntry * existing = m_privateNameScope->names; existing != nullptr; existing = existing->next)
+    {
+        if (existing->name != name)
+        {
+            continue;
+        }
+        if (existing->kind != PrivateNameKind::Accessor ||
+            (isGetter ? existing->hasGetter : existing->hasSetter))
+        {
+            Error(ERRsyntax);
+        }
+        return existing;
+    }
+
+    PrivateNameEntry * entry = CreateClassPrivateNameEntry(name, buildAST);
+    entry->kind = PrivateNameKind::Accessor;
     return entry;
 }
 
@@ -9105,6 +9145,7 @@ void Parser::ResolvePendingPrivateRefs(PrivateNameScope * outermost)
             hiddenRef->SetSym(entry->sym);
             deferred->pnode->AsParseNodeName()->SetSymRef(hiddenRef);
             deferred->pnode->AsParseNodeName()->sym = entry->sym;
+            deferred->pnode->AsParseNodeName()->SetPrivateKind(entry->kind);
             entry->sym->SetHasNonLocalReference();
         }
         deferred = next;
@@ -9334,6 +9375,38 @@ void Parser::AttachClassFieldsToLambda(ParseNodeFnc * pnodeLambda, ParseNode * p
     pnodeLambda->pnodeClassFields = pnodeClonedFields;
 }
 
+// Clone the private-method brand list for an arrow that performs super() in a
+// derived constructor. The brand symbols and method definitions are class-block
+// bindings; only the references need to live in the arrow's frame.
+void Parser::AttachClassPrivateMethodsToLambda(ParseNodeFnc * pnodeLambda, ParseNode * pnodePrivateMethods)
+{
+    ParseNodePtr pnodeClonedMethods = nullptr;
+    ParseNodePtr * lastClonedMethod = nullptr;
+    ParseNodePtr pnodeWalker = pnodePrivateMethods;
+    while (pnodeWalker != nullptr)
+    {
+        ParseNodePtr pnodeEntry = pnodeWalker->nop == knopList
+            ? pnodeWalker->AsParseNodeBin()->pnode1
+            : pnodeWalker;
+        ParseNodeName * pnodeName = pnodeEntry->AsParseNodeName();
+
+        PidRefStack * hiddenRef = Anew(&m_nodeAllocator, PidRefStack);
+        hiddenRef->SetSym(pnodeName->sym);
+        ParseNodeName * pnodeCloned = CreateNameNode(pnodeName->pid, hiddenRef, pnodeName->ichMin, pnodeName->ichLim);
+        pnodeCloned->SetIsPrivateName();
+        pnodeCloned->sym = pnodeName->sym;
+        pnodeCloned->SetPrivateKind(pnodeName->GetPrivateKind());
+        AddToNodeList(&pnodeClonedMethods, &lastClonedMethod, pnodeCloned);
+
+        if (pnodeWalker->nop != knopList)
+        {
+            break;
+        }
+        pnodeWalker = pnodeWalker->AsParseNodeBin()->pnode2;
+    }
+    pnodeLambda->pnodeClassPrivateMethods = pnodeClonedMethods;
+}
+
 // S1 fast-scan counterpart of CreateClassFieldInitializerFunction. During the
 // deferred-parse fast scan we cannot build the initializer AST, but the
 // enclosing function's nested count and nested function proxies must already
@@ -9378,6 +9451,41 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
     ParseNodePtr *lastMemberNodeRef = nullptr;
     ParseNodePtr pnodeInstanceFields = nullptr;
     ParseNodePtr *lastInstanceFieldNodeRef = nullptr;
+    ParseNodePtr pnodePrivateMethods = nullptr;
+    ParseNodePtr *lastPrivateMethodNodeRef = nullptr;
+
+    auto AddPrivateMethodInit = [&](PrivateNameEntry * entry)
+    {
+        if (!buildAST || entry == nullptr || entry->methodInitAdded)
+        {
+            return;
+        }
+        PidRefStack * hiddenRef = Anew(&m_nodeAllocator, PidRefStack);
+        hiddenRef->SetSym(entry->sym);
+        ParseNodeName * pnodeBrand = CreateNameNode(entry->name, hiddenRef, entry->decl->ichMin, entry->decl->ichLim);
+        pnodeBrand->SetIsPrivateName();
+        pnodeBrand->sym = entry->sym;
+        pnodeBrand->SetPrivateKind(entry->kind);
+        AddToNodeList(&pnodePrivateMethods, &lastPrivateMethodNodeRef, pnodeBrand);
+        entry->methodInitAdded = true;
+    };
+
+    auto MakePrivateHint = [&](IdentPtr name, const char16 * prefix = nullptr, uint32 prefixLength = 0) -> LPCOLESTR
+    {
+        uint32 hintLength = prefixLength + name->Cch() + 1;
+        char16 * hint = AnewArray(&m_nodeAllocator, char16, hintLength + 1);
+        for (uint32 i = 0; i < prefixLength; i++)
+        {
+            hint[i] = prefix[i];
+        }
+        hint[prefixLength] = _u('#');
+        for (uint32 i = 0; i < name->Cch(); i++)
+        {
+            hint[prefixLength + 1 + i] = name->Psz()[i];
+        }
+        hint[hintLength] = 0;
+        return hint;
+    };
     uint32 nameHintLength = pHintLength ? *pHintLength : 0;
     uint32 nameHintOffset = pShortNameOffset ? *pShortNameOffset : 0;
 
@@ -9525,6 +9633,8 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
         bool privateScanned = false;
         PrivateNameEntry * privateEntry = nullptr;
         IdentPtr privateSource = nullptr;
+        RestorePoint privateNameStart;
+        bool privateNameStartCaptured = false;
 
         if (m_token.tk == tkPrivateName)
         {
@@ -9534,7 +9644,7 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
             privateSource = m_token.GetIdentifier(this->GetHashTbl());
             if (isStatic)
             {
-                // Static private fields are outside this slice.
+                // Static private members are outside this slice.
                 Error(ERRsyntax);
             }
             if (privateSource == wellKnownPropertyPids.constructor)
@@ -9542,6 +9652,8 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
                 // `#constructor` is not a valid private name.
                 Error(ERRsyntax);
             }
+            this->GetScanner()->Capture(&privateNameStart);
+            privateNameStartCaptured = true;
             privateEntry = DeclareClassPrivateName(privateSource, buildAST);
             if (buildAST)
             {
@@ -9639,15 +9751,36 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
             (fieldTerminator || getSetGeneratorAsi ||
                 (!isGetOrSetName && this->GetScanner()->FHadNewLine() && m_token.tk != tkLParen));
 
-        if (isPrivateField && !isFieldDefinition)
+        if (isPrivateField)
         {
-            // Private methods/accessors and generators are outside this slice;
-            // reject them rather than falling into the public member grammar
-            // (which has no private-name production).
-            Error(ERRsyntax);
+            if (isFieldDefinition)
+            {
+                privateEntry->kind = PrivateNameKind::Field;
+                if (buildAST)
+                {
+                    pnodeMemberName->AsParseNodeName()->SetPrivateKind(PrivateNameKind::Field);
+                }
+            }
+            else
+            {
+                // Private instance method. The method grammar is otherwise the
+                // public-member grammar; rewind to the private-name token so
+                // ParseFncDecl consumes it as the (suppressed) function name.
+                Assert(privateNameStartCaptured);
+                privateEntry->kind = PrivateNameKind::Method;
+                if (buildAST)
+                {
+                    pnodeMemberName->AsParseNodeName()->SetPrivateKind(PrivateNameKind::Method);
+                    pMemberNameHint = MakePrivateHint(privateSource);
+                    memberNameHintLength = privateSource->Cch() + 1;
+                    memberNameOffset = 0;
+                    memberPid = privateSource;
+                }
+                AddPrivateMethodInit(privateEntry);
+                this->GetScanner()->SeekTo(privateNameStart);
+            }
         }
-
-        if (!isFieldDefinition && scannedFieldName)
+        else if (!isFieldDefinition && scannedFieldName)
         {
             this->GetScanner()->SeekTo(afterFieldName);
         }
@@ -9886,6 +10019,79 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
                 maybeAccessor = false;
             }
 
+            if (maybeAccessor && (memberPid == wellKnownPropertyPids.get || memberPid == wellKnownPropertyPids.set) &&
+                m_token.tk == tkPrivateName)
+            {
+                bool isGetter = (memberPid == wellKnownPropertyPids.get);
+                charcount_t privateIchMin = this->GetScanner()->IchMinTok();
+                charcount_t privateIchLim = this->GetScanner()->IchLimTok();
+                IdentPtr accessorSource = m_token.GetIdentifier(this->GetHashTbl());
+                if (isStatic)
+                {
+                    // Static private accessors are outside this slice.
+                    Error(ERRsyntax);
+                }
+                if (isAsyncMethod || isGenerator)
+                {
+                    // Accessors cannot be async or generators: `async get`,
+                    // `*set`, `async *get`, etc. are early errors. The public
+                    // accessor branch applies the same async restriction; the
+                    // generator flag is checked here as well for private names.
+                    Error(ERRsyntax);
+                }
+                if (accessorSource == wellKnownPropertyPids.constructor)
+                {
+                    Error(ERRsyntax);
+                }
+
+                privateEntry = DeclareClassPrivateAccessor(accessorSource, isGetter, buildAST);
+                privateEntry->kind = PrivateNameKind::Accessor;
+                if (isGetter)
+                {
+                    Assert(!privateEntry->hasGetter);
+                    privateEntry->hasGetter = true;
+                }
+                else
+                {
+                    Assert(!privateEntry->hasSetter);
+                    privateEntry->hasSetter = true;
+                }
+
+                if (buildAST)
+                {
+                    PidRefStack * hiddenRef = Anew(&m_nodeAllocator, PidRefStack);
+                    hiddenRef->SetSym(privateEntry->sym);
+                    ParseNodeName * pnodePrivate = CreateNameNode(accessorSource, hiddenRef, privateIchMin, privateIchLim);
+                    pnodePrivate->SetIsPrivateName();
+                    pnodePrivate->sym = privateEntry->sym;
+                    pnodePrivate->SetPrivateKind(PrivateNameKind::Accessor);
+                    pnodeMemberName = pnodePrivate;
+                }
+
+                AddPrivateMethodInit(privateEntry);
+
+                ParseNodeFnc * pnodeFnc = ParseFncDeclNoCheckScope<buildAST>(
+                    fncDeclFlags | (isGetter ? fFncNoArg : fFncOneArg),
+                    SuperRestrictionState::PropertyAllowed, nullptr, /* needsPIDOnRCurlyScan */ true);
+
+                pnodeFnc->SetIsStaticMember(false);
+                pnodeFnc->SetHasHomeObj();
+
+                if (buildAST)
+                {
+                    pnodeFnc->SetIsAccessor();
+                    pnodeFnc->pid = accessorSource;
+                    pnodeFnc->hint = MakePrivateHint(
+                        accessorSource, isGetter ? _u("get ") : _u("set "), 4);
+                    pnodeFnc->hintLength = accessorSource->Cch() + 5;
+                    pnodeFnc->hintOffset = 0;
+                    ParseNodePtr pnodeMemberAccessor = CreateBinNode(
+                        isGetter ? knopGetMember : knopSetMember, pnodeMemberName, pnodeFnc);
+                    AddToNodeList(&pnodeMembers, &lastMemberNodeRef, pnodeMemberAccessor);
+                }
+                continue;
+            }
+
             if (maybeAccessor && (memberPid == wellKnownPropertyPids.get || memberPid == wellKnownPropertyPids.set))
             {
                 bool isGetter = (memberPid == wellKnownPropertyPids.get);
@@ -9964,7 +10170,10 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
                 if (buildAST)
                 {
                     pnodeMember = CreateBinNode(knopMember, pnodeMemberName, pnodeFnc);
-                    pMemberNameHint = ConstructFinalHintNode(pClassNamePid, pidHint, nullptr /*pgetset*/, isStatic, &memberNameHintLength, &memberNameOffset, isComputedName, pMemberNameHint);
+                    if (!isPrivateField)
+                    {
+                        pMemberNameHint = ConstructFinalHintNode(pClassNamePid, pidHint, nullptr /*pgetset*/, isStatic, &memberNameHintLength, &memberNameOffset, isComputedName, pMemberNameHint);
+                    }
                 }
             }
 
@@ -10024,6 +10233,11 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
         pnodeConstructor->cbStringMin = cbMinConstructor;
         pnodeConstructor->cbStringLim = cbLimConstructor;
 
+        if (pnodePrivateMethods != nullptr)
+        {
+            pnodeConstructor->pnodeClassPrivateMethods = pnodePrivateMethods;
+        }
+
         if (pnodeInstanceFields != nullptr)
         {
             pnodeConstructor->pnodeClassFields = pnodeInstanceFields;
@@ -10073,6 +10287,24 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
                     ? pnodeSuperLambdas->AsParseNodeBin()->pnode1
                     : pnodeSuperLambdas;
                 AttachClassFieldsToLambda(pnodeEntry->AsParseNodeFnc(), pnodeInstanceFields, thisSym);
+
+                if (pnodeSuperLambdas->nop != knopList)
+                {
+                    break;
+                }
+                pnodeSuperLambdas = pnodeSuperLambdas->AsParseNodeBin()->pnode2;
+            }
+        }
+
+        if (pnodePrivateMethods != nullptr && pnodeConstructor->pnodeClassSuperLambdas != nullptr)
+        {
+            ParseNodePtr pnodeSuperLambdas = pnodeConstructor->pnodeClassSuperLambdas;
+            while (pnodeSuperLambdas != nullptr)
+            {
+                ParseNodePtr pnodeEntry = pnodeSuperLambdas->nop == knopList
+                    ? pnodeSuperLambdas->AsParseNodeBin()->pnode1
+                    : pnodeSuperLambdas;
+                AttachClassPrivateMethodsToLambda(pnodeEntry->AsParseNodeFnc(), pnodePrivateMethods);
 
                 if (pnodeSuperLambdas->nop != knopList)
                 {

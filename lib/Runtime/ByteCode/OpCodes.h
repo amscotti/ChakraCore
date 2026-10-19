@@ -898,6 +898,12 @@ MACRO_EXTEND_WMS(       LdPrivateField,    Reg3,           OpSideEffect|OpOpndHa
 MACRO_EXTEND_WMS(       StPrivateField,    Reg4,           OpSideEffect|OpOpndHasImplicitCall|OpPostOpDbgBailOut)
 MACRO_EXTEND_WMS(       InitPrivateField,  Reg4,           OpSideEffect|OpOpndHasImplicitCall|OpPostOpDbgBailOut)
 MACRO_EXTEND_WMS(       HasPrivateField,   Reg3,           OpSideEffect|OpOpndHasImplicitCall|OpPostOpDbgBailOut)
+MACRO_EXTEND_WMS(       SetPrivateDefinition, Reg2B1,      OpSideEffect|OpOpndHasImplicitCall|OpPostOpDbgBailOut)
+MACRO_EXTEND_WMS(       InitPrivateMethod, Reg2,            OpSideEffect|OpPostOpDbgBailOut)
+MACRO_EXTEND_WMS(       LdPrivateMethod,   Reg3,            OpSideEffect|OpOpndHasImplicitCall|OpPostOpDbgBailOut)
+MACRO_EXTEND_WMS(       LdPrivateAccessor, Reg3,            OpSideEffect|OpOpndHasImplicitCall|OpPostOpDbgBailOut)
+MACRO_EXTEND_WMS(       StPrivateAccessor, Reg4U,           OpSideEffect|OpOpndHasImplicitCall|OpPostOpDbgBailOut)
+MACRO_EXTEND_WMS(       StPrivateMethod,   Reg3,            OpSideEffect|OpPostOpDbgBailOut)
 
 #undef MACRO_WMS_PROFILED
 #undef MACRO_WMS_PROFILED2

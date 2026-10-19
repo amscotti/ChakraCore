@@ -938,11 +938,14 @@ private:
     bool ClassBodyHasPrivateSyntax();
     void PushPrivateNameScope();
     void PopPrivateNameScope();
+    PrivateNameEntry * CreateClassPrivateNameEntry(IdentPtr name, bool buildAST);
     PrivateNameEntry * DeclareClassPrivateName(IdentPtr name, bool buildAST);
+    PrivateNameEntry * DeclareClassPrivateAccessor(IdentPtr name, bool isGetter, bool buildAST);
     ParseNodeName * CreatePrivateNameReference(IdentPtr name, charcount_t ichMin, charcount_t ichLim, bool buildAST);
     void ResolvePendingPrivateRefs(PrivateNameScope * outermost);
     ParseNodeFnc * CreateClassFieldInitializerFunction(charcount_t ichMin, size_t cbMin, ParseNodePtr * ppnodeInitExpr = nullptr);
     void AttachClassFieldsToLambda(ParseNodeFnc * pnodeLambda, ParseNode * pnodeFields, Symbol * thisSym);
+    void AttachClassPrivateMethodsToLambda(ParseNodeFnc * pnodeLambda, ParseNode * pnodePrivateMethods);
     ParseNodeFnc * CreateClassFieldInitializerFastScanStub();
     template<bool buildAST> ParseNodeClass * ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint, uint32 *pHintLength, uint32 *pShortNameOffset);
 

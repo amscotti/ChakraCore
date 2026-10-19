@@ -360,6 +360,12 @@ namespace Js
         static Var OP_StPrivateField(Var instance, Var brand, Var newValue, ScriptContext * scriptContext);
         static Var OP_InitPrivateField(Var instance, Var brand, Var newValue, ScriptContext * scriptContext);
         static BOOL OP_HasPrivateField(Var instance, Var brand, ScriptContext * scriptContext);
+        static Var OP_SetPrivateDefinition(Var brand, Var value, uint8 kind, ScriptContext * scriptContext);
+        static Var OP_InitPrivateMethod(Var instance, Var brand, ScriptContext * scriptContext);
+        static Var OP_LdPrivateMethod(Var instance, Var brand, ScriptContext * scriptContext);
+        static Var OP_LdPrivateAccessor(Var instance, Var brand, ScriptContext * scriptContext);
+        static Var OP_StPrivateAccessor(Var instance, Var brand, Var newValue, ScriptContext * scriptContext);
+        static Var OP_StPrivateMethod(Var instance, Var brand, ScriptContext * scriptContext);
         static Var OP_DeleteProperty(Var instance, PropertyId propertyId, ScriptContext* scriptContext, PropertyOperationFlags propertyOperationFlags = PropertyOperation_None);
         static Var OP_DeleteRootProperty(Var instance, PropertyId propertyId, ScriptContext* scriptContext, PropertyOperationFlags propertyOperationFlags = PropertyOperation_None);
 
