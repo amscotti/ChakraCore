@@ -31,6 +31,7 @@ namespace Js
 
         virtual BOOL EnsureProperty(PropertyId propertyId) override;
         virtual BOOL EnsureNoRedeclProperty(PropertyId propertyId) override sealed;
+        virtual BOOL EnsureNoRedeclPropertyForEval(PropertyId propertyId) override sealed;
         virtual BOOL HasOwnPropertyCheckNoRedecl(PropertyId propertyId) override sealed;
         void EnsureCanDeclGloFunc(PropertyId propertyId);
 

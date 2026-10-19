@@ -151,6 +151,7 @@ namespace Js
 
         bool closureInitDone : 1;
         bool isParamScopeDone : 1;
+        bool evalInParamScope : 1;
         bool shouldCacheSP : 1; // Helps in determining if we need to cache the sp in ProcessTryFinally
 #if ENABLE_PROFILE_INFO
         bool switchProfileMode : 1;
@@ -332,6 +333,8 @@ namespace Js
 
         bool IsParamScopeDone() const { return isParamScopeDone; }
         void SetIsParamScopeDone(bool value) { isParamScopeDone = value; }
+        bool IsEvalInParamScope() const { return evalInParamScope; }
+        void SetEvalInParamScope(bool value) { evalInParamScope = value; }
 
         static bool IsBrLong(OpCode op, const byte * ip)
         {

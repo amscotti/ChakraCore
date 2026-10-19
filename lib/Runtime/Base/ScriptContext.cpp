@@ -110,6 +110,7 @@ namespace Js
         isEvalRestricted(false),
         evalInClassFieldInitializer(false),
         evalInDerivedFieldConstructor(false),
+        evalInParamScope(false),
         isInvalidatedForHostObjects(false),
         fastDOMenabled(false),
         directHostTypeId(TypeIds_GlobalObject),

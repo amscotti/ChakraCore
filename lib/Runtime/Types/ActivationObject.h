@@ -27,6 +27,7 @@ namespace Js
         virtual BOOL SetInternalProperty(PropertyId propertyId, Var value, PropertyOperationFlags flags, PropertyValueInfo* info) override;
         virtual BOOL EnsureProperty(PropertyId propertyId) override;
         virtual BOOL EnsureNoRedeclProperty(PropertyId propertyId) override;
+        virtual BOOL EnsureNoRedeclPropertyForEval(PropertyId propertyId) override;
         virtual BOOL InitProperty(PropertyId propertyId, Var value, PropertyOperationFlags flags = PropertyOperation_None, PropertyValueInfo* info = NULL) override;
         virtual BOOL InitPropertyScoped(PropertyId propertyId, Var value) override;
         virtual BOOL InitFuncScoped(PropertyId propertyId, Var value) override;
@@ -55,6 +56,7 @@ namespace Js
 
         virtual BOOL EnsureProperty(PropertyId propertyId) override;
         virtual BOOL EnsureNoRedeclProperty(PropertyId propertyId) override;
+        virtual BOOL EnsureNoRedeclPropertyForEval(PropertyId propertyId) override { return FALSE; }
         virtual BOOL InitPropertyScoped(PropertyId propertyId, Var value) override;
         virtual BOOL InitFuncScoped(PropertyId propertyId, Var value) override;
 
@@ -80,6 +82,7 @@ namespace Js
 
         virtual BOOL EnsureProperty(PropertyId propertyId) override;
         virtual BOOL EnsureNoRedeclProperty(PropertyId propertyId) override;
+        virtual BOOL EnsureNoRedeclPropertyForEval(PropertyId propertyId) override { return FALSE; }
         virtual BOOL InitFuncScoped(PropertyId propertyId, Var value) override;
         virtual BOOL InitPropertyScoped(PropertyId propertyId, Var value) override;
 

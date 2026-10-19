@@ -1611,7 +1611,15 @@ FuncInfo * ByteCodeGenerator::StartBindFunction(const char16 *name, uint nameLen
         bodyScope->SetCapturesAll(true);
         bodyScope->SetMustInstantiate(true);
 
-        // Do not mark param scope as dynamic as it does not leak declarations
+        // Do not mark param scope as dynamic as it does not leak declarations,
+        // unless the eval call is in the parameter list. In that case the
+        // eval's variable environment is outside the parameter scope and its
+        // declarations must be visible to the body and to parameter closures.
+        if (pnodeFnc->IsLambda() &&
+            pnodeFnc->pnodeScopes != nullptr && pnodeFnc->pnodeScopes->GetCallsEval())
+        {
+            paramScope->SetIsDynamic(true);
+        }
         paramScope->SetIsObject();
         paramScope->SetCapturesAll(true);
         paramScope->SetMustInstantiate(true);

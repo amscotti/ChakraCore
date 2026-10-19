@@ -828,6 +828,7 @@ private:
         bool isEvalRestricted;
         bool evalInClassFieldInitializer;
         bool evalInDerivedFieldConstructor;
+        bool evalInParamScope;
 #if DBG
         bool isInitialized;
         bool isCloningGlobal;
@@ -937,6 +938,8 @@ private:
         bool IsEvalInClassFieldInitializer() const { return this->evalInClassFieldInitializer; }
         void SetEvalInDerivedFieldConstructor(bool set) { this->evalInDerivedFieldConstructor = set; }
         bool IsEvalInDerivedFieldConstructor() const { return this->evalInDerivedFieldConstructor; }
+        void SetEvalInParamScope(bool set) { this->evalInParamScope = set; }
+        bool IsEvalInParamScope() const { return this->evalInParamScope; }
 #if ENABLE_NATIVE_CODEGEN
         bool IsClosedNativeCodeGenerator() const
         {

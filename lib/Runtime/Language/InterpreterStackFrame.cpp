@@ -1189,6 +1189,7 @@ namespace Js
         newInstance->m_flags        = InterpreterStackFrameFlags_None;
         newInstance->closureInitDone = false;
         newInstance->isParamScopeDone = false;
+        newInstance->evalInParamScope = false;
         newInstance->shouldCacheSP = true;
 #if ENABLE_PROFILE_INFO
         newInstance->switchProfileMode = false;
@@ -7142,6 +7143,30 @@ skipThunk:
         if (executeFunction->scopeSlotArraySize > 0 || executeFunction->HasScopeObject())
         {
             this->InitializeClosures();
+        }
+
+        // A direct eval in the parameter list may have created an "arguments"
+        // binding in the parameter environment. Body lookups in a split-scope
+        // function resolve through the body closure, so carry the binding over
+        // when it exists. The value is the eval-assigned one; body var/function
+        // declarations still overwrite it during body instantiation.
+        if (this->IsEvalInParamScope() && executeFunction->IsLambda())
+        {
+            Var paramClosure = this->GetParamClosure();
+            Var bodyClosure = this->GetLocalClosure();
+            if (VarIs<DynamicObject>(paramClosure) && VarIs<DynamicObject>(bodyClosure))
+            {
+                DynamicObject *paramObject = VarTo<DynamicObject>(paramClosure);
+                if (paramObject->HasOwnProperty(PropertyIds::arguments))
+                {
+                    Var argumentsValue = nullptr;
+                    if (paramObject->GetProperty(paramObject, PropertyIds::arguments, &argumentsValue, nullptr, GetScriptContext()))
+                    {
+                        VarTo<DynamicObject>(bodyClosure)->InitProperty(
+                            PropertyIds::arguments, argumentsValue, PropertyOperation_None, nullptr);
+                    }
+                }
+            }
         }
     }
 
