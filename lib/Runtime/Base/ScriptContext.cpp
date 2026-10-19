@@ -113,7 +113,6 @@ namespace Js
         evalInParamScope(false),
         evalInArrowParamScope(false),
         evalCallerParameterArguments(false),
-        evalCallerBodyLexicalArguments(false),
         isInvalidatedForHostObjects(false),
         fastDOMenabled(false),
         directHostTypeId(TypeIds_GlobalObject),

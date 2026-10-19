@@ -8,8 +8,8 @@ function print(x) { WScript.Echo(x+''); }
 const f = 'const f';
 let g = 'let g';
 
-eval("if (false) { function f() { } }");
-eval("if (true) { function g() { } }");
+try { eval("if (false) { function f() { } }"); } catch (e) { print(e.name + ': ' + e.message); }
+try { eval("if (true) { function g() { } }"); } catch (e) { print(e.name + ': ' + e.message); }
 
 
 print(f);
@@ -22,7 +22,7 @@ print(h);
 
 {
     function i(globalblock) { }
-    eval("function i(ineval) { }");
+    try { eval("function i(ineval) { }"); } catch (e) { print(e.name + ': ' + e.message); }
     print(i);
 }
 print(i);
@@ -31,8 +31,7 @@ function j(global) { }
 
 {
     function j(globalblock) { }
-    eval("function j(ineval) { }");
+    try { eval("function j(ineval) { }"); } catch (e) { print(e.name + ': ' + e.message); }
     print(j);
 }
 print(j);
-

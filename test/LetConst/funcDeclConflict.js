@@ -56,12 +56,10 @@ ex = "4";
         let fo5_l = 123;
 
         if (true) {
-            // TODO: this is blocked by https://github.com/Microsoft/ChakraCore/issues/5070
-            //
             // Top level function in eval conflicts with outer function level let
             try { eval("function fo5_l(){};") } catch (e) { ex = e.message }
 
-            assert.areEqual("4", ex);
+            assert.areEqual("Let/Const redeclaration", ex);
             ex = "5";
         }
     }

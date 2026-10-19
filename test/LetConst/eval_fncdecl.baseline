@@ -1,7 +1,11 @@
+SyntaxError: Let/Const redeclaration
+SyntaxError: Let/Const redeclaration
 const f
 let g
 function h(ineval) { }
-function i(ineval) { }
-function i(ineval) { }
-function j(ineval) { }
-function j(ineval) { }
+SyntaxError: Let/Const redeclaration
+function i(globalblock) { }
+function i(globalblock) { }
+SyntaxError: Let/Const redeclaration
+function j(globalblock) { }
+function j(globalblock) { }

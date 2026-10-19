@@ -1,9 +1,9 @@
 # C2-S14 P2: direct-eval `arguments` declaration errors
 
-Status: **`<pending>`** (branch `s14-p2`, base `a2e921875`), 2026-10-19.
-Target selection **192/192** with **157 fail→pass / 0 pass→fail** and the 35
-passing controls preserved. Interpreter/Mac no-JIT only; JIT evidence is not
-claimed (see B4).
+Status: **`<pending>`** (branch `s14-p2`, base `a2e921875`, merged P4
+integration `ef1c20cfc`), 2026-10-19. Target selection **192/192** with
+**157 fail→pass / 0 pass→fail** and the 35 passing controls preserved.
+Interpreter/Mac no-JIT only; JIT evidence is not claimed (see B4).
 
 ## Scope and spec rule
 
@@ -35,16 +35,20 @@ names: non-`arguments` eval/parameter collisions remain P4-owned.
 ## Design
 
 - `GlobalObject::VEval` determines whether a direct eval call is running in
-  the caller's parameter scope, whether that caller is an arrow, whether the
-  caller has a parameter named `arguments`, and whether the caller's top-level
-  body has a lexical `arguments` declaration. It already walks the stack for
+  the caller's parameter scope, whether that caller is an arrow, and whether
+  the caller has a parameter named `arguments`. It already walks the stack for
   the class-field context; the first script caller's
-  `InterpreterStackFrame::IsParamScopeDone`, `FunctionBody::IsLambda`, and two
-  stable `FunctionInfo` attributes (set from the parser's
-  `fpnArguments_overriddenInParam`/`fpnArguments_overriddenByDecl`) are the
-  discriminators. The four booleans are passed to
-  `ExecuteEvalParsedFunction`, which publishes them on `ScriptContext` with an
-  RAII save/restore across the eval call (including abrupt completion).
+  `InterpreterStackFrame::IsParamScopeDone`, `FunctionBody::IsLambda`, and the
+  stable `FunctionInfo` attribute `ParameterNamedArguments` (set from the
+  parser's `fpnArguments_overriddenInParam`) are the discriminators. The three
+  booleans are passed to `ExecuteEvalParsedFunction`, which publishes them on
+  `ScriptContext` with an RAII save/restore across the eval call (including
+  abrupt completion). P4 retains `AnnexBBlockFunction = 0x40000000`; P2 uses
+  the remaining `0x80000000` attribute bit. The attribute is part of the
+  existing serialized FunctionInfo attribute word, so bytecode serialization
+  format and GUID are unchanged; the stable-attribute mask carries it across
+  defer parse/full parse and the serializer's allowed-attribute mask accepts
+  it.
 - In `OP_ScopedEnsureNoRedeclProperty` (`ByteCodeEmitter`'s eval-only
   `ScopedEnsureNoRedeclFld`), `arguments` is checked directly:
   - in a parameter-scope eval, the first frame-display environment is the
@@ -55,12 +59,13 @@ names: non-`arguments` eval/parameter collisions remain P4-owned.
     enumerable, non-configurable var binding with `InitProperty`.
   - in a body eval, the first activation is either the body lexical
     environment or its variable environment. A no-redeclaration `arguments`
-    there is a lexical collision unless the caller's parameter itself is named
-    `arguments` and there is no top-level body lexical `arguments`; that
-    parameter lives in the merged variable environment and remains legal.
-    This covers simple/split/generator bodies, catch/with blocks and nested
-    blocks, and lets a body eval declare its own binding without inspecting an
-    outer split-scope parameter binding.
+    there is a lexical collision unless the caller has a parameter named
+    `arguments`; that parameter lives in the merged variable environment and
+    remains legal. This covers simple/split/generator bodies, catch/with
+    blocks and nested blocks, and lets a body eval declare its own binding
+    without inspecting an outer split-scope parameter binding. The check is
+    first-environment only; a top-level body lexical binding hidden behind a
+    catch scope remains the documented residual.
   - elsewhere the normal eval redeclaration walk runs. For `arguments` it uses
     `EnsureNoRedeclPropertyForEval`, a SyntaxError-reporting variant of the
     existing lexical-redeclaration check; other names keep the existing
@@ -105,8 +110,8 @@ Selection `test/language/eval-code/direct/*arguments*.js`:
 | Run | Passed | Failed | Scenarios |
 |---|---:|---:|---:|
 | before (`out/test262-c2-s14-p2-before`) | 35 | 157 | 192 |
-| after (`out/test262-c2-s14-p2-final-direct`) | **192** | **0** | 192 |
-| after, `-force:deferparse` (`out/test262-c2-s14-p2-final-direct-defer`) | **192** | **0** | 192 |
+| after merge (`out/test262-c2-s14-p2-merged-direct`) | **192** | **0** | 192 |
+| after merge, `-force:deferparse` (`out/test262-c2-s14-p2-merged-direct-defer`) | **192** | **0** | 192 |
 
 Exact flips: **157 fail→pass, 0 pass→fail**. All 35 pre-existing passes
 (including the async cases that pass vacuously on the fulfilled path) remain
@@ -119,11 +124,13 @@ Full direct+indirect eval-code directory:
 | Run | Passed | Failed | Scenarios |
 |---|---:|---:|---:|
 | before (`out/test262-c2-s14-p2-evalcode-before`) | 280 | 174 | 454 |
-| after (`out/test262-c2-s14-p2-final-evalcode`) | **437** | **17** | 454 |
+| after merge (`out/test262-c2-s14-p2-merged-evalcode`) | **444** | **10** | 454 |
 
-Exact diff: **157 fail→pass, 0 pass→fail**. The residual 17 are pre-existing
-P4/class-field `super` cases (`super-prop*`, `var-env-*`, both direct and
-indirect), unchanged by this slice.
+Exact diff: **164 fail→pass, 0 pass→fail**. P4 integration fixes seven of the
+previous `var-env-*` failures; the remaining 10 are the pre-existing
+class-field `super-prop*` cases and are outside this slice. Global-code
+declaration instantiation also passes 75/75 after the merge
+(`out/test262-c2-s14-p2-merged-global`).
 
 Broader affected-shape run
 (`arguments-object`, `expressions/arrow-function`, `expressions/function`,
@@ -132,11 +139,11 @@ Broader affected-shape run
 | Run | Passed | Failed |
 |---|---:|---:|
 | before (`out/test262-c2-s14-p2-regress-before`) | 1,711 | 157 |
-| after (`out/test262-c2-s14-p2-final-regress`) | **1,715** | **153** |
+| after merge (`out/test262-c2-s14-p2-merged-regress`) | **1,719** | **149** |
 
-Exact diff: **4 fail→pass, 0 pass→fail** (the four
-`arrow-function/scope-param-{elem,rest}-var-{open,close}.js` cases, which
-observe an eval var from an arrow parameter closure).
+Exact diff: **8 fail→pass, 0 pass→fail** (the four P2
+`arrow-function/scope-param-{elem,rest}-var-{open,close}.js` cases plus four
+P4-owned cases).
 
 Focused `test/es7/eval-arguments-declarations.js` is registered in
 `test/es7/rlexe.xml` and passes. It covers the implicit binding with a function
@@ -156,7 +163,8 @@ non-leakage, plus top-level body `let`/`const` collisions in simple, split,
 generator, catch, with and nested-block shapes.
 
 The legacy suite (`runtests.py -t --variants disable_jit test`) is
-**1994/0**, including `test/es6/default-splitscope.js`. That test caught an
+**1995/0** after the merge, including P4's `test/es7/global-eval-declarations.js`
+and `test/es6/default-splitscope.js`. That test caught an
 initial over-broad version: marking every function's parameter scope dynamic
 made parameter-eval vars leak into ordinary function bodies. The final change
 marks parameter scopes dynamic only for arrows and performs no value copy into
@@ -171,14 +179,18 @@ the body scope.
   pre-existing `ReferenceError`; this slice does not claim it.
 - Indirect eval, global code and module code are outside the trigger: no
   caller parameter scope is involved.
-- Nested-block and body-eval lexical collisions are only partially modelled.
-  The body rule inspects the first activation environment; a `let`/`const
-  arguments` in a nested block is detected for ordinary callers, but is
-  under-rejected when the same function also has a parameter named `arguments`
-  (the parameter flag allows the no-redeclaration first environment). A lexical
-  environment that the frame display does not expose as a separate first
-  activation has the same limitation. This predates the slice and is not
-  claimed.
+- Hidden-outer lexical under-rejection remains. The body rule inspects the
+  first activation environment, so a top-level body `let`/`const arguments`
+  hidden behind an inner catch environment is accepted:
+  `function f(){ let arguments=1; try { throw 1; } catch (e) { eval("var arguments"); } }`.
+  Block, if, with, generator and split forms are detected. The catch shape,
+  and a nested block with a parameter named `arguments`, are not conformance
+  and are pinned as a focused known-residual test.
+- `delete` of the eval-created binding matches JSC/spec, not Node: the binding
+  is a non-configurable var, so `delete arguments` is false and the value is
+  preserved. Node 26 instead deletes the arrow-parameter eval binding and
+  subsequently reports it undefined; this slice does not follow that
+  non-conformant behavior.
 - Async functions surface the SyntaxError as a rejected promise; async
   generators and generators evaluate parameter defaults with the engine’s
   existing eager scheduling, so the corpus’s synchronous `assert.throws`

@@ -1239,9 +1239,21 @@ void EmitAssignmentToFuncName(ParseNodeFnc *pnodeFnc, ByteCodeGenerator *byteCod
             // updated when the declaration was skipped.
             if (fncScopeSym && pnodeFnc->IsAnnexBVarExtension())
             {
-                if (fncScopeSym->GetIsGlobal() && byteCodeGenerator->GetFlags() & fscrEval)
+                if (pnodeFnc->funcInfo != nullptr && pnodeFnc->funcInfo->byteCodeFunction != nullptr)
                 {
-                    Js::PropertyId propertyId = fncScopeSym->GetPosition();
+                    Js::FunctionInfo *functionInfo = pnodeFnc->funcInfo->byteCodeFunction->GetFunctionInfo();
+                    functionInfo->SetAttributes((Js::FunctionInfo::Attributes)(
+                        functionInfo->GetAttributes() | Js::FunctionInfo::Attributes::AnnexBBlockFunction));
+                }
+                // The synthetic binding is an eval var binding in the var
+                // environment. InitFuncScoped checks each environment on the
+                // eval chain: a block/function lexical binding skips the
+                // store, while a global lexical binding is rejected by the
+                // preflight above. Existing global properties keep their
+                // Annex B var-binding attributes.
+                if ((byteCodeGenerator->GetFlags() & fscrEvalCode) && funcInfoParent->IsGlobalFunction())
+                {
+                    Js::PropertyId propertyId = fncScopeSym->EnsurePosition(byteCodeGenerator);
                     byteCodeGenerator->EmitGlobalFncDeclInit(pnodeFnc->location, propertyId, funcInfoParent);
                 }
                 else
@@ -4624,7 +4636,7 @@ void ByteCodeGenerator::EmitLoadInstance(Symbol *sym, IdentPtr pid, Js::RegSlot 
 void ByteCodeGenerator::EmitGlobalFncDeclInit(Js::RegSlot rhsLocation, Js::PropertyId propertyId, FuncInfo * funcInfo)
 {
     // Note: declared variables and assignments in the global function go to the root object directly.
-    if (this->flags & fscrEval)
+    if ((this->flags & fscrEvalCode) && funcInfo->IsGlobalFunction())
     {
         // Func decl's always get their init values before any use, so we don't pre-initialize the property to undef.
         // That means that we have to use ScopedInitFld so that we initialize the property on the right instance
@@ -5987,16 +5999,9 @@ void ByteCodeGenerator::EnsureNoRedeclarations(ParseNodeBlock *pnodeBlock, FuncI
         });
     }
 
-    auto emitRedeclCheck = [this](Symbol * sym, FuncInfo * funcInfo, bool isFncDecl = false)
+    auto emitLexicalRedeclCheck = [this](Symbol * sym, FuncInfo * funcInfo)
     {
         Js::PropertyId propertyId = sym->EnsurePosition(this);
-
-        // Global function declarations must pass #sec-candeclareglobalfunction
-        // which is enforced by EnsureCanDeclGloFunc
-        if (isFncDecl)
-        {
-            this->m_writer.ElementRootU(Js::OpCode::EnsureCanDeclGloFunc, funcInfo->FindOrAddReferencedPropertyId(propertyId));
-        }
 
         if (this->flags & fscrEval)
         {
@@ -6012,6 +6017,21 @@ void ByteCodeGenerator::EnsureNoRedeclarations(ParseNodeBlock *pnodeBlock, FuncI
         }
     };
 
+    auto emitCanDeclareGloFunc = [this](Symbol * sym, FuncInfo * funcInfo)
+    {
+        // EvalDeclarationInstantiation calls CanDeclareGlobalFunction after
+        // checking every var name against the lexical environment. The
+        // interpreter routes this opcode through the eval environment for eval
+        // code, so a local var environment skips the global check.
+        Js::PropertyId propertyId = sym->EnsurePosition(this);
+        this->m_writer.ElementRootU(Js::OpCode::EnsureCanDeclGloFunc, funcInfo->FindOrAddReferencedPropertyId(propertyId));
+    };
+
+    // EvalDeclarationInstantiation checks every var name (including function
+    // declarations) against the lexical environment before any
+    // CanDeclareGlobalFunction call. Emit both passes in that order so a later
+    // lexical collision is not masked by an earlier non-definable function.
+
     // scan for function declarations
     // these behave like "var" declarations
     for (ParseNodePtr pnode = pnodeBlock->pnodeScopes; pnode;)
@@ -6021,7 +6041,7 @@ void ByteCodeGenerator::EnsureNoRedeclarations(ParseNodeBlock *pnodeBlock, FuncI
         case knopFncDecl:
             if (pnode->AsParseNodeFnc()->IsDeclaration())
             {
-                emitRedeclCheck(pnode->AsParseNodeFnc()->pnodeName->sym, funcInfo, true);
+                emitLexicalRedeclCheck(pnode->AsParseNodeFnc()->pnodeName->sym, funcInfo);
             }
 
             pnode = pnode->AsParseNodeFnc()->pnodeNext;
@@ -6069,9 +6089,64 @@ void ByteCodeGenerator::EnsureNoRedeclarations(ParseNodeBlock *pnodeBlock, FuncI
 
         if (sym->GetSymbolType() == STVariable)
         {
-            emitRedeclCheck(sym, funcInfo);
+            emitLexicalRedeclCheck(sym, funcInfo);
         }
     }
+
+    // CanDeclareGlobalFunction preflight after every lexical check.
+    for (ParseNodePtr pnode = pnodeBlock->pnodeScopes; pnode;)
+    {
+        switch (pnode->nop) {
+
+        case knopFncDecl:
+            if (pnode->AsParseNodeFnc()->IsDeclaration())
+            {
+                emitCanDeclareGloFunc(pnode->AsParseNodeFnc()->pnodeName->sym, funcInfo);
+            }
+
+            pnode = pnode->AsParseNodeFnc()->pnodeNext;
+            break;
+
+        case knopBlock:
+            pnode = pnode->AsParseNodeBlock()->pnodeNext;
+            break;
+
+        case knopCatch:
+            pnode = pnode->AsParseNodeCatch()->pnodeNext;
+            break;
+
+        case knopWith:
+            pnode = pnode->AsParseNodeWith()->pnodeNext;
+            break;
+
+        default:
+            Assert(UNREACHED);
+        }
+    }
+
+    // Annex B synthetic vars are created by the parser as function-scope var
+    // nodes. Before the first evaluated statement, reject a global lexical
+    // collision; a local lexical environment still skips the synthetic store.
+    if (this->flags & fscrEvalCode)
+    {
+        for (ParseNode *pnode = funcInfo->root->pnodeVars; pnode; pnode = pnode->AsParseNodeVar()->pnodeNext)
+        {
+            if (!pnode->AsParseNodeVar()->isBlockScopeFncDeclVar)
+            {
+                continue;
+            }
+
+            Symbol *sym = pnode->AsParseNodeVar()->sym;
+            if (sym == nullptr)
+            {
+                continue;
+            }
+
+            Js::PropertyId propertyId = sym->EnsurePosition(this);
+            this->m_writer.ElementRootU(Js::OpCode::EnsureNoRootFld, funcInfo->FindOrAddReferencedPropertyId(propertyId));
+        }
+    }
+
 }
 
 void ByteCodeGenerator::RecordAllIntConstants(FuncInfo * funcInfo)

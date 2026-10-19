@@ -1310,8 +1310,7 @@ static const Js::FunctionInfo::Attributes StableFunctionInfoAttributesMask = (Js
     Js::FunctionInfo::Attributes::ComputedName |
     Js::FunctionInfo::Attributes::HomeObj |
     Js::FunctionInfo::Attributes::GeneratorWithComplexParams |
-    Js::FunctionInfo::Attributes::ParameterNamedArguments |
-    Js::FunctionInfo::Attributes::TopLevelLexicalArguments
+    Js::FunctionInfo::Attributes::ParameterNamedArguments
 );
 
 static Js::FunctionInfo::Attributes GetFunctionInfoAttributes(ParseNodeFnc * pnodeFnc)
@@ -1328,10 +1327,6 @@ static Js::FunctionInfo::Attributes GetFunctionInfoAttributes(ParseNodeFnc * pno
     if ((pnodeFnc->grfpn & PNodeFlags::fpnArguments_overriddenInParam) != 0)
     {
         attributes = (Js::FunctionInfo::Attributes)(attributes | Js::FunctionInfo::Attributes::ParameterNamedArguments);
-    }
-    if ((pnodeFnc->grfpn & PNodeFlags::fpnArguments_overriddenByDecl) != 0)
-    {
-        attributes = (Js::FunctionInfo::Attributes)(attributes | Js::FunctionInfo::Attributes::TopLevelLexicalArguments);
     }
     if (pnodeFnc->HasSuperReference())
     {
@@ -1529,6 +1524,7 @@ FuncInfo * ByteCodeGenerator::StartBindFunction(const char16 *name, uint nameLen
         parseableFunctionInfo->SetIsDeclaration(pnodeFnc->IsDeclaration() != 0);
         parseableFunctionInfo->SetIsMethod(pnodeFnc->IsMethod() != 0);
         parseableFunctionInfo->SetIsAccessor(pnodeFnc->IsAccessor() != 0);
+
         if (pnodeFnc->IsAccessor())
         {
             scriptContext->optimizationOverrides.SetSideEffects(Js::SideEffects_Accessor);

@@ -32,7 +32,7 @@ namespace Js
         }
         else if (noRedecl)
         {
-            JavascriptError::ThrowReferenceError(GetScriptContext(), ERRRedeclaration);
+            JavascriptError::ThrowSyntaxError(GetScriptContext(), ERRRedeclaration);
         }
         return TRUE;
     }
@@ -154,7 +154,16 @@ namespace Js
 
     BOOL BlockActivationObject::EnsureNoRedeclProperty(PropertyId propertyId)
     {
-        // eval, etc., should not create function var properties on block scope
+        // EvalDeclarationInstantiation checks HasBinding on every lexical
+        // environment between the eval's lexical environment and the var
+        // environment. A block activation object holds lexical bindings; a
+        // sloppy direct eval var declaration that reaches one of them is a
+        // SyntaxError. The var itself is still created in the var environment,
+        // so this check must not claim the property for the scoped store.
+        if (DynamicObject::HasOwnProperty(propertyId))
+        {
+            JavascriptError::ThrowSyntaxError(GetScriptContext(), ERRRedeclaration);
+        }
         return false;
     }
 

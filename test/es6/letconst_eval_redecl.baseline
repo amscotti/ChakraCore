@@ -2,15 +2,15 @@
 1
 1
 1
-ReferenceError: Let/Const redeclaration
-ReferenceError: Let/Const redeclaration
-ReferenceError: Let/Const redeclaration
-ReferenceError: Let/Const redeclaration
+SyntaxError: Let/Const redeclaration
+SyntaxError: Let/Const redeclaration
+SyntaxError: Let/Const redeclaration
+SyntaxError: Let/Const redeclaration
 1
 1
 1
 1
-ReferenceError: Let/Const redeclaration
-ReferenceError: Let/Const redeclaration
-ReferenceError: Let/Const redeclaration
-ReferenceError: Let/Const redeclaration
+SyntaxError: Let/Const redeclaration
+SyntaxError: Let/Const redeclaration
+SyntaxError: Let/Const redeclaration
+SyntaxError: Let/Const redeclaration

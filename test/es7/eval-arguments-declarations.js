@@ -169,6 +169,22 @@ var tests = [
         }
     },
     {
+        name: "known residual: top-level lexical arguments hidden by a catch environment",
+        body() {
+            // The first frame-display environment is the catch scope, which
+            // hides the body's top-level lexical binding. This is a documented
+            // under-rejection, not conformance; the block/if/with forms above
+            // are detected.
+            assert.doesNotThrow(function () {
+                function f() {
+                    let arguments = 1;
+                    try { throw 1; } catch (e) { eval("var arguments"); }
+                }
+                f();
+            }, "known residual: catch scope hides the outer lexical binding");
+        }
+    },
+    {
         name: "arrow parameter redeclarations are legal and last value wins",
         body() {
             var f1 = (p = eval("var arguments; var arguments = 2")) => arguments;

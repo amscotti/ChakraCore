@@ -831,7 +831,6 @@ private:
         bool evalInParamScope;
         bool evalInArrowParamScope;
         bool evalCallerParameterArguments;
-        bool evalCallerBodyLexicalArguments;
 #if DBG
         bool isInitialized;
         bool isCloningGlobal;
@@ -947,8 +946,6 @@ private:
         bool IsEvalInArrowParamScope() const { return this->evalInArrowParamScope; }
         void SetEvalCallerParameterArguments(bool set) { this->evalCallerParameterArguments = set; }
         bool IsEvalCallerParameterArguments() const { return this->evalCallerParameterArguments; }
-        void SetEvalCallerBodyLexicalArguments(bool set) { this->evalCallerBodyLexicalArguments = set; }
-        bool IsEvalCallerBodyLexicalArguments() const { return this->evalCallerBodyLexicalArguments; }
 #if ENABLE_NATIVE_CODEGEN
         bool IsClosedNativeCodeGenerator() const
         {

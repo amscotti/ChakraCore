@@ -2338,7 +2338,8 @@ public:
                 | FunctionInfo::Attributes::ComputedName
                 | FunctionInfo::Attributes::ClassFieldInitializer
                 | FunctionInfo::Attributes::ClassConstructorWithFields
-                | FunctionInfo::Attributes::HomeObj)) == 0,
+                | FunctionInfo::Attributes::HomeObj
+                | FunctionInfo::Attributes::ParameterNamedArguments)) == 0,
             "Only the ErrorOnNew|SuperReference|Lambda|CapturesThis|Generator|ClassConstructor|BaseConstructorKind|Async|ClassMember|Method|EnclosedByGlobalFunc|AllowDirectSuper|ComputedName|DeferredParse|CanDefer|HomeObj attributes should be set on a serialized function");
         if (attributes != FunctionInfo::Attributes::None)
         {
