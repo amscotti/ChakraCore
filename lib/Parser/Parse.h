@@ -394,6 +394,7 @@ private:
     ParseNodeInt * CreateIntNode(int32 lw);
     ParseNodeStr * CreateStrNode(IdentPtr pid);
     ParseNodeBigInt * CreateBigIntNode(IdentPtr pid);
+    IdentPtr PidFromBigIntLiteral(IdentPtr pid, bool buildAST);
     ParseNodeName * CreateNameNode(IdentPtr pid);
     ParseNodeName * CreateNameNode(IdentPtr pid, PidRefStack * ref, charcount_t ichMin, charcount_t ichLim);
     ParseNodeSpecialName * CreateSpecialNameNode(IdentPtr pid, PidRefStack * ref, charcount_t ichMin, charcount_t ichLim);
@@ -577,7 +578,7 @@ private:
     ParseNodeFnc *GetCurrentNonLambdaFunctionNode();
 
     bool NextTokenConfirmsLetDecl() const { return m_token.tk == tkID || m_token.tk == tkLBrack || m_token.tk == tkLCurly || m_token.IsReservedWord(); }
-    bool NextTokenIsPropertyNameStart() const { return m_token.tk == tkID || m_token.tk == tkStrCon || m_token.tk == tkIntCon || m_token.tk == tkFltCon || m_token.tk == tkLBrack || m_token.IsReservedWord(); }
+    bool NextTokenIsPropertyNameStart() const { return m_token.tk == tkID || m_token.tk == tkStrCon || m_token.tk == tkIntCon || m_token.tk == tkFltCon || m_token.tk == tkBigIntCon || m_token.tk == tkLBrack || m_token.IsReservedWord(); }
 
     template<bool buildAST>
     void PushStmt(StmtNest *pStmt, ParseNodeStmt * pnode, OpCode op, LabelId* pLabelIdList)
@@ -933,7 +934,7 @@ private:
 
     template<bool buildAST> ParseNodePtr GenerateModuleFunctionWrapper();
 
-    IdentPtr ParseClassPropertyName(IdentPtr * hint);
+    template<bool buildAST> IdentPtr ParseClassPropertyName(IdentPtr * hint);
     bool ClassBodyHasFieldSyntax();
     bool ClassBodyHasPrivateSyntax();
     void PushPrivateNameScope();

@@ -2365,7 +2365,7 @@ namespace Js
 
         ScriptContext* scriptContext = dataViewConstructor->GetScriptContext();
         JavascriptLibrary* library = dataViewConstructor->GetLibrary();
-        library->AddMember(dataViewConstructor, PropertyIds::length, TaggedInt::ToVarUnchecked(3), PropertyConfigurable);
+        library->AddMember(dataViewConstructor, PropertyIds::length, TaggedInt::ToVarUnchecked(1), PropertyConfigurable);
         library->AddMember(dataViewConstructor, PropertyIds::prototype, scriptContext->GetLibrary()->dataViewPrototype, PropertyNone);
         library->AddMember(dataViewConstructor, PropertyIds::name, scriptContext->GetPropertyString(PropertyIds::DataView), PropertyConfigurable);
 
@@ -2399,6 +2399,13 @@ namespace Js
         library->AddFunctionToLibraryObject(dataViewPrototype, PropertyIds::getFloat64, &DataView::EntryInfo::GetFloat64, 1);
         library->AddFunctionToLibraryObjectWithPropertyName(dataViewPrototype, _u("getFloat16"), &DataView::EntryInfo::GetFloat16, 1);
         library->AddFunctionToLibraryObjectWithPropertyName(dataViewPrototype, _u("setFloat16"), &DataView::EntryInfo::SetFloat16, 2);
+        if (scriptContext->GetConfig()->IsESBigIntEnabled())
+        {
+            library->AddFunctionToLibraryObjectWithPropertyName(dataViewPrototype, _u("getBigInt64"), &DataView::EntryInfo::GetBigInt64, 1);
+            library->AddFunctionToLibraryObjectWithPropertyName(dataViewPrototype, _u("getBigUint64"), &DataView::EntryInfo::GetBigUint64, 1);
+            library->AddFunctionToLibraryObjectWithPropertyName(dataViewPrototype, _u("setBigInt64"), &DataView::EntryInfo::SetBigInt64, 2);
+            library->AddFunctionToLibraryObjectWithPropertyName(dataViewPrototype, _u("setBigUint64"), &DataView::EntryInfo::SetBigUint64, 2);
+        }
 
         library->AddAccessorsToLibraryObject(dataViewPrototype, PropertyIds::buffer, &DataView::EntryInfo::GetterBuffer, nullptr);
         library->AddAccessorsToLibraryObject(dataViewPrototype, PropertyIds::byteLength, &DataView::EntryInfo::GetterByteLength, nullptr);

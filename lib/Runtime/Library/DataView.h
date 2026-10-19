@@ -28,6 +28,8 @@ namespace Js
             static FunctionInfo GetFloat32;
             static FunctionInfo GetFloat64;
             static FunctionInfo GetFloat16;
+            static FunctionInfo GetBigInt64;
+            static FunctionInfo GetBigUint64;
             static FunctionInfo SetInt8;
             static FunctionInfo SetUint8;
             static FunctionInfo SetInt16;
@@ -37,6 +39,8 @@ namespace Js
             static FunctionInfo SetFloat32;
             static FunctionInfo SetFloat64;
             static FunctionInfo SetFloat16;
+            static FunctionInfo SetBigInt64;
+            static FunctionInfo SetBigUint64;
 
             static FunctionInfo GetterBuffer;
             static FunctionInfo GetterByteLength;
@@ -61,6 +65,8 @@ namespace Js
         static Var EntryGetFloat32(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryGetFloat64(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryGetFloat16(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryGetBigInt64(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryGetBigUint64(RecyclableObject* function, CallInfo callInfo, ...);
 
         static Var EntrySetInt8(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntrySetUint8(RecyclableObject* function, CallInfo callInfo, ...);
@@ -71,6 +77,8 @@ namespace Js
         static Var EntrySetFloat32(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntrySetFloat64(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntrySetFloat16(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntrySetBigInt64(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntrySetBigUint64(RecyclableObject* function, CallInfo callInfo, ...);
 
         static Var EntryGetterBuffer(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryGetterByteLength(RecyclableObject* function, CallInfo callInfo, ...);

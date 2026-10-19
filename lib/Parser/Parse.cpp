@@ -6,6 +6,7 @@
 #include "ParserPch.h"
 #include "FormalsUtil.h"
 #include "../Runtime/Language/SourceDynamicProfileManager.h"
+#include "Library/JavascriptBigInt.h"
 
 #include "ByteCode/ByteCodeSerializer.h"
 
@@ -1177,6 +1178,22 @@ ParseNodeBigInt * Parser::CreateBigIntNode(IdentPtr pid)
     pnode->isNegative = false;
     AddAstSize(sizeof(ParseNodeBigInt));
     return pnode;
+}
+
+IdentPtr Parser::PidFromBigIntLiteral(IdentPtr pid, bool buildAST)
+{
+    // ES2020 PropertyName: a BigInt literal key is the decimal string of its
+    // value (the literal's trailing 'n' is not part of the key). Only the
+    // AST-building parse needs the canonical key; the syntax-only pass uses
+    // the raw token to avoid allocating runtime BigInts in a deferred parse.
+    if (!buildAST)
+    {
+        return pid;
+    }
+
+    Js::JavascriptBigInt * value = Js::JavascriptBigInt::Create(pid->Psz(), pid->Cch(), false, m_scriptContext);
+    Js::JavascriptString * key = value->ToString(m_scriptContext);
+    return this->GetHashTbl()->PidHashNameLen(key->GetString(), key->GetLength());
 }
 
 ParseNodeName * Parser::CreateNameNode(IdentPtr pid)
@@ -5548,6 +5565,15 @@ ParseNodeBin * Parser::ParseMemberGetSet(OpCode nop, LPCOLESTR* ppNameHint, size
         }
         break;
 
+    case tkBigIntCon:
+        pid = this->PidFromBigIntLiteral(m_token.GetBigInt(), buildAST);
+        *ppNameHint = pid->Psz();
+        if (buildAST)
+        {
+            pnodeName = CreateStrNode(pid);
+        }
+        break;
+
     case tkLBrack:
         // Computed property name: get|set [expr] () {  }
         if (!m_scriptContext->GetConfig()->IsES6ObjectLiteralsEnabled())
@@ -5742,6 +5768,14 @@ ParseNodePtr Parser::ParseMemberList(LPCOLESTR pNameHint, uint32* pNameHintLengt
                 pnodeName = CreateStrNode(pidHint);
             }
             wrapInBrackets = true;
+            break;
+
+        case tkBigIntCon:
+            pidHint = this->PidFromBigIntLiteral(m_token.GetBigInt(), buildAST);
+            if (buildAST)
+            {
+                pnodeName = CreateStrNode(pidHint);
+            }
             break;
 
         case tkLBrack:
@@ -6001,7 +6035,7 @@ ParseNodePtr Parser::ParseMemberList(LPCOLESTR pNameHint, uint32* pNameHintLengt
                 if (tkHint.tk != tkID)
                 {
                     Assert(tkHint.IsReservedWord()
-                        || tkHint.tk == tkIntCon || tkHint.tk == tkFltCon || tkHint.tk == tkStrCon);
+                        || tkHint.tk == tkIntCon || tkHint.tk == tkFltCon || tkHint.tk == tkBigIntCon || tkHint.tk == tkStrCon);
                     // All keywords are banned in non-strict mode.
                     // Future reserved words are banned in strict mode.
                     if (IsStrictMode() || !tkHint.IsFutureReservedWord(true))
@@ -8737,6 +8771,7 @@ LPCOLESTR Parser::GetFunctionName(ParseNodeFnc * pnodeFnc, LPCOLESTR pNameHint)
     return name;
 }
 
+template<bool buildAST>
 IdentPtr Parser::ParseClassPropertyName(IdentPtr * pidHint)
 {
     if (m_token.tk == tkID || m_token.tk == tkStrCon || m_token.IsReservedWord())
@@ -8765,7 +8800,9 @@ IdentPtr Parser::ParseClassPropertyName(IdentPtr * pidHint)
             Error(ERRES5NoOctal);
         }
 
-        return this->GetScanner()->PidFromLong(m_token.GetLong());
+        IdentPtr pid = this->GetScanner()->PidFromLong(m_token.GetLong());
+        *pidHint = pid;
+        return pid;
     }
     else if (m_token.tk == tkFltCon)
     {
@@ -8774,7 +8811,15 @@ IdentPtr Parser::ParseClassPropertyName(IdentPtr * pidHint)
             Error(ERRES5NoOctal);
         }
 
-        return this->GetScanner()->PidFromDbl(m_token.GetDouble());
+        IdentPtr pid = this->GetScanner()->PidFromDbl(m_token.GetDouble());
+        *pidHint = pid;
+        return pid;
+    }
+    else if (m_token.tk == tkBigIntCon)
+    {
+        IdentPtr pid = this->PidFromBigIntLiteral(m_token.GetBigInt(), buildAST);
+        *pidHint = pid;
+        return pid;
     }
 
     Error(ERRnoMemberIdent);
@@ -9710,7 +9755,7 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
             else // not computed name
             {
                 maybeAccessor = !this->GetScanner()->LastIdentifierHasEscape();
-                memberPid = this->ParseClassPropertyName(&pidHint);
+                memberPid = this->ParseClassPropertyName<buildAST>(&pidHint);
                 if (pidHint)
                 {
                     pMemberNameHint = pidHint->Psz();
@@ -10105,7 +10150,7 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
                 }
                 else // not computed name
                 {
-                    memberPid = this->ParseClassPropertyName(&pidHint);
+                    memberPid = this->ParseClassPropertyName<buildAST>(&pidHint);
                 }
 
                 if ((isStatic ? (memberPid == wellKnownPropertyPids.prototype) : (memberPid == wellKnownPropertyPids.constructor)) || isAsyncMethod)

@@ -9,6 +9,62 @@
 namespace Js
 {
 
+    namespace
+    {
+        // Reinterpret the low 64 bits as a signed integer without relying on
+        // an implementation-defined uint64-to-int64 conversion.
+        inline int64 DataViewBigInt64Bits(uint64 bits)
+        {
+            const uint64 int64Max = 0x7fffffffffffffffULL;
+            if (bits <= int64Max)
+            {
+                return static_cast<int64>(bits);
+            }
+            const int64 int64Min = -0x7fffffffffffffffLL - 1;
+            return static_cast<int64>(bits - (int64Max + 1)) + int64Min;
+        }
+
+        // Byte-wise assembly keeps DataView BigInt accesses independent of
+        // host alignment and endianness.
+        inline uint64 DataViewReadUInt64(const BYTE* bytes, bool littleEndian)
+        {
+            uint64 value = 0;
+            if (littleEndian)
+            {
+                for (uint32 i = 0; i < 8; i++)
+                {
+                    value |= static_cast<uint64>(bytes[i]) << (i * 8);
+                }
+            }
+            else
+            {
+                for (uint32 i = 0; i < 8; i++)
+                {
+                    value = (value << 8) | bytes[i];
+                }
+            }
+            return value;
+        }
+
+        inline void DataViewWriteUInt64(BYTE* bytes, uint64 value, bool littleEndian)
+        {
+            if (littleEndian)
+            {
+                for (uint32 i = 0; i < 8; i++)
+                {
+                    bytes[i] = static_cast<BYTE>(value >> (i * 8));
+                }
+            }
+            else
+            {
+                for (uint32 i = 0; i < 8; i++)
+                {
+                    bytes[i] = static_cast<BYTE>(value >> ((7 - i) * 8));
+                }
+            }
+        }
+    }
+
     Var DataView::NewInstance(RecyclableObject* function, CallInfo callInfo, ...)
     {
         PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
@@ -450,6 +506,69 @@ namespace Js
         return JavascriptNumber::ToVarWithCheck(Float16::ToDouble(half), scriptContext);
     }
 
+    Var DataView::EntryGetBigInt64(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+        ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+
+        Assert(!(callInfo.Flags & CallFlags_New));
+
+        if (args.Info.Count == 0 || !VarIs<DataView>(args[0]))
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NeedDataView);
+        }
+
+        DataView* dataView = VarTo<DataView>(args[0]);
+        Var offset = args.Info.Count > 1 ? args[1] : scriptContext->GetLibrary()->GetUndefined();
+
+        // GetViewValue order: ToIndex(requestIndex), ToBoolean(littleEndian),
+        // then the detached/out-of-bounds checks.
+        uint32 byteOffset = dataView->GetViewIndex(offset, _u("DataView.prototype.getBigInt64"));
+
+        BOOL isLittleEndian = FALSE;
+        if (args.Info.Count > 2)
+        {
+            isLittleEndian = JavascriptConversion::ToBoolean(args[2], scriptContext);
+        }
+
+        dataView->CheckViewRange(byteOffset, sizeof(uint64), _u("DataView.prototype.getBigInt64"));
+
+        uint64 bits = DataViewReadUInt64(dataView->buffer + byteOffset, isLittleEndian != FALSE);
+        return JavascriptBigInt::CreateFromInt64(DataViewBigInt64Bits(bits), scriptContext);
+    }
+
+    Var DataView::EntryGetBigUint64(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+        ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+
+        Assert(!(callInfo.Flags & CallFlags_New));
+
+        if (args.Info.Count == 0 || !VarIs<DataView>(args[0]))
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NeedDataView);
+        }
+
+        DataView* dataView = VarTo<DataView>(args[0]);
+        Var offset = args.Info.Count > 1 ? args[1] : scriptContext->GetLibrary()->GetUndefined();
+        uint32 byteOffset = dataView->GetViewIndex(offset, _u("DataView.prototype.getBigUint64"));
+
+        BOOL isLittleEndian = FALSE;
+        if (args.Info.Count > 2)
+        {
+            isLittleEndian = JavascriptConversion::ToBoolean(args[2], scriptContext);
+        }
+
+        dataView->CheckViewRange(byteOffset, sizeof(uint64), _u("DataView.prototype.getBigUint64"));
+
+        uint64 bits = DataViewReadUInt64(dataView->buffer + byteOffset, isLittleEndian != FALSE);
+        return JavascriptBigInt::CreateFromUInt64(bits, scriptContext);
+    }
+
     Var DataView::EntrySetInt8(RecyclableObject* function, CallInfo callInfo, ...)
     {
         PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
@@ -832,6 +951,75 @@ namespace Js
             dataView->buffer[byteOffset] = (BYTE)(half >> 8);
             dataView->buffer[byteOffset + 1] = (BYTE)half;
         }
+
+        return scriptContext->GetLibrary()->GetUndefined();
+    }
+
+    Var DataView::EntrySetBigInt64(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+        ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+
+        Assert(!(callInfo.Flags & CallFlags_New));
+
+        if (args.Info.Count == 0 || !VarIs<DataView>(args[0]))
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NeedDataView);
+        }
+
+        DataView* dataView = VarTo<DataView>(args[0]);
+        Var offset = args.Info.Count > 1 ? args[1] : scriptContext->GetLibrary()->GetUndefined();
+
+        // SetViewValue order: ToIndex(byteOffset) before ToBigInt(value),
+        // then ToBoolean(littleEndian), then the detached/range checks.
+        uint32 byteOffset = dataView->GetViewIndex(offset, _u("DataView.prototype.setBigInt64"));
+
+        Var value = args.Info.Count > 2 ? args[2] : scriptContext->GetLibrary()->GetUndefined();
+        JavascriptBigInt* bigIntValue = JavascriptConversion::ToBigInt(value, scriptContext);
+
+        BOOL isLittleEndian = FALSE;
+        if (args.Info.Count > 3)
+        {
+            isLittleEndian = JavascriptConversion::ToBoolean(args[3], scriptContext);
+        }
+
+        dataView->CheckViewRange(byteOffset, sizeof(uint64), _u("DataView.prototype.setBigInt64"));
+        DataViewWriteUInt64(dataView->buffer + byteOffset, bigIntValue->ToUInt64Low(), isLittleEndian != FALSE);
+
+        return scriptContext->GetLibrary()->GetUndefined();
+    }
+
+    Var DataView::EntrySetBigUint64(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+        ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+
+        Assert(!(callInfo.Flags & CallFlags_New));
+
+        if (args.Info.Count == 0 || !VarIs<DataView>(args[0]))
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NeedDataView);
+        }
+
+        DataView* dataView = VarTo<DataView>(args[0]);
+        Var offset = args.Info.Count > 1 ? args[1] : scriptContext->GetLibrary()->GetUndefined();
+        uint32 byteOffset = dataView->GetViewIndex(offset, _u("DataView.prototype.setBigUint64"));
+
+        Var value = args.Info.Count > 2 ? args[2] : scriptContext->GetLibrary()->GetUndefined();
+        JavascriptBigInt* bigIntValue = JavascriptConversion::ToBigInt(value, scriptContext);
+
+        BOOL isLittleEndian = FALSE;
+        if (args.Info.Count > 3)
+        {
+            isLittleEndian = JavascriptConversion::ToBoolean(args[3], scriptContext);
+        }
+
+        dataView->CheckViewRange(byteOffset, sizeof(uint64), _u("DataView.prototype.setBigUint64"));
+        DataViewWriteUInt64(dataView->buffer + byteOffset, bigIntValue->ToUInt64Low(), isLittleEndian != FALSE);
 
         return scriptContext->GetLibrary()->GetUndefined();
     }

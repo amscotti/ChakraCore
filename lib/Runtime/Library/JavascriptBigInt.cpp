@@ -153,6 +153,30 @@ namespace Js
         return m_isNegative ? (0 - value) : value;
     }
 
+    hash_t JavascriptBigInt::GetHashCode() const
+    {
+        // FNV-1a over the canonical limb representation plus the sign.
+        // Values are canonical (no high zero limbs, no negative zero), so
+        // equal BigInts always produce the same hash without an allocation.
+        hash_t hash = 2166136261u;
+        if (m_isNegative)
+        {
+            hash ^= 0x9e3779b9u;
+            hash *= 16777619u;
+        }
+        for (digit_t i = 0; i < m_length; i++)
+        {
+            digit_t digit = m_digits[i];
+            for (uint32 b = 0; b < sizeof(digit_t); b++)
+            {
+                hash ^= static_cast<byte>(digit & 0xff);
+                hash *= 16777619u;
+                digit >>= 8;
+            }
+        }
+        return hash;
+    }
+
     namespace
     {
         // StrWhiteSpace from the StringNumericLiteral grammar (used by StringToBigInt).
