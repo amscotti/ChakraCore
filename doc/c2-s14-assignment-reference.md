@@ -49,12 +49,19 @@ object, or the `Undecl` sentinel when the reference has only a static binding:
   (`let`/`const`) bindings.
 - The register is threaded through `EmitBinaryReference`, compound assignment,
   logical assignment, prefix/postfix increment/decrement, and `EmitAssignment`.
-  For compound/logical/inc-dec, `EmitLoad` branches on the captured register:
-  when it is not `Undecl`, GetValue is a direct `LdFld` through the captured
-  object (plus `ChkUndecl` for a captured declarative TDZ binding), so
-  `HasBinding`/`@@unscopables`/proxy `has` is not evaluated a second time and
-  cannot select another binding. When the register is `Undecl`, the existing
-  static/lexical load path is retained.
+  For compound/logical/inc-dec, `EmitLoad` branches on the captured register.
+  When it is not `Undecl`, GetValue first probes `HasProperty` on the captured
+  binding object (Object Environment Record GetBindingValue), then loads with
+  a direct `LdFld`; a missing binding is `undefined` in sloppy mode and throws
+  `ReferenceError` before the RHS in strict mode. `ChkUndecl` handles a
+  captured declarative TDZ binding. When the register is `Undecl`, a new
+  `EmitPropLoad(..., skipDynamicScopes)` path writes directly to the static
+  owner/root, so a stateful `@@unscopables` or proxy `has` cannot redirect the
+  read. Eval fallback deliberately retains the old scoped load because its
+  caller-chain/global-lexical semantics are different.
+  Plain `with` reads now use the same GetBindingValue `HasProperty` probe in
+  `EmitPropLoad`, including the dynamic call-target path, so test262
+  `get-binding-value-*` observe `has` before `get`.
   Destructuring and `for-in`/`for-of` head stores keep their existing paths.
 
 `EmitAssignment` uses the captured base when the register is not `Undecl`:
@@ -112,7 +119,7 @@ Exact P5 selection:
 | Run | Passed | Failed | Scenarios |
 |---|---:|---:|---:|
 | before (`out/test262-c2-s14-p5-before`) | 0 | 50 | 50 |
-| after (`out/test262-c2-s14-p5-r4-exact`) | **50** | **0** | 50 |
+| after (`out/test262-c2-s14-p5-r7-exact`) | **50** | **0** | 50 |
 
 Exact flips: **50 fail→pass, 0 pass→fail**.
 
@@ -123,25 +130,26 @@ Broad assignment/compound-assignment directories
 | Run | Passed | Failed | Scenarios |
 |---|---:|---:|---:|
 | before (`out/test262-c2-s14-p5-assign-before`) | 1,395 | 241 | 1,636 |
-| after (`out/test262-c2-s14-p5-r4-assign`) | **1,445** | **191** | 1,636 |
+| after (`out/test262-c2-s14-p5-r7-assign`) | **1,445** | **191** | 1,636 |
 
 Exact flips: **50 fail→pass, 0 pass→fail**.
 
 Wider affected run (`test/language/expressions/**`,
 `test/language/statements/with/**`, `test/language/eval-code/**`; 21,922
 scenarios): before `out/test262-c2-s14-p5-regress-before`
-16,540/5,382; after `out/test262-c2-s14-p5-regress-r4` **16,616/5,306**.
+16,540/5,382; after `out/test262-c2-s14-p5-regress-r6` **16,623/5,299**.
 Excluding the parallel-run dynamic-import flake described below, the observed
-flips are **65 fail→pass, 0 pass→fail**: the 50 P5 scenarios, 12
-increment/decrement scenarios, 2 strict `with` deletion scenarios, and
-`unscopables-inc-dec.js` (fixed by reading through the captured base). The
-reviewed `d95e63597` run had **64 fail→pass / 1 pass→fail** here; the one
-pass→fail was the typed-array shape now fixed. `test/language/statements/with/**`
-alone moved 172/10 → **175/7** (4 fail→pass, 0 pass→fail).
+flips are **68 fail→pass, 0 pass→fail**: the 50 P5 scenarios, 12
+increment/decrement scenarios, 2 strict `with` deletion scenarios,
+`unscopables-inc-dec.js` (fixed by reading through the captured base), and 3
+GetBindingValue proxy/with scenarios. The reviewed `d95e63597` run had
+**64 fail→pass / 1 pass→fail** here; the one pass→fail was the typed-array
+shape now fixed. `test/language/statements/with/**` alone moved 172/10 →
+**178/4** (6 fail→pass, 0 pass→fail).
 
 The dynamic-import slice differs between the two parallel runs: the reviewed
 `d95e63597` run had an import diff of 78 scenarios (38 fail→pass, 40
-pass→fail); the final run had 65 (38+27). Those scenarios flip
+pass→fail); the final run had 63 (39+24). Those scenarios flip
 nondeterministically under the parallel harness on both binaries and are not
 attributed to this change (single-file `--jobs 1` runs pass 2/2).
 
@@ -152,9 +160,10 @@ scenarios are **2/2** on the test and debug-static binaries, and the
 2,175 pass / 2,161 fail with **0 flips**.
 
 Focused `test/es7/assignment-reference-base.js` (registered in
-`test/es7/rlexe.xml` with `-args summary -endargs`) passes **18/18**. It covers
-simple, compound and logical assignment through `with`, stateful
-`@@unscopables`, proxy `has` side effects, variable RHS/result temporaries,
+`test/es7/rlexe.xml` with `-args summary -endargs`) passes **21/21**. It covers
+simple, compound and logical assignment through `with`, stateful/reverse
+`@@unscopables`, proxy `has` side effects and GetBindingValue probes, variable
+RHS/result temporaries,
 nested `with`, eval-introduced vars, eval-local `with`, getters/setters,
 postfix/prefix increment/decrement, reference-before-RHS ordering, strict
 deleted-binding errors, eval const/TDZ errors, the function-expression-name
@@ -187,6 +196,15 @@ previously encoded the old re-resolution behavior for `with` +
   (covered by the focused test), but if the `with` binding is absent at
   reference time and the RHS creates it, the store can still select that new
   property. This matches current Node behaviour and has no test262 cover.
+- The two `set-mutable-binding-idref-*-with-proxy-env.js` scenarios still fail
+  on a pre-existing extra proxy `getOwnPropertyDescriptor` call in the proxy
+  set path. Their `has`/`get`/`set` prefix now matches the expected sequence
+  (`has, get:unscopables, has, get, has, set` for the compound case), but the
+  extra descriptor call is independent of P5 and was present before this batch.
+  The corresponding `get-binding-value-*` scenarios are 2/2.
+- Typed-array invalid integer indices remain on the pre-existing path: the P5
+  change only recognizes canonical numeric non-index properties on a typed-array
+  prototype. `TypedArray`/`TypedArrayConstructors` has 0 flips against before.
 - Destructuring assignment targets and `for-in`/`for-of` head assignment retain
   their previous emission paths; they are outside the P5 selection.
 - The dynamic-import diff in the 21,922-scenario parallel run (78 in the

@@ -228,6 +228,60 @@ var tests = [
         }
     },
     {
+        name: "with: unscopable fallback does not re-read unscopables",
+        body() {
+            var S = Symbol.unscopables;
+            var n = 0;
+            var o = { x: 2 };
+            var x = 10;
+            Object.defineProperty(o, S, {
+                get() {
+                    return n++ === 0 ? { x: true } : {};
+                }
+            });
+
+            with (o) {
+                x++;
+            }
+
+            assert.areEqual(1, n, "the with binding is rejected once and the static reference is used");
+            assert.areEqual(2, o.x, "the rejected with binding is not written");
+            assert.areEqual(11, x, "the outer binding is incremented");
+        }
+    },
+    {
+        name: "with: proxy fallback does not re-run HasProperty",
+        body() {
+            var calls = 0;
+            var target = { x: 2 };
+            var proxy = new Proxy(target, {
+                has(t, key) {
+                    if (key === "x") {
+                        calls++;
+                        return calls !== 1;
+                    }
+                    return key in t;
+                },
+                get(t, key) {
+                    return t[key];
+                },
+                set(t, key, value) {
+                    t[key] = value;
+                    return true;
+                }
+            });
+            var x = 10;
+
+            with (proxy) {
+                x++;
+            }
+
+            assert.areEqual(1, calls, "the static fallback does not probe the proxy again");
+            assert.areEqual(2, target.x, "the rejected proxy binding is not written");
+            assert.areEqual(11, x, "the outer binding is incremented");
+        }
+    },
+    {
         name: "with: increment reads and writes the captured base once",
         body() {
             var S = Symbol.unscopables;
@@ -284,8 +338,40 @@ var tests = [
             with (compound.proxy) {
                 x += 2;
             }
-            assert.areEqual(2, compound.calls(), "compound GetValue does not add a HasProperty call");
+            assert.areEqual(3, compound.calls(), "compound probes HasProperty for reference, GetBindingValue and PutValue");
             assert.areEqual(3, compound.target.x, "compound assignment stores through the proxy");
+        }
+    },
+    {
+        name: "with: strict GetBindingValue missing binding throws before the RHS",
+        body() {
+            var calls = 0;
+            var target = { x: 1 };
+            var proxy = new Proxy(target, {
+                has(t, key) {
+                    if (key === "x") {
+                        calls++;
+                        return calls === 1;
+                    }
+                    return key in t;
+                },
+                get(t, key) {
+                    return t[key];
+                }
+            });
+            var rhsRan = false;
+
+            assert.throws(function () {
+                with (proxy) {
+                    (function () {
+                        "use strict";
+                        x += (rhsRan = true, 1);
+                    })();
+                }
+            }, ReferenceError, "strict GetBindingValue throws when HasProperty is false");
+
+            assert.areEqual(2, calls, "reference and GetBindingValue each probe HasProperty");
+            assert.isFalse(rhsRan, "the RHS does not run after the GetBindingValue ReferenceError");
         }
     },
     {
