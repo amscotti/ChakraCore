@@ -17,7 +17,7 @@ not a claim that TigerBeetle, Ghostty or Bun endorses this guide.
 4. **What happens at every failure/exit point?** Trace partial initialization,
    foreign status errors, OOM, exceptions, cancellation and shutdown.
 5. **Which test observes the promised lifetime?** A successful compile or the
-   2004/2056 regression baseline does not prove the new ownership contract.
+   2005/2057 regression baseline does not prove the new ownership contract.
 
 If a lifetime cannot be established from declarations, implementations and callers,
 record the uncertainty and narrow the change. Do not choose an allocator or add a
@@ -117,7 +117,7 @@ being thread-safe does not make a container, callback or JS handle thread-safe.
 - `JsGetArrayBufferStorage` explicitly says the raw buffer pointer is not a GC
   reference (`ChakraCommon.h:2063-2080`). Rooting the ArrayBuffer prevents collection
   while held; it does **not** prevent `JsDetachArrayBuffer` or establish future
-  resize/pointer stability (`ChakraCore.h:1959-2004`).
+  resize/pointer stability (`ChakraCore.h:1959-2005`).
 - Runtime disposal invalidates its resources (`ChakraCommon.h:800-812`). Roots
   must be released through the permitted owner context before disposal; they are
   not a license to use handles after teardown.
@@ -409,7 +409,7 @@ JIT, concurrency or whole-process sanitizer coverage.
 - **[GT-LEAK]** Mitchell Hashimoto,
   [Finding and Fixing Ghostty's Largest Memory Leak](https://mitchellh.com/writing/ghostty-memory-leak-fix)
   (2026-01-10), [fix PR #10251](https://github.com/ghostty-org/ghostty/pull/10251).
-- **[GT-CODE]** [Ghostty PageList, inspected commit](https://github.com/ghostty-org/ghostty/blob/e3ac62004ef2a6c9c4b4bb4231535c1c3c3e4ae3/src/terminal/PageList.zig):
+- **[GT-CODE]** [Ghostty PageList, inspected commit](https://github.com/ghostty-org/ghostty/blob/e3ac62005ef2a6c9c4b4bb4231535c1c3c3e4ae3/src/terminal/PageList.zig):
   explicit backing ownership (:65-93), release/accounting (:5095-5129),
   tracked pin acquisition/release (:5711-5745), invalidation/garbage state (:7191-7211).
 - **[BUN]** Jarred Sumner, [Rewriting Bun in Rust](https://bun.com/blog/bun-in-rust)
