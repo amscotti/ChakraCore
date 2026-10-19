@@ -10152,10 +10152,20 @@ Case0:
 
             Assert(length <= UINT_MAX);
 
+            // %TypedArray%.prototype.map uses its captured length even after a
+            // species shrink. The generic Array.prototype.map path instead
+            // walks its own `length` property and only invokes the callback
+            // for indices that are actually present on the TypedArray.
+            uint32 mapLength = (uint32)length;
+            if (!isTypedArrayEntryPoint)
+            {
+                mapLength = min(mapLength, typedArrayBase->GetLength());
+            }
+
             // The species constructor or a callback may shrink or detach the
-            // source. Map still calls the callback over the captured length;
-            // an OOB or detached Get produces undefined.
-            for (uint32 k = 0; k < (uint32)length; k++)
+            // source. TypedArray map still calls the callback over the captured
+            // length; an OOB or detached Get produces undefined.
+            for (uint32 k = 0; k < mapLength; k++)
             {
                 // No need to do HasItem, as it cannot be observable unless 'typedArrayBase' is proxy. And we have established that it is indeed typedarray.
 
