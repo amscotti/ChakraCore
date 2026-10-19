@@ -4693,6 +4693,34 @@ ParseNodePtr Parser::ParsePostfixOperators(
             if (m_token.tk != tkLBrack && m_token.tk != tkLParen)
             {
                 // '?.' name form: the current token is the property name.
+                // '?. PrivateIdentifier' is a valid OptionalChain production.
+                if (m_token.tk == tkPrivateName)
+                {
+                    charcount_t privateIchMin = this->GetScanner()->IchMinTok();
+                    charcount_t privateIchLim = this->GetScanner()->IchLimTok();
+                    IdentPtr privateName = m_token.GetIdentifier(this->GetHashTbl());
+                    ParseNodeName * privateRef = CreatePrivateNameReference(
+                        privateName, privateIchMin, privateIchLim, buildAST);
+                    if (buildAST)
+                    {
+                        pnode = CreateBinNode(knopDot, pnode, privateRef);
+                    }
+                    else
+                    {
+                        pnode = nullptr;
+                        pToken->tk = tkNone;
+                    }
+                    if (pfIsDotOrIndex)
+                    {
+                        *pfIsDotOrIndex = true;
+                    }
+                    if (pfIsCallResult)
+                    {
+                        *pfIsCallResult = false;
+                    }
+                    this->GetScanner()->Scan();
+                    continue;
+                }
                 if (!m_token.IsIdentifier() && !m_token.IsReservedWord())
                 {
                     IdentifierExpectedError(m_token);
@@ -5036,11 +5064,9 @@ ParseNodePtr Parser::ParsePostfixOperators(
                 privateIchMin = this->GetScanner()->IchMinTok();
                 privateIchLim = this->GetScanner()->IchLimTok();
                 privateName = m_token.GetIdentifier(this->GetHashTbl());
-                if (inOptChain)
-                {
-                    // Optional chains cannot contain private references.
-                    Error(ERRsyntax);
-                }
+                // Note: 'OptionalChain . PrivateIdentifier' (o?.c.#f) is a
+                // valid production, so there is no inOptChain rejection here;
+                // the ?. segment short-circuits before this reference runs.
                 if (pnode != nullptr && pnode->nop == knopName &&
                     pnode->AsParseNodeName()->IsSpecialName() && pnode->AsParseNodeSpecialName()->isSuper)
                 {
@@ -11211,8 +11237,17 @@ ParseNodePtr Parser::ParseExpr(int oplMin,
                 if (buildAST)
                 {
                     ParseNodePtr pnode1 = pnode->AsParseNodeUni()->pnode1;
-                    if (pnode1->nop == knopDot && pnode1->AsParseNodeBin()->pnode2->nop == knopName &&
-                        pnode1->AsParseNodeBin()->pnode2->AsParseNodeName()->IsPrivateName())
+                    // An optional chain's final operation is the top node of
+                    // its tail (pnode2); unwrap it so 'delete o?.#x' and
+                    // 'delete o?.c.#x' hit the same early error as the plain
+                    // form instead of reaching the delete emitter.
+                    ParseNodePtr pnodeDeleteTarget = pnode1;
+                    if (pnodeDeleteTarget->nop == knopOptChain)
+                    {
+                        pnodeDeleteTarget = pnodeDeleteTarget->AsParseNodeTri()->pnode2;
+                    }
+                    if (pnodeDeleteTarget->nop == knopDot && pnodeDeleteTarget->AsParseNodeBin()->pnode2->nop == knopName &&
+                        pnodeDeleteTarget->AsParseNodeBin()->pnode2->AsParseNodeName()->IsPrivateName())
                     {
                         // Delete of a private reference is an early error.
                         Error(ERRsyntax);
@@ -14920,6 +14955,11 @@ ParseNode* Parser::CopyPnode(ParseNode *pnode) {
         nameNode->ichMin = pnode->ichMin;
         nameNode->ichLim = pnode->ichLim;
         nameNode->sym = pnode->AsParseNodeName()->sym;
+        if (pnode->AsParseNodeName()->IsPrivateName())
+        {
+            nameNode->SetIsPrivateName();
+        }
+        nameNode->SetPrivateKind(pnode->AsParseNodeName()->GetPrivateKind());
         return nameNode;
     }
                    //PTNODE(knopInt        , "int const"    ,None    ,Int  ,fnopLeaf|fnopConst)

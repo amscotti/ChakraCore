@@ -220,6 +220,49 @@ var tests = [
             assert.areEqual(20, { b: [10, 20] }?.b?.[1]);
         }
     },
+    {
+        name: "Private names in optional chains",
+        body() {
+            class C {
+                #m = 'test262';
+                c = this;
+                static access(obj) { return obj?.#m; }
+                via(obj) { return obj?.c.#m; }
+                self() { return this?.#m; }
+            }
+            const c = new C();
+            // '?. PrivateIdentifier' direct form
+            assert.areEqual('test262', C.access(c));
+            assert.areEqual(undefined, C.access(null));
+            assert.areEqual(undefined, C.access(undefined));
+            assert.throws(() => C.access({}), TypeError,
+                "brand check still applies to non-nullish non-instances");
+            // 'OptionalChain . PrivateIdentifier' continuation form
+            assert.areEqual('test262', c.via(c));
+            assert.areEqual(undefined, c.via(null));
+            assert.throws(() => c.via({ c: {} }), TypeError,
+                "continuation private access brand-checks the tail value");
+            assert.areEqual('test262', c.self());
+            // A private name in an optional chain is still not assignable.
+            assert.isFalse(parses("class D { #x = 1; m(o) { o?.#x = 2; } }"),
+                "assignment through ?. private reference is an early SyntaxError");
+            assert.isFalse(parses("class D { #x = 1; m(o) { o?.c.#x = 2; } }"),
+                "assignment through continuation private after ?. is an early SyntaxError");
+            // Delete of a private reference is an early SyntaxError in all
+            // forms. Assert via eval-or-call so deferred method bodies,
+            // which reparse on first call, are covered the same way.
+            const deletePrivate = (expr) => () => {
+                const D = eval("(class { #x = 1; c = this; m(o) { return delete " + expr + "; } })");
+                new D().m(new D());
+            };
+            assert.throws(deletePrivate("o?.#x"), SyntaxError,
+                "delete of ?. private reference is an early SyntaxError");
+            assert.throws(deletePrivate("o?.c.#x"), SyntaxError,
+                "delete of continuation private after ?. is an early SyntaxError");
+            assert.throws(deletePrivate("(o?.#x)"), SyntaxError,
+                "delete of parenthesized ?. private reference is an early SyntaxError");
+        }
+    },
 ];
 
 testRunner.runTests(tests, { verbose: WScript.Arguments[0] != "summary" });
