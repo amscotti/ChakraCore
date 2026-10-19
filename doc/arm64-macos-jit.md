@@ -103,6 +103,8 @@ branch is unchanged.
 - JIT `interpreted`: **2363/440** after the `ToVar` fallback below. 398
   failures are the asm/WASM gap; 42 are other paths (26 SIGSEGV, 11 SIGABRT,
   1 SIGFPE, 4 unclassified). 33 distinct non-asm paths remain.
+- JIT `dynapogo`: **1904/364**. 293 failures are the asm/WASM gap; 60
+  distinct non-asm paths remain (50 SIGSEGV, 16 SIGABRT, 5 unclassified).
 
 One representative full-JIT debugger test (`DebuggerCommon/default.js` with
 `-debugLaunch`) reached `GlobOpt::ToVar` with a `BrNotAddr_A` Var that was not
@@ -112,7 +114,8 @@ at `AssertOrFailFast(valueInfo)` (`lib/Backend/GlobOpt.cpp:11449`).
 inconsistent IR. That fixed the debugger cluster and reduced the suite from
 556 to 440 failures; `DebuggerCommon/default.js` now passes.
 
-The remaining non-asm failures are separate newer-baseline coverage gaps:
+The remaining non-asm failures are separate newer-baseline coverage gaps; the
+JIT profile is not yet a full-language supported profile:
 
 - `Basics/With2.js` passes with `-off:DynamicProfile`, pointing at the
   profiled property-store/array helper path rather than the core JIT.
