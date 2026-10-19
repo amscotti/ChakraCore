@@ -590,10 +590,11 @@ Decision/rollback points:
 - [ ] C4: Published qualified ES2025 result on the claimed default configurations.
 
 **Latest integration checkpoint (2026-10-18):** main is clean at
-**1992/0 test** and **2044/0 debug-static** (573/573 and 546/546 steps).
+**1993/0 test** and **2045/0 debug-static** (573/573 and 546/546 steps).
 Merged lanes: S1 public instance fields, S2 arithmetic, S8 resizable
 ArrayBuffer/transfer, S13 WeakRef, S14 P1 statement completion, S14 P3
-Annex B block-function var skip, and S14 P6 property enumeration
+Annex B block-function var skip, S14 P6 property enumeration, and S14 P7
+labeled-break/try-finally
 ([c2-s1-public-fields.md](c2-s1-public-fields.md),
 [c2-s2-bigint-arithmetic.md](c2-s2-bigint-arithmetic.md),
 [c2-s8-resizable.md](c2-s8-resizable.md),
