@@ -422,7 +422,7 @@ namespace Js
         if (VarIs<TypedArrayBase>(iterable))
         {
             typedArrayBase = VarTo<TypedArrayBase>(iterable);
-            if (typedArrayBase->IsDetachedBuffer())
+            if (typedArrayBase->IsDetachedBuffer() || typedArrayBase->IsOutOfBounds())
             {
                 JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray);
             }

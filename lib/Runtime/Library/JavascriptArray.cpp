@@ -7862,7 +7862,8 @@ Case0:
         }
         else
         {
-            if (TypedArrayBase::IsDetachedTypedArray(args[0]))
+            if (TypedArrayBase::IsDetachedTypedArray(args[0]) ||
+                (VarIs<TypedArrayBase>(args[0]) && UnsafeVarTo<TypedArrayBase>(args[0])->IsOutOfBounds()))
             {
                 JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, _u("Array.prototype.toLocalString"));
             }

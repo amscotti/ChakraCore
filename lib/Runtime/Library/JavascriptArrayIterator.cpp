@@ -63,7 +63,7 @@ namespace Js
         else if (VarIs<TypedArrayBase>(iterable))
         {
             typedArrayBase = UnsafeVarTo<TypedArrayBase>(iterable);
-            if (typedArrayBase->IsDetachedBuffer())
+            if (typedArrayBase->IsDetachedBuffer() || typedArrayBase->IsOutOfBounds())
             {
                 JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray);
             }

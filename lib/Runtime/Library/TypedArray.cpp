@@ -200,10 +200,11 @@ namespace Js
                );
     }
 
-    TypedArrayBase::TypedArrayBase(ArrayBufferBase* arrayBuffer, uint32 offSet, uint mappedLength, uint elementSize, DynamicType* type) :
+    TypedArrayBase::TypedArrayBase(ArrayBufferBase* arrayBuffer, uint32 offSet, uint mappedLength, uint elementSize, DynamicType* type, bool lengthTracking) :
         ArrayBufferParent(type, mappedLength, arrayBuffer),
         byteOffset(offSet),
-        BYTES_PER_ELEMENT(elementSize)
+        BYTES_PER_ELEMENT(elementSize),
+        lengthTracking(lengthTracking)
     {
     }
 
@@ -242,7 +243,7 @@ namespace Js
             }
 
             ArrayBufferBase *arrayBuffer = scriptContext->GetLibrary()->CreateArrayBuffer(byteLen);
-            newArr = static_cast<TypedArrayBase*>(pfnCreateTypedArray(arrayBuffer, 0, len, scriptContext->GetLibrary()));
+            newArr = static_cast<TypedArrayBase*>(pfnCreateTypedArray(arrayBuffer, 0, len, scriptContext->GetLibrary(), false));
 
             for (uint32 k = 0; k < len; k++)
             {
@@ -265,6 +266,7 @@ namespace Js
         TypedArrayBase* typedArraySource = nullptr;
         RecyclableObject* jsArraySource = nullptr;
         bool fromExternalObject = false;
+        bool lengthTracking = false;
 
         // Handle first argument - see if that is ArrayBuffer/SharedArrayBuffer
         if (args.Info.Count > 1)
@@ -338,32 +340,75 @@ namespace Js
         // If we got an ArrayBuffer, we can continue to process arguments.
         if (arrayBuffer != nullptr)
         {
-            byteLength = arrayBuffer->GetByteLength();
+            // A view over a resizable buffer without an explicit length is
+            // length-tracking; only a non-undefined fourth argument captures
+            // a fixed length (explicit undefined still tracks).
+            lengthTracking = VarIs<ArrayBuffer>(arrayBuffer) &&
+                VarTo<ArrayBuffer>(arrayBuffer)->IsResizable() &&
+                !(args.Info.Count > 3 && !JavascriptOperators::IsUndefinedObject(args[3]));
+
+            // Both ToIndex calls below can run user code that resizes or
+            // detaches the buffer. Coerce first, then re-read the current
+            // byte length before computing the element range.
             if (args.Info.Count > 2)
             {
-                offset = ArrayBuffer::ToIndex(args[2], JSERR_InvalidTypedArrayLength, scriptContext, byteLength, false);
+                offset = ArrayBuffer::ToIndex(args[2], JSERR_InvalidTypedArrayLength, scriptContext, ArrayBuffer::MaxArrayBufferLength, false);
+            }
 
-                // we can start the mapping from the end of the incoming buffer, but with a map of 0 length.
-                // User can't really do anything useful with the typed array but apparently this is allowed.
-                if ((offset % elementSize) != 0)
-                {
-                    JavascriptError::ThrowRangeError(
-                        scriptContext, JSERR_InvalidTypedArrayLength);
-                }
+            if (arrayBuffer->IsDetached())
+            {
+                JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, _u("[TypedArray]"));
+            }
+
+            byteLength = arrayBuffer->GetByteLength();
+            if ((uint32)offset > byteLength)
+            {
+                JavascriptError::ThrowRangeError(scriptContext, JSERR_InvalidTypedArrayLength);
+            }
+
+            // we can start the mapping from the end of the incoming buffer, but with a map of 0 length.
+            // User can't really do anything useful with the typed array but apparently this is allowed.
+            if ((offset % elementSize) != 0)
+            {
+                JavascriptError::ThrowRangeError(
+                    scriptContext, JSERR_InvalidTypedArrayLength);
             }
 
             if (args.Info.Count > 3 && !JavascriptOperators::IsUndefinedObject(args[3]))
             {
-                mappedLength = ArrayBuffer::ToIndex(args[3], JSERR_InvalidTypedArrayLength, scriptContext, (byteLength - offset) / elementSize, false);
+                mappedLength = ArrayBuffer::ToIndex(args[3], JSERR_InvalidTypedArrayLength, scriptContext, ArrayBuffer::MaxArrayBufferLength / elementSize, false);
             }
             else
             {
-                if ((byteLength - offset) % elementSize != 0)
+                // A length-tracking view floors a partial trailing element;
+                // a fixed view must fit exactly within the initial buffer.
+                if (!lengthTracking && (byteLength - offset) % elementSize != 0)
                 {
                     JavascriptError::ThrowRangeError(
                         scriptContext, JSERR_InvalidTypedArrayLength);
                 }
                 mappedLength = (byteLength - offset)/elementSize;
+            }
+
+            // Validation above may have been reordered by user code in the
+            // length conversion; verify the view still fits.
+            if (arrayBuffer->IsDetached())
+            {
+                JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, _u("[TypedArray]"));
+            }
+
+            byteLength = arrayBuffer->GetByteLength();
+            if ((uint32)offset > byteLength ||
+                (!lengthTracking && (uint32)mappedLength > (byteLength - (uint32)offset) / elementSize))
+            {
+                JavascriptError::ThrowRangeError(scriptContext, JSERR_InvalidTypedArrayLength);
+            }
+
+            if (lengthTracking)
+            {
+                // The stored length is only a construction snapshot; lookups
+                // use the current buffer byte length.
+                mappedLength = (byteLength - (uint32)offset) / elementSize;
             }
         }
         else
@@ -384,7 +429,7 @@ namespace Js
         }
 
         // Create and set the array based on the source.
-        TypedArrayBase* newArray  = static_cast<TypedArrayBase*>(pfnCreateTypedArray(arrayBuffer, offset, mappedLength, scriptContext->GetLibrary()));
+        TypedArrayBase* newArray  = static_cast<TypedArrayBase*>(pfnCreateTypedArray(arrayBuffer, offset, mappedLength, scriptContext->GetLibrary(), lengthTracking));
         if (fromExternalObject)
         {
             // No need to copy externally provided buffer
@@ -1089,7 +1134,7 @@ namespace Js
             return TaggedInt::ToVarUnchecked(0);
         }
 
-        return JavascriptNumber::ToVar(typedArray->GetByteOffset(), scriptContext);
+        return JavascriptNumber::ToVar(typedArray->GetEffectiveByteOffset(), scriptContext);
     }
 
     Var TypedArrayBase::EntryGetterLength(RecyclableObject* function, CallInfo callInfo, ...)
@@ -1257,10 +1302,17 @@ namespace Js
             offset = ArrayBuffer::ToIndex(args[2], JSERR_InvalidTypedArrayLength, scriptContext, ArrayBuffer::MaxArrayBufferLength, false);
         }
 
+        // Out-of-bounds views behave like detached views for set: reject them
+        // before reading the source (a proxy source must not observe a get).
+        if (typedArrayBase->IsDetachedBuffer() || typedArrayBase->IsOutOfBounds())
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, _u("[TypedArray].prototype.set"));
+        }
+
         TypedArrayBase* typedArraySource = JavascriptOperators::TryFromVar<Js::TypedArrayBase>(args[1]);
         if (typedArraySource)
         {
-            if (typedArraySource->IsDetachedBuffer() || typedArrayBase->IsDetachedBuffer()) // If IsDetachedBuffer(targetBuffer) is true, then throw a TypeError exception.
+            if (typedArraySource->IsDetachedBuffer() || typedArraySource->IsOutOfBounds())
             {
                 JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, _u("[TypedArray].prototype.set"));
             }
@@ -1275,10 +1327,6 @@ namespace Js
             if (!JavascriptConversion::ToObject(args[1], scriptContext, &sourceArray))
             {
                 JavascriptError::ThrowTypeError(scriptContext, JSERR_TypedArray_NeedSource);
-            }
-            else if (typedArrayBase->IsDetachedBuffer())
-            {
-                JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, _u("[TypedArray].prototype.set"));
             }
             typedArrayBase->SetObject(sourceArray, typedArrayBase->GetLength(), (uint32)offset);
         }
@@ -1332,11 +1380,16 @@ namespace Js
             end = begin;
         }
 
-        return typedArrayBase->Subarray(begin, end);
+        // A subarray of an auto-length view stays auto-length when end is
+        // omitted; with an explicit end it captures a fixed length.
+        bool lengthTracking = typedArrayBase->IsLengthTracking() &&
+            (args.Info.Count <= 2 || JavascriptOperators::IsUndefined(args[2]));
+
+        return typedArrayBase->Subarray(begin, end, lengthTracking);
     }
 
     template <typename TypeName, bool clamped, bool virtualAllocated>
-    Var TypedArray<TypeName, clamped, virtualAllocated>::Subarray(uint32 begin, uint32 end)
+    Var TypedArray<TypeName, clamped, virtualAllocated>::Subarray(uint32 begin, uint32 end, bool lengthTracking)
     {
         Assert(end >= begin);
 
@@ -1355,7 +1408,7 @@ namespace Js
         newTypedArray = VarTo<RecyclableObject>(JavascriptOperators::NewObjectCreationHelper_ReentrancySafe(constructor, isDefaultConstructor, scriptContext->GetThreadContext(), [=]()->Js::Var
         {
             Js::Var constructorArgs[] = { constructor, buffer, JavascriptNumber::ToVar(beginByteOffset, scriptContext), JavascriptNumber::ToVar(newLength, scriptContext) };
-            Js::CallInfo constructorCallInfo(Js::CallFlags_New, _countof(constructorArgs));
+            Js::CallInfo constructorCallInfo(Js::CallFlags_New, lengthTracking ? 3 : 4);
             return TypedArrayBase::TypedArrayCreate(constructor, &Js::Arguments(constructorCallInfo, constructorArgs), newLength, scriptContext);
         }));
 
@@ -2251,8 +2304,8 @@ namespace Js
                 // Sort the copied data
                 typedArrayBase->SortHelper(list, length, compareFn, scriptContext, tempAlloc);
 
-                // compare function calls may have detached Type Array
-                if (TypedArrayBase::IsDetachedTypedArray(typedArrayBase))
+                // compare function calls may have detached or made the view OOB
+                if (TypedArrayBase::IsDetachedTypedArray(typedArrayBase) || typedArrayBase->IsOutOfBounds())
                 {
                     JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, _u("[TypedArray].prototype.sort"));
                 }
@@ -2490,7 +2543,11 @@ namespace Js
 
         Var value = args.Info.Count > 2 ? args[2] : scriptContext->GetLibrary()->GetUndefined();
         double numeric = TypedToNumber(value, scriptContext);
-        if (source->IsDetachedBuffer() || !inRange)
+
+        // ToNumber can shrink the buffer. IsValidIntegerIndex is evaluated
+        // against the current element length, not the captured one.
+        uint32 currentLength = source->GetLength();
+        if (source->IsDetachedBuffer() || !inRange || actual >= currentLength)
         {
             JavascriptError::ThrowRangeError(scriptContext, JSERR_InvalidTypedArrayIndex);
         }
@@ -2815,7 +2872,7 @@ namespace Js
             JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NeedTypedArray);
         }
 
-        if (typedArrayBase->IsDetachedBuffer())
+        if (typedArrayBase->IsDetachedBuffer() || typedArrayBase->IsOutOfBounds())
         {
             JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, apiName);
         }
@@ -3541,7 +3598,7 @@ namespace Js
     }
 
 
-    Var CharArray::Create(ArrayBufferBase* arrayBuffer, uint32 byteOffSet, uint32 mappedLength, JavascriptLibrary* javascriptLibrary)
+    Var CharArray::Create(ArrayBufferBase* arrayBuffer, uint32 byteOffSet, uint32 mappedLength, JavascriptLibrary* javascriptLibrary, bool lengthTracking)
     {
         CharArray* arr;
         uint32 totalLength, mappedByteLength;
@@ -3551,7 +3608,7 @@ namespace Js
         {
             JavascriptError::ThrowRangeError(arrayBuffer->GetScriptContext(), JSERR_InvalidTypedArrayLength);
         }
-        arr = RecyclerNew(javascriptLibrary->GetRecycler(), CharArray, arrayBuffer, byteOffSet, mappedLength, javascriptLibrary->GetCharArrayType());
+        arr = RecyclerNew(javascriptLibrary->GetRecycler(), CharArray, arrayBuffer, byteOffSet, mappedLength, javascriptLibrary->GetCharArrayType(), lengthTracking);
         return arr;
     }
 
@@ -3572,7 +3629,7 @@ namespace Js
         JavascriptError::ThrowTypeError(function->GetScriptContext(), JSERR_This_NeedTypedArray);
     }
 
-    inline Var CharArray::Subarray(uint32 begin, uint32 end)
+    inline Var CharArray::Subarray(uint32 begin, uint32 end, bool lengthTracking)
     {
         AssertMsg(FALSE, "not supported in char array");
         JavascriptError::ThrowTypeError(GetScriptContext(), JSERR_This_NeedTypedArray);

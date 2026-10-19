@@ -9,7 +9,7 @@
 
 namespace Js
 {
-    typedef Var (*PFNCreateTypedArray)(Js::ArrayBufferBase* arrayBuffer, uint32 offSet, uint32 mappedLength, Js::JavascriptLibrary* javascriptLibrary);
+    typedef Var (*PFNCreateTypedArray)(Js::ArrayBufferBase* arrayBuffer, uint32 offSet, uint32 mappedLength, Js::JavascriptLibrary* javascriptLibrary, bool lengthTracking);
 
     template<typename T> bool TypedArrayCompareElementsHelper(JavascriptArray::CompareVarsInfo* cvInfo, const void* elem1, const void* elem2);
 
@@ -69,7 +69,7 @@ namespace Js
             static FunctionInfo GetterSymbolSpecies;
         };
 
-        TypedArrayBase(ArrayBufferBase* arrayBuffer, uint byteOffset, uint mappedLength, uint elementSize, DynamicType* type);
+        TypedArrayBase(ArrayBufferBase* arrayBuffer, uint byteOffset, uint mappedLength, uint elementSize, DynamicType* type, bool lengthTracking = false);
 
         static Var NewInstance(RecyclableObject* function, CallInfo callInfo, ...);
 
@@ -169,9 +169,41 @@ namespace Js
         virtual Var TypedExchange(_In_ uint32 index, _In_ Var second) = 0;
         virtual Var TypedCompareExchange(_In_ uint32 index, _In_ Var comparand, _In_ Var replacementValue) = 0;
 
-        uint32 GetByteLength() const { return length * BYTES_PER_ELEMENT; }
+        // Length-tracking views created without an explicit length follow the
+        // buffer's current [[ArrayBufferByteLength]]. Fixed views keep the
+        // captured length and report zero while their range is out of bounds;
+        // both recover when the buffer grows again.
+        uint32 GetLength() const
+        {
+            uint32 bufferByteLength = GetArrayBuffer()->GetByteLength();
+            if (byteOffset > bufferByteLength)
+            {
+                return 0;
+            }
+            uint32 availableLength = (bufferByteLength - byteOffset) / BYTES_PER_ELEMENT;
+            if (lengthTracking)
+            {
+                return availableLength;
+            }
+            return length <= availableLength ? length : 0;
+        }
+
+        bool IsOutOfBounds() const
+        {
+            uint32 bufferByteLength = GetArrayBuffer()->GetByteLength();
+            if (byteOffset > bufferByteLength)
+            {
+                return true;
+            }
+            return !lengthTracking && length > (bufferByteLength - byteOffset) / BYTES_PER_ELEMENT;
+        }
+
+        uint32 GetByteLength() const { return GetLength() * BYTES_PER_ELEMENT; }
         uint32 GetByteOffset() const { return byteOffset; }
+        // The byteOffset getter reports zero while the view is out of bounds.
+        uint32 GetEffectiveByteOffset() const { return IsOutOfBounds() ? 0 : byteOffset; }
         uint32 GetBytesPerElement() const { return BYTES_PER_ELEMENT; }
+        bool IsLengthTracking() const { return lengthTracking; }
         byte*  GetByteBuffer() const { return buffer; };
         bool IsDetachedBuffer() const { return this->GetArrayBuffer()->IsDetached(); }
         void ClearLengthAndBufferOnDetach();
@@ -212,10 +244,11 @@ namespace Js
 
         virtual void SortHelper(byte* listBuffer, uint32 length, RecyclableObject* compareFn, ScriptContext* scriptContext, ArenaAllocator* allocator) = 0;
 
-        virtual Var Subarray(uint32 begin, uint32 end) = 0;
+        virtual Var Subarray(uint32 begin, uint32 end, bool lengthTracking) = 0;
         Field(int32) BYTES_PER_ELEMENT;
         Field(uint32) byteOffset;
         FieldNoBarrier(BYTE*) buffer;   // beginning of mapped array.
+        Field(bool) lengthTracking;     // No explicit length: follow the buffer
 
     public:
         static uint32 GetOffsetOfBuffer()  { return offsetof(TypedArrayBase, buffer); }
@@ -279,14 +312,14 @@ namespace Js
             static FunctionInfo Set;
         };
 
-        TypedArray(ArrayBufferBase* arrayBuffer, uint32 byteOffset, uint32 mappedLength, DynamicType* type);
+        TypedArray(ArrayBufferBase* arrayBuffer, uint32 byteOffset, uint32 mappedLength, DynamicType* type, bool lengthTracking = false);
 
-        static Var Create(ArrayBufferBase* arrayBuffer, uint32 byteOffSet, uint32 mappedLength, JavascriptLibrary* javascriptLibrary);
+        static Var Create(ArrayBufferBase* arrayBuffer, uint32 byteOffSet, uint32 mappedLength, JavascriptLibrary* javascriptLibrary, bool lengthTracking = false);
         static Var NewInstance(RecyclableObject* function, CallInfo callInfo, ...);
 
         static Var EntrySet(RecyclableObject* function, CallInfo callInfo, ...);
 
-        Var Subarray(uint32 begin, uint32 end);
+        Var Subarray(uint32 begin, uint32 end, bool lengthTracking);
 
         static BOOL HasVirtualTableInfo(Var aValue)
         {
@@ -559,18 +592,18 @@ namespace Js
         static Var EntrySet(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntrySubarray(RecyclableObject* function, CallInfo callInfo, ...);
 
-        CharArray(ArrayBufferBase* arrayBuffer, uint32 byteOffset, uint32 mappedLength, DynamicType* type) :
-        TypedArrayBase(arrayBuffer, byteOffset, mappedLength, sizeof(char16), type)
+        CharArray(ArrayBufferBase* arrayBuffer, uint32 byteOffset, uint32 mappedLength, DynamicType* type, bool lengthTracking = false) :
+        TypedArrayBase(arrayBuffer, byteOffset, mappedLength, sizeof(char16), type, lengthTracking)
         {
             AssertMsg(arrayBuffer->GetByteLength() >= byteOffset, "invalid offset");
             AssertMsg(mappedLength*sizeof(char16)+byteOffset <= GetArrayBuffer()->GetByteLength(), "invalid length");
             buffer = arrayBuffer->GetBuffer() + byteOffset;
         }
 
-        static Var Create(ArrayBufferBase* arrayBuffer, uint32 byteOffSet, uint32 mappedLength, JavascriptLibrary* javascriptLibrary);
+        static Var Create(ArrayBufferBase* arrayBuffer, uint32 byteOffSet, uint32 mappedLength, JavascriptLibrary* javascriptLibrary, bool lengthTracking = false);
         static Var NewInstance(RecyclableObject* function, CallInfo callInfo, ...);
 
-        Var Subarray(uint32 begin, uint32 end);
+        Var Subarray(uint32 begin, uint32 end, bool lengthTracking);
 
         virtual BOOL DirectSetItem(_In_ uint32 index, _In_ Js::Var value) override;
         virtual BOOL DirectSetItemNoSet(_In_ uint32 index, _In_ Js::Var value) override;
@@ -609,13 +642,13 @@ namespace Js
     template <> bool VarIsImpl<CharArray>(RecyclableObject* obj);
 
     template <typename TypeName, bool clamped, bool virtualAllocated>
-    TypedArray<TypeName, clamped, virtualAllocated>::TypedArray(ArrayBufferBase* arrayBuffer, uint32 byteOffset, uint32 mappedLength, DynamicType* type) :
-        TypedArrayBase(arrayBuffer, byteOffset, mappedLength, sizeof(TypeName), type)
+    TypedArray<TypeName, clamped, virtualAllocated>::TypedArray(ArrayBufferBase* arrayBuffer, uint32 byteOffset, uint32 mappedLength, DynamicType* type, bool lengthTracking) :
+        TypedArrayBase(arrayBuffer, byteOffset, mappedLength, sizeof(TypeName), type, lengthTracking)
     {
         AssertMsg(arrayBuffer->GetByteLength() >= byteOffset, "invalid offset");
         AssertMsg(mappedLength*sizeof(TypeName)+byteOffset <= arrayBuffer->GetByteLength(), "invalid length");
         buffer = arrayBuffer->GetBuffer() + byteOffset;
-        if (arrayBuffer->IsValidVirtualBufferLength(arrayBuffer->GetByteLength()) &&
+        if (!lengthTracking && arrayBuffer->IsValidVirtualBufferLength(arrayBuffer->GetByteLength()) &&
              (byteOffset == 0) &&
              (mappedLength == (arrayBuffer->GetByteLength() / sizeof(TypeName)))
            )
@@ -657,7 +690,7 @@ namespace Js
     }
 
     template <typename TypeName, bool clamped, bool virtualAllocated>
-    Var TypedArray<TypeName, clamped, virtualAllocated>::Create(ArrayBufferBase* arrayBuffer, uint32 byteOffSet, uint32 mappedLength, JavascriptLibrary* javascriptLibrary)
+    Var TypedArray<TypeName, clamped, virtualAllocated>::Create(ArrayBufferBase* arrayBuffer, uint32 byteOffSet, uint32 mappedLength, JavascriptLibrary* javascriptLibrary, bool lengthTracking)
     {
         uint32 totalLength, mappedByteLength;
 
@@ -669,7 +702,7 @@ namespace Js
         }
 
         DynamicType *type = javascriptLibrary->GetTypedArrayType<TypeName, clamped>(0);
-        return RecyclerNew(javascriptLibrary->GetRecycler(), TypedArray, arrayBuffer, byteOffSet, mappedLength, type);
+        return RecyclerNew(javascriptLibrary->GetRecycler(), TypedArray, arrayBuffer, byteOffSet, mappedLength, type, lengthTracking);
     }
 
 #if defined(__clang__)
