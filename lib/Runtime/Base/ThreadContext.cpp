@@ -24,6 +24,7 @@
 #include "Language/InterpreterStackFrame.h"
 #include "Language/JavascriptStackWalker.h"
 #include "Base/ScriptMemoryDumper.h"
+#include "Library/JavascriptFinalizationRegistry.h"
 
 #if DBG
 #include "Memory/StressTest.h"
@@ -489,6 +490,11 @@ ThreadContext::~ThreadContext()
         {
             keptObjects->ClearAndZero();
             keptObjects.Unroot(recycler);
+        }
+        if (finalizationRegistries)
+        {
+            finalizationRegistries->ClearAndZero();
+            finalizationRegistries.Unroot(recycler);
         }
 
         // Unpin the memory for leak report so we don't report this as a leak.
@@ -1435,6 +1441,50 @@ ThreadContext::ClearKeptObjects()
     {
         // Zero removed slots so stale pointers are not conservative scan roots.
         keptObjects->ClearAndZero();
+    }
+}
+
+void
+ThreadContext::RegisterFinalizationRegistry(Js::JavascriptFinalizationRegistry* registry)
+{
+    Assert(registry != nullptr);
+    Assert(recycler != nullptr);
+
+    if (!finalizationRegistries)
+    {
+        finalizationRegistries.Root(RecyclerNew(recycler, FinalizationRegistryList, recycler), recycler);
+    }
+
+    RecyclerWeakReference<Js::JavascriptFinalizationRegistry>* weakRegistry = nullptr;
+    recycler->FindOrCreateWeakReferenceHandle(registry, &weakRegistry);
+    finalizationRegistries->Add(weakRegistry);
+}
+
+void
+ThreadContext::ScheduleFinalizationRegistryCleanupJobs()
+{
+    if (!finalizationRegistries)
+    {
+        return;
+    }
+
+    // The list holds leaf weak handles, not registries. Remove handles whose
+    // registry was collected and schedule jobs only for live registries with
+    // at least one cleared target.
+    for (int i = 0; i < finalizationRegistries->Count();)
+    {
+        RecyclerWeakReference<Js::JavascriptFinalizationRegistry>* weakRegistry =
+            finalizationRegistries->Item(i);
+        Js::JavascriptFinalizationRegistry* registry = weakRegistry->Get();
+
+        if (registry == nullptr)
+        {
+            finalizationRegistries->RemoveAt(i);
+            continue;
+        }
+
+        registry->ScheduleCleanupJob();
+        ++i;
     }
 }
 

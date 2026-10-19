@@ -3,6 +3,7 @@
     "this": {
       "Symbol.toStringTag": "string global",
       "WeakRef": "function <large string>",
+      "FinalizationRegistry": "function <large string>",
       "obj": "undefined undefined",
       "c": "undefined undefined",
       "foo": "function <large string>",
@@ -55,6 +56,7 @@
     "this": {
       "Symbol.toStringTag": "string global",
       "WeakRef": "function <large string>",
+      "FinalizationRegistry": "function <large string>",
       "obj": "undefined undefined",
       "c": "undefined undefined",
       "foo": "function <large string>",
@@ -98,6 +100,7 @@
     "this": {
       "Symbol.toStringTag": "string global",
       "WeakRef": "function <large string>",
+      "FinalizationRegistry": "function <large string>",
       "obj": "undefined undefined",
       "c": "undefined undefined",
       "foo": "function <large string>",
@@ -130,6 +133,7 @@
     "this": {
       "Symbol.toStringTag": "string global",
       "WeakRef": "function <large string>",
+      "FinalizationRegistry": "function <large string>",
       "obj": "undefined undefined",
       "c": "undefined undefined",
       "foo": "function <large string>",
@@ -168,6 +172,7 @@
     "this": {
       "Symbol.toStringTag": "string global",
       "WeakRef": "function <large string>",
+      "FinalizationRegistry": "function <large string>",
       "obj": "Object {...}",
       "c": "number 10",
       "foo": "function <large string>",

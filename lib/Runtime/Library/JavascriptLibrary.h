@@ -347,6 +347,7 @@ namespace Js
         Field(DynamicType *) weakMapType;
         Field(DynamicType *) weakSetType;
         Field(DynamicType *) weakRefType;
+        Field(DynamicType *) finalizationRegistryType;
         Field(DynamicType *) proxyType;
         Field(StaticType  *) withType;
         Field(DynamicType *) SpreadArgumentType;
@@ -869,6 +870,8 @@ namespace Js
         void SetJsrtContext(FinalizableObject* jsrtContext);
         FinalizableObject* GetJsrtContext();
         void EnqueueTask(Var taskVar);
+        bool HasNativeHostPromiseContinuationCallback() const { return nativeHostPromiseContinuationFunction != nullptr; }
+        JavascriptFinalizationRegistryCleanupTaskFunction* CreateFinalizationRegistryCleanupTaskFunction(JavascriptFinalizationRegistry* registry);
 
         HeapArgumentsObject* CreateHeapArguments(Var frameObj, uint formalCount, bool isStrictMode = false);
         JavascriptArray* CreateArray();
@@ -943,6 +946,7 @@ namespace Js
         JavascriptWeakMap* CreateWeakMap();
         JavascriptWeakSet* CreateWeakSet();
         JavascriptWeakRef* CreateWeakRef(RecyclableObject* target);
+        JavascriptFinalizationRegistry* CreateFinalizationRegistry(Var cleanupCallback);
         JavascriptError* CreateError();
         JavascriptError* CreateError(DynamicType* errorType, BOOL isExternal = FALSE);
         JavascriptError* CreateExternalError(ErrorTypeEnum errorTypeEnum);
@@ -1293,6 +1297,7 @@ namespace Js
         STANDARD_INIT(WeakMap);
         STANDARD_INIT(WeakSet);
         STANDARD_INIT(WeakRef);
+        STANDARD_INIT(FinalizationRegistry);
         STANDARD_INIT(Promise);
         STANDARD_INIT(GeneratorFunction);
         STANDARD_INIT(AsyncFunction);
@@ -1411,6 +1416,7 @@ namespace Js
         HRESULT ProfilerRegisterWeakMap();
         HRESULT ProfilerRegisterWeakSet();
         HRESULT ProfilerRegisterWeakRef();
+        HRESULT ProfilerRegisterFinalizationRegistry();
         HRESULT ProfilerRegisterSymbol();
         HRESULT ProfilerRegisterIterator();
         HRESULT ProfilerRegisterArrayIterator();

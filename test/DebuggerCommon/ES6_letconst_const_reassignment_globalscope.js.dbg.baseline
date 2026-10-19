@@ -2,7 +2,8 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
-      "WeakRef": "function <large string>"
+      "WeakRef": "function <large string>",
+      "FinalizationRegistry": "function <large string>"
     },
     "locals": {
       "a": "number 1",

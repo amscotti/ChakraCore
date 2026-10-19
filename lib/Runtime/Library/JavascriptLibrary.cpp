@@ -379,6 +379,10 @@ namespace Js
             DynamicType::New(scriptContext, TypeIds_Object, objectPrototype, nullptr,
             DeferredTypeHandler<InitializeWeakRefPrototype, DefaultDeferredTypeFilter, true>::GetDefaultInstance()));
 
+        finalizationRegistryPrototype = DynamicObject::New(recycler,
+            DynamicType::New(scriptContext, TypeIds_Object, objectPrototype, nullptr,
+            DeferredTypeHandler<InitializeFinalizationRegistryPrototype, DefaultDeferredTypeFilter, true>::GetDefaultInstance()));
+
         if (scriptContext->GetConfig()->IsES2018AsyncIterationEnabled())
         {
             asyncIteratorPrototype = DynamicObject::New(recycler,
@@ -786,6 +790,9 @@ namespace Js
             PathTypeHandlerNoAttr::New(scriptContext, this->GetRootPath(), 0, 0, 0, true, true), true, true);
 
         weakRefType = DynamicType::New(scriptContext, TypeIds_WeakRef, weakRefPrototype, nullptr,
+            PathTypeHandlerNoAttr::New(scriptContext, this->GetRootPath(), 0, 0, 0, true, true), true, true);
+
+        finalizationRegistryType = DynamicType::New(scriptContext, TypeIds_FinalizationRegistry, finalizationRegistryPrototype, nullptr,
             PathTypeHandlerNoAttr::New(scriptContext, this->GetRootPath(), 0, 0, 0, true, true), true, true);
 
         TypePath *const iteratorResultPath = TypePath::New(recycler);
@@ -1808,6 +1815,10 @@ namespace Js
         weakRefConstructor = CreateBuiltinConstructor(&JavascriptWeakRef::EntryInfo::NewInstance,
             DeferredTypeHandler<InitializeWeakRefConstructor>::GetDefaultInstance());
         AddFunction(globalObject, scriptContext->GetOrAddPropertyIdTracked(_u("WeakRef")), weakRefConstructor);
+
+        finalizationRegistryConstructor = CreateBuiltinConstructor(&JavascriptFinalizationRegistry::EntryInfo::NewInstance,
+            DeferredTypeHandler<InitializeFinalizationRegistryConstructor>::GetDefaultInstance());
+        AddFunction(globalObject, scriptContext->GetOrAddPropertyIdTracked(_u("FinalizationRegistry")), finalizationRegistryConstructor);
 
         if (scriptContext->GetConfig()->IsESIteratorHelpersEnabled())
         {
@@ -4902,6 +4913,44 @@ namespace Js
         return true;
     }
 
+    bool JavascriptLibrary::InitializeFinalizationRegistryConstructor(DynamicObject* finalizationRegistryConstructor, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)
+    {
+        typeHandler->Convert(finalizationRegistryConstructor, mode, 3);
+        // Note: Any new function addition/deletion/modification should also be
+        // updated in JavascriptLibrary::ProfilerRegisterFinalizationRegistry
+        // so the profiler stays in sync.
+        JavascriptLibrary* library = finalizationRegistryConstructor->GetLibrary();
+        library->AddMember(finalizationRegistryConstructor, PropertyIds::length, TaggedInt::ToVarUnchecked(1), PropertyConfigurable);
+        library->AddMember(finalizationRegistryConstructor, PropertyIds::prototype, library->finalizationRegistryPrototype, PropertyNone);
+        library->AddMember(finalizationRegistryConstructor, PropertyIds::name, library->CreateStringFromCppLiteral(_u("FinalizationRegistry")), PropertyConfigurable);
+
+        finalizationRegistryConstructor->SetHasNoEnumerableProperties(true);
+
+        return true;
+    }
+
+    bool JavascriptLibrary::InitializeFinalizationRegistryPrototype(DynamicObject* finalizationRegistryPrototype, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)
+    {
+        typeHandler->Convert(finalizationRegistryPrototype, mode, 4);
+        // Note: Any new function addition/deletion/modification should also be
+        // updated in JavascriptLibrary::ProfilerRegisterFinalizationRegistry
+        // so the profiler stays in sync.
+        ScriptContext* scriptContext = finalizationRegistryPrototype->GetScriptContext();
+        JavascriptLibrary* library = finalizationRegistryPrototype->GetLibrary();
+        library->AddMember(finalizationRegistryPrototype, PropertyIds::constructor, library->finalizationRegistryConstructor);
+        library->AddFunctionToLibraryObjectWithPropertyName(finalizationRegistryPrototype, _u("register"), &JavascriptFinalizationRegistry::EntryInfo::Register, 2);
+        library->AddFunctionToLibraryObjectWithPropertyName(finalizationRegistryPrototype, _u("unregister"), &JavascriptFinalizationRegistry::EntryInfo::Unregister, 1);
+
+        if (scriptContext->GetConfig()->IsES6ToStringTagEnabled())
+        {
+            library->AddMember(finalizationRegistryPrototype, PropertyIds::_symbolToStringTag, library->CreateStringFromCppLiteral(_u("FinalizationRegistry")), PropertyConfigurable);
+        }
+
+        finalizationRegistryPrototype->SetHasNoEnumerableProperties(true);
+
+        return true;
+    }
+
     bool JavascriptLibrary::InitializeWeakSetConstructor(DynamicObject* weakSetConstructor, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)
     {
         typeHandler->Convert(weakSetConstructor, mode, 3);
@@ -6594,6 +6643,22 @@ namespace Js
         return RecyclerNew(recycler, JavascriptWeakRef, weakRefType, targetWeakRef);
     }
 
+    JavascriptFinalizationRegistry* JavascriptLibrary::CreateFinalizationRegistry(Var cleanupCallback)
+    {
+        AssertMsg(finalizationRegistryType, "Where's finalizationRegistryType?");
+        return RecyclerNew(this->GetRecycler(), JavascriptFinalizationRegistry, finalizationRegistryType, cleanupCallback);
+    }
+
+    JavascriptFinalizationRegistryCleanupTaskFunction* JavascriptLibrary::CreateFinalizationRegistryCleanupTaskFunction(JavascriptFinalizationRegistry* registry)
+    {
+        JavascriptMethod entryPoint = &JavascriptFinalizationRegistry::EntryCleanupJob;
+        FunctionInfo* functionInfo = RecyclerNew(this->GetRecycler(), FunctionInfo, entryPoint, FunctionInfo::Attributes::ErrorOnNew);
+        DynamicType* type = CreateDeferredPrototypeFunctionType(entryPoint);
+
+        return RecyclerNewEnumClass(this->GetRecycler(), EnumFunctionClass,
+            JavascriptFinalizationRegistryCleanupTaskFunction, type, functionInfo, registry);
+    }
+
     JavascriptPromise* JavascriptLibrary::CreatePromise()
     {
         AssertMsg(promiseType, "Where's promiseType?");
@@ -7892,6 +7957,7 @@ namespace Js
         REGISTER_OBJECT(WeakMap);
         REGISTER_OBJECT(WeakSet);
         REGISTER_OBJECT(WeakRef);
+        REGISTER_OBJECT(FinalizationRegistry);
 
         REGISTER_OBJECT(Symbol);
 
@@ -8421,6 +8487,28 @@ namespace Js
 
         PropertyId derefId = scriptContext->GetOrAddPropertyIdTracked(_u("deref"));
         REG_LIB_FUNC_CORE(pwszObjectName, _u("deref"), derefId, JavascriptWeakRef::EntryInfo::Deref);
+
+        return hr;
+    }
+
+    HRESULT JavascriptLibrary::ProfilerRegisterFinalizationRegistry()
+    {
+        HRESULT hr = S_OK;
+        ScriptContext* scriptContext = this->GetScriptContext();
+
+        // FinalizationRegistry uses tracked dynamic property ids (no
+        // PropertyIds::FinalizationRegistry) so the checked-in built-in
+        // bytecode property-id table stays stable.
+        PropertyId registryId = scriptContext->GetOrAddPropertyIdTracked(_u("FinalizationRegistry"));
+        REG_LIB_FUNC_CORE(NULL, _u("FinalizationRegistry"), registryId, JavascriptFinalizationRegistry::EntryInfo::NewInstance);
+
+        DEFINE_OBJECT_NAME(FinalizationRegistry);
+
+        PropertyId registerId = scriptContext->GetOrAddPropertyIdTracked(_u("register"));
+        REG_LIB_FUNC_CORE(pwszObjectName, _u("register"), registerId, JavascriptFinalizationRegistry::EntryInfo::Register);
+
+        PropertyId unregisterId = scriptContext->GetOrAddPropertyIdTracked(_u("unregister"));
+        REG_LIB_FUNC_CORE(pwszObjectName, _u("unregister"), unregisterId, JavascriptFinalizationRegistry::EntryInfo::Unregister);
 
         return hr;
     }

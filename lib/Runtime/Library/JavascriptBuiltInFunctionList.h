@@ -599,5 +599,8 @@ BUILTIN(DataView, GetBigInt64, EntryGetBigInt64, FunctionInfo::ErrorOnNew)
 BUILTIN(DataView, GetBigUint64, EntryGetBigUint64, FunctionInfo::ErrorOnNew)
 BUILTIN(DataView, SetBigInt64, EntrySetBigInt64, FunctionInfo::ErrorOnNew)
 BUILTIN(DataView, SetBigUint64, EntrySetBigUint64, FunctionInfo::ErrorOnNew)
+BUILTIN(JavascriptFinalizationRegistry, NewInstance, NewInstance, FunctionInfo::SkipDefaultNewObject)
+BUILTIN(JavascriptFinalizationRegistry, Register, EntryRegister, FunctionInfo::ErrorOnNew)
+BUILTIN(JavascriptFinalizationRegistry, Unregister, EntryUnregister, FunctionInfo::ErrorOnNew)
 
 #undef BUILTIN_TEMPLATE

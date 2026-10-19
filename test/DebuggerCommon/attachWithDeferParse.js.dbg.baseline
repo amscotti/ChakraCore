@@ -3,6 +3,7 @@
     "this": {
       "Symbol.toStringTag": "string global",
       "WeakRef": "function <large string>",
+      "FinalizationRegistry": "function <large string>",
       "foo": "function <large string>",
       "inEvalFunc1": "function <large string>"
     },
@@ -28,6 +29,7 @@
     "this": {
       "Symbol.toStringTag": "string global",
       "WeakRef": "function <large string>",
+      "FinalizationRegistry": "function <large string>",
       "foo": "function <large string>",
       "inEvalFunc1": "function <large string>"
     },
@@ -67,6 +69,7 @@
     "this": {
       "Symbol.toStringTag": "string global",
       "WeakRef": "function <large string>",
+      "FinalizationRegistry": "function <large string>",
       "foo": "function <large string>",
       "inEvalFunc1": "function <large string>"
     },

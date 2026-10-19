@@ -31,6 +31,7 @@
     "this": {
       "Symbol.toStringTag": "string global",
       "WeakRef": "function <large string>",
+      "FinalizationRegistry": "function <large string>",
       "callcount": "number 5",
       "foo": "function <large string>",
       "bar": "function <large string>",
@@ -81,6 +82,7 @@
     "this": {
       "Symbol.toStringTag": "string global",
       "WeakRef": "function <large string>",
+      "FinalizationRegistry": "function <large string>",
       "callcount": "number 5",
       "foo": "function <large string>",
       "bar": "function <large string>",
@@ -122,6 +124,7 @@
     "this": {
       "Symbol.toStringTag": "string global",
       "WeakRef": "function <large string>",
+      "FinalizationRegistry": "function <large string>",
       "callcount": "number 5",
       "foo": "function <large string>",
       "bar": "function <large string>",

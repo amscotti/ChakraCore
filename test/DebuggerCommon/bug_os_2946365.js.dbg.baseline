@@ -8,6 +8,12 @@
         "prototype": "Object {...}",
         "name": "string WeakRef"
       },
+      "FinalizationRegistry": {
+        "#__proto__": "function <large string>",
+        "length": "number 1",
+        "prototype": "Object {...}",
+        "name": "string <large string>"
+      },
       "a": {
         "#__proto__": "Array []",
         "length": "number 10",

@@ -1,0 +1,3 @@
+Error: expected cleanup callback failure
+	at Anonymous function(string) (finalization-registry-errors.js:17:9)
+pass

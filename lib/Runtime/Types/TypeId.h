@@ -125,21 +125,22 @@ namespace Js
       TypeIds_WebAssemblyMemory = 78,
       TypeIds_WebAssemblyTable = 79,
 
-      // WeakRef is a normal builtin JavaScript object. Keep it inside both
-      // ranges so runtime/JIT classification does not treat it as an internal
-      // or host-only object type.
+      // WeakRef and FinalizationRegistry are normal builtin JavaScript
+      // objects. Keep them inside both ranges so runtime/JIT classification
+      // does not treat them as internal or host-only object types.
       TypeIds_WeakRef = 80,
-      TypeIds_LastBuiltinDynamicObject = TypeIds_WeakRef,
-      TypeIds_GlobalObject = 81,
-      TypeIds_ModuleRoot = 82,
+      TypeIds_FinalizationRegistry = 81,
+      TypeIds_LastBuiltinDynamicObject = TypeIds_FinalizationRegistry,
+      TypeIds_GlobalObject = 82,
+      TypeIds_ModuleRoot = 83,
       TypeIds_LastTrueJavascriptObjectType = TypeIds_ModuleRoot,
 
-      TypeIds_HostObject = 83,
-      TypeIds_ActivationObject = 84,
-      TypeIds_SpreadArgument = 85,
-      TypeIds_ModuleNamespace = 86,
-      TypeIds_ListIterator = 87,
-      TypeIds_ExternalIterator = 88,
+      TypeIds_HostObject = 84,
+      TypeIds_ActivationObject = 85,
+      TypeIds_SpreadArgument = 86,
+      TypeIds_ModuleNamespace = 87,
+      TypeIds_ListIterator = 88,
+      TypeIds_ExternalIterator = 89,
       TypeIds_Limit //add a new TypeId before TypeIds_Limit or before TypeIds_LastTrueJavascriptObjectType
   };
 }

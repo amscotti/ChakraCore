@@ -30,6 +30,12 @@
         "prototype": "Object {...}",
         "name": "string WeakRef"
       },
+      "FinalizationRegistry": {
+        "#__proto__": "function <large string>",
+        "length": "number 1",
+        "prototype": "Object {...}",
+        "name": "string <large string>"
+      },
       "foo": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",

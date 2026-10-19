@@ -74,6 +74,7 @@ namespace Js
         JavascriptFunction* GetWeakMapConstructor() { return weakMapConstructor; }
         JavascriptFunction* GetWeakSetConstructor() { return weakSetConstructor; }
         JavascriptFunction* GetWeakRefConstructor() { return weakRefConstructor; }
+        JavascriptFunction* GetFinalizationRegistryConstructor() { return finalizationRegistryConstructor; }
         JavascriptFunction* GetSymbolConstructor() { return symbolConstructor; }
         JavascriptFunction* GetProxyConstructor() const { return proxyConstructor; }
         JavascriptFunction* GetPromiseConstructor() const { return promiseConstructor; }
@@ -139,6 +140,7 @@ namespace Js
         DynamicObject* GetWeakMapPrototype() { return weakMapPrototype; }
         DynamicObject* GetWeakSetPrototype() { return weakSetPrototype; }
         DynamicObject* GetWeakRefPrototype() { return weakRefPrototype; }
+        DynamicObject* GetFinalizationRegistryPrototype() { return finalizationRegistryPrototype; }
         DynamicObject* GetSymbolPrototype() { return symbolPrototype; }
         DynamicObject* GetAsyncIteratorPrototype() const { return asyncIteratorPrototype; }
         DynamicObject* GetArrayIteratorPrototype() const { return arrayIteratorPrototype; }
@@ -173,6 +175,7 @@ namespace Js
         Field(RuntimeFunction*) weakMapConstructor;
         Field(RuntimeFunction*) weakSetConstructor;
         Field(RuntimeFunction*) weakRefConstructor;
+        Field(RuntimeFunction*) finalizationRegistryConstructor;
         Field(RuntimeFunction*) arrayConstructor;
         Field(RuntimeFunction*) typedArrayConstructor;
         Field(RuntimeFunction*) Int8ArrayConstructor;
@@ -273,6 +276,7 @@ namespace Js
         Field(DynamicObject*) weakMapPrototype;
         Field(DynamicObject*) weakSetPrototype;
         Field(DynamicObject*) weakRefPrototype;
+        Field(DynamicObject*) finalizationRegistryPrototype;
         Field(DynamicObject*) symbolPrototype;
         Field(DynamicObject*) asyncIteratorPrototype;           // aka %AsyncIteratorPrototype%
         Field(DynamicObject*) iteratorPrototype;           // aka %IteratorPrototype%
