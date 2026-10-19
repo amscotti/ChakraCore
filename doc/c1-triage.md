@@ -853,9 +853,13 @@ still owns JIT-configuration claims.)*
 | S14 P3 | Landed `0a723970e` | 280/0; full Annex B 765/17, 282/0 | 17 P4 declaration-instantiation collisions |
 | S14 P6 | Landed `8b52cc063` | 18/18, 10/0; broad 10/0 | unordered/global/let and dictionary snapshot cost; JIT |
 
-Full gates at this checkpoint: **1993/0 test**, **2045/0 debug-static**.
-All active feature/triage worktrees are merged. P7 (labeled-break/finally
-crash) is also landed. Next work items are P2/P4/P5.
+| S14 P4 | Landed `be630c7f6` | 150/0; 112 controls; 38 engine/4 host flips | body eval with non-simple params; R1/R2; JIT |
+| S14 P2 | Landed `526931bc5` | 192/0; 157/0; controls preserved | hidden outer lexical; JSC/Node delete difference; JIT |
+
+Full gates at this checkpoint: **1995/0 test**, **2047/0 debug-static**.
+All active feature/triage worktrees are merged. Next work item is P5
+assignment/PutValue, then S1 private/static, S8 typed-array tracking,
+S2 BigInt64Array, and S13 FinalizationRegistry.
 
 ## 7. Separate inventories
 

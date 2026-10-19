@@ -1,7 +1,10 @@
 # C2-S14 P4: global/eval declaration-instantiation collisions
 
-Status: **`<pending>`** (implementation and focused evidence on `s14-p4`;
-Mac interpreter/no-JIT only, JIT gated at B4). Base `ff170d34b`.
+Status: **landed in `be630c7f6`** (feature `5fc7ab0cc`; base `ff170d34b`).
+Integrated main gates **1994/2046**. Target selection **150/0** with 112
+prior controls/0 pass→fail. Mac interpreter/no-JIT only; JIT gated at B4.
+Tracked residual: body eval with non-simple parameters still over-reports
+SyntaxError (legacy expectations marked as non-conforming).
 
 ## Scope and spec operations
 

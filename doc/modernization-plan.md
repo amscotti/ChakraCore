@@ -590,11 +590,11 @@ Decision/rollback points:
 - [ ] C4: Published qualified ES2025 result on the claimed default configurations.
 
 **Latest integration checkpoint (2026-10-18):** main is clean at
-**1993/0 test** and **2045/0 debug-static** (573/573 and 546/546 steps).
+**1995/0 test** and **2047/0 debug-static** (573/573 and 546/546 steps).
 Merged lanes: S1 public instance fields, S2 arithmetic, S8 resizable
 ArrayBuffer/transfer, S13 WeakRef, S14 P1 statement completion, S14 P3
-Annex B block-function var skip, S14 P6 property enumeration, and S14 P7
-labeled-break/try-finally
+Annex B block-function var skip, S14 P6 property enumeration, S14 P7
+labeled-break/try-finally, and S14 P2/P4 eval/global declaration work
 ([c2-s1-public-fields.md](c2-s1-public-fields.md),
 [c2-s2-bigint-arithmetic.md](c2-s2-bigint-arithmetic.md),
 [c2-s8-resizable.md](c2-s8-resizable.md),
@@ -602,11 +602,10 @@ labeled-break/try-finally
 [c2-s14-statement-completion.md](c2-s14-statement-completion.md),
 [c2-s14-annexb-var-skip.md](c2-s14-annexb-var-skip.md),
 [c2-s14-enumeration-order.md](c2-s14-enumeration-order.md)). Integrated
-class corpus: **1,989/5,897**, **539 fail→pass / 0 pass→fail**. Next
-bounded S14 work: the pre-existing labeled-break/try-finally crash (P7),
-then P2/P4/P5; S1 private/static/computed, S8 typed-array tracking, S2
-BigInt64Array/Map-Set identity, and S13 FinalizationRegistry remain
-unblocked follow-ups. S3, S12, S6 default, B4 and C4 remain externally or
+class corpus: **1,989/5,897**, **539 fail→pass / 0 pass→fail**. Next bounded work: S14 P5 assignment/PutValue, then S1 private/static/
+computed fields, S8 typed-array tracking, S2 BigInt64Array/Map-Set identity,
+and S13 FinalizationRegistry. Tracked eval residuals: P4 body eval with
+non-simple parameters; P2 hidden outer lexical and JSC/Node delete difference. S3, S12, S6 default, B4 and C4 remain externally or
 gate blocked.
 
 **C2 batch status:** S4, S5, all of S10 (the copy-by-change half and

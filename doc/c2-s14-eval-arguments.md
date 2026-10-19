@@ -1,9 +1,12 @@
 # C2-S14 P2: direct-eval `arguments` declaration errors
 
-Status: **`<pending>`** (branch `s14-p2`, base `a2e921875`, merged P4
-integration `ef1c20cfc`), 2026-10-19. Target selection **192/192** with
-**157 fail→pass / 0 pass→fail** and the 35 passing controls preserved.
-Interpreter/Mac no-JIT only; JIT evidence is not claimed (see B4).
+Status: **landed in `526931bc5`** (feature `e1e93e396`, rebased over P4
+`ef1c20cfc`; base `a2e921875`), 2026-10-19. Integrated main gates
+**1995/2047**. Target selection **192/192** with **157 fail→pass / 0
+pass→fail** and the 35 controls preserved. Interpreter/Mac no-JIT only;
+JIT evidence is not claimed (see B4). Tracked residual: outer top-level
+`let`/`const arguments` hidden by a catch/block; delete follows JSC/spec,
+not Node 26.
 
 ## Scope and spec rule
 
