@@ -32,12 +32,12 @@ function f(one) { }
 function f(two) { }
 function f(two) { }
 
-Test 5: Inner shadows outer; parser skips the inner extension but the outer var fallback stays observable
+Test 5: Inner shadows outer; the inner extension is skipped and the outer block binding remains
 
 function f(outer) { }
 function f(inner) { }
 function f(outer) { }
-function f(inner) { }
+function f(outer) { }
 
 Test 6: Last declaration executed wins; loop and conditionals
 

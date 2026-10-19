@@ -154,15 +154,11 @@ var tests = [
         }
     },
     {
-        name: "nested sloppy block functions: inner extension is skipped but the outer var fallback stays observable",
+        name: "nested sloppy block functions, both call orders",
         body() {
-            // An ordinary sloppy function in an enclosing Block is a
-            // LexicallyDeclaredName, so replacing the inner declaration with
-            // "var f" is an early error and the parser creates no inner
-            // synthetic var. The emitted store is still observable because
-            // GetFuncScopeVarSym falls back to the outer Annex B var; test262
-            // expects 1 for both orders and needs the emitter/AST gate. These
-            // two assertions flip with that gate.
+            // test262 block-decl-nested-blocks-with-fun-decl.js: the inner
+            // declaration is not Annex-B applicable because the enclosing
+            // Block's ordinary function is a LexicalDeclaredName.
             function outerDeclaredLast() {
                 { { function f() { return 2; } } function f() { return 1; } }
                 return f();
@@ -171,8 +167,8 @@ var tests = [
                 { function f() { return 1; } { function f() { return 2; } } }
                 return f();
             }
-            assert.strictEqual(outerDeclaredLast(), 2);
-            assert.strictEqual(outerDeclaredFirst(), 2);
+            assert.strictEqual(outerDeclaredLast(), 1);
+            assert.strictEqual(outerDeclaredFirst(), 1);
 
             // Without an enclosing same-named declaration the ordinary
             // extension still applies, including through nested blocks.
@@ -186,6 +182,95 @@ var tests = [
                 { function annexBNestedSibling() { return 1; } }
                 { function annexBNestedSibling() { return 2; } }
                 assert.strictEqual(annexBNestedSibling(), 2);
+            }());
+        }
+    },
+    {
+        name: "same-named var, function, parameter and arguments bindings are not updated by skipped declarations",
+        body() {
+            // The extension is skipped because of the enclosing let, and the
+            // var binding must keep its own value (the emitted gate prevents
+            // GetFuncScopeVarSym from finding it).
+            function annexBVarIdentity() {
+                var f = "V";
+                { let f = "L"; { function f() { return "B"; } } }
+                return typeof f + ":" + f;
+            }
+            assert.strictEqual(annexBVarIdentity(), "string:V");
+
+            function annexBFunctionIdentity() {
+                function f() { return "T"; }
+                { let f = "L"; { function f() { return "B"; } } }
+                return f();
+            }
+            assert.strictEqual(annexBFunctionIdentity(), "T");
+
+            function annexBParamIdentity(f) {
+                { let f = "L"; { function f() {} } }
+                return typeof f;
+            }
+            assert.strictEqual(annexBParamIdentity(7), "number");
+
+            function annexBGenVar() {
+                var f = "V";
+                { function* f() {} }
+                return typeof f + ":" + f;
+            }
+            function annexBAsyncVar() {
+                var f = "V";
+                { async function f() {} }
+                return typeof f + ":" + f;
+            }
+            function annexBAsyncGenVar() {
+                var f = "V";
+                { async function* f() {} }
+                return typeof f + ":" + f;
+            }
+            assert.strictEqual(annexBGenVar(), "string:V");
+            assert.strictEqual(annexBAsyncVar(), "string:V");
+            assert.strictEqual(annexBAsyncGenVar(), "string:V");
+        }
+    },
+    {
+        name: "parameter, rest/default parameter and arguments exclusions",
+        body() {
+            function annexBParamPlain(f) {
+                { function f() {} }
+                return typeof f + ":" + f;
+            }
+            function annexBParamDefault(f = 7) {
+                { function f() {} }
+                return typeof f + ":" + f;
+            }
+            function annexBRest(...args) {
+                { function args() {} }
+                return Array.isArray(args) + ":" + args.length;
+            }
+            function annexBArguments() {
+                { function arguments() {} }
+                return arguments.toString();
+            }
+            function annexBArgumentsRest(..._) {
+                { function arguments() {} }
+                return arguments.toString();
+            }
+            assert.strictEqual(annexBParamPlain(7), "number:7");
+            assert.strictEqual(annexBParamDefault(), "number:7");
+            assert.strictEqual(annexBRest(1, 2), "true:2");
+            assert.strictEqual(annexBArguments(), "[object Arguments]");
+            assert.strictEqual(annexBArgumentsRest(), "[object Arguments]");
+
+            // A genuinely applicable block function still updates an existing
+            // function-scope var/function binding.
+            (function () {
+                var annexBStillVar = "before";
+                { function annexBStillVar() { return "block"; } }
+                assert.strictEqual(annexBStillVar(), "block");
+            }());
+            (function () {
+                { function annexBStillFn() { return "block"; } }
+                function annexBStillFn() { return "top"; }
+                assert.strictEqual(annexBStillFn(), "block");
             }());
         }
     },

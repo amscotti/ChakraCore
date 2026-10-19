@@ -1,6 +1,6 @@
 # C2-S14 P3: Annex B block-function var-extension skip
 
-Status: **`<pending>`** — follow-up draft commit on `s14-p3` on top of `afd8aef9e`.
+Status: **`<pending>`** — follow-up draft commit on `s14-p3` on top of `91e0d8fc7`.
 Interpreter/Mac no-JIT verified; JIT evidence is not claimed (see B4).
 Integration owns the shared plan/triage update and gate counts.
 
@@ -13,8 +13,9 @@ function-scoped `var` binding:
 `EvalDeclarationInstantiation`) and the `IfStatement` production in B.3.3.
 The extension is created only if replacing that one `FunctionDeclaration` with a
 `VariableStatement` having the same name would not produce an early error in the
-enclosing function body, script or eval body. Generator, async and
-async-generator declarations are not `FunctionDeclaration` and never receive it.
+enclosing function body, script or eval body, and F is not in `paramNames`.
+Generator, async and async-generator declarations are not `FunctionDeclaration`
+and never receive it.
 
 The engine previously created the synthetic `ParseNodeVar` unconditionally for
 every sloppy function declaration whose current block was `Regular`. That made
@@ -55,22 +56,38 @@ eval `let`/`const`.
   is inside this construct". A sloppy function declaration in the current
   construct only conflicts with descendants (`declBlockId > current`), not
   same-block duplicates. Sibling lexical names do not conflict.
+- Registration also applies the B.3.3.1 `paramNames` exclusion
+  (`AnnexBVarExcludedByParameterNames`): a formal (simple, rest or destructured)
+  with the same name, or the referenceable built-in `arguments` binding, means
+  the extension does not apply. This uses the parameter scope's `STFormal`
+  symbols, so it works in both AST and fast-scan/deferred modes.
 - When the enclosing function body (or the global/eval var-scope block) closes,
   `FinalizeAnnexBPendingVars` creates the synthetic `ParseNodeVar`s for
-  non-conflicting entries, in source order, and marks them
-  `isBlockScopeFncDeclVar`. Conflicting entries are absent, so no synthetic
-  function-scope symbol is created by the parser. `GetFuncScopeVarSym` still
-  falls back to any same-named body/parameter/`arguments` symbol; that residual
-  is described below.
+  applicable entries, in source order, and marks them
+  `isBlockScopeFncDeclVar`. It also sets the per-declaration AST flag
+  `ParseNodeFnc::isAnnexBVarExtension`; skipped/conflicting/excluded
+  declarations leave it false.
+- `ByteCodeEmitter::EmitAssignmentToFuncName` now emits the synthetic
+  function-scope store only when that AST flag is set. This matters because
+  `Symbol::GetFuncScopeVarSym` can find an unrelated same-named body-scope var,
+  parameter or `arguments` symbol; a skipped declaration must not update it.
+  Ordinary function declarations keep their existing emission path (the flag is
+  false and `GetFuncScopeVarSym` is null for non-block declarations).
+- The flag lives on the declaration node, not in `ScopeInfo`. Deferred bodies
+  reparse their declarations and run the same parser decision before emission;
+  a deferred block-function declaration retains its node and flag when its body
+  is later undeferred. Fast-scan, `-force:deferparse`, deferred-scope restore
+  and the legacy cached-scope/serialized variants were exercised by the runs
+  below.
 - `FinishParseBlock` runs the finalize before symbol binding. The deferred-scope
   path (`ParseType_Deferred` with restored `ScopeInfo`) also runs it before
   `FinishScopeInfo`. Fast-scanned deferred bodies use the same
   `FinishParseBlock` hook. The saved `m_ppnodeVar` tail is advanced only when it
   is a link in the current function's var list, so the subsequent
   `ParseFncDeclInternal` list termination does not drop the appended nodes.
-- No AST/deferred-stub payload or bytecode emitter code changed. The only
-  bytecode difference is the intended absence/presence of the synthetic var
-  binding. Parser state lives in the parse arena and is not retained.
+- The only emitter change is the flag gate above; no other bytecode or runtime
+  instantiation code changed. Parser state lives in the parse arena and is not
+  retained.
 
 ## Evidence
 
@@ -81,7 +98,7 @@ Pinned corpus `2e0a56762801e275a9fdf96dc49d90ba0cddcf63`, flags
 dylib `27e9fe54c06ec2f23d898771aba89d9c83894084a4d0cccb73fb2ca4c73588f6`);
 "after" is the local test-profile binary (`ch`
 `d8cfc255702ed0683efb2a96f371f1be7923d5c2c75181396123a5abf866981d`, dylib
-`5db456964c516289e02f1eecd78547a0461a51cf421ab66c2213014abc75b574`). Every command was run under
+`9bdd4c44593811036ea07e285faa986493cbfd3f77fce6bb783415f5a3a9e833`). Every command was run under
 `/tmp/opencode/cc-gate-lock.sh` with `--checkout "$PWD/out/test262"` and a local
 `out/` directory; no `--prepare` and no full `zig build check`.
 
@@ -91,34 +108,31 @@ P3 selection
 | Run | Passed | Failed | Fail→pass | Pass→fail |
 |---|---:|---:|---:|---:|
 | before, `out/test262-p3-before` | 16 | 264 | — | — |
-| after, `out/test262-p3b-after` | **280** | **0** | **264** | **0** |
-| after with `-force:deferparse`, `out/test262-p3b-after-defer` | **280** | **0** | — | — |
+| after, `out/test262-gate-selection` | **280** | **0** | **264** | **0** |
+| after with `-force:deferparse`, `out/test262-gate-selection-defer` | **280** | **0** | — | — |
 
 Full three Annex B directories (782 scenarios, 781 files):
 
 | Run | Passed | Failed | Fail→pass | Pass→fail |
 |---|---:|---:|---:|---:|
 | before, `out/test262-p3-dirs-before` | 483 | 299 | — | — |
-| after, `out/test262-p3b-dirs-after` | **747** | **35** | **264** | **0** |
-| after with `-force:deferparse`, `out/test262-p3b-dirs-after-defer` | **747** | **35** | — | — |
+| after, `out/test262-gate-dirs` | **765** | **17** | **282** | **0** |
+| after with `-force:deferparse`, `out/test262-gate-dirs-defer` | **765** | **17** | — | — |
 
-The 35 remaining failures are: 16 eval
-`existing-global-init`/`existing-non-enumerable-global-init` cases, 17
-function-code `skip-param`/`skip-dft-param`/`skip-arguments` cases, one
-`nested-blocks-with-fun-decl`, and
-`global-code/script-decl-lex-collision.js`. None was passing before
-(pass→fail is zero in both the selection and the full directories). The nested
-case is now skipped by the parser too, but its runtime assertion still sees the
-outer Annex B var through the emitter fallback (next section), so the
-fail→pass count stays 264.
+The 17 remaining failures are all P4 declaration-instantiation collisions:
+16 eval `existing-global-init`/`existing-non-enumerable-global-init` cases and
+`global-code/script-decl-lex-collision.js`. The 17 param/dft-arg/arguments
+scenarios and `block-decl-nested-blocks-with-fun-decl.js` now pass. None of the
+remaining failures was passing before (pass→fail is zero in both the selection
+and the full directories).
 
 Controls:
 
 | Corpus | Before | After |
 |---|---:|---:|
-| `test/language/block-scope/**/*.js` (287 scenarios, 145 files) | 287/0 | **287/0** (`out/test262-p3b-blockscope`) |
+| `test/language/block-scope/**/*.js` (287 scenarios, 145 files) | 287/0 | **287/0** (`out/test262-gate-blockscope`) |
 | same, `-force:deferparse` | — | **287/0** |
-| `scope-lex-{generator,async-function,async-generator}.js` | 3/3 (3 failures) | **6/0** (3 fail→pass; `out/test262-p3b-switch`) |
+| `scope-lex-{generator,async-function,async-generator}.js` | 3/3 (3 failures) | **6/0** (3 fail→pass; `out/test262-gate-switch`) |
 
 The three switch tests are the extra controls requested by the triage:
 generator/async/async-generator block functions no longer receive an ordinary
@@ -130,11 +144,11 @@ Focused tests:
   `test/es7/rlexe.xml` with `-args summary -endargs`: **pass**, also with
   `-force:deferparse`. It covers function/global code and direct/indirect eval,
   block/for/for-in/for-of/switch/catch-pattern skips, later lexical names
-  (same-block and class cases), nested/sibling *valid* hoisting controls, valid
-  ordinary hoisting (duplicate functions, `var`, top-level function,
-  eval/global), strict mode, and generator/async/async-generator controls. It
-  also pins the A/B nested-conflict residual: both call orders currently
-  observe 2 (test262 expects 1) because of the emitter fallback below.
+  (same-block and class cases), nested/sibling hoisting controls, A/B nested
+  conflict in both call orders (test262's 1/1), same-named `var`/function/
+  parameter/rest/default/`arguments` gating, generator/async/async-generator
+  controls, strict mode, and valid ordinary hoisting (duplicate functions,
+  `var`, top-level function, eval/global).
 - `python3 test/runtests.py -b "$PWD/zig-out/bin/ch" -t
   --variants=disable_jit test/es7`: **54 passed / 0 failed**, including
   `test/es7/blockscope-early-errors.js`.
@@ -143,16 +157,18 @@ Focused tests:
   --variants=disable_jit`: **1989 passed / 0 failed**. The extra test is this
   batch's new file; integration owns gate pin counts.
 
-Deliberate legacy expectation update: `test/es6/blockscope-functionbinding.js`
-Tests 2 and 3 referenced the block function name outside its lexical block.
-Those references now throw `ReferenceError` because the extension is correctly
-skipped; the test catches the error and
-`blockscope-functionbinding.baseline` records `ReferenceError` on those four
-lines. Test 2/3/5 names and comments no longer claim a function-scope leak; Test
-5 output is unchanged because its inner store still reaches the outer Annex B
-var through the emitter fallback. `blockscope-functionbinding.js` and the
-baseline header text were changed only for those names/comments and the four
-`ReferenceError` expectations.
+Deliberate legacy expectation updates (non-conforming old Annex B behavior):
+`test/es6/blockscope-functionbinding.js` Tests 2 and 3 referenced the block
+function name outside its lexical block; those references now throw
+`ReferenceError` and the test catches them, with four `ReferenceError` lines in
+the baseline. Test 5's inner extension is now skipped, so its final print is the
+outer block function instead of the inner one; the section name/comment and
+baseline line were updated. `test/es6/default.js` f14 and
+`test/es6/default-splitscope.js` f25 expected a block function named
+`arguments` to replace the built-in arguments binding. Per B.3.3.1 that binding
+is in `paramNames`, so the extension is skipped; those assertions now check that
+`arguments` remains the argument object and is not callable. All other legacy
+cases remain unchanged.
 
 ## Memory ownership record and review receipt
 
@@ -164,7 +180,8 @@ Domain/allocator: Parser arena for one parse job (including deferred/background
 Physical base/extent/alignment/release: arena blocks; released by existing
   parser arena teardown, not by this code.
 Logical length/views: linked pending list plus per-name map; borrowed only
-  during parsing, never stored in AST/bytecode/ScopeInfo.
+  during parsing, never stored in bytecode/ScopeInfo. The surviving decision is
+  one bool on the declaration ParseNodeFnc (arena lifetime).
 Owner/transfer: enclosing function's BlockInfoStack; transferred to no one.
   Finalize clears the owner list/map and converts survivors to ParseNodeVar.
 Invalidation: arena teardown; finalize; block pops. No GC/detach/mutation
@@ -177,17 +194,20 @@ Accounting/bound: one pending record per sloppy ordinary block function, one
   per-name map entry per distinct name per function, one conflict-map entry per
   lexical name in a non-source lexical block. Not per enclosing block depth.
 Tests: P3 selection 280/280 eager and force:deferparse; full three dirs
-  483→747 with 264 fail→pass and 0 pass→fail (35 residual); block-scope
+  483→765 with 282 fail→pass and 0 pass→fail (17 P4 residual); block-scope
   287/287; switch controls 6/0; es7 54/0; legacy 1989/0.
-Remaining uncertainty: no sanitizer, JIT, concurrency or OOM-injection run.
+Remaining uncertainty: no sanitizer, JIT, concurrency or OOM-injection run; the
+  AST flag is not a serialized field (it is recomputed on reparse and retained
+  on an undeferred declaration node).
 ```
 
 Review checked the before/after-declaration cases (lexical before and after the
 block function), duplicate ordinary functions in the same vs an enclosing
-source block (both A/B source orders), sibling-block isolation,
-generator/async exclusion, simple-vs-pattern catch, eval/global top-level
-lexicals, deferred fast scan vs deferred reparse, and the `m_ppnodeVar` tail
-advance that keeps the appended nodes linked. A first draft that deferred the
+source block (both A/B source orders), sibling-block isolation, formal/rest/
+default/`arguments` exclusion, generator/async exclusion, simple-vs-pattern
+catch, eval/global top-level lexicals, deferred fast scan vs deferred reparse,
+the `m_ppnodeVar` tail advance, and the emitter flag gate for same-named
+`var`/function/parameter/`arguments` bindings. A first draft that deferred the
 nodes without advancing that tail lost the synthetic binding and crashed valid
 hoisting (`test/es6/blockscope-functionbinding.js`); the final code advances it
 only when the saved tail belongs to the current function, and the legacy suite
@@ -195,40 +215,25 @@ and the full Annex B directories pass.
 
 ## Residual and risks
 
-- **Emitter fallback (in-scope but not changed here).** Annex B emission is
-  still not gated by the parser's skip decision. `Symbol::GetFuncScopeVarSym`
-  searches the enclosing function body scope and then its parameter scope for
-  any same-named symbol, and `EmitAssignmentToFuncName` emits the store whenever
-  that search succeeds. A same-named user `var`, an outer Annex B var, a formal
-  parameter or `arguments` therefore keeps the emitted store observable even
-  when the parser created no synthetic var node.
-  - This is why the 17 function-code `skip-param`, `skip-dft-param` and
-    `skip-arguments` scenarios still fail: the name is a formal or `arguments`
-    and the parser-only skip cannot suppress the store.
-  - It is also why `block-decl-nested-blocks-with-fun-decl.js` still observes
-    `f() === 2` (test262 expects 1) and why the focused A/B probes both observe
-    2: the parser now marks the inner declaration as conflicting (an ordinary
-    sloppy function in an enclosing Block is lexical), but the outer block
-    function's Annex B var is found by the fallback.
-  - Fixing these needs a per-declaration AST flag set by the parser and consumed
-    by the emitter (an emitter/AST gate), or an equivalent check in
-    `GetFuncScopeVarSym`/`EmitAssignmentToFuncName`. This batch deliberately
-    does not touch emitter/runtime code; the parser conflict decision is the
-    prerequisite.
+- No P3-selection residual remains. Full three-directory residual is 17 P4
+  scenarios: 16 eval `existing-global-init`/
+  `existing-non-enumerable-global-init` cases and
+  `global-code/script-decl-lex-collision.js`. They are declaration-
+  instantiation collisions outside this slice and unchanged.
 - `EvalDeclarationInstantiation` runtime `bindingExists` checks against a
   caller lexical environment are runtime instantiation, not the parse-time
   early-error rule; not changed here.
-- The 16 eval `existing-global-init` failures and
-  `global-code/script-decl-lex-collision.js` belong to the P4
-  declaration-instantiation collision cluster.
-- The source text of `test/es6/blockscope-functionbinding.js` was kept
-  otherwise intact; Test 2/3 now catch the invalid outer references, the four
-  baseline output lines changed deliberately, and Test 5's name/comment records
-  the emitter-fallback residual (its output is unchanged).
+- The AST flag is recomputed during deferred/scope-restored body parsing and
+  retained on a declaration node whose body is later undeferred. It is not a
+  field in `DeferredFunctionStub` or `ScopeInfo`; the force:deferparse corpus,
+  legacy `-force:CachedScope` and serialized variants passed, but a dedicated
+  bytecode-cache test for this flag was not added.
+- Legacy expectations updated deliberately as listed above; no other source
+  changes were made to those files.
 
 ## B4 note
 
-Parser/declaration-instantiation only; no emitter, GC, JIT or runtime
-instantiation code changed. Execution evidence is Mac no-JIT (test profile and
-`-force:deferparse`), plus the legacy disable-JIT suite. B4 still owns any
-JIT-configuration claim.
+Parser/declaration-instantiation plus one bytecode-emitter gate; no GC, JIT or
+runtime-instantiation code changed. Execution evidence is Mac no-JIT (test
+profile and `-force:deferparse`), plus the legacy disable-JIT suite. B4 still
+owns any JIT-configuration claim.

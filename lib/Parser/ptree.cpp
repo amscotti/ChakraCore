@@ -426,6 +426,7 @@ ParseNodeFnc::ParseNodeFnc(OpCode nop, charcount_t ichMin, charcount_t ichLim)
     this->hintOffset = 0;
     this->hintLength = 0;
     this->isNameIdentifierRef = true;
+    this->isAnnexBVarExtension = false;
     this->nestedFuncEscapes = false;
     this->hasSuperCallInConstructorLambda = false;
     this->isClassFieldInitializerContext = false;

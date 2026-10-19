@@ -57,10 +57,12 @@ struct AnnexBPendingVar
 {
     IdentPtr pid;
     ParseNodeFnc *owner;                    // function (or global program) receiving the var
+    ParseNodeFnc *funcNode;                 // block-level declaration node
     uint32 declBlockId;                     // block id active at the declaration
     charcount_t ichMin;
     charcount_t ichLim;
     bool hasConflict;
+    bool isExcludedByParameterNames;
     AnnexBPendingVar *next;                 // owner list, source order
     AnnexBPendingVar *nextByName;
 };
@@ -1814,7 +1816,42 @@ bool Parser::AnnexBVarWouldConflict(IdentPtr pid)
     return false;
 }
 
-void Parser::RegisterAnnexBPendingVar(IdentPtr pid)
+bool Parser::AnnexBVarExcludedByParameterNames(IdentPtr pid)
+{
+    ParseNodeFnc *pnodeFnc = GetCurrentFunctionNode();
+    if (pnodeFnc == nullptr || pnodeFnc->nop != knopFncDecl)
+    {
+        // Global/eval code has no parameterNames.
+        return false;
+    }
+
+    // B.3.3.1 also requires F not to be in paramNames. Formals carry STFormal
+    // in the parameter scope in both AST and fast-scan modes.
+    Scope *paramScope = pnodeFnc->pnodeScopes != nullptr ? pnodeFnc->pnodeScopes->scope : nullptr;
+    if (paramScope != nullptr)
+    {
+        SymbolName const symName(reinterpret_cast<const char16*>(pid->Psz()), pid->Cch());
+        Symbol *sym = paramScope->FindLocalSymbol(symName);
+        if (sym != nullptr && sym->GetSymbolType() == STFormal)
+        {
+            return true;
+        }
+    }
+
+    if (pid == wellKnownPropertyPids.arguments)
+    {
+        // Mirror UpdateArgumentsNode: the built-in arguments binding is in
+        // paramNames only when it is referenceable.
+        bool overriddenByDecl = (pnodeFnc->grfpn & PNodeFlags::fpnArguments_overriddenByDecl) != 0;
+        bool overriddenInParam = (pnodeFnc->grfpn & PNodeFlags::fpnArguments_overriddenInParam) != 0;
+        return !pnodeFnc->IsLambda() &&
+            !overriddenInParam &&
+            !(overriddenByDecl && pnodeFnc->IsBodyAndParamScopeMerged());
+    }
+    return false;
+}
+
+void Parser::RegisterAnnexBPendingVar(IdentPtr pid, ParseNodeFnc *pnodeFnc)
 {
     BlockInfoStack *functionBlockInfo = GetCurrentFunctionBlockInfo();
     if (functionBlockInfo->annexBPendingMap == nullptr)
@@ -1825,10 +1862,12 @@ void Parser::RegisterAnnexBPendingVar(IdentPtr pid)
     AnnexBPendingVar *pending = Anew(&m_nodeAllocator, AnnexBPendingVar);
     pending->pid = pid;
     pending->owner = GetCurrentFunctionNode();
+    pending->funcNode = pnodeFnc;
     pending->declBlockId = GetCurrentBlock()->blockId;
     pending->ichMin = this->GetScanner()->IchMinTok();
     pending->ichLim = this->GetScanner()->IchLimTok();
     pending->hasConflict = AnnexBVarWouldConflict(pid);
+    pending->isExcludedByParameterNames = AnnexBVarExcludedByParameterNames(pid);
     pending->next = nullptr;
     pending->nextByName = nullptr;
 
@@ -1865,10 +1904,11 @@ void Parser::FinalizeAnnexBPendingVars(BlockInfoStack *blockInfo)
     ParseNodePtr *const ppnodeVarSave = m_ppnodeVar;
     for (; pending != nullptr; pending = pending->next)
     {
-        if (pending->hasConflict)
+        if (pending->hasConflict || pending->isExcludedByParameterNames)
         {
             // Replacing this declaration with "var f;" would be an early
-            // error, so Annex B does not create the synthetic binding.
+            // error, or F is in the parameter names (including the built-in
+            // arguments binding), so Annex B does not create the extension.
             continue;
         }
 
@@ -1885,6 +1925,7 @@ void Parser::FinalizeAnnexBPendingVars(BlockInfoStack *blockInfo)
 
         ParseNodeVar *vardecl = CreateVarDeclNode(pending->pid, STVariable, false, nullptr, false);
         vardecl->isBlockScopeFncDeclVar = true;
+        pending->funcNode->SetIsAnnexBVarExtension();
         vardecl->ichMin = pending->ichMin;
         vardecl->ichLim = pending->ichLim;
         if (vardecl->sym->GetIsFormal())
@@ -6277,7 +6318,7 @@ ParseNodeFnc * Parser::ParseFncDeclInternal(ushort flags, LPCOLESTR pNameHint, c
             // lexical declarations in the enclosing constructs are known: if
             // replacing the declaration with "var f;" would be an early
             // error, B.3.2.1/B.3.3.1 skip the binding entirely.
-            RegisterAnnexBPendingVar(pFncNamePid);
+            RegisterAnnexBPendingVar(pFncNamePid, pnodeFnc);
         }
     }
 

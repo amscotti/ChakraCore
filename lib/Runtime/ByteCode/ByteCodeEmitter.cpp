@@ -1222,7 +1222,12 @@ void EmitAssignmentToFuncName(ParseNodeFnc *pnodeFnc, ByteCodeGenerator *byteCod
 
             Symbol * fncScopeSym = sym->GetFuncScopeVarSym();
 
-            if (fncScopeSym)
+            // Annex B B.3.2.1/B.3.3.1: the synthetic function-scoped var store
+            // is only emitted for declarations the parser marked as receiving
+            // the extension. GetFuncScopeVarSym can find an unrelated
+            // same-named var/parameter/arguments binding, which must not be
+            // updated when the declaration was skipped.
+            if (fncScopeSym && pnodeFnc->IsAnnexBVarExtension())
             {
                 if (fncScopeSym->GetIsGlobal() && byteCodeGenerator->GetFlags() & fscrEval)
                 {

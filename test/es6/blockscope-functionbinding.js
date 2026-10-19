@@ -95,10 +95,9 @@ print('\nTest 4: Last executed declaration wins; simple case\n');
 
 
 // The parser skips the inner extension because the enclosing Block's ordinary
-// function is a lexical name. The emitted store is still observable because
-// GetFuncScopeVarSym falls back to the outer Annex B var; an emitter/AST gate
-// is needed to make this conform to test262 (expected value 1, not 2).
-print('\nTest 5: Inner shadows outer; parser skips the inner extension but the outer var fallback stays observable\n');
+// function is a lexical name, and the per-declaration emitter gate prevents
+// the fallback store; the outer block binding remains after the inner block.
+print('\nTest 5: Inner shadows outer; the inner extension is skipped and the outer block binding remains\n');
 (function ()
 {
     if (true)

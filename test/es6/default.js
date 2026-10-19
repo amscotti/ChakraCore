@@ -533,7 +533,8 @@ var tests = [
                 }
             }
             assert.areEqual(1, b, "Arguments value is the initial value in the param scope too");
-            assert.areEqual(10, arguments(), "Hoisted var binding is updated after the block is exected");
+            assert.areEqual(1, arguments[0], "The built-in arguments binding is not replaced by the block function");
+            assert.throws(function () { arguments(); }, TypeError, "Annex B does not extend the built-in arguments binding");
         }
         f14(1);
 

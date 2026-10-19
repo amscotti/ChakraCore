@@ -433,7 +433,8 @@ public:
     // the enclosing constructs are known.
     void MarkAnnexBPendingConflicts(IdentPtr pid, bool isSloppyFunctionDecl);
     bool AnnexBVarWouldConflict(IdentPtr pid);
-    void RegisterAnnexBPendingVar(IdentPtr pid);
+    bool AnnexBVarExcludedByParameterNames(IdentPtr pid);
+    void RegisterAnnexBPendingVar(IdentPtr pid, ParseNodeFnc *pnodeFnc);
     void FinalizeAnnexBPendingVars(BlockInfoStack *blockInfo);
     // Add a var declaration. Only use while parsing. Assumes m_ppnodeVar is pointing to the right place already
     ParseNodeVar * CreateVarDeclNode(IdentPtr pid, SymbolType symbolType, bool autoArgumentsObject = false, ParseNodePtr pnodeFnc = NULL, bool checkReDecl = true, bool isVarDeclaredName = false);
