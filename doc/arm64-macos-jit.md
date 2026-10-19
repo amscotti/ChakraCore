@@ -14,8 +14,10 @@ The functional work is committed on `jit/arm64-macos`: `07d6965e8` (`jit:
 native ARM64 macOS port`), `2372fcc81` (JIT build/runtime/bytecode checks),
 `9ccc535a8` (XData lifecycle + installer symlink hardening), `fcbc434c9`
 (generator write-barrier and empty-page leaks), and `9e1e4cb55` (full 64-bit
-InlineeCallInfo label). This milestone record is committed on top. The local
-tag `jit-arm64-macos-m1` marks the checkpoint; the branch is not merged.
+InlineeCallInfo label). The local tag `jit-arm64-macos-m1` marks that
+checkpoint. Post-M1 follow-ups are `209f18d80` (generator callee/strictness and
+Apple 16 KiB heap pages) and `a2dac362e` (suspended-generator reparse guard).
+The branch is not merged.
 The installed binary is `out/jit/bin/libChakraCore.dylib`, 26238904 bytes,
 timestamp 2026-10-18 22:54. `out/jit/bin/ch` is the host (788320 bytes); it
 dlopens the sibling dylib, so trust the dylib timestamp. The suite logs named
@@ -180,7 +182,7 @@ try/finally shapes. The three suite runs below were rerun on the 22:54 binary
   failures, zero signals. The two StackTrace line diffs are fixed.
 
 The branch is committed (`07d6965e8`, `2372fcc81`, `9ccc535a8`, `fcbc434c9`,
-`9e1e4cb55`) but not merged.
+`9e1e4cb55`, `209f18d80`, `a2dac362e`) but not merged.
 `zig build -Dprofile=jit check` runs the generic smoke, `check_jit.py`, and
 `verify_bytecode_pure.py --jit --verify`. The JIT static archive is
 deterministic (`ZERO_AR_DATE=1`, epoch/0:0 member metadata). The base object
@@ -362,8 +364,9 @@ A multi-lens review swarm (architecture, ABI, memory/GC, concurrency, build,
 test evidence, security, and full-diff hygiene) produced this deduplicated
 queue. All P1 merge blockers and the build-system findings are closed; the
 P2/P3 items below are a mix of fixed, open, pre-existing, or documented gaps.
-Runtime fixes landed across `07d6965e8`, `9ccc535a8`, `fcbc434c9`, and
-`9e1e4cb55`; build/test fixes landed in `2372fcc81`.
+Runtime fixes landed across `07d6965e8`, `9ccc535a8`, `fcbc434c9`,
+`9e1e4cb55`, `209f18d80`, and `a2dac362e`; build/test fixes landed in
+`2372fcc81`.
 
 **Resolved**
 
@@ -739,8 +742,8 @@ substitution: `ftell` on a FIFO is 0 and an empty script exits 0.
 Edits for this port go in the worktree only. The modernization checkout has
 carried unrelated uncommitted parser work during this effort; that work is not
 part of the JIT port and is not copied here. The port is committed as
-`07d6965e8`, `2372fcc81`, `9ccc535a8`, `fcbc434c9`, and `9e1e4cb55`; it is
-not merged.
+`07d6965e8`, `2372fcc81`, `9ccc535a8`, `fcbc434c9`, `9e1e4cb55`,
+`209f18d80`, and `a2dac362e`; it is not merged.
 
 The standing arrangement:
 
@@ -953,8 +956,9 @@ Do not attempt to modify these lowering methods without following Section 7.1.
 
 These are committed on `jit/arm64-macos` in `07d6965e8`; `2372fcc81` adds the
 JIT check gate, the deterministic archive, and the independent backend-count
-assert; `9ccc535a8`, `fcbc434c9`, and `9e1e4cb55` add the lifecycle, GC, and
-inline-frame fixes.
+assert; `9ccc535a8`, `fcbc434c9`, `9e1e4cb55`, `209f18d80`, and
+`a2dac362e` add the lifecycle, GC, inline-frame, callee/strictness, heap, and
+reparse-guard fixes.
 
 Build and install:
 
