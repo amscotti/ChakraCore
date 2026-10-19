@@ -100,18 +100,29 @@ branch is unchanged.
 - JIT `zig build -Dprofile=jit check`: green after regenerating the JIT
   builtin bytecode.
 - JIT `disable_jit`: **2012/0**.
-- JIT `interpreted`: **2247/556**. 398 failures are the asm/WASM gap; about
-  148 are non-asm paths, mostly `DebuggerCommon`, including **129 SIGABRT**
-  and **25 SIGSEGV**.
+- JIT `interpreted`: **2363/440** after the `ToVar` fallback below. 398
+  failures are the asm/WASM gap; 42 are other paths (26 SIGSEGV, 11 SIGABRT,
+  1 SIGFPE, 4 unclassified). 33 distinct non-asm paths remain.
 
 One representative full-JIT debugger test (`DebuggerCommon/default.js` with
-`-debugLaunch`) aborts in `GlobOpt::ToVar` at the
-`AssertOrFailFast(valueInfo)` at `lib/Backend/GlobOpt.cpp:11449` during
-foreground codegen. `-off:FullJit` passes; `-off:SimpleJit` and
-`-off:TypeSpec` still crash; `-off:GlobOpt` reaches the baseline but with a
-debugger-output mismatch. This is a debugger/full-JIT integration blocker,
-not a default-profile regression. The integration branch is therefore not
-merge-ready.
+`-debugLaunch`) reached `GlobOpt::ToVar` with a `BrNotAddr_A` Var that was not
+type-specialized. The normal optimizer assumed that was impossible and failed
+at `AssertOrFailFast(valueInfo)` (`lib/Backend/GlobOpt.cpp:11449`).
+`c355a78fc` now aborts this codegen attempt and falls back instead of emitting
+inconsistent IR. That fixed the debugger cluster and reduced the suite from
+556 to 440 failures; `DebuggerCommon/default.js` now passes.
+
+The remaining non-asm failures are separate newer-baseline coverage gaps:
+
+- `Basics/With2.js` passes with `-off:DynamicProfile`, pointing at the
+  profiled property-store/array helper path rather than the core JIT.
+- `es7/class-private-fields.js` passes with both JIT tiers disabled, as do
+  several other new feature tests (`bigint`, class fields/private methods,
+  resizable typed arrays); the old backend does not implement those bytecode
+  shapes.
+- The AOT C2 policy already says JIT claims are gated on B4; the integration
+  branch is not merge-ready until these tests are either ported or formally
+  scoped out of the JIT profile's supported coverage.
 
 #### Suspended-generator reparse guard (Apple ARM64)
 
