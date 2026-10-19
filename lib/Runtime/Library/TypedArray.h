@@ -516,6 +516,32 @@ namespace Js
             return TRUE;
         }
 
+        // BigInt element stores convert first (observable ToBigInt and its
+        // throws) and then silently ignore an OOB or detached store. They do
+        // not throw for a detached buffer once conversion succeeded.
+        inline BOOL BaseTypedBigIntDirectSetItem(_In_ uint32 index, _In_ Js::Var value, TypeName (*convFunc)(Var value, ScriptContext* scriptContext))
+        {
+            TypeName typedValue = convFunc(value, GetScriptContext());
+
+            if (this->IsDetachedBuffer() || index >= GetLength())
+            {
+                return FALSE;
+            }
+
+            Assert((index + 1)* sizeof(TypeName) + GetByteOffset() <= GetArrayBuffer()->GetByteLength());
+            TypeName* typedBuffer = (TypeName*)buffer;
+            typedBuffer[index] = typedValue;
+            return TRUE;
+        }
+
+        inline BOOL BaseTypedBigIntDirectSetItemNoSet(_In_ uint32 index, _In_ Js::Var value, TypeName (*convFunc)(Var value, ScriptContext* scriptContext))
+        {
+            // Invalid canonical numeric indexes still run the observable
+            // ToBigInt conversion, then perform no store.
+            convFunc(value, GetScriptContext());
+            return FALSE;
+        }
+
         inline BOOL BaseTypedDirectSetItemNoSet(_In_ uint32 index, _In_ Js::Var value, TypeName (*convFunc)(Var value, ScriptContext* scriptContext))
         {
             // This call can potentially invoke user code, and may end up detaching the underlying array (this).

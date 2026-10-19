@@ -751,7 +751,11 @@ namespace Js
 
     BOOL TypedArrayBase::SetItem(uint32 index, Var value, PropertyOperationFlags flags)
     {
-        if (flags == PropertyOperation_None && index >= GetLength())
+        // BigInt element stores perform ToBigInt even when the index is out
+        // of bounds or the view is detached; the conversion and its side
+        // effects are observable (IntegerIndexedElementSet). Other element
+        // types keep the existing early-out optimization.
+        if (flags == PropertyOperation_None && index >= GetLength() && !IsBigIntElementType())
         {
             return false;
         }
@@ -3660,13 +3664,13 @@ namespace Js
     template<>
     inline BOOL Int64Array::DirectSetItem(_In_ uint32 index, _In_ Js::Var value)
     {
-        return BaseTypedDirectSetItem(index, value, ToBigInt64Element);
+        return BaseTypedBigIntDirectSetItem(index, value, ToBigInt64Element);
     }
 
     template<>
     inline BOOL Int64Array::DirectSetItemNoSet(_In_ uint32 index, _In_ Js::Var value)
     {
-        return BaseTypedDirectSetItemNoSet(index, value, ToBigInt64Element);
+        return BaseTypedBigIntDirectSetItemNoSet(index, value, ToBigInt64Element);
     }
 
     template<>
@@ -3702,13 +3706,13 @@ namespace Js
     template<>
     inline BOOL Uint64Array::DirectSetItem(_In_ uint32 index, _In_ Js::Var value)
     {
-        return BaseTypedDirectSetItem(index, value, ToBigUint64Element);
+        return BaseTypedBigIntDirectSetItem(index, value, ToBigUint64Element);
     }
 
     template<>
     inline BOOL Uint64Array::DirectSetItemNoSet(_In_ uint32 index, _In_ Js::Var value)
     {
-        return BaseTypedDirectSetItemNoSet(index, value, ToBigUint64Element);
+        return BaseTypedBigIntDirectSetItemNoSet(index, value, ToBigUint64Element);
     }
 
     template<>

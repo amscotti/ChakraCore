@@ -1,9 +1,10 @@
 # C2-S2 sub-batch: BigInt64Array and BigUint64Array elements
 
-Status: **pending review** (implemented on `s2-bigint64`, base `7a2199595`);
-Mac ARM64 no-JIT evidence only. `ESBigInt` is still off by default and is
-required to expose these constructors; BigInt arithmetic and S8 typed-array
-tracking are otherwise unchanged.
+Status: **pending review** (implementation `bf2fe8521`, adversarial follow-up
+on `s2-bigint64`, base `7a2199595`); Mac ARM64 no-JIT evidence only.
+`ESBigInt` is still off by default and is required to expose these
+constructors; BigInt arithmetic and S8 typed-array tracking are otherwise
+unchanged.
 
 This slice adds the typed-array element family that was left out of
 [c2-s2-bigint](c2-s2-bigint.md) / [c2-s2-bigint-arithmetic](c2-s2-bigint-arithmetic.md)
@@ -25,15 +26,25 @@ key identity and BigInt literal property names remain out of scope.
    two's-complement bit patterns; the type ids are already inside the
    `TypedArrayBase` range that ArrayBuffer detach, species, subarray, slicing
    and resizable-view tracking understand.
-3. **Conversion.** Reads allocate a Recycler `JavascriptBigInt` directly from
-   the 64-bit element (`CreateFromInt64` / `CreateFromUInt64`), never through
-   a double, so `INT64_MIN` and values above 2^53 are exact. Stores call
+3. **Conversion and store ordering.** Reads allocate a Recycler
+   `JavascriptBigInt` directly from the 64-bit element
+   (`CreateFromInt64` / `CreateFromUInt64`), never through a double, so
+   `INT64_MIN` and values above 2^53 are exact. Stores call
    `JavascriptConversion::ToBigInt` once (observable coercion and its throws),
    take the low 64 two's-complement bits (`ToUInt64Low`) and store them.
    Number, `null`, `undefined` and Symbol stores throw `TypeError`; invalid
    BigInt strings throw `SyntaxError`. `BigInt.asIntN(64, x)` and
    `BigInt.asUintN(64, x)` are the reference semantics for signed/unsigned
    truncation.
+   Element assignment now routes `Int64Array`/`Uint64Array` through the typed
+   array fast path, and `SetItem` no longer early-returns before conversion
+   for BigInt elements. Consequently OOB (`10`, `-1`, `1.5`, `-0`, canonical
+   numeric strings) and detached stores run `ToBigInt` exactly once first;
+   a successful BigInt conversion then no-ops when the index is invalid or
+   the buffer is detached (no detached `TypeError`), while a Number value
+   throws from `ToBigInt` before that check in both sloppy and strict code.
+   The BigInt-specific direct-store helper deliberately replaces the generic
+   detached throw for this element family.
 4. **Methods.** `set`, `subarray`, `slice`, `map`, `filter`, `sort`
    (numeric default order and a BigInt-valued user comparator),
    `toSorted`, `toReversed`, `with`, `fill` (converted once for the typed
@@ -95,10 +106,17 @@ with `-ESBigInt -CollectGarbage -args summary -endargs`, covers:
   callbacks receiving BigInts, `fill` conversion-once, `with`,
   `copyWithin`, `reverse`, iteration, search, reduce/find and
   `toLocaleString`;
+- OOB (positive, negative, fractional, canonical-string), strict/sloppy and
+  detached stores: `ToBigInt` runs once before validation, Number values
+  throw, successful BigInt values no-op on invalid/detached views, conversion
+  failures propagate, and a `Uint8Array` control confirms the existing
+  non-BigInt path;
 - auto/fixed resizable-buffer grow, shrink, OOB, byteOffset and recovery;
 - index descriptors, `Object.keys`/`Reflect.ownKeys`, `in`, delete,
   `defineProperty` with BigInt versus Number, OOB no-op stores and large
-  value truncation.
+  value truncation. The `configurable` flag is intentionally not asserted:
+  the inherited typed-array descriptor reports false while spec/Node report
+  true (see residual below).
 
 ## Evidence
 
@@ -119,8 +137,9 @@ Before and after binaries were measured with the same host flags as S2:
 - `TypedArrayConstructors/BigInt64Array/**` + `BigUint64Array/**` +
   `TypedArray/**/BigInt/**` + `TypedArray/**/*BigInt*`: **1016 scenarios /
   512 files**, before **14 passed / 1002 failed**, after **958 passed /
-  58 failed** (`out/test262-s2b-before`, `out/test262-s2b-after2`):
-  **944 fail→pass / 0 pass→fail**, identical result keys.
+  58 failed** (`out/test262-s2b-before`, `out/test262-s2b-main-final`):
+  **944 fail→pass / 0 pass→fail**, identical result keys. The follow-up
+  store change keeps this set at 958/58 (0/0 against the pre-fix binary).
   - `TypedArrayConstructors/BigInt64Array`: **0/24 → 24/24**;
     `BigUint64Array`: **0/24 → 24/24**.
   - The extra `ctors-bigint/**` corpus (113 files) is **0/226 → 166/226**,
@@ -128,12 +147,27 @@ Before and after binaries were measured with the same host flags as S2:
     **214/226**, leaving only the 12 cross-realm prototype scenarios
     (`proto-from-ctor-realm*.js`, including the SAB variant), which fail
     identically for non-BigInt constructors on both binaries.
+- Expanded `TypedArrayConstructors/internals/**/BigInt/**`: **221
+  scenarios / 117 files** (`out/test262-s2b-internals-117-base`,
+  `-117-before`, `-final`). Base `7a2199595` **2/221**; pre-follow-up
+  `bf2fe8521` **163/221**; final **165/221** (56 failed), so the store fix is
+  **2 fail→pass / 0 pass→fail** against `bf2fe8521` and **163/0** against
+  base. Residual by directory: Set 22, Delete 10, DefineOwnProperty 8,
+  Get 6, GetOwnProperty 6, HasProperty 4. All are inherited: the non-BigInt
+  internals run (398 scenarios) is byte-for-byte **151/247** on both base
+  and final binaries, including descriptor `configurable`, `Reflect.set`,
+  detached reads/deletes and `Object.freeze`/`seal` behavior.
+- Resizable/out-of-bounds corpus (`TypedArray/**` and
+  `TypedArrayConstructors/**` with `*resizable*`/`*out-of-bounds*`,
+  `-ESBigInt`): **362 passed / 16 failed**, 378 scenarios / 191 files.
+  All 16 are inherited integer-indexed `Set`/`Delete` cases that also fail
+  for `Float64Array` and non-BigInt constructors on the base binary.
 - Supplementary same-binary run with `-ESSharedArrayBuffer`: the main
   corpus is **964/1016**, so the six SAB scenarios moved to pass and the
   remaining 52 are the two inherited classes below.
 - SHA-256: test launcher `d6f46c5af6dbe36fd97d01cbb04217eec2ec9aeb88a81c34c287ae6cc8a3a3dd`,
-  engine `8b609b2e2b490fa2cef42f53c32b27cd43108f01eb28527511a3586fdc5d3269`,
-  debug-static launcher `88dcd225dbf4869885e7c420d125b05babf449486785695090cb0f4b3f177823`.
+  engine `55f9a4fdc1af276ae53daabf5f17d28ae58620c3d28250b0fd5ac9c4149910c6`,
+  debug-static launcher `9a27f9f9e37f13f344d3f4a176218f45005ba716adb2c643cdbf61e9b20bd535`.
 - `git diff --check` clean.
 
 ## Residuals and classification
@@ -157,6 +191,18 @@ Before and after binaries were measured with the same host flags as S2:
   `newTarget` prototypes are not preserved from another realm for any typed
   array; both binaries fail the non-BigInt analog. No pass→fail is
   introduced.
+- **Typed-array descriptor and integrity semantics (inherited).**
+  `Object.getOwnPropertyDescriptor(ta, "0").configurable` is `false` in this
+  engine while spec/Node report `true`; `Reflect.set` on canonical numeric
+  OOB strings, `delete` on detached/OOB indexes, `Object.freeze` and related
+  `DefineOwnProperty` paths also retain the pre-existing typed-array
+  behavior. The new test asserts the value/writable/enumerable parts and
+  deliberately does not codify the wrong `configurable` value. The expanded
+  internals corpus quantifies the residual (56 scenarios); the same
+  non-BigInt tests have identical base/final counts.
+- **DataView 64-bit BigInt accessors.** `DataView.prototype.getBigInt64`,
+  `setBigInt64`, `getBigUint64` and `setBigUint64` are not implemented in
+  this slice; DataView numeric and Float16 methods are unchanged.
 - **Atomics BigInt operations** (`Atomics.add/sub/...` on BigInt64Array)
   are not part of this slice; non-BigInt Atomics paths are unchanged.
 - **JIT/B4.** No JIT lowering, inline cache, bailout or native frame change

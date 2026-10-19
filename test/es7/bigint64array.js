@@ -154,6 +154,65 @@ var tests = [
         }
     },
     {
+        name: "Out-of-bounds and detached stores convert before validation",
+        body() {
+            var view = new BigInt64Array(1);
+
+            // Sloppy and strict element assignment both run ToBigInt before
+            // the index/detached check, so Number values throw.
+            assertThrowsTypeError(function () { view[10] = 1; }, "OOB sloppy Number store");
+            assertThrowsTypeError(function () { view[-1] = 1; }, "negative Number store");
+            assertThrowsTypeError(function () { view[1.5] = 1; }, "fractional Number store");
+            assertThrowsTypeError(function () { "use strict"; view[10] = 1; }, "OOB strict Number store");
+
+            assert.doesNotThrow(function () { view[10] = 2n; }, "OOB BigInt store is a no-op");
+            assert.doesNotThrow(function () { "use strict"; view[10] = 2n; }, "OOB strict BigInt store");
+            assert.strictEqual(1, view.length, "OOB store does not grow the view");
+
+            var calls = 0;
+            view[10] = { valueOf() { calls++; return 3n; } };
+            assert.strictEqual(1, calls, "OOB store converts the value exactly once");
+
+            var throwingCalls = 0;
+            assertThrowsTypeError(function () {
+                view[10] = { valueOf() { throwingCalls++; return 3; } };
+            }, "OOB conversion failure propagates");
+            assert.strictEqual(1, throwingCalls, "OOB conversion failure runs once");
+
+            var detached = new BigInt64Array(1);
+            assert.strictEqual("function", typeof detached.buffer.transfer, "transfer is available");
+            detached.buffer.transfer();
+
+            assertThrowsTypeError(function () { detached[0] = 1; }, "detached Number store converts first");
+            assert.doesNotThrow(function () { detached[0] = 1n; }, "detached BigInt store is a no-op");
+            var detachedCalls = 0;
+            assert.doesNotThrow(function () {
+                detached[0] = { valueOf() { detachedCalls++; return 4n; } };
+            }, "detached object store converts first");
+            assert.strictEqual(1, detachedCalls, "detached store converts exactly once");
+
+            var detachedThrowCalls = 0;
+            var caught = false;
+            try {
+                detached[0] = { valueOf() { detachedThrowCalls++; throw new Error("store-conversion"); } };
+            } catch (e) {
+                caught = e.message === "store-conversion";
+            }
+            assert.isTrue(caught, "detached conversion failure propagates");
+            assert.strictEqual(1, detachedThrowCalls, "detached conversion failure runs once");
+
+            // Control: the existing non-BigInt path already converts OOB
+            // values and throws for a detached numeric store.
+            var control = new Uint8Array(1);
+            var controlCalls = 0;
+            control[10] = { valueOf() { controlCalls++; return 5; } };
+            assert.strictEqual(1, controlCalls, "Uint8 OOB store converts once");
+            var detachedControl = new Uint8Array(1);
+            detachedControl.buffer.transfer();
+            assertThrowsTypeError(function () { detachedControl[0] = 1; }, "detached Uint8 store still throws");
+        }
+    },
+    {
         name: "ArrayBuffer construction, offsets and byteLength",
         body() {
             var buffer = new ArrayBuffer(32);
@@ -399,7 +458,9 @@ var tests = [
             assert.strictEqual(1n, descriptor.value, "index value descriptor");
             assert.isTrue(descriptor.writable, "index writable");
             assert.isTrue(descriptor.enumerable, "index enumerable");
-            assert.isFalse(descriptor.configurable, "index not configurable");
+            // The inherited typed-array descriptor reports configurable false;
+            // spec/Node report true. Recorded as a residual rather than
+            // asserting the wrong value here.
 
             assert.strictEqual("0,1", Object.keys(view).join(","), "Object.keys");
             assert.strictEqual("0,1", Reflect.ownKeys(view).join(","), "Reflect.ownKeys");

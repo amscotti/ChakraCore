@@ -4901,7 +4901,9 @@ CommonNumber:
 
         TypeId instanceType = JavascriptOperators::GetTypeId(instance);
 
-        bool isTypedArray = (instanceType >= TypeIds_Int8Array && instanceType <= TypeIds_Float64Array);
+        bool isTypedArray = (instanceType >= TypeIds_Int8Array && instanceType <= TypeIds_Float64Array)
+            || instanceType == TypeIds_Int64Array
+            || instanceType == TypeIds_Uint64Array;
 
         if (isTypedArray)
         {
@@ -5053,6 +5055,27 @@ CommonNumber:
                     {
                         Float64Array* float64Array = UnsafeVarTo<Float64Array>(instance);
                         returnValue = float64Array->ValidateIndexAndDirectSetItem(index, value, &isNumericIndex);
+                    }
+                    break;
+                }
+                case TypeIds_Int64Array:
+                {
+                    // BigInt64Array has no virtual-array variant. Index
+                    // validation still runs DirectSetItemNoSet/ToBigInt for
+                    // OOB, negative, fractional and detached stores.
+                    if (VirtualTableInfo<Int64Array>::HasVirtualTable(instance))
+                    {
+                        Int64Array* int64Array = UnsafeVarTo<Int64Array>(instance);
+                        returnValue = int64Array->ValidateIndexAndDirectSetItem(index, value, &isNumericIndex);
+                    }
+                    break;
+                }
+                case TypeIds_Uint64Array:
+                {
+                    if (VirtualTableInfo<Uint64Array>::HasVirtualTable(instance))
+                    {
+                        Uint64Array* uint64Array = UnsafeVarTo<Uint64Array>(instance);
+                        returnValue = uint64Array->ValidateIndexAndDirectSetItem(index, value, &isNumericIndex);
                     }
                     break;
                 }
