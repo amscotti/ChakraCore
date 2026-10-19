@@ -578,8 +578,8 @@ pub fn build(b: *std.Build) void {
             }
         }
     }
-    // Static: 539 - 3 dylib TUs + TestHooks in ch = 537.
-    const expect_total: u32 = if (is_static) 537 else 539;
+    // Static: 540 - 3 dylib TUs + TestHooks in ch = 538.
+    const expect_total: u32 = if (is_static) 538 else 540;
     std.debug.assert(n == expect_total);
     const expect_singular: usize = if (is_static) 0 else 3;
     std.debug.assert(singular_libs.items.len == expect_singular);

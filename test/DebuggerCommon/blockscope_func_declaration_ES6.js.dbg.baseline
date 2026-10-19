@@ -3,6 +3,7 @@
     "this": {
       "Symbol.toStringTag": "string global",
       "WeakRef": "function <large string>",
+      "FinalizationRegistry": "function <large string>",
       "x": "undefined undefined",
       "foo": "undefined undefined",
       "bar": "undefined undefined"
@@ -19,6 +20,7 @@
     "this": {
       "Symbol.toStringTag": "string global",
       "WeakRef": "function <large string>",
+      "FinalizationRegistry": "function <large string>",
       "x": "number 1",
       "foo": "function <large string>",
       "bar": "function <large string>"

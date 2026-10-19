@@ -960,6 +960,7 @@ pub const library_group = Group{
         "lib/Runtime/Library/JavascriptWeakMap.cpp",
         "lib/Runtime/Library/JavascriptWeakSet.cpp",
         "lib/Runtime/Library/JavascriptWeakRef.cpp",
+        "lib/Runtime/Library/JavascriptFinalizationRegistry.cpp",
         "lib/Runtime/Library/JsBuiltInEngineInterfaceExtensionObject.cpp",
         "lib/Runtime/Library/LazyJSONString.cpp",
         "lib/Runtime/Library/LiteralString.cpp",

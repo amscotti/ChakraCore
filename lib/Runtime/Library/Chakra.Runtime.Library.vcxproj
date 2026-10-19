@@ -77,6 +77,7 @@
     <ClCompile Include="$(MSBuildThisFileDirectory)JavascriptWeakMap.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)JavascriptWeakSet.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)JavascriptWeakRef.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)JavascriptFinalizationRegistry.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)JavascriptTypedNumber.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)JSONParser.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)JSONScanner.cpp" />
@@ -225,6 +226,7 @@
     <ClInclude Include="JavascriptWeakMap.h" />
     <ClInclude Include="JavascriptWeakSet.h" />
     <ClInclude Include="JavascriptWeakRef.h" />
+    <ClInclude Include="JavascriptFinalizationRegistry.h" />
     <ClInclude Include="JSONParser.h" />
     <ClInclude Include="JSONScanner.h" />
     <ClInclude Include="MapOrSetDataList.h" />

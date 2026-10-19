@@ -1056,6 +1056,7 @@ namespace Js
         Output::Print(_u("    WeakMap                        %8d   %8d\n"), typeCount[TypeIds_WeakMap], instanceCount[TypeIds_WeakMap]);
         Output::Print(_u("    WeakSet                        %8d   %8d\n"), typeCount[TypeIds_WeakSet], instanceCount[TypeIds_WeakSet]);
         Output::Print(_u("    WeakRef                        %8d   %8d\n"), typeCount[TypeIds_WeakRef], instanceCount[TypeIds_WeakRef]);
+        Output::Print(_u("    FinalizationRegistry           %8d   %8d\n"), typeCount[TypeIds_FinalizationRegistry], instanceCount[TypeIds_FinalizationRegistry]);
         Output::Print(_u("    ArrayIterator                  %8d   %8d\n"), typeCount[TypeIds_ArrayIterator], instanceCount[TypeIds_ArrayIterator]);
         Output::Print(_u("    MapIterator                    %8d   %8d\n"), typeCount[TypeIds_MapIterator], instanceCount[TypeIds_MapIterator]);
         Output::Print(_u("    SetIterator                    %8d   %8d\n"), typeCount[TypeIds_SetIterator], instanceCount[TypeIds_SetIterator]);
@@ -2700,6 +2701,10 @@ ExitTempAllocator:
         if (isRoot && threadContext->GetCallRootLevel() == 1)
         {
             ClearKeptObjects();
+            // FinalizationRegistry cleanup jobs run after the target's
+            // collection at this host/job boundary, never synchronously
+            // inside the job that may still have the target on its stack.
+            threadContext->ScheduleFinalizationRegistryCleanupJobs();
         }
 
         if ((isRoot && threadContext->GetCallRootLevel() == 1) || isForcedEnd)
@@ -2722,6 +2727,11 @@ ExitTempAllocator:
         // cross-realm target added from this context is cleared by the
         // outermost root call, whichever realm owns that call.
         GetThreadContext()->ClearKeptObjects();
+    }
+
+    void ScriptContext::RegisterFinalizationRegistry(Js::JavascriptFinalizationRegistry* registry)
+    {
+        GetThreadContext()->RegisterFinalizationRegistry(registry);
     }
 
 #ifdef FAULT_INJECTION

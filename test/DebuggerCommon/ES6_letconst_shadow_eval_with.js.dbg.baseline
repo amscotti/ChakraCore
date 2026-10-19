@@ -3,6 +3,7 @@
     "this": {
       "Symbol.toStringTag": "string global",
       "WeakRef": "function <large string>",
+      "FinalizationRegistry": "function <large string>",
       "Run": "function <large string>"
     },
     "locals": {
@@ -24,6 +25,7 @@
     "this": {
       "Symbol.toStringTag": "string global",
       "WeakRef": "function <large string>",
+      "FinalizationRegistry": "function <large string>",
       "Run": "function <large string>"
     },
     "locals": {
@@ -45,6 +47,7 @@
     "this": {
       "Symbol.toStringTag": "string global",
       "WeakRef": "function <large string>",
+      "FinalizationRegistry": "function <large string>",
       "Run": "function <large string>"
     },
     "locals": {
@@ -66,6 +69,7 @@
     "this": {
       "Symbol.toStringTag": "string global",
       "WeakRef": "function <large string>",
+      "FinalizationRegistry": "function <large string>",
       "Run": "function <large string>"
     },
     "locals": {

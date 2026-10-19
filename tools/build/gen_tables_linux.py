@@ -5,7 +5,7 @@
 #-------------------------------------------------------------------------------------------------------
 """B4.3: generate tools/build/tables_linux.zig from the Linux reference build.ninja.
 
-The Linux engine graph (683 compiles across 34 target/language rules, incl.
+The Linux engine graph (684 compiles across 34 target/language rules, incl.
 Backend/WasmReader/wabt) is too large to hand-transcribe like the Mac tables.
 Instead this script extracts every compile edge's source list plus its
 (DEFINES, INCLUDES, FLAGS) triple from a reference ``build.ninja`` (produced by

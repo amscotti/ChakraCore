@@ -104,6 +104,7 @@
     "this": {
       "Symbol.toStringTag": "string global",
       "WeakRef": "function <large string>",
+      "FinalizationRegistry": "function <large string>",
       "a1": "number 10",
       "foo": "function <large string>",
       "sub_expression_step_into": "function <large string>"

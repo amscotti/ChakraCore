@@ -109,6 +109,7 @@
       "  this  ": {
         "Symbol.toStringTag": "string global",
         "WeakRef": "function function WeakRef() { [native code] }",
+        "FinalizationRegistry": "function function FinalizationRegistry() { [native code] }",
         "not_used": "number 0"
       }
     }
@@ -163,6 +164,7 @@
       "  this  ": {
         "Symbol.toStringTag": "string global",
         "WeakRef": "function function WeakRef() { [native code] }",
+        "FinalizationRegistry": "function function FinalizationRegistry() { [native code] }",
         "not_used": "number 0"
       }
     }

@@ -9954,6 +9954,7 @@
     "this": {
       "Symbol.toStringTag": "string global",
       "WeakRef": "function <large string>",
+      "FinalizationRegistry": "function <large string>",
       "glob": "Object {...}"
     },
     "arguments": {
@@ -9976,6 +9977,7 @@
     "this": {
       "Symbol.toStringTag": "string global",
       "WeakRef": "function <large string>",
+      "FinalizationRegistry": "function <large string>",
       "glob": "Object {...}"
     },
     "locals": {
@@ -10008,6 +10010,7 @@
     "this": {
       "Symbol.toStringTag": "string global",
       "WeakRef": "function <large string>",
+      "FinalizationRegistry": "function <large string>",
       "glob": "Object {...}"
     },
     "locals": {
@@ -10037,6 +10040,7 @@
     "this": {
       "Symbol.toStringTag": "string global",
       "WeakRef": "function <large string>",
+      "FinalizationRegistry": "function <large string>",
       "glob": "Object {...}"
     },
     "locals": {
@@ -10074,6 +10078,7 @@
     "this": {
       "Symbol.toStringTag": "string global",
       "WeakRef": "function <large string>",
+      "FinalizationRegistry": "function <large string>",
       "glob": "Object {...}"
     },
     "arguments": {
@@ -10096,6 +10101,7 @@
     "this": {
       "Symbol.toStringTag": "string global",
       "WeakRef": "function <large string>",
+      "FinalizationRegistry": "function <large string>",
       "glob": "Object {...}"
     },
     "locals": {
@@ -10122,6 +10128,7 @@
     "this": {
       "Symbol.toStringTag": "string global",
       "WeakRef": "function <large string>",
+      "FinalizationRegistry": "function <large string>",
       "glob": "Object {...}"
     },
     "locals": {
@@ -10144,6 +10151,7 @@
     "this": {
       "Symbol.toStringTag": "string global",
       "WeakRef": "function <large string>",
+      "FinalizationRegistry": "function <large string>",
       "glob": "Object {...}"
     },
     "locals": {
@@ -10174,6 +10182,7 @@
     "this": {
       "Symbol.toStringTag": "string global",
       "WeakRef": "function <large string>",
+      "FinalizationRegistry": "function <large string>",
       "glob": "Object {...}"
     },
     "arguments": {
@@ -10197,6 +10206,7 @@
     "this": {
       "Symbol.toStringTag": "string global",
       "WeakRef": "function <large string>",
+      "FinalizationRegistry": "function <large string>",
       "glob": "Object {...}"
     },
     "locals": {
@@ -10237,6 +10247,7 @@
     "this": {
       "Symbol.toStringTag": "string global",
       "WeakRef": "function <large string>",
+      "FinalizationRegistry": "function <large string>",
       "glob": "Object {...}"
     },
     "arguments": {
@@ -10259,6 +10270,7 @@
     "this": {
       "Symbol.toStringTag": "string global",
       "WeakRef": "function <large string>",
+      "FinalizationRegistry": "function <large string>",
       "glob": "Object {...}"
     },
     "locals": {
@@ -10298,6 +10310,7 @@
     "this": {
       "Symbol.toStringTag": "string global",
       "WeakRef": "function <large string>",
+      "FinalizationRegistry": "function <large string>",
       "glob": "Object {...}"
     },
     "locals": {
@@ -10338,6 +10351,7 @@
     "this": {
       "Symbol.toStringTag": "string global",
       "WeakRef": "function <large string>",
+      "FinalizationRegistry": "function <large string>",
       "glob": "Object {...}"
     },
     "locals": {
@@ -10394,6 +10408,7 @@
     "this": {
       "Symbol.toStringTag": "string global",
       "WeakRef": "function <large string>",
+      "FinalizationRegistry": "function <large string>",
       "glob": "Object {...}"
     },
     "arguments": {
@@ -10421,6 +10436,7 @@
     "this": {
       "Symbol.toStringTag": "string global",
       "WeakRef": "function <large string>",
+      "FinalizationRegistry": "function <large string>",
       "glob": "Object {...}"
     },
     "arguments": {
@@ -10449,6 +10465,7 @@
     "this": {
       "Symbol.toStringTag": "string global",
       "WeakRef": "function <large string>",
+      "FinalizationRegistry": "function <large string>",
       "glob": "Object {...}"
     },
     "arguments": {
@@ -10484,6 +10501,7 @@
     "this": {
       "Symbol.toStringTag": "string global",
       "WeakRef": "function <large string>",
+      "FinalizationRegistry": "function <large string>",
       "glob": "Object {...}"
     },
     "arguments": {
@@ -10511,6 +10529,7 @@
     "this": {
       "Symbol.toStringTag": "string global",
       "WeakRef": "function <large string>",
+      "FinalizationRegistry": "function <large string>",
       "glob": "Object {...}"
     },
     "arguments": {
@@ -10546,6 +10565,7 @@
     "this": {
       "Symbol.toStringTag": "string global",
       "WeakRef": "function <large string>",
+      "FinalizationRegistry": "function <large string>",
       "glob": "Object {...}"
     },
     "arguments": {

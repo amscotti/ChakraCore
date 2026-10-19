@@ -1367,6 +1367,7 @@ private:
         // reachable until the end of the current root host call/job.
         void KeepDuringJob(RecyclableObject* object);
         void ClearKeptObjects();
+        void RegisterFinalizationRegistry(Js::JavascriptFinalizationRegistry* registry);
 
         template <bool stackProbe, bool leaveForHost>
         bool LeaveScriptStart(void * frameAddress);

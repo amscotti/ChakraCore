@@ -57,6 +57,7 @@
 #include "Library/JavascriptWeakMap.h"
 #include "Library/JavascriptWeakSet.h"
 #include "Library/JavascriptWeakRef.h"
+#include "Library/JavascriptFinalizationRegistry.h"
 
 #include "Types/UnscopablesWrapperObject.h"
 #include "Types/PropertyIndexRanges.h"

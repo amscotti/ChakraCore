@@ -241,9 +241,11 @@ diff is broad; it is not a runtime behavior change.
 
 ## Residual
 
-- `FinalizationRegistry`: not implemented; its cleanup-job contract and
-  host-observable finalization remain a separate C3 project. The one WeakRef
-  corpus scenario that constructs a FinalizationRegistry stays failed.
+- `FinalizationRegistry`: the S13b follow-up implements the constructor,
+  `register`/`unregister`, and the host-job cleanup contract in
+  [c2-s13-finalization-registry.md](c2-s13-finalization-registry.md). The WeakRef
+  corpus scenario that constructs a FinalizationRegistry now passes (58/58
+  scenarios); timing/JIT limits are recorded in the follow-up.
 - S13's symbol entries in `WeakMap`/`WeakSet` remain strongly held by their
   per-collection symbol dictionaries. A symbol that is both a WeakMap key and a
   WeakRef target is therefore kept alive by the WeakMap; this is the

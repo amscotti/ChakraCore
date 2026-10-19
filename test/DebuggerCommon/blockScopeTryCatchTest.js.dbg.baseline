@@ -3,6 +3,7 @@
     "this": {
       "Symbol.toStringTag": "string global",
       "WeakRef": "function <large string>",
+      "FinalizationRegistry": "function <large string>",
       "blockScopeTryCatchTestFunc": "function <large string>"
     },
     "arguments": {
@@ -25,6 +26,7 @@
     "this": {
       "Symbol.toStringTag": "string global",
       "WeakRef": "function <large string>",
+      "FinalizationRegistry": "function <large string>",
       "blockScopeTryCatchTestFunc": "function <large string>"
     },
     "arguments": {

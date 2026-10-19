@@ -8,6 +8,12 @@
         "prototype": "Object {...}",
         "name": "string WeakRef"
       },
+      "FinalizationRegistry": {
+        "#__proto__": "function <large string>",
+        "length": "number 1",
+        "prototype": "Object {...}",
+        "name": "string <large string>"
+      },
       "foo": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
@@ -262,6 +268,12 @@
         "length": "number 1",
         "prototype": "Object {...}",
         "name": "string WeakRef"
+      },
+      "FinalizationRegistry": {
+        "#__proto__": "function <large string>",
+        "length": "number 1",
+        "prototype": "Object {...}",
+        "name": "string <large string>"
       },
       "foo": {
         "#__proto__": "function <large string>",
@@ -536,6 +548,7 @@
     "this": {
       "Symbol.toStringTag": "string global",
       "WeakRef": "function <large string>",
+      "FinalizationRegistry": "function <large string>",
       "foo": "function <large string>",
       "foo1": "function <large string>",
       "foo2": "function <large string>"
@@ -564,6 +577,7 @@
     "this": {
       "Symbol.toStringTag": "string global",
       "WeakRef": "function <large string>",
+      "FinalizationRegistry": "function <large string>",
       "foo": "function <large string>",
       "foo1": "function <large string>",
       "foo2": "function <large string>"
@@ -593,6 +607,7 @@
     "this": {
       "Symbol.toStringTag": "string global",
       "WeakRef": "function <large string>",
+      "FinalizationRegistry": "function <large string>",
       "foo": "function <large string>",
       "foo1": "function <large string>",
       "foo2": "function <large string>"
@@ -623,6 +638,7 @@
     "this": {
       "Symbol.toStringTag": "string global",
       "WeakRef": "function <large string>",
+      "FinalizationRegistry": "function <large string>",
       "foo": "function <large string>",
       "foo1": "function <large string>",
       "foo2": "function <large string>"

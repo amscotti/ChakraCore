@@ -16,6 +16,7 @@ namespace Js
     typedef JsUtil::List<ReturnedValue*> ReturnedValueList;
 #endif
     class DelayedFreeArrayBuffer;
+    class JavascriptFinalizationRegistry;
 }
 
 typedef BVSparse<ArenaAllocator> ActiveFunctionSet;
@@ -714,6 +715,11 @@ private:
     typedef JsUtil::List<Js::RecyclableObject*, Recycler> KeptObjectList;
     RecyclerRootPtr<KeptObjectList> keptObjects;
 
+    // FinalizationRegistry cleanup jobs are agent/thread-wide. The root keeps
+    // only leaf weak handles; a registry remains collectible while registered.
+    typedef JsUtil::List<RecyclerWeakReference<Js::JavascriptFinalizationRegistry>*, Recycler> FinalizationRegistryList;
+    RecyclerRootPtr<FinalizationRegistryList> finalizationRegistries;
+
     uint temporaryArenaAllocatorCount;
     uint temporaryGuestArenaAllocatorCount;
 
@@ -1122,6 +1128,12 @@ public:
     // (realm) on this agent/thread until the outermost root call ends.
     void KeepDuringJob(Js::RecyclableObject* object);
     void ClearKeptObjects();
+
+    // FinalizationRegistry support. RegisterFinalizationRegistry records a
+    // weak handle for the thread-wide registry list; the outermost host call
+    // boundary schedules cleanup jobs for registries with cleared targets.
+    void RegisterFinalizationRegistry(Js::JavascriptFinalizationRegistry* registry);
+    void ScheduleFinalizationRegistryCleanupJobs();
 
     Recycler* EnsureRecycler();
 

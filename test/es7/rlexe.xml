@@ -306,6 +306,13 @@
   </test>
   <test>
     <default>
+      <files>finalization-registry.js</files>
+      <compile-flags>-CollectGarbage -args summary -endargs</compile-flags>
+      <baseline>finalization-registry.js.baseline</baseline>
+    </default>
+  </test>
+  <test>
+    <default>
       <files>blockscope-early-errors.js</files>
       <compile-flags>-args summary -endargs</compile-flags>
     </default>

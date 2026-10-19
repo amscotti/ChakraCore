@@ -46,6 +46,12 @@
         "prototype": "Object {...}",
         "name": "string WeakRef"
       },
+      "FinalizationRegistry": {
+        "#__proto__": "function <large string>",
+        "length": "number 1",
+        "prototype": "Object {...}",
+        "name": "string <large string>"
+      },
       "i": "number 0",
       "g": {
         "#__proto__": "function <large string>",
@@ -220,6 +226,12 @@
         "length": "number 1",
         "prototype": "Object {...}",
         "name": "string WeakRef"
+      },
+      "FinalizationRegistry": {
+        "#__proto__": "function <large string>",
+        "length": "number 1",
+        "prototype": "Object {...}",
+        "name": "string <large string>"
       },
       "i": "number 1",
       "g": {
@@ -396,6 +408,12 @@
         "prototype": "Object {...}",
         "name": "string WeakRef"
       },
+      "FinalizationRegistry": {
+        "#__proto__": "function <large string>",
+        "length": "number 1",
+        "prototype": "Object {...}",
+        "name": "string <large string>"
+      },
       "i": "number 2",
       "g": {
         "#__proto__": "function <large string>",
@@ -571,6 +589,12 @@
         "prototype": "Object {...}",
         "name": "string WeakRef"
       },
+      "FinalizationRegistry": {
+        "#__proto__": "function <large string>",
+        "length": "number 1",
+        "prototype": "Object {...}",
+        "name": "string <large string>"
+      },
       "i": "number 3",
       "g": {
         "#__proto__": "function <large string>",
@@ -745,6 +769,12 @@
         "length": "number 1",
         "prototype": "Object {...}",
         "name": "string WeakRef"
+      },
+      "FinalizationRegistry": {
+        "#__proto__": "function <large string>",
+        "length": "number 1",
+        "prototype": "Object {...}",
+        "name": "string <large string>"
       },
       "i": "number 4",
       "g": {
@@ -878,6 +908,7 @@
     "this": {
       "Symbol.toStringTag": "string global",
       "WeakRef": "function <large string>",
+      "FinalizationRegistry": "function <large string>",
       "i": "number 5",
       "g": "function <large string>",
       "f": "function <large string>",
@@ -909,6 +940,7 @@
     "this": {
       "Symbol.toStringTag": "string global",
       "WeakRef": "function <large string>",
+      "FinalizationRegistry": "function <large string>",
       "i": "number 5",
       "g": "function <large string>",
       "f": "function <large string>",
