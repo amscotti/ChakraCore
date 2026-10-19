@@ -33,10 +33,12 @@ print('\nTest 1: Simple case with single block-scoped function\n');
     print(h);
 })();
 
-print('\nTest 2: Block-scoped function shadows outer let binding, but leaks into function scope\n');
+// The enclosing Block's let binding makes replacing the block function with
+// var an early error, so the parser creates no function-scope binding here.
+print('\nTest 2: Block-scoped function shadowed by an enclosing let binding; the extension is skipped\n');
 (function ()
 {
-    print(f);
+    try { print(f); } catch (e) { print(e.name); }
     if (true)
     {
         let f = 'let f';
@@ -48,14 +50,14 @@ print('\nTest 2: Block-scoped function shadows outer let binding, but leaks into
         }
         print(f);
     }
-    print(f);
+    try { print(f); } catch (e) { print(e.name); }
 })();
 
 
-print('\nTest 3: Assignment to function in block behaves like assigning let variable; function still leaks out to function scope; assignment does not affect function scope binding\n');
+print('\nTest 3: Assignment to function in block behaves like assigning let variable; the extension is skipped\n');
 (function ()
 {
-    print(f);
+    try { print(f); } catch (e) { print(e.name); }
     if (true)
     {
         let f = 'let f';
@@ -70,7 +72,7 @@ print('\nTest 3: Assignment to function in block behaves like assigning let vari
         f = 'reassigned outer let f';
         print(f);
     }
-    print(f);
+    try { print(f); } catch (e) { print(e.name); }
 })();
 
 
@@ -92,7 +94,10 @@ print('\nTest 4: Last executed declaration wins; simple case\n');
 })();
 
 
-print('\nTest 5: Inner shadows outer and last executed (inner) wins for function scope\n');
+// The parser skips the inner extension because the enclosing Block's ordinary
+// function is a lexical name, and the per-declaration emitter gate prevents
+// the fallback store; the outer block binding remains after the inner block.
+print('\nTest 5: Inner shadows outer; the inner extension is skipped and the outer block binding remains\n');
 (function ()
 {
     if (true)

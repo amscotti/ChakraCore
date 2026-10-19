@@ -538,6 +538,9 @@ public:
     IdentPtrSet *capturedNames;
     uint16 firstDefaultArg; // Position of the first default argument, if any
     bool isNameIdentifierRef;
+    // Parser-set Annex B signal: this block-level function declaration gets the
+    // synthetic function-scoped var extension. Consumed by EmitAssignmentToFuncName.
+    bool isAnnexBVarExtension;
     bool nestedFuncEscapes;
     bool canBeDeferred;
     bool hasSuperCallInConstructorLambda;
@@ -623,6 +626,7 @@ public:
     void SetUsesArguments(bool set = true) { SetFlags(kFunctionUsesArguments, set); }
     void SetIsDefaultModuleExport(bool set = true) { SetFlags(kFunctionIsDefaultModuleExport, set); }
     void SetIsDeclaredInParamScope(bool set = true) { SetFlags(kFunctionIsDeclaredInParamScope, set); }
+    void SetIsAnnexBVarExtension(bool set = true) { isAnnexBVarExtension = set; }
     void SetNestedFuncEscapes(bool set = true) { nestedFuncEscapes = set; }
     void SetCanBeDeferred(bool set = true) { canBeDeferred = set; }
     void ResetBodyAndParamScopeMerged() { isBodyAndParamScopeMerged = false; }
@@ -664,6 +668,7 @@ public:
     bool UsesArguments() const { return HasFlags(kFunctionUsesArguments); }
     bool IsDefaultModuleExport() const { return HasFlags(kFunctionIsDefaultModuleExport); }
     bool IsDeclaredInParamScope() const { return HasFlags(kFunctionIsDeclaredInParamScope); }
+    bool IsAnnexBVarExtension() const { return isAnnexBVarExtension; }
     bool NestedFuncEscapes() const { return nestedFuncEscapes; }
     bool CanBeDeferred() const { return canBeDeferred; }
     bool IsBodyAndParamScopeMerged() { return isBodyAndParamScopeMerged; }
