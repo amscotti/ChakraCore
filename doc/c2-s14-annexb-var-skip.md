@@ -2,7 +2,7 @@
 
 Status: **landed in `0a723970e`** (feature `8731bad6d`; base `b50fa4d94`).
 Interpreter/Mac no-JIT verified; JIT evidence is not claimed (see B4).
-Targeted Annex B selection **280/0**, full three directories **765/17**
+Current integrated gates **1996/2048**. Targeted Annex B selection **280/0**, full three directories **765/17**
 (**282 fail→pass / 0 pass→fail**); the residual 17 are P4
 declaration-instantiation collisions.
 

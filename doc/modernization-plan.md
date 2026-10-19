@@ -589,23 +589,25 @@ Decision/rollback points:
   tracked until C4, optional ecosystem scope has separate gates.
 - [ ] C4: Published qualified ES2025 result on the claimed default configurations.
 
-**Latest integration checkpoint (2026-10-18):** main is clean at
-**1996/0 test** and **2048/0 debug-static** (573/573 and 546/546 steps).
+**Latest integration checkpoint (2026-10-19):** main is clean at
+`874e96cad`, **1996/0 test** and **2048/0 debug-static** (573/573 and
+546/546 steps).
 Merged lanes: S1 public instance fields, S2 arithmetic, S8 resizable
-ArrayBuffer/transfer, S13 WeakRef, S14 P1 statement completion, S14 P3
-Annex B block-function var skip, S14 P6 property enumeration, S14 P7
-labeled-break/try-finally, and S14 P2/P4 eval/global declaration work
+ArrayBuffer/transfer, S13 WeakRef, and S14 P1/P2/P3/P4/P5/P6/P7
 ([c2-s1-public-fields.md](c2-s1-public-fields.md),
 [c2-s2-bigint-arithmetic.md](c2-s2-bigint-arithmetic.md),
 [c2-s8-resizable.md](c2-s8-resizable.md),
 [c2-s13-weakref.md](c2-s13-weakref.md),
 [c2-s14-statement-completion.md](c2-s14-statement-completion.md),
+[c2-s14-eval-arguments.md](c2-s14-eval-arguments.md),
 [c2-s14-annexb-var-skip.md](c2-s14-annexb-var-skip.md),
-[c2-s14-enumeration-order.md](c2-s14-enumeration-order.md)). Integrated
-class corpus: **1,989/5,897**, **539 fail→pass / 0 pass→fail**. S14 P5 is
-landed; the next work is S1 private/static/
-computed fields, S8 typed-array tracking, S2 BigInt64Array/Map-Set identity,
-and S13 FinalizationRegistry. Tracked eval residuals: P4 body eval with
+[c2-s14-global-eval-declarations.md](c2-s14-global-eval-declarations.md),
+[c2-s14-assignment-reference.md](c2-s14-assignment-reference.md),
+[c2-s14-enumeration-order.md](c2-s14-enumeration-order.md),
+[c2-s14-labeled-break-finally.md](c2-s14-labeled-break-finally.md)). Integrated
+class corpus: **1,989/5,897**, **539 fail→pass / 0 pass→fail**. S14 P5 is landed; the next work is S1 private/static/computed fields,
+S8 typed-array tracking, S2 BigInt64Array/Map-Set identity, and S13
+FinalizationRegistry. Tracked eval residuals: P4 body eval with
 non-simple parameters; P2 hidden outer lexical and JSC/Node delete difference. S3, S12, S6 default, B4 and C4 remain externally or
 gate blocked.
 

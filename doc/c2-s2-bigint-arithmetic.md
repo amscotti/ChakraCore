@@ -1,7 +1,7 @@
 # C2-S2 sub-batch 5: BigInt arithmetic, shifts and bitwise operators
 
 Status: **landed in `1c5d5b2fc`** (slice `aacba18d4`; debug invariant fix in
-`91bfe7fcf`); Mac ARM64 no-JIT with `-ESBigInt`; JIT is not claimed — see B4
+`91bfe7fcf`); current integrated gates **1996/2048**; Mac ARM64 no-JIT with `-ESBigInt`; JIT is not claimed — see B4
 note. Scoped corpus **444/2**, **80 fail→pass / 0 pass→fail**; broad arithmetic
 **1,027/1,027**.
 This slice completes the separable arithmetic/bitwise/shift part of S2 and

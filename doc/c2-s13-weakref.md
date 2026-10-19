@@ -1,7 +1,7 @@
 # C2-S13: bounded WeakRef slice
 
 Status: **landed in `803331b51`** (feature fixes `a8267f451`, `b963bc9b1`,
-`e94b2dd6a`); Mac no-JIT (JIT evidence is not claimed; B4 owns the JIT
+`e94b2dd6a`); current integrated gates **1996/2048**; Mac no-JIT (JIT evidence is not claimed; B4 owns the JIT
 configuration claims). WeakRef corpus **56/58**, **56 fail→pass / 0
 pass→fail**; two residual scenarios require `FinalizationRegistry`. This
 slice covers `WeakRef` only. `FinalizationRegistry` remains a separate C3

@@ -2,8 +2,8 @@
 
 Status: **landed as the S14 next-work plan in `f49509aca`**. No engine source
 was changed by the triage itself. Base `10d44c972`; evidence recorded
-2026-10-18. The first implementation batch is P1 (statement completion
-values): 60 current-confirmed scenarios, expanding to 112 fail→pass.
+2026-10-18. Batches P1–P7 are now implemented/merged through the current
+**1996/2048** checkpoint; see `c1-triage.md` §6 for evidence and residuals.
 
 ## Method and evidence
 

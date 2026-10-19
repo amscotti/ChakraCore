@@ -1,7 +1,7 @@
 # C2-S14 P7: labeled break out of nested try-finally
 
 Status: **landed in `05616c535`** (feature `45361dbd2`; base `ff170d34b`).
-Integrated main gates **1993/2045**. Interpreter/Mac no-JIT evidence only;
+At landing 1993/2045; current integrated gates **1996/2048**. Interpreter/Mac no-JIT evidence only;
 B4 owns JIT/Linux/concurrent-GC claims.
 
 ## Crash

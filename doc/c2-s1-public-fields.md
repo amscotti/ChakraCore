@@ -1,7 +1,7 @@
 # C2-S1: public instance class fields (simple identifier names)
 
 Status: **landed in `bd0de1694`** (feature commits `9edcd6b6d`, `5f3703987`,
-`55084e92a`, `5411729ec`, `eba79aac2`); integrated main gates **1988/2040**.
+`55084e92a`, `5411729ec`, `eba79aac2`); current integrated gates **1996/2048**.
 Final integrated class-elements corpus: **1,989 / 5,897 passed (3,908 failed),
 539 fail→pass / 0 pass→fail**. See the residuals below; private/static/
 computed fields and static blocks remain the follow-up S1 work.

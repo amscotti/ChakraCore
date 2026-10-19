@@ -852,7 +852,6 @@ still owns JIT-configuration claims.)*
 | S14 P1 | Landed `a4eba5a38` | 152/4 on integrated binary; 112/0 | S1 class completion; unsupported `using`; pre-existing labeled-break/finally crash (P7) |
 | S14 P3 | Landed `0a723970e` | 280/0; full Annex B 765/17, 282/0 | 17 P4 declaration-instantiation collisions |
 | S14 P6 | Landed `8b52cc063` | 18/18, 10/0; broad 10/0 | unordered/global/let and dictionary snapshot cost; JIT |
-
 | S14 P4 | Landed `be630c7f6` | 150/0; 112 controls; 38 engine/4 host flips | body eval with non-simple params; R1/R2; JIT |
 | S14 P2 | Landed `526931bc5` | 192/0; 157/0; controls preserved | hidden outer lexical; JSC/Node delete difference; JIT |
 | S14 P5 | Landed `8b5f28c06` | 50/50; broad 50/0; wider 65/0 non-import | eval/function-expression; proxy descriptor; JIT |
