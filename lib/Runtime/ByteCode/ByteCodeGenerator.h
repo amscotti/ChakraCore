@@ -45,6 +45,11 @@ struct JumpCleanupInfo
     // TryFinally only: holds the try completion value while the finally block runs
     // on a break/continue cleanup path (eval/global result register).
     Js::RegSlot saveReturnValueReg;
+
+    // Bytecode offset at which this protected region was entered. A jump whose
+    // target statement starts at or after this offset stays inside the region
+    // and must not emit the region's Leave cleanup.
+    uint32 byteCodeStartOffset;
 };
 
 class ByteCodeGenerator
@@ -475,7 +480,8 @@ public:
             0,
             Js::Constants::NoRegister,
             Js::Constants::NoRegister,
-            Js::Constants::NoRegister
+            Js::Constants::NoRegister,
+            0
         });
     }
 
@@ -486,7 +492,18 @@ public:
         Js::RegSlot regSlot2 = Js::Constants::NoRegister,
         Js::RegSlot saveReturnValueReg = Js::Constants::NoRegister)
     {
-        this->jumpCleanupList->Prepend({nullptr, 0, tryOp, label, regSlot1, regSlot2, saveReturnValueReg});
+        // The caller has already emitted the try/handler header, so the
+        // protected body (and any jump target inside it) starts here or later.
+        this->jumpCleanupList->Prepend({
+            nullptr,
+            0,
+            tryOp,
+            label,
+            regSlot1,
+            regSlot2,
+            saveReturnValueReg,
+            this->Writer()->GetCurrentOffset()
+        });
     }
 
     void PopJumpCleanup() { this->jumpCleanupList->RemoveHead(); }
