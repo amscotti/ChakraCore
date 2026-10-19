@@ -937,6 +937,16 @@ void CloneEmitBlock(ParseNodeBlock *pnodeBlock, ByteCodeGenerator *byteCodeGener
     }
 }
 
+// Statement completion values (ES2015+ UpdateEmpty): a statement that can complete
+// with an empty value in an eval/global result position contributes undefined, not
+// the value left by an earlier statement. Expression statements overwrite the return
+// register with their value; these resets establish the undefined baseline for the
+// statement shapes whose completion is not an expression value.
+void EmitLoadUndefinedToReturnRegister(ByteCodeGenerator *byteCodeGenerator)
+{
+    byteCodeGenerator->Writer()->Reg1(Js::OpCode::LdUndef, ByteCodeGenerator::ReturnRegister);
+}
+
 void EmitBlock(ParseNodeBlock *pnodeBlock, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo, BOOL fReturnValue)
 {
     Assert(pnodeBlock->nop == knopBlock);
@@ -10226,6 +10236,13 @@ void EmitForInOrForOf(ParseNodeForInOrForOf *loopNode, ByteCodeGenerator *byteCo
     Emit(loopNode->pnodeObj, byteCodeGenerator, funcInfo, false); // evaluate collection expression
     funcInfo->ReleaseLoc(loopNode->pnodeObj);
 
+    if (fReturnValue)
+    {
+        // ForIn/OfBodyEvaluation starts V at undefined; the body updates the
+        // return register when it produces a value.
+        EmitLoadUndefinedToReturnRegister(byteCodeGenerator);
+    }
+
     EndEmitBlock(loopNode->pnodeBlock, byteCodeGenerator, funcInfo);
     if (loopNode->pnodeBlock->scope != nullptr)
     {
@@ -10432,7 +10449,18 @@ void ByteCodeGenerator::EmitJumpCleanup(ParseNode* target, FuncInfo* funcInfo)
             // This is for flow control and does not participate in identifying boundaries 
             // of try/catch blocks, thus we shouldn't call RecordCrossFrameEntryExitRecord
             // here.
+            if (info.saveReturnValueReg != Js::Constants::NoRegister)
+            {
+                // The finally block runs on the Leave below and clears the result
+                // register; keep the try completion value for its normal exit.
+                this->Writer()->Reg2(Js::OpCode::Ld_A, info.saveReturnValueReg, ReturnRegister);
+            }
             this->Writer()->Empty(Js::OpCode::Leave);
+            if (info.saveReturnValueReg != Js::Constants::NoRegister)
+            {
+                // Reached only when the finally block completed normally.
+                this->Writer()->Reg2(Js::OpCode::Ld_A, ReturnRegister, info.saveReturnValueReg);
+            }
         }
     }
 }
@@ -12462,7 +12490,9 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
     case knopFor:
     {
         ParseNodeFor * pnodeFor = pnode->AsParseNodeFor();
-        if (pnodeFor->pnodeInverted != nullptr)
+        // The inverted-loop optimization emits both loops without a completion value.
+        // Keep the original form when the eval result register is live.
+        if (pnodeFor->pnodeInverted != nullptr && !fReturnValue)
         {
             byteCodeGenerator->EmitInvertedLoop(pnodeFor, pnodeFor->pnodeInverted, funcInfo);
         }
@@ -12473,6 +12503,13 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
             funcInfo->ReleaseLoc(pnodeFor->pnodeInit);
 
             CloneEmitBlock(pnodeFor->pnodeBlock, byteCodeGenerator, funcInfo);
+
+            if (fReturnValue)
+            {
+                // Loop V starts at undefined; the body updates the return register
+                // when it produces a value.
+                EmitLoadUndefinedToReturnRegister(byteCodeGenerator);
+            }
 
             EmitLoop(pnodeFor,
                 pnodeFor->pnodeCond,
@@ -12495,6 +12532,15 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
 
         Js::ByteCodeLabel trueLabel = byteCodeGenerator->Writer()->DefineLabel();
         Js::ByteCodeLabel falseLabel = byteCodeGenerator->Writer()->DefineLabel();
+
+        if (fReturnValue)
+        {
+            // An if statement whose selected branch has an empty completion
+            // completes with undefined regardless of the previous statement.
+            // Emit before the dispatch so both targets see the reset.
+            EmitLoadUndefinedToReturnRegister(byteCodeGenerator);
+        }
+
         EmitBooleanExpression(pnodeIf->pnodeCond, trueLabel, falseLabel, byteCodeGenerator, funcInfo, true, false);
         funcInfo->ReleaseLoc(pnodeIf->pnodeCond);
 
@@ -12533,6 +12579,10 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
     case knopWhile:
     {
         ParseNodeWhile * pnodeWhile = pnode->AsParseNodeWhile();
+        if (fReturnValue)
+        {
+            EmitLoadUndefinedToReturnRegister(byteCodeGenerator);
+        }
         EmitLoop(pnodeWhile,
             pnodeWhile->pnodeCond,
             pnodeWhile->pnodeBody,
@@ -12546,6 +12596,10 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
     case knopDoWhile:
     {
         ParseNodeWhile * pnodeWhile = pnode->AsParseNodeWhile();
+        if (fReturnValue)
+        {
+            EmitLoadUndefinedToReturnRegister(byteCodeGenerator);
+        }
         EmitLoop(pnodeWhile,
             pnodeWhile->pnodeCond,
             pnodeWhile->pnodeBody,
@@ -12684,6 +12738,12 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
                 byteCodeGenerator->Writer()->AddPropertyToDebuggerScope(debuggerScope, regVal, Js::Constants::NoProperty, /*shouldConsumeRegister*/ true, Js::DebuggerScopePropertyFlags_WithObject);
             }
 
+            if (fReturnValue)
+            {
+                // WithStatement returns UpdateEmpty(bodyCompletion, undefined).
+                EmitLoadUndefinedToReturnRegister(byteCodeGenerator);
+            }
+
             Emit(pnodeWith->pnodeBody, byteCodeGenerator, funcInfo, fReturnValue);
             funcInfo->ReleaseLoc(pnodeWith->pnodeBody);
             byteCodeGenerator->PopScope();
@@ -12743,6 +12803,13 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
         byteCodeGenerator->Writer()->Reg2(Js::OpCode::BeginSwitch, regVal, pnodeSwitch->pnodeVal->location);
 
         BeginEmitBlock(pnodeSwitch->pnodeBlock, byteCodeGenerator, funcInfo);
+
+        if (fReturnValue)
+        {
+            // CaseBlockEvaluation starts V at undefined; case bodies update the
+            // return register as they produce values.
+            EmitLoadUndefinedToReturnRegister(byteCodeGenerator);
+        }
 
         byteCodeGenerator->EndStatement(pnodeSwitch);
 
@@ -12814,6 +12881,13 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
         // same for catch block. Thus record cross interpreter frame entry/exit records for them.
         byteCodeGenerator->Writer()->RecordCrossFrameEntryExitRecord(/* isEnterBlock = */ true);
 
+        if (fReturnValue)
+        {
+            // TryStatement returns UpdateEmpty(C, undefined), where C is the try
+            // or catch body completion.
+            EmitLoadUndefinedToReturnRegister(byteCodeGenerator);
+        }
+
         byteCodeGenerator->Writer()->Br(Js::OpCode::TryCatch, catchLabel);
 
         byteCodeGenerator->PushJumpCleanupForTry(Js::OpCode::TryCatch, catchLabel);
@@ -12849,6 +12923,13 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
         }
 
         byteCodeGenerator->Writer()->Reg1(Js::OpCode::Catch, location);
+
+        if (fReturnValue)
+        {
+            // A catch body that produces no value completes with undefined; do not
+            // let a value stored by the try body before the throw leak through.
+            EmitLoadUndefinedToReturnRegister(byteCodeGenerator);
+        }
 
         Scope *scope = pnodeCatch->scope;
         byteCodeGenerator->PushScope(scope);
@@ -12996,6 +13077,14 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
         ParseNodeFinally *pnodeFinally = pnodeTryFinally->pnodeFinally;
         Assert(pnodeFinally);
 
+        // A normal finally completion discards its own value and returns the try
+        // body's (UpdateEmpty(B, undefined)); an abrupt finally keeps its value.
+        Js::RegSlot savedReturnValueReg = Js::Constants::NoRegister;
+        if (fReturnValue)
+        {
+            savedReturnValueReg = funcInfo->AcquireTmpRegister();
+        }
+
         // If we yield from the finally block after an exception, we have to store the exception object for the future next call.
         // When we yield from the Try-Finally the offset to the end of the Try block is needed for the branch instruction.
         Js::RegSlot regException = Js::Constants::NoRegister;
@@ -13015,23 +13104,45 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
                 Js::OpCode::TryFinallyWithYield,
                 finallyLabel,
                 regException,
-                regOffset);
+                regOffset,
+                savedReturnValueReg);
         }
         else
         {
             byteCodeGenerator->Writer()->Br(Js::OpCode::TryFinally, finallyLabel);
-            byteCodeGenerator->PushJumpCleanupForTry(Js::OpCode::TryFinally, finallyLabel);
+            byteCodeGenerator->PushJumpCleanupForTry(
+                Js::OpCode::TryFinally, finallyLabel,
+                Js::Constants::NoRegister, Js::Constants::NoRegister,
+                savedReturnValueReg);
         }
 
         // Increasing the stack as we will be storing the additional values when we enter try..finally.
         funcInfo->StartRecordingOutArgs(1);
 
+        if (fReturnValue)
+        {
+            EmitLoadUndefinedToReturnRegister(byteCodeGenerator);
+        }
+
         Emit(pnodeTry->pnodeBody, byteCodeGenerator, funcInfo, fReturnValue);
         funcInfo->ReleaseLoc(pnodeTry->pnodeBody);
+
+        if (fReturnValue)
+        {
+            byteCodeGenerator->Writer()->Reg2(
+                Js::OpCode::Ld_A, savedReturnValueReg, ByteCodeGenerator::ReturnRegister);
+        }
 
         byteCodeGenerator->PopJumpCleanup();
         byteCodeGenerator->Writer()->Empty(Js::OpCode::Leave);
         byteCodeGenerator->Writer()->RecordCrossFrameEntryExitRecord(false);
+
+        if (fReturnValue)
+        {
+            // Reached when the finally block completed normally: discard its value.
+            byteCodeGenerator->Writer()->Reg2(
+                Js::OpCode::Ld_A, ByteCodeGenerator::ReturnRegister, savedReturnValueReg);
+        }
 
         // Note: although we don't use OpCode::Leave for finally block,
         // OpCode::LeaveNull causes a return to parent interpreter thunk.
@@ -13041,6 +13152,13 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
         byteCodeGenerator->Writer()->Br(pnodeTryFinally->breakLabel);
         byteCodeGenerator->Writer()->MarkLabel(finallyLabel);
         byteCodeGenerator->Writer()->Empty(Js::OpCode::Finally);
+
+        if (fReturnValue)
+        {
+            // The finally body's own completion value is retained only if the
+            // body exits abruptly (e.g. break/continue); start it at undefined.
+            EmitLoadUndefinedToReturnRegister(byteCodeGenerator);
+        }
 
         byteCodeGenerator->PushJumpCleanupForTry(
             Js::OpCode::ResumeFinally,
@@ -13066,6 +13184,11 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
         byteCodeGenerator->Writer()->Empty(Js::OpCode::LeaveNull);
 
         byteCodeGenerator->Writer()->MarkLabel(pnodeTryFinally->breakLabel);
+
+        if (fReturnValue)
+        {
+            funcInfo->ReleaseTmpRegister(savedReturnValueReg);
+        }
         break;
     }
     case knopThrow:
