@@ -10,20 +10,20 @@ function h() { }
 
 Test 2: Block-scoped function shadows outer let binding, but leaks into function scope
 
-undefined
+ReferenceError
 let f
 function f() { }
 let f
-function f() { }
+ReferenceError
 
 Test 3: Assignment to function in block behaves like assigning let variable; function still leaks out to function scope; assignment does not affect function scope binding
 
-undefined
+ReferenceError
 let f
 reassigned inner function declared "let" f
 let f
 reassigned outer let f
-function f() { }
+ReferenceError
 
 Test 4: Last executed declaration wins; simple case
 

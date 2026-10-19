@@ -47,6 +47,26 @@ struct BlockInfoName
 // name -> var-record list. Arena-backed; lives only for the parse.
 typedef JsUtil::BaseDictionary<IdentPtr, BlockInfoName*, ArenaAllocator, PrimeSizePolicy> BlockNameMap;
 
+// Annex B B.3.2/B.3.3.1: a sloppy block-level function declaration gets a
+// synthetic function-scoped var only if replacing the declaration with
+// "var f;" would not introduce an early error. The decision depends on
+// lexical declarations that may appear later in any enclosing construct, so
+// the var node is created when the enclosing function body (or global/eval
+// block) closes. Parser-only, arena-backed, parse lifetime.
+struct AnnexBPendingVar
+{
+    IdentPtr pid;
+    ParseNodeFnc *owner;                    // function (or global program) receiving the var
+    uint32 declBlockId;                     // block id active at the declaration
+    charcount_t ichMin;
+    charcount_t ichLim;
+    bool hasConflict;
+    AnnexBPendingVar *next;                 // owner list, source order
+    AnnexBPendingVar *nextByName;
+};
+
+typedef JsUtil::BaseDictionary<IdentPtr, AnnexBPendingVar*, ArenaAllocator, PrimeSizePolicy> AnnexBPendingVarMap;
+
 struct BlockInfoStack
 {
     StmtNest pstmt;
@@ -57,6 +77,10 @@ struct BlockInfoStack
     BlockInfoName *pnodeLexNames;           // names in this block's LexicallyDeclaredNames
     BlockNameMap *lexicalNameMap;           // duplicate lookup for pnodeLexNames
     BlockNameMap *varNameMap;               // function block only: pid -> var records (innermost source block)
+    BlockNameMap *annexBConflictMap;        // non-source block: lexical names that conflict with an Annex B var
+    AnnexBPendingVar *annexBPendingFirst;   // function block only: pending synthetic vars, source order
+    AnnexBPendingVar *annexBPendingLast;
+    AnnexBPendingVarMap *annexBPendingMap;  // function block only: pid -> pending entries
     BlockInfoName *catchParamNames;         // catch body block only: BoundNames of CatchParameter
     bool catchParamsPending;                // catch scope waiting to attach names to its body block
     bool isSourceBlock;                     // syntactic Block : { StatementList } (not a for/switch/class scope)
@@ -1644,37 +1668,236 @@ static bool IsLexicalBlockScope(BlockInfoStack *blockInfo)
 void Parser::AddBlockLexicalDecl(IdentPtr pid, bool isFunctionDecl, bool isSloppyFunctionDecl)
 {
     BlockInfoStack *blockInfo = m_currentBlockInfo;
-    if (pid == nullptr || !IsLexicalBlockScope(blockInfo))
+    if (pid == nullptr)
     {
         return;
     }
 
-    // LexicallyDeclaredNames must not contain duplicate entries. Annex B
-    // permits duplicate ordinary function declarations in sloppy blocks only.
-    if (blockInfo->lexicalNameMap == nullptr)
-    {
-        blockInfo->lexicalNameMap = Anew(&m_nodeAllocator, BlockNameMap, &m_nodeAllocator);
-    }
+    bool isLexicalBlock = IsLexicalBlockScope(blockInfo);
 
-    BlockInfoName *existing = nullptr;
-    if (blockInfo->lexicalNameMap->TryGetValue(pid, &existing))
+    if (isLexicalBlock)
     {
-        if (!(isFunctionDecl && existing->isFunctionDecl &&
-              isSloppyFunctionDecl && existing->isSloppyFunctionDecl))
+        // LexicallyDeclaredNames must not contain duplicate entries. Annex B
+        // permits duplicate ordinary function declarations in sloppy blocks only.
+        if (blockInfo->lexicalNameMap == nullptr)
         {
-            Error(ERRRedeclaration);
+            blockInfo->lexicalNameMap = Anew(&m_nodeAllocator, BlockNameMap, &m_nodeAllocator);
         }
+
+        BlockInfoName *existing = nullptr;
+        if (blockInfo->lexicalNameMap->TryGetValue(pid, &existing))
+        {
+            if (!(isFunctionDecl && existing->isFunctionDecl &&
+                  isSloppyFunctionDecl && existing->isSloppyFunctionDecl))
+            {
+                Error(ERRRedeclaration);
+            }
+            return;
+        }
+
+        BlockInfoName *name = Anew(&m_nodeAllocator, BlockInfoName);
+        name->pid = pid;
+        name->isFunctionDecl = isFunctionDecl;
+        name->isSloppyFunctionDecl = isSloppyFunctionDecl;
+        name->sourceBlockId = 0;
+        name->next = blockInfo->pnodeLexNames;
+        blockInfo->pnodeLexNames = name;
+        blockInfo->lexicalNameMap->Item(pid, name);
+    }
+    else if (!isFunctionDecl)
+    {
+        // Function-body, global/global-eval and catch-parameter-pattern blocks
+        // are lexical boundaries too, but their function declarations are
+        // var scoped (or covered by the catch rule), so only let/const/class
+        // (and destructuring bindings, which use the same node type) are
+        // recorded. These names can make a synthetic Annex B var an early error.
+        if (blockInfo->annexBConflictMap == nullptr)
+        {
+            blockInfo->annexBConflictMap = Anew(&m_nodeAllocator, BlockNameMap, &m_nodeAllocator);
+        }
+        BlockInfoName *existing = nullptr;
+        if (!blockInfo->annexBConflictMap->TryGetValue(pid, &existing))
+        {
+            BlockInfoName *name = Anew(&m_nodeAllocator, BlockInfoName);
+            name->pid = pid;
+            name->isFunctionDecl = false;
+            name->isSloppyFunctionDecl = false;
+            name->sourceBlockId = 0;
+            name->next = nullptr;
+            blockInfo->annexBConflictMap->Item(pid, name);
+        }
+    }
+
+    // A lexical declaration arriving after a block function may still make
+    // the synthetic var an early error. Source-block ordinary sloppy
+    // functions are the Annex B duplicate case and do not conflict.
+    if (!isFunctionDecl || (isLexicalBlock && !isSloppyFunctionDecl))
+    {
+        MarkAnnexBPendingConflicts(pid);
+    }
+}
+
+void Parser::MarkAnnexBPendingConflicts(IdentPtr pid)
+{
+    BlockInfoStack *functionBlockInfo = GetCurrentFunctionBlockInfo();
+    if (functionBlockInfo->annexBPendingMap == nullptr)
+    {
         return;
     }
 
-    BlockInfoName *name = Anew(&m_nodeAllocator, BlockInfoName);
-    name->pid = pid;
-    name->isFunctionDecl = isFunctionDecl;
-    name->isSloppyFunctionDecl = isSloppyFunctionDecl;
-    name->sourceBlockId = 0;
-    name->next = blockInfo->pnodeLexNames;
-    blockInfo->pnodeLexNames = name;
-    blockInfo->lexicalNameMap->Item(pid, name);
+    AnnexBPendingVar *pending = nullptr;
+    if (!functionBlockInfo->annexBPendingMap->TryGetValue(pid, &pending))
+    {
+        return;
+    }
+
+    // Block ids are assigned depth-first, so a pending var declared in the
+    // current construct or a descendant has a block id >= the current one.
+    // A pending var in an already closed sibling has a smaller id and does
+    // not conflict with a lexical name in this construct.
+    uint32 blockId = GetCurrentBlock()->blockId;
+    for (; pending != nullptr; pending = pending->nextByName)
+    {
+        if (pending->declBlockId >= blockId)
+        {
+            pending->hasConflict = true;
+        }
+    }
+}
+
+bool Parser::AnnexBVarWouldConflict(IdentPtr pid)
+{
+    BlockInfoStack *functionBlockInfo = GetCurrentFunctionBlockInfo();
+    for (BlockInfoStack *blockInfo = m_currentBlockInfo;
+         blockInfo != nullptr;
+         blockInfo = blockInfo->pBlockInfoOuter)
+    {
+        BlockInfoName *name = nullptr;
+        if (blockInfo->lexicalNameMap != nullptr &&
+            blockInfo->lexicalNameMap->TryGetValue(pid, &name) &&
+            !(name->isFunctionDecl && name->isSloppyFunctionDecl))
+        {
+            // let/const/class, or a generator/async function declaration.
+            // Ordinary sloppy function declarations are the Annex B duplicate
+            // case and are replaced together with the var.
+            return true;
+        }
+        if (blockInfo->annexBConflictMap != nullptr &&
+            blockInfo->annexBConflictMap->TryGetValue(pid, &name))
+        {
+            // Function-body/global/eval lexical name, or a destructured catch
+            // parameter's bound name.
+            return true;
+        }
+        if (blockInfo == functionBlockInfo)
+        {
+            break;
+        }
+    }
+    return false;
+}
+
+void Parser::RegisterAnnexBPendingVar(IdentPtr pid)
+{
+    BlockInfoStack *functionBlockInfo = GetCurrentFunctionBlockInfo();
+    if (functionBlockInfo->annexBPendingMap == nullptr)
+    {
+        functionBlockInfo->annexBPendingMap = Anew(&m_nodeAllocator, AnnexBPendingVarMap, &m_nodeAllocator);
+    }
+
+    AnnexBPendingVar *pending = Anew(&m_nodeAllocator, AnnexBPendingVar);
+    pending->pid = pid;
+    pending->owner = GetCurrentFunctionNode();
+    pending->declBlockId = GetCurrentBlock()->blockId;
+    pending->ichMin = this->GetScanner()->IchMinTok();
+    pending->ichLim = this->GetScanner()->IchLimTok();
+    pending->hasConflict = AnnexBVarWouldConflict(pid);
+    pending->next = nullptr;
+    pending->nextByName = nullptr;
+
+    AnnexBPendingVar *existing = nullptr;
+    if (functionBlockInfo->annexBPendingMap->TryGetValue(pid, &existing))
+    {
+        pending->nextByName = existing;
+    }
+    functionBlockInfo->annexBPendingMap->Item(pid, pending);
+
+    if (functionBlockInfo->annexBPendingLast != nullptr)
+    {
+        functionBlockInfo->annexBPendingLast->next = pending;
+    }
+    else
+    {
+        functionBlockInfo->annexBPendingFirst = pending;
+    }
+    functionBlockInfo->annexBPendingLast = pending;
+}
+
+void Parser::FinalizeAnnexBPendingVars(BlockInfoStack *blockInfo)
+{
+    AnnexBPendingVar *pending = blockInfo->annexBPendingFirst;
+    if (pending == nullptr)
+    {
+        return;
+    }
+
+    blockInfo->annexBPendingFirst = nullptr;
+    blockInfo->annexBPendingLast = nullptr;
+    blockInfo->annexBPendingMap = nullptr;
+
+    ParseNodePtr *const ppnodeVarSave = m_ppnodeVar;
+    for (; pending != nullptr; pending = pending->next)
+    {
+        if (pending->hasConflict)
+        {
+            // Replacing this declaration with "var f;" would be an early
+            // error, so Annex B does not create the synthetic binding.
+            continue;
+        }
+
+        ParseNodeFnc *owner = pending->owner;
+        AnalysisAssert(owner != nullptr);
+
+        // Function bodies reached through deferred parsing may have already
+        // restored the enclosing var-list tail, so select it explicitly.
+        m_ppnodeVar = &owner->pnodeVars;
+        while (*m_ppnodeVar != nullptr)
+        {
+            m_ppnodeVar = &(*m_ppnodeVar)->AsParseNodeVar()->pnodeNext;
+        }
+
+        ParseNodeVar *vardecl = CreateVarDeclNode(pending->pid, STVariable, false, nullptr, false);
+        vardecl->isBlockScopeFncDeclVar = true;
+        vardecl->ichMin = pending->ichMin;
+        vardecl->ichLim = pending->ichLim;
+        if (vardecl->sym->GetIsFormal())
+        {
+            owner->SetHasAnyWriteToFormals(true);
+        }
+    }
+
+    // ParseFncDeclInternal terminates the current function's var list through
+    // m_ppnodeVar after this block closes. If the saved pointer is a link in
+    // the current function's list it is now stale (it points at an appended
+    // node's "next" field vs. the old tail), so advance it to the real tail.
+    // For deferred/fast-scan bodies the saved pointer belongs to an outer
+    // list; leave that position untouched.
+    ParseNodePtr *currentHead = &GetCurrentFunctionNode()->pnodeVars;
+    ParseNodePtr *currentTail = currentHead;
+    bool savedInCurrentList = false;
+    while (true)
+    {
+        if (currentTail == ppnodeVarSave)
+        {
+            savedInCurrentList = true;
+        }
+        if (*currentTail == nullptr)
+        {
+            break;
+        }
+        currentTail = &(*currentTail)->AsParseNodeVar()->pnodeNext;
+    }
+    m_ppnodeVar = savedInCurrentList ? currentTail : ppnodeVarSave;
 }
 
 void Parser::AddBlockVarDecl(IdentPtr pid)
@@ -2001,6 +2224,12 @@ void Parser::FinishParseBlock(ParseNodeBlock *pnodeBlock, bool needScanRCurly)
 {
     Assert(m_currentBlockInfo != nullptr && pnodeBlock == m_currentBlockInfo->pnodeBlock);
 
+    // A function body (or the global/eval var scope) is the point where every
+    // enclosing lexical construct for its block function declarations has
+    // closed, so resolve the deferred Annex B synthetic vars before names are
+    // bound to symbols.
+    FinalizeAnnexBPendingVars(m_currentBlockInfo);
+
     if (needScanRCurly)
     {
         // Only update the ichLim if we were expecting an RCurly. If there is an
@@ -2267,6 +2496,10 @@ BlockInfoStack *Parser::PushBlockInfo(ParseNodeBlock * pnodeBlock)
     newBlockInfo->pnodeLexNames = nullptr;
     newBlockInfo->lexicalNameMap = nullptr;
     newBlockInfo->varNameMap = nullptr;
+    newBlockInfo->annexBConflictMap = nullptr;
+    newBlockInfo->annexBPendingFirst = nullptr;
+    newBlockInfo->annexBPendingLast = nullptr;
+    newBlockInfo->annexBPendingMap = nullptr;
     newBlockInfo->catchParamNames = nullptr;
     newBlockInfo->catchParamsPending = false;
     if (m_currentBlockInfo != nullptr && m_currentBlockInfo->catchParamsPending)
@@ -6017,20 +6250,17 @@ ParseNodeFnc * Parser::ParseFncDeclInternal(ushort flags, LPCOLESTR pNameHint, c
     {
         if (pFncNamePid != nullptr &&
             GetCurrentBlock() &&
-            GetCurrentBlock()->blockType == PnodeBlockType::Regular)
+            GetCurrentBlock()->blockType == PnodeBlockType::Regular &&
+            !pnodeFnc->IsGenerator() &&
+            !pnodeFnc->IsAsync())
         {
-            // Add a function-scoped VarDecl with the same name as the function for
-            // back compat with pre-ES6 code that declares functions in blocks. The
-            // idea is that the last executed declaration wins at the function scope
-            // level and we accomplish this by having each block scoped function
-            // declaration assign to both the block scoped "let" binding, as well
-            // as the function scoped "var" binding.
-            ParseNodeVar * vardecl = CreateVarDeclNode(pFncNamePid, STVariable, false, nullptr, false);
-            vardecl->isBlockScopeFncDeclVar = true;
-            if (GetCurrentFunctionNode() && vardecl->sym->GetIsFormal())
-            {
-                GetCurrentFunctionNode()->SetHasAnyWriteToFormals(true);
-            }
+            // Annex B applies to ordinary sloppy block-level function
+            // declarations. The synthetic function-scoped var is created at
+            // the end of the enclosing function body/global block, after all
+            // lexical declarations in the enclosing constructs are known: if
+            // replacing the declaration with "var f;" would be an early
+            // error, B.3.2.1/B.3.3.1 skip the binding entirely.
+            RegisterAnnexBPendingVar(pFncNamePid);
         }
     }
 
@@ -13384,6 +13614,10 @@ ParseNodeProg * Parser::Parse(LPCUTF8 pszSrc, size_t offset, size_t length, char
     {
         if (scopeInfo)
         {
+            // The deferred function body's scope is restored from cached
+            // ScopeInfo and is not closed through FinishParseBlock, so resolve
+            // its Annex B pending vars before symbol binding.
+            this->FinalizeAnnexBPendingVars(m_currentBlockInfo);
             this->FinishScopeInfo(scopeInfo);
         }
     }

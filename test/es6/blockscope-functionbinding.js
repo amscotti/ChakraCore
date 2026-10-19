@@ -36,7 +36,7 @@ print('\nTest 1: Simple case with single block-scoped function\n');
 print('\nTest 2: Block-scoped function shadows outer let binding, but leaks into function scope\n');
 (function ()
 {
-    print(f);
+    try { print(f); } catch (e) { print(e.name); }
     if (true)
     {
         let f = 'let f';
@@ -48,14 +48,14 @@ print('\nTest 2: Block-scoped function shadows outer let binding, but leaks into
         }
         print(f);
     }
-    print(f);
+    try { print(f); } catch (e) { print(e.name); }
 })();
 
 
 print('\nTest 3: Assignment to function in block behaves like assigning let variable; function still leaks out to function scope; assignment does not affect function scope binding\n');
 (function ()
 {
-    print(f);
+    try { print(f); } catch (e) { print(e.name); }
     if (true)
     {
         let f = 'let f';
@@ -70,7 +70,7 @@ print('\nTest 3: Assignment to function in block behaves like assigning let vari
         f = 'reassigned outer let f';
         print(f);
     }
-    print(f);
+    try { print(f); } catch (e) { print(e.name); }
 })();
 
 
