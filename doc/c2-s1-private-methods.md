@@ -1,6 +1,6 @@
 # C2-S1: private instance methods and private accessors
 
-Status: **landed in `30a81731c`** (feature `4b588d2f4`; base `7a2199595`); current integrated gates **2004/2056**. Evidence: focused private-method subset 202/20, **198 fail→pass / 0 pass→fail**; es7 68/0. Private statics/static blocks/computed/direct-eval/async-generator private methods remain residuals; B4 gated. This slice
+Status: **landed in `30a81731c`** (feature `4b588d2f4`; base `7a2199595`); current integrated gates **2012/2064**. Evidence: focused private-method subset 202/20, **198 fail→pass / 0 pass→fail**; es7 68/0. Private statics/static blocks/computed/direct-eval/async-generator private methods remain residuals; B4 gated. This slice
 adds non-static private instance methods (`#m(){}`) and private accessors
 (`get #x(){}` / `set #x(v){}`). Private static members, static blocks, computed
 class-element names, async/generator private methods, decorators, optional-chain

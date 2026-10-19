@@ -1,6 +1,6 @@
 # C2-S1: private instance fields and `#x in obj` brand checks
 
-Status: **landed in `da0351e8e`** (feature fixes `047f877c1`, `1f62ac060`; base `1927b9493`); current integrated gates **2004/2056**. Evidence: focused private subset 176/30, **160 fail→pass / 0 pass→fail**; es7 64/0. Private methods/accessors/static/computed/direct-eval/optional-chain remain residuals; JIT/B4 gated.
+Status: **landed in `da0351e8e`** (feature fixes `047f877c1`, `1f62ac060`; base `1927b9493`); current integrated gates **2012/2064**. Evidence: focused private subset 176/30, **160 fail→pass / 0 pass→fail**; es7 64/0. Private methods/accessors/static/computed/direct-eval/optional-chain remain residuals; JIT/B4 gated.
 
 This slice implements non-static **private instance fields** (`#x;`,
 `#x = init;`) and the `#x in obj` private-brand check in class declarations and

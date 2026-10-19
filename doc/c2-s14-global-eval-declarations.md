@@ -1,7 +1,7 @@
 # C2-S14 P4: global/eval declaration-instantiation collisions
 
 Status: **landed in `be630c7f6`** (feature `5fc7ab0cc`; base `ff170d34b`).
-At landing 1994/2046; current integrated gates **2004/2056**. Target selection **150/0** with 112
+At landing 1994/2046; current integrated gates **2012/2064**. Target selection **150/0** with 112
 prior controls/0 pass→fail. Mac interpreter/no-JIT only; JIT gated at B4.
 Tracked residual: body eval with non-simple parameters still over-reports
 SyntaxError (legacy expectations marked as non-conforming).

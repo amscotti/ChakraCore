@@ -1,7 +1,6 @@
 # C2-S1: private static class fields
 
-Status: **pending**. Implementation and focused evidence are on branch
-`s1-static-private` (base `f352f4e5e`); B4 JIT/default gates have not run.
+Status: **landed in `226e7e1b4`** (feature `57fc57898`; base `f352f4e5e`); current integrated gates **2012/2064**. Evidence: 600/602, **571 fail→pass / 0 pass→fail**; local es7 77/0. Direct-eval and JIT/B4 residuals remain.
 This slice implements `static #x;` and `static #x = expr;` in class
 declarations and class expressions. Private static methods/accessors, static
 blocks, computed static names and decorators remain out of scope and are

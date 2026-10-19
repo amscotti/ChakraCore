@@ -1,7 +1,7 @@
 # C2-S14 P6: property enumeration order after delete/re-add
 
 Status: **landed in `8b52cc063`** (feature `25318a151`; base `b50fa4d94`).
-Mac no-JIT evidence recorded; B4 owns Linux/JIT/GCStress claims. Current integrated gates **2004/2056**. Targeted
+Mac no-JIT evidence recorded; B4 owns Linux/JIT/GCStress claims. Current integrated gates **2012/2064**. Targeted
 P6 selection **18/18**, **10 fail→pass / 0 pass→fail**; broad
 Object/JSON/for-in **7,150/190** with the same 10 flips. This slice fixes
 only own-property/`for-in` enumeration order for an ordered dictionary after a

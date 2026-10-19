@@ -1,6 +1,6 @@
 # C2-S2 residual: BigInt collection keys, literal property names, DataView accessors
 
-Status: **landed in `10154e3f5`** (feature `b45d224d3`; base `1c983ef9c`); current integrated gates **2008/2060**. All measurements are Mac ARM64 no-JIT with
+Status: **landed in `10154e3f5`** (feature `b45d224d3`; base `1c983ef9c`); current integrated gates **2012/2064**. All measurements are Mac ARM64 no-JIT with
 `-ESBigInt`; `ESBigInt` remains off by default and no JIT claim is made
 (see B4).
 

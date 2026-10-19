@@ -849,6 +849,7 @@ still owns JIT-configuration claims.)*
 | S1 private instance fields | Landed `da0351e8e` | private subset 176/30, 160/0; es7 64/0 | private methods/accessors, static/private-static, computed, eval/optional-chain, JIT |
 | S1 private methods/accessors | Landed `30a81731c` | 202/20, 198/0; es7 68/0 | private statics/static blocks/computed, direct-eval, async/generator private methods, JIT |
 | S1 public static fields | Landed `041a9bb8f` | 75/75, 35/0; local 75/0 | private static/static blocks/computed/super.prop/JIT |
+| S1 private static fields | Landed `226e7e1b4` | 600/602, 571/0; local 2012/0 | static blocks/private static methods/computed, direct eval, JIT |
 | S2 arithmetic/bitwise/shift | Landed `1c5d5b2fc` | scoped 444/2, 80/0; broad 1,027/1,027; Node differentials | BigInt64Array/BigUint64Array, Map/Set identity, literal property names, giant ToString, JIT |
 | S2 BigInt64Array | Landed `f5f0efef5` | 944/0; 958/1016; ctors 24/24, 166/0; internals 163/0 | DataView BigInt, internals, Map/Set identity, SAB, JIT |
 | S2 BigInt collections/DataView | Landed `10154e3f5` | 102/0; 140/4; broad 104/0; class names/DataView length | immutable buffers, SAB, static fields, JIT |
@@ -864,8 +865,9 @@ still owns JIT-configuration claims.)*
 | S14 P5 | Landed `8b5f28c06` | 50/50; broad 50/0; wider 65/0 non-import | eval/function-expression; proxy descriptor; JIT |
 
 Full gates at this checkpoint: **1997/0 test**, **2049/0 debug-static**.
-All active feature/triage worktrees are merged. Next work items are S1 private static/static blocks/computed elements,
-S6 flag-on gaps, and the documented S8/S2/P-eval residuals. P5 residual: eval/function-expression
+All active feature/triage worktrees are merged. Next work items are S1 static blocks/private static methods/accessors and
+computed elements, S6 flag-on gaps, and the documented S8/S2/P-eval
+residuals. P5 residual: eval/function-expression
 reference paths and pre-existing proxy descriptor duplication.
 
 ## 7. Separate inventories
