@@ -328,4 +328,16 @@
       <compile-flags>-CollectGarbage -args summary -endargs</compile-flags>
     </default>
   </test>
+  <test>
+    <default>
+      <files>property-enumeration-order.js</files>
+      <compile-flags>-args summary -endargs</compile-flags>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>property-enumeration-order.js</files>
+      <compile-flags>-TypeSnapshotEnumeration- -args summary -endargs</compile-flags>
+    </default>
+  </test>
 </regress-exe>

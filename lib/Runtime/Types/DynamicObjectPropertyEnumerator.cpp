@@ -101,8 +101,64 @@ namespace Js
 
         // Reload the type after EnsureObjectReady
         type = object->GetDynamicType();
+        auto fillCache = [this](CachedData* cachedData, uint propertyCount)
+        {
+            PropertyId propertyId;
+            PropertyAttributes attributes;
+            while (this->enumeratedCount < static_cast<int>(propertyCount))
+            {
+                JavascriptString* propertyString = this->MoveAndGetNextNoCache(propertyId, &attributes);
+                if (propertyString == nullptr)
+                {
+                    break;
+                }
+
+                PropertyString* propertyStringTyped = JavascriptOperators::TryFromVar<PropertyString>(propertyString);
+                if (propertyStringTyped != nullptr)
+                {
+                    cachedData->strings[enumeratedCount] = propertyStringTyped;
+                    cachedData->indexes[enumeratedCount] = this->objectIndex;
+                    cachedData->attributes[enumeratedCount] = attributes;
+                    cachedData->cachedCount = ++this->enumeratedCount;
+                }
+            }
+            cachedData->completed = true;
+            this->enumeratedCount = 0;
+            this->objectIndex = Constants::NoBigSlot;
+        };
         if (!type->PrepareForTypeSnapshotEnumeration())
         {
+            // Snapshot semantics were requested but PrepareForTypeSnapshotEnumeration did not lock the type:
+            // either the handler is not lockable (dictionary) or -TypeSnapshotEnumeration- disabled locking.
+            // Walk the keys now; a setter can delete/re-add a property while a for-in/JSON/Object.assign/spread
+            // enumeration is in flight, and a live map walk would then skip or duplicate entries. The local
+            // cache is owned by this enumerator only; a null scriptContext marks it as local and keeps the JIT
+            // fast path off.
+            if (GetSnapShotSemantics())
+            {
+                uint propertyCount = this->object->GetPropertyCountForEnum();
+                if (propertyCount == 0)
+                {
+                    Initialize(type, nullptr, 0);
+                    return true;
+                }
+
+                data = RecyclerNewStructPlus(requestContext->GetRecycler(),
+                    propertyCount * sizeof(Field(PropertyString*)) + propertyCount * sizeof(BigPropertyIndex) + propertyCount * sizeof(PropertyAttributes), CachedData);
+                data->scriptContext = nullptr;
+                data->cachedCount = 0;
+                data->propertyCount = propertyCount;
+                data->strings = reinterpret_cast<Field(PropertyString*)*>(data + 1);
+                data->indexes = unsafe_write_barrier_cast<BigPropertyIndex *>(data->strings + propertyCount);
+                data->attributes = (PropertyAttributes*)(data->indexes + propertyCount);
+                data->completed = false;
+                data->enumNonEnumerable = GetEnumNonEnumerable();
+                data->enumSymbols = GetEnumSymbols();
+                Initialize(type, data, propertyCount);
+                fillCache(data, propertyCount);
+                return true;
+            }
+
             Initialize(type, nullptr, object->GetPropertyCount());
             return true;
         }
@@ -121,6 +177,11 @@ namespace Js
         data->enumSymbols = GetEnumSymbols();
         requestContext->GetThreadContext()->AddDynamicObjectEnumeratorCache(type, data);
         Initialize(type, data, propertyCount);
+
+        // Fill the locked-type snapshot now rather than lazily. If user code mutates the object during
+        // enumeration (delete/re-add, conversion to another handler), the in-flight enumerator must keep
+        // walking the keys captured at the start; a lazy walk would observe the rebuilt map.
+        fillCache(data, propertyCount);
 
         if (enumeratorCache)
         {
@@ -141,7 +202,8 @@ namespace Js
         TTDAssert(this->cachedData == nullptr || !this->scriptContext->GetThreadContext()->IsRuntimeInTTDMode(), "We should always have cachedData null if we are in record or replay mode");
 #endif
 
-        return !this->IsNullEnumerator() && !GetEnumNonEnumerable() && this->cachedData != nullptr;
+        return !this->IsNullEnumerator() && !GetEnumNonEnumerable() && this->cachedData != nullptr &&
+            this->cachedData->scriptContext != nullptr;
     }
 
     void DynamicObjectPropertyEnumerator::Clear(EnumeratorFlags flags, ScriptContext * requestContext)
@@ -171,26 +233,66 @@ namespace Js
 #endif
 
         Assert(enumeratedCount <= cachedData->cachedCount);
-        JavascriptString* propertyStringName;
+        JavascriptString* propertyStringName = nullptr;
         PropertyAttributes propertyAttributes = PropertyNone;
+#if DBG
+        bool skipped = false;
+#endif
         if (enumeratedCount < cachedData->cachedCount)
         {
-            PropertyString * propertyString = cachedData->strings[enumeratedCount];
-            propertyStringName = propertyString;
-            propertyId = propertyString->GetPropertyId();
+            while (enumeratedCount < cachedData->cachedCount)
+            {
+                PropertyString * propertyString = cachedData->strings[enumeratedCount];
+                propertyId = propertyString->GetPropertyId();
+
+                // Snapshot keys are not a guarantee that the property still exists: user code during enumeration
+                // may delete it. Skip removed keys, and use the current enumerability. A deleted and re-added key
+                // exists again and is returned once; it is not duplicated because its snapshot slot is consumed.
+                bool exists = this->object->HasOwnProperty(propertyId) != FALSE;
+                bool enumerable = exists && this->object->IsEnumerable(propertyId) != FALSE;
+                if (!exists || (!enumerable && !GetEnumNonEnumerable()))
+                {
+                    enumeratedCount++;
+#if DBG
+                    skipped = true;
+#endif
+                    continue;
+                }
+
+                propertyStringName = propertyString;
 
 #if DBG
-            PropertyId tempPropertyId;
-            /* JavascriptString * tempPropertyString = */ this->MoveAndGetNextNoCache(tempPropertyId, attributes);
+                if (!skipped && cachedData->scriptContext != nullptr && this->initialType == this->object->GetDynamicType())
+                {
+                    // Shared type caches enumerate a locked snapshot. A local dictionary snapshot, a skipped key,
+                    // or a type change during enumeration can outlive a live map reorder; the cross-check is not
+                    // valid then.
+                    PropertyId tempPropertyId;
+                    /* JavascriptString * tempPropertyString = */ this->MoveAndGetNextNoCache(tempPropertyId, attributes);
 
-            Assert(tempPropertyId == propertyId);
-            Assert(this->objectIndex == cachedData->indexes[enumeratedCount]);
+                    Assert(tempPropertyId == propertyId);
+                    Assert(this->objectIndex == cachedData->indexes[enumeratedCount]);
+                }
 #endif
 
-            this->objectIndex = cachedData->indexes[enumeratedCount];
-            propertyAttributes = cachedData->attributes[enumeratedCount];
+                this->objectIndex = cachedData->indexes[enumeratedCount];
+                propertyAttributes = cachedData->attributes[enumeratedCount];
+                if (enumerable)
+                {
+                    propertyAttributes |= PropertyEnumerable;
+                }
+                else
+                {
+                    propertyAttributes &= ~PropertyEnumerable;
+                }
 
-            enumeratedCount++;
+                enumeratedCount++;
+                if (attributes != nullptr)
+                {
+                    *attributes = propertyAttributes;
+                }
+                return propertyStringName;
+            }
         }
         else if (!cachedData->completed)
         {
@@ -216,8 +318,11 @@ namespace Js
         else
         {
 #if DBG
-            PropertyId tempPropertyId;
-            Assert(this->MoveAndGetNextNoCache(tempPropertyId, attributes) == nullptr);
+            if (cachedData->scriptContext != nullptr && this->initialType == this->object->GetDynamicType())
+            {
+                PropertyId tempPropertyId;
+                Assert(this->MoveAndGetNextNoCache(tempPropertyId, attributes) == nullptr);
+            }
 #endif
 
             propertyStringName = nullptr;
@@ -268,8 +373,12 @@ namespace Js
     JavascriptString * DynamicObjectPropertyEnumerator::MoveAndGetNext(PropertyId& propertyId, PropertyAttributes * attributes)
     {
         propertyId = Js::Constants::NoProperty;
-        if (this->cachedData && this->initialType == this->object->GetDynamicType())
+        if (this->cachedData &&
+            (this->cachedData->scriptContext == nullptr || (GetSnapShotSemantics() && this->initialType->GetIsLocked())))
         {
+            // A shared cache holds the initial, locked type's keys. The object may have changed type since
+            // enumeration began (for example because a delete/re-add converted its handler); the snapshot is
+            // still the enumeration state, so do not fall back to the live map here.
             return MoveAndGetNextWithCache(propertyId, attributes);
         }
         if (this->object)

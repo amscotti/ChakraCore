@@ -219,6 +219,8 @@ namespace Js
 
         void Add(const PropertyRecord* propertyId, PropertyAttributes attributes, ScriptContext *const scriptContext);
         void Add(const PropertyRecord* propertyId, PropertyAttributes attributes, bool isInitialized, bool isFixed, bool usedAsFixed, ScriptContext *const scriptContext);
+        void Add(T propertyIndex, const PropertyRecord* propertyId, PropertyAttributes attributes, bool isInitialized, bool isFixed, bool usedAsFixed, ScriptContext *const scriptContext);
+        DictionaryPropertyDescriptor<T>* ReAddPropertyAtEnd(DynamicObject* instance, PropertyRecord const* propertyRecord, DictionaryPropertyDescriptor<T>* descriptor);
 
         void EnsureSlotCapacity(DynamicObject * instance, T increment = 1);
 
