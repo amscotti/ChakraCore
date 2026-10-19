@@ -2037,7 +2037,25 @@ LIdentifier:
                 p++;
                 goto LSkipLineComment;
             }
-            goto LDefault;
+            {
+                // Private class name: '#' followed immediately by an
+                // IdentifierName. The '#' is part of the token range but not
+                // of the interned identifier.
+                EncodedCharPtr privateNameStart = p;
+                EncodedCharPtr privateNameEnd = p;
+                // The resulting keyword token (for names like `#if`) is
+                // discarded below: a PrivateIdentifier is always an
+                // IdentifierName, never a keyword.
+                if (this->ScanIdentifier(false, &privateNameEnd) == tkScanError)
+                {
+                    token = tkScanError;
+                    break;
+                }
+                p = privateNameEnd;
+                m_ptoken->SetIdentifier(this->PidOfIdentiferAt(privateNameStart, privateNameEnd));
+                token = tkPrivateName;
+            }
+            break;
 
         case '/':
             token = tkDiv;

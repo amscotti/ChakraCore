@@ -27,6 +27,7 @@ enum tokens
     tkStrCon,    // string literal
     tkRegExp,    // regular expression literal
     tkBigIntCon, // bigint literal
+    tkPrivateName, // #IdentifierName (private class name)
 
     tkLim
 };

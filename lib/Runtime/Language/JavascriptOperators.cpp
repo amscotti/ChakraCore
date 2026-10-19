@@ -15,6 +15,7 @@
 #include "Library/ThrowErrorObject.h"
 #include "Library/JavascriptGeneratorFunction.h"
 #include "Library/JavascriptAsyncFunction.h"
+#include "Library/JavascriptWeakMap.h"
 
 #include "Library/ForInObjectEnumerator.h"
 #include "Library/ES5Array.h"
@@ -3328,6 +3329,89 @@ CommonNumber:
         descriptor.SetEnumerable(true);
         descriptor.SetConfigurable(true);
         return JavascriptObject::DefineOwnPropertyHelper(object, propertyId, descriptor, scriptContext, true);
+    }
+
+    // S1 private instance fields. Each private name is a per-class-evaluation
+    // hidden WeakMap brand: the object is the weak key and the field value is
+    // the map value. This keeps private state off the object's property list
+    // (so reflection, proxies and non-extensible objects behave correctly) and
+    // gives class evaluations distinct brands without static PropertyIds.
+    static JavascriptWeakMap * GetPrivateBrandMap(Var brand)
+    {
+        Assert(VarIs<JavascriptWeakMap>(brand));
+        return UnsafeVarTo<JavascriptWeakMap>(brand);
+    }
+
+    static void ThrowPrivateBrandCheck(ScriptContext * scriptContext)
+    {
+        JavascriptError::ThrowTypeError(scriptContext, JSERR_PrivateFieldBrandCheck);
+    }
+
+    Var JavascriptOperators::OP_NewPrivateName(ScriptContext * scriptContext)
+    {
+        return scriptContext->GetLibrary()->CreateWeakMap();
+    }
+
+    Var JavascriptOperators::OP_LdPrivateField(Var instance, Var brand, ScriptContext * scriptContext)
+    {
+        if (!JavascriptOperators::IsObject(instance))
+        {
+            ThrowPrivateBrandCheck(scriptContext);
+        }
+
+        RecyclableObject * object = UnsafeVarTo<RecyclableObject>(instance);
+        Var value;
+        if (!GetPrivateBrandMap(brand)->Get(object, &value))
+        {
+            ThrowPrivateBrandCheck(scriptContext);
+        }
+        return value;
+    }
+
+    Var JavascriptOperators::OP_StPrivateField(Var instance, Var brand, Var newValue, ScriptContext * scriptContext)
+    {
+        if (!JavascriptOperators::IsObject(instance))
+        {
+            ThrowPrivateBrandCheck(scriptContext);
+        }
+
+        RecyclableObject * object = UnsafeVarTo<RecyclableObject>(instance);
+        JavascriptWeakMap * brandMap = GetPrivateBrandMap(brand);
+        if (!brandMap->Has(object))
+        {
+            ThrowPrivateBrandCheck(scriptContext);
+        }
+        brandMap->Set(object, newValue);
+        return newValue;
+    }
+
+    Var JavascriptOperators::OP_InitPrivateField(Var instance, Var brand, Var newValue, ScriptContext * scriptContext)
+    {
+        if (!JavascriptOperators::IsObject(instance))
+        {
+            ThrowPrivateBrandCheck(scriptContext);
+        }
+
+        RecyclableObject * object = UnsafeVarTo<RecyclableObject>(instance);
+        JavascriptWeakMap * brandMap = GetPrivateBrandMap(brand);
+        if (!object->IsExtensible() || brandMap->Has(object))
+        {
+            // PrivateFieldAdd: a private field may be added only once and
+            // only to an extensible object.
+            ThrowPrivateBrandCheck(scriptContext);
+        }
+        brandMap->Set(object, newValue);
+        return newValue;
+    }
+
+    BOOL JavascriptOperators::OP_HasPrivateField(Var instance, Var brand, ScriptContext * scriptContext)
+    {
+        if (!JavascriptOperators::IsObject(instance))
+        {
+            // `#x in primitive` throws TypeError (it is not a property test).
+            ThrowPrivateBrandCheck(scriptContext);
+        }
+        return GetPrivateBrandMap(brand)->Has(UnsafeVarTo<RecyclableObject>(instance)) ? TRUE : FALSE;
     }
 
     BOOL JavascriptOperators::DeleteProperty(RecyclableObject* instance, PropertyId propertyId, PropertyOperationFlags propertyOperationFlags)

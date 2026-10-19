@@ -5022,6 +5022,41 @@ skipThunk:
     }
 
     template <class T>
+    void InterpreterStackFrame::OP_NewPrivateName(const unaligned T* playout)
+    {
+        SetReg(playout->R0, JavascriptOperators::OP_NewPrivateName(scriptContext));
+    }
+
+    template <class T>
+    void InterpreterStackFrame::OP_LdPrivateField(const unaligned T* playout)
+    {
+        SetReg(playout->R0, JavascriptOperators::OP_LdPrivateField(
+            GetReg(playout->R1), GetReg(playout->R2), scriptContext));
+    }
+
+    template <class T>
+    void InterpreterStackFrame::OP_StPrivateField(const unaligned T* playout)
+    {
+        SetReg(playout->R0, JavascriptOperators::OP_StPrivateField(
+            GetReg(playout->R1), GetReg(playout->R2), GetReg(playout->R3), scriptContext));
+    }
+
+    template <class T>
+    void InterpreterStackFrame::OP_InitPrivateField(const unaligned T* playout)
+    {
+        SetReg(playout->R0, JavascriptOperators::OP_InitPrivateField(
+            GetReg(playout->R1), GetReg(playout->R2), GetReg(playout->R3), scriptContext));
+    }
+
+    template <class T>
+    void InterpreterStackFrame::OP_HasPrivateField(const unaligned T* playout)
+    {
+        BOOL result = JavascriptOperators::OP_HasPrivateField(
+            GetReg(playout->R1), GetReg(playout->R2), scriptContext);
+        SetReg(playout->R0, result ? scriptContext->GetLibrary()->GetTrue() : scriptContext->GetLibrary()->GetFalse());
+    }
+
+    template <class T>
     void InterpreterStackFrame::OP_InitLocalProperty(unaligned T* playout)
     {
         DoInitProperty(playout, this->localClosure);

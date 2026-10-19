@@ -355,6 +355,11 @@ namespace Js
         static BOOL OP_StFunctionExpression(Var instance, PropertyId propertyId, Var newValue);
         static BOOL OP_InitProperty(Var instance, PropertyId propertyId, Var newValue);
         static BOOL OP_InitClassField(Var instance, PropertyId propertyId, Var newValue);
+        static Var OP_NewPrivateName(ScriptContext * scriptContext);
+        static Var OP_LdPrivateField(Var instance, Var brand, ScriptContext * scriptContext);
+        static Var OP_StPrivateField(Var instance, Var brand, Var newValue, ScriptContext * scriptContext);
+        static Var OP_InitPrivateField(Var instance, Var brand, Var newValue, ScriptContext * scriptContext);
+        static BOOL OP_HasPrivateField(Var instance, Var brand, ScriptContext * scriptContext);
         static Var OP_DeleteProperty(Var instance, PropertyId propertyId, ScriptContext* scriptContext, PropertyOperationFlags propertyOperationFlags = PropertyOperation_None);
         static Var OP_DeleteRootProperty(Var instance, PropertyId propertyId, ScriptContext* scriptContext, PropertyOperationFlags propertyOperationFlags = PropertyOperation_None);
 
