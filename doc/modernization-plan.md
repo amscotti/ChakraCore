@@ -589,8 +589,8 @@ Decision/rollback points:
   tracked until C4, optional ecosystem scope has separate gates.
 - [ ] C4: Published qualified ES2025 result on the claimed default configurations.
 
-**Latest integration checkpoint (2026-10-19):** main is clean at
-`874e96cad`, **1996/0 test** and **2048/0 debug-static** (573/573 and
+**Latest integration checkpoint (2026-10-19):** main is clean at the
+**1996/0 test** and **2048/0 debug-static** (573/573 and
 546/546 steps).
 Merged lanes: S1 public instance fields, S2 arithmetic, S8 resizable
 ArrayBuffer/transfer, S13 WeakRef, and S14 P1/P2/P3/P4/P5/P6/P7

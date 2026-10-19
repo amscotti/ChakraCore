@@ -841,7 +841,7 @@ asserted the old non-conforming block `var`/`let` behavior were updated
 deliberately. Gates moved 1975/2027 → 1976/2028. No bytecode change; B4
 still owns JIT-configuration claims.)*
 
-## 6. C2 integration status (2026-10-18)
+## 6. C2 integration status (2026-10-19)
 
 | Batch | Status | Integrated evidence | Remaining |
 |---|---|---|---|
