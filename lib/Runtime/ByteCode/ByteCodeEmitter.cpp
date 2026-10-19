@@ -4424,10 +4424,24 @@ void ByteCodeGenerator::EmitLoadInstance(Symbol *sym, IdentPtr pid, Js::RegSlot 
         {
             if (envIndex == -1)
             {
-                // The local body scope. Branch cannot bail on implicit calls.
-              
-                this->m_writer.BrLocalProperty(Js::OpCode::BrOnHasLocalProperty, rec.label, propertyIndex);
-                rec.kind = DynamicLoadKind::Local;
+                if (scope == funcInfo->GetParamScope() &&
+                    !funcInfo->IsBodyAndParamScopeMerged() &&
+                    funcInfo->GetCurrentChildScope() != scope)
+                {
+                    Assert(scope->GetIsObject());
+                    Js::RegSlot paramObjectReg = funcInfo->AcquireTmpRegister();
+                    this->m_writer.Reg1(Js::OpCode::LdParamObj, paramObjectReg);
+                    this->m_writer.BrProperty(Js::OpCode::BrOnHasProperty, rec.label, paramObjectReg, propertyIndex);
+                    rec.kind = DynamicLoadKind::ParamObj;
+                    rec.instance = paramObjectReg;
+                }
+                else
+                {
+                    // The local body scope. Branch cannot bail on implicit calls.
+
+                    this->m_writer.BrLocalProperty(Js::OpCode::BrOnHasLocalProperty, rec.label, propertyIndex);
+                    rec.kind = DynamicLoadKind::Local;
+                }
             }
             else
             {
@@ -4565,6 +4579,16 @@ void ByteCodeGenerator::EmitLoadInstance(Symbol *sym, IdentPtr pid, Js::RegSlot 
                         Assert(thisLocation != instLocation);
                         this->m_writer.Reg2(Js::OpCode::Ld_A_ReuseLoc, thisLocation, funcInfo->undefinedConstantRegister);
                     }
+                    break;
+
+                case DynamicLoadKind::ParamObj:
+                    this->m_writer.Reg1(Js::OpCode::LdParamObj, instLocation);
+                    if (thisLocation != funcInfo->undefinedConstantRegister)
+                    {
+                        Assert(thisLocation != instLocation);
+                        this->m_writer.Reg2(Js::OpCode::Ld_A_ReuseLoc, thisLocation, funcInfo->undefinedConstantRegister);
+                    }
+                    funcInfo->ReleaseTmpRegister(recList.Item(i).instance);
                     break;
 
                 case DynamicLoadKind::Env:
@@ -4857,9 +4881,23 @@ void ByteCodeGenerator::EmitPropStore(Js::RegSlot rhsLocation, Symbol *sym, Iden
         {
             if (envIndex == -1)
             {
-                this->m_writer.BrLocalProperty(Js::OpCode::BrOnHasLocalProperty, rec.label, propertyIndex);
-                rec.kind = DynamicLoadKind::Local;
-                rec.instance = scopeLocation;
+                if (scope == funcInfo->GetParamScope() &&
+                    !funcInfo->IsBodyAndParamScopeMerged() &&
+                    funcInfo->GetCurrentChildScope() != scope)
+                {
+                    Assert(scope->GetIsObject());
+                    Js::RegSlot paramObjectReg = funcInfo->AcquireTmpRegister();
+                    this->m_writer.Reg1(Js::OpCode::LdParamObj, paramObjectReg);
+                    this->m_writer.BrProperty(Js::OpCode::BrOnHasProperty, rec.label, paramObjectReg, propertyIndex);
+                    rec.kind = DynamicLoadKind::ParamObj;
+                    rec.instance = paramObjectReg;
+                }
+                else
+                {
+                    this->m_writer.BrLocalProperty(Js::OpCode::BrOnHasLocalProperty, rec.label, propertyIndex);
+                    rec.kind = DynamicLoadKind::Local;
+                    rec.instance = scopeLocation;
+                }
             }
             else
             {
@@ -5021,6 +5059,12 @@ void ByteCodeGenerator::EmitPropStore(Js::RegSlot rhsLocation, Symbol *sym, Iden
                 case DynamicLoadKind::Local:
                     cacheId = funcInfo->FindOrAddInlineCacheId(recList.Item(i).instance, propertyId, false, true);
                     this->m_writer.ElementP(Js::OpCode::StLocalFld, rhsLocation, cacheId);
+                    break;
+
+                case DynamicLoadKind::ParamObj:
+                    cacheId = funcInfo->FindOrAddInlineCacheId(recList.Item(i).instance, propertyId, false, true);
+                    this->m_writer.PatchableProperty(Js::OpCode::StFld, rhsLocation, recList.Item(i).instance, cacheId);
+                    funcInfo->ReleaseTmpRegister(recList.Item(i).instance);
                     break;
 
                 case DynamicLoadKind::Env:
@@ -5230,9 +5274,26 @@ void ByteCodeGenerator::EmitPropLoad(Js::RegSlot lhsLocation, Symbol *sym, Ident
         {
             if (envIndex == -1)
             {
-                this->m_writer.BrLocalProperty(Js::OpCode::BrOnHasLocalProperty, rec.label, propertyIndex);
-                rec.kind = DynamicLoadKind::Local;
-                rec.instance = scopeLocation;
+                if (scope == funcInfo->GetParamScope() &&
+                    !funcInfo->IsBodyAndParamScopeMerged() &&
+                    funcInfo->GetCurrentChildScope() != scope)
+                {
+                    // The parameter scope is an outer environment when emitting
+                    // the body. Its location is the body scope register, so
+                    // load the parameter closure explicitly.
+                    Assert(scope->GetIsObject());
+                    Js::RegSlot paramObjectReg = funcInfo->AcquireTmpRegister();
+                    this->m_writer.Reg1(Js::OpCode::LdParamObj, paramObjectReg);
+                    this->m_writer.BrProperty(Js::OpCode::BrOnHasProperty, rec.label, paramObjectReg, propertyIndex);
+                    rec.kind = DynamicLoadKind::ParamObj;
+                    rec.instance = paramObjectReg;
+                }
+                else
+                {
+                    this->m_writer.BrLocalProperty(Js::OpCode::BrOnHasLocalProperty, rec.label, propertyIndex);
+                    rec.kind = DynamicLoadKind::Local;
+                    rec.instance = scopeLocation;
+                }
             }
             else
             {
@@ -5416,6 +5477,12 @@ void ByteCodeGenerator::EmitPropLoad(Js::RegSlot lhsLocation, Symbol *sym, Ident
                     this->m_writer.ElementP(Js::OpCode::LdLocalFld_ReuseLoc, lhsLocation, cacheId);
                     break;
 
+                case DynamicLoadKind::ParamObj:
+                    cacheId = funcInfo->FindOrAddInlineCacheId(recList.Item(i).instance, propertyId, false, false);
+                    this->m_writer.PatchableProperty(Js::OpCode::LdFld_ReuseLoc, lhsLocation, recList.Item(i).instance, cacheId);
+                    funcInfo->ReleaseTmpRegister(recList.Item(i).instance);
+                    break;
+
                 case DynamicLoadKind::Env:
                     instLocation = funcInfo->AcquireTmpRegister();
                     this->m_writer.SlotI1(Js::OpCode::LdEnvObj, instLocation, recList.Item(i).index);
@@ -5512,9 +5579,23 @@ void ByteCodeGenerator::EmitPropDelete(Js::RegSlot lhsLocation, Symbol *sym, Ide
         {
             if (envIndex == -1)
             {
-                this->m_writer.BrLocalProperty(Js::OpCode::BrOnHasLocalProperty, rec.label, propertyIndex);
-                rec.kind = DynamicLoadKind::Local;
-                rec.instance = scopeLocation;
+                if (scope == funcInfo->GetParamScope() &&
+                    !funcInfo->IsBodyAndParamScopeMerged() &&
+                    funcInfo->GetCurrentChildScope() != scope)
+                {
+                    Assert(scope->GetIsObject());
+                    Js::RegSlot paramObjectReg = funcInfo->AcquireTmpRegister();
+                    this->m_writer.Reg1(Js::OpCode::LdParamObj, paramObjectReg);
+                    this->m_writer.BrProperty(Js::OpCode::BrOnHasProperty, rec.label, paramObjectReg, propertyIndex);
+                    rec.kind = DynamicLoadKind::ParamObj;
+                    rec.instance = paramObjectReg;
+                }
+                else
+                {
+                    this->m_writer.BrLocalProperty(Js::OpCode::BrOnHasLocalProperty, rec.label, propertyIndex);
+                    rec.kind = DynamicLoadKind::Local;
+                    rec.instance = scopeLocation;
+                }
             }
             else
             {
@@ -5582,6 +5663,11 @@ void ByteCodeGenerator::EmitPropDelete(Js::RegSlot lhsLocation, Symbol *sym, Ide
             {
                 case DynamicLoadKind::Local:
                     this->m_writer.ElementU(Js::OpCode::DeleteLocalFld_ReuseLoc, lhsLocation, propertyIndex);
+                    break;
+
+                case DynamicLoadKind::ParamObj:
+                    this->m_writer.Property(Js::OpCode::DeleteFld_ReuseLoc, lhsLocation, recList.Item(i).instance, propertyIndex);
+                    funcInfo->ReleaseTmpRegister(recList.Item(i).instance);
                     break;
 
                 case DynamicLoadKind::Env:
@@ -5705,9 +5791,23 @@ void ByteCodeGenerator::EmitPropTypeof(Js::RegSlot lhsLocation, Symbol *sym, Ide
         {
             if (envIndex == -1)
             {
-                this->m_writer.BrLocalProperty(Js::OpCode::BrOnHasLocalProperty, rec.label, propertyIndex);
-                rec.kind = DynamicLoadKind::Local;
-                rec.instance = scopeLocation;
+                if (scope == funcInfo->GetParamScope() &&
+                    !funcInfo->IsBodyAndParamScopeMerged() &&
+                    funcInfo->GetCurrentChildScope() != scope)
+                {
+                    Assert(scope->GetIsObject());
+                    Js::RegSlot paramObjectReg = funcInfo->AcquireTmpRegister();
+                    this->m_writer.Reg1(Js::OpCode::LdParamObj, paramObjectReg);
+                    this->m_writer.BrProperty(Js::OpCode::BrOnHasProperty, rec.label, paramObjectReg, propertyIndex);
+                    rec.kind = DynamicLoadKind::ParamObj;
+                    rec.instance = paramObjectReg;
+                }
+                else
+                {
+                    this->m_writer.BrLocalProperty(Js::OpCode::BrOnHasLocalProperty, rec.label, propertyIndex);
+                    rec.kind = DynamicLoadKind::Local;
+                    rec.instance = scopeLocation;
+                }
             }
             else
             {
@@ -5831,6 +5931,11 @@ void ByteCodeGenerator::EmitPropTypeof(Js::RegSlot lhsLocation, Symbol *sym, Ide
             {
                 case DynamicLoadKind::Local:
                     this->EmitTypeOfFld(funcInfo, propertyId, lhsLocation, recList.Item(i).instance, Js::OpCode::LdLocalFld, true);
+                    break;
+
+                case DynamicLoadKind::ParamObj:
+                    this->EmitTypeOfFld(funcInfo, propertyId, lhsLocation, recList.Item(i).instance, Js::OpCode::LdFldForTypeOf, true);
+                    funcInfo->ReleaseTmpRegister(recList.Item(i).instance);
                     break;
 
                 case DynamicLoadKind::Env:

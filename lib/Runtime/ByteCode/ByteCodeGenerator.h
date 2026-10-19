@@ -14,6 +14,7 @@ enum DynamicLoadKind
 {
     Invalid,
     Local,
+    ParamObj,
     Env,
     LocalWith,
     EnvWith

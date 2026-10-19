@@ -133,6 +133,17 @@ namespace Js
         return true;
     }
 
+    BOOL
+    RootObjectBase::EnsureNoRedeclPropertyForEval(PropertyId propertyId)
+    {
+        bool noRedecl = false;
+        if (GetTypeHandler()->HasRootProperty(this, propertyId, &noRedecl) && noRedecl)
+        {
+            JavascriptError::ThrowSyntaxError(GetScriptContext(), ERRRedeclaration);
+        }
+        return true;
+    }
+
     void
     RootObjectBase::EnsureCanDeclGloFunc(PropertyId propertyId)
     {

@@ -34,7 +34,7 @@ namespace Js
         BOOL ReserveGlobalProperty(PropertyId propertyId);
         BOOL IsReservedGlobalProperty(PropertyId propertyId);
 
-        Var ExecuteEvalParsedFunction(ScriptFunction *pfuncScript, FrameDisplay* environment, Var &varThis, ScriptContext *scriptContext);
+        Var ExecuteEvalParsedFunction(ScriptFunction *pfuncScript, FrameDisplay* environment, Var &varThis, ScriptContext *scriptContext, bool evalInParamScope, bool evalInArrowParamScope, bool evalCallerParameterArguments);
 
         class EntryInfo
         {

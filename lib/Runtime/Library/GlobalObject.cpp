@@ -9,6 +9,7 @@
 #endif
 #include "ByteCode/ByteCodeApi.h"
 #include "Exceptions/EvalDisabledException.h"
+#include "Language/InterpreterStackFrame.h"
 
 #include "Types/PropertyIndexRanges.h"
 #include "Types/SimpleDictionaryPropertyDescriptor.h"
@@ -593,6 +594,9 @@ using namespace Js;
         // cached FunctionBody compiled under a different context.
         bool evalInClassFieldInitializer = false;
         bool evalInDerivedFieldConstructor = false;
+        bool evalInParamScope = false;
+        bool evalInArrowParamScope = false;
+        bool evalCallerParameterArguments = false;
         if (args.IsDirectEvalCall() && !isIndirect)
         {
             JavascriptFunction * pfuncCaller = nullptr;
@@ -607,8 +611,26 @@ using namespace Js;
             // immediate caller. Walk out to the constructor so super() in that
             // eval is rejected instead of silently skipping field init.
             JavascriptStackWalker walker(scriptContext);
+            bool firstCaller = true;
             while (walker.GetCaller(&pfuncCaller))
             {
+                if (firstCaller)
+                {
+                    firstCaller = false;
+                    if (pfuncCaller != nullptr && pfuncCaller->IsScriptFunction() && walker.IsJavascriptFrame())
+                    {
+                        InterpreterStackFrame *callerFrame = walker.GetCurrentInterpreterFrame();
+                        // Direct eval in a parameter initializer runs while the
+                        // caller's parameter scope is still the active
+                        // environment. Its variable environment is the outer
+                        // call environment, not the parameter scope.
+                        FunctionBody *callerBody = pfuncCaller->GetFunctionBody();
+                        FunctionInfo *callerInfo = callerBody->GetFunctionInfo();
+                        evalInParamScope = callerFrame != nullptr && !callerFrame->IsParamScopeDone();
+                        evalInArrowParamScope = evalInParamScope && callerBody->IsLambda();
+                        evalCallerParameterArguments = callerInfo->HasParameterNamedArguments();
+                    }
+                }
                 if (pfuncCaller == nullptr || !pfuncCaller->IsScriptFunction())
                 {
                     continue;
@@ -771,7 +793,7 @@ using namespace Js;
             }
         }
 
-        return library->GetGlobalObject()->ExecuteEvalParsedFunction(pfuncScript, environment, varThis, scriptContext);
+        return library->GetGlobalObject()->ExecuteEvalParsedFunction(pfuncScript, environment, varThis, scriptContext, evalInParamScope, evalInArrowParamScope, evalCallerParameterArguments);
     }
 
     void GlobalObject::UpdateThisForEval(Var &varThis, ModuleID moduleID, ScriptContext *scriptContext)
@@ -780,7 +802,7 @@ using namespace Js;
     }
 
 
-    Var GlobalObject::ExecuteEvalParsedFunction(ScriptFunction *pfuncScript, FrameDisplay* environment, Var &varThis, ScriptContext *scriptContext)
+    Var GlobalObject::ExecuteEvalParsedFunction(ScriptFunction *pfuncScript, FrameDisplay* environment, Var &varThis, ScriptContext *scriptContext, bool evalInParamScope, bool evalInArrowParamScope, bool evalCallerParameterArguments)
     {
         Assert(pfuncScript != nullptr);
 
@@ -792,6 +814,31 @@ using namespace Js;
             // Executing the eval causes the scope chain to escape.
             pfuncScript->InvalidateCachedScopeChain();
         }
+
+        struct AutoRestoreEvalInParamScope
+        {
+            ScriptContext *scriptContext;
+            bool saved;
+            bool savedArrow;
+            bool savedParamArgs;
+            AutoRestoreEvalInParamScope(ScriptContext *scriptContext, bool value, bool arrowValue, bool paramArgsValue)
+                : scriptContext(scriptContext),
+                  saved(scriptContext->IsEvalInParamScope()),
+                  savedArrow(scriptContext->IsEvalInArrowParamScope()),
+                  savedParamArgs(scriptContext->IsEvalCallerParameterArguments())
+            {
+                scriptContext->SetEvalInParamScope(value);
+                scriptContext->SetEvalInArrowParamScope(arrowValue);
+                scriptContext->SetEvalCallerParameterArguments(paramArgsValue);
+            }
+            ~AutoRestoreEvalInParamScope()
+            {
+                scriptContext->SetEvalInParamScope(saved);
+                scriptContext->SetEvalInArrowParamScope(savedArrow);
+                scriptContext->SetEvalCallerParameterArguments(savedParamArgs);
+            }
+        } restoreEvalInParamScope(scriptContext, evalInParamScope, evalInArrowParamScope, evalCallerParameterArguments);
+
         Var varResult = nullptr;
         BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
         {

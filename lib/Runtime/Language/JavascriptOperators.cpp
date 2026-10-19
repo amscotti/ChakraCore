@@ -4,6 +4,7 @@
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #include "RuntimeLanguagePch.h"
+#include "cmperr.h"
 
 #include "Types/PathTypeHandler.h"
 #include "Types/PropertyIndexRanges.h"
@@ -8054,10 +8055,62 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
         int length = pDisplay->GetLength();
         RecyclableObject *object;
 
+        // Direct eval in a parameter initializer: the caller's active
+        // environment is the parameter scope, which is an intermediate
+        // environment for EvalDeclarationInstantiation. An "arguments" var
+        // declaration there conflicts with the parameter scope's arguments
+        // binding (the implicit arguments object or a parameter named
+        // arguments). Arrow functions have no implicit binding, so the first
+        // legal declaration creates the binding and later eval declarations
+        // reuse it (a var redeclaration is not a conflict).
+        if (propertyId == PropertyIds::arguments && length > 0)
+        {
+            ScriptContext *scriptContext = VarTo<RecyclableObject>(defaultInstance)->GetScriptContext();
+            if (scriptContext->IsEvalInParamScope() &&
+                FrameDisplay::GetScopeType(pDisplay->GetItem(0)) == ScopeType_ActivationObject)
+            {
+                ActivationObject *paramScope = VarTo<ActivationObject>(pDisplay->GetItem(0));
+                bool noRedecl = false;
+                bool hasBinding = paramScope->GetTypeHandler()->HasProperty(paramScope, propertyId, &noRedecl);
+                if (hasBinding && (!scriptContext->IsEvalInArrowParamScope() || noRedecl))
+                {
+                    JavascriptError::ThrowSyntaxError(scriptContext, ERRRedeclaration);
+                }
+                if (!hasBinding)
+                {
+                    // A var binding is writable and enumerable but not
+                    // configurable; EnsureProperty would make it configurable.
+                    paramScope->InitProperty(propertyId,
+                        scriptContext->GetLibrary()->GetUndefined(), PropertyOperation_None, nullptr);
+                }
+                return;
+            }
+
+            // Body eval: the first environment is either the body's lexical
+            // environment or its variable environment. A lexical arguments
+            // binding conflicts; a parameter named arguments lives in the
+            // merged variable environment and does not.
+            if (FrameDisplay::GetScopeType(pDisplay->GetItem(0)) == ScopeType_ActivationObject)
+            {
+                ActivationObject *firstScope = VarTo<ActivationObject>(pDisplay->GetItem(0));
+                bool noRedecl = false;
+                bool hasBinding = firstScope->GetTypeHandler()->HasProperty(firstScope, propertyId, &noRedecl);
+                if (hasBinding && noRedecl &&
+                    !scriptContext->IsEvalCallerParameterArguments())
+                {
+                    JavascriptError::ThrowSyntaxError(scriptContext, ERRRedeclaration);
+                }
+                return;
+            }
+        }
+
         for (i = 0; i < length; i++)
         {
             object = VarTo<RecyclableObject>(pDisplay->GetItem(i));
-            if (object->EnsureNoRedeclProperty(propertyId))
+            bool done = propertyId == PropertyIds::arguments ?
+                object->EnsureNoRedeclPropertyForEval(propertyId) :
+                object->EnsureNoRedeclProperty(propertyId);
+            if (done)
             {
                 return;
             }

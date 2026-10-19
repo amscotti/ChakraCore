@@ -91,6 +91,20 @@ namespace Js
         return true;
     }
 
+    BOOL ActivationObject::EnsureNoRedeclPropertyForEval(PropertyId propertyId)
+    {
+        bool noRedecl = false;
+        if (GetTypeHandler()->HasProperty(this, propertyId, &noRedecl) && noRedecl)
+        {
+            // A direct eval var declaration colliding with an intermediate
+            // lexical binding is a SyntaxError (EvalDeclarationInstantiation).
+            JavascriptError::ThrowSyntaxError(GetScriptContext(), ERRRedeclaration);
+        }
+        // This is the variable environment for the checked declaration, so the
+        // walk stops here whether or not it already has the binding.
+        return TRUE;
+    }
+
     BOOL ActivationObject::DeleteItem(uint32 index, PropertyOperationFlags flags)
     {
         return false;

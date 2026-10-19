@@ -311,6 +311,10 @@ namespace Js {
         virtual BOOL InitPropertyInEval(PropertyId propertyId, Var value, PropertyOperationFlags flags = PropertyOperation_None, PropertyValueInfo* info = NULL);
         virtual BOOL EnsureProperty(PropertyId propertyId);
         virtual BOOL EnsureNoRedeclProperty(PropertyId propertyId);
+        // Same as EnsureNoRedeclProperty, but reports a SyntaxError. Used by
+        // direct eval's var-declaration check, where the conflict is an early
+        // error rather than a runtime redeclaration.
+        virtual BOOL EnsureNoRedeclPropertyForEval(PropertyId propertyId) { return FALSE; }
         virtual BOOL SetPropertyWithAttributes(PropertyId propertyId, Var value, PropertyAttributes attributes, PropertyValueInfo* info, PropertyOperationFlags flags = PropertyOperation_None, SideEffects possibleSideEffects = SideEffects_Any);
         virtual BOOL InitPropertyScoped(PropertyId propertyId, Var value);
         virtual BOOL InitFuncScoped(PropertyId propertyId, Var value);

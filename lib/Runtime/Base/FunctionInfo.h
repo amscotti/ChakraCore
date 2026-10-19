@@ -47,7 +47,8 @@ namespace Js
             GeneratorWithComplexParams     = 0x8000000, // Generator function with non-simple params needs startup yield
             ClassFieldInitializer          = 0x10000000, // function/arrow is lexically inside a class field initializer
             ClassConstructorWithFields     = 0x20000000, // class constructor owns instance-field initializers
-            AnnexBBlockFunction            = 0x40000000 // ordinary block function receiving the Annex B var extension
+            AnnexBBlockFunction            = 0x40000000, // ordinary block function receiving the Annex B var extension
+            ParameterNamedArguments        = 0x80000000  // a formal parameter is named "arguments"
         };
         FunctionInfo(JavascriptMethod entryPoint, Attributes attributes = None, LocalFunctionId functionId = Js::Constants::NoFunctionId, FunctionProxy* functionBodyImpl = nullptr);
         FunctionInfo(JavascriptMethod entryPoint, _no_write_barrier_tag, Attributes attributes = None, LocalFunctionId functionId = Js::Constants::NoFunctionId, FunctionProxy* functionBodyImpl = nullptr);
@@ -70,6 +71,7 @@ namespace Js
         bool IsDeferred() const { return ((this->attributes & (DeferredDeserialize | DeferredParse)) != 0); }
         static bool IsLambda(Attributes attributes) { return ((attributes & Lambda) != 0); }
         bool IsLambda() const { return IsLambda(this->attributes); }
+        bool HasParameterNamedArguments() const { return (this->attributes & ParameterNamedArguments) != 0; }
         bool IsConstructor() const { return ((this->attributes & ErrorOnNew) == 0); }
 
         static bool IsGenerator(Attributes attributes) { return ((attributes & Generator) != 0); }

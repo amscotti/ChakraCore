@@ -1309,7 +1309,8 @@ static const Js::FunctionInfo::Attributes StableFunctionInfoAttributesMask = (Js
     Js::FunctionInfo::Attributes::Module |
     Js::FunctionInfo::Attributes::ComputedName |
     Js::FunctionInfo::Attributes::HomeObj |
-    Js::FunctionInfo::Attributes::GeneratorWithComplexParams
+    Js::FunctionInfo::Attributes::GeneratorWithComplexParams |
+    Js::FunctionInfo::Attributes::ParameterNamedArguments
 );
 
 static Js::FunctionInfo::Attributes GetFunctionInfoAttributes(ParseNodeFnc * pnodeFnc)
@@ -1322,6 +1323,10 @@ static Js::FunctionInfo::Attributes GetFunctionInfoAttributes(ParseNodeFnc * pno
     if (pnodeFnc->IsLambda())
     {
         attributes = (Js::FunctionInfo::Attributes)(attributes | Js::FunctionInfo::Attributes::ErrorOnNew | Js::FunctionInfo::Attributes::Lambda);
+    }
+    if ((pnodeFnc->grfpn & PNodeFlags::fpnArguments_overriddenInParam) != 0)
+    {
+        attributes = (Js::FunctionInfo::Attributes)(attributes | Js::FunctionInfo::Attributes::ParameterNamedArguments);
     }
     if (pnodeFnc->HasSuperReference())
     {
@@ -1519,6 +1524,7 @@ FuncInfo * ByteCodeGenerator::StartBindFunction(const char16 *name, uint nameLen
         parseableFunctionInfo->SetIsDeclaration(pnodeFnc->IsDeclaration() != 0);
         parseableFunctionInfo->SetIsMethod(pnodeFnc->IsMethod() != 0);
         parseableFunctionInfo->SetIsAccessor(pnodeFnc->IsAccessor() != 0);
+
         if (pnodeFnc->IsAccessor())
         {
             scriptContext->optimizationOverrides.SetSideEffects(Js::SideEffects_Accessor);
@@ -1611,7 +1617,15 @@ FuncInfo * ByteCodeGenerator::StartBindFunction(const char16 *name, uint nameLen
         bodyScope->SetCapturesAll(true);
         bodyScope->SetMustInstantiate(true);
 
-        // Do not mark param scope as dynamic as it does not leak declarations
+        // Do not mark param scope as dynamic as it does not leak declarations,
+        // unless the eval call is in the parameter list. In that case the
+        // eval's variable environment is outside the parameter scope and its
+        // declarations must be visible to the body and to parameter closures.
+        if (pnodeFnc->IsLambda() &&
+            pnodeFnc->pnodeScopes != nullptr && pnodeFnc->pnodeScopes->GetCallsEval())
+        {
+            paramScope->SetIsDynamic(true);
+        }
         paramScope->SetIsObject();
         paramScope->SetCapturesAll(true);
         paramScope->SetMustInstantiate(true);
