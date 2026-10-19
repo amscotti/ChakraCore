@@ -168,6 +168,18 @@
   </test>
   <test>
     <default>
+      <files>class-static-private-fields.js</files>
+      <compile-flags>-args summary -endargs</compile-flags>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>class-static-private-fields.js</files>
+      <compile-flags>-force:deferparse -args summary -endargs</compile-flags>
+    </default>
+  </test>
+  <test>
+    <default>
       <files>class-private-fields.js</files>
       <compile-flags>-args summary -endargs</compile-flags>
     </default>
