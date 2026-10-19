@@ -406,14 +406,14 @@ const tests = [
         }
     },
     {
-        name: "early errors: static prototype/constructor, static blocks, static private and computed fields",
+        name: "early errors: static prototype/constructor, static blocks, private methods and computed fields",
         body() {
             assert.throws(function () { eval("class C { static prototype; }"); }, SyntaxError, "static prototype");
             assert.throws(function () { eval("class C { static 'prototype' = 1; }"); }, SyntaxError, "string static prototype");
             assert.throws(function () { eval("class C { static constructor; }"); }, SyntaxError, "static constructor");
             assert.throws(function () { eval("class C { static 'constructor' = 1; }"); }, SyntaxError, "string static constructor");
             assert.throws(function () { eval("class C { static {} }"); }, SyntaxError, "static block");
-            assert.throws(function () { eval("class C { static #x; }"); }, SyntaxError, "static private field");
+            assert.doesNotThrow(function () { eval("class C { static #x; }"); }, "static private field");
             assert.throws(function () { eval("class C { static #m() {} }"); }, SyntaxError, "static private method");
             assert.throws(function () { eval("class C { static [0] = 1; }"); }, SyntaxError, "computed static field");
             assert.throws(function () { eval("class C { static [0]; }"); }, SyntaxError, "computed static field without initializer");

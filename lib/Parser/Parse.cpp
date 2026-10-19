@@ -88,9 +88,9 @@ struct BlockInfoStack
     bool isSourceBlock;                     // syntactic Block : { StatementList } (not a for/switch/class scope)
 };
 
-// S1 private class fields: one runtime token binding per declared private
-// name, held in a hidden block-scoped const of the class body, plus a lexical
-// chain so nested classes can reference outer private names.
+// S1 private class fields (instance and static): one runtime token binding per
+// declared private name, held in a hidden block-scoped const of the class body,
+// plus a lexical chain so nested classes can reference outer private names.
 struct PrivateNameEntry
 {
     IdentPtr name;
@@ -9660,8 +9660,7 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
             else if (m_token.tk == tkSColon || m_token.tk == tkAsg || m_token.tk == tkRCurly)
             {
                 // 'static;' / 'static = 1' / 'static }' are instance fields
-                // named static. Static fields are outside this slice, but this
-                // spelling is a public instance field.
+                // named static.
                 this->GetScanner()->SeekTo(beginStatic);
             }
             else
@@ -9703,11 +9702,6 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
             ichMin = this->GetScanner()->IchMinTok();
             iecpMin = this->GetScanner()->IecpMinTok();
             privateSource = m_token.GetIdentifier(this->GetHashTbl());
-            if (isStatic)
-            {
-                // Static private members are outside this slice.
-                Error(ERRsyntax);
-            }
             if (privateSource == wellKnownPropertyPids.constructor)
             {
                 // `#constructor` is not a valid private name.
@@ -9751,7 +9745,12 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
         }
 
         bool isGenerator = m_scriptContext->GetConfig()->IsES6GeneratorsEnabled() &&
-            m_token.tk == tkStar;
+            m_token.tk == tkStar &&
+            // A private name is already complete before this check. A `*`
+            // after a line terminator therefore starts the next class
+            // element (field ASI), not a generator modifier on the private
+            // name; `#x *gen(){}` without a newline remains invalid.
+            !(isPrivateField && this->GetScanner()->FHadNewLine());
         if (isGenerator)
         {
             fncDeclFlags |= fFncGenerator;
@@ -9824,6 +9823,13 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
             }
             else
             {
+                // Static private methods/accessors are outside this slice.
+                // Reject explicitly instead of treating the member as an
+                // instance private method.
+                if (isStatic)
+                {
+                    Error(ERRsyntax);
+                }
                 // Private instance method. The method grammar is otherwise the
                 // public-member grammar; rewind to the private-name token so
                 // ParseFncDecl consumes it as the (suppressed) function name.
@@ -10021,9 +10027,10 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
                 ParseNodeBin * pnodeField = CreateBinNode(knopMember, pnodeMemberName, pnodeCall);
                 if (isStatic)
                 {
-                    // Static fields stay in the class member list so their
-                    // evaluation is interleaved with static methods in textual
-                    // order. pnode2 is a call (or null), not a function node.
+                    // Static fields (public and private) stay in the class
+                    // member list so their evaluation is interleaved with
+                    // static methods in textual order. pnode2 is a call (or
+                    // null), not a function node.
                     AddToNodeList(&pnodeMembers, &lastMemberNodeRef, pnodeField);
                 }
                 else

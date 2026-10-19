@@ -2664,8 +2664,10 @@ void ByteCodeGenerator::EmitClassFieldInitializerCalls(ParseNode * pnodeFields, 
 
 // S1: evaluate one static field at class-definition time. The initializer
 // helper (when present) is called with the constructor as its explicit
-// receiver; the result is installed on the constructor itself with
-// CreateDataPropertyOrThrow semantics. No instance-side work is done.
+// receiver; the result is installed on the constructor itself. Public fields
+// use CreateDataPropertyOrThrow (InitClassField) and private fields use the
+// class's existing brand WeakMap keyed by the constructor
+// (InitStaticPrivateField). No instance-side work is done.
 void ByteCodeGenerator::EmitStaticClassFieldDefinition(ParseNode * pnodeField, Js::RegSlot classLocation, FuncInfo * funcInfo)
 {
     ParseNode * pnodeName = pnodeField->AsParseNodeBin()->pnode1;
@@ -2673,7 +2675,8 @@ void ByteCodeGenerator::EmitStaticClassFieldDefinition(ParseNode * pnodeField, J
         ? pnodeField->AsParseNodeBin()->pnode2->AsParseNodeCall()
         : nullptr;
 
-    Assert(pnodeName->nop == knopStr);
+    bool isPrivate = pnodeName->nop == knopName && pnodeName->AsParseNodeName()->IsPrivateName();
+    Assert(isPrivate || pnodeName->nop == knopStr);
     Js::RegSlot valueLocation;
     bool releaseValueLoc = false;
 
@@ -2704,10 +2707,25 @@ void ByteCodeGenerator::EmitStaticClassFieldDefinition(ParseNode * pnodeField, J
         releaseValueLoc = true;
     }
 
-    AssignPropertyId(pnodeName->AsParseNodeStr()->pid);
-    Js::PropertyId propertyId = pnodeName->AsParseNodeStr()->pid->GetPropertyId();
-    uint cacheId = funcInfo->FindOrAddInlineCacheId(classLocation, propertyId, false, true);
-    Writer()->PatchableProperty(Js::OpCode::InitClassField, valueLocation, classLocation, cacheId);
+    if (isPrivate)
+    {
+        ParseNodeName * pnodePrivateName = pnodeName->AsParseNodeName();
+        Assert(pnodePrivateName->sym != nullptr);
+        Js::RegSlot brandLocation = funcInfo->AcquireTmpRegister();
+        this->EmitPropLoad(
+            brandLocation, pnodePrivateName->sym, pnodePrivateName->pid, funcInfo,
+            /*skipUseBeforeDeclarationCheck*/ true);
+        Writer()->Reg4(
+            Js::OpCode::InitStaticPrivateField, valueLocation, classLocation, brandLocation, valueLocation);
+        funcInfo->ReleaseTmpRegister(brandLocation);
+    }
+    else
+    {
+        AssignPropertyId(pnodeName->AsParseNodeStr()->pid);
+        Js::PropertyId propertyId = pnodeName->AsParseNodeStr()->pid->GetPropertyId();
+        uint cacheId = funcInfo->FindOrAddInlineCacheId(classLocation, propertyId, false, true);
+        Writer()->PatchableProperty(Js::OpCode::InitClassField, valueLocation, classLocation, cacheId);
+    }
 
     if (releaseValueLoc)
     {
@@ -12109,13 +12127,21 @@ static bool IsPrivateMemberNode(ParseNode * memberNode)
 
 // Static field entries are stored in the class member list to preserve
 // textual order with static methods. Unlike method members, pnode2 is either
-// null (no initializer) or an initializer helper call node.
+// null (no initializer) or an initializer helper call node. Both public
+// (knopStr) and private (private knopName) names are accepted.
 static bool IsStaticFieldMemberNode(ParseNode * memberNode)
 {
-    return memberNode->nop == knopMember &&
-        memberNode->AsParseNodeBin()->pnode1->nop == knopStr &&
-        (memberNode->AsParseNodeBin()->pnode2 == nullptr ||
-         memberNode->AsParseNodeBin()->pnode2->nop == knopCall);
+    if (memberNode->nop != knopMember)
+    {
+        return false;
+    }
+
+    ParseNode * pnodeName = memberNode->AsParseNodeBin()->pnode1;
+    bool isFieldName = pnodeName->nop == knopStr ||
+        (pnodeName->nop == knopName && pnodeName->AsParseNodeName()->IsPrivateName());
+    ParseNode * pnodeValue = memberNode->AsParseNodeBin()->pnode2;
+
+    return isFieldName && (pnodeValue == nullptr || pnodeValue->nop == knopCall);
 }
 
 // Create the method/accessor function once per class evaluation and stash it in
@@ -13035,14 +13061,23 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
     // this is MemberExpression as rvalue
     case knopDot:
     {
+        // Acquire the result slot before the base for private references so
+        // the base (which may itself be a temp, e.g. a closure slot load of an
+        // outer class binding) stays above it on the temp stack and can be
+        // released first. The result stays live for the enclosing expression.
+        const bool isPrivateReference = IsPrivateFieldReference(pnode);
+        if (isPrivateReference)
+        {
+            funcInfo->AcquireLoc(pnode);
+        }
+
         Emit(pnode->AsParseNodeBin()->pnode1, byteCodeGenerator, funcInfo, false);
 
         Js::RegSlot callObjLocation = pnode->AsParseNodeBin()->pnode1->location;
         Js::RegSlot protoLocation = callObjLocation;
 
-        if (IsPrivateFieldReference(pnode))
+        if (isPrivateReference)
         {
-            funcInfo->AcquireLoc(pnode);
             EmitPrivateLoad(
                 pnode->AsParseNodeBin()->pnode2->AsParseNodeName(), pnode->location,
                 callObjLocation, byteCodeGenerator, funcInfo);
