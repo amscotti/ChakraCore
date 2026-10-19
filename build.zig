@@ -871,7 +871,7 @@ pub fn build(b: *std.Build) void {
 
     // B3.2: debug-static checks (legacy baselines in
     // doc/b3-profiles.md section 5). Same five gates as test, with the
-    // debug/static expectations: `--debug` regression (2046/0),
+    // debug/static expectations: `--debug` regression (2047/0),
     // bytecode --noJit --verify, 8 EXECUTED static native tests
     // (PASS requires build+run to SUCCESS, plus archive-symbol and
     // Makefile linkage evidence), output-asserted smoke, and
@@ -910,12 +910,12 @@ pub fn build(b: *std.Build) void {
         dbg_regression.addArg("--select");
         dbg_regression.addArg("debug");
         dbg_regression.addArg("--expected-passed");
-        dbg_regression.addArg("2046");
+        dbg_regression.addArg("2047");
         dbg_regression.addArg("--expected-failed");
         dbg_regression.addArg("0");
         dbg_regression.step.dependOn(cp_step);
         dbg_regression.stdio = .inherit;
-        const dbg_regression_top = b.step("check-regression", "Run the regression suite (--debug) against the debug-static ch, require 2046 passed / 0 failed (not part of the default build)");
+        const dbg_regression_top = b.step("check-regression", "Run the regression suite (--debug) against the debug-static ch, require 2047 passed / 0 failed (not part of the default build)");
         dbg_regression_top.dependOn(&dbg_regression.step);
 
         const dbg_native = b.addSystemCommand(&.{python});
@@ -956,7 +956,7 @@ pub fn build(b: *std.Build) void {
         const dbg_metadata_top = b.step("check-metadata", "Assert debug-static artifact metadata: minos, stacksize 0, headers, no dylib, archive, self-containment (not part of the default build)");
         dbg_metadata_top.dependOn(&dbg_metadata.step);
 
-        const dbg_check_top = b.step("check", "Full legacy-equivalent verification for debug-static: regression 2046/0, bytecode, static native embedding, smoke, metadata (not part of the default build)");
+        const dbg_check_top = b.step("check", "Full legacy-equivalent verification for debug-static: regression 2047/0, bytecode, static native embedding, smoke, metadata (not part of the default build)");
         dbg_check_top.dependOn(&dbg_regression.step);
         dbg_check_top.dependOn(&dbg_verify_bc.step);
         dbg_check_top.dependOn(&dbg_native.step);
@@ -1008,7 +1008,7 @@ pub fn build(b: *std.Build) void {
     // (1) Regression suite: runtests.py --test --variants=disable_jit
     // --binary=<installed ch> - the legacy-exact selection for this
     // profile (test/CMakeLists.txt:39-44; no --not-tag since ICU is
-    // present). Requires 1994 passed / 0 failed, parsed from the
+    // present). Requires 1995 passed / 0 failed, parsed from the
     // real `Total:` summary line.
     const regression = b.addSystemCommand(&.{python});
     regression.addFileArg(b.path("tools/build/check_regression.py"));
@@ -1016,7 +1016,7 @@ pub fn build(b: *std.Build) void {
     regression.addFileArg(installed_ch);
     regression.step.dependOn(b.getInstallStep());
     regression.stdio = .inherit;
-    const regression_top = b.step("check-regression", "Run the regression suite against the zig-built ch, require 1994 passed / 0 failed (not part of the default build)");
+    const regression_top = b.step("check-regression", "Run the regression suite against the zig-built ch, require 1995 passed / 0 failed (not part of the default build)");
     regression_top.dependOn(&regression.step);
 
     // (3) Shared embedding test: test_native.sh with the zig-built ch
@@ -1052,7 +1052,7 @@ pub fn build(b: *std.Build) void {
     const metadata_top = b.step("check-metadata", "Assert artifact metadata: minos, stacks, headers, exports (not part of the default build)");
     metadata_top.dependOn(&metadata.step);
 
-    const check_top = b.step("check", "Full legacy-equivalent verification: regression 1994/0, bytecode, native embedding, smoke, metadata (not part of the default build)");
+    const check_top = b.step("check", "Full legacy-equivalent verification: regression 1995/0, bytecode, native embedding, smoke, metadata (not part of the default build)");
     check_top.dependOn(&regression.step);
     check_top.dependOn(&verify_bc.step);
     check_top.dependOn(&native.step);
