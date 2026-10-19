@@ -63,6 +63,14 @@ implements nested-class shadowing. A reference becomes a `ParseNodeName` marked
 treat this name as a property reference. `ParseNodeClass::pnodePrivateNames`
 retains the hidden declaration list for emission.
 
+Two parser edge cases are guarded explicitly: the "function assignment"
+marker is only applied to real assignments whose left operand is an ordinary
+name (not a private reference), so `#x in function(){}` cannot dereference a
+missing `PidRefStack`; and `AttachClassFieldsToLambda` clones a private field
+name as another private `knopName` retaining its brand symbol instead of
+casting it to `ParseNodeStr`. Arrow-`super()` field calls therefore use
+`InitPrivateField` and do not create a public property.
+
 `ClassBodyHasPrivateSyntax` is a conservative look-ahead used to keep nested
 functions eager when a class may contain private syntax. It bails out as
 "private" on context-sensitive tokens (template pieces, regex, division,
@@ -122,8 +130,8 @@ Build (Mac ARM64, `-nonative` interpreter evidence):
 - `... zig build -Dprofile=debug-static ...` — green.
 - `... zig build verify-bytecode ...` — green; checked-in bytecode unchanged.
 - Release `zig-out/bin/ch` sha256 `8be2157112dd5b39c25c46616de2fc1101d78fb69dc2b38983ca4667840b606c`;
-  `libChakraCore.dylib` sha256 `140c3b45dc8c89ef02f0957462ea88bda84efca9bf7c675b3819853a4764a260`;
-  Debug `out/debug-static/bin/ch` sha256 `b80d368db2bfe5b491c76f93aeeed66215f4483f1bec56b20ca7fff47e8307fa`.
+  `libChakraCore.dylib` sha256 `4bcccad4be9b9103d041092d8e42760597ffc0b8a72e7eb492849b1d5279a644`;
+  Debug `out/debug-static/bin/ch` sha256 `6880da1ce77071815cf1766ea5d41c2dae702c928607a3c162b7ed7fd7112aad`.
 
 Local suites (disable_jit):
 
@@ -132,10 +140,12 @@ Local suites (disable_jit):
   -ParserStateCache` modes (Release and Debug). The file includes deferred fast
   scan cases for `this.#x`, duplicate private fields, nested duplicate classes,
   `Function("return this.#x")`, and a 300-statement prefix; parenthesized RHS
-  forms and `#foo`/`#bar`/`#Baz` NamedEvaluation.
+  forms and `#foo`/`#bar`/`#Baz` NamedEvaluation; `#x in` with function,
+  arrow, generator, async-function, class and object values (no crash, all
+  `false`); and arrow-`super()` private initialization (only public `b` is
+  enumerable, `d.x` is `undefined`, `getX()` is `42`).
 - `test/es7` — **64 passed / 0 failed** (three `class-private-fields.js`
-  entries plus the existing suite). The earlier 61/1 note was the stale
-  `asyncawait-functionality.js` baseline claim; a fresh run is green.
+  entries plus the existing suite).
 - `test/es7/class-fields-public.js` — 27/27 (public-field regression control).
 - `test/es6` — 233/0; `test/es6module` — 31/0; `test/Function` — 70/0.
 
@@ -172,7 +182,9 @@ passed, 160 fail -> pass, 0 pass -> fail.
 - The primitive-receiver get/put tests are blocked by the existing missing
   BigInt literal support (`15n`), not by private-field semantics.
 - Computed public names are out of scope, so the computed-property private
-  interaction tests remain failing.
+  interaction tests remain failing. Public/private mixed field initialization
+  is declaration-ordered, but computed-name TDZ interactions are not exercised
+  and remain a residual risk.
 - Parser look-ahead conservatively treats classes with context-sensitive tokens
   (regex/division/templates) as private-syntax classes, keeping more nested
   functions eager than strictly necessary.

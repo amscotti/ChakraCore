@@ -203,6 +203,39 @@ const tests = [
         }
     },
     {
+        name: "#x in function, arrow, generator, async, class and object values",
+        body() {
+            class C {
+                #x;
+                static isIn(v) { return #x in v; }
+            }
+            assert.isFalse(C.isIn(function () {}));
+            assert.isFalse(C.isIn(() => {}));
+            assert.isFalse(C.isIn(function* () {}));
+            assert.isFalse(C.isIn(async function () {}));
+            assert.isFalse(C.isIn(class {}));
+            assert.isFalse(C.isIn({}));
+        }
+    },
+    {
+        name: "arrow super initializes private fields without creating public properties",
+        body() {
+            class B {
+                constructor() { this.b = 1; }
+            }
+            class D extends B {
+                #x = 42;
+                constructor() { (() => super())(); }
+                getX() { return this.#x; }
+            }
+            const d = new D();
+            assert.areEqual("b", Object.keys(d).join(","));
+            assert.areEqual(undefined, d.x);
+            assert.areEqual(42, d.getX());
+            assert.throws(function () { D.prototype.getX.call({}); }, TypeError);
+        }
+    },
+    {
         name: "parenthesized in expressions are valid on the right of #x in",
         body() {
             assert.doesNotThrow(function () {

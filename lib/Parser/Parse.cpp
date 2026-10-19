@@ -9279,7 +9279,11 @@ void Parser::AttachClassFieldsToLambda(ParseNodeFnc * pnodeLambda, ParseNode * p
             ? pnodeFieldsWalker->AsParseNodeBin()->pnode1
             : pnodeFieldsWalker;
         ParseNodePtr pnodeName = pnodeField->AsParseNodeBin()->pnode1;
-        IdentPtr fieldPid = pnodeName->AsParseNodeStr()->pid;
+        bool isPrivateName = pnodeName->nop == knopName &&
+            pnodeName->AsParseNodeName()->IsPrivateName();
+        IdentPtr fieldPid = isPrivateName
+            ? pnodeName->AsParseNodeName()->pid
+            : pnodeName->AsParseNodeStr()->pid;
         ParseNodePtr pnodeOriginalCall = pnodeField->AsParseNodeBin()->pnode2;
 
         ParseNodeCall * pnodeCall = nullptr;
@@ -9301,7 +9305,22 @@ void Parser::AttachClassFieldsToLambda(ParseNodeFnc * pnodeLambda, ParseNode * p
             pnodeCall->argCount = 0;
         }
 
-        ParseNodeStr * pnodeClonedName = CreateStrNode(fieldPid);
+        ParseNodePtr pnodeClonedName;
+        if (isPrivateName)
+        {
+            ParseNodeName * pnodePrivateName = pnodeName->AsParseNodeName();
+            PidRefStack * hiddenRef = Anew(&m_nodeAllocator, PidRefStack);
+            hiddenRef->SetSym(pnodePrivateName->sym);
+            ParseNodeName * pnodeClonedPrivate = CreateNameNode(
+                pnodePrivateName->pid, hiddenRef, pnodePrivateName->ichMin, pnodePrivateName->ichLim);
+            pnodeClonedPrivate->SetIsPrivateName();
+            pnodeClonedPrivate->sym = pnodePrivateName->sym;
+            pnodeClonedName = pnodeClonedPrivate;
+        }
+        else
+        {
+            pnodeClonedName = CreateStrNode(fieldPid);
+        }
         ParseNodeBin * pnodeClonedField = CreateBinNode(knopMember, pnodeClonedName, pnodeCall);
         AddToNodeList(&pnodeClonedFields, &lastClonedField, pnodeClonedField);
 
@@ -11219,10 +11238,15 @@ ParseNodePtr Parser::ParseExpr(int oplMin,
                     {
                         pnode2->AsParseNodeFnc()->isNameIdentifierRef = false;
                     }
-                    else if (pnode1->nop == knopName)
+                    else if (pnode1->nop == knopName &&
+                             !pnode1->AsParseNodeName()->IsPrivateName() &&
+                             nop == knopAsg)
                     {
                         PidRefStack *pidRef = pnode1->AsParseNodeName()->pid->GetTopRef();
-                        pidRef->isFuncAssignment = true;
+                        if (pidRef != nullptr)
+                        {
+                            pidRef->isFuncAssignment = true;
+                        }
                     }
                 }
                 else if (pnode2->nop == knopClassDecl && pnode1->nop == knopDot)
