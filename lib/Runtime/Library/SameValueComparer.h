@@ -89,6 +89,11 @@ namespace Js
                     return JsUtil::CharacterBuffer<WCHAR>::StaticGetHashCode(v->GetString(), v->GetLength());
                 }
 
+            case TypeIds_BigInt:
+                // SameValueZero compares BigInts by value, so the dictionary
+                // hash must also use the value rather than object identity.
+                return UnsafeVarTo<JavascriptBigInt>(i)->GetHashCode();
+
             default:
                 return RecyclerPointerComparer<Var>::GetHashCode(i);
             }

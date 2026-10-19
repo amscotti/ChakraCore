@@ -595,5 +595,9 @@ BUILTIN(ArrayBuffer, TransferToFixedLength, EntryTransferToFixedLength, Function
 // (and therefore checked-in built-in bytecode) stays stable.
 BUILTIN(JavascriptWeakRef, NewInstance, NewInstance, FunctionInfo::SkipDefaultNewObject)
 BUILTIN(JavascriptWeakRef, Deref, EntryDeref, FunctionInfo::ErrorOnNew)
+BUILTIN(DataView, GetBigInt64, EntryGetBigInt64, FunctionInfo::ErrorOnNew)
+BUILTIN(DataView, GetBigUint64, EntryGetBigUint64, FunctionInfo::ErrorOnNew)
+BUILTIN(DataView, SetBigInt64, EntrySetBigInt64, FunctionInfo::ErrorOnNew)
+BUILTIN(DataView, SetBigUint64, EntrySetBigUint64, FunctionInfo::ErrorOnNew)
 
 #undef BUILTIN_TEMPLATE

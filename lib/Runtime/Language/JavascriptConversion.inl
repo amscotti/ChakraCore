@@ -315,6 +315,9 @@ namespace Js {
 #endif
        }
        case TypeIds_String:
+       case TypeIds_BigInt:
+           // Strings and BigInts require value comparison and cannot be
+           // used as pointer-comparable simple Map/Set keys.
            return nullptr;
 
        default:

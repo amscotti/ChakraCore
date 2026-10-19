@@ -92,6 +92,9 @@ namespace Js
         // Low 64 bits of the two's-complement representation (ToBigInt64 /
         // ToBigUint64). Negative values wrap modulo 2**64.
         uint64 ToUInt64Low() const;
+        // Value hash for Map/Set/SameValueZero dictionaries. Equal canonical
+        // BigInts hash identically regardless of object identity.
+        hash_t GetHashCode() const;
         virtual RecyclableObject * CloneToScriptContext(ScriptContext* requestContext) override;
         virtual RecyclableObject* ToObject(ScriptContext * requestContext) override;
         virtual Var GetTypeOfString(ScriptContext * requestContext) override;
