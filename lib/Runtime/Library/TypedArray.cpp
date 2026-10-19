@@ -1415,6 +1415,19 @@ namespace Js
         return newTypedArray;
     }
 
+    Var TypedArrayBase::EntryToLocaleString(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+        ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+
+        Assert(!(callInfo.Flags & CallFlags_New));
+
+        TypedArrayBase* typedArrayBase = ValidateTypedArray(args, scriptContext, _u("[TypedArray].prototype.toLocaleString"));
+        return JavascriptArray::ToLocaleString(static_cast<RecyclableObject*>(typedArrayBase), scriptContext);
+    }
+
     // %TypedArray%.from as described in ES6.0 (draft 22) Section 22.2.2.1
     Var TypedArrayBase::EntryFrom(RecyclableObject* function, CallInfo callInfo, ...)
     {

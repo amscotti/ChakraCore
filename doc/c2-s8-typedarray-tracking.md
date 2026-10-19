@@ -67,8 +67,10 @@ Ownership record:
   not notify parents; all consumers read the current buffer length.
 - **Reentrancy:** the TypedArray constructor re-reads the byte length after
   `ToIndex(byteOffset)` and after `ToIndex(length)`, so a getter may grow,
-  shrink or detach; `set`, `sort`, the iterator and `with` recheck detached/OOB
-  state or the current length at their user-code boundaries.
+  shrink or detach; `set`, `sort`, the iterator, `with`, `copyWithin`, `map`
+  and `slice` recheck detached/OOB state or the current length at their
+  user-code boundaries. `copyWithin` uses a per-element fallback when coercion
+  changes the live length and treats an OOB/zero-length receiver as a no-op.
 - **Thread/context:** unchanged script-thread access; no async or cross-thread
   state was added.
 
@@ -90,32 +92,47 @@ New `test/es7/resizable-typedarray.js`, registered once in
 - TypeError rejection of OOB fixed views across prototype methods and
   iterators; iterators that grow/shrink mid-iteration;
 - `set` target/source validation, `subarray` auto propagation and species,
-  `slice` fixed copies, `fill`, `copyWithin`, `with` after ToNumber reentrancy,
+  `slice` fixed copies and post-species OOB revalidation, `fill`, `copyWithin`
+  after target/start/end coercion resizes, `with` after ToNumber reentrancy,
   and constructor reentrancy after offset coercion;
-- DataView auto-length tracking remains intact.
+- `map` after species-constructor shrink/detach over the captured callback
+  range, distinct `%TypedArray%.prototype.toLocaleString` versus generic
+  `Array.prototype.toLocaleString.call`, and DataView auto-length tracking.
 
 ## Evidence
 
 Mac ARM64, no-JIT test profile, shared gate lock, local `.zig-cache`/`out`;
-test262 revision `2e0a56762801e275a9fdf96dc49d90ba0cddcf63` (170 files, 340
-scenarios, 18 controls).
+test262 revision `2e0a56762801e275a9fdf96dc49d90ba0cddcf63`, 18 controls.
+The earlier before run in this lane used Node `v26.5.0`; to remove that runner
+difference the base binary was rerun with Node `v22.22.3` (same as this lane's
+after run) for every count below.
 
 - `/tmp/opencode/cc-gate-lock.sh zig build --summary line`:
   **567/567 steps succeeded**.
 - New es7 test, base binary (`out/base-bin/ch`, SHA-256 `81de4407…`):
-  **2/14 passed, 12 failed**. Same source with this lane
-  (`zig-out/bin/ch`, SHA-256 `0122769e…`): **14/14 passed**.
+  **2/18 passed, 16 failed**. Same source with this lane
+  (`zig-out/bin/ch`, launcher `0122769e…`, dylib `d499575d…`):
+  **18/18 passed**.
 - Adjacent `test/es7/resizable-arraybuffer.js` **12/12** and
   `test/es7/float16.js` **10/10** still pass.
 - Focused test262 corpus
   `test/built-ins/TypedArray/**/*resizable*` +
   `test/built-ins/TypedArray/**/*out-of-bounds*`:
   **22/340 before → 132/340 after**, **110 fail→pass / 0 pass→fail**.
-  Result keys match one-for-one. The 208 residual scenarios are entirely
-  BigInt-disabled: 178 hit `resizableArrayBufferUtils`'s direct
-  `BigInt64Array` reference (including non-BigInt constructor loops), and 30
-  contain BigInt literal syntax rejected without `-ESBigInt`. No non-BigInt
-  behavior scenario remains failing.
+  Result keys match one-for-one.
+- Added `test/built-ins/TypedArrayConstructors/**/*resizable*` and
+  `.../**/*out-of-bounds*`: combined corpus **378 scenarios / 191 files**,
+  **32/378 → 150/378**, **118 fail→pass / 0 pass→fail**; the constructors
+  slice alone is **10/38 → 18/38**, **8/0**.
+- The 208 residual scenarios in the 340 slice are BigInt-gated: 178 hit
+  `resizableArrayBufferUtils`'s direct `BigInt64Array` reference and 30 contain
+  BigInt literal syntax rejected without `-ESBigInt`. These are not all
+  "non-BigInt behavior passed": 178 abort before their later assertions, so
+  each file's remaining behavior was not executed.
+- The 20 constructors-slice residuals are BigInt-gated (10 scenarios) plus
+  pre-existing integer-indexed `Delete`/`Reflect.set` and
+  `resized-out-of-bounds-to-in-bounds-index` semantics (10 scenarios), all
+  failing on the base binary too; no pass→fail.
 
 ## Residuals
 
@@ -134,12 +151,15 @@ scenarios, 18 controls).
   `lengthTracking`; reconstructed views are fixed. `TypedArrayBase::GetBuffer`
   reports the current byte length, but no length-tracking flag is exposed to
   embedders.
-- **Reentrant fast paths.** `copyWithin`'s typed memmove fast path assumes the
-  captured length still matches `GetLength()`; `sort` with a comparison callback
-  writes the captured range after the callback. Both are memory-safe because
-  resizable capacity is retained, and neither is exercised by the focused
-  corpus, but a callback/coercion that resizes the buffer can diverge from
-  per-element no-op semantics. Treat as follow-up hardening, not claimed here.
+- **Sort callback resize.** `sort` with a comparison callback still writes the
+  captured range after the callback. It is memory-safe because resizable
+  capacity is retained, but a callback that resizes the buffer can diverge from
+  per-element no-op semantics. The focused corpus does not exercise that path.
+- **Integer-indexed Set/Delete residual.** The added constructors corpus exposes
+  pre-existing behavior: OOB `Delete`/`Reflect.set` results and
+  `resized-out-of-bounds-to-in-bounds-index` (a value coercion that grows the
+  buffer before the set validity check). These fail identically on the base
+  binary and are not changed by this slice.
 - **Slow numeric property path.** The element fast path returns undefined for
   OOB indices; the generic numeric `GetPropertyQuery` path still reports
   not-found (allowing prototype lookup) for an undefined element. The focused

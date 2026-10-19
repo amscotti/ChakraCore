@@ -60,6 +60,7 @@ namespace Js
             static FunctionInfo Some;
             static FunctionInfo Sort;
             static FunctionInfo Values;
+            static FunctionInfo ToLocaleString;
 
             static FunctionInfo GetterBuffer;
             static FunctionInfo GetterByteLength;
@@ -75,6 +76,7 @@ namespace Js
 
         static Var EntrySet(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntrySubarray(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryToLocaleString(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryFrom(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryOf(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryAt(RecyclableObject* function, CallInfo callInfo, ...);

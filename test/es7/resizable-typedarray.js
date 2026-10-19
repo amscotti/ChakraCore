@@ -468,6 +468,137 @@ var tests = [
         }
     },
     {
+        name: "copyWithin re-reads the live range after index coercion",
+        body() {
+            var rab = new ArrayBuffer(4, { maxByteLength: 8 });
+            var view = new Uint8Array(rab);
+
+            function reset() {
+                rab.resize(4);
+                view.set([0, 1, 2, 3]);
+            }
+
+            reset();
+            view.copyWithin({ valueOf() { rab.resize(2); return 0; } }, 1);
+            assertSameElements([1, 0], elements(view), "target coercion shrink");
+
+            reset();
+            view.copyWithin(0, { valueOf() { rab.resize(2); return 1; } });
+            assertSameElements([1, 0], elements(view), "start coercion shrink");
+
+            reset();
+            view.copyWithin(0, 1, { valueOf() { rab.resize(2); return 4; } });
+            assertSameElements([1, 0], elements(view), "end coercion shrink");
+
+            reset();
+            view.copyWithin({ valueOf() { rab.resize(6); return 0; } }, 2);
+            assertSameElements([2, 3, 2, 3, 0, 0], elements(view), "grow after target coercion");
+
+            var fixedRab = new ArrayBuffer(4, { maxByteLength: 4 });
+            var fixed = new Uint8Array(fixedRab, 0, 4);
+            fixed.set([0, 1, 2, 3]);
+            fixed.copyWithin({ valueOf() { fixedRab.resize(1); return 0; } }, 1);
+            assert.areEqual(0, fixed.length, "fixed OOB copyWithin is a no-op");
+
+            var zeroRab = new ArrayBuffer(2, { maxByteLength: 2 });
+            var zero = new Uint8Array(zeroRab);
+            zero.copyWithin({ valueOf() { zeroRab.resize(0); return 0; } }, 0);
+            assert.areEqual(0, zero.length, "zero-length copyWithin is a no-op");
+        }
+    },
+    {
+        name: "toLocaleString distinguishes Array and TypedArray receivers",
+        body() {
+            var rab = new ArrayBuffer(4, { maxByteLength: 4 });
+            var view = new Uint8Array(rab, 0, 4);
+            view.set([1, 2, 3, 4]);
+            rab.resize(0);
+
+            assert.areEqual("", Array.prototype.toLocaleString.call(view),
+                "generic Array entry on an OOB TypedArray");
+            assert.throws(function () { view.toLocaleString(); }, TypeError,
+                "TypedArray entry rejects an OOB receiver");
+            assert.isFalse(Array.prototype.toLocaleString === Uint8Array.prototype.toLocaleString,
+                "TypedArray has a distinct toLocaleString function");
+        }
+    },
+    {
+        name: "map calls the callback over the captured length after species resize",
+        body() {
+            function mapValues(source, rab, resizeTo) {
+                var values = [];
+                source.constructor = {
+                    [Symbol.species]: function (length) {
+                        var result = new Uint8Array(length);
+                        rab.resize(resizeTo);
+                        return result;
+                    }
+                };
+                var result = source.map(function (value) {
+                    values.push(value);
+                    return value;
+                });
+                assert.areEqual(4, result.length, "result keeps captured length");
+                assert.isTrue(result instanceof Uint8Array, "result preserves species");
+                return values;
+            }
+
+            var fixedRab = new ArrayBuffer(4, { maxByteLength: 8 });
+            var fixed = new Uint8Array(fixedRab, 0, 4);
+            fixed.set([0, 1, 2, 3]);
+            assertSameElements([undefined, undefined, undefined, undefined],
+                mapValues(fixed, fixedRab, 2), "fixed source shrink");
+
+            var autoRab = new ArrayBuffer(4, { maxByteLength: 8 });
+            var auto = new Uint8Array(autoRab);
+            auto.set([0, 1, 2, 3]);
+            assertSameElements([0, 1, undefined, undefined],
+                mapValues(auto, autoRab, 2), "auto source shrink");
+
+            var detachRab = new ArrayBuffer(4, { maxByteLength: 8 });
+            var detachSource = new Uint8Array(detachRab, 0, 4);
+            detachSource.constructor = {
+                [Symbol.species]: function (length) {
+                    var result = new Uint8Array(length);
+                    detachRab.transfer();
+                    return result;
+                }
+            };
+            assert.throws(function () { detachSource.map(function (v) { return v; }); },
+                TypeError, "detached source after species");
+        }
+    },
+    {
+        name: "slice revalidates the source after species construction",
+        body() {
+            var rab = new ArrayBuffer(4, { maxByteLength: 4 });
+            var fixed = new Uint8Array(rab, 0, 4);
+            fixed.set([1, 2, 3, 4]);
+            fixed.constructor = {
+                [Symbol.species]: function (length) {
+                    var result = new Uint8Array(length);
+                    rab.resize(2);
+                    return result;
+                }
+            };
+            assert.throws(function () { fixed.slice(); }, TypeError,
+                "fixed source became OOB in the species constructor");
+
+            var autoRab = new ArrayBuffer(4, { maxByteLength: 8 });
+            var auto = new Uint8Array(autoRab);
+            auto.set([1, 2, 3, 4]);
+            auto.constructor = {
+                [Symbol.species]: function (length) {
+                    var result = new Uint8Array(length);
+                    autoRab.resize(2);
+                    return result;
+                }
+            };
+            assertSameElements([1, 2, 0, 0], elements(auto.slice()),
+                "auto source copies its live range after species shrink");
+        }
+    },
+    {
         name: "DataView auto-length tracking remains intact",
         body() {
             var rab = new ArrayBuffer(4, { maxByteLength: 12 });

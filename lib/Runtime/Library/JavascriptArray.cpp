@@ -6484,6 +6484,15 @@ Case0:
             return newObj;
         }
 
+        // The species constructor ran user code after source validation. A
+        // fixed source may now be OOB, or any source may be detached; throw
+        // before copying rather than returning zero-filled destination bytes.
+        if (isTypedArrayEntryPoint && typedArrayBase != nullptr &&
+            (typedArrayBase->IsDetachedBuffer() || typedArrayBase->IsOutOfBounds()))
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, _u("[TypedArray].prototype.slice"));
+        }
+
         // The ArraySpeciesCreate call above could have converted the source array into an ES5Array. If this happens
         // we will process the array elements like an ES5Array.
         if (pArr && !JavascriptArray::IsNonES5Array(obj))
@@ -7862,8 +7871,7 @@ Case0:
         }
         else
         {
-            if (TypedArrayBase::IsDetachedTypedArray(args[0]) ||
-                (VarIs<TypedArrayBase>(args[0]) && UnsafeVarTo<TypedArrayBase>(args[0])->IsOutOfBounds()))
+            if (TypedArrayBase::IsDetachedTypedArray(args[0]))
             {
                 JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, _u("Array.prototype.toLocalString"));
             }
@@ -9638,7 +9646,44 @@ Case0:
                 JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, _u("[TypedArray].prototype.copyWithin"));
             }
 
-            AssertOrFailFast(length == typedArrayBase->GetLength());
+            // Target/start/end coercion may have resized the buffer. The
+            // captured indices remain the spec inputs, but the live view can
+            // now be shorter, longer or OOB.
+            uint32 liveLength = typedArrayBase->GetLength();
+            if (typedArrayBase->IsOutOfBounds() || liveLength == 0)
+            {
+                return obj;
+            }
+
+            if (liveLength != (uint32)length)
+            {
+                int direction = (fromVal < toVal && toVal < (fromVal + count)) ? -1 : 1;
+                int64 fromIndex = fromVal;
+                int64 toIndex = toVal;
+                if (direction < 0)
+                {
+                    fromIndex += count - 1;
+                    toIndex += count - 1;
+                }
+
+                Var undefinedValue = library->GetUndefined();
+                while (count > 0)
+                {
+                    Var value = undefinedValue;
+                    if (fromIndex >= 0 && (uint64)fromIndex < liveLength)
+                    {
+                        value = typedArrayBase->DirectGetItem((uint32)fromIndex);
+                    }
+                    if (toIndex >= 0 && (uint64)toIndex < liveLength)
+                    {
+                        typedArrayBase->DirectSetItem((uint32)toIndex, value);
+                    }
+                    fromIndex += direction;
+                    toIndex += direction;
+                    count--;
+                }
+                return obj;
+            }
 
             uint32 bytesPerElement = typedArrayBase->GetBytesPerElement();
             byte *buffer = typedArrayBase->GetByteBuffer();
@@ -10088,9 +10133,11 @@ Case0:
             }
 
             Assert(length <= UINT_MAX);
-            uint32 end = (uint32)min(length, (T)typedArrayBase->GetLength());
 
-            for (uint32 k = 0; k < end; k++)
+            // The species constructor may have shrunk or detached the source.
+            // Map still calls the callback over the captured length; an OOB
+            // Get produces undefined and a detached Get throws.
+            for (uint32 k = 0; k < (uint32)length; k++)
             {
                 // No need to do HasItem, as it cannot be observable unless 'typedArrayBase' is proxy. And we have established that it is indeed typedarray.
 

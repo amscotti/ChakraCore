@@ -2124,20 +2124,16 @@ namespace Js
         builtinFuncs[BuiltinFunction::JavascriptArray_Slice]              = library->AddFunctionToLibraryObject(arrayPrototype, PropertyIds::slice,           &JavascriptArray::EntryInfo::Slice,             2);
         builtinFuncs[BuiltinFunction::JavascriptArray_Splice]             = library->AddFunctionToLibraryObject(arrayPrototype, PropertyIds::splice,          &JavascriptArray::EntryInfo::Splice,            2);
 
-        // The toString and toLocaleString properties are shared between Array.prototype and %TypedArray%.prototype.
-        // Whichever prototype is initialized first will create the functions, the other should just load the existing function objects.
+        // Array.prototype has its own toLocaleString. toString stays shared
+        // with %TypedArray%.prototype, so whichever prototype initializes
+        // first creates it and the other reuses the function object.
+        library->arrayPrototypeToLocaleStringFunction = /* No inlining       Array_ToLocaleString */ library->AddFunctionToLibraryObject(arrayPrototype, PropertyIds::toLocaleString, &JavascriptArray::EntryInfo::ToLocaleString, 0);
         if (library->arrayPrototypeToStringFunction == nullptr)
         {
-            Assert(library->arrayPrototypeToLocaleStringFunction == nullptr);
-
-            library->arrayPrototypeToLocaleStringFunction = /* No inlining       Array_ToLocaleString */ library->AddFunctionToLibraryObject(arrayPrototype, PropertyIds::toLocaleString, &JavascriptArray::EntryInfo::ToLocaleString, 0);
             library->arrayPrototypeToStringFunction =       /* No inlining       Array_ToString       */ library->AddFunctionToLibraryObject(arrayPrototype, PropertyIds::toString, &JavascriptArray::EntryInfo::ToString, 0);
         }
         else
         {
-            Assert(library->arrayPrototypeToLocaleStringFunction);
-
-            library->AddMember(arrayPrototype, PropertyIds::toLocaleString, library->arrayPrototypeToLocaleStringFunction);
             library->AddMember(arrayPrototype, PropertyIds::toString, library->arrayPrototypeToStringFunction);
         }
 
@@ -2473,20 +2469,19 @@ namespace Js
             library->AddAccessorsToLibraryObjectWithName(typedarrayPrototype, PropertyIds::_symbolToStringTag,
                 PropertyIds::_RuntimeFunctionNameId_toStringTag, &TypedArrayBase::EntryInfo::GetterSymbolToStringTag, nullptr);
         }
-        // The toString and toLocaleString properties are shared between Array.prototype and %TypedArray%.prototype.
-        // Whichever prototype is initialized first will create the functions, the other should just load the existing function objects.
+        // %TypedArray%.prototype.toLocaleString is a distinct function object
+        // from Array.prototype.toLocaleString: it validates the receiver
+        // before delegating to the shared localized string builder.
+        library->AddFunctionToLibraryObject(typedarrayPrototype, PropertyIds::toLocaleString, &TypedArrayBase::EntryInfo::ToLocaleString, 0);
+
+        // toString remains shared between Array.prototype and
+        // %TypedArray%.prototype.
         if (library->arrayPrototypeToStringFunction == nullptr)
         {
-            Assert(library->arrayPrototypeToLocaleStringFunction == nullptr);
-
-            library->arrayPrototypeToLocaleStringFunction = library->AddFunctionToLibraryObject(typedarrayPrototype, PropertyIds::toLocaleString, &JavascriptArray::EntryInfo::ToLocaleString, 0);
             library->arrayPrototypeToStringFunction = library->AddFunctionToLibraryObject(typedarrayPrototype, PropertyIds::toString, &JavascriptArray::EntryInfo::ToString, 0);
         }
         else
         {
-            Assert(library->arrayPrototypeToLocaleStringFunction);
-
-            library->AddMember(typedarrayPrototype, PropertyIds::toLocaleString, library->arrayPrototypeToLocaleStringFunction);
             library->AddMember(typedarrayPrototype, PropertyIds::toString, library->arrayPrototypeToStringFunction);
         }
 
@@ -8536,6 +8531,7 @@ namespace Js
         REG_OBJECTS_LIB_FUNC(some, TypedArrayBase::EntrySome);
         REG_OBJECTS_LIB_FUNC(sort, TypedArrayBase::EntrySort);
         REG_OBJECTS_LIB_FUNC(includes, TypedArrayBase::EntryIncludes);
+        REG_OBJECTS_LIB_FUNC(toLocaleString, TypedArrayBase::EntryToLocaleString);
         REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("toReversed"), 10, TypedArrayBase::EntryToReversed);
         REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("toSorted"), 8, TypedArrayBase::EntryToSorted);
         REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("with"), 4, TypedArrayBase::EntryWith);
