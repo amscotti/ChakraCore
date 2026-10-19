@@ -33,7 +33,9 @@ print('\nTest 1: Simple case with single block-scoped function\n');
     print(h);
 })();
 
-print('\nTest 2: Block-scoped function shadows outer let binding, but leaks into function scope\n');
+// The enclosing Block's let binding makes replacing the block function with
+// var an early error, so the parser creates no function-scope binding here.
+print('\nTest 2: Block-scoped function shadowed by an enclosing let binding; the extension is skipped\n');
 (function ()
 {
     try { print(f); } catch (e) { print(e.name); }
@@ -52,7 +54,7 @@ print('\nTest 2: Block-scoped function shadows outer let binding, but leaks into
 })();
 
 
-print('\nTest 3: Assignment to function in block behaves like assigning let variable; function still leaks out to function scope; assignment does not affect function scope binding\n');
+print('\nTest 3: Assignment to function in block behaves like assigning let variable; the extension is skipped\n');
 (function ()
 {
     try { print(f); } catch (e) { print(e.name); }
@@ -92,7 +94,11 @@ print('\nTest 4: Last executed declaration wins; simple case\n');
 })();
 
 
-print('\nTest 5: Inner shadows outer and last executed (inner) wins for function scope\n');
+// The parser skips the inner extension because the enclosing Block's ordinary
+// function is a lexical name. The emitted store is still observable because
+// GetFuncScopeVarSym falls back to the outer Annex B var; an emitter/AST gate
+// is needed to make this conform to test262 (expected value 1, not 2).
+print('\nTest 5: Inner shadows outer; parser skips the inner extension but the outer var fallback stays observable\n');
 (function ()
 {
     if (true)

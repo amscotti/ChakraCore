@@ -154,6 +154,42 @@ var tests = [
         }
     },
     {
+        name: "nested sloppy block functions: inner extension is skipped but the outer var fallback stays observable",
+        body() {
+            // An ordinary sloppy function in an enclosing Block is a
+            // LexicallyDeclaredName, so replacing the inner declaration with
+            // "var f" is an early error and the parser creates no inner
+            // synthetic var. The emitted store is still observable because
+            // GetFuncScopeVarSym falls back to the outer Annex B var; test262
+            // expects 1 for both orders and needs the emitter/AST gate. These
+            // two assertions flip with that gate.
+            function outerDeclaredLast() {
+                { { function f() { return 2; } } function f() { return 1; } }
+                return f();
+            }
+            function outerDeclaredFirst() {
+                { function f() { return 1; } { function f() { return 2; } } }
+                return f();
+            }
+            assert.strictEqual(outerDeclaredLast(), 2);
+            assert.strictEqual(outerDeclaredFirst(), 2);
+
+            // Without an enclosing same-named declaration the ordinary
+            // extension still applies, including through nested blocks.
+            (function () {
+                { { function annexBNestedOnly() { return 3; } } }
+                assert.strictEqual(annexBNestedOnly(), 3);
+            }());
+
+            // Sibling blocks remain isolated; the later execution wins.
+            (function () {
+                { function annexBNestedSibling() { return 1; } }
+                { function annexBNestedSibling() { return 2; } }
+                assert.strictEqual(annexBNestedSibling(), 2);
+            }());
+        }
+    },
+    {
         name: "valid Annex B hoisting controls",
         body() {
             (function () {

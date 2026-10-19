@@ -1729,15 +1729,21 @@ void Parser::AddBlockLexicalDecl(IdentPtr pid, bool isFunctionDecl, bool isSlopp
     }
 
     // A lexical declaration arriving after a block function may still make
-    // the synthetic var an early error. Source-block ordinary sloppy
-    // functions are the Annex B duplicate case and do not conflict.
-    if (!isFunctionDecl || (isLexicalBlock && !isSloppyFunctionDecl))
+    // the synthetic var an early error. An ordinary sloppy function in the
+    // pending declaration's own source block is the Annex B duplicate case,
+    // but the same name in an enclosing block stays lexical after the inner
+    // declaration is replaced with "var", so descendants conflict.
+    if (!isFunctionDecl)
     {
-        MarkAnnexBPendingConflicts(pid);
+        MarkAnnexBPendingConflicts(pid, false);
+    }
+    else if (isLexicalBlock)
+    {
+        MarkAnnexBPendingConflicts(pid, isSloppyFunctionDecl);
     }
 }
 
-void Parser::MarkAnnexBPendingConflicts(IdentPtr pid)
+void Parser::MarkAnnexBPendingConflicts(IdentPtr pid, bool isSloppyFunctionDecl)
 {
     BlockInfoStack *functionBlockInfo = GetCurrentFunctionBlockInfo();
     if (functionBlockInfo->annexBPendingMap == nullptr)
@@ -1758,6 +1764,12 @@ void Parser::MarkAnnexBPendingConflicts(IdentPtr pid)
     uint32 blockId = GetCurrentBlock()->blockId;
     for (; pending != nullptr; pending = pending->nextByName)
     {
+        if (isSloppyFunctionDecl && pending->declBlockId == blockId)
+        {
+            // Duplicate ordinary function declarations directly in the same
+            // Block/CaseClause are the Annex B exception.
+            continue;
+        }
         if (pending->declBlockId >= blockId)
         {
             pending->hasConflict = true;
@@ -1774,13 +1786,18 @@ bool Parser::AnnexBVarWouldConflict(IdentPtr pid)
     {
         BlockInfoName *name = nullptr;
         if (blockInfo->lexicalNameMap != nullptr &&
-            blockInfo->lexicalNameMap->TryGetValue(pid, &name) &&
-            !(name->isFunctionDecl && name->isSloppyFunctionDecl))
+            blockInfo->lexicalNameMap->TryGetValue(pid, &name))
         {
-            // let/const/class, or a generator/async function declaration.
-            // Ordinary sloppy function declarations are the Annex B duplicate
-            // case and are replaced together with the var.
-            return true;
+            bool isOwnBlock = blockInfo == m_currentBlockInfo;
+            if (!isOwnBlock ||
+                !(name->isFunctionDecl && name->isSloppyFunctionDecl))
+            {
+                // An enclosing block's function declaration remains a lexical
+                // name when the inner declaration is replaced with "var", so
+                // it is an early error. Only ordinary sloppy duplicates in the
+                // pending declaration's own source block are exempt.
+                return true;
+            }
         }
         if (blockInfo->annexBConflictMap != nullptr &&
             blockInfo->annexBConflictMap->TryGetValue(pid, &name))

@@ -8,7 +8,7 @@ function g() { }
 function g() { }
 function h() { }
 
-Test 2: Block-scoped function shadows outer let binding, but leaks into function scope
+Test 2: Block-scoped function shadowed by an enclosing let binding; the extension is skipped
 
 ReferenceError
 let f
@@ -16,7 +16,7 @@ function f() { }
 let f
 ReferenceError
 
-Test 3: Assignment to function in block behaves like assigning let variable; function still leaks out to function scope; assignment does not affect function scope binding
+Test 3: Assignment to function in block behaves like assigning let variable; the extension is skipped
 
 ReferenceError
 let f
@@ -32,7 +32,7 @@ function f(one) { }
 function f(two) { }
 function f(two) { }
 
-Test 5: Inner shadows outer and last executed (inner) wins for function scope
+Test 5: Inner shadows outer; parser skips the inner extension but the outer var fallback stays observable
 
 function f(outer) { }
 function f(inner) { }

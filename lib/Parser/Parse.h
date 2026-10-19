@@ -431,7 +431,7 @@ public:
     // Annex B block-function synthetic var: declaration is deferred until the
     // enclosing function body/global block closes, when all lexical names in
     // the enclosing constructs are known.
-    void MarkAnnexBPendingConflicts(IdentPtr pid);
+    void MarkAnnexBPendingConflicts(IdentPtr pid, bool isSloppyFunctionDecl);
     bool AnnexBVarWouldConflict(IdentPtr pid);
     void RegisterAnnexBPendingVar(IdentPtr pid);
     void FinalizeAnnexBPendingVars(BlockInfoStack *blockInfo);
