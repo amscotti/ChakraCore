@@ -1352,6 +1352,11 @@ namespace Js
                     pfuncActual->EnsureDeserialized()->GetDisplayName());
                 break;
             }
+            case Js::OpCode::StPrivateAccessor:
+            {
+                Output::Print(_u(" R%d = R%d.#<accessor set> R%d, R%d"), data->R0, data->R1, data->R2, data->R3);
+                break;
+            }
 
             default:
                 AssertMsg(false, "Unknown Reg4U opcode");

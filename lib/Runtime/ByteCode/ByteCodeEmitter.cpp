@@ -38,12 +38,63 @@ static bool IsPrivateFieldReference(ParseNode *pnode)
 }
 
 static Js::RegSlot EmitPrivateBrand(
-    ParseNodeName * pnodeName, ByteCodeGenerator * byteCodeGenerator, FuncInfo * funcInfo)
+    ParseNodeName * pnodeName, ByteCodeGenerator * byteCodeGenerator, FuncInfo * funcInfo,
+    bool skipUseBeforeDeclarationCheck = false)
 {
     Assert(pnodeName != nullptr && pnodeName->sym != nullptr);
     Js::RegSlot brandLocation = funcInfo->AcquireTmpRegister();
-    byteCodeGenerator->EmitPropLoad(brandLocation, pnodeName->sym, pnodeName->pid, funcInfo);
+    byteCodeGenerator->EmitPropLoad(
+        brandLocation, pnodeName->sym, pnodeName->pid, funcInfo, skipUseBeforeDeclarationCheck);
     return brandLocation;
+}
+
+// Emit a brand-checked private read. Fields and methods return the value stored
+// in the per-name brand record; accessors invoke the stored getter with the
+// instance as receiver.
+static void EmitPrivateLoad(
+    ParseNodeName * pnodeName, Js::RegSlot resultLocation, Js::RegSlot instanceLocation,
+    ByteCodeGenerator * byteCodeGenerator, FuncInfo * funcInfo)
+{
+    Js::RegSlot brandLocation = EmitPrivateBrand(pnodeName, byteCodeGenerator, funcInfo);
+    Js::OpCode op = Js::OpCode::LdPrivateField;
+    switch (pnodeName->GetPrivateKind())
+    {
+    case PrivateNameKind::Method:
+        op = Js::OpCode::LdPrivateMethod;
+        break;
+    case PrivateNameKind::Accessor:
+        op = Js::OpCode::LdPrivateAccessor;
+        break;
+    default:
+        break;
+    }
+    byteCodeGenerator->Writer()->Reg3(op, resultLocation, instanceLocation, brandLocation);
+    funcInfo->ReleaseTmpRegister(brandLocation);
+}
+
+// Emit a brand-checked private write. Method writes throw (methods are not
+// writable); accessor writes invoke the stored setter with the instance.
+static void EmitPrivateStore(
+    ParseNodeName * pnodeName, Js::RegSlot instanceLocation, Js::RegSlot valueLocation,
+    ByteCodeGenerator * byteCodeGenerator, FuncInfo * funcInfo)
+{
+    Js::RegSlot brandLocation = EmitPrivateBrand(pnodeName, byteCodeGenerator, funcInfo);
+    switch (pnodeName->GetPrivateKind())
+    {
+    case PrivateNameKind::Method:
+        byteCodeGenerator->Writer()->Reg3(
+            Js::OpCode::StPrivateMethod, valueLocation, instanceLocation, brandLocation);
+        break;
+    case PrivateNameKind::Accessor:
+        byteCodeGenerator->Writer()->Reg4U(
+            Js::OpCode::StPrivateAccessor, valueLocation, instanceLocation, brandLocation, valueLocation, 0);
+        break;
+    default:
+        byteCodeGenerator->Writer()->Reg4(
+            Js::OpCode::StPrivateField, valueLocation, instanceLocation, brandLocation, valueLocation);
+        break;
+    }
+    funcInfo->ReleaseTmpRegister(brandLocation);
 }
 
 #define STARTSTATEMENET_IFTOPLEVEL(isTopLevel, pnode) \
@@ -2438,6 +2489,22 @@ void ByteCodeGenerator::EmitSuperCall(FuncInfo* funcInfo, ParseNodeSuperCall * p
 
     EmitPropStoreForSpecialSymbol(pnodeSuperCall->pnodeThis->location, thisSym, pnodeSuperCall->pnodeThis->pid, funcInfo, false);
 
+    // S1: private methods/accessors are branded before any field initializer
+    // runs. Derived classes do this immediately after super() binds `this`.
+    if (funcInfo == nonLambdaFunc)
+    {
+        if (nonLambdaFunc->root->pnodeClassPrivateMethods != nullptr)
+        {
+            EmitClassPrivateMethodInits(
+                nonLambdaFunc->root->pnodeClassPrivateMethods, funcInfo, pnodeSuperCall->pnodeThis->location);
+        }
+    }
+    else if (funcInfo->root->pnodeClassPrivateMethods != nullptr)
+    {
+        EmitClassPrivateMethodInits(
+            funcInfo->root->pnodeClassPrivateMethods, funcInfo, pnodeSuperCall->pnodeThis->location);
+    }
+
     // S1: derived class instance fields initialize immediately after super()
     // returns and binds `this`, before the rest of the constructor body.
     if (nonLambdaFunc->root->pnodeClassFields != nullptr)
@@ -2463,6 +2530,47 @@ void ByteCodeGenerator::EmitSuperCall(FuncInfo* funcInfo, ParseNodeSuperCall * p
     funcInfo->ReleaseLoc(pnodeSuperCall->pnodeTarget);
     funcInfo->ReleaseLoc(pnodeSuperCall->pnodeNewTarget);
     funcInfo->ReleaseLoc(pnodeSuperCall->pnodeThis);
+}
+
+// S1 private methods/accessors: install the method/accessor brand on the
+// instance before any field initializer runs. The function values were created
+// once during class evaluation and live in the brand record itself.
+void ByteCodeGenerator::EmitClassPrivateMethodInits(ParseNode * pnodePrivateMethods, FuncInfo * funcInfo, Js::RegSlot thisLocationOverride)
+{
+    if (pnodePrivateMethods == nullptr)
+    {
+        return;
+    }
+
+    Js::RegSlot thisLocation = thisLocationOverride;
+    if (thisLocation == Js::Constants::NoRegister)
+    {
+        Symbol * thisSym = funcInfo->GetThisSymbol();
+        Assert(thisSym != nullptr);
+        thisLocation = thisSym->GetLocation();
+    }
+
+    while (pnodePrivateMethods != nullptr)
+    {
+        ParseNode * pnodeEntry = pnodePrivateMethods->nop == knopList
+            ? pnodePrivateMethods->AsParseNodeBin()->pnode1
+            : pnodePrivateMethods;
+        ParseNodeName * pnodeName = pnodeEntry->AsParseNodeName();
+        Assert(pnodeName->sym != nullptr);
+
+        Js::RegSlot brandLocation = funcInfo->AcquireTmpRegister();
+        this->EmitPropLoad(
+            brandLocation, pnodeName->sym, pnodeName->pid, funcInfo,
+            /*skipUseBeforeDeclarationCheck*/ true);
+        Writer()->Reg2(Js::OpCode::InitPrivateMethod, thisLocation, brandLocation);
+        funcInfo->ReleaseTmpRegister(brandLocation);
+
+        if (pnodePrivateMethods->nop != knopList)
+        {
+            break;
+        }
+        pnodePrivateMethods = pnodePrivateMethods->AsParseNodeBin()->pnode2;
+    }
 }
 
 // S1: run the hidden per-field initializer helper functions and define each
@@ -3156,11 +3264,18 @@ void ByteCodeGenerator::EmitOneFunction(ParseNodeFnc *pnodeFnc)
 
         // S1: with a non-simple parameter list, base fields must run before
         // default-parameter evaluation. The special-symbol storage above has
-        // already published `this` into its scope slot.
-        if (pnodeFnc->IsBaseClassConstructor() && pnodeFnc->pnodeClassFields != nullptr &&
-            pnodeFnc->HasNonSimpleParameterList())
+        // already published `this` into its scope slot. Private method brands
+        // precede every field initializer.
+        if (pnodeFnc->IsBaseClassConstructor() && pnodeFnc->HasNonSimpleParameterList())
         {
-            EmitClassFieldInitializerCalls(pnodeFnc->pnodeClassFields, funcInfo);
+            if (pnodeFnc->pnodeClassPrivateMethods != nullptr)
+            {
+                EmitClassPrivateMethodInits(pnodeFnc->pnodeClassPrivateMethods, funcInfo);
+            }
+            if (pnodeFnc->pnodeClassFields != nullptr)
+            {
+                EmitClassFieldInitializerCalls(pnodeFnc->pnodeClassFields, funcInfo);
+            }
         }
 
         if (pnodeFnc->HasNonSimpleParameterList() || !funcInfo->IsBodyAndParamScopeMerged())
@@ -3189,11 +3304,17 @@ void ByteCodeGenerator::EmitOneFunction(ParseNodeFnc *pnodeFnc)
         // S1: simple parameter lists have no default evaluators, so field
         // initialization can run after DefineUserVars has published captured /
         // eval-visible `this` and initialized var bindings, yet still before
-        // the constructor body.
-        if (pnodeFnc->IsBaseClassConstructor() && pnodeFnc->pnodeClassFields != nullptr &&
-            !pnodeFnc->HasNonSimpleParameterList())
+        // the constructor body. Private method brands precede fields.
+        if (pnodeFnc->IsBaseClassConstructor() && !pnodeFnc->HasNonSimpleParameterList())
         {
-            EmitClassFieldInitializerCalls(pnodeFnc->pnodeClassFields, funcInfo);
+            if (pnodeFnc->pnodeClassPrivateMethods != nullptr)
+            {
+                EmitClassPrivateMethodInits(pnodeFnc->pnodeClassPrivateMethods, funcInfo);
+            }
+            if (pnodeFnc->pnodeClassFields != nullptr)
+            {
+                EmitClassFieldInitializerCalls(pnodeFnc->pnodeClassFields, funcInfo);
+            }
         }
 
         // Emit all scope-wide function definitions before emitting function bodies
@@ -7869,12 +7990,10 @@ void EmitAssignment(
     {
         if (IsPrivateFieldReference(lhs))
         {
-            Js::RegSlot brandLocation = EmitPrivateBrand(
-                lhs->AsParseNodeBin()->pnode2->AsParseNodeName(), byteCodeGenerator, funcInfo);
-            byteCodeGenerator->Writer()->Reg4(
-                Js::OpCode::StPrivateField, rhsLocation,
-                lhs->AsParseNodeBin()->pnode1->location, brandLocation, rhsLocation);
-            funcInfo->ReleaseTmpRegister(brandLocation);
+            EmitPrivateStore(
+                lhs->AsParseNodeBin()->pnode2->AsParseNodeName(),
+                lhs->AsParseNodeBin()->pnode1->location, rhsLocation,
+                byteCodeGenerator, funcInfo);
             break;
         }
 
@@ -8036,12 +8155,9 @@ void EmitLoad(
         EmitReference(lhs, byteCodeGenerator, funcInfo);
         if (IsPrivateFieldReference(lhs))
         {
-            Js::RegSlot brandLocation = EmitPrivateBrand(
-                lhs->AsParseNodeBin()->pnode2->AsParseNodeName(), byteCodeGenerator, funcInfo);
-            byteCodeGenerator->Writer()->Reg3(
-                Js::OpCode::LdPrivateField, lhs->location,
-                lhs->AsParseNodeBin()->pnode1->location, brandLocation);
-            funcInfo->ReleaseTmpRegister(brandLocation);
+            EmitPrivateLoad(
+                lhs->AsParseNodeBin()->pnode2->AsParseNodeName(), lhs->location,
+                lhs->AsParseNodeBin()->pnode1->location, byteCodeGenerator, funcInfo);
             break;
         }
 
@@ -8922,12 +9038,9 @@ void EmitCallTargetNoEvalComponents(
         {
             Emit(pnodeTarget->AsParseNodeBin()->pnode1, byteCodeGenerator, funcInfo, false);
             funcInfo->AcquireLoc(pnodeTarget);
-            Js::RegSlot brandLocation = EmitPrivateBrand(
-                pnodeTarget->AsParseNodeBin()->pnode2->AsParseNodeName(), byteCodeGenerator, funcInfo);
-            byteCodeGenerator->Writer()->Reg3(
-                Js::OpCode::LdPrivateField, pnodeTarget->location,
-                pnodeTarget->AsParseNodeBin()->pnode1->location, brandLocation);
-            funcInfo->ReleaseTmpRegister(brandLocation);
+            EmitPrivateLoad(
+                pnodeTarget->AsParseNodeBin()->pnode2->AsParseNodeName(), pnodeTarget->location,
+                pnodeTarget->AsParseNodeBin()->pnode1->location, byteCodeGenerator, funcInfo);
             *thisLocation = pnodeTarget->AsParseNodeBin()->pnode1->location;
             *callObjLocation = *thisLocation;
             break;
@@ -8987,12 +9100,9 @@ void EmitCallTarget(
         if (IsPrivateFieldReference(pnodeTarget))
         {
             Emit(pnodeBinTarget->pnode1, byteCodeGenerator, funcInfo, false);
-            Js::RegSlot brandLocation = EmitPrivateBrand(
-                pnodeBinTarget->pnode2->AsParseNodeName(), byteCodeGenerator, funcInfo);
-            byteCodeGenerator->Writer()->Reg3(
-                Js::OpCode::LdPrivateField, pnodeTarget->location,
-                pnodeBinTarget->pnode1->location, brandLocation);
-            funcInfo->ReleaseTmpRegister(brandLocation);
+            EmitPrivateLoad(
+                pnodeBinTarget->pnode2->AsParseNodeName(), pnodeTarget->location,
+                pnodeBinTarget->pnode1->location, byteCodeGenerator, funcInfo);
             *thisLocation = pnodeBinTarget->pnode1->location;
             *callObjLocation = Js::Constants::NoRegister;
             break;
@@ -11926,6 +12036,41 @@ void EmitYieldStar(
     writer->MarkLabel(finishNormal);
 }
 
+static bool IsPrivateMemberNode(ParseNode * memberNode)
+{
+    return (memberNode->nop == knopMember || memberNode->nop == knopGetMember || memberNode->nop == knopSetMember) &&
+        memberNode->AsParseNodeBin()->pnode1->nop == knopName &&
+        memberNode->AsParseNodeBin()->pnode1->AsParseNodeName()->IsPrivateName();
+}
+
+// Create the method/accessor function once per class evaluation and stash it in
+// the private name's brand record under the record itself. Instances only get
+// a brand entry (see InitPrivateMethod), so the function is shared by every
+// instance and never becomes an own property.
+static void EmitPrivateMemberDefinition(
+    ParseNode * memberNode, Js::RegSlot objectLocation,
+    ByteCodeGenerator * byteCodeGenerator, FuncInfo * funcInfo)
+{
+    ParseNodeName * pnodeName = memberNode->AsParseNodeBin()->pnode1->AsParseNodeName();
+    ParseNodeFnc * pnodeFnc = memberNode->AsParseNodeBin()->pnode2->AsParseNodeFnc();
+
+    pnodeFnc->SetHomeObjLocation(objectLocation);
+    Emit(pnodeFnc, byteCodeGenerator, funcInfo, false);
+
+    // The class-block brand const is initialized earlier in this same class
+    // evaluation; its parser-level declaration is a const, so suppress the
+    // lexical use-before-declaration check for this synthetic load.
+    Js::RegSlot brandLocation = EmitPrivateBrand(
+        pnodeName, byteCodeGenerator, funcInfo, /*skipUseBeforeDeclarationCheck*/ true);
+    uint8 kind = pnodeName->GetPrivateKind() == PrivateNameKind::Method
+        ? 0
+        : (memberNode->nop == knopGetMember ? 1 : 2);
+    byteCodeGenerator->Writer()->Reg2B1(
+        Js::OpCode::SetPrivateDefinition, pnodeFnc->location, brandLocation, kind);
+    funcInfo->ReleaseTmpRegister(brandLocation);
+    funcInfo->ReleaseLoc(pnodeFnc);
+}
+
 void EmitClass(ParseNodeClass * pnodeClass, ByteCodeGenerator * byteCodeGenerator, FuncInfo * funcInfo)
 {
     funcInfo->AcquireLoc(pnodeClass);
@@ -12036,11 +12181,25 @@ void EmitClass(ParseNodeClass * pnodeClass, ByteCodeGenerator * byteCodeGenerato
         {
             pnodeMember = pnodeMembers->AsParseNodeBin()->pnode1;
             pnodeMemberFnc = pnodeMember->AsParseNodeBin()->pnode2->AsParseNodeFnc();
-            EmitMemberNode(pnodeMember, pnodeMemberFnc->IsStaticMember() ? pnodeClass->location : protoLoc, byteCodeGenerator, funcInfo, pnodeClass, /*useStore*/ false, &isObjectEmpty);
+            if (IsPrivateMemberNode(pnodeMember))
+            {
+                EmitPrivateMemberDefinition(pnodeMember, protoLoc, byteCodeGenerator, funcInfo);
+            }
+            else
+            {
+                EmitMemberNode(pnodeMember, pnodeMemberFnc->IsStaticMember() ? pnodeClass->location : protoLoc, byteCodeGenerator, funcInfo, pnodeClass, /*useStore*/ false, &isObjectEmpty);
+            }
             pnodeMembers = pnodeMembers->AsParseNodeBin()->pnode2;
         }
         pnodeMemberFnc = pnodeMembers->AsParseNodeBin()->pnode2->AsParseNodeFnc();
-        EmitMemberNode(pnodeMembers, pnodeMemberFnc->IsStaticMember() ? pnodeClass->location : protoLoc, byteCodeGenerator, funcInfo, pnodeClass, /*useStore*/ false, &isObjectEmpty);
+        if (IsPrivateMemberNode(pnodeMembers))
+        {
+            EmitPrivateMemberDefinition(pnodeMembers, protoLoc, byteCodeGenerator, funcInfo);
+        }
+        else
+        {
+            EmitMemberNode(pnodeMembers, pnodeMemberFnc->IsStaticMember() ? pnodeClass->location : protoLoc, byteCodeGenerator, funcInfo, pnodeClass, /*useStore*/ false, &isObjectEmpty);
+        }
     }
 
     funcInfo->ReleaseTmpRegister(protoLoc);
@@ -12786,13 +12945,11 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
 
         if (IsPrivateFieldReference(pnode))
         {
-            Js::RegSlot brandLocation = EmitPrivateBrand(
-                pnode->AsParseNodeBin()->pnode2->AsParseNodeName(), byteCodeGenerator, funcInfo);
-            funcInfo->ReleaseTmpRegister(brandLocation);
-            funcInfo->ReleaseLoc(pnode->AsParseNodeBin()->pnode1);
             funcInfo->AcquireLoc(pnode);
-            byteCodeGenerator->Writer()->Reg3(
-                Js::OpCode::LdPrivateField, pnode->location, callObjLocation, brandLocation);
+            EmitPrivateLoad(
+                pnode->AsParseNodeBin()->pnode2->AsParseNodeName(), pnode->location,
+                callObjLocation, byteCodeGenerator, funcInfo);
+            funcInfo->ReleaseLoc(pnode->AsParseNodeBin()->pnode1);
             break;
         }
 

@@ -360,6 +360,19 @@ public:
 
 class Symbol;
 struct PidRefStack;
+
+// S1 private methods/accessors: resolved private references need to know how
+// the declared private name is dispatched (field value, method value, or
+// accessor get/set). The kind is filled in when the private scope is popped,
+// after all class elements have been parsed.
+enum class PrivateNameKind : uint8
+{
+    Unknown = 0,
+    Field,
+    Method,
+    Accessor,
+};
+
 class ParseNodeName : public ParseNode
 {
 public:
@@ -379,6 +392,8 @@ public:
     bool IsSpecialName() { return isSpecialName; }
     bool IsPrivateName() { return isPrivateName; }
     void SetIsPrivateName() { isPrivateName = true; }
+    PrivateNameKind GetPrivateKind() const { return privateKind; }
+    void SetPrivateKind(PrivateNameKind kind) { privateKind = kind; }
 
     DISABLE_SELF_CAST(ParseNodeName);
 
@@ -388,6 +403,7 @@ protected:
 private:
     bool isSpecialName;         // indicates a PnPid (knopName) is a special name like 'this' or 'super'
     bool isPrivateName;         // '#name' reference to a class private binding
+    PrivateNameKind privateKind; // dispatch kind of a private reference/declaration
 };
 
 // variable declaration
@@ -517,6 +533,12 @@ public:
     // initializer). Lives on the constructor so bytecode generation can run the
     // initializers in the right frame (base prologue or right after super()).
     ParseNodePtr pnodeClassFields;
+    // S1 private methods/accessors: brand references for each private method
+    // or accessor declared by the class. Constructor/prologue emission adds
+    // these brands before any field initializer runs, matching
+    // InitializeInstanceElements. Each item is a private knopName bound to the
+    // class-block brand const.
+    ParseNodePtr pnodeClassPrivateMethods;
 
     FuncInfo *funcInfo; // function information gathered during byte code generation
     Scope *scope;
