@@ -17,7 +17,7 @@ not a claim that TigerBeetle, Ghostty or Bun endorses this guide.
 4. **What happens at every failure/exit point?** Trace partial initialization,
    foreign status errors, OOM, exceptions, cancellation and shutdown.
 5. **Which test observes the promised lifetime?** A successful compile or the
-   1996/2048 regression baseline does not prove the new ownership contract.
+   1997/2049 regression baseline does not prove the new ownership contract.
 
 If a lifetime cannot be established from declarations, implementations and callers,
 record the uncertainty and narrow the change. Do not choose an allocator or add a
@@ -117,7 +117,7 @@ being thread-safe does not make a container, callback or JS handle thread-safe.
 - `JsGetArrayBufferStorage` explicitly says the raw buffer pointer is not a GC
   reference (`ChakraCommon.h:2063-2080`). Rooting the ArrayBuffer prevents collection
   while held; it does **not** prevent `JsDetachArrayBuffer` or establish future
-  resize/pointer stability (`ChakraCore.h:1959-1996`).
+  resize/pointer stability (`ChakraCore.h:1959-1997`).
 - Runtime disposal invalidates its resources (`ChakraCommon.h:800-812`). Roots
   must be released through the permitted owner context before disposal; they are
   not a license to use handles after teardown.
