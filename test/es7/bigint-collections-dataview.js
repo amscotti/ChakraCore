@@ -381,7 +381,7 @@ var tests = [
             assert.strictEqual("offset,value", orderOf(function (i, v) { view.setUint32(i, v); }), "setUint32 order");
             assert.strictEqual("offset,value", orderOf(function (i, v) { view.setFloat32(i, v); }), "setFloat32 order");
             assert.strictEqual("offset,value", orderOf(function (i, v) { view.setFloat64(i, v); }), "setFloat64 order");
-            assert.strictEqual(7, view.getInt32(0), "writes still land");
+            assert.strictEqual(7, view.getFloat64(0), "writes still land");
         }
     }
 ];
