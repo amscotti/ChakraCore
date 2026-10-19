@@ -89,6 +89,30 @@ suspended generator bodies, the async-function pending-await crash, and
 unbuilt Windows/ARM32 builds, TTD+debugger-action coverage, and hardened
 entitlement paths.
 
+### Integration checkpoint — modernize/baseline 7eeccbb5
+
+The temporary integration branch `jit/arm64-macos-integration-20261019`
+merges modernization checkpoint `7eeccbb5` (`a6e01cb98`, plus
+`ee26a4671` for the regenerated JIT builtins). The main `jit/arm64-macos`
+branch is unchanged.
+
+- Default `zig build check`: **2012/0**.
+- JIT `zig build -Dprofile=jit check`: green after regenerating the JIT
+  builtin bytecode.
+- JIT `disable_jit`: **2012/0**.
+- JIT `interpreted`: **2247/556**. 398 failures are the asm/WASM gap; about
+  148 are non-asm paths, mostly `DebuggerCommon`, including **129 SIGABRT**
+  and **25 SIGSEGV**.
+
+One representative full-JIT debugger test (`DebuggerCommon/default.js` with
+`-debugLaunch`) aborts in `GlobOpt::ToVar` at the
+`AssertOrFailFast(valueInfo)` at `lib/Backend/GlobOpt.cpp:11449` during
+foreground codegen. `-off:FullJit` passes; `-off:SimpleJit` and
+`-off:TypeSpec` still crash; `-off:GlobOpt` reaches the baseline but with a
+debugger-output mismatch. This is a debugger/full-JIT integration blocker,
+not a default-profile regression. The integration branch is therefore not
+merge-ready.
+
 #### Suspended-generator reparse guard (Apple ARM64)
 
 `ParseableFunctionInfo::CleanupToReparse` normally drops the bytecode block,
@@ -186,8 +210,8 @@ The branch is committed (`07d6965e8`, `2372fcc81`, `9ccc535a8`, `fcbc434c9`,
 `zig build -Dprofile=jit check` runs the generic smoke, `check_jit.py`, and
 `verify_bytecode_pure.py --jit --verify`. The JIT static archive is
 deterministic (`ZERO_AR_DATE=1`, epoch/0:0 member metadata). The base object
-counts are 538 shared / 536 static; the JIT graph adds 89 backend TUs for 627
-shared.
+counts are 540 shared / 538 static at the integration checkpoint; the JIT
+graph adds 89 backend TUs for 629 shared / 627 static.
 
 ### Second-pass fixes on the 16:37 dylib
 
@@ -395,7 +419,8 @@ Runtime fixes landed across `07d6965e8`, `9ccc535a8`, `fcbc434c9`,
 - **`expect_total` was vacuous for the JIT graph.** Fixed in `2372fcc81`:
   `backend_expected` is the independent sum of
   `backend_group.{cxx,c,asm_files}.len`, asserted to be 89, and `backend_n`
-  is asserted against it. The shared JIT total is 538 + 89 = 627.
+  is asserted against it. After the integration checkpoint the shared JIT
+total is 540 + 89 = 629.
 
 **P2 - ownership, correctness, and release hardening**
 
@@ -967,8 +992,8 @@ Build and install:
   smoke plus a JIT symbol/hot-call smoke and a `--jit` bytecode verify.
 - `tools/build/tables.zig` adds the ARM64 backend group on top of the existing
   object groups. The backend group is not a member of `object_groups`. The
-  base shared/static object counts stay 538/536; the JIT graph adds 89
-  backend TUs and asserts 627 shared.
+  base shared/static object counts stay 540/538 at the integration
+  checkpoint; the JIT graph adds 89 backend TUs and asserts 629 shared.
 - `tools/build/install_profile.py` knows the `jit` install prefix.
 
 Executable JIT memory:
@@ -1745,9 +1770,10 @@ These are easy to "simplify" into a bug. Each one was measured.
 - The no-JIT builtin bytecode headers and
   `ByteCodeCacheReleaseFileVersion.h` stay as the modernization branch has
   them.
-- The base object counts stay 536 static / 538 shared. The JIT graph
-  independently asserts 89 backend TUs (`backend_expected`), so its shared
-  total is 627; do not fold the backend count into the base baseline.
+- The base object counts stay 538 static / 540 shared at the integration
+  checkpoint. The JIT graph independently asserts 89 backend TUs
+  (`backend_expected`), so its totals are 627 static / 629 shared; do not fold
+  the backend count into the base baseline.
 - No kill switch, no `-RecyclerStress`, no second suite in parallel, no
   commit unless the maintainer asks, no push, no merge, and no rebase unless
   modernization has moved.
