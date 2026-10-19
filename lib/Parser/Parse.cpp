@@ -8800,7 +8800,9 @@ IdentPtr Parser::ParseClassPropertyName(IdentPtr * pidHint)
             Error(ERRES5NoOctal);
         }
 
-        return this->GetScanner()->PidFromLong(m_token.GetLong());
+        IdentPtr pid = this->GetScanner()->PidFromLong(m_token.GetLong());
+        *pidHint = pid;
+        return pid;
     }
     else if (m_token.tk == tkFltCon)
     {
@@ -8809,11 +8811,15 @@ IdentPtr Parser::ParseClassPropertyName(IdentPtr * pidHint)
             Error(ERRES5NoOctal);
         }
 
-        return this->GetScanner()->PidFromDbl(m_token.GetDouble());
+        IdentPtr pid = this->GetScanner()->PidFromDbl(m_token.GetDouble());
+        *pidHint = pid;
+        return pid;
     }
     else if (m_token.tk == tkBigIntCon)
     {
-        return this->PidFromBigIntLiteral(m_token.GetBigInt(), buildAST);
+        IdentPtr pid = this->PidFromBigIntLiteral(m_token.GetBigInt(), buildAST);
+        *pidHint = pid;
+        return pid;
     }
 
     Error(ERRnoMemberIdent);

@@ -41,6 +41,11 @@ operations, general BigInt arithmetic, or immutable-buffer support.
    now recognizes `tkBigIntCon` so `get 2n() {}` works. The
    syntax-only/deferred parse returns the raw token and performs no
    runtime allocation; the AST-building parse does the conversion.
+   `ParseClassPropertyName` now also returns the decimal pid through
+   `pidHint` for BigInt, integer and float literal names, so class
+   method/accessor naming uses `"1"`, `"get 2"`, `"set 4"`, and the
+   static analogue rather than an empty name. The same one-line omission
+   was fixed for ordinary numeric literal class names.
    Computed keys (`{[1n]: ...}`, `class C { [1n]() {} }`) already used
    `ToPropertyKey` and continue to work.
 3. **DataView BigInt accessors.** New own prototype functions on
@@ -67,6 +72,10 @@ operations, general BigInt arithmetic, or immutable-buffer support.
      `JavascriptBuiltInFunctionList.h` so existing built-in enum values
      and checked-in bytecode stay stable. No new static `PropertyId` was
      added; names are tracked dynamic property records.
+4. **DataView constructor length.** `DataView.length` is now `1`
+   (`buffer [ , byteOffset [ , byteLength ] ]`), matching the default
+   largest-named-argument rule and test262/Node. This pre-existing
+   registration error was a one-constant correction.
 
 ## Ownership note
 
@@ -93,7 +102,8 @@ Pinned test262 `2e0a56762801e275a9fdf96dc49d90ba0cddcf63`; shared gate
 lock; local `.zig-cache`/`out`; before binary is the unchanged base
 `/Users/ascotti/Documents/code/ChakraCore/zig-out/bin/ch`
 (`8dd8d6b0…`, source HEAD `1c983ef9c`). After binaries:
-`zig-out/bin/ch` `eb31ad36…`, `out/debug-static/bin/ch` `c6e4eb4c…`.
+`zig-out/bin/ch` `eb31ad36…` with `libChakraCore.dylib`
+`91a92751…`; `out/debug-static/bin/ch` `6b6eff3f…`.
 Both test262 runs passed all 18 controls.
 
 Before/after focused corpus (144 scenarios / 72 files, host flags
@@ -114,9 +124,11 @@ by the local test and the direct probe below.
 
 Broad control selection (Map, Set, DataView and `language/expressions/
 object|class`; 12,570 scenarios / 6,377 files) was **9,641/2,929**
-before and **9,743/2,827** after: exactly the same 102 fail→pass and
-**0 pass→fail**, with identical result keys. Debug-static focused rerun:
-**140/4**, 102 fail→pass / 0 pass→fail against the base artifact.
+before and **9,745/2,825** after: **104 fail→pass, 0 pass→fail**, with
+identical result keys. The 104 are the same 102 focused flips plus the
+two `built-ins/DataView/length.js` scenarios enabled by the constructor
+length correction. Debug-static focused rerun: **140/4**, 102 fail→pass /
+0 pass→fail against the base artifact.
 
 Direct identity probe:
 `new Map([[1n,1],[1n,2]]).size`, `get(1n)`, `new Set([1n,1n,2n]).size`,
@@ -128,7 +140,9 @@ Local test `test/es7/bigint-collections-dataview.js`, registered once in
 -endargs`, covers Map/Set identity and deletion, Number/BigInt separation,
 object/string/symbol/NaN identity and weak collections, literal keys for
 object methods/accessors/class members/class fields/destructuring and
-computed keys, DataView descriptors/name/length/non-constructibility,
+computed keys, class method/accessor names for BigInt and numeric literal
+keys (instance and static), `DataView.length`, accessor
+descriptors/names/lengths/non-constructibility,
 signed/unsigned boundaries, both endiannesses, custom offsets, ToIndex and
 ToBigInt errors, conversion/range/detached ordering, and resizable views.
 It passes on the test and debug-static binaries.
@@ -141,7 +155,8 @@ Builds (shared gate lock):
 - Existing local suites re-run green: `test/es7/bigint-{basics,asintn,
   literals,mixed,arithmetic}.js`, `test/es7/bigint64array.js`,
   `test/es6/{map,set,weakmap,weakset}_{basic,functionality}.js` (with
-  `-ES6ObjectLiterals`), and `test/typedarray/dataview2.js`.
+  `-ES6ObjectLiterals`), `test/es7/class-{fields-public,private-fields,
+  private-methods}.js`, and `test/typedarray/dataview2.js`.
 - Default-flag probe: all four DataView methods are `undefined` without
   `-ESBigInt` and `function` with it.
 - `git diff --check` clean.

@@ -154,6 +154,34 @@ var tests = [
             assert.strictEqual("static method", C["5"](), "BigInt-named static class method");
             assert.strictEqual("computed method", instance["6"](), "computed BigInt class key");
 
+            class NamedBigInt {
+                1n() {}
+                static 3n() {}
+                get 2n() { return "getter"; }
+                set 4n(value) { this.setValue = value; }
+            }
+            var namedBigInt = new NamedBigInt();
+            assert.strictEqual("1", namedBigInt["1"].name, "instance BigInt method name");
+            assert.strictEqual("3", NamedBigInt["3"].name, "static BigInt method name");
+            var getBigInt = Object.getOwnPropertyDescriptor(NamedBigInt.prototype, "2").get;
+            var setBigInt = Object.getOwnPropertyDescriptor(NamedBigInt.prototype, "4").set;
+            assert.strictEqual("get 2", getBigInt.name, "BigInt getter name");
+            assert.strictEqual("set 4", setBigInt.name, "BigInt setter name");
+
+            class NamedNumber {
+                5() {}
+                static 7() {}
+                get 6() { return "getter"; }
+                set 8(value) { this.setValue = value; }
+            }
+            var namedNumber = new NamedNumber();
+            assert.strictEqual("5", namedNumber["5"].name, "instance numeric method name");
+            assert.strictEqual("7", NamedNumber["7"].name, "static numeric method name");
+            assert.strictEqual("get 6", Object.getOwnPropertyDescriptor(NamedNumber.prototype, "6").get.name,
+                "numeric getter name");
+            assert.strictEqual("set 8", Object.getOwnPropertyDescriptor(NamedNumber.prototype, "8").set.name,
+                "numeric setter name");
+
             var computed = { [7n]: "seven" };
             assert.strictEqual("seven", computed[7], "computed BigInt property key");
             assert.strictEqual("seven", computed[7n], "computed BigInt property access");
@@ -173,6 +201,7 @@ var tests = [
     {
         name: "DataView BigInt accessor shape and descriptors",
         body() {
+            assert.strictEqual(1, DataView.length, "DataView constructor length");
             var proto = DataView.prototype;
             ["getBigInt64", "getBigUint64"].forEach(function (name) {
                 var descriptor = Object.getOwnPropertyDescriptor(proto, name);
