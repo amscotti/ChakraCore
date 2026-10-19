@@ -244,6 +244,46 @@ var tests = [
         }
     },
     {
+        name: "indirect eval Annex B global lexical and ordinary function descriptors",
+        body() {
+            loadScript("let geIndirectLet = 1; const geIndirectConst = 2; class geIndirectClass {}");
+            assert.throws(function () {
+                loadScript('(0, eval)("geIndirectSide = true; if (true) { function geIndirectLet() {} }");');
+            }, SyntaxError, "indirect eval block function collides with a global let");
+            assert.strictEqual(geIndirectLet, 1, "indirect eval did not overwrite the global let");
+            assert.strictEqual(Object.prototype.hasOwnProperty.call(global, "geIndirectLet"), false,
+                "global let is not a property");
+            assert.strictEqual(typeof geIndirectSide, "undefined", "indirect eval body did not run");
+            assert.throws(function () {
+                loadScript('(0, eval)("if (true) { function geIndirectConst() {} }");');
+            }, SyntaxError, "indirect eval block function collides with a global const");
+            assert.strictEqual(geIndirectConst, 2, "global const is unchanged");
+            assert.throws(function () {
+                loadScript('(0, eval)("if (true) { function geIndirectClass() {} }");');
+            }, SyntaxError, "indirect eval block function collides with a global class");
+            assert.strictEqual(typeof geIndirectClass, "function", "global class is unchanged");
+
+        }
+    },
+    {
+        name: "CanDeclareGlobalFunction precedes the Annex B synthetic preflight",
+        body() {
+            Object.defineProperty(global, "geOrderNonDefinable", {
+                value: 1, writable: true, enumerable: false, configurable: false
+            });
+            loadScript("let geOrderSyntheticLexical = 1;");
+            loadScript(
+                "var geOrderCaught = 'none'; var geOrderSide = false;" +
+                "try { eval('function geOrderNonDefinable() {} geOrderSide = true; if (true) { function geOrderSyntheticLexical() {} }'); }" +
+                "catch (e) { geOrderCaught = e.name; }");
+            assert.strictEqual(geOrderCaught, "TypeError",
+                "non-definable function TypeError precedes the synthetic lexical check");
+            assert.strictEqual(geOrderSide, false, "eval body did not run");
+            assert.strictEqual(geOrderNonDefinable, 1, "non-definable binding is unchanged");
+            assert.strictEqual(geOrderSyntheticLexical, 1, "synthetic collision binding is unchanged");
+        }
+    },
+    {
         name: "direct eval runs CanDeclareGlobalFunction before creating any function",
         body() {
             Object.defineProperty(global, "geNonDefinableFn", {

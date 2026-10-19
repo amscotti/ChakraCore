@@ -124,7 +124,7 @@ Pinned corpus `2e0a56762801e275a9fdf96dc49d90ba0cddcf63`, flags
 `out/` caches. Final binary `zig-out/bin/ch` (sha256
 `3a57922e9ae7cfbf10477e17216507034fdca33e16312533bf95db1d6371c35e`) and
 `libChakraCore.dylib` (sha256
-`90d481b60d36ad095718998e8f2f63657f67f134af3cbac70e0e00c4afeea647`). The
+`30ce4ffe82ed756f7d35dda8ba191a609cdeb42bb1e932e8c3a55635d4c8c9c3`). The
 "before" dylib is
 `d8e0eb0fb6ab0773c83d800f9cf39262f52951f1f656f8b94ae6d90470a266e9`.
 
@@ -146,7 +146,7 @@ corrected host, **38 fail→pass / 0 pass→fail** and all **112** previously
 passing controls remain green; the other four recorded failures are the
 host-wrapper cases above. Artifacts:
 `out/test262-p4-global-throw-before`, `out/test262-p4-var-env-before`,
-`out/test262-p4-scope-throw-before`, `out/test262-p4-r17-{global,var-env,scope}`.
+`out/test262-p4-scope-throw-before`, `out/test262-p4-r34-{global,var-env,scope}`.
 The split also satisfies the triage's 19+23 batch shape: global-code 19 flips
 (15 engine + 4 host), eval-code 23 flips (7 var-env + 16 parameter-default).
 
@@ -156,7 +156,7 @@ Controls and related selections:
 |---|---:|---:|
 | P3 skip selection (280) | 280/0 | **280/0** |
 | full Annex B three directories (782) | P3 doc: 765/17 | **782/0** |
-| direct/indirect non-definable eval selection (15) | not part of P4 baseline | **15/0** (`out/test262-p4-r17-nondef`) |
+| direct/indirect non-definable eval selection (15) | not part of P4 baseline | **15/0** (`out/test262-p4-r34-nondef`) |
 | `test/language/block-scope/**/*.js` (287) | 287/0 | **287/0** |
 | P1 completion selection (156) | 152/4 known class/using | **152/4** |
 | `test/es7` legacy suite | 57/0 existing (57/1 with new test) | **58/0** |
@@ -252,5 +252,13 @@ against its 31-file blast radius.
 - The interpreter routes eval declaration preflights through the eval
   environment; the JIT lowering still calls the root-only helper. JIT behavior
   and configuration are B4-owned and are not claimed here.
+- Ordinary direct/indirect eval function bindings over an existing
+  configurable writable non-enumerable property still keep enumerable:false;
+  the writable-data branch is shared with the Annex B synthetic var store.
+  This remains a residual against CreateGlobalFunctionBinding's defaults.
+- Body eval with non-simple parameters still throws SyntaxError for
+  `eval('var a')`/`eval('var a=2')`; the runtime lower walk still observes the
+  parameter activation. This batch did not resolve that separate environment
+  split.
 - No full `zig build check` or global gate-pin update was run; integration owns
   cumulative counts.

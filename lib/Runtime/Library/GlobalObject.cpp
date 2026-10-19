@@ -1930,12 +1930,6 @@ LHexError:
         PropertyDescriptor existing;
         if (JavascriptOperators::GetOwnPropertyDescriptor(this, propertyId, GetScriptContext(), &existing))
         {
-            if (existing.IsDataDescriptor() && existing.IsWritable())
-            {
-                return DynamicObject::SetPropertyWithAttributes(
-                    propertyId, value, existing.GetAttributes(), nullptr, PropertyOperation_ThrowIfNotExtensible);
-            }
-
             PropertyDescriptor descriptor;
             descriptor.SetValue(value);
             if (existing.IsConfigurable())
@@ -1987,6 +1981,9 @@ LHexError:
         if (hasRootProperty &&
             JavascriptOperators::GetOwnPropertyDescriptor(this, propertyId, GetScriptContext(), &existing))
         {
+            // The Annex B synthetic var store keeps a writable property's
+            // attributes. Ordinary eval function bindings use the
+            // CreateGlobalFunctionBinding defaults unless non-configurable.
             if (existing.IsDataDescriptor() && existing.IsWritable())
             {
                 return DynamicObject::SetPropertyWithAttributes(

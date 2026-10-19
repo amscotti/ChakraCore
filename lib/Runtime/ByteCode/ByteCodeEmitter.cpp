@@ -1245,7 +1245,7 @@ void EmitAssignmentToFuncName(ParseNodeFnc *pnodeFnc, ByteCodeGenerator *byteCod
                 // store, while a global lexical binding is rejected by the
                 // preflight above. Existing global properties keep their
                 // Annex B var-binding attributes.
-                if ((byteCodeGenerator->GetFlags() & fscrEval) && funcInfoParent->IsGlobalFunction())
+                if ((byteCodeGenerator->GetFlags() & fscrEvalCode) && funcInfoParent->IsGlobalFunction())
                 {
                     Js::PropertyId propertyId = fncScopeSym->EnsurePosition(byteCodeGenerator);
                     byteCodeGenerator->EmitGlobalFncDeclInit(pnodeFnc->location, propertyId, funcInfoParent);
@@ -4606,7 +4606,7 @@ void ByteCodeGenerator::EmitLoadInstance(Symbol *sym, IdentPtr pid, Js::RegSlot 
 void ByteCodeGenerator::EmitGlobalFncDeclInit(Js::RegSlot rhsLocation, Js::PropertyId propertyId, FuncInfo * funcInfo)
 {
     // Note: declared variables and assignments in the global function go to the root object directly.
-    if (this->flags & fscrEval)
+    if ((this->flags & fscrEvalCode) && funcInfo->IsGlobalFunction())
     {
         // Func decl's always get their init values before any use, so we don't pre-initialize the property to undef.
         // That means that we have to use ScopedInitFld so that we initialize the property on the right instance
@@ -5982,29 +5982,6 @@ void ByteCodeGenerator::EnsureNoRedeclarations(ParseNodeBlock *pnodeBlock, FuncI
         }
     }
 
-    // Annex B synthetic vars are created by the parser as function-scope var
-    // nodes. Before the first evaluated statement, reject a global lexical
-    // collision; a local lexical environment still skips the synthetic store.
-    if (this->flags & fscrEval)
-    {
-        for (ParseNode *pnode = funcInfo->root->pnodeVars; pnode; pnode = pnode->AsParseNodeVar()->pnodeNext)
-        {
-            if (!pnode->AsParseNodeVar()->isBlockScopeFncDeclVar)
-            {
-                continue;
-            }
-
-            Symbol *sym = pnode->AsParseNodeVar()->sym;
-            if (sym == nullptr)
-            {
-                continue;
-            }
-
-            Js::PropertyId propertyId = sym->EnsurePosition(this);
-            this->m_writer.ElementRootU(Js::OpCode::EnsureNoRootFld, funcInfo->FindOrAddReferencedPropertyId(propertyId));
-        }
-    }
-
     // CanDeclareGlobalFunction preflight after every lexical check.
     for (ParseNodePtr pnode = pnodeBlock->pnodeScopes; pnode;)
     {
@@ -6035,6 +6012,30 @@ void ByteCodeGenerator::EnsureNoRedeclarations(ParseNodeBlock *pnodeBlock, FuncI
             Assert(UNREACHED);
         }
     }
+
+    // Annex B synthetic vars are created by the parser as function-scope var
+    // nodes. Before the first evaluated statement, reject a global lexical
+    // collision; a local lexical environment still skips the synthetic store.
+    if (this->flags & fscrEvalCode)
+    {
+        for (ParseNode *pnode = funcInfo->root->pnodeVars; pnode; pnode = pnode->AsParseNodeVar()->pnodeNext)
+        {
+            if (!pnode->AsParseNodeVar()->isBlockScopeFncDeclVar)
+            {
+                continue;
+            }
+
+            Symbol *sym = pnode->AsParseNodeVar()->sym;
+            if (sym == nullptr)
+            {
+                continue;
+            }
+
+            Js::PropertyId propertyId = sym->EnsurePosition(this);
+            this->m_writer.ElementRootU(Js::OpCode::EnsureNoRootFld, funcInfo->FindOrAddReferencedPropertyId(propertyId));
+        }
+    }
+
 }
 
 void ByteCodeGenerator::RecordAllIntConstants(FuncInfo * funcInfo)

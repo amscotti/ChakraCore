@@ -8075,7 +8075,12 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
 
         for (int i = 0; i < length; i++)
         {
-            RecyclableObject *object = VarTo<RecyclableObject>(pDisplay->GetItem(i));
+            Var item = pDisplay->GetItem(i);
+            if (item == nullptr)
+            {
+                continue;
+            }
+            RecyclableObject *object = VarTo<RecyclableObject>(item);
             if (VarIs<RootObjectBase>(object))
             {
                 VarTo<RootObjectBase>(object)->EnsureCanDeclGloFunc(propertyId);
@@ -8093,10 +8098,13 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
             }
         }
 
-        RecyclableObject *object = VarTo<RecyclableObject>(defaultInstance);
-        if (VarIs<RootObjectBase>(object))
+        if (defaultInstance != nullptr)
         {
-            VarTo<RootObjectBase>(object)->EnsureCanDeclGloFunc(propertyId);
+            RecyclableObject *object = VarTo<RecyclableObject>(defaultInstance);
+            if (VarIs<RootObjectBase>(object))
+            {
+                VarTo<RootObjectBase>(object)->EnsureCanDeclGloFunc(propertyId);
+            }
         }
         JIT_HELPER_END(Op_ScopedEnsureCanDeclGloFunc);
     }
@@ -8108,7 +8116,12 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
 
         for (int i = 0; i < length; i++)
         {
-            RecyclableObject *object = VarTo<RecyclableObject>(pDisplay->GetItem(i));
+            Var item = pDisplay->GetItem(i);
+            if (item == nullptr)
+            {
+                continue;
+            }
+            RecyclableObject *object = VarTo<RecyclableObject>(item);
             if (VarIs<RootObjectBase>(object))
             {
                 VarTo<RootObjectBase>(object)->EnsureNoGlobalLexical(propertyId);
@@ -8125,10 +8138,13 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
             }
         }
 
-        RecyclableObject *object = VarTo<RecyclableObject>(defaultInstance);
-        if (VarIs<RootObjectBase>(object))
+        if (defaultInstance != nullptr)
         {
-            VarTo<RootObjectBase>(object)->EnsureNoGlobalLexical(propertyId);
+            RecyclableObject *object = VarTo<RecyclableObject>(defaultInstance);
+            if (VarIs<RootObjectBase>(object))
+            {
+                VarTo<RootObjectBase>(object)->EnsureNoGlobalLexical(propertyId);
+            }
         }
         JIT_HELPER_END(Op_ScopedEnsureNoGlobalLexical);
     }
