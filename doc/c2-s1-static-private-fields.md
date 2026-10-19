@@ -36,9 +36,10 @@ rejected as `SyntaxError`.
   `#x in obj` use the existing private opcodes. Wrong receivers, primitives,
   proxies and unbranded objects produce the existing `TypeError` behavior.
 - Private state remains readable/writable after `Object.freeze(C)`, because it
-  is stored in the brand map rather than in properties. An add to a
-  non-extensible constructor throws `TypeError`, matching this engine's
-  existing instance `PrivateFieldAdd` policy (see residual).
+  is stored in the brand map rather than in properties. Static private field
+  addition also works when the constructor is already frozen/non-extensible,
+  matching Node and the spec's private-element model. The legacy instance
+  private-field add gate is unchanged (see residual).
 
 ## Parser/AST design
 
@@ -52,6 +53,12 @@ rejected as `SyntaxError`.
   initializer call node, which preserves textual order with public static
   fields and static methods. The first class-emission pass skips them; the
   second pass runs them.
+- A `*` following a private field name after a line terminator starts the next
+  class element (ASI), rather than being consumed as a generator modifier on
+  the private name: `static #x\n*gen(){}` and
+  `static #x\n*[Symbol.iterator](){}` are valid. The same holds for instance
+  private fields. Without a line terminator (`#x *gen(){}`) the form remains a
+  `SyntaxError`. Public field names already followed this ASI path.
 - The existing hidden block-scoped private-name const, deferred reference
   resolution, duplicate checks, `#constructor` check, `arguments`/`super()`
   early errors and NamedEvaluation (`#field`) are reused unchanged.
@@ -61,18 +68,22 @@ rejected as `SyntaxError`.
 
 ## Bytecode/runtime design
 
-No opcode or PropertyId was added. The implementation reuses:
+No PropertyId was added. The implementation reuses the existing private
+machinery and appends one interpreter-only opcode:
 
 - `NewPrivateName` — one hidden per-name brand `JavascriptWeakMap` per class
   evaluation, stored in the class-block const.
-- `InitPrivateField` — add the static field value to that map keyed by the
-  constructor (same add/brand-check semantics as instance fields).
+- `InitStaticPrivateField` (appended after `StPrivateMethod`) — add the static
+  field value to that map keyed by the constructor. Like the spec's
+  `PrivateFieldAdd`, it rejects a duplicate brand but does not require the
+  constructor to be extensible, so frozen constructors accept their own
+  private static storage.
 - `LdPrivateField`, `StPrivateField`, `HasPrivateField` — unchanged access,
   write and `#x in obj` behavior for constructor receivers.
 
 `IsStaticFieldMemberNode` now accepts either a public `knopStr` name or a
 private `knopName`. `EmitStaticClassFieldDefinition` loads the hidden brand
-const for private names and emits `InitPrivateField(value, constructor,
+const for private names and emits `InitStaticPrivateField(value, constructor,
 brand, value)`; public names still emit `InitClassField`. The initializer
 helper is called with the constructor as its explicit receiver, exactly as
 for public static fields. `EmitClass` keeps its existing two-pass shape:
@@ -83,7 +94,8 @@ static fields in textual order.
 
 - **Resource**: one hidden `JavascriptWeakMap` per declared private name per
   class evaluation (existing private-field resource), plus one weak map entry
-  per initialized private static field. No new native allocation or opcode.
+  per initialized private static field. No new native allocation; one appended
+  interpreter opcode.
 - **Owner**: the hidden block-scoped const owns the map; the map owns values;
   the constructor is the weak key for a static name. The class block and its
   closure keep the map alive for the class lifetime.
@@ -94,9 +106,9 @@ static fields in textual order.
   mutate/freeze the constructor or throw. Abrupt completion prevents later
   static fields from running; entries already added remain ordinary weak-map
   entries. `this` and helper calls are normal rooted values.
-- **Failure**: wrong receiver/primitive, duplicate add, or add to a
-  non-extensible constructor throws `TypeError`; no partial native resource
-  exists.
+- **Failure**: wrong receiver/primitive or duplicate static add throws
+  `TypeError`; static adds on a frozen/non-extensible constructor succeed.
+  No partial native resource exists.
 - **Thread/context**: current-thread script execution on the active
   `ThreadContext`; no new async job, callback, TLS or cross-thread access.
 
@@ -112,13 +124,13 @@ Build (Mac ARM64, `test` profile, interpreter `-nonative` evidence), all under
 - Release launcher `zig-out/bin/ch` sha256
   `dcad64e59ab207cbf40b75161110dd1ed473f6db7b69af86ab6175dcdf2c2fe3`
   (stable launcher); `libChakraCore.dylib` sha256
-  `58d3b5944c967be7fbe4dfe1c00422328493267364b588ba0c0bde7551267d6a`.
+  `b02ed4b6f715e6b58ad656494e57c239319e4b13aaf7fefe7ddadc1a69d5606c`.
   Debug `out/debug-static/bin/ch` sha256
-  `ee94d580c7e01f86b11639a46e3772e0c37f134138fb91b6ac963f0a3802c873`.
+  `cba5eb427b5f16d0e471fcb17e7f57d7150092f0f83d6eccd540f9b76ae72007`.
 
 Local suites (`disable_jit`, Release):
 
-- `test/es7/class-static-private-fields.js` — **11/11** in normal,
+- `test/es7/class-static-private-fields.js` — **12/12** in normal,
   `-force:deferparse` and `-noDeferParse` modes. The Debug/static binary
   passes the same three modes.
 - `python3 test/runtests.py -t -b "$PWD/zig-out/bin/ch" --variants disable_jit`
@@ -141,7 +153,7 @@ were used before and after:
 | run | passed | failed |
 |---|---:|---:|
 | base `f352f4e5e` binary/dylib (`d437ee0e…`) | 29 | 573 |
-| S1 static-private binary/dylib (`58d3b594…`) | **600** | **2** |
+| S1 static-private binary/dylib (`b02ed4b6…`) | **600** | **2** |
 
 Scenario diff: **571 fail→pass, 0 pass→fail**. Feature counts reported for
 `class-static-fields-private`: 29/573 → 600/2.
@@ -161,14 +173,16 @@ method/accessor interactions outside this slice.
 - Direct eval cannot resolve private static (or instance) names; `eval`
   inside a static method/initializer that references `this.#x` remains a
   `SyntaxError`.
-- The private-add path rejects non-extensible receivers. This follows the
-  engine's existing instance private-field policy and existing focused tests;
-  current ECMAScript private elements are internal slots and are not
-  extensibility-gated. This divergence is shared with the earlier private
-  field slice, not introduced here.
-- `super.prop` in static (and instance) field initializers remains a
-  `SyntaxError`; `super()` is correctly an early error. Direct eval of
-  `super`/private names is not extended.
+- Static private adds accept frozen/non-extensible constructors. The legacy
+  instance private-field add still rejects non-extensible receivers. That
+  instance-only gate follows the earlier private-field slice and is a tracked
+  divergence from current ECMAScript private elements (which are internal
+  slots and are not extensibility-gated).
+- `super.prop` in field initializers is a runtime `ReferenceError`, not an
+  early `SyntaxError`; `super()` is correctly an early error. The field-helper
+  path in this checkout still rejects direct field-initializer `super.prop`
+  forms at parse time, so those forms are not claimed as conforming. Direct
+  eval of `super`/private names is not extended.
 - Brands are `JavascriptWeakMap` entries rather than an internal-slot
   implementation. `-CollectGarbage` is used in test262 runs, but heavy
   GC-stress and weak-key lifetime are not separately exercised.
@@ -183,8 +197,14 @@ method/accessor interactions outside this slice.
   them in the class member list, rejects static private methods/accessors,
   and reuses the private name/brand const machinery.
 - `lib/Runtime/ByteCode/ByteCodeEmitter.cpp`: recognizes private static field
-  members and installs them with `InitPrivateField` on the constructor in the
-  second class-emission pass.
+  members and installs them with `InitStaticPrivateField` on the constructor
+  in the second class-emission pass.
+- `lib/Runtime/ByteCode/OpCodes.h`,
+  `lib/Runtime/Language/InterpreterHandler.inl`,
+  `lib/Runtime/Language/InterpreterStackFrame.{h,cpp}`,
+  `lib/Runtime/Language/JavascriptOperators.{h,cpp}`: appended
+  interpreter-only `InitStaticPrivateField` opcode and its non-extensibility-
+  gated `PrivateFieldAdd` implementation.
 - `test/es7/class-static-private-fields.js`, `test/es7/rlexe.xml`: focused
   regression test and normal/forced-defer entries.
 - `test/es7/class-static-fields.js`: updates the earlier public-static

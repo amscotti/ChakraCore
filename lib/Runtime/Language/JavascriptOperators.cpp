@@ -3404,6 +3404,28 @@ CommonNumber:
         return newValue;
     }
 
+    Var JavascriptOperators::OP_InitStaticPrivateField(Var instance, Var brand, Var newValue, ScriptContext * scriptContext)
+    {
+        if (!JavascriptOperators::IsObject(instance))
+        {
+            ThrowPrivateBrandCheck(scriptContext);
+        }
+
+        RecyclableObject * object = UnsafeVarTo<RecyclableObject>(instance);
+        JavascriptWeakMap * brandMap = GetPrivateBrandMap(brand);
+        if (brandMap->Has(object))
+        {
+            // PrivateFieldAdd: a private field may be added only once. Static
+            // private state is stored as a private element in the brand
+            // WeakMap, so receiver extensibility is irrelevant (matching the
+            // spec and other engines, unlike OP_InitPrivateField's legacy
+            // instance-field gate).
+            ThrowPrivateBrandCheck(scriptContext);
+        }
+        brandMap->Set(object, newValue);
+        return newValue;
+    }
+
     BOOL JavascriptOperators::OP_HasPrivateField(Var instance, Var brand, ScriptContext * scriptContext)
     {
         if (!JavascriptOperators::IsObject(instance))

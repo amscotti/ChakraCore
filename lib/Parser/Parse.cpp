@@ -9745,7 +9745,12 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
         }
 
         bool isGenerator = m_scriptContext->GetConfig()->IsES6GeneratorsEnabled() &&
-            m_token.tk == tkStar;
+            m_token.tk == tkStar &&
+            // A private name is already complete before this check. A `*`
+            // after a line terminator therefore starts the next class
+            // element (field ASI), not a generator modifier on the private
+            // name; `#x *gen(){}` without a newline remains invalid.
+            !(isPrivateField && this->GetScanner()->FHadNewLine());
         if (isGenerator)
         {
             fncDeclFlags |= fFncGenerator;

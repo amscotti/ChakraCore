@@ -2666,8 +2666,8 @@ void ByteCodeGenerator::EmitClassFieldInitializerCalls(ParseNode * pnodeFields, 
 // helper (when present) is called with the constructor as its explicit
 // receiver; the result is installed on the constructor itself. Public fields
 // use CreateDataPropertyOrThrow (InitClassField) and private fields use the
-// class's existing brand WeakMap keyed by the constructor (InitPrivateField).
-// No instance-side work is done.
+// class's existing brand WeakMap keyed by the constructor
+// (InitStaticPrivateField). No instance-side work is done.
 void ByteCodeGenerator::EmitStaticClassFieldDefinition(ParseNode * pnodeField, Js::RegSlot classLocation, FuncInfo * funcInfo)
 {
     ParseNode * pnodeName = pnodeField->AsParseNodeBin()->pnode1;
@@ -2716,7 +2716,7 @@ void ByteCodeGenerator::EmitStaticClassFieldDefinition(ParseNode * pnodeField, J
             brandLocation, pnodePrivateName->sym, pnodePrivateName->pid, funcInfo,
             /*skipUseBeforeDeclarationCheck*/ true);
         Writer()->Reg4(
-            Js::OpCode::InitPrivateField, valueLocation, classLocation, brandLocation, valueLocation);
+            Js::OpCode::InitStaticPrivateField, valueLocation, classLocation, brandLocation, valueLocation);
         funcInfo->ReleaseTmpRegister(brandLocation);
     }
     else
@@ -13061,14 +13061,23 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
     // this is MemberExpression as rvalue
     case knopDot:
     {
+        // Acquire the result slot before the base for private references so
+        // the base (which may itself be a temp, e.g. a closure slot load of an
+        // outer class binding) stays above it on the temp stack and can be
+        // released first. The result stays live for the enclosing expression.
+        const bool isPrivateReference = IsPrivateFieldReference(pnode);
+        if (isPrivateReference)
+        {
+            funcInfo->AcquireLoc(pnode);
+        }
+
         Emit(pnode->AsParseNodeBin()->pnode1, byteCodeGenerator, funcInfo, false);
 
         Js::RegSlot callObjLocation = pnode->AsParseNodeBin()->pnode1->location;
         Js::RegSlot protoLocation = callObjLocation;
 
-        if (IsPrivateFieldReference(pnode))
+        if (isPrivateReference)
         {
-            funcInfo->AcquireLoc(pnode);
             EmitPrivateLoad(
                 pnode->AsParseNodeBin()->pnode2->AsParseNodeName(), pnode->location,
                 callObjLocation, byteCodeGenerator, funcInfo);

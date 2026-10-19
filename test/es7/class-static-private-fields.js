@@ -235,7 +235,50 @@ const tests = [
         }
     },
     {
-        name: "frozen constructors keep existing private static state; adding to a non-extensible constructor throws",
+        name: "field ASI before generator methods works after public and private field names",
+        body() {
+            class StaticPrivate {
+                static #x = 7;
+                static #y
+                *gen() { yield StaticPrivate.#x; }
+                *[Symbol.iterator]() { yield StaticPrivate.#y === undefined; }
+            }
+            assert.areEqual(7, new StaticPrivate().gen().next().value);
+            assert.isTrue([...new StaticPrivate()][0]);
+
+            class InstancePrivate {
+                #x = 5;
+                #y
+                *gen() { yield this.#x; }
+                *[Symbol.iterator]() { yield this.#y === undefined; }
+            }
+            assert.areEqual(5, new InstancePrivate().gen().next().value);
+            assert.isTrue([...new InstancePrivate()][0]);
+
+            class StaticPublic {
+                static x = 1;
+                static y
+                *gen() { yield StaticPublic.x; }
+                *[Symbol.iterator]() { yield StaticPublic.y === undefined; }
+            }
+            assert.areEqual(1, new StaticPublic().gen().next().value);
+            assert.isTrue([...new StaticPublic()][0]);
+
+            class InstancePublic {
+                x = 1;
+                y
+                *gen() { yield this.x; }
+                *[Symbol.iterator]() { yield this.y === undefined; }
+            }
+            assert.areEqual(1, new InstancePublic().gen().next().value);
+            assert.isTrue([...new InstancePublic()][0]);
+
+            // No line terminator after the field name: not field ASI.
+            assert.throws(function () { eval("class C { static #x *gen() {} }"); }, SyntaxError);
+        }
+    },
+    {
+        name: "frozen constructors keep existing private static state; adding private static storage matches PrivateFieldAdd",
         body() {
             class C {
                 static #x = 1;
@@ -247,11 +290,18 @@ const tests = [
             C.write(2);
             assert.areEqual(2, C.read());
 
-            // Reuses the same PrivateFieldAdd policy as instance private
-            // fields: the add itself requires an extensible receiver.
-            assert.throws(function () {
-                eval("class D { static #x = (Object.preventExtensions(this), 1); }");
-            }, TypeError);
+            // Static private fields are private elements, not properties:
+            // like Node and the spec, a frozen constructor still accepts
+            // its own private static storage.
+            const Frozen = eval(
+                "(class { static #x = (Object.freeze(this), 1); static read() { return this.#x; } })");
+            assert.isTrue(Object.isFrozen(Frozen));
+            assert.areEqual(1, Frozen.read());
+
+            const NonExtensible = eval(
+                "(class { static #x = (Object.preventExtensions(this), 2); static read() { return this.#x; } })");
+            assert.isFalse(Object.isExtensible(NonExtensible));
+            assert.areEqual(2, NonExtensible.read());
         }
     },
     {

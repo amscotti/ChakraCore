@@ -905,6 +905,13 @@ MACRO_EXTEND_WMS(       LdPrivateAccessor, Reg3,            OpSideEffect|OpOpndH
 MACRO_EXTEND_WMS(       StPrivateAccessor, Reg4U,           OpSideEffect|OpOpndHasImplicitCall|OpPostOpDbgBailOut)
 MACRO_EXTEND_WMS(       StPrivateMethod,   Reg3,            OpSideEffect|OpPostOpDbgBailOut)
 
+// S1 static private fields: PrivateFieldAdd on the constructor. Unlike
+// InitPrivateField this is not a property definition, so a non-extensible
+// (e.g. frozen) constructor still accepts its private static storage, as
+// required for private elements. Appended after StPrivateMethod so no
+// established opcode value shifts.
+MACRO_EXTEND_WMS(       InitStaticPrivateField, Reg4,        OpSideEffect|OpOpndHasImplicitCall|OpPostOpDbgBailOut)
+
 #undef MACRO_WMS_PROFILED
 #undef MACRO_WMS_PROFILED2
 #undef MACRO_WMS_PROFILED_OP

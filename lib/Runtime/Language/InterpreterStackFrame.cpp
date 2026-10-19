@@ -5099,6 +5099,13 @@ skipThunk:
     }
 
     template <class T>
+    void InterpreterStackFrame::OP_InitStaticPrivateField(const unaligned T* playout)
+    {
+        SetReg(playout->R0, JavascriptOperators::OP_InitStaticPrivateField(
+            GetReg(playout->R1), GetReg(playout->R2), GetReg(playout->R3), scriptContext));
+    }
+
+    template <class T>
     void InterpreterStackFrame::OP_InitLocalProperty(unaligned T* playout)
     {
         DoInitProperty(playout, this->localClosure);
