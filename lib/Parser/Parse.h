@@ -433,7 +433,7 @@ public:
     // the enclosing constructs are known.
     void MarkAnnexBPendingConflicts(IdentPtr pid, bool isSloppyFunctionDecl);
     bool AnnexBVarWouldConflict(IdentPtr pid);
-    bool AnnexBVarExcludedByParameterNames(IdentPtr pid);
+    bool AnnexBVarExcludedByParameterNames(ParseNodeFnc *pnodeFnc, IdentPtr pid);
     void RegisterAnnexBPendingVar(IdentPtr pid, ParseNodeFnc *pnodeFnc);
     void FinalizeAnnexBPendingVars(BlockInfoStack *blockInfo);
     // Add a var declaration. Only use while parsing. Assumes m_ppnodeVar is pointing to the right place already

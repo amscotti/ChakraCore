@@ -260,6 +260,80 @@ var tests = [
             assert.strictEqual(annexBArguments(), "[object Arguments]");
             assert.strictEqual(annexBArgumentsRest(), "[object Arguments]");
 
+            // A top-level body function named arguments makes argumentsObjNeeded
+            // false, so "arguments" is not in the spec parameterNames and the
+            // block-function extension applies in both source orders (including
+            // generator/async body declarations and a simple formal).
+            function annexBBodyFnArgumentsBefore() {
+                function arguments() { return 3; }
+                { function arguments() { return 2; } }
+                return arguments();
+            }
+            function annexBBodyFnArgumentsAfter() {
+                { function arguments() { return 2; } }
+                function arguments() { return 3; }
+                return arguments();
+            }
+            function annexBBodyGenArgumentsBefore() {
+                function* arguments() { return 3; }
+                { function arguments() { return 2; } }
+                return arguments();
+            }
+            function annexBBodyGenArgumentsAfter() {
+                { function arguments() { return 2; } }
+                function* arguments() { return 3; }
+                return arguments();
+            }
+            function annexBBodyAsyncArgumentsBefore() {
+                async function arguments() { return 3; }
+                { function arguments() { return 2; } }
+                return typeof arguments;
+            }
+            function annexBBodyAsyncArgumentsAfter() {
+                { function arguments() { return 2; } }
+                async function arguments() { return 3; }
+                return typeof arguments;
+            }
+            function annexBBodyFormalArguments(x) {
+                function arguments() { return 3; }
+                { function arguments() { return 2; } }
+                return arguments();
+            }
+            assert.strictEqual(annexBBodyFnArgumentsBefore(), 2);
+            assert.strictEqual(annexBBodyFnArgumentsAfter(), 2);
+            assert.strictEqual(annexBBodyGenArgumentsBefore(), 2);
+            assert.strictEqual(annexBBodyGenArgumentsAfter(), 2);
+            assert.strictEqual(annexBBodyAsyncArgumentsBefore(), "function");
+            assert.strictEqual(annexBBodyAsyncArgumentsAfter(), "function");
+            assert.strictEqual(annexBBodyFormalArguments(7), 2);
+
+            // A body-level var arguments does not make argumentsObjNeeded
+            // false; non-simple/rest parameters always need the arguments
+            // object, so these declarations remain skipped.
+            function annexBVarArguments() {
+                var arguments = "V";
+                { function arguments() { return 2; } }
+                return typeof arguments + ":" + arguments;
+            }
+            function annexBNonSimpleArguments(a = 1) {
+                function arguments() { return 3; }
+                { function arguments() { return 2; } }
+                return arguments();
+            }
+            function annexBRestArguments(..._) {
+                function arguments() { return 3; }
+                { function arguments() { return 2; } }
+                return arguments();
+            }
+            function annexBDestructuredArguments({arguments}) {
+                { function arguments() { return 2; } }
+                return typeof arguments + ":" + arguments;
+            }
+            assert.strictEqual(annexBVarArguments(), "string:V");
+            assert.strictEqual(annexBNonSimpleArguments(), 3);
+            assert.strictEqual(annexBRestArguments(), 3);
+            assert.strictEqual(annexBDestructuredArguments({arguments: 9}), "number:9");
+
             // A genuinely applicable block function still updates an existing
             // function-scope var/function binding.
             (function () {

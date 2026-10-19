@@ -524,7 +524,7 @@ var tests = [
         f13(undefined, { arguments: 2 });
 
         function f14(a, b = arguments[0]) {
-            assert.areEqual(1, arguments[0], "Function in block causes a var declaration to be hoisted and the initial value should be same as the arguments symbol");
+            assert.areEqual(1, arguments[0], "The built-in arguments binding is not replaced by the block function");
             {
                 {
                     function arguments() {

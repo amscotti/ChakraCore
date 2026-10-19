@@ -62,7 +62,6 @@ struct AnnexBPendingVar
     charcount_t ichMin;
     charcount_t ichLim;
     bool hasConflict;
-    bool isExcludedByParameterNames;
     AnnexBPendingVar *next;                 // owner list, source order
     AnnexBPendingVar *nextByName;
 };
@@ -1816,17 +1815,17 @@ bool Parser::AnnexBVarWouldConflict(IdentPtr pid)
     return false;
 }
 
-bool Parser::AnnexBVarExcludedByParameterNames(IdentPtr pid)
+bool Parser::AnnexBVarExcludedByParameterNames(ParseNodeFnc *pnodeFnc, IdentPtr pid)
 {
-    ParseNodeFnc *pnodeFnc = GetCurrentFunctionNode();
     if (pnodeFnc == nullptr || pnodeFnc->nop != knopFncDecl)
     {
         // Global/eval code has no parameterNames.
         return false;
     }
 
-    // B.3.3.1 also requires F not to be in paramNames. Formals carry STFormal
-    // in the parameter scope in both AST and fast-scan modes.
+    // B.3.1/B.3.3.1 requires F not to be in paramNames. Formals carry STFormal
+    // in the parameter scope in both AST and fast-scan modes. Evaluate at
+    // finalize time so body declarations are visible.
     Scope *paramScope = pnodeFnc->pnodeScopes != nullptr ? pnodeFnc->pnodeScopes->scope : nullptr;
     if (paramScope != nullptr)
     {
@@ -1838,17 +1837,37 @@ bool Parser::AnnexBVarExcludedByParameterNames(IdentPtr pid)
         }
     }
 
-    if (pid == wellKnownPropertyPids.arguments)
+    if (pid != wellKnownPropertyPids.arguments)
     {
-        // Mirror UpdateArgumentsNode: the built-in arguments binding is in
-        // paramNames only when it is referenceable.
-        bool overriddenByDecl = (pnodeFnc->grfpn & PNodeFlags::fpnArguments_overriddenByDecl) != 0;
-        bool overriddenInParam = (pnodeFnc->grfpn & PNodeFlags::fpnArguments_overriddenInParam) != 0;
-        return !pnodeFnc->IsLambda() &&
-            !overriddenInParam &&
-            !(overriddenByDecl && pnodeFnc->IsBodyAndParamScopeMerged());
+        return false;
     }
-    return false;
+
+    // argumentsObjNeeded (FunctionDeclarationInstantiation step 22):
+    // arrows and a formal named arguments disable it; with simple parameters a
+    // top-level function/lexical declaration named arguments also disables it.
+    // A body-level var arguments does not.
+    if (pnodeFnc->IsLambda() ||
+        (pnodeFnc->grfpn & PNodeFlags::fpnArguments_overriddenInParam) != 0)
+    {
+        return false;
+    }
+    if (pnodeFnc->HasNonSimpleParameterList())
+    {
+        return true;
+    }
+
+    bool hasTopLevelFunctionArguments = false;
+    SymbolName const symName(reinterpret_cast<const char16*>(pid->Psz()), pid->Cch());
+    Scope *bodyScope = pnodeFnc->pnodeBodyScope != nullptr ? pnodeFnc->pnodeBodyScope->scope : nullptr;
+    Symbol *argumentsSym = bodyScope != nullptr ? bodyScope->FindLocalSymbol(symName) : nullptr;
+    if (argumentsSym == nullptr || argumentsSym->GetSymbolType() != STFunction)
+    {
+        argumentsSym = paramScope != nullptr ? paramScope->FindLocalSymbol(symName) : nullptr;
+    }
+    hasTopLevelFunctionArguments = argumentsSym != nullptr && argumentsSym->GetSymbolType() == STFunction;
+    bool hasTopLevelLexicalArguments =
+        (pnodeFnc->grfpn & PNodeFlags::fpnArguments_overriddenByDecl) != 0;
+    return !hasTopLevelFunctionArguments && !hasTopLevelLexicalArguments;
 }
 
 void Parser::RegisterAnnexBPendingVar(IdentPtr pid, ParseNodeFnc *pnodeFnc)
@@ -1867,7 +1886,6 @@ void Parser::RegisterAnnexBPendingVar(IdentPtr pid, ParseNodeFnc *pnodeFnc)
     pending->ichMin = this->GetScanner()->IchMinTok();
     pending->ichLim = this->GetScanner()->IchLimTok();
     pending->hasConflict = AnnexBVarWouldConflict(pid);
-    pending->isExcludedByParameterNames = AnnexBVarExcludedByParameterNames(pid);
     pending->next = nullptr;
     pending->nextByName = nullptr;
 
@@ -1904,7 +1922,8 @@ void Parser::FinalizeAnnexBPendingVars(BlockInfoStack *blockInfo)
     ParseNodePtr *const ppnodeVarSave = m_ppnodeVar;
     for (; pending != nullptr; pending = pending->next)
     {
-        if (pending->hasConflict || pending->isExcludedByParameterNames)
+        if (pending->hasConflict ||
+            AnnexBVarExcludedByParameterNames(pending->owner, pending->pid))
         {
             // Replacing this declaration with "var f;" would be an early
             // error, or F is in the parameter names (including the built-in

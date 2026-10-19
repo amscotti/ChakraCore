@@ -1,6 +1,6 @@
 # C2-S14 P3: Annex B block-function var-extension skip
 
-Status: **`<pending>`** — follow-up draft commit on `s14-p3` on top of `91e0d8fc7`.
+Status: **`<pending>`** — follow-up draft commit on `s14-p3` on top of `14722b254`.
 Interpreter/Mac no-JIT verified; JIT evidence is not claimed (see B4).
 Integration owns the shared plan/triage update and gate counts.
 
@@ -56,11 +56,15 @@ eval `let`/`const`.
   is inside this construct". A sloppy function declaration in the current
   construct only conflicts with descendants (`declBlockId > current`), not
   same-block duplicates. Sibling lexical names do not conflict.
-- Registration also applies the B.3.3.1 `paramNames` exclusion
-  (`AnnexBVarExcludedByParameterNames`): a formal (simple, rest or destructured)
-  with the same name, or the referenceable built-in `arguments` binding, means
-  the extension does not apply. This uses the parameter scope's `STFormal`
-  symbols, so it works in both AST and fast-scan/deferred modes.
+- The B.3.3.1 `paramNames` exclusion (`AnnexBVarExcludedByParameterNames`) is
+  evaluated at finalize time, after the body is parsed. A formal (simple, rest
+  or destructured) with the same name excludes the extension. For `arguments`
+  it follows `argumentsObjNeeded`: arrows and a formal named `arguments` do not
+  exclude; non-simple/rest parameter lists still need the arguments object; with
+  simple parameters a top-level body function (ordinary, generator or async) or
+  top-level lexical declaration named `arguments` disables the arguments
+  binding, so the extension applies, while a body-level `var arguments` does
+  not disable it. Both source orders are covered.
 - When the enclosing function body (or the global/eval var-scope block) closes,
   `FinalizeAnnexBPendingVars` creates the synthetic `ParseNodeVar`s for
   applicable entries, in source order, and marks them
@@ -98,7 +102,7 @@ Pinned corpus `2e0a56762801e275a9fdf96dc49d90ba0cddcf63`, flags
 dylib `27e9fe54c06ec2f23d898771aba89d9c83894084a4d0cccb73fb2ca4c73588f6`);
 "after" is the local test-profile binary (`ch`
 `d8cfc255702ed0683efb2a96f371f1be7923d5c2c75181396123a5abf866981d`, dylib
-`9bdd4c44593811036ea07e285faa986493cbfd3f77fce6bb783415f5a3a9e833`). Every command was run under
+`a025b30a0f1f0930540fd74b6b1ec076a5b45d8b75d482941094d2f554c6a9ec`). Every command was run under
 `/tmp/opencode/cc-gate-lock.sh` with `--checkout "$PWD/out/test262"` and a local
 `out/` directory; no `--prepare` and no full `zig build check`.
 
@@ -108,16 +112,16 @@ P3 selection
 | Run | Passed | Failed | Fail→pass | Pass→fail |
 |---|---:|---:|---:|---:|
 | before, `out/test262-p3-before` | 16 | 264 | — | — |
-| after, `out/test262-gate-selection` | **280** | **0** | **264** | **0** |
-| after with `-force:deferparse`, `out/test262-gate-selection-defer` | **280** | **0** | — | — |
+| after, `out/test262-final-selection` | **280** | **0** | **264** | **0** |
+| after with `-force:deferparse`, `out/test262-final-selection-defer` | **280** | **0** | — | — |
 
 Full three Annex B directories (782 scenarios, 781 files):
 
 | Run | Passed | Failed | Fail→pass | Pass→fail |
 |---|---:|---:|---:|---:|
 | before, `out/test262-p3-dirs-before` | 483 | 299 | — | — |
-| after, `out/test262-gate-dirs` | **765** | **17** | **282** | **0** |
-| after with `-force:deferparse`, `out/test262-gate-dirs-defer` | **765** | **17** | — | — |
+| after, `out/test262-final-dirs` | **765** | **17** | **282** | **0** |
+| after with `-force:deferparse`, `out/test262-final-dirs-defer` | **765** | **17** | — | — |
 
 The 17 remaining failures are all P4 declaration-instantiation collisions:
 16 eval `existing-global-init`/`existing-non-enumerable-global-init` cases and
@@ -130,9 +134,9 @@ Controls:
 
 | Corpus | Before | After |
 |---|---:|---:|
-| `test/language/block-scope/**/*.js` (287 scenarios, 145 files) | 287/0 | **287/0** (`out/test262-gate-blockscope`) |
-| same, `-force:deferparse` | — | **287/0** |
-| `scope-lex-{generator,async-function,async-generator}.js` | 3/3 (3 failures) | **6/0** (3 fail→pass; `out/test262-gate-switch`) |
+| `test/language/block-scope/**/*.js` (287 scenarios, 145 files) | 287/0 | **287/0** (`out/test262-final-blockscope`) |
+| same, `-force:deferparse` (`out/test262-final-blockscope-defer`, final binary) | — | **287/0** |
+| `scope-lex-{generator,async-function,async-generator}.js` | 3/3 (3 failures) | **6/0** (3 fail→pass; `out/test262-final-switch`) |
 
 The three switch tests are the extra controls requested by the triage:
 generator/async/async-generator block functions no longer receive an ordinary
@@ -146,9 +150,10 @@ Focused tests:
   block/for/for-in/for-of/switch/catch-pattern skips, later lexical names
   (same-block and class cases), nested/sibling hoisting controls, A/B nested
   conflict in both call orders (test262's 1/1), same-named `var`/function/
-  parameter/rest/default/`arguments` gating, generator/async/async-generator
-  controls, strict mode, and valid ordinary hoisting (duplicate functions,
-  `var`, top-level function, eval/global).
+  parameter/rest/default/`arguments` gating (including body-level
+  ordinary/generator/async function `arguments` in both orders), generator/
+  async/async-generator controls, strict mode, and valid ordinary hoisting
+  (duplicate functions, `var`, top-level function, eval/global).
 - `python3 test/runtests.py -b "$PWD/zig-out/bin/ch" -t
   --variants=disable_jit test/es7`: **54 passed / 0 failed**, including
   `test/es7/blockscope-early-errors.js`.
@@ -228,6 +233,11 @@ and the full Annex B directories pass.
   field in `DeferredFunctionStub` or `ScopeInfo`; the force:deferparse corpus,
   legacy `-force:CachedScope` and serialized variants passed, but a dedicated
   bytecode-cache test for this flag was not added.
+- Deliberate spec/test262 behavior over V8 in the arguments corner: a body-level
+  `var arguments` and non-simple/rest parameter lists keep the arguments object
+  in `parameterNames`, so a same-named block function does not replace it. A
+  body-level ordinary/generator/async function `arguments` disables
+  `argumentsObjNeeded`, so the extension applies. Focused tests pin both.
 - Legacy expectations updated deliberately as listed above; no other source
   changes were made to those files.
 
