@@ -572,6 +572,26 @@ var tests = [
                 assert.strictEqual(values[i] / -1n, -values[i], "divide by -1 " + i);
             }
         }
+    },
+    {
+        name: "toString across conversion chunk boundaries",
+        body: function () {
+            // Decimal conversion divides by 10**9 chunks; interior chunks
+            // must be zero-padded and the leading chunk must not be.
+            assert.strictEqual((1000000001n).toString(), "1000000001", "pad interior chunk");
+            assert.strictEqual((100000000000000000001n).toString(), "100000000000000000001", "pad two chunks");
+            assert.strictEqual((-1000000001n).toString(), "-1000000001", "negative padding");
+            assert.strictEqual((10n ** 27n).toString(), "1" + "0".repeat(27), "exact power across chunks");
+            assert.strictEqual((123456789012345678901234567890n).toString(),
+                "123456789012345678901234567890", "round trip 30 digits");
+            // Other radices chunk by their own largest uint32 power.
+            assert.strictEqual((0xffffffffn).toString(16), "ffffffff", "hex chunk edge");
+            assert.strictEqual((0x100000000n).toString(16), "100000000", "hex carry across chunk");
+            assert.strictEqual((35n).toString(36), "z", "radix 36 single");
+            assert.strictEqual((36n ** 6n + 1n).toString(36), "1000001", "radix 36 padding");
+            assert.strictEqual((2n ** 64n).toString(2), "1" + "0".repeat(64), "binary across chunks");
+            assert.strictEqual(BigInt("1000000001"), 1000000001n, "parse stays chunk-aligned");
+        }
     }
 ];
 

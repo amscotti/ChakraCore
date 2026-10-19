@@ -302,14 +302,16 @@ namespace Js
         return requestContext->GetLibrary()->GetBigIntTypeDisplayString();
     }
 
-    // Divide the positive magnitude in `digits` by a small radix in place and
-    // return the remainder. The divisor is at most 36, so a half-limb at a
-    // time keeps every intermediate inside uint64 without 128-bit math. The
+    // Divide the positive magnitude in `digits` by a small divisor in place
+    // and return the remainder. The divisor may be any uint32 >= 2 (callers
+    // pass a radix power chunk, e.g. 10**9): with remainder < divisor, a
+    // half-limb at a time keeps every intermediate inside uint64 without
+    // 128-bit math, and each quotient half stays below 2**halfBits. The
     // half-limb width follows digit_t (32 bits for 64-bit limbs, 16 bits for
     // 32-bit limbs), unlike a hard-coded 64-bit assumption.
     uint32 JavascriptBigInt::DivModInPlace(digit_t * digits, digit_t& length, uint32 divisor)
     {
-        Assert(divisor >= 2 && divisor <= 36);
+        Assert(divisor >= 2);
         Assert(length > 0);
 
         const uint32 halfBits = sizeof(digit_t) * 4;
@@ -363,13 +365,32 @@ namespace Js
         digit_t * digits = RecyclerNewArrayLeaf(scriptContext->GetRecycler(), digit_t, length);
         js_memcpy_s(digits, length * sizeof(digit_t), m_digits, length * sizeof(digit_t));
 
-        // DivModInPlace yields the least-significant digit first.
+        // Convert by the largest power of the radix that fits a uint32
+        // divisor (10**9 for decimal), mirroring the chunked parse path:
+        // one DivModInPlace per chunk instead of one per output digit.
+        // Interior chunks are zero-padded to the full chunk width; the
+        // most-significant chunk is not.
+        uint32 chunkBase = radix;
+        uint32 chunkDigits = 1;
+        while (chunkBase <= UINT32_MAX / radix)
+        {
+            chunkBase *= radix;
+            chunkDigits++;
+        }
+
+        // DivModInPlace yields the least-significant chunk first.
         char16 * reversedDigits = RecyclerNewArrayLeaf(scriptContext->GetRecycler(), char16, maxDigits);
         charcount_t digitCount = 0;
         while (length > 0)
         {
-            uint32 remainder = JavascriptBigInt::DivModInPlace(digits, length, radix);
-            reversedDigits[digitCount++] = digitChars[remainder];
+            uint32 chunk = JavascriptBigInt::DivModInPlace(digits, length, chunkBase);
+            uint32 emitted = 0;
+            do
+            {
+                reversedDigits[digitCount++] = digitChars[chunk % radix];
+                chunk /= radix;
+                emitted++;
+            } while (chunk > 0 || (length > 0 && emitted < chunkDigits));
         }
         Assert(digitCount <= maxDigits);
 
