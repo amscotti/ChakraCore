@@ -317,6 +317,18 @@ overwrite or delete each other's files — the jobs=8 instability above is
 consistent with that intra-run race (not isolated here from load/timeout
 effects), and per-agent temp isolation does not yet exist.
 
+**Update (post-C1 fix pass):** per-agent temp isolation has landed —
+`tools/test262/harness.js` now gives every agent its own `agent-N/`
+subdirectory of the per-run temp dir, and the controls grew a
+duplicate-basename fixture pair (`dup-a`/`dup-b`, 20 controls) that
+discriminates both the fixture cache and the shared-temp race: with
+either protection removed, one side of the pair deterministically
+receives the other's fixture and the controls abort *(observed A/B)*.
+With isolation in place, `test/language/module-code/**` (602
+scenarios) shows **0 flips** across two `--jobs=8` runs and one
+`--jobs=1` run *(observed)*. The §2 baseline rerun below is still
+owed (it predates both fixes), but it no longer needs `--jobs=1`.
+
 ## 4. Failure groups by root cause
 
 Bucket rules (first match wins; implemented in `analyze.py`, applied to all
@@ -930,8 +942,8 @@ Unresolved after C1:
   but the §2 baseline was recorded pre-fix: disposition is to rerun those
   subsets with the fixed harness before any C4 certification, and before
   treating baseline counts for those directories as exact. The same rerun
-  should use `--jobs=1` (or per-agent temp isolation, also owed) so the
-  shared-temp agent race in §3 cannot reintroduce flips.
+  should use the per-agent temp isolation now in `harness.js`
+  (§3 update) so the shared-temp agent race cannot reintroduce flips.
 - Enabled-flag test262 runs for `ESBigInt`, `ESSharedArrayBuffer`,
   `ES6RegExSymbols`, `ES6RegExPrototypeProperties` (S2/S6/S7) — measured
   2026-10-15 in [c2-flag-audits.md](c2-flag-audits.md); the S7 follow-up

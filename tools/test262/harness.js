@@ -51,6 +51,27 @@ ChakraAgent.prototype.evalScript = async function(...args) {
     return result;
 };
 
+// The agent pool shares one --temp-dir across all agents, and eshost writes
+// each scenario's sources (test file + fixtures/modules) into it under
+// deterministic relative names. Concurrent agents running different tests
+// whose sources share a relative path overwrite and unlink each other's
+// in-use files, which flipped ~79 scenarios run-to-run at --jobs=8
+// (measured in doc/c1-triage.md). Give every agent its own subdirectory of
+// the per-run temp dir; run.py still removes the whole tree afterwards.
+const eshost = require('eshost');
+const fs = require('fs');
+const path = require('path');
+const createAgent = eshost.createAgent;
+let agentSequence = 0;
+eshost.createAgent = function(type, options) {
+    if (options && options.out) {
+        const out = path.join(options.out, `agent-${agentSequence++}`);
+        fs.mkdirSync(out, { recursive: true });
+        options = { ...options, out };
+    }
+    return createAgent(type, options);
+};
+
 const validatorPath = require.resolve('test262-harness/lib/validator');
 const validate = require(validatorPath);
 require.cache[validatorPath].exports = function(test) {

@@ -208,10 +208,10 @@ def main():
     acquire_output_lock(args.output)
     checkout(args.checkout, args.prepare)
     identity = artifact_identity(args.binary)
-    controls, _, _ = harness(args.binary, HERE / 'controls', ['test/*.js'],
+    controls, _, _ = harness(args.binary, HERE / 'controls', ['test/**/*.js'],
                              args.output / 'controls.json', args, controls=True)
     expected = {path.name: not path.name.startswith('fail-') for path in
-                (HERE / 'controls/test').glob('*.js') if '_FIXTURE' not in path.name}
+                (HERE / 'controls/test').rglob('*.js') if '_FIXTURE' not in path.name}
     observed = Counter()
     for record in controls:
         name = Path(record['file']).name
@@ -248,6 +248,7 @@ def main():
         'package_lock_sha256': digest(HERE / 'package-lock.json'),
         'node_version': subprocess.check_output([args.node, '--version'], text=True).strip(),
         'host_flags': args.host_flags, 'patterns': patterns, 'command': command,
+        'jobs': args.jobs, 'timeout_ms': args.timeout,
         'host_exclusions': ['IsHTMLDDA', 'CanBlockIsFalse'],
         'scenario_count': len(records), 'source_file_count': len({r['file'] for r in records}),
         'skipped_scenarios': len(skips), 'skip_reasons': dict(Counter(item['reason'] for item in skips)),

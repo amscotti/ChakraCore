@@ -50,6 +50,7 @@ plausible-looking but wrong report.
 """
 import argparse
 from collections import Counter, defaultdict
+import hashlib
 import json
 from pathlib import Path
 import sys
@@ -479,7 +480,9 @@ def main():
     except ValueError as error:
         print(f'ABORT: {error}', file=sys.stderr)
         return 2
-    report = {'results': str(args.results), 'policy': str(args.policy), **report}
+    report = {'results': str(args.results), 'policy': str(args.policy),
+              'policy_sha256': hashlib.sha256(args.policy.read_bytes()).hexdigest(),
+              **report}
     text = render_text(report)
     if args.out_json:
         args.out_json.write_text(json.dumps(report, indent=2, sort_keys=True) + '\n')

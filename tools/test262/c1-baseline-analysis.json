@@ -1563,6 +1563,7 @@
     }
   },
   "policy": "/Users/ascotti/Documents/code/ChakraCore/tools/test262/edition-policy.json",
+  "policy_sha256": "927c4c3f52d9bd01f80729d97d6967d3cd5707e2a44b238d62ea3c79644a1c34",
   "records": 93141,
   "results": "out/test262-zig/results.json",
   "skipped": {

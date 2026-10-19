@@ -60,6 +60,11 @@ python3 tools/test262/run.py --binary build-zigpilot/ch --output out/test262-reg
 ```
 
 `--jobs` defaults to 8; `--timeout` is per-scenario milliseconds (default 10000).
+Both are recorded in `summary.json` (`jobs`, `timeout_ms`). Each agent writes
+its scenario sources under its own `agent-N/` subdirectory of the per-run
+temp dir (see `harness.js`), so parallel agents cannot overwrite each
+other's same-relative-path files; `analyze.py` reports carry the
+`edition-policy.json` SHA-256 they were computed against.
 `--host-flags='…'` explicitly records an alternate feature configuration. A corpus
 with conformance failures returns **1**; a failed control, modified checkout,
 harness failure, invalid/no results returns **2**. Neither becomes a successful
@@ -67,7 +72,7 @@ conformance check just because a host invocation returned zero.
 
 ## Controls and host adaptation
 
-Each run first verifies eighteen fixtures under `controls/test/`: successful sync,
+Each run first verifies twenty fixtures under `controls/test/` (recursively): successful sync,
 async, module, parse-negative, runtime-negative, realm and buffer-detachment cases;
 plus deliberately failing assertions, wrong negative error types, and nonzero
 empty-output exits. All expected outcomes must match. This catches the shell's
