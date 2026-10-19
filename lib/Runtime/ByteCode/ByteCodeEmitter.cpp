@@ -10420,8 +10420,43 @@ void EmitArrayLiteral(ParseNode *pnode, ByteCodeGenerator *byteCodeGenerator, Fu
     }
 }
 
+static bool IsStatementNodeForJumpTarget(ParseNode* pnode)
+{
+    switch (pnode->nop)
+    {
+    case knopBlock:
+    case knopBreak:
+    case knopContinue:
+    case knopWith:
+    case knopIf:
+    case knopSwitch:
+    case knopCase:
+    case knopReturn:
+    case knopTryFinally:
+    case knopTryCatch:
+    case knopTry:
+    case knopCatch:
+    case knopFinally:
+    case knopWhile:
+    case knopDoWhile:
+    case knopFor:
+    case knopForIn:
+    case knopForOf:
+    case knopForAwaitOf:
+        return true;
+    default:
+        return false;
+    }
+}
+
 void ByteCodeGenerator::EmitJumpCleanup(ParseNode* target, FuncInfo* funcInfo)
 {
+    uint32 targetStartOffset = UINT_MAX;
+    if (target != nullptr && IsStatementNodeForJumpTarget(target))
+    {
+        targetStartOffset = target->AsParseNodeStmt()->byteCodeStartOffset;
+    }
+
     for (JumpCleanupList::Iterator iter(this->jumpCleanupList); iter.Next();)
     {
         const JumpCleanupInfo& info = iter.Data();
@@ -10444,6 +10479,16 @@ void ByteCodeGenerator::EmitJumpCleanup(ParseNode* target, FuncInfo* funcInfo)
                 info.tryOp == Js::OpCode::TryFinallyWithYield ||
                 info.tryOp == Js::OpCode::ResumeCatch ||
                 info.tryOp == Js::OpCode::ResumeFinally);
+
+            if (targetStartOffset != UINT_MAX && targetStartOffset >= info.byteCodeStartOffset)
+            {
+                // The jump target is inside this protected region (for example a
+                // labeled break inside a try whose label is nested in an outer
+                // try-finally). The jump does not exit this region, so leaving it
+                // here would run the handler early and reuse its resume offset.
+                // All remaining entries enclose the target as well.
+                break;
+            }
 
             // We insert OpCode::Leave when there is a 'return' inside try/catch/finally.
             // This is for flow control and does not participate in identifying boundaries 
@@ -11521,6 +11566,17 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
     ThreadContext::ProbeCurrentStackNoDispose(Js::Constants::MinStackByteCodeVisitor, byteCodeGenerator->GetScriptContext());
 
     TrackGlobalIntAssignments(pnode, byteCodeGenerator);
+
+    // Remember where this statement starts so a break/continue targeting it can
+    // tell whether a try/handler cleanup region was actually exited.
+    if (IsStatementNodeForJumpTarget(pnode))
+    {
+        ParseNodeStmt *stmt = pnode->AsParseNodeStmt();
+        if (stmt->emitLabels)
+        {
+            stmt->byteCodeStartOffset = byteCodeGenerator->Writer()->GetCurrentOffset();
+        }
+    }
 
     // printNop(pnode->nop);
     switch (pnode->nop)

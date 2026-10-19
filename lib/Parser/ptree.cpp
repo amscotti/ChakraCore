@@ -509,6 +509,7 @@ ParseNodeStmt::ParseNodeStmt(OpCode nop, charcount_t ichMin, charcount_t ichLim)
     : ParseNode(nop, ichMin, ichLim)
 {
     this->emitLabels = false;
+    this->byteCodeStartOffset = UINT_MAX;
 }
 
 ParseNodeBlock::ParseNodeBlock(charcount_t ichMin, charcount_t ichLim, int blockId, PnodeBlockType blockType)

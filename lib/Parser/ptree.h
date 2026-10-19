@@ -830,6 +830,11 @@ public:
 
     bool emitLabels;
 
+    // Byte code offset at which this statement's body starts, recorded when it
+    // is emitted as a jump target. Jump cleanup uses it to distinguish exits
+    // from jumps that stay inside a protected region.
+    uint32 byteCodeStartOffset;
+
     DISABLE_SELF_CAST(ParseNodeStmt);
 };
 
