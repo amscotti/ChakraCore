@@ -17,7 +17,7 @@ native ARM64 macOS port`), `2372fcc81` (JIT build/runtime/bytecode checks),
 InlineeCallInfo label). This milestone record is committed on top. The local
 tag `jit-arm64-macos-m1` marks the checkpoint; the branch is not merged.
 The installed binary is `out/jit/bin/libChakraCore.dylib`, 26238584 bytes,
-timestamp 2026-10-18 13:58. `out/jit/bin/ch` is the host (788320 bytes); it
+timestamp 2026-10-18 21:22. `out/jit/bin/ch` is the host (788320 bytes); it
 dlopens the sibling dylib, so trust the dylib timestamp. The suite logs named
 below are ephemeral local artifacts from the original runs; they are not
 checked in.
@@ -61,13 +61,28 @@ profile. Resolve it by a separate ARM64 asm.js/WASM port or an explicit,
 reviewed platform exclusion; do not filter the tests or alter the 1973/0
 no-JIT gate.
 
+### Post-M1 runtime follow-up
+
+After the M1 tag, the generator `arguments.callee` identity and strict-mode
+arguments are fixed: ARM64 `LoadHeapArguments` passes the real generator
+function object for coroutines, and
+`JavascriptOperators::IsStrictModeForHeapArguments` recovers strictness from
+the `GeneratorVirtualScriptFunction` so strict generators get the
+`%ThrowTypeError%` callee accessor and an unmapped arguments object on the
+interpreter and JIT. The Apple ARM64 custom heap now uses full 16 KiB logical
+pages (256-byte chunks, 64 tracked chunks, bucket 6 for 16 KiB); non-Apple
+builds keep 4096/128/32. The PAL direct-embedder write-window contract and the
+single `HelperProfiledNewScObjArray` homing exception are documented at their
+call sites. Gates on the 21:22 binary: `disable_jit` 1973/0, `interpreted`
+2367/397 (asm.js/WASM only), `dynapogo` 1943/286 (asm.js/WASM only), zero
+signals. The suspended-coroutine reparse lifetime remains the open runtime
+item.
+
 Non-blocking follow-ups are listed in
 [Known open engine issues](#known-open-engine-issues) and the
-[Swarm review queue](#swarm-review-queue): JIT-generator
-`arguments.callee` identity, the 4 KiB logical/16 KiB host custom-heap page
-waste, direct-embedder PAL protection semantics, helper-call homing
-discrepancy, suspended-coroutine bytecode lifetime across debugger reparse,
-and unbuilt Windows/ARM32/TTD/hardened-entitlement paths.
+[Swarm review queue](#swarm-review-queue): suspended-coroutine bytecode
+lifetime across debugger reparse, and unbuilt
+Windows/ARM32/TTD/hardened-entitlement paths.
 
 ## Current state and handoff
 
@@ -76,16 +91,16 @@ An 8-argument `apply(arguments)` with default inlining works. `new.target`
 works for the argument counts that were measured. Generator JIT
 (`-JitES6Generators`) now runs all measured yield/resume/return/throw and
 try/finally shapes. The three suite runs below were rerun on the 13:08 binary
-(`jit-*-inline.log`); the 18:13 and 19:09 builds are not the same object set.
+(`jit-*-strict.log`); the 18:13 and 19:09 builds are not the same object set.
 
-- `disable_jit` is **1973/0** (`jit-disable-inline.log`).
+- `disable_jit` is **1973/0** (`jit-disable-strict.log`).
   Wall time varies with host load: the prior 19:27 run was 42.51 s
   (`jit-disable-final.log`) and the 19:09 run was 54.5 s
   (`jit-disable-repair3.log`).
-- `dynapogo` is **1943/286** (`jit-dynapogo-inline.log`, 501.49 s; the 19:09
+- `dynapogo` is **1943/286** (`jit-dynapogo-strict.log`, 492.81 s; the 19:09
   run is `jit-dynapogo-repair3.log`, 488.15 s). Every failure is in an
   asm.js/WASM folder and exits 0, so the signal count is zero.
-- `interpreted` is **2367/397** (`jit-interpreted-inline.log`): 397 asm.js/WASM
+- `interpreted` is **2367/397** (`jit-interpreted-strict.log`): 397 asm.js/WASM
   failures, zero signals. The two StackTrace line diffs are fixed.
 
 The branch is committed (`07d6965e8`, `2372fcc81`, `9ccc535a8`, `fcbc434c9`,
@@ -311,18 +326,20 @@ Runtime fixes landed across `07d6965e8`, `9ccc535a8`, `fcbc434c9`, and
   allocator. The pre-fix order was a genuine UAF. The `PrependNode == nullptr`
   branch itself is still not deterministically injected.
 - **Empty small-object page release — fixed in the working tree.** The
-  `FreeAllocation` branch now compares against the 32 tracked chunks
-  (`Page::MaxAllocationSize / Page::Alignment`), removes the page node, and
-  calls `ReleasePages` under `codePageAllocators->cs`. `Page::IsEmpty` also
-  uses the tracked-chunk count instead of a 64-bit all-ones test. The small
-  function stress showed 2944 page allocations / 2933 empty-page releases
-  with no double release; `maxFreePageCount == 0` decommits or releases the
-  segment as before.
-- **The custom heap fixes a 4 KiB logical page on a 16 KiB host page.**
-  `CustomHeap.h` caps `Page::MaxAllocationSize` at 4096 while
-  `AutoSystemInfo::PageSize` is 16384 on Apple ARM64; 12 KiB of every small
-  page is unusable and the page-sized fast path cannot match a 4 KiB
-  allocation. Pre-existing performance waste, not a correctness failure.
+  `FreeAllocation` branch compares against `Page::ChunkCount` (64 on Apple
+  16 KiB, 32 elsewhere), removes the page node, and calls `ReleasePages`
+  under `codePageAllocators->cs`. `Page::IsEmpty` uses the same tracked-chunk
+  count. A 25,600-small-function stress allocated 509 pages and released 504
+  with no double release or overlap; `maxFreePageCount == 0` decommits or
+  releases the segment as before.
+- **Apple 16 KiB custom-heap page — fixed in the working tree.** On 64-bit
+  Apple ARM64 the small-object allocator now uses the full host page:
+  `MaxAllocationSize=16384`, 256-byte chunks, 64 tracked chunks, bucket 6 for
+  16 KiB and `LargeObjectList` at 7. A 16 KiB allocation is a page-sized
+  small allocation and reaches the fast free path. Non-Apple builds keep
+  4096/128/32. The trade-off is a 256-byte minimum chunk and no upward
+  coalescing; non-Apple and background-JIT-free paths remain source-audited,
+  not runtime-tested.
 - **Completed-generator write-barrier leak — fixed in the working tree.**
   `SetState(Completed)` now unregisters the frame, `args.Values`, and
   `&args.Values` before nulling them; `SetFrame` retains the registered frame
@@ -344,14 +361,17 @@ Runtime fixes landed across `07d6965e8`, `9ccc535a8`, `fcbc434c9`, and
   branch is inert in this tree, and `-InduceCodeGenFailure` throws before
   registration, so the post-`Register` failure path is source-audited rather
   than runtime-exercised.
-- **PAL API inconsistencies on JIT regions (partially fixed).**
-  `VirtualFree(MEM_RELEASE)` now rejects an interior address with
-  `ERROR_INVALID_ADDRESS`; the probe rejected `base+1`, `base+PG`, and
-  `base+4*PG` and left the region intact. Still open:
-  `VirtualAlloc(MEM_COMMIT, PAGE_READWRITE)` returns memory that is still
-  write-protected for the calling thread (`VirtualQuery` says writable), and
-  `VirtualProtect` queries/protects under separate lock acquisitions.
-  Internal callers compensate; direct embedders remain exposed.
+- **PAL direct-embedder semantics — documented contract, not Windows-identical.**
+  `VirtualFree(MEM_RELEASE)` rejects an interior address with
+  `ERROR_INVALID_ADDRESS`. On Apple ARM64 MAP_JIT, `VirtualAlloc(MEM_COMMIT,
+  PAGE_READWRITE)` maps/zeroes and returns with the calling thread's write
+  window closed; `flProtect` is the page's logical protection. Direct
+  embedders must call `VirtualProtect(..., PAGE_READWRITE)` to open the
+  thread-local window and `PAGE_EXECUTE_READ` to close it. `VirtualProtect`
+  holds `virtual_critsec` across the page-state query/update, so there is no
+  query/protect TOCTOU; the window itself is per thread. `PAGE_NOACCESS`,
+  `PAGE_EXECUTE`, and `PAGE_READONLY` cannot be applied to a MAP_JIT page and
+  return `ERROR_INVALID_ACCESS`.
 - **Installer symlink escape — fixed in the working tree, with TOCTOU
   residual.** The installer now rejects a symlinked `out/<profile>` root,
   rejects every existing symlink component below the prefix (including
@@ -452,9 +472,9 @@ one. On this Mac the runner still sets `arch='x64'` and applies
 
 | Variant | Binary | Log | Result |
 |---|---|---|---|
-| `interpreted` (`-maxInterpretCount:1 -maxSimpleJitRunCount:1 -bgjit-`) | 13:58 dylib | `jit-interpreted-inline.log` | `passed 2367, failed 397`. All 397 failures are asm.js or WebAssembly with exit 0. Zero signals. `EH` 40/0, `TryCatch` 1/0. |
-| `dynapogo` (`-forceNative -off:simpleJit -bgJitDelay:0`) | 13:58 dylib | `jit-dynapogo-inline.log`, 501.49 s | `passed 1943, failed 286`. All 286 failures are in asm.js / WebAssembly folders and exit 0. Zero signals. `apply3` and `applyBugs` are absent from the failure list. |
-| `disable_jit` (`-nonative`) | 13:58 dylib | `jit-disable-inline.log` | `passed 1973, failed 0`. The gate. Do not bump it. |
+| `interpreted` (`-maxInterpretCount:1 -maxSimpleJitRunCount:1 -bgjit-`) | 21:22 dylib | `jit-interpreted-strict.log` | `passed 2367, failed 397`. All 397 failures are asm.js or WebAssembly with exit 0. Zero signals. `EH` 40/0, `TryCatch` 1/0. |
+| `dynapogo` (`-forceNative -off:simpleJit -bgJitDelay:0`) | 21:22 dylib | `jit-dynapogo-strict.log`, 492.81 s | `passed 1943, failed 286`. All 286 failures are in asm.js / WebAssembly folders and exit 0. Zero signals. `apply3` and `applyBugs` are absent from the failure list. |
+| `disable_jit` (`-nonative`) | 21:22 dylib | `jit-disable-strict.log` | `passed 1973, failed 0`. The gate. Do not bump it. |
 
 All 286 dynapogo failures are the asm.js / WebAssembly baseline gap:
 123 `WasmSpec`, 92 `AsmJs`, 54 `wasm`, 14 `AsmJSFloat`, 2
@@ -517,14 +537,15 @@ them as fixed by this port.
   retain/rebase the old FunctionBody/bytecode and its operand metadata, or
   avoid reparsing live coroutine frames. This is an ownership change, not a
   one-line guard.
-- **JIT-compiled generator `arguments.callee` identity.**
-  With `-JitES6Generators`, `arguments.callee` returns a function object with
-  the same name and source but `!== g`; the interpreter returns the original
-  `g`. `test/es6/generators-apis.js` covers this but runs without
-  `-JitES6Generators`. The generator-JIT path builds the arguments object
-  from a different function object. Flag-off by default; not a crash. The
-  `yield*` completion probe that was also suspected reproduces under
-  `-nonative` and is not attributed to this port.
+- **Strict generator arguments test coverage.** The ARM64 coroutine
+  `LoadHeapArguments` now passes the real generator function object, and
+  `JavascriptOperators::IsStrictModeForHeapArguments` recovers strictness
+  from the `GeneratorVirtualScriptFunction`. Strict generators now get the
+  `%ThrowTypeError%` callee accessor and an unmapped arguments object on the
+  interpreter and JIT; sloppy `arguments.callee === g` passes under
+  `-JitES6Generators`. There is no checked-in strict generator test that runs
+  the JIT combination; the evidence is manual probes. Add one before
+  enabling coroutine JIT by default.
 - **TTD debug loop selection.** The TTD debug loop is split profiled/unprofiled
   and compile-verified, but there is no supported short TTD+debugger-action
   test in this tree. Record the gap rather than claiming it is exercised.
@@ -1215,7 +1236,7 @@ interpreted `throw` is catchable: `out/jit/bin/ch "$TMPDIR/test_throw.js"` and
 `out/jit/bin/ch "$TMPDIR/test_throw_50.js"` both print `PASS`. Section 7.2 has
 the `-mic:1` and `-forceNative` results. The `disable_jit` suite has since been
 re-run repeatedly on the current JIT-enabled binary; the final 13:08 gate is
-`1973 passed / 0 failed` (`jit-disable-inline.log`). The no-JIT `ch` from
+`1973 passed / 0 failed` (`jit-disable-strict.log`). The no-JIT `ch` from
 the modernization checkout remains the rebase oracle. Do not treat the throw
 scripts as a substitute for `1973` passed and `0` failed.
 
@@ -1449,7 +1470,7 @@ worktree root. The runner spawns `ch` with the test directory as cwd, so
 
 The 19:09 run (historical, `jit-interpreted-repair3.log`, 52.15 seconds; the
 pre-repair `jit-interpreted-jitwrite.log` took 45.03 seconds) measured the same
-totals as the current 13:58 run (`jit-interpreted-inline.log`):
+totals as the current 21:22 run (`jit-interpreted-strict.log`):
 
 ```
 Total: passed 2367, failed 397
@@ -1479,9 +1500,9 @@ baseline failure (`ASMJSParser`). The other 27 exited on a signal: 22
 `SIGABRT` (`-6`, mostly debugger tests, including `typedarray/samethread.js`
 inside a long DataView log), 4 `SIGSEGV` (`-11`, both `es6GeneratorJit`
 files), and 1 `SIGBUS` (`-10`, `Object/ObjectSpread_Limits.js`). That list is
-historical. On the 13:58 dylib the same suite is `passed 1943, failed 286`;
+historical. On the 21:22 dylib the same suite is `passed 1943, failed 286`;
 all 286 are in asm.js/WASM folders and exit 0, so the signal count is zero
-(`jit-dynapogo-inline.log`, 501.49 s). The 19:09 run had the
+(`jit-dynapogo-strict.log`, 492.81 s). The 19:09 run had the
 same totals (`jit-dynapogo-repair3.log`, 488.15 s). `Function/apply3.js` and
 `inlining/applyBugs.js` are not in the failure list.
 
@@ -1496,7 +1517,7 @@ and 10 arguments and that `super` spread all print `PASS` under `-mic:1
 -bgjit-` and under `-forceNative`.
 
 `disable_jit` on the current 20:39 binary is `passed 1973, failed 0`
-(`jit-disable-inline.log`). The earlier 1972/1 run on the 12:52
+(`jit-disable-strict.log`). The earlier 1972/1 run on the 12:52
 dylib missed only `DebuggerCommon/AsyncDynamicAttach.js`, which printed
 `PASSED` and then hung inside `ScriptContext::DebugProfileProbeThunk`; the
 second-pass `DynamicProfileInfo`/debug-loop split is the fix (see
@@ -1736,11 +1757,11 @@ commands. Stage 4 totals are in
 
 #### Stage 4: Regression suites
 
-`interpreted` on the 13:58 dylib is 2367/397 (all 397 asm.js / WebAssembly,
-exit 0, zero signals; `jit-interpreted-inline.log`). `dynapogo` on the 13:58 dylib is
+`interpreted` on the 21:22 dylib is 2367/397 (all 397 asm.js / WebAssembly,
+exit 0, zero signals; `jit-interpreted-strict.log`). `dynapogo` on the 21:22 dylib is
 1943/286 (all 286 failures are in asm.js/WASM folders and exit 0, zero
-signals; `jit-dynapogo-inline.log`, 501.49 s). `disable_jit` on the same binary
-is 1973/0 (`jit-disable-inline.log`). The 19:09 runs (`jit-interpreted-repair3.log`,
+signals; `jit-dynapogo-strict.log`, 492.81 s). `disable_jit` on the same binary
+is 1973/0 (`jit-disable-strict.log`). The 19:09 runs (`jit-interpreted-repair3.log`,
 `jit-dynapogo-repair3.log`, and `jit-disable-repair3.log`) are the prior object
 set; they showed the same totals. The absolute binary and the one-variant rule
 are in the handoff section. Those runs closed the `es6GeneratorJit` segfaults

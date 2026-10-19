@@ -2002,6 +2002,13 @@ VirtualAlloc_(
         }
     }
 
+    /* On Apple ARM64 MAP_JIT regions, MEM_COMMIT maps/zeroes the pages and
+       leaves the calling thread in execute mode (the JIT write window closed)
+       even when flProtect is PAGE_READWRITE. flProtect is the page's logical
+       protection, not a request to leave the thread writable. Direct embedders
+       that need to write must call VirtualProtect(..., PAGE_READWRITE) after
+       the commit; PAGE_EXECUTE_READ closes the window again. Internal JIT
+       callers already use the per-thread window around their writes. */
     if ( flAllocationType & MEM_COMMIT )
     {
         InternalEnterCriticalSection(pthrCurrent, &virtual_critsec);

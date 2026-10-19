@@ -4453,6 +4453,10 @@ IR::Instr* Lowerer::LowerProfiledNewArray(IR::JitProfilingInstr* instr, bool has
     {
         const int32 argCount = m_lowererMD.LowerCallArgs(instr, Js::CallFlags_New, 4);
 
+        // This is the deliberate exception to the helper platform-ABI rule:
+        // HelperProfiledNewScObjArray consumes the JS argc/argv image, so the
+        // call is lowered with argCount (and Apple homes x0-x7). Pure helpers
+        // use ChangeToHelperCall, which passes 0 and does not home.
         m_lowererMD.LoadHelperArgument(instr, IR::Opnd::CreateProfileIdOpnd(instr->arrayProfileId, m_func));
         m_lowererMD.LoadHelperArgument(instr, IR::Opnd::CreateProfileIdOpnd(instr->profileId, m_func));
         m_lowererMD.LoadHelperArgument(instr, IR::Opnd::CreateFramePointerOpnd(m_func));

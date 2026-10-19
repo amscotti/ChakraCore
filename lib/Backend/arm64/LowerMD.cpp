@@ -2050,6 +2050,17 @@ LowererMD::LoadHeapArguments(IR::Instr * instrArgs)
             // s1 = current function
             StackSym * paramSym = GetImplicitParamSlotSym(0);
             IR::Opnd * srcOpnd = IR::SymOpnd::New(paramSym, TyMachReg, func);
+
+            if (this->m_func->GetJITFunctionBody()->IsCoroutine())
+            {
+                // the function object for generator calls is a GeneratorVirtualScriptFunction object
+                // and we need to pass the real JavascriptGeneratorFunction object so grab it instead
+                IR::RegOpnd *tmpOpnd = IR::RegOpnd::New(TyMachReg, func);
+                Lowerer::InsertMove(tmpOpnd, srcOpnd, instrArgs);
+
+                srcOpnd = IR::IndirOpnd::New(tmpOpnd, Js::GeneratorVirtualScriptFunction::GetRealFunctionOffset(), TyMachPtr, func);
+            }
+
             this->LoadHelperArgument(instrArgs, srcOpnd);
 
             // Save the newly-created args object to its dedicated stack slot.

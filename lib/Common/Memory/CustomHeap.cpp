@@ -605,6 +605,7 @@ bool Heap<TAlloc, TPreReservedAlloc>::AllocInPage(Page* page, size_t bytes, usho
     }
 
     Assert(Math::IsPow2((int32)bytes));
+    Assert(GetChunkSizeForBytes(bytes) <= Page::ChunkCount);
 
     uint length = GetChunkSizeForBytes(bytes);
     BVIndex index = GetFreeIndexForPage(page, bytes);
@@ -699,6 +700,16 @@ bool Heap<TAlloc, TPreReservedAlloc>::AllocInPage(Page* page, size_t bytes, usho
 template<typename TAlloc, typename TPreReservedAlloc>
 Page* Heap<TAlloc, TPreReservedAlloc>::AllocNewPage(BucketId bucket, bool canAllocInPreReservedHeapPageSegment, bool isAnyJittedCode, _Inout_ bool* isAllJITCodeInPreReservedRegion)
 {
+    // AllocPages(1) below returns one host page. Page::MaxAllocationSize and
+    // Page::Alignment describe the chunks inside it and must not exceed the
+    // host page. On Apple ARM64 the constants cover the full 16 KiB host page;
+    // every other target keeps the historical 4 KiB logical page, so a larger
+    // host page would leave its remainder unused.
+    Assert(AutoSystemInfo::PageSize >= Page::MaxAllocationSize);
+#if defined(__APPLE__) && defined(_M_ARM64) && defined(TARGET_64)
+    Assert(AutoSystemInfo::PageSize == Page::MaxAllocationSize);
+#endif
+
     void* pageSegment = nullptr;
 
     char* address = nullptr;
@@ -853,11 +864,12 @@ bool Heap<TAlloc, TPreReservedAlloc>::FreeAllocation(Allocation* object)
 
     uint freeBitsCount = page->freeBitVector.Count();
 
-    // The page tracks Page::MaxAllocationSize bytes in Page::Alignment chunks
-    // (32 chunks), while BVUnit may have 64 bits. Only the tracked chunks are
-    // initialized and used, so compare against the chunk count rather than
-    // BitsPerWord when deciding whether the page is becoming empty.
-    const uint pageChunkCount = Page::MaxAllocationSize / Page::Alignment;
+    // The page tracks exactly Page::ChunkCount chunks; BVUnit may have more
+    // bits (64 on TARGET_64 even when only 32 chunks are tracked). Only the
+    // tracked chunks are initialized and used, so compare against the chunk
+    // count rather than BitsPerWord when deciding whether the page is becoming
+    // empty.
+    const uint pageChunkCount = Page::ChunkCount;
 
     // Make sure that the section under interest or the whole page has not already been freed
     if (page->IsEmpty() || page->freeBitVector.TestAnyInRange(index, length))
@@ -1130,13 +1142,14 @@ void Heap<TAlloc, TPreReservedAlloc>::DumpStats()
     HeapTrace(_u("Buckets: \n"));
     for (int i = 0; i < BucketId::NumBuckets; i++)
     {
-        Output::Print(_u("\t%d => %u ["), (1 << (i + 7)), buckets[i].Count());
+        Output::Print(_u("\t%d => %u ["), Page::Alignment << i, buckets[i].Count());
 
         FOREACH_DLISTBASE_ENTRY_EDITING(Page, page, &this->buckets[i], bucketIter)
         {
-            BVUnit usedBitVector = page.freeBitVector;
-            usedBitVector.ComplimentAll(); // Get the actual used bit vector
-            Output::Print(_u(" %u "), usedBitVector.Count() * Page::Alignment); // Print out the space used in this page
+            // Count only the tracked chunks; the high bits of a 64-bit BVUnit
+            // are not part of a 4 KiB page on non-Apple builds.
+            uint usedChunks = Page::ChunkCount - page.freeBitVector.Count();
+            Output::Print(_u(" %u "), usedChunks * Page::Alignment); // Print out the space used in this page
         }
 
         NEXT_DLISTBASE_ENTRY_EDITING
