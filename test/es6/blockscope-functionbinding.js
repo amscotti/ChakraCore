@@ -303,17 +303,17 @@ print('\nTest 13: Eval does not leak let and const bindings\n');
     try { print(k); } catch (e) { print(e); }
 })();
 
-print('\nTest 14: Eval leaks vars, and var declarations bind to block scoped bindings for rhs initialization\n');
+print('\nTest 14: Eval leaks vars; a same-named block lexical declaration is a SyntaxError\n');
 (function ()
 {
     var f = 'var f';
 
     {
-        let f = 'let f';
+        let blockF = 'let f';
 
         eval("var f = 'eval var f'; var g = 'eval var g'; print(f); print(g);");
 
-        print(f);
+        print(blockF);
         print(g);
     }
 
@@ -341,14 +341,14 @@ print('\nTest 16: Eval function declarations create/assign to a var binding and 
 
     if (true)
     {
-        function g(notineval) { }
-        function h(notineval) { }
+        function gBlock(notineval) { }
+        function hBlock(notineval) { }
 
         eval("function f(ineval) { }; function g(ineval) { }; if (true) { function h(ineval) { }; print(h); } print(h);");
 
         print(f); // this should be f(ineval)
         print(g); // this should be g(ineval)
-        print(h); // this should be h(notineval)
+        print(h); // this should be h(ineval)
     }
 
     print(f); // this should be f(ineval)
@@ -356,7 +356,7 @@ print('\nTest 16: Eval function declarations create/assign to a var binding and 
     print(h); // this should be h(ineval)
 })();
 
-print('\nTest 17: var initializations should find block scoped lets but still create properties at function scope\n');
+print('\nTest 17: eval var declarations reject lower block lexical bindings\n');
 (function ()
 {
     var f = 'var f not in eval';
@@ -365,14 +365,28 @@ print('\nTest 17: var initializations should find block scoped lets but still cr
     {
         let g = 'let g not in eval';
 
-        eval("var f = 'var f in eval'; if (true) { var g = 'var g in eval'; }");
+        try
+        {
+            eval("var f = 'var f in eval'; if (true) { var g = 'var g in eval'; }");
+        }
+        catch (e)
+        {
+            print(e);
+        }
 
-        print(f); // this should be 'var f in eval'
-        print(g); // this should be 'let g in eval'
+        print(f); // the failed instantiation did not run the body
+        print(g); // the block lexical binding is unchanged
     }
 
-    print(f); // this should be 'var f in eval'
-    print(g); // this should be 'undefined'
+    print(f); // the failed instantiation did not create the eval var
+    try
+    {
+        print(g);
+    }
+    catch (e)
+    {
+        print(e);
+    }
 })();
 
 print('\nTest 18: function declaration in eval should shadow variables declared outside eval (strict)\n');

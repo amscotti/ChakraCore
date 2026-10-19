@@ -1239,15 +1239,11 @@ void EmitAssignmentToFuncName(ParseNodeFnc *pnodeFnc, ByteCodeGenerator *byteCod
             // updated when the declaration was skipped.
             if (fncScopeSym && pnodeFnc->IsAnnexBVarExtension())
             {
-                if (fncScopeSym->GetIsGlobal() && byteCodeGenerator->GetFlags() & fscrEval)
-                {
-                    Js::PropertyId propertyId = fncScopeSym->GetPosition();
-                    byteCodeGenerator->EmitGlobalFncDeclInit(pnodeFnc->location, propertyId, funcInfoParent);
-                }
-                else
-                {
-                    byteCodeGenerator->EmitPropStore(pnodeFnc->location, fncScopeSym, nullptr, funcInfoParent, false, false, /* isFncDeclVar */true);
-                }
+                // The synthetic binding is an ordinary var binding
+                // (CreateGlobalVarBinding for global eval): an existing
+                // property keeps its attributes and is not reinitialized.
+                // The block function assignment then updates only its value.
+                byteCodeGenerator->EmitPropStore(pnodeFnc->location, fncScopeSym, nullptr, funcInfoParent, false, false, /* isFncDeclVar */true);
             }
         }
     }
@@ -5886,9 +5882,12 @@ void ByteCodeGenerator::EnsureNoRedeclarations(ParseNodeBlock *pnodeBlock, FuncI
     {
         Js::PropertyId propertyId = sym->EnsurePosition(this);
 
-        // Global function declarations must pass #sec-candeclareglobalfunction
-        // which is enforced by EnsureCanDeclGloFunc
-        if (isFncDecl)
+        // Global function declarations must pass #sec-candeclareglobalfunction.
+        // EvalDeclarationInstantiation does not call CanDeclareGlobalFunction;
+        // it creates the binding directly (and reports a failed define through
+        // CreateGlobalFunctionBinding). Emitting this check in eval would also
+        // reject an existing non-configurable accessor with the wrong error.
+        if (isFncDecl && !(this->flags & fscrEval))
         {
             this->m_writer.ElementRootU(Js::OpCode::EnsureCanDeclGloFunc, funcInfo->FindOrAddReferencedPropertyId(propertyId));
         }

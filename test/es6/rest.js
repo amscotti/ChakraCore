@@ -37,23 +37,23 @@ var tests = [
       assert.doesNotThrow(function () { eval("function foo(a, ...b) { var a; }"); },
                     "Var redeclaration does not throw with a non-simple parameter list on a non-rest parameter");
       assert.throws(function () { function foo(...a) { eval('var a;'); }; foo(); },
-          ReferenceError,
+          SyntaxError,
           "Var redeclaration throws with a non-simple parameter list inside an eval",
           "Let/Const redeclaration");
       assert.throws(function () { function foo(...[a]) { eval('var a;'); }; foo(); },
-          ReferenceError,
+          SyntaxError,
           "Var redeclaration throws with a non-simple parameter list inside an eval",
           "Let/Const redeclaration");
       assert.throws(function () { function foo(a, ...b) { eval('var b;'); }; foo(); },
-          ReferenceError,
+          SyntaxError,
           "Var redeclaration throws with a non-simple parameter list inside an eval",
           "Let/Const redeclaration");
       assert.throws(function () { function foo(a = 1, ...b) { eval('var b;'); }; foo(); },
-          ReferenceError,
+          SyntaxError,
           "Var redeclaration throws with a non-simple parameter list inside an eval",
           "Let/Const redeclaration");
       assert.throws(function () { function foo(a, b = 1, ...c) { eval('var c;'); }; foo(); },
-          ReferenceError,
+          SyntaxError,
           "Var redeclaration throws with a non-simple parameter list inside an eval",
           "Let/Const redeclaration");
 
@@ -61,7 +61,7 @@ var tests = [
       assert.doesNotThrow(function () { function foo(...[a]) { eval('let a;'); }; foo(); }, "Let redeclaration inside an eval does not throw with a non-simple parameter list");
       assert.doesNotThrow(function () { function foo(...a) { eval('const a = "str";'); }; foo() }, "Const redeclaration inside an eval does not throw with a non-simple parameter list");
       assert.throws(function () { function foo(a, ...b) { eval('var a;'); }; foo(); },
-                    ReferenceError,
+                    SyntaxError,
                     "Var redeclaration throws with a non-simple parameter list on a non-rest parameter inside eval",
                     "Let/Const redeclaration");
       assert.doesNotThrow(function () { function foo(...a) { eval('let a;'); }; foo(); }, "Let redeclaration of a non-default parameter inside an eval does not throw with a non-simple parameter list");

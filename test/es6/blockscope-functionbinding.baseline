@@ -107,13 +107,13 @@ ReferenceError: 'i' is not defined
 eval blockscoped var j
 ReferenceError: 'k' is not defined
 
-Test 14: Eval leaks vars, and var declarations bind to block scoped bindings for rhs initialization
+Test 14: Eval leaks vars; a same-named block lexical declaration is a SyntaxError
 
 eval var f
 eval var g
-eval var f
+let f
 eval var g
-var f
+eval var f
 eval var g
 
 Test 15: Eval should have TDZ use before declaration error
@@ -123,20 +123,21 @@ ReferenceError: Use before declaration
 Test 16: Eval function declarations create/assign to a var binding and assign to let binding, and create a let binding if not at eval global scope
 
 function h(ineval) { }
-function h(notineval) { }
+function h(ineval) { }
 function f(ineval) { }
 function g(ineval) { }
-function h(notineval) { }
+function h(ineval) { }
 function f(ineval) { }
 function g(ineval) { }
 function h(ineval) { }
 
-Test 17: var initializations should find block scoped lets but still create properties at function scope
+Test 17: eval var declarations reject lower block lexical bindings
 
-var f in eval
-var g in eval
-var f in eval
-undefined
+SyntaxError: Let/Const redeclaration
+var f not in eval
+let g not in eval
+var f not in eval
+ReferenceError: 'g' is not defined
 
 Test 18: function declaration in eval should shadow variables declared outside eval (strict)
 
@@ -160,27 +161,27 @@ function j() { }
 const j
 function k() { }
 var k
-ReferenceError: Let/Const redeclaration
+SyntaxError: Let/Const redeclaration
 let l
 let l
-ReferenceError: Let/Const redeclaration
+SyntaxError: Let/Const redeclaration
 inner let l
 outer let l
-ReferenceError: Let/Const redeclaration
+SyntaxError: Let/Const redeclaration
 const m
 const m
-ReferenceError: Let/Const redeclaration
+SyntaxError: Let/Const redeclaration
 inner const m
 const m
-ReferenceError: Let/Const redeclaration
+SyntaxError: Let/Const redeclaration
 inner let m
 const m
 function n() { }
 function n() { }
 function n() { }
-ReferenceError: Let/Const redeclaration
+SyntaxError: Let/Const redeclaration
 let o
-ReferenceError: Let/Const redeclaration
+SyntaxError: Let/Const redeclaration
 const p
 function q() { }
 var q
@@ -239,34 +240,34 @@ function glo_t19_j() { }
 const glo_t19_j
 function glo_t19_k() { }
 var glo_t19_k
-ReferenceError: Let/Const redeclaration
+SyntaxError: Let/Const redeclaration
 let glo_t19_l
 let glo_t19_l
 undefined
-ReferenceError: Let/Const redeclaration
+SyntaxError: Let/Const redeclaration
 let declaredLater
-ReferenceError: Let/Const redeclaration
+SyntaxError: Let/Const redeclaration
 inner let glo_t19_l
 outer let glo_t19_l
 undefined
-ReferenceError: Let/Const redeclaration
+SyntaxError: Let/Const redeclaration
 const glo_t19_m
 const glo_t19_m
 undefined
-ReferenceError: Let/Const redeclaration
+SyntaxError: Let/Const redeclaration
 inner const m
 const glo_t19_m
 undefined
-ReferenceError: Let/Const redeclaration
+SyntaxError: Let/Const redeclaration
 inner let m
 const glo_t19_m
 undefined
 function glo_t19_n() { }
 function glo_t19_n() { }
 function glo_t19_n() { }
-ReferenceError: Let/Const redeclaration
+SyntaxError: Let/Const redeclaration
 let glo_t19_o
-ReferenceError: Let/Const redeclaration
+SyntaxError: Let/Const redeclaration
 const glo_t19_p
 function glo_t19_q() { }
 var glo_t19_q

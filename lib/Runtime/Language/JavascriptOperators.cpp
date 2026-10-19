@@ -3164,6 +3164,9 @@ CommonNumber:
         if (VarIs<RootObjectBase>(instance))
         {
             attributes |= PropertyLetConstGlobal;
+            // Global lexical bindings are not properties of the global object
+            // in the spec and must be created even when it is non-extensible.
+            flags = static_cast<PropertyOperationFlags>(flags | PropertyOperation_Force);
         }
 
         instance->SetPropertyWithAttributes(propertyId, newValue, attributes, NULL, (PropertyOperationFlags)(flags | PropertyOperation_AllowUndecl));
@@ -3183,6 +3186,9 @@ CommonNumber:
         if (VarIs<RootObjectBase>(instance))
         {
             attributes |= PropertyLetConstGlobal;
+            // Global lexical bindings are not properties of the global object
+            // in the spec and must be created even when it is non-extensible.
+            flags = static_cast<PropertyOperationFlags>(flags | PropertyOperation_Force);
         }
 
         instance->SetPropertyWithAttributes(propertyId, newValue, attributes, NULL, (PropertyOperationFlags)(flags | PropertyOperation_AllowUndecl));
@@ -3196,7 +3202,7 @@ CommonNumber:
         RecyclableObject* instance = VarTo<RecyclableObject>(obj);
         JIT_HELPER_NOT_REENTRANT_HEADER(Op_InitUndeclRootLetFld, reentrancylock, instance->GetScriptContext()->GetThreadContext());
 
-        PropertyOperationFlags flags = static_cast<PropertyOperationFlags>(PropertyOperation_SpecialValue | PropertyOperation_AllowUndecl);
+        PropertyOperationFlags flags = static_cast<PropertyOperationFlags>(PropertyOperation_SpecialValue | PropertyOperation_AllowUndecl | PropertyOperation_Force);
         PropertyAttributes attributes = PropertyLetDefaults | PropertyLetConstGlobal;
 
         instance->SetPropertyWithAttributes(propertyId, instance->GetLibrary()->GetUndeclBlockVar(), attributes, NULL, flags);
@@ -3210,7 +3216,7 @@ CommonNumber:
         RecyclableObject* instance = VarTo<RecyclableObject>(obj);
         JIT_HELPER_NOT_REENTRANT_HEADER(Op_InitUndeclRootConstFld, reentrancylock, instance->GetScriptContext()->GetThreadContext());
 
-        PropertyOperationFlags flags = static_cast<PropertyOperationFlags>(PropertyOperation_SpecialValue | PropertyOperation_AllowUndecl);
+        PropertyOperationFlags flags = static_cast<PropertyOperationFlags>(PropertyOperation_SpecialValue | PropertyOperation_AllowUndecl | PropertyOperation_Force);
         PropertyAttributes attributes = PropertyConstDefaults | PropertyLetConstGlobal;
 
         instance->SetPropertyWithAttributes(propertyId, instance->GetLibrary()->GetUndeclBlockVar(), attributes, NULL, flags);
