@@ -9684,17 +9684,17 @@ Case0:
                     toIndex += count - 1;
                 }
 
-                Var undefinedValue = library->GetUndefined();
                 while (count > 0)
                 {
-                    Var value = undefinedValue;
+                    // An invalid source index leaves the target unchanged;
+                    // copying undefined would write 0/NaN on typed targets.
                     if (fromIndex >= 0 && (uint64)fromIndex < liveLength)
                     {
-                        value = typedArrayBase->DirectGetItem((uint32)fromIndex);
-                    }
-                    if (toIndex >= 0 && (uint64)toIndex < liveLength)
-                    {
-                        typedArrayBase->DirectSetItem((uint32)toIndex, value);
+                        Var value = typedArrayBase->DirectGetItem((uint32)fromIndex);
+                        if (toIndex >= 0 && (uint64)toIndex < liveLength)
+                        {
+                            typedArrayBase->DirectSetItem((uint32)toIndex, value);
+                        }
                     }
                     fromIndex += direction;
                     toIndex += direction;
@@ -10152,14 +10152,16 @@ Case0:
 
             Assert(length <= UINT_MAX);
 
-            // The species constructor may have shrunk or detached the source.
-            // Map still calls the callback over the captured length; an OOB
-            // Get produces undefined and a detached Get throws.
+            // The species constructor or a callback may shrink or detach the
+            // source. Map still calls the callback over the captured length;
+            // an OOB or detached Get produces undefined.
             for (uint32 k = 0; k < (uint32)length; k++)
             {
                 // No need to do HasItem, as it cannot be observable unless 'typedArrayBase' is proxy. And we have established that it is indeed typedarray.
 
-                element = typedArrayBase->DirectGetItem(k);
+                element = (!typedArrayBase->IsDetachedBuffer() && k < typedArrayBase->GetLength())
+                    ? typedArrayBase->DirectGetItem(k)
+                    : scriptContext->GetLibrary()->GetUndefined();
                 JS_REENTRANT(jsReentLock,
                     BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
                     {

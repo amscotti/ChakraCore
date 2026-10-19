@@ -114,7 +114,7 @@ after run) for every count below.
   **567/567 steps succeeded**.
 - New es7 test, base binary (`out/base-bin/ch`, SHA-256 `81de4407…`):
   **2/22 passed, 20 failed**. Same source with this lane
-  (`zig-out/bin/ch`, launcher `0122769e…`, dylib `382b8d7c…`):
+  (`zig-out/bin/ch`, launcher `0122769e…`, dylib `b7ba8716…`):
   **22/22 passed**.
 - Adjacent `test/es7/resizable-arraybuffer.js` **12/12** and
   `test/es7/float16.js` **10/10** still pass.
@@ -132,6 +132,9 @@ after run) for every count below.
   **4/108 before → 58/108 after**, **54 fail→pass / 0 pass→fail**. All 50
   residuals are BigInt-gated (helper/literal/ReferenceError before later
   assertions), so only the executed portions are evidenced.
+- Re-ran the 333-shape copyWithin matrix (`/tmp/opencode/s8b-attack/copymatrix.js`)
+  on this lane: **333/333 lines identical to `copymatrix.node`**, including
+  OOB-source skip and Float32 target checks.
 - The 208 residual scenarios in the 340 slice are BigInt-gated: 178 hit
   `resizableArrayBufferUtils`'s direct `BigInt64Array` reference and 30 contain
   BigInt literal syntax rejected without `-ESBigInt`. These are not all
@@ -146,7 +149,17 @@ after run) for every count below.
 
 - **BigInt corpus.** `BigInt64Array`/`BigUint64Array` are not implemented in
   this build; the focused helper and literal parse failures above are outside
-  this slice. Enabling them is separate S2/S8 work.
+  this slice. Enabling them is separate S2/S8 work. The 54-file expanded set is
+  also BigInt-gated in 50 scenarios; those files abort before later assertions,
+  so they are unexecuted, not proven.
+- **Generic Array entrypoints.** The fixed resizable semantics above are wired
+  through the TypedArray entrypoints. `Array.prototype.copyWithin.call` and
+  `Array.prototype.join.call` on a TypedArray still use the generic object
+  algorithm and can diverge for OOB positions.
+- **toLocaleString element formatting.** The distinct TypedArray entrypoint
+  validates the receiver but delegates element conversion to the shared
+  `JavascriptArray::ToLocaleString` helper. User-defined per-element
+  `toLocaleString` formatting is not consulted for typed-array elements.
 - **Special element types.** `Float16Array` and the immutable-ArrayBuffer
   proposal remain unimplemented and outside this slice.
 - **JIT/B4.** This is Mac ARM64 no-JIT evidence only. The JIT still consults the

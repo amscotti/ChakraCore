@@ -480,15 +480,29 @@ var tests = [
 
             reset();
             view.copyWithin({ valueOf() { rab.resize(2); return 0; } }, 1);
-            assertSameElements([1, 0], elements(view), "target coercion shrink");
+            assertSameElements([1, 1], elements(view), "target coercion shrink");
 
             reset();
             view.copyWithin(0, { valueOf() { rab.resize(2); return 1; } });
-            assertSameElements([1, 0], elements(view), "start coercion shrink");
+            assertSameElements([1, 1], elements(view), "start coercion shrink");
 
             reset();
             view.copyWithin(0, 1, { valueOf() { rab.resize(2); return 4; } });
-            assertSameElements([1, 0], elements(view), "end coercion shrink");
+            assertSameElements([1, 1], elements(view), "end coercion shrink");
+
+            reset();
+            view.copyWithin(0, { valueOf() { rab.resize(3); return 2; } });
+            assertSameElements([2, 1, 2], elements(view), "OOB source leaves target unchanged");
+
+            reset();
+            view.copyWithin(1, { valueOf() { rab.resize(3); return 2; } });
+            assertSameElements([0, 2, 2], elements(view), "overlapping OOB source leaves target unchanged");
+
+            var floatRab = new ArrayBuffer(16, { maxByteLength: 32 });
+            var floats = new Float32Array(floatRab);
+            floats.set([0, 1, 2, 3]);
+            floats.copyWithin(0, { valueOf() { floatRab.resize(12); return 2; } });
+            assertSameElements([2, 1, 2], elements(floats), "float OOB source stays finite");
 
             reset();
             view.copyWithin({ valueOf() { rab.resize(6); return 0; } }, 2);
@@ -566,8 +580,14 @@ var tests = [
                     return result;
                 }
             };
-            assert.throws(function () { detachSource.map(function (v) { return v; }); },
-                TypeError, "detached source after species");
+            var detachedValues = [];
+            var detachedResult = detachSource.map(function (value) {
+                detachedValues.push(value);
+                return value;
+            });
+            assertSameElements([undefined, undefined, undefined, undefined], detachedValues,
+                "detached source keeps callback range");
+            assert.areEqual(4, detachedResult.length, "detached source result length");
         }
     },
     {
