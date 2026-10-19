@@ -13,7 +13,7 @@ void EmitMethodElem(ParseNode *pnode, Js::RegSlot callObjLocation, Js::RegSlot i
 void EmitReference(ParseNode *pnode, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo);
 void EmitAssignment(ParseNode *asgnNode, ParseNode *lhs, Js::RegSlot rhsLocation, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo, Js::RegSlot referenceBaseLocation = Js::Constants::NoRegister);
 Js::RegSlot EmitAssignmentReferenceBase(ParseNode *lhs, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo);
-void EmitLoad(ParseNode *rhs, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo);
+void EmitLoad(ParseNode *rhs, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo, Js::RegSlot referenceBaseLocation = Js::Constants::NoRegister);
 void EmitCall(ParseNodeCall* pnodeCall, ByteCodeGenerator* byteCodeGenerator, FuncInfo* funcInfo, BOOL fReturnValue, BOOL fEvaluateComponents, Js::RegSlot overrideThisLocation = Js::Constants::NoRegister, Js::RegSlot newTargetLocation = Js::Constants::NoRegister);
 void EmitStartupYield(ByteCodeGenerator* byteCodeGenerator, FuncInfo* funcInfo);
 void EmitYield(Js::RegSlot resultReg, Js::RegSlot inputReg, ByteCodeGenerator* byteCodeGenerator, FuncInfo* funcInfo);
@@ -7747,17 +7747,18 @@ void EmitAssignment(
 
             byteCodeGenerator->Writer()->MarkLabel(capturedLabel);
 
+            // SetMutableBinding always probes HasProperty, even with S = false.
+            // In strict mode a missing binding becomes a ReferenceError; in
+            // sloppy mode the fall-through Set recreates it on the captured
+            // object environment record.
+            Js::ByteCodeLabel presentLabel = byteCodeGenerator->Writer()->DefineLabel();
+            byteCodeGenerator->Writer()->BrProperty(Js::OpCode::BrOnHasProperty, presentLabel, referenceBaseLocation, propertyIndex);
             if (isStrict)
             {
-                // Object environment records throw if the binding disappeared
-                // between reference evaluation and PutValue (SetMutableBinding
-                // with S = true). Declarative records cannot lose a binding.
-                Js::ByteCodeLabel presentLabel = byteCodeGenerator->Writer()->DefineLabel();
-                byteCodeGenerator->Writer()->BrProperty(Js::OpCode::BrOnHasProperty, presentLabel, referenceBaseLocation, propertyIndex);
                 byteCodeGenerator->Writer()->W1(Js::OpCode::RuntimeReferenceError, SCODE_CODE(JSERR_CantAssignTo));
                 byteCodeGenerator->Writer()->Br(doneLabel);
-                byteCodeGenerator->Writer()->MarkLabel(presentLabel);
             }
+            byteCodeGenerator->Writer()->MarkLabel(presentLabel);
 
             uint cacheId = funcInfo->FindOrAddInlineCacheId(referenceBaseLocation, propertyId, false, true);
             byteCodeGenerator->Writer()->PatchableProperty(
@@ -7865,7 +7866,8 @@ void EmitAssignment(
 void EmitLoad(
     ParseNode *lhs,
     ByteCodeGenerator *byteCodeGenerator,
-    FuncInfo *funcInfo)
+    FuncInfo *funcInfo,
+    Js::RegSlot referenceBaseLocation)
 {
     // Emit the instructions to load the value into the LHS location. Do not assign/free any temps
     // in the process.
@@ -7878,7 +7880,30 @@ void EmitLoad(
     case knopName:
     {
         funcInfo->AcquireLoc(lhs);
-        byteCodeGenerator->EmitPropLoad(lhs->location, lhs->AsParseNodeName()->sym, lhs->AsParseNodeName()->pid, funcInfo);
+        ParseNodeName *pnodeName = lhs->AsParseNodeName();
+        if (referenceBaseLocation == Js::Constants::NoRegister)
+        {
+            byteCodeGenerator->EmitPropLoad(lhs->location, pnodeName->sym, pnodeName->pid, funcInfo);
+            break;
+        }
+
+        // The reference base was captured before the RHS. Read GetValue
+        // through that base so @@unscopables/proxy HasBinding is not repeated
+        // and cannot resolve a different binding.
+        Js::ByteCodeLabel capturedLabel = byteCodeGenerator->Writer()->DefineLabel();
+        Js::ByteCodeLabel doneLabel = byteCodeGenerator->Writer()->DefineLabel();
+        byteCodeGenerator->Writer()->BrReg1(Js::OpCode::BrNotUndecl_A, capturedLabel, referenceBaseLocation);
+        byteCodeGenerator->EmitPropLoad(lhs->location, pnodeName->sym, pnodeName->pid, funcInfo);
+        byteCodeGenerator->Writer()->Br(doneLabel);
+
+        byteCodeGenerator->Writer()->MarkLabel(capturedLabel);
+        Js::PropertyId propertyId = pnodeName->sym ? pnodeName->sym->EnsurePosition(byteCodeGenerator) : pnodeName->pid->GetPropertyId();
+        uint cacheId = funcInfo->FindOrAddInlineCacheId(referenceBaseLocation, propertyId, false, false);
+        byteCodeGenerator->Writer()->PatchableProperty(Js::OpCode::LdFld, lhs->location, referenceBaseLocation, cacheId);
+        // A captured declarative base may still be in TDZ. The normal load
+        // path checks this; the direct property load must do so explicitly.
+        byteCodeGenerator->Writer()->Reg1(Js::OpCode::ChkUndecl, lhs->location);
+        byteCodeGenerator->Writer()->MarkLabel(doneLabel);
         break;
     }
 
@@ -10980,7 +11005,8 @@ void EmitBinaryReference(ParseNode *pnode1, ParseNode *pnode2, ByteCodeGenerator
     if (fLoadLhs)
     {
         // Emit code to load the value of the LHS.
-        EmitLoad(pnode1, byteCodeGenerator, funcInfo);
+        EmitLoad(pnode1, byteCodeGenerator, funcInfo,
+            referenceBaseLocation != nullptr ? *referenceBaseLocation : Js::Constants::NoRegister);
     }
     else
     {
@@ -12113,7 +12139,7 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
             }
 
             // Load the initial value, convert it (this is the expression result), and increment it.
-            EmitLoad(pnode1, byteCodeGenerator, funcInfo);
+            EmitLoad(pnode1, byteCodeGenerator, funcInfo, referenceBaseLocation);
             const Js::OpCode op2 = isESBigIntEnabled ? Js::OpCode::Conv_Numeric : Js::OpCode::Conv_Num;
             byteCodeGenerator->Writer()->Reg2(op2, pnode->location, pnode1->location);
 
@@ -12189,7 +12215,7 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
 
         if (need_result_location)
         {
-            EmitLoad(pnode1, byteCodeGenerator, funcInfo);
+            EmitLoad(pnode1, byteCodeGenerator, funcInfo, referenceBaseLocation);
             byteCodeGenerator->Writer()->Reg2(op, result_location, pnode1->location);
 
             // Store the incremented value and release the l-value.
@@ -12197,7 +12223,7 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
         }
         else
         {
-            EmitLoad(pnode1, byteCodeGenerator, funcInfo);
+            EmitLoad(pnode1, byteCodeGenerator, funcInfo, referenceBaseLocation);
             byteCodeGenerator->Writer()->Reg2(op, pnode1->location, pnode1->location);
 
             // Store the incremented value and release the l-value.

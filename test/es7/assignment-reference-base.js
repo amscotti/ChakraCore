@@ -190,6 +190,105 @@ var tests = [
         }
     },
     {
+        name: "with: compound and logical reads use the captured base once",
+        body() {
+            var S = Symbol.unscopables;
+            var n = 0;
+            var o = { x: 2 };
+            var x = 10;
+            Object.defineProperty(o, S, {
+                get() {
+                    return ++n === 1 ? {} : { x: true };
+                }
+            });
+
+            with (o) {
+                x += 3;
+            }
+
+            assert.areEqual(1, n, "unscopables is read only during reference evaluation");
+            assert.areEqual(5, o.x, "the captured base supplies and receives the compound value");
+            assert.areEqual(10, x, "the outer binding is untouched");
+
+            n = 0;
+            var l = { x: 0 };
+            Object.defineProperty(l, S, {
+                get() {
+                    return ++n === 1 ? {} : { x: true };
+                }
+            });
+
+            with (l) {
+                x ||= (l.rhs = 7);
+            }
+
+            assert.areEqual(1, n, "logical assignment does not re-run the unscopables lookup");
+            assert.areEqual(7, l.x, "the captured base receives the logical result");
+            assert.areEqual(10, x, "the outer binding is still untouched");
+        }
+    },
+    {
+        name: "with: increment reads and writes the captured base once",
+        body() {
+            var S = Symbol.unscopables;
+            var n = 0;
+            var o = { x: 2 };
+            var x = 10;
+            Object.defineProperty(o, S, {
+                get() {
+                    return ++n === 1 ? {} : { x: true };
+                }
+            });
+
+            with (o) {
+                x++;
+            }
+
+            assert.areEqual(1, n, "increment does not re-run the unscopables lookup");
+            assert.areEqual(3, o.x, "the captured base is incremented");
+            assert.areEqual(10, x, "the outer binding is untouched");
+        }
+    },
+    {
+        name: "with: proxy HasProperty runs for both reference and PutValue, not GetValue",
+        body() {
+            function makeScope() {
+                var hasCalls = 0;
+                var target = { x: 1 };
+                var proxy = new Proxy(target, {
+                    has(t, key) {
+                        if (key === "x") {
+                            hasCalls++;
+                        }
+                        return key in t;
+                    },
+                    get(t, key) {
+                        return t[key];
+                    },
+                    set(t, key, value) {
+                        t[key] = value;
+                        return true;
+                    }
+                });
+                return { proxy: proxy, target: target, calls: function () { return hasCalls; } };
+            }
+
+            var simple = makeScope();
+            with (simple.proxy) {
+                x = 2;
+            }
+            assert.areEqual(2, simple.calls(), "simple assignment probes HasProperty at both steps");
+            assert.areEqual(2, simple.target.x, "simple assignment stores through the proxy");
+
+            var compound = makeScope();
+            with (compound.proxy) {
+                x += 2;
+            }
+            assert.areEqual(2, compound.calls(), "compound GetValue does not add a HasProperty call");
+            assert.areEqual(3, compound.target.x, "compound assignment stores through the proxy");
+        }
+    },
+    {
         name: "with: function expression name is shadowed by the object environment",
         body() {
             var fn = function name() {

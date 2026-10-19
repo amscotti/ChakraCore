@@ -49,6 +49,12 @@ object, or the `Undecl` sentinel when the reference has only a static binding:
   (`let`/`const`) bindings.
 - The register is threaded through `EmitBinaryReference`, compound assignment,
   logical assignment, prefix/postfix increment/decrement, and `EmitAssignment`.
+  For compound/logical/inc-dec, `EmitLoad` branches on the captured register:
+  when it is not `Undecl`, GetValue is a direct `LdFld` through the captured
+  object (plus `ChkUndecl` for a captured declarative TDZ binding), so
+  `HasBinding`/`@@unscopables`/proxy `has` is not evaluated a second time and
+  cannot select another binding. When the register is `Undecl`, the existing
+  static/lexical load path is retained.
   Destructuring and `for-in`/`for-of` head stores keep their existing paths.
 
 `EmitAssignment` uses the captured base when the register is not `Undecl`:
@@ -56,10 +62,10 @@ object, or the `Undecl` sentinel when the reference has only a static binding:
 - Store through the captured object with the existing `StFld`/`StFldStrict`
   opcode and inline cache. This preserves getters/setters, writable checks and
   const/TDZ errors from `SetProperty`.
-- In strict mode, if the captured object environment record no longer has the
-  property, emit `RuntimeReferenceError` at store time. This matches
-  `SetMutableBinding` with `S = true`; non-strict assignment recreates the
-  property on the captured object.
+- `SetMutableBinding` probes `HasProperty` whether or not `S` is true. The
+  captured store therefore emits `BrOnHasProperty` unconditionally. A missing
+  binding only becomes `RuntimeReferenceError` in strict mode; sloppy
+  assignment falls through to the set and recreates it on the captured object.
 - A captured base is a plain object. `JavascriptOperators::SetAccessorOrNonWritableProperty`
   now treats a canonical numeric non-index property on a typed-array prototype
   as the typed-array `[[Set]]` no-op instead of creating an own property on the
@@ -106,7 +112,7 @@ Exact P5 selection:
 | Run | Passed | Failed | Scenarios |
 |---|---:|---:|---:|
 | before (`out/test262-c2-s14-p5-before`) | 0 | 50 | 50 |
-| after (`out/test262-c2-s14-p5-r3-exact`) | **50** | **0** | 50 |
+| after (`out/test262-c2-s14-p5-r4-exact`) | **50** | **0** | 50 |
 
 Exact flips: **50 fail→pass, 0 pass→fail**.
 
@@ -117,40 +123,42 @@ Broad assignment/compound-assignment directories
 | Run | Passed | Failed | Scenarios |
 |---|---:|---:|---:|
 | before (`out/test262-c2-s14-p5-assign-before`) | 1,395 | 241 | 1,636 |
-| after (`out/test262-c2-s14-p5-r3-assign`) | **1,445** | **191** | 1,636 |
+| after (`out/test262-c2-s14-p5-r4-assign`) | **1,445** | **191** | 1,636 |
 
 Exact flips: **50 fail→pass, 0 pass→fail**.
 
 Wider affected run (`test/language/expressions/**`,
 `test/language/statements/with/**`, `test/language/eval-code/**`; 21,922
 scenarios): before `out/test262-c2-s14-p5-regress-before`
-16,540/5,382; after `out/test262-c2-s14-p5-regress-r3` **16,617/5,305**.
+16,540/5,382; after `out/test262-c2-s14-p5-regress-r4` **16,616/5,306**.
 Excluding the parallel-run dynamic-import flake described below, the observed
-flips are **64 fail→pass, 0 pass→fail**: the 50 P5 scenarios, 12
-increment/decrement scenarios, and 2 strict `with` deletion scenarios. The
+flips are **65 fail→pass, 0 pass→fail**: the 50 P5 scenarios, 12
+increment/decrement scenarios, 2 strict `with` deletion scenarios, and
+`unscopables-inc-dec.js` (fixed by reading through the captured base). The
 reviewed `d95e63597` run had **64 fail→pass / 1 pass→fail** here; the one
 pass→fail was the typed-array shape now fixed. `test/language/statements/with/**`
-alone moved 172/10 → **174/8** (3 fail→pass, 0 pass→fail).
+alone moved 172/10 → **175/7** (4 fail→pass, 0 pass→fail).
 
 The dynamic-import slice differs between the two parallel runs: the reviewed
 `d95e63597` run had an import diff of 78 scenarios (38 fail→pass, 40
-pass→fail); the final run had 59 (36+23). Those scenarios flip
+pass→fail); the final run had 65 (38+27). Those scenarios flip
 nondeterministically under the parallel harness on both binaries and are not
 attributed to this change (single-file `--jobs 1` runs pass 2/2).
 
 Typed-array focused checks: the two
 `set-mutable-binding-binding-deleted-with-typed-array-in-proto-chain*.js`
-scenarios are **2/2**, and the `TypedArray`/`TypedArrayConstructors` built-in
-selection is unchanged at 2,175 pass / 2,161 fail with **0 flips**.
+scenarios are **2/2** on the test and debug-static binaries, and the
+`TypedArray`/`TypedArrayConstructors` built-in selection is unchanged at
+2,175 pass / 2,161 fail with **0 flips**.
 
 Focused `test/es7/assignment-reference-base.js` (registered in
-`test/es7/rlexe.xml` with `-args summary -endargs`) passes **15/15**. It covers
-simple, compound and logical assignment through `with`, variable RHS/result
-temporaries, nested `with`, eval-introduced vars, eval-local `with`,
-getters/setters, postfix/prefix increment/decrement, reference-before-RHS
-ordering, strict deleted-binding errors, eval const/TDZ errors, the
-function-expression-name shadowing path, and the typed-array canonical
-numeric non-index no-op.
+`test/es7/rlexe.xml` with `-args summary -endargs`) passes **18/18**. It covers
+simple, compound and logical assignment through `with`, stateful
+`@@unscopables`, proxy `has` side effects, variable RHS/result temporaries,
+nested `with`, eval-introduced vars, eval-local `with`, getters/setters,
+postfix/prefix increment/decrement, reference-before-RHS ordering, strict
+deleted-binding errors, eval const/TDZ errors, the function-expression-name
+shadowing path, and the typed-array canonical numeric non-index no-op.
 
 Full legacy regression: `python3 test/runtests.py -b "$PWD/zig-out/bin/ch" -t
 --variants disable_jit` → **1,996 passed / 0 failed**. Debug-static
