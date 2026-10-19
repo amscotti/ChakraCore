@@ -13,19 +13,24 @@ decorators remain out of scope.
   with `writable: true`, `enumerable: true`, `configurable: true`.
 - Static fields do not appear on the prototype or on constructed instances;
   no per-instance initialization is added.
-- Initializers run at **class-definition evaluation**, in textual order
-  interleaved with static methods/accessors. From
+- Class definition first evaluates and installs **all** methods, accessors
+  and computed property names in textual order, including private methods and
+  accessors. It then initializes the class-name binding, and only then runs
+  static field initializers in their own textual order. From
   `class C { static f = typeof this.m; static m() {} }` the field sees
-  `"undefined"`; the reverse order sees `"function"`. A static field may
-  overwrite an earlier method, and a later method may overwrite an earlier
-  field.
+  `"function"` and may call `this.m()`. Because fields are applied last, a
+  field wins over a same-named method/accessor:
+  `class C { static x = 1; static x() {} }` has `C.x === 1`. Computed-name
+  side effects occur before every static initializer, and a computed-name
+  throw suppresses all of them.
 - `this` inside an initializer is the constructor being defined (the derived
   constructor for subclasses); arrows and direct `eval` observe the same
-  receiver. The class-name binding is initialized before members, so
-  `class C { static self = C; }` and named class expressions work.
-  Anonymous class expressions use their inferred name, including
-  `export default class { ... }` (the constructor is named `"default"` before
-  its static fields run).
+  receiver. The class-name binding is in its TDZ while members/computed names
+  evaluate (`class C { [C]() {} }` throws `ReferenceError`) and is initialized
+  before static fields, so `class C { static self = C; }` and named class
+  expressions work. Anonymous class expressions use their inferred name,
+  including `export default class { ... }` (the constructor is named
+  `"default"` before its static fields run).
 - A missing initializer defines `undefined`. Duplicate static names run every
   initializer in order and the last definition wins. `CreateDataPropertyOrThrow`
   semantics are used, so inherited setters/read-only properties are ignored
@@ -39,7 +44,7 @@ decorators remain out of scope.
 - Static initializers share field early errors: direct `arguments`, `super()`,
   and `await`/`yield` in the surrounding async/generator shape are
   `SyntaxError`s. Arbitrary JS, proxies and abrupt completion propagate before
-  later members run. Direct eval of `this` is supported.
+  later static initializers run. Direct eval of `this` is supported.
 
 ## Parser/AST design
 
@@ -54,10 +59,11 @@ Static disambiguation extends the existing class-field look-ahead:
   `static async = 1`, `static get = 1`, and `static set\n*a(){}` (static field
   `set` followed by an instance generator).
 - Static field entries are stored in `pnodeClass->pnodeMembers` (not the
-  instance-field list) so emission naturally interleaves them with static
-  methods in textual order. `pnode2` is either null (no initializer) or the
-  initializer helper call, while method members keep a function node in
-  `pnode2`.
+  instance-field list) so their own textual order is preserved and their
+  names participate in the same class visit. `pnode2` is either null (no
+  initializer) or the initializer helper call, while method members keep a
+  function node in `pnode2`. Emission separates the member walk into methods
+  first and static fields last.
 - Initializers reuse `CreateClassFieldInitializerFunction`, the hidden
   block-scoped helper and the existing `arguments`/await/yield/NamedEvaluation
   handling. Instance helpers keep the explicit constructor-`this` override;
@@ -73,10 +79,13 @@ No opcode or PropertyId is added. Static fields reuse the existing
 interpreter-only `InitClassField` (`CreateDataPropertyOrThrow`) and the
 existing helper function objects.
 
-- `EmitClass` now stores the inner class-name binding **before** the member
-  loop (spec order), then walks `pnodeMembers` in textual order. Method
-  members use the existing `EmitMemberNode`; static field members call
-  `EmitStaticClassFieldDefinition`.
+- `EmitClass` walks `pnodeMembers` twice. The first pass evaluates/installs
+  every method, accessor, computed name and private member in textual order;
+  static field entries are skipped. The inner class-name binding is stored
+  only after that pass (its TDZ covers computed names), and a second pass
+  runs every static field initializer in textual order. This also guarantees
+  private methods/accessors exist before a static initializer can use
+  `new C().#m`.
 - A static initializer helper is invoked with an explicit receiver register
   loaded from `pnodeClass->location` (the constructor). The result slot is
   acquired before the receiver temp so temp-stack LIFO order is preserved.
@@ -123,19 +132,24 @@ Build (Mac ARM64, interpreter `-nonative` evidence):
 - Release `zig-out/bin/ch` sha256
   `70237022d8e138af512cf4266d539f29376a068ac2df73d9756142978bb0f35a`;
   `libChakraCore.dylib` sha256
-  `0c449ef14624873a50f09b8ff1abbdfa30268235b967350fe6a4811dcd437ec9`;
+  `fbbcac128a93ab685d5f4327bd6c0447627ac19481600b39435013a3c8498ff1`;
   Debug `out/debug-static/bin/ch` sha256
-  `14b62f8ba5d68270ca965fb4bf931c6acc11f75e7fa9ebc4b33cd4df3764a78c`.
+  `66dc4fb207ee6a5d59c63b809704bde83072be15dcea0325b221fd1f933b0926`
+  (the launcher hash `70237022…` is stable).
 
 Local suites (`disable_jit`, release unless noted):
 
 - `test/es7` — **75 passed / 0 failed** (includes normal and
-  `-force:deferparse` entries for `class-static-fields.js`).
+  `-force:deferparse` entries for `class-static-fields.js`). The test covers
+  field-before-method calls, fields winning after methods, computed-name
+  ordering/failure, class-name TDZ, and late private method/accessor use from
+  static initializers.
 - `test/es6` — 233/0; `test/es6module` — 31/0; `test/es5` — 56/0;
   `test/Function` — 70/0.
 - Debug `class-static-fields.js` — pass in normal, `-force:deferparse` and
-  `-noDeferParse`; Debug `class-fields-public.js` and
-  `class-private-fields.js` also pass. No SIGABRT/SIGSEGV observed.
+  `-noDeferParse`; Debug `class-fields-public.js`,
+  `class-private-fields.js` and `class-private-methods.js` also pass. No
+  SIGABRT/SIGSEGV observed (including the late-private-method regression).
 - Debug `test/es7` reports 74/1 because
   `finalization-registry-errors.js` (unrelated FinalizationRegistry GC test)
   fails; the base Debug binary reproduces that failure with the same command.

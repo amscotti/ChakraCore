@@ -12245,10 +12245,41 @@ void EmitClass(ParseNodeClass * pnodeClass, ByteCodeGenerator * byteCodeGenerato
 
     funcInfo->ReleaseTmpRegister(frameDisplayLoc);
 
-    // Emit name binding. ClassDefinitionEvaluation initializes the inner class
-    // binding before evaluating members, so static field initializers can
-    // observe the class name (including anonymous class expressions, whose
-    // inferred name is already installed on the constructor).
+    // Evaluate and install every non-field class element first, in textual
+    // order: methods, accessors, computed names and private methods/accessors.
+    // Static field entries stay in the member list for textual ordering, but
+    // their initializers do not run during this walk.
+    bool isObjectEmpty = true;
+    for (ParseNode * pnodeMemberList = pnodeClass->pnodeMembers;
+         pnodeMemberList != nullptr;)
+    {
+        ParseNode * pnodeMember = pnodeMemberList->nop == knopList
+            ? pnodeMemberList->AsParseNodeBin()->pnode1
+            : pnodeMemberList;
+        if (!IsStaticFieldMemberNode(pnodeMember))
+        {
+            ParseNodeFnc * pnodeMemberFnc = pnodeMember->AsParseNodeBin()->pnode2->AsParseNodeFnc();
+            if (IsPrivateMemberNode(pnodeMember))
+            {
+                EmitPrivateMemberDefinition(pnodeMember, protoLoc, byteCodeGenerator, funcInfo);
+            }
+            else
+            {
+                EmitMemberNode(pnodeMember, pnodeMemberFnc->IsStaticMember() ? pnodeClass->location : protoLoc, byteCodeGenerator, funcInfo, pnodeClass, /*useStore*/ false, &isObjectEmpty);
+            }
+        }
+
+        if (pnodeMemberList->nop != knopList)
+        {
+            break;
+        }
+        pnodeMemberList = pnodeMemberList->AsParseNodeBin()->pnode2;
+    }
+
+    // The inner class binding stays in its TDZ while members (including
+    // computed property-name expressions) are evaluated, then is initialized
+    // before any static field initializer runs. Anonymous class expressions
+    // already have their inferred name installed on the constructor.
     if (pnodeClass->pnodeName)
     {
         Symbol * sym = pnodeClass->pnodeName->sym;
@@ -12256,52 +12287,24 @@ void EmitClass(ParseNodeClass * pnodeClass, ByteCodeGenerator * byteCodeGenerato
         byteCodeGenerator->EmitPropStore(pnodeClass->location, sym, nullptr, funcInfo, false, true);
     }
 
-    // Methods and static fields in textual order. Static field entries remain
-    // in the member list and are distinguished from method members by pnode2
-    // not being a function declaration.
-    bool isObjectEmpty = true;
-    ParseNode * pnodeMembers = pnodeClass->pnodeMembers;
-    ParseNode * pnodeMember;
-    ParseNodeFnc * pnodeMemberFnc;
-    if (pnodeMembers != nullptr)
+    // Static fields run only after all class elements have been evaluated and
+    // the class name is bound, in their own textual order.
+    for (ParseNode * pnodeMemberList = pnodeClass->pnodeMembers;
+         pnodeMemberList != nullptr;)
     {
-        while (pnodeMembers->nop == knopList)
+        ParseNode * pnodeMember = pnodeMemberList->nop == knopList
+            ? pnodeMemberList->AsParseNodeBin()->pnode1
+            : pnodeMemberList;
+        if (IsStaticFieldMemberNode(pnodeMember))
         {
-            pnodeMember = pnodeMembers->AsParseNodeBin()->pnode1;
-            if (IsStaticFieldMemberNode(pnodeMember))
-            {
-                byteCodeGenerator->EmitStaticClassFieldDefinition(pnodeMember, pnodeClass->location, funcInfo);
-            }
-            else
-            {
-                pnodeMemberFnc = pnodeMember->AsParseNodeBin()->pnode2->AsParseNodeFnc();
-                if (IsPrivateMemberNode(pnodeMember))
-                {
-                    EmitPrivateMemberDefinition(pnodeMember, protoLoc, byteCodeGenerator, funcInfo);
-                }
-                else
-                {
-                    EmitMemberNode(pnodeMember, pnodeMemberFnc->IsStaticMember() ? pnodeClass->location : protoLoc, byteCodeGenerator, funcInfo, pnodeClass, /*useStore*/ false, &isObjectEmpty);
-                }
-            }
-            pnodeMembers = pnodeMembers->AsParseNodeBin()->pnode2;
+            byteCodeGenerator->EmitStaticClassFieldDefinition(pnodeMember, pnodeClass->location, funcInfo);
         }
-        if (IsStaticFieldMemberNode(pnodeMembers))
+
+        if (pnodeMemberList->nop != knopList)
         {
-            byteCodeGenerator->EmitStaticClassFieldDefinition(pnodeMembers, pnodeClass->location, funcInfo);
+            break;
         }
-        else
-        {
-            pnodeMemberFnc = pnodeMembers->AsParseNodeBin()->pnode2->AsParseNodeFnc();
-            if (IsPrivateMemberNode(pnodeMembers))
-            {
-                EmitPrivateMemberDefinition(pnodeMembers, protoLoc, byteCodeGenerator, funcInfo);
-            }
-            else
-            {
-                EmitMemberNode(pnodeMembers, pnodeMemberFnc->IsStaticMember() ? pnodeClass->location : protoLoc, byteCodeGenerator, funcInfo, pnodeClass, /*useStore*/ false, &isObjectEmpty);
-            }
-        }
+        pnodeMemberList = pnodeMemberList->AsParseNodeBin()->pnode2;
     }
 
     funcInfo->ReleaseTmpRegister(protoLoc);

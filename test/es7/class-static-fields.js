@@ -59,29 +59,120 @@ const tests = [
         }
     },
     {
-        name: "static fields interleave with static methods in textual order",
+        name: "all methods and accessors are installed before static initializers run",
         body() {
-            class Before {
+            class FieldBeforeMethod {
                 static field = typeof this.method;
                 static method() {}
             }
-            assert.areEqual("undefined", Before.field);
+            assert.areEqual("function", FieldBeforeMethod.field);
 
-            class After {
+            class MethodBeforeField {
                 static method() {}
                 static field = typeof this.method;
             }
-            assert.areEqual("function", After.field);
+            assert.areEqual("function", MethodBeforeField.field);
 
             const log = [];
-            class Interleaved {
+            class Deferred {
                 static a = (log.push("a"), 1);
                 static m() { log.push("m"); }
                 static b = (log.push("b"), 2);
             }
             assert.areEqual("a,b", log.join(","));
-            Interleaved.m();
+            Deferred.m();
             assert.areEqual("a,b,m", log.join(","));
+        }
+    },
+    {
+        name: "static fields are applied after methods/accessors, so a later field wins",
+        body() {
+            class FieldThenMethod {
+                static x = 1;
+                static x() { return 2; }
+            }
+            assert.areEqual(1, FieldThenMethod.x);
+
+            class MethodThenField {
+                static x() { return 1; }
+                static x = 2;
+            }
+            assert.areEqual(2, MethodThenField.x);
+
+            class FieldThenAccessor {
+                static x = 2;
+                static get x() { return 3; }
+            }
+            assert.areEqual(2, FieldThenAccessor.x);
+            const desc = Object.getOwnPropertyDescriptor(FieldThenAccessor, "x");
+            assert.isTrue(desc.writable);
+            assert.isTrue(desc.enumerable);
+            assert.isTrue(desc.configurable);
+            assert.areEqual(2, desc.value);
+        }
+    },
+    {
+        name: "static initializers can call methods declared later and see computed names first",
+        body() {
+            class CallsLaterMethod {
+                static value = this.compute();
+                static compute() { return 7; }
+            }
+            assert.areEqual(7, CallsLaterMethod.value);
+
+            const log = [];
+            class ComputedFirst {
+                static a = (log.push("fieldA"), 1);
+                [(log.push("computedA"), "m")]() {}
+                static b = (log.push("fieldB"), 2);
+                [(log.push("computedB"), "n")]() {}
+            }
+            assert.areEqual("computedA,computedB,fieldA,fieldB", log.join(","));
+            assert.areEqual(1, ComputedFirst.a);
+            assert.areEqual(2, ComputedFirst.b);
+        }
+    },
+    {
+        name: "computed-name failure prevents every static initializer",
+        body() {
+            let ran = false;
+            assert.throws(function () {
+                eval("class C { static a = (ran = true, 1); [(() => { throw new Error('computed'); })()]() {} }");
+            }, Error, "computed name throws");
+            assert.isFalse(ran);
+        }
+    },
+    {
+        name: "class name is in TDZ during computed names, then bound before static initializers",
+        body() {
+            assert.throws(function () {
+                eval("class C { [C]() {} }");
+            }, ReferenceError, "computed name sees the TDZ binding");
+
+            class C {
+                static self = C;
+            }
+            assert.areEqual(C, C.self);
+
+            assert.throws(function () {
+                eval("class D { static a = D; [(() => { throw new Error('stop'); })()]() {} }");
+            }, Error, "later computed-name failure still suppresses static fields");
+        }
+    },
+    {
+        name: "static initializers see private methods and accessors installed by class elements",
+        body() {
+            class WithPrivateMethod {
+                static value = new WithPrivateMethod().#m();
+                #m() { return 5; }
+            }
+            assert.areEqual(5, WithPrivateMethod.value);
+
+            class WithPrivateAccessor {
+                static value = new WithPrivateAccessor().#p;
+                get #p() { return 6; }
+            }
+            assert.areEqual(6, WithPrivateAccessor.value);
         }
     },
     {
@@ -133,23 +224,6 @@ const tests = [
             C.doubled = 20;
             assert.areEqual(10, C.x);
             assert.areEqual(10, C.values().next().value);
-        }
-    },
-    {
-        name: "static field before/after a same-named static method follows textual order",
-        body() {
-            class FieldThenMethod {
-                static x = 1;
-                static x() { return 2; }
-            }
-            assert.areEqual("function", typeof FieldThenMethod.x);
-            assert.areEqual(2, FieldThenMethod.x());
-
-            class MethodThenField {
-                static x() { return 1; }
-                static x = 2;
-            }
-            assert.areEqual(2, MethodThenField.x);
         }
     },
     {
