@@ -1,8 +1,8 @@
 # C2-S13 follow-up: FinalizationRegistry
 
-Status: **pending integration** (branch `s13-fr`, base `1c983ef9c`). Mac
-no-JIT only; JIT evidence is not claimed and B4 owns the JIT configuration
-claims. `WeakRef` remains as recorded in [c2-s13-weakref.md](c2-s13-weakref.md);
+Status: **pending integration** (branch `s13-fr`, base `1c983ef9c`; initial
+implementation `3d9012a8d`, review fixes `63d77e9a4`). Mac no-JIT only; JIT
+evidence is not claimed and B4 owns the JIT configuration claims. `WeakRef` remains as recorded in [c2-s13-weakref.md](c2-s13-weakref.md);
 this slice adds the separate `FinalizationRegistry` cleanup-job mechanism.
 
 ## Scope
