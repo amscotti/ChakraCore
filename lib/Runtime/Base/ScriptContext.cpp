@@ -111,6 +111,8 @@ namespace Js
         evalInClassFieldInitializer(false),
         evalInDerivedFieldConstructor(false),
         evalInParamScope(false),
+        evalInArrowParamScope(false),
+        evalArgumentsInVarEnv(false),
         isInvalidatedForHostObjects(false),
         fastDOMenabled(false),
         directHostTypeId(TypeIds_GlobalObject),

@@ -137,11 +137,7 @@ namespace Js
     RootObjectBase::EnsureNoRedeclPropertyForEval(PropertyId propertyId)
     {
         bool noRedecl = false;
-        if (!GetTypeHandler()->HasRootProperty(this, propertyId, &noRedecl))
-        {
-            return FALSE;
-        }
-        if (noRedecl)
+        if (GetTypeHandler()->HasRootProperty(this, propertyId, &noRedecl) && noRedecl)
         {
             JavascriptError::ThrowSyntaxError(GetScriptContext(), ERRRedeclaration);
         }

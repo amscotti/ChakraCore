@@ -73,6 +73,68 @@ var tests = [
         }
     },
     {
+        name: "arrow parameter eval does not alias unrelated body bindings",
+        body() {
+            var f1 = (p = eval("var arguments = 'p'")) => { var d; return d; };
+            assert.areEqual(undefined, f1(), "body var after parameter eval");
+
+            var f2 = (p = eval("var arguments = 'p'")) => {
+                function d() { return 1; }
+                return d();
+            };
+            assert.areEqual(1, f2(), "body function declaration after parameter eval");
+
+            var f3 = (arguments, p = eval("1")) => { var d; return d; };
+            assert.areEqual(undefined, f3("A"), "body var with a parameter named arguments");
+
+            var f4 = (p = eval("var arguments = 'p'"), q = () => arguments) => {
+                var d;
+                return [d, q()];
+            };
+            assert.areEqual(undefined, f4()[0], "body var remains undefined");
+            assert.areEqual("p", f4()[1], "parameter closure sees the eval binding");
+        }
+    },
+    {
+        name: "arrow parameter redeclarations are legal and last value wins",
+        body() {
+            var f1 = (p = eval("var arguments; var arguments = 2")) => arguments;
+            assert.areEqual(2, f1(), "duplicate var declarations in one eval");
+
+            var f2 = (p = (eval("var arguments"), eval("var arguments = 2"))) => arguments;
+            assert.areEqual(2, f2(), "duplicate var declarations in two evals");
+
+            var f3 = (p = eval("function arguments() { return 1; } function arguments() { return 2; }")) => arguments();
+            assert.areEqual(2, f3(), "duplicate function declarations, last function wins");
+        }
+    },
+    {
+        name: "body eval declares a body binding after a parameter eval",
+        body() {
+            var f = (p = eval("var arguments = 'p'")) => {
+                eval("var arguments");
+                return typeof arguments;
+            };
+            assert.areEqual("undefined", f(), "body eval var declaration shadows the parameter eval binding");
+        }
+    },
+    {
+        name: "body eval with a parameter named arguments stops at the body variable environment",
+        body() {
+            function f1(arguments, p = 1) { eval("var arguments = 'b'"); return arguments; }
+            assert.areEqual("b", f1("a"), "default parameter");
+
+            function f2(arguments, p = eval("1")) { eval("var arguments = 'b'"); return arguments; }
+            assert.areEqual("b", f2("a"), "default expression with direct eval");
+
+            function f3(arguments, ...rest) { eval("var arguments = 'b'"); return arguments; }
+            assert.areEqual("b", f3("a"), "rest parameter");
+
+            function f4(arguments, { p } = { p: 1 }) { eval("var arguments = 'b'"); return arguments; }
+            assert.areEqual("b", f4("a"), "destructured default parameter");
+        }
+    },
+    {
         name: "generators and async functions evaluate parameter defaults at call time",
         body() {
             assertEvalThrows(function () {

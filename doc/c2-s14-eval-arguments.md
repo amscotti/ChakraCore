@@ -35,29 +35,38 @@ names: non-`arguments` eval/parameter collisions remain P4-owned.
 ## Design
 
 - `GlobalObject::VEval` determines whether a direct eval call is running in
-  the caller's parameter scope. It already walks the stack for the class-field
-  context; the first script caller's `InterpreterStackFrame::IsParamScopeDone`
-  is the discriminator. The result is passed to
-  `ExecuteEvalParsedFunction`, which publishes a `ScriptContext`
-  `evalInParamScope` bit with an RAII save/restore across the eval call
-  (including abrupt completion).
+  the caller's parameter scope, whether that caller is an arrow, and whether a
+  body eval runs in a merged parameter/body variable environment. It already
+  walks the stack for the class-field context; the first script caller's
+  `InterpreterStackFrame::IsParamScopeDone`, `FunctionBody::IsLambda` and
+  `IsParamAndBodyScopeMerged` are the discriminators. The three booleans are
+  passed to `ExecuteEvalParsedFunction`, which publishes them on
+  `ScriptContext` with an RAII save/restore across the eval call (including
+  abrupt completion).
 - In `OP_ScopedEnsureNoRedeclProperty` (`ByteCodeEmitter`'s eval-only
   `ScopedEnsureNoRedeclFld`), `arguments` is checked directly:
   - in a parameter-scope eval, the first frame-display environment is the
-    parameter scope. An existing `arguments` property (implicit or formal)
-    throws `SyntaxError`; otherwise the binding is created there so a legal
-    arrow declaration takes effect.
+    parameter scope. An implicit arguments object or a formal named
+    `arguments` (no-redeclaration property) throws `SyntaxError`. An
+    eval-created property has no redeclaration flag, so a second eval
+    declaration is legal; the first legal declaration creates the binding.
+  - a body eval in a merged parameter/body environment stops at that variable
+    environment, so `var arguments` remains legal there.
   - elsewhere the normal eval redeclaration walk runs. For `arguments` it uses
     `EnsureNoRedeclPropertyForEval`, a SyntaxError-reporting variant of the
     existing lexical-redeclaration check; other names keep the existing
-    `EnsureNoRedeclProperty` behavior.
+    `EnsureNoRedeclProperty` behavior. The variant stops the walk at each
+    function variable environment whether or not it already owns the name, so
+    a split-scope body eval does not inspect an outer parameter binding.
 - An arrow's parameter scope is marked dynamic when the direct eval is in its
   parameter list (`ByteCodeGenerator::StartBindFunction`), so a parameter
-  closure (`q = () => arguments`) resolves the eval-created binding. The body
-  itself is added to the body closure at `OP_BeginBodyScope` when such an eval
-  ran. This copy is limited to arrow frames; ordinary split-scope functions
-  retain their existing body-instantiation behavior (and the P4-owned
-  non-arguments semantics).
+  closure (`q = () => arguments`) resolves the eval-created binding. Body
+  loads, `typeof`, and call-target resolution of the outer parameter scope
+  emit `LdParamObj` plus a property check instead of reading the body closure
+  register (`DynamicLoadKind::ParamObj`). This makes the eval-created binding
+  visible to the body without copying a value into the body scope, so unrelated
+  body var/function bindings keep their own slots and body eval/var
+  declarations shadow the parameter binding normally.
 - `ActivationObject`/`RootObjectBase` gain the
   `EnsureNoRedeclPropertyForEval` override; `BlockActivationObject` and
   `PseudoActivationObject` keep returning false. `RecyclableObject` provides
@@ -68,13 +77,12 @@ before; the check runs at eval declaration instantiation, so error timing is
 parameter initialization rather than eval parse or body execution.
 
 Ownership: the eval frame display and its scope objects remain owned by the
-caller frame; the new bits and script-context flag are non-owning state. The
-only added reference is the `arguments` value copied from the parameter
-closure into the body closure at `OP_BeginBodyScope`, both within the same
-live activation/frame; the store uses the normal property write path.
-Invalidation/threading: parser/bytecode unchanged; the runtime state is
-thread-local (`ScriptContext`, `InterpreterStackFrame`), and eval executes
-synchronously on the caller thread. No GC tracing or async job state is added.
+caller frame; the new booleans are non-owning state. No value is copied into a
+second scope. The parameter-scope loads read the existing parameter closure via
+`LdParamObj`; the body and parameter closures remain owned by the split-scope
+frame. Invalidation/threading: parser/bytecode AST unchanged; the runtime state
+is thread-local (`ScriptContext`), and eval executes synchronously on the
+caller thread. No GC tracing or async job state is added.
 
 ## Evidence
 
@@ -124,14 +132,20 @@ Focused `test/es7/eval-arguments-declarations.js` is registered in
 declaration/expression/method, preceding/following `arguments` parameters,
 body `var`/`let`/function colliders, generator and async/async-generator
 timing, arrow legal declarations/body shadowing/parameter closures, direct
-body eval, indirect eval, and the “default skipped” timing control.
+body eval, indirect eval, and the “default skipped” timing control. It also
+pins the regression shapes found in review: body var/function/parameter
+bindings after an arrow parameter eval (no aliasing), duplicate var and
+function declarations in one or two parameter evals (last value/function
+wins), body eval after a parameter eval (undefined body binding), and body eval
+with a parameter named `arguments` in default, direct-eval-default, rest and
+destructured parameter forms.
 
 The legacy suite (`runtests.py -t --variants disable_jit test`) is
 **1994/0**, including `test/es6/default-splitscope.js`. That test caught an
 initial over-broad version: marking every function's parameter scope dynamic
 made parameter-eval vars leak into ordinary function bodies. The final change
-marks parameter scopes dynamic only for arrows and copies only the
-`arguments` binding into arrow body closures.
+marks parameter scopes dynamic only for arrows and performs no value copy into
+the body scope.
 
 ## Residual
 
@@ -142,6 +156,11 @@ marks parameter scopes dynamic only for arrows and copies only the
   pre-existing `ReferenceError`; this slice does not claim it.
 - Indirect eval, global code and module code are outside the trigger: no
   caller parameter scope is involved.
+- Nested-block and body-eval lexical collisions are only partially modelled.
+  The merged-body stop treats the first activation as the variable
+  environment; a `let arguments` in a nested block with an eval var declaration
+  can still be under-rejected where the engine's frame display does not expose
+  a separate lexical environment. This predates the slice and is not claimed.
 - Async functions surface the SyntaxError as a rejected promise; async
   generators and generators evaluate parameter defaults with the engine’s
   existing eager scheduling, so the corpus’s synchronous `assert.throws`

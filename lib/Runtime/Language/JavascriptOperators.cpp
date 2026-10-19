@@ -8054,20 +8054,34 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
         // environment for EvalDeclarationInstantiation. An "arguments" var
         // declaration there conflicts with the parameter scope's arguments
         // binding (the implicit arguments object or a parameter named
-        // arguments). Arrow functions have no implicit binding, so a legal
-        // eval declaration creates the binding in that scope.
+        // arguments). Arrow functions have no implicit binding, so the first
+        // legal declaration creates the binding and later eval declarations
+        // reuse it (a var redeclaration is not a conflict).
         if (propertyId == PropertyIds::arguments && length > 0)
         {
             ScriptContext *scriptContext = VarTo<RecyclableObject>(defaultInstance)->GetScriptContext();
             if (scriptContext->IsEvalInParamScope() &&
                 FrameDisplay::GetScopeType(pDisplay->GetItem(0)) == ScopeType_ActivationObject)
             {
-                RecyclableObject *paramScope = VarTo<RecyclableObject>(pDisplay->GetItem(0));
-                if (paramScope->HasOwnProperty(propertyId))
+                ActivationObject *paramScope = VarTo<ActivationObject>(pDisplay->GetItem(0));
+                bool noRedecl = false;
+                bool hasBinding = paramScope->GetTypeHandler()->HasProperty(paramScope, propertyId, &noRedecl);
+                if (hasBinding && (!scriptContext->IsEvalInArrowParamScope() || noRedecl))
                 {
                     JavascriptError::ThrowSyntaxError(scriptContext, ERRRedeclaration);
                 }
-                paramScope->EnsureProperty(propertyId);
+                if (!hasBinding)
+                {
+                    paramScope->EnsureProperty(propertyId);
+                }
+                return;
+            }
+
+            // The body's merged variable environment already owns the
+            // parameter/implicit arguments binding, so a body eval var
+            // declaration is legal (it redeclares a var, not a lexical name).
+            if (scriptContext->IsEvalArgumentsInVarEnv())
+            {
                 return;
             }
         }
