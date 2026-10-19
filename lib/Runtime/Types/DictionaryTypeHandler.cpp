@@ -364,6 +364,55 @@ namespace Js
     }
 
     template <typename T>
+    DictionaryPropertyDescriptor<T>* DictionaryTypeHandlerBase<T>::ReAddPropertyAtEnd(DynamicObject* instance, PropertyRecord const* propertyRecord, DictionaryPropertyDescriptor<T>* descriptor)
+    {
+        // A re-added property is a new insertion for enumeration order. Move its dictionary entry to the end
+        // without disturbing its value/accessor slots. Deleted tombstones are dropped; deleted let/const
+        // descriptors stay because they still describe a live binding. The rebuild keeps propertyMap indices
+        // compact, which FindNextProperty and enumeration caches walk in order.
+        ScriptContext* scriptContext = instance->GetScriptContext();
+        Assert(descriptor != nullptr);
+        Assert(!(descriptor->Attributes & (PropertyDeleted | PropertyLetConstGlobal)));
+
+        DictionaryPropertyDescriptor<T> newDescriptor = *descriptor;
+
+        PropertyDescriptorMap* newPropertyMap = RecyclerNew(scriptContext->GetRecycler(),
+            PropertyDescriptorMap, scriptContext->GetRecycler(), propertyMap->Count());
+
+        for (int i = 0; i < propertyMap->Count(); ++i)
+        {
+            PropertyRecord const* key = propertyMap->GetKeyAt(i);
+            DictionaryPropertyDescriptor<T> entry = propertyMap->GetValueAt(i);
+
+            if (entry.Attributes & PropertyDeleted)
+            {
+                if (entry.Attributes & PropertyLetConstGlobal)
+                {
+                    // Keep the deleted global descriptor: it also represents the let/const binding.
+                }
+                else
+                {
+                    continue;
+                }
+            }
+
+            if (key == propertyRecord)
+            {
+                // This is the old descriptor being replaced by the new insertion at the end. Its attributes
+                // may already have been reset by the caller.
+                continue;
+            }
+
+            newPropertyMap->Add(key, entry);
+        }
+
+        newPropertyMap->Add(propertyRecord, newDescriptor);
+        propertyMap = newPropertyMap;
+
+        return newPropertyMap->GetReferenceAt(newPropertyMap->Count() - 1);
+    }
+
+    template <typename T>
     void DictionaryTypeHandlerBase<T>::Add(
         const PropertyRecord* propertyRecord,
         PropertyAttributes attributes,
@@ -858,6 +907,7 @@ namespace Js
                         return false;
                     }
                 }
+                bool const reAddAtEnd = !(descriptor->Attributes & PropertyLetConstGlobal);
                 scriptContext->InvalidateProtoCaches(propertyId);
                 if (descriptor->Attributes & PropertyLetConstGlobal)
                 {
@@ -869,6 +919,10 @@ namespace Js
                 }
                 instance->SetHasNoEnumerableProperties(false);
                 descriptor->ConvertToData();
+                if (reAddAtEnd)
+                {
+                    descriptor = ReAddPropertyAtEnd(instance, propertyRecord, descriptor);
+                }
             }
             else if (!allowLetConstGlobal && descriptor->HasNonLetConstGlobal() && !(descriptor->Attributes & PropertyWritable))
             {
@@ -1659,6 +1713,7 @@ namespace Js
 #if ENABLE_FIXED_FIELDS
             Assert(descriptor->SanityCheckFixedBits());
 #endif
+            bool const reAddAtEnd = (descriptor->Attributes & PropertyDeleted) && !(descriptor->Attributes & PropertyLetConstGlobal);
             if (descriptor->Attributes & PropertyDeleted)
             {
                 if (descriptor->Attributes & PropertyLetConstGlobal)
@@ -1727,6 +1782,11 @@ namespace Js
                 InvalidateFixedField(instance, propertyId, descriptor);
             }
 #endif
+
+            if (reAddAtEnd)
+            {
+                descriptor = ReAddPropertyAtEnd(instance, propertyRecord, descriptor);
+            }
 
             // don't overwrite an existing accessor with null
             if (getter != nullptr)
@@ -1848,6 +1908,9 @@ namespace Js
                     }
                 }
 
+                // [[DefineOwnProperty]] converts an accessor to data by deleting and re-adding with Force. That is
+                // a redefinition, not a deletion followed by a new insertion, so it must keep the original position.
+                bool const reAddAtEnd = !(descriptor->Attributes & PropertyLetConstGlobal) && !(flags & PropertyOperation_Force);
                 scriptContext->InvalidateProtoCaches(propertyId);
                 if (descriptor->Attributes & PropertyLetConstGlobal)
                 {
@@ -1858,6 +1921,10 @@ namespace Js
                     descriptor->Attributes = attributes;
                 }
                 descriptor->ConvertToData();
+                if (reAddAtEnd)
+                {
+                    descriptor = ReAddPropertyAtEnd(instance, propertyRecord, descriptor);
+                }
             }
             else if (descriptor->GetIsShadowed())
             {

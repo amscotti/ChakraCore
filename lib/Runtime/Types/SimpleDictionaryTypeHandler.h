@@ -273,6 +273,8 @@ namespace Js
         BOOL ClearAttribute(DynamicObject* instance, SimpleDictionaryPropertyDescriptor<TPropertyIndex>* descriptor, PropertyAttributes attribute);
         void EnsureSlotCapacity(DynamicObject * instance);
         template <typename TPropertyKey>
+        SimpleDictionaryPropertyDescriptor<TPropertyIndex>* ReAddPropertyAtEnd(DynamicObject* instance, TPropertyKey propertyKey, SimpleDictionaryPropertyDescriptor<TPropertyIndex>* descriptor);
+        template <typename TPropertyKey>
         BOOL AddProperty(DynamicObject* instance, TPropertyKey propertyKey, Var value, PropertyAttributes attributes, PropertyValueInfo* info, PropertyOperationFlags flags, SideEffects possibleSideEffects);
         virtual BOOL FreezeImpl(DynamicObject* instance, bool isConvertedType) override;
 

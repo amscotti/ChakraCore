@@ -173,6 +173,11 @@ namespace Js
         return scriptContext->GetPropertyName(propertyId);
     }
 
+    const PropertyRecord* TMapKey_OptionalConvertPropertyIdToPropertyRecord(ScriptContext* scriptContext, const PropertyRecord* propertyRecord)
+    {
+        return propertyRecord;
+    }
+
 
     template <typename TPropertyKey>
     PropertyId TPropertyKey_GetUpdateSideEffectPropertyId(PropertyId propertyId, TPropertyKey propertyKey);
@@ -1376,18 +1381,37 @@ namespace Js
                 }
             }
 
-            if(SupportsSwitchingToUnordered(scriptContext))
+            // Ordered handlers must enumerate a re-added property at its new insertion position. The unordered
+            // handler deliberately reuses deleted slots and has no insertion-order guarantee.
+            bool const reAddAtEnd = !isUnordered && !(descriptor->Attributes & PropertyLetConstGlobal);
+            if (reAddAtEnd && this->GetSlotCapacity() <= this->nextPropertyIndex)
             {
-                --numDeletedProperties;
+                if (this->GetSlotCapacity() >= MaxPropertyIndexSize)
+                {
+                    return this->ConvertToBigSimpleDictionaryTypeHandler(instance)->SetProperty(instance, propertyId, value, flags, info);
+                }
+                EnsureSlotCapacity(instance);
             }
-            descriptor->Attributes = PropertyDynamicTypeDefaults;
+
+            if (!reAddAtEnd)
+            {
+                if(SupportsSwitchingToUnordered(scriptContext))
+                {
+                    --numDeletedProperties;
+                }
+                descriptor->Attributes = PropertyDynamicTypeDefaults;
+            }
             instance->SetHasNoEnumerableProperties(false);
             propertyId = TPropertyKey_GetOptionalPropertyId(instance->GetScriptContext(), propertyKey);
             if (propertyId != Constants::NoProperty)
             {
                 scriptContext->InvalidateProtoCaches(propertyId);
             }
-            descriptor->Attributes = PropertyDynamicTypeDefaults;
+            if (reAddAtEnd)
+            {
+                descriptor->Attributes = PropertyDynamicTypeDefaults;
+                descriptor = ReAddPropertyAtEnd(instance, propertyKey, descriptor);
+            }
         }
         else if (!(descriptor->Attributes & PropertyWritable) && !(flags & PropertyOperation_AllowUndeclInConsoleScope))
         {
@@ -2379,6 +2403,7 @@ namespace Js
                                 possibleSideEffects);
             }
 
+            bool reAddAtEnd = false;
             if (descriptor->Attributes & PropertyDeleted && !(descriptor->Attributes & PropertyLetConstGlobal))
             {
                 Assert((descriptor->Attributes & PropertyLetConstGlobal) == 0);
@@ -2425,12 +2450,28 @@ namespace Js
                     }
                 }
 
-                if(SupportsSwitchingToUnordered(scriptContext))
+                // [[DefineOwnProperty]] converts an accessor to data by deleting and re-adding with Force. That is
+                // a redefinition, not a deletion followed by a new insertion, so it must keep the original position.
+                reAddAtEnd = !isUnordered && !(flags & PropertyOperation_Force);
+                if (reAddAtEnd && this->GetSlotCapacity() <= this->nextPropertyIndex)
                 {
-                    --numDeletedProperties;
+                    if (this->GetSlotCapacity() >= MaxPropertyIndexSize)
+                    {
+                        return this->ConvertToBigSimpleDictionaryTypeHandler(instance)->SetPropertyWithAttributes(
+                            instance, propertyId, value, attributes, info, flags, possibleSideEffects);
+                    }
+                    EnsureSlotCapacity(instance);
+                }
+
+                if (!reAddAtEnd)
+                {
+                    if(SupportsSwitchingToUnordered(scriptContext))
+                    {
+                        --numDeletedProperties;
+                    }
+                    descriptor->Attributes = PropertyDynamicTypeDefaults;
                 }
                 scriptContext->InvalidateProtoCaches(propertyId);
-                descriptor->Attributes = PropertyDynamicTypeDefaults;
             }
 
             if (descriptor->Attributes != attributes)
@@ -2460,6 +2501,12 @@ namespace Js
 
                     descriptor->Attributes = attributes;
                 }
+            }
+
+            if (reAddAtEnd)
+            {
+                descriptor->Attributes = attributes;
+                descriptor = ReAddPropertyAtEnd(instance, propertyRecord, descriptor);
             }
 
             if (descriptor->propertyIndex != NoSlots)
@@ -2641,19 +2688,92 @@ namespace Js
     template <typename TPropertyIndex, typename TMapKey, bool IsNotExtensibleSupported>
     BOOL SimpleDictionaryTypeHandlerBase<TPropertyIndex, TMapKey, IsNotExtensibleSupported>::GetAttributesWithPropertyIndex(DynamicObject * instance, PropertyId propertyId, BigPropertyIndex index, PropertyAttributes * attributes)
     {
-        // this might get value that are deleted from the dictionary, but that should be nulled out
+        // The index passed here is a property slot, not a propertyMap index: after a delete/re-add rebuild the
+        // two differ for descriptors that follow a hole. The property id identifies the descriptor unambiguously.
         SimpleDictionaryPropertyDescriptor<TPropertyIndex> const * descriptor;
-        if (!propertyMap->TryGetValueAt(index, &descriptor))
+        bool found = false;
+        if (propertyId != Constants::NoProperty)
         {
+            PropertyRecord const* propertyRecord = instance->GetScriptContext()->GetPropertyName(propertyId);
+            found = propertyMap->TryGetReference(propertyRecord, &descriptor);
+        }
+        if (!found && !propertyMap->TryGetValueAt(index, &descriptor))
+        {
+            // this might get value that are deleted from the dictionary, but that should be nulled out
             return false;
         }
-        Assert(descriptor->propertyIndex == index);
         if (descriptor->Attributes & PropertyDeleted)
         {
             return false;
         }
         *attributes = descriptor->Attributes & PropertyDynamicTypeDefaults;
         return true;
+    }
+
+    template <typename TPropertyIndex, typename TMapKey, bool IsNotExtensibleSupported>
+    template <typename TPropertyKey>
+    SimpleDictionaryPropertyDescriptor<TPropertyIndex>* SimpleDictionaryTypeHandlerBase<TPropertyIndex, TMapKey, IsNotExtensibleSupported>::ReAddPropertyAtEnd(DynamicObject* instance, TPropertyKey propertyKey, SimpleDictionaryPropertyDescriptor<TPropertyIndex>* descriptor)
+    {
+        // A deleted property that is added back is a new property for enumeration purposes: it goes after every
+        // property that currently exists, regardless of the position its deleted descriptor occupied. The slot is
+        // kept unique and monotonically increasing, so the descriptor's slot remains usable and type-handler
+        // conversions can continue to transfer values by slot.
+        //
+        // The map is rebuilt instead of using BaseDictionary::Remove because Remove frees an entry index in place
+        // (and would have to be reinserted through the free list), while enumeration and inline-cache lookups walk
+        // propertyMap indices in order. The rebuild retains live descriptors in order, drops ordinary deleted
+        // tombstones, preserves deleted let/const descriptors (they still represent a live binding), and appends the
+        // re-added descriptor. Allocation is recycler-owned through the handler's existing propertyMap field.
+        ScriptContext* scriptContext = instance->GetScriptContext();
+        Assert(descriptor != nullptr);
+        Assert(!(descriptor->Attributes & (PropertyDeleted | PropertyLetConstGlobal)));
+
+        TMapKey mapKey = TMapKey_ConvertKey<TMapKey>(scriptContext, TMapKey_OptionalConvertPropertyIdToPropertyRecord(scriptContext, propertyKey));
+
+        SimpleDictionaryPropertyDescriptor<TPropertyIndex> newDescriptor = *descriptor;
+        newDescriptor.propertyIndex = this->nextPropertyIndex;
+
+        SimplePropertyDescriptorMap* newPropertyMap = RecyclerNew(scriptContext->GetRecycler(),
+            SimplePropertyDescriptorMap, scriptContext->GetRecycler(), propertyMap->Count());
+
+        byte deletedCount = 0;
+        for (int i = 0; i < propertyMap->Count(); ++i)
+        {
+            TMapKey key = propertyMap->GetKeyAt(i);
+            SimpleDictionaryPropertyDescriptor<TPropertyIndex> entry = propertyMap->GetValueAt(i);
+
+            if (entry.Attributes & PropertyDeleted)
+            {
+                if (entry.Attributes & PropertyLetConstGlobal)
+                {
+                    // Deleted global data may still shadow a let/const binding, so keep the descriptor.
+                    if (deletedCount < 0xFF)
+                    {
+                        ++deletedCount;
+                    }
+                }
+                else
+                {
+                    continue;
+                }
+            }
+
+            if (PropertyRecordStringHashComparer<TMapKey>::Equals(key, mapKey))
+            {
+                // This is the old descriptor being replaced by the new insertion at the end. Its attributes
+                // may already have been reset by the caller.
+                continue;
+            }
+
+            newPropertyMap->Add(key, entry);
+        }
+
+        newPropertyMap->Add(mapKey, newDescriptor);
+        propertyMap = newPropertyMap;
+        this->nextPropertyIndex = newDescriptor.propertyIndex + 1;
+        SetNumDeletedProperties(deletedCount);
+
+        return newPropertyMap->GetReferenceAt(newPropertyMap->Count() - 1);
     }
 
     template <typename TPropertyIndex, typename TMapKey, bool IsNotExtensibleSupported>
