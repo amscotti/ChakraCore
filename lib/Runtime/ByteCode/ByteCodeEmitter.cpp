@@ -12144,11 +12144,11 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
             {
                 funcInfo->ReleaseTmpRegister(incDecResult);
             }
+            funcInfo->ReleaseLoad(pnode1);
             if (referenceBaseLocation != Js::Constants::NoRegister)
             {
                 funcInfo->ReleaseTmpRegister(referenceBaseLocation);
             }
-            funcInfo->ReleaseLoad(pnode1);
             byteCodeGenerator->EndStatement(pnode);
 
             break;
@@ -12175,6 +12175,12 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
             || funcInfo->RegIsConst(pnode1->location)
             || (pnode1->nop == knopName && pnode1->AsParseNodeName()->sym && pnode1->AsParseNodeName()->sym->GetIsFuncExpr());
 
+        // Acquire the result slot before the captured base. The result stays
+        // live for the enclosing expression, so the base must be above it on
+        // the temp stack and be released first.
+        const Js::RegSlot result_location =
+            need_result_location ? funcInfo->AcquireLoc(pnode) : Js::Constants::NoRegister;
+
         Js::RegSlot referenceBaseLocation = Js::Constants::NoRegister;
         if (pnode1->nop == knopName && !pnode1->AsParseNodeName()->IsSpecialName())
         {
@@ -12183,8 +12189,6 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
 
         if (need_result_location)
         {
-            const Js::RegSlot result_location = funcInfo->AcquireLoc(pnode);
-
             EmitLoad(pnode1, byteCodeGenerator, funcInfo);
             byteCodeGenerator->Writer()->Reg2(op, result_location, pnode1->location);
 
@@ -12199,11 +12203,11 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
             // Store the incremented value and release the l-value.
             EmitAssignment(nullptr, pnode1, pnode1->location, byteCodeGenerator, funcInfo, referenceBaseLocation);
         }
+        funcInfo->ReleaseLoad(pnode1);
         if (referenceBaseLocation != Js::Constants::NoRegister)
         {
             funcInfo->ReleaseTmpRegister(referenceBaseLocation);
         }
-        funcInfo->ReleaseLoad(pnode1);
 
         byteCodeGenerator->EndStatement(pnode);
         break;
@@ -12560,14 +12564,14 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
             EmitBinaryReference(lhs, rhs, byteCodeGenerator, funcInfo, false, true, &referenceBaseLocation);
             EmitAssignment(nullptr, lhs, rhs->location, byteCodeGenerator, funcInfo, referenceBaseLocation);
         }
-        if (referenceBaseLocation != Js::Constants::NoRegister)
-        {
-            funcInfo->ReleaseTmpRegister(referenceBaseLocation);
-        }
         funcInfo->ReleaseLoc(rhs);
         if (!lhs->IsPattern())
         {
             funcInfo->ReleaseReference(lhs);
+        }
+        if (referenceBaseLocation != Js::Constants::NoRegister)
+        {
+            funcInfo->ReleaseTmpRegister(referenceBaseLocation);
         }
         byteCodeGenerator->EndStatement(pnode);
         break;
@@ -12797,11 +12801,11 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
             byteCodeGenerator->Writer()->Reg3(nopToOp[pnode->nop], lhs->location, lhs->location, rhs->location);
             EmitAssignment(nullptr, lhs, lhs->location, byteCodeGenerator, funcInfo, referenceBaseLocation);
         }
+        funcInfo->ReleaseLoad(lhs);
         if (referenceBaseLocation != Js::Constants::NoRegister)
         {
             funcInfo->ReleaseTmpRegister(referenceBaseLocation);
         }
-        funcInfo->ReleaseLoad(lhs);
 
         byteCodeGenerator->EndStatement(pnode);
         break;
@@ -12846,11 +12850,11 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
         funcInfo->ReleaseLoc(rhs);
 
         byteCodeGenerator->Writer()->MarkLabel(doneLabel);
+        funcInfo->ReleaseLoad(lhs);
         if (referenceBaseLocation != Js::Constants::NoRegister)
         {
             funcInfo->ReleaseTmpRegister(referenceBaseLocation);
         }
-        funcInfo->ReleaseLoad(lhs);
 
         byteCodeGenerator->EndStatement(pnode);
         break;

@@ -190,6 +190,76 @@ var tests = [
         }
     },
     {
+        name: "with: function expression name is shadowed by the object environment",
+        body() {
+            var fn = function name() {
+                var seen;
+                with ({ name: 5 }) {
+                    name = 7;
+                    seen = name;
+                }
+                return seen;
+            };
+            assert.areEqual(7, fn(), "the with binding receives the assignment");
+        }
+    },
+    {
+        name: "with: variable RHS keeps captured-base temps balanced",
+        body() {
+            var o = { x: 1, y: 2, a: 0, b: 1 };
+
+            with (o) {
+                x = y;
+            }
+            assert.areEqual(2, o.x, "simple assignment with a variable RHS");
+
+            with (o) {
+                x += y;
+            }
+            assert.areEqual(4, o.x, "compound assignment with a variable RHS");
+
+            with (o) {
+                a ||= y;
+            }
+            assert.areEqual(2, o.a, "logical assignment with a variable RHS");
+
+            with (o) {
+                b &&= y;
+            }
+            assert.areEqual(2, o.b, "short-circuit assignment with a variable RHS");
+
+            with (o) {
+                x++;
+                ++y;
+            }
+            assert.areEqual(5, o.x, "postfix increment on a captured base");
+            assert.areEqual(3, o.y, "prefix increment on a captured base");
+        }
+    },
+    {
+        name: "with: typed-array prototype canonical numeric non-index is a no-op",
+        body() {
+            var typedArray = new Int32Array(10);
+            var env = Object.create(typedArray);
+            Object.defineProperty(env, "NaN", {
+                configurable: true,
+                value: 100
+            });
+
+            with (env) {
+                NaN = (delete env.NaN, 0);
+            }
+
+            assert.areEqual(undefined, Object.getOwnPropertyDescriptor(env, "NaN"),
+                "the deleted with binding is not recreated");
+
+            var direct = Object.create(new Int32Array(4));
+            direct.NaN = 0;
+            assert.areEqual(undefined, Object.getOwnPropertyDescriptor(direct, "NaN"),
+                "direct assignment follows the typed-array prototype [[Set]] no-op");
+        }
+    },
+    {
         name: "with: strict assignment to a deleted binding throws and does not recreate it",
         body() {
             var x = 0;
