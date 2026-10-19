@@ -1309,7 +1309,9 @@ static const Js::FunctionInfo::Attributes StableFunctionInfoAttributesMask = (Js
     Js::FunctionInfo::Attributes::Module |
     Js::FunctionInfo::Attributes::ComputedName |
     Js::FunctionInfo::Attributes::HomeObj |
-    Js::FunctionInfo::Attributes::GeneratorWithComplexParams
+    Js::FunctionInfo::Attributes::GeneratorWithComplexParams |
+    Js::FunctionInfo::Attributes::ParameterNamedArguments |
+    Js::FunctionInfo::Attributes::TopLevelLexicalArguments
 );
 
 static Js::FunctionInfo::Attributes GetFunctionInfoAttributes(ParseNodeFnc * pnodeFnc)
@@ -1322,6 +1324,14 @@ static Js::FunctionInfo::Attributes GetFunctionInfoAttributes(ParseNodeFnc * pno
     if (pnodeFnc->IsLambda())
     {
         attributes = (Js::FunctionInfo::Attributes)(attributes | Js::FunctionInfo::Attributes::ErrorOnNew | Js::FunctionInfo::Attributes::Lambda);
+    }
+    if ((pnodeFnc->grfpn & PNodeFlags::fpnArguments_overriddenInParam) != 0)
+    {
+        attributes = (Js::FunctionInfo::Attributes)(attributes | Js::FunctionInfo::Attributes::ParameterNamedArguments);
+    }
+    if ((pnodeFnc->grfpn & PNodeFlags::fpnArguments_overriddenByDecl) != 0)
+    {
+        attributes = (Js::FunctionInfo::Attributes)(attributes | Js::FunctionInfo::Attributes::TopLevelLexicalArguments);
     }
     if (pnodeFnc->HasSuperReference())
     {

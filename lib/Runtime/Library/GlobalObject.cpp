@@ -596,7 +596,8 @@ using namespace Js;
         bool evalInDerivedFieldConstructor = false;
         bool evalInParamScope = false;
         bool evalInArrowParamScope = false;
-        bool evalArgumentsInVarEnv = false;
+        bool evalCallerParameterArguments = false;
+        bool evalCallerBodyLexicalArguments = false;
         if (args.IsDirectEvalCall() && !isIndirect)
         {
             JavascriptFunction * pfuncCaller = nullptr;
@@ -625,11 +626,11 @@ using namespace Js;
                         // environment. Its variable environment is the outer
                         // call environment, not the parameter scope.
                         FunctionBody *callerBody = pfuncCaller->GetFunctionBody();
+                        FunctionInfo *callerInfo = callerBody->GetFunctionInfo();
                         evalInParamScope = callerFrame != nullptr && !callerFrame->IsParamScopeDone();
                         evalInArrowParamScope = evalInParamScope && callerBody->IsLambda();
-                        evalArgumentsInVarEnv =
-                            !evalInParamScope && !callerBody->IsLambda() &&
-                            callerBody->IsParamAndBodyScopeMerged();
+                        evalCallerParameterArguments = callerInfo->HasParameterNamedArguments();
+                        evalCallerBodyLexicalArguments = callerInfo->HasTopLevelLexicalArguments();
                     }
                 }
                 if (pfuncCaller == nullptr || !pfuncCaller->IsScriptFunction())
@@ -794,7 +795,7 @@ using namespace Js;
             }
         }
 
-        return library->GetGlobalObject()->ExecuteEvalParsedFunction(pfuncScript, environment, varThis, scriptContext, evalInParamScope, evalInArrowParamScope, evalArgumentsInVarEnv);
+        return library->GetGlobalObject()->ExecuteEvalParsedFunction(pfuncScript, environment, varThis, scriptContext, evalInParamScope, evalInArrowParamScope, evalCallerParameterArguments, evalCallerBodyLexicalArguments);
     }
 
     void GlobalObject::UpdateThisForEval(Var &varThis, ModuleID moduleID, ScriptContext *scriptContext)
@@ -803,7 +804,7 @@ using namespace Js;
     }
 
 
-    Var GlobalObject::ExecuteEvalParsedFunction(ScriptFunction *pfuncScript, FrameDisplay* environment, Var &varThis, ScriptContext *scriptContext, bool evalInParamScope, bool evalInArrowParamScope, bool evalArgumentsInVarEnv)
+    Var GlobalObject::ExecuteEvalParsedFunction(ScriptFunction *pfuncScript, FrameDisplay* environment, Var &varThis, ScriptContext *scriptContext, bool evalInParamScope, bool evalInArrowParamScope, bool evalCallerParameterArguments, bool evalCallerBodyLexicalArguments)
     {
         Assert(pfuncScript != nullptr);
 
@@ -821,24 +822,28 @@ using namespace Js;
             ScriptContext *scriptContext;
             bool saved;
             bool savedArrow;
-            bool savedVarEnv;
-            AutoRestoreEvalInParamScope(ScriptContext *scriptContext, bool value, bool arrowValue, bool varEnvValue)
+            bool savedParamArgs;
+            bool savedBodyLexicalArgs;
+            AutoRestoreEvalInParamScope(ScriptContext *scriptContext, bool value, bool arrowValue, bool paramArgsValue, bool bodyLexicalArgsValue)
                 : scriptContext(scriptContext),
                   saved(scriptContext->IsEvalInParamScope()),
                   savedArrow(scriptContext->IsEvalInArrowParamScope()),
-                  savedVarEnv(scriptContext->IsEvalArgumentsInVarEnv())
+                  savedParamArgs(scriptContext->IsEvalCallerParameterArguments()),
+                  savedBodyLexicalArgs(scriptContext->IsEvalCallerBodyLexicalArguments())
             {
                 scriptContext->SetEvalInParamScope(value);
                 scriptContext->SetEvalInArrowParamScope(arrowValue);
-                scriptContext->SetEvalArgumentsInVarEnv(varEnvValue);
+                scriptContext->SetEvalCallerParameterArguments(paramArgsValue);
+                scriptContext->SetEvalCallerBodyLexicalArguments(bodyLexicalArgsValue);
             }
             ~AutoRestoreEvalInParamScope()
             {
                 scriptContext->SetEvalInParamScope(saved);
                 scriptContext->SetEvalInArrowParamScope(savedArrow);
-                scriptContext->SetEvalArgumentsInVarEnv(savedVarEnv);
+                scriptContext->SetEvalCallerParameterArguments(savedParamArgs);
+                scriptContext->SetEvalCallerBodyLexicalArguments(savedBodyLexicalArgs);
             }
-        } restoreEvalInParamScope(scriptContext, evalInParamScope, evalInArrowParamScope, evalArgumentsInVarEnv);
+        } restoreEvalInParamScope(scriptContext, evalInParamScope, evalInArrowParamScope, evalCallerParameterArguments, evalCallerBodyLexicalArguments);
 
         Var varResult = nullptr;
         BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())

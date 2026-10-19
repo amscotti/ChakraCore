@@ -8072,16 +8072,29 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
                 }
                 if (!hasBinding)
                 {
-                    paramScope->EnsureProperty(propertyId);
+                    // A var binding is writable and enumerable but not
+                    // configurable; EnsureProperty would make it configurable.
+                    paramScope->InitProperty(propertyId,
+                        scriptContext->GetLibrary()->GetUndefined(), PropertyOperation_None, nullptr);
                 }
                 return;
             }
 
-            // The body's merged variable environment already owns the
-            // parameter/implicit arguments binding, so a body eval var
-            // declaration is legal (it redeclares a var, not a lexical name).
-            if (scriptContext->IsEvalArgumentsInVarEnv())
+            // Body eval: the first environment is either the body's lexical
+            // environment or its variable environment. A lexical arguments
+            // binding conflicts; a parameter named arguments lives in the
+            // merged variable environment and does not.
+            if (FrameDisplay::GetScopeType(pDisplay->GetItem(0)) == ScopeType_ActivationObject)
             {
+                ActivationObject *firstScope = VarTo<ActivationObject>(pDisplay->GetItem(0));
+                bool noRedecl = false;
+                bool hasBinding = firstScope->GetTypeHandler()->HasProperty(firstScope, propertyId, &noRedecl);
+                if (hasBinding && noRedecl &&
+                    (scriptContext->IsEvalCallerBodyLexicalArguments() ||
+                     !scriptContext->IsEvalCallerParameterArguments()))
+                {
+                    JavascriptError::ThrowSyntaxError(scriptContext, ERRRedeclaration);
+                }
                 return;
             }
         }

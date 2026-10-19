@@ -35,38 +35,48 @@ names: non-`arguments` eval/parameter collisions remain P4-owned.
 ## Design
 
 - `GlobalObject::VEval` determines whether a direct eval call is running in
-  the caller's parameter scope, whether that caller is an arrow, and whether a
-  body eval runs in a merged parameter/body variable environment. It already
-  walks the stack for the class-field context; the first script caller's
-  `InterpreterStackFrame::IsParamScopeDone`, `FunctionBody::IsLambda` and
-  `IsParamAndBodyScopeMerged` are the discriminators. The three booleans are
-  passed to `ExecuteEvalParsedFunction`, which publishes them on
-  `ScriptContext` with an RAII save/restore across the eval call (including
-  abrupt completion).
+  the caller's parameter scope, whether that caller is an arrow, whether the
+  caller has a parameter named `arguments`, and whether the caller's top-level
+  body has a lexical `arguments` declaration. It already walks the stack for
+  the class-field context; the first script caller's
+  `InterpreterStackFrame::IsParamScopeDone`, `FunctionBody::IsLambda`, and two
+  stable `FunctionInfo` attributes (set from the parser's
+  `fpnArguments_overriddenInParam`/`fpnArguments_overriddenByDecl`) are the
+  discriminators. The four booleans are passed to
+  `ExecuteEvalParsedFunction`, which publishes them on `ScriptContext` with an
+  RAII save/restore across the eval call (including abrupt completion).
 - In `OP_ScopedEnsureNoRedeclProperty` (`ByteCodeEmitter`'s eval-only
   `ScopedEnsureNoRedeclFld`), `arguments` is checked directly:
   - in a parameter-scope eval, the first frame-display environment is the
     parameter scope. An implicit arguments object or a formal named
     `arguments` (no-redeclaration property) throws `SyntaxError`. An
     eval-created property has no redeclaration flag, so a second eval
-    declaration is legal; the first legal declaration creates the binding.
-  - a body eval in a merged parameter/body environment stops at that variable
-    environment, so `var arguments` remains legal there.
+    declaration is legal; the first legal declaration creates a writable,
+    enumerable, non-configurable var binding with `InitProperty`.
+  - in a body eval, the first activation is either the body lexical
+    environment or its variable environment. A no-redeclaration `arguments`
+    there is a lexical collision unless the caller's parameter itself is named
+    `arguments` and there is no top-level body lexical `arguments`; that
+    parameter lives in the merged variable environment and remains legal.
+    This covers simple/split/generator bodies, catch/with blocks and nested
+    blocks, and lets a body eval declare its own binding without inspecting an
+    outer split-scope parameter binding.
   - elsewhere the normal eval redeclaration walk runs. For `arguments` it uses
     `EnsureNoRedeclPropertyForEval`, a SyntaxError-reporting variant of the
     existing lexical-redeclaration check; other names keep the existing
-    `EnsureNoRedeclProperty` behavior. The variant stops the walk at each
-    function variable environment whether or not it already owns the name, so
-    a split-scope body eval does not inspect an outer parameter binding.
+    `EnsureNoRedeclProperty` behavior.
 - An arrow's parameter scope is marked dynamic when the direct eval is in its
   parameter list (`ByteCodeGenerator::StartBindFunction`), so a parameter
   closure (`q = () => arguments`) resolves the eval-created binding. Body
-  loads, `typeof`, and call-target resolution of the outer parameter scope
-  emit `LdParamObj` plus a property check instead of reading the body closure
-  register (`DynamicLoadKind::ParamObj`). This makes the eval-created binding
-  visible to the body without copying a value into the body scope, so unrelated
-  body var/function bindings keep their own slots and body eval/var
-  declarations shadow the parameter binding normally.
+  loads, `typeof`, call-target resolution, stores, compound assignments,
+  increments and deletes of the outer parameter scope emit `LdParamObj` plus a
+  property check instead of reading the body closure register
+  (`DynamicLoadKind::ParamObj`). Stores use `StFld`, deletes
+  `DeleteFld_ReuseLoc`; this keeps body reads and writes on the same parameter
+  binding, never a global property, and lets delete fail on the
+  non-configurable binding. Unrelated body var/function bindings keep their
+  own slots, and body eval/var declarations shadow the parameter binding
+  normally.
 - `ActivationObject`/`RootObjectBase` gain the
   `EnsureNoRedeclPropertyForEval` override; `BlockActivationObject` and
   `PseudoActivationObject` keep returning false. `RecyclableObject` provides
@@ -95,7 +105,8 @@ Selection `test/language/eval-code/direct/*arguments*.js`:
 | Run | Passed | Failed | Scenarios |
 |---|---:|---:|---:|
 | before (`out/test262-c2-s14-p2-before`) | 35 | 157 | 192 |
-| after (`out/test262-c2-s14-p2-after`) | **192** | **0** | 192 |
+| after (`out/test262-c2-s14-p2-final-direct`) | **192** | **0** | 192 |
+| after, `-force:deferparse` (`out/test262-c2-s14-p2-final-direct-defer`) | **192** | **0** | 192 |
 
 Exact flips: **157 fail→pass, 0 pass→fail**. All 35 pre-existing passes
 (including the async cases that pass vacuously on the fulfilled path) remain
@@ -108,7 +119,7 @@ Full direct+indirect eval-code directory:
 | Run | Passed | Failed | Scenarios |
 |---|---:|---:|---:|
 | before (`out/test262-c2-s14-p2-evalcode-before`) | 280 | 174 | 454 |
-| after (`out/test262-c2-s14-p2-evalcode-final`) | **437** | **17** | 454 |
+| after (`out/test262-c2-s14-p2-final-evalcode`) | **437** | **17** | 454 |
 
 Exact diff: **157 fail→pass, 0 pass→fail**. The residual 17 are pre-existing
 P4/class-field `super` cases (`super-prop*`, `var-env-*`, both direct and
@@ -121,7 +132,7 @@ Broader affected-shape run
 | Run | Passed | Failed |
 |---|---:|---:|
 | before (`out/test262-c2-s14-p2-regress-before`) | 1,711 | 157 |
-| after (`out/test262-c2-s14-p2-regress-after`) | **1,715** | **153** |
+| after (`out/test262-c2-s14-p2-final-regress`) | **1,715** | **153** |
 
 Exact diff: **4 fail→pass, 0 pass→fail** (the four
 `arrow-function/scope-param-{elem,rest}-var-{open,close}.js` cases, which
@@ -137,8 +148,12 @@ pins the regression shapes found in review: body var/function/parameter
 bindings after an arrow parameter eval (no aliasing), duplicate var and
 function declarations in one or two parameter evals (last value/function
 wins), body eval after a parameter eval (undefined body binding), and body eval
-with a parameter named `arguments` in default, direct-eval-default, rest and
-destructured parameter forms.
+with a parameter named `arguments` in function and arrow default,
+direct-eval-default, rest and destructured parameter forms. Body writes,
+compound assignments, increments and deletes of the eval-created binding are
+covered, including the non-configurable delete result and global-object
+non-leakage, plus top-level body `let`/`const` collisions in simple, split,
+generator, catch, with and nested-block shapes.
 
 The legacy suite (`runtests.py -t --variants disable_jit test`) is
 **1994/0**, including `test/es6/default-splitscope.js`. That test caught an
@@ -157,10 +172,13 @@ the body scope.
 - Indirect eval, global code and module code are outside the trigger: no
   caller parameter scope is involved.
 - Nested-block and body-eval lexical collisions are only partially modelled.
-  The merged-body stop treats the first activation as the variable
-  environment; a `let arguments` in a nested block with an eval var declaration
-  can still be under-rejected where the engine's frame display does not expose
-  a separate lexical environment. This predates the slice and is not claimed.
+  The body rule inspects the first activation environment; a `let`/`const
+  arguments` in a nested block is detected for ordinary callers, but is
+  under-rejected when the same function also has a parameter named `arguments`
+  (the parameter flag allows the no-redeclaration first environment). A lexical
+  environment that the frame display does not expose as a separate first
+  activation has the same limitation. This predates the slice and is not
+  claimed.
 - Async functions surface the SyntaxError as a rejected promise; async
   generators and generators evaluate parameter defaults with the engine’s
   existing eager scheduling, so the corpus’s synchronous `assert.throws`

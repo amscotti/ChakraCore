@@ -96,6 +96,79 @@ var tests = [
         }
     },
     {
+        name: "arrow body writes update the eval-created parameter binding",
+        body() {
+            var hadArguments = "arguments" in globalThis;
+            var oldArguments = globalThis.arguments;
+
+            var f1 = (p = eval("var arguments = 'p'")) => { arguments = "q"; return arguments; };
+            assert.areEqual("q", f1(), "simple assignment updates the parameter binding");
+
+            var f2 = (p = eval("var arguments = 'p'")) => { arguments += "x"; return arguments; };
+            assert.areEqual("px", f2(), "compound assignment updates the parameter binding");
+
+            var f3 = (p = eval("var arguments = 1")) => { arguments++; return arguments; };
+            assert.areEqual(2, f3(), "increment updates the parameter binding");
+
+            var f4 = (p = eval("var arguments = 'p'")) => {
+                var result = delete arguments;
+                return [result, arguments];
+            };
+            var deleted = f4();
+            assert.isFalse(deleted[0], "eval-created binding is not configurable");
+            assert.areEqual("p", deleted[1], "failed delete preserves the binding value");
+
+            assert.areEqual(hadArguments, "arguments" in globalThis,
+                "body writes do not create a global arguments property");
+            if (hadArguments) {
+                assert.areEqual(oldArguments, globalThis.arguments, "global arguments is unchanged");
+            }
+        }
+    },
+    {
+        name: "body lexical arguments bindings conflict with eval var declarations",
+        body() {
+            assertEvalThrows(function () {
+                function f() { let arguments = 1; eval("var arguments"); }
+                f();
+            }, "simple parameter list, let");
+
+            assertEvalThrows(function () {
+                function f() { const arguments = 1; eval("var arguments"); }
+                f();
+            }, "simple parameter list, const");
+
+            assertEvalThrows(function () {
+                function f(p = 1) { let arguments = 1; eval("var arguments"); }
+                f();
+            }, "split parameter scope, let");
+
+            assertEvalThrows(function () {
+                function* f() { let arguments = 1; eval("var arguments"); yield 1; }
+                f().next();
+            }, "generator body, let");
+
+            assertEvalThrows(function () {
+                function f() {
+                    try { throw 1; } catch (e) { const arguments = 1; eval("var arguments"); }
+                }
+                f();
+            }, "catch block, const");
+
+            assertEvalThrows(function () {
+                function f() {
+                    with ({ x: 1 }) { let arguments = 1; eval("var arguments"); }
+                }
+                f();
+            }, "with block, let");
+
+            assertEvalThrows(function () {
+                function f() { { { const arguments = 1; eval("var arguments"); } } }
+                f();
+            }, "nested blocks, const");
+        }
+    },
+    {
         name: "arrow parameter redeclarations are legal and last value wins",
         body() {
             var f1 = (p = eval("var arguments; var arguments = 2")) => arguments;
@@ -132,6 +205,18 @@ var tests = [
 
             function f4(arguments, { p } = { p: 1 }) { eval("var arguments = 'b'"); return arguments; }
             assert.areEqual("b", f4("a"), "destructured default parameter");
+
+            var a1 = (arguments, p = 1) => { eval("var arguments = 'b'"); return arguments; };
+            assert.areEqual("b", a1("a"), "arrow default parameter");
+
+            var a2 = (arguments, p = eval("1")) => { eval("var arguments = 'b'"); return arguments; };
+            assert.areEqual("b", a2("a"), "arrow default expression with direct eval");
+
+            var a3 = (arguments, ...rest) => { eval("var arguments = 'b'"); return arguments; };
+            assert.areEqual("b", a3("a"), "arrow rest parameter");
+
+            var a4 = (arguments, { p } = { p: 1 }) => { eval("var arguments = 'b'"); return arguments; };
+            assert.areEqual("b", a4("a"), "arrow destructured default parameter");
         }
     },
     {
