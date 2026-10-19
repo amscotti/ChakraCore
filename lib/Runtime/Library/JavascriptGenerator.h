@@ -56,6 +56,12 @@ public:
 
         if (state == GeneratorState::Completed)
         {
+#if ENABLE_SUSPENDED_COROUTINE_REPARSE_GUARD
+            // Completion is observed after the JIT epilogue may already have
+            // nulled `frame`, so use the retained FunctionBody registration
+            // rather than the frame to release the reparse guard.
+            ReleaseLiveCoroutineFrame();
+#endif
             frame = nullptr;
             args.Values = nullptr;
             scriptFunction = nullptr;
@@ -79,6 +85,18 @@ private:
     // bookkeeping word as a live GC reference. It is cleared when the block is
     // unregistered and is never used to access the frame.
     uintptr_t writeBarrierFrame;
+
+#if ENABLE_SUSPENDED_COROUTINE_REPARSE_GUARD
+    // FunctionBody that owns the bytecode backing the suspended frame. This
+    // Field keeps the body alive for as long as the generator can resume into
+    // it; the paired count on that body blocks a debugger reparse from freeing
+    // the bytecode. Set by SetFrame and released exactly once on completion or
+    // on finalization of a collected suspended generator.
+    Field(FunctionBody*) liveCoroutineFunctionBody;
+    bool liveCoroutineFrameCounted;
+
+    void ReleaseLiveCoroutineFrame();
+#endif
 
     void SetResumeYieldProperties(Var value, ResumeYieldKind kind);
     void UnregisterPendingWriteBarrierBlocks();

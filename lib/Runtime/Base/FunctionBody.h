@@ -2151,6 +2151,16 @@ namespace Js
     private:
         FieldWithBarrier(uint) inactiveCount;
 
+#if ENABLE_SUSPENDED_COROUTINE_REPARSE_GUARD
+        // Number of live JavascriptGenerator frames that were created for this
+        // body and have not completed or been finalized. A non-zero count
+        // means a debugger reparse must not free this body's bytecode, const
+        // table or debug metadata: the suspended frame's ByteCodeReader still
+        // points into them. This is a plain count, not a GC reference; the
+        // JavascriptGenerator retains the body through its Field pointer.
+        uint liveCoroutineFrameCount;
+#endif
+
         // aligned with 8
         FieldWithBarrier(bool) m_tag32 : 1;
         FieldWithBarrier(bool) m_nativeEntryPointUsed : 1;    // Code might have been generated but not yet used.
@@ -2290,6 +2300,9 @@ namespace Js
     public:
         FunctionBody(ByteCodeCache* cache, Utf8SourceInfo* sourceInfo, ScriptContext* scriptContext):
             ParseableFunctionInfo((JavascriptMethod) nullptr, 0, (LocalFunctionId) 0, sourceInfo, scriptContext, 0, nullptr, 0, 0, FunctionInfo::Attributes::None, Flags_None)
+#if ENABLE_SUSPENDED_COROUTINE_REPARSE_GUARD
+            , liveCoroutineFrameCount(0)
+#endif
         {
             // Dummy constructor- does nothing
             // Must be stack allocated
@@ -2580,6 +2593,31 @@ namespace Js
             }
             return false;
         }
+
+#if ENABLE_SUSPENDED_COROUTINE_REPARSE_GUARD
+        // Paired with JavascriptGenerator::SetFrame and the generator's
+        // completion/finalization. The suspended frame must not outlive the
+        // bytecode it reads; see CleanupToReparse in FunctionBody.cpp.
+        void AddLiveCoroutineFrame()
+        {
+            Assert(this->liveCoroutineFrameCount != (uint)-1);
+            ++this->liveCoroutineFrameCount;
+        }
+
+        void RemoveLiveCoroutineFrame()
+        {
+            // Called from JavascriptGenerator::Finalize during GC as well as
+            // from the completion transition. It must stay allocation-free
+            // and must not run script.
+            Assert(this->liveCoroutineFrameCount != 0);
+            --this->liveCoroutineFrameCount;
+        }
+
+        bool HasLiveCoroutineFrames() const
+        {
+            return this->liveCoroutineFrameCount != 0;
+        }
+#endif
 
 #pragma region SourceInfo Methods
         void CopySourceInfo(ParseableFunctionInfo* originalFunctionInfo);

@@ -242,6 +242,17 @@
 #define ENABLE_RECYCLER_TYPE_TRACKING 0
 #endif
 
+// A suspended generator/async frame keeps a raw ByteCodeReader and operand
+// metadata pointing into the FunctionBody's bytecode block. On Apple ARM64 the
+// generator is finalizable (the software write barrier is always compiled in),
+// so count live suspended frames per FunctionBody and refuse to drop that
+// bytecode for a debugger reparse while a frame can still resume into it.
+#if defined(__APPLE__) && defined(_M_ARM64) && GLOBAL_ENABLE_WRITE_BARRIER
+#define ENABLE_SUSPENDED_COROUTINE_REPARSE_GUARD 1
+#else
+#define ENABLE_SUSPENDED_COROUTINE_REPARSE_GUARD 0
+#endif
+
 #if ENABLE_BACKGROUND_PAGE_ZEROING && !ENABLE_BACKGROUND_PAGE_FREEING
 #error "Background page zeroing can't be turned on if freeing pages in the background is disabled"
 #endif

@@ -16,8 +16,8 @@ native ARM64 macOS port`), `2372fcc81` (JIT build/runtime/bytecode checks),
 (generator write-barrier and empty-page leaks), and `9e1e4cb55` (full 64-bit
 InlineeCallInfo label). This milestone record is committed on top. The local
 tag `jit-arm64-macos-m1` marks the checkpoint; the branch is not merged.
-The installed binary is `out/jit/bin/libChakraCore.dylib`, 26238584 bytes,
-timestamp 2026-10-18 21:22. `out/jit/bin/ch` is the host (788320 bytes); it
+The installed binary is `out/jit/bin/libChakraCore.dylib`, 26238904 bytes,
+timestamp 2026-10-18 22:54. `out/jit/bin/ch` is the host (788320 bytes); it
 dlopens the sibling dylib, so trust the dylib timestamp. The suite logs named
 below are ephemeral local artifacts from the original runs; they are not
 checked in.
@@ -73,16 +73,92 @@ interpreter and JIT. The Apple ARM64 custom heap now uses full 16 KiB logical
 pages (256-byte chunks, 64 tracked chunks, bucket 6 for 16 KiB); non-Apple
 builds keep 4096/128/32. The PAL direct-embedder write-window contract and the
 single `HelperProfiledNewScObjArray` homing exception are documented at their
-call sites. Gates on the 21:22 binary: `disable_jit` 1973/0, `interpreted`
+call sites. Gates on the 22:54 binary: `disable_jit` 1973/0, `interpreted`
 2367/397 (asm.js/WASM only), `dynapogo` 1943/286 (asm.js/WASM only), zero
-signals. The suspended-coroutine reparse lifetime remains the open runtime
-item.
+signals. The suspended-generator reparse lifetime now has an Apple ARM64
+live-frame guard; plain async functions remain exposed (pending-await attach
+can abort in `AsyncSpawnStep`). See
+[Suspended-generator reparse guard](#suspended-generator-reparse-guard-apple-arm64).
 
 Non-blocking follow-ups are listed in
 [Known open engine issues](#known-open-engine-issues) and the
-[Swarm review queue](#swarm-review-queue): suspended-coroutine bytecode
-lifetime across debugger reparse, and unbuilt
-Windows/ARM32/TTD/hardened-entitlement paths.
+[Swarm review queue](#swarm-review-queue): debugger breakpoint deferral in
+suspended generator bodies, the async-function pending-await crash, and
+unbuilt Windows/ARM32 builds, TTD+debugger-action coverage, and hardened
+entitlement paths.
+
+#### Suspended-generator reparse guard (Apple ARM64)
+
+`ParseableFunctionInfo::CleanupToReparse` normally drops the bytecode block,
+const table, statement maps and other codegen metadata so a debug-mode reparse
+can build debug bytecode. A suspended generator frame (synchronous or async
+generator) keeps a raw `ByteCodeReader` and operand metadata into that state.
+On the old path the
+reparse could free or replace bytes the resume path still reads: with
+`-nonative -off:DynamicProfile`, yielding, attaching, then resuming returned a
+bare value instead of an iterator result.
+
+The guard counts live generator frames per `FunctionBody`.
+`JavascriptGenerator::SetFrame` increments once when it installs a frame whose
+body `IsGenerator()` and retains the body in a `Field`; plain async functions
+use the same generator object but are deliberately not counted, so their
+debugger attach/locals path still reparses normally. `SetState(Completed)` releases the count for a
+normally completed generator; `JavascriptGenerator::Finalize` releases it for
+a collected suspended generator. The JIT epilogue can null the frame before
+completion is observed, so both release paths use the retained registration,
+not the frame pointer, and an explicit `liveCoroutineFrameCounted` flag keeps
+each generator's decrement exactly once. On `__APPLE__ && _M_ARM64` with
+`GLOBAL_ENABLE_WRITE_BARRIER`, a `JavascriptGenerator` is allocated finalizable
+even when the runtime software write barrier flag is off, so the
+collected-suspended case still runs `Finalize` (the extra finalizer is a no-op
+for non-generator users). Shutdown does not decrement: the context and its
+bodies are torn down together.
+
+When `CleanupToReparse` reaches a body whose count is non-zero, it recreates
+that body's entry points for the current debug mode and returns without
+touching the bytecode, const table, statement maps or other metadata.
+Recreating the entry points is required because the attach pass points the
+default entry at a deferred-parsing thunk; leaving it there made the resumed
+generator re-enter the deferred parse path and loop. Nested bodies are always cleaned above, before the parent is pinned; this
+fixed a deferred-parser hang when a nested helper/closure was called after
+attach. Bodies whose count is zero are cleaned and reparsed exactly as before.
+The guard is per FunctionBody, so the whole body and any metadata a frame can
+reach stay alive while any frame from that body is live.
+
+Limits, stated deliberately:
+
+- Breakpoints, stepping and other probes in a generator body that is suspended
+  when the debugger attaches are not installed in that body while the frame is
+  live. The attach/resume path stays correct, but this is **not** full debugger
+  support for suspended generator bodies. A later detach/attach after the last
+  frame completes can reparse the body and install debug bytecode.
+- Async generators use the same `JavascriptGenerator` state and finalizer and
+  are guarded. Plain async functions are not counted; their existing debugger
+  locals/stepping behavior is unchanged.
+- Non-Apple targets compile the guard out and keep the old behavior and the
+  lifetime bug.
+
+Focused evidence on the 22:54 JIT build: the scratch `-nonative
+-off:DynamicProfile` yield/attach/resume repro changed from a bare `2` to
+`{"value":2,"done":true}`. The same result holds with `-off:DynamicProfile`
+(JIT enabled), with `-ForceSoftwareWriteBarrier-`, for an async generator, for
+a nested generator, for two live frames from one body, for 100 subsequent
+yields, for `throw`/`return` through a `try/finally`, and across
+attach/detach. After the guarded generator completes, a detach/attach reparses
+the body and a fresh instance's breakpoint fires; the same happens after the
+suspended generator is dropped and collected under
+`-ForceGCAfterJSONParse`, which exercises the `Finalize` decrement. A normal
+(non-coroutine) function's post-attach `locals()` breakpoint still fires.
+`test/DebuggerCommon/generators.js` with `-debuglaunch` still prints `PASS`.
+`AsyncDynamicAttach.js` passes its `locals()`/stepping baseline, but it does
+not cover a pending-await resume; plain async functions are not pinned and
+remain exposed (see [Known open engine issues](#known-open-engine-issues)).
+Nested helper/closure calls after attach now resume correctly. Full suites on
+this binary: `disable_jit` 1973/0; `interpreted` 2367/397 (all 397 asm/WASM),
+zero signals. One earlier full `interpreted` run on the same binary hit a
+non-reproducible SIGSEGV in the random `Array/array_sort_random.js`; 90 focused
+reruns and two subsequent full runs passed. It is tracked as an unisolated
+flake, not a confirmed guard regression.
 
 ## Current state and handoff
 
@@ -90,17 +166,17 @@ The port compiles and runs JavaScript with the JIT on. Throw/catch works.
 An 8-argument `apply(arguments)` with default inlining works. `new.target`
 works for the argument counts that were measured. Generator JIT
 (`-JitES6Generators`) now runs all measured yield/resume/return/throw and
-try/finally shapes. The three suite runs below were rerun on the 13:08 binary
-(`jit-*-strict.log`); the 18:13 and 19:09 builds are not the same object set.
+try/finally shapes. The three suite runs below were rerun on the 22:54 binary
+(`jit-*-guard5*.log`); the 18:13 and 19:09 builds are not the same object set.
 
-- `disable_jit` is **1973/0** (`jit-disable-strict.log`).
+- `disable_jit` is **1973/0** (`jit-disable-guard5.log`).
   Wall time varies with host load: the prior 19:27 run was 42.51 s
   (`jit-disable-final.log`) and the 19:09 run was 54.5 s
   (`jit-disable-repair3.log`).
-- `dynapogo` is **1943/286** (`jit-dynapogo-strict.log`, 492.81 s; the 19:09
+- `dynapogo` is **1943/286** (`jit-dynapogo-guard5.log`, 496.39 s; the 19:09
   run is `jit-dynapogo-repair3.log`, 488.15 s). Every failure is in an
   asm.js/WASM folder and exits 0, so the signal count is zero.
-- `interpreted` is **2367/397** (`jit-interpreted-strict.log`): 397 asm.js/WASM
+- `interpreted` is **2367/397** (`jit-interpreted-guard5b.log`): 397 asm.js/WASM
   failures, zero signals. The two StackTrace line diffs are fixed.
 
 The branch is committed (`07d6965e8`, `2372fcc81`, `9ccc535a8`, `fcbc434c9`,
@@ -242,8 +318,9 @@ not claim to solve: a suspended generator/async frame keeps a raw
 `ByteCodeReader` into bytecode that a debugger reparse replaces, and
 debug-mode reparse can change layout for reasons other than profile opcodes
 (`try/finally`, object literals). `-off:DynamicProfile` reproduces that
-separately. It is recorded as an open engine issue, not a regression from this
-port; see [Known open engine issues](#known-open-engine-issues).
+separately. It was not a regression from this port. A later Apple ARM64 guard
+now keeps a body with live coroutine frames from being cleaned; see
+[Suspended-generator reparse guard](#suspended-generator-reparse-guard-apple-arm64).
 
 ### Swarm review follow-up (20:39 dylib)
 
@@ -472,9 +549,9 @@ one. On this Mac the runner still sets `arch='x64'` and applies
 
 | Variant | Binary | Log | Result |
 |---|---|---|---|
-| `interpreted` (`-maxInterpretCount:1 -maxSimpleJitRunCount:1 -bgjit-`) | 21:22 dylib | `jit-interpreted-strict.log` | `passed 2367, failed 397`. All 397 failures are asm.js or WebAssembly with exit 0. Zero signals. `EH` 40/0, `TryCatch` 1/0. |
-| `dynapogo` (`-forceNative -off:simpleJit -bgJitDelay:0`) | 21:22 dylib | `jit-dynapogo-strict.log`, 492.81 s | `passed 1943, failed 286`. All 286 failures are in asm.js / WebAssembly folders and exit 0. Zero signals. `apply3` and `applyBugs` are absent from the failure list. |
-| `disable_jit` (`-nonative`) | 21:22 dylib | `jit-disable-strict.log` | `passed 1973, failed 0`. The gate. Do not bump it. |
+| `interpreted` (`-maxInterpretCount:1 -maxSimpleJitRunCount:1 -bgjit-`) | 22:54 dylib | `jit-interpreted-guard5b.log` | `passed 2367, failed 397`. All 397 failures are asm.js or WebAssembly with exit 0. Zero signals. `EH` 40/0, `TryCatch` 1/0. |
+| `dynapogo` (`-forceNative -off:simpleJit -bgJitDelay:0`) | 22:54 dylib | `jit-dynapogo-guard5.log`, 496.39 s | `passed 1943, failed 286`. All 286 failures are in asm.js / WebAssembly folders and exit 0. Zero signals. `apply3` and `applyBugs` are absent from the failure list. |
+| `disable_jit` (`-nonative`) | 22:54 dylib | `jit-disable-guard5.log` | `passed 1973, failed 0`. The gate. Do not bump it. |
 
 All 286 dynapogo failures are the asm.js / WebAssembly baseline gap:
 123 `WasmSpec`, 92 `AsmJs`, 54 `wasm`, 14 `AsmJSFloat`, 2
@@ -527,16 +604,34 @@ inode (`rm` then `cp`) instead of debugging the engine.
 These are pre-existing and separate from the JIT merge gate. Do not present
 them as fixed by this port.
 
-- **Suspended coroutine across a debugger reparse.** A generator/async frame
-  keeps a raw `ByteCodeReader` into the bytecode block that
-  `FunctionBody::CleanupToReparseHelper` drops. A debug-mode reparse can also
-  change bytecode layout for `try/finally`, object literals, and other
-  debug-only emission decisions. Repro with `-nonative -off:DynamicProfile`
-  and a generator that yields, attaches a debugger, then resumes: the result
-  can be a bare value instead of an iterator result. A correct fix needs to
-  retain/rebase the old FunctionBody/bytecode and its operand metadata, or
-  avoid reparsing live coroutine frames. This is an ownership change, not a
-  one-line guard.
+- **Debugger probes in suspended generator bodies (Apple ARM64).** The
+  bytecode-lifetime guard avoids the reparse use-after-free by leaving a body
+  with live generator frames uncleaned. As a consequence, breakpoints,
+  stepping and locals in that body are not available while a frame is live;
+  they require a later detach/attach after the last frame completes. Plain
+  async functions are not counted, so `AsyncDynamicAttach.js` retains its
+  normal locals/stepping behavior, but that does not make a pending-await
+  resume safe; see the next bullet. Non-Apple targets still have the original
+  reparse lifetime problem. This is the documented tradeoff, not full
+  debugger support for suspended generator bodies.
+- **Suspended async-function resume after dynamic attach (Apple ARM64).**
+  The generator guard deliberately does not pin plain async bodies, because the
+  debugger's `locals()`/stepping baseline needs a reparse. A pending-await
+  async function attached mid-flight can resume with a non-iterator value and
+  abort in `JavascriptAsyncFunction::AsyncSpawnStep` (`SIGABRT`,
+  `FatalInternalError`). Minimal repro:
+  ```js
+  var resolveIt;
+  var p = new Promise(function (r) { resolveIt = r; });
+  async function f() { print("before"); var v = await p; print("after " + v); }
+  f();
+  WScript.Attach(function () { resolveIt(41); });
+  ```
+  This is pre-existing before the generator guard (observed on 21:22 and 22:21); `AsyncDynamicAttach.js` passes but
+  does not exercise a pending-await resume. A full fix needs the suspended
+  async body to retain/rebase its reader and bytecode across reparse, or a
+  separate debug FunctionBody; the generator-only live-frame count cannot
+  cover it without losing the async debugger locals baseline.
 - **Strict generator arguments test coverage.** The ARM64 coroutine
   `LoadHeapArguments` now passes the real generator function object, and
   `JavascriptOperators::IsStrictModeForHeapArguments` recovers strictness
@@ -1235,8 +1330,8 @@ A throw is a separate gate from the variant flag. On the 11:25 dylib an
 interpreted `throw` is catchable: `out/jit/bin/ch "$TMPDIR/test_throw.js"` and
 `out/jit/bin/ch "$TMPDIR/test_throw_50.js"` both print `PASS`. Section 7.2 has
 the `-mic:1` and `-forceNative` results. The `disable_jit` suite has since been
-re-run repeatedly on the current JIT-enabled binary; the final 13:08 gate is
-`1973 passed / 0 failed` (`jit-disable-strict.log`). The no-JIT `ch` from
+re-run repeatedly on the current JIT-enabled binary; the final 22:54 gate is
+`1973 passed / 0 failed` (`jit-disable-guard5.log`). The no-JIT `ch` from
 the modernization checkout remains the rebase oracle. Do not treat the throw
 scripts as a substitute for `1973` passed and `0` failed.
 
@@ -1470,7 +1565,7 @@ worktree root. The runner spawns `ch` with the test directory as cwd, so
 
 The 19:09 run (historical, `jit-interpreted-repair3.log`, 52.15 seconds; the
 pre-repair `jit-interpreted-jitwrite.log` took 45.03 seconds) measured the same
-totals as the current 21:22 run (`jit-interpreted-strict.log`):
+totals as the current 22:54 run (`jit-interpreted-guard5b.log`):
 
 ```
 Total: passed 2367, failed 397
@@ -1500,9 +1595,9 @@ baseline failure (`ASMJSParser`). The other 27 exited on a signal: 22
 `SIGABRT` (`-6`, mostly debugger tests, including `typedarray/samethread.js`
 inside a long DataView log), 4 `SIGSEGV` (`-11`, both `es6GeneratorJit`
 files), and 1 `SIGBUS` (`-10`, `Object/ObjectSpread_Limits.js`). That list is
-historical. On the 21:22 dylib the same suite is `passed 1943, failed 286`;
+historical. On the 22:54 dylib the same suite is `passed 1943, failed 286`;
 all 286 are in asm.js/WASM folders and exit 0, so the signal count is zero
-(`jit-dynapogo-strict.log`, 492.81 s). The 19:09 run had the
+(`jit-dynapogo-guard5.log`, 496.39 s). The 19:09 run had the
 same totals (`jit-dynapogo-repair3.log`, 488.15 s). `Function/apply3.js` and
 `inlining/applyBugs.js` are not in the failure list.
 
@@ -1516,8 +1611,8 @@ so the gap is applied once. On the 12:52 dylib, direct `new` of 2, 4, 5, 7,
 and 10 arguments and that `super` spread all print `PASS` under `-mic:1
 -bgjit-` and under `-forceNative`.
 
-`disable_jit` on the current 20:39 binary is `passed 1973, failed 0`
-(`jit-disable-strict.log`). The earlier 1972/1 run on the 12:52
+`disable_jit` on the current 22:54 binary is `passed 1973, failed 0`
+(`jit-disable-guard5.log`). The earlier 1972/1 run on the 12:52
 dylib missed only `DebuggerCommon/AsyncDynamicAttach.js`, which printed
 `PASSED` and then hung inside `ScriptContext::DebugProfileProbeThunk`; the
 second-pass `DynamicProfileInfo`/debug-loop split is the fix (see
@@ -1758,10 +1853,10 @@ commands. Stage 4 totals are in
 #### Stage 4: Regression suites
 
 `interpreted` on the 21:22 dylib is 2367/397 (all 397 asm.js / WebAssembly,
-exit 0, zero signals; `jit-interpreted-strict.log`). `dynapogo` on the 21:22 dylib is
+exit 0, zero signals; `jit-interpreted-guard5b.log`). `dynapogo` on the 22:54 dylib is
 1943/286 (all 286 failures are in asm.js/WASM folders and exit 0, zero
-signals; `jit-dynapogo-strict.log`, 492.81 s). `disable_jit` on the same binary
-is 1973/0 (`jit-disable-strict.log`). The 19:09 runs (`jit-interpreted-repair3.log`,
+signals; `jit-dynapogo-guard5.log`, 496.39 s). `disable_jit` on the same binary
+is 1973/0 (`jit-disable-guard5.log`). The 19:09 runs (`jit-interpreted-repair3.log`,
 `jit-dynapogo-repair3.log`, and `jit-disable-repair3.log`) are the prior object
 set; they showed the same totals. The absolute binary and the one-variant rule
 are in the handoff section. Those runs closed the `es6GeneratorJit` segfaults
