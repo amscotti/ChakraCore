@@ -579,6 +579,7 @@ namespace Js
         Assert(!(callInfo.Flags & CallFlags_New));
 
         int8 value = 0;
+        uint32 byteOffset = 0;
         switch (args.Info.Count)
         {
         case 0:
@@ -593,6 +594,9 @@ namespace Js
                 JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NeedDataView);
                 break;
             }
+            // SetViewValue order: ToIndex(byteOffset) precedes the value
+            // and littleEndian conversions below (matching setBigInt64).
+            byteOffset = VarTo<DataView>(args[0])->GetViewIndex(args[1], _u("DataView.prototype.SetInt8"));
             if (args.Info.Count > 2)
             {
                 value = JavascriptConversion::ToInt8(args[2], scriptContext);
@@ -601,7 +605,7 @@ namespace Js
         }
 
         DataView* dataView = VarTo<DataView>(args[0]);
-        dataView->SetValue<int8>(args[1], value, _u("DataView.prototype.SetInt8"));
+        dataView->SetValueAt<int8>(byteOffset, value, _u("DataView.prototype.SetInt8"));
         return scriptContext->GetLibrary()->GetUndefined();
     }
 
@@ -615,6 +619,7 @@ namespace Js
         Assert(!(callInfo.Flags & CallFlags_New));
 
         uint8 value = 0;
+        uint32 byteOffset = 0;
         switch (args.Info.Count)
         {
         case 0:
@@ -629,6 +634,9 @@ namespace Js
                 JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NeedDataView);
                 break;
             }
+            // SetViewValue order: ToIndex(byteOffset) precedes the value
+            // and littleEndian conversions below (matching setBigInt64).
+            byteOffset = VarTo<DataView>(args[0])->GetViewIndex(args[1], _u("DataView.prototype.SetUint8"));
             if (args.Info.Count > 2)
             {
                 value = JavascriptConversion::ToUInt8(args[2], scriptContext);
@@ -637,7 +645,7 @@ namespace Js
         }
 
         DataView* dataView = VarTo<DataView>(args[0]);
-        dataView->SetValue<uint8>(args[1], value, _u("DataView.prototype.SetUint8"));
+        dataView->SetValueAt<uint8>(byteOffset, value, _u("DataView.prototype.SetUint8"));
         return scriptContext->GetLibrary()->GetUndefined();
     }
 
@@ -652,6 +660,7 @@ namespace Js
 
         BOOL isLittleEndian = FALSE;
         int16 value = 0;
+        uint32 byteOffset = 0;
         switch (args.Info.Count)
         {
         case 0:
@@ -666,6 +675,9 @@ namespace Js
                 JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NeedDataView);
                 break;
             }
+            // SetViewValue order: ToIndex(byteOffset) precedes the value
+            // and littleEndian conversions below (matching setBigInt64).
+            byteOffset = VarTo<DataView>(args[0])->GetViewIndex(args[1], _u("DataView.prototype.SetInt16"));
             if (args.Info.Count > 2)
             {
                 if (!JavascriptOperators::IsUndefined(args[2]))
@@ -681,7 +693,7 @@ namespace Js
         }
 
         DataView* dataView = VarTo<DataView>(args[0]);
-        dataView->SetValue<int16>(args[1], value, _u("DataView.prototype.SetInt16"), isLittleEndian);
+        dataView->SetValueAt<int16>(byteOffset, value, _u("DataView.prototype.SetInt16"), isLittleEndian);
         return scriptContext->GetLibrary()->GetUndefined();
     }
 
@@ -696,6 +708,7 @@ namespace Js
 
         BOOL isLittleEndian = FALSE;
         uint16 value = 0;
+        uint32 byteOffset = 0;
         switch (args.Info.Count)
         {
         case 0:
@@ -710,6 +723,9 @@ namespace Js
                 JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NeedDataView);
                 break;
             }
+            // SetViewValue order: ToIndex(byteOffset) precedes the value
+            // and littleEndian conversions below (matching setBigInt64).
+            byteOffset = VarTo<DataView>(args[0])->GetViewIndex(args[1], _u("DataView.prototype.SetUint16"));
             if (args.Info.Count > 2)
             {
                 if (!JavascriptOperators::IsUndefined(args[2]))
@@ -725,7 +741,7 @@ namespace Js
         }
 
         DataView* dataView = VarTo<DataView>(args[0]);
-        dataView->SetValue<uint16>(args[1], value, _u("DataView.prototype.SetUint16"), isLittleEndian);
+        dataView->SetValueAt<uint16>(byteOffset, value, _u("DataView.prototype.SetUint16"), isLittleEndian);
         return scriptContext->GetLibrary()->GetUndefined();
     }
 
@@ -740,6 +756,7 @@ namespace Js
 
         BOOL isLittleEndian = FALSE;
         int32 value = 0;
+        uint32 byteOffset = 0;
         switch (args.Info.Count)
         {
         case 0:
@@ -754,6 +771,9 @@ namespace Js
                 JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NeedDataView);
                 break;
             }
+            // SetViewValue order: ToIndex(byteOffset) precedes the value
+            // and littleEndian conversions below (matching setBigInt64).
+            byteOffset = VarTo<DataView>(args[0])->GetViewIndex(args[1], _u("DataView.prototype.SetInt32"));
             if (args.Info.Count > 2)
             {
                 if (!JavascriptOperators::IsUndefined(args[2]))
@@ -769,7 +789,7 @@ namespace Js
         }
 
         DataView* dataView = VarTo<DataView>(args[0]);
-        dataView->SetValue<int32>(args[1], value, _u("DataView.prototype.SetInt32"), isLittleEndian);
+        dataView->SetValueAt<int32>(byteOffset, value, _u("DataView.prototype.SetInt32"), isLittleEndian);
         return scriptContext->GetLibrary()->GetUndefined();
     }
 
@@ -784,6 +804,7 @@ namespace Js
 
         BOOL isLittleEndian = FALSE;
         uint32 value = 0;
+        uint32 byteOffset = 0;
         switch (args.Info.Count)
         {
         case 0:
@@ -798,6 +819,9 @@ namespace Js
                 JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NeedDataView);
                 break;
             }
+            // SetViewValue order: ToIndex(byteOffset) precedes the value
+            // and littleEndian conversions below (matching setBigInt64).
+            byteOffset = VarTo<DataView>(args[0])->GetViewIndex(args[1], _u("DataView.prototype.SetUint32"));
             if (args.Info.Count > 2)
             {
                 if (!JavascriptOperators::IsUndefined(args[2]))
@@ -813,7 +837,7 @@ namespace Js
         }
 
         DataView* dataView = VarTo<DataView>(args[0]);
-        dataView->SetValue<uint32>(args[1], value, _u("DataView.prototype.SetUint32"), isLittleEndian);
+        dataView->SetValueAt<uint32>(byteOffset, value, _u("DataView.prototype.SetUint32"), isLittleEndian);
         return scriptContext->GetLibrary()->GetUndefined();
     }
 
@@ -828,6 +852,7 @@ namespace Js
 
         BOOL isLittleEndian = FALSE;
         float value = static_cast<float>(JavascriptNumber::NaN);
+        uint32 byteOffset = 0;
         switch (args.Info.Count)
         {
         case 0:
@@ -842,6 +867,9 @@ namespace Js
                 JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NeedDataView);
                 break;
             }
+            // SetViewValue order: ToIndex(byteOffset) precedes the value
+            // and littleEndian conversions below (matching setBigInt64).
+            byteOffset = VarTo<DataView>(args[0])->GetViewIndex(args[1], _u("DataView.prototype.SetFloat32"));
             if (args.Info.Count > 2)
             {
                 if (!JavascriptOperators::IsUndefined(args[2]))
@@ -857,7 +885,7 @@ namespace Js
         }
 
         DataView* dataView = VarTo<DataView>(args[0]);
-        dataView->SetValue<float>(args[1], value, _u("DataView.prototype.SetFloat32"), isLittleEndian);
+        dataView->SetValueAt<float>(byteOffset, value, _u("DataView.prototype.SetFloat32"), isLittleEndian);
         return scriptContext->GetLibrary()->GetUndefined();
     }
 
@@ -872,6 +900,7 @@ namespace Js
 
         BOOL isLittleEndian = FALSE;
         double value = JavascriptNumber::NaN;
+        uint32 byteOffset = 0;
         switch (args.Info.Count)
         {
         case 0:
@@ -886,6 +915,9 @@ namespace Js
                 JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NeedDataView);
                 break;
             }
+            // SetViewValue order: ToIndex(byteOffset) precedes the value
+            // and littleEndian conversions below (matching setBigInt64).
+            byteOffset = VarTo<DataView>(args[0])->GetViewIndex(args[1], _u("DataView.prototype.SetFloat64"));
             if (args.Info.Count > 2)
             {
                 if (!JavascriptOperators::IsUndefined(args[2]))
@@ -901,7 +933,7 @@ namespace Js
         }
 
         DataView* dataView = VarTo<DataView>(args[0]);
-        dataView->SetValue<double>(args[1], value, _u("DataView.prototype.SetFloat64"), isLittleEndian);
+        dataView->SetValueAt<double>(byteOffset, value, _u("DataView.prototype.SetFloat64"), isLittleEndian);
         return scriptContext->GetLibrary()->GetUndefined();
     }
 
@@ -1159,6 +1191,18 @@ namespace Js
     void DataView::SetValue<double>(Var offset, double value, const char16 *funcName, BOOL isLittleEndian)
     {
         this->SetValue<double, double UNALIGNED*>(offset, value, isLittleEndian, funcName);
+    }
+
+    template<>
+    void DataView::SetValueAt<float>(uint32 byteOffset, float value, const char16 *funcName, BOOL isLittleEndian)
+    {
+        this->SetValueAt<float, float UNALIGNED*>(byteOffset, value, isLittleEndian, funcName);
+    }
+
+    template<>
+    void DataView::SetValueAt<double>(uint32 byteOffset, double value, const char16 *funcName, BOOL isLittleEndian)
+    {
+        this->SetValueAt<double, double UNALIGNED*>(byteOffset, value, isLittleEndian, funcName);
     }
 #endif
 

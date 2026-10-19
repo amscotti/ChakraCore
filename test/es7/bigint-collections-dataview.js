@@ -359,6 +359,30 @@ var tests = [
             fixedView.setBigInt64(0, 9n);
             assert.strictEqual(9n, trackingView.getBigInt64(0), "tracking view recovers after grow");
         }
+    },
+    {
+        name: "Numeric DataView setters convert offset before value",
+        body: function () {
+            // SetViewValue: ToIndex(byteOffset) precedes ToNumber(value)
+            // for every setter, matching the BigInt setter order.
+            var view = new DataView(new ArrayBuffer(16));
+            function orderOf(invoke) {
+                var order = [];
+                var idx = { valueOf: function () { order.push("offset"); return 0; } };
+                var val = { valueOf: function () { order.push("value"); return 7; } };
+                invoke(idx, val);
+                return order.join(",");
+            }
+            assert.strictEqual("offset,value", orderOf(function (i, v) { view.setInt8(i, v); }), "setInt8 order");
+            assert.strictEqual("offset,value", orderOf(function (i, v) { view.setUint8(i, v); }), "setUint8 order");
+            assert.strictEqual("offset,value", orderOf(function (i, v) { view.setInt16(i, v); }), "setInt16 order");
+            assert.strictEqual("offset,value", orderOf(function (i, v) { view.setUint16(i, v); }), "setUint16 order");
+            assert.strictEqual("offset,value", orderOf(function (i, v) { view.setInt32(i, v); }), "setInt32 order");
+            assert.strictEqual("offset,value", orderOf(function (i, v) { view.setUint32(i, v); }), "setUint32 order");
+            assert.strictEqual("offset,value", orderOf(function (i, v) { view.setFloat32(i, v); }), "setFloat32 order");
+            assert.strictEqual("offset,value", orderOf(function (i, v) { view.setFloat64(i, v); }), "setFloat64 order");
+            assert.strictEqual(7, view.getInt32(0), "writes still land");
+        }
     }
 ];
 

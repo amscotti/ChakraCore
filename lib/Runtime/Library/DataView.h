@@ -169,7 +169,21 @@ namespace Js
         template<typename TypeName, typename PointerAccessTypeName>
         void SetValue(Var offset, TypeName value, BOOL isLittleEndian, const char16 *funcName)
         {
-            uint32 byteOffset = GetViewIndex(offset, funcName);
+            SetValueAt<TypeName, PointerAccessTypeName>(GetViewIndex(offset, funcName), value, isLittleEndian, funcName);
+        }
+
+        // SetViewValue performs ToIndex(requestIndex) before converting the
+        // value, so setters convert the offset first (GetViewIndex) and write
+        // through SetValueAt with the resolved byte offset.
+        template<typename TypeName>
+        inline void SetValueAt(uint32 byteOffset, TypeName value, const char16 *funcName, BOOL isLittleEndian = FALSE)
+        {
+            SetValueAt<TypeName, TypeName*>(byteOffset, value, isLittleEndian, funcName);
+        }
+
+        template<typename TypeName, typename PointerAccessTypeName>
+        void SetValueAt(uint32 byteOffset, TypeName value, BOOL isLittleEndian, const char16 *funcName)
+        {
             CheckViewRange(byteOffset, sizeof(TypeName), funcName);
 
             TypeName* typedBuffer = (TypeName*)(buffer + byteOffset);
@@ -190,6 +204,8 @@ namespace Js
         template<> Var GetValueWithCheck<double>(Var offset, const char16 *funcName, BOOL isLittleEndian /* = FALSE */);
         template<> void SetValue<float>(Var offset, float value, const char16 *funcName, BOOL isLittleEndian /* = FALSE */);
         template<> void SetValue<double>(Var offset, double value, const char16 *funcName, BOOL isLittleEndian /* = FALSE */);
+        template<> void SetValueAt<float>(uint32 byteOffset, float value, const char16 *funcName, BOOL isLittleEndian /* = FALSE */);
+        template<> void SetValueAt<double>(uint32 byteOffset, double value, const char16 *funcName, BOOL isLittleEndian /* = FALSE */);
 #endif
 
         Field(uint32) byteOffset;
