@@ -11381,7 +11381,15 @@ GlobOpt::ToVar(IR::Instr *instr, IR::RegOpnd *regOpnd, BasicBlock *block, Value 
         return instr;
     }
 
-    Assert(block->globOptData.IsTypeSpecialized(varSym));
+    if (!block->globOptData.IsTypeSpecialized(varSym))
+    {
+        // The newer language bytecode can produce a Var use without a
+        // type-specialized representation (for example BrNotAddr_A in the
+        // baseline debugger tests). The normal path below assumes this cannot
+        // happen and would emit inconsistent IR. Abort this codegen attempt
+        // and let execution fall back instead of failing fatally.
+        throw Js::OperationAbortedException();
+    }
 
     if (!value)
     {
