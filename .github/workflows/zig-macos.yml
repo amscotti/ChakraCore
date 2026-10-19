@@ -8,7 +8,7 @@
 #   - all 14 required B1 configuration checks pass (the optional local
 #     CMake-reference comparison adds a 15th check when available);
 #   - the equivalent legacy cmake leg (F0 recipe: RelWithDebInfo, shared,
-#     no-JIT, system ICU) will stay green at 1997/0;
+#     no-JIT, system ICU) will stay green at 2000/0;
 #   - every run records its inputs (zig version + full `zig env`, target,
 #     flavor, feature defines, dependency versions) and outputs (artifact
 #     manifest with sizes/hashes, gate tallies) as job outputs + artifacts.
@@ -189,16 +189,16 @@ jobs:
           set -euo pipefail
           case '${{ matrix.profile }}' in
             test)
-              grep -E 'Total: passed 1997, failed 0' ci-evidence/check.log
+              grep -E 'Total: passed 2000, failed 0' ci-evidence/check.log
               grep -E 'Bytecode is up to date' ci-evidence/check.log
               grep -E 'test-shared-basic : PASS' ci-evidence/check.log
-              line="test: regression=1997/0 bytecode=up-to-date native=shared-PASS"
+              line="test: regression=2000/0 bytecode=up-to-date native=shared-PASS"
               ;;
             debug-static)
-              grep -E 'Total: passed 2049, failed 0' ci-evidence/check.log
+              grep -E 'Total: passed 2052, failed 0' ci-evidence/check.log
               grep -E 'Bytecode is up to date' ci-evidence/check.log
               test "$(grep -cE 'test-static-.* : PASS' ci-evidence/check.log)" = '8'
-              line="debug-static: regression=2049/0 bytecode=up-to-date native=8x-static-PASS"
+              line="debug-static: regression=2052/0 bytecode=up-to-date native=8x-static-PASS"
               ;;
             release-shared)
               # The hello leg is logged as a one-line repr, not raw
@@ -261,7 +261,7 @@ jobs:
           path: ci-evidence/
 
   legacy-test:
-    name: legacy cmake Test leg (F0 recipe, 1997/0)
+    name: legacy cmake Test leg (F0 recipe, 2000/0)
     runs-on: macos-26
     timeout-minutes: 90
     outputs:
@@ -304,13 +304,13 @@ jobs:
         id: tally
         run: |
           set -euo pipefail
-          grep -E 'Total: passed 1997, failed 0' ci-evidence/check.log
+          grep -E 'Total: passed 2000, failed 0' ci-evidence/check.log
           grep -E 'test-shared-basic : PASS' ci-evidence/check.log
           ls -l build-ci-test/ch | tee -a ci-evidence/check.log
           # The legacy dylib lands at the build root (observed in the
           # B3.5 sim), not under bin/ — both paths asserted, no `|| true`.
           shasum -a 256 build-ci-test/ch build-ci-test/libChakraCore.dylib | tee ci-evidence/shasum.txt
-          line="legacy-test: regression=1997/0 native=shared-PASS"
+          line="legacy-test: regression=2000/0 native=shared-PASS"
           echo "$line" | tee ci-evidence/tally.txt
           echo "tally=$line" >> "$GITHUB_OUTPUT"
           echo "- $line" >> "$GITHUB_STEP_SUMMARY"
