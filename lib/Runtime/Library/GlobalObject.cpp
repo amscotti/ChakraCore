@@ -1981,10 +1981,17 @@ LHexError:
         if (hasRootProperty &&
             JavascriptOperators::GetOwnPropertyDescriptor(this, propertyId, GetScriptContext(), &existing))
         {
+            bool isAnnexBBlockFunction = false;
+            if (VarIs<JavascriptFunction>(value))
+            {
+                isAnnexBBlockFunction = (VarTo<JavascriptFunction>(value)->GetFunctionInfo()->GetAttributes() &
+                    Js::FunctionInfo::Attributes::AnnexBBlockFunction) != 0;
+            }
+
             // The Annex B synthetic var store keeps a writable property's
             // attributes. Ordinary eval function bindings use the
             // CreateGlobalFunctionBinding defaults unless non-configurable.
-            if (existing.IsDataDescriptor() && existing.IsWritable())
+            if (existing.IsDataDescriptor() && existing.IsWritable() && isAnnexBBlockFunction)
             {
                 return DynamicObject::SetPropertyWithAttributes(
                     propertyId, value, existing.GetAttributes(), nullptr, PropertyOperation_ThrowIfNotExtensible);

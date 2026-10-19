@@ -1239,6 +1239,12 @@ void EmitAssignmentToFuncName(ParseNodeFnc *pnodeFnc, ByteCodeGenerator *byteCod
             // updated when the declaration was skipped.
             if (fncScopeSym && pnodeFnc->IsAnnexBVarExtension())
             {
+                if (pnodeFnc->funcInfo != nullptr && pnodeFnc->funcInfo->byteCodeFunction != nullptr)
+                {
+                    Js::FunctionInfo *functionInfo = pnodeFnc->funcInfo->byteCodeFunction->GetFunctionInfo();
+                    functionInfo->SetAttributes((Js::FunctionInfo::Attributes)(
+                        functionInfo->GetAttributes() | Js::FunctionInfo::Attributes::AnnexBBlockFunction));
+                }
                 // The synthetic binding is an eval var binding in the var
                 // environment. InitFuncScoped checks each environment on the
                 // eval chain: a block/function lexical binding skips the
