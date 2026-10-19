@@ -593,7 +593,7 @@ Decision/rollback points:
 **1996/0 test** and **2048/0 debug-static** (573/573 and
 546/546 steps).
 Merged lanes: S1 public instance fields, S2 arithmetic, S8 resizable
-ArrayBuffer/transfer, S13 WeakRef, and S14 P1/P2/P3/P4/P5/P6/P7
+ArrayBuffer/transfer, S13 WeakRef, S8 TypedArray tracking, and S14 P1/P2/P3/P4/P5/P6/P7
 ([c2-s1-public-fields.md](c2-s1-public-fields.md),
 [c2-s2-bigint-arithmetic.md](c2-s2-bigint-arithmetic.md),
 [c2-s8-resizable.md](c2-s8-resizable.md),

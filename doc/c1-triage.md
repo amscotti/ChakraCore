@@ -847,7 +847,8 @@ still owns JIT-configuration claims.)*
 |---|---|---|---|
 | S1 public instance fields | Landed `bd0de1694` | class corpus 1,989/5,897, 539/0; 27 focused cases, normal + forced defer | private/static/computed fields, static blocks, `super.prop`/eval-super property, JIT |
 | S2 arithmetic/bitwise/shift | Landed `1c5d5b2fc` | scoped 444/2, 80/0; broad 1,027/1,027; Node differentials | BigInt64Array/BigUint64Array, Map/Set identity, literal property names, giant ToString, JIT |
-| S8 resizable/transfer | Landed `6ceb23d6d` | focused 424/834, 236/0; ArrayBuffer 358/442; DataView 44/52; Float16 4/4 | TypedArray tracking, immutable buffers, SAB, Float16Array, cross-realm/Reflect order, JsRT/Wasm, JIT |
+| S8 resizable/transfer | Landed `6ceb23d6d` | focused 424/834, 236/0; ArrayBuffer 358/442; DataView 44/52; Float16 4/4 | immutable buffers, SAB, Float16Array, cross-realm/Reflect order, JsRT/Wasm, JIT |
+| S8 TypedArray tracking | Landed `859b07d13` | focused 132/340, 110/0; combined 150/378, 118/0; expanded 54/0 | BigInt-gated residual; generic Array helpers, toLocaleString element formatting, JIT/TTD |
 | S13 WeakRef | Landed `803331b51` | WeakRef 56/58, 56/0; agent-wide kept set; 200/500-run stability | FinalizationRegistry, symbol WeakMap/WeakSet keys, host-dispatch, concurrent GC/JIT |
 | S14 P1 | Landed `a4eba5a38` | 152/4 on integrated binary; 112/0 | S1 class completion; unsupported `using`; pre-existing labeled-break/finally crash (P7) |
 | S14 P3 | Landed `0a723970e` | 280/0; full Annex B 765/17, 282/0 | 17 P4 declaration-instantiation collisions |
@@ -856,10 +857,10 @@ still owns JIT-configuration claims.)*
 | S14 P2 | Landed `526931bc5` | 192/0; 157/0; controls preserved | hidden outer lexical; JSC/Node delete difference; JIT |
 | S14 P5 | Landed `8b5f28c06` | 50/50; broad 50/0; wider 65/0 non-import | eval/function-expression; proxy descriptor; JIT |
 
-Full gates at this checkpoint: **1996/0 test**, **2048/0 debug-static**.
+Full gates at this checkpoint: **1997/0 test**, **2049/0 debug-static**.
 All active feature/triage worktrees are merged. Next work items are S1
-private/static/computed fields, S8 typed-array tracking, S2 BigInt64Array,
-and S13 FinalizationRegistry. P5 residual: eval/function-expression
+private/static/computed fields, S2 BigInt64Array, and S13
+FinalizationRegistry; S8 tracking residuals are tracked separately. P5 residual: eval/function-expression
 reference paths and pre-existing proxy descriptor duplication.
 
 ## 7. Separate inventories
