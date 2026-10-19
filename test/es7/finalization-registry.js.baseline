@@ -1,3 +1,0 @@
-Error: expected cleanup callback failure
-	at Anonymous function(string) (finalization-registry.js:232:5)
-pass

@@ -8,9 +8,10 @@ this slice adds the separate `FinalizationRegistry` cleanup-job mechanism.
 ## Scope
 
 1. `new FinalizationRegistry(cleanupCallback)` with a callable callback,
-   `NewTarget`/`Reflect.construct` prototype selection, subclassing,
-   `length` 1, `name`, non-writable/non-configurable `prototype`, and
-   non-constructible `register`/`unregister` methods.
+   `NewTarget`/`Reflect.construct` prototype selection (including
+   `GetFunctionRealm` through Proxy and bound-function target chains),
+   subclassing, `length` 1, `name`, non-writable/non-configurable `prototype`,
+   and non-constructible `register`/`unregister` methods.
 2. `register(target, heldValue, unregisterToken?)` with ES `CanBeHeldWeakly`
    targets and tokens (Object or unregistered Symbol; `Symbol.for(...)` and
    primitives rejected), duplicate registrations, a strong `heldValue` while
@@ -21,8 +22,9 @@ this slice adds the separate `FinalizationRegistry` cleanup-job mechanism.
    boundary, with the held value as the only argument and `undefined` as
    `this`; no callback after unregister, while the target is strongly
    reachable, or after the registry is collected.
-5. Real `-CollectGarbage` and `WScript.SetTimeout` job-boundary tests. No fake
-   GC or timing shim was added.
+5. Real `-CollectGarbage` and `WScript.SetTimeout` job-boundary tests, plus
+   focused Proxy/bound NewTarget, callback-retry/remaining-cell, and expected
+   callback-error tests. No fake GC or timing shim was added.
 
 Not in scope: `WeakMap.prototype.getOrInsert*`, TTD snapshot support for the
 new internal fields, JIT-specific behavior, and concurrent-GC/GCStress.
@@ -73,15 +75,18 @@ Failure / OOM / shutdown:
   is added to the weak-reference map. OOM follows the recycler allocation path;
   no partial cell is published. ThreadContext's destructor clears and unroots
   the weak-handle list before deleting the recycler. No cleanup task is created
-  when the host has no native promise-continuation/job callback.
+  when the host has no native promise-continuation/job callback. Task
+  creation/enqueue failure resets cleanupJobScheduled before propagating;
+  closed ScriptContexts are not scheduled.
 Memory accounting:
   One registry block plus one thread-list slot per registry (until the next
   boundary removes collected registries), one list buffer per registry with
   cells, one cell per registration, and shared weak handles per distinct
   target/token. The registry list keeps only leaf handles, never registries.
   Held values are strong only while a cell exists; target/token edges are
-  weak. A host that never drains the queue retains a scheduled registry and its
-  cells until the task runs or the runtime is disposed.
+  weak. A host that never drains the queue retains scheduled task functions and
+  their registries/cells until the tasks run or the runtime is disposed; each
+  new outermost boundary may enqueue one idempotent retry task.
 ```
 
 ## GC and cleanup-job contract
@@ -93,22 +98,31 @@ clears its handle and the next outermost boundary removes the list slot.
 
 At `ScriptContext::OnScriptEnd` with `isRoot && callRootLevel == 1`, after
 `ClearKeptObjects`, `ThreadContext::ScheduleFinalizationRegistryCleanupJobs`
-walks the thread-wide weak-registry list. A live registry with at least one
-cleared target handle schedules one cleanup task through
-`JavascriptLibrary::EnqueueTask`, unless a task is already scheduled. The task
-is a recycler `RuntimeFunction` with a strong `Field(registry)` and is rooted by
-the host queue. This is the same host job queue used by Promise reactions:
-`ch` installs `WScriptJsrt::PromiseContinuationCallback`, which queues the task
-on its `MessageQueue`; timers and promise continuations are separate outermost
-host calls/jobs. No callback runs synchronously inside `OnScriptEnd`.
+walks the thread-wide weak-registry list. A live, open registry with at least
+one cleared target handle schedules one cleanup task through
+`JavascriptLibrary::EnqueueTask`. The task is a recycler `RuntimeFunction` with
+a strong `Field(registry)` and is rooted by the host queue. This is the same
+host job queue used by Promise reactions: `ch` installs
+`WScriptJsrt::PromiseContinuationCallback`, which queues the task on its
+`MessageQueue`; timers and promise continuations are separate outermost host
+calls/jobs. No callback runs synchronously inside `OnScriptEnd`.
+
+`cleanupJobScheduled` is advisory within one scheduling attempt. If a task is
+still pending at the next outermost boundary, the flag is cleared and an
+idempotent retry task is enqueued. This recovers a dropped/late host task, at
+the cost of duplicate no-op tasks when the host merely delays it; a host that
+never drains the queue can accumulate one retry per job. Task creation or
+`EnqueueTask` failure clears the flag before rethrowing so the next boundary can
+retry. `cleanupJobActive` prevents nested/reentrant cleanup, and a closed
+ScriptContext is not scheduled.
 
 `CleanupDeadCells` removes one cell before invoking the callback with
 `CallInfo(CallFlags_Value, 2)` and `this = undefined`. If the callback throws,
 the exception propagates to the host job (the `ch` host prints it and continues
-its message loop); the remaining dead cells stay registered and are scheduled
-at a later boundary. Cells whose targets are still marked are skipped. A
-callback that unregisters more cells or registers new ones observes the normal
-list mutation rules.
+its message loop); the active guard is cleared, the remaining dead cells stay
+registered, and the next boundary schedules a retry. Cells whose targets are
+still marked are skipped. A callback that unregisters more cells or registers
+new ones observes the normal list mutation rules.
 
 The cleanup contract is deliberately conservative: if the host has not
 installed a native promise-continuation/job callback, no cleanup task is
@@ -128,23 +142,30 @@ copied from the base commit to `out/s13-fr-before-bin/` before implementation.
 | `built-ins/WeakRef` (29 files / 58 scenarios; residual) | 56 | **58** | 2 | 0 |
 
 Exact result sets: `out/test262-s13-fr-before/results.json`,
-`out/test262-s13-fr-after3/results.json`, and
+`out/test262-s13-fr-after4/results.json`, and
 `out/test262-s13-fr-weakref-before/results.json` /
-`out/test262-s13-fr-weakref-after-final/results.json`. Controls passed 18/18 on
+`out/test262-s13-fr-weakref-after-fix/results.json`. Controls passed 18/18 on
 each run. The debug-static binary also passed the FinalizationRegistry corpus
-94/94 (`out/test262-s13-fr-after-debug`).
+94/94 (`out/test262-s13-fr-after-debug2`).
 
 Focused `test/es7/finalization-registry.js` covers constructor/call state,
 descriptors, non-constructible methods, target/token eligibility, duplicate
 registrations, all-match unregister, target vs held value, object/primitive
 held values, heldValue strong retention (including a live cell across a job
 boundary), weak token lifetime, no cleanup while a target is strongly
-reachable, cleanup after it becomes unreachable, multiple registries, a
-throwing cleanup callback (expected host error is in the test baseline), and
-target/token non-retention using real collections. It passed 50/50 direct
-baseline-mode runs on the test profile, and the `es7` folder passed 70/70 on
-both test and debug-static. The test is registered once with
-`-CollectGarbage -args summary -endargs`.
+reachable, cleanup after it becomes unreachable, multiple registries, and
+target/token non-retention using real collections. It passed 100/100 direct
+runs on the test profile and the `es7` folder passed 72/72 on both test and
+debug-static.
+
+`test/es7/finalization-registry-realm.js` covers `GetFunctionRealm` through a
+same-thread child realm for a normal function, bound function, Proxy, nested
+Proxy, and bound Proxy whose target function has an undefined `prototype`; an
+object-valued `NewTarget.prototype` still wins. `test/es7/
+finalization-registry-errors.js` covers a callback that throws on its first
+cell and requires the remaining cells to be retried by a later cleanup task;
+the expected host error is in `finalization-registry-errors.js.baseline`. Both
+focus tests passed 20/20 direct runs on test and debug-static.
 
 Adding the global intrinsic changed the debugger's global-property view. All
 66 affected `.dbg.baseline` files were regenerated from the test run; the diff
@@ -161,7 +182,7 @@ python3 tools/test262/run.py --binary "$PWD/out/s13-fr-before-bin/ch" \
   --checkout "$PWD/out/test262" --output "$PWD/out/test262-s13-fr-before" \
   'test/built-ins/FinalizationRegistry/**/*.js'
 python3 tools/test262/run.py --binary "$PWD/zig-out/bin/ch" \
-  --checkout "$PWD/out/test262" --output "$PWD/out/test262-s13-fr-after3" \
+  --checkout "$PWD/out/test262" --output "$PWD/out/test262-s13-fr-after4" \
   'test/built-ins/FinalizationRegistry/**/*.js'
 python3 test/runtests.py --test --variants=disable_jit \
   -b "$PWD/zig-out/bin/ch" test/es7
@@ -183,9 +204,11 @@ type.
   id and task function are compiled but not behavior-proved with JIT. B4 owns
   those matrices.
 - **Gate pins:** per the implementer instruction, this branch does not update
-  `tools/build/check_regression.py` pins. Registering the new test makes the
-  expected counts test **2005** and debug-static **2057**; integration must move
-  the pins. No full gate was run here.
+  `tools/build/check_regression.py` pins. The three registered focus tests make
+  the expected counts test **2007** and debug-static **2059** (the prior commit
+  already accounted for `finalization-registry.js` at 2005/2057; the realm and
+  errors tests add two more). Integration must move the pins. No full gate was
+  run here.
 - **Host job contract:** cleanup requires a native promise-continuation/job
   callback. The checked-in JsRT context returns `E_NOTIMPL` from
   `EnqueuePromiseTask` and JsRT embedders without `JsSetPromiseContinuationCallback`
@@ -199,8 +222,19 @@ type.
   allowances for such remnants rather than exact counts.
 - **Callback errors:** the expected-error baseline is host-specific and embeds
   the test line number; changing the throwing line requires regenerating
-  `finalization-registry.js.baseline`. Other hosts may report the job error
-  differently.
+  `finalization-registry-errors.js.baseline`. Other hosts may report the job
+  error differently. The callback-error text is still the generic
+  `JSERR_FunctionArgument_NeedObject` for target/token validation nits.
+- **Cross-realm Symbol identity:** symbol targets/tokens use the recycler weak
+  handle, but a cross-realm Symbol clone is a distinct primitive identity. This
+  is inherited from the existing Symbol cloning/`WeakRef` behavior and is not
+  fixed in this batch.
+- **Host-dispatch/recycler restriction:** objects without a recycler allocation
+  (host-dispatch/external surfaces) are rejected with TypeError rather than
+  retained strongly; no test262 scenario exercises that host surface.
+- **Dropped tasks:** a delayed task is intentionally retried at the next
+  boundary, so duplicates are possible; a host that never drains accumulates
+  one idempotent task per job until the runtime is disposed or a task runs.
 - **No `$262.gc`:** test262 GC-timing tests cannot run; focused tests use the
   `ch` `-CollectGarbage` intrinsic and real timer jobs.
 - **Reentrancy coverage:** callbacks that unregister/register/GC are handled by

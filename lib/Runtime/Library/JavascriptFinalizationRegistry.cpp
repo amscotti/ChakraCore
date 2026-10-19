@@ -13,6 +13,37 @@ namespace Js
              VirtualTableInfo<CrossSiteObject<JavascriptFinalizationRegistryCleanupTaskFunction>>::HasVirtualTable(obj));
     }
 
+    // OrdinaryCreateFromConstructor -> GetPrototypeFromConstructor ->
+    // GetFunctionRealm. A Proxy or bound function does not necessarily carry
+    // its target's ScriptContext, so follow the spec's target chain instead of
+    // using newTargetObject->GetScriptContext(). GetTarget() throws the
+    // specified TypeError for a revoked Proxy.
+    static ScriptContext* GetFunctionRealm(RecyclableObject* function)
+    {
+        while (true)
+        {
+            if (VarIs<JavascriptProxy>(function))
+            {
+                function = VarTo<JavascriptProxy>(function)->GetTarget();
+                continue;
+            }
+
+            if (VarIs<BoundFunction>(function))
+            {
+                JavascriptFunction* target = VarTo<BoundFunction>(function)->GetTargetFunction();
+                if (target == nullptr)
+                {
+                    AssertMsg(false, "BoundFunction without a callable target");
+                    return function->GetScriptContext();
+                }
+                function = target;
+                continue;
+            }
+
+            return function->GetScriptContext();
+        }
+    }
+
     static bool IsValidWeakKey(Var value, RecyclableObject** object)
     {
         // ES CanBeHeldWeakly: objects and unregistered Symbols. Registered
@@ -86,7 +117,7 @@ namespace Js
         }
         else
         {
-            ScriptContext* newTargetContext = newTargetObject->GetScriptContext();
+            ScriptContext* newTargetContext = GetFunctionRealm(newTargetObject);
             if (newTargetContext != nullptr && newTargetContext != scriptContext)
             {
                 DynamicObject* realmProto = newTargetContext->GetLibrary()->GetFinalizationRegistryPrototype();
@@ -266,58 +297,112 @@ namespace Js
 
     void JavascriptFinalizationRegistry::ScheduleCleanupJob()
     {
-        if (cleanupJobScheduled || !HasClearedTargets())
+        if (cleanupJobActive)
         {
-            return;
-        }
-
-        JavascriptLibrary* library = GetScriptContext()->GetLibrary();
-        if (!library->HasNativeHostPromiseContinuationCallback())
-        {
-            // Finalization is not guaranteed when the host has no job queue.
-            // Keep the cells and retry at a later job boundary rather than
-            // running callbacks synchronously inside OnScriptEnd.
-            return;
-        }
-
-        cleanupJobScheduled = TRUE;
-        library->EnqueueTask(library->CreateFinalizationRegistryCleanupTaskFunction(this));
-    }
-
-    void JavascriptFinalizationRegistry::CleanupDeadCells()
-    {
-        cleanupJobScheduled = FALSE;
-        if (cells == nullptr)
-        {
+            // A reentrant host call must not start a second cleanup job while
+            // this registry's cleanup is executing.
             return;
         }
 
         ScriptContext* scriptContext = GetScriptContext();
+        if (scriptContext == nullptr || scriptContext->IsClosed())
+        {
+            cleanupJobScheduled = FALSE;
+            return;
+        }
+
+        if (!HasClearedTargets())
+        {
+            return;
+        }
+
+        // cleanupJobScheduled only prevents a duplicate enqueue inside the
+        // same scheduling attempt. At the next outermost boundary a still
+        // pending task has either been dropped or delayed; reset the advisory
+        // flag and enqueue an idempotent retry. The ch host drains the normal
+        // queue between jobs, so a task scheduled here runs before the next
+        // boundary unless the host drops or never drains it.
+        cleanupJobScheduled = FALSE;
+
+        JavascriptLibrary* library = scriptContext->GetLibrary();
+        if (!library->HasNativeHostPromiseContinuationCallback())
+        {
+            // Finalization is not guaranteed when the host has no job queue.
+            // Keep the cells and retry at a later boundary instead of running
+            // callbacks synchronously inside OnScriptEnd.
+            return;
+        }
+
+        cleanupJobScheduled = TRUE;
+        try
+        {
+            library->EnqueueTask(library->CreateFinalizationRegistryCleanupTaskFunction(this));
+        }
+        catch (...)
+        {
+            // Task creation/OOM/host enqueue failure must not leave the
+            // advisory flag set and wedge all future cleanup attempts.
+            cleanupJobScheduled = FALSE;
+            throw;
+        }
+    }
+
+    void JavascriptFinalizationRegistry::CleanupDeadCells()
+    {
+        if (cleanupJobActive)
+        {
+            // ES IsFinalizationRegistryCleanupJobActive: nested/reentrant
+            // cleanup is not allowed; leave remaining cells for a later job.
+            return;
+        }
+
+        cleanupJobScheduled = FALSE;
+
+        ScriptContext* scriptContext = GetScriptContext();
+        if (scriptContext == nullptr || scriptContext->IsClosed() || cells == nullptr)
+        {
+            return;
+        }
+
         ThreadContext* threadContext = scriptContext->GetThreadContext();
         Var undefinedVar = scriptContext->GetLibrary()->GetUndefined();
         RecyclableObject* callback = VarTo<RecyclableObject>(cleanupCallback);
 
-        // CleanupFinalizationRegistry removes one cell before invoking the
-        // callback. If the callback throws, the exception leaves the job and
-        // the remaining dead cells are handled at a later boundary.
-        for (int i = 0; i < cells->Count();)
+        cleanupJobActive = TRUE;
+        try
         {
-            FinalizationRegistryCell* cell = cells->Item(i);
-            if (cell->targetWeakRef->Get() != nullptr)
+            // CleanupFinalizationRegistry removes one cell before invoking the
+            // callback. If the callback throws, the exception leaves the job
+            // and the remaining dead cells are retried at a later boundary.
+            for (int i = 0; i < cells->Count();)
             {
-                ++i;
-                continue;
-            }
+                FinalizationRegistryCell* cell = cells->Item(i);
+                if (cell->targetWeakRef->Get() != nullptr)
+                {
+                    ++i;
+                    continue;
+                }
 
-            Var heldValue = cell->heldValue;
-            cells->RemoveAt(i);
+                Var heldValue = cell->heldValue;
+                cells->RemoveAt(i);
 
-            BEGIN_SAFE_REENTRANT_CALL(threadContext)
-            {
-                CALL_FUNCTION(threadContext, callback, CallInfo(CallFlags_Value, 2), undefinedVar, heldValue);
+                BEGIN_SAFE_REENTRANT_CALL(threadContext)
+                {
+                    CALL_FUNCTION(threadContext, callback, CallInfo(CallFlags_Value, 2), undefinedVar, heldValue);
+                }
+                END_SAFE_REENTRANT_CALL
             }
-            END_SAFE_REENTRANT_CALL
         }
+        catch (...)
+        {
+            // The callback may throw. Clear the job-active guard before
+            // propagating to the host so the next boundary can retry the
+            // remaining cells.
+            cleanupJobActive = FALSE;
+            throw;
+        }
+
+        cleanupJobActive = FALSE;
     }
 
     BOOL JavascriptFinalizationRegistry::GetDiagTypeString(StringBuilder<ArenaAllocator>* stringBuilder, ScriptContext* requestContext)

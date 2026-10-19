@@ -38,11 +38,13 @@ namespace Js
         Field(Var) cleanupCallback;
         Field(CellList*) cells;
         Field(BOOL) cleanupJobScheduled;
+        Field(BOOL) cleanupJobActive;
 
         friend class VirtualTableInfo<JavascriptFinalizationRegistry>;
         friend class JavascriptFinalizationRegistryCleanupTaskFunction;
         JavascriptFinalizationRegistry(VirtualTableInfoCtorEnum v)
-            : DynamicObject(v), cleanupCallback(nullptr), cells(nullptr), cleanupJobScheduled(FALSE) {}
+            : DynamicObject(v), cleanupCallback(nullptr), cells(nullptr),
+              cleanupJobScheduled(FALSE), cleanupJobActive(FALSE) {}
         DEFINE_VALIDATE_VTABLE_REGISTERED(JavascriptFinalizationRegistry);
         DEFINE_MARSHAL_OBJECT_TO_SCRIPT_CONTEXT(JavascriptFinalizationRegistry);
 
@@ -51,7 +53,8 @@ namespace Js
             : DynamicObject(type),
               cleanupCallback(cleanupCallback),
               cells(nullptr),
-              cleanupJobScheduled(FALSE)
+              cleanupJobScheduled(FALSE),
+              cleanupJobActive(FALSE)
         {
         }
 

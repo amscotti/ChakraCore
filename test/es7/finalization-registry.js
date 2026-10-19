@@ -224,15 +224,6 @@ var persistRegistry = new FinalizationRegistry(function () {});
     persistRegistry.register(persistTarget, held, persistToken);
 })();
 
-// A throwing cleanup callback must not prevent later host tasks. The throw is
-// reported by the host job; the flag proves the callback ran.
-var throwSeen = false;
-var throwRegistry = new FinalizationRegistry(function () {
-    throwSeen = true;
-    throw new Error("expected cleanup callback failure");
-});
-throwRegistry.register({}, "throw");
-
 // Multiple registries and registrations.
 var multiA = [];
 var multiB = [];
@@ -274,7 +265,6 @@ WScript.SetTimeout(function job2() {
     check(deadSeen.length >= A_COUNT - CLEAR_ALLOWANCE, "dead target cleanup jobs");
     check(primitiveSeen.length >= PRIMITIVE_COUNT - CLEAR_ALLOWANCE, "primitive heldValues");
     check(checkDeadHeldValues() >= A_COUNT - CLEAR_ALLOWANCE, "object heldValues strongly held");
-    check(throwSeen, "throwing cleanup callback ran");
     check(duplicateSeen.length === 2 && duplicateSeen[0] === "dup-1" && duplicateSeen[1] === "dup-2",
         "duplicate registrations produce two cleanup callbacks");
     check(typeof persistHeldRef.deref() === "object", "heldValue strongly held while target is alive");
