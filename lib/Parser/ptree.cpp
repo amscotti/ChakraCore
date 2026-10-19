@@ -304,9 +304,11 @@ ParseNodeUni::ParseNodeUni(OpCode nop, charcount_t ichMin, charcount_t ichLim, P
 ParseNodeBin::ParseNodeBin(OpCode nop, charcount_t ichMin, charcount_t ichLim, ParseNode * pnode1, ParseNode * pnode2)
     : ParseNode(nop, ichMin, ichLim)
 {
-    // Member name is either a string or a computed name
+    // Member name is either a string, a computed name, or (for instance
+    // private fields only) a private name node.
     Assert((nop != knopMember && nop != knopMemberShort && nop != knopObjectPatternMember && nop != knopGetMember && nop != knopSetMember) 
-        || (pnode1->nop == knopStr || pnode1->nop == knopComputedName));
+        || (pnode1->nop == knopStr || pnode1->nop == knopComputedName ||
+            (nop == knopMember && pnode1->nop == knopName && pnode1->AsParseNodeName()->IsPrivateName())));
 
     // Dot's rhs has to be a name;
     Assert(nop != knopDot || pnode2->nop == knopName);
@@ -368,6 +370,7 @@ ParseNodeName::ParseNodeName(charcount_t ichMin, charcount_t ichLim, IdentPtr na
     this->sym = nullptr;    
     this->symRef = nullptr;
     this->isSpecialName = false;
+    this->isPrivateName = false;
 }
 
 void ParseNodeName::SetSymRef(PidRefStack * ref)
@@ -466,6 +469,7 @@ ParseNodeFnc::ParseNodeFnc(OpCode nop, charcount_t ichMin, charcount_t ichLim)
 ParseNodeClass::ParseNodeClass(OpCode nop, charcount_t ichMin, charcount_t ichLim)
     : ParseNode(nop, ichMin, ichLim)
 {
+    this->pnodePrivateNames = nullptr;
 }
 
 ParseNodeExportDefault::ParseNodeExportDefault(OpCode nop, charcount_t ichMin, charcount_t ichLim)

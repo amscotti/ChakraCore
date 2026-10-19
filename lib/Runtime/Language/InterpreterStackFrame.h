@@ -597,6 +597,11 @@ namespace Js
 
         template <class T> void OP_InitProperty(unaligned T* playout);
         template <class T> void OP_InitClassField(const unaligned T* playout);
+        template <class T> void OP_NewPrivateName(const unaligned T* playout);
+        template <class T> void OP_LdPrivateField(const unaligned T* playout);
+        template <class T> void OP_StPrivateField(const unaligned T* playout);
+        template <class T> void OP_InitPrivateField(const unaligned T* playout);
+        template <class T> void OP_HasPrivateField(const unaligned T* playout);
         template <class T> void OP_InitLocalProperty(unaligned T* playout);
         template <class T> void OP_InitRootProperty(unaligned T* playout);
         template <class T> void OP_InitUndeclLetProperty(unaligned T* playout);

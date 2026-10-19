@@ -890,6 +890,15 @@ MACRO_BACKEND_ONLY(GeneratorEpilogueNoFrameNullOutLabel,    Empty,  None)
 // shifts.
 MACRO_EXTEND_WMS(       InitClassField,    ElementCP,      OpSideEffect|OpOpndHasImplicitCall|OpPostOpDbgBailOut)
 
+// S1 private instance fields: each private name is represented at runtime by
+// a fresh hidden WeakMap brand token. Appended after InitClassField so no
+// established opcode value shifts.
+MACRO_EXTEND_WMS(       NewPrivateName,    Reg1,           OpSideEffect|OpPostOpDbgBailOut)
+MACRO_EXTEND_WMS(       LdPrivateField,    Reg3,           OpSideEffect|OpOpndHasImplicitCall|OpPostOpDbgBailOut)
+MACRO_EXTEND_WMS(       StPrivateField,    Reg4,           OpSideEffect|OpOpndHasImplicitCall|OpPostOpDbgBailOut)
+MACRO_EXTEND_WMS(       InitPrivateField,  Reg4,           OpSideEffect|OpOpndHasImplicitCall|OpPostOpDbgBailOut)
+MACRO_EXTEND_WMS(       HasPrivateField,   Reg3,           OpSideEffect|OpOpndHasImplicitCall|OpPostOpDbgBailOut)
+
 #undef MACRO_WMS_PROFILED
 #undef MACRO_WMS_PROFILED2
 #undef MACRO_WMS_PROFILED_OP

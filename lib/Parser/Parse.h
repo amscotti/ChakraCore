@@ -79,6 +79,9 @@ struct PidRefStack;
 struct DeferredFunctionStub;
 
 struct BlockInfoStack;
+struct PrivateNameScope;
+struct PrivateNameEntry;
+struct DeferredPrivateRef;
 
 struct StmtNest
 {
@@ -496,6 +499,13 @@ private:
     bool m_disallowSuperCallInEval;
     bool m_classFieldInitializerUsesArguments;
     uint32 m_classFieldHelperCount;
+    // S1 private class fields: lexical private-name environment and deferred
+    // resolution list. Private names are resolved at the end of the outermost
+    // enclosing class so uses may precede declarations.
+    PrivateNameScope * m_privateNameScope;
+    DeferredPrivateRef * m_pendingPrivateRefs;
+    bool m_currentClassHasPrivate;
+    uint32 m_classPrivateNameCount;
     uint * m_pnestedCount; // count of functions nested at one level below the current node
 
     struct WellKnownPropertyPids
@@ -925,6 +935,12 @@ private:
 
     IdentPtr ParseClassPropertyName(IdentPtr * hint);
     bool ClassBodyHasFieldSyntax();
+    bool ClassBodyHasPrivateSyntax();
+    void PushPrivateNameScope();
+    void PopPrivateNameScope();
+    PrivateNameEntry * DeclareClassPrivateName(IdentPtr name, bool buildAST);
+    ParseNodeName * CreatePrivateNameReference(IdentPtr name, charcount_t ichMin, charcount_t ichLim, bool buildAST);
+    void ResolvePendingPrivateRefs(PrivateNameScope * outermost);
     ParseNodeFnc * CreateClassFieldInitializerFunction(charcount_t ichMin, size_t cbMin, ParseNodePtr * ppnodeInitExpr = nullptr);
     void AttachClassFieldsToLambda(ParseNodeFnc * pnodeLambda, ParseNode * pnodeFields, Symbol * thisSym);
     ParseNodeFnc * CreateClassFieldInitializerFastScanStub();
@@ -985,7 +1001,8 @@ private:
         _Inout_opt_ charcount_t *plastRParen = nullptr,
         _Out_opt_ bool* looseCoalesce = nullptr,
         _Out_opt_ bool* pfHasOptChain = nullptr,
-        _Out_opt_ bool* pfIsCallResult = nullptr);
+        _Out_opt_ bool* pfIsCallResult = nullptr,
+        BOOL fAllowIn = TRUE);
 
     template<bool buildAST> ParseNodePtr ParsePostfixOperators(
         ParseNodePtr pnode,

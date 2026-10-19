@@ -377,6 +377,8 @@ public:
     Js::PropertyId PropertyIdFromNameNode() const;
 
     bool IsSpecialName() { return isSpecialName; }
+    bool IsPrivateName() { return isPrivateName; }
+    void SetIsPrivateName() { isPrivateName = true; }
 
     DISABLE_SELF_CAST(ParseNodeName);
 
@@ -385,6 +387,7 @@ protected:
 
 private:
     bool isSpecialName;         // indicates a PnPid (knopName) is a special name like 'this' or 'super'
+    bool isPrivateName;         // '#name' reference to a class private binding
 };
 
 // variable declaration
@@ -730,6 +733,9 @@ public:
     ParseNodeFnc * pnodeConstructor;
     ParseNodePtr pnodeMembers;
     ParseNodePtr pnodeExtends;
+    // S1 private fields: hidden block-scoped const declarations (knopConstDecl)
+    // which hold one fresh runtime private-name token per class evaluation.
+    ParseNodePtr pnodePrivateNames;
 
     bool isDefaultModuleExport;
 

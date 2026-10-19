@@ -62,7 +62,7 @@ public:
 
     IdentPtr GetIdentifier(HashTbl * hashTbl)
     {
-        Assert(IsIdentifier() || IsReservedWord());
+        Assert(IsIdentifier() || IsReservedWord() || tk == tkPrivateName);
         if (u.pid)
         {
             return u.pid;

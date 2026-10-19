@@ -2327,6 +2327,12 @@ void BindInstAndMember(ParseNode *pnode, ByteCodeGenerator *byteCodeGenerator)
     BindReference(pnode, byteCodeGenerator);
 
     ParseNodeName *right = pnode->AsParseNodeBin()->pnode2->AsParseNodeName();    
+    if (right->IsPrivateName())
+    {
+        // A private name is not a property reference: it resolves to the
+        // class-block brand token retained by the parser.
+        return;
+    }
     byteCodeGenerator->AssignPropertyId(right->pid);
     right->sym = nullptr;
     right->ClearSymRef();
@@ -3565,12 +3571,16 @@ void VisitNestedScopes(ParseNode* pnodeScopeList, ParseNode* pnodeParent, ByteCo
                             ? pnodeFields->AsParseNodeBin()->pnode1
                             : pnodeFields;
                         ParseNodePtr pnodeFieldName = pnodeField->AsParseNodeBin()->pnode1;
-                        Assert(pnodeFieldName->nop == knopStr);
-                        // The field name is not part of the body AST, so bind
-                        // its property id (and string constant for
-                        // NamedEvaluation) explicitly.
-                        byteCodeGenerator->AssignPropertyId(pnodeFieldName->AsParseNodeStr()->pid);
-                        Visit(pnodeFieldName, byteCodeGenerator, prefix, postfix);
+                        if (!(pnodeFieldName->nop == knopName &&
+                              pnodeFieldName->AsParseNodeName()->IsPrivateName()))
+                        {
+                            Assert(pnodeFieldName->nop == knopStr);
+                            // The field name is not part of the body AST, so bind
+                            // its property id (and string constant for
+                            // NamedEvaluation) explicitly.
+                            byteCodeGenerator->AssignPropertyId(pnodeFieldName->AsParseNodeStr()->pid);
+                            Visit(pnodeFieldName, byteCodeGenerator, prefix, postfix);
+                        }
 
                         ParseNodePtr pnodeFieldCall = pnodeField->AsParseNodeBin()->pnode2;
                         if (pnodeFieldCall != nullptr)

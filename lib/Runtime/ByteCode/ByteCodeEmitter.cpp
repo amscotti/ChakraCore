@@ -28,6 +28,24 @@ bool CallTargetIsArray(ParseNode *pnode)
     return pnode->nop == knopName && pnode->AsParseNodeName()->PropertyIdFromNameNode() == Js::PropertyIds::Array;
 }
 
+// S1 private fields: `obj.#x` is represented as a knopDot whose property name
+// is a private knopName bound to the class-block brand token.
+static bool IsPrivateFieldReference(ParseNode *pnode)
+{
+    return pnode != nullptr && pnode->nop == knopDot &&
+        pnode->AsParseNodeBin()->pnode2->nop == knopName &&
+        pnode->AsParseNodeBin()->pnode2->AsParseNodeName()->IsPrivateName();
+}
+
+static Js::RegSlot EmitPrivateBrand(
+    ParseNodeName * pnodeName, ByteCodeGenerator * byteCodeGenerator, FuncInfo * funcInfo)
+{
+    Assert(pnodeName != nullptr && pnodeName->sym != nullptr);
+    Js::RegSlot brandLocation = funcInfo->AcquireTmpRegister();
+    byteCodeGenerator->EmitPropLoad(brandLocation, pnodeName->sym, pnodeName->pid, funcInfo);
+    return brandLocation;
+}
+
 #define STARTSTATEMENET_IFTOPLEVEL(isTopLevel, pnode) \
 if ((isTopLevel)) \
 { \
@@ -2463,7 +2481,8 @@ void ByteCodeGenerator::EmitClassFieldInitializerCalls(ParseNode * pnodeFields, 
             ? pnodeField->AsParseNodeBin()->pnode2->AsParseNodeCall()
             : nullptr;
 
-        Assert(pnodeName->nop == knopStr);
+        bool isPrivate = pnodeName->nop == knopName && pnodeName->AsParseNodeName()->IsPrivateName();
+        Assert(isPrivate || pnodeName->nop == knopStr);
 
         Js::RegSlot thisLocation = thisLocationOverride;
         if (thisLocation == Js::Constants::NoRegister)
@@ -2492,10 +2511,24 @@ void ByteCodeGenerator::EmitClassFieldInitializerCalls(ParseNode * pnodeFields, 
             releaseValueLoc = true;
         }
 
-        AssignPropertyId(pnodeName->AsParseNodeStr()->pid);
-        Js::PropertyId propertyId = pnodeName->AsParseNodeStr()->pid->GetPropertyId();
-        uint cacheId = funcInfo->FindOrAddInlineCacheId(thisLocation, propertyId, false, true);
-        Writer()->PatchableProperty(Js::OpCode::InitClassField, valueLocation, thisLocation, cacheId);
+        if (isPrivate)
+        {
+            ParseNodeName * pnodePrivateName = pnodeName->AsParseNodeName();
+            Assert(pnodePrivateName->sym != nullptr);
+            Js::RegSlot brandLocation = funcInfo->AcquireTmpRegister();
+            this->EmitPropLoad(
+                brandLocation, pnodePrivateName->sym, pnodePrivateName->pid, funcInfo);
+            Writer()->Reg4(
+                Js::OpCode::InitPrivateField, valueLocation, thisLocation, brandLocation, valueLocation);
+            funcInfo->ReleaseTmpRegister(brandLocation);
+        }
+        else
+        {
+            AssignPropertyId(pnodeName->AsParseNodeStr()->pid);
+            Js::PropertyId propertyId = pnodeName->AsParseNodeStr()->pid->GetPropertyId();
+            uint cacheId = funcInfo->FindOrAddInlineCacheId(thisLocation, propertyId, false, true);
+            Writer()->PatchableProperty(Js::OpCode::InitClassField, valueLocation, thisLocation, cacheId);
+        }
 
         if (releaseValueLoc)
         {
@@ -6265,7 +6298,8 @@ bool IsApplyArgs(ParseNodeCall* callNode)
         if ((lhsNode != nullptr) && ((lhsNode->nop == knopDot) || (lhsNode->nop == knopName)) && !IsArguments(lhsNode))
         {
             ParseNode* nameNode = target->AsParseNodeBin()->pnode2;
-            if (nameNode != nullptr)
+            if (nameNode != nullptr &&
+                !(nameNode->nop == knopName && nameNode->AsParseNodeName()->IsPrivateName()))
             {
                 bool nameIsApply = nameNode->AsParseNodeName()->PropertyIdFromNameNode() == Js::PropertyIds::apply;
                 if (nameIsApply && args != nullptr && args->nop == knopList)
@@ -7833,6 +7867,17 @@ void EmitAssignment(
     // x.y =
     case knopDot:
     {
+        if (IsPrivateFieldReference(lhs))
+        {
+            Js::RegSlot brandLocation = EmitPrivateBrand(
+                lhs->AsParseNodeBin()->pnode2->AsParseNodeName(), byteCodeGenerator, funcInfo);
+            byteCodeGenerator->Writer()->Reg4(
+                Js::OpCode::StPrivateField, rhsLocation,
+                lhs->AsParseNodeBin()->pnode1->location, brandLocation, rhsLocation);
+            funcInfo->ReleaseTmpRegister(brandLocation);
+            break;
+        }
+
         // PutValue(x, "y", rhs)
         Js::PropertyId propertyId = lhs->AsParseNodeBin()->pnode2->AsParseNodeName()->PropertyIdFromNameNode();
 
@@ -7987,10 +8032,21 @@ void EmitLoad(
     // = x.y
     case knopDot:
     {
-        // get field id for "y"
-        Js::PropertyId propertyId = lhs->AsParseNodeBin()->pnode2->AsParseNodeName()->PropertyIdFromNameNode();
         funcInfo->AcquireLoc(lhs);
         EmitReference(lhs, byteCodeGenerator, funcInfo);
+        if (IsPrivateFieldReference(lhs))
+        {
+            Js::RegSlot brandLocation = EmitPrivateBrand(
+                lhs->AsParseNodeBin()->pnode2->AsParseNodeName(), byteCodeGenerator, funcInfo);
+            byteCodeGenerator->Writer()->Reg3(
+                Js::OpCode::LdPrivateField, lhs->location,
+                lhs->AsParseNodeBin()->pnode1->location, brandLocation);
+            funcInfo->ReleaseTmpRegister(brandLocation);
+            break;
+        }
+
+        // get field id for "y"
+        Js::PropertyId propertyId = lhs->AsParseNodeBin()->pnode2->AsParseNodeName()->PropertyIdFromNameNode();
         uint cacheId = funcInfo->FindOrAddInlineCacheId(lhs->AsParseNodeBin()->pnode1->location, propertyId, false, false);
         byteCodeGenerator->Writer()->PatchableProperty(Js::OpCode::LdFld, lhs->location, lhs->AsParseNodeBin()->pnode1->location, cacheId);
         break;
@@ -8862,6 +8918,20 @@ void EmitCallTargetNoEvalComponents(
     switch (pnodeTarget->nop)
     {
     case knopDot:
+        if (IsPrivateFieldReference(pnodeTarget))
+        {
+            Emit(pnodeTarget->AsParseNodeBin()->pnode1, byteCodeGenerator, funcInfo, false);
+            funcInfo->AcquireLoc(pnodeTarget);
+            Js::RegSlot brandLocation = EmitPrivateBrand(
+                pnodeTarget->AsParseNodeBin()->pnode2->AsParseNodeName(), byteCodeGenerator, funcInfo);
+            byteCodeGenerator->Writer()->Reg3(
+                Js::OpCode::LdPrivateField, pnodeTarget->location,
+                pnodeTarget->AsParseNodeBin()->pnode1->location, brandLocation);
+            funcInfo->ReleaseTmpRegister(brandLocation);
+            *thisLocation = pnodeTarget->AsParseNodeBin()->pnode1->location;
+            *callObjLocation = *thisLocation;
+            break;
+        }
         *thisLocation = pnodeTarget->AsParseNodeBin()->pnode1->location;
         *callObjLocation = pnodeTarget->AsParseNodeBin()->pnode1->location;
         break;
@@ -8914,6 +8984,19 @@ void EmitCallTarget(
     {
         ParseNodeBin * pnodeBinTarget = pnodeTarget->AsParseNodeBin();
         funcInfo->AcquireLoc(pnodeBinTarget);
+        if (IsPrivateFieldReference(pnodeTarget))
+        {
+            Emit(pnodeBinTarget->pnode1, byteCodeGenerator, funcInfo, false);
+            Js::RegSlot brandLocation = EmitPrivateBrand(
+                pnodeBinTarget->pnode2->AsParseNodeName(), byteCodeGenerator, funcInfo);
+            byteCodeGenerator->Writer()->Reg3(
+                Js::OpCode::LdPrivateField, pnodeTarget->location,
+                pnodeBinTarget->pnode1->location, brandLocation);
+            funcInfo->ReleaseTmpRegister(brandLocation);
+            *thisLocation = pnodeBinTarget->pnode1->location;
+            *callObjLocation = Js::Constants::NoRegister;
+            break;
+        }
         // Assign the call target operand(s), putting them into expression temps if necessary to protect
         // them from side-effects.
         if (fSideEffectArgs)
@@ -9215,6 +9298,13 @@ void EmitCallInstrNoEvalComponents(
     {
     case knopDot:
     {
+        if (IsPrivateFieldReference(pnodeTarget))
+        {
+            // The target was loaded by EmitCallTargetNoEvalComponents.
+            EmitCallI(pnodeCall, /*fEvaluateComponents*/ FALSE, fIsEval, fHasNewTarget, actualArgCount, byteCodeGenerator, funcInfo, callSiteId, spreadIndices);
+            break;
+        }
+
         Assert(pnodeTarget->AsParseNodeBin()->pnode2->nop == knopName);
         Js::PropertyId propertyId = pnodeTarget->AsParseNodeBin()->pnode2->AsParseNodeName()->PropertyIdFromNameNode();
 
@@ -11845,6 +11935,24 @@ void EmitClass(ParseNodeClass * pnodeClass, ByteCodeGenerator * byteCodeGenerato
     Js::RegSlot protoLoc = funcInfo->AcquireTmpRegister();
     BeginEmitBlock(pnodeClass->pnodeBlock, byteCodeGenerator, funcInfo);
 
+    // S1 private fields: give every private name declared by this class
+    // evaluation a fresh brand token (a hidden WeakMap). Methods and field
+    // initializers reach it through the hidden class-block const.
+    for (ParseNodePtr pnodePrivate = pnodeClass->pnodePrivateNames;
+         pnodePrivate != nullptr;
+         pnodePrivate = pnodePrivate->nop == knopList ? pnodePrivate->AsParseNodeBin()->pnode2 : nullptr)
+    {
+        ParseNodePtr pnodeDecl = pnodePrivate->AsParseNodeBin()->pnode1;
+        ParseNodeVar * pnodeVar = pnodeDecl->AsParseNodeVar();
+        Js::RegSlot brandLocation = funcInfo->AcquireTmpRegister();
+        byteCodeGenerator->Writer()->Reg1(Js::OpCode::NewPrivateName, brandLocation);
+        byteCodeGenerator->EmitPropStore(
+            brandLocation, pnodeVar->sym, pnodeVar->pid, funcInfo,
+            /*isLetDecl*/ false, /*isConstDecl*/ true,
+            /*isFncDeclVar*/ false, /*skipUseBeforeDeclarationCheck*/ true);
+        funcInfo->ReleaseTmpRegister(brandLocation);
+    }
+
     Js::RegSlot frameDisplayLoc = funcInfo->frameDisplayRegister != Js::Constants::NoRegister ? funcInfo->frameDisplayRegister : funcInfo->GetEnvRegister();
     Js::RegSlot tmpFrameDisplayLoc = funcInfo->AcquireTmpRegister();
     frameDisplayLoc = byteCodeGenerator->PrependLocalScopes(frameDisplayLoc, tmpFrameDisplayLoc, funcInfo);
@@ -12356,6 +12464,14 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
         {
         case knopDot:
         {
+            if (IsPrivateFieldReference(pnodeOpnd))
+            {
+                Emit(pnodeOpnd, byteCodeGenerator, funcInfo, false);
+                funcInfo->ReleaseLoc(pnodeOpnd);
+                byteCodeGenerator->Writer()->Reg2(
+                    Js::OpCode::Typeof, funcInfo->AcquireLoc(pnode), pnodeOpnd->location);
+                break;
+            }
             Emit(pnodeOpnd->AsParseNodeBin()->pnode1, byteCodeGenerator, funcInfo, false);
             Js::PropertyId propertyId = pnodeOpnd->AsParseNodeBin()->pnode2->AsParseNodeName()->PropertyIdFromNameNode();
             Assert(pnodeOpnd->AsParseNodeBin()->pnode2->nop == knopName);
@@ -12445,9 +12561,30 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
     case knopLsh:
     case knopRsh:
     case knopRs2:
-    case knopIn:
         EmitBinary(nopToOp[pnode->nop], pnode, byteCodeGenerator, funcInfo);
         break;
+    case knopIn:
+    {
+        ParseNode * pnodeLhs = pnode->AsParseNodeBin()->pnode1;
+        if (pnodeLhs->nop == knopName && pnodeLhs->AsParseNodeName()->IsPrivateName())
+        {
+            // `#x in obj` is an own-brand check, not a property lookup.
+            STARTSTATEMENET_IFTOPLEVEL(isTopLevel, pnode);
+            Emit(pnode->AsParseNodeBin()->pnode2, byteCodeGenerator, funcInfo, false);
+            Js::RegSlot brandLocation = EmitPrivateBrand(
+                pnodeLhs->AsParseNodeName(), byteCodeGenerator, funcInfo);
+            funcInfo->ReleaseTmpRegister(brandLocation);
+            funcInfo->ReleaseLoc(pnode->AsParseNodeBin()->pnode2);
+            funcInfo->AcquireLoc(pnode);
+            byteCodeGenerator->Writer()->Reg3(
+                Js::OpCode::HasPrivateField, pnode->location,
+                pnode->AsParseNodeBin()->pnode2->location, brandLocation);
+            ENDSTATEMENET_IFTOPLEVEL(isTopLevel, pnode);
+            break;
+        }
+        EmitBinary(nopToOp[pnode->nop], pnode, byteCodeGenerator, funcInfo);
+        break;
+    }
     case knopInstOf:
     {
         STARTSTATEMENET_IFTOPLEVEL(isTopLevel, pnode);
@@ -12646,6 +12783,18 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
 
         Js::RegSlot callObjLocation = pnode->AsParseNodeBin()->pnode1->location;
         Js::RegSlot protoLocation = callObjLocation;
+
+        if (IsPrivateFieldReference(pnode))
+        {
+            Js::RegSlot brandLocation = EmitPrivateBrand(
+                pnode->AsParseNodeBin()->pnode2->AsParseNodeName(), byteCodeGenerator, funcInfo);
+            funcInfo->ReleaseTmpRegister(brandLocation);
+            funcInfo->ReleaseLoc(pnode->AsParseNodeBin()->pnode1);
+            funcInfo->AcquireLoc(pnode);
+            byteCodeGenerator->Writer()->Reg3(
+                Js::OpCode::LdPrivateField, pnode->location, callObjLocation, brandLocation);
+            break;
+        }
 
         if (ByteCodeGenerator::IsSuper(pnode->AsParseNodeBin()->pnode1))
         {
