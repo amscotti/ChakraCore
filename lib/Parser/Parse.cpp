@@ -9470,14 +9470,18 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
         entry->methodInitAdded = true;
     };
 
-    auto MakePrivateHint = [&](IdentPtr name) -> LPCOLESTR
+    auto MakePrivateHint = [&](IdentPtr name, const char16 * prefix = nullptr, uint32 prefixLength = 0) -> LPCOLESTR
     {
-        uint32 hintLength = name->Cch() + 1;
+        uint32 hintLength = prefixLength + name->Cch() + 1;
         char16 * hint = AnewArray(&m_nodeAllocator, char16, hintLength + 1);
-        hint[0] = _u('#');
+        for (uint32 i = 0; i < prefixLength; i++)
+        {
+            hint[i] = prefix[i];
+        }
+        hint[prefixLength] = _u('#');
         for (uint32 i = 0; i < name->Cch(); i++)
         {
-            hint[i + 1] = name->Psz()[i];
+            hint[prefixLength + 1 + i] = name->Psz()[i];
         }
         hint[hintLength] = 0;
         return hint;
@@ -10027,6 +10031,14 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
                     // Static private accessors are outside this slice.
                     Error(ERRsyntax);
                 }
+                if (isAsyncMethod || isGenerator)
+                {
+                    // Accessors cannot be async or generators: `async get`,
+                    // `*set`, `async *get`, etc. are early errors. The public
+                    // accessor branch applies the same async restriction; the
+                    // generator flag is checked here as well for private names.
+                    Error(ERRsyntax);
+                }
                 if (accessorSource == wellKnownPropertyPids.constructor)
                 {
                     Error(ERRsyntax);
@@ -10069,8 +10081,9 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
                 {
                     pnodeFnc->SetIsAccessor();
                     pnodeFnc->pid = accessorSource;
-                    pnodeFnc->hint = MakePrivateHint(accessorSource);
-                    pnodeFnc->hintLength = accessorSource->Cch() + 1;
+                    pnodeFnc->hint = MakePrivateHint(
+                        accessorSource, isGetter ? _u("get ") : _u("set "), 4);
+                    pnodeFnc->hintLength = accessorSource->Cch() + 5;
                     pnodeFnc->hintOffset = 0;
                     ParseNodePtr pnodeMemberAccessor = CreateBinNode(
                         isGetter ? knopGetMember : knopSetMember, pnodeMemberName, pnodeFnc);

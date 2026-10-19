@@ -47,7 +47,10 @@ collisions remain `SyntaxError`s. Private method/accessor names are parsed by
 the existing class-member grammar; `ParseFncDeclNoCheckScope` consumes the
 private token as the suppressed function name, and the parser rewinds to the
 token so the ordinary method/accessor path can run. Function hints use the
-source spelling including `#` (so `new C().ref().name === "#m"`).
+source spelling including `#` (so `new C().ref().name === "#m"`); accessor
+hints are `get #x` / `set #x`. The private-accessor path rejects
+`async get/set`, `*get/set` and `async *get/set` with the same early-error
+policy as public accessors, before declaring or pairing the name.
 
 Resolved private reference `ParseNodeName`s record the entry kind at the
 outermost class pop. This lets the emitter select field, method or accessor
@@ -76,6 +79,11 @@ Appended interpreter-only opcodes (after `HasPrivateField`):
 - `StPrivateAccessor` — brand check, retrieve setter, `CallSetter`, `TypeError`
   if absent.
 - `StPrivateMethod` — brand check, then `TypeError` (methods are not writable).
+
+`StPrivateField`/`StPrivateAccessor`/`StPrivateMethod` write their result
+through R0. The emitter therefore uses a temporary result register instead of
+the RHS location, which may be a constant register for literal/null/undefined
+stores. This also covers compound, logical and destructuring assignment paths.
 
 No static private PropertyIds were added.
 
@@ -110,19 +118,21 @@ Build (Mac ARM64 release/no-JIT; all commands under the serialized gate lock):
 - `sh /tmp/opencode/cc-gate-lock.sh mise exec -- zig build -Dprofile=debug-static --cache-dir "$PWD/.zig-cache"` — green.
 - Release `zig-out/bin/ch` sha256 `bb2b06bd95337cc22b66b5510e9770a4030b2f5877261a015c8e7b750ad8eca6`
   (unchanged launcher; shared build), `zig-out/bin/libChakraCore.dylib` sha256
-  `18f4e08a957b172fb99b15dcb58aaa24651e4b510e304a5f184dbc7fc4afbc1b`.
+  `f392b0e4d9cb88d8365c79db25d12a4406bee92f510f70154500d3b88e9f5eee`.
   The pre-slice base dylib was `0568fb41ecea5159eaf17cd1fe86aa7d94de7ddc642b9201df828a22d3723175`.
   Debug-static `out/debug-static/bin/ch` sha256
-  `b4de223c6366c6cea8ecb583e185d833a78b0abe8fba2e4830bff66ecbf12742` (static).
+  `54369ac375cd16465a4fedf1c483378b0740d16afa7e1e23f6315431a21213ae` (static).
 
 Local suites (disable_jit, release binary):
 
-- `test/es7/class-private-methods.js` — 17/17 cases pass in normal,
+- `test/es7/class-private-methods.js` — 18/18 cases pass in normal,
   `-force:deferparse` and `-noDeferParse` modes. Cases cover method dispatch,
   shared function identity/name/length, reflection, wrong receivers, get/set
   accessors and missing halves, derived/base brands, initialization order,
   `#m in obj`, frozen/non-extensible receivers, per-evaluation brands, nested
-  shadowing, arrow-`super()` cloning, method write rejection, and early errors.
+  shadowing, arrow-`super()` cloning, method write rejection, literal/compound/
+  logical/destructuring private stores, and early errors (including async/
+  generator accessor rejection and duplicate getter/setter interactions).
 - Debug-static build passes the same test file in normal, `-force:deferparse`,
   `-noDeferParse`, and `-force:DeferParse -UseParserStateCache
   -ParserStateCache` modes; the debug build also exercises the private-accessor
@@ -130,8 +140,8 @@ Local suites (disable_jit, release binary):
   remains green.
 - `test/es7/class-private-fields.js` — still passes in all three release modes.
 - `python3 test/runtests.py -t -b "$PWD/zig-out/bin/ch" --variants disable_jit`
-  — **2003 passed / 0 failed** across the checked-in suite, including
-  `es7: 68/0`, `es6: 233/0`, `es6module: 31/0`.
+  — **2003 passed / 0 failed**; debug-static suite — **2055 passed /
+  0 failed** (`es7: 68/0`, `es6: 233/0`, `es6module: 31/0`).
 
 Focused test262 subset (pinned corpus
 `2e0a56762801e275a9fdf96dc49d90ba0cddcf63`; same command and filters as the
@@ -159,16 +169,22 @@ failed. Residual failures are exactly:
 - Private static fields/methods, static blocks, computed class-element names
   and decorators are excluded by design.
 - Async/generator private instance methods are not implemented in this slice
-  (valid syntax is reported as `SyntaxError` until follow-up); accessors cannot
-  be async/generator.
+  (valid syntax is reported as `SyntaxError` until follow-up). Async/generator
+  private accessors are syntax errors, matching the public accessor rule.
 - Direct eval inside methods/initializers cannot see the class private
   environment, as with private fields.
 - Optional-chain private tails (`o?.#m`) remain unsupported.
-- Destructuring assignment targets containing private methods/accessors remain
-  unsupported (private destructuring targets were already a field residual).
+- Private field/accessor destructuring assignment targets do work and are
+  covered by the focused test (array and object patterns, literal values).
+  Method values remain non-writable, including under destructuring assignment.
+- Nonextensible policy: method/accessor brands install before field adds, so a
+  non-extensible receiver can retain callable private methods while a declared
+  private field makes construction throw `TypeError`; freezing after
+  construction does not break method/accessor access.
 - The `JavascriptWeakMap` self entry relies on WeakMap keys being objects and on
   the existing weak-key storage; clone/marshal across script contexts is
-  untested.
+  untested. Test262 runs use `-CollectGarbage`, but GC-stress and weak-map
+  lifetime under heavy pressure are not separately exercised.
 - All new opcodes are interpreter-only. **B4 must run this corpus and the es7
   tests under SimpleJIT/FullJIT (dynapogo) before any JIT/default claim.**
 

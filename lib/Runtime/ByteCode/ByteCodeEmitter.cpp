@@ -79,21 +79,27 @@ static void EmitPrivateStore(
     ByteCodeGenerator * byteCodeGenerator, FuncInfo * funcInfo)
 {
     Js::RegSlot brandLocation = EmitPrivateBrand(pnodeName, byteCodeGenerator, funcInfo);
+    // The RHS may live in a constant register (literal, undefined, etc.).
+    // StPrivate* writes its result through R0, so a constant destination would
+    // trip the interpreter's "writable register" assertion. Use a real temp;
+    // the assignment result remains available at valueLocation.
+    Js::RegSlot resultLocation = funcInfo->AcquireTmpRegister();
     switch (pnodeName->GetPrivateKind())
     {
     case PrivateNameKind::Method:
         byteCodeGenerator->Writer()->Reg3(
-            Js::OpCode::StPrivateMethod, valueLocation, instanceLocation, brandLocation);
+            Js::OpCode::StPrivateMethod, resultLocation, instanceLocation, brandLocation);
         break;
     case PrivateNameKind::Accessor:
         byteCodeGenerator->Writer()->Reg4U(
-            Js::OpCode::StPrivateAccessor, valueLocation, instanceLocation, brandLocation, valueLocation, 0);
+            Js::OpCode::StPrivateAccessor, resultLocation, instanceLocation, brandLocation, valueLocation, 0);
         break;
     default:
         byteCodeGenerator->Writer()->Reg4(
-            Js::OpCode::StPrivateField, valueLocation, instanceLocation, brandLocation, valueLocation);
+            Js::OpCode::StPrivateField, resultLocation, instanceLocation, brandLocation, valueLocation);
         break;
     }
+    funcInfo->ReleaseTmpRegister(resultLocation);
     funcInfo->ReleaseTmpRegister(brandLocation);
 }
 

@@ -303,9 +303,102 @@ const tests = [
             class C {
                 #m() {}
                 assign() { this.#m = 0; }
+                assignLiteral() { this.#m = 8; }
+                assignString() { this.#m = "x"; }
             }
             const c = new C();
             assert.throws(function () { c.assign(); }, TypeError);
+            assert.throws(function () { c.assignLiteral(); }, TypeError);
+            assert.throws(function () { c.assignString(); }, TypeError);
+        }
+    },
+    {
+        name: "literal, compound, logical and destructuring private stores use writable destinations",
+        body() {
+            class Fields {
+                #n = 0;
+                #s = "";
+                #b = true;
+                #z = 1;
+                #u = 1;
+
+                setLiterals() {
+                    this.#n = 8;
+                    this.#s = "x";
+                    this.#b = false;
+                    this.#z = null;
+                    this.#u = undefined;
+                }
+                getLiterals() {
+                    return [this.#n, this.#s, this.#b, this.#z, this.#u];
+                }
+                compound() {
+                    this.#n = 1;
+                    this.#n += 2;
+                    this.#n ||= 9;
+                    this.#n &&= 7;
+                    this.#n ??= 5;
+                    return this.#n;
+                }
+                destructure() {
+                    [this.#n] = [11];
+                    ({ x: this.#s } = { x: "y" });
+                    return [this.#n, this.#s];
+                }
+            }
+
+            const f = new Fields();
+            f.setLiterals();
+            const literals = f.getLiterals();
+            assert.areEqual(8, literals[0]);
+            assert.areEqual("x", literals[1]);
+            assert.areEqual(false, literals[2]);
+            assert.areEqual(null, literals[3]);
+            assert.areEqual(undefined, literals[4]);
+            assert.areEqual(7, f.compound());
+            const destructured = f.destructure();
+            assert.areEqual(11, destructured[0]);
+            assert.areEqual("y", destructured[1]);
+
+            class Accessors {
+                v = 0;
+                set #x(value) { this.v = value; }
+                get #x() { return this.v; }
+
+                setNumber() { this.#x = 8; }
+                setString() { this.#x = "x"; }
+                setBool() { this.#x = false; }
+                setNull() { this.#x = null; }
+                setUndefined() { this.#x = undefined; }
+                read() { return this.#x; }
+                compound() {
+                    this.#x = 1;
+                    this.#x += 2;
+                    this.#x ||= 9;
+                    this.#x &&= 7;
+                    this.#x ??= 5;
+                    return this.#x;
+                }
+                destructure() {
+                    [this.#x] = [11];
+                    ({ x: this.#x } = { x: 12 });
+                    return this.#x;
+                }
+            }
+
+            const a = new Accessors();
+            a.setNumber();
+            assert.areEqual(8, a.read());
+            a.setString();
+            assert.areEqual("x", a.read());
+            a.setBool();
+            assert.areEqual(false, a.read());
+            a.setNull();
+            assert.areEqual(null, a.read());
+            a.setUndefined();
+            assert.areEqual(undefined, a.read());
+            assert.areEqual(7, a.compound());
+            assert.areEqual(12, a.destructure());
         }
     },
     {
@@ -317,6 +410,17 @@ const tests = [
             assert.throws(function () { eval("class C { #m(){} get #m(){} }"); }, SyntaxError);
             assert.throws(function () { eval("class C { get #m(){} get #m(){} }"); }, SyntaxError);
             assert.throws(function () { eval("class C { set #m(v){} set #m(v){} }"); }, SyntaxError);
+            assert.throws(function () { eval("class C { async get #m(){} }"); }, SyntaxError);
+            assert.throws(function () { eval("class C { async set #m(v){} }"); }, SyntaxError);
+            assert.throws(function () { eval("class C { *get #m(){} }"); }, SyntaxError);
+            assert.throws(function () { eval("class C { *set #m(v){} }"); }, SyntaxError);
+            assert.throws(function () { eval("class C { async *get #m(){} }"); }, SyntaxError);
+            assert.throws(function () { eval("class C { async *set #m(v){} }"); }, SyntaxError);
+            assert.throws(function () { eval("class C { async get #m(){} set #m(v){} }"); }, SyntaxError);
+            assert.throws(function () { eval("class C { get #m(){} async set #m(v){} }"); }, SyntaxError);
+            assert.throws(function () { eval("class C { get #m(){} set #m(v){} get #m(){} }"); }, SyntaxError);
+            assert.throws(function () { eval("class C { get #m(){} set #m(v){} set #m(v){} }"); }, SyntaxError);
+            assert.doesNotThrow(function () { eval("class C { get #m(){} set #m(v){} }"); });
             assert.throws(function () { eval("class C { #constructor(){} }"); }, SyntaxError);
             assert.throws(function () { eval("class C { get #constructor(){} }"); }, SyntaxError);
             assert.throws(function () { eval("class C { m() { this.#missing(); } }"); }, SyntaxError);
