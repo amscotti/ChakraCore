@@ -100,9 +100,10 @@ branch is unchanged.
 - JIT `zig build -Dprofile=jit check`: green after regenerating the JIT
   builtin bytecode.
 - JIT `disable_jit`: **2012/0**.
-- JIT `interpreted`: **2363/440** after the `ToVar` fallback below. 398
-  failures are the asm/WASM gap; 42 are other paths (26 SIGSEGV, 11 SIGABRT,
-  1 SIGFPE, 4 unclassified). 33 distinct non-asm paths remain.
+- JIT `interpreted`: **2364/439** after the `ToVar` fallback below. 398
+  failures are the asm/WASM gap; 41 are other paths (26 SIGSEGV, 11 SIGABRT,
+  4 unclassified). 32 distinct non-asm paths remain. This clean run used no
+  stale root-level `profile.dpl.*` caches.
 - JIT `dynapogo`: **1904/364**. 293 failures are the asm/WASM gap; 60
   distinct non-asm paths remain (50 SIGSEGV, 16 SIGABRT, 5 unclassified).
 
@@ -112,7 +113,7 @@ type-specialized. The normal optimizer assumed that was impossible and failed
 at `AssertOrFailFast(valueInfo)` (`lib/Backend/GlobOpt.cpp:11449`).
 `c355a78fc` now aborts this codegen attempt and falls back instead of emitting
 inconsistent IR. That fixed the debugger cluster and reduced the suite from
-556 to 440 failures; `DebuggerCommon/default.js` now passes.
+556 to 439 failures; `DebuggerCommon/default.js` now passes.
 
 The remaining non-asm failures are separate newer-baseline coverage gaps; the
 JIT profile is not yet a full-language supported profile:
