@@ -5022,6 +5022,19 @@ skipThunk:
     }
 
     template <class T>
+    void InterpreterStackFrame::OP_InitClassFieldComputedName(const unaligned T* playout)
+    {
+        // Dynamic-key class field definition with the same
+        // CreateDataPropertyOrThrow semantics as OP_InitClassField. The key
+        // register holds the converted key stashed at class definition time.
+        JavascriptOperators::OP_InitClassFieldComputedName(
+            GetReg(playout->Instance),
+            GetReg(playout->Element),
+            GetReg(playout->Value),
+            m_functionBody->GetScriptContext());
+    }
+
+    template <class T>
     void InterpreterStackFrame::OP_NewPrivateName(const unaligned T* playout)
     {
         SetReg(playout->R0, JavascriptOperators::OP_NewPrivateName(scriptContext));

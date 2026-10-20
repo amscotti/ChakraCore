@@ -572,9 +572,15 @@ public:
     bool isClassFieldInitializerContext;
     // S1 static super: static field initializer helpers allow super.property
     // (HomeObject is the constructor, passed as the helper's `this`). Set at
-    // helper creation; instance helpers keep this false and still reject
-    // super at parse time.
+    // helper creation; instance helpers use isStaticClassFieldInitializer ==
+    // false with PropertyAllowed and bind their super slot from pnodeFieldHome.
     bool isStaticClassFieldInitializer;
+    // S1 instance super: hidden class-block slot holding the class prototype
+    // (the specified HomeObject for instance field initializers). Set at
+    // helper creation from the current class's home declaration; null for
+    // static helpers and non-field functions. The helper prologue binds its
+    // super slot from this declaration.
+    ParseNodeVar * pnodeFieldHome;
     bool hasInstanceFields;
     ParseNodePtr pnodeClassSuperLambdas;
     ParseNodePtr * ppnodeClassSuperLambdasLast;
@@ -769,6 +775,11 @@ public:
     // are evaluated and before any static field initializer runs. Each item
     // is a private knopName bound to the class-block brand const.
     ParseNodePtr pnodeClassStaticPrivateMethods;
+    // S1 instance super: hidden class-block declaration holding the class
+    // prototype for instance field initializer super slots. Created with the
+    // first initialized instance field; null for classes without initialized
+    // instance fields.
+    ParseNodeVar * pnodeInstanceHome;
 
     bool isDefaultModuleExport;
 

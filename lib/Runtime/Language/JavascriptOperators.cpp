@@ -3331,6 +3331,32 @@ CommonNumber:
         return JavascriptObject::DefineOwnPropertyHelper(object, propertyId, descriptor, scriptContext, true);
     }
 
+    // S1 computed field names: dynamic-key variant of OP_InitClassField with
+    // identical CreateDataPropertyOrThrow semantics. The key register holds
+    // the ToPropertyKey-converted key from class definition time, so
+    // GetPropertyId performs no further user-visible conversion here.
+    BOOL JavascriptOperators::OP_InitClassFieldComputedName(Var instance, Var elementName, Var newValue, ScriptContext* scriptContext)
+    {
+        Assert(!TaggedNumber::Is(instance));
+        PropertyId propertyId = JavascriptOperators::GetPropertyId(elementName, scriptContext);
+        RecyclableObject * object = VarTo<RecyclableObject>(instance);
+
+        // A static field lives on the constructor (a function); like computed
+        // static methods, a "prototype" key is a TypeError. Instance targets
+        // are ordinary objects and never take this path.
+        if (VarIs<JavascriptFunction>(instance) && Js::PropertyIds::prototype == propertyId)
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_ClassStaticMethodCannotBePrototype);
+        }
+
+        PropertyDescriptor descriptor;
+        descriptor.SetValue(newValue);
+        descriptor.SetWritable(true);
+        descriptor.SetEnumerable(true);
+        descriptor.SetConfigurable(true);
+        return JavascriptObject::DefineOwnPropertyHelper(object, propertyId, descriptor, scriptContext, true);
+    }
+
     // S1 private instance fields. Each private name is a per-class-evaluation
     // hidden WeakMap brand: the object is the weak key and the field value is
     // the map value. This keeps private state off the object's property list

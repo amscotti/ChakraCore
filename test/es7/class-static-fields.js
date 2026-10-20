@@ -3,9 +3,10 @@
 // Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
-// C2-S1: public static class fields with simple identifier/literal names and
-// optional initializers (doc/c2-s1-static-fields.md). Static private fields,
-// static blocks, computed names and decorators are intentionally excluded.
+// C2-S1: public static class fields with simple identifier/literal names,
+// computed names and optional initializers (doc/c2-s1-static-fields.md,
+// doc/c2-s1-computed-instance-super.md). Static private fields, static blocks
+// and decorators are intentionally excluded.
 
 WScript.LoadScriptFile("..\\UnitTestFramework\\UnitTestFramework.js");
 
@@ -406,7 +407,7 @@ const tests = [
         }
     },
     {
-        name: "early errors: static prototype/constructor, static blocks, private methods and computed fields",
+        name: "early errors: static prototype/constructor, static blocks and private methods",
         body() {
             assert.throws(function () { eval("class C { static prototype; }"); }, SyntaxError, "static prototype");
             assert.throws(function () { eval("class C { static 'prototype' = 1; }"); }, SyntaxError, "string static prototype");
@@ -415,8 +416,11 @@ const tests = [
             assert.throws(function () { eval("class C { static {} }"); }, SyntaxError, "static block");
             assert.doesNotThrow(function () { eval("class C { static #x; }"); }, "static private field");
             assert.doesNotThrow(function () { eval("class C { static #m() {} }"); }, "static private method");
-            assert.throws(function () { eval("class C { static [0] = 1; }"); }, SyntaxError, "computed static field");
-            assert.throws(function () { eval("class C { static [0]; }"); }, SyntaxError, "computed static field without initializer");
+            // Computed static field names are evaluated, not rejected: only a
+            // "prototype" key throws, at class definition time.
+            assert.doesNotThrow(function () { eval("class C { static [0] = 1; }"); }, "computed static field");
+            assert.doesNotThrow(function () { eval("class C { static [0]; }"); }, "computed static field without initializer");
+            assert.throws(function () { eval("class C { static ['prototype'] = 1; }"); }, TypeError, "computed static prototype");
         }
     },
     {
@@ -523,12 +527,97 @@ const tests = [
         }
     },
     {
-        name: "instance field super remains a parse-time SyntaxError",
+        name: "instance field super is allowed with the prototype as HomeObject",
         body() {
-            // Direct code rejects super in instance field initializers; this
-            // residual is unchanged by static super support.
-            assert.throws(function () { new Function("class B extends Object { constructor() { super(); } y = super.foo; }"); }, SyntaxError, "instance super.prop");
-            assert.throws(function () { new Function("class B extends Object { constructor() { super(); } y = super.foo = 1; }"); }, SyntaxError, "instance super assignment");
+            // Instance helpers resolve super against the derived prototype
+            // with the instance as receiver (see class-fields-public.js for
+            // the full matrix); smoke-test both shapes from the static file.
+            class Base { }
+            Base.prototype.pd = 5;
+            class Derived extends Base {
+                x = super.pd;
+                y = (super.q = 9, this.q);
+            }
+            const d = new Derived();
+            assert.areEqual(5, d.x);
+            assert.areEqual(9, d.y);
+        }
+    },
+    {
+        name: "computed static field names evaluate once in textual order",
+        body() {
+            const log = [];
+            function key(name) { log.push(name); return name; }
+            class C {
+                [key("m1")]() { return 1; }
+                static a = (log.push("init:a"), 1);
+                static [key("s1")] = 2;
+                [key("m2")]() { return 3; }
+                static [key("s2")] = (log.push("init:s2"), 4);
+            }
+            // Every key evaluates at class definition time in textual order,
+            // interleaved with methods; static initializers run after all
+            // members, in their own textual order.
+            assert.areEqual("m1,s1,m2,s2,init:a,init:s2", log.join(","));
+            assert.areEqual(1, C.a);
+            assert.areEqual(2, C.s1);
+            assert.areEqual(4, C.s2);
+            assert.areEqual("a,s1,s2", Object.keys(C).join(","));
+
+            // ToPropertyKey runs once per element.
+            let count = 0;
+            const keyObj = { toString() { count++; return "k"; } };
+            const D = eval("(class { static [keyObj] = 1; static [keyObj] = 2; })");
+            void D;
+            assert.areEqual(2, count);
+        }
+    },
+    {
+        name: "computed static field keys: scope, duplicates, special names and value naming",
+        body() {
+            // Outer bindings are visible; the class name is in its TDZ.
+            let v = "w";
+            class C {
+                static [v] = 1;
+            }
+            assert.areEqual(1, C.w);
+            assert.throws(function () { eval("class Bad { static [Bad] = 1; }"); }, ReferenceError, "class name TDZ in key");
+
+            // Symbol keys and duplicate last-wins.
+            const s = Symbol("s");
+            let runs = 0;
+            class D {
+                static [s] = 1;
+                static ["d"] = (runs++, 10);
+                static ["d"] = (runs++, 20);
+            }
+            assert.areEqual(1, D[s]);
+            assert.areEqual(20, D.d);
+            assert.areEqual(2, runs);
+
+            // "constructor" defines an own property; bare keys define undefined.
+            class E {
+                static ["constructor"] = 1;
+                static ["bare"];
+            }
+            assert.areEqual(1, E.constructor);
+            assert.isTrue(Object.prototype.hasOwnProperty.call(E, "bare"));
+            assert.areEqual(undefined, E.bare);
+
+            // Anonymous function and class values take the computed key name.
+            class F {
+                static ["nf"] = function () { };
+                static ["nc"] = class { };
+            }
+            assert.areEqual("nf", F.nf.name);
+            assert.areEqual("nc", F.nc.name);
+
+            // A throwing key suppresses every later static initializer.
+            let ran = false;
+            assert.throws(function () {
+                eval("class G { static [(() => { throw new Error('boom'); })()] = 1; static s = (ran = true, 2); }");
+            }, Error, "key throw");
+            assert.isFalse(ran);
         }
     }
 ];

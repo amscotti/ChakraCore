@@ -28,6 +28,11 @@ bool CallTargetIsArray(ParseNode *pnode)
     return pnode->nop == knopName && pnode->AsParseNodeName()->PropertyIdFromNameNode() == Js::PropertyIds::Array;
 }
 
+// S1 computed field names (defined near IsStaticFieldMemberNode below).
+static bool IsComputedFieldNameNode(ParseNode * pnodeName);
+static ParseNodeVar * GetComputedFieldKeyDecl(ParseNode * pnodeName);
+static Js::RegSlot EmitComputedFieldKeyLoad(ParseNode * pnodeName, ByteCodeGenerator * byteCodeGenerator, FuncInfo * funcInfo);
+
 // S1 private fields: `obj.#x` is represented as a knopDot whose property name
 // is a private knopName bound to the class-block brand token.
 static bool IsPrivateFieldReference(ParseNode *pnode)
@@ -2396,11 +2401,24 @@ void ByteCodeGenerator::LoadSuperObject(FuncInfo *funcInfo)
     // bind the super slot to it: LdHomeObjProto on it yields the base
     // constructor (or Function.prototype for base classes) and the existing
     // LdSuperFld/StSuperFld paths receive the correct home base with
-    // this == constructor. Instance helpers keep the LdHomeObj path, which
-    // resolves to undefined for them (their super use stays a parse error).
+    // this == constructor.
     if (funcInfo->root->isStaticClassFieldInitializer && funcInfo->GetThisSymbol() != nullptr)
     {
         m_writer.Reg2(Js::OpCode::Ld_A, superSym->GetLocation(), funcInfo->GetThisSymbol()->GetLocation());
+        return;
+    }
+
+    // S1 instance super: an instance field initializer helper likewise has no
+    // home object, but its specified [[HomeObject]] is the class prototype
+    // (not the instance passed as `this`). The prototype was published to the
+    // hidden home slot at class definition time; bind the super slot from it
+    // so LdHomeObjProto yields the base prototype with this == instance.
+    if (funcInfo->root->isClassFieldInitializerContext && funcInfo->root->pnodeFieldHome != nullptr &&
+        funcInfo->GetThisSymbol() != nullptr)
+    {
+        this->EmitPropLoad(superSym->GetLocation(), funcInfo->root->pnodeFieldHome->sym,
+            funcInfo->root->pnodeFieldHome->pid, funcInfo,
+            /*skipUseBeforeDeclarationCheck*/ true);
         return;
     }
 
@@ -2611,7 +2629,8 @@ void ByteCodeGenerator::EmitClassFieldInitializerCalls(ParseNode * pnodeFields, 
             : nullptr;
 
         bool isPrivate = pnodeName->nop == knopName && pnodeName->AsParseNodeName()->IsPrivateName();
-        Assert(isPrivate || pnodeName->nop == knopStr);
+        bool isComputed = !isPrivate && IsComputedFieldNameNode(pnodeName);
+        Assert(isPrivate || isComputed || pnodeName->nop == knopStr);
 
         Js::RegSlot thisLocation = thisLocationOverride;
         if (thisLocation == Js::Constants::NoRegister)
@@ -2640,7 +2659,28 @@ void ByteCodeGenerator::EmitClassFieldInitializerCalls(ParseNode * pnodeFields, 
             releaseValueLoc = true;
         }
 
-        if (isPrivate)
+        // S1 computed field names: load the key stashed at class definition
+        // time. The key temp is acquired after the value (temp registers are
+        // a LIFO stack) and both survive the initializer call, which runs in
+        // the helper's own frame.
+        Js::RegSlot keyLocation = Js::Constants::NoRegister;
+        if (isComputed)
+        {
+            keyLocation = EmitComputedFieldKeyLoad(pnodeName, this, funcInfo);
+        }
+
+        if (isComputed)
+        {
+            // Anonymous function/class values take the computed key as their
+            // name (NamedEvaluation), recorded by the parser on the key slot.
+            if (GetComputedFieldKeyDecl(pnodeName)->pnodeInit != nullptr)
+            {
+                Writer()->Reg2(Js::OpCode::SetComputedNameVar, valueLocation, keyLocation);
+            }
+            Writer()->Element(Js::OpCode::InitClassFieldComputedName, valueLocation, thisLocation, keyLocation,
+                /*instanceAtReturnRegOK*/ true, this->forceStrictModeForClassComputedPropertyName);
+        }
+        else if (isPrivate)
         {
             ParseNodeName * pnodePrivateName = pnodeName->AsParseNodeName();
             Assert(pnodePrivateName->sym != nullptr);
@@ -2659,6 +2699,10 @@ void ByteCodeGenerator::EmitClassFieldInitializerCalls(ParseNode * pnodeFields, 
             Writer()->PatchableProperty(Js::OpCode::InitClassField, valueLocation, thisLocation, cacheId);
         }
 
+        if (keyLocation != Js::Constants::NoRegister)
+        {
+            funcInfo->ReleaseTmpRegister(keyLocation);
+        }
         if (releaseValueLoc)
         {
             funcInfo->ReleaseTmpRegister(valueLocation);
@@ -2691,7 +2735,8 @@ void ByteCodeGenerator::EmitStaticClassFieldDefinition(ParseNode * pnodeField, J
         : nullptr;
 
     bool isPrivate = pnodeName->nop == knopName && pnodeName->AsParseNodeName()->IsPrivateName();
-    Assert(isPrivate || pnodeName->nop == knopStr);
+    bool isComputed = !isPrivate && IsComputedFieldNameNode(pnodeName);
+    Assert(isPrivate || isComputed || pnodeName->nop == knopStr);
     Js::RegSlot valueLocation;
     bool releaseValueLoc = false;
 
@@ -2722,7 +2767,26 @@ void ByteCodeGenerator::EmitStaticClassFieldDefinition(ParseNode * pnodeField, J
         releaseValueLoc = true;
     }
 
-    if (isPrivate)
+    // S1 computed field names: load the key stashed at class definition time
+    // (acquired after the value; temp registers are a LIFO stack).
+    Js::RegSlot keyLocation = Js::Constants::NoRegister;
+    if (isComputed)
+    {
+        keyLocation = EmitComputedFieldKeyLoad(pnodeName, this, funcInfo);
+    }
+
+    if (isComputed)
+    {
+        // Anonymous function/class values take the computed key as their name
+        // (NamedEvaluation), recorded by the parser on the key slot.
+        if (GetComputedFieldKeyDecl(pnodeName)->pnodeInit != nullptr)
+        {
+            Writer()->Reg2(Js::OpCode::SetComputedNameVar, valueLocation, keyLocation);
+        }
+        Writer()->Element(Js::OpCode::InitClassFieldComputedName, valueLocation, classLocation, keyLocation,
+            /*instanceAtReturnRegOK*/ true, this->forceStrictModeForClassComputedPropertyName);
+    }
+    else if (isPrivate)
     {
         ParseNodeName * pnodePrivateName = pnodeName->AsParseNodeName();
         Assert(pnodePrivateName->sym != nullptr);
@@ -2742,6 +2806,10 @@ void ByteCodeGenerator::EmitStaticClassFieldDefinition(ParseNode * pnodeField, J
         Writer()->PatchableProperty(Js::OpCode::InitClassField, valueLocation, classLocation, cacheId);
     }
 
+    if (keyLocation != Js::Constants::NoRegister)
+    {
+        funcInfo->ReleaseTmpRegister(keyLocation);
+    }
     if (releaseValueLoc)
     {
         funcInfo->ReleaseTmpRegister(valueLocation);
@@ -12140,10 +12208,35 @@ static bool IsPrivateMemberNode(ParseNode * memberNode)
         memberNode->AsParseNodeBin()->pnode1->AsParseNodeName()->IsPrivateName();
 }
 
+// S1 computed field names: a computed field member's name is a knopMember
+// wrapper around the key expression (pnode1, knopComputedName) and its hidden
+// class-block key slot declaration (pnode2, knopLetDecl). Method members
+// never carry this wrapper.
+static bool IsComputedFieldNameNode(ParseNode * pnodeName)
+{
+    return pnodeName != nullptr && pnodeName->nop == knopMember &&
+        pnodeName->AsParseNodeBin()->pnode1 != nullptr &&
+        pnodeName->AsParseNodeBin()->pnode1->nop == knopComputedName &&
+        pnodeName->AsParseNodeBin()->pnode2 != nullptr &&
+        pnodeName->AsParseNodeBin()->pnode2->nop == knopLetDecl;
+}
+
+static ParseNode * GetComputedFieldKeyExpr(ParseNode * pnodeName)
+{
+    Assert(IsComputedFieldNameNode(pnodeName));
+    return pnodeName->AsParseNodeBin()->pnode1;
+}
+
+static ParseNodeVar * GetComputedFieldKeyDecl(ParseNode * pnodeName)
+{
+    Assert(IsComputedFieldNameNode(pnodeName));
+    return pnodeName->AsParseNodeBin()->pnode2->AsParseNodeVar();
+}
+
 // Static field entries are stored in the class member list to preserve
 // textual order with static methods. Unlike method members, pnode2 is either
-// null (no initializer) or an initializer helper call node. Both public
-// (knopStr) and private (private knopName) names are accepted.
+// null (no initializer) or an initializer helper call node. Public (knopStr),
+// computed (wrapper) and private (private knopName) names are accepted.
 static bool IsStaticFieldMemberNode(ParseNode * memberNode)
 {
     if (memberNode->nop != knopMember)
@@ -12152,11 +12245,51 @@ static bool IsStaticFieldMemberNode(ParseNode * memberNode)
     }
 
     ParseNode * pnodeName = memberNode->AsParseNodeBin()->pnode1;
-    bool isFieldName = pnodeName->nop == knopStr ||
+    bool isFieldName = pnodeName->nop == knopStr || IsComputedFieldNameNode(pnodeName) ||
         (pnodeName->nop == knopName && pnodeName->AsParseNodeName()->IsPrivateName());
     ParseNode * pnodeValue = memberNode->AsParseNodeBin()->pnode2;
 
     return isFieldName && (pnodeValue == nullptr || pnodeValue->nop == knopCall);
+}
+
+// S1 computed field names: evaluate the key expression once (in textual
+// member order at class definition time), convert it with ToPropertyKey, and
+// stash it in the hidden class-block slot for the field definitions.
+static void EmitComputedFieldKey(ParseNode * pnodeName, ByteCodeGenerator * byteCodeGenerator, FuncInfo * funcInfo)
+{
+    Assert(IsComputedFieldNameNode(pnodeName));
+    ParseNode * pnodeComputedName = GetComputedFieldKeyExpr(pnodeName);
+    ParseNodeVar * pnodeKeyDecl = GetComputedFieldKeyDecl(pnodeName);
+
+    // Strict mode must be enforced on the evaluation of computed property
+    // names in classes, as for computed method names.
+    bool prevFlag = byteCodeGenerator->forceStrictModeForClassComputedPropertyName;
+    byteCodeGenerator->forceStrictModeForClassComputedPropertyName = true;
+    Emit(pnodeComputedName, byteCodeGenerator, funcInfo, false);
+    byteCodeGenerator->forceStrictModeForClassComputedPropertyName = prevFlag;
+
+    Js::RegSlot keyLocation = funcInfo->AcquireTmpRegister();
+    byteCodeGenerator->Writer()->Reg2(Js::OpCode::Conv_Prop, keyLocation, pnodeComputedName->location);
+    byteCodeGenerator->EmitPropStore(keyLocation, pnodeKeyDecl->sym, pnodeKeyDecl->pid,
+        funcInfo, /*isLetDecl*/ true, /*isConstDecl*/ false, /*isFncDeclVar*/ false,
+        /*skipUseBeforeDeclarationCheck*/ true);
+    // Temp registers are a LIFO stack: the key temp sits above the key
+    // expression's location, so release it first.
+    funcInfo->ReleaseTmpRegister(keyLocation);
+    funcInfo->ReleaseLoc(pnodeComputedName);
+}
+
+// S1 computed field names: load the stashed key into a temp register. The
+// caller releases the temp when the field definition completes.
+static Js::RegSlot EmitComputedFieldKeyLoad(ParseNode * pnodeName, ByteCodeGenerator * byteCodeGenerator, FuncInfo * funcInfo)
+{
+    Assert(IsComputedFieldNameNode(pnodeName));
+    ParseNodeVar * pnodeKeyDecl = GetComputedFieldKeyDecl(pnodeName);
+
+    Js::RegSlot keyLocation = funcInfo->AcquireTmpRegister();
+    byteCodeGenerator->EmitPropLoad(keyLocation, pnodeKeyDecl->sym, pnodeKeyDecl->pid,
+        funcInfo, /*skipUseBeforeDeclarationCheck*/ true);
+    return keyLocation;
 }
 
 // Create the method/accessor function once per class evaluation and stash it in
@@ -12286,18 +12419,67 @@ void EmitClass(ParseNodeClass * pnodeClass, ByteCodeGenerator * byteCodeGenerato
 
     funcInfo->ReleaseTmpRegister(frameDisplayLoc);
 
+    // S1 instance super: publish the class prototype to the hidden home slot
+    // so instance field initializer helpers can bind their super slot from it
+    // (their specified [[HomeObject]]). Only classes with initialized instance
+    // fields carry the slot.
+    if (pnodeClass->pnodeInstanceHome != nullptr)
+    {
+        byteCodeGenerator->EmitPropStore(protoLoc, pnodeClass->pnodeInstanceHome->sym,
+            pnodeClass->pnodeInstanceHome->pid, funcInfo, /*isLetDecl*/ true,
+            /*isConstDecl*/ false, /*isFncDeclVar*/ false,
+            /*skipUseBeforeDeclarationCheck*/ true);
+    }
+
     // Evaluate and install every non-field class element first, in textual
     // order: methods, accessors, computed names and private methods/accessors.
     // Static field entries stay in the member list for textual ordering, but
     // their initializers do not run during this walk.
+    //
+    // S1 computed field names: every computed key (methods, static fields and
+    // instance fields) evaluates here, interleaved in textual element order.
+    // Instance fields live on the constructor's field list (which is textual
+    // like the member list), so drain them by source position around each
+    // member; static computed keys are evaluated inline in member position.
     bool isObjectEmpty = true;
+    ParseNodePtr pnodePendingInstanceFields = (pnodeClass->pnodeConstructor != nullptr)
+        ? pnodeClass->pnodeConstructor->pnodeClassFields : nullptr;
     for (ParseNode * pnodeMemberList = pnodeClass->pnodeMembers;
          pnodeMemberList != nullptr;)
     {
         ParseNode * pnodeMember = pnodeMemberList->nop == knopList
             ? pnodeMemberList->AsParseNodeBin()->pnode1
             : pnodeMemberList;
-        if (!IsStaticFieldMemberNode(pnodeMember))
+        while (pnodePendingInstanceFields != nullptr)
+        {
+            ParseNode * pnodePendingField = pnodePendingInstanceFields->nop == knopList
+                ? pnodePendingInstanceFields->AsParseNodeBin()->pnode1
+                : pnodePendingInstanceFields;
+            if (pnodePendingField->ichMin >= pnodeMember->ichMin)
+            {
+                break;
+            }
+            ParseNode * pnodePendingName = pnodePendingField->AsParseNodeBin()->pnode1;
+            if (IsComputedFieldNameNode(pnodePendingName))
+            {
+                EmitComputedFieldKey(pnodePendingName, byteCodeGenerator, funcInfo);
+            }
+            if (pnodePendingInstanceFields->nop != knopList)
+            {
+                pnodePendingInstanceFields = nullptr;
+                break;
+            }
+            pnodePendingInstanceFields = pnodePendingInstanceFields->AsParseNodeBin()->pnode2;
+        }
+        if (IsStaticFieldMemberNode(pnodeMember))
+        {
+            ParseNode * pnodeStaticName = pnodeMember->AsParseNodeBin()->pnode1;
+            if (IsComputedFieldNameNode(pnodeStaticName))
+            {
+                EmitComputedFieldKey(pnodeStaticName, byteCodeGenerator, funcInfo);
+            }
+        }
+        else
         {
             ParseNodeFnc * pnodeMemberFnc = pnodeMember->AsParseNodeBin()->pnode2->AsParseNodeFnc();
             if (IsPrivateMemberNode(pnodeMember))
@@ -12321,6 +12503,22 @@ void EmitClass(ParseNodeClass * pnodeClass, ByteCodeGenerator * byteCodeGenerato
             break;
         }
         pnodeMemberList = pnodeMemberList->AsParseNodeBin()->pnode2;
+    }
+    while (pnodePendingInstanceFields != nullptr)
+    {
+        ParseNode * pnodePendingField = pnodePendingInstanceFields->nop == knopList
+            ? pnodePendingInstanceFields->AsParseNodeBin()->pnode1
+            : pnodePendingInstanceFields;
+        ParseNode * pnodePendingName = pnodePendingField->AsParseNodeBin()->pnode1;
+        if (IsComputedFieldNameNode(pnodePendingName))
+        {
+            EmitComputedFieldKey(pnodePendingName, byteCodeGenerator, funcInfo);
+        }
+        if (pnodePendingInstanceFields->nop != knopList)
+        {
+            break;
+        }
+        pnodePendingInstanceFields = pnodePendingInstanceFields->AsParseNodeBin()->pnode2;
     }
 
     // S1 static private methods/accessors: install each brand on the

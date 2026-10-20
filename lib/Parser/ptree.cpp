@@ -305,9 +305,13 @@ ParseNodeBin::ParseNodeBin(OpCode nop, charcount_t ichMin, charcount_t ichLim, P
     : ParseNode(nop, ichMin, ichLim)
 {
     // Member name is either a string, a computed name, or (for instance
-    // private fields/methods/accessors) a private name node.
-    Assert((nop != knopMember && nop != knopMemberShort && nop != knopObjectPatternMember && nop != knopGetMember && nop != knopSetMember) 
+    // private fields/methods/accessors) a private name node. S1 computed
+    // field names additionally wrap the key expression with its hidden key
+    // slot (knopMember around the knopComputedName).
+    Assert((nop != knopMember && nop != knopMemberShort && nop != knopObjectPatternMember && nop != knopGetMember && nop != knopSetMember)
         || (pnode1->nop == knopStr || pnode1->nop == knopComputedName ||
+            (pnode1->nop == knopMember && pnode1->AsParseNodeBin()->pnode1 != nullptr &&
+             pnode1->AsParseNodeBin()->pnode1->nop == knopComputedName) ||
             ((nop == knopMember || nop == knopGetMember || nop == knopSetMember) &&
              pnode1->nop == knopName && pnode1->AsParseNodeName()->IsPrivateName())));
 
@@ -436,6 +440,7 @@ ParseNodeFnc::ParseNodeFnc(OpCode nop, charcount_t ichMin, charcount_t ichLim)
     this->hasSuperCallInConstructorLambda = false;
     this->isClassFieldInitializerContext = false;
     this->isStaticClassFieldInitializer = false;
+    this->pnodeFieldHome = nullptr;
     this->hasInstanceFields = false;
     this->pnodeClassSuperLambdas = nullptr;
     this->ppnodeClassSuperLambdasLast = nullptr;
@@ -475,6 +480,7 @@ ParseNodeClass::ParseNodeClass(OpCode nop, charcount_t ichMin, charcount_t ichLi
 {
     this->pnodePrivateNames = nullptr;
     this->pnodeClassStaticPrivateMethods = nullptr;
+    this->pnodeInstanceHome = nullptr;
 }
 
 ParseNodeExportDefault::ParseNodeExportDefault(OpCode nop, charcount_t ichMin, charcount_t ichLim)

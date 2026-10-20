@@ -355,6 +355,7 @@ namespace Js
         static BOOL OP_StFunctionExpression(Var instance, PropertyId propertyId, Var newValue);
         static BOOL OP_InitProperty(Var instance, PropertyId propertyId, Var newValue);
         static BOOL OP_InitClassField(Var instance, PropertyId propertyId, Var newValue);
+        static BOOL OP_InitClassFieldComputedName(Var instance, Var elementName, Var newValue, ScriptContext* scriptContext);
         static Var OP_NewPrivateName(ScriptContext * scriptContext);
         static Var OP_LdPrivateField(Var instance, Var brand, ScriptContext * scriptContext);
         static Var OP_StPrivateField(Var instance, Var brand, Var newValue, ScriptContext * scriptContext);
