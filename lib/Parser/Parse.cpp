@@ -9769,6 +9769,45 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
         RestorePoint privateNameStart;
         bool privateNameStartCaptured = false;
 
+        // The `async` and `*` modifiers precede both public and private
+        // names (`async #m(){}`, `*#m(){}`, `async *#m(){}`), so recognize
+        // them before the private-name token is consumed below. The [no
+        // LineTerminator here] rule for `async` is unchanged: a newline
+        // keeps `async` an ordinary member name and the private name starts
+        // a new element. A `*` here always starts a generator element: a
+        // `#x` seen earlier in the iteration is consumed below, so
+        // `#x\n*gen(){}` still splits into a field plus a generator via the
+        // ASI field rule, while `#x *gen(){}` without a newline stays a
+        // syntax error through the method grammar.
+        if (CheckContextualKeyword(wellKnownPropertyPids.async) && m_scriptContext->GetConfig()->IsES7AsyncAndAwaitEnabled())
+        {
+            RestorePoint parsedAsync;
+            this->GetScanner()->Capture(&parsedAsync);
+            ichMin = this->GetScanner()->IchMinTok();
+            iecpMin = this->GetScanner()->IecpMinTok();
+
+            this->GetScanner()->Scan();
+            if (m_token.tk == tkLParen || m_token.tk == tkAsg || m_token.tk == tkSColon ||
+                m_token.tk == tkRCurly || this->GetScanner()->FHadNewLine())
+            {
+                // 'async()' / 'async = 1' / 'async;' / 'async }' are ordinary
+                // members named async, not async methods.
+                this->GetScanner()->SeekTo(parsedAsync);
+            }
+            else
+            {
+                isAsyncMethod = true;
+            }
+        }
+
+        bool isGenerator = m_scriptContext->GetConfig()->IsES6GeneratorsEnabled() &&
+            m_token.tk == tkStar;
+        if (isGenerator)
+        {
+            fncDeclFlags |= fFncGenerator;
+            this->GetScanner()->ScanForcingPid();
+        }
+
         if (m_token.tk == tkPrivateName)
         {
             isPrivateField = true;
@@ -9795,40 +9834,6 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
             }
             this->GetScanner()->ScanForcingPid();
             privateScanned = true;
-        }
-
-        if (!isPrivateField && CheckContextualKeyword(wellKnownPropertyPids.async) && m_scriptContext->GetConfig()->IsES7AsyncAndAwaitEnabled())
-        {
-            RestorePoint parsedAsync;
-            this->GetScanner()->Capture(&parsedAsync);
-            ichMin = this->GetScanner()->IchMinTok();
-            iecpMin = this->GetScanner()->IecpMinTok();
-
-            this->GetScanner()->Scan();
-            if (m_token.tk == tkLParen || m_token.tk == tkAsg || m_token.tk == tkSColon ||
-                m_token.tk == tkRCurly || this->GetScanner()->FHadNewLine())
-            {
-                // 'async()' / 'async = 1' / 'async;' / 'async }' are ordinary
-                // members named async, not async methods.
-                this->GetScanner()->SeekTo(parsedAsync);
-            }
-            else
-            {
-                isAsyncMethod = true;
-            }
-        }
-
-        bool isGenerator = m_scriptContext->GetConfig()->IsES6GeneratorsEnabled() &&
-            m_token.tk == tkStar &&
-            // A private name is already complete before this check. A `*`
-            // after a line terminator therefore starts the next class
-            // element (field ASI), not a generator modifier on the private
-            // name; `#x *gen(){}` without a newline remains invalid.
-            !(isPrivateField && this->GetScanner()->FHadNewLine());
-        if (isGenerator)
-        {
-            fncDeclFlags |= fFncGenerator;
-            this->GetScanner()->ScanForcingPid();
         }
 
 
@@ -9898,16 +9903,17 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
             }
             else
             {
-                // Private method (static or instance). Static and instance
+                // Private method (static or instance, sync, async,
+                // generator or async generator). Static and instance
                 // methods share the method grammar and the brand machinery;
                 // entry->isStatic (set at declaration) routes the brand init
-                // to the static or the instance init list. Async (`async #m`)
-                // and generator (`*#m`) spellings never reach this path: the
-                // async/star modifiers are only recognized before public
-                // names, so those forms still fail as syntax errors below.
-                // The method grammar is otherwise the public-member grammar;
-                // rewind to the private-name token so ParseFncDecl consumes
-                // it as the (suppressed) function name.
+                // to the static or the instance init list. The async/star
+                // modifiers were recognized before the private-name token
+                // above (fFncGenerator is already in fncDeclFlags;
+                // isAsyncMethod adds fFncAsync on the shared method path
+                // below), so rewinding to the private-name token lets the
+                // ordinary ParseFncDecl method grammar consume it as the
+                // (suppressed) function name with the right function kind.
                 Assert(privateNameStartCaptured);
                 privateEntry->kind = PrivateNameKind::Method;
                 if (buildAST)

@@ -4,12 +4,24 @@
 // Licensed under the MIT license. See LICENSE.txt in the project root for license information.
 //-------------------------------------------------------------------------------------------------------
 // C2-S1: private instance methods (`#m(){}`) and private accessors
-// (`get #x(){}` / `set #x(v){}`), plus private static methods and accessors
-// (`static #m(){}`, `static get #x(){}` / `static set #x(v){}`).
-// Async/generator private methods, static blocks, computed names and
-// decorators remain out of scope (doc/c2-s1-private-static-methods.md).
+// (`get #x(){}` / `set #x(v){}`), private static methods and accessors
+// (`static #m(){}`, `static get #x(){}` / `static set #x(v){}`), and
+// async/generator private methods (`async #m(){}`, `*#m(){}`,
+// `async *#m(){}` and their static forms).
+// Static blocks, computed names and decorators remain out of scope
+// (doc/c2-s1-private-async-gen.md).
 
 WScript.LoadScriptFile("..\\UnitTestFramework\\UnitTestFramework.js");
+
+// Async completion settles after the test body returns, so promise-valued
+// assertions run through the framework's async machinery: the summary waits
+// for the loaded snippet, and a mismatch fails the test instead of passing
+// silently. There is exactly one such snippet per file: the LoadScript
+// wrapper publishes a single global _asyncExit, so concurrent snippets would
+// overwrite each other's exit and never complete.
+function assertAsyncCompletion(source) {
+    testRunner.LoadScript(source, undefined, false, true);
+}
 
 const tests = [
     {
@@ -430,9 +442,12 @@ const tests = [
             assert.doesNotThrow(function () { eval("class C { static #m(){} }"); });
             assert.doesNotThrow(function () { eval("class C { static get #m(){} }"); });
             assert.doesNotThrow(function () { eval("class C { static set #m(v){} }"); });
-            assert.throws(function () { eval("class C { static async #m(){} }"); }, SyntaxError);
-            assert.throws(function () { eval("class C { static *#m(){} }"); }, SyntaxError);
-            assert.throws(function () { eval("class C { static async *#m(){} }"); }, SyntaxError);
+            assert.doesNotThrow(function () { eval("class C { async #m(){} }"); });
+            assert.doesNotThrow(function () { eval("class C { *#m(){} }"); });
+            assert.doesNotThrow(function () { eval("class C { async *#m(){} }"); });
+            assert.doesNotThrow(function () { eval("class C { static async #m(){} }"); });
+            assert.doesNotThrow(function () { eval("class C { static *#m(){} }"); });
+            assert.doesNotThrow(function () { eval("class C { static async *#m(){} }"); });
         }
     },
     {
@@ -589,6 +604,218 @@ const tests = [
             assert.throws(function () { eval("class C { static #m() {} static r() { return this.#missing; } }"); }, SyntaxError);
             // ASI still splits a field from a following static member.
             assert.doesNotThrow(function () { eval("class C { static #x\nstatic #m() { return 1; } }"); });
+        }
+    },
+    {
+        name: "async private methods have the correct kind, name and length",
+        body() {
+            class C {
+                #v = 40;
+                async #m(a, b) { await 1; return this.#v + a + b; }
+                call(a, b) { return this.#m(a, b); }
+                ref() { return this.#m; }
+                static has(o) { return #m in o; }
+            }
+
+            const c = new C();
+            const fn = c.ref();
+            assert.areEqual("#m", fn.name);
+            assert.areEqual(2, fn.length);
+            assert.areEqual("AsyncFunction", fn.constructor.name);
+            assert.isTrue(c.call(0, 0) instanceof Promise);
+            assert.isTrue(C.has(c));
+            assert.isFalse(C.has({}));
+            assert.isFalse(C.has(Object.create(c)));
+            assert.throws(function () { C.has(1); }, TypeError);
+            // Completion values for this and every other async case below
+            // are asserted by the single "async completions" case at the end
+            // of this file.
+        }
+    },
+    {
+        name: "generator private methods support yield, yield*, return() and throw()",
+        body() {
+            class C {
+                *#g(x, y) { yield x; yield* [x + 1, x + 2]; return x + 3; }
+                it(x) { return this.#g(x); }
+                ref() { return this.#g; }
+                callOn(o, x) { return o.#g(x); }
+                static has(o) { return #g in o; }
+            }
+
+            const c = new C();
+            assert.areEqual("#g", c.ref().name);
+            assert.areEqual(2, c.ref().length);
+            assert.areEqual("GeneratorFunction", c.ref().constructor.name);
+            const first = c.it(1);
+            assert.areEqual(1, first.next().value);
+            assert.areEqual(2, first.next().value);
+            assert.areEqual(3, first.next().value);
+            const last = first.next();
+            assert.areEqual(4, last.value);
+            assert.areEqual(true, last.done);
+            assert.areEqual(9, c.it(0).return(9).value);
+            assert.areEqual(true, c.it(0).return(9).done);
+            try {
+                c.it(0).throw(new Error("boom"));
+                assert.fail("throw() through a private generator should propagate");
+            } catch (e) {
+                assert.areEqual("boom", e.message);
+            }
+            assert.throws(function () { c.callOn({}, 1).next(); }, TypeError);
+            assert.throws(function () { c.callOn(Object.create(c), 1).next(); }, TypeError);
+            assert.isTrue(C.has(c));
+            assert.isFalse(C.has({}));
+        }
+    },
+    {
+        name: "async generator private methods support await, yield and for-await",
+        body() {
+            class C {
+                #n = 3;
+                async *#a() { for (let i = 0; i < this.#n; i++) { await i; yield i * 2; } }
+                it() { return this.#a(); }
+                ref() { return this.#a; }
+            }
+
+            const c = new C();
+            assert.areEqual("#a", c.ref().name);
+            assert.areEqual(0, c.ref().length);
+            assert.areEqual("AsyncGeneratorFunction", c.ref().constructor.name);
+            // The first next() returns a promise synchronously.
+            assert.isTrue(c.it().next() instanceof Promise);
+        }
+    },
+    {
+        name: "static async/generator private methods dispatch on the constructor",
+        body() {
+            class C {
+                static #v = 40;
+                static async #m(x) { await 1; return this.#v + x; }
+                static *#g(x) { yield x; yield x + 1; }
+                static async *#a(x) { await 1; yield x * 2; }
+                static call(x) { return this.#m(x); }
+                static git(x) { return [...this.#g(x)]; }
+                static ref() { return this.#m; }
+                static has(o) { return #m in o; }
+            }
+
+            assert.areEqual("#m", C.ref().name);
+            assert.areEqual(1, C.ref().length);
+            assert.areEqual("AsyncFunction", C.ref().constructor.name);
+            assert.isTrue(C.call(0) instanceof Promise);
+            assert.areEqual("1,2", C.git(1).join(","));
+            assert.isTrue(C.has(C));
+            assert.isFalse(C.has({}));
+            assert.isFalse(C.has(new C()));
+            assert.throws(function () { C.call.call({}); }, TypeError);
+        }
+    },
+    {
+        name: "private async/generator methods work in derived classes with super",
+        body() {
+            class Base {
+                constructor() { this.base = 100; }
+                val() { return this.base; }
+            }
+            class C extends Base {
+                #x = 1;
+                async #m(y) { await 1; return this.val() + this.#x + y; }
+                *#g(y) { yield super.val() + y; }
+                call(y) { return this.#m(y); }
+                git(y) { return [...this.#g(y)]; }
+            }
+
+            const c = new C();
+            assert.isTrue(c.call(0) instanceof Promise);
+            assert.areEqual("100,101", [100, c.git(1)[0]].join(","));
+        }
+    },
+    {
+        name: "private async/generator brands survive prototype manipulation and freeze",
+        body() {
+            class C {
+                async *#m() { await 1; yield 7; }
+                call() { return this.#m(); }
+                ref() { return this.#m; }
+            }
+
+            const c = new C();
+            const fn = c.ref();
+            Object.setPrototypeOf(C.prototype, null);
+            Object.freeze(c);
+            assert.areEqual("#m", fn.name);
+            assert.isTrue(c.call().next() instanceof Promise);
+        }
+    },
+    {
+        name: "private async/generator early errors and line-terminator rules",
+        body() {
+            // Async or generator accessors stay early errors.
+            assert.throws(function () { eval("class C { async get #x() {} }"); }, SyntaxError);
+            assert.throws(function () { eval("class C { async set #x(v) {} }"); }, SyntaxError);
+            assert.throws(function () { eval("class C { *get #x() {} }"); }, SyntaxError);
+            assert.throws(function () { eval("class C { *set #x(v) {} }"); }, SyntaxError);
+            assert.throws(function () { eval("class C { async *get #x() {} }"); }, SyntaxError);
+            assert.throws(function () { eval("class C { async *set #x(v) {} }"); }, SyntaxError);
+            assert.throws(function () { eval("class C { get #x() {} async set #x(v) {} }"); }, SyntaxError);
+            // The async modifier comes before static, never after it.
+            assert.throws(function () { eval("class C { async static #m() {} }"); }, SyntaxError);
+            assert.throws(function () { eval("class C { async static #m; }"); }, SyntaxError);
+            // Duplicate rules are unchanged across kinds.
+            assert.throws(function () { eval("class C { async #m() {} #m() {} }"); }, SyntaxError);
+            assert.throws(function () { eval("class C { *#m() {} async *#m() {} }"); }, SyntaxError);
+            assert.throws(function () { eval("class C { async #m() {} async #m() {} }"); }, SyntaxError);
+            assert.throws(function () { eval("class C { static *#m() {} static #m() {} }"); }, SyntaxError);
+            assert.throws(function () { eval("class C { get #x() {} async #x() {} }"); }, SyntaxError);
+            assert.throws(function () { eval("class C { async #m() {} static async #m() {} }"); }, SyntaxError);
+            // An async method needs a parameter list; a generator needs a body.
+            assert.throws(function () { eval("class C { async #m = 1 }"); }, SyntaxError);
+            assert.throws(function () { eval("class C { async #x; }"); }, SyntaxError);
+            assert.throws(function () { eval("class C { *#m = 1 }"); }, SyntaxError);
+            assert.throws(function () { eval("class C { async *#m = 1 }"); }, SyntaxError);
+            assert.throws(function () { eval("class C { #x *gen() {} }"); }, SyntaxError);
+            assert.throws(function () { eval("class C { async #constructor() {} }"); }, SyntaxError);
+            assert.throws(function () { eval("class C { *#constructor() {} }"); }, SyntaxError);
+            // A newline after async keeps `async` an ordinary member: the
+            // class below is a field named async plus a sync private method.
+            var Split = eval("(class { async\n#m() { return 1; } get() { return this.#m(); } })");
+            var split = new Split();
+            assert.areEqual(undefined, split.async);
+            assert.areEqual(1, split.get());
+            // A newline after `*` still starts a generator private method.
+            var StarSplit = eval("(class { *\n#m() { yield 2; } it() { return [...this.#m()]; } })");
+            assert.areEqual("2", new StarSplit().it().join(","));
+            // A star after a field newline starts the next element: a
+            // private field plus a public generator.
+            var AfterField = eval("(class { #x\n*gen() { yield 3; } pub() { return [...this.gen()]; } })");
+            assert.areEqual("3", new AfterField().pub().join(","));
+        }
+    },
+    {
+        name: "async private completions settle with the expected values",
+        body() {
+            // Single chained snippet (see assertAsyncCompletion): each step
+            // covers one async case above, and one _asyncExit settles them
+            // all. Any mismatch rejects the chain and fails this test.
+            assertAsyncCompletion(
+                "class CAsyncV { #v = 40; async #m(a, b) { await 1; return this.#v + a + b; } call(a, b) { return this.#m(a, b); } }" +
+                "class CAsyncG { #n = 3; async *#a() { for (let i = 0; i < this.#n; i++) { await i; yield i * 2; } } it() { return this.#a(); } }" +
+                "class CStaticA { static #v = 40; static async #m(x) { await 1; return this.#v + x; } static call(x) { return this.#m(x); } }" +
+                "class CStaticAG { static async *#a(x) { await 1; yield x * 2; } static it(x) { return this.#a(x); } }" +
+                "class CDrvB { constructor() { this.base = 100; } val() { return this.base; } }" +
+                "class CDrv extends CDrvB { #x = 1; async #m(y) { await 1; return this.val() + this.#x + y; } call(y) { return this.#m(y); } }" +
+                "class CManip { async *#m() { await 1; yield 7; } call() { return this.#m(); } }" +
+                "function CPump(it, out) { return it.next().then(function (r) { if (r.done) { return out; } out.push(r.value); return CPump(it, out); }); }" +
+                "new CAsyncV().call(1, 1).then(function (v) { assert.areEqual(42, v); })" +
+                ".then(function () { return CPump(new CAsyncG().it(), []); })" +
+                ".then(function (out) { assert.areEqual('0,2,4', out.join(',')); return CStaticA.call(2); })" +
+                ".then(function (v) { assert.areEqual(42, v); return CStaticAG.it(21).next(); })" +
+                ".then(function (r) { assert.areEqual(42, r.value); assert.areEqual(false, r.done); return new CDrv().call(1); })" +
+                ".then(function (v) { assert.areEqual(102, v);" +
+                " var inst = new CManip(); Object.setPrototypeOf(CManip.prototype, null); Object.freeze(inst); return inst.call().next(); })" +
+                ".then(function (r) { assert.areEqual(7, r.value); assert.areEqual(false, r.done); _asyncExit(); }," +
+                " function (e) { assert.fail('async completion failed: ' + (e && e.stack || e)); });");
         }
     }
 ];

@@ -337,14 +337,16 @@ const tests = [
             }, TypeError);
 
             // Private static methods/accessors are supported (see
-            // class-private-methods.js); static blocks and async/generator
-            // private variants remain SyntaxError. Computed public names are
-            // evaluated (doc/c2-s1-computed-instance-super.md), never private.
+            // class-private-methods.js), including the async/generator
+            // variants; static blocks remain SyntaxError. Computed public
+            // names are evaluated (doc/c2-s1-computed-instance-super.md),
+            // never private.
             assert.doesNotThrow(function () { eval("class C { static #m() {} }"); });
             assert.doesNotThrow(function () { eval("class C { static get #p() { return 1; } }"); });
             assert.doesNotThrow(function () { eval("class C { static set #p(v) {} }"); });
-            assert.throws(function () { eval("class C { static * #g() {} }"); }, SyntaxError);
-            assert.throws(function () { eval("class C { static async #m() {} }"); }, SyntaxError);
+            assert.doesNotThrow(function () { eval("class C { static * #g() {} }"); });
+            assert.doesNotThrow(function () { eval("class C { static async #m() {} }"); });
+            assert.doesNotThrow(function () { eval("class C { static async * #m() {} }"); });
             assert.throws(function () { eval("class C { static {} }"); }, SyntaxError);
             assert.doesNotThrow(function () { eval("class C { static ['computed'] = 1; }"); });
             assert.areEqual(1, eval("class C { static ['computed'] = 1; }").computed);
