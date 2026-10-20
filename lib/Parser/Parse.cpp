@@ -9932,16 +9932,29 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
                     uint * pnestedCountSave = m_pnestedCount;
                     ParseNodePtr fastScanChildList = nullptr;
                     // A static block is a statement-level function boundary
-                    // even in scans: push a deferred knopBlock sentinel so
-                    // labels and break/continue targets outside the block
-                    // stay invisible and declaration checks see a block.
-                    StmtNest stmtBoundary;
-                    stmtBoundary.isDeferred = true;
-                    stmtBoundary.op = knopBlock;
-                    stmtBoundary.pLabelId = nullptr;
-                    stmtBoundary.pstmtOuter = nullptr;
+                    // even in scans. Bottom out the statement chain first so
+                    // labels and break/continue targets outside the block stay
+                    // invisible, then push a real function-like block scope
+                    // around the statement list. PnodeBlockType::Function
+                    // makes this block its own function block, so `var` (and
+                    // hoisted Annex B function) declarations stay block-local
+                    // and collide with block-level let/const exactly like the
+                    // real helper parse, instead of leaking into (or falsely
+                    // colliding with) enclosing scopes. ScopeType_Block (not
+                    // FunctionBody) keeps the split param-scope check aimed at
+                    // the enclosing function away from block locals, matching
+                    // the parameterless helper; the scope object itself stays
+                    // lazy like any scanned block.
                     StmtNest * pstmtSave = m_pstmtCur;
-                    SetCurrentStatement(&stmtBoundary);
+                    SetCurrentStatement(nullptr);
+                    ParseNodeBlock * pnodeScanBlock = StartParseBlock<false>(PnodeBlockType::Function, ScopeType_Block);
+                    // Non-regular blocks never lazily create their scope (see
+                    // the Regular assert in AddDeclForPid), so attach the
+                    // block scope up front, the way a scanned function body
+                    // carries its own scope. FinishParseBlock pops it.
+                    Scope * pnodeScanScope = Anew(&m_nodeAllocator, Scope, &m_nodeAllocator, ScopeType_Block);
+                    pnodeScanBlock->scope = pnodeScanScope;
+                    PushScope(pnodeScanScope);
                     m_ppnodeScope = &fastScanChildList;
                     m_ppnodeExprScope = nullptr;
                     m_pnestedCount = &pnodeFastScanStub->nestedCount;
@@ -9952,6 +9965,7 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
                     this->GetScanner()->SetYieldIsKeywordRegion(previousYieldIsKeyword);
                     this->GetScanner()->SetAwaitIsKeywordRegion(previousAwaitIsKeyword);
 
+                    FinishParseBlock(pnodeScanBlock, false);
                     SetCurrentStatement(pstmtSave);
                     m_ppnodeScope = ppnodeScopeSave;
                     m_ppnodeExprScope = ppnodeExprScopeSave;

@@ -690,6 +690,89 @@ const tests = [
         }
     },
     {
+        name: "static block declaration scope attribution agrees under deferred parsing",
+        body() {
+            // The fast scan must attribute block-level declarations to the
+            // block's own function-like scope, exactly like the full parse:
+            // intra-block lexical/var collisions are early errors, while
+            // block locals never collide with the class name, outer
+            // bindings, or enclosing parameters. Error shapes run through
+            // eval/new Function (eager full parse); the valid shapes below
+            // run directly, so this file's -force:deferparse variant scans
+            // them with the deferred scope (doc/c2-s1-static-blocks.md).
+            assert.throws(function () { eval("class X { static { let a = 1; var a = 2; } }"); }, SyntaxError, "let/var");
+            assert.throws(function () { eval("class X { static { var a = 1; let a = 2; } }"); }, SyntaxError, "var/let");
+            assert.throws(function () { eval("class X { static { const a = 1; var a = 2; } }"); }, SyntaxError, "const/var");
+            assert.throws(function () { eval("class X { static { var a = 1; const a = 2; } }"); }, SyntaxError, "var/const");
+            assert.throws(function () { eval("class X { static { let a = 1; let a = 2; } }"); }, SyntaxError, "duplicate let");
+            assert.throws(function () { eval("class X { static { let a = 1; { var a = 2; } } }"); }, SyntaxError, "let/nested var");
+            assert.throws(function () { eval("class X { static { { var a = 1; } let a = 2; } }"); }, SyntaxError, "nested var/let");
+            assert.throws(function () { eval("class X { static { for (var i = 0; i < 1; i++) {} let i = 2; } }"); }, SyntaxError, "for var/let");
+            assert.throws(function () { eval("class X { static { switch (1) { case 1: var s = 5; } let s = 6; } }"); }, SyntaxError, "switch var/let");
+            assert.throws(function () { eval("class X { static { try {} catch (e) { var q = 1; } let q = 2; } }"); }, SyntaxError, "catch var/let");
+            assert.throws(function () { new Function("class X { static { let a = 1; var a = 2; } }"); }, SyntaxError, "let/var in Function");
+            assert.throws(function () { new Function("class X { static { var a = 1; let a = 2; } }"); }, SyntaxError, "var/let in Function");
+
+            // A block let/const/var may shadow the class name.
+            class ShadowLet {
+                static { let ShadowLet = 5; this.v = ShadowLet; }
+            }
+            assert.areEqual(5, ShadowLet.v);
+            class ShadowConst {
+                static { const ShadowConst = 6; this.v = ShadowConst; }
+            }
+            assert.areEqual(6, ShadowConst.v);
+            class ShadowVar {
+                static { var ShadowVar = 7; this.v = ShadowVar; }
+            }
+            assert.areEqual(7, ShadowVar.v);
+            class ShadowFn {
+                static { function ShadowFn() { return 8; } this.v = ShadowFn(); }
+            }
+            assert.areEqual(8, ShadowFn.v);
+
+            // A block var is block-scoped: it coexists with outer
+            // function-scope let/const/var bindings of the same name.
+            let z = 1;
+            const y = 10;
+            var w = 100;
+            class Outer {
+                static { var z = 2; var y = 20; var w = 200; this.v = [z, y, w]; }
+            }
+            assert.areEqual("2,20,200", Outer.v.join(","));
+            assert.areEqual(1, z);
+            assert.areEqual(10, y);
+            assert.areEqual(100, w);
+
+            // Nested blocks, nested functions, and split-parameter enclosing
+            // functions keep the same attribution.
+            class Nested {
+                static {
+                    let n = 1;
+                    {
+                        var m = 2;
+                        function h() { var n = 3; return n + m; }
+                        this.v = [n, m, h()];
+                    }
+                }
+            }
+            assert.areEqual("1,2,5", Nested.v.join(","));
+            const split = ([p]) => {
+                class SP {
+                    static { let p = 4; var q = 5; this.v = [p, q]; }
+                }
+                return SP.v;
+            };
+            assert.areEqual("4,5", split([40]).join(","));
+
+            // Uses of outer bindings and separate per-block scopes still work.
+            class UsesOuter {
+                static { this.v = z + y + w; }
+            }
+            assert.areEqual(111, UsesOuter.v);
+        }
+    },
+    {
         name: "static block early errors: arguments, await, yield, return, break and continue",
         body() {
             assert.throws(function () { eval("class C { static { console.log(arguments); } }"); }, SyntaxError, "arguments");

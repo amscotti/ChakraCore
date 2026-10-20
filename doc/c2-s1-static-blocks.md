@@ -186,6 +186,93 @@ absent from this worktree (only `tools/test262/run.py` is present), so no
 before/after corpus comparison was possible; in-tree suites plus the
 node-differential probes above are the regression net, per the lane brief.
 
+## Fix round (review loop 2): defer-scan scope attribution
+
+Two adversarial-review defects, both in the fast-scan (`buildAST == false`)
+branch of the `static {` member loop in `ParseClassDecl`. Reproduced before
+changing code with the lane binaries (`zig-out/bin/ch`,
+`out/debug-static/bin/ch`) using `-forcedeferparse` vs `-nodeferparse`
+with `node v26.5.0` as oracle:
+
+| defect | before | after |
+|---|---|---|
+| D1 `function f(){class C{static{let a=1;var a=2;}}return 1;} f();` (also reversed order, `const`/`var`) | full parse: `SyntaxError`; defer scan: missed, release `ch` throws `Error: Internal error` at the `f()` call, debug-static asserts at `FunctionBody.cpp:2519` (`Syntax errors should never be detected on deferred re-parse`), SIGTRAP rc=133 | `SyntaxError` (Let/Const redeclaration) in normal, `-forcedeferparse` and `-nodeferparse` modes on both binaries; debug build reports it at the same point the full parse does, no assert |
+| D2a `function f(){class C{static{let C=5;}} return 1;} f();` | accepted by node and full-parse `ch`; `SyntaxError` under `-forcedeferparse` | accepted in all modes |
+| D2b `function f(){let z=1; class C{static{var z=2; this.v=z;}} return C.v;} f();` | `node` and full-parse `ch` print `2`; `SyntaxError` under `-forcedeferparse` | prints `2` in all modes |
+
+Root cause: the scan branch parsed the block statement list with no
+`BlockInfoStack` pushed — only a `StmtNest` sentinel plus the flat
+stub-child list. Every declaration-attribution path keys off
+`GetCurrentBlockInfo()` / `GetCurrentFunctionBlockInfo()` and pid-ref scope
+ids, so the block's `let`/`const` landed in the enclosing function-body
+block and its `var`/`function` in the enclosing function scope. Same-scope
+`let`+`var` therefore never shared a scope (D1 missed, then re-detected
+when the deferred reparse built the real helper with full validation —
+hence the Internal-error/assert), while block locals falsely collided with
+the class binding (D2a) and outer `let`s (D2b). The full parse is correct
+because `CreateClassStaticBlockFunction` builds Parameter + FunctionBody
+blocks for the helper; plain `{ }` blocks and method bodies are correct in
+scans for the same reason (real `BlockInfoStack`s via `ParseBlock<false>`
+and `ParseFncDeclInternal<false>`).
+
+Fix (`lib/Parser/Parse.cpp`, scan branch only): bottom out the statement
+chain as before (outer labels/loops stay invisible), then wrap the
+statement list in a real `StartParseBlock<false>(PnodeBlockType::Function,
+ScopeType_Block)` / `FinishParseBlock` pair, keeping the existing
+stub-child redirection. `Function` block type makes the block its own
+`pBlockInfoFunction`, so `var`/hoisted-function declarations stay
+block-local and collide with block-level `let`/`const` exactly like the
+helper; nested regular blocks inherit it as their function block, and
+Annex B maps, `CheckBlockDeclarations` and `BindPidRefs` run at close like
+any scanned block. `ScopeType_Block` (not `FunctionBody`) keeps the
+split-param-scope check aimed at the enclosing function away from block
+locals, matching the parameterless helper — verified with
+`([p]) => { class SP { static { let p = 4; ... } } }`. The scope object is
+attached up front because non-regular blocks never lazily create one
+(`AddDeclForPid` asserts `Regular` on the lazy path; debug caught this on
+the first iteration). No special cases per repro: every shape in both
+defect families falls out of the one scope.
+
+Tests: new `static block declaration scope attribution agrees under
+deferred parsing` entry in `test/es7/class-static-fields.js` (no new files,
+no `rlexe.xml` change, gate counts unmoved). Must-error shapes are pinned
+via `eval`/`new Function` (eager full parse); must-pass shapes also run as
+direct code, so this file's existing `-force:deferparse` `rlexe.xml`
+variant scans them with the fixed scope in CI — pre-fix that variant
+rejects them at parse time. Must-error shapes cannot appear as direct
+committed code (a file that fails to parse fails the suite), so the D1
+scan direction is pinned by the manual runs below, per repo convention
+(same as `blockscope-early-errors.js`).
+
+Verification observed (release `zig-out/bin/ch` unless noted):
+
+- Focused files pass in all three modes on both binaries:
+  `class-static-fields.js` (with the new entry), plus
+  `class-static-private-fields.js`, `class-private-methods.js`,
+  `class-private-fields.js`, `class-fields-public.js`,
+  `deferparseclass.js` — `pass` in normal / `-forcedeferparse` /
+  `-nodeferparse`.
+- Node-differential sweeps, 69 probes total, `ch` normal/defer/nodefer vs
+  `node`: **69/69 identical error class, identical values on every
+  value case**. Covers let/const/var/function collisions in both orders,
+  nested blocks/classes/functions, blocks in nested deferred functions
+  (incl. 3-deep), class-name shadowing (let/const/var/function),
+  outer let/const/var coexistence, split-param enclosing functions,
+  return/break/continue/label inward+outward, and the lane's prior probes
+  (ordering, private access incl. friend pattern, super, scope,
+  exceptions, arguments error, this/arrow, eval, empty blocks).
+- Gates: `mise x -- zig build check` PASS (incl. `check_regression:
+  PASS: passed 2012 / failed 0`); `mise x -- zig build
+  check-regression -Dprofile=debug-static` **PASS: passed 2064 /
+  failed 0**. `tools/build/gate_counts.json` untouched.
+
+Observation (not changed, for the coordinator): the S1 `sawClass`
+eager-guard in `ParseFncDeclInternal` does not keep small class-bearing
+functions eager under `-forcedeferparse` (`-trace:deferparse` still shows
+`Deferred : f` for `function f(){class C{m(){}} return 1;} f();`), so the
+scan path fixed here is live for ordinary class code and must stay
+correct; the guard's effectiveness was left as-is.
+
 ## Residual work and limitations
 
 - `super.prop` inside a **nested plain function** in a block is an early
@@ -215,7 +302,8 @@ node-differential probes above are the regression net, per the lane brief.
   assert permits nameless `knopMember` block entries.
 - `lib/Parser/Parse.h`, `lib/Parser/Parse.cpp`: `m_inClassStaticBlock`
   scan flag; `CreateClassStaticBlockFunction`; `static {` member-loop
-  branch (AST + stub paths, flag save/restore, nameless member entries);
+  branch (AST + stub paths, flag save/restore, nameless member entries; fix round: scan branch wraps the statement list
+  in a synthetic Function-typed/Block-scoped scan block so declarations attribute like the helper);
   `tkRETURN` early error (marker + flag); `m_inClassStaticBlock`
   save/reset/restore in `ParseFncDeclInternal`; `static {` in
   `ClassBodyHasFieldSyntax`.
@@ -227,7 +315,7 @@ node-differential probes above are the regression net, per the lane brief.
 - `lib/Runtime/ByteCode/ByteCodeGenerator.cpp`: `nullptr` guards in `Bind`'s
   `knopMember` case and `IsSuper`.
 - `test/es7/class-static-fields.js`: stale `static {}` rejection updated;
-  6 new block entries. `test/es7/class-static-private-fields.js`: stale
+  6 new block entries plus the fix-round scope-attribution entry. `test/es7/class-static-private-fields.js`: stale
   rejection updated; 2 new block entries. `test/es7/class-private-methods.js`:
   header comment only. No new test files; `rlexe.xml` and
   `tools/build/gate_counts.json` unmoved (2012/2064).
