@@ -392,6 +392,64 @@ const tests = [
             }
             assert.areEqual("1|3|a,b,m", D.read().join("|"));
         }
+    },
+    {
+        name: "private static initializers read super with the constructor as HomeObject",
+        body() {
+            class Base {
+                static foo = 7;
+                static who() { return this.name; }
+            }
+            class Derived extends Base {
+                static #x = super.foo;
+                static #who = super.who();
+                static #byArrow = (() => super.foo)();
+                static readX() { return Derived.#x; }
+                static readWho() { return Derived.#who; }
+                static readArrow() { return Derived.#byArrow; }
+            }
+            assert.areEqual(7, Derived.readX());
+            assert.areEqual("Derived", Derived.readWho());
+            assert.areEqual(7, Derived.readArrow());
+
+            // Private and public static initializers share one textual
+            // order and one super environment.
+            class Mixed extends Base {
+                static a = super.foo;
+                static #b = this.a + 1;
+                static c = this.#b + 1;
+                static readB() { return Mixed.#b; }
+            }
+            assert.areEqual(7, Mixed.a);
+            assert.areEqual(8, Mixed.readB());
+            assert.areEqual(9, Mixed.c);
+
+            // Base classes read Function.prototype: missing names are
+            // undefined.
+            class Plain {
+                static #missing = super.foo;
+                static readMissing() { return Plain.#missing; }
+            }
+            assert.areEqual(undefined, Plain.readMissing());
+        }
+    },
+    {
+        name: "super inside private static accessors and initializers (merged lanes)",
+        body() {
+            class Base {
+                static x = 40;
+                static make() { return 40; }
+            }
+            class Derived extends Base {
+                static get #p() { return super.x; }
+                static #inc() { return 2; }
+                static #v = super.make() + this.#inc();
+                static readP() { return Derived.#p; }
+                static readV() { return Derived.#v; }
+            }
+            assert.areEqual(40, Derived.readP());
+            assert.areEqual(42, Derived.readV());
+        }
     }
 ];
 

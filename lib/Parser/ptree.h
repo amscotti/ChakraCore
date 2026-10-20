@@ -570,6 +570,11 @@ public:
     bool canBeDeferred;
     bool hasSuperCallInConstructorLambda;
     bool isClassFieldInitializerContext;
+    // S1 static super: static field initializer helpers allow super.property
+    // (HomeObject is the constructor, passed as the helper's `this`). Set at
+    // helper creation; instance helpers keep this false and still reject
+    // super at parse time.
+    bool isStaticClassFieldInitializer;
     bool hasInstanceFields;
     ParseNodePtr pnodeClassSuperLambdas;
     ParseNodePtr * ppnodeClassSuperLambdasLast;

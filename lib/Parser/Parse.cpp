@@ -172,6 +172,7 @@ Parser::Parser(Js::ScriptContext* scriptContext, BOOL strictMode, PageAllocator 
     m_hasDeferredShorthandInitError(false),
     m_deferCommaError(false),
     m_inClassFieldInitializer(false),
+    m_inStaticClassFieldInitializer(false),
     m_currentClassHasFields(true),
     m_disallowSuperCallInEval(false),
     m_classFieldInitializerUsesArguments(false),
@@ -9247,7 +9248,7 @@ void Parser::ResolvePendingPrivateRefs(PrivateNameScope * outermost)
 // initializer are parented to the initializer, not to the class's enclosing
 // function. The source scanner is positioned at the first token of the
 // initializer expression (after '=').
-ParseNodeFnc * Parser::CreateClassFieldInitializerFunction(charcount_t ichMin, size_t cbMin, ParseNodePtr * ppnodeInitExpr)
+ParseNodeFnc * Parser::CreateClassFieldInitializerFunction(charcount_t ichMin, size_t cbMin, ParseNodePtr * ppnodeInitExpr, bool isStatic)
 {
     Assert(!this->m_deferringAST);
 
@@ -9263,7 +9264,13 @@ ParseNodeFnc * Parser::CreateClassFieldInitializerFunction(charcount_t ichMin, s
     pnodeFnc->SetDeclaration(true);
     pnodeFnc->SetHomeObjLocation(Js::Constants::NoRegister);
     pnodeFnc->isClassFieldInitializerContext = true;
-    pnodeFnc->superRestrictionState = SuperRestrictionState::Disallowed;
+    pnodeFnc->isStaticClassFieldInitializer = isStatic;
+    // Static initializers run with [[HomeObject]] set to the constructor, so
+    // super.property is allowed (super() stays an early error via
+    // ParseSuper). Instance initializers keep Disallowed: their residual is
+    // unchanged by this slice.
+    pnodeFnc->superRestrictionState = isStatic ?
+        SuperRestrictionState::PropertyAllowed : SuperRestrictionState::Disallowed;
     pnodeFnc->functionId = (*m_nextFunctionId)++;
     pnodeFnc->lineNumber = this->GetScanner()->LineCur();
     pnodeFnc->columnNumber = 0;
@@ -9962,12 +9969,14 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
 
                 bool usesArgumentsSave = m_classFieldInitializerUsesArguments;
                 bool inFieldInitializerSave = m_inClassFieldInitializer;
+                bool inStaticFieldInitializerSave = m_inStaticClassFieldInitializer;
                 m_classFieldInitializerUsesArguments = false;
                 m_inClassFieldInitializer = true;
+                m_inStaticClassFieldInitializer = isStatic;
 
                 if (buildAST)
                 {
-                    pnodeInitFnc = CreateClassFieldInitializerFunction(ichMin, iecpMin, &pnodeInitExpr);
+                    pnodeInitFnc = CreateClassFieldInitializerFunction(ichMin, iecpMin, &pnodeInitExpr, isStatic);
                 }
                 else
                 {
@@ -9984,6 +9993,7 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
 
                 m_classFieldInitializerUsesArguments = m_classFieldInitializerUsesArguments || usesArgumentsSave;
                 m_inClassFieldInitializer = inFieldInitializerSave;
+                m_inStaticClassFieldInitializer = inStaticFieldInitializerSave;
 
                 if (m_classFieldInitializerUsesArguments)
                 {
@@ -15330,6 +15340,20 @@ IdentPtr Parser::ParseSuper(bool fAllowCall)
     default:
         Error(ERRInvalidSuper);
         break;
+    }
+
+    // S1 static super: stub builds (buildAST == false) have no helper
+    // context yet, so allow super.property inside a static field initializer
+    // without recording it on the enclosing function. Recording it there
+    // would poison the enclosing deferred proxy's attributes (SuperReference
+    // is in the stable mask) while the full parse records the reference on
+    // the helper. super() still falls through to the state checks below and
+    // errors, matching the full parse. Validation of the real helper happens
+    // during the full parse via its PropertyAllowed restriction state.
+    if (!buildAST && m_inStaticClassFieldInitializer &&
+        (m_token.tk == tkDot || m_token.tk == tkLBrack))
+    {
+        return superPid;
     }
 
     currentNodeFunc->SetHasSuperReference(TRUE);

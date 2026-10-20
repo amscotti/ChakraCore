@@ -2389,6 +2389,21 @@ void ByteCodeGenerator::LoadSuperObject(FuncInfo *funcInfo)
     Assert(superSym);
     Assert(!funcInfo->IsLambda());
 
+    // S1 static super: a static field initializer helper has no home object
+    // (it is created at class-block entry, before the constructor exists), so
+    // it cannot use LdHomeObj. The constructor is passed as the helper's
+    // `this` and is the specified [[HomeObject]] for static initializers, so
+    // bind the super slot to it: LdHomeObjProto on it yields the base
+    // constructor (or Function.prototype for base classes) and the existing
+    // LdSuperFld/StSuperFld paths receive the correct home base with
+    // this == constructor. Instance helpers keep the LdHomeObj path, which
+    // resolves to undefined for them (their super use stays a parse error).
+    if (funcInfo->root->isStaticClassFieldInitializer && funcInfo->GetThisSymbol() != nullptr)
+    {
+        m_writer.Reg2(Js::OpCode::Ld_A, superSym->GetLocation(), funcInfo->GetThisSymbol()->GetLocation());
+        return;
+    }
+
     m_writer.Reg1(Js::OpCode::LdHomeObj, superSym->GetLocation());
 }
 

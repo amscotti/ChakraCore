@@ -496,6 +496,11 @@ private:
     // so their bodies have their own lexical `this` and correctly parented
     // nested functions.
     bool m_inClassFieldInitializer;
+    // S1 static super: true while parsing a static field initializer, so
+    // stub builds (which have no helper context yet) can allow super.property
+    // without recording it on the enclosing function. Save/restore alongside
+    // m_inClassFieldInitializer; nested classes reset it per member.
+    bool m_inStaticClassFieldInitializer;
     bool m_currentClassHasFields;
     bool m_disallowSuperCallInEval;
     bool m_classFieldInitializerUsesArguments;
@@ -944,7 +949,7 @@ private:
     PrivateNameEntry * DeclareClassPrivateAccessor(IdentPtr name, bool isGetter, bool isStatic, bool buildAST);
     ParseNodeName * CreatePrivateNameReference(IdentPtr name, charcount_t ichMin, charcount_t ichLim, bool buildAST);
     void ResolvePendingPrivateRefs(PrivateNameScope * outermost);
-    ParseNodeFnc * CreateClassFieldInitializerFunction(charcount_t ichMin, size_t cbMin, ParseNodePtr * ppnodeInitExpr = nullptr);
+    ParseNodeFnc * CreateClassFieldInitializerFunction(charcount_t ichMin, size_t cbMin, ParseNodePtr * ppnodeInitExpr = nullptr, bool isStatic = false);
     void AttachClassFieldsToLambda(ParseNodeFnc * pnodeLambda, ParseNode * pnodeFields, Symbol * thisSym);
     void AttachClassPrivateMethodsToLambda(ParseNodeFnc * pnodeLambda, ParseNode * pnodePrivateMethods);
     ParseNodeFnc * CreateClassFieldInitializerFastScanStub();
