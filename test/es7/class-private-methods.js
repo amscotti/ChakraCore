@@ -4,8 +4,10 @@
 // Licensed under the MIT license. See LICENSE.txt in the project root for license information.
 //-------------------------------------------------------------------------------------------------------
 // C2-S1: private instance methods (`#m(){}`) and private accessors
-// (`get #x(){}` / `set #x(v){}`). Static/private-static members, static
-// blocks, computed names and decorators are intentionally out of this slice.
+// (`get #x(){}` / `set #x(v){}`), plus private static methods and accessors
+// (`static #m(){}`, `static get #x(){}` / `static set #x(v){}`).
+// Async/generator private methods, static blocks, computed names and
+// decorators remain out of scope (doc/c2-s1-private-static-methods.md).
 
 WScript.LoadScriptFile("..\\UnitTestFramework\\UnitTestFramework.js");
 
@@ -425,8 +427,168 @@ const tests = [
             assert.throws(function () { eval("class C { get #constructor(){} }"); }, SyntaxError);
             assert.throws(function () { eval("class C { m() { this.#missing(); } }"); }, SyntaxError);
             assert.throws(function () { eval("this.#missing"); }, SyntaxError);
-            assert.throws(function () { eval("class C { static #m(){} }"); }, SyntaxError);
-            assert.throws(function () { eval("class C { static get #m(){} }"); }, SyntaxError);
+            assert.doesNotThrow(function () { eval("class C { static #m(){} }"); });
+            assert.doesNotThrow(function () { eval("class C { static get #m(){} }"); });
+            assert.doesNotThrow(function () { eval("class C { static set #m(v){} }"); });
+            assert.throws(function () { eval("class C { static async #m(){} }"); }, SyntaxError);
+            assert.throws(function () { eval("class C { static *#m(){} }"); }, SyntaxError);
+            assert.throws(function () { eval("class C { static async *#m(){} }"); }, SyntaxError);
+        }
+    },
+    {
+        name: "static private methods dispatch on the constructor",
+        body() {
+            class C {
+                static #m() { return 42; }
+                static call() { return this.#m(); }
+                static ref() { return this.#m; }
+            }
+
+            assert.areEqual(42, C.call());
+            assert.areEqual("#m", C.ref().name);
+            // The brand check happens at `this.#m`, not at the call itself,
+            // so an extracted function remains callable with any receiver.
+            assert.areEqual(42, C.ref().call({}, 0));
+        }
+    },
+    {
+        name: "the static private brand belongs to the defining constructor",
+        body() {
+            class C {
+                static #m() { return 1; }
+                static call() { return this.#m(); }
+            }
+            class Other {}
+            class D extends C {}
+
+            assert.areEqual(1, C.call());
+            assert.throws(function () { C.call.call(new C()); }, TypeError);
+            assert.throws(function () { C.call.call(C.prototype); }, TypeError);
+            assert.throws(function () { C.call.call(Other); }, TypeError);
+            assert.throws(function () { D.call(); }, TypeError);
+            assert.throws(function () { C.call.call(D); }, TypeError);
+
+            // A subclass that redeclares the name gets a fresh brand.
+            class R2 extends C {
+                static #m() { return 2; }
+                static call() { return this.#m(); }
+            }
+            assert.areEqual(2, R2.call());
+            assert.areEqual(1, C.call());
+        }
+    },
+    {
+        name: "static private accessors share one name and brand",
+        body() {
+            class C {
+                static get #v() { return this._v; }
+                static set #v(x) { this._v = x * 2; }
+                static getV() { return this.#v; }
+                static setV(x) { this.#v = x; }
+                static has(o) { return #v in o; }
+            }
+
+            C.setV(21);
+            assert.areEqual(42, C.getV());
+            assert.isTrue(C.has(C));
+            assert.isFalse(C.has({}));
+            assert.isFalse(C.has(new C()));
+            assert.isFalse(C.has(C.prototype));
+            assert.throws(function () { C.has(1); }, TypeError);
+
+            assert.throws(function () { eval("class G { static get #v() { return 1; } static w(v) { this.#v = v; } } G.w(1);"); }, TypeError);
+            assert.throws(function () { eval("class S { static set #v(x) {} static r() { return this.#v; } } S.r();"); }, TypeError);
+            assert.throws(function () { eval("class W { static #m() {} static w(v) { this.#m = v; } } W.w(1);"); }, TypeError);
+            assert.doesNotThrow(function () { eval("class P { static get #v() { return 1; } static set #v(x) {} }"); });
+        }
+    },
+    {
+        name: "static private methods are hidden from reflection and survive freeze",
+        body() {
+            class C {
+                static #m() { return 1; }
+                static call() { return this.#m(); }
+                static has(o) { return #m in o; }
+            }
+
+            assert.isFalse(Object.prototype.hasOwnProperty.call(C, "#m"));
+            assert.isFalse(Object.prototype.hasOwnProperty.call(C.prototype, "#m"));
+            assert.areEqual(-1, Object.getOwnPropertyNames(C).indexOf("#m"));
+            assert.areEqual(undefined, Object.getOwnPropertyDescriptor(C, "#m"));
+            assert.isFalse(C.has(new C()));
+
+            Object.freeze(C);
+            assert.areEqual(1, C.call());
+            assert.isTrue(C.has(C));
+        }
+    },
+    {
+        name: "static and instance private names are isolated per evaluation",
+        body() {
+            class C {
+                static #m() { return 1; }
+                im() { return this.#m; }
+            }
+            // Instances are never branded with static names.
+            assert.throws(function () { new C().im(); }, TypeError);
+
+            // Instance code reaches static names lexically through the class.
+            class N {
+                static #m() { return 5; }
+                im() { return N.#m(); }
+            }
+            assert.areEqual(5, new N().im());
+
+            // Each class evaluation creates a fresh static brand.
+            var C1 = eval("class C1 { static #m() { return 1; } static call() { return this.#m(); } }");
+            var C2 = eval("class C2 { static #m() { return 2; } static call() { return this.#m(); } }");
+            assert.areEqual(1, C1.call());
+            assert.areEqual(2, C2.call());
+            assert.throws(function () { C1.call.call(C2); }, TypeError);
+
+            var K = class {
+                static #m() { return 9; }
+                static call() { return this.#m(); }
+            };
+            assert.areEqual(9, K.call());
+        }
+    },
+    {
+        name: "static private methods support super and #prototype",
+        body() {
+            class B { static who() { return "base"; } }
+            class E extends B {
+                static #m() { return super.who(); }
+                static call() { return this.#m(); }
+            }
+            assert.areEqual("base", E.call());
+
+            // A private identifier is never a PropName, so the static
+            // "prototype" early error does not apply (matching instances).
+            var P = eval("class P { static #prototype() { return 1; } static call() { return this.#prototype(); } }");
+            assert.areEqual(1, P.call());
+        }
+    },
+    {
+        name: "static private early errors",
+        body() {
+            assert.throws(function () { eval("class C { static #m() {} static #m() {} }"); }, SyntaxError);
+            assert.throws(function () { eval("class C { static #m() {} #m() {} }"); }, SyntaxError);
+            assert.throws(function () { eval("class C { #m() {} static #m() {} }"); }, SyntaxError);
+            assert.throws(function () { eval("class C { static #m() {} static #m = 1; }"); }, SyntaxError);
+            assert.throws(function () { eval("class C { static #m = 1; static #m() {} }"); }, SyntaxError);
+            assert.throws(function () { eval("class C { static #m() {} #m = 1; }"); }, SyntaxError);
+            assert.throws(function () { eval("class C { static get #x() {} static get #x() {} }"); }, SyntaxError);
+            assert.throws(function () { eval("class C { static set #x(v) {} static set #x(v) {} }"); }, SyntaxError);
+            assert.throws(function () { eval("class C { static get #x() {} set #x(v) {} }"); }, SyntaxError);
+            assert.throws(function () { eval("class C { get #x() {} static set #x(v) {} }"); }, SyntaxError);
+            assert.throws(function () { eval("class C { static get #x() {} static #x = 1; }"); }, SyntaxError);
+            assert.throws(function () { eval("class C { static get #x() {} #x() {} }"); }, SyntaxError);
+            assert.throws(function () { eval("class C { static #constructor() {} }"); }, SyntaxError);
+            assert.throws(function () { eval("class C { static get #constructor() {} }"); }, SyntaxError);
+            assert.throws(function () { eval("class C { static #m() {} static r() { return this.#missing; } }"); }, SyntaxError);
+            // ASI still splits a field from a following static member.
+            assert.doesNotThrow(function () { eval("class C { static #x\nstatic #m() { return 1; } }"); });
         }
     }
 ];

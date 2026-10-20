@@ -473,6 +473,7 @@ ParseNodeClass::ParseNodeClass(OpCode nop, charcount_t ichMin, charcount_t ichLi
     : ParseNode(nop, ichMin, ichLim)
 {
     this->pnodePrivateNames = nullptr;
+    this->pnodeClassStaticPrivateMethods = nullptr;
 }
 
 ParseNodeExportDefault::ParseNodeExportDefault(OpCode nop, charcount_t ichMin, charcount_t ichLim)

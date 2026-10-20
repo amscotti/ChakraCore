@@ -414,7 +414,7 @@ const tests = [
             assert.throws(function () { eval("class C { static 'constructor' = 1; }"); }, SyntaxError, "string static constructor");
             assert.throws(function () { eval("class C { static {} }"); }, SyntaxError, "static block");
             assert.doesNotThrow(function () { eval("class C { static #x; }"); }, "static private field");
-            assert.throws(function () { eval("class C { static #m() {} }"); }, SyntaxError, "static private method");
+            assert.doesNotThrow(function () { eval("class C { static #m() {} }"); }, "static private method");
             assert.throws(function () { eval("class C { static [0] = 1; }"); }, SyntaxError, "computed static field");
             assert.throws(function () { eval("class C { static [0]; }"); }, SyntaxError, "computed static field without initializer");
         }
