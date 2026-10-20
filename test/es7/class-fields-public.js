@@ -3,9 +3,10 @@
 // Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
-// C2-S1: public instance class fields with simple identifier names and
-// optional initializers (doc/c2-s1-public-fields.md). Private/static/computed
-// elements and decorators are intentionally not part of this slice.
+// C2-S1: public instance class fields with simple identifier names, computed
+// names and optional initializers (doc/c2-s1-public-fields.md,
+// doc/c2-s1-computed-instance-super.md). Private/static elements and
+// decorators are intentionally not part of this slice.
 
 WScript.LoadScriptFile("..\\UnitTestFramework\\UnitTestFramework.js");
 
@@ -546,6 +547,232 @@ const tests = [
             // The spec forbids a public field named "constructor".
             assert.throws(function () { eval("class Bad { constructor; }"); }, SyntaxError, "constructor field is an early error");
             assert.throws(function () { eval("class Bad { 'constructor' = 1; }"); }, SyntaxError, "string constructor field is an early error");
+        }
+    },
+    {
+        name: "computed instance field names evaluate once in textual order",
+        body() {
+            const log = [];
+            function key(name) { log.push(name); return name; }
+            class C {
+                [key("m1")]() { return 1; }
+                a = (log.push("init:a"), 1);
+                [key("f1")] = (log.push("init:f1"), 2);
+                [key("m2")]() { return 3; }
+                b = (log.push("init:b"), 4);
+            }
+            // Keys evaluate at class definition time, interleaved with
+            // methods in textual order; initializers do not run yet.
+            assert.areEqual("m1,f1,m2", log.join(","));
+
+            log.length = 0;
+            const first = new C();
+            assert.areEqual("init:a,init:f1,init:b", log.join(","));
+            assert.areEqual(1, first.a);
+            assert.areEqual(2, first.f1);
+            assert.areEqual(4, first.b);
+            assert.areEqual("a,f1,b", Object.keys(first).join(","));
+
+            // Keys are not re-evaluated per construction.
+            log.length = 0;
+            const second = new C();
+            assert.areEqual("init:a,init:f1,init:b", log.join(","));
+            assert.areEqual(2, second.f1);
+        }
+    },
+    {
+        name: "computed instance field keys: scope, conversions, duplicates and special names",
+        body() {
+            let count = 0;
+            const keyObj = { toString() { count++; return "k"; } };
+            class C {
+                [keyObj] = 1;
+                [keyObj] = 2;
+            }
+            // ToPropertyKey runs once per element at class definition time.
+            assert.areEqual(2, count);
+            const c = new C();
+            assert.areEqual(1, Object.keys(c).length);
+            assert.areEqual(2, c.k);
+            assert.areEqual(2, count);
+
+            // Outer bindings are visible; the class name is in its TDZ.
+            let v = "w";
+            class D {
+                [v] = 1;
+            }
+            assert.areEqual(1, new D().w);
+            assert.throws(function () { eval("class Bad { [Bad] = 1; }"); }, ReferenceError, "class name TDZ in key");
+
+            // Symbol and numeric keys.
+            const s = Symbol("s");
+            class F {
+                [s] = 1;
+                [42] = 2;
+            }
+            const f = new F();
+            assert.areEqual(1, f[s]);
+            assert.areEqual(2, f["42"]);
+
+            // Duplicate computed keys: every initializer runs, last wins.
+            let runs = 0;
+            class G {
+                ["d"] = (runs++, 1);
+                ["d"] = (runs++, 2);
+            }
+            assert.areEqual(2, new G().d);
+            assert.areEqual(2, runs);
+
+            // "constructor", "prototype" and "__proto__" define ordinary own
+            // properties on the instance.
+            class H {
+                ["constructor"] = 1;
+                ["prototype"] = 2;
+                ["__proto__"] = 3;
+                ["bare"];
+            }
+            const h = new H();
+            assert.areEqual(1, h.constructor);
+            assert.areEqual(2, h.prototype);
+            assert.areEqual(3, h["__proto__"]);
+            assert.isTrue(Object.prototype.hasOwnProperty.call(h, "__proto__"));
+            assert.areEqual(H.prototype, Object.getPrototypeOf(h));
+            assert.isTrue(Object.prototype.hasOwnProperty.call(h, "bare"));
+            assert.areEqual(undefined, h.bare);
+
+            // Anonymous function and class values take the computed key name.
+            class N {
+                ["nf"] = function () { };
+                ["nc"] = class { };
+                ["named"] = function explicit() { };
+            }
+            const n = new N();
+            assert.areEqual("nf", n.nf.name);
+            assert.areEqual("nc", n.nc.name);
+            assert.areEqual("explicit", n.named.name);
+
+            // A throwing key suppresses every later definition.
+            assert.throws(function () {
+                eval("class E { [(() => { throw new Error('boom'); })()] = 1; static s = 2; }");
+            }, Error, "key throw");
+            assert.throws(function () {
+                eval("class E2 { [(() => { throw new Error('kboom'); })()] = 1; x = 1; } new E2();");
+            }, Error, "key throw suppresses instance fields");
+        }
+    },
+    {
+        name: "super reads in instance field initializers",
+        body() {
+            class Base { }
+            Base.prototype.pd = 111;
+            Base.prototype.who = function () { return this.tag + "!"; };
+            Object.defineProperty(Base.prototype, "g", { get() { return 42; }, configurable: true });
+            class Derived extends Base {
+                tag = "T";
+                x = super.pd;
+                y = super.g;
+                z = super.who();
+                w = (() => super.pd)();
+                v = super["pd"];
+                missing = super.missing;
+                t = this.tag;
+            }
+            const d = new Derived();
+            assert.areEqual(111, d.x);
+            assert.areEqual(42, d.y);
+            assert.areEqual("T!", d.z);
+            assert.areEqual(111, d.w);
+            assert.areEqual(111, d.v);
+            assert.areEqual(undefined, d.missing);
+            assert.areEqual("T", d.t);
+            assert.areEqual("tag,x,y,z,w,v,missing,t", Object.keys(d).join(","));
+
+            // Base classes read through Object.prototype.
+            class Plain {
+                a = super.toString === Object.prototype.toString;
+                b = super.hasOwnProperty === Object.prototype.hasOwnProperty;
+            }
+            const p = new Plain();
+            assert.isTrue(p.a);
+            assert.isTrue(p.b);
+
+            // super() in an instance field initializer is an early error, as
+            // is super in a nested non-arrow function.
+            assert.throws(function () { new Function("class D extends Object { x = super(); }"); }, SyntaxError, "super call");
+            assert.throws(function () { new Function("class D { x = super(); }"); }, SyntaxError, "super call in base");
+            assert.throws(function () { new Function("class D extends Object { x = (function () { return super.foo; })(); }"); }, SyntaxError, "nested function super");
+        }
+    },
+    {
+        name: "super assignments and calls in instance field initializers",
+        body() {
+            class Base {
+                set s(v) { this.sv = v * 2; }
+            }
+            Base.prototype.pd = 111;
+            Base.prototype.m = function () { return "m:" + this.tag; };
+            class Derived extends Base {
+                tag = "T";
+                a = (super.s = 21, this.sv);
+                b = (super.pd = 9, this.pd);
+                c = (super.pd2 = 7, this.pd2);
+                r = super.m();
+            }
+            const d = new Derived();
+            // Setters run with the instance as receiver.
+            assert.areEqual(42, d.a);
+            assert.areEqual(42, d.sv);
+            // Plain assignment shadows the prototype value on the instance.
+            assert.areEqual(9, d.b);
+            assert.areEqual(111, Base.prototype.pd);
+            assert.areEqual(7, d.c);
+            // Calls observe the instance as receiver.
+            assert.areEqual("m:T", d.r);
+            // Compound assignment reads through the base and writes the instance.
+            class D2 extends Base {
+                e = (super.pd += 1, this.pd);
+            }
+            const d2 = new D2();
+            assert.areEqual(112, d2.e);
+            assert.areEqual(111, Base.prototype.pd);
+
+            // Base-class assignment creates an own property on the instance.
+            class Plain {
+                f = (super.zzz = 5, this.zzz);
+            }
+            assert.areEqual(5, new Plain().f);
+
+            // extends null cannot construct, so fields never run.
+            assert.throws(function () { new (class N extends null { q = 5; })(); }, TypeError, "extends null construction");
+        }
+    },
+    {
+        name: "computed fields and instance super in deferred and indirect shapes",
+        body() {
+            function make(tag) {
+                return class extends Object {
+                    t = tag;
+                    [tag] = super.toString === Object.prototype.toString;
+                    u = super.hasOwnProperty === Object.prototype.hasOwnProperty;
+                };
+            }
+            const inst = new (make("dyn"))();
+            assert.areEqual("dyn", inst.t);
+            assert.isTrue(inst.dyn);
+            assert.isTrue(inst.u);
+
+            const EvalC = eval("(class { ['e'] = 41; })");
+            assert.areEqual(41, new EvalC().e);
+
+            const FunctionC = new Function("return class { static se = 1; ['ie'] = 2; }")();
+            assert.areEqual(2, new FunctionC().ie);
+            assert.areEqual(1, FunctionC.se);
+
+            // Classes defined inside field initializers keep working keys.
+            class Outer {
+                inner = (new (class { ["k"] = 3; })()).k;
+            }
+            assert.areEqual(3, new Outer().inner);
         }
     }
 ];

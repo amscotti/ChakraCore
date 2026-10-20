@@ -345,6 +345,31 @@ void Visit(ParseNode *pnode, ByteCodeGenerator* byteCodeGenerator, PrefixFn pref
                 Visit(pnodeFieldCall, byteCodeGenerator, prefix, postfix);
             }
         }
+        // S1 computed instance field names: the key expressions evaluate in
+        // the class-evaluation frame (not in the constructor), but the
+        // instance field list lives on the constructor. Visit each key here,
+        // under the class frame, so constants and references bind correctly.
+        // The hidden key slots need no visit (like private brand consts).
+        if (pnode->AsParseNodeClass()->pnodeConstructor != nullptr &&
+            pnode->AsParseNodeClass()->pnodeConstructor->pnodeClassFields != nullptr)
+        {
+            for (ParseNodePtr pnodeFields = pnode->AsParseNodeClass()->pnodeConstructor->pnodeClassFields;
+                 pnodeFields != nullptr;
+                 pnodeFields = pnodeFields->nop == knopList ? pnodeFields->AsParseNodeBin()->pnode2 : nullptr)
+            {
+                ParseNodePtr pnodeField = pnodeFields->nop == knopList
+                    ? pnodeFields->AsParseNodeBin()->pnode1
+                    : pnodeFields;
+                ParseNodePtr pnodeFieldName = pnodeField->AsParseNodeBin()->pnode1;
+                if (pnodeFieldName != nullptr && pnodeFieldName->nop == knopMember &&
+                    pnodeFieldName->AsParseNodeBin()->pnode1 != nullptr &&
+                    pnodeFieldName->AsParseNodeBin()->pnode1->nop == knopComputedName)
+                {
+                    byteCodeGenerator->SetCurrentTopStatement(pnodeFieldName);
+                    Visit(pnodeFieldName->AsParseNodeBin()->pnode1, byteCodeGenerator, prefix, postfix);
+                }
+            }
+        }
         EndVisitBlock(pnode->AsParseNodeClass()->pnodeBlock, byteCodeGenerator);
         break;
     }
@@ -3592,12 +3617,25 @@ void VisitNestedScopes(ParseNode* pnodeScopeList, ParseNode* pnodeParent, ByteCo
                         if (!(pnodeFieldName->nop == knopName &&
                               pnodeFieldName->AsParseNodeName()->IsPrivateName()))
                         {
-                            Assert(pnodeFieldName->nop == knopStr);
-                            // The field name is not part of the body AST, so bind
-                            // its property id (and string constant for
-                            // NamedEvaluation) explicitly.
-                            byteCodeGenerator->AssignPropertyId(pnodeFieldName->AsParseNodeStr()->pid);
-                            Visit(pnodeFieldName, byteCodeGenerator, prefix, postfix);
+                            // S1 computed field names carry a knopMember
+                            // wrapper whose key expression is evaluated in the
+                            // class-evaluation frame; it is visited with the
+                            // class (not here under the constructor), so only
+                            // simple names are bound in this pass.
+                            if (pnodeFieldName->nop == knopMember)
+                            {
+                                Assert(pnodeFieldName->AsParseNodeBin()->pnode1 != nullptr &&
+                                    pnodeFieldName->AsParseNodeBin()->pnode1->nop == knopComputedName);
+                            }
+                            else
+                            {
+                                Assert(pnodeFieldName->nop == knopStr);
+                                // The field name is not part of the body AST, so bind
+                                // its property id (and string constant for
+                                // NamedEvaluation) explicitly.
+                                byteCodeGenerator->AssignPropertyId(pnodeFieldName->AsParseNodeStr()->pid);
+                                Visit(pnodeFieldName, byteCodeGenerator, prefix, postfix);
+                            }
                         }
 
                         ParseNodePtr pnodeFieldCall = pnodeField->AsParseNodeBin()->pnode2;

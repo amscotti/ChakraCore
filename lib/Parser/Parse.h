@@ -505,6 +505,14 @@ private:
     bool m_disallowSuperCallInEval;
     bool m_classFieldInitializerUsesArguments;
     uint32 m_classFieldHelperCount;
+    // S1 computed field names: hidden key-slot counter (globally unique like
+    // the helper counter) and S1 instance super: the current class's hidden
+    // home declaration (class-block slot holding the prototype for instance
+    // field initializer super slots). The home declaration is created with
+    // the first initialized instance field and is save/restored across
+    // nested classes.
+    uint32 m_classComputedFieldKeyCount;
+    ParseNodeVar * m_currentClassHome;
     // S1 private class fields: lexical private-name environment and deferred
     // resolution list. Private names are resolved at the end of the outermost
     // enclosing class so uses may precede declarations.

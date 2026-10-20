@@ -223,6 +223,7 @@ EXDEF3_WMS(CUSTOM,                  LdPrivateAccessor,          OP_LdPrivateAcce
 EXDEF3_WMS(CUSTOM,                  StPrivateAccessor,          OP_StPrivateAccessor, Reg4U)
 EXDEF3_WMS(CUSTOM,                  StPrivateMethod,            OP_StPrivateMethod, Reg3)
 EXDEF3_WMS(CUSTOM,                  InitStaticPrivateField,     OP_InitStaticPrivateField, Reg4)
+EXDEF3_WMS(CUSTOM,                  InitClassFieldComputedName,  OP_InitClassFieldComputedName, ElementI)
   DEF3_WMS(CUSTOM,                  ProfiledInitFld,            PROFILEDOP(OP_ProfiledInitProperty, OP_InitProperty), ElementCP)
   DEF3_WMS(CUSTOM,                  InitLocalFld,               OP_InitLocalProperty, ElementP)
   DEF3_WMS(CUSTOM,                  ProfiledInitLocalFld,       PROFILEDOP(OP_ProfiledInitLocalProperty, OP_InitLocalProperty), ElementP)

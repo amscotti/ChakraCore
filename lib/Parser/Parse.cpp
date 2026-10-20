@@ -177,6 +177,8 @@ Parser::Parser(Js::ScriptContext* scriptContext, BOOL strictMode, PageAllocator 
     m_disallowSuperCallInEval(false),
     m_classFieldInitializerUsesArguments(false),
     m_classFieldHelperCount(0),
+    m_classComputedFieldKeyCount(0),
+    m_currentClassHome(nullptr),
     m_privateNameScope(nullptr),
     m_pendingPrivateRefs(nullptr),
     m_currentClassHasPrivate(false),
@@ -9265,12 +9267,16 @@ ParseNodeFnc * Parser::CreateClassFieldInitializerFunction(charcount_t ichMin, s
     pnodeFnc->SetHomeObjLocation(Js::Constants::NoRegister);
     pnodeFnc->isClassFieldInitializerContext = true;
     pnodeFnc->isStaticClassFieldInitializer = isStatic;
-    // Static initializers run with [[HomeObject]] set to the constructor, so
-    // super.property is allowed (super() stays an early error via
-    // ParseSuper). Instance initializers keep Disallowed: their residual is
-    // unchanged by this slice.
-    pnodeFnc->superRestrictionState = isStatic ?
-        SuperRestrictionState::PropertyAllowed : SuperRestrictionState::Disallowed;
+    // S1 computed/instance super: both static and instance initializers run
+    // with a [[HomeObject]] (the constructor for static helpers, bound from
+    // `this`; the class prototype for instance helpers, bound from the hidden
+    // home slot), so super.property is allowed in both. super() stays an
+    // early error via ParseSuper.
+    pnodeFnc->superRestrictionState = SuperRestrictionState::PropertyAllowed;
+    if (!isStatic)
+    {
+        pnodeFnc->pnodeFieldHome = m_currentClassHome;
+    }
     pnodeFnc->functionId = (*m_nextFunctionId)++;
     pnodeFnc->lineNumber = this->GetScanner()->LineCur();
     pnodeFnc->columnNumber = 0;
@@ -9416,9 +9422,14 @@ void Parser::AttachClassFieldsToLambda(ParseNodeFnc * pnodeLambda, ParseNode * p
         ParseNodePtr pnodeName = pnodeField->AsParseNodeBin()->pnode1;
         bool isPrivateName = pnodeName->nop == knopName &&
             pnodeName->AsParseNodeName()->IsPrivateName();
+        // S1 computed field names: the member name is a knopMember wrapper
+        // around the key expression and its hidden key slot. The clone shares
+        // the wrapper (the key is evaluated once at class definition time),
+        // and the call target keeps the hidden helper pid.
+        bool isComputedName = !isPrivateName && pnodeName->nop == knopMember;
         IdentPtr fieldPid = isPrivateName
             ? pnodeName->AsParseNodeName()->pid
-            : pnodeName->AsParseNodeStr()->pid;
+            : (!isComputedName ? pnodeName->AsParseNodeStr()->pid : nullptr);
         ParseNodePtr pnodeOriginalCall = pnodeField->AsParseNodeBin()->pnode2;
 
         ParseNodeCall * pnodeCall = nullptr;
@@ -9427,7 +9438,7 @@ void Parser::AttachClassFieldsToLambda(ParseNodeFnc * pnodeLambda, ParseNode * p
             ParseNodeName * pnodeOriginalTarget = pnodeOriginalCall->AsParseNodeCall()->pnodeTarget->AsParseNodeName();
             PidRefStack * hiddenRef = Anew(&m_nodeAllocator, PidRefStack);
             hiddenRef->SetSym(*pnodeOriginalTarget->GetSymRef());
-            ParseNodeName * pnodeTarget = CreateNameNode(fieldPid);
+            ParseNodeName * pnodeTarget = CreateNameNode(isComputedName ? pnodeOriginalTarget->pid : fieldPid);
             pnodeTarget->SetSymRef(hiddenRef);
 
             PidRefStack * thisRef = Anew(&m_nodeAllocator, PidRefStack);
@@ -9451,6 +9462,10 @@ void Parser::AttachClassFieldsToLambda(ParseNodeFnc * pnodeLambda, ParseNode * p
             pnodeClonedPrivate->SetIsPrivateName();
             pnodeClonedPrivate->sym = pnodePrivateName->sym;
             pnodeClonedName = pnodeClonedPrivate;
+        }
+        else if (isComputedName)
+        {
+            pnodeClonedName = pnodeName;
         }
         else
         {
@@ -9665,6 +9680,8 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
 
     bool previousClassHasFields = m_currentClassHasFields;
     bool previousClassHasPrivate = m_currentClassHasPrivate;
+    ParseNodeVar * previousClassHome = m_currentClassHome;
+    m_currentClassHome = nullptr;
     bool thisClassHasPrivate = ClassBodyHasPrivateSyntax();
     m_currentClassHasPrivate = previousClassHasPrivate || thisClassHasPrivate;
     // A class without fields may leave its constructor deferred only when it
@@ -9841,14 +9858,15 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
             }
         }
 
-        // S1: public field definition (instance or static, no computed name).
-        // A field is recognized when the member name is followed by '=', ';',
-        // '}' or a line terminator (ASI), and is not a method ( '(' ). For a
-        // simple name the scanner is still on the name token, so look ahead one
-        // token and restore for the existing method/accessor grammar.
+        // S1: public field definition (instance or static, simple or computed
+        // name). A field is recognized when the member name is followed by
+        // '=', ';', '}' or a line terminator (ASI), and is not a method
+        // ( '(' ). For a simple name the scanner is still on the name token
+        // (and for a computed name it is on ']'), so look ahead one token and
+        // restore for the existing method/accessor grammar.
         RestorePoint afterFieldName;
         bool scannedFieldName = false;
-        if (isPrivateField || (!isComputedName && memberPid != nullptr))
+        if (isPrivateField || isComputedName || memberPid != nullptr)
         {
             if (!privateScanned)
             {
@@ -9918,13 +9936,7 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
                 // method with a parameter list.
                 Error(ERRsyntax);
             }
-            if (isComputedName)
-            {
-                // Computed field names (static or instance) are outside this
-                // slice.
-                Error(ERRsyntax);
-            }
-            if ((!isPrivateField && memberPid == nullptr) || (buildAST && pnodeMemberName == nullptr))
+            if ((!isPrivateField && !isComputedName && memberPid == nullptr) || (buildAST && pnodeMemberName == nullptr))
             {
                 Error(ERRnoMemberIdent);
             }
@@ -9946,6 +9958,40 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
             ParseNodePtr * ppnodeExprScopeSave = nullptr;
             uint * pnestedCountSave = nullptr;
             ParseNodePtr fastScanChildList = nullptr;
+
+            // S1 computed field names: hidden class-block slot for the
+            // once-evaluated key. The slot is written during class definition
+            // (in textual member order) and read by the field definition.
+            ParseNodeVar * pnodeKeyDecl = nullptr;
+            if (buildAST && isComputedName)
+            {
+                char16 hiddenKeyName[48];
+                int keyNameLength = swprintf_s(hiddenKeyName, 48, _u("*s1key%u*"), this->m_classComputedFieldKeyCount++);
+                Assert(keyNameLength > 0);
+                IdentPtr hiddenKeyPid = this->GetHashTbl()->PidHashNameLen(hiddenKeyName, static_cast<uint32>(keyNameLength));
+
+                pnodeKeyDecl = CreateBlockScopedDeclNode(hiddenKeyPid, knopLetDecl);
+                Assert(pnodeKeyDecl != nullptr && pnodeKeyDecl->sym != nullptr);
+                pnodeKeyDecl->grfpn |= fpnHidden;
+                pnodeKeyDecl->sym->SetHasNonLocalReference();
+                pnodeKeyDecl->sym->SetNeedDeclaration(false);
+            }
+
+            // S1 instance super: hidden class-block slot holding the class
+            // prototype (the specified HomeObject for instance field
+            // initializers). One slot per class, shared by every instance
+            // helper; created with the first initialized instance field.
+            if (buildAST && !isStatic && hasInitializer && m_currentClassHome == nullptr)
+            {
+                IdentPtr hiddenHomePid = this->GetHashTbl()->PidHashNameLen(_u("*s1home*"), 8);
+
+                ParseNodeVar * pnodeHomeDecl = CreateBlockScopedDeclNode(hiddenHomePid, knopLetDecl);
+                Assert(pnodeHomeDecl != nullptr && pnodeHomeDecl->sym != nullptr);
+                pnodeHomeDecl->grfpn |= fpnHidden;
+                pnodeHomeDecl->sym->SetHasNonLocalReference();
+                pnodeHomeDecl->sym->SetNeedDeclaration(false);
+                m_currentClassHome = pnodeHomeDecl;
+            }
 
             if (hasInitializer)
             {
@@ -10084,7 +10130,58 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
                     }
                 }
 
+                if (pnodeKeyDecl != nullptr)
+                {
+                    // S1 computed field names: wrap the key expression with
+                    // its hidden key slot so the field member stays
+                    // self-contained: the member's name becomes
+                    // knopMember(computedName, keyDecl). Class emission
+                    // evaluates the key once, in textual member order, and
+                    // stashes it in the slot; the field definition loads it
+                    // from there. An anonymous function/class value takes its
+                    // name from the computed key at runtime (NamedEvaluation),
+                    // recorded as a knopTrue marker on the key declaration's
+                    // init.
+                    bool needsRuntimeName = pnodeInitExpr != nullptr &&
+                        ((pnodeInitExpr->nop == knopFncDecl &&
+                          pnodeInitExpr->AsParseNodeFnc()->pnodeName == nullptr) ||
+                         (pnodeInitExpr->nop == knopClassDecl &&
+                          pnodeInitExpr->AsParseNodeClass()->pnodeName == nullptr &&
+                          pnodeInitExpr->AsParseNodeClass()->pnodeConstructor != nullptr));
+                    if (needsRuntimeName)
+                    {
+                        pnodeKeyDecl->pnodeInit = CreateNodeForOpT<knopTrue>();
+                        // The runtime name is applied with SetComputedNameVar,
+                        // which requires the FunctionWithComputedName variant.
+                        // Mark the value like a computed-name method does.
+                        ParseNodeFnc * pnodeValueFnc = pnodeInitExpr->nop == knopFncDecl
+                            ? pnodeInitExpr->AsParseNodeFnc()
+                            : pnodeInitExpr->AsParseNodeClass()->pnodeConstructor;
+                        pnodeValueFnc->SetHasComputedName();
+                        // Mirror computed methods: give the anonymous value a
+                        // fully qualified display hint (C.prototype[k] for
+                        // instance fields, C.[k] for static fields) so it is
+                        // not treated as an anonymous function when the
+                        // runtime installs its name from the key. The key
+                        // itself still supplies the .name via SetComputedNameVar.
+                        uint32 valueHintLength = 0;
+                        uint32 valueHintOffset = 0;
+                        LPCOLESTR valueHint = ConstructFinalHintNode(pClassNamePid, nullptr,
+                            nullptr /*pgetset*/, isStatic, &valueHintLength, &valueHintOffset,
+                            true /*isComputedName*/, pMemberNameHint);
+                        if (valueHint != nullptr)
+                        {
+                            Assert(valueHintLength >= valueHintOffset);
+                            pnodeValueFnc->hint = valueHint;
+                            pnodeValueFnc->hintLength = valueHintLength;
+                            pnodeValueFnc->hintOffset = valueHintOffset;
+                        }
+                    }
+                    pnodeMemberName = CreateBinNode(knopMember, pnodeMemberName, pnodeKeyDecl);
+                }
+
                 ParseNodeBin * pnodeField = CreateBinNode(knopMember, pnodeMemberName, pnodeCall);
+
                 if (isStatic)
                 {
                     // Static fields (public and private) stay in the class
@@ -10466,6 +10563,7 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
         pnodeClass->pnodeMembers = pnodeMembers;
         pnodeClass->pnodePrivateNames = classPrivateScope != nullptr ? classPrivateScope->pnodeDecls : nullptr;
         pnodeClass->pnodeClassStaticPrivateMethods = pnodeStaticPrivateMethods;
+        pnodeClass->pnodeInstanceHome = m_currentClassHome;
         pnodeClass->isDefaultModuleExport = false;
     }
     FinishParseBlock(pnodeBlock);
@@ -10475,6 +10573,7 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
     m_fUseStrictMode = strictSave;
     m_currentClassHasFields = previousClassHasFields;
     m_currentClassHasPrivate = previousClassHasPrivate;
+    m_currentClassHome = previousClassHome;
 
     this->GetScanner()->Scan();
 
@@ -15342,15 +15441,16 @@ IdentPtr Parser::ParseSuper(bool fAllowCall)
         break;
     }
 
-    // S1 static super: stub builds (buildAST == false) have no helper
-    // context yet, so allow super.property inside a static field initializer
-    // without recording it on the enclosing function. Recording it there
-    // would poison the enclosing deferred proxy's attributes (SuperReference
-    // is in the stable mask) while the full parse records the reference on
-    // the helper. super() still falls through to the state checks below and
-    // errors, matching the full parse. Validation of the real helper happens
-    // during the full parse via its PropertyAllowed restriction state.
-    if (!buildAST && m_inStaticClassFieldInitializer &&
+    // S1 static/instance super: stub builds (buildAST == false) have no
+    // helper context yet, so allow super.property inside any field
+    // initializer without recording it on the enclosing function. Recording
+    // it there would poison the enclosing deferred proxy's attributes
+    // (SuperReference is in the stable mask) while the full parse records
+    // the reference on the helper. super() still falls through to the state
+    // checks below and errors, matching the full parse. Validation of the
+    // real helper happens during the full parse via its PropertyAllowed
+    // restriction state.
+    if (!buildAST && m_inClassFieldInitializer &&
         (m_token.tk == tkDot || m_token.tk == tkLBrack))
     {
         return superPid;

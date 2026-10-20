@@ -912,6 +912,15 @@ MACRO_EXTEND_WMS(       StPrivateMethod,   Reg3,            OpSideEffect|OpPostO
 // established opcode value shifts.
 MACRO_EXTEND_WMS(       InitStaticPrivateField, Reg4,        OpSideEffect|OpOpndHasImplicitCall|OpPostOpDbgBailOut)
 
+// S1 computed field names: define a field under a dynamic key with
+// CreateDataPropertyOrThrow semantics. The key register already holds the
+// ToPropertyKey-converted key (evaluated once at class definition time), so
+// the handler performs no further user-visible conversion. A "prototype" key
+// on a constructor target (a static field) throws like computed static
+// methods. Appended after InitStaticPrivateField so no established opcode
+// value shifts.
+MACRO_EXTEND_WMS(       InitClassFieldComputedName, ElementI,    OpSideEffect|OpOpndHasImplicitCall|OpPostOpDbgBailOut)
+
 #undef MACRO_WMS_PROFILED
 #undef MACRO_WMS_PROFILED2
 #undef MACRO_WMS_PROFILED_OP
