@@ -447,6 +447,89 @@ const tests = [
             const FunctionC = FunctionCtor();
             assert.areEqual(12, FunctionC.x);
         }
+    },
+    {
+        name: "static initializers read super from the constructor prototype with this bound to the constructor",
+        body() {
+            class Base {
+                static foo = 7;
+                static who() { return this.name; }
+                static count = 0;
+                static inc() { this.count++; return this.count; }
+            }
+            class Derived extends Base {
+                static x = super.foo;
+                static byIndex = super["foo"];
+                static byArrow = (() => super.foo)();
+                static who = super.who();
+                static first = super.inc();
+                static second = super.inc();
+            }
+            assert.areEqual(7, Derived.x);
+            assert.areEqual(7, Derived.byIndex);
+            assert.areEqual(7, Derived.byArrow);
+            // super method calls observe the derived constructor as this.
+            assert.areEqual("Derived", Derived.who);
+            assert.areEqual(1, Derived.first);
+            assert.areEqual(2, Derived.second);
+            assert.areEqual(2, Derived.count);
+            assert.areEqual(0, Base.count);
+
+            // Base classes read Function.prototype: missing names are
+            // undefined, inherited members resolve.
+            class Plain {
+                static missing = super.foo;
+                static kind = typeof super.hasOwnProperty;
+            }
+            assert.areEqual(undefined, Plain.missing);
+            assert.areEqual("function", Plain.kind);
+
+            // extends null still resolves through Function.prototype.
+            class NullParent extends null {
+                static missing = super.foo;
+            }
+            assert.areEqual(undefined, NullParent.missing);
+
+            // Calling a missing super method throws TypeError at runtime.
+            assert.throws(function () { eval("class C extends Base { static x = super.nope(); }"); }, TypeError, "missing super method");
+
+            // super() stays an early error in derived static initializers.
+            assert.throws(function () { eval("class C extends Base { static x = super(); }"); }, SyntaxError, "derived super call");
+        }
+    },
+    {
+        name: "static initializer super assignment follows ordinary super assignment semantics",
+        body() {
+            class Base {
+                static foo = 7;
+                static set s(v) { this.sv = v * 2; }
+            }
+            // A base setter runs with the derived constructor as receiver.
+            class ViaSetter extends Base {
+                static done = (super.s = 21);
+            }
+            assert.areEqual(21, ViaSetter.done);
+            assert.areEqual(42, ViaSetter.sv);
+            assert.areEqual(undefined, Base.sv);
+
+            // A plain super assignment defines an own property on the
+            // derived constructor and leaves the base binding alone.
+            class OwnProp extends Base {
+                static result = (super.foo = 99);
+            }
+            assert.areEqual(99, OwnProp.result);
+            assert.areEqual(99, OwnProp.foo);
+            assert.areEqual(7, Base.foo);
+        }
+    },
+    {
+        name: "instance field super remains a parse-time SyntaxError",
+        body() {
+            // Direct code rejects super in instance field initializers; this
+            // residual is unchanged by static super support.
+            assert.throws(function () { new Function("class B extends Object { constructor() { super(); } y = super.foo; }"); }, SyntaxError, "instance super.prop");
+            assert.throws(function () { new Function("class B extends Object { constructor() { super(); } y = super.foo = 1; }"); }, SyntaxError, "instance super assignment");
+        }
     }
 ];
 

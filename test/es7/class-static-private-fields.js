@@ -360,6 +360,46 @@ const tests = [
             assert.areEqual("field", C.field.name);
             assert.isFalse(Object.prototype.hasOwnProperty.call(C, "#field"));
         }
+    },
+    {
+        name: "private static initializers read super with the constructor as HomeObject",
+        body() {
+            class Base {
+                static foo = 7;
+                static who() { return this.name; }
+            }
+            class Derived extends Base {
+                static #x = super.foo;
+                static #who = super.who();
+                static #byArrow = (() => super.foo)();
+                static readX() { return Derived.#x; }
+                static readWho() { return Derived.#who; }
+                static readArrow() { return Derived.#byArrow; }
+            }
+            assert.areEqual(7, Derived.readX());
+            assert.areEqual("Derived", Derived.readWho());
+            assert.areEqual(7, Derived.readArrow());
+
+            // Private and public static initializers share one textual
+            // order and one super environment.
+            class Mixed extends Base {
+                static a = super.foo;
+                static #b = this.a + 1;
+                static c = this.#b + 1;
+                static readB() { return Mixed.#b; }
+            }
+            assert.areEqual(7, Mixed.a);
+            assert.areEqual(8, Mixed.readB());
+            assert.areEqual(9, Mixed.c);
+
+            // Base classes read Function.prototype: missing names are
+            // undefined.
+            class Plain {
+                static #missing = super.foo;
+                static readMissing() { return Plain.#missing; }
+            }
+            assert.areEqual(undefined, Plain.readMissing());
+        }
     }
 ];
 
