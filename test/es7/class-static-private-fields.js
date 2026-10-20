@@ -3,11 +3,12 @@
 // Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
-// C2-S1: private static class fields (`static #x;`, `static #x = expr;`).
-// Private static methods/accessors are covered in class-private-methods.js
-// (doc/c2-s1-private-static-methods.md). Static blocks, computed static
-// names and decorators remain out of scope
-// (doc/c2-s1-static-private-fields.md).
+// C2-S1: private static class fields (`static #x;`, `static #x = expr;`),
+// plus static-block access to private names
+// (doc/c2-s1-static-blocks.md). Private static methods/accessors are covered
+// in class-private-methods.js
+// (doc/c2-s1-private-static-methods.md). Computed static names and decorators
+// remain out of scope (doc/c2-s1-static-private-fields.md).
 
 WScript.LoadScriptFile("..\\UnitTestFramework\\UnitTestFramework.js");
 
@@ -337,14 +338,16 @@ const tests = [
             }, TypeError);
 
             // Private static methods/accessors are supported (see
-            // class-private-methods.js); static blocks, computed names and
-            // async/generator private variants remain SyntaxError.
+            // class-private-methods.js); static blocks are supported (see
+            // class-static-fields.js and doc/c2-s1-static-blocks.md).
+            // Computed names and async/generator private variants remain
+            // SyntaxError.
             assert.doesNotThrow(function () { eval("class C { static #m() {} }"); });
             assert.doesNotThrow(function () { eval("class C { static get #p() { return 1; } }"); });
             assert.doesNotThrow(function () { eval("class C { static set #p(v) {} }"); });
             assert.throws(function () { eval("class C { static * #g() {} }"); }, SyntaxError);
             assert.throws(function () { eval("class C { static async #m() {} }"); }, SyntaxError);
-            assert.throws(function () { eval("class C { static {} }"); }, SyntaxError);
+            assert.doesNotThrow(function () { eval("class C { static {} }"); }, "static block");
             assert.throws(function () { eval("class C { static ['computed'] = 1; }"); }, SyntaxError);
 
             // Static initializer early errors match public fields.
@@ -449,6 +452,78 @@ const tests = [
             }
             assert.areEqual(40, Derived.readP());
             assert.areEqual(42, Derived.readV());
+        }
+    },
+    {
+        name: "static blocks access every private name of the class",
+        body() {
+            class C {
+                static #s = 5;
+                #i = 6;
+                static { this.fromBlock = C.#s + new C().#i; }
+                static readS() { return this.#s; }
+                static readI(o) { return o.#i; }
+            }
+            assert.areEqual(11, C.fromBlock);
+            assert.areEqual(5, C.readS());
+            assert.areEqual(6, C.readI(new C()));
+
+            // Private methods and accessors are installed before blocks run.
+            class M {
+                static { this.v = new M().#m() + this.#sm() + this.#p; }
+                #m() { return 1; }
+                static #sm() { return 2; }
+                static get #p() { return 4; }
+            }
+            assert.areEqual(7, M.v);
+
+            // A block may install closures that later use instance private
+            // names (friend pattern).
+            let getSecret;
+            class Friend {
+                #secret = 42;
+                static { getSecret = (o) => o.#secret; }
+            }
+            assert.areEqual(42, getSecret(new Friend()));
+
+            // `#x in obj` works in blocks.
+            class Has {
+                static #x = 1;
+                static { this.found = (#x in Has); this.missing = (#x in {}); }
+            }
+            assert.isTrue(Has.found);
+            assert.isFalse(Has.missing);
+        }
+    },
+    {
+        name: "static blocks follow private-name lexical scope and brand timing",
+        body() {
+            // Private names from another class are a SyntaxError, even
+            // through the defining class object.
+            assert.throws(function () { eval("class B { static #x = 1; } class D { static { this.v = B.#x; } }"); }, SyntaxError);
+            assert.throws(function () { eval("class B { static #x = 1; } class D extends B { static { this.v = B.#x; } }"); }, SyntaxError);
+
+            // A forward private reference parses but the brand is absent
+            // until its declaration runs, so the block throws TypeError.
+            assert.throws(function () { eval("class C { static { this.v = this.#y; } static #y = 1; }"); }, TypeError);
+
+            // Each class evaluation gets a fresh brand, including for
+            // closures installed by blocks.
+            const make = function () {
+                let read;
+                const K = class {
+                    static #v = 42;
+                    static { read = (o) => o.#v; }
+                    static readOwn() { return this.#v; }
+                };
+                return { K, read };
+            };
+            const first = make();
+            const second = make();
+            assert.areEqual(42, first.read(first.K));
+            assert.areEqual(42, second.read(second.K));
+            assert.throws(function () { first.read(second.K); }, TypeError);
+            assert.throws(function () { second.read(first.K); }, TypeError);
         }
     }
 ];

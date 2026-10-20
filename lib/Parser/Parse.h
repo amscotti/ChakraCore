@@ -501,6 +501,12 @@ private:
     // without recording it on the enclosing function. Save/restore alongside
     // m_inClassFieldInitializer; nested classes reset it per member.
     bool m_inStaticClassFieldInitializer;
+    // S1 static blocks: true while fast-scanning a static-block body (which
+    // has no helper context yet) so `return` there stays an early error.
+    // Full parses use the helper's isClassStaticBlock marker instead; nested
+    // function bodies are skipped in scans and rebind m_currentNodeFunc in
+    // full parses, so no reset is needed on function entry.
+    bool m_inClassStaticBlock;
     bool m_currentClassHasFields;
     bool m_disallowSuperCallInEval;
     bool m_classFieldInitializerUsesArguments;
@@ -950,6 +956,7 @@ private:
     ParseNodeName * CreatePrivateNameReference(IdentPtr name, charcount_t ichMin, charcount_t ichLim, bool buildAST);
     void ResolvePendingPrivateRefs(PrivateNameScope * outermost);
     ParseNodeFnc * CreateClassFieldInitializerFunction(charcount_t ichMin, size_t cbMin, ParseNodePtr * ppnodeInitExpr = nullptr, bool isStatic = false);
+    ParseNodeFnc * CreateClassStaticBlockFunction(charcount_t ichMin, size_t cbMin);
     void AttachClassFieldsToLambda(ParseNodeFnc * pnodeLambda, ParseNode * pnodeFields, Symbol * thisSym);
     void AttachClassPrivateMethodsToLambda(ParseNodeFnc * pnodeLambda, ParseNode * pnodePrivateMethods);
     ParseNodeFnc * CreateClassFieldInitializerFastScanStub();

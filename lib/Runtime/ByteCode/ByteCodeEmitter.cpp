@@ -2753,6 +2753,32 @@ void ByteCodeGenerator::EmitStaticClassFieldDefinition(ParseNode * pnodeField, J
     }
 }
 
+// S1: evaluate one static block at class-definition time. The block helper
+// (when present) is called with the constructor as its explicit receiver,
+// exactly like a static field initializer, but the result is discarded: the
+// block's effects are its assignments and side effects. Abrupt completion
+// propagates before later static elements run.
+void ByteCodeGenerator::EmitStaticClassBlockDefinition(ParseNode * pnodeMember, Js::RegSlot classLocation, FuncInfo * funcInfo)
+{
+    ParseNodeCall * pnodeCall = pnodeMember->AsParseNodeBin()->pnode2->AsParseNodeCall();
+
+    Assert(!pnodeCall->isUsed);
+    Assert(pnodeCall->pnodeThisOverride == nullptr);
+    StartStatement(pnodeCall);
+
+    // The call location holds the discarded completion value; acquiring it
+    // mirrors the static-field path so the call always has a valid target.
+    funcInfo->AcquireLoc(pnodeCall);
+    Js::RegSlot thisLocation = funcInfo->AcquireTmpRegister();
+    Writer()->Reg2(Js::OpCode::Ld_A_ReuseLoc, thisLocation, classLocation);
+    EmitCall(pnodeCall, this, funcInfo, false, /*fEvaluateComponents*/ true, thisLocation);
+    funcInfo->ReleaseTmpRegister(thisLocation);
+
+    Assert(pnodeCall->location != Js::Constants::NoRegister);
+    funcInfo->ReleaseLoc(pnodeCall);
+    EndStatement(pnodeCall);
+}
+
 void ByteCodeGenerator::EmitClassConstructorEndCode(FuncInfo *funcInfo)
 {
     Symbol* thisSym = funcInfo->GetThisSymbol();
@@ -12152,11 +12178,31 @@ static bool IsStaticFieldMemberNode(ParseNode * memberNode)
     }
 
     ParseNode * pnodeName = memberNode->AsParseNodeBin()->pnode1;
+    if (pnodeName == nullptr)
+    {
+        // Static-block entries carry no name; see IsStaticBlockMemberNode.
+        return false;
+    }
     bool isFieldName = pnodeName->nop == knopStr ||
         (pnodeName->nop == knopName && pnodeName->AsParseNodeName()->IsPrivateName());
     ParseNode * pnodeValue = memberNode->AsParseNodeBin()->pnode2;
 
     return isFieldName && (pnodeValue == nullptr || pnodeValue->nop == knopCall);
+}
+
+// Static-block entries are stored in the class member list with no name
+// (pnode1 == nullptr) and the block helper call in pnode2, so the second
+// class-emission pass runs them in textual order with static fields.
+static bool IsStaticBlockMemberNode(ParseNode * memberNode)
+{
+    if (memberNode->nop != knopMember)
+    {
+        return false;
+    }
+
+    ParseNode * pnodeValue = memberNode->AsParseNodeBin()->pnode2;
+    return memberNode->AsParseNodeBin()->pnode1 == nullptr &&
+        pnodeValue != nullptr && pnodeValue->nop == knopCall;
 }
 
 // Create the method/accessor function once per class evaluation and stash it in
@@ -12288,8 +12334,8 @@ void EmitClass(ParseNodeClass * pnodeClass, ByteCodeGenerator * byteCodeGenerato
 
     // Evaluate and install every non-field class element first, in textual
     // order: methods, accessors, computed names and private methods/accessors.
-    // Static field entries stay in the member list for textual ordering, but
-    // their initializers do not run during this walk.
+    // Static field and static-block entries stay in the member list for
+    // textual ordering, but their initializers do not run during this walk.
     bool isObjectEmpty = true;
     for (ParseNode * pnodeMemberList = pnodeClass->pnodeMembers;
          pnodeMemberList != nullptr;)
@@ -12297,7 +12343,7 @@ void EmitClass(ParseNodeClass * pnodeClass, ByteCodeGenerator * byteCodeGenerato
         ParseNode * pnodeMember = pnodeMemberList->nop == knopList
             ? pnodeMemberList->AsParseNodeBin()->pnode1
             : pnodeMemberList;
-        if (!IsStaticFieldMemberNode(pnodeMember))
+        if (!IsStaticFieldMemberNode(pnodeMember) && !IsStaticBlockMemberNode(pnodeMember))
         {
             ParseNodeFnc * pnodeMemberFnc = pnodeMember->AsParseNodeBin()->pnode2->AsParseNodeFnc();
             if (IsPrivateMemberNode(pnodeMember))
@@ -12346,8 +12392,9 @@ void EmitClass(ParseNodeClass * pnodeClass, ByteCodeGenerator * byteCodeGenerato
         byteCodeGenerator->EmitPropStore(pnodeClass->location, sym, nullptr, funcInfo, false, true);
     }
 
-    // Static fields run only after all class elements have been evaluated and
-    // the class name is bound, in their own textual order.
+    // Static fields and static blocks run only after all class elements have
+    // been evaluated and the class name is bound, in their shared textual
+    // order.
     for (ParseNode * pnodeMemberList = pnodeClass->pnodeMembers;
          pnodeMemberList != nullptr;)
     {
@@ -12357,6 +12404,10 @@ void EmitClass(ParseNodeClass * pnodeClass, ByteCodeGenerator * byteCodeGenerato
         if (IsStaticFieldMemberNode(pnodeMember))
         {
             byteCodeGenerator->EmitStaticClassFieldDefinition(pnodeMember, pnodeClass->location, funcInfo);
+        }
+        else if (IsStaticBlockMemberNode(pnodeMember))
+        {
+            byteCodeGenerator->EmitStaticClassBlockDefinition(pnodeMember, pnodeClass->location, funcInfo);
         }
 
         if (pnodeMemberList->nop != knopList)

@@ -6,8 +6,9 @@
 // C2-S1: private instance methods (`#m(){}`) and private accessors
 // (`get #x(){}` / `set #x(v){}`), plus private static methods and accessors
 // (`static #m(){}`, `static get #x(){}` / `static set #x(v){}`).
-// Async/generator private methods, static blocks, computed names and
-// decorators remain out of scope (doc/c2-s1-private-static-methods.md).
+// Async/generator private methods, computed names and decorators remain out
+// of scope (doc/c2-s1-private-static-methods.md). Static blocks are covered
+// in class-static-fields.js (doc/c2-s1-static-blocks.md).
 
 WScript.LoadScriptFile("..\\UnitTestFramework\\UnitTestFramework.js");
 

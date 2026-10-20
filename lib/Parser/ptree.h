@@ -575,6 +575,10 @@ public:
     // helper creation; instance helpers keep this false and still reject
     // super at parse time.
     bool isStaticClassFieldInitializer;
+    // S1 static blocks: a static-block helper parses a statement list, so
+    // `return` at its top level (even inside a nested block/loop/branch) is
+    // an early error while nested functions keep their own return rules.
+    bool isClassStaticBlock;
     bool hasInstanceFields;
     ParseNodePtr pnodeClassSuperLambdas;
     ParseNodePtr * ppnodeClassSuperLambdasLast;

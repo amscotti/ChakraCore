@@ -869,7 +869,9 @@ bool ByteCodeGenerator::IsThis(ParseNode* pnode)
 /* static */
 bool ByteCodeGenerator::IsSuper(ParseNode* pnode)
 {
-    return pnode->nop == knopName && pnode->AsParseNodeName()->IsSpecialName() && pnode->AsParseNodeSpecialName()->isSuper;
+    // Static-block member entries carry no name (pnode1 == nullptr); they
+    // are never super references.
+    return pnode != nullptr && pnode->nop == knopName && pnode->AsParseNodeName()->IsSpecialName() && pnode->AsParseNodeSpecialName()->isSuper;
 }
 
 // ByteCodeGenerator debug mode means we are generating debug mode user-code. Library code is always in non-debug mode.
@@ -4625,9 +4627,11 @@ void Bind(ParseNode *pnode, ByteCodeGenerator *byteCodeGenerator)
     case knopSetMember:
 
         {
-            // lhs is knopStr, rhs is expr
+            // lhs is knopStr, rhs is expr. Static-block entries carry no
+            // name (pnode1 == nullptr); their helper call is bound by the
+            // class loop below.
             ParseNode *id = pnode->AsParseNodeBin()->pnode1;
-            if (id->nop == knopStr)
+            if (id != nullptr && id->nop == knopStr)
             {
                 byteCodeGenerator->AssignPropertyId(id->AsParseNodeStr()->pid);
                 id->grfpn |= fpnMemberReference;

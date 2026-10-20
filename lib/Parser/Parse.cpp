@@ -173,6 +173,7 @@ Parser::Parser(Js::ScriptContext* scriptContext, BOOL strictMode, PageAllocator 
     m_deferCommaError(false),
     m_inClassFieldInitializer(false),
     m_inStaticClassFieldInitializer(false),
+    m_inClassStaticBlock(false),
     m_currentClassHasFields(true),
     m_disallowSuperCallInEval(false),
     m_classFieldInitializerUsesArguments(false),
@@ -6312,6 +6313,12 @@ ParseNodeFnc * Parser::ParseFncDeclInternal(ushort flags, LPCOLESTR pNameHint, c
     {
         m_inClassFieldInitializer = false;
     }
+    // S1 static blocks: every nested function (including arrows, whose block
+    // bodies allow `return`) is a return boundary for the fast-scan
+    // m_inClassStaticBlock flag. Full parses use the helper's
+    // isClassStaticBlock marker instead, so this reset is harmless there.
+    bool inClassStaticBlockSave = m_inClassStaticBlock;
+    m_inClassStaticBlock = false;
     // Eval-super rejection belongs to the outer constructor's own super call,
     // not to nested class constructors defined by the eval code.
     bool disallowSuperCallInEvalSave = m_disallowSuperCallInEval;
@@ -6517,6 +6524,7 @@ ParseNodeFnc * Parser::ParseFncDeclInternal(ushort flags, LPCOLESTR pNameHint, c
 
     m_inClassFieldInitializer = inClassFieldInitializerSave;
     m_disallowSuperCallInEval = disallowSuperCallInEvalSave;
+    m_inClassStaticBlock = inClassStaticBlockSave;
     return pnodeFnc;
 }
 
@@ -8942,6 +8950,13 @@ bool Parser::ClassBodyHasFieldSyntax()
             {
                 sawField = true;
             }
+            if (token == tkLCurly && lastToken == tkSTATIC)
+            {
+                // S1 static blocks (`static { ... }`) carry a synthesized
+                // initializer helper like static fields, so their
+                // constructor must stay eager too.
+                sawField = true;
+            }
         }
 
         switch (token)
@@ -9398,6 +9413,153 @@ ParseNodeFnc * Parser::CreateClassFieldInitializerFunction(charcount_t ichMin, s
     return pnodeFnc;
 }
 
+// S1 static blocks: synthesize a hidden block-scoped function declaration
+// which evaluates one `static { ... }` body. The shape mirrors
+// CreateClassFieldInitializerFunction (strict `this` bound to the
+// constructor at the call site, static super environment, arguments early
+// error, await/yield treated as ordinary tokens), but the body is a
+// StatementList parsed like a function body instead of a single expression:
+// var/function declarations are helper-local, let/const are block-local, and
+// `return` at the helper level is rejected by the tkRETURN early error via
+// isClassStaticBlock. The scanner is positioned at the first body token
+// (after '{') on entry; on exit it is past the closing '}'.
+ParseNodeFnc * Parser::CreateClassStaticBlockFunction(charcount_t ichMin, size_t cbMin)
+{
+    Assert(!this->m_deferringAST);
+
+    char16 hiddenName[32];
+    int nameLength = swprintf_s(hiddenName, 32, _u("*s1block%u*"), this->m_classFieldHelperCount++);
+    Assert(nameLength > 0);
+
+    IdentPtr hiddenPid = this->GetHashTbl()->PidHashNameLen(hiddenName, static_cast<uint32>(nameLength));
+
+    ParseNodeFnc * pnodeFnc = CreateAllowDeferNodeForOpT<knopFncDecl>();
+    pnodeFnc->SetNested(m_currentNodeFunc != nullptr);
+    pnodeFnc->SetStrictMode();
+    pnodeFnc->SetDeclaration(true);
+    pnodeFnc->SetHomeObjLocation(Js::Constants::NoRegister);
+    pnodeFnc->isClassFieldInitializerContext = true;
+    pnodeFnc->isStaticClassFieldInitializer = true;
+    pnodeFnc->isClassStaticBlock = true;
+    // Static blocks run with [[HomeObject]] set to the constructor, so
+    // super.property is allowed (super() stays an early error via
+    // ParseSuper). Nested plain functions keep their own Disallowed state.
+    pnodeFnc->superRestrictionState = SuperRestrictionState::PropertyAllowed;
+    pnodeFnc->functionId = (*m_nextFunctionId)++;
+    pnodeFnc->lineNumber = this->GetScanner()->LineCur();
+    pnodeFnc->columnNumber = 0;
+    // The helper is synthetic, so its source range starts at the `static`
+    // keyword: it strictly contains every nested function range, which keeps
+    // deferred-reparse reuse keyed on start offset + length unambiguous.
+    pnodeFnc->ichMin = ichMin;
+    pnodeFnc->cbMin = cbMin;
+    pnodeFnc->cbStringMin = pnodeFnc->cbMin;
+
+    pnodeFnc->pnodeName = CreateDeclNode(knopVarDecl, hiddenPid, STFunction);
+    pnodeFnc->pid = hiddenPid;
+    // The constructor (a nested function) loads this binding from the class
+    // block closure. Mark it captured up front so it is allocated a block scope
+    // slot even though the constructor reference is synthesized after parsing.
+    pnodeFnc->pnodeName->sym->SetHasNonLocalReference();
+
+    // Register the hidden function as a block-scoped declaration in the class
+    // body so that class definition evaluation creates the function object and
+    // the constructor can reach it through the class block's closure.
+    AppendFunctionToScopeList(true, pnodeFnc);
+    AddBlockLexicalDecl(hiddenPid, true, false);
+    if (m_pnestedCount)
+    {
+        (*m_pnestedCount)++;
+    }
+
+    ParseNodeFnc * pnodeFncSave = m_currentNodeFunc;
+    ParseNodeFnc * pnodeFncNonLambdaSave = m_currentNodeNonLambdaFunc;
+    ParseNodePtr * ppnodeVarSave = m_ppnodeVar;
+    uint * pnestedCountSave = m_pnestedCount;
+    int32 * pAstSizeSave = m_pCurrentAstSize;
+
+    m_currentNodeFunc = pnodeFnc;
+    m_currentNodeNonLambdaFunc = pnodeFnc;
+    m_pnestedCount = &pnodeFnc->nestedCount;
+    m_pCurrentAstSize = &pnodeFnc->astSize;
+
+    // A static block is a statement-level function boundary: labels and
+    // break/continue targets outside the block are not visible from it.
+    // Reset before the helper's blocks are pushed so the statement chain
+    // bottoms out here, exactly like ParseFncDeclHelper.
+    StmtNest * pstmtSave = m_pstmtCur;
+    SetCurrentStatement(nullptr);
+
+    ParseNodeBlock * pnodeParamBlock = StartParseBlock<true>(PnodeBlockType::Parameter, ScopeType_Parameter);
+    pnodeFnc->pnodeScopes = pnodeParamBlock;
+
+    ParseNodePtr * ppnodeScopeSave = m_ppnodeScope;
+    m_ppnodeScope = &pnodeParamBlock->pnodeScopes;
+    ParseNodePtr * ppnodeExprScopeSave = m_ppnodeExprScope;
+    m_ppnodeExprScope = nullptr;
+
+    m_ppnodeVar = &pnodeFnc->pnodeVars;
+    // A normal function's built-in arguments binding is needed for direct eval
+    // and for closures created by the block. Direct `arguments` in the block
+    // is still rejected by the ContainsArguments early error.
+    ParseNodeVar * argNode = AddArgumentsNodeToVars(pnodeFnc);
+
+    ParseNodeBlock * pnodeInnerBlock = StartParseBlock<true>(PnodeBlockType::Function, ScopeType_FunctionBody);
+    *m_ppnodeScope = pnodeInnerBlock;
+    pnodeFnc->pnodeBodyScope = pnodeInnerBlock;
+    m_ppnodeScope = &pnodeInnerBlock->pnodeScopes;
+    pnodeInnerBlock->pnodeStmt = pnodeFnc;
+
+    ParseNodePtr * lastNodeRef = nullptr;
+
+    // A static block is not an async/generator body even when the
+    // surrounding class lives in one. Treat await/yield as ordinary tokens so
+    // an invalid use is a SyntaxError instead of building an await/yield node
+    // that the helper FunctionBody cannot execute. Nested async/generator
+    // functions reset these regions in ParseFncDeclInternal.
+    bool previousYieldIsKeyword = this->GetScanner()->SetYieldIsKeywordRegion(false);
+    bool previousAwaitIsKeyword = this->GetScanner()->SetAwaitIsKeywordRegion(false);
+    ParseStmtList<true>(&pnodeFnc->pnodeBody, &lastNodeRef, SM_OnFunctionCode, true /* isSourceElementList */);
+    this->GetScanner()->SetYieldIsKeywordRegion(previousYieldIsKeyword);
+    this->GetScanner()->SetAwaitIsKeywordRegion(previousAwaitIsKeyword);
+
+    // The statement list ends at the block's closing '}'.
+    ChkCurTokNoScan(tkRCurly, ERRnoRcurly);
+    pnodeFnc->ichLim = this->GetScanner()->IchLimTok();
+    pnodeFnc->cbLim = this->GetScanner()->IecpLimTok();
+    pnodeFnc->cbStringLim = pnodeFnc->cbLim;
+    this->GetScanner()->ScanForcingPid();
+
+    AddToNodeList(&pnodeFnc->pnodeBody, &lastNodeRef, CreateNodeForOpT<knopEndCode>());
+
+    FinishParseBlock(pnodeInnerBlock, false);
+    UpdateArgumentsNode(pnodeFnc, argNode);
+    CreateSpecialSymbolDeclarations(pnodeFnc);
+    FinishParseBlock(pnodeParamBlock, false);
+
+    // Restore the enclosing statement stack only after the helper's blocks
+    // are popped, matching ParseFncDeclHelper.
+    SetCurrentStatement(pstmtSave);
+
+    // Match the bookkeeping ParseFncDeclInternal performs for a real nested
+    // function: verify captured names for the helper's deferred children and
+    // propagate the set to the enclosing function's parser state.
+    ProcessCapturedNames(pnodeFnc);
+
+    Assert(m_ppnodeExprScope == nullptr || *m_ppnodeExprScope == nullptr);
+    m_ppnodeExprScope = ppnodeExprScopeSave;
+    m_ppnodeScope = ppnodeScopeSave;
+    m_ppnodeVar = ppnodeVarSave;
+    m_pnestedCount = pnestedCountSave;
+    m_pCurrentAstSize = pAstSizeSave;
+    m_currentNodeFunc = pnodeFncSave;
+    m_currentNodeNonLambdaFunc = pnodeFncNonLambdaSave;
+
+    AddNestedCapturedNames(pnodeFnc);
+
+    return pnodeFnc;
+}
+
 // Build a field-call list for an arrow that calls super() from a derived
 // constructor. The arrow has its own bytecode frame, so its field-call operands
 // must be visited/emitted there; the helper functions and instance are still
@@ -9697,11 +9859,18 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
         }
 
         bool isStatic = false;
+        // S1 static blocks: the helper's source range starts at the `static`
+        // keyword so it strictly contains every nested function range.
+        charcount_t staticIchMin = 0;
+        size_t staticIecpMin = 0;
         if (m_token.tk == tkSTATIC)
         {
             // 'static' can be used as an IdentifierName here, even in strict mode code. We need to see the next token before we know
             // if this is being used as a keyword. This is similar to the way we treat 'let' in some cases.
             // See https://tc39.github.io/ecma262/#sec-keywords for more info.
+
+            staticIchMin = this->GetScanner()->IchMinTok();
+            staticIecpMin = this->GetScanner()->IecpMinTok();
 
             RestorePoint beginStatic;
             this->GetScanner()->Capture(&beginStatic);
@@ -9726,10 +9895,107 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
 
             if (isStatic && m_token.tk == tkLCurly)
             {
-                // Class static blocks are outside the S1 static-field slice.
-                // Reject explicitly instead of failing later in the member
-                // grammar with an unrelated "member identifier expected".
-                Error(ERRsyntax);
+                // S1 static blocks: `static { ... }` evaluates its body with
+                // the constructor as `this` at its textual position among the
+                // static fields. The body is parsed into a hidden helper (or
+                // a fast-scan stub) and the member entry carries the helper
+                // call with no name, so the second class-emission pass runs
+                // blocks in textual order with fields.
+                this->GetScanner()->ScanForcingPid();
+
+                bool usesArgumentsSave = m_classFieldInitializerUsesArguments;
+                bool inFieldInitializerSave = m_inClassFieldInitializer;
+                bool inStaticFieldInitializerSave = m_inStaticClassFieldInitializer;
+                bool inStaticBlockSave = m_inClassStaticBlock;
+                m_classFieldInitializerUsesArguments = false;
+                m_inClassFieldInitializer = true;
+                m_inStaticClassFieldInitializer = true;
+                m_inClassStaticBlock = true;
+
+                ParseNodeFnc * pnodeBlockFnc = nullptr;
+                charcount_t blockIchLim = 0;
+                if (buildAST)
+                {
+                    pnodeBlockFnc = CreateClassStaticBlockFunction(staticIchMin, staticIecpMin);
+                    blockIchLim = pnodeBlockFnc->ichLim;
+                }
+                else
+                {
+                    // Reserve the helper's nested slot in the fast scan's
+                    // function count/proxy layout before parsing block
+                    // children, and parent those children to the skipped stub
+                    // so the enclosing function's nested count matches the
+                    // real parse.
+                    ParseNodeFnc * pnodeFastScanStub = CreateClassFieldInitializerFastScanStub();
+                    ParseNodePtr * ppnodeScopeSave = m_ppnodeScope;
+                    ParseNodePtr * ppnodeExprScopeSave = m_ppnodeExprScope;
+                    uint * pnestedCountSave = m_pnestedCount;
+                    ParseNodePtr fastScanChildList = nullptr;
+                    // A static block is a statement-level function boundary
+                    // even in scans: push a deferred knopBlock sentinel so
+                    // labels and break/continue targets outside the block
+                    // stay invisible and declaration checks see a block.
+                    StmtNest stmtBoundary;
+                    stmtBoundary.isDeferred = true;
+                    stmtBoundary.op = knopBlock;
+                    stmtBoundary.pLabelId = nullptr;
+                    stmtBoundary.pstmtOuter = nullptr;
+                    StmtNest * pstmtSave = m_pstmtCur;
+                    SetCurrentStatement(&stmtBoundary);
+                    m_ppnodeScope = &fastScanChildList;
+                    m_ppnodeExprScope = nullptr;
+                    m_pnestedCount = &pnodeFastScanStub->nestedCount;
+
+                    bool previousYieldIsKeyword = this->GetScanner()->SetYieldIsKeywordRegion(false);
+                    bool previousAwaitIsKeyword = this->GetScanner()->SetAwaitIsKeywordRegion(false);
+                    ParseStmtList<false>(nullptr, nullptr, SM_DeferredParse, true /* isSourceElementList */);
+                    this->GetScanner()->SetYieldIsKeywordRegion(previousYieldIsKeyword);
+                    this->GetScanner()->SetAwaitIsKeywordRegion(previousAwaitIsKeyword);
+
+                    SetCurrentStatement(pstmtSave);
+                    m_ppnodeScope = ppnodeScopeSave;
+                    m_ppnodeExprScope = ppnodeExprScopeSave;
+                    m_pnestedCount = pnestedCountSave;
+
+                    // The statement list ends at the block's closing '}'.
+                    ChkCurTokNoScan(tkRCurly, ERRnoRcurly);
+                    blockIchLim = this->GetScanner()->IchLimTok();
+                    this->GetScanner()->ScanForcingPid();
+                }
+
+                m_classFieldInitializerUsesArguments = m_classFieldInitializerUsesArguments || usesArgumentsSave;
+                m_inClassFieldInitializer = inFieldInitializerSave;
+                m_inStaticClassFieldInitializer = inStaticFieldInitializerSave;
+                m_inClassStaticBlock = inStaticBlockSave;
+
+                if (m_classFieldInitializerUsesArguments)
+                {
+                    // ClassStaticBlockBody early error: the body must not
+                    // contain an `arguments` identifier reference.
+                    Error(ERRsyntax);
+                }
+
+                if (buildAST)
+                {
+                    PidRefStack * hiddenRef = Anew(&m_nodeAllocator, PidRefStack);
+                    hiddenRef->SetSym(pnodeBlockFnc->pnodeName->sym);
+                    ParseNodeName * pnodeTarget = CreateNameNode(pnodeBlockFnc->pnodeName->pid);
+                    pnodeTarget->SetSymRef(hiddenRef);
+
+                    // Like static field helpers, the block helper receives
+                    // the constructor as its explicit receiver at the
+                    // class-definition emission site, so it carries no AST
+                    // `this` override. The result is discarded.
+                    ParseNodeCall * pnodeCall = CreateCallNode(knopCall, pnodeTarget, nullptr);
+                    pnodeCall->isUsed = false;
+                    pnodeCall->argCount = 0;
+
+                    ParseNodeBin * pnodeBlock = CreateBinNode(knopMember, nullptr, pnodeCall,
+                        staticIchMin, blockIchLim);
+                    AddToNodeList(&pnodeMembers, &lastMemberNodeRef, pnodeBlock);
+                }
+
+                continue;
             }
         }
 
@@ -13439,9 +13705,20 @@ LRestart:
     case tkRETURN:
     {
         ParseNodeReturn * pnodeReturn;
+        // S1 static blocks: the block body is a statement list, so `return`
+        // at the helper's level is an early error even inside a nested
+        // block/loop/branch. Nested functions rebind m_currentNodeFunc in
+        // full parses (and are skipped in scans), so they keep their own
+        // return rules. Scans use the m_inClassStaticBlock flag because they
+        // have no helper context yet.
+        if (!buildAST && m_inClassStaticBlock)
+        {
+            Error(ERRbadReturn);
+        }
         if (buildAST)
         {
-            if (nullptr == m_currentNodeFunc || IsTopLevelModuleFunc())
+            if (nullptr == m_currentNodeFunc || IsTopLevelModuleFunc() ||
+                m_currentNodeFunc->isClassStaticBlock)
             {
                 Error(ERRbadReturn);
             }
