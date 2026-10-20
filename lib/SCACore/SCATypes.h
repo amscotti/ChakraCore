@@ -47,6 +47,7 @@ enum SCATypeId
     SCA_Float64Array = 68,
     SCA_DataView = 69,
     SCA_Uint8ClampedArray = 70,
+    SCA_Float16Array = 71,
     SCA_TypedArrayMin = SCA_Int8Array,
     SCA_TypedArrayMax = SCA_Float64Array,
     SCA_Map = 80,
@@ -70,7 +71,7 @@ typedef unsigned int scaposition_t;
 #define SCA_PROPERTY_TERMINATOR 0xFFFFFFFF
 #define IsSCAPrimitive(scaTypeId) ((scaTypeId) <= SCA_LastPrimitive)
 #define IsSCAHostObject(scaTypeId) ((scaTypeId) >= SCA_FirstHostObject)
-#define IsSCATypedArray(scaTypeId) ((scaTypeId) == SCA_Uint8ClampedArray || ((scaTypeId) >= SCA_TypedArrayMin && (scaTypeId) <= SCA_TypedArrayMax))
+#define IsSCATypedArray(scaTypeId) ((scaTypeId) == SCA_Uint8ClampedArray || (scaTypeId) == SCA_Float16Array || ((scaTypeId) >= SCA_TypedArrayMin && (scaTypeId) <= SCA_TypedArrayMax))
 #define FACILITY_SCA            FACILITY_ITF
 #define E_SCA_UNSUPPORTED       MAKE_HRESULT(SEVERITY_ERROR, FACILITY_SCA, 0x1000)
 #define E_SCA_NEWVERSION        MAKE_HRESULT(SEVERITY_ERROR, FACILITY_SCA, 0x1001)

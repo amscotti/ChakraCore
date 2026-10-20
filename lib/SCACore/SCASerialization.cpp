@@ -396,6 +396,7 @@ namespace Js
     bool SerializationCloner<Writer>::IsTypedArray(SrcTypeId typeId)
     {
         return (typeId >= TypeIds_TypedArraySCAMin && typeId <= TypeIds_TypedArraySCAMax)
+            || typeId == TypeIds_Float16Array
             || typeId == TypeIds_DataView;
     }
 
@@ -504,6 +505,12 @@ namespace Js
             {
                 WriteTypedArray<double, false>(src);
             }
+            break;
+
+        case TypeIds_Float16Array:
+            // No virtual-array variant: the raw 2-byte patterns serialize
+            // as-is and widen on load.
+            WriteTypedArray<Float16Bits, false>(src);
             break;
 
         case TypeIds_DataView:

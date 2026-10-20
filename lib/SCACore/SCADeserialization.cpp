@@ -558,6 +558,10 @@ namespace Js
             ReadTypedArray<double, false>(dst);
             break;
 
+        case SCA_Float16Array:
+            ReadTypedArray<Float16Bits, false>(dst);
+            break;
+
         case SCA_DataView:
             ReadTypedArray<DataView, false>(dst);
             break;

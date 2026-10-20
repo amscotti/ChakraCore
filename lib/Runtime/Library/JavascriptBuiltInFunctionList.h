@@ -415,6 +415,7 @@ BUILTIN_TEMPLATE(Int32Array, NewInstance, NewInstance, FunctionInfo::SkipDefault
 BUILTIN_TEMPLATE(Uint32Array, NewInstance, NewInstance, FunctionInfo::SkipDefaultNewObject)
 BUILTIN_TEMPLATE(Float32Array, NewInstance, NewInstance, FunctionInfo::SkipDefaultNewObject)
 BUILTIN_TEMPLATE(Float64Array, NewInstance, NewInstance, FunctionInfo::SkipDefaultNewObject)
+BUILTIN_TEMPLATE(Float16Array, NewInstance, NewInstance, FunctionInfo::SkipDefaultNewObject)
 BUILTIN_TEMPLATE(Int64Array, NewInstance, NewInstance, FunctionInfo::SkipDefaultNewObject)
 BUILTIN_TEMPLATE(Uint64Array, NewInstance, NewInstance, FunctionInfo::SkipDefaultNewObject)
 BUILTIN(CharArray, NewInstance, NewInstance, FunctionInfo::SkipDefaultNewObject)

@@ -235,6 +235,12 @@ namespace Js
                 UnsafeVarTo<TypedArrayBase>(parent)->ClearLengthAndBufferOnDetach();
                 break;
 
+        case TypeIds_Float16Array:
+                // Float16Array has no virtual-array variant: fixed views
+                // only record the detach, like the BigInt kinds.
+                UnsafeVarTo<TypedArrayBase>(parent)->ClearLengthAndBufferOnDetach();
+            break;
+
         case TypeIds_Int64Array:
         case TypeIds_Uint64Array:
         case TypeIds_CharArray:

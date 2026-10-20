@@ -117,6 +117,7 @@ OBJECT_TYPE(Float64MixedArray)
 // Typed arrays that are not optimized by the JIT
 OBJECT_TYPE(Int64Array)
 OBJECT_TYPE(Uint64Array)
+OBJECT_TYPE(Float16Array)
 OBJECT_TYPE(BoolArray)
 OBJECT_TYPE(CharArray)
 OBJECT_TYPE(Count)

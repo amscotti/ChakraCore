@@ -243,6 +243,7 @@ enum VTableValue {
     VtableUint32Array,
     VtableFloat32Array,
     VtableFloat64Array,
+    VtableFloat16Array,
     VtableJavascriptPixelArray,
     VtableInt64Array,
     VtableUint64Array,

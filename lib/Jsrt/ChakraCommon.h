@@ -525,7 +525,11 @@ typedef unsigned short uint16_t;
         /// <summary>
         ///     A float64 array.
         /// </summary>
-        JsArrayTypeFloat64
+        JsArrayTypeFloat64,
+        /// <summary>
+        ///     A float16 array.
+        /// </summary>
+        JsArrayTypeFloat16
     } JsTypedArrayType;
 
     /// <summary>

@@ -8,6 +8,22 @@
 
 namespace Js
 {
+    // Raw binary16 storage for Float16Array elements. The buffer holds the
+    // 16-bit patterns; load widens with Float16::ToDouble and store narrows
+    // with Float16::ToBits after ToNumber. A distinct struct (rather than a
+    // uint16 alias) gives Float16Array its own TypedArray instantiation,
+    // TypeId and conversion semantics. Trivially copyable so typed-array
+    // memmove/sort fast paths can copy it bitwise.
+    struct Float16Bits
+    {
+        uint16 bits;
+        Float16Bits() : bits(0) {}
+        Float16Bits(uint16 value) : bits(value) {}
+        bool operator==(int rhs) const { return bits == (uint16)rhs; }
+        bool operator==(const Float16Bits& rhs) const { return bits == rhs.bits; }
+        explicit operator int() const { return bits; }
+    };
+
     // Portable IEEE 754 binary16 conversion. Everything is done with integer
     // bit manipulation so the result does not depend on a compiler's __fp16
     // support or on the host floating point rounding mode.

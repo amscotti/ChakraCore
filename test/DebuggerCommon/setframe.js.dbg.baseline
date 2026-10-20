@@ -2,6 +2,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "Float16Array": "function <large string>",
       "WeakRef": "function <large string>",
       "FinalizationRegistry": "function <large string>",
       "GGG": "function <large string>",
@@ -29,6 +30,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "Float16Array": "function <large string>",
       "WeakRef": "function <large string>",
       "FinalizationRegistry": "function <large string>",
       "GGG": "function <large string>",
@@ -66,6 +68,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "Float16Array": "function <large string>",
       "WeakRef": "function <large string>",
       "FinalizationRegistry": "function <large string>",
       "GGG": "function <large string>",
@@ -131,6 +134,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "Float16Array": "function <large string>",
       "WeakRef": "function <large string>",
       "FinalizationRegistry": "function <large string>",
       "GGG": "function <large string>",
@@ -168,6 +172,7 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "Float16Array": "function <large string>",
       "WeakRef": "function <large string>",
       "FinalizationRegistry": "function <large string>",
       "GGG": "function <large string>",
