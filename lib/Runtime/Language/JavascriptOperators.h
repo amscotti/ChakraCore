@@ -667,6 +667,7 @@ namespace Js
         static Var OP_LdHomeObjProto(Var aRight, ScriptContext* scriptContext);
         static Var OP_LdFuncObjProto(Var aRight, ScriptContext* scriptContext);
         static Var OP_ImportCall(_In_ JavascriptFunction *function, _In_ Var specifier, _In_ ScriptContext* scriptContext);
+        static Var OP_ImportCallWithOptions(_In_ JavascriptFunction *function, _In_ Var specifier, _In_ Var options, _In_ ScriptContext* scriptContext);
 
         static Var OP_NewAwaitObject(ScriptContext* scriptContext);
         static Var OP_NewAsyncFromSyncIterator(Var syncIterator, ScriptContext* scriptContext);

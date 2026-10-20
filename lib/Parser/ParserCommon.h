@@ -49,10 +49,37 @@ struct ModuleImportOrExportEntry
     IdentPtr     exportName;
     PidRefStack* pidRefStack;
     charcount_t  offset;
+    struct ModuleAttributeList* attributes;
+};
+
+// A single `with { key: "value", ... }` entry. Both key and value are
+// IdentPtrs: keys are IdentifierName or StringLiteral tokens, values are
+// always StringLiteral tokens. The list is kept sorted by key so that
+// module-request equality is order-insensitive.
+struct ModuleAttributeEntry
+{
+    IdentPtr key;
+    IdentPtr value;
+    ModuleAttributeEntry* next;
+};
+
+struct ModuleAttributeList
+{
+    ModuleAttributeEntry* head;
+};
+
+// A static module request: a specifier plus its WithClause attributes
+// (nullptr when no WithClause was present, which is equivalent to an
+// empty attribute list per ES2025).
+struct ModuleRequestEntry
+{
+    IdentPtr specifier;
+    ModuleAttributeList* attributes;
 };
 
 typedef SList<ModuleImportOrExportEntry, ArenaAllocator> ModuleImportOrExportEntryList;
 typedef SList<IdentPtr, ArenaAllocator> IdentPtrList;
+typedef SList<ModuleRequestEntry, ArenaAllocator> ModuleRequestList;
 typedef JsUtil::BaseHashSet<IdentPtr, ArenaAllocator, PowerOf2SizePolicy> IdentPtrSet;
 
 //

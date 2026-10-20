@@ -118,6 +118,7 @@ LSC_ERROR_MSG(1100, ERRUndeclaredExportName, "Export of name '%s' which has no l
 LSC_ERROR_MSG(1101, ERRModuleImportOrExportInScript, "'import' or 'export' can only be used in module code.")
 LSC_ERROR_MSG(1102, ERRInvalidAsgTarget, "Invalid left-hand side in assignment.")
 LSC_ERROR_MSG(1103, ERRMissingFrom, "Expected 'from' after import or export clause.")
+LSC_ERROR_MSG(1105, ERRDuplicateModuleAttribute, "Duplicate attribute key '%s'")
 
 // 1104 ERRsyntaxEOF
 // 1105-1199 available for future use

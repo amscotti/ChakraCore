@@ -426,7 +426,47 @@ var tests = [
             testScript(functionBody, "Test that import() always gives different promise objects", false, true);
             testModuleScript(functionBody, "Test that import() always gives different promise objects", false, true);
         }
-    }
+    },
+    {
+        name: "Dynamic import with options argument",
+        body: function () {
+            let fulfillBody = (optionsSource, checkSource) =>
+                `testDynamicImport(
+                    ()=>{ return import(\'ModuleSimpleExport.js\', ${optionsSource}); },
+                    (v)=>{ ${checkSource} },
+                    (err)=>{ assert.fail(\'Expected fulfillment: \' + (err && err.message)); }, _asyncEnter, _asyncExit
+                )`;
+            let rejectBody = (optionsSource, checkSource) =>
+                `testDynamicImport(
+                    ()=>{ return import(\'ModuleSimpleExport.js\', ${optionsSource}); },
+                    (v)=>{ assert.fail(\'Expected rejection\'); },
+                    (err)=>{ ${checkSource} }, _asyncEnter, _asyncExit
+                )`;
+            let okExport = "assert.areEqual(\'ModuleSimpleExport\', v.ModuleSimpleExport_foo());";
+            testScript(fulfillBody("undefined", okExport), "import() with undefined options fulfills", false, true);
+            testModuleScript(fulfillBody("undefined", okExport), "import() with undefined options fulfills", false, true);
+            testScript(fulfillBody("{ with: {} }", okExport), "import() with empty with-object fulfills", false, true);
+            testModuleScript(fulfillBody("{ with: {} }", okExport), "import() with empty with-object fulfills", false, true);
+            testScript(fulfillBody("{ with: undefined }", okExport), "import() with undefined with-property fulfills", false, true);
+            testScript(fulfillBody("{ with: { kind: \"js\", extra: \"x\" } }", okExport), "import() passes unknown attributes to the host", false, true);
+            testScript(fulfillBody("", okExport).replace(", )", ",)"), "import() with trailing comma fulfills", false, true);
+            testScript(rejectBody("null", "assert.areEqual(TypeError, err.constructor);"), "import() with null options rejects with TypeError", false, true);
+            testModuleScript(rejectBody("null", "assert.areEqual(TypeError, err.constructor);"), "import() with null options rejects with TypeError", false, true);
+            testScript(rejectBody("{ with: 23 }", "assert.areEqual(TypeError, err.constructor);"), "import() with non-object with-property rejects with TypeError", false, true);
+            testScript(rejectBody("'options string'", "assert.areEqual(TypeError, err.constructor);"), "import() with string options rejects with TypeError", false, true);
+            testScript(rejectBody("{ with: 'str' }", "assert.areEqual(TypeError, err.constructor);"), "import() with string with-property rejects with TypeError", false, true);
+            testScript(rejectBody("{ with: { type: 23 } }", "assert.areEqual(TypeError, err.constructor);"), "import() with non-string attribute value rejects with TypeError", false, true);
+            testScript(rejectBody("{ with: { type: \"bogus\" } }", "assert.isTrue(err instanceof Error);"), "import() with unsupported type rejects the promise", false, true);
+            let jsonBody =
+                `testDynamicImport(
+                    ()=>{ return import(\'importattrs-fixture.json\', { with: { type: \'json\' } }); },
+                    (v)=>{ assert.areEqual(42, v.default.answer); },
+                    (err)=>{ assert.fail(\'Expected JSON fulfillment: \' + (err && err.message)); }, _asyncEnter, _asyncExit
+                )`;
+            testScript(jsonBody, "Dynamic import of a JSON module fulfills with the parsed default export", false, true);
+            testModuleScript(jsonBody, "Dynamic import of a JSON module fulfills with the parsed default export", false, true);
+        }
+    },
 ];
 
 testRunner.runTests(tests, { verbose: WScript.Arguments[0] != "summary" });

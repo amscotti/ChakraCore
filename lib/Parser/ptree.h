@@ -841,7 +841,7 @@ public:
     ModuleImportOrExportEntryList* indirectExportEntries;
     ModuleImportOrExportEntryList* starExportEntries;
     ModuleImportOrExportEntryList* importEntries;
-    IdentPtrList* requestedModules;
+    ModuleRequestList* requestedModules;
 
     DISABLE_SELF_CAST(ParseNodeModule);
 };

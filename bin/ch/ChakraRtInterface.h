@@ -36,6 +36,7 @@ struct JsAPIHooks
     typedef JsErrorCode (WINAPI *JsrtBooleanToBoolPtr)(JsValueRef value, bool *boolValue);
     typedef JsErrorCode (WINAPI *JsrtGetPropertyPtr)(JsValueRef object, JsPropertyIdRef property, JsValueRef* value);
     typedef JsErrorCode (WINAPI *JsrtHasPropertyPtr)(JsValueRef object, JsPropertyIdRef property, bool *hasProperty);
+    typedef JsErrorCode (WINAPI *JsrtGetOwnPropertyNamesPtr)(JsValueRef object, JsValueRef *propertyNames);
     typedef JsErrorCode (WINAPI *JsInitializeModuleRecordPtr)(JsModuleRecord referencingModule, JsValueRef normalizedSpecifier, JsModuleRecord* moduleRecord);
     typedef JsErrorCode (WINAPI *JsParseModuleSourcePtr)(JsModuleRecord requestModule, JsSourceContext sourceContext, byte* sourceText, unsigned int sourceLength, JsParseModuleSourceFlags sourceFlag, JsValueRef* exceptionValueRef);
     typedef JsErrorCode (WINAPI *JsModuleEvaluationPtr)(JsModuleRecord requestModule, JsValueRef* result);
@@ -161,6 +162,7 @@ struct JsAPIHooks
     JsrtGetErrorPrototypePtr pfJsrtGetErrorPrototype;
     JsrtGetIteratorPrototypePtr pfJsrtGetIteratorPrototype;
 
+    JsrtGetOwnPropertyNamesPtr pfJsrtGetOwnPropertyNames;
     JsrtCreateFunctionPtr pfJsrtCreateFunction;
     JsrtCreateEnhancedFunctionPtr pfJsrtCreateEnhancedFunction;
     JsCreateNamedFunctionPtr pfJsrtCreateNamedFunction;
@@ -413,6 +415,7 @@ public:
     static JsErrorCode WINAPI JsBooleanToBool(JsValueRef value, bool* boolValue) { return HOOK_JS_API(BooleanToBool(value, boolValue)); }
     static JsErrorCode WINAPI JsGetProperty(JsValueRef object, JsPropertyIdRef property, JsValueRef* value) { return HOOK_JS_API(GetProperty(object, property, value)); }
     static JsErrorCode WINAPI JsHasProperty(JsValueRef object, JsPropertyIdRef property, bool *hasProperty) { return HOOK_JS_API(HasProperty(object, property, hasProperty)); }
+    static JsErrorCode WINAPI JsGetOwnPropertyNames(JsValueRef object, JsValueRef *propertyNames) { return HOOK_JS_API(GetOwnPropertyNames(object, propertyNames)); }
     static JsErrorCode WINAPI JsCallFunction(JsValueRef function, JsValueRef* arguments, unsigned short argumentCount, JsValueRef *result) { return HOOK_JS_API(CallFunction(function, arguments, argumentCount, result)); }
     static JsErrorCode WINAPI JsNumberToDouble(JsValueRef value, double* doubleValue) { return HOOK_JS_API(NumberToDouble(value, doubleValue)); }
     static JsErrorCode WINAPI JsNumberToInt(JsValueRef value, int* intValue) { return HOOK_JS_API(NumberToInt(value, intValue)); }

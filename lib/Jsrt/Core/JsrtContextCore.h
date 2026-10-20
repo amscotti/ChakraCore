@@ -104,6 +104,8 @@ public:
         : HostScriptContext(scriptContext),
         fetchImportedModuleCallback(nullptr),
         fetchImportedModuleFromScriptCallback(nullptr),
+        fetchImportedModuleWithAttributesCallback(nullptr),
+        fetchImportedModuleFromScriptWithAttributesCallback(nullptr),
         notifyModuleReadyCallback(nullptr),
         initializeImportMetaCallback(nullptr),
         reportModuleCompletionCallback(nullptr)
@@ -235,8 +237,8 @@ public:
         return E_NOTIMPL;
     }
 
-    HRESULT FetchImportedModule(Js::ModuleRecordBase* referencingModule, LPCOLESTR specifier, Js::ModuleRecordBase** dependentModuleRecord) override;
-    HRESULT FetchImportedModuleFromScript(JsSourceContext dwReferencingSourceContext, LPCOLESTR specifier, Js::ModuleRecordBase** dependentModuleRecord) override;
+    HRESULT FetchImportedModule(Js::ModuleRecordBase* referencingModule, LPCOLESTR specifier, Js::Var attributes, Js::ModuleRecordBase** dependentModuleRecord) override;
+    HRESULT FetchImportedModuleFromScript(JsSourceContext dwReferencingSourceContext, LPCOLESTR specifier, Js::Var attributes, Js::ModuleRecordBase** dependentModuleRecord) override;
 
     HRESULT NotifyHostAboutModuleReady(Js::ModuleRecordBase* referencingModule, Js::Var exceptionVar) override;
 
@@ -251,6 +253,12 @@ public:
 
     void SetFetchImportedModuleFromScriptCallback(FetchImportedModuleFromScriptCallBack fetchCallback) { this->fetchImportedModuleFromScriptCallback = fetchCallback; }
     FetchImportedModuleFromScriptCallBack GetFetchImportedModuleFromScriptCallback() const { return this->fetchImportedModuleFromScriptCallback; }
+
+    void SetFetchImportedModuleWithAttributesCallback(FetchImportedModuleWithAttributesCallBack fetchCallback) { this->fetchImportedModuleWithAttributesCallback = fetchCallback; }
+    FetchImportedModuleWithAttributesCallBack GetFetchImportedModuleWithAttributesCallback() const { return this->fetchImportedModuleWithAttributesCallback; }
+
+    void SetFetchImportedModuleFromScriptWithAttributesCallback(FetchImportedModuleFromScriptWithAttributesCallBack fetchCallback) { this->fetchImportedModuleFromScriptWithAttributesCallback = fetchCallback; }
+    FetchImportedModuleFromScriptWithAttributesCallBack GetFetchImportedModuleFromScriptWithAttributesCallback() const { return this->fetchImportedModuleFromScriptWithAttributesCallback; }
 
     void SetInitializeImportMetaCallback(InitializeImportMetaCallback initializeCallback) { this->initializeImportMetaCallback = initializeCallback; }
     InitializeImportMetaCallback GetInitializeImportMetaCallback() const { return this->initializeImportMetaCallback; }
@@ -269,6 +277,8 @@ public:
 private:
     FetchImportedModuleCallBack fetchImportedModuleCallback;
     FetchImportedModuleFromScriptCallBack fetchImportedModuleFromScriptCallback;
+    FetchImportedModuleWithAttributesCallBack fetchImportedModuleWithAttributesCallback;
+    FetchImportedModuleFromScriptWithAttributesCallBack fetchImportedModuleFromScriptWithAttributesCallback;
     NotifyModuleReadyCallback notifyModuleReadyCallback;
     InitializeImportMetaCallback initializeImportMetaCallback;
     ReportModuleCompletionCallback reportModuleCompletionCallback;

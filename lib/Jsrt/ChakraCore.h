@@ -120,7 +120,23 @@ typedef enum JsModuleHostInfoKind
     /// <summary>
     ///     Callback to report module completion or exception thrown when evaluating a module.
     /// </summary>
-    JsModuleHostInfo_ReportModuleCompletionCallback = 0x8
+    JsModuleHostInfo_ReportModuleCompletionCallback = 0x8,
+    /// <summary>
+    ///     Callback for receiving notification to fetch a dependent module,
+    ///     with its import attributes (ES2025). When set, the engine routes
+    ///     every static-import fetch through this callback; requests without
+    ///     attributes arrive with the <c>attributes</c> parameter set to
+    ///     the <c>undefined</c> value.
+    /// </summary>
+    JsModuleHostInfo_FetchImportedModuleWithAttributesCallback = 0x9,
+    /// <summary>
+    ///     Callback for receiving notification to fetch imported modules
+    ///     dynamically in scripts, with the import() options attributes
+    ///     (ES2025). When set, the engine routes every dynamic-import fetch
+    ///     through this callback; requests without attributes arrive with
+    ///     the <c>attributes</c> parameter set to the <c>undefined</c> value.
+    /// </summary>
+    JsModuleHostInfo_FetchImportedModuleFromScriptWithAttributesCallback = 0xA
 } JsModuleHostInfoKind;
 
 /// <summary>
@@ -180,6 +196,59 @@ typedef JsErrorCode(CHAKRA_CALLBACK * FetchImportedModuleCallBack)(_In_ JsModule
 ///     Returns <c>JsNoError</c> if the operation succeeded or an error code otherwise.
 /// </returns>
 typedef JsErrorCode(CHAKRA_CALLBACK * FetchImportedModuleFromScriptCallBack)(_In_ JsSourceContext dwReferencingSourceContext, _In_ JsValueRef specifier, _Outptr_result_maybenull_ JsModuleRecord* dependentModuleRecord);
+
+/// <summary>
+///     User implemented callback to fetch additional imported modules in ES modules, with import attributes.
+/// </summary>
+/// <remarks>
+///     This is the attributes-capable form of <c>FetchImportedModuleCallBack</c>, added for
+///     ES2025 import attributes. When a host registers this callback (via
+///     <c>JsModuleHostInfo_FetchImportedModuleWithAttributesCallback</c>), the
+///     engine routes every static-import fetch through it: requests carrying
+///     attributes pass an engine-created object whose own enumerable string
+///     properties map attribute names to attribute values (both strings,
+///     in sorted key order); requests without attributes pass
+///     <c>undefined</c>. When this callback is not registered, requests
+///     without attributes fall back to <c>FetchImportedModuleCallBack</c>
+///     unchanged, while requests carrying attributes fail to load.
+/// </remarks>
+/// <param name="referencingModule">The referencing module that is requesting the dependent module.</param>
+/// <param name="specifier">The specifier coming from the module source code.</param>
+/// <param name="attributes">The import attributes object, or <c>undefined</c> when the request has none.</param>
+/// <param name="dependentModuleRecord">The ModuleRecord of the dependent module. If the module was requested
+///                                     before from other source, return the existing ModuleRecord, otherwise
+///                                     return a newly created ModuleRecord.</param>
+/// <returns>
+///     Returns a <c>JsNoError</c> if the operation succeeded an error code otherwise.
+/// </returns>
+typedef JsErrorCode(CHAKRA_CALLBACK * FetchImportedModuleWithAttributesCallBack)(_In_ JsModuleRecord referencingModule, _In_ JsValueRef specifier, _In_ JsValueRef attributes, _Outptr_result_maybenull_ JsModuleRecord* dependentModuleRecord);
+
+/// <summary>
+///     User implemented callback to fetch imported modules dynamically in scripts, with import attributes.
+/// </summary>
+/// <remarks>
+///     This is the attributes-capable form of
+///     <c>FetchImportedModuleFromScriptCallBack</c>, added for ES2025
+///     <c>import()</c> options. When a host registers this callback (via
+///     <c>JsModuleHostInfo_FetchImportedModuleFromScriptWithAttributesCallback</c>),
+///     the engine routes every dynamic-import fetch through it: the second
+///     <c>import()</c> argument's validated "with" attributes arrive as an
+///     engine-created object (own enumerable string properties mapping names
+///     to string values); requests without attributes pass <c>undefined</c>.
+///     When this callback is not registered, requests without attributes fall
+///     back to <c>FetchImportedModuleFromScriptCallBack</c> unchanged, while
+///     requests carrying attributes fail to load.
+/// </remarks>
+/// <param name="dwReferencingSourceContext">The referencing script context that calls import()</param>
+/// <param name="specifier">The specifier provided to the import() call.</param>
+/// <param name="attributes">The import attributes object, or <c>undefined</c> when the request has none.</param>
+/// <param name="dependentModuleRecord">The ModuleRecord of the dependent module. If the module was requested
+///                                     before from other source, return the existing ModuleRecord, otherwise
+///                                     return a newly created ModuleRecord.</param>
+/// <returns>
+///     Returns <c>JsNoError</c> if the operation succeeded or an error code otherwise.
+/// </returns>
+typedef JsErrorCode(CHAKRA_CALLBACK * FetchImportedModuleFromScriptWithAttributesCallBack)(_In_ JsSourceContext dwReferencingSourceContext, _In_ JsValueRef specifier, _In_ JsValueRef attributes, _Outptr_result_maybenull_ JsModuleRecord* dependentModuleRecord);
 
 /// <summary>
 ///     User implemented callback to get notification when the module is ready.

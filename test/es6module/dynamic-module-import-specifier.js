@@ -86,8 +86,8 @@ var tests = [
                 let functionBody =
                     `
                     assert.throws(function () { eval("import()"); }, SyntaxError, "no argument");
-                    assert.throws(function () { eval("import(1, 2)"); }, SyntaxError, "more than one arguments");
-                    assert.throws(function () { eval("import('abc.js', 'def.js')"); }, SyntaxError, "more than one argument - case 2");
+                    assert.doesNotThrow(function () { eval("import(1, 2)"); }, "ES2025 import() accepts an options argument");
+                    assert.doesNotThrow(function () { eval("import('abc.js', 'def.js')"); }, "ES2025 import() accepts an options argument - case 2");
                     assert.throws(function () { eval("import(...['abc.js', 'def.js'])"); }, SyntaxError, "spread argument");
                     `;
 

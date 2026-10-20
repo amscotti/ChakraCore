@@ -184,9 +184,18 @@ namespace Js
         {
             if (*exceptionVar == nullptr)
             {
-                const WCHAR * sourceUrl = this->GetSpecifierSz();
+                if (this->errorObject != nullptr)
+                {
+                    // A failed dependency fetch (e.g. import attributes the host cannot serve) records the load error on
+                    // the module; surface it instead of synthesizing one from an empty compile error.
+                    *exceptionVar = this->errorObject;
+                }
+                else
+                {
+                    const WCHAR * sourceUrl = this->GetSpecifierSz();
 
-                *exceptionVar = JavascriptError::CreateFromCompileScriptException(scriptContext, &se, sourceUrl);
+                    *exceptionVar = JavascriptError::CreateFromCompileScriptException(scriptContext, &se, sourceUrl);
+                }
             }
             // Cleanup in case of error.
             this->ReleaseParserResourcesForHierarchy();
@@ -509,7 +518,8 @@ namespace Js
             this->starExportRecordList->Map([=](ModuleImportOrExportEntry exportEntry) {
                 Assert(exportEntry.moduleRequest != nullptr);
                 SourceTextModuleRecord* moduleRecord = nullptr;
-                if (this->childrenModuleSet->TryGetValue(exportEntry.moduleRequest->Psz(), &moduleRecord))
+                LPCOLESTR moduleRequestKey = SourceTextModuleRecord::GetModuleRequestKey(allocator, exportEntry.moduleRequest, exportEntry.attributes);
+                if (this->childrenModuleSet->TryGetValue(moduleRequestKey, &moduleRecord))
                 {
                     Assert(moduleRecord->WasParsed());
                     Assert(moduleRecord->WasDeclarationInitialized()); // we should be half way during initialization
@@ -552,7 +562,7 @@ namespace Js
             Js::PropertyId localNamePid = EnsurePropertyIdForIdentifier(importEntry.localName);
             if (localNamePid == localName)
             {
-                SourceTextModuleRecord* childModule = this->GetChildModuleRecord(importEntry.moduleRequest->Psz());
+                SourceTextModuleRecord* childModule = this->GetChildModuleRecord(importEntry.moduleRequest, importEntry.attributes);
                 Js::PropertyId importName = EnsurePropertyIdForIdentifier(importEntry.importName);
                 if (importName == Js::PropertyIds::star_)
                 {
@@ -650,7 +660,7 @@ namespace Js
                 }
 
                 PropertyId importNameId = EnsurePropertyIdForIdentifier(exportEntry.importName);
-                SourceTextModuleRecord* childModuleRecord = GetChildModuleRecord(exportEntry.moduleRequest->Psz());
+                SourceTextModuleRecord* childModuleRecord = GetChildModuleRecord(exportEntry.moduleRequest, exportEntry.attributes);
                 if (childModuleRecord == nullptr)
                 {
                     this->ReleaseParserResourcesForHierarchy();
@@ -699,7 +709,7 @@ namespace Js
             ModuleNameRecord* starResolution = nullptr;
             starExportRecordList->MapUntil([&](ModuleImportOrExportEntry starExportEntry) {
                 ModuleNameRecord* currentResolution = nullptr;
-                SourceTextModuleRecord* childModule = GetChildModuleRecord(starExportEntry.moduleRequest->Psz());
+                SourceTextModuleRecord* childModule = GetChildModuleRecord(starExportEntry.moduleRequest, starExportEntry.attributes);
                 if (childModule == nullptr)
                 {
                     this->ReleaseParserResourcesForHierarchy();
@@ -743,13 +753,13 @@ namespace Js
         return !ambiguousResolution;
     }
 
-    void SourceTextModuleRecord::SetParent(SourceTextModuleRecord* parentRecord, LPCOLESTR moduleName)
+    void SourceTextModuleRecord::SetParent(SourceTextModuleRecord* parentRecord, LPCOLESTR moduleRequestKey)
     {
         Assert(parentRecord != nullptr);
         parentRecord->EnsureChildModuleSet(GetScriptContext());
-        if (!parentRecord->childrenModuleSet->ContainsKey(moduleName))
+        if (!parentRecord->childrenModuleSet->ContainsKey(moduleRequestKey))
         {
-            parentRecord->childrenModuleSet->AddNew(moduleName, this);
+            parentRecord->childrenModuleSet->AddNew(moduleRequestKey, this);
 
             if (this->parentModuleList == nullptr)
             {
@@ -826,14 +836,29 @@ namespace Js
         {
             EnsureChildModuleSet(scriptContext);
 
-            requestedModuleList->MapUntil([&](IdentPtr specifier) {
+            requestedModuleList->MapUntil([&](ModuleRequestEntry requestEntry) {
+                IdentPtr specifier = requestEntry.specifier;
                 LPCOLESTR moduleName = specifier->Psz();
+                // Requests that differ in attributes are distinct requests and
+                // resolve to distinct child records.
+                LPCOLESTR moduleRequestKey = SourceTextModuleRecord::GetModuleRequestKey(scriptContext->GeneralAllocator(), specifier, requestEntry.attributes);
                 ModuleRecordBase* moduleRecordBase = nullptr;
                 SourceTextModuleRecord* moduleRecord = nullptr;
-                bool itemFound = childrenModuleSet->TryGetValue(moduleName, &moduleRecord);
+                bool itemFound = childrenModuleSet->TryGetValue(moduleRequestKey, &moduleRecord);
                 if (!itemFound)
                 {
-                    hr = scriptContext->GetHostScriptContext()->FetchImportedModule(this, moduleName, &moduleRecordBase);
+                    Var attributes = BuildModuleAttributesObject(requestEntry.attributes);
+                    hr = scriptContext->GetHostScriptContext()->FetchImportedModule(this, moduleName, attributes, &moduleRecordBase);
+                    if (hr == E_NOTIMPL)
+                    {
+                        // The request carries import attributes but the host
+                        // registered no attributes-capable callback.
+                        JavascriptError *error = scriptContext->GetLibrary()->CreateTypeError();
+                        JavascriptError::SetErrorMessageProperties(error, hr, _u("import attributes are not supported by the host"), scriptContext);
+                        this->errorObject = error;
+                        hr = E_FAIL;
+                        return true;
+                    }
                     if (FAILED(hr))
                     {
                         return true;
@@ -843,7 +868,7 @@ namespace Js
                     if (errorObject == nullptr)
                     {
                         OUTPUT_TRACE_DEBUGONLY(Js::ModulePhase, _u("\t>SetParent in (%s)\n"), moduleRecord->GetSpecifierSz());
-                        moduleRecord->SetParent(this, moduleName);
+                        moduleRecord->SetParent(this, moduleRequestKey);
                     }
                     else
                     {
@@ -1076,9 +1101,10 @@ namespace Js
             if (requestedModuleList != nullptr)
             {
                 requestedModuleList->Reverse();
-                requestedModuleList->Map([&](IdentPtr specifier) {
+                requestedModuleList->Map([&](ModuleRequestEntry requestEntry) {
                     SourceTextModuleRecord* childModuleRecord = nullptr;
-                    AssertOrFailFast(childrenModuleSet->TryGetValue(specifier->Psz(), &childModuleRecord));
+                    LPCOLESTR moduleRequestKey = SourceTextModuleRecord::GetModuleRequestKey(scriptContext->GeneralAllocator(), requestEntry.specifier, requestEntry.attributes);
+                    AssertOrFailFast(childrenModuleSet->TryGetValue(moduleRequestKey, &childModuleRecord));
 
                     childModuleRecord->ModuleEvaluation();
                     // if child module was evaluated before and threw need to re-throw now
@@ -1321,6 +1347,107 @@ namespace Js
         return childModuleRecord;
     }
 
+    SourceTextModuleRecord* SourceTextModuleRecord::GetChildModuleRecord(IdentPtr specifier, ModuleAttributeList* attributes) const
+    {
+        LPCOLESTR moduleRequestKey = SourceTextModuleRecord::GetModuleRequestKey(scriptContext->GeneralAllocator(), specifier, attributes);
+        return GetChildModuleRecord(moduleRequestKey);
+    }
+
+    LPCOLESTR SourceTextModuleRecord::GetModuleRequestKey(ArenaAllocator* allocator, IdentPtr specifier, ModuleAttributeList* attributes)
+    {
+        // Canonical request identity: the specifier followed by the sorted
+        // attribute key/value pairs. Components are joined with U+001F, with
+        // literal U+001F bytes doubled so the encoding is unambiguous for
+        // arbitrary string content. A missing WithClause is equivalent to an
+        // empty attribute list, so both produce the bare specifier key.
+        // The key is allocated from the given arena; callers pass the general
+        // allocator, whose lifetime covers the child-module map that retains
+        // insertion keys.
+        const char16 separator = 0x1F;
+        uint32 totalLength = specifier->Cch();
+        for (ModuleAttributeEntry* entry = (attributes != nullptr) ? attributes->head : nullptr;
+            entry != nullptr; entry = entry->next)
+        {
+            // Two components plus two separators per attribute; extra room
+            // for doubled separators is added below per component.
+            totalLength += 2 + entry->key->Cch() + entry->value->Cch();
+        }
+        // Account for separators already in `totalLength` above; now add
+        // room for doubled separators inside component text.
+        auto countSeparators = [](const char16* text, uint32 length) {
+            uint32 count = 0;
+            for (uint32 i = 0; i < length; i++)
+            {
+                if (text[i] == separator)
+                {
+                    count++;
+                }
+            }
+            return count;
+        };
+        totalLength += countSeparators(specifier->Psz(), specifier->Cch());
+        for (ModuleAttributeEntry* entry = (attributes != nullptr) ? attributes->head : nullptr;
+            entry != nullptr; entry = entry->next)
+        {
+            totalLength += countSeparators(entry->key->Psz(), entry->key->Cch());
+            totalLength += countSeparators(entry->value->Psz(), entry->value->Cch());
+        }
+
+        char16* key = AnewArray(allocator, char16, totalLength + 1);
+        char16* cursor = key;
+        auto appendComponent = [&](const char16* text, uint32 length) {
+            if (cursor != key)
+            {
+                *cursor++ = separator;
+            }
+            for (uint32 i = 0; i < length; i++)
+            {
+                *cursor++ = text[i];
+                if (text[i] == separator)
+                {
+                    *cursor++ = separator;
+                }
+            }
+        };
+        appendComponent(specifier->Psz(), specifier->Cch());
+        for (ModuleAttributeEntry* entry = (attributes != nullptr) ? attributes->head : nullptr;
+            entry != nullptr; entry = entry->next)
+        {
+            appendComponent(entry->key->Psz(), entry->key->Cch());
+            appendComponent(entry->value->Psz(), entry->value->Cch());
+        }
+        *cursor = 0;
+        Assert((uint32)(cursor - key) == totalLength);
+        return key;
+    }
+
+    Var SourceTextModuleRecord::BuildModuleAttributesObject(ModuleAttributeList* attributes)
+    {
+        if (attributes == nullptr || attributes->head == nullptr)
+        {
+            // No attributes: the caller takes the legacy host path (or the
+            // new callback with `undefined`, when the host registered it).
+            return nullptr;
+        }
+        ScriptContext* scriptContext = GetScriptContext();
+        JavascriptLibrary* library = scriptContext->GetLibrary();
+        // Ownership record: Recycler-owned plain object created for one
+        // synchronous host fetch. It is referenced from this frame's native
+        // stack (scanned) until the host returns; the host must JsAddRef any
+        // value it retains past return. Properties are plain data properties
+        // on a fresh ordinary object, so no user code runs during construction.
+        // OOM (JavascriptException) propagates like the other allocations on
+        // this path and is converted at the API boundary.
+        DynamicObject* attributesObject = library->CreateObject();
+        for (ModuleAttributeEntry* entry = attributes->head; entry != nullptr; entry = entry->next)
+        {
+            PropertyId propertyId = EnsurePropertyIdForIdentifier(entry->key);
+            JavascriptString* value = JavascriptString::NewCopySz(entry->value->Psz(), scriptContext);
+            JavascriptOperators::SetProperty(attributesObject, attributesObject, propertyId, value, scriptContext, PropertyOperation_None);
+        }
+        return attributesObject;
+    }
+
     void SourceTextModuleRecord::InitializeLocalImports()
     {
         if (importRecordList != nullptr)
@@ -1328,7 +1455,7 @@ namespace Js
             importRecordList->Map([&](ModuleImportOrExportEntry& importEntry) {
                 Js::PropertyId importName = EnsurePropertyIdForIdentifier(importEntry.importName);
 
-                SourceTextModuleRecord* childModule = this->GetChildModuleRecord(importEntry.moduleRequest->Psz());
+                SourceTextModuleRecord* childModule = this->GetChildModuleRecord(importEntry.moduleRequest, importEntry.attributes);
                 ModuleNameRecord* importRecord = nullptr;
                 // We don't need to initialize anything for * import.
                 if (importName != Js::PropertyIds::star_)
@@ -1459,7 +1586,7 @@ namespace Js
             indirectExportRecordList->Map([&](ModuleImportOrExportEntry exportEntry)
             {
                 PropertyId propertyId = EnsurePropertyIdForIdentifier(exportEntry.importName);
-                SourceTextModuleRecord* childModuleRecord = GetChildModuleRecord(exportEntry.moduleRequest->Psz());
+                SourceTextModuleRecord* childModuleRecord = GetChildModuleRecord(exportEntry.moduleRequest, exportEntry.attributes);
                 if (childModuleRecord == nullptr)
                 {
                     JavascriptError* errorObj = scriptContext->GetLibrary()->CreateReferenceError();

@@ -690,20 +690,24 @@ private:
     // Future recommendation : Consider consolidating Parser::CaptureState and Scanner::Capture together if we do CaptureState more often.
 
 public:
-    IdentPtrList* GetRequestedModulesList();
+    ModuleRequestList* GetRequestedModulesList();
     ModuleImportOrExportEntryList* GetModuleImportEntryList();
     ModuleImportOrExportEntryList* GetModuleLocalExportEntryList();
     ModuleImportOrExportEntryList* GetModuleIndirectExportEntryList();
     ModuleImportOrExportEntryList* GetModuleStarExportEntryList();
 
 protected:
-    IdentPtrList* EnsureRequestedModulesList();
+    ModuleRequestList* EnsureRequestedModulesList();
     ModuleImportOrExportEntryList* EnsureModuleImportEntryList();
     ModuleImportOrExportEntryList* EnsureModuleLocalExportEntryList();
     ModuleImportOrExportEntryList* EnsureModuleIndirectExportEntryList();
     ModuleImportOrExportEntryList* EnsureModuleStarExportEntryList();
 
-    void AddModuleSpecifier(IdentPtr moduleRequest);
+    void AddModuleSpecifier(IdentPtr moduleRequest, ModuleAttributeList* attributes);
+    static bool ModuleAttributesEqual(ModuleAttributeList* left, ModuleAttributeList* right);
+    static int CompareModuleAttributeKeys(IdentPtr left, IdentPtr right);
+    template<bool buildAST> ModuleAttributeList* ParseOptionalWithClause();
+    template<bool buildAST> ModuleAttributeList* ParseWithClause();
     ModuleImportOrExportEntry* AddModuleImportOrExportEntry(ModuleImportOrExportEntryList* importOrExportEntryList, IdentPtr importName, IdentPtr localName, IdentPtr exportName, IdentPtr moduleRequest, charcount_t offsetForError = 0);
     ModuleImportOrExportEntry* AddModuleImportOrExportEntry(ModuleImportOrExportEntryList* importOrExportEntryList, ModuleImportOrExportEntry* importOrExportEntry);
     void AddModuleLocalExportEntry(ParseNodePtr varDeclNode);
@@ -1059,7 +1063,7 @@ private:
     template<bool buildAST> ParseNodePtr ParseDefaultExportClause();
 
     template<bool buildAST> void ParseNamedImportOrExportClause(ModuleImportOrExportEntryList* importOrExportEntryList, bool isExportClause);
-    template<bool buildAST> IdentPtr ParseImportOrExportFromClause(bool throwIfNotFound);
+    template<bool buildAST> IdentPtr ParseImportOrExportFromClause(bool throwIfNotFound, ModuleAttributeList** attributes = nullptr);
 
     BOOL NodeIsIdent(ParseNodePtr pnode, IdentPtr pid);
     BOOL NodeIsEvalName(ParseNodePtr pnode);
