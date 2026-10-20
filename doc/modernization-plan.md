@@ -53,7 +53,7 @@ handling have been validated before its results are used as a completion gate.
 | B6 | Windows feasibility and rollout; later target extensions | Stable build contracts | Separate expansion |
 | Z1 | One useful mixed C++/Zig unit behind a tested C ABI | B3; B4 if the unit ships on Linux | Optional pilot |
 | C1 | Qualified ES2025 test policy and triaged failures | Stable Mac build at B3 | Recorded (CONDITIONAL) |
-| C2 | Bounded compatibility batches and partial releases | C1; B4 before JIT-wide enablement | In progress (S4/S5/S10/S11/S7-matchAll/S9 named-groups + d-flag + duplicate named groups + lookbehind + ES2025 modifiers; S1 class elements: public/private instance+static fields, private methods/accessors; S2 BigInt: operators/literals/asIntN-asUintN, collections, DataView, BigInt64Array; S8 resizable ArrayBuffer + TypedArray tracking + Float16; S13 symbol keys, WeakRef, FinalizationRegistry; S14 P1–P7 — all closed on Mac no-JIT; JIT claims gated on B4) |
+| C2 | Bounded compatibility batches and partial releases | C1; B4 before JIT-wide enablement | In progress (S4/S5/S10/S11/S7-matchAll/S9 named-groups + d-flag + duplicate named groups + lookbehind + ES2025 modifiers; S1 class elements complete: public/private instance+static fields, private methods/accessors incl. async/generator and statics, computed field names, `super` in field initializers, static blocks (integrated elements corpus 5,854/5,897; direct-eval/eval-super residuals remain); S2 BigInt: operators/literals/asIntN-asUintN, collections, DataView, BigInt64Array; S8 resizable ArrayBuffer + TypedArray tracking + Float16; S13 symbol keys, WeakRef, FinalizationRegistry; S14 P1–P7 — all closed on Mac no-JIT; JIT claims gated on B4) |
 | C3 | Larger runtime/object-model feature projects | C1 and their feature prerequisites | Separate projects |
 | C4 | Verified full ES2025 core-language result | Required C2/C3 work and qualified runner | Long-term objective |
 
@@ -589,9 +589,10 @@ Decision/rollback points:
   tracked until C4, optional ecosystem scope has separate gates.
 - [ ] C4: Published qualified ES2025 result on the claimed default configurations.
 
-**Latest integration checkpoint (2026-10-19):** main is clean at the
-**2012/0 test** and **2064/0 debug-static** (574/574 and
-547/547 steps).
+**Latest integration checkpoint (2026-10-20):** main is clean at the
+**2012/0 test** and **2064/0 debug-static** gates (re-verified after
+every merge in the two S1 waves below; counts are single-sourced in
+`tools/build/gate_counts.json`).
 Merged lanes: S1 public/private instance+static fields and private methods/accessors, S2 arithmetic + BigInt64Array/Uint64Array + collections/
 DataView, S8 resizable ArrayBuffer/transfer + TypedArray tracking, S13
 WeakRef + FinalizationRegistry, and S14 P1/P2/P3/P4/P5/P6/P7
@@ -613,11 +614,36 @@ WeakRef + FinalizationRegistry, and S14 P1/P2/P3/P4/P5/P6/P7
 [c2-s14-global-eval-declarations.md](c2-s14-global-eval-declarations.md),
 [c2-s14-assignment-reference.md](c2-s14-assignment-reference.md),
 [c2-s14-enumeration-order.md](c2-s14-enumeration-order.md),
-[c2-s14-labeled-break-finally.md](c2-s14-labeled-break-finally.md)). Integrated
-class corpus: **1,989/5,897**, **539 fail→pass / 0 pass→fail**. All active feature/triage worktrees are merged; next work items are S1 static blocks/private static methods/accessors and
-computed elements, S6 flag-on gaps, and the documented S8/S2/P-eval residuals. Tracked eval residuals: P4 body eval with
-non-simple parameters; P2 hidden outer lexical and JSC/Node delete difference. S3, S12, S6 default, B4 and C4 remain externally or
-gate blocked.
+[c2-s14-labeled-break-finally.md](c2-s14-labeled-break-finally.md)).
+Two further S1 waves then completed the class-elements surface on Mac
+no-JIT: private static methods/accessors and `super` in static field
+initializers, then computed field names + `super` in instance field
+initializers, async/generator private methods, and static
+initialization blocks
+([c2-s1-private-static-methods.md](c2-s1-private-static-methods.md),
+[c2-s1-super-static-init.md](c2-s1-super-static-init.md),
+[c2-s1-computed-instance-super.md](c2-s1-computed-instance-super.md),
+[c2-s1-private-async-gen.md](c2-s1-private-async-gen.md),
+[c2-s1-static-blocks.md](c2-s1-static-blocks.md); static blocks took a
+review loop-2 fix for defer-scan scope attribution, recorded in its
+receipt). Integrated class-elements corpus (statements + expressions
+`class/elements`, 5,897 scenarios, re-run 2026-10-20 on the merged
+binary, `out/test262-c2-s1-wave2`): **5,854/5,897 passed (43
+failed)**, **3,865 fail→pass / 0 pass→fail** vs the 2026-10-19
+integrated run (both S1 waves). The 43 residuals are 24 direct-eval
+private-visibility scenarios, 8 private-names-in-computed-keys, 4
+primitive-receiver private field get/put, 2 PrivateFieldSet
+evaluation-order, 1 non-extensible-object (strict), and 4
+post-ES2025 `accessor`-grammar scenarios. All active feature/triage
+worktrees are merged; next work items are the S1 tail residuals
+(direct-eval privates, computed-key private visibility, eval-super),
+the S12 import-attributes cluster, Float16Array (S8 remainder), S6
+flag-on gaps, and the documented S8/S2/P-eval residuals. Tracked eval
+residuals: P4 body eval with non-simple parameters; P2 hidden outer
+lexical and JSC/Node delete difference. S3 (Unicode data decision),
+S6 default (product/security decision), B4 and C4 remain decision- or
+gate-blocked; S12 needs its embedder host-contract decision
+([c1-triage.md](c1-triage.md) shortlist item S12).
 
 **C2 batch status:** S4, S5, all of S10 (the copy-by-change half and
 the Set-methods half), all of S11, S7, the five S9 sub-batches
@@ -776,8 +802,10 @@ S6 shows zero regressions under `-ESSharedArrayBuffer` but
 needs a product/security decision before any default, plus
 waitAsync/growable/non-shared-Atomics work; S2's flagged path no longer
 has a host-crash class but its arithmetic/typed-array completion still
-stays C3-large. The alternative next batch remains
-the S12 import-attributes cluster or a C3 slice.
+stays C3-large. With the S1 class-elements surface complete (2026-10-20
+checkpoint above), the next batch candidates are the S12
+import-attributes cluster (pending its host-contract decision),
+Float16Array (S8 remainder), or the S1 tail residuals.
 
 **Next platform gate:** B4 native execution. Provision a native x64 Linux
 runner via the preferred path to green in [b4-gate.md](b4-gate.md) §4(a),

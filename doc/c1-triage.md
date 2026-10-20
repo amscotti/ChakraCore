@@ -853,15 +853,20 @@ asserted the old non-conforming block `var`/`let` behavior were updated
 deliberately. Gates moved 1975/2027 → 1976/2028. No bytecode change; B4
 still owns JIT-configuration claims.)*
 
-## 6. C2 integration status (2026-10-19)
+## 6. C2 integration status (2026-10-20)
 
 | Batch | Status | Integrated evidence | Remaining |
 |---|---|---|---|
-| S1 public instance fields | Landed `bd0de1694` | class corpus 1,989/5,897, 539/0; 27 focused cases, normal + forced defer | private/static/computed fields, static blocks, `super.prop`/eval-super property, JIT |
-| S1 private instance fields | Landed `da0351e8e` | private subset 176/30, 160/0; es7 64/0 | private methods/accessors, static/private-static, computed, eval/optional-chain, JIT |
-| S1 private methods/accessors | Landed `30a81731c` | 202/20, 198/0; es7 68/0 | private statics/static blocks/computed, direct-eval, async/generator private methods, JIT |
-| S1 public static fields | Landed `041a9bb8f` | 75/75, 35/0; local 75/0 | private static/static blocks/computed/super.prop/JIT |
-| S1 private static fields | Landed `226e7e1b4` | 600/602, 571/0; local 2012/0 | static blocks/private static methods/computed, direct eval, JIT |
+| S1 public instance fields | Landed `bd0de1694` | class corpus 1,989/5,897, 539/0; 27 focused cases, normal + forced defer | eval-super property, JIT (private/static/computed fields, static blocks, `super.prop` closed by later S1 rows) |
+| S1 private instance fields | Landed `da0351e8e` | private subset 176/30, 160/0; es7 64/0 | direct-eval privates, JIT (methods/statics/computed closed by later S1 rows) |
+| S1 private methods/accessors | Landed `30a81731c` | 202/20, 198/0; es7 68/0 | direct-eval privates, JIT (statics/blocks/computed/async-gen closed by later S1 rows) |
+| S1 public static fields | Landed `041a9bb8f` | 75/75, 35/0; local 75/0 | JIT (private static/blocks/computed/super.prop closed by later S1 rows) |
+| S1 private static fields | Landed `226e7e1b4` | 600/602, 571/0; local 2012/0 | direct-eval privates, JIT (blocks/methods/computed closed by later S1 rows) |
+| S1 private static methods/accessors | Landed `197d381d7` (merge `c318fa42d`) | class delta 182 fixed / 0 new; es7 25/25 + 13/13; dual-review ACCEPT | direct-eval privates, JIT (async/gen + static blocks closed by later S1 rows) |
+| S1 `super` in static field initializers | Landed `920822ac0` (merge `0c01875b5`) | node-parity probes; committed tests green; dual-review ACCEPT | eval-super, JIT (instance-field super closed by computed row) |
+| S1 computed field names + instance-field `super` | Landed `894ba5394` (merge `fd893c83f`) | class-elements 1833/255 vs base 1699/389 (2,088 scenarios, lane-run), 67 files f→p / 0 p→f; dual-review ACCEPT | eval-super, private names in computed keys (8 scenarios), JIT |
+| S1 async/generator private methods | Landed `7cc057124` (merge `1caf23d67`) | scoped test262 272 f→p / 0 p→f (lane-run); dual-review ACCEPT | JIT |
+| S1 static blocks | Landed `9ba243adb` + fix `6ff088e19` (merge `02f99fc63`) | loop-2 dual-review ACCEPT after defer-scan scope fix; 69/69 node differentials ×3 modes | JIT; bare-`await`/nested-super defer residuals shared with field initializers |
 | S2 arithmetic/bitwise/shift | Landed `1c5d5b2fc` | scoped 444/2, 80/0; broad 1,027/1,027; Node differentials | BigInt64Array/BigUint64Array, Map/Set identity, literal property names, giant ToString, JIT |
 | S2 BigInt64Array | Landed `f5f0efef5` | 944/0; 958/1016; ctors 24/24, 166/0; internals 163/0 | DataView BigInt, internals, Map/Set identity, SAB, JIT |
 | S2 BigInt collections/DataView | Landed `10154e3f5` | 102/0; 140/4; broad 104/0; class names/DataView length | immutable buffers, SAB, static fields, JIT |
@@ -876,9 +881,18 @@ still owns JIT-configuration claims.)*
 | S14 P2 | Landed `526931bc5` | 192/0; 157/0; controls preserved | hidden outer lexical; JSC/Node delete difference; JIT |
 | S14 P5 | Landed `8b5f28c06` | 50/50; broad 50/0; wider 65/0 non-import | eval/function-expression; proxy descriptor; JIT |
 
-Full gates at this checkpoint: **1997/0 test**, **2049/0 debug-static**.
-All active feature/triage worktrees are merged. Next work items are S1 static blocks/private static methods/accessors and
-computed elements, S6 flag-on gaps, and the documented S8/S2/P-eval
+Full gates at this checkpoint: **2012/0 test**, **2064/0 debug-static**
+(single-sourced in `tools/build/gate_counts.json`). Integrated
+class-elements corpus re-run 2026-10-20 (`out/test262-c2-s1-wave2`):
+**5,854/5,897 passed (43 failed)**, 3,865 f→p / 0 p→f vs the
+2026-10-19 integrated run; residuals are 24 direct-eval
+private-visibility, 8 private-names-in-computed-keys, 4
+primitive-receiver get/put, 2 PrivateFieldSet order, 1 non-extensible
+(strict), 4 post-ES2025 `accessor` grammar. All active feature/triage
+worktrees are merged. Next work items are the S1 tail residuals
+(direct-eval privates, computed-key private visibility, eval-super),
+the S12 import-attributes cluster (host-contract decision pending),
+Float16Array, S6 flag-on gaps, and the documented S8/S2/P-eval
 residuals. P5 residual: eval/function-expression
 reference paths and pre-existing proxy descriptor duplication.
 
