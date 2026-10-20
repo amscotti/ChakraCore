@@ -708,7 +708,7 @@ protected:
     static int CompareModuleAttributeKeys(IdentPtr left, IdentPtr right);
     template<bool buildAST> ModuleAttributeList* ParseOptionalWithClause();
     template<bool buildAST> ModuleAttributeList* ParseWithClause();
-    ModuleImportOrExportEntry* AddModuleImportOrExportEntry(ModuleImportOrExportEntryList* importOrExportEntryList, IdentPtr importName, IdentPtr localName, IdentPtr exportName, IdentPtr moduleRequest, charcount_t offsetForError = 0);
+    ModuleImportOrExportEntry* AddModuleImportOrExportEntry(ModuleImportOrExportEntryList* importOrExportEntryList, IdentPtr importName, IdentPtr localName, IdentPtr exportName, IdentPtr moduleRequest, charcount_t offsetForError = 0, ModuleAttributeList* attributes = nullptr);
     ModuleImportOrExportEntry* AddModuleImportOrExportEntry(ModuleImportOrExportEntryList* importOrExportEntryList, ModuleImportOrExportEntry* importOrExportEntry);
     void AddModuleLocalExportEntry(ParseNodePtr varDeclNode);
     void CheckForDuplicateExportEntry(IdentPtr exportName);

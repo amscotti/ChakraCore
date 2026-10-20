@@ -10981,8 +10981,15 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
                 return false;
             }
             JavascriptArray* keys = JavascriptOperators::GetOwnPropertyKeys(withObj, scriptContext);
-            DynamicObject* attributesObject = scriptContext->GetLibrary()->CreateObject();
             uint32 length = keys->GetLength();
+            // Stage validated entries in a temp object so each fetched value
+            // stays rooted (Recycler-owned) while later getters still run
+            // user code. Getters therefore run in enumeration order, exactly
+            // as before; only the final object's key order is normalized.
+            // The key ids are plain ints in a leaf array, needing no tracing.
+            DynamicObject* stagedObject = scriptContext->GetLibrary()->CreateObject();
+            PropertyId* keyIds = length > 0 ? RecyclerNewArrayLeaf(scriptContext->GetRecycler(), PropertyId, length) : nullptr;
+            uint32 count = 0;
             for (uint32 i = 0; i < length; i++)
             {
                 Var key = keys->DirectGetItem(i);
@@ -11008,7 +11015,60 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
                     return false;
                 }
                 // Fresh ordinary object: no setters can run here.
-                JavascriptOperators::SetProperty(attributesObject, attributesObject, keyId, value, scriptContext, PropertyOperation_None);
+                JavascriptOperators::SetProperty(stagedObject, stagedObject, keyId, value, scriptContext, PropertyOperation_None);
+                keyIds[count++] = keyId;
+            }
+            if (count == 0)
+            {
+                // An empty "with" is the same request as no attributes (the
+                // static path maps `with {}` to undefined), so pass nullptr
+                // and take the legacy host path.
+                *attributes = nullptr;
+                return true;
+            }
+            // Sort by UTF-16 code-unit order to honor the "sorted key order"
+            // contract, matching the static path (sorted at parse).
+            // Insertion sort: attribute lists are tiny.
+            auto compareKeyIds = [scriptContext](PropertyId left, PropertyId right) -> int {
+                const PropertyRecord* leftName = scriptContext->GetPropertyName(left);
+                const PropertyRecord* rightName = scriptContext->GetPropertyName(right);
+                Assert(leftName != nullptr && rightName != nullptr);
+                uint32 leftLength = leftName->GetLength();
+                uint32 rightLength = rightName->GetLength();
+                uint32 minLength = leftLength < rightLength ? leftLength : rightLength;
+                const char16* leftBuffer = leftName->GetBuffer();
+                const char16* rightBuffer = rightName->GetBuffer();
+                for (uint32 index = 0; index < minLength; index++)
+                {
+                    if (leftBuffer[index] != rightBuffer[index])
+                    {
+                        return leftBuffer[index] < rightBuffer[index] ? -1 : 1;
+                    }
+                }
+                if (leftLength != rightLength)
+                {
+                    return leftLength < rightLength ? -1 : 1;
+                }
+                return 0;
+            };
+            for (uint32 i = 1; i < count; i++)
+            {
+                PropertyId key = keyIds[i];
+                uint32 j = i;
+                while (j > 0 && compareKeyIds(key, keyIds[j - 1]) < 0)
+                {
+                    keyIds[j] = keyIds[j - 1];
+                    j--;
+                }
+                keyIds[j] = key;
+            }
+            DynamicObject* attributesObject = scriptContext->GetLibrary()->CreateObject();
+            for (uint32 i = 0; i < count; i++)
+            {
+                // Plain data properties on a fresh ordinary object: no user
+                // code runs here.
+                Var value = JavascriptOperators::GetProperty(stagedObject, keyIds[i], scriptContext);
+                JavascriptOperators::SetProperty(attributesObject, attributesObject, keyIds[i], value, scriptContext, PropertyOperation_None);
             }
             *attributes = attributesObject;
             return true;

@@ -2215,7 +2215,9 @@ static JsErrorCode ReadModuleAttributes(JsValueRef attributes, bool* hasAttribut
     auto escape = [](const char* text, std::string* out) {
         for (const char* p = text; *p != '\0'; p++)
         {
-            if (*p == '\\' || *p == '\n' || *p == '\x1e')
+            // '=' is the key/value delimiter, so it must be escaped too:
+            // otherwise {"a=b":"c"} and {a:"b=c"} serialize identically.
+            if (*p == '\\' || *p == '\n' || *p == '\x1e' || *p == '=')
             {
                 out->push_back('\\');
             }

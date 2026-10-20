@@ -467,6 +467,79 @@ var tests = [
             testModuleScript(jsonBody, "Dynamic import of a JSON module fulfills with the parsed default export", false, true);
         }
     },
+    {
+        name: "Dynamic import attribute identity",
+        body: function () {
+            // '=' in attribute keys/values is escaped in the host request
+            // key, so {"a=b":"c"} and {a:"b=c"} fetch distinct records.
+            let escapeBody =
+                `testDynamicImport(
+                    ()=>{ return Promise.all([
+                        import(\'importattrs-counter.js\', { with: { "a=b": "c" } }),
+                        import(\'importattrs-counter.js\', { with: { a: "b=c" } })
+                    ]); },
+                    (v)=>{
+                        assert.isFalse(v[0] === v[1], \'attributes differing only around = must yield distinct records\');
+                        var n0 = v[0].get(); var m0 = v[1].get();
+                        v[0].inc();
+                        assert.areEqual(n0 + 1, v[0].get(), \'state advances on its own record\');
+                        assert.areEqual(m0, v[1].get(), \'the other record is unaffected\');
+                    },
+                    (err)=>{ assert.fail(\'Expected fulfillment: \' + (err && err.message)); }, _asyncEnter, _asyncExit
+                )`;
+            testScript(escapeBody, "Attributes differing around '=' fetch distinct module records", false, true);
+            testModuleScript(escapeBody, "Attributes differing around '=' fetch distinct module records", false, true);
+            // Key order is insignificant: dynamic keys are sorted like the
+            // static path, so both spellings share one record and one state.
+            let orderBody =
+                `testDynamicImport(
+                    ()=>{ return Promise.all([
+                        import(\'importattrs-counter.js\', { with: { extra: "y", note: "z" } }),
+                        import(\'importattrs-counter.js\', { with: { note: "z", extra: "y" } })
+                    ]); },
+                    (v)=>{
+                        assert.isTrue(v[0] === v[1], \'same attribute set in different key order must yield the same record\');
+                        var n = v[0].get();
+                        v[1].inc();
+                        assert.areEqual(n + 1, v[0].get(), \'state is shared across key orders\');
+                    },
+                    (err)=>{ assert.fail(\'Expected fulfillment: \' + (err && err.message)); }, _asyncEnter, _asyncExit
+                )`;
+            testScript(orderBody, "Same attribute set in different key order shares one record", false, true);
+            testModuleScript(orderBody, "Same attribute set in different key order shares one record", false, true);
+            // A static import lists its keys in one order; a dynamic import
+            // in the opposite order must resolve to the same record (the
+            // re-exported function objects are identical).
+            let staticBody =
+                `testDynamicImport(
+                    ()=>{ return Promise.all([
+                        import(\'importattrs-counter.js\', { with: { note: "z", extra: "y" } }),
+                        import(\'importattrs-static.js\')
+                    ]); },
+                    (v)=>{
+                        assert.isTrue(v[0].inc === v[1].inc, \'static and dynamic spellings of one attribute set share the record\');
+                        assert.isTrue(v[0].get === v[1].get, \'static and dynamic spellings of one attribute set share the record\');
+                    },
+                    (err)=>{ assert.fail(\'Expected fulfillment: \' + (err && err.message)); }, _asyncEnter, _asyncExit
+                )`;
+            testScript(staticBody, "Static and dynamic spellings of one attribute set share one record", false, true);
+            testModuleScript(staticBody, "Static and dynamic spellings of one attribute set share one record", false, true);
+            // An empty "with" is the same request as no attributes.
+            let emptyBody =
+                `testDynamicImport(
+                    ()=>{ return Promise.all([
+                        import(\'importattrs-counter.js\'),
+                        import(\'importattrs-counter.js\', { with: {} })
+                    ]); },
+                    (v)=>{
+                        assert.isTrue(v[0] === v[1], \'empty with-object is the same request as no attributes\');
+                    },
+                    (err)=>{ assert.fail(\'Expected fulfillment: \' + (err && err.message)); }, _asyncEnter, _asyncExit
+                )`;
+            testScript(emptyBody, "Empty with-object is the same request as no attributes", false, true);
+            testModuleScript(emptyBody, "Empty with-object is the same request as no attributes", false, true);
+        }
+    },
 ];
 
 testRunner.runTests(tests, { verbose: WScript.Arguments[0] != "summary" });

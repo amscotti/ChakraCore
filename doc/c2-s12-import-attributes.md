@@ -305,3 +305,59 @@ CRLF lines are not flagged by `git diff --check` (now clean).
   `rlexe.xml` entry — not a runnable test).
 - `.gitattributes`: `test/es6module/module-syntax.js whitespace=cr-at-eol`.
 - `tools/build/gate_counts.json`: untouched (2012/2064 hold).
+
+## Fix round (loop-1 review defects D1-D3)
+
+All three loop-1 defects reproduced on the lane binary before fixing
+(D1: debug-static assertion at `SourceTextModuleRecord.cpp:542` /
+release SIGSEGV while throwing; D2: `SHARED-RECORD`; D3:
+`SWAPPED-ORDER: DIFFERENT-RECORDS`); each new regression test below
+was also run against the pre-fix binary and fails there.
+
+- D1 parser (`lib/Parser/Parse.cpp`, `lib/Parser/Parse.h`): star
+  export entries (`export *` / `export * as ns ... with {...}`)
+  assigned `attributes` through the pointer returned by the by-value
+  `AddModuleImportOrExportEntry` overload, but the list stores a copy
+  (`SList::Prepend` copies the struct), so the stored entry kept
+  `nullptr` and resolution missed. Fixed by threading `attributes`
+  through a new defaulted parameter set before the copy; the
+  post-hoc assignment is gone. Named re-exports and imports already
+  attached attributes before the copy and are unchanged.
+- D2 host (`bin/ch/WScriptJsrt.cpp`, `ReadModuleAttributes`): the
+  escape set missed `=`, so `{"a=b":"c"}` and `{a:"b=c"}`
+  canonicalized identically. `=` is now backslash-escaped alongside
+  the entry separator, backslash, and newline. No existing key
+  changes (no prior corpus key contains those bytes unescaped).
+- D3 engine (`lib/Runtime/Language/JavascriptOperators.cpp`,
+  `TryGetImportAttributes`): dynamic keys are now inserted into the
+  attributes object in sorted UTF-16 code-unit order (insertion sort
+  over a leaf `PropertyId` array) to honor the `ChakraCore.h`
+  "sorted key order" contract and match the parse-time-sorted static
+  path. Getters still run once in enumeration order (values staged
+  in a temp Recycler object first, so later getters cannot collect
+  buffered values); an empty `with` now maps to `nullptr` like the
+  static `with {}` (same request as no attributes). Also corrected
+  the stale `BuildModuleAttributesObject` header comment (returns
+  `nullptr`, not "always an object", when there are no attributes).
+- Regression tests (existing files only; scenario counts unchanged):
+  `module-syntax.js` gains attributed `export *` + consumer shapes
+  (plain star, bare consumer, named re-export);
+  `export_namespace_as.js` gains `export * as ns ... with` consumer
+  shapes; `dynamic-module-functionality.js` gains a "Dynamic import
+  attribute identity" case (`=`-escape split, order-insensitivity,
+  static/dynamic agreement, empty-`with` equivalence). New unlisted
+  fixtures `importattrs-counter/star/named/static/star-as.js` (not in
+  `rlexe.xml`, so no new scenarios).
+- Gates: `mise x -- zig build check` green incl. `Total: passed
+  2012, failed 0`; `check-regression -Dprofile=debug-static`
+  `Total: passed 2064, failed 0`; `git diff --check` clean;
+  focused suites pass in normal / `-forcedeferparse` /
+  `-nodeferparse` on both binaries. test262
+  `import/** + module-code/**`: 565/172 with per-scenario results
+  identical to the lane run (0 pass-to-fail, 0 fail-to-pass);
+  `dynamic-import/import-attributes/**` holds at 17/27 (remaining
+  failures are the pre-existing host CWD-relative fixture
+  URIError). Full debug-static `check` metadata leg reports
+  `libChakraCoreStatic.a: 526 members, require 524`; reproduced at
+  the unmodified lane tip (stash + rebuild), so it predates this fix
+  round and is unrelated (no translation unit added or removed).

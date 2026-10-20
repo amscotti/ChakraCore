@@ -3231,7 +3231,7 @@ ModuleImportOrExportEntry* Parser::AddModuleImportOrExportEntry(ModuleImportOrEx
     return importOrExportEntry;
 }
 
-ModuleImportOrExportEntry* Parser::AddModuleImportOrExportEntry(ModuleImportOrExportEntryList* importOrExportEntryList, IdentPtr importName, IdentPtr localName, IdentPtr exportName, IdentPtr moduleRequest, charcount_t offsetForError)
+ModuleImportOrExportEntry* Parser::AddModuleImportOrExportEntry(ModuleImportOrExportEntryList* importOrExportEntryList, IdentPtr importName, IdentPtr localName, IdentPtr exportName, IdentPtr moduleRequest, charcount_t offsetForError, ModuleAttributeList* attributes)
 {
     ModuleImportOrExportEntry* importOrExportEntry = Anew(&m_nodeAllocator, ModuleImportOrExportEntry);
 
@@ -3241,7 +3241,10 @@ ModuleImportOrExportEntry* Parser::AddModuleImportOrExportEntry(ModuleImportOrEx
     importOrExportEntry->moduleRequest = moduleRequest;
     importOrExportEntry->pidRefStack = offsetForError == 0 ? nullptr : PushPidRef(localName);
     importOrExportEntry->offset = offsetForError;
-    importOrExportEntry->attributes = nullptr;
+    // The list stores a by-value copy (SList::Prepend copies the struct), so
+    // attributes must be attached here, before the copy. Assigning through
+    // the returned pointer afterwards would only mutate the orphan temp.
+    importOrExportEntry->attributes = attributes;
 
     return AddModuleImportOrExportEntry(importOrExportEntryList, importOrExportEntry);
 }
@@ -3878,17 +3881,15 @@ ParseNodePtr Parser::ParseExportDeclaration(bool *needTerminator)
 
             AddModuleSpecifier(moduleIdentifier, attributes);
 
-            ModuleImportOrExportEntry* exportEntry = nullptr;
             if (!exportName)
             {
-                exportEntry = AddModuleImportOrExportEntry(EnsureModuleStarExportEntryList(), wellKnownPropertyPids._star, nullptr, nullptr, moduleIdentifier);
+                AddModuleImportOrExportEntry(EnsureModuleStarExportEntryList(), wellKnownPropertyPids._star, nullptr, nullptr, moduleIdentifier, 0, attributes);
             }
             else
             {
                 CheckForDuplicateExportEntry(exportName);
-                exportEntry = AddModuleImportOrExportEntry(EnsureModuleIndirectExportEntryList(), wellKnownPropertyPids._star, nullptr, exportName, moduleIdentifier);
+                AddModuleImportOrExportEntry(EnsureModuleIndirectExportEntryList(), wellKnownPropertyPids._star, nullptr, exportName, moduleIdentifier, 0, attributes);
             }
-            exportEntry->attributes = attributes;
         }
 
         if (needTerminator != nullptr)

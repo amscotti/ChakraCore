@@ -138,8 +138,9 @@ namespace Js
         static LPCOLESTR GetModuleRequestKey(ArenaAllocator* allocator, IdentPtr specifier, ModuleAttributeList* attributes);
 
         // Builds the engine-created attributes object (string -> string,
-        // keys in sorted order) handed to the host fetch callback. Always
-        // returns an object, even when there are no attributes.
+        // keys in sorted order) handed to the host fetch callback. Returns
+        // nullptr when there are no attributes, which the caller maps to
+        // `undefined` (or the legacy host path).
         Var BuildModuleAttributesObject(ModuleAttributeList* attributes);
         Utf8SourceInfo* GetSourceInfo() { return this->pSourceInfo; }
         static Var ResolveOrRejectDynamicImportPromise(bool isResolve, Var value, ScriptContext *scriptContext, SourceTextModuleRecord *mr = nullptr, bool useReturn = true);
