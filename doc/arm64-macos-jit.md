@@ -118,8 +118,18 @@ inconsistent IR. That fixed the debugger cluster and reduced the suite from
 The remaining non-asm failures are separate newer-baseline coverage gaps; the
 JIT profile is not yet a full-language supported profile:
 
-- `Basics/With2.js` passes with `-off:DynamicProfile`, pointing at the
-  profiled property-store/array helper path rather than the core JIT.
+- **`with`/`eval` profiled-store owner cluster (open).** `Basics/With2.js`
+  and the minimal `var o={}; with(o){ nested(o.x=function(){}); }` shape pass
+  with `-off:DynamicProfile` or `-nonative`, but fail under both JIT tiers.
+  The profiled `StFld` helper receives a `ThreadContext*` as `instance`
+  instead of the captured `o` object; this is a JIT property-owner/environment
+  lowering bug, not a stale cache or the fixed `ToVar` path. Two attempted
+  fallbacks were rejected: aborting codegen for the whole function fixed the
+  representative case but regressed 19 other `with`/`eval` tests, and
+  lowering every `ProfiledStFld` in a `with` function through normal `StFld`
+  fixed the representative case but caused the same 19 regressions. The safe
+  fix must preserve the with-specific owner/scope path while reloading the
+  correct captured object.
 - `es7/class-private-fields.js` passes with both JIT tiers disabled, as do
   several other new feature tests (`bigint`, class fields/private methods,
   resizable typed arrays); the old backend does not implement those bytecode
