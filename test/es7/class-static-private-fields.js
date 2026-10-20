@@ -4,8 +4,10 @@
 // Licensed under the MIT license. See LICENSE.txt in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 // C2-S1: private static class fields (`static #x;`, `static #x = expr;`).
-// Private static methods/accessors, static blocks, computed static names and
-// decorators remain out of scope (doc/c2-s1-static-private-fields.md).
+// Private static methods/accessors are covered in class-private-methods.js
+// (doc/c2-s1-private-static-methods.md). Static blocks, computed static
+// names and decorators remain out of scope
+// (doc/c2-s1-static-private-fields.md).
 
 WScript.LoadScriptFile("..\\UnitTestFramework\\UnitTestFramework.js");
 
@@ -334,12 +336,14 @@ const tests = [
                 eval("class C { static #x = this.#y; static #y = 1; }");
             }, TypeError);
 
-            // Private static methods/accessors and static blocks remain out of
-            // scope and are reported as SyntaxError.
-            assert.throws(function () { eval("class C { static #m() {} }"); }, SyntaxError);
+            // Private static methods/accessors are supported (see
+            // class-private-methods.js); static blocks, computed names and
+            // async/generator private variants remain SyntaxError.
+            assert.doesNotThrow(function () { eval("class C { static #m() {} }"); });
+            assert.doesNotThrow(function () { eval("class C { static get #p() { return 1; } }"); });
+            assert.doesNotThrow(function () { eval("class C { static set #p(v) {} }"); });
             assert.throws(function () { eval("class C { static * #g() {} }"); }, SyntaxError);
-            assert.throws(function () { eval("class C { static get #p() { return 1; } }"); }, SyntaxError);
-            assert.throws(function () { eval("class C { static set #p(v) {} }"); }, SyntaxError);
+            assert.throws(function () { eval("class C { static async #m() {} }"); }, SyntaxError);
             assert.throws(function () { eval("class C { static {} }"); }, SyntaxError);
             assert.throws(function () { eval("class C { static ['computed'] = 1; }"); }, SyntaxError);
 
@@ -359,6 +363,34 @@ const tests = [
             assert.areEqual("#field", C.accessPrivateField().name);
             assert.areEqual("field", C.field.name);
             assert.isFalse(Object.prototype.hasOwnProperty.call(C, "#field"));
+        }
+    },
+    {
+        name: "static field initializers run after static private methods are installed",
+        body() {
+            // A field declared before the method still observes it, and a
+            // field declared after the method may call it: brands install
+            // during member evaluation, before any static initializer runs.
+            class C {
+                static early = C.late(1);
+                static #m() { return 40; }
+                static late(x) { return this.#m() + x; }
+                static #n = 2;
+                static useBoth() { return this.#m() + this.#n; }
+            }
+            assert.areEqual(41, C.early);
+            assert.areEqual(41, C.late(1));
+            assert.areEqual(42, C.useBoth());
+
+            // Methods see fields initialized before them in textual order.
+            var log = [];
+            class D {
+                static #a = (log.push("a"), 1);
+                static #m() { return log.push("m"), this.#a + 1; }
+                static #b = (log.push("b"), this.#m() + 1);
+                static read() { return [this.#a, this.#b, log.join(",")]; }
+            }
+            assert.areEqual("1|3|a,b,m", D.read().join("|"));
         }
     }
 ];

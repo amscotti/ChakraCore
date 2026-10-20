@@ -101,6 +101,10 @@ struct PrivateNameEntry
     bool hasGetter;
     bool hasSetter;
     bool methodInitAdded;
+    // True when the declaring element is static. A private name may not mix
+    // static and instance declarations (duplicate-name early error), so this
+    // also routes the brand init to the instance or the static init list.
+    bool isStatic;
     PrivateNameEntry * next;
 };
 
@@ -9088,6 +9092,7 @@ PrivateNameEntry * Parser::CreateClassPrivateNameEntry(IdentPtr name, bool build
     entry->hasGetter = false;
     entry->hasSetter = false;
     entry->methodInitAdded = false;
+    entry->isStatic = false;
     entry->next = m_privateNameScope->names;
     m_privateNameScope->names = entry;
 
@@ -9137,8 +9142,9 @@ PrivateNameEntry * Parser::DeclareClassPrivateName(IdentPtr name, bool buildAST)
 
 // A get/set pair shares one private name binding (and therefore one brand).
 // Reuse the existing entry only when the other half of the pair was already
-// declared; any other duplicate spelling is an early error.
-PrivateNameEntry * Parser::DeclareClassPrivateAccessor(IdentPtr name, bool isGetter, bool buildAST)
+// declared with the same staticness; any other duplicate spelling (including
+// a static/instance mix) is an early error.
+PrivateNameEntry * Parser::DeclareClassPrivateAccessor(IdentPtr name, bool isGetter, bool isStatic, bool buildAST)
 {
     Assert(name != nullptr);
     Assert(m_privateNameScope != nullptr);
@@ -9150,6 +9156,7 @@ PrivateNameEntry * Parser::DeclareClassPrivateAccessor(IdentPtr name, bool isGet
             continue;
         }
         if (existing->kind != PrivateNameKind::Accessor ||
+            existing->isStatic != isStatic ||
             (isGetter ? existing->hasGetter : existing->hasSetter))
         {
             Error(ERRsyntax);
@@ -9159,6 +9166,7 @@ PrivateNameEntry * Parser::DeclareClassPrivateAccessor(IdentPtr name, bool isGet
 
     PrivateNameEntry * entry = CreateClassPrivateNameEntry(name, buildAST);
     entry->kind = PrivateNameKind::Accessor;
+    entry->isStatic = isStatic;
     return entry;
 }
 
@@ -9532,6 +9540,14 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
     ParseNodePtr *lastInstanceFieldNodeRef = nullptr;
     ParseNodePtr pnodePrivateMethods = nullptr;
     ParseNodePtr *lastPrivateMethodNodeRef = nullptr;
+    // S1 static private methods/accessors: brand references installed on the
+    // constructor during class evaluation. Kept separate from the instance
+    // list so instance construction never brands static names (and vice
+    // versa). Each entry is exclusively static or instance (duplicates are
+    // early errors), so the shared methodInitAdded flag dedupes get/set pairs
+    // on both lists.
+    ParseNodePtr pnodeStaticPrivateMethods = nullptr;
+    ParseNodePtr *lastStaticPrivateMethodNodeRef = nullptr;
 
     auto AddPrivateMethodInit = [&](PrivateNameEntry * entry)
     {
@@ -9545,7 +9561,14 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
         pnodeBrand->SetIsPrivateName();
         pnodeBrand->sym = entry->sym;
         pnodeBrand->SetPrivateKind(entry->kind);
-        AddToNodeList(&pnodePrivateMethods, &lastPrivateMethodNodeRef, pnodeBrand);
+        if (entry->isStatic)
+        {
+            AddToNodeList(&pnodeStaticPrivateMethods, &lastStaticPrivateMethodNodeRef, pnodeBrand);
+        }
+        else
+        {
+            AddToNodeList(&pnodePrivateMethods, &lastPrivateMethodNodeRef, pnodeBrand);
+        }
         entry->methodInitAdded = true;
     };
 
@@ -9736,6 +9759,7 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
             this->GetScanner()->Capture(&privateNameStart);
             privateNameStartCaptured = true;
             privateEntry = DeclareClassPrivateName(privateSource, buildAST);
+            privateEntry->isStatic = isStatic;
             if (buildAST)
             {
                 PidRefStack * hiddenRef = Anew(&m_nodeAllocator, PidRefStack);
@@ -9849,16 +9873,16 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
             }
             else
             {
-                // Static private methods/accessors are outside this slice.
-                // Reject explicitly instead of treating the member as an
-                // instance private method.
-                if (isStatic)
-                {
-                    Error(ERRsyntax);
-                }
-                // Private instance method. The method grammar is otherwise the
-                // public-member grammar; rewind to the private-name token so
-                // ParseFncDecl consumes it as the (suppressed) function name.
+                // Private method (static or instance). Static and instance
+                // methods share the method grammar and the brand machinery;
+                // entry->isStatic (set at declaration) routes the brand init
+                // to the static or the instance init list. Async (`async #m`)
+                // and generator (`*#m`) spellings never reach this path: the
+                // async/star modifiers are only recognized before public
+                // names, so those forms still fail as syntax errors below.
+                // The method grammar is otherwise the public-member grammar;
+                // rewind to the private-name token so ParseFncDecl consumes
+                // it as the (suppressed) function name.
                 Assert(privateNameStartCaptured);
                 privateEntry->kind = PrivateNameKind::Method;
                 if (buildAST)
@@ -10136,11 +10160,6 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
                 charcount_t privateIchMin = this->GetScanner()->IchMinTok();
                 charcount_t privateIchLim = this->GetScanner()->IchLimTok();
                 IdentPtr accessorSource = m_token.GetIdentifier(this->GetHashTbl());
-                if (isStatic)
-                {
-                    // Static private accessors are outside this slice.
-                    Error(ERRsyntax);
-                }
                 if (isAsyncMethod || isGenerator)
                 {
                     // Accessors cannot be async or generators: `async get`,
@@ -10154,7 +10173,7 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
                     Error(ERRsyntax);
                 }
 
-                privateEntry = DeclareClassPrivateAccessor(accessorSource, isGetter, buildAST);
+                privateEntry = DeclareClassPrivateAccessor(accessorSource, isGetter, isStatic, buildAST);
                 privateEntry->kind = PrivateNameKind::Accessor;
                 if (isGetter)
                 {
@@ -10184,7 +10203,7 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
                     fncDeclFlags | (isGetter ? fFncNoArg : fFncOneArg),
                     SuperRestrictionState::PropertyAllowed, nullptr, /* needsPIDOnRCurlyScan */ true);
 
-                pnodeFnc->SetIsStaticMember(false);
+                pnodeFnc->SetIsStaticMember(isStatic);
                 pnodeFnc->SetHasHomeObj();
 
                 if (buildAST)
@@ -10251,7 +10270,11 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
             }
             else
             {
-                if (isStatic && (memberPid == wellKnownPropertyPids.prototype))
+                // The static "prototype" early error applies to PropName
+                // spellings only. A private identifier is never a PropName
+                // (instance `#prototype(){}` already parses), so private
+                // members are exempt.
+                if (isStatic && !isPrivateField && (memberPid == wellKnownPropertyPids.prototype))
                 {
                     Error(ERRsyntax);
                 }
@@ -10432,6 +10455,7 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
         pnodeClass->pnodeExtends = pnodeExtends;
         pnodeClass->pnodeMembers = pnodeMembers;
         pnodeClass->pnodePrivateNames = classPrivateScope != nullptr ? classPrivateScope->pnodeDecls : nullptr;
+        pnodeClass->pnodeClassStaticPrivateMethods = pnodeStaticPrivateMethods;
         pnodeClass->isDefaultModuleExport = false;
     }
     FinishParseBlock(pnodeBlock);

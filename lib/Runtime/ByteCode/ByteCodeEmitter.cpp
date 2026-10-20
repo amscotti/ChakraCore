@@ -12287,7 +12287,13 @@ void EmitClass(ParseNodeClass * pnodeClass, ByteCodeGenerator * byteCodeGenerato
             ParseNodeFnc * pnodeMemberFnc = pnodeMember->AsParseNodeBin()->pnode2->AsParseNodeFnc();
             if (IsPrivateMemberNode(pnodeMember))
             {
-                EmitPrivateMemberDefinition(pnodeMember, protoLoc, byteCodeGenerator, funcInfo);
+                // Static private methods resolve `super` against the
+                // constructor; instance members resolve against the
+                // prototype, mirroring the public-method home objects.
+                EmitPrivateMemberDefinition(
+                    pnodeMember,
+                    pnodeMemberFnc->IsStaticMember() ? pnodeClass->location : protoLoc,
+                    byteCodeGenerator, funcInfo);
             }
             else
             {
@@ -12300,6 +12306,18 @@ void EmitClass(ParseNodeClass * pnodeClass, ByteCodeGenerator * byteCodeGenerato
             break;
         }
         pnodeMemberList = pnodeMemberList->AsParseNodeBin()->pnode2;
+    }
+
+    // S1 static private methods/accessors: install each brand on the
+    // constructor now that every definition is stored in its brand record.
+    // Definitions and brand installs both precede the inner binding and all
+    // static field initializers, so initializers may call static private
+    // methods. The shared InitPrivateMethod opcode is receiver-agnostic; the
+    // constructor is simply the receiver here instead of an instance.
+    if (pnodeClass->pnodeClassStaticPrivateMethods != nullptr)
+    {
+        byteCodeGenerator->EmitClassPrivateMethodInits(
+            pnodeClass->pnodeClassStaticPrivateMethods, funcInfo, pnodeClass->location);
     }
 
     // The inner class binding stays in its TDZ while members (including

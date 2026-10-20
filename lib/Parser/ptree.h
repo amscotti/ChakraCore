@@ -758,6 +758,12 @@ public:
     // S1 private fields: hidden block-scoped const declarations (knopConstDecl)
     // which hold one fresh runtime private-name token per class evaluation.
     ParseNodePtr pnodePrivateNames;
+    // S1 static private methods/accessors: brand references for each static
+    // private method or accessor declared by the class. Class emission
+    // installs these brands on the constructor after all member definitions
+    // are evaluated and before any static field initializer runs. Each item
+    // is a private knopName bound to the class-block brand const.
+    ParseNodePtr pnodeClassStaticPrivateMethods;
 
     bool isDefaultModuleExport;
 
