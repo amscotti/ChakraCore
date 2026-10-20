@@ -307,13 +307,16 @@ ParseNodeBin::ParseNodeBin(OpCode nop, charcount_t ichMin, charcount_t ichLim, P
     // Member name is either a string, a computed name, or (for instance
     // private fields/methods/accessors) a private name node. S1 computed
     // field names additionally wrap the key expression with its hidden key
-    // slot (knopMember around the knopComputedName).
+    // slot (knopMember around the knopComputedName). S1 static blocks use
+    // knopMember with no name (pnode1 == nullptr) and the block helper
+    // call in pnode2.
     Assert((nop != knopMember && nop != knopMemberShort && nop != knopObjectPatternMember && nop != knopGetMember && nop != knopSetMember)
-        || (pnode1->nop == knopStr || pnode1->nop == knopComputedName ||
+        || (nop == knopMember && pnode1 == nullptr)
+        || (pnode1 != nullptr && (pnode1->nop == knopStr || pnode1->nop == knopComputedName ||
             (pnode1->nop == knopMember && pnode1->AsParseNodeBin()->pnode1 != nullptr &&
              pnode1->AsParseNodeBin()->pnode1->nop == knopComputedName) ||
             ((nop == knopMember || nop == knopGetMember || nop == knopSetMember) &&
-             pnode1->nop == knopName && pnode1->AsParseNodeName()->IsPrivateName())));
+             pnode1->nop == knopName && pnode1->AsParseNodeName()->IsPrivateName()))));
 
     // Dot's rhs has to be a name;
     Assert(nop != knopDot || pnode2->nop == knopName);
@@ -441,6 +444,7 @@ ParseNodeFnc::ParseNodeFnc(OpCode nop, charcount_t ichMin, charcount_t ichLim)
     this->isClassFieldInitializerContext = false;
     this->isStaticClassFieldInitializer = false;
     this->pnodeFieldHome = nullptr;
+    this->isClassStaticBlock = false;
     this->hasInstanceFields = false;
     this->pnodeClassSuperLambdas = nullptr;
     this->ppnodeClassSuperLambdasLast = nullptr;

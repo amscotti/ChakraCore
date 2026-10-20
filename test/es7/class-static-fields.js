@@ -5,8 +5,9 @@
 //-------------------------------------------------------------------------------------------------------
 // C2-S1: public static class fields with simple identifier/literal names,
 // computed names and optional initializers (doc/c2-s1-static-fields.md,
-// doc/c2-s1-computed-instance-super.md). Static private fields, static blocks
-// and decorators are intentionally excluded.
+// doc/c2-s1-computed-instance-super.md), plus static initialization blocks
+// (doc/c2-s1-static-blocks.md). Static private fields are covered in
+// class-static-private-fields.js; decorators are intentionally excluded.
 
 WScript.LoadScriptFile("..\\UnitTestFramework\\UnitTestFramework.js");
 
@@ -407,13 +408,14 @@ const tests = [
         }
     },
     {
-        name: "early errors: static prototype/constructor, static blocks and private methods",
+        name: "early errors: static prototype/constructor (static blocks, private methods, computed fields supported)",
         body() {
             assert.throws(function () { eval("class C { static prototype; }"); }, SyntaxError, "static prototype");
             assert.throws(function () { eval("class C { static 'prototype' = 1; }"); }, SyntaxError, "string static prototype");
             assert.throws(function () { eval("class C { static constructor; }"); }, SyntaxError, "static constructor");
             assert.throws(function () { eval("class C { static 'constructor' = 1; }"); }, SyntaxError, "string static constructor");
-            assert.throws(function () { eval("class C { static {} }"); }, SyntaxError, "static block");
+            // Static blocks are supported (doc/c2-s1-static-blocks.md).
+            assert.doesNotThrow(function () { eval("class C { static {} }"); }, "static block");
             assert.doesNotThrow(function () { eval("class C { static #x; }"); }, "static private field");
             assert.doesNotThrow(function () { eval("class C { static #m() {} }"); }, "static private method");
             // Computed static field names are evaluated, not rejected: only a
@@ -618,6 +620,305 @@ const tests = [
                 eval("class G { static [(() => { throw new Error('boom'); })()] = 1; static s = (ran = true, 2); }");
             }, Error, "key throw");
             assert.isFalse(ran);
+        }
+    },
+    {
+        name: "static blocks evaluate in textual order interleaved with static fields",
+        body() {
+            const log = [];
+            class C {
+                static a = (log.push("a"), 1);
+                static { log.push("b1"); this.fromFirst = this.a; }
+                static b = (log.push("b"), this.fromFirst + 1);
+                static { log.push("b2"); this.fromSecond = this.b; }
+            }
+
+            assert.areEqual("a,b1,b,b2", log.join(","));
+            assert.areEqual(1, C.a);
+            assert.areEqual(1, C.fromFirst);
+            assert.areEqual(2, C.b);
+            assert.areEqual(2, C.fromSecond);
+
+            // A block before a field observes the field as absent, matching
+            // textual evaluation order.
+            const Later = class {
+                static { this.early = this.late; }
+                static late = 5;
+            };
+            assert.areEqual(undefined, Later.early);
+            assert.areEqual(5, Later.late);
+
+            // Empty blocks and semicolon-adjacent blocks are valid.
+            assert.doesNotThrow(function () { eval("class E { static {} }"); });
+            const Semi = eval("(class { static { this.x = 1; }; static y = 2; })");
+            assert.areEqual(1, Semi.x);
+            assert.areEqual(2, Semi.y);
+
+            // `static` followed by a newline and `{` is still a block.
+            const Newline = eval("(class { static\n{ this.x = 3; } })");
+            assert.areEqual(3, Newline.x);
+        }
+    },
+    {
+        name: "static block this is the constructor and methods are installed first",
+        body() {
+            let seen;
+            let arrowSeen;
+            class C {
+                static {
+                    seen = this;
+                    arrowSeen = (() => this)();
+                    this.installed = 1;
+                }
+                static method() { return 2; }
+            }
+            assert.areEqual(C, seen);
+            assert.areEqual(C, arrowSeen);
+            assert.areEqual(1, C.installed);
+
+            class FieldBeforeMethod {
+                static { this.kind = typeof this.method; }
+                static method() {}
+            }
+            assert.areEqual("function", FieldBeforeMethod.kind);
+
+            class WithPrivate {
+                static { this.v = new WithPrivate().#m() + this.#sm(); }
+                #m() { return 5; }
+                static #sm() { return 6; }
+                static get #p() { return 7; }
+                static { this.w = this.#p; }
+            }
+            assert.areEqual(11, WithPrivate.v);
+            assert.areEqual(7, WithPrivate.w);
+        }
+    },
+    {
+        name: "static blocks read super with the constructor as HomeObject",
+        body() {
+            class Base {
+                static foo = 7;
+                static who() { return this.name; }
+            }
+            class Derived extends Base {
+                static { this.x = super.foo; }
+                static { this.byIndex = super["foo"]; }
+                static { this.byArrow = (() => super.foo)(); }
+                static { this.who = super.who(); }
+                static y = super.foo;
+            }
+            assert.areEqual(7, Derived.x);
+            assert.areEqual(7, Derived.byIndex);
+            assert.areEqual(7, Derived.byArrow);
+            assert.areEqual("Derived", Derived.who);
+            assert.areEqual(7, Derived.y);
+
+            // Base classes resolve through Function.prototype.
+            class Plain {
+                static { this.missing = super.foo; this.kind = typeof super.hasOwnProperty; }
+            }
+            assert.areEqual(undefined, Plain.missing);
+            assert.areEqual("function", Plain.kind);
+
+            // Super assignment in a block follows ordinary semantics.
+            class ViaAssign extends Base {
+                static { super.foo = 9; }
+            }
+            assert.areEqual(9, ViaAssign.foo);
+            assert.areEqual(7, Base.foo);
+
+            // super() stays an early error.
+            assert.throws(function () { eval("class X extends Base { static { super(); } }"); }, SyntaxError, "super call");
+            assert.throws(function () { new Function("class X extends Base { static { super(); } }"); }, SyntaxError, "super call in Function");
+            // Note: super inside a nested plain function is rejected in the
+            // full parse but shares the field-initializer residuals under
+            // deferred parsing (eval defers to runtime; -force:deferparse
+            // skips nested bodies until called), so it is covered by
+            // node-differential probes instead of this file.
+        }
+    },
+    {
+        name: "static blocks have a function-like own scope",
+        body() {
+            class C {
+                static {
+                    var v = 1;
+                    function f() { return 2; }
+                    let l = 3;
+                    const k = 4;
+                    this.captured = [v, f(), l, k];
+                }
+            }
+            assert.areEqual("1,2,3,4", C.captured.join(","));
+
+            // var/function declarations do not leak out of the block.
+            assert.areEqual("undefined", typeof v);
+            assert.areEqual("undefined", typeof f);
+            assert.isFalse(Object.prototype.hasOwnProperty.call(C, "v"));
+            assert.isFalse(Object.prototype.hasOwnProperty.call(C, "f"));
+            assert.isFalse(Object.prototype.hasOwnProperty.call(C, "l"));
+
+            // Duplicate vars/functions are allowed; duplicate lexicals and
+            // lexical/var collisions are early errors.
+            const DupVar = eval("(class { static { var a = 1; var a = 2; this.r = a; } })");
+            assert.areEqual(2, DupVar.r);
+            const DupFn = eval("(class { static { function g() { return 1; } function g() { return 2; } this.r = g(); } })");
+            assert.areEqual(2, DupFn.r);
+            assert.throws(function () { eval("class X { static { let q = 1; let q = 2; } }"); }, SyntaxError, "duplicate let");
+            assert.throws(function () { eval("class X { static { var q = 1; let q = 2; } }"); }, SyntaxError, "var/let collision");
+            assert.throws(function () { eval("class X { static { let q = 1; function q() {} } }"); }, SyntaxError, "let/function collision");
+
+            // Each block gets its own scope.
+            class Two {
+                static { var shared = 1; this.first = shared; }
+                static { var shared = 2; this.second = shared; }
+            }
+            assert.areEqual(1, Two.first);
+            assert.areEqual(2, Two.second);
+        }
+    },
+    {
+        name: "static block declaration scope attribution agrees under deferred parsing",
+        body() {
+            // The fast scan must attribute block-level declarations to the
+            // block's own function-like scope, exactly like the full parse:
+            // intra-block lexical/var collisions are early errors, while
+            // block locals never collide with the class name, outer
+            // bindings, or enclosing parameters. Error shapes run through
+            // eval/new Function (eager full parse); the valid shapes below
+            // run directly, so this file's -force:deferparse variant scans
+            // them with the deferred scope (doc/c2-s1-static-blocks.md).
+            assert.throws(function () { eval("class X { static { let a = 1; var a = 2; } }"); }, SyntaxError, "let/var");
+            assert.throws(function () { eval("class X { static { var a = 1; let a = 2; } }"); }, SyntaxError, "var/let");
+            assert.throws(function () { eval("class X { static { const a = 1; var a = 2; } }"); }, SyntaxError, "const/var");
+            assert.throws(function () { eval("class X { static { var a = 1; const a = 2; } }"); }, SyntaxError, "var/const");
+            assert.throws(function () { eval("class X { static { let a = 1; let a = 2; } }"); }, SyntaxError, "duplicate let");
+            assert.throws(function () { eval("class X { static { let a = 1; { var a = 2; } } }"); }, SyntaxError, "let/nested var");
+            assert.throws(function () { eval("class X { static { { var a = 1; } let a = 2; } }"); }, SyntaxError, "nested var/let");
+            assert.throws(function () { eval("class X { static { for (var i = 0; i < 1; i++) {} let i = 2; } }"); }, SyntaxError, "for var/let");
+            assert.throws(function () { eval("class X { static { switch (1) { case 1: var s = 5; } let s = 6; } }"); }, SyntaxError, "switch var/let");
+            assert.throws(function () { eval("class X { static { try {} catch (e) { var q = 1; } let q = 2; } }"); }, SyntaxError, "catch var/let");
+            assert.throws(function () { new Function("class X { static { let a = 1; var a = 2; } }"); }, SyntaxError, "let/var in Function");
+            assert.throws(function () { new Function("class X { static { var a = 1; let a = 2; } }"); }, SyntaxError, "var/let in Function");
+
+            // A block let/const/var may shadow the class name.
+            class ShadowLet {
+                static { let ShadowLet = 5; this.v = ShadowLet; }
+            }
+            assert.areEqual(5, ShadowLet.v);
+            class ShadowConst {
+                static { const ShadowConst = 6; this.v = ShadowConst; }
+            }
+            assert.areEqual(6, ShadowConst.v);
+            class ShadowVar {
+                static { var ShadowVar = 7; this.v = ShadowVar; }
+            }
+            assert.areEqual(7, ShadowVar.v);
+            class ShadowFn {
+                static { function ShadowFn() { return 8; } this.v = ShadowFn(); }
+            }
+            assert.areEqual(8, ShadowFn.v);
+
+            // A block var is block-scoped: it coexists with outer
+            // function-scope let/const/var bindings of the same name.
+            let z = 1;
+            const y = 10;
+            var w = 100;
+            class Outer {
+                static { var z = 2; var y = 20; var w = 200; this.v = [z, y, w]; }
+            }
+            assert.areEqual("2,20,200", Outer.v.join(","));
+            assert.areEqual(1, z);
+            assert.areEqual(10, y);
+            assert.areEqual(100, w);
+
+            // Nested blocks, nested functions, and split-parameter enclosing
+            // functions keep the same attribution.
+            class Nested {
+                static {
+                    let n = 1;
+                    {
+                        var m = 2;
+                        function h() { var n = 3; return n + m; }
+                        this.v = [n, m, h()];
+                    }
+                }
+            }
+            assert.areEqual("1,2,5", Nested.v.join(","));
+            const split = ([p]) => {
+                class SP {
+                    static { let p = 4; var q = 5; this.v = [p, q]; }
+                }
+                return SP.v;
+            };
+            assert.areEqual("4,5", split([40]).join(","));
+
+            // Uses of outer bindings and separate per-block scopes still work.
+            class UsesOuter {
+                static { this.v = z + y + w; }
+            }
+            assert.areEqual(111, UsesOuter.v);
+        }
+    },
+    {
+        name: "static block early errors: arguments, await, yield, return, break and continue",
+        body() {
+            assert.throws(function () { eval("class C { static { console.log(arguments); } }"); }, SyntaxError, "arguments");
+            assert.throws(function () { eval("class C { static { let f = () => arguments; } }"); }, SyntaxError, "arguments in arrow");
+            assert.throws(function () { eval("async function f() { class C { static { await 1; } } }"); }, SyntaxError, "await");
+            assert.throws(function () { eval("function* g() { class C { static { yield 1; } } }"); }, SyntaxError, "yield");
+            assert.throws(function () { eval("class C { static { return 1; } }"); }, SyntaxError, "return");
+            assert.throws(function () { eval("class C { static { if (true) return; } }"); }, SyntaxError, "return in branch");
+            assert.throws(function () { eval("class C { static { for (let i = 0; i < 1; i++) { return; } } }"); }, SyntaxError, "return in loop");
+            assert.throws(function () { eval("class C { static { break; } }"); }, SyntaxError, "bare break");
+            assert.throws(function () { eval("class C { static { continue; } }"); }, SyntaxError, "bare continue");
+            assert.throws(function () { eval("outer: for (let i = 0; i < 1; i++) { class C { static { break outer; } } }"); }, SyntaxError, "outer label");
+
+            // new.target evaluates to undefined; nested functions keep their
+            // own return and arguments rules.
+            class N {
+                static { this.hasNewTarget = new.target === undefined; }
+            }
+            assert.isTrue(N.hasNewTarget);
+
+            const Nested = eval("(class { static { function f() { return arguments.length; } this.r = f(1, 2); } })");
+            assert.areEqual(2, Nested.r);
+
+            // Inner loops, labels and nested-function returns are valid.
+            const Flow = eval("(class { static { let n = 0; for (let i = 0; i < 3; i++) { if (i === 1) continue; n++; } lbl: { break lbl; } function f() { return 7; } this.r = n + f(); } })");
+            assert.areEqual(9, Flow.r);
+        }
+    },
+    {
+        name: "static blocks work in base and derived classes and propagate exceptions",
+        body() {
+            // Anonymous and named class expressions.
+            const Anon = class { static { this.x = 10; } };
+            assert.areEqual(10, Anon.x);
+            const Named = class Inner {
+                static x = 5;
+                static { this.y = Inner.x + 1; }
+            };
+            assert.areEqual(6, Named.y);
+
+            class Derived extends Object {
+                static { this.z = 3; }
+            }
+            assert.areEqual(3, Derived.z);
+
+            // An exception propagates out of the class definition and later
+            // static elements do not run.
+            let reached = false;
+            assert.throws(function () {
+                eval("class T { static a = 1; static { throw new Error('boom'); } static b = (reached = true, 2); }");
+            }, Error, "block exception");
+            assert.isFalse(reached);
+
+            // The class binding is not initialized when evaluation throws.
+            assert.throws(function () {
+                eval("class U { static { throw new Error('stop'); } }");
+            }, Error);
+            assert.areEqual("undefined", typeof U);
         }
     }
 ];

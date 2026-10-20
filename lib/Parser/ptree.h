@@ -581,6 +581,10 @@ public:
     // static helpers and non-field functions. The helper prologue binds its
     // super slot from this declaration.
     ParseNodeVar * pnodeFieldHome;
+    // S1 static blocks: a static-block helper parses a statement list, so
+    // `return` at its top level (even inside a nested block/loop/branch) is
+    // an early error while nested functions keep their own return rules.
+    bool isClassStaticBlock;
     bool hasInstanceFields;
     ParseNodePtr pnodeClassSuperLambdas;
     ParseNodePtr * ppnodeClassSuperLambdasLast;

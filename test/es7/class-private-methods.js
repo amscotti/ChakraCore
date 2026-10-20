@@ -7,9 +7,9 @@
 // (`get #x(){}` / `set #x(v){}`), private static methods and accessors
 // (`static #m(){}`, `static get #x(){}` / `static set #x(v){}`), and
 // async/generator private methods (`async #m(){}`, `*#m(){}`,
-// `async *#m(){}` and their static forms).
-// Static blocks, computed names and decorators remain out of scope
-// (doc/c2-s1-private-async-gen.md).
+// `async *#m(){}` and their static forms; doc/c2-s1-private-async-gen.md).
+// Computed private names and decorators remain out of scope. Static blocks
+// are covered in class-static-fields.js (doc/c2-s1-static-blocks.md).
 
 WScript.LoadScriptFile("..\\UnitTestFramework\\UnitTestFramework.js");
 
