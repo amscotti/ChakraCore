@@ -525,7 +525,6 @@ private:
     PrivateNameScope * m_privateNameScope;
     DeferredPrivateRef * m_pendingPrivateRefs;
     bool m_currentClassHasPrivate;
-    uint32 m_classPrivateNameCount;
     uint * m_pnestedCount; // count of functions nested at one level below the current node
 
     struct WellKnownPropertyPids
@@ -962,6 +961,9 @@ private:
     PrivateNameEntry * DeclareClassPrivateName(IdentPtr name, bool buildAST);
     PrivateNameEntry * DeclareClassPrivateAccessor(IdentPtr name, bool isGetter, bool isStatic, bool buildAST);
     ParseNodeName * CreatePrivateNameReference(IdentPtr name, charcount_t ichMin, charcount_t ichLim, bool buildAST);
+    ParseNodeName * CreateDynamicPrivateRef(IdentPtr name, charcount_t ichMin, charcount_t ichLim, bool buildAST);
+    IdentPtr PidForHiddenPrivateName(IdentPtr name);
+    void RecordEvalPrivateBrand(IdentPtr name);
     void ResolvePendingPrivateRefs(PrivateNameScope * outermost);
     ParseNodeFnc * CreateClassFieldInitializerFunction(charcount_t ichMin, size_t cbMin, ParseNodePtr * ppnodeInitExpr = nullptr, bool isStatic = false);
     ParseNodeFnc * CreateClassStaticBlockFunction(charcount_t ichMin, size_t cbMin);

@@ -183,7 +183,6 @@ Parser::Parser(Js::ScriptContext* scriptContext, BOOL strictMode, PageAllocator 
     m_privateNameScope(nullptr),
     m_pendingPrivateRefs(nullptr),
     m_currentClassHasPrivate(false),
-    m_classPrivateNameCount(0),
     m_pnestedCount(nullptr),
 
     wellKnownPropertyPids(), // should initialize to nullptrs
@@ -9116,10 +9115,12 @@ PrivateNameEntry * Parser::CreateClassPrivateNameEntry(IdentPtr name, bool build
 
     if (buildAST)
     {
-        char16 hiddenName[48];
-        int nameLength = swprintf_s(hiddenName, 48, _u("*s1private%u*"), this->m_classPrivateNameCount++);
-        Assert(nameLength > 0);
-        IdentPtr hiddenPid = this->GetHashTbl()->PidHashNameLen(hiddenName, static_cast<uint32>(nameLength));
+        // Derive the hidden block-const pid from the source spelling (instead
+        // of a parse counter) so that direct-eval code, parsed without the
+        // caller's private scope stack, resolves the same const through the
+        // runtime scope chain. Keep in sync with the dynamic brand lookup in
+        // ByteCodeGenerator (PropertyIdForDynamicPrivateBrand).
+        IdentPtr hiddenPid = PidForHiddenPrivateName(name);
 
         ParseNodeVar * decl = CreateBlockScopedDeclNode(hiddenPid, knopConstDecl);
         Assert(decl != nullptr && decl->sym != nullptr);
@@ -9188,12 +9189,84 @@ PrivateNameEntry * Parser::DeclareClassPrivateAccessor(IdentPtr name, bool isGet
     return entry;
 }
 
+// The hidden class-block brand const pid embeds the private name's source
+// spelling (a parse counter would be unknowable to separately-parsed eval
+// code). Direct-eval code resolves it through the runtime scope chain, so the
+// derivation must match PropertyIdForDynamicPrivateBrand in the emitter.
+IdentPtr Parser::PidForHiddenPrivateName(IdentPtr name)
+{
+    Assert(name != nullptr);
+    static const char16 prefix[] = { _u('*'), _u('s'), _u('1'), _u('p'), _u('r'), _u('i'), _u('v'), _u('a'), _u('t'), _u('e'), _u('#') };
+    static const uint32 prefixLength = _countof(prefix);
+    const char16 * spelling = name->Psz();
+    charcount_t spellingLength = name->Cch();
+    charcount_t totalLength = prefixLength + spellingLength + 1; // + trailing '*'
+    char16 * hiddenName = AnewArray(&m_nodeAllocator, char16, totalLength + 1);
+    for (uint32 i = 0; i < prefixLength; i++)
+    {
+        hiddenName[i] = prefix[i];
+    }
+    for (charcount_t i = 0; i < spellingLength; i++)
+    {
+        hiddenName[prefixLength + i] = spelling[i];
+    }
+    hiddenName[prefixLength + spellingLength] = _u('*');
+    hiddenName[totalLength] = 0;
+    return this->GetHashTbl()->PidHashNameLen(hiddenName, totalLength);
+}
+
+// Record a source spelling referenced dynamically from direct-eval code on
+// the program node so the emitter can validate it against the caller's scope
+// chain before the eval body executes (early SyntaxError semantics).
+void Parser::RecordEvalPrivateBrand(IdentPtr name)
+{
+    Assert(name != nullptr);
+    Assert(m_currentNodeProg != nullptr);
+    for (ParseNodePtr cell = m_currentNodeProg->pnodeEvalPrivateBrands; cell != nullptr; cell = cell->AsParseNodeBin()->pnode2)
+    {
+        if (cell->AsParseNodeBin()->pnode1->AsParseNodeName()->pid == name)
+        {
+            return;
+        }
+    }
+    ParseNodeName * brandName = Anew(&m_nodeAllocator, ParseNodeName, 0, 0, name);
+    AddAstSize(sizeof(ParseNodeName));
+    m_currentNodeProg->pnodeEvalPrivateBrands = CreateBinNode(knopList, brandName, m_currentNodeProg->pnodeEvalPrivateBrands);
+}
+
+// A private reference in direct-eval code with no enclosing class declared
+// by the eval itself. It resolves against the caller's private environment
+// at runtime (SyntaxError at eval execution when the caller declares no such
+// name); an indirect eval therefore never resolves it.
+ParseNodeName * Parser::CreateDynamicPrivateRef(
+    IdentPtr name, charcount_t ichMin, charcount_t ichLim, bool buildAST)
+{
+    RecordEvalPrivateBrand(name);
+    if (!buildAST)
+    {
+        return nullptr;
+    }
+    ParseNodeName * pnode = Anew(&m_nodeAllocator, ParseNodeName, ichMin, ichLim, name);
+    AddAstSize(sizeof(ParseNodeName));
+    pnode->SetIsPrivateName();
+    pnode->SetIsDynamicPrivateName();
+    PidRefStack * nullRef = Anew(&m_nodeAllocator, PidRefStack);
+    pnode->SetSymRef(nullRef);
+    return pnode;
+}
+
 ParseNodeName * Parser::CreatePrivateNameReference(
     IdentPtr name, charcount_t ichMin, charcount_t ichLim, bool buildAST)
 {
     Assert(name != nullptr);
     if (m_privateNameScope == nullptr)
     {
+        if ((m_grfscr & fscrEval) != 0)
+        {
+            // No enclosing class in this parse: in direct-eval code the
+            // reference inherits the caller's private environment.
+            return CreateDynamicPrivateRef(name, ichMin, ichLim, buildAST);
+        }
         // Private names are only valid lexically inside a class body.
         Error(ERRsyntax);
     }
@@ -9239,6 +9312,22 @@ void Parser::ResolvePendingPrivateRefs(PrivateNameScope * outermost)
 
         if (entry == nullptr)
         {
+            if ((m_grfscr & fscrEval) != 0)
+            {
+                // A private reference in eval code that matches no class
+                // declared by the eval itself resolves against the caller's
+                // private environment at runtime (SyntaxError at eval
+                // execution when the caller declares no such name).
+                RecordEvalPrivateBrand(deferred->name);
+                if (deferred->pnode != nullptr)
+                {
+                    deferred->pnode->AsParseNodeName()->SetIsDynamicPrivateName();
+                    PidRefStack * nullRef = Anew(&m_nodeAllocator, PidRefStack);
+                    deferred->pnode->AsParseNodeName()->SetSymRef(nullRef);
+                }
+                deferred = next;
+                continue;
+            }
             // Use of an undeclared private name is a SyntaxError. Fast scan
             // has no AST node, so use the recorded token range.
             Error(ERRsyntax, deferred->ichMin, deferred->ichLim);

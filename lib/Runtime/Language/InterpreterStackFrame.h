@@ -555,6 +555,7 @@ namespace Js
         template <class T> void OP_ProfiledGetMethodProperty(unaligned T* playout);
         template <class T> void OP_ProfiledGetLocalMethodProperty(unaligned T* playout);
         template <typename T> void OP_GetPropertyScoped(const unaligned OpLayoutT_ElementP<T>* playout);
+        template <typename T> void OP_LdPrivateBrand(const unaligned OpLayoutT_ElementP<T>* playout);
         template <typename T> void OP_GetPropertyForTypeOfScoped(const unaligned OpLayoutT_ElementP<T>* playout);
         template <typename T> void OP_GetPropertyScoped_NoFastPath(const unaligned OpLayoutT_ElementP<T>* playout);
         template <class T> void OP_GetMethodPropertyScoped(unaligned T* playout);
@@ -601,6 +602,8 @@ namespace Js
         template <class T> void OP_NewPrivateName(const unaligned T* playout);
         template <class T> void OP_LdPrivateField(const unaligned T* playout);
         template <class T> void OP_StPrivateField(const unaligned T* playout);
+        template <class T> void OP_LdPrivateDynamic(const unaligned T* playout);
+        template <class T> void OP_StPrivateDynamic(const unaligned T* playout);
         template <class T> void OP_InitPrivateField(const unaligned T* playout);
         template <class T> void OP_HasPrivateField(const unaligned T* playout);
         template <class T> void OP_SetPrivateDefinition(const unaligned T* playout);

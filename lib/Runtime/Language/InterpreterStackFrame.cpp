@@ -4503,6 +4503,48 @@ skipThunk:
                 defaultInstance));
     }
 
+    template <typename T>
+    void InterpreterStackFrame::OP_LdPrivateBrand(const unaligned OpLayoutT_ElementP<T>* playout)
+    {
+        // Load a class private brand for direct-eval code through the runtime
+        // scope chain. The walk is intentionally uncached (eval callers vary
+        // while the same compiled body is reused) and never falls back to the
+        // root object: an absent name is a SyntaxError, so indirect eval can
+        // never resolve a private name.
+        ThreadContext* threadContext = this->GetScriptContext()->GetThreadContext();
+        ImplicitCallFlags savedImplicitCallFlags = threadContext->GetImplicitCallFlags();
+        threadContext->ClearImplicitCallFlags();
+
+        PropertyId propertyId = GetPropertyIdFromCacheId(playout->inlineCacheIndex);
+        FrameDisplay *pScope = this->GetEnvForEvalCode();
+        ScriptContext* scriptContext = GetScriptContext();
+        Var value = nullptr;
+        bool found = false;
+        int length = pScope->GetLength();
+        for (int i = 0; i < length; i++)
+        {
+            RecyclableObject* object = VarTo<RecyclableObject>(pScope->GetItem(i));
+            if (JavascriptOperators::GetProperty(object, propertyId, &value, scriptContext, nullptr))
+            {
+                found = true;
+                break;
+            }
+        }
+        if (!found)
+        {
+            JavascriptError::ThrowSyntaxError(scriptContext, ERRsyntax);
+        }
+        if (scriptContext->IsUndeclBlockVar(value))
+        {
+            JavascriptError::ThrowReferenceError(scriptContext, JSERR_UseBeforeDeclaration);
+        }
+
+        SetReg(playout->Value, value);
+
+        threadContext->CheckAndResetImplicitCallAccessorFlag();
+        threadContext->AddImplicitCallFlags(savedImplicitCallFlags);
+    }
+
     template <class T>
     void InterpreterStackFrame::OP_SetPropertyScoped(unaligned T* playout, PropertyOperationFlags flags)
     {
@@ -5051,6 +5093,20 @@ skipThunk:
     void InterpreterStackFrame::OP_StPrivateField(const unaligned T* playout)
     {
         SetReg(playout->R0, JavascriptOperators::OP_StPrivateField(
+            GetReg(playout->R1), GetReg(playout->R2), GetReg(playout->R3), scriptContext));
+    }
+
+    template <class T>
+    void InterpreterStackFrame::OP_LdPrivateDynamic(const unaligned T* playout)
+    {
+        SetReg(playout->R0, JavascriptOperators::OP_LdPrivateDynamic(
+            GetReg(playout->R1), GetReg(playout->R2), scriptContext));
+    }
+
+    template <class T>
+    void InterpreterStackFrame::OP_StPrivateDynamic(const unaligned T* playout)
+    {
+        SetReg(playout->R0, JavascriptOperators::OP_StPrivateDynamic(
             GetReg(playout->R1), GetReg(playout->R2), GetReg(playout->R3), scriptContext));
     }
 

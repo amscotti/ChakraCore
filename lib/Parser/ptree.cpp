@@ -375,10 +375,11 @@ ParseNodeBigInt::ParseNodeBigInt(charcount_t ichMin, charcount_t ichLim, IdentPt
 ParseNodeName::ParseNodeName(charcount_t ichMin, charcount_t ichLim, IdentPtr name)
     : ParseNode(knopName, ichMin, ichLim), pid(name)
 {     
-    this->sym = nullptr;    
+    this->sym = nullptr;
     this->symRef = nullptr;
     this->isSpecialName = false;
     this->isPrivateName = false;
+    this->isDynamicPrivateName = false;
     this->privateKind = PrivateNameKind::Unknown;
 }
 
@@ -502,6 +503,7 @@ ParseNodeProg::ParseNodeProg(OpCode nop, charcount_t ichMin, charcount_t ichLim)
 {
     this->pnodeLastValStmt = nullptr;
     this->m_UsesArgumentsAtGlobal = false;
+    this->pnodeEvalPrivateBrands = nullptr;
 }
 
 ParseNodeModule::ParseNodeModule(OpCode nop, charcount_t ichMin, charcount_t ichLim)

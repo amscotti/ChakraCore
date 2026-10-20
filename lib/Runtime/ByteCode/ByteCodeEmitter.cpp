@@ -42,15 +42,82 @@ static bool IsPrivateFieldReference(ParseNode *pnode)
         pnode->AsParseNodeBin()->pnode2->AsParseNodeName()->IsPrivateName();
 }
 
+static Js::PropertyId PropertyIdForDynamicPrivateBrand(
+    IdentPtr name, ByteCodeGenerator * byteCodeGenerator, FuncInfo * funcInfo)
+{
+    // Derive the hidden class-block brand const id from a private name's
+    // source spelling. Must match Parser::PidForHiddenPrivateName: the const
+    // is declared under this name so separately-parsed direct-eval code can
+    // resolve it through the runtime scope chain.
+    Assert(name != nullptr);
+    static const uint32 prefixLength = 11; // "*s1private#"
+    const char16 * spelling = name->Psz();
+    charcount_t spellingLength = name->Cch();
+    charcount_t totalLength = prefixLength + spellingLength + 1; // + trailing '*'
+    char16 * hiddenName = AnewArray(byteCodeGenerator->GetAllocator(), char16, totalLength + 1);
+    const char16 * prefix = _u("*s1private#");
+    for (uint32 i = 0; i < prefixLength; i++)
+    {
+        hiddenName[i] = prefix[i];
+    }
+    for (charcount_t i = 0; i < spellingLength; i++)
+    {
+        hiddenName[prefixLength + i] = spelling[i];
+    }
+    hiddenName[prefixLength + spellingLength] = _u('*');
+    hiddenName[totalLength] = 0;
+    return funcInfo->byteCodeFunction->GetOrAddPropertyIdTracked(SymbolName(hiddenName, totalLength));
+}
+
+// The hidden class-block brand const is initialized by the NewPrivateName
+// loop at the top of EmitClass, before any same-function brand load (computed
+// keys, member definitions, static initializers) can execute. The parser-level
+// "needs declaration" bit is therefore not a real TDZ guard here: bind marks
+// block-scoped consts as needing declaration, which would emit a static
+// use-before-declaration error for those same-function loads. Skip it always;
+// cross-function loads (methods, field helpers) are unaffected because the
+// check only applies when the scope's function is the emitting function.
 static Js::RegSlot EmitPrivateBrand(
     ParseNodeName * pnodeName, ByteCodeGenerator * byteCodeGenerator, FuncInfo * funcInfo,
-    bool skipUseBeforeDeclarationCheck = false)
+    bool skipUseBeforeDeclarationCheck = true)
 {
-    Assert(pnodeName != nullptr && pnodeName->sym != nullptr);
+    Assert(pnodeName != nullptr);
     Js::RegSlot brandLocation = funcInfo->AcquireTmpRegister();
+    if (pnodeName->IsDynamicPrivateName())
+    {
+        // Direct-eval reference with no lexically enclosing class in this
+        // parse: load the caller's brand through the runtime scope chain.
+        // Absent on the chain, the handler throws a SyntaxError (so indirect
+        // eval never resolves a private name); present-but-uninitialized is
+        // a use-before-declaration error, matching block-scoped consts.
+        Assert(pnodeName->sym == nullptr);
+        Js::PropertyId hiddenPid = PropertyIdForDynamicPrivateBrand(pnodeName->pid, byteCodeGenerator, funcInfo);
+        uint cacheId = funcInfo->FindOrAddInlineCacheId(funcInfo->GetEnvRegister(), hiddenPid, false, false);
+        byteCodeGenerator->Writer()->ElementP(Js::OpCode::LdPrivateBrand, brandLocation, cacheId);
+        return brandLocation;
+    }
+    Assert(pnodeName->sym != nullptr);
     byteCodeGenerator->EmitPropLoad(
         brandLocation, pnodeName->sym, pnodeName->pid, funcInfo, skipUseBeforeDeclarationCheck);
     return brandLocation;
+}
+
+// Emit one scope-chain brand validation per private spelling referenced
+// dynamically from direct-eval code. These run before any user statement so
+// an undeclared name is a SyntaxError at eval execution even when the first
+// use sits in a nested function (early-error semantics), and even when an
+// earlier statement would otherwise run first (executed = false).
+static void EmitEvalPrivateBrandChecks(ParseNodePtr brandList, ByteCodeGenerator * byteCodeGenerator, FuncInfo * funcInfo)
+{
+    for (ParseNodePtr cell = brandList; cell != nullptr; cell = cell->AsParseNodeBin()->pnode2)
+    {
+        ParseNodeName * brandName = cell->AsParseNodeBin()->pnode1->AsParseNodeName();
+        Js::PropertyId hiddenPid = PropertyIdForDynamicPrivateBrand(brandName->pid, byteCodeGenerator, funcInfo);
+        uint cacheId = funcInfo->FindOrAddInlineCacheId(funcInfo->GetEnvRegister(), hiddenPid, false, false);
+        Js::RegSlot tmpReg = funcInfo->AcquireTmpRegister();
+        byteCodeGenerator->Writer()->ElementP(Js::OpCode::LdPrivateBrand, tmpReg, cacheId);
+        funcInfo->ReleaseTmpRegister(tmpReg);
+    }
 }
 
 // Emit a brand-checked private read. Fields and methods return the value stored
@@ -61,8 +128,14 @@ static void EmitPrivateLoad(
     ByteCodeGenerator * byteCodeGenerator, FuncInfo * funcInfo)
 {
     Js::RegSlot brandLocation = EmitPrivateBrand(pnodeName, byteCodeGenerator, funcInfo);
-    Js::OpCode op = Js::OpCode::LdPrivateField;
-    switch (pnodeName->GetPrivateKind())
+    Js::OpCode op;
+    if (pnodeName->IsDynamicPrivateName())
+    {
+        // The declaration kind lives in the caller's class, so dispatch on
+        // the brand record shape at runtime (field, method or accessor).
+        op = Js::OpCode::LdPrivateDynamic;
+    }
+    else switch (pnodeName->GetPrivateKind())
     {
     case PrivateNameKind::Method:
         op = Js::OpCode::LdPrivateMethod;
@@ -71,6 +144,7 @@ static void EmitPrivateLoad(
         op = Js::OpCode::LdPrivateAccessor;
         break;
     default:
+        op = Js::OpCode::LdPrivateField;
         break;
     }
     byteCodeGenerator->Writer()->Reg3(op, resultLocation, instanceLocation, brandLocation);
@@ -89,7 +163,14 @@ static void EmitPrivateStore(
     // trip the interpreter's "writable register" assertion. Use a real temp;
     // the assignment result remains available at valueLocation.
     Js::RegSlot resultLocation = funcInfo->AcquireTmpRegister();
-    switch (pnodeName->GetPrivateKind())
+    if (pnodeName->IsDynamicPrivateName())
+    {
+        // The declaration kind lives in the caller's class, so dispatch on
+        // the brand record shape at runtime (field, method or accessor).
+        byteCodeGenerator->Writer()->Reg4(
+            Js::OpCode::StPrivateDynamic, resultLocation, instanceLocation, brandLocation, valueLocation);
+    }
+    else switch (pnodeName->GetPrivateKind())
     {
     case PrivateNameKind::Method:
         byteCodeGenerator->Writer()->Reg3(
@@ -3057,7 +3138,7 @@ void ByteCodeGenerator::EmitProgram(ParseNodeProg *pnodeProg)
 }
 
 void EmitDestructuredObject(ParseNode *lhs, Js::RegSlot rhsLocation, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo);
-void EmitDestructuredValueOrInitializer(ParseNodePtr lhsElementNode, Js::RegSlot rhsLocation, ParseNodePtr initializer, bool isNonPatternAssignmentTarget, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo);
+void EmitDestructuredValueOrInitializer(ParseNodePtr lhsElementNode, Js::RegSlot rhsLocation, ParseNodePtr initializer, bool isNonPatternAssignmentTarget, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo, bool referenceEmitted = false);
 
 void ByteCodeGenerator::PopulateFormalsScope(uint beginOffset, FuncInfo *funcInfo, ParseNodeFnc *pnodeFnc)
 {
@@ -3609,6 +3690,15 @@ void ByteCodeGenerator::EmitOneFunction(ParseNodeFnc *pnodeFnc)
         }
 
         this->inPrologue = false;
+
+        if (pnodeFnc->nop == knopProg &&
+            pnodeFnc->AsParseNodeProg()->pnodeEvalPrivateBrands != nullptr)
+        {
+            // Direct-eval code with private references resolved against the
+            // caller's private environment: validate every spelling against
+            // the runtime scope chain before any user statement executes.
+            EmitEvalPrivateBrandChecks(pnodeFnc->AsParseNodeProg()->pnodeEvalPrivateBrands, this, funcInfo);
+        }
 
         if (funcInfo->IsGlobalFunction())
         {
@@ -7150,7 +7240,7 @@ void EmitGetObjectProperty(
         /* registerCacheIdForCall */ false);
 }
 
-void EmitDestructuredElement(ParseNode *elem, Js::RegSlot sourceLocation, ByteCodeGenerator* byteCodeGenerator, FuncInfo *funcInfo)
+void EmitDestructuredElement(ParseNode *elem, Js::RegSlot sourceLocation, ByteCodeGenerator* byteCodeGenerator, FuncInfo *funcInfo, bool referenceEmitted = false)
 {
     switch (elem->nop)
     {
@@ -7162,7 +7252,10 @@ void EmitDestructuredElement(ParseNode *elem, Js::RegSlot sourceLocation, ByteCo
         break;
 
     default:
-        EmitReference(elem, byteCodeGenerator, funcInfo);
+        if (!referenceEmitted)
+        {
+            EmitReference(elem, byteCodeGenerator, funcInfo);
+        }
     }
 
     EmitAssignment(nullptr, elem, sourceLocation, byteCodeGenerator, funcInfo);
@@ -7852,20 +7945,38 @@ void EmitDestructuredArray(
     byteCodeGenerator->EndStatement(lhs);
 }
 
-void EmitNameInvoke(Js::RegSlot lhsLocation,
-    Js::RegSlot objectLocation,
-    Js::RegSlot computedPropIdArrLocation,
-    uint32 *computedIndex,
-    bool hasRest,
-    ParseNodePtr nameNode,
-    ByteCodeGenerator* byteCodeGenerator,
-    FuncInfo* funcInfo)
+// Evaluate the key of a computed object-destructuring name. Static names
+// need no evaluation. The key value stays live in its node location for the
+// subsequent property Get.
+static void EmitDestructuredObjectKey(ParseNodePtr nameNode,
+    ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo)
 {
     Assert(nameNode != nullptr);
     if (nameNode->nop == knopComputedName)
     {
         ParseNodePtr pnode1 = nameNode->AsParseNodeUni()->pnode1;
         Emit(pnode1, byteCodeGenerator, funcInfo, false/*isConstructorCall*/);
+    }
+}
+
+// Load the property value for an object-destructuring member (LdElemI for
+// computed keys, LdFld for static names), including rest bookkeeping. When
+// releaseKey is false the computed key location stays live for a caller that
+// acquired more temps after the key (hoisted target reference): the caller
+// must release the key once those temps are gone to keep the temp stack LIFO.
+static void EmitDestructuredObjectGet(Js::RegSlot lhsLocation,
+    Js::RegSlot objectLocation,
+    Js::RegSlot computedPropIdArrLocation,
+    uint32 *computedIndex,
+    bool hasRest,
+    ParseNodePtr nameNode,
+    ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo,
+    bool releaseKey = true)
+{
+    Assert(nameNode != nullptr);
+    if (nameNode->nop == knopComputedName)
+    {
+        ParseNodePtr pnode1 = nameNode->AsParseNodeUni()->pnode1;
 
         byteCodeGenerator->Writer()->Element(Js::OpCode::LdElemI_A, lhsLocation, objectLocation, pnode1->location);
         if (hasRest)
@@ -7873,7 +7984,10 @@ void EmitNameInvoke(Js::RegSlot lhsLocation,
             byteCodeGenerator->Writer()->Slot(Js::OpCode::StPropIdArrFromVar, pnode1->location, computedPropIdArrLocation, *computedIndex);
             (*computedIndex)++;
         }
-        funcInfo->ReleaseLoc(pnode1);
+        if (releaseKey)
+        {
+            funcInfo->ReleaseLoc(pnode1);
+        }
     }
     else
     {
@@ -7885,12 +7999,39 @@ void EmitNameInvoke(Js::RegSlot lhsLocation,
     }
 }
 
+void EmitNameInvoke(Js::RegSlot lhsLocation,
+    Js::RegSlot objectLocation,
+    Js::RegSlot computedPropIdArrLocation,
+    uint32 *computedIndex,
+    bool hasRest,
+    ParseNodePtr nameNode,
+    ByteCodeGenerator* byteCodeGenerator,
+    FuncInfo* funcInfo)
+{
+    EmitDestructuredObjectKey(nameNode, byteCodeGenerator, funcInfo);
+    EmitDestructuredObjectGet(lhsLocation, objectLocation, computedPropIdArrLocation,
+        computedIndex, hasRest, nameNode, byteCodeGenerator, funcInfo);
+}
+
+// A destructuring target of the form `base.prop`, `base[idx]` (or a private
+// reference) must be evaluated as a reference before the property value is
+// read: evaluating the base can throw (uninitialized `this` parameter of a
+// derived constructor, TDZ, getters on `with` scope objects) and the store
+// must reuse the same base value. Identifier targets evaluate to a binding
+// with no user-visible effect, so they keep the existing order.
+static bool NeedsDestructuredReferenceHoist(ParseNodePtr targetNode)
+{
+    return targetNode != nullptr &&
+        (targetNode->nop == knopDot || targetNode->nop == knopIndex);
+}
+
 void EmitDestructuredValueOrInitializer(ParseNodePtr lhsElementNode,
     Js::RegSlot rhsLocation,
     ParseNodePtr initializer,
     bool isNonPatternAssignmentTarget,
     ByteCodeGenerator *byteCodeGenerator,
-    FuncInfo *funcInfo)
+    FuncInfo *funcInfo,
+    bool referenceEmitted)
 {
     // If we have initializer we need to see if the destructured value is undefined or not - if it is undefined we need to assign initializer
 
@@ -7932,7 +8073,7 @@ void EmitDestructuredValueOrInitializer(ParseNodePtr lhsElementNode,
     }
     else
     {
-        EmitDestructuredElement(lhsElementNode, rhsLocationTmp, byteCodeGenerator, funcInfo);
+        EmitDestructuredElement(lhsElementNode, rhsLocationTmp, byteCodeGenerator, funcInfo, referenceEmitted);
     }
 
     if (initializer != nullptr)
@@ -7954,16 +8095,16 @@ void EmitDestructuredObjectMember(ParseNodePtr memberNode,
 
     Js::RegSlot nameLocation = funcInfo->AcquireTmpRegister();
     ParseNodePtr lhsElementNode = nullptr;
+    ParseNodePtr nameNode = nullptr;
+    bool referenceEmitted = false;
 
     if (memberNode->nop == knopObjectPatternMember)
     {
-        EmitNameInvoke(nameLocation, rhsLocation, computedPropIdArrLocation, 
-            computedIndex, hasRest, memberNode->AsParseNodeBin()->pnode1, byteCodeGenerator, funcInfo);
-
         // Imagine we are transforming
         // {x:x1} = {} to x1 = {}.x  (here x1 is the second node of the member but that is our lhsnode)
 
         lhsElementNode = memberNode->AsParseNodeBin()->pnode2;
+        nameNode = memberNode->AsParseNodeBin()->pnode1;
     }
     else
     {
@@ -7984,7 +8125,36 @@ void EmitDestructuredObjectMember(ParseNodePtr memberNode,
         lhsElementNode = lhsElementNode->AsParseNodeBin()->pnode1;
     }
 
-    EmitDestructuredValueOrInitializer(lhsElementNode, nameLocation, init, false /*isNonPatternAssignmentTarget*/, byteCodeGenerator, funcInfo);
+    if (nameNode != nullptr && NeedsDestructuredReferenceHoist(lhsElementNode))
+    {
+        // Evaluate the assignment target as a reference before reading the
+        // property value: evaluating the base can throw (uninitialized `this`
+        // of a derived constructor, TDZ, getters on `with` scope objects) and
+        // the store must reuse the same base value. Key, target and value
+        // then evaluate in order, matching the specified
+        // PropertyDestructuringAssignmentEvaluation.
+        EmitDestructuredObjectKey(nameNode, byteCodeGenerator, funcInfo);
+        EmitReference(lhsElementNode, byteCodeGenerator, funcInfo);
+        EmitDestructuredObjectGet(nameLocation, rhsLocation, computedPropIdArrLocation,
+            computedIndex, hasRest, nameNode, byteCodeGenerator, funcInfo,
+            false /*releaseKey: key loc predates the reference temps*/);
+        referenceEmitted = true;
+    }
+    else if (nameNode != nullptr)
+    {
+        EmitNameInvoke(nameLocation, rhsLocation, computedPropIdArrLocation,
+            computedIndex, hasRest, nameNode, byteCodeGenerator, funcInfo);
+    }
+
+    EmitDestructuredValueOrInitializer(lhsElementNode, nameLocation, init, false /*isNonPatternAssignmentTarget*/, byteCodeGenerator, funcInfo, referenceEmitted);
+
+    if (referenceEmitted && nameNode != nullptr && nameNode->nop == knopComputedName)
+    {
+        // The key location was acquired before the hoisted reference temps and
+        // released here, after ReleaseReference inside
+        // EmitDestructuredValueOrInitializer, to keep the temp stack LIFO.
+        funcInfo->ReleaseLoc(nameNode->AsParseNodeUni()->pnode1);
+    }
 
     funcInfo->ReleaseTmpRegister(nameLocation);
 }

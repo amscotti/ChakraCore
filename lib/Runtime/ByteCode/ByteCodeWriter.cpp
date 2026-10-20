@@ -1978,6 +1978,8 @@ StoreCommon:
         case OpCode::ConsoleScopedStFld:
         case OpCode::ScopedStFldStrict:
         case OpCode::ConsoleScopedStFldStrict:
+        case OpCode::LdPrivateBrand:
+            // Scope-slot brand load: exact identity, never profile-converted.
             break;
 
         case OpCode::LdLocalFld:

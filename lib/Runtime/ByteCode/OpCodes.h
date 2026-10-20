@@ -921,6 +921,23 @@ MACRO_EXTEND_WMS(       InitStaticPrivateField, Reg4,        OpSideEffect|OpOpnd
 // value shifts.
 MACRO_EXTEND_WMS(       InitClassFieldComputedName, ElementI,    OpSideEffect|OpOpndHasImplicitCall|OpPostOpDbgBailOut)
 
+// S1 tail (direct eval): load a class private brand through the runtime
+// scope chain for a private reference parsed without the caller's private
+// scope stack. The inline-cache slot carries the derived hidden-const
+// property id; the walk is intentionally uncached (eval callers vary).
+// Absent from the chain, the handler throws a SyntaxError (so indirect eval
+// never resolves a private name); present-but-uninitialized is a
+// use-before-declaration error, matching block-scoped consts. Appended last
+// so no established opcode value shifts.
+MACRO_EXTEND_WMS(       LdPrivateBrand, ElementP,    OpSideEffect|OpOpndHasImplicitCall|OpPostOpDbgBailOut)
+
+// S1 tail (direct eval): brand-checked private access where the declaration
+// kind is unknown statically, dispatching on the brand record shape at
+// runtime (field value, shared method function, or accessor record).
+// Appended last so no established opcode value shifts.
+MACRO_EXTEND_WMS(       LdPrivateDynamic, Reg3,      OpSideEffect|OpOpndHasImplicitCall|OpPostOpDbgBailOut)
+MACRO_EXTEND_WMS(       StPrivateDynamic, Reg4,      OpSideEffect|OpOpndHasImplicitCall|OpPostOpDbgBailOut)
+
 #undef MACRO_WMS_PROFILED
 #undef MACRO_WMS_PROFILED2
 #undef MACRO_WMS_PROFILED_OP

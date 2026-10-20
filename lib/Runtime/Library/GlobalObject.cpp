@@ -653,6 +653,12 @@ using namespace Js;
         // across such callers; the substring test intentionally over-approximates
         // (a false positive only disables caching).
         bool mayContainSuper = wcsstr(sourceString, _u("super")) != nullptr;
+        // A '#' may introduce a private name resolved against the caller's
+        // private environment. The eval-entry validation needs references
+        // from nested bodies too, so parse those eagerly below. (The
+        // compiled body itself stays caller-agnostic — dynamic scope-chain
+        // loads plus entry checks — so the eval map remains safe to use.)
+        bool mayContainPrivateRef = wcschr(sourceString, _u('#')) != nullptr;
         bool useEvalMap = !VirtualTableInfo<PropertyString>::HasVirtualTable(argString) &&
             debugEvalScriptContext == nullptr &&
             !evalInClassFieldInitializer && !evalInDerivedFieldConstructor &&
@@ -673,7 +679,7 @@ using namespace Js;
                 grfscr |= fscrIsLibraryCode;
             }
 
-            if (!(grfscr & fscrConsoleScopeEval))
+            if (!(grfscr & fscrConsoleScopeEval) && !mayContainPrivateRef)
             {
                 grfscr |= fscrCanDeferFncParse;
             }
