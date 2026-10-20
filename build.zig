@@ -189,6 +189,53 @@ fn gateSdk(b: *std.Build) []const u8 {
     return sdk_path;
 }
 
+fn gatePin(obj: std.json.ObjectMap, path: []const u8, select: []const u8, field: []const u8) u32 {
+    const entry = obj.get(select) orelse
+        fail("malformed gate counts {s}: missing {s} pin", .{ path, select });
+    if (entry != .object)
+        fail("malformed gate counts {s}: {s} pin must be an object", .{ path, select });
+    const v = entry.object.get(field) orelse
+        fail("malformed gate counts {s}: {s} pin missing {s}", .{ path, select, field });
+    if (v != .integer or v.integer < 0 or v.integer > std.math.maxInt(u32))
+        fail("malformed gate counts {s}: {s}.{s} must be an integer in [0, {d}]", .{ path, select, field, std.math.maxInt(u32) });
+    return @intCast(v.integer);
+}
+
+const GateCounts = struct {
+    test_passed: u32,
+    test_failed: u32,
+    debug_passed: u32,
+    debug_failed: u32,
+};
+
+// Single-sourced regression gate pins (tools/build/gate_counts.json):
+// read at build-graph time so the check-regression args and step
+// descriptions below always match check_regression.py. Missing or
+// malformed source fails the configure loudly (same fail() style as
+// the SDK/ICU gates) - never silent defaults.
+fn loadGateCounts(b: *std.Build) GateCounts {
+    const arena = b.graph.arena;
+    const root = b.root.root_dir.path orelse
+        fail("cannot resolve the build root path; refusing a CWD-relative gate counts read", .{});
+    const path = std.fmt.allocPrint(arena, "{s}/tools/build/gate_counts.json", .{root}) catch @panic("OOM");
+    const file = std.Io.Dir.openFileAbsolute(b.graph.io, path, .{}) catch
+        fail("cannot read gate counts {s}: missing tools/build/gate_counts.json", .{path});
+    defer file.close(b.graph.io);
+    var fr = file.readerStreaming(b.graph.io, &.{});
+    const bytes = fr.interface.allocRemaining(arena, .limited(1 << 20)) catch
+        fail("cannot read gate counts {s}", .{path});
+    const parsed = std.json.parseFromSlice(std.json.Value, arena, bytes, .{}) catch
+        fail("malformed gate counts {s}: invalid JSON", .{path});
+    if (parsed.value != .object)
+        fail("malformed gate counts {s}: root must be an object", .{path});
+    return .{
+        .test_passed = gatePin(parsed.value.object, path, "test", "passed"),
+        .test_failed = gatePin(parsed.value.object, path, "test", "failed"),
+        .debug_passed = gatePin(parsed.value.object, path, "debug", "passed"),
+        .debug_failed = gatePin(parsed.value.object, path, "debug", "failed"),
+    };
+}
+
 fn gateIcu(b: *std.Build) []const u8 {
     const arena = b.graph.arena;
     const io = b.graph.io;
@@ -440,6 +487,7 @@ pub fn build(b: *std.Build) void {
     const icu_include = gateIcu(b);
     const python = b.findProgram(.{ .names = &.{ "python3", "python" } }) orelse
         fail("cannot find python3 or python on PATH; needed to run bin/ch/jstoc.py for DbgController.js.h", .{});
+    const gates = loadGateCounts(b);
 
     // The test line is byte-identical to B2; other profiles label themselves.
     if (profile == .@"test") {
@@ -870,8 +918,9 @@ pub fn build(b: *std.Build) void {
     }
 
     // B3.2: debug-static checks (legacy baselines in
-    // doc/b3-profiles.md section 5). Same five gates as test, with the
-    // debug/static expectations: `--debug` regression (2064/0),
+    // doc/b3-profiles.md section 5, pins in
+    // tools/build/gate_counts.json). Same five gates as test, with the
+    // debug/static expectations: `--debug` regression (debug pin),
     // bytecode --noJit --verify, 8 EXECUTED static native tests
     // (PASS requires build+run to SUCCESS, plus archive-symbol and
     // Makefile linkage evidence), output-asserted smoke, and
@@ -910,12 +959,12 @@ pub fn build(b: *std.Build) void {
         dbg_regression.addArg("--select");
         dbg_regression.addArg("debug");
         dbg_regression.addArg("--expected-passed");
-        dbg_regression.addArg("2064");
+        dbg_regression.addArg(b.fmt("{d}", .{gates.debug_passed}));
         dbg_regression.addArg("--expected-failed");
-        dbg_regression.addArg("0");
+        dbg_regression.addArg(b.fmt("{d}", .{gates.debug_failed}));
         dbg_regression.step.dependOn(cp_step);
         dbg_regression.stdio = .inherit;
-        const dbg_regression_top = b.step("check-regression", "Run the regression suite (--debug) against the debug-static ch, require 2064 passed / 0 failed (not part of the default build)");
+        const dbg_regression_top = b.step("check-regression", b.fmt("Run the regression suite (--debug) against the debug-static ch, require {d} passed / {d} failed (not part of the default build)", .{ gates.debug_passed, gates.debug_failed }));
         dbg_regression_top.dependOn(&dbg_regression.step);
 
         const dbg_native = b.addSystemCommand(&.{python});
@@ -956,7 +1005,7 @@ pub fn build(b: *std.Build) void {
         const dbg_metadata_top = b.step("check-metadata", "Assert debug-static artifact metadata: minos, stacksize 0, headers, no dylib, archive, self-containment (not part of the default build)");
         dbg_metadata_top.dependOn(&dbg_metadata.step);
 
-        const dbg_check_top = b.step("check", "Full legacy-equivalent verification for debug-static: regression 2064/0, bytecode, static native embedding, smoke, metadata (not part of the default build)");
+        const dbg_check_top = b.step("check", b.fmt("Full legacy-equivalent verification for debug-static: regression {d}/{d}, bytecode, static native embedding, smoke, metadata (not part of the default build)", .{ gates.debug_passed, gates.debug_failed }));
         dbg_check_top.dependOn(&dbg_regression.step);
         dbg_check_top.dependOn(&dbg_verify_bc.step);
         dbg_check_top.dependOn(&dbg_native.step);
@@ -1008,15 +1057,16 @@ pub fn build(b: *std.Build) void {
     // (1) Regression suite: runtests.py --test --variants=disable_jit
     // --binary=<installed ch> - the legacy-exact selection for this
     // profile (test/CMakeLists.txt:39-44; no --not-tag since ICU is
-    // present). Requires 2012 passed / 0 failed, parsed from the
-    // real `Total:` summary line.
+    // present). Requires the gate_counts.json test pin, parsed from
+    // the real `Total:` summary line (check_regression.py defaults to
+    // --select test when no explicit counts are passed).
     const regression = b.addSystemCommand(&.{python});
     regression.addFileArg(b.path("tools/build/check_regression.py"));
     regression.addFileArg(b.path("test/runtests.py"));
     regression.addFileArg(installed_ch);
     regression.step.dependOn(b.getInstallStep());
     regression.stdio = .inherit;
-    const regression_top = b.step("check-regression", "Run the regression suite against the zig-built ch, require 2012 passed / 0 failed (not part of the default build)");
+    const regression_top = b.step("check-regression", b.fmt("Run the regression suite against the zig-built ch, require {d} passed / {d} failed (not part of the default build)", .{ gates.test_passed, gates.test_failed }));
     regression_top.dependOn(&regression.step);
 
     // (3) Shared embedding test: test_native.sh with the zig-built ch
@@ -1052,7 +1102,7 @@ pub fn build(b: *std.Build) void {
     const metadata_top = b.step("check-metadata", "Assert artifact metadata: minos, stacks, headers, exports (not part of the default build)");
     metadata_top.dependOn(&metadata.step);
 
-    const check_top = b.step("check", "Full legacy-equivalent verification: regression 2012/0, bytecode, native embedding, smoke, metadata (not part of the default build)");
+    const check_top = b.step("check", b.fmt("Full legacy-equivalent verification: regression {d}/{d}, bytecode, native embedding, smoke, metadata (not part of the default build)", .{ gates.test_passed, gates.test_failed }));
     check_top.dependOn(&regression.step);
     check_top.dependOn(&verify_bc.step);
     check_top.dependOn(&native.step);

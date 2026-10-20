@@ -8,7 +8,7 @@
 #   - all 14 required B1 configuration checks pass (the optional local
 #     CMake-reference comparison adds a 15th check when available);
 #   - the equivalent legacy cmake leg (F0 recipe: RelWithDebInfo, shared,
-#     no-JIT, system ICU) will stay green at 2012/0;
+#     no-JIT, system ICU) will stay green at the gate_counts.json test pin;
 #   - every run records its inputs (zig version + full `zig env`, target,
 #     flavor, feature defines, dependency versions) and outputs (artifact
 #     manifest with sizes/hashes, gate tallies) as job outputs + artifacts.
@@ -189,16 +189,17 @@ jobs:
           set -euo pipefail
           case '${{ matrix.profile }}' in
             test)
-              grep -E 'Total: passed 2012, failed 0' ci-evidence/check.log
               grep -E 'Bytecode is up to date' ci-evidence/check.log
               grep -E 'test-shared-basic : PASS' ci-evidence/check.log
-              line="test: regression=2012/0 bytecode=up-to-date native=shared-PASS"
+              # Regression pin single-sourced from tools/build/gate_counts.json:
+              # the python one-liner both asserts the Total line and builds
+              # the tally from the same pins (no literal counts here).
+              line="$(python3 -c "import json; c=json.load(open('tools/build/gate_counts.json'))['test']; want='Total: passed %d, failed %d' % (c['passed'], c['failed']); assert want in open('ci-evidence/check.log').read(), 'missing ' + want; print('test: regression=%d/%d bytecode=up-to-date native=shared-PASS' % (c['passed'], c['failed']))")"
               ;;
             debug-static)
-              grep -E 'Total: passed 2064, failed 0' ci-evidence/check.log
               grep -E 'Bytecode is up to date' ci-evidence/check.log
               test "$(grep -cE 'test-static-.* : PASS' ci-evidence/check.log)" = '8'
-              line="debug-static: regression=2064/0 bytecode=up-to-date native=8x-static-PASS"
+              line="$(python3 -c "import json; c=json.load(open('tools/build/gate_counts.json'))['debug']; want='Total: passed %d, failed %d' % (c['passed'], c['failed']); assert want in open('ci-evidence/check.log').read(), 'missing ' + want; print('debug-static: regression=%d/%d bytecode=up-to-date native=8x-static-PASS' % (c['passed'], c['failed']))")"
               ;;
             release-shared)
               # The hello leg is logged as a one-line repr, not raw
@@ -261,7 +262,7 @@ jobs:
           path: ci-evidence/
 
   legacy-test:
-    name: legacy cmake Test leg (F0 recipe, 2012/0)
+    name: legacy cmake Test leg (F0 recipe, gate_counts.json test pin)
     runs-on: macos-26
     timeout-minutes: 90
     outputs:
@@ -304,13 +305,14 @@ jobs:
         id: tally
         run: |
           set -euo pipefail
-          grep -E 'Total: passed 2012, failed 0' ci-evidence/check.log
           grep -E 'test-shared-basic : PASS' ci-evidence/check.log
+          # Regression pin single-sourced from tools/build/gate_counts.json
+          # (same one-liner shape as the zig legs above).
+          line="$(python3 -c "import json; c=json.load(open('tools/build/gate_counts.json'))['test']; want='Total: passed %d, failed %d' % (c['passed'], c['failed']); assert want in open('ci-evidence/check.log').read(), 'missing ' + want; print('legacy-test: regression=%d/%d native=shared-PASS' % (c['passed'], c['failed']))")"
           ls -l build-ci-test/ch | tee -a ci-evidence/check.log
           # The legacy dylib lands at the build root (observed in the
           # B3.5 sim), not under bin/ — both paths asserted, no `|| true`.
           shasum -a 256 build-ci-test/ch build-ci-test/libChakraCore.dylib | tee ci-evidence/shasum.txt
-          line="legacy-test: regression=2012/0 native=shared-PASS"
           echo "$line" | tee ci-evidence/tally.txt
           echo "tally=$line" >> "$GITHUB_OUTPUT"
           echo "- $line" >> "$GITHUB_STEP_SUMMARY"

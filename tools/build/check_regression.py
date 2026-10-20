@@ -18,27 +18,12 @@ No --not-tag: ICU is present in these profiles, so TEST_ICU is empty
 Slow, ...) is runtests.py's own and therefore identical by
 construction.
 
-Requires the legacy baseline counts for the selection: 2012 passed /
-0 failed (--test), 2064 passed / 0 failed (--debug). The C2-S13
-WeakRef slice added weakref.js and weakref-gc.js to both selections
-(1984/2036 -> 2012/2064) on top of the C2-S8 float16.js test, which sits
-on top of the C2-S2 sub-batch 4 bigint-mixed.js
-test, which sits on top of sub-batch 3's
-bigint-literals.js (doc/c2-s2-bigint.md), sub-batch 2's asIntN/asUintN
-test, and the C2-S9 modifiers sub-batch's regexp-modifiers.js
-(doc/c2-s9-modifiers.md), C2-S13's
-weakcollections-symbols.js (doc/c2-s13-symbol-keys.md), itself on
-top of C2-S14's blockscope-early-errors.js
-(doc/c2-s14-blockscope.md), C2-S2 sub-batch 1's bigint-basics.js
-(doc/c2-s2-bigint.md) and
-the S9 receipts, doc/c2-s9-namedgroups.md, which registered
-namedgroups.js, namedgroups-symbols.js, regexp-indices.js,
-regexp-indices-symbols.js, namedgroups-dup.js and
-regexp-lookbehind.js on top of C2-S7's 1968/2020; earlier rungs:
-matchall.js 1967/2019, the S11 remainder's s11-builtins.js
-1966/2018, C2-S10's Set-methods/copy-by-change 1965/2017 and
-1966/2018, S11 replaceAll 1964/2016, S5 1962/2014). The --debug selection honestly differs
-from Test's count (doc/b3-profiles.md §5).
+Requires the legacy baseline counts for the selection, single-sourced
+from tools/build/gate_counts.json (test and debug pins with the full
+why-chain in its _lineage key; receipts doc/c2-s2-bigint.md,
+doc/c2-s9-modifiers.md, doc/c2-s13-symbol-keys.md,
+doc/c2-s14-blockscope.md, doc/c2-s9-namedgroups.md). The --debug
+selection honestly differs from Test's count (doc/b3-profiles.md §5).
 The verdict comes from parsing the real `Total: passed N, failed M`
 summary line (runtests.py:567), not from the exit code alone; a
 nonzero exit, a missing summary, or 2+ summary lines also fails
@@ -47,20 +32,12 @@ runtests.py's own per-test timeout is untouched.
 
 Usage: check_regression.py <runtests.py> <ch> [--select test|debug]
        [--expected-passed N] [--expected-failed M] [--self-test]
-Defaults: --select test, 2012/0 (the B2 test profile; count raised by
-C2-S13 WeakRef's weakref.js + weakref-gc.js, C2-S8's float16.js,
-S2-b4's bigint-mixed.js, S2-b3's bigint-literals.js,
-S2-b2's bigint-asintn.js, the S9 modifiers sub-batch's
-regexp-modifiers.js, S13's
-weakcollections-symbols.js, S14's blockscope-early-errors.js
-and S2-b1's bigint-basics.js on
-top of S9's regexp-lookbehind.js,
-namedgroups-dup.js, regexp-indices.js, regexp-indices-symbols.js,
-namedgroups.js and namedgroups-symbols.js from the earlier S9 rungs
-and C2-S7's 1968, doc/c2-s2-bigint.md, doc/c2-s9-namedgroups.md).
-Exit code: 0 iff the suite ran green with exactly the expected counts.
+Defaults: --select test with the gate_counts.json test pin (the B2
+test profile). Exit code: 0 iff the suite ran green with exactly the
+expected counts.
 """
 
+import json
 import os
 import re
 import subprocess
@@ -70,29 +47,52 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common
 
 TOTAL_RE = re.compile(r"^Total: passed (\d+), failed (\d+)\s*$")
-EXPECTED_PASSED = 2012
-EXPECTED_FAILED = 0
-# Per-selection legacy baselines (counts: doc/c2-s9-modifiers.md,
+# Single-sourced gate pins: tools/build/gate_counts.json holds the
+# per-selection legacy baselines (why-chain in its _lineage key;
+# receipts doc/c2-s2-bigint.md, doc/c2-s9-modifiers.md,
 # doc/c2-s13-symbol-keys.md, doc/c2-s14-blockscope.md,
-# doc/c2-s2-bigint.md and doc/c2-s9-namedgroups.md; S2 sub-batch 4
-# added bigint-mixed.js on top of sub-batch 3's bigint-literals.js.
-# The S9 modifiers sub-batch added regexp-modifiers.js on top of S13's
-# weakcollections-symbols.js, itself on top of
-# S14's blockscope-early-errors.js, on top of S2 sub-batch 1's bigint-basics.js on top
-# of S9, which added namedgroups.js + namedgroups-symbols.js over C2-S7's
-# 1968/2020, then its sub-batch 2 added regexp-indices.js +
-# regexp-indices-symbols.js, sub-batch 3 added namedgroups-dup.js, and
-# sub-batch 4 added regexp-lookbehind.js;
-# before that the rungs were matchall.js
-# 1967/2019, s11-builtins.js 1966/2018, setmethods.js 1965/2017, S11
-# replaceAll 1964/2016, S5 1962/2014). Why the selections differ:
-# doc/b3-profiles.md §5. --select picks the flag; the counts stay
-# explicit CLI args so a wiring mistake (debug flag with test counts)
-# fails instead of silently passing on a wrong gate.
-# C2-S8 added float16.js to both selections (1981/2033 -> 1982/2034).
-# C2-S13 WeakRef added weakref.js and weakref-gc.js (1984/2036 -> 2012/2064).
+# doc/c2-s9-namedgroups.md; why the selections differ:
+# doc/b3-profiles.md §5). Missing/malformed source fails loudly here
+# with no silent defaults, so a lost or hand-edited pin can never
+# pass as the old hard-coded counts.
+GATE_COUNTS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "gate_counts.json")
+
+
+def _load_gate_counts(path=GATE_COUNTS_PATH):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except OSError as e:
+        print("check_regression: FAIL: cannot read gate counts %s: %s"
+              % (path, e), file=sys.stderr)
+        raise SystemExit(2)
+    except ValueError as e:
+        print("check_regression: FAIL: malformed gate counts %s: %s"
+              % (path, e), file=sys.stderr)
+        raise SystemExit(2)
+    counts = {}
+    for select in ("test", "debug"):
+        entry = data.get(select) if isinstance(data, dict) else None
+        if (not isinstance(entry, dict)
+                or not isinstance(entry.get("passed"), int)
+                or not isinstance(entry.get("failed"), int)
+                or entry["passed"] < 0 or entry["failed"] < 0
+                or isinstance(entry.get("passed"), bool)
+                or isinstance(entry.get("failed"), bool)):
+            print("check_regression: FAIL: gate counts %s missing/invalid "
+                  "%r pin: need {\"passed\": int >= 0, \"failed\": int >= 0}"
+                  % (path, select), file=sys.stderr)
+            raise SystemExit(2)
+        counts[select] = (entry["passed"], entry["failed"])
+    return counts
+
+
 SELECT_FLAGS = {"test": "--test", "debug": "--debug"}
-SELECT_COUNTS = {"test": (2012, 0), "debug": (2064, 0)}
+SELECT_COUNTS = _load_gate_counts()
+# Back-compat default pair (the B2 test profile); kept as names, not
+# literals, so a pin bump cannot strand a stale default here.
+EXPECTED_PASSED, EXPECTED_FAILED = SELECT_COUNTS["test"]
 
 
 def parse_total(lines):
@@ -126,21 +126,26 @@ def check_counts(parsed, exp_passed, exp_failed):
 
 def self_test():
     """Negative controls: the parser/verdict must reject doctored logs."""
+    # All vectors derive from the gate_counts.json pins: the exact
+    # baseline must accept, and every doctored variant (off-by-N passed,
+    # nonzero failed, duplicated/missing/malformed summary) must reject.
+    tp, tf = SELECT_COUNTS["test"]
+    exact = "Total: passed %d, failed %d" % (tp, tf)
     cases = [
         ("exact baseline",
-         ["Total: passed 2012, failed 0"], True),
+         [exact], True),
         ("one failure",
-         ["Total: passed 1960, failed 1"], False),
+         ["Total: passed %d, failed %d" % (tp, tf + 1)], False),
+        ("wrong passed",
+         ["Total: passed %d, failed %d" % (tp + 4, tf)], False),
         ("wrong total",
-         ["Total: passed 1962, failed 0", "Total: passed 10, failed 0"], False),
+         [exact, "Total: passed 10, failed 0"], False),
         ("duplicate summary",
-         ["Total: passed 1962, failed 0",
-          "Total: passed 1962, failed 0"], False),
+         [exact, exact], False),
         ("missing summary",
          ["############ Results ###########", "Success!"], False),
         ("lookalike line",
-         ["XTotal: passed 1962, failed 0",
-          "Total: passed 1962, failed 0 wisely"], False),
+         ["X" + exact, exact + " wisely"], False),
     ]
     bad = 0
     for name, lines, want_ok in cases:
@@ -155,30 +160,37 @@ def self_test():
             bad += 1
         print("self-test %-16s -> %s (verdict=%s err=%r)"
               % (name, status, "accept" if ok else "reject", err))
-    # Profile-awareness pins: the --debug baseline (2064/0) must be
-    # accepted under debug expectations and rejected under test
-    # expectations, so a count/selection mismatch can never pass.
+    # Profile-awareness pins, derived from both gate_counts.json pins:
+    # each selection's baseline must be accepted under its own
+    # expectations and rejected under the other's, so a count/selection
+    # mismatch (debug flag with test counts or vice versa) can never
+    # pass. Skipped when both pins coincide (then swapping is a no-op).
+    dp, df = SELECT_COUNTS["debug"]
+    dbg_line = "Total: passed %d, failed %d" % (dp, df)
     try:
-        err = check_counts(parse_total(["Total: passed 2064, failed 0"]),
-                           *SELECT_COUNTS["debug"])
+        err = check_counts(parse_total([dbg_line]), *SELECT_COUNTS["debug"])
     except ValueError as e:
         err = str(e)
     if err is None:
-        print("self-test %-16s -> PASS (verdict=accept)" % "debug 2064/0")
+        print("self-test %-16s -> PASS (verdict=accept)" % "debug baseline")
     else:
         print("self-test %-16s -> FAIL (verdict=reject err=%r)"
-              % ("debug 2064/0", err))
+              % ("debug baseline", err))
         bad += 1
-    try:
-        err = check_counts(parse_total(["Total: passed 2016, failed 0"]),
-                           *SELECT_COUNTS["test"])
-    except ValueError as e:
-        err = str(e)
-    if err is not None:
-        print("self-test %-16s -> PASS (verdict=reject)" % "debug vs test")
-    else:
-        print("self-test %-16s -> FAIL (verdict=accept)" % "debug vs test")
-        bad += 1
+    for name, line, expect in (("debug vs test", dbg_line, SELECT_COUNTS["test"]),
+                               ("test vs debug", exact, SELECT_COUNTS["debug"])):
+        if SELECT_COUNTS["test"] == SELECT_COUNTS["debug"]:
+            print("self-test %-16s -> PASS (pins coincide, skip)" % name)
+            continue
+        try:
+            err = check_counts(parse_total([line]), *expect)
+        except ValueError as e:
+            err = str(e)
+        if err is not None:
+            print("self-test %-16s -> PASS (verdict=reject)" % name)
+        else:
+            print("self-test %-16s -> FAIL (verdict=accept)" % name)
+            bad += 1
     if SELECT_FLAGS.get("debug") == "--debug":
         print("self-test %-16s -> PASS" % "debug flag map")
     else:
