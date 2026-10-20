@@ -34,6 +34,7 @@ ROOT = HERE.parent.parent
 sys.path.insert(0, str(HERE))
 import common
 import check_native
+import check_regression
 import check_regression_linux
 import install_profile
 import test_incremental
@@ -434,6 +435,75 @@ class RegressionLinuxGradeTests(unittest.TestCase):
         verdict, _ = check_regression_linux.grade_variant(
             "interpreted", 0, ["some harness output", self.SIG6])
         self.assertEqual(verdict, "FAIL")
+
+
+class GateCountsTests(unittest.TestCase):
+    """tools/build/gate_counts.json is the single source of the Mac
+    regression pins: check_regression.py must follow it exactly, and a
+    missing/malformed source must fail loudly (no silent defaults)."""
+
+    def load_source(self):
+        with open(HERE / "gate_counts.json", encoding="utf-8") as f:
+            return json.load(f)
+
+    def test_source_shape(self):
+        data = self.load_source()
+        for select in ("test", "debug"):
+            self.assertIsInstance(data[select]["passed"], int)
+            self.assertIsInstance(data[select]["failed"], int)
+            self.assertNotIsInstance(data[select]["passed"], bool)
+            self.assertNotIsInstance(data[select]["failed"], bool)
+            self.assertGreaterEqual(data[select]["passed"], 0)
+            self.assertGreaterEqual(data[select]["failed"], 0)
+
+    def test_check_regression_follows_source(self):
+        data = self.load_source()
+        for select in ("test", "debug"):
+            self.assertEqual(check_regression.SELECT_COUNTS[select],
+                             (data[select]["passed"], data[select]["failed"]))
+        self.assertEqual((check_regression.EXPECTED_PASSED,
+                          check_regression.EXPECTED_FAILED),
+                         check_regression.SELECT_COUNTS["test"])
+
+    def test_wrong_counts_rejected(self):
+        tp, tf = check_regression.SELECT_COUNTS["test"]
+        line = "Total: passed %d, failed %d" % (tp, tf)
+        self.assertIsNone(check_regression.check_counts(
+            check_regression.parse_total([line]), tp, tf))
+        self.assertIsNotNone(check_regression.check_counts(
+            check_regression.parse_total(
+                ["Total: passed %d, failed %d" % (tp + 1, tf)]), tp, tf))
+        if (check_regression.SELECT_COUNTS["test"]
+                != check_regression.SELECT_COUNTS["debug"]):
+            dp, df = check_regression.SELECT_COUNTS["debug"]
+            dbg = "Total: passed %d, failed %d" % (dp, df)
+            self.assertIsNotNone(check_regression.check_counts(
+                check_regression.parse_total([dbg]), tp, tf))
+            self.assertIsNotNone(check_regression.check_counts(
+                check_regression.parse_total([line]), dp, df))
+
+    def run_isolated_selftest(self, gate_counts_text=None):
+        with tempfile.TemporaryDirectory(prefix="gate-counts-test-") as tmp:
+            root = Path(tmp)
+            shutil.copy(HERE / "check_regression.py",
+                        root / "check_regression.py")
+            shutil.copy(HERE / "common.py", root / "common.py")
+            if gate_counts_text is not None:
+                (root / "gate_counts.json").write_text(gate_counts_text)
+            return subprocess.run(
+                [sys.executable, str(root / "check_regression.py"),
+                 "--self-test"],
+                capture_output=True, text=True, timeout=60)
+
+    def test_missing_source_fails_loudly(self):
+        proc = self.run_isolated_selftest()
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("gate_counts.json", proc.stderr)
+
+    def test_malformed_source_fails_loudly(self):
+        proc = self.run_isolated_selftest('{"test": {"passed": 1}}')
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("gate_counts.json", proc.stderr)
 
 
 class BytecodePurityTests(unittest.TestCase):
