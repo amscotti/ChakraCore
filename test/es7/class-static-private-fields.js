@@ -337,13 +337,14 @@ const tests = [
             }, TypeError);
 
             // Private static methods/accessors are supported (see
-            // class-private-methods.js); static blocks, computed names and
-            // async/generator private variants remain SyntaxError.
+            // class-private-methods.js), including the async/generator
+            // variants; static blocks and computed names remain SyntaxError.
             assert.doesNotThrow(function () { eval("class C { static #m() {} }"); });
             assert.doesNotThrow(function () { eval("class C { static get #p() { return 1; } }"); });
             assert.doesNotThrow(function () { eval("class C { static set #p(v) {} }"); });
-            assert.throws(function () { eval("class C { static * #g() {} }"); }, SyntaxError);
-            assert.throws(function () { eval("class C { static async #m() {} }"); }, SyntaxError);
+            assert.doesNotThrow(function () { eval("class C { static * #g() {} }"); });
+            assert.doesNotThrow(function () { eval("class C { static async #m() {} }"); });
+            assert.doesNotThrow(function () { eval("class C { static async * #m() {} }"); });
             assert.throws(function () { eval("class C { static {} }"); }, SyntaxError);
             assert.throws(function () { eval("class C { static ['computed'] = 1; }"); }, SyntaxError);
 
