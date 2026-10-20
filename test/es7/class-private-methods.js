@@ -817,6 +817,80 @@ const tests = [
                 ".then(function (r) { assert.areEqual(7, r.value); assert.areEqual(false, r.done); _asyncExit(); }," +
                 " function (e) { assert.fail('async completion failed: ' + (e && e.stack || e)); });");
         }
+    },
+    {
+        // S1 tail: direct eval inherits the caller's private environment.
+        // Private references in eval code inside methods, accessors and
+        // field initializers resolve to the enclosing class's names with
+        // runtime brand checks; indirect eval and undeclared names throw
+        // SyntaxError (the latter before any eval statement executes).
+        name: "direct eval inherits the caller's private environment",
+        body() {
+            class C {
+                #m = 44;
+                getWithEval() { return eval("this.#m"); }
+            }
+            class D {
+                #m = 45;
+            }
+            const c = new C();
+            assert.areEqual(44, c.getWithEval());
+            assert.throws(function () { c.getWithEval.call(new D()); }, TypeError, "brand of the enclosing class applies");
+
+            class CM {
+                #m() { return "Test262"; }
+                callWithEval() { return eval("this.#m()"); }
+            }
+            class DM {
+                #m() { throw new Error("must not run"); }
+            }
+            const cm = new CM();
+            assert.areEqual("Test262", cm.callWithEval());
+            assert.throws(function () { cm.callWithEval.call(new DM()); }, TypeError);
+
+            class CA {
+                get #v() { return "Test262"; }
+                getWithEval() { return eval("this.#v"); }
+            }
+            assert.areEqual("Test262", new CA().getWithEval());
+
+            class CS {
+                #v = 1;
+                setWithEval(v) { eval("this.#v = v"); return this.#v; }
+            }
+            assert.areEqual("Test262", new CS().setWithEval("Test262"));
+
+            class CI {
+                #m = 11;
+                v = eval("this.#m * 2");
+            }
+            assert.areEqual(22, new CI().v);
+
+            class CST {
+                static #m() { return "Test262"; }
+                static callWithEval() { return eval("this.#m()"); }
+            }
+            assert.areEqual("Test262", CST.callWithEval());
+
+            // Indirect eval never resolves private names.
+            class IND {
+                #m = 1;
+                f() { return (0, eval)("this.#m"); }
+            }
+            assert.throws(function () { new IND().f(); }, SyntaxError);
+
+            // Undeclared names are early errors: nothing executes first,
+            // including inside nested functions.
+            let executed = false;
+            class UN {
+                f() { return eval("executed = true; this.#undeclared;"); }
+                g() { return eval("function h() { return this.#undeclared; }"); }
+            }
+            const un = new UN();
+            assert.throws(function () { un.f(); }, SyntaxError);
+            assert.throws(function () { un.g(); }, SyntaxError);
+            assert.areEqual(false, executed, "eval body did not start executing");
+        }
     }
 ];
 

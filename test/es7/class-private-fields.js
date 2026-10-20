@@ -312,6 +312,99 @@ const tests = [
             assert.areEqual(1, c.x);
             assert.areEqual("x", Object.keys(c).join(","));
         }
+    },
+    {
+        // S1 tail: private references inside computed property names resolve
+        // against the class private environment; the brand const is
+        // initialized before key evaluation, so a missing brand is a
+        // TypeError (never a use-before-declaration error), whatever the
+        // declaration order.
+        name: "private names resolve in computed field keys with runtime brand checks",
+        body() {
+            const outer = {};
+            assert.throws(function () {
+                class C {
+                    [outer.#f] = "Test262";
+                    #f = "foo";
+                }
+            }, TypeError, "brand missing on the key receiver is a TypeError");
+            assert.throws(function () {
+                class C {
+                    #f = "foo";
+                    [outer.#f] = "Test262";
+                }
+            }, TypeError, "declaration order does not matter");
+            assert.throws(function () {
+                class C {
+                    [outer.#m()] = "Test262";
+                    #m() { throw new Error("must not run"); }
+                }
+            }, TypeError, "private method brand missing on the key receiver");
+            assert.throws(function () {
+                class C {
+                    #f = "foo";
+                    [outer.#f];
+                }
+            }, TypeError, "bare computed keys with private refs brand-check too");
+        }
+    },
+    {
+        // S1 tail: PrivateFieldGet/Put on a primitive receiver throws
+        // TypeError (spec GetValue order: the primitive is checked before the
+        // brand lookup runs).
+        name: "private field access on primitive receivers throws TypeError",
+        body() {
+            class C {
+                #p = 1;
+                get() { return this.#p; }
+                set(v) { this.#p = v; }
+            }
+            const c = new C();
+            [15, "Test262", Symbol("Test262"), null, undefined].forEach(function (receiver) {
+                assert.throws(function () { c.get.call(receiver); }, TypeError, "get on primitive " + String(receiver));
+                assert.throws(function () { c.set.call(receiver, 2); }, TypeError, "set on primitive " + String(receiver));
+            });
+            assert.areEqual(1, c.get.call(c), "instance access keeps working");
+        }
+    },
+    {
+        // S1 tail: in object destructuring the assignment target is evaluated
+        // as a reference before the property value is read, so a receiver
+        // that throws (uninitialized `this` of a derived constructor) throws
+        // before any getter on the right-hand side runs.
+        name: "object destructuring evaluates the target reference before reading the value",
+        body() {
+            const log = [];
+            class Base { }
+            class C extends Base {
+                #field;
+                field;
+                constructor(which) {
+                    const init = () => super();
+                    const object = {
+                        get a() { log.push("get:" + which); init(); return 1; }
+                    };
+                    if (which === "private") {
+                        ({ a: this.#field } = object);
+                    } else {
+                        ({ a: this.field } = object);
+                    }
+                }
+            }
+            assert.throws(function () { new C("private"); }, ReferenceError, "private target throws before the getter");
+            assert.throws(function () { new C("public"); }, ReferenceError, "public target throws before the getter");
+            assert.areEqual("", log.join(","), "no getter ran");
+
+            // Sanity: key, target, value evaluate in order for member targets.
+            const order = [];
+            const holder = {};
+            const key = function () { order.push("key"); return "p"; };
+            const target = function () { order.push("target"); return holder; };
+            const source = { get p() { order.push("get"); return 1; } };
+            ({ [key()]: target().x } = source);
+            assert.areEqual("key,target,get", order.join(","));
+            assert.areEqual(1, holder.x);
+        }
     }
 ];
 

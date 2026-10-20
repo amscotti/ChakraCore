@@ -359,6 +359,8 @@ namespace Js
         static Var OP_NewPrivateName(ScriptContext * scriptContext);
         static Var OP_LdPrivateField(Var instance, Var brand, ScriptContext * scriptContext);
         static Var OP_StPrivateField(Var instance, Var brand, Var newValue, ScriptContext * scriptContext);
+        static Var OP_LdPrivateDynamic(Var instance, Var brand, ScriptContext * scriptContext);
+        static Var OP_StPrivateDynamic(Var instance, Var brand, Var newValue, ScriptContext * scriptContext);
         static Var OP_InitPrivateField(Var instance, Var brand, Var newValue, ScriptContext * scriptContext);
         static Var OP_InitStaticPrivateField(Var instance, Var brand, Var newValue, ScriptContext * scriptContext);
         static BOOL OP_HasPrivateField(Var instance, Var brand, ScriptContext * scriptContext);

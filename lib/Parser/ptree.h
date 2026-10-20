@@ -403,7 +403,13 @@ protected:
 private:
     bool isSpecialName;         // indicates a PnPid (knopName) is a special name like 'this' or 'super'
     bool isPrivateName;         // '#name' reference to a class private binding
+    bool isDynamicPrivateName;  // '#name' in direct-eval code, resolved against
+                                // the caller's private environment through the
+                                // runtime scope chain (sym stays nullptr)
     PrivateNameKind privateKind; // dispatch kind of a private reference/declaration
+public:
+    bool IsDynamicPrivateName() { return isDynamicPrivateName; }
+    void SetIsDynamicPrivateName() { isDynamicPrivateName = true; }
 };
 
 // variable declaration
@@ -827,6 +833,13 @@ public:
 
     ParseNodePtr pnodeLastValStmt;  // Used by ByteCodeGenerator
     bool m_UsesArgumentsAtGlobal;
+
+    // Source spellings of private names referenced dynamically from direct-eval
+    // code (resolved against the caller's private environment through the
+    // runtime scope chain). knopList of knopName with pid == source spelling.
+    // Used by ByteCodeGenerator to emit eval-entry brand checks. Null when the
+    // program contains no such reference.
+    ParseNodePtr pnodeEvalPrivateBrands;
 
     DISABLE_SELF_CAST(ParseNodeProg);
 };

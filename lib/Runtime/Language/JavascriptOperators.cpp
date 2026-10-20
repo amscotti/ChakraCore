@@ -3611,6 +3611,79 @@ CommonNumber:
         return nullptr;
     }
 
+    // Brand-checked private access for references whose declaration kind is
+    // unknown statically (direct eval): dispatch on the brand record shape.
+    // A shared function definition is a method, a {get, set} record is an
+    // accessor, and no shared definition means an instance field.
+    Var JavascriptOperators::OP_LdPrivateDynamic(Var instance, Var brand, ScriptContext * scriptContext)
+    {
+        if (!JavascriptOperators::IsObject(instance))
+        {
+            ThrowPrivateBrandCheck(scriptContext);
+        }
+        RecyclableObject * object = UnsafeVarTo<RecyclableObject>(instance);
+        JavascriptWeakMap * brandMap = GetPrivateBrandMap(brand);
+        if (!brandMap->Has(object))
+        {
+            ThrowPrivateBrandCheck(scriptContext);
+        }
+        Var definition = GetPrivateDefinition(brandMap);
+        if (definition == nullptr)
+        {
+            Var value;
+            if (!brandMap->Get(object, &value))
+            {
+                ThrowPrivateBrandCheck(scriptContext);
+            }
+            return value;
+        }
+        if (VarIs<JavascriptFunction>(definition))
+        {
+            return definition;
+        }
+        DynamicObject * record = UnsafeVarTo<DynamicObject>(definition);
+        Var getter;
+        if (!JavascriptOperators::GetOwnProperty(record, Js::PropertyIds::get, &getter, scriptContext, nullptr) ||
+            getter == nullptr || !VarIs<JavascriptFunction>(getter))
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_PrivateAccessorMissingGetter);
+        }
+        return JavascriptOperators::CallGetter(UnsafeVarTo<RecyclableObject>(getter), instance, scriptContext);
+    }
+
+    Var JavascriptOperators::OP_StPrivateDynamic(Var instance, Var brand, Var newValue, ScriptContext * scriptContext)
+    {
+        if (!JavascriptOperators::IsObject(instance))
+        {
+            ThrowPrivateBrandCheck(scriptContext);
+        }
+        RecyclableObject * object = UnsafeVarTo<RecyclableObject>(instance);
+        JavascriptWeakMap * brandMap = GetPrivateBrandMap(brand);
+        if (!brandMap->Has(object))
+        {
+            ThrowPrivateBrandCheck(scriptContext);
+        }
+        Var definition = GetPrivateDefinition(brandMap);
+        if (definition == nullptr)
+        {
+            brandMap->Set(object, newValue);
+            return newValue;
+        }
+        if (VarIs<JavascriptFunction>(definition))
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_PrivateMethodNotWritable);
+        }
+        DynamicObject * record = UnsafeVarTo<DynamicObject>(definition);
+        Var setter;
+        if (!JavascriptOperators::GetOwnProperty(record, Js::PropertyIds::set, &setter, scriptContext, nullptr) ||
+            setter == nullptr || !VarIs<JavascriptFunction>(setter))
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_PrivateAccessorMissingSetter);
+        }
+        JavascriptOperators::CallSetter(UnsafeVarTo<RecyclableObject>(setter), instance, newValue, scriptContext);
+        return newValue;
+    }
+
     BOOL JavascriptOperators::DeleteProperty(RecyclableObject* instance, PropertyId propertyId, PropertyOperationFlags propertyOperationFlags)
     {
         return DeleteProperty_Impl<false>(instance, propertyId, propertyOperationFlags);
