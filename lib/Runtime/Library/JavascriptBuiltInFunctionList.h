@@ -608,5 +608,9 @@ BUILTIN(JavascriptFinalizationRegistry, Unregister, EntryUnregister, FunctionInf
 BUILTIN(SharedArrayBuffer, GetterMaxByteLength, EntryGetterMaxByteLength, FunctionInfo::ErrorOnNew | FunctionInfo::HasNoSideEffect)
 BUILTIN(SharedArrayBuffer, GetterGrowable, EntryGetterGrowable, FunctionInfo::ErrorOnNew | FunctionInfo::HasNoSideEffect)
 BUILTIN(SharedArrayBuffer, Grow, EntryGrow, FunctionInfo::ErrorOnNew)
+// ES2026 Atomics.pause and Atomics.waitAsync. Appended after the existing
+// entries so every pre-existing BuiltInEnum value stays stable.
+BUILTIN(AtomicsObject, Pause, EntryPause, FunctionInfo::ErrorOnNew)
+BUILTIN(AtomicsObject, WaitAsync, EntryWaitAsync, FunctionInfo::ErrorOnNew)
 
 #undef BUILTIN_TEMPLATE

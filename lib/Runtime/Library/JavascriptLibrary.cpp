@@ -2311,7 +2311,7 @@ namespace Js
 
     bool JavascriptLibrary::InitializeAtomicsObject(DynamicObject* atomicsObject, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)
     {
-        typeHandler->Convert(atomicsObject, mode, 12);
+        typeHandler->Convert(atomicsObject, mode, 14);
 
         JavascriptLibrary* library = atomicsObject->GetLibrary();
 
@@ -2322,9 +2322,11 @@ namespace Js
         library->AddFunctionToLibraryObject(atomicsObject, PropertyIds::isLockFree, &AtomicsObject::EntryInfo::IsLockFree, 1);
         library->AddFunctionToLibraryObject(atomicsObject, PropertyIds::load, &AtomicsObject::EntryInfo::Load, 2);
         library->AddFunctionToLibraryObject(atomicsObject, PropertyIds::or_, &AtomicsObject::EntryInfo::Or, 3);
+        library->AddFunctionToLibraryObjectWithPropertyName(atomicsObject, _u("pause"), &AtomicsObject::EntryInfo::Pause, 0);
         library->AddFunctionToLibraryObject(atomicsObject, PropertyIds::store, &AtomicsObject::EntryInfo::Store, 3);
         library->AddFunctionToLibraryObject(atomicsObject, PropertyIds::sub, &AtomicsObject::EntryInfo::Sub, 3);
         library->AddFunctionToLibraryObject(atomicsObject, PropertyIds::wait, &AtomicsObject::EntryInfo::Wait, 4);
+        library->AddFunctionToLibraryObjectWithPropertyName(atomicsObject, _u("waitAsync"), &AtomicsObject::EntryInfo::WaitAsync, 4);
         library->AddFunctionToLibraryObject(atomicsObject, PropertyIds::notify, &AtomicsObject::EntryInfo::Notify, 3);
         library->AddFunctionToLibraryObject(atomicsObject, PropertyIds::xor_, &AtomicsObject::EntryInfo::Xor, 3);
 
@@ -8460,9 +8462,11 @@ namespace Js
         REG_OBJECTS_LIB_FUNC(isLockFree, AtomicsObject::EntryIsLockFree);
         REG_OBJECTS_LIB_FUNC(load, AtomicsObject::EntryLoad);
         REG_OBJECTS_LIB_FUNC(or_, AtomicsObject::EntryOr);
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("pause"), 5, AtomicsObject::EntryPause);
         REG_OBJECTS_LIB_FUNC(store, AtomicsObject::EntryStore);
         REG_OBJECTS_LIB_FUNC(sub, AtomicsObject::EntrySub);
         REG_OBJECTS_LIB_FUNC(wait, AtomicsObject::EntryWait);
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("waitAsync"), 9, AtomicsObject::EntryWaitAsync);
         REG_OBJECTS_LIB_FUNC(notify, AtomicsObject::EntryNotify);
         REG_OBJECTS_LIB_FUNC(xor_, AtomicsObject::EntryXor);
 

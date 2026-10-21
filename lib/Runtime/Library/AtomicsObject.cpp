@@ -152,6 +152,25 @@ namespace Js
         return (size == 1 || size == 2 || size == 4) ? scriptContext->GetLibrary()->GetTrue() : scriptContext->GetLibrary()->GetFalse();
     }
 
+    Var AtomicsObject::EntryPause(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+        ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+        Assert(!(callInfo.Flags & CallFlags_New));
+
+        // ES2026 25.4.12: no argument validation or coercion, no observable
+        // effect other than timing. Use the architecture spin-wait hint.
+#if defined(_M_ARM64)
+        __yield();
+#elif defined(__aarch64__)
+        __asm__ __volatile__("yield" ::: "memory");
+#else
+        YieldProcessor();
+#endif
+        return scriptContext->GetLibrary()->GetUndefined();
+    }
+
     Var AtomicsObject::EntryLoad(RecyclableObject* function, CallInfo callInfo, ...)
     {
         ATOMICS_FUNCTION_ENTRY_CHECKS(2, "Atomics.load");
@@ -246,6 +265,98 @@ namespace Js
             : scriptContext->GetLibrary()->CreateStringFromCppLiteral(_u("timed-out"));
     }
 
+    Var AtomicsObject::CreateWaitAsyncResult(ScriptContext *scriptContext, bool async, Var value)
+    {
+        JavascriptLibrary* library = scriptContext->GetLibrary();
+        DynamicObject* result = library->CreateObject();
+        PropertyId asyncId = scriptContext->GetOrAddPropertyIdTracked(_u("async"));
+        PropertyDescriptor descriptor;
+        descriptor.SetWritable(true);
+        descriptor.SetEnumerable(true);
+        descriptor.SetConfigurable(true);
+
+        descriptor.SetValue(async ? library->GetTrue() : library->GetFalse());
+        JavascriptObject::DefineOwnPropertyHelper(result, asyncId, descriptor, scriptContext);
+        descriptor.SetValue(value);
+        JavascriptObject::DefineOwnPropertyHelper(result, PropertyIds::value, descriptor, scriptContext);
+        return result;
+    }
+
+    Var AtomicsObject::EntryWaitAsync(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+        ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+        Assert(!(callInfo.Flags & CallFlags_New));
+
+        // DoWait(async): ValidateIntegerTypedArray (waitable = Int32 only, shared
+        // only), then ValidateAtomicAccess captures TypedArrayLength before
+        // ToIndex(index), then value, then timeout. Missing arguments default to
+        // undefined/0/infinite like the rest of the Atomics family; the
+        // typed-array argument itself must throw TypeError, not RangeError.
+        JavascriptLibrary* library = scriptContext->GetLibrary();
+        Var undefinedVar = library->GetUndefined();
+        Var typedArray = args.Info.Count > 1 ? args[1] : undefinedVar;
+        Var index = args.Info.Count > 2 ? args[2] : undefinedVar;
+        Var valueArg = args.Info.Count > 3 ? args[3] : undefinedVar;
+        Var timeoutArg = args.Info.Count > 4 ? args[4] : undefinedVar;
+
+        uint32 accessIndex = 0;
+        TypedArrayBase *typedArrayBase = ValidateAndGetTypedArray(
+            typedArray, index, &accessIndex, scriptContext, true /*onlyInt32*/, true /*requireShared*/);
+
+        int32 value = JavascriptConversion::ToInt32(valueArg, scriptContext);
+
+        double timeoutNumber = JavascriptConversion::ToNumber(timeoutArg, scriptContext);
+        bool infiniteTimeout = NumberUtilities::IsNan(timeoutNumber) || JavascriptNumber::IsPosInf(timeoutNumber);
+        double realTimeout = 0;
+        if (!infiniteTimeout && !JavascriptNumber::IsNegInf(timeoutNumber) && timeoutNumber > 0)
+        {
+            realTimeout = timeoutNumber;
+        }
+
+        Assert(typedArrayBase->GetBytesPerElement() == 4);
+        uint32 bufferIndex = (accessIndex * 4) + typedArrayBase->GetByteOffset();
+        Assert(bufferIndex < typedArrayBase->GetArrayBuffer()->GetByteLength());
+        SharedArrayBuffer *sharedArrayBuffer = typedArrayBase->GetArrayBuffer()->GetAsSharedArrayBuffer();
+        WaiterList *waiterList = sharedArrayBuffer->GetWaiterList(bufferIndex);
+
+        JavascriptSharedArrayBuffer* rootBuffer = static_cast<JavascriptSharedArrayBuffer*>(sharedArrayBuffer);
+        JavascriptPromiseCapability* capability = JavascriptPromise::NewPromiseCapability(
+            scriptContext->GetLibrary()->GetPromiseConstructor(), scriptContext);
+        AtomicsAsyncWaiter* waiter = RecyclerNew(
+            scriptContext->GetRecycler(), AtomicsAsyncWaiter, rootBuffer, capability, scriptContext);
+
+        {
+            AutoCriticalSection autoCS(waiterList->GetCriticalSectionForAccess());
+
+            int32 witness = JavascriptConversion::ToInt32(typedArrayBase->DirectGetItem(accessIndex), scriptContext);
+            if (value != witness)
+            {
+                return CreateWaitAsyncResult(scriptContext, false,
+                    scriptContext->GetLibrary()->CreateStringFromCppLiteral(_u("not-equal")));
+            }
+
+            if (!infiniteTimeout && realTimeout == 0)
+            {
+                return CreateWaitAsyncResult(scriptContext, false,
+                    scriptContext->GetLibrary()->CreateStringFromCppLiteral(_u("timed-out")));
+            }
+
+            // Register while holding the waiter-list lock so a concurrent notify
+            // cannot miss the waiter. The record is rooted by rootBuffer; the
+            // native token identifies it to notify and to the finalizer.
+            AtomicsAsyncWaiterRegistration* registration = rootBuffer->AddAsyncWaiter(
+                waiter, scriptContext, scriptContext->GetThreadContext());
+            waiterList->AddAsyncWaiter(registration);
+        }
+
+        // Finite positive timeouts are not schedulable by this embedding (there
+        // is no core timer job); the promise stays pending until notify. See
+        // doc/c2-s6-waitasync.md.
+        return CreateWaitAsyncResult(scriptContext, true, capability->GetPromise());
+    }
+
     Var AtomicsObject::EntryNotify(RecyclableObject* function, CallInfo callInfo, ...)
     {
         ATOMICS_FUNCTION_ENTRY_CHECKS(2, "Atomics.notify");
@@ -255,11 +366,21 @@ namespace Js
         int32 count = INT_MAX;
         if (args.Info.Count > 3 && !JavascriptOperators::IsUndefinedObject(args[3]))
         {
+            // ToIntegerOrInfinity, then clamp to the int32 count the waiter list
+            // accepts. NaN -> +0 (test262 count-from-nans); +Infinity and any
+            // value above INT_MAX mean "wake all"; -Infinity and <= 0 mean none.
             double d = JavascriptConversion::ToInteger(args[3], scriptContext);
-            if (!(NumberUtilities::IsNan(d) || JavascriptNumber::IsPosInf(d)))
+            if (JavascriptNumber::IsPosInf(d) || d > (double)INT_MAX)
             {
-                int32 c = JavascriptConversion::ToInt32(d);
-                count = max(0, c);
+                count = INT_MAX;
+            }
+            else if (JavascriptNumber::IsNegInf(d) || d <= 0)
+            {
+                count = 0;
+            }
+            else
+            {
+                count = (int32)d;
             }
         }
 
@@ -277,9 +398,42 @@ namespace Js
         WaiterList *waiterList = sharedArrayBuffer->GetWaiterList(bufferIndex);
 
         uint32 removed = 0;
+        AtomicsAsyncWaiterRegistration* asyncAwoken = nullptr;
+        void* threadContext = scriptContext->GetThreadContext();
         {
             AutoCriticalSection autoCS(waiterList->GetCriticalSectionForAccess());
-            removed = waiterList->RemoveAndWakeWaiters(count);
+            removed = waiterList->RemoveAndWakeWaiters(count, threadContext, &asyncAwoken);
+        }
+
+        // RemoveAndWakeWaiters prepends to the handoff list. Reverse it so
+        // promises resolve in waiter-list (FIFO) order.
+        AtomicsAsyncWaiterRegistration* fifoAwoken = nullptr;
+        while (asyncAwoken != nullptr)
+        {
+            AtomicsAsyncWaiterRegistration* next = asyncAwoken->nextAwoken;
+            asyncAwoken->nextAwoken = fifoAwoken;
+            fifoAwoken = asyncAwoken;
+            asyncAwoken = next;
+        }
+        asyncAwoken = fifoAwoken;
+
+        // Resolve outside the critical section: promise resolution allocates and
+        // may enqueue reactions. Same-ThreadContext cross-realm waiters are
+        // allowed; their promise is resolved through the record's own
+        // ScriptContext.
+        while (asyncAwoken != nullptr)
+        {
+            AtomicsAsyncWaiterRegistration* registration = asyncAwoken;
+            asyncAwoken = registration->nextAwoken;
+            AtomicsAsyncWaiter* waiter = registration->record;
+            if (!waiter->IsSettled() && registration->threadContext == threadContext)
+            {
+                waiter->ResolveOk(); // releases the registration token
+            }
+            else
+            {
+                waiter->Abandon();
+            }
         }
 
         return JavascriptNumber::ToVar(removed, scriptContext);

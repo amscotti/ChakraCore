@@ -93,6 +93,12 @@
       <compile-flags>-ESSharedArrayBuffer -args summary -endargs</compile-flags>
     </default>
   </test>
+  <test>
+    <default>
+      <files>s6-waitasync-pause.js</files>
+      <compile-flags>-ESSharedArrayBuffer -Test262 -CollectGarbage -force:deferparse -args summary -endargs</compile-flags>
+    </default>
+  </test>
     <test>
     <default>
       <files>PromiseRejectionTracking.js</files>
