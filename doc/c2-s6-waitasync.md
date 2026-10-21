@@ -1,10 +1,11 @@
 # C2-S6b: Atomics.pause and Atomics.waitAsync (flag-on slice)
 
-Status: **pending** — implementation and focused evidence only; not merged, no
-gate pin or shared plan change. Branch `s6-waitasync`, base `d54071e0f`.
-`ESSharedArrayBuffer` remains **off by default**: default probes still print
-`SAB=undefined Atomics=undefined`. This receipt does not propose a default
-change and does not claim multi-agent waitAsync suspension.
+Status: **landed** — merged as `eef3b93c5`; review fixes `5fa9524e2`;
+integration/gate commit `92e419ffd`. Final Mac ARM64 no-JIT gates are
+**2021/0 test** and **2073/0 debug-static**. `ESSharedArrayBuffer` remains
+**off by default**: default probes still print `SAB=undefined
+Atomics=undefined`. This receipt does not propose a default change and does
+not claim multi-agent waitAsync suspension.
 
 ## Scope
 
@@ -50,7 +51,8 @@ Property installation stays inside the existing
 with dynamic tracked property names, so no new static `PropertyId` is added.
 Their `FunctionInfo`s are appended at the end of
 `JavascriptBuiltInFunctionList.h`; no pre-existing `BuiltInEnum` value shifts.
-No rlexe pin is changed.
+The focused test is registered once in `test/es7/rlexe.xml`; integration
+therefore moves the single-source gate pins by one.
 
 `DoWait(async)` ordering is implemented explicitly in `EntryWaitAsync`:
 type/shared validation → length capture + index coercion/range check → value
@@ -136,9 +138,10 @@ Mac ARM64, test profile (RelWithDebInfo, no JIT), shared gate lock
 (`sh /tmp/opencode/cc-gate-lock.sh`), local `.zig-cache`/`out`; no `--prepare`
 and no full corpus/check.
 
-- `zig build --summary line -Dprofile=test`: **568/568 steps succeeded**.
-- `zig build --summary line -Dprofile=debug-static`: **546/546 steps
-  succeeded**. Debug-static binary: `out/debug-static/bin/ch`.
+- Lane builds: `zig build --summary line -Dprofile=test` **568/568** and
+  `-Dprofile=debug-static` **546/546**. After integration the authoritative
+  `zig build check` is **583/583**, with **2021/0 test** and **2073/0
+  debug-static** regression gates.
 - New `test/es7/s6-waitasync-pause.js`, registered once in
   `test/es7/rlexe.xml` with
   `-ESSharedArrayBuffer -Test262 -CollectGarbage -force:deferparse -args summary`:
@@ -164,7 +167,9 @@ and no full corpus/check.
     non-BigInt waitAsync **0/114 → 70/114**.
   - Exact `Atomics/waitAsync/**/*.js` (101 files, **202 scenarios**, includes
     BigInt): **0/202 → 72/202**, **72 fail→pass / 0 pass→fail**; non-BigInt
-    subset **70/114**, BigInt subset **2/88**.
+    subset **70/114**, BigInt subset **2/88**. Re-run on the merged binary:
+    **80/124** (`out/test262-final-s6b`) and **72/202**
+    (`out/test262-final-waitasync`), 0 pass→fail.
   - Adjacent wait/notify selection `Atomics/wait/*.js` +
     `Atomics/notify/*.js` (95 files, 190 scenarios): **138/190 before →
     138/190 after, 0 fail→pass / 0 pass→fail**.

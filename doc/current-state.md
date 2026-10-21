@@ -56,9 +56,10 @@ This `doc/` folder is the start of durable in-repo documentation. The
 feature inventory and line anchors below are the 2026-10-10 baseline
 snapshot; the modernization branch has since added the C2 surfaces listed
 in [modernization-plan.md](modernization-plan.md) §6 and its receipts.
-Latest merged checkpoint (2026-10-21): **2020/0 test**, **2072/0
-debug-static**, including direct-eval `super` early errors and the flag-on
-S6a growable-SAB/non-shared-Atomics slice.
+Latest merged checkpoint (2026-10-21): **2021/0 test**, **2073/0
+debug-static**, including direct-eval `super` early errors, the flag-on
+S6a growable-SAB/non-shared-Atomics slice, and S6b `Atomics.pause` /
+single-thread `Atomics.waitAsync`.
 
 ## 3. Architecture (summary)
 
@@ -393,11 +394,12 @@ from 48,598 files: 61,565 passed / 31,576 failed, with 902 explicit skips. Its
 corpus includes post-ES2025 proposals and uses default language flags.
 
 **Modernization checkpoint (2026-10-21):** the merged branch is green at
-**2020/0 test** and **2072/0 debug-static** on Mac ARM64 no-JIT. Direct-eval
+**2021/0 test** and **2073/0 debug-static** on Mac ARM64 no-JIT. Direct-eval
 `super` early errors are closed (eval-code 454/0; object-literal function/arrow
-false accepts fixed in `39e9f2a16`), and the flag-on S6a slice has growable
+false accepts fixed in `39e9f2a16`), the flag-on S6a slice has growable
 SharedArrayBuffer plus ES2020 non-shared Atomics (focused S6 574/982;
-112 fail→pass / 0 pass→fail; debug index-detach abort fixed) while
+112 fail→pass / 0 pass→fail; debug index-detach abort fixed), and S6b adds
+`Atomics.pause` plus single-thread `waitAsync` (80/124; 0 pass→fail) while
 SAB/Atomics remain off by default.
 S3 Unicode/ICU, S6 default enablement, B4 Linux/JIT/WASM and C4 host-negative
 qualification remain decision- or hardware-blocked; no JIT, Linux, native-x64,
