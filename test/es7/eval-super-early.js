@@ -49,6 +49,56 @@ var tests = [
         }
     },
     {
+        name: "arrow lexical context, not the active stack, decides the eval super binding",
+        body() {
+            var hit = false;
+            class Base {
+                get value() { return 1; }
+            }
+            class Derived extends Base {
+                arrowInPlainUnderMethod() {
+                    function make() {
+                        return () => eval("super[hit = true]");
+                    }
+                    return make()();
+                }
+                arrowThroughWrapper() {
+                    function pass(f) { return f(); }
+                    var call = () => eval("super.value");
+                    return pass(call);
+                }
+                escapedArrow() {
+                    var call = () => eval("super.value");
+                    return call;
+                }
+                evalArrowThenEval() {
+                    var call = eval("() => eval('super.value')");
+                    return call();
+                }
+                nestedEvalArrows() {
+                    return eval("(() => () => eval('super.value'))()()");
+                }
+            }
+
+            var d = new Derived();
+            assert.throws(function () {
+                d.arrowInPlainUnderMethod();
+            }, SyntaxError, "arrow created in a plain function");
+            assert.isFalse(hit, "the computed key must not run");
+
+            assert.areEqual(1, d.arrowThroughWrapper(), "arrow in a method through a plain wrapper");
+            assert.areEqual(1, d.escapedArrow()(), "arrow invoked after the method returned");
+            assert.areEqual(1, d.evalArrowThenEval(), "arrow created by eval in a method");
+            assert.areEqual(1, d.nestedEvalArrows(), "nested arrows and eval in a method");
+
+            var indirect = eval;
+            var escapedIndirect = (() => indirect)();
+            assert.throws(function () {
+                escapedIndirect("super.value");
+            }, SyntaxError, "indirect eval through an arrow");
+        }
+    },
+    {
         name: "methods and constructors retain the super binding in direct eval",
         body() {
             class Base {
@@ -91,6 +141,84 @@ var tests = [
             assert.areEqual(7, o.method(), "object literal method");
             assert.areEqual(7, o.nested(), "object literal nested eval");
             assert.areEqual(7, o.mapped(), "borrowed method call");
+        }
+    },
+    {
+        name: "constructor arrows allow eval super() with normal runtime semantics",
+        body() {
+            class Base {}
+            class ArrowCall extends Base {
+                constructor() {
+                    var value = (() => eval("super()"))();
+                    this.ok = true;
+                    this.value = value;
+                }
+            }
+            class EvalArrowCall extends Base {
+                constructor() {
+                    var value = eval("(() => super())()");
+                    this.ok = true;
+                    this.value = value;
+                }
+            }
+
+            var first = new ArrowCall();
+            assert.isTrue(first.ok, "arrow eval super() completes the constructor");
+            assert.isTrue(first instanceof ArrowCall, "constructed instance");
+            var second = new EvalArrowCall();
+            assert.isTrue(second.ok, "eval-created arrow super() completes the constructor");
+            assert.isTrue(second instanceof EvalArrowCall, "constructed instance");
+        }
+    },
+    {
+        name: "static fields/blocks and accessor/async/generator methods keep arrow eval super",
+        body() {
+            class Base {
+                get value() { return 1; }
+                static get staticValue() { return 5; }
+            }
+            class Members extends Base {
+                static fromArrowField = (() => eval("super.staticValue"))();
+                static fromDirectField = eval("super.staticValue");
+                static {
+                    this.fromArrowBlock = (() => eval("super.staticValue"))();
+                    this.fromDirectBlock = eval("super.staticValue");
+                }
+                get getter() { return (() => eval("super.value"))(); }
+                set setter(v) { this.setterValue = (() => eval("super.value"))(); }
+                async asyncMethod() { return (() => eval("super.value"))(); }
+                *generatorMethod() { return (() => eval("super.value"))(); }
+            }
+
+            assert.areEqual(5, Members.fromArrowField, "arrow in static field");
+            assert.areEqual(5, Members.fromDirectField, "direct eval in static field");
+            assert.areEqual(5, Members.fromArrowBlock, "arrow in static block");
+            assert.areEqual(5, Members.fromDirectBlock, "direct eval in static block");
+
+            var m = new Members();
+            assert.areEqual(1, m.getter, "getter");
+            m.setter = 0;
+            assert.areEqual(1, m.setterValue, "setter");
+            assert.isTrue(m.asyncMethod() instanceof Promise, "async method returns a promise");
+            assert.areEqual(1, m.generatorMethod().next().value, "generator method");
+        }
+    },
+    {
+        name: "repeated direct eval keeps the method home object (eval map/parser cache)",
+        body() {
+            class Base {
+                get value() { return 3; }
+            }
+            class Repeated extends Base {
+                method() {
+                    var values = [];
+                    for (var i = 0; i < 3; i++) {
+                        values.push(eval("super.value"));
+                    }
+                    return values.join(",");
+                }
+            }
+            assert.areEqual("3,3,3", new Repeated().method(), "repeated eval");
         }
     },
     {

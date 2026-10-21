@@ -575,6 +575,11 @@ public:
     bool nestedFuncEscapes;
     bool canBeDeferred;
     bool hasSuperCallInConstructorLambda;
+    // Lexical PerformEval inMethod context: this function's environment has a
+    // [[HomeObject]] (method/accessor/constructor, field/static-block helper,
+    // or an arrow lexically inside one). Consumed when creating its body so a
+    // direct eval from this function (or its arrows/eval code) may use super.
+    bool hasHomeObjectContext;
     bool isClassFieldInitializerContext;
     // S1 static super: static field initializer helpers allow super.property
     // (HomeObject is the constructor, passed as the helper's `this`). Set at

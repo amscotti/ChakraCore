@@ -27,20 +27,26 @@ PerformEval decides `inMethod` from the eval caller's environment (it has a
   unchanged; `super()` in eval keeps its existing constructor-only checks.
 - `lib/Runtime/Base/ScriptContext.{h,cpp}`: transient `evalInMethod` flag,
   saved/restored around `EvalHelper` like the existing field-initializer flags.
+- `lib/Parser/ptree.{h,cpp}`, `lib/Parser/Parse.cpp`: each function node records
+  a lexical `hasHomeObjectContext`. Methods, accessors, constructors and the
+  synthetic field/static-block helpers set it; arrows inherit it from the
+  lexical non-lambda function (or from the reparsed body / eval caller context
+  when no enclosing node is available). Plain functions do not inherit.
+- `lib/Runtime/ByteCode/ByteCodeGenerator.cpp`: copies that parser hint to the
+  function/arrow body (first parse and deferred reuse) and keeps it across
+  deferred bodies. The eval program body takes it from the direct-eval context.
 - `lib/Runtime/Library/GlobalObject.cpp`: computes `evalInMethod` from the
   direct eval caller's `FunctionInfo::HasHomeObj()`, class-field-initializer
   context (field and static-block helpers have a [[HomeObject]] without the
-  `HomeObj` bit), or a direct-eval body marker for nested eval. Indirect eval
-  never sets it.
-- `lib/Runtime/Base/FunctionBody.{h,cpp}`: `m_isEvalInMethod` marks a direct
-  eval body's inMethod context so a nested direct eval inherits it. It is
-  refreshed on each eval call (so a cached body follows its current caller),
-  copied in `ParseableFunctionInfo::Copy` and the proxy constructor, and is not
-  serialized; bodies containing `super` already bypass the eval map.
-- Arrow callers have no home object of their own. When the arrow is active, a
-  stack walk past lambdas/eval bodies finds the lexical non-lambda caller;
-  global arrows (`EnclosedByGlobalFunc`) and arrows nested in plain functions
-  still fail closed.
+  `HomeObj` bit), or the caller body's lexical marker. Indirect eval never sets
+  it. There is no active-stack inference: an arrow created in a plain function
+  stays SyntaxError even when invoked under a method.
+- `lib/Runtime/Base/FunctionBody.{h,cpp}`: `m_hasHomeObjectContext` carries the
+  lexical marker through arrows and direct-eval bodies, so nested direct eval
+  inherits it. It is refreshed on each eval call (so a cached body follows its
+  current caller), copied in `ParseableFunctionInfo::Copy` and the proxy
+  constructor, and is not serialized; bodies containing `super` already bypass
+  the eval map.
 
 ## Evidence
 
@@ -53,6 +59,11 @@ Focused `test/es7/eval-super-early.js` (new; three rlexe entries: default,
 - test profile, `--variants=disable_jit`: **passed 3, failed 0**
   (`python3 test/runtests.py -t --variants=disable_jit --binary $PWD/zig-out/bin/ch test/es7/eval-super-early.js`).
 - debug-static, `--variants=disable_jit`: **passed 3, failed 0**.
+  The file covers the false-accept side effect case (arrow lexically in a plain
+  function invoked under a method: `SyntaxError`, key not evaluated), arrows in
+  methods through wrappers / after return / created by eval, nested eval arrows,
+  constructor arrows running `super()`, static field/block helpers, and
+  accessor/async/generator methods, plus repeated eval in all three parse modes.
 - Existing regression files `class-fields-public`, `class-static-fields`,
   `class-static-blocks`, `eval-arguments-declarations` plus the new file:
   **10/0** (test and debug-static); adding `asyncawait-syntax.js` gives
@@ -75,17 +86,22 @@ the pre-existing private-nonextensible, BigInt-runner and field-accessor
 residuals.
 
 Artifacts (scratch, not committed): `out/test262-results-evalsuper-base*`,
-`out/test262-results-evalsuper-final`, `out/test262-results-evalsuper-final-elements`.
+`out/test262-results-evalsuper-fix2-superprop`,
+`out/test262-results-evalsuper-fix2-evalcode`,
+`out/test262-results-evalsuper-fix2-elements`.
 
 ## Residual work and risks
 
-- An arrow created inside a method but invoked after the method has returned
-  can still reject a direct eval `super.property`: the marker is not yet
-  propagated to arrow `FunctionBody`s, and the active-frame fallback has no
-  method frame to find. Test262 only covers the global arrow.
-- The `m_isEvalInMethod` bit is not serialized. Eval bodies with `super` are
-  excluded from the eval map, so nested eval through `-ForceSerialized` /
-  snapshot paths was not exercised and remains a B4 check.
+- The lexical marker is not serialized. Ordinary methods/constructors still
+  hit the `FunctionInfo` fallback after deserialization, but a deserialized
+  arrow/body that later performs direct eval can lose its inherited context.
+  `-ForceSerialized` / snapshot nested-eval paths were not exercised and remain
+  a B4 check.
+- An eval function body cached under one caller can be reused across callers;
+  the body marker is refreshed per call, but arrows already created inside that
+  cached body keep the marker they were generated with. Eval sources with a
+  literal `super` bypass the eval map; dynamically constructed super names are
+  the residual case.
 - JIT/backend was not exercised by these runs (`-nonative` and
   `--variants=disable_jit`). **B4 must run the focused test262 subset plus
   `test/es7/eval-super-early.js` and the class regression files under
@@ -97,7 +113,8 @@ Artifacts (scratch, not committed): `out/test262-results-evalsuper-base*`,
 
 ## Files
 
-- `lib/Parser/Parse.cpp`
+- `lib/Parser/Parse.cpp`, `lib/Parser/ptree.{h,cpp}`
+- `lib/Runtime/ByteCode/ByteCodeGenerator.cpp`
 - `lib/Runtime/Base/FunctionBody.{h,cpp}`, `lib/Runtime/Base/ScriptContext.{h,cpp}`
 - `lib/Runtime/Library/GlobalObject.cpp`
 - `test/es7/eval-super-early.js` (new), `test/es7/rlexe.xml`

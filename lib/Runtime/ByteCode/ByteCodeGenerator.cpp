@@ -2662,6 +2662,13 @@ FuncInfo* PreVisitFunction(ParseNodeFnc* pnodeFnc, ByteCodeGenerator* byteCodeGe
     FuncInfo* funcInfo = pnodeFnc->funcInfo = byteCodeGenerator->StartBindFunction(funcName, funcNameLength, functionNameOffset, &funcExprWithName, pnodeFnc, reuseNestedFunc);
     funcInfo->byteCodeFunction->SetIsNamedFunctionExpression(funcExprWithName);
     funcInfo->byteCodeFunction->SetIsNameIdentifierRef(pnodeFnc->isNameIdentifierRef);
+    // A deferred body reuses the marker recorded on its stub; the parser hint
+    // covers the first parse of a function/arrow.
+    if (pnodeFnc->hasHomeObjectContext ||
+        (reuseNestedFunc != nullptr && reuseNestedFunc->HasHomeObjectContext()))
+    {
+        funcInfo->byteCodeFunction->SetHasHomeObjectContext(true);
+    }
 
     if (fIsRoot)
     {
@@ -2873,6 +2880,27 @@ FuncInfo* PostVisitFunction(ParseNodeFnc* pnodeFnc, ByteCodeGenerator* byteCodeG
     {
         top->byteCodeFunction->GetFunctionInfo()->SetAllowDirectSuper();
     }
+
+    // Lexical PerformEval inMethod marker. It is set by the parser on the
+    // function node (methods/constructors/helpers and arrows inheriting their
+    // lexical non-lambda environment) and survives through the deferred body.
+    // Plain/global code and arrows in plain functions stay false; never infer
+    // this from other active stack frames.
+    bool hasHomeObjectContext = pnodeFnc->hasHomeObjectContext ||
+        top->byteCodeFunction->HasHomeObjectContext();
+    if (!hasHomeObjectContext && top->IsGlobalFunction() &&
+        (byteCodeGenerator->GetFlags() & fscrEval) != 0)
+    {
+        // The eval program body itself has no ParseNodeFnc entry; the direct
+        // eval caller context was established before parsing.
+        hasHomeObjectContext = byteCodeGenerator->GetScriptContext()->IsEvalInMethod();
+    }
+    if (!hasHomeObjectContext && !top->IsGlobalFunction())
+    {
+        Js::FunctionInfo *info = top->byteCodeFunction->GetFunctionInfo();
+        hasHomeObjectContext = info->HasHomeObj() || info->IsClassFieldInitializer();
+    }
+    top->byteCodeFunction->SetHasHomeObjectContext(hasHomeObjectContext);
 
     // If this is a named function expression and has deferred child, mark has non-local reference.
     if (funcExprWithName)

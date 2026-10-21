@@ -6527,6 +6527,10 @@ ParseNodeFnc * Parser::ParseFncDeclInternal(ushort flags, LPCOLESTR pNameHint, c
     bool fDeclaration = flags & fFncDeclaration;
     bool fModule = (flags & fFncModule) != 0;
     bool fLambda = (flags & fFncLambda) != 0;
+    // Capture the lexical non-lambda env before this function is pushed. For
+    // an arrow this is the environment PerformEval uses for inMethod; an eval
+    // program body has no ParseNodeFnc here and is covered by ScriptContext.
+    ParseNodeFnc *enclosingNonLambda = m_currentNodeNonLambdaFunc;
     // FieldDefinition ContainsArguments only sees through arrow functions.
     // A real function/method boundary (including a function nested in an
     // initializer) has its own arguments binding and ends the check.
@@ -6618,6 +6622,34 @@ ParseNodeFnc * Parser::ParseFncDeclInternal(ushort flags, LPCOLESTR pNameHint, c
     pnodeFnc->SetIsBaseClassConstructor((flags & fFncBaseClassConstructor) != 0);
     pnodeFnc->SetHomeObjLocation(Js::Constants::NoRegister);
     pnodeFnc->SetHasNonThisStmt(pnodeFnc->IsClassConstructor());
+
+    if (fLambda)
+    {
+        if (enclosingNonLambda != nullptr)
+        {
+            pnodeFnc->hasHomeObjectContext = enclosingNonLambda->hasHomeObjectContext;
+        }
+        else if (m_parseType == ParseType_Deferred && m_functionBody != nullptr)
+        {
+            // A deferred body may be parsed without its lexical enclosing
+            // ParseNodeFnc (for example, the inner arrow of an eval-created
+            // arrow). The body being reparsed carries the context instead.
+            pnodeFnc->hasHomeObjectContext = m_functionBody->HasHomeObjectContext();
+        }
+        else
+        {
+            pnodeFnc->hasHomeObjectContext =
+                ((m_grfscr & fscrEval) == fscrEval) && m_scriptContext->IsEvalInMethod();
+        }
+    }
+    else
+    {
+        // A method/accessor/constructor has its own [[HomeObject]]. Plain
+        // functions do not inherit one; synthetic field/static-block helpers
+        // set this explicitly when they are created.
+        pnodeFnc->hasHomeObjectContext =
+            pnodeFnc->IsMethod() || pnodeFnc->IsClassConstructor();
+    }
 
     if (this->m_currentScope && this->m_currentScope->GetScopeType() == ScopeType_Parameter)
     {
@@ -8459,6 +8491,7 @@ ParseNodeFnc * Parser::GenerateEmptyConstructor(bool extends)
     pnodeFnc->SetHasNonThisStmt();
     pnodeFnc->SetIsGeneratedDefault(TRUE);
     pnodeFnc->SetHasHomeObj();
+    pnodeFnc->hasHomeObjectContext = true;
     pnodeFnc->SetHomeObjLocation(Js::Constants::NoRegister);
 
     pnodeFnc->ichLim = this->GetScanner()->IchLimTok();
@@ -9594,6 +9627,7 @@ ParseNodeFnc * Parser::CreateClassFieldInitializerFunction(charcount_t ichMin, s
     pnodeFnc->SetDeclaration(true);
     pnodeFnc->SetHomeObjLocation(Js::Constants::NoRegister);
     pnodeFnc->isClassFieldInitializerContext = true;
+    pnodeFnc->hasHomeObjectContext = true;
     pnodeFnc->isStaticClassFieldInitializer = isStatic;
     // S1 computed/instance super: both static and instance initializers run
     // with a [[HomeObject]] (the constructor for static helpers, bound from
@@ -9759,6 +9793,7 @@ ParseNodeFnc * Parser::CreateClassStaticBlockFunction(charcount_t ichMin, size_t
     pnodeFnc->SetDeclaration(true);
     pnodeFnc->SetHomeObjLocation(Js::Constants::NoRegister);
     pnodeFnc->isClassFieldInitializerContext = true;
+    pnodeFnc->hasHomeObjectContext = true;
     pnodeFnc->isStaticClassFieldInitializer = true;
     pnodeFnc->isClassStaticBlock = true;
     // Static blocks run with [[HomeObject]] set to the constructor, so
@@ -10008,6 +10043,7 @@ ParseNodeFnc * Parser::CreateClassFieldInitializerFastScanStub()
     pnodeFnc->SetDeclaration(true);
     pnodeFnc->SetIsGeneratedDefault(true);
     pnodeFnc->SetHomeObjLocation(Js::Constants::NoRegister);
+    pnodeFnc->hasHomeObjectContext = true;
     pnodeFnc->superRestrictionState = SuperRestrictionState::Disallowed;
     pnodeFnc->functionId = (*m_nextFunctionId)++;
     pnodeFnc->lineNumber = this->GetScanner()->LineCur();
