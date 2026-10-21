@@ -7,12 +7,12 @@
 # C2-S6a: growable SharedArrayBuffer and non-shared Atomics (flag-on slice)
 
 Status: **landed** — merged as `e3371d313` on top of base `9a99ccbee`;
-review fix `eaa526f89`, integration/debug fix `9fceb6fe4`. Final Mac ARM64
-no-JIT gates are **2020/0 test** and **2072/0 debug-static**. Review and B4
-JIT/Linux/multi-agent checks remain open. `ESSharedArrayBuffer` stays **off by
-default**: without the flag both `SharedArrayBuffer` and `Atomics` are absent.
-This receipt covers only the flag-on surface below; it does not propose a
-default change.
+review fix `eaa526f89`, integration/debug fix `9fceb6fe4`, final review fix
+`39e9f2a16`. Final Mac ARM64 no-JIT gates are **2020/0 test** and
+**2072/0 debug-static**. Review and B4 JIT/Linux/multi-agent checks remain open.
+`ESSharedArrayBuffer` stays **off by default**: without the flag both
+`SharedArrayBuffer` and `Atomics` are absent. This receipt covers only the
+flag-on surface below; it does not propose a default change.
 
 ## Scope
 
@@ -37,8 +37,11 @@ default change.
    a stale pointer. The debug-only `accessIndex < GetLength()` assertion in
   `TypedArrayBeginStub` was removed for these value-taking entries: an index
   getter may legally shrink the buffer before the value is converted, so the
-  post-conversion revalidation owns the live invariant. `Atomics.load`, which
-  has no value coercion, keeps its immediate post-index check.
+  post-conversion revalidation owns the live invariant. The same guard was
+  removed for buffer detachment in the index getter; the final review's
+  `39e9f2a16` removes that debug abort and adds detach-during-index regression
+  cases. `Atomics.load`, which has no value coercion, keeps its immediate
+  post-index check.
 
 Out of scope: `Atomics.waitAsync`, `Atomics.pause`, BigInt typed arrays,
 immutable ArrayBuffers, cross-agent grow synchronization, and any default
@@ -212,8 +215,8 @@ ran through `sh /tmp/opencode/cc-gate-lock.sh`.
   `test/built-ins/SharedArrayBuffer/**/*.js`
   (982 scenarios / 491 files):
   **462/982 before → 574/982 after**, **112 fail→pass / 0 pass→fail**.
-  Re-run on the merged binary 2026-10-21: **574 passed / 408 failed**
-  (`out/test262-final-s6`).
+  Re-run on the final merged binary after review fix `39e9f2a16`:
+  **574 passed / 408 failed** (`out/test262-final-s6`).
   Subsets:
   - grow methods: 2/30 → **28/30** (2 residual are the BigInt-syntax
     `this-is-not-object` scenario);

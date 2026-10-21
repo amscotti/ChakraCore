@@ -664,8 +664,11 @@ spec `SyntaxError`) and landed the flag-on S6a slice (merge
 `e3371d313`; growable SharedArrayBuffer plus ES2020 non-shared Atomics;
 focused S6 462/982 → 574/982, 112 fail→pass / 0 pass→fail; SAB remains
 off by default) ([c2-s1-eval-super.md](c2-s1-eval-super.md),
-[c2-s6-growable-nonshared.md](c2-s6-growable-nonshared.md)). All active
-feature/triage worktrees are merged; next work items are the remaining
+[c2-s6-growable-nonshared.md](c2-s6-growable-nonshared.md)). A final
+adversarial review then closed the object-literal function/arrow eval-super
+false accepts and the debug index-detach Atomics abort in `39e9f2a16`
+(gates unchanged). All active feature/triage worktrees are merged; next work
+items are the remaining
 S6 flag-on gaps (`waitAsync`, `pause`, BigInt Atomics, multi-agent
 wait/grow), the documented S8/S2/P-eval residuals, and the C4
 qualification work (full baseline rerun, host-reported negative

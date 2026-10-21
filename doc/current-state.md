@@ -394,9 +394,11 @@ corpus includes post-ES2025 proposals and uses default language flags.
 
 **Modernization checkpoint (2026-10-21):** the merged branch is green at
 **2020/0 test** and **2072/0 debug-static** on Mac ARM64 no-JIT. Direct-eval
-`super` early errors are closed (eval-code 454/0), and the flag-on S6a slice
-has growable SharedArrayBuffer plus ES2020 non-shared Atomics (focused S6
-574/982; 112 fail→pass / 0 pass→fail) while SAB/Atomics remain off by default.
+`super` early errors are closed (eval-code 454/0; object-literal function/arrow
+false accepts fixed in `39e9f2a16`), and the flag-on S6a slice has growable
+SharedArrayBuffer plus ES2020 non-shared Atomics (focused S6 574/982;
+112 fail→pass / 0 pass→fail; debug index-detach abort fixed) while
+SAB/Atomics remain off by default.
 S3 Unicode/ICU, S6 default enablement, B4 Linux/JIT/WASM and C4 host-negative
 qualification remain decision- or hardware-blocked; no JIT, Linux, native-x64,
 TTD or multi-agent claim is made.

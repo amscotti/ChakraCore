@@ -1,7 +1,8 @@
 # C2-S1: direct-eval SuperProperty early errors
 
-**Status: landed** (merge `ea8f253ac`; final gates **2020/0 test**,
-**2072/0 debug-static**). B4 JIT/Linux and serialization checks remain open.
+**Status: landed** (merge `ea8f253ac`; final review fix `39e9f2a16`;
+final gates **2020/0 test**, **2072/0 debug-static**). B4 JIT/Linux and
+serialization checks remain open.
 
 Lane `evalsuper`, base `9a99ccbee`. Scope: the 10 failing direct-eval
 `super-prop*` scenarios from the wave-3 triage. This slice does not change the
@@ -104,6 +105,16 @@ Artifacts (scratch, not committed): `out/test262-results-evalsuper-base*`,
   cached body keep the marker they were generated with. Eval sources with a
   literal `super` bypass the eval map; dynamically constructed super names are
   the residual case.
+- Pre-existing super-property evaluation order before `super()` remains: a
+  computed `super[expr]` in a derived constructor can evaluate `expr` before
+  the missing-binding ReferenceError. Node/Bun also differ from each other on
+  the write case. This is outside the eval-super diff and is tracked as a
+  constructor/super-order residual for B4 review.
+- Object-literal function/arrow property values no longer receive a
+  [[HomeObject]]; concise methods and accessors still do. `EmitMemberNode`
+  records a home-object location only when the parser marked one. This fix
+  required regenerating only the no-JIT `JsBuiltIn` bytecode header; the JIT
+  header remains a B4 regeneration item.
 - JIT/backend was not exercised by these runs (`-nonative` and
   `--variants=disable_jit`). **B4 must run the focused test262 subset plus
   `test/es7/eval-super-early.js` and the class regression files under
@@ -122,13 +133,20 @@ commit is `e8afc8101`. The full gate initially failed six legacy
 those fixtures still expected the old runtime `ReferenceError`. They now
 expect the spec early `SyntaxError`, and the `super[value = 0]` control asserts
 that the computed key is not evaluated. This is a test-expectation correction,
-not an engine behavior waiver. Final focused gate: **2020/0 test**,
-**2072/0 debug-static**.
+not an engine behavior waiver. The final adversarial review then found that
+object-literal function/arrow property values were still treated as methods;
+fix `39e9f2a16` removes that false home object, guards `EmitMemberNode`, and
+adds the object-literal/arrow cases to the same rlexe entries. The no-JIT
+`JsBuiltIn` header was regenerated and the full gates re-ran without a count
+change: **2020/0 test**, **2072/0 debug-static**, **454/0 eval-code** after the
+fix.
 
 ## Files
 
 - `lib/Parser/Parse.cpp`, `lib/Parser/ptree.{h,cpp}`
-- `lib/Runtime/ByteCode/ByteCodeGenerator.cpp`
+- `lib/Runtime/ByteCode/ByteCodeGenerator.cpp`,
+  `lib/Runtime/ByteCode/ByteCodeEmitter.cpp`
+- `lib/Runtime/Library/InJavascript/JsBuiltIn.nojit.bc.{32b,64b}.h`
 - `lib/Runtime/Base/FunctionBody.{h,cpp}`, `lib/Runtime/Base/ScriptContext.{h,cpp}`
 - `lib/Runtime/Library/GlobalObject.cpp`
 - `test/es7/eval-super-early.js` (new), `test/es7/rlexe.xml`
