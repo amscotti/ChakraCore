@@ -24,16 +24,24 @@ change and does not claim multi-agent waitAsync suspension.
      `{async:false, value:"timed-out"}`; unequal witness returns
      `{async:false, value:"not-equal"}` even when the timeout is infinite;
    - the async path returns `{async:true, value:%Promise%}` using the engine
-     promise capability machinery.
-3. `Atomics.notify` resolves a registered same-ScriptContext async waiter to
-   `"ok"` after releasing the waiter-list critical section. `count` is shared
-   with synchronous waiters.
+     promise capability machinery;
+   - missing arguments are legal short calls: missing `index`/`value` default
+     to `0`, missing `timeout` to infinity, while a missing/null/undefined
+     typed array throws `TypeError` (not the old arity `RangeError`).
+3. `Atomics.notify` resolves a registered async waiter to `"ok"` after
+   releasing the waiter-list critical section. It wakes same-thread waiters
+   across realms; `count` uses `ToIntegerOrInfinity` and clamps above
+   `INT_MAX` (including `+Infinity`) to "wake all", while `NaN` is `+0`,
+   negative/`-Infinity` are zero, and `2^31`, `2^32+1`, `MAX_VALUE` and
+   `+Infinity` wake all registered waiters. Woken promises resolve in FIFO
+   waiter-list order.
 4. `Atomics.wait` is unchanged: still shared-only, and still a non-suspending
    no-op on non-Windows (`AddAndSuspendWaiter` returns false). S6a non-shared
    RMW/wait/notify behavior is unchanged.
 
-Out of scope: finite positive async timeout scheduling, cross-agent async
-suspension/resolution, BigInt waitAsync, and any default enablement.
+Out of scope: finite positive async timeout scheduling, cross-agent (different
+`ThreadContext`) async suspension/resolution, BigInt waitAsync, and any default
+enablement.
 
 ## Design
 
@@ -48,7 +56,18 @@ No rlexe pin is changed.
 type/shared validation → length capture + index coercion/range check → value
 coercion → timeout coercion → waiter-list lookup → lock → witness compare →
 fast result or registration. Timeout is coerced before the witness compare,
-so a poisoned timeout throws even on a would-be `not-equal` path.
+so a poisoned timeout throws even on a would-be `not-equal` path. Missing
+arguments are defaulted before validation, so `waitAsync()` and
+`waitAsync(null)` throw `TypeError`, while `waitAsync(ta)`,
+`waitAsync(ta,0)` and `waitAsync(ta,0,0)` register an infinite wait on index 0
+with expected value 0.
+
+`Atomics.notify` converts `count` with `JavascriptConversion::ToInteger`
+(the engine's ToIntegerOrInfinity: NaN → +0, ±∞ preserved, truncation toward
+zero) and then clamps to `[0, INT_MAX]` before the int32 waiter-list API. This
+avoids the old `ToInt32` wrap where `2^31` became `INT_MIN` and woke nobody.
+`NaN` deliberately remains `0` per current test262 (`count-from-nans`,
+`notify-nan`), not "wake all".
 
 The result object uses `DefineOwnPropertyHelper` with a data descriptor, not
 `[[Set]]`; an inherited `Object.prototype.async` setter cannot run and cannot
@@ -64,23 +83,24 @@ Creation: RecyclerNew record in AtomicsObject::EntryWaitAsync; HeapNew token in
 Domain: record = Recycler normal heap (conservatively scanned); token = native
         HeapAllocator, deleted with HeapDelete
 Fields: record holds capability, owner wrapper, wrapper-list next, ScriptContext,
-        settled; token holds record pointer, WaiterList*, wrapper-link,
-        notify-link, linked flag
+        settled; token holds record pointer, WaiterList*, cached ScriptContext*,
+        cached opaque ThreadContext*, wrapper-link, notify-link, linked flag
 Owner/root: JavascriptSharedArrayBuffer::asyncWaiters roots the record; the
         wrapper also owns the native token list. The SharedContents WaiterList
         stores only the native token, never an owning GC reference.
 Transfer: registration adds the record to the wrapper GC list and then (still
         under the WaiterList lock) adds the token to the waiter list; notify
         removes the token from the waiter list and hands it to the caller.
-Invalidation: notify (same ScriptContext) resolves then releases the token and
-        record-list entry; SAB finalize walks the native token list (never the
-        record) and unlinks tokens without running promise code; a
-        cross-ScriptContext notify leaves the token/record registered and does
-        not count or resolve it.
+Invalidation: notify on the same ThreadContext resolves then releases the token
+        and record-list entry; SAB finalize walks the native token list (never
+        the record) and unlinks tokens without running promise code; a notify
+        from a different ThreadContext leaves the token/record registered and
+        does not count or resolve it.
 Thread/context: all mutations of the record and its wrapper lists happen on the
-        registrant's ScriptContext thread. The notifying thread only reads the
-        record's ScriptContext through the lock-published token and never
-        resolves or mutates a foreign record.
+        registrant's ThreadContext. The skip decision on a foreign notifying
+        thread compares only the token's cached ThreadContext pointer; it never
+        dereferences the record. Same-thread waiters in another realm are
+        resolved through the record's own ScriptContext.
 Release: notify outside the critical section; successful resolve releases the
         wrapper-list reference and token. Settled records are collectible.
 Finalizer safety: an unmarked wrapper is not scanned by the collector, so its
@@ -89,11 +109,20 @@ Finalizer safety: an unmarked wrapper is not scanned by the collector, so its
         AtomicsAsyncWaiter pointer.
 Reentrancy: promise resolution happens after leaving the critical section and
         only resolves a string; record linking does not run user code.
+Known finalizer risk: CancelAsyncWaiters takes the same WaiterList critical
+        section a foreign agent may hold. A safe lock-free unlink is not bounded
+        in this slice; the finalizer only removes native list nodes and holds no
+        other lock, but a stop-the-world GC that suspends a thread while it
+        holds csForAccess could stall. Documented, not claimed safe under
+        concurrent cross-agent waits.
 Tests: s6-waitasync-pause.js (forced defer parse + CollectGarbage) covers
-        pending-notify, GC-before-notify, non-mutation and double-notify; a
-        200-waiter/200-notify stress probe resolves all promises. The
-        wrapper-dies-first path is structurally handled by the native token but
-        was not exercised (SAB serialization crashes in this build).
+        pause, not-equal, zero/negative/-Infinity/NaN timeouts, short calls,
+        2^31/2^32+1/MAX_VALUE/+Infinity/NaN/negative notify counts, same-thread
+        cross-realm wakeup, FIFO order, GC-before-notify, non-mutation and
+        double-notify; a 200-waiter/200-notify stress probe resolves all
+        promises. The wrapper-dies-first path is structurally handled by the
+        native token but was not exercised (SAB serialization crashes in this
+        build).
 ```
 
 The finite positive timeout path has **no core timer job** in this embedding.
@@ -112,14 +141,17 @@ and no full corpus/check.
   succeeded**. Debug-static binary: `out/debug-static/bin/ch`.
 - New `test/es7/s6-waitasync-pause.js`, registered once in
   `test/es7/rlexe.xml` with
-  `-ESSharedArrayBuffer -CollectGarbage -force:deferparse -args summary`:
+  `-ESSharedArrayBuffer -Test262 -CollectGarbage -force:deferparse -args summary`:
   base binary **exit 1 / 0 passes** (`Atomics.pause` absent); after
   **pass** on both test and debug-static binaries. Covers pause shape/descriptor/
   non-constructor/no mutation, waitAsync shape/descriptors, not-equal,
   zero/negative/−Infinity/false/null timeouts, fractional and missing timeout
   classification, validation/coercion order, length-before-index (growable SAB),
-  detached view, inherited-setter avoidance, GC before notify, single-agent
-  notify → `"ok"`, double-notify → 0, and no SAB mutation.
+  detached view, inherited-setter avoidance, legal short calls with index/value
+  defaults, 2^31/2^32+1/MAX_VALUE/+Infinity/NaN/negative notify counts,
+  same-thread cross-realm wakeup and no double resolution, FIFO `.then` order,
+  GC before notify, single-agent notify → `"ok"`, double-notify → 0, and no SAB
+  mutation.
 - Default-off probe: `./zig-out/bin/ch probe.js` prints
   `SAB=undefined Atomics=undefined`. Flag-on prints `SAB=function
   Atomics=object`, `pause=function`, `waitAsync=function`.
@@ -154,10 +186,10 @@ and no full corpus/check.
   `finite-1ms=pending` (Chakra).
 - **40 multi-agent scenarios** (20 files × default/strict): agent tests await
   `Atomics.waitAsync` in `$262.agent` crossthread workers. This slice does not
-  register/resolve cross-ScriptContext waiters, and the crossthread host does
-  not drain async-function promise jobs even for `await 1` (verified directly);
-  the harness therefore kills the hung host with SIGKILL. No multi-agent
-  suspension is claimed.
+  register/resolve waiters from another `ThreadContext`, and the crossthread
+  host does not drain async-function promise jobs even for `await 1` (verified
+  directly); the harness therefore kills the hung host with SIGKILL. No
+  multi-agent suspension is claimed.
 - **86 BigInt scenarios** in the `waitAsync/bigint` subtree are residual for
   the separate BigInt typed-array/Atomics work (2 pass by syntax/negative-only
   coincidence).
@@ -168,9 +200,16 @@ and no full corpus/check.
   pending until notify. A host timer/job mechanism would be needed; adding a
   background resolver thread would violate the ScriptContext thread contract.
 - **Cross-agent waitAsync is unimplemented.** `Atomics.notify` ignores and does
-  not count async waiters owned by another `ScriptContext`; those waiters stay
-  registered until SAB finalization. This avoids cross-thread GC writes and
-  promise resolution but is not multi-agent conformance.
+  not count async waiters owned by another `ThreadContext`; those waiters stay
+  registered until SAB finalization. The skip check uses only the token's cached
+  thread pointer, never a foreign GC record. Same-thread cross-realm waiters do
+  wake. This avoids cross-thread GC writes and promise resolution but is not
+  multi-agent conformance.
+- **Finalizer lock risk remains documented.** `CancelAsyncWaiters` takes the
+  WaiterList critical section while unlinking native tokens. It allocates
+  nothing and holds no other lock, but a stop-the-world GC suspending a foreign
+  thread inside `csForAccess` could stall finalization; a lock-free unlink is
+  not bounded in this slice.
 - **`Atomics.pause` timing is not measured.** It emits ARM64 `yield` (MSVC
   ARM64 `__yield`, other architectures `YieldProcessor`); no upper-bound tuning
   or benchmark is claimed.

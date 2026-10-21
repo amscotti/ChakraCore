@@ -176,6 +176,75 @@ ArrayBuffer.prototype.transfer.call(detached.buffer);
 var poisoned = { valueOf: function () { check(false, "poisoned coercion ran"); return 0; } };
 throws(TypeError, function () { Atomics.waitAsync(detached, poisoned, poisoned, poisoned); }, "detached view throws TypeError");
 
+// --- Short calls and argument defaults -------------------------------------
+throws(TypeError, function () { Atomics.waitAsync(); }, "waitAsync() throws TypeError");
+throws(TypeError, function () { Atomics.waitAsync(null); }, "waitAsync(null) throws TypeError");
+throws(TypeError, function () { Atomics.waitAsync(undefined); }, "waitAsync(undefined) throws TypeError");
+
+var shortView = new Int32Array(new SharedArrayBuffer(8));
+var shortA = Atomics.waitAsync(shortView);
+var shortB = Atomics.waitAsync(shortView, 0);
+var shortC = Atomics.waitAsync(shortView, 0, 0);
+check(shortA.async === true && shortA.value instanceof Promise, "waitAsync(ta) defaults index/value to 0");
+check(shortB.async === true && shortB.value instanceof Promise, "waitAsync(ta,0) defaults value to 0");
+check(shortC.async === true && shortC.value instanceof Promise, "waitAsync(ta,0,0) defaults timeout to infinite");
+check(Atomics.notify(shortView, 0, 3) === 3, "three short-call waiters are registered");
+check(Atomics.waitAsync(shortView, 0, 0, 0).value === "timed-out", "explicit timeout 0 is timed-out");
+
+// --- Count conversion and wake-all boundaries ------------------------------
+var countView = new Int32Array(new SharedArrayBuffer(8));
+function addCountWaiters(count) {
+    var waiters = [];
+    for (var i = 0; i < count; i++) {
+        waiters.push(Atomics.waitAsync(countView, 0, 0, Infinity));
+    }
+    return waiters;
+}
+
+addCountWaiters(3);
+check(Atomics.notify(countView, 0, Math.pow(2, 31)) === 3, "count 2^31 wakes all");
+addCountWaiters(3);
+check(Atomics.notify(countView, 0, Math.pow(2, 32) + 1) === 3, "count 2^32+1 wakes all");
+addCountWaiters(3);
+check(Atomics.notify(countView, 0, Number.MAX_VALUE) === 3, "count Number.MAX_VALUE wakes all");
+addCountWaiters(1);
+check(Atomics.notify(countView, 0, Number.POSITIVE_INFINITY) === 1, "count +Infinity wakes all");
+check(Atomics.notify(countView, 0, 1) === 0, "wake-all consumed the waiter");
+addCountWaiters(1);
+check(Atomics.notify(countView, 0, NaN) === 0, "NaN count is ToIntegerOrInfinity 0");
+check(Atomics.notify(countView, 0, 1) === 1, "NaN did not consume the waiter");
+addCountWaiters(1);
+check(Atomics.notify(countView, 0, Number.NEGATIVE_INFINITY) === 0, "-Infinity count is 0");
+check(Atomics.notify(countView, 0, -1) === 0, "negative count is 0");
+check(Atomics.notify(countView, 0, 1) === 1, "negative count did not consume the waiter");
+
+// --- Same-thread cross-realm notify ----------------------------------------
+var realmOutcome = "pending";
+var realmView = null;
+if (typeof $262 !== "undefined" && typeof $262.createRealm === "function") {
+    var realm = $262.createRealm();
+    var realmSab = new SharedArrayBuffer(16);
+    var realmArray = new realm.global.Int32Array(realmSab);
+    realmView = new Int32Array(realmSab);
+    var realmWaiter = realm.global.Atomics.waitAsync(realmArray, 0, 0, Infinity);
+    check(realmWaiter.async === true, "cross-realm waitAsync is asynchronous");
+    realmWaiter.value.then(function (value) { realmOutcome = value; });
+    check(Atomics.notify(realmView, 0, 1) === 1, "notify from realm A wakes realm B waiter");
+    check(Atomics.notify(realmView, 0, 1) === 0, "cross-realm waiter is not double-resolved");
+} else {
+    check(false, "$262.createRealm is required for the cross-realm regression");
+}
+
+// --- FIFO notify order ------------------------------------------------------
+var fifoView = new Int32Array(new SharedArrayBuffer(8));
+var fifoOrder = [];
+for (var fifoIndex = 0; fifoIndex < 5; fifoIndex++) {
+    (function (index) {
+        Atomics.waitAsync(fifoView, 0, 0, Infinity).value.then(function () { fifoOrder.push(index); });
+    })(fifoIndex);
+}
+check(Atomics.notify(fifoView, 0, 5) === 5, "notify wakes five FIFO waiters");
+
 // --- Single-agent notify resolves the promise to "ok" ----------------------
 var notifyView = new Int32Array(new SharedArrayBuffer(16));
 var waiter = Atomics.waitAsync(notifyView, 0, 0, Infinity);
@@ -211,6 +280,8 @@ WScript.SetTimeout(function () {
     try {
         check(outcome === "ok", "notified promise resolved to ok, got " + outcome);
         check(nanOutcome === "ok", "NaN waiter resolved to ok, got " + nanOutcome);
+        check(realmOutcome === "ok", "cross-realm waiter resolved to ok, got " + realmOutcome);
+        check(fifoOrder.join(",") === "0,1,2,3,4", "FIFO notify order, got " + fifoOrder.join(","));
         if (typeof CollectGarbage === "function") {
             CollectGarbage();
         }

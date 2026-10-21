@@ -70,6 +70,8 @@ namespace Js
     {
         AtomicsAsyncWaiter* record;
         WaiterList* waiterList;
+        ScriptContext* scriptContext;   // cached, never read through the record
+        void* threadContext;            // cached ThreadContext*, compared opaquely
         AtomicsAsyncWaiterRegistration* nextWrapper;
         AtomicsAsyncWaiterRegistration* nextAwoken;
         bool linked;
@@ -220,12 +222,14 @@ namespace Js
         // pending promise and its capability survive until notify or finalize.
         // SharedContents waiter lists store native registration tokens, not
         // owning references.
-        AtomicsAsyncWaiterRegistration* AddAsyncWaiter(AtomicsAsyncWaiter* waiter)
+        AtomicsAsyncWaiterRegistration* AddAsyncWaiter(AtomicsAsyncWaiter* waiter, ScriptContext* scriptContext, void* threadContext)
         {
             Assert(waiter != nullptr);
             AtomicsAsyncWaiterRegistration* registration = HeapNew(AtomicsAsyncWaiterRegistration);
             registration->record = waiter;
             registration->waiterList = nullptr; // set by WaiterList::AddAsyncWaiter
+            registration->scriptContext = scriptContext;
+            registration->threadContext = threadContext;
             registration->nextWrapper = asyncRegistrations;
             registration->nextAwoken = nullptr;
             registration->linked = false;
@@ -350,12 +354,13 @@ namespace Js
 
         bool _Requires_lock_held_(csForAccess.cs) AddAndSuspendWaiter(DWORD_PTR waiter, uint32 timeout);
         void RemoveWaiter(DWORD_PTR waiter);
-        // Notify pops up to `count` same-ScriptContext entries. Async entries
+        // Notify pops up to `count` same-ThreadContext entries. Async entries
         // are linked into *asyncAwoken through their nextAwoken field (no
         // allocation while the critical section is held); their promises are
         // resolved by the caller after the lock is released. Async waiters
-        // registered by another ScriptContext are left in place.
-        uint32 RemoveAndWakeWaiters(int32 count, ScriptContext* context, AtomicsAsyncWaiterRegistration** asyncAwoken = nullptr);
+        // registered on another thread are left in place. Same-thread
+        // cross-realm waiters are woken.
+        uint32 RemoveAndWakeWaiters(int32 count, void* threadContext, AtomicsAsyncWaiterRegistration** asyncAwoken = nullptr);
         void AddAsyncWaiter(AtomicsAsyncWaiterRegistration* registration);
         void RemoveAsyncWaiter(AtomicsAsyncWaiterRegistration* registration);
 

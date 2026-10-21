@@ -948,7 +948,7 @@ namespace Js
         // TODO for xplat
     }
 
-    uint32 WaiterList::RemoveAndWakeWaiters(int32 count, ScriptContext* context, AtomicsAsyncWaiterRegistration** asyncAwoken)
+    uint32 WaiterList::RemoveAndWakeWaiters(int32 count, void* threadContext, AtomicsAsyncWaiterRegistration** asyncAwoken)
     {
         Assert(m_waiters != nullptr);
         Assert(count >= 0);
@@ -957,13 +957,13 @@ namespace Js
         {
             AgentOfBuffer agent = m_waiters->Item(i);
             if (agent.asyncRegistration != nullptr &&
-                agent.asyncRegistration->record->GetScriptContext() != context)
+                agent.asyncRegistration->threadContext != threadContext)
             {
                 // Cross-agent async waiters are outside this slice's contract:
-                // resolving or mutating their GC-visible record from this
-                // thread is unsafe. Leave them registered and do not count them.
-                // The registration token is native, so probing it does not
-                // dereference a GC pointer from the wrong thread.
+                // resolving their GC-visible records from this thread is
+                // unsafe. The cached ThreadContext lives on the native token,
+                // so this check never dereferences the record. Leave the waiter
+                // registered and do not count it.
                 i++;
                 continue;
             }
@@ -972,7 +972,7 @@ namespace Js
             count--; removed++;
             if (agent.asyncRegistration != nullptr)
             {
-                // Single-agent async wait: hand the token to the caller, which
+                // Single-thread async wait: hand the token to the caller, which
                 // resolves its record after releasing this critical section.
                 // The SAB wrapper keeps the record rooted until then.
                 Assert(asyncAwoken != nullptr);
