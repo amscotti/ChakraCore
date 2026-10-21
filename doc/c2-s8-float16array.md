@@ -220,6 +220,42 @@ index-descriptor `configurable:false`) and the sort-comparefn call sequence
 - **SCA forward compat**: data written with `SCA_Float16Array` (71) is
   rejected by older binaries through the existing unknown-type path.
 
+## Fix round 2 (review loop 2)
+
+Loop-1 REGULAR verdict was FIX_REQUIRED on exactly one defect; ADVERSARIAL
+accepted in substance (all apparent node divergences are pre-existing
+engine-wide conventions shared with `Float32Array`/`Float64Array`).
+
+- **Defect**: `TypedArrayBase::GetDiagTypeString`
+  (`lib/Runtime/Library/TypedArray.cpp`) had no `TypeIds_Float16Array` case,
+  so a `Float16Array` fell to `default: Assert(false)` and reported
+  `"Object"` instead of `"Object, (Float16Array)"` like every sibling kind.
+  **Fix**: added the `case TypeIds_Float16Array` mirroring the siblings.
+  No other file changed for the fix.
+- **Sweep (same missing-kind class, debugger/diag/profiler)**: all clean.
+  Already had `Float16Array`: both `JsrtDebugUtils.cpp` switches (object
+  grouping + type-name string), `TTSnapObjects.cpp` snapshot replay,
+  `ScriptContext.cpp` diagnostic type counts, `ArrayBuffer.cpp` detach,
+  `TypedArray.h` virtual-table `Create`, every `TypedArray.cpp` dispatch site
+  (`@@toStringTag`, `CreateSameType`, `FindMinOrMax`, memmove exclusion),
+  all `JavascriptOperators.cpp` sites (`GetElementI`, `OP_SetElementI`,
+  `OP_Memcopy`, `OP_Memset`). Clean by design (shared with `BigInt64Array`/
+  `BigUint64Array`, which take the same path): `TryGetLengthForOptimizedTypedArray`
+  (optimized-kinds-only predicate), `ProfilingHelpers.cpp:365`
+  `instanceType <= TypeIds_Float64Array` range, `TypedArray.h` virtual-table
+  switch `default` (no virtual variant for the new kind).
+- **Regression coverage**: none committed. Rationale: no in-tree test asserts
+  any `GetDiagTypeString` output for any typed-array kind (zero baselines
+  contain `"Object, ("`), because the dbg harness display prefers
+  `className` (which already says `Float16Array`) and masks the `type`
+  string; the repo has no native unit-test harness either. Manual probe on
+  the fixed binary: `[object Float16Array]`, ctor identity ok,
+  `Float16Array/2`, `[object Float64Array]` (unchanged); focused
+  `test/es7/float16array.js` 17/17 pass.
+- **Gates re-verified after fix**: `mise x -- zig build check` **2013/0**,
+  `mise x -- zig build check-regression -Dprofile=debug-static` **2065/0** —
+  both match `tools/build/gate_counts.json`.
+
 ## Ownership / allocation
 
 No allocation, ownership, retained-pointer, GC-tracing or memory-accounting

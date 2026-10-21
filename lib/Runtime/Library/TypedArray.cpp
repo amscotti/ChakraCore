@@ -2854,6 +2854,10 @@ namespace Js
             stringBuilder->AppendCppLiteral(_u("Object, (Float64Array)"));
             break;
 
+        case TypeIds_Float16Array:
+            stringBuilder->AppendCppLiteral(_u("Object, (Float16Array)"));
+            break;
+
         case TypeIds_Int64Array:
             stringBuilder->AppendCppLiteral(_u("Object, (BigInt64Array)"));
             break;
