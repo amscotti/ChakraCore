@@ -10142,9 +10142,11 @@ void EmitMemberNode(ParseNode *memberNode, Js::RegSlot objectLocation, ByteCodeG
     bool isFncDecl = exprNode->nop == knopFncDecl;
     bool isClassMember = isFncDecl && exprNode->AsParseNodeFnc()->IsClassMember();
 
-    if (isFncDecl)
+    if (isFncDecl && exprNode->AsParseNodeFnc()->HasHomeObj())
     {
-        Assert(exprNode->AsParseNodeFnc()->HasHomeObj());
+        // Object-literal function/arrow property values are not methods and
+        // carry no [[HomeObject]]; only concise methods/accessors need the
+        // object location for their home-object binding.
         exprNode->AsParseNodeFnc()->SetHomeObjLocation(objectLocation);
     }
 

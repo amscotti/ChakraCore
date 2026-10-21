@@ -393,6 +393,27 @@ var tests = [
             assert.throws(function () {
                 Atomics.add(detachedByValue, 0, { valueOf: function () { detachDuringValue.transfer(); return 1; } });
             }, TypeError, "value getter detaches the buffer");
+            // Detaching in the index getter must reach value coercion before the
+            // post-conversion revalidation throws; debug builds must not abort.
+            function makeDetachingView() {
+                var buffer = new ArrayBuffer(8);
+                return {
+                    view: new Int32Array(buffer),
+                    index: { valueOf: function () { buffer.transfer(); return 0; } }
+                };
+            }
+            var addDetach = makeDetachingView();
+            assert.throws(function () {
+                Atomics.add(addDetach.view, addDetach.index, { valueOf: function () { throw new Error("value-ran"); } });
+            }, Error, "index detach must not suppress value coercion");
+            var storeDetach = makeDetachingView();
+            assert.throws(function () {
+                Atomics.store(storeDetach.view, storeDetach.index, 1);
+            }, TypeError, "index detach is rejected after validation");
+            var compareDetach = makeDetachingView();
+            assert.throws(function () {
+                Atomics.compareExchange(compareDetach.view, compareDetach.index, 0, 1);
+            }, TypeError, "index detach is rejected before the atomic instruction");
             var shrinkDuringValue = new ArrayBuffer(8, { maxByteLength: 8 });
             var shrunkByValue = new Int32Array(shrinkDuringValue);
             assert.throws(function () {

@@ -144,6 +144,35 @@ var tests = [
         }
     },
     {
+        name: "object literal function and arrow property values are not methods",
+        body() {
+            var hit = false;
+            var o = {
+                fn: function () { return eval("super[hit = true]"); },
+                ["computed" + "Fn"]: function () { return eval("super[hit = true]"); }
+            };
+            function makeArrowProperty() {
+                return { arrow: () => eval("super[hit = true]") };
+            }
+
+            assert.throws(function () { o.fn(); }, SyntaxError, "function-valued property");
+            assert.isFalse(hit, "function-valued property key must not run");
+            assert.throws(function () { makeArrowProperty().arrow(); }, SyntaxError, "arrow-valued property in a plain function");
+            assert.isFalse(hit, "arrow-valued property key must not run");
+            assert.throws(function () { o.computedFn(); }, SyntaxError, "computed function-valued property");
+            assert.isFalse(hit, "computed property key must not run");
+
+            var base = { get value() { return 9; } };
+            var methods = {
+                method() { return eval("super.value"); },
+                get accessor() { return eval("super.value"); }
+            };
+            Object.setPrototypeOf(methods, base);
+            assert.areEqual(9, methods.method(), "concise method still has a home object");
+            assert.areEqual(9, methods.accessor, "accessor still has a home object");
+        }
+    },
+    {
         name: "constructor arrows allow eval super() with normal runtime semantics",
         body() {
             class Base {}

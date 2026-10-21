@@ -6186,8 +6186,11 @@ ParseNodePtr Parser::ParseMemberList(LPCOLESTR pNameHint, uint32* pNameHintLengt
                 {
                     if (pnodeExpr->nop == knopFncDecl)
                     {
+                        // A function/arrow expression used as an object
+                        // property value is not a method and has no
+                        // [[HomeObject]]. Concise methods/accessors take the
+                        // tkLParen branch above and set their own home object.
                         funcNode = pnodeExpr->AsParseNodeFnc();
-                        funcNode->SetHasHomeObj();
                     }
                     else if (pnodeExpr->nop == knopClassDecl)
                     {
