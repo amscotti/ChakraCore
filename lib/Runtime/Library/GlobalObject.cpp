@@ -594,6 +594,10 @@ using namespace Js;
         // cached FunctionBody compiled under a different context.
         bool evalInClassFieldInitializer = false;
         bool evalInDerivedFieldConstructor = false;
+        // PerformEval inMethod: the direct eval caller (or the direct eval body
+        // for a nested direct eval) has a [[HomeObject]], so SuperProperty is
+        // allowed in the eval source. Indirect eval never inherits it.
+        bool evalInMethod = false;
         bool evalInParamScope = false;
         bool evalInArrowParamScope = false;
         bool evalCallerParameterArguments = false;
@@ -603,8 +607,49 @@ using namespace Js;
             if (JavascriptStackWalker::GetCaller(&pfuncCaller, scriptContext) &&
                 pfuncCaller != nullptr && pfuncCaller->IsScriptFunction())
             {
-                FunctionInfo * callerInfo = pfuncCaller->GetFunctionBody()->GetFunctionInfo();
+                FunctionBody * callerBody = pfuncCaller->GetFunctionBody();
+                FunctionInfo * callerInfo = callerBody->GetFunctionInfo();
                 evalInClassFieldInitializer = callerInfo->IsClassFieldInitializer();
+                // A nested direct eval sees the outer eval FunctionBody as its
+                // caller; carry the context it was compiled with. Field
+                // initializer helpers and static blocks have a [[HomeObject]]
+                // even though they do not carry the HomeObj FunctionInfo bit.
+                evalInMethod = callerInfo->HasHomeObj() ||
+                    evalInClassFieldInitializer ||
+                    callerBody->IsEvalInMethod();
+
+                // An arrow has no [[HomeObject]] of its own but resolves
+                // `this` (and therefore the eval super environment) through
+                // its lexical enclosing function. When the arrow is active,
+                // walk out to the nearest non-lambda caller; global arrows
+                // and arrows nested in plain functions still find none.
+                if (!evalInMethod && callerInfo->IsLambda() &&
+                    !callerInfo->GetEnclosedByGlobalFunc())
+                {
+                    JavascriptStackWalker superWalker(scriptContext);
+                    JavascriptFunction *frameFunction = nullptr;
+                    while (superWalker.GetCaller(&frameFunction))
+                    {
+                        if (frameFunction == nullptr || !frameFunction->IsScriptFunction())
+                        {
+                            continue;
+                        }
+                        FunctionBody *frameBody = frameFunction->GetFunctionBody();
+                        FunctionInfo *frameInfo = frameBody->GetFunctionInfo();
+                        if (frameBody->IsEval() || frameInfo->IsLambda())
+                        {
+                            if (frameInfo->IsLambda() && frameInfo->GetEnclosedByGlobalFunc())
+                            {
+                                break;
+                            }
+                            continue;
+                        }
+                        evalInMethod = frameInfo->HasHomeObj() ||
+                            frameInfo->IsClassFieldInitializer() ||
+                            frameBody->IsEvalInMethod();
+                        break;
+                    }
+                }
             }
 
             // An eval inside an arrow in a constructor has the arrow as its
@@ -689,17 +734,21 @@ using namespace Js;
                 ScriptContext * context;
                 bool classField;
                 bool derivedField;
+                bool inMethod;
                 AutoRestoreEvalContext(ScriptContext * context) : context(context),
                     classField(context->IsEvalInClassFieldInitializer()),
-                    derivedField(context->IsEvalInDerivedFieldConstructor()) { }
+                    derivedField(context->IsEvalInDerivedFieldConstructor()),
+                    inMethod(context->IsEvalInMethod()) { }
                 ~AutoRestoreEvalContext()
                 {
                     context->SetEvalInClassFieldInitializer(classField);
                     context->SetEvalInDerivedFieldConstructor(derivedField);
+                    context->SetEvalInMethod(inMethod);
                 }
             } restoreEvalContext(scriptContext);
             scriptContext->SetEvalInClassFieldInitializer(evalInClassFieldInitializer);
             scriptContext->SetEvalInDerivedFieldConstructor(evalInDerivedFieldConstructor);
+            scriptContext->SetEvalInMethod(evalInMethod);
 
             pfuncScript = library->GetGlobalObject()->EvalHelper(scriptContext, argString->GetSz(), argString->GetLength(), moduleID,
                 grfscr, Constants::EvalCode, doRegisterDocument, isIndirect, strictMode);
@@ -737,6 +786,15 @@ using namespace Js;
             }
         }
 #endif
+
+        if (pfuncScript != nullptr)
+        {
+            // Nested direct eval inside this eval has the same PerformEval
+            // inMethod context as this call; the body itself stays
+            // caller-agnostic and resolves super through the scope chain.
+            // Record it per call so a cached body follows the current caller.
+            pfuncScript->GetFunctionBody()->SetIsEvalInMethod(evalInMethod);
+        }
 
 #if ENABLE_TTD
         //

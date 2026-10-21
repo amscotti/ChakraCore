@@ -1525,6 +1525,7 @@ namespace Js
         CopyDeferParseField(m_doScopeObjectCreation);
         CopyDeferParseField(m_usesArgumentsObject);
         CopyDeferParseField(m_isEval);
+        CopyDeferParseField(m_isEvalInMethod);
         CopyDeferParseField(m_isDynamicFunction);
         CopyDeferParseField(m_hasImplicitArgIns);
         CopyDeferParseField(m_dontInline);
@@ -1662,6 +1663,7 @@ namespace Js
       m_lineNumber(0),
       m_columnNumber(0),
       m_isEval(false),
+      m_isEvalInMethod(false),
       m_isDynamicFunction(false),
       m_displayName(nullptr),
       m_displayNameLength(0),
@@ -1714,6 +1716,7 @@ namespace Js
       m_isStaticNameFunction(proxy->GetIsStaticNameFunction()),
       m_reportedInParamCount(proxy->GetReportedInParamsCount()),
       m_reparsed(proxy->IsReparsed()),
+      m_isEvalInMethod(proxy->IsEvalInMethod()),
       m_isMethod(proxy->IsMethod()),
       m_tag21(true)
 #if DBG

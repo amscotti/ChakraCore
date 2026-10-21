@@ -1681,6 +1681,11 @@ namespace Js
         charcount_t LengthInChars() const { return m_cchLength; }
         charcount_t StartInDocument() const;
         bool IsEval() const { return m_isEval; }
+        // Direct eval body compiled from a caller with a [[HomeObject]]
+        // (PerformEval inMethod). Nested direct eval inherits this context;
+        // indirect eval bodies never do.
+        bool IsEvalInMethod() const { return m_isEvalInMethod; }
+        void SetIsEvalInMethod(bool set) { m_isEvalInMethod = set; }
         bool IsDynamicFunction() const;
         bool GetDontInline() { return m_dontInline; }
         void SetDontInline(bool is) { m_dontInline = is; }
@@ -1825,6 +1830,7 @@ namespace Js
         // 16 bits from last tag
 
         FieldWithBarrier(bool) m_isEval : 1;              // Source code is in 'eval'
+        FieldWithBarrier(bool) m_isEvalInMethod : 1;      // Direct eval body compiled with a [[HomeObject]] caller
         FieldWithBarrier(bool) m_isDynamicFunction : 1;   // Source code is in 'Function'
         FieldWithBarrier(bool) m_hasImplicitArgIns : 1;
         FieldWithBarrier(bool) m_dontInline : 1;          // Used by the JIT's inliner

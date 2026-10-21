@@ -16110,14 +16110,18 @@ IdentPtr Parser::ParseSuper(bool fAllowCall)
     {
         // Any super access is good within a class constructor
     }
-    else if ((((this->m_grfscr & fscrEval) == fscrEval) && currentNonLambdaFunc == nullptr) || (currentNonLambdaFunc != nullptr && currentNonLambdaFunc->superRestrictionState == SuperRestrictionState::PropertyAllowed))
+    else if ((((this->m_grfscr & fscrEval) == fscrEval) && currentNonLambdaFunc == nullptr && m_scriptContext->IsEvalInMethod()) || (currentNonLambdaFunc != nullptr && currentNonLambdaFunc->superRestrictionState == SuperRestrictionState::PropertyAllowed))
     {
-        // Currently for eval cases during compile time we use propertyallowed and throw during runtime for error cases.
-        // The eval allowance applies only at the eval program's own level, where
-        // there is no enclosing non-lambda function in this parse (arrows do not
-        // count): a nested plain function inside eval code has no home object,
-        // so its super references are early errors here like anywhere else,
-        // instead of slipping through to a runtime error.
+        // PerformEval inMethod: direct eval code may contain SuperProperty only
+        // when its caller has a [[HomeObject]] (method, accessor, constructor,
+        // field initializer/static block, or a direct eval body compiled in one
+        // of those). Global code, plain functions and indirect eval have none,
+        // so super there is an early SyntaxError instead of a runtime
+        // ReferenceError. The allowance applies only at the eval program's own
+        // level, where there is no enclosing non-lambda function in this parse
+        // (arrows do not count): a nested plain function inside eval code has no
+        // home object, so its super references are early errors here like
+        // anywhere else.
         if (m_token.tk == tkLParen)
         {
             if ((this->m_grfscr & fscrEval) == fscrNil)

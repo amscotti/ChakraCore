@@ -110,6 +110,7 @@ namespace Js
         isEvalRestricted(false),
         evalInClassFieldInitializer(false),
         evalInDerivedFieldConstructor(false),
+        evalInMethod(false),
         evalInParamScope(false),
         evalInArrowParamScope(false),
         evalCallerParameterArguments(false),
