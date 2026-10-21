@@ -603,5 +603,10 @@ BUILTIN(DataView, SetBigUint64, EntrySetBigUint64, FunctionInfo::ErrorOnNew)
 BUILTIN(JavascriptFinalizationRegistry, NewInstance, NewInstance, FunctionInfo::SkipDefaultNewObject)
 BUILTIN(JavascriptFinalizationRegistry, Register, EntryRegister, FunctionInfo::ErrorOnNew)
 BUILTIN(JavascriptFinalizationRegistry, Unregister, EntryUnregister, FunctionInfo::ErrorOnNew)
+// ES2024 growable SharedArrayBuffer. Appended after the existing entries so
+// every pre-existing BuiltInEnum value stays stable.
+BUILTIN(SharedArrayBuffer, GetterMaxByteLength, EntryGetterMaxByteLength, FunctionInfo::ErrorOnNew | FunctionInfo::HasNoSideEffect)
+BUILTIN(SharedArrayBuffer, GetterGrowable, EntryGetterGrowable, FunctionInfo::ErrorOnNew | FunctionInfo::HasNoSideEffect)
+BUILTIN(SharedArrayBuffer, Grow, EntryGrow, FunctionInfo::ErrorOnNew)
 
 #undef BUILTIN_TEMPLATE

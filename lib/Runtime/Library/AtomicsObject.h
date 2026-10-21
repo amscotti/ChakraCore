@@ -43,9 +43,13 @@ namespace Js
         static Var EntryXor(RecyclableObject* function, CallInfo callInfo, ...);
 
     private:
-        static Var ValidateSharedIntegerTypedArray(Var typedArray, ScriptContext *scriptContext, bool onlyInt32);
-        static uint32 ValidateAtomicAccess(Var typedArray, Var index, ScriptContext *scriptContext);
+        // ES2020+ implements the read-modify-write family on both shared and
+        // non-shared integer TypedArrays. `requireShared` retains the
+        // shared-only brand for Atomics.wait.
+        static ArrayBufferBase* ValidateIntegerTypedArray(Var typedArray, ScriptContext *scriptContext, bool onlyInt32, bool requireShared);
+        static uint32 ValidateAtomicAccess(Var typedArray, Var requestIndex, ScriptContext *scriptContext);
+        static void CheckAtomicAccessStillValid(TypedArrayBase *typedArray, uint32 accessIndex, ScriptContext *scriptContext, const char16 *funcName);
 
-        static TypedArrayBase * ValidateAndGetTypedArray(Var typedArray, Var index, _Out_ uint32 *accessIndex, ScriptContext *scriptContext, bool onlyInt32 = false);
+        static TypedArrayBase * ValidateAndGetTypedArray(Var typedArray, Var index, _Out_ uint32 *accessIndex, ScriptContext *scriptContext, bool onlyInt32 = false, bool requireShared = false);
     };
 }

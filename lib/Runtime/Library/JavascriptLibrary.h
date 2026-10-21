@@ -901,6 +901,7 @@ namespace Js
 #endif
 #endif
         SharedArrayBuffer* CreateSharedArrayBuffer(uint32 length);
+        SharedArrayBuffer* CreateSharedArrayBuffer(uint32 length, uint32 maxByteLength, bool isGrowable);
         SharedArrayBuffer* CreateSharedArrayBuffer(SharedContents *contents);
         ArrayBuffer* CreateProjectionArraybuffer(uint32 length);
         ArrayBuffer* CreateProjectionArraybuffer(byte* buffer, uint32 length);
