@@ -98,8 +98,8 @@ Artifacts (scratch, not committed): `out/test262-results-evalsuper-base*`,
 - The lexical marker is not serialized. Ordinary methods/constructors still
   hit the `FunctionInfo` fallback after deserialization, but a deserialized
   arrow/body that later performs direct eval can lose its inherited context.
-  `-ForceSerialized` / snapshot nested-eval paths were not exercised and remain
-  a B4 check.
+  `-ForceSerialized` passes the focused file and matrix in the final review,
+  but snapshot/TTD nested-eval paths were not exercised and remain a B4 check.
 - An eval function body cached under one caller can be reused across callers;
   the body marker is refreshed per call, but arrows already created inside that
   cached body keep the marker they were generated with. Eval sources with a
