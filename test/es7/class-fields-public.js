@@ -774,6 +774,33 @@ const tests = [
             }
             assert.areEqual(3, new Outer().inner);
         }
+    },
+    {
+        name: "super in direct eval: eval top level and arrows inherit, nested plain functions are early errors",
+        body() {
+            class B { y() { return 11; } get g() { return 12; } }
+            class D extends B {
+                m() { return eval("super.y()"); }
+                a() { return eval("(() => super.g)()"); }
+                n() { return eval("(function(){ return super.y(); })()"); }
+            }
+            const d = new D();
+            assert.areEqual(11, d.m());
+            assert.areEqual(12, d.a());
+            assert.throws(() => d.n(), SyntaxError, "nested plain function in eval has no home object");
+
+            // Indirect eval never inherits a super binding.
+            const indirect = eval;
+            assert.throws(() => indirect("super.y"), SyntaxError, "indirect eval super");
+
+            // Classes defined by eval keep their own super rules.
+            const E = eval("(class extends B { q() { return super.y(); } })");
+            assert.areEqual(11, new E().q());
+            assert.throws(() => eval("(function(){ class C { static x = function(){ return super.y; }; } return C.x(); })()"),
+                SyntaxError, "nested plain function in eval-defined static initializer");
+            assert.throws(() => eval("(function(){ class C { x = function(){ return super.y; }; } return new C().x(); })()"),
+                SyntaxError, "nested plain function in eval-defined instance initializer");
+        }
     }
 ];
 
