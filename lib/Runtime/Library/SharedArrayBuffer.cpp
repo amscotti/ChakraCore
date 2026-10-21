@@ -616,6 +616,14 @@ namespace Js
 
     bool SharedArrayBuffer::IsValidVirtualBufferLength(uint length) const
     {
+        // Growable JS buffers use a heap allocation sized to maxByteLength and
+        // rely on length-tracking views; they must not be classified as the
+        // asm.js virtual-buffer fast path (same rule as resizable ArrayBuffer
+        // call sites: !isResizable && IsValidVirtualBufferLength).
+        if (IsGrowable())
+        {
+            return false;
+        }
 #if ENABLE_FAST_ARRAYBUFFER
         /*
         1. length >= 2^16

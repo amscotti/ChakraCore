@@ -80,17 +80,51 @@ Resource / creation / release:
   re-reads the live lengths through the buffer object, not a cached copy.
 - **Thread/context.** Atomics and grow remain script-context operations. The
   `SharedContents` block is already shared with other agents; `bufferLength`
-  is a plain shared field in this slice. Concurrent grow from two agents is
-  **not** made atomic or synchronized here (documented residual); the ordinary
-  worker sharing path keeps working through the existing refcount.
+  is a plain 32-bit field in this slice. Concurrent grow from two agents, and
+  any agent reading/iterating a view while another grows, is a broader data
+  race than grow-vs-grow: readers can observe a length without the matching
+  zero-filled extent or synchronize with a waiter list. A multi-agent contract
+  is **not** claimed here; it needs an atomically published length/capacity
+  (an atomic 64-bit length in a future design) plus waiter coordination. The
+  tested contract is single-agent grow-only with a stable pointer; the
+  ordinary worker sharing path keeps working through the existing refcount.
+- **WebAssembly SharedArrayBuffer.** `WebAssemblySharedArrayBuffer` keeps
+  `isGrowable == false`: `.growable` is false, `.maxByteLength` reports the
+  current byte length, and `.grow()` throws TypeError, while
+  `WebAssembly.Memory.prototype.grow` keeps using `GrowMemory` and its
+  existing reserved/committed accounting. This matches Node `v22.22.3` and Bun
+  `1.4.3` probes, which report a wasm shared memory buffer as
+  `growable === false` with `maxByteLength === byteLength`.
+- **Eager capacity is a memory-exhaustion vector.** `maxByteLength` bytes are
+  requested and zeroed at construction, not committed lazily. A small script
+  can therefore ask for a GB-scale capacity (up to the 2^31-1 engine cap) and
+  pressure the recycler/external-memory accounting even though only a few
+  bytes are ever exposed. This slice keeps eager allocation because it is the
+  invariant that makes grow non-remapping and pointer-stable; choosing a lazy
+  reservation or a lower host limit is a product/security decision, not made
+  here.
 - **Atomics ownership.** No allocation. The validation helpers only borrow the
   TypedArray and its buffer for the duration of the entry point. `Atomics`
-  helpers capture the live length before index coercion and revalidate the
-  view after value coercion before issuing the atomic instruction, so a
-  non-shared buffer that is detached or shrunk by user code is not addressed
-  through a stale raw pointer. `compareExchange` now coerces `expectedValue`
-  before `replacementValue` explicitly rather than relying on argument
-  evaluation order.
+  helpers capture the live length before index coercion. For the eight
+  value-coercing operations (`add`, `sub`, `and`, `or`, `xor`, `exchange`,
+  `compareExchange`, `store`) the spec's `RevalidateAtomicAccess` follows the
+  value conversion, so they do **not** revalidate between index and value
+  coercion; the TypedArray helpers revalidate after converting the value
+  (`TypedArrayCheckStillValidForAtomics`). `Atomics.load` has no value
+  conversion and keeps its immediate post-index check. This makes an index
+  getter that shrinks a non-shared resizable buffer, followed by a value getter
+  that grows it back, succeed as in Node/Bun; an index error still precedes a
+  value error, a value error is not replaced by an OOB TypeError, and a view
+  still out of bounds after conversion raises TypeError. `compareExchange`
+  coerces `expectedValue` before `replacementValue` explicitly rather than
+  relying on argument evaluation order.
+- **Virtual-buffer classification.** `SharedArrayBuffer::IsValidVirtualBufferLength`
+  returns false while the buffer is growable, mirroring the
+  `!isResizable && IsValidVirtualBufferLength(...)` rule used for resizable
+  ArrayBuffers. A growable SAB is heap-allocated to `maxByteLength`, not
+  virtually reserved, and must not select the asm.js `*VirtualArray` vtables
+  even when its current length is a power-of-two 64 KiB-style value. Fixed SAB
+  classification is unchanged.
 
 Property installation is flag-gated through the existing
 `IsESSharedArrayBufferEnabled` block. New built-ins
@@ -113,17 +147,25 @@ New `test/es7/s6-growable-nonshared.js`, registered once in
   checks; byteLength tracking and multi-grow zero-fill with existing bytes
   preserved;
 - `maxByteLength`/`growable` accessor descriptors and brand checks; `grow`
-  descriptor/name/length and non-constructor behavior;
+  descriptor/name/length and non-constructor behavior; getter-only setters
+  ignore assignment, and a later grow still observes the original limit;
 - auto-length TypedArrays (including offset and subarray) growing, fixed views
   staying fixed, auto/fixed DataView tracking, and range errors on construction;
+  a 64 KiB growable SAB (a valid asm.js virtual-buffer length) keeps an
+  explicit full-length view fixed across grow, confirming the virtual-path
+  exclusion is behaviorally safe;
 - `slice` result fixedness/copy, species growable result, and species
   smaller/same-buffer TypeErrors;
 - all nine non-shared Atomics operations for `Int8Array` through
   `Uint32Array`, cross-checking the atomic store with a normal TypedArray read;
 - non-shared validation/order: type before index/value coercion, RangeError
   for bad index, detached and OOB view TypeErrors, `wait` shared-only,
-  `notify` count-before-return-0, and detach/shrink during index or value
-  coercion;
+  `notify` count-before-return-0;
+- `Atomics` revalidation order after value conversion: index coercion shrinks
+  and the value getter regrows (store/add/compareExchange succeed), index error
+  precedes value error, value error precedes OOB revalidation, and a view that
+  stays OOB after conversion throws TypeError. Detach here is
+  `ArrayBuffer.prototype.transfer()` on a non-shared buffer; SABs never detach;
 - growable-SAB Atomics before and after growth, zero-filled new elements and
   preserved existing elements.
 
@@ -139,13 +181,15 @@ ran through `sh /tmp/opencode/cc-gate-lock.sh`.
   `76e5f0734b3afe511ea0b309f8ddc62306387661d9880ff998aa85112b1ecbea`.
   After binary: `zig-out/bin/ch` SHA-256
   `02c64783232e101b7cf32816a3f0cbed3286168addd6038bc8ecbe8d5e555f69`;
-  dylib SHA-256 `356fb519794440ccf42d2cecc70008118cd7e69df5578e87e79bdf1d9ac618eb`.
-- `test/es7/s6-growable-nonshared.js`: base **0/11 → 11/11** after (with
-  `-CollectGarbage` also 11/11). Default (no flag) run: **0/11**, all failing
-  with `ReferenceError: 'SharedArrayBuffer' is not defined`; a direct probe
-  prints `SAB=undefined Atomics=undefined`, while `-ESSharedArrayBuffer`
-  prints `SAB=function Atomics=object` with `grow`, `maxByteLength` and
-  `growable` present.
+  dylib SHA-256 `838e6b997281da39dcb09010aa34e13817324730d1f80fbc4ceedea5e30f8c59`.
+- `test/es7/s6-growable-nonshared.js`: base **0/13 → 13/13** after (with
+  `-CollectGarbage` also 13/13). Default (no flag) run: **0/13** — test #1
+  fails its precondition assertion (`typeof SharedArrayBuffer` is
+  `undefined`, not a ReferenceError), tests #2–#13 fail with
+  `ReferenceError: 'SharedArrayBuffer' is not defined` at their first SAB
+  use. A direct probe prints `SAB=undefined Atomics=undefined`, while
+  `-ESSharedArrayBuffer` prints `SAB=function Atomics=object` with `grow`,
+  `maxByteLength` and `growable` present.
 - Adjacent tests after the change (same flag): `sharedarraybuffer.js` 7/7,
   `atomics_test.js` 16/16, `resizable-arraybuffer.js` 12/12,
   `resizable-typedarray.js` 23/23. `ES6TypedArrayExtensions.js` with its
@@ -162,8 +206,10 @@ ran through `sh /tmp/opencode/cc-gate-lock.sh`.
     `this-is-not-object` scenario);
   - growable accessor: 0/18 → **18/18**;
   - maxByteLength accessor: 0/20 → **20/20**;
-  - constructor maxByteLength options: 2/18 → **16/18** (2 residual are
-    BigInt syntax);
+  - constructor maxByteLength options: 2/18 → **16/18** (the 2 residual
+    scenarios are `options-maxbytelength-compared-before-object-creation.js`,
+    the inherited Reflect.construct prototype-read order; `options-non-object.js`
+    is not part of this filter and its 2 scenarios are BigInt-syntax);
   - Atomics files whose names contain `non-shared`: 24/86 → **54/86**
     (30 residual are BigInt files; 2 are `waitAsync`).
 - Non-regression for the S8 TypedArray length-tracking surface, same checkout
@@ -181,6 +227,15 @@ ran through `sh /tmp/opencode/cc-gate-lock.sh`.
   growable-SAB view that had length 0 before index coercion throws RangeError).
   Node 22.22.3 predates that revision and differs on those two ordering
   probes, so it is not used as an oracle there.
+- Revalidation-after-value differential (`/tmp/opencode/cc-revalidate.js`):
+  Node `v22.22.3`, Bun `1.4.3` and this binary all report store shrink→regrow
+  `7` (stored at index 1), add shrink→regrow `0`/value `5`, value-getter error
+  identity, index-getter RangeError precedence, no-regrow TypeError, and
+  store-after-regrow `7`. Before the fix Chakra threw the early OOB TypeError
+  on the add case because it revalidated before value coercion.
+- The 64 KiB virtual-length case is exercised by the new test (explicit
+  full-length view fixed, auto view 65536→131072, no crash); fixed SABs and
+  WebAssembly SABs keep the pre-existing virtual classification paths.
 
 ### Residual classification of the 408 remaining scenarios
 
@@ -207,10 +262,25 @@ ran through `sh /tmp/opencode/cc-gate-lock.sh`.
   `Atomics.pause`. Documented above.
 - **BigInt Atomics/typed arrays** remain unimplemented; BigInt `non-shared`
   coverage is unexecuted, not proven.
-- **Multi-agent grow.** `bufferLength` is a plain shared field; concurrent
-  grows from two agents are not synchronized, and `Atomics.notify`/waiter
-  hashing while another agent grows is outside this slice. The single-agent
-  contract (grow-only, stable pointer, zero-fill) is what is tested.
+- **Multi-agent grow and read.** `bufferLength` is a plain 32-bit field, so
+  grow-vs-grow and grow-vs-read/iterate are both unsynchronized data races:
+  a reader may see a new length without the matching zero-filled publication,
+  or a waiter list may be observed while another agent grows. A multi-agent
+  contract needs an atomically published length/capacity (an atomic 64-bit
+  length in a future design) plus waiter coordination; this slice claims only
+  the single-agent grow-only, stable-pointer, zero-fill contract.
+- **Eager-capacity DoS.** `maxByteLength` is allocated and zeroed at
+  construction (up to 2^31-1 bytes), so a script can request GB-scale memory
+  while exposing a tiny `byteLength`. Lazy commit or a host-configurable limit
+  is a product/security decision; no limit was added here.
+- **WebAssembly SharedArrayBuffer.** Wasm buffers stay non-JS-growable
+  (`growable === false`, `maxByteLength === byteLength`, `grow()` TypeError)
+  and keep their reserved/committed `GrowMemory` accounting; Node/Bun agree on
+  those JS-visible values. Cross-checking wasm `maxLength` reservation against
+  the new JS fields is out of scope.
+- **Detach scope.** Only non-shared `ArrayBuffer`s detach (the test uses
+  `ArrayBuffer.prototype.transfer()`); shared buffers are never detachable, so
+  the SAB view-tracking path has no detach invalidation to handle.
 - **Grow shrink semantics.** This slice rejects `grow(newLength < byteLength)`
   with RangeError, matching Node/Bun. Current test262 permits a host-handled
   abrupt completion for `grow-smaller-size`, so the test does not pin the

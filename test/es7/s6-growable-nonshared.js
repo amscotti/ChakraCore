@@ -411,6 +411,111 @@ var tests = [
         }
     },
     {
+        name: "Atomics revalidation follows value conversion",
+        body() {
+            var ab = new ArrayBuffer(8, { maxByteLength: 8 });
+            var view = new Int32Array(ab);
+
+            // Index coercion shrinks below index 1; the value getter grows the
+            // buffer back. Revalidation happens after value conversion, so the
+            // operation succeeds and sees the restored range.
+            assert.areEqual(7, Atomics.store(view,
+                { valueOf: function () { ab.resize(4); return 1; } },
+                { valueOf: function () { ab.resize(8); return 7; } }));
+            assert.areEqual(7, Atomics.load(view, 1));
+
+            var ab2 = new ArrayBuffer(8, { maxByteLength: 8 });
+            var view2 = new Int32Array(ab2);
+            assert.areEqual(0, Atomics.add(view2,
+                { valueOf: function () { ab2.resize(4); return 1; } },
+                { valueOf: function () { ab2.resize(8); return 5; } }));
+            assert.areEqual(5, Atomics.load(view2, 1));
+
+            // Order: index coercion runs before value coercion, and a value
+            // getter error is not replaced by the early OOB TypeError.
+            var ab3 = new ArrayBuffer(8, { maxByteLength: 8 });
+            var view3 = new Int32Array(ab3);
+            var indexError = new RangeError("index");
+            var valueError = new Error("value");
+            assert.throws(function () {
+                Atomics.add(view3,
+                    { valueOf: function () { ab3.resize(4); throw indexError; } },
+                    { valueOf: function () { throw valueError; } });
+            }, RangeError, "index coercion error precedes value coercion");
+            ab3.resize(8);
+            assert.throws(function () {
+                Atomics.add(view3,
+                    { valueOf: function () { ab3.resize(4); return 1; } },
+                    { valueOf: function () { throw valueError; } });
+            }, Error, "value coercion error precedes revalidation");
+            var caughtValue;
+            ab3.resize(8);
+            try {
+                Atomics.add(view3,
+                    { valueOf: function () { ab3.resize(4); return 1; } },
+                    { valueOf: function () { throw valueError; } });
+            } catch (e) {
+                caughtValue = e;
+            }
+            assert.strictEqual(valueError, caughtValue, "value error identity");
+
+            // Without a regrow the post-conversion revalidation throws.
+            var ab4 = new ArrayBuffer(8, { maxByteLength: 8 });
+            var view4 = new Int32Array(ab4);
+            assert.throws(function () {
+                Atomics.add(view4,
+                    { valueOf: function () { ab4.resize(4); return 1; } },
+                    3);
+            }, TypeError, "still out of bounds after conversion");
+
+            // compareExchange converts both values before revalidating.
+            var ab5 = new ArrayBuffer(8, { maxByteLength: 8 });
+            var view5 = new Int32Array(ab5);
+            assert.areEqual(0, Atomics.compareExchange(view5,
+                { valueOf: function () { ab5.resize(4); return 1; } },
+                { valueOf: function () { ab5.resize(8); return 0; } },
+                { valueOf: function () { return 9; } }));
+            assert.areEqual(9, Atomics.load(view5, 1));
+        }
+    },
+    {
+        name: "growable buffer virtual-length invariant and getter-only setters",
+        body() {
+            // 64 KiB is a valid asm.js virtual-buffer length. A growable SAB
+            // must not be classified for that path: the explicit full-length
+            // view stays fixed while the auto-length view grows.
+            var big = new SharedArrayBuffer(65536, { maxByteLength: 131072 });
+            var explicitFull = new Int8Array(big, 0, 65536);
+            var autoBig = new Uint8Array(big);
+            explicitFull[0] = 11;
+            explicitFull[65535] = 22;
+            assert.areEqual(65536, explicitFull.length);
+            big.grow(131072);
+            assert.areEqual(65536, explicitFull.length, "virtual-looking fixed view stays fixed");
+            assert.areEqual(131072, autoBig.length, "auto view tracks the grown length");
+            assert.areEqual(11, explicitFull[0]);
+            assert.areEqual(22, explicitFull[65535]);
+            assert.areEqual(0, autoBig[65536]);
+            assert.areEqual(0, autoBig[131071]);
+            explicitFull[65536 - 1] = 33;
+            assert.areEqual(33, autoBig[65536 - 1]);
+
+            // maxByteLength/growable are getter-only; assignment is ignored and
+            // a later grow still uses the original limit.
+            var setters = new SharedArrayBuffer(4, { maxByteLength: 8 });
+            assert.areEqual(undefined, Object.getOwnPropertyDescriptor(SharedArrayBuffer.prototype, "maxByteLength").set);
+            assert.areEqual(undefined, Object.getOwnPropertyDescriptor(SharedArrayBuffer.prototype, "growable").set);
+            setters.maxByteLength = 4096;
+            setters.growable = false;
+            assert.areEqual(8, setters.maxByteLength, "maxByteLength assignment ignored");
+            assert.isTrue(setters.growable, "growable assignment ignored");
+            setters.grow(8);
+            setters.grow(8);
+            assert.areEqual(8, setters.byteLength, "regrow to the same length is a no-op");
+            assert.throws(function () { setters.grow(9); }, RangeError, "original limit still applies");
+        }
+    },
+    {
         name: "Atomics on growable SharedArrayBuffer views",
         body() {
             var buffer = new SharedArrayBuffer(4, { maxByteLength: 16 });
