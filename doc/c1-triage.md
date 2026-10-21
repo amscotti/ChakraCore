@@ -867,6 +867,9 @@ still owns JIT-configuration claims.)*
 | S1 computed field names + instance-field `super` | Landed `894ba5394` (merge `fd893c83f`) | class-elements 1833/255 vs base 1699/389 (2,088 scenarios, lane-run), 67 files f→p / 0 p→f; dual-review ACCEPT | eval-super, private names in computed keys (8 scenarios), JIT |
 | S1 async/generator private methods | Landed `7cc057124` (merge `1caf23d67`) | scoped test262 272 f→p / 0 p→f (lane-run); dual-review ACCEPT | JIT |
 | S1 static blocks | Landed `9ba243adb` + fix `6ff088e19` (merge `02f99fc63`) | loop-2 dual-review ACCEPT after defer-scan scope fix; 69/69 node differentials ×3 modes | JIT; bare-`await`/nested-super defer residuals shared with field initializers |
+| S1 tail: direct-eval + computed-key privates, field semantics | Landed `1418c292f` (merge `de92ddb80`) | elements corpus 5,888/5,897 (`out/test262-c2-wave3`), +34/0 vs wave-2 run; dual-review ACCEPT (adversarial re-run) | JIT (3 interpreter-only ops); 4 primitive-receiver scenarios need `-ESBigInt` in runner; eval-super |
+| S8 Float16Array | Landed `de89e6d27` + fix `161639b48` (merge `a39aa8c45`) | gates 2013/2065 (new float16array.js 17/17); loop-2 dual ACCEPT after GetDiagTypeString fix | JIT kind lowering (B4); Atomics exclusion by allowlist |
+| S12 import attributes + JSON modules | Landed `ee826e889` + fixes `36043391d`, `d0223ff1a` (merge `78cc4f412`) | import corpus delta +12 net / 0 p→f (lane-run 565/172 vs 553/184); loop-3 dual ACCEPT (user-authorized) | `OP_ImportCallWithOptions` JIT lowering (B4); BOM-JSON; debug metadata leg pre-existing |
 | S2 arithmetic/bitwise/shift | Landed `1c5d5b2fc` | scoped 444/2, 80/0; broad 1,027/1,027; Node differentials | BigInt64Array/BigUint64Array, Map/Set identity, literal property names, giant ToString, JIT |
 | S2 BigInt64Array | Landed `f5f0efef5` | 944/0; 958/1016; ctors 24/24, 166/0; internals 163/0 | DataView BigInt, internals, Map/Set identity, SAB, JIT |
 | S2 BigInt collections/DataView | Landed `10154e3f5` | 102/0; 140/4; broad 104/0; class names/DataView length | immutable buffers, SAB, static fields, JIT |
@@ -881,19 +884,19 @@ still owns JIT-configuration claims.)*
 | S14 P2 | Landed `526931bc5` | 192/0; 157/0; controls preserved | hidden outer lexical; JSC/Node delete difference; JIT |
 | S14 P5 | Landed `8b5f28c06` | 50/50; broad 50/0; wider 65/0 non-import | eval/function-expression; proxy descriptor; JIT |
 
-Full gates at this checkpoint: **2012/0 test**, **2064/0 debug-static**
+Full gates at this checkpoint: **2013/0 test**, **2065/0 debug-static**
 (single-sourced in `tools/build/gate_counts.json`). Integrated
-class-elements corpus re-run 2026-10-20 (`out/test262-c2-s1-wave2`):
-**5,854/5,897 passed (43 failed)**, 3,865 f→p / 0 p→f vs the
-2026-10-19 integrated run; residuals are 24 direct-eval
-private-visibility, 8 private-names-in-computed-keys, 4
-primitive-receiver get/put, 2 PrivateFieldSet order, 1 non-extensible
-(strict), 4 post-ES2025 `accessor` grammar. All active feature/triage
-worktrees are merged. Next work items are the S1 tail residuals
-(direct-eval privates, computed-key private visibility, eval-super),
-the S12 import-attributes cluster (host-contract decision pending),
-Float16Array, S6 flag-on gaps, and the documented S8/S2/P-eval
-residuals. P5 residual: eval/function-expression
+class-elements corpus re-runs 2026-10-20: wave-2
+(`out/test262-c2-s1-wave2`) **5,854/5,897**, 3,865 f→p / 0 p→f vs
+2026-10-19; wave-3 (`out/test262-c2-wave3`, after the S1-tail lane)
+**5,888/5,897 passed (9 failed)**, +34/0 — remaining are 4
+post-ES2025 `accessor` grammar, 4 primitive-receiver scenarios that
+need `-ESBigInt` to parse under the default runner (pass with the
+flag), and 1 Stage-1 non-extensible scenario Node also fails. All
+active feature/triage worktrees are merged. Next work items are the
+eval-super residual, S6 flag-on gaps, the documented S8/S2/P-eval
+residuals, and C4 qualification (full baseline rerun,
+host-reported negative phase). P5 residual: eval/function-expression
 reference paths and pre-existing proxy descriptor duplication.
 
 ## 7. Separate inventories

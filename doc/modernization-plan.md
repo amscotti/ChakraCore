@@ -57,7 +57,7 @@ handling have been validated before its results are used as a completion gate.
 | B6 | Windows feasibility and rollout; later target extensions | Stable build contracts | Separate expansion |
 | Z1 | One useful mixed C++/Zig unit behind a tested C ABI | B3; B4 if the unit ships on Linux | Optional pilot |
 | C1 | Qualified ES2025 test policy and triaged failures | Stable Mac build at B3 | Recorded (CONDITIONAL) |
-| C2 | Bounded compatibility batches and partial releases | C1; B4 before JIT-wide enablement | In progress (S4/S5/S10/S11/S7-matchAll/S9 named-groups + d-flag + duplicate named groups + lookbehind + ES2025 modifiers; S1 class elements complete: public/private instance+static fields, private methods/accessors incl. async/generator and statics, computed field names, `super` in field initializers, static blocks (integrated elements corpus 5,854/5,897; direct-eval/eval-super residuals remain); S2 BigInt: operators/literals/asIntN-asUintN, collections, DataView, BigInt64Array; S8 resizable ArrayBuffer + TypedArray tracking + bounded Float16 slice (DataView/Math.f16round; Float16Array pending); S13 symbol keys, WeakRef, FinalizationRegistry; S14 P1–P7 — all closed on Mac no-JIT; JIT claims gated on B4) |
+| C2 | Bounded compatibility batches and partial releases | C1; B4 before JIT-wide enablement | In progress (S4/S5/S10/S11/S7-matchAll/S9 named-groups + d-flag + duplicate named groups + lookbehind + ES2025 modifiers; S1 class elements complete: public/private instance+static fields, private methods/accessors incl. async/generator and statics, computed field names, `super` in field initializers, static blocks (integrated elements corpus 5,854/5,897; direct-eval/eval-super residuals remain); S2 BigInt: operators/literals/asIntN-asUintN, collections, DataView, BigInt64Array; S8 resizable ArrayBuffer + TypedArray tracking + Float16 (DataView/Math.f16round slice and Float16Array); S12 import attributes + JSON modules (additive host contract); S13 symbol keys, WeakRef, FinalizationRegistry; S14 P1–P7 — all closed on Mac no-JIT; JIT claims gated on B4) |
 | C3 | Larger runtime/object-model feature projects | C1 and their feature prerequisites | Separate projects |
 | C4 | Verified full ES2025 core-language result | Required C2/C3 work and qualified runner | Long-term objective |
 
@@ -594,9 +594,10 @@ Decision/rollback points:
 - [ ] C4: Published qualified ES2025 result on the claimed default configurations.
 
 **Latest integration checkpoint (2026-10-20):** main is clean at the
-**2012/0 test** and **2064/0 debug-static** gates (re-verified after
-every merge in the two S1 waves below; counts are single-sourced in
-`tools/build/gate_counts.json`).
+**2013/0 test** and **2065/0 debug-static** gates (re-verified after
+every merge in the waves below; counts are single-sourced in
+`tools/build/gate_counts.json` — Float16Array's new test file moved
+2012/2064 → 2013/2065).
 Merged lanes: S1 public/private instance+static fields and private methods/accessors, S2 arithmetic + BigInt64Array/Uint64Array + collections/
 DataView, S8 resizable ArrayBuffer/transfer + TypedArray tracking, S13
 WeakRef + FinalizationRegistry, and S14 P1/P2/P3/P4/P5/P6/P7
@@ -638,16 +639,28 @@ integrated run (both S1 waves). The 43 residuals are 24 direct-eval
 private-visibility scenarios, 8 private-names-in-computed-keys, 4
 primitive-receiver private field get/put, 2 PrivateFieldSet
 evaluation-order, 1 non-extensible-object (strict), and 4
-post-ES2025 `accessor`-grammar scenarios. All active feature/triage
-worktrees are merged; next work items are the S1 tail residuals
-(direct-eval privates, computed-key private visibility, eval-super),
-the S12 import-attributes cluster, Float16Array (S8 remainder), S6
-flag-on gaps, and the documented S8/S2/P-eval residuals. Tracked eval
-residuals: P4 body eval with non-simple parameters; P2 hidden outer
-lexical and JSC/Node delete difference. S3 (Unicode data decision),
-S6 default (product/security decision), B4 and C4 remain decision- or
-gate-blocked; S12 needs its embedder host-contract decision
-([c1-triage.md](c1-triage.md) shortlist item S12).
+post-ES2025 `accessor`-grammar scenarios. A third wave then closed
+that tail and two further clusters on Mac no-JIT: direct-eval and
+computed-key private visibility plus private-field operation
+semantics ([c2-s1-tail-privates.md](c2-s1-tail-privates.md); elements
+corpus re-run `out/test262-c2-wave3`: **5,888/5,897**, +34/0 vs
+wave 2 — the 9 remaining are the 4 post-ES2025 `accessor` scenarios,
+4 primitive-receiver scenarios that need `-ESBigInt` to parse in the
+default runner (pass with the flag), and 1 Stage-1 non-extensible
+scenario Node also fails), `Float16Array`
+([c2-s8-float16array.md](c2-s8-float16array.md); one loop-1 debugger
+defect fixed in loop 2), and import attributes + JSON modules
+([c2-s12-import-attributes.md](c2-s12-import-attributes.md); additive
+JsRT fetch-with-attributes callback, legacy hosts unaffected; two
+loop-2 defects fixed in a user-authorized loop 3; `OP_ImportCallWithOptions`
+JIT lowering owed at B4). All active feature/triage worktrees are
+merged; next work items are the remaining eval-super residual, S6
+flag-on gaps, the documented S8/S2/P-eval residuals, and the C4
+qualification work (full baseline rerun, host-reported negative
+phase). Tracked eval residuals: P4 body eval with non-simple
+parameters; P2 hidden outer lexical and JSC/Node delete difference.
+S3 (Unicode data decision), S6 default (product/security decision),
+B4 and C4 remain decision- or gate-blocked.
 
 **C2 batch status:** S4, S5, all of S10 (the copy-by-change half and
 the Set-methods half), all of S11, S7, the five S9 sub-batches
