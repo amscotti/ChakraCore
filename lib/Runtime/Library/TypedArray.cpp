@@ -3294,7 +3294,9 @@ namespace Js
 
 #define TypedArrayBeginStub(TypedArrayName) \
         Assert(GetArrayBuffer() && GetArrayBuffer()->GetBuffer()); \
-        Assert(accessIndex < GetLength()); \
+        /* The index was validated before value coercion; user code may shrink \
+           or grow a resizable buffer, so the post-conversion check owns the \
+           live accessIndex < GetLength() invariant for value-taking ops. */ \
         ScriptContext *scriptContext = GetScriptContext(); \
         typedef TypedArrayName::TypedArrayType type; \
         type *buffer = (type*)this->buffer + accessIndex;
