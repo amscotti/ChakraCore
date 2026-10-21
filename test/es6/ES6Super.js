@@ -169,8 +169,8 @@ var tests = [
     body: function () {
         var value = undefined;
 
-        assert.throws(function(){ eval('super[value = 0]'); }, ReferenceError, "super[value = 0]", "Missing or invalid 'super' binding");
-        assert.areEqual(0, value);
+        assert.throws(function(){ eval('super[value = 0]'); }, SyntaxError, "super[value = 0]", "Invalid use of the 'super' keyword");
+        assert.areEqual(undefined, value, "computed key is not evaluated for an early error");
     }
   },
   {
