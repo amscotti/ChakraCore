@@ -925,7 +925,7 @@ pub fn build(b: *std.Build) void {
     // (PASS requires build+run to SUCCESS, plus archive-symbol and
     // Makefile linkage evidence), output-asserted smoke, and
     // static-aware metadata (minos 26.0, LC_MAIN stacksize 0 - the
-    // U-B3.1-2 pin - headers, no dylib, 524-member archive with JsRT
+    // U-B3.1-2 pin - headers, no dylib, 526-member archive with JsRT
     // symbols, self-contained ch). B3.4 paths: plain out/debug-static
     // strings (the side prefix is fixed, not --prefix-relative); each
     // step depends on the copy-out (ordering) and fingerprints the
