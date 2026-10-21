@@ -24,6 +24,13 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "Float16Array": {
+        "#__proto__": "function <large string>",
+        "length": "number 3",
+        "name": "string Float16Array",
+        "BYTES_PER_ELEMENT": "number 2",
+        "prototype": "Object {...}"
+      },
       "WeakRef": {
         "#__proto__": "function <large string>",
         "length": "number 1",

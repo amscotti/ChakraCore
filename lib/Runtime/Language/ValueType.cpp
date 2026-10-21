@@ -1164,6 +1164,7 @@ void ValueType::InitializeTypeIdToBitsMap()
     TypeIdToBits[TypeIds_Float64Array      ] = GetObject(ObjectType::Float64Array).bits;
     TypeIdToBits[TypeIds_Int64Array        ] = GetObject(ObjectType::Int64Array).bits;
     TypeIdToBits[TypeIds_Uint64Array       ] = GetObject(ObjectType::Uint64Array).bits;
+    TypeIdToBits[TypeIds_Float16Array      ] = GetObject(ObjectType::Float16Array).bits;
     TypeIdToBits[TypeIds_CharArray         ] = GetObject(ObjectType::CharArray).bits;
     TypeIdToBits[TypeIds_BoolArray         ] = GetObject(ObjectType::BoolArray).bits;
 

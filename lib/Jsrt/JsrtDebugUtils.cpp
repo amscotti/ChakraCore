@@ -266,6 +266,7 @@ void JsrtDebugUtils::AddPropertyType(Js::DynamicObject * object, Js::IDiagObject
         case Js::TypeIds_Uint32Array:
         case Js::TypeIds_Float32Array:
         case Js::TypeIds_Float64Array:
+        case Js::TypeIds_Float16Array:
         case Js::TypeIds_Int64Array:
         case Js::TypeIds_Uint64Array:
         case Js::TypeIds_DataView:
@@ -473,6 +474,7 @@ const char16 * JsrtDebugUtils::GetClassName(Js::TypeId typeId)
     case Js::TypeIds_Uint32Array:           return _u("Uint32Array");
     case Js::TypeIds_Float32Array:          return _u("Float32Array");
     case Js::TypeIds_Float64Array:          return _u("Float64Array");
+    case Js::TypeIds_Float16Array:          return _u("Float16Array");
     case Js::TypeIds_Int64Array:            return _u("Int64Array");
     case Js::TypeIds_Uint64Array:           return _u("Uint64Array");
     case Js::TypeIds_DataView:              return _u("DataView");

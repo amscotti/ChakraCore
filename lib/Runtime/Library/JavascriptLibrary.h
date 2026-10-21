@@ -14,6 +14,7 @@
 CompileAssert(MaxPreInitializedObjectTypeInlineSlotCount <= USHRT_MAX);
 
 #include "StringCache.h"
+#include "Library/Float16.h"
 #include "Library/JavascriptGenerator.h"
 #include "Library/JavascriptAsyncGenerator.h"
 
@@ -251,6 +252,7 @@ namespace Js
         Field(DynamicType *) uint32ArrayType;
         Field(DynamicType *) float32ArrayType;
         Field(DynamicType *) float64ArrayType;
+        Field(DynamicType *) float16ArrayType;
         Field(DynamicType *) int64ArrayType;
         Field(DynamicType *) uint64ArrayType;
         Field(DynamicType *) boolArrayType;
@@ -918,6 +920,7 @@ namespace Js
         template<> inline DynamicType* GetTypedArrayType<uint32,false>(uint32) { return uint32ArrayType; };
         template<> inline DynamicType* GetTypedArrayType<float,false>(float) { return float32ArrayType; };
         template<> inline DynamicType* GetTypedArrayType<double,false>(double) { return float64ArrayType; };
+        template<> inline DynamicType* GetTypedArrayType<Float16Bits,false>(Float16Bits) { return float16ArrayType; };
         template<> inline DynamicType* GetTypedArrayType<int64,false>(int64) { return int64ArrayType; };
         template<> inline DynamicType* GetTypedArrayType<uint64,false>(uint64) { return uint64ArrayType; };
         template<> inline DynamicType* GetTypedArrayType<bool,false>(bool) { return boolArrayType; };
@@ -1282,6 +1285,7 @@ namespace Js
         STANDARD_INIT(Uint32Array);
         STANDARD_INIT(Float32Array);
         STANDARD_INIT(Float64Array);
+        STANDARD_INIT(Float16Array);
         STANDARD_INIT(Boolean);
         STANDARD_INIT(Symbol);
         STANDARD_INIT(Date);

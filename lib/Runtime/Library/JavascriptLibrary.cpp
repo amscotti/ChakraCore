@@ -244,6 +244,10 @@ namespace Js
             DynamicType::New(scriptContext, TypeIds_Object, typedArrayPrototype, nullptr,
                 DeferredTypeHandler<InitializeFloat64ArrayPrototype, DefaultDeferredTypeFilter, true>::GetDefaultInstance()));
 
+        Float16ArrayPrototype = DynamicObject::New(recycler,
+            DynamicType::New(scriptContext, TypeIds_Object, typedArrayPrototype, nullptr,
+                DeferredTypeHandler<InitializeFloat16ArrayPrototype, DefaultDeferredTypeFilter, true>::GetDefaultInstance()));
+
         BigInt64ArrayPrototype = DynamicObject::New(recycler,
             DynamicType::New(scriptContext, TypeIds_Object, typedArrayPrototype, nullptr,
                 DeferredTypeHandler<InitializeBigInt64ArrayPrototype, DefaultDeferredTypeFilter, true>::GetDefaultInstance()));
@@ -584,6 +588,7 @@ namespace Js
         INIT_SIMPLE_TYPE(uint32ArrayType, TypeIds_Uint32Array, Uint32ArrayPrototype);
         INIT_SIMPLE_TYPE(float32ArrayType, TypeIds_Float32Array, Float32ArrayPrototype);
         INIT_SIMPLE_TYPE(float64ArrayType, TypeIds_Float64Array, Float64ArrayPrototype);
+        INIT_SIMPLE_TYPE(float16ArrayType, TypeIds_Float16Array, Float16ArrayPrototype);
         INIT_SIMPLE_TYPE(int64ArrayType, TypeIds_Int64Array, BigInt64ArrayPrototype);
         INIT_SIMPLE_TYPE(uint64ArrayType, TypeIds_Uint64Array, BigUint64ArrayPrototype);
         INIT_SIMPLE_TYPE(boolArrayType, TypeIds_BoolArray, BoolArrayPrototype);
@@ -1713,6 +1718,14 @@ namespace Js
             typedArrayConstructor);
         AddFunction(globalObject, PropertyIds::Float64Array, Float64ArrayConstructor);
 
+        // Float16Array has no static PropertyIds entry (like BigInt64Array);
+        // the global name and the constructor/prototype names below are
+        // dynamic strings.
+        Float16ArrayConstructor = CreateBuiltinConstructor(&Float16Array::EntryInfo::NewInstance,
+            DeferredTypeHandler<InitializeFloat16ArrayConstructor>::GetDefaultInstance(),
+            typedArrayConstructor);
+        AddFunction(globalObject, scriptContext->GetOrAddPropertyIdTracked(_u("Float16Array")), Float16ArrayConstructor);
+
         // BigInt64Array/BigUint64Array are part of the BigInt feature. Their
         // element type is stored in the existing Int64Array/Uint64Array slots
         // (two's-complement 64-bit), but the constructors and prototypes are
@@ -2559,6 +2572,7 @@ namespace Js
     INIT_TYPEDARRAY_CONSTRUCTOR(Uint32Array, Uint32ArrayPrototype, uint32);
     INIT_TYPEDARRAY_CONSTRUCTOR(Float32Array, Float32ArrayPrototype, float);
     INIT_TYPEDARRAY_CONSTRUCTOR(Float64Array, Float64ArrayPrototype, double);
+    INIT_TYPEDARRAY_CONSTRUCTOR(Float16Array, Float16ArrayPrototype, Float16Bits);
 
 #define INIT_TYPEDARRAY_CONSTRUCTOR_NAMED(typedArray, typedArrayDisplayName, typedarrayPrototype, TypeName) \
     bool  JavascriptLibrary::Initialize##typedArray##Constructor(DynamicObject* typedArrayConstructor, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode) \
@@ -2597,6 +2611,7 @@ namespace Js
     INIT_TYPEDARRAY_PROTOTYPE(Uint32Array, Uint32ArrayPrototype, uint32);
     INIT_TYPEDARRAY_PROTOTYPE(Float32Array, Float32ArrayPrototype, float);
     INIT_TYPEDARRAY_PROTOTYPE(Float64Array, Float64ArrayPrototype, double);
+    INIT_TYPEDARRAY_PROTOTYPE(Float16Array, Float16ArrayPrototype, Float16Bits);
 
     // BigInt64Array/BigUint64Array are only exposed with ESBigInt. Without
     // the flag the slots remain the internal MS projection prototypes and
@@ -3764,6 +3779,7 @@ namespace Js
         VirtualTableRecorder<Js::Uint32Array>::RecordVirtualTableAddress(vtableAddresses, VTableValue::VtableUint32Array);
         VirtualTableRecorder<Js::Float32Array>::RecordVirtualTableAddress(vtableAddresses, VTableValue::VtableFloat32Array);
         VirtualTableRecorder<Js::Float64Array>::RecordVirtualTableAddress(vtableAddresses, VTableValue::VtableFloat64Array);
+        VirtualTableRecorder<Js::Float16Array>::RecordVirtualTableAddress(vtableAddresses, VTableValue::VtableFloat16Array);
         VirtualTableRecorder<Js::Int64Array>::RecordVirtualTableAddress(vtableAddresses, VTableValue::VtableInt64Array);
         VirtualTableRecorder<Js::Uint64Array>::RecordVirtualTableAddress(vtableAddresses, VTableValue::VtableUint64Array);
 
@@ -7659,6 +7675,7 @@ namespace Js
             || constructor == library->GetUint32ArrayConstructor()
             || constructor == library->GetFloat32ArrayConstructor()
             || constructor == library->GetFloat64ArrayConstructor()
+            || constructor == library->GetFloat16ArrayConstructor()
             || constructor == library->GetBigInt64ArrayConstructor()
             || constructor == library->GetBigUint64ArrayConstructor();
     }

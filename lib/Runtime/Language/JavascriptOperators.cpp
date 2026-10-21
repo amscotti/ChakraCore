@@ -49,6 +49,15 @@ typedef struct JsNativeString
 
 using namespace Js;
 
+    // Float16Array element store for the OP_Memcopy/OP_Memset fast paths:
+    // observable ToNumber followed by round-to-nearest-even narrowing with
+    // the shared Float16 codec (mirrors TypedArray.cpp::ToFloat16Element,
+    // which is file-local there).
+    static Float16Bits Float16ElementStore(Var value, ScriptContext* scriptContext)
+    {
+        return Float16Bits(Float16::ToBits(JavascriptConversion::ToNumber(value, scriptContext)));
+    }
+
     DEFINE_RECYCLER_TRACKER_ARRAY_PERF_COUNTER(Var);
     DEFINE_RECYCLER_TRACKER_PERF_COUNTER(FrameDisplay);
 
@@ -4568,6 +4577,21 @@ CommonNumber:
             }
             break;
         }
+        case TypeIds_Float16Array:
+        {
+            // Float16Array has no virtual-array variant; the typed array
+            // deals with all possible values for the index.
+            int32 indexInt = TaggedInt::ToInt32(index);
+            if (VirtualTableInfo<Float16Array>::HasVirtualTable(instance))
+            {
+                Float16Array* float16Array = UnsafeVarTo<Float16Array>(instance);
+                if (indexInt >= 0)
+                {
+                    return float16Array->DirectGetItem(indexInt);
+                }
+            }
+            break;
+        }
 
         default:
             break;
@@ -5173,7 +5197,8 @@ CommonNumber:
 
         bool isTypedArray = (instanceType >= TypeIds_Int8Array && instanceType <= TypeIds_Float64Array)
             || instanceType == TypeIds_Int64Array
-            || instanceType == TypeIds_Uint64Array;
+            || instanceType == TypeIds_Uint64Array
+            || instanceType == TypeIds_Float16Array;
 
         if (isTypedArray)
         {
@@ -5337,6 +5362,18 @@ CommonNumber:
                     {
                         Int64Array* int64Array = UnsafeVarTo<Int64Array>(instance);
                         returnValue = int64Array->ValidateIndexAndDirectSetItem(index, value, &isNumericIndex);
+                    }
+                    break;
+                }
+                case TypeIds_Float16Array:
+                {
+                    // Float16Array has no virtual-array variant. Index
+                    // validation still runs DirectSetItemNoSet/ToNumber for
+                    // OOB, negative, fractional and detached stores.
+                    if (VirtualTableInfo<Float16Array>::HasVirtualTable(instance))
+                    {
+                        Float16Array* float16Array = UnsafeVarTo<Float16Array>(instance);
+                        returnValue = float16Array->ValidateIndexAndDirectSetItem(index, value, &isNumericIndex);
                     }
                     break;
                 }
@@ -5781,6 +5818,13 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
             returnValue = MEMCOPY_TYPED_ARRAY(Float64Array, ToNumber);
             break;
         }
+        case TypeIds_Float16Array:
+        {
+            // Same-type only (checked above): bitwise copy is exact for
+            // binary16 patterns. The converter covers the undefined tail.
+            returnValue = VarTo<Float16Array>(dstInstance)->DirectSetItemAtRange(VarTo<Float16Array>(srcInstance), srcStart, dstStart, length, Float16ElementStore);
+            break;
+        }
         case TypeIds_Array:
         case TypeIds_NativeFloatArray:
         case TypeIds_NativeIntArray:
@@ -5861,6 +5905,13 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
         MEMSET_TYPED_ARRAY_CASE(Uint32Array, ToUInt32)
         MEMSET_TYPED_ARRAY_CASE(Float32Array, ToFloat)
         MEMSET_TYPED_ARRAY_CASE(Float64Array, ToNumber)
+        case TypeIds_Float16Array:
+        {
+            Float16Array::TypedArrayType typedValue;
+            if (!MemsetConversion<Float16Array::TypedArrayType, Float16ElementStore>(value, scriptContext, &typedValue)) return false;
+            returnValue = VarTo<Float16Array>(instance)->DirectSetItemAtRange(start, length, typedValue);
+            break;
+        }
         case TypeIds_NativeFloatArray:
         case TypeIds_NativeIntArray:
         case TypeIds_Array:

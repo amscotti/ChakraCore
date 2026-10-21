@@ -280,6 +280,10 @@ namespace Js
     {
         static SCATypeId GetSCATypeId() { return SCA_Float64Array; }
     };
+    template<> struct TypedArrayTrace<Float16Bits>: TypedArrayTraceBase<Float16Bits>
+    {
+        static SCATypeId GetSCATypeId() { return SCA_Float16Array; }
+    };
     template<> struct TypedArrayTrace<int8, false,true>: TypedArrayTraceBase<int8,false,true>
     {
         static SCATypeId GetSCATypeId() { return SCA_Int8Array; }

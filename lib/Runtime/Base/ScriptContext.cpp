@@ -1045,6 +1045,7 @@ namespace Js
         Output::Print(_u("    Uint32Array                    %8d   %8d\n"), typeCount[TypeIds_Uint32Array], instanceCount[TypeIds_Uint32Array]);
         Output::Print(_u("    Float32Array                   %8d   %8d\n"), typeCount[TypeIds_Float32Array], instanceCount[TypeIds_Float32Array]);
         Output::Print(_u("    Float64Array                   %8d   %8d\n"), typeCount[TypeIds_Float64Array], instanceCount[TypeIds_Float64Array]);
+        Output::Print(_u("    Float16Array                   %8d   %8d\n"), typeCount[TypeIds_Float16Array], instanceCount[TypeIds_Float16Array]);
         Output::Print(_u("    DataView                       %8d   %8d\n"), typeCount[TypeIds_DataView], instanceCount[TypeIds_DataView]);
         Output::Print(_u("    ModuleRoot                     %8d   %8d\n"), typeCount[TypeIds_ModuleRoot], instanceCount[TypeIds_ModuleRoot]);
         Output::Print(_u("    HostObject                     %8d   %8d\n"), typeCount[TypeIds_HostObject], instanceCount[TypeIds_HostObject]);

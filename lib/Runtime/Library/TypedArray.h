@@ -7,6 +7,8 @@
 //----------------------------------------------------------------------------
 #pragma once
 
+#include "Float16.h"
+
 namespace Js
 {
     typedef Var (*PFNCreateTypedArray)(Js::ArrayBufferBase* arrayBuffer, uint32 offSet, uint32 mappedLength, Js::JavascriptLibrary* javascriptLibrary, bool lengthTracking);
@@ -17,6 +19,10 @@ namespace Js
     // Numbers) to a user comparefn.
     template <> bool TypedArrayCompareElementsHelper<int64>(JavascriptArray::CompareVarsInfo* cvInfo, const void* elem1, const void* elem2);
     template <> bool TypedArrayCompareElementsHelper<uint64>(JavascriptArray::CompareVarsInfo* cvInfo, const void* elem1, const void* elem2);
+    // Float16Array stores raw binary16 patterns; the helper widens each
+    // side with Float16::ToDouble before comparing, so the default sort is
+    // numeric on the represented values (including NaN-to-end handling).
+    template <> bool TypedArrayCompareElementsHelper<Float16Bits>(JavascriptArray::CompareVarsInfo* cvInfo, const void* elem1, const void* elem2);
 
     class TypedArrayBase : public ArrayBufferParent
     {
@@ -294,6 +300,7 @@ namespace Js
     typedef TypedArray<double>              Float64Array;
     typedef TypedArray<int64>               Int64Array;
     typedef TypedArray<uint64>              Uint64Array;
+    typedef TypedArray<Float16Bits>         Float16Array;
     typedef TypedArray<bool>                BoolArray;
     typedef TypedArray<int8, false, true>   Int8VirtualArray;
     typedef TypedArray<uint8, false, true>  Uint8VirtualArray;
@@ -763,6 +770,7 @@ namespace Js
     __EXPLICIT_INSTANTINATE_TA(Float64Array);
     __EXPLICIT_INSTANTINATE_TA(Int64Array);
     __EXPLICIT_INSTANTINATE_TA(Uint64Array);
+    __EXPLICIT_INSTANTINATE_TA(Float16Array);
     __EXPLICIT_INSTANTINATE_TA(BoolArray);
     __EXPLICIT_INSTANTINATE_TA(Int8VirtualArray);
     __EXPLICIT_INSTANTINATE_TA(Uint8VirtualArray);

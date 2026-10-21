@@ -2177,6 +2177,9 @@ CHAKRA_API JsCreateTypedArray(_In_ JsTypedArrayType arrayType, _In_ JsValueRef b
         case JsArrayTypeFloat64:
             constructorFunc = library->GetFloat64ArrayConstructor();
             break;
+        case JsArrayTypeFloat16:
+            constructorFunc = library->GetFloat16ArrayConstructor();
+            break;
         default:
             return JsErrorInvalidArgument;
         }
@@ -2222,6 +2225,7 @@ C_ASSERT(JsArrayTypeInt32         - Js::TypeIds_Int32Array        == JsArrayType
 C_ASSERT(JsArrayTypeUint32        - Js::TypeIds_Uint32Array       == JsArrayTypeInt8 - Js::TypeIds_Int8Array);
 C_ASSERT(JsArrayTypeFloat32       - Js::TypeIds_Float32Array      == JsArrayTypeInt8 - Js::TypeIds_Int8Array);
 C_ASSERT(JsArrayTypeFloat64       - Js::TypeIds_Float64Array      == JsArrayTypeInt8 - Js::TypeIds_Int8Array);
+C_ASSERT(JsArrayTypeFloat16       - Js::TypeIds_Float16Array      == JsArrayTypeInt8 - Js::TypeIds_Int8Array);
 
 inline JsTypedArrayType GetTypedArrayType(Js::TypeId typeId)
 {
@@ -2347,6 +2351,9 @@ CHAKRA_API JsGetTypedArrayStorage(_In_ JsValueRef instance, _Outptr_result_byteb
                     break;
                 case Js::TypeIds_Float64Array:
                     *elementSize = sizeof(double);
+                    break;
+                case Js::TypeIds_Float16Array:
+                    *elementSize = sizeof(uint16);
                     break;
                 default:
                     AssertMsg(FALSE, "invalid typed array type");
@@ -2480,6 +2487,7 @@ template<> struct TypedArrayTypeTraits<int32> { static const JsTypedArrayType cT
 template<> struct TypedArrayTypeTraits<uint32> { static const JsTypedArrayType cTypedArrayType = JsTypedArrayType::JsArrayTypeUint32; };
 template<> struct TypedArrayTypeTraits<float> { static const JsTypedArrayType cTypedArrayType = JsTypedArrayType::JsArrayTypeFloat32; };
 template<> struct TypedArrayTypeTraits<double> { static const JsTypedArrayType cTypedArrayType = JsTypedArrayType::JsArrayTypeFloat64; };
+template<> struct TypedArrayTypeTraits<Js::Float16Bits> { static const JsTypedArrayType cTypedArrayType = JsTypedArrayType::JsArrayTypeFloat16; };
 
 template <class T, bool clamped = false>
 Js::ArrayObject* CreateTypedArray(Js::ScriptContext *scriptContext, void* data, unsigned int length)
@@ -2563,6 +2571,9 @@ CHAKRA_API JsSetIndexedPropertiesToExternalData(
             break;
         case JsArrayTypeFloat64:
             newTypedArray = CreateTypedArray<double>(scriptContext, data, elementLength);
+            break;
+        case JsArrayTypeFloat16:
+            newTypedArray = CreateTypedArray<Js::Float16Bits>(scriptContext, data, elementLength);
             break;
         default:
             return JsErrorInvalidArgument;
@@ -2651,6 +2662,9 @@ CHAKRA_API JsGetIndexedPropertiesExternalData(
             break;
         case Js::TypeIds_Float64Array:
             GetObjectArrayData<double>(objectArray, buffer, arrayType, elementLength);
+            break;
+        case Js::TypeIds_Float16Array:
+            GetObjectArrayData<Js::Float16Bits>(objectArray, buffer, arrayType, elementLength);
             break;
         default:
             RETURN_NO_EXCEPTION(JsErrorInvalidArgument);

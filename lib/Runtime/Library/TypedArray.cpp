@@ -53,6 +53,20 @@ namespace Js
         {
             return JavascriptBigInt::CreateFromUInt64(buffer[index], scriptContext);
         }
+
+        // Float16Array element conversions. Store runs the observable
+        // ToNumber (including user code), then rounds to binary16 with the
+        // shared Float16 codec so stores agree with DataView.setFloat16;
+        // load widens exactly with Float16::ToDouble.
+        Float16Bits ToFloat16Element(Var value, ScriptContext* scriptContext)
+        {
+            return Float16Bits(Float16::ToBits(JavascriptConversion::ToNumber(value, scriptContext)));
+        }
+
+        inline Var Float16ElementAt(uint16* buffer, uint32 index, ScriptContext* scriptContext)
+        {
+            return JavascriptNumber::ToVarWithCheck(Float16::ToDouble(buffer[index]), scriptContext);
+        }
     }
 
     // explicitly instantiate these function for the built in entry point FunctionInfo
@@ -67,6 +81,7 @@ namespace Js
     INSTANTIATE_BUILT_IN_ENTRYPOINTS(Float64Array)
     INSTANTIATE_BUILT_IN_ENTRYPOINTS(Int64Array)
     INSTANTIATE_BUILT_IN_ENTRYPOINTS(Uint64Array)
+    INSTANTIATE_BUILT_IN_ENTRYPOINTS(Float16Array)
     INSTANTIATE_BUILT_IN_ENTRYPOINTS(BoolArray)
 
     template <> bool VarIsImpl<Uint8ClampedArray>(RecyclableObject* obj)
@@ -155,6 +170,14 @@ namespace Js
         return JavascriptOperators::GetTypeId(obj) == TypeIds_Uint64Array &&
                ( VirtualTableInfo<Uint64Array>::HasVirtualTable(obj) ||
                  VirtualTableInfo<CrossSiteObject<Uint64Array>>::HasVirtualTable(obj)
+               );
+    }
+
+    template <> bool VarIsImpl<Float16Array>(RecyclableObject* obj)
+    {
+        return JavascriptOperators::GetTypeId(obj) == TypeIds_Float16Array &&
+               ( VirtualTableInfo<Float16Array>::HasVirtualTable(obj) ||
+                 VirtualTableInfo<CrossSiteObject<Float16Array>>::HasVirtualTable(obj)
                );
     }
 
@@ -958,7 +981,8 @@ namespace Js
              && !VarIs<Float32Array>(this) && !VarIs<Float32Array>(source)
              && !VarIs<Float32VirtualArray>(this) && !VarIs<Float32VirtualArray>(source)
              && !VarIs<Float64Array>(this) && !VarIs<Float64Array>(source)
-             && !VarIs<Float64VirtualArray>(this) && !VarIs<Float64VirtualArray>(source)))
+             && !VarIs<Float64VirtualArray>(this) && !VarIs<Float64VirtualArray>(source)
+             && !VarIs<Float16Array>(this) && !VarIs<Float16Array>(source)))
         {
             const size_t offsetInBytes = offset * BYTES_PER_ELEMENT;
             memmove_s(buffer + offsetInBytes,
@@ -1283,6 +1307,10 @@ namespace Js
 
         case TypeIds_Float64Array:
             name = scriptContext->GetPropertyString(PropertyIds::Float64Array);
+            break;
+
+        case TypeIds_Float16Array:
+            name = scriptContext->GetLibrary()->CreateStringFromCppLiteral(_u("Float16Array"));
             break;
 
         case TypeIds_Int64Array:
@@ -2390,6 +2418,60 @@ namespace Js
         return JavascriptConversion::ToNumber_Full(retVal, scriptContext) < 0;
     }
 
+    // Float16Array stores raw binary16 patterns, so the generic helper
+    // (which casts elements to double) does not apply. Widen both sides
+    // exactly, then reuse the Number comparison semantics: NaN sorts to
+    // the end and a user comparefn receives the widened Numbers.
+    template<>
+    bool TypedArrayCompareElementsHelper<Float16Bits>(JavascriptArray::CompareVarsInfo* cvInfo, const void* elem1, const void* elem2)
+    {
+        const double x = Float16::ToDouble(static_cast<const Float16Bits*>(elem1)->bits);
+        const double y = Float16::ToDouble(static_cast<const Float16Bits*>(elem2)->bits);
+
+        if (NumberUtilities::IsNan(x))
+        {
+            return false;
+        }
+        else if (NumberUtilities::IsNan(y))
+        {
+            return true;
+        }
+
+        if (cvInfo->compFn != nullptr)
+        {
+            RecyclableObject* compFn = cvInfo->compFn;
+            ScriptContext* scriptContext = compFn->GetScriptContext();
+            Var undefined = scriptContext->GetLibrary()->GetUndefined();
+            Var retVal = nullptr;
+            BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+            {
+                retVal = CALL_FUNCTION(scriptContext->GetThreadContext(),
+                            compFn, CallInfo(CallFlags_Value, 3),
+                            undefined,
+                            JavascriptNumber::ToVarNoCheck(x, scriptContext),
+                            JavascriptNumber::ToVarNoCheck(y, scriptContext));
+            }
+            END_SAFE_REENTRANT_CALL
+
+            if (TaggedInt::Is(retVal))
+            {
+                return TaggedInt::ToInt32(retVal) < 0;
+            }
+
+            if (JavascriptNumber::Is_NoTaggedIntCheck(retVal))
+            {
+                return JavascriptNumber::GetValue(retVal) < 0;
+            }
+
+            return JavascriptConversion::ToNumber_Full(retVal, scriptContext) < 0;
+        }
+        else // simple comparison when no user method is provided
+        {
+            // `<` treats -0 and +0 as equal, matching the other float kinds.
+            return x < y;
+        }
+    }
+
     // TypedArray.prototype.sort entry point
     // Implements #sec-%typedarray%.prototype.sort from ECMA 2023 spec
     // 
@@ -2510,6 +2592,9 @@ namespace Js
             break;
         case TypeIds_Float64Array:
             created = Float64Array::Create(arrayBuffer, 0, length, library);
+            break;
+        case TypeIds_Float16Array:
+            created = Float16Array::Create(arrayBuffer, 0, length, library);
             break;
         case TypeIds_Int64Array:
             created = Int64Array::Create(arrayBuffer, 0, length, library);
@@ -2769,6 +2854,10 @@ namespace Js
             stringBuilder->AppendCppLiteral(_u("Object, (Float64Array)"));
             break;
 
+        case TypeIds_Float16Array:
+            stringBuilder->AppendCppLiteral(_u("Object, (Float16Array)"));
+            break;
+
         case TypeIds_Int64Array:
             stringBuilder->AppendCppLiteral(_u("Object, (BigInt64Array)"));
             break;
@@ -2929,6 +3018,8 @@ namespace Js
             return scriptContext->GetLibrary()->GetFloat32ArrayConstructor();
         case TypeId::TypeIds_Float64Array:
             return scriptContext->GetLibrary()->GetFloat64ArrayConstructor();
+        case TypeId::TypeIds_Float16Array:
+            return scriptContext->GetLibrary()->GetFloat16ArrayConstructor();
         case TypeId::TypeIds_Int64Array:
             return scriptContext->GetLibrary()->GetBigInt64ArrayConstructor();
         case TypeId::TypeIds_Uint64Array:
@@ -2972,6 +3063,32 @@ namespace Js
 
         case TypeIds_Float64Array:
             return this->FindMinOrMax<double, true>(scriptContext, findMax);
+
+        case TypeIds_Float16Array:
+        {
+            // Widen each element exactly, then reuse the double NaN/-0
+            // semantics. Kept inline because Float16Bits is a storage
+            // struct, not an arithmetic type.
+            Float16Bits* typedBuffer = (Float16Bits*)this->buffer;
+            uint len = this->GetLength();
+            Assert(sizeof(Float16Bits) + GetByteOffset() <= GetArrayBuffer()->GetByteLength());
+            double currentRes = Float16::ToDouble(typedBuffer[0].bits);
+            for (uint i = 0; i < len; i++)
+            {
+                Assert((i + 1) * sizeof(Float16Bits) + GetByteOffset() <= GetArrayBuffer()->GetByteLength());
+                double compare = Float16::ToDouble(typedBuffer[i].bits);
+                if (JavascriptNumber::IsNan(compare))
+                {
+                    return scriptContext->GetLibrary()->GetNaN();
+                }
+                if (findMax ? currentRes < compare : currentRes > compare ||
+                    (compare == 0 && Js::JavascriptNumber::IsNegZero(currentRes)))
+                {
+                    currentRes = compare;
+                }
+            }
+            return Js::JavascriptNumber::ToVarNoCheck(currentRes, scriptContext);
+        }
 
         default:
             AssertMsg(false, "Unsupported array for fast path");
@@ -3121,6 +3238,7 @@ namespace Js
     DIRECT_SET_NO_DETACH_CHECK(Float32VirtualArray, JavascriptConversion::ToFloat);
     DIRECT_SET_NO_DETACH_CHECK(Float64Array, JavascriptConversion::ToNumber);
     DIRECT_SET_NO_DETACH_CHECK(Float64VirtualArray, JavascriptConversion::ToNumber);
+    DIRECT_SET_NO_DETACH_CHECK(Float16Array, ToFloat16Element);
     DIRECT_SET_NO_DETACH_CHECK(Int64Array, ToBigInt64Element);
     DIRECT_SET_NO_DETACH_CHECK(Uint64Array, ToBigUint64Element);
     DIRECT_SET_NO_DETACH_CHECK(Uint8ClampedArray, JavascriptConversion::ToUInt8Clamped);
@@ -3159,6 +3277,17 @@ namespace Js
     DIRECT_GET_VAR_CHECK_NO_DETACH_CHECK(Float32VirtualArray);
     DIRECT_GET_VAR_CHECK_NO_DETACH_CHECK(Float64Array);
     DIRECT_GET_VAR_CHECK_NO_DETACH_CHECK(Float64VirtualArray);
+
+    // Float16Array loads widen exactly; the generic helpers take an
+    // arithmetic element type, so both getters are specialized below.
+    template<>
+    inline Var Float16Array::DirectGetItemNoDetachCheck(_In_ uint32 index)
+    {
+        Assert(!IsDetachedBuffer());
+        Assert(index < GetLength());
+        Assert((index + 1)* sizeof(Float16Bits) + GetByteOffset() <= GetArrayBuffer()->GetByteLength());
+        return Float16ElementAt((uint16*)buffer, index, GetScriptContext());
+    }
 
 #define TypedArrayBeginStub(TypedArrayName) \
         Assert(GetArrayBuffer() && GetArrayBuffer()->GetBuffer()); \
@@ -3243,6 +3372,7 @@ namespace Js
         NOTSUPPORTEDSTUB(Float32VirtualArray, OP); \
         NOTSUPPORTEDSTUB(Float64Array, OP); \
         NOTSUPPORTEDSTUB(Float64VirtualArray, OP); \
+        NOTSUPPORTEDSTUB(Float16Array, OP); \
         NOTSUPPORTEDSTUB(Int64Array, OP); \
         NOTSUPPORTEDSTUB(Uint64Array, OP); \
         NOTSUPPORTEDSTUB(Uint8ClampedArray, OP); \
@@ -3743,6 +3873,39 @@ namespace Js
     VTableValue Uint64Array::DummyVirtualFunctionToHinderLinkerICF()
     {
         return VTableValue::VtableUint64Array;
+    }
+
+    template<>
+    inline BOOL Float16Array::DirectSetItem(_In_ uint32 index, _In_ Js::Var value)
+    {
+        return BaseTypedDirectSetItem(index, value, ToFloat16Element);
+    }
+
+    template<>
+    inline BOOL Float16Array::DirectSetItemNoSet(_In_ uint32 index, _In_ Js::Var value)
+    {
+        return BaseTypedDirectSetItemNoSet(index, value, ToFloat16Element);
+    }
+
+    template<>
+    inline Var Float16Array::DirectGetItem(_In_ uint32 index)
+    {
+        if (this->IsDetachedBuffer())
+        {
+            JavascriptError::ThrowTypeError(GetScriptContext(), JSERR_DetachedTypedArray);
+        }
+        if (index < GetLength())
+        {
+            Assert((index + 1) * sizeof(Float16Bits) + GetByteOffset() <= GetArrayBuffer()->GetByteLength());
+            return Float16ElementAt((uint16*)buffer, index, GetScriptContext());
+        }
+        return GetLibrary()->GetUndefined();
+    }
+
+    template<>
+    VTableValue Float16Array::DummyVirtualFunctionToHinderLinkerICF()
+    {
+        return VTableValue::VtableFloat16Array;
     }
 
     template<>

@@ -13566,6 +13566,7 @@ Case0:
     template void Js::JavascriptArray::TypedArraySort<uint32>(uint32*, uint32, JavascriptArray::CompareVarsInfo*, ArenaAllocator*);
     template void Js::JavascriptArray::TypedArraySort<float>(float*, uint32, JavascriptArray::CompareVarsInfo*, ArenaAllocator*);
     template void Js::JavascriptArray::TypedArraySort<double>(double*, uint32, JavascriptArray::CompareVarsInfo*, ArenaAllocator*);
+    template void Js::JavascriptArray::TypedArraySort<Float16Bits>(Float16Bits*, uint32, JavascriptArray::CompareVarsInfo*, ArenaAllocator*);
     template void Js::JavascriptArray::TypedArraySort<int64>(int64*, uint32, JavascriptArray::CompareVarsInfo*, ArenaAllocator*);
     template void Js::JavascriptArray::TypedArraySort<uint64>(uint64*, uint32, JavascriptArray::CompareVarsInfo*, ArenaAllocator*);
     template void Js::JavascriptArray::TypedArraySort<bool>(bool*, uint32, JavascriptArray::CompareVarsInfo*, ArenaAllocator*);

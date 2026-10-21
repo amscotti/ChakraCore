@@ -1941,6 +1941,9 @@ namespace TTD
             case Js::TypeIds_Float64Array:
                 tab = Js::Float64Array::Create(arrayBuffer, typedArrayInfo->ByteOffset, typedArrayInfo->Length, jslib);
                 break;
+            case Js::TypeIds_Float16Array:
+                tab = Js::Float16Array::Create(arrayBuffer, typedArrayInfo->ByteOffset, typedArrayInfo->Length, jslib);
+                break;
             case Js::TypeIds_Int64Array:
                 tab = Js::Int64Array::Create(arrayBuffer, typedArrayInfo->ByteOffset, typedArrayInfo->Length, jslib);
                 break;

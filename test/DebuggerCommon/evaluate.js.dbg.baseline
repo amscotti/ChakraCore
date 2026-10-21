@@ -108,6 +108,7 @@
     "evaluate": {
       "  this  ": {
         "Symbol.toStringTag": "string global",
+        "Float16Array": "function function Float16Array() { [native code] }",
         "WeakRef": "function function WeakRef() { [native code] }",
         "FinalizationRegistry": "function function FinalizationRegistry() { [native code] }",
         "not_used": "number 0"
@@ -163,6 +164,7 @@
     "evaluate": {
       "  this  ": {
         "Symbol.toStringTag": "string global",
+        "Float16Array": "function function Float16Array() { [native code] }",
         "WeakRef": "function function WeakRef() { [native code] }",
         "FinalizationRegistry": "function function FinalizationRegistry() { [native code] }",
         "not_used": "number 0"
