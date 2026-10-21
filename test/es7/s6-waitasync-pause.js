@@ -289,7 +289,7 @@ WScript.SetTimeout(function () {
             print("s6-waitasync-pause: " + failures.length + " failure(s)");
             WScript.Quit(1);
         }
-        print("s6-waitasync-pause: all checks passed");
+        print("pass");
     } catch (e) {
         print("s6-waitasync-pause: unexpected failure: " + (e.stack || e));
         WScript.Quit(1);
