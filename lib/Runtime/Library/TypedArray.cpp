@@ -402,11 +402,14 @@ namespace Js
         // If we got an ArrayBuffer, we can continue to process arguments.
         if (arrayBuffer != nullptr)
         {
-            // A view over a resizable buffer without an explicit length is
-            // length-tracking; only a non-undefined fourth argument captures
-            // a fixed length (explicit undefined still tracks).
-            lengthTracking = VarIs<ArrayBuffer>(arrayBuffer) &&
-                VarTo<ArrayBuffer>(arrayBuffer)->IsResizable() &&
+            // A view over a resizable ArrayBuffer or a growable SharedArrayBuffer
+            // without an explicit length is length-tracking; only a non-undefined
+            // fourth argument captures a fixed length (explicit undefined still
+            // tracks). SharedArrayBuffer is never detachable, so tracking only
+            // grows.
+            bool resizableBuffer = VarIs<ArrayBuffer>(arrayBuffer) && VarTo<ArrayBuffer>(arrayBuffer)->IsResizable();
+            bool growableSharedBuffer = VarIs<SharedArrayBuffer>(arrayBuffer) && VarTo<SharedArrayBuffer>(arrayBuffer)->IsGrowable();
+            lengthTracking = (resizableBuffer || growableSharedBuffer) &&
                 !(args.Info.Count > 3 && !JavascriptOperators::IsUndefinedObject(args[3]));
 
             // Both ToIndex calls below can run user code that resizes or
@@ -3296,12 +3299,22 @@ namespace Js
         typedef TypedArrayName::TypedArrayType type; \
         type *buffer = (type*)this->buffer + accessIndex;
 
+// The value conversion below can run user code that detaches the buffer or
+// shrinks a resizable one. `buffer` is a raw pointer captured above, so
+// revalidate after conversion and before the atomic instruction.
+#define TypedArrayCheckStillValidForAtomics() \
+        if (IsDetachedBuffer() || IsOutOfBounds() || accessIndex >= GetLength()) \
+        { \
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, _u("Atomics")); \
+        }
+
 #define TypedArrayStore(TypedArrayName, fnName, convertFn) \
     template<>\
     Var TypedArrayName##::Typed##fnName(_In_ uint32 accessIndex, _In_ Var value) \
     { \
         TypedArrayBeginStub(TypedArrayName); \
         double retVal = JavascriptConversion::ToInteger(value, scriptContext); \
+        TypedArrayCheckStillValidForAtomics(); \
         AtomicsOperations::fnName(buffer, convertFn(retVal)); \
         return JavascriptNumber::ToVarWithCheck(retVal, scriptContext); \
     }
@@ -3320,7 +3333,9 @@ namespace Js
     Var TypedArrayName##::Typed##fnName(_In_ uint32 accessIndex, _In_ Var value) \
     { \
         TypedArrayBeginStub(TypedArrayName); \
-        type result = AtomicsOperations::fnName(buffer, convertFn(value, scriptContext)); \
+        type convertedValue = convertFn(value, scriptContext); \
+        TypedArrayCheckStillValidForAtomics(); \
+        type result = AtomicsOperations::fnName(buffer, convertedValue); \
         return JavascriptNumber::ToVar(result, scriptContext); \
     }
 
@@ -3329,7 +3344,10 @@ namespace Js
     Var TypedArrayName##::Typed##fnName(_In_ uint32 accessIndex, _In_ Var first, _In_ Var value) \
     { \
         TypedArrayBeginStub(TypedArrayName); \
-        type result = AtomicsOperations::fnName(buffer, convertFn(first, scriptContext), convertFn(value, scriptContext)); \
+        type firstValue = convertFn(first, scriptContext); \
+        type secondValue = convertFn(value, scriptContext); \
+        TypedArrayCheckStillValidForAtomics(); \
+        type result = AtomicsOperations::fnName(buffer, firstValue, secondValue); \
         return JavascriptNumber::ToVar(result, scriptContext); \
     }
 

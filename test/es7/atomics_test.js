@@ -51,7 +51,7 @@ var tests = [{
             }
 		}
 	}, {
-		name : "Atomics's operation allowed on SharedArrayBuffer only",
+		name : "Atomics operations accept shared and non-shared integer views",
 		body : function () {
             var nonInt32Views = [new Int8Array(makeSharedArrayBuffer(8)),
                     new Uint8Array(makeSharedArrayBuffer(8)),
@@ -78,8 +78,9 @@ var tests = [{
                     }
                     else
                     {
-                        assert.throws(() => op(new Int8Array(1), 0, 0, 0), TypeError, op.name +" is not allowed on Int8Array of ArrayBuffer",
-                                        "SharedArrayBuffer object expected");
+                        // ES2020: the read-modify-write family accepts
+                        // non-shared integer views.
+                        assert.doesNotThrow(() => op(new Int8Array(1), 0, 0, 0), op.name +" is allowed on Int8Array of ArrayBuffer");
                     }
                     assert.throws(() => op(new Float32Array(1), 0, 0, 0), TypeError, op.name +" is not allowed on Float32Array of ArrayBuffer",
                                         "The operation is not supported on this typed array type");

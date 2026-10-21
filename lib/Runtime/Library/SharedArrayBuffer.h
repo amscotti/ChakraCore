@@ -18,9 +18,10 @@ namespace Js
     public:
         BYTE  *buffer;             // Points to a heap allocated RGBA buffer, can be null
         IndexToWaitersMap *indexToWaiterList;  // Map of agents waiting on a particular index.
-        uint32 bufferLength;       // Number of bytes allocated
-        uint32 maxBufferLength = 0; // Maximum number of bytes to allocate (only used by WebAssemblySharedArrayBuffer)
+        uint32 bufferLength;       // Current [[ArrayBufferByteLength]]; growable buffers update this
+        uint32 maxBufferLength = 0; // Maximum number of bytes: growable limit or WebAssembly maximum
         bool isWebAssembly = false;
+        bool isGrowable = false;   // Growable (ES2024) JS SharedArrayBuffer; capacity is maxBufferLength
     private:
         // Addref/release counter for current buffer, this is needed as the current buffer will be shared among different workers
         long refCount;
@@ -65,12 +66,18 @@ namespace Js
             static FunctionInfo NewInstance;
             static FunctionInfo Slice;
             static FunctionInfo GetterByteLength;
+            static FunctionInfo GetterMaxByteLength;
+            static FunctionInfo GetterGrowable;
+            static FunctionInfo Grow;
             static FunctionInfo GetterSymbolSpecies;
         };
 
         static Var NewInstance(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntrySlice(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryGetterByteLength(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryGetterMaxByteLength(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryGetterGrowable(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryGrow(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryGetterSymbolSpecies(RecyclableObject* function, CallInfo callInfo, ...);
 
         virtual BOOL GetDiagTypeString(StringBuilder<ArenaAllocator>* stringBuilder, ScriptContext* requestContext) override;
@@ -78,6 +85,21 @@ namespace Js
 
         virtual uint32 GetByteLength() const override;
         virtual BYTE* GetBuffer() const override;
+
+        // ES2024 growable SharedArrayBuffer. A growable buffer owns a capacity of
+        // maxBufferLength bytes and only changes bufferLength on grow; the base
+        // pointer is never remapped, so views stay valid. Shared buffers are not
+        // detachable, so there is no invalidation path here.
+        bool IsGrowable() const { return sharedContents != nullptr && sharedContents->isGrowable; }
+        uint32 GetMaxByteLength() const
+        {
+            if (sharedContents == nullptr)
+            {
+                return 0;
+            }
+            return sharedContents->isGrowable ? sharedContents->maxBufferLength : sharedContents->bufferLength;
+        }
+        void Grow(uint32 newByteLength);
 
         static int GetByteLengthOffset() { Assert(false); return 0; }
         static int GetBufferOffset() { Assert(false); return 0; }
@@ -100,11 +122,12 @@ namespace Js
         virtual bool IsValidVirtualBufferLength(uint length) const;
 
     protected:
-        // maxLength is necessary only for WebAssemblySharedArrayBuffer to know how much it can grow
+        // maxLength is the allocation extent for growable JS buffers and the
+        // grow limit for WebAssemblySharedArrayBuffer.
         // Must call after constructor of child class is completed. Required to be able to make correct virtual calls
-        void Init(uint32 length, uint32 maxLength);
-        virtual BYTE* AllocBuffer(uint32 length, uint32 maxLength);
-        virtual void FreeBuffer(BYTE* buffer, uint32 length, uint32 maxLength);
+        void Init(uint32 length, uint32 maxLength, bool isGrowable = false);
+        virtual BYTE* AllocBuffer(uint32 length, uint32 maxLength, bool isGrowable);
+        virtual void FreeBuffer(BYTE* buffer, uint32 length, uint32 maxLength, bool isGrowable);
 
         FieldNoBarrier(SharedContents *) sharedContents;
 
@@ -124,6 +147,7 @@ namespace Js
 
     public:
         static JavascriptSharedArrayBuffer* Create(uint32 length, DynamicType * type);
+        static JavascriptSharedArrayBuffer* Create(uint32 length, uint32 maxByteLength, bool isGrowable, DynamicType * type);
         static JavascriptSharedArrayBuffer* Create(SharedContents *sharedContents, DynamicType * type);
         virtual void Dispose(bool isShutdown) override;
         virtual void Finalize(bool isShutdown) override;
@@ -150,8 +174,8 @@ namespace Js
         _Must_inspect_result_ bool GrowMemory(uint32 newBufferLength);
 
     protected:
-        virtual BYTE* AllocBuffer(uint32 length, uint32 maxLength) override;
-        virtual void FreeBuffer(BYTE* buffer, uint32 length, uint32 maxLength) override;
+        virtual BYTE* AllocBuffer(uint32 length, uint32 maxLength, bool isGrowable) override;
+        virtual void FreeBuffer(BYTE* buffer, uint32 length, uint32 maxLength, bool isGrowable) override;
 
     private:
         WebAssemblySharedArrayBuffer(DynamicType * type);

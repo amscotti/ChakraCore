@@ -87,6 +87,12 @@
       <compile-flags>-ESSharedArrayBuffer -args summary -endargs</compile-flags>
     </default>
   </test>
+  <test>
+    <default>
+      <files>s6-growable-nonshared.js</files>
+      <compile-flags>-ESSharedArrayBuffer -args summary -endargs</compile-flags>
+    </default>
+  </test>
     <test>
     <default>
       <files>PromiseRejectionTracking.js</files>

@@ -18,7 +18,7 @@
 
 namespace Js
 {
-    Var AtomicsObject::ValidateSharedIntegerTypedArray(Var typedArray, ScriptContext *scriptContext, bool onlyInt32)
+    ArrayBufferBase* AtomicsObject::ValidateIntegerTypedArray(Var typedArray, ScriptContext *scriptContext, bool onlyInt32, bool requireShared)
     {
         if (!VarIs<TypedArrayBase>(typedArray))
         {
@@ -44,7 +44,19 @@ namespace Js
 
         TypedArrayBase *typedArrayBase = UnsafeVarTo<TypedArrayBase>(typedArray);
         ArrayBufferBase* arrayBuffer = typedArrayBase->GetArrayBuffer();
-        if (arrayBuffer == nullptr || !VarIsCorrectType(arrayBuffer) || !arrayBuffer->IsSharedArrayBuffer())
+        if (arrayBuffer == nullptr || !VarIsCorrectType(arrayBuffer))
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedTypedArrayObject);
+        }
+
+        // ValidateTypedArray throws TypeError for a detached buffer and for a
+        // view that became out of bounds after a resize.
+        if (arrayBuffer->IsDetached() || typedArrayBase->IsOutOfBounds())
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray);
+        }
+
+        if (requireShared && !arrayBuffer->IsSharedArrayBuffer())
         {
             JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedSharedArrayBufferObject);
         }
@@ -56,36 +68,36 @@ namespace Js
     {
         Assert(VarIs<TypedArrayBase>(typedArray));
 
-        int32 accessIndex = -1;
-        if (TaggedInt::Is(requestIndex))
-        {
-            accessIndex = TaggedInt::ToInt32(requestIndex);
-        }
-        else if(Js::JavascriptOperators::IsUndefined(requestIndex))
-        {
-            accessIndex = 0;
-        }
-        else
-        {
-            accessIndex = JavascriptConversion::ToInt32_Full(requestIndex, scriptContext);
-            double dblValue = JavascriptConversion::ToInteger(requestIndex, scriptContext);
-            if (dblValue != accessIndex)
-            {
-                JavascriptError::ThrowRangeError(scriptContext, JSERR_InvalidTypedArrayIndex);
-            }
-        }
+        // TypedArrayLength is read before index coercion; a getter may resize
+        // or grow the buffer, but the access is checked against the captured
+        // length.
+        uint32 length = VarTo<TypedArrayBase>(typedArray)->GetLength();
+        uint32 accessIndex = ArrayBuffer::ToIndex(
+            requestIndex, JSERR_InvalidTypedArrayIndex, scriptContext, ArrayBuffer::MaxArrayBufferLength, false);
 
-        if (accessIndex < 0 || accessIndex >= (int32)VarTo<TypedArrayBase>(typedArray)->GetLength())
+        if (accessIndex >= length)
         {
             JavascriptError::ThrowRangeError(scriptContext, JSERR_InvalidTypedArrayIndex);
         }
 
-        return (uint32)accessIndex;
+        return accessIndex;
     }
 
-    TypedArrayBase * AtomicsObject::ValidateAndGetTypedArray(Var typedArray, Var index, _Out_ uint32 *accessIndex, ScriptContext *scriptContext, bool onlyInt32)
+    void AtomicsObject::CheckAtomicAccessStillValid(TypedArrayBase *typedArray, uint32 accessIndex, ScriptContext *scriptContext, const char16 *funcName)
     {
-        ValidateSharedIntegerTypedArray(typedArray, scriptContext, onlyInt32);
+        // The index getter above can detach a non-shared buffer or shrink a
+        // resizable one. The read-modify-write helpers touch memory, so refuse
+        // to address a view that is no longer in bounds instead of reading
+        // retained (but no longer current) capacity.
+        if (typedArray->IsDetachedBuffer() || typedArray->IsOutOfBounds() || accessIndex >= typedArray->GetLength())
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, funcName);
+        }
+    }
+
+    TypedArrayBase * AtomicsObject::ValidateAndGetTypedArray(Var typedArray, Var index, _Out_ uint32 *accessIndex, ScriptContext *scriptContext, bool onlyInt32, bool requireShared)
+    {
+        ValidateIntegerTypedArray(typedArray, scriptContext, onlyInt32, requireShared);
         uint32 i = ValidateAtomicAccess(typedArray, index, scriptContext);
         if (accessIndex != nullptr)
         {
@@ -101,6 +113,7 @@ namespace Js
 
         uint32 accessIndex = 0;
         TypedArrayBase *typedArrayBase = ValidateAndGetTypedArray(args[1], args[2], &accessIndex, scriptContext);
+        CheckAtomicAccessStillValid(typedArrayBase, accessIndex, scriptContext, _u("Atomics.add"));
         return typedArrayBase->TypedAdd(accessIndex, args[3]);
     }
 
@@ -110,6 +123,7 @@ namespace Js
 
         uint32 accessIndex = 0;
         TypedArrayBase *typedArrayBase = ValidateAndGetTypedArray(args[1], args[2], &accessIndex, scriptContext);
+        CheckAtomicAccessStillValid(typedArrayBase, accessIndex, scriptContext, _u("Atomics.and"));
         return typedArrayBase->TypedAnd(accessIndex, args[3]);
     }
 
@@ -119,7 +133,7 @@ namespace Js
 
         uint32 accessIndex = 0;
         TypedArrayBase *typedArrayBase = ValidateAndGetTypedArray(args[1], args[2], &accessIndex, scriptContext);
-
+        CheckAtomicAccessStillValid(typedArrayBase, accessIndex, scriptContext, _u("Atomics.compareExchange"));
         return typedArrayBase->TypedCompareExchange(accessIndex, args[3], args[4]);
     }
 
@@ -129,6 +143,7 @@ namespace Js
 
         uint32 accessIndex = 0;
         TypedArrayBase *typedArrayBase = ValidateAndGetTypedArray(args[1], args[2], &accessIndex, scriptContext);
+        CheckAtomicAccessStillValid(typedArrayBase, accessIndex, scriptContext, _u("Atomics.exchange"));
         return typedArrayBase->TypedExchange(accessIndex, args[3]);
     }
 
@@ -146,6 +161,7 @@ namespace Js
 
         uint32 accessIndex = 0;
         TypedArrayBase *typedArrayBase = ValidateAndGetTypedArray(args[1], args[2], &accessIndex, scriptContext);
+        CheckAtomicAccessStillValid(typedArrayBase, accessIndex, scriptContext, _u("Atomics.load"));
         return typedArrayBase->TypedLoad(accessIndex);
     }
 
@@ -155,6 +171,7 @@ namespace Js
 
         uint32 accessIndex = 0;
         TypedArrayBase *typedArrayBase = ValidateAndGetTypedArray(args[1], args[2], &accessIndex, scriptContext);
+        CheckAtomicAccessStillValid(typedArrayBase, accessIndex, scriptContext, _u("Atomics.or"));
         return typedArrayBase->TypedOr(accessIndex, args[3]);
     }
 
@@ -164,6 +181,7 @@ namespace Js
 
         uint32 accessIndex = 0;
         TypedArrayBase *typedArrayBase = ValidateAndGetTypedArray(args[1], args[2], &accessIndex, scriptContext);
+        CheckAtomicAccessStillValid(typedArrayBase, accessIndex, scriptContext, _u("Atomics.store"));
         return typedArrayBase->TypedStore(accessIndex, args[3]);
     }
 
@@ -173,6 +191,7 @@ namespace Js
 
         uint32 accessIndex = 0;
         TypedArrayBase *typedArrayBase = ValidateAndGetTypedArray(args[1], args[2], &accessIndex, scriptContext);
+        CheckAtomicAccessStillValid(typedArrayBase, accessIndex, scriptContext, _u("Atomics.sub"));
         return typedArrayBase->TypedSub(accessIndex, args[3]);
     }
 
@@ -181,7 +200,7 @@ namespace Js
         ATOMICS_FUNCTION_ENTRY_CHECKS(3, "Atomics.wait");
 
         uint32 accessIndex = 0;
-        TypedArrayBase *typedArrayBase = ValidateAndGetTypedArray(args[1], args[2], &accessIndex, scriptContext, true /*onlyInt32*/);
+        TypedArrayBase *typedArrayBase = ValidateAndGetTypedArray(args[1], args[2], &accessIndex, scriptContext, true /*onlyInt32*/, true /*requireShared*/);
 
         int32 value = JavascriptConversion::ToInt32(args[3], scriptContext);
         uint32 timeout = INFINITE;
@@ -250,6 +269,13 @@ namespace Js
             }
         }
 
+        // ES2020: notify accepts a non-shared Int32Array, evaluates count,
+        // then returns zero because there is no shared waiter list.
+        if (!typedArrayBase->GetArrayBuffer()->IsSharedArrayBuffer())
+        {
+            return JavascriptNumber::ToVar(0, scriptContext);
+        }
+
         Assert(typedArrayBase->GetBytesPerElement() == 4);
         uint32 bufferIndex = (accessIndex * 4) + typedArrayBase->GetByteOffset();
         Assert(bufferIndex < typedArrayBase->GetArrayBuffer()->GetByteLength());
@@ -271,6 +297,7 @@ namespace Js
 
         uint32 accessIndex = 0;
         TypedArrayBase *typedArrayBase = ValidateAndGetTypedArray(args[1], args[2], &accessIndex, scriptContext);
+        CheckAtomicAccessStillValid(typedArrayBase, accessIndex, scriptContext, _u("Atomics.xor"));
         return typedArrayBase->TypedXor(accessIndex, args[3]);
     }
 }

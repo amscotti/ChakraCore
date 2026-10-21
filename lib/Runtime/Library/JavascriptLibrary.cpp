@@ -2288,13 +2288,16 @@ namespace Js
 
     bool JavascriptLibrary::InitializeSharedArrayBufferPrototype(DynamicObject* sharedArrayBufferPrototype, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)
     {
-        typeHandler->Convert(sharedArrayBufferPrototype, mode, 4);
+        typeHandler->Convert(sharedArrayBufferPrototype, mode, 7);
 
         ScriptContext* scriptContext = sharedArrayBufferPrototype->GetScriptContext();
         JavascriptLibrary* library = sharedArrayBufferPrototype->GetLibrary();
         library->AddMember(sharedArrayBufferPrototype, PropertyIds::constructor, library->sharedArrayBufferConstructor);
         library->AddFunctionToLibraryObject(sharedArrayBufferPrototype, PropertyIds::slice, &SharedArrayBuffer::EntryInfo::Slice, 2);
+        library->AddFunctionToLibraryObjectWithPropertyName(sharedArrayBufferPrototype, _u("grow"), &SharedArrayBuffer::EntryInfo::Grow, 1);
         library->AddAccessorsToLibraryObject(sharedArrayBufferPrototype, PropertyIds::byteLength, &SharedArrayBuffer::EntryInfo::GetterByteLength, nullptr);
+        library->AddAccessorsToLibraryObject(sharedArrayBufferPrototype, scriptContext->GetOrAddPropertyIdTracked(_u("maxByteLength")), &SharedArrayBuffer::EntryInfo::GetterMaxByteLength, nullptr);
+        library->AddAccessorsToLibraryObject(sharedArrayBufferPrototype, scriptContext->GetOrAddPropertyIdTracked(_u("growable")), &SharedArrayBuffer::EntryInfo::GetterGrowable, nullptr);
 
         if (scriptContext->GetConfig()->IsES6ToStringTagEnabled())
         {
@@ -6542,6 +6545,11 @@ namespace Js
     SharedArrayBuffer* JavascriptLibrary::CreateSharedArrayBuffer(uint32 length)
     {
         return JavascriptSharedArrayBuffer::Create(length, sharedArrayBufferType);
+    }
+
+    SharedArrayBuffer* JavascriptLibrary::CreateSharedArrayBuffer(uint32 length, uint32 maxByteLength, bool isGrowable)
+    {
+        return JavascriptSharedArrayBuffer::Create(length, maxByteLength, isGrowable, sharedArrayBufferType);
     }
 
     SharedArrayBuffer* JavascriptLibrary::CreateSharedArrayBuffer(SharedContents *contents)

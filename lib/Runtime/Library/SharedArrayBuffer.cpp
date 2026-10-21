@@ -71,12 +71,42 @@ namespace Js
         }
     }
 
+    // ToIndex without the engine's MaxSharedArrayBufferLength clamp. The
+    // constructor performs the same ordering as ArrayBuffer: ToIndex(length),
+    // read/ToIndex(options.maxByteLength), compare, resolve newTarget.prototype,
+    // then apply the engine allocation limit before allocating the data block.
+    static double ToIndexNoEngineCap(Var value, int32 errorCode, ScriptContext* scriptContext)
+    {
+        if (JavascriptOperators::IsUndefined(value))
+        {
+            return 0.0;
+        }
+
+        if (TaggedInt::Is(value))
+        {
+            int64 index = TaggedInt::ToInt64(value);
+            if (index < 0)
+            {
+                JavascriptError::ThrowRangeError(scriptContext, errorCode);
+            }
+            return (double)index;
+        }
+
+        double d = JavascriptConversion::ToInteger(value, scriptContext);
+        if (d < 0.0 || d > 9007199254740991.0) // 2^53 - 1
+        {
+            JavascriptError::ThrowRangeError(scriptContext, errorCode);
+        }
+        return d;
+    }
+
     Var SharedArrayBuffer::NewInstance(RecyclableObject* function, CallInfo callInfo, ...)
     {
         PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
 
         ARGUMENTS(args, callInfo);
         ScriptContext* scriptContext = function->GetScriptContext();
+        JavascriptLibrary* library = scriptContext->GetLibrary();
 
         AssertMsg(args.Info.Count > 0, "Should always have implicit 'this'");
 
@@ -88,17 +118,64 @@ namespace Js
             JavascriptError::ThrowTypeError(scriptContext, JSERR_ClassConstructorCannotBeCalledWithoutNew, _u("SharedArrayBuffer"));
         }
 
-        uint32 byteLength = 0;
+        double byteLengthValue = 0.0;
         if (args.Info.Count > 1)
         {
-            byteLength = ArrayBuffer::ToIndex(args[1], JSERR_ArrayLengthConstructIncorrect, scriptContext, MaxSharedArrayBufferLength);
+            byteLengthValue = ToIndexNoEngineCap(args[1], JSERR_ArrayLengthConstructIncorrect, scriptContext);
         }
 
-        RecyclableObject* newArr = scriptContext->GetLibrary()->CreateSharedArrayBuffer(byteLength);
+        // GetArrayBufferMaxByteLengthOption: only objects participate; the
+        // property is read and coerced before the byteLength/maxByteLength
+        // comparison and before any object creation.
+        bool hasMaxByteLength = false;
+        double requestedMaxByteLength = 0.0;
+        if (args.Info.Count > 2 && JavascriptOperators::IsObjectType(JavascriptOperators::GetTypeId(args[2])))
+        {
+            PropertyId maxByteLengthId = scriptContext->GetOrAddPropertyIdTracked(_u("maxByteLength"));
+            Var maxByteLengthValue = JavascriptOperators::GetProperty(VarTo<RecyclableObject>(args[2]), maxByteLengthId, scriptContext);
+            if (!JavascriptOperators::IsUndefined(maxByteLengthValue))
+            {
+                hasMaxByteLength = true;
+                requestedMaxByteLength = ToIndexNoEngineCap(maxByteLengthValue, JSERR_ArrayLengthConstructIncorrect, scriptContext);
+            }
+        }
 
-        return isCtorSuperCall ?
-            JavascriptOperators::OrdinaryCreateFromConstructor(VarTo<RecyclableObject>(newTarget), newArr, nullptr, scriptContext) :
-            newArr;
+        if (hasMaxByteLength && byteLengthValue > requestedMaxByteLength)
+        {
+            JavascriptError::ThrowRangeError(scriptContext, JSERR_ArrayLengthConstructIncorrect);
+        }
+
+        // AllocateSharedArrayBuffer creates the JS object before the data
+        // block, so resolve the newTarget prototype before allocating.
+        RecyclableObject* newTargetPrototype = nullptr;
+        if (isCtorSuperCall)
+        {
+            Var proto = JavascriptOperators::GetPropertyNoCache(VarTo<RecyclableObject>(newTarget), PropertyIds::prototype, scriptContext);
+            if (JavascriptOperators::IsObjectType(JavascriptOperators::GetTypeId(proto)))
+            {
+                newTargetPrototype = VarTo<RecyclableObject>(proto);
+            }
+        }
+
+        double maxByteLength = hasMaxByteLength ? requestedMaxByteLength : byteLengthValue;
+        if (byteLengthValue > (double)MaxSharedArrayBufferLength || maxByteLength > (double)MaxSharedArrayBufferLength)
+        {
+            JavascriptError::ThrowRangeError(scriptContext, JSERR_ArrayLengthConstructIncorrect);
+        }
+
+        SharedArrayBuffer* newArr = library->CreateSharedArrayBuffer(
+            (uint32)byteLengthValue, (uint32)maxByteLength, hasMaxByteLength);
+        Assert(newArr != nullptr);
+        if (byteLengthValue > 0 && newArr->GetByteLength() == 0)
+        {
+            JavascriptError::ThrowRangeError(scriptContext, JSERR_FunctionArgument_Invalid);
+        }
+
+        if (newTargetPrototype != nullptr)
+        {
+            JavascriptObject::ChangePrototype(newArr, newTargetPrototype, true, scriptContext);
+        }
+        return newArr;
     }
 
     // SharedArrayBuffer.prototype.byteLength
@@ -118,6 +195,97 @@ namespace Js
 
         SharedArrayBuffer* sharedArrayBuffer = VarTo<SharedArrayBuffer>(args[0]);
         return JavascriptNumber::ToVar(sharedArrayBuffer->GetByteLength(), scriptContext);
+    }
+
+    // SharedArrayBuffer.prototype.maxByteLength
+    Var SharedArrayBuffer::EntryGetterMaxByteLength(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+        ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+
+        Assert(!(callInfo.Flags & CallFlags_New));
+
+        if (args.Info.Count == 0 || !VarIs<SharedArrayBuffer>(args[0]))
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedSharedArrayBufferObject);
+        }
+
+        return JavascriptNumber::ToVar(VarTo<SharedArrayBuffer>(args[0])->GetMaxByteLength(), scriptContext);
+    }
+
+    // SharedArrayBuffer.prototype.growable
+    Var SharedArrayBuffer::EntryGetterGrowable(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+        ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+
+        Assert(!(callInfo.Flags & CallFlags_New));
+
+        if (args.Info.Count == 0 || !VarIs<SharedArrayBuffer>(args[0]))
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedSharedArrayBufferObject);
+        }
+
+        return VarTo<SharedArrayBuffer>(args[0])->IsGrowable()
+            ? scriptContext->GetLibrary()->GetTrue()
+            : scriptContext->GetLibrary()->GetFalse();
+    }
+
+    // SharedArrayBuffer.prototype.grow ( newLength )
+    Var SharedArrayBuffer::EntryGrow(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+        ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+
+        Assert(!(callInfo.Flags & CallFlags_New));
+
+        // Step order: brand and [[ArrayBufferMaxByteLength]] checks precede
+        // argument coercion; range validation follows coercion.
+        if (args.Info.Count == 0 || !VarIs<SharedArrayBuffer>(args[0]))
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedSharedArrayBufferObject);
+        }
+
+        SharedArrayBuffer* sharedArrayBuffer = VarTo<SharedArrayBuffer>(args[0]);
+        if (!sharedArrayBuffer->IsGrowable())
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_Invalid, _u("SharedArrayBuffer.prototype.grow"));
+        }
+
+        Var newLength = args.Info.Count > 1 ? args[1] : scriptContext->GetLibrary()->GetUndefined();
+        uint32 newByteLength = ArrayBuffer::ToIndex(
+            newLength, JSERR_ArrayLengthConstructIncorrect, scriptContext, MaxSharedArrayBufferLength);
+
+        if (newByteLength < sharedArrayBuffer->GetByteLength() ||
+            newByteLength > sharedArrayBuffer->GetMaxByteLength())
+        {
+            JavascriptError::ThrowRangeError(scriptContext, JSERR_ArrayLengthConstructIncorrect);
+        }
+
+        sharedArrayBuffer->Grow(newByteLength);
+        return scriptContext->GetLibrary()->GetUndefined();
+    }
+
+    void SharedArrayBuffer::Grow(uint32 newByteLength)
+    {
+        Assert(sharedContents != nullptr);
+        Assert(sharedContents->isGrowable);
+        Assert(newByteLength >= sharedContents->bufferLength);
+        Assert(newByteLength <= sharedContents->maxBufferLength);
+
+        uint32 oldByteLength = sharedContents->bufferLength;
+        if (newByteLength > oldByteLength)
+        {
+            Assert(sharedContents->buffer != nullptr);
+            ZeroMemory(sharedContents->buffer + oldByteLength, newByteLength - oldByteLength);
+            sharedContents->bufferLength = newByteLength;
+        }
     }
 
     // SharedArrayBuffer.prototype.slice
@@ -226,38 +394,38 @@ namespace Js
         return args[0];
     }
 
-    BYTE* SharedArrayBuffer::AllocBuffer(uint32 length, uint32 maxLength)
+    BYTE* SharedArrayBuffer::AllocBuffer(uint32 length, uint32 maxLength, bool isGrowable)
     {
-        Unused(maxLength); // WebAssembly only
 #if ENABLE_FAST_ARRAYBUFFER
-        if (this->IsValidVirtualBufferLength(length))
+        // Growable JS buffers cannot use the fixed-length virtual allocator:
+        // growth never remaps, so the full capacity must be a heap allocation.
+        if (!isGrowable && this->IsValidVirtualBufferLength(length))
         {
             return (BYTE*)AsmJsVirtualAllocator(length);
         }
         else
 #endif
         {
-            return HeapNewNoThrowArray(BYTE, length);
+            return HeapNewNoThrowArray(BYTE, isGrowable ? maxLength : length);
         }
     }
 
-    void SharedArrayBuffer::FreeBuffer(BYTE* buffer, uint32 length, uint32 maxLength)
+    void SharedArrayBuffer::FreeBuffer(BYTE* buffer, uint32 length, uint32 maxLength, bool isGrowable)
     {
-        Unused(maxLength); // WebAssembly only
 #if ENABLE_FAST_ARRAYBUFFER
         //AsmJS Virtual Free
-        if (this->IsValidVirtualBufferLength(length))
+        if (!isGrowable && this->IsValidVirtualBufferLength(length))
         {
             FreeMemAlloc(buffer);
         }
         else
 #endif
         {
-            HeapDeleteArray(length, buffer);
+            HeapDeleteArray(isGrowable ? maxLength : length, buffer);
         }
     }
 
-    void SharedArrayBuffer::Init(uint32 length, uint32 maxLength)
+    void SharedArrayBuffer::Init(uint32 length, uint32 maxLength, bool isGrowable)
     {
         AssertOrFailFast(!sharedContents && length <= maxLength);
         BYTE * buffer = nullptr;
@@ -273,6 +441,7 @@ namespace Js
         {
             JavascriptError::ThrowOutOfMemoryError(GetScriptContext());
         }
+        localSharedContents->isGrowable = isGrowable;
         struct AutoCleanupSharedContents
         {
             SharedContents* sharedContents;
@@ -289,19 +458,25 @@ namespace Js
 
         Recycler* recycler = GetType()->GetLibrary()->GetRecycler();
 
+        // A growable JS buffer allocates its full maxByteLength capacity once;
+        // fixed buffers and WebAssembly buffers keep the existing length-based
+        // allocation and accounting. A zero maxLength means there is no data
+        // block to allocate (length 0 fixed buffer).
+        uint32 allocationLength = isGrowable ? maxLength : length;
+
         if (maxLength != 0)
         {
-            if (recycler->RequestExternalMemoryAllocation(length))
+            if (recycler->RequestExternalMemoryAllocation(allocationLength))
             {
-                buffer = this->AllocBuffer(length, maxLength);
+                buffer = this->AllocBuffer(length, maxLength, isGrowable);
                 if (buffer == nullptr)
                 {
                     recycler->CollectNow<CollectOnTypedArrayAllocation>();
 
-                    buffer = this->AllocBuffer(length, maxLength);
+                    buffer = this->AllocBuffer(length, maxLength, isGrowable);
                     if (buffer == nullptr)
                     {
-                        recycler->ReportExternalMemoryFailure(length);
+                        recycler->ReportExternalMemoryFailure(allocationLength);
                         JavascriptError::ThrowOutOfMemoryError(GetScriptContext());
                     }
                 }
@@ -312,7 +487,9 @@ namespace Js
             }
 
             Assert(buffer != nullptr);
-            ZeroMemory(buffer, length);
+            // Zero the whole capacity: grow only exposes bytes in this range and
+            // never reallocates, and the zero-fill contract starts here.
+            ZeroMemory(buffer, isGrowable ? maxLength : length);
         }
         localSharedContents->buffer = buffer;
 #if DBG
@@ -415,10 +592,17 @@ namespace Js
 
     JavascriptSharedArrayBuffer* JavascriptSharedArrayBuffer::Create(uint32 length, DynamicType * type)
     {
+        return Create(length, length, false /*isGrowable*/, type);
+    }
+
+    JavascriptSharedArrayBuffer* JavascriptSharedArrayBuffer::Create(uint32 length, uint32 maxByteLength, bool isGrowable, DynamicType * type)
+    {
+        AssertOrFailFast(length <= maxByteLength);
         Recycler* recycler = type->GetScriptContext()->GetRecycler();
         JavascriptSharedArrayBuffer* result = RecyclerNewFinalized(recycler, JavascriptSharedArrayBuffer, type);
-        result->Init(length, length);
-        recycler->AddExternalMemoryUsage(length);
+        result->Init(length, maxByteLength, isGrowable);
+        // A growable buffer owns its whole capacity, so charge the capacity.
+        recycler->AddExternalMemoryUsage(isGrowable ? maxByteLength : length);
         return result;
     }
 
@@ -455,10 +639,12 @@ namespace Js
         uint ref = sharedContents->Release();
         if (ref == 0)
         {
-            this->FreeBuffer(sharedContents->buffer, sharedContents->bufferLength, sharedContents->maxBufferLength);
+            this->FreeBuffer(sharedContents->buffer, sharedContents->bufferLength, sharedContents->maxBufferLength, sharedContents->isGrowable);
 
             Recycler* recycler = GetType()->GetLibrary()->GetRecycler();
-            recycler->ReportExternalMemoryFree(sharedContents->bufferLength);
+            // Growable JS buffers are charged for their whole capacity; fixed
+            // and WebAssembly buffers keep the current-length accounting.
+            recycler->ReportExternalMemoryFree(sharedContents->isGrowable ? sharedContents->maxBufferLength : sharedContents->bufferLength);
 
             sharedContents->Cleanup();
             HeapDelete(sharedContents);
@@ -604,8 +790,9 @@ namespace Js
         return true;
     }
 
-    BYTE* WebAssemblySharedArrayBuffer::AllocBuffer(uint32 length, uint32 maxLength)
+    BYTE* WebAssemblySharedArrayBuffer::AllocBuffer(uint32 length, uint32 maxLength, bool isGrowable)
     {
+        Unused(isGrowable); // WebAssembly buffers are grown by GrowMemory, never by SAB.grow
 #if ENABLE_FAST_ARRAYBUFFER
         if (CONFIG_FLAG(WasmFastArray))
         {
@@ -633,8 +820,9 @@ namespace Js
         return HeapNewNoThrowArray(BYTE, maxLength);
     }
 
-    void WebAssemblySharedArrayBuffer::FreeBuffer(BYTE* buffer, uint32 length, uint32 maxLength)
+    void WebAssemblySharedArrayBuffer::FreeBuffer(BYTE* buffer, uint32 length, uint32 maxLength, bool isGrowable)
     {
+        Unused(isGrowable);
         if (IsValidVirtualBufferLength(length))
         {
             FreeMemAlloc(buffer);
