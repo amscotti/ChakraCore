@@ -3068,7 +3068,7 @@ void Parser::ParseNamedImportOrExportClause(ModuleImportOrExportEntryList* impor
     ChkCurTokNoScan(tkRCurly, ERRnoRcurly);
 }
 
-IdentPtrList* Parser::GetRequestedModulesList()
+ModuleRequestList* Parser::GetRequestedModulesList()
 {
     return m_currentNodeProg->AsParseNodeModule()->requestedModules;
 }
@@ -3110,11 +3110,11 @@ ModuleImportOrExportEntryList* Parser::GetModuleStarExportEntryList()
     return m_currentNodeProg->AsParseNodeModule()->starExportEntries;
 }
 
-IdentPtrList* Parser::EnsureRequestedModulesList()
+ModuleRequestList* Parser::EnsureRequestedModulesList()
 {
     if (m_currentNodeProg->AsParseNodeModule()->requestedModules == nullptr)
     {
-        m_currentNodeProg->AsParseNodeModule()->requestedModules = Anew(&m_nodeAllocator, IdentPtrList, &m_nodeAllocator);
+        m_currentNodeProg->AsParseNodeModule()->requestedModules = Anew(&m_nodeAllocator, ModuleRequestList, &m_nodeAllocator);
     }
     return m_currentNodeProg->AsParseNodeModule()->requestedModules;
 }
@@ -3155,14 +3155,75 @@ ModuleImportOrExportEntryList* Parser::EnsureModuleStarExportEntryList()
     return m_currentNodeProg->AsParseNodeModule()->starExportEntries;
 }
 
-void Parser::AddModuleSpecifier(IdentPtr moduleRequest)
+void Parser::AddModuleSpecifier(IdentPtr moduleRequest, ModuleAttributeList* attributes)
 {
-    IdentPtrList* requestedModulesList = EnsureRequestedModulesList();
+    ModuleRequestList* requestedModulesList = EnsureRequestedModulesList();
 
-    if (!requestedModulesList->Has(moduleRequest))
+    // [[RequestedModules]] holds distinct ModuleRequest records: two requests
+    // are the same only when both the specifier and the sorted attribute
+    // list match (a missing WithClause is equivalent to an empty one, so
+    // nullptr and an empty list compare equal here).
+    ModuleRequestEntry* existing = requestedModulesList->Find([&](ModuleRequestEntry requestEntry)
     {
-        requestedModulesList->Prepend(moduleRequest);
+        return requestEntry.specifier == moduleRequest
+            && ModuleAttributesEqual(requestEntry.attributes, attributes);
+    });
+
+    if (existing == nullptr)
+    {
+        ModuleRequestEntry requestEntry;
+        requestEntry.specifier = moduleRequest;
+        requestEntry.attributes = attributes;
+        requestedModulesList->Prepend(requestEntry);
     }
+}
+
+bool Parser::ModuleAttributesEqual(ModuleAttributeList* left, ModuleAttributeList* right)
+{
+    ModuleAttributeEntry* leftEntry = (left != nullptr) ? left->head : nullptr;
+    ModuleAttributeEntry* rightEntry = (right != nullptr) ? right->head : nullptr;
+    while (leftEntry != nullptr && rightEntry != nullptr)
+    {
+        // Both lists are kept sorted by key at parse time, so pairwise
+        // pointer comparison is sufficient for equality.
+        if (leftEntry->key != rightEntry->key || leftEntry->value != rightEntry->value)
+        {
+            return false;
+        }
+        leftEntry = leftEntry->next;
+        rightEntry = rightEntry->next;
+    }
+    return leftEntry == nullptr && rightEntry == nullptr;
+}
+
+int Parser::CompareModuleAttributeKeys(IdentPtr left, IdentPtr right)
+{
+    // UTF-16 code-unit order; deterministic within and across runs.
+    // A char16 loop (not memcmp): on little-endian targets memcmp compares
+    // the low byte first, which misorders units >= U+0100 against units
+    // below it (e.g. U+0100 sorts before U+00FF). This must agree with the
+    // dynamic-path comparator in JavascriptOperators (code-unit loop).
+    uint32 leftCch = left->Cch();
+    uint32 rightCch = right->Cch();
+    uint32 minCch = leftCch < rightCch ? leftCch : rightCch;
+    const char16* leftPsz = left->Psz();
+    const char16* rightPsz = right->Psz();
+    for (uint32 i = 0; i < minCch; i++)
+    {
+        if (leftPsz[i] != rightPsz[i])
+        {
+            return leftPsz[i] < rightPsz[i] ? -1 : 1;
+        }
+    }
+    if (leftCch < rightCch)
+    {
+        return -1;
+    }
+    if (leftCch > rightCch)
+    {
+        return 1;
+    }
+    return 0;
 }
 
 ModuleImportOrExportEntry* Parser::AddModuleImportOrExportEntry(ModuleImportOrExportEntryList* importOrExportEntryList, ModuleImportOrExportEntry* importOrExportEntry)
@@ -3177,7 +3238,7 @@ ModuleImportOrExportEntry* Parser::AddModuleImportOrExportEntry(ModuleImportOrEx
     return importOrExportEntry;
 }
 
-ModuleImportOrExportEntry* Parser::AddModuleImportOrExportEntry(ModuleImportOrExportEntryList* importOrExportEntryList, IdentPtr importName, IdentPtr localName, IdentPtr exportName, IdentPtr moduleRequest, charcount_t offsetForError)
+ModuleImportOrExportEntry* Parser::AddModuleImportOrExportEntry(ModuleImportOrExportEntryList* importOrExportEntryList, IdentPtr importName, IdentPtr localName, IdentPtr exportName, IdentPtr moduleRequest, charcount_t offsetForError, ModuleAttributeList* attributes)
 {
     ModuleImportOrExportEntry* importOrExportEntry = Anew(&m_nodeAllocator, ModuleImportOrExportEntry);
 
@@ -3187,6 +3248,10 @@ ModuleImportOrExportEntry* Parser::AddModuleImportOrExportEntry(ModuleImportOrEx
     importOrExportEntry->moduleRequest = moduleRequest;
     importOrExportEntry->pidRefStack = offsetForError == 0 ? nullptr : PushPidRef(localName);
     importOrExportEntry->offset = offsetForError;
+    // The list stores a by-value copy (SList::Prepend copies the struct), so
+    // attributes must be attached here, before the copy. Assigning through
+    // the returned pointer afterwards would only mutate the orphan temp.
+    importOrExportEntry->attributes = attributes;
 
     return AddModuleImportOrExportEntry(importOrExportEntryList, importOrExportEntry);
 }
@@ -3229,6 +3294,118 @@ void Parser::CheckForDuplicateExportEntry(ModuleImportOrExportEntryList* exportE
     {
         Error(ERRDuplicateExport, exportName->Psz());
     }
+}
+
+template<bool buildAST>
+ModuleAttributeList* Parser::ParseOptionalWithClause()
+{
+    // A WithClause ("with { ... }") may follow a module specifier. Anything
+    // else leaves the token stream untouched, so a `with` statement on the
+    // following line still terminates the declaration (ASI applies as usual).
+    if (m_token.tk != tkWITH)
+    {
+        return nullptr;
+    }
+    RestorePoint withKeyword;
+    this->GetScanner()->Capture(&withKeyword);
+    this->GetScanner()->Scan();
+    if (m_token.tk != tkLCurly)
+    {
+        this->GetScanner()->SeekTo(withKeyword);
+        return nullptr;
+    }
+    return ParseWithClause<buildAST>();
+}
+
+template<bool buildAST>
+ModuleAttributeList* Parser::ParseWithClause()
+{
+    // Current token is '{'. ES2025 grammar:
+    //   WithClause: "with" "{" WithEntries_opt "}"
+    //   WithEntries: AttributeKey ":" StringLiteral ("," WithEntries)? (trailing comma allowed)
+    //   AttributeKey: IdentifierName | StringLiteral
+    // Only the "with" keyword is accepted; the legacy "assert" spelling is a
+    // plain identifier and never reaches this path.
+    Assert(m_token.tk == tkLCurly);
+    this->GetScanner()->Scan();
+
+    ModuleAttributeList* attributes = nullptr;
+    if (buildAST)
+    {
+        attributes = Anew(&m_nodeAllocator, ModuleAttributeList);
+        attributes->head = nullptr;
+    }
+
+    while (m_token.tk != tkRCurly && m_token.tk != tkEOF)
+    {
+        IdentPtr key = nullptr;
+        if (m_token.tk == tkStrCon)
+        {
+            key = m_token.GetStr();
+        }
+        else if (m_token.IsIdentifier() || m_token.IsReservedWord())
+        {
+            // IdentifierName: reserved words are allowed as keys.
+            key = m_token.GetIdentifier(this->GetHashTbl());
+        }
+        else
+        {
+            Error(ERRTokenAfter, GetTokenString(m_token.tk), GetTokenString(this->GetScanner()->GetPrevious()));
+        }
+
+        this->GetScanner()->Scan();
+        ChkCurTokNoScan(tkColon, ERRnoColon);
+        this->GetScanner()->Scan();
+
+        if (m_token.tk != tkStrCon)
+        {
+            // Attribute values must be string literals.
+            Error(ERRValidIfFollowedBy, GetTokenString(m_token.tk), _u("a string literal."));
+        }
+        IdentPtr value = m_token.GetStr();
+        this->GetScanner()->Scan();
+
+        if (buildAST)
+        {
+            // Keep the list sorted by key (code-unit order) so that request
+            // equality and canonical keys are order-insensitive. Duplicate
+            // keys are an early error.
+            ModuleAttributeEntry** link = &attributes->head;
+            while (*link != nullptr)
+            {
+                int order = CompareModuleAttributeKeys((*link)->key, key);
+                if (order == 0)
+                {
+                    Error(ERRDuplicateModuleAttribute, key->Psz());
+                }
+                if (order > 0)
+                {
+                    break;
+                }
+                link = &(*link)->next;
+            }
+            ModuleAttributeEntry* entry = Anew(&m_nodeAllocator, ModuleAttributeEntry);
+            entry->key = key;
+            entry->value = value;
+            entry->next = *link;
+            *link = entry;
+        }
+
+        if (m_token.tk == tkComma)
+        {
+            // A trailing comma before '}' is allowed.
+            this->GetScanner()->Scan();
+        }
+        else
+        {
+            ChkCurTokNoScan(tkRCurly, ERRnoRcurly);
+        }
+    }
+
+    ChkCurTokNoScan(tkRCurly, ERRnoRcurly);
+    this->GetScanner()->Scan();
+
+    return attributes;
 }
 
 template<bool buildAST>
@@ -3351,14 +3528,35 @@ void Parser::MakeModuleAsync()
 template<bool buildAST> ParseNodePtr Parser::ParseImportCall()
 {
     this->GetScanner()->Scan();
-    ParseNodePtr specifier = ParseExpr<buildAST>(koplCma, nullptr, /* fAllowIn */FALSE, /* fAllowEllipsis */FALSE);
+    ParseNodePtr specifier = ParseExpr<buildAST>(koplCma, nullptr, /* fAllowIn */TRUE, /* fAllowEllipsis */FALSE);
+    ParseNodePtr args = specifier;
+    if (m_token.tk == tkComma)
+    {
+        // import() accepts an optional second argument (the options object
+        // carrying the "with" attributes) plus optional trailing commas:
+        //   import ( AssignmentExpression ,? )
+        //   import ( AssignmentExpression , AssignmentExpression ,? )
+        this->GetScanner()->Scan();
+        if (m_token.tk != tkRParen)
+        {
+            ParseNodePtr options = ParseExpr<buildAST>(koplCma, nullptr, /* fAllowIn */TRUE, /* fAllowEllipsis */FALSE);
+            if (m_token.tk == tkComma)
+            {
+                this->GetScanner()->Scan();
+            }
+            if (buildAST)
+            {
+                args = CreateBinNode(knopList, specifier, options);
+            }
+        }
+    }
     if (m_token.tk != tkRParen)
     {
         Error(ERRnoRparen);
     }
 
     this->GetScanner()->Scan();
-    return buildAST ? CreateCallNode(knopCall, CreateNodeForOpT<knopImport>(), specifier) : nullptr;
+    return buildAST ? CreateCallNode(knopCall, CreateNodeForOpT<knopImport>(), args) : nullptr;
 }
 
 template<bool buildAST>
@@ -3403,14 +3601,22 @@ ParseNodePtr Parser::ParseImport()
     if (m_token.tk == tkStrCon)
     {
         // This import declaration has no import clause.
-        // "import ModuleSpecifier;"
+        // "import ModuleSpecifier;" or "import ModuleSpecifier WithClause;"
+        IdentPtr moduleSpecifier = nullptr;
         if (buildAST)
         {
-            AddModuleSpecifier(m_token.GetStr());
+            moduleSpecifier = m_token.GetStr();
         }
 
         // Scan past the module identifier.
         this->GetScanner()->Scan();
+
+        ModuleAttributeList* attributes = ParseOptionalWithClause<buildAST>();
+
+        if (buildAST)
+        {
+            AddModuleSpecifier(moduleSpecifier, attributes);
+        }
     }
     else
     {
@@ -3420,16 +3626,18 @@ ParseNodePtr Parser::ParseImport()
         ParseImportClause<buildAST>(&importEntryList);
 
         // Token following import clause must be the identifier 'from'
-        IdentPtr moduleSpecifier = ParseImportOrExportFromClause<buildAST>(true);
+        ModuleAttributeList* attributes = nullptr;
+        IdentPtr moduleSpecifier = ParseImportOrExportFromClause<buildAST>(true, &attributes);
 
         if (buildAST)
         {
             Assert(moduleSpecifier != nullptr);
 
-            AddModuleSpecifier(moduleSpecifier);
+            AddModuleSpecifier(moduleSpecifier, attributes);
 
-            importEntryList.Map([this, moduleSpecifier](ModuleImportOrExportEntry& importEntry) {
+            importEntryList.Map([this, moduleSpecifier, attributes](ModuleImportOrExportEntry& importEntry) {
                 importEntry.moduleRequest = moduleSpecifier;
+                importEntry.attributes = attributes;
                 AddModuleImportOrExportEntry(EnsureModuleImportEntryList(), &importEntry);
             });
         }
@@ -3442,7 +3650,7 @@ ParseNodePtr Parser::ParseImport()
 }
 
 template<bool buildAST>
-IdentPtr Parser::ParseImportOrExportFromClause(bool throwIfNotFound)
+IdentPtr Parser::ParseImportOrExportFromClause(bool throwIfNotFound, ModuleAttributeList** attributes)
 {
     IdentPtr moduleSpecifier = nullptr;
 
@@ -3459,6 +3667,15 @@ IdentPtr Parser::ParseImportOrExportFromClause(bool throwIfNotFound)
         }
 
         this->GetScanner()->Scan();
+
+        // An optional WithClause may follow the module specifier. It is
+        // consumed (and validated) in every parse mode; the caller decides
+        // whether the recorded list is kept.
+        ModuleAttributeList* withClause = ParseOptionalWithClause<buildAST>();
+        if (attributes != nullptr)
+        {
+            *attributes = withClause;
+        }
     }
     else if (throwIfNotFound)
     {
@@ -3662,22 +3879,23 @@ ParseNodePtr Parser::ParseExportDeclaration(bool *needTerminator)
         }
 
         // A star token in an export declaration must be followed by a from clause which begins with a token 'from'.
-        moduleIdentifier = ParseImportOrExportFromClause<buildAST>(true);
+        ModuleAttributeList* attributes = nullptr;
+        moduleIdentifier = ParseImportOrExportFromClause<buildAST>(true, &attributes);
 
         if (buildAST)
         {
             Assert(moduleIdentifier != nullptr);
 
-            AddModuleSpecifier(moduleIdentifier);
+            AddModuleSpecifier(moduleIdentifier, attributes);
 
             if (!exportName)
             {
-                AddModuleImportOrExportEntry(EnsureModuleStarExportEntryList(), wellKnownPropertyPids._star, nullptr, nullptr, moduleIdentifier);
+                AddModuleImportOrExportEntry(EnsureModuleStarExportEntryList(), wellKnownPropertyPids._star, nullptr, nullptr, moduleIdentifier, 0, attributes);
             }
             else
             {
                 CheckForDuplicateExportEntry(exportName);
-                AddModuleImportOrExportEntry(EnsureModuleIndirectExportEntryList(), wellKnownPropertyPids._star, nullptr, exportName, moduleIdentifier);
+                AddModuleImportOrExportEntry(EnsureModuleIndirectExportEntryList(), wellKnownPropertyPids._star, nullptr, exportName, moduleIdentifier, 0, attributes);
             }
         }
 
@@ -3698,19 +3916,21 @@ ParseNodePtr Parser::ParseExportDeclaration(bool *needTerminator)
         this->GetScanner()->Scan();
 
         // Export clause may be followed by a from clause.
-        moduleIdentifier = ParseImportOrExportFromClause<buildAST>(false);
+        ModuleAttributeList* attributes = nullptr;
+        moduleIdentifier = ParseImportOrExportFromClause<buildAST>(false, &attributes);
 
         if (buildAST)
         {
             if (moduleIdentifier != nullptr)
             {
-                AddModuleSpecifier(moduleIdentifier);
+                AddModuleSpecifier(moduleIdentifier, attributes);
             }
 
-            exportEntryList.Map([this, moduleIdentifier](ModuleImportOrExportEntry& exportEntry) {
+            exportEntryList.Map([this, moduleIdentifier, attributes](ModuleImportOrExportEntry& exportEntry) {
                 if (moduleIdentifier != nullptr)
                 {
                     exportEntry.moduleRequest = moduleIdentifier;
+                    exportEntry.attributes = attributes;
 
                     // We need to swap localname and importname when this is a re-export.
                     exportEntry.importName = exportEntry.localName;

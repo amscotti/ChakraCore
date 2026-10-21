@@ -1219,6 +1219,8 @@ bool WScriptJsrt::Initialize()
 
     IfJsrtErrorFail(ChakraRTInterface::JsSetModuleHostInfo(nullptr, JsModuleHostInfo_FetchImportedModuleCallback, (void*)WScriptJsrt::FetchImportedModule), false);
     IfJsrtErrorFail(ChakraRTInterface::JsSetModuleHostInfo(nullptr, JsModuleHostInfo_FetchImportedModuleFromScriptCallback, (void*)WScriptJsrt::FetchImportedModuleFromScript), false);
+    IfJsrtErrorFail(ChakraRTInterface::JsSetModuleHostInfo(nullptr, JsModuleHostInfo_FetchImportedModuleWithAttributesCallback, (void*)WScriptJsrt::FetchImportedModuleWithAttributes), false);
+    IfJsrtErrorFail(ChakraRTInterface::JsSetModuleHostInfo(nullptr, JsModuleHostInfo_FetchImportedModuleFromScriptWithAttributesCallback, (void*)WScriptJsrt::FetchImportedModuleFromScriptWithAttributes), false);
     IfJsrtErrorFail(ChakraRTInterface::JsSetModuleHostInfo(nullptr, JsModuleHostInfo_NotifyModuleReadyCallback, (void*)WScriptJsrt::NotifyModuleReadyCallback), false);
     IfJsrtErrorFail(ChakraRTInterface::JsSetModuleHostInfo(nullptr, JsModuleHostInfo_InitializeImportMetaCallback, (void*)WScriptJsrt::InitializeImportMetaCallback), false);
     IfJsrtErrorFail(ChakraRTInterface::JsSetModuleHostInfo(nullptr, JsModuleHostInfo_ReportModuleCompletionCallback, (void*)WScriptJsrt::ReportModuleCompletionCallback), false);
@@ -1880,21 +1882,32 @@ bool WScriptJsrt::PrintException(LPCSTR fileName, JsErrorCode jsErrorCode, JsVal
 
                 int line;
                 int column;
-                
-                IfJsrtErrorFail(CreatePropertyIdFromString("line", &linePropertyId), false);
-                IfJsrtErrorFail(ChakraRTInterface::JsGetProperty(exception, linePropertyId, &lineProperty), false);
-                IfJsrtErrorFail(ChakraRTInterface::JsNumberToInt(lineProperty, &line), false);
 
-                IfJsrtErrorFail(CreatePropertyIdFromString("column", &columnPropertyId), false);
-                IfJsrtErrorFail(ChakraRTInterface::JsGetProperty(exception, columnPropertyId, &columnProperty), false);
-                IfJsrtErrorFail(ChakraRTInterface::JsNumberToInt(columnProperty, &column), false);
+                // Link-phase failures (for example a rejected dependency
+                // fetch) carry no line/column position; report them without
+                // one instead of dropping them silently.
+                bool hasPosition =
+                    CreatePropertyIdFromString("line", &linePropertyId) == JsNoError &&
+                    ChakraRTInterface::JsGetProperty(exception, linePropertyId, &lineProperty) == JsNoError &&
+                    ChakraRTInterface::JsNumberToInt(lineProperty, &line) == JsNoError &&
+                    CreatePropertyIdFromString("column", &columnPropertyId) == JsNoError &&
+                    ChakraRTInterface::JsGetProperty(exception, columnPropertyId, &columnProperty) == JsNoError &&
+                    ChakraRTInterface::JsNumberToInt(columnProperty, &column) == JsNoError;
 
                 CHAR shortFileName[_MAX_PATH];
                 CHAR ext[_MAX_EXT];
                 _splitpath_s(fileName, nullptr, 0, nullptr, 0, shortFileName, _countof(shortFileName), ext, _countof(ext));
-                fwprintf(stderr, _u("%ls\n\tat code (%S%S:%d:%d)\n"),
-                    errorMessage.GetWideString(), shortFileName, ext, (int)line + 1,
-                    (int)column + 1);
+                if (hasPosition)
+                {
+                    fwprintf(stderr, _u("%ls\n\tat code (%S%S:%d:%d)\n"),
+                        errorMessage.GetWideString(), shortFileName, ext, (int)line + 1,
+                        (int)column + 1);
+                }
+                else
+                {
+                    fwprintf(stderr, _u("%ls\n\tat code (%S%S:?)\n"),
+                        errorMessage.GetWideString(), shortFileName, ext);
+                }
             }
             else
             {
@@ -2022,14 +2035,26 @@ Error:
     return hr;
 }
 
-WScriptJsrt::ModuleMessage::ModuleMessage(JsModuleRecord module, JsValueRef specifier, std::string* fullPathPtr)
-    : MessageBase(0), moduleRecord(module), specifier(specifier)
+// Forward declarations for the import-attributes host support below.
+static JsErrorCode ReadModuleAttributes(JsValueRef attributes, bool* hasAttributes, std::string* canonicalOut, std::string* typeOut);
+static char* WrapJsonModuleSource(LPCSTR jsonText);
+
+WScriptJsrt::ModuleMessage::ModuleMessage(JsModuleRecord module, JsValueRef specifier, std::string* filePathPtr, std::string* mapKeyPtr, bool isJson, bool direct)
+    : MessageBase(0), moduleRecord(module), specifier(specifier), isJsonModule(isJson), directParse(direct)
 {
-    fullPath = nullptr;
+    filePath = nullptr;
+    mapKey = nullptr;
     ChakraRTInterface::JsAddRef(module, nullptr);
     if (specifier != nullptr)
     {
-        fullPath = new std::string (*fullPathPtr);
+        if (filePathPtr != nullptr)
+        {
+            filePath = new std::string(*filePathPtr);
+        }
+        if (mapKeyPtr != nullptr)
+        {
+            mapKey = new std::string(*mapKeyPtr);
+        }
         // nullptr specifier means a Promise to execute; non-nullptr means a "fetch" operation.
         ChakraRTInterface::JsAddRef(specifier, nullptr);
     }
@@ -2040,9 +2065,23 @@ WScriptJsrt::ModuleMessage::~ModuleMessage()
     ChakraRTInterface::JsRelease(moduleRecord, nullptr);
     if (specifier != nullptr)
     {
-        delete fullPath;
+        delete filePath;
+        delete mapKey;
         ChakraRTInterface::JsRelease(specifier, nullptr);
     }
+}
+
+// Parses module source directly on an already-registered record. Used for
+// attribute-bearing fetches whose map key embeds the attributes and therefore
+// cannot round-trip through LoadModuleFromString's path-keyed lookup.
+// Mirrors LoadModuleFromString's parse tail: fetch records are never root
+// modules, so a parse failure simply stays on the record for the engine link
+// phase, with no host exception raised here.
+static void ParseModuleSourceOnRecord(JsModuleRecord module, LPCSTR fileContent, unsigned int contentLength)
+{
+    JsValueRef errorObject = JS_INVALID_REFERENCE;
+    ChakraRTInterface::JsParseModuleSource(module, WScriptJsrt::GetNextSourceContext(),
+        (LPBYTE)fileContent, contentLength, JsParseModuleSourceFlags_DataIsUTF8, &errorObject);
 }
 
 HRESULT WScriptJsrt::ModuleMessage::Call(LPCSTR fileName)
@@ -2068,22 +2107,67 @@ HRESULT WScriptJsrt::ModuleMessage::Call(LPCSTR fileName)
         errorCode = specifierStr.GetError();
         if (errorCode == JsNoError)
         {
-            hr = Helpers::LoadScriptFromFile(*specifierStr, fileContent, nullptr, fullPath, true);
+            hr = Helpers::LoadScriptFromFile(*specifierStr, fileContent, nullptr, filePath, true);
 
             if (FAILED(hr))
             {
                 if (!HostConfigFlags::flags.MuteHostErrorMsgIsEnabled)
                 {
-                    auto actualModuleRecord = moduleRecordMap.find(*fullPath);
+                    auto actualModuleRecord = moduleRecordMap.find(*mapKey);
                     if (actualModuleRecord == moduleRecordMap.end() || moduleErrMap[actualModuleRecord->second] == RootModule)
                     {
                         fprintf(stderr, "Couldn't load file '%s'\n", specifierStr.GetString());
                     }
                 }
-                LoadScript(nullptr, fullPath == nullptr ? *specifierStr : fullPath->c_str(), nullptr, "module", true, WScriptJsrt::FinalizeFree, false);
+                if (directParse)
+                {
+                    // Mirror the legacy empty-module parse below, targeting
+                    // the stored record directly.
+                    ParseModuleSourceOnRecord(moduleRecord, nullptr, 0);
+                }
+                else
+                {
+                    LoadScript(nullptr, filePath == nullptr ? *specifierStr : filePath->c_str(), nullptr, "module", true, WScriptJsrt::FinalizeFree, false);
+                }
                 goto Error;
             }
-            LoadScript(nullptr, fullPath == nullptr ? *specifierStr : fullPath->c_str(), fileContent, "module", true, WScriptJsrt::FinalizeFree, true);
+            if (isJsonModule)
+            {
+                // JSON modules produce a namespace whose only export is
+                // "default" holding the parsed value
+                // (CreateDefaultExportSyntheticModule). The file text is
+                // evaluated through JSON.parse rather than pasted as an
+                // object literal, so keys such as "__proto__" keep their
+                // parsed-value semantics. Invalid JSON therefore throws a
+                // SyntaxError at evaluation time.
+                char* jsonModuleSource = WrapJsonModuleSource(fileContent);
+                free((void*)fileContent);
+                fileContent = nullptr;
+                if (jsonModuleSource == nullptr)
+                {
+                    hr = E_OUTOFMEMORY;
+                    if (directParse)
+                    {
+                        ParseModuleSourceOnRecord(moduleRecord, nullptr, 0);
+                    }
+                    else
+                    {
+                        LoadScript(nullptr, filePath == nullptr ? *specifierStr : filePath->c_str(), nullptr, "module", true, WScriptJsrt::FinalizeFree, false);
+                    }
+                    goto Error;
+                }
+                fileContent = jsonModuleSource;
+            }
+            if (directParse)
+            {
+                unsigned int contentLength = (fileContent == nullptr) ? 0 : (unsigned int)strlen(fileContent);
+                ParseModuleSourceOnRecord(moduleRecord, fileContent, contentLength);
+                free((void*)fileContent);
+            }
+            else
+            {
+                LoadScript(nullptr, filePath == nullptr ? *specifierStr : filePath->c_str(), fileContent, "module", true, WScriptJsrt::FinalizeFree, true);
+            }
         }
     }
 Error:
@@ -2099,6 +2183,219 @@ JsErrorCode WScriptJsrt::ReportModuleCompletionCallback(JsModuleRecord module, J
         PrintException(AutoString(specifier).GetString(), JsErrorCode::JsErrorScriptException, exception);
     }
     return JsNoError;
+}
+
+// Reads the engine-created attributes object (string -> string) into a
+// canonical escaped "key=value" serialization plus the "type" value.
+// `attributes` may be undefined, meaning the request carries no attributes.
+static JsErrorCode ReadModuleAttributes(JsValueRef attributes, bool* hasAttributes, std::string* canonicalOut, std::string* typeOut)
+{
+    *hasAttributes = false;
+    canonicalOut->clear();
+    typeOut->clear();
+
+    JsValueType valueType = JsUndefined;
+    JsErrorCode valueTypeError = ChakraRTInterface::JsGetValueType(attributes, &valueType);
+    IfJsrtErrorFail(valueTypeError, valueTypeError);
+    if (valueType == JsUndefined)
+    {
+        return JsNoError;
+    }
+    *hasAttributes = true;
+
+    JsValueRef propertyNames = JS_INVALID_REFERENCE;
+    IfJsrtErrorFail(ChakraRTInterface::JsGetOwnPropertyNames(attributes, &propertyNames), JsErrorInvalidArgument);
+    JsPropertyIdRef lengthId = nullptr;
+    IfJsrtErrorFail(ChakraRTInterface::JsCreatePropertyId("length", 6, &lengthId), JsErrorInvalidArgument);
+    JsValueRef lengthValue = JS_INVALID_REFERENCE;
+    IfJsrtErrorFail(ChakraRTInterface::JsGetProperty(propertyNames, lengthId, &lengthValue), JsErrorInvalidArgument);
+    int length = 0;
+    IfJsrtErrorFail(ChakraRTInterface::JsNumberToInt(lengthValue, &length), JsErrorInvalidArgument);
+
+    auto escape = [](const char* text, std::string* out) {
+        for (const char* p = text; *p != '\0'; p++)
+        {
+            // '=' is the key/value delimiter, so it must be escaped too:
+            // otherwise {"a=b":"c"} and {a:"b=c"} serialize identically.
+            if (*p == '\\' || *p == '\n' || *p == '\x1e' || *p == '=')
+            {
+                out->push_back('\\');
+            }
+            out->push_back(*p);
+        }
+    };
+
+    for (int i = 0; i < length; i++)
+    {
+        JsValueRef indexValue = JS_INVALID_REFERENCE;
+        IfJsrtErrorFail(ChakraRTInterface::JsIntToNumber(i, &indexValue), JsErrorInvalidArgument);
+        JsValueRef keyValue = JS_INVALID_REFERENCE;
+        IfJsrtErrorFail(ChakraRTInterface::JsGetIndexedProperty(propertyNames, indexValue, &keyValue), JsErrorInvalidArgument);
+        AutoString keyString;
+        if (keyString.Initialize(keyValue) != JsNoError)
+        {
+            return keyString.GetError();
+        }
+        JsPropertyIdRef keyId = nullptr;
+        IfJsrtErrorFail(ChakraRTInterface::JsCreatePropertyId(keyString.GetString(), strlen(keyString.GetString()), &keyId), JsErrorInvalidArgument);
+        JsValueRef value = JS_INVALID_REFERENCE;
+        IfJsrtErrorFail(ChakraRTInterface::JsGetProperty(attributes, keyId, &value), JsErrorInvalidArgument);
+        AutoString valueString;
+        if (valueString.Initialize(value) != JsNoError)
+        {
+            return valueString.GetError();
+        }
+        if (i > 0)
+        {
+            canonicalOut->push_back('\x1e');
+        }
+        escape(keyString.GetString(), canonicalOut);
+        canonicalOut->push_back('=');
+        escape(valueString.GetString(), canonicalOut);
+        if (strcmp(keyString.GetString(), "type") == 0 && typeOut->empty())
+        {
+            *typeOut = valueString.GetString();
+        }
+    }
+    return JsNoError;
+}
+
+// Synthesizes `export default JSON.parse('<file text>');` for a JSON module.
+// Only the single-quote, backslash and JS line terminators are escaped;
+// every other byte passes through unchanged so JSON.parse observes the
+// exact file text.
+static char* WrapJsonModuleSource(LPCSTR jsonText)
+{
+    static const char prefix[] = "export default JSON.parse('";
+    static const char suffix[] = "');";
+    static const char lineSeparatorEscape[] = "\\u2028";
+    static const char paragraphSeparatorEscape[] = "\\u2029";
+    size_t length = strlen(jsonText);
+    // Worst case: every byte doubles, plus two 6-byte escapes per 3-byte
+    // sequence, plus prefix/suffix/NUL.
+    size_t capacity = (sizeof(prefix) - 1) + 2 * length + (sizeof(suffix) - 1) + 1;
+    char* out = (char*)malloc(capacity);
+    if (out == nullptr)
+    {
+        return nullptr;
+    }
+    char* cursor = out;
+    memcpy(cursor, prefix, sizeof(prefix) - 1);
+    cursor += sizeof(prefix) - 1;
+    for (size_t i = 0; i < length; i++)
+    {
+        unsigned char c = (unsigned char)jsonText[i];
+        if (c == '\\' || c == '\'')
+        {
+            *cursor++ = '\\';
+            *cursor++ = (char)c;
+        }
+        else if (c == '\n')
+        {
+            *cursor++ = '\\';
+            *cursor++ = 'n';
+        }
+        else if (c == '\r')
+        {
+            *cursor++ = '\\';
+            *cursor++ = 'r';
+        }
+        else if (c == 0xE2 && i + 2 < length &&
+            (unsigned char)jsonText[i + 1] == 0x80 &&
+            ((unsigned char)jsonText[i + 2] == 0xA8 || (unsigned char)jsonText[i + 2] == 0xA9))
+        {
+            const char* escape = ((unsigned char)jsonText[i + 2] == 0xA8) ? lineSeparatorEscape : paragraphSeparatorEscape;
+            memcpy(cursor, escape, 6);
+            cursor += 6;
+            i += 2;
+        }
+        else
+        {
+            *cursor++ = (char)c;
+        }
+    }
+    memcpy(cursor, suffix, sizeof(suffix) - 1);
+    cursor += sizeof(suffix) - 1;
+    *cursor = '\0';
+    return out;
+}
+
+JsErrorCode WScriptJsrt::FetchImportedModuleHelperWithAttributes(JsModuleRecord referencingModule,
+    JsValueRef specifier, JsValueRef attributes, _Out_ JsModuleRecord* dependentModuleRecord, LPCSTR refdir)
+{
+    JsModuleRecord moduleRecord = JS_INVALID_REFERENCE;
+    AutoString specifierStr;
+    *dependentModuleRecord = nullptr;
+
+    if (specifierStr.Initialize(specifier) != JsNoError)
+    {
+        return specifierStr.GetError();
+    }
+
+    bool hasAttributes = false;
+    std::string canonicalAttributes;
+    std::string attributeType;
+    JsErrorCode attributesError = ReadModuleAttributes(attributes, &hasAttributes, &canonicalAttributes, &attributeType);
+    if (attributesError != JsNoError)
+    {
+        return attributesError;
+    }
+
+    char fullPath[_MAX_PATH];
+    std::string specifierFullPath = refdir ? refdir : "";
+    specifierFullPath += *specifierStr;
+    if (_fullpath(fullPath, specifierFullPath.c_str(), _MAX_PATH) == nullptr)
+    {
+        return JsErrorInvalidArgument;
+    }
+
+    // Module identity: requests that differ in attributes resolve to distinct
+    // records. Attribute-less requests keep the legacy plain-path key so
+    // behavior for existing scenarios is unchanged.
+    std::string moduleKey(fullPath);
+    if (hasAttributes)
+    {
+        moduleKey += '\x1e';
+        moduleKey += canonicalAttributes;
+    }
+
+    auto moduleEntry = moduleRecordMap.find(moduleKey);
+    if (moduleEntry != moduleRecordMap.end())
+    {
+        *dependentModuleRecord = moduleEntry->second;
+        return JsNoError;
+    }
+
+    bool isJsonModule = (attributeType == "json");
+    if (hasAttributes && !attributeType.empty() && !isJsonModule)
+    {
+        // Unsupported "type" values fail the load. The engine surfaces this
+        // as an import failure (a link error for static imports, a promise
+        // rejection for dynamic imports).
+        return JsErrorInvalidArgument;
+    }
+
+    JsErrorCode errorCode = ChakraRTInterface::JsInitializeModuleRecord(referencingModule, specifier, &moduleRecord);
+    if (errorCode == JsNoError)
+    {
+        GetDir(fullPath, &moduleDirMap[moduleRecord]);
+        std::string pathKey = moduleKey;
+        moduleRecordMap[pathKey] = moduleRecord;
+        moduleErrMap[moduleRecord] = ImportedModule;
+        std::string filePathKey(fullPath);
+        // Note: unlike the legacy Create call above (which passes the
+        // referencing module and re-derives the record from the file path),
+        // the attributes-aware message must target the fetched record
+        // directly, since its map key embeds the attributes.
+        ModuleMessage* moduleMessage = WScriptJsrt::ModuleMessage::CreateWithAttributes(moduleRecord, specifier, &filePathKey, &pathKey, isJsonModule);
+        if (moduleMessage == nullptr)
+        {
+            return JsErrorOutOfMemory;
+        }
+        WScriptJsrt::PushMessage(moduleMessage);
+        *dependentModuleRecord = moduleRecord;
+    }
+    return errorCode;
 }
 
 JsErrorCode WScriptJsrt::FetchImportedModuleHelper(JsModuleRecord referencingModule,
@@ -2171,6 +2468,28 @@ JsErrorCode WScriptJsrt::FetchImportedModuleFromScript(_In_ JsSourceContext dwRe
     _In_ JsValueRef specifier, _Outptr_result_maybenull_ JsModuleRecord* dependentModuleRecord)
 {
     return FetchImportedModuleHelper(nullptr, specifier, dependentModuleRecord);
+}
+
+// Attributes-capable fetch callbacks (ES2025 import attributes). The engine
+// routes every fetch through these once registered, including requests
+// without attributes (which arrive as undefined).
+JsErrorCode WScriptJsrt::FetchImportedModuleWithAttributes(_In_ JsModuleRecord referencingModule,
+    _In_ JsValueRef specifier, _In_ JsValueRef attributes, _Outptr_result_maybenull_ JsModuleRecord* dependentModuleRecord)
+{
+    auto moduleDirEntry = moduleDirMap.find(referencingModule);
+    if (moduleDirEntry != moduleDirMap.end())
+    {
+        std::string dir = moduleDirEntry->second;
+        return FetchImportedModuleHelperWithAttributes(referencingModule, specifier, attributes, dependentModuleRecord, dir.c_str());
+    }
+
+    return FetchImportedModuleHelperWithAttributes(referencingModule, specifier, attributes, dependentModuleRecord);
+}
+
+JsErrorCode WScriptJsrt::FetchImportedModuleFromScriptWithAttributes(_In_ JsSourceContext dwReferencingSourceContext,
+    _In_ JsValueRef specifier, _In_ JsValueRef attributes, _Outptr_result_maybenull_ JsModuleRecord* dependentModuleRecord)
+{
+    return FetchImportedModuleHelperWithAttributes(nullptr, specifier, attributes, dependentModuleRecord);
 }
 
 // Callback from chakraCore when the module resolution is finished, either successfully or unsuccessfully.

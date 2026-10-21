@@ -20,7 +20,7 @@ namespace Js
         friend class JavascriptLibrary;
 
         SourceTextModuleRecord(ScriptContext* scriptContext);
-        IdentPtrList* GetRequestedModuleList() const { return requestedModuleList; }
+        ModuleRequestList* GetRequestedModuleList() const { return requestedModuleList; }
         ModuleImportOrExportEntryList* GetImportEntryList() const { return importRecordList; }
         ModuleImportOrExportEntryList* GetLocalExportEntryList() const { return localExportRecordList; }
         ModuleImportOrExportEntryList* GetIndirectExportEntryList() const { return indirectExportRecordList; }
@@ -84,7 +84,7 @@ namespace Js
         void SetLocalExportRecordList(ModuleImportOrExportEntryList* localExports) { localExportRecordList = localExports; }
         void SetIndirectExportRecordList(ModuleImportOrExportEntryList* indirectExports) { indirectExportRecordList = indirectExports; }
         void SetStarExportRecordList(ModuleImportOrExportEntryList* starExports) { starExportRecordList = starExports; }
-        void SetRequestedModuleList(IdentPtrList* requestModules) { requestedModuleList = requestModules; }
+        void SetRequestedModuleList(ModuleRequestList* requestModules) { requestedModuleList = requestModules; }
 
         ScriptContext* GetScriptContext() const { return scriptContext; }
         HRESULT ParseSource(__in_bcount(sourceLength) byte* sourceText, uint32 sourceLength, SRCINFO * srcInfo, Var* exceptionVar, bool isUtf8);
@@ -127,8 +127,21 @@ namespace Js
         ModuleNameRecord* GetNamespaceNameRecord() { return &namespaceRecord; }
 
         SourceTextModuleRecord* GetChildModuleRecord(LPCOLESTR specifier) const;
+        SourceTextModuleRecord* GetChildModuleRecord(IdentPtr specifier, ModuleAttributeList* attributes) const;
 
-        void SetParent(SourceTextModuleRecord* parentRecord, LPCOLESTR moduleName);
+        void SetParent(SourceTextModuleRecord* parentRecord, LPCOLESTR moduleRequestKey);
+
+        // Builds the canonical identity key for a module request: the
+        // specifier plus the sorted attribute list. Requests that differ in
+        // attributes map to different keys (and therefore different child
+        // records); a missing WithClause is equivalent to an empty one.
+        static LPCOLESTR GetModuleRequestKey(ArenaAllocator* allocator, IdentPtr specifier, ModuleAttributeList* attributes);
+
+        // Builds the engine-created attributes object (string -> string,
+        // keys in sorted order) handed to the host fetch callback. Returns
+        // nullptr when there are no attributes, which the caller maps to
+        // `undefined` (or the legacy host path).
+        Var BuildModuleAttributesObject(ModuleAttributeList* attributes);
         Utf8SourceInfo* GetSourceInfo() { return this->pSourceInfo; }
         static Var ResolveOrRejectDynamicImportPromise(bool isResolve, Var value, ScriptContext *scriptContext, SourceTextModuleRecord *mr = nullptr, bool useReturn = true);
         Var PostProcessDynamicModuleImport();
@@ -153,7 +166,7 @@ namespace Js
         Field(uint) sourceIndex;
         FieldNoBarrier(Parser*) parser;  // we'll need to keep the parser around till we are done with bytecode gen.
         Field(ScriptContext*) scriptContext;
-        Field(IdentPtrList*) requestedModuleList;
+        Field(ModuleRequestList*) requestedModuleList;
         Field(ModuleImportOrExportEntryList*) importRecordList;
         Field(ModuleImportOrExportEntryList*) localExportRecordList;
         Field(ModuleImportOrExportEntryList*) indirectExportRecordList;

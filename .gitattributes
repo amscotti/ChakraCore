@@ -25,3 +25,6 @@ test/BigInt/global_object.js whitespace=cr-at-eol
 # the pre-spec block var/let behavior; historical lines stay CRLF.
 test/LetConst/letvar.js whitespace=cr-at-eol
 test/LetConst/for-loop.js whitespace=cr-at-eol
+# C2-S12 appends WithClause coverage to this CRLF module-syntax file;
+# historical lines stay CRLF.
+test/es6module/module-syntax.js whitespace=cr-at-eol

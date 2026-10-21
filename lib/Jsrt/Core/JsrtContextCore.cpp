@@ -104,8 +104,39 @@ void JsrtContextCore::OnScriptLoad(Js::JavascriptFunction * scriptFunction, Js::
 #endif
 }
 
-HRESULT ChakraCoreHostScriptContext::FetchImportedModule(Js::ModuleRecordBase* referencingModule, LPCOLESTR specifier, Js::ModuleRecordBase** dependentModuleRecord)
+HRESULT ChakraCoreHostScriptContext::FetchImportedModule(Js::ModuleRecordBase* referencingModule, LPCOLESTR specifier, Js::Var attributes, Js::ModuleRecordBase** dependentModuleRecord)
 {
+    // Ownership record: `specifierVar` and `attributes` are Recycler GC values
+    // created/held by the engine caller; this frame passes them to the host
+    // synchronously. The host must JsAddRef any value it retains past return
+    // (Jsrt.cpp:601-720); no engine root is held on the host's behalf.
+    // Borrow invalidation: a host callback may run script and trigger GC;
+    // the caller's C++ locals stay on the scanned native stack (same as the
+    // pre-existing specifier-only path). No reentrancy-safe mutation of these
+    // values occurs here.
+    if (fetchImportedModuleWithAttributesCallback != nullptr)
+    {
+        Js::JavascriptString* specifierVar = Js::JavascriptString::NewCopySz(specifier, GetScriptContext());
+        Js::Var attributesVar = attributes != nullptr ? attributes : GetScriptContext()->GetLibrary()->GetUndefined();
+        JsModuleRecord dependentRecord = JS_INVALID_REFERENCE;
+        {
+            AUTO_NO_EXCEPTION_REGION;
+            JsErrorCode errorCode = fetchImportedModuleWithAttributesCallback(referencingModule, specifierVar, attributesVar, &dependentRecord);
+            if (errorCode == JsNoError)
+            {
+                *dependentModuleRecord = static_cast<Js::ModuleRecordBase*>(dependentRecord);
+                return NOERROR;
+            }
+        }
+        return E_INVALIDARG;
+    }
+    if (attributes != nullptr)
+    {
+        // The request carries import attributes but the host registered no
+        // attributes-capable callback. Callers translate this into a
+        // TypeError load failure.
+        return E_NOTIMPL;
+    }
     if (fetchImportedModuleCallback == nullptr)
     {
         return E_INVALIDARG;
@@ -124,8 +155,28 @@ HRESULT ChakraCoreHostScriptContext::FetchImportedModule(Js::ModuleRecordBase* r
     return E_INVALIDARG;
 }
 
-HRESULT ChakraCoreHostScriptContext::FetchImportedModuleFromScript(JsSourceContext dwReferencingSourceContext, LPCOLESTR specifier, Js::ModuleRecordBase** dependentModuleRecord)
+HRESULT ChakraCoreHostScriptContext::FetchImportedModuleFromScript(JsSourceContext dwReferencingSourceContext, LPCOLESTR specifier, Js::Var attributes, Js::ModuleRecordBase** dependentModuleRecord)
 {
+    if (fetchImportedModuleFromScriptWithAttributesCallback != nullptr)
+    {
+        Js::JavascriptString* specifierVar = Js::JavascriptString::NewCopySz(specifier, GetScriptContext());
+        Js::Var attributesVar = attributes != nullptr ? attributes : GetScriptContext()->GetLibrary()->GetUndefined();
+        JsModuleRecord dependentRecord = JS_INVALID_REFERENCE;
+        {
+            AUTO_NO_EXCEPTION_REGION;
+            JsErrorCode errorCode = fetchImportedModuleFromScriptWithAttributesCallback(dwReferencingSourceContext, specifierVar, attributesVar, &dependentRecord);
+            if (errorCode == JsNoError)
+            {
+                *dependentModuleRecord = static_cast<Js::ModuleRecordBase*>(dependentRecord);
+                return NOERROR;
+            }
+        }
+        return E_INVALIDARG;
+    }
+    if (attributes != nullptr)
+    {
+        return E_NOTIMPL;
+    }
     if (fetchImportedModuleFromScriptCallback == nullptr)
     {
         return E_INVALIDARG;

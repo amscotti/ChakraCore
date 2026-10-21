@@ -11063,9 +11063,154 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
         JIT_HELPER_END(LdFuncObjProto);
     }
 
-    Var JavascriptOperators::OP_ImportCall(_In_ JavascriptFunction *function, _In_ Var specifier, _In_ ScriptContext* scriptContext)
+    // Validates the second import() argument per ES2025 EvaluateImportCall.
+    // On success returns true with `attributes` set to the engine-created
+    // attributes object (string -> string), or nullptr when there are none.
+    // On failure returns false with `rejection` set to the TypeError (or the
+    // propagated abrupt completion) the import promise must reject with.
+    // Unknown option keys are collected like any other key; only the "with"
+    // property itself is read here, and only string values are accepted (no
+    // coercion). Only own enumerable string-keyed properties participate;
+    // abrupt completions from getters, proxies or key enumeration reject.
+    static bool TryGetImportAttributes(Var options, ScriptContext* scriptContext, Var* attributes, Var* rejection)
     {
-        JIT_HELPER_REENTRANT_HEADER(ImportCall);
+        *attributes = nullptr;
+        *rejection = nullptr;
+        if (JavascriptOperators::IsUndefined(options))
+        {
+            return true;
+        }
+        // ES2025 GetOptionsObject: undefined is allowed; anything whose
+        // Type() is not Object (null and all primitives, including strings)
+        // is a TypeError. IsObject is TypeId-based, so primitive strings,
+        // numbers, symbols and bigints are rejected here.
+        if (!JavascriptOperators::IsObject(options))
+        {
+            *rejection = scriptContext->GetLibrary()->CreateTypeError();
+            return false;
+        }
+        try
+        {
+            PropertyId withId = scriptContext->GetOrAddPropertyIdTracked(_u("with"), 4);
+            Var withObj = JavascriptOperators::GetProperty(VarTo<RecyclableObject>(options), withId, scriptContext);
+            if (JavascriptOperators::IsUndefined(withObj))
+            {
+                return true;
+            }
+            // The 'with' value follows the same rule: undefined means no
+            // attributes, null or any other primitive is a TypeError.
+            if (!JavascriptOperators::IsObject(withObj))
+            {
+                *rejection = scriptContext->GetLibrary()->CreateTypeError();
+                return false;
+            }
+            JavascriptArray* keys = JavascriptOperators::GetOwnPropertyKeys(withObj, scriptContext);
+            uint32 length = keys->GetLength();
+            // Stage validated entries in a temp object so each fetched value
+            // stays rooted (Recycler-owned) while later getters still run
+            // user code. Getters therefore run in enumeration order, exactly
+            // as before; only the final object's key order is normalized.
+            // The key ids are plain ints in a leaf array, needing no tracing.
+            DynamicObject* stagedObject = scriptContext->GetLibrary()->CreateObject();
+            PropertyId* keyIds = length > 0 ? RecyclerNewArrayLeaf(scriptContext->GetRecycler(), PropertyId, length) : nullptr;
+            uint32 count = 0;
+            for (uint32 i = 0; i < length; i++)
+            {
+                Var key = keys->DirectGetItem(i);
+                if (!VarIs<JavascriptString>(key))
+                {
+                    continue;
+                }
+                JavascriptString* keyString = VarTo<JavascriptString>(key);
+                PropertyId keyId = scriptContext->GetOrAddPropertyIdTracked(keyString->GetSz(), keyString->GetLength());
+                PropertyDescriptor descriptor;
+                if (!JavascriptObject::GetOwnPropertyDescriptorHelper(VarTo<RecyclableObject>(withObj), keyId, scriptContext, descriptor))
+                {
+                    continue;
+                }
+                if (!descriptor.IsEnumerable())
+                {
+                    continue;
+                }
+                Var value = JavascriptOperators::GetProperty(VarTo<RecyclableObject>(withObj), keyId, scriptContext);
+                if (!VarIs<JavascriptString>(value))
+                {
+                    *rejection = scriptContext->GetLibrary()->CreateTypeError();
+                    return false;
+                }
+                // Fresh ordinary object: no setters can run here.
+                JavascriptOperators::SetProperty(stagedObject, stagedObject, keyId, value, scriptContext, PropertyOperation_None);
+                keyIds[count++] = keyId;
+            }
+            if (count == 0)
+            {
+                // An empty "with" is the same request as no attributes (the
+                // static path maps `with {}` to undefined), so pass nullptr
+                // and take the legacy host path.
+                *attributes = nullptr;
+                return true;
+            }
+            // Sort by UTF-16 code-unit order to honor the "sorted key order"
+            // contract, matching the static path (sorted at parse).
+            // Insertion sort: attribute lists are tiny.
+            auto compareKeyIds = [scriptContext](PropertyId left, PropertyId right) -> int {
+                const PropertyRecord* leftName = scriptContext->GetPropertyName(left);
+                const PropertyRecord* rightName = scriptContext->GetPropertyName(right);
+                Assert(leftName != nullptr && rightName != nullptr);
+                uint32 leftLength = leftName->GetLength();
+                uint32 rightLength = rightName->GetLength();
+                uint32 minLength = leftLength < rightLength ? leftLength : rightLength;
+                const char16* leftBuffer = leftName->GetBuffer();
+                const char16* rightBuffer = rightName->GetBuffer();
+                for (uint32 index = 0; index < minLength; index++)
+                {
+                    if (leftBuffer[index] != rightBuffer[index])
+                    {
+                        return leftBuffer[index] < rightBuffer[index] ? -1 : 1;
+                    }
+                }
+                if (leftLength != rightLength)
+                {
+                    return leftLength < rightLength ? -1 : 1;
+                }
+                return 0;
+            };
+            for (uint32 i = 1; i < count; i++)
+            {
+                PropertyId key = keyIds[i];
+                uint32 j = i;
+                while (j > 0 && compareKeyIds(key, keyIds[j - 1]) < 0)
+                {
+                    keyIds[j] = keyIds[j - 1];
+                    j--;
+                }
+                keyIds[j] = key;
+            }
+            DynamicObject* attributesObject = scriptContext->GetLibrary()->CreateObject();
+            for (uint32 i = 0; i < count; i++)
+            {
+                // Plain data properties on a fresh ordinary object: no user
+                // code runs here.
+                Var value = JavascriptOperators::GetProperty(stagedObject, keyIds[i], scriptContext);
+                JavascriptOperators::SetProperty(attributesObject, attributesObject, keyIds[i], value, scriptContext, PropertyOperation_None);
+            }
+            *attributes = attributesObject;
+            return true;
+        }
+        catch (const JavascriptException& err)
+        {
+            *rejection = err.GetAndClear()->GetThrownObject(scriptContext);
+            AssertMsg(*rejection != nullptr, "TryGetImportAttributes: null error object");
+            if (*rejection == nullptr)
+            {
+                *rejection = scriptContext->GetLibrary()->CreateTypeError();
+            }
+            return false;
+        }
+    }
+
+    static Var ImportCallImpl(JavascriptFunction* function, Var specifier, Var options, ScriptContext* scriptContext)
+    {
         ModuleRecordBase *moduleRecordBase = nullptr;
         SourceTextModuleRecord *moduleRecord = nullptr;
 
@@ -11086,6 +11231,15 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
             }
 
             Throw::InternalError();
+        }
+
+        Var attributes = nullptr;
+        {
+            Var rejection = nullptr;
+            if (!TryGetImportAttributes(options, scriptContext, &attributes, &rejection))
+            {
+                return SourceTextModuleRecord::ResolveOrRejectDynamicImportPromise(false, rejection, scriptContext);
+            }
         }
 
         DWORD_PTR dwReferencingSourceContext = parentFuncBody->GetHostSourceContext();
@@ -11135,7 +11289,7 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
             SourceTextModuleRecord *referenceModuleRecord = parentFuncBody->GetScriptContext()->GetLibrary()->GetModuleRecord(parentFuncBody->GetModuleID());
             BEGIN_LEAVE_SCRIPT(scriptContext);
             BEGIN_TRANSLATE_TO_HRESULT(static_cast<ExceptionType>(ExceptionType_OutOfMemory | ExceptionType_StackOverflow));
-            hr = scriptContext->GetHostScriptContext()->FetchImportedModule(referenceModuleRecord, moduleName, &moduleRecordBase);
+            hr = scriptContext->GetHostScriptContext()->FetchImportedModule(referenceModuleRecord, moduleName, attributes, &moduleRecordBase);
             END_TRANSLATE_EXCEPTION_TO_HRESULT(hr);
             END_LEAVE_SCRIPT(scriptContext);
         }
@@ -11144,21 +11298,32 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
             Assert(dwReferencingSourceContext != Js::Constants::NoHostSourceContext);
             BEGIN_LEAVE_SCRIPT(scriptContext);
             BEGIN_TRANSLATE_TO_HRESULT(static_cast<ExceptionType>(ExceptionType_OutOfMemory | ExceptionType_StackOverflow));
-            hr = scriptContext->GetHostScriptContext()->FetchImportedModuleFromScript(dwReferencingSourceContext, moduleName, &moduleRecordBase);
+            hr = scriptContext->GetHostScriptContext()->FetchImportedModuleFromScript(dwReferencingSourceContext, moduleName, attributes, &moduleRecordBase);
             END_TRANSLATE_EXCEPTION_TO_HRESULT(hr);
             END_LEAVE_SCRIPT(scriptContext);
         }
 
         if (FAILED(hr))
         {
-            // We cannot just use the buffer in the specifier string - need to make a copy here.
-            size_t length = wcslen(moduleName);
-            char16* allocatedString = RecyclerNewArrayLeaf(scriptContext->GetRecycler(), char16, length + 1);
-            wmemcpy_s(allocatedString, length + 1, moduleName, length);
-            allocatedString[length] = _u('\0');
+            Js::JavascriptError *error = nullptr;
+            if (hr == E_NOTIMPL)
+            {
+                // The request carries import attributes but the host
+                // registered no attributes-capable callback.
+                error = scriptContext->GetLibrary()->CreateTypeError();
+                JavascriptError::SetErrorMessageProperties(error, hr, _u("import attributes are not supported by the host"), scriptContext);
+            }
+            else
+            {
+                // We cannot just use the buffer in the specifier string - need to make a copy here.
+                size_t length = wcslen(moduleName);
+                char16* allocatedString = RecyclerNewArrayLeaf(scriptContext->GetRecycler(), char16, length + 1);
+                wmemcpy_s(allocatedString, length + 1, moduleName, length);
+                allocatedString[length] = _u('\0');
 
-            Js::JavascriptError *error = scriptContext->GetLibrary()->CreateURIError();
-            JavascriptError::SetErrorMessageProperties(error, hr, allocatedString, scriptContext);
+                error = scriptContext->GetLibrary()->CreateURIError();
+                JavascriptError::SetErrorMessageProperties(error, hr, allocatedString, scriptContext);
+            }
             return SourceTextModuleRecord::ResolveOrRejectDynamicImportPromise(false, error, scriptContext);
         }
 
@@ -11174,7 +11339,22 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
         }
 
         return moduleRecord->PostProcessDynamicModuleImport();
+    }
+
+    Var JavascriptOperators::OP_ImportCall(_In_ JavascriptFunction *function, _In_ Var specifier, _In_ ScriptContext* scriptContext)
+    {
+        JIT_HELPER_REENTRANT_HEADER(ImportCall);
+        return ImportCallImpl(function, specifier, scriptContext->GetLibrary()->GetUndefined(), scriptContext);
         JIT_HELPER_END(ImportCall);
+    }
+
+    Var JavascriptOperators::OP_ImportCallWithOptions(_In_ JavascriptFunction *function, _In_ Var specifier, _In_ Var options, _In_ ScriptContext* scriptContext)
+    {
+        // Interpreter-only until B4 lowers this opcode for the JIT (see the
+        // S12 receipt): no JIT_HELPER registration, which would otherwise
+        // require a Backend helper entry. The macros expand empty without
+        // native codegen, so behavior here is identical either way.
+        return ImportCallImpl(function, specifier, options, scriptContext);
     }
 
     Var JavascriptOperators::OP_NewAwaitObject(ScriptContext* scriptContext)

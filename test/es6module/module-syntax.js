@@ -185,6 +185,41 @@ var tests = [
         }
     },
     {
+        name: "Valid import/export WithClause statements",
+        body: function () {
+            testModuleScript('import { foo } from "ValidExportStatements.js" with {};', 'Empty WithClause on named import', false);
+            testModuleScript('import "ValidExportStatements.js" with {};', 'Empty WithClause on side-effect import', false);
+            testModuleScript('import foo from "ValidExportStatements.js" with { kind: "js" };', 'WithClause on default import', false);
+            testModuleScript('import * as ns from "ValidExportStatements.js" with { a: "b", c: "d" };', 'WithClause with multiple entries on namespace import', false);
+            testModuleScript('import { foo } from "ValidExportStatements.js" with { "kind": "js", \'a-b\': "c" };', 'String-literal keys in WithClause', false);
+            testModuleScript('import { foo } from "ValidExportStatements.js" with { if: "x", class: "y", with: "z" };', 'Reserved words are allowed as attribute keys', false);
+            testModuleScript('import { foo } from "ValidExportStatements.js" with { kind: "js", };', 'Trailing comma in WithClause', false);
+            testModuleScript('import { foo } from "ValidExportStatements.js"\nwith {};', 'Line terminator before with keyword', false);
+            testModuleScript('export * from "ValidExportStatements.js" with {};', 'Empty WithClause on export star', false);
+            testModuleScript('export * from "ValidExportStatements.js" with { kind: "js" };', 'Non-empty WithClause on export star keeps the attributed request', false);
+            testModuleScript('import { inc, get } from "importattrs-star.js" with { kind: "js" }; var before = get(); assert.areEqual(before + 1, inc());', 'Consumer resolves a binding through an attributed export-star', false);
+            testModuleScript('import { inc, get } from "importattrs-star.js"; var before = get(); assert.areEqual(before + 1, inc());', 'Attributed export-star also serves a consumer without attributes', false);
+            testModuleScript('import { inc, get } from "importattrs-named.js" with { kind: "js" }; var before = get(); assert.areEqual(before + 1, inc());', 'Consumer resolves a binding through an attributed named re-export', false);            testModuleScript('export { foo } from "ValidExportStatements.js" with { kind: "js" };', 'WithClause on named re-export', false);
+            testModuleScript('export { foo } from "ValidExportStatements.js" with { }; import { foo as foo2 } from "ValidExportStatements.js" with { };', 'Repeated empty WithClause is not a duplicate request', false);
+            testModuleScript('import answer from "importattrs-fixture.json" with { type: "json" }; assert.areEqual(42, answer.answer); assert.areEqual(3, answer.list.length); assert.areEqual("b", answer.nested.a);', 'JSON module default export', false);
+            testModuleScript('import def from "importattrs-fixture.json" with { type: "json" }; assert.areEqual(Object.prototype, Object.getPrototypeOf(def)); assert.isTrue(Object.prototype.hasOwnProperty.call(def, "__proto__"));', 'JSON module keeps __proto__ as own data property', false);
+            testModuleScript('import * as ns from "importattrs-fixture.json" with { type: "json" }; assert.areEqual(42, ns.default.answer); assert.areEqual(1, Object.getOwnPropertyNames(ns).length);', 'JSON module namespace has only a default export', false);
+        }
+    },
+    {
+        name: "Syntax error WithClause statements",
+        body: function () {
+            testModuleScript('import { foo } from "ValidExportStatements.js" with { type: "js", type: "json" };', 'Duplicate attribute keys are an early error', true);
+            testModuleScript('import { foo } from "ValidExportStatements.js" with { "type": "x", \'typ\\u0065\': "y" };', 'Duplicate attribute keys after escape processing are an early error', true);
+            testModuleScript('import { foo } from "ValidExportStatements.js" with { type: 123 };', 'Attribute values must be string literals', true);
+            testModuleScript('import { foo } from "ValidExportStatements.js" with { type };', 'Attribute entries require a colon and a value', true);
+            testModuleScript('import { foo } from "ValidExportStatements.js" with { 123: "x" };', 'Attribute keys must be IdentifierName or string literals', true);
+            testModuleScript('import { foo } from "ValidExportStatements.js" with { type: "x" ', 'Missing closing brace in WithClause', true);
+            testModuleScript('export * from "ValidExportStatements.js" with { a: "1", a: "2" };', 'Duplicate attribute keys in export-from are an early error', true);
+            testModuleScript('assert.throws(function () { eval(\"import(\\"ValidExportStatements.js\\", \\"x\\", \\"y\\")\"); }, SyntaxError);', 'Syntax error for three import() arguments', false);
+        }
+    },
+    {
         name: "HTML comments do not parse in module code",
         body: function () {
             testModuleScript("<!--\n",     "HTML open comment does not parse in module code",  true);

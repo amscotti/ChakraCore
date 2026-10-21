@@ -203,6 +203,7 @@ if ((isTopLevel)) \
 
 DynamicLoadRecord::DynamicLoadRecord() : kind(DynamicLoadKind::Invalid), label(Js::Constants::NoByteCodeOffset), instance(Js::Constants::NoSlot) {}
 
+
 BOOL MayHaveSideEffectOnNode(ParseNode *pnode, ParseNode *pnodeSE, ByteCodeGenerator *byteCodeGenerator)
 {
     // Try to determine whether pnodeSE (SE = side effect) may kill the named var represented by pnode.
@@ -436,6 +437,30 @@ void EmitBinaryOpnds(ParseNode* pnode1, ParseNode* pnode2, ByteCodeGenerator* by
 bool IsExpressionStatement(ParseNode* stmt, const Js::ScriptContext *const scriptContext);
 void EmitInvoke(Js::RegSlot location, Js::RegSlot callObjLocation, Js::PropertyId propertyId, ByteCodeGenerator* byteCodeGenerator, FuncInfo* funcInfo);
 void EmitInvoke(Js::RegSlot location, Js::RegSlot callObjLocation, Js::PropertyId propertyId, ByteCodeGenerator* byteCodeGenerator, FuncInfo* funcInfo, Js::RegSlot arg1Location);
+
+// Emits an import() call. Single-argument form keeps the pre-existing
+// ImportCall opcode; the two-argument form (specifier plus options object)
+// uses ImportCallWithOptions (no-JIT only; B4 owns the JIT lowering, see
+// the S12 receipt).
+static void EmitImportCall(ParseNode *args, ParseNodeCall *callNode, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo)
+{
+    if (args->nop != knopList)
+    {
+        Emit(args, byteCodeGenerator, funcInfo, false);
+        funcInfo->ReleaseLoc(args);
+        funcInfo->AcquireLoc(callNode);
+        byteCodeGenerator->Writer()->Reg2(Js::OpCode::ImportCall, callNode->location, args->location);
+        return;
+    }
+    ParseNode *specifierNode = args->AsParseNodeBin()->pnode1;
+    ParseNode *optionsNode = args->AsParseNodeBin()->pnode2;
+    Emit(specifierNode, byteCodeGenerator, funcInfo, false);
+    Emit(optionsNode, byteCodeGenerator, funcInfo, false);
+    funcInfo->ReleaseLoc(optionsNode);
+    funcInfo->ReleaseLoc(specifierNode);
+    funcInfo->AcquireLoc(callNode);
+    byteCodeGenerator->Writer()->Reg3(Js::OpCode::ImportCallWithOptions, callNode->location, specifierNode->location, optionsNode->location);
+}
 
 static const Js::OpCode nopToOp[knopLim] =
 {
@@ -8550,11 +8575,9 @@ void EmitLoad(
         else if (pnodeCallLhs->pnodeTarget->nop == knopImport)
         {
             ParseNodePtr args = pnodeCallLhs->pnodeArgs;
-            Assert(CountArguments(args) == 2); // import() takes one argument
-            Emit(args, byteCodeGenerator, funcInfo, false);
-            funcInfo->ReleaseLoc(args);
-            funcInfo->AcquireLoc(pnodeCallLhs);
-            byteCodeGenerator->Writer()->Reg2(Js::OpCode::ImportCall, pnodeCallLhs->location, args->location);
+            // import() takes one argument plus an optional options argument.
+            Assert(CountArguments(args) == 2 || CountArguments(args) == 3);
+            EmitImportCall(args, pnodeCallLhs, byteCodeGenerator, funcInfo);
         }
         else
         {
@@ -13441,11 +13464,9 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
         else if (pnodeCall->pnodeTarget->nop == knopImport)
         {
             ParseNodePtr args = pnodeCall->pnodeArgs;
-            Assert(CountArguments(args) == 2); // import() takes one argument
-            Emit(args, byteCodeGenerator, funcInfo, false);
-            funcInfo->ReleaseLoc(args);
-            funcInfo->AcquireLoc(pnodeCall);
-            byteCodeGenerator->Writer()->Reg2(Js::OpCode::ImportCall, pnodeCall->location, args->location);
+            // import() takes one argument plus an optional options argument.
+            Assert(CountArguments(args) == 2 || CountArguments(args) == 3);
+            EmitImportCall(args, pnodeCall, byteCodeGenerator, funcInfo);
         }
         else if (pnodeCall->pnodeThisOverride != nullptr)
         {

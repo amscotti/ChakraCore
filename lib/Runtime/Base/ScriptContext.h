@@ -179,8 +179,15 @@ public:
     virtual HRESULT SetDispatchInvoke(Js::JavascriptMethod dispatchInvoke) = 0;
     virtual HRESULT EnqueuePromiseTask(Js::Var varTask) = 0;
 
-    virtual HRESULT FetchImportedModule(Js::ModuleRecordBase* referencingModule, LPCOLESTR specifier, Js::ModuleRecordBase** dependentModuleRecord) = 0;
-    virtual HRESULT FetchImportedModuleFromScript(DWORD_PTR dwReferencingSourceContext, LPCOLESTR specifier, Js::ModuleRecordBase** dependentModuleRecord) = 0;
+    // Fetches a dependent module. `attributes` is the engine-created
+    // attributes object (string -> string, possibly empty) for the module
+    // request; the host receives it as a JS object. Returns E_NOTIMPL when
+    // the request carries attributes but the host registered no
+    // attributes-capable callback, so callers can fail the load with a
+    // TypeError. A null attributes object means the legacy path (no
+    // attributes were recorded for the request).
+    virtual HRESULT FetchImportedModule(Js::ModuleRecordBase* referencingModule, LPCOLESTR specifier, Js::Var attributes, Js::ModuleRecordBase** dependentModuleRecord) = 0;
+    virtual HRESULT FetchImportedModuleFromScript(DWORD_PTR dwReferencingSourceContext, LPCOLESTR specifier, Js::Var attributes, Js::ModuleRecordBase** dependentModuleRecord) = 0;
     virtual HRESULT NotifyHostAboutModuleReady(Js::ModuleRecordBase* referencingModule, Js::Var exceptionVar) = 0;
     virtual HRESULT InitializeImportMeta(Js::ModuleRecordBase* referencingModule, Js::Var importMetaObject) = 0;
     virtual bool ReportModuleCompletion(Js::ModuleRecordBase* module, Js::Var exception) = 0;

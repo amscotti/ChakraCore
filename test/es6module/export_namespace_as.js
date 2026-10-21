@@ -128,6 +128,22 @@ const tests = [
                 assert.isUndefined(Boo.default);
             `);
         }
+    },
+    {
+        name : "Export star-as with attributes",
+        body() {
+            testRunner.LoadModule(`
+                import {ns} from "importattrs-star-as.js" with { kind: "js" };
+                var before = ns.get();
+                assert.areEqual(before + 1, ns.inc());
+                assert.areEqual(before + 1, ns.get());
+            `);
+            testRunner.LoadModule(`
+                import {ns} from "importattrs-star-as.js";
+                var before = ns.get();
+                assert.areEqual(before + 1, ns.inc());
+            `);
+        }
     }
 ];
 

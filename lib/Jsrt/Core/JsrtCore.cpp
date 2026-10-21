@@ -182,6 +182,12 @@ JsSetModuleHostInfo(
         case JsModuleHostInfo_FetchImportedModuleFromScriptCallback:
             currentContext->GetHostScriptContext()->SetFetchImportedModuleFromScriptCallback(reinterpret_cast<FetchImportedModuleFromScriptCallBack>(hostInfo));
             break;
+        case JsModuleHostInfo_FetchImportedModuleWithAttributesCallback:
+            currentContext->GetHostScriptContext()->SetFetchImportedModuleWithAttributesCallback(reinterpret_cast<FetchImportedModuleWithAttributesCallBack>(hostInfo));
+            break;
+        case JsModuleHostInfo_FetchImportedModuleFromScriptWithAttributesCallback:
+            currentContext->GetHostScriptContext()->SetFetchImportedModuleFromScriptWithAttributesCallback(reinterpret_cast<FetchImportedModuleFromScriptWithAttributesCallBack>(hostInfo));
+            break;
         case JsModuleHostInfo_NotifyModuleReadyCallback:
             currentContext->GetHostScriptContext()->SetNotifyModuleReadyCallback(reinterpret_cast<NotifyModuleReadyCallback>(hostInfo));
             break;
@@ -234,6 +240,12 @@ JsGetModuleHostInfo(
             break;
         case JsModuleHostInfo_FetchImportedModuleFromScriptCallback:
             *hostInfo = reinterpret_cast<void*>(currentContext->GetHostScriptContext()->GetFetchImportedModuleFromScriptCallback());
+            break;
+        case JsModuleHostInfo_FetchImportedModuleWithAttributesCallback:
+            *hostInfo = reinterpret_cast<void*>(currentContext->GetHostScriptContext()->GetFetchImportedModuleWithAttributesCallback());
+            break;
+        case JsModuleHostInfo_FetchImportedModuleFromScriptWithAttributesCallback:
+            *hostInfo = reinterpret_cast<void*>(currentContext->GetHostScriptContext()->GetFetchImportedModuleFromScriptWithAttributesCallback());
             break;
         case JsModuleHostInfo_NotifyModuleReadyCallback:
             *hostInfo = reinterpret_cast<void*>(currentContext->GetHostScriptContext()->GetNotifyModuleReadyCallback());

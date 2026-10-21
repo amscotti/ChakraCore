@@ -44,18 +44,30 @@ public:
     private:
         JsModuleRecord moduleRecord;
         JsValueRef specifier;
-        std::string* fullPath;
+        std::string* filePath;
+        std::string* mapKey;
+        bool isJsonModule;
+        bool directParse;
 
-        ModuleMessage(JsModuleRecord module, JsValueRef specifier, std::string* fullPathPtr);
+        ModuleMessage(JsModuleRecord module, JsValueRef specifier, std::string* filePathPtr, std::string* mapKeyPtr, bool isJson, bool direct);
 
     public:
         ~ModuleMessage();
 
         virtual HRESULT Call(LPCSTR fileName) override;
 
-        static ModuleMessage* Create(JsModuleRecord module, JsValueRef specifier, std::string* fullPath = nullptr)
+        static ModuleMessage* Create(JsModuleRecord module, JsValueRef specifier, std::string* fullPath = nullptr, bool isJson = false)
         {
-            return new ModuleMessage(module, specifier, fullPath);
+            return new ModuleMessage(module, specifier, fullPath, fullPath, isJson, false);
+        }
+
+        // Fetch messages for requests carrying import attributes: the record
+        // is registered under `mapKey` (which embeds the attributes), so the
+        // parse step must target the stored record directly instead of
+        // re-deriving it from the file path.
+        static ModuleMessage* CreateWithAttributes(JsModuleRecord module, JsValueRef specifier, std::string* filePath, std::string* mapKey, bool isJson)
+        {
+            return new ModuleMessage(module, specifier, filePath, mapKey, isJson, true);
         }
 
     };
@@ -65,6 +77,8 @@ public:
 
     static JsErrorCode FetchImportedModule(_In_ JsModuleRecord referencingModule, _In_ JsValueRef specifier, _Outptr_result_maybenull_ JsModuleRecord* dependentModuleRecord);
     static JsErrorCode FetchImportedModuleFromScript(_In_ DWORD_PTR dwReferencingSourceContext, _In_ JsValueRef specifier, _Outptr_result_maybenull_ JsModuleRecord* dependentModuleRecord);
+    static JsErrorCode FetchImportedModuleWithAttributes(_In_ JsModuleRecord referencingModule, _In_ JsValueRef specifier, _In_ JsValueRef attributes, _Outptr_result_maybenull_ JsModuleRecord* dependentModuleRecord);
+    static JsErrorCode FetchImportedModuleFromScriptWithAttributes(_In_ JsSourceContext dwReferencingSourceContext, _In_ JsValueRef specifier, _In_ JsValueRef attributes, _Outptr_result_maybenull_ JsModuleRecord* dependentModuleRecord);
     static JsErrorCode NotifyModuleReadyCallback(_In_opt_ JsModuleRecord referencingModule, _In_opt_ JsValueRef exceptionVar);
     static JsErrorCode ReportModuleCompletionCallback(JsModuleRecord module, JsValueRef exception);
     static JsErrorCode CALLBACK InitializeImportMetaCallback(_In_opt_ JsModuleRecord referencingModule, _In_opt_ JsValueRef importMetaVar);
@@ -150,6 +164,7 @@ private:
     static JsValueRef CALLBACK Deserialize(JsValueRef callee, bool isConstructCall, JsValueRef *arguments, unsigned short argumentCount, void *callbackState);
 
     static JsErrorCode FetchImportedModuleHelper(JsModuleRecord referencingModule, JsValueRef specifier, _Out_ JsModuleRecord* dependentModuleRecord, LPCSTR refdir = nullptr);
+    static JsErrorCode FetchImportedModuleHelperWithAttributes(JsModuleRecord referencingModule, JsValueRef specifier, JsValueRef attributes, _Out_ JsModuleRecord* dependentModuleRecord, LPCSTR refdir = nullptr);
 
     static MessageQueue *messageQueue;
     static DWORD_PTR sourceContext;

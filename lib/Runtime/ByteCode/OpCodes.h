@@ -938,6 +938,13 @@ MACRO_EXTEND_WMS(       LdPrivateBrand, ElementP,    OpSideEffect|OpOpndHasImpli
 MACRO_EXTEND_WMS(       LdPrivateDynamic, Reg3,      OpSideEffect|OpOpndHasImplicitCall|OpPostOpDbgBailOut)
 MACRO_EXTEND_WMS(       StPrivateDynamic, Reg4,      OpSideEffect|OpOpndHasImplicitCall|OpPostOpDbgBailOut)
 
+// S12 import attributes: appended at the end of the extended list so that no
+// existing opcode value changes (checked-in built-in bytecode stays valid).
+// No-JIT only for now: Lower.cpp has no case for this opcode and hits its
+// unlowered-opcode Fatal under JIT, so B4 must add the lowering (mirroring
+// ImportCall) before any JIT-configuration claim for import() with options.
+MACRO_EXTEND_WMS(       ImportCallWithOptions, Reg3,          OpSideEffect|OpHasImplicitCall)
+
 #undef MACRO_WMS_PROFILED
 #undef MACRO_WMS_PROFILED2
 #undef MACRO_WMS_PROFILED_OP

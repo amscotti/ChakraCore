@@ -107,6 +107,7 @@ bool ChakraRTInterface::LoadChakraDll(ArgInfo* argInfo, HINSTANCE *outLibrary)
     m_jsApiHooks.pfJsrtBooleanToBool = (JsAPIHooks::JsrtBooleanToBoolPtr)GetChakraCoreSymbol(library, "JsBooleanToBool");
     m_jsApiHooks.pfJsrtGetProperty = (JsAPIHooks::JsrtGetPropertyPtr)GetChakraCoreSymbol(library, "JsGetProperty");
     m_jsApiHooks.pfJsrtHasProperty = (JsAPIHooks::JsrtHasPropertyPtr)GetChakraCoreSymbol(library, "JsHasProperty");
+    m_jsApiHooks.pfJsrtGetOwnPropertyNames = (JsAPIHooks::JsrtGetOwnPropertyNamesPtr)GetChakraCoreSymbol(library, "JsGetOwnPropertyNames");
     m_jsApiHooks.pfJsrtCallFunction = (JsAPIHooks::JsrtCallFunctionPtr)GetChakraCoreSymbol(library, "JsCallFunction");
     m_jsApiHooks.pfJsrtNumberToDouble = (JsAPIHooks::JsrtNumberToDoublePtr)GetChakraCoreSymbol(library, "JsNumberToDouble");
     m_jsApiHooks.pfJsrtNumberToInt = (JsAPIHooks::JsrtNumberToIntPtr)GetChakraCoreSymbol(library, "JsNumberToInt");

@@ -8101,6 +8101,11 @@ skipThunk:
         return JavascriptOperators::OP_ImportCall(function, specifier, scriptContext);
     }
 
+    Var InterpreterStackFrame::OP_ImportCallWithOptions(Var specifier, Var options, ScriptContext *scriptContext)
+    {
+        return JavascriptOperators::OP_ImportCallWithOptions(function, specifier, options, scriptContext);
+    }
+
     void InterpreterStackFrame::ValidateRegValue(Var value, bool allowStackVar, bool allowStackVarOnDisabledStackNestedFunc) const
     {
 #if DBG
