@@ -835,6 +835,7 @@ private:
         bool isEvalRestricted;
         bool evalInClassFieldInitializer;
         bool evalInDerivedFieldConstructor;
+        bool evalInMethod;
         bool evalInParamScope;
         bool evalInArrowParamScope;
         bool evalCallerParameterArguments;
@@ -947,6 +948,10 @@ private:
         bool IsEvalInClassFieldInitializer() const { return this->evalInClassFieldInitializer; }
         void SetEvalInDerivedFieldConstructor(bool set) { this->evalInDerivedFieldConstructor = set; }
         bool IsEvalInDerivedFieldConstructor() const { return this->evalInDerivedFieldConstructor; }
+        // PerformEval inMethod: the direct eval caller has a [[HomeObject]], so
+        // eval code may contain SuperProperty.
+        void SetEvalInMethod(bool set) { this->evalInMethod = set; }
+        bool IsEvalInMethod() const { return this->evalInMethod; }
         void SetEvalInParamScope(bool set) { this->evalInParamScope = set; }
         bool IsEvalInParamScope() const { return this->evalInParamScope; }
         void SetEvalInArrowParamScope(bool set) { this->evalInArrowParamScope = set; }

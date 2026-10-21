@@ -442,6 +442,7 @@ ParseNodeFnc::ParseNodeFnc(OpCode nop, charcount_t ichMin, charcount_t ichLim)
     this->isAnnexBVarExtension = false;
     this->nestedFuncEscapes = false;
     this->hasSuperCallInConstructorLambda = false;
+    this->hasHomeObjectContext = false;
     this->isClassFieldInitializerContext = false;
     this->isStaticClassFieldInitializer = false;
     this->pnodeFieldHome = nullptr;

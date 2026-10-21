@@ -391,6 +391,24 @@
   </test>
   <test>
     <default>
+      <files>eval-super-early.js</files>
+      <compile-flags>-args summary -endargs</compile-flags>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>eval-super-early.js</files>
+      <compile-flags>-force:deferparse -args summary -endargs</compile-flags>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>eval-super-early.js</files>
+      <compile-flags>-noDeferParse -args summary -endargs</compile-flags>
+    </default>
+  </test>
+  <test>
+    <default>
       <files>eval-arguments-declarations.js</files>
       <compile-flags>-args summary -endargs</compile-flags>
     </default>
