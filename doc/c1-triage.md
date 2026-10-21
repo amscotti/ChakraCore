@@ -960,14 +960,13 @@ Unresolved after C1:
   engine/host change, prerequisite for any C4 phase claim. The 12
   resolution-phase suspects are dispositioned in §3 as true wrong-phase
   passes retained in the recorded baseline by design.
-- Rerun of the fixture-cache-affected subsets (§3: 30 directories, 888
-  recorded scenarios / 478 edition-selected exposed, 2 flips measured at
-  `--jobs=1`). The cache itself is fixed in `tools/test262/harness.js`,
-  but the §2 baseline was recorded pre-fix: disposition is to rerun those
-  subsets with the fixed harness before any C4 certification, and before
-  treating baseline counts for those directories as exact. The same rerun
-  should use the per-agent temp isolation now in `harness.js`
-  (§3 update) so the shared-temp agent race cannot reintroduce flips.
+- Fixture-cache-affected subsets rerun: completed on 2026-10-21 with the
+  fixed harness and per-agent temp isolation over the exact 30 directories
+  (2,365 scenarios): **1,367 passed / 998 failed**, **0 pass→fail / 102
+  fail→pass** against the old precombined result. See
+  [c4-fixture-rerun.md](c4-fixture-rerun.md). This removes the pre-fix
+  baseline ambiguity for these directories but does **not** close the
+  host-negative-phase gap or certify C4.
 - Enabled-flag test262 runs for `ESBigInt`, `ESSharedArrayBuffer`,
   `ES6RegExSymbols`, `ES6RegExPrototypeProperties` (S2/S6/S7) — measured
   2026-10-15 in [c2-flag-audits.md](c2-flag-audits.md); the S7 follow-up

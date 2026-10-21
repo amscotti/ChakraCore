@@ -401,6 +401,9 @@ SharedArrayBuffer plus ES2020 non-shared Atomics (focused S6 574/982;
 112 fail→pass / 0 pass→fail; debug index-detach abort fixed), and S6b adds
 `Atomics.pause` plus single-thread `waitAsync` (80/124; 0 pass→fail) while
 SAB/Atomics remain off by default.
-S3 Unicode/ICU, S6 default enablement, B4 Linux/JIT/WASM and C4 host-negative
+The 30-directory fixture-cache subset has also been rerun with the fixed
+harness: **1,367/998 of 2,365**, 0 pass→fail and 102 fail→pass versus the old
+precombined result ([c4-fixture-rerun.md](c4-fixture-rerun.md)). S3
+Unicode/ICU, S6 default enablement, B4 Linux/JIT/WASM and C4 host-negative
 qualification remain decision- or hardware-blocked; no JIT, Linux, native-x64,
 TTD or multi-agent claim is made.

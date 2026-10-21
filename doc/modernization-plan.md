@@ -393,8 +393,12 @@ open as shortlist prerequisites, not C1 blockers. A post-record review
 also found and fixed an eshost fixture-cache collision in the harness
 wrapper (2 measured scenario flips at `--jobs=1` over the affected
 directories; 888 recorded scenarios exposed); the baseline above was
-recorded pre-fix, so rerunning the affected subsets is owed before any C4
-certification ([c1-triage.md](c1-triage.md) §3/§9).
+recorded pre-fix. The exact 30-directory subset has now been rerun with the
+fixed harness: **1,367 passed / 998 failed of 2,365**, with **0 pass→fail**
+and **102 fail→pass** against the old precombined result. This is pre-negative-
+phase evidence, not a C4 certification
+([c4-fixture-rerun.md](c4-fixture-rerun.md);
+[c1-triage.md](c1-triage.md) §3/§9).
 
 #### C2 — Deliver bounded compatibility batches
 
