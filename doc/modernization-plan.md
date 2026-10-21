@@ -10,8 +10,12 @@
 > before any full result is certified. **C2 is in progress** — batches
 > S4, S5, S10, S11, S7-matchAll, the five S9 sub-batches (named
 > groups, `d` flag/indices, duplicate named groups, lookbehind,
-> ES2025 modifiers), S1 public instance fields, S2 arithmetic, S8
-> resizable ArrayBuffer/transfer, S13 WeakRef, S14 P1/P3/P6, and the
+> ES2025 modifiers), the complete S1 class-elements surface (fields,
+> private methods/accessors incl. async/generator and statics, computed
+> names, `super` in initializers, static blocks, direct-eval/computed-key
+> private visibility), S2 BigInt, S8 resizable ArrayBuffer/transfer +
+> TypedArray tracking + bounded Float16 slice, S13 WeakRef +
+> FinalizationRegistry, S14 P1–P7, and the
 > S14 block-scope and statement-level early-error clusters are closed on
 > Mac no-JIT (JIT claims gated on B4), receipts in [c2-s4.md](c2-s4.md),
 > [c2-s5.md](c2-s5.md), [c2-s10.md](c2-s10.md),
@@ -53,7 +57,7 @@ handling have been validated before its results are used as a completion gate.
 | B6 | Windows feasibility and rollout; later target extensions | Stable build contracts | Separate expansion |
 | Z1 | One useful mixed C++/Zig unit behind a tested C ABI | B3; B4 if the unit ships on Linux | Optional pilot |
 | C1 | Qualified ES2025 test policy and triaged failures | Stable Mac build at B3 | Recorded (CONDITIONAL) |
-| C2 | Bounded compatibility batches and partial releases | C1; B4 before JIT-wide enablement | In progress (S4/S5/S10/S11/S7-matchAll/S9 named-groups + d-flag + duplicate named groups + lookbehind + ES2025 modifiers; S1 class elements complete: public/private instance+static fields, private methods/accessors incl. async/generator and statics, computed field names, `super` in field initializers, static blocks (integrated elements corpus 5,854/5,897; direct-eval/eval-super residuals remain); S2 BigInt: operators/literals/asIntN-asUintN, collections, DataView, BigInt64Array; S8 resizable ArrayBuffer + TypedArray tracking + Float16; S13 symbol keys, WeakRef, FinalizationRegistry; S14 P1–P7 — all closed on Mac no-JIT; JIT claims gated on B4) |
+| C2 | Bounded compatibility batches and partial releases | C1; B4 before JIT-wide enablement | In progress (S4/S5/S10/S11/S7-matchAll/S9 named-groups + d-flag + duplicate named groups + lookbehind + ES2025 modifiers; S1 class elements complete: public/private instance+static fields, private methods/accessors incl. async/generator and statics, computed field names, `super` in field initializers, static blocks (integrated elements corpus 5,854/5,897; direct-eval/eval-super residuals remain); S2 BigInt: operators/literals/asIntN-asUintN, collections, DataView, BigInt64Array; S8 resizable ArrayBuffer + TypedArray tracking + bounded Float16 slice (DataView/Math.f16round; Float16Array pending); S13 symbol keys, WeakRef, FinalizationRegistry; S14 P1–P7 — all closed on Mac no-JIT; JIT claims gated on B4) |
 | C3 | Larger runtime/object-model feature projects | C1 and their feature prerequisites | Separate projects |
 | C4 | Verified full ES2025 core-language result | Required C2/C3 work and qualified runner | Long-term objective |
 
