@@ -394,7 +394,7 @@ also found and fixed an eshost fixture-cache collision in the harness
 wrapper (2 measured scenario flips at `--jobs=1` over the affected
 directories; 888 recorded scenarios exposed); the baseline above was
 recorded pre-fix, so rerunning the affected subsets is owed before any C4
-certification ([c1-triage.md](c1-triage.md) §3/§8).
+certification ([c1-triage.md](c1-triage.md) §3/§9).
 
 #### C2 — Deliver bounded compatibility batches
 
@@ -594,10 +594,11 @@ Decision/rollback points:
 - [ ] C4: Published qualified ES2025 result on the claimed default configurations.
 
 **Latest integration checkpoint (2026-10-20):** main is clean at the
-**2013/0 test** and **2065/0 debug-static** gates (re-verified after
-every merge in the waves below; counts are single-sourced in
+**2016/0 test** and **2068/0 debug-static** gates (re-verified after
+every merge and repair below; counts are single-sourced in
 `tools/build/gate_counts.json` — Float16Array's new test file moved
-2012/2064 → 2013/2065).
+2012/2064 → 2013/2065, repair-loop `-noDeferParse` rlexe variants
+then moved 2013/2065 → 2016/2068).
 Merged lanes: S1 public/private instance+static fields and private methods/accessors, S2 arithmetic + BigInt64Array/Uint64Array + collections/
 DataView, S8 resizable ArrayBuffer/transfer + TypedArray tracking, S13
 WeakRef + FinalizationRegistry, and S14 P1/P2/P3/P4/P5/P6/P7
@@ -660,7 +661,19 @@ qualification work (full baseline rerun, host-reported negative
 phase). Tracked eval residuals: P4 body eval with non-simple
 parameters; P2 hidden outer lexical and JSC/Node delete difference.
 S3 (Unicode data decision), S6 default (product/security decision),
-B4 and C4 remain decision- or gate-blocked.
+B4 and C4 remain decision- or gate-blocked. A repair loop then closed
+the accumulated alignment debt on Mac no-JIT: nested-plain-function
+`super` inside eval and bare `await` in static initializers/blocks are
+now early errors matching Node/spec in all parse modes, the
+debug-static archive-member pin matches the S13 translation units
+(526; full `check -Dprofile=debug-static` green again), every S1 test
+file runs in all three parse modes under the gates, and the dead
+`m_inStaticClassFieldInitializer` parser state was removed and later
+revived with its await-region consumer. Kill-switch policy (recorded
+decision): completed ES2025-required surfaces ship without feature
+flags, matching the flag-cleanup direction — backout is by revert,
+not by flag; surviving kill switches are the pre-existing per-feature
+ones documented in their receipts (S4/S5).
 
 **C2 batch status:** S4, S5, all of S10 (the copy-by-change half and
 the Set-methods half), all of S11, S7, the five S9 sub-batches

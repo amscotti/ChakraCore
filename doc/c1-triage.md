@@ -306,7 +306,7 @@ shows **0 flips**, controls stay 18/18 and the §5 scoped regexp run still
 reproduces 456/24 *(observed)*. The fix changes nothing in `analyze.py`
 (which operates on the recorded data; its rerun is byte-identical), and
 the §2 baseline was recorded pre-fix, so rerunning the affected subsets is
-still owed (§8). At the default `--jobs=8` the same alone-vs-combined
+still owed (§9). At the default `--jobs=8` the same alone-vs-combined
 comparison flips ~79 scenarios with unstable membership before *and*
 after the cache fix, and jobs=8 alone totals (1,214/1,207 passed) sit
 below the jobs=1 total (1,267) *(observed)*: that instability is not the
@@ -853,7 +853,7 @@ asserted the old non-conforming block `var`/`let` behavior were updated
 deliberately. Gates moved 1975/2027 → 1976/2028. No bytecode change; B4
 still owns JIT-configuration claims.)*
 
-## 6. C2 integration status (2026-10-20)
+## 7. C2 integration status (2026-10-20)
 
 | Batch | Status | Integrated evidence | Remaining |
 |---|---|---|---|
@@ -884,8 +884,9 @@ still owns JIT-configuration claims.)*
 | S14 P2 | Landed `526931bc5` | 192/0; 157/0; controls preserved | hidden outer lexical; JSC/Node delete difference; JIT |
 | S14 P5 | Landed `8b5f28c06` | 50/50; broad 50/0; wider 65/0 non-import | eval/function-expression; proxy descriptor; JIT |
 
-Full gates at this checkpoint: **2013/0 test**, **2065/0 debug-static**
-(single-sourced in `tools/build/gate_counts.json`). Integrated
+Full gates at this checkpoint: **2016/0 test**, **2068/0 debug-static**
+(single-sourced in `tools/build/gate_counts.json`; repair-loop
+`-noDeferParse` rlexe variants moved 2013/2065 → 2016/2068). Integrated
 class-elements corpus re-runs 2026-10-20: wave-2
 (`out/test262-c2-s1-wave2`) **5,854/5,897**, 3,865 f→p / 0 p→f vs
 2026-10-19; wave-3 (`out/test262-c2-wave3`, after the S1-tail lane)
@@ -899,7 +900,7 @@ residuals, and C4 qualification (full baseline rerun,
 host-reported negative phase). P5 residual: eval/function-expression
 reference paths and pre-existing proxy descriptor duplication.
 
-## 7. Separate inventories
+## 8. Separate inventories
 
 **Engine defects on existing features** — the 3,822-failure defect bucket
 and S14; includes the 327 executed parse negatives and failing negatives
@@ -936,7 +937,7 @@ stage-≥3 proposals itemized with sources in `edition-policy.json`. None
 of these block C2 batches; `Temporal` and decorators are plan-level
 stretch scope, not C4 debt.
 
-## 8. Reforecast and open items
+## 9. Reforecast and open items
 
 C1's evidence supports plan §4's shape with one sharpening: the edition
 debt is **19,648 scenario failures**, of which class elements (S1) and
