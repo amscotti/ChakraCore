@@ -819,9 +819,13 @@ pub fn build(b: *std.Build) void {
     // Negative controls: each check script's --self-test proves its
     // gates CAN fail (doctored logs rejected, tampered victims fail).
     // Hermetic (no install dependency, no profile dependence), so every
-    // profile registers it. Run `zig build check-selftest`.
+    // profile registers it. Run `zig build check-selftest`. The Linux
+    // gate scripts are included here too: they are equally hermetic, and
+    // running them on Mac keeps the parked B4 gate logic from rotting
+    // (linux.zig registers the same list for Linux targets). Wired into
+    // every profile's `check` below so the merge gates exercise them.
     const selftest_top = b.step("check-selftest", "Negative controls for every check gate (not part of the default build)");
-    for ([_][]const u8{ "check_regression.py", "check_native.py", "check_smoke.py", "check_metadata.py" }) |script| {
+    for ([_][]const u8{ "check_regression.py", "check_native.py", "check_smoke.py", "check_metadata.py", "check_regression_linux.py", "check_smoke_linux.py", "check_metadata_linux.py" }) |script| {
         const st = b.addSystemCommand(&.{python});
         st.addFileArg(b.path(b.fmt("tools/build/{s}", .{script})));
         st.addArg("--self-test");
@@ -898,6 +902,7 @@ pub fn build(b: *std.Build) void {
         rel_check_top.dependOn(&rel_smoke.step);
         rel_check_top.dependOn(&rel_native.step);
         rel_check_top.dependOn(&rel_metadata.step);
+        rel_check_top.dependOn(selftest_top);
 
         // No regression/bytecode legs: the legacy Release check has
         // neither (test/CMakeLists.txt:23-45), so neither does this
@@ -1011,6 +1016,7 @@ pub fn build(b: *std.Build) void {
         dbg_check_top.dependOn(&dbg_native.step);
         dbg_check_top.dependOn(&dbg_smoke.step);
         dbg_check_top.dependOn(&dbg_metadata.step);
+        dbg_check_top.dependOn(selftest_top);
         return;
     }
 
@@ -1108,4 +1114,5 @@ pub fn build(b: *std.Build) void {
     check_top.dependOn(&native.step);
     check_top.dependOn(&smoke.step);
     check_top.dependOn(&metadata.step);
+    check_top.dependOn(selftest_top);
 }
