@@ -10,8 +10,70 @@ namespace Js
 {
 
     class WaiterList;
+    class SharedArrayBuffer;
+    class JavascriptSharedArrayBuffer;
+    class JavascriptPromiseCapability;
+    class AtomicsAsyncWaiter;
     typedef JsUtil::List<DWORD_PTR, HeapAllocator> SharableAgents;
     typedef JsUtil::BaseDictionary<uint, WaiterList *, HeapAllocator> IndexToWaitersMap;
+
+    // One pending Atomics.waitAsync registration. Allocation domain: Recycler
+    // (RecyclerNew, normal heap). Owner: the JavascriptSharedArrayBuffer that
+    // roots it through asyncWaiters. The native registration node (below) is
+    // the only token the SAB finalizer may touch; it never dereferences this
+    // record, because an unmarked wrapper is not scanned and its record can be
+    // swept before the wrapper's finalizer runs.
+    class AtomicsAsyncWaiter : public FinalizableObject
+    {
+    public:
+        AtomicsAsyncWaiter(JavascriptSharedArrayBuffer* buffer, JavascriptPromiseCapability* capability, ScriptContext* scriptContext)
+            : buffer(buffer), capability(capability), scriptContext(scriptContext),
+              nextWrapperWaiter(nullptr), settled(false)
+        {
+        }
+
+        JavascriptSharedArrayBuffer* GetBuffer() const { return buffer; }
+        JavascriptPromiseCapability* GetCapability() const { return capability; }
+        ScriptContext* GetScriptContext() const { return scriptContext; }
+
+        AtomicsAsyncWaiter* GetNextWrapperWaiter() const { return nextWrapperWaiter; }
+        void SetNextWrapperWaiter(AtomicsAsyncWaiter* next) { nextWrapperWaiter = next; }
+
+        bool IsSettled() const { return settled; }
+
+        // Resolve the promise with "ok" and unlink from the owner/waiter list.
+        void ResolveOk();
+        // Mark a woken waiter whose promise cannot be resolved on this thread
+        // (multi-agent; unsupported in this slice) without touching the owner
+        // wrapper from the notifying thread.
+        void Abandon();
+
+        virtual void Finalize(bool isShutdown) override {}
+        virtual void Dispose(bool isShutdown) override {}
+        virtual void Mark(Recycler* recycler) override
+        {
+            AssertMsg(false, "AtomicsAsyncWaiter is allocated in the conservatively scanned normal heap");
+        }
+
+    private:
+        Field(JavascriptSharedArrayBuffer*) buffer;
+        Field(JavascriptPromiseCapability*) capability;
+        Field(AtomicsAsyncWaiter*) nextWrapperWaiter;
+        ScriptContext* scriptContext;
+        bool settled;
+    };
+
+    // Native token owned by the wrapper and stored in the SharedContents waiter
+    // list. HeapAllocator-owned; the wrapper's finalizer deletes it without
+    // dereferencing the (possibly already swept) AtomicsAsyncWaiter record.
+    struct AtomicsAsyncWaiterRegistration
+    {
+        AtomicsAsyncWaiter* record;
+        WaiterList* waiterList;
+        AtomicsAsyncWaiterRegistration* nextWrapper;
+        AtomicsAsyncWaiterRegistration* nextAwoken;
+        bool linked;
+    };
 
     class SharedContents
     {
@@ -104,6 +166,7 @@ namespace Js
         static int GetByteLengthOffset() { Assert(false); return 0; }
         static int GetBufferOffset() { Assert(false); return 0; }
         static int GetSharedContentsOffset() { return offsetof(SharedArrayBuffer, sharedContents); }
+
         virtual bool IsArrayBuffer() override { return false; }
         virtual bool IsSharedArrayBuffer() override { return true; }
         virtual ArrayBuffer * GetAsArrayBuffer() { return nullptr; }
@@ -152,10 +215,84 @@ namespace Js
         virtual void Dispose(bool isShutdown) override;
         virtual void Finalize(bool isShutdown) override;
 
+        // Async waiters registered through this wrapper. The list is rooted here
+        // (the wrapper's finalizable-heap object is conservatively scanned) so a
+        // pending promise and its capability survive until notify or finalize.
+        // SharedContents waiter lists store native registration tokens, not
+        // owning references.
+        AtomicsAsyncWaiterRegistration* AddAsyncWaiter(AtomicsAsyncWaiter* waiter)
+        {
+            Assert(waiter != nullptr);
+            AtomicsAsyncWaiterRegistration* registration = HeapNew(AtomicsAsyncWaiterRegistration);
+            registration->record = waiter;
+            registration->waiterList = nullptr; // set by WaiterList::AddAsyncWaiter
+            registration->nextWrapper = asyncRegistrations;
+            registration->nextAwoken = nullptr;
+            registration->linked = false;
+            asyncRegistrations = registration;
+
+            waiter->SetNextWrapperWaiter(asyncWaiters);
+            asyncWaiters = waiter;
+            return registration;
+        }
+
+        void RemoveAsyncWaiter(AtomicsAsyncWaiter* waiter)
+        {
+            AtomicsAsyncWaiter* current = asyncWaiters;
+            AtomicsAsyncWaiter* previous = nullptr;
+            while (current != nullptr)
+            {
+                if (current == waiter)
+                {
+                    if (previous == nullptr)
+                    {
+                        asyncWaiters = current->GetNextWrapperWaiter();
+                    }
+                    else
+                    {
+                        previous->SetNextWrapperWaiter(current->GetNextWrapperWaiter());
+                    }
+                    break;
+                }
+                previous = current;
+                current = current->GetNextWrapperWaiter();
+            }
+
+            AtomicsAsyncWaiterRegistration* registration = asyncRegistrations;
+            AtomicsAsyncWaiterRegistration* previousRegistration = nullptr;
+            while (registration != nullptr)
+            {
+                if (registration->record == waiter)
+                {
+                    if (previousRegistration == nullptr)
+                    {
+                        asyncRegistrations = registration->nextWrapper;
+                    }
+                    else
+                    {
+                        previousRegistration->nextWrapper = registration->nextWrapper;
+                    }
+                    HeapDelete(registration);
+                    return;
+                }
+                previousRegistration = registration;
+                registration = registration->nextWrapper;
+            }
+            Assert(false);
+        }
+
+        // Finalizer path: unlink every native registration from its shared
+        // waiter list and release the token. Never dereferences the GC record.
+        void CancelAsyncWaiters();
+
     protected:
         JavascriptSharedArrayBuffer(DynamicType * type);
         JavascriptSharedArrayBuffer(SharedContents *sharedContents, DynamicType * type);
 
+    private:
+        // Root for Atomics.waitAsync records registered through this wrapper.
+        Field(AtomicsAsyncWaiter*) asyncWaiters;
+        AtomicsAsyncWaiterRegistration* asyncRegistrations;
     };
 
 #ifdef ENABLE_WASM_THREADS
@@ -193,12 +330,14 @@ namespace Js
     struct AgentOfBuffer
     {
     public:
-        AgentOfBuffer() :identity(NULL), event(NULL) {}
-        AgentOfBuffer(DWORD_PTR agent, HANDLE e) :identity(agent), event(e) {}
+        AgentOfBuffer() :identity(NULL), event(NULL), asyncRegistration(nullptr) {}
+        AgentOfBuffer(DWORD_PTR agent, HANDLE e) :identity(agent), event(e), asyncRegistration(nullptr) {}
+        AgentOfBuffer(AtomicsAsyncWaiterRegistration* registration) :identity(NULL), event(NULL), asyncRegistration(registration) {}
         static bool AgentCanSuspend(ScriptContext *scriptContext);
 
         DWORD_PTR identity;
         HANDLE event;
+        AtomicsAsyncWaiterRegistration* asyncRegistration; // non-owning; owner is JavascriptSharedArrayBuffer
     };
 
     typedef JsUtil::List<AgentOfBuffer, HeapAllocator> Waiters;
@@ -211,7 +350,14 @@ namespace Js
 
         bool _Requires_lock_held_(csForAccess.cs) AddAndSuspendWaiter(DWORD_PTR waiter, uint32 timeout);
         void RemoveWaiter(DWORD_PTR waiter);
-        uint32 RemoveAndWakeWaiters(int32 count);
+        // Notify pops up to `count` same-ScriptContext entries. Async entries
+        // are linked into *asyncAwoken through their nextAwoken field (no
+        // allocation while the critical section is held); their promises are
+        // resolved by the caller after the lock is released. Async waiters
+        // registered by another ScriptContext are left in place.
+        uint32 RemoveAndWakeWaiters(int32 count, ScriptContext* context, AtomicsAsyncWaiterRegistration** asyncAwoken = nullptr);
+        void AddAsyncWaiter(AtomicsAsyncWaiterRegistration* registration);
+        void RemoveAsyncWaiter(AtomicsAsyncWaiterRegistration* registration);
 
         CriticalSection * GetCriticalSectionForAccess() { return &csForAccess; }
 

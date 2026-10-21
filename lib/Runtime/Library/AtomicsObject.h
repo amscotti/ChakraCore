@@ -22,9 +22,11 @@ namespace Js
             static FunctionInfo IsLockFree;
             static FunctionInfo Load;
             static FunctionInfo Or;
+            static FunctionInfo Pause;
             static FunctionInfo Store;
             static FunctionInfo Sub;
             static FunctionInfo Wait;
+            static FunctionInfo WaitAsync;
             static FunctionInfo Notify;
             static FunctionInfo Xor;
         };
@@ -36,9 +38,11 @@ namespace Js
         static Var EntryIsLockFree(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryLoad(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryOr(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryPause(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryStore(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntrySub(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryWait(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryWaitAsync(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryNotify(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryXor(RecyclableObject* function, CallInfo callInfo, ...);
 
@@ -51,5 +55,6 @@ namespace Js
         static void CheckAtomicAccessStillValid(TypedArrayBase *typedArray, uint32 accessIndex, ScriptContext *scriptContext, const char16 *funcName);
 
         static TypedArrayBase * ValidateAndGetTypedArray(Var typedArray, Var index, _Out_ uint32 *accessIndex, ScriptContext *scriptContext, bool onlyInt32 = false, bool requireShared = false);
+        static Var CreateWaitAsyncResult(ScriptContext *scriptContext, bool async, Var value);
     };
 }

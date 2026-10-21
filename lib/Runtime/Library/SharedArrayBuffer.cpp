@@ -582,11 +582,11 @@ namespace Js
     }
 
     JavascriptSharedArrayBuffer::JavascriptSharedArrayBuffer(DynamicType * type) :
-        SharedArrayBuffer(type)
+        SharedArrayBuffer(type), asyncWaiters(nullptr), asyncRegistrations(nullptr)
     {
     }
     JavascriptSharedArrayBuffer::JavascriptSharedArrayBuffer(SharedContents *sharedContents, DynamicType * type) :
-        SharedArrayBuffer(sharedContents, type)
+        SharedArrayBuffer(sharedContents, type), asyncWaiters(nullptr), asyncRegistrations(nullptr)
     {
     }
 
@@ -637,8 +637,31 @@ namespace Js
 #endif
     }
 
+    void JavascriptSharedArrayBuffer::CancelAsyncWaiters()
+    {
+        AtomicsAsyncWaiterRegistration* registration = asyncRegistrations;
+        while (registration != nullptr)
+        {
+            AtomicsAsyncWaiterRegistration* next = registration->nextWrapper;
+            if (registration->linked && registration->waiterList != nullptr)
+            {
+                registration->waiterList->RemoveAsyncWaiter(registration);
+            }
+            HeapDelete(registration);
+            registration = next;
+        }
+        asyncRegistrations = nullptr;
+    }
+
     void JavascriptSharedArrayBuffer::Finalize(bool isShutdown)
     {
+        // Drop pending waitAsync registrations before the shared waiter lists
+        // (which hold native registration tokens) can be torn down. Promise code
+        // must not run from a finalizer; these promises stay pending. The tokens
+        // intentionally do not dereference AtomicsAsyncWaiter: an unmarked
+        // wrapper is not scanned, so its records may already have been swept.
+        CancelAsyncWaiters();
+
         if (sharedContents == nullptr)
         {
             return;
@@ -925,22 +948,106 @@ namespace Js
         // TODO for xplat
     }
 
-    uint32 WaiterList::RemoveAndWakeWaiters(int32 count)
+    uint32 WaiterList::RemoveAndWakeWaiters(int32 count, ScriptContext* context, AtomicsAsyncWaiterRegistration** asyncAwoken)
     {
         Assert(m_waiters != nullptr);
         Assert(count >= 0);
         uint32 removed = 0;
-#ifdef _WIN32
-        while (count > 0 && m_waiters->Count() > 0)
+        for (int i = 0; i < m_waiters->Count() && count > 0; )
         {
-            AgentOfBuffer agent = m_waiters->Item(0);
-            m_waiters->RemoveAt(0);
+            AgentOfBuffer agent = m_waiters->Item(i);
+            if (agent.asyncRegistration != nullptr &&
+                agent.asyncRegistration->record->GetScriptContext() != context)
+            {
+                // Cross-agent async waiters are outside this slice's contract:
+                // resolving or mutating their GC-visible record from this
+                // thread is unsafe. Leave them registered and do not count them.
+                // The registration token is native, so probing it does not
+                // dereference a GC pointer from the wrong thread.
+                i++;
+                continue;
+            }
+
+            m_waiters->RemoveAt(i);
             count--; removed++;
-            SetEvent(agent.event);
-            // This agent will be closed when their respective call to wait has returned
-        }
+            if (agent.asyncRegistration != nullptr)
+            {
+                // Single-agent async wait: hand the token to the caller, which
+                // resolves its record after releasing this critical section.
+                // The SAB wrapper keeps the record rooted until then.
+                Assert(asyncAwoken != nullptr);
+                AtomicsAsyncWaiterRegistration* registration = agent.asyncRegistration;
+                registration->linked = false;
+                registration->nextAwoken = *asyncAwoken;
+                *asyncAwoken = registration;
+            }
+#ifdef _WIN32
+            else
+            {
+                SetEvent(agent.event);
+                // This agent will be closed when their respective call to wait has returned
+            }
 #endif
+        }
         return removed;
+    }
+
+    void WaiterList::AddAsyncWaiter(AtomicsAsyncWaiterRegistration* registration)
+    {
+        Assert(m_waiters != nullptr);
+        Assert(registration != nullptr);
+        Assert(registration->record != nullptr);
+        Assert(!registration->linked);
+        registration->waiterList = this;
+        m_waiters->Add(AgentOfBuffer(registration));
+        registration->linked = true;
+    }
+
+    void WaiterList::RemoveAsyncWaiter(AtomicsAsyncWaiterRegistration* registration)
+    {
+        AutoCriticalSection autoCS(&csForAccess);
+        if (m_waiters == nullptr)
+        {
+            return;
+        }
+        for (int i = m_waiters->Count() - 1; i >= 0; i--)
+        {
+            if (m_waiters->Item(i).asyncRegistration == registration)
+            {
+                m_waiters->RemoveAt(i);
+                registration->linked = false;
+                return;
+            }
+        }
+    }
+
+    void AtomicsAsyncWaiter::ResolveOk()
+    {
+        if (settled)
+        {
+            return;
+        }
+        settled = true;
+
+        if (buffer != nullptr)
+        {
+            buffer->RemoveAsyncWaiter(this);
+        }
+
+        JavascriptLibrary* library = scriptContext->GetLibrary();
+        JavascriptPromise::TryCallResolveOrRejectHandler(
+            capability->GetResolve(),
+            library->CreateStringFromCppLiteral(_u("ok")),
+            scriptContext);
+    }
+
+    void AtomicsAsyncWaiter::Abandon()
+    {
+        // The notifying thread is not the registrant's ScriptContext. Mutating
+        // the owner wrapper's GC-visible list from here would be a cross-thread
+        // write, so only mark the record settled; the wrapper keeps it rooted
+        // until finalization and the promise intentionally stays pending.
+        settled = true;
     }
 
     bool AgentOfBuffer::AgentCanSuspend(ScriptContext *scriptContext)
