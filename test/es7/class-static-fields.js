@@ -433,6 +433,13 @@ const tests = [
             assert.throws(function () { eval("class C { static x = super(); }"); }, SyntaxError, "super call");
             assert.throws(function () { eval("async function f() { class C { static x = await 1 } }"); }, SyntaxError, "await");
             assert.throws(function () { eval("function* g() { class C { static x = yield 1 } }"); }, SyntaxError, "yield");
+            // `await` is reserved in static initializers even outside async
+            // contexts: bare references and declarations are early errors,
+            // while nested arrows/functions recompute it as an identifier.
+            assert.throws(function () { eval("class C { static x = await; }"); }, SyntaxError, "bare await identifier");
+            assert.throws(function () { eval("class C { static x = await 1; }"); }, SyntaxError, "await expression at script level");
+            assert.doesNotThrow(function () { eval("class C { static x = (function(){ var await = 3; return await; })(); }"); }, "await identifier in nested plain function");
+            assert.doesNotThrow(function () { eval("class C { static x = (async () => await 1)(); }"); }, "await in nested async arrow");
 
             class Good {
                 static x = function () { return arguments.length; };
@@ -866,6 +873,8 @@ const tests = [
             assert.throws(function () { eval("class C { static { console.log(arguments); } }"); }, SyntaxError, "arguments");
             assert.throws(function () { eval("class C { static { let f = () => arguments; } }"); }, SyntaxError, "arguments in arrow");
             assert.throws(function () { eval("async function f() { class C { static { await 1; } } }"); }, SyntaxError, "await");
+            assert.throws(function () { eval("class C { static { await; } }"); }, SyntaxError, "bare await identifier at script level");
+            assert.throws(function () { eval("class C { static { var await = 1; } }"); }, SyntaxError, "await declaration at script level");
             assert.throws(function () { eval("function* g() { class C { static { yield 1; } } }"); }, SyntaxError, "yield");
             assert.throws(function () { eval("class C { static { return 1; } }"); }, SyntaxError, "return");
             assert.throws(function () { eval("class C { static { if (true) return; } }"); }, SyntaxError, "return in branch");

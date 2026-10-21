@@ -496,9 +496,23 @@ private:
     // so their bodies have their own lexical `this` and correctly parented
     // nested functions.
     bool m_inClassFieldInitializer;
-    // (Static-ness of a field initializer is carried by the helper node's
-    // isStaticClassFieldInitializer marker for full parses; stub builds only
-    // need m_inClassFieldInitializer for the super.property scan allowance.)
+    // True while parsing a static field initializer or static block (scan
+    // or helper full parse), including nested arrows; reset at real
+    // function boundaries in ParseFncDeclInternal. Those grammars reserve
+    // `await` at their own level without being async bodies: member/helper
+    // sites turn the scanner's await-keyword region on, nested functions
+    // recompute it from their own async-ness, and this flag lets
+    // ParseUnaryOrParenExpr reject await expressions at the helper level.
+    // Static-ness for super binding is carried by the helper node's
+    // isStaticClassFieldInitializer marker, not this flag.
+    bool m_inStaticClassFieldInitializer;
+    // Function node enclosing the class whose static initializer/block set
+    // m_inStaticClassFieldInitializer (save/restored with it at member
+    // sites). Lets the await guard tell an async function nested INSIDE the
+    // initializer (its awaits are legal) from one enclosing the whole class
+    // (its async-ness must not exempt the initializer's own awaits, which
+    // matters when the enclosing function is only being scanned).
+    ParseNodeFnc * m_staticInitEnclosingFunc;
     // S1 static blocks: true while fast-scanning a static-block body (which
     // has no helper context yet) so `return` there stays an early error.
     // Full parses use the helper's isClassStaticBlock marker instead; nested

@@ -172,12 +172,14 @@ Parser::Parser(Js::ScriptContext* scriptContext, BOOL strictMode, PageAllocator 
     m_hasDeferredShorthandInitError(false),
     m_deferCommaError(false),
     m_inClassFieldInitializer(false),
+    m_inStaticClassFieldInitializer(false),
     m_inClassStaticBlock(false),
     m_currentClassHasFields(true),
     m_disallowSuperCallInEval(false),
     m_classFieldInitializerUsesArguments(false),
     m_classFieldHelperCount(0),
     m_classComputedFieldKeyCount(0),
+    m_staticInitEnclosingFunc(nullptr),
     m_currentClassHome(nullptr),
     m_privateNameScope(nullptr),
     m_pendingPrivateRefs(nullptr),
@@ -6529,9 +6531,11 @@ ParseNodeFnc * Parser::ParseFncDeclInternal(ushort flags, LPCOLESTR pNameHint, c
     // A real function/method boundary (including a function nested in an
     // initializer) has its own arguments binding and ends the check.
     bool inClassFieldInitializerSave = m_inClassFieldInitializer;
+    bool inStaticClassFieldInitializerSave = m_inStaticClassFieldInitializer;
     if (!fLambda)
     {
         m_inClassFieldInitializer = false;
+        m_inStaticClassFieldInitializer = false;
     }
     // S1 static blocks: every nested function (including arrows, whose block
     // bodies allow `return`) is a return boundary for the fast-scan
@@ -6743,6 +6747,7 @@ ParseNodeFnc * Parser::ParseFncDeclInternal(ushort flags, LPCOLESTR pNameHint, c
     }    this->m_tryCatchOrFinallyDepth = tryCatchOrFinallyDepthSave;
 
     m_inClassFieldInitializer = inClassFieldInitializerSave;
+    m_inStaticClassFieldInitializer = inStaticClassFieldInitializerSave;
     m_disallowSuperCallInEval = disallowSuperCallInEvalSave;
     m_inClassStaticBlock = inClassStaticBlockSave;
     return pnodeFnc;
@@ -9666,12 +9671,13 @@ ParseNodeFnc * Parser::CreateClassFieldInitializerFunction(charcount_t ichMin, s
     m_inClassFieldInitializer = true;
 
     // A field initializer is not an async/generator body even when the
-    // surrounding class lives in one. Treat await/yield as ordinary tokens so
-    // an invalid use is a SyntaxError instead of building an await/yield node
-    // that the helper FunctionBody cannot execute. Nested async/generator
-    // functions reset these regions in ParseFncDeclInternal.
+    // surrounding class lives in one. Yield stays an ordinary token (strict
+    // mode still reserves it); await is a keyword only in static
+    // initializers, whose grammar reserves it without allowing await
+    // expressions (ParseUnaryOrParenExpr rejects those in helpers). Nested
+    // async/generator functions reset these regions in ParseFncDeclInternal.
     bool previousYieldIsKeyword = this->GetScanner()->SetYieldIsKeywordRegion(false);
-    bool previousAwaitIsKeyword = this->GetScanner()->SetAwaitIsKeywordRegion(false);
+    bool previousAwaitIsKeyword = this->GetScanner()->SetAwaitIsKeywordRegion(isStatic);
     ParseNodePtr pnodeExpr = ParseExpr<true>(koplAsg, nullptr, TRUE);
     this->GetScanner()->SetYieldIsKeywordRegion(previousYieldIsKeyword);
     this->GetScanner()->SetAwaitIsKeywordRegion(previousAwaitIsKeyword);
@@ -9827,12 +9833,13 @@ ParseNodeFnc * Parser::CreateClassStaticBlockFunction(charcount_t ichMin, size_t
     ParseNodePtr * lastNodeRef = nullptr;
 
     // A static block is not an async/generator body even when the
-    // surrounding class lives in one. Treat await/yield as ordinary tokens so
-    // an invalid use is a SyntaxError instead of building an await/yield node
-    // that the helper FunctionBody cannot execute. Nested async/generator
-    // functions reset these regions in ParseFncDeclInternal.
+    // surrounding class lives in one. Yield stays an ordinary token (strict
+    // mode still reserves it); await is a keyword here (the grammar reserves
+    // it) without allowing await expressions (ParseUnaryOrParenExpr rejects
+    // those in helpers). Nested async/generator functions reset these
+    // regions in ParseFncDeclInternal.
     bool previousYieldIsKeyword = this->GetScanner()->SetYieldIsKeywordRegion(false);
-    bool previousAwaitIsKeyword = this->GetScanner()->SetAwaitIsKeywordRegion(false);
+    bool previousAwaitIsKeyword = this->GetScanner()->SetAwaitIsKeywordRegion(true);
     ParseStmtList<true>(&pnodeFnc->pnodeBody, &lastNodeRef, SM_OnFunctionCode, true /* isSourceElementList */);
     this->GetScanner()->SetYieldIsKeywordRegion(previousYieldIsKeyword);
     this->GetScanner()->SetAwaitIsKeywordRegion(previousAwaitIsKeyword);
@@ -10230,9 +10237,13 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
 
                 bool usesArgumentsSave = m_classFieldInitializerUsesArguments;
                 bool inFieldInitializerSave = m_inClassFieldInitializer;
+                bool inStaticFieldInitializerSave = m_inStaticClassFieldInitializer;
+                ParseNodeFnc * staticInitEnclosingSave = m_staticInitEnclosingFunc;
                 bool inStaticBlockSave = m_inClassStaticBlock;
                 m_classFieldInitializerUsesArguments = false;
                 m_inClassFieldInitializer = true;
+                m_inStaticClassFieldInitializer = true;
+                m_staticInitEnclosingFunc = GetCurrentFunctionNode();
                 m_inClassStaticBlock = true;
 
                 ParseNodeFnc * pnodeBlockFnc = nullptr;
@@ -10283,7 +10294,7 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
                     m_pnestedCount = &pnodeFastScanStub->nestedCount;
 
                     bool previousYieldIsKeyword = this->GetScanner()->SetYieldIsKeywordRegion(false);
-                    bool previousAwaitIsKeyword = this->GetScanner()->SetAwaitIsKeywordRegion(false);
+                    bool previousAwaitIsKeyword = this->GetScanner()->SetAwaitIsKeywordRegion(true);
                     ParseStmtList<false>(nullptr, nullptr, SM_DeferredParse, true /* isSourceElementList */);
                     this->GetScanner()->SetYieldIsKeywordRegion(previousYieldIsKeyword);
                     this->GetScanner()->SetAwaitIsKeywordRegion(previousAwaitIsKeyword);
@@ -10302,6 +10313,8 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
 
                 m_classFieldInitializerUsesArguments = m_classFieldInitializerUsesArguments || usesArgumentsSave;
                 m_inClassFieldInitializer = inFieldInitializerSave;
+                m_inStaticClassFieldInitializer = inStaticFieldInitializerSave;
+                m_staticInitEnclosingFunc = staticInitEnclosingSave;
                 m_inClassStaticBlock = inStaticBlockSave;
 
                 if (m_classFieldInitializerUsesArguments)
@@ -10602,12 +10615,21 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
                     m_pnestedCount = &pnodeFastScanStub->nestedCount;
                 }
 
+                // Static initializers reserve `await` from their first token:
+                // set the scanner region before ScanForcingPid tokenizes it.
+                // Arrows and nested functions inside reset the region by
+                // their own async-ness in ParseFncDeclInternal/ParseFncFormals.
+                bool previousAwaitIsKeyword = this->GetScanner()->SetAwaitIsKeywordRegion(isStatic);
                 this->GetScanner()->ScanForcingPid();
 
                 bool usesArgumentsSave = m_classFieldInitializerUsesArguments;
                 bool inFieldInitializerSave = m_inClassFieldInitializer;
+                bool inStaticFieldInitializerSave = m_inStaticClassFieldInitializer;
+                ParseNodeFnc * staticInitEnclosingSave = m_staticInitEnclosingFunc;
                 m_classFieldInitializerUsesArguments = false;
                 m_inClassFieldInitializer = true;
+                m_inStaticClassFieldInitializer = isStatic;
+                m_staticInitEnclosingFunc = GetCurrentFunctionNode();
 
                 if (buildAST)
                 {
@@ -10620,7 +10642,7 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
                     // function can hide an invalid field initializer until its
                     // body is later compiled.
                     bool previousYieldIsKeyword = this->GetScanner()->SetYieldIsKeywordRegion(false);
-                    bool previousAwaitIsKeyword = this->GetScanner()->SetAwaitIsKeywordRegion(false);
+                    bool previousAwaitIsKeyword = this->GetScanner()->SetAwaitIsKeywordRegion(isStatic);
                     ParseExpr<false>(koplAsg, nullptr, TRUE);
                     this->GetScanner()->SetYieldIsKeywordRegion(previousYieldIsKeyword);
                     this->GetScanner()->SetAwaitIsKeywordRegion(previousAwaitIsKeyword);
@@ -10628,6 +10650,9 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
 
                 m_classFieldInitializerUsesArguments = m_classFieldInitializerUsesArguments || usesArgumentsSave;
                 m_inClassFieldInitializer = inFieldInitializerSave;
+                m_inStaticClassFieldInitializer = inStaticFieldInitializerSave;
+                m_staticInitEnclosingFunc = staticInitEnclosingSave;
+                this->GetScanner()->SetAwaitIsKeywordRegion(previousAwaitIsKeyword);
 
                 if (m_classFieldInitializerUsesArguments)
                 {
@@ -11808,7 +11833,18 @@ ParseNodePtr Parser::ParseExpr(int oplMin,
         }
         else if (nop == knopAwait)
         {
-            if (!this->GetScanner()->AwaitIsKeywordRegion() ||
+            // Static field initializers and static blocks reserve `await`
+            // (region on) without being async bodies: an await expression
+            // there is still an early error unless the innermost function
+            // is itself async AND nested inside the initializer (an async
+            // function enclosing the whole class, possibly only scanned,
+            // must not exempt the initializer's own awaits). The parser
+            // flag covers both helper full parses and fast scans.
+            ParseNodeFnc * currentFuncForAwait = GetCurrentFunctionNode();
+            bool inStaticClassHelper = m_inStaticClassFieldInitializer &&
+                !(currentFuncForAwait != nullptr && currentFuncForAwait->IsAsync() &&
+                  currentFuncForAwait != m_staticInitEnclosingFunc);
+            if (!this->GetScanner()->AwaitIsKeywordRegion() || inStaticClassHelper ||
                 m_currentScope->AncestorScopeIsParameter()) // Await is not allowed within any parameter scope
             {
                 // As with the 'yield' keyword, the case where 'await' is scanned as a keyword (tkAWAIT)
