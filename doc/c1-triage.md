@@ -853,22 +853,24 @@ asserted the old non-conforming block `var`/`let` behavior were updated
 deliberately. Gates moved 1975/2027 → 1976/2028. No bytecode change; B4
 still owns JIT-configuration claims.)*
 
-## 7. C2 integration status (2026-10-20)
+## 7. C2 integration status (2026-10-21)
 
 | Batch | Status | Integrated evidence | Remaining |
 |---|---|---|---|
-| S1 public instance fields | Landed `bd0de1694` | class corpus 1,989/5,897, 539/0; 27 focused cases, normal + forced defer | eval-super property, JIT (private/static/computed fields, static blocks, `super.prop` closed by later S1 rows) |
+| S1 public instance fields | Landed `bd0de1694` | class corpus 1,989/5,897, 539/0; 27 focused cases, normal + forced defer | JIT (private/static/computed fields, static blocks and eval-super closed by later S1 rows) |
 | S1 private instance fields | Landed `da0351e8e` | private subset 176/30, 160/0; es7 64/0 | direct-eval privates, JIT (methods/statics/computed closed by later S1 rows) |
 | S1 private methods/accessors | Landed `30a81731c` | 202/20, 198/0; es7 68/0 | direct-eval privates, JIT (statics/blocks/computed/async-gen closed by later S1 rows) |
 | S1 public static fields | Landed `041a9bb8f` | 75/75, 35/0; local 75/0 | JIT (private static/blocks/computed/super.prop closed by later S1 rows) |
 | S1 private static fields | Landed `226e7e1b4` | 600/602, 571/0; local 2012/0 | direct-eval privates, JIT (blocks/methods/computed closed by later S1 rows) |
 | S1 private static methods/accessors | Landed `197d381d7` (merge `c318fa42d`) | class delta 182 fixed / 0 new; es7 25/25 + 13/13; dual-review ACCEPT | direct-eval privates, JIT (async/gen + static blocks closed by later S1 rows) |
-| S1 `super` in static field initializers | Landed `920822ac0` (merge `0c01875b5`) | node-parity probes; committed tests green; dual-review ACCEPT | eval-super, JIT (instance-field super closed by computed row) |
-| S1 computed field names + instance-field `super` | Landed `894ba5394` (merge `fd893c83f`) | class-elements 1833/255 vs base 1699/389 (2,088 scenarios, lane-run), 67 files f→p / 0 p→f; dual-review ACCEPT | eval-super, private names in computed keys (8 scenarios), JIT |
+| S1 `super` in static field initializers | Landed `920822ac0` (merge `0c01875b5`) | node-parity probes; committed tests green; dual-review ACCEPT | JIT (instance-field super closed by computed row; eval-super closed below) |
+| S1 computed field names + instance-field `super` | Landed `894ba5394` (merge `fd893c83f`) | class-elements 1833/255 vs base 1699/389 (2,088 scenarios, lane-run), 67 files f→p / 0 p→f; dual-review ACCEPT | JIT (private names in computed keys closed by S1 tail; eval-super closed below) |
 | S1 async/generator private methods | Landed `7cc057124` (merge `1caf23d67`) | scoped test262 272 f→p / 0 p→f (lane-run); dual-review ACCEPT | JIT |
 | S1 static blocks | Landed `9ba243adb` + fix `6ff088e19` (merge `02f99fc63`) | loop-2 dual-review ACCEPT after defer-scan scope fix; 69/69 node differentials ×3 modes | JIT; bare-`await`/nested-super defer residuals shared with field initializers |
-| S1 tail: direct-eval + computed-key privates, field semantics | Landed `1418c292f` (merge `de92ddb80`) | elements corpus 5,888/5,897 (`out/test262-c2-wave3`), +34/0 vs wave-2 run; dual-review ACCEPT (adversarial re-run) | JIT (3 interpreter-only ops); 4 primitive-receiver scenarios need `-ESBigInt` in runner; eval-super |
+| S1 tail: direct-eval + computed-key privates, field semantics | Landed `1418c292f` (merge `de92ddb80`) | elements corpus 5,888/5,897 (`out/test262-c2-wave3`), +34/0 vs wave-2 run; dual-review ACCEPT (adversarial re-run) | JIT (3 interpreter-only ops); 4 primitive-receiver scenarios need `-ESBigInt` in runner |
+| S1 direct-eval `super` early errors | Landed `851d0646f` (merge `ea8f253ac`) | `super-prop*` 12/0; eval-code 454/0 (10 f→p / 0 p→f); class elements 5,888/9 unchanged; 3 parse-mode entries; legacy expectations corrected | JIT/serialization (B4) |
 | S8 Float16Array | Landed `de89e6d27` + fix `161639b48` (merge `a39aa8c45`) | gates 2013/2065 (new float16array.js 17/17); loop-2 dual ACCEPT after GetDiagTypeString fix | JIT kind lowering (B4); Atomics exclusion by allowlist |
+| S6a growable SAB + non-shared Atomics (flag-on) | Landed `01923087f` + review `eaa526f89` (merge `e3371d313`) | focused S6 462/982 → 574/982, 112 f→p / 0 p→f; new test 13/13; SAB/Atomics remain off by default | `waitAsync`/`pause`, BigInt Atomics, multi-agent wait/grow, B4 |
 | S12 import attributes + JSON modules | Landed `ee826e889` + fixes `36043391d`, `d0223ff1a` (merge `78cc4f412`) | import corpus delta +12 net / 0 p→f (lane-run 565/172 vs 553/184); loop-3 dual ACCEPT (user-authorized) | `OP_ImportCallWithOptions` JIT lowering (B4); BOM-JSON; debug metadata leg pre-existing |
 | S2 arithmetic/bitwise/shift | Landed `1c5d5b2fc` | scoped 444/2, 80/0; broad 1,027/1,027; Node differentials | BigInt64Array/BigUint64Array, Map/Set identity, literal property names, giant ToString, JIT |
 | S2 BigInt64Array | Landed `f5f0efef5` | 944/0; 958/1016; ctors 24/24, 166/0; internals 163/0 | DataView BigInt, internals, Map/Set identity, SAB, JIT |
@@ -884,9 +886,10 @@ still owns JIT-configuration claims.)*
 | S14 P2 | Landed `526931bc5` | 192/0; 157/0; controls preserved | hidden outer lexical; JSC/Node delete difference; JIT |
 | S14 P5 | Landed `8b5f28c06` | 50/50; broad 50/0; wider 65/0 non-import | eval/function-expression; proxy descriptor; JIT |
 
-Full gates at this checkpoint: **2016/0 test**, **2068/0 debug-static**
+Full gates at this checkpoint: **2020/0 test**, **2072/0 debug-static**
 (single-sourced in `tools/build/gate_counts.json`; repair-loop
-`-noDeferParse` rlexe variants moved 2013/2065 → 2016/2068). Integrated
+`-noDeferParse` rlexe variants moved 2013/2065 → 2016/2068, S6a added
+one entry, and eval-super added three parse-mode entries). Integrated
 class-elements corpus re-runs 2026-10-20: wave-2
 (`out/test262-c2-s1-wave2`) **5,854/5,897**, 3,865 f→p / 0 p→f vs
 2026-10-19; wave-3 (`out/test262-c2-wave3`, after the S1-tail lane)
@@ -895,9 +898,9 @@ post-ES2025 `accessor` grammar, 4 primitive-receiver scenarios that
 need `-ESBigInt` to parse under the default runner (pass with the
 flag), and 1 Stage-1 non-extensible scenario Node also fails. All
 active feature/triage worktrees are merged. Next work items are the
-eval-super residual, S6 flag-on gaps, the documented S8/S2/P-eval
-residuals, and C4 qualification (full baseline rerun,
-host-reported negative phase). P5 residual: eval/function-expression
+remaining S6 flag-on gaps (`waitAsync`, `pause`, BigInt Atomics,
+multi-agent wait/grow), the documented S8/S2/P-eval residuals, and C4
+qualification (full baseline rerun, host-reported negative phase). P5 residual: eval/function-expression
 reference paths and pre-existing proxy descriptor duplication.
 
 ## 8. Separate inventories

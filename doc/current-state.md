@@ -1,7 +1,7 @@
 # Current State of ChakraCore
 
 Engine-source baseline `97e68c917` (19 Feb 2026; see §7), with modernization
-execution/decisions updated through 2026-10-10. Version **1.13.0 dev**
+execution/decisions updated through 2026-10-21. Version **1.13.0 dev**
 (`lib/Common/ChakraCoreVersion.h:19-21`, `CHAKRA_CORE_VERSION_RELEASE 0` at :58).
 MIT license (`LICENSE.txt`). Every claim below cites an in-repo path; line numbers
 were verified against this HEAD.
@@ -52,7 +52,13 @@ Math, Debug, PlatformAgnostic), SCACore (structured clone), WasmReader, wabt
 Docs: no `docs/` dir; 12 tracked `.md` files; the real docs live on the wiki
 (`README.md:27-33` Architecture/Embedding/JsRT-Reference/Resources, :46 Building,
 :48 binaries; `CONTRIBUTING.md:36`, `.editorconfig:3` coding-conventions wiki).
-This `doc/` folder is the start of durable in-repo documentation.
+This `doc/` folder is the start of durable in-repo documentation. The
+feature inventory and line anchors below are the 2026-10-10 baseline
+snapshot; the modernization branch has since added the C2 surfaces listed
+in [modernization-plan.md](modernization-plan.md) §6 and its receipts.
+Latest merged checkpoint (2026-10-21): **2020/0 test**, **2072/0
+debug-static**, including direct-eval `super` early errors and the flag-on
+S6a growable-SAB/non-shared-Atomics slice.
 
 ## 3. Architecture (summary)
 
@@ -137,18 +143,18 @@ unconditional (no ConfigFlags gate) even though nearby flags exist. Also present
 :453`), String includes (C++ builtins), and error `cause`
 (`JavascriptError.cpp:68-71`). OFF by default: SharedArrayBuffer/Atomics (:709,
 :1189; rlexe :80-88), BigInt (:669, :1194; `test/BigInt/rlexe.xml`), ES6 RegExp
-symbols and prototype properties (DEFAULTs :686-696; FLAGs :1171, :1180). ABSENT —
-no engine implementation or feature tests (`?.`, logical assignment, class fields,
-`#private`, static blocks, decorators, `replaceAll`, `matchAll`, `queueMicrotask`,
-`WeakRef`, `FinalizationRegistry`; remaining literal hits are benchmark-internal
-identifiers and C++-level name collisions such as ETW `MatchAllKeyword` and JsRT
-`JsCreateWeakReference`). Runtime probes on both AppleClang and Zig shells
-(2026-10-10) reject ES2018 named capture groups, lookbehind, and Unicode property
-escapes, as well as RegExp `d`/`v` flags and import attributes. The flag switch
-(`lib/Parser/RegexParser.cpp:2731-2799`) handles only i/g/m/s/u/y. These are
-confirmed gaps, including older RegExp work that must precede newer named-group
-and `v`-flag additions. The repeatable probe is
-`tools/test262/feature-probe.js`; see the modernization plan §4 for priorities.
+symbols and prototype properties (DEFAULTs :686-696; FLAGs :1171, :1180). At
+the 2026-10-10 baseline, the engine also had no optional chaining/logical
+assignment, class fields/`#private`/static blocks, `replaceAll`, `matchAll`,
+`WeakRef`, `FinalizationRegistry`, named capture groups/lookbehind, import
+attributes, or RegExp `d`/`v` flags. The modernization branch has since landed
+those C2 surfaces except the S3-gated Unicode property escapes and `v` flag;
+decorators and `queueMicrotask` remain unimplemented. BigInt, RegExp symbols
+and SAB/Atomics remain default-off; the SAB/Atomics flag-on surface now includes
+growable buffers and non-shared Atomics but awaits the product/security
+decision. The repeatable probe is `tools/test262/feature-probe.js`; see
+[modernization-plan.md](modernization-plan.md) §4 for the current gap list and
+per-batch receipts.
 
 Intl: only Collator/DateTimeFormat/NumberFormat/PluralRules (`InJavascript/Intl.js`,
 IntlEngineInterfaceExtensionObject.cpp; `ENABLE_INTL_OBJECT` :6-23). The ICU C API is
@@ -316,17 +322,24 @@ travis/appveyor badges.
 
 ## 8. Modernization constraints
 
-(a) Partial ES2015–ES2019 baseline: ES2018 named groups/lookbehind/Unicode property
-escapes are missing, as are `?.` / logical-assign / class-fields / `#private` /
-static-blocks / decorators / `WeakRef` / `FinalizationRegistry` / `replaceAll` /
-`matchAll` / `queueMicrotask` absent — needs a parser + builtins workstream
-(error `cause`, `flat`/`flatMap`/`includes` are already present, so the ES2019 story
-is better than it first looks). (b) Intl 4-constructor subset; embedded ICU 63.2
+(a) The 2026-10-10 baseline was a partial ES2015–ES2019 engine: ES2018
+named groups/lookbehind/Unicode property escapes and `?.` / logical-assign /
+class-fields / `#private` / static-blocks / `WeakRef` / `FinalizationRegistry` /
+`replaceAll` / `matchAll` were absent. The modernization branch has since
+landed the C2 parser/builtins batches recorded in
+[modernization-plan.md](modernization-plan.md) §6, including class elements,
+S2 BigInt slices, S8 resizable buffers/Float16, S9 regex, S12 import attributes,
+S13 WeakRef/FinalizationRegistry, and S14 eval/statement fixes. Remaining
+feature work is tracked in that plan; decorators and `queueMicrotask` are not
+claimed. (Error `cause`, `flat`/`flatMap`/`includes` were already present in
+the baseline.) (b) Intl 4-constructor subset; embedded ICU 63.2
 (2018), current system-ICU pilot 78.3. ICU upgrade and `--no-icu` behavior need
 explicit dependency/test decisions. (c) WASM MVP + sign-ext /
 nontrapping; threads/multi-value/SIMD gated off; GC/tail-calls/EH/stringref/
-extended-const absent. (d) BigInt / SAB+Atomics / RegExp-symbols OFF by default —
-keep flagged until deliberately enabled. (e) C++17 + Rotor PAL; x86/ARM win-only;
+extended-const absent. (d) BigInt / RegExp-symbols remain OFF by default. The
+SAB+Atomics flag-on surface now includes growable SharedArrayBuffer and
+non-shared Atomics, but the feature remains OFF by default pending the
+product/security decision; keep all three flagged until deliberately enabled. (e) C++17 + Rotor PAL; x86/ARM win-only;
 ARM64 JIT broken off-Windows — PAL/backend first. (f) No sandbox/heap cage, no
 pointer compression; mark-sweep GC with concurrent/parallel mark + concurrent sweep
 — hostile-input handling is a threat-model decision. (g) Legacy floors describe
@@ -378,3 +391,12 @@ not evidence that any complete edition already passes.
 The first [conformance baseline](conformance-baseline.md) ran 93,141 scenarios
 from 48,598 files: 61,565 passed / 31,576 failed, with 902 explicit skips. Its
 corpus includes post-ES2025 proposals and uses default language flags.
+
+**Modernization checkpoint (2026-10-21):** the merged branch is green at
+**2020/0 test** and **2072/0 debug-static** on Mac ARM64 no-JIT. Direct-eval
+`super` early errors are closed (eval-code 454/0), and the flag-on S6a slice
+has growable SharedArrayBuffer plus ES2020 non-shared Atomics (focused S6
+574/982; 112 fail→pass / 0 pass→fail) while SAB/Atomics remain off by default.
+S3 Unicode/ICU, S6 default enablement, B4 Linux/JIT/WASM and C4 host-negative
+qualification remain decision- or hardware-blocked; no JIT, Linux, native-x64,
+TTD or multi-agent claim is made.

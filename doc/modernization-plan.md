@@ -57,7 +57,7 @@ handling have been validated before its results are used as a completion gate.
 | B6 | Windows feasibility and rollout; later target extensions | Stable build contracts | Separate expansion |
 | Z1 | One useful mixed C++/Zig unit behind a tested C ABI | B3; B4 if the unit ships on Linux | Optional pilot |
 | C1 | Qualified ES2025 test policy and triaged failures | Stable Mac build at B3 | Recorded (CONDITIONAL) |
-| C2 | Bounded compatibility batches and partial releases | C1; B4 before JIT-wide enablement | In progress (S4/S5/S10/S11/S7-matchAll/S9 named-groups + d-flag + duplicate named groups + lookbehind + ES2025 modifiers; S1 class elements complete: public/private instance+static fields, private methods/accessors incl. async/generator and statics, computed field names, `super` in field initializers, static blocks (integrated elements corpus 5,854/5,897; direct-eval/eval-super residuals remain); S2 BigInt: operators/literals/asIntN-asUintN, collections, DataView, BigInt64Array; S8 resizable ArrayBuffer + TypedArray tracking + Float16 (DataView/Math.f16round slice and Float16Array); S12 import attributes + JSON modules (additive host contract); S13 symbol keys, WeakRef, FinalizationRegistry; S14 P1–P7 — all closed on Mac no-JIT; JIT claims gated on B4) |
+| C2 | Bounded compatibility batches and partial releases | C1; B4 before JIT-wide enablement | In progress (S4/S5/S10/S11/S7-matchAll/S9 named-groups + d-flag + duplicate named groups + lookbehind + ES2025 modifiers; S1 class elements complete: public/private instance+static fields, private methods/accessors incl. async/generator and statics, computed field names, `super` in field initializers, static blocks and direct-eval `super` early errors (integrated elements corpus 5,888/5,897; 9 documented non-eval residuals; eval-code 454/0); S6a flag-on growable SAB/non-shared Atomics (default remains off); S2 BigInt: operators/literals/asIntN-asUintN, collections, DataView, BigInt64Array; S8 resizable ArrayBuffer + TypedArray tracking + Float16 (DataView/Math.f16round slice and Float16Array); S12 import attributes + JSON modules (additive host contract); S13 symbol keys, WeakRef, FinalizationRegistry; S14 P1–P7 — all closed on Mac no-JIT; JIT claims gated on B4) |
 | C3 | Larger runtime/object-model feature projects | C1 and their feature prerequisites | Separate projects |
 | C4 | Verified full ES2025 core-language result | Required C2/C3 work and qualified runner | Long-term objective |
 
@@ -593,12 +593,14 @@ Decision/rollback points:
   tracked until C4, optional ecosystem scope has separate gates.
 - [ ] C4: Published qualified ES2025 result on the claimed default configurations.
 
-**Latest integration checkpoint (2026-10-20):** main is clean at the
-**2016/0 test** and **2068/0 debug-static** gates (re-verified after
+**Latest integration checkpoint (2026-10-21):** main is clean at the
+**2020/0 test** and **2072/0 debug-static** gates (re-verified after
 every merge and repair below; counts are single-sourced in
 `tools/build/gate_counts.json` — Float16Array's new test file moved
 2012/2064 → 2013/2065, repair-loop `-noDeferParse` rlexe variants
-then moved 2013/2065 → 2016/2068).
+then moved 2013/2065 → 2016/2068, the flag-on S6 slice added one entry
+(2016/2068 → 2017/2069), and the direct-eval super lane added three
+parse-mode entries (2017/2069 → 2020/2072)).
 Merged lanes: S1 public/private instance+static fields and private methods/accessors, S2 arithmetic + BigInt64Array/Uint64Array + collections/
 DataView, S8 resizable ArrayBuffer/transfer + TypedArray tracking, S13
 WeakRef + FinalizationRegistry, and S14 P1/P2/P3/P4/P5/P6/P7
@@ -654,9 +656,18 @@ defect fixed in loop 2), and import attributes + JSON modules
 ([c2-s12-import-attributes.md](c2-s12-import-attributes.md); additive
 JsRT fetch-with-attributes callback, legacy hosts unaffected; two
 loop-2 defects fixed in a user-authorized loop 3; `OP_ImportCallWithOptions`
-JIT lowering owed at B4). All active feature/triage worktrees are
-merged; next work items are the remaining eval-super residual, S6
-flag-on gaps, the documented S8/S2/P-eval residuals, and the C4
+JIT lowering owed at B4). The final wave-3 repair cycle then closed the
+10 direct-eval `super` early-error scenarios (merge `ea8f253ac`; lexical
+HomeObject propagation through arrows/eval bodies, full eval-code
+454/0, class-elements 5,888/9 unchanged; legacy fixtures updated to the
+spec `SyntaxError`) and landed the flag-on S6a slice (merge
+`e3371d313`; growable SharedArrayBuffer plus ES2020 non-shared Atomics;
+focused S6 462/982 → 574/982, 112 fail→pass / 0 pass→fail; SAB remains
+off by default) ([c2-s1-eval-super.md](c2-s1-eval-super.md),
+[c2-s6-growable-nonshared.md](c2-s6-growable-nonshared.md)). All active
+feature/triage worktrees are merged; next work items are the remaining
+S6 flag-on gaps (`waitAsync`, `pause`, BigInt Atomics, multi-agent
+wait/grow), the documented S8/S2/P-eval residuals, and the C4
 qualification work (full baseline rerun, host-reported negative
 phase). Tracked eval residuals: P4 body eval with non-simple
 parameters; P2 hidden outer lexical and JSC/Node delete difference.

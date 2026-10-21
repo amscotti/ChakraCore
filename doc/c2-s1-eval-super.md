@@ -1,6 +1,7 @@
 # C2-S1: direct-eval SuperProperty early errors
 
-**Status: pending** (integration/B4 review not yet recorded).
+**Status: landed** (merge `ea8f253ac`; final gates **2020/0 test**,
+**2072/0 debug-static**). B4 JIT/Linux and serialization checks remain open.
 
 Lane `evalsuper`, base `9a99ccbee`. Scope: the 10 failing direct-eval
 `super-prop*` scenarios from the wave-3 triage. This slice does not change the
@@ -83,7 +84,8 @@ Scenario diff for the focused and full eval-code runs: exactly the 10
 `super-prop*` default/strict failures flipped **fail -> pass**, **0 pass ->
 fail**. The class-elements run has **0 scenario changes**; its 9 failures are
 the pre-existing private-nonextensible, BigInt-runner and field-accessor
-residuals.
+residuals. The merged binary was re-run on the full eval-code corpus on
+2026-10-21: **454/0** (`out/test262-final-evalsuper`).
 
 Artifacts (scratch, not committed): `out/test262-results-evalsuper-base*`,
 `out/test262-results-evalsuper-fix2-superprop`,
@@ -106,10 +108,22 @@ Artifacts (scratch, not committed): `out/test262-results-evalsuper-base*`,
   `--variants=disable_jit`). **B4 must run the focused test262 subset plus
   `test/es7/eval-super-early.js` and the class regression files under
   SimpleJIT/FullJIT before any JIT/default claim.**
-- The three new rlexe entries raise the regression selection from 2016/2068 to
-  an expected 2019/2071. Per the lane instruction the shared
-  `tools/build/gate_counts.json` pins were deliberately not edited; integration
-  must bump them with the other lane counts.
+- The three new rlexe entries raised the regression selection by three. The
+  S6 lane added one more, and integration set the single-source pins from
+  2016/2068 to **2020/2072**; full `zig build check` and the debug-static
+  regression gate are green at those counts.
+
+## Integration
+
+Merged as `ea8f253ac` on top of the S6 merge `e3371d313`; the final
+gate/pin and debug-invariant commit is `9fceb6fe4`, and the legacy-expectation
+commit is `e8afc8101`. The full gate initially failed six legacy
+`es6/classes.js`, `es6/ES6Super.js` and `es6/bug_981217` scenarios because
+those fixtures still expected the old runtime `ReferenceError`. They now
+expect the spec early `SyntaxError`, and the `super[value = 0]` control asserts
+that the computed key is not evaluated. This is a test-expectation correction,
+not an engine behavior waiver. Final focused gate: **2020/0 test**,
+**2072/0 debug-static**.
 
 ## Files
 

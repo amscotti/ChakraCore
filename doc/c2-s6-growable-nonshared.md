@@ -6,11 +6,13 @@
 
 # C2-S6a: growable SharedArrayBuffer and non-shared Atomics (flag-on slice)
 
-Status: **pending** — implementation and focused Mac ARM64 no-JIT evidence are
-green on branch `s6-flag-on` (base `9a99ccbee`); review, integration and the
-B4 gate remain open. `ESSharedArrayBuffer` stays **off by default**: without the
-flag both `SharedArrayBuffer` and `Atomics` are absent. This receipt covers only
-the flag-on surface below; it does not propose a default change.
+Status: **landed** — merged as `e3371d313` on top of base `9a99ccbee`;
+review fix `eaa526f89`, integration/debug fix `9fceb6fe4`. Final Mac ARM64
+no-JIT gates are **2020/0 test** and **2072/0 debug-static**. Review and B4
+JIT/Linux/multi-agent checks remain open. `ESSharedArrayBuffer` stays **off by
+default**: without the flag both `SharedArrayBuffer` and `Atomics` are absent.
+This receipt covers only the flag-on surface below; it does not propose a
+default change.
 
 ## Scope
 
@@ -32,7 +34,11 @@ the flag-on surface below; it does not propose a default change.
 7. `AtomicReadModifyWrite` index validation now captures the TypedArray length
    **before** `ToIndex(index)`, matching the 2025 test262 revision; the raw
    operand is revalidated after value coercion so a detach/shrink cannot leave
-   a stale pointer.
+   a stale pointer. The debug-only `accessIndex < GetLength()` assertion in
+  `TypedArrayBeginStub` was removed for these value-taking entries: an index
+  getter may legally shrink the buffer before the value is converted, so the
+  post-conversion revalidation owns the live invariant. `Atomics.load`, which
+  has no value coercion, keeps its immediate post-index check.
 
 Out of scope: `Atomics.waitAsync`, `Atomics.pause`, BigInt typed arrays,
 immutable ArrayBuffers, cross-agent grow synchronization, and any default
@@ -175,7 +181,12 @@ Mac ARM64, test profile (RelWithDebInfo, no JIT, DISABLE_JIT), shared gate
 lock, local `.zig-cache`/`out`. Every authoritative `zig build`/test262 command
 ran through `sh /tmp/opencode/cc-gate-lock.sh`.
 
-- `zig build --summary line`: **568/568 steps succeeded**.
+- Lane `zig build --summary line`: **568/568 steps succeeded**. After
+  integration with the eval-super lane, the authoritative full
+  `zig build check`: **583/583 steps succeeded**; final regression gates
+  **2020/0 test** and **2072/0 debug-static** (the S6 entry moved
+  2016/2068 -> 2017/2069; the three eval-super entries then moved it to
+  2020/2072).
 - Base binary: `ChakraCore-wt/evalsuper` `zig-out/bin/ch` at the same base
   `9a99ccbee` (copied with its dylibs to `out/base-bin`), launcher SHA-256
   `76e5f0734b3afe511ea0b309f8ddc62306387661d9880ff998aa85112b1ecbea`.
@@ -201,6 +212,8 @@ ran through `sh /tmp/opencode/cc-gate-lock.sh`.
   `test/built-ins/SharedArrayBuffer/**/*.js`
   (982 scenarios / 491 files):
   **462/982 before → 574/982 after**, **112 fail→pass / 0 pass→fail**.
+  Re-run on the merged binary 2026-10-21: **574 passed / 408 failed**
+  (`out/test262-final-s6`).
   Subsets:
   - grow methods: 2/30 → **28/30** (2 residual are the BigInt-syntax
     `this-is-not-object` scenario);
