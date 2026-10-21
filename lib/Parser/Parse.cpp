@@ -3200,13 +3200,21 @@ bool Parser::ModuleAttributesEqual(ModuleAttributeList* left, ModuleAttributeLis
 int Parser::CompareModuleAttributeKeys(IdentPtr left, IdentPtr right)
 {
     // UTF-16 code-unit order; deterministic within and across runs.
+    // A char16 loop (not memcmp): on little-endian targets memcmp compares
+    // the low byte first, which misorders units >= U+0100 against units
+    // below it (e.g. U+0100 sorts before U+00FF). This must agree with the
+    // dynamic-path comparator in JavascriptOperators (code-unit loop).
     uint32 leftCch = left->Cch();
     uint32 rightCch = right->Cch();
     uint32 minCch = leftCch < rightCch ? leftCch : rightCch;
-    int result = memcmp(left->Psz(), right->Psz(), minCch * sizeof(char16));
-    if (result != 0)
+    const char16* leftPsz = left->Psz();
+    const char16* rightPsz = right->Psz();
+    for (uint32 i = 0; i < minCch; i++)
     {
-        return result < 0 ? -1 : 1;
+        if (leftPsz[i] != rightPsz[i])
+        {
+            return leftPsz[i] < rightPsz[i] ? -1 : 1;
+        }
     }
     if (leftCch < rightCch)
     {
@@ -3521,7 +3529,7 @@ void Parser::MakeModuleAsync()
 template<bool buildAST> ParseNodePtr Parser::ParseImportCall()
 {
     this->GetScanner()->Scan();
-    ParseNodePtr specifier = ParseExpr<buildAST>(koplCma, nullptr, /* fAllowIn */FALSE, /* fAllowEllipsis */FALSE);
+    ParseNodePtr specifier = ParseExpr<buildAST>(koplCma, nullptr, /* fAllowIn */TRUE, /* fAllowEllipsis */FALSE);
     ParseNodePtr args = specifier;
     if (m_token.tk == tkComma)
     {
@@ -3532,7 +3540,7 @@ template<bool buildAST> ParseNodePtr Parser::ParseImportCall()
         this->GetScanner()->Scan();
         if (m_token.tk != tkRParen)
         {
-            ParseNodePtr options = ParseExpr<buildAST>(koplCma, nullptr, /* fAllowIn */FALSE, /* fAllowEllipsis */FALSE);
+            ParseNodePtr options = ParseExpr<buildAST>(koplCma, nullptr, /* fAllowIn */TRUE, /* fAllowEllipsis */FALSE);
             if (m_token.tk == tkComma)
             {
                 this->GetScanner()->Scan();

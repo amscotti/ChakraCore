@@ -65,7 +65,7 @@ syntax, source-phase (`source`/`bytes`/`text`) imports.
   property, the prototype is `Object.prototype`, the namespace exposes
   **only** `default`, and invalid JSON is a `SyntaxError` at evaluation.
   Attribute-bearing requests get an attribute-suffixed `moduleKey` parsed
-  through `ModuleMessage::WithAttributes` + `directParse`
+  through `ModuleMessage::CreateWithAttributes` + `directParse`
   (`ParseModuleSourceOnRecord`) instead of the path-keyed
   `LoadModuleFromString`; empty attributes keep the legacy plain-path key.
   Non-empty unsupported `type` values fail the fetch (dynamic: `URIError`
@@ -86,8 +86,8 @@ syntax, source-phase (`source`/`bytes`/`text`) imports.
 ## Parser/AST design
 
 - `ParseOptionalWithClause` / `ParseWithClause` build a sorted
-  `ModuleAttributeList` with duplicate detection; keys keep their
-  `ParseNode` form for error fidelity, values are string literals only.
+  `ModuleAttributeList` with duplicate detection; keys are stored as
+  `IdentPtr`s, values are string literals only.
 - `ParseNodeModule.requestedModules` is now a `ModuleRequestList` of
   `{ specifier, attributes }` pairs; static import/export entries carry
   `ModuleImportOrExportEntry.attributes` for the emitter and the runtime
@@ -259,8 +259,8 @@ CRLF lines are not flagged by `git diff --check` (now clean).
 - Dynamic `import()` of a JSON module in `ch` resolves relative to the
   referring script path; remote URLs are unsupported (pre-existing host
   limitation).
-- `JsGetOwnPropertyNames` was added to the `ch` hook table for
-  `TryGetImportAttributes` enumeration; older `ch` binaries without the
+- `JsGetOwnPropertyNames` was added to the `ch` hook table for the
+  host `ReadModuleAttributes` enumeration; older `ch` binaries without the
   export leave a null hook — hosts must take the lane's `ch` (or provide
   the export).
 - Static-link attribute read errors surface through the recorded
@@ -295,7 +295,7 @@ CRLF lines are not flagged by `git diff --check` (now clean).
 - `bin/ch/ChakraRtInterface.h/.cpp`, `bin/ch/WScriptJsrt.h/.cpp`:
   callback registration, `ReadModuleAttributes`,
   `WrapJsonModuleSource`, `FetchImportedModuleHelperWithAttributes`,
-  `ModuleMessage::WithAttributes` + `directParse`, attribute-suffixed
+  `ModuleMessage::CreateWithAttributes` + `directParse`, attribute-suffixed
   keys, `PrintException`/`ParseSource` hardening.
 - `test/es6module/module-syntax.js`, `dynamic-module-functionality.js`,
   `dynamic-module-import-specifier.js`: coverage entries (fix round:
@@ -361,3 +361,43 @@ was also run against the pre-fix binary and fails there.
   `libChakraCoreStatic.a: 526 members, require 524`; reproduced at
   the unmodified lane tip (stash + rebuild), so it predates this fix
   round and is unrelated (no translation unit added or removed).
+
+## Fix round (loop-3 defects D4, D-in)
+
+Both defects reproduced on the lane binary before fixing (D4:
+`DIFFERENT-RECORDS` on the exact static-vs-dynamic scenario the new
+test encodes; D-in: `SyntaxError: Expected ')'` for `in` in either
+`import()` argument, same shapes the new eval assertions encode); the
+committed regression tests fail on those pre-fix behaviors.
+
+- D4 parser (`lib/Parser/Parse.cpp`, `CompareModuleAttributeKeys`):
+  the static comparator used `memcmp` over UTF-16 bytes, which on
+  little-endian targets misorders units >= U+0100 against lower units
+  (U+0100 sorted before U+00FF), while the dynamic path
+  (`TryGetImportAttributes`) sorts by UTF-16 code unit — so the loop-1
+  claim that the dynamic order "matches the parse-time-sorted static
+  path" held only for ASCII/Latin-1 keys. Replaced with a `char16`
+  code-unit loop; behavior-preserving for ASCII/Latin-1. Regression
+  test: static vs dynamic non-ASCII attribute sets now share one
+  module record (`dynamic-module-functionality.js` +
+  `importattrs-nonascii.js` fixture).
+- D-in parser (`lib/Parser/Parse.cpp`, `ParseImportCall`): both
+  `import()` arguments were parsed with `fAllowIn` FALSE, wrongly
+  rejecting the grammar's `AssignmentExpression[+In]`
+  (`import('a' in {} ? 'b' : 'c')` and
+  `import('m.js', 'a' in {} ? {} : null)` failed to parse). Flipped
+  both to TRUE; the single `<bool buildAST>` template covers full
+  parse and fast scan, so no grammar ambiguity is introduced in
+  either mode. Regression coverage for both argument positions
+  (`dynamic-module-import-specifier.js`).
+- Nits: `ModuleMessage::WithAttributes` corrected to the real factory
+  name `ModuleMessage::CreateWithAttributes`; attribute keys recorded
+  as stored `IdentPtr`s; `JsGetOwnPropertyNames` recorded as serving
+  the `ch` host `ReadModuleAttributes` enumeration. The stale
+  "always returns an object" wording on `BuildModuleAttributesObject`
+  was already corrected in the loop-1 round (header documents the
+  `nullptr` return); no change needed.
+- Gates: `mise x -- zig build check` PASS and `check-regression
+  -Dprofile=debug-static` at `tools/build/gate_counts.json`
+  (2012/2064); import-attributes corpus subset + both defect repros
+  re-run (deltas recorded by the round driver).

@@ -524,6 +524,24 @@ var tests = [
                 )`;
             testScript(staticBody, "Static and dynamic spellings of one attribute set share one record", false, true);
             testModuleScript(staticBody, "Static and dynamic spellings of one attribute set share one record", false, true);
+            // Non-ASCII keys sort by UTF-16 code unit on both paths, so a
+            // static spelling in one order and a dynamic spelling in the
+            // opposite order share one record (U+0100 vs U+00FF diverge
+            // under byte-order comparison, which the parser used before).
+            let nonAsciiBody =
+                `testDynamicImport(
+                    ()=>{ return Promise.all([
+                        import(\'importattrs-counter.js\', { with: { "\u00FF": "2", "\u0100": "1" } }),
+                        import(\'importattrs-nonascii.js\')
+                    ]); },
+                    (v)=>{
+                        assert.isTrue(v[0].inc === v[1].inc, \'static and dynamic non-ASCII attribute sets share the record\');
+                        assert.isTrue(v[0].get === v[1].get, \'static and dynamic non-ASCII attribute sets share the record\');
+                    },
+                    (err)=>{ assert.fail(\'Expected fulfillment: \' + (err && err.message)); }, _asyncEnter, _asyncExit
+                )`;
+            testScript(nonAsciiBody, "Static and dynamic non-ASCII attribute sets share one record", false, true);
+            testModuleScript(nonAsciiBody, "Static and dynamic non-ASCII attribute sets share one record", false, true);
             // An empty "with" is the same request as no attributes.
             let emptyBody =
                 `testDynamicImport(

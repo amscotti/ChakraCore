@@ -74,6 +74,8 @@ var tests = [
                     assert.doesNotThrow(function () { eval("import('number' + 100 + 0.4 * 18)"); }, "expression");
                     assert.doesNotThrow(function () { eval("import(import(true))"); }, "nested import");
                     assert.doesNotThrow(function () { eval("import(import(Infinity) + import(undefined))"); }, "nested import expression");
+                    assert.doesNotThrow(function () { eval("import('a' in {} ? 'b.js' : 'c.js')"); }, "in-operator in first argument");
+                    assert.doesNotThrow(function () { eval("import('abc.js', 'a' in {} ? {} : null)"); }, "in-operator in second argument");
                     `;
 
                 testScript(functionBody, "Test importing a simple exported function");
