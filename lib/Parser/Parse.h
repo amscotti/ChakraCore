@@ -496,11 +496,9 @@ private:
     // so their bodies have their own lexical `this` and correctly parented
     // nested functions.
     bool m_inClassFieldInitializer;
-    // S1 static super: true while parsing a static field initializer, so
-    // stub builds (which have no helper context yet) can allow super.property
-    // without recording it on the enclosing function. Save/restore alongside
-    // m_inClassFieldInitializer; nested classes reset it per member.
-    bool m_inStaticClassFieldInitializer;
+    // (Static-ness of a field initializer is carried by the helper node's
+    // isStaticClassFieldInitializer marker for full parses; stub builds only
+    // need m_inClassFieldInitializer for the super.property scan allowance.)
     // S1 static blocks: true while fast-scanning a static-block body (which
     // has no helper context yet) so `return` there stays an early error.
     // Full parses use the helper's isClassStaticBlock marker instead; nested

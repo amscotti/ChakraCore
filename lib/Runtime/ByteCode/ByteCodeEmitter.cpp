@@ -12710,6 +12710,11 @@ void EmitClass(ParseNodeClass * pnodeClass, ByteCodeGenerator * byteCodeGenerato
             }
             pnodePendingInstanceFields = pnodePendingInstanceFields->AsParseNodeBin()->pnode2;
         }
+        // Every member is exactly one of: static field, static block, or a
+        // method-shaped member (public/private, defined in this walk).
+        Assert(IsStaticFieldMemberNode(pnodeMember) || IsStaticBlockMemberNode(pnodeMember) ||
+            (pnodeMember->AsParseNodeBin()->pnode2 != nullptr &&
+             pnodeMember->AsParseNodeBin()->pnode2->nop == knopFncDecl));
         if (IsStaticFieldMemberNode(pnodeMember))
         {
             ParseNode * pnodeStaticName = pnodeMember->AsParseNodeBin()->pnode1;

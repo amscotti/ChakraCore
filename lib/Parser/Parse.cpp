@@ -172,7 +172,6 @@ Parser::Parser(Js::ScriptContext* scriptContext, BOOL strictMode, PageAllocator 
     m_hasDeferredShorthandInitError(false),
     m_deferCommaError(false),
     m_inClassFieldInitializer(false),
-    m_inStaticClassFieldInitializer(false),
     m_inClassStaticBlock(false),
     m_currentClassHasFields(true),
     m_disallowSuperCallInEval(false),
@@ -10231,11 +10230,9 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
 
                 bool usesArgumentsSave = m_classFieldInitializerUsesArguments;
                 bool inFieldInitializerSave = m_inClassFieldInitializer;
-                bool inStaticFieldInitializerSave = m_inStaticClassFieldInitializer;
                 bool inStaticBlockSave = m_inClassStaticBlock;
                 m_classFieldInitializerUsesArguments = false;
                 m_inClassFieldInitializer = true;
-                m_inStaticClassFieldInitializer = true;
                 m_inClassStaticBlock = true;
 
                 ParseNodeFnc * pnodeBlockFnc = nullptr;
@@ -10305,7 +10302,6 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
 
                 m_classFieldInitializerUsesArguments = m_classFieldInitializerUsesArguments || usesArgumentsSave;
                 m_inClassFieldInitializer = inFieldInitializerSave;
-                m_inStaticClassFieldInitializer = inStaticFieldInitializerSave;
                 m_inClassStaticBlock = inStaticBlockSave;
 
                 if (m_classFieldInitializerUsesArguments)
@@ -10610,10 +10606,8 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
 
                 bool usesArgumentsSave = m_classFieldInitializerUsesArguments;
                 bool inFieldInitializerSave = m_inClassFieldInitializer;
-                bool inStaticFieldInitializerSave = m_inStaticClassFieldInitializer;
                 m_classFieldInitializerUsesArguments = false;
                 m_inClassFieldInitializer = true;
-                m_inStaticClassFieldInitializer = isStatic;
 
                 if (buildAST)
                 {
@@ -10634,7 +10628,6 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
 
                 m_classFieldInitializerUsesArguments = m_classFieldInitializerUsesArguments || usesArgumentsSave;
                 m_inClassFieldInitializer = inFieldInitializerSave;
-                m_inStaticClassFieldInitializer = inStaticFieldInitializerSave;
 
                 if (m_classFieldInitializerUsesArguments)
                 {
