@@ -8564,15 +8564,51 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
                 return;
             }
 
-            // Body eval: the first environment is either the body's lexical
-            // environment or its variable environment. A lexical arguments
-            // binding conflicts; a parameter named arguments lives in the
-            // merged variable environment and does not.
-            if (FrameDisplay::GetScopeType(pDisplay->GetItem(0)) == ScopeType_ActivationObject)
+            // Body eval: walk the caller's environment chain to its variable
+            // environment, which is the first plain activation object. Catch
+            // and block environments between the eval and that environment
+            // are intermediate declarative environments for
+            // EvalDeclarationInstantiation, so an arguments binding in any of
+            // them also conflicts. Earlier versions stopped at the first
+            // activation object, which let a catch environment hide an outer
+            // body lexical binding. A with object or slot array holds no
+            // declarative lexical binding and is skipped.
+            for (i = 0; i < length; i++)
             {
-                ActivationObject *firstScope = VarTo<ActivationObject>(pDisplay->GetItem(0));
+                if (FrameDisplay::GetScopeType(pDisplay->GetItem(i)) != ScopeType_ActivationObject)
+                {
+                    continue;
+                }
+
+                ActivationObject *scope = VarTo<ActivationObject>(pDisplay->GetItem(i));
+
+                if (VarIs<BlockActivationObject>(scope))
+                {
+                    // A block activation object only holds lexical bindings;
+                    // any own arguments binding here is a conflict.
+                    scope->EnsureNoRedeclProperty(propertyId);
+                    continue;
+                }
+
                 bool noRedecl = false;
-                bool hasBinding = firstScope->GetTypeHandler()->HasProperty(firstScope, propertyId, &noRedecl);
+                bool hasBinding = scope->GetTypeHandler()->HasProperty(scope, propertyId, &noRedecl);
+
+                if (VarIs<PseudoActivationObject>(scope))
+                {
+                    // Catch and function-expression scopes. Annex B.3.5 lets
+                    // a simple catch parameter be redeclared by a var, so
+                    // only a let-like (pattern) catch binding conflicts.
+                    if (hasBinding && noRedecl)
+                    {
+                        JavascriptError::ThrowSyntaxError(scriptContext, ERRRedeclaration);
+                    }
+                    continue;
+                }
+
+                // The first plain activation object is the eval's variable
+                // environment. A lexical arguments binding there conflicts; a
+                // parameter named arguments lives in the merged variable
+                // environment and does not.
                 if (hasBinding && noRedecl &&
                     !scriptContext->IsEvalCallerParameterArguments())
                 {
