@@ -1,7 +1,8 @@
 # C2-S14 residual: hidden outer eval `arguments` binding
 
-Status: **pending** — implementation and focused Mac ARM64 no-JIT evidence only;
-not merged and no gate-pin update. Base `183e7fab0`.
+Status: **landed** — commit `d9a1998d1`, merge `13e925a75`; final gates
+**2021/0 test** and **2073/0 debug-static**. Mac ARM64 no-JIT evidence only;
+no gate-pin change. Base `183e7fab0`.
 
 ## Problem
 
@@ -51,9 +52,11 @@ synchronously.
 ## Evidence
 
 Focused `test/es7/eval-arguments-declarations.js` (existing one-entry rlexe
-test, so expected gate pins do not change): **pass** on the test binary,
+test, so gate pins do not change): **pass** on test and debug-static,
 including the former known-residual catch case and new catch/block/if/with,
-nested-block, arrow, split-parameter and generator coverage. Adjacent
+nested-block, arrow, split-parameter and generator coverage. The merged
+full gates are **2021/0 test** and **2073/0 debug-static**, `zig build check`
+**583/583**. Adjacent
 `eval-arguments-declarations`, `default-splitscope`,
 `global-eval-declarations` and `annexb-block-function-var` files: **5/0**.
 

@@ -400,7 +400,8 @@ false accepts fixed in `39e9f2a16`), the flag-on S6a slice has growable
 SharedArrayBuffer plus ES2020 non-shared Atomics (focused S6 574/982;
 112 fail→pass / 0 pass→fail; debug index-detach abort fixed), and S6b adds
 `Atomics.pause` plus single-thread `waitAsync` (80/124; 0 pass→fail) while
-SAB/Atomics remain off by default.
+SAB/Atomics remain off by default. The catch-hidden eval-`arguments`
+under-rejection is also closed (focused eval-code 454/0, gates unchanged).
 The 30-directory fixture-cache subset has also been rerun with the fixed
 harness: **1,367/998 of 2,365**, 0 pass→fail and 102 fail→pass versus the old
 precombined result ([c4-fixture-rerun.md](c4-fixture-rerun.md)). S3

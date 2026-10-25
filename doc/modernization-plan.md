@@ -675,11 +675,13 @@ false accepts and the debug index-detach Atomics abort in `39e9f2a16`
 (gates unchanged). S6b then added `Atomics.pause` and single-thread
 `Atomics.waitAsync` (merge `eef3b93c5`; focused 80/124, 0 pass→fail;
 finite timeout and cross-agent suspension remain), moving the gates to
-2021/2073. All active feature/triage worktrees are merged; next work
-items are the remaining S6 flag-on gaps (finite timeout scheduling,
-cross-agent waitAsync, BigInt Atomics, multi-agent wait/grow), the
-documented S8/S2/P-eval residuals, and the C4 qualification work (full
-baseline rerun, host-reported negative phase). Tracked eval residuals: P4 body eval with non-simple
+2021/2073. S14 then closed the catch-hidden eval-`arguments` under-rejection
+(merge `13e925a75`, receipt [c2-s14-eval-hidden-outer.md](c2-s14-eval-hidden-outer.md);
+focused eval-code 454/0, gates unchanged). All active feature/triage
+worktrees are merged; next work items are the remaining S6 flag-on gaps
+(finite timeout scheduling, cross-agent waitAsync, BigInt Atomics,
+multi-agent wait/grow), the documented S8/S2/P-eval residuals, and the C4
+qualification work (full baseline rerun, host-reported negative phase). Tracked eval residuals: P4 body eval with non-simple
 parameters; P2 hidden outer lexical and JSC/Node delete difference.
 S3 (Unicode data decision), S6 default (product/security decision),
 B4 and C4 remain decision- or gate-blocked. A repair loop then closed

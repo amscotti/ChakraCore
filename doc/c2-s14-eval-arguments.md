@@ -181,13 +181,14 @@ the body scope.
   pre-existing `ReferenceError`; this slice does not claim it.
 - Indirect eval, global code and module code are outside the trigger: no
   caller parameter scope is involved.
-- Hidden-outer lexical under-rejection remains. The body rule inspects the
-  first activation environment, so a top-level body `let`/`const arguments`
-  hidden behind an inner catch environment is accepted:
-  `function f(){ let arguments=1; try { throw 1; } catch (e) { eval("var arguments"); } }`.
-  Block, if, with, generator and split forms are detected. The catch shape,
-  and a nested block with a parameter named `arguments`, are not conformance
-  and are pinned as a focused known-residual test.
+- The hidden-outer lexical under-rejection is closed in `d9a1998d1`
+  (merged with the follow-up): the body rule now walks through catch/block
+  activation objects, so a top-level body `let`/`const arguments` hidden
+  behind an inner catch environment throws the spec `SyntaxError`.
+  Parameter-named `arguments`, simple catch parameters, `with` objects and
+  nested-arrow variable environments retain their allowed controls. See
+  [c2-s14-eval-hidden-outer.md](c2-s14-eval-hidden-outer.md). Focused
+  eval-code remained **454/0**.
 - `delete` of the eval-created binding matches JSC/spec, not Node: the binding
   is a non-configurable var, so `delete arguments` is false and the value is
   preserved. Node 26 instead deletes the arrow-parameter eval binding and
