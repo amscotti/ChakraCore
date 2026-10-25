@@ -5391,7 +5391,17 @@ CommonNumber:
                 // if this was numeric index, return operation status else
                 // Return the result of calling the default ordinary object [[Set]] internal method (9.1.8) on O passing P, V, and Receiver as arguments.
                 if (isNumericIndex)
+                {
+                    // [[Set]] returns false for an immutable view; only a
+                    // strict-mode assignment turns that into a TypeError.
+                    if (!returnValue &&
+                        (flags & PropertyOperation_StrictMode) &&
+                        IsImmutableBuffer(VarTo<TypedArrayBase>(instance)->GetArrayBuffer()))
+                    {
+                        JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedArrayBufferObject);
+                    }
                     return returnValue;
+                }
             }
         }
         else

@@ -6423,7 +6423,7 @@ Case0:
                     {
                         Js::Var constructorArgs[] = { constructor, JavascriptNumber::ToVar(newLenT, scriptContext) };
                         Js::CallInfo constructorCallInfo(Js::CallFlags_New, _countof(constructorArgs));
-                        return TypedArrayBase::TypedArrayCreate(constructor, &Js::Arguments(constructorCallInfo, constructorArgs), (uint32)newLenT, scriptContext);
+                        return TypedArrayBase::TypedArrayCreate(constructor, &Js::Arguments(constructorCallInfo, constructorArgs), (uint32)newLenT, scriptContext, true);
                     }));
             );
         }
@@ -10055,7 +10055,7 @@ Case0:
                     {
                         Js::Var constructorArgs[] = {constructor, JavascriptNumber::ToVar(length, scriptContext) };
                         Js::CallInfo constructorCallInfo(Js::CallFlags_New, _countof(constructorArgs));
-                        return TypedArrayBase::TypedArrayCreate(constructor, &Js::Arguments(constructorCallInfo, constructorArgs), (uint32)length, scriptContext);
+                        return TypedArrayBase::TypedArrayCreate(constructor, &Js::Arguments(constructorCallInfo, constructorArgs), (uint32)length, scriptContext, true);
                     }));
             )
         }
@@ -11041,7 +11041,7 @@ Case0:
                     Js::CallInfo constructorCallInfo(Js::CallFlags_New, _countof(constructorArgs));
                     if (isTypedArrayEntryPoint)
                     {
-                        return TypedArrayBase::TypedArrayCreate(constructor, &Js::Arguments(constructorCallInfo, constructorArgs), len, scriptContext);
+                        return TypedArrayBase::TypedArrayCreate(constructor, &Js::Arguments(constructorCallInfo, constructorArgs), len, scriptContext, true);
                     }
                     else
                     {

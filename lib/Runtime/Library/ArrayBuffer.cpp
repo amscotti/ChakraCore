@@ -588,6 +588,25 @@ namespace Js
         return VarTo<ArrayBuffer>(args[0])->IsResizable() ? scriptContext->GetLibrary()->GetTrue() : scriptContext->GetLibrary()->GetFalse();
     }
 
+    // ArrayBuffer.prototype.immutable getter. The slot is fixed for the
+    // lifetime of an immutable buffer and is independent of detach state.
+    Var ArrayBuffer::EntryGetterImmutable(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+        ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+
+        Assert(!(callInfo.Flags & CallFlags_New));
+
+        if (args.Info.Count == 0 || !VarIs<ArrayBuffer>(args[0]))
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedArrayBufferObject);
+        }
+
+        return VarTo<ArrayBuffer>(args[0])->IsImmutable() ? scriptContext->GetLibrary()->GetTrue() : scriptContext->GetLibrary()->GetFalse();
+    }
+
     void ArrayBuffer::Resize(uint32 newByteLength)
     {
         Assert(!this->isDetached);
@@ -620,7 +639,7 @@ namespace Js
         }
 
         ArrayBuffer* arrayBuffer = VarTo<ArrayBuffer>(args[0]);
-        if (!arrayBuffer->IsResizable())
+        if (arrayBuffer->IsImmutable() || !arrayBuffer->IsResizable())
         {
             JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedArrayBufferObject);
         }
@@ -650,7 +669,7 @@ namespace Js
         state->CleanUp();
     }
 
-    static ArrayBuffer* TransferBuffer(ArrayBuffer* source, Var newLength, bool preserveResizability, const char16* funcName, ScriptContext* scriptContext)
+    static ArrayBuffer* TransferBuffer(ArrayBuffer* source, Var newLength, bool preserveResizability, bool immutable, const char16* funcName, ScriptContext* scriptContext)
     {
         JavascriptLibrary* library = scriptContext->GetLibrary();
 
@@ -672,6 +691,13 @@ namespace Js
             JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, funcName);
         }
 
+        // ArrayBufferCopyAndDetach step 6: an immutable buffer can never be
+        // detached or transferred, independent of the requested length.
+        if (source->IsImmutable())
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedArrayBufferObject);
+        }
+
         if (newByteLengthValue > (double)ArrayBuffer::MaxArrayBufferLength)
         {
             JavascriptError::ThrowRangeError(scriptContext, JSERR_ArrayLengthConstructIncorrect);
@@ -685,7 +711,7 @@ namespace Js
             JavascriptError::ThrowTypeError(scriptContext, WASMERR_CantDetach);
         }
 
-        bool resizable = preserveResizability && source->IsResizable();
+        bool resizable = !immutable && preserveResizability && source->IsResizable();
         uint32 maxByteLength = resizable ? source->GetMaxByteLength() : newByteLength;
         if (resizable && newByteLength > maxByteLength)
         {
@@ -695,6 +721,10 @@ namespace Js
         ArrayBuffer* destination = resizable
             ? library->CreateResizableArrayBuffer(newByteLength, maxByteLength)
             : library->CreateArrayBuffer(newByteLength);
+        if (immutable)
+        {
+            destination->SetImmutable();
+        }
 
         uint32 sourceLength = source->GetByteLength();
         uint32 copyLength = newByteLength < sourceLength ? newByteLength : sourceLength;
@@ -724,7 +754,27 @@ namespace Js
 
         ArrayBuffer* arrayBuffer = VarTo<ArrayBuffer>(args[0]);
         Var newLength = args.Info.Count > 1 ? args[1] : scriptContext->GetLibrary()->GetUndefined();
-        return TransferBuffer(arrayBuffer, newLength, true, _u("ArrayBuffer.prototype.transfer"), scriptContext);
+        return TransferBuffer(arrayBuffer, newLength, true, false, _u("ArrayBuffer.prototype.transfer"), scriptContext);
+    }
+
+    // ArrayBuffer.prototype.transferToImmutable ( [ newLength ] )
+    Var ArrayBuffer::EntryTransferToImmutable(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+        ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+
+        Assert(!(callInfo.Flags & CallFlags_New));
+
+        if (args.Info.Count == 0 || !VarIs<ArrayBuffer>(args[0]))
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedArrayBufferObject);
+        }
+
+        ArrayBuffer* arrayBuffer = VarTo<ArrayBuffer>(args[0]);
+        Var newLength = args.Info.Count > 1 ? args[1] : scriptContext->GetLibrary()->GetUndefined();
+        return TransferBuffer(arrayBuffer, newLength, false, true, _u("ArrayBuffer.prototype.transferToImmutable"), scriptContext);
     }
 
     // ArrayBuffer.prototype.transferToFixedLength ( [ newLength ] )
@@ -744,7 +794,7 @@ namespace Js
 
         ArrayBuffer* arrayBuffer = VarTo<ArrayBuffer>(args[0]);
         Var newLength = args.Info.Count > 1 ? args[1] : scriptContext->GetLibrary()->GetUndefined();
-        return TransferBuffer(arrayBuffer, newLength, false, _u("ArrayBuffer.prototype.transferToFixedLength"), scriptContext);
+        return TransferBuffer(arrayBuffer, newLength, false, false, _u("ArrayBuffer.prototype.transferToFixedLength"), scriptContext);
     }
 
     // ArrayBuffer.isView as described in ES6 draft #20 section 24.1.3.1
@@ -799,6 +849,12 @@ namespace Js
         if (arrayBuffer->IsDetached())
         {
             JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, _u("ArrayBuffer.detach"));
+        }
+
+        // DetachArrayBuffer step 2: an immutable buffer is never detachable.
+        if (arrayBuffer->IsImmutable())
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedArrayBufferObject);
         }
 
         // Discard the buffer
@@ -895,6 +951,13 @@ namespace Js
             JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, _u("ArrayBuffer.prototype.slice"));
         }
 
+        // ArrayBuffer.prototype.slice step 23: the species result must not be
+        // immutable because slice fills it after construction.
+        if (newBuffer->IsImmutable())
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedArrayBufferObject);
+        }
+
         if (newBuffer == arrayBuffer) // 24.1.4.3: 22. If SameValue(new, O) is true, then throw a TypeError exception.
         {
             JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedArrayBufferObject);
@@ -936,6 +999,116 @@ namespace Js
         return newBuffer;
     }
 
+    namespace
+    {
+        // ResolveBounds (len, start, end) from the immutable-arraybuffer
+        // proposal. ToIntegerOrInfinity clamps to len for positive values and
+        // to zero for negative values below -len; NaN and -0 become zero.
+        void ResolveArrayBufferBounds(Var start, Var end, uint32 len, ScriptContext* scriptContext, uint32* first, uint32* final)
+        {
+            double relativeStart = JavascriptConversion::ToInteger(start, scriptContext);
+            double from;
+            if (JavascriptNumber::IsNegInf(relativeStart))
+            {
+                from = 0;
+            }
+            else if (relativeStart < 0)
+            {
+                from = max((double)len + relativeStart, 0.0);
+            }
+            else
+            {
+                from = min(relativeStart, (double)len);
+            }
+
+            double relativeEnd;
+            if (JavascriptOperators::IsUndefined(end))
+            {
+                relativeEnd = (double)len;
+            }
+            else
+            {
+                relativeEnd = JavascriptConversion::ToInteger(end, scriptContext);
+            }
+
+            double to;
+            if (JavascriptNumber::IsNegInf(relativeEnd))
+            {
+                to = 0;
+            }
+            else if (relativeEnd < 0)
+            {
+                to = max((double)len + relativeEnd, 0.0);
+            }
+            else
+            {
+                to = min(relativeEnd, (double)len);
+            }
+
+            *first = (uint32)from;
+            *final = (uint32)to;
+        }
+
+        ArrayBuffer* CreateImmutableArrayBuffer(uint32 length, ScriptContext* scriptContext)
+        {
+            ArrayBuffer* buffer = scriptContext->GetLibrary()->CreateArrayBuffer(length);
+            buffer->SetImmutable();
+            return buffer;
+        }
+    }
+
+    // ArrayBuffer.prototype.sliceToImmutable ( start, end )
+    Var ArrayBuffer::EntrySliceToImmutable(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+        ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+
+        Assert(!(callInfo.Flags & CallFlags_New));
+
+        if (args.Info.Count == 0 || !VarIs<ArrayBuffer>(args[0]))
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedArrayBufferObject);
+        }
+
+        ArrayBuffer* arrayBuffer = VarTo<ArrayBuffer>(args[0]);
+        if (arrayBuffer->IsDetached())
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, _u("ArrayBuffer.prototype.sliceToImmutable"));
+        }
+
+        JavascriptLibrary* library = scriptContext->GetLibrary();
+        Var start = args.Info.Count > 1 ? args[1] : library->GetUndefined();
+        Var end = args.Info.Count > 2 ? args[2] : library->GetUndefined();
+        uint32 len = arrayBuffer->GetByteLength();
+        uint32 first = 0;
+        uint32 final = 0;
+        ResolveArrayBufferBounds(start, end, len, scriptContext, &first, &final);
+
+        // Bounds coercion can detach or resize the receiver.
+        if (arrayBuffer->IsDetached())
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, _u("ArrayBuffer.prototype.sliceToImmutable"));
+        }
+
+        uint32 currentLength = arrayBuffer->GetByteLength();
+        if (currentLength < final)
+        {
+            JavascriptError::ThrowRangeError(scriptContext, JSERR_ArrayLengthConstructIncorrect);
+        }
+
+        uint32 newLength = final > first ? final - first : 0;
+        ArrayBuffer* newBuffer = CreateImmutableArrayBuffer(newLength, scriptContext);
+        uint32 copyLength = first < currentLength ? min(newLength, currentLength - first) : 0;
+        if (copyLength > 0)
+        {
+            AssertMsg(arrayBuffer->GetBuffer() != nullptr, "buffer must not be null when we copy from it");
+            js_memcpy_s(newBuffer->GetBuffer(), newLength, arrayBuffer->GetBuffer() + first, copyLength);
+        }
+        return newBuffer;
+    }
+
     Var ArrayBuffer::EntryGetterSymbolSpecies(RecyclableObject* function, CallInfo callInfo, ...)
     {
         ARGUMENTS(args, callInfo);
@@ -972,7 +1145,7 @@ namespace Js
     template <class Allocator>
     ArrayBuffer::ArrayBuffer(uint32 length, DynamicType * type, Allocator allocator) :
         ArrayBufferBase(type), bufferContent(nullptr), bufferLength(0),
-        maxByteLength(0), allocatedByteLength(0), isResizable(false)
+        maxByteLength(0), allocatedByteLength(0), isResizable(false), isImmutable(false)
     {
         if (length > MaxArrayBufferLength)
         {
@@ -1024,7 +1197,7 @@ namespace Js
     template <class Allocator>
     ArrayBuffer::ArrayBuffer(uint32 length, uint32 maxByteLength, DynamicType * type, Allocator allocator) :
         ArrayBufferBase(type), bufferContent(nullptr), bufferLength(0),
-        maxByteLength(maxByteLength), allocatedByteLength(0), isResizable(true)
+        maxByteLength(maxByteLength), allocatedByteLength(0), isResizable(true), isImmutable(false)
     {
         if (maxByteLength > MaxArrayBufferLength)
         {
@@ -1079,7 +1252,7 @@ namespace Js
 
     ArrayBuffer::ArrayBuffer(RefCountedBuffer* buffContent, uint32 length, DynamicType * type)
        : ArrayBufferBase(type), bufferContent(nullptr), bufferLength(length),
-       maxByteLength(length), allocatedByteLength(length), isResizable(false)
+       maxByteLength(length), allocatedByteLength(length), isResizable(false), isImmutable(false)
     {
         if (length > MaxArrayBufferLength)
         {
@@ -1103,7 +1276,7 @@ namespace Js
 
     ArrayBuffer::ArrayBuffer(byte* buffer, uint32 length, DynamicType * type, bool isExternal) :
         ArrayBufferBase(type), bufferContent(nullptr), bufferLength(length),
-        maxByteLength(length), allocatedByteLength(length), isResizable(false)
+        maxByteLength(length), allocatedByteLength(length), isResizable(false), isImmutable(false)
     {
         if (length > MaxArrayBufferLength)
         {

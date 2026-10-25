@@ -612,5 +612,10 @@ BUILTIN(SharedArrayBuffer, Grow, EntryGrow, FunctionInfo::ErrorOnNew)
 // entries so every pre-existing BuiltInEnum value stays stable.
 BUILTIN(AtomicsObject, Pause, EntryPause, FunctionInfo::ErrorOnNew)
 BUILTIN(AtomicsObject, WaitAsync, EntryWaitAsync, FunctionInfo::ErrorOnNew)
+// Immutable ArrayBuffer proposal. Appended after the existing entries so
+// every pre-existing BuiltInEnum value stays stable.
+BUILTIN(ArrayBuffer, SliceToImmutable, EntrySliceToImmutable, FunctionInfo::ErrorOnNew)
+BUILTIN(ArrayBuffer, TransferToImmutable, EntryTransferToImmutable, FunctionInfo::ErrorOnNew)
+BUILTIN(ArrayBuffer, GetterImmutable, EntryGetterImmutable, FunctionInfo::ErrorOnNew | FunctionInfo::HasNoSideEffect)
 
 #undef BUILTIN_TEMPLATE

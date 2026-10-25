@@ -160,9 +160,9 @@ namespace Js
         // Returns false if this is not a TypedArray or it's not detached
         static BOOL IsDetachedTypedArray(Var aValue);
         static HRESULT GetBuffer(Var aValue, ArrayBuffer** outBuffer, uint32* outOffset, uint32* outLength);
-        static TypedArrayBase * ValidateTypedArray(Var aValue, ScriptContext *scriptContext, LPCWSTR apiName);
-        static TypedArrayBase * ValidateTypedArray(Arguments &args, ScriptContext *scriptContext, LPCWSTR apiName);
-        static Var TypedArrayCreate(Var constructor, Arguments *args, uint32 length, ScriptContext *scriptContext);
+        static TypedArrayBase * ValidateTypedArray(Var aValue, ScriptContext *scriptContext, LPCWSTR apiName, bool writeAccess = false);
+        static TypedArrayBase * ValidateTypedArray(Arguments &args, ScriptContext *scriptContext, LPCWSTR apiName, bool writeAccess = false);
+        static Var TypedArrayCreate(Var constructor, Arguments *args, uint32 length, ScriptContext *scriptContext, bool writeAccess = false);
         // Same element type and length. Does not read constructor or @@species.
         static TypedArrayBase* CreateSameType(TypedArrayBase* exemplar, uint32 length);
 
@@ -500,6 +500,11 @@ namespace Js
 
         inline BOOL BaseTypedDirectSetItem(_In_ uint32 index, _In_ Js::Var value, TypeName (*convFunc)(Var value, ScriptContext* scriptContext))
         {
+            if (IsImmutableBuffer(GetArrayBuffer()))
+            {
+                return FALSE;
+            }
+
             // This call can potentially invoke user code, and may end up detaching the underlying array (this).
             // Therefore it was brought out and above the IsDetached check
             TypeName typedValue = convFunc(value, GetScriptContext());
@@ -528,6 +533,11 @@ namespace Js
         // not throw for a detached buffer once conversion succeeded.
         inline BOOL BaseTypedBigIntDirectSetItem(_In_ uint32 index, _In_ Js::Var value, TypeName (*convFunc)(Var value, ScriptContext* scriptContext))
         {
+            if (IsImmutableBuffer(GetArrayBuffer()))
+            {
+                return FALSE;
+            }
+
             TypeName typedValue = convFunc(value, GetScriptContext());
 
             if (this->IsDetachedBuffer() || index >= GetLength())

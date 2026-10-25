@@ -18,7 +18,7 @@
 
 namespace Js
 {
-    ArrayBufferBase* AtomicsObject::ValidateIntegerTypedArray(Var typedArray, ScriptContext *scriptContext, bool onlyInt32, bool requireShared)
+    ArrayBufferBase* AtomicsObject::ValidateIntegerTypedArray(Var typedArray, ScriptContext *scriptContext, bool onlyInt32, bool requireShared, bool writeAccess)
     {
         if (!VarIs<TypedArrayBase>(typedArray))
         {
@@ -54,6 +54,13 @@ namespace Js
         if (arrayBuffer->IsDetached() || typedArrayBase->IsOutOfBounds())
         {
             JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray);
+        }
+
+        // ValidateTypedArray step 4: write-mode Atomics reject an immutable
+        // backing buffer before index or value coercion.
+        if (writeAccess && IsImmutableBuffer(arrayBuffer))
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedArrayBufferObject);
         }
 
         if (requireShared && !arrayBuffer->IsSharedArrayBuffer())
@@ -96,9 +103,9 @@ namespace Js
         }
     }
 
-    TypedArrayBase * AtomicsObject::ValidateAndGetTypedArray(Var typedArray, Var index, _Out_ uint32 *accessIndex, ScriptContext *scriptContext, bool onlyInt32, bool requireShared)
+    TypedArrayBase * AtomicsObject::ValidateAndGetTypedArray(Var typedArray, Var index, _Out_ uint32 *accessIndex, ScriptContext *scriptContext, bool onlyInt32, bool requireShared, bool writeAccess)
     {
-        ValidateIntegerTypedArray(typedArray, scriptContext, onlyInt32, requireShared);
+        ValidateIntegerTypedArray(typedArray, scriptContext, onlyInt32, requireShared, writeAccess);
         uint32 i = ValidateAtomicAccess(typedArray, index, scriptContext);
         if (accessIndex != nullptr)
         {
@@ -113,7 +120,7 @@ namespace Js
         ATOMICS_FUNCTION_ENTRY_CHECKS(3, "Atomics.add");
 
         uint32 accessIndex = 0;
-        TypedArrayBase *typedArrayBase = ValidateAndGetTypedArray(args[1], args[2], &accessIndex, scriptContext);
+        TypedArrayBase *typedArrayBase = ValidateAndGetTypedArray(args[1], args[2], &accessIndex, scriptContext, false, false, true /*writeAccess*/);
         return typedArrayBase->TypedAdd(accessIndex, args[3]);
     }
 
@@ -122,7 +129,7 @@ namespace Js
         ATOMICS_FUNCTION_ENTRY_CHECKS(3, "Atomics.and");
 
         uint32 accessIndex = 0;
-        TypedArrayBase *typedArrayBase = ValidateAndGetTypedArray(args[1], args[2], &accessIndex, scriptContext);
+        TypedArrayBase *typedArrayBase = ValidateAndGetTypedArray(args[1], args[2], &accessIndex, scriptContext, false, false, true /*writeAccess*/);
         return typedArrayBase->TypedAnd(accessIndex, args[3]);
     }
 
@@ -131,7 +138,7 @@ namespace Js
         ATOMICS_FUNCTION_ENTRY_CHECKS(4, "Atomics.compareExchange");
 
         uint32 accessIndex = 0;
-        TypedArrayBase *typedArrayBase = ValidateAndGetTypedArray(args[1], args[2], &accessIndex, scriptContext);
+        TypedArrayBase *typedArrayBase = ValidateAndGetTypedArray(args[1], args[2], &accessIndex, scriptContext, false, false, true /*writeAccess*/);
         return typedArrayBase->TypedCompareExchange(accessIndex, args[3], args[4]);
     }
 
@@ -140,7 +147,7 @@ namespace Js
         ATOMICS_FUNCTION_ENTRY_CHECKS(3, "Atomics.exchange");
 
         uint32 accessIndex = 0;
-        TypedArrayBase *typedArrayBase = ValidateAndGetTypedArray(args[1], args[2], &accessIndex, scriptContext);
+        TypedArrayBase *typedArrayBase = ValidateAndGetTypedArray(args[1], args[2], &accessIndex, scriptContext, false, false, true /*writeAccess*/);
         return typedArrayBase->TypedExchange(accessIndex, args[3]);
     }
 
@@ -186,7 +193,7 @@ namespace Js
         ATOMICS_FUNCTION_ENTRY_CHECKS(3, "Atomics.or");
 
         uint32 accessIndex = 0;
-        TypedArrayBase *typedArrayBase = ValidateAndGetTypedArray(args[1], args[2], &accessIndex, scriptContext);
+        TypedArrayBase *typedArrayBase = ValidateAndGetTypedArray(args[1], args[2], &accessIndex, scriptContext, false, false, true /*writeAccess*/);
         return typedArrayBase->TypedOr(accessIndex, args[3]);
     }
 
@@ -195,7 +202,7 @@ namespace Js
         ATOMICS_FUNCTION_ENTRY_CHECKS(3, "Atomics.store");
 
         uint32 accessIndex = 0;
-        TypedArrayBase *typedArrayBase = ValidateAndGetTypedArray(args[1], args[2], &accessIndex, scriptContext);
+        TypedArrayBase *typedArrayBase = ValidateAndGetTypedArray(args[1], args[2], &accessIndex, scriptContext, false, false, true /*writeAccess*/);
         return typedArrayBase->TypedStore(accessIndex, args[3]);
     }
 
@@ -204,7 +211,7 @@ namespace Js
         ATOMICS_FUNCTION_ENTRY_CHECKS(3, "Atomics.sub");
 
         uint32 accessIndex = 0;
-        TypedArrayBase *typedArrayBase = ValidateAndGetTypedArray(args[1], args[2], &accessIndex, scriptContext);
+        TypedArrayBase *typedArrayBase = ValidateAndGetTypedArray(args[1], args[2], &accessIndex, scriptContext, false, false, true /*writeAccess*/);
         return typedArrayBase->TypedSub(accessIndex, args[3]);
     }
 
@@ -444,7 +451,7 @@ namespace Js
         ATOMICS_FUNCTION_ENTRY_CHECKS(3, "Atomics.xor");
 
         uint32 accessIndex = 0;
-        TypedArrayBase *typedArrayBase = ValidateAndGetTypedArray(args[1], args[2], &accessIndex, scriptContext);
+        TypedArrayBase *typedArrayBase = ValidateAndGetTypedArray(args[1], args[2], &accessIndex, scriptContext, false, false, true /*writeAccess*/);
         return typedArrayBase->TypedXor(accessIndex, args[3]);
     }
 }

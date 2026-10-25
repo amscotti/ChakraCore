@@ -11,10 +11,13 @@ slice
 resize
 transfer
 transferToFixedLength
+sliceToImmutable
+transferToImmutable
 byteLength
 detached
 maxByteLength
 resizable
+immutable
 aaa
 foo
 bar
@@ -28,10 +31,13 @@ slice
 resize
 transfer
 transferToFixedLength
+sliceToImmutable
+transferToImmutable
 byteLength
 detached
 maxByteLength
 resizable
+immutable
 aaa
 foo
 bar
