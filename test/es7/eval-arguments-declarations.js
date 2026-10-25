@@ -169,19 +169,159 @@ var tests = [
         }
     },
     {
-        name: "known residual: top-level lexical arguments hidden by a catch environment",
+        name: "hidden outer lexical arguments bindings conflict with eval var declarations",
         body() {
-            // The first frame-display environment is the catch scope, which
-            // hides the body's top-level lexical binding. This is a documented
-            // under-rejection, not conformance; the block/if/with forms above
-            // are detected.
-            assert.doesNotThrow(function () {
+            // Catch and block environments between the eval and the body
+            // variable environment are intermediate declarative environments
+            // for EvalDeclarationInstantiation; the lexical walk must continue
+            // through them instead of stopping at the first activation object.
+            assertEvalThrows(function () {
                 function f() {
                     let arguments = 1;
                     try { throw 1; } catch (e) { eval("var arguments"); }
                 }
                 f();
-            }, "known residual: catch scope hides the outer lexical binding");
+            }, "catch hides a top-level let");
+
+            assertEvalThrows(function () {
+                function f() {
+                    const arguments = 1;
+                    try { throw 1; } catch (e) { eval("var arguments"); }
+                }
+                f();
+            }, "catch hides a top-level const");
+
+            assertEvalThrows(function () {
+                function f() {
+                    let arguments = 1;
+                    try { throw 1; } catch (e) { eval("var arguments = 5"); }
+                }
+                f();
+            }, "catch hides a top-level let from an initializer");
+
+            assertEvalThrows(function () {
+                function f() {
+                    let arguments = 1;
+                    try { throw 1; } catch (e) { eval("function arguments() {}"); }
+                }
+                f();
+            }, "catch hides a top-level let from an eval function declaration");
+
+            assertEvalThrows(function () {
+                function f() { let arguments = 1; { eval("var arguments"); } }
+                f();
+            }, "block hides a top-level let");
+
+            assertEvalThrows(function () {
+                function f() { let arguments = 1; if (true) { eval("var arguments"); } }
+                f();
+            }, "if block hides a top-level let");
+
+            assertEvalThrows(function () {
+                function f() {
+                    let arguments = 1;
+                    with ({ x: 1 }) { eval("var arguments"); }
+                }
+                f();
+            }, "with hides a top-level let");
+
+            assertEvalThrows(function () {
+                function f() { let arguments = 1; { { eval("var arguments"); } } }
+                f();
+            }, "nested blocks hide a top-level let");
+
+            assertEvalThrows(function () {
+                function f() { { let arguments = 1; { eval("var arguments"); } } }
+                f();
+            }, "inner block hides an outer block let");
+
+            assertEvalThrows(function () {
+                function f() {
+                    let arguments = 1;
+                    try { throw 1; } catch (e) { with ({ x: 1 }) { eval("var arguments"); } }
+                }
+                f();
+            }, "catch then with hides a top-level let");
+
+            assertEvalThrows(function () {
+                var f = () => {
+                    let arguments = 1;
+                    try { throw 1; } catch (e) { eval("var arguments"); }
+                };
+                f();
+            }, "arrow body catch hides a top-level let");
+
+            assertEvalThrows(function () {
+                function f(p = 1) {
+                    let arguments = 1;
+                    try { throw 1; } catch (e) { eval("var arguments"); }
+                }
+                f();
+            }, "split parameter scope catch hides a top-level let");
+
+            assertEvalThrows(function () {
+                function* f() {
+                    let arguments = 1;
+                    try { throw 1; } catch (e) { eval("var arguments"); }
+                    yield 1;
+                }
+                f().next();
+            }, "generator catch hides a top-level let");
+        }
+    },
+    {
+        name: "hidden-scope walk preserves parameter, var, catch and with controls",
+        body() {
+            function f1(arguments) {
+                try { throw 1; } catch (e) { eval("var arguments = 'b'"); }
+                return arguments;
+            }
+            assert.areEqual("b", f1("a"), "parameter named arguments through catch");
+
+            function f2(arguments) {
+                { { eval("var arguments = 'b'"); } }
+                return arguments;
+            }
+            assert.areEqual("b", f2("a"), "parameter named arguments through nested blocks");
+
+            function f3() {
+                var arguments;
+                try { throw 1; } catch (e) { eval("var arguments = 'b'"); }
+                return arguments;
+            }
+            assert.areEqual("b", f3(), "ordinary var redeclaration through catch");
+
+            function f4(a) {
+                try { throw 1; } catch (e) { eval("var arguments = 'b'"); }
+                return arguments;
+            }
+            assert.areEqual("b", f4("a"), "implicit arguments object through catch");
+
+            assert.doesNotThrow(function () {
+                (function () {
+                    with ({ arguments: 1 }) { eval("var arguments = 'b'"); }
+                })();
+            }, "with object arguments property is not a declarative binding");
+
+            // Annex B.3.5 allows a simple catch parameter named arguments to
+            // coexist with a var declaration; the walk must not treat it as a
+            // lexical conflict.
+            assert.doesNotThrow(function () {
+                (function () {
+                    try { throw 1; } catch (arguments) { eval("var arguments"); }
+                })();
+            }, "simple catch parameter named arguments");
+
+            // The eval's variable environment is the nested arrow's body, so
+            // the outer lexical binding is outside the spec walk.
+            assert.doesNotThrow(function () {
+                (function () {
+                    let arguments = 1;
+                    try { throw 1; } catch (e) {
+                        (() => { eval("var arguments = 'b'"); })();
+                    }
+                })();
+            }, "nested arrow variable environment stops before an outer lexical binding");
         }
     },
     {
