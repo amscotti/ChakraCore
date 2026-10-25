@@ -423,6 +423,13 @@ var tests = [
             ta[1] = 9;
             assert.areEqual(2, ta[1], "sloppy element assignment is a silent no-op");
             assert.isFalse(Reflect.set(ta, 0, 9), "Reflect.set reports failure");
+            var receiver = {};
+            assert.isFalse(Reflect.set(ta, 0, 9, receiver), "Reflect.set with distinct receiver reports failure");
+            assert.isFalse(Object.prototype.hasOwnProperty.call(receiver, "0"), "distinct receiver is not written");
+            assert.throws(function () { Object.assign(ta, { 0: 9 }); }, TypeError, "Object.assign rejects an immutable numeric target");
+            assert.throws(function () { Object.assign(ta, { 1: 9 }); }, TypeError, "Object.assign rejects a later immutable index");
+            assert.doesNotThrow(function () { Object.assign(ta, { foo: 9 }); }, "Object.assign still permits non-index properties");
+            assert.areEqual(9, ta.foo, "Object.assign writes a non-index property");
             ta.custom = 1;
             assert.areEqual(1, ta.custom, "non-index properties remain writable");
 

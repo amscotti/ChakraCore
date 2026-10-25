@@ -3033,6 +3033,21 @@ CommonNumber:
         }
 
         Assert(!TaggedNumber::Is(receiver));
+
+        // Reflect.set/ordinary assignment can target an immutable typed array
+        // through a distinct receiver. Canonical numeric [[Set]] must report
+        // failure before that receiver is written; strict assignment throws.
+        if (VarIs<TypedArrayBase>(object) &&
+            IsImmutableBuffer(UnsafeVarTo<TypedArrayBase>(object)->GetArrayBuffer()))
+        {
+            uint32 numericIndex = 0;
+            if (requestContext->IsNumericPropertyId(propertyId, &numericIndex))
+            {
+                JavascriptError::ThrowCantAssignIfStrictMode(propertyOperationFlags, requestContext);
+                return FALSE;
+            }
+        }
+
         BOOL setAccessorResult = FALSE;
         if (SetAccessorOrNonWritableProperty(receiver, object, propertyId, newValue, info, requestContext, propertyOperationFlags, isRoot, false, &setAccessorResult))
         {
@@ -4100,6 +4115,15 @@ CommonNumber:
         Var setterValueOrProxy = nullptr;
         DescriptorFlags flags = None;
         Assert(!TaggedNumber::Is(receiver));
+
+        // Integer-indexed [[Set]] is false before OrdinarySet for any
+        // immutable view, even when the receiver is a distinct object.
+        if (VarIs<TypedArrayBase>(object) &&
+            IsImmutableBuffer(UnsafeVarTo<TypedArrayBase>(object)->GetArrayBuffer()))
+        {
+            JavascriptError::ThrowCantAssignIfStrictMode(propertyOperationFlags, scriptContext);
+            return FALSE;
+        }
         if (JavascriptOperators::CheckPrototypesForAccessorOrNonWritableItem(object, index, &setterValueOrProxy, &flags, scriptContext, skipPrototypeCheck))
         {
             scriptContext->GetThreadContext()->AddImplicitCallFlags(ImplicitCall_NoOpSet);

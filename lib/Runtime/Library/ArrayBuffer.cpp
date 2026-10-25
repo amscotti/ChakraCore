@@ -727,6 +727,14 @@ namespace Js
             destination->SetImmutable();
         }
 
+        // Destination allocation can collect or run finalizers that detach
+        // the source. Recheck before reading its length/bytes or calling
+        // DetachAndFree, which asserts that the source is still attached.
+        if (source->IsDetached())
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, _u("ArrayBuffer.prototype.transfer"));
+        }
+
         uint32 sourceLength = source->GetByteLength();
         uint32 copyLength = newByteLength < sourceLength ? newByteLength : sourceLength;
         if (copyLength > 0)
