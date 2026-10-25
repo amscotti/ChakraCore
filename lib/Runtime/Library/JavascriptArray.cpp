@@ -6423,7 +6423,7 @@ Case0:
                     {
                         Js::Var constructorArgs[] = { constructor, JavascriptNumber::ToVar(newLenT, scriptContext) };
                         Js::CallInfo constructorCallInfo(Js::CallFlags_New, _countof(constructorArgs));
-                        return TypedArrayBase::TypedArrayCreate(constructor, &Js::Arguments(constructorCallInfo, constructorArgs), (uint32)newLenT, scriptContext);
+                        return TypedArrayBase::TypedArrayCreate(constructor, &Js::Arguments(constructorCallInfo, constructorArgs), (uint32)newLenT, scriptContext, true);
                     }));
             );
         }
@@ -7019,6 +7019,15 @@ Case0:
 
             // Write the sorted data back to the original array
             // Undefined values and holes are placed at the end
+            TypedArrayBase* typedArray = JavascriptOperators::TryFromVar<TypedArrayBase>(obj);
+            if (values > 0 && typedArray != nullptr &&
+                IsImmutableBuffer(typedArray->GetArrayBuffer()))
+            {
+                // Array.prototype.sort on an immutable typed array reaches
+                // this point through the generic path; fail before the first
+                // Set instead of silently dropping every store.
+                JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedArrayBufferObject);
+            }
             for (i = 0; i < values; ++i)
             {
                 JS_REENTRANT(jsReentLock, JavascriptOperators::SetItem(obj, obj, i, SortGetHelper(list, i), scriptContext, static_cast<PropertyOperationFlags>(PropertyOperation_ThrowIfNonWritable | PropertyOperation_ThrowIfNotExtensible)));
@@ -9644,6 +9653,14 @@ Case0:
         // We shouldn't have made it here if the count was going to be zero
         Assert(count > 0);
 
+        // Array.prototype.copyWithin reaches a typed array through the generic
+        // path; a non-empty copy into an immutable backing buffer must throw
+        // rather than ignoring the DirectSetItem failure.
+        if (typedArrayBase && IsImmutableBuffer(typedArrayBase->GetArrayBuffer()))
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedArrayBufferObject);
+        }
+
         // If we entered via TypedArray.prototype.copyWithin, then we can copy by bytes. Otherwise, if the user called
         // Array.prototype.copyWithin on a typed array instance, then the typed array might be responsible for not
         // writing torn values, which memmove does not guarantee.
@@ -9902,6 +9919,14 @@ Case0:
         if (k < MaxArrayLength)
         {
             int64 end = min<int64>(finalVal, MaxArrayLength);
+            // Array.prototype.fill reaches a typed array through the generic
+            // path (no write-mode validation); the first Set on an immutable
+            // backing buffer must throw instead of silently ignoring the
+            // DirectSetItem failure. A zero-length write range is a no-op.
+            if (typedArrayBase && k < end && IsImmutableBuffer(typedArrayBase->GetArrayBuffer()))
+            {
+                JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedArrayBufferObject);
+            }
             uint32 u32k = static_cast<uint32>(k);
 
             while (u32k < end)
@@ -10055,7 +10080,7 @@ Case0:
                     {
                         Js::Var constructorArgs[] = {constructor, JavascriptNumber::ToVar(length, scriptContext) };
                         Js::CallInfo constructorCallInfo(Js::CallFlags_New, _countof(constructorArgs));
-                        return TypedArrayBase::TypedArrayCreate(constructor, &Js::Arguments(constructorCallInfo, constructorArgs), (uint32)length, scriptContext);
+                        return TypedArrayBase::TypedArrayCreate(constructor, &Js::Arguments(constructorCallInfo, constructorArgs), (uint32)length, scriptContext, true);
                     }));
             )
         }
@@ -11041,7 +11066,7 @@ Case0:
                     Js::CallInfo constructorCallInfo(Js::CallFlags_New, _countof(constructorArgs));
                     if (isTypedArrayEntryPoint)
                     {
-                        return TypedArrayBase::TypedArrayCreate(constructor, &Js::Arguments(constructorCallInfo, constructorArgs), len, scriptContext);
+                        return TypedArrayBase::TypedArrayCreate(constructor, &Js::Arguments(constructorCallInfo, constructorArgs), len, scriptContext, true);
                     }
                     else
                     {

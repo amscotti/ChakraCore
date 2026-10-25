@@ -2373,10 +2373,13 @@ namespace Js
         library->AddFunctionToLibraryObjectWithPropertyName(arrayBufferPrototype, _u("resize"), &ArrayBuffer::EntryInfo::Resize, 1);
         library->AddFunctionToLibraryObjectWithPropertyName(arrayBufferPrototype, _u("transfer"), &ArrayBuffer::EntryInfo::Transfer, 0);
         library->AddFunctionToLibraryObjectWithPropertyName(arrayBufferPrototype, _u("transferToFixedLength"), &ArrayBuffer::EntryInfo::TransferToFixedLength, 0);
+        library->AddFunctionToLibraryObjectWithPropertyName(arrayBufferPrototype, _u("sliceToImmutable"), &ArrayBuffer::EntryInfo::SliceToImmutable, 2);
+        library->AddFunctionToLibraryObjectWithPropertyName(arrayBufferPrototype, _u("transferToImmutable"), &ArrayBuffer::EntryInfo::TransferToImmutable, 0);
         library->AddAccessorsToLibraryObject(arrayBufferPrototype, PropertyIds::byteLength, &ArrayBuffer::EntryInfo::GetterByteLength, nullptr);
         library->AddAccessorsToLibraryObject(arrayBufferPrototype, scriptContext->GetOrAddPropertyIdTracked(_u("detached")), &ArrayBuffer::EntryInfo::GetterDetached, nullptr);
         library->AddAccessorsToLibraryObject(arrayBufferPrototype, scriptContext->GetOrAddPropertyIdTracked(_u("maxByteLength")), &ArrayBuffer::EntryInfo::GetterMaxByteLength, nullptr);
         library->AddAccessorsToLibraryObject(arrayBufferPrototype, scriptContext->GetOrAddPropertyIdTracked(_u("resizable")), &ArrayBuffer::EntryInfo::GetterResizable, nullptr);
+        library->AddAccessorsToLibraryObject(arrayBufferPrototype, scriptContext->GetOrAddPropertyIdTracked(_u("immutable")), &ArrayBuffer::EntryInfo::GetterImmutable, nullptr);
 
         if (scriptContext->GetConfig()->IsES6ToStringTagEnabled())
         {

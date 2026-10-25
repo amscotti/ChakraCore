@@ -584,7 +584,7 @@ JsExternalizeArrayBuffer(
     return ContextAPINoScriptWrapper_NoRecord([&](Js::ScriptContext *scriptContext) -> JsErrorCode {
 
         Js::ArrayBuffer* arrayBuffer = Js::JavascriptOperators::TryFromVar<Js::ArrayBuffer>(arrayBufferVar);
-        if (!arrayBuffer)
+        if (!arrayBuffer || arrayBuffer->IsImmutable())
         {
             return JsErrorInvalidArgument;
         }
@@ -626,7 +626,13 @@ JsDetachArrayBuffer(
             return JsErrorInvalidArgument;
         }
 
-        Js::VarTo<Js::ArrayBuffer>(arrayBuffer)->Detach();
+        Js::ArrayBuffer* arrayBufferObject = Js::VarTo<Js::ArrayBuffer>(arrayBuffer);
+        if (arrayBufferObject->IsImmutable())
+        {
+            return JsErrorInvalidArgument;
+        }
+
+        arrayBufferObject->Detach();
         return JsNoError;
     });
 }

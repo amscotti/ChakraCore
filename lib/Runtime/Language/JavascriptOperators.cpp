@@ -3033,6 +3033,21 @@ CommonNumber:
         }
 
         Assert(!TaggedNumber::Is(receiver));
+
+        // Reflect.set/ordinary assignment can target an immutable typed array
+        // through a distinct receiver. Canonical numeric [[Set]] must report
+        // failure before that receiver is written; strict assignment throws.
+        if (VarIs<TypedArrayBase>(object) &&
+            IsImmutableBuffer(UnsafeVarTo<TypedArrayBase>(object)->GetArrayBuffer()))
+        {
+            uint32 numericIndex = 0;
+            if (requestContext->IsNumericPropertyId(propertyId, &numericIndex))
+            {
+                JavascriptError::ThrowCantAssignIfStrictMode(propertyOperationFlags, requestContext);
+                return FALSE;
+            }
+        }
+
         BOOL setAccessorResult = FALSE;
         if (SetAccessorOrNonWritableProperty(receiver, object, propertyId, newValue, info, requestContext, propertyOperationFlags, isRoot, false, &setAccessorResult))
         {
@@ -4100,6 +4115,15 @@ CommonNumber:
         Var setterValueOrProxy = nullptr;
         DescriptorFlags flags = None;
         Assert(!TaggedNumber::Is(receiver));
+
+        // Integer-indexed [[Set]] is false before OrdinarySet for any
+        // immutable view, even when the receiver is a distinct object.
+        if (VarIs<TypedArrayBase>(object) &&
+            IsImmutableBuffer(UnsafeVarTo<TypedArrayBase>(object)->GetArrayBuffer()))
+        {
+            JavascriptError::ThrowCantAssignIfStrictMode(propertyOperationFlags, scriptContext);
+            return FALSE;
+        }
         if (JavascriptOperators::CheckPrototypesForAccessorOrNonWritableItem(object, index, &setterValueOrProxy, &flags, scriptContext, skipPrototypeCheck))
         {
             scriptContext->GetThreadContext()->AddImplicitCallFlags(ImplicitCall_NoOpSet);
@@ -5391,7 +5415,17 @@ CommonNumber:
                 // if this was numeric index, return operation status else
                 // Return the result of calling the default ordinary object [[Set]] internal method (9.1.8) on O passing P, V, and Receiver as arguments.
                 if (isNumericIndex)
+                {
+                    // [[Set]] returns false for an immutable view; only a
+                    // strict-mode assignment turns that into a TypeError.
+                    if (!returnValue &&
+                        (flags & PropertyOperation_StrictMode) &&
+                        IsImmutableBuffer(VarTo<TypedArrayBase>(instance)->GetArrayBuffer()))
+                    {
+                        JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedArrayBufferObject);
+                    }
                     return returnValue;
+                }
             }
         }
         else
@@ -10382,6 +10416,27 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
             {
                 return Reject(throwOnError, scriptContext, JSERR_InvalidTypedArrayIndex, propId);
             }
+
+            // The proposal marks integer-indexed properties of an immutable
+            // buffer non-writable and non-configurable. A no-op descriptor
+            // succeeds; any attempted change fails (10.4.5.3).
+            if (IsImmutableBuffer(typedArray->GetArrayBuffer()))
+            {
+                if (descriptor.IsAccessorDescriptor()
+                    || (descriptor.ConfigurableSpecified() && descriptor.IsConfigurable())
+                    || (descriptor.EnumerableSpecified() && !descriptor.IsEnumerable())
+                    || (descriptor.WritableSpecified() && descriptor.IsWritable()))
+                {
+                    return Reject(throwOnError, scriptContext, JSERR_DefineProperty_NotConfigurable, propId);
+                }
+                if (descriptor.ValueSpecified()
+                    && !JavascriptConversion::SameValue(typedArray->DirectGetItem(uint32Index), descriptor.GetValue()))
+                {
+                    return Reject(throwOnError, scriptContext, JSERR_DefineProperty_NotWritable, propId);
+                }
+                return true;
+            }
+
             // vi. If IsAccessorDescriptor(Desc) is true, return false.
             // vii. If Desc has a[[Configurable]] field and if Desc.[[Configurable]] is true, return false.
             // viii. If Desc has an[[Enumerable]] field and if Desc.[[Enumerable]] is false, return false.

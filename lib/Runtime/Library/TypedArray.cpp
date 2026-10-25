@@ -777,6 +777,13 @@ namespace Js
 
     BOOL TypedArrayBase::SetItem(uint32 index, Var value, PropertyOperationFlags flags)
     {
+        // [[Set]] step 1.b.ii: any canonical numeric assignment to an
+        // immutable view reports failure before value conversion.
+        if (IsImmutableBuffer(GetArrayBuffer()))
+        {
+            return false;
+        }
+
         // BigInt element stores perform ToBigInt even when the index is out
         // of bounds or the view is detached; the conversion and its side
         // effects are observable (IntegerIndexedElementSet). Other element
@@ -821,7 +828,9 @@ namespace Js
         uint32 index = 0;
         if (GetScriptContext()->IsNumericPropertyId(propertyId, &index))
         {
-            return true;
+            // Integer-indexed properties of an immutable buffer are
+            // non-writable (proposal 10.4.5.1).
+            return !IsImmutableBuffer(GetArrayBuffer());
         }
         return DynamicObject::IsWritable(propertyId);
     }
@@ -1379,6 +1388,13 @@ namespace Js
             JavascriptError::ThrowTypeError(scriptContext, JSERR_TypedArray_NeedSource);
         }
 
+        // set step 5: verify the target is mutable before reading offset or
+        // any source element.
+        if (IsImmutableBuffer(typedArrayBase->GetArrayBuffer()))
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedArrayBufferObject);
+        }
+
         if (args.Info.Count > 2)
         {
             offset = ArrayBuffer::ToIndex(args[2], JSERR_InvalidTypedArrayLength, scriptContext, ArrayBuffer::MaxArrayBufferLength, false);
@@ -1588,7 +1604,7 @@ namespace Js
                 {
                     Js::Var constructorArgs[] = { constructor, JavascriptNumber::ToVar(len, scriptContext) };
                     Js::CallInfo constructorCallInfo(Js::CallFlags_New, _countof(constructorArgs));
-                    return TypedArrayCreate(constructor, &Js::Arguments(constructorCallInfo, constructorArgs), len, scriptContext);
+                    return TypedArrayCreate(constructor, &Js::Arguments(constructorCallInfo, constructorArgs), len, scriptContext, true);
                 });
 
                 TypedArrayBase* newTypedArrayBase = JavascriptOperators::TryFromVar<Js::TypedArrayBase>(newObj);
@@ -1649,7 +1665,7 @@ namespace Js
             {
                 Js::Var constructorArgs[] = { constructor, JavascriptNumber::ToVar(len, scriptContext) };
                 Js::CallInfo constructorCallInfo(Js::CallFlags_New, _countof(constructorArgs));
-                return TypedArrayBase::TypedArrayCreate(constructor, &Js::Arguments(constructorCallInfo, constructorArgs), len, scriptContext);
+                return TypedArrayBase::TypedArrayCreate(constructor, &Js::Arguments(constructorCallInfo, constructorArgs), len, scriptContext, true);
             });
 
             TypedArrayBase* newTypedArrayBase = JavascriptOperators::TryFromVar<Js::TypedArrayBase>(newObj);
@@ -1752,7 +1768,7 @@ namespace Js
         Assert(!(callInfo.Flags & CallFlags_New));
         CHAKRATEL_LANGSTATS_INC_BUILTINCOUNT(TypedArray_Prototype_copyWithin);
 
-        TypedArrayBase* typedArrayBase = ValidateTypedArray(args, scriptContext, _u("[TypedArray].prototype.copyWithin"));
+        TypedArrayBase* typedArrayBase = ValidateTypedArray(args, scriptContext, _u("[TypedArray].prototype.copyWithin"), true);
         uint32 length = typedArrayBase->GetLength();
 
         return JavascriptArray::CopyWithinHelper(nullptr, typedArrayBase, typedArrayBase, length, args, scriptContext);
@@ -1826,7 +1842,7 @@ namespace Js
         Assert(!(callInfo.Flags & CallFlags_New));
         CHAKRATEL_LANGSTATS_INC_BUILTINCOUNT(TypedArray_Prototype_fill);
 
-        TypedArrayBase* typedArrayBase = ValidateTypedArray(args, scriptContext, _u("[TypedArray].prototype.fill"));
+        TypedArrayBase* typedArrayBase = ValidateTypedArray(args, scriptContext, _u("[TypedArray].prototype.fill"), true);
         return JavascriptArray::FillHelper(nullptr, typedArrayBase, typedArrayBase, typedArrayBase->GetLength(), args, scriptContext);
     }
 
@@ -1909,7 +1925,7 @@ namespace Js
             {
                 Js::Var constructorArgs[] = { constructor, JavascriptNumber::ToVar(captured, scriptContext) };
                 Js::CallInfo constructorCallInfo(Js::CallFlags_New, _countof(constructorArgs));
-                return TypedArrayBase::TypedArrayCreate(constructor, &Js::Arguments(constructorCallInfo, constructorArgs), captured, scriptContext);
+                return TypedArrayBase::TypedArrayCreate(constructor, &Js::Arguments(constructorCallInfo, constructorArgs), captured, scriptContext, true);
             }));
 
             TypedArrayBase* newArr = JavascriptOperators::TryFromVar<Js::TypedArrayBase>(newObj);
@@ -2261,7 +2277,7 @@ namespace Js
         Assert(!(callInfo.Flags & CallFlags_New));
         CHAKRATEL_LANGSTATS_INC_BUILTINCOUNT(TypedArray_Prototype_reverse);
 
-        TypedArrayBase* typedArrayBase = ValidateTypedArray(args, scriptContext, _u("[TypedArray].prototype.reverse"));
+        TypedArrayBase* typedArrayBase = ValidateTypedArray(args, scriptContext, _u("[TypedArray].prototype.reverse"), true);
         return JavascriptArray::ReverseHelper(nullptr, typedArrayBase, typedArrayBase, typedArrayBase->GetLength(), scriptContext);
     }
 
@@ -2503,7 +2519,7 @@ namespace Js
 
         // Throw if not a valid typed array
         // This step is per spec and allows us to optimise significantly below
-        TypedArrayBase* typedArrayBase = ValidateTypedArray(args, scriptContext, _u("[TypedArray].prototype.sort"));
+        TypedArrayBase* typedArrayBase = ValidateTypedArray(args, scriptContext, _u("[TypedArray].prototype.sort"), true);
         uint32 length = typedArrayBase->GetLength();
 
         // Early return if length is 0 or 1
@@ -2919,6 +2935,12 @@ namespace Js
         // If index is not numeric, goto [[Set]] property path
         if (*isNumericIndex)
         {
+            // [[Set]] step 1.b.ii: canonical numeric assignment to an
+            // immutable view reports failure before value conversion.
+            if (IsImmutableBuffer(GetArrayBuffer()))
+            {
+                return FALSE;
+            }
             return skipSetItem ?
                 DirectSetItemNoSet(indexToSet, value) :
                 DirectSetItem(indexToSet, value);
@@ -3125,23 +3147,30 @@ namespace Js
     }
 
     // static
-    TypedArrayBase * TypedArrayBase::ValidateTypedArray(Arguments &args, ScriptContext *scriptContext, LPCWSTR apiName)
+    TypedArrayBase * TypedArrayBase::ValidateTypedArray(Arguments &args, ScriptContext *scriptContext, LPCWSTR apiName, bool writeAccess)
     {
         if (args.Info.Count == 0)
         {
             JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NeedTypedArray);
         }
 
-        return ValidateTypedArray(args[0], scriptContext, apiName);
+        return ValidateTypedArray(args[0], scriptContext, apiName, writeAccess);
     }
 
     // static
-    TypedArrayBase* TypedArrayBase::ValidateTypedArray(Var aValue, ScriptContext *scriptContext, LPCWSTR apiName)
+    TypedArrayBase* TypedArrayBase::ValidateTypedArray(Var aValue, ScriptContext *scriptContext, LPCWSTR apiName, bool writeAccess)
     {
         TypedArrayBase *typedArrayBase = JavascriptOperators::TryFromVar<Js::TypedArrayBase>(aValue);
         if (!typedArrayBase)
         {
             JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NeedTypedArray);
+        }
+
+        // ValidateTypedArray step 4: write-mode validation rejects an
+        // immutable backing buffer before any length or argument work.
+        if (writeAccess && IsImmutableBuffer(typedArrayBase->GetArrayBuffer()))
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedArrayBufferObject);
         }
 
         if (typedArrayBase->IsDetachedBuffer() || typedArrayBase->IsOutOfBounds())
@@ -3153,11 +3182,11 @@ namespace Js
     }
 
     // static
-    Var TypedArrayBase::TypedArrayCreate(Var constructor, Arguments *args, uint32 length, ScriptContext *scriptContext)
+    Var TypedArrayBase::TypedArrayCreate(Var constructor, Arguments *args, uint32 length, ScriptContext *scriptContext, bool writeAccess)
     {
         Var newObj = JavascriptOperators::NewScObject(constructor, *args, scriptContext);
 
-        TypedArrayBase * typedArray = TypedArrayBase::ValidateTypedArray(newObj, scriptContext, nullptr);
+        TypedArrayBase * typedArray = TypedArrayBase::ValidateTypedArray(newObj, scriptContext, nullptr, writeAccess);
 
         // ECMA262 22.2.4.6 TypedArrayCreate line 3. "If argumentList is a List of a single Number" (args[0] == constructor)
         if (args->Info.Count == 2 && typedArray->GetLength() < length)

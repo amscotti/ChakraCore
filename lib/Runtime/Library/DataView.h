@@ -110,6 +110,7 @@ namespace Js
         // (test262 getFloat16/setFloat16 detached-buffer ordering), so these
         // helpers are shared by the templates and the Float16 entries.
         uint32 GetViewIndex(Var offset, const char16* funcName);
+        uint32 GetWritableViewIndex(Var offset, const char16* funcName);
         void CheckViewRange(uint32 byteOffset, uint32 elementSize, const char16* funcName);
 
         template<typename TypeName>

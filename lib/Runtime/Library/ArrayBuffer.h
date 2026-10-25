@@ -198,6 +198,9 @@ namespace Js
             static FunctionInfo Resize;
             static FunctionInfo Transfer;
             static FunctionInfo TransferToFixedLength;
+            static FunctionInfo SliceToImmutable;
+            static FunctionInfo TransferToImmutable;
+            static FunctionInfo GetterImmutable;
             static FunctionInfo GetterSymbolSpecies;
 #if ENABLE_DEBUG_CONFIG_OPTIONS
             static FunctionInfo Detach;
@@ -214,6 +217,9 @@ namespace Js
         static Var EntryResize(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryTransfer(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryTransferToFixedLength(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntrySliceToImmutable(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryTransferToImmutable(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryGetterImmutable(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryGetterSymbolSpecies(RecyclableObject* function, CallInfo callInfo, ...);
 #if ENABLE_DEBUG_CONFIG_OPTIONS
         static Var EntryDetach(RecyclableObject* function, CallInfo callInfo, ...);
@@ -230,6 +236,8 @@ namespace Js
         uint32 GetMaxByteLength() const { return isResizable ? maxByteLength : bufferLength; }
         uint32 GetAllocatedByteLength() const { return allocatedByteLength; }
         bool IsResizable() const { return isResizable; }
+        bool IsImmutable() const { return isImmutable; }
+        void SetImmutable() { Assert(!isDetached); isImmutable = true; }
         void Resize(uint32 newByteLength);
         RefCountedBuffer *GetBufferContent() { return bufferContent;  }
         static int GetBufferContentsOffset() { return offsetof(ArrayBuffer, bufferContent); }
@@ -284,7 +292,15 @@ namespace Js
         Field(uint32) maxByteLength;      // Immutable resizable limit; logical length for fixed buffers
         Field(uint32) allocatedByteLength; // Physical allocation extent (maxByteLength for resizable)
         Field(bool) isResizable;          // Whether [[ArrayBufferMaxByteLength]] exists
+        Field(bool) isImmutable;          // Whether [[ArrayBufferIsImmutable]] exists
     };
+
+    // [[ArrayBufferIsImmutable]] is present only on non-shared ArrayBuffers.
+    inline bool IsImmutableBuffer(ArrayBufferBase* arrayBuffer)
+    {
+        return arrayBuffer != nullptr && arrayBuffer->IsArrayBuffer() &&
+            static_cast<ArrayBuffer*>(arrayBuffer)->IsImmutable();
+    }
 
     template <> inline bool VarIsImpl<ArrayBuffer>(RecyclableObject* obj)
     {

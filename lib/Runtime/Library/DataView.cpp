@@ -244,6 +244,17 @@ namespace Js
         return ArrayBuffer::ToIndex(offset, JSERR_DataView_InvalidOffset, GetScriptContext(), ArrayBuffer::MaxArrayBufferLength, false);
     }
 
+    // SetViewValue step 3: reject an immutable backing buffer before
+    // ToIndex(requestIndex) or value conversion.
+    uint32 DataView::GetWritableViewIndex(Var offset, const char16* funcName)
+    {
+        if (IsImmutableBuffer(GetArrayBuffer()))
+        {
+            JavascriptError::ThrowTypeError(GetScriptContext(), JSERR_NeedArrayBufferObject);
+        }
+        return GetViewIndex(offset, funcName);
+    }
+
     void DataView::CheckViewRange(uint32 byteOffset, uint32 elementSize, const char16* funcName)
     {
         ScriptContext* scriptContext = GetScriptContext();
@@ -596,7 +607,7 @@ namespace Js
             }
             // SetViewValue order: ToIndex(byteOffset) precedes the value
             // and littleEndian conversions below (matching setBigInt64).
-            byteOffset = VarTo<DataView>(args[0])->GetViewIndex(args[1], _u("DataView.prototype.SetInt8"));
+            byteOffset = VarTo<DataView>(args[0])->GetWritableViewIndex(args[1], _u("DataView.prototype.SetInt8"));
             if (args.Info.Count > 2)
             {
                 value = JavascriptConversion::ToInt8(args[2], scriptContext);
@@ -636,7 +647,7 @@ namespace Js
             }
             // SetViewValue order: ToIndex(byteOffset) precedes the value
             // and littleEndian conversions below (matching setBigInt64).
-            byteOffset = VarTo<DataView>(args[0])->GetViewIndex(args[1], _u("DataView.prototype.SetUint8"));
+            byteOffset = VarTo<DataView>(args[0])->GetWritableViewIndex(args[1], _u("DataView.prototype.SetUint8"));
             if (args.Info.Count > 2)
             {
                 value = JavascriptConversion::ToUInt8(args[2], scriptContext);
@@ -677,7 +688,7 @@ namespace Js
             }
             // SetViewValue order: ToIndex(byteOffset) precedes the value
             // and littleEndian conversions below (matching setBigInt64).
-            byteOffset = VarTo<DataView>(args[0])->GetViewIndex(args[1], _u("DataView.prototype.SetInt16"));
+            byteOffset = VarTo<DataView>(args[0])->GetWritableViewIndex(args[1], _u("DataView.prototype.SetInt16"));
             if (args.Info.Count > 2)
             {
                 if (!JavascriptOperators::IsUndefined(args[2]))
@@ -725,7 +736,7 @@ namespace Js
             }
             // SetViewValue order: ToIndex(byteOffset) precedes the value
             // and littleEndian conversions below (matching setBigInt64).
-            byteOffset = VarTo<DataView>(args[0])->GetViewIndex(args[1], _u("DataView.prototype.SetUint16"));
+            byteOffset = VarTo<DataView>(args[0])->GetWritableViewIndex(args[1], _u("DataView.prototype.SetUint16"));
             if (args.Info.Count > 2)
             {
                 if (!JavascriptOperators::IsUndefined(args[2]))
@@ -773,7 +784,7 @@ namespace Js
             }
             // SetViewValue order: ToIndex(byteOffset) precedes the value
             // and littleEndian conversions below (matching setBigInt64).
-            byteOffset = VarTo<DataView>(args[0])->GetViewIndex(args[1], _u("DataView.prototype.SetInt32"));
+            byteOffset = VarTo<DataView>(args[0])->GetWritableViewIndex(args[1], _u("DataView.prototype.SetInt32"));
             if (args.Info.Count > 2)
             {
                 if (!JavascriptOperators::IsUndefined(args[2]))
@@ -821,7 +832,7 @@ namespace Js
             }
             // SetViewValue order: ToIndex(byteOffset) precedes the value
             // and littleEndian conversions below (matching setBigInt64).
-            byteOffset = VarTo<DataView>(args[0])->GetViewIndex(args[1], _u("DataView.prototype.SetUint32"));
+            byteOffset = VarTo<DataView>(args[0])->GetWritableViewIndex(args[1], _u("DataView.prototype.SetUint32"));
             if (args.Info.Count > 2)
             {
                 if (!JavascriptOperators::IsUndefined(args[2]))
@@ -869,7 +880,7 @@ namespace Js
             }
             // SetViewValue order: ToIndex(byteOffset) precedes the value
             // and littleEndian conversions below (matching setBigInt64).
-            byteOffset = VarTo<DataView>(args[0])->GetViewIndex(args[1], _u("DataView.prototype.SetFloat32"));
+            byteOffset = VarTo<DataView>(args[0])->GetWritableViewIndex(args[1], _u("DataView.prototype.SetFloat32"));
             if (args.Info.Count > 2)
             {
                 if (!JavascriptOperators::IsUndefined(args[2]))
@@ -917,7 +928,7 @@ namespace Js
             }
             // SetViewValue order: ToIndex(byteOffset) precedes the value
             // and littleEndian conversions below (matching setBigInt64).
-            byteOffset = VarTo<DataView>(args[0])->GetViewIndex(args[1], _u("DataView.prototype.SetFloat64"));
+            byteOffset = VarTo<DataView>(args[0])->GetWritableViewIndex(args[1], _u("DataView.prototype.SetFloat64"));
             if (args.Info.Count > 2)
             {
                 if (!JavascriptOperators::IsUndefined(args[2]))
@@ -956,7 +967,7 @@ namespace Js
 
         // ToIndex(requestIndex) precedes ToNumber(value); the detached and
         // range checks follow the value conversion (test262 ordering).
-        uint32 byteOffset = dataView->GetViewIndex(offset, _u("DataView.prototype.setFloat16"));
+        uint32 byteOffset = dataView->GetWritableViewIndex(offset, _u("DataView.prototype.setFloat16"));
 
         double value = JavascriptNumber::NaN;
         if (args.Info.Count > 2)
@@ -1006,7 +1017,7 @@ namespace Js
 
         // SetViewValue order: ToIndex(byteOffset) before ToBigInt(value),
         // then ToBoolean(littleEndian), then the detached/range checks.
-        uint32 byteOffset = dataView->GetViewIndex(offset, _u("DataView.prototype.setBigInt64"));
+        uint32 byteOffset = dataView->GetWritableViewIndex(offset, _u("DataView.prototype.setBigInt64"));
 
         Var value = args.Info.Count > 2 ? args[2] : scriptContext->GetLibrary()->GetUndefined();
         JavascriptBigInt* bigIntValue = JavascriptConversion::ToBigInt(value, scriptContext);
@@ -1039,7 +1050,7 @@ namespace Js
 
         DataView* dataView = VarTo<DataView>(args[0]);
         Var offset = args.Info.Count > 1 ? args[1] : scriptContext->GetLibrary()->GetUndefined();
-        uint32 byteOffset = dataView->GetViewIndex(offset, _u("DataView.prototype.setBigUint64"));
+        uint32 byteOffset = dataView->GetWritableViewIndex(offset, _u("DataView.prototype.setBigUint64"));
 
         Var value = args.Info.Count > 2 ? args[2] : scriptContext->GetLibrary()->GetUndefined();
         JavascriptBigInt* bigIntValue = JavascriptConversion::ToBigInt(value, scriptContext);
