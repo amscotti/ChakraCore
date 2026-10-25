@@ -30,8 +30,14 @@ conformance.
    debug `ArrayBuffer.detach` reject an immutable receiver. DataView setters,
    TypedArray write-mode validation/mutators, direct indexed stores and
    TypedArray species/create destinations reject immutable backing buffers.
-   Reads, views, `subarray`, `slice` (as a read of the source), constructors
-   from views, and non-index properties remain available.
+   The generic `Array.prototype.fill`/`copyWithin`/`sort` paths, which reach a
+   typed array without `ValidateTypedArray`, reject a non-empty write to an
+   immutable view. Reads, views, `subarray`, `slice` (as a read of the source),
+   constructors from views, no-op `defineProperty` descriptors and non-index
+   properties remain available.
+6. Host alias safety: `JsExternalizeArrayBuffer` and `JsDetachArrayBuffer`
+   reject immutable buffers, so the Chakra host's transferable-object
+   serialization cannot externalize/detach an immutable source.
 
 All new properties are installed unconditionally (no config flag), use
 Append-only `JavascriptBuiltInFunctionList.h` entries, and use tracked dynamic
@@ -58,13 +64,15 @@ Ownership record for the new slice:
   destination exists and before the internal copy; the only writes into an
   immutable data block are `AllocateImmutableArrayBuffer`'s copy in
   `transferToImmutable`/`sliceToImmutable`.
-- **Transfer.** `TransferBuffer` keeps its existing order: `ToIndex(newLength)`
-  (undefined means source length), detached check, immutable check, engine
-  allocation cap, WebAssembly detach-key check, destination allocation, copy,
-  then source detach/free. Immutable mode never preserves resizability. The
-  destination is allocated and copied before the source is detached, so a
-  failed `ToIndex`, allocation or WebAssembly check leaves the source attached
-  and unchanged.
+- **Transfer.** `TransferBuffer` keeps the spec's ordering: `ToIndex(newLength)`
+  (undefined means source length), detached check, immutable check, WebAssembly
+  detach-key check, engine allocation cap, destination allocation, copy, then
+  source detach/free. The engine-cap check deliberately follows the detach-key
+  check so a WebAssembly buffer reports TypeError rather than the engine's
+  RangeError for an over-limit requested length. Immutable mode never preserves
+  resizability. The destination is allocated and copied before the source is
+  detached, so a failed `ToIndex`, allocation or detach-key check leaves the
+  source attached and unchanged.
 - **Slice bounds.** `ResolveArrayBufferBounds` implements the proposal's
   `ResolveBounds`: start is coerced first, end second (undefined end means the
   original length), negative values clamp at zero, positive values clamp at the
@@ -74,9 +82,14 @@ Ownership record for the new slice:
   end is RangeError. The destination is a fresh immutable buffer, never a view.
 - **Invalidation / reentrancy.** The source is re-read through the buffer
   object after user coercion; no raw pointer is retained across it. Detach still
-  runs the existing parent notification path. `sliceToImmutable` reads the
-  source data only after the final detached/length checks and allocates the
-  destination before copying. Source resizing cannot invalidate the copy.
+  runs the existing parent notification path. `sliceToImmutable` allocates the
+  destination before copying, and allocation can collect/run finalizers; after
+  the allocation it rechecks `IsDetached()`, refreshes `currentLength`, reapplies
+  the `currentLength < final` RangeError and recomputes `copyLength` before the
+  only `js_memcpy_s`. A finalizer that detaches fails with TypeError and one that
+  shrinks below the resolved end fails with RangeError; the freshly allocated
+  destination is unreferenced and recycler-owned. Source resizing cannot
+  invalidate the copy.
 - **Views.** `IsImmutableBuffer` is a type-tag check plus the immutable bit;
   SharedArrayBuffer views always report false. TypedArray's
   `ValidateTypedArray(..., writeAccess)` checks the bit before
@@ -88,7 +101,19 @@ Ownership record for the new slice:
   through `OP_SetElementI`. DataView setters call `GetWritableViewIndex`, which
   checks the bit before `ToIndex(byteOffset)` and value conversion. Atomics
   passes write access only for the read-modify-write/store family; `load` and
-  `notify` stay read mode.
+  `notify` stay read mode. Generic `Array.prototype.fill` and `copyWithin`
+  reject a non-empty write range after their index coercion; generic
+  `Array.prototype.sort` rejects after reading/sorting and before its first
+  write-back, preserving comparator calls for a non-empty receiver.
+- **Immutable descriptors.** `DefineOwnPropertyForTypedArray` treats an
+  immutable indexed property as non-writable/non-configurable: an empty
+  descriptor, `{value: same}`, `{writable:false}`, `{configurable:false}` and a
+  full same-value descriptor succeed; accessor descriptors, `writable:true`,
+  `configurable:true`, `enumerable:false` and a different `value` fail.
+- **Host boundary.** `JsExternalizeArrayBuffer` and `JsDetachArrayBuffer`
+  return `JsErrorInvalidArgument` for an immutable buffer before exposing or
+  releasing its storage. This keeps the host serialization transfer path from
+  detaching an immutable source and producing an aliasing mutable clone.
 - **Failure.** A TypeError is raised for non-object/non-ArrayBuffer receivers,
   SharedArrayBuffer, detached sources, immutable write targets and immutable
   species/create destinations. RangeError is used for invalid ToIndex bounds,
@@ -107,9 +132,11 @@ ordinary/detached/immutable slot results, copy/detach/zero-fill/prefix copy,
 resizable sources, species bypass, ToIndex order and errors, slice bounds grow/
 shrink/detach cases, slice species rejection, ArrayBuffer slice of an immutable
 source, DataView read/write behavior and argument order, TypedArray mutators,
-strict/sloppy/Reflect indexed writes, descriptors and `defineProperty`,
-subarray/slice/set read paths, TypedArray/`from`/`of` species results, and a
-conditional Atomics block. The file passes `test/es7` on both profiles:
+generic `Array.prototype.fill`/`copyWithin`/`sort` rejection and no-op ranges,
+strict/sloppy/Reflect indexed writes, descriptors and no-op/different-value
+`defineProperty`, subarray/slice/set read paths, TypedArray/`from`/`of` species
+results, the host serialization transfer rejection, and a conditional Atomics
+block. The file passes `test/es7` on both profiles:
 **87 passed / 0 failed** in `test` and **87 passed / 0 failed** in
 `debug-static`. The added entry is expected to move the gate pins by one:
 **2021/2073 → 2022/2074** (`test`/`debug-static`); the pins were not edited.
@@ -118,6 +145,13 @@ conditional Atomics block. The file passes `test/es7` on both profiles:
 `ArrayBuffer.prototype` names in insertion order (`sliceToImmutable`,
 `transferToImmutable`, `immutable`); the focused `test/typedarray` folder is
 **59 passed / 0 failed** (`test`) and **60 passed / 0 failed** (`debug-static`).
+
+The review fixes are exercised by the same focused lane: `sliceToImmutable`
+revalidates after destination allocation (invariant documented below because no
+deterministic finalizer shape is available), generic `Array.prototype.fill`/
+`copyWithin`/`sort` throw TypeError on a non-empty immutable write, no-op
+immutable `defineProperty` descriptors return true, and the host serialization
+transfer path throws without detaching the source.
 
 Pinned test262 focused selection (61 files, 122 strict/default scenarios from
 `features: [immutable-arraybuffer]` under ArrayBuffer/TypedArray/DataView/
@@ -136,34 +170,43 @@ Adjacent ArrayBuffer/DataView/TypedArray/TypedArrayConstructors/Atomics trees
 | 5,978 / 696 | 6,088 / 586 | +110 | 0 |
 
 Artifacts (scratch, ignored): `out/test262-s8-immutable-{before,after,
-before-flags,after-flags,final-default,final-flags,adj-before,adj-after,
-adj-final}`. The two focused flag-on failures are `return-immutable.js`
-(host `$DETACHBUFFER` double-detach, see Residuals) and
+before-flags,after-flags,final-default,final-flags,fix-default,fix-flags,
+adj-before,adj-after,adj-final,fix-adj}`. The two focused flag-on failures are
+`return-immutable.js` (host `$DETACHBUFFER` double-detach, see Residuals) and
 `Atomics/notify/immutable-buffer-returns-0.js` (BigInt64Array unsupported by
-this engine's Atomics surface, see Residuals). The adjacent run has no
-pass→fail.
+this engine's Atomics surface, see Residuals). The adjacent and post-review
+focused runs reproduce the same tables with no pass→fail.
 
 Direct lane smoke checks also verified: strict indexed assignment to an
 immutable view throws TypeError, sloppy assignment is a silent no-op,
 `Reflect.set` returns false, the index descriptor is non-writable/non-
-configurable, and `Object.defineProperty(ta, "0", { value: 1 })` throws
-TypeError.
+configurable, no-op `defineProperty` shapes return true while a different value
+throws TypeError, generic Array mutators throw without changing bytes, and
+`WScript.SerializeObject(iab, [iab])` now throws while leaving the source
+attached, immutable and byte-identical.
 
 ## Residuals and B4
 
-- **Host/JsRT immutability is advisory.** The engine prevents JavaScript writes
-  through DataView/TypedArray/Atomics and blocks the JS transfer/resize/detach
-  entry points. JsRT still exposes the storage pointer
-  (`JsGetArrayBufferStorage`) and `JsDetachArrayBuffer` does not reject an
-  immutable buffer, and host APIs that write through a raw storage pointer are
-  outside the ECMAScript checks. No OS read-only page protection is claimed.
+- **`sliceToImmutable` allocation-time reentrancy.** The post-allocation
+  `IsDetached`/length recheck and `copyLength` recomputation are not directly
+  forced by a deterministic finalizer/GC shape in this embedding; the pinned
+  grow/shrink/detach tests cover coercion-time reentry. The invariant is
+  enforced in `EntrySliceToImmutable` and documented above.
+- **Host/JsRT residual.** `JsExternalizeArrayBuffer` and `JsDetachArrayBuffer`
+  now reject immutable buffers, but `JsGetArrayBufferStorage` still exposes the
+  storage pointer and host code that writes through that pointer is outside the
+  ECMAScript checks. No OS read-only page protection is claimed. A host can
+  still request a by-value serializer copy; that copy is independent, not an
+  alias of the immutable block.
 - **TTD/serialization and debugger snapshots** do not carry the new bool; a
   snapshot replay of an immutable buffer would produce a mutable buffer. This
-  slice does not claim TTD fidelity.
-- **JIT/B4.** All evidence is Mac ARM64 `-nonative`. The interpreter/helper
-  checks are covered; inlined JIT typed-array store fast paths and JIT
-  write-barrier behavior were not audited or executed. B4 owns Linux/JIT
-  evidence and any JIT fast-path invalidation work.
+  slice does not claim TTD fidelity. The Chakra host's transferable-object
+  serialization is rejected for immutable buffers as described above.
+- **JIT/B4 blocker.** All evidence is Mac ARM64 `-nonative`. The interpreter and
+  helper checks are covered; inlined JIT typed-array store fast paths have no
+  immutable-buffer check and were not audited or executed. Immutable write
+  safety must not be claimed under JIT until B4 adds/validates that fast-path
+  check or an invalidation equivalent. B4 also owns Linux evidence.
 - **`return-immutable.js` host harness limitation.** The pinned test calls
   `$DETACHBUFFER` on a source that `transferToImmutable` already detached. The
   Chakra test262 host implements `$262.detachArrayBuffer` with
@@ -177,14 +220,15 @@ TypeError.
   buffers. `Atomics.notify` with `BigInt64Array` still fails because the
   pre-existing Atomics surface rejects BigInt64Array (the S2/S6 BigInt Atomics
   gap); this slice does not add BigInt wait/notify support.
-- **DefineOwnProperty nuance.** Immutable indexed `defineProperty` currently
-  returns failure through the typed-array store check; the proposal's
-  apply-current-descriptor rule for a no-op `{ value: same }` is not
-  implemented. No pinned immutable test exercises it.
 - **Uint8Array base64/hex.** `setFromBase64`/`setFromHex` are not implemented
   in this engine. Their two pinned immutable tests currently pass only
   vacuously (calling an absent method throws TypeError and the tests' side-effect
   assertions hold); this slice does not claim those APIs.
+- **WebAssembly detach-key evidence.** The transfer ordering now checks the
+  WebAssembly detach key before the engine allocation cap, matching step 7 of
+  `ArrayBufferCopyAndDetach`, but this Mac profile builds without WebAssembly
+  (`typeof WebAssembly === "undefined"`), so the ordering could not be executed
+  in the focused lane. B4/WebAssembly-enabled profiles own that proof.
 - **No zero-copy optimization.** `transferToImmutable`/`sliceToImmutable`
   always copy. The proposal explicitly permits copying.
 - Cross-realm species/ArrayBuffer-object behavior was not added to the focused

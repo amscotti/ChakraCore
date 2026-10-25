@@ -10392,6 +10392,27 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
             {
                 return Reject(throwOnError, scriptContext, JSERR_InvalidTypedArrayIndex, propId);
             }
+
+            // The proposal marks integer-indexed properties of an immutable
+            // buffer non-writable and non-configurable. A no-op descriptor
+            // succeeds; any attempted change fails (10.4.5.3).
+            if (IsImmutableBuffer(typedArray->GetArrayBuffer()))
+            {
+                if (descriptor.IsAccessorDescriptor()
+                    || (descriptor.ConfigurableSpecified() && descriptor.IsConfigurable())
+                    || (descriptor.EnumerableSpecified() && !descriptor.IsEnumerable())
+                    || (descriptor.WritableSpecified() && descriptor.IsWritable()))
+                {
+                    return Reject(throwOnError, scriptContext, JSERR_DefineProperty_NotConfigurable, propId);
+                }
+                if (descriptor.ValueSpecified()
+                    && !JavascriptConversion::SameValue(typedArray->DirectGetItem(uint32Index), descriptor.GetValue()))
+                {
+                    return Reject(throwOnError, scriptContext, JSERR_DefineProperty_NotWritable, propId);
+                }
+                return true;
+            }
+
             // vi. If IsAccessorDescriptor(Desc) is true, return false.
             // vii. If Desc has a[[Configurable]] field and if Desc.[[Configurable]] is true, return false.
             // viii. If Desc has an[[Enumerable]] field and if Desc.[[Enumerable]] is false, return false.

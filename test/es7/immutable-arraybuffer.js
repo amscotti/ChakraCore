@@ -392,6 +392,20 @@ var tests = [
             assert.areEqual(4, ta.length, "TypedArray view reads length");
             assert.areEqual(1, ta[0], "TypedArray element read");
 
+            var genericComparisons = 0;
+            assert.throws(function () { Array.prototype.fill.call(ta, 9); }, TypeError, "Array.prototype.fill rejects immutable");
+            assert.throws(function () { Array.prototype.copyWithin.call(ta, 0, 1); }, TypeError, "Array.prototype.copyWithin rejects immutable");
+            assert.throws(function () {
+                Array.prototype.sort.call(ta, function () {
+                    genericComparisons++;
+                    return 0;
+                });
+            }, TypeError, "Array.prototype.sort rejects immutable");
+            assert.isTrue(genericComparisons > 0, "generic sort compares before its write-back fails");
+            assert.doesNotThrow(function () { Array.prototype.fill.call(ta, 9, 5, 5); }, "zero-length generic fill is a no-op");
+            assert.doesNotThrow(function () { Array.prototype.copyWithin.call(ta, 0, 0, 0); }, "zero-count generic copyWithin is a no-op");
+            assertBytes(immutable, [1, 2, 3, 4], "generic Array mutators did not modify bytes");
+
             var calls = [];
             assert.throws(function () { ta.fill(9, { valueOf() { calls.push("fill"); return 0; } }); }, TypeError);
             assert.throws(function () { ta.copyWithin(0, 1); }, TypeError);
@@ -415,7 +429,17 @@ var tests = [
             var descriptor = Object.getOwnPropertyDescriptor(ta, "0");
             assert.isFalse(descriptor.writable, "index descriptor is not writable");
             assert.isFalse(descriptor.configurable, "index descriptor is not configurable");
-            assert.throws(function () { Object.defineProperty(ta, "0", { value: 1 }); }, TypeError, "defineProperty rejects writes");
+            assert.isTrue(Reflect.defineProperty(ta, "0", {}), "empty descriptor is a no-op");
+            assert.isTrue(Reflect.defineProperty(ta, "0", { value: 1 }), "same-value descriptor is a no-op");
+            assert.isTrue(Reflect.defineProperty(ta, "0", { writable: false }), "writable:false is a no-op");
+            assert.isTrue(Reflect.defineProperty(ta, "0", { configurable: false }), "configurable:false is a no-op");
+            assert.isTrue(Reflect.defineProperty(ta, "0", { value: 1, writable: false, configurable: false, enumerable: true }),
+                "full same-value descriptor is a no-op");
+            assert.isFalse(Reflect.defineProperty(ta, "0", { value: 9 }), "different value is rejected");
+            assert.isFalse(Reflect.defineProperty(ta, "0", { writable: true }), "writable:true is rejected");
+            assert.isFalse(Reflect.defineProperty(ta, "0", { configurable: true }), "configurable:true is rejected");
+            assert.isFalse(Reflect.defineProperty(ta, "0", { enumerable: false }), "enumerable:false is rejected");
+            assert.throws(function () { Object.defineProperty(ta, "0", { value: 9 }); }, TypeError, "defineProperty rejects writes");
 
             var mutableTarget = new Uint8Array(4);
             mutableTarget.set(new Uint8Array(immutable));
@@ -508,6 +532,25 @@ var tests = [
             assert.throws(function () { Atomics.add(ta, 0, 1); }, TypeError, "Atomics.add rejects immutable");
             assert.throws(function () { Atomics.store(ta, 0, 1); }, TypeError, "Atomics.store rejects immutable");
             assert.areEqual(0, Atomics.notify(ta, 0, 1), "Atomics.notify on a non-shared buffer returns zero");
+        }
+    },
+    {
+        name: "Host serialization cannot externalize or detach an immutable buffer",
+        body() {
+            if (typeof WScript === "undefined" || typeof WScript.SerializeObject !== "function") {
+                return;
+            }
+            var source = makeImmutable([7, 8]);
+            var threw = false;
+            try {
+                WScript.SerializeObject(source, [source]);
+            } catch (e) {
+                threw = true;
+            }
+            assert.isTrue(threw, "SerializeObject transfer list is rejected");
+            assert.isFalse(source.detached, "immutable source stays attached");
+            assert.isTrue(source.immutable, "immutable source stays immutable");
+            assertBytes(source, [7, 8], "immutable source keeps its bytes");
         }
     }
 ];

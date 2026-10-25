@@ -698,18 +698,19 @@ namespace Js
             JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedArrayBufferObject);
         }
 
+        // WebAssembly.Memory buffers cannot be detached. This is the
+        // [[ArrayBufferDetachKey]] check (step 7), which precedes the
+        // engine's allocation-limit check and destination allocation.
+        if (source->IsWebAssemblyArrayBuffer())
+        {
+            JavascriptError::ThrowTypeError(scriptContext, WASMERR_CantDetach);
+        }
+
         if (newByteLengthValue > (double)ArrayBuffer::MaxArrayBufferLength)
         {
             JavascriptError::ThrowRangeError(scriptContext, JSERR_ArrayLengthConstructIncorrect);
         }
         uint32 newByteLength = (uint32)newByteLengthValue;
-
-        // WebAssembly.Memory buffers cannot be detached. Check before creating
-        // and copying into a destination that would be discarded by the throw.
-        if (source->IsWebAssemblyArrayBuffer())
-        {
-            JavascriptError::ThrowTypeError(scriptContext, WASMERR_CantDetach);
-        }
 
         bool resizable = !immutable && preserveResizability && source->IsResizable();
         uint32 maxByteLength = resizable ? source->GetMaxByteLength() : newByteLength;
@@ -1100,6 +1101,19 @@ namespace Js
 
         uint32 newLength = final > first ? final - first : 0;
         ArrayBuffer* newBuffer = CreateImmutableArrayBuffer(newLength, scriptContext);
+
+        // Allocating the destination can collect or run finalizers that
+        // reenter and detach or resize the source. Revalidate and re-read the
+        // live length before touching source bytes.
+        if (arrayBuffer->IsDetached())
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, _u("ArrayBuffer.prototype.sliceToImmutable"));
+        }
+        currentLength = arrayBuffer->GetByteLength();
+        if (currentLength < final)
+        {
+            JavascriptError::ThrowRangeError(scriptContext, JSERR_ArrayLengthConstructIncorrect);
+        }
         uint32 copyLength = first < currentLength ? min(newLength, currentLength - first) : 0;
         if (copyLength > 0)
         {
