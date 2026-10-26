@@ -20,7 +20,10 @@ function assertFormat(expected, fmt, date, msg = "assertFormat") {
 
     if (isICU) {
         const parts = fmt.formatToParts(date);
-        assert.areEqual(expected, parts.map((part) => part.value).join(""), `${msg}: fmt.formatToParts(date) did not match expected value`);
+        // ICU 79 adds a typographic apostrophe before a 2-digit year. The
+        // format string is already normalized through ascii(); keep the
+        // formatToParts comparison on the same normalized basis.
+        assert.areEqual(ascii(expected), ascii(parts.map((part) => part.value).join("")), `${msg}: fmt.formatToParts(date) did not match expected value`);
 
         const types = parts.filter((part) => part.type != "literal").map((part) => part.type);
         assert.areEqual(new Set(types).size, types.length, `Duplicate non-literal parts detected in ${JSON.stringify(parts)}`)
@@ -204,10 +207,14 @@ const tests = [
             test({ hour: "numeric", minute: "numeric", second: "numeric" }, ["hour", "minute", "second"], ["12", "00", "00"]);
             test({ month: "long" }, "month", "January");
 
-            // See https://github.com/chakra-core/ChakraCore/issues/7047
+            // See https://github.com/chakra-core/ChakraCore/issues/7047.
+            // ICU 79 uses a plain space for the first literal here; ICU 78
+            // used comma-space.
             if (!isICU || WScript.Platform.ICU_VERSION != 78) {
+                const icuMajor = isICU ? parseInt(WScript.Platform.ICU_VERSION, 10) : 0;
+                const firstLiteral = icuMajor >= 79 ? " " : ", ";
                 // the "literal" tested here is the first of two literals, the second of which is a space between "12" and "AM"
-                test({ hour: "numeric", weekday: "long" }, ["weekday", "literal", "hour", "dayPeriod"], ["Saturday", ", ", "12", "AM"]);
+                test({ hour: "numeric", weekday: "long" }, ["weekday", "literal", "hour", "dayPeriod"], ["Saturday", firstLiteral, "12", "AM"]);
             }
         }
     },
