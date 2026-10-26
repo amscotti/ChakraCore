@@ -53,8 +53,10 @@ namespace UnifiedRegex
         bool Resolve(const char16* name, CharCount nameLen, const char16* value, CharCount valueLen, bool hasValue, Resolved* out);
 
         // Computes the matching code points into `result`, allocated from
-        // `allocator`. Requires a successfully resolved escape.
-        void BuildCodePointSet(const Resolved& resolved, ArenaAllocator* allocator, CharSet<codepoint_t>& result);
+        // `allocator`. Returns false only on an ICU-internal failure (the
+        // caller turns that into a SyntaxError); requires a successfully
+        // resolved escape.
+        bool BuildCodePointSet(const Resolved& resolved, ArenaAllocator* allocator, CharSet<codepoint_t>& result);
 
         // ---------------------------------------------------------------------------
         // Implementation (this header is consumed only by RegexParser.cpp; all
@@ -210,6 +212,23 @@ namespace UnifiedRegex
             { _u("Qaac"), USCRIPT_COPTIC },
         };
 
+        // ICU enumerates ISO 15924 codes that have no assigned code points
+        // in its Unicode build (Zxxx, Hans, Hanb, Kpel, Loma, ...). The
+        // ECMAScript script-value tables only contain scripts with code
+        // points, and engines reject the unassigned spellings, so a script
+        // value is valid only when its Script set is non-empty. This is a
+        // data-derived check (no name list), and it also covers the scx
+        // forms: every scx value is a script value.
+        static bool ScriptHasAssignedCodePoints(int32 script)
+        {
+            UErrorCode ec = U_ZERO_ERROR;
+            USet* set = uset_open(1, 0); // empty
+            uset_applyIntPropertyValue(set, UCHAR_SCRIPT, script, &ec);
+            bool hasCodePoints = U_SUCCESS(ec) && uset_getItemCount(set) > 0;
+            uset_close(set);
+            return hasCodePoints;
+        }
+
         static bool EqualsAscii(const char16* name, CharCount nameLen, const char16* spelling)
         {
             for (CharCount i = 0; ; i++)
@@ -275,6 +294,8 @@ namespace UnifiedRegex
                 if (EqualsIcuName(value, valueLen, u_getPropertyValueName(UCHAR_SCRIPT, v, U_LONG_PROPERTY_NAME)) ||
                     EqualsIcuName(value, valueLen, u_getPropertyValueName(UCHAR_SCRIPT, v, U_SHORT_PROPERTY_NAME)))
                 {
+                    if (!ScriptHasAssignedCodePoints(v))
+                        return false; // ISO code with no assigned code points
                     out->value = v;
                     out->isGroupValue = false;
                     return true;
@@ -284,6 +305,8 @@ namespace UnifiedRegex
             {
                 if (EqualsAscii(value, valueLen, a.name))
                 {
+                    if (!ScriptHasAssignedCodePoints(a.script))
+                        return false; // ISO code with no assigned code points
                     out->value = a.script;
                     out->isGroupValue = false;
                     return true;
@@ -355,8 +378,10 @@ namespace UnifiedRegex
 
         // Fills `result` with the USet's ranges. Property application never
         // produces string elements (that is v-flag "property of strings"
-        // territory, out of scope), so any string item is skipped.
-        static void CopyUSetRanges(USet* set, ArenaAllocator* allocator, CharSet<codepoint_t>& result)
+        // territory, out of scope), so any string item is skipped. Returns
+        // false when ICU reports a failure mid-iteration so the caller does
+        // not silently accept a truncated set.
+        static bool CopyUSetRanges(USet* set, ArenaAllocator* allocator, CharSet<codepoint_t>& result)
         {
             UErrorCode ec = U_ZERO_ERROR;
             int32 itemCount = uset_getItemCount(set);
@@ -366,27 +391,28 @@ namespace UnifiedRegex
                 UChar str[8];
                 int32 strLen = uset_getItem(set, i, &start, &end, str, 8, &ec);
                 if (U_FAILURE(ec))
-                    break;
+                    return false;
                 if (strLen != 0)
                     continue;
                 if (start > end)
                     continue;
                 result.SetRange(allocator, static_cast<codepoint_t>(start), static_cast<codepoint_t>(end));
             }
+            return true;
         }
 
-        void BuildCodePointSet(const Resolved& resolved, ArenaAllocator* allocator, CharSet<codepoint_t>& result)
+        bool BuildCodePointSet(const Resolved& resolved, ArenaAllocator* allocator, CharSet<codepoint_t>& result)
         {
             switch (resolved.kind)
             {
                 case Any:
                     result.SetRange(allocator, 0, 0x10FFFF);
-                    return;
+                    return true;
                 case ASCII:
                     result.SetRange(allocator, 0, 0x7F);
-                    return;
+                    return true;
                 case Invalid:
-                    return;
+                    return false;
                 default:
                     break;
             }
@@ -419,9 +445,19 @@ namespace UnifiedRegex
                     }
                     UChar nameBuffer[32];
                     int32_t n = 0;
-                    for (; longName[n] != 0 && n < 31; n++)
+                    for (; longName[n] != 0; n++)
+                    {
+                        if (n >= 32)
+                        {
+                            // Name does not fit; never pass a truncated name
+                            // (it could silently resolve to another script).
+                            ec = U_BUFFER_OVERFLOW_ERROR;
+                            break;
+                        }
                         nameBuffer[n] = static_cast<UChar>(static_cast<unsigned char>(longName[n]));
-                    nameBuffer[n] = 0;
+                    }
+                    if (U_FAILURE(ec))
+                        break;
                     uset_applyPropertyAlias(set, _u("Script_Extensions"), -1, nameBuffer, n, &ec);
                     break;
                 }
@@ -432,9 +468,9 @@ namespace UnifiedRegex
                     ec = U_ILLEGAL_ARGUMENT_ERROR;
                     break;
             }
-            if (U_SUCCESS(ec))
-                CopyUSetRanges(set, allocator, result);
+            bool ok = U_SUCCESS(ec) && CopyUSetRanges(set, allocator, result);
             uset_close(set);
+            return ok;
         }
     }
 }

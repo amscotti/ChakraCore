@@ -341,6 +341,64 @@ var tests = [
         }
     },
     {
+        name: "Class \\p/\\P without a body: Annex B identity vs u-mode rejection",
+        body() {
+            compileOk("/[\\p]/");
+            compileOk("/[\\pL]/");
+            compileOk("/[\\P]/");
+            compileOk("/[\\p]x{2}/");
+            compileOk("/[\\pL]x{2}/");
+            compileOk("/[\\pxNd}]/", "brace-less short form with a trailing brace character");
+            compileOk("/[\\p{Lu]/", "brace opened but never closed before the literal end");
+            compileOk("new RegExp('[\\\\p{Lu]')");
+
+            assert.isTrue(/[\p]/.test("p"), "identity 'p' in the class");
+            assert.isFalse(/[\p]/.test("L"));
+            assert.isTrue(/[\pL]/.test("L"), "identity 'p' followed by literal 'L'");
+            assert.isTrue(/[\P]/.test("P"));
+            assert.isFalse(/[\P]/.test("p"));
+            assert.isTrue(/[\p]x{2}/.test("pxx"), "quantified tail after the class");
+            assert.isFalse(/[\p]x{2}/.test("pxy"));
+            assert.isTrue(/[\pL]x{2}/.test("Lxx"));
+            assert.isTrue(/[\pxNd}]/.test("}"), "brace character is a class member");
+            assert.isTrue(/[\pxNd}]/.test("p"));
+            assert.isFalse(/[\pxNd}]/.test("Q"));
+            assert.isTrue(/[\p{Lu]/.test("{"), "'{Lu' re-parse as literal characters");
+            assert.isTrue(new RegExp("[\\p{Lu]").test("p"), "dynamic form matches literals");
+
+            compileError("/[\\p]/u");
+            compileError("/[\\pL]/u");
+            compileError("/[\\P]/u");
+            compileError("/[\\p]x{2}/u");
+            compileError("/[\\pL]x{2}/u");
+            compileError("new RegExp('[\\\\p]', 'u')");
+            compileError("new RegExp('[\\\\pL]x{2}', 'u')");
+        }
+    },
+    {
+        name: "Script values without assigned code points are rejected",
+        body() {
+            var unassigned = ["Hanb", "Kpel", "Loma", "Hans", "Hant", "Zxxx", "Zmth", "Zsym", "Jamo", "Aran", "Hrkt", "Hntl"];
+            for (var i = 0; i < unassigned.length; i++) {
+                var code = unassigned[i];
+                compileError("new RegExp('\\\\p{sc=" + code + "}', 'u')");
+                compileError("new RegExp('\\\\p{scx=" + code + "}', 'u')");
+                compileError("new RegExp('\\\\p{Script=" + code + "}', 'u')");
+                compileError("new RegExp('\\\\p{Script_Extensions=" + code + "}', 'u')");
+            }
+
+            var assigned = ["Greek", "Grek", "Qaai", "Qaac", "Copt", "Unknown", "Zzzz", "Inherited", "Zinh", "Katakana", "Hiragana", "Latin"];
+            for (var j = 0; j < assigned.length; j++) {
+                var ok = assigned[j];
+                compileOk("new RegExp('\\\\p{sc=" + ok + "}', 'u')");
+                compileOk("new RegExp('\\\\p{scx=" + ok + "}', 'u')");
+            }
+            assert.isTrue(/\p{sc=Katakana}/u.test("\u30a2"), "assigned script still matches");
+            assert.isTrue(/\p{scx=Katakana}/u.test("\u30fc"), "assigned script extensions still match");
+            assert.isTrue(/\p{sc=Unknown}/u.test("\u0378"), "Unknown covers unassigned code points");
+        }
+    },
+    {
         name: "Dynamic construction, compile and flags",
         body() {
             assert.isTrue(new RegExp("\\p{Lu}", "u").test("A"));

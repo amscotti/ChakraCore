@@ -721,7 +721,8 @@ namespace UnifiedRegex
             Fail(JSERR_RegExpSyntax);
 
         CharSet<codepoint_t> codePointSet;
-        UnicodeProperty::BuildCodePointSet(resolved, ctAllocator, codePointSet);
+        if (!UnicodeProperty::BuildCodePointSet(resolved, ctAllocator, codePointSet))
+            Fail(JSERR_RegExpSyntax); // ICU failed to compute the set
 
         // \P{...} complements the property over all code points first, and
         // i-mode case closure (when effective) applies to the complemented
@@ -754,7 +755,8 @@ namespace UnifiedRegex
 
         const bool isNegation = ECLookahead() == 'P';
         ECConsume(); // p/P
-        Assert(!IsEOF() && ECLookahead() == '{'); // pass 0 validated the shape
+        if (IsEOF() || ECLookahead() != '{')
+            Fail(JSERR_RegExpInvalidEscape); // pass 0 already deferred this shape
 
         char16 name[propertyEscapeMaxNameLen];
         char16 value[propertyEscapeMaxNameLen];
@@ -767,7 +769,8 @@ namespace UnifiedRegex
             Fail(JSERR_RegExpSyntax);
 
         CharSet<codepoint_t> codePointSet;
-        UnicodeProperty::BuildCodePointSet(resolved, ctAllocator, codePointSet);
+        if (!UnicodeProperty::BuildCodePointSet(resolved, ctAllocator, codePointSet))
+            Fail(JSERR_RegExpSyntax); // ICU failed to compute the set
 
         if (!isNegation)
         {
@@ -3424,11 +3427,13 @@ namespace UnifiedRegex
             }
             else if (nextChar == '\\')
             {
-                if (unicodeFlagPresent && (ECLookahead() == 'p' || ECLookahead() == 'P'))
+                if (unicodeFlagPresent && (ECLookahead() == 'p' || ECLookahead() == 'P') && ECLookahead(1) == '{')
                 {
                     // \p{...}/\P{...} inside the class: union its code point
                     // set. Like \d & co it is a set-valued atom, so it cannot
-                    // be a range endpoint.
+                    // be a range endpoint. (Without the brace, pass 0's
+                    // deferred invalid-escape error already rejected the
+                    // u-mode pattern, and non-u re-parses as identity.)
                     if (pendingRangeStart != INVALID_CODEPOINT)
                     {
                         Fail(JSERR_UnicodeRegExpRangeContainsCharClass);
@@ -3747,12 +3752,20 @@ namespace UnifiedRegex
                 return true;
             case 'p':
             case 'P':
-                // \p{...}/\P{...} property escape (u mode); like \d & co it
-                // is never a singleton class atom. 'p'/'P' was already
-                // consumed by the switch's NextChar, so the shared scanner
-                // continues from '{'.
-                ScanPropertyEscapeBodyPass0();
-                return false;
+                // \p{...}/\P{...} property escape (u mode); like \d & co a
+                // property escape with a body is never a singleton class
+                // atom. 'p'/'P' was already consumed by the switch's
+                // NextChar, so the shared scanner continues from '{'.
+                // Without the brace this stays the Annex B identity escape
+                // 'p'/'P' (an invalid escape once the u flag is known).
+                if (ECLookahead() == '{')
+                {
+                    ScanPropertyEscapeBodyPass0();
+                    return false;
+                }
+                DeferredFailIfUnicode(JSERR_RegExpInvalidEscape);
+                singleton = c;
+                return true;
             default:
                 // embedded 0 is ok
                 singleton = c;

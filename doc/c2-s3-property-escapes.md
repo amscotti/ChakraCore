@@ -33,7 +33,7 @@ existing `u` flag** (ES2018 feature, current-spec semantics):
   (`/\p{Lu}/.test('p{Lu}')` stays true). One deliberate divergence from
   V8/JSC kept: they reject an unterminated `\p{...` even without `u`; we keep
   accepting it as literals because this slice pins existing non-u behavior.
-  (`[\p{Lu]` without `u` is still a SyntaxError in both, as before.)
+  (`[\p{Lu]` without `u` parses as the literal characters `{Lu` in Chakra — base and this change — and in Node/Bun alike; only a class with no closing `]` at all is a SyntaxError everywhere)
 
 **Out of scope** (later S3 slices): the `v` flag (still rejected as an
 invalid flag), `--`/`&&`/nested-class set notation, and property-of-strings
@@ -125,30 +125,75 @@ on that basis.
   syntax errors), records a deferred error, or returns a node; no partial
   state survives (arena allocation is transactional by design).
 
+## Review repairs (combined general+adversarial review, commit after `b9bb103c3`)
+
+1. **Class `\p`/`\P` without a body** (blocking): `ClassEscapePass0`
+   called the shared body scanner unconditionally for `p`/`P`, so
+   `[\p]`/`[\pL]`/`[\P]` hit the scanner's `{` assertion (debug) or
+   misparsed (release). Both passes now mirror the atom-path guards:
+   pass 0 records a deferred-if-unicode invalid-escape error and keeps the
+   Annex B identity escape (`singleton = 'p'/'P'`), and the pass-1 class
+   hook additionally requires the `{` before engaging (its remaining shape
+   assert became a defensive `Fail`). Non-u class forms are byte-identical
+   to the base binary again; u-mode forms are SyntaxError (20-probe
+   battery: ch == Node == Bun; non-u rows == base).
+2. **Script-value over-acceptance**: `sc=`/`scx=` accepted ISO codes with
+   no assigned code points in the ICU build (`Hanb`, `Kpel`, `Loma`, and
+   34 more enumerated spellings). Resolution now rejects any script value
+   whose `UCHAR_SCRIPT` USet is empty — a data-derived check, no name
+   list — applied to `Script` and `Script_Extensions` (and the `Qaai`/
+   `Qaac` aliases). The 70-probe battery matches Node/Bun exactly
+   (all three engines reject all 35 codes for both properties);
+   assigned scripts incl. `Unknown`/`Zzzz`/`Qaai` stay accepted.
+3. **ICU failure handling**: `BuildCodePointSet` now returns success;
+   `U_FAILURE` at apply time or mid-iteration propagates to the parser's
+   existing `Fail(JSERR_RegExpSyntax)` path in both the atom and class
+   callers, so an ICU error can no longer silently produce an empty or
+   truncated set. The canonical-name buffer for `Script_Extensions`
+   detects overflow instead of truncating (a truncated name could
+   silently resolve to a different script). No ICU object is retained
+   across calls (USet open/close stay on one straight-line path).
+4. **Receipt corrections**: the false `[\p{Lu]`-without-`u` SyntaxError
+   claim is corrected (that form parses as literal `{Lu` in Chakra, Node
+   and Bun alike; only a class missing its `]` errors, everywhere); exact
+   Unicode version labels are replaced by observed drift traits; the
+   focused-test counts are exact (16 groups / 365 assertions) and CH gate
+   runs are distinguished from the separate Node/Bun shim battery.
+
 ## Tests and evidence
 
 - **Focused regression test** `test/es7/regexp-property-escapes.js`
   (registered once in `test/es7/rlexe.xml`, default launch,
-  `-args summary -endargs`): 14 test groups / 262 assertions covering the
+  `-args summary -endargs`): 16 test groups / 365 assertions covering the
   full accept matrix (binary canonical+alias spellings, gc values incl.
   groups and legacy aliases, sc/scx incl. ISO codes and `Qaai`/`Qaac`,
   `Any`/`Assigned`/`ASCII`), the reject matrix (wrong case, spaces/hyphens
   not stripped, lone scripts, property-name-alone, value-under-wrong-
   property, non-ES properties, empty/`=`-only/two-`=`/unterminated bodies,
-  `\p` without braces, class range endpoints), non-u identity-escape
-  preservation, matching semantics (binary, gc, sc vs scx on U+30FC,
-  astral members, negation, surrogate code points), case-insensitive
-  closure (atom-vs-class ordering, scoped modifier `i`), class
-  unions/negations/dash literals, composition (quantifiers, alternation,
-  lookbehind, named groups, split/replace, sticky), dynamic construction,
-  `compile()` and `source` round-trip. **Node 26.5.0 and Bun 1.4.3 pass the
-  same file through a shim: 262/262 both.** `ch` (test profile): `pass` on
-  default, `-noDeferParse`, `-CollectGarbage`, `-noDeferParse
-  -CollectGarbage` and `-force:deferParse` launches.
+  `\p` without braces, class range endpoints, script values with no
+  assigned code points), non-u identity-escape preservation (atom and class
+  `p`/`P` without braces, short forms like `[\pL]`, trailing brace
+  characters like `[\pxNd}]`, `[\p{Lu]` literal re-parse), matching
+  semantics (binary, gc, sc vs scx on U+30FC, astral members, negation,
+  surrogate code points), case-insensitive closure (atom-vs-class ordering,
+  scoped modifier `i`), class unions/negations/dash literals, composition
+  (quantifiers, alternation, lookbehind, named groups, split/replace,
+  sticky), dynamic construction, `compile()` and `source` round-trip.
+  **CH gate runs**: `ch` test-profile `pass` on default, `-noDeferParse`,
+  `-CollectGarbage`, `-noDeferParse -CollectGarbage` and
+  `-force:deferParse` launches, and the same five launches pass on the
+  debug-static profile. **Separate Node/Bun oracle battery** (not the gate
+  harness): the same file's assertions executed under Node 26.5.0 and
+  Bun 1.4.3 through a compatibility shim — 365/365 assertions each.
 - **Oracle batteries** (`/tmp/opencode/s3a-*.js`, kept outside the repo):
-  79-probe semantic matrix and five name/alias/Annex-B batteries — ch
-  matches Node on every outcome; the only textual difference is SyntaxError
-  message wording. Remaining outcome-level differences vs Node, all in the
+  a 79-probe semantic matrix, five name/alias/Annex-B batteries, a
+  20-probe class-without-brace battery (`[\p]`, `[\pL]`, `[\P]`,
+  `[\p]x{2}`, `[\pxNd}]`, `[\p{Lu]`, u-mode rejections) and a 70-probe
+  unassigned-script battery (35 ISO codes × sc/scx) — ch matches Node 26.5.0
+  and Bun 1.4.3 on every outcome (Bun and Node are identical to each other
+  on all of them), and every non-u row is also identical to the base
+  ChakraCore binary, so Annex B behavior is unchanged. The only textual
+  difference anywhere is SyntaxError message wording. Remaining outcome-level differences vs Node, all in the
   engine's documented u-mode per-unit-matching lacunarity class
   (doc/c2-s9-modifiers.md "Limits"): `/\P{L}/u.exec('𝐀')` returns
   `[0,1]` ('\uD835') where Node returns null, `/\p{Cs}/u.exec('\uD800\uDC00')`
@@ -164,16 +209,22 @@ on that basis.
   `regexp-modifiers/**`, `test/language/literals/regexp/**` = **1,980
   scenarios (990 files)**. Before (base binary `688e304462b85669` at the
   identical HEAD `084dcf06a`): **1,020 passed / 960 failed**
-  (`out/test262-s3a-before`). After (worktree binary
-  `9bf4a43e…`→final `ac858c67…`): **1,814 passed / 166 failed**
-  (`out/test262-s3a-after`). Per-scenario join: **794 fail→pass,
-  0 pass→fail**; the 166 residue all failed before too:
+  (`out/test262-s3a-before`). After the initial implementation:
+  **1,814 passed / 166 failed** (`out/test262-s3a-after`); after the review
+  repairs, an identical rerun gives **1,814 passed / 166 failed**
+  (`out/test262-s3a-after2`), and the repair join is **0 fail→pass /
+  0 pass→fail** versus the pre-repair run (the fixed bugs are not exercised
+  by this corpus). Combined per-scenario join versus the base binary:
+  **794 fail→pass, 0 pass→fail**; the 166 residue all failed before too:
   - 96 timeouts + 16 assertion failures in `generated/` = 56 unique files:
-    Unicode **17** (the corpus's generated tables) vs **ICU 79.1 = Unicode
-    15.1** drift — new scripts (Garay, Gurung Khema, Kirat Rai, Sunuwar,
-    Todhri, Ol Onal, ...), new assignments (`Assigned`/`gc=Unassigned`/
+    drift between the pinned corpus's newer generated property tables and
+    the pinned **ICU 79.1** build's data — the corpus asserts scripts the
+    ICU build does not enumerate (Garay, Gurung Khema, Kirat Rai, Sunuwar,
+    Todhri, Ol Onal, ...) and assignments the ICU build does not have
+    (e.g. `\P{Assigned}` must match U+208F; `Assigned`/`gc=Unassigned`/
     `gc=Other`/`Grapheme_Base`/`Extended_Pictographic`/`sc=Unknown`/
-    `scx=Devanagari`). The timeouts are drift-triggered: one drifted symbol
+    `scx=Devanagari` files). No exact Unicode version is claimed for either
+    side beyond the observed drift traits. The timeouts are drift-triggered: one drifted symbol
     fails `/^\p{X}+$/u`, the harness falls back to per-symbol tests over
     >100K symbols, and the interpreter's quadratic backtracking on the
     failing anchored loop exceeds the 10 s harness limit (Node completes
@@ -205,23 +256,28 @@ on that basis.
   `Script_-_Greek.js`, `General_Category_-_Surrogate.js`) gives
   **282 passed / 12 failed (294 scenarios)** — the 12 are exactly the
   pre-existing double-escaped-literal files; no debug assert fired
-  (`out/test262-s3a-debug`).
+  (`out/test262-s3a-debug`, re-verified post-repair in
+  `out/test262-s3a-debug2`).
 
 ## Residuals
 
 1. `v` flag and set notation: entirely unimplemented (rejected as today);
    `generated/strings/**` keeps failing. Next S3 slice.
-2. ICU 79.1 (Unicode 15.1) data vs the corpus's Unicode 17 tables: 56
-   generated files fail on new scripts/new assignments. Bounded by the
-   pinned dependency; lifting it needs the B5 dependency decision (ICU ≥ 76
-   would add Unicode 16/17 scripts). Exact residual at this pin: 16
-   assertion failures + 96 drift-triggered timeouts as above.
+2. ICU 79.1 data vs the pinned corpus's newer generated tables: 56
+   generated files fail on scripts/assignments the ICU build does not know
+   (observed drift traits above; exact Unicode versions deliberately not
+   asserted). Bounded by the pinned dependency; lifting it needs the B5
+   dependency decision. Exact residual at this pin: 16 assertion failures +
+   96 drift-triggered timeouts as above.
 3. Half-pair/lone-surrogate matching in u mode for sets that contain
    surrogate code points (exec positions and match spans; see oracle
    battery) — the engine's pre-existing per-unit u-mode lacunarity, now
    reachable via `\p{Cs}`/`\P{...}`/`\p{Any}`; not fixed by this slice.
-4. Unterminated `\p{` without `u` is accepted as literals (V8/JSC reject);
-   deliberate preservation of existing non-u behavior.
+4. Unterminated `\p{` bodies without `u`: every probed form (atom and
+   class, literal and dynamic) is accepted as literals by Chakra, Node and
+   Bun identically; a class that never closes is a SyntaxError everywhere.
+   No known divergence remains here (an earlier draft of this receipt
+   misattributed a missing-`]` error to the escape).
 5. Pre-existing, untouched: `[^]` u-mode behavior change noted above
    (spec-correct now); `[^\u{10000}-\u{10FFFF}]`-style BMP-only complements
    still double-negate (pre-existing corner, preserved verbatim);
