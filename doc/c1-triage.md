@@ -853,7 +853,7 @@ asserted the old non-conforming block `var`/`let` behavior were updated
 deliberately. Gates moved 1975/2027 → 1976/2028. No bytecode change; B4
 still owns JIT-configuration claims.)*
 
-## 7. C2 integration status (2026-10-21)
+## 7. C2 integration status (2026-10-25)
 
 | Batch | Status | Integrated evidence | Remaining |
 |---|---|---|---|
@@ -870,6 +870,7 @@ still owns JIT-configuration claims.)*
 | S1 tail: direct-eval + computed-key privates, field semantics | Landed `1418c292f` (merge `de92ddb80`) | elements corpus 5,888/5,897 (`out/test262-c2-wave3`), +34/0 vs wave-2 run; dual-review ACCEPT (adversarial re-run) | JIT (3 interpreter-only ops); 4 primitive-receiver scenarios need `-ESBigInt` in runner |
 | S1 direct-eval `super` early errors | Landed `851d0646f` (merge `ea8f253ac`) + review `39e9f2a16` | `super-prop*` 12/0; eval-code 454/0 (10 f→p / 0 p→f); class elements 5,888/9 unchanged; object-literal function/arrow false accepts fixed; 3 parse-mode entries; legacy expectations corrected | JIT/serialization (B4); pre-existing super[expr] before super() order |
 | S8 Float16Array | Landed `de89e6d27` + fix `161639b48` (merge `a39aa8c45`) | gates 2013/2065 (new float16array.js 17/17); loop-2 dual ACCEPT after GetDiagTypeString fix | JIT kind lowering (B4); Atomics exclusion by allowlist |
+| S8 immutable ArrayBuffer | Landed `ce2179b2a` + review `2fb37b4d6`, `cbf91b796` (merge `4ac863379`) | focused 84/38 default, 118/122 flag-on; adjacent +110 f→p / 0 p→f; new test entry; gates 2022/2074 | JIT fast path, TTD snapshot fidelity, JsRT raw storage, B4 |
 | S6a growable SAB + non-shared Atomics (flag-on) | Landed `01923087f` + review `eaa526f89` (merge `e3371d313`) + final `39e9f2a16` | focused S6 462/982 → 574/982, 112 f→p / 0 p→f; new test 13/13; debug index-detach abort fixed; SAB/Atomics remain off by default | BigInt Atomics, multi-agent wait/grow, B4 |
 | S6b `Atomics.pause` + single-thread `waitAsync` (flag-on) | Landed `0a1c592b3` + review `5fa9524e2` (merge `eef3b93c5`) | pause 10/10; focused pause+waitAsync 0/124 → 80/124, 72/202 exact, 80/0 f→p; short calls/counts/cross-realm/FIFO fixed; new test 1 entry | finite timeout scheduling, cross-agent waitAsync, BigInt waitAsync, B4; SAB default off |
 | S12 import attributes + JSON modules | Landed `ee826e889` + fixes `36043391d`, `d0223ff1a` (merge `78cc4f412`) | import corpus delta +12 net / 0 p→f (lane-run 565/172 vs 553/184); loop-3 dual ACCEPT (user-authorized) | `OP_ImportCallWithOptions` JIT lowering (B4); BOM-JSON; debug metadata leg pre-existing |
@@ -888,11 +889,11 @@ still owns JIT-configuration claims.)*
 | S14 hidden-outer eval `arguments` | Landed `d9a1998d1` (merge `13e925a75`) | catch-hidden top-level lexical now SyntaxError; parameter/simple-catch/with/arrow controls preserved; eval-code 454/0; no gate change | JIT/TTD (B4) |
 | S14 P5 | Landed `8b5f28c06` | 50/50; broad 50/0; wider 65/0 non-import | eval/function-expression; proxy descriptor; JIT |
 
-Full gates at this checkpoint: **2021/0 test**, **2073/0 debug-static**
+Full gates at this checkpoint: **2022/0 test**, **2074/0 debug-static**
 (single-sourced in `tools/build/gate_counts.json`; repair-loop
 `-noDeferParse` rlexe variants moved 2013/2065 → 2016/2068, S6a added
-one entry, eval-super added three parse-mode entries, and S6b added the
-waitAsync/pause entry). Integrated
+one entry, eval-super added three parse-mode entries, S6b added the
+waitAsync/pause entry, and S8 immutable added one entry). Integrated
 class-elements corpus re-runs 2026-10-20: wave-2
 (`out/test262-c2-s1-wave2`) **5,854/5,897**, 3,865 f→p / 0 p→f vs
 2026-10-19; wave-3 (`out/test262-c2-wave3`, after the S1-tail lane)

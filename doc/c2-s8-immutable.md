@@ -6,9 +6,10 @@
 
 # C2-S8: bounded immutable ArrayBuffer proposal surface
 
-Status: **pending** — implementation and focused Mac ARM64 no-JIT evidence are
-in the `s8-immutable` lane on base `0dbfd358a`. Review, merge and B4 (Linux/JIT)
-remain open. This is the bounded `immutable-arraybuffer` proposal surface named
+Status: **landed** — implementation `ce2179b2a`, review fixes `2fb37b4d6` and
+`cbf91b796`, merge `4ac863379`, gate/ICU integration `6af4bf9f4`. Final gates
+are **2022/0 test** and **2074/0 debug-static**. B4 JIT/Linux and the explicit
+TTD/JsRT residuals remain open. This is the bounded `immutable-arraybuffer` proposal surface named
 by the S8 triage, not the import-bytes proposal and not a claim of full ES2026
 conformance.
 
@@ -138,8 +139,9 @@ strict/sloppy/Reflect indexed writes, descriptors and no-op/different-value
 results, the host serialization transfer rejection, and a conditional Atomics
 block. The file passes `test/es7` on both profiles:
 **87 passed / 0 failed** in `test` and **87 passed / 0 failed** in
-`debug-static`. The added entry is expected to move the gate pins by one:
-**2021/2073 → 2022/2074** (`test`/`debug-static`); the pins were not edited.
+`debug-static`. The added entry moved the gate pins by one, from **2021/2073**
+to **2022/2074** (`test`/`debug-static`); the merged full gates are green at
+those counts with `zig build check` **583/583**.
 
 `test/typedarray/arraybufferType.baseline` now records the three new
 `ArrayBuffer.prototype` names in insertion order (`sliceToImmutable`,

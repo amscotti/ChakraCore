@@ -1,7 +1,7 @@
 # Current State of ChakraCore
 
 Engine-source baseline `97e68c917` (19 Feb 2026; see §7), with modernization
-execution/decisions updated through 2026-10-21. Version **1.13.0 dev**
+execution/decisions updated through 2026-10-25. Version **1.13.0 dev**
 (`lib/Common/ChakraCoreVersion.h:19-21`, `CHAKRA_CORE_VERSION_RELEASE 0` at :58).
 MIT license (`LICENSE.txt`). Every claim below cites an in-repo path; line numbers
 were verified against this HEAD.
@@ -56,10 +56,11 @@ This `doc/` folder is the start of durable in-repo documentation. The
 feature inventory and line anchors below are the 2026-10-10 baseline
 snapshot; the modernization branch has since added the C2 surfaces listed
 in [modernization-plan.md](modernization-plan.md) §6 and its receipts.
-Latest merged checkpoint (2026-10-21): **2021/0 test**, **2073/0
+Latest merged checkpoint (2026-10-25): **2022/0 test**, **2074/0
 debug-static**, including direct-eval `super` early errors, the flag-on
-S6a growable-SAB/non-shared-Atomics slice, and S6b `Atomics.pause` /
-single-thread `Atomics.waitAsync`.
+S6a growable-SAB/non-shared-Atomics slice, S6b `Atomics.pause` /
+single-thread `Atomics.waitAsync`, the S14 hidden-outer eval-`arguments`
+fix, and the bounded S8 immutable-ArrayBuffer surface.
 
 ## 3. Architecture (summary)
 
@@ -163,7 +164,9 @@ wrapped by `lib/Runtime/PlatformAgnostic/ChakraICU.h` (:36-46, 11 ICU headers,
 HAS_ICU, WINDOWS10_ICU variant); `UnicodeText.h` builds on it with non-ICU fallbacks
 (:8-13, :40-58).
 Embedded ICU is pinned to 63.2 (root CMakeLists.txt:196-222); system/custom ICU
-is unpinned, with 78.3 run-verified in the current Mac pilot. macOS `--no-icu` fallback
+is unpinned; the current Mac pilot is run-verified on ICU **79.1** (the
+prior 78.3 formatting baseline was updated for the new apostrophe/literal
+placement in `Intl/DateTimeFormat.js`). macOS `--no-icu` fallback
 (:268-275). RelativeTimeFormat/ListFormat/DisplayNames/Segmenter/DurationFormat:
 0 hits.
 
@@ -334,7 +337,7 @@ S13 WeakRef/FinalizationRegistry, and S14 eval/statement fixes. Remaining
 feature work is tracked in that plan; decorators and `queueMicrotask` are not
 claimed. (Error `cause`, `flat`/`flatMap`/`includes` were already present in
 the baseline.) (b) Intl 4-constructor subset; embedded ICU 63.2
-(2018), current system-ICU pilot 78.3. ICU upgrade and `--no-icu` behavior need
+(2018), current system-ICU pilot 79.1. ICU upgrade and `--no-icu` behavior need
 explicit dependency/test decisions. (c) WASM MVP + sign-ext /
 nontrapping; threads/multi-value/SIMD gated off; GC/tail-calls/EH/stringref/
 extended-const absent. (d) BigInt / RegExp-symbols remain OFF by default. The
@@ -394,14 +397,15 @@ from 48,598 files: 61,565 passed / 31,576 failed, with 902 explicit skips. Its
 corpus includes post-ES2025 proposals and uses default language flags.
 
 **Modernization checkpoint (2026-10-21):** the merged branch is green at
-**2021/0 test** and **2073/0 debug-static** on Mac ARM64 no-JIT. Direct-eval
+**2022/0 test** and **2074/0 debug-static** on Mac ARM64 no-JIT. Direct-eval
 `super` early errors are closed (eval-code 454/0; object-literal function/arrow
 false accepts fixed in `39e9f2a16`), the flag-on S6a slice has growable
 SharedArrayBuffer plus ES2020 non-shared Atomics (focused S6 574/982;
 112 fail→pass / 0 pass→fail; debug index-detach abort fixed), and S6b adds
 `Atomics.pause` plus single-thread `waitAsync` (80/124; 0 pass→fail) while
 SAB/Atomics remain off by default. The catch-hidden eval-`arguments`
-under-rejection is also closed (focused eval-code 454/0, gates unchanged).
+under-rejection is closed, and the bounded immutable-ArrayBuffer surface is
+landed with explicit JIT/TTD residuals.
 The 30-directory fixture-cache subset has also been rerun with the fixed
 harness: **1,367/998 of 2,365**, 0 pass→fail and 102 fail→pass versus the old
 precombined result ([c4-fixture-rerun.md](c4-fixture-rerun.md)). S3
