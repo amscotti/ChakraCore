@@ -218,6 +218,47 @@ namespace UnifiedRegex
         AltNode* AppendSurrogateRangeToDisjunction(codepoint_t lowerCodePoint, codepoint_t upperCodePoint, AltNode *lastAlttNode);
         AltNode* AppendSurrogatePairToDisjunction(codepoint_t codePoint, AltNode *lastAlttNode);
 
+        // Raw span of a \p{...}/\P{...} escape, recorded during pass 0. The
+        // u flag is unknown in pass 0, so the body is only scanned to the
+        // closing '}' (unterminated -> deferred-if-unicode error) and its
+        // names are validated with deferred-if-unicode errors; pass 1
+        // re-parses the same span and builds the node (u mode only). Without
+        // the u flag the whole escape re-parses as the Annex B identity
+        // escape 'p'/'P' plus literal '{...}' characters, as before.
+
+        // Longest property/value spelling ("Changes_When_NFKC_Casefolded"
+        // and friends); longer bodies are invalid names, so scanning can
+        // stop collecting and just mark the span invalid.
+        static const CharCount propertyEscapeMaxNameLen = 64;
+
+        // Cursor at 'p' or 'P' (the '\' is consumed). Consumes through the
+        // closing '}' when the body is structurally terminated, records the
+        // span, and validates the name with a deferred-if-unicode error.
+        void ScanPropertyEscapePass0();
+        // Cursor at '{' ('p'/'P' already consumed by either the atom path
+        // above or the class-escape switch): the shared pass 0 body scan and
+        // deferred-if-unicode validation.
+        void ScanPropertyEscapeBodyPass0();
+        // Cursor at '{' (p/P consumed). Consumes through '}' and reduces the
+        // body to ASCII name/value buffers; false when the body cannot be a
+        // valid property expression. Unterminated bodies Fail.
+        bool ScanPropertyEscapeBody(char16* name, CharCount& nameLen,
+                                    char16* value, CharCount& valueLen, bool& hasValue);
+        // Cursor at 'p' or 'P', u mode: consumes the escape and returns the
+        // matching node (code-point-set translation below). Never an
+        // assertion.
+        Node* ParsePropertyEscapePass1();
+        // Cursor at 'p' or 'P', u mode, inside a character class: consumes
+        // the escape and unions its code point set into targetSet (\P{...}
+        // contributes its complement).
+        void UnionPropertyEscapePass1(CharSet<codepoint_t>& targetSet);
+        // Translates a finished (complemented / case-closed) code point set
+        // into matcher nodes: a simple character or surrogate-pair atom when
+        // singleton, a single MatchSetNode when all-BMP, otherwise a
+        // disjunction of the BMP set and surrogate-pair range arms. Shared
+        // by character classes and property escapes.
+        Node* TranslateCodePointSet(CharSet<codepoint_t>& codePointSet, bool isNegation);
+
         //
         // Errors
         //

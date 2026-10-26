@@ -102,6 +102,7 @@ Term ::= ... | '(' '?' '=' Disjunction ')' [removed] | '(' '?' '!' Disjunction '
 */
 
 #include "ParserPch.h"
+#include "RegexUnicodeProperty.h"
 
 namespace UnifiedRegex
 {
@@ -578,6 +579,314 @@ namespace UnifiedRegex
         }
 
         return tailNode;
+    }
+
+    //
+    // Unicode property escapes (ES2018, \p{...}/\P{...} under the u flag)
+    //
+
+    template <typename P, const bool IsLiteral>
+    bool Parser<P, IsLiteral>::ScanPropertyEscapeBody(char16* name, CharCount& nameLen,
+                                                      char16* value, CharCount& valueLen, bool& hasValue)
+    {
+        Assert(ECLookahead() == '{');
+
+        nameLen = 0;
+        valueLen = 0;
+        hasValue = false;
+        bool valid = true; // terminated body with plausible name shapes
+
+        ECConsume(); // {
+        while (true)
+        {
+            if (IsEOF())
+            {
+                // Unterminated body; the caller decides whether this is a
+                // deferred-if-unicode error (pass 0) or a hard failure
+                // (pass 1). The cursor is left wherever the scan stopped.
+                return false;
+            }
+            EncodedChar ec = ECLookahead();
+            if (ec == '}')
+            {
+                ECConsume();
+                return valid && nameLen > 0 && (!hasValue || valueLen > 0);
+            }
+            if (ec == '/' && IsLiteral)
+            {
+                // An unescaped '/' terminates a regex literal body, so the
+                // property body is unterminated from the parser's viewpoint.
+                return false;
+            }
+            Char c = NextChar();
+            if (c == '=')
+            {
+                if (hasValue)
+                    valid = false; // at most one '=' separator
+                hasValue = true;
+                continue;
+            }
+            if (c >= 0x80)
+            {
+                valid = false; // non-ASCII names are always invalid
+                continue;
+            }
+            char16* target = hasValue ? value : name;
+            CharCount& targetLen = hasValue ? valueLen : nameLen;
+            if (targetLen < propertyEscapeMaxNameLen)
+                target[targetLen++] = c;
+            else
+                valid = false; // longer than any valid spelling
+        }
+    }
+
+    template <typename P, const bool IsLiteral>
+    void Parser<P, IsLiteral>::ScanPropertyEscapePass0()
+    {
+        Assert(ECLookahead() == 'p' || ECLookahead() == 'P');
+
+        if (ECLookahead(1) != '{')
+        {
+            // \p/\P without a body: identity escape in non-unicode mode,
+            // invalid escape in unicode mode.
+            DeferredFailIfUnicode(JSERR_RegExpInvalidEscape);
+            ECConsume(); // p/P
+            return;
+        }
+
+        ECConsume(); // p/P
+        ScanPropertyEscapeBodyPass0();
+    }
+
+    // Shared pass 0 tail for the atom context (which consumed p/P through
+    // ScanPropertyEscapePass0) and the class context (whose ClassEscapePass0
+    // switch already consumed p/P through NextChar). Cursor is at '{'.
+    template <typename P, const bool IsLiteral>
+    void Parser<P, IsLiteral>::ScanPropertyEscapeBodyPass0()
+    {
+        Assert(ECLookahead() == '{');
+
+        // A validation failure reports the escape's start, and an
+        // unterminated body must leave the cursor just past 'p'/'P' so the
+        // non-unicode re-parse as identity escape plus literals sees the
+        // same input in both passes. 'p'/'P' is one encoded unit, so
+        // next - 1 is the escape start.
+        const EncodedChar* escapeStart = next - 1;
+        const size_t savedMultiUnits = this->GetMultiUnits();
+
+        char16 name[propertyEscapeMaxNameLen];
+        char16 value[propertyEscapeMaxNameLen];
+        CharCount nameLen, valueLen;
+        bool hasValue;
+        bool structural = ScanPropertyEscapeBody(name, nameLen, value, valueLen, hasValue);
+        if (!structural)
+        {
+            // Unterminated \p{ : SyntaxError only under the u flag.
+            next = escapeStart + 1;
+            this->RestoreMultiUnits(savedMultiUnits);
+            DeferredFailIfUnicode(JSERR_RegExpSyntax);
+            return;
+        }
+        UnicodeProperty::Resolved resolved;
+        if (!UnicodeProperty::Resolve(name, nameLen, value, valueLen, hasValue, &resolved))
+        {
+            // Unknown property/value: SyntaxError only under the u flag;
+            // without it the escape re-parses as the identity escape
+            // 'p'/'P' plus literal '{...}' characters.
+            const EncodedChar* savedNext = next;
+            next = escapeStart;
+            DeferredFailIfUnicode(JSERR_RegExpSyntax);
+            next = savedNext;
+        }
+    }
+
+    template <typename P, const bool IsLiteral>
+    Node* Parser<P, IsLiteral>::ParsePropertyEscapePass1()
+    {
+        Assert(unicodeFlagPresent && (ECLookahead() == 'p' || ECLookahead() == 'P'));
+
+        const bool isNegation = ECLookahead() == 'P';
+        ECConsume(); // p/P
+        if (IsEOF() || ECLookahead() != '{')
+            Fail(JSERR_RegExpInvalidEscape); // pass 0 already deferred this
+
+        char16 name[propertyEscapeMaxNameLen];
+        char16 value[propertyEscapeMaxNameLen];
+        CharCount nameLen, valueLen;
+        bool hasValue;
+        if (!ScanPropertyEscapeBody(name, nameLen, value, valueLen, hasValue))
+            Fail(JSERR_RegExpSyntax);
+        UnicodeProperty::Resolved resolved;
+        if (!UnicodeProperty::Resolve(name, nameLen, value, valueLen, hasValue, &resolved))
+            Fail(JSERR_RegExpSyntax);
+
+        CharSet<codepoint_t> codePointSet;
+        UnicodeProperty::BuildCodePointSet(resolved, ctAllocator, codePointSet);
+
+        // \P{...} complements the property over all code points first, and
+        // i-mode case closure (when effective) applies to the complemented
+        // set, so /\P{Lu}/iu matches 'A' through 'a' (Node-verified), while
+        // [^\p{Lu}] closes over \p{Lu} and then complements in the class
+        // path below.
+        CharSet<codepoint_t> secondSet; // complement (\P) or case closure (i)
+        CharSet<codepoint_t> thirdSet;  // case closure when both applied
+        CharSet<codepoint_t>* toUse = &codePointSet;
+        if (isNegation)
+        {
+            codePointSet.ToComplement(ctAllocator, secondSet);
+            codePointSet.FreeBody(ctAllocator);
+            toUse = &secondSet;
+        }
+        if (caseInsensitiveFlagPresent) // effective i state (scoped modifiers)
+        {
+            toUse->ToEquivClass(ctAllocator, thirdSet);
+            toUse->FreeBody(ctAllocator);
+            toUse = &thirdSet;
+        }
+
+        return TranslateCodePointSet(*toUse, /*isNegation*/ false);
+    }
+
+    template <typename P, const bool IsLiteral>
+    void Parser<P, IsLiteral>::UnionPropertyEscapePass1(CharSet<codepoint_t>& targetSet)
+    {
+        Assert(unicodeFlagPresent && (ECLookahead() == 'p' || ECLookahead() == 'P'));
+
+        const bool isNegation = ECLookahead() == 'P';
+        ECConsume(); // p/P
+        Assert(!IsEOF() && ECLookahead() == '{'); // pass 0 validated the shape
+
+        char16 name[propertyEscapeMaxNameLen];
+        char16 value[propertyEscapeMaxNameLen];
+        CharCount nameLen, valueLen;
+        bool hasValue;
+        if (!ScanPropertyEscapeBody(name, nameLen, value, valueLen, hasValue))
+            Fail(JSERR_RegExpSyntax);
+        UnicodeProperty::Resolved resolved;
+        if (!UnicodeProperty::Resolve(name, nameLen, value, valueLen, hasValue, &resolved))
+            Fail(JSERR_RegExpSyntax);
+
+        CharSet<codepoint_t> codePointSet;
+        UnicodeProperty::BuildCodePointSet(resolved, ctAllocator, codePointSet);
+
+        if (!isNegation)
+        {
+            targetSet.UnionInPlace(ctAllocator, codePointSet);
+            codePointSet.FreeBody(ctAllocator);
+        }
+        else
+        {
+            CharSet<codepoint_t> complementedSet;
+            codePointSet.ToComplement(ctAllocator, complementedSet);
+            codePointSet.FreeBody(ctAllocator);
+            targetSet.UnionInPlace(ctAllocator, complementedSet);
+            complementedSet.FreeBody(ctAllocator);
+        }
+    }
+
+    template <typename P, const bool IsLiteral>
+    Node* Parser<P, IsLiteral>::TranslateCodePointSet(CharSet<codepoint_t>& codePointSet, bool isNegation)
+    {
+        Assert(unicodeFlagPresent);
+        Assert(scriptContext->GetConfig()->IsES6UnicodeExtensionsEnabled());
+
+        if (codePointSet.IsEmpty())
+        {
+            return Anew(ctAllocator, MatchSetNode, false, false, caseInsensitiveFlagPresent);
+        }
+
+        // If a singleton, return a simple character (or surrogate pair atom)
+        bool isSingleton = !this->caseInsensitiveFlagPresent && !isNegation && codePointSet.IsSingleton();
+        if (isSingleton)
+        {
+            codepoint_t singleton = codePointSet.Singleton();
+
+            if (singleton < 0x10000)
+            {
+                Node* toReturn = Anew(ctAllocator, MatchCharNode, (char16)singleton, caseInsensitiveFlagPresent);
+                codePointSet.Clear(ctAllocator);
+                return toReturn;
+            }
+            else
+            {
+                char16 lowerSurrogate, upperSurrogate;
+                Js::NumberUtilities::CodePointAsSurrogatePair(singleton, &lowerSurrogate, &upperSurrogate);
+                Node* toReturn = CreateSurrogatePairAtom(lowerSurrogate, upperSurrogate);
+                codePointSet.Clear(ctAllocator);
+                return toReturn;
+            }
+        }
+
+        const uint totalCodePointsCount = codePointSet.Count();
+        const uint simpleCharsCount = codePointSet.SimpleCharCount();
+        if (totalCodePointsCount == simpleCharsCount)
+        {
+            MatchSetNode *simpleToReturn = Anew(ctAllocator, MatchSetNode, isNegation, true, caseInsensitiveFlagPresent);
+            codePointSet.CloneSimpleCharsTo(ctAllocator, simpleToReturn->set);
+            return simpleToReturn;
+        }
+
+        Node* prefixNode = nullptr;
+        Node* suffixNode = nullptr;
+
+        if (simpleCharsCount > 0)
+        {
+            if (!codePointSet.ContainSurrogateCodeUnits())
+            {
+                MatchSetNode *node = Anew(ctAllocator, MatchSetNode, false, false, caseInsensitiveFlagPresent);
+                codePointSet.CloneSimpleCharsTo(ctAllocator, node->set);
+                prefixNode = node;
+            }
+            else
+            {
+                MatchSetNode *node = Anew(ctAllocator, MatchSetNode, false, false, caseInsensitiveFlagPresent);
+                codePointSet.CloneNonSurrogateCodeUnitsTo(ctAllocator, node->set);
+                prefixNode = node;
+                node = Anew(ctAllocator, MatchSetNode, false, false, caseInsensitiveFlagPresent);
+                codePointSet.CloneSurrogateCodeUnitsTo(ctAllocator, node->set);
+                suffixNode = node;
+            }
+        }
+
+        AltNode *headToReturn = prefixNode == nullptr ? nullptr : Anew(ctAllocator, AltNode, prefixNode, nullptr);
+        AltNode *currentTail = headToReturn;
+
+        codepoint_t charRangeSearchIndex = 0x10000, lowerCharOfRange = 0, upperCharOfRange = 0;
+
+        while (codePointSet.GetNextRange(charRangeSearchIndex, &lowerCharOfRange, &upperCharOfRange))
+        {
+            if (lowerCharOfRange == upperCharOfRange)
+            {
+                currentTail = this->AppendSurrogatePairToDisjunction(lowerCharOfRange, currentTail);
+            }
+            else
+            {
+                currentTail = this->AppendSurrogateRangeToDisjunction(lowerCharOfRange, upperCharOfRange, currentTail);
+            }
+
+            if (headToReturn == nullptr)
+            {
+                headToReturn = currentTail;
+            }
+
+            AnalysisAssert(currentTail != nullptr);
+            while (currentTail->tail != nullptr)
+            {
+                currentTail = currentTail->tail;
+            }
+            charRangeSearchIndex = upperCharOfRange + 1;
+        }
+        if (suffixNode != nullptr)
+        {
+            currentTail->tail = Anew(ctAllocator, AltNode, suffixNode, nullptr);
+        }
+        codePointSet.Clear(ctAllocator);
+
+        if (headToReturn != nullptr && headToReturn->tail == nullptr)
+        {
+            return headToReturn->head;
+        }
+        return headToReturn;
     }
 
     //
@@ -2338,6 +2647,15 @@ namespace UnifiedRegex
             }
             return false;
         }
+        else if (ec == 'p' || ec == 'P')
+        {
+            // \p{...}/\P{...} property escape: consumed and validated here
+            // (deferred-if-unicode for the malformed/unknown-name cases);
+            // without the u flag pass 1 re-parses it as the identity escape
+            // 'p'/'P' plus literal '{...}' characters.
+            ScanPropertyEscapePass0();
+            return false;
+        }
         else if (ec == 'k')
         {
             // \k<Name> named backreference (or Annex B identity escape when
@@ -2618,6 +2936,14 @@ namespace UnifiedRegex
                 ECConsume(); // k
                 node = deferredCharNode;
             }
+            return false; // not an assertion
+        }
+        else if ((ECLookahead() == 'p' || ECLookahead() == 'P') && this->unicodeFlagPresent)
+        {
+            // \p{...}/\P{...} property escape (u mode only; without the flag
+            // 'p'/'P' falls through to the identity-escape switch below and
+            // the '{...}' part re-parses as literal atoms).
+            node = ParsePropertyEscapePass1();
             return false; // not an assertion
         }
         else
@@ -3098,32 +3424,49 @@ namespace UnifiedRegex
             }
             else if (nextChar == '\\')
             {
-                Node* returnedNode = ClassEscapePass1(&deferredCharNode, &deferredSetNode, previousWasASurrogate);
-                codePointToSet = pendingCodePoint;
-
-                if (returnedNode->tag == Node::MatchSet)
+                if (unicodeFlagPresent && (ECLookahead() == 'p' || ECLookahead() == 'P'))
                 {
+                    // \p{...}/\P{...} inside the class: union its code point
+                    // set. Like \d & co it is a set-valued atom, so it cannot
+                    // be a range endpoint.
                     if (pendingRangeStart != INVALID_CODEPOINT)
                     {
-                        if (unicodeFlagPresent)
-                        {
-                            //A range containing a character class and the unicode flag is present, thus we end up having to throw a "Syntax" error here
-                            //This breaks the notion of Pass0 check for valid syntax, because during that time, the unicode flag is unknown.
-                            Fail(JSERR_UnicodeRegExpRangeContainsCharClass); //From #sec-patterns-static-semantics-early-errors-annexb
-                        }
-
-                        codePointSet.Set(ctAllocator, '-');
+                        Fail(JSERR_UnicodeRegExpRangeContainsCharClass);
                     }
-
+                    UnionPropertyEscapePass1(codePointSet);
+                    codePointToSet = pendingCodePoint;
                     pendingCodePoint = INVALID_CODEPOINT;
-                    pendingRangeStart = INVALID_CODEPOINT;
-                    codePointSet.UnionInPlace(ctAllocator, deferredSetNode.set);
                     currIsACharSet = true;
                 }
                 else
                 {
-                    // Just a character
-                    pendingCodePoint = deferredCharNode.cs[0];
+                    Node* returnedNode = ClassEscapePass1(&deferredCharNode, &deferredSetNode, previousWasASurrogate);
+                    codePointToSet = pendingCodePoint;
+
+                    if (returnedNode->tag == Node::MatchSet)
+                    {
+                        if (pendingRangeStart != INVALID_CODEPOINT)
+                        {
+                            if (unicodeFlagPresent)
+                            {
+                                //A range containing a character class and the unicode flag is present, thus we end up having to throw a "Syntax" error here
+                                //This breaks the notion of Pass0 check for valid syntax, because during that time, the unicode flag is unknown.
+                                Fail(JSERR_UnicodeRegExpRangeContainsCharClass); //From #sec-patterns-static-semantics-early-errors-annexb
+                            }
+
+                            codePointSet.Set(ctAllocator, '-');
+                        }
+
+                        pendingCodePoint = INVALID_CODEPOINT;
+                        pendingRangeStart = INVALID_CODEPOINT;
+                        codePointSet.UnionInPlace(ctAllocator, deferredSetNode.set);
+                        currIsACharSet = true;
+                    }
+                    else
+                    {
+                        // Just a character
+                        pendingCodePoint = deferredCharNode.cs[0];
+                    }
                 }
             }
             else if (nextChar == '-')
@@ -3219,42 +3562,12 @@ namespace UnifiedRegex
         // Everything past here must be under the flag
         Assert(scriptContext->GetConfig()->IsES6UnicodeExtensionsEnabled());
 
-        if (codePointSet.IsEmpty())
-        {
-            return Anew(ctAllocator, MatchSetNode, false, false, caseInsensitiveFlagPresent);
-        }
-
-        Node* prefixNode = nullptr;
-        Node* suffixNode = nullptr;
-
-        CharSet<codepoint_t> *toUseForTranslation = &codePointSet;
-
-        // If a singleton, return a simple character
-        bool isSingleton = !this->caseInsensitiveFlagPresent && !isNegation && codePointSet.IsSingleton();
-        if (isSingleton)
-        {
-            codepoint_t singleton = codePointSet.Singleton();
-            Node* toReturn = nullptr;
-
-            if (singleton < 0x10000)
-            {
-                toReturn = Anew(ctAllocator, MatchCharNode, (char16)singleton, caseInsensitiveFlagPresent);
-            }
-            else
-            {
-                Assert(unicodeFlagPresent);
-                char16 lowerSurrogate, upperSurrogate;
-                Js::NumberUtilities::CodePointAsSurrogatePair(singleton, &lowerSurrogate, &upperSurrogate);
-                toReturn = CreateSurrogatePairAtom(lowerSurrogate, upperSurrogate);
-            }
-
-            codePointSet.Clear(ctAllocator);
-            return toReturn;
-        }
-
-        // If negation, we want to complement the simple chars.
-        // When a set is negated, optimizations skip checking if applicable, so we can go ahead and negate it here.
+        // If negation, complement over all code points; under i, close over
+        // case equivalence classes first (so [^\p{Lu}]iu does not match 'A',
+        // while the atom form \P{Lu} closes after complementing — see
+        // ParsePropertyEscapePass1).
         CharSet<codepoint_t> negatedSet;
+        CharSet<codepoint_t> *toUseForTranslation = &codePointSet;
 
         if (!this->caseInsensitiveFlagPresent)
         {
@@ -3296,77 +3609,11 @@ namespace UnifiedRegex
             Assert(toUseForTranslation == &codePointSet);
         }
 
-        uint totalCodePointsCount = toUseForTranslation->Count();
-        uint simpleCharsCount = toUseForTranslation->SimpleCharCount();
-        if (totalCodePointsCount == simpleCharsCount)
-        {
-            MatchSetNode *simpleToReturn = Anew(ctAllocator, MatchSetNode, isNegation, true, caseInsensitiveFlagPresent);
-            toUseForTranslation->CloneSimpleCharsTo(ctAllocator, simpleToReturn->set);
-            return simpleToReturn;
-        }
-
-        if  (simpleCharsCount > 0)
-        {
-            if (!toUseForTranslation->ContainSurrogateCodeUnits())
-            {
-                MatchSetNode *node = Anew(ctAllocator, MatchSetNode, false, false, caseInsensitiveFlagPresent);
-                toUseForTranslation->CloneSimpleCharsTo(ctAllocator, node->set);
-                prefixNode = node;
-            }
-            else
-            {
-                MatchSetNode *node = Anew(ctAllocator, MatchSetNode, false, false, caseInsensitiveFlagPresent);
-                toUseForTranslation->CloneNonSurrogateCodeUnitsTo(ctAllocator, node->set);
-                prefixNode = node;
-                node = Anew(ctAllocator, MatchSetNode, false, false, caseInsensitiveFlagPresent);
-                toUseForTranslation->CloneSurrogateCodeUnitsTo(ctAllocator, node->set);
-                suffixNode = node;
-            }
-        }
-
-        Assert(unicodeFlagPresent);
-        AltNode *headToReturn = prefixNode == nullptr ? nullptr : Anew(ctAllocator, AltNode, prefixNode, nullptr);
-        AltNode *currentTail = headToReturn;
-
-        codepoint_t charRangeSearchIndex = 0x10000, lowerCharOfRange = 0, upperCharOfRange = 0;
-
-        while (toUseForTranslation->GetNextRange(charRangeSearchIndex, &lowerCharOfRange, &upperCharOfRange))
-        {
-            if (lowerCharOfRange == upperCharOfRange)
-            {
-                currentTail = this->AppendSurrogatePairToDisjunction(lowerCharOfRange, currentTail);
-            }
-            else
-            {
-                currentTail = this->AppendSurrogateRangeToDisjunction(lowerCharOfRange, upperCharOfRange, currentTail);
-            }
-
-            if (headToReturn == nullptr)
-            {
-                headToReturn = currentTail;
-            }
-
-            AnalysisAssert(currentTail != nullptr);
-            while (currentTail->tail != nullptr)
-            {
-                currentTail = currentTail->tail;
-            }
-            charRangeSearchIndex = upperCharOfRange + 1;
-        }
-
-        if (suffixNode != nullptr)
-        {
-            currentTail->tail = Anew(ctAllocator, AltNode, suffixNode, nullptr);
-        }
-        toUseForTranslation->Clear(ctAllocator);
-
-        if (headToReturn != nullptr && headToReturn->tail == nullptr)
-        {
-            return headToReturn->head;
-        }
-        return headToReturn;
+        // TranslateCodePointSet clears the translated set itself; under
+        // negation the class set was already freed by the complement prep
+        // above (matching the original inline code exactly).
+        return TranslateCodePointSet(*toUseForTranslation, isNegation);
     }
-
 #pragma warning(push)
 #pragma warning(disable:4702)   // unreachable code
     template <typename P, const bool IsLiteral>
@@ -3498,6 +3745,14 @@ namespace UnifiedRegex
                 sawClassK = true;
                 singleton = c;
                 return true;
+            case 'p':
+            case 'P':
+                // \p{...}/\P{...} property escape (u mode); like \d & co it
+                // is never a singleton class atom. 'p'/'P' was already
+                // consumed by the switch's NextChar, so the shared scanner
+                // continues from '{'.
+                ScanPropertyEscapeBodyPass0();
+                return false;
             default:
                 // embedded 0 is ok
                 singleton = c;
