@@ -437,6 +437,38 @@ var tests = [
         }
     },
     {
+        name: "Member pairs are never re-split into lone units (spec-convergent)",
+        body() {
+            // The pair \uD800\uDC00 is U+10000, a MEMBER of the
+            // complements [^\u{10400}] and [^\u{10400}-\u{10427}]. The
+            // old surrogate alternation let backtracking re-split a
+            // consumed member pair into two lone-unit atoms, so these
+            // matched on the base engine; Node/Bun/spec reject them. The
+            // deterministic code-point matcher never reinterprets a member
+            // pair. (For the excluded pair itself — \uD801\uDC00 OF
+            // U+10400 — see the lone-unit fallback note below.)
+            assert.isFalse(/^[^\u{10400}]{2}$/u.test("\ud800\udc00"),
+                "exactly two lone-unit iterations cannot cover one member pair");
+            assert.isFalse(/^[^\u{10400}-\u{10427}]{2,}$/u.test("\ud800\udc00"),
+                "bounded range form");
+            assert.areEqual(null, /^[^\u{10400}]*\udc00$/u.exec("\ud800\udc00"),
+                "a trailing lone low surrogate cannot split the member pair");
+            assert.isFalse(/^[^\u{10400}]*?X$/u.test("\ud800\udc00"), "lazy star");
+            // A member pair is one iteration consuming 2 units.
+            assert.isTrue(/^[^\u{10428}]{1}$/u.test("\ud800\udc00"),
+                "member pair = exactly one iteration");
+            assert.areEqual(2, /^([^\u{10428}])$/u.exec("\ud800\udc00")[0].length,
+                "single-iteration capture spans both units");
+            // NOTE (documented divergence, not asserted here because it
+            // differs from Node): when the pair itself is NOT a member but
+            // its lone units are (e.g. /^[^\u{10400}]+$/u over the pair
+            // "\ud801\udc00" OF U+10400), this engine's pre-existing
+            // lone-surrogate fallback still matches the lone units, while
+            // Node/spec advance by code point and fail. See the receipt's
+            // residual section.
+        }
+    },
+    {
         name: "Dynamic construction, compile and flags",
         body() {
             assert.isTrue(new RegExp("\\p{Lu}", "u").test("A"));

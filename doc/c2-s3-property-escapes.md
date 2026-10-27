@@ -90,12 +90,13 @@ on that basis.
   - `TranslateCodePointSet` is the translation tail factored out of
     `CharacterClassPass1` and shared with the atom path: singleton →
     `MatchCharNode` or surrogate-pair atom; all-BMP → one `MatchSetNode`;
-    otherwise BMP prefix (+ lone-surrogate suffix) plus surrogate-range
-    disjunction arms. No new AST node kinds, no new instructions, no
-    bytecode or PropertyId changes; property escapes reuse the existing
-    set/alternation machinery, so lookbehind mirroring, scoped modifiers,
-    quantifiers, capture/backreference and `compile()` interplay come for
-    free.
+    otherwise **one new `MatchCodePointSetNode`** (see "Perf repair" below —
+    the mixed case originally reused the existing prefix/pair-arms/suffix
+    alternation with no new node kinds, which is also what introduced the
+    exponential-backtracking defect). No JS-bytecode or PropertyId changes;
+    property escapes reuse the existing set machinery, so lookbehind
+    mirroring, scoped modifiers, quantifiers, capture/backreference and
+    `compile()` interplay come for free.
   - The moved code now complements an **empty** u-mode class body before
     translation, so `/[^]/u` matches any code point as the spec requires;
     the previous behavior (never matching anything) was a pre-existing
@@ -178,47 +179,90 @@ additionally leaked non-surrogate units into its "surrogate-only" result
 through the unfiltered first-256 bitmap (now fixed; the function is no
 longer on any live path).
 
-**Fix:** mixed BMP/astral sets now compile to **one** `MatchCodePointSet`
-node/instruction (`lib/Parser/RegexCompileTime.{h,cpp}`,
-`lib/Parser/RegexRuntime.{h,cpp}`, opcode appended after the lookbehind
-set). It carries the BMP member units (including lone-surrogate units) and
-the sorted astral member ranges, and matches **deterministically**: at each
+**Fix:** mixed BMP/astral sets now compile to **one** new AST node
+`MatchCodePointSetNode` (`lib/Parser/RegexCompileTime.{h,cpp}`; tag
+appended after the ES2018 set) and **one** new fixed-size instruction
+`MatchCodePointSetInst` (`lib/Parser/RegexRuntime.{h,cpp}`; opcode
+appended after `FrameNegatedWordBoundaryTest`, so no earlier tag moves).
+The node holds, in the parser's compile-time arena: the BMP member units as
+a `CharSet<Char>` (including lone-surrogate units), a `firstUnits` upper
+bound (BMP units plus all high surrogates when astral members exist;
+`isFirstExact` false), and the sorted astral member ranges as a flat
+`codepoint_t[2n]` array. `Emit` allocates the instruction in the existing
+packed instruction buffer (fixed `sizeof(MatchCodePointSetInst)`; the
+ranges are **not** in-line — the instruction carries an
+arena-`AnewArray`'d pointer, mirroring the `ScannersMixin` pointer pattern),
+clones the set into the run-time allocator like every `SetMixin` user, and
+copies the ranges there; the node's compile-time arena data dies with the
+parser as before. No ICU object, GC root, tracer or barrier is involved
+(the arena-wholesale ranges array needs no per-node free, matching the
+`ScannersMixin` infos precedent). Matching is **deterministic**: at each
 position a complete surrogate pair that is a member consumes 2 units
-(binary range search); otherwise the single unit stands for its own code
-point and consumes 1. No choicepoints per iteration, so quantifiers
-greedy/lazy/bounded/optional, groups, backreferences and lookbehind bodies
-backtrack linearly. The former prefix/arms/suffix builder pair
-(`AppendSurrogateRangeToDisjunction`/`AppendSurrogatePairToDisjunction`)
-became dead and was removed (~10.8 KB). The node reports
-`isDeterministic`, participates in the normal loop schemes (Guarded /
-GreedyNoBacktrack fire again for suitable follows), and is excluded from
-prefix-skipping and set-scan synchronization (a first-unit scan cannot
-decide pair membership). All-BMP sets keep the single `MatchSetNode` path
-and astral singletons keep the surrogate-pair atom.
+(binary range search over the ranges); otherwise the single unit stands for
+its own code point and consumes 1 — no choicepoints per iteration, so
+quantifiers greedy/lazy/bounded/optional, groups, backreferences and
+lookbehind bodies backtrack linearly. The former
+`AppendSurrogateRangeToDisjunction`/`AppendSurrogatePairToDisjunction`
+builders became dead and were removed (~10.8 KB). The node reports
+`isDeterministic` and rejoins the Guarded/GreedyNoBacktrack loop schemes
+for suitable follows; it is **deliberately excluded** from prefix-skipping
+(`SupportsPrefixSkipping` false — a 1-or-2-unit atom defeats fixed-prefix
+accounting) and from set-scan synchronization
+(`HeadSyncronizingNode`/`EmitScan` unreachable — a first-unit scan cannot
+decide pair membership and consuming on sync would accept non-members),
+and `IsCharOrPositiveSet` is false so the concat canonical form (no two
+adjacent unit-set atoms) and the char/trie recognizers leave it alone.
+All-BMP sets keep the single `MatchSetNode` path and astral singletons
+keep the surrogate-pair atom.
 
-**Semantics preserved exactly** (the pair-then-lone-unit order reproduces
-the old arm-then-suffix order): a 30-probe quantifier battery (greedy/lazy/
-bounded/optional, atoms and classes, Lu/Script/scx/gc groups, astral and
-lone-surrogate runs, iu closure, capture groups, backreference, lookbehind,
-split/replace) matches Node 26.5.0 and Bun 1.4.3 on every outcome
-(`s3a-sem`); the 79-probe oracle matrix and the name/alias/Annex-B/
+**Semantics: one intentional, spec-convergent delta.** The old surrogate
+disjunction allowed a quantifier to backtrack into a *consumed member pair*
+and re-split it into two lone-unit atoms. `\uD800\uDC00` is U+10000, a
+**member** of the complements `[\u{10400}]`-excluded and
+`[\u{10400}-\u{10427}]`-excluded, so on the base engine
+`/^[^\u{10400}]{2}$/u.test("\uD800\uDC00")` returned `true` (two lone
+units) while Node 26.5.0/Bun 1.4.3/spec say `false`; likewise
+`/^[^\u{10400}-\u{10427}]{2,}$/u` (base `true`, spec `false`) and
+`/^[^\u{10400}]*\uDC00$/u.exec("\uD800\uDC00")` (base matched,
+returning the whole pair; spec/Node/Bun return `null`).
+`MatchCodePointSet` deterministically consumes a member pair as one
+2-unit code point and never reinterprets it, so those now return
+`false`/`null` — a deliberate convergence to the spec matching
+Node/Bun, **not** exact base preservation; the focused test pins it
+(group "Member pairs are never re-split into lone units", which also
+verifies a member pair still counts as exactly one iteration spanning
+both units). Everything else is preserved: the pair-then-lone-unit *preference
+order* at a single position is unchanged, and a 30-probe quantifier battery
+(greedy/lazy/bounded/optional, atoms and classes, Lu/Script/scx/gc groups,
+astral and lone-surrogate runs, iu closure, capture groups, backreference,
+lookbehind, split/replace) matches Node and Bun on every outcome
+(`s3a-sem`). The 79-probe oracle matrix and the name/alias/Annex-B/
 class-without-brace/unassigned-script batteries are unchanged (only the
 three documented pre-existing u-mode search divergences remain).
 
-**Perf evidence** (`s3a-bign`, deterministic local probe, not a gate):
-failing continuations complete in ≤1 ms at n=26..1024 for
-`^\P{Lu}+z$`/`^[\P{Lu}]+z$` atom and class forms, astral runs at n=512,
-`^\p{Script=Latin}+z$` n=1024, `^\p{gc=Ll}{2}z?`; Node and Bun report the
-same results in 0-1 ms; identical outputs. Before the repair the same
-inputs took 544 ms at n=20 and 2.2 s at n=22 on this engine (measured),
-i.e. exponential. The focused gate test asserts the n=256..1024 failing
-continuations (correct `false` results, no wall-clock dependency).
+**Perf evidence** (`s3a-bign`/`s3a-redos`, deterministic local probes,
+not gates): property-set failing continuations are now linear — ≤1 ms at
+n=26..1024 for `^\P{Lu}+z$`/`^[\P{Lu}]+z$` atom and class forms, astral
+runs at n=512, `^\p{Script=Latin}+z$` n=1024 — with outputs identical to
+Node 26.5.0/Bun 1.4.3 (0-1 ms there). Before the repair the same inputs
+took 544 ms at n=20 and 2.2 s at n=22 on this engine (measured), i.e.
+exponential; no property-set shape times out in the local ladder. The
+focused gate test asserts the n=256..1024 failing continuations (correct
+`false` results, no wall-clock dependency).
+
+**Scope of the perf claim:** only property/class-set atoms are covered.
+Generic nested-quantifier and alternation ReDoS shapes remain exponential
+**engine-wide** (base-identical backtracking, not property-specific):
+`^(?:\P{Lu}|\w)+z$` takes ~9 ms at n=16 and ~101 ms at n=20 here, and
+`^(?:\P{Lu}+)+z$` ~0/46 ms at n=16/20 (Node mitigates these partially at
+5-10 ms; both remain superlinear there too). Fixing generic backtracking is
+out of scope for this slice.
 
 ## Tests and evidence
 
 - **Focused regression test** `test/es7/regexp-property-escapes.js`
   (registered once in `test/es7/rlexe.xml`, default launch,
-  `-args summary -endargs`): 16 test groups / 394 assertions covering the
+  `-args summary -endargs`): 17 test groups / 400 assertions covering the
   full accept matrix (binary canonical+alias spellings, gc values incl.
   groups and legacy aliases, sc/scx incl. ISO codes and `Qaai`/`Qaac`,
   `Any`/`Assigned`/`ASCII`), the reject matrix (wrong case, spaces/hyphens
@@ -243,17 +287,22 @@ continuations (correct `false` results, no wall-clock dependency).
   `-force:deferParse` launches, and the same five launches pass on the
   debug-static profile. **Separate Node/Bun oracle battery** (not the gate
   harness): the same file's assertions executed under Node 26.5.0 and
-  Bun 1.4.3 through a compatibility shim — 394/394 assertions each
-  (the round-1 file was 15 groups / 365 assertions; the perf repair adds
-  the quantified-set group).
+  Bun 1.4.3 through a compatibility shim — 400/400 assertions each
+  (round-1 file: 15 groups / 365 assertions; the perf repair added the
+  quantified-set group, and this review iteration adds the member-pair
+  re-splitting group).
 - **Oracle batteries** (`/tmp/opencode/s3a-*.js`, kept outside the repo):
   a 79-probe semantic matrix, five name/alias/Annex-B batteries, a
   20-probe class-without-brace battery (`[\p]`, `[\pL]`, `[\P]`,
   `[\p]x{2}`, `[\pxNd}]`, `[\p{Lu]`, u-mode rejections) and a 70-probe
   unassigned-script battery (35 ISO codes × sc/scx) — ch matches Node 26.5.0
-  and Bun 1.4.3 on every outcome (Bun and Node are identical to each other
-  on all of them), and every non-u row is also identical to the base
-  ChakraCore binary, so Annex B behavior is unchanged. The only textual
+  and Bun 1.4.3 on every outcome of **these batteries** (Node and Bun also
+  agreed with each other on all of them), and every non-u row is also
+  identical to the base ChakraCore binary, so Annex B behavior is
+  unchanged. This is a claim about the listed batteries only — the engines
+  are not universally identical, and the remaining traced differences are
+  the documented engine divergences below (u-mode per-unit search/lone-
+  surrogate lacunarity; `v`-flag acceptance). The only textual
   difference anywhere is SyntaxError message wording. Remaining outcome-level differences vs Node, all in the
   engine's documented u-mode per-unit-matching lacunarity class
   (doc/c2-s9-modifiers.md "Limits"): `/\P{L}/u.exec('𝐀')` returns
@@ -264,18 +313,27 @@ continuations (correct `false` results, no wall-clock dependency).
   V8 advances per code point). None of these shapes is exercised by the
   generated corpus's anchored/per-symbol assertions.
 - **Pinned test262** (`tools/test262/run.py`, default host flags
-  `-nonative -Test262 -CollectGarbage`, controls 20/20 both runs), full
+  `-nonative -Test262 -CollectGarbage`; the runner's own 20 harness
+  control scenarios — sync/async/module/parse-negative/runtime-negative/
+  realm/detachment plus deliberate failures — passed 20/20 in every run
+  cited here), full
   bounded selection: `test/built-ins/RegExp/property-escapes/**` (all 613
   files), `match-indices/**`, `lookBehind/**`, `named-groups/**`,
   `regexp-modifiers/**`, `test/language/literals/regexp/**` = **1,980
-  scenarios (990 files)**. Base binary (`688e304462b85669` at the identical
-  HEAD `084dcf06a`): **1,020 passed / 960 failed**
-  (`out/test262-s3a-before`). Final state after the perf repair:
-  **1,814 passed / 166 failed, 0 timeouts** (`out/test262-s3a-after3`).
-  Per-scenario join versus the base binary: **794 fail→pass,
-  0 pass→fail**; versus the pre-perf-repair run (`...-after2`):
-  **0 flips of either direction** — the 166 residue scenarios are exactly
-  the same set throughout. All 166 now fail as fast assertion failures:
+  scenarios (990 files)**. Run identity (recorded in each `summary.json`;
+  the `ch` launcher embeds a stable content hash, so the **dylib** hash is
+  the distinguishing artifact): base run = launcher `688e3044…` +
+  dylib `59194083…`; final run (`out/test262-s3a-after3`) = launcher
+  `ac858c67…` + **dylib `c92cf6c9…`** (the pre-perf-repair
+  `...-after2` run used dylib `1b025b98…`). Reproducible results:
+  base **1,020 passed / 960 failed**; final **1,814 passed / 166 failed**
+  with **0 of the 1,980 scenarios carrying `timeout: true`** in the final
+  `results.json` (the per-scenario `rawResult.timeout` field is recorded
+  by the harness; the 96 prior timeouts were identified from the same
+  field in the earlier runs). Per-scenario joins: versus base **794
+  fail→pass, 0 pass→fail**; versus the pre-perf-repair run **0 flips in
+  either direction** — the 166 residue scenarios are the same set
+  throughout, all failing as fast assertions:
   - 112 `generated/` scenarios (56 unique files) = pure **data drift**
     between the pinned corpus's newer generated property tables and the
     pinned **ICU 79.1** build: the corpus asserts scripts the ICU build
@@ -301,10 +359,15 @@ continuations (correct `false` results, no wall-clock dependency).
     substrate (unchanged; same failures before).
   - The 8 `\p` scenarios that were the S9 modifiers receipt's residue are
     now green (`regexp-modifiers/**` is 100% after).
-- **Adjacent controls** prove no regression: match-indices 48/48,
-  lookBehind 100% (both modes), regexp-modifiers 100%, named-groups residue
-  unchanged (6 pre-existing), literals/regexp residue unchanged (22
-  pre-existing).
+- **Adjacent legacy/es7 controls** (separate from the runner's 20 harness
+  controls above): 8 gate files — es6 `regex-set`, `regex-annex-b`,
+  `regex-case-folding`, `regex-quantifiers`, `regex-code-point`, es7
+  `regexp-modifiers`, `regexp-lookbehind`, `namedgroups` — produce
+  **byte-identical output on the worktree and base binaries** (including
+  lookbehind's shared 15/16). Inside the test262 selection:
+  match-indices 48/48, lookBehind 100% (both modes), regexp-modifiers 100%,
+  named-groups residue unchanged (6 pre-existing), literals/regexp residue
+  unchanged (22 pre-existing).
 - **Gate impact**: `regexp-property-escapes.js` adds one rlexe entry → the
   regression gates move 2022/2074 → **2023/2075** (both profiles +1;
   `tools/build/gate_counts.json` intentionally not edited by this batch —
@@ -352,12 +415,27 @@ continuations (correct `false` results, no wall-clock dependency).
    `{`-as-literal leniency in u mode; named-groups symbols-flag residue.
 6. ~~Perf: exponential backtracking on quantified complement sets~~ —
    **fixed** by the deterministic whole-code-point-set matcher (see "Perf
-   repair" below); the former 96 corpus timeouts now complete instantly
-   and fail on drift data alone.
+   repair" above); the former 96 corpus timeouts now complete instantly
+   and fail on drift data alone. **Scope:** generic nested-quantifier /
+   alternation ReDoS shapes (`^(?:\P{Lu}|\w)+z$`,
+   `^(?:\P{Lu}+)+z$`) remain exponential engine-wide — base-identical
+   backtracking, not property-specific; separate engine work.
+7. Member-pair re-splitting (old base u-mode class/property sets could
+   backtrack a consumed member pair into two lone-unit atoms) —
+   **intentionally removed** as part of the perf repair; the new behavior
+   matches spec/Node/Bun and is pinned by the focused test (see "Perf
+   repair" for the delta cases). The complementary pre-existing divergence
+   remains: a non-member pair whose lone units are members still matches
+   the lone units here (Node/spec fail) — residual 3.
+8. Pre-existing, deliberately untouched this iteration: the malformed
+   u-mode `{`/`]` quantifier leniency (base-identical; separate follow-up
+   per the review instruction).
 
 ## JIT (B4)
 
-All evidence is Mac no-JIT interpreter. The slice adds no JS bytecode and no
-regex instruction; B4 must run `regexp-property-escapes.js`, the property
+All evidence is Mac no-JIT interpreter. The slice adds no JS bytecode but
+**does add one regex instruction** (`MatchCodePointSet`; fixed-size,
+interpreter-executed like its siblings); B4 must run
+`regexp-property-escapes.js`, the property
 corpus and the adjacent RegExp corpora under SimpleJIT/FullJIT (dynapogo)
 before any JIT-configuration claim, per the standing C2 policy.
