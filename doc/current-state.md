@@ -1,7 +1,7 @@
 # Current State of ChakraCore
 
 Engine-source baseline `97e68c917` (19 Feb 2026; see §7), with modernization
-execution/decisions updated through 2026-10-25. Version **1.13.0 dev**
+execution/decisions updated through 2026-10-26. Version **1.13.0 dev**
 (`lib/Common/ChakraCoreVersion.h:19-21`, `CHAKRA_CORE_VERSION_RELEASE 0` at :58).
 MIT license (`LICENSE.txt`). Every claim below cites an in-repo path; line numbers
 were verified against this HEAD.
@@ -56,11 +56,12 @@ This `doc/` folder is the start of durable in-repo documentation. The
 feature inventory and line anchors below are the 2026-10-10 baseline
 snapshot; the modernization branch has since added the C2 surfaces listed
 in [modernization-plan.md](modernization-plan.md) §6 and its receipts.
-Latest merged checkpoint (2026-10-25): **2022/0 test**, **2074/0
+Latest merged checkpoint (2026-10-26): **2023/0 test**, **2075/0
 debug-static**, including direct-eval `super` early errors, the flag-on
 S6a growable-SAB/non-shared-Atomics slice, S6b `Atomics.pause` /
 single-thread `Atomics.waitAsync`, the S14 hidden-outer eval-`arguments`
-fix, and the bounded S8 immutable-ArrayBuffer surface.
+fix, the bounded S8 immutable-ArrayBuffer surface, and S3-a Unicode
+property escapes under the `u` flag.
 
 ## 3. Architecture (summary)
 
@@ -397,15 +398,17 @@ from 48,598 files: 61,565 passed / 31,576 failed, with 902 explicit skips. Its
 corpus includes post-ES2025 proposals and uses default language flags.
 
 **Modernization checkpoint (2026-10-21):** the merged branch is green at
-**2022/0 test** and **2074/0 debug-static** on Mac ARM64 no-JIT. Direct-eval
+**2023/0 test** and **2075/0 debug-static** on Mac ARM64 no-JIT. Direct-eval
 `super` early errors are closed (eval-code 454/0; object-literal function/arrow
 false accepts fixed in `39e9f2a16`), the flag-on S6a slice has growable
 SharedArrayBuffer plus ES2020 non-shared Atomics (focused S6 574/982;
 112 fail→pass / 0 pass→fail; debug index-detach abort fixed), and S6b adds
 `Atomics.pause` plus single-thread `waitAsync` (80/124; 0 pass→fail) while
 SAB/Atomics remain off by default. The catch-hidden eval-`arguments`
-under-rejection is closed, and the bounded immutable-ArrayBuffer surface is
-landed with explicit JIT/TTD residuals.
+under-rejection is closed, the bounded immutable-ArrayBuffer surface is
+landed with explicit JIT/TTD residuals, and Unicode property escapes under
+`u` are landed on ICU 79.1 with a deterministic code-point-set matcher
+(`v` remains open).
 The 30-directory fixture-cache subset has also been rerun with the fixed
 harness: **1,367/998 of 2,365**, 0 pass→fail and 102 fail→pass versus the old
 precombined result ([c4-fixture-rerun.md](c4-fixture-rerun.md)). S3

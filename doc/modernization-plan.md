@@ -57,7 +57,7 @@ handling have been validated before its results are used as a completion gate.
 | B6 | Windows feasibility and rollout; later target extensions | Stable build contracts | Separate expansion |
 | Z1 | One useful mixed C++/Zig unit behind a tested C ABI | B3; B4 if the unit ships on Linux | Optional pilot |
 | C1 | Qualified ES2025 test policy and triaged failures | Stable Mac build at B3 | Recorded (CONDITIONAL) |
-| C2 | Bounded compatibility batches and partial releases | C1; B4 before JIT-wide enablement | In progress (S4/S5/S10/S11/S7-matchAll/S9 named-groups + d-flag + duplicate named groups + lookbehind + ES2025 modifiers; S1 class elements complete: public/private instance+static fields, private methods/accessors incl. async/generator and statics, computed field names, `super` in field initializers, static blocks and direct-eval `super` early errors (integrated elements corpus 5,888/5,897; 9 documented non-eval residuals; eval-code 454/0); S6a flag-on growable SAB/non-shared Atomics (default remains off); S6b flag-on `Atomics.pause` + single-thread `Atomics.waitAsync` (finite timeouts and cross-agent suspension remain); S8 immutable ArrayBuffer (`immutable`, `transferToImmutable`, `sliceToImmutable`, write protections; JIT/TTD residuals); S2 BigInt: operators/literals/asIntN-asUintN, collections, DataView, BigInt64Array; S8 resizable ArrayBuffer + TypedArray tracking + Float16 (DataView/Math.f16round slice and Float16Array); S12 import attributes + JSON modules (additive host contract); S13 symbol keys, WeakRef, FinalizationRegistry; S14 P1–P7 — all closed on Mac no-JIT; JIT claims gated on B4) |
+| C2 | Bounded compatibility batches and partial releases | C1; B4 before JIT-wide enablement | In progress (S4/S5/S10/S11/S7-matchAll/S9 named-groups + d-flag + duplicate named groups + lookbehind + ES2025 modifiers; S1 class elements complete: public/private instance+static fields, private methods/accessors incl. async/generator and statics, computed field names, `super` in field initializers, static blocks and direct-eval `super` early errors (integrated elements corpus 5,888/5,897; 9 documented non-eval residuals; eval-code 454/0); S6a flag-on growable SAB/non-shared Atomics (default remains off); S6b flag-on `Atomics.pause` + single-thread `Atomics.waitAsync` (finite timeouts and cross-agent suspension remain); S8 immutable ArrayBuffer (`immutable`, `transferToImmutable`, `sliceToImmutable`, write protections; JIT/TTD residuals); S3-a Unicode property escapes under `u` on ICU 79.1 (deterministic code-point-set matcher; `v` remains); S2 BigInt: operators/literals/asIntN-asUintN, collections, DataView, BigInt64Array; S8 resizable ArrayBuffer + TypedArray tracking + Float16 (DataView/Math.f16round slice and Float16Array); S12 import attributes + JSON modules (additive host contract); S13 symbol keys, WeakRef, FinalizationRegistry; S14 P1–P7 — all closed on Mac no-JIT; JIT claims gated on B4) |
 | C3 | Larger runtime/object-model feature projects | C1 and their feature prerequisites | Separate projects |
 | C4 | Verified full ES2025 core-language result | Required C2/C3 work and qualified runner | Long-term objective |
 
@@ -597,16 +597,17 @@ Decision/rollback points:
   tracked until C4, optional ecosystem scope has separate gates.
 - [ ] C4: Published qualified ES2025 result on the claimed default configurations.
 
-**Latest integration checkpoint (2026-10-25):** main is clean at the
-**2022/0 test** and **2074/0 debug-static** gates (re-verified after
+**Latest integration checkpoint (2026-10-26):** main is clean at the
+**2023/0 test** and **2075/0 debug-static** gates (re-verified after
 every merge and repair below; counts are single-sourced in
 `tools/build/gate_counts.json` — Float16Array's new test file moved
 2012/2064 → 2013/2065, repair-loop `-noDeferParse` rlexe variants
 then moved 2013/2065 → 2016/2068, the flag-on S6a slice added one entry
 (2016/2068 → 2017/2069), the direct-eval super lane added three
 parse-mode entries (2017/2069 → 2020/2072), S6b added the waitAsync/pause
-entry (2020/2072 → 2021/2073), and S8 immutable ArrayBuffer added one
-entry (2021/2073 → 2022/2074)).
+entry (2020/2072 → 2021/2073), S8 immutable ArrayBuffer added one entry
+(2021/2073 → 2022/2074), and S3-a Unicode property escapes added one
+entry (2022/2074 → 2023/2075)).
 Merged lanes: S1 public/private instance+static fields and private methods/accessors, S2 arithmetic + BigInt64Array/Uint64Array + collections/
 DataView, S8 resizable ArrayBuffer/transfer + TypedArray tracking, S13
 WeakRef + FinalizationRegistry, and S14 P1/P2/P3/P4/P5/P6/P7
@@ -682,11 +683,17 @@ focused eval-code 454/0, gates unchanged). S8 then landed the bounded
 immutable-ArrayBuffer surface (merge `4ac863379`, receipt
 [c2-s8-immutable.md](c2-s8-immutable.md): focused 84/38 default and
 118/122 flag-on, adjacent +110 fail→pass / 0 pass→fail; JIT/TTD residuals),
-moving the gates to 2022/2074. All active feature/triage worktrees are
-merged; next work items are the remaining S6 flag-on gaps (finite timeout
-scheduling, cross-agent waitAsync, BigInt Atomics, multi-agent wait/grow),
-the remaining S8/S2/P-eval residuals, and the C4 qualification work (full
-baseline rerun, host-reported negative phase). Tracked eval residuals: P4 body eval with non-simple
+moving the gates to 2022/2074. S3-a then landed Unicode property escapes
+under the `u` flag on ICU 79.1 (merge `1d92d7b37`, receipt
+[c2-s3-property-escapes.md](c2-s3-property-escapes.md): bounded RegExp
+corpus 1,020/960 → **1,814/166**, **794 fail→pass / 0 pass→fail**, with
+the deterministic `MatchCodePointSet` repair removing the former 96
+property-set timeouts), moving the gates to 2023/2075. All active
+feature/triage worktrees are merged; next work items are S3-b
+(`v` flag/set notation/property-of-strings), the remaining S6 flag-on gaps
+(finite timeout scheduling, cross-agent waitAsync, BigInt Atomics,
+multi-agent wait/grow), the remaining S8/S2/P-eval residuals, and the C4
+qualification work (full baseline rerun, host-reported negative phase). Tracked eval residuals: P4 body eval with non-simple
 parameters; P2 hidden outer lexical and JSC/Node delete difference.
 S3 (Unicode data decision), S6 default (product/security decision),
 B4 and C4 remain decision- or gate-blocked. A repair loop then closed

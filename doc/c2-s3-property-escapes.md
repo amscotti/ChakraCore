@@ -1,8 +1,9 @@
 # C2-S3-a: Unicode property escapes under the `u` flag
 
-Status: **pending** (implemented on branch `s3-property-escapes`, base
-`084dcf06a`; evidence below; awaiting integration review and the gate-count
-bump the integrator owns).
+Status: **landed** — implementation `b9bb103c3`, review repairs `96c563e1f`,
+`3fd125328`, and `f622a4218`; merge `1d92d7b37`. Final gates are
+**2023/0 test** and **2075/0 debug-static**; full `zig build check` is
+**583/583**. Base `084dcf06a`.
 
 ## Scope
 
