@@ -187,7 +187,7 @@ namespace UnifiedRegex
 
         inline CaseInsensitive::MappingSource GetCaseMappingSource() const
         {
-            return (flags & UnicodeRegexFlag) != 0
+            return (flags & (UnicodeRegexFlag | UnicodeSetsRegexFlag)) != 0
                 ? CaseInsensitive::MappingSource::CaseFolding
                 : CaseInsensitive::MappingSource::UnicodeData;
         }
@@ -963,6 +963,15 @@ namespace UnifiedRegex
     struct MatchLiteralEquivInst : Inst, LiteralMixin
     {
         inline MatchLiteralEquivInst(CharCount offset, CharCount length) : Inst(InstTag::MatchLiteralEquiv), LiteralMixin(offset, length) {}
+
+        INST_BODY
+    };
+
+    // v-flag string member under i: per-code-point spec Canonicalize
+    // comparison against the canonicalized stored literal (pair-aware).
+    struct MatchLiteralCanonicalInst : Inst, LiteralMixin
+    {
+        inline MatchLiteralCanonicalInst(CharCount offset, CharCount length) : Inst(InstTag::MatchLiteralCanonical), LiteralMixin(offset, length) {}
 
         INST_BODY
     };

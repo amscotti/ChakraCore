@@ -64,6 +64,7 @@ namespace UnifiedRegex
         bool IsMultiline() const;
         bool IsDotAll() const;
         bool IsUnicode() const;
+        bool IsUnicodeSets() const;
         bool IsSticky() const;
         bool IsHasIndices() const;
         bool WasLastMatchSuccessful() const;

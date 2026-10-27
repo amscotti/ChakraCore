@@ -1010,7 +1010,7 @@ using namespace Js;
     JavascriptString* JavascriptRegExp::StringFromFlags(UnifiedRegex::RegexFlags flags, ScriptContext* scriptContext)
     {
         // Same order as EntryGetterFlags, GetOptions(), and ToString().
-        char16 buf[7];
+        char16 buf[8];
         CharCount i = 0;
         if ((flags & UnifiedRegex::HasIndicesRegexFlag) != 0) { buf[i++] = _u('d'); }
         if ((flags & UnifiedRegex::GlobalRegexFlag) != 0) { buf[i++] = _u('g'); }
@@ -1018,6 +1018,7 @@ using namespace Js;
         if ((flags & UnifiedRegex::MultilineRegexFlag) != 0) { buf[i++] = _u('m'); }
         if ((flags & UnifiedRegex::DotAllRegexFlag) != 0) { buf[i++] = _u('s'); }
         if ((flags & UnifiedRegex::UnicodeRegexFlag) != 0) { buf[i++] = _u('u'); }
+        if ((flags & UnifiedRegex::UnicodeSetsRegexFlag) != 0) { buf[i++] = _u('v'); }
         if ((flags & UnifiedRegex::StickyRegexFlag) != 0) { buf[i++] = _u('y'); }
         return JavascriptString::NewCopyBuffer(buf, i, scriptContext);
     }
@@ -1259,6 +1260,7 @@ using namespace Js;
             if (scriptConfig->IsES6UnicodeExtensionsEnabled())
             {
                 APPEND_FLAG(PropertyIds::unicode, _u('u'));
+                APPEND_FLAG(scriptContext->GetLibrary()->GetRegexUnicodeSetsPropertyRecord()->GetPropertyId(), _u('v'));
             }
 
             if (scriptConfig->IsES6RegExStickyEnabled())
@@ -1337,6 +1339,10 @@ using namespace Js;
             {
                 bs.Append(_u('u'));
             }
+            if (GetPattern()->IsUnicodeSets())
+            {
+                bs.Append(_u('v'));
+            }
             if (GetPattern()->IsSticky())
             {
                 bs.Append(_u('y'));
@@ -1387,6 +1393,7 @@ using namespace Js;
     DEFINE_FLAG_GETTER(EntryGetterUnicode, unicode, IsUnicode)
     DEFINE_FLAG_GETTER(EntryGetterDotAll, dotAll, IsDotAll)
     DEFINE_FLAG_GETTER(EntryGetterHasIndices, hasIndices, IsHasIndices)
+    DEFINE_FLAG_GETTER(EntryGetterUnicodeSets, unicodeSets, IsUnicodeSets)
 
     JavascriptRegExp * JavascriptRegExp::BoxStackInstance(JavascriptRegExp * instance, bool deepCopy)
     {

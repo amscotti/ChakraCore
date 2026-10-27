@@ -4,6 +4,7 @@
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #include "ParserPch.h"
+#include <unicode/uchar.h> // u_toupper for MatchLiteralCanonicalInst (v-flag \q strings under i)
 
 namespace UnifiedRegex
 {
@@ -1725,6 +1726,94 @@ namespace UnifiedRegex
 #endif
 
     // ----------------------------------------------------------------------
+    // MatchLiteralCanonicalInst (v-flag string members under i)
+    // ----------------------------------------------------------------------
+    // Ownership: the instruction carries only the standard LiteralMixin
+    // offset/length into the program's literal buffer (the unchanged
+    // transfer passes copy the folded bytes there); no extra retained
+    // state, in line with MatchLiteralInst. Folding is Unicode simple case
+    // folding (ES2027 MaybeSimpleCaseFolding), implemented with ICU
+    // u_foldCase/U_FOLD_CASE_DEFAULT — a const table lookup on the
+    // matcher's calling thread, same rental-threading shape as the
+    // parse-time ICU use. The stored literal holds the folded pattern code
+    // points; an input code point matches iff scf(input) equals the stored
+    // folded code point (surrogate-pair aware).
+    inline codepoint_t CanonicalCodePoint(codepoint_t cp)
+    {
+        return (codepoint_t)u_foldCase((UChar32)cp, U_FOLD_CASE_DEFAULT);
+    }
+
+    inline bool MatchLiteralCanonicalInst::Exec(REGEX_INST_EXEC_PARAMETERS) const
+    {
+        if (length > inputLength - inputOffset)
+        {
+            return matcher.Fail(FAIL_PARAMETERS);
+        }
+
+        const Char* const literalBuffer = matcher.program->rep.insts.litbuf;
+        const Char* literalCurr = literalBuffer + offset;
+        const Char* const literalEnd = literalCurr + length;
+        CharCount inputCurr = inputOffset;
+
+        while (literalCurr < literalEnd)
+        {
+            if (inputCurr >= inputLength)
+                return matcher.Fail(FAIL_PARAMETERS);
+
+            // Decode the next input code point (pair-aware)
+            Char in0 = input[inputCurr];
+            codepoint_t inputCp = in0;
+            CharCount inputUnits = 1;
+            if (in0 >= 0xD800 && in0 <= 0xDBFF && inputCurr + 1 < inputLength)
+            {
+                Char in1 = input[inputCurr + 1];
+                if (in1 >= 0xDC00 && in1 <= 0xDFFF)
+                {
+                    inputCp = 0x10000 + ((in0 - 0xD800) << 10) + (in1 - 0xDC00);
+                    inputUnits = 2;
+                }
+            }
+
+            // Decode the next stored (canonical) code point
+            Char lit0 = *literalCurr;
+            codepoint_t litCp = lit0;
+            CharCount litUnits = 1;
+            if (lit0 >= 0xD800 && lit0 <= 0xDBFF && literalCurr + 1 < literalEnd)
+            {
+                Char lit1 = literalCurr[1];
+                if (lit1 >= 0xDC00 && lit1 <= 0xDFFF)
+                {
+                    litCp = 0x10000 + ((lit0 - 0xD800) << 10) + (lit1 - 0xDC00);
+                    litUnits = 2;
+                }
+            }
+
+            if (CanonicalCodePoint(inputCp) != litCp)
+            {
+                return matcher.Fail(FAIL_PARAMETERS);
+            }
+
+            inputCurr += inputUnits;
+            literalCurr += litUnits;
+        }
+
+        inputOffset = inputCurr;
+        instPointer += sizeof(*this);
+        return false;
+    }
+
+#if ENABLE_REGEX_CONFIG_OPTIONS
+    int MatchLiteralCanonicalInst::Print(DebugWriter* w, Label label, const Char* litbuf) const
+    {
+        PRINT_RE_BYTECODE_BEGIN("MatchLiteralCanonical");
+        PRINT_MIXIN_ARGS(LiteralMixin, true);
+        PRINT_RE_BYTECODE_MID();
+        PRINT_BYTES(LiteralMixin);
+        PRINT_RE_BYTECODE_END();
+    }
+#endif
+
+    // ----------------------------------------------------------------------
     // MatchTrieInst (optimized instruction)
     // ----------------------------------------------------------------------
 
@@ -2708,7 +2797,7 @@ namespace UnifiedRegex
         const Char* const groupText = this->realInput != nullptr ? this->realInput : input;
 
         bool isCaseInsensitiveMatch = isCaseInsensitive;
-        bool isCodePointList = (program->flags & UnicodeRegexFlag) != 0;
+        bool isCodePointList = (program->flags & (UnicodeRegexFlag | UnicodeSetsRegexFlag)) != 0;
 
         if (!frameReversed)
         {
@@ -4889,7 +4978,7 @@ namespace UnifiedRegex
             if (realPos > 0)
             {
                 Char* const scratch = RecyclerNewArrayLeaf(matcher.recycler, Char, realPos);
-                if ((matcher.program->flags & UnifiedRegex::UnicodeRegexFlag) != 0)
+                if ((matcher.program->flags & (UnifiedRegex::UnicodeRegexFlag | UnifiedRegex::UnicodeSetsRegexFlag)) != 0)
                 {
                     // u-mode: reverse by CODE POINTS, keeping surrogate pairs'
                     // units in order, so code-point-oriented u-mode atoms,

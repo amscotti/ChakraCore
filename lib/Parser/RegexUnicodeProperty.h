@@ -26,6 +26,9 @@ namespace UnifiedRegex
         //    U_GC_*_MASK grouped-category mask
         //  - Script/ScriptExtensions: value is a UScriptCode
         //  - Any/ASCII/Assigned: the three RegExp-specific properties
+        //  - StringProperty: value is an index into stringPropertyNames, one
+        //    of the seven ES2024 properties of strings. Valid under the v
+        //    flag only (the caller reports them as invalid under plain u).
         enum Kind : uint8
         {
             Invalid,
@@ -35,7 +38,8 @@ namespace UnifiedRegex
             ScriptExtensions,
             Any,
             ASCII,
-            Assigned
+            Assigned,
+            StringProperty
         };
 
         struct Resolved
@@ -51,6 +55,26 @@ namespace UnifiedRegex
         // is not a valid property expression (the caller turns that into a
         // SyntaxError under the u flag).
         bool Resolve(const char16* name, CharCount nameLen, const char16* value, CharCount valueLen, bool hasValue, Resolved* out);
+
+        // True when the resolved escape is one of the seven ES2024 properties
+        // of strings (valid only under the v flag).
+        inline bool IsStringProperty(const Resolved& resolved) { return resolved.kind == StringProperty; }
+
+        // Receiver for the string elements of a property-of-strings set.
+        // Add is called once per string, in ICU enumeration order; `s` is
+        // valid only for the duration of the call.
+        struct StringCollector
+        {
+            virtual void Add(const char16* s, int32 len) = 0;
+        protected:
+            ~StringCollector() {}
+        };
+
+        // Computes the matching code points and strings of a property of
+        // strings into `result`/`collector` (may be null to count only).
+        // Returns false only on an ICU-internal failure. Requires a resolved
+        // StringProperty.
+        bool BuildStringPropertySet(const Resolved& resolved, ArenaAllocator* allocator, CharSet<codepoint_t>& result, StringCollector* collector);
 
         // Computes the matching code points into `result`, allocated from
         // `allocator`. Returns false only on an ICU-internal failure (the
@@ -315,6 +339,21 @@ namespace UnifiedRegex
             return false;
         }
 
+        // The seven ES2024 properties of strings, resolved through ICU's
+        // UnicodeSet property aliases (all present in ICU 79.1; no Unicode
+        // data is copied into the engine).
+        static const char16* stringPropertyNames[] =
+        {
+            _u("Basic_Emoji"),
+            _u("Emoji_Keycap_Sequence"),
+            _u("RGI_Emoji_Modifier_Sequence"),
+            _u("RGI_Emoji_Flag_Sequence"),
+            _u("RGI_Emoji_Tag_Sequence"),
+            _u("RGI_Emoji_ZWJ_Sequence"),
+            _u("RGI_Emoji")
+        };
+        static const int32 numStringPropertyNames = 7;
+
         bool Resolve(const char16* name, CharCount nameLen, const char16* value, CharCount valueLen, bool hasValue, Resolved* out)
         {
             if (nameLen == 0)
@@ -372,6 +411,18 @@ namespace UnifiedRegex
                 out->value = 0;
                 out->isGroupValue = false;
                 return true;
+            }
+            // Properties of strings (ES2024 'v' flag only): valid as lone
+            // names only, never with =value.
+            for (int32 i = 0; i < numStringPropertyNames; i++)
+            {
+                if (EqualsAscii(name, nameLen, stringPropertyNames[i]))
+                {
+                    out->kind = StringProperty;
+                    out->value = i;
+                    out->isGroupValue = false;
+                    return true;
+                }
             }
             return ResolveGcValue(name, nameLen, out);
         }
@@ -469,6 +520,58 @@ namespace UnifiedRegex
                     break;
             }
             bool ok = U_SUCCESS(ec) && CopyUSetRanges(set, allocator, result);
+            uset_close(set);
+            return ok;
+        }
+
+        bool BuildStringPropertySet(const Resolved& resolved, ArenaAllocator* allocator, CharSet<codepoint_t>& result, StringCollector* collector)
+        {
+            Assert(resolved.kind == StringProperty);
+            if (resolved.value < 0 || resolved.value >= numStringPropertyNames)
+                return false;
+
+            UErrorCode ec = U_ZERO_ERROR;
+            USet* set = uset_open(1, 0); // empty
+            // ICU resolves these with an empty value ("[:Basic_Emoji:]" in
+            // UnicodeSet pattern terms).
+            uset_applyPropertyAlias(set, stringPropertyNames[resolved.value], -1, NULL, 0, &ec);
+            bool ok = U_SUCCESS(ec);
+            if (ok)
+            {
+                int32 itemCount = uset_getItemCount(set);
+                for (int32 i = 0; i < itemCount && ok; i++)
+                {
+                    // Longest emoji sequence in ICU 79.1 is 15 UTF-16 units
+                    // (tag sequences up to 14); 24 leaves headroom and guards
+                    // against a longer future build being silently truncated.
+                    UChar str[24];
+                    UChar32 start, end;
+                    int32 strLen = uset_getItem(set, i, &start, &end, str, 24, &ec);
+                    if (U_FAILURE(ec))
+                    {
+                        ok = false;
+                        break;
+                    }
+                    if (strLen == 0)
+                    {
+                        if (start > end)
+                            continue;
+                        result.SetRange(allocator, static_cast<codepoint_t>(start), static_cast<codepoint_t>(end));
+                    }
+                    else if (strLen > 24)
+                    {
+                        // Item longer than the probe buffer: report an
+                        // ICU-side failure rather than truncating.
+                        ok = false;
+                        break;
+                    }
+                    else if (strLen > 0)
+                    {
+                        if (collector != nullptr)
+                            collector->Add(str, strLen);
+                    }
+                }
+            }
             uset_close(set);
             return ok;
         }

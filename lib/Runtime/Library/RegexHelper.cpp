@@ -62,7 +62,22 @@ namespace Js
                 {
                     if((flags & UnifiedRegex::UnicodeRegexFlag) != 0)
                         return false;
+                    // ES2024: 'u' and 'v' are mutually exclusive.
+                    if ((flags & UnifiedRegex::UnicodeSetsRegexFlag) != 0)
+                        return false;
                     flags = (UnifiedRegex::RegexFlags)(flags | UnifiedRegex::UnicodeRegexFlag);
+                    break;
+                }
+                return false;
+            case 'v':
+                // ES2024 'v' flag (Unicode sets), gated like 'u'.
+                if (scriptContext->GetConfig()->IsES6UnicodeExtensionsEnabled())
+                {
+                    if ((flags & UnifiedRegex::UnicodeSetsRegexFlag) != 0)
+                        return false;
+                    if ((flags & UnifiedRegex::UnicodeRegexFlag) != 0)
+                        return false;
+                    flags = (UnifiedRegex::RegexFlags)(flags | UnifiedRegex::UnicodeSetsRegexFlag);
                     break;
                 }
                 return false;
@@ -132,7 +147,7 @@ namespace Js
         // based implementation.
         //
         // dgimsuy plus a trailing NUL. Seven flags no longer fit in 7 char16s.
-        const CharCount OPT_BUF_SIZE = 8;
+        const CharCount OPT_BUF_SIZE = 10;
         char16 opts[OPT_BUF_SIZE];
 
         CharCount i = 0;
@@ -161,6 +176,11 @@ namespace Js
         {
             Assert(scriptContext->GetConfig()->IsES6UnicodeExtensionsEnabled());
             opts[i++] = _u('u');
+        }
+        if (flags & UnifiedRegex::UnicodeSetsRegexFlag)
+        {
+            Assert(scriptContext->GetConfig()->IsES6UnicodeExtensionsEnabled());
+            opts[i++] = _u('v');
         }
         if (flags & UnifiedRegex::StickyRegexFlag)
         {

@@ -164,6 +164,7 @@ namespace Js
             static FunctionInfo GetterUnicode;
             static FunctionInfo GetterDotAll;
             static FunctionInfo GetterHasIndices;
+            static FunctionInfo GetterUnicodeSets;
             static FunctionInfo Escape;
             // v5.8 only
             static FunctionInfo Compile;
@@ -190,6 +191,7 @@ namespace Js
         static Var EntryGetterUnicode(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryGetterDotAll(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryGetterHasIndices(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryGetterUnicodeSets(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryEscape(RecyclableObject* function, CallInfo callInfo, ...);
         // v5.8 only
         static Var EntryCompile(RecyclableObject* function, CallInfo callInfo, ...);

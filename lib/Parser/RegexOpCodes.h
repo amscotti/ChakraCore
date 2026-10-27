@@ -138,3 +138,11 @@ MTemplate(FrameNegatedWordBoundaryTest, template<bool isNegation>, FrameWordBoun
 // the prefix/pair-arms/suffix alternation whose per-iteration arm choices
 // made quantified sets backtrack exponentially.
 M(MatchCodePointSet)
+// v-flag (\q) string member under the i flag: the literal stores the
+// spec-Canonicalize form of each code point and the instruction matches an
+// input code point iff Canonicalize(input) equals the stored code point
+// (surrogate-pair aware). Differs from MatchLiteralEquivInst exactly on
+// the fold-vs-canonicalize characters (U+212A, U+017F, ...): the equiv
+// expansion over-folds them into the class, the spec rule keeps them
+// distinct. Appended after MatchCodePointSet to keep earlier tags stable.
+M(MatchLiteralCanonical)

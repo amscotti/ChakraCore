@@ -189,6 +189,20 @@ namespace UnifiedRegex
         // deferred error state.
         ParseError* deferredIfNotUnicodeError;
         ParseError* deferredIfUnicodeError;
+        // v-flag (Unicode sets) deferred errors, recorded in pass 0 when the
+        // flags are still unknown:
+        //  - deferredIfUnicodeSetsError fires when the v flag is present
+        //    (v-mode class grammar violations: reserved double punctuators,
+        //    unescaped ClassSetSyntaxCharacters, malformed set operations or
+        //    \q bodies, negated classes whose contents may contain strings).
+        //  - deferredIfUnicodeNoSetsError fires when the u flag is present
+        //    without v (the seven properties of strings are v-only escapes).
+        ParseError* deferredIfUnicodeSetsError;
+        ParseError* deferredIfUnicodeNoSetsError;
+        // True when the v (Unicode sets) flag is present. v implies the whole
+        // u-mode surface (unicodeFlagPresent is set for u OR v); this flag
+        // additionally selects the v-mode character-class grammar.
+        bool unicodeSetsFlagPresent;
 
     private:
 
@@ -235,8 +249,10 @@ namespace UnifiedRegex
         void ScanPropertyEscapePass0();
         // Cursor at '{' ('p'/'P' already consumed by either the atom path
         // above or the class-escape switch): the shared pass 0 body scan and
-        // deferred-if-unicode validation.
-        void ScanPropertyEscapeBodyPass0();
+        // deferred-if-unicode validation. isNegation distinguishes \P{...}
+        // (properties of strings are rejected under every unicode mode) from
+        // \p{...} (rejected under plain u only, valid under v).
+        void ScanPropertyEscapeBodyPass0(bool isNegation);
         // Cursor at '{' (p/P consumed). Consumes through '}' and reduces the
         // body to ASCII name/value buffers; false when the body cannot be a
         // valid property expression. Unterminated bodies Fail.
@@ -256,6 +272,93 @@ namespace UnifiedRegex
         // disjunction of the BMP set and surrogate-pair range arms. Shared
         // by character classes and property escapes.
         Node* TranslateCodePointSet(CharSet<codepoint_t>& codePointSet, bool isNegation);
+
+        //
+        // v flag (ES2024 Unicode sets) character classes
+        //
+
+        // A class member string (alternative), in the parser's compile-time
+        // vStringBuffer. unitLen is UTF-16 units; cpLen is code points
+        // (ordering key: alternatives are tried longest first).
+        struct VString
+        {
+            const Char* chars;
+            uint32 unitLen;
+            uint32 cpLen;
+        };
+
+        // A v-mode class operand or intermediate result: a code point set
+        // plus a list of strings (only strings of >= 2 code points and the
+        // empty string are kept; single-code-point strings fold into cp).
+        // mayContainStrings mirrors the spec's static MayContainStrings
+        // (conservative through set operations) so negation can be rejected
+        // in pass 0. isRange is set by the item parser when the member was a
+        // character range (ranges cannot be set-operation operands).
+        struct VCSet
+        {
+            CharSet<codepoint_t> cp;
+            VString* strings;
+            int numStrings;
+            int stringsCap;
+            bool containsEmptyString;
+            bool mayContainStrings;
+            bool isRange;
+        };
+
+        Char* vStringBuffer;     // concatenated string members (ctAllocator)
+        CharCount vStringBufLen;
+        CharCount vStringBufNext;
+        CharCount vStringBufCap;
+        codepoint_t* vScratchCps;  // \q alternative / ICU string decode scratch (ctAllocator)
+        CharCount vScratchCpsCap;
+        Char* vScratchUnits;       // canonicalized string re-encode scratch (ctAllocator)
+        CharCount vScratchUnitsLen;
+        CharCount vScratchUnitsCap;
+        bool vLastScanIsStringProperty; // set by ScanPropertyEscapeBodyPass0
+        bool vClassSawNested;               // pass 0: this v class contains a nested '['
+        const EncodedChar* vClassSpanStart; // pass 0: span the v validator consumed ('[' .. after ']')
+        const EncodedChar* vClassSpanEnd;   // pass 0: ']'-atom rule in TermPass0
+
+        void DeferredFailIfUnicodeSets(HRESULT error);
+        void DeferredFailIfUnicodeNoSets(HRESULT error);
+        void VInitSet(VCSet& set);
+        void VEnsureStringCap(VCSet& set, int additional);
+        CharCount VAppendStringChars(const Char* chars, CharCount len);
+        void VAddStringRaw(VCSet& set, const Char* chars, CharCount unitLen, CharCount cpLen);
+        void VAddStringFromCodePoints(VCSet& set, const codepoint_t* cps, CharCount numCps);
+        void VAddCodePoint(VCSet& set, codepoint_t cp);
+        void VCloseOperandIfInsensitive(VCSet& set);
+        codepoint_t VCanonicalizeCodePoint(codepoint_t cp) const;
+        static bool VStringEq(const VString& a, const VString& b);
+        static int VStringLexCmp(const void* pa, const void* pb);
+        void VSortStringsLex(VString* strings, int n);
+        void VApplyOp(VCSet& acc, VCSet& rhs, bool isDifference);
+        void VUnionInPlace(VCSet& acc, VCSet& rhs);
+        // Pass 0: validates the v grammar over the class body (cursor just
+        // after '['), recording deferred-if-v errors; restores the cursor so
+        // the legacy scan is unaffected. Never hard-fails.
+        void VClassPass0();
+        void VValidateClass(bool& mayContainStrings);
+        void VValidateExpr(bool& mayContainStrings);
+        void VValidateItem(bool& mayContainStrings, bool& isRange);
+        void VValidateEscape(bool& mayContainStrings);
+        void VValidateEscape(bool& mayContainStrings, bool& isSingleton, bool& isSetValued);
+        void VValidateQBody(bool& mayContainStrings);
+        // Pass 1: parses the same grammar (flags known, v on) and builds the
+        // node. Cursor just after '['.
+        Node* VClassPass1();
+        void VParseClass(VCSet& set, bool& negation);
+        void VParseExpr(VCSet& acc);
+        void VParseItem(VCSet& set);
+        void VParseOperand(VCSet& set, bool allowRange);
+        void VParseQ(VCSet& set);
+        void VParsePropertyEscape(VCSet& set, bool isNegation);
+        codepoint_t VDecodeSingletonEscape(bool inQString);
+        codepoint_t VDecodeEscapeCodePoint();
+        codepoint_t VDecodeUEscape();
+        codepoint_t VReadRawCodePoint();
+        void VRejectRangeHere();
+        Node* VBuildNode(VCSet& set, bool negation);
 
         //
         // Errors
