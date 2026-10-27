@@ -365,6 +365,26 @@ var tests = [
         }
     },
     {
+        name: "v-mode escaped backslash is the escaped-backslash member",
+        body() {
+            // [\\] under v is a legal escaped ClassSetSyntaxCharacter:
+            // literal and dynamic forms, plain classes, set operations and
+            // \q bodies all accept it (Node 26.5.0 == Bun 1.4.3).
+            var bs = String.fromCharCode(92);
+            var esc = bs + bs; // one escaped backslash in a source string
+            assert.isTrue(eval("/[" + esc + "]/v").test(bs), "[\\] member");
+            assert.isTrue(eval("/[a" + esc + "]/v").test(bs), "[a\\] backslash member");
+            assert.isTrue(eval("/[a" + esc + "]/v").test("a"), "[a\\] keeps a");
+            assert.isTrue(eval("/[[a]" + "--" + esc + "]/v").test("a"), "[[a]--\\] keeps a");
+            assert.isFalse(eval("/[[a]" + "--" + esc + "]/v").test(bs), "[[a]--\\] drops the backslash");
+            assert.isTrue(eval("/[" + bs + "q{a" + esc + "b}]/v").test("a" + bs + "b"), "\\q body member");
+            assert.areEqual(4, eval("/[" + esc + "]/v").source.length, "source is verbatim");
+            assert.isTrue(new RegExp("[" + esc + "]", "v").test(bs), "dynamic [\\]");
+            assert.isTrue(new RegExp("[[a]" + "--" + esc + "]", "v").test("a"), "dynamic set op");
+            assert.areEqual(4, new RegExp("[" + esc + "]", "v").source.length, "dynamic source verbatim");
+        }
+    },
+    {
         name: "Deferred parse: the new early errors fire in every parse mode",
         body() {
             // eval and dynamic forms parse at runtime, so the same sources

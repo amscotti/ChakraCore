@@ -1526,9 +1526,11 @@ namespace UnifiedRegex
                     // grammar an escaped class character is legal only as a
                     // CharacterEscape (handled by the cases above) or as
                     // escaped ClassSet punctuation: the ClassSetSyntax
-                    // characters, the reserved-double-punctuator components
-                    // and the '-'/'^' operators. Everything else ([\" ],
-                    // [\ ], [\'], [\k], non-ASCII, ...) rejects.
+                    // characters (including the backslash itself:
+                    // [\\]/v is the escaped-backslash member), the
+                    // reserved-double-punctuator components and the
+                    // '-'/'^' operators. Everything else ([\" ], [\ ],
+                    // [\'], [\k], non-ASCII, ...) rejects.
                     switch (c)
                     {
                     case '!':
@@ -1536,6 +1538,7 @@ namespace UnifiedRegex
                     case '$':
                     case '%':
                     case '&':
+                    case '\\':
                     case '(':
                     case ')':
                     case '*':

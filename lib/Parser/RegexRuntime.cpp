@@ -5999,31 +5999,55 @@ namespace UnifiedRegex
             }
         }
 
-        // In u/v modes a match can never begin inside a surrogate pair, so
-        // the scan advances past a complete pair as one code point.
-        const bool isUnicodeMode = (program->flags & (UnicodeRegexFlag | UnicodeSetsRegexFlag)) != 0;
-        while (offset < inputLength)
+        // Pair-aware advance is needed only when the single character IS a
+        // trail surrogate (see MatchSingleCharCaseSensitive); the common
+        // scan stays the original tight loop.
+        const bool skipCompletePairs =
+            (program->flags & (UnicodeRegexFlag | UnicodeSetsRegexFlag)) != 0 &&
+            Js::NumberUtilities::IsSurrogateUpperPart(c);
+        if (!skipCompletePairs)
         {
+            while (offset < inputLength)
+            {
 #if ENABLE_REGEX_CONFIG_OPTIONS
-            CompStats();
+                CompStats();
 #endif
-            if (MatchSingleCharCaseInsensitiveHere(mappingSource, input, offset, c))
-            {
-                GroupInfo* const info = GroupIdToGroupInfo(0);
-                info->offset = offset;
-                info->length = 1;
-                return true;
-            }
-            if (isUnicodeMode &&
-                Js::NumberUtilities::IsSurrogateLowerPart(input[offset]) &&
-                offset + 1 < inputLength &&
-                Js::NumberUtilities::IsSurrogateUpperPart(input[offset + 1]))
-            {
-                offset += 2;
-            }
-            else
-            {
+                if (MatchSingleCharCaseInsensitiveHere(mappingSource, input, offset, c))
+                {
+                    GroupInfo* const info = GroupIdToGroupInfo(0);
+                    info->offset = offset;
+                    info->length = 1;
+                    return true;
+                }
                 offset++;
+            }
+        }
+        else
+        {
+            while (offset < inputLength)
+            {
+#if ENABLE_REGEX_CONFIG_OPTIONS
+                CompStats();
+#endif
+                if (MatchSingleCharCaseInsensitiveHere(mappingSource, input, offset, c))
+                {
+                    GroupInfo* const info = GroupIdToGroupInfo(0);
+                    info->offset = offset;
+                    info->length = 1;
+                    return true;
+                }
+                // A match can never begin inside a complete surrogate pair
+                // in u/v modes: skip it as one code point.
+                if (Js::NumberUtilities::IsSurrogateLowerPart(input[offset]) &&
+                    offset + 1 < inputLength &&
+                    Js::NumberUtilities::IsSurrogateUpperPart(input[offset + 1]))
+                {
+                    offset += 2;
+                }
+                else
+                {
+                    offset++;
+                }
             }
         }
 
@@ -6066,31 +6090,58 @@ namespace UnifiedRegex
             }
         }
 
-        // In u/v modes a match can never begin inside a surrogate pair, so
-        // the scan advances past a complete pair as one code point.
-        const bool isUnicodeMode = (program->flags & (UnicodeRegexFlag | UnicodeSetsRegexFlag)) != 0;
-        while (offset < inputLength)
+        // Pair-aware advance is needed only when the single character IS a
+        // trail surrogate: only then can the per-unit scan match inside a
+        // complete surrogate pair (a non-surrogate c can never equal a unit
+        // inside a pair, and a lead-surrogate c matches at pair starts by
+        // the engine's documented lead-lacunarity either way). Gate on that
+        // so the common scan stays the original tight loop.
+        const bool skipCompletePairs =
+            (program->flags & (UnicodeRegexFlag | UnicodeSetsRegexFlag)) != 0 &&
+            Js::NumberUtilities::IsSurrogateUpperPart(c);
+        if (!skipCompletePairs)
         {
+            while (offset < inputLength)
+            {
 #if ENABLE_REGEX_CONFIG_OPTIONS
-            CompStats();
+                CompStats();
 #endif
-            if (input[offset] == c)
-            {
-                GroupInfo* const info = GroupIdToGroupInfo(0);
-                info->offset = offset;
-                info->length = 1;
-                return true;
-            }
-            if (isUnicodeMode &&
-                Js::NumberUtilities::IsSurrogateLowerPart(input[offset]) &&
-                offset + 1 < inputLength &&
-                Js::NumberUtilities::IsSurrogateUpperPart(input[offset + 1]))
-            {
-                offset += 2;
-            }
-            else
-            {
+                if (input[offset] == c)
+                {
+                    GroupInfo* const info = GroupIdToGroupInfo(0);
+                    info->offset = offset;
+                    info->length = 1;
+                    return true;
+                }
                 offset++;
+            }
+        }
+        else
+        {
+            while (offset < inputLength)
+            {
+#if ENABLE_REGEX_CONFIG_OPTIONS
+                CompStats();
+#endif
+                if (input[offset] == c)
+                {
+                    GroupInfo* const info = GroupIdToGroupInfo(0);
+                    info->offset = offset;
+                    info->length = 1;
+                    return true;
+                }
+                // A match can never begin inside a complete surrogate pair
+                // in u/v modes: skip it as one code point.
+                if (Js::NumberUtilities::IsSurrogateLowerPart(input[offset]) &&
+                    offset + 1 < inputLength &&
+                    Js::NumberUtilities::IsSurrogateUpperPart(input[offset + 1]))
+                {
+                    offset += 2;
+                }
+                else
+                {
+                    offset++;
+                }
             }
         }
 

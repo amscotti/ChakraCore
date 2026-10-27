@@ -261,12 +261,106 @@ was dropped to keep the diff minimal.
    documented; the 69 ICU-drift property scenarios were re-verified green
    (the fallback is untouched).
 
+### Final iteration (`4c2ccf463` repairs, round 2)
+
+1. **v escaped backslash.** `VValidateEscape`'s ClassSet punctuation set
+   omitted the backslash itself, so `[\\]/v`, `[a\\]/v`, `[[a]--\\]/v` and
+   `[\q{a\\b}]/v` rejected while Node/Bun/spec accept (`\` is a
+   ClassSetSyntaxCharacter). Added; the full printable-ASCII escaped-class
+   sweep now reads **LEGAL = `!#$%&()*+,-./0:;<=>?@DSW[]^\`bdfnrstvw{|}~\`
+   (incl. `\`)** identically on CH, Node 26.5.0 and Bun 1.4.3, and the
+   focused test gained an 11-assertion escaped-backslash group (literal,
+   dynamic, class, set-op and `\q` forms; the earlier "full printable set
+   probed" claim had silently skipped the backslash itself — corrected).
+2. **Perf.** See "Perf accounting": the pair-aware advance is now gated on
+   trail-surrogate pattern characters only, restoring the original tight
+   loops for everything else; final ≤ base within noise on the microbench.
+3. **Residual probes recorded** (below): mid-pair manual `lastIndex`
+   divergences, negative `lastIndex` TypeError, compile/flags substrate.
+   `compile()` itself was re-probed behaviorally (`v→u` property escapes,
+   `u→v` nested classes, `compile("{","u")` strictness, plain recompile):
+   the final build matches Node on all four (`compile("{","u")` now
+   throws like Node; the base accepted it) — the only compile-adjacent
+   gap is the default-off `ES6RegExPrototypeProperties` substrate
+   (`r.flags`/`r.unicodeSets` are undefined without it), not compile
+   logic.
+
+### Canonical v universe (final iteration)
+
+
+The S3-b receipt's listing **does** reproduce exactly; earlier runs of this
+lane mis-transcribed it twice (296 scenarios: missed
+`test/built-ins/RegExp/prototype/unicodeSets/**`; 298: also mis-listed the
+String `search` v-flag files). The canonical selection is
+`test/built-ins/RegExp/unicodeSets/**` (114 files),
+`test/built-ins/RegExp/prototype/unicodeSets/**` (38 files),
+`test/built-ins/RegExp/property-escapes/generated/strings/**` (28),
+`RegExp/prototype/exec/regexp-builtin-exec-v-u-flag.js`,
+`RegExp/prototype/flags/this-val-regexp.js`, and the five String
+match/matchAll/replace/search(+search v-u) v-flag files — **187 files /
+374 scenarios**, exactly the S3-b count. Run on both binaries
+(`out/test262-s9-truebase-vcanon` vs `out/test262-s9-final3-vcanon`):
+**346 passed / 28 failed on BOTH** — identical totals to the S3-b
+receipt's recorded default-flags result, 0 fail→pass / 0 pass→fail. The
+28-scenario residue is the deliberately excluded substrate class (18
+`unicodeSets` accessor + 10 String v-flag scenarios needing
+`-ES6RegExPrototypeProperties -ES6RegExSymbols`, one additionally
+`-ESBigInt`), exactly the S3-b decomposition. Combined with the other
+corpora (`out/test262-s9-final3-{literals,s3a,adjacent,annexb}` vs
+`out/test262-s9-truebase-*`): **total +74 fail→pass, 0 pass→fail over
+4,192 scenarios**.
+
+### Artifact and accounting notes
+
+- The `ch` launcher **loads the dylib next to itself**, so a copied
+  launcher silently executes whichever dylib currently sits beside it;
+  run identity therefore rests on the **dylib** hash recorded in each
+  `summary.json` (`binary_sha256` is the launcher and is stable across
+  this lane's builds). Every before/after comparison in this receipt uses
+  self-contained directories: `zig-out/bin/s9-base/{ch,
+  libChakraCore.dylib}` (pristine base) vs `zig-out/bin/{ch,
+  libChakraCore.dylib}` (final).
+- Result directories per count (all under `out/`):
+  - true base: `test262-s9-truebase-{literals,s3a,adjacentsyntax,annexb}`
+    and `test262-s9-truebase-vcanon`;
+  - final: `test262-s9-final2-{literals,s3a,adjacent,annexb,vuni2}` for
+    the repair round and `test262-s9-final3-{vcanon,literals,s3a,adjacent,
+    annexb}` for this iteration;
+  - the superseded first attempts are `test262-s9-before-*` /
+    `test262-s9-after-*` (launcher/dylib mismatch) and
+    `test262-s9-final-vuniverse` / `-before2-*` / `-after2-*` (mis-
+    transcribed v selections). The v-selection history is: 296 (missing
+    prototype/unicodeSets), 298 (same, plus a search-file listing slip),
+    374 (canonical).
+- The earlier statement that the S3-b listing "does not reproduce" was
+  wrong — the omission was this lane's transcription; corrected above.
+
+### Perf accounting
+
+The first pair-aware single-char change added a flag+surrogate branch to
+both scan loops (measured on one 20k-ASCII microbench as ~2x relative on
+non-u and ~4.3x on u vs the base tight loop — absolute runs were 0-2 ms,
+so the ratios reflect loop-body noise, but the branch was real). The
+final shape gates the pair-aware advance on the pattern character being a
+trail surrogate (`IsSurrogateUpperPart(c)`): a non-surrogate single char
+can never match a unit inside a complete pair, and a lead-surrogate
+pattern matches at pair starts by the documented lead-lacunarity either
+way, so the tight original loop is restored for every other pattern.
+Measured (identical microbench, 200x20k scans): base 2/0/10/10 ms and
+final 1/1/10/9 ms (non-u / u / non-u-i / u-i), trail-surrogate astral
+10k x50: base 4 ms, final 2 ms — final ≤ base within noise on every
+line, including `-CollectGarbage`. No perf-regression claim is made
+beyond these numbers; B4/JIT re-measurement remains the standing gate.
+
+
+
 ### Repair-round evidence
 
-- Focused test (now 13 groups): `pass` on the test profile and on
+- Focused test: `pass` on the test profile and on
   debug-static across default, `-noDeferParse`, `-CollectGarbage`,
-  combined and `-force:deferParse`; 13/13 groups under Node 26.5.0 and
-  Bun 1.4.3 via the shim.
+  combined and `-force:deferParse` (13 groups at the repair round, 14
+  after the final iteration's escaped-backslash group); 14/14 groups
+  under Node 26.5.0 and Bun 1.4.3 via the shim.
 - Differential batteries (s9-repro2/3/4 + the residual-shape battery,
   normalized): **CH == Node == Bun** on every fixed shape (nested-class
   rejection under u, v punctuation accept/reject over the full printable
@@ -275,19 +369,16 @@ was dropped to keep the diff minimal.
   the documented `\uDE00X`-family literal-scanner lines. Bun alone
   accepts `[\é]` under v (Node/spec reject); engine follows Node.
 - Pinned test262 (identical selections before/after; before = the
-  pristine-base `s9-base` self-contained binary directory, totals
-  reproducing the recorded gates):
+  pristine-base `s9-base` self-contained binary directory):
   - literals 480 scenarios: **458/22 → 480/0**, +22/0;
   - S3-a selection 1,980: **1,828/152 → 1,862/118**, +34/0;
-  - v universe 298 (the S3-b receipt's directory selection as
-    reconstructable from its listing — its 374-scenario count does not
-    reproduce; both sides ran the identical selection):
-    **286/12 → 286/12**, 0/0;
   - adjacent syntax 1,008: **972/36 → 988/20**, +16/0;
   - annexB 350: **284/66 → 286/64**, +2/0;
-  - **total +74 fail→pass, 0 pass→fail over 4,116 scenarios** — identical
-    to the pre-repair state (the repairs cost nothing and the 69
-    ICU-drift property scenarios stay green).
+  - **total +74 fail→pass, 0 pass→fail over the 3,818 non-v scenarios** —
+    identical to the pre-repair state (the repairs cost nothing and the 69
+    ICU-drift property scenarios stay green). The v-universe history and
+    the final canonical 374-scenario run are recorded in the "canonical v
+    universe" note below.
 - The 18 legacy/es7 adjacent gate files re-verified: byte-identical on
   base vs final (es6 regex-*/unicode_regex_* and es7 regexp-* incl.
   `regexp-v-flag`); `unicode_escape_sequences` matches its re-baselined
@@ -325,27 +416,47 @@ was dropped to keep the diff minimal.
 2. **Positive low-surrogate classes** (`[\udc00-\udfff]`) still match the
    low half at a complete pair (the per-unit scan-start lacunarity; 1
    oracle-battery divergence line vs Node, pre-existing and unchanged).
+   The single-character form `/\uD800/u` over a complete pair matches the
+   lead half on the engine and returns null on Node (lead-lacunarity,
+   pre-existing, kept by design this round).
 3. **Literal-scanner fast paths advance per UTF-16 unit under u/v** (the
    prefix-skip / TextbookBoyer-Moore / octoquad programs). Exact divergent
    shapes (engine vs Node): `/\uDE00X/u.exec("\uD800\uDE00X")` →
    `["\uDE00X"]` at index 1 vs `null`; `/\uDE00X|q/u` on the same input →
    `["\uDE00X"]` vs `["q"]`; `"\uD800\uDE00Xz".split(/\uDE00X/u)` → 2
    parts vs 1; the same first shape under `v`. A trail surrogate as the
-   FIRST literal unit is the trigger; single-char, class-atom and
-   main-program paths are pair-aware (fixed this round). B4 follow-up:
-   the scan loops are the hottest interpreter path and need JIT
-   verification before a pair-aware advance.
-4. **Capturing-group cap**: the engine rejects more than `INT16_MAX`
+   FIRST literal unit is the trigger; single-char (since this lane),
+   class-atom and main-program paths are pair-aware. B4 follow-up: the
+   scan loops are the hottest interpreter path and need JIT verification
+   before a pair-aware advance.
+4. **Mid-pair manual `lastIndex` (global u)** — pre-existing on the base
+   binary, unchanged: `/\uDC00/gu` with `lastIndex = 1` on
+   `"\uD800\uDC00"` matches at index 1 (`["\uDC00"]`) where Node returns
+   null (over-match at an in-pair start); `/\u{10400}/gu` with
+   `lastIndex = 1` on two pairs matches at index 2 (advances to the next
+   pair start) where Node reports index 0 (snap-back restart).
+5. **Negative `lastIndex`** — pre-existing on the base binary: with
+   `lastIndex = -1`, `/a/g.exec("ba")` ends with `lastIndex` 0 on the
+   engine vs 2 on Node (spec: ToLength clamps to 0, then the match at 1
+   advances lastIndex to 2); `lastIndex = -5` throws a TypeError on the
+   engine vs a normal match on Node.
+6. **Substrate gaps (not selection omissions)**: `RegExp.prototype.flags`
+   / `unicodeSets` reads (also after `compile()`) require the
+   default-off `ES6RegExPrototypeProperties` substrate; `matchAll` and
+   the String v-flag scenarios in the canonical v universe require
+   `-ES6RegExSymbols` (plus the two pre-existing matchAll empty-match
+   scenarios); `hasIndices` surface parity is corpus-pinned under the
+   same substrate. `compile()` semantics themselves were re-probed and
+   match Node.
+7. **Capturing-group cap**: the engine rejects more than `INT16_MAX`
    (32767) capturing groups with a RangeError; Node accepts up to 65535
    and then throws SyntaxError. Raising the cap touches uint16 group ids
-   across parser/runtime (and the >65535 SyntaxError conversion alone
-   would leave the 32768..65535 band failing while Node succeeds) —
-   left documented.
-5. **matchAll empty-match advance** (S3-b residual), the `new
+   across parser/runtime — left documented.
+8. **matchAll empty-match advance** (S3-b residual), the `new
    RegExp("\u{...}").source` decoded-pair normalization quirk, and the
    pre-existing literal-scanner rejection of file-level `/[a[b]/`-shaped
    literals (dynamic forms parse) are untouched.
-6. JIT/B4: all evidence is Mac no-JIT interpreter (below).
+9. JIT/B4: all evidence is Mac no-JIT interpreter (below).
 
 ## JIT (B4)
 
