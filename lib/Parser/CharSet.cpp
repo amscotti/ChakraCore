@@ -992,7 +992,13 @@ namespace UnifiedRegex
         }
         else
         {
-            other.rep.full.direct.CloneFrom(rep.full.direct);
+            // The first-256 direct bitmap is entirely non-surrogate, so the
+            // clone starts empty there; the trie keeps only the surrogate
+            // range. (This function previously cloned the direct bitmap
+            // unfiltered and cleared only [0..0xD7FF] from the trie, which
+            // leaked every unit below 0x100 and above 0xDFFF into the
+            // "surrogate units only" result.)
+            other.rep.full.direct.Clear();
             if (rep.full.root == nullptr)
             {
                 other.rep.full.root = nullptr;
@@ -1001,6 +1007,7 @@ namespace UnifiedRegex
             {
                 other.rep.full.root = rep.full.root->Clone(allocator);
                 other.rep.full.root->ClearRange(allocator, CharSetNode::levels - 1, 0, 0xD7FF);
+                other.rep.full.root->ClearRange(allocator, CharSetNode::levels - 1, 0xE000, 0xFFFF);
             }
         }
     }

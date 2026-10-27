@@ -1812,6 +1812,174 @@ namespace UnifiedRegex
 #endif
 
     // ----------------------------------------------------------------------
+    // MatchCodePointSetNode
+    // ----------------------------------------------------------------------
+
+    CharCount MatchCodePointSetNode::LiteralLength() const
+    {
+        return 0;
+    }
+
+    bool MatchCodePointSetNode::IsCharOrPositiveSet() const
+    {
+        // Not a single-unit set: the concat canonical form (which merges
+        // consecutive unit-set atoms) and the char/trie recognizers must
+        // not treat this node as one.
+        return false;
+    }
+
+    CharCount MatchCodePointSetNode::TransferPass0(Compiler& compiler, const Char* litbuf)
+    {
+        return 0;
+    }
+
+    void MatchCodePointSetNode::TransferPass1(Compiler& compiler, const Char* litbuf)
+    {
+        // Case closure (when effective i applies) was already applied to the
+        // underlying code point set before translation; nothing to do.
+    }
+
+    bool MatchCodePointSetNode::IsRefiningAssertion(Compiler& compiler)
+    {
+        return false;
+    }
+
+    void MatchCodePointSetNode::AnnotatePass0(Compiler& compiler)
+    {
+        if (set.IsEmpty())
+            isWord = false;
+        else
+            isWord = set.IsSubsetOf(*compiler.standardChars->GetWordSet());
+    }
+
+    void MatchCodePointSetNode::AnnotatePass1(Compiler& compiler, bool parentNotInLoop, bool parentAtLeastOnce, bool parentNotSpeculative, bool parentNotNegated)
+    {
+        features = HasMatchSet;
+        // firstUnits is an upper bound on starting units: it contains every
+        // high surrogate when astral members exist, including pairs that are
+        // not members.
+        firstSet = &firstUnits;
+        isFirstExact = numRanges == 0;
+        thisConsumes = CountDomain(1, 2);
+        isThisIrrefutable = false;
+        isThisWillNotProgress = true;
+        isThisWillNotRegress = true;
+        isNotInLoop = parentNotInLoop;
+        isAtLeastOnce = parentAtLeastOnce;
+        isNotSpeculative = parentNotSpeculative;
+        isNotNegated = parentNotNegated;
+    }
+
+    void MatchCodePointSetNode::AnnotatePass2(Compiler& compiler, CountDomain accumConsumes, bool accumPrevWillNotProgress, bool accumPrevWillNotRegress)
+    {
+        prevConsumes = accumConsumes;
+        isPrevWillNotProgress = accumPrevWillNotProgress;
+        isPrevWillNotRegress = accumPrevWillNotRegress;
+    }
+
+    void MatchCodePointSetNode::AnnotatePass3(Compiler& compiler, CountDomain accumConsumes, CharSet<Char>* accumFollow, bool accumFollowIrrefutable, bool accumFollowEOL)
+    {
+        followConsumes = accumConsumes;
+        followSet = accumFollow;
+        isFollowIrrefutable = accumFollowIrrefutable;
+        isFollowEOL = accumFollowEOL;
+    }
+
+    void MatchCodePointSetNode::AnnotatePass4(Compiler& compiler)
+    {
+        isDeterministic = true;
+    }
+
+    bool MatchCodePointSetNode::SupportsPrefixSkipping(Compiler& compiler) const
+    {
+        // The atom consumes 1 or 2 units depending on the input pair, so a
+        // compile-time fixed prefix assumption cannot account for it.
+        return false;
+    }
+
+    Node* MatchCodePointSetNode::HeadSyncronizingNode(Compiler& compiler)
+    {
+        return 0;
+    }
+
+    CharCount MatchCodePointSetNode::MinSyncronizingLiteralLength(Compiler& compiler, int& numLiterals) const
+    {
+        return 0;
+    }
+
+    void MatchCodePointSetNode::CollectSyncronizingLiterals(Compiler& compiler, ScannersMixin& scanners) const
+    {
+        Assert(false);
+    }
+
+    void MatchCodePointSetNode::BestSyncronizingNode(Compiler& compiler, Node*& bestNode)
+    {
+    }
+
+    void MatchCodePointSetNode::AccumDefineGroups(Js::ScriptContext* scriptContext, int& minGroup, int& maxGroup)
+    {
+    }
+
+    void MatchCodePointSetNode::Emit(Compiler& compiler, CharCount& skipped)
+    {
+        if (skipped >= 2)
+        {
+            // Asking to skip the whole (up to 2-unit) atom
+            skipped -= 2;
+            return;
+        }
+
+        //
+        // Compilation scheme:
+        //
+        //   MatchCodePointSet(set, ranges...)
+        //
+
+        skipped -= min(skipped, static_cast<CharCount>(2));
+
+        MatchCodePointSetInst* inst = EMIT(compiler, MatchCodePointSetInst, numRanges);
+        inst->set.CloneFrom(compiler.rtAllocator, set);
+        codepoint_t* emittedRanges = AnewArray(compiler.rtAllocator, codepoint_t, 2 * numRanges);
+        for (int i = 0; i < 2 * numRanges; i++)
+            emittedRanges[i] = ranges[i];
+        inst->ranges = emittedRanges;
+    }
+
+    CharCount MatchCodePointSetNode::EmitScan(Compiler& compiler, bool isHeadSyncronizingNode)
+    {
+        // Unreachable: the node never reports itself as a synchronizing node
+        // (a first-unit sync cannot decide pair membership, so consuming on
+        // sync would accept non-members).
+        Assert(false);
+        return 0;
+    }
+
+    bool MatchCodePointSetNode::IsOctoquad(Compiler& compiler, OctoquadIdentifier* oi)
+    {
+        return false;
+    }
+
+    bool MatchCodePointSetNode::IsCharTrieArm(Compiler& compiler, uint& accNumAlts) const
+    {
+        return false;
+    }
+
+    bool MatchCodePointSetNode::BuildCharTrie(Compiler& compiler, CharTrie* trie, Node* cont, bool isAcceptFirst) const
+    {
+        return false;
+    }
+
+#if ENABLE_REGEX_CONFIG_OPTIONS
+    void MatchCodePointSetNode::Print(DebugWriter* w, const Char* litbuf) const
+    {
+        w->Print(_u("MatchCodePointSet(%d ranges, "), numRanges);
+        set.Print(w);
+        w->PrintEOL(_u(")"));
+        PrintAnnotations(w);
+    }
+#endif
+
+    // ----------------------------------------------------------------------
     // ConcatNode
     // ----------------------------------------------------------------------
 
