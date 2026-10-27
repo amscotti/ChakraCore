@@ -391,8 +391,10 @@ out of scope for this slice.
 
 ## Residuals
 
-1. `v` flag and set notation: entirely unimplemented (rejected as today);
-   `generated/strings/**` keeps failing. Next S3 slice.
+1. `v` flag and set notation were unimplemented in this slice and are
+   **superseded by S3-b** (merge `dd60bdadd`,
+   [c2-s3-v-flag.md](c2-s3-v-flag.md)); the 14 `generated/strings`
+   scenarios now pass with the `v` implementation.
 2. ICU 79.1 data vs the pinned corpus's newer generated tables: 56
    generated files fail on scripts/assignments the ICU build does not know
    (observed drift traits above; exact Unicode versions deliberately not
@@ -410,10 +412,11 @@ out of scope for this slice.
    Bun identically; a class that never closes is a SyntaxError everywhere.
    No known divergence remains here (an earlier draft of this receipt
    misattributed a missing-`]` error to the escape).
-5. Pre-existing, untouched: `[^]` u-mode behavior change noted above
+5. Pre-existing, untouched by S3-a: `[^]` u-mode behavior change noted above
    (spec-correct now); `[^\u{10000}-\u{10FFFF}]`-style BMP-only complements
-   still double-negate (pre-existing corner, preserved verbatim);
-   `{`-as-literal leniency in u mode; named-groups symbols-flag residue.
+   were later fixed by S3-b's final review repair (`d6d2bc1eb`);
+   `{`-as-literal leniency in u mode and the named-groups symbols-flag
+   residue remain.
 6. ~~Perf: exponential backtracking on quantified complement sets~~ —
    **fixed** by the deterministic whole-code-point-set matcher (see "Perf
    repair" above); the former 96 corpus timeouts now complete instantly

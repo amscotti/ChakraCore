@@ -1,10 +1,10 @@
 # C2-S3-b: RegExp `v` flag (Unicode sets)
 
-Status: **pending review** — implementation plus the combined
-general+adversarial review repairs (second commit on the branch, on top
-of `7bd66a59d`; branch `s3-v-flag`, base `0a5006399`); focused test green on
-both profiles and all launch variants; pinned corpus and adjacent controls
-below.
+Status: **landed** — implementation `7bd66a59d`; review repairs `aadf5aa88`,
+`ce0ba752a`, and final `d6d2bc1eb`; merge `dd60bdadd`. Final full gates are
+**2024/0 test** and **2076/0 debug-static** (`zig build check` **583/583**).
+The final focused file is **33 groups / 560 assertions**; earlier assertion
+counts below are retained only as review-iteration history.
 
 ## Scope
 
@@ -521,7 +521,8 @@ two divergences recorded under Residuals):
 
 ## JIT (B4)
 
-All evidence is Mac no-JIT interpreter. The slice adds no JS bytecode and
-no regex instruction; B4 must still run the focused test, the v corpus and
-the adjacent RegExp corpora under SimpleJIT/FullJIT (dynapogo) before any
-JIT-configuration claim, per the standing C2 policy.
+All evidence is Mac no-JIT interpreter. The slice adds no JS bytecode but
+does add one fixed-size regex instruction, `MatchLiteralCanonical`, for
+simple-case-folded string members. B4 must still run the focused test, the
+v corpus and the adjacent RegExp corpora under SimpleJIT/FullJIT (dynapogo)
+before any JIT-configuration claim, per the standing C2 policy.
