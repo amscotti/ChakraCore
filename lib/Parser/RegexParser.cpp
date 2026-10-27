@@ -109,6 +109,42 @@ namespace UnifiedRegex
     template <typename P, const bool IsLiteral>
     const CharCount Parser<P, IsLiteral>::initLitbufSize;
 
+    namespace VDetail
+    {
+        inline bool IsReservedPunctuatorChar(char16 c)
+        {
+            switch (c)
+            {
+                case '&': case '!': case '#': case '$': case '%': case '*':
+                case '+': case ',': case '.': case ':': case ';': case '<':
+                case '=': case '>': case '?': case '@': case '`': case '~':
+                case '^':
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        inline bool IsHighSurrogateUnit(char16 c) { return c >= 0xD800 && c <= 0xDBFF; }
+        inline bool IsLowSurrogateUnit(char16 c) { return c >= 0xDC00 && c <= 0xDFFF; }
+        inline codepoint_t SurrogatePairToCodePoint(char16 high, char16 low)
+        {
+            return 0x10000 + ((high - 0xD800) << 10) + (low - 0xDC00);
+        }
+        inline bool IsClassSetSyntaxChar(char16 c)
+        {
+            switch (c)
+            {
+                case '(': case ')': case '[': case ']': case '{': case '}':
+                case '-': case '/': case '|':
+                    return true;
+                default:
+                    return false;
+            }
+        }
+    }
+
+
     ParseError::ParseError(bool isBody, CharCount pos, CharCount encodedPos, HRESULT error)
         : isBody(isBody), pos(pos), encodedPos(encodedPos), error(error)
     {
@@ -175,6 +211,19 @@ namespace UnifiedRegex
         , valueOfLastSurrogate(INVALID_CODEPOINT)
         , deferredIfNotUnicodeError(nullptr)
         , deferredIfUnicodeError(nullptr)
+        , deferredIfUnicodeSetsError(nullptr)
+        , deferredIfUnicodeNoSetsError(nullptr)
+        , unicodeSetsFlagPresent(false)
+        , vStringBuffer(nullptr)
+        , vStringBufLen(0)
+        , vStringBufNext(0)
+        , vStringBufCap(0)
+        , vScratchCps(nullptr)
+        , vScratchCpsCap(0)
+        , vScratchUnits(nullptr)
+        , vScratchUnitsLen(0)
+        , vScratchUnitsCap(0)
+        , vLastScanIsStringProperty(false)
     {
         this->SetIsUtf8(isUtf8);
     }
@@ -473,14 +522,14 @@ namespace UnifiedRegex
         }
 
         ECConsume(); // p/P
-        ScanPropertyEscapeBodyPass0();
+        ScanPropertyEscapeBodyPass0(/*isNegation*/ ECLookback(1) == 'P');
     }
 
     // Shared pass 0 tail for the atom context (which consumed p/P through
     // ScanPropertyEscapePass0) and the class context (whose ClassEscapePass0
     // switch already consumed p/P through NextChar). Cursor is at '{'.
     template <typename P, const bool IsLiteral>
-    void Parser<P, IsLiteral>::ScanPropertyEscapeBodyPass0()
+    void Parser<P, IsLiteral>::ScanPropertyEscapeBodyPass0(bool isNegation)
     {
         Assert(ECLookahead() == '{');
 
@@ -496,6 +545,7 @@ namespace UnifiedRegex
         char16 value[propertyEscapeMaxNameLen];
         CharCount nameLen, valueLen;
         bool hasValue;
+        this->vLastScanIsStringProperty = false;
         bool structural = ScanPropertyEscapeBody(name, nameLen, value, valueLen, hasValue);
         if (!structural)
         {
@@ -515,6 +565,23 @@ namespace UnifiedRegex
             next = escapeStart;
             DeferredFailIfUnicode(JSERR_RegExpSyntax);
             next = savedNext;
+            return;
+        }
+        // Properties of strings are valid only under the v flag: \P{...} of
+        // one is a SyntaxError under every unicode mode (the complement of a
+        // set that may contain strings is not expressible), while \p{...} of
+        // one is a SyntaxError under plain u. Both fire after the flags are
+        // known; under v the \P form is additionally the v-class rule.
+        if (UnicodeProperty::IsStringProperty(resolved))
+        {
+            const EncodedChar* savedNext = next;
+            next = escapeStart;
+            if (isNegation)
+                DeferredFailIfUnicode(JSERR_RegExpSyntax);
+            else
+                DeferredFailIfUnicodeNoSets(JSERR_RegExpSyntax);
+            next = savedNext;
+            this->vLastScanIsStringProperty = true;
         }
     }
 
@@ -537,6 +604,66 @@ namespace UnifiedRegex
         UnicodeProperty::Resolved resolved;
         if (!UnicodeProperty::Resolve(name, nameLen, value, valueLen, hasValue, &resolved))
             Fail(JSERR_RegExpSyntax);
+
+        // Property of strings (v mode only): an alternation of the string
+        // members (longest first) and the code point part, built exactly like
+        // a v-mode class operand. \P is rejected (pass 0 deferred it).
+        if (UnicodeProperty::IsStringProperty(resolved))
+        {
+            if (isNegation)
+                Fail(JSERR_RegExpSyntax);
+
+            VCSet set;
+            VInitSet(set);
+            struct Collector : UnicodeProperty::StringCollector
+            {
+                Parser* parser;
+                VCSet* set;
+                virtual void Add(const char16* s, int32 len) override
+                {
+                    CharCount cps = 0;
+                    for (int32 i = 0; i < len; )
+                    {
+                        if (i + 1 < len && VDetail::IsHighSurrogateUnit(s[i]) && VDetail::IsLowSurrogateUnit(s[i + 1]))
+                            i += 2;
+                        else
+                            i += 1;
+                        cps++;
+                    }
+                    if (cps > parser->vScratchCpsCap)
+                    {
+                        CharCount newCap = parser->vScratchCpsCap == 0 ? 16 : parser->vScratchCpsCap;
+                        while (cps > newCap)
+                            newCap *= 2;
+                        codepoint_t* newList = AnewArray(parser->ctAllocator, codepoint_t, newCap);
+                        for (CharCount i = 0; i < cps; i++)
+                            newList[i] = 0;
+                        parser->vScratchCps = newList;
+                        parser->vScratchCpsCap = newCap;
+                    }
+                    CharCount n = 0;
+                    for (int32 i = 0; i < len; )
+                    {
+                        if (i + 1 < len && VDetail::IsHighSurrogateUnit(s[i]) && VDetail::IsLowSurrogateUnit(s[i + 1]))
+                        {
+                            parser->vScratchCps[n++] = VDetail::SurrogatePairToCodePoint(s[i], s[i + 1]);
+                            i += 2;
+                        }
+                        else
+                        {
+                            parser->vScratchCps[n++] = s[i];
+                            i += 1;
+                        }
+                    }
+                    parser->VAddStringFromCodePoints(*set, parser->vScratchCps, n);
+                }
+            } collector;
+            collector.parser = this;
+            collector.set = &set;
+            if (!UnicodeProperty::BuildStringPropertySet(resolved, ctAllocator, set.cp, &collector))
+                Fail(JSERR_RegExpSyntax); // ICU failed
+            return VBuildNode(set, /*negation*/ false);
+        }
 
         CharSet<codepoint_t> codePointSet;
         if (!UnicodeProperty::BuildCodePointSet(resolved, ctAllocator, codePointSet))
@@ -691,6 +818,1462 @@ namespace UnifiedRegex
     }
 
     //
+    // v flag (ES2024 Unicode sets) character classes.
+    //
+    // Grammar (validated in pass 0 with deferred-if-v errors, parsed and
+    // compiled in pass 1 when the v flag is known), per the ES2024 spec and
+    // the Node 26.5.0/Bun 1.4.3 oracles:
+    //
+    //   VClass     ::= '[' '^'? ( VExpr | empty ) ']'
+    //   VExpr      ::= firstItem then a sequence of:
+    //                  - juxtaposed items (union), or
+    //                  - ('--' | '&&') operand chains (one operator kind
+    //                    only, left-associative; ranges and multi-item
+    //                    unions cannot be chain operands, and no union item
+    //                    may follow a chain).
+    //   VItem      ::= VOperand | singleton '-' singleton   (range)
+    //   VOperand   ::= raw char | singleton escape | '\d'&co | '\p{'... |
+    //                  '\q{'... | nested VClass
+    //
+    // Plus the reserved-double-punctuator rule (two adjacent unescaped
+    // occurrences of any of & ! # $ % * + , . : ; < = > ? @ ` ~ ^, including
+    // inside \q bodies and nested classes, unless the pair is the '&&'/'--'
+    // operator itself), the ClassSetSyntaxCharacter escaping rule
+    // ( ( ) [ ] { } - / | must be escaped inside classes and \q bodies), and
+    // the negation early error (a '^' class whose contents MayContainStrings).
+    //
+
+    template <typename P, const bool IsLiteral>
+    void Parser<P, IsLiteral>::VInitSet(VCSet& set)
+    {
+        set.strings = nullptr;
+        set.numStrings = 0;
+        set.stringsCap = 0;
+        set.containsEmptyString = false;
+        set.mayContainStrings = false;
+        set.isRange = false;
+    }
+
+    template <typename P, const bool IsLiteral>
+    void Parser<P, IsLiteral>::VEnsureStringCap(VCSet& set, int additional)
+    {
+        if (set.numStrings + additional <= set.stringsCap)
+            return;
+        int newCap = set.stringsCap == 0 ? 8 : set.stringsCap;
+        while (set.numStrings + additional > newCap)
+            newCap *= 2;
+        VString* newList = AnewArray(ctAllocator, VString, newCap);
+        for (int i = 0; i < set.numStrings; i++)
+            newList[i] = set.strings[i];
+        set.strings = newList;
+        set.stringsCap = newCap;
+    }
+
+    // Appends chars to the shared string buffer, growing it (ctAllocator),
+    // and returns the start offset of the appended run.
+    template <typename P, const bool IsLiteral>
+    CharCount Parser<P, IsLiteral>::VAppendStringChars(const Char* chars, CharCount len)
+    {
+        if (vStringBufNext + len > vStringBufCap)
+        {
+            CharCount newCap = vStringBufCap == 0 ? 32 : vStringBufCap;
+            while (vStringBufNext + len > newCap)
+                newCap *= 2;
+            Char* newBuf = AnewArray(ctAllocator, Char, newCap);
+            if (vStringBuffer != nullptr)
+            {
+                for (CharCount i = 0; i < vStringBufNext; i++)
+                    newBuf[i] = vStringBuffer[i];
+            }
+            vStringBuffer = newBuf;
+            vStringBufCap = newCap;
+        }
+        CharCount at = vStringBufNext;
+        for (CharCount i = 0; i < len; i++)
+            vStringBuffer[vStringBufNext + i] = chars[i];
+        vStringBufNext += len;
+        return at;
+    }
+
+    template <typename P, const bool IsLiteral>
+    void Parser<P, IsLiteral>::VAddStringRaw(VCSet& set, const Char* chars, CharCount unitLen, CharCount cpLen)
+    {
+        if (cpLen == 0)
+        {
+            set.containsEmptyString = true;
+            set.mayContainStrings = true;
+            return;
+        }
+        VEnsureStringCap(set, 1);
+        CharCount at = VAppendStringChars(chars, unitLen);
+        set.strings[set.numStrings].chars = vStringBuffer + at;
+        set.strings[set.numStrings].unitLen = unitLen;
+        set.strings[set.numStrings].cpLen = cpLen;
+        set.numStrings++;
+        set.mayContainStrings = true;
+    }
+
+    // Adds one string member given as code points, applying the
+    // single-code-point folding (into the code point set) and, under the
+    // effective i state, per-code-point canonicalization so the set
+    // operations compare canonical forms (Node-verified behavior).
+    template <typename P, const bool IsLiteral>
+    void Parser<P, IsLiteral>::VAddStringFromCodePoints(VCSet& set, const codepoint_t* cps, CharCount numCps)
+    {
+        if (numCps == 1)
+        {
+            VAddCodePoint(set, cps[0]);
+            return;
+        }
+        if (numCps == 0)
+        {
+            set.containsEmptyString = true;
+            set.mayContainStrings = true;
+            return;
+        }
+        // Canonicalize each code point, then encode to UTF-16 in a scratch
+        // buffer (a canonicalized code point never changes unit count).
+        CharCount needed = 0;
+        for (CharCount i = 0; i < numCps; i++)
+            needed += cps[i] >= 0x10000 ? 2 : 1;
+        if (needed > vScratchUnitsCap)
+        {
+            CharCount newCap = vScratchUnitsCap == 0 ? 32 : vScratchUnitsCap;
+            while (needed > newCap)
+                newCap *= 2;
+            Char* newBuf = AnewArray(ctAllocator, Char, newCap);
+            if (vScratchUnits != nullptr)
+            {
+                for (CharCount i = 0; i < vScratchUnitsLen; i++)
+                    newBuf[i] = vScratchUnits[i];
+            }
+            vScratchUnits = newBuf;
+            vScratchUnitsCap = newCap;
+        }
+        CharCount units = 0;
+        for (CharCount i = 0; i < numCps; i++)
+        {
+            codepoint_t cp = cps[i];
+            if (caseInsensitiveFlagPresent)
+                cp = VCanonicalizeCodePoint(cp);
+            if (cp < 0x10000)
+            {
+                vScratchUnits[units++] = (Char)cp;
+            }
+            else
+            {
+                char16 first, second;
+                Js::NumberUtilities::CodePointAsSurrogatePair(cp, &first, &second);
+                vScratchUnits[units++] = first;
+                vScratchUnits[units++] = second;
+            }
+        }
+        vScratchUnitsLen = units;
+        VAddStringRaw(set, vScratchUnits, units, numCps);
+    }
+
+    template <typename P, const bool IsLiteral>
+    void Parser<P, IsLiteral>::VAddCodePoint(VCSet& set, codepoint_t cp)
+    {
+        if (caseInsensitiveFlagPresent)
+            cp = VCanonicalizeCodePoint(cp);
+        set.cp.Set(ctAllocator, cp);
+    }
+
+    // Canonicalization for one code point under the effective i state: the
+    // representative of its case-equivalence class, matching how the runtime
+    // matches case-insensitive literals/backreferences under u/v programs.
+    template <typename P, const bool IsLiteral>
+    codepoint_t Parser<P, IsLiteral>::VCanonicalizeCodePoint(codepoint_t cp) const
+    {
+        if (cp < 0x10000)
+            return standardChars->ToCanonical(CaseInsensitive::MappingSource::CaseFolding, (Char)cp);
+        uint tableIndex = 0, actualHigh = 0;
+        codepoint_t equivClass[CaseInsensitive::EquivClassSize];
+        if (CaseInsensitive::RangeToEquivClass(tableIndex, cp, cp, actualHigh, equivClass))
+            return equivClass[0];
+        return cp;
+    }
+
+    template <typename P, const bool IsLiteral>
+    /*static*/ bool Parser<P, IsLiteral>::VStringEq(const VString& a, const VString& b)
+    {
+        if (a.unitLen != b.unitLen)
+            return false;
+        for (uint32 i = 0; i < a.unitLen; i++)
+        {
+            if (a.chars[i] != b.chars[i])
+                return false;
+        }
+        return true;
+    }
+
+    template <typename P, const bool IsLiteral>
+    /*static*/ int Parser<P, IsLiteral>::VStringLexCmp(const void* pa, const void* pb)
+    {
+        const VString& a = *static_cast<const VString*>(pa);
+        const VString& b = *static_cast<const VString*>(pb);
+        if (a.unitLen != b.unitLen)
+            return a.unitLen < b.unitLen ? -1 : 1;
+        for (uint32 i = 0; i < a.unitLen; i++)
+        {
+            if (a.chars[i] != b.chars[i])
+                return a.chars[i] < b.chars[i] ? -1 : 1;
+        }
+        return 0;
+    }
+
+    template <typename P, const bool IsLiteral>
+    void Parser<P, IsLiteral>::VSortStringsLex(VString* strings, int n)
+    {
+        if (n > 1)
+            qsort(strings, (size_t)n, sizeof(VString), &Parser<P, IsLiteral>::VStringLexCmp);
+    }
+
+    // acc OP rhs over both components: code points via range arithmetic,
+    // strings via exact (already canonicalized) comparison. MayContainStrings
+    // keeps the spec's conservative static semantics: a difference keeps the
+    // left side's flag, an intersection is the conjunction of both.
+    template <typename P, const bool IsLiteral>
+    void Parser<P, IsLiteral>::VApplyOp(VCSet& acc, VCSet& rhs, bool isDifference)
+    {
+        // Code points
+        CharSet<codepoint_t> out;
+        if (isDifference)
+        {
+            codepoint_t aLo = 0, aHi = 0;
+            codepoint_t search = 0;
+            while (acc.cp.GetNextRange(search, &aLo, &aHi))
+            {
+                search = aHi + 1;
+                // Subtract every rhs range overlapping [aLo, aHi]
+                codepoint_t cursor = aLo;
+                codepoint_t bLo = 0, bHi = 0;
+                codepoint_t bSearch = 0;
+                while (rhs.cp.GetNextRange(bSearch, &bLo, &bHi))
+                {
+                    bSearch = bHi + 1;
+                    if (bHi < cursor)
+                        continue;
+                    if (bLo > aHi)
+                        break;
+                    if (bLo > cursor)
+                        out.SetRange(ctAllocator, cursor, bLo - 1);
+                    cursor = bHi < aHi ? bHi + 1 : aHi + 1;
+                    if (cursor > aHi)
+                        break;
+                }
+                if (cursor <= aHi)
+                    out.SetRange(ctAllocator, cursor, aHi);
+            }
+        }
+        else
+        {
+            codepoint_t aLo = 0, aHi = 0;
+            codepoint_t search = 0;
+            while (acc.cp.GetNextRange(search, &aLo, &aHi))
+            {
+                search = aHi + 1;
+                codepoint_t bLo = 0, bHi = 0;
+                codepoint_t bSearch = 0;
+                while (rhs.cp.GetNextRange(bSearch, &bLo, &bHi))
+                {
+                    bSearch = bHi + 1;
+                    if (bHi < aLo)
+                        continue;
+                    if (bLo > aHi)
+                        break;
+                    out.SetRange(ctAllocator, max(aLo, bLo), min(aHi, bHi));
+                }
+            }
+        }
+        acc.cp.Clear(ctAllocator);
+        acc.cp.CloneFrom(ctAllocator, out);
+        out.FreeBody(ctAllocator);
+
+        // Strings
+        if (isDifference)
+        {
+            if (rhs.numStrings > 0 && acc.numStrings > 0)
+            {
+                VSortStringsLex(acc.strings, acc.numStrings);
+                VSortStringsLex(rhs.strings, rhs.numStrings);
+                int outCount = 0;
+                int j = 0;
+                for (int i = 0; i < acc.numStrings; i++)
+                {
+                    while (j < rhs.numStrings && VStringLexCmp(&rhs.strings[j], &acc.strings[i]) < 0)
+                        j++;
+                    if (j < rhs.numStrings && VStringEq(rhs.strings[j], acc.strings[i]))
+                        continue; // removed
+                    acc.strings[outCount++] = acc.strings[i];
+                }
+                acc.numStrings = outCount;
+            }
+            if (rhs.containsEmptyString)
+                acc.containsEmptyString = false;
+            // mayContainStrings keeps the left side's flag (spec semantics)
+        }
+        else
+        {
+            if (acc.numStrings > 0 && rhs.numStrings > 0)
+            {
+                VSortStringsLex(acc.strings, acc.numStrings);
+                VSortStringsLex(rhs.strings, rhs.numStrings);
+                int outCount = 0;
+                int j = 0;
+                for (int i = 0; i < acc.numStrings; i++)
+                {
+                    while (j < rhs.numStrings && VStringLexCmp(&rhs.strings[j], &acc.strings[i]) < 0)
+                        j++;
+                    if (j < rhs.numStrings && VStringEq(rhs.strings[j], acc.strings[i]))
+                        acc.strings[outCount++] = acc.strings[i];
+                }
+                acc.numStrings = outCount;
+            }
+            else
+            {
+                acc.numStrings = 0;
+            }
+            acc.containsEmptyString = acc.containsEmptyString && rhs.containsEmptyString;
+            acc.mayContainStrings = acc.mayContainStrings && rhs.mayContainStrings;
+        }
+    }
+
+    template <typename P, const bool IsLiteral>
+    void Parser<P, IsLiteral>::VUnionInPlace(VCSet& acc, VCSet& rhs)
+    {
+        acc.cp.UnionInPlace(ctAllocator, rhs.cp);
+        VEnsureStringCap(acc, rhs.numStrings);
+        for (int i = 0; i < rhs.numStrings; i++)
+            acc.strings[acc.numStrings++] = rhs.strings[i];
+        acc.containsEmptyString = acc.containsEmptyString || rhs.containsEmptyString;
+        acc.mayContainStrings = acc.mayContainStrings || rhs.mayContainStrings;
+    }
+
+    // ---------------------------------------------------------------------------
+    // Pass 0 validation (deferred-if-v errors; cursor is fully restored)
+    // ---------------------------------------------------------------------------
+
+    template <typename P, const bool IsLiteral>
+    void Parser<P, IsLiteral>::VClassPass0()
+    {
+        const EncodedChar* savedNext = next;
+        const size_t savedMultiUnits = this->GetMultiUnits();
+        bool mayContainStrings = false;
+        VValidateClass(mayContainStrings);
+        next = savedNext;
+        this->RestoreMultiUnits(savedMultiUnits);
+    }
+
+    // Cursor just after '[' (the '^' not yet consumed).
+    template <typename P, const bool IsLiteral>
+    void Parser<P, IsLiteral>::VValidateClass(bool& mayContainStrings)
+    {
+        mayContainStrings = false;
+        if (IsEOF() || ECLookahead() == 0)
+        {
+            DeferredFailIfUnicodeSets(JSERR_RegExpNoBracket);
+            return;
+        }
+        bool negation = false;
+        if (ECLookahead() == '^')
+        {
+            negation = true;
+            ECConsume();
+        }
+        if (ECLookahead() == ']')
+            return; // empty class
+        VValidateExpr(mayContainStrings);
+        if (negation && mayContainStrings)
+        {
+            // Negated character class may contain strings (ES2024 early
+            // error; the static MayContainStrings is conservative).
+            DeferredFailIfUnicodeSets(JSERR_RegExpSyntax);
+        }
+    }
+
+    template <typename P, const bool IsLiteral>
+    void Parser<P, IsLiteral>::VValidateExpr(bool& mayContainStrings)
+    {
+        mayContainStrings = false;
+        int unionItems = 0;      // plain union items parsed before any operator
+        bool sawRange = false;   // a range among them
+        char chainOp = 0;
+
+        // First item
+        bool itemMcs = false;
+        bool isRange = false;
+        VValidateItem(itemMcs, isRange);
+        mayContainStrings = itemMcs;
+        sawRange = isRange;
+
+        while (true)
+        {
+            if (IsEOF() || ECLookahead() == 0 || ECLookahead() == ']')
+            {
+                if (ECLookahead() != ']')
+                    DeferredFailIfUnicodeSets(JSERR_RegExpNoBracket);
+                return;
+            }
+            bool isAndOp = ECLookahead() == '&' && ECLookahead(1) == '&';
+            bool isDiffOp = ECLookahead() == '-' && ECLookahead(1) == '-';
+            if (isAndOp || isDiffOp)
+            {
+                if (unionItems != 0 || sawRange || (chainOp != 0 && chainOp != (isAndOp ? '&' : '-')))
+                {
+                    // A multi-item union or a range cannot be the left side
+                    // of a set operation, and the two operators cannot mix:
+                    // nest a class instead (V8/JSC-observed grammar).
+                    DeferredFailIfUnicodeSets(JSERR_RegExpSyntax);
+                    return;
+                }
+                chainOp = isAndOp ? '&' : '-';
+                ECConsume(2);
+                bool rhsMcs = false;
+                VValidateEscape(rhsMcs);
+                // A range cannot be the right operand of a set operation:
+                // '-' followed by an operand start. ('--' was consumed above
+                // as the operator chain continuation; a trailing '-' before
+                // ']' is reported by the next item scan.)
+                if (ECLookahead() == '-' && ECLookahead(1) != ']' && ECLookahead(1) != '-' && ECLookahead(1) != 0)
+                {
+                    DeferredFailIfUnicodeSets(JSERR_UnicodeRegExpRangeContainsCharClass);
+                    return;
+                }
+                if (chainOp == '&')
+                    mayContainStrings = mayContainStrings && rhsMcs;
+                // '-' keeps the left side's flag
+                continue;
+            }
+            if (chainOp != 0)
+            {
+                // Juxtaposed item after a set-operation chain.
+                DeferredFailIfUnicodeSets(JSERR_RegExpSyntax);
+                return;
+            }
+            VValidateItem(itemMcs, isRange);
+            mayContainStrings = mayContainStrings || itemMcs;
+            sawRange = sawRange || isRange;
+            unionItems++;
+        }
+    }
+
+    // Validates one item (operand or range). Sets isRange.
+    template <typename P, const bool IsLiteral>
+    void Parser<P, IsLiteral>::VValidateItem(bool& mayContainStrings, bool& isRange)
+    {
+        isRange = false;
+        bool isSetValued = false;
+        bool isSingleton = false;
+        VValidateEscape(mayContainStrings, isSingleton, isSetValued);
+        // Range? '-' followed by an operand start (not ']', not the '--'
+        // operator, not EOF).
+        if (ECLookahead() == '-' && ECLookahead(1) != ']' && ECLookahead(1) != '-' && ECLookahead(1) != 0)
+        {
+            if (isSetValued)
+            {
+                DeferredFailIfUnicodeSets(JSERR_UnicodeRegExpRangeContainsCharClass);
+                return;
+            }
+            ECConsume(); // -
+            bool rhsMcs = false, rhsSingleton = false, rhsSetValued = false;
+            VValidateEscape(rhsMcs, rhsSingleton, rhsSetValued);
+            if (rhsSetValued)
+            {
+                DeferredFailIfUnicodeSets(JSERR_UnicodeRegExpRangeContainsCharClass);
+                return;
+            }
+            isRange = true;
+        }
+    }
+
+    // Validates one operand starting at the cursor: a raw character, a
+    // nested class, or an escape. Reports the v-specific deferred errors
+    // (reserved punctuator pairs, unescaped syntax characters, \q bodies)
+    // and delegates property-name validation to the shared pass 0 property
+    // scanner. Outputs: isSingleton (single code point), isSetValued
+    // (\d&co, \p{...}, nested class, \q{...}).
+    template <typename P, const bool IsLiteral>
+    void Parser<P, IsLiteral>::VValidateEscape(bool& mayContainStrings)
+    {
+        bool isSingleton = false;
+        bool isSetValued = false;
+        VValidateEscape(mayContainStrings, isSingleton, isSetValued);
+    }
+
+    template <typename P, const bool IsLiteral>
+    void Parser<P, IsLiteral>::VValidateEscape(bool& mayContainStrings, bool& isSingleton, bool& isSetValued)
+    {
+        isSingleton = false;
+        isSetValued = false;
+        if (IsEOF() || ECLookahead() == 0)
+        {
+            DeferredFailIfUnicodeSets(JSERR_RegExpNoBracket);
+            return;
+        }
+        EncodedChar ec = ECLookahead();
+        if (ec == '\\')
+        {
+            ECConsume();
+            if (IsEOF() || ECLookahead() == 0)
+            {
+                DeferredFailIfUnicodeSets(JSERR_RegExpNoBracket);
+                return;
+            }
+            Char c = Chars<EncodedChar>::CTW(ECLookahead());
+            switch (c)
+            {
+                case 'q':
+                    ECConsume(); // q
+                    if (ECLookahead() == '{')
+                    {
+                        VValidateQBody(mayContainStrings);
+                        isSetValued = true;
+                        return;
+                    }
+                    DeferredFailIfUnicodeSets(JSERR_RegExpInvalidEscape);
+                    return;
+                case 'p':
+                case 'P':
+                    ECConsume(); // p/P
+                    if (ECLookahead() == '{')
+                    {
+                        ScanPropertyEscapeBodyPass0(/*isNegation*/ c == 'P');
+                        mayContainStrings = mayContainStrings || this->vLastScanIsStringProperty;
+                        isSetValued = true;
+                        return;
+                    }
+                    DeferredFailIfUnicodeSets(JSERR_RegExpInvalidEscape);
+                    return;
+                case 'd': case 'D': case 's': case 'S': case 'w': case 'W':
+                    ECConsume();
+                    isSetValued = true;
+                    return;
+                case 'f': case 'n': case 'r': case 't': case 'v': case 'b': case '0':
+                    ECConsume();
+                    isSingleton = true;
+                    return;
+                case 'c':
+                    ECConsume();
+                    if (!IsEOF() && ECLookahead() != 0 && standardEncodedChars->IsLetter(ECLookahead()))
+                        ECConsume();
+                    isSingleton = true;
+                    return;
+                case 'x':
+                    ECConsume();
+                    if (ECCanConsume(2) && standardEncodedChars->IsHex(ECLookahead(0)) && standardEncodedChars->IsHex(ECLookahead(1)))
+                        ECConsume(2);
+                    isSingleton = true;
+                    return;
+                case 'u':
+                {
+                    ECConsume(); // u
+                    if (ECCanConsume(1) && ECLookahead(0) == '{')
+                    {
+                        // Scan the braced escape inline: the shared
+                        // TryParseExtendedUnicodeEscape helper implements a
+                        // two-call unit-splitting dance for astral code
+                        // points that rewinds the cursor, which is wrong for
+                        // this validation-only scan.
+                        ECConsume(); // {
+                        CharCount digits = 0;
+                        while (!IsEOF() && ECLookahead() != 0 && standardEncodedChars->IsHex(ECLookahead()))
+                        {
+                            ECConsume();
+                            digits++;
+                        }
+                        if (digits == 0 || IsEOF() || ECLookahead() != '}')
+                        {
+                            DeferredFailIfUnicodeSets(JSERR_RegExpSyntax);
+                            return;
+                        }
+                        ECConsume(); // }
+                    }
+                    else if (ECCanConsume(4) &&
+                        standardEncodedChars->IsHex(ECLookahead(0)) && standardEncodedChars->IsHex(ECLookahead(1)) &&
+                        standardEncodedChars->IsHex(ECLookahead(2)) && standardEncodedChars->IsHex(ECLookahead(3)))
+                    {
+                        ECConsume(4);
+                    }
+                    isSingleton = true;
+                    return;
+                }
+                default:
+                    if (standardEncodedChars->IsDigit(ECLookahead()))
+                    {
+                        // Octal escapes (other than \0, handled above) are
+                        // rejected under v. Consume first: a validation-only
+                        // scan must never leave the cursor in place.
+                        ECConsume();
+                        DeferredFailIfUnicodeSets(JSERR_RegExpInvalidEscape);
+                        return;
+                    }
+                    // Identity escape of a non-digit character: v keeps the
+                    // u-mode class policy (punctuation yes; letters and
+                    // other IDContinue characters are left to the shared
+                    // u-mode deferred machinery).
+                    ECConsume();
+                    isSingleton = true;
+                    return;
+            }
+        }
+        if (ec == '[')
+        {
+            ECConsume();
+            bool innerMcs = false;
+            VValidateClass(innerMcs);
+            mayContainStrings = mayContainStrings || innerMcs;
+            isSetValued = true;
+            return;
+        }
+        // Raw character. ']' here means an operand was expected (the
+        // expression loops break on ']' before reaching this). All error
+        // paths consume the offending character first: this is a
+        // validation-only scan, and leaving the cursor in place would loop.
+        Char c = NextChar();
+        if (VDetail::IsClassSetSyntaxChar(c) && c != '[')
+        {
+            DeferredFailIfUnicodeSets(JSERR_RegExpSyntax);
+            return;
+        }
+        if (VDetail::IsReservedPunctuatorChar(c) && !IsEOF() && ECLookahead() != 0 &&
+            Chars<EncodedChar>::CTW(ECLookahead()) == c)
+        {
+            DeferredFailIfUnicodeSets(JSERR_RegExpSyntax);
+            ECConsume(); // the pair partner
+            return;
+        }
+        isSingleton = true;
+    }
+
+    // Cursor at '{' of a \q{...} escape ('q' consumed).
+    template <typename P, const bool IsLiteral>
+    void Parser<P, IsLiteral>::VValidateQBody(bool& mayContainStrings)
+    {
+        Assert(ECLookahead() == '{');
+        ECConsume(); // {
+        int altCodePoints = 0;
+        while (true)
+        {
+            if (IsEOF() || ECLookahead() == 0)
+            {
+                DeferredFailIfUnicodeSets(JSERR_RegExpSyntax);
+                return;
+            }
+            EncodedChar ec = ECLookahead();
+            if (ec == '}')
+            {
+                ECConsume();
+                if (altCodePoints != 1)
+                    mayContainStrings = true;
+                return;
+            }
+            if (ec == '|')
+            {
+                ECConsume();
+                if (altCodePoints != 1)
+                    mayContainStrings = true;
+                altCodePoints = 0;
+                continue;
+            }
+            if (ec == '\\')
+            {
+                ECConsume();
+                if (IsEOF() || ECLookahead() == 0)
+                {
+                    DeferredFailIfUnicodeSets(JSERR_RegExpSyntax);
+                    return;
+                }
+                Char c = Chars<EncodedChar>::CTW(ECLookahead());
+                switch (c)
+                {
+                    case 'f': case 'n': case 'r': case 't': case 'v': case 'b': case '0':
+                        ECConsume();
+                        altCodePoints++;
+                        continue;
+                    case 'c':
+                        ECConsume();
+                        if (!IsEOF() && ECLookahead() != 0 && standardEncodedChars->IsLetter(ECLookahead()))
+                        {
+                            ECConsume();
+                            altCodePoints++;
+                            continue;
+                        }
+                        DeferredFailIfUnicodeSets(JSERR_RegExpInvalidEscape);
+                        return;
+                    case 'x':
+                        ECConsume();
+                        if (ECCanConsume(2) && standardEncodedChars->IsHex(ECLookahead(0)) && standardEncodedChars->IsHex(ECLookahead(1)))
+                        {
+                            ECConsume(2);
+                            altCodePoints++;
+                            continue;
+                        }
+                        DeferredFailIfUnicodeSets(JSERR_RegExpInvalidEscape);
+                        return;
+                    case 'u':
+                    {
+                        ECConsume();
+                        if (ECCanConsume(1) && ECLookahead(0) == '{')
+                        {
+                            // Scan the braced escape inline (see the
+                            // operand validator: the shared helper rewinds
+                            // for astral code points).
+                            ECConsume(); // {
+                            CharCount digits = 0;
+                            while (!IsEOF() && ECLookahead() != 0 && standardEncodedChars->IsHex(ECLookahead()))
+                            {
+                                ECConsume();
+                                digits++;
+                            }
+                            if (digits == 0 || IsEOF() || ECLookahead() != '}')
+                            {
+                                DeferredFailIfUnicodeSets(JSERR_RegExpSyntax);
+                                return;
+                            }
+                            ECConsume(); // }
+                            altCodePoints++;
+                            continue;
+                        }
+                        if (ECCanConsume(4) &&
+                            standardEncodedChars->IsHex(ECLookahead(0)) && standardEncodedChars->IsHex(ECLookahead(1)) &&
+                            standardEncodedChars->IsHex(ECLookahead(2)) && standardEncodedChars->IsHex(ECLookahead(3)))
+                        {
+                            ECConsume(4);
+                            altCodePoints++;
+                            continue;
+                        }
+                        ECConsume(); // malformed; keep the scan advancing
+                        DeferredFailIfUnicodeSets(JSERR_RegExpInvalidEscape);
+                        return;
+                    }
+                    case 'd': case 'D': case 's': case 'S': case 'w': case 'W':
+                    case 'p': case 'P': case 'k': case 'q':
+                        ECConsume();
+                        DeferredFailIfUnicodeSets(JSERR_RegExpInvalidEscape);
+                        return;
+                    default:
+                        if (standardEncodedChars->IsDigit(ECLookahead()))
+                        {
+                            ECConsume();
+                            DeferredFailIfUnicodeSets(JSERR_RegExpInvalidEscape);
+                            return;
+                        }
+                        ECConsume();
+                        altCodePoints++;
+                        continue;
+                }
+            }
+            // Raw character: syntax characters and reserved pairs rejected.
+            Char c = NextChar();
+            if (VDetail::IsClassSetSyntaxChar(c))
+            {
+                DeferredFailIfUnicodeSets(JSERR_RegExpSyntax);
+                return;
+            }
+            if (VDetail::IsReservedPunctuatorChar(c) && !IsEOF() && ECLookahead() != 0 &&
+                Chars<EncodedChar>::CTW(ECLookahead()) == c)
+            {
+                DeferredFailIfUnicodeSets(JSERR_RegExpSyntax);
+                return;
+            }
+            altCodePoints++;
+        }
+    }
+
+    // ---------------------------------------------------------------------------
+    // Pass 1 (flags known, v on): parse and build
+    // ---------------------------------------------------------------------------
+
+    template <typename P, const bool IsLiteral>
+    Node* Parser<P, IsLiteral>::VClassPass1()
+    {
+        VCSet set;
+        VInitSet(set);
+        bool negation = false;
+        VParseClass(set, negation);
+        // VParseClass consumed through ']' (nested classes need that), but
+        // the TermPass1 caller expects to consume the top-level ']' itself
+        // exactly like the legacy CharacterClassPass1 contract.
+        Assert(ECLookback(1) == ']');
+        ECRevert(1);
+        // Any surrogate-pair entries the pass 0 legacy scan tracked inside
+        // this class's raw span were consumed here directly as code points;
+        // skip them so later atoms still line up with the tracker list (the
+        // list is in textual order).
+        while (this->currentSurrogatePairNode != nullptr && this->currentSurrogatePairNode->location < next)
+        {
+            this->currentSurrogatePairNode = this->currentSurrogatePairNode->next;
+        }
+        if (negation && set.mayContainStrings)
+        {
+            // Pass 0 already deferred this error (it fires before pass 1);
+            // this is a defensive check.
+            Fail(JSERR_RegExpSyntax);
+        }
+        return VBuildNode(set, negation);
+    }
+
+    // Parses a whole class (cursor just after '['); consumes through ']'.
+    template <typename P, const bool IsLiteral>
+    void Parser<P, IsLiteral>::VParseClass(VCSet& set, bool& negation)
+    {
+        negation = false;
+        if (IsEOF() || ECLookahead() == 0)
+            Fail(JSERR_RegExpNoBracket);
+        if (ECLookahead() == '^')
+        {
+            negation = true;
+            ECConsume();
+        }
+        if (ECLookahead() != ']')
+            VParseExpr(set);
+        if (IsEOF() || ECLookahead() != ']')
+            Fail(JSERR_RegExpNoBracket);
+        ECConsume(); // ]
+    }
+
+    template <typename P, const bool IsLiteral>
+    void Parser<P, IsLiteral>::VParseExpr(VCSet& acc)
+    {
+        int unionItems = 0;
+        bool sawRange = false;
+        char chainOp = 0;
+
+        VCSet item;
+        VInitSet(item);
+        VParseItem(item);
+        acc = item;
+        sawRange = item.isRange;
+
+        while (true)
+        {
+            if (IsEOF() || ECLookahead() == 0 || ECLookahead() == ']')
+                break;
+            bool isAndOp = ECLookahead() == '&' && ECLookahead(1) == '&';
+            bool isDiffOp = ECLookahead() == '-' && ECLookahead(1) == '-';
+            if (isAndOp || isDiffOp)
+            {
+                if (unionItems != 0 || sawRange || (chainOp != 0 && chainOp != (isAndOp ? '&' : '-')))
+                    Fail(JSERR_RegExpSyntax);
+                chainOp = isAndOp ? '&' : '-';
+                ECConsume(2);
+                VCSet rhs;
+                VInitSet(rhs);
+                VParseOperand(rhs, /*allowRange*/ false);
+                VApplyOp(acc, rhs, /*isDifference*/ chainOp == '-');
+                continue;
+            }
+            if (chainOp != 0)
+                Fail(JSERR_RegExpSyntax);
+            VCSet next;
+            VInitSet(next);
+            VParseItem(next);
+            VUnionInPlace(acc, next);
+            unionItems++;
+        }
+    }
+
+    // Parses one item (operand or char range) into set.
+    template <typename P, const bool IsLiteral>
+    void Parser<P, IsLiteral>::VParseItem(VCSet& set)
+    {
+        bool setValued =
+            (ECLookahead() == '\\' &&
+             ((ECLookahead(1) == 'q' && ECLookahead(2) == '{') ||
+              ECLookahead(1) == 'd' || ECLookahead(1) == 'D' ||
+              ECLookahead(1) == 's' || ECLookahead(1) == 'S' ||
+              ECLookahead(1) == 'w' || ECLookahead(1) == 'W' ||
+              ((ECLookahead(1) == 'p' || ECLookahead(1) == 'P') && ECLookahead(2) == '{'))) ||
+            ECLookahead() == '[';
+        if (setValued)
+        {
+            VParseOperand(set, /*allowRange*/ true);
+            // A nested class operand is not a character range even when its
+            // own contents include one (the copy carries the inner flag).
+            set.isRange = false;
+            return;
+        }
+        // Singleton (range-able) item
+        codepoint_t left;
+        if (ECLookahead() == '\\')
+        {
+            ECConsume();
+            left = VDecodeSingletonEscape(/*inQString*/ false);
+        }
+        else
+        {
+            left = VReadRawCodePoint();
+            if (left == (codepoint_t)'-')
+                Fail(JSERR_RegExpSyntax); // unescaped '-'
+        }
+        if (ECLookahead() == '-' && ECLookahead(1) != ']' && ECLookahead(1) != '-' && ECLookahead(1) != 0)
+        {
+            ECConsume(); // -
+            codepoint_t right;
+            if (ECLookahead() == '\\')
+            {
+                ECConsume();
+                right = VDecodeSingletonEscape(false);
+            }
+            else
+            {
+                right = VReadRawCodePoint();
+                if (right == (codepoint_t)'-')
+                    Fail(JSERR_RegExpSyntax);
+            }
+            if (right < left)
+                Fail(JSERR_RegExpBadRange);
+            set.cp.SetRange(ctAllocator, left, right);
+            set.isRange = true;
+            return;
+        }
+        VAddCodePoint(set, left);
+    }
+
+    // Parses one operand: nested class, \q{...}, \p{...}, \d&co, escape or
+    // raw char. With allowRange false (set-operation right operand), a
+    // following range is rejected.
+    template <typename P, const bool IsLiteral>
+    void Parser<P, IsLiteral>::VParseOperand(VCSet& set, bool allowRange)
+    {
+        if (ECLookahead() == '[')
+        {
+            ECConsume(); // [
+            VCSet inner;
+            VInitSet(inner);
+            bool innerNegation = false;
+            VParseClass(inner, innerNegation);
+            if (innerNegation)
+            {
+                if (inner.mayContainStrings)
+                    Fail(JSERR_RegExpSyntax);
+                // closure-then-complement, mirroring the legacy class path
+                if (caseInsensitiveFlagPresent)
+                {
+                    CharSet<codepoint_t> closed;
+                    inner.cp.ToEquivClass(ctAllocator, closed);
+                    inner.cp.Clear(ctAllocator);
+                    inner.cp.CloneFrom(ctAllocator, closed);
+                    closed.FreeBody(ctAllocator);
+                }
+                CharSet<codepoint_t> complemented;
+                inner.cp.ToComplement(ctAllocator, complemented);
+                inner.cp.Clear(ctAllocator);
+                inner.cp.CloneFrom(ctAllocator, complemented);
+                complemented.FreeBody(ctAllocator);
+            }
+            set = inner;
+            VRejectRangeHere();
+            return;
+        }
+        if (ECLookahead() == '\\')
+        {
+            EncodedChar e1 = ECLookahead(1);
+            if (e1 == 'q' && ECLookahead(2) == '{')
+            {
+                ECConsume(2); // \q
+                VParseQ(set);
+                VRejectRangeHere();
+                return;
+            }
+            if ((e1 == 'p' || e1 == 'P') && ECLookahead(2) == '{')
+            {
+                VParsePropertyEscape(set, e1 == 'P');
+                VRejectRangeHere();
+                return;
+            }
+            if (e1 == 'd' || e1 == 'D' || e1 == 's' || e1 == 'S' || e1 == 'w' || e1 == 'W')
+            {
+                ECConsume(2);
+                // The standard character sets are exposed in the char16
+                // domain; copy their ranges into the code point domain.
+                CharSet<Char> units;
+                switch (e1)
+                {
+                    case 'd': standardChars->SetDigits(ctAllocator, units); break;
+                    case 'D': standardChars->SetNonDigits(ctAllocator, units); break;
+                    case 's': standardChars->SetWhitespace(ctAllocator, units); break;
+                    case 'S': standardChars->SetNonWhitespace(ctAllocator, units); break;
+                    case 'w':
+                        if (unicodeFlagPresent && caseInsensitiveFlagPresent)
+                            standardChars->SetWordIUChars(ctAllocator, units);
+                        else
+                            standardChars->SetWordChars(ctAllocator, units);
+                        break;
+                    case 'W':
+                        if (unicodeFlagPresent && caseInsensitiveFlagPresent)
+                            standardChars->SetNonWordIUChars(ctAllocator, units);
+                        else
+                            standardChars->SetNonWordChars(ctAllocator, units);
+                        break;
+                }
+                Char lo = 0, hi = 0;
+                Char search = 0;
+                while (units.GetNextRange(search, &lo, &hi))
+                {
+                    set.cp.SetRange(ctAllocator, lo, hi);
+                    search = hi + 1;
+                }
+                units.FreeBody(ctAllocator);
+                VRejectRangeHere();
+                return;
+            }
+            ECConsume(); // backslash
+            codepoint_t cp = VDecodeSingletonEscape(false);
+            if (ECLookahead() == '-' && ECLookahead(1) != ']' && ECLookahead(1) != '-' && ECLookahead(1) != 0)
+            {
+                if (!allowRange)
+                    Fail(JSERR_UnicodeRegExpRangeContainsCharClass);
+                ECConsume(); // -
+                codepoint_t right;
+                if (ECLookahead() == '\\')
+                {
+                    ECConsume();
+                    right = VDecodeSingletonEscape(false);
+                }
+                else
+                    right = VReadRawCodePoint();
+                if (right == (codepoint_t)'-')
+                    Fail(JSERR_RegExpSyntax);
+                if (right < cp)
+                    Fail(JSERR_RegExpBadRange);
+                set.cp.SetRange(ctAllocator, cp, right);
+                set.isRange = true;
+                return;
+            }
+            VAddCodePoint(set, cp);
+            return;
+        }
+        // Raw character
+        codepoint_t cp = VReadRawCodePoint();
+        if (cp == (codepoint_t)'-')
+            Fail(JSERR_RegExpSyntax); // unescaped '-'
+        if (ECLookahead() == '-' && ECLookahead(1) != ']' && ECLookahead(1) != '-' && ECLookahead(1) != 0)
+        {
+            if (!allowRange)
+                Fail(JSERR_UnicodeRegExpRangeContainsCharClass);
+            ECConsume(); // -
+            codepoint_t right;
+            if (ECLookahead() == '\\')
+            {
+                ECConsume();
+                right = VDecodeSingletonEscape(false);
+            }
+            else
+            {
+                right = VReadRawCodePoint();
+                if (right == (codepoint_t)'-')
+                    Fail(JSERR_RegExpSyntax);
+            }
+            if (right < cp)
+                Fail(JSERR_RegExpBadRange);
+            set.cp.SetRange(ctAllocator, cp, right);
+            set.isRange = true;
+            return;
+        }
+        VAddCodePoint(set, cp);
+    }
+
+    // After a set-valued operand (\q, \p, \d&co, nested class): a '-' that
+    // is neither the difference operator nor the class end would make the
+    // operand a range endpoint, which is a SyntaxError under v (as under u).
+    template <typename P, const bool IsLiteral>
+    void Parser<P, IsLiteral>::VRejectRangeHere()
+    {
+        if (ECLookahead() == '-' && ECLookahead(1) != ']' && ECLookahead(1) != '-' && ECLookahead(1) != 0)
+        {
+            Fail(JSERR_UnicodeRegExpRangeContainsCharClass);
+        }
+    }
+
+    // Decodes one singleton escape (cursor after the backslash). v rules:
+    // octal escapes other than \0 are rejected, as are the class/set-valued
+    // escape letters outside their operand forms; identity escapes follow
+    // the u-mode class policy (punctuation; not word characters).
+    template <typename P, const bool IsLiteral>
+    codepoint_t Parser<P, IsLiteral>::VDecodeSingletonEscape(bool inQString)
+    {
+        Assert(!IsEOF());
+        EncodedChar ec = ECLookahead();
+        if (standardEncodedChars->IsDigit(ec))
+        {
+            if (ec != '0')
+                Fail(JSERR_RegExpInvalidEscape);
+            ECConsume();
+            // \0 not followed by another digit (would be an octal escape)
+            if (!IsEOF() && ECLookahead() != 0 && standardEncodedChars->IsDigit(ECLookahead()))
+                Fail(JSERR_RegExpInvalidEscape);
+            return 0;
+        }
+        Char c = NextChar();
+        switch (c)
+        {
+            case 'f': return '\f';
+            case 'n': return '\n';
+            case 'r': return '\r';
+            case 't': return '\t';
+            case 'v': return '\v';
+            case 'b': return '\b';
+            case 'c':
+            {
+                if (!IsEOF() && ECLookahead() != 0 && standardEncodedChars->IsLetter(ECLookahead()))
+                {
+                    codepoint_t v = Chars<EncodedChar>::CTU(ECLookahead()) % 32;
+                    ECConsume();
+                    return v;
+                }
+                Fail(JSERR_RegExpInvalidEscape);
+                return 0;
+            }
+            case 'x':
+            {
+                if (ECCanConsume(2) && standardEncodedChars->IsHex(ECLookahead(0)) && standardEncodedChars->IsHex(ECLookahead(1)))
+                {
+                    codepoint_t v = (standardEncodedChars->DigitValue(ECLookahead(0)) << 4) |
+                        standardEncodedChars->DigitValue(ECLookahead(1));
+                    ECConsume(2);
+                    return v;
+                }
+                Fail(JSERR_RegExpInvalidEscape);
+                return 0;
+            }
+            case 'u':
+                return VDecodeUEscape();
+            case 'q': case 'p': case 'P': case 'k':
+            case 'd': case 'D': case 's': case 'S': case 'w': case 'W':
+                Fail(JSERR_RegExpInvalidEscape);
+                return 0;
+            default:
+                // Identity escape; v (like u) rejects word characters
+                // (letters, digits, '_'), which cover the practical
+                // UnicodeIDContinue set for validation purposes. Escaped
+                // '}' and '|' are valid inside \q (only the raw characters
+                // terminate an alternative).
+                if (standardChars->IsWord(c))
+                    Fail(JSERR_RegExpInvalidEscape);
+                return c;
+        }
+    }
+
+    // \u{...} or \uHHHH with the 'u' consumed; returns the whole code point.
+    template <typename P, const bool IsLiteral>
+    codepoint_t Parser<P, IsLiteral>::VDecodeUEscape()
+    {
+        if (ECCanConsume(1) && ECLookahead(0) == '{')
+        {
+            codepoint_t cp = 0;
+            ECConsume(); // {
+            CharCount digits = 0;
+            while (!IsEOF() && ECLookahead() != 0 && standardEncodedChars->IsHex(ECLookahead()))
+            {
+                cp = cp * 16 + standardEncodedChars->DigitValue(ECLookahead());
+                if (cp > 0x10FFFF)
+                    Fail(JSERR_RegExpInvalidEscape);
+                digits++;
+                ECConsume();
+            }
+            if (digits == 0 || IsEOF() || ECLookahead() != '}')
+                Fail(JSERR_RegExpSyntax);
+            ECConsume(); // }
+            return cp;
+        }
+        if (ECCanConsume(4) &&
+            standardEncodedChars->IsHex(ECLookahead(0)) && standardEncodedChars->IsHex(ECLookahead(1)) &&
+            standardEncodedChars->IsHex(ECLookahead(2)) && standardEncodedChars->IsHex(ECLookahead(3)))
+        {
+            codepoint_t v = (standardEncodedChars->DigitValue(ECLookahead(0)) << 12) |
+                (standardEncodedChars->DigitValue(ECLookahead(1)) << 8) |
+                (standardEncodedChars->DigitValue(ECLookahead(2)) << 4) |
+                standardEncodedChars->DigitValue(ECLookahead(3));
+            ECConsume(4);
+            return v;
+        }
+        Fail(JSERR_RegExpInvalidEscape);
+        return 0;
+    }
+
+    // Reads one raw code point, pairing adjacent surrogate units (v classes
+    // are code-point based and the flags are known here, so no deferred
+    // tracking is needed).
+    template <typename P, const bool IsLiteral>
+    codepoint_t Parser<P, IsLiteral>::VReadRawCodePoint()
+    {
+        Assert(!IsEOF());
+        Char c = NextChar();
+        if (VDetail::IsHighSurrogateUnit(c) && !IsEOF() && ECLookahead() != 0)
+        {
+            const EncodedChar* after = next;
+            Char c2 = NextChar();
+            if (VDetail::IsLowSurrogateUnit(c2))
+                return VDetail::SurrogatePairToCodePoint(c, c2);
+            next = after; // not a pair; rewind the second unit
+        }
+        return c;
+    }
+
+    // \q{alt1|alt2|...} with '{' at the cursor ('q' consumed).
+    template <typename P, const bool IsLiteral>
+    void Parser<P, IsLiteral>::VParseQ(VCSet& set)
+    {
+        Assert(ECLookahead() == '{');
+        ECConsume(); // {
+        while (true)
+        {
+            if (IsEOF() || ECLookahead() == 0)
+                Fail(JSERR_RegExpSyntax);
+            // One alternative: decode code points into scratch. An empty
+            // alternative (including \q{} itself) becomes the empty-string
+            // member through VAddStringFromCodePoints.
+            CharCount numCps = 0;
+            while (true)
+            {
+                if (IsEOF() || ECLookahead() == 0)
+                    Fail(JSERR_RegExpSyntax);
+                if (ECLookahead() == '}' || ECLookahead() == '|')
+                    break;
+                codepoint_t cp;
+                if (ECLookahead() == '\\')
+                {
+                    ECConsume();
+                    cp = VDecodeSingletonEscape(/*inQString*/ true);
+                    // Escaped surrogate halves may combine with the next
+                    // \uXXXX escape (the u-mode pattern rule).
+                    if (cp >= 0xD800 && cp <= 0xDBFF && ECLookahead() == '\\' && ECLookahead(1) == 'u')
+                    {
+                        const EncodedChar* beforeSecond = next;
+                        ECConsume(2); // \u
+                        codepoint_t second = VDecodeUEscape();
+                        if (second >= 0xDC00 && second <= 0xDFFF)
+                            cp = VDetail::SurrogatePairToCodePoint((Char)cp, (Char)second);
+                        else
+                            next = beforeSecond;
+                    }
+                }
+                else
+                {
+                    cp = VReadRawCodePoint();
+                }
+                if (numCps == vScratchCpsCap)
+                {
+                    CharCount newCap = vScratchCpsCap == 0 ? 16 : vScratchCpsCap * 2;
+                    codepoint_t* newList = AnewArray(ctAllocator, codepoint_t, newCap);
+                    for (CharCount i = 0; i < numCps; i++)
+                        newList[i] = vScratchCps[i];
+                    vScratchCps = newList;
+                    vScratchCpsCap = newCap;
+                }
+                vScratchCps[numCps++] = cp;
+            }
+            VAddStringFromCodePoints(set, vScratchCps, numCps);
+            if (ECLookahead() == '}')
+            {
+                ECConsume();
+                return;
+            }
+            if (ECLookahead() == '|')
+                ECConsume();
+            else
+                Fail(JSERR_RegExpSyntax);
+        }
+    }
+
+    // \p{...}/\P{...} operand (cursor at the escape start).
+    template <typename P, const bool IsLiteral>
+    void Parser<P, IsLiteral>::VParsePropertyEscape(VCSet& set, bool isNegation)
+    {
+        ECConsume(2); // \p or \P
+        if (IsEOF() || ECLookahead() != '{')
+            Fail(JSERR_RegExpInvalidEscape);
+        char16 name[propertyEscapeMaxNameLen];
+        char16 value[propertyEscapeMaxNameLen];
+        CharCount nameLen, valueLen;
+        bool hasValue;
+        if (!ScanPropertyEscapeBody(name, nameLen, value, valueLen, hasValue))
+            Fail(JSERR_RegExpSyntax);
+        UnicodeProperty::Resolved resolved;
+        if (!UnicodeProperty::Resolve(name, nameLen, value, valueLen, hasValue, &resolved))
+            Fail(JSERR_RegExpSyntax);
+
+        if (UnicodeProperty::IsStringProperty(resolved))
+        {
+            if (isNegation)
+                Fail(JSERR_RegExpSyntax); // pass 0 already deferred this
+            // Collector appends the ICU strings as members.
+            struct Collector : UnicodeProperty::StringCollector
+            {
+                Parser* parser;
+                VCSet* set;
+                virtual void Add(const char16* s, int32 len) override
+                {
+                    CharCount cps = 0;
+                    for (int32 i = 0; i < len; )
+                    {
+                        if (i + 1 < len && VDetail::IsHighSurrogateUnit(s[i]) && VDetail::IsLowSurrogateUnit(s[i + 1]))
+                            i += 2;
+                        else
+                            i += 1;
+                        cps++;
+                    }
+                    if (cps > parser->vScratchCpsCap)
+                    {
+                        CharCount newCap = parser->vScratchCpsCap == 0 ? 16 : parser->vScratchCpsCap;
+                        while (cps > newCap)
+                            newCap *= 2;
+                        codepoint_t* newList = AnewArray(parser->ctAllocator, codepoint_t, newCap);
+                        for (CharCount i = 0; i < cps; i++)
+                            newList[i] = 0;
+                        parser->vScratchCps = newList;
+                        parser->vScratchCpsCap = newCap;
+                    }
+                    CharCount n = 0;
+                    for (int32 i = 0; i < len; )
+                    {
+                        if (i + 1 < len && VDetail::IsHighSurrogateUnit(s[i]) && VDetail::IsLowSurrogateUnit(s[i + 1]))
+                        {
+                            parser->vScratchCps[n++] = VDetail::SurrogatePairToCodePoint(s[i], s[i + 1]);
+                            i += 2;
+                        }
+                        else
+                        {
+                            parser->vScratchCps[n++] = s[i];
+                            i += 1;
+                        }
+                    }
+                    parser->VAddStringFromCodePoints(*set, parser->vScratchCps, n);
+                }
+            } collector;
+            collector.parser = this;
+            collector.set = &set;
+            if (!UnicodeProperty::BuildStringPropertySet(resolved, ctAllocator, set.cp, &collector))
+                Fail(JSERR_RegExpSyntax); // ICU failed
+            return;
+        }
+
+        CharSet<codepoint_t> codePointSet;
+        if (!UnicodeProperty::BuildCodePointSet(resolved, ctAllocator, codePointSet))
+            Fail(JSERR_RegExpSyntax);
+        if (!isNegation)
+        {
+            set.cp.UnionInPlace(ctAllocator, codePointSet);
+            codePointSet.FreeBody(ctAllocator);
+        }
+        else
+        {
+            CharSet<codepoint_t> complemented;
+            codePointSet.ToComplement(ctAllocator, complemented);
+            codePointSet.FreeBody(ctAllocator);
+            set.cp.UnionInPlace(ctAllocator, complemented);
+            complemented.FreeBody(ctAllocator);
+        }
+    }
+
+    // Builds the final node: an alternation trying the string members
+    // longest-first (each a literal), then the code point set, then (if the
+    // empty string is a member) a zero-width success.
+    template <typename P, const bool IsLiteral>
+    Node* Parser<P, IsLiteral>::VBuildNode(VCSet& set, bool negation)
+    {
+        // i closure first, then complement for negated classes (same order
+        // as the legacy u-mode class path).
+        if (caseInsensitiveFlagPresent)
+        {
+            CharSet<codepoint_t> closed;
+            set.cp.ToEquivClass(ctAllocator, closed);
+            set.cp.Clear(ctAllocator);
+            set.cp.CloneFrom(ctAllocator, closed);
+            closed.FreeBody(ctAllocator);
+        }
+        if (negation)
+        {
+            Assert(!set.mayContainStrings && set.numStrings == 0 && !set.containsEmptyString);
+            CharSet<codepoint_t> complemented;
+            set.cp.ToComplement(ctAllocator, complemented);
+            set.cp.Clear(ctAllocator);
+            set.cp.CloneFrom(ctAllocator, complemented);
+            complemented.FreeBody(ctAllocator);
+        }
+
+        // Sort string members longest (code points) first; order among
+        // equal lengths is unobservable (equal consumption on match).
+        if (set.numStrings > 1)
+        {
+            uint32 maxLen = 0;
+            for (int i = 0; i < set.numStrings; i++)
+                maxLen = max(maxLen, set.strings[i].cpLen);
+            VString* tmp = AnewArray(ctAllocator, VString, set.numStrings);
+            CharCount* counts = AnewArrayZ(ctAllocator, CharCount, maxLen + 2);
+            for (int i = 0; i < set.numStrings; i++)
+                counts[set.strings[i].cpLen]++;
+            // descending: the position for length L is the count of all
+            // strictly longer strings
+            CharCount running = 0;
+            for (uint32 len = maxLen + 1; len-- > 0; )
+            {
+                CharCount c = counts[len];
+                counts[len] = running;
+                running += c;
+            }
+            for (int i = 0; i < set.numStrings; i++)
+                tmp[counts[set.strings[i].cpLen]++] = set.strings[i];
+            for (int i = 0; i < set.numStrings; i++)
+                set.strings[i] = tmp[i];
+        }
+
+        Node* armsHead = nullptr;
+        AltNode* armsLast = nullptr;
+        auto appendArm = [&](Node* arm)
+        {
+            if (armsHead == nullptr)
+            {
+                armsHead = arm;
+                return;
+            }
+            AltNode* link = Anew(ctAllocator, AltNode, arm, nullptr);
+            if (armsLast == nullptr)
+            {
+                armsLast = link;
+                armsHead = Anew(ctAllocator, AltNode, armsHead, armsLast);
+            }
+            else
+            {
+                armsLast->tail = link;
+                armsLast = link;
+            }
+        };
+
+        for (int i = 0; i < set.numStrings; i++)
+        {
+            const VString& s = set.strings[i];
+            Assert(s.unitLen > 1);
+            EnsureLitbuf(s.unitLen);
+            for (CharCount j = 0; j < s.unitLen; j++)
+                litbuf[litbufNext + j] = s.chars[j];
+            MatchLiteralNode* lit = Anew(ctAllocator, MatchLiteralNode, litbufNext, s.unitLen, caseInsensitiveFlagPresent);
+            litbufNext += s.unitLen;
+            appendArm(lit);
+        }
+
+        if (!set.cp.IsEmpty() || (set.numStrings == 0 && !set.containsEmptyString))
+        {
+            // TranslateCodePointSet clears the set body
+            appendArm(TranslateCodePointSet(set.cp, /*isNegation*/ false));
+        }
+        else
+        {
+            set.cp.FreeBody(ctAllocator);
+        }
+
+        if (set.containsEmptyString)
+        {
+            appendArm(Anew(ctAllocator, SimpleNode, Node::Empty));
+        }
+
+        return armsHead != nullptr ? armsHead : Anew(ctAllocator, SimpleNode, Node::Empty);
+    }
+
+    //
     // Errors
     //
 
@@ -719,6 +2302,26 @@ namespace UnifiedRegex
         if (this->deferredIfNotUnicodeError == nullptr)
         {
             this->deferredIfNotUnicodeError = Anew(ctAllocator, ParseError, inBody, Pos(), Chars<EncodedChar>::OSB(next, input), error);
+        }
+    }
+
+    // v-mode (Unicode sets) deferred errors; see RegexParser.h. Recorded in
+    // pass 0, raised by the entry points once the flags are known.
+    template <typename P, const bool IsLiteral>
+    void Parser<P, IsLiteral>::DeferredFailIfUnicodeSets(HRESULT error)
+    {
+        if (this->deferredIfUnicodeSetsError == nullptr)
+        {
+            this->deferredIfUnicodeSetsError = Anew(ctAllocator, ParseError, inBody, Pos(), Chars<EncodedChar>::OSB(next, input), error);
+        }
+    }
+
+    template <typename P, const bool IsLiteral>
+    void Parser<P, IsLiteral>::DeferredFailIfUnicodeNoSets(HRESULT error)
+    {
+        if (this->deferredIfUnicodeNoSetsError == nullptr)
+        {
+            this->deferredIfUnicodeNoSetsError = Anew(ctAllocator, ParseError, inBody, Pos(), Chars<EncodedChar>::OSB(next, input), error);
         }
     }
 
@@ -2037,6 +3640,15 @@ namespace UnifiedRegex
             break;
         case '[':
             ECConsume();
+            // v flag (ES2024 Unicode sets): validate the extended class
+            // grammar ahead of the legacy scan. This only records
+            // deferred-if-v errors (the same text is often a legal u/Annex B
+            // class) and restores the cursor, so the legacy scan below and
+            // the non-v re-parse in pass 1 see the same input.
+            if (scriptContext->GetConfig()->IsES6UnicodeExtensionsEnabled())
+            {
+                VClassPass0();
+            }
             this->tempLocationOfSurrogatePair = nullptr;
             this->codePointAtTempLocation = 0;
             this->tempLocationOfRange = next;
@@ -2307,6 +3919,15 @@ namespace UnifiedRegex
             }
         case '[':
             ECConsume();
+            if (unicodeSetsFlagPresent)
+            {
+                // v flag: the extended class grammar replaces the legacy
+                // ClassRanges parse entirely.
+                node = VClassPass1();
+                Assert(ECLookahead() == ']');
+                ECConsume(); // ]
+                break; // fall-through for opt quantifier
+            }
             if (unicodeFlagPresent)
             {
                 containsSurrogatePair = this->currentSurrogatePairNode != nullptr && this->currentSurrogatePairNode->rangeLocation == next;
@@ -3045,6 +4666,24 @@ namespace UnifiedRegex
                     // '-' is just a char, consume it and set as last char
                     lastCodepoint = NextChar();
                 }
+                else if (ECLookahead(1) == '-' &&
+                         scriptContext->GetConfig()->IsES6UnicodeExtensionsEnabled() &&
+                         lastCodepoint > (codepoint_t)'-')
+                {
+                    // v flag (ES2024): '<singleton>--' where the legacy range
+                    // <singleton>..'-' would be invalid starts a set
+                    // difference operator instead. When the range would be
+                    // VALID (e.g. '[+--]' is the range +..-) the legacy range
+                    // stands: u keeps it and v's pass 1 re-parses the text as
+                    // an (invalid or operator-shaped) v class. The u flag is
+                    // unknown in pass 0, so consume this dash as a literal
+                    // character and defer the range error for every non-v
+                    // mode (both non-unicode and plain u reject the text
+                    // today; only v parses on).
+                    DeferredFailIfNotUnicode(JSERR_RegExpBadRange);
+                    DeferredFailIfUnicodeNoSets(JSERR_RegExpBadRange);
+                    lastCodepoint = NextChar();
+                }
                 else
                 {
                     pendingRangeStart = this->next == this->positionAfterLastSurrogate
@@ -3558,7 +5197,7 @@ namespace UnifiedRegex
                 // 'p'/'P' (an invalid escape once the u flag is known).
                 if (ECLookahead() == '{')
                 {
-                    ScanPropertyEscapeBodyPass0();
+                    ScanPropertyEscapeBodyPass0(/*isNegation*/ c == 'P');
                     return false;
                 }
                 DeferredFailIfUnicode(JSERR_RegExpInvalidEscape);
@@ -3804,12 +5443,37 @@ namespace UnifiedRegex
                     {
                         Fail(JSERR_RegExpSyntax);
                     }
+                    // ES2024: 'u' and 'v' are mutually exclusive.
+                    if ((flags & UnicodeSetsRegexFlag) != 0)
+                    {
+                        Fail(JSERR_RegExpSyntax);
+                    }
                     flags = (RegexFlags)(flags | UnicodeRegexFlag);
                     // For telemetry
                     CHAKRATEL_LANGSTATS_INC_LANGFEATURECOUNT(ES6, UnicodeRegexFlag, scriptContext);
 
                     break;
                 }
+            case 'v':
+                // ES2024 'v' flag (Unicode sets): shares the unicode
+                // configuration gate; u+v is rejected above and here.
+                if (scriptContext->GetConfig()->IsES6UnicodeExtensionsEnabled())
+                {
+                    if ((flags & UnicodeSetsRegexFlag) != 0)
+                    {
+                        Fail(JSERR_RegExpSyntax);
+                    }
+                    if ((flags & UnicodeRegexFlag) != 0)
+                    {
+                        Fail(JSERR_RegExpSyntax);
+                    }
+                    flags = (RegexFlags)(flags | UnicodeSetsRegexFlag);
+                    break;
+                }
+                // Without the unicode configuration the flag character is
+                // invalid (it is a word character, like the default case).
+                Fail(JSERR_RegExpSyntax);
+                return;
             case 'y':
                 if (scriptContext->GetConfig()->IsES6RegExStickyEnabled())
                 {
@@ -3868,7 +5532,8 @@ namespace UnifiedRegex
             Options(flags);
             if (!IsEOF())
                 Fail(JSERR_RegExpSyntax);
-            this->unicodeFlagPresent = (flags & UnifiedRegex::UnicodeRegexFlag) == UnifiedRegex::UnicodeRegexFlag;
+            this->unicodeFlagPresent = (flags & (UnifiedRegex::UnicodeRegexFlag | UnifiedRegex::UnicodeSetsRegexFlag)) != 0;
+            this->unicodeSetsFlagPresent = (flags & UnifiedRegex::UnicodeSetsRegexFlag) == UnifiedRegex::UnicodeSetsRegexFlag;
             this->caseInsensitiveFlagPresent = (flags & UnifiedRegex::IgnoreCaseRegexFlag) == UnifiedRegex::IgnoreCaseRegexFlag;
             this->dotAllFlagPresent = (flags & UnifiedRegex::DotAllRegexFlag) == UnifiedRegex::DotAllRegexFlag;
             this->multilineFlagPresent = (flags & UnifiedRegex::MultilineRegexFlag) == UnifiedRegex::MultilineRegexFlag;
@@ -3878,6 +5543,7 @@ namespace UnifiedRegex
         else
         {
             this->unicodeFlagPresent = false;
+            this->unicodeSetsFlagPresent = false;
             this->caseInsensitiveFlagPresent = false;
             this->dotAllFlagPresent = false;
             this->multilineFlagPresent = false;
@@ -3891,6 +5557,14 @@ namespace UnifiedRegex
         else if(this->deferredIfUnicodeError != nullptr && this->unicodeFlagPresent)
         {
             throw ParseError(*deferredIfUnicodeError);
+        }
+        else if (this->deferredIfUnicodeSetsError != nullptr && this->unicodeSetsFlagPresent)
+        {
+            throw ParseError(*this->deferredIfUnicodeSetsError);
+        }
+        else if (this->deferredIfUnicodeNoSetsError != nullptr && this->unicodeFlagPresent && !this->unicodeSetsFlagPresent)
+        {
+            throw ParseError(*this->deferredIfUnicodeNoSetsError);
         }
 
         // Named backreference resolution needs both the full set of group
@@ -3936,7 +5610,8 @@ namespace UnifiedRegex
         // Options are needed for the next pass
         ECMust('/', ERRnoSlash);
         Options(flags);
-        this->unicodeFlagPresent = (flags & UnifiedRegex::UnicodeRegexFlag) == UnifiedRegex::UnicodeRegexFlag;
+        this->unicodeFlagPresent = (flags & (UnifiedRegex::UnicodeRegexFlag | UnifiedRegex::UnicodeSetsRegexFlag)) != 0;
+        this->unicodeSetsFlagPresent = (flags & UnifiedRegex::UnicodeSetsRegexFlag) == UnifiedRegex::UnicodeSetsRegexFlag;
         this->caseInsensitiveFlagPresent = (flags & UnifiedRegex::IgnoreCaseRegexFlag) == UnifiedRegex::IgnoreCaseRegexFlag;
         this->dotAllFlagPresent = (flags & UnifiedRegex::DotAllRegexFlag) == UnifiedRegex::DotAllRegexFlag;
         this->multilineFlagPresent = (flags & UnifiedRegex::MultilineRegexFlag) == UnifiedRegex::MultilineRegexFlag;
@@ -3950,6 +5625,14 @@ namespace UnifiedRegex
         else if(this->deferredIfUnicodeError != nullptr && this->unicodeFlagPresent)
         {
             throw ParseError(*deferredIfUnicodeError);
+        }
+        else if (this->deferredIfUnicodeSetsError != nullptr && this->unicodeSetsFlagPresent)
+        {
+            throw ParseError(*this->deferredIfUnicodeSetsError);
+        }
+        else if (this->deferredIfUnicodeNoSetsError != nullptr && this->unicodeFlagPresent && !this->unicodeSetsFlagPresent)
+        {
+            throw ParseError(*this->deferredIfUnicodeNoSetsError);
         }
 
         // Named backreference resolution needs both the full set of group
@@ -3997,7 +5680,8 @@ namespace UnifiedRegex
         ECMust('/', ERRnoSlash);
         RegexFlags dummyFlags = NoRegexFlags;
         Options(dummyFlags);
-        this->unicodeFlagPresent = (dummyFlags & UnifiedRegex::UnicodeRegexFlag) == UnifiedRegex::UnicodeRegexFlag;
+        this->unicodeFlagPresent = (dummyFlags & (UnifiedRegex::UnicodeRegexFlag | UnifiedRegex::UnicodeSetsRegexFlag)) != 0;
+        this->unicodeSetsFlagPresent = (dummyFlags & UnifiedRegex::UnicodeSetsRegexFlag) == UnifiedRegex::UnicodeSetsRegexFlag;
         this->caseInsensitiveFlagPresent = (dummyFlags & UnifiedRegex::IgnoreCaseRegexFlag) == UnifiedRegex::IgnoreCaseRegexFlag;
         this->dotAllFlagPresent = (dummyFlags & UnifiedRegex::DotAllRegexFlag) == UnifiedRegex::DotAllRegexFlag;
         this->multilineFlagPresent = (dummyFlags & UnifiedRegex::MultilineRegexFlag) == UnifiedRegex::MultilineRegexFlag;
@@ -4012,6 +5696,14 @@ namespace UnifiedRegex
         else if(this->deferredIfUnicodeError != nullptr && this->unicodeFlagPresent)
         {
             throw ParseError(*deferredIfUnicodeError);
+        }
+        else if (this->deferredIfUnicodeSetsError != nullptr && this->unicodeSetsFlagPresent)
+        {
+            throw ParseError(*this->deferredIfUnicodeSetsError);
+        }
+        else if (this->deferredIfUnicodeNoSetsError != nullptr && this->unicodeFlagPresent && !this->unicodeSetsFlagPresent)
+        {
+            throw ParseError(*this->deferredIfUnicodeNoSetsError);
         }
 
         // ParseLiteral resolves named references here. This no-AST scan is

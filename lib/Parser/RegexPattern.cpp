@@ -113,6 +113,12 @@ namespace UnifiedRegex
         return GetScriptContext()->GetConfig()->IsES6UnicodeExtensionsEnabled() && (rep.unified.program->flags & UnicodeRegexFlag) != 0;
     }
 
+    bool RegexPattern::IsUnicodeSets() const
+    {
+        // ES2024 'v' flag; gated by the unicode configuration like 'u'
+        return GetScriptContext()->GetConfig()->IsES6UnicodeExtensionsEnabled() && (rep.unified.program->flags & UnicodeSetsRegexFlag) != 0;
+    }
+
     bool RegexPattern::IsSticky() const
     {
         return GetScriptContext()->GetConfig()->IsES6RegExStickyEnabled() && (rep.unified.program->flags & StickyRegexFlag) != 0;

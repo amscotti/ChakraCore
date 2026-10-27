@@ -343,6 +343,7 @@ namespace Js
         Field(const PropertyRecord *) regexGroupsPropertyRecord;
         Field(const PropertyRecord *) regexIndicesPropertyRecord;
         Field(const PropertyRecord *) regexHasIndicesPropertyRecord;
+        Field(const PropertyRecord *) regexUnicodeSetsPropertyRecord;
         Field(DynamicType *) stringTypeDynamic;
         Field(DynamicType *) mapType;
         Field(DynamicType *) setType;
@@ -799,6 +800,7 @@ namespace Js
         const PropertyRecord * GetRegexGroupsPropertyRecord() const { return regexGroupsPropertyRecord; }
         const PropertyRecord * GetRegexIndicesPropertyRecord() const { return regexIndicesPropertyRecord; }
         const PropertyRecord * GetRegexHasIndicesPropertyRecord() const { return regexHasIndicesPropertyRecord; }
+        const PropertyRecord * GetRegexUnicodeSetsPropertyRecord() const { return regexUnicodeSetsPropertyRecord; }
         DynamicType * GetArrayBufferType() const { return arrayBufferType; }
         StaticType  * GetStringTypeStatic() const { return stringCache.GetStringTypeStatic(); }
         DynamicType * GetStringTypeDynamic() const { return stringTypeDynamic; }

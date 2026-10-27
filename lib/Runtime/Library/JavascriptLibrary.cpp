@@ -775,6 +775,12 @@ namespace Js
         scriptContext->GetOrAddPropertyRecord(_u("hasIndices"), 10, &regexHasIndicesRecord);
         regexHasIndicesPropertyRecord = regexHasIndicesRecord;
 
+        // "unicodeSets" (the 'v' flag's prototype accessor name, ES2024),
+        // registered as a dynamic property record for the same reason.
+        const PropertyRecord* regexUnicodeSetsRecord = nullptr;
+        scriptContext->GetOrAddPropertyRecord(_u("unicodeSets"), 11, &regexUnicodeSetsRecord);
+        regexUnicodeSetsPropertyRecord = regexUnicodeSetsRecord;
+
         // Initialize string types
         // static type is handled under StringCache.h
         stringTypeDynamic = DynamicType::New(scriptContext, TypeIds_StringObject, stringPrototype, nullptr, NullTypeHandler<false>::GetDefaultInstance(), true, true);
@@ -4584,6 +4590,16 @@ namespace Js
             library->AddAccessorsToLibraryObject(regexPrototype,
                 library->GetRegexHasIndicesPropertyRecord()->GetPropertyId(),
                 &JavascriptRegExp::EntryInfo::GetterHasIndices, nullptr);
+
+            // 'v' flag (ES2024 Unicode sets) accessor, gated by the unicode
+            // configuration like the 'u' accessor. Also a dynamic property
+            // record.
+            if (scriptConfig->IsES6UnicodeExtensionsEnabled())
+            {
+                library->AddAccessorsToLibraryObject(regexPrototype,
+                    library->GetRegexUnicodeSetsPropertyRecord()->GetPropertyId(),
+                    &JavascriptRegExp::EntryInfo::GetterUnicodeSets, nullptr);
+            }
         }
 
         if (scriptConfig->IsES6RegExSymbolsEnabled())

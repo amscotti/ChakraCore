@@ -187,7 +187,7 @@ namespace UnifiedRegex
 
         inline CaseInsensitive::MappingSource GetCaseMappingSource() const
         {
-            return (flags & UnicodeRegexFlag) != 0
+            return (flags & (UnicodeRegexFlag | UnicodeSetsRegexFlag)) != 0
                 ? CaseInsensitive::MappingSource::CaseFolding
                 : CaseInsensitive::MappingSource::UnicodeData;
         }

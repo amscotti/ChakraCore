@@ -17,6 +17,7 @@ namespace UnifiedRegex
         StickyRegexFlag     = 1 << 4,
         DotAllRegexFlag     = 1 << 5,
         HasIndicesRegexFlag = 1 << 6,   // ES2022 'd' flag (match indices); unconditional, no config flag
-        AllRegexFlags       = (1 << 7) - 1
+        UnicodeSetsRegexFlag = 1 << 7,  // ES2024 'v' flag (Unicode sets); gated by ES6UnicodeExtensions like 'u'
+        AllRegexFlags       = (1 << 8) - 1
     };
 }

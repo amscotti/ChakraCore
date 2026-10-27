@@ -2708,7 +2708,7 @@ namespace UnifiedRegex
         const Char* const groupText = this->realInput != nullptr ? this->realInput : input;
 
         bool isCaseInsensitiveMatch = isCaseInsensitive;
-        bool isCodePointList = (program->flags & UnicodeRegexFlag) != 0;
+        bool isCodePointList = (program->flags & (UnicodeRegexFlag | UnicodeSetsRegexFlag)) != 0;
 
         if (!frameReversed)
         {
@@ -4889,7 +4889,7 @@ namespace UnifiedRegex
             if (realPos > 0)
             {
                 Char* const scratch = RecyclerNewArrayLeaf(matcher.recycler, Char, realPos);
-                if ((matcher.program->flags & UnifiedRegex::UnicodeRegexFlag) != 0)
+                if ((matcher.program->flags & (UnifiedRegex::UnicodeRegexFlag | UnifiedRegex::UnicodeSetsRegexFlag)) != 0)
                 {
                     // u-mode: reverse by CODE POINTS, keeping surrogate pairs'
                     // units in order, so code-point-oriented u-mode atoms,
