@@ -1631,9 +1631,11 @@ namespace UnifiedRegex
     {
         codepoint_t* ranges;
         const int numRanges;
+        const bool noHalfPairFallback; // negated u-mode class: no lead-unit fallback at a complete pair
 
-        inline MatchCodePointSetInst(int numRanges)
-            : Inst(InstTag::MatchCodePointSet), ranges(nullptr), numRanges(numRanges) {}
+        inline MatchCodePointSetInst(int numRanges, bool noHalfPairFallback)
+            : Inst(InstTag::MatchCodePointSet), ranges(nullptr), numRanges(numRanges),
+              noHalfPairFallback(noHalfPairFallback) {}
 
         INST_BODY
         INST_BODY_FREE(SetMixin<false>)

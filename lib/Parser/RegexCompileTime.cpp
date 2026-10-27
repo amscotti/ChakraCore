@@ -1978,7 +1978,7 @@ namespace UnifiedRegex
 
         skipped -= min(skipped, static_cast<CharCount>(2));
 
-        MatchCodePointSetInst* inst = EMIT(compiler, MatchCodePointSetInst, numRanges);
+        MatchCodePointSetInst* inst = EMIT(compiler, MatchCodePointSetInst, numRanges, noHalfPairFallback);
         inst->set.CloneFrom(compiler.rtAllocator, set);
         codepoint_t* emittedRanges = AnewArray(compiler.rtAllocator, codepoint_t, 2 * numRanges);
         for (int i = 0; i < 2 * numRanges; i++)

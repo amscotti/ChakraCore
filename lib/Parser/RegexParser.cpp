@@ -227,6 +227,9 @@ namespace UnifiedRegex
         , vClassSawNested(false)
         , vClassSpanStart(nullptr)
         , vClassSpanEnd(nullptr)
+        , decimalEscapes(nullptr)
+        , numDecimalEscapes(0)
+        , decimalEscapesCap(0)
     {
         this->SetIsUtf8(isUtf8);
     }
@@ -342,6 +345,11 @@ namespace UnifiedRegex
 
         if(!ECCanConsume(i + 1) || ECLookahead(i) != '}')
         {
+            // \u{ started a code point body (at least one hex digit) that
+            // does not terminate with '}': no other RegExpUnicodeEscapeSequence
+            // form can follow, so u mode must reject the pattern (deferred;
+            // non-u keeps the identity-escape-plus-literals Annex B reading).
+            DeferredFailIfUnicode(JSERR_RegExpInvalidEscape);
             return 0;
         }
 
@@ -736,7 +744,8 @@ namespace UnifiedRegex
     }
 
     template <typename P, const bool IsLiteral>
-    Node* Parser<P, IsLiteral>::TranslateCodePointSet(CharSet<codepoint_t>& codePointSet, bool isNegation)
+    Node* Parser<P, IsLiteral>::TranslateCodePointSet(CharSet<codepoint_t>& codePointSet, bool isNegation,
+        bool noHalfPairFallback)
     {
         Assert(unicodeFlagPresent);
         Assert(scriptContext->GetConfig()->IsES6UnicodeExtensionsEnabled());
@@ -794,6 +803,7 @@ namespace UnifiedRegex
         // exponentially. The single matcher resolves each position to
         // exactly one interpretation (member pair = 2 units, else unit).
         MatchCodePointSetNode* node = Anew(ctAllocator, MatchCodePointSetNode, caseInsensitiveFlagPresent);
+        node->noHalfPairFallback = noHalfPairFallback;
         codePointSet.CloneSimpleCharsTo(ctAllocator, node->set);
 
         codepoint_t charRangeSearchIndex = 0x10000, lowerCharOfRange = 0, upperCharOfRange = 0;
@@ -2470,8 +2480,10 @@ namespace UnifiedRegex
 
         if (!set.cp.IsEmpty() || (set.numStrings == 0 && !set.containsEmptyString))
         {
-            // TranslateCodePointSet clears the set body
-            appendArm(TranslateCodePointSet(set.cp, /*isNegation*/ false));
+            // TranslateCodePointSet clears the set body. A negated v class
+            // (pure code points: contents that may contain strings are
+            // rejected earlier) keeps the negated-class half-pair rule.
+            appendArm(TranslateCodePointSet(set.cp, /*isNegation*/ false, /*noHalfPairFallback*/ negation));
         }
         else
         {
@@ -2515,6 +2527,60 @@ namespace UnifiedRegex
         if (this->deferredIfNotUnicodeError == nullptr)
         {
             this->deferredIfNotUnicodeError = Anew(ctAllocator, ParseError, inBody, Pos(), Chars<EncodedChar>::OSB(next, input), error);
+        }
+    }
+
+    // Pass 0 helper for atom decimal escapes: the cursor is at the first
+    // digit after '\'. Consumes nothing (the caller's digit loop owns the
+    // cursor); records value/shape for the entry points' u-mode validation.
+    template <typename P, const bool IsLiteral>
+    void Parser<P, IsLiteral>::RecordDecimalEscapePass0()
+    {
+        if (this->numDecimalEscapes == this->decimalEscapesCap)
+        {
+            int newCap = this->decimalEscapesCap == 0 ? 8 : this->decimalEscapesCap * 2;
+            DecimalEscapeOccurrence* newList = AnewArray(ctAllocator, DecimalEscapeOccurrence, newCap);
+            for (int i = 0; i < this->numDecimalEscapes; i++)
+                newList[i] = this->decimalEscapes[i];
+            this->decimalEscapes = newList;
+            this->decimalEscapesCap = newCap;
+        }
+        DecimalEscapeOccurrence& occ = this->decimalEscapes[this->numDecimalEscapes++];
+        // Mirror pass 1's five-digit accumulation so the recorded value and
+        // its overlong flag agree with the backreference/octal
+        // disambiguation the non-u path performs.
+        CharCount digits = 0;
+        uint32 value = 0;
+        while (digits < 5 && ECCanConsume(digits + 1) && standardEncodedChars->IsDigit(ECLookahead(digits)))
+        {
+            value = value * 10 + (uint32)standardEncodedChars->DigitValue(ECLookahead(digits));
+            digits++;
+        }
+        occ.value = value;
+        occ.pos = Pos();
+        occ.encodedPos = Chars<EncodedChar>::OSB(next, input);
+        occ.zeroLeadingRun = ECLookahead() == '0' && ECCanConsume(2) && standardEncodedChars->IsDigit(ECLookahead(1));
+        occ.overlong = digits == 5 && ECCanConsume(digits + 1) && standardEncodedChars->IsDigit(ECLookahead(digits));
+    }
+
+    // Called by every entry point once the flags and the final group count
+    // are known: under u/v an atom decimal escape must be \0 or a
+    // backreference to an existing (possibly later-defined) group. Without
+    // the flag the Annex B octal/identity readings in pass 1 are untouched.
+    template <typename P, const bool IsLiteral>
+    void Parser<P, IsLiteral>::ValidateDecimalEscapesIfUnicode()
+    {
+        if (!this->unicodeFlagPresent)
+        {
+            return;
+        }
+        for (int i = 0; i < this->numDecimalEscapes; i++)
+        {
+            const DecimalEscapeOccurrence& occ = this->decimalEscapes[i];
+            if (occ.zeroLeadingRun || occ.overlong || occ.value >= (uint32)this->numGroups)
+            {
+                throw ParseError(true, occ.pos, occ.encodedPos, JSERR_RegExpInvalidEscape);
+            }
         }
     }
 
@@ -3785,6 +3851,10 @@ namespace UnifiedRegex
         // never quantifiable (ES2018 removed the Annex B QuantifiableAssertion
         // relaxation for them), in either mode.
         bool thisTermIsLookbehind = false;
+        // Set when this term is a (?= / (?! lookahead assertion: Annex B
+        // allows a quantifier on it (QuantifiableAssertion), u/v modes do
+        // not, so the quantifier records a deferred-if-unicode error.
+        bool thisTermIsLookahead = false;
 
         switch (ECLookahead())
         {
@@ -3812,6 +3882,9 @@ namespace UnifiedRegex
                 {
                 case '=':
                 case '!':
+                    ECConsume(2);
+                    thisTermIsLookahead = true;
+                    break;
                 case ':':
                     ECConsume(2);
                     break;
@@ -3900,16 +3973,31 @@ namespace UnifiedRegex
             // pass-0 validator consumed for the most recent class
             // ([a[b]c], [[ab][cd]], [\q{a|b}]); outside that span
             // ([]a], [a]], [[a]]|]) it is an atom and rejects under v.
-            // Non-v modes keep the Annex B leniency exactly as before.
+            // The same span exemption applies to the u-mode rule (']' is a
+            // SyntaxCharacter, so plain u has no bare ']' atom either) and,
+            // below, to the new '{'/'}' rules; non-v modes keep the Annex B
+            // leniency exactly as before.
             if (scriptContext->GetConfig()->IsES6UnicodeExtensionsEnabled())
             {
                 bool inSpan = this->vClassSpanStart != nullptr && next >= this->vClassSpanStart && next < this->vClassSpanEnd;
                 if (!inSpan)
+                {
                     DeferredFailIfUnicodeSets(JSERR_RegExpSyntax);
+                    DeferredFailIfUnicode(JSERR_RegExpSyntax);
+                }
             }
             NextChar();
             break;
         case '}':
+            // '}' is not a PatternCharacter under u (only Annex B has the
+            // ExtendedPatternCharacter literal fallback for it), except
+            // inside a v class span the legacy scanner split early (the
+            // closing braces of \q{...} bodies and nested-class content).
+            if (scriptContext->GetConfig()->IsES6UnicodeExtensionsEnabled()
+                && !(this->vClassSpanStart != nullptr && next >= this->vClassSpanStart && next < this->vClassSpanEnd))
+            {
+                DeferredFailIfUnicode(JSERR_RegExpSyntax);
+            }
             NextChar();
             break;
         case '*':
@@ -3919,7 +4007,17 @@ namespace UnifiedRegex
             if (AtQuantifier())
                 Fail(JSERR_RegExpBadQuant);
             else
+            {
+                if (ECLookahead() == '{' && scriptContext->GetConfig()->IsES6UnicodeExtensionsEnabled()
+                    && !(this->vClassSpanStart != nullptr && next >= this->vClassSpanStart && next < this->vClassSpanEnd))
+                {
+                    // A '{' that does not start a quantifier is an Annex B
+                    // literal only; u mode has no ExtendedPatternCharacter
+                    // fallback for it (v class spans excepted as above).
+                    DeferredFailIfUnicode(JSERR_RegExpSyntax);
+                }
                 ECConsume();
+            }
             break;
         case 0:
             if (IsEOF())
@@ -3950,6 +4048,12 @@ namespace UnifiedRegex
         {
             if (thisTermIsLookbehind)
                 Fail(JSERR_RegExpBadQuant);
+            if (thisTermIsLookahead && scriptContext->GetConfig()->IsES6UnicodeExtensionsEnabled())
+            {
+                // Annex B QuantifiableAssertion+Quantifier; u/v modes reject
+                // (deferred so the non-u reading is unchanged).
+                DeferredFailIfUnicode(JSERR_RegExpBadQuant);
+            }
             switch (ECLookahead())
             {
             case '*':
@@ -4298,6 +4402,7 @@ namespace UnifiedRegex
         }
         else if (standardEncodedChars->IsDigit(ec))
         {
+            RecordDecimalEscapePass0();
             do
             {
                 ECConsume();
@@ -4425,6 +4530,12 @@ namespace UnifiedRegex
                     standardEncodedChars->IsHex(ECLookahead(0)) &&
                     standardEncodedChars->IsHex(ECLookahead(1)))
                     ECConsume(2);
+                else if (scriptContext->GetConfig()->IsES6UnicodeExtensionsEnabled())
+                {
+                    // \xNN is the only hex escape form under u (deferred;
+                    // non-u keeps the identity-escape Annex B reading).
+                    DeferredFailIfUnicode(JSERR_RegExpInvalidEscape);
+                }
                 break;
             case 'u':
                 bool surrogateEncountered = false;
@@ -4437,7 +4548,15 @@ namespace UnifiedRegex
                         // Asserts in place as extra checks for when we do have an allocator
                         Assert(this->ctAllocator == nullptr || this->currentSurrogatePairNode != nullptr);
                         Assert(this->ctAllocator == nullptr || current == this->currentSurrogatePairNode->location);
-                        ECConsume(lengthOfSurrogate);
+                        // The astral branch of TryParseExtendedUnicodeEscape
+                        // rewound the cursor to the '\' to hand its first
+                        // half to this scan; consuming the escape body only
+                        // (lengthOfSurrogate, counted from '{') used to land
+                        // two units short, leaving the escape tail to parse
+                        // as literal terms. Consume the whole escape so the
+                        // scan position matches the source text (the '}' and
+                        // digit strict rules would otherwise see the tail).
+                        ECConsume(lengthOfSurrogate + 2);
                     }
                     //Don't fall through
                     break;
@@ -4457,6 +4576,12 @@ namespace UnifiedRegex
                         TrackIfSurrogatePair(value, (next - 1), 5);
                     }
                     ECConsume(4);
+                }
+                else if (this->scriptContext->GetConfig()->IsES6UnicodeExtensionsEnabled())
+                {
+                    // Under u, \u must be uHex4 or u{CodePoint} (deferred;
+                    // non-u keeps the identity-escape Annex B reading).
+                    DeferredFailIfUnicode(JSERR_RegExpInvalidEscape);
                 }
                 break;
             }
@@ -5399,8 +5524,10 @@ namespace UnifiedRegex
 
         // TranslateCodePointSet clears the translated set itself; under
         // negation the class set was already freed by the complement prep
-        // above (matching the original inline code exactly).
-        return TranslateCodePointSet(*toUseForTranslation, isNegation);
+        // above (matching the original inline code exactly). A negated
+        // u-mode class must not match the lead half of an excluded complete
+        // surrogate pair, so it carries noHalfPairFallback.
+        return TranslateCodePointSet(*toUseForTranslation, isNegation, /*noHalfPairFallback*/ isNegation);
     }
 #pragma warning(push)
 #pragma warning(disable:4702)   // unreachable code
@@ -5428,6 +5555,17 @@ namespace UnifiedRegex
                 digits++;
             }
             while (digits < 3 && standardEncodedChars->IsOctal(ECLookahead())); // terminating 0 is not octal
+            if (scriptContext->GetConfig()->IsES6UnicodeExtensionsEnabled())
+            {
+                // ClassEscape under u allows decimal 0 only when no decimal
+                // digit follows; every legacy octal shape (and \0-started
+                // runs, whose extra digit was already consumed above) is a
+                // deferred u-mode rejection. Non-u keeps the octal reading.
+                if (digits != 1 || n != 0 || standardEncodedChars->IsDigit(ECLookahead()))
+                {
+                    DeferredFailIfUnicode(JSERR_RegExpInvalidEscape);
+                }
+            }
             singleton = UTC((UChar)n);
             // Clear possible pair
             this->tempLocationOfSurrogatePair = nullptr;
@@ -5497,7 +5635,14 @@ namespace UnifiedRegex
                     ECConsume(2);
                 }
                 else
+                {
+                    if (scriptContext->GetConfig()->IsES6UnicodeExtensionsEnabled())
+                    {
+                        // \xNN is the only hex escape form under u
+                        DeferredFailIfUnicode(JSERR_RegExpInvalidEscape);
+                    }
                     singleton = c;
+                }
                 return true;
             case 'u':
                 this->tempLocationOfSurrogatePair = location;
@@ -5522,7 +5667,14 @@ namespace UnifiedRegex
                     ECConsume(4);
                 }
                 else
+                {
+                    if (scriptContext->GetConfig()->IsES6UnicodeExtensionsEnabled())
+                    {
+                        // Under u, \u must be uHex4 or u{CodePoint}
+                        DeferredFailIfUnicode(JSERR_RegExpInvalidEscape);
+                    }
                     singleton = c;
+                }
                 return true;
             case 'k':
                 // There is no \k<Name> backreference inside classes. '\k' is
@@ -5550,6 +5702,40 @@ namespace UnifiedRegex
                 singleton = c;
                 return true;
             default:
+                if (scriptContext->GetConfig()->IsES6UnicodeExtensionsEnabled())
+                {
+                    // Under u a class identity escape is limited to
+                    // SyntaxCharacter plus '-' and '/' (ES2015
+                    // ClassEscape/IdentityEscape; Annex B accepts any
+                    // character). Everything else ([\M], [\8], [\9], ...)
+                    // is a deferred rejection. Deferred-if-unicode-WITHOUT-v:
+                    // the v grammar has its own class-escape policy (its
+                    // validator already rejects word characters and octals,
+                    // while escaped reserved singles like [\&] stay legal).
+                    switch (c)
+                    {
+                    case '^':
+                    case '$':
+                    case '\\':
+                    case '.':
+                    case '*':
+                    case '+':
+                    case '?':
+                    case '(':
+                    case ')':
+                    case '[':
+                    case ']':
+                    case '{':
+                    case '}':
+                    case '|':
+                    case '-':
+                    case '/':
+                        break;
+                    default:
+                        DeferredFailIfUnicodeNoSets(JSERR_RegExpInvalidEscape);
+                        break;
+                    }
+                }
                 // embedded 0 is ok
                 singleton = c;
                 return true;
@@ -5913,6 +6099,9 @@ namespace UnifiedRegex
             throw ParseError(*this->deferredIfUnicodeNoSetsError);
         }
 
+        // Decimal escapes need both the flag and the final group count.
+        ValidateDecimalEscapesIfUnicode();
+
         // Named backreference resolution needs both the full set of group
         // definitions and the u flag, so it runs only now.
         ResolveNamedGroupRefs(body, bodyLim);
@@ -5980,6 +6169,9 @@ namespace UnifiedRegex
         {
             throw ParseError(*this->deferredIfUnicodeNoSetsError);
         }
+
+        // Decimal escapes need both the flag and the final group count.
+        ValidateDecimalEscapesIfUnicode();
 
         // Named backreference resolution needs both the full set of group
         // definitions and the u flag, so it runs only now.
@@ -6051,6 +6243,12 @@ namespace UnifiedRegex
         {
             throw ParseError(*this->deferredIfUnicodeNoSetsError);
         }
+
+        // Decimal escapes need both the flag and the final group count;
+        // this no-AST scan is the one deferred functions get, and a syntax
+        // error discovered only on the later reparse is reported as an
+        // internal error, so the validation has to run now too.
+        ValidateDecimalEscapesIfUnicode();
 
         // ParseLiteral resolves named references here. This no-AST scan is
         // the one deferred functions get, and a syntax error discovered only
@@ -6191,55 +6389,62 @@ namespace UnifiedRegex
         Node* nodeToReturn = nullptr;
         if (this->scriptContext->GetConfig()->IsES6UnicodeExtensionsEnabled() && this->unicodeFlagPresent)
         {
-            MatchSetNode *lowerRangeNode = Anew(ctAllocator, MatchSetNode, false, false, caseInsensitiveFlagPresent);
-            lowerRangeNode->set.SetRange(ctAllocator, (Char)0xD800, (Char)0xDBFF);
-            MatchSetNode *upperRangeNode = Anew(ctAllocator, MatchSetNode, false, false, caseInsensitiveFlagPresent);
-            upperRangeNode->set.SetRange(ctAllocator, (Char)0xDC00, (Char)0xDFFF);
-
-            ConcatNode* surrogateRangePairNode = Anew(ctAllocator, ConcatNode, lowerRangeNode, Anew(ctAllocator, ConcatNode, upperRangeNode, nullptr));
-
-            // The MatchSet node will be split into [0-D7FFDC00-FFFF] (minus special characters like newline, whitespace, etc.) as a prefix, and a suffix of [D800-DBFF]
-            // i.e. The MatchSet node can be with [0-D7FFDC00-FFFF] (minus special characters like newline, whitespace, etc.) OR [D800-DBFF]
-            MatchSetNode* partialPrefixSetNode = Anew(ctAllocator, MatchSetNode, false, false, caseInsensitiveFlagPresent);
+            // One deterministic whole-code-point-set atom: the same standard
+            // set the previous BMP prefix arm carried (lone-surrogate code
+            // points included as members), lifted to code points with the
+            // astral planes 0x10000..0x10FFFF added. The previous
+            // prefix/pair/lone-high-surrogate alternation left a complete
+            // surrogate pair with two live interpretations (the 2-unit pair
+            // arm and a 1-unit lone-high arm), so a quantified consumer such
+            // as (.+).*\1/u could capture a half of a pair and backtrack
+            // into it; TranslateCodePointSet's matcher resolves each
+            // position to exactly one interpretation.
+            CharSet<Char> units;
             switch (cc)
             {
             case '.':
                 if (this->dotAllFlagPresent)
                 {
-                    standardChars->SetFullSet(ctAllocator, partialPrefixSetNode->set);
+                    standardChars->SetFullSet(ctAllocator, units);
                 }
                 else
                 {
-                    standardChars->SetNonNewline(ctAllocator, partialPrefixSetNode->set);
+                    standardChars->SetNonNewline(ctAllocator, units);
                 }
                 break;
             case 'S':
-                standardChars->SetNonWhitespace(ctAllocator, partialPrefixSetNode->set);
+                standardChars->SetNonWhitespace(ctAllocator, units);
                 break;
             case 'D':
-                standardChars->SetNonDigits(ctAllocator, partialPrefixSetNode->set);
+                standardChars->SetNonDigits(ctAllocator, units);
                 break;
             case 'W':
                 if (this->caseInsensitiveFlagPresent)
                 {
-                    standardChars->SetNonWordIUChars(ctAllocator, partialPrefixSetNode->set);
+                    standardChars->SetNonWordIUChars(ctAllocator, units);
                 }
                 else
                 {
-                    standardChars->SetNonWordChars(ctAllocator, partialPrefixSetNode->set);
+                    standardChars->SetNonWordChars(ctAllocator, units);
                 }
                 break;
             default:
                 AssertMsg(false, "");
             }
 
-            partialPrefixSetNode->set.SubtractRange(ctAllocator, (Char)0xD800u, (Char)0xDBFFu);
-
-            MatchSetNode* partialSuffixSetNode = Anew(ctAllocator, MatchSetNode, false, false, caseInsensitiveFlagPresent);
-            partialSuffixSetNode->set.SetRange(ctAllocator, (Char)0xD800u, (Char)0xDBFFu);
-
-            AltNode* altNode = Anew(ctAllocator, AltNode, partialPrefixSetNode, Anew(ctAllocator, AltNode, surrogateRangePairNode, Anew(ctAllocator, AltNode, partialSuffixSetNode, nullptr)));
-            nodeToReturn = altNode;
+            CharSet<codepoint_t> codePointSet;
+            Char lo = 0, hi = 0;
+            Char search = 0;
+            while (units.GetNextRange(search, &lo, &hi))
+            {
+                codePointSet.SetRange(ctAllocator, lo, hi);
+                if (hi == Chars<Char>::MaxUChar)
+                    break;
+                search = hi + 1;
+            }
+            units.FreeBody(ctAllocator);
+            codePointSet.SetRange(ctAllocator, 0x10000, 0x10FFFF);
+            nodeToReturn = TranslateCodePointSet(codePointSet, false);
         }
         else
         {

@@ -4800,25 +4800,15 @@ namespace UnifiedRegex
             return matcher.Fail(FAIL_PARAMETERS);
 
         const Char c0 = input[inputOffset];
-        if (!Js::NumberUtilities::IsSurrogateLowerPart(c0) && !Js::NumberUtilities::IsSurrogateUpperPart(c0))
-        {
-            // Plain BMP unit: single-unit membership.
-            if (this->set.Get(c0))
-            {
-                inputOffset++;
-                instPointer += sizeof(*this);
-                return false;
-            }
-            return matcher.Fail(FAIL_PARAMETERS);
-        }
-
         if (Js::NumberUtilities::IsSurrogateLowerPart(c0) &&
             inputOffset + 1 < inputLength &&
             Js::NumberUtilities::IsSurrogateUpperPart(input[inputOffset + 1]))
         {
             // A complete pair is one code point: prefer the 2-unit member
             // interpretation, then the lone-high fallback (preserving the
-            // engine's documented lone-surrogate behavior).
+            // engine's documented lone-surrogate behavior for positive
+            // sets and property escapes). NEGATED u-mode classes take no
+            // fallback: half of an excluded astral symbol is not a match.
             const codepoint_t cp = Js::NumberUtilities::SurrogatePairAsCodePoint(c0, input[inputOffset + 1]);
             int lo = 0;
             int hi = numRanges - 1;
@@ -4842,6 +4832,10 @@ namespace UnifiedRegex
                 inputOffset += 2;
                 instPointer += sizeof(*this);
                 return false;
+            }
+            if (noHalfPairFallback)
+            {
+                return matcher.Fail(FAIL_PARAMETERS);
             }
         }
 
@@ -6315,13 +6309,33 @@ namespace UnifiedRegex
                 // Need to continue matching even if matchStart == inputLim since some patterns may match an empty string at the end
                 // of the input. For instance: /a*$/.exec("b")
                 bool firstIteration = true;
+                // In u/v modes a match can never begin inside a surrogate
+                // pair, so the retry start advances by the whole code point
+                // at the failed start (two units for a complete pair, else
+                // one); non-u keeps the Annex B per-unit advance exactly.
+                const bool isUnicodeMode = (prog->flags & (UnicodeRegexFlag | UnicodeSetsRegexFlag)) != 0;
                 do
                 {
                     // Let there be only one call to MatchHere(), as that call expands the interpreter loop in-place. Having
                     // multiple calls to MatchHere() would bloat the code.
                     res = MatchHere(input, inputLength, offset, nextSyncInputOffset, regexStacks->contStack, regexStacks->assertionStack, qcTicks, firstIteration);
                     firstIteration = false;
-                } while(!res && loopMatchHere && ++offset <= inputLength);
+                    if (res || !loopMatchHere)
+                    {
+                        break;
+                    }
+                    if (isUnicodeMode && offset < inputLength &&
+                        Js::NumberUtilities::IsSurrogateLowerPart(input[offset]) &&
+                        offset + 1 < inputLength &&
+                        Js::NumberUtilities::IsSurrogateUpperPart(input[offset + 1]))
+                    {
+                        offset += 2;
+                    }
+                    else
+                    {
+                        offset++;
+                    }
+                } while (offset <= inputLength);
 
                 break;
             }

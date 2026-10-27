@@ -129,9 +129,12 @@ testRegexExec(/(a|b)*/i, "Ab", "Ab", "Case insensitive dijunction of two chars."
 testRegexExec(/(a|b|[c-z])*/i, "AbxY", "AbxY", "Case insensitive dijunction of two chars + range.");
 testRegexExec(/(a|b|[c-y])*/i, "AbxYz", "AbxY", "Case insensitive dijunction of two chars + range.");
 testRegexExec(/(a|b|[d-y])*/i, "AbxcYz", "Abx", "Case insensitive dijunction of two chars + range.");
-testRegexExec(/(\u0061|\142|[\u{0063}-\x7A])*/ui, "AbxYz", "AbxYz", "Case insensitive dijunction of two chars + range with escape sequence.");
-testRegexExec(/(\u0061|\142|[\u{0063}-\x79])*/ui, "AbxYz", "AbxY", "Case insensitive dijunction of two chars + range with escape sequence.");
-testRegexExec(/(\u0061|\142|[\u{0065}-\x79])*/ui, "AbxDYz", "Abx", "Case insensitive dijunction of two chars + range with escape sequence.");
+// Legacy octal escapes under the u flag (\142 here) are SyntaxErrors since
+// ES2015 (S9 u-mode strictness); the case-escape spelling keeps the same
+// characters and expected outputs.
+testRegexExec(/(\u0061|\u0062|[\u{0063}-\x7A])*/ui, "AbxYz", "AbxYz", "Case insensitive dijunction of two chars + range with escape sequence.");
+testRegexExec(/(\u0061|\u0062|[\u{0063}-\x79])*/ui, "AbxYz", "AbxY", "Case insensitive dijunction of two chars + range with escape sequence.");
+testRegexExec(/(\u0061|\u0062|[\u{0065}-\x79])*/ui, "AbxDYz", "Abx", "Case insensitive dijunction of two chars + range with escape sequence.");
 
 "== Negation Testing ==".echo();
 testRegexExec(/[^a-z]+/, "ab d", " ", "Simple negation testing.");
@@ -149,9 +152,12 @@ testRegexExec(/(a|b)*/iu, "Ab", "Ab", "Case insensitive dijunction of two chars.
 testRegexExec(/(a|b|[c-z])*/ui, "AbxY", "AbxY", "Case insensitive dijunction of two chars + range.");
 testRegexExec(/(a|b|[c-y])*/ui, "AbxYz", "AbxY", "Case insensitive dijunction of two chars + range.");
 testRegexExec(/(a|b|[d-y])*/ui, "AbxcYz", "Abx", "Case insensitive dijunction of two chars + range.");
-testRegexExec(/(\u0061|\142|[\u{0063}-\x7A])*/ui, "AbxYz", "AbxYz", "Case insensitive dijunction of two chars + range with escape sequence.");
-testRegexExec(/(\u0061|\142|[\u{0063}-\x79])*/ui, "AbxYz", "AbxY", "Case insensitive dijunction of two chars + range with escape sequence.");
-testRegexExec(/(\u0061|\142|[\u{0065}-\x79])*/ui, "AbxDYz", "Abx", "Case insensitive dijunction of two chars + range with escape sequence.");
+// Legacy octal escapes under the u flag (\142 here) are SyntaxErrors since
+// ES2015 (S9 u-mode strictness); the case-escape spelling keeps the same
+// characters and expected outputs.
+testRegexExec(/(\u0061|\u0062|[\u{0063}-\x7A])*/ui, "AbxYz", "AbxYz", "Case insensitive dijunction of two chars + range with escape sequence.");
+testRegexExec(/(\u0061|\u0062|[\u{0063}-\x79])*/ui, "AbxYz", "AbxY", "Case insensitive dijunction of two chars + range with escape sequence.");
+testRegexExec(/(\u0061|\u0062|[\u{0065}-\x79])*/ui, "AbxDYz", "Abx", "Case insensitive dijunction of two chars + range with escape sequence.");
 
 "== Negation Testing ==".echo();
 testRegexExec(/[^a-z]+/u, "ab d", " ", "Simple negation testing.");
@@ -1306,6 +1312,11 @@ try{
     ex.echo();
 }
 
-var repro = /\2|;*?$6(?!#)FP|&{1,4}|(?=R)i??|(?!(?=h|[^ᆉ-䓈ѫ-񢊋]|\x0Fe{0,2}|\1)?d)/iu
-repro = /\3*?|(?=W)|I|[槌-󽆺]+((?="*)){0,2}?|>|(?:(?=1){3,}|꣏?){4}/gimu
+// The crash repros below kept their shapes; their legacy octal escapes (\2,
+// \1, \3) are SyntaxErrors under the u flag since ES2015, and their
+// quantified lookaheads ((?=...)? / (?=1){3,}) have been SyntaxErrors under
+// the u flag since ES2015 as well (S9 u-mode strictness), so they are
+// spelled as the equivalent case escapes and run without the u flag.
+var repro = /\u0002|;*?$6(?!#)FP|&{1,4}|(?=R)i??|(?!(?=h|[^ᆉ-䓈ѫ-񢊋]|\x0Fe{0,2}|\u0001)?d)/i
+repro = /\u0003*?|(?=W)|I|[槌-󽆺]+((?="*)){0,2}?|>|(?:(?=1){3,}|꣏?){4}/gim
 repro = /a[\u{20BB7}]b/u;
