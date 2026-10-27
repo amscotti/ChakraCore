@@ -4805,10 +4805,17 @@ namespace UnifiedRegex
             Js::NumberUtilities::IsSurrogateUpperPart(input[inputOffset + 1]))
         {
             // A complete pair is one code point: prefer the 2-unit member
-            // interpretation, then the lone-high fallback (preserving the
-            // engine's documented lone-surrogate behavior for positive
-            // sets and property escapes). NEGATED u-mode classes take no
-            // fallback: half of an excluded astral symbol is not a match.
+            // interpretation, then the lead-unit fallback. The fallback is
+            // the engine's documented behavior for POSITIVE sets and for
+            // property escapes of both polarities: the pinned
+            // property-escapes corpus passes its unanchored loop forms only
+            // because the fallback matches both halves of astral pairs that
+            // ICU 79.1 includes in the property but the newer pinned corpus
+            // does not (data drift; see doc/c2-s9-u-strictness.md). Only
+            // NEGATED u-mode character classes (noHalfPairFallback, set by
+            // the legacy CharacterClassPass1 complement path and v's
+            // pure-code-point negations) skip it: half of an excluded
+            // astral symbol is not a match.
             const codepoint_t cp = Js::NumberUtilities::SurrogatePairAsCodePoint(c0, input[inputOffset + 1]);
             int lo = 0;
             int hi = numRanges - 1;
@@ -5974,7 +5981,11 @@ namespace UnifiedRegex
 #if ENABLE_REGEX_CONFIG_OPTIONS
             CompStats();
 #endif
-            if (MatchSingleCharCaseInsensitiveHere(mappingSource, input, offset, c))
+            // offset can be inputLength (exec at the end of the input, or on
+            // a sliced string whose storage ends here); reading input[offset]
+            // would read past the input (the terminating NUL on flat
+            // strings, the parent's next character on slices).
+            if (offset < inputLength && MatchSingleCharCaseInsensitiveHere(mappingSource, input, offset, c))
             {
                 GroupInfo* const info = GroupIdToGroupInfo(0);
                 info->offset = offset;
@@ -5988,6 +5999,9 @@ namespace UnifiedRegex
             }
         }
 
+        // In u/v modes a match can never begin inside a surrogate pair, so
+        // the scan advances past a complete pair as one code point.
+        const bool isUnicodeMode = (program->flags & (UnicodeRegexFlag | UnicodeSetsRegexFlag)) != 0;
         while (offset < inputLength)
         {
 #if ENABLE_REGEX_CONFIG_OPTIONS
@@ -6000,7 +6014,17 @@ namespace UnifiedRegex
                 info->length = 1;
                 return true;
             }
-            offset++;
+            if (isUnicodeMode &&
+                Js::NumberUtilities::IsSurrogateLowerPart(input[offset]) &&
+                offset + 1 < inputLength &&
+                Js::NumberUtilities::IsSurrogateUpperPart(input[offset + 1]))
+            {
+                offset += 2;
+            }
+            else
+            {
+                offset++;
+            }
         }
 
         ResetGroup(0);
@@ -6024,7 +6048,11 @@ namespace UnifiedRegex
 #if ENABLE_REGEX_CONFIG_OPTIONS
             CompStats();
 #endif
-            if (input[offset] == c)
+            // offset can be inputLength (exec at the end of the input, or on
+            // a sliced string whose storage ends here); reading input[offset]
+            // would read past the input (the terminating NUL on flat
+            // strings, the parent's next character on slices).
+            if (offset < inputLength && input[offset] == c)
             {
                 GroupInfo* const info = GroupIdToGroupInfo(0);
                 info->offset = offset;
@@ -6038,6 +6066,9 @@ namespace UnifiedRegex
             }
         }
 
+        // In u/v modes a match can never begin inside a surrogate pair, so
+        // the scan advances past a complete pair as one code point.
+        const bool isUnicodeMode = (program->flags & (UnicodeRegexFlag | UnicodeSetsRegexFlag)) != 0;
         while (offset < inputLength)
         {
 #if ENABLE_REGEX_CONFIG_OPTIONS
@@ -6050,7 +6081,17 @@ namespace UnifiedRegex
                 info->length = 1;
                 return true;
             }
-            offset++;
+            if (isUnicodeMode &&
+                Js::NumberUtilities::IsSurrogateLowerPart(input[offset]) &&
+                offset + 1 < inputLength &&
+                Js::NumberUtilities::IsSurrogateUpperPart(input[offset + 1]))
+            {
+                offset += 2;
+            }
+            else
+            {
+                offset++;
+            }
         }
 
         ResetGroup(0);

@@ -236,6 +236,135 @@ var tests = [
         }
     },
     {
+        name: "u-mode rejects v nested-class syntax; v and non-u keep their readings",
+        body() {
+            // Nested classes, set operations and \q are v grammar: plain u
+            // rejects (Node/Bun agree), v accepts, non-u keeps the Annex B
+            // legacy class reading.
+            compileError("/[[a]]/u");
+            compileError("/[a[b]c]/u");
+            compileError("/[[a]--[b]]/u");
+            compileError("/[^[a]]/u");
+            compileError("/[[ab][cd]]/u");
+            dynError("[[a]]", "u");
+            dynError("[a[b]c]", "u");
+            dynError("[[a]--[b]]", "u");
+            compileOk("/[[a]]/v");
+            compileOk("/[a[b]c]/v");
+            compileOk("/[[a]--[b]]/v");
+            compileOk("/[^[a]]/v");
+            assert.isTrue(/[a[b]c]/v.test("b"), "v nested-class member");
+            compileOk("/[[a]]/");
+            compileOk("/[a[b]c]/");
+            assert.isFalse(new RegExp("[[a]]").test("]"), "non-u legacy class does not match ]");
+            assert.isTrue(new RegExp("[a[b]").test("["), "non-u legacy class member [");
+        }
+    },
+    {
+        name: "v-mode escaped class punctuation: only escapes and ClassSet punctuation",
+        body() {
+            // An escaped character in a v class must be a CharacterEscape
+            // or escaped ClassSet punctuation (syntax characters, reserved
+            // double-punctuator components, '-' and '^'). Everything else
+            // rejects. eval sources carry ONE backslash before the char.
+            var bs = String.fromCharCode(92);
+            var rejects = ['"', "'", " ", "k", "e", "_", "3"];
+            for (var i = 0; i < rejects.length; i++) {
+                (function (c) {
+                    assert.throws(function () { eval("/[" + bs + c + "]/v"); }, SyntaxError, "v class reject \\" + c);
+                })(rejects[i]);
+            }
+            var accepts = ["&", "-", "/", "!", "#", "%", "~", "{", "}", "^", "`", "(", ")", "[", "]", "|", "*", "+", ",", ".", ":", ";", "<", "=", ">", "?", "@"];
+            for (var j = 0; j < accepts.length; j++) {
+                (function (c) {
+                    assert.doesNotThrow(function () { eval("/[" + bs + c + "]/v"); }, "v class accept \\" + c);
+                })(accepts[j]);
+            }
+            // valid escapes and semantics keep working
+            assert.isTrue(new RegExp("[" + bs + "d]", "v").test("5"));
+            assert.isTrue(new RegExp("[" + bs + "b" + bs + "-d]", "v").test("\u0008"));
+            assert.isTrue(new RegExp("[a" + bs + "-c]", "v").test("-"), "escaped dash is a literal member");
+            assert.isTrue(new RegExp("[" + bs + "^]", "v").test("^"));
+            // plain u also rejects the non-identity leftovers (existing rule)
+            assert.throws(function () { eval("/[" + bs + "k]/u"); }, SyntaxError, "u class reject \\k");
+        }
+    },
+    {
+        name: "Sticky single-char at the input end: no out-of-bounds read",
+        body() {
+            // exec at lastIndex == length must fail without reading past the
+            // input (the terminating NUL of flat strings / the parent's next
+            // character of slices).
+            var re;
+            re = /\0/y; re.lastIndex = 0;
+            assert.areEqual(null, re.exec(""), "empty input, lastIndex 0 == length");
+            re = /\0/y; re.lastIndex = 2;
+            assert.areEqual(null, re.exec("ab"), "flat input at end");
+            re = /\0/gy; re.lastIndex = 2;
+            assert.areEqual(null, re.exec("ab"), "global sticky at end");
+            re = /A/iy; re.lastIndex = 0;
+            assert.areEqual(null, re.exec(""), "case-insensitive empty at end");
+            var parent = "ab\u0000cd";
+            var child = parent.slice(0, 2); // storage ends where the parent keeps \u0000
+            assert.areEqual(2, child.length, "slice length control");
+            re = /\0/y; re.lastIndex = child.length;
+            assert.areEqual(null, re.exec(child), "sliced child at its end");
+            // positive controls: the same patterns do match when the char
+            // really is at lastIndex
+            assert.areEqual("\u0000", /\0/y.exec("\u0000x")[0], "sticky matches at 0");
+            assert.areEqual("\u0000", /\0/y.exec("xx\u0000yy".slice(2))[0], "sticky matches sliced start");
+            re = /\0/gy;
+            assert.areEqual("\u0000", re.exec("\u0000a")[0], "global sticky at 0");
+        }
+    },
+    {
+        name: "Atom identity escapes under u reject in every parse mode",
+        body() {
+            var bs = String.fromCharCode(92);
+            var rejects = ["e", "-", " ", "M", "q", "A"];
+            for (var i = 0; i < rejects.length; i++) {
+                (function (c) {
+                    assert.throws(function () { eval("/" + bs + c + "/u"); }, SyntaxError, "identity \\" + c + " under u");
+                    assert.throws(function () { new RegExp(bs + c, "u"); }, SyntaxError, "dynamic identity \\" + c);
+                })(rejects[i]);
+            }
+            // SyntaxCharacter, '/', ZWNJ/ZWJ and the pseudo-escapes stay legal
+            assert.isTrue(eval("/" + bs + "{/u").test("{"), "\\{ under u");
+            assert.isTrue(eval("/" + bs + "}/u").test("}"), "\\} under u");
+            assert.isTrue(eval("/" + bs + "u200C/u").test("\u200C"), "ZWNJ under u");
+            assert.isTrue(eval("/" + bs + "u200D/u").test("\u200D"), "ZWJ under u");
+            assert.isTrue(eval("/" + bs + "d/u").test("5"), "\\d under u");
+            assert.isTrue(eval("/" + bs + "b/u").test("ab"), "\\b under u");
+            assert.isTrue(new RegExp(bs + "/", "u").test("/"), "\\/ under u");
+            // non-u Annex B identity escapes preserved
+            assert.isTrue(eval("/" + bs + "e/").test("e"), "non-u \\e");
+            assert.isTrue(eval("/" + bs + "-/").test("-"), "non-u \\-");
+            assert.isTrue(eval("/" + bs + "M/").test("M"), "non-u \\M");
+            // deferred constructor bodies agree (the no-AST scan records the
+            // rejection, so the reparse throws a clean SyntaxError)
+            assert.throws(function () { (new Function("return /" + bs + "e/u"))(); }, SyntaxError, "deferred \\e");
+            assert.throws(function () { (new Function("return /" + bs + "-/u"))(); }, SyntaxError, "deferred \\-");
+            assert.throws(function () { (new Function("return /" + bs + " /u"))(); }, SyntaxError, "deferred \\ ");
+        }
+    },
+    {
+        name: "Single-char scan advances per code point under u/v",
+        body() {
+            // A trail-surrogate single-char pattern cannot match inside a
+            // complete surrogate pair (the fast path now skips pairs).
+            assert.areEqual(null, new RegExp("\\uDE00", "u").exec("\ud800\ude00"), "trail surrogate vs pair");
+            assert.areEqual(null, new RegExp("\\uDE00", "iu").exec("\ud800\ude00"), "trail surrogate vs pair (i)");
+            assert.areEqual("\ude00", new RegExp("\\uDE00", "u").exec("\ude00")[0], "lone trail direct");
+            // plain searches after a pair keep finding the next code point
+            assert.areEqual("X", new RegExp("X", "u").exec("\ud800\udc00X")[0], "search after pair");
+            assert.areEqual("a", new RegExp("a", "iu").exec("\ud800\udc00a")[0], "i-search after pair");
+            assert.areEqual("X", new RegExp("X", "v").exec("\ud800\udc00X")[0], "v search after pair");
+            assert.areEqual(null, new RegExp("X", "u").exec("\ud800\udc00"), "no false match in pair");
+            // non-u keeps the per-unit scan exactly
+            assert.areEqual("\udc00", /\uDC00/.exec("\ud800\udc00")[0], "non-u per-unit scan");
+        }
+    },
+    {
         name: "Deferred parse: the new early errors fire in every parse mode",
         body() {
             // eval and dynamic forms parse at runtime, so the same sources
@@ -245,7 +374,8 @@ var tests = [
             // where the valid literals above prove the scan does not
             // false-reject.
             var sources = ["/{/u", "/\\1/u", "/\\8/u", "/.(?=.)?/u", "/\\u{1,}/u",
-                           "/\\u{1F_639}/u", "/]/u", "/[\\M]/u", "/[\\8]/u", "/[\\q{a}]/u"];
+                           "/\\u{1F_639}/u", "/]/u", "/[\\M]/u", "/[\\8]/u", "/[\\q{a}]/u",
+                           "/[[a]]/u", "/[a[b]c]/u", "/\\e/u", "/\\-/u", "/\\ /u"];
             for (var i = 0; i < sources.length; i++) {
                 (function (src) {
                     assert.throws(function () { eval(src); }, SyntaxError, "eval " + src);

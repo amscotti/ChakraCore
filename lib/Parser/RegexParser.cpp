@@ -1522,10 +1522,48 @@ namespace UnifiedRegex
                         DeferredFailIfUnicodeSets(JSERR_RegExpInvalidEscape);
                         return;
                     }
-                    // Identity escape of a non-digit character: v keeps the
-                    // u-mode class policy (punctuation yes; letters and
-                    // other IDContinue characters are left to the shared
-                    // u-mode deferred machinery).
+                    // Identity escape of a non-digit character. Under the v
+                    // grammar an escaped class character is legal only as a
+                    // CharacterEscape (handled by the cases above) or as
+                    // escaped ClassSet punctuation: the ClassSetSyntax
+                    // characters, the reserved-double-punctuator components
+                    // and the '-'/'^' operators. Everything else ([\" ],
+                    // [\ ], [\'], [\k], non-ASCII, ...) rejects.
+                    switch (c)
+                    {
+                    case '!':
+                    case '#':
+                    case '$':
+                    case '%':
+                    case '&':
+                    case '(':
+                    case ')':
+                    case '*':
+                    case '+':
+                    case ',':
+                    case '-':
+                    case '.':
+                    case '/':
+                    case ':':
+                    case ';':
+                    case '<':
+                    case '=':
+                    case '>':
+                    case '?':
+                    case '@':
+                    case '[':
+                    case ']':
+                    case '^':
+                    case '`':
+                    case '{':
+                    case '|':
+                    case '}':
+                    case '~':
+                        break;
+                    default:
+                        DeferredFailIfUnicodeSets(JSERR_RegExpInvalidEscape);
+                        break;
+                    }
                     ECConsume();
                     isSingleton = true;
                     return;
@@ -3973,10 +4011,10 @@ namespace UnifiedRegex
             // pass-0 validator consumed for the most recent class
             // ([a[b]c], [[ab][cd]], [\q{a|b}]); outside that span
             // ([]a], [a]], [[a]]|]) it is an atom and rejects under v.
-            // The same span exemption applies to the u-mode rule (']' is a
-            // SyntaxCharacter, so plain u has no bare ']' atom either) and,
-            // below, to the new '{'/'}' rules; non-v modes keep the Annex B
-            // leniency exactly as before.
+            // Inside the span the content is v grammar: legal under v and
+            // under non-u Annex B, but plain u has no nested classes, so it
+            // rejects there (deferred-if-unicode-without-v). Non-v modes
+            // keep the Annex B leniency exactly as before.
             if (scriptContext->GetConfig()->IsES6UnicodeExtensionsEnabled())
             {
                 bool inSpan = this->vClassSpanStart != nullptr && next >= this->vClassSpanStart && next < this->vClassSpanEnd;
@@ -3985,6 +4023,10 @@ namespace UnifiedRegex
                     DeferredFailIfUnicodeSets(JSERR_RegExpSyntax);
                     DeferredFailIfUnicode(JSERR_RegExpSyntax);
                 }
+                else
+                {
+                    DeferredFailIfUnicodeNoSets(JSERR_RegExpSyntax);
+                }
             }
             NextChar();
             break;
@@ -3992,11 +4034,18 @@ namespace UnifiedRegex
             // '}' is not a PatternCharacter under u (only Annex B has the
             // ExtendedPatternCharacter literal fallback for it), except
             // inside a v class span the legacy scanner split early (the
-            // closing braces of \q{...} bodies and nested-class content).
-            if (scriptContext->GetConfig()->IsES6UnicodeExtensionsEnabled()
-                && !(this->vClassSpanStart != nullptr && next >= this->vClassSpanStart && next < this->vClassSpanEnd))
+            // closing braces of \q{...} bodies and nested-class content),
+            // where it is v grammar: legal under v, rejected under plain u.
+            if (scriptContext->GetConfig()->IsES6UnicodeExtensionsEnabled())
             {
-                DeferredFailIfUnicode(JSERR_RegExpSyntax);
+                if (this->vClassSpanStart != nullptr && next >= this->vClassSpanStart && next < this->vClassSpanEnd)
+                {
+                    DeferredFailIfUnicodeNoSets(JSERR_RegExpSyntax);
+                }
+                else
+                {
+                    DeferredFailIfUnicode(JSERR_RegExpSyntax);
+                }
             }
             NextChar();
             break;
@@ -4008,13 +4057,21 @@ namespace UnifiedRegex
                 Fail(JSERR_RegExpBadQuant);
             else
             {
-                if (ECLookahead() == '{' && scriptContext->GetConfig()->IsES6UnicodeExtensionsEnabled()
-                    && !(this->vClassSpanStart != nullptr && next >= this->vClassSpanStart && next < this->vClassSpanEnd))
+                if (ECLookahead() == '{' && scriptContext->GetConfig()->IsES6UnicodeExtensionsEnabled())
                 {
-                    // A '{' that does not start a quantifier is an Annex B
-                    // literal only; u mode has no ExtendedPatternCharacter
-                    // fallback for it (v class spans excepted as above).
-                    DeferredFailIfUnicode(JSERR_RegExpSyntax);
+                    if (this->vClassSpanStart != nullptr && next >= this->vClassSpanStart && next < this->vClassSpanEnd)
+                    {
+                        // v class-span content (see '}' above): legal under
+                        // v, rejected under plain u, literal without u.
+                        DeferredFailIfUnicodeNoSets(JSERR_RegExpSyntax);
+                    }
+                    else
+                    {
+                        // A '{' that does not start a quantifier is an Annex B
+                        // literal only; u mode has no ExtendedPatternCharacter
+                        // fallback for it.
+                        DeferredFailIfUnicode(JSERR_RegExpSyntax);
+                    }
                 }
                 ECConsume();
             }
@@ -4538,8 +4595,9 @@ namespace UnifiedRegex
                 }
                 break;
             case 'u':
-                bool surrogateEncountered = false;
-                int lengthOfSurrogate = TryParseExtendedUnicodeEscape(c, surrogateEncountered, true);
+                {
+                    bool surrogateEncountered = false;
+                    int lengthOfSurrogate = TryParseExtendedUnicodeEscape(c, surrogateEncountered, true);
                 if (lengthOfSurrogate > 0)
                 {
                     if (surrogateEncountered)
@@ -4582,6 +4640,68 @@ namespace UnifiedRegex
                     // Under u, \u must be uHex4 or u{CodePoint} (deferred;
                     // non-u keeps the identity-escape Annex B reading).
                     DeferredFailIfUnicode(JSERR_RegExpInvalidEscape);
+                }
+                break;
+                }
+            default:
+                if (this->scriptContext->GetConfig()->IsES6UnicodeExtensionsEnabled())
+                {
+                    // Under u an identity escape is limited to
+                    // SyntaxCharacter plus '/' and the ZWNJ/ZWJ (ES2015
+                    // IdentityEscape; the pseudo-escapes below reach their
+                    // own pass-1 cases). Record the rejection here in pass
+                    // 0 so deferred (no-AST) parses fail with a clean
+                    // SyntaxError instead of an internal error on the
+                    // later reparse; non-u keeps any-character Annex B
+                    // identity escapes. Inside a v class span the legacy
+                    // scan's leftover escapes are v class grammar (e.g.
+                    // the \q of [[a]--\q{b}]): legal under v, rejected
+                    // under plain u, Annex B identity without u.
+                    bool inVClassSpan = this->vClassSpanStart != nullptr && next >= this->vClassSpanStart && next < this->vClassSpanEnd;
+                    switch (c)
+                    {
+                    case '^':
+                    case '$':
+                    case '\\':
+                    case '.':
+                    case '*':
+                    case '+':
+                    case '?':
+                    case '(':
+                    case ')':
+                    case '[':
+                    case ']':
+                    case '{':
+                    case '}':
+                    case '|':
+                    case '/':
+                    case 'f':
+                    case 'n':
+                    case 'r':
+                    case 't':
+                    case 'v':
+                    case 'd':
+                    case 'D':
+                    case 's':
+                    case 'S':
+                    case 'w':
+                    case 'W':
+                        break;
+                    default:
+                        if (c == (Char)0x200C || c == (Char)0x200D) // ZWNJ / ZWJ
+                        {
+                            break;
+                        }
+                        if (inVClassSpan)
+                        {
+                            DeferredFailIfUnicodeNoSets(JSERR_RegExpInvalidEscape);
+                        }
+                        else
+                        {
+                            DeferredFailIfUnicode(JSERR_RegExpInvalidEscape);
+                        }
+                        break;
+                    }
                 }
                 break;
             }

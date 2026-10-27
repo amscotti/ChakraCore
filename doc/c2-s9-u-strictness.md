@@ -1,6 +1,7 @@
 # C2-S9: u-mode RegExp strictness
 
-Status: **pending**
+Status: **pending** (review-repair round applied on top; see "Review
+repairs" below)
 
 ## Scope
 
@@ -207,6 +208,108 @@ was dropped to keep the diff minimal.
   `out/test262-s9-final-*` (final), each `summary.json` recording the run
   identity and dylib hash.
 
+## Review repairs (combined review round on `a7b60e94a`)
+
+1. **u-mode rejects v nested-class syntax.** The v-class span exemption for
+   `]`/`{`/`}` atoms (the legacy scanner ends nested/`\q` classes early)
+   now only applies when the `v` flag is actually present: inside a span
+   the atoms record a deferred-if-unicode-WITHOUT-v error, so
+   `[[a]]/u`, `[a[b]c]/u`, `[[a]--[b]]/u`, `[^[a]]/u`, `[[ab][cd]]/u`
+   reject under plain u while staying legal under v and under non-u
+   Annex B (Node 26.5.0 == Bun 1.4.3 on every shape).
+2. **v-mode escaped class punctuation.** `VValidateEscape`'s identity
+   default is now limited to the ClassSet punctuation set (syntax
+   characters, reserved-double-punctuator components, `-`, `^`):
+   `[\" ]`, `[\' ]`, `[\ ]`, `[\k]`, `[\3]`, `[\_]` reject under v, while
+   `[\&]`, `[\-]`, `[\/]`, `[\!]`, `[\#]`, `[\~]`, `[\{]`, `[\^]`,
+   `` [\`] ``, `[a\-c]` and every CharacterEscape stay legal (the full
+   printable-ASCII set was probed against Node/Bun; Bun alone accepts
+   `[\é]`, Node/spec reject — engine follows Node).
+3. **Sticky single-char out-of-bounds read.** The sticky branches of
+   `MatchSingleCharCaseSensitive/Insensitive` read `input[offset]` with
+   `offset == inputLength` (visible as `/\0/y.exec("")` returning a match
+   through the terminating NUL; a sliced string could read its parent's
+   next character). Both branches now guard `offset < inputLength`.
+4. **Deferred atom identity escapes under u.** `AtomEscapePass0`'s
+   identity default records a deferred-if-unicode error for any escaped
+   character that is not a SyntaxCharacter, `/`, ZWNJ/ZWJ or one of the
+   pseudo-escape letters, so `/\e/u`, `/\-/u`, `/\ /u`, `/\M/u`, `/\q/u`
+   (literal, dynamic and `new Function` deferred forms) fail with a clean
+   SyntaxError from the no-AST scan instead of surfacing only at the
+   reparse; non-u Annex B identity escapes are untouched.
+5. **Comment/error nits.** The `MatchCodePointSetInst` comment now states
+   the fallback contract exactly: POSITIVE sets AND property escapes of
+   both polarities keep the lead-unit fallback (the pinned ICU-drift
+   property corpus depends on it); only negated character classes take
+   `noHalfPairFallback`. The >`INT16_MAX` capturing-group limit keeps its
+   RangeError: raising the cap to the spec's 65535 touches uint16 group
+   ids across parser/runtime, and converting only the error type would
+   leave the 32768..65535 band failing while Node succeeds — documented
+   residual, not changed.
+6. **Per-unit advance in single-char fast paths (partial fix).**
+   `MatchSingleCharCaseSensitive/Insensitive` scan loops now advance per
+   code point under u/v, so trail-surrogate single-char patterns
+   (`/\uDE00/u` on `"\uD800\uDE00"`) and plain searches after pairs
+   behave per spec. The literal-scanner fast paths (literal prefix skip /
+   TextbookBoyer-Moore / octoquad) still advance per UTF-16 unit:
+   `/\uDE00X/u` (and alternation/search/split forms built on it, also
+   under v) match at the in-pair trail position where Node returns
+   null/`["q"]`/no-split. Those loops are the engine's hottest scan path
+   and need B4 JIT verification before a pair-aware change — documented
+   residual with the exact shapes below.
+7. **Lone-surrogate/backref unit-wise lacunarity** remains as previously
+   documented; the 69 ICU-drift property scenarios were re-verified green
+   (the fallback is untouched).
+
+### Repair-round evidence
+
+- Focused test (now 13 groups): `pass` on the test profile and on
+  debug-static across default, `-noDeferParse`, `-CollectGarbage`,
+  combined and `-force:deferParse`; 13/13 groups under Node 26.5.0 and
+  Bun 1.4.3 via the shim.
+- Differential batteries (s9-repro2/3/4 + the residual-shape battery,
+  normalized): **CH == Node == Bun** on every fixed shape (nested-class
+  rejection under u, v punctuation accept/reject over the full printable
+  set, sticky-at-end, identity escapes incl. `new Function` deferred
+  forms, single-char pair advance); the only CH-vs-Node divergences are
+  the documented `\uDE00X`-family literal-scanner lines. Bun alone
+  accepts `[\é]` under v (Node/spec reject); engine follows Node.
+- Pinned test262 (identical selections before/after; before = the
+  pristine-base `s9-base` self-contained binary directory, totals
+  reproducing the recorded gates):
+  - literals 480 scenarios: **458/22 → 480/0**, +22/0;
+  - S3-a selection 1,980: **1,828/152 → 1,862/118**, +34/0;
+  - v universe 298 (the S3-b receipt's directory selection as
+    reconstructable from its listing — its 374-scenario count does not
+    reproduce; both sides ran the identical selection):
+    **286/12 → 286/12**, 0/0;
+  - adjacent syntax 1,008: **972/36 → 988/20**, +16/0;
+  - annexB 350: **284/66 → 286/64**, +2/0;
+  - **total +74 fail→pass, 0 pass→fail over 4,116 scenarios** — identical
+    to the pre-repair state (the repairs cost nothing and the 69
+    ICU-drift property scenarios stay green).
+- The 18 legacy/es7 adjacent gate files re-verified: byte-identical on
+  base vs final (es6 regex-*/unicode_regex_* and es7 regexp-* incl.
+  `regexp-v-flag`); `unicode_escape_sequences` matches its re-baselined
+  expectations; lookbehind 15/16 and namedgroups-dup 10/11 are the
+  pre-existing base failures (identical on both binaries).
+- Perf/GC spot checks unchanged (below).
+- Artifact note (general-review nit): the `ch` launcher loads the dylib
+  next to it, so every comparison uses self-contained binary directories
+  (`zig-out/bin/s9-base` = pristine base launcher+dylib, `zig-out/bin` =
+  final); each corpus run's `summary.json` records the exact dylib hash
+  it executed.
+
+
+   A complete surrogate pair whose code point is NOT a member still falls
+   back to its lead unit in `MatchCodePointSetInst` (engine-wide since
+   S3-a). The spec-critical removal regressed 69 pinned
+   `property-escapes/generated/*` scenarios whose loop forms pass only
+   because the fallback matches both halves of pairs ICU 79.1 includes in
+   the property but the newer pinned corpus expects to match — Unicode
+   data drift masked by the fallback. Closing those requires the S3
+   Unicode-data decision; only negated classes take the strict rule
+   (`noHalfPairFallback`) today.
 ## Residuals
 
 1. **Pair→unit fallback retained for positive sets and property escapes.**
@@ -222,15 +325,27 @@ was dropped to keep the diff minimal.
 2. **Positive low-surrogate classes** (`[\udc00-\udfff]`) still match the
    low half at a complete pair (the per-unit scan-start lacunarity; 1
    oracle-battery divergence line vs Node, pre-existing and unchanged).
-3. **Braces inside v-validator spans under plain u**: `{`/`}` (like the
-   pre-existing `]`) inside a span the v pass-0 validator consumed are
-   exempt from the new u-mode atom rules even without the v flag — the
-   S3-b span trade-off, applied consistently; exotic plain-u shapes with
-   unescaped braces inside such spans stay accepted.
-4. **matchAll empty-match advance** (S3-b residual) and the `new
-   RegExp("\u{...}").source` decoded-pair normalization quirk are
-   untouched.
-5. JIT/B4: all evidence is Mac no-JIT interpreter (below).
+3. **Literal-scanner fast paths advance per UTF-16 unit under u/v** (the
+   prefix-skip / TextbookBoyer-Moore / octoquad programs). Exact divergent
+   shapes (engine vs Node): `/\uDE00X/u.exec("\uD800\uDE00X")` →
+   `["\uDE00X"]` at index 1 vs `null`; `/\uDE00X|q/u` on the same input →
+   `["\uDE00X"]` vs `["q"]`; `"\uD800\uDE00Xz".split(/\uDE00X/u)` → 2
+   parts vs 1; the same first shape under `v`. A trail surrogate as the
+   FIRST literal unit is the trigger; single-char, class-atom and
+   main-program paths are pair-aware (fixed this round). B4 follow-up:
+   the scan loops are the hottest interpreter path and need JIT
+   verification before a pair-aware advance.
+4. **Capturing-group cap**: the engine rejects more than `INT16_MAX`
+   (32767) capturing groups with a RangeError; Node accepts up to 65535
+   and then throws SyntaxError. Raising the cap touches uint16 group ids
+   across parser/runtime (and the >65535 SyntaxError conversion alone
+   would leave the 32768..65535 band failing while Node succeeds) —
+   left documented.
+5. **matchAll empty-match advance** (S3-b residual), the `new
+   RegExp("\u{...}").source` decoded-pair normalization quirk, and the
+   pre-existing literal-scanner rejection of file-level `/[a[b]/`-shaped
+   literals (dynamic forms parse) are untouched.
+6. JIT/B4: all evidence is Mac no-JIT interpreter (below).
 
 ## JIT (B4)
 
