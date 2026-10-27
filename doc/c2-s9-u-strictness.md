@@ -1,7 +1,8 @@
 # C2-S9: u-mode RegExp strictness
 
-Status: **pending** (review-repair round applied on top; see "Review
-repairs" below)
+Status: **landed** — implementation `a7b60e94a`, review repairs `4c2ccf463`
+and `b27b3e8d5`, merge `b8080f59f`. Final full gates are **2025/0 test** and
+**2077/0 debug-static** (`zig build check` **583/583**).
 
 ## Scope
 
