@@ -316,7 +316,8 @@ namespace UnifiedRegex
         CharCount vScratchUnitsCap;
         bool vLastScanIsStringProperty; // set by ScanPropertyEscapeBodyPass0
         bool vClassSawNested;               // pass 0: this v class contains a nested '['
-        bool vSawNestedClassInAlternative;  // pass 0: some class in this alternative nests (']'-atom rule)
+        const EncodedChar* vClassSpanStart; // pass 0: span the v validator consumed ('[' .. after ']')
+        const EncodedChar* vClassSpanEnd;   // pass 0: ']'-atom rule in TermPass0
 
         void DeferredFailIfUnicodeSets(HRESULT error);
         void DeferredFailIfUnicodeNoSets(HRESULT error);
@@ -326,7 +327,6 @@ namespace UnifiedRegex
         void VAddStringRaw(VCSet& set, const Char* chars, CharCount unitLen, CharCount cpLen);
         void VAddStringFromCodePoints(VCSet& set, const codepoint_t* cps, CharCount numCps);
         void VAddCodePoint(VCSet& set, codepoint_t cp);
-        void VAddCanonEquivalenceCodePoints(VCSet& set, codepoint_t cp);
         void VCloseOperandIfInsensitive(VCSet& set);
         codepoint_t VCanonicalizeCodePoint(codepoint_t cp) const;
         static bool VStringEq(const VString& a, const VString& b);

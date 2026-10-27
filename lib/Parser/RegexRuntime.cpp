@@ -1730,20 +1730,17 @@ namespace UnifiedRegex
     // ----------------------------------------------------------------------
     // Ownership: the instruction carries only the standard LiteralMixin
     // offset/length into the program's literal buffer (the unchanged
-    // transfer passes copy the canonicalized bytes there); no extra
-    // retained state, in line with MatchLiteralInst. Canonicalize is the
-    // ECMA-262 unicode rule: simple uppercase when single, with non-ASCII
-    // never canonicalizing into ASCII — implemented with ICU u_toupper
-    // table lookups on the matcher's calling thread (same rental-threading
-    // shape as the parse-time ICU use).
+    // transfer passes copy the folded bytes there); no extra retained
+    // state, in line with MatchLiteralInst. Folding is Unicode simple case
+    // folding (ES2027 MaybeSimpleCaseFolding), implemented with ICU
+    // u_foldCase/U_FOLD_CASE_DEFAULT — a const table lookup on the
+    // matcher's calling thread, same rental-threading shape as the
+    // parse-time ICU use. The stored literal holds the folded pattern code
+    // points; an input code point matches iff scf(input) equals the stored
+    // folded code point (surrogate-pair aware).
     inline codepoint_t CanonicalCodePoint(codepoint_t cp)
     {
-        codepoint_t upper = (codepoint_t)u_toupper((UChar32)cp);
-        if (upper == cp)
-            return cp;
-        if (cp >= 0x80 && upper < 0x80)
-            return cp;
-        return upper;
+        return (codepoint_t)u_foldCase((UChar32)cp, U_FOLD_CASE_DEFAULT);
     }
 
     inline bool MatchLiteralCanonicalInst::Exec(REGEX_INST_EXEC_PARAMETERS) const

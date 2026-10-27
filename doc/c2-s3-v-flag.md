@@ -404,6 +404,89 @@ two divergences recorded under Residuals):
   8 ms, RGI 5k find ≈446 ms (the inherited literal-alternation cliff);
   `-CollectGarbage` spot check identical.
 
+## Review repairs, iteration 3 (final: combined re-review blockers)
+
+1. **u-mode sole complement shorthand**: the flip to the positive set now
+   requires the shorthand to be the *sole* item — `sawAnyClassItem` is set
+   by every in-loop and final flush (chars, ranges, properties) and by a
+   second shorthand, in either order. Independently, every `\D`/`\S`/`\W`
+   operand under u now adds the astral planes to the code point set
+   (the char16 sets carry BMP only), so negated classes with siblings
+   (`[^\W_]`, `[^\D5]`, `[^5\D]`, `[^\S ]`, `[^\W\d]`, `[^\W0-9]`,
+   `[^\D\d]`) and positive unions (`[a\D]`) are exact; sole `[^\D]/u`
+   still equals `\d`. This exposed and fixed a pre-existing
+   double-negation corner: `TranslateCodePointSet`'s all-BMP path passed
+   `isNegation` into a node holding an already-complemented set, so
+   all-BMP complements (`[^\u{10000}-\u{10FFFF}]`, and the new astral
+   complements) matched exactly backwards; the node now never re-negates
+   (every u-mode caller pre-complements).
+2. **Raw astral literal set-op operands**: the pass-0 validator's raw-char
+   and reserved-pair peeks decoded *encoded bytes* as UTF-16 units, so
+   raw astral characters in regex literals (UTF-8 scanner policy) never
+   combined; all peeks now save/restore the cursor and decode a full
+   character (`NextChar`), making `[😀--x]`, `[x--😀]`,
+   `[😀--😁]`, `[\p{Basic_Emoji}--😀]`, `[\q{x}--😀]` work in literal
+   source exactly like `new RegExp` strings (both verified against Node).
+3. **Bare `]` under v**: the whole-pattern sticky exemption is replaced by
+   span tracking — `VClassPass0` records the `[`..after-`]` span the v
+   validator consumed (keeping the enclosing span when the legacy scan
+   starts a sibling class inside it), and a legacy `]` atom rejects unless
+   it lies inside that span. The iteration-2 false accepts
+   (`[[a]]|]`, `[[a]]*]`, `[a[b]]|]`, `[[a]]|x]`, `[[ab][cd]]|]`) now
+   reject while `[a[b]c]`, `[[ab][cd]]`, `[\q{a|b}]`, `[\q{|}]`,
+   `[[0-9]\q{0|2}]`, `[]x[a[b]]` stay valid (all Node-verified).
+4. **Simple case folding for v string members**: `\q` members under i now
+   use Unicode *simple case folding* (ES2027 MaybeSimpleCaseFolding;
+   ICU `u_foldCase/U_FOLD_CASE_DEFAULT`, verified: U+212A→k, U+017F→s,
+   ß→itself) — pattern code points folded at insertion, input code points
+   folded in `MatchLiteralCanonicalInst` (pair-aware). Single-code-point
+   members join the code point set and close over the engine's fold
+   classes (the same scf equivalence). `[\q{ka}]/iv` matches U+212Aa and
+   `[\q{ss}]` matches U+017Fs; `[\q{ss}]` still rejects ß. **Node 26.5.0
+   diverges on single-character members** (`[\q{k}]/iv` misses K and
+   U+212A while matching multi-char members; `[\q{\u017F}]` misses s/S)
+   — its asymmetric subset is documented, not followed; the engine pins
+   the spec (11 differential lines, all in this family). Bun matches the
+   engine on all but the pre-existing half-pair line.
+5. **Receipt/optimizer corrections**: `IsOctoquad` now actually excludes
+   canonical literals (guard added; the earlier no-guard claim removed).
+   Parity wording corrected: the surrogate/complement lacunarity applies
+   to *any computed set containing surrogate code points* (e.g.
+   `[^\u{10000}-\u{10FFFF}]/u` returning a high-surrogate half for astral
+   input — still residual #10), not only lone-surrogate members.
+   S3-a artifact caveat: the S3-a baseline used for byte-identical
+   adjacent controls is the s3-property-escapes worktree binary (built at
+   that lane's final commit); its dylib hash was recorded in the S3-a
+   run, and timing-sensitive comparisons were not re-measured here.
+6. `\q`-string deduplication was already complete; the scf change keeps
+   it (folding happens before the sort).
+
+### Iteration-3 evidence
+
+- Focused test (33 groups / 560 assertions): `pass` on test and
+  debug-static across default/`-noDeferParse`/`-CollectGarbage`/
+  combined/`-force:deferParse`.
+- 77-line differential battery (u siblings both orders + iu/v, raw astral
+  string+literal forms, sticky-`]` family, scf matrix incl. set ops):
+  **CH == Node on 65/77**; all 12 divergences are (a) the one pre-existing
+  half-pair lacunarity line and (b) 11 scf single-character-member lines
+  where Node's asymmetry misses spec matches (engine = spec). **CH == Bun
+  on 75/77** (the same lacunarity line plus one scf-Kelvin line).
+- Sticky battery: 5 false-accept shapes reject, 6 valid shapes accept —
+  byte-identical to Node. Raw-literal astral battery (10 literal-source
+  shapes): identical to Node.
+- Pinned corpus (final binary): v universe **346 passed / 28 failed of
+  374 scenarios** (exactly the accessor/symbols/BigInt substrate set);
+  S3-a 1,980 selection **1,828 passed / 152 failed** with the identical
+  decomposition (112 drift + 12 double-escaped + 6 named-groups +
+  22 literals) — **0 pass→fail** vs S3-a and vs both prior iterations.
+- Adjacent controls: 13 legacy/es7 gate files byte-identical to the S3-a
+  base binary (incl. `regex-set`, exercising the Translate negation fix).
+- Perf/GC: `[\S]+` 20k ≈34 ms, `[^\D]` astral 5k 0 ms, nested-500 and
+  200 canonical compiles 0 ms, 100 RGI compiles 9 ms, RGI 5k find ≈445 ms
+  (inherited literal-alternation cliff); `-CollectGarbage` identical;
+  defer-truncation ladders clean on both profiles.
+
 ## Residuals
 
 1. Oracle divergences on `\q` under `i` (all documented, engine implements

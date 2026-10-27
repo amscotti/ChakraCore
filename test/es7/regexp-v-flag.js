@@ -519,7 +519,7 @@ var tests = [
             // on the Kelvin outcome).
             assert.areEqual("k", exec0(/[\q{k}]/iv, "k"));
             assert.areEqual("K", exec0(/[\q{k}]/iv, "K"), "symmetric canonicalization (spec; V8 quirk returns null)");
-            assert.areEqual(null, /[\q{k}]/iv.exec("\u212A"), "Kelvin sign never matches a 'k' member");
+            assert.areEqual("\u212A", /[\q{k}]/iv.exec("\u212A")[0], "Kelvin folds onto k (spec scf; V8 null)");
             assert.areEqual("k", exec0(/[\q{K}]/iv, "k"));
             assert.areEqual("K", exec0(/[\q{K}]/iv, "K"));
             // U+017F LATIN SMALL LETTER LONG S folds to 's' but canonicalizes
@@ -529,14 +529,14 @@ var tests = [
             // Bun 1.4.3 and this engine implement the spec — see the
             // receipt's oracle divergence notes.)
             assert.areEqual("S", exec0(/[\q{s}]/iv, "S"));
-            assert.areEqual(null, /[\q{s}]/iv.exec("\u017F"), "long s never matches an 's' member");
-            assert.areEqual(null, /[\q{\u017F}]/iv.exec("s"));
-            assert.areEqual(null, /[\q{\u017F}]/iv.exec("S"));
+            assert.areEqual("\u017F", /[\q{s}]/iv.exec("\u017F")[0], "long s folds onto s (spec scf)");
+            assert.areEqual("s", /[\q{\u017F}]/iv.exec("s")[0]);
+            assert.areEqual("S", /[\q{\u017F}]/iv.exec("S")[0]);
             assert.areEqual("\u017F", exec0(/[\q{\u017F}]/iv, "\u017F"));
             // multi-char members canonicalize per character
             assert.areEqual("Kk", exec0(/[\q{kk}]/iv, "Kk"));
             assert.areEqual("AB", exec0(/[\q{ab}]/iv, "AB"));
-            assert.areEqual(null, /[\q{ss}]/iv.exec("\u017Fs"), "no fold into multi-char members");
+            assert.areEqual("\u017Fs", /[\q{ss}]/iv.exec("\u017Fs")[0], "long s folds inside multi-char members (spec scf; V8 agrees)");
             // ordinary class chars keep the engine's fold closure
             assert.areEqual("\u212A", /[k]/iv.exec("\u212A")[0]);
             assert.areEqual("K", /[k-k]/iv.exec("K")[0]);
@@ -556,7 +556,8 @@ var tests = [
             assert.areEqual(null, /[\q{k}--[k-k]]/iv.exec("K"));
             assert.areEqual(null, /[\q{k}--[k-k]]/iv.exec("\u212A"));
             assert.areEqual("k", /[\q{k}--[\u{17F}-\u{17F}]]/iv.exec("k")[0], "long-s range removes nothing from k");
-            assert.areEqual(null, /[\q{k}--[\u{17F}-\u{17F}]]/iv.exec("\u212A"));
+            assert.areEqual("\u212A", /[\q{k}--[\u{17F}-\u{17F}]]/iv.exec("\u212A")[0],
+                "Kelvin survives: the scf member class {k,K,U+212A} minus {s,S,U+017F} keeps it (spec; Node null via its asymmetric single-char members)");
             assert.areEqual(null, /[[k]--[k]]/iv.exec("K"), "nested class operands closed too");
             assert.areEqual(null, /[[k]--[k]]/iv.exec("k"));
             // singleton-vs-singleton and no-i behavior unchanged
@@ -627,12 +628,12 @@ var tests = [
             assert.areEqual("yKA", /y[\q{ka}]/iv.exec("yKA")[0]);
             assert.areEqual("kay", /[\q{ka}]y/iv.exec("kay")[0], "canonical member + suffix");
             assert.areEqual("KAy", /[\q{ka}]y/iv.exec("KAy")[0]);
-            assert.areEqual(null, /[\q{ka}]y/iv.exec("\u212AAy"), "Kelvin never matches the member part");
+            assert.areEqual("\u212AAy", /[\q{ka}]y/iv.exec("\u212AAy")[0], "member folds the Kelvin sign onto k (spec scf)");
             assert.areEqual("yKAz", /(y[\q{ka}])z/iv.exec("yKAz")[0], "capture around the boundary");
             assert.areEqual("yKA", /x|y[\q{ka}]/iv.exec("yKA")[0], "alternative branch");
             assert.areEqual("yKAkaz", /y[\q{ka}]+z/iv.exec("yKAkaz")[0], "quantified across the boundary");
             assert.areEqual("yKak", /y[\q{ka}]k/iv.exec("yKak")[0], "member then ordinary char then member char");
-            assert.areEqual(null, /[\q{ka}]x/iv.exec("\u212Ax"), "member refuses the Kelvin sign, so no match at 0");
+            assert.areEqual("\u212Ax", /[\q{k}]x/iv.exec("\u212Ax")[0], "member folds the Kelvin sign onto k (spec scf)");
             // multi-member canonical runs stay separate per member
             assert.areEqual("ab", /^[\q{ab}b]$/iv.exec("ab")[0]);
             assert.areEqual("b", /^[\q{ab}b]$/iv.exec("b")[0]);
@@ -714,6 +715,106 @@ var tests = [
             dynOk("[]", "");
             dynOk("[]--a]", "");
             assert.isFalse(/[]--a]/.test("--a]"), "legacy empty class matches nothing");
+        }
+    },
+    {
+        name: "Repair 3: u-mode sole complement shorthand with siblings",
+        body() {
+            // sole forms still flip to the positive set
+            assert.areEqual("5", /^[^\D]$/u.exec("5")[0]);
+            assert.areEqual(null, /^[^\D]$/u.exec("\u{1F600}"), "no astral leak, sole");
+            assert.areEqual("a", /^[^\W]$/u.exec("a")[0]);
+            // any sibling cancels the flip; the astral extension keeps the
+            // complement exact (Node-verified expectations)
+            assert.areEqual(null, /^[^\W_]$/u.exec("_"));
+            assert.areEqual("a", /^[^\W_]$/u.exec("a")[0]);
+            assert.areEqual(null, /^[^\W_]$/u.exec("\u{1F600}"));
+            assert.areEqual(null, /^[^\D5]$/u.exec("5"));
+            assert.areEqual(null, /^[^\D5]$/u.exec("x"));
+            assert.areEqual(null, /^[^\D5]$/u.exec("\u{1F600}"));
+            assert.areEqual(null, /^[^5\D]$/u.exec("5"), "sibling before, both orders");
+            assert.areEqual(null, /^[^5\D]$/u.exec("x"));
+            assert.areEqual(null, /^[^\S ]$/u.exec(" "));
+            assert.areEqual(null, /^[^\S ]$/u.exec("x"));
+            assert.areEqual("_", /^[^\W\d]$/u.exec("_")[0]);
+            assert.areEqual(null, /^[^\W\d]$/u.exec("5"));
+            assert.areEqual("a", /^[^\W\d]$/u.exec("a")[0]);
+            assert.areEqual("_", /^[^\W0-9]$/u.exec("_")[0]);
+            assert.areEqual(null, /^[^\W0-9]$/u.exec("5"));
+            assert.areEqual(null, /^[^\D\d]$/u.exec("5"));
+            assert.areEqual(null, /^[^\D\d]$/u.exec("x"));
+            // i and v variants agree on the astral boundary
+            assert.areEqual(null, /^[^\D]$/iu.exec("\u{1F600}"));
+            assert.areEqual(null, /^[^\W_]$/iv.exec("\u{1F600}"));
+            assert.areEqual("5", /^[^\D]$/v.exec("5")[0]);
+            // positive unions keep astral members
+            assert.isTrue(/[a\D]/u.test("\u{1F600}"));
+            assert.isTrue(/[\D]/v.test("\u{1F600}"));
+            // double-negation corner (all-BMP complement) is fixed
+            assert.areEqual(null, /^[^\u{10000}-\u{10FFFF}]$/u.exec("\u{1F600}"));
+            assert.areEqual("a", /^[^\u{10000}-\u{10FFFF}]$/u.exec("a")[0]);
+        }
+    },
+    {
+        name: "Repair 3: raw astral literal set-operation operands",
+        body() {
+            // literal source: the astral characters are raw (not \u escapes)
+            assert.isTrue(/[😀--x]/v.test("\u{1F600}"));
+            assert.isFalse(/[😀--x]/v.test("x"));
+            assert.isFalse(/[😀&&x]/v.test("\u{1F600}"), "intersection with disjoint cp");
+            assert.isTrue(/[x--😀]/v.test("x"));
+            assert.isFalse(/[x--😀]/v.test("\u{1F600}"));
+            assert.isTrue(/[😀--😁]/v.test("\u{1F600}"), "pair-pair subtraction");
+            assert.isFalse(/[😀--😁]/v.test("\u{1F601}"));
+            assert.isFalse(/^[\p{Basic_Emoji}--😀]$/v.test("\u{1F600}"), "property minus raw astral member");
+            assert.areEqual("\u{1F601}", /^[\p{Basic_Emoji}--😀]$/v.exec("\u{1F601}")[0]);
+            assert.isTrue(/[\q{x}--😀]/v.test("x"), "\q left operand minus raw astral");
+            assert.isFalse(/[\q{x}--😀]/v.test("\u{1F600}"));
+            // \u escape spellings stay equivalent
+            assert.isTrue(/[\uD83D\uDE00--x]/v.test("\u{1F600}"));
+            assert.isTrue(/[\u{1F600}--x]/v.test("\u{1F600}"));
+        }
+    },
+    {
+        name: "Repair 3: bare ']' atoms reject outside the v class span",
+        body() {
+            // false-accept family (sticky-flag over-exemption) now rejects
+            dynError("[[a]]|]", "v");
+            dynError("[[a]]*]", "v");
+            dynError("[a[b]]|]", "v");
+            dynError("[[a]]|x]", "v");
+            dynError("[[ab][cd]]|]", "v");
+            // valid nested/\q shapes stay accepted
+            dynOk("[a[b]c]", "v");
+            dynOk("[[ab][cd]]", "v");
+            dynOk("[\\q{a|b}]", "v");
+            dynOk("[\\q{|}]", "v");
+            dynOk("[[0-9]\\q{0|2}]", "v");
+            dynOk("[]x[a[b]]", "v");
+            assert.isTrue(/[a[b]c]/v.test("c"), "nested content still matches");
+            assert.isTrue(new RegExp("[\\q{a|b}]", "v").test("a"));
+        }
+    },
+    {
+        name: "Repair 3: simple case folding for \q string members under i",
+        body() {
+            // spec scf: U+212A folds onto 'k', U+017F onto 's' (ES2027
+            // MaybeSimpleCaseFolding). Node 26.5.0/V8 diverges on
+            // single-character members ([\q{k}] misses K/U+212A); this
+            // engine implements the spec symmetrically.
+            assert.areEqual("\u212Aa", /^[\q{ka}]$/iv.exec("\u212Aa")[0], "Kelvin folds onto k (spec)");
+            assert.areEqual("\u017Fs", /^[\q{ss}]$/iv.exec("\u017Fs")[0], "long s folds onto s (spec)");
+            assert.areEqual("Ss", /^[\q{ss}]$/iv.exec("Ss")[0]);
+            assert.areEqual(null, /^[\q{ss}]$/iv.exec("\u00DF"), "simple folding does not expand ss");
+            assert.areEqual("K", /[\q{k}]/iv.exec("K")[0], "single-char member matches K (spec; V8 null)");
+            assert.areEqual("\u212A", /[\q{k}]/iv.exec("\u212A")[0], "single-char member matches Kelvin (spec; V8 null)");
+            assert.areEqual("k", /[\q{k}]/iv.exec("k")[0]);
+            assert.areEqual("aB", /[\q{ab}]/iv.exec("aB")[0]);
+            assert.areEqual("s", /[\q{\u017F}]/iv.exec("s")[0], "long-s member matches s (spec)");
+            assert.areEqual("\u017F", /[\q{\u017F}]/iv.exec("\u017F")[0]);
+            assert.areEqual("\u212Aa", /^[\q{ka|cd}]+$/iv.exec("\u212Aa")[0], "folding inside alternation members");
+            assert.areEqual("ab", /[\q{ab}]/v.exec("ab")[0], "no i: exact");
+            assert.areEqual(null, /[\q{ab}]/iv.exec("ba"), "order still matters");
         }
     },
 ];

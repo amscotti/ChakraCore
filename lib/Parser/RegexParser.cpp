@@ -225,7 +225,8 @@ namespace UnifiedRegex
         , vScratchUnitsCap(0)
         , vLastScanIsStringProperty(false)
         , vClassSawNested(false)
-        , vSawNestedClassInAlternative(false)
+        , vClassSpanStart(nullptr)
+        , vClassSpanEnd(nullptr)
     {
         this->SetIsUtf8(isUtf8);
     }
@@ -771,7 +772,15 @@ namespace UnifiedRegex
         const uint simpleCharsCount = codePointSet.SimpleCharCount();
         if (totalCodePointsCount == simpleCharsCount)
         {
-            MatchSetNode *simpleToReturn = Anew(ctAllocator, MatchSetNode, isNegation, true, caseInsensitiveFlagPresent);
+            // Every u-mode caller of this helper hands in an
+            // already-complemented set when isNegation is set
+            // (CharacterClassPass1 pre-complements; the property-escape and
+            // v-class callers pass false), so the node must not negate
+            // again at runtime. Re-negating here double-negated the
+            // all-BMP corner (the S3-a-documented
+            // [^\u{10000}-\u{10FFFF}] shape, and [^\W_] once the
+            // complement shorthands carry the astral planes).
+            MatchSetNode *simpleToReturn = Anew(ctAllocator, MatchSetNode, false, true, caseInsensitiveFlagPresent);
             codePointSet.CloneSimpleCharsTo(ctAllocator, simpleToReturn->set);
             return simpleToReturn;
         }
@@ -925,16 +934,14 @@ namespace UnifiedRegex
         if (numCps == 1)
         {
             // A single-code-point \q alternative participates in the code
-            // point domain. Under i it carries the spec-canonical
-            // equivalence (k matches K, never U+212A) rather than the fold
-            // closure ordinary operands use.
+            // point domain; under i its scf equivalence is exactly the
+            // engine's case-fold closure of that code point (k ~ K ~
+            // U+212A, s ~ S ~ U+017F), the same closure ordinary class
+            // operands get.
+            set.cp.Set(ctAllocator, cps[0]);
             if (caseInsensitiveFlagPresent)
             {
-                VAddCanonEquivalenceCodePoints(set, cps[0]);
-            }
-            else
-            {
-                set.cp.Set(ctAllocator, cps[0]);
+                VCloseOperandIfInsensitive(set);
             }
             return;
         }
@@ -993,34 +1000,13 @@ namespace UnifiedRegex
         set.cp.Set(ctAllocator, cp);
     }
 
-    // Adds the spec-canonical equivalence of one code point to a set's code
-    // point part: every x with Canonicalize(x) == Canonicalize(cp) (at most
-    // {cp, its canonical form, the simple lower of that}). Used for
-    // single-code-point \q string members under i, which must match k and K
-    // but never U+212A (the fold closure used for ordinary class operands
-    // would admit it). Only called under i.
-    template <typename P, const bool IsLiteral>
-    void Parser<P, IsLiteral>::VAddCanonEquivalenceCodePoints(VCSet& set, codepoint_t cp)
-    {
-        Assert(caseInsensitiveFlagPresent);
-        codepoint_t canonical = VCanonicalizeCodePoint(cp);
-        codepoint_t candidates[3] = { cp, canonical, (codepoint_t)u_tolower((UChar32)canonical) };
-        for (int i = 0; i < 3; i++)
-        {
-            codepoint_t x = candidates[i];
-            if (VCanonicalizeCodePoint(x) == canonical)
-            {
-                set.cp.Set(ctAllocator, x);
-            }
-        }
-    }
-
     // Folds an operand's code point part closed over the engine's case
     // equivalence classes (the same closure the legacy u-mode class path
     // applies) so that &&/-- see closed operands on both sides: under i,
-    // [k--[k-k]] must be empty, not {K}. \q operands are NOT closed here:
-    // their members use the spec-canonical equivalence instead (see
-    // VAddCanonEquivalenceCodePoints).
+    // [k--[k-k]] must be empty, not {K}. \q multi-code-point members are
+    // not stored in the code point set (they are canonical literals); the
+    // single-code-point members the \q path adds ARE closed here — their
+    // scf equivalence is exactly this closure.
     template <typename P, const bool IsLiteral>
     void Parser<P, IsLiteral>::VCloseOperandIfInsensitive(VCSet& set)
     {
@@ -1037,26 +1023,18 @@ namespace UnifiedRegex
     // representative of its case-equivalence class, matching how the runtime
     // matches case-insensitive literals/backreferences under u/v programs.
     template <typename P, const bool IsLiteral>
-    // Spec Canonicalize (ECMA-262 Canonicalize with the unicode parameter,
-    // the same rule u-mode single-character comparisons use): the simple
-    // uppercase mapping when it is a single code point, except that a
-    // non-ASCII character never canonicalizes into ASCII. This differs from
-    // full case folding exactly on the review-pinned characters: U+212A
-    // (KELVIN SIGN) and U+017F (LATIN SMALL LETTER LONG S) fold to 'k'/'s'
-    // but canonicalize to themselves, so a \q string member 'k' matches
-    // 'k'/'K' but never U+212A (Node 26.5.0 agrees; Bun 1.4.3/JSC
-    // over-folds — see the receipt's oracle divergence notes). V8 applies
-    // this per code point but asymmetrically for single-character \q
-    // members (it matches the raw pattern character only); this engine
-    // implements the spec's symmetric canon(x) == canon(y) comparison.
+    // Simple case folding for v string members under i (ES2027
+    // MaybeSimpleCaseFolding): map every code point with Unicode simple
+    // case folding (ICU u_foldCase, U_FOLD_CASE_DEFAULT). scf folds
+    // U+212A (KELVIN SIGN) onto 'k' and U+017F (LATIN SMALL LETTER LONG S)
+    // onto 's', so a \q member 'k'/'ss' matches those inputs, while ß
+    // (whose simple folding is itself) does not match 'ss'. Node 26.5.0/V8
+    // applies an asymmetric subset for single-character members (misses
+    // U+212A there) — documented oracle divergence; this engine implements
+    // the spec's symmetric scf(x) == scf(y) comparison.
     codepoint_t Parser<P, IsLiteral>::VCanonicalizeCodePoint(codepoint_t cp) const
     {
-        codepoint_t upper = (codepoint_t)u_toupper((UChar32)cp);
-        if (upper == cp)
-            return cp; // no mapping (includes surrogates and unmapped)
-        if (cp >= 0x80 && upper < 0x80)
-            return cp; // non-ASCII never canonicalizes into ASCII
-        return upper;
+        return (codepoint_t)u_foldCase((UChar32)cp, U_FOLD_CASE_DEFAULT);
     }
 
     template <typename P, const bool IsLiteral>
@@ -1225,14 +1203,27 @@ namespace UnifiedRegex
         const EncodedChar* savedNext = next;
         const size_t savedMultiUnits = this->GetMultiUnits();
         bool mayContainStrings = false;
-        bool sawNested = this->vClassSawNested;
+        this->vClassSawNested = false;
         VValidateClass(mayContainStrings);
-        // For the ']'-atom rule in TermPass0 (see there): once any class in
-        // this alternative contained a nested bracket, later legacy ']'
-        // atoms may be v class content ([[ab][cd]]), so the alternative is
-        // exempt; without nesting a following bare ']' really is an atom
-        // ([]a], [a]]).
-        this->vSawNestedClassInAlternative = this->vSawNestedClassInAlternative || this->vClassSawNested || sawNested;
+        // For the ']'-atom rule in TermPass0 (see there): record the span
+        // the v validator consumed (from the '[' through its matching ']').
+        // A legacy ']' atom is genuine v class content exactly when it lies
+        // inside this span (nested brackets, \q bodies with '|' or ']');
+        // outside it a bare ']' really is an atom and rejects under v.
+        // A nested-in-legacy-view sibling ([[ab][cd]]: the legacy scan
+        // starts a second class inside the v class's span) must not
+        // shrink the recorded span; keep the enclosing one when the new
+        // span lies inside it.
+        {
+            const EncodedChar* newStart = savedNext - 1;
+            const EncodedChar* newEnd = next;
+            if (!(this->vClassSpanStart != nullptr &&
+                  newStart >= this->vClassSpanStart && newEnd <= this->vClassSpanEnd))
+            {
+                this->vClassSpanStart = newStart;
+                this->vClassSpanEnd = newEnd;
+            }
+        }
         next = savedNext;
         this->RestoreMultiUnits(savedMultiUnits);
     }
@@ -1550,21 +1541,36 @@ namespace UnifiedRegex
         Char c = NextChar();
         if (VDetail::IsHighSurrogateUnit(c) && !IsEOF() && ECLookahead() != 0)
         {
-            Char c2 = Chars<EncodedChar>::CTW(ECLookahead());
-            if (VDetail::IsLowSurrogateUnit(c2))
-                ECConsume();
+            // Decode the next character through the encoding policy (a
+            // raw UTF-8 astral char is several encoded units; peeking raw
+            // bytes as UTF-16 units mis-detects pairs in literals).
+            const EncodedChar* after = next;
+            const size_t savedMultiUnits = this->GetMultiUnits();
+            Char c2 = NextChar();
+            if (!VDetail::IsLowSurrogateUnit(c2))
+            {
+                next = after; // not a pair; rewind the decoded char
+                this->RestoreMultiUnits(savedMultiUnits);
+            }
         }
         if (VDetail::IsClassSetSyntaxChar(c) && c != '[')
         {
             DeferredFailIfUnicodeSets(JSERR_RegExpSyntax);
             return;
         }
-        if (VDetail::IsReservedPunctuatorChar(c) && !IsEOF() && ECLookahead() != 0 &&
-            Chars<EncodedChar>::CTW(ECLookahead()) == c)
+        if (VDetail::IsReservedPunctuatorChar(c) && !IsEOF() && ECLookahead() != 0)
         {
-            DeferredFailIfUnicodeSets(JSERR_RegExpSyntax);
-            ECConsume(); // the pair partner
-            return;
+            const EncodedChar* after = next;
+            const size_t savedMultiUnits = this->GetMultiUnits();
+            Char c2 = NextChar();
+            bool isPair = c2 == c;
+            next = after;
+            this->RestoreMultiUnits(savedMultiUnits);
+            if (isPair)
+            {
+                DeferredFailIfUnicodeSets(JSERR_RegExpSyntax);
+                return;
+            }
         }
         isSingleton = true;
     }
@@ -1694,11 +1700,19 @@ namespace UnifiedRegex
                 DeferredFailIfUnicodeSets(JSERR_RegExpSyntax);
                 return;
             }
-            if (VDetail::IsReservedPunctuatorChar(c) && !IsEOF() && ECLookahead() != 0 &&
-                Chars<EncodedChar>::CTW(ECLookahead()) == c)
+            if (VDetail::IsReservedPunctuatorChar(c) && !IsEOF() && ECLookahead() != 0)
             {
-                DeferredFailIfUnicodeSets(JSERR_RegExpSyntax);
-                return;
+                const EncodedChar* afterQ = next;
+                const size_t savedMultiUnitsQ = this->GetMultiUnits();
+                Char c2Q = NextChar();
+                bool isPairQ = c2Q == c;
+                next = afterQ;
+                this->RestoreMultiUnits(savedMultiUnitsQ);
+                if (isPairQ)
+                {
+                    DeferredFailIfUnicodeSets(JSERR_RegExpSyntax);
+                    return;
+                }
             }
             altCodePoints++;
         }
@@ -2900,10 +2914,6 @@ namespace UnifiedRegex
     template <typename P, const bool IsLiteral>
     void Parser<P, IsLiteral>::PatternPass0()
     {
-        // Sticky for the whole pattern: a legacy | or ] inside a v class
-        // (nested brackets, \q{} bodies) makes the legacy alternative
-        // boundaries unreliable, so the ']'-atom exemption must not reset.
-        this->vSawNestedClassInAlternative = false;
         this->positionAfterLastSurrogate = nullptr;
         this->deferredIfNotUnicodeError = nullptr;
         this->deferredIfUnicodeError = nullptr;
@@ -3884,15 +3894,18 @@ namespace UnifiedRegex
             break;
         case ']':
             // v mode (like every u-mode grammar) has no bare ']' atom
-            // outside a class. The strict review shapes ([]a], []--a],
-            // [^]--a], []]) all close an EMPTY v class first, so scope the
-            // deferred-if-v error to that case: a class with nested
-            // brackets extends past the legacy scan boundary ([a[b]c] must
-            // stay valid), and a non-empty plain class keeps the engine's
-            // documented u-mode ']'-atom leniency.
-            if (scriptContext->GetConfig()->IsES6UnicodeExtensionsEnabled() && !this->vSawNestedClassInAlternative)
+            // outside a class. The legacy scanner ends nested/\q classes
+            // early, so a ']' the legacy scan treats as an atom is genuine
+            // v class content exactly when it lies inside the span the v
+            // pass-0 validator consumed for the most recent class
+            // ([a[b]c], [[ab][cd]], [\q{a|b}]); outside that span
+            // ([]a], [a]], [[a]]|]) it is an atom and rejects under v.
+            // Non-v modes keep the Annex B leniency exactly as before.
+            if (scriptContext->GetConfig()->IsES6UnicodeExtensionsEnabled())
             {
-                DeferredFailIfUnicodeSets(JSERR_RegExpSyntax);
+                bool inSpan = this->vClassSpanStart != nullptr && next >= this->vClassSpanStart && next < this->vClassSpanEnd;
+                if (!inSpan)
+                    DeferredFailIfUnicodeSets(JSERR_RegExpSyntax);
             }
             NextChar();
             break;
@@ -5184,10 +5197,18 @@ namespace UnifiedRegex
                         if (unicodeFlagPresent &&
                             (ECLookback(1) == 'D' || ECLookback(1) == 'S' || ECLookback(1) == 'W'))
                         {
-                            if (sawAnyClassItem)
-                                negatedSoleShorthand = 0; // not sole
-                            else if (negatedSoleShorthand == 0)
+                            if (sawAnyClassItem || negatedSoleShorthand != 0)
+                                negatedSoleShorthand = 0; // not sole (sibling before or after)
+                            else
                                 negatedSoleShorthand = ECLookback(1);
+                            // The complement shorthands are defined over
+                            // ALL code points, but the char16 set carries
+                            // only the BMP part. Without the astral planes a
+                            // negated class with siblings ([^\W_]) would
+                            // complement the astral gap back in and match
+                            // astral input; positive unions ([a\D]) gain
+                            // the astral members they must have.
+                            codePointSet.SetRange(ctAllocator, 0x10000, 0x10FFFF);
                         }
                         else
                         {
@@ -5255,10 +5276,12 @@ namespace UnifiedRegex
                     
                     codePointSet.SetRange(ctAllocator, pendingRangeStart, pendingCodePoint);
                     pendingRangeStart = pendingCodePoint = INVALID_CODEPOINT;
+                    sawAnyClassItem = true;
                 }
                 else
                 {
                     codePointSet.Set(ctAllocator, codePointToSet);
+                    sawAnyClassItem = true;
                 }
             }
 
@@ -5299,7 +5322,7 @@ namespace UnifiedRegex
         // [^\D] == \d over all code points: flip the sole complement
         // shorthand to its positive form so the negated unit-set substrate
         // never sees it (it would otherwise match astral input).
-        if (isNegation && negatedSoleShorthand != 0)
+        if (isNegation && negatedSoleShorthand != 0 && !sawAnyClassItem)
         {
             codePointSet.Clear(ctAllocator);
             CharSet<Char> units;
