@@ -37,6 +37,11 @@ function dynError(pattern, flags, message) {
 var hasUnicodeSetsAccessor =
     typeof Object.getOwnPropertyDescriptor(RegExp.prototype, "unicodeSets") !== "undefined";
 
+function exec0(re, input) {
+    var m = re.exec(input);
+    return m === null ? null : m[0];
+}
+
 var tests = [
     {
         name: "Flag parsing: v accepted, u+v rejected, duplicates rejected",
@@ -432,6 +437,165 @@ var tests = [
     compileOk("/[a[b]/u");
     compileError("/\\p{Basic_Emoji}/u");
     assert.isTrue(/\p{Lu}/.test("p{Lu}"), "non-u property escape stays identity + literals");
+        }
+    },
+    {
+        name: "Repair: negated shorthand classes terminate and complement correctly",
+        body() {
+            assert.isTrue(/[\S]/v.test("x"));
+            assert.isFalse(/[\S]/v.test(" "));
+            assert.isTrue(/[^\S]/v.test(" "));
+            assert.isFalse(/[^\S]/v.test("x"));
+            assert.isTrue(/[\D]/v.test("x"));
+            assert.isFalse(/[\D]/v.test("5"));
+            assert.isTrue(/[\W]/v.test("~"), "~ is not a word char");
+            assert.isFalse(/[\W]/v.test("_"));
+            assert.isFalse(/[\W]/v.test("a"));
+            assert.isFalse(/[\S\d]/v.test(" "), "union with negated shorthand");
+            assert.isTrue(/[\S\d]/v.test("5"));
+            assert.isFalse(/[\S--x]/v.test(" "), "difference with negated shorthand");
+            assert.isTrue(/[\S--x]/v.test("y"));
+            assert.isFalse(/[\S&&\d]/v.test("x"), "intersection with negated shorthand");
+            assert.isTrue(/[\S&&\d]/v.test("5"));
+            assert.isTrue(/[\S]/iv.test("X"), "i variant");
+            assert.isTrue(/[^\W]/v.test("a"), "double negation through union");
+            assert.areEqual("x x x", "a b c".replace(/\S/gv, "x"), "global replace over non-space runs");
+        }
+    },
+    {
+        name: "Repair: character escapes are valid -- right operands",
+        body() {
+            compileOk("/[a--\\t]/v");
+            assert.isFalse(/[a--\t]/v.test("\t"), "removed member");
+            assert.isTrue(/[a--\t]/v.test("a"), "kept member");
+            compileOk("/[\\s--\\n]/v");
+            assert.isFalse(/[\s--\n]/v.test("\n"));
+            assert.isTrue(/[\s--\n]/v.test(" "));
+            compileOk("/[a--\\0]/v");
+            compileOk("/[a--\\x09]/v");
+            assert.isFalse(/[a--\x09]/v.test("\t"));
+            compileOk("/[a--\\u0009]/v");
+            assert.isFalse(/[a--\u0009]/v.test("\t"));
+            compileOk("/[a--\\u{9}]/v");
+            assert.isFalse(/[a--\u{9}]/v.test("\t"));
+            compileOk("/[a--\\b]/v");
+            assert.isFalse(/[a--\b]/v.test("\b" === "b" ? "b" : "\u0008"));
+            compileOk("/[\\q{a}--\\t]/v");
+            assert.isFalse(/[\q{a}--\t]/v.test("\t"));
+            assert.isTrue(/[\q{a}--\t]/v.test("a"));
+            // set-valued and range left operands keep the rejection
+            compileError("/[a-c--\\t]/v");
+            compileError("/[\\d--a-c]/v");
+            // legacy shapes stay preserved without v
+            compileError("/[a--\\t]/");
+            compileOk("/[--a]/");
+            assert.isTrue(/[--a]/.test("."));
+        }
+    },
+    {
+        name: "Repair: escaped surrogate pairs form astral ranges and endpoints",
+        body() {
+            assert.areEqual("\u{1F600}", /^[\uD83D\uDE00-\uD83D\uDE01]$/v.exec("\u{1F600}")[0]);
+            assert.areEqual("\u{1F601}", /^[\uD83D\uDE00-\uD83D\uDE01]$/v.exec("\u{1F601}")[0]);
+            assert.areEqual(null, /^[\uD83D\uDE00-\uD83D\uDE01]$/v.exec("\u{1F602}"), "above the range");
+            assert.areEqual(null, /^[\uD83D\uDE00-\uD83D\uDE01]$/v.exec("\u{1F5FF}"), "below the range");
+            assert.areEqual(null, /^[\uD83D\uDE00]$/v.exec("\u{1F601}"));
+            assert.areEqual("\u{1F601}", /^[\uD83D\uDE01-\uD83D\uDE02]$/v.exec("\u{1F601}")[0]);
+            // set operations over astral ranges
+                        assert.areEqual("\u{1F601}", /^[[\uD83D\uDE00-\uD83D\uDE01]--[\u{1F600}]]$/v.exec("\u{1F601}")[0]);
+            assert.isTrue(/[[\uD83D\uDE00-\uD83D\uDE01]&&[\u{1F600}]]/v.test("\u{1F600}"), "intersection keeps");
+            assert.isFalse(/[[\uD83D\uDE00-\uD83D\uDE01]&&[\u{1F601}]]/v.test("\u{1F600}"));
+            // range-order rejection with pairs still works
+            compileError("/[\\uD83D\\uDE01-\\uD83D\\uDE00]/v");
+            // pairs in \q bodies still fold
+            assert.areEqual("\u{1F600}", /^[\q{\uD83D\uDE00}]$/v.exec("\u{1F600}")[0]);
+        }
+    },
+    {
+        name: "Repair: spec Canonicalize for \\q string members under i (Kelvin, long s)",
+        body() {
+            // U+212A KELVIN SIGN folds to 'k' but canonicalizes to itself:
+            // a \q member 'k' matches k/K and never U+212A (spec; Node agrees
+            // on the Kelvin outcome).
+            assert.areEqual("k", exec0(/[\q{k}]/iv, "k"));
+            assert.areEqual("K", exec0(/[\q{k}]/iv, "K"), "symmetric canonicalization (spec; V8 quirk returns null)");
+            assert.areEqual(null, /[\q{k}]/iv.exec("\u212A"), "Kelvin sign never matches a 'k' member");
+            assert.areEqual("k", exec0(/[\q{K}]/iv, "k"));
+            assert.areEqual("K", exec0(/[\q{K}]/iv, "K"));
+            // U+017F LATIN SMALL LETTER LONG S folds to 's' but canonicalizes
+            // to itself, so it matches only itself in a \q member. (The K/K
+            // and long-s self-match outcomes follow the spec's symmetric
+            // Canonicalize; Node 26.5.0/V8 quirk-diverges to null there —
+            // Bun 1.4.3 and this engine implement the spec — see the
+            // receipt's oracle divergence notes.)
+            assert.areEqual("S", exec0(/[\q{s}]/iv, "S"));
+            assert.areEqual(null, /[\q{s}]/iv.exec("\u017F"), "long s never matches an 's' member");
+            assert.areEqual(null, /[\q{\u017F}]/iv.exec("s"));
+            assert.areEqual(null, /[\q{\u017F}]/iv.exec("S"));
+            assert.areEqual("\u017F", exec0(/[\q{\u017F}]/iv, "\u017F"));
+            // multi-char members canonicalize per character
+            assert.areEqual("Kk", exec0(/[\q{kk}]/iv, "Kk"));
+            assert.areEqual("AB", exec0(/[\q{ab}]/iv, "AB"));
+            assert.areEqual(null, /[\q{ss}]/iv.exec("\u017Fs"), "no fold into multi-char members");
+            // ordinary class chars keep the engine's fold closure
+            assert.areEqual("\u212A", /[k]/iv.exec("\u212A")[0]);
+            assert.areEqual("K", /[k-k]/iv.exec("K")[0]);
+            assert.areEqual("\u212A", /[k-k]/iv.exec("\u212A")[0]);
+        }
+    },
+    {
+        name: "Repair: operands are case-closed before && and --",
+        body() {
+            assert.areEqual(null, /[k--[k-k]]/iv.exec("k"), "fold-closed both sides");
+            assert.areEqual(null, /[k--[k-k]]/iv.exec("K"));
+            assert.areEqual(null, /[k--[k-k]]/iv.exec("\u212A"));
+            assert.areEqual(null, /[\q{k}--\p{Ll}]/iv.exec("k"), "canonical member minus closed property");
+            assert.areEqual(null, /[\q{k}--\p{Ll}]/iv.exec("K"));
+            assert.areEqual(null, /[\q{k}--\p{Ll}]/iv.exec("\u212A"));
+            assert.areEqual(null, /[\q{k}--[k-k]]/iv.exec("k"), "canonical member minus closed range");
+            assert.areEqual(null, /[\q{k}--[k-k]]/iv.exec("K"));
+            assert.areEqual(null, /[\q{k}--[k-k]]/iv.exec("\u212A"));
+            assert.areEqual("k", /[\q{k}--[\u{17F}-\u{17F}]]/iv.exec("k")[0], "long-s range removes nothing from k");
+            assert.areEqual(null, /[\q{k}--[\u{17F}-\u{17F}]]/iv.exec("\u212A"));
+            assert.areEqual(null, /[[k]--[k]]/iv.exec("K"), "nested class operands closed too");
+            assert.areEqual(null, /[[k]--[k]]/iv.exec("k"));
+            // singleton-vs-singleton and no-i behavior unchanged
+            assert.areEqual(null, /[k--k]/iv.exec("K"));
+            assert.areEqual(null, /[k--k]/iv.exec("k"));
+            assert.areEqual(null, /[k--k]/v.exec("k"));
+            assert.areEqual(null, /^[\q{ab}--\q{AB}]$/iv.exec("ab"), "canonicalization applies before string set ops");
+            // union still closes over the whole set
+            assert.isTrue(/[kx]/iv.test("K"));
+            assert.isTrue(/[kx]/iv.test("X"));
+        }
+    },
+    {
+        name: "Repair: truncated classes and deep nesting fail cleanly",
+        body() {
+            dynError("[[a]--", "v");
+            dynError("[[a]&&", "v");
+            dynError("[[a]--\\", "v");
+            dynError("[[a]--x", "v");
+            dynError("[[", "v");
+            dynError("[\\q{ab", "v");
+            dynError("[a--", "v");
+            dynError("[\\uD83D\\uDE0", "v");
+            dynError("[x\\", "v");
+            dynError("[", "v");
+            // Deep nesting must never crash: within the profile's stack
+            // budget the pattern compiles; beyond it the parser's stack
+            // probe raises a clean out-of-stack error. Measured bounds
+            // (this test): the test profile accepts >= 8000 levels, the
+            // debug-static profile accepts 3000 and reports a clean error
+            // at 4000 (larger debug frames). Node accepts 4000 and rejects
+            // at 16000; Bun accepts 16000.
+            var deep2000 = new Array(2001).join("[") + "a" + new Array(2001).join("]");
+            assert.doesNotThrow(function () { new RegExp(deep2000, "v"); }, "N=2000 nesting both profiles");
+            var deep4000 = new Array(4001).join("[") + "a" + new Array(4001).join("]");
+            var deepResult = "no-throw";
+            try { new RegExp(deep4000, "v"); } catch (e) { deepResult = e.name + " | " + e.message; }
+            assert.isTrue(deepResult === "no-throw" || /stack/i.test(deepResult),
+                "N=4000 either compiles or fails with a clean stack error, got " + deepResult);
         }
     },
 ];

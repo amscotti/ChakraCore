@@ -1,9 +1,10 @@
 # C2-S3-b: RegExp `v` flag (Unicode sets)
 
-Status: **pending review** — implementation complete on branch `s3-v-flag`
-(worktree `ChakraCore-wt/s3-v-flag`, base `0a5006399`); focused test green on
+Status: **pending review** — implementation plus the combined
+general+adversarial review repairs (second commit on the branch, on top
+of `7bd66a59d`; branch `s3-v-flag`, base `0a5006399`); focused test green on
 both profiles and all launch variants; pinned corpus and adjacent controls
-recorded below.
+below.
 
 ## Scope
 
@@ -166,15 +167,15 @@ two divergences recorded under Residuals):
   literals, `[a&&b]/u` literal union).
   - **CH gate runs** (`zig-out/bin/ch`, test profile): `pass` on default,
     `-noDeferParse`, `-CollectGarbage`, `-noDeferParse -CollectGarbage`
-    and `-force:deferParse` launches — re-verified on the final binary
-    after the last parser repair.
+    and `-force:deferParse` launches — re-verified after the review
+    repairs on the final binary.
   - **Debug-static** (`out/debug-static/bin/ch`, asserts active): `pass`
-    on the same five launches (final binary).
+    on the same five launches (final repaired binary).
   - **Node/Bun oracle battery** (not the gate harness): the same file's
     assertions executed under Node 26.5.0 and Bun 1.4.3 through a
-    compatibility shim — **364/364 each except** three assertions where
-    Bun (JSC) itself diverges from Node/V8 (below); i.e. the file is
-    Node-exact and the engine matches Node.
+    compatibility shim — 463 assertions. After the review repairs the
+    engine passes 463/463; Node differs on 6 and Bun on 10, every one of
+    them a documented oracle divergence (below), not an engine defect.
 - **Pinned test262** (`tools/test262/run.py`, default host flags
   `-nonative -Test262 -CollectGarbage`; 20/20 harness controls in each
   run): the **exact 187-file v-flag universe** (`test/built-ins/RegExp/
@@ -183,7 +184,9 @@ two divergences recorded under Residuals):
   `RegExp/prototype/exec/regexp-builtin-exec-v-u-flag.js`,
   `RegExp/prototype/flags/this-val-regexp.js`, and the five
   `String/prototype/{match,matchAll,replace,search}` v-flag files) =
-  **374 scenarios (187 files × 2 modes)**:
+  **374 scenarios (187 files × 2 modes)**, re-run after the review
+  repairs (`out/test262-s3b2-*`; identical totals to the first
+  iteration):
   - default flags: **346 passed / 28 failed** — the 28 are exactly the
     accessor/substrate class (18 `unicodeSets` prototype scenarios +
     10 String.prototype v-flag scenarios needing the symbols substrate,
@@ -201,12 +204,14 @@ two divergences recorded under Residuals):
 - **S3-a bounded regression selection** (the S3-a receipt's exact
   1,980-scenario universe: `property-escapes/**`, `match-indices/**`,
   `lookBehind/**`, `named-groups/**`, `regexp-modifiers/**`,
-  `language/literals/regexp/**`): **1,828 passed / 152 failed** vs the
-  S3-a final 1,814/166 = **+14 fail→pass, 0 pass→fail**; the 14 are
-  exactly the `generated/strings/` scenarios S3-a deferred to this slice,
-  and the remaining 152 decompose identically to the S3-a residue (112
-  generated data drift, 12 double-escaped literals, 6 named-groups
-  symbols substrate, 22 u-literal leniency).
+  `language/literals/regexp/**`), re-run after the review repairs:
+  **1,828 passed / 152 failed** — identical totals and residue
+  decomposition to the first iteration (112 generated data drift,
+  12 double-escaped literals, 6 named-groups symbols substrate, 22
+  u-literal leniency) and vs the S3-a final 1,814/166 **+14 fail→pass,
+  0 pass→fail** (the 14 = `generated/strings/` scenarios deferred to this
+  slice). The 13 adjacent legacy/es7 gate files also re-verified
+  byte-identical on the repaired binary.
 - **Adjacent legacy/es7 controls**: 13 gate files — es6 `regex-set`,
   `regex-annex-b`, `regex-case-folding`, `regex-quantifiers`,
   `regex-code-point`; es7 `regexp-modifiers`, `regexp-lookbehind`,
@@ -228,15 +233,110 @@ two divergences recorded under Residuals):
   in `out/test262-s3b-v-default2`, `-v-proto`, `-v-flagson`,
   `-s3a-regr` (each `summary.json` records the run identity).
 
+## Review repairs (combined general+adversarial review, second iteration)
+
+1. **Negated shorthand classes never terminated** (`[\S]`, `[\D]`, `[\W]`
+   and their i/union/negation/`--`/`&&` combinations): the char16 range
+   cursor in the `\d`-family copy loop wrapped at 0xFFFF (`hi + 1`
+   truncated) so the loop restarted forever. Fixed by stopping after a
+   range that ends at 0xFFFF. Perf ladder: `[\S]+`/`[\D]+`/`[\W]+` over
+   20k inputs now 0-3 ms (was: no return).
+2. **Character escapes wrongly rejected as `--` right operands**
+   (`[a--\t]`, `[\s--\n]`, `[a--\0]`, `\x09`, `\u0009`, `\u{9}`,
+   `[a--\b]`, `\q`-left forms): the pass-0 `--` softening consumed only
+   the first dash, so the second opened a bogus range against the escape
+   and hard-failed. The softening now consumes both dashes and clears the
+   pending item; a second softening at the legacy range-resolution fail
+   site covers set-valued left operands (`[\s--\n]` shape: a range
+   starting at literal `-` with a smaller end is invalid in every legacy
+   mode, so deferring is behavior-preserving for non-v). Range left
+   operands (`[a-c--\t]`) stay rejected, and `[]`-legacy shapes
+   (`[--a]` without flags) stay accepted.
+3. **Escaped surrogate pair range endpoints**
+   (`[\uD83D\uDE00-\uD83D\uDE01]`): singleton escape decoding in
+   `VParseItem`/`VParseOperand` now combines an escaped high surrogate
+   with a following escaped low surrogate into one astral code point
+   (`VDecodeEscapeCodePoint`), so astral ranges, negations and set
+   operations over them work; astral range-order rejection preserved.
+4. **Kelvin sign in `\q` strings under `i`**
+   (`[\q{k}]/iv` on U+212A must be null): v string members now use the
+   spec Canonicalize rule (simple uppercase; non-ASCII never canonicalizes
+   into ASCII) instead of case-fold closure. Multi-code-point members
+   match through **one new fixed-size instruction**
+   `MatchLiteralCanonicalInst` (opcode appended after `MatchCodePointSet`
+   — no earlier tag moves; literal bytes ride the unchanged literal-buffer
+   transfer, so the ownership record is exactly MatchLiteralInst's; the
+   ICU `u_toupper` call is a const table lookup on the calling thread).
+   Single-code-point members join the code point set through their
+   canonical equivalence (`VAddCanonEquivalenceCodePoints`). Canonical
+   literals opt out of every scan/prefix-skip candidate and publish a
+   sound non-exact firstSet. Literal-run accumulation
+   (`AccumLiteral`/`FinalTerm`) preserves the canonical flag and never
+   merges canonical with ordinary runs.
+5. **v+i set operations now close operands before `&&`/`--`**: every
+   ordinary operand (chars, ranges, `\d`&co, `\p`, nested classes) is
+   fold-closed at insertion (`VCloseOperandIfInsensitive`), so
+   `[k--[k-k]]/iv`, `[\q{k}--\p{Ll}]/iv`, `[\q{k}--[k-k]]/iv`,
+   `[\q{k}--[\u{17F}-\u{17F}]]/iv` and the nested-class form compute over
+   closed operands; `\q` members keep the canonical equivalence (no
+   over-fold). `VBuildNode` no longer re-closes (that would re-admit
+   U+212A). No-`i`, singleton-vs-singleton and ordinary `[k-k]/iv`
+   behavior unchanged (class chars keep the engine's fold closure:
+   `[k]/iv` still matches U+212A).
+6. **Truncated nested class + operator** (`[[a]--`, `&&` variant):
+   `VReadRawCodePoint` and the operand/item entry points guard EOF and
+   fail with a clean `SyntaxError`; verified on debug-static (asserts
+   active) across a 10-case truncation ladder.
+7. **Deep nested v classes** (`"[".repeat(N)+"a"+"]".repeat(N)`):
+   pass 0/1 class recursion now probes the stack
+   (`PROBE_STACK_NO_DISPOSE`, the standing parser mechanism) and the
+   per-level `VCSet`s moved from C++ stack frames into the compile-time
+   arena, so nesting compiles cleanly within the stack budget and raises
+   the engine's standard out-of-stack error beyond it — no SIGSEGV.
+   Measured: test profile OK through 8000 levels, clean error at 16000;
+   debug-static OK through 3000, clean error at 4000 (larger debug
+   frames). Node accepts 4000 and rejects at 16000 (its own parser
+   limit); Bun accepts 16000.
+
+### Receipt-only items from the review
+
+- The ~50x scan cliff for `[\p{RGI_Emoji}]gv` (44 ms vs Node/Bun ~1 ms per
+  5k-char scan) is the inherited literal-alternation prefilter gap: the
+  property's ~2770 string arms are tried per position because none of the
+  engines' literal scan/prefilter instructions apply to an
+  `AltNode` of v string arms. Correctness is unaffected; bounded by the
+  corpus (each scenario completes quickly).
+- Deferred-reparse residual examples corrected: the pass-1-only rejections
+  are malformed `[\x]`/`[\u]` escape shapes (not range-order examples;
+  range order is checked in pass 1 only for *valid-shaped* classes, which
+  the no-AST scan accepts structurally).
+- u/v leniency notes completed: `]` as an Annex B atom outside classes,
+  `\q` outside classes (invalid escape under v, identity under Annex B),
+  `\1`-`\9` outside classes (Annex B), malformed `{`-quantifier leniency.
+- Node/Bun Kelvin claims corrected: Bun (JSC) *over*-folds (U+212A and
+  U+017F match `k`/`s` members — 7 battery divergences); Node (V8) is
+  asymmetric on single-character `\q` members under `i` (matches the raw
+  pattern character only: `[\q{K}]/iv` on `"K"` is null) and folds
+  U+017F inside multi-char members — 6 battery divergences. This engine
+  implements the spec's symmetric Canonicalize for both.
+- Duplicate `\q` string members (repeated alternatives, overlapping
+  property-of-strings sets) are now deduplicated in `VBuildNode` after
+  the descending-length sort (adjacent equal members are unobservable),
+  bounded by the sort itself.
+
 ## Residuals
 
-1. Node/Bun divergences (implementation follows Node/V8, which matches the
-   spec on each probed point): Bun accepts `[\q{\d}]`/`[\q{\w}]` (class
-   escapes inside `\q`), Bun does not canonicalize strings before set
-   operations (`[\q{ab}--[\q{AB}]]/iv` matches under Bun, not under
-   Node/spec), Bun accepts `[a[b]--[c]]` (union as difference left
-   operand), and Bun folds KELVIN SIGN into `[\q{k}]/iv`. The first three
-   are pinned by the focused test as Node-behavior assertions.
+1. Oracle divergences on `\q` under `i` (all documented, engine implements
+   the spec): Bun (JSC) over-folds U+212A/U+017F into `k`/`s` members and
+   accepts `[\q{\d}]`/`[\q{\w}]`; Node (V8) is asymmetric on
+   single-character members (raw-pattern-character matching: `[\q{K}]/iv`
+   on `"K"` is null) and folds U+017F inside multi-char members; this
+   engine (and the ES spec) canonicalize both sides symmetrically. Six
+   Node-side and ten Bun-side assertions in the differential battery are
+   these divergences.
+    these divergences. Also: Bun accepts `[a[b]--[c]]` (union as
+    difference left operand) and Node rejects `[\q{\d}]` — both pinned
+    as Node-behavior assertions in the focused test.
 2. v-mode inherits the engine's documented u-mode divergences: per-unit
    search advance (lone-surrogate lacunarity — a class containing a lone
    surrogate member can match a surrogate half inside a pair), the

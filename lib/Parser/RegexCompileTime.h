@@ -381,6 +381,10 @@ namespace UnifiedRegex
         bool isEquivClass; // True if each consecutive triplet of characters of literal represents equivalence
                            // class of characters to match against. Actual literal length will be 3 times the length
                            // given above
+        bool isCanonical;  // v-flag \q string member under i: the stored literal holds the
+                           // spec-Canonicalize form of each code point and matching compares
+                           // Canonicalize(input code point) with it (MatchLiteralCanonicalInst);
+                           // suppresses the equiv-class expansion
 
         inline MatchLiteralNode(CharCount offset, CharCount length, bool isCaseInsensitive = false)
             : Node(MatchLiteral)
@@ -388,6 +392,7 @@ namespace UnifiedRegex
             , length(length)
             , isCaseInsensitive(isCaseInsensitive)
             , isEquivClass(false)
+            , isCanonical(false)
         {
         }
 

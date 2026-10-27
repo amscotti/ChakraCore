@@ -613,8 +613,8 @@ namespace UnifiedRegex
             if (isNegation)
                 Fail(JSERR_RegExpSyntax);
 
-            VCSet set;
-            VInitSet(set);
+            VCSet* set = Anew(ctAllocator, VCSet);
+            VInitSet(*set);
             struct Collector : UnicodeProperty::StringCollector
             {
                 Parser* parser;
@@ -659,10 +659,10 @@ namespace UnifiedRegex
                 }
             } collector;
             collector.parser = this;
-            collector.set = &set;
-            if (!UnicodeProperty::BuildStringPropertySet(resolved, ctAllocator, set.cp, &collector))
+            collector.set = set;
+            if (!UnicodeProperty::BuildStringPropertySet(resolved, ctAllocator, set->cp, &collector))
                 Fail(JSERR_RegExpSyntax); // ICU failed
-            return VBuildNode(set, /*negation*/ false);
+            return VBuildNode(*set, /*negation*/ false);
         }
 
         CharSet<codepoint_t> codePointSet;
@@ -922,7 +922,18 @@ namespace UnifiedRegex
     {
         if (numCps == 1)
         {
-            VAddCodePoint(set, cps[0]);
+            // A single-code-point \q alternative participates in the code
+            // point domain. Under i it carries the spec-canonical
+            // equivalence (k matches K, never U+212A) rather than the fold
+            // closure ordinary operands use.
+            if (caseInsensitiveFlagPresent)
+            {
+                VAddCanonEquivalenceCodePoints(set, cps[0]);
+            }
+            else
+            {
+                set.cp.Set(ctAllocator, cps[0]);
+            }
             return;
         }
         if (numCps == 0)
@@ -980,19 +991,70 @@ namespace UnifiedRegex
         set.cp.Set(ctAllocator, cp);
     }
 
+    // Adds the spec-canonical equivalence of one code point to a set's code
+    // point part: every x with Canonicalize(x) == Canonicalize(cp) (at most
+    // {cp, its canonical form, the simple lower of that}). Used for
+    // single-code-point \q string members under i, which must match k and K
+    // but never U+212A (the fold closure used for ordinary class operands
+    // would admit it). Only called under i.
+    template <typename P, const bool IsLiteral>
+    void Parser<P, IsLiteral>::VAddCanonEquivalenceCodePoints(VCSet& set, codepoint_t cp)
+    {
+        Assert(caseInsensitiveFlagPresent);
+        codepoint_t canonical = VCanonicalizeCodePoint(cp);
+        codepoint_t candidates[3] = { cp, canonical, (codepoint_t)u_tolower((UChar32)canonical) };
+        for (int i = 0; i < 3; i++)
+        {
+            codepoint_t x = candidates[i];
+            if (VCanonicalizeCodePoint(x) == canonical)
+            {
+                set.cp.Set(ctAllocator, x);
+            }
+        }
+    }
+
+    // Folds an operand's code point part closed over the engine's case
+    // equivalence classes (the same closure the legacy u-mode class path
+    // applies) so that &&/-- see closed operands on both sides: under i,
+    // [k--[k-k]] must be empty, not {K}. \q operands are NOT closed here:
+    // their members use the spec-canonical equivalence instead (see
+    // VAddCanonEquivalenceCodePoints).
+    template <typename P, const bool IsLiteral>
+    void Parser<P, IsLiteral>::VCloseOperandIfInsensitive(VCSet& set)
+    {
+        if (!caseInsensitiveFlagPresent || set.cp.IsEmpty())
+            return;
+        CharSet<codepoint_t> closed;
+        set.cp.ToEquivClass(ctAllocator, closed);
+        set.cp.Clear(ctAllocator);
+        set.cp.CloneFrom(ctAllocator, closed);
+        closed.FreeBody(ctAllocator);
+    }
+
     // Canonicalization for one code point under the effective i state: the
     // representative of its case-equivalence class, matching how the runtime
     // matches case-insensitive literals/backreferences under u/v programs.
     template <typename P, const bool IsLiteral>
+    // Spec Canonicalize (ECMA-262 Canonicalize with the unicode parameter,
+    // the same rule u-mode single-character comparisons use): the simple
+    // uppercase mapping when it is a single code point, except that a
+    // non-ASCII character never canonicalizes into ASCII. This differs from
+    // full case folding exactly on the review-pinned characters: U+212A
+    // (KELVIN SIGN) and U+017F (LATIN SMALL LETTER LONG S) fold to 'k'/'s'
+    // but canonicalize to themselves, so a \q string member 'k' matches
+    // 'k'/'K' but never U+212A (Node 26.5.0 agrees; Bun 1.4.3/JSC
+    // over-folds — see the receipt's oracle divergence notes). V8 applies
+    // this per code point but asymmetrically for single-character \q
+    // members (it matches the raw pattern character only); this engine
+    // implements the spec's symmetric canon(x) == canon(y) comparison.
     codepoint_t Parser<P, IsLiteral>::VCanonicalizeCodePoint(codepoint_t cp) const
     {
-        if (cp < 0x10000)
-            return standardChars->ToCanonical(CaseInsensitive::MappingSource::CaseFolding, (Char)cp);
-        uint tableIndex = 0, actualHigh = 0;
-        codepoint_t equivClass[CaseInsensitive::EquivClassSize];
-        if (CaseInsensitive::RangeToEquivClass(tableIndex, cp, cp, actualHigh, equivClass))
-            return equivClass[0];
-        return cp;
+        codepoint_t upper = (codepoint_t)u_toupper((UChar32)cp);
+        if (upper == cp)
+            return cp; // no mapping (includes surrogates and unmapped)
+        if (cp >= 0x80 && upper < 0x80)
+            return cp; // non-ASCII never canonicalizes into ASCII
+        return upper;
     }
 
     template <typename P, const bool IsLiteral>
@@ -1170,6 +1232,13 @@ namespace UnifiedRegex
     template <typename P, const bool IsLiteral>
     void Parser<P, IsLiteral>::VValidateClass(bool& mayContainStrings)
     {
+        // Nested v classes recurse once per level; probe the stack so deep
+        // nesting throws the engine's standard stack-overflow error instead
+        // of exhausting the thread stack (Node accepts ~arbitrary depth,
+        // V8 throws RangeError beyond its own limit; we stay in the
+        // engine's standard probe framework like every other recursive
+        // parser entry point).
+        PROBE_STACK_NO_DISPOSE(scriptContext, Js::Constants::MinStackRegex);
         mayContainStrings = false;
         if (IsEOF() || ECLookahead() == 0)
         {
@@ -1589,10 +1658,10 @@ namespace UnifiedRegex
     template <typename P, const bool IsLiteral>
     Node* Parser<P, IsLiteral>::VClassPass1()
     {
-        VCSet set;
-        VInitSet(set);
+        VCSet* set = Anew(ctAllocator, VCSet);
+        VInitSet(*set);
         bool negation = false;
-        VParseClass(set, negation);
+        VParseClass(*set, negation);
         // VParseClass consumed through ']' (nested classes need that), but
         // the TermPass1 caller expects to consume the top-level ']' itself
         // exactly like the legacy CharacterClassPass1 contract.
@@ -1606,19 +1675,20 @@ namespace UnifiedRegex
         {
             this->currentSurrogatePairNode = this->currentSurrogatePairNode->next;
         }
-        if (negation && set.mayContainStrings)
+        if (negation && set->mayContainStrings)
         {
             // Pass 0 already deferred this error (it fires before pass 1);
             // this is a defensive check.
             Fail(JSERR_RegExpSyntax);
         }
-        return VBuildNode(set, negation);
+        return VBuildNode(*set, negation);
     }
 
     // Parses a whole class (cursor just after '['); consumes through ']'.
     template <typename P, const bool IsLiteral>
     void Parser<P, IsLiteral>::VParseClass(VCSet& set, bool& negation)
     {
+        PROBE_STACK_NO_DISPOSE(scriptContext, Js::Constants::MinStackRegex);
         negation = false;
         if (IsEOF() || ECLookahead() == 0)
             Fail(JSERR_RegExpNoBracket);
@@ -1641,11 +1711,15 @@ namespace UnifiedRegex
         bool sawRange = false;
         char chainOp = 0;
 
-        VCSet item;
-        VInitSet(item);
-        VParseItem(item);
-        acc = item;
-        sawRange = item.isRange;
+        // Per-level sets live in the compile-time arena (wholesale freed
+        // with the parser, like every other v buffer) so deep class nesting
+        // consumes only small parser frames; the stack probe in
+        // VParseClass then bounds recursion cleanly.
+        VCSet* item = Anew(ctAllocator, VCSet);
+        VInitSet(*item);
+        VParseItem(*item);
+        acc = *item;
+        sawRange = item->isRange;
 
         while (true)
         {
@@ -1659,18 +1733,18 @@ namespace UnifiedRegex
                     Fail(JSERR_RegExpSyntax);
                 chainOp = isAndOp ? '&' : '-';
                 ECConsume(2);
-                VCSet rhs;
-                VInitSet(rhs);
-                VParseOperand(rhs, /*allowRange*/ false);
-                VApplyOp(acc, rhs, /*isDifference*/ chainOp == '-');
+                VCSet* rhs = Anew(ctAllocator, VCSet);
+                VInitSet(*rhs);
+                VParseOperand(*rhs, /*allowRange*/ false);
+                VApplyOp(acc, *rhs, /*isDifference*/ chainOp == '-');
                 continue;
             }
             if (chainOp != 0)
                 Fail(JSERR_RegExpSyntax);
-            VCSet next;
-            VInitSet(next);
-            VParseItem(next);
-            VUnionInPlace(acc, next);
+            VCSet* next = Anew(ctAllocator, VCSet);
+            VInitSet(*next);
+            VParseItem(*next);
+            VUnionInPlace(acc, *next);
             unionItems++;
         }
     }
@@ -1679,6 +1753,8 @@ namespace UnifiedRegex
     template <typename P, const bool IsLiteral>
     void Parser<P, IsLiteral>::VParseItem(VCSet& set)
     {
+        if (IsEOF() || ECLookahead() == 0)
+            Fail(JSERR_RegExpNoBracket); // truncated class
         bool setValued =
             (ECLookahead() == '\\' &&
              ((ECLookahead(1) == 'q' && ECLookahead(2) == '{') ||
@@ -1700,7 +1776,7 @@ namespace UnifiedRegex
         if (ECLookahead() == '\\')
         {
             ECConsume();
-            left = VDecodeSingletonEscape(/*inQString*/ false);
+            left = VDecodeEscapeCodePoint();
         }
         else
         {
@@ -1715,7 +1791,7 @@ namespace UnifiedRegex
             if (ECLookahead() == '\\')
             {
                 ECConsume();
-                right = VDecodeSingletonEscape(false);
+                right = VDecodeEscapeCodePoint();
             }
             else
             {
@@ -1727,9 +1803,11 @@ namespace UnifiedRegex
                 Fail(JSERR_RegExpBadRange);
             set.cp.SetRange(ctAllocator, left, right);
             set.isRange = true;
+            VCloseOperandIfInsensitive(set);
             return;
         }
         VAddCodePoint(set, left);
+        VCloseOperandIfInsensitive(set);
     }
 
     // Parses one operand: nested class, \q{...}, \p{...}, \d&co, escape or
@@ -1738,33 +1816,35 @@ namespace UnifiedRegex
     template <typename P, const bool IsLiteral>
     void Parser<P, IsLiteral>::VParseOperand(VCSet& set, bool allowRange)
     {
+        if (IsEOF() || ECLookahead() == 0)
+            Fail(JSERR_RegExpNoBracket); // truncated class
         if (ECLookahead() == '[')
         {
             ECConsume(); // [
-            VCSet inner;
-            VInitSet(inner);
+            VCSet* inner = Anew(ctAllocator, VCSet);
+            VInitSet(*inner);
             bool innerNegation = false;
-            VParseClass(inner, innerNegation);
+            VParseClass(*inner, innerNegation);
             if (innerNegation)
             {
-                if (inner.mayContainStrings)
+                if (inner->mayContainStrings)
                     Fail(JSERR_RegExpSyntax);
                 // closure-then-complement, mirroring the legacy class path
                 if (caseInsensitiveFlagPresent)
                 {
                     CharSet<codepoint_t> closed;
-                    inner.cp.ToEquivClass(ctAllocator, closed);
-                    inner.cp.Clear(ctAllocator);
-                    inner.cp.CloneFrom(ctAllocator, closed);
+                    inner->cp.ToEquivClass(ctAllocator, closed);
+                    inner->cp.Clear(ctAllocator);
+                    inner->cp.CloneFrom(ctAllocator, closed);
                     closed.FreeBody(ctAllocator);
                 }
                 CharSet<codepoint_t> complemented;
-                inner.cp.ToComplement(ctAllocator, complemented);
-                inner.cp.Clear(ctAllocator);
-                inner.cp.CloneFrom(ctAllocator, complemented);
+                inner->cp.ToComplement(ctAllocator, complemented);
+                inner->cp.Clear(ctAllocator);
+                inner->cp.CloneFrom(ctAllocator, complemented);
                 complemented.FreeBody(ctAllocator);
             }
-            set = inner;
+            set = *inner;
             VRejectRangeHere();
             return;
         }
@@ -1814,14 +1894,17 @@ namespace UnifiedRegex
                 while (units.GetNextRange(search, &lo, &hi))
                 {
                     set.cp.SetRange(ctAllocator, lo, hi);
+                    if (hi == Chars<Char>::MaxUChar)
+                        break; // a complement-style set reaches 0xFFFF; hi + 1 would wrap the char16 search cursor and loop forever
                     search = hi + 1;
                 }
                 units.FreeBody(ctAllocator);
+                VCloseOperandIfInsensitive(set);
                 VRejectRangeHere();
                 return;
             }
             ECConsume(); // backslash
-            codepoint_t cp = VDecodeSingletonEscape(false);
+            codepoint_t cp = VDecodeEscapeCodePoint();
             if (ECLookahead() == '-' && ECLookahead(1) != ']' && ECLookahead(1) != '-' && ECLookahead(1) != 0)
             {
                 if (!allowRange)
@@ -1831,7 +1914,7 @@ namespace UnifiedRegex
                 if (ECLookahead() == '\\')
                 {
                     ECConsume();
-                    right = VDecodeSingletonEscape(false);
+                    right = VDecodeEscapeCodePoint();
                 }
                 else
                     right = VReadRawCodePoint();
@@ -1841,9 +1924,11 @@ namespace UnifiedRegex
                     Fail(JSERR_RegExpBadRange);
                 set.cp.SetRange(ctAllocator, cp, right);
                 set.isRange = true;
+                VCloseOperandIfInsensitive(set);
                 return;
             }
             VAddCodePoint(set, cp);
+            VCloseOperandIfInsensitive(set);
             return;
         }
         // Raw character
@@ -1859,7 +1944,7 @@ namespace UnifiedRegex
             if (ECLookahead() == '\\')
             {
                 ECConsume();
-                right = VDecodeSingletonEscape(false);
+                right = VDecodeEscapeCodePoint();
             }
             else
             {
@@ -1871,9 +1956,11 @@ namespace UnifiedRegex
                 Fail(JSERR_RegExpBadRange);
             set.cp.SetRange(ctAllocator, cp, right);
             set.isRange = true;
+            VCloseOperandIfInsensitive(set);
             return;
         }
         VAddCodePoint(set, cp);
+        VCloseOperandIfInsensitive(set);
     }
 
     // After a set-valued operand (\q, \p, \d&co, nested class): a '-' that
@@ -1957,6 +2044,28 @@ namespace UnifiedRegex
         }
     }
 
+    // Decodes one singleton escape (cursor after the backslash) and applies
+    // the u-mode pattern rule that an escaped high surrogate followed by an
+    // escaped \uXXXX low surrogate combines into one astral code point, so
+    // [\uD83D\uDE00-\uD83D\uDE01] forms the astral range U+1F600..U+1F601
+    // (Node-verified). The pair is only combined when both halves arrive as
+    // \uXXXX escapes (the raw-text case is handled by VReadRawCodePoint).
+    template <typename P, const bool IsLiteral>
+    codepoint_t Parser<P, IsLiteral>::VDecodeEscapeCodePoint()
+    {
+        codepoint_t cp = VDecodeSingletonEscape(/*inQString*/ false);
+        if (cp >= 0xD800 && cp <= 0xDBFF && ECLookahead() == '\\' && ECLookahead(1) == 'u')
+        {
+            const EncodedChar* beforeSecond = next;
+            ECConsume(2); // \u
+            codepoint_t second = VDecodeUEscape();
+            if (second >= 0xDC00 && second <= 0xDFFF)
+                return VDetail::SurrogatePairToCodePoint((Char)cp, (Char)second);
+            next = beforeSecond; // not a pair; rewind the second escape
+        }
+        return cp;
+    }
+
     // \u{...} or \uHHHH with the 'u' consumed; returns the whole code point.
     template <typename P, const bool IsLiteral>
     codepoint_t Parser<P, IsLiteral>::VDecodeUEscape()
@@ -2000,7 +2109,8 @@ namespace UnifiedRegex
     template <typename P, const bool IsLiteral>
     codepoint_t Parser<P, IsLiteral>::VReadRawCodePoint()
     {
-        Assert(!IsEOF());
+        if (IsEOF() || ECLookahead() == 0)
+            Fail(JSERR_RegExpNoBracket); // truncated class (debug guard: callers used to assert here)
         Char c = NextChar();
         if (VDetail::IsHighSurrogateUnit(c) && !IsEOF() && ECLookahead() != 0)
         {
@@ -2167,6 +2277,14 @@ namespace UnifiedRegex
             set.cp.UnionInPlace(ctAllocator, complemented);
             complemented.FreeBody(ctAllocator);
         }
+        // Close the property operand so &&/-- see closed operands under i
+        // (the ICU set arrives raw). String-property members were added
+        // above and use the canonical string domain; closing them would
+        // over-fold, so only close when no string members were added.
+        if (set.numStrings == 0 && !set.containsEmptyString)
+        {
+            VCloseOperandIfInsensitive(set);
+        }
     }
 
     // Builds the final node: an alternation trying the string members
@@ -2175,16 +2293,12 @@ namespace UnifiedRegex
     template <typename P, const bool IsLiteral>
     Node* Parser<P, IsLiteral>::VBuildNode(VCSet& set, bool negation)
     {
-        // i closure first, then complement for negated classes (same order
-        // as the legacy u-mode class path).
-        if (caseInsensitiveFlagPresent)
-        {
-            CharSet<codepoint_t> closed;
-            set.cp.ToEquivClass(ctAllocator, closed);
-            set.cp.Clear(ctAllocator);
-            set.cp.CloneFrom(ctAllocator, closed);
-            closed.FreeBody(ctAllocator);
-        }
+        // Under i every operand was already closed at its insertion point
+        // (ordinary operands with the fold closure, \q members with the
+        // spec-canonical equivalence), so no whole-set closure happens
+        // here; re-closing would over-fold the canonical \q members (e.g.
+        // admit U+212A for a 'k' member). Complement for negated classes
+        // (the complement of a closed set is closed).
         if (negation)
         {
             Assert(!set.mayContainStrings && set.numStrings == 0 && !set.containsEmptyString);
@@ -2197,6 +2311,10 @@ namespace UnifiedRegex
 
         // Sort string members longest (code points) first; order among
         // equal lengths is unobservable (equal consumption on match).
+        // Duplicate members (repeated \q alternatives or overlapping
+        // property-of-strings sets) are removed after the sort: equal-length
+        // adjacent duplicates are unobservable, so this is purely a size
+        // optimization, bounded by the sort itself.
         if (set.numStrings > 1)
         {
             uint32 maxLen = 0;
@@ -2219,6 +2337,14 @@ namespace UnifiedRegex
                 tmp[counts[set.strings[i].cpLen]++] = set.strings[i];
             for (int i = 0; i < set.numStrings; i++)
                 set.strings[i] = tmp[i];
+
+            int outCount = 1;
+            for (int i = 1; i < set.numStrings; i++)
+            {
+                if (!VStringEq(set.strings[outCount - 1], set.strings[i]))
+                    set.strings[outCount++] = set.strings[i];
+            }
+            set.numStrings = outCount;
         }
 
         Node* armsHead = nullptr;
@@ -2250,7 +2376,13 @@ namespace UnifiedRegex
             EnsureLitbuf(s.unitLen);
             for (CharCount j = 0; j < s.unitLen; j++)
                 litbuf[litbufNext + j] = s.chars[j];
+            // Under i the stored bytes are the spec-Canonicalize form of
+            // each code point; the canonical instruction compares
+            // Canonicalize(input) with them (never over-folding U+212A /
+            // U+017F the way the equiv-class expansion does).
             MatchLiteralNode* lit = Anew(ctAllocator, MatchLiteralNode, litbufNext, s.unitLen, caseInsensitiveFlagPresent);
+            if (caseInsensitiveFlagPresent)
+                lit->isCanonical = true;
             litbufNext += s.unitLen;
             appendArm(lit);
         }
@@ -2912,13 +3044,32 @@ namespace UnifiedRegex
         CharCount addLen = charOrLiteralNode->LiteralLength();
         Assert(addLen > 0);
 
+        // Canonical v-flag \q string members compare through per-code-point
+        // Canonicalize (MatchLiteralCanonicalInst); they must never merge
+        // with an ordinary literal run (whose bytes are raw and whose
+        // matcher is exact/equiv), so a mismatch abandons the current run.
+        bool incomingCanonical =
+            charOrLiteralNode->tag == Node::MatchLiteral && ((MatchLiteralNode*)charOrLiteralNode)->isCanonical;
+
         if (deferredLiteralNode->length == 0)
         {
             // Start a new literal
             EnsureLitbuf(addLen);
             deferredLiteralNode->offset = litbufNext;
             deferredLiteralNode->length = addLen;
+            deferredLiteralNode->isCanonical = incomingCanonical;
             charOrLiteralNode->AppendLiteral(litbufNext, litbufLen, litbuf);
+        }
+        else if (deferredLiteralNode->isCanonical != incomingCanonical)
+        {
+            // Abandon current literal and start a fresh one (leaves gap)
+            EnsureLitbuf(deferredLiteralNode->length + addLen);
+            js_wmemcpy_s(litbuf + litbufNext, litbufLen - litbufNext, litbuf + deferredLiteralNode->offset, deferredLiteralNode->length);
+            deferredLiteralNode->offset = litbufNext;
+            litbufNext += deferredLiteralNode->length;
+            charOrLiteralNode->AppendLiteral(litbufNext, litbufLen, litbuf);
+            deferredLiteralNode->length += addLen;
+            deferredLiteralNode->isCanonical = incomingCanonical;
         }
         else if (deferredLiteralNode->offset + deferredLiteralNode->length == litbufNext)
         {
@@ -4676,13 +4827,18 @@ namespace UnifiedRegex
                     // VALID (e.g. '[+--]' is the range +..-) the legacy range
                     // stands: u keeps it and v's pass 1 re-parses the text as
                     // an (invalid or operator-shaped) v class. The u flag is
-                    // unknown in pass 0, so consume this dash as a literal
-                    // character and defer the range error for every non-v
+                    // unknown in pass 0, so consume BOTH dashes as literal
+                    // characters and defer the range error for every non-v
                     // mode (both non-unicode and plain u reject the text
-                    // today; only v parses on).
+                    // today; only v parses on). Consuming both dashes also
+                    // prevents the second one from opening a new (bogus)
+                    // range against the following character, which would
+                    // hard-fail patterns like '[a--\t]'.
                     DeferredFailIfNotUnicode(JSERR_RegExpBadRange);
                     DeferredFailIfUnicodeNoSets(JSERR_RegExpBadRange);
-                    lastCodepoint = NextChar();
+                    NextChar(); // first dash
+                    NextChar(); // second dash
+                    lastCodepoint = INVALID_CODEPOINT;
                 }
                 else
                 {
@@ -4781,7 +4937,25 @@ namespace UnifiedRegex
                     // If it is, then \ud800\udc00 - \ud800\udc01 is valid, otherwise invalid.
                     if (pendingRangeStart < 0x10000 && pendingRangeEnd < 0x10000 && pendingRangeStart > pendingRangeEnd)
                     {
-                        Fail(JSERR_RegExpBadRange);
+                        if (pendingRangeStart == (codepoint_t)'-' &&
+                            pendingRangeEnd < (codepoint_t)'-' &&
+                            scriptContext->GetConfig()->IsES6UnicodeExtensionsEnabled())
+                        {
+                            // v flag (ES2024): a range whose start is the
+                            // literal '-' can only come from a '--' operator
+                            // shape ('<set>--<operand>' or '\--<operand>'):
+                            // a legacy range starting at '-' with a smaller
+                            // end is invalid in every mode, so defer the
+                            // error for non-v modes (they keep rejecting it)
+                            // and let v's pass 1 re-parse the operator.
+                            DeferredFailIfNotUnicode(JSERR_RegExpBadRange);
+                            DeferredFailIfUnicodeNoSets(JSERR_RegExpBadRange);
+                            pendingRangeStart = pendingRangeEnd = INVALID_CODEPOINT;
+                        }
+                        else
+                        {
+                            Fail(JSERR_RegExpBadRange);
+                        }
                     }
                     else
                     {

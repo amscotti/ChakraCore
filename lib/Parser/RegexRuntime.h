@@ -967,6 +967,15 @@ namespace UnifiedRegex
         INST_BODY
     };
 
+    // v-flag string member under i: per-code-point spec Canonicalize
+    // comparison against the canonicalized stored literal (pair-aware).
+    struct MatchLiteralCanonicalInst : Inst, LiteralMixin
+    {
+        inline MatchLiteralCanonicalInst(CharCount offset, CharCount length) : Inst(InstTag::MatchLiteralCanonical), LiteralMixin(offset, length) {}
+
+        INST_BODY
+    };
+
     struct MatchTrieInst : Inst, TrieMixin
     {
         // Trie must always be cloned

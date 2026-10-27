@@ -4,6 +4,7 @@
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #include "ParserPch.h"
+#include <unicode/uchar.h> // u_toupper for MatchLiteralCanonicalInst (v-flag \q strings under i)
 
 namespace UnifiedRegex
 {
@@ -1717,6 +1718,97 @@ namespace UnifiedRegex
     int MatchLiteralEquivInst::Print(DebugWriter* w, Label label, const Char* litbuf) const
     {
         PRINT_RE_BYTECODE_BEGIN("MatchLiteralEquiv");
+        PRINT_MIXIN_ARGS(LiteralMixin, true);
+        PRINT_RE_BYTECODE_MID();
+        PRINT_BYTES(LiteralMixin);
+        PRINT_RE_BYTECODE_END();
+    }
+#endif
+
+    // ----------------------------------------------------------------------
+    // MatchLiteralCanonicalInst (v-flag string members under i)
+    // ----------------------------------------------------------------------
+    // Ownership: the instruction carries only the standard LiteralMixin
+    // offset/length into the program's literal buffer (the unchanged
+    // transfer passes copy the canonicalized bytes there); no extra
+    // retained state, in line with MatchLiteralInst. Canonicalize is the
+    // ECMA-262 unicode rule: simple uppercase when single, with non-ASCII
+    // never canonicalizing into ASCII — implemented with ICU u_toupper
+    // table lookups on the matcher's calling thread (same rental-threading
+    // shape as the parse-time ICU use).
+    inline codepoint_t CanonicalCodePoint(codepoint_t cp)
+    {
+        codepoint_t upper = (codepoint_t)u_toupper((UChar32)cp);
+        if (upper == cp)
+            return cp;
+        if (cp >= 0x80 && upper < 0x80)
+            return cp;
+        return upper;
+    }
+
+    inline bool MatchLiteralCanonicalInst::Exec(REGEX_INST_EXEC_PARAMETERS) const
+    {
+        if (length > inputLength - inputOffset)
+        {
+            return matcher.Fail(FAIL_PARAMETERS);
+        }
+
+        const Char* const literalBuffer = matcher.program->rep.insts.litbuf;
+        const Char* literalCurr = literalBuffer + offset;
+        const Char* const literalEnd = literalCurr + length;
+        CharCount inputCurr = inputOffset;
+
+        while (literalCurr < literalEnd)
+        {
+            if (inputCurr >= inputLength)
+                return matcher.Fail(FAIL_PARAMETERS);
+
+            // Decode the next input code point (pair-aware)
+            Char in0 = input[inputCurr];
+            codepoint_t inputCp = in0;
+            CharCount inputUnits = 1;
+            if (in0 >= 0xD800 && in0 <= 0xDBFF && inputCurr + 1 < inputLength)
+            {
+                Char in1 = input[inputCurr + 1];
+                if (in1 >= 0xDC00 && in1 <= 0xDFFF)
+                {
+                    inputCp = 0x10000 + ((in0 - 0xD800) << 10) + (in1 - 0xDC00);
+                    inputUnits = 2;
+                }
+            }
+
+            // Decode the next stored (canonical) code point
+            Char lit0 = *literalCurr;
+            codepoint_t litCp = lit0;
+            CharCount litUnits = 1;
+            if (lit0 >= 0xD800 && lit0 <= 0xDBFF && literalCurr + 1 < literalEnd)
+            {
+                Char lit1 = literalCurr[1];
+                if (lit1 >= 0xDC00 && lit1 <= 0xDFFF)
+                {
+                    litCp = 0x10000 + ((lit0 - 0xD800) << 10) + (lit1 - 0xDC00);
+                    litUnits = 2;
+                }
+            }
+
+            if (CanonicalCodePoint(inputCp) != litCp)
+            {
+                return matcher.Fail(FAIL_PARAMETERS);
+            }
+
+            inputCurr += inputUnits;
+            literalCurr += litUnits;
+        }
+
+        inputOffset = inputCurr;
+        instPointer += sizeof(*this);
+        return false;
+    }
+
+#if ENABLE_REGEX_CONFIG_OPTIONS
+    int MatchLiteralCanonicalInst::Print(DebugWriter* w, Label label, const Char* litbuf) const
+    {
+        PRINT_RE_BYTECODE_BEGIN("MatchLiteralCanonical");
         PRINT_MIXIN_ARGS(LiteralMixin, true);
         PRINT_RE_BYTECODE_MID();
         PRINT_BYTES(LiteralMixin);

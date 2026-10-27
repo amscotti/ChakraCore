@@ -324,6 +324,8 @@ namespace UnifiedRegex
         void VAddStringRaw(VCSet& set, const Char* chars, CharCount unitLen, CharCount cpLen);
         void VAddStringFromCodePoints(VCSet& set, const codepoint_t* cps, CharCount numCps);
         void VAddCodePoint(VCSet& set, codepoint_t cp);
+        void VAddCanonEquivalenceCodePoints(VCSet& set, codepoint_t cp);
+        void VCloseOperandIfInsensitive(VCSet& set);
         codepoint_t VCanonicalizeCodePoint(codepoint_t cp) const;
         static bool VStringEq(const VString& a, const VString& b);
         static int VStringLexCmp(const void* pa, const void* pb);
@@ -350,6 +352,7 @@ namespace UnifiedRegex
         void VParseQ(VCSet& set);
         void VParsePropertyEscape(VCSet& set, bool isNegation);
         codepoint_t VDecodeSingletonEscape(bool inQString);
+        codepoint_t VDecodeEscapeCodePoint();
         codepoint_t VDecodeUEscape();
         codepoint_t VReadRawCodePoint();
         void VRejectRangeHere();

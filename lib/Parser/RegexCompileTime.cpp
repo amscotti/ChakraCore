@@ -848,6 +848,11 @@ namespace UnifiedRegex
     CharCount MatchLiteralNode::TransferPass0(Compiler& compiler, const Char* litbuf)
     {
         Assert(length > 1);
+        if (isCanonical)
+        {
+            Assert(isCaseInsensitive); // v string member under i
+            return length;             // canonical bytes copied verbatim
+        }
         if (isCaseInsensitive
             && !compiler.standardChars->IsTrivialString(compiler.program->GetCaseMappingSource(), litbuf + offset, length))
         {
@@ -908,9 +913,42 @@ namespace UnifiedRegex
         features = HasMatchLiteral;
         thisConsumes.Exact(length);
         firstSet = Anew(compiler.ctAllocator, UnicodeCharSet);
-        for (int i = 0; i < (isEquivClass ? CaseInsensitive::EquivClassSize : 1); i++)
-            firstSet->Set(compiler.ctAllocator, compiler.program->rep.insts.litbuf[offset + i]);
-        isFirstExact = true;
+        if (isCanonical)
+        {
+            // Canonical (v \q under i) literal: the set of input units
+            // that can start a match is the canonical preimage of the
+            // stored first code point (its simple lowercase, plus astral
+            // preimages' first units). Rather than approximate that here,
+            // publish a sound bound: both surrogate ranges when the first
+            // stored code point is astral, and the canonical char plus its
+            // simple lowercase otherwise. Never exact.
+            const Char c = compiler.program->rep.insts.litbuf[offset];
+            if (length >= 2 && c >= 0xD800 && c <= 0xDBFF &&
+                compiler.program->rep.insts.litbuf[offset + 1] >= 0xDC00 &&
+                compiler.program->rep.insts.litbuf[offset + 1] <= 0xDFFF)
+            {
+                firstSet->SetRange(compiler.ctAllocator, 0xD800, 0xDBFF);
+            }
+            else
+            {
+                firstSet->Set(compiler.ctAllocator, c);
+                codepoint_t lower = (codepoint_t)u_tolower((UChar32)(codepoint_t)c);
+                if (lower != (codepoint_t)c)
+                    firstSet->Set(compiler.ctAllocator, (Char)lower);
+                // Soundness: an astral input code point could in principle
+                // uppercase onto this BMP canonical form; admit every high
+                // surrogate start. The bound grows past the sync heuristic
+                // threshold, so scan fast paths simply decline.
+                firstSet->SetRange(compiler.ctAllocator, 0xD800, 0xDBFF);
+            }
+            isFirstExact = false;
+        }
+        else
+        {
+            for (int i = 0; i < (isEquivClass ? CaseInsensitive::EquivClassSize : 1); i++)
+                firstSet->Set(compiler.ctAllocator, compiler.program->rep.insts.litbuf[offset + i]);
+            isFirstExact = true;
+        }
         isThisIrrefutable = false;
         isThisWillNotProgress = true;
         isThisWillNotRegress = true;
@@ -942,22 +980,29 @@ namespace UnifiedRegex
 
     bool MatchLiteralNode::SupportsPrefixSkipping(Compiler& compiler) const
     {
-        return true;
+        // Canonical (v \q under i) literals match per code point through
+        // Canonicalize, which the fixed-prefix accounting and the scan
+        // instructions cannot express; keep them on the plain path.
+        return !isCanonical;
     }
 
     Node* MatchLiteralNode::HeadSyncronizingNode(Compiler& compiler)
     {
-        return this;
+        return isCanonical ? nullptr : this;
     }
 
     CharCount MatchLiteralNode::MinSyncronizingLiteralLength(Compiler& compiler, int& numLiterals) const
     {
+        if (isCanonical)
+            return 0; // not a scan candidate (see HeadSyncronizingNode)
         numLiterals++;
         return length;
     }
 
     void MatchLiteralNode::CollectSyncronizingLiterals(Compiler& compiler, ScannersMixin& scanners) const
     {
+        if (isCanonical)
+            return; // not a scan candidate (see HeadSyncronizingNode)
         ScannerMixin* scanner =
             scanners.Add(compiler.GetScriptContext()->GetRecycler(), compiler.GetProgram(), offset, length, isEquivClass);
         scanner->scanner.Setup(compiler.rtAllocator, compiler.program->rep.insts.litbuf + offset, length, isEquivClass ? CaseInsensitive::EquivClassSize : 1);
@@ -965,6 +1010,8 @@ namespace UnifiedRegex
 
     void MatchLiteralNode::BestSyncronizingNode(Compiler& compiler, Node*& bestNode)
     {
+        if (isCanonical)
+            return; // not a scan candidate (see HeadSyncronizingNode)
         if (IsBetterSyncronizingNode(compiler, bestNode, this))
             bestNode = this;
     }
@@ -999,7 +1046,9 @@ namespace UnifiedRegex
         }
         else
         {
-            if (isEquivClass)
+            if (isCanonical)
+                EMIT(compiler, MatchLiteralCanonicalInst, effectiveOffset, effectiveLength);
+            else if (isEquivClass)
                 EMIT(compiler, MatchLiteralEquivInst, effectiveOffset, effectiveLength);
             else
                 EMIT(compiler, MatchLiteralInst, effectiveOffset, effectiveLength);
@@ -1015,6 +1064,7 @@ namespace UnifiedRegex
         //   SyncTo(Literal|LiteralEquiv|LinearLiteral)And(Continue|Consume|Backup)
         //
 
+        AssertMsg(!isCanonical, "canonical literals opt out of every scan candidate (see HeadSyncronizingNode)");
         Char * litptr = compiler.program->rep.insts.litbuf + offset;
 
         if (isHeadSyncronizingNode)
