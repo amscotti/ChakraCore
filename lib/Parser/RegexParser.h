@@ -204,6 +204,25 @@ namespace UnifiedRegex
         // additionally selects the v-mode character-class grammar.
         bool unicodeSetsFlagPresent;
 
+        // Atom decimal escapes (\0, \1.., legacy octal shapes) seen during
+        // pass 0. Under u/v every occurrence must be \0 (with no decimal
+        // digit following) or a backreference number within the FINAL group
+        // count, which pass 0 cannot know yet, so the sites only record and
+        // the entry points validate once the flag and the final count are
+        // available (ES2015 AtomEscape has no legacy octal/identity
+        // fallbacks under u). ctAllocator-owned, dies with the parse.
+        struct DecimalEscapeOccurrence
+        {
+            uint32 value;          // numeric value of the first <= 5 digits
+            CharCount pos;         // scan position for the thrown error
+            CharCount encodedPos;
+            bool zeroLeadingRun;   // \0 followed by more digits: never a DecimalEscape under u
+            bool overlong;         // more than 5 digits: can never be a group number
+        };
+        DecimalEscapeOccurrence* decimalEscapes;
+        int numDecimalEscapes;
+        int decimalEscapesCap;
+
     private:
 
         //
@@ -271,7 +290,8 @@ namespace UnifiedRegex
         // singleton, a single MatchSetNode when all-BMP, otherwise a
         // disjunction of the BMP set and surrogate-pair range arms. Shared
         // by character classes and property escapes.
-        Node* TranslateCodePointSet(CharSet<codepoint_t>& codePointSet, bool isNegation);
+        Node* TranslateCodePointSet(CharSet<codepoint_t>& codePointSet, bool isNegation,
+            bool noHalfPairFallback = false);
 
         //
         // v flag (ES2024 Unicode sets) character classes
@@ -367,6 +387,10 @@ namespace UnifiedRegex
         void Fail(HRESULT error);
         void DeferredFailIfUnicode(HRESULT error);
         void DeferredFailIfNotUnicode(HRESULT error);
+        // Atom decimal escapes: recorded during pass 0 (cursor at the first
+        // digit after '\'), validated by the entry points under u/v.
+        void RecordDecimalEscapePass0();
+        void ValidateDecimalEscapesIfUnicode();
         inline void ECMust(EncodedChar ec, HRESULT error);
         inline Char NextChar();
 

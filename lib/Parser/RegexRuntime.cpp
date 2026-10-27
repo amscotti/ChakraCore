@@ -4800,25 +4800,22 @@ namespace UnifiedRegex
             return matcher.Fail(FAIL_PARAMETERS);
 
         const Char c0 = input[inputOffset];
-        if (!Js::NumberUtilities::IsSurrogateLowerPart(c0) && !Js::NumberUtilities::IsSurrogateUpperPart(c0))
-        {
-            // Plain BMP unit: single-unit membership.
-            if (this->set.Get(c0))
-            {
-                inputOffset++;
-                instPointer += sizeof(*this);
-                return false;
-            }
-            return matcher.Fail(FAIL_PARAMETERS);
-        }
-
         if (Js::NumberUtilities::IsSurrogateLowerPart(c0) &&
             inputOffset + 1 < inputLength &&
             Js::NumberUtilities::IsSurrogateUpperPart(input[inputOffset + 1]))
         {
             // A complete pair is one code point: prefer the 2-unit member
-            // interpretation, then the lone-high fallback (preserving the
-            // engine's documented lone-surrogate behavior).
+            // interpretation, then the lead-unit fallback. The fallback is
+            // the engine's documented behavior for POSITIVE sets and for
+            // property escapes of both polarities: the pinned
+            // property-escapes corpus passes its unanchored loop forms only
+            // because the fallback matches both halves of astral pairs that
+            // ICU 79.1 includes in the property but the newer pinned corpus
+            // does not (data drift; see doc/c2-s9-u-strictness.md). Only
+            // NEGATED u-mode character classes (noHalfPairFallback, set by
+            // the legacy CharacterClassPass1 complement path and v's
+            // pure-code-point negations) skip it: half of an excluded
+            // astral symbol is not a match.
             const codepoint_t cp = Js::NumberUtilities::SurrogatePairAsCodePoint(c0, input[inputOffset + 1]);
             int lo = 0;
             int hi = numRanges - 1;
@@ -4842,6 +4839,10 @@ namespace UnifiedRegex
                 inputOffset += 2;
                 instPointer += sizeof(*this);
                 return false;
+            }
+            if (noHalfPairFallback)
+            {
+                return matcher.Fail(FAIL_PARAMETERS);
             }
         }
 
@@ -5980,7 +5981,11 @@ namespace UnifiedRegex
 #if ENABLE_REGEX_CONFIG_OPTIONS
             CompStats();
 #endif
-            if (MatchSingleCharCaseInsensitiveHere(mappingSource, input, offset, c))
+            // offset can be inputLength (exec at the end of the input, or on
+            // a sliced string whose storage ends here); reading input[offset]
+            // would read past the input (the terminating NUL on flat
+            // strings, the parent's next character on slices).
+            if (offset < inputLength && MatchSingleCharCaseInsensitiveHere(mappingSource, input, offset, c))
             {
                 GroupInfo* const info = GroupIdToGroupInfo(0);
                 info->offset = offset;
@@ -5994,19 +5999,56 @@ namespace UnifiedRegex
             }
         }
 
-        while (offset < inputLength)
+        // Pair-aware advance is needed only when the single character IS a
+        // trail surrogate (see MatchSingleCharCaseSensitive); the common
+        // scan stays the original tight loop.
+        const bool skipCompletePairs =
+            (program->flags & (UnicodeRegexFlag | UnicodeSetsRegexFlag)) != 0 &&
+            Js::NumberUtilities::IsSurrogateUpperPart(c);
+        if (!skipCompletePairs)
         {
-#if ENABLE_REGEX_CONFIG_OPTIONS
-            CompStats();
-#endif
-            if (MatchSingleCharCaseInsensitiveHere(mappingSource, input, offset, c))
+            while (offset < inputLength)
             {
-                GroupInfo* const info = GroupIdToGroupInfo(0);
-                info->offset = offset;
-                info->length = 1;
-                return true;
+#if ENABLE_REGEX_CONFIG_OPTIONS
+                CompStats();
+#endif
+                if (MatchSingleCharCaseInsensitiveHere(mappingSource, input, offset, c))
+                {
+                    GroupInfo* const info = GroupIdToGroupInfo(0);
+                    info->offset = offset;
+                    info->length = 1;
+                    return true;
+                }
+                offset++;
             }
-            offset++;
+        }
+        else
+        {
+            while (offset < inputLength)
+            {
+#if ENABLE_REGEX_CONFIG_OPTIONS
+                CompStats();
+#endif
+                if (MatchSingleCharCaseInsensitiveHere(mappingSource, input, offset, c))
+                {
+                    GroupInfo* const info = GroupIdToGroupInfo(0);
+                    info->offset = offset;
+                    info->length = 1;
+                    return true;
+                }
+                // A match can never begin inside a complete surrogate pair
+                // in u/v modes: skip it as one code point.
+                if (Js::NumberUtilities::IsSurrogateLowerPart(input[offset]) &&
+                    offset + 1 < inputLength &&
+                    Js::NumberUtilities::IsSurrogateUpperPart(input[offset + 1]))
+                {
+                    offset += 2;
+                }
+                else
+                {
+                    offset++;
+                }
+            }
         }
 
         ResetGroup(0);
@@ -6030,7 +6072,11 @@ namespace UnifiedRegex
 #if ENABLE_REGEX_CONFIG_OPTIONS
             CompStats();
 #endif
-            if (input[offset] == c)
+            // offset can be inputLength (exec at the end of the input, or on
+            // a sliced string whose storage ends here); reading input[offset]
+            // would read past the input (the terminating NUL on flat
+            // strings, the parent's next character on slices).
+            if (offset < inputLength && input[offset] == c)
             {
                 GroupInfo* const info = GroupIdToGroupInfo(0);
                 info->offset = offset;
@@ -6044,19 +6090,59 @@ namespace UnifiedRegex
             }
         }
 
-        while (offset < inputLength)
+        // Pair-aware advance is needed only when the single character IS a
+        // trail surrogate: only then can the per-unit scan match inside a
+        // complete surrogate pair (a non-surrogate c can never equal a unit
+        // inside a pair, and a lead-surrogate c matches at pair starts by
+        // the engine's documented lead-lacunarity either way). Gate on that
+        // so the common scan stays the original tight loop.
+        const bool skipCompletePairs =
+            (program->flags & (UnicodeRegexFlag | UnicodeSetsRegexFlag)) != 0 &&
+            Js::NumberUtilities::IsSurrogateUpperPart(c);
+        if (!skipCompletePairs)
         {
-#if ENABLE_REGEX_CONFIG_OPTIONS
-            CompStats();
-#endif
-            if (input[offset] == c)
+            while (offset < inputLength)
             {
-                GroupInfo* const info = GroupIdToGroupInfo(0);
-                info->offset = offset;
-                info->length = 1;
-                return true;
+#if ENABLE_REGEX_CONFIG_OPTIONS
+                CompStats();
+#endif
+                if (input[offset] == c)
+                {
+                    GroupInfo* const info = GroupIdToGroupInfo(0);
+                    info->offset = offset;
+                    info->length = 1;
+                    return true;
+                }
+                offset++;
             }
-            offset++;
+        }
+        else
+        {
+            while (offset < inputLength)
+            {
+#if ENABLE_REGEX_CONFIG_OPTIONS
+                CompStats();
+#endif
+                if (input[offset] == c)
+                {
+                    GroupInfo* const info = GroupIdToGroupInfo(0);
+                    info->offset = offset;
+                    info->length = 1;
+                    return true;
+                }
+                // A match can never begin inside a complete surrogate pair
+                // in u/v modes: skip it as one code point.
+                if (Js::NumberUtilities::IsSurrogateLowerPart(input[offset]) &&
+                    offset + 1 < inputLength &&
+                    Js::NumberUtilities::IsSurrogateUpperPart(input[offset + 1]))
+                {
+                    offset += 2;
+                }
+                else
+                {
+                    offset++;
+                }
+            }
         }
 
         ResetGroup(0);
@@ -6315,13 +6401,33 @@ namespace UnifiedRegex
                 // Need to continue matching even if matchStart == inputLim since some patterns may match an empty string at the end
                 // of the input. For instance: /a*$/.exec("b")
                 bool firstIteration = true;
+                // In u/v modes a match can never begin inside a surrogate
+                // pair, so the retry start advances by the whole code point
+                // at the failed start (two units for a complete pair, else
+                // one); non-u keeps the Annex B per-unit advance exactly.
+                const bool isUnicodeMode = (prog->flags & (UnicodeRegexFlag | UnicodeSetsRegexFlag)) != 0;
                 do
                 {
                     // Let there be only one call to MatchHere(), as that call expands the interpreter loop in-place. Having
                     // multiple calls to MatchHere() would bloat the code.
                     res = MatchHere(input, inputLength, offset, nextSyncInputOffset, regexStacks->contStack, regexStacks->assertionStack, qcTicks, firstIteration);
                     firstIteration = false;
-                } while(!res && loopMatchHere && ++offset <= inputLength);
+                    if (res || !loopMatchHere)
+                    {
+                        break;
+                    }
+                    if (isUnicodeMode && offset < inputLength &&
+                        Js::NumberUtilities::IsSurrogateLowerPart(input[offset]) &&
+                        offset + 1 < inputLength &&
+                        Js::NumberUtilities::IsSurrogateUpperPart(input[offset + 1]))
+                    {
+                        offset += 2;
+                    }
+                    else
+                    {
+                        offset++;
+                    }
+                } while (offset <= inputLength);
 
                 break;
             }

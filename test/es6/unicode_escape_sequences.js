@@ -182,18 +182,21 @@ invalidStrings.forEach(function (str){
 /a\u{1}b/.test("aub").echo();
 /a\u{}b/.test("a\u{0}b").echo();
 
-/a\u{}b/u.test("au\{\}b").echo();
+// Malformed braced \u bodies (\u{}, \u{1.1}) are SyntaxErrors under the u
+// flag (ES2015 RegExpUnicodeEscapeSequence; S9 u-mode strictness); without
+// the flag the identity-escape readings above are unchanged.
+try { eval("/a\\u{}b/u"); } catch (e) { WScript.Echo(e instanceof SyntaxError); }
+try { eval("/a\\u{1.1}b/u"); } catch (e) { WScript.Echo(e instanceof SyntaxError); }
 /a\u{1}b/u.test("a\u0001b").echo();
-/a\u{1.1}b/u.test("au\{1.1\}b").echo();
 /a\u{110000}b/.test("a" + (Array(110001).join('u')) +"b").echo();
 /a\u{11FFFF}b/.test("au\{11FFFF\}b").echo();
 /a\u{10FFFF}b/.test("a\uDBFF\uDFFFb").echo();
 
 /a\u{1000000}b/.test("au\{1000000\}b").echo();
-/a\u{1.1}b/u.test("a\u0001b").echo();
+try { eval("/a\\u{1.1}b/u"); } catch (e) { WScript.Echo(e instanceof SyntaxError); }
 /a\u{1}b/u.test("a\\ub").echo();
 /a\u{1}b/u.test("aub").echo();
-/a\u{}b/u.test("a\u{0}b").echo();
+try { eval("/a\\u{}b/u"); } catch (e) { WScript.Echo(e instanceof SyntaxError); }
 
 
 try {

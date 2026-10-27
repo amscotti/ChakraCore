@@ -471,6 +471,12 @@ namespace UnifiedRegex
         CharSet<Char> firstUnits;   // set plus high surrogates when ranges exist
         codepoint_t* ranges;        // 2*numRanges entries: lower, upper, ...
         int numRanges;
+        // True for NEGATED u-mode character classes: a complete surrogate
+        // pair whose code point is not a member must fail the atom instead
+        // of falling back to its lead unit (half of an excluded astral
+        // symbol is not a match). Property escapes and positive classes
+        // keep the engine's documented fallback (lone-surrogate behavior).
+        bool noHalfPairFallback;
 
         inline MatchCodePointSetNode(bool isCaseInsensitive)
             : Node(MatchCodePointSet)
@@ -479,6 +485,7 @@ namespace UnifiedRegex
             , firstUnits()
             , ranges(nullptr)
             , numRanges(0)
+            , noHalfPairFallback(false)
         {
         }
 
