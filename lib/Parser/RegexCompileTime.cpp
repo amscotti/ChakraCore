@@ -824,7 +824,13 @@ namespace UnifiedRegex
 
     CharCount MatchLiteralNode::LiteralLength() const
     {
-        return length;
+        // Canonical (v \q under i) literals must never fuse with ordinary
+        // literal/char runs (AccumLiteral): a merged run would either match
+        // the raw bytes case-insensitively (admitting U+212A-style folds)
+        // or canonicalize the ordinary part (changing its behavior).
+        // Reporting zero keeps them out of every accumulation path; they
+        // still concatenate like any other node.
+        return isCanonical ? 0 : length;
     }
 
     void MatchLiteralNode::AppendLiteral(CharCount& litbufNext, CharCount litbufLen, __inout_ecount(litbufLen) Char* litbuf) const
@@ -915,32 +921,13 @@ namespace UnifiedRegex
         firstSet = Anew(compiler.ctAllocator, UnicodeCharSet);
         if (isCanonical)
         {
-            // Canonical (v \q under i) literal: the set of input units
-            // that can start a match is the canonical preimage of the
-            // stored first code point (its simple lowercase, plus astral
-            // preimages' first units). Rather than approximate that here,
-            // publish a sound bound: both surrogate ranges when the first
-            // stored code point is astral, and the canonical char plus its
-            // simple lowercase otherwise. Never exact.
-            const Char c = compiler.program->rep.insts.litbuf[offset];
-            if (length >= 2 && c >= 0xD800 && c <= 0xDBFF &&
-                compiler.program->rep.insts.litbuf[offset + 1] >= 0xDC00 &&
-                compiler.program->rep.insts.litbuf[offset + 1] <= 0xDFFF)
-            {
-                firstSet->SetRange(compiler.ctAllocator, 0xD800, 0xDBFF);
-            }
-            else
-            {
-                firstSet->Set(compiler.ctAllocator, c);
-                codepoint_t lower = (codepoint_t)u_tolower((UChar32)(codepoint_t)c);
-                if (lower != (codepoint_t)c)
-                    firstSet->Set(compiler.ctAllocator, (Char)lower);
-                // Soundness: an astral input code point could in principle
-                // uppercase onto this BMP canonical form; admit every high
-                // surrogate start. The bound grows past the sync heuristic
-                // threshold, so scan fast paths simply decline.
-                firstSet->SetRange(compiler.ctAllocator, 0xD800, 0xDBFF);
-            }
+            // Canonical (v \q under i) literal: the preimage of
+            // Canonicalize over the stored first code point is not
+            // bounded by any small set (e.g. U+0345 and friends uppercase
+            // onto their target), so publish the whole BMP as a sound
+            // upper bound. That disables every set-size-gated fast path
+            // (sync-to-set etc.) while keeping the matcher exact.
+            firstSet->SetRange(compiler.ctAllocator, 0x0000, Chars<Char>::MaxUChar);
             isFirstExact = false;
         }
         else
@@ -1196,6 +1183,10 @@ namespace UnifiedRegex
 
     bool MatchLiteralNode::IsCharTrieArm(Compiler& compiler, uint& accNumAlts) const
     {
+        // A trie matches raw literal bytes; canonical members must go
+        // through MatchLiteralCanonicalInst.
+        if (isCanonical)
+            return false;
         if (isEquivClass)
             // The literal would expand into length^3 alternatives
             return false;

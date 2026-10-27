@@ -324,6 +324,86 @@ two divergences recorded under Residuals):
   the descending-length sort (adjacent equal members are unobservable),
   bounded by the sort itself.
 
+## Review repairs, iteration 2 (combined re-review blockers)
+
+1. **Astral set-operation operands**: escaped surrogate pairs now combine
+   in the pass-0 validator's raw-character and `\uXXXX` operand scans
+   (mirroring `VDecodeEscapeCodePoint`), and the legacy dash-softening
+   also fires when a completed surrogate pair precedes `--` (the pair
+   position previously turned the dash into an astral range start whose
+   deferred BadRange fired under v). `\uD83D\uDE00--x`, `&&`, right
+   operands, pair-pair subtraction and property-astral subtraction all
+   Node-verified; `\u{...}` spelling unchanged.
+2. **Canonical literal accumulation**: canonical (`\q` under i) literals
+   report `LiteralLength()` 0, so `AccumLiteral` never fuses them with
+   ordinary runs (a merged run previously either kept raw bytes — losing
+   "yka" — or canonicalized ordinary chars). `y[\q{ka}]`,
+   `[\q{ka}]y`, captures, quantifiers and alternatives pinned; the
+   Kelvin sign still never matches a member.
+3. **Multiple multi-code-point `\q` members**: the mis-fusion in (2) was
+   also silently dropping the canonical flag for multi-alternative
+   members (`[\q{ab|cd}]` matched only the last member's case forms);
+   with runs separate every member emits `MatchLiteralCanonicalInst`.
+   Unions, nested classes, repeated and duplicate members pinned.
+4. **Deferred truncated nested classes**: `VValidateClass` now consumes
+   its closing `]` (nested-class alignment), so `[[a]--`, `[[a]`,
+   `&&`/`\q`-truncations record the deferred-if-v error during the
+   no-AST scan: clean SyntaxError under `-force:deferParse` on both
+   profiles (previously a bare `Error` at call time).
+5. **Astral complement shorthands**: `[^\D]`/`[^\S]`/`[^\W]` equal
+   `\d`/`\s`/`\w` under v (astral planes added to the complement
+   operand) and under u (the sole-complement-shorthand negation flips to
+   the positive set in `CharacterClassPass1`, avoiding the negated
+   unit-set substrate that admitted astral input). `[a\D]` unions and
+   positive `\D` still match astral. The remaining `[a\D]/u` divergence
+   is the engine's per-unit u-mode lacunarity (returns the high
+   surrogate half where Node returns the pair) — pre-existing, residual.
+6. **Strict v empty/reserved classes**: `[]--a]`, `[]a]`, `[^]--a]`,
+   `[]]`, `[a]]` reject under v via a `]`-atom deferred-if-v rule
+   (scoped by a per-pattern sticky "saw nested class" flag so nested
+   classes like `[a[b]c]`/`[[ab][cd]]` and `\q` bodies containing `|`
+   stay valid — the legacy scanner mis-splits those); `[]`/`[^]` stay
+   legal; `[a&&&]`/`[a---b]` reject via the triple-operator reserved
+   pair; legacy non-v `[]`/`]`-atom leniency preserved (Node-parity:
+   legacy `[]--a]` parses and matches nothing).
+7. **Canonical firstSet**: replaced the unsound "char + lowercase +
+   high-surrogate range" bound with the full BMP range (sound: the
+   Canonicalize preimage, e.g. U+0345-style titles, is never outside it)
+   and `isFirstExact` false; every set-size-gated fast path declines.
+   `IsCharTrieArm`/`IsOctoquad` also exclude canonical literals.
+8. **Receipt corrections**: the non-u `[\s--\n]` shape — legacy
+   non-unicode Chakra treats `--` after `\s` as a literal-dash range
+   `\s`..`-`? No: the deferred-if-not-unicode error fires, so non-u
+   keeps rejecting exactly as before (Node accepts it as literal chars
+   `--`; that pre-existing Annex-B divergence is inherited, not fixed
+   here). Deferred truncation coverage is now all pass-0 no-AST shapes
+   (see 4). Astral complement behavior is per 5; literal-run
+   accumulation per 2; `\q`-string dedup was already complete
+   (descending-sort adjacent removal).
+
+### Iteration-2 evidence
+
+- Focused test (now 29 groups / 539 assertions): `pass` on test and
+  debug-static across default/`-noDeferParse`/`-CollectGarbage`/
+  combined/`-force:deferParse`.
+- 75-case differential battery (astral set ops, canonical concat and
+  multi-member `\q`, shorthand complements on astral inputs, strict
+  empty classes): **CH == Node on 74/75**; the single divergence is the
+  documented per-unit u-mode lacunarity on `[a\D]/u` (Bun differs on
+  that same case only).
+- Pinned corpus re-run on the final binary: v universe
+  **346 passed / 28 failed of 374** (exactly the accessor/symbols/
+  BigInt substrate set); S3-a 1,980 selection **1,828/152** (identical
+  decomposition: 112 drift + 12 double-escaped + 6 named-groups +
+  22 literals; +14/0 vs S3-a). 142-file unicodeSets+strings sweep 142/0.
+- Defer ladder (`/[[a]--/v`, `/[[a]/v`, `&&`, `[[`, `[\q{ab` inside
+  deferred functions): clean SyntaxError under default and
+  `-force:deferParse` on both profiles.
+- Perf/GC: `[\S]+` 20k ≈34 ms, `[^\D]` astral 5k 0 ms, nested-500
+  compiles 0 ms, 200 canonical `\q` compiles 0 ms, 100 RGI compiles
+  8 ms, RGI 5k find ≈446 ms (the inherited literal-alternation cliff);
+  `-CollectGarbage` spot check identical.
+
 ## Residuals
 
 1. Oracle divergences on `\q` under `i` (all documented, engine implements

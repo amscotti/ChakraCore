@@ -598,6 +598,124 @@ var tests = [
                 "N=4000 either compiles or fails with a clean stack error, got " + deepResult);
         }
     },
+    {
+        name: "Repair 2: astral set-operation operands in every spelling",
+        body() {
+            // escaped surrogate pairs
+            assert.areEqual("\u{1F600}", /^[\uD83D\uDE00--x]$/v.exec("\u{1F600}")[0]);
+            assert.areEqual(null, /^[\uD83D\uDE00--x]$/v.exec("x"));
+            assert.areEqual(null, /^[\uD83D\uDE00&&x]$/v.exec("\u{1F600}"), "intersection with disjoint cp");
+            assert.areEqual(null, /^[\uD83D\uDE00&&x]$/v.exec("x"), "intersection is empty, no x either");
+            assert.areEqual("x", /^[x--\uD83D\uDE00]$/v.exec("x")[0]);
+            assert.areEqual(null, /^[x--\uD83D\uDE00]$/v.exec("\u{1F600}"));
+            assert.areEqual("\u{1F600}", /^[\uD83D\uDE00--\uD83D\uDE01]$/v.exec("\u{1F600}")[0], "pair-pair subtraction keeps the lower");
+            assert.areEqual(null, /^[\uD83D\uDE00--\uD83D\uDE01]$/v.exec("\u{1F601}"));
+            assert.areEqual(null, /^[\p{Basic_Emoji}--\uD83D\uDE00]$/v.exec("\u{1F600}"), "property minus astral member");
+            assert.areEqual("\u{1F601}", /^[\p{Basic_Emoji}--\uD83D\uDE00]$/v.exec("\u{1F601}")[0]);
+            // raw astral characters (literal source); single dash is the range
+            assert.isTrue(/[\u{1F600}-\u{1F601}]/v.test("\u{1F601}"));
+            assert.isFalse(/[\u{1F600}-\u{1F601}]/v.test("\u{1F602}"));
+            // consistency with \u{...} spelling
+            assert.areEqual("\u{1F600}", /^[\u{1F600}--x]$/v.exec("\u{1F600}")[0]);
+            assert.areEqual(null, /^[\u{1F600}&&x]$/v.exec("\u{1F600}"));
+        }
+    },
+    {
+        name: "Repair 2: canonical literal runs never mis-fuse",
+        body() {
+            assert.areEqual("yka", /y[\q{ka}]/iv.exec("yka")[0], "prefix ordinary + canonical member");
+            assert.areEqual("yKA", /y[\q{ka}]/iv.exec("yKA")[0]);
+            assert.areEqual("kay", /[\q{ka}]y/iv.exec("kay")[0], "canonical member + suffix");
+            assert.areEqual("KAy", /[\q{ka}]y/iv.exec("KAy")[0]);
+            assert.areEqual(null, /[\q{ka}]y/iv.exec("\u212AAy"), "Kelvin never matches the member part");
+            assert.areEqual("yKAz", /(y[\q{ka}])z/iv.exec("yKAz")[0], "capture around the boundary");
+            assert.areEqual("yKA", /x|y[\q{ka}]/iv.exec("yKA")[0], "alternative branch");
+            assert.areEqual("yKAkaz", /y[\q{ka}]+z/iv.exec("yKAkaz")[0], "quantified across the boundary");
+            assert.areEqual("yKak", /y[\q{ka}]k/iv.exec("yKak")[0], "member then ordinary char then member char");
+            assert.areEqual(null, /[\q{ka}]x/iv.exec("\u212Ax"), "member refuses the Kelvin sign, so no match at 0");
+            // multi-member canonical runs stay separate per member
+            assert.areEqual("ab", /^[\q{ab}b]$/iv.exec("ab")[0]);
+            assert.areEqual("b", /^[\q{ab}b]$/iv.exec("b")[0]);
+            assert.areEqual("AB", /^[\q{ab}b]$/iv.exec("AB")[0]);
+        }
+    },
+    {
+        name: "Repair 2: every multi-code-point \q member matches canonically",
+        body() {
+            assert.areEqual("ab", /^[\q{ab|cd}]$/iv.exec("ab")[0]);
+            assert.areEqual("AB", /^[\q{ab|cd}]$/iv.exec("AB")[0]);
+            assert.areEqual("cd", /^[\q{ab|cd}]$/iv.exec("cd")[0]);
+            assert.areEqual("CD", /^[\q{ab|cd}]$/iv.exec("CD")[0]);
+            assert.areEqual("aB", /^[\q{ab|cd}]$/iv.exec("aB")[0], "per-character canonicalization (Node-verified)");
+            assert.areEqual("ABCD", /^[\q{ab|cd}]+$/iv.exec("ABCD")[0], "quantified alternation of canonical members");
+            assert.areEqual("aB", /[\q{ab|cd}]+/iv.exec("aBdC")[0], "dC is not a canonical cd (Node-verified)");
+            assert.areEqual(null, /^[\q{ab|cd}]+$/iv.exec("aBdC"));
+            // union with a code point arm and nested classes
+            assert.areEqual("AB", /^[\q{ab}x]$/iv.exec("AB")[0]);
+            assert.areEqual("x", /^[\q{ab}x]$/iv.exec("x")[0]);
+            assert.areEqual("CD", /^[[\q{cd}]]$/iv.exec("CD")[0], "inside a nested class");
+            assert.areEqual("AbCd", /^[\q{ab}\q{cd}]{2}$/iv.exec("AbCd")[0], "repeated members");
+            assert.areEqual("AB", /^[\q{ab}\q{ab}]$/iv.exec("AB")[0], "duplicate members deduped but still canonical");
+        }
+    },
+    {
+        name: "Repair 2: truncated nested classes throw under deferParse too",
+        body() {
+            dynError("[[a]--", "v");
+            dynError("[[a]", "v");
+            dynError("[[a]&&", "v");
+            dynError("[[a]--x", "v");
+            dynError("[[", "v");
+            dynError("[\q{ab", "v");
+            // same shapes inside a deferred function literal
+            assert.throws(function () { eval("function d1() { return /[[a]--/v; }"); }, SyntaxError, "deferred truncated operator");
+            assert.throws(function () { eval("function d2() { return /[[a]/v; }"); }, SyntaxError, "deferred truncated nested");
+        }
+    },
+    {
+        name: "Repair 2: astral complement shorthands equal their positive form",
+        body() {
+            assert.areEqual(null, /[^\D]/v.exec("\u{1F600}"), "[^\\D] is \\d, no astral");
+            assert.areEqual(null, /[^\S]/v.exec("\u{1F600}"), "[^\\S] is \\s, no astral");
+            assert.areEqual(null, /[^\W]/v.exec("\u{1F600}"), "[^\\W] is \\w, no astral");
+            assert.areEqual("5", /^[^\D]$/v.exec("5")[0]);
+            assert.areEqual(" ", /^[^\S]$/v.exec(" ")[0]);
+            assert.areEqual("_", /^[^\W]$/v.exec("_")[0]);
+            assert.areEqual(null, /[^\D]/u.exec("\u{1F600}"), "u mode agrees");
+            assert.areEqual(null, /[^\S]/u.exec("\u{1F600}"));
+            assert.areEqual(null, /[^\W]/u.exec("\u{1F600}"));
+            assert.isTrue(/[a\D]/u.test("\u{1F600}"), "union with \\D still matches astral");
+            assert.isTrue(/[\D]/v.test("\u{1F600}"), "positive \\D matches astral");
+            assert.isTrue(/[\S]/v.test("\u{1F600}"));
+        }
+    },
+    {
+        name: "Repair 2: strict v empty/reserved-punctuator classes",
+        body() {
+            // [] and [^] stay legal (never-match / any-code-point)
+            assert.areEqual(null, /[]/v.exec("x"));
+            assert.isTrue(/[^]/v.test("x"));
+            // ...but the shapes whose class closes early and leaves a bare
+            // ']' atom, or a reserved triple operator, are SyntaxErrors
+            dynError("[]--a]", "v");
+            dynError("[]a]", "v");
+            dynError("[^]--a]", "v");
+            dynError("[]]", "v");
+            dynError("[a&&&]", "v");
+            dynError("[a---b]", "v");
+            dynError("[a--&&]", "v");
+            dynError("[a&&-]", "v");
+            // legal operator chains stay legal
+            dynOk("[a--b--c]", "v");
+            dynOk("[a&&b&&c]", "v");
+            dynOk("[a--&]", "v");
+            // legacy non-v [] and ]-atom leniency preserved: the shape
+            // parses and the empty class matches nothing (Node-verified)
+            dynOk("[]", "");
+            dynOk("[]--a]", "");
+            assert.isFalse(/[]--a]/.test("--a]"), "legacy empty class matches nothing");
+        }
+    },
 ];
 
 testRunner.runTests(tests, { verbose: WScript.Arguments[0] != "summary" });

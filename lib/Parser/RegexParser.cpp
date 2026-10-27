@@ -224,6 +224,8 @@ namespace UnifiedRegex
         , vScratchUnitsLen(0)
         , vScratchUnitsCap(0)
         , vLastScanIsStringProperty(false)
+        , vClassSawNested(false)
+        , vSawNestedClassInAlternative(false)
     {
         this->SetIsUtf8(isUtf8);
     }
@@ -1223,7 +1225,14 @@ namespace UnifiedRegex
         const EncodedChar* savedNext = next;
         const size_t savedMultiUnits = this->GetMultiUnits();
         bool mayContainStrings = false;
+        bool sawNested = this->vClassSawNested;
         VValidateClass(mayContainStrings);
+        // For the ']'-atom rule in TermPass0 (see there): once any class in
+        // this alternative contained a nested bracket, later legacy ']'
+        // atoms may be v class content ([[ab][cd]]), so the alternative is
+        // exempt; without nesting a following bare ']' really is an atom
+        // ([]a], [a]]).
+        this->vSawNestedClassInAlternative = this->vSawNestedClassInAlternative || this->vClassSawNested || sawNested;
         next = savedNext;
         this->RestoreMultiUnits(savedMultiUnits);
     }
@@ -1252,8 +1261,17 @@ namespace UnifiedRegex
             ECConsume();
         }
         if (ECLookahead() == ']')
+        {
+            ECConsume(); // keep nested scans aligned (cursor is restored by the caller)
             return; // empty class
+        }
         VValidateExpr(mayContainStrings);
+        if (IsEOF() || ECLookahead() == 0 || ECLookahead() != ']')
+        {
+            DeferredFailIfUnicodeSets(JSERR_RegExpNoBracket);
+            return;
+        }
+        ECConsume(); // the class's closing ']' (VParseClass consumes it too)
         if (negation && mayContainStrings)
         {
             // Negated character class may contain strings (ES2024 early
@@ -1299,6 +1317,13 @@ namespace UnifiedRegex
                 }
                 chainOp = isAndOp ? '&' : '-';
                 ECConsume(2);
+                // A third operator char ([a&&&], [a---b]): the operator's
+                // second char and it form a reserved double punctuator.
+                if (ECLookahead() == chainOp && ECLookahead(1) != 0 && !IsEOF())
+                {
+                    DeferredFailIfUnicodeSets(JSERR_RegExpSyntax);
+                    return;
+                }
                 bool rhsMcs = false;
                 VValidateEscape(rhsMcs);
                 // A range cannot be the right operand of a set operation:
@@ -1463,7 +1488,25 @@ namespace UnifiedRegex
                         standardEncodedChars->IsHex(ECLookahead(0)) && standardEncodedChars->IsHex(ECLookahead(1)) &&
                         standardEncodedChars->IsHex(ECLookahead(2)) && standardEncodedChars->IsHex(ECLookahead(3)))
                     {
+                        Char high = UTC((standardEncodedChars->DigitValue(ECLookahead(0)) << 12) |
+                            (standardEncodedChars->DigitValue(ECLookahead(1)) << 8) |
+                            (standardEncodedChars->DigitValue(ECLookahead(2)) << 4) |
+                            standardEncodedChars->DigitValue(ECLookahead(3)));
                         ECConsume(4);
+                        // An escaped surrogate pair is one code point
+                        // (pass 1 combines it in VDecodeEscapeCodePoint).
+                        if (VDetail::IsHighSurrogateUnit(high) &&
+                            ECLookahead() == '\\' && ECCanConsume(6) && ECLookahead(1) == 'u' &&
+                            standardEncodedChars->IsHex(ECLookahead(2)) && standardEncodedChars->IsHex(ECLookahead(3)) &&
+                            standardEncodedChars->IsHex(ECLookahead(4)) && standardEncodedChars->IsHex(ECLookahead(5)))
+                        {
+                            Char low = UTC((standardEncodedChars->DigitValue(ECLookahead(2)) << 12) |
+                                (standardEncodedChars->DigitValue(ECLookahead(3)) << 8) |
+                                (standardEncodedChars->DigitValue(ECLookahead(4)) << 4) |
+                                standardEncodedChars->DigitValue(ECLookahead(5)));
+                            if (VDetail::IsLowSurrogateUnit(low))
+                                ECConsume(6); // \uXXXX
+                        }
                     }
                     isSingleton = true;
                     return;
@@ -1490,6 +1533,7 @@ namespace UnifiedRegex
         if (ec == '[')
         {
             ECConsume();
+            this->vClassSawNested = true;
             bool innerMcs = false;
             VValidateClass(innerMcs);
             mayContainStrings = mayContainStrings || innerMcs;
@@ -1500,7 +1544,16 @@ namespace UnifiedRegex
         // expression loops break on ']' before reaching this). All error
         // paths consume the offending character first: this is a
         // validation-only scan, and leaving the cursor in place would loop.
+        // Read a full code point: a raw surrogate pair is ONE v-class
+        // operand ([😀--x] would otherwise validate as two items and the
+        // -- operator would be rejected as a union chain).
         Char c = NextChar();
+        if (VDetail::IsHighSurrogateUnit(c) && !IsEOF() && ECLookahead() != 0)
+        {
+            Char c2 = Chars<EncodedChar>::CTW(ECLookahead());
+            if (VDetail::IsLowSurrogateUnit(c2))
+                ECConsume();
+        }
         if (VDetail::IsClassSetSyntaxChar(c) && c != '[')
         {
             DeferredFailIfUnicodeSets(JSERR_RegExpSyntax);
@@ -1733,6 +1786,12 @@ namespace UnifiedRegex
                     Fail(JSERR_RegExpSyntax);
                 chainOp = isAndOp ? '&' : '-';
                 ECConsume(2);
+                // A third operator char ([a&&&], [a---b]): reserved double
+                // punctuator (pass 0 deferred it already).
+                if (ECLookahead() == chainOp && ECLookahead(1) != 0 && !IsEOF())
+                {
+                    Fail(JSERR_RegExpSyntax);
+                }
                 VCSet* rhs = Anew(ctAllocator, VCSet);
                 VInitSet(*rhs);
                 VParseOperand(*rhs, /*allowRange*/ false);
@@ -1899,6 +1958,14 @@ namespace UnifiedRegex
                     search = hi + 1;
                 }
                 units.FreeBody(ctAllocator);
+                // The complement shorthands (\D, \S, \W) are defined over
+                // all code points: the char16 set only carries the BMP part,
+                // so add the astral planes ([^\D] must equal \d and match
+                // no astral input; Node-verified).
+                if (e1 == 'D' || e1 == 'S' || e1 == 'W')
+                {
+                    set.cp.SetRange(ctAllocator, 0x10000, 0x10FFFF);
+                }
                 VCloseOperandIfInsensitive(set);
                 VRejectRangeHere();
                 return;
@@ -2833,6 +2900,10 @@ namespace UnifiedRegex
     template <typename P, const bool IsLiteral>
     void Parser<P, IsLiteral>::PatternPass0()
     {
+        // Sticky for the whole pattern: a legacy | or ] inside a v class
+        // (nested brackets, \q{} bodies) makes the legacy alternative
+        // boundaries unreliable, so the ']'-atom exemption must not reset.
+        this->vSawNestedClassInAlternative = false;
         this->positionAfterLastSurrogate = nullptr;
         this->deferredIfNotUnicodeError = nullptr;
         this->deferredIfUnicodeError = nullptr;
@@ -3812,6 +3883,19 @@ namespace UnifiedRegex
             Fail(JSERR_RegExpSyntax);
             break;
         case ']':
+            // v mode (like every u-mode grammar) has no bare ']' atom
+            // outside a class. The strict review shapes ([]a], []--a],
+            // [^]--a], []]) all close an EMPTY v class first, so scope the
+            // deferred-if-v error to that case: a class with nested
+            // brackets extends past the legacy scan boundary ([a[b]c] must
+            // stay valid), and a non-empty plain class keeps the engine's
+            // documented u-mode ']'-atom leniency.
+            if (scriptContext->GetConfig()->IsES6UnicodeExtensionsEnabled() && !this->vSawNestedClassInAlternative)
+            {
+                DeferredFailIfUnicodeSets(JSERR_RegExpSyntax);
+            }
+            NextChar();
+            break;
         case '}':
             NextChar();
             break;
@@ -4819,26 +4903,33 @@ namespace UnifiedRegex
                 }
                 else if (ECLookahead(1) == '-' &&
                          scriptContext->GetConfig()->IsES6UnicodeExtensionsEnabled() &&
-                         lastCodepoint > (codepoint_t)'-')
+                         (lastCodepoint > (codepoint_t)'-' ||
+                          this->next == this->positionAfterLastSurrogate))
                 {
                     // v flag (ES2024): '<singleton>--' where the legacy range
-                    // <singleton>..'-' would be invalid starts a set
+                    // <singleton>..'-' would be invalid, or a completed
+                    // surrogate pair followed by '--', starts a set
                     // difference operator instead. When the range would be
                     // VALID (e.g. '[+--]' is the range +..-) the legacy range
                     // stands: u keeps it and v's pass 1 re-parses the text as
-                    // an (invalid or operator-shaped) v class. The u flag is
+                    // an (invalid or operator-shaped) v class. Without the
+                    // surrogate case, the pair position turns the first dash
+                    // into range start U+1F600.. and the surrogate-range
+                    // machinery records a deferred BadRange that fires under
+                    // v (the astral-operand review bug). The u flag is
                     // unknown in pass 0, so consume BOTH dashes as literal
                     // characters and defer the range error for every non-v
-                    // mode (both non-unicode and plain u reject the text
-                    // today; only v parses on). Consuming both dashes also
-                    // prevents the second one from opening a new (bogus)
-                    // range against the following character, which would
-                    // hard-fail patterns like '[a--\t]'.
+                    // mode (they reject these shapes today; only v parses
+                    // on). Consuming both dashes also prevents the second
+                    // one from opening a new (bogus) range against the
+                    // following character, which would hard-fail patterns
+                    // like '[a--\t]'.
                     DeferredFailIfNotUnicode(JSERR_RegExpBadRange);
                     DeferredFailIfUnicodeNoSets(JSERR_RegExpBadRange);
                     NextChar(); // first dash
                     NextChar(); // second dash
                     lastCodepoint = INVALID_CODEPOINT;
+                    this->tempLocationOfSurrogatePair = nullptr;
                 }
                 else
                 {
@@ -4997,6 +5088,11 @@ namespace UnifiedRegex
         MatchSetNode deferredSetNode(false, false, caseInsensitiveFlagPresent);
         MatchCharNode deferredCharNode(0, caseInsensitiveFlagPresent);
 
+        // [^\D]/[^\S]/[^\W] (sole complement shorthand under negation)
+        // equal \d/\s/\w over all code points; see the escape branch.
+        bool sawAnyClassItem = false;
+        EncodedChar negatedSoleShorthand = 0;
+
         bool isNegation = false;
 
         if (ECLookahead() == '^')
@@ -5052,6 +5148,7 @@ namespace UnifiedRegex
                     UnionPropertyEscapePass1(codePointSet);
                     codePointToSet = pendingCodePoint;
                     pendingCodePoint = INVALID_CODEPOINT;
+                    sawAnyClassItem = true;
                     currIsACharSet = true;
                 }
                 else
@@ -5076,6 +5173,26 @@ namespace UnifiedRegex
                         pendingCodePoint = INVALID_CODEPOINT;
                         pendingRangeStart = INVALID_CODEPOINT;
                         codePointSet.UnionInPlace(ctAllocator, deferredSetNode.set);
+                        // Track a sole complement shorthand (\D, \S, \W):
+                        // a negated class containing exactly one of them
+                        // ([^\D] etc.) must equal the positive shorthand
+                        // over ALL code points, but the char16 set only
+                        // carries the BMP part and the negated unit-set
+                        // substrate would admit astral input (the review's
+                        // astral-complement bug). The flip below rebuilds
+                        // the positive set.
+                        if (unicodeFlagPresent &&
+                            (ECLookback(1) == 'D' || ECLookback(1) == 'S' || ECLookback(1) == 'W'))
+                        {
+                            if (sawAnyClassItem)
+                                negatedSoleShorthand = 0; // not sole
+                            else if (negatedSoleShorthand == 0)
+                                negatedSoleShorthand = ECLookback(1);
+                        }
+                        else
+                        {
+                            sawAnyClassItem = true;
+                        }
                         currIsACharSet = true;
                     }
                     else
@@ -5154,6 +5271,7 @@ namespace UnifiedRegex
         if (pendingCodePoint != INVALID_CODEPOINT)
         {
             codePointSet.Set(ctAllocator, pendingCodePoint);
+            sawAnyClassItem = true;
         }
 
         // At this point, we have a complete set of codepoints representing the range.
@@ -5177,6 +5295,37 @@ namespace UnifiedRegex
 
         // Everything past here must be under the flag
         Assert(scriptContext->GetConfig()->IsES6UnicodeExtensionsEnabled());
+
+        // [^\D] == \d over all code points: flip the sole complement
+        // shorthand to its positive form so the negated unit-set substrate
+        // never sees it (it would otherwise match astral input).
+        if (isNegation && negatedSoleShorthand != 0)
+        {
+            codePointSet.Clear(ctAllocator);
+            CharSet<Char> units;
+            switch (negatedSoleShorthand)
+            {
+                case 'D': standardChars->SetDigits(ctAllocator, units); break;
+                case 'S': standardChars->SetWhitespace(ctAllocator, units); break;
+                case 'W':
+                    if (caseInsensitiveFlagPresent)
+                        standardChars->SetWordIUChars(ctAllocator, units);
+                    else
+                        standardChars->SetWordChars(ctAllocator, units);
+                    break;
+            }
+            Char lo = 0, hi = 0;
+            Char search = 0;
+            while (units.GetNextRange(search, &lo, &hi))
+            {
+                codePointSet.SetRange(ctAllocator, lo, hi);
+                if (hi == Chars<Char>::MaxUChar)
+                    break;
+                search = hi + 1;
+            }
+            units.FreeBody(ctAllocator);
+            isNegation = false;
+        }
 
         // If negation, complement over all code points; under i, close over
         // case equivalence classes first (so [^\p{Lu}]iu does not match 'A',

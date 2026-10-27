@@ -315,6 +315,8 @@ namespace UnifiedRegex
         CharCount vScratchUnitsLen;
         CharCount vScratchUnitsCap;
         bool vLastScanIsStringProperty; // set by ScanPropertyEscapeBodyPass0
+        bool vClassSawNested;               // pass 0: this v class contains a nested '['
+        bool vSawNestedClassInAlternative;  // pass 0: some class in this alternative nests (']'-atom rule)
 
         void DeferredFailIfUnicodeSets(HRESULT error);
         void DeferredFailIfUnicodeNoSets(HRESULT error);
