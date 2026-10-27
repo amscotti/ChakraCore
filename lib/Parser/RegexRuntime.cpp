@@ -4699,6 +4699,86 @@ namespace UnifiedRegex
 #endif
 
     // ----------------------------------------------------------------------
+    // MatchCodePointSetInst
+    // ----------------------------------------------------------------------
+
+    inline bool MatchCodePointSetInst::Exec(REGEX_INST_EXEC_PARAMETERS) const
+    {
+#if ENABLE_REGEX_CONFIG_OPTIONS
+        matcher.CompStats();
+#endif
+        if (inputOffset >= inputLength)
+            return matcher.Fail(FAIL_PARAMETERS);
+
+        const Char c0 = input[inputOffset];
+        if (!Js::NumberUtilities::IsSurrogateLowerPart(c0) && !Js::NumberUtilities::IsSurrogateUpperPart(c0))
+        {
+            // Plain BMP unit: single-unit membership.
+            if (this->set.Get(c0))
+            {
+                inputOffset++;
+                instPointer += sizeof(*this);
+                return false;
+            }
+            return matcher.Fail(FAIL_PARAMETERS);
+        }
+
+        if (Js::NumberUtilities::IsSurrogateLowerPart(c0) &&
+            inputOffset + 1 < inputLength &&
+            Js::NumberUtilities::IsSurrogateUpperPart(input[inputOffset + 1]))
+        {
+            // A complete pair is one code point: prefer the 2-unit member
+            // interpretation, then the lone-high fallback (preserving the
+            // engine's documented lone-surrogate behavior).
+            const codepoint_t cp = Js::NumberUtilities::SurrogatePairAsCodePoint(c0, input[inputOffset + 1]);
+            int lo = 0;
+            int hi = numRanges - 1;
+            bool isMember = false;
+            while (lo <= hi)
+            {
+                const int mid = lo + (hi - lo) / 2;
+                const codepoint_t lower = ranges[2 * mid];
+                if (cp < lower)
+                    hi = mid - 1;
+                else if (cp > ranges[2 * mid + 1])
+                    lo = mid + 1;
+                else
+                {
+                    isMember = true;
+                    break;
+                }
+            }
+            if (isMember)
+            {
+                inputOffset += 2;
+                instPointer += sizeof(*this);
+                return false;
+            }
+        }
+
+        // Lone surrogate unit (or a high surrogate whose pair is not a
+        // member): its own code point decides.
+        if (this->set.Get(c0))
+        {
+            inputOffset++;
+            instPointer += sizeof(*this);
+            return false;
+        }
+        return matcher.Fail(FAIL_PARAMETERS);
+    }
+
+#if ENABLE_REGEX_CONFIG_OPTIONS
+    int MatchCodePointSetInst::Print(DebugWriter* w, Label label, const Char* litbuf) const
+    {
+        PRINT_RE_BYTECODE_BEGIN("MatchCodePointSet");
+        PRINT_MIXIN(SetMixin<false>);
+        PRINT_RE_BYTECODE_MID();
+        PRINT_BYTES(SetMixin<false>);
+        PRINT_RE_BYTECODE_END();
+    }
+#endif
+
+    // ----------------------------------------------------------------------
     // BeginAssertionInst
     // ----------------------------------------------------------------------
 

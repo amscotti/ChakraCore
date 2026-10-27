@@ -133,3 +133,8 @@ M(FrameBOLTest) // ^ inside a lookbehind, tested against the real input
 M(FrameEOLTest) // $ inside a lookbehind, tested against the real input
 MTemplate(FrameWordBoundaryTest, template<bool isNegation>, FrameWordBoundaryTestInst, FrameWordBoundaryTestInst<false>)
 MTemplate(FrameNegatedWordBoundaryTest, template<bool isNegation>, FrameWordBoundaryTestInst, FrameWordBoundaryTestInst<true>)
+// One whole code-point-set atom (Unicode property escapes and u-mode
+// classes with astral members): deterministic 1-or-2-unit match, replaces
+// the prefix/pair-arms/suffix alternation whose per-iteration arm choices
+// made quantified sets backtrack exponentially.
+M(MatchCodePointSet)

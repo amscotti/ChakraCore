@@ -215,8 +215,6 @@ namespace UnifiedRegex
         int TryParseExtendedUnicodeEscape(Char& c, bool& previousSurrogatePart, bool trackSurrogatePair = false);
         void TrackIfSurrogatePair(codepoint_t codePoint, const EncodedChar* location, uint32 consumptionLength);
         Node* CreateSurrogatePairAtom(char16 lower, char16 upper);
-        AltNode* AppendSurrogateRangeToDisjunction(codepoint_t lowerCodePoint, codepoint_t upperCodePoint, AltNode *lastAlttNode);
-        AltNode* AppendSurrogatePairToDisjunction(codepoint_t codePoint, AltNode *lastAlttNode);
 
         // Raw span of a \p{...}/\P{...} escape, recorded during pass 0. The
         // u flag is unknown in pass 0, so the body is only scanned to the

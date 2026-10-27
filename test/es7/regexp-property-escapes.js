@@ -399,6 +399,44 @@ var tests = [
         }
     },
     {
+        name: "Quantified property sets: semantics and linear backtracking",
+        body() {
+            // Correctness across quantifier kinds and continuations
+            assert.isTrue(/^\P{Lu}+$/u.test("a".repeat(500)), "greedy + over a long run");
+            assert.isFalse(/^\P{Lu}+z$/u.test("a".repeat(256) + "A"), "failing continuation at n=256");
+            assert.isFalse(/^[\P{Lu}]+z$/u.test("a".repeat(256) + "A"), "class form, failing continuation");
+            assert.isTrue(/^\P{Lu}+?A/u.test("a".repeat(128) + "A"), "lazy + finds the late member");
+            assert.isFalse(/^\P{Lu}+?z/u.test("a".repeat(128) + "A"), "lazy + failing");
+            assert.isTrue(/^\P{Lu}*b$/u.test("aaab"), "star");
+            assert.isTrue(/^\p{gc=Ll}{3}$/u.test("abc"), "exact count");
+            assert.isFalse(/^\P{Lu}{2,5}$/u.test("abcdef"), "bounded over count");
+            assert.isTrue(/^\p{Lu}?a$/u.test("a"), "optional");
+            assert.isTrue(/^\P{Lu}+\p{Lu}+$/u.test("a".repeat(50) + "A".repeat(50)), "two quantified atoms");
+            assert.isTrue(/^\p{Script=Greek}+$/u.test("\u03b1\u03b2\u03b3".repeat(50)), "script +");
+            assert.isFalse(/^\p{Script=Greek}+z$/u.test("\u03b1".repeat(128)), "script + failing continuation");
+            assert.isTrue(/^[\p{Script=Greek}]+$/u.test("\u03b1\u{10140}"), "class with astral member (ancient Greek numbers)");
+            assert.isTrue(/^\p{L}+$/u.test("aA\u{1D41A}".repeat(40)), "gc group + with astral run");
+            assert.isFalse(/^\p{L}+z$/u.test("\u{1D41A}".repeat(128)), "astral run failing continuation");
+            assert.isTrue(/^\p{scx=Katakana}+$/u.test("\u30a2".repeat(100)), "scx +");
+            assert.isTrue(/^\P{Lu}+$/u.test("\u{1D41A}".repeat(200)), "astral complement run");
+            assert.isFalse(/^\P{Lu}+z$/u.test("\u{1D41A}".repeat(128)), "astral complement failing continuation");
+            assert.isTrue(/^\p{Cs}+$/u.test("\ud800\udbff".repeat(50)), "lone surrogate run");
+            assert.isTrue(/^\p{Any}+$/u.test("a\u{1F600}\ud800b".repeat(40)), "any with pairs and lone surrogates");
+            assert.isTrue(new RegExp("^(\\P{Lu})+$", "u").test("abc"), "grouped quantified");
+            assert.areEqual("c", new RegExp("^(\\P{Lu})+$", "u").exec("abc")[1], "last iteration captured");
+            assert.isTrue(/(?<=^\P{Lu}+)A/u.test("aaaA"), "lookbehind over quantified set");
+            assert.isTrue(/^\P{Lu}+$/u.test("a".repeat(128)), "iu closure run");
+            assert.isFalse(/^\P{Lu}+$/u.test("a".repeat(128) + "A"), "iu closure late member");
+            assert.areEqual("A|5!|", "aA5!".replace(/^a+/, "").replace(/\P{Lu}+/u, "|$&|"), "replace with quantified set");
+
+            // Linear-backtracking smoke at sizes that were exponential before
+            // (2^26 partitions at n=26; wall-clock stays instant when linear)
+            assert.isFalse(new RegExp("^(?:\\P{Lu})+z$", "u").test("a".repeat(1024) + "A"), "atom n=1024");
+            assert.isFalse(new RegExp("^[\\P{Lu}]+z$", "u").test("a".repeat(1024) + "A"), "class n=1024");
+            assert.isFalse(new RegExp("^\\P{Lu}+z$", "u").test("\u{1D41A}".repeat(512)), "astral n=512");
+        }
+    },
+    {
         name: "Dynamic construction, compile and flags",
         body() {
             assert.isTrue(new RegExp("\\p{Lu}", "u").test("A"));

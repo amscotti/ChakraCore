@@ -1609,6 +1609,28 @@ namespace UnifiedRegex
 
         INST_BODY
     };
+
+    // One whole code-point-set atom (u-mode classes and Unicode property
+    // escapes whose sets have astral members). Deterministic: at each
+    // position the input admits exactly one interpretation (a surrogate
+    // pair when the next unit completes a member pair, otherwise a single
+    // unit), so quantified use cannot enumerate partitions. `set` holds the
+    // BMP members' units (including lone-surrogate units for their code
+    // points); `ranges` holds the astral member ranges [lower..upper],
+    // sorted ascending.
+    struct MatchCodePointSetInst : Inst, SetMixin<false>
+    {
+        codepoint_t* ranges;
+        const int numRanges;
+
+        inline MatchCodePointSetInst(int numRanges)
+            : Inst(InstTag::MatchCodePointSet), ranges(nullptr), numRanges(numRanges) {}
+
+        INST_BODY
+        INST_BODY_FREE(SetMixin<false>)
+        // NOTE: the ranges array is arena-allocated wholesale (like
+        // ScannersMixin's infos); it needs no per-node free.
+    };
 #pragma pack(pop)
 
     // ----------------------------------------------------------------------

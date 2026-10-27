@@ -160,11 +160,65 @@ on that basis.
    focused-test counts are exact (16 groups / 365 assertions) and CH gate
    runs are distinguished from the separate Node/Bun shim battery.
 
+## Perf repair (iteration 2): deterministic whole-code-point-set matcher
+
+**Defect (integration-blocking, found by combined review):** quantified
+complement property sets backtracked **exponentially** on failing
+continuations (`^\P{Lu}+z$`, `^[\P{Lu}]+$`, `^\P{Script=...}+z$`):
+n=20 ≈ 544 ms, n=22 ≈ 2.2 s, n≥24 > 60 s (Node/Bun < 1 ms). Root cause:
+`TranslateCodePointSet` expanded any u-mode set with astral members into an
+alternation (BMP prefix + surrogate-pair range arms + lone-surrogate
+suffix). A surrogate pair in the input could be consumed either as one pair
+arm (2 units) or as lone surrogate units (1 unit each), so a quantifier
+over the atom carried several live choices per iteration and a failing
+continuation enumerated the partitions (2^n). The same defect shape existed
+in the pre-existing u-mode class translation (`^[^a]+z$` u-mode showed the
+same curve on the base binary), and `CharSet::CloneSurrogateCodeUnitsTo`
+additionally leaked non-surrogate units into its "surrogate-only" result
+through the unfiltered first-256 bitmap (now fixed; the function is no
+longer on any live path).
+
+**Fix:** mixed BMP/astral sets now compile to **one** `MatchCodePointSet`
+node/instruction (`lib/Parser/RegexCompileTime.{h,cpp}`,
+`lib/Parser/RegexRuntime.{h,cpp}`, opcode appended after the lookbehind
+set). It carries the BMP member units (including lone-surrogate units) and
+the sorted astral member ranges, and matches **deterministically**: at each
+position a complete surrogate pair that is a member consumes 2 units
+(binary range search); otherwise the single unit stands for its own code
+point and consumes 1. No choicepoints per iteration, so quantifiers
+greedy/lazy/bounded/optional, groups, backreferences and lookbehind bodies
+backtrack linearly. The former prefix/arms/suffix builder pair
+(`AppendSurrogateRangeToDisjunction`/`AppendSurrogatePairToDisjunction`)
+became dead and was removed (~10.8 KB). The node reports
+`isDeterministic`, participates in the normal loop schemes (Guarded /
+GreedyNoBacktrack fire again for suitable follows), and is excluded from
+prefix-skipping and set-scan synchronization (a first-unit scan cannot
+decide pair membership). All-BMP sets keep the single `MatchSetNode` path
+and astral singletons keep the surrogate-pair atom.
+
+**Semantics preserved exactly** (the pair-then-lone-unit order reproduces
+the old arm-then-suffix order): a 30-probe quantifier battery (greedy/lazy/
+bounded/optional, atoms and classes, Lu/Script/scx/gc groups, astral and
+lone-surrogate runs, iu closure, capture groups, backreference, lookbehind,
+split/replace) matches Node 26.5.0 and Bun 1.4.3 on every outcome
+(`s3a-sem`); the 79-probe oracle matrix and the name/alias/Annex-B/
+class-without-brace/unassigned-script batteries are unchanged (only the
+three documented pre-existing u-mode search divergences remain).
+
+**Perf evidence** (`s3a-bign`, deterministic local probe, not a gate):
+failing continuations complete in ≤1 ms at n=26..1024 for
+`^\P{Lu}+z$`/`^[\P{Lu}]+z$` atom and class forms, astral runs at n=512,
+`^\p{Script=Latin}+z$` n=1024, `^\p{gc=Ll}{2}z?`; Node and Bun report the
+same results in 0-1 ms; identical outputs. Before the repair the same
+inputs took 544 ms at n=20 and 2.2 s at n=22 on this engine (measured),
+i.e. exponential. The focused gate test asserts the n=256..1024 failing
+continuations (correct `false` results, no wall-clock dependency).
+
 ## Tests and evidence
 
 - **Focused regression test** `test/es7/regexp-property-escapes.js`
   (registered once in `test/es7/rlexe.xml`, default launch,
-  `-args summary -endargs`): 16 test groups / 365 assertions covering the
+  `-args summary -endargs`): 16 test groups / 394 assertions covering the
   full accept matrix (binary canonical+alias spellings, gc values incl.
   groups and legacy aliases, sc/scx incl. ISO codes and `Qaai`/`Qaac`,
   `Any`/`Assigned`/`ASCII`), the reject matrix (wrong case, spaces/hyphens
@@ -173,7 +227,12 @@ on that basis.
   `\p` without braces, class range endpoints, script values with no
   assigned code points), non-u identity-escape preservation (atom and class
   `p`/`P` without braces, short forms like `[\pL]`, trailing brace
-  characters like `[\pxNd}]`, `[\p{Lu]` literal re-parse), matching
+  characters like `[\pxNd}]`, `[\p{Lu]` literal re-parse), quantified-set
+  semantics and linear backtracking (greedy/lazy/bounded/optional over
+  \P/\p atoms and classes across Lu/Script/scx/gc, astral and
+  lone-surrogate runs, iu closure, groups, backreferences, lookbehind,
+  split/replace, and failing continuations at n=256..1024 that were
+  exponential before the perf repair), matching
   semantics (binary, gc, sc vs scx on U+30FC, astral members, negation,
   surrogate code points), case-insensitive closure (atom-vs-class ordering,
   scoped modifier `i`), class unions/negations/dash literals, composition
@@ -184,7 +243,9 @@ on that basis.
   `-force:deferParse` launches, and the same five launches pass on the
   debug-static profile. **Separate Node/Bun oracle battery** (not the gate
   harness): the same file's assertions executed under Node 26.5.0 and
-  Bun 1.4.3 through a compatibility shim — 365/365 assertions each.
+  Bun 1.4.3 through a compatibility shim — 394/394 assertions each
+  (the round-1 file was 15 groups / 365 assertions; the perf repair adds
+  the quantified-set group).
 - **Oracle batteries** (`/tmp/opencode/s3a-*.js`, kept outside the repo):
   a 79-probe semantic matrix, five name/alias/Annex-B batteries, a
   20-probe class-without-brace battery (`[\p]`, `[\pL]`, `[\P]`,
@@ -207,28 +268,28 @@ on that basis.
   bounded selection: `test/built-ins/RegExp/property-escapes/**` (all 613
   files), `match-indices/**`, `lookBehind/**`, `named-groups/**`,
   `regexp-modifiers/**`, `test/language/literals/regexp/**` = **1,980
-  scenarios (990 files)**. Before (base binary `688e304462b85669` at the
-  identical HEAD `084dcf06a`): **1,020 passed / 960 failed**
-  (`out/test262-s3a-before`). After the initial implementation:
-  **1,814 passed / 166 failed** (`out/test262-s3a-after`); after the review
-  repairs, an identical rerun gives **1,814 passed / 166 failed**
-  (`out/test262-s3a-after2`), and the repair join is **0 fail→pass /
-  0 pass→fail** versus the pre-repair run (the fixed bugs are not exercised
-  by this corpus). Combined per-scenario join versus the base binary:
-  **794 fail→pass, 0 pass→fail**; the 166 residue all failed before too:
-  - 96 timeouts + 16 assertion failures in `generated/` = 56 unique files:
-    drift between the pinned corpus's newer generated property tables and
-    the pinned **ICU 79.1** build's data — the corpus asserts scripts the
-    ICU build does not enumerate (Garay, Gurung Khema, Kirat Rai, Sunuwar,
-    Todhri, Ol Onal, ...) and assignments the ICU build does not have
-    (e.g. `\P{Assigned}` must match U+208F; `Assigned`/`gc=Unassigned`/
-    `gc=Other`/`Grapheme_Base`/`Extended_Pictographic`/`sc=Unknown`/
-    `scx=Devanagari` files). No exact Unicode version is claimed for either
-    side beyond the observed drift traits. The timeouts are drift-triggered: one drifted symbol
-    fails `/^\p{X}+$/u`, the harness falls back to per-symbol tests over
-    >100K symbols, and the interpreter's quadratic backtracking on the
-    failing anchored loop exceeds the 10 s harness limit (Node completes
-    the same files).
+  scenarios (990 files)**. Base binary (`688e304462b85669` at the identical
+  HEAD `084dcf06a`): **1,020 passed / 960 failed**
+  (`out/test262-s3a-before`). Final state after the perf repair:
+  **1,814 passed / 166 failed, 0 timeouts** (`out/test262-s3a-after3`).
+  Per-scenario join versus the base binary: **794 fail→pass,
+  0 pass→fail**; versus the pre-perf-repair run (`...-after2`):
+  **0 flips of either direction** — the 166 residue scenarios are exactly
+  the same set throughout. All 166 now fail as fast assertion failures:
+  - 112 `generated/` scenarios (56 unique files) = pure **data drift**
+    between the pinned corpus's newer generated property tables and the
+    pinned **ICU 79.1** build: the corpus asserts scripts the ICU build
+    does not enumerate (Garay, Gurung Khema, Kirat Rai, Sunuwar, Todhri,
+    Ol Onal, ...) and assignments it does not have (observed: the corpus
+    requires `\P{Assigned}` to match U+208F ₏, and `Assigned`/
+    `gc=Unassigned`/`gc=Other`/`Grapheme_Base`/`Extended_Pictographic`/
+    `sc=Unknown`/`scx=Devanagari` files fail on their first drifted
+    symbol). No exact Unicode version is claimed for either side beyond
+    these observed traits. 96 of the 112 previously exceeded the 10 s
+    harness limit — that was the exponential-backtracking defect below,
+    not data drift: after the perf repair every one of them completes
+    quickly and fails on the same drifted symbols the 16 already-asserting
+    files report.
   - 14 `generated/strings/` scenarios: `v`-flag property-of-strings — out
     of scope by design.
   - 12 `non-existent-property-value-*` scenarios: the generated files
@@ -249,15 +310,20 @@ on that basis.
   `tools/build/gate_counts.json` intentionally not edited by this batch —
   the integrator's single-source bump, per the standing process).
 - **Debug-static**: `zig build -Dprofile=debug-static` green; the focused
-  test passes on `out/debug-static/bin/ch` (default and
-  `-noDeferParse -CollectGarbage` launches) with debug asserts active. A
+  test (16 groups incl. the quantified-set group) passes on
+  `out/debug-static/bin/ch` on default, `-noDeferParse`, `-CollectGarbage`,
+  `-noDeferParse -CollectGarbage` and `-force:deferParse` launches with
+  debug asserts active (one assert fix during the loop: the new node must
+  not report `IsCharOrPositiveSet`, or the concat canonical-form assert
+  fires on adjacent set atoms). A
   bounded debug-profile corpus run (all 144 non-generated
   `property-escapes/*.js` + representative generated files `Any.js`,
   `Script_-_Greek.js`, `General_Category_-_Surrogate.js`) gives
   **282 passed / 12 failed (294 scenarios)** — the 12 are exactly the
   pre-existing double-escaped-literal files; no debug assert fired
   (`out/test262-s3a-debug`, re-verified post-repair in
-  `out/test262-s3a-debug2`).
+  `out/test262-s3a-debug2` and post-perf-repair with the quantified-set
+  tests in `out/test262-s3a-debug3` — same 282/12).
 
 ## Residuals
 
@@ -267,8 +333,10 @@ on that basis.
    generated files fail on scripts/assignments the ICU build does not know
    (observed drift traits above; exact Unicode versions deliberately not
    asserted). Bounded by the pinned dependency; lifting it needs the B5
-   dependency decision. Exact residual at this pin: 16 assertion failures +
-   96 drift-triggered timeouts as above.
+   dependency decision. Exact residual at this pin: 112 generated scenarios
+   (56 files) failing as instant drift assertions — all complete quickly
+   since the perf repair; 96 of them previously exceeded the harness
+   timeout.
 3. Half-pair/lone-surrogate matching in u mode for sets that contain
    surrogate code points (exec positions and match spans; see oracle
    battery) — the engine's pre-existing per-unit u-mode lacunarity, now
@@ -282,10 +350,10 @@ on that basis.
    (spec-correct now); `[^\u{10000}-\u{10FFFF}]`-style BMP-only complements
    still double-negate (pre-existing corner, preserved verbatim);
    `{`-as-literal leniency in u mode; named-groups symbols-flag residue.
-6. Perf: big-set property escapes compile to multi-arm alternations; the
-   interpreter's backtracking on failing anchored `^\p{X}+$` strings is
-   quadratic (the 96 timeouts above). A bounded perf follow-up (loop or
-   set-matching specialization) belongs to a later slice with the JIT (B4).
+6. ~~Perf: exponential backtracking on quantified complement sets~~ —
+   **fixed** by the deterministic whole-code-point-set matcher (see "Perf
+   repair" below); the former 96 corpus timeouts now complete instantly
+   and fail on drift data alone.
 
 ## JIT (B4)
 

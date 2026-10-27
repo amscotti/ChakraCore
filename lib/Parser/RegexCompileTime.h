@@ -61,6 +61,8 @@ namespace UnifiedRegex
             , Lookbehind          // (?<=e), (?<!e) and re-oriented lookaheads (see LookbehindNode)
             // ModifierNode
             , Modifier            // (?ims-ims:e), ES2025 scoped modifiers
+            // MatchCodePointSetNode
+            , MatchCodePointSet   // one deterministic whole-code-point-set atom
         };
 
         enum Features : uint16
@@ -445,6 +447,39 @@ namespace UnifiedRegex
         NODE_DECL
     };
 
+    // One whole code-point-set atom for u-mode sets with astral members
+    // (Unicode property escapes and the classes that translate through
+    // TranslateCodePointSet). Replaces the former prefix/pair-arms/suffix
+    // alternation: that representation gave a quantified set atom several
+    // live arms per iteration (pair vs lone surrogate unit), so a failing
+    // continuation backtracked exponentially through the partitions. This
+    // node matches deterministically: a surrogate pair is one 2-unit code
+    // point when it is a member, otherwise the unit stands for its own code
+    // point. `set` holds the BMP members' units (including lone-surrogate
+    // units), `firstUnits` additionally contains every high surrogate when
+    // any astral member exists (annotation upper bound; not exact),
+    // `ranges` holds sorted astral member pairs [lower, upper].
+    struct MatchCodePointSetNode : Node
+    {
+        bool isCaseInsensitive; // effective i state at the set's source position
+        CharSet<Char> set;          // BMP membership, compile-time allocator
+        CharSet<Char> firstUnits;   // set plus high surrogates when ranges exist
+        codepoint_t* ranges;        // 2*numRanges entries: lower, upper, ...
+        int numRanges;
+
+        inline MatchCodePointSetNode(bool isCaseInsensitive)
+            : Node(MatchCodePointSet)
+            , isCaseInsensitive(isCaseInsensitive)
+            , set()
+            , firstUnits()
+            , ranges(nullptr)
+            , numRanges(0)
+        {
+        }
+
+        NODE_DECL
+    };
+
     struct ConcatNode : Node
     {
         Node* head;       // never a concat node
@@ -723,6 +758,7 @@ namespace UnifiedRegex
         friend MatchNamedGroupNode;
         friend LoopNode;
         friend MatchSetNode;
+        friend MatchCodePointSetNode;
         friend AssertionNode;
         friend LookbehindNode;
 

@@ -398,188 +398,6 @@ namespace UnifiedRegex
         return literalNode;
     }
 
-    // This function will create appropriate pairs of ranges and add them to the disjunction node.
-    // Terms used in comments:
-    //      - A minor codePoint is smaller than major codePoint, and both define a range of codePoints above 0x10000; to avoid confusion between lower/upper denoting codeUnits composing the surrogate pair.
-    //      - A boundary is a mod 0x400 alignment marker due to the nature of surrogate pairs representation. So the codepoint 0x10300 lies between boundaries 0x10000 and 0x10400.
-    //      - A prefix is the range set used to represent the values from minorCodePoint to the first boundary above minorCodePoint if applicable.
-    //      - A suffix is the range set used to represent the values from first boundary below majorCodePoint to the majorCodePoint if applicable.
-    //      - A full range is the range set used to represent the values from first boundary above minorCodePoint to first boundary below majorCodePoint if applicable.
-    // The algorithm works as follows:
-    //      1. Determine minorBoundary (minorCodePoint - mod 0x400 +0x400) and majorBoundary (majorCodePoint - mod 0x400). minorBoundary > minorCodePoint and majorBoundary < majorCodePoint
-    //      2. Based on the codePoints and the boundaries, prefix, suffix, and full range is determined. Here are the rules:
-    //          2-a. If minorBoundary > majorBoundary, we have an inner boundary range, output just that.
-    //          2-b. If minorBoundary - 0x400u != minorCodepoint (i.e. codePoint doesn't lie right on a boundary to be part of a full range) we have a prefix.
-    //          2-c. If majorBoundary + 0x3FFu != majorCodepoint (i.e. codePoint doesn't lie right before a boundary to be part of a full range) we have a suffix.
-    //          2-d. We have a full range, if the two boundaries don't equal, OR the codePoints lie on the range boundaries opposite to what constitutes a prefix/suffix.
-    // Visual representation for sample range 0x10300 - 0x10900
-    //          |     [ _   |    ^ ]     |
-    //      0x10000      0x10800      0x11000
-    // [ ] - denote the actual range
-    //  _  - minorBoundary
-    //  ^  - majorBoundary
-    //  |  - other boundaries
-    // prefix is between [ and _
-    // suffix is between ^ and ]
-    // full range is between _ and ^
-    template <typename P, const bool IsLiteral>
-    AltNode* Parser<P, IsLiteral>::AppendSurrogateRangeToDisjunction(codepoint_t minorCodePoint, codepoint_t majorCodePoint, AltNode *lastAltNode)
-    {
-        Assert(minorCodePoint < majorCodePoint);
-        Assert(minorCodePoint >= 0x10000u);
-        Assert(majorCodePoint >= 0x10000u);
-        Assert(scriptContext->GetConfig()->IsES6UnicodeExtensionsEnabled() && unicodeFlagPresent);
-
-        char16 lowerMinorCodeUnit, upperMinorCodeUnit, lowerMajorCodeUnit, upperMajorCodeUnit;
-        Js::NumberUtilities::CodePointAsSurrogatePair(minorCodePoint, &lowerMinorCodeUnit, &upperMinorCodeUnit);
-        Js::NumberUtilities::CodePointAsSurrogatePair(majorCodePoint, &lowerMajorCodeUnit, &upperMajorCodeUnit);
-
-        // These boundaries represent whole range boundaries, as in 0x10000, 0x10400, 0x10800 etc
-        // minor boundary is the first boundary strictly above minorCodePoint
-        // major boundary is the first boundary below or equal to majorCodePoint
-        codepoint_t minorBoundary = minorCodePoint - (minorCodePoint % 0x400u) + 0x400u;
-        codepoint_t majorBoundary = majorCodePoint - (majorCodePoint % 0x400u);
-
-        Assert(minorBoundary >= 0x10000);
-        Assert(majorBoundary >= 0x10000);
-
-        AltNode* tailToAdd = nullptr;
-
-        // If the minor boundary is higher than major boundary, that means we have a range within the boundary and is less than 0x400
-        // Ex: 0x10430 - 0x10700 will have minor boundary of 0x10800 and major of 0x10400
-        // This pair will be represented in single range set.
-        const bool singleRange = minorBoundary > majorBoundary;
-        if (singleRange)
-        {
-            Assert(majorCodePoint - minorCodePoint < 0x400u);
-            Assert(lowerMinorCodeUnit == lowerMajorCodeUnit);
-
-            MatchCharNode* lowerCharNode = Anew(ctAllocator, MatchCharNode, lowerMinorCodeUnit, caseInsensitiveFlagPresent);
-            MatchSetNode* setNode = Anew(ctAllocator, MatchSetNode, false, false, caseInsensitiveFlagPresent);
-            setNode->set.SetRange(ctAllocator, (Char)upperMinorCodeUnit, (Char)upperMajorCodeUnit);
-            ConcatNode* concatNode = Anew(ctAllocator, ConcatNode, lowerCharNode, Anew(ctAllocator, ConcatNode, setNode, nullptr));
-
-            tailToAdd = Anew(ctAllocator, AltNode, concatNode, nullptr);
-        }
-        else
-        {
-            Node* prefixNode = nullptr, *suffixNode = nullptr;
-            const bool twoConsecutiveRanges = minorBoundary == majorBoundary;
-
-            // For minorBoundary,
-            if (minorBoundary - minorCodePoint == 1) // Single character in minor range
-            {
-                // The prefix is only a surrogate pair atom
-                prefixNode = CreateSurrogatePairAtom(lowerMinorCodeUnit, upperMinorCodeUnit);
-            }
-            else if (minorCodePoint != minorBoundary - 0x400u) // Minor range isn't full
-            {
-                Assert(minorBoundary - minorCodePoint < 0x400u);
-                MatchCharNode* lowerCharNode = Anew(ctAllocator, MatchCharNode, (Char)lowerMinorCodeUnit, caseInsensitiveFlagPresent);
-                MatchSetNode* upperSetNode = Anew(ctAllocator, MatchSetNode, false, true, caseInsensitiveFlagPresent);
-                upperSetNode->set.SetRange(ctAllocator, (Char)upperMinorCodeUnit, (Char)0xDFFFu);
-                prefixNode = Anew(ctAllocator, ConcatNode, lowerCharNode, Anew(ctAllocator, ConcatNode, upperSetNode, nullptr));
-            }
-            else // Full minor range
-            {
-                minorBoundary -= 0x400u;
-            }
-
-            if (majorBoundary == majorCodePoint) // Single character in major range
-            {
-                // The suffix is only a surrogate pair atom
-                suffixNode = CreateSurrogatePairAtom(lowerMajorCodeUnit, upperMajorCodeUnit);
-                majorBoundary -= 0x400u;
-            }
-            else if (majorBoundary + 0x3FFu != majorCodePoint) // Major range isn't full
-            {
-                Assert(majorCodePoint - majorBoundary < 0x3FFu);
-                MatchCharNode* lowerCharNode = Anew(ctAllocator, MatchCharNode, (Char)lowerMajorCodeUnit, caseInsensitiveFlagPresent);
-                MatchSetNode* upperSetNode = Anew(ctAllocator, MatchSetNode, false, false, caseInsensitiveFlagPresent);
-                upperSetNode->set.SetRange(ctAllocator, (Char)0xDC00u, (Char)upperMajorCodeUnit);
-                suffixNode = Anew(ctAllocator, ConcatNode, lowerCharNode, Anew(ctAllocator, ConcatNode, upperSetNode, nullptr));
-                majorBoundary -= 0x400u;
-            }
-
-            const bool nonFullConsecutiveRanges = twoConsecutiveRanges && prefixNode != nullptr && suffixNode != nullptr;
-            if (nonFullConsecutiveRanges)
-            {
-                Assert(suffixNode != nullptr);
-                Assert(minorCodePoint != minorBoundary - 0x400u);
-                Assert(majorBoundary + 0x3FFu != majorCodePoint);
-
-                // If the minor boundary is equal to major boundary, that means we have a cross boundary range that only needs 2 nodes for prefix/suffix.
-                // We can only cross one boundary.
-                Assert(majorCodePoint - minorCodePoint < 0x800u);
-                tailToAdd = Anew(ctAllocator, AltNode, prefixNode, Anew(ctAllocator, AltNode, suffixNode, nullptr));
-            }
-            else
-            {
-                // We have 3 sets of ranges, comprising of prefix, full and suffix.
-                Assert(majorCodePoint - minorCodePoint >= 0x400u);
-                Assert((prefixNode != nullptr && suffixNode != nullptr) // Spanning more than two ranges
-                    || (prefixNode == nullptr && minorBoundary == minorCodePoint) // Two consecutive ranges and the minor is full
-                    || (suffixNode == nullptr && majorBoundary + 0x3FFu == majorCodePoint)); // Two consecutive ranges and the major is full
-
-                Node* lowerOfFullRange;
-                char16 lowerMinorBoundary, lowerMajorBoundary, ignore;
-                Js::NumberUtilities::CodePointAsSurrogatePair(minorBoundary, &lowerMinorBoundary, &ignore);
-
-                bool singleFullRange = majorBoundary == minorBoundary;
-                if (singleFullRange)
-                {
-                    // The lower part of the full range is simple a surrogate lower char
-                    lowerOfFullRange = Anew(ctAllocator, MatchCharNode, (Char)lowerMinorBoundary, caseInsensitiveFlagPresent);
-                }
-                else
-                {
-
-                    Js::NumberUtilities::CodePointAsSurrogatePair(majorBoundary, &lowerMajorBoundary, &ignore);
-                    MatchSetNode* setNode = Anew(ctAllocator, MatchSetNode, false, false, caseInsensitiveFlagPresent);
-                    setNode->set.SetRange(ctAllocator, (Char)lowerMinorBoundary, (Char)lowerMajorBoundary);
-                    lowerOfFullRange = setNode;
-                }
-                MatchSetNode* fullUpperRange = Anew(ctAllocator, MatchSetNode, false, false, caseInsensitiveFlagPresent);
-                fullUpperRange->set.SetRange(ctAllocator, (Char)0xDC00u, (Char)0xDFFFu);
-
-                // These are added in the following order [full] [prefix][suffix]
-                // This is doing by prepending, so in reverse.
-                if (suffixNode != nullptr)
-                {
-                    tailToAdd = Anew(ctAllocator, AltNode, suffixNode, tailToAdd);
-                }
-                if (prefixNode != nullptr)
-                {
-                    tailToAdd = Anew(ctAllocator, AltNode, prefixNode, tailToAdd);
-                }
-                tailToAdd = Anew(ctAllocator, AltNode, Anew(ctAllocator, ConcatNode, lowerOfFullRange, Anew(ctAllocator, ConcatNode, fullUpperRange, nullptr)), tailToAdd);
-            }
-        }
-
-        if (lastAltNode != nullptr)
-        {
-            Assert(lastAltNode->tail == nullptr);
-            lastAltNode->tail = tailToAdd;
-        }
-
-        return tailToAdd;
-    }
-
-    template <typename P, const bool IsLiteral>
-    AltNode* Parser<P, IsLiteral>::AppendSurrogatePairToDisjunction(codepoint_t codePoint, AltNode *lastAltNode)
-    {
-        char16 lower, upper;
-        Js::NumberUtilities::CodePointAsSurrogatePair(codePoint, &lower, &upper);
-
-        AltNode* tailNode = Anew(ctAllocator, AltNode, CreateSurrogatePairAtom(lower, upper), nullptr);
-
-        if (lastAltNode != nullptr)
-        {
-            lastAltNode->tail = tailNode;
-        }
-
-        return tailNode;
-    }
 
     //
     // Unicode property escapes (ES2018, \p{...}/\P{...} under the u flag)
@@ -829,67 +647,47 @@ namespace UnifiedRegex
             return simpleToReturn;
         }
 
-        Node* prefixNode = nullptr;
-        Node* suffixNode = nullptr;
-
-        if (simpleCharsCount > 0)
-        {
-            if (!codePointSet.ContainSurrogateCodeUnits())
-            {
-                MatchSetNode *node = Anew(ctAllocator, MatchSetNode, false, false, caseInsensitiveFlagPresent);
-                codePointSet.CloneSimpleCharsTo(ctAllocator, node->set);
-                prefixNode = node;
-            }
-            else
-            {
-                MatchSetNode *node = Anew(ctAllocator, MatchSetNode, false, false, caseInsensitiveFlagPresent);
-                codePointSet.CloneNonSurrogateCodeUnitsTo(ctAllocator, node->set);
-                prefixNode = node;
-                node = Anew(ctAllocator, MatchSetNode, false, false, caseInsensitiveFlagPresent);
-                codePointSet.CloneSurrogateCodeUnitsTo(ctAllocator, node->set);
-                suffixNode = node;
-            }
-        }
-
-        AltNode *headToReturn = prefixNode == nullptr ? nullptr : Anew(ctAllocator, AltNode, prefixNode, nullptr);
-        AltNode *currentTail = headToReturn;
+        // Mixed BMP/astral membership: ONE deterministic whole-code-point-set
+        // atom. The previous representation (BMP prefix + surrogate-pair
+        // range arms + lone-surrogate suffix as an alternation) gave a
+        // quantified atom several live arms per iteration — a surrogate pair
+        // could be consumed as one pair arm or as lone units — so a failing
+        // continuation enumerated the partitions and backtracked
+        // exponentially. The single matcher resolves each position to
+        // exactly one interpretation (member pair = 2 units, else unit).
+        MatchCodePointSetNode* node = Anew(ctAllocator, MatchCodePointSetNode, caseInsensitiveFlagPresent);
+        codePointSet.CloneSimpleCharsTo(ctAllocator, node->set);
 
         codepoint_t charRangeSearchIndex = 0x10000, lowerCharOfRange = 0, upperCharOfRange = 0;
-
+        int numRanges = 0;
         while (codePointSet.GetNextRange(charRangeSearchIndex, &lowerCharOfRange, &upperCharOfRange))
         {
-            if (lowerCharOfRange == upperCharOfRange)
-            {
-                currentTail = this->AppendSurrogatePairToDisjunction(lowerCharOfRange, currentTail);
-            }
-            else
-            {
-                currentTail = this->AppendSurrogateRangeToDisjunction(lowerCharOfRange, upperCharOfRange, currentTail);
-            }
-
-            if (headToReturn == nullptr)
-            {
-                headToReturn = currentTail;
-            }
-
-            AnalysisAssert(currentTail != nullptr);
-            while (currentTail->tail != nullptr)
-            {
-                currentTail = currentTail->tail;
-            }
+            numRanges++;
             charRangeSearchIndex = upperCharOfRange + 1;
         }
-        if (suffixNode != nullptr)
+        node->numRanges = numRanges;
+        node->ranges = AnewArray(ctAllocator, codepoint_t, 2 * numRanges);
+        charRangeSearchIndex = 0x10000;
+        int rangeIndex = 0;
+        while (codePointSet.GetNextRange(charRangeSearchIndex, &lowerCharOfRange, &upperCharOfRange))
         {
-            currentTail->tail = Anew(ctAllocator, AltNode, suffixNode, nullptr);
+            node->ranges[2 * rangeIndex] = lowerCharOfRange;
+            node->ranges[2 * rangeIndex + 1] = upperCharOfRange;
+            rangeIndex++;
+            charRangeSearchIndex = upperCharOfRange + 1;
         }
-        codePointSet.Clear(ctAllocator);
 
-        if (headToReturn != nullptr && headToReturn->tail == nullptr)
+        node->firstUnits.CloneFrom(ctAllocator, node->set);
+        if (numRanges > 0)
         {
-            return headToReturn->head;
+            // Any member pair starts with a high surrogate; including them
+            // all keeps firstSet a sound upper bound (isFirstExact stays
+            // false for the annotation passes).
+            node->firstUnits.SetRange(ctAllocator, (Char)0xD800, (Char)0xDBFF);
         }
-        return headToReturn;
+
+        codePointSet.Clear(ctAllocator);
+        return node;
     }
 
     //
@@ -1781,7 +1579,7 @@ namespace UnifiedRegex
     // exactly two terms, the first a lead-surrogate atom (a lead char or a
     // set contained in [D800-DBFF]) and the second a trail-surrogate-only
     // set ([DC00-DFFF] subrange). These are built by
-    // AppendSurrogateRangeToDisjunction (astral ranges in classes) and
+    // CreateSurrogatePairAtom (astral singletons in classes/escapes) and
     // GetNodeWithValidCharacterSet (u-mode . / \S / \D / \W); the two units
     // are ONE code point, so in u-mode (whose reversed window keeps pairs in
     // unit order) mirroring must preserve their order.
