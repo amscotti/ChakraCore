@@ -75,6 +75,7 @@ namespace Js
         static void SetLastIndexProperty(Var instance, Var lastIndex, ScriptContext* scriptContext);
         static bool GetGlobalProperty(RecyclableObject* instance, ScriptContext* scriptContext);
         static bool GetUnicodeProperty(RecyclableObject* instance, ScriptContext* scriptContext);
+        static bool GetFullUnicodeProperty(RecyclableObject* instance, ScriptContext* scriptContext);
         static JavascriptString* StringFromFlags(UnifiedRegex::RegexFlags flags, ScriptContext* scriptContext);
         friend class JavascriptString;
 

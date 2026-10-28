@@ -138,6 +138,26 @@ using namespace Js;
             scriptContext);
     }
 
+    bool JavascriptRegExp::GetFullUnicodeProperty(RecyclableObject* instance, ScriptContext* scriptContext)
+    {
+        // ES2026 derives fullUnicode from the flags containing "u" OR "v"
+        // (22.2.6.8 @@match, 22.2.6.11 @@replace, 22.2.7.2 RegExpBuiltinExec):
+        // "v" implies the whole u-mode surface, but the `unicode` accessor
+        // reports false for a v-only regex, so the `unicodeSets` accessor is
+        // consulted as well (a dynamic property record, like the accessor
+        // itself).
+        if (JavascriptConversion::ToBool(
+                JavascriptOperators::GetProperty(instance, PropertyIds::unicode, scriptContext),
+                scriptContext))
+        {
+            return true;
+        }
+        PropertyId unicodeSetsPropertyId = scriptContext->GetLibrary()->GetRegexUnicodeSetsPropertyRecord()->GetPropertyId();
+        return JavascriptConversion::ToBool(
+            JavascriptOperators::GetProperty(instance, unicodeSetsPropertyId, scriptContext),
+            scriptContext);
+    }
+
     CharCount JavascriptRegExp::AddIndex(CharCount base, CharCount offset)
     {
         return (base + offset < base) // Overflow?
@@ -989,8 +1009,11 @@ using namespace Js;
             {
                 global = true;
             }
-            else if (flagsBuf[i] == _u('u'))
+            else if (flagsBuf[i] == _u('u') || flagsBuf[i] == _u('v'))
             {
+                // ES2026 22.2.6.8: "v" implies the whole u-mode surface, so
+                // the empty-match advance must also step whole code points
+                // for v regexes (the `unicode` accessor alone reports false).
                 fullUnicode = true;
             }
         }

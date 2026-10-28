@@ -1,10 +1,13 @@
 # C2-S9-b: code-point-aware literal search under `u`/`v`
 
 Status: **pending** (implemented and fully evidenced on Mac no-JIT; awaiting
-review/integration). Gate pins unchanged and re-verified: `zig build check`
+review/integration; includes the review-repair round: the `v`
+full-Unicode matchAll/split/match/replace fix and receipt corrections).
+Gate pins unchanged and re-verified on the committed tree: `zig build check`
 green on both profiles — `check-regression` **2026/0** (test) and **2078/0**
 (debug-static), plus bytecode/native/smoke/metadata legs — all through the
-shared gate lock (`sh /tmp/opencode/cc-gate-lock.sh`).
+shared gate lock (`sh /tmp/opencode/cc-gate-lock.sh`); logs preserved under
+`out/gate-receipt/`.
 
 Closes the S9-b literal-scanner surrogate residual: under `u`/`v` a search
 fast path could start (or a walk could land) on the second half of a
@@ -20,6 +23,26 @@ per-unit instead of resolving to the containing code point.
 - `/\uDC00/gu` with `lastIndex = 1` matched at 1 (Node `null`);
   `/\u{10400}/gu` with `lastIndex = 1` returned `null` where Node/Bun match
   the pair at index 0 (spec pair-splitting `lastIndex`).
+
+## Review repair: fullUnicode covers `v` (blocking hang)
+
+The S9-b pair-start snap exposed a latent `v` bug in the flag-string walks:
+`@@matchAll` (and `@@match`/`@@replace`/`@@split` under
+`-ES6RegExSymbols`) computed fullUnicode from the flags/`unicode` property
+alone, which is **false for a `v`-only regex** (`(/a/v).unicode === false`;
+ES2026 22.2.6.8/22.2.6.11/22.2.7.2 require "u" **or** "v"). An empty-capable
+`v` pattern then ping-ponged forever: the iterator's empty-match advance
+stepped +1 into a pair and the snap moved the next `exec` back to the pair
+start (`"😀X".matchAll(/\uDE00?/gv)` under `-ES6RegExSymbols` never
+terminated). Fixes (Node-exact after; all 25 differential shapes below):
+
+- `JavascriptRegExp::EntrySymbolMatchAll` flag scan: `'v'` also sets
+  `fullUnicode`.
+- `JavascriptRegExp::GetFullUnicodeProperty` (new; `unicode` OR
+  `unicodeSets` observable property reads) used by `RegexEs6MatchImpl` and
+  `RegexEs6ReplaceImpl`.
+- `RegexEs6SplitImpl` reads its flags string for `'u'` **or** `'v'`
+  (`unicodeMatching`).
 
 ## Spec basis
 
@@ -140,16 +163,28 @@ All binaries are self-contained launcher+dylib directories
 debug-static).
 
 - **Focused test** `test/es7/regexp-u-strictness.js` (same rlexe entry, no
-  new file; gate counts unchanged): extended 14 → 20 groups with six new
-  deterministic groups — trail-literal scans (literal/char2/TBM/dynamic/
-  set-scan/alternation first-set, `i`/`v` mirrors, non-u Annex B pins), pair
-  literals, manual mid-pair `lastIndex` (global, sticky, empty pattern,
-  boundary controls), global/sticky walks and search/split/replace/
-  exec-walk (the surface matchAll drives), anchors and alternation, lone
-  surrogates. **20/20 pass** on test and debug-static across default,
-  `-noDeferParse`, `-CollectGarbage`, combined and `-force:deferParse`;
-  20/20 under Node 26.5.0 and Bun 1.4.3 via a WScript shim
-  (`out/s9-probe/shim.js`).
+  new file; gate counts unchanged): extended 14 → **21** groups — six S9-b
+  groups (trail-literal scans incl. literal/char2/TBM/dynamic/set-scan/
+  alternation first-set with `i`/`v` mirrors and non-u Annex B pins, pair
+  literals, manual mid-pair `lastIndex` with boundary controls, global/sticky
+  walks and search/split/replace/exec-walk, anchors and alternation, lone
+  surrogates) plus the repair round's `v`-mode empty-capable walk group
+  (split/match/replace/replaceAll + the exec-level snap contract; the
+  `-ES6RegExSymbols` matchAll forms are pinned in `test/es7/matchall.js`,
+  extended 22 → **23 groups** under its existing flag-enabled rlexe entry).
+  **21/21 and 23/23 pass** on test and debug-static across default,
+  `-noDeferParse`, `-CollectGarbage`, combined and `-force:deferParse`
+  (matchall.js always with `-ES6RegExSymbols`); 21/21 and 23/23 under Node
+  26.5.0 and Bun 1.4.3 via a WScript shim (`out/s9-probe/shim.js`).
+- **Repair-round differential battery** (`out/s9-probe/vfix.js`, 25 shapes
+  under `-ES6RegExSymbols`, mirrored in Node first): v/u/no-flag
+  empty-capable matchAll walks (including the hang shape
+  `"😀X".matchAll(/\uDE00?/gv)` → `[[0,0],[0,2],[0,3]]`), trail/pair-literal
+  matchAll, done/count, `d`-flag indices, non-global throws, manual
+  mid-pair `lastIndex`, subclass and direct `Symbol.matchAll` paths, and
+  split/match/replace/replaceAll for v/u/no-flag: **CH == Node on all 25**
+  (no hangs; the pre-fix binary looped forever on the matchAll v shapes).
+  The default-mode split/match/replace subset is also identical.
 - **Differential batteries** (60-assertion group battery
   `out/s9-probe/groups.js` + probe scripts): CH == Node == Bun on every
   fixed shape; the only remaining CH-vs-Node divergences are the kept
@@ -165,24 +200,42 @@ debug-static).
   `new RegExp("\\u{10400}*|…")` non-u, is byte-identical on base).
 - **Pinned test262** (`tools/test262/run.py`, revision
   `2e0a56762801e275a9fdf96dc49d90ba0cddcf63`, default host flags), base
-  vs final over identical selections:
-  - `test/language/literals/regexp/**` 480 scenarios: **480/0 → 480/0** (0/0);
-  - S3-a selection (property-escapes, match-indices, lookBehind,
-    named-groups, regexp-modifiers, literals/regexp) 1,980: **1,862/118 →
-    1,862/118** (0/0; identical to the S9 receipt pin, so the 69 ICU-drift
-    property scenarios and the pair→unit fallback are untouched);
-  - v canonical 374 (unicodeSets, prototype/unicodeSets, generated/strings,
-    the two RegExp prototype files and the five String v-flag files):
-    **346/28 → 346/28** (0/0; the 28-scenario substrate class unchanged);
-  - adjacent syntax 1,008 (`RegExp/*.js`, CharacterClassEscapes, dotall):
-    **988/20 → 988/20** (0/0);
-  - annexB RegExp/String/split/replace/literals 140: **76/64 → 76/64** (0/0);
-  - a broader v-superset selection (all String match/matchAll/replace/
-    search files, 710 scenarios): **614/96 → 614/96** (0/0).
-  - **Total: 0 pass→fail over 4,122 scenarios across all selections.**
+  (pristine `ec01ad6ac`) vs final over identical named selections
+  (`out/t262-s9b-{base,final}-*`), **0 pass→fail in every selection**:
+  - literals (`test/language/literals/regexp/**`), 480 scenarios:
+    **480/0 → 480/0**;
+  - S3-a selection (`test/built-ins/RegExp/{property-escapes,match-indices,
+    lookBehind,named-groups,regexp-modifiers}/**` + the literals glob),
+    1,980: **1,862/118 → 1,862/118** (identical to the S9 receipt pin, so
+    the 69 ICU-drift property scenarios and the pair→unit fallback are
+    untouched);
+  - v canonical (`test/built-ins/RegExp/{unicodeSets,prototype/unicodeSets,
+    property-escapes/generated/strings}/**`, `prototype/exec/regexp-builtin-
+    exec-v-u-flag.js`, `prototype/flags/this-val-regexp.js`, and the five
+    String v-flag files `String/prototype/{match,matchAll,replace}/regexp-
+    prototype-*-v-u-flag.js` + `search/regexp-prototype-search-v{,-u}-flag.js`),
+    374: **346/28 → 346/28** (the 28-scenario substrate class unchanged);
+  - adjacent syntax (`test/built-ins/RegExp/*.js`,
+    `CharacterClassEscapes/**`, `dotall/**`), 1,008: **988/20 → 988/20**;
+  - annexB (`test/annexB/built-ins/RegExp/**`, annexB String split/replace,
+    annexB literals/regexp), 140: **76/64 → 76/64**;
+  - v superset (the v-canonical globs with the **entire**
+    `String/prototype/{match,matchAll,replace,search}` directories), 710:
+    **614/96 → 614/96**.
+  These selections deliberately overlap (literals ⊂ S3-a; v canonical ⊂ v
+  superset; `property-escapes/generated/strings` ⊂ S3-a's property-escapes),
+  so no de-duplicated grand total is claimed — the per-selection totals
+  above are the exact counts.
 - **Adjacent legacy gate files**: every `test/es6/*regex*`,
   `test/es7/regexp-*`/`matchall` output is byte-identical base vs final
-  except the deliberately extended `regexp-u-strictness.js` itself.
+  except the deliberately extended `regexp-u-strictness.js` (and
+  `matchall.js` in this repair round, whose new group fails only its new
+  assertions on the base binary). `test/es6/unicode_regex_surrogate_utf8.js`
+  — which the S9 receipt had re-spelled for u-mode SyntaxErrors after two
+  legacy crash repros — runs clean on the committed binary: exit 0, output
+  content-identical to its re-baselined `.baseline` (CRLF-only byte
+  difference, as the harness normalizes); no crash artifact exists on this
+  tree.
 - **Hang/termination probes** (`out/s9-probe/probe3.js` under
   `-ES6RegExSymbols`): lead-class global match/replace/split/matchAll and
   empty-match walks over pairs all terminate with Node-order results where
@@ -208,6 +261,15 @@ surrogate-heavy / 620 KB ASCII inputs; base vs final vs Node for context):
   walks; moving every u/v branch out of line and gating pattern-side first
   recovered the scan paths entirely and left only the per-match costs
   above. No claim beyond these numbers.
+- **Linear alternation-first-set shape** (`out/s9-probe/perf5.js`): a full
+  miss of `/q|\uDE00/u` over 90 KB of surrogate-heavy text costs 13 ms on
+  the final binary vs 0 ms on base — but base's 0 ms is the **wrong-answer
+  fast path** (it matched the trail half mid-pair immediately); the final
+  scan is linear and at Node parity (Node: 11 ms for the same miss, and
+  Node also pays ~13 ms for the ASCII miss where CH's non-trail control
+  stays 0 ms). The no-trail control `/q|z/u` is 0→0 ms on CH (identical
+  base vs final), and the ASCII miss `/q|\uDE00/u` is 14→14 ms (surrogate
+  checks never fire on ASCII input).
 
 ## Residuals
 
@@ -223,23 +285,61 @@ surrogate-heavy / 620 KB ASCII inputs; base vs final vs Node for context):
    bit inside `SetMixin` would remove it at the cost of an instruction
    layout change — deferred with B4.
 3. **Perf deltas on match-count-heavy walks** (+3–11 ms per 100 × 10k-match
-   microbench walks, scans unchanged) — final ≤ Node on the u forms,
-   within ~1 ms of Node on non-u `/ab/g`; absolute deltas vs base are
-   documented above.
-4. **matchAll/`r.flags`/`unicodeSets` substrate** gaps are unchanged
+   microbench walks, scans unchanged) and the linear alternation-first-set
+   miss shape (above) — final ≤ Node on the u forms, within ~1 ms of Node
+   on non-u `/ab/g`; absolute deltas vs base are documented above.
+4. **Failed non-global/non-sticky exec/test resets `lastIndex` to 0**
+   (`/a/u` with `lastIndex = 5` on a failing input leaves 0; Node keeps 5).
+   Cause: the flag-off `PropagateLastMatchToRegex` resets unconditionally
+   on a failed match instead of only for global/sticky (ES2026 22.2.7.2
+   step 13.a). Not regressed by S9-b (identical on base), left documented.
+5. **`test()` cache makes the reset profile-dependent**: a *repeated*
+   failing `test()` on a non-global/non-sticky regex hits the
+   `RegExpTestCache` — the release/test profile returns the cached result
+   early and **keeps** `lastIndex` (accidentally spec-shaped), while
+   debug-static re-runs the match for validation and resets it to 0
+   (`re.lastIndex = 7; re.test(s)` → 7 on test, 0 on debug-static; Node
+   keeps 7 in both). Debug-only revalidation in `RegexEs5TestImpl`; left
+   documented.
+6. **Negative/−Infinity `lastIndex`**: ToLength should clamp to 0 and match
+   from there — `/a/g` with `lastIndex = -1` or `-Infinity` on `"ba"`
+   returns `null` with `lastIndex` reset to 0 on CH, while Node matches at
+   1 and leaves `lastIndex` 2 (the S9 receipt's older "throws TypeError on
+   -5" shape no longer reproduces after the S7 ToLength work; current
+   behavior is the null+reset shape above, identical on base). GetInitial
+   offset handling of negative values; left documented.
+7. **`split` limit does not count capture groups**:
+   `"aXbXc".split(/(X)/u, 2)` returns `["a","X","b"]` (3 elements — the
+   limit check runs before the captures are appended, and captures are
+   appended beyond it) where Node returns exactly `["a","X"]`;
+   `limit = 3` coincides. Same for `v`. ES5 split driver limit checks;
+   pre-existing on base, left documented.
+8. **matchAll/`r.flags`/`unicodeSets` substrate** gaps are unchanged
    (default-off `ES6RegExSymbols`/`ES6RegExPrototypeProperties`); the
    `AdvanceStringIndex` +1 TODO from the S7/S3-b receipts is now fixed for
-   u regexes (empty-match iteration advances per code point), observable
-   only under those flags.
-5. Negative `lastIndex` ToLength handling and the `INT16_MAX` group cap
-   remain as in the S9 receipt (untouched).
+   u **and v** regexes (empty-match iteration advances per code point),
+   observable only under those flags.
+9. The `INT16_MAX` group cap remains as in the S9 receipt (untouched).
+
+## Gate receipts (committed tree)
+
+Both profiles rebuilt from the committed tree and run through the shared
+gate lock; raw logs preserved under `out/gate-receipt/`:
+
+- `zig build check -Dprofile=test`: **exit 0**, `check-regression`
+  **2026 passed / 0 failed** (pin 2026), bytecode/native/smoke/metadata
+  legs green.
+- `zig build check -Dprofile=debug-static`: **exit 0**, `check-regression`
+  **2078 passed / 0 failed** (pin 2078), static native 8/8 suites PASS,
+  bytecode/smoke/metadata legs green.
 
 ## JIT (B4)
 
 All evidence is Mac no-JIT interpreter. No opcode, instruction-encoding or
 bytecode change (one bool field on the C++ `Matcher`, one private static on
-`Char2LiteralScannerMixin`); B4 must still run the focused test (20 groups)
-and the RegExp corpora above under SimpleJIT/FullJIT before any
-JIT-configuration claim, per the standing C2 policy, and re-measure the
-walk microbenches (the per-match bookkeeping is in interpreter C++ only, so
-JIT regex callers should be unaffected, but that is unverified).
+`Char2LiteralScannerMixin`, one `JavascriptRegExp` static); B4 must still
+run the focused tests (21 + 23 groups) and the RegExp corpora above under
+SimpleJIT/FullJIT before any JIT-configuration claim, per the standing C2
+policy, and re-measure the walk microbenches (the per-match bookkeeping is
+in interpreter C++ only, so JIT regex callers should be unaffected, but
+that is unverified).

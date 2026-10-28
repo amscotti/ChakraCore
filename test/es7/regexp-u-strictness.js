@@ -522,6 +522,43 @@ var tests = [
         }
     },
     {
+        name: "v-mode empty-capable walks advance per code point (matchAll substrate)",
+        body() {
+            // The @@match/@@replace/@@split drivers and the matchAll iterator
+            // derive fullUnicode from flags containing "u" OR "v" (ES2026);
+            // v implies the whole u-mode surface, and the `unicode` accessor
+            // alone reports false for a v-only regex. Before the S9-b repair
+            // the per-unit +1 empty-match advance fought the pair-start snap
+            // in Matcher::Match and could loop forever. These shapes run in
+            // default mode (the -ES6RegExSymbols matchAll forms are pinned in
+            // test/es7/matchall.js); every value mirrors Node 26.5.0.
+            var input = "\ud83d\ude00X"; // [pair][X]
+            assert.areEqual("\ud83d\ude00,X", input.split(/\uDE00?/gv).join(","), "v empty split keeps the pair whole");
+            assert.areEqual("\ud83d\ude00,X", input.split(/\uDE00?/gu).join(","), "u empty split (control)");
+            assert.areEqual(",,", input.match(/\uDE00?/gv).join(","), "v empty match yields one per code point");
+            assert.areEqual(",,", input.match(/\uDE00?/gu).join(","), "u empty match (control)");
+            assert.areEqual(",\ude00,,", input.match(/\uDE00?/g).join(","), "no-flag match keeps the per-unit walk");
+            assert.areEqual("Q\ud83d\ude00QXQ", input.replace(/\uDE00?/gv, "Q"), "v empty replace steps whole code points");
+            assert.areEqual("Q\ud83d\ude00QXQ", input.replace(/\uDE00?/gu, "Q"), "u empty replace (control)");
+            assert.areEqual("Q\ud83d\ude00QXQ", input.replaceAll(/\uDE00?/gv, "Q"), "v replaceAll steps whole code points");
+            assert.areEqual("Q\ud83d\ude00QXQ", input.replaceAll(/\uDE00?/gu, "Q"), "u replaceAll (control)");
+            assert.areEqual("Q\ud83dQQXQ", input.replace(/\uDE00?/g, "Q"), "no-flag replace keeps the per-unit walk");
+            // the exec-level contract those drivers ride on: a manual
+            // mid-pair lastIndex snaps to the pair start in v mode too
+            var re = /\u{10400}/gv;
+            re.lastIndex = 1;
+            var m = re.exec("\ud801\udc00\ud801\udc00");
+            assert.areEqual(0, m.index, "v pair literal with mid-pair lastIndex snaps back");
+            assert.areEqual(2, re.lastIndex, "v lastIndex is the pair end");
+            var re2 = /\uDE00?/gv;
+            re2.lastIndex = 1;
+            var m2 = re2.exec(input);
+            assert.areEqual(0, m2.index, "v empty-capable pattern snaps to the pair start");
+            assert.areEqual(0, m2[0].length, "v empty-capable match is empty at 0");
+            assert.areEqual(0, re2.lastIndex, "v empty match leaves lastIndex at its end");
+        }
+    },
+    {
         name: "v-mode escaped backslash is the escaped-backslash member",
         body() {
             // [\\] under v is a legal escaped ClassSetSyntaxCharacter:

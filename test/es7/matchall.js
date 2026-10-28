@@ -471,6 +471,85 @@ var tests = [
             assert.areEqual(1e300, n.lastIndex, "non-global never writes");
         }
     },
+    {
+        // S9-b repair: fullUnicode must cover `v` (ES2026 @@matchAll derives
+        // it from flags containing "u" OR "v"). The `unicode` accessor alone
+        // reports false for a v-only regex, so before the fix an empty-capable
+        // v pattern ping-ponged forever between the iterator's +1 empty-match
+        // advance and the S9-b pair-start snap in Matcher::Match
+        // ("\uDE00?" over "\uD83D\uDE00X" re-matched index 0 from lastIndex 1).
+        // Every assertion below was mirrored in Node 26.5.0 first.
+        name: "matchAll fullUnicode covers the v flag (S9-b pair-start snap)",
+        body() {
+            var input = "\ud83d\ude00X"; // [pair][X]
+
+            function collect(re, s) {
+                var out = [];
+                var guard = 0;
+                for (var m of s.matchAll(re)) {
+                    out.push([m[0].length, m.index]);
+                    if (++guard > 20) { out.push(["GUARD"]); break; }
+                }
+                return out;
+            }
+
+            // THE hang shape: v empty-capable pattern over a surrogate pair.
+            assert.areEqual("0,0|0,2|0,3",
+                collect(/\uDE00?/gv, input).map(function (x) { return x.join(","); }).join("|"),
+                "v empty-capable matchAll terminates on code-point boundaries");
+            // controls: u (already full-Unicode) and the per-unit no-flag walk
+            assert.areEqual("0,0|0,2|0,3",
+                collect(/\uDE00?/gu, input).map(function (x) { return x.join(","); }).join("|"),
+                "u empty-capable matchAll (control)");
+            assert.areEqual("0,0|1,1|0,2|0,3",
+                collect(/\uDE00?/g, input).map(function (x) { return x.join(","); }).join("|"),
+                "no-flag empty-capable matchAll keeps the per-unit walk");
+            // v trail-literal and pair-literal matchAll stay pair-aware
+            assert.areEqual("", collect(/\uDE00X/gv, input).join(","), "v trail literal finds nothing in the pair");
+            assert.areEqual("2,0", collect(/\ud83d\ude00/gv, input).map(function (x) { return x.join(","); }).join(","), "v pair literal matchAll");
+            assert.areEqual("2,0", collect(/\ud83d\ude00/gu, input).map(function (x) { return x.join(","); }).join(","), "u pair literal matchAll");
+            // done/count over the v walk: three empty matches then done
+            var count = 0, first = -1, done = false;
+            var it = input.matchAll(/X?/gv);
+            var res;
+            while (!(res = it.next()).done) {
+                if (first < 0) { first = res.value.index; }
+                count++;
+            }
+            assert.areEqual(3, count, "v empty walk yields one match per code point");
+            assert.areEqual(0, first, "first v empty match is at 0");
+            assert.isTrue(done === false && res.value === undefined, "iterator finishes done with undefined");
+            // d-flag indices sit on code-point boundaries (X is at [2,3))
+            var idx = [];
+            for (var m of input.matchAll(/X/dgv)) { idx.push(m.indices[0].join(",")); }
+            assert.areEqual("2,3", idx.join("|"), "v d-flag indices");
+            // non-global still throws, v or not
+            assert.throws(function () { input.matchAll(/\uDE00?/v); }, TypeError, "non-global v matchAll throws");
+            assert.throws(function () { input.matchAll(/\uDE00?/u); }, TypeError, "non-global u matchAll throws");
+            // manual mid-pair lastIndex transfers into the v walk (snap applies)
+            var seeded = /\uDE00?/gv;
+            seeded.lastIndex = 1;
+            var seededIt = seeded[Symbol.matchAll](input);
+            assert.areEqual(0, seededIt.next().value.index, "v matchAll with mid-pair lastIndex snaps to the pair start");
+            // subclass instances take the same v path
+            var Sub = class extends RegExp {};
+            var subOut = [];
+            var subGuard = 0;
+            for (var sm of input.matchAll(new Sub("\\uDE00?", "gv"))) {
+                subOut.push(sm.index);
+                if (++subGuard > 20) { subOut.push("GUARD"); break; }
+            }
+            assert.areEqual("0,2,3", subOut.join(","), "v subclass matchAll terminates identically");
+            // Symbol.matchAll directly on a v regex (flags-string path)
+            var direct = [];
+            var dGuard = 0;
+            for (var dm of /\uDE00?/gv[Symbol.matchAll](input)) {
+                direct.push(dm.index);
+                if (++dGuard > 20) { direct.push("GUARD"); break; }
+            }
+            assert.areEqual("0,2,3", direct.join(","), "direct Symbol.matchAll v walk");
+        }
+    },
 ];
 
 testRunner.runTests(tests, { verbose: WScript.Arguments[0] != "summary" });

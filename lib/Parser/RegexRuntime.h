@@ -1964,8 +1964,9 @@ namespace UnifiedRegex
         Field(CharCount*) literalNextSyncInputOffsets;
 
         // Cached (program->flags & (UnicodeRegexFlag | UnicodeSetsRegexFlag))
-        // != 0, set at the top of Match: scan instructions and scanner mixins
-        // read this per invocation instead of chasing program->flags.
+        // != 0, set in the Matcher constructor (the program is fixed for the
+        // Matcher's lifetime): scan instructions and scanner mixins read this
+        // per invocation instead of chasing program->flags.
         Field(bool) isUnicodeMode;
 
         FieldNoBarrier(Recycler*) recycler;

@@ -521,7 +521,8 @@ namespace Js
         }
         else
         {
-            bool unicode = JavascriptRegExp::GetUnicodeProperty(thisObj, scriptContext);
+            // fullUnicode covers v too (see JavascriptRegExp::GetFullUnicodeProperty).
+            bool unicode = JavascriptRegExp::GetFullUnicodeProperty(thisObj, scriptContext);
 
             JavascriptRegExp::SetLastIndexProperty(thisObj, TaggedInt::ToVarUnchecked(0), scriptContext);
 
@@ -1210,7 +1211,8 @@ namespace Js
         bool unicode = false; // Dummy value. It isn't used below unless "global" is "true".
         if (global)
         {
-            unicode = JavascriptRegExp::GetUnicodeProperty(thisObj, scriptContext);
+            // fullUnicode covers v too (see JavascriptRegExp::GetFullUnicodeProperty).
+            unicode = JavascriptRegExp::GetFullUnicodeProperty(thisObj, scriptContext);
             JavascriptRegExp::SetLastIndexProperty(thisObj, TaggedInt::ToVarUnchecked(0), scriptContext);
         }
 
@@ -1905,7 +1907,10 @@ namespace Js
         JavascriptString* flags = JavascriptConversion::ToString(
             JavascriptOperators::GetProperty(thisObj, PropertyIds::flags, scriptContext),
             scriptContext);
-        bool unicode = wcsstr(flags->GetString(), _u("u")) != nullptr;
+        // ES2026 @@split: unicodeMatching is true for "u" OR "v" (v implies
+        // the whole u-mode surface).
+        const char16* const flagsBuf = flags->GetString();
+        bool unicode = wcsstr(flagsBuf, _u("u")) != nullptr || wcsstr(flagsBuf, _u("v")) != nullptr;
         flags = AppendStickyToFlagsIfNeeded(flags, scriptContext);
 
         bool isDefaultConstructor = speciesConstructor == defaultConstructor;
