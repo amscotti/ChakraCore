@@ -515,15 +515,21 @@ namespace Js
     {
         PCWSTR const varName = _u("RegExp.prototype[Symbol.match]");
 
-        if (!JavascriptRegExp::GetGlobalProperty(thisObj, scriptContext))
+        // ES2026 @@match: global and fullUnicode ('u' OR 'v') derive from ONE
+        // observable Get(R, "flags") + ToString (substrate fallback for a
+        // genuine RegExp whose "flags" accessor was not installed — the same
+        // fallback @@matchAll makes; a user-provided value is never ignored).
+        bool global = false;
+        bool fullUnicode = false;
+        JavascriptRegExp::ParseBuiltinFlags(
+            JavascriptRegExp::GetFlagsStringForBuiltin(thisObj, scriptContext), global, fullUnicode);
+
+        if (!global)
         {
             return JavascriptRegExp::CallExec(thisObj, input, varName, scriptContext);
         }
         else
         {
-            // fullUnicode covers v too (see JavascriptRegExp::GetFullUnicodeProperty).
-            bool unicode = JavascriptRegExp::GetFullUnicodeProperty(thisObj, scriptContext);
-
             JavascriptRegExp::SetLastIndexProperty(thisObj, TaggedInt::ToVarUnchecked(0), scriptContext);
 
             JavascriptArray* arrayResult = nullptr;
@@ -546,7 +552,7 @@ namespace Js
 
                 arrayResult->DirectAppendItem(matchStr);
 
-                AdvanceLastIndex(thisObj, input, matchStr, unicode, scriptContext);
+                AdvanceLastIndex(thisObj, input, matchStr, fullUnicode, scriptContext);
             }
             while (true);
 
@@ -1207,12 +1213,16 @@ namespace Js
     template<typename ReplacementFn>
     Var RegexHelper::RegexEs6ReplaceImpl(ScriptContext* scriptContext, RecyclableObject* thisObj, JavascriptString* input, ReplacementFn appendReplacement, bool noResult)
     {
-        bool global = JavascriptRegExp::GetGlobalProperty(thisObj, scriptContext);
-        bool unicode = false; // Dummy value. It isn't used below unless "global" is "true".
+        // ES2026 @@replace: global and fullUnicode ('u' OR 'v') derive from
+        // ONE observable Get(R, "flags") + ToString (substrate fallback for
+        // a genuine RegExp whose "flags" accessor was not installed — the
+        // same fallback @@matchAll makes; a user value is never ignored).
+        bool global = false;
+        bool unicode = false; // fullUnicode; only read by the loop when global.
+        JavascriptRegExp::ParseBuiltinFlags(
+            JavascriptRegExp::GetFlagsStringForBuiltin(thisObj, scriptContext), global, unicode);
         if (global)
         {
-            // fullUnicode covers v too (see JavascriptRegExp::GetFullUnicodeProperty).
-            unicode = JavascriptRegExp::GetFullUnicodeProperty(thisObj, scriptContext);
             JavascriptRegExp::SetLastIndexProperty(thisObj, TaggedInt::ToVarUnchecked(0), scriptContext);
         }
 
@@ -1904,13 +1914,14 @@ namespace Js
             scriptContext);
         AssertOrFailFast(JavascriptOperators::IsConstructor(speciesConstructor));
 
-        JavascriptString* flags = JavascriptConversion::ToString(
-            JavascriptOperators::GetProperty(thisObj, PropertyIds::flags, scriptContext),
-            scriptContext);
-        // ES2026 @@split: unicodeMatching is true for "u" OR "v" (v implies
-        // the whole u-mode surface).
-        const char16* const flagsBuf = flags->GetString();
-        bool unicode = wcsstr(flagsBuf, _u("u")) != nullptr || wcsstr(flagsBuf, _u("v")) != nullptr;
+        // ES2026 @@split: one observable Get(R, "flags") + ToString with the
+        // same substrate fallback @@matchAll makes (without
+        // -ES6RegExPrototypeProperties the accessor is absent and a raw Get
+        // would stringify undefined, breaking the splitter construction);
+        // unicodeMatching is true for "u" OR "v" (v implies the whole
+        // u-mode surface).
+        JavascriptString* flags = JavascriptRegExp::GetFlagsStringForBuiltin(thisObj, scriptContext);
+        bool unicode = wcsstr(flags->GetString(), _u("u")) != nullptr || wcsstr(flags->GetString(), _u("v")) != nullptr;
         flags = AppendStickyToFlagsIfNeeded(flags, scriptContext);
 
         bool isDefaultConstructor = speciesConstructor == defaultConstructor;

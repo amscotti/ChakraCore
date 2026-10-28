@@ -27,22 +27,38 @@ per-unit instead of resolving to the containing code point.
 ## Review repair: fullUnicode covers `v` (blocking hang)
 
 The S9-b pair-start snap exposed a latent `v` bug in the flag-string walks:
-`@@matchAll` (and `@@match`/`@@replace`/`@@split` under
-`-ES6RegExSymbols`) computed fullUnicode from the flags/`unicode` property
-alone, which is **false for a `v`-only regex** (`(/a/v).unicode === false`;
-ES2026 22.2.6.8/22.2.6.11/22.2.7.2 require "u" **or** "v"). An empty-capable
-`v` pattern then ping-ponged forever: the iterator's empty-match advance
-stepped +1 into a pair and the snap moved the next `exec` back to the pair
-start (`"😀X".matchAll(/\uDE00?/gv)` under `-ES6RegExSymbols` never
-terminated). Fixes (Node-exact after; all 25 differential shapes below):
+the ES6 symbol drivers computed fullUnicode from the `flags`/`unicode`
+properties alone, which are **false/absent for a `v`-only regex**
+(`(/a/v).unicode === false`; ES2026 22.2.6.8/22.2.6.11/22.2.7.2 require
+"u" **or** "v"). An empty-capable `v` pattern then ping-ponged forever: the
+walk's empty-match advance stepped +1 into a pair and the snap moved the
+next `exec` back to the pair start.
 
-- `JavascriptRegExp::EntrySymbolMatchAll` flag scan: `'v'` also sets
-  `fullUnicode`.
-- `JavascriptRegExp::GetFullUnicodeProperty` (new; `unicode` OR
-  `unicodeSets` observable property reads) used by `RegexEs6MatchImpl` and
-  `RegexEs6ReplaceImpl`.
-- `RegexEs6SplitImpl` reads its flags string for `'u'` **or** `'v'`
-  (`unicodeMatching`).
+**Iteration 1** treated `'v'` in the matchAll flag scan and read
+`unicode`/`unicodeSets` properties elsewhere — still wrong: without
+`-ES6RegExPrototypeProperties` those accessors are not installed at all, so
+a *subclassed* `v` regex (exactly the case the observable ES6 drivers exist
+for) still hung in `String.match`/`replace`/`replaceAll`, and `@@split`
+stringified `undefined` and threw a SyntaxError building its splitter.
+
+**Iteration 2 (final shape):** `@@match`, `@@replace`, `@@split` and
+`@@matchAll` all derive their loop controls the spec way — ONE observable
+`Get(R, "flags")` + `ToString` (`JavascriptRegExp::
+GetFlagsStringForBuiltin`), parsed by `ParseBuiltinFlags`
+(`global` = 'g'; fullUnicode = 'u' **or 'v'**). When the value is
+`undefined` because the `ES6RegExPrototypeProperties` substrate did not
+install the accessor and no user accessor/own value provides it, a genuine
+RegExp instance falls back to its compiled internal flags — the same
+deviation `@@matchAll` and `String.prototype.replaceAll` already made. A
+user-provided observable value (lying, object-with-ToString, or throwing)
+is never ignored, and the read sequence is spec-shaped: exactly one
+`flags` read per builtin, never per iteration; `global`/`unicode`/
+`unicodeSets` are not consulted (probe-verified under
+`-ES6RegExSymbols -ES6RegExPrototypeProperties` with recording accessors,
+CH == Node). The now-dead property readers
+(`GetGlobalProperty`/`GetUnicodeProperty`/`GetFullUnicodeProperty`) were
+removed. Plain regexes still take the default ES5 fast paths (nothing
+changed for them); non-`v` behavior is unchanged.
 
 ## Spec basis
 
@@ -171,20 +187,30 @@ debug-static).
   surrogates) plus the repair round's `v`-mode empty-capable walk group
   (split/match/replace/replaceAll + the exec-level snap contract; the
   `-ES6RegExSymbols` matchAll forms are pinned in `test/es7/matchall.js`,
-  extended 22 → **23 groups** under its existing flag-enabled rlexe entry).
-  **21/21 and 23/23 pass** on test and debug-static across default,
+  extended 22 → **24 groups** under its existing flag-enabled rlexe entry:
+  the matchAll hang group, and the iteration-2 subclass group — subclass v
+  match/replace/replaceAll/split empty-capable termination + exact results
+  with u/no-flag controls, one-flags-read-per-builtin recording accessors,
+  own/lying/ToString-object/throwing flags values).
+  **21/21 and 24/24 pass** on test and debug-static across default,
   `-noDeferParse`, `-CollectGarbage`, combined and `-force:deferParse`
-  (matchall.js always with `-ES6RegExSymbols`); 21/21 and 23/23 under Node
+  (matchall.js always with `-ES6RegExSymbols`); 21/21 and 24/24 under Node
   26.5.0 and Bun 1.4.3 via a WScript shim (`out/s9-probe/shim.js`).
-- **Repair-round differential battery** (`out/s9-probe/vfix.js`, 25 shapes
-  under `-ES6RegExSymbols`, mirrored in Node first): v/u/no-flag
-  empty-capable matchAll walks (including the hang shape
-  `"😀X".matchAll(/\uDE00?/gv)` → `[[0,0],[0,2],[0,3]]`), trail/pair-literal
-  matchAll, done/count, `d`-flag indices, non-global throws, manual
-  mid-pair `lastIndex`, subclass and direct `Symbol.matchAll` paths, and
-  split/match/replace/replaceAll for v/u/no-flag: **CH == Node on all 25**
-  (no hangs; the pre-fix binary looped forever on the matchAll v shapes).
-  The default-mode split/match/replace subset is also identical.
+- **Repair-round differential batteries** (`out/s9-probe/vfix.js` 25 shapes;
+  `out/s9-probe/vfix2.js` 21 shapes; `out/s9-probe/reads.js` read-sequence
+  probes; mirrored in Node first): v/u/no-flag empty-capable matchAll,
+  match, replace, replaceAll and split walks (including every hang shape),
+  subclass instances, done/count, `d`-flag indices, non-global throws,
+  manual mid-pair `lastIndex`, direct `Symbol.matchAll`, and the flags
+  observability matrix (own value overrides, object ToString, throwing
+  accessor propagates, exactly one `flags` read per builtin with
+  `global`/`unicode`/`unicodeSets` never consulted): **CH == Node on every
+  shape** under both `-ES6RegExSymbols` and
+  `-ES6RegExSymbols -ES6RegExPrototypeProperties`; the default-mode
+  split/match/replace subset is also identical. A lying observable
+  `"g"`-only flags value on an empty-capable `v` regex loops in the spec
+  algorithm itself — Node OOMs on it; that spec-inherent shape is not
+  pinned.
 - **Differential batteries** (60-assertion group battery
   `out/s9-probe/groups.js` + probe scripts): CH == Node == Bun on every
   fixed shape; the only remaining CH-vs-Node divergences are the kept
@@ -229,7 +255,7 @@ debug-static).
 - **Adjacent legacy gate files**: every `test/es6/*regex*`,
   `test/es7/regexp-*`/`matchall` output is byte-identical base vs final
   except the deliberately extended `regexp-u-strictness.js` (and
-  `matchall.js` in this repair round, whose new group fails only its new
+  `matchall.js` in this repair round, whose new groups fail only their new
   assertions on the base binary). `test/es6/unicode_regex_surrogate_utf8.js`
   — which the S9 receipt had re-spelled for u-mode SyntaxErrors after two
   legacy crash repros — runs clean on the committed binary: exit 0, output
@@ -320,6 +346,20 @@ surrogate-heavy / 620 KB ASCII inputs; base vs final vs Node for context):
    u **and v** regexes (empty-match iteration advances per code point),
    observable only under those flags.
 9. The `INT16_MAX` group cap remains as in the S9 receipt (untouched).
+10. **Legacy instance flag properties without the substrate**: with
+    `-ES6RegExSymbols` but not `-ES6RegExPrototypeProperties`, RegExp
+    instances carry non-configurable own `global`/`unicode`-style
+    properties, so `Object.defineProperty(r, "global", ...)` throws a
+    TypeError where Node (accessor prototype) allows it - pre-existing on
+    the base binary and unrelated to the flags derivation (the iteration-2
+    read-sequence probes run under
+    `-ES6RegExSymbols -ES6RegExPrototypeProperties`, where the accessors
+    exist, and CH == Node there). Left documented.
+11. **Lying observable flags on empty-capable v regexes**: an observable
+    `flags` value of `"g"` on an empty-capable `v` regex makes the spec
+    algorithm itself loop (the +1 advance fights the builtin exec's
+    code-point snap) - Node OOMs on the shape; the engine follows the same
+    spec-shaped derivation and does not special-case it. Not pinned.
 
 ## Gate receipts (committed tree)
 
@@ -338,7 +378,7 @@ gate lock; raw logs preserved under `out/gate-receipt/`:
 All evidence is Mac no-JIT interpreter. No opcode, instruction-encoding or
 bytecode change (one bool field on the C++ `Matcher`, one private static on
 `Char2LiteralScannerMixin`, one `JavascriptRegExp` static); B4 must still
-run the focused tests (21 + 23 groups) and the RegExp corpora above under
+run the focused tests (21 + 24 groups) and the RegExp corpora above under
 SimpleJIT/FullJIT before any JIT-configuration claim, per the standing C2
 policy, and re-measure the walk microbenches (the per-match bookkeeping is
 in interpreter C++ only, so JIT regex callers should be unaffected, but

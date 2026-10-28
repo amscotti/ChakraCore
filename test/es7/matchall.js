@@ -550,6 +550,64 @@ var tests = [
             assert.areEqual("0,2,3", direct.join(","), "direct Symbol.matchAll v walk");
         }
     },
+    {
+        // S9-b repair iteration 2: @@match/@@replace/@@split derive global and
+        // fullUnicode ('u' OR 'v') from ONE observable Get(R, "flags") +
+        // ToString (ES2026 22.2.6.8/22.2.6.11), with @@matchAll's substrate
+        // fallback when the accessor is not installed. Before this, a
+        // subclassed v regex under -ES6RegExSymbols alone hung in match/
+        // replace/replaceAll (the flags properties were absent, so the
+        // empty-match advance stepped +1 against the S9-b pair-start snap)
+        // and split stringified undefined and threw a SyntaxError building
+        // the splitter. Every value mirrors Node 26.5.0.
+        name: "subclass v builtins derive fullUnicode from flags (match/replace/split)",
+        body() {
+            var input = "\ud83d\ude00X"; // [pair][X]
+            var Sub = class extends RegExp {};
+
+            // the previously-hanging empty-capable walks terminate exactly
+            assert.areEqual(",,", input.match(new Sub("\\uDE00?", "gv")).join(","), "subclass v match");
+            assert.areEqual("Q\ud83d\ude00QXQ", input.replace(new Sub("\\uDE00?", "gv"), "Q"), "subclass v replace");
+            assert.areEqual("Q\ud83d\ude00QXQ", input.replaceAll(new Sub("\\uDE00?", "gv"), "Q"), "subclass v replaceAll");
+            assert.areEqual("Q\ud83d\ude00QXQ", input.replace(new Sub("\\uDE00?", "gv"), function () { return "Q"; }), "subclass v replace function");
+            assert.areEqual("\ud83d\ude00,X", input.split(new Sub("\\uDE00?", "gv")).join(","), "subclass v empty split");
+            assert.areEqual("\ud83d\ude00,", input.split(new Sub("X", "gv")).join(","), "subclass v literal split");
+            assert.areEqual("\ud83d\ude00", input.match(new Sub("\ud83d\ude00", "gv")).join(","), "subclass v pair-literal match");
+            // controls: u (already full-Unicode) and the per-unit no-flag walk
+            assert.areEqual(",,", input.match(new Sub("\\uDE00?", "gu")).join(","), "subclass u match (control)");
+            assert.areEqual("Q\ud83d\ude00QXQ", input.replace(new Sub("\\uDE00?", "gu"), "Q"), "subclass u replace (control)");
+            assert.areEqual(",\ude00,,", input.match(new Sub("\\uDE00?", "g")).join(","), "subclass no-flag match keeps the per-unit walk");
+            assert.areEqual("Q\ud83dQQXQ", input.replace(new Sub("\\uDE00?", "g"), "Q"), "subclass no-flag replace keeps the per-unit walk");
+            // one observable flags read per builtin, never re-read per
+            // iteration, and the value is used (not the compiled flags)
+            var reads = [];
+            var recording = new Sub("\\uDE00?", "gv");
+            Object.defineProperty(recording, "flags", { get() { reads.push("flags"); return "gv"; }, configurable: true });
+            assert.areEqual(",,", input.match(recording).join(","), "recording-flags match result");
+            assert.areEqual("flags", reads.join(","), "flags read exactly once by @@match");
+            reads.length = 0;
+            var counting = new Sub("X", "gv");
+            var count = 0;
+            Object.defineProperty(counting, "flags", { get() { count++; return "gv"; }, configurable: true });
+            input.replace(counting, "Q");
+            input.split(counting);
+            assert.areEqual(2, count, "one flags read per replace/split builtin");
+            // a user-provided observable value wins over the compiled flags:
+            // an own "gu" value on a v regex walks per u
+            var lying = new Sub("\\uDE00?", "gv");
+            Object.defineProperty(lying, "flags", { value: "gu", configurable: true });
+            assert.areEqual(",,", input.match(lying).join(","), "own flags value is used");
+            // object flags are stringified
+            var stringified = new Sub("\\uDE00?", "gv");
+            Object.defineProperty(stringified, "flags", { value: { toString() { return "gv"; } }, configurable: true });
+            assert.areEqual(",,", input.match(stringified).join(","), "object flags is ToString'd");
+            // a throwing flags accessor propagates
+            var throwing = new Sub("\\uDE00?", "gv");
+            Object.defineProperty(throwing, "flags", { get() { throw new RangeError("boom"); }, configurable: true });
+            assert.throws(function () { input.match(throwing); }, RangeError, "throwing flags propagates from @@match");
+            assert.throws(function () { input.split(throwing); }, RangeError, "throwing flags propagates from @@split");
+        }
+    },
 ];
 
 testRunner.runTests(tests, { verbose: WScript.Arguments[0] != "summary" });

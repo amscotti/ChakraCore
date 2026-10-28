@@ -124,38 +124,46 @@ using namespace Js;
             static_cast<PropertyOperationFlags>(PropertyOperation_ThrowIfNotExtensible | PropertyOperation_ThrowIfNonWritable));
     }
 
-    bool JavascriptRegExp::GetGlobalProperty(RecyclableObject* instance, ScriptContext* scriptContext)
+    JavascriptString* JavascriptRegExp::GetFlagsStringForBuiltin(RecyclableObject* instance, ScriptContext* scriptContext)
     {
-        return JavascriptConversion::ToBool(
-            JavascriptOperators::GetProperty(instance, PropertyIds::global, scriptContext),
-            scriptContext);
-    }
-
-    bool JavascriptRegExp::GetUnicodeProperty(RecyclableObject* instance, ScriptContext* scriptContext)
-    {
-        return JavascriptConversion::ToBool(
-            JavascriptOperators::GetProperty(instance, PropertyIds::unicode, scriptContext),
-            scriptContext);
-    }
-
-    bool JavascriptRegExp::GetFullUnicodeProperty(RecyclableObject* instance, ScriptContext* scriptContext)
-    {
-        // ES2026 derives fullUnicode from the flags containing "u" OR "v"
-        // (22.2.6.8 @@match, 22.2.6.11 @@replace, 22.2.7.2 RegExpBuiltinExec):
-        // "v" implies the whole u-mode surface, but the `unicode` accessor
-        // reports false for a v-only regex, so the `unicodeSets` accessor is
-        // consulted as well (a dynamic property record, like the accessor
-        // itself).
-        if (JavascriptConversion::ToBool(
-                JavascriptOperators::GetProperty(instance, PropertyIds::unicode, scriptContext),
-                scriptContext))
+        // ES2026 @@match/@@matchAll/@@replace/@@split derive their loop
+        // controls from ONE observable Get(R, "flags") + ToString. When the
+        // value is undefined because the ES6RegExPrototypeProperties
+        // substrate did not install the "flags" accessor (and no user
+        // accessor or own value provides one), fall back to the compiled
+        // internal flags of a genuine RegExp instance — the same deviation
+        // String.prototype.replaceAll makes for a missing "flags". A
+        // user-provided observable value is never ignored.
+        Var flagsVar = JavascriptOperators::GetProperty(instance, PropertyIds::flags, scriptContext);
+        if (JavascriptOperators::IsUndefined(flagsVar)
+            && VarIs<JavascriptRegExp>(instance)
+            && !JavascriptOperators::HasProperty(instance, PropertyIds::flags))
         {
-            return true;
+            return StringFromFlags(VarTo<JavascriptRegExp>(instance)->GetFlags(), scriptContext);
         }
-        PropertyId unicodeSetsPropertyId = scriptContext->GetLibrary()->GetRegexUnicodeSetsPropertyRecord()->GetPropertyId();
-        return JavascriptConversion::ToBool(
-            JavascriptOperators::GetProperty(instance, unicodeSetsPropertyId, scriptContext),
-            scriptContext);
+        return JavascriptConversion::ToString(flagsVar, scriptContext);
+    }
+
+    void JavascriptRegExp::ParseBuiltinFlags(JavascriptString* flags, bool& global, bool& fullUnicode)
+    {
+        // "v" implies the whole u-mode surface (the `unicode` accessor alone
+        // reports false for a v-only regex), so fullUnicode is set by 'u' OR
+        // 'v' (ES2026 22.2.6.8/22.2.6.11/22.2.7.2).
+        const char16* flagsBuf = flags->GetString();
+        const CharCount flagsLen = flags->GetLength();
+        global = false;
+        fullUnicode = false;
+        for (CharCount i = 0; i < flagsLen; i++)
+        {
+            if (flagsBuf[i] == _u('g'))
+            {
+                global = true;
+            }
+            else if (flagsBuf[i] == _u('u') || flagsBuf[i] == _u('v'))
+            {
+                fullUnicode = true;
+            }
+        }
     }
 
     CharCount JavascriptRegExp::AddIndex(CharCount base, CharCount offset)
@@ -970,22 +978,7 @@ using namespace Js;
             R, defaultConstructor, scriptContext);
         AssertOrFailFast(JavascriptOperators::IsConstructor(speciesConstructor));
 
-        JavascriptString* flags = nullptr;
-        Var flagsVar = JavascriptOperators::GetProperty(R, PropertyIds::flags, scriptContext);
-        if (JavascriptOperators::IsUndefined(flagsVar)
-            && VarIs<JavascriptRegExp>(R)
-            && !JavascriptOperators::HasProperty(R, PropertyIds::flags))
-        {
-            // ES6RegExPrototypeProperties is off, so RegExp.prototype.flags
-            // is not installed and Get cannot observe the internal flags.
-            // Fall back to the pattern's flags, the same deviation
-            // String.prototype.replaceAll makes for a missing "flags".
-            flags = StringFromFlags(VarTo<JavascriptRegExp>(R)->GetFlags(), scriptContext);
-        }
-        else
-        {
-            flags = JavascriptConversion::ToString(flagsVar, scriptContext);
-        }
+        JavascriptString* flags = JavascriptRegExp::GetFlagsStringForBuiltin(R, scriptContext);
 
         bool isDefaultConstructor = speciesConstructor == defaultConstructor;
         Var matcherVar = JavascriptOperators::NewObjectCreationHelper_ReentrancySafe(speciesConstructor, isDefaultConstructor, scriptContext->GetThreadContext(), [=]() -> Js::Var
@@ -1001,22 +994,7 @@ using namespace Js;
 
         bool global = false;
         bool fullUnicode = false;
-        const char16* flagsBuf = flags->GetString();
-        const CharCount flagsLen = flags->GetLength();
-        for (CharCount i = 0; i < flagsLen; i++)
-        {
-            if (flagsBuf[i] == _u('g'))
-            {
-                global = true;
-            }
-            else if (flagsBuf[i] == _u('u') || flagsBuf[i] == _u('v'))
-            {
-                // ES2026 22.2.6.8: "v" implies the whole u-mode surface, so
-                // the empty-match advance must also step whole code points
-                // for v regexes (the `unicode` accessor alone reports false).
-                fullUnicode = true;
-            }
-        }
+        JavascriptRegExp::ParseBuiltinFlags(flags, global, fullUnicode);
 
         // Transfer ToLength(Get(R, "lastIndex")) as the spec writes it: the
         // unclamped Number goes to the matcher through the observable Set

@@ -73,9 +73,13 @@ namespace Js
         static CharCount GetLastIndexProperty(RecyclableObject* instance, ScriptContext* scriptContext);
         static void SetLastIndexProperty(Var instance, CharCount lastIndex, ScriptContext* scriptContext);
         static void SetLastIndexProperty(Var instance, Var lastIndex, ScriptContext* scriptContext);
-        static bool GetGlobalProperty(RecyclableObject* instance, ScriptContext* scriptContext);
-        static bool GetUnicodeProperty(RecyclableObject* instance, ScriptContext* scriptContext);
-        static bool GetFullUnicodeProperty(RecyclableObject* instance, ScriptContext* scriptContext);
+        // One observable Get(R, "flags") + ToString with the substrate
+        // fallback for a genuine RegExp whose "flags" accessor was not
+        // installed (see the implementation; @@match/@@matchAll/@@replace/
+        // @@split), and the loop-control derivation from that string
+        // (global; fullUnicode = 'u' OR 'v').
+        static JavascriptString* GetFlagsStringForBuiltin(RecyclableObject* instance, ScriptContext* scriptContext);
+        static void ParseBuiltinFlags(JavascriptString* flags, bool& global, bool& fullUnicode);
         static JavascriptString* StringFromFlags(UnifiedRegex::RegexFlags flags, ScriptContext* scriptContext);
         friend class JavascriptString;
 
