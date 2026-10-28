@@ -99,6 +99,12 @@
       <compile-flags>-ESSharedArrayBuffer -Test262 -CollectGarbage -force:deferparse -args summary -endargs</compile-flags>
     </default>
   </test>
+  <test>
+    <default>
+      <files>s6-bigint-atomics.js</files>
+      <compile-flags>-ESBigInt -ESSharedArrayBuffer -CollectGarbage -args summary -endargs</compile-flags>
+    </default>
+  </test>
     <test>
     <default>
       <files>PromiseRejectionTracking.js</files>

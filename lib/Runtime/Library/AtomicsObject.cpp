@@ -18,7 +18,32 @@
 
 namespace Js
 {
-    ArrayBufferBase* AtomicsObject::ValidateIntegerTypedArray(Var typedArray, ScriptContext *scriptContext, bool onlyInt32, bool requireShared, bool writeAccess)
+    namespace
+    {
+        // Reinterpret the low 64 bits as a signed integer without relying on
+        // an implementation-defined uint64-to-int64 conversion (same helper
+        // as TypedArray.cpp's ToBigInt64Element).
+        inline int64 BigInt64Bits(uint64 bits)
+        {
+            const uint64 int64Max = 0x7fffffffffffffffULL;
+            if (bits <= int64Max)
+            {
+                return static_cast<int64>(bits);
+            }
+            const int64 int64Min = -0x7fffffffffffffffLL - 1;
+            return static_cast<int64>(bits - (int64Max + 1)) + int64Min;
+        }
+
+        // ToBigInt64 for the Atomics.wait/waitAsync value argument. ToBigInt
+        // performs the observable conversion (including user code); the wait
+        // witness comparison then uses the wrapped low 64 bits.
+        int64 ToBigInt64Value(Var value, ScriptContext *scriptContext)
+        {
+            return BigInt64Bits(JavascriptConversion::ToBigInt(value, scriptContext)->ToUInt64Low());
+        }
+    }
+
+    ArrayBufferBase* AtomicsObject::ValidateIntegerTypedArray(Var typedArray, ScriptContext *scriptContext, bool waitable, bool requireShared, bool writeAccess)
     {
         if (!VarIs<TypedArrayBase>(typedArray))
         {
@@ -26,9 +51,13 @@ namespace Js
         }
 
         TypeId typeId = JavascriptOperators::GetTypeId(typedArray);
-        if (onlyInt32)
+        if (waitable)
         {
-            if (typeId != TypeIds_Int32Array)
+            // ValidateIntegerTypedArray(waitable): only Int32Array and
+            // BigInt64Array may host a waiter list. BigUint64Array and every
+            // non-integer element type are rejected before index/value
+            // coercion.
+            if (typeId != TypeIds_Int32Array && typeId != TypeIds_Int64Array)
             {
                 JavascriptError::ThrowTypeError(scriptContext, JSERR_InvalidOperationOnTypedArray);
             }
@@ -36,7 +65,8 @@ namespace Js
         else
         {
             if (!(typeId == TypeIds_Int8Array || typeId == TypeIds_Uint8Array || typeId == TypeIds_Int16Array ||
-                typeId == TypeIds_Uint16Array || typeId == TypeIds_Int32Array || typeId == TypeIds_Uint32Array))
+                typeId == TypeIds_Uint16Array || typeId == TypeIds_Int32Array || typeId == TypeIds_Uint32Array ||
+                typeId == TypeIds_Int64Array || typeId == TypeIds_Uint64Array))
             {
                 JavascriptError::ThrowTypeError(scriptContext, JSERR_InvalidOperationOnTypedArray);
             }
@@ -103,9 +133,9 @@ namespace Js
         }
     }
 
-    TypedArrayBase * AtomicsObject::ValidateAndGetTypedArray(Var typedArray, Var index, _Out_ uint32 *accessIndex, ScriptContext *scriptContext, bool onlyInt32, bool requireShared, bool writeAccess)
+    TypedArrayBase * AtomicsObject::ValidateAndGetTypedArray(Var typedArray, Var index, _Out_ uint32 *accessIndex, ScriptContext *scriptContext, bool waitable, bool requireShared, bool writeAccess)
     {
-        ValidateIntegerTypedArray(typedArray, scriptContext, onlyInt32, requireShared, writeAccess);
+        ValidateIntegerTypedArray(typedArray, scriptContext, waitable, requireShared, writeAccess);
         uint32 i = ValidateAtomicAccess(typedArray, index, scriptContext);
         if (accessIndex != nullptr)
         {
@@ -156,7 +186,17 @@ namespace Js
         ATOMICS_FUNCTION_ENTRY_CHECKS(1, "Atomics.isLockFree");
         uint32 size = JavascriptConversion::ToUInt32(args[1], scriptContext);
         // TODO : Currently for the size 1, 2 and 4 we are treating them lock free, we will take a look at this later.
-        return (size == 1 || size == 2 || size == 4) ? scriptContext->GetLibrary()->GetTrue() : scriptContext->GetLibrary()->GetFalse();
+        // Size 8 (BigInt64Array/BigUint64Array elements) is lock free exactly
+        // on 64-bit targets, where the 64-bit Interlocked* RMW primitives used
+        // by AtomicsOperations are single-copy-atomic instructions (ARM64
+        // LSE/cas, x64 lock-prefixed). The value is deterministic per build
+        // and never changes during execution, as the spec requires.
+#if defined(TARGET_64)
+        const bool isLockFree8 = true;
+#else
+        const bool isLockFree8 = false;
+#endif
+        return (size == 1 || size == 2 || size == 4 || (size == 8 && isLockFree8)) ? scriptContext->GetLibrary()->GetTrue() : scriptContext->GetLibrary()->GetFalse();
     }
 
     Var AtomicsObject::EntryPause(RecyclableObject* function, CallInfo callInfo, ...)
@@ -220,9 +260,22 @@ namespace Js
         ATOMICS_FUNCTION_ENTRY_CHECKS(3, "Atomics.wait");
 
         uint32 accessIndex = 0;
-        TypedArrayBase *typedArrayBase = ValidateAndGetTypedArray(args[1], args[2], &accessIndex, scriptContext, true /*onlyInt32*/, true /*requireShared*/);
+        TypedArrayBase *typedArrayBase = ValidateAndGetTypedArray(args[1], args[2], &accessIndex, scriptContext, true /*waitable*/, true /*requireShared*/);
 
-        int32 value = JavascriptConversion::ToInt32(args[3], scriptContext);
+        // Waitable views are Int32Array (ToInt32 value) or BigInt64Array
+        // (ToBigInt64 value); the raw int64 witness is read under the waiter
+        // list lock below.
+        const bool isBigInt64 = JavascriptOperators::GetTypeId(typedArrayBase) == TypeIds_Int64Array;
+        int32 value = 0;
+        int64 bigValue = 0;
+        if (isBigInt64)
+        {
+            bigValue = ToBigInt64Value(args[3], scriptContext);
+        }
+        else
+        {
+            value = JavascriptConversion::ToInt32(args[3], scriptContext);
+        }
         uint32 timeout = INFINITE;
 
         if (args.Info.Count > 4 && !JavascriptOperators::IsUndefinedObject(args[4]))
@@ -240,8 +293,9 @@ namespace Js
             JavascriptError::ThrowTypeError(scriptContext, JSERR_CannotSuspendBuffer);
         }
 
-        Assert(typedArrayBase->GetBytesPerElement() == 4);
-        uint32 bufferIndex = (accessIndex * 4) + typedArrayBase->GetByteOffset();
+        const uint32 bytesPerElement = typedArrayBase->GetBytesPerElement();
+        Assert(bytesPerElement == 4 || bytesPerElement == 8);
+        uint32 bufferIndex = (accessIndex * bytesPerElement) + typedArrayBase->GetByteOffset();
         Assert(bufferIndex < typedArrayBase->GetArrayBuffer()->GetByteLength());
         SharedArrayBuffer *sharedArrayBuffer = typedArrayBase->GetArrayBuffer()->GetAsSharedArrayBuffer();
         WaiterList *waiterList = sharedArrayBuffer->GetWaiterList(bufferIndex);
@@ -252,10 +306,21 @@ namespace Js
         {
             AutoCriticalSection autoCS(waiterList->GetCriticalSectionForAccess());
 
-            int32 w = JavascriptConversion::ToInt32(typedArrayBase->DirectGetItem(accessIndex), scriptContext);
-            if (value != w)
+            if (isBigInt64)
             {
-                return scriptContext->GetLibrary()->CreateStringFromCppLiteral(_u("not-equal"));
+                int64 w = ((int64*)typedArrayBase->GetByteBuffer())[accessIndex];
+                if (bigValue != w)
+                {
+                    return scriptContext->GetLibrary()->CreateStringFromCppLiteral(_u("not-equal"));
+                }
+            }
+            else
+            {
+                int32 w = JavascriptConversion::ToInt32(typedArrayBase->DirectGetItem(accessIndex), scriptContext);
+                if (value != w)
+                {
+                    return scriptContext->GetLibrary()->CreateStringFromCppLiteral(_u("not-equal"));
+                }
             }
 
             DWORD_PTR agent = (DWORD_PTR)scriptContext;
@@ -296,11 +361,14 @@ namespace Js
         ScriptContext* scriptContext = function->GetScriptContext();
         Assert(!(callInfo.Flags & CallFlags_New));
 
-        // DoWait(async): ValidateIntegerTypedArray (waitable = Int32 only, shared
-        // only), then ValidateAtomicAccess captures TypedArrayLength before
-        // ToIndex(index), then value, then timeout. Missing arguments default to
-        // undefined/0/infinite like the rest of the Atomics family; the
-        // typed-array argument itself must throw TypeError, not RangeError.
+        // DoWait(async): ValidateIntegerTypedArray (waitable = Int32Array or
+        // BigInt64Array, shared only), then ValidateAtomicAccess captures
+        // TypedArrayLength before ToIndex(index), then value (ToInt32 or
+        // ToBigInt64 by element type), then timeout. Missing arguments
+        // default to undefined/0/infinite like the rest of the Atomics
+        // family; the typed-array argument itself must throw TypeError, not
+        // RangeError. For BigInt64Array a missing value is a TypeError
+        // (ToBigInt(undefined)).
         JavascriptLibrary* library = scriptContext->GetLibrary();
         Var undefinedVar = library->GetUndefined();
         Var typedArray = args.Info.Count > 1 ? args[1] : undefinedVar;
@@ -310,9 +378,22 @@ namespace Js
 
         uint32 accessIndex = 0;
         TypedArrayBase *typedArrayBase = ValidateAndGetTypedArray(
-            typedArray, index, &accessIndex, scriptContext, true /*onlyInt32*/, true /*requireShared*/);
+            typedArray, index, &accessIndex, scriptContext, true /*waitable*/, true /*requireShared*/);
 
-        int32 value = JavascriptConversion::ToInt32(valueArg, scriptContext);
+        // Waitable views are Int32Array (ToInt32 value) or BigInt64Array
+        // (ToBigInt64 value); the raw int64 witness is read under the waiter
+        // list lock below.
+        const bool isBigInt64 = JavascriptOperators::GetTypeId(typedArrayBase) == TypeIds_Int64Array;
+        int32 value = 0;
+        int64 bigValue = 0;
+        if (isBigInt64)
+        {
+            bigValue = ToBigInt64Value(valueArg, scriptContext);
+        }
+        else
+        {
+            value = JavascriptConversion::ToInt32(valueArg, scriptContext);
+        }
 
         double timeoutNumber = JavascriptConversion::ToNumber(timeoutArg, scriptContext);
         bool infiniteTimeout = NumberUtilities::IsNan(timeoutNumber) || JavascriptNumber::IsPosInf(timeoutNumber);
@@ -322,8 +403,9 @@ namespace Js
             realTimeout = timeoutNumber;
         }
 
-        Assert(typedArrayBase->GetBytesPerElement() == 4);
-        uint32 bufferIndex = (accessIndex * 4) + typedArrayBase->GetByteOffset();
+        const uint32 bytesPerElement = typedArrayBase->GetBytesPerElement();
+        Assert(bytesPerElement == 4 || bytesPerElement == 8);
+        uint32 bufferIndex = (accessIndex * bytesPerElement) + typedArrayBase->GetByteOffset();
         Assert(bufferIndex < typedArrayBase->GetArrayBuffer()->GetByteLength());
         SharedArrayBuffer *sharedArrayBuffer = typedArrayBase->GetArrayBuffer()->GetAsSharedArrayBuffer();
         WaiterList *waiterList = sharedArrayBuffer->GetWaiterList(bufferIndex);
@@ -337,11 +419,23 @@ namespace Js
         {
             AutoCriticalSection autoCS(waiterList->GetCriticalSectionForAccess());
 
-            int32 witness = JavascriptConversion::ToInt32(typedArrayBase->DirectGetItem(accessIndex), scriptContext);
-            if (value != witness)
+            if (isBigInt64)
             {
-                return CreateWaitAsyncResult(scriptContext, false,
-                    scriptContext->GetLibrary()->CreateStringFromCppLiteral(_u("not-equal")));
+                int64 witness = ((int64*)typedArrayBase->GetByteBuffer())[accessIndex];
+                if (bigValue != witness)
+                {
+                    return CreateWaitAsyncResult(scriptContext, false,
+                        scriptContext->GetLibrary()->CreateStringFromCppLiteral(_u("not-equal")));
+                }
+            }
+            else
+            {
+                int32 witness = JavascriptConversion::ToInt32(typedArrayBase->DirectGetItem(accessIndex), scriptContext);
+                if (value != witness)
+                {
+                    return CreateWaitAsyncResult(scriptContext, false,
+                        scriptContext->GetLibrary()->CreateStringFromCppLiteral(_u("not-equal")));
+                }
             }
 
             if (!infiniteTimeout && realTimeout == 0)
@@ -369,7 +463,7 @@ namespace Js
         ATOMICS_FUNCTION_ENTRY_CHECKS(2, "Atomics.notify");
 
         uint32 accessIndex = 0;
-        TypedArrayBase *typedArrayBase = ValidateAndGetTypedArray(args[1], args[2], &accessIndex, scriptContext, true /*onlyInt32*/);
+        TypedArrayBase *typedArrayBase = ValidateAndGetTypedArray(args[1], args[2], &accessIndex, scriptContext, true /*waitable*/);
         int32 count = INT_MAX;
         if (args.Info.Count > 3 && !JavascriptOperators::IsUndefinedObject(args[3]))
         {
@@ -391,15 +485,17 @@ namespace Js
             }
         }
 
-        // ES2020: notify accepts a non-shared Int32Array, evaluates count,
-        // then returns zero because there is no shared waiter list.
+        // ES2020: notify accepts a non-shared Int32Array or BigInt64Array,
+        // evaluates count, then returns zero because there is no shared
+        // waiter list.
         if (!typedArrayBase->GetArrayBuffer()->IsSharedArrayBuffer())
         {
             return JavascriptNumber::ToVar(0, scriptContext);
         }
 
-        Assert(typedArrayBase->GetBytesPerElement() == 4);
-        uint32 bufferIndex = (accessIndex * 4) + typedArrayBase->GetByteOffset();
+        const uint32 bytesPerElement = typedArrayBase->GetBytesPerElement();
+        Assert(bytesPerElement == 4 || bytesPerElement == 8);
+        uint32 bufferIndex = (accessIndex * bytesPerElement) + typedArrayBase->GetByteOffset();
         Assert(bufferIndex < typedArrayBase->GetArrayBuffer()->GetByteLength());
         SharedArrayBuffer *sharedArrayBuffer = typedArrayBase->GetArrayBuffer()->GetAsSharedArrayBuffer();
         WaiterList *waiterList = sharedArrayBuffer->GetWaiterList(bufferIndex);

@@ -3421,8 +3421,6 @@ namespace Js
         NOTSUPPORTEDSTUB(Float64Array, OP); \
         NOTSUPPORTEDSTUB(Float64VirtualArray, OP); \
         NOTSUPPORTEDSTUB(Float16Array, OP); \
-        NOTSUPPORTEDSTUB(Int64Array, OP); \
-        NOTSUPPORTEDSTUB(Uint64Array, OP); \
         NOTSUPPORTEDSTUB(Uint8ClampedArray, OP); \
         NOTSUPPORTEDSTUB(Uint8ClampedVirtualArray, OP); \
         NOTSUPPORTEDSTUB(BoolArray, OP);
@@ -3436,6 +3434,74 @@ namespace Js
     GENERATE_FOREACH_TYPEDARRAY(TypedArrayStore, GenerateNotSupportedStub2, Store)
     GENERATE_FOREACH_TYPEDARRAY(TypedArrayOp2, GenerateNotSupportedStub2, Sub)
     GENERATE_FOREACH_TYPEDARRAY(TypedArrayOp2, GenerateNotSupportedStub2, Xor)
+
+    // BigInt64Array / BigUint64Array Atomics (ES2020). The value conversion
+    // is ToBigInt (observable, may run user code and detach/shrink a
+    // non-shared buffer, so the post-conversion revalidation still applies);
+    // the low 64 bits of the two's-complement value participate in the
+    // 64-bit atomic RMW, and results are BigInt values - signed for
+    // BigInt64Array, unsigned for BigUint64Array. Arithmetic and bitwise
+    // results wrap modulo 2**64. Store returns the full ToBigInt value while
+    // storing only the wrapped low 64 bits (ES2020 Atomics.store step 11).
+#define BigIntTypedArrayOp1(TypedArrayName, fnName, createFn) \
+    template<>\
+    Var TypedArrayName##::Typed##fnName(_In_ uint32 accessIndex) \
+    { \
+        TypedArrayBeginStub(TypedArrayName); \
+        type result = AtomicsOperations::fnName(buffer); \
+        return createFn(result, scriptContext); \
+    }
+
+#define BigIntTypedArrayOp2(TypedArrayName, fnName, convFn, createFn) \
+    template<>\
+    Var TypedArrayName##::Typed##fnName(_In_ uint32 accessIndex, _In_ Var value) \
+    { \
+        TypedArrayBeginStub(TypedArrayName); \
+        type convertedValue = convFn(value, scriptContext); \
+        TypedArrayCheckStillValidForAtomics(); \
+        type result = AtomicsOperations::fnName(buffer, convertedValue); \
+        return createFn(result, scriptContext); \
+    }
+
+#define BigIntTypedArrayStore(TypedArrayName, convFn) \
+    template<>\
+    Var TypedArrayName##::TypedStore(_In_ uint32 accessIndex, _In_ Var value) \
+    { \
+        TypedArrayBeginStub(TypedArrayName); \
+        JavascriptBigInt* bigint = JavascriptConversion::ToBigInt(value, scriptContext); \
+        TypedArrayCheckStillValidForAtomics(); \
+        AtomicsOperations::Store(buffer, convFn(bigint, scriptContext)); \
+        return bigint; \
+    }
+
+#define BigIntTypedArrayCompareExchange(TypedArrayName, convFn, createFn) \
+    template<>\
+    Var TypedArrayName##::TypedCompareExchange(_In_ uint32 accessIndex, _In_ Var comparand, _In_ Var replacementValue) \
+    { \
+        TypedArrayBeginStub(TypedArrayName); \
+        type comparandValue = convFn(comparand, scriptContext); \
+        type replacementValueConverted = convFn(replacementValue, scriptContext); \
+        TypedArrayCheckStillValidForAtomics(); \
+        type result = AtomicsOperations::CompareExchange(buffer, comparandValue, replacementValueConverted); \
+        return createFn(result, scriptContext); \
+    }
+
+#define FOREACH_BIGINT_TYPEDARRAY_OP2(fnName) \
+        BigIntTypedArrayOp2(Int64Array, fnName, ToBigInt64Element, JavascriptBigInt::CreateFromInt64); \
+        BigIntTypedArrayOp2(Uint64Array, fnName, ToBigUint64Element, JavascriptBigInt::CreateFromUInt64);
+
+    FOREACH_BIGINT_TYPEDARRAY_OP2(Add)
+    FOREACH_BIGINT_TYPEDARRAY_OP2(And)
+    FOREACH_BIGINT_TYPEDARRAY_OP2(Exchange)
+    FOREACH_BIGINT_TYPEDARRAY_OP2(Or)
+    FOREACH_BIGINT_TYPEDARRAY_OP2(Sub)
+    FOREACH_BIGINT_TYPEDARRAY_OP2(Xor)
+    BigIntTypedArrayOp1(Int64Array, Load, JavascriptBigInt::CreateFromInt64)
+    BigIntTypedArrayOp1(Uint64Array, Load, JavascriptBigInt::CreateFromUInt64)
+    BigIntTypedArrayStore(Int64Array, ToBigInt64Element)
+    BigIntTypedArrayStore(Uint64Array, ToBigUint64Element)
+    BigIntTypedArrayCompareExchange(Int64Array, ToBigInt64Element, JavascriptBigInt::CreateFromInt64)
+    BigIntTypedArrayCompareExchange(Uint64Array, ToBigUint64Element, JavascriptBigInt::CreateFromUInt64)
 
     template<>
     VTableValue Int8Array::DummyVirtualFunctionToHinderLinkerICF()
