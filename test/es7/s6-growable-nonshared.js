@@ -312,7 +312,9 @@ var tests = [
             assert.areEqual(2, new Int32Array(ab)[1]);
             assert.isTrue(Atomics.isLockFree(1));
             assert.isTrue(Atomics.isLockFree(4));
-            assert.isFalse(Atomics.isLockFree(8));
+            // S6c: 64-bit RMW is single-copy-atomic on 64-bit targets, so
+            // BigInt64Array/BigUint64Array element size 8 is lock free here.
+            assert.isTrue(Atomics.isLockFree(8));
         }
     },
     {

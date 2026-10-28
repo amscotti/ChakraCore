@@ -39,7 +39,12 @@ template<> struct ConvertType<int16> { typedef short _t; };
 template<> struct ConvertType<uint16> { typedef short _t; };
 template<> struct ConvertType<int32> { typedef LONG _t; };
 template<> struct ConvertType<uint32> { typedef LONG _t; };
+// uint64 shares the LONGLONG interlocked primitives with int64: every
+// operation below round-trips the bit pattern through identical-width
+// casts, so the two's-complement bits stored in the buffer are preserved
+// for both BigInt element types.
 template<> struct ConvertType<int64> { typedef LONGLONG _t; };
+template<> struct ConvertType<uint64> { typedef LONGLONG _t; };
 
 #define MakeInterLockArgDef1(type) type value
 #define MakeInterLockArgDef2(type) type v1, type v2
@@ -77,6 +82,13 @@ template<> int64 AtomicsOperations::Load(int64* buffer)
     // Implement 64bits atomic load on 32bits platform with a CompareExchange
     // It is slower, but at least it is garantied to be an atomic operation
     return CompareExchange<int64>(buffer, 0, 0);
+}
+
+template<> uint64 AtomicsOperations::Load(uint64* buffer)
+{
+    CompileAssert(sizeof(size_t) == 4);
+    // Same 32-bit workaround as the int64 load above.
+    return CompareExchange<uint64>(buffer, 0, 0);
 }
 #endif
 
@@ -154,5 +166,6 @@ ExplicitImplementation(uint16);
 ExplicitImplementation(int32);
 ExplicitImplementation(uint32);
 ExplicitImplementation(int64);
+ExplicitImplementation(uint64);
 
 };

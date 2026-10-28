@@ -48,13 +48,17 @@ namespace Js
 
     private:
         // ES2020+ implements the read-modify-write family on both shared and
-        // non-shared integer TypedArrays. `requireShared` retains the
-        // shared-only brand for Atomics.wait.
-        static ArrayBufferBase* ValidateIntegerTypedArray(Var typedArray, ScriptContext *scriptContext, bool onlyInt32, bool requireShared, bool writeAccess = false);
+        // non-shared integer TypedArrays, including the BigInt64Array/
+        // BigUint64Array element types (the Int64/Uint64 TypeIds exist only
+        // under -ESBigInt). `requireShared` retains the shared-only brand for
+        // Atomics.wait. `waitable` restricts the view to the two waitable
+        // element types (Int32Array and BigInt64Array) used by wait/waitAsync/
+        // notify; BigUint64Array is rejected there.
+        static ArrayBufferBase* ValidateIntegerTypedArray(Var typedArray, ScriptContext *scriptContext, bool waitable, bool requireShared, bool writeAccess = false);
         static uint32 ValidateAtomicAccess(Var typedArray, Var requestIndex, ScriptContext *scriptContext);
         static void CheckAtomicAccessStillValid(TypedArrayBase *typedArray, uint32 accessIndex, ScriptContext *scriptContext, const char16 *funcName);
 
-        static TypedArrayBase * ValidateAndGetTypedArray(Var typedArray, Var index, _Out_ uint32 *accessIndex, ScriptContext *scriptContext, bool onlyInt32 = false, bool requireShared = false, bool writeAccess = false);
+        static TypedArrayBase * ValidateAndGetTypedArray(Var typedArray, Var index, _Out_ uint32 *accessIndex, ScriptContext *scriptContext, bool waitable = false, bool requireShared = false, bool writeAccess = false);
         static Var CreateWaitAsyncResult(ScriptContext *scriptContext, bool async, Var value);
     };
 }
