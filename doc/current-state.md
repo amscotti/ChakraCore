@@ -62,7 +62,8 @@ S6a growable-SAB/non-shared-Atomics slice, S6b `Atomics.pause` /
 single-thread `Atomics.waitAsync`, S6c BigInt Atomics, the S14
 hidden-outer eval-`arguments` fix, the bounded S8 immutable-ArrayBuffer
 surface, both S3 RegExp slices (`u` property escapes and `v` Unicode Sets
-mode), and S9 u-mode RegExp strictness.
+mode), S9 u-mode RegExp strictness, and S9-b code-point-aware RegExp
+search/builtin flag derivation.
 
 ## 3. Architecture (summary)
 
@@ -412,8 +413,9 @@ under-rejection is closed, the bounded immutable-ArrayBuffer surface is
 landed with explicit JIT/TTD residuals, and both S3 RegExp surfaces are
 landed on ICU 79.1: `u` property escapes with a deterministic
 code-point-set matcher, `v` Unicode Sets mode with set operations,
-`\q{...}`, properties-of-strings and `RegExp.prototype.unicodeSets`, and
-u-mode strict syntax/astral semantics with literals corpus 480/0.
+`\q{...}`, properties-of-strings and `RegExp.prototype.unicodeSets`,
+u-mode strict syntax/astral semantics with literals corpus 480/0, and
+code-point-aware literal search plus `v`-aware RegExp builtin walks.
 The 30-directory fixture-cache subset has also been rerun with the fixed
 harness: **1,367/998 of 2,365**, 0 pass→fail and 102 fail→pass versus the old
 precombined result ([c4-fixture-rerun.md](c4-fixture-rerun.md)). S3

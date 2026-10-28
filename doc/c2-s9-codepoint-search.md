@@ -1,11 +1,9 @@
 # C2-S9-b: code-point-aware literal search under `u`/`v`
 
-Status: **pending** (implemented and fully evidenced on Mac no-JIT; awaiting
-review/integration; includes three review-repair rounds: the `v`
-full-Unicode derivation for the ES6 regex builtins, the spec-shaped
-one-`flags`-read derivation, and the final repairs — length-bounded flag
-scans, the config-gated substrate fallback, and the global-walk
-non-progress guard).
+Status: **landed** — implementation `9c2c6d85b`, review repairs `f8a7a3f7a`,
+`52e02ccec`, and `167deae86`, merge `33b1192e7`. Final full gates remain
+**2026/0 test** and **2078/0 debug-static** (`zig build check`
+**583/583**).
 Gate pins unchanged and re-verified on the committed tree: `zig build check`
 green on both profiles — `check-regression` **2026/0** (test) and **2078/0**
 (debug-static), plus bytecode/native/smoke/metadata legs — all through the
