@@ -123,6 +123,12 @@ authoritative build/test262 command ran through the gate lock. Base binary:
   Atomics were unimplemented). This slice deliberately flips it to
   `assert.isTrue`: 64-bit RMW is single-copy-atomic on this target, and
   Node 26.5.0/Bun 1.4.3 report `true`. This is the only adjacent-test edit.
+- **`isLockFree` fractional sizes** (post-review differential, pinned in
+  the focused test): spec `ToIntegerOrInfinity(size)` truncates before the
+  size comparison, so `isLockFree(4.9) === true` and
+  `isLockFree(8.9) === true` on 64-bit. Bun 1.4.3 and this engine agree;
+  **Node 26.5.0 is the outlier**, returning `false` for 4.9 and 8.9
+  (it compares the untruncated value; it also returns `false` for 1.5).
 - Default-off probes (`out` script printing the four typeofs): no flags
   `SAB=undefined Atomics=undefined B64=undefined BigInt=undefined`;
   `-ESBigInt` `Atomics=undefined`; `-ESSharedArrayBuffer` `BigInt=undefined`;
@@ -174,15 +180,24 @@ authoritative build/test262 command ran through the gate lock. Base binary:
     (`Atomics/notify/*.js` + `Atomics/wait/*.js`, 190 scenarios):
     **140/190 on the after binary, twice** (S6b recorded 138/190 on its
     binary; the +2 are the immutable-buffer notify fixes).
-- Residual classification of the 169 after-failures (content-scanned for
-  `$262.agent`): **95 number + 70 BigInt multi-agent wait/notify/wake
-  scenarios** (crossthread agents whose waiters do not suspend — the
+- Residual taxonomy of the 169 after-failures. **Bucket rule** (heuristic,
+  applied to file content and name): a scenario is *multi-agent/timeout*
+  iff its source uses `$262.agent`; within that bucket the *finite-timeout*
+  subset is named by file (`returns-result-object-value-is-promise-
+  resolves-to-timed-out` and `true-for-timeout`) because those scenarios
+  need **both** a draining crossthread host **and** a 1 ms async timer
+  resolution — the two residuals are not disjoint counts. Everything else
+  is SAB-constructor-order. Result: **165 multi-agent/timeout scenarios**
+  (95 Number + 70 BigInt; the 4 finite-timeout scenarios above are 4 of
+  these 165 — crossthread agents whose waiters do not suspend, the
   documented pre-existing xplat wait limitation plus this slice's
-  out-of-scope cross-agent waitAsync), **4 finite-positive-async-timeout
-  scenarios** (`returns-result-object-value-is-promise-resolves-to-timed-out`
-  ×2, `true-for-timeout` ×2 — no core timer job, per S6b), and **4 SAB
-  constructor-order scenarios** (the pre-existing `Reflect.construct`
-  prototype-read and cross-realm residuals from S6a). Zero unclassified.
+  out-of-scope cross-agent waitAsync), plus **4 SAB constructor-order
+  scenarios**: `built-ins/SharedArrayBuffer/proto-from-ctor-realm.js`
+  (default + strict; pre-existing cross-realm prototype handling) and
+  `built-ins/SharedArrayBuffer/options-maxbytelength-compared-before-
+  object-creation.js` (default + strict; the inherited `Reflect.construct`
+  prototype-read order, same residual recorded in S6a/S8). 165 + 4 = 169;
+  zero unclassified.
 - Regression gates (explicit `--expected-passed` overrides; the
   `gate_counts.json` pins are deliberately **not** edited by this slice —
   integration bumps 2025/2077 → 2026/2078): `zig build -Dprofile=
@@ -195,13 +210,15 @@ authoritative build/test262 command ran through the gate lock. Base binary:
 
 ## Residuals and risks
 
-- **Multi-agent suspension stays unimplemented** (165 scenarios above):
-  `WaiterList::AddAndSuspendWaiter` remains a no-op returning false on
-  non-Windows, and cross-`ThreadContext` async waiters are neither counted
-  nor resolved (S6b). BigInt64 waiters reuse that machinery unchanged, so a
-  second agent cannot suspend on a BigInt64 cell yet.
-- **Finite positive async timeout stays unschedulable** (4 scenarios): the
-  promise stays pending until notify; no timer job exists.
+- **Multi-agent suspension stays unimplemented** (165 scenarios above,
+  4 of which also need the finite timer): `WaiterList::AddAndSuspendWaiter`
+  remains a no-op returning false on non-Windows, and cross-`ThreadContext`
+  async waiters are neither counted nor resolved (S6b). BigInt64 waiters
+  reuse that machinery unchanged, so a second agent cannot suspend on a
+  BigInt64 cell yet.
+- **Finite positive async timeout stays unschedulable** (the 4-scenario
+  subset above): the promise stays pending until notify; no timer job
+  exists.
 - **Sync `wait` reports "timed-out" immediately on this host** even for an
   infinite timeout (pre-existing xplat behavior, now also observable in the
   BigInt64 path; deterministic and matching the S6a/S6b receipts).
@@ -215,6 +232,27 @@ authoritative build/test262 command ran through the gate lock. Base binary:
   follows current spec (returns the `ToBigInt` value).
 - **Waiter-list arity RangeError** on `Atomics.wait(ta, index)` short calls
   remains (pre-existing); the BigInt64 wait path inherits it.
+- **`Atomics.wait` timeout `ToInt32` wrap at ≥ 2^31 ms**: `EntryWait`
+  converts the timeout with `ToInt32` then clamps to `>= 0`, so a timeout
+  of 2^31 ms or more wraps negative and clamps to zero, producing an
+  immediate `"timed-out"` where the spec means a very long (or, per
+  `ToIntegerOrInfinity`, unclamped) wait. Pre-existing Int32 behavior,
+  inherited unchanged by the BigInt64 path. Latent on this host: sync
+  `wait` never actually suspends (every wait returns `"timed-out"` promptly
+  and deterministically), so no current test distinguishes a wrapped from a
+  genuine multi-day timeout.
+- **Grow-during-index RangeError is engine-wide, not BigInt-specific**: the
+  length-captured-before-`ToIndex(index)` rule (2025 test262 revision,
+  adopted by S6a) makes any Atomics index getter that grows a growable SAB
+  past the captured length throw RangeError; the focused test pins this for
+  BigInt64. Node itself is inconsistent across versions on this ordering
+  (Node 22 predates the revision), so aligning the remaining orderings is
+  an S6a-family follow-up covering all element types, not a defect of this
+  slice.
+- **Mac no-JIT / single-agent evidence gap**: every result above was
+  recorded on Mac ARM64 no-JIT, single-agent. No JIT (SimpleJIT/FullJIT),
+  no TTD, no Linux (B4) and no cross-agent execution evidence exists for
+  the BigInt Atomics surface; see the JIT/TTD entry below for the B4 gate.
 - **64-bit atomic primitives**: int64/uint64 RMW uses the PAL
   `Interlocked*64` family (`__sync_fetch_and_*` /
   `__sync_val_compare_and_swap` on clang; MSVC intrinsics on Windows);

@@ -260,6 +260,12 @@ check(Atomics.isLockFree(8) === true, "isLockFree(8) is true on this 64-bit buil
 check(Atomics.isLockFree(8) === Atomics.isLockFree(8), "isLockFree(8) is deterministic");
 check(Atomics.isLockFree(1) === true && Atomics.isLockFree(2) === true && Atomics.isLockFree(4) === true, "sizes 1/2/4 unchanged");
 check(Atomics.isLockFree(3) === false && Atomics.isLockFree(5) === false && Atomics.isLockFree(16) === false, "other sizes false");
+// Spec isLockFree applies ToIntegerOrInfinity(size) before comparing, so
+// fractional sizes truncate: 4.9 -> 4 (true) and 8.9 -> 8 (true on 64-bit).
+// Bun 1.4.3/JSC agree; Node 26 is the outlier for 8.9 (and 4.9), returning
+// false because it compares the untruncated value.
+check(Atomics.isLockFree(4.9) === true, "isLockFree(4.9) truncates to size 4");
+check(Atomics.isLockFree(8.9) === true, "isLockFree(8.9) truncates to size 8 on 64-bit");
 
 // --- Async completion ------------------------------------------------------
 WScript.SetTimeout(function () {
