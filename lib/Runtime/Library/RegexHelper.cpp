@@ -393,6 +393,91 @@ namespace Js
         UnifiedRegex::Matcher* matcher;
     };
 
+    // ----------------------------------------------------------------------
+    // u/v code-point walk helpers.
+    //
+    // Matcher::Match (RegexRuntime.cpp) never starts an attempt at a
+    // position that splits a complete surrogate pair: an offset whose
+    // previous unit is a lead surrogate and whose unit is a trail surrogate
+    // resolves to the containing code point (ES2026 22.2.7.2 step 13.b).
+    // The helpers below keep every internal global walk feeding such a
+    // position to the next attempt: an empty match advances per code point
+    // (AdvanceStringIndex), and the engine's documented lead-half
+    // pair-lacunarity (a one-unit match of a lead surrogate whose trail
+    // half follows) steps past the trail half so the walk cannot ping-pong
+    // through the pair-start snap. Non-u keeps the per-unit Annex B
+    // advance exactly.
+    // ----------------------------------------------------------------------
+
+    static bool RegexSplitsSurrogatePairAt(const char16* input, CharCount inputLength, CharCount position)
+    {
+        return position > 0 && position < inputLength
+            && Js::NumberUtilities::IsSurrogateUpperPart(input[position])
+            && Js::NumberUtilities::IsSurrogateLowerPart(input[position - 1]);
+    }
+
+    static CharCount RegexAdvanceStringIndexUnicode(const char16* input, CharCount inputLength, CharCount index)
+    {
+        if (index + 1 >= inputLength)
+        {
+            return index + 1;
+        }
+        if (Js::NumberUtilities::IsSurrogateLowerPart(input[index])
+            && Js::NumberUtilities::IsSurrogateUpperPart(input[index + 1]))
+        {
+            return index + 2;
+        }
+        return index + 1;
+    }
+
+    static bool RegexIsUnicodePattern(UnifiedRegex::RegexPattern* pattern)
+    {
+        return pattern->IsUnicode() || pattern->IsUnicodeSets();
+    }
+
+    // Next start after a successful u/v match [matchStart, matchEnd).
+    static CharCount RegexNextMatchStart(const char16* input, CharCount inputLength, CharCount matchStart, CharCount matchEnd)
+    {
+        if (matchEnd == matchStart)
+        {
+            return RegexAdvanceStringIndexUnicode(input, inputLength, matchStart);
+        }
+        if (matchEnd < inputLength
+            && Js::NumberUtilities::IsSurrogateUpperPart(input[matchEnd])
+            && Js::NumberUtilities::IsSurrogateLowerPart(input[matchEnd - 1])
+            && matchEnd - 1 <= matchStart)
+        {
+            return matchEnd + 1;
+        }
+        return matchEnd;
+    }
+
+    // The match reported to PropagateLastMatch for the regex's "lastIndex"
+    // write after a successful exec/test. A one-unit u/v match ending on a
+    // pair's second half is the engine's documented lead-half lacunarity
+    // (Node ends u matches only on code-point boundaries); writing the raw
+    // end would make every exec/test loop re-enter the same match through
+    // the pair-start snap in Matcher::Match, so step past the trail half.
+    // The result array / RegExp ctor keep the unadjusted match.
+    static UnifiedRegex::GroupInfo RegexAdjustedLastMatchForPropagation(
+        UnifiedRegex::RegexPattern* pattern,
+        const char16* input,
+        CharCount inputLength,
+        const UnifiedRegex::GroupInfo& match)
+    {
+        if (!match.IsUndefined() && RegexIsUnicodePattern(pattern) && match.length == 1)
+        {
+            const CharCount end = match.EndOffset();
+            if (RegexSplitsSurrogatePairAt(input, inputLength, end))
+            {
+                UnifiedRegex::GroupInfo adjusted = match;
+                adjusted.length = 2;
+                return adjusted;
+            }
+        }
+        return match;
+    }
+
     template <bool updateHistory>
     Var RegexHelper::RegexMatchImpl(ScriptContext* scriptContext, RecyclableObject *thisObj, JavascriptString *input, bool noResult, void *const stackAllocationPointer)
     {
@@ -552,6 +637,8 @@ namespace Js
 
         const bool isGlobal = pattern->IsGlobal();
         const bool isSticky = pattern->IsSticky();
+        // Hoisted out of the match loop (the walk advance reads it per match).
+        const bool isUnicodePattern = RegexIsUnicodePattern(pattern);
         JavascriptArray* arrayResult = 0;
         RegexMatchState state;
 
@@ -593,7 +680,12 @@ namespace Js
                 }
                 globalIndex++;
             }
-            offset = lastActualMatch.offset + max(lastActualMatch.length, static_cast<CharCountOrFlag>(1));
+            // Under u/v advance per code point (empty matches) and never
+            // hand a pair-splitting end back to the matcher (see the walk
+            // helpers above); non-u keeps the per-unit +1 advance.
+            offset = isUnicodePattern
+                ? RegexNextMatchStart(inputStr, inputLength, lastActualMatch.offset, lastActualMatch.EndOffset())
+                : lastActualMatch.offset + max(lastActualMatch.length, static_cast<CharCountOrFlag>(1));
         } while (isGlobal);
         PrimEndMatch(state, scriptContext, pattern);
         if (updateHistory)
@@ -661,7 +753,7 @@ namespace Js
         }
 
         // else: match remains undefined
-        PropagateLastMatch(scriptContext, isGlobal, isSticky, regularExpression, input, match, match, true, true);
+        PropagateLastMatch(scriptContext, isGlobal, isSticky, regularExpression, input, match, RegexAdjustedLastMatchForPropagation(pattern, input->GetString(), inputLength, match), true, true);
 
         if (noResult || match.IsUndefined())
         {
@@ -781,7 +873,7 @@ namespace Js
         }
 
         // else: match remains undefined
-        PropagateLastMatch(scriptContext, isGlobal, isSticky, regularExpression, input, match, match, true, true);
+        PropagateLastMatch(scriptContext, isGlobal, isSticky, regularExpression, input, match, RegexAdjustedLastMatchForPropagation(pattern, inputStr, inputLength, match), true, true);
         bool wasFound = !match.IsUndefined();
 
         if (useCache)
@@ -1277,8 +1369,8 @@ namespace Js
         UnifiedRegex::GroupInfo lastSuccessfulMatch;
         const bool isGlobal = pattern->IsGlobal();
         const bool isSticky = pattern->IsSticky();
-
-        // If global = false and sticky = true, set offset = lastIndex, else set offset = 0
+        // Hoisted out of the replace loop (the walk advance reads it per match).
+        const bool isUnicodePattern = RegexIsUnicodePattern(pattern);
         CharCount offset = 0;
         if (!isGlobal && isSticky)
         {
@@ -1348,15 +1440,30 @@ namespace Js
                 }
                 if (lastActualMatch.length == 0)
                 {
+                    // Under u/v the empty-match advance steps a whole code
+                    // point; stepping one unit into a surrogate pair would
+                    // hand the next attempt a pair-splitting start, which
+                    // Matcher::Match snaps back to this same empty match.
+                    // The stepped code point is appended verbatim. Non-u
+                    // keeps the +1 unit advance.
+                    const CharCount step = isUnicodePattern
+                        ? RegexAdvanceStringIndexUnicode(inputStr, inputLength, lastActualMatch.offset) - lastActualMatch.offset
+                        : 1;
                     if (lastActualMatch.offset < inputLength)
                     {
                         concatenated.Append(inputStr[lastActualMatch.offset]);
+                        if (step == 2)
+                        {
+                            concatenated.Append(inputStr[lastActualMatch.offset + 1]);
+                        }
                     }
-                    offset = lastActualMatch.offset + 1;
+                    offset = lastActualMatch.offset + step;
                 }
                 else
                 {
-                    offset = lastActualMatch.EndOffset();
+                    offset = isUnicodePattern
+                        ? RegexNextMatchStart(inputStr, inputLength, lastActualMatch.offset, lastActualMatch.EndOffset())
+                        : lastActualMatch.EndOffset();
                 }
             }
             while (isGlobal);
@@ -1391,7 +1498,11 @@ namespace Js
                     break;
 
                 lastSuccessfulMatch = lastActualMatch;
-                offset = lastActualMatch.length == 0? lastActualMatch.offset + 1 : lastActualMatch.EndOffset();
+                // See the empty-match advance above: u/v walks step whole
+                // code points and never re-enter a pair-splitting end.
+                offset = !isUnicodePattern
+                    ? (lastActualMatch.length == 0 ? lastActualMatch.offset + 1 : lastActualMatch.EndOffset())
+                    : RegexNextMatchStart(inputStr, inputLength, lastActualMatch.offset, lastActualMatch.EndOffset());
             }
             while (isGlobal);
             newString = scriptContext->GetLibrary()->GetEmptyString();
@@ -1445,6 +1556,8 @@ namespace Js
         // NOTE: These must be kept out of the scope of the try below!
         const bool isGlobal = pattern->IsGlobal();
         const bool isSticky = pattern->IsSticky();
+        // Hoisted out of the replace loop (the walk advance reads it per match).
+        const bool isUnicodePattern = RegexIsUnicodePattern(pattern);
 
         // If global = true, set lastIndex to 0 in case it is used in replacefn
         if (isGlobal)
@@ -1520,15 +1633,27 @@ namespace Js
 
             if (lastActualMatch.length == 0)
             {
+                // See the string-replace empty-match advance: under u/v step
+                // a whole code point (appending it verbatim) so the next
+                // attempt cannot start on a pair's second half.
+                const CharCount step = isUnicodePattern
+                    ? RegexAdvanceStringIndexUnicode(inputStr, inputLength, lastActualMatch.offset) - lastActualMatch.offset
+                    : 1;
                 if (lastActualMatch.offset < inputLength)
                 {
                     concatenated.Append(inputStr[lastActualMatch.offset]);
+                    if (step == 2)
+                    {
+                        concatenated.Append(inputStr[lastActualMatch.offset + 1]);
+                    }
                 }
-                offset = lastActualMatch.offset + 1;
+                offset = lastActualMatch.offset + step;
             }
             else
             {
-                offset = lastActualMatch.EndOffset();
+                offset = isUnicodePattern
+                    ? RegexNextMatchStart(inputStr, inputLength, lastActualMatch.offset, lastActualMatch.EndOffset())
+                    : lastActualMatch.EndOffset();
             }
         }
         while (isGlobal);
@@ -1911,6 +2036,8 @@ namespace Js
         }
 
         UnifiedRegex::RegexPattern *splitPattern = GetSplitPattern(scriptContext, regularExpression);
+        // Hoisted out of the split loop (the empty-match advance reads it per match).
+        const bool isUnicodeSplitPattern = RegexIsUnicodePattern(splitPattern);
 
         const char16* inputStr = input->GetString();
         CharCount inputLength = input->GetLength(); // s in spec
@@ -1953,7 +2080,15 @@ namespace Js
                 CharCount endOffset = match.EndOffset(); // e in spec
 
                 if (endOffset == copyOffset)
-                    startOffset++;
+                {
+                    // Empty-match advance: under u/v step a whole code
+                    // point so the next attempt cannot start on a pair's
+                    // second half (which Matcher::Match would snap back to
+                    // this same match). Non-u keeps +1.
+                    startOffset = isUnicodeSplitPattern
+                        ? RegexAdvanceStringIndexUnicode(inputStr, inputLength, startOffset)
+                        : startOffset + 1;
+                }
                 else
                 {
                     AppendSubString(scriptContext, ary, input, copyOffset, startOffset);
@@ -2538,7 +2673,7 @@ namespace Js
 
         if (!mustMatchEntireInput) // don't update 'lastIndex' when mustMatchEntireInput is true since the global flag is ignored
         {
-            PropagateLastMatchToRegex(scriptContext, isGlobal, isSticky, regularExpression, match, match);
+            PropagateLastMatchToRegex(scriptContext, isGlobal, isSticky, regularExpression, match, RegexAdjustedLastMatchForPropagation(pattern, input, inputLength, match));
         }
 
         return mustMatchEntireInput ? match.offset == 0 && match.length == inputLength : !match.IsUndefined();
@@ -2740,10 +2875,23 @@ namespace Js
 
     CharCount RegexHelper::AdvanceStringIndex(JavascriptString* string, CharCount index, bool isUnicode)
     {
-        // TODO: Change the increment to 2 depending on the "unicode" flag and
-        // the code point at "index". The increment is currently constant at 1
-        // in order to be compatible with the rest of the RegExp code.
+        // ES2026 22.2.7.3: under unicode the index advances by the code
+        // point's code-unit count, so a position at the start of a complete
+        // surrogate pair skips both units (empty-match iteration in
+        // @@match/@@replace/matchAll). Non-unicode advances by one unit.
+        if (!isUnicode)
+        {
+            return JavascriptRegExp::AddIndex(index, 1);
+        }
 
-        return JavascriptRegExp::AddIndex(index, 1);
+        const CharCount length = string->GetLength();
+        if (index >= length)
+        {
+            return JavascriptRegExp::AddIndex(index, 1);
+        }
+        const char16* const input = string->GetString();
+        return JavascriptRegExp::AddIndex(
+            index,
+            RegexAdvanceStringIndexUnicode(input, length, index) - index);
     }
 }

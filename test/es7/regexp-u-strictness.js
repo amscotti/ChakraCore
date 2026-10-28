@@ -4,13 +4,16 @@
 //-------------------------------------------------------------------------------------------------------
 // ES2015 u-mode RegExp strictness (S9 residual): extended pattern characters
 // (`{`/`}`/`]`), legacy octal and out-of-bounds decimal escapes, quantifiable
-// assertions, malformed `\u{...}`/`\x`/`\u` escape bodies, and the surrogate
+// assertions, malformed `\u{...}`/`\x`/`\u` escape bodies, the surrogate
 // code-point semantics of inverted astral classes, the u-mode dot/shorthand
-// complements and backreferences. Non-u Annex B behavior is pinned unchanged
-// (lone `{`/`}`/`]` literals, octal escapes, quantified lookaheads, per-unit
-// astral scanning), and `v` (which implies the whole u-mode surface) follows
-// `u`. Every assertion was mirrored in Node 26.5.0 and Bun 1.4.3 first; the
-// two oracles agreed on all of them.
+// complements and backreferences, and (S9-b) code-point-aware literal search:
+// trail-surrogate literal/set/alternation scans, pair literals and spec
+// pair-splitting manual `lastIndex` (ES2026 22.2.7.2 step 13.b), global and
+// sticky walks, and search/split/replace/exec-walk advancement. Non-u Annex B
+// behavior is pinned unchanged (lone `{`/`}`/`]` literals, octal escapes,
+// quantified lookaheads, per-unit astral scanning), and `v` (which implies
+// the whole u-mode surface) follows `u`. Every assertion was mirrored in
+// Node 26.5.0 and Bun 1.4.3 first; the two oracles agreed on all of them.
 
 WScript.LoadScriptFile("..\\UnitTestFramework\\UnitTestFramework.js");
 
@@ -362,6 +365,160 @@ var tests = [
             assert.areEqual(null, new RegExp("X", "u").exec("\ud800\udc00"), "no false match in pair");
             // non-u keeps the per-unit scan exactly
             assert.areEqual("\udc00", /\uDC00/.exec("\ud800\udc00")[0], "non-u per-unit scan");
+        }
+    },
+    {
+        name: "Trail-surrogate literal scans never start mid-pair under u/v",
+        body() {
+            // The literal/prefix/set-scan fast paths advance per code point:
+            // a pattern whose first unit is a trail surrogate can no longer
+            // match starting on the second half of a complete pair.
+            assert.areEqual(null, /\uDE00X/u.exec("\ud83d\ude00X"), "trail 2-char literal vs pair");
+            assert.areEqual(null, /\uDE00X/iu.exec("\ud83d\ude00X"), "trail 2-char literal vs pair (i)");
+            assert.areEqual(null, /\uDE00X/v.exec("\ud83d\ude00X"), "trail 2-char literal vs pair (v)");
+            assert.areEqual(null, /\uDE00XY/u.exec("\ud83d\ude00XY"), "trail 3-char literal vs pair");
+            assert.areEqual(null, new RegExp("\\uDE00X", "u").exec("\ud83d\ude00X"), "dynamic trail literal vs pair");
+            assert.areEqual(null, /\uDE00X/u.exec("q\ud83d\ude00X"), "trail literal cannot relocate past the pair");
+            assert.areEqual(null, /\uDE00X/u.exec("\ud800\udc00\ud83d\ude00X"), "trail literal after a real pair still fails");
+            assert.areEqual(0, /\uDE00X/u.exec("\ude00X").index, "trail literal matches a lone trail");
+            assert.areEqual(null, /[\uDE00x]a/u.exec("\ud83d\ude00a"), "set-scan trail member + literal");
+            assert.areEqual("\ude00a", /[\uDE00x]a/u.exec("\ude00a")[0], "set-scan finds the lone trail");
+            assert.areEqual(null, /a|\uDE00/u.exec("\ud83d\ude00"), "alternation first-set trail member");
+            assert.areEqual("q", /q|\uDE00X/u.exec("\ud83d\ude00Xq")[0], "alternation picks the later real branch");
+            assert.areEqual(3, /q|\uDE00X/u.exec("\ud83d\ude00Xq").index, "alternation match index");
+            // single-char program path (previously fixed) stays green
+            assert.areEqual(null, new RegExp("\\uDE00", "u").exec("\ud800\ude00"), "single-char trail vs pair");
+            // non-u keeps the Annex B per-unit scan exactly
+            assert.areEqual("\ude00X", /\uDE00X/.exec("\ud83d\ude00X")[0], "non-u trail literal matches the half");
+            assert.areEqual(1, /\uDE00X/.exec("\ud83d\ude00X").index, "non-u match index is the half");
+        }
+    },
+    {
+        name: "Full pair literals scan and match whole code points",
+        body() {
+            assert.areEqual("\ud801\udc00", /\u{10400}/u.exec("\ud801\udc00")[0], "pair literal matches the pair");
+            assert.areEqual(0, /\u{10400}/u.exec("\ud801\udc00").index, "pair literal index");
+            assert.areEqual(2, /\u{10400}/u.exec("\ud800\udc00\ud801\udc00").index, "pair literal skips the wrong pair");
+            assert.areEqual(2, /\u{1F600}x/u.exec("\ud83d\ude00\ud83d\ude00x").index, "pair literal with ASCII suffix");
+            assert.areEqual("\ud83d\ude00x", /\u{1F600}x/u.exec("\ud83d\ude00\ud83d\ude00x")[0], "pair literal + suffix consumes both units");
+        }
+    },
+    {
+        name: "Manual mid-pair lastIndex snaps to the containing code point",
+        body() {
+            // ES2026 22.2.7.2 step 13.b: the attempt starts at the code point
+            // containing element lastIndex (Node/Bun parity).
+            var re;
+            re = /\uDC00/gu; re.lastIndex = 1;
+            assert.areEqual(null, re.exec("\ud800\udc00"), "trail pattern mid-pair lastIndex fails");
+            assert.areEqual(0, re.lastIndex, "failed global exec resets lastIndex");
+            re = /\u{10400}/gu; re.lastIndex = 1;
+            var m = re.exec("\ud801\udc00\ud801\udc00");
+            assert.areEqual(0, m.index, "pair-literal global snaps back to 0");
+            assert.areEqual(2, m[0].length, "snapped match consumes the pair");
+            assert.areEqual(2, re.lastIndex, "lastIndex is the pair end");
+            re = /\u{10400}/yu; re.lastIndex = 1;
+            m = re.exec("\ud801\udc00");
+            assert.areEqual(0, m.index, "sticky snaps a mid-pair lastIndex too");
+            assert.areEqual(2, re.lastIndex, "sticky lastIndex after snapped pair match");
+            re = /\u{10400}/gu; re.lastIndex = 2;
+            m = re.exec("\ud801\udc00\ud801\udc00");
+            assert.areEqual(2, m.index, "boundary lastIndex keeps the second pair");
+            assert.areEqual(4, re.lastIndex, "boundary lastIndex advances to the end");
+            re = /\u{10400}/gu; re.lastIndex = 3;
+            m = re.exec("\ud801\udc00\ud801\udc00");
+            assert.areEqual(2, m.index, "lastIndex mid second pair snaps back");
+            re = /\uDE00X/gu; re.lastIndex = 1;
+            assert.areEqual(null, re.exec("\ud83d\ude00X"), "trail literal mid-pair lastIndex fails");
+            re = /\uDC00/yu; re.lastIndex = 1;
+            assert.areEqual(null, re.exec("\ud800\udc00"), "sticky trail mid-pair fails");
+            assert.areEqual(0, re.lastIndex, "failed sticky exec resets lastIndex");
+            re = /X/yu; re.lastIndex = 1;
+            m = re.exec("\ud800X");
+            assert.areEqual(1, m.index, "non-trail sticky at a non-splitting offset is unchanged");
+            re = /()/gu; re.lastIndex = 1;
+            m = re.exec("\ud801\udc00");
+            assert.areEqual(0, m.index, "empty pattern mid-pair lastIndex snaps");
+            assert.areEqual(0, re.lastIndex, "empty match leaves lastIndex at its end");
+        }
+    },
+    {
+        name: "Global/sticky walks and search/split/replace stay on code-point boundaries",
+        body() {
+            // The String.match/search/split/replace drivers and exec-walk
+            // loops (the surface matchAll drives) advance per code point.
+            assert.areEqual(null, "X\ud83d\ude00Xq".match(/\uDE00X/gu), "match walk finds no in-pair trail literal");
+            assert.areEqual(-1, "\u{1F600}".search(/\uDE00/u), "search single-char trail over pair");
+            assert.areEqual(-1, "\u{1F600}".search(/\uDE00X/u), "search literal trail over pair");
+            assert.areEqual(1, "\ud83d\ude00Xz".split(/\uDE00X/u).length, "split ignores an in-pair separator");
+            assert.areEqual(2, "\ud801\udc00a".split(/\u{10400}/u).length, "split on a real pair separator");
+            assert.areEqual(3, "\ud801\udc00X\ud801\udc00X".split(/\u{10400}X/u).length, "split finds both pair separators");
+            assert.areEqual("\ud83d\ude00Xz", "\ud83d\ude00Xz".replace(/\uDE00X/gu, "Q"), "replace skips an in-pair match");
+            assert.areEqual("\ud83d\ude00a", "\ud83d\ude00a".replace(/[\uDE00x]a/gu, "Q"), "replace skips an in-pair set match");
+            assert.areEqual("\ud83d\ude00Xz", "\ud83d\ude00Xz".replace(/\uDE00X/gu, function () { return "Q"; }), "replace function skips an in-pair match");
+            // empty matches advance past whole pairs (AdvanceStringIndex)
+            assert.areEqual(["", ""], "\ud800\udc00".match(/x?/gu), "empty match walk yields one match per code point");
+            var seen = [], re = /x?/gu, input = "\ud800\udc00", m;
+            while ((m = re.exec(input))) {
+                seen.push(m.index);
+                if (m[0] === "") { re.lastIndex += 2; }
+                if (re.lastIndex > input.length) { break; }
+            }
+            assert.areEqual("0,2", seen.join(","), "exec-walk empty matches sit on pair boundaries");
+            seen = []; re = /\uDE00/gu; input = "\ud800\ude00\ude00";
+            while ((m = re.exec(input))) {
+                seen.push(m.index);
+                if (re.lastIndex > input.length) { break; }
+            }
+            assert.areEqual("2", seen.join(","), "exec-walk trail pattern skips the pair, finds the lone trail");
+            assert.areEqual(1, "\ud800\udc00".split(/(?=x)/u).length, "empty separator split keeps the pair whole");
+            // sticky walks never start mid-pair
+            var stickySeen = [];
+            re = /\uDE00X/yu; input = "\ud83d\ude00X";
+            for (var i = 0; i < 4; i++) {
+                m = re.exec(input);
+                if (m) { stickySeen.push(m.index); }
+                if (!m || re.lastIndex === 0) { break; }
+            }
+            assert.areEqual("", stickySeen.join(","), "sticky walk never matches the in-pair literal");
+            // non-u keeps the per-unit walk exactly
+            assert.areEqual(["\ude00X"], "\ud83d\ude00Xq".match(/\uDE00X/g), "non-u global walk matches the half");
+            assert.areEqual(2, "\ud800\ude00Xz".split(/\uDE00X/).length, "non-u split on the half");
+        }
+    },
+    {
+        name: "Anchors and alternation over surrogate literals",
+        body() {
+            assert.areEqual("a", /a|\uDE00/u.exec("a\ud83d\ude00")[0], "alternation lead branch wins");
+            assert.areEqual(0, /a|\uDE00/u.exec("a\ud83d\ude00").index, "alternation lead branch index");
+            assert.areEqual(null, /^\uDE00X/u.exec("\ud83d\ude00X"), "anchored trail literal cannot match mid-pair");
+            assert.areEqual(2, /X/u.exec("\ud800\udc00X").index, "plain search after a pair lands on the boundary");
+            assert.areEqual(0, /\u{10400}$/u.exec("\ud801\udc00").index, "dollar-anchored pair literal");
+            assert.areEqual(null, /\b\uDE00/u.exec("x\ud83d\ude00"), "word-boundary trail literal fails");
+            assert.areEqual(0, /(?:\u{10400}|q)/u.exec("\ud801\udc00q").index, "alternation with pair literal picks the first branch");
+            assert.areEqual(3, /^X/um.exec("\ud800\udc00\nX").index, "multiline anchor after a pair + newline");
+        }
+    },
+    {
+        name: "Lone surrogates keep their own code-point matches",
+        body() {
+            assert.areEqual("\ude00", /\uDE00/u.exec("\ude00")[0], "lone trail direct");
+            assert.areEqual(2, /\uDE00/u.exec("\ud800\udc00\ude00").index, "lone trail after a complete pair");
+            assert.areEqual("\udc00", /[\uDC00-\uDFFF]/u.exec("a\udc00")[0], "lone trail class scan");
+            assert.areEqual(1, /[\uDC00-\uDFFF]/u.exec("a\udc00").index, "lone trail class index");
+            assert.areEqual("\ud800", /[\uD800]/u.exec("\ud800x")[0], "lone lead keeps matching");
+            assert.areEqual(2, "\ud800\udc00\ude00".split(/\uDE00/u).length, "split on a lone trail");
+            assert.areEqual("aQ", "a\ude00".replace(/\uDE00/gu, "Q"), "replace a lone trail");
+            assert.areEqual("Qa", "\ud800a".replace(/\uD800/gu, "Q"), "replace a lone lead");
+            var seen = [], re = /\uDE00/gu, input = "\ud801\udc00\ud801\udc00\ude00", m;
+            while ((m = re.exec(input))) {
+                seen.push(m.index);
+                if (re.lastIndex > input.length) { break; }
+            }
+            assert.areEqual("4", seen.join(","), "walk over pairs finds only the lone trail");
+            // non-u per-unit semantics preserved end to end
+            assert.areEqual("\udc00", /\uDC00/.exec("\ud800\udc00")[0], "non-u single-char per-unit scan");
+            assert.areEqual(1, /\uDC00/.exec("\ud800\udc00").index, "non-u index is the trail unit");
         }
     },
     {
