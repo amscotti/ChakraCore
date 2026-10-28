@@ -478,6 +478,24 @@ namespace Js
         return match;
     }
 
+    // Length-bounded character scan for a flags string: the value may be an
+    // observable ToString result backed by a SubString whose buffer is not
+    // NUL-terminated ("gy".substring(0,1)), so wcsstr would read past its
+    // length.
+    static bool FlagsStringContainsChar(JavascriptString* flags, char16 c)
+    {
+        const char16* buf = flags->GetString();
+        const CharCount len = flags->GetLength();
+        for (CharCount i = 0; i < len; i++)
+        {
+            if (buf[i] == c)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
     template <bool updateHistory>
     Var RegexHelper::RegexMatchImpl(ScriptContext* scriptContext, RecyclableObject *thisObj, JavascriptString *input, bool noResult, void *const stackAllocationPointer)
     {
@@ -533,6 +551,11 @@ namespace Js
             JavascriptRegExp::SetLastIndexProperty(thisObj, TaggedInt::ToVarUnchecked(0), scriptContext);
 
             JavascriptArray* arrayResult = nullptr;
+            // Non-progress guard (see AdvanceLastIndex): a repeating
+            // empty-match start index means the advance never landed (an
+            // observable receiver dropped the "lastIndex" write), so the
+            // walk terminates without another match instead of hanging.
+            CharCount previousEmptyStart = CharCountFlag;
 
             do
             {
@@ -552,7 +575,15 @@ namespace Js
 
                 arrayResult->DirectAppendItem(matchStr);
 
-                AdvanceLastIndex(thisObj, input, matchStr, fullUnicode, scriptContext);
+                CharCount const emptyStart = AdvanceLastIndex(thisObj, input, matchStr, fullUnicode, scriptContext);
+                if (emptyStart != CharCountFlag)
+                {
+                    if (emptyStart == previousEmptyStart)
+                    {
+                        break;
+                    }
+                    previousEmptyStart = emptyStart;
+                }
             }
             while (true);
 
@@ -1232,6 +1263,9 @@ namespace Js
 
         JsUtil::List<RecyclableObject*>* results = RecyclerNew(recycler, JsUtil::List<RecyclableObject*>, recycler);
 
+        // Non-progress guard start index for the collection loop (see below).
+        CharCount previousEmptyStart = CharCountFlag;
+
         while (true)
         {
             PCWSTR varName = _u("RegExp.prototype[Symbol.replace]");
@@ -1251,7 +1285,20 @@ namespace Js
             }
 
             JavascriptString* matchStr = GetMatchStrFromResult(resultObj, scriptContext);
-            AdvanceLastIndex(thisObj, input, matchStr, unicode, scriptContext);
+            CharCount const emptyStart = AdvanceLastIndex(thisObj, input, matchStr, unicode, scriptContext);
+            // Non-progress guard (see AdvanceLastIndex): a repeating
+            // empty-match start index means the advance never landed (an
+            // observable receiver dropped the "lastIndex" write), so the
+            // collection loop stops instead of hanging; the already
+            // collected results are then substituted as usual.
+            if (emptyStart != CharCountFlag)
+            {
+                if (emptyStart == previousEmptyStart)
+                {
+                    break;
+                }
+                previousEmptyStart = emptyStart;
+            }
         }
 
         CompoundString::Builder<64 * sizeof(void *) / sizeof(char16)> accumulatedResultBuilder(scriptContext);
@@ -1919,9 +1966,10 @@ namespace Js
         // -ES6RegExPrototypeProperties the accessor is absent and a raw Get
         // would stringify undefined, breaking the splitter construction);
         // unicodeMatching is true for "u" OR "v" (v implies the whole
-        // u-mode surface).
+        // u-mode surface). The scans are length-bounded: an observable
+        // flags value can be a non-NUL-terminated SubString.
         JavascriptString* flags = JavascriptRegExp::GetFlagsStringForBuiltin(thisObj, scriptContext);
-        bool unicode = wcsstr(flags->GetString(), _u("u")) != nullptr || wcsstr(flags->GetString(), _u("v")) != nullptr;
+        bool unicode = FlagsStringContainsChar(flags, _u('u')) || FlagsStringContainsChar(flags, _u('v'));
         flags = AppendStickyToFlagsIfNeeded(flags, scriptContext);
 
         bool isDefaultConstructor = speciesConstructor == defaultConstructor;
@@ -2014,13 +2062,12 @@ namespace Js
 
     JavascriptString* RegexHelper::AppendStickyToFlagsIfNeeded(JavascriptString* flags, ScriptContext* scriptContext)
     {
-        const char16* flagsString = flags->GetString();
-        if (wcsstr(flagsString, _u("y")) == nullptr)
+        if (!FlagsStringContainsChar(flags, _u('y')))
         {
             BEGIN_TEMP_ALLOCATOR(tempAlloc, scriptContext, _u("RegexHelper"))
             {
                 StringBuilder<ArenaAllocator> bs(tempAlloc, flags->GetLength() + 1);
-                bs.Append(flagsString, flags->GetLength());
+                bs.Append(flags->GetString(), flags->GetLength());
                 bs.Append(_u('y'));
                 flags = Js::JavascriptString::NewCopyBuffer(bs.Detach(), bs.Count(), scriptContext);
             }
@@ -2874,7 +2921,15 @@ namespace Js
             scriptContext);
     }
 
-    void RegexHelper::AdvanceLastIndex(
+    // Returns the observable "lastIndex" the empty-match advance started
+    // from (CharCountFlag when the match was non-empty and no advance ran).
+    // The ES6 global loops use a repetition of that value as their
+    // non-progress guard: with an observable receiver whose "lastIndex"
+    // writes are dropped (e.g. a proxy set trap), the advance never lands
+    // and the same empty match would be re-run forever; a progressing walk
+    // never repeats it, so a repeat terminates the walk without another
+    // match instead of hanging.
+    CharCount RegexHelper::AdvanceLastIndex(
         RecyclableObject* instance,
         JavascriptString* input,
         JavascriptString* matchStr,
@@ -2884,9 +2939,12 @@ namespace Js
         if (matchStr->GetLength() == 0)
         {
             CharCount lastIndex = JavascriptRegExp::GetLastIndexProperty(instance, scriptContext);
+            const CharCount startedFrom = lastIndex;
             lastIndex = AdvanceStringIndex(input, lastIndex, unicode);
             JavascriptRegExp::SetLastIndexProperty(instance, lastIndex, scriptContext);
+            return startedFrom;
         }
+        return CharCountFlag;
     }
 
     CharCount RegexHelper::AdvanceStringIndex(JavascriptString* string, CharCount index, bool isUnicode)

@@ -608,6 +608,82 @@ var tests = [
             assert.throws(function () { input.split(throwing); }, RangeError, "throwing flags propagates from @@split");
         }
     },
+    {
+        // S9-b final repair iteration 3: length-bounded flag scans (an
+        // observable flags value can be a non-NUL-terminated SubString —
+        // wcsstr over-reads and mis-derives the splitter's sticky/unicode
+        // flags), the substrate-only internal-flags fallback, and the
+        // global-walk non-progress guard. Values mirror Node 26.5.0 except
+        // the two guard shapes, where the spec algorithm itself loops
+        // forever in Node (OOM) and the engine terminates instead.
+        name: "substring flags, substrate fallback, and proxy non-progress guard",
+        body() {
+            var input = "\ud83d\ude00X"; // [pair][X]
+            var Sub = class extends RegExp {};
+            function withFlags(re, v) {
+                Object.defineProperty(re, "flags", { value: v, configurable: true });
+                return re;
+            }
+
+            // Length-bounded scans: substring and concatenated flags values
+            // derive sticky/unicode exactly from the in-bounds characters.
+            assert.areEqual("\ud83d\ude00,", input.split(withFlags(new Sub("X", "gv"), "gvX".substring(0, 1))).join(","), "split flags 'g' substring");
+            assert.areEqual("\ud83d\ude00,", input.split(withFlags(new Sub("X", "gv"), "guy".substring(0, 2))).join(","), "split flags 'gu' substring");
+            assert.areEqual("\ud83d\ude00,", input.split(withFlags(new Sub("X", "gv"), "gy".substring(0, 1))).join(","), "split flags 'gy' substring (no stale y)");
+            assert.areEqual("\ud83d\ude00,", input.split(withFlags(new Sub("X", "gv"), "g" + "v")).join(","), "split flags concatenated");
+            assert.areEqual(3, input.match(withFlags(new Sub("\\uDE00?", "gv"), "g" + "v")).length, "match flags concatenated");
+            var walked = [];
+            var walkGuard = 0;
+            for (var m of input.matchAll(withFlags(new Sub("\\uDE00?", "gv"), "gvX".substring(0, 2)))) {
+                walked.push(m.index);
+                if (++walkGuard > 10) { walked.push("GUARD"); break; }
+            }
+            assert.areEqual("0,2,3", walked.join(","), "matchAll flags 'gv' substring walks code points");
+
+            // Substrate fallback is config-gated: with the flags accessor
+            // installed, an observable undefined (self-deleting getter)
+            // stringifies to "undefined" per spec (non-global -> one exec);
+            // without it the genuine-regex internal flags are used.
+            var substrate = typeof Object.getOwnPropertyDescriptor(RegExp.prototype, "flags") !== "undefined";
+            var selfDeleting = new Sub("\\uDE00?", "gv");
+            Object.defineProperty(selfDeleting, "flags", { get() { delete selfDeleting.flags; return undefined; }, configurable: true });
+            if (substrate) {
+                assert.areEqual("", input.match(selfDeleting).join(","), "observable undefined flags -> 'undefined' (spec)");
+            }
+            else {
+                assert.areEqual(",,", input.match(selfDeleting).join(","), "substrate-off undefined flags -> internal flags (documented deviation)");
+            }
+
+            // Proxy receivers never hang: the observable path brand-checks.
+            assert.throws(function () { input.match(new Proxy(/\uDE00?/gv, {})); }, TypeError, "plain proxy match throws, no hang");
+            assert.throws(function () { input.replace(new Proxy(/\uDE00?/gv, {}), "Q"); }, TypeError, "plain proxy replace throws, no hang");
+            assert.throws(function () { input.replaceAll(new Proxy(/\uDE00?/gv, {}), "Q"); }, TypeError, "plain proxy replaceAll throws, no hang");
+            // A proxy whose exec is bound to the target terminates with the
+            // correct result even when its set trap drops the writes.
+            var target = /\uDE00?/gv;
+            var droppingSet = new Proxy(target, {
+                get: function (t, k) { var v = t[k]; return typeof v === "function" ? v.bind(t) : v; },
+                set: function () { return true; }
+            });
+            assert.areEqual(3, input.match(droppingSet).length, "bound-exec dropping-set proxy terminates");
+
+            // Non-progress guard: with lastIndex writes silently dropped the
+            // spec algorithm re-runs the same empty match forever (Node
+            // OOMs); the engine terminates without another match. These two
+            // shapes intentionally have no Node oracle.
+            var pinned = /\uDE00?/gv;
+            var guardObj = {
+                get flags() { return "gv"; },
+                get lastIndex() { return 0; },
+                set lastIndex(v) { /* dropped */ },
+                exec: function (s) { return RegExp.prototype.exec.call(pinned, s); },
+            };
+            guardObj[Symbol.match] = RegExp.prototype[Symbol.match];
+            guardObj[Symbol.replace] = RegExp.prototype[Symbol.replace];
+            assert.areEqual(2, input.match(guardObj).length, "dropped lastIndex writes terminate the match walk");
+            assert.areEqual("QQ\ud83d\ude00X", input.replace(guardObj, "Q"), "dropped lastIndex writes terminate the replace walk");
+        }
+    },
 ];
 
 testRunner.runTests(tests, { verbose: WScript.Arguments[0] != "summary" });

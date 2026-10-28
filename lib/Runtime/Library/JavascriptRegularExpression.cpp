@@ -127,17 +127,21 @@ using namespace Js;
     JavascriptString* JavascriptRegExp::GetFlagsStringForBuiltin(RecyclableObject* instance, ScriptContext* scriptContext)
     {
         // ES2026 @@match/@@matchAll/@@replace/@@split derive their loop
-        // controls from ONE observable Get(R, "flags") + ToString. When the
-        // value is undefined because the ES6RegExPrototypeProperties
-        // substrate did not install the "flags" accessor (and no user
-        // accessor or own value provides one), fall back to the compiled
-        // internal flags of a genuine RegExp instance — the same deviation
-        // String.prototype.replaceAll makes for a missing "flags". A
-        // user-provided observable value is never ignored.
+        // controls from ONE observable Get(R, "flags") + ToString. The only
+        // fallback is the substrate gap: when the
+        // ES6RegExPrototypeProperties configuration did not install the
+        // "flags" accessor at all, a genuine RegExp instance uses its
+        // compiled internal flags (the same deviation
+        // String.prototype.replaceAll makes for a missing "flags"). No
+        // HasProperty probe runs after the observable Get, and under the
+        // full substrate an observable undefined stringifies to "undefined"
+        // exactly as the spec requires. Substrate-off deviation: a user
+        // getter that RETURNS undefined also takes the internal-flag
+        // fallback (documented in the receipt).
         Var flagsVar = JavascriptOperators::GetProperty(instance, PropertyIds::flags, scriptContext);
         if (JavascriptOperators::IsUndefined(flagsVar)
-            && VarIs<JavascriptRegExp>(instance)
-            && !JavascriptOperators::HasProperty(instance, PropertyIds::flags))
+            && !scriptContext->GetConfig()->IsES6RegExPrototypePropertiesEnabled()
+            && VarIs<JavascriptRegExp>(instance))
         {
             return StringFromFlags(VarTo<JavascriptRegExp>(instance)->GetFlags(), scriptContext);
         }

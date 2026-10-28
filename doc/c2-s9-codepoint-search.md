@@ -1,8 +1,11 @@
 # C2-S9-b: code-point-aware literal search under `u`/`v`
 
 Status: **pending** (implemented and fully evidenced on Mac no-JIT; awaiting
-review/integration; includes the review-repair round: the `v`
-full-Unicode matchAll/split/match/replace fix and receipt corrections).
+review/integration; includes three review-repair rounds: the `v`
+full-Unicode derivation for the ES6 regex builtins, the spec-shaped
+one-`flags`-read derivation, and the final repairs — length-bounded flag
+scans, the config-gated substrate fallback, and the global-walk
+non-progress guard).
 Gate pins unchanged and re-verified on the committed tree: `zig build check`
 green on both profiles — `check-regression` **2026/0** (test) and **2078/0**
 (debug-static), plus bytecode/native/smoke/metadata legs — all through the
@@ -41,7 +44,27 @@ a *subclassed* `v` regex (exactly the case the observable ES6 drivers exist
 for) still hung in `String.match`/`replace`/`replaceAll`, and `@@split`
 stringified `undefined` and threw a SyntaxError building its splitter.
 
-**Iteration 2 (final shape):** `@@match`, `@@replace`, `@@split` and
+**Iteration 3 (final review repairs):** (a) every flag scan is
+length-bounded — an observable `flags` value can be a non-NUL-terminated
+SubString (`"gy".substring(0,1)`), and the old `wcsstr` reads mis-derived
+the splitter's sticky/unicode flags (`FlagsStringContainsChar` in
+`RegexHelper`, used by `@@split` and `AppendStickyToFlagsIfNeeded`);
+(b) the internal-flags fallback is config-gated only
+(`!IsES6RegExPrototypePropertiesEnabled()` plus a genuine RegExp) with no
+`HasProperty` probe after the observable Get — under the full substrate an
+observable `undefined` stringifies to `"undefined"` per spec (self-deleting
+getter pinned); substrate-off, a user getter that *returns* undefined also
+takes the internal fallback (documented deviation, below); (c) the `@@match`
+and `@@replace` global loops carry a non-progress guard: `AdvanceLastIndex`
+returns the observable `lastIndex` the empty-match advance started from,
+and a repetition of that value (writes dropped by an observable receiver)
+terminates the walk without another match instead of hanging — the spec
+algorithm itself loops forever there (Node OOMs; termination is a deliberate
+safety deviation). Proxy receivers brand-check and throw a TypeError before
+any loop can run (no hang; under the full substrate even the same
+`hasIndices`-getter TypeError message as Node).
+
+**Iteration 2 (spec-shaped derivation):** `@@match`, `@@replace`, `@@split` and
 `@@matchAll` all derive their loop controls the spec way — ONE observable
 `Get(R, "flags")` + `ToString` (`JavascriptRegExp::
 GetFlagsStringForBuiltin`), parsed by `ParseBuiltinFlags`
@@ -187,30 +210,41 @@ debug-static).
   surrogates) plus the repair round's `v`-mode empty-capable walk group
   (split/match/replace/replaceAll + the exec-level snap contract; the
   `-ES6RegExSymbols` matchAll forms are pinned in `test/es7/matchall.js`,
-  extended 22 → **24 groups** under its existing flag-enabled rlexe entry:
-  the matchAll hang group, and the iteration-2 subclass group — subclass v
+  extended 22 → **25 groups** under its existing flag-enabled rlexe entry:
+  the matchAll hang group; the iteration-2 subclass group (subclass v
   match/replace/replaceAll/split empty-capable termination + exact results
   with u/no-flag controls, one-flags-read-per-builtin recording accessors,
-  own/lying/ToString-object/throwing flags values).
-  **21/21 and 24/24 pass** on test and debug-static across default,
+  own/lying/ToString-object/throwing flags values); and the iteration-3
+  group (substring/concatenated flags splits and walks, the config-gated
+  self-deleting undefined getter — spec `"undefined"` reading under the
+  full substrate, the documented internal-flags fallback without it —
+  plain/dropping-set proxies that throw or terminate, and the two
+  non-progress-guard shapes with the engine's exact results).
+  **21/21 and 25/25 pass** on test and debug-static across default,
   `-noDeferParse`, `-CollectGarbage`, combined and `-force:deferParse`
-  (matchall.js always with `-ES6RegExSymbols`); 21/21 and 24/24 under Node
-  26.5.0 and Bun 1.4.3 via a WScript shim (`out/s9-probe/shim.js`).
+  (matchall.js under `-ES6RegExSymbols` and also under
+  `-ES6RegExSymbols -ES6RegExPrototypeProperties`); the Node 26.5.0/Bun
+  1.4.3 shim check passes 25/25 on a copy with only the two
+  spec-never-terminates guard assertions excluded (those have no Node
+  oracle; both engines' remaining assertions agree).
 - **Repair-round differential batteries** (`out/s9-probe/vfix.js` 25 shapes;
   `out/s9-probe/vfix2.js` 21 shapes; `out/s9-probe/reads.js` read-sequence
-  probes; mirrored in Node first): v/u/no-flag empty-capable matchAll,
-  match, replace, replaceAll and split walks (including every hang shape),
-  subclass instances, done/count, `d`-flag indices, non-global throws,
-  manual mid-pair `lastIndex`, direct `Symbol.matchAll`, and the flags
-  observability matrix (own value overrides, object ToString, throwing
-  accessor propagates, exactly one `flags` read per builtin with
-  `global`/`unicode`/`unicodeSets` never consulted): **CH == Node on every
-  shape** under both `-ES6RegExSymbols` and
+  probes; `out/s9-probe/rep3*.js` + `out/s9-probe/guard.js` iteration-3
+  repros; mirrored in Node first): v/u/no-flag empty-capable matchAll,
+  match, replace, replaceAll and split walks, substring/concatenated flags
+  values (`"gvX".substring(0,1)`, `"guy".substring(0,2)`,
+  `"gy".substring(0,1)`, `"g"+"v"`), the self-deleting undefined getter,
+  plain and dropping-set proxies, and the flags observability matrix (own
+  value overrides, object ToString, throwing accessor, exactly one `flags`
+  read per builtin): **CH == Node on every shape that terminates in Node**
+  under both `-ES6RegExSymbols` and
   `-ES6RegExSymbols -ES6RegExPrototypeProperties`; the default-mode
-  split/match/replace subset is also identical. A lying observable
-  `"g"`-only flags value on an empty-capable `v` regex loops in the spec
-  algorithm itself — Node OOMs on it; that spec-inherent shape is not
-  pinned.
+  split/match/replace subset is also identical. Two shape families have no
+  Node oracle because the spec algorithm itself never terminates there
+  (Node OOMs): a lying observable `"g"`-only flags value on an
+  empty-capable `v` regex, and dropped `lastIndex` writes on an observable
+  receiver — on both, the engine's non-progress guard terminates (the
+  second family is pinned with the engine's exact results).
 - **Differential batteries** (60-assertion group battery
   `out/s9-probe/groups.js` + probe scripts): CH == Node == Bun on every
   fixed shape; the only remaining CH-vs-Node divergences are the kept
@@ -355,11 +389,21 @@ surrogate-heavy / 620 KB ASCII inputs; base vs final vs Node for context):
     read-sequence probes run under
     `-ES6RegExSymbols -ES6RegExPrototypeProperties`, where the accessors
     exist, and CH == Node there). Left documented.
-11. **Lying observable flags on empty-capable v regexes**: an observable
-    `flags` value of `"g"` on an empty-capable `v` regex makes the spec
-    algorithm itself loop (the +1 advance fights the builtin exec's
-    code-point snap) - Node OOMs on the shape; the engine follows the same
-    spec-shaped derivation and does not special-case it. Not pinned.
+11. **Spec-never-terminates shapes terminate on the engine**: an
+    observable `flags` value of `"g"` on an empty-capable `v` regex, and
+    dropped `lastIndex` writes on an observable receiver, both loop forever
+    in the spec algorithm (Node OOMs on each). The engine's non-progress
+    guard (repeated empty-match start index in the `@@match`/`@@replace`
+    loops) terminates these without another match — a deliberate safety
+    deviation; the dropped-writes family is pinned with the engine's exact
+    results, the lying-`"g"` family is left unpinned.
+12. **Substrate-off undefined-getter fallback**: without
+    `-ES6RegExPrototypeProperties`, a user `flags` getter that *returns*
+    `undefined` on a genuine RegExp takes the internal-flags fallback
+    rather than stringifying `"undefined"` (with the substrate installed,
+    observable `undefined` stringifies per spec — self-deleting getter
+    pinned). Distinguishing the two would need a `HasProperty` probe after
+    an observable Get; left as the documented deviation.
 
 ## Gate receipts (committed tree)
 
@@ -378,7 +422,7 @@ gate lock; raw logs preserved under `out/gate-receipt/`:
 All evidence is Mac no-JIT interpreter. No opcode, instruction-encoding or
 bytecode change (one bool field on the C++ `Matcher`, one private static on
 `Char2LiteralScannerMixin`, one `JavascriptRegExp` static); B4 must still
-run the focused tests (21 + 24 groups) and the RegExp corpora above under
+run the focused tests (21 + 25 groups) and the RegExp corpora above under
 SimpleJIT/FullJIT before any JIT-configuration claim, per the standing C2
 policy, and re-measure the walk microbenches (the per-match bookkeeping is
 in interpreter C++ only, so JIT regex callers should be unaffected, but
