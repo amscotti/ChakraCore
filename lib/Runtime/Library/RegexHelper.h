@@ -178,6 +178,9 @@ namespace Js
         static JavascriptString* GetMatchStrFromResult(RecyclableObject* result, ScriptContext* scriptContext);
         static charcount_t AdvanceStringIndex(JavascriptString* string, charcount_t index, bool isUnicode);
     private:
-        static void AdvanceLastIndex(RecyclableObject* instance, JavascriptString* input, JavascriptString* matchStr, bool unicode, ScriptContext* scriptContext);
+        // Returns the observable "lastIndex" the empty-match advance
+        // started from (CharCountFlag for a non-empty match); callers use
+        // its repetition as the global-walk non-progress guard.
+        static CharCount AdvanceLastIndex(RecyclableObject* instance, JavascriptString* input, JavascriptString* matchStr, bool unicode, ScriptContext* scriptContext);
     };
 }

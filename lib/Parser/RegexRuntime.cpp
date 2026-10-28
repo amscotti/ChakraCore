@@ -547,18 +547,258 @@ namespace UnifiedRegex
 #endif
 
     // ----------------------------------------------------------------------
+    // u/v code-point scan helpers
+    // ----------------------------------------------------------------------
+
+    // True iff `position` is the second half of a complete surrogate pair,
+    // i.e. a u/v match can never begin there (ES2026 22.2.7.2 step 13.b
+    // resolves a start offset to the code point containing it; the matcher's
+    // input is a code-point sequence, so pair-interior positions are not
+    // match starts). Non-u keeps the Annex B per-unit positions exactly.
+    inline bool SplitsSurrogatePairAt(const char16* const input, const CharCount inputLength, const CharCount position)
+    {
+        // The trail-unit test comes first: it needs one load and fails for
+        // every non-surrogate unit.
+        return position > 0 && position < inputLength
+            && Js::NumberUtilities::IsSurrogateUpperPart(input[position])
+            && Js::NumberUtilities::IsSurrogateLowerPart(input[position - 1]);
+    }
+
+    // ----------------------------------------------------------------------
+    // Cold u/v scan-resume variants. Under u/v a scan must not stop on the
+    // second half of a complete surrogate pair (a match can never begin
+    // there); when a hot per-unit scan loop stops on such a position,
+    // out-of-line helpers skip it and resume the same tight loop, so the
+    // per-unit cost of every other scan is unchanged. Only a stop-set that
+    // can contain a trail-surrogate unit can ever split a pair.
+    // ----------------------------------------------------------------------
+
+    // Resume a scan for `matchC` from `inputOffset`, returning the first
+    // stop that is not a pair's second half.
+    _NOINLINE static CharCount ScanToCharPairAwareResume(
+        const char16* const input,
+        const CharCount inputLength,
+        CharCount inputOffset,
+        const char16 matchC)
+    {
+        while (true)
+        {
+            while (inputOffset < inputLength && input[inputOffset] != matchC)
+            {
+                inputOffset++;
+            }
+            if (inputOffset >= inputLength || !SplitsSurrogatePairAt(input, inputLength, inputOffset))
+            {
+                return inputOffset;
+            }
+            inputOffset++;
+        }
+    }
+
+    // As above, for `matchC0` or `matchC1`.
+    _NOINLINE static CharCount ScanToChar2SetPairAwareResume(
+        const char16* const input,
+        const CharCount inputLength,
+        CharCount inputOffset,
+        const char16 matchC0,
+        const char16 matchC1)
+    {
+        while (true)
+        {
+            while (inputOffset < inputLength && input[inputOffset] != matchC0 && input[inputOffset] != matchC1)
+            {
+                inputOffset++;
+            }
+            if (inputOffset >= inputLength || !SplitsSurrogatePairAt(input, inputLength, inputOffset))
+            {
+                return inputOffset;
+            }
+            inputOffset++;
+        }
+    }
+
+    // (defined below; used by the combined stop checks)
+    static CharCount ScanToCharPairAwareResume(const char16* const input, const CharCount inputLength, CharCount inputOffset, const char16 matchC);
+    static CharCount ScanToChar2SetPairAwareResume(const char16* const input, const CharCount inputLength, CharCount inputOffset, const char16 matchC0, const char16 matchC1);
+    static CharCount ScanToSetPairAwareResume(const RuntimeCharSet<char16>& matchSet, const char16* const input, const CharCount inputLength, CharCount inputOffset, const bool isNegation);
+
+    // Combined out-of-line u/v stop check for the hot Sync instructions:
+    // returns the scan position, resumed past a pair's second half when the
+    // tight loop stopped on one. The pattern-side gate (whether the stop
+    // unit can be a trail surrogate) is folded in so the hot path pays only
+    // one predictable branch.
+    _NOINLINE static CharCount ScanStopCheckChar(
+        const char16* const input,
+        const CharCount inputLength,
+        const CharCount inputOffset,
+        const char16 matchC)
+    {
+        if (inputOffset < inputLength
+            && Js::NumberUtilities::IsSurrogateUpperPart(matchC)
+            && SplitsSurrogatePairAt(input, inputLength, inputOffset))
+        {
+            return ScanToCharPairAwareResume(input, inputLength, inputOffset + 1, matchC);
+        }
+        return inputOffset;
+    }
+
+    _NOINLINE static CharCount ScanStopCheckChar2Set(
+        const char16* const input,
+        const CharCount inputLength,
+        const CharCount inputOffset,
+        const char16 matchC0,
+        const char16 matchC1)
+    {
+        if (inputOffset < inputLength
+            && (Js::NumberUtilities::IsSurrogateUpperPart(matchC0) || Js::NumberUtilities::IsSurrogateUpperPart(matchC1))
+            && SplitsSurrogatePairAt(input, inputLength, inputOffset))
+        {
+            return ScanToChar2SetPairAwareResume(input, inputLength, inputOffset + 1, matchC0, matchC1);
+        }
+        return inputOffset;
+    }
+
+    _NOINLINE static CharCount ScanStopCheckSet(
+        const RuntimeCharSet<char16>& matchSet,
+        const char16* const input,
+        const CharCount inputLength,
+        const CharCount inputOffset,
+        const bool isNegation)
+    {
+        if (inputOffset < inputLength
+            && SplitsSurrogatePairAt(input, inputLength, inputOffset))
+        {
+            return ScanToSetPairAwareResume(matchSet, input, inputLength, inputOffset + 1, isNegation);
+        }
+        return inputOffset;
+    }
+
+    // As above, for a set member (a non-member when isNegation).
+    _NOINLINE static CharCount ScanToSetPairAwareResume(
+        const RuntimeCharSet<char16>& matchSet,
+        const char16* const input,
+        const CharCount inputLength,
+        CharCount inputOffset,
+        const bool isNegation)
+    {
+        while (true)
+        {
+            while (inputOffset < inputLength && matchSet.Get(input[inputOffset]) == isNegation)
+            {
+                inputOffset++;
+            }
+            if (inputOffset >= inputLength || !SplitsSurrogatePairAt(input, inputLength, inputOffset))
+            {
+                return inputOffset;
+            }
+            inputOffset++;
+        }
+    }
+
+    // Re-run a Boyer-Moore literal scan skipping u/v candidates that begin
+    // on the second half of a complete surrogate pair (see
+    // ScannerMixinT<ScannerT>::Match; pair-splitting candidates are at
+    // least two units apart, so the rescans stay linear).
+    template <typename ScanFn>
+    _NOINLINE static bool RescanLiteralSkipPairSplits(
+        const char16* const input,
+        const CharCount inputLength,
+        CharCount& inputOffset,
+        ScanFn scan)
+    {
+        while (SplitsSurrogatePairAt(input, inputLength, inputOffset))
+        {
+            inputOffset++;
+            if (!scan())
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // Scan with a full-map Boyer-Moore literal scanner, skipping u/v
+    // candidates that begin on the second half of a complete surrogate pair
+    // (see ScannerMixinT<ScannerT>::Match). Only a first unit that can be a
+    // trail surrogate can hit such a position, so the per-candidate check is
+    // gated on the pattern's first position (the equivalence class for
+    // equiv-class scans).
+    template <uint equivClassSize>
+    inline bool MatchLiteralSkipPairSplits(
+        const bool isUnicodeScan,
+        const char16* const input,
+        const CharCount inputLength,
+        CharCount& matchOffset,
+        TextbookBoyerMoore<char16> const& scanner,
+        const char16* const pat,
+        const CharCount patLen
+#if ENABLE_REGEX_CONFIG_OPTIONS
+        , RegexStats* stats
+#endif
+        )
+    {
+        bool found = scanner.template Match<equivClassSize>(
+            input, inputLength, matchOffset, pat, patLen
+#if ENABLE_REGEX_CONFIG_OPTIONS
+            , stats
+#endif
+            );
+        if (found
+            && isUnicodeScan
+            && (Js::NumberUtilities::IsSurrogateUpperPart(pat[0])
+                || (equivClassSize > 1
+                    && (Js::NumberUtilities::IsSurrogateUpperPart(pat[1])
+                        || Js::NumberUtilities::IsSurrogateUpperPart(pat[2])
+                        || Js::NumberUtilities::IsSurrogateUpperPart(pat[3])))))
+        {
+            return RescanLiteralSkipPairSplits(
+                input, inputLength, matchOffset,
+                [&]()
+                {
+                    return scanner.template Match<equivClassSize>(
+                        input, inputLength, matchOffset, pat, patLen
+#if ENABLE_REGEX_CONFIG_OPTIONS
+                        , stats
+#endif
+                        ) != false;
+                });
+        }
+        return found;
+    }
+
+    // ----------------------------------------------------------------------
     // Char2LiteralScannerMixin
     // ----------------------------------------------------------------------
 
     bool Char2LiteralScannerMixin::Match(Matcher& matcher, const char16* const input, const CharCount inputLength, CharCount& inputOffset) const
+    {
+        bool found = Scan(matcher, input, inputLength, inputOffset, cs[0], cs[1]);
+        // See ScannerMixinT<ScannerT>::Match: only a trail-surrogate first
+        // unit can hit a pair-splitting position, so gate on cs[0] first
+        // (the rescan is out of line).
+        if (Js::NumberUtilities::IsSurrogateUpperPart(cs[0])
+            && found
+            && matcher.isUnicodeMode)
+        {
+            return RescanLiteralSkipPairSplits(
+                input, inputLength, inputOffset,
+                [&]()
+                {
+                    return Scan(matcher, input, inputLength, inputOffset, cs[0], cs[1]);
+                });
+        }
+        return found;
+    }
+
+    bool Char2LiteralScannerMixin::Scan(Matcher& matcher, const char16* const input, const CharCount inputLength, CharCount& inputOffset, const char16 firstChar, const char16 secondChar)
     {
         if (inputLength == 0)
         {
             return false;
         }
 
-        const uint matchC0 = Chars<char16>::CTU(cs[0]);
-        const uint matchC1 = Chars<char16>::CTU(cs[1]);
+        const uint matchC0 = Chars<char16>::CTU(firstChar);
+        const uint matchC1 = Chars<char16>::CTU(secondChar);
 
         const char16 * currentInput = input + inputOffset;
         const char16 * endInput = input + inputLength - 1;
@@ -653,16 +893,42 @@ namespace UnifiedRegex
     ScannerMixinT<ScannerT>::Match(Matcher& matcher, const char16 * const input, const CharCount inputLength, CharCount& inputOffset) const
     {
         Assert(length <= matcher.program->rep.insts.litbufLen - offset);
-        return scanner.template Match<1>(
+        const char16* const pat = matcher.program->rep.insts.litbuf + offset;
+        bool found = scanner.template Match<1>(
             input
             , inputLength
             , inputOffset
-            , matcher.program->rep.insts.litbuf + offset
+            , pat
             , length
 #if ENABLE_REGEX_CONFIG_OPTIONS
             , matcher.stats
 #endif
             );
+        // Only a first pattern unit that CAN be a trail surrogate can hit a
+        // pair-splitting position (a hit starts with input[offset] == pat[0]),
+        // so gate the per-candidate check on that and keep the common scan
+        // cost identical to non-u (the rescan is out of line).
+        if (found
+            && matcher.isUnicodeMode
+            && Js::NumberUtilities::IsSurrogateUpperPart(pat[0]))
+        {
+            return RescanLiteralSkipPairSplits(
+                input, inputLength, inputOffset,
+                [&]()
+                {
+                    return scanner.template Match<1>(
+                        input
+                        , inputLength
+                        , inputOffset
+                        , pat
+                        , length
+#if ENABLE_REGEX_CONFIG_OPTIONS
+                        , matcher.stats
+#endif
+                        ) != false;
+                });
+        }
+        return found;
     }
 
 #if ENABLE_REGEX_CONFIG_OPTIONS
@@ -687,16 +953,43 @@ namespace UnifiedRegex
     {
         Assert(length * CaseInsensitive::EquivClassSize <= matcher.program->rep.insts.litbufLen - offset);
         CompileAssert(lastPatCharEquivClassSize >= 1 && lastPatCharEquivClassSize <= CaseInsensitive::EquivClassSize);
-        return scanner.Match<CaseInsensitive::EquivClassSize, lastPatCharEquivClassSize>(
+        const char16* const pat = matcher.program->rep.insts.litbuf + offset;
+        bool found = scanner.Match<CaseInsensitive::EquivClassSize, lastPatCharEquivClassSize>(
             input
             , inputLength
             , inputOffset
-            , matcher.program->rep.insts.litbuf + offset
+            , pat
             , length
 #if ENABLE_REGEX_CONFIG_OPTIONS
             , matcher.stats
 #endif
             );
+        // See ScannerMixinT<ScannerT>::Match; the first pattern position is
+        // the equivalence class pat[0..EquivClassSize-1] (rescan out of line).
+        if (found
+            && matcher.isUnicodeMode
+            && (Js::NumberUtilities::IsSurrogateUpperPart(pat[0])
+                || Js::NumberUtilities::IsSurrogateUpperPart(pat[1])
+                || Js::NumberUtilities::IsSurrogateUpperPart(pat[2])
+                || Js::NumberUtilities::IsSurrogateUpperPart(pat[3])))
+        {
+            return RescanLiteralSkipPairSplits(
+                input, inputLength, inputOffset,
+                [&]()
+                {
+                    return scanner.Match<CaseInsensitive::EquivClassSize, lastPatCharEquivClassSize>(
+                        input
+                        , inputLength
+                        , inputOffset
+                        , pat
+                        , length
+#if ENABLE_REGEX_CONFIG_OPTIONS
+                        , matcher.stats
+#endif
+                        ) != false;
+                });
+        }
+        return found;
     }
 
 #if ENABLE_REGEX_CONFIG_OPTIONS
@@ -1927,6 +2220,14 @@ namespace UnifiedRegex
             inputOffset++;
         }
 
+        // Under u/v the scan must not stop on a pair's second half; the
+        // check (pattern gate included) is out of line, so the hot loop and
+        // non-u keep the Annex B per-unit scan exactly.
+        if (matcher.isUnicodeMode)
+        {
+            inputOffset = ScanStopCheckChar(input, inputLength, inputOffset, matchC);
+        }
+
         matchStart = inputOffset;
         instPointer += sizeof(*this);
         return false;
@@ -1960,6 +2261,12 @@ namespace UnifiedRegex
             matcher.CompStats();
 #endif
             inputOffset++;
+        }
+
+        // See SyncToCharAndContinueInst (out-of-line stop check).
+        if (matcher.isUnicodeMode)
+        {
+            inputOffset = ScanStopCheckChar2Set(input, inputLength, inputOffset, matchC0, matchC1);
         }
 
         matchStart = inputOffset;
@@ -1996,6 +2303,13 @@ namespace UnifiedRegex
             matcher.CompStats();
 #endif
             inputOffset++;
+        }
+
+        // Under u/v the scan must not stop on a pair's second half (the
+        // check is out of line); non-u keeps the per-unit scan exactly.
+        if (matcher.isUnicodeMode)
+        {
+            inputOffset = ScanStopCheckSet(matchSet, input, inputLength, inputOffset, IsNegation);
         }
 
         matchStart = inputOffset;
@@ -2126,6 +2440,12 @@ namespace UnifiedRegex
             inputOffset++;
         }
 
+        // See SyncToCharAndContinueInst (out-of-line stop check).
+        if (matcher.isUnicodeMode)
+        {
+            inputOffset = ScanStopCheckChar(input, inputLength, inputOffset, matchC);
+        }
+
         if (inputOffset >= inputLength)
         {
             return matcher.HardFail(HARDFAIL_PARAMETERS(HardFailMode::ImmediateFail));
@@ -2166,6 +2486,12 @@ namespace UnifiedRegex
             inputOffset++;
         }
 
+        // See SyncToCharAndContinueInst (out-of-line stop check).
+        if (matcher.isUnicodeMode)
+        {
+            inputOffset = ScanStopCheckChar2Set(input, inputLength, inputOffset, matchC0, matchC1);
+        }
+
         if (inputOffset >= inputLength)
         {
             return matcher.HardFail(HARDFAIL_PARAMETERS(HardFailMode::ImmediateFail));
@@ -2204,6 +2530,12 @@ namespace UnifiedRegex
             matcher.CompStats();
 #endif
             inputOffset++;
+        }
+
+        // See SyncToSetAndContinueInst (out-of-line stop check).
+        if (matcher.isUnicodeMode)
+        {
+            inputOffset = ScanStopCheckSet(matchSet, input, inputLength, inputOffset, IsNegation);
         }
 
         if (inputOffset >= inputLength)
@@ -2357,6 +2689,12 @@ namespace UnifiedRegex
             inputOffset++;
         }
 
+        // See SyncToCharAndContinueInst (out-of-line stop check).
+        if (matcher.isUnicodeMode)
+        {
+            inputOffset = ScanStopCheckChar(input, inputLength, inputOffset, matchC);
+        }
+
         if (inputOffset >= inputLength)
         {
             return matcher.HardFail(HARDFAIL_PARAMETERS(HardFailMode::ImmediateFail));
@@ -2371,6 +2709,14 @@ namespace UnifiedRegex
             matchStart = inputOffset - min(maxBackup, (CharCount)backup.upper);
         }
         // else: leave start where it is
+
+        // A u/v match can never begin on a pair's second half: when the
+        // backup repositions the start there, resolve to the containing
+        // pair's start (the main retry advances per code point from there).
+        if (matcher.isUnicodeMode && SplitsSurrogatePairAt(input, inputLength, matchStart))
+        {
+            matchStart--;
+        }
 
         // Move input to new match start
         inputOffset = matchStart;
@@ -2427,6 +2773,12 @@ namespace UnifiedRegex
             inputOffset++;
         }
 
+        // See SyncToSetAndContinueInst (out-of-line stop check).
+        if (matcher.isUnicodeMode)
+        {
+            inputOffset = ScanStopCheckSet(matchSet, input, inputLength, inputOffset, IsNegation);
+        }
+
         if (inputOffset >= inputLength)
         {
             return matcher.HardFail(HARDFAIL_PARAMETERS(HardFailMode::ImmediateFail));
@@ -2441,6 +2793,14 @@ namespace UnifiedRegex
             matchStart = inputOffset - min(maxBackup, (CharCount)backup.upper);
         }
         // else: leave start where it is
+
+        // A u/v match can never begin on a pair's second half: when the
+        // backup repositions the start there, resolve to the containing
+        // pair's start (the main retry advances per code point from there).
+        if (matcher.isUnicodeMode && SplitsSurrogatePairAt(input, inputLength, matchStart))
+        {
+            matchStart--;
+        }
 
         // Move input to new match start
         inputOffset = matchStart;
@@ -2511,6 +2871,14 @@ namespace UnifiedRegex
             matchStart = inputOffset - min(maxBackup, (CharCount)backup.upper);
         }
         // else: leave start where it is
+
+        // A u/v match can never begin on a pair's second half: when the
+        // backup repositions the start there, resolve to the containing
+        // pair's start (the main retry advances per code point from there).
+        if (matcher.isUnicodeMode && SplitsSurrogatePairAt(input, inputLength, matchStart))
+        {
+            matchStart--;
+        }
 
         // Move input to new match start
         inputOffset = matchStart;
@@ -2649,27 +3017,26 @@ namespace UnifiedRegex
                 thisMatchOffset = inputOffset;
             }
 
-            if (infos[i]->isEquivClass
-                ? (infos[i]->scanner.Match<CaseInsensitive::EquivClassSize>(
-                    input
-                    , inputLength
-                    , thisMatchOffset
-                    , matcher.program->rep.insts.litbuf + infos[i]->offset
-                    , infos[i]->length
+            // Under u/v, skip candidates that begin on the second half of a
+            // complete surrogate pair (see ScannerMixinT<ScannerT>::Match).
+            const bool isUnicodeScan = matcher.isUnicodeMode;
+            const char16* const pat = matcher.program->rep.insts.litbuf + infos[i]->offset;
+            const CharCount patLen = infos[i]->length;
+            bool matched = infos[i]->isEquivClass
+                ? MatchLiteralSkipPairSplits<CaseInsensitive::EquivClassSize>(
+                    isUnicodeScan, input, inputLength, thisMatchOffset, infos[i]->scanner, pat, patLen
 #if ENABLE_REGEX_CONFIG_OPTIONS
                     , matcher.stats
 #endif
-                    ))
-                : (infos[i]->scanner.Match<1>(
-                    input
-                    , inputLength
-                    , thisMatchOffset
-                    , matcher.program->rep.insts.litbuf + infos[i]->offset
-                    , infos[i]->length
+                    )
+                : MatchLiteralSkipPairSplits<1>(
+                    isUnicodeScan, input, inputLength, thisMatchOffset, infos[i]->scanner, pat, patLen
 #if ENABLE_REGEX_CONFIG_OPTIONS
                     , matcher.stats
 #endif
-                    )))
+                    );
+
+            if (matched)
             {
                 if (besti < 0 || thisMatchOffset < bestMatchOffset)
                 {
@@ -2700,6 +3067,14 @@ namespace UnifiedRegex
             matchStart = bestMatchOffset - min(maxBackup, (CharCount)backup.upper);
         }
         // else: leave start where it is
+
+        // A u/v match can never begin on a pair's second half: when the
+        // backup repositions the start there, resolve to the containing
+        // pair's start (the main retry advances per code point from there).
+        if (matcher.isUnicodeMode && SplitsSurrogatePairAt(input, inputLength, matchStart))
+        {
+            matchStart--;
+        }
 
         // Move input to new match start
         inputOffset = matchStart;
@@ -5714,6 +6089,7 @@ namespace UnifiedRegex
         , groupInfos(nullptr)
         , loopInfos(nullptr)
         , literalNextSyncInputOffsets(nullptr)
+        , isUnicodeMode((pattern->rep.unified.program->flags & (UnicodeRegexFlag | UnicodeSetsRegexFlag)) != 0)
         , recycler(scriptContext->GetRecycler())
         , previousQcTime(0)
         , realInput(nullptr)
@@ -6357,6 +6733,17 @@ namespace UnifiedRegex
         bool loopMatchHere = true;
         Program const *prog = this->program;
         bool isStickyPresent = this->pattern->IsSticky();
+
+        // ES2026 22.2.7.2 step 13.b: under u/v the matcher's input is a
+        // code-point sequence, and an attempt seeded at an offset that
+        // splits a complete surrogate pair starts at the code point
+        // containing that offset (Node/Bun parity: a manual mid-pair
+        // `lastIndex` snaps back to the pair start, global or sticky).
+        // Non-u keeps the Annex B per-unit start exactly.
+        if (isUnicodeMode && SplitsSurrogatePairAt(input, inputLength, offset))
+        {
+            offset--;
+        }
 
         // Establish the top frame (the real input). Held for the whole match;
         // see the frame-state comment in RegexRuntime.h. Cleared on return so

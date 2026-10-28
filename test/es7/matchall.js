@@ -471,6 +471,219 @@ var tests = [
             assert.areEqual(1e300, n.lastIndex, "non-global never writes");
         }
     },
+    {
+        // S9-b repair: fullUnicode must cover `v` (ES2026 @@matchAll derives
+        // it from flags containing "u" OR "v"). The `unicode` accessor alone
+        // reports false for a v-only regex, so before the fix an empty-capable
+        // v pattern ping-ponged forever between the iterator's +1 empty-match
+        // advance and the S9-b pair-start snap in Matcher::Match
+        // ("\uDE00?" over "\uD83D\uDE00X" re-matched index 0 from lastIndex 1).
+        // Every assertion below was mirrored in Node 26.5.0 first.
+        name: "matchAll fullUnicode covers the v flag (S9-b pair-start snap)",
+        body() {
+            var input = "\ud83d\ude00X"; // [pair][X]
+
+            function collect(re, s) {
+                var out = [];
+                var guard = 0;
+                for (var m of s.matchAll(re)) {
+                    out.push([m[0].length, m.index]);
+                    if (++guard > 20) { out.push(["GUARD"]); break; }
+                }
+                return out;
+            }
+
+            // THE hang shape: v empty-capable pattern over a surrogate pair.
+            assert.areEqual("0,0|0,2|0,3",
+                collect(/\uDE00?/gv, input).map(function (x) { return x.join(","); }).join("|"),
+                "v empty-capable matchAll terminates on code-point boundaries");
+            // controls: u (already full-Unicode) and the per-unit no-flag walk
+            assert.areEqual("0,0|0,2|0,3",
+                collect(/\uDE00?/gu, input).map(function (x) { return x.join(","); }).join("|"),
+                "u empty-capable matchAll (control)");
+            assert.areEqual("0,0|1,1|0,2|0,3",
+                collect(/\uDE00?/g, input).map(function (x) { return x.join(","); }).join("|"),
+                "no-flag empty-capable matchAll keeps the per-unit walk");
+            // v trail-literal and pair-literal matchAll stay pair-aware
+            assert.areEqual("", collect(/\uDE00X/gv, input).join(","), "v trail literal finds nothing in the pair");
+            assert.areEqual("2,0", collect(/\ud83d\ude00/gv, input).map(function (x) { return x.join(","); }).join(","), "v pair literal matchAll");
+            assert.areEqual("2,0", collect(/\ud83d\ude00/gu, input).map(function (x) { return x.join(","); }).join(","), "u pair literal matchAll");
+            // done/count over the v walk: three empty matches then done
+            var count = 0, first = -1, done = false;
+            var it = input.matchAll(/X?/gv);
+            var res;
+            while (!(res = it.next()).done) {
+                if (first < 0) { first = res.value.index; }
+                count++;
+            }
+            assert.areEqual(3, count, "v empty walk yields one match per code point");
+            assert.areEqual(0, first, "first v empty match is at 0");
+            assert.isTrue(done === false && res.value === undefined, "iterator finishes done with undefined");
+            // d-flag indices sit on code-point boundaries (X is at [2,3))
+            var idx = [];
+            for (var m of input.matchAll(/X/dgv)) { idx.push(m.indices[0].join(",")); }
+            assert.areEqual("2,3", idx.join("|"), "v d-flag indices");
+            // non-global still throws, v or not
+            assert.throws(function () { input.matchAll(/\uDE00?/v); }, TypeError, "non-global v matchAll throws");
+            assert.throws(function () { input.matchAll(/\uDE00?/u); }, TypeError, "non-global u matchAll throws");
+            // manual mid-pair lastIndex transfers into the v walk (snap applies)
+            var seeded = /\uDE00?/gv;
+            seeded.lastIndex = 1;
+            var seededIt = seeded[Symbol.matchAll](input);
+            assert.areEqual(0, seededIt.next().value.index, "v matchAll with mid-pair lastIndex snaps to the pair start");
+            // subclass instances take the same v path
+            var Sub = class extends RegExp {};
+            var subOut = [];
+            var subGuard = 0;
+            for (var sm of input.matchAll(new Sub("\\uDE00?", "gv"))) {
+                subOut.push(sm.index);
+                if (++subGuard > 20) { subOut.push("GUARD"); break; }
+            }
+            assert.areEqual("0,2,3", subOut.join(","), "v subclass matchAll terminates identically");
+            // Symbol.matchAll directly on a v regex (flags-string path)
+            var direct = [];
+            var dGuard = 0;
+            for (var dm of /\uDE00?/gv[Symbol.matchAll](input)) {
+                direct.push(dm.index);
+                if (++dGuard > 20) { direct.push("GUARD"); break; }
+            }
+            assert.areEqual("0,2,3", direct.join(","), "direct Symbol.matchAll v walk");
+        }
+    },
+    {
+        // S9-b repair iteration 2: @@match/@@replace/@@split derive global and
+        // fullUnicode ('u' OR 'v') from ONE observable Get(R, "flags") +
+        // ToString (ES2026 22.2.6.8/22.2.6.11), with @@matchAll's substrate
+        // fallback when the accessor is not installed. Before this, a
+        // subclassed v regex under -ES6RegExSymbols alone hung in match/
+        // replace/replaceAll (the flags properties were absent, so the
+        // empty-match advance stepped +1 against the S9-b pair-start snap)
+        // and split stringified undefined and threw a SyntaxError building
+        // the splitter. Every value mirrors Node 26.5.0.
+        name: "subclass v builtins derive fullUnicode from flags (match/replace/split)",
+        body() {
+            var input = "\ud83d\ude00X"; // [pair][X]
+            var Sub = class extends RegExp {};
+
+            // the previously-hanging empty-capable walks terminate exactly
+            assert.areEqual(",,", input.match(new Sub("\\uDE00?", "gv")).join(","), "subclass v match");
+            assert.areEqual("Q\ud83d\ude00QXQ", input.replace(new Sub("\\uDE00?", "gv"), "Q"), "subclass v replace");
+            assert.areEqual("Q\ud83d\ude00QXQ", input.replaceAll(new Sub("\\uDE00?", "gv"), "Q"), "subclass v replaceAll");
+            assert.areEqual("Q\ud83d\ude00QXQ", input.replace(new Sub("\\uDE00?", "gv"), function () { return "Q"; }), "subclass v replace function");
+            assert.areEqual("\ud83d\ude00,X", input.split(new Sub("\\uDE00?", "gv")).join(","), "subclass v empty split");
+            assert.areEqual("\ud83d\ude00,", input.split(new Sub("X", "gv")).join(","), "subclass v literal split");
+            assert.areEqual("\ud83d\ude00", input.match(new Sub("\ud83d\ude00", "gv")).join(","), "subclass v pair-literal match");
+            // controls: u (already full-Unicode) and the per-unit no-flag walk
+            assert.areEqual(",,", input.match(new Sub("\\uDE00?", "gu")).join(","), "subclass u match (control)");
+            assert.areEqual("Q\ud83d\ude00QXQ", input.replace(new Sub("\\uDE00?", "gu"), "Q"), "subclass u replace (control)");
+            assert.areEqual(",\ude00,,", input.match(new Sub("\\uDE00?", "g")).join(","), "subclass no-flag match keeps the per-unit walk");
+            assert.areEqual("Q\ud83dQQXQ", input.replace(new Sub("\\uDE00?", "g"), "Q"), "subclass no-flag replace keeps the per-unit walk");
+            // one observable flags read per builtin, never re-read per
+            // iteration, and the value is used (not the compiled flags)
+            var reads = [];
+            var recording = new Sub("\\uDE00?", "gv");
+            Object.defineProperty(recording, "flags", { get() { reads.push("flags"); return "gv"; }, configurable: true });
+            assert.areEqual(",,", input.match(recording).join(","), "recording-flags match result");
+            assert.areEqual("flags", reads.join(","), "flags read exactly once by @@match");
+            reads.length = 0;
+            var counting = new Sub("X", "gv");
+            var count = 0;
+            Object.defineProperty(counting, "flags", { get() { count++; return "gv"; }, configurable: true });
+            input.replace(counting, "Q");
+            input.split(counting);
+            assert.areEqual(2, count, "one flags read per replace/split builtin");
+            // a user-provided observable value wins over the compiled flags:
+            // an own "gu" value on a v regex walks per u
+            var lying = new Sub("\\uDE00?", "gv");
+            Object.defineProperty(lying, "flags", { value: "gu", configurable: true });
+            assert.areEqual(",,", input.match(lying).join(","), "own flags value is used");
+            // object flags are stringified
+            var stringified = new Sub("\\uDE00?", "gv");
+            Object.defineProperty(stringified, "flags", { value: { toString() { return "gv"; } }, configurable: true });
+            assert.areEqual(",,", input.match(stringified).join(","), "object flags is ToString'd");
+            // a throwing flags accessor propagates
+            var throwing = new Sub("\\uDE00?", "gv");
+            Object.defineProperty(throwing, "flags", { get() { throw new RangeError("boom"); }, configurable: true });
+            assert.throws(function () { input.match(throwing); }, RangeError, "throwing flags propagates from @@match");
+            assert.throws(function () { input.split(throwing); }, RangeError, "throwing flags propagates from @@split");
+        }
+    },
+    {
+        // S9-b final repair iteration 3: length-bounded flag scans (an
+        // observable flags value can be a non-NUL-terminated SubString —
+        // wcsstr over-reads and mis-derives the splitter's sticky/unicode
+        // flags), the substrate-only internal-flags fallback, and the
+        // global-walk non-progress guard. Values mirror Node 26.5.0 except
+        // the two guard shapes, where the spec algorithm itself loops
+        // forever in Node (OOM) and the engine terminates instead.
+        name: "substring flags, substrate fallback, and proxy non-progress guard",
+        body() {
+            var input = "\ud83d\ude00X"; // [pair][X]
+            var Sub = class extends RegExp {};
+            function withFlags(re, v) {
+                Object.defineProperty(re, "flags", { value: v, configurable: true });
+                return re;
+            }
+
+            // Length-bounded scans: substring and concatenated flags values
+            // derive sticky/unicode exactly from the in-bounds characters.
+            assert.areEqual("\ud83d\ude00,", input.split(withFlags(new Sub("X", "gv"), "gvX".substring(0, 1))).join(","), "split flags 'g' substring");
+            assert.areEqual("\ud83d\ude00,", input.split(withFlags(new Sub("X", "gv"), "guy".substring(0, 2))).join(","), "split flags 'gu' substring");
+            assert.areEqual("\ud83d\ude00,", input.split(withFlags(new Sub("X", "gv"), "gy".substring(0, 1))).join(","), "split flags 'gy' substring (no stale y)");
+            assert.areEqual("\ud83d\ude00,", input.split(withFlags(new Sub("X", "gv"), "g" + "v")).join(","), "split flags concatenated");
+            assert.areEqual(3, input.match(withFlags(new Sub("\\uDE00?", "gv"), "g" + "v")).length, "match flags concatenated");
+            var walked = [];
+            var walkGuard = 0;
+            for (var m of input.matchAll(withFlags(new Sub("\\uDE00?", "gv"), "gvX".substring(0, 2)))) {
+                walked.push(m.index);
+                if (++walkGuard > 10) { walked.push("GUARD"); break; }
+            }
+            assert.areEqual("0,2,3", walked.join(","), "matchAll flags 'gv' substring walks code points");
+
+            // Substrate fallback is config-gated: with the flags accessor
+            // installed, an observable undefined (self-deleting getter)
+            // stringifies to "undefined" per spec (non-global -> one exec);
+            // without it the genuine-regex internal flags are used.
+            var substrate = typeof Object.getOwnPropertyDescriptor(RegExp.prototype, "flags") !== "undefined";
+            var selfDeleting = new Sub("\\uDE00?", "gv");
+            Object.defineProperty(selfDeleting, "flags", { get() { delete selfDeleting.flags; return undefined; }, configurable: true });
+            if (substrate) {
+                assert.areEqual("", input.match(selfDeleting).join(","), "observable undefined flags -> 'undefined' (spec)");
+            }
+            else {
+                assert.areEqual(",,", input.match(selfDeleting).join(","), "substrate-off undefined flags -> internal flags (documented deviation)");
+            }
+
+            // Proxy receivers never hang: the observable path brand-checks.
+            assert.throws(function () { input.match(new Proxy(/\uDE00?/gv, {})); }, TypeError, "plain proxy match throws, no hang");
+            assert.throws(function () { input.replace(new Proxy(/\uDE00?/gv, {}), "Q"); }, TypeError, "plain proxy replace throws, no hang");
+            assert.throws(function () { input.replaceAll(new Proxy(/\uDE00?/gv, {}), "Q"); }, TypeError, "plain proxy replaceAll throws, no hang");
+            // A proxy whose exec is bound to the target terminates with the
+            // correct result even when its set trap drops the writes.
+            var target = /\uDE00?/gv;
+            var droppingSet = new Proxy(target, {
+                get: function (t, k) { var v = t[k]; return typeof v === "function" ? v.bind(t) : v; },
+                set: function () { return true; }
+            });
+            assert.areEqual(3, input.match(droppingSet).length, "bound-exec dropping-set proxy terminates");
+
+            // Non-progress guard: with lastIndex writes silently dropped the
+            // spec algorithm re-runs the same empty match forever (Node
+            // OOMs); the engine terminates without another match. These two
+            // shapes intentionally have no Node oracle.
+            var pinned = /\uDE00?/gv;
+            var guardObj = {
+                get flags() { return "gv"; },
+                get lastIndex() { return 0; },
+                set lastIndex(v) { /* dropped */ },
+                exec: function (s) { return RegExp.prototype.exec.call(pinned, s); },
+            };
+            guardObj[Symbol.match] = RegExp.prototype[Symbol.match];
+            guardObj[Symbol.replace] = RegExp.prototype[Symbol.replace];
+            assert.areEqual(2, input.match(guardObj).length, "dropped lastIndex writes terminate the match walk");
+            assert.areEqual("QQ\ud83d\ude00X", input.replace(guardObj, "Q"), "dropped lastIndex writes terminate the replace walk");
+        }
+    },
 ];
 
 testRunner.runTests(tests, { verbose: WScript.Arguments[0] != "summary" });

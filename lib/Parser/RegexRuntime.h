@@ -413,6 +413,9 @@ namespace UnifiedRegex
 #if ENABLE_REGEX_CONFIG_OPTIONS
         void Print(DebugWriter* w, const char16* litbuf) const;
 #endif
+
+    private:
+        static bool Scan(Matcher& matcher, const char16* const input, const CharCount inputLength, CharCount& inputOffset, const char16 firstChar, const char16 secondChar);
     };
 
     template <typename ScannerT>
@@ -1959,6 +1962,12 @@ namespace UnifiedRegex
         // However, if we cache the furthest offsets we tried, we can skip the searches
         // for "foo" after the first time.
         Field(CharCount*) literalNextSyncInputOffsets;
+
+        // Cached (program->flags & (UnicodeRegexFlag | UnicodeSetsRegexFlag))
+        // != 0, set in the Matcher constructor (the program is fixed for the
+        // Matcher's lifetime): scan instructions and scanner mixins read this
+        // per invocation instead of chasing program->flags.
+        Field(bool) isUnicodeMode;
 
         FieldNoBarrier(Recycler*) recycler;
 

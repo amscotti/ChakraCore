@@ -124,18 +124,50 @@ using namespace Js;
             static_cast<PropertyOperationFlags>(PropertyOperation_ThrowIfNotExtensible | PropertyOperation_ThrowIfNonWritable));
     }
 
-    bool JavascriptRegExp::GetGlobalProperty(RecyclableObject* instance, ScriptContext* scriptContext)
+    JavascriptString* JavascriptRegExp::GetFlagsStringForBuiltin(RecyclableObject* instance, ScriptContext* scriptContext)
     {
-        return JavascriptConversion::ToBool(
-            JavascriptOperators::GetProperty(instance, PropertyIds::global, scriptContext),
-            scriptContext);
+        // ES2026 @@match/@@matchAll/@@replace/@@split derive their loop
+        // controls from ONE observable Get(R, "flags") + ToString. The only
+        // fallback is the substrate gap: when the
+        // ES6RegExPrototypeProperties configuration did not install the
+        // "flags" accessor at all, a genuine RegExp instance uses its
+        // compiled internal flags (the same deviation
+        // String.prototype.replaceAll makes for a missing "flags"). No
+        // HasProperty probe runs after the observable Get, and under the
+        // full substrate an observable undefined stringifies to "undefined"
+        // exactly as the spec requires. Substrate-off deviation: a user
+        // getter that RETURNS undefined also takes the internal-flag
+        // fallback (documented in the receipt).
+        Var flagsVar = JavascriptOperators::GetProperty(instance, PropertyIds::flags, scriptContext);
+        if (JavascriptOperators::IsUndefined(flagsVar)
+            && !scriptContext->GetConfig()->IsES6RegExPrototypePropertiesEnabled()
+            && VarIs<JavascriptRegExp>(instance))
+        {
+            return StringFromFlags(VarTo<JavascriptRegExp>(instance)->GetFlags(), scriptContext);
+        }
+        return JavascriptConversion::ToString(flagsVar, scriptContext);
     }
 
-    bool JavascriptRegExp::GetUnicodeProperty(RecyclableObject* instance, ScriptContext* scriptContext)
+    void JavascriptRegExp::ParseBuiltinFlags(JavascriptString* flags, bool& global, bool& fullUnicode)
     {
-        return JavascriptConversion::ToBool(
-            JavascriptOperators::GetProperty(instance, PropertyIds::unicode, scriptContext),
-            scriptContext);
+        // "v" implies the whole u-mode surface (the `unicode` accessor alone
+        // reports false for a v-only regex), so fullUnicode is set by 'u' OR
+        // 'v' (ES2026 22.2.6.8/22.2.6.11/22.2.7.2).
+        const char16* flagsBuf = flags->GetString();
+        const CharCount flagsLen = flags->GetLength();
+        global = false;
+        fullUnicode = false;
+        for (CharCount i = 0; i < flagsLen; i++)
+        {
+            if (flagsBuf[i] == _u('g'))
+            {
+                global = true;
+            }
+            else if (flagsBuf[i] == _u('u') || flagsBuf[i] == _u('v'))
+            {
+                fullUnicode = true;
+            }
+        }
     }
 
     CharCount JavascriptRegExp::AddIndex(CharCount base, CharCount offset)
@@ -950,22 +982,7 @@ using namespace Js;
             R, defaultConstructor, scriptContext);
         AssertOrFailFast(JavascriptOperators::IsConstructor(speciesConstructor));
 
-        JavascriptString* flags = nullptr;
-        Var flagsVar = JavascriptOperators::GetProperty(R, PropertyIds::flags, scriptContext);
-        if (JavascriptOperators::IsUndefined(flagsVar)
-            && VarIs<JavascriptRegExp>(R)
-            && !JavascriptOperators::HasProperty(R, PropertyIds::flags))
-        {
-            // ES6RegExPrototypeProperties is off, so RegExp.prototype.flags
-            // is not installed and Get cannot observe the internal flags.
-            // Fall back to the pattern's flags, the same deviation
-            // String.prototype.replaceAll makes for a missing "flags".
-            flags = StringFromFlags(VarTo<JavascriptRegExp>(R)->GetFlags(), scriptContext);
-        }
-        else
-        {
-            flags = JavascriptConversion::ToString(flagsVar, scriptContext);
-        }
+        JavascriptString* flags = JavascriptRegExp::GetFlagsStringForBuiltin(R, scriptContext);
 
         bool isDefaultConstructor = speciesConstructor == defaultConstructor;
         Var matcherVar = JavascriptOperators::NewObjectCreationHelper_ReentrancySafe(speciesConstructor, isDefaultConstructor, scriptContext->GetThreadContext(), [=]() -> Js::Var
@@ -981,19 +998,7 @@ using namespace Js;
 
         bool global = false;
         bool fullUnicode = false;
-        const char16* flagsBuf = flags->GetString();
-        const CharCount flagsLen = flags->GetLength();
-        for (CharCount i = 0; i < flagsLen; i++)
-        {
-            if (flagsBuf[i] == _u('g'))
-            {
-                global = true;
-            }
-            else if (flagsBuf[i] == _u('u'))
-            {
-                fullUnicode = true;
-            }
-        }
+        JavascriptRegExp::ParseBuiltinFlags(flags, global, fullUnicode);
 
         // Transfer ToLength(Get(R, "lastIndex")) as the spec writes it: the
         // unclamped Number goes to the matcher through the observable Set
