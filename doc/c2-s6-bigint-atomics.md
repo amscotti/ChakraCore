@@ -1,9 +1,10 @@
 # C2-S6c: BigInt Atomics (flag-on slice)
 
-Status: **pending** — implementation on branch `s6-bigint-atomics`, base
-`27a996edd`. `ESBigInt` and `ESSharedArrayBuffer` both remain **off by
-default**; the BigInt Atomics surface requires both flags. This receipt
-does not propose a default change.
+Status: **landed** — implementation `d13f5bdaa`, review cleanup `cda8a2fd3`,
+merge `981fe000d`. Final full gates are **2026/0 test** and **2078/0
+debug-static** (`zig build check` **583/583**). `ESBigInt` and
+`ESSharedArrayBuffer` both remain **off by default**; the BigInt Atomics
+surface requires both flags. This receipt does not propose a default change.
 
 ## Scope
 

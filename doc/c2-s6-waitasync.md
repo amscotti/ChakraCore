@@ -195,9 +195,10 @@ and no full corpus/check.
   host does not drain async-function promise jobs even for `await 1` (verified
   directly); the harness therefore kills the hung host with SIGKILL. No
   multi-agent suspension is claimed.
-- **86 BigInt scenarios** in the `waitAsync/bigint` subtree are residual for
-  the separate BigInt typed-array/Atomics work (2 pass by syntax/negative-only
-  coincidence).
+- The former 86-scenario BigInt `waitAsync` residue is superseded by S6c
+  (merge `981fe000d`, [c2-s6-bigint-atomics.md](c2-s6-bigint-atomics.md)).
+  The remaining BigInt failures are the same finite-timeout/cross-agent
+  classes above rather than missing BigInt Atomics support.
 
 ## Residuals and risks
 

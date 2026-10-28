@@ -57,7 +57,7 @@ handling have been validated before its results are used as a completion gate.
 | B6 | Windows feasibility and rollout; later target extensions | Stable build contracts | Separate expansion |
 | Z1 | One useful mixed C++/Zig unit behind a tested C ABI | B3; B4 if the unit ships on Linux | Optional pilot |
 | C1 | Qualified ES2025 test policy and triaged failures | Stable Mac build at B3 | Recorded (CONDITIONAL) |
-| C2 | Bounded compatibility batches and partial releases | C1; B4 before JIT-wide enablement | In progress (S4/S5/S10/S11/S7-matchAll/S9 named-groups + d-flag + duplicate named groups + lookbehind + ES2025 modifiers; S1 class elements complete: public/private instance+static fields, private methods/accessors incl. async/generator and statics, computed field names, `super` in field initializers, static blocks and direct-eval `super` early errors (integrated elements corpus 5,888/5,897; 9 documented non-eval residuals; eval-code 454/0); S6a flag-on growable SAB/non-shared Atomics (default remains off); S6b flag-on `Atomics.pause` + single-thread `Atomics.waitAsync` (finite timeouts and cross-agent suspension remain); S8 immutable ArrayBuffer (`immutable`, `transferToImmutable`, `sliceToImmutable`, write protections; JIT/TTD residuals); S3-a Unicode property escapes under `u` on ICU 79.1 (deterministic code-point-set matcher); S3-b RegExp `v`/Unicode Sets mode incl. `\q`, set operations and properties-of-strings; S9 u-mode RegExp strictness/canonical astral semantics; S2 BigInt: operators/literals/asIntN-asUintN, collections, DataView, BigInt64Array; S8 resizable ArrayBuffer + TypedArray tracking + Float16 (DataView/Math.f16round slice and Float16Array); S12 import attributes + JSON modules (additive host contract); S13 symbol keys, WeakRef, FinalizationRegistry; S14 P1–P7 — all closed on Mac no-JIT; JIT claims gated on B4) |
+| C2 | Bounded compatibility batches and partial releases | C1; B4 before JIT-wide enablement | In progress (S4/S5/S10/S11/S7-matchAll/S9 named-groups + d-flag + duplicate named groups + lookbehind + ES2025 modifiers; S1 class elements complete: public/private instance+static fields, private methods/accessors incl. async/generator and statics, computed field names, `super` in field initializers, static blocks and direct-eval `super` early errors (integrated elements corpus 5,888/5,897; 9 documented non-eval residuals; eval-code 454/0); S6a flag-on growable SAB/non-shared Atomics (default remains off); S6b flag-on `Atomics.pause` + single-thread `Atomics.waitAsync` (finite timeouts and cross-agent suspension remain); S6c flag-on BigInt64Array/BigUint64Array Atomics incl. BigInt wait/notify/waitAsync validation; S8 immutable ArrayBuffer (`immutable`, `transferToImmutable`, `sliceToImmutable`, write protections; JIT/TTD residuals); S3-a Unicode property escapes under `u` on ICU 79.1 (deterministic code-point-set matcher); S3-b RegExp `v`/Unicode Sets mode incl. `\q`, set operations and properties-of-strings; S9 u-mode RegExp strictness/canonical astral semantics; S2 BigInt: operators/literals/asIntN-asUintN, collections, DataView, BigInt64Array; S8 resizable ArrayBuffer + TypedArray tracking + Float16 (DataView/Math.f16round slice and Float16Array); S12 import attributes + JSON modules (additive host contract); S13 symbol keys, WeakRef, FinalizationRegistry; S14 P1–P7 — all closed on Mac no-JIT; JIT claims gated on B4) |
 | C3 | Larger runtime/object-model feature projects | C1 and their feature prerequisites | Separate projects |
 | C4 | Verified full ES2025 core-language result | Required C2/C3 work and qualified runner | Long-term objective |
 
@@ -598,7 +598,7 @@ Decision/rollback points:
 - [ ] C4: Published qualified ES2025 result on the claimed default configurations.
 
 **Latest integration checkpoint (2026-10-27):** main is clean at the
-**2025/0 test** and **2077/0 debug-static** gates (re-verified after
+**2026/0 test** and **2078/0 debug-static** gates (re-verified after
 every merge and repair below; counts are single-sourced in
 `tools/build/gate_counts.json` — Float16Array's new test file moved
 2012/2064 → 2013/2065, repair-loop `-noDeferParse` rlexe variants
@@ -608,8 +608,9 @@ parse-mode entries (2017/2069 → 2020/2072), S6b added the waitAsync/pause
 entry (2020/2072 → 2021/2073), S8 immutable ArrayBuffer added one entry
 (2021/2073 → 2022/2074), S3-a Unicode property escapes added one entry
 (2022/2074 → 2023/2075), S3-b RegExp `v` mode added one entry
-(2023/2075 → 2024/2076), and S9 u-mode RegExp strictness added one entry
-(2024/2076 → 2025/2077)).
+(2023/2075 → 2024/2076), S9 u-mode RegExp strictness added one entry
+(2024/2076 → 2025/2077), and S6c BigInt Atomics added one entry
+(2025/2077 → 2026/2078)).
 Merged lanes: S1 public/private instance+static fields and private methods/accessors, S2 arithmetic + BigInt64Array/Uint64Array + collections/
 DataView, S8 resizable ArrayBuffer/transfer + TypedArray tracking, S13
 WeakRef + FinalizationRegistry, and S14 P1/P2/P3/P4/P5/P6/P7
@@ -701,9 +702,13 @@ u-mode strict-syntax and astral semantics residual (merge `b8080f59f`,
 receipt [c2-s9-u-strictness.md](c2-s9-u-strictness.md): +74 fail→pass /
 0 pass→fail over 4,192 scenarios, including literals 480/0; review repairs
 also closed a sticky OOB read and deferred identity-escape abort), moving
-the gates to 2025/2077. All active feature/triage worktrees are merged;
-next work items are the remaining S6 flag-on gaps (finite timeout
-scheduling, cross-agent waitAsync, BigInt Atomics, multi-agent wait/grow),
+the gates to 2025/2077. S6c then added BigInt64Array/BigUint64Array
+Atomics (merge `981fe000d`, receipt
+[c2-s6-bigint-atomics.md](c2-s6-bigint-atomics.md): exact BigInt dirs
+22/206 → 136/206; full Atomics+SAB selection 698/284 → 814/168 with
+116 fail→pass / 0 pass→fail; BigInt/Atomics defaults remain off), moving
+the gates to 2026/2078. All active feature/triage worktrees are merged;
+next work items are finite timeout scheduling and cross-agent waitAsync,
 the remaining S8/S2/P-eval residuals, literal-scanner surrogate advance,
 and the C4 qualification work (full baseline rerun, host-reported negative
 phase). Tracked eval residuals: P4 body eval with non-simple

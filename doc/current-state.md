@@ -56,13 +56,13 @@ This `doc/` folder is the start of durable in-repo documentation. The
 feature inventory and line anchors below are the 2026-10-10 baseline
 snapshot; the modernization branch has since added the C2 surfaces listed
 in [modernization-plan.md](modernization-plan.md) §6 and its receipts.
-Latest merged checkpoint (2026-10-27): **2025/0 test**, **2077/0
+Latest merged checkpoint (2026-10-27): **2026/0 test**, **2078/0
 debug-static**, including direct-eval `super` early errors, the flag-on
 S6a growable-SAB/non-shared-Atomics slice, S6b `Atomics.pause` /
-single-thread `Atomics.waitAsync`, the S14 hidden-outer eval-`arguments`
-fix, the bounded S8 immutable-ArrayBuffer surface, both S3 RegExp
-slices (`u` property escapes and `v` Unicode Sets mode), and S9 u-mode
-RegExp strictness.
+single-thread `Atomics.waitAsync`, S6c BigInt Atomics, the S14
+hidden-outer eval-`arguments` fix, the bounded S8 immutable-ArrayBuffer
+surface, both S3 RegExp slices (`u` property escapes and `v` Unicode Sets
+mode), and S9 u-mode RegExp strictness.
 
 ## 3. Architecture (summary)
 
@@ -400,13 +400,14 @@ from 48,598 files: 61,565 passed / 31,576 failed, with 902 explicit skips. Its
 corpus includes post-ES2025 proposals and uses default language flags.
 
 **Modernization checkpoint (2026-10-21):** the merged branch is green at
-**2025/0 test** and **2077/0 debug-static** on Mac ARM64 no-JIT. Direct-eval
+**2026/0 test** and **2078/0 debug-static** on Mac ARM64 no-JIT. Direct-eval
 `super` early errors are closed (eval-code 454/0; object-literal function/arrow
 false accepts fixed in `39e9f2a16`), the flag-on S6a slice has growable
 SharedArrayBuffer plus ES2020 non-shared Atomics (focused S6 574/982;
 112 fail→pass / 0 pass→fail; debug index-detach abort fixed), and S6b adds
-`Atomics.pause` plus single-thread `waitAsync` (80/124; 0 pass→fail) while
-SAB/Atomics remain off by default. The catch-hidden eval-`arguments`
+`Atomics.pause` plus single-thread `waitAsync` (80/124; 0 pass→fail), and
+S6c adds BigInt64Array/BigUint64Array Atomics while BigInt and SAB/Atomics
+remain off by default. The catch-hidden eval-`arguments`
 under-rejection is closed, the bounded immutable-ArrayBuffer surface is
 landed with explicit JIT/TTD residuals, and both S3 RegExp surfaces are
 landed on ICU 79.1: `u` property escapes with a deterministic
