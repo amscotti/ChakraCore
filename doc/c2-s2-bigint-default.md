@@ -219,10 +219,15 @@ Regression pins move **2026/2078 → 2030/2082** (test/debug);
    uses — from the digits plus a trailing `n`, with the sign passed
    separately (a negative zero canonicalizes inside the factory). No
    binary BigInt limb format; existing
-   cache/version checks are untouched (an old reader rejects the new
-   constant kind through its existing unknown-tag path rather than
-   aborting, and a new file with BigInt constants simply fails those
-   readers' version-scheme check like any other format extension).
+   cache/version checks are untouched. Cross-version protection is the
+   pre-existing header version-scheme check: a cache file written by a
+   different build fails that check (`InvalidByteCode`) and falls back to
+   parsing from source **before any constant table is read**, so an old
+   reader never reaches the new `ctBigInt` tag. (The `ReadConstantsTable`
+   and `DeserializeVarArray` default cases assert rather than skip, which
+   is why the version-scheme check — not unknown-tag tolerance — is the
+   safety mechanism; the same holds for every past constant-kind
+   addition.)
 2. **Debugger primitive display** (`JavascriptBigInt.{h,cpp}`): added
    `GetDiagValueString` (exact decimal digits + trailing `n`, e.g.
    `-45n`, mirroring Symbol's override shape; one recycler allocation on
@@ -308,3 +313,28 @@ Regression pins move **2026/2078 → 2030/2082** (test/debug);
   the disable flag still restores the previous default exactly.
 - **Final default (B1c) vs prior default-off (A2): 2,333 fail→pass /
   0 pass→fail** — unchanged from the pre-repair measurement.
+
+### Serialization verification scope and pre-existing (non-S2) issues
+
+Only `-Serialized` is a registered gate entry
+(`test/es7/bigint-serialized.js`). The parser-state cache pair was
+manually verified on both binaries but is not pinned:
+`-GenerateParserStateCache` (rc 0, state dump) and
+`-UseParserStateCache -ParserStateCache -Force:DeferParse` (literal
+probe prints `1 255 -3 5`; the full `bigint-serialized.js` content
+passes 3/3) on the test and debug-static builds — ch generates the
+parser-state buffer in memory, so both flags exercise the same
+constant-serialization code path.
+
+Two **pre-existing** serialization issues are recorded as follow-ups,
+not S2 regressions:
+
+- A truncated/corrupt buffer handed to `JsRunSerialized` crashes rather
+  than failing cleanly: the deserializer's read helpers do not
+  bounds-check against the buffer end, a class of defect that predates
+  `ctBigInt` (any malformed constant table can over-read). A bounds
+  audit of the reader is the follow-up.
+- `-Serialized` + cross-context `WScript.LoadScript(..., 'samethread')`
+  asserts on debug builds at `JsrtHelper.cpp:54`
+  (`originalJsrtContext` switch check), reproduced with `var val = 5;`
+  and no BigInt content.

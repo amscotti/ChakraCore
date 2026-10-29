@@ -4796,6 +4796,21 @@ public:
                         break;
                     }
 
+                // ctBigInt is deliberately NOT handled here. Aux var
+                // arrays (e.g. element literal arrays) only contain
+                // TaggedInt/Number elements today, so a BigInt constant
+                // never reaches this switch: the writer would first have
+                // to start emitting ctBigInt into a var array, and this
+                // default case (plus its assert) is the tripwire that
+                // forces the question. Before BigInt constants may be
+                // placed in an aux var array, this switch needs a ctBigInt
+                // case that rebuilds the value exactly like
+                // ReadConstantsTable does (decimal string constant ->
+                // FunctionBody-style RecordBigIntConstant / Create), and a
+                // writer change plus a corpus/round-trip test to match.
+                // Version-scheme rejection at the header, not this
+                // default, is what protects old readers from new tags.
+
                 default:
                     AssertMsg(UNREACHED, "Unexpected object type in VarArray");
                     Throw::FatalInternalError();
