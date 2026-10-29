@@ -4,6 +4,7 @@
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #include "RuntimeLibraryPch.h"
+#include "Math/JavascriptMath.h"
 
 #define ATOMICS_FUNCTION_ENTRY_CHECKS(length, methodName) \
         PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault); \
@@ -416,6 +417,17 @@ namespace Js
         AtomicsAsyncWaiter* waiter = RecyclerNew(
             scriptContext->GetRecycler(), AtomicsAsyncWaiter, rootBuffer, capability, scriptContext);
 
+        // A finite positive timeout is schedulable only when the host installed
+        // the optional timer continuation callback. Without it (or while TTD is
+        // recording/replaying — the host timer queue is not modeled there) the
+        // promise stays pending until notify: the S6b documented fallback.
+        const bool scheduleTimeout =
+            realTimeout > 0 && library->HasNativeHostTimerContinuationCallback()
+#if ENABLE_TTD
+            && !scriptContext->ShouldPerformRecordOrReplayAction()
+#endif
+            ;
+
         {
             AutoCriticalSection autoCS(waiterList->GetCriticalSectionForAccess());
 
@@ -450,11 +462,28 @@ namespace Js
             AtomicsAsyncWaiterRegistration* registration = rootBuffer->AddAsyncWaiter(
                 waiter, scriptContext, scriptContext->GetThreadContext());
             waiterList->AddAsyncWaiter(registration);
+            if (scheduleTimeout)
+            {
+                // Cache the native links while still under the lock so the
+                // timeout task can claim this registration later.
+                waiter->SetRegistration(registration);
+            }
         }
 
-        // Finite positive timeouts are not schedulable by this embedding (there
-        // is no core timer job); the promise stays pending until notify. See
-        // doc/c2-s6-waitasync.md.
+        if (scheduleTimeout)
+        {
+            // ceil to whole milliseconds (a sub-millisecond wait rounds up to
+            // 1 ms, so it can never reproduce the synchronous timed-out fast
+            // path), clamped to UINT32_MAX ms (~49.7 days). Task
+            // creation/enqueue failure (OOM) leaves the registration intact:
+            // the promise stays pending and notify still works — the
+            // no-callback fallback.
+            double ceilMs = JavascriptMath::Ceil(realTimeout);
+            unsigned int delayMilliseconds =
+                ceilMs >= (double)UINT32_MAX ? UINT32_MAX : (unsigned int)ceilMs;
+            library->EnqueueDelayedTask(library->CreateAtomicsWaitAsyncTimeoutTaskFunction(waiter), delayMilliseconds);
+        }
+
         return CreateWaitAsyncResult(scriptContext, true, capability->GetPromise());
     }
 

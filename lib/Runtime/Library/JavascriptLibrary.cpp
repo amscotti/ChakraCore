@@ -5573,6 +5573,12 @@ namespace Js
         this->nativeHostPromiseContinuationFunctionState = state;
     }
 
+    void JavascriptLibrary::SetNativeHostTimerContinuationFunction(TimerContinuationCallback function, void *state)
+    {
+        this->nativeHostTimerContinuationFunction = function;
+        this->nativeHostTimerContinuationFunctionState = state;
+    }
+
     void JavascriptLibrary::CallNativeHostPromiseRejectionTracker(Var promise, Var reason, bool handled)
     {
         if (this->nativeHostPromiseRejectionTracker != nullptr)
@@ -5696,6 +5702,33 @@ namespace Js
                 Js::JavascriptError::MapAndThrowError(scriptContext, JSERR_HostMaybeMissingPromiseContinuationCallback);
             }
         }
+    }
+
+    void JavascriptLibrary::EnqueueDelayedTask(Var taskVar, unsigned int delayMilliseconds)
+    {
+        Assert(VarIs<JavascriptFunction>(taskVar));
+        Assert(this->nativeHostTimerContinuationFunction != nullptr);
+
+#if ENABLE_TTD
+        // The host timer queue is not modeled in TTD: callers must not schedule
+        // delayed tasks while recording or replaying (finite waitAsync timeouts
+        // stay pending instead; guarded in AtomicsObject::EntryWaitAsync).
+        TTDAssert(!this->scriptContext->ShouldPerformRecordOrReplayAction(), "Delayed tasks are not modeled in TTD!!!");
+#endif
+
+        BEGIN_LEAVE_SCRIPT(scriptContext);
+        try
+        {
+            this->nativeHostTimerContinuationFunction(taskVar, delayMilliseconds, this->nativeHostTimerContinuationFunctionState);
+        }
+        catch (...)
+        {
+            // Hosts are required not to pass exceptions back across the callback boundary. If
+            // this happens, it is a bug in the host, not something that we are expected to
+            // handle gracefully.
+            Js::Throw::FatalInternalError();
+        }
+        END_LEAVE_SCRIPT(scriptContext);
     }
 
 #ifdef ENABLE_JS_BUILTINS
@@ -6702,6 +6735,19 @@ namespace Js
 
         return RecyclerNewEnumClass(this->GetRecycler(), EnumFunctionClass,
             JavascriptFinalizationRegistryCleanupTaskFunction, type, functionInfo, registry);
+    }
+
+    AtomicsWaitAsyncTimeoutTaskFunction* JavascriptLibrary::CreateAtomicsWaitAsyncTimeoutTaskFunction(AtomicsAsyncWaiter* waiter)
+    {
+        JavascriptMethod entryPoint = &AtomicsAsyncWaiter::EntryTimeoutTask;
+        FunctionInfo* functionInfo = RecyclerNew(this->GetRecycler(), FunctionInfo, entryPoint, FunctionInfo::Attributes::ErrorOnNew);
+        DynamicType* type = CreateDeferredPrototypeFunctionType(entryPoint);
+
+        // Recycler-owned (EnumFunctionClass) like the FinalizationRegistry cleanup
+        // task. The host queue AddRefs the returned function, which roots the
+        // waiter record and, through it, the whole registration chain.
+        return RecyclerNewEnumClass(this->GetRecycler(), EnumFunctionClass,
+            AtomicsWaitAsyncTimeoutTaskFunction, type, functionInfo, waiter);
     }
 
     JavascriptPromise* JavascriptLibrary::CreatePromise()

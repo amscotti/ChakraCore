@@ -14,6 +14,7 @@ namespace Js
     class JavascriptSharedArrayBuffer;
     class JavascriptPromiseCapability;
     class AtomicsAsyncWaiter;
+    struct AtomicsAsyncWaiterRegistration;
     typedef JsUtil::List<DWORD_PTR, HeapAllocator> SharableAgents;
     typedef JsUtil::BaseDictionary<uint, WaiterList *, HeapAllocator> IndexToWaitersMap;
 
@@ -28,7 +29,7 @@ namespace Js
     public:
         AtomicsAsyncWaiter(JavascriptSharedArrayBuffer* buffer, JavascriptPromiseCapability* capability, ScriptContext* scriptContext)
             : buffer(buffer), capability(capability), scriptContext(scriptContext),
-              nextWrapperWaiter(nullptr), settled(false)
+              nextWrapperWaiter(nullptr), settled(false), registration(nullptr)
         {
         }
 
@@ -48,6 +49,28 @@ namespace Js
         // wrapper from the notifying thread.
         void Abandon();
 
+        // Finite-timeout support (S6d). Cache the native registration links so
+        // the host-delayed timeout task can claim the waiter. Called under the
+        // waiter-list lock, after WaiterList::AddAsyncWaiter published the
+        // waiterList pointer on the token.
+        void SetRegistration(AtomicsAsyncWaiterRegistration* registration);
+        // Timeout-task claim: settled -> false (late task no-ops without
+        // dereferencing the released token); otherwise settle and unlink under
+        // the waiter-list lock so a later notify counts 0 and cannot resolve.
+        // All claim/settle mutations run on the registrant's script thread.
+        bool TryClaimForTimeout();
+        // Resolve the promise with "timed-out" after a successful claim; must
+        // run outside the waiter-list critical section (resolution allocates
+        // and enqueues promise reactions).
+        void ResolveTimedOutAfterClaim();
+        // Host-delayed timeout task entry point; sees the task function.
+        static Var EntryTimeoutTask(RecyclableObject* function, CallInfo callInfo, ...);
+
+        // Shared settle tail: resolve the capability with the given outcome
+        // literal. Callers have settled and unlinked; runs outside the
+        // waiter list lock.
+        template <size_t N> void ResolveWith(const char16 (&outcome)[N]);
+
         virtual void Finalize(bool isShutdown) override {}
         virtual void Dispose(bool isShutdown) override {}
         virtual void Mark(Recycler* recycler) override
@@ -61,6 +84,14 @@ namespace Js
         Field(AtomicsAsyncWaiter*) nextWrapperWaiter;
         ScriptContext* scriptContext;
         bool settled;
+
+        // Plain (non-traced) native links to the registration token, cached at
+        // registration. Only read by TryClaimForTimeout on the registrant's
+        // script thread after checking settled: every path that deletes the
+        // token (notify resolution, SAB finalization) first sets settled, and
+        // while the token is alive the task roots the record, which roots the
+        // wrapper, which owns the token and the SharedContents (waiter list).
+        AtomicsAsyncWaiterRegistration* registration;
     };
 
     // Native token owned by the wrapper and stored in the SharedContents waiter
@@ -76,6 +107,38 @@ namespace Js
         AtomicsAsyncWaiterRegistration* nextAwoken;
         bool linked;
     };
+
+    // Host-delayed timeout task for a pending Atomics.waitAsync with a finite
+    // positive timeout. Recycler-owned RuntimeFunction mirroring the
+    // FinalizationRegistry cleanup task: the host queue AddRefs the task until
+    // it has called or dropped it, which roots the record -> wrapper -> native
+    // registration token (and the SharedContents waiter list), so the record's
+    // cached native links stay valid for the task's whole lifetime. The only
+    // caller is the host that received the task inside
+    // JavascriptLibrary::EnqueueDelayedTask; the engine never invokes it and
+    // spawns no thread.
+    class AtomicsWaitAsyncTimeoutTaskFunction : public RuntimeFunction
+    {
+    protected:
+        DEFINE_VTABLE_CTOR(AtomicsWaitAsyncTimeoutTaskFunction, RuntimeFunction);
+        DEFINE_MARSHAL_OBJECT_TO_SCRIPT_CONTEXT(AtomicsWaitAsyncTimeoutTaskFunction);
+
+    public:
+        AtomicsWaitAsyncTimeoutTaskFunction(
+            DynamicType* type,
+            FunctionInfo* functionInfo,
+            AtomicsAsyncWaiter* waiter)
+            : RuntimeFunction(type, functionInfo), waiter(waiter)
+        {
+        }
+
+        AtomicsAsyncWaiter* GetWaiter() const { return waiter; }
+
+    private:
+        Field(AtomicsAsyncWaiter*) waiter;
+    };
+
+    template <> bool VarIsImpl<AtomicsWaitAsyncTimeoutTaskFunction>(RecyclableObject* obj);
 
     class SharedContents
     {

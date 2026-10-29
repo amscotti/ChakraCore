@@ -770,6 +770,7 @@ JsValueRef WScriptJsrt::LoadScript(JsValueRef callee, LPCSTR fileName,
         IfJsrtErrorSetGo(ChakraRTInterface::JsSetCurrentContext(newContext));
 
         IfJsErrorFailLog(ChakraRTInterface::JsSetPromiseContinuationCallback(PromiseContinuationCallback, (void*)messageQueue));
+        IfJsErrorFailLog(ChakraRTInterface::JsSetTimerContinuationCallback(TimerContinuationCallback, (void*)messageQueue));
 
         // Initialize the host objects
         Initialize();
@@ -2544,6 +2545,22 @@ void WScriptJsrt::PromiseContinuationCallback(JsValueRef task, void *callbackSta
     MessageQueue * messageQueue = (MessageQueue *)callbackState;
 
     WScriptJsrt::CallbackMessage *msg = new WScriptJsrt::CallbackMessage(0, task);
+    messageQueue->InsertSorted(msg);
+}
+
+void WScriptJsrt::TimerContinuationCallback(JsValueRef task, unsigned int delayMilliseconds, void *callbackState)
+{
+    Assert(task != JS_INVALID_REFERENCE);
+    Assert(callbackState != JS_INVALID_REFERENCE);
+    MessageQueue * messageQueue = (MessageQueue *)callbackState;
+
+    // Exactly the WScript.SetTimeout mechanism: the CallbackMessage
+    // constructor AddRefs the delayed task and its destructor releases it
+    // after the call or on queue teardown. InsertSorted stamps the absolute
+    // due time (now + delay), and ProcessAll drains the queue on the thread
+    // that ran the script, sleeping until the delay has elapsed, so the task
+    // never runs before its minimum delay and never off the script thread.
+    WScriptJsrt::CallbackMessage *msg = new WScriptJsrt::CallbackMessage(delayMilliseconds, task);
     messageQueue->InsertSorted(msg);
 }
 

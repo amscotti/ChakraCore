@@ -252,6 +252,20 @@ var nonSharedCount = 0;
 check(Atomics.notify(nonSharedB64, 0, { valueOf: function () { nonSharedCount++; return 42; } }) === 0, "non-shared notify returns 0");
 check(nonSharedCount === 1, "non-shared notify evaluated count");
 
+// --- Finite positive waitAsync timeouts (S6d) -------------------------------
+// The BigInt64 waiter resolves "timed-out" through the host timer, and notify
+// wins over a pending finite timeout exactly as for Int32Array.
+var bigFinite = new BigInt64Array(new SharedArrayBuffer(64));
+var bigTimeoutOutcome = "pending";
+Atomics.waitAsync(bigFinite, 0, 0n, 1).value.then(function (v) { bigTimeoutOutcome = v; });
+var bigNotifyWinOutcome = "pending";
+Atomics.waitAsync(bigFinite, 1, 0n, 60).value.then(function (v) { bigNotifyWinOutcome = v; });
+check(Atomics.notify(bigFinite, 1, 1) === 1, "notify wins over pending BigInt64 60ms timeout");
+var bigTimeoutNotifyCount = -1;
+WScript.SetTimeout(function () {
+    bigTimeoutNotifyCount = Atomics.notify(bigFinite, 0, 1);
+}, 10);
+
 // Index validation before count.
 throws(RangeError, function () { Atomics.notify(b64, 9, 1); }, "notify index validated");
 
@@ -273,6 +287,10 @@ WScript.SetTimeout(function () {
         // The waiter promise resolves to "ok" after notify (the notify above
         // already ran; the reaction is observed here).
         check(outcome === "ok", "notified BigInt64 waitAsync resolved to ok, got " + outcome);
+        // Finite-timeout completion checks (S6d).
+        check(bigTimeoutOutcome === "timed-out", "BigInt64 finite timeout resolved to timed-out, got " + bigTimeoutOutcome);
+        check(bigNotifyWinOutcome === "ok", "BigInt64 notify-before-timeout resolved ok, got " + bigNotifyWinOutcome);
+        check(bigTimeoutNotifyCount === 0, "notify after a BigInt64 timeout counts 0, got " + bigTimeoutNotifyCount);
         if (typeof CollectGarbage === "function") {
             CollectGarbage();
         }

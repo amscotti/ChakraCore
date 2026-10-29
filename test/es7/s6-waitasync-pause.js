@@ -3,10 +3,12 @@
 // Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
-// S6b flag-on surface: Atomics.pause and Atomics.waitAsync. Runs with
-// -ESSharedArrayBuffer (doc/c2-s6-waitasync.md). Finite positive async
-// timeouts are not schedulable by this embedding and stay pending; the test
-// covers the fast timeout paths and notify-driven resolution instead.
+// S6b/S6d flag-on surface: Atomics.pause and Atomics.waitAsync. Runs with
+// -ESSharedArrayBuffer (doc/c2-s6-waitasync.md, doc/c2-s6-waitasync-timeout.md).
+// The ch host installs the timer continuation callback, so finite positive
+// timeouts resolve "timed-out" after ceil(timeout) ms (sub-millisecond values
+// round up to 1 ms); notify wins over a pending timeout, the losing side
+// no-ops, and NaN/+Infinity/omitted timeouts stay pending until notify.
 
 var failures = [];
 function check(condition, message) {
@@ -245,6 +247,76 @@ for (var fifoIndex = 0; fifoIndex < 5; fifoIndex++) {
 }
 check(Atomics.notify(fifoView, 0, 5) === 5, "notify wakes five FIFO waiters");
 
+// --- Finite positive timeouts (S6d) ----------------------------------------
+// The ch host routes delayed timeout tasks into its message queue, so a
+// finite positive timeout resolves "timed-out" after ceil(timeout) ms.
+var finiteView = new Int32Array(new SharedArrayBuffer(32));
+
+// A 1ms timeout resolves "timed-out".
+var oneMs = Atomics.waitAsync(finiteView, 0, 0, 1);
+check(oneMs.async === true && oneMs.value instanceof Promise, "1ms timeout is asynchronous");
+var oneMsOutcome = "pending";
+oneMs.value.then(function (v) { oneMsOutcome = v; }, function (e) { oneMsOutcome = "rejected:" + e; });
+
+// Sub-millisecond timeouts round up to 1ms: async, never the sync fast path.
+var subA = Atomics.waitAsync(finiteView, 1, 0, 0.5);
+var subB = Atomics.waitAsync(finiteView, 2, 0, 1e-7);
+check(subA.async === true && subA.value instanceof Promise, "0.5ms timeout is asynchronous");
+check(subB.async === true && subB.value instanceof Promise, "1e-7ms timeout is asynchronous");
+var subOutcomeA = "pending", subOutcomeB = "pending";
+subA.value.then(function (v) { subOutcomeA = v; });
+subB.value.then(function (v) { subOutcomeB = v; });
+
+// Multiple finite waiters on one index all time out; a later notify counts 0.
+var multiOutcomes = ["pending", "pending", "pending"];
+for (var m = 0; m < 3; m++) {
+    (function (i) {
+        Atomics.waitAsync(finiteView, 4, 0, 2).value.then(function (v) { multiOutcomes[i] = v; });
+    })(m);
+}
+
+// A pending timeout task survives collection: the host-held task roots the
+// waiter -> wrapper -> registration chain. 30ms leaves room for the GCs.
+var gcOutcome = "pending";
+Atomics.waitAsync(finiteView, 5, 0, 30).value.then(function (v) { gcOutcome = v; });
+if (typeof CollectGarbage === "function") {
+    CollectGarbage();
+    CollectGarbage();
+}
+
+// Notify-before-timeout: notify wins synchronously; the later timeout task
+// no-ops without touching the released registration.
+var notifyWinOutcome = "pending";
+Atomics.waitAsync(finiteView, 6, 0, 60).value.then(function (v) { notifyWinOutcome = v; });
+check(Atomics.notify(finiteView, 6, 1) === 1, "notify wins over pending 60ms timeout");
+
+// Timeout-before-notify: a 1ms timeout unregisters the waiter, so the notify
+// at ~10ms counts 0 and cannot resolve.
+var timeoutWinOutcome = "pending";
+Atomics.waitAsync(finiteView, 7, 0, 1).value.then(function (v) { timeoutWinOutcome = v; });
+var timeoutWinNotifyCount = -1;
+WScript.SetTimeout(function () {
+    timeoutWinNotifyCount = Atomics.notify(finiteView, 7, 1);
+}, 10);
+
+// NaN / +Infinity / omitted timeouts are infinite: no timer is scheduled, the
+// promises are still pending at 50ms and resolve through notify.
+var infView = new Int32Array(new SharedArrayBuffer(16));
+var pendOutcomes = ["pending", "pending", "pending"];
+[Atomics.waitAsync(infView, 0, 0, NaN),
+ Atomics.waitAsync(infView, 1, 0, Infinity),
+ Atomics.waitAsync(infView, 2, 0)].forEach(function (w, i) {
+    check(w.async === true && w.value instanceof Promise, "NaN/+Infinity/omitted timeout is asynchronous");
+    w.value.then(function (v) { pendOutcomes[i] = v; });
+});
+WScript.SetTimeout(function () {
+    check(pendOutcomes[0] === "pending" && pendOutcomes[1] === "pending" && pendOutcomes[2] === "pending",
+        "NaN/+Infinity/omitted stay pending at 50ms, got " + pendOutcomes.join(","));
+    check(Atomics.notify(infView, 0, 1) === 1, "NaN waiter still registered at 50ms");
+    check(Atomics.notify(infView, 1, 1) === 1, "+Infinity waiter still registered at 50ms");
+    check(Atomics.notify(infView, 2, 1) === 1, "omitted-timeout waiter still registered at 50ms");
+}, 50);
+
 // --- Single-agent notify resolves the promise to "ok" ----------------------
 var notifyView = new Int32Array(new SharedArrayBuffer(16));
 var waiter = Atomics.waitAsync(notifyView, 0, 0, Infinity);
@@ -282,6 +354,19 @@ WScript.SetTimeout(function () {
         check(nanOutcome === "ok", "NaN waiter resolved to ok, got " + nanOutcome);
         check(realmOutcome === "ok", "cross-realm waiter resolved to ok, got " + realmOutcome);
         check(fifoOrder.join(",") === "0,1,2,3,4", "FIFO notify order, got " + fifoOrder.join(","));
+        // Finite-timeout completion checks (S6d).
+        check(oneMsOutcome === "timed-out", "1ms timeout resolved to timed-out, got " + oneMsOutcome);
+        check(subOutcomeA === "timed-out", "0.5ms timeout resolved to timed-out (ceil to 1ms), got " + subOutcomeA);
+        check(subOutcomeB === "timed-out", "1e-7ms timeout resolved to timed-out (ceil to 1ms), got " + subOutcomeB);
+        check(multiOutcomes.join(",") === "timed-out,timed-out,timed-out",
+            "three finite waiters all timed out, got " + multiOutcomes.join(","));
+        check(Atomics.notify(finiteView, 4, 3) === 0, "timed-out waiters are unregistered");
+        check(gcOutcome === "timed-out", "timeout task survived collection, got " + gcOutcome);
+        check(notifyWinOutcome === "ok", "notify-before-timeout resolved ok exactly once, got " + notifyWinOutcome);
+        check(timeoutWinOutcome === "timed-out", "timeout-before-notify resolved timed-out, got " + timeoutWinOutcome);
+        check(timeoutWinNotifyCount === 0, "notify after a timeout counts 0, got " + timeoutWinNotifyCount);
+        check(pendOutcomes.join(",") === "ok,ok,ok",
+            "NaN/+Infinity/omitted resolved via notify after staying pending, got " + pendOutcomes.join(","));
         if (typeof CollectGarbage === "function") {
             CollectGarbage();
         }

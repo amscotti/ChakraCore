@@ -69,6 +69,7 @@ struct JsAPIHooks
     typedef JsErrorCode(WINAPI *JsrtGetIndexedPropertyPtr)(JsValueRef object, JsValueRef index, JsValueRef *value);
     typedef JsErrorCode (WINAPI *JsrtSetIndexedPropertyPtr)(JsValueRef object, JsValueRef index, JsValueRef value);
     typedef JsErrorCode (WINAPI *JsrtSetPromiseContinuationCallbackPtr)(JsPromiseContinuationCallback callback, void *callbackState);
+    typedef JsErrorCode (WINAPI *JsrtSetTimerContinuationCallbackPtr)(JsTimerContinuationCallback callback, void *callbackState);
     typedef JsErrorCode (WINAPI *JsrtSetHostPromiseRejectionTrackerPtr)(JsHostPromiseRejectionTrackerCallback callback, void *callbackState);
     typedef JsErrorCode (WINAPI *JsrtGetContextOfObject)(JsValueRef object, JsContextRef *callbackState);
 
@@ -210,6 +211,7 @@ struct JsAPIHooks
     JsrtGetIndexedPropertyPtr pfJsrtGetIndexedProperty;
     JsrtSetIndexedPropertyPtr pfJsrtSetIndexedProperty;
     JsrtSetPromiseContinuationCallbackPtr pfJsrtSetPromiseContinuationCallback;
+    JsrtSetTimerContinuationCallbackPtr pfJsrtSetTimerContinuationCallback;
     JsrtSetHostPromiseRejectionTrackerPtr pfJsrtSetHostPromiseRejectionTracker;
     JsrtGetContextOfObject pfJsrtGetContextOfObject;
     JsrtDiagStartDebugging pfJsrtDiagStartDebugging;
@@ -442,6 +444,7 @@ public:
     static JsErrorCode WINAPI JsGetIndexedProperty(JsValueRef object, JsValueRef index, JsValueRef *value) { return HOOK_JS_API(GetIndexedProperty(object, index, value)); }
     static JsErrorCode WINAPI JsSetIndexedProperty(JsValueRef object, JsValueRef index, JsValueRef value) { return HOOK_JS_API(SetIndexedProperty(object, index, value)); }
     static JsErrorCode WINAPI JsSetPromiseContinuationCallback(JsPromiseContinuationCallback callback, void *callbackState) { return HOOK_JS_API(SetPromiseContinuationCallback(callback, callbackState)); }
+    static JsErrorCode WINAPI JsSetTimerContinuationCallback(JsTimerContinuationCallback callback, void *callbackState) { return HOOK_JS_API(SetTimerContinuationCallback(callback, callbackState)); }
     static JsErrorCode WINAPI JsSetHostPromiseRejectionTracker(JsHostPromiseRejectionTrackerCallback callback, void *callbackState) { return HOOK_JS_API(SetHostPromiseRejectionTracker(callback, callbackState)); }
     static JsErrorCode WINAPI JsGetContextOfObject(JsValueRef object, JsContextRef* context) { return HOOK_JS_API(GetContextOfObject(object, context)); }
     static JsErrorCode WINAPI JsDiagStartDebugging(JsRuntimeHandle runtimeHandle, JsDiagDebugEventCallback debugEventCallback, void* callbackState) { return HOOK_JS_API(DiagStartDebugging(runtimeHandle, debugEventCallback, callbackState)); }

@@ -27,6 +27,8 @@ class JsrtExternalType;
 namespace Js
 {
     class RefCountedBuffer;
+    class AtomicsAsyncWaiter;
+    class AtomicsWaitAsyncTimeoutTaskFunction;
 
     static const unsigned int EvalMRUSize = 15;
     typedef JsUtil::BaseDictionary<DWORD_PTR, SourceContextInfo *, Recycler, PowerOf2SizePolicy> SourceContextInfoMap;
@@ -216,6 +218,7 @@ namespace Js
         static DWORD GetRandSeed1Offset() { return offsetof(JavascriptLibrary, randSeed1); }
         static DWORD GetTypeDisplayStringsOffset() { return offsetof(JavascriptLibrary, typeDisplayStrings); }
         typedef bool (CALLBACK *PromiseContinuationCallback)(Var task, void *callbackState);
+        typedef void (CALLBACK *TimerContinuationCallback)(Var task, unsigned int delayMilliseconds, void *callbackState);
 
         Var GetUndeclBlockVar() const { return undeclBlockVarSentinel; }
         bool IsUndeclBlockVar(Var var) const { return var == undeclBlockVarSentinel; }
@@ -464,6 +467,11 @@ namespace Js
 
         FieldNoBarrier(PromiseContinuationCallback) nativeHostPromiseContinuationFunction;
         Field(void *) nativeHostPromiseContinuationFunctionState;
+
+        // Optional per-context delayed-task callback (JsSetTimerContinuationCallback).
+        // Unset by default: finite waitAsync timeouts stay pending without it.
+        FieldNoBarrier(TimerContinuationCallback) nativeHostTimerContinuationFunction = nullptr;
+        Field(void *) nativeHostTimerContinuationFunctionState = nullptr;
 
         typedef SList<Js::FunctionProxy*, Recycler> FunctionReferenceList;
 #ifdef _CHAKRACOREBUILD
@@ -868,6 +876,7 @@ namespace Js
         JavascriptFunction* GetThrowerFunction() const { return throwerFunction; }
 
         void SetNativeHostPromiseContinuationFunction(PromiseContinuationCallback function, void *state);
+        void SetNativeHostTimerContinuationFunction(TimerContinuationCallback function, void *state);
 
         void CallNativeHostPromiseRejectionTracker(Var promise, Var reason, bool handled);
 
@@ -875,7 +884,14 @@ namespace Js
         FinalizableObject* GetJsrtContext();
         void EnqueueTask(Var taskVar);
         bool HasNativeHostPromiseContinuationCallback() const { return nativeHostPromiseContinuationFunction != nullptr; }
+        bool HasNativeHostTimerContinuationCallback() const { return nativeHostTimerContinuationFunction != nullptr; }
+        // Hands a delayed task (a JavascriptFunction) plus its minimum delay in
+        // milliseconds to the host timer callback. Requires that callback
+        // (HasNativeHostTimerContinuationCallback) and must not be reached
+        // while TTD is recording or replaying.
+        void EnqueueDelayedTask(Var taskVar, unsigned int delayMilliseconds);
         JavascriptFinalizationRegistryCleanupTaskFunction* CreateFinalizationRegistryCleanupTaskFunction(JavascriptFinalizationRegistry* registry);
+        AtomicsWaitAsyncTimeoutTaskFunction* CreateAtomicsWaitAsyncTimeoutTaskFunction(AtomicsAsyncWaiter* waiter);
 
         HeapArgumentsObject* CreateHeapArguments(Var frameObj, uint formalCount, bool isStrictMode = false);
         JavascriptArray* CreateArray();
