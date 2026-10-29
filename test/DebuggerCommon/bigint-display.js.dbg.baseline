@@ -1,0 +1,55 @@
+[
+  {
+    "this": {
+      "Symbol.toStringTag": "string global",
+      "BigInt": "function <large string>",
+      "Float16Array": "function <large string>",
+      "BigInt64Array": "function <large string>",
+      "BigUint64Array": "function <large string>",
+      "WeakRef": "function <large string>",
+      "FinalizationRegistry": "function <large string>",
+      "bigintDisplay": "function <large string>"
+    },
+    "arguments": {
+      "#__proto__": "Object {...}",
+      "length": "number 0",
+      "callee": "function <large string>",
+      "Symbol.iterator": "function <large string>"
+    },
+    "locals": {
+      "decimal": "bigint 123n",
+      "negative": "bigint -45n",
+      "multiLimb": "bigint <large string>",
+      "zero": "bigint 0n",
+      "wrapper": {
+        "#__proto__": "BigInt {...}"
+      }
+    },
+    "globals": {
+      "Symbol.toStringTag": "string global",
+      "bigintDisplay": "function <large string>"
+    }
+  },
+  {
+    "evaluate": {
+      "decimal + 7n": "bigint 130n"
+    }
+  },
+  {
+    "evaluate": {
+      "wrapper": {
+        "#__proto__": "BigInt {...}"
+      }
+    }
+  },
+  {
+    "evaluate": {
+      "BigInt.asUintN(8, 300n)": "bigint 44n"
+    }
+  },
+  {
+    "evaluate": {
+      "typeof 1n": "string bigint"
+    }
+  }
+]

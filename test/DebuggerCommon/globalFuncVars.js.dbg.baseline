@@ -2,7 +2,10 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "BigInt": "function <large string>",
       "Float16Array": "function <large string>",
+      "BigInt64Array": "function <large string>",
+      "BigUint64Array": "function <large string>",
       "WeakRef": "function <large string>",
       "FinalizationRegistry": "function <large string>",
       "obj": "undefined undefined",
@@ -56,7 +59,10 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "BigInt": "function <large string>",
       "Float16Array": "function <large string>",
+      "BigInt64Array": "function <large string>",
+      "BigUint64Array": "function <large string>",
       "WeakRef": "function <large string>",
       "FinalizationRegistry": "function <large string>",
       "obj": "undefined undefined",
@@ -101,7 +107,10 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "BigInt": "function <large string>",
       "Float16Array": "function <large string>",
+      "BigInt64Array": "function <large string>",
+      "BigUint64Array": "function <large string>",
       "WeakRef": "function <large string>",
       "FinalizationRegistry": "function <large string>",
       "obj": "undefined undefined",
@@ -135,7 +144,10 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "BigInt": "function <large string>",
       "Float16Array": "function <large string>",
+      "BigInt64Array": "function <large string>",
+      "BigUint64Array": "function <large string>",
       "WeakRef": "function <large string>",
       "FinalizationRegistry": "function <large string>",
       "obj": "undefined undefined",
@@ -175,7 +187,10 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "BigInt": "function <large string>",
       "Float16Array": "function <large string>",
+      "BigInt64Array": "function <large string>",
+      "BigUint64Array": "function <large string>",
       "WeakRef": "function <large string>",
       "FinalizationRegistry": "function <large string>",
       "obj": "Object {...}",

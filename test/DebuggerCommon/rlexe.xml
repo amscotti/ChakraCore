@@ -1298,6 +1298,13 @@
   </test>
   <test>
     <default>
+      <files>bigint-display.js</files>
+      <compile-flags>-dbgbaseline:bigint-display.js.dbg.baseline</compile-flags>
+      <tags>exclude_dynapogo</tags>
+    </default>
+  </test>
+  <test>
+    <default>
       <files>ConsoleScope.js</files>
       <baseline>ConsoleScope.js.baseline</baseline>
       <compile-flags>-debuglaunch -dbgbaseline:ConsoleScope.js.dbg.baseline</compile-flags>

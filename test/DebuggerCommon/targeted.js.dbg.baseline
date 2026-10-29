@@ -40,11 +40,33 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "BigInt": {
+        "#__proto__": "function <large string>",
+        "length": "number 1",
+        "prototype": "BigInt {...}",
+        "name": "string BigInt",
+        "asIntN": "function <large string>",
+        "asUintN": "function <large string>"
+      },
       "Float16Array": {
         "#__proto__": "function <large string>",
         "length": "number 3",
         "name": "string Float16Array",
         "BYTES_PER_ELEMENT": "number 2",
+        "prototype": "Object {...}"
+      },
+      "BigInt64Array": {
+        "#__proto__": "function <large string>",
+        "length": "number 3",
+        "name": "string BigInt64Array",
+        "BYTES_PER_ELEMENT": "number 8",
+        "prototype": "Object {...}"
+      },
+      "BigUint64Array": {
+        "#__proto__": "function <large string>",
+        "length": "number 3",
+        "name": "string BigUint64Array",
+        "BYTES_PER_ELEMENT": "number 8",
         "prototype": "Object {...}"
       },
       "WeakRef": {
@@ -228,11 +250,33 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "BigInt": {
+        "#__proto__": "function <large string>",
+        "length": "number 1",
+        "prototype": "BigInt {...}",
+        "name": "string BigInt",
+        "asIntN": "function <large string>",
+        "asUintN": "function <large string>"
+      },
       "Float16Array": {
         "#__proto__": "function <large string>",
         "length": "number 3",
         "name": "string Float16Array",
         "BYTES_PER_ELEMENT": "number 2",
+        "prototype": "Object {...}"
+      },
+      "BigInt64Array": {
+        "#__proto__": "function <large string>",
+        "length": "number 3",
+        "name": "string BigInt64Array",
+        "BYTES_PER_ELEMENT": "number 8",
+        "prototype": "Object {...}"
+      },
+      "BigUint64Array": {
+        "#__proto__": "function <large string>",
+        "length": "number 3",
+        "name": "string BigUint64Array",
+        "BYTES_PER_ELEMENT": "number 8",
         "prototype": "Object {...}"
       },
       "WeakRef": {
@@ -416,11 +460,33 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "BigInt": {
+        "#__proto__": "function <large string>",
+        "length": "number 1",
+        "prototype": "BigInt {...}",
+        "name": "string BigInt",
+        "asIntN": "function <large string>",
+        "asUintN": "function <large string>"
+      },
       "Float16Array": {
         "#__proto__": "function <large string>",
         "length": "number 3",
         "name": "string Float16Array",
         "BYTES_PER_ELEMENT": "number 2",
+        "prototype": "Object {...}"
+      },
+      "BigInt64Array": {
+        "#__proto__": "function <large string>",
+        "length": "number 3",
+        "name": "string BigInt64Array",
+        "BYTES_PER_ELEMENT": "number 8",
+        "prototype": "Object {...}"
+      },
+      "BigUint64Array": {
+        "#__proto__": "function <large string>",
+        "length": "number 3",
+        "name": "string BigUint64Array",
+        "BYTES_PER_ELEMENT": "number 8",
         "prototype": "Object {...}"
       },
       "WeakRef": {
@@ -604,11 +670,33 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "BigInt": {
+        "#__proto__": "function <large string>",
+        "length": "number 1",
+        "prototype": "BigInt {...}",
+        "name": "string BigInt",
+        "asIntN": "function <large string>",
+        "asUintN": "function <large string>"
+      },
       "Float16Array": {
         "#__proto__": "function <large string>",
         "length": "number 3",
         "name": "string Float16Array",
         "BYTES_PER_ELEMENT": "number 2",
+        "prototype": "Object {...}"
+      },
+      "BigInt64Array": {
+        "#__proto__": "function <large string>",
+        "length": "number 3",
+        "name": "string BigInt64Array",
+        "BYTES_PER_ELEMENT": "number 8",
+        "prototype": "Object {...}"
+      },
+      "BigUint64Array": {
+        "#__proto__": "function <large string>",
+        "length": "number 3",
+        "name": "string BigUint64Array",
+        "BYTES_PER_ELEMENT": "number 8",
         "prototype": "Object {...}"
       },
       "WeakRef": {
@@ -792,11 +880,33 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "BigInt": {
+        "#__proto__": "function <large string>",
+        "length": "number 1",
+        "prototype": "BigInt {...}",
+        "name": "string BigInt",
+        "asIntN": "function <large string>",
+        "asUintN": "function <large string>"
+      },
       "Float16Array": {
         "#__proto__": "function <large string>",
         "length": "number 3",
         "name": "string Float16Array",
         "BYTES_PER_ELEMENT": "number 2",
+        "prototype": "Object {...}"
+      },
+      "BigInt64Array": {
+        "#__proto__": "function <large string>",
+        "length": "number 3",
+        "name": "string BigInt64Array",
+        "BYTES_PER_ELEMENT": "number 8",
+        "prototype": "Object {...}"
+      },
+      "BigUint64Array": {
+        "#__proto__": "function <large string>",
+        "length": "number 3",
+        "name": "string BigUint64Array",
+        "BYTES_PER_ELEMENT": "number 8",
         "prototype": "Object {...}"
       },
       "WeakRef": {
@@ -942,7 +1052,10 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "BigInt": "function <large string>",
       "Float16Array": "function <large string>",
+      "BigInt64Array": "function <large string>",
+      "BigUint64Array": "function <large string>",
       "WeakRef": "function <large string>",
       "FinalizationRegistry": "function <large string>",
       "i": "number 5",
@@ -975,7 +1088,10 @@
   {
     "this": {
       "Symbol.toStringTag": "string global",
+      "BigInt": "function <large string>",
       "Float16Array": "function <large string>",
+      "BigInt64Array": "function <large string>",
+      "BigUint64Array": "function <large string>",
       "WeakRef": "function <large string>",
       "FinalizationRegistry": "function <large string>",
       "i": "number 5",

@@ -302,6 +302,25 @@ namespace Js
         return requestContext->GetLibrary()->GetBigIntTypeDisplayString();
     }
 
+    BOOL JavascriptBigInt::GetDiagValueString(StringBuilder<ArenaAllocator>* stringBuilder, ScriptContext* requestContext)
+    {
+        // Debugger display convention for a BigInt primitive: the exact
+        // decimal digits (including a leading '-' for negative values)
+        // followed by 'n', e.g. "-5n". ToString allocates one recycler
+        // string on the debug evaluation thread, the same class of
+        // allocation the base implementation performs for Number.
+        JavascriptString* valueString = this->ToString(requestContext);
+        stringBuilder->Append(valueString->GetString(), valueString->GetLength());
+        stringBuilder->Append(_u('n'));
+        return TRUE;
+    }
+
+    BOOL JavascriptBigInt::GetDiagTypeString(StringBuilder<ArenaAllocator>* stringBuilder, ScriptContext* requestContext)
+    {
+        stringBuilder->AppendCppLiteral(_u("bigint"));
+        return TRUE;
+    }
+
     // Divide the positive magnitude in `digits` by a small divisor in place
     // and return the remainder. The divisor may be any uint32 >= 2 (callers
     // pass a radix power chunk, e.g. 10**9): with remainder < divisor, a

@@ -18,6 +18,7 @@
 
 #include "Language/AsmJsModule.h"
 #include "Library/ES5Array.h"
+#include "Library/JavascriptBigInt.h"
 
 void ChakraBinaryBuildDateTimeHash(DWORD * buildDateHash, DWORD * buildTimeHash);
 
@@ -277,6 +278,7 @@ enum ConstantType : byte
     ctTrue = 11,
     ctFalse = 12,
     ctStringTemplateCallsite = 13,
+    ctBigInt = 14,
 };
 
 
@@ -1576,6 +1578,20 @@ public:
             // to decide the constant type.
             auto size = PrependByte(builder, _u("String Template Callsite Constant"), ctStringTemplateCallsite);
             return size + PrependStringTemplateCallsiteConstant(builder, var);
+        }
+
+        case TypeIds_BigInt:
+        {
+            // A BigInt literal constant is serialized as its exact decimal
+            // string (with a leading '-' for negative values). The reader
+            // re-creates the value through the same validated decimal
+            // grammar the BigInt constructor uses, so no binary BigInt
+            // format is introduced and the constant table stays
+            // self-describing. ESBigInt is on by default, so this path is
+            // reachable from plain literal sources.
+            auto bigInt = VarTo<JavascriptBigInt>(var);
+            auto size = PrependByte(builder, _u("BigInt Constant"), ctBigInt);
+            return size + PrependStringConstant(builder, bigInt->ToString(bigInt->GetScriptContext()));
         }
 
         default:
@@ -3378,6 +3394,34 @@ public:
                     function->RecordConstant(reg, callsite);
                     break;
                 }
+            case ctBigInt:
+                {
+                    LPCWSTR string;
+                    uint32 len;
+                    current = ReadStringConstant(current, function, &string, &len);
+
+                    // The writer emits the exact decimal string of the value,
+                    // with a leading '-' for negatives. Recreate the constant
+                    // through RecordBigIntConstant — the same entry point the
+                    // emitter uses — whose literal factory expects the digits
+                    // and a trailing 'n', with the sign passed separately (a
+                    // negative zero canonicalizes to 0n inside the factory).
+                    bool isNegative = len > 0 && string[0] == _u('-');
+                    LPCWSTR digits = isNegative ? string + 1 : string;
+                    uint32 digitsLen = len - (isNegative ? 1 : 0);
+
+                    ScriptContext* scriptContext = function->GetScriptContext();
+                    charcount_t literalLen = digitsLen + 1;
+                    char16* literal = RecyclerNewArrayLeaf(scriptContext->GetRecycler(), char16, literalLen);
+                    for (uint32 i = 0; i < digitsLen; i++)
+                    {
+                        literal[i] = digits[i];
+                    }
+                    literal[digitsLen] = _u('n');
+
+                    function->RecordBigIntConstant(reg, literal, literalLen, isNegative);
+                    break;
+                }
             case ctInt32:
                 {
                     int value;
@@ -4751,6 +4795,21 @@ public:
                         result->elements[index] = number;
                         break;
                     }
+
+                // ctBigInt is deliberately NOT handled here. Aux var
+                // arrays (e.g. element literal arrays) only contain
+                // TaggedInt/Number elements today, so a BigInt constant
+                // never reaches this switch: the writer would first have
+                // to start emitting ctBigInt into a var array, and this
+                // default case (plus its assert) is the tripwire that
+                // forces the question. Before BigInt constants may be
+                // placed in an aux var array, this switch needs a ctBigInt
+                // case that rebuilds the value exactly like
+                // ReadConstantsTable does (decimal string constant ->
+                // FunctionBody-style RecordBigIntConstant / Create), and a
+                // writer change plus a corpus/round-trip test to match.
+                // Version-scheme rejection at the header, not this
+                // default, is what protects old readers from new tags.
 
                 default:
                     AssertMsg(UNREACHED, "Unexpected object type in VarArray");
