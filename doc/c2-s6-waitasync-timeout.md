@@ -1,11 +1,9 @@
 # C2-S6d: finite Atomics.waitAsync timeouts (flag-on slice)
 
-Status: **implemented** — branch `s6-waitasync-timeout`, base `532eab420`,
-implementation `9a6524b8b`, review fixes `d702ea085` (host 32-bit
-due-time wraparound bug + documentation). Focused gates green:
-`zig build check` (test) **583/583** with regression **2026/0**,
-`zig build check -Dprofile=debug-static` **560/560** with regression
-**2078/0**, `check-native` PASS. `ESSharedArrayBuffer` (and `ESBigInt`
+Status: **landed** — implementation `9a6524b8b`, review fixes `d702ea085`,
+receipt fixes through `c71f35ff3`, merge `dd6434127`. Final full gates are
+**2026/0 test** and **2078/0 debug-static** (`zig build check`
+**583/583**). `ESSharedArrayBuffer` (and `ESBigInt`
 for the BigInt64 paths) remain **off by default**; this slice changes no
 default. Supersedes the finite-timeout residual of
 [c2-s6-waitasync.md](c2-s6-waitasync.md) (S6b); everything else in that

@@ -202,9 +202,11 @@ and no full corpus/check.
 
 ## Residuals and risks
 
-- **Finite positive async timeout is unimplemented.** The promise remains
-  pending until notify. A host timer/job mechanism would be needed; adding a
-  background resolver thread would violate the ScriptContext thread contract.
+- Finite positive async timeouts are implemented by S6d when the host installs
+  the optional timer continuation callback
+  ([c2-s6-waitasync-timeout.md](c2-s6-waitasync-timeout.md)). Embedders
+  without that callback retain the pending-until-notify fallback; see that
+  receipt for host granularity and stale-task shutdown limitations.
 - **Cross-agent waitAsync is unimplemented.** `Atomics.notify` ignores and does
   not count async waiters owned by another `ThreadContext`; those waiters stay
   registered until SAB finalization. The skip check uses only the token's cached

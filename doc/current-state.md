@@ -406,8 +406,9 @@ corpus includes post-ES2025 proposals and uses default language flags.
 false accepts fixed in `39e9f2a16`), the flag-on S6a slice has growable
 SharedArrayBuffer plus ES2020 non-shared Atomics (focused S6 574/982;
 112 fail→pass / 0 pass→fail; debug index-detach abort fixed), and S6b adds
-`Atomics.pause` plus single-thread `waitAsync` (80/124; 0 pass→fail), and
-S6c adds BigInt64Array/BigUint64Array Atomics while BigInt and SAB/Atomics
+`Atomics.pause` plus single-thread `waitAsync` with finite timeouts through an
+optional additive host timer callback, and S6c adds
+BigInt64Array/BigUint64Array Atomics while BigInt and SAB/Atomics
 remain off by default. The catch-hidden eval-`arguments`
 under-rejection is closed, the bounded immutable-ArrayBuffer surface is
 landed with explicit JIT/TTD residuals, and both S3 RegExp surfaces are
