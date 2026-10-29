@@ -1,7 +1,7 @@
 # C2-S6d: finite Atomics.waitAsync timeouts (flag-on slice)
 
 Status: **implemented** — branch `s6-waitasync-timeout`, base `532eab420`,
-implementation `9a6524b8b`, review fixes `PENDING_HASH` (host 32-bit
+implementation `9a6524b8b`, review fixes `d702ea085` (host 32-bit
 due-time wraparound bug + documentation). Focused gates green:
 `zig build check` (test) **583/583** with regression **2026/0**,
 `zig build check -Dprofile=debug-static` **560/560** with regression
