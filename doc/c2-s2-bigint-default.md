@@ -1,13 +1,13 @@
 # C2-S2: ESBigInt default-enablement
 
-Status: **flipped** — `DEFAULT_CONFIG_ESBigInt` is now `true`
-(`lib/Common/ConfigFlagsList.h:669`), landed on `s2-bigint-default` on top of
-`52c010c64`. All evidence is Mac ARM64 no-JIT (`-nonative -Test262
--CollectGarbage` for test262); JIT is not claimed (B4). The explicit
-`-ESBigInt` flag still works and `-ESBigInt-` restores the previous
-default-off behavior exactly. Regression gates move **2026/2078 →
-2027/2079** (one new `test/es7/rlexe.xml` entry); `gate_counts.json` was
-NOT edited here — the coordinator owns the pin bump.
+Status: **landed** — default flip `c2961de3e`, review repairs `66aed0c68`,
+final cleanup `cb4e3c720`, merge `f73012a01`. `DEFAULT_CONFIG_ESBigInt` is
+now `true` (`lib/Common/ConfigFlagsList.h:669`). The explicit `-ESBigInt`
+flag still works and `-ESBigInt-` restores the previous default-off behavior
+exactly. Final gates are **2030/0 test** and **2082/0 debug-static**
+(`zig build check` **583/583**); the four new entries are default,
+serialized, disabled, and debugger-display coverage. All evidence is Mac
+ARM64 no-JIT; JIT is not claimed (B4).
 
 ## Audit
 

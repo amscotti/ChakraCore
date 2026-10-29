@@ -853,7 +853,7 @@ asserted the old non-conforming block `var`/`let` behavior were updated
 deliberately. Gates moved 1975/2027 → 1976/2028. No bytecode change; B4
 still owns JIT-configuration claims.)*
 
-## 7. C2 integration status (2026-10-27)
+## 7. C2 integration status (2026-10-29)
 
 | Batch | Status | Integrated evidence | Remaining |
 |---|---|---|---|
@@ -867,7 +867,7 @@ still owns JIT-configuration claims.)*
 | S1 computed field names + instance-field `super` | Landed `894ba5394` (merge `fd893c83f`) | class-elements 1833/255 vs base 1699/389 (2,088 scenarios, lane-run), 67 files f→p / 0 p→f; dual-review ACCEPT | JIT (private names in computed keys closed by S1 tail; eval-super closed below) |
 | S1 async/generator private methods | Landed `7cc057124` (merge `1caf23d67`) | scoped test262 272 f→p / 0 p→f (lane-run); dual-review ACCEPT | JIT |
 | S1 static blocks | Landed `9ba243adb` + fix `6ff088e19` (merge `02f99fc63`) | loop-2 dual-review ACCEPT after defer-scan scope fix; 69/69 node differentials ×3 modes | JIT; bare-`await`/nested-super defer residuals shared with field initializers |
-| S1 tail: direct-eval + computed-key privates, field semantics | Landed `1418c292f` (merge `de92ddb80`) | elements corpus 5,888/5,897 (`out/test262-c2-wave3`), +34/0 vs wave-2 run; dual-review ACCEPT (adversarial re-run) | JIT (3 interpreter-only ops); 4 primitive-receiver scenarios need `-ESBigInt` in runner |
+| S1 tail: direct-eval + computed-key privates, field semantics | Landed `1418c292f` (merge `de92ddb80`); default-BigInt rerun 2026-10-29 | elements corpus 5,888/5,897 (`out/test262-c2-wave3`) → **5,892/5,897** (`out/test262-c2-s1-default-bigint`) after BigInt default-on; +4/0 parse-barrier scenarios | JIT; 4 post-ES2025 accessor grammar; 1 Stage-1 non-extensible |
 | S1 direct-eval `super` early errors | Landed `851d0646f` (merge `ea8f253ac`) + review `39e9f2a16` | `super-prop*` 12/0; eval-code 454/0 (10 f→p / 0 p→f); class elements 5,888/9 unchanged; object-literal function/arrow false accepts fixed; 3 parse-mode entries; legacy expectations corrected | JIT/serialization (B4); pre-existing super[expr] before super() order |
 | S8 Float16Array | Landed `de89e6d27` + fix `161639b48` (merge `a39aa8c45`) | gates 2013/2065 (new float16array.js 17/17); loop-2 dual ACCEPT after GetDiagTypeString fix | JIT kind lowering (B4); Atomics exclusion by allowlist |
 | S8 immutable ArrayBuffer | Landed `ce2179b2a` + review `2fb37b4d6`, `cbf91b796` (merge `4ac863379`) | focused 84/38 default, 118/122 flag-on; adjacent +110 f→p / 0 p→f; new test entry; gates 2022/2074 | JIT fast path, TTD snapshot fidelity, JsRT raw storage, B4 |
@@ -883,6 +883,7 @@ still owns JIT-configuration claims.)*
 | S2 arithmetic/bitwise/shift | Landed `1c5d5b2fc` | scoped 444/2, 80/0; broad 1,027/1,027; Node differentials | BigInt64Array/BigUint64Array, Map/Set identity, literal property names, giant ToString, JIT |
 | S2 BigInt64Array | Landed `f5f0efef5` | 944/0; 958/1016; ctors 24/24, 166/0; internals 163/0 | DataView BigInt, internals, Map/Set identity, SAB, JIT |
 | S2 BigInt collections/DataView | Landed `10154e3f5` | 102/0; 140/4; broad 104/0; class names/DataView length | immutable buffers, SAB, static fields, JIT |
+| S2 BigInt default enablement | Landed `c2961de3e` + repairs `66aed0c68`, `cb4e3c720` (merge `f73012a01`) | affected audit 198/3,237 old-default → 2,531/904 default-on, 2,333/0 f→p/p→f; `-ESBigInt-` restores old profile 0/0; serialization/debugger crashes fixed; 4 new entries | JIT/TTD, JsValueType enum, quadratic ToString, B4 |
 | S8 resizable/transfer | Landed `6ceb23d6d` | focused 424/834, 236/0; ArrayBuffer 358/442; DataView 44/52; Float16 4/4 | immutable buffers, SAB, Float16Array, cross-realm/Reflect order, JsRT/Wasm, JIT |
 | S8 TypedArray tracking | Landed `859b07d13` | focused 132/340, 110/0; combined 150/378, 118/0; expanded 54/0 | BigInt-gated residual; generic Array helpers, toLocaleString element formatting, JIT/TTD |
 | S13 WeakRef | Landed `803331b51` | WeakRef 56/58, 56/0; agent-wide kept set; 200/500-run stability | FinalizationRegistry, symbol WeakMap/WeakSet keys, host-dispatch, concurrent GC/JIT |
@@ -895,24 +896,24 @@ still owns JIT-configuration claims.)*
 | S14 hidden-outer eval `arguments` | Landed `d9a1998d1` (merge `13e925a75`) | catch-hidden top-level lexical now SyntaxError; parameter/simple-catch/with/arrow controls preserved; eval-code 454/0; no gate change | JIT/TTD (B4) |
 | S14 P5 | Landed `8b5f28c06` | 50/50; broad 50/0; wider 65/0 non-import | eval/function-expression; proxy descriptor; JIT |
 
-Full gates at this checkpoint: **2026/0 test**, **2078/0 debug-static**
+Full gates at this checkpoint: **2030/0 test**, **2082/0 debug-static**
 (single-sourced in `tools/build/gate_counts.json`; repair-loop
 `-noDeferParse` rlexe variants moved 2013/2065 → 2016/2068, S6a added
 one entry, eval-super added three parse-mode entries, S6b added the
 waitAsync/pause entry, S8 immutable added one entry, S3-a property
 escapes added one entry, S3-b `v` mode added one entry, S9 u-mode
-strictness added one entry, and S6c BigInt Atomics added one entry). Integrated
+strictness added one entry, S6c BigInt Atomics added one entry, and S2
+BigInt default enablement added four entries). Integrated
 class-elements corpus re-runs 2026-10-20: wave-2
 (`out/test262-c2-s1-wave2`) **5,854/5,897**, 3,865 f→p / 0 p→f vs
 2026-10-19; wave-3 (`out/test262-c2-wave3`, after the S1-tail lane)
-**5,888/5,897 passed (9 failed)**, +34/0 — remaining are 4
-post-ES2025 `accessor` grammar, 4 primitive-receiver scenarios that
-need `-ESBigInt` to parse under the default runner (pass with the
-flag), and 1 Stage-1 non-extensible scenario Node also fails. All
-active feature/triage worktrees are merged. Next work items are the
-remaining S6 flag-on gaps (finite timeout scheduling, cross-agent
-waitAsync, BigInt Atomics, multi-agent wait/grow), the documented
-S8/S2/P-eval residuals, and C4 qualification (full baseline rerun,
+**5,888/5,897 passed (9 failed)**, +34/0. With BigInt now default-on,
+the 2026-10-29 rerun (`out/test262-c2-s1-default-bigint`) is
+**5,892/5,897**: the four former `-ESBigInt` parse-barrier scenarios
+pass; the four post-ES2025 `accessor` grammar scenarios and one Stage-1
+non-extensible scenario remain. All active feature/triage worktrees are
+merged. Next work items are cross-agent waitAsync, the remaining
+S8/P-eval residuals, and C4 qualification (full baseline rerun,
 host-reported negative phase). P5 residual: eval/function-expression
 reference paths and pre-existing proxy descriptor duplication.
 
@@ -923,14 +924,15 @@ and S14; includes the 327 executed parse negatives and failing negatives
 generally. These do not need new features, only correctness work.
 
 **Disabled-feature incompleteness** — default-off flags named in the
-policy, with `ConfigFlagsList.h` anchors: `ESBigInt` (false at :669 —
-flagged path observably incomplete, §5), `ESSharedArrayBuffer` (false at
+policy, with `ConfigFlagsList.h` anchors: `ESSharedArrayBuffer` (false at
 :709 — measured 2026-10-15 in [c2-flag-audits.md](c2-flag-audits.md) §S6:
 zero regressions; defaulting is a product/security decision),
 `ES6RegExSymbols` (false at :692-696 — protocol appears when enabled,
 JIT-helper warning at :1177), `ES6RegExPrototypeProperties` (false at
-:687-690 — no feature tag; measured only by before/after runs). The
-disabled-flag bucket is 3,937 failures, but it *understates* flag effects
+:687-690 — no feature tag; measured only by before/after runs). BigInt is
+now default-on with `-ESBigInt-` as the explicit opt-out. The disabled-flag
+bucket is being reforecast for the remaining flags; the historical BigInt
+portion is closed by [c2-s2-bigint-default.md](c2-s2-bigint-default.md).
 where a test lacks the gating tag (e.g. BigInt64Array failures filed under
 `TypedArray` land in required-feature-missing).
 

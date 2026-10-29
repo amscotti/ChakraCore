@@ -26,12 +26,6 @@
       ],
       "rationale": "DEFAULT_CONFIG_ES6RegExSymbols is false (lib/Common/ConfigFlagsList.h:692-696; flag registered at lib/Common/ConfigFlagsList.h:1180), so the RegExp.prototype[Symbol.*] protocol surface is off by default."
     },
-    "ESBigInt": {
-      "features": [
-        "BigInt"
-      ],
-      "rationale": "DEFAULT_CONFIG_ESBigInt is false (lib/Common/ConfigFlagsList.h:669,1194); baseline host flags do not enable it."
-    },
     "ESSharedArrayBuffer": {
       "features": [
         "SharedArrayBuffer",
