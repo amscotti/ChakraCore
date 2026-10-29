@@ -129,6 +129,8 @@ namespace Js
         static Var EntryToLocaleString(RecyclableObject* function, CallInfo callInfo, ...);
 
         virtual BOOL Equals(Var other, BOOL* value, ScriptContext * requestContext) override;
+        virtual BOOL GetDiagValueString(StringBuilder<ArenaAllocator>* stringBuilder, ScriptContext* requestContext) override;
+        virtual BOOL GetDiagTypeString(StringBuilder<ArenaAllocator>* stringBuilder, ScriptContext* requestContext) override;
 
         static digit_t AddDigit(digit_t a, digit_t b, digit_t * carry);
         static digit_t SubDigit(digit_t a, digit_t b, digit_t * borrow);

@@ -48,7 +48,9 @@ Two real default-enablement gaps were found and fixed by this slice
 
 Corpus `2e0a56762801e275a9fdf96dc49d90ba0cddcf63`; selection = every file
 under `test/language`, `test/built-ins`, `test/annexB` whose path or
-content matches /bigint/i (1,730 files → 3,435 scenarios; BigInt built-ins,
+content matches /bigint/i (1,729 source files → 3,435 scenarios; the
+selection listed 1,730 files but two blocking-host scenarios are skipped
+before execution; BigInt built-ins,
 language BigInt expression/literal/operator/property-name directories,
 BigInt64Array/BigUint64Array incl. `ctors-bigint`/internals, DataView
 BigInt, Map/Set, Atomics BigInt). Pre-flip binary (base `52c010c64`,
@@ -127,13 +129,19 @@ above and fail identically without the flag.)
    `"bigint"` + display string, mirroring Symbol) and `TypeIds_BigIntObject`
    (object group + `GetClassName` `"BigInt"`, mirroring `SymbolObject`).
    No new PropertyIds or cached display strings.
-3. **66+6 debugger baselines**: global-object snapshots now list
+3. **66 debugger baselines total**: global-object snapshots now list
    `BigInt`, `BigInt64Array`, `BigUint64Array`; snapshots that stringify
-   `BigInt.prototype` show `BigInt {...}` instead of `undefined
-   undefined`. Promoted machine-generated `.rebase` output with CRLF
-   preserved, after a JSON-recursive diff proved the first 66 differ only
-   by the three added global keys (0 removals/value changes) and the
-   final 6 only by the `BigInt/prototype` value. (Same procedure as the
+   the `BigInt` constructor's `prototype` child show `BigInt {...}`
+   instead of `undefined undefined`. 60 of the 66 files differ only by
+   the three added global keys (0 removals/value changes); the remaining
+   6 (`ES6_proto_simple`, `ES6_proto_userDefinedObject`,
+   `array_prototest`, `bug_os_2946365`,
+   `step_in_from_interpreted_function_attach`, `targeted`) additionally
+   expand the `BigInt` constructor one level, so they also show its
+   `length`/`name`/`asIntN`/`asUintN` properties and the corrected
+   `prototype: "BigInt {...}"` value. All 66 were promoted from
+   machine-generated `.rebase` output with CRLF preserved after a
+   JSON-recursive diff verified additions-only. (Same procedure as the
    S8 Float16Array flip.)
 
 Public `JsGetValueType` classifies a BigInt as `JsObject` (no
@@ -167,33 +175,136 @@ dylib `59e1481b…`, debug-static `2ebd4a6a…`)
   (`check_regression.py --expected-passed` override; `gate_counts.json`
   pins 2026/2078 must be bumped by the coordinator — consumers follow
   per its `_lineage`).
-- `zig build check` / `check -Dprofile=debug-static` on the final tree:
-  the regression steps fail **only** against the un-bumped pins
-  (expected 2026/2078, actual 2027/2079); every other step passed
-  (580/583 and 557/560 summaries with exactly the two regression-step
-  failures each).
+- `zig build check` / `check -Dprofile=debug-static` on the final tree
+  (re-verified after the repair): the regression steps fail **only**
+  against the un-bumped pins (expected 2026/2078, actual 2030/2082);
+  every other step passed (580/583 and 557/560 summaries with exactly
+  the two regression-step failures each).
 
-## New default-coverage test
+## Coverage tests (default, serialized, disabled, debugger)
 
-`test/es7/bigint-default.js` (registered once, default flags, no
-`-ESBigInt`): 7 checks — global availability, literals/conversions/
-stringification, arithmetic/bitwise/shift/comparison incl. `asIntN`/
-`asUintN`, Map/Set identity, `BigInt64Array`/`BigUint64Array` round-trips
-(INT64_MIN/MAX, >2^53, from/of), DataView BigInt accessors (endianness,
-ToBigInt/ToIndex errors), literal property names, JSON rejection,
-wrappers. Disable behavior (`-ESBigInt-`) is proven by the B3 run and the
-runtime probes above rather than a second pinned entry.
+- `test/es7/bigint-default.js` (default flags, no `-ESBigInt`): 7 checks —
+  global availability, literals/conversions/stringification,
+  arithmetic/bitwise/shift/comparison incl. `asIntN`/`asUintN`, Map/Set
+  identity, `BigInt64Array`/`BigUint64Array` round-trips (INT64_MIN/MAX,
+  >2^53, from/of), DataView BigInt accessors (endianness, ToBigInt/
+  ToIndex errors), literal property names, JSON rejection, wrappers.
+- `test/es7/bigint-serialized.js` (`-Serialized`): literal constants
+  through the bytecode round trip — decimal/hex/octal/binary/separated/
+  negative/zero/multi-limb literals, array literals, literal property
+  names, arithmetic and value identity on restored constants, and a
+  deferred function body whose literals restore on first call.
+- `test/es7/bigint-disabled.js` (`-ESBigInt-`): no top-level BigInt
+  syntax; `eval("1n")`, `Function("return 1n")`, separated/non-decimal
+  forms and a literal property name all throw clean `SyntaxError`, the
+  BigInt global surface is absent, and plain dynamic code still runs.
+- `test/DebuggerCommon/bigint-display.js` (`-dbgbaseline`): primitive
+  display (`bigint 123n` etc.), wrapper display, and evaluation
+  (`decimal + 7n`, `BigInt.asUintN(8, 300n)`, `typeof 1n`).
+
+Total new `rlexe.xml` entries in this batch: 3 es7 + 1 DebuggerCommon
+(bigint-default, bigint-serialized, bigint-disabled, bigint-display).
+Regression pins move **2026/2078 → 2030/2082** (test/debug);
+`gate_counts.json` remains with the coordinator.
+
+## Repair addenda (review blockers)
+
+1. **Bytecode serialization** (`ByteCodeSerializer.cpp`): BigInt literal
+   constants previously reached `PrependVarConstant`'s `default:` and
+   aborted the process (`-Serialized`, `-GenerateParserStateCache`,
+   `JsSerialize`). New `ctBigInt` constant kind: the writer emits the
+   value's exact decimal string (leading `-` for negatives) through the
+   regular string-constant table; the reader re-creates the constant with
+   `FunctionBody::RecordBigIntConstant` — the same entry point the emitter
+   uses — from the digits plus a trailing `n`, with the sign passed
+   separately (a negative zero canonicalizes inside the factory). No
+   binary BigInt limb format; existing
+   cache/version checks are untouched (an old reader rejects the new
+   constant kind through its existing unknown-tag path rather than
+   aborting, and a new file with BigInt constants simply fails those
+   readers' version-scheme check like any other format extension).
+2. **Debugger primitive display** (`JavascriptBigInt.{h,cpp}`): added
+   `GetDiagValueString` (exact decimal digits + trailing `n`, e.g.
+   `-45n`, mirroring Symbol's override shape; one recycler allocation on
+   the debug evaluation thread, the same class the base performs for
+   Number) and `GetDiagTypeString` (`"bigint"`), replacing the previous
+   `"bigint undefined"` value text.
 
 ## Residual / B4
 
-- JIT: `Lower.cpp` object-equality fast path, BigInt inline caches and
-  any `Conv_Numeric` lowering claims remain B4-gated (no-JIT evidence
-  only). TTD BigInt recording/playback unverified.
-- `JsGetValueType` reports `JsObject` for BigInt (public API enum
-  predates BigInt).
-- Debugger: primitive BigInt is displayed like Symbol (type + display
-  string); no debugger UI contract beyond `className "BigInt"` is claimed.
-- `edition-policy.json` ESBigInt classification is stale (shared pin,
-  coordinator follow-up).
-- Performance: quadratic giant-decimal stringification, uncapped
-  BigInt/String equality parsing (unchanged).
+- JIT: `Lower.cpp:23967` keys an object-equality lowering fast path on
+  `!CONFIG_FLAG(ESBigInt)`, read when a function is JIT-compiled; with the
+  flag on (the new default) the generic helper path is used, and a
+  `-ESBigInt-` run re-activates the fast path — either way the choice is
+  per-JIT-compile of the live flag value, so no baked-in default is
+  assumed. No JIT lowering/inline-cache evidence is claimed (B4-gated,
+  no-JIT runs only).
+- TTD: BigInt values in time-travel recording/playback snapshots are not
+  covered by TTSnapValues' typed paths; TTD BigInt recording/playback
+  remains unverified (no TTD gate ran in this batch).
+- `JsGetValueType` reports `JsObject` for a BigInt primitive: the public
+  `JsValueType` enum predates BigInt and has no BigInt member
+  (`lib/Jsrt/Jsrt.cpp` default case). Hosts must use `JsConvertValueToString`
+  or engine-internal type queries.
+- `tools/test262/edition-policy.json` line 33
+  (`disabled_by_default_flags.ESBigInt`) is now doubly stale: the default
+  it cites is flipped (`ConfigFlagsList.h:669` now `true`) and its
+  registration reference `:1194` was already wrong (the FLAGR entry is at
+  `:1197`). Shared C1 pin; NOT edited here — the C1 owner should move
+  `BigInt` out of the disabled-flag bucket so future default-run
+  BigInt-tagged failures classify as real.
+- Performance: quadratic giant-decimal `ToString`, uncapped BigInt/String
+  equality parsing, and (new with serialization) decimal re-encoding of
+  BigInt literal constants at serialize time share the same quadratic
+  converter (unchanged behavior class).
+
+
+### Repair evidence
+
+- Crash repros before the fix: `ch -Serialized` and
+  `ch -GenerateParserStateCache` on `var q=1n;` both exited 134
+  (`PrependVarConstant` default case -> `Throw::FatalInternalError`,
+  crash report `ch-2026-10-29-142719.ips`). After the fix both run clean
+  (`1 255 -3 5` round trip; parser-state hex dump; rc 0), on the test and
+  debug-static binaries, including arrays and deferred function bodies.
+- `test/es7/bigint-serialized.js` (`-Serialized`): **pass** on both
+  profiles; `test/es7/bigint-disabled.js` (`-ESBigInt-`): **pass** on
+  both; `test/DebuggerCommon/bigint-display.js` (`-debuglaunch`,
+  `-dbgbaseline`): **pass** on both with a machine-generated CRLF
+  baseline showing `decimal: "bigint 123n"`, `negative: "bigint -45n"`,
+  `zero: "bigint 0n"`, `multiLimb: "bigint <large string>"`, the wrapper
+  expansion (`BigInt {...}`), and evaluations `decimal + 7n ->
+  "bigint 130n"`, `BigInt.asUintN(8, 300n) -> "bigint 44n"`,
+  `typeof 1n -> "string bigint"`.
+- Focused matrix (`test/es7` + `test/BigInt`, `--variants=disable_jit`):
+  default **105/105** on both profiles; also green with `-ESBigInt`,
+  `-nodeferparse`, `-forcedeferparse` (one non-BigInt synthetic-mode
+  artifact, `finalization-registry-errors.js` under duplicated
+  `-CollectGarbage`, byte-identical output with `-ESBigInt-`). Extra-flag
+  `-Serialized` mode fails six pre-existing non-Serialized tests
+  (deferparseclass, eval-super-early x3, PromiseRejectionTracking,
+  finalization-registry-errors) that have no `-Serialized` registration —
+  assertion/baseline mismatches, not crashes.
+- No-literal-source-crash sweep: every `test/es7/bigint*.js`,
+  `s6-bigint-atomics.js` and `test/BigInt/*.js` file run under
+  `-Serialized`, `-GenerateParserStateCache` and plain modes on the test
+  binary with zero signal exits, and under `-Serialized` on debug-static
+  with two exceptions that are a pre-existing non-BigInt host assert:
+  `WScript.LoadScript(..., 'samethread')` cross-context marshalling under
+  `-Serialized` asserts at `JsrtHelper.cpp:54` on debug builds —
+  reproduced with `var val = 5;` and no BigInt content.
+- Full regression after the repair: **2030/0 test** and **2082/0
+  debug-static** (`check_regression.py --expected-passed` overrides;
+  +4 entries over the 2026/2078 base pins).
+
+### Final post-repair joins (repaired binaries: test launcher `ch`
+`89e5833d…` — unchanged, it loads the engine dynamically — test engine
+`libChakraCore.dylib` `fec27ca2…`, debug-static `ch` `87a6c88e…`)
+
+- **Final default (B1c) vs prior flag-on (A1), 3,435 scenarios:
+  0 fail→pass / 0 pass→fail** — per-scenario identical, so the repair
+  changed no engine-observable result.
+- **Final `-ESBigInt-` (B3b) vs prior default-off (A2): 0/0 flips** —
+  the disable flag still restores the previous default exactly.
+- **Final default (B1c) vs prior default-off (A2): 2,333 fail→pass /
+  0 pass→fail** — unchanged from the pre-repair measurement.

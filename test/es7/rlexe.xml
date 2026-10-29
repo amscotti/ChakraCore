@@ -487,6 +487,18 @@
   </test>
   <test>
     <default>
+      <files>bigint-serialized.js</files>
+      <compile-flags>-Serialized -args summary -endargs</compile-flags>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>bigint-disabled.js</files>
+      <compile-flags>-ESBigInt- -args summary -endargs</compile-flags>
+    </default>
+  </test>
+  <test>
+    <default>
       <files>regexp-modifiers.js</files>
       <compile-flags>-args summary -endargs</compile-flags>
     </default>
