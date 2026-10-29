@@ -23,6 +23,17 @@
 
 using namespace std;
 
+// S6d: JsSetTimerContinuationCallback install/uninstall round-trip. The
+// callback is optional and additive; SharedArrayBuffer/Atomics are flag-gated
+// off in this sample, so nothing schedules delayed tasks — the round-trip
+// checks the per-context set/unset contract only.
+static void TimerContinuationCallback(JsValueRef task, unsigned int delayMilliseconds, void *callbackState)
+{
+    (void)task;
+    (void)delayMilliseconds;
+    (void)callbackState;
+}
+
 int main()
 {
     JsRuntimeHandle runtime;
@@ -40,6 +51,10 @@ int main()
 
     // Now set the current execution context.
     JsSetCurrentContext(context);
+
+    // Optional timer continuation callback: set, run a script, unset.
+    FAIL_CHECK(JsSetTimerContinuationCallback(TimerContinuationCallback, nullptr));
+    FAIL_CHECK(JsSetTimerContinuationCallback(nullptr, nullptr));
 
     JsValueRef fname;
     FAIL_CHECK(JsCreateString("sample", strlen("sample"), &fname));

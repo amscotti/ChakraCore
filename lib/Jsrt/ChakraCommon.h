@@ -772,6 +772,36 @@ typedef unsigned short uint16_t;
     typedef void (CHAKRA_CALLBACK *JsPromiseContinuationCallback)(_In_ JsValueRef task, _In_opt_ void *callbackState);
 
     /// <summary>
+    ///     A timer (delayed task) continuation callback.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///     The host can optionally specify a timer continuation callback in
+    ///     <c>JsSetTimerContinuationCallback</c>. When the engine creates a delayed task
+    ///     (currently a finite <c>Atomics.waitAsync</c> timeout), the callback is invoked
+    ///     with the task, represented as a JavaScript function, and a minimum delay in
+    ///     milliseconds. The host must run the task no earlier than the requested delay,
+    ///     on a thread on which it may call into the runtime that created the task.
+    ///     </para>
+    ///     <para>
+    ///     The host owns the <c>task</c> reference from the callback until it has called
+    ///     or dropped the task (<c>JsAddRef</c>/<c>JsRelease</c>). The callback is
+    ///     optional: features that need it degrade to their pending behavior when it is
+    ///     not installed, and the engine never throws for its absence. The host must not
+    ///     throw exceptions across the callback boundary.
+    ///     </para>
+    ///     <para>
+    ///     The delay is a minimum within the host's own timer granularity; the engine
+    ///     supplies whole milliseconds and requires no sub-millisecond precision, and a
+    ///     task handed to the callback carries no cancellation handle.
+    ///     </para>
+    /// </remarks>
+    /// <param name="task">The delayed task, represented as a JavaScript function.</param>
+    /// <param name="delayMilliseconds">The minimum delay, in milliseconds, before the task should run.</param>
+    /// <param name="callbackState">The data argument to be passed to the callback.</param>
+    typedef void (CHAKRA_CALLBACK *JsTimerContinuationCallback)(_In_ JsValueRef task, _In_ unsigned int delayMilliseconds, _In_opt_ void *callbackState);
+
+    /// <summary>
     ///     Creates a new runtime.
     /// </summary>
     /// <param name="attributes">The attributes of the runtime to be created.</param>
@@ -2454,6 +2484,29 @@ typedef unsigned short uint16_t;
     CHAKRA_API
         JsSetPromiseContinuationCallback(
             _In_opt_ JsPromiseContinuationCallback promiseContinuationCallback,
+            _In_opt_ void *callbackState);
+
+    /// <summary>
+    ///     Sets a timer (delayed task) continuation callback for the current context.
+    /// </summary>
+    /// <remarks>
+    ///     <para>
+    ///     Requires an active script context. The callback is optional (default unset);
+    ///     without it, engine features that need delayed tasks — currently finite
+    ///     positive <c>Atomics.waitAsync</c> timeouts — keep their pending behavior
+    ///     instead of scheduling. Existing promise continuation behavior is unchanged.
+    ///     </para>
+    /// </remarks>
+    /// <param name="timerContinuationCallback">The callback function being set; <c>nullptr</c> unsets it.</param>
+    /// <param name="callbackState">
+    ///     User provided state that will be passed back to the callback.
+    /// </param>
+    /// <returns>
+    ///     The code <c>JsNoError</c> if the operation succeeded, a failure code otherwise.
+    /// </returns>
+    CHAKRA_API
+        JsSetTimerContinuationCallback(
+            _In_opt_ JsTimerContinuationCallback timerContinuationCallback,
             _In_opt_ void *callbackState);
 
     /// <summary>

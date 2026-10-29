@@ -83,6 +83,7 @@ public:
     static JsErrorCode ReportModuleCompletionCallback(JsModuleRecord module, JsValueRef exception);
     static JsErrorCode CALLBACK InitializeImportMetaCallback(_In_opt_ JsModuleRecord referencingModule, _In_opt_ JsValueRef importMetaVar);
     static void CALLBACK PromiseContinuationCallback(JsValueRef task, void *callbackState);
+    static void CALLBACK TimerContinuationCallback(JsValueRef task, unsigned int delayMilliseconds, void *callbackState);
     static void CALLBACK PromiseRejectionTrackerCallback(JsValueRef promise, JsValueRef reason, bool handled, void *callbackState);
 
     static LPCWSTR ConvertErrorCodeToMessage(JsErrorCode errorCode)

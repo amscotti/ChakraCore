@@ -6,6 +6,13 @@
 
 namespace Js
 {
+    template <> bool VarIsImpl<AtomicsWaitAsyncTimeoutTaskFunction>(RecyclableObject* obj)
+    {
+        return VarIs<JavascriptFunction>(obj) &&
+            (VirtualTableInfo<AtomicsWaitAsyncTimeoutTaskFunction>::HasVirtualTable(obj) ||
+             VirtualTableInfo<CrossSiteObject<AtomicsWaitAsyncTimeoutTaskFunction>>::HasVirtualTable(obj));
+    }
+
 #if DBG
     void SharedContents::AddAgent(DWORD_PTR agent)
     {
@@ -1034,11 +1041,7 @@ namespace Js
             buffer->RemoveAsyncWaiter(this);
         }
 
-        JavascriptLibrary* library = scriptContext->GetLibrary();
-        JavascriptPromise::TryCallResolveOrRejectHandler(
-            capability->GetResolve(),
-            library->CreateStringFromCppLiteral(_u("ok")),
-            scriptContext);
+        ResolveWith(_u("ok"));
     }
 
     void AtomicsAsyncWaiter::Abandon()
@@ -1048,6 +1051,98 @@ namespace Js
         // write, so only mark the record settled; the wrapper keeps it rooted
         // until finalization and the promise intentionally stays pending.
         settled = true;
+    }
+
+    void AtomicsAsyncWaiter::SetRegistration(AtomicsAsyncWaiterRegistration* registration)
+    {
+        // Called under the waiter-list lock, after WaiterList::AddAsyncWaiter
+        // set registration->waiterList. Plain non-traced links: the token is
+        // native-heap owned by the wrapper; the task roots the whole chain
+        // (task -> record -> wrapper -> token/SharedContents), so the links
+        // stay valid while the record is live and unsettled.
+        Assert(registration != nullptr);
+        Assert(registration->waiterList != nullptr);
+        this->registration = registration;
+    }
+
+    bool AtomicsAsyncWaiter::TryClaimForTimeout()
+    {
+        // Runs on the registrant's script thread from the host-delayed timeout
+        // task. `settled` is checked before any dereference of the cached
+        // native links: the paths that release the token while this task can
+        // still run are notify resolution and cross-agent Abandon, and both
+        // set settled first. Wrapper finalization deletes tokens WITHOUT
+        // setting settled, but it cannot race a live task: the host-held task
+        // roots the record, which roots the wrapper, so an unlinked task's
+        // wrapper is never finalized (the stale task is simply a no-op).
+        if (settled || registration == nullptr)
+        {
+            return false;
+        }
+
+        WaiterList* waiterList = registration->waiterList;
+        Assert(waiterList != nullptr);
+        AutoCriticalSection autoCS(waiterList->GetCriticalSectionForAccess());
+
+        // Re-check under the lock: the notify path removes the token and
+        // settles the record inside this same critical section.
+        if (settled)
+        {
+            return false;
+        }
+
+        settled = true;
+
+        // Unlink while holding the lock so a later notify counts 0 and cannot
+        // resolve. csForAccess is recursive, so WaiterList::RemoveAsyncWaiter
+        // re-entry below is safe. JavascriptSharedArrayBuffer::RemoveAsyncWaiter
+        // deletes the token; nothing may touch `registration` afterwards.
+        waiterList->RemoveAsyncWaiter(registration);
+        if (buffer != nullptr)
+        {
+            buffer->RemoveAsyncWaiter(this);
+        }
+        registration = nullptr;
+
+        return true;
+    }
+
+    void AtomicsAsyncWaiter::ResolveTimedOutAfterClaim()
+    {
+        // Claim (settle + unlink) already happened under the waiter-list lock
+        // in TryClaimForTimeout; resolution runs strictly outside it.
+        Assert(settled);
+        ResolveWith(_u("timed-out"));
+    }
+
+    Var AtomicsAsyncWaiter::EntryTimeoutTask(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+        ARGUMENTS(args, callInfo);
+        Assert(!(callInfo.Flags & CallFlags_New));
+
+        AtomicsWaitAsyncTimeoutTaskFunction* task = VarTo<AtomicsWaitAsyncTimeoutTaskFunction>(function);
+        AtomicsAsyncWaiter* waiter = task->GetWaiter();
+        if (waiter->TryClaimForTimeout())
+        {
+            waiter->ResolveTimedOutAfterClaim();
+        }
+        // else: notify (or cross-agent Abandon) already settled the waiter;
+        // the late timeout task no-ops without touching the released token.
+        return function->GetScriptContext()->GetLibrary()->GetUndefined();
+    }
+
+    template <size_t N>
+    void AtomicsAsyncWaiter::ResolveWith(const char16 (&outcome)[N])
+    {
+        // Shared settle tail. Callers have settled and unlinked the waiter;
+        // resolution happens outside the waiter-list critical section because
+        // it allocates and enqueues promise reactions.
+        JavascriptLibrary* library = scriptContext->GetLibrary();
+        JavascriptPromise::TryCallResolveOrRejectHandler(
+            capability->GetResolve(),
+            library->CreateStringFromCppLiteral(outcome),
+            scriptContext);
     }
 
     bool AgentOfBuffer::AgentCanSuspend(ScriptContext *scriptContext)
