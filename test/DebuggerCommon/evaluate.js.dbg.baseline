@@ -108,7 +108,10 @@
     "evaluate": {
       "  this  ": {
         "Symbol.toStringTag": "string global",
+        "BigInt": "function function BigInt() { [native code] }",
         "Float16Array": "function function Float16Array() { [native code] }",
+        "BigInt64Array": "function function BigInt64Array() { [native code] }",
+        "BigUint64Array": "function function BigUint64Array() { [native code] }",
         "WeakRef": "function function WeakRef() { [native code] }",
         "FinalizationRegistry": "function function FinalizationRegistry() { [native code] }",
         "not_used": "number 0"
@@ -164,7 +167,10 @@
     "evaluate": {
       "  this  ": {
         "Symbol.toStringTag": "string global",
+        "BigInt": "function function BigInt() { [native code] }",
         "Float16Array": "function function Float16Array() { [native code] }",
+        "BigInt64Array": "function function BigInt64Array() { [native code] }",
+        "BigUint64Array": "function function BigUint64Array() { [native code] }",
         "WeakRef": "function function WeakRef() { [native code] }",
         "FinalizationRegistry": "function function FinalizationRegistry() { [native code] }",
         "not_used": "number 0"

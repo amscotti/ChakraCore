@@ -211,6 +211,14 @@ void JsrtDebugUtils::AddPropertyType(Js::DynamicObject * object, Js::IDiagObject
             addDisplay = true;
             break;
 
+        case Js::TypeIds_BigInt:
+            // Like Symbol: expose the type plus the display string (decimal
+            // value); reached whenever a BigInt primitive appears in a
+            // debugger object snapshot now that ESBigInt is on by default.
+            JsrtDebugUtils::AddPropertyToObject(object, JsrtDebugPropertyId::type, _u("bigint"), 6, scriptContext);
+            addDisplay = true;
+            break;
+
         case Js::TypeIds_Function:
             JsrtDebugUtils::AddPropertyToObject(object, JsrtDebugPropertyId::type, scriptContext->GetLibrary()->GetFunctionTypeDisplayString(), scriptContext);
             addDisplay = true;
@@ -277,6 +285,7 @@ void JsrtDebugUtils::AddPropertyType(Js::DynamicObject * object, Js::IDiagObject
         case Js::TypeIds_WeakRef:
         case Js::TypeIds_FinalizationRegistry:
         case Js::TypeIds_SymbolObject:
+        case Js::TypeIds_BigIntObject:
         case Js::TypeIds_Generator:
         case Js::TypeIds_AsyncGenerator:
         case Js::TypeIds_AsyncFromSyncIterator:
@@ -485,6 +494,7 @@ const char16 * JsrtDebugUtils::GetClassName(Js::TypeId typeId)
     case Js::TypeIds_WeakRef:               return _u("WeakRef");
     case Js::TypeIds_FinalizationRegistry:  return _u("FinalizationRegistry");
     case Js::TypeIds_SymbolObject:          return _u("Symbol");
+    case Js::TypeIds_BigIntObject:          return _u("BigInt");
     case Js::TypeIds_Generator:             return _u("Generator");
     case Js::TypeIds_AsyncGenerator:        return _u("AsyncGenerator");
     case Js::TypeIds_AsyncFromSyncIterator: return _u("AsyncFromSyncIterator");
