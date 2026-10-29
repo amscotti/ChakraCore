@@ -152,8 +152,11 @@ Tests: test/es7/s6-waitasync-pause.js (1ms/multi/sub-ms/GC-survival
 Mac ARM64 (aarch64-apple-macos.26.0), test profile (RelWithDebInfo, no JIT)
 and debug-static, shared gate lock (`sh /tmp/opencode/cc-gate-lock.sh`),
 local `.zig-cache`/`out`; no `--prepare`, no full corpus/check. Every
-authoritative build/test262 command ran through the gate lock. Node runner
-**v22.22.3** (the machine's current default; S6b/S6c recorded v26.5.0).
+authoritative build/test262 command ran through the gate lock. Node runner:
+the base/after and Atomics/SAB + wait/notify adjacency runs used
+**v22.22.3**; the post-fix `after2` waitAsync re-run used **v26.5.0** (the
+machine's default `node` changed between runs; recorded per artifact in
+each `summary.json`).
 Binaries (SHA-256, launcher + dylib): after `06bf1875…`/`9e2a7133…`
 (`out/s6d-after-bin`), base `cd29fd50…`/`0422fea8…` (`out/s6d-base-bin`,
 built from the stashed tree at `532eab420`).
@@ -267,7 +270,8 @@ Post-fix re-verification (fixed tree, binaries
   `zig build check -Dprofile=debug-static` **560/560**, regression
   **2078/0 PASS**, metadata PASS (static archive 526 members + 8 JsRT
   symbols unchanged).
-- test262 `waitAsync/**` re-run on the fixed binary: **122/80, identical
+- test262 `waitAsync/**` re-run on the fixed binary (Node **v26.5.0**):
+  **122/80, identical
   scenario-for-scenario to the pre-fix after artifact (0 diffs), +6/0
   vs base** — the host fix flips nothing.
 - Engine code delta in the fix is comment-only (SharedArrayBuffer
@@ -281,10 +285,11 @@ Post-fix re-verification (fixed tree, binaries
   scenarios; a cross-`ThreadContext` notify still leaves the waiter
   registered (it `Abandon`s the record, which deliberately makes the
   timeout task a no-op).
-- TTD record/replay does not schedule or replay finite timeouts (guarded in
-  `EntryWaitAsync` and `TTDAssert`ed in `EnqueueDelayedTask`); **not
-  exercised** in this slice's evidence — consistent with S6b/S6c, which
-  also ran no TTD.
+- TTD: recording **verified** — finite timeouts stay pending while
+  recording and no delayed task is scheduled; replay is **not exercisable**
+  in the current ch host due to a pre-existing host replay assert, so no
+  replay behavior is claimed; the release (non-TTD) path resolves normally.
+  Guards live in `EntryWaitAsync` and `EnqueueDelayedTask`'s `TTDAssert`.
 - The engine still has no host-independent timer: embedders without the new
   callback keep pending promises for finite timeouts (documented fallback,
   unchanged from S6b; the API round-trip is proven, uninstalled-callback

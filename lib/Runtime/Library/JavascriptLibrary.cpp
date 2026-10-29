@@ -5713,6 +5713,8 @@ namespace Js
         // The host timer queue is not modeled in TTD: callers must not schedule
         // delayed tasks while recording or replaying (finite waitAsync timeouts
         // stay pending instead; guarded in AtomicsObject::EntryWaitAsync).
+        // Recording verified; replay is not exercisable in the current ch host
+        // (pre-existing host replay assert), so no replay claim is made.
         TTDAssert(!this->scriptContext->ShouldPerformRecordOrReplayAction(), "Delayed tasks are not modeled in TTD!!!");
 #endif
 

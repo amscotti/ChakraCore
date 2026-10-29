@@ -421,6 +421,10 @@ namespace Js
         // the optional timer continuation callback. Without it (or while TTD is
         // recording/replaying — the host timer queue is not modeled there) the
         // promise stays pending until notify: the S6b documented fallback.
+        // TTD status: recording verified (finite timeouts stay pending, no
+        // delayed-task scheduling); replay is not exercisable in the current
+        // ch host due to a pre-existing host replay assert, so no replay
+        // behavior is claimed; the release (non-TTD) path resolves normally.
         const bool scheduleTimeout =
             realTimeout > 0 && library->HasNativeHostTimerContinuationCallback()
 #if ENABLE_TTD

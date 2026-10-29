@@ -2558,9 +2558,11 @@ void WScriptJsrt::TimerContinuationCallback(JsValueRef task, unsigned int delayM
     // constructor AddRefs the delayed task and its destructor releases it
     // after the call or on queue teardown. InsertSorted stamps the absolute
     // due time (now + delay, 64-bit), and ProcessAll drains the queue on the
-    // thread that ran the script, sleeping until the delay has elapsed, so
-    // the task never runs before its minimum delay and never off the script
-    // thread.
+    // thread that ran the script, so a task never runs off the script thread
+    // and runs no earlier than requested within host clock/sleep granularity
+    // (a measured few-ms early fire remains: the ms-truncated tick source and
+    // the single CLOCK_REALTIME-served Sleep can wake just before the
+    // monotonic deadline; see MessageQueue.h).
     //
     // Review note (S6d): a delayed task is a one-shot with no cancellation
     // handle. A notify that settles the waiter does NOT remove its host task

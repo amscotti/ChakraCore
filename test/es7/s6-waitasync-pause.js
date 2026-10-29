@@ -381,7 +381,7 @@ WScript.SetTimeout(function () {
         check(timeoutWinNotifyCount === 0, "notify after a timeout counts 0, got " + timeoutWinNotifyCount);
         check(pendOutcomes.join(",") === "ok,ok,ok",
             "NaN/+Infinity/omitted resolved via notify after staying pending, got " + pendOutcomes.join(","));
-        // Huge delays must still be pending here (~150ms in): a 32-bit
+        // Huge delays must still be pending at this 100ms callback: a 32-bit
         // due-time wrap would have resolved them "timed-out" at drain start.
         check(hugeOutcomes[0] === "pending" && hugeOutcomes[1] === "pending",
             "huge clamped delays stay pending (no 32-bit due-time wrap), got " + hugeOutcomes.join(","));
