@@ -87,10 +87,13 @@ namespace Js
 
         // Plain (non-traced) native links to the registration token, cached at
         // registration. Only read by TryClaimForTimeout on the registrant's
-        // script thread after checking settled: every path that deletes the
-        // token (notify resolution, SAB finalization) first sets settled, and
-        // while the token is alive the task roots the record, which roots the
-        // wrapper, which owns the token and the SharedContents (waiter list).
+        // script thread after checking settled: notify resolution and
+        // cross-agent Abandon set settled before releasing the token, and SAB
+        // finalization — which deletes tokens without setting settled —
+        // cannot race a live task, because the task roots the record, which
+        // roots the wrapper that owns the token and the SharedContents
+        // (waiter list). The chain makes every cached pointer valid while the
+        // record is live.
         AtomicsAsyncWaiterRegistration* registration;
     };
 

@@ -8,7 +8,19 @@
 class MessageBase
 {
 private:
-    unsigned int m_time;
+    // Absolute due time in 64-bit monotonic ticks (PAL GetTickCount64, ms).
+    // This must stay 64-bit: 32-bit storage wrapped for large valid delays
+    // (the timer continuation callback can receive up to UINT32_MAX ms ≈
+    // 49.7 days — Atomics.waitAsync clamps there — and GetTickCount itself
+    // wraps every ~49.7 days), which made a far-future task due in the past
+    // so it fired immediately instead of staying pending.
+    //
+    // Precision: the tick source is millisecond-truncated from a monotonic
+    // clock, and PAL Sleep is served against CLOCK_REALTIME, so the single
+    // Sleep in PopAndWait may wake a few milliseconds before the monotonic
+    // deadline (the queue does not re-check after sleeping). The host timer
+    // contract is a minimum delay, not sub-millisecond precision.
+    unsigned long long m_time;
     unsigned int m_id;
 
     static unsigned int s_messageCount;
@@ -19,8 +31,8 @@ public:
     MessageBase(unsigned int time) : m_time(time), m_id(s_messageCount++) { }
     virtual ~MessageBase() { }
 
-    void BeginTimer() { m_time += GetTickCount(); };
-    unsigned int GetTime() { return m_time; };
+    void BeginTimer() { m_time += GetTickCount64(); };
+    unsigned long long GetTime() { return m_time; };
     unsigned int GetId() { return m_id; };
 
     virtual HRESULT Call(LPCSTR fileName) = 0;
@@ -176,14 +188,17 @@ class MessageQueue
 {
     struct ListEntry
     {
-        unsigned int time;
+        // Absolute due time (64-bit monotonic ticks); see MessageBase::m_time.
+        unsigned long long time;
         MessageBase* message;
 
-        ListEntry(unsigned int time, MessageBase* message):
+        ListEntry(unsigned long long time, MessageBase* message):
             time(time),
             message(message)
         { }
 
+        // Strict less-than keeps FIFO order for equal due times: SortedList
+        // inserts after existing equals, so ties run in insertion order.
         static bool LessThan(const ListEntry& first, const ListEntry& second)
         {
             return first.time < second.time;
@@ -196,7 +211,7 @@ public:
     void InsertSorted(MessageBase *message)
     {
         message->BeginTimer();
-        unsigned int time = message->GetTime();
+        unsigned long long time = message->GetTime();
         m_queue.Insert(ListEntry(time, message));
     }
 
@@ -207,10 +222,15 @@ public:
         ListEntry entry = m_queue.Pop();
         MessageBase *tmp = entry.message;
 
-        int waitTime = tmp->GetTime() - GetTickCount();
-        if(waitTime > 0)
+        // 64-bit difference: a far-future due time (e.g. UINT32_MAX ms from
+        // a clamped waitAsync timeout) no longer wraps negative. Sleep takes
+        // a DWORD, which covers the maximum possible gap; clamp defensively.
+        const long long waitTime = (long long)(tmp->GetTime() - GetTickCount64());
+        if (waitTime > 0)
         {
-            Sleep(waitTime);
+            unsigned long long clamped =
+                waitTime > (long long)UINT32_MAX ? (unsigned long long)UINT32_MAX : (unsigned long long)waitTime;
+            Sleep((DWORD)clamped);
         }
 
         return tmp;

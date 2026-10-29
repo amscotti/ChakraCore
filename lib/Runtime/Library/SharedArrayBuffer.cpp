@@ -1069,9 +1069,12 @@ namespace Js
     {
         // Runs on the registrant's script thread from the host-delayed timeout
         // task. `settled` is checked before any dereference of the cached
-        // native links: every path that releases the token (notify resolution,
-        // wrapper finalization, cross-agent Abandon) first sets settled, so a
-        // late task after a notify win never touches the freed token.
+        // native links: the paths that release the token while this task can
+        // still run are notify resolution and cross-agent Abandon, and both
+        // set settled first. Wrapper finalization deletes tokens WITHOUT
+        // setting settled, but it cannot race a live task: the host-held task
+        // roots the record, which roots the wrapper, so an unlinked task's
+        // wrapper is never finalized (the stale task is simply a no-op).
         if (settled || registration == nullptr)
         {
             return false;

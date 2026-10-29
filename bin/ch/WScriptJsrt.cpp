@@ -2557,9 +2557,19 @@ void WScriptJsrt::TimerContinuationCallback(JsValueRef task, unsigned int delayM
     // Exactly the WScript.SetTimeout mechanism: the CallbackMessage
     // constructor AddRefs the delayed task and its destructor releases it
     // after the call or on queue teardown. InsertSorted stamps the absolute
-    // due time (now + delay), and ProcessAll drains the queue on the thread
-    // that ran the script, sleeping until the delay has elapsed, so the task
-    // never runs before its minimum delay and never off the script thread.
+    // due time (now + delay, 64-bit), and ProcessAll drains the queue on the
+    // thread that ran the script, sleeping until the delay has elapsed, so
+    // the task never runs before its minimum delay and never off the script
+    // thread.
+    //
+    // Review note (S6d): a delayed task is a one-shot with no cancellation
+    // handle. A notify that settles the waiter does NOT remove its host task
+    // from this queue — the stale task is a no-op when it finally runs, but
+    // ProcessAll still sleeps until its due time, so a queued far-future
+    // task (up to UINT32_MAX ms) delays process exit at shutdown. Hosts that
+    // need prompt shutdown require a future cancellation-handle extension to
+    // JsSetTimerContinuationCallback's task API; ch deliberately does not
+    // fake cancellation.
     WScriptJsrt::CallbackMessage *msg = new WScriptJsrt::CallbackMessage(delayMilliseconds, task);
     messageQueue->InsertSorted(msg);
 }

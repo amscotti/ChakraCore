@@ -1,12 +1,13 @@
 # C2-S6d: finite Atomics.waitAsync timeouts (flag-on slice)
 
 Status: **implemented** — branch `s6-waitasync-timeout`, base `532eab420`,
-commit `c37a1c255`. Focused gates green: `zig build check` (test) **583/583**
-with regression **2026/0**, `zig build check -Dprofile=debug-static`
-**560/560** with regression **2078/0**, `check-native` PASS.
-`ESSharedArrayBuffer` (and `ESBigInt` for the BigInt64 paths) remain
-**off by default**; this slice changes no default.
-Supersedes the finite-timeout residual of
+implementation `9a6524b8b`, review fixes `PENDING_HASH` (host 32-bit
+due-time wraparound bug + documentation). Focused gates green:
+`zig build check` (test) **583/583** with regression **2026/0**,
+`zig build check -Dprofile=debug-static` **560/560** with regression
+**2078/0**, `check-native` PASS. `ESSharedArrayBuffer` (and `ESBigInt`
+for the BigInt64 paths) remain **off by default**; this slice changes no
+default. Supersedes the finite-timeout residual of
 [c2-s6-waitasync.md](c2-s6-waitasync.md) (S6b); everything else in that
 receipt is unchanged.
 
@@ -122,8 +123,10 @@ TTD: not modeled — no scheduling while ShouldPerformRecordOrReplayAction;
         EnqueueDelayedTask TTDAsserts the same precondition
 Tests: test/es7/s6-waitasync-pause.js (1ms/multi/sub-ms/GC-survival
         timeouts, notify-wins + late no-op, timeout-wins + late notify 0,
-        NaN/+Infinity pending controls, unregistration checks),
-        test/es7/s6-bigint-atomics.js (BigInt64 finite timeouts + notify
+        NaN/+Infinity pending controls, unregistration checks,
+        huge-clamped-delay wrap regression — pending at 100ms then
+        Quit-bounded exit before the ~49.7-day drain), test/es7/
+        s6-bigint-atomics.js (BigInt64 finite timeouts + notify
         wins), test/native-tests/test-shared-basic/sample.cpp (API
         install/uninstall round-trip)
 ```
@@ -178,7 +181,10 @@ built from the stashed tree at `532eab420`).
   the debug-static binary in the registered, `-nodeferparse` and no-GC
   modes. The base binary **fails exactly the 8 new finite-timeout checks**
   (exit 1) and still passes every S6b check — precise before/after
-  discrimination.
+  discrimination; the base run of `s6-bigint-atomics.js` fails **exactly
+  its 2 new checks** (`BigInt64 finite timeout resolved to timed-out, got
+  ok` — the timer never fired — and `notify after a BigInt64 timeout
+  counts 0, got 1`).
 - Extended `test/es7/s6-bigint-atomics.js` (BigInt64 finite timeout →
   `"timed-out"`, notify-before-timeout wins, late notify counts 0):
   **pass** on the test binary (registered, `-nodeferparse`,
@@ -194,8 +200,12 @@ built from the stashed tree at `532eab420`).
   `-ESSharedArrayBuffer` and with both flags + GC; `atomics_test.js`
   16/16 with both flag sets; `sharedarraybuffer.js` 7/7;
   `bigint64array.js` 10/10 (both flags + GC).
-- Pinned test262 `2e0a56762801e275a9fdf96dc49d90ba0cddcf63`, 20 controls
-  passed per run, host flags
+- Pinned test262 `2e0a56762801e275a9fdf96dc49d90ba0cddcf63`, controls
+  **20 scenarios per run, all verified**: **12 must-pass scenarios pass**
+  plus **8 deliberate-failure sentinels verified failing** (3 fail at the
+  validator — `fail-assert`, `fail-exit`, `fail-wrong-error` — and 5
+  `fail-wrong-phase-*` pass the naive validator but are downgraded by
+  run.py's negative-phase evidence check). Host flags
   `-ESBigInt -ESSharedArrayBuffer -nonative -Test262 -CollectGarbage`,
   jobs 6, timeout 10s (`tools/test262/run.py`, artifacts
   `out/test262-s6d2-*`):
@@ -222,6 +232,48 @@ built from the stashed tree at `532eab420`).
   set/unset contract is proven natively; task delivery is proven through
   the ch host probes/tests.
 
+### Review fix: host 32-bit due-time wraparound (blocking)
+
+The `9a6524b8b` ch queue stored absolute due times as 32-bit
+`GetTickCount` sums, so a huge-but-valid delay (the engine clamps
+`waitAsync` to `UINT32_MAX` ms ≈ 49.7 days) wrapped into the past and the
+task resolved `"timed-out"` immediately. Probe on the `9a6524b8b` binary:
+`Atomics.waitAsync(ta,0,0,4294967294)` and `(ta,1,0,1e308)` printed
+`huge-outcomes=timed-out,timed-out`; after converting
+`MessageBase::m_time`/`ListEntry::time` and the `PopAndWait` comparison
+to 64-bit `GetTickCount64()` ticks (PAL provides it; `Sleep` still takes
+a DWORD, which covers the maximum `UINT32_MAX` ms gap), the same probe
+prints `huge-outcomes=pending,pending` and exits promptly. Insertion
+order and FIFO tie behavior are unchanged (`LessThan` stays strict
+`<` on the widened type). The committed regression lives inside the
+existing `s6-waitasync-pause.js` (no new rlexe entry, pins stay
+2026/2078): two huge-delay waiters must still be pending in the final
+100 ms callback, which then `WScript.Quit`s — `Quit` calls `ExitProcess`,
+so the drain never reaches the queued ~49.7-day tasks and the gate never
+waits for them. On the unfixed binary that test fails exactly the new
+`huge clamped delays stay pending` check (1 failure, exit 1); on the
+fixed binary it passes in every mode below. A standalone kill-bounded
+probe (`out` script, `s6d-huge-probe.js`) records the same discrimination
+outside the gate.
+
+Post-fix re-verification (fixed tree, binaries
+`out/s6d-after2-bin` ch `52c6b265…` / dylib `af42fec7…`):
+- Focused `s6-waitasync-pause.js`: **pass** on the test binary
+  (registered ×3, `-nodeferparse`, no-GC) and on the debug-static binary
+  (registered, `-nodeferparse`, no-GC). Focused `s6-bigint-atomics.js`:
+  **pass** on both binaries in all four modes. The huge-delay probe:
+  `pending,pending`, prompt exit, on both profiles.
+- `zig build check` (test) **583/583**, regression **2026/0 PASS**;
+  `zig build check -Dprofile=debug-static` **560/560**, regression
+  **2078/0 PASS**, metadata PASS (static archive 526 members + 8 JsRT
+  symbols unchanged).
+- test262 `waitAsync/**` re-run on the fixed binary: **122/80, identical
+  scenario-for-scenario to the pre-fix after artifact (0 diffs), +6/0
+  vs base** — the host fix flips nothing.
+- Engine code delta in the fix is comment-only (SharedArrayBuffer
+  wrapper-finalization wording, ChakraCommon delay-granularity remark);
+  the behavior change is confined to the ch host queue.
+
 ## Residuals
 
 - Cross-agent waitAsync remains unimplemented (S6b residual, unchanged):
@@ -238,10 +290,26 @@ built from the stashed tree at `532eab420`).
   unchanged from S6b; the API round-trip is proven, uninstalled-callback
   behavior is only covered by the base-binary runs, which have no host
   timer at all).
-- The `ch` `MessageQueue` timer uses `GetTickCount` + `Sleep` granularity:
-  delays are minimums (never early), and queue ordering is by absolute due
-  time, so ordering robustness holds, but no sub-millisecond precision or
-  monotonic-clock claim is made.
+- **Stale-task exit latency (no cancellation handle).** A delayed task is a
+  one-shot: a notify that settles the waiter does **not** remove its host
+  task from the ch queue. The stale task is a no-op when it finally runs,
+  but `ProcessAll` still sleeps until its due time, so a queued
+  far-future task (up to `UINT32_MAX` ms) delays process exit at shutdown.
+  Hosts needing prompt shutdown require a future cancellation-handle
+  extension to the task side of `JsSetTimerContinuationCallback`; ch
+  deliberately does not fake cancellation (documented at the host
+  callback and in the API header).
+- **Timer precision / early fire.** The queue's tick source is
+  millisecond-truncated from a monotonic clock (`GetTickCount64`; on macOS
+  `mach_absolute_time` via the PAL fallback), but PAL `Sleep` is served
+  against `CLOCK_REALTIME`, and `PopAndWait` sleeps the computed gap once
+  without re-checking — so a task can run a few milliseconds **before**
+  the monotonic deadline (review observed ~4 ms host-granularity early
+  fire; still present after the 64-bit fix, which changed only the
+  arithmetic width). The engine supplies a **minimum delay in whole
+  milliseconds**, not sub-millisecond precision and not a strict
+  lower bound within host granularity; ordering by absolute due time
+  (FIFO on ties) is unaffected.
 - JIT configurations are gated on B4 (Mac no-JIT evidence only).
 - Operational note (harness, unchanged from S6c): the gate-lock wrapper's
   `exec` discards its EXIT trap, so killed runs leave a stale lock. This

@@ -317,6 +317,20 @@ WScript.SetTimeout(function () {
     check(Atomics.notify(infView, 2, 1) === 1, "omitted-timeout waiter still registered at 50ms");
 }, 50);
 
+// Huge finite delays clamp to UINT32_MAX ms (~49.7 days); the host queue must
+// treat that as a far-future due time, not wrap a 32-bit tick sum into the
+// past (the S6d review bug: such tasks resolved "timed-out" immediately).
+// Bounded observation: the final callback Quits before the drain could reach
+// the ~49.7-day tasks, so this test never waits for them.
+var hugeView = new Int32Array(new SharedArrayBuffer(16));
+var hugeOutcomes = ["pending", "pending"];
+var hugeA = Atomics.waitAsync(hugeView, 0, 0, 4294967294); // UINT32_MAX-1 ms
+var hugeB = Atomics.waitAsync(hugeView, 1, 0, 1e308);      // clamps to UINT32_MAX ms
+check(hugeA.async === true && hugeA.value instanceof Promise, "UINT32_MAX-1 ms delay is asynchronous");
+check(hugeB.async === true && hugeB.value instanceof Promise, "1e308 ms delay is asynchronous");
+hugeA.value.then(function (v) { hugeOutcomes[0] = v; });
+hugeB.value.then(function (v) { hugeOutcomes[1] = v; });
+
 // --- Single-agent notify resolves the promise to "ok" ----------------------
 var notifyView = new Int32Array(new SharedArrayBuffer(16));
 var waiter = Atomics.waitAsync(notifyView, 0, 0, Infinity);
@@ -367,6 +381,10 @@ WScript.SetTimeout(function () {
         check(timeoutWinNotifyCount === 0, "notify after a timeout counts 0, got " + timeoutWinNotifyCount);
         check(pendOutcomes.join(",") === "ok,ok,ok",
             "NaN/+Infinity/omitted resolved via notify after staying pending, got " + pendOutcomes.join(","));
+        // Huge delays must still be pending here (~150ms in): a 32-bit
+        // due-time wrap would have resolved them "timed-out" at drain start.
+        check(hugeOutcomes[0] === "pending" && hugeOutcomes[1] === "pending",
+            "huge clamped delays stay pending (no 32-bit due-time wrap), got " + hugeOutcomes.join(","));
         if (typeof CollectGarbage === "function") {
             CollectGarbage();
         }
@@ -375,6 +393,9 @@ WScript.SetTimeout(function () {
             WScript.Quit(1);
         }
         print("pass");
+        // Bounded exit: quit before the queue drain could reach the queued
+        // ~49.7-day huge-delay tasks (they have no cancellation handle).
+        WScript.Quit(0);
     } catch (e) {
         print("s6-waitasync-pause: unexpected failure: " + (e.stack || e));
         WScript.Quit(1);

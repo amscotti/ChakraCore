@@ -790,6 +790,11 @@ typedef unsigned short uint16_t;
     ///     not installed, and the engine never throws for its absence. The host must not
     ///     throw exceptions across the callback boundary.
     ///     </para>
+    ///     <para>
+    ///     The delay is a minimum within the host's own timer granularity; the engine
+    ///     supplies whole milliseconds and requires no sub-millisecond precision, and a
+    ///     task handed to the callback carries no cancellation handle.
+    ///     </para>
     /// </remarks>
     /// <param name="task">The delayed task, represented as a JavaScript function.</param>
     /// <param name="delayMilliseconds">The minimum delay, in milliseconds, before the task should run.</param>
