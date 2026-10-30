@@ -231,11 +231,68 @@ Atomics.store(i32a8, 2, 1); // release the agent: it notifies our waiter
 var report8 = getReport();
 check(report8 === "8:notify=1", "agent's notify of the main-thread waiter counts 1, got " + report8);
 
+// --- 9. Multi-waiter partial notify: 3 agents x 2 waiters + main -----------
+var sab9 = new SharedArrayBuffer(5 * Int32Array.BYTES_PER_ELEMENT);
+var i32a9 = new Int32Array(sab9);
+var src9 = `
+    $262.agent.receiveBroadcast(function(sab) {
+        var v = new Int32Array(sab);
+        var p1 = Atomics.waitAsync(v, 0, 0).value;
+        var p2 = Atomics.waitAsync(v, 0, 0).value;
+        Atomics.add(v, 4, 1);
+        Promise.all([p1, p2]).then(function(vals) {
+            $262.agent.report("9:" + vals[0] + ":" + vals[1]);
+            $262.agent.leaving();
+        });
+    });
+`;
+$262.agent.start(src9);
+$262.agent.start(src9);
+$262.agent.start(src9);
+$262.agent.broadcast(sab9);
+waitUntil(i32a9, 4, 3);
+var main9Outcome = "pending";
+var main9 = Atomics.waitAsync(i32a9, 0, 0);
+main9.value.then(function(v) { main9Outcome = v; });
+check(Atomics.notify(i32a9, 0, 4) === 4, "partial notify wakes exactly 4 of the 7 waiters");
+check(Atomics.notify(i32a9, 0) === 3, "notify rest wakes the remaining 3");
+for (var i = 0; i < 3; i++) {
+    var report9 = getReport();
+    check(report9 === "9:ok:ok", "agent waiter pair both resolved ok, got " + report9);
+}
+check(Atomics.notify(i32a9, 0) === 0, "all 7 waiters unregistered after both notifies");
+
+// --- 10. Repeated broadcasts to the same three agents ----------------------
+var src10 = `
+    $262.agent.receiveBroadcast(function(sab) {
+        var v = new Int32Array(sab);
+        var p = Atomics.waitAsync(v, 0, 0).value;
+        Atomics.add(v, 4, 1);
+        p.then(function(val) { $262.agent.report("10:" + val); });
+    });
+`;
+$262.agent.start(src10);
+$262.agent.start(src10);
+$262.agent.start(src10);
+for (var round = 1; round <= 3; round++) {
+    var sabR = new SharedArrayBuffer(5 * Int32Array.BYTES_PER_ELEMENT);
+    var i32aR = new Int32Array(sabR);
+    $262.agent.broadcast(sabR);
+    waitUntil(i32aR, 4, 3);
+    check(Atomics.notify(i32aR, 0, 2) === 2, "round " + round + ": partial notify wakes 2 of 3");
+    check(Atomics.notify(i32aR, 0) === 1, "round " + round + ": notify rest wakes the last one");
+    for (var i = 0; i < 3; i++) {
+        var reportR = getReport();
+        check(reportR === "10:ok", "round " + round + " agent resolved ok, got " + reportR);
+    }
+}
+
 WScript.SetTimeout(function() {
     try {
         check(parentResult.async === true, "parent waitAsync result is async");
         check(parentOutcome === "ok", "main-thread waiter resolved ok via its monitor, got " + parentOutcome);
         check(Atomics.notify(i32a8, 0) === 0, "resolved main-thread waiter is unregistered");
+        check(main9Outcome === "ok", "scenario 9 main waiter resolved ok, got " + main9Outcome);
         if (failures.length) {
             print("s6-waitasync-cross-agent: " + failures.length + " failure(s)");
             WScript.Quit(1);

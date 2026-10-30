@@ -13,7 +13,16 @@ public:
     HANDLE hevntInitialScriptCompleted;
     HANDLE hevntReceivedBroadcast;
     HANDLE hevntShutdown;
-    HANDLE hSemaphore;
+    // Set by the child AFTER it consumed the current broadcast's shared
+    // content (its SAB wrapper was created), so the parent can wait for
+    // every live child before releasing the content handle and before a
+    // later broadcast overwrites RuntimeThreadData::sharedContent. Replaces
+    // the old per-broadcast semaphore, which the parent closed after the
+    // FIRST child's release, leaving the remaining children to signal a
+    // closed (possibly recycled) handle. Auto-reset, owned by the child's
+    // RuntimeThreadData for the child's whole lifetime, so the parent never
+    // waits on a handle that can be closed from under it.
+    HANDLE hevntBroadcastConsumed;
     HANDLE hThread;
 
     JsSharedArrayBufferContentHandle sharedContent;

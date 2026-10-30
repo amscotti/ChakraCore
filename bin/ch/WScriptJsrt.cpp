@@ -1271,15 +1271,26 @@ Error:
 
 bool WScriptJsrt::Uninitialize()
 {
-    // moduleRecordMap is a global std::map, its destructor may access overridden
-    // "operator delete" / global HeapAllocator::Instance. Clear it manually here
-    // to avoid worrying about global destructor order.
-    moduleRecordMap.clear();
-    moduleDirMap.clear();
-    moduleErrMap.clear();
-    scriptDirMap.clear();
-
     auto& threadData = GetRuntimeThreadLocalData().threadData;
+
+    // The module/script maps below are process-global std::maps. Agent
+    // threads reach this Uninitialize on every leaving()/shutdown exit (and
+    // since S6e that is the common path), so clearing them from a child
+    // would race the main thread's map usage and each other — heap
+    // corruption, not a controlled teardown. Only the main thread (no
+    // threadData, or the root RuntimeThreadData with no parent) may clear
+    // them; children only join their own sub-agents.
+    if (threadData == nullptr || threadData->parent == nullptr)
+    {
+        // moduleRecordMap is a global std::map, its destructor may access overridden
+        // "operator delete" / global HeapAllocator::Instance. Clear it manually here
+        // to avoid worrying about global destructor order.
+        moduleRecordMap.clear();
+        moduleDirMap.clear();
+        moduleErrMap.clear();
+        scriptDirMap.clear();
+    }
+
     if (threadData && !threadData->children.empty())
     {
         LONG count = (LONG)threadData->children.size();
@@ -1597,25 +1608,52 @@ JsValueRef __stdcall WScriptJsrt::BroadcastCallback(JsValueRef callee, bool isCo
         {
             ChakraRTInterface::JsGetSharedArrayBufferContent(arguments[1], &threadData->sharedContent);
 
-            LONG count = (LONG)threadData->children.size();
-            threadData->hSemaphore = CreateSemaphore(NULL, 0, count, NULL);
-            if (threadData->hSemaphore)
+            // Signal every child, then wait for EACH live child to consume
+            // the content (its child-side wrapper AddRef'd it) before the
+            // handle is released and threadData->sharedContent may be
+            // overwritten by a later broadcast. The old code created a
+            // semaphore sized for all children but waited for a single
+            // release, then closed the handle: the remaining children
+            // signaled a closed handle (which the OS may have recycled) and
+            // a second broadcast could overwrite sharedContent while a slow
+            // child had not consumed it yet. The per-child consumed events
+            // are owned by each child for its whole lifetime, so no wait
+            // here can hit a recycled handle.
+            for (auto i = threadData->children.begin(); i != threadData->children.end(); i++)
             {
-                //Clang does not support "for each" yet
-                for (auto i = threadData->children.begin(); i != threadData->children.end(); i++)
-                {
-                    auto child = *i;
-                    SetEvent(child->hevntReceivedBroadcast);
-                }
-
-                WaitForSingleObject(threadData->hSemaphore, INFINITE);
-                CloseHandle(threadData->hSemaphore);
-                threadData->hSemaphore = INVALID_HANDLE_VALUE;
+                auto child = *i;
+                SetEvent(child->hevntReceivedBroadcast);
             }
-            else
+
+            for (auto i = threadData->children.begin(); i != threadData->children.end(); i++)
             {
-                fwprintf(stderr, _u("Couldn't create semaphore.\n"));
-                fflush(stderr);
+                auto child = *i;
+                // Zero-timeout probe first, so the common case (child
+                // consumed immediately) and the departed-child case both
+                // resolve without paying a 50 ms slice.
+                DWORD waitRet = WaitForSingleObject(child->hevntBroadcastConsumed, 0);
+                DWORD waitedMs = 0;
+                bool departed = false;
+                while (waitRet != WAIT_OBJECT_0 && waitedMs < 5000)
+                {
+                    // A child that already exited (leaving/shutdown, or a
+                    // failed ThreadProc) never consumes this broadcast;
+                    // once its thread is dead there is nothing to wait for.
+                    // This is the expected state for agents that already
+                    // left, so it is not a warning.
+                    if (WaitForSingleObject(child->hThread, 0) == WAIT_OBJECT_0)
+                    {
+                        departed = true;
+                        break;
+                    }
+                    waitRet = WaitForSingleObject(child->hevntBroadcastConsumed, 50);
+                    waitedMs += 50;
+                }
+                if (waitRet != WAIT_OBJECT_0 && !departed)
+                {
+                    fwprintf(stderr, _u("live agent did not acknowledge broadcast (waited %u ms)\n"), waitedMs);
+                    fflush(stderr);
+                }
             }
 
             ChakraRTInterface::JsReleaseSharedArrayBufferContentHandle(threadData->sharedContent);

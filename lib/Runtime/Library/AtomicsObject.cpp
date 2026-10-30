@@ -451,6 +451,7 @@ namespace Js
 #endif
             ;
 
+        AtomicsAsyncWaiterRegistration* registration = nullptr;
         {
             AutoCriticalSection autoCS(waiterList->GetCriticalSectionForAccess());
 
@@ -482,10 +483,13 @@ namespace Js
             // Register while holding the waiter-list lock so a concurrent notify
             // cannot miss the waiter. The record is rooted by rootBuffer; the
             // native token identifies it to notify and to the finalizer.
-            // `monitored` publishes the scheduleMonitor decision to foreign
-            // notifiers under the same lock.
-            AtomicsAsyncWaiterRegistration* registration = rootBuffer->AddAsyncWaiter(
-                waiter, scriptContext, scriptContext->GetThreadContext(), scheduleMonitor);
+            // `monitored` starts false and is published (again under this
+            // lock) only after the monitor task was successfully created and
+            // enqueued below: until then a foreign notify skips the waiter
+            // entirely — the S6b fallback — so an OOM'ed monitor can never
+            // leave a counted-but-unresolvable wake behind.
+            registration = rootBuffer->AddAsyncWaiter(
+                waiter, scriptContext, scriptContext->GetThreadContext(), false /*monitored*/);
             waiterList->AddAsyncWaiter(registration);
             if (scheduleTimeout || scheduleMonitor)
             {
@@ -512,12 +516,21 @@ namespace Js
         if (scheduleMonitor)
         {
             // Bounded-interval poll task; it re-enqueues itself while the
-            // wait is pending and stops once settled/released. Task
-            // creation/enqueue failure (OOM) degrades to the unmonitored
-            // behavior: a foreign notify then leaves the waiter registered
-            // and uncounted (S6b fallback).
+            // wait is pending and stops once settled/released. Create and
+            // enqueue FIRST, then publish `monitored`: on task-creation OOM
+            // the exception propagates and the registration keeps the S6b
+            // contract (foreign notifies skip it, uncounted; same-thread
+            // notify still resolves). This thread is the only drainer of the
+            // host queue, so the task cannot run before publication
+            // completes. A foreign notify that raced inside the (tiny)
+            // registration-to-publication window simply skipped the waiter,
+            // exactly as if it had arrived before registration.
             library->EnqueueDelayedTask(library->CreateAtomicsWaitAsyncMonitorTaskFunction(waiter),
                 AtomicsAsyncWaiter::MonitorPollIntervalMs);
+            {
+                AutoCriticalSection autoCS(waiterList->GetCriticalSectionForAccess());
+                registration->monitored = true;
+            }
         }
 
         return CreateWaitAsyncResult(scriptContext, true, capability->GetPromise());

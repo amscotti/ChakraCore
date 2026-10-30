@@ -21,7 +21,7 @@ RuntimeThreadLocalData& GetRuntimeThreadLocalData()
 }
 
 RuntimeThreadData::RuntimeThreadData() :
-    hSemaphore(nullptr), 
+    hevntBroadcastConsumed(nullptr),
     hThread(nullptr),
     sharedContent(nullptr),
     receiveBroadcastCallbackFunc(nullptr),
@@ -34,6 +34,7 @@ RuntimeThreadData::RuntimeThreadData() :
     this->hevntInitialScriptCompleted = CreateEvent(NULL, TRUE, FALSE, NULL);
     this->hevntReceivedBroadcast = CreateEvent(NULL, FALSE, FALSE, NULL);
     this->hevntShutdown = CreateEvent(NULL, TRUE, FALSE, NULL);
+    this->hevntBroadcastConsumed = CreateEvent(NULL, FALSE, FALSE, NULL);
 
     InitializeCriticalSection(&csReportQ);
 }
@@ -43,6 +44,7 @@ RuntimeThreadData::~RuntimeThreadData()
     CloseHandle(this->hevntInitialScriptCompleted);
     CloseHandle(this->hevntReceivedBroadcast);
     CloseHandle(this->hevntShutdown);
+    CloseHandle(this->hevntBroadcastConsumed);
     CloseHandle(this->hThread);
     DeleteCriticalSection(&csReportQ);
 }
@@ -110,17 +112,33 @@ DWORD RuntimeThreadData::ThreadProc()
 
         if (waitRet == WAIT_OBJECT_0)
         {
-            JsValueRef args[3];
-            ChakraRTInterface::JsGetGlobalObject(&args[0]);
-            ChakraRTInterface::JsCreateSharedArrayBufferWithSharedContent(this->parent->sharedContent, &args[1]);
-            ChakraRTInterface::JsDoubleToNumber(1, &args[2]);
-
-            // notify the parent we received the data
-            ReleaseSemaphore(this->parent->hSemaphore, 1, NULL);
-
-            if (this->receiveBroadcastCallbackFunc)
+            if (this->leaving || WaitForSingleObject(this->hevntShutdown, 0) == WAIT_OBJECT_0)
             {
-                ChakraRTInterface::JsCallFunction(this->receiveBroadcastCallbackFunc, args, 3, nullptr);
+                // Departing agent: acknowledge the broadcast without
+                // consuming it. The parent's all-children handshake then
+                // completes promptly, and this thread never reads
+                // parent->sharedContent again (a later broadcast could
+                // already have overwritten it).
+                SetEvent(this->hevntBroadcastConsumed);
+            }
+            else
+            {
+                JsValueRef args[3];
+                ChakraRTInterface::JsGetGlobalObject(&args[0]);
+                ChakraRTInterface::JsCreateSharedArrayBufferWithSharedContent(this->parent->sharedContent, &args[1]);
+                ChakraRTInterface::JsDoubleToNumber(1, &args[2]);
+
+                // Notify the parent we consumed the shared content (the
+                // wrapper above already AddRef'd it) BEFORE running any
+                // script: the parent will not release the content handle,
+                // overwrite parent->sharedContent or start another
+                // broadcast until every live child has set this event.
+                SetEvent(this->hevntBroadcastConsumed);
+
+                if (this->receiveBroadcastCallbackFunc)
+                {
+                    ChakraRTInterface::JsCallFunction(this->receiveBroadcastCallbackFunc, args, 3, nullptr);
+                }
             }
         }
 
@@ -131,7 +149,12 @@ DWORD RuntimeThreadData::ThreadProc()
             // continuations; the monitor task re-enqueues itself with a
             // future due time, which the next timed wait above waits for).
             // Stop draining when the script asked to leave or the parent
-            // signaled shutdown so teardown stays prompt.
+            // signaled shutdown so teardown stays prompt. Unlike the main
+            // loop's ProcessAll this deliberately does not call
+            // JsTTDNotifyYield: TTD is not modeled for crossthread agents
+            // (the engine schedules no delayed tasks while recording or
+            // replaying), so there is no TTD yield point to honor on an
+            // agent thread.
             while (!this->leaving &&
                    WaitForSingleObject(this->hevntShutdown, 0) != WAIT_OBJECT_0 &&
                    agentQueue->HasDueMessage())
@@ -147,6 +170,15 @@ DWORD RuntimeThreadData::ThreadProc()
         if ((waitRet == WAIT_OBJECT_0 + 1) || this->leaving ||
             WaitForSingleObject(this->hevntShutdown, 0) == WAIT_OBJECT_0)
         {
+            // If a broadcast arrived while this child was already leaving,
+            // acknowledge it so a parent waiting for all consumers does not
+            // wait out its bounded timeout on a child that will never run
+            // receiveBroadcast again.
+            if (WaitForSingleObject(this->hevntReceivedBroadcast, 0) == WAIT_OBJECT_0)
+            {
+                SetEvent(this->hevntBroadcastConsumed);
+            }
+
             WScriptJsrt::Uninitialize();
 
             // Tear the queue down BEFORE disposing the runtime: its messages

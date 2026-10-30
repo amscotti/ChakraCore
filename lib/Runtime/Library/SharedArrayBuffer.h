@@ -136,14 +136,18 @@ namespace Js
         AtomicsAsyncWaiterRegistration* nextWrapper;
         AtomicsAsyncWaiterRegistration* nextAwoken;
         bool linked;
-        // S6e cross-agent handoff. `monitored` is immutable after publication
-        // (set once at registration under the waiter-list lock; read by
-        // foreign notifiers under the same lock). `wakeRequested` is an atomic
-        // latch: a foreign notify sets it (under the waiter-list lock) after
-        // removing the token from the shared list, and the registrant's
-        // monitor task polls it without the lock and claims under the lock.
-        // A foreign thread never dereferences `record` or any other GC-visible
-        // field through this token, and never frees the token.
+        // S6e cross-agent handoff. `monitored` is written under the
+        // waiter-list lock: false at registration, flipped to true only
+        // after the monitor task was successfully created and enqueued
+        // (task-creation OOM keeps it false, so a foreign notify then skips
+        // the waiter — the S6b fallback — instead of counting a wake nobody
+        // can resolve). Foreign notifiers read it under the same lock.
+        // `wakeRequested` is an atomic latch: a foreign notify sets it
+        // (under the waiter-list lock) BEFORE removing the token from the
+        // shared list, and the registrant's monitor task polls it without
+        // the lock and claims under the lock. A foreign thread never
+        // dereferences `record` or any other GC-visible field through this
+        // token, and never frees the token.
         bool monitored;
         volatile long wakeRequested;
     };
@@ -181,11 +185,14 @@ namespace Js
     template <> bool VarIsImpl<AtomicsWaitAsyncTimeoutTaskFunction>(RecyclableObject* obj);
 
     // Host-delayed monitor task for a pending cross-agent Atomics.waitAsync
-    // (S6e). Same ownership model as the timeout task: recycler-owned
-    // RuntimeFunction AddRef'd by the host queue until it has called or
-    // dropped it, rooting record -> wrapper -> native registration token ->
-    // SharedContents, so the record's cached native links stay valid for the
-    // task's whole lifetime. Re-enqueues itself at
+    // (S6e). Ownership/rooting model (mirrors the timeout task): the host
+    // queue AddRefs the task, which is a GC root; the task's traced waiter
+    // Field keeps the record alive, the record's traced buffer Field keeps
+    // the wrapper alive, and the wrapper in turn OWNS the native
+    // registration token and holds the SharedContents reference (native
+    // ownership, not GC rooting — nothing traces through the token). Hence
+    // the record's cached native links stay valid for the task's whole
+    // lifetime. Re-enqueues itself at
     // AtomicsAsyncWaiter::MonitorPollIntervalMs while the waiter is pending
     // and not wake-requested; stops as soon as the waiter settles or the
     // registration is released. Only ever called by the host that received it

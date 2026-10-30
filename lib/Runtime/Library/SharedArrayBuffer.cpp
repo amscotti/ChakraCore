@@ -671,9 +671,22 @@ namespace Js
         while (registration != nullptr)
         {
             AtomicsAsyncWaiterRegistration* next = registration->nextWrapper;
-            if (registration->linked && registration->waiterList != nullptr)
+            if (registration->waiterList != nullptr)
             {
-                registration->waiterList->RemoveAsyncWaiter(registration);
+                // Read `linked` under the waiter-list CS (it is written by a
+                // foreign notifier under the same CS). While linked == true
+                // the unlink happens under the CS too (RemoveAsyncWaiter
+                // re-enters the recursive CS); once linked == false is
+                // observed here, the notifier has finished its final token
+                // write and will not touch the token again, so HeapDelete is
+                // safe. This closes the unlinked-token/UAF window of the
+                // earlier revision, where `linked` was read without the CS
+                // and the notifier still had a latch write outstanding.
+                AutoCriticalSection autoCS(registration->waiterList->GetCriticalSectionForAccess());
+                if (registration->linked)
+                {
+                    registration->waiterList->RemoveAsyncWaiter(registration);
+                }
             }
             HeapDelete(registration);
             registration = next;
@@ -1001,17 +1014,39 @@ namespace Js
                 }
 
                 // Foreign async waiter with a live monitor task (S6e). Hand
-                // off through the native token only: remove it from this
-                // shared list and atomically set the wake-request latch. The
-                // registrant's monitor task observes the latch on its own
-                // thread, claims, unlinks, releases the token and resolves
-                // "ok" there. This thread must not touch the record, the
-                // wrapper or any GC-visible field, and never frees the token.
-                // The waiter counts toward notify's return value.
+                // off through the native token only, in this exact order:
+                //   1. set the wake-request latch,
+                //   2. remove the token from this shared list,
+                //   3. linked = false — the notifier's FINAL token touch.
+                // Ordering rationale: while linked == true, the only paths
+                // that may delete the token (wrapper finalization via
+                // CancelAsyncWaiters, the registrant's claim via
+                // JavascriptSharedArrayBuffer::RemoveAsyncWaiter) must first
+                // take this waiter-list critical section (finalization calls
+                // WaiterList::RemoveAsyncWaiter for a linked token), so they
+                // cannot free it while this thread holds the lock. No monitor
+                // can claim between the latch and the unlink either: the
+                // claim (TryClaimForWake) runs on the registrant's thread and
+                // needs this same critical section; observing the latch early
+                // only makes it block here until the unlink completes. After
+                // step 3 the notifier never dereferences the token again, so
+                // the finalizer's fast path (linked == false -> HeapDelete
+                // without the CS) is safe. Setting the latch LAST, as an
+                // earlier revision did, left a window where the finalizer
+                // deleted the unlinked token between steps 2 and 3 and the
+                // latch write touched freed memory.
+                // The registrant's monitor resolves "ok" on its own thread;
+                // this thread must not touch the record, the wrapper or any
+                // GC-visible field, and never frees the token. The waiter
+                // counts toward notify's return value. (A count of 1 can
+                // still race an already-due timeout task on the registrant:
+                // whoever claims first through `settled` wins exactly once,
+                // and the promise may resolve "timed-out" after this notify
+                // returned 1 — the spec's own concurrent-timeout ambiguity.)
                 AtomicsAsyncWaiterRegistration* registration = agent.asyncRegistration;
+                InterlockedExchangeAdd(&registration->wakeRequested, 1L);
                 m_waiters->RemoveAt(i);
                 registration->linked = false;
-                InterlockedExchangeAdd(&registration->wakeRequested, 1L);
                 count--; removed++;
                 continue;
             }
@@ -1022,12 +1057,16 @@ namespace Js
             {
                 // Single-thread async wait: hand the token to the caller, which
                 // resolves its record after releasing this critical section.
-                // The SAB wrapper keeps the record rooted until then.
+                // The SAB wrapper keeps the record rooted until then. The
+                // handoff list link is written BEFORE linked = false: the
+                // finalizer's fast path may HeapDelete an unlinked token
+                // without this CS, so linked = false must be this thread's
+                // final token write (same discipline as the foreign branch).
                 Assert(asyncAwoken != nullptr);
                 AtomicsAsyncWaiterRegistration* registration = agent.asyncRegistration;
-                registration->linked = false;
                 registration->nextAwoken = *asyncAwoken;
                 *asyncAwoken = registration;
+                registration->linked = false;
             }
 #ifdef _WIN32
             else
