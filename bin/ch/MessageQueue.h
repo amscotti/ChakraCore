@@ -100,6 +100,13 @@ public:
         return data;
     }
 
+    // Earliest entry without removing it. Requires a non-empty list.
+    const T& Peek() const
+    {
+        Assert(head != nullptr);
+        return head->data;
+    }
+
     template <typename PredicateFn>
     void Remove(PredicateFn fn)
     {
@@ -239,6 +246,34 @@ public:
     bool IsEmpty()
     {
         return m_queue.IsEmpty();
+    }
+
+    // Absolute due time of the earliest message. Requires !IsEmpty(); callers
+    // use it to compute how long their event loop may block before a delayed
+    // task (e.g. an Atomics.waitAsync timeout/monitor task) becomes due.
+    unsigned long long NextDueTime()
+    {
+        return m_queue.Peek().time;
+    }
+
+    // True when the earliest message's absolute due time has passed.
+    bool HasDueMessage()
+    {
+        return !m_queue.IsEmpty() &&
+            (long long)(m_queue.Peek().time - GetTickCount64()) <= 0;
+    }
+
+    // Pop the earliest message iff it is already due; nullptr otherwise.
+    // Unlike PopAndWait this never sleeps, so an event loop can interleave
+    // due messages with its own wake events.
+    MessageBase* PopDue()
+    {
+        if (!HasDueMessage())
+        {
+            return nullptr;
+        }
+        ListEntry entry = m_queue.Pop();
+        return entry.message;
     }
 
     void RemoveById(unsigned int id)

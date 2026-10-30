@@ -167,6 +167,12 @@ private:
     static JsErrorCode FetchImportedModuleHelper(JsModuleRecord referencingModule, JsValueRef specifier, _Out_ JsModuleRecord* dependentModuleRecord, LPCSTR refdir = nullptr);
     static JsErrorCode FetchImportedModuleHelperWithAttributes(JsModuleRecord referencingModule, JsValueRef specifier, JsValueRef attributes, _Out_ JsModuleRecord* dependentModuleRecord, LPCSTR refdir = nullptr);
 
+    // Message queue for the current thread: the per-child agent queue when
+    // running on a crossthread agent thread (S6e), otherwise the main host
+    // queue. Prevents WScript.SetTimeout/ClearTimeout and samethread script
+    // loads issued from an agent from racing the main thread's queue.
+    static MessageQueue* GetThreadMessageQueue();
+
     static MessageQueue *messageQueue;
     static DWORD_PTR sourceContext;
     static std::map<std::string, JsModuleRecord> moduleRecordMap;

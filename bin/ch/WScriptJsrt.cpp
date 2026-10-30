@@ -18,6 +18,9 @@
 #include <ctime>
 #include <ratio>
 #include <chrono>
+#if !defined(_WIN32)
+#include <unistd.h> // ::_exit (raw, non-PAL process termination for WScript.Quit)
+#endif
 
 #if defined(_X86_) || defined(_M_IX86)
 #define CPU_ARCH_TEXT "x86"
@@ -76,6 +79,20 @@ std::map<JsModuleRecord, std::string>  WScriptJsrt::moduleDirMap;
 std::map<JsModuleRecord, ModuleState>  WScriptJsrt::moduleErrMap;
 std::map<DWORD_PTR, std::string> WScriptJsrt::scriptDirMap;
 DWORD_PTR WScriptJsrt::sourceContext = 0;
+
+// Message queue for the current thread: the per-child agent queue when
+// running inside a crossthread agent thread (S6e), otherwise the main host
+// queue. Prevents WScript.SetTimeout/ClearTimeout and samethread script
+// loads issued from an agent from racing the main thread's queue.
+MessageQueue* WScriptJsrt::GetThreadMessageQueue()
+{
+    RuntimeThreadData* threadData = GetRuntimeThreadLocalData().threadData;
+    if (threadData != nullptr && threadData->messageQueue != nullptr)
+    {
+        return threadData->messageQueue;
+    }
+    return messageQueue;
+}
 
 #define ERROR_MESSAGE_TO_STRING(errorCode, errorMessage, errorMessageString)        \
     JsErrorCode errorCode = JsNoError;                                              \
@@ -196,6 +213,40 @@ JsValueRef __stdcall WScriptJsrt::EchoCallback(JsValueRef callee, bool isConstru
     }
 }
 
+// Raw process termination for WScript.Quit. The previous design (signal
+// every child's shutdown event, join under a 10 s bound, then ExitProcess)
+// still crashed three ways, because ExitProcess/exit run the PAL
+// process-detach path (JsrtRuntime::Uninitialize, DLL detach, C++/TLS
+// destructors) over runtimes whose threads may still be inside JsRT calls:
+// an AGENT-initiated Quit joins only the calling agent's sub-agents, never
+// the main thread or its siblings (SIGSEGV 18/20 in the adversarial
+// campaign); a WEDGED agent (while(true){}) exhausts the join bound and is
+// hard-terminated mid-JsRun (SIGSEGV 8/8); and the joined path left
+// residual SIGBUS under parallel load. Quit therefore performs NO runtime
+// teardown at all anymore: flush stdout/stderr (PAL_fflush writes the
+// underlying FILE buffers synchronously; Echo already flushes per line),
+// then terminate through the raw syscall path. Nothing that could observe
+// a half-torn-down runtime ever runs: no PAL cleanup, no destructors, no
+// detach notifications, no finalizers — sibling and wedged agent threads
+// simply stop existing, so joining is unnecessary by construction.
+static DECLSPEC_NORETURN void RawExitProcess(int exitCode)
+{
+    fflush(stdout);
+    fflush(stderr);
+
+#if defined(_WIN32)
+    // Windows preserves this host's historical ExitProcess semantics; the
+    // adversarial teardown campaign is POSIX (macOS) only.
+    ExitProcess(exitCode);
+#else
+    // ::_exit bypasses atexit/PAL/TLS/destructor machinery entirely (pal.h
+    // remaps `exit` but not `_exit`). Only the low 8 bits of the exit
+    // status are observable by wait(), so mask explicitly; rlexe codes
+    // (0/1) and any masked WScript.Quit(n) keep their exact values.
+    ::_exit(exitCode & 0xff);
+#endif
+}
+
 JsValueRef __stdcall WScriptJsrt::QuitCallback(JsValueRef callee, bool isConstructCall, JsValueRef *arguments, unsigned short argumentCount, void *callbackState)
 {
     int exitCode = 0;
@@ -207,7 +258,7 @@ JsValueRef __stdcall WScriptJsrt::QuitCallback(JsValueRef callee, bool isConstru
         exitCode = (int)exitCodeDouble;
     }
 
-    ExitProcess(exitCode);
+    RawExitProcess(exitCode);
 }
 
 JsValueRef __stdcall WScriptJsrt::LoadScriptFileCallback(JsValueRef callee, bool isConstructCall, JsValueRef *arguments, unsigned short argumentCount, void *callbackState)
@@ -769,8 +820,8 @@ JsValueRef WScriptJsrt::LoadScript(JsValueRef callee, LPCSTR fileName,
 
         IfJsrtErrorSetGo(ChakraRTInterface::JsSetCurrentContext(newContext));
 
-        IfJsErrorFailLog(ChakraRTInterface::JsSetPromiseContinuationCallback(PromiseContinuationCallback, (void*)messageQueue));
-        IfJsErrorFailLog(ChakraRTInterface::JsSetTimerContinuationCallback(TimerContinuationCallback, (void*)messageQueue));
+        IfJsErrorFailLog(ChakraRTInterface::JsSetPromiseContinuationCallback(PromiseContinuationCallback, (void*)GetThreadMessageQueue()));
+        IfJsErrorFailLog(ChakraRTInterface::JsSetTimerContinuationCallback(TimerContinuationCallback, (void*)GetThreadMessageQueue()));
 
         // Initialize the host objects
         Initialize();
@@ -890,7 +941,7 @@ JsValueRef WScriptJsrt::SetTimeoutCallback(JsValueRef callee, bool isConstructCa
 
     time = static_cast<int>(tmp);
     msg = new CallbackMessage(time, function);
-    messageQueue->InsertSorted(msg);
+    GetThreadMessageQueue()->InsertSorted(msg);
 
     IfJsrtErrorSetGo(ChakraRTInterface::JsDoubleToNumber(static_cast<double>(msg->GetId()), &timerId));
     return timerId;
@@ -919,7 +970,7 @@ JsValueRef WScriptJsrt::ClearTimeoutCallback(JsValueRef callee, bool isConstruct
     if (ChakraRTInterface::JsNumberToDouble(arguments[1], &tmp) == JsNoError)
     {
         timerId = static_cast<int>(tmp);
-        messageQueue->RemoveById(timerId);
+        GetThreadMessageQueue()->RemoveById(timerId);
     }
 
     IfJsrtErrorSetGo(ChakraRTInterface::JsGetUndefinedValue(&undef));
@@ -1257,15 +1308,26 @@ Error:
 
 bool WScriptJsrt::Uninitialize()
 {
-    // moduleRecordMap is a global std::map, its destructor may access overridden
-    // "operator delete" / global HeapAllocator::Instance. Clear it manually here
-    // to avoid worrying about global destructor order.
-    moduleRecordMap.clear();
-    moduleDirMap.clear();
-    moduleErrMap.clear();
-    scriptDirMap.clear();
-
     auto& threadData = GetRuntimeThreadLocalData().threadData;
+
+    // The module/script maps below are process-global std::maps. Agent
+    // threads reach this Uninitialize on every leaving()/shutdown exit (and
+    // since S6e that is the common path), so clearing them from a child
+    // would race the main thread's map usage and each other — heap
+    // corruption, not a controlled teardown. Only the main thread (no
+    // threadData, or the root RuntimeThreadData with no parent) may clear
+    // them; children only join their own sub-agents.
+    if (threadData == nullptr || threadData->parent == nullptr)
+    {
+        // moduleRecordMap is a global std::map, its destructor may access overridden
+        // "operator delete" / global HeapAllocator::Instance. Clear it manually here
+        // to avoid worrying about global destructor order.
+        moduleRecordMap.clear();
+        moduleDirMap.clear();
+        moduleErrMap.clear();
+        scriptDirMap.clear();
+    }
+
     if (threadData && !threadData->children.empty())
     {
         LONG count = (LONG)threadData->children.size();
@@ -1583,25 +1645,52 @@ JsValueRef __stdcall WScriptJsrt::BroadcastCallback(JsValueRef callee, bool isCo
         {
             ChakraRTInterface::JsGetSharedArrayBufferContent(arguments[1], &threadData->sharedContent);
 
-            LONG count = (LONG)threadData->children.size();
-            threadData->hSemaphore = CreateSemaphore(NULL, 0, count, NULL);
-            if (threadData->hSemaphore)
+            // Signal every child, then wait for EACH live child to consume
+            // the content (its child-side wrapper AddRef'd it) before the
+            // handle is released and threadData->sharedContent may be
+            // overwritten by a later broadcast. The old code created a
+            // semaphore sized for all children but waited for a single
+            // release, then closed the handle: the remaining children
+            // signaled a closed handle (which the OS may have recycled) and
+            // a second broadcast could overwrite sharedContent while a slow
+            // child had not consumed it yet. The per-child consumed events
+            // are owned by each child for its whole lifetime, so no wait
+            // here can hit a recycled handle.
+            for (auto i = threadData->children.begin(); i != threadData->children.end(); i++)
             {
-                //Clang does not support "for each" yet
-                for (auto i = threadData->children.begin(); i != threadData->children.end(); i++)
-                {
-                    auto child = *i;
-                    SetEvent(child->hevntReceivedBroadcast);
-                }
-
-                WaitForSingleObject(threadData->hSemaphore, INFINITE);
-                CloseHandle(threadData->hSemaphore);
-                threadData->hSemaphore = INVALID_HANDLE_VALUE;
+                auto child = *i;
+                SetEvent(child->hevntReceivedBroadcast);
             }
-            else
+
+            for (auto i = threadData->children.begin(); i != threadData->children.end(); i++)
             {
-                fwprintf(stderr, _u("Couldn't create semaphore.\n"));
-                fflush(stderr);
+                auto child = *i;
+                // Zero-timeout probe first, so the common case (child
+                // consumed immediately) and the departed-child case both
+                // resolve without paying a 50 ms slice.
+                DWORD waitRet = WaitForSingleObject(child->hevntBroadcastConsumed, 0);
+                DWORD waitedMs = 0;
+                bool departed = false;
+                while (waitRet != WAIT_OBJECT_0 && waitedMs < 5000)
+                {
+                    // A child that already exited (leaving/shutdown, or a
+                    // failed ThreadProc) never consumes this broadcast;
+                    // once its thread is dead there is nothing to wait for.
+                    // This is the expected state for agents that already
+                    // left, so it is not a warning.
+                    if (WaitForSingleObject(child->hThread, 0) == WAIT_OBJECT_0)
+                    {
+                        departed = true;
+                        break;
+                    }
+                    waitRet = WaitForSingleObject(child->hevntBroadcastConsumed, 50);
+                    waitedMs += 50;
+                }
+                if (waitRet != WAIT_OBJECT_0 && !departed)
+                {
+                    fwprintf(stderr, _u("live agent did not acknowledge broadcast (waited %u ms)\n"), waitedMs);
+                    fflush(stderr);
+                }
             }
 
             ChakraRTInterface::JsReleaseSharedArrayBufferContentHandle(threadData->sharedContent);

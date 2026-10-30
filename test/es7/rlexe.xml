@@ -107,6 +107,12 @@
   </test>
     <test>
     <default>
+      <files>s6-waitasync-cross-agent.js</files>
+      <compile-flags>-ESBigInt -ESSharedArrayBuffer -Test262 -CollectGarbage -args summary -endargs</compile-flags>
+    </default>
+  </test>
+    <test>
+    <default>
       <files>PromiseRejectionTracking.js</files>
       <compile-flags>-TrackRejectedPromises -args summary -endargs -nodeferparse</compile-flags>
       <baseline>PromiseRejectionTracking.baseline</baseline>

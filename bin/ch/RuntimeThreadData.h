@@ -13,7 +13,16 @@ public:
     HANDLE hevntInitialScriptCompleted;
     HANDLE hevntReceivedBroadcast;
     HANDLE hevntShutdown;
-    HANDLE hSemaphore;
+    // Set by the child AFTER it consumed the current broadcast's shared
+    // content (its SAB wrapper was created), so the parent can wait for
+    // every live child before releasing the content handle and before a
+    // later broadcast overwrites RuntimeThreadData::sharedContent. Replaces
+    // the old per-broadcast semaphore, which the parent closed after the
+    // FIRST child's release, leaving the remaining children to signal a
+    // closed (possibly recycled) handle. Auto-reset, owned by the child's
+    // RuntimeThreadData for the child's whole lifetime, so the parent never
+    // waits on a handle that can be closed from under it.
+    HANDLE hevntBroadcastConsumed;
     HANDLE hThread;
 
     JsSharedArrayBufferContentHandle sharedContent;
@@ -22,6 +31,16 @@ public:
 
     JsRuntimeHandle runtime;
     JsContextRef context;
+
+    // Per-child job/timer queue (S6e). Created in ThreadProc after the child
+    // context exists and installed as the callbackState of the promise and
+    // timer continuation callbacks, so promise reactions, async-function
+    // steps and engine-delayed tasks (Atomics.waitAsync timeout/monitor
+    // tasks) raised on the child context are drained on the child thread.
+    // Owned by ThreadProc: torn down (RemoveAll + delete) on the child thread
+    // BEFORE JsDisposeRuntime, because messages own JsRefs that must be
+    // released while the runtime is still valid.
+    MessageQueue* messageQueue;
 
 
     std::string initialSource;

@@ -44,15 +44,21 @@ namespace Js
 
         // Resolve the promise with "ok" and unlink from the owner/waiter list.
         void ResolveOk();
-        // Mark a woken waiter whose promise cannot be resolved on this thread
-        // (multi-agent; unsupported in this slice) without touching the owner
-        // wrapper from the notifying thread.
+        // Defensive tail only, and unreachable for foreign waiters since
+        // S6e: a foreign notify of a monitored waiter hands off through the
+        // token latch (the registrant's monitor task resolves it), and an
+        // unmonitored foreign waiter is skipped outright. If it ever runs,
+        // it marks the record settled WITHOUT releasing the native
+        // registration token or touching the owner wrapper — the token is
+        // released exclusively on the registrant's thread (claim paths) or
+        // by wrapper finalization.
         void Abandon();
 
-        // Finite-timeout support (S6d). Cache the native registration links so
-        // the host-delayed timeout task can claim the waiter. Called under the
-        // waiter-list lock, after WaiterList::AddAsyncWaiter published the
-        // waiterList pointer on the token.
+        // Finite-timeout/cross-agent support (S6d/S6e). Cache the native
+        // registration links so the host-delayed timeout and monitor tasks
+        // can claim the waiter. Called under the waiter-list lock, after
+        // WaiterList::AddAsyncWaiter published the waiterList pointer on the
+        // token.
         void SetRegistration(AtomicsAsyncWaiterRegistration* registration);
         // Timeout-task claim: settled -> false (late task no-ops without
         // dereferencing the released token); otherwise settle and unlink under
@@ -65,6 +71,29 @@ namespace Js
         void ResolveTimedOutAfterClaim();
         // Host-delayed timeout task entry point; sees the task function.
         static Var EntryTimeoutTask(RecyclableObject* function, CallInfo callInfo, ...);
+
+        // Cross-agent wake support (S6e). A foreign notify (another
+        // ThreadContext) removes the native token from the shared waiter list
+        // and atomically sets the token's wake-request flag; the registrant's
+        // host-delayed monitor task — scheduled when the shared content is
+        // cross-runtime — polls that flag and performs the claim/unlink/
+        // release and the "ok" resolution on the registrant's thread only.
+        // Bounded poll interval for the rescheduling monitor, in milliseconds.
+        static const unsigned int MonitorPollIntervalMs = 2;
+        // Whether the cached native registration links are still live. Only
+        // meaningful on the registrant thread; see the registration field.
+        bool HasRegistration() const { return registration != nullptr; }
+        // Atomic read of the token's wake-request flag. Only valid while the
+        // registration is live (HasRegistration), on the registrant thread.
+        bool IsWakeRequested() const;
+        // Monitor claim: wake-request observed -> settle, unlink and release
+        // the token under the waiter-list lock (registrant thread only).
+        bool TryClaimForWake();
+        // Resolve the promise with "ok" after a successful wake claim; must
+        // run outside the waiter-list critical section.
+        void ResolveOkAfterClaim();
+        // Host-delayed monitor task entry point; sees the task function.
+        static Var EntryMonitorTask(RecyclableObject* function, CallInfo callInfo, ...);
 
         // Shared settle tail: resolve the capability with the given outcome
         // literal. Callers have settled and unlinked; runs outside the
@@ -86,10 +115,10 @@ namespace Js
         bool settled;
 
         // Plain (non-traced) native links to the registration token, cached at
-        // registration. Only read by TryClaimForTimeout on the registrant's
-        // script thread after checking settled: notify resolution and
-        // cross-agent Abandon set settled before releasing the token, and SAB
-        // finalization — which deletes tokens without setting settled —
+        // registration. Only read by TryClaimForTimeout/TryClaimForWake on the
+        // registrant's script thread after checking settled: notify resolution
+        // and cross-agent Abandon set settled before releasing the token, and
+        // SAB finalization — which deletes tokens without setting settled —
         // cannot race a live task, because the task roots the record, which
         // roots the wrapper that owns the token and the SharedContents
         // (waiter list). The chain makes every cached pointer valid while the
@@ -109,6 +138,20 @@ namespace Js
         AtomicsAsyncWaiterRegistration* nextWrapper;
         AtomicsAsyncWaiterRegistration* nextAwoken;
         bool linked;
+        // S6e cross-agent handoff. `monitored` is written under the
+        // waiter-list lock: false at registration, flipped to true only
+        // after the monitor task was successfully created and enqueued
+        // (task-creation OOM keeps it false, so a foreign notify then skips
+        // the waiter — the S6b fallback — instead of counting a wake nobody
+        // can resolve). Foreign notifiers read it under the same lock.
+        // `wakeRequested` is an atomic latch: a foreign notify sets it
+        // (under the waiter-list lock) BEFORE removing the token from the
+        // shared list, and the registrant's monitor task polls it without
+        // the lock and claims under the lock. A foreign thread never
+        // dereferences `record` or any other GC-visible field through this
+        // token, and never frees the token.
+        bool monitored;
+        volatile long wakeRequested;
     };
 
     // Host-delayed timeout task for a pending Atomics.waitAsync with a finite
@@ -143,6 +186,42 @@ namespace Js
 
     template <> bool VarIsImpl<AtomicsWaitAsyncTimeoutTaskFunction>(RecyclableObject* obj);
 
+    // Host-delayed monitor task for a pending cross-agent Atomics.waitAsync
+    // (S6e). Ownership/rooting model (mirrors the timeout task): the host
+    // queue AddRefs the task, which is a GC root; the task's traced waiter
+    // Field keeps the record alive, the record's traced buffer Field keeps
+    // the wrapper alive, and the wrapper in turn OWNS the native
+    // registration token and holds the SharedContents reference (native
+    // ownership, not GC rooting — nothing traces through the token). Hence
+    // the record's cached native links stay valid for the task's whole
+    // lifetime. Re-enqueues itself at
+    // AtomicsAsyncWaiter::MonitorPollIntervalMs while the waiter is pending
+    // and not wake-requested; stops as soon as the waiter settles or the
+    // registration is released. Only ever called by the host that received it
+    // on the registrant's thread.
+    class AtomicsWaitAsyncMonitorTaskFunction : public RuntimeFunction
+    {
+    protected:
+        DEFINE_VTABLE_CTOR(AtomicsWaitAsyncMonitorTaskFunction, RuntimeFunction);
+        DEFINE_MARSHAL_OBJECT_TO_SCRIPT_CONTEXT(AtomicsWaitAsyncMonitorTaskFunction);
+
+    public:
+        AtomicsWaitAsyncMonitorTaskFunction(
+            DynamicType* type,
+            FunctionInfo* functionInfo,
+            AtomicsAsyncWaiter* waiter)
+            : RuntimeFunction(type, functionInfo), waiter(waiter)
+        {
+        }
+
+        AtomicsAsyncWaiter* GetWaiter() const { return waiter; }
+
+    private:
+        Field(AtomicsAsyncWaiter*) waiter;
+    };
+
+    template <> bool VarIsImpl<AtomicsWaitAsyncMonitorTaskFunction>(RecyclableObject* obj);
+
     class SharedContents
     {
     public:
@@ -152,7 +231,25 @@ namespace Js
         uint32 maxBufferLength = 0; // Maximum number of bytes: growable limit or WebAssembly maximum
         bool isWebAssembly = false;
         bool isGrowable = false;   // Growable (ES2024) JS SharedArrayBuffer; capacity is maxBufferLength
+
+        // S6e: this content was (or may be) shared with another runtime — a
+        // host extracted a content handle (JsGetSharedArrayBufferContent) or
+        // a wrapper was created from such a handle
+        // (JsCreateSharedArrayBufferWithSharedContent / SCA deserialization).
+        // Atomics.waitAsync on cross-runtime content may be notified from
+        // another thread, so the registrant schedules a monitor task (see
+        // AtomicsObject::EntryWaitAsync); ordinary single-runtime waitAsync
+        // never gains polling. One-way false->true transition; the RMW keeps
+        // the flag atomic, and the host's broadcast handshake (events /
+        // semaphore) orders the write against the receiving runtime's reads.
+        // Returns true when the contents were ALREADY marked, so a caller can
+        // run first-share work (retro-monitoring pre-share waiters) exactly
+        // once.
+        bool MarkCrossRuntime();
+        bool IsCrossRuntime();
+
     private:
+        volatile long crossRuntime;
         // Addref/release counter for current buffer, this is needed as the current buffer will be shared among different workers
         long refCount;
 
@@ -175,7 +272,7 @@ namespace Js
         void Cleanup();
 
         SharedContents(BYTE* b, uint32 l, uint32 m)
-            : buffer(b), bufferLength(l), maxBufferLength(m), refCount(1), indexToWaiterList(nullptr)
+            : buffer(b), bufferLength(l), maxBufferLength(m), crossRuntime(0), refCount(1), indexToWaiterList(nullptr)
 #if DBG
             , allowedAgents(nullptr)
 #endif
@@ -243,6 +340,16 @@ namespace Js
         WaiterList *GetWaiterList(uint index);
         SharedContents *GetSharedContents() { return sharedContents; }
 
+        // S6e pre-share support: called when this wrapper's contents are
+        // marked cross-runtime for the FIRST time (content-handle
+        // extraction). Overridden by JavascriptSharedArrayBuffer to
+        // retroactively schedule monitor tasks for async waiters that were
+        // registered while the buffer was still single-runtime — without
+        // this they would stay deaf to foreign notifies forever. Runs on
+        // the extracting thread, which for a first extraction is the
+        // registrant's own runtime/thread.
+        virtual void MonitorPendingAsyncWaiters() { }
+
 #if defined(TARGET_64)
         //maximum 2G -1  for amd64
         static const uint32 MaxSharedArrayBufferLength = 0x7FFFFFFF;
@@ -287,8 +394,11 @@ namespace Js
         // (the wrapper's finalizable-heap object is conservatively scanned) so a
         // pending promise and its capability survive until notify or finalize.
         // SharedContents waiter lists store native registration tokens, not
-        // owning references.
-        AtomicsAsyncWaiterRegistration* AddAsyncWaiter(AtomicsAsyncWaiter* waiter, ScriptContext* scriptContext, void* threadContext)
+        // owning references. `monitored` records whether a monitor task was
+        // scheduled for this registration (cross-runtime content + host timer
+        // callback): it decides whether a foreign notify may hand off through
+        // the token's wake-request latch.
+        AtomicsAsyncWaiterRegistration* AddAsyncWaiter(AtomicsAsyncWaiter* waiter, ScriptContext* scriptContext, void* threadContext, bool monitored)
         {
             Assert(waiter != nullptr);
             AtomicsAsyncWaiterRegistration* registration = HeapNew(AtomicsAsyncWaiterRegistration);
@@ -299,6 +409,8 @@ namespace Js
             registration->nextWrapper = asyncRegistrations;
             registration->nextAwoken = nullptr;
             registration->linked = false;
+            registration->monitored = monitored;
+            registration->wakeRequested = 0;
             asyncRegistrations = registration;
 
             waiter->SetNextWrapperWaiter(asyncWaiters);
@@ -354,6 +466,14 @@ namespace Js
         // Finalizer path: unlink every native registration from its shared
         // waiter list and release the token. Never dereferences the GC record.
         void CancelAsyncWaiters();
+
+        // S6e pre-share support (see SharedArrayBuffer::MonitorPendingAsyncWaiters):
+        // schedule monitor tasks for async waiters registered before the
+        // contents were marked cross-runtime, then publish their tokens as
+        // monitored. Must run on the registrant's thread (first extraction
+        // guarantees this: only the extracting runtime owns wrappers with
+        // waiters at that point).
+        virtual void MonitorPendingAsyncWaiters() override;
 
     protected:
         JavascriptSharedArrayBuffer(DynamicType * type);
@@ -420,12 +540,18 @@ namespace Js
 
         bool _Requires_lock_held_(csForAccess.cs) AddAndSuspendWaiter(DWORD_PTR waiter, uint32 timeout);
         void RemoveWaiter(DWORD_PTR waiter);
-        // Notify pops up to `count` same-ThreadContext entries. Async entries
-        // are linked into *asyncAwoken through their nextAwoken field (no
-        // allocation while the critical section is held); their promises are
-        // resolved by the caller after the lock is released. Async waiters
-        // registered on another thread are left in place. Same-thread
-        // cross-realm waiters are woken.
+        // Notify pops up to `count` entries in waiter-list (FIFO) order.
+        // Same-ThreadContext async entries are linked into *asyncAwoken
+        // through their nextAwoken field (no allocation while the critical
+        // section is held); their promises are resolved by the caller after
+        // the lock is released. A foreign-ThreadContext async entry whose
+        // token has a live monitor task (monitored) is removed from the list,
+        // counted, and its token's wake-request latch is set atomically — the
+        // registrant's monitor task claims and resolves it on its own thread;
+        // this thread never touches the record/wrapper. An unmonitored
+        // foreign entry is left registered and uncounted (S6b behavior for
+        // hosts without the timer callback / cross-runtime opt-in).
+        // Same-thread cross-realm waiters are woken.
         uint32 RemoveAndWakeWaiters(int32 count, void* threadContext, AtomicsAsyncWaiterRegistration** asyncAwoken = nullptr);
         void AddAsyncWaiter(AtomicsAsyncWaiterRegistration* registration);
         void RemoveAsyncWaiter(AtomicsAsyncWaiterRegistration* registration);

@@ -432,6 +432,26 @@ namespace Js
 #endif
             ;
 
+        // S6e: when the shared content is marked cross-runtime (a host
+        // extracted a content handle / created a wrapper from one) a foreign
+        // ThreadContext may notify this waiter. The foreign notify cannot
+        // touch this runtime's GC state, so it only sets the token's
+        // wake-request latch; a monitor task scheduled here through the same
+        // timer callback polls that latch and resolves "ok" on this thread.
+        // Ordinary single-runtime waitAsync never gains polling: the host
+        // timer callback must exist and the content must be cross-runtime.
+        // Under TTD (no host timer queue) cross-agent waits keep the S6b
+        // pending-until-same-thread-notify behavior.
+        const bool scheduleMonitor =
+            sharedArrayBuffer->GetSharedContents() != nullptr &&
+            sharedArrayBuffer->GetSharedContents()->IsCrossRuntime() &&
+            library->HasNativeHostTimerContinuationCallback()
+#if ENABLE_TTD
+            && !scriptContext->ShouldPerformRecordOrReplayAction()
+#endif
+            ;
+
+        AtomicsAsyncWaiterRegistration* registration = nullptr;
         {
             AutoCriticalSection autoCS(waiterList->GetCriticalSectionForAccess());
 
@@ -463,13 +483,18 @@ namespace Js
             // Register while holding the waiter-list lock so a concurrent notify
             // cannot miss the waiter. The record is rooted by rootBuffer; the
             // native token identifies it to notify and to the finalizer.
-            AtomicsAsyncWaiterRegistration* registration = rootBuffer->AddAsyncWaiter(
-                waiter, scriptContext, scriptContext->GetThreadContext());
+            // `monitored` starts false and is published (again under this
+            // lock) only after the monitor task was successfully created and
+            // enqueued below: until then a foreign notify skips the waiter
+            // entirely — the S6b fallback — so an OOM'ed monitor can never
+            // leave a counted-but-unresolvable wake behind.
+            registration = rootBuffer->AddAsyncWaiter(
+                waiter, scriptContext, scriptContext->GetThreadContext(), false /*monitored*/);
             waiterList->AddAsyncWaiter(registration);
-            if (scheduleTimeout)
+            if (scheduleTimeout || scheduleMonitor)
             {
                 // Cache the native links while still under the lock so the
-                // timeout task can claim this registration later.
+                // timeout/monitor task can claim this registration later.
                 waiter->SetRegistration(registration);
             }
         }
@@ -486,6 +511,26 @@ namespace Js
             unsigned int delayMilliseconds =
                 ceilMs >= (double)UINT32_MAX ? UINT32_MAX : (unsigned int)ceilMs;
             library->EnqueueDelayedTask(library->CreateAtomicsWaitAsyncTimeoutTaskFunction(waiter), delayMilliseconds);
+        }
+
+        if (scheduleMonitor)
+        {
+            // Bounded-interval poll task; it re-enqueues itself while the
+            // wait is pending and stops once settled/released. Create and
+            // enqueue FIRST, then publish `monitored`: on task-creation OOM
+            // the exception propagates and the registration keeps the S6b
+            // contract (foreign notifies skip it, uncounted; same-thread
+            // notify still resolves). This thread is the only drainer of the
+            // host queue, so the task cannot run before publication
+            // completes. A foreign notify that raced inside the (tiny)
+            // registration-to-publication window simply skipped the waiter,
+            // exactly as if it had arrived before registration.
+            library->EnqueueDelayedTask(library->CreateAtomicsWaitAsyncMonitorTaskFunction(waiter),
+                AtomicsAsyncWaiter::MonitorPollIntervalMs);
+            {
+                AutoCriticalSection autoCS(waiterList->GetCriticalSectionForAccess());
+                registration->monitored = true;
+            }
         }
 
         return CreateWaitAsyncResult(scriptContext, true, capability->GetPromise());

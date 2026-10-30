@@ -13,6 +13,96 @@ namespace Js
              VirtualTableInfo<CrossSiteObject<AtomicsWaitAsyncTimeoutTaskFunction>>::HasVirtualTable(obj));
     }
 
+    template <> bool VarIsImpl<AtomicsWaitAsyncMonitorTaskFunction>(RecyclableObject* obj)
+    {
+        return VarIs<JavascriptFunction>(obj) &&
+            (VirtualTableInfo<AtomicsWaitAsyncMonitorTaskFunction>::HasVirtualTable(obj) ||
+             VirtualTableInfo<CrossSiteObject<AtomicsWaitAsyncMonitorTaskFunction>>::HasVirtualTable(obj));
+    }
+
+    bool SharedContents::MarkCrossRuntime()
+    {
+        // One-way latch; multiple markings only grow the counter, which is
+        // read as nonzero/nonzero. Interlocked RMWs are full barriers, and
+        // the host broadcast handshake (event/semaphore) already orders the
+        // writer against the receiving runtime. Returns whether the contents
+        // were already marked, so first-share work runs exactly once.
+        return InterlockedExchangeAdd(&crossRuntime, 1L) != 0;
+    }
+
+    bool SharedContents::IsCrossRuntime()
+    {
+        return InterlockedExchangeAdd(&crossRuntime, 0L) != 0;
+    }
+
+    void JavascriptSharedArrayBuffer::MonitorPendingAsyncWaiters()
+    {
+        // First-share hook: waitAsync registrations made while this buffer
+        // was still single-runtime never scheduled a monitor task (no
+        // cross-runtime notifies were possible), so their tokens say
+        // monitored == false and a foreign notify would skip and not count
+        // them — a permanently deaf waiter. The contents becoming
+        // cross-runtime changes that: schedule monitors for every pending
+        // unmonitored record, exactly like EntryWaitAsync does at
+        // registration. Runs on the extracting thread; on the first
+        // extraction only the extracting runtime owns wrappers over these
+        // contents, so this is the registrant's thread and touching the GC
+        // records here is safe.
+        ScriptContext* scriptContext = GetScriptContext();
+        JavascriptLibrary* library = scriptContext->GetLibrary();
+        if (!library->HasNativeHostTimerContinuationCallback())
+        {
+            // No scheduling mechanism: keep the S6b contract (foreign
+            // notifies skip and do not count these waiters).
+            return;
+        }
+#if ENABLE_TTD
+        if (scriptContext->ShouldPerformRecordOrReplayAction())
+        {
+            return;
+        }
+#endif
+
+        AtomicsAsyncWaiterRegistration* registration = asyncRegistrations;
+        while (registration != nullptr)
+        {
+            AtomicsAsyncWaiter* record = registration->record;
+            if (!registration->monitored && !record->IsSettled())
+            {
+                // Create and enqueue the task BEFORE publishing monitored
+                // (same discipline as EntryWaitAsync): on task-creation OOM
+                // the exception propagates and this waiter — and the ones
+                // after it — keep the S6b skip-and-uncount contract instead
+                // of a counted wake nobody can resolve. This thread is the
+                // only drainer of its host queue, so the task cannot run
+                // before publication completes.
+                AtomicsWaitAsyncMonitorTaskFunction* task =
+                    library->CreateAtomicsWaitAsyncMonitorTaskFunction(record);
+                library->EnqueueDelayedTask(task, AtomicsAsyncWaiter::MonitorPollIntervalMs);
+
+                WaiterList* waiterList = registration->waiterList;
+                if (waiterList != nullptr)
+                {
+                    AutoCriticalSection autoCS(waiterList->GetCriticalSectionForAccess());
+                    if (!registration->monitored && !record->IsSettled())
+                    {
+                        if (!record->HasRegistration())
+                        {
+                            // Pre-share registrations never cached their
+                            // token links (only finite-timeout ones did);
+                            // the monitor task's claim needs them.
+                            record->SetRegistration(registration);
+                        }
+                        registration->monitored = true;
+                    }
+                }
+                // A waiter that settled between the fast check and the lock
+                // is left as-is: its settled flag already released it.
+            }
+            registration = registration->nextWrapper;
+        }
+    }
+
 #if DBG
     void SharedContents::AddAgent(DWORD_PTR agent)
     {
@@ -650,9 +740,22 @@ namespace Js
         while (registration != nullptr)
         {
             AtomicsAsyncWaiterRegistration* next = registration->nextWrapper;
-            if (registration->linked && registration->waiterList != nullptr)
+            if (registration->waiterList != nullptr)
             {
-                registration->waiterList->RemoveAsyncWaiter(registration);
+                // Read `linked` under the waiter-list CS (it is written by a
+                // foreign notifier under the same CS). While linked == true
+                // the unlink happens under the CS too (RemoveAsyncWaiter
+                // re-enters the recursive CS); once linked == false is
+                // observed here, the notifier has finished its final token
+                // write and will not touch the token again, so HeapDelete is
+                // safe. This closes the unlinked-token/UAF window of the
+                // earlier revision, where `linked` was read without the CS
+                // and the notifier still had a latch write outstanding.
+                AutoCriticalSection autoCS(registration->waiterList->GetCriticalSectionForAccess());
+                if (registration->linked)
+                {
+                    registration->waiterList->RemoveAsyncWaiter(registration);
+                }
             }
             HeapDelete(registration);
             registration = next;
@@ -966,12 +1069,54 @@ namespace Js
             if (agent.asyncRegistration != nullptr &&
                 agent.asyncRegistration->threadContext != threadContext)
             {
-                // Cross-agent async waiters are outside this slice's contract:
-                // resolving their GC-visible records from this thread is
-                // unsafe. The cached ThreadContext lives on the native token,
-                // so this check never dereferences the record. Leave the waiter
-                // registered and do not count it.
-                i++;
+                if (!agent.asyncRegistration->monitored)
+                {
+                    // Foreign async waiter whose host has no monitor task for
+                    // it (no timer callback, not cross-runtime content, or
+                    // TTD): nobody can resolve its record from this thread or
+                    // wake the registrant, so keep the S6b contract — leave
+                    // the waiter registered and do not count it. The check
+                    // uses only native token fields under this lock; it never
+                    // dereferences the record.
+                    i++;
+                    continue;
+                }
+
+                // Foreign async waiter with a live monitor task (S6e). Hand
+                // off through the native token only, in this exact order:
+                //   1. set the wake-request latch,
+                //   2. remove the token from this shared list,
+                //   3. linked = false — the notifier's FINAL token touch.
+                // Ordering rationale: while linked == true, the only paths
+                // that may delete the token (wrapper finalization via
+                // CancelAsyncWaiters, the registrant's claim via
+                // JavascriptSharedArrayBuffer::RemoveAsyncWaiter) must first
+                // take this waiter-list critical section (finalization calls
+                // WaiterList::RemoveAsyncWaiter for a linked token), so they
+                // cannot free it while this thread holds the lock. No monitor
+                // can claim between the latch and the unlink either: the
+                // claim (TryClaimForWake) runs on the registrant's thread and
+                // needs this same critical section; observing the latch early
+                // only makes it block here until the unlink completes. After
+                // step 3 the notifier never dereferences the token again, so
+                // the finalizer's fast path (linked == false -> HeapDelete
+                // without the CS) is safe. Setting the latch LAST, as an
+                // earlier revision did, left a window where the finalizer
+                // deleted the unlinked token between steps 2 and 3 and the
+                // latch write touched freed memory.
+                // The registrant's monitor resolves "ok" on its own thread;
+                // this thread must not touch the record, the wrapper or any
+                // GC-visible field, and never frees the token. The waiter
+                // counts toward notify's return value. (A count of 1 can
+                // still race an already-due timeout task on the registrant:
+                // whoever claims first through `settled` wins exactly once,
+                // and the promise may resolve "timed-out" after this notify
+                // returned 1 — the spec's own concurrent-timeout ambiguity.)
+                AtomicsAsyncWaiterRegistration* registration = agent.asyncRegistration;
+                InterlockedExchangeAdd(&registration->wakeRequested, 1L);
+                m_waiters->RemoveAt(i);
+                registration->linked = false;
+                count--; removed++;
                 continue;
             }
 
@@ -981,12 +1126,16 @@ namespace Js
             {
                 // Single-thread async wait: hand the token to the caller, which
                 // resolves its record after releasing this critical section.
-                // The SAB wrapper keeps the record rooted until then.
+                // The SAB wrapper keeps the record rooted until then. The
+                // handoff list link is written BEFORE linked = false: the
+                // finalizer's fast path may HeapDelete an unlinked token
+                // without this CS, so linked = false must be this thread's
+                // final token write (same discipline as the foreign branch).
                 Assert(asyncAwoken != nullptr);
                 AtomicsAsyncWaiterRegistration* registration = agent.asyncRegistration;
-                registration->linked = false;
                 registration->nextAwoken = *asyncAwoken;
                 *asyncAwoken = registration;
+                registration->linked = false;
             }
 #ifdef _WIN32
             else
@@ -1130,6 +1279,108 @@ namespace Js
         // else: notify (or cross-agent Abandon) already settled the waiter;
         // the late timeout task no-ops without touching the released token.
         return function->GetScriptContext()->GetLibrary()->GetUndefined();
+    }
+
+    bool AtomicsAsyncWaiter::IsWakeRequested() const
+    {
+        // Registrant thread only, and only while `registration` is live (the
+        // monitor task roots record -> wrapper -> token). Interlocked RMW as
+        // an atomic read with a full barrier, mirroring the writer side.
+        Assert(registration != nullptr);
+        return InterlockedExchangeAdd(&registration->wakeRequested, 0L) != 0;
+    }
+
+    bool AtomicsAsyncWaiter::TryClaimForWake()
+    {
+        // Runs on the registrant's script thread from the host-delayed monitor
+        // task after the token's wake-request latch was observed set by a
+        // foreign notify. Same arbitration as TryClaimForTimeout: `settled` is
+        // checked before any dereference of the cached native links, so a
+        // waiter already settled by a timeout claim (or a same-thread notify)
+        // no-ops without touching the released token. On success the settle
+        // and both unlinks happen under the waiter-list lock; the token is
+        // released by JavascriptSharedArrayBuffer::RemoveAsyncWaiter on this
+        // (the registrant's) thread — the foreign notifying thread never
+        // frees it, so there is no double delete.
+        if (settled || registration == nullptr)
+        {
+            return false;
+        }
+
+        WaiterList* waiterList = registration->waiterList;
+        Assert(waiterList != nullptr);
+        AutoCriticalSection autoCS(waiterList->GetCriticalSectionForAccess());
+
+        if (settled)
+        {
+            return false;
+        }
+
+        settled = true;
+
+        // The foreign notify already unlinked the token from the shared list
+        // (that is what the latch means), but a same-thread notify could not
+        // have: it would have handed the token to its own resolution path.
+        // RemoveAsyncWaiter is idempotent — if the token is somehow no longer
+        // linked, it returns without touching it.
+        waiterList->RemoveAsyncWaiter(registration);
+        if (buffer != nullptr)
+        {
+            buffer->RemoveAsyncWaiter(this);
+        }
+        registration = nullptr;
+
+        return true;
+    }
+
+    void AtomicsAsyncWaiter::ResolveOkAfterClaim()
+    {
+        // Claim (settle + unlink) already happened under the waiter-list lock
+        // in TryClaimForWake; resolution runs strictly outside it.
+        Assert(settled);
+        ResolveWith(_u("ok"));
+    }
+
+    Var AtomicsAsyncWaiter::EntryMonitorTask(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+        ARGUMENTS(args, callInfo);
+        Assert(!(callInfo.Flags & CallFlags_New));
+
+        AtomicsWaitAsyncMonitorTaskFunction* task = VarTo<AtomicsWaitAsyncMonitorTaskFunction>(function);
+        AtomicsAsyncWaiter* waiter = task->GetWaiter();
+        JavascriptLibrary* library = function->GetScriptContext()->GetLibrary();
+
+        // Stop immediately when the waiter settled (same-thread notify or a
+        // timeout claim won) or the registration is gone: the token may
+        // already be released, so `settled`/`registration` are checked before
+        // any use of the cached links.
+        if (waiter->IsSettled() || !waiter->HasRegistration())
+        {
+            return library->GetUndefined();
+        }
+
+        if (waiter->IsWakeRequested())
+        {
+            // A foreign notify requested the wake. Claim on this (the
+            // registrant's) thread: settle + unlink + release the token under
+            // the waiter-list lock, then resolve "ok" outside it. A failed
+            // claim means a timeout won in between — stop either way; the
+            // woken path never reschedules.
+            if (waiter->TryClaimForWake())
+            {
+                waiter->ResolveOkAfterClaim();
+            }
+            return library->GetUndefined();
+        }
+
+        // Still pending and not woken: reschedule this task at the bounded
+        // poll interval. Re-enqueueing the running task hands it to the host
+        // timer callback again (one more AddRef/Release cycle on the host
+        // side), exactly like a fresh task, and keeps the
+        // task -> record -> wrapper -> token root chain alive.
+        library->EnqueueDelayedTask(function, MonitorPollIntervalMs);
+        return library->GetUndefined();
     }
 
     template <size_t N>
