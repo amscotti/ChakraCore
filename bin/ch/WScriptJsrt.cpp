@@ -1330,20 +1330,35 @@ bool WScriptJsrt::Uninitialize()
 
     if (threadData && !threadData->children.empty())
     {
-        LONG count = (LONG)threadData->children.size();
-        std::vector<HANDLE> childrenHandles;
+        // Children are never unlinked before this point: LoadScriptCallback
+        // push_backs each child on THIS (the owning parent's) thread before
+        // CreateThread, leaving() only sets the child's own flag, and the
+        // sole removal is the clear() below — so this list is mutated only
+        // on this thread and these passes need no lock.
+        //
+        // Signal shutdown for ALL children BEFORE any waiting, then join
+        // each child's thread handle individually. WaitForMultipleObjects
+        // (PAL included, pal/src/synchmgr/wait.cpp) accepts at most
+        // MAXIMUM_WAIT_OBJECTS (64) handles, so the previous single call
+        // over every accumulated child failed outright once a process
+        // started more than 64 agents: debug profiles asserted at the
+        // waitRet check, and release/test profiles fell through to the
+        // delete loop with no thread having been observed exiting —
+        // freeing RuntimeThreadData objects their threads still touch.
+        for(auto i = threadData->children.begin(); i!= threadData->children.end(); i++)
+        {
+            SetEvent((*i)->hevntShutdown);
+        }
 
         //Clang does not support "for each" yet
         for(auto i = threadData->children.begin(); i!= threadData->children.end(); i++)
         {
-            auto child = *i;
-            childrenHandles.push_back(child->hThread);
-            SetEvent(child->hevntShutdown);
+            DWORD waitRet = WaitForSingleObject((*i)->hThread, INFINITE);
+            Assert(waitRet == WAIT_OBJECT_0);
         }
 
-        DWORD waitRet = WaitForMultipleObjects(count, &childrenHandles[0], TRUE, INFINITE);
-        Assert(waitRet == WAIT_OBJECT_0);
-
+        // Every child above was individually observed exited before any
+        // delete runs.
         for (auto i = threadData->children.begin(); i != threadData->children.end(); i++)
         {
             delete *i;
