@@ -80,7 +80,14 @@ X64WriteBarrierCardTableManager::OnThreadInit()
     this->_stacklimit = (char*)stackEnd;
 #endif
 
-    size_t numPages = (stackBase - stackEnd) / AutoSystemInfo::PageSize;
+    // Round the page count UP: the PAL's GetCurrentThreadStackLimits can
+    // report a non-page-aligned stack top (e.g. macOS pthread stackaddr;
+    // observed [0x16ff80000, 0x170003000) with PageSize 16K). Rounding down
+    // excludes the stack's top partial page from card-table section commit,
+    // and a write barrier on a stack slot in that page (WriteBarrierPtr
+    // construction materializes barriered temporaries on the stack) then
+    // reads an uncommitted card page and crashes (E1 agent-startup SIGBUS).
+    size_t numPages = (stackBase - stackEnd + AutoSystemInfo::PageSize - 1) / AutoSystemInfo::PageSize;
     // stackEnd is the lower boundary
     bool ret = OnSegmentAlloc((char*) stackEnd, numPages);
 #if ENABLE_DEBUG_CONFIG_OPTIONS
