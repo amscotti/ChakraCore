@@ -1,8 +1,8 @@
 # C2-S6e: cross-agent Atomics.waitAsync (flag-on slice)
 
 Status: **landed** — implementation `d972c53fe`, review repair `e547fa345`
-(docs receipt below) on branch `s6-cross-agent-waitasync` (base `f305a175f`);
-evidence below. `ESSharedArrayBuffer` (and `ESBigInt` for the BigInt64 paths)
+(docs `6c319e065`… `05d70b805`), final repair iteration 2 (this commit) on
+branch `s6-cross-agent-waitasync` (base `f305a175f`); evidence below. `ESSharedArrayBuffer` (and `ESBigInt` for the BigInt64 paths)
 remain **off by default** (BigInt itself is default-on since S2); this slice
 changes no default. It supersedes the cross-agent residual of
 [c2-s6-waitasync.md](c2-s6-waitasync.md) (S6b); S6d finite timeouts are
@@ -77,6 +77,60 @@ Artifacts (this repair round): test-profile binary `zig-out/bin/ch`
 The first session's `out/s6e-bins/ch-debug-static` copy was in fact a
 test-profile build (identical UUID to `ch-test`) — mislabeled, corrected
 here; debug-profile evidence below was re-run on the genuine path.
+
+## Review repair, iteration 2 (final)
+
+1. **Child runtime teardown crashes (SIGSEGV/SIGTRAP/SIGBUS).** The
+   adversarial campaign reproduced two independent families on the
+   iteration-1 binaries:
+   - *Dispose family*: child `JsDisposeRuntime` →
+     `Recycler::FinalizeConcurrent` → `RecyclerParallelThread::Shutdown` →
+     `ThreadService::HasCallback` on a stale pointer. Each agent runtime
+     was created with no thread service, so every agent spun its own
+     "Chakra Background Recycler" + parallel-mark threads whose
+     concurrent/parallel shutdown raced the agent's own dispose.
+   - *Exit family*: `WScript.Quit` called raw `ExitProcess` while agent
+     threads were mid-JsRT-call; the process-detach path then walked their
+     hard-terminated runtimes (queued-callback/context-teardown SIGSEGV in
+     `JsGetGlobalObject`, `!currentThreadContext->IsScriptActive()` and
+     `recycler->IsReentrantState()` asserts). Minimized reproducers showed
+     the trigger is `Quit` with live agents (8 agents × 2 waiters crashed
+     17–21/25; the same scripts without `Quit`, or single-agent variants,
+     were clean), and that `CollectGarbage` was irrelevant.
+   Fixes (no signal catching/hiding): agent runtimes are created with
+   `JsRuntimeAttributeDisableBackgroundWork` (in-thread GC via
+   `OptimizeForManyInstances`; no per-agent recycler threads), and
+   `QuitCallback` now performs an orderly agent shutdown — signal every
+   child's shutdown event and join chunked (≤64 handles) under a 10 s
+   bound — before `ExitProcess`. A wedged agent still cannot hang exit;
+   after the bound the exit proceeds as before.
+2. **Pre-share waiter was deaf.** A `waitAsync` registered before the first
+   `JsGetSharedArrayBufferContent` had `monitored == false` forever:
+   foreign notifies returned 0 and its promise stayed pending. On the
+   FIRST extraction (`MarkCrossRuntime` now reports the transition),
+   `JavascriptSharedArrayBuffer::MonitorPendingAsyncWaiters` walks the
+   wrapper's pending unmonitored records and retroactively schedules their
+   monitor tasks — create + enqueue first, then publish `monitored` (and
+   cache the token links, which only finite-timeout registrations had)
+   under the waiter-list CS. Exactly-once and OOM behavior match
+   `EntryWaitAsync`: task-creation OOM propagates and leaves the waiter
+   (and the rest of the walk) on the S6b skip-and-uncount contract. The
+   first extraction runs before any child wrapper exists, so the walk is
+   on the registrant's own thread and may safely touch the records.
+3. **Binary identity.** All iteration-2 corpus/stress/gate evidence below
+   comes from one recorded final identity: launcher
+   `zig-out/bin/ch` SHA-256 `c03eea6e…528`, `libChakraCore.dylib`
+   SHA-256 `cef46d17…73a`, dylib UUID `6832F606-73DE-3A66-97A9-6A53082F3109`
+   (the `ch` launcher embeds no engine code; engine changes move only the
+   dylib, so launcher UUIDs repeat across engine builds). The iteration-1
+   UUID labels above identify the iteration-1 binaries only; iteration-1
+   corpus counts are superseded by the final-binary counts below.
+4. **Comments/residuals corrected**: `Abandon` documented as an
+   unreachable defensive tail that never releases the token (release stays
+   with registrant-thread claims/finalization); the finalizer's
+   read-`linked`-under-CS / delete-outside contract is stated at both
+   sites; monitor self-reschedule OOM and the 5 s stuck-agent consequence
+   are recorded as residuals (below).
 
 ## Scope
 
@@ -245,67 +299,55 @@ handshake is the per-child consumed-event protocol described in the repair
 section; on exit the child acknowledges any pending broadcast without
 consuming it.
 
-## Evidence
+## Evidence (final binary — iteration 2)
 
-Two rounds: implementation `d972c53fe` (first session, summarized) and the
-review repair `e547fa345` (this round, authoritative). Mac ARM64
-(aarch64-apple-macos.26.0), test profile (RelWithDebInfo, no JIT) and
-debug-static, shared gate lock (the wrapper leaks its lock on completion —
-the documented S6c/S6d operational note; reclaimed by mtime aging only when
-no zig/runtests/run.py gate process was active). Pinned test262
+Mac ARM64 (aarch64-apple-macos.26.0), test profile (RelWithDebInfo, no
+JIT) and debug-static, shared gate lock, pinned test262
 `2e0a56762801e275a9fdf96dc49d90ba0cddcf63`, 20 controls passed per run,
 Node **v26.5.0**, jobs 6, timeout 10 s, host flags
 `-ESBigInt -ESSharedArrayBuffer -nonative -Test262 -CollectGarbage`.
+Final identity (all counts below): launcher SHA-256 `c03eea6e…528`,
+dylib SHA-256 `cef46d17…73a`, dylib UUID `6832F606-73DE-3A66-97A9-6A53082F3109`
+(debug-static `out/debug-static/bin/ch` SHA-256 `99a20675…5c`). The `ch`
+launcher embeds no engine code; engine changes move only the dylib, so
+launcher UUIDs repeat across engine builds.
 
-Repair-round binaries: `zig-out/bin/ch` (test, UUID
-`EC33225D-8002-3850-9F56-E6DC31CDDBBA`) and `out/debug-static/bin/ch`
-(UUID `93518278-2940-3E19-840F-8C578873F0FA`).
-
-- Builds: test **568/568**, debug-static **546/546** (only pre-existing
-  warnings).
-- Focused `test/es7/s6-waitasync-cross-agent.js` — now **10 scenarios**
-  (the original 8 plus: 3 agents × 2 waiters + main waiter with
-  `notify(4)`→4 / rest→3 / all-unregistered, and 3 repeated broadcasts to
-  the same three agents with per-round partial notify counts) — **pass** on
-  the test binary (registered ×3, `-nodeferparse`, `-force:deferparse`,
-  no-GC) and on `out/debug-static/bin/ch` (registered, `-nodeferparse`).
-  S6b/S6D `s6-waitasync-pause.js` and S6c `s6-bigint-atomics.js` **pass**
-  in registered/variant modes on both profiles; adjacent es7
-  (`s6-growable-nonshared` 13/13, `atomics_test` 16/16, `sharedarraybuffer`
-  7/7, `bigint64array` 10/10) green. Default-off probes unchanged
-  (`SAB=undefined Atomics=undefined` with no flags / `-ESBigInt` alone;
-  both flags present everything). The first session's base-binary
-  discrimination (19 failing checks, exit 1) carries over — the repair
-  changes no scenario semantics, only concurrency.
-- **Stress (review recipe, out-of-gate)**: the exact adversarial recipe
-  (3 agents × 2 waiters + main waiter, `notify(4)`, notify rest, agents
-  `leaving()`) × **105** on the test binary and × **30** on
-  `out/debug-static/bin/ch` — **zero signals**; plus the full focused test
-  file ×70 and a repeated-broadcast variant ×80 under 2-way parallel load —
-  **zero signals** (255+ runs total post-fix; no new `.ips` reports). The
-  pre-fix crash is captured in
-  `~/Library/Logs/DiagnosticReports/ch-2026-10-29-211944.ips` (child
-  ThreadProc → Uninitialize → scriptDirMap clear → malloc abort, SIGTRAP;
-  the same corruption family explains the SIGBUS variant and the first
-  session's corpus SIGSEGV flake). TSan is not wired for this build.
-- **Exact `Atomics/waitAsync/**` corpus (202 scenarios), two runs**:
-  **198/4** and **197/5** (vs base 122/80, first-session after 193/9 — the
-  handshake repair removed the SIGKILL/timeout flake class). **0
-  pass→fail** vs base in both runs; the shifting 4–5 residuals are all
-  `no-spurious-wakeup-*` (the witness race below — the first session
-  demonstrated `unpark=not-equal` at 0.06 ms vs on-time 200 ms timeouts).
-- **Atomics + SAB selection (982)**: Atomics `**` **693/81** (base 615/159
-  in the first session; residuals = pre-existing sync-`Atomics.wait` agent
-  scenarios + the flaky no-spurious family), `SharedArrayBuffer/**`
-  **204/4** (the same 4 documented constructor-order scenarios). Merged
-  **897/85**.
+- Builds: test **568/568**, debug-static **546/546**.
+- **Crash repro loops (review scripts, zero signals)**: before the fixes,
+  `gc_pressure` crashed **17/20** on the then-current binary (reproduced on
+  demand; minimized to "Quit with live agents" — single-agent and no-Quit
+  variants were clean, `CollectGarbage` irrelevant). After both fixes:
+  12 reviewer scripts (`gc_pressure`, `gc_pressure_dbg`, `throw_exit`,
+  `broadcast_chaos`, `teardown_storm`, `stall_G5`, `shutdown_mainwaiter`,
+  `race_orig`, `agents12_notifyall`, `agents12_dbg`, `child_to_child`,
+  `uaf_timeout_race`) × 15 = **180/180 clean** on the final test binary,
+  plus the five worst × 30 = **150/150 clean** on the Quit-fix build, plus
+  `gc_pressure_dbg` × 12 = **12/12 clean** on the final debug-static
+  binary — only exits 0/1, no signals, no new `.ips` reports.
+- Focused `test/es7/s6-waitasync-cross-agent.js` — **11 scenario groups**
+  (iteration 1's 10 plus: pre-share Int32 waiter registered before the
+  first broadcast — agent notify returns 1 and resolves `"ok"`; pre-share
+  BigInt64 twin; pre-share 300 ms finite waiter — the timeout still wins
+  after the share; post-share control waiter) — **pass** on the test
+  binary (registered ×3, `-nodeferparse`, `-force:deferparse`, no-GC) and
+  on `out/debug-static/bin/ch` (registered, `-nodeferparse`).
+- S6b/S6D `s6-waitasync-pause.js`, S6c `s6-bigint-atomics.js`, adjacent
+  es7 (`s6-growable-nonshared` 13/13, `atomics_test` 16/16,
+  `sharedarraybuffer` 7/7, `bigint64array` 10/10): **pass** on both
+  profiles. Default-off probes unchanged (`SAB=undefined
+  Atomics=undefined` with no flags / `-ESBigInt` alone).
+- **Exact `Atomics/waitAsync/**` (202 scenarios), two runs**: **201/1**
+  (79 fail→pass / 0 pass→fail) and **199/3** (77 fail→pass / 0 pass→fail)
+  vs base 122/80; every residual in both runs is the
+  `no-spurious-wakeup-*` witness race.
+- **Atomics + SAB 982**: Atomics `**` **691/83** (76 fail→pass /
+  0 pass→fail vs base 615/159), `SharedArrayBuffer/**` **204/4** (the
+  same 4 documented constructor-order scenarios). Merged **895/87**.
 - Gates (expected-pin overrides; pins deliberately not edited):
   `check_regression.py --select test --expected-passed 2031` →
   **PASS 2031/0**; `--select debug` (on `out/debug-static/bin/ch`)
   `--expected-passed 2083` → **PASS 2083/0**. Pin move is exactly the one
-  new rlexe entry (test 2030→2031, debug 2082→2083). `zig build check`
-  fails only its embedded count step against the un-edited 2030 pin
-  (2031/0 actual), matching the S6c policy.
+  new rlexe entry (test 2030→2031, debug 2082→2083).
 
 ## Residuals and risks
 
@@ -332,6 +374,28 @@ Repair-round binaries: `zig-out/bin/ch` (test, UUID
   the ≤2 ms poll window; `settled` arbitrates exactly-once and the promise
   resolves `"timed-out"` — the spec's own concurrent-timeout ambiguity
   (documented in the repair section).
+- **Monitor self-reschedule OOM (host-queue failure)**: the monitor's
+  self re-enqueue hands the existing task to the host timer callback
+  again; that is a host-side allocation (`new CallbackMessage` in ch,
+  which fatally exits on failure). A hypothetical non-fatal host that
+  drops the reschedule would leave a `monitored` waiter whose monitor is
+  dead: later foreign notifies would count and latch it with nobody to
+  resolve — bounded by the host contract that the timer callback must
+  accept the task.
+- **5-second stuck-agent handshake consequence**: if a *live* agent never
+  acknowledges a broadcast within 5 s (wedged in native code before its
+  consumed-event SetEvent, or starved past the bound), the parent
+  proceeds with a stderr warning; if that agent later wakes during a
+  *subsequent* broadcast it may consume the newer round's content (wrong
+  buffer for its `receiveBroadcast`). Bounded to the >5 s-starvation case;
+  the pre-fix code had the equivalent window on every multi-child
+  broadcast.
+- **Pre-share waiters on sibling wrappers**: retro-monitoring covers the
+  wrapper being extracted at the first share. Pending waiters on a
+  *different* wrapper over the same contents inside the extracting
+  runtime (only constructible via
+  `JsCreateSharedArrayBufferWithSharedContent` into the same runtime)
+  are not retro-monitored; they keep the S6b skip-and-uncount contract.
 - **Remaining shared-host global state**: `WScriptJsrt::GetNextSourceContext`
   (a plain static counter) is incremented from agent threads — a benign
   duplicate-source-context race, unchanged from the pre-S6e host; module
