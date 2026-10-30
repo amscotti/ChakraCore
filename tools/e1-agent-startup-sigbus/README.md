@@ -18,7 +18,9 @@ test gates; these are evidence-collection tools.
 - `rvs.mjs` — churn driver (adapted from the S6e reviewer's rvb.mjs):
   `node rvs.mjs <pre|predbg|post|postdbg> <killms> <agents> <count> <par>
   [interp]`. Bins live in the (git-ignored) `out/sigbus/bin-*` dirs of the
-  lane worktree.
+  lane worktree. Note: any `*dbg` label symbolicates against the pre-fix
+  debug image's offsets — harmless for fault counting, but do not interpose
+  dbg legs (symbolication would use the wrong image).
 - `cs-hammer.c` — mutual-exclusion hammer for the PAL CriticalSection
   exported from libChakraCore.dylib: `./cs-hammer <dylib> <threads>`.
 - `lldb-catch.sh` — retry-loop lldb capture with OnSegmentAlloc/OnThreadInit
