@@ -745,12 +745,29 @@ confirmations) as a separate pre-existing engine race in concurrent
 child `ScriptContext::Initialize` — routed to its own engine lane, not
 hidden. The single new `s6-waitasync-cross-agent` entry moved the gates
 to **2031/2083** (post-merge main `zig build check` 583/583 with
-2031/0 test; debug-static 2083/0). All active feature/triage
-worktrees are merged; next work items are the separate engine lane for
-the pre-Quit multi-agent startup SIGBUS (16-agent no-Quit churn
-reproducer, ~2/120), the remaining S8/P-eval residuals, lead-surrogate
-lacunarity, and the C4 qualification work (full baseline rerun,
-host-reported negative phase). Tracked eval residuals: P4 body eval with non-simple
+2031/0 test; debug-static 2083/0). The separate E1 engine lane then
+diagnosed and fixed that startup SIGBUS (merge `3574b6168`, receipt
+[e1-agent-startup-sigbus.md](e1-agent-startup-sigbus.md)): the x64
+write-barrier card table's `OnThreadInit` rounded the thread-stack page
+count down, so macOS ARM64's unaligned pthread stack tops left the top
+partial page outside card-table section commit, and stack write barriers
+on `WriteBarrierPtr` temporaries read uncommitted PROT_NONE card pages
+during concurrent child `ScriptContext::Initialize` — deterministic
+arithmetic, not a race (55/11200 interposed pre-fix → 0/2450 post-fix;
+dual ACCEPT; gates unchanged 2031/2083). A conformance repair to S6e then
+restored guaranteed FIFO **resolution** order across a foreign notify
+pass (merge `02c45f214`, receipt section in
+[c2-s6-cross-agent-waitasync.md](c2-s6-cross-agent-waitasync.md)):
+tokens were latched FIFO but each resolved by its own 2 ms monitor timer,
+so near-equal fires could invert order (30/2400 on debug, surfaced by the
+post-E1 debug gate); the repair chains latched tokens at latch time under
+the waiter-list CS and claims them head-first on the registrant thread
+(0/2400 post-fix; 7,800 adversarial pass-observations clean; dual ACCEPT;
+gates unchanged). All active feature/triage
+worktrees are merged; next work items are
+the remaining S8/P-eval residuals, the recorded S6e exit-assert card
+(~100+ agents at end-of-main), lead-surrogate lacunarity, and the C4
+qualification work (full baseline rerun, host-reported negative phase). Tracked eval residuals: P4 body eval with non-simple
 parameters; P2 hidden outer lexical and JSC/Node delete difference.
 S3 (Unicode data decision), S6 default (product/security decision),
 B4 and C4 remain decision- or gate-blocked. A repair loop then closed

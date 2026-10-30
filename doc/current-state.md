@@ -416,8 +416,13 @@ Atomics, S6d adds finite `waitAsync` timeouts, and S6e adds flag-on
 cross-agent `waitAsync` through a native wake latch with registrant-thread
 monitor tasks and child message queues, plus a POSIX `WScript.Quit`
 flush-and-raw-exit teardown that removed the deterministic Quit crash
-families (a ~0.3% pre-Quit agent-startup SIGBUS remains, tracked as a
-separate engine lane). BigInt is now enabled by default; `-ESBigInt-`
+families. The residual ~0.3% pre-Quit agent-startup SIGBUS was then
+root-caused as a card-table stack-coverage gap and fixed by the E1 engine
+lane (`OnThreadInit` page-count round-up; merge `3574b6168`; gates
+unchanged at 2031/2083), and a follow-up repair restored guaranteed FIFO
+resolution order for cross-agent `waitAsync` (per-notify-pass ordered
+chain, head-first registrant claims; merge `02c45f214`).
+BigInt is now enabled by default; `-ESBigInt-`
 restores the old
 default-off profile, and the class-elements corpus improved to **5,892/5,897**
 because the four former BigInt parse-barrier scenarios now execute.

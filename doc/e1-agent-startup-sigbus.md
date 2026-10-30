@@ -7,7 +7,9 @@ Lane: `agent-startup-sigbus` (base `8d2d68ea8`). Defect: rare SIGBUS (~0.3% unde
 churn; sharp reproducer 16-agent no-Quit churn ~2/120) during concurrent child
 `ScriptContext::Initialize` in the `ch` host's agent threads, before any Quit.
 Review: general and adversarial reviewers both **ACCEPTED** at `58d02c90b`
-(see "Review outcome" below); pending merge to main.
+(see "Review outcome" below). Landing: merged to main in `3574b6168`;
+post-merge main gates **2031/0 test** and **2083/0 debug-static**, pins
+unchanged (no new gate entries).
 
 ## Proven facts (instrumented interposer `out/sigbus/sigbus-trace.dylib`)
 

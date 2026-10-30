@@ -879,7 +879,8 @@ still owns JIT-configuration claims.)*
 | S6b `Atomics.pause` + single-thread `waitAsync` (flag-on) | Landed `0a1c592b3` + review `5fa9524e2` (merge `eef3b93c5`) | pause 10/10; focused pause+waitAsync 0/124 → 80/124, 72/202 exact, 80/0 f→p; short calls/counts/cross-realm/FIFO fixed; new test 1 entry | finite timeout scheduling, cross-agent waitAsync, BigInt waitAsync, B4; SAB default off |
 | S6c BigInt Atomics (flag-on) | Landed `d13f5bdaa` + cleanup `cda8a2fd3` (merge `981fe000d`) | exact BigInt dirs 22/206 → 136/206; Atomics+SAB 698/284 → 814/168, 116/0 f→p/f; shared+non-shared BigInt64/BigUint64 RMW, wait/notify/waitAsync validation | finite timeout, cross-agent suspension, SAB constructor-order, B4; BigInt/SAB defaults off |
 | S6d finite `waitAsync` timeouts (flag-on) | Landed `9a6524b8b` + repairs `d702ea085`, `2a2b37148`, `c71f35ff3` (merge `dd6434127`) | additive optional host timer callback; recycler-owned timeout task; waitAsync 116/202 → 122/202, +6/0; huge-delay host wrap fixed; gates unchanged 2026/2078 | cross-agent waitAsync, no timer callback fallback, stale-task shutdown latency, TTD replay, B4 |
-| S6e cross-agent `waitAsync` (flag-on) | Landed `d972c53fe` + repairs `e547fa345`, `e23fc6f6b`, teardown-only `a78a5dba4` + receipt `866a03c82` (merge `6900598e4`) | native wake latch + registrant-thread monitor tasks + child message queues; POSIX `WScript.Quit` flush + raw `::_exit` teardown (no PAL/runtime cleanup), eliminating the deterministic Quit crash families; waitAsync selection 122/80 → 201/1 (repeat 199/3), 0 pass→fail; Atomics selection 691/83, SAB 204/4, merged ≈895/982; new test 1 entry; gates 2030/2082 → 2031/2083 | pre-Quit multi-agent startup SIGBUS (~0.3%, separate engine lane), unnotified cross-runtime waits poll, blocked-stdout Quit hang (pre-existing), TTD+Quit log truncation (pre-existing), SAB default off, B4 |
+| S6e cross-agent `waitAsync` (flag-on) | Landed `d972c53fe` + repairs `e547fa345`, `e23fc6f6b`, teardown-only `a78a5dba4` + receipt `866a03c82` (merge `6900598e4`); FIFO resolution repair `533e41d37`/`d99ab67c0` + receipt `d9a6f2d7b`, `a16657242` (merge `02c45f214`) | native wake latch + registrant-thread monitor tasks + child message queues; POSIX `WScript.Quit` flush + raw `::_exit` teardown (no PAL/runtime cleanup), eliminating the deterministic Quit crash families; waitAsync selection 122/80 → 201/1 (repeat 199/3), 0 pass→fail; Atomics selection 691/83, SAB 204/4, merged ≈895/982; new test 1 entry; gates 2030/2082 → 2031/2083. FIFO repair: per-notify-pass ordered chain + head-first claims restored guaranteed per-agent FIFO resolution (30/2400 pre → 0/2400 post; 7,800 adversarial pass-observations clean), gates unchanged | pre-Quit multi-agent startup SIGBUS fixed by E1 (merge `3574b6168`), exit assert under ~100+ agents (iteration-3 teardown; separate card), unnotified cross-runtime waits poll, blocked-stdout Quit hang (pre-existing), TTD+Quit log truncation (pre-existing), SAB default off, B4 |
+| E1 agent-startup SIGBUS (engine defect) | Fixed `944921636` + receipt `58d02c90b`, `e28b11109` (merge `3574b6168`) | card-table stack-coverage gap: `X64WriteBarrierCardTableManager::OnThreadInit` rounded stack pages down, dropping the unaligned top partial page (macOS pthread `stackaddr`) from section commit; stack write barriers on `WriteBarrierPtr` temporaries then read uncommitted PROT_NONE card pages (deterministic `+0x5c000` signature, not a race); one-line round-up fix, ownership unchanged; 55/11200 → 0/2450 interposed churn (clean 0.24% → 0/500); dual ACCEPT; gates unchanged 2031/2083 | PAL low-end up-round coverage gap (documented), malloc'd `WriteBarrierPtr` theoretical gap, statistical bounds, B4 |
 | S12 import attributes + JSON modules | Landed `ee826e889` + fixes `36043391d`, `d0223ff1a` (merge `78cc4f412`) | import corpus delta +12 net / 0 p→f (lane-run 565/172 vs 553/184); loop-3 dual ACCEPT (user-authorized) | `OP_ImportCallWithOptions` JIT lowering (B4); BOM-JSON; debug metadata leg pre-existing |
 | S2 arithmetic/bitwise/shift | Landed `1c5d5b2fc` | scoped 444/2, 80/0; broad 1,027/1,027; Node differentials | BigInt64Array/BigUint64Array, Map/Set identity, literal property names, giant ToString, JIT |
 | S2 BigInt64Array | Landed `f5f0efef5` | 944/0; 958/1016; ctors 24/24, 166/0; internals 163/0 | DataView BigInt, internals, Map/Set identity, SAB, JIT |
@@ -914,10 +915,16 @@ the 2026-10-29 rerun (`out/test262-c2-s1-default-bigint`) is
 **5,892/5,897**: the four former `-ESBigInt` parse-barrier scenarios
 pass; the four post-ES2025 `accessor` grammar scenarios and one Stage-1
 non-extensible scenario remain. All active feature/triage worktrees are
-merged. Next work items are the separate engine lane for the pre-Quit
-multi-agent startup SIGBUS (concurrent child `ScriptContext::Initialize`;
-preserved 16-agent no-Quit churn reproducer, ~2/120), the remaining
-S8/P-eval residuals, and C4 qualification (full baseline rerun,
+merged. The separate E1 engine lane fixed the pre-Quit multi-agent
+startup SIGBUS (card-table stack coverage; merge `3574b6168`, gates
+unchanged), and the S6e FIFO resolution-order repair restored guaranteed
+per-agent FIFO fulfillment across a foreign notify pass (per-notify-pass
+ordered chain + head-first registrant claims; 30/2400 pre → 0/2400 post;
+merge `02c45f214`, gates unchanged). Next work items are the exit-assert
+card (end-of-main `WaitForMultipleObjects` over accumulated agent handles
+after ~100+ agents, pre-existing iteration-3 teardown behavior), the
+remaining S8/P-eval residuals, and C4
+qualification (full baseline rerun,
 host-reported negative phase). P5 residual: eval/function-expression
 reference paths and pre-existing proxy descriptor duplication.
 
@@ -925,7 +932,10 @@ reference paths and pre-existing proxy descriptor duplication.
 
 **Engine defects on existing features** — the 3,822-failure defect bucket
 and S14; includes the 327 executed parse negatives and failing negatives
-generally. These do not need new features, only correctness work.
+generally. These do not need new features, only correctness work. The
+first dedicated engine-defect lane is closed: E1 fixed the card-table
+stack-coverage gap behind the agent-startup SIGBUS
+([e1-agent-startup-sigbus.md](e1-agent-startup-sigbus.md)).
 
 **Disabled-feature incompleteness** — default-off flags named in the
 policy, with `ConfigFlagsList.h` anchors: `ESSharedArrayBuffer` (false at
