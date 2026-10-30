@@ -445,6 +445,39 @@ debug `633049b0…a39` (`out/s6e-fifo-bins/ch-pre-debug`), post-fix debug
 - Profile skew above: post-fix test-profile reproducer legs are
   uninformative (pre-fix baseline is 0/1200 there); the debug gate
   remains the detector.
+- **Pre-existing exit assert under very-high agent churn (adversarial
+  review; separate follow-up card)**: `ASSERTION (WScriptJsrt.cpp:1345)
+  waitRet == 0 waitRet == WAIT_OBJECT_0` — the end-of-main
+  `WaitForMultipleObjects` over the accumulated `threadData->children`
+  handles fails after ~100+ leave-completed agents in one process.
+  Reproduced 3/3 identically on the pre-fix AND post-fix binaries
+  (introduced by the iteration-3 host teardown, not by this repair);
+  the committed test (~15 agents) and both gates never hit it; all
+  in-process oracles complete before the assert, so data is unaffected.
+
+### Review outcome (FIFO repair)
+
+Both reviewers **ACCEPTED** with zero `[bug]` findings.
+
+- **General review**: chain stamping inside the notify's single CS hold,
+  splice-before-delete verified on all three release paths, JsRT boundary
+  respected (other-registrant tokens touched by native fields only),
+  delay-0 ordering proven against `MessageQueue.h`'s insert-after-equals
+  semantics, termination proven (monotonically shortening chain),
+  ownership record compliant with `doc/memory-management.md`.
+  Independently re-measured: pre 7/600 inversions vs post 0/600;
+  debug gate **PASS 2083/0**.
+- **Adversarial review**: **7,800 pass-observations / 41,600
+  waiter-observations with 0 FIFO violations and 0 hangs** (4/8/16
+  waiters, full/split notify modes, racing dual notifiers with exact
+  totals); timeout×notify poisoning (1,600 waiters: 0 double-resolves,
+  0 missed, survivors FIFO); GC churn and leave/teardown races clean;
+  pre-share retro path ordered; 32-waiter chains terminate ≤27 ms under
+  load; no fix-attributable leak (RSS slopes equal pre/post); both gates
+  **PASS 2031/0 and 2083/0** with pins unedited. Ordering is structural
+  (claims serialize on the registrant thread and require no unsettled
+  same-registrant predecessor), not scheduler luck. Its one `[risk]` is
+  the pre-existing exit assert recorded above.
 
 ## Scope
 
