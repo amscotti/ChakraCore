@@ -2,10 +2,14 @@
 
 Status: **landed** — implementation `d972c53fe`, review repair `e547fa345`
 (docs `6c319e065`… `05d70b805`), final repair iteration 2
-(`e23fc6f6b`), teardown-only iteration 3 (`WScript.Quit` raw exit; this
-commit, with the post-landing SIGBUS diagnosis and fresh campaign
+(`e23fc6f6b`), teardown-only iteration 3 (`WScript.Quit` raw exit;
+`a78a5dba4`, with the post-landing SIGBUS diagnosis and fresh campaign
 evidence below) on
-branch `s6-cross-agent-waitasync` (base `f305a175f`); evidence below. `ESSharedArrayBuffer` (and `ESBigInt` for the BigInt64 paths)
+branch `s6-cross-agent-waitasync` (base `f305a175f`); evidence below. A
+docs-only receipt cleanup after `a78a5dba4` (no runtime change) copies the
+reviewer's final gate logs under `out/gate-receipt/` and the adversarial
+campaign under `out/s6e-teardown-review/` (both git-ignored evidence) and
+corrects the evidence labels below. `ESSharedArrayBuffer` (and `ESBigInt` for the BigInt64 paths)
 remain **off by default** (BigInt itself is default-on since S2); this slice
 changes no default. It supersedes the cross-agent residual of
 [c2-s6-waitasync.md](c2-s6-waitasync.md) (S6b); S6d finite timeouts are
@@ -162,8 +166,9 @@ were still inside JsRT calls.
    join window closed". **That attribution was wrong** (see the
    post-landing diagnosis below): a signal-handler capture proved the
    residual SIGBUS is a pre-existing agent-*startup* race in the engine
-   (concurrent `JsCreateContext`), firing before any Quit and identically
-   on the iteration-2 host — not an exit-path crash at all.
+   (concurrent `JsCreateContext`), firing before any Quit and
+   identically on the intermediate-snapshot comparison host — not an
+   exit-path crash at all.
 
 Design (`bin/ch/WScriptJsrt.cpp`, `RawExitProcess`): `WScript.Quit`
 attempts **no runtime teardown at all** anymore. It flushes `stdout` and
@@ -210,13 +215,26 @@ before it can register, before the parent's registration barrier can
 pass, therefore strictly **before any `WScript.Quit` can run**. Three
 independent confirmations:
 
-1. **Same-engine/old-host reproduction.** The iteration-era host
-   binary (`out/s6e-bins/ch-test`, join-then-`ExitProcess` design)
-   running the identical, engine-unchanged `libChakraCore.dylib`
-   (SHA `cef46d17…73a` — iteration 3 changed only `bin/ch` host code)
+1. **Same-engine/old-host reproduction.** The comparison host is an
+   **unlabeled intermediate snapshot, not the final iteration-2
+   launcher**: SHA-256 `29dba05e…8a4` (preserved as
+   `out/s6e-bins/ch-test`, byte-identical to the mislabeled
+   `out/s6e-bins/ch-debug-static` copy; UUID
+   `A84219BA-9D9A-3762-B057-0A3643C02BCD`). It matches neither the
+   recorded iteration-1 binary nor the final iteration-2 launcher
+   (`c03eea6e…528`), and no commit label was recorded for it, so its
+   exact source tree is unknown (the earlier
+   "join-then-`ExitProcess` design" label for this binary is
+   retracted). The snapshot preserved no dylib, so the engine dylib
+   had to be relocated next to it (copied from `zig-out`, SHA
+   `cef46d17…73a` — iteration 3 changed only `bin/ch` host code; the
+   `ch` launcher loads the dylib from its own directory). Running
+   that snapshot host against the identical, engine-unchanged dylib
    reproduces the *same* fault, same frame, same fixed address
    (`0x30005c000`): 1 REALFAULT / 400 vs the new host's 3/400 under
-   the same driver. The teardown design is irrelevant to this fault.
+   the same driver. This proves the fault independent of the
+   teardown host change; it does not establish the snapshot host's
+   own Quit design.
 2. **No-Quit variant.** `n6noquit` (8 agents, identical startup, main
    spins forever — the driver SIGKILLs, so **no exit path ever runs**):
    with a churn-matched 60 ms kill the same captured fault fires
@@ -232,7 +250,12 @@ Root cause is engine-side (concurrent `ScriptContext::Initialize` /
 prototype allocation racing across agent threads — a fixed
 page-aligned fault address suggests the recycler/page-allocator
 segment path); it predates this slice's host change and is **out of
-scope for the teardown-only repair**. What the raw-exit change did
+scope for the teardown-only repair**. Proven so far: independent of
+the teardown host change and of the current dylib; **not** proven
+absent from the entire S6e engine branch at current test power (the
+pre-S6e base host has been churn-probed only at the weak 8-agent/
+60 ms setting — 0/200 — never at the sharp 16-agent setting; see the
+residual below). What the raw-exit change did
 remove is every *exit-path* crash: the deterministic families of
 iteration 2 (`n7` agent-initiated Quit SIGSEGV 18/20, `n8` wedged
 agent 8/8, `n6` Quit-with-live-agents 17–21/25) are all clean now —
@@ -480,7 +503,15 @@ no-ops; prior full-build gates 568/568 and 546/546 stand).
   n6-test, n7-test, n8-debug, n12-test) — **all four identified as
   the pre-existing agent-startup race** above (interposer capture,
   old-host reproduction, no-Quit variant); wall ≈37 s/seq round,
-  ≈15 s/par round.
+  ≈15 s/par round. **Provenance:** this 1,255-run aggregate is
+  doc-embedded only and not reconstructable — `drive4.mjs` overwrote
+  its per-round result files in place (last-round remnant and driver
+  preserved under `out/s6e-teardown-review/drive4/`). The
+  independent reviewer campaign under `out/s6e-teardown-review/`
+  corroborates it: **1,134 valid of 1,154** Phase A runs (the 20
+  discounted runs are the first round's 10 `a3` one-byte stdout
+  mismatches and 10 `a4` driver-timeout kills; both families clean in
+  all five later rounds) plus Phase B's 970 no-Quit churn runs.
 - **Focused suites, both profiles** (`runtests.py --test|--debug
   --variants=disable_jit`, per-test rlexe flags):
   `s6-waitasync-cross-agent`, `s6-waitasync-pause` (S6b pause +
@@ -492,11 +523,24 @@ no-ops; prior full-build gates 568/568 and 546/546 stand).
   (registered, `-nodeferparse`).
 - **Interposer diagnosis campaign** (node-spawn,
   `DYLD_INSERT_LIBRARIES` handler): new host `n6` 3 REALFAULT/400
-  (backtrace above); iteration-era host + same dylib 1/400 identical
-  backtrace/address; `lldb --batch` 300 runs of n6/n8/n7 clean
-  (timing displacement). No-Quit `n6noquit` (churn-matched 60 ms
+  (backtrace above); intermediate-snapshot host + same dylib 1/400
+  identical backtrace/address; `lldb --batch` 300 runs of n6/n8/n7
+  clean (timing displacement). No-Quit `n6noquit` (churn-matched 60 ms
   driver kill): 3 REALFAULT/600, identical backtrace — see the
-  residual below.
+  residual below. Reviewer Phase B (no-Quit churn classification,
+  `rvb-*.out` under `out/s6e-teardown-review/`, 970 runs): current
+  host 0/200 (8 agents/60 ms), 0/120 (2/60 ms), 1/80 (8/1.5 s),
+  **2/120 (16 agents/60 ms — the sharp reproducer)**, 0/100 with the
+  interposer; base host 0/200 (8/60 ms); intermediate-snapshot host
+  0/150 (8/60 ms).
+- **Final gate receipt (reviewer, at `a78a5dba4`)**: both rlexe gates
+  re-run by the reviewer on the iteration-3 binaries above — test
+  **2031/0**, debug-static **2083/0** (same expected-pin overrides as
+  the iteration-2 gate entry). Gate evidence provenance now points to
+  the copied reviewer logs `out/gate-receipt/rev-s6e3-gate-test.log`
+  and `rev-s6e3-gate-debug.log` (with `out/gate-receipt/PROVENANCE.md`
+  recording commit, binary SHA-256s and reviewer run times), not to
+  the reviewer's scratch directory.
 
 ## Residuals and risks
 
@@ -559,16 +603,23 @@ no-ops; prior full-build gates 568/568 and 546/546 stand).
   (2 ms) plus host sleep granularity — the host timer contract's few-ms
   early/late fire (S6d) applies. No fairness/starvation claim beyond FIFO
   list order.
-- **Rare SIGBUS at agent startup (pre-existing engine race, out of
-  scope)**: concurrent `JsCreateContext` → `ScriptContext::Initialize` →
+- **Rare SIGBUS at agent startup (engine race, out of scope)**:
+  concurrent `JsCreateContext` → `ScriptContext::Initialize` →
   `JavascriptLibrary::InitializePrototypes` → `JavascriptStringObject`
   ctor (JavascriptStringObject.cpp:36) faults on a fixed page offset
   (`0x30005c000`, also `0xa8c05c000` — `+0x5c000` in different
   segments) with si_code 1, ~0.3% under the teardown campaign and
-  ~0.5–0.75% under the interposer driver. Provably independent of
-  `WScript.Quit` (fires before the registration barrier; reproduces on
-  the iteration-2 host with the same dylib; reproduces 3/600 with no
-  Quit at all — `n6noquit`, main spins forever, driver kill only). Produces no `.ips` (ReportCrash
+  ~0.5–0.75% under the interposer driver. Independent of
+  `WScript.Quit` (fires before the registration barrier; reproduces
+  on the intermediate-snapshot host with the same dylib; reproduces
+  3/600 with no Quit at all — `n6noquit`, main spins forever, driver
+  kill only). **Scope of that proof:** independent of the teardown
+  host change and of the current dylib, but *not* proven absent from
+  the entire S6e engine branch at current test power — the pre-S6e
+  base host was churn-probed only at 8 agents/60 ms (0/200), never at
+  the sharp setting. Sharp reproducer: **16-agent no-Quit churn,
+  ~2/120** (`rvb-cur-60-16.out`); 8-agent/60 ms shows 0/200, so weak
+  churn proves nothing. Produces no `.ips` (ReportCrash
   silent) but is caught by a chained SIGBUS handler. Needs an
   engine-side owner (page-allocator/recycler segment race at context
   init); not worsened by the raw-exit change.
@@ -583,6 +634,28 @@ no-ops; prior full-build gates 568/568 and 546/546 stand).
   not by GC — fine for the `ch` test host, and the reason real embedders
   should dispose runtimes before exit rather than call `Quit` with live
   agents.
+- **Quit can hang on a blocked full stdout pipe (pre-existing)**: if
+  stdout is a pipe nobody reads and agents fill it, an agent blocked
+  in `write` holds the stdio `FILE` lock; `Quit`'s synchronous stdout
+  flush then blocks and the process hangs (probe
+  `out/s6e-teardown-review/a6_blockout.js`, run only with an unread
+  stdout pipe). Base/iteration-2 parity verified — the join/PAL-exit
+  designs flushed the same way and hung the same way; not introduced
+  or worsened by the raw-exit change.
+- **`-TTRecord` + `Quit` truncates the time-travel log (pre-existing)**:
+  quitting mid-record leaves a truncated TT stream — no Quit path
+  (raw exit or PAL exit) finalizes the recorder, so replay cannot
+  proceed past the Quit. Base/iteration-2 parity verified. The
+  documented S6d/S6e TTD stance (no host timer queue while
+  recording/replaying) is unchanged.
+- **End-of-main still walks PAL cleanup with live agents
+  (pre-existing, out of scope)**: when the main script runs to
+  completion while agents are still alive, `bin/ch/ch.cpp`'s
+  end-of-main termination (`ExitProcess(0)` semantics —
+  `PAL_Shutdown`/CRT exit) still runs the PAL cleanup path over live
+  agent runtimes — the natural-exit analogue of the detach-walk
+  hazard iteration 3 removed only for `WScript.Quit`. Unchanged since
+  base and out of scope for the teardown-only slice.
 - **TTD**: no delayed tasks (hence no monitors) while recording/replaying;
   cross-agent waitAsync stays pending — the documented S6d stance.
 - **Finalizer lock risk** (S6b, unchanged): `CancelAsyncWaiters` takes the
