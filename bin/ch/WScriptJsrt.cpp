@@ -18,6 +18,9 @@
 #include <ctime>
 #include <ratio>
 #include <chrono>
+#if !defined(_WIN32)
+#include <unistd.h> // ::_exit (raw, non-PAL process termination for WScript.Quit)
+#endif
 
 #if defined(_X86_) || defined(_M_IX86)
 #define CPU_ARCH_TEXT "x86"
@@ -210,54 +213,38 @@ JsValueRef __stdcall WScriptJsrt::EchoCallback(JsValueRef callee, bool isConstru
     }
 }
 
-// Orderly agent shutdown before ExitProcess. WScript.Quit must not
-// hard-terminate agent threads mid-JsRT-call: ExitProcess then runs the
-// process-detach path (JsrtRuntime::Uninitialize et al.) over runtimes
-// whose threads died inside script/engine calls, which the review
-// reproduced as SIGSEGV/SIGTRAP/SIGBUS (including the
-// !currentThreadContext->IsScriptActive() assert and the
-// queued-callback/context-teardown signature). Signal every agent's
-// shutdown event and join with a bounded wait so a wedged agent cannot
-// hang process exit; after the bound the exit proceeds exactly as before.
-// The child threads perform their own queue teardown and JsDisposeRuntime,
-// so their runtimes are consistently shut down before the process dies.
-static void ShutdownAgentChildrenBeforeExit(DWORD totalWaitMilliseconds)
+// Raw process termination for WScript.Quit. The previous design (signal
+// every child's shutdown event, join under a 10 s bound, then ExitProcess)
+// still crashed three ways, because ExitProcess/exit run the PAL
+// process-detach path (JsrtRuntime::Uninitialize, DLL detach, C++/TLS
+// destructors) over runtimes whose threads may still be inside JsRT calls:
+// an AGENT-initiated Quit joins only the calling agent's sub-agents, never
+// the main thread or its siblings (SIGSEGV 18/20 in the adversarial
+// campaign); a WEDGED agent (while(true){}) exhausts the join bound and is
+// hard-terminated mid-JsRun (SIGSEGV 8/8); and the joined path left
+// residual SIGBUS under parallel load. Quit therefore performs NO runtime
+// teardown at all anymore: flush stdout/stderr (PAL_fflush writes the
+// underlying FILE buffers synchronously; Echo already flushes per line),
+// then terminate through the raw syscall path. Nothing that could observe
+// a half-torn-down runtime ever runs: no PAL cleanup, no destructors, no
+// detach notifications, no finalizers — sibling and wedged agent threads
+// simply stop existing, so joining is unnecessary by construction.
+static DECLSPEC_NORETURN void RawExitProcess(int exitCode)
 {
-    auto& threadData = GetRuntimeThreadLocalData().threadData;
-    if (threadData == nullptr || threadData->children.empty())
-    {
-        return;
-    }
+    fflush(stdout);
+    fflush(stderr);
 
-    std::vector<HANDLE> handles;
-    handles.reserve(threadData->children.size());
-    for (auto i = threadData->children.begin(); i != threadData->children.end(); i++)
-    {
-        handles.push_back((*i)->hThread);
-        SetEvent((*i)->hevntShutdown);
-    }
-
-    // WaitForMultipleObjects accepts at most 64 handles; wait in chunks
-    // under one overall deadline.
-    DWORD waited = 0;
-    size_t index = 0;
-    while (index < handles.size() && waited < totalWaitMilliseconds)
-    {
-        size_t chunk = handles.size() - index;
-        if (chunk > 64 /* MAXIMUM_WAIT_OBJECTS */)
-        {
-            chunk = 64;
-        }
-        DWORD waitRet = WaitForMultipleObjects((DWORD)chunk, &handles[index], TRUE, 100);
-        if (waitRet >= WAIT_OBJECT_0 && waitRet < WAIT_OBJECT_0 + chunk)
-        {
-            index += chunk;
-        }
-        else
-        {
-            waited += 100;
-        }
-    }
+#if defined(_WIN32)
+    // Windows preserves this host's historical ExitProcess semantics; the
+    // adversarial teardown campaign is POSIX (macOS) only.
+    ExitProcess(exitCode);
+#else
+    // ::_exit bypasses atexit/PAL/TLS/destructor machinery entirely (pal.h
+    // remaps `exit` but not `_exit`). Only the low 8 bits of the exit
+    // status are observable by wait(), so mask explicitly; rlexe codes
+    // (0/1) and any masked WScript.Quit(n) keep their exact values.
+    ::_exit(exitCode & 0xff);
+#endif
 }
 
 JsValueRef __stdcall WScriptJsrt::QuitCallback(JsValueRef callee, bool isConstructCall, JsValueRef *arguments, unsigned short argumentCount, void *callbackState)
@@ -271,8 +258,7 @@ JsValueRef __stdcall WScriptJsrt::QuitCallback(JsValueRef callee, bool isConstru
         exitCode = (int)exitCodeDouble;
     }
 
-    ShutdownAgentChildrenBeforeExit(10000);
-    ExitProcess(exitCode);
+    RawExitProcess(exitCode);
 }
 
 JsValueRef __stdcall WScriptJsrt::LoadScriptFileCallback(JsValueRef callee, bool isConstructCall, JsValueRef *arguments, unsigned short argumentCount, void *callbackState)

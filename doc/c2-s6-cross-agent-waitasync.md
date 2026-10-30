@@ -1,7 +1,10 @@
 # C2-S6e: cross-agent Atomics.waitAsync (flag-on slice)
 
 Status: **landed** — implementation `d972c53fe`, review repair `e547fa345`
-(docs `6c319e065`… `05d70b805`), final repair iteration 2 (this commit) on
+(docs `6c319e065`… `05d70b805`), final repair iteration 2
+(`e23fc6f6b`), teardown-only iteration 3 (`WScript.Quit` raw exit; this
+commit, with the post-landing SIGBUS diagnosis and fresh campaign
+evidence below) on
 branch `s6-cross-agent-waitasync` (base `f305a175f`); evidence below. `ESSharedArrayBuffer` (and `ESBigInt` for the BigInt64 paths)
 remain **off by default** (BigInt itself is default-on since S2); this slice
 changes no default. It supersedes the cross-agent residual of
@@ -100,10 +103,12 @@ here; debug-profile evidence below was re-run on the genuine path.
    Fixes (no signal catching/hiding): agent runtimes are created with
    `JsRuntimeAttributeDisableBackgroundWork` (in-thread GC via
    `OptimizeForManyInstances`; no per-agent recycler threads), and
-   `QuitCallback` now performs an orderly agent shutdown — signal every
+   `QuitCallback` then performed an orderly agent shutdown — signal every
    child's shutdown event and join chunked (≤64 handles) under a 10 s
-   bound — before `ExitProcess`. A wedged agent still cannot hang exit;
-   after the bound the exit proceeds as before.
+   bound — before `ExitProcess`. That join design was **superseded in
+   iteration 3** by the raw-exit semantics below (it still crashed for
+   agent-initiated Quit, wedged agents, and residually under parallel
+   load); the DisableBackgroundWork half stands unchanged.
 2. **Pre-share waiter was deaf.** A `waitAsync` registered before the first
    `JsGetSharedArrayBufferContent` had `monitored == false` forever:
    foreign notifies returned 0 and its promise stayed pending. On the
@@ -131,6 +136,110 @@ here; debug-profile evidence below was re-run on the genuine path.
    read-`linked`-under-CS / delete-outside contract is stated at both
    sites; monitor self-reschedule OOM and the 5 s stuck-agent consequence
    are recorded as residuals (below).
+
+## Review repair, iteration 3 (teardown-only: raw exit for `WScript.Quit`)
+
+The iteration-2 join-then-`ExitProcess` design still crashed three ways,
+all rooted in the same fact: **`ExitProcess`/`exit` run the PAL
+process-detach path** (`JsrtRuntime::Uninitialize`-driven runtime
+finalization, DLL detach, C++/TLS destructors) over runtimes whose threads
+were still inside JsRT calls.
+
+1. **Agent-initiated Quit** (`n7_agent_quit`: one agent of 8 calls
+   `WScript.Quit(7)` mid-flight). The join only ever covered the *calling*
+   thread's own sub-agents — never the main thread or sibling agents,
+   which `ExitProcess` then hard-terminated mid-JsRT-call before the
+   detach path walked their runtimes: **SIGSEGV 18/20** on the final
+   iteration-2 binary (test profile, parallel 6).
+2. **Wedged agent** (`n8_wedged_agent_quit`: one agent of 6 inside
+   `while(true){}`, main calls `Quit(0)`). The bounded join expired after
+   ~10 s and the same detach path ran over the wedged runtime:
+   **SIGSEGV 8/8**.
+3. **Residual SIGBUS under parallel load** in the flagship teardown
+   families (`n6_quit_live_agents` 1/25, `n10_timed_leaving` 1/25,
+   `n12_interleave` 1/25 test + 1/5 debug) — iteration 2 attributed these
+   to "the same detach path racing agents that were mid-JsRT while the
+   join window closed". **That attribution was wrong** (see the
+   post-landing diagnosis below): a signal-handler capture proved the
+   residual SIGBUS is a pre-existing agent-*startup* race in the engine
+   (concurrent `JsCreateContext`), firing before any Quit and identically
+   on the iteration-2 host — not an exit-path crash at all.
+
+Design (`bin/ch/WScriptJsrt.cpp`, `RawExitProcess`): `WScript.Quit`
+attempts **no runtime teardown at all** anymore. It flushes `stdout` and
+`stderr` (`PAL_fflush` writes the underlying `FILE` buffers
+synchronously; `Echo` already flushes per line) and then terminates
+through the raw syscall path — POSIX: `::_exit(exitCode & 0xff)`, which
+runs no PAL cleanup, no atexit handlers, no C++/TLS destructors, no DLL
+or process detach notifications and no runtime finalizers
+(`pal.h` remaps `exit` but not `_exit`; the explicit `& 0xff` documents
+the `wait()`-observable mask). Sibling and wedged agent threads simply
+stop existing; joining is unnecessary by construction (and unjoinable in
+the agent-initiated case, where the quitter never owned the main thread
+or its siblings), so no signal phase is retained either — a best-effort
+root-tree walk would only add a new unsynchronized read of other
+threads' `children` lists microseconds before the process dies. Windows
+preserves the host's historical `ExitProcess` semantics (the adversarial
+campaign is POSIX/macOS only). Exit-code exactness is unchanged: probe
+`WScript.Quit(0|1|3|7|42|255|-1)` → `0|1|3|7|42|255|255` (negative codes
+mask, as before), and the rlexe gates' `WScript.Quit(0/1)` tests keep
+their exact codes.
+
+## Iteration 3 post-landing diagnosis: the residual SIGBUS is a
+pre-existing agent-startup race, not an exit-path crash
+
+After landing the raw-exit design, a fresh teardown campaign (below)
+still observed a rare SIGBUS (~0.3%) across the teardown families —
+but with **no** `.ips` crash reports and **no** `ReportCrash`
+activity. A `DYLD_INSERT_LIBRARIES` interposer installing a
+`SA_SIGINFO` SIGBUS/SIGSEGV/SIGTRAP handler (the PAL chains unhandled
+faults to the previous handler) captured it on demand:
+
+```text
+SIGBUS si_code 1 (KERN_INVALID_ADDRESS), fault addr 0x30005c000
+Js::JavascriptStringObject::JavascriptStringObject(...)  JavascriptStringObject.cpp:36
+Js::JavascriptLibrary::InitializePrototypes()            JavascriptLibrary.cpp:289
+Js::JavascriptLibrary::Initialize -> GlobalObject::Initialize
+ScriptContext::Initialize -> JsrtContextCore::EnsureScriptContext
+JsCreateContext
+RuntimeThreadData::ThreadProc +140      (agent thread)
+```
+
+The faulting thread is an **agent still inside `JsCreateContext`** —
+before it can register, before the parent's registration barrier can
+pass, therefore strictly **before any `WScript.Quit` can run**. Three
+independent confirmations:
+
+1. **Same-engine/old-host reproduction.** The iteration-era host
+   binary (`out/s6e-bins/ch-test`, join-then-`ExitProcess` design)
+   running the identical, engine-unchanged `libChakraCore.dylib`
+   (SHA `cef46d17…73a` — iteration 3 changed only `bin/ch` host code)
+   reproduces the *same* fault, same frame, same fixed address
+   (`0x30005c000`): 1 REALFAULT / 400 vs the new host's 3/400 under
+   the same driver. The teardown design is irrelevant to this fault.
+2. **No-Quit variant.** `n6noquit` (8 agents, identical startup, main
+   spins forever — the driver SIGKILLs, so **no exit path ever runs**):
+   with a churn-matched 60 ms kill the same captured fault fires
+   **3/600** with the identical backtrace (fault addresses
+   `0x30005c000` and `0xa8c05c000` — same `+0x5c000` page offset in
+   different segments); with a 1.5 s kill it fires 0/400, i.e. the race
+   scales with agent-startup churn, not with any exit behavior.
+3. **Timing displacement.** 300 `lldb --batch` runs of the worst
+   families caught nothing (ptrace changes thread startup timing),
+   matching a scheduling-sensitive allocation race at context init.
+
+Root cause is engine-side (concurrent `ScriptContext::Initialize` /
+prototype allocation racing across agent threads — a fixed
+page-aligned fault address suggests the recycler/page-allocator
+segment path); it predates this slice's host change and is **out of
+scope for the teardown-only repair**. What the raw-exit change did
+remove is every *exit-path* crash: the deterministic families of
+iteration 2 (`n7` agent-initiated Quit SIGSEGV 18/20, `n8` wedged
+agent 8/8, `n6` Quit-with-live-agents 17–21/25) are all clean now —
+`n7` exits **exactly 7 in 180/180** runs, `n8` exits 0 immediately in
+126/126 (no 10 s join bound left to burn), and every remaining signal
+in 1255 campaign runs is this startup race. Recorded as a residual
+with the engine backtrace; a future engine slice should own it.
 
 ## Scope
 
@@ -349,6 +458,46 @@ launcher UUIDs repeat across engine builds.
   `--expected-passed 2083` → **PASS 2083/0**. Pin move is exactly the one
   new rlexe entry (test 2030→2031, debug 2082→2083).
 
+## Evidence (final binaries — iteration 3, teardown-only repair)
+
+Iteration 3 changes only host code (`bin/ch/WScriptJsrt.cpp`), so the
+engine dylib identity is unchanged (SHA `cef46d17…73a`, UUID
+`6832F606-73DE-3A66-97A9-6A53082F3109`); the test launcher moved to
+SHA-256 `f13a52f1…f35f` (`zig-out/bin/ch`) and debug-static to
+`3c4b6d56…e9c0` (`out/debug-static/bin/ch`); both rebuilt clean
+(`zig build` / `zig build -Dprofile=debug-static`, up-to-date
+no-ops; prior full-build gates 568/568 and 546/546 stand).
+
+- **Exit-code exactness, both binaries** (`-ESBigInt
+  -ESSharedArrayBuffer`): `WScript.Quit(0|1|3|7|42|255|-1)` →
+  `0|1|3|7|42|255|255`; `print("x");Quit(5)` prints `x` then exits 5
+  (flush-before-exit verified).
+- **Teardown campaign** (`drive4.mjs`, seq PAR=1 ×7 rounds and par
+  PAR=6 ×4 rounds; families n6/n7/n8/n10/n12 + focused + pause +
+  bigint-atomics; alternating `-CollectGarbage`): **1251 pass, 0 fail,
+  0 hang**, every exit code exact (`n7` 180/180 exit **7**, `n8`
+  126/126 immediate exit 0 — no join bound), 4 SIGBUS (~0.3%:
+  n6-test, n7-test, n8-debug, n12-test) — **all four identified as
+  the pre-existing agent-startup race** above (interposer capture,
+  old-host reproduction, no-Quit variant); wall ≈37 s/seq round,
+  ≈15 s/par round.
+- **Focused suites, both profiles** (`runtests.py --test|--debug
+  --variants=disable_jit`, per-test rlexe flags):
+  `s6-waitasync-cross-agent`, `s6-waitasync-pause` (S6b pause +
+  waitAsync, S6d finite timeouts), `s6-bigint-atomics` (S6c),
+  `s6-growable-nonshared`, `atomics_test`, `sharedarraybuffer`,
+  `bigint64array` → **7/7 test, 7/7 debug**. Cross-agent variant
+  matrix additionally all `pass`/exit 0: test (registered ×3,
+  `-nodeferparse`, `-force:deferparse`, no-GC) and debug
+  (registered, `-nodeferparse`).
+- **Interposer diagnosis campaign** (node-spawn,
+  `DYLD_INSERT_LIBRARIES` handler): new host `n6` 3 REALFAULT/400
+  (backtrace above); iteration-era host + same dylib 1/400 identical
+  backtrace/address; `lldb --batch` 300 runs of n6/n8/n7 clean
+  (timing displacement). No-Quit `n6noquit` (churn-matched 60 ms
+  driver kill): 3 REALFAULT/600, identical backtrace — see the
+  residual below.
+
 ## Residuals and risks
 
 - **Unnotified cross-agent infinite waits poll forever** (by design): the
@@ -390,12 +539,17 @@ launcher UUIDs repeat across engine builds.
   buffer for its `receiveBroadcast`). Bounded to the >5 s-starvation case;
   the pre-fix code had the equivalent window on every multi-child
   broadcast.
-- **Pre-share waiters on sibling wrappers**: retro-monitoring covers the
-  wrapper being extracted at the first share. Pending waiters on a
-  *different* wrapper over the same contents inside the extracting
-  runtime (only constructible via
-  `JsCreateSharedArrayBufferWithSharedContent` into the same runtime)
-  are not retro-monitored; they keep the S6b skip-and-uncount contract.
+- **Pre-share waiters on sibling wrappers**: retro-monitoring (iteration 2)
+  covers the wrapper being extracted at the first share — including a
+  pre-share **main-thread** `waitAsync`, whose waiters are retro-monitored
+  when the first `JsGetSharedArrayBufferContent` marks the contents
+  cross-runtime (the earlier claim that pre-share main-thread waiters stay
+  unmonitored was stale and is removed). The only residual is a pending
+  waiter on a *different* wrapper over the same contents inside the
+  extracting runtime (only constructible via
+  `JsCreateSharedArrayBufferWithSharedContent` into the same runtime):
+  those are not retro-monitored and keep the S6b skip-and-uncount
+  contract.
 - **Remaining shared-host global state**: `WScriptJsrt::GetNextSourceContext`
   (a plain static counter) is incremented from agent threads — a benign
   duplicate-source-context race, unchanged from the pre-S6e host; module
@@ -405,11 +559,30 @@ launcher UUIDs repeat across engine builds.
   (2 ms) plus host sleep granularity — the host timer contract's few-ms
   early/late fire (S6d) applies. No fairness/starvation claim beyond FIFO
   list order.
-- **Main-thread waitAsync registered before the buffer is broadcast** gets
-  no monitor (the mark happens at extraction/from-content creation), so a
-  foreign notify for it is skipped and uncounted. test262 does not exercise
-  this ordering; a future slice could re-check the mark at notify time and
-  fall back to leaving the waiter registered.
+- **Rare SIGBUS at agent startup (pre-existing engine race, out of
+  scope)**: concurrent `JsCreateContext` → `ScriptContext::Initialize` →
+  `JavascriptLibrary::InitializePrototypes` → `JavascriptStringObject`
+  ctor (JavascriptStringObject.cpp:36) faults on a fixed page offset
+  (`0x30005c000`, also `0xa8c05c000` — `+0x5c000` in different
+  segments) with si_code 1, ~0.3% under the teardown campaign and
+  ~0.5–0.75% under the interposer driver. Provably independent of
+  `WScript.Quit` (fires before the registration barrier; reproduces on
+  the iteration-2 host with the same dylib; reproduces 3/600 with no
+  Quit at all — `n6noquit`, main spins forever, driver kill only). Produces no `.ips` (ReportCrash
+  silent) but is caught by a chained SIGBUS handler. Needs an
+  engine-side owner (page-allocator/recycler segment race at context
+  init); not worsened by the raw-exit change.
+- **`WScript.Quit` performs no runtime teardown** (iteration 3, by
+  design): raw `_exit` skips `JsDisposeRuntime`, agent queue teardown,
+  finalizers and PAL cleanup for every live runtime — the deliberate
+  trade that removed the teardown crash families. Two consequences:
+  (a) output written by an agent thread concurrently with a Quit may be
+  truncated mid-line if Quit's flush wins the race (the quitting thread
+  flushes synchronously; `Echo` flushes per line, so complete lines are
+  safe); (b) recycler-owned resources are reclaimed by process death,
+  not by GC — fine for the `ch` test host, and the reason real embedders
+  should dispose runtimes before exit rather than call `Quit` with live
+  agents.
 - **TTD**: no delayed tasks (hence no monitors) while recording/replaying;
   cross-agent waitAsync stays pending — the documented S6d stance.
 - **Finalizer lock risk** (S6b, unchanged): `CancelAsyncWaiters` takes the
