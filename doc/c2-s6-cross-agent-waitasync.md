@@ -1,12 +1,82 @@
 # C2-S6e: cross-agent Atomics.waitAsync (flag-on slice)
 
-Status: **landed** — implementation `d972c53fe` on branch
-`s6-cross-agent-waitasync` (base `f305a175f`); evidence below.
-`ESSharedArrayBuffer` (and `ESBigInt` for the BigInt64 paths) remain **off
-by default** (BigInt itself is default-on since S2); this slice changes no
-default. It supersedes the cross-agent residual of
+Status: **landed** — implementation `d972c53fe`, review repair `e547fa345`
+(docs receipt below) on branch `s6-cross-agent-waitasync` (base `f305a175f`);
+evidence below. `ESSharedArrayBuffer` (and `ESBigInt` for the BigInt64 paths)
+remain **off by default** (BigInt itself is default-on since S2); this slice
+changes no default. It supersedes the cross-agent residual of
 [c2-s6-waitasync.md](c2-s6-waitasync.md) (S6b); S6d finite timeouts are
 unchanged and now arbitrate with the new wake path.
+
+## Review repair (e547fa345)
+
+1. **Token-latch ordering (UAF window).** The foreign notify now performs,
+   entirely under the waiter-list CS: latch → list removal →
+   `linked = false` as its **final** token write. While `linked == true`,
+   every path that may delete the token (wrapper finalization through
+   `WaiterList::RemoveAsyncWaiter`, the registrant's claim through
+   `JavascriptSharedArrayBuffer::RemoveAsyncWaiter`) must first take that
+   same CS, so nothing can free the token mid-handoff; once `linked` reads
+   false under the CS the notifier is provably done with the token. No
+   monitor can claim between latch and unlink: `TryClaimForWake` runs on the
+   registrant thread and needs the same CS — observing the latch early only
+   parks it there until the unlink completes. The same-thread handoff branch
+   writes `nextAwoken` before `linked = false` for the same reason, and
+   `CancelAsyncWaiters` now reads `linked` under the CS (HeapDelete stays
+   outside the lock).
+2. **Crash root cause (SIGTRAP/SIGBUS, reproduced).** macOS `.ips` backtrace
+   of a crashing multi-agent run: *child* `RuntimeThreadData::ThreadProc` →
+   `WScriptJsrt::Uninitialize` → `scriptDirMap.clear()` (process-global
+   `std::map<DWORD_PTR, std::string>`) → `~basic_string` → malloc abort.
+   Since S6e, agents routinely exit through `leaving()`, and every child
+   exit called `Uninitialize`, which cleared the four process-global
+   module/script maps from agent threads — racing the main thread and each
+   other (libcpp `std::map` writes) and corrupting the heap. With ≥3 agents
+   leaving concurrently this is the reviewer's reproducible crash; it also
+   explains the first session's one-off corpus SIGSEGV. Fix: the global-map
+   clears are main-thread-only (no `threadData`, or the root
+   `RuntimeThreadData` with `parent == nullptr`); agent threads only join
+   their own sub-agents. TSan is not wired for this build (the legacy
+   sanitizer wiring is documented as suspect), so the evidence is the
+   captured backtrace plus 255+ zero-signal stress runs after the fix.
+3. **Broadcast handshake.** `BroadcastCallback` used to create a semaphore
+   sized for all children but wait for **one** release, then close it —
+   leaving every other child to `ReleaseSemaphore` a closed (and possibly
+   recycled) handle — and a following broadcast could overwrite
+   `RuntimeThreadData::sharedContent` before slow consumers read it.
+   Replaced with a per-child auto-reset **consumed event** owned by the
+   child's `RuntimeThreadData` for the child's whole lifetime (the parent
+   never waits on a closable-from-under-it handle): the child sets it after
+   creating its SAB wrapper (consuming the content) and **before** running
+   any script; a departing (`leaving`/shutdown) child acknowledges without
+   consuming and never touches `parent->sharedContent` again; the parent
+   waits for each live child (zero-timeout probe, then 50 ms slices, ≤5 s
+   bounded, skipping threads that already exited) before releasing the
+   content handle or returning, so `sharedContent` cannot be overwritten
+   until every live child consumed it. Dead-agent broadcasts are skipped
+   via the thread-liveness check (not a warning); only a live non-acking
+   agent warns on stderr.
+4. **`monitored` publication (OOM edge).** `monitored` now starts false and
+   is published (under the waiter-list CS) only after the monitor task was
+   successfully created and enqueued. On task-creation OOM the registration
+   therefore keeps the exact S6b contract — foreign notifies skip and do
+   not count the waiter — instead of the previously possible
+   counted-but-unresolvable wake. The publishing thread is the only
+   drainer of its host queue, so the task cannot run before publication
+   completes.
+5. **Counting nuance (documented).** A foreign notify can return 1 while
+   the registrant's already-due timeout task wins the resolution inside
+   the ≤2 ms poll window: `settled` arbitrates exactly-once, and the
+   promise resolves `"timed-out"` after a notify that counted the waiter —
+   the spec's own concurrent-timeout ambiguity, same shape as the sync
+   wait.
+
+Artifacts (this repair round): test-profile binary `zig-out/bin/ch`
+(UUID `EC33225D-8002-3850-9F56-E6DC31CDDBBA`), genuine debug-static binary
+`out/debug-static/bin/ch` (UUID `93518278-2940-3E19-840F-8C578873F0FA`).
+The first session's `out/s6e-bins/ch-debug-static` copy was in fact a
+test-profile build (identical UUID to `ch-test`) — mislabeled, corrected
+here; debug-profile evidence below was re-run on the genuine path.
 
 ## Scope
 
@@ -46,13 +116,17 @@ event-based (non-polling) wake mechanism.
 ### Foreign notify handoff (`WaiterList::RemoveAndWakeWaiters`)
 
 Under the waiter-list lock, a foreign async entry whose token has
-`monitored == true` is removed from the shared list (`linked = false`),
-counted toward notify's return value, and its `wakeRequested` latch is set
-with an interlocked RMW. A foreign entry without a monitor keeps the S6b
-contract: left registered, not counted, promise pending. The branch reads
-and writes only native token fields; `record` is never dereferenced from
-the notifying thread. FIFO order is preserved because foreign entries are
-consumed in waiter-list order like same-thread ones.
+`monitored == true` is processed in the order: set the atomic wake-request
+latch → remove from the shared list → `linked = false` (the notifier's
+final token touch), and it counts toward notify's return value. The latch
+leads so that, throughout the handoff, the token is either still linked
+(deletion paths must take this same CS) or the notifier has no further
+writes; see the repair section for the full ordering argument. A foreign
+entry without a monitor keeps the S6b contract: left registered, not
+counted, promise pending. The branch reads and writes only native token
+fields; `record` is never dereferenced from the notifying thread. FIFO
+order is preserved because foreign entries are consumed in waiter-list
+order like same-thread ones.
 
 ### Cross-runtime opt-in (`SharedContents::MarkCrossRuntime`)
 
@@ -105,19 +179,24 @@ Creation: HeapNew in JavascriptSharedArrayBuffer::AddAsyncWaiter on the
 Domain: native HeapAllocator; released only with HeapDelete from
         JavascriptSharedArrayBuffer::RemoveAsyncWaiter (registrant thread)
         or CancelAsyncWaiters (wrapper finalizer / runtime dispose)
-New fields: monitored (immutable after publication under the waiter-list
-        lock; written once at registration, read by foreign notifiers under
-        the same lock) and wakeRequested (volatile long latch; set by a
-        foreign notify with an interlocked RMW under the waiter-list lock
-        after the token is unlinked; read by the registrant's monitor with
-        an interlocked RMW without the lock). The waiter-list CS orders the
-        structural unlink; the RMWs order the flag itself.
+New fields: monitored (false at registration, published under the
+        waiter-list lock only after the monitor task is created and
+        enqueued — task-creation OOM keeps the S6b skip-and-uncount
+        contract; read by foreign notifiers under the same lock) and
+        wakeRequested (volatile long latch; set by a foreign notify with an
+        interlocked RMW under the waiter-list lock BEFORE the token is
+        unlinked and with linked=false as the notifier's final token
+        write; read by the registrant's monitor with an interlocked RMW
+        without the lock). The waiter-list CS orders the structural
+        unlink; the RMWs order the flag itself.
 Cross-thread rule: the notifying thread touches ONLY {threadContext
-        (read), monitored (read), linked (write), wakeRequested (RMW)} and
-        list membership — all native fields. It never dereferences record,
-        never touches the wrapper/GC lists, and never frees the token. The
-        child (registrant) exclusively performs the claim, the wrapper-list
-        unlink and the token deletion, so there is no double delete.
+        (read), monitored (read), linked (final write), wakeRequested
+        (RMW)} and list membership — all native fields. It never
+        dereferences record, never touches the wrapper/GC lists, and never
+        frees the token. The child (registrant) exclusively performs the
+        claim, the wrapper-list unlink and the token deletion, so there is
+        no double delete; the finalizer reads linked under the same CS
+        before its fast-path HeapDelete.
 Root chain: host queue AddRef(monitor task) → task.waiter (traced Field) →
         record.buffer (traced Field) → wrapper → asyncRegistrations token +
         SharedContents (waiter list). While the task is queued or executing
@@ -131,12 +210,12 @@ Finalizer: CancelAsyncWaiters unlinks tokens whose `linked` is still true
         HeapDeletes them without touching records — unchanged S6b path; a
         foreign notify cannot race it because both take the waiter-list CS
         for the structural part and neither frees what the other owns.
-Failure paths: monitor task creation/enqueue failure (OOM) degrades to the
-        unmonitored contract — the waiter stays registered, foreign notifies
-        skip and do not count it (S6b fallback); no cross-thread hazard is
-        introduced. Child shutdown with a pending monitor drops the task at
-        queue teardown ( JsRef released before dispose); the promise stays
-        pending by design.
+Failure paths: monitor task creation/enqueue failure (OOM) never publishes
+        `monitored`, so the waiter keeps the S6b contract — foreign
+        notifies skip and do not count it, same-thread notify still
+        resolves; no cross-thread hazard is introduced. Child shutdown with
+        a pending monitor drops the task at queue teardown (JsRef released
+        before dispose); the promise stays pending by design.
 Thread/context: promise resolution, GC-visible writes and token deletion
         happen exclusively on the registrant's thread. The notifying thread
         performs no JsRT/GC operation beyond its own Atomics.notify.
@@ -159,85 +238,74 @@ by its poll interval instead of parking the thread forever, and shutdown /
 after it), so teardown stays prompt. The queue is destroyed
 (`RemoveAll` + delete, releasing each task's JsRef) **before**
 `JsDisposeRuntime` in both the normal and error exits — messages own refs
-that must be released while the runtime is valid.
+that must be released while the runtime is valid. The child's drain does
+not call `JsTTDNotifyYield` (TTD models no host timer queue, and agents
+schedule no delayed tasks while recording/replaying). The broadcast
+handshake is the per-child consumed-event protocol described in the repair
+section; on exit the child acknowledges any pending broadcast without
+consuming it.
 
 ## Evidence
 
-Mac ARM64 (aarch64-apple-macos.26.0), test profile (RelWithDebInfo, no JIT)
-and debug-static, shared gate lock (`sh /tmp/opencode/cc-gate-lock.sh`),
-local `.zig-cache`/`out`; no `--prepare`, no full corpus/check. Every
-authoritative build/test262 command ran through the gate lock (the wrapper
-leaks its lock on completion — the documented S6c/S6d operational note; it
-was reclaimed by aging per the script's own policy only when no
-zig/runtests/run.py gate process was active). Pinned test262
+Two rounds: implementation `d972c53fe` (first session, summarized) and the
+review repair `e547fa345` (this round, authoritative). Mac ARM64
+(aarch64-apple-macos.26.0), test profile (RelWithDebInfo, no JIT) and
+debug-static, shared gate lock (the wrapper leaks its lock on completion —
+the documented S6c/S6d operational note; reclaimed by mtime aging only when
+no zig/runtests/run.py gate process was active). Pinned test262
 `2e0a56762801e275a9fdf96dc49d90ba0cddcf63`, 20 controls passed per run,
 Node **v26.5.0**, jobs 6, timeout 10 s, host flags
-`-ESBigInt -ESSharedArrayBuffer -nonative -Test262 -CollectGarbage`. Base
-binary: `/Users/ascotti/Documents/code/ChakraCore/zig-out/bin/ch` (the main
-worktree clean at `f305a175f`, SHA-256 `3cbb54a7…`).
+`-ESBigInt -ESSharedArrayBuffer -nonative -Test262 -CollectGarbage`.
 
-- Builds: `zig build -Dprofile=test --summary line` **568/568**;
-  `-Dprofile=debug-static` **546/546** (only pre-existing warnings).
-  `zig build check` **581/583**, the one failed step being the embedded
-  `check-regression` count (actual **2031/0** vs the deliberately un-edited
-  pin 2030 — same policy as S6c). Authoritative gates with explicit
-  overrides: `tools/build/check_regression.py ... --select test
-  --expected-passed 2031` → **PASS: passed 2031 / failed 0**;
-  `--select debug --expected-passed 2083` (binary
-  `out/debug-static/bin/ch`) → **PASS: passed 2083 / failed 0**. Pin move
-  is exactly the new rlexe entry: test 2030 → 2031, debug 2082 → 2083.
-- New `test/es7/s6-waitasync-cross-agent.js`, registered once in
-  `test/es7/rlexe.xml` with
-  `-ESBigInt -ESSharedArrayBuffer -Test262 -CollectGarbage -args summary`:
-  **pass** on the test binary (registered, `-nodeferparse`) and on the
-  debug-static binary (registered, `-nodeferparse`). 8 scenarios: Int32
-  foreign notify → `"ok"` + count 1 + unregistered-after; BigInt64 same
-  (timeout-before-notify → `"timed-out"` + late notify 0; notify-before-500
-  ms-timeout → `"ok"` + late notify/task no-op; two agents on separate
-  indexes; FIFO order A,B within one agent across a `CollectGarbage`; async
-  `receiveBroadcast` draining across awaits; reverse direction — main-thread
-  waiter + monitor in the main queue woken by an agent's notify, count 1,
-  then unregistered). The **base binary fails exactly the 19 new checks**
-  (exit 1, deterministic) — precise before/after discrimination.
-- S6b/S6d focused `s6-waitasync-pause.js`: **pass** ×3 registered flags,
-  `-nodeferparse`, without `-CollectGarbage`, and with `-ESBigInt` added;
-  debug-static registered **pass**. S6c focused `s6-bigint-atomics.js`:
-  **pass** registered, `-nodeferparse`, `-force:deferparse`; debug-static
-  registered **pass**. Adjacent es7: `s6-growable-nonshared.js` 13/13,
-  `atomics_test.js` 16/16, `sharedarraybuffer.js` 7/7, `bigint64array.js`
-  10/10 (both flags + GC).
-- Default-off probes (identical shape to the S2 baseline): no flags
-  `SAB=undefined Atomics=undefined B64=function BigInt=function`;
-  `-ESBigInt` alone unchanged; `-ESSharedArrayBuffer` (alone or with
-  `-ESBigInt`) `SAB=function Atomics=object`.
-- **Exact `Atomics/waitAsync/**` corpus (101 files, 202 scenarios)**:
-  base **122/80 → after 193/9**, **71 fail→pass / 0 pass→fail**
-  (scenario-for-scenario diff over `results.json`; artifacts
-  `out/test262-s6e-waitAsync-{base,after}`). A full re-run on the same
-  binary gives **195/7** with a *different* residual subset — the
-  remaining 7–9 failures are all `no-spurious-wakeup-*` scenarios whose
-  `lapse >= TIMEOUT` assertion loses the upstream witness race when the
-  agent thread is starved under 6-way parallel load: the parent's RMW
-  (after `tryYield`'s 100 ms) lands before the descheduled agent's
-  `waitAsync` reads the witness, so the *correct* `not-equal` fast path
-  resolves in ~0.06 ms (demonstrated directly: probe reports
-  `unpark=not-equal duration=0.06`; when registration wins, the same probe
-  measures `duration=200.5/201.8` — the timeout fires on time). One
-  `no-spurious-wakeup-on-store` SIGSEGV under 6-way load was not
-  reproduced in isolation or in the re-run — same class as the S6c
-  documented multi-agent load flake. Expected single-source pin move:
-  test 2026 → 2027, debug-static 2078 → 2079 (pins not edited here).
-- **Atomics + SAB selection (982 scenarios)**: Atomics `**` subset
-  (774 scenarios): base **615/159 → after 694/80**, **79 fail→pass /
-  0 pass→fail** (artifacts `out/test262-s6e-982-{base,after}`); the 80
-  residuals are the documented pre-existing sync-`Atomics.wait` agent
-  scenarios (non-Windows no-op suspension) plus the flaky no-spurious
-  family. `SharedArrayBuffer/**` subset (208 scenarios): **204/4** — the
-  same 4 documented SAB constructor-order scenarios as S6c/S6d
-  (`proto-from-ctor-realm`, `options-maxbytelength-compared-before-
-  object-creation`, default+strict). Merged 982: ≈**819/163 → 898/84**
-  (base SAB half assumed at the recorded 204/4; consistent with S6d's
-  820/162 on its binary).
+Repair-round binaries: `zig-out/bin/ch` (test, UUID
+`EC33225D-8002-3850-9F56-E6DC31CDDBBA`) and `out/debug-static/bin/ch`
+(UUID `93518278-2940-3E19-840F-8C578873F0FA`).
+
+- Builds: test **568/568**, debug-static **546/546** (only pre-existing
+  warnings).
+- Focused `test/es7/s6-waitasync-cross-agent.js` — now **10 scenarios**
+  (the original 8 plus: 3 agents × 2 waiters + main waiter with
+  `notify(4)`→4 / rest→3 / all-unregistered, and 3 repeated broadcasts to
+  the same three agents with per-round partial notify counts) — **pass** on
+  the test binary (registered ×3, `-nodeferparse`, `-force:deferparse`,
+  no-GC) and on `out/debug-static/bin/ch` (registered, `-nodeferparse`).
+  S6b/S6D `s6-waitasync-pause.js` and S6c `s6-bigint-atomics.js` **pass**
+  in registered/variant modes on both profiles; adjacent es7
+  (`s6-growable-nonshared` 13/13, `atomics_test` 16/16, `sharedarraybuffer`
+  7/7, `bigint64array` 10/10) green. Default-off probes unchanged
+  (`SAB=undefined Atomics=undefined` with no flags / `-ESBigInt` alone;
+  both flags present everything). The first session's base-binary
+  discrimination (19 failing checks, exit 1) carries over — the repair
+  changes no scenario semantics, only concurrency.
+- **Stress (review recipe, out-of-gate)**: the exact adversarial recipe
+  (3 agents × 2 waiters + main waiter, `notify(4)`, notify rest, agents
+  `leaving()`) × **105** on the test binary and × **30** on
+  `out/debug-static/bin/ch` — **zero signals**; plus the full focused test
+  file ×70 and a repeated-broadcast variant ×80 under 2-way parallel load —
+  **zero signals** (255+ runs total post-fix; no new `.ips` reports). The
+  pre-fix crash is captured in
+  `~/Library/Logs/DiagnosticReports/ch-2026-10-29-211944.ips` (child
+  ThreadProc → Uninitialize → scriptDirMap clear → malloc abort, SIGTRAP;
+  the same corruption family explains the SIGBUS variant and the first
+  session's corpus SIGSEGV flake). TSan is not wired for this build.
+- **Exact `Atomics/waitAsync/**` corpus (202 scenarios), two runs**:
+  **198/4** and **197/5** (vs base 122/80, first-session after 193/9 — the
+  handshake repair removed the SIGKILL/timeout flake class). **0
+  pass→fail** vs base in both runs; the shifting 4–5 residuals are all
+  `no-spurious-wakeup-*` (the witness race below — the first session
+  demonstrated `unpark=not-equal` at 0.06 ms vs on-time 200 ms timeouts).
+- **Atomics + SAB selection (982)**: Atomics `**` **693/81** (base 615/159
+  in the first session; residuals = pre-existing sync-`Atomics.wait` agent
+  scenarios + the flaky no-spurious family), `SharedArrayBuffer/**`
+  **204/4** (the same 4 documented constructor-order scenarios). Merged
+  **897/85**.
+- Gates (expected-pin overrides; pins deliberately not edited):
+  `check_regression.py --select test --expected-passed 2031` →
+  **PASS 2031/0**; `--select debug` (on `out/debug-static/bin/ch`)
+  `--expected-passed 2083` → **PASS 2083/0**. Pin move is exactly the one
+  new rlexe entry (test 2030→2031, debug 2082→2083). `zig build check`
+  fails only its embedded count step against the un-edited 2030 pin
+  (2031/0 actual), matching the S6c policy.
 
 ## Residuals and risks
 
@@ -251,14 +319,24 @@ worktree clean at `f305a175f`, SHA-256 `3cbb54a7…`).
   (pending promise + live worker); documented rather than capped, because
   every cap silently breaks late notifies (counted-but-unresolved waiters
   or unregistered-but-pending promises are worse).
-- **`no-spurious-wakeup-*` witness race under parallel load**: 7–9 of 202
+- **`no-spurious-wakeup-*` witness race under parallel load**: 4–5 of 202
   waitAsync scenarios fail non-deterministically at `jobs 6` (subset shifts
-  between runs; 193–195 passing) because the parent's RMW after
+  between runs; 197–198 passing) because the parent's RMW after
   `tryYield`(100 ms) can beat a starved agent's witness read — the correct
   `not-equal` fast path then resolves immediately. This is host thread
   scheduling granularity, not the wake/timeout machinery (probe evidence
   in Evidence); a longer yield, an agent-side "parked" handshake, or a
   scheduler-aware host would make it deterministic.
+- **Notify-count vs concurrent timeout**: a foreign notify may return 1
+  while the registrant's already-due timeout task wins the resolution in
+  the ≤2 ms poll window; `settled` arbitrates exactly-once and the promise
+  resolves `"timed-out"` — the spec's own concurrent-timeout ambiguity
+  (documented in the repair section).
+- **Remaining shared-host global state**: `WScriptJsrt::GetNextSourceContext`
+  (a plain static counter) is incremented from agent threads — a benign
+  duplicate-source-context race, unchanged from the pre-S6e host; module
+  loads inside an agent still push to the main queue (`PushMessage`). Both
+  pre-existing, unexercised by test262 agents.
 - **Polling latency**: a foreign wake is observed within one poll interval
   (2 ms) plus host sleep granularity — the host timer contract's few-ms
   early/late fire (S6d) applies. No fairness/starvation claim beyond FIFO
@@ -274,9 +352,6 @@ worktree clean at `f305a175f`, SHA-256 `3cbb54a7…`).
   waiter-list CS; a stop-the-world GC suspending a foreign thread inside
   `csForAccess` could stall finalization. Not worsened by this slice (the
   foreign notify holds the CS no longer than before).
-- **Module loads inside an agent thread** still push to
-  `WScriptJsrt::PushMessage` (main queue); pre-existing, unexercised by
-  test262 agents.
 - **JIT/B4**: no bytecode/JIT surface changed; evidence is Mac ARM64 no-JIT.
   B4 must repeat the focused tests and the two test262 selections on native
   Linux and JIT profiles.
