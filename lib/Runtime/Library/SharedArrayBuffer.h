@@ -89,6 +89,18 @@ namespace Js
         // Monitor claim: wake-request observed -> settle, unlink and release
         // the token under the waiter-list lock (registrant thread only).
         bool TryClaimForWake();
+        // Wake-claim body for callers already holding the waiter-list CS
+        // (it is a recursive CriticalSection, so re-entry from the pass-order
+        // walk below is safe). Split from TryClaimForWake so the FIFO walk
+        // can claim predecessors while it holds the CS.
+        bool TryClaimForWakeUnderCS();
+        // FIFO pass-order wake claim (S6e conformance repair): walk this
+        // token's notify-pass chain from its head and claim the first
+        // unsettled same-ThreadContext chain member — this waiter itself or
+        // a FIFO predecessor. Returns true with *claimed set to the claimed
+        // record; the caller resolves it outside the CS. See EntryMonitorTask
+        // for the ordering contract.
+        bool TryClaimWakeInPassOrder(AtomicsAsyncWaiter** claimed);
         // Resolve the promise with "ok" after a successful wake claim; must
         // run outside the waiter-list critical section.
         void ResolveOkAfterClaim();
@@ -152,6 +164,49 @@ namespace Js
         // token, and never frees the token.
         bool monitored;
         volatile long wakeRequested;
+
+        // FIFO resolution order (S6e conformance repair). A foreign notify
+        // pass latches up to `count` foreign tokens in waiter-list (FIFO)
+        // order and links exactly those tokens into a per-pass chain,
+        // stamped at latch time under the waiter-list CS: passPrev points to
+        // the previously latched token of the same pass, passNext to the next
+        // one. The registrant's monitor tasks walk that chain (under the same
+        // CS) and claim/resolve same-ThreadContext predecessors before
+        // themselves, so promise resolutions happen in notify FIFO order
+        // regardless of which monitor timer fires first. Other-ThreadContext
+        // chain members are skipped by the walk: they resolve on their own
+        // registrant threads, and relative order across agents is
+        // unobservable (each agent drains its own microtask queue). All link
+        // reads/writes happen under the waiter-list CS of the list the pass
+        // ran on; a token leaves the chain — SpliceFromPassChain — under that
+        // same CS on every path that releases it (wake/timeout claim, wrapper
+        // finalization), so walkers only ever see live tokens. The notifier's
+        // passNext stamp for the next sibling happens after the previous
+        // sibling set linked = false, but inside the same single CS hold:
+        // every path that can observe linked == false (finalizer) or free
+        // the token (registrant claims) must first acquire this CS, so the
+        // sibling cannot be released in between.
+        AtomicsAsyncWaiterRegistration* passPrev;
+        AtomicsAsyncWaiterRegistration* passNext;
+
+        // Requires the waiter-list CS of the list this token's pass ran on.
+        void SpliceFromPassChain()
+        {
+            if (passPrev == nullptr && passNext == nullptr)
+            {
+                return; // never latched into a pass, or already spliced
+            }
+            if (passPrev != nullptr)
+            {
+                passPrev->passNext = passNext;
+            }
+            if (passNext != nullptr)
+            {
+                passNext->passPrev = passPrev;
+            }
+            passPrev = nullptr;
+            passNext = nullptr;
+        }
     };
 
     // Host-delayed timeout task for a pending Atomics.waitAsync with a finite
@@ -411,6 +466,8 @@ namespace Js
             registration->linked = false;
             registration->monitored = monitored;
             registration->wakeRequested = 0;
+            registration->passPrev = nullptr;
+            registration->passNext = nullptr;
             asyncRegistrations = registration;
 
             waiter->SetNextWrapperWaiter(asyncWaiters);
@@ -546,12 +603,15 @@ namespace Js
         // section is held); their promises are resolved by the caller after
         // the lock is released. A foreign-ThreadContext async entry whose
         // token has a live monitor task (monitored) is removed from the list,
-        // counted, and its token's wake-request latch is set atomically — the
-        // registrant's monitor task claims and resolves it on its own thread;
-        // this thread never touches the record/wrapper. An unmonitored
-        // foreign entry is left registered and uncounted (S6b behavior for
-        // hosts without the timer callback / cross-runtime opt-in).
-        // Same-thread cross-realm waiters are woken.
+        // counted, chained to the pass's previously latched token (passPrev/
+        // passNext, so the registrant's monitors can resolve the pass in FIFO
+        // order — see AtomicsAsyncWaiter::TryClaimWakeInPassOrder), and its
+        // token's wake-request latch is set atomically — the registrant's
+        // monitor task claims and resolves it on its own thread; this thread
+        // never touches the record/wrapper. An unmonitored foreign entry is
+        // left registered and uncounted (S6b behavior for hosts without the
+        // timer callback / cross-runtime opt-in). Same-thread cross-realm
+        // waiters are woken.
         uint32 RemoveAndWakeWaiters(int32 count, void* threadContext, AtomicsAsyncWaiterRegistration** asyncAwoken = nullptr);
         void AddAsyncWaiter(AtomicsAsyncWaiterRegistration* registration);
         void RemoveAsyncWaiter(AtomicsAsyncWaiterRegistration* registration);
