@@ -15,6 +15,12 @@ changes no default. It supersedes the cross-agent residual of
 [c2-s6-waitasync.md](c2-s6-waitasync.md) (S6b); S6d finite timeouts are
 unchanged and now arbitrate with the new wake path.
 
+Landing: merged to main in `6900598e4` (merging `866a03c82`). Post-merge
+main gates: `zig build check` **583/583** with test regression
+**2031/0**, and debug-static regression **2083/0**;
+`tools/build/gate_counts.json` pins moved 2030/2082 → 2031/2083 in the
+landing commit, adding the single `s6-waitasync-cross-agent` rlexe entry.
+
 ## Review repair (e547fa345)
 
 1. **Token-latch ordering (UAF window).** The foreign notify now performs,

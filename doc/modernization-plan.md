@@ -57,7 +57,7 @@ handling have been validated before its results are used as a completion gate.
 | B6 | Windows feasibility and rollout; later target extensions | Stable build contracts | Separate expansion |
 | Z1 | One useful mixed C++/Zig unit behind a tested C ABI | B3; B4 if the unit ships on Linux | Optional pilot |
 | C1 | Qualified ES2025 test policy and triaged failures | Stable Mac build at B3 | Recorded (CONDITIONAL) |
-| C2 | Bounded compatibility batches and partial releases | C1; B4 before JIT-wide enablement | In progress (S4/S5/S10/S11/S7-matchAll/S9 named-groups + d-flag + duplicate named groups + lookbehind + ES2025 modifiers; S1 class elements complete: public/private instance+static fields, private methods/accessors incl. async/generator and statics, computed field names, `super` in field initializers, static blocks and direct-eval `super` early errors (integrated elements corpus now 5,892/5,897 after default BigInt; eval-code 454/0); S6a flag-on growable SAB/non-shared Atomics (default remains off); S6b flag-on `Atomics.pause` + single-thread `Atomics.waitAsync` (finite timeouts and cross-agent suspension remain); S6c flag-on BigInt64Array/BigUint64Array Atomics incl. BigInt wait/notify/waitAsync validation; S6d finite `Atomics.waitAsync` timeouts via an optional additive host timer callback; S8 immutable ArrayBuffer (`immutable`, `transferToImmutable`, `sliceToImmutable`, write protections; JIT/TTD residuals); S3-a Unicode property escapes under `u` on ICU 79.1 (deterministic code-point-set matcher); S3-b RegExp `v`/Unicode Sets mode incl. `\q`, set operations and properties-of-strings; S9 u-mode RegExp strictness/canonical astral semantics plus S9-b code-point-aware literal search/builtin flag derivation; S2 BigInt is now enabled by default after a full default/disable audit plus bytecode serialization and debugger-display repairs; S8 resizable ArrayBuffer + TypedArray tracking + Float16 (DataView/Math.f16round slice and Float16Array); S12 import attributes + JSON modules (additive host contract); S13 symbol keys, WeakRef, FinalizationRegistry; S14 P1–P7 — all closed on Mac no-JIT; JIT claims gated on B4) |
+| C2 | Bounded compatibility batches and partial releases | C1; B4 before JIT-wide enablement | In progress (S4/S5/S10/S11/S7-matchAll/S9 named-groups + d-flag + duplicate named groups + lookbehind + ES2025 modifiers; S1 class elements complete: public/private instance+static fields, private methods/accessors incl. async/generator and statics, computed field names, `super` in field initializers, static blocks and direct-eval `super` early errors (integrated elements corpus now 5,892/5,897 after default BigInt; eval-code 454/0); S6a flag-on growable SAB/non-shared Atomics (default remains off); S6b flag-on `Atomics.pause` + single-thread `Atomics.waitAsync` (finite timeouts landed as S6d and cross-agent suspension as S6e); S6c flag-on BigInt64Array/BigUint64Array Atomics incl. BigInt wait/notify/waitAsync validation; S6d finite `Atomics.waitAsync` timeouts via an optional additive host timer callback; S6e flag-on cross-agent `Atomics.waitAsync` (native wake latch, registrant-thread monitor tasks, child message queues; POSIX `WScript.Quit` flush + raw-exit teardown; SAB default remains off); S8 immutable ArrayBuffer (`immutable`, `transferToImmutable`, `sliceToImmutable`, write protections; JIT/TTD residuals); S3-a Unicode property escapes under `u` on ICU 79.1 (deterministic code-point-set matcher); S3-b RegExp `v`/Unicode Sets mode incl. `\q`, set operations and properties-of-strings; S9 u-mode RegExp strictness/canonical astral semantics plus S9-b code-point-aware literal search/builtin flag derivation; S2 BigInt is now enabled by default after a full default/disable audit plus bytecode serialization and debugger-display repairs; S8 resizable ArrayBuffer + TypedArray tracking + Float16 (DataView/Math.f16round slice and Float16Array); S12 import attributes + JSON modules (additive host contract); S13 symbol keys, WeakRef, FinalizationRegistry; S14 P1–P7 — all closed on Mac no-JIT; JIT claims gated on B4) |
 | C3 | Larger runtime/object-model feature projects | C1 and their feature prerequisites | Separate projects |
 | C4 | Verified full ES2025 core-language result | Required C2/C3 work and qualified runner | Long-term objective |
 
@@ -597,8 +597,8 @@ Decision/rollback points:
   tracked until C4, optional ecosystem scope has separate gates.
 - [ ] C4: Published qualified ES2025 result on the claimed default configurations.
 
-**Latest integration checkpoint (2026-10-29):** main is clean at the
-**2030/0 test** and **2082/0 debug-static** gates (re-verified after every
+**Latest integration checkpoint (2026-10-30):** main is clean at the
+**2031/0 test** and **2083/0 debug-static** gates (re-verified after every
 merge and repair below; counts are single-sourced in
 `tools/build/gate_counts.json` — Float16Array's new test file moved
 2012/2064 → 2013/2065, repair-loop `-noDeferParse` rlexe variants
@@ -610,8 +610,9 @@ entry (2020/2072 → 2021/2073), S8 immutable ArrayBuffer added one entry
 (2022/2074 → 2023/2075), S3-b RegExp `v` mode added one entry
 (2023/2075 → 2024/2076), S9 u-mode RegExp strictness added one entry
 (2024/2076 → 2025/2077), S6c BigInt Atomics added one entry
-(2025/2077 → 2026/2078), and S2 BigInt default enablement added four
-entries (2026/2078 → 2030/2082)).
+(2025/2077 → 2026/2078), S2 BigInt default enablement added four
+entries (2026/2078 → 2030/2082), and S6e cross-agent waitAsync added
+one entry (2030/2082 → 2031/2083)).
 Merged lanes: S1 public/private instance+static fields and private methods/accessors, S2 arithmetic + BigInt64Array/Uint64Array + collections/
 DataView, S8 resizable ArrayBuffer/transfer + TypedArray tracking, S13
 WeakRef + FinalizationRegistry, and S14 P1/P2/P3/P4/P5/P6/P7
@@ -730,10 +731,26 @@ display, and default/serialized/disabled/display pins, moving the gates to
 (`out/test262-c2-s1-default-bigint`) then moved it **5,888/5,897 →
 5,892/5,897**: the four former `-ESBigInt` parse-barrier scenarios now
 pass; only the four post-ES2025 `accessor`-grammar scenarios and the one
-Stage-1 non-extensible scenario remain. All active feature/triage
-worktrees are merged; next work items are cross-agent waitAsync, the
-remaining S8/P-eval residuals, lead-surrogate lacunarity, and the C4
-qualification work (full baseline rerun, host-reported negative phase). Tracked eval residuals: P4 body eval with non-simple
+Stage-1 non-extensible scenario remain. S6e then landed flag-on
+cross-agent `Atomics.waitAsync` (merge `6900598e4`, receipt
+[c2-s6-cross-agent-waitasync.md](c2-s6-cross-agent-waitasync.md)):
+foreign notifies hand off through a native wake latch with
+registrant-thread monitor tasks and per-child message queues;
+POSIX `WScript.Quit` now flushes and raw-exits with no PAL/runtime
+teardown, eliminating the deterministic Quit crash families; the
+waitAsync test262 selection moved 122/80 → 201/1 (repeat 199/3) with
+**0 pass→fail**, the merged Atomics+SAB selection is ≈895/982, and the
+~0.3% pre-Quit agent-startup SIGBUS was diagnosed (three independent
+confirmations) as a separate pre-existing engine race in concurrent
+child `ScriptContext::Initialize` — routed to its own engine lane, not
+hidden. The single new `s6-waitasync-cross-agent` entry moved the gates
+to **2031/2083** (post-merge main `zig build check` 583/583 with
+2031/0 test; debug-static 2083/0). All active feature/triage
+worktrees are merged; next work items are the separate engine lane for
+the pre-Quit multi-agent startup SIGBUS (16-agent no-Quit churn
+reproducer, ~2/120), the remaining S8/P-eval residuals, lead-surrogate
+lacunarity, and the C4 qualification work (full baseline rerun,
+host-reported negative phase). Tracked eval residuals: P4 body eval with non-simple
 parameters; P2 hidden outer lexical and JSC/Node delete difference.
 S3 (Unicode data decision), S6 default (product/security decision),
 B4 and C4 remain decision- or gate-blocked. A repair loop then closed

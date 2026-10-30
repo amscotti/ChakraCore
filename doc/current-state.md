@@ -56,11 +56,13 @@ This `doc/` folder is the start of durable in-repo documentation. The
 feature inventory and line anchors below are the 2026-10-10 baseline
 snapshot; the modernization branch has since added the C2 surfaces listed
 in [modernization-plan.md](modernization-plan.md) §6 and its receipts.
-Latest merged checkpoint (2026-10-29): **2030/0 test**, **2082/0
+Latest merged checkpoint (2026-10-30): **2031/0 test**, **2083/0
 debug-static**, including direct-eval `super` early errors, the flag-on
 S6a growable-SAB/non-shared-Atomics slice, S6b `Atomics.pause` /
 single-thread `Atomics.waitAsync`, S6c BigInt Atomics, S6d finite
-waitAsync timeouts, default-on BigInt, the S14 hidden-outer
+waitAsync timeouts, S6e flag-on cross-agent `waitAsync` (native wake
+latch, registrant-thread monitors, child message queues, POSIX
+`WScript.Quit` raw-exit teardown), default-on BigInt, the S14 hidden-outer
 eval-`arguments` fix, the bounded S8 immutable-ArrayBuffer surface, both
 S3 RegExp slices (`u` property escapes and `v` Unicode Sets mode), S9
 u-mode RegExp strictness, and S9-b code-point-aware RegExp search/builtin
@@ -402,15 +404,21 @@ The first [conformance baseline](conformance-baseline.md) ran 93,141 scenarios
 from 48,598 files: 61,565 passed / 31,576 failed, with 902 explicit skips. Its
 corpus includes post-ES2025 proposals and uses default language flags.
 
-**Modernization checkpoint (2026-10-21):** the merged branch is green at
-**2030/0 test** and **2082/0 debug-static** on Mac ARM64 no-JIT. Direct-eval
+**Modernization checkpoint (2026-10-30):** the merged branch is green at
+**2031/0 test** and **2083/0 debug-static** on Mac ARM64 no-JIT. Direct-eval
 `super` early errors are closed (eval-code 454/0; object-literal function/arrow
 false accepts fixed in `39e9f2a16`), the flag-on S6a slice has growable
 SharedArrayBuffer plus ES2020 non-shared Atomics (focused S6 574/982;
 112 fail→pass / 0 pass→fail; debug index-detach abort fixed), and S6b adds
 `Atomics.pause` plus single-thread `waitAsync` with finite timeouts through an
-optional additive host timer callback, and S6c adds BigInt64Array/BigUint64Array
-Atomics. BigInt is now enabled by default; `-ESBigInt-` restores the old
+optional additive host timer callback, S6c adds BigInt64Array/BigUint64Array
+Atomics, S6d adds finite `waitAsync` timeouts, and S6e adds flag-on
+cross-agent `waitAsync` through a native wake latch with registrant-thread
+monitor tasks and child message queues, plus a POSIX `WScript.Quit`
+flush-and-raw-exit teardown that removed the deterministic Quit crash
+families (a ~0.3% pre-Quit agent-startup SIGBUS remains, tracked as a
+separate engine lane). BigInt is now enabled by default; `-ESBigInt-`
+restores the old
 default-off profile, and the class-elements corpus improved to **5,892/5,897**
 because the four former BigInt parse-barrier scenarios now execute.
 SharedArrayBuffer/Atomics remain off by default pending the product/security
