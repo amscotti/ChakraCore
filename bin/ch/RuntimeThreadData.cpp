@@ -59,7 +59,21 @@ DWORD RuntimeThreadData::ThreadProc()
 
     threadLocalData.Initialize(this);
 
-    IfJsErrorFailLog(ChakraRTInterface::JsCreateRuntime(JsRuntimeAttributeNone, nullptr, &runtime));
+    // Agent runtimes are small, short-lived and single-threaded: create them
+    // with JsRuntimeAttributeDisableBackgroundWork so the recycler runs
+    // in-thread (OptimizeForManyInstances) instead of spawning a
+    // "Chakra Background Recycler" + parallel-mark threads per agent. ch
+    // installs no JsRT thread service, so each agent runtime otherwise owns
+    // raw background GC threads whose concurrent/parallel shutdown raced
+    // agent script and teardown (review-reproduced SIGSEGV/SIGTRAP/SIGBUS:
+    // Recycler::FinalizeConcurrent -> RecyclerParallelThread::Shutdown ->
+    // ThreadService::HasCallback on a stale pointer; queued-callback
+    // context teardown; recycler->IsReentrantState() and
+    // !IsScriptActive() asserts) — with 8+ agents the thread population and
+    // the races multiply. This is the same attribute embedders use for
+    // worker runtimes; GC still runs, just in-thread.
+    IfJsErrorFailLog(ChakraRTInterface::JsCreateRuntime(
+        (JsRuntimeAttributes)(JsRuntimeAttributeDisableBackgroundWork), nullptr, &runtime));
     IfJsErrorFailLog(ChakraRTInterface::JsCreateContext(runtime, &context));
     IfJsErrorFailLog(ChakraRTInterface::JsSetCurrentContext(context));
 

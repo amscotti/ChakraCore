@@ -210,6 +210,56 @@ JsValueRef __stdcall WScriptJsrt::EchoCallback(JsValueRef callee, bool isConstru
     }
 }
 
+// Orderly agent shutdown before ExitProcess. WScript.Quit must not
+// hard-terminate agent threads mid-JsRT-call: ExitProcess then runs the
+// process-detach path (JsrtRuntime::Uninitialize et al.) over runtimes
+// whose threads died inside script/engine calls, which the review
+// reproduced as SIGSEGV/SIGTRAP/SIGBUS (including the
+// !currentThreadContext->IsScriptActive() assert and the
+// queued-callback/context-teardown signature). Signal every agent's
+// shutdown event and join with a bounded wait so a wedged agent cannot
+// hang process exit; after the bound the exit proceeds exactly as before.
+// The child threads perform their own queue teardown and JsDisposeRuntime,
+// so their runtimes are consistently shut down before the process dies.
+static void ShutdownAgentChildrenBeforeExit(DWORD totalWaitMilliseconds)
+{
+    auto& threadData = GetRuntimeThreadLocalData().threadData;
+    if (threadData == nullptr || threadData->children.empty())
+    {
+        return;
+    }
+
+    std::vector<HANDLE> handles;
+    handles.reserve(threadData->children.size());
+    for (auto i = threadData->children.begin(); i != threadData->children.end(); i++)
+    {
+        handles.push_back((*i)->hThread);
+        SetEvent((*i)->hevntShutdown);
+    }
+
+    // WaitForMultipleObjects accepts at most 64 handles; wait in chunks
+    // under one overall deadline.
+    DWORD waited = 0;
+    size_t index = 0;
+    while (index < handles.size() && waited < totalWaitMilliseconds)
+    {
+        size_t chunk = handles.size() - index;
+        if (chunk > 64 /* MAXIMUM_WAIT_OBJECTS */)
+        {
+            chunk = 64;
+        }
+        DWORD waitRet = WaitForMultipleObjects((DWORD)chunk, &handles[index], TRUE, 100);
+        if (waitRet >= WAIT_OBJECT_0 && waitRet < WAIT_OBJECT_0 + chunk)
+        {
+            index += chunk;
+        }
+        else
+        {
+            waited += 100;
+        }
+    }
+}
+
 JsValueRef __stdcall WScriptJsrt::QuitCallback(JsValueRef callee, bool isConstructCall, JsValueRef *arguments, unsigned short argumentCount, void *callbackState)
 {
     int exitCode = 0;
@@ -221,6 +271,7 @@ JsValueRef __stdcall WScriptJsrt::QuitCallback(JsValueRef callee, bool isConstru
         exitCode = (int)exitCodeDouble;
     }
 
+    ShutdownAgentChildrenBeforeExit(10000);
     ExitProcess(exitCode);
 }
 

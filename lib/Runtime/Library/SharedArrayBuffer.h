@@ -44,12 +44,14 @@ namespace Js
 
         // Resolve the promise with "ok" and unlink from the owner/waiter list.
         void ResolveOk();
-        // Mark a woken waiter whose promise cannot be resolved on this thread
-        // (multi-agent; unsupported in this slice) without touching the owner
-        // wrapper from the notifying thread. Since S6e a foreign notify of a
-        // monitored waiter never reaches this path (the registrant's monitor
-        // task resolves it); retained only as a defensive tail for handed-off
-        // tokens.
+        // Defensive tail only, and unreachable for foreign waiters since
+        // S6e: a foreign notify of a monitored waiter hands off through the
+        // token latch (the registrant's monitor task resolves it), and an
+        // unmonitored foreign waiter is skipped outright. If it ever runs,
+        // it marks the record settled WITHOUT releasing the native
+        // registration token or touching the owner wrapper — the token is
+        // released exclusively on the registrant's thread (claim paths) or
+        // by wrapper finalization.
         void Abandon();
 
         // Finite-timeout/cross-agent support (S6d/S6e). Cache the native
@@ -240,7 +242,10 @@ namespace Js
         // never gains polling. One-way false->true transition; the RMW keeps
         // the flag atomic, and the host's broadcast handshake (events /
         // semaphore) orders the write against the receiving runtime's reads.
-        void MarkCrossRuntime();
+        // Returns true when the contents were ALREADY marked, so a caller can
+        // run first-share work (retro-monitoring pre-share waiters) exactly
+        // once.
+        bool MarkCrossRuntime();
         bool IsCrossRuntime();
 
     private:
@@ -334,6 +339,16 @@ namespace Js
 
         WaiterList *GetWaiterList(uint index);
         SharedContents *GetSharedContents() { return sharedContents; }
+
+        // S6e pre-share support: called when this wrapper's contents are
+        // marked cross-runtime for the FIRST time (content-handle
+        // extraction). Overridden by JavascriptSharedArrayBuffer to
+        // retroactively schedule monitor tasks for async waiters that were
+        // registered while the buffer was still single-runtime — without
+        // this they would stay deaf to foreign notifies forever. Runs on
+        // the extracting thread, which for a first extraction is the
+        // registrant's own runtime/thread.
+        virtual void MonitorPendingAsyncWaiters() { }
 
 #if defined(TARGET_64)
         //maximum 2G -1  for amd64
@@ -451,6 +466,14 @@ namespace Js
         // Finalizer path: unlink every native registration from its shared
         // waiter list and release the token. Never dereferences the GC record.
         void CancelAsyncWaiters();
+
+        // S6e pre-share support (see SharedArrayBuffer::MonitorPendingAsyncWaiters):
+        // schedule monitor tasks for async waiters registered before the
+        // contents were marked cross-runtime, then publish their tokens as
+        // monitored. Must run on the registrant's thread (first extraction
+        // guarantees this: only the extracting runtime owns wrappers with
+        // waiters at that point).
+        virtual void MonitorPendingAsyncWaiters() override;
 
     protected:
         JavascriptSharedArrayBuffer(DynamicType * type);

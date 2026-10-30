@@ -20,18 +20,87 @@ namespace Js
              VirtualTableInfo<CrossSiteObject<AtomicsWaitAsyncMonitorTaskFunction>>::HasVirtualTable(obj));
     }
 
-    void SharedContents::MarkCrossRuntime()
+    bool SharedContents::MarkCrossRuntime()
     {
         // One-way latch; multiple markings only grow the counter, which is
         // read as nonzero/nonzero. Interlocked RMWs are full barriers, and
         // the host broadcast handshake (event/semaphore) already orders the
-        // writer against the receiving runtime.
-        InterlockedExchangeAdd(&crossRuntime, 1L);
+        // writer against the receiving runtime. Returns whether the contents
+        // were already marked, so first-share work runs exactly once.
+        return InterlockedExchangeAdd(&crossRuntime, 1L) != 0;
     }
 
     bool SharedContents::IsCrossRuntime()
     {
         return InterlockedExchangeAdd(&crossRuntime, 0L) != 0;
+    }
+
+    void JavascriptSharedArrayBuffer::MonitorPendingAsyncWaiters()
+    {
+        // First-share hook: waitAsync registrations made while this buffer
+        // was still single-runtime never scheduled a monitor task (no
+        // cross-runtime notifies were possible), so their tokens say
+        // monitored == false and a foreign notify would skip and not count
+        // them — a permanently deaf waiter. The contents becoming
+        // cross-runtime changes that: schedule monitors for every pending
+        // unmonitored record, exactly like EntryWaitAsync does at
+        // registration. Runs on the extracting thread; on the first
+        // extraction only the extracting runtime owns wrappers over these
+        // contents, so this is the registrant's thread and touching the GC
+        // records here is safe.
+        ScriptContext* scriptContext = GetScriptContext();
+        JavascriptLibrary* library = scriptContext->GetLibrary();
+        if (!library->HasNativeHostTimerContinuationCallback())
+        {
+            // No scheduling mechanism: keep the S6b contract (foreign
+            // notifies skip and do not count these waiters).
+            return;
+        }
+#if ENABLE_TTD
+        if (scriptContext->ShouldPerformRecordOrReplayAction())
+        {
+            return;
+        }
+#endif
+
+        AtomicsAsyncWaiterRegistration* registration = asyncRegistrations;
+        while (registration != nullptr)
+        {
+            AtomicsAsyncWaiter* record = registration->record;
+            if (!registration->monitored && !record->IsSettled())
+            {
+                // Create and enqueue the task BEFORE publishing monitored
+                // (same discipline as EntryWaitAsync): on task-creation OOM
+                // the exception propagates and this waiter — and the ones
+                // after it — keep the S6b skip-and-uncount contract instead
+                // of a counted wake nobody can resolve. This thread is the
+                // only drainer of its host queue, so the task cannot run
+                // before publication completes.
+                AtomicsWaitAsyncMonitorTaskFunction* task =
+                    library->CreateAtomicsWaitAsyncMonitorTaskFunction(record);
+                library->EnqueueDelayedTask(task, AtomicsAsyncWaiter::MonitorPollIntervalMs);
+
+                WaiterList* waiterList = registration->waiterList;
+                if (waiterList != nullptr)
+                {
+                    AutoCriticalSection autoCS(waiterList->GetCriticalSectionForAccess());
+                    if (!registration->monitored && !record->IsSettled())
+                    {
+                        if (!record->HasRegistration())
+                        {
+                            // Pre-share registrations never cached their
+                            // token links (only finite-timeout ones did);
+                            // the monitor task's claim needs them.
+                            record->SetRegistration(registration);
+                        }
+                        registration->monitored = true;
+                    }
+                }
+                // A waiter that settled between the fast check and the lock
+                // is left as-is: its settled flag already released it.
+            }
+            registration = registration->nextWrapper;
+        }
     }
 
 #if DBG

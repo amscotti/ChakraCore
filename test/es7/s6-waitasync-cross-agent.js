@@ -263,12 +263,20 @@ for (var i = 0; i < 3; i++) {
 check(Atomics.notify(i32a9, 0) === 0, "all 7 waiters unregistered after both notifies");
 
 // --- 10. Repeated broadcasts to the same three agents ----------------------
+// Tag cell v[3] carries the round (1..3); after round 3 the agents leave,
+// and they ignore later broadcasts with other tags (scenario 11 reuses the
+// broadcast machinery with fresh buffers whose tag cell stays 0).
 var src10 = `
     $262.agent.receiveBroadcast(function(sab) {
         var v = new Int32Array(sab);
+        var tag = Atomics.load(v, 3);
+        if (tag < 1 || tag > 3) { return; }
         var p = Atomics.waitAsync(v, 0, 0).value;
         Atomics.add(v, 4, 1);
-        p.then(function(val) { $262.agent.report("10:" + val); });
+        p.then(function(val) {
+            $262.agent.report("10:" + val);
+            if (tag === 3) { $262.agent.leaving(); }
+        });
     });
 `;
 $262.agent.start(src10);
@@ -277,6 +285,7 @@ $262.agent.start(src10);
 for (var round = 1; round <= 3; round++) {
     var sabR = new SharedArrayBuffer(5 * Int32Array.BYTES_PER_ELEMENT);
     var i32aR = new Int32Array(sabR);
+    Atomics.store(i32aR, 3, round);
     $262.agent.broadcast(sabR);
     waitUntil(i32aR, 4, 3);
     check(Atomics.notify(i32aR, 0, 2) === 2, "round " + round + ": partial notify wakes 2 of 3");
@@ -286,6 +295,76 @@ for (var round = 1; round <= 3; round++) {
         check(reportR === "10:ok", "round " + round + " agent resolved ok, got " + reportR);
     }
 }
+$262.agent.sleep(150); // let the round-3 agents finish leaving
+
+// --- 11. Pre-share waiters: registered before the first broadcast ----------
+// A waitAsync registered while the buffer is still single-runtime has no
+// monitor yet; the first broadcast must retroactively monitor it so the
+// agent's foreign notify counts (returns 1) and resolves "ok".
+var sab11 = new SharedArrayBuffer(5 * Int32Array.BYTES_PER_ELEMENT);
+var i32a11 = new Int32Array(sab11);
+var preShareOutcome = "pending";
+var preShareBigOutcome = "pending";
+var preShareTimeoutOutcome = "pending";
+var pre11 = Atomics.waitAsync(i32a11, 0, 0);
+pre11.value.then(function(v) { preShareOutcome = v; });
+var sab11b = new SharedArrayBuffer(5 * BigInt64Array.BYTES_PER_ELEMENT);
+var b64a11 = new BigInt64Array(sab11b);
+var preBig11 = Atomics.waitAsync(b64a11, 0, 0n);
+preBig11.value.then(function(v) { preShareBigOutcome = v; });
+var sab11c = new SharedArrayBuffer(5 * Int32Array.BYTES_PER_ELEMENT);
+var i32a11c = new Int32Array(sab11c);
+var preTimeout11 = Atomics.waitAsync(i32a11c, 0, 0, 300);
+preTimeout11.value.then(function(v) { preShareTimeoutOutcome = v; });
+
+$262.agent.start(`
+    $262.agent.receiveBroadcast(function(sab) {
+        var v = new Int32Array(sab);
+        $262.agent.report("11a:notify=" + Atomics.notify(v, 0));
+        $262.agent.leaving();
+    });
+`);
+$262.agent.broadcast(sab11);
+var report11a = getReport();
+check(report11a === "11a:notify=1", "pre-share Int32 waiter: agent notify counts 1, got " + report11a);
+
+$262.agent.start(`
+    $262.agent.receiveBroadcast(function(sab) {
+        var v = new BigInt64Array(sab);
+        $262.agent.report("11b:notify=" + Atomics.notify(v, 0));
+        $262.agent.leaving();
+    });
+`);
+$262.agent.broadcast(sab11b);
+var report11b = getReport();
+check(report11b === "11b:notify=1", "pre-share BigInt64 waiter: agent notify counts 1, got " + report11b);
+
+// Timeout-before-share control: the finite waiter is registered pre-share,
+// never notified; after the share nobody notifies it either — its 300 ms
+// timeout must still win (retro-monitor must not reschedule it forever).
+$262.agent.start(`
+    $262.agent.receiveBroadcast(function(sab) {
+        var v = new Int32Array(sab);
+        $262.agent.leaving();
+    });
+`);
+$262.agent.broadcast(sab11c);
+$262.agent.sleep(450); // timeout fires well before the final callback
+
+// Post-share control: a waiter registered after the share keeps working.
+var post11 = Atomics.waitAsync(i32a11, 2, 0);
+var post11Outcome = "pending";
+post11.value.then(function(v) { post11Outcome = v; });
+$262.agent.start(`
+    $262.agent.receiveBroadcast(function(sab) {
+        var v = new Int32Array(sab);
+        $262.agent.report("11c:notify=" + Atomics.notify(v, 2));
+        $262.agent.leaving();
+    });
+`);
+$262.agent.broadcast(sab11);
+var report11c = getReport();
+check(report11c === "11c:notify=1", "post-share control waiter: notify counts 1, got " + report11c);
 
 WScript.SetTimeout(function() {
     try {
@@ -293,6 +372,11 @@ WScript.SetTimeout(function() {
         check(parentOutcome === "ok", "main-thread waiter resolved ok via its monitor, got " + parentOutcome);
         check(Atomics.notify(i32a8, 0) === 0, "resolved main-thread waiter is unregistered");
         check(main9Outcome === "ok", "scenario 9 main waiter resolved ok, got " + main9Outcome);
+        check(preShareOutcome === "ok", "pre-share Int32 waiter resolved ok, got " + preShareOutcome);
+        check(preShareBigOutcome === "ok", "pre-share BigInt64 waiter resolved ok, got " + preShareBigOutcome);
+        check(preShareTimeoutOutcome === "timed-out", "pre-share finite waiter timed out, got " + preShareTimeoutOutcome);
+        check(post11Outcome === "ok", "post-share control waiter resolved ok, got " + post11Outcome);
+        check(Atomics.notify(i32a11, 0) === 0, "pre-share waiter unregistered after resolution");
         if (failures.length) {
             print("s6-waitasync-cross-agent: " + failures.length + " failure(s)");
             WScript.Quit(1);

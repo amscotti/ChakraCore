@@ -682,8 +682,16 @@ CHAKRA_API JsGetSharedArrayBufferContent(_In_ JsValueRef sharedArrayBuffer, _Out
 
         // Extracting a content handle is the act of sharing this buffer with
         // another runtime: mark it so waiters registered on any wrapper see
-        // cross-runtime notification semantics (S6e).
-        (*content)->MarkCrossRuntime();
+        // cross-runtime notification semantics (S6e). On the FIRST
+        // extraction, retroactively monitor this wrapper's pre-share async
+        // waiters — they registered while the buffer was single-runtime and
+        // would otherwise stay deaf to foreign notifies (the extraction runs
+        // before any child wrapper exists, so this thread is their
+        // registrant).
+        if (!(*content)->MarkCrossRuntime())
+        {
+            Js::VarTo<Js::SharedArrayBuffer>(sharedArrayBuffer)->MonitorPendingAsyncWaiters();
+        }
 
         return JsNoError;
     });
