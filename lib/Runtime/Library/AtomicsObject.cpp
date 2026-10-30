@@ -432,6 +432,25 @@ namespace Js
 #endif
             ;
 
+        // S6e: when the shared content is marked cross-runtime (a host
+        // extracted a content handle / created a wrapper from one) a foreign
+        // ThreadContext may notify this waiter. The foreign notify cannot
+        // touch this runtime's GC state, so it only sets the token's
+        // wake-request latch; a monitor task scheduled here through the same
+        // timer callback polls that latch and resolves "ok" on this thread.
+        // Ordinary single-runtime waitAsync never gains polling: the host
+        // timer callback must exist and the content must be cross-runtime.
+        // Under TTD (no host timer queue) cross-agent waits keep the S6b
+        // pending-until-same-thread-notify behavior.
+        const bool scheduleMonitor =
+            sharedArrayBuffer->GetSharedContents() != nullptr &&
+            sharedArrayBuffer->GetSharedContents()->IsCrossRuntime() &&
+            library->HasNativeHostTimerContinuationCallback()
+#if ENABLE_TTD
+            && !scriptContext->ShouldPerformRecordOrReplayAction()
+#endif
+            ;
+
         {
             AutoCriticalSection autoCS(waiterList->GetCriticalSectionForAccess());
 
@@ -463,13 +482,15 @@ namespace Js
             // Register while holding the waiter-list lock so a concurrent notify
             // cannot miss the waiter. The record is rooted by rootBuffer; the
             // native token identifies it to notify and to the finalizer.
+            // `monitored` publishes the scheduleMonitor decision to foreign
+            // notifiers under the same lock.
             AtomicsAsyncWaiterRegistration* registration = rootBuffer->AddAsyncWaiter(
-                waiter, scriptContext, scriptContext->GetThreadContext());
+                waiter, scriptContext, scriptContext->GetThreadContext(), scheduleMonitor);
             waiterList->AddAsyncWaiter(registration);
-            if (scheduleTimeout)
+            if (scheduleTimeout || scheduleMonitor)
             {
                 // Cache the native links while still under the lock so the
-                // timeout task can claim this registration later.
+                // timeout/monitor task can claim this registration later.
                 waiter->SetRegistration(registration);
             }
         }
@@ -486,6 +507,17 @@ namespace Js
             unsigned int delayMilliseconds =
                 ceilMs >= (double)UINT32_MAX ? UINT32_MAX : (unsigned int)ceilMs;
             library->EnqueueDelayedTask(library->CreateAtomicsWaitAsyncTimeoutTaskFunction(waiter), delayMilliseconds);
+        }
+
+        if (scheduleMonitor)
+        {
+            // Bounded-interval poll task; it re-enqueues itself while the
+            // wait is pending and stops once settled/released. Task
+            // creation/enqueue failure (OOM) degrades to the unmonitored
+            // behavior: a foreign notify then leaves the waiter registered
+            // and uncounted (S6b fallback).
+            library->EnqueueDelayedTask(library->CreateAtomicsWaitAsyncMonitorTaskFunction(waiter),
+                AtomicsAsyncWaiter::MonitorPollIntervalMs);
         }
 
         return CreateWaitAsyncResult(scriptContext, true, capability->GetPromise());

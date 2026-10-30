@@ -6752,6 +6752,19 @@ namespace Js
             AtomicsWaitAsyncTimeoutTaskFunction, type, functionInfo, waiter);
     }
 
+    AtomicsWaitAsyncMonitorTaskFunction* JavascriptLibrary::CreateAtomicsWaitAsyncMonitorTaskFunction(AtomicsAsyncWaiter* waiter)
+    {
+        JavascriptMethod entryPoint = &AtomicsAsyncWaiter::EntryMonitorTask;
+        FunctionInfo* functionInfo = RecyclerNew(this->GetRecycler(), FunctionInfo, entryPoint, FunctionInfo::Attributes::ErrorOnNew);
+        DynamicType* type = CreateDeferredPrototypeFunctionType(entryPoint);
+
+        // Same recycler-owned task model as the timeout task; the monitor
+        // additionally re-enqueues itself while the wait is pending, so its
+        // root (host queue AddRef) persists for the whole wait.
+        return RecyclerNewEnumClass(this->GetRecycler(), EnumFunctionClass,
+            AtomicsWaitAsyncMonitorTaskFunction, type, functionInfo, waiter);
+    }
+
     JavascriptPromise* JavascriptLibrary::CreatePromise()
     {
         AssertMsg(promiseType, "Where's promiseType?");

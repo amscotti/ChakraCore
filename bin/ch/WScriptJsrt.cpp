@@ -77,6 +77,20 @@ std::map<JsModuleRecord, ModuleState>  WScriptJsrt::moduleErrMap;
 std::map<DWORD_PTR, std::string> WScriptJsrt::scriptDirMap;
 DWORD_PTR WScriptJsrt::sourceContext = 0;
 
+// Message queue for the current thread: the per-child agent queue when
+// running inside a crossthread agent thread (S6e), otherwise the main host
+// queue. Prevents WScript.SetTimeout/ClearTimeout and samethread script
+// loads issued from an agent from racing the main thread's queue.
+MessageQueue* WScriptJsrt::GetThreadMessageQueue()
+{
+    RuntimeThreadData* threadData = GetRuntimeThreadLocalData().threadData;
+    if (threadData != nullptr && threadData->messageQueue != nullptr)
+    {
+        return threadData->messageQueue;
+    }
+    return messageQueue;
+}
+
 #define ERROR_MESSAGE_TO_STRING(errorCode, errorMessage, errorMessageString)        \
     JsErrorCode errorCode = JsNoError;                                              \
     do                                                                              \
@@ -769,8 +783,8 @@ JsValueRef WScriptJsrt::LoadScript(JsValueRef callee, LPCSTR fileName,
 
         IfJsrtErrorSetGo(ChakraRTInterface::JsSetCurrentContext(newContext));
 
-        IfJsErrorFailLog(ChakraRTInterface::JsSetPromiseContinuationCallback(PromiseContinuationCallback, (void*)messageQueue));
-        IfJsErrorFailLog(ChakraRTInterface::JsSetTimerContinuationCallback(TimerContinuationCallback, (void*)messageQueue));
+        IfJsErrorFailLog(ChakraRTInterface::JsSetPromiseContinuationCallback(PromiseContinuationCallback, (void*)GetThreadMessageQueue()));
+        IfJsErrorFailLog(ChakraRTInterface::JsSetTimerContinuationCallback(TimerContinuationCallback, (void*)GetThreadMessageQueue()));
 
         // Initialize the host objects
         Initialize();
@@ -890,7 +904,7 @@ JsValueRef WScriptJsrt::SetTimeoutCallback(JsValueRef callee, bool isConstructCa
 
     time = static_cast<int>(tmp);
     msg = new CallbackMessage(time, function);
-    messageQueue->InsertSorted(msg);
+    GetThreadMessageQueue()->InsertSorted(msg);
 
     IfJsrtErrorSetGo(ChakraRTInterface::JsDoubleToNumber(static_cast<double>(msg->GetId()), &timerId));
     return timerId;
@@ -919,7 +933,7 @@ JsValueRef WScriptJsrt::ClearTimeoutCallback(JsValueRef callee, bool isConstruct
     if (ChakraRTInterface::JsNumberToDouble(arguments[1], &tmp) == JsNoError)
     {
         timerId = static_cast<int>(tmp);
-        messageQueue->RemoveById(timerId);
+        GetThreadMessageQueue()->RemoveById(timerId);
     }
 
     IfJsrtErrorSetGo(ChakraRTInterface::JsGetUndefinedValue(&undef));

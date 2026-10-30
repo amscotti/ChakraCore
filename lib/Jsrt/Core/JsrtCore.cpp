@@ -646,6 +646,12 @@ CHAKRA_API JsCreateSharedArrayBufferWithSharedContent(_In_ JsSharedArrayBufferCo
         Js::JavascriptLibrary* library = scriptContext->GetLibrary();
         *result = library->CreateSharedArrayBuffer((Js::SharedContents*)sharedContents);
 
+        // A wrapper created from a foreign content handle means the buffer
+        // (and its waiter lists) are now shared across runtimes; waiters
+        // registered through this wrapper may be notified from another
+        // ThreadContext (Atomics.waitAsync monitor scheduling, S6e).
+        ((Js::SharedContents*)sharedContents)->MarkCrossRuntime();
+
         PERFORM_JSRT_TTD_RECORD_ACTION_RESULT(scriptContext, result);
 
         JS_ETW(EventWriteJSCRIPT_RECYCLER_ALLOCATE_OBJECT(*result));
@@ -673,6 +679,11 @@ CHAKRA_API JsGetSharedArrayBufferContent(_In_ JsValueRef sharedArrayBuffer, _Out
         }
 
         (*content)->AddRef();
+
+        // Extracting a content handle is the act of sharing this buffer with
+        // another runtime: mark it so waiters registered on any wrapper see
+        // cross-runtime notification semantics (S6e).
+        (*content)->MarkCrossRuntime();
 
         return JsNoError;
     });

@@ -29,6 +29,7 @@ namespace Js
     class RefCountedBuffer;
     class AtomicsAsyncWaiter;
     class AtomicsWaitAsyncTimeoutTaskFunction;
+    class AtomicsWaitAsyncMonitorTaskFunction;
 
     static const unsigned int EvalMRUSize = 15;
     typedef JsUtil::BaseDictionary<DWORD_PTR, SourceContextInfo *, Recycler, PowerOf2SizePolicy> SourceContextInfoMap;
@@ -892,6 +893,7 @@ namespace Js
         void EnqueueDelayedTask(Var taskVar, unsigned int delayMilliseconds);
         JavascriptFinalizationRegistryCleanupTaskFunction* CreateFinalizationRegistryCleanupTaskFunction(JavascriptFinalizationRegistry* registry);
         AtomicsWaitAsyncTimeoutTaskFunction* CreateAtomicsWaitAsyncTimeoutTaskFunction(AtomicsAsyncWaiter* waiter);
+        AtomicsWaitAsyncMonitorTaskFunction* CreateAtomicsWaitAsyncMonitorTaskFunction(AtomicsAsyncWaiter* waiter);
 
         HeapArgumentsObject* CreateHeapArguments(Var frameObj, uint formalCount, bool isStrictMode = false);
         JavascriptArray* CreateArray();

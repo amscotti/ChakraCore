@@ -27,6 +27,7 @@ RuntimeThreadData::RuntimeThreadData() :
     receiveBroadcastCallbackFunc(nullptr),
     runtime(nullptr),
     context(nullptr),
+    messageQueue(nullptr),
     parent(nullptr),
     leaving(false)
 {
@@ -52,6 +53,7 @@ DWORD RuntimeThreadData::ThreadProc()
     JsValueRef fname;
     const char* fullPath = "agent source";
     HRESULT hr = S_OK;
+    MessageQueue* agentQueue = nullptr;
 
     threadLocalData.Initialize(this);
 
@@ -64,6 +66,18 @@ DWORD RuntimeThreadData::ThreadProc()
     {
         IfFailGo(E_FAIL);
     }
+
+    // Per-child job/timer queue (S6e). The same callbacks the main host loop
+    // installs, but on a queue owned by this thread: promise reactions and
+    // async-function steps raised on the child context, plus engine-delayed
+    // tasks (finite Atomics.waitAsync timeouts and the cross-agent monitor
+    // task), are drained on this thread at safe points below. Without this,
+    // an async receiveBroadcast suspends at its first await and its
+    // continuations are dropped.
+    agentQueue = new MessageQueue();
+    this->messageQueue = agentQueue;
+    IfJsErrorFailLog(ChakraRTInterface::JsSetPromiseContinuationCallback(WScriptJsrt::PromiseContinuationCallback, (void*)agentQueue));
+    IfJsErrorFailLog(ChakraRTInterface::JsSetTimerContinuationCallback(WScriptJsrt::TimerContinuationCallback, (void*)agentQueue));
 
 
     IfJsErrorFailLog(ChakraRTInterface::JsCreateExternalArrayBuffer((void*)this->initialSource.c_str(),
@@ -80,8 +94,19 @@ DWORD RuntimeThreadData::ThreadProc()
 
     while (true)
     {
+        // Block until a broadcast/shutdown arrives or the earliest delayed
+        // task is due. A pending self-rescheduling task (waitAsync monitor)
+        // therefore bounds this wait by its poll interval instead of parking
+        // the thread forever.
+        DWORD waitMs = INFINITE;
+        if (!agentQueue->IsEmpty())
+        {
+            const long long delta = (long long)(agentQueue->NextDueTime() - GetTickCount64());
+            waitMs = delta <= 0 ? 0 : (delta > (long long)0xFFFFFFFE ? 0xFFFFFFFE : (DWORD)delta);
+        }
+
         HANDLE handles[] = { this->hevntReceivedBroadcast, this->hevntShutdown };
-        DWORD waitRet = WaitForMultipleObjects(_countof(handles), handles, false, INFINITE);
+        DWORD waitRet = WaitForMultipleObjects(_countof(handles), handles, false, waitMs);
 
         if (waitRet == WAIT_OBJECT_0)
         {
@@ -99,9 +124,42 @@ DWORD RuntimeThreadData::ThreadProc()
             }
         }
 
-        if (waitRet == WAIT_OBJECT_0 + 1 || this->leaving)
+        if (waitRet == WAIT_OBJECT_0 || waitRet == WAIT_TIMEOUT)
+        {
+            // Safe point: drain due jobs/timers on this thread. Each message
+            // may queue more (promise reactions run synchronously queued
+            // continuations; the monitor task re-enqueues itself with a
+            // future due time, which the next timed wait above waits for).
+            // Stop draining when the script asked to leave or the parent
+            // signaled shutdown so teardown stays prompt.
+            while (!this->leaving &&
+                   WaitForSingleObject(this->hevntShutdown, 0) != WAIT_OBJECT_0 &&
+                   agentQueue->HasDueMessage())
+            {
+                MessageBase* msg = agentQueue->PopDue();
+                // Omit checking the return value: like the main loop's
+                // ProcessAll, one failing job must not block the rest.
+                msg->Call(fullPath);
+                delete msg;
+            }
+        }
+
+        if ((waitRet == WAIT_OBJECT_0 + 1) || this->leaving ||
+            WaitForSingleObject(this->hevntShutdown, 0) == WAIT_OBJECT_0)
         {
             WScriptJsrt::Uninitialize();
+
+            // Tear the queue down BEFORE disposing the runtime: its messages
+            // own JsRefs (task functions) that must be released while the
+            // runtime is still valid. A still-pending monitor task's waiter
+            // intentionally stays unresolved; runtime disposal finalizes the
+            // wrapper, whose finalizer unlinks the native registration token.
+            if (agentQueue != nullptr)
+            {
+                agentQueue->RemoveAll();
+                delete agentQueue;
+                this->messageQueue = nullptr;
+            }
 
             if (this->receiveBroadcastCallbackFunc)
             {
@@ -113,7 +171,7 @@ DWORD RuntimeThreadData::ThreadProc()
             threadLocalData.Uninitialize();
             return 0;
         }
-        else if (waitRet != WAIT_OBJECT_0)
+        else if (waitRet != WAIT_OBJECT_0 && waitRet != WAIT_TIMEOUT)
         {
             Assert(false);
             break;
@@ -122,6 +180,12 @@ DWORD RuntimeThreadData::ThreadProc()
 
 Error:
 
+    if (agentQueue != nullptr)
+    {
+        agentQueue->RemoveAll();
+        delete agentQueue;
+        this->messageQueue = nullptr;
+    }
     ChakraRTInterface::JsSetCurrentContext(nullptr);
     ChakraRTInterface::JsDisposeRuntime(runtime);
     threadLocalData.Uninitialize();

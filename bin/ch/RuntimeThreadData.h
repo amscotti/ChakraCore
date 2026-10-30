@@ -23,6 +23,16 @@ public:
     JsRuntimeHandle runtime;
     JsContextRef context;
 
+    // Per-child job/timer queue (S6e). Created in ThreadProc after the child
+    // context exists and installed as the callbackState of the promise and
+    // timer continuation callbacks, so promise reactions, async-function
+    // steps and engine-delayed tasks (Atomics.waitAsync timeout/monitor
+    // tasks) raised on the child context are drained on the child thread.
+    // Owned by ThreadProc: torn down (RemoveAll + delete) on the child thread
+    // BEFORE JsDisposeRuntime, because messages own JsRefs that must be
+    // released while the runtime is still valid.
+    MessageQueue* messageQueue;
+
 
     std::string initialSource;
 
