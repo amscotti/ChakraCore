@@ -606,6 +606,11 @@ namespace Js
         {
             AtomicsAsyncWaiterRegistration* registration = asyncAwoken;
             asyncAwoken = registration->nextAwoken;
+            // A same-ThreadContext handoff token was never latched into a
+            // notify-pass FIFO chain (only the foreign branch chains, and it
+            // removes the token from the list), so its pass links are
+            // permanently null — reading them here needs no CS.
+            Assert(registration->passPrev == nullptr && registration->passNext == nullptr);
             AtomicsAsyncWaiter* waiter = registration->record;
             if (!waiter->IsSettled() && registration->threadContext == threadContext)
             {

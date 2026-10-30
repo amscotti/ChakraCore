@@ -9,7 +9,10 @@ branch `s6-cross-agent-waitasync` (base `f305a175f`); evidence below. A
 docs-only receipt cleanup after `a78a5dba4` (no runtime change) copies the
 reviewer's final gate logs under `out/gate-receipt/` and the adversarial
 campaign under `out/s6e-teardown-review/` (both git-ignored evidence) and
-corrects the evidence labels below. `ESSharedArrayBuffer` (and `ESBigInt` for the BigInt64 paths)
+corrects the evidence labels below. A later conformance repair (branch
+`s6e-fifo-resolution`, base `3574b6168` = main: diagnosis `533e41d37`,
+fix `d99ab67c0`) fixes foreign-notify-pass FIFO **resolution** order —
+see "S6e conformance repair" below. `ESSharedArrayBuffer` (and `ESBigInt` for the BigInt64 paths)
 remain **off by default** (BigInt itself is default-on since S2); this slice
 changes no default. It supersedes the cross-agent residual of
 [c2-s6-waitasync.md](c2-s6-waitasync.md) (S6b); S6d finite timeouts are
@@ -270,6 +273,212 @@ agent 8/8, `n6` Quit-with-live-agents 17–21/25) are all clean now —
 in 1255 campaign runs is this startup race. Recorded as a residual
 with the engine backtrace; a future engine slice should own it.
 
+## S6e conformance repair: FIFO resolution order across a foreign notify pass
+
+Status: diagnosis `533e41d37`, fix `d99ab67c0`, receipt (this section)
+docs-only commit, branch `s6e-fifo-resolution` (base `3574b6168` = main).
+
+### Root cause
+
+The Design section below claimed "FIFO order is preserved because foreign
+entries are consumed in waiter-list order like same-thread ones". That was
+true at LATCH time but not at RESOLUTION time: each foreign-latched
+waiter's promise is resolved by its OWN registrant-thread monitor task
+(`AtomicsWaitAsyncMonitorTaskFunction`, 2 ms self-rescheduling poll), and
+two monitors whose deadlines land in the same host tick can fire in either
+order on the registrant's queue — waiter 2 can resolve before waiter 1.
+ES2025 `NotifyWaiters` fulfills woken waiters in list order, and one
+registrant thread observes both resolutions through its single microtask
+queue, so the inversion is observable through the agent's `.then`
+reactions. Structural constraint (why the waiter list cannot fix it): at
+foreign-notify time the token is unlinked from the waiter list as it is
+latched (that is what the latch means), so a firing monitor cannot
+discover earlier latched siblings there. Ordering must be recorded AT
+LATCH TIME — the only moment the pass's tokens are all visible in FIFO
+order — while claims and resolutions stay on the registrant's thread (the
+ownership invariant: the foreign notifier never frees or resolves tokens).
+
+Reproducer `/tmp/opencode/e1-flake/s6fifo.js` (minimal extraction of
+scenario 6), debug-static, 6-way parallel, flags
+`-nonative -ESBigInt -ESSharedArrayBuffer -Test262 -CollectGarbage`:
+**30/2400 = 1.25% `6:B,A` inversions** at base `3574b6168` (binary
+SHA-256 `633049b0…a39`, preserved as `out/s6e-fifo-bins/ch-pre-debug`);
+the original E1-session observation on main's debug binary was 19/2400 =
+0.79%. **Profile skew**: main's test-profile binary measures **0/1200**
+— slower execution widens the window where two monitor deadlines land in
+the same tick — so the flap surfaces in the DEBUG gate, and the debug
+gate is the sharp detector for this defect (test-profile post-fix runs
+prove little at these rates).
+
+### Design
+
+Chosen: **per-notify-pass ordered chain + head-first monitor claims**
+(candidate A). Candidate B (ordered batch handed to the registrant's
+queue) was rejected: it allocates on the notify hot path and adds a new
+JsRT-boundary message type/rooting chain — larger risk against the same
+locked invariants.
+
+- `WaiterList::RemoveAndWakeWaiters` chains the foreign tokens a notify
+  pass latches into a per-pass doubly-linked list (`passPrev`/`passNext`
+  on the native token), stamped at latch time under the waiter-list CS,
+  in latch (waiter-list FIFO) order.
+- `AtomicsAsyncWaiter::TryClaimWakeInPassOrder` (registrant thread, under
+  the same CS): walk from the chain head and claim the first unsettled
+  same-`ThreadContext` member. If it is a FIFO predecessor, resolve it
+  `"ok"` (outside the CS) and immediately re-enqueue this monitor at
+  **delay 0** — due now, queued after the promise reactions the
+  resolution just enqueued (the ch queue runs equal-due-time messages in
+  insertion order, and promise jobs are themselves delay-0 messages), so
+  those reactions run first and the next firing advances the chain; the
+  walk claims at most one waiter per firing and the chain strictly
+  shortens, so it terminates. If the head-reachable member is the waiter
+  itself, behavior is identical to the pre-repair claim (the common
+  single-waiter case costs nothing extra). Other-`ThreadContext` members
+  are skipped by native-field compare only: cross-agent relative order is
+  unobservable (each agent drains its own microtask queue), and their own
+  monitors claim them on their own threads.
+- `TryClaimForWake` split into a CS-taking wrapper +
+  `TryClaimForWakeUnderCS` so the walk can claim predecessors while
+  holding the (recursive) CS.
+
+Unchanged (locked semantics): wake counts, exactly-once `settled`
+arbitration, timeout-vs-wake arbitration (a timeout that wins for a
+latched waiter resolves `"timed-out"` — the spec's concurrent-timeout
+ambiguity — and simply splices out of the chain), pre-share
+retro-monitoring, and the S6d timer design.
+
+### Ownership deltas (memory-management record)
+
+```text
+Resource: passPrev/passNext chain links on the native
+          AtomicsAsyncWaiterRegistration token (+ SpliceFromPassChain)
+Creation/first write: stamped by the foreign notify pass in
+          WaiterList::RemoveAndWakeWaiters at latch time, under the
+          waiter-list CS; the token itself is still HeapNew'd in
+          JavascriptSharedArrayBuffer::AddAsyncWaiter on the registrant
+          thread (unchanged S6b/S6e ownership: wrapper-owned, released
+          by registrant-thread claims or wrapper finalization only)
+Domain: native pointer fields on the HeapAllocator-owned token — no new
+          allocation, no GC-visible field, no new root, no new lock
+Owner/transfer: unchanged; the foreign notifier still never frees the
+          token and never dereferences record
+Invariants: latched && !settled => token is in its pass chain; all link
+          reads/writes under the waiter-list CS of the list the pass ran
+          on; every release path (TryClaimForWakeUnderCS,
+          TryClaimForTimeout, CancelAsyncWaiters) splices the token out
+          under that same CS before HeapDelete, so walkers only see live
+          tokens. The one write to an already-latched token (the next
+          sibling's passNext stamp) happens inside the notifier's single
+          CS hold — every observer of linked == false or deleter of the
+          token must first acquire that CS — extending (not breaking)
+          the S6e iteration-1 token-latch ordering invariant
+Thread/context: stamping on the notifying thread under CS; walk/claim/
+          splice on the registrant thread (record fields touched only
+          after a native threadContext compare matches); finalizer splice
+          on the finalizing runtime thread under the same CS
+Borrow invalidation: splice at settle/release (passPrev/passNext =
+          nullptr); token HeapDelete follows immediately after
+Failure paths: no new fallible operation — no allocation and no host
+          call under the CS; the delay-0 re-enqueue is outside the CS
+          and inherits the documented monitor self-reschedule OOM
+          residual
+Tests: test/es7/s6-waitasync-cross-agent.js scenarios 12-13; reproducer
+          A/B campaign below
+```
+
+### Evidence (S6e FIFO repair)
+
+Mac ARM64 (aarch64-apple-macos.26.0), debug-static + test profiles,
+shared gate lock. Reproducer `/tmp/opencode/e1-flake/s6fifo.js`, 6-way
+parallel unless noted, flags as above. Binaries (SHA-256): pre-fix
+debug `633049b0…a39` (`out/s6e-fifo-bins/ch-pre-debug`), post-fix debug
+`b4f18d8e…468` (`out/s6e-fifo-bins/ch-post-debug`), post-fix test
+`0d917b2f…c61` (`zig-out/bin/ch`).
+
+| Leg | Binary | Runs | Par | `6:B,A` inversions | Crashes |
+|---|---|---|---|---|---|
+| Pre-fix (A) | base `3574b6168` debug | 2400 | 6 | **30 (1.25%)** | 0 |
+| Post-fix (B) | fix `d99ab67c0` debug | 2400 | 6 | **0** | 0 |
+| Post-fix quiet-rate | fix `d99ab67c0` debug | 600 | 1 | **0** | 0 |
+
+- Deterministic scenarios in the gate file: 12 (four waiters, one agent,
+  one `notify(4)` pass → `12:A,B,C,D`) and 13 (two agents × two waiters,
+  one mixed pass → per-agent `13:1,2`; exercises foreign-token skipping)
+  — full-file direct runs (scenarios 6, 12 and 13 all assert FIFO order):
+  **30/30 clean on post-fix debug, 30/30 on post-fix test**.
+- Focused suites (`runtests.py --test|--debug --variants=disable_jit`):
+  s6-waitasync-cross-agent, s6-waitasync-pause (S6b/S6d),
+  s6-bigint-atomics (S6c), s6-growable-nonshared, atomics_test,
+  sharedarraybuffer, bigint64array → **7/7 test, 7/7 debug**.
+- Cross-agent variant matrix: test (registered ×3, `-nodeferparse`,
+  `-force:deferparse`, no-GC) and debug (registered, `-nodeferparse`,
+  no-GC) — all `pass`/exit 0.
+- Builds: debug-static **546/546**, test **568/568**;
+  `zig build check` **583/583**, `zig build check -Dprofile=debug-static`
+  **560/560**.
+- Gates: check_regression `--select test --expected-passed 2031` →
+  **PASS 2031/0**; `--select debug --expected-passed 2083` →
+  **PASS 2083/0** (pins in `tools/build/gate_counts.json` untouched at
+  2031/2083; scenarios 12-13 extend the existing rlexe entry, count
+  unchanged).
+
+### Residuals (S6e FIFO repair)
+
+- **Chained-pass resolution latency**: a pass latching k same-registrant
+  waiters resolves them across k monitor firings (one claim each, delay-0
+  re-enqueue) — microseconds per link in-process, unobservable next to
+  the 2 ms poll interval; the first waiter still resolves within one
+  poll interval of the notify.
+- **Delay-0 re-enqueue OOM**: shares the monitor self-reschedule host
+  contract and its documented residual (a host that drops it leaves the
+  chain's later waiters latched but unresolved — same class as the
+  pre-repair dead-monitor residual).
+- **Cross-agent relative order remains unspecified by design** (the walk
+  skips other-registrant tokens); same-thread vs foreign waiters within
+  one pass also keep their pre-repair relative timing (same-thread
+  handoffs resolve synchronously inside the notify call, foreign ones
+  within one poll interval) — unobservable in a single runtime's job
+  queue.
+- **Finalizer CS hold**: CancelAsyncWaiters now splices under the CS it
+  already took (no longer hold); walkers hold the CS for O(pass size)
+  native pointer hops — the same order the notify pass itself holds it.
+- Profile skew above: post-fix test-profile reproducer legs are
+  uninformative (pre-fix baseline is 0/1200 there); the debug gate
+  remains the detector.
+- **Pre-existing exit assert under very-high agent churn (adversarial
+  review; separate follow-up card)**: `ASSERTION (WScriptJsrt.cpp:1345)
+  waitRet == 0 waitRet == WAIT_OBJECT_0` — the end-of-main
+  `WaitForMultipleObjects` over the accumulated `threadData->children`
+  handles fails after ~100+ leave-completed agents in one process.
+  Reproduced 3/3 identically on the pre-fix AND post-fix binaries
+  (introduced by the iteration-3 host teardown, not by this repair);
+  the committed test (~15 agents) and both gates never hit it; all
+  in-process oracles complete before the assert, so data is unaffected.
+
+### Review outcome (FIFO repair)
+
+Both reviewers **ACCEPTED** with zero `[bug]` findings.
+
+- **General review**: chain stamping inside the notify's single CS hold,
+  splice-before-delete verified on all three release paths, JsRT boundary
+  respected (other-registrant tokens touched by native fields only),
+  delay-0 ordering proven against `MessageQueue.h`'s insert-after-equals
+  semantics, termination proven (monotonically shortening chain),
+  ownership record compliant with `doc/memory-management.md`.
+  Independently re-measured: pre 7/600 inversions vs post 0/600;
+  debug gate **PASS 2083/0**.
+- **Adversarial review**: **7,800 pass-observations / 41,600
+  waiter-observations with 0 FIFO violations and 0 hangs** (4/8/16
+  waiters, full/split notify modes, racing dual notifiers with exact
+  totals); timeout×notify poisoning (1,600 waiters: 0 double-resolves,
+  0 missed, survivors FIFO); GC churn and leave/teardown races clean;
+  pre-share retro path ordered; 32-waiter chains terminate ≤27 ms under
+  load; no fix-attributable leak (RSS slopes equal pre/post); both gates
+  **PASS 2031/0 and 2083/0** with pins unedited. Ordering is structural
+  (claims serialize on the registrant thread and require no unsettled
+  same-registrant predecessor), not scheduler luck. Its one `[risk]` is
+  the pre-existing exit assert recorded above.
+
 ## Scope
 
 1. A **foreign** `Atomics.notify` (a different `ThreadContext`) now wakes a
@@ -317,8 +526,10 @@ writes; see the repair section for the full ordering argument. A foreign
 entry without a monitor keeps the S6b contract: left registered, not
 counted, promise pending. The branch reads and writes only native token
 fields; `record` is never dereferenced from the notifying thread. FIFO
-order is preserved because foreign entries are consumed in waiter-list
-order like same-thread ones.
+order is preserved through RESOLUTION, not just latch: the pass chains
+the latched tokens (`passPrev`/`passNext`, stamped at latch time) and the
+registrant's monitors claim them head-first — see the S6e conformance
+repair section and `AtomicsAsyncWaiter::TryClaimWakeInPassOrder`.
 
 ### Cross-runtime opt-in (`SharedContents::MarkCrossRuntime`)
 

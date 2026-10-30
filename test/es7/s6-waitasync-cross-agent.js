@@ -366,6 +366,76 @@ $262.agent.broadcast(sab11);
 var report11c = getReport();
 check(report11c === "11c:notify=1", "post-share control waiter: notify counts 1, got " + report11c);
 
+// --- 12. FIFO across four waiters on one agent --------------------------------
+// ES2025 NotifyWaiters fulfills woken waiters in waiter-list order. The
+// notify pass chains the four latched tokens and the agent's monitors claim
+// them head-first, so the resolution order (observed through the agent's
+// single microtask queue) must be A,B,C,D whichever monitor timer happens to
+// fire first.
+var sab12 = new SharedArrayBuffer(5 * Int32Array.BYTES_PER_ELEMENT);
+var i32a12 = new Int32Array(sab12);
+$262.agent.start(`
+    $262.agent.receiveBroadcast(function(sab) {
+        var i32a = new Int32Array(sab);
+        var order = [];
+        var tags = ["A", "B", "C", "D"];
+        var promises = [];
+        for (var t = 0; t < tags.length; t++) {
+            promises.push(Atomics.waitAsync(i32a, 0, 0).value);
+        }
+        for (var t = 0; t < tags.length; t++) {
+            (function(tag) {
+                promises[t].then(function() { order.push(tag); });
+            })(tags[t]);
+        }
+        Atomics.add(i32a, 4, 1);
+        Promise.all(promises).then(function() {
+            $262.agent.report("12:" + order.join(","));
+            $262.agent.leaving();
+        });
+    });
+`);
+$262.agent.broadcast(sab12);
+waitUntil(i32a12, 4, 1);
+if (typeof CollectGarbage === "function") {
+    CollectGarbage(); // four pending waiters: the queued tasks must root them
+}
+check(Atomics.notify(i32a12, 0, 4) === 4, "notify counts all four registered foreign waiters");
+var report12 = getReport();
+check(report12 === "12:A,B,C,D", "four-waiter FIFO resolution order A,B,C,D, got " + report12);
+
+// --- 13. Mixed agents in one notify pass: per-agent FIFO ----------------------
+// One notify(4) pass latches tokens from both registrants into a single
+// pass chain. Relative order ACROSS agents is unobservable (separate
+// microtask queues), so each agent's walker skips the other agent's tokens;
+// each agent's own pair must still resolve in its registration order.
+var sab13 = new SharedArrayBuffer(5 * Int32Array.BYTES_PER_ELEMENT);
+var i32a13 = new Int32Array(sab13);
+var src13 = `
+    $262.agent.receiveBroadcast(function(sab) {
+        var i32a = new Int32Array(sab);
+        var order = [];
+        var p1 = Atomics.waitAsync(i32a, 0, 0).value;
+        var p2 = Atomics.waitAsync(i32a, 0, 0).value;
+        p1.then(function() { order.push(1); });
+        p2.then(function() { order.push(2); });
+        Atomics.add(i32a, 4, 1);
+        Promise.all([p1, p2]).then(function() {
+            $262.agent.report("13:" + order.join(","));
+            $262.agent.leaving();
+        });
+    });
+`;
+$262.agent.start(src13);
+$262.agent.start(src13);
+$262.agent.broadcast(sab13);
+waitUntil(i32a13, 4, 2);
+check(Atomics.notify(i32a13, 0, 4) === 4, "one notify pass counts both agents' waiters");
+for (var r13 = 0; r13 < 2; r13++) {
+    var report13 = getReport();
+    check(report13 === "13:1,2", "mixed-pass per-agent FIFO order 1,2, got " + report13);
+}
+
 WScript.SetTimeout(function() {
     try {
         check(parentResult.async === true, "parent waitAsync result is async");
