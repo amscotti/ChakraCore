@@ -597,11 +597,13 @@ pre-fix debug `291ba391…d66` (`ch-pre-debug`, static), post-fix debug
   skips joining its own sub-agents, but it is unreachable after any
   script ran (all `Error` exits precede `JsRun`; sub-agents are created
   only by script) — pre-existing, unchanged.
-- `CreateThread`'s return value at the spawn site is unchecked
-  (pre-existing): a failed spawn leaves `hThread == NULL`, and the join's
-  `WaitForSingleObject(NULL)` would trip the per-child Assert (debug) or
-  delete a never-started child (release) — same shape pre- and post-fix.
-  Follow-up card; no change in this repair.
+- ~~`CreateThread`'s return value at the spawn site is unchecked
+  (pre-existing)~~ **Fixed** by the host-spawn-check follow-up below
+  (diagnosis `325d015c7`, fix `fd7b022b1`): the failure is worse than
+  this bullet recorded — before the join is ever reached, the
+  `WaitForSingleObject(hevntInitialScriptCompleted, INFINITE)` right
+  after the failed spawn hangs forever (the only setter of the parent's
+  event is the never-started child's `ThreadProc`).
 - Review note: `-CollectGarbage` is not a real `ch` flag (silently
   accepted; the `CollectGarbage()` global is undefined in these
   profiles, so committed tests' `typeof` guards never fire) — GC legs
@@ -623,8 +625,143 @@ timers, broadcast cutoff, nested sub-agents, raw-exit Quit with 70
 live children, 3–4-way concurrent load) all clean, and ≤64 semantics
 byte-identical pre vs post on both profiles. Its nits are folded
 above (wedged-agent failure mode, GC-flag note); the general review's
-assert-wording and unchecked-`CreateThread` nits are folded above and
-filed as a follow-up card.
+assert-wording and unchecked-`CreateThread` nits are folded above — the
+latter fixed by the host-spawn-check follow-up below.
+
+### Follow-up: host-spawn-check — unchecked `CreateThread` at the spawn site
+
+Status: diagnosis `325d015c7`, tooling refinement `28d3c470a`, fix
+`fd7b022b1`, receipt (this section), branch `host-spawn-check` (base
+`4f564ea04` = main, gates 2031/2083). Retires the residual bullet above.
+
+Root cause: the `crossthread` branch of `WScriptJsrt::LoadScript` never
+checked `::CreateThread`'s return (the PAL returns `NULL` after
+`pthread_create` fails, `pal/src/thread/pal_thread.cpp`). On failure, in
+order: (1) the immediately following
+`WaitForSingleObject(threadData->hevntInitialScriptCompleted, INFINITE)`
+hangs forever — sampled stack of a reproduced hang: `main → … →
+WScriptJsrt::LoadScript (WScriptJsrt.cpp:879) → WaitForSingleObject →
+CPalSynchronizationManager::BlockThread → _pthread_cond_wait`,
+1532/1534 samples; (2) the dead child stays in `threadData->children`
+with a NULL handle, for the end-of-main per-child join
+(`WaitForSingleObject(NULL)` → Assert on debug, delete of a
+never-started child on release) — reachable only if something else
+breaks the wait, because hazard 1 hangs first.
+
+Design (host-side only, ~30 lines): on `hThread == NULL`, unlink and
+`delete` the just-pushed child on the owning parent thread, skip the
+wait, and surface `JsErrorOutOfMemory` with "Failed to create the agent
+thread." through the function's existing `errorCode`/`errorMessage`
+path (the PAL maps a failed `pthread_create` to
+`ERROR_NOT_ENOUGH_MEMORY`, so that is the closest JsRT code). Success
+path unchanged; no engine change; script sees a catchable exception and
+the process exits cleanly.
+
+Ownership record (failure path; memory-management):
+
+```text
+Resource: the failed child RuntimeThreadData (host new/delete) and the
+          parent's hevntInitialScriptCompleted state
+Owner: unchanged — the owning parent thread's children list; deletion
+          authority for a never-started child moves to the spawn site
+          itself (the end-of-main join never observes it)
+Transfer/invalidation: the child is deleted before LoadScript returns;
+          nothing else can hold a reference — the child thread never
+          started, this thread is the sole children-list mutator (it
+          pushed the child with no intervening script), so pop_back
+          unlinks exactly the failed child. ~RuntimeThreadData's
+          CloseHandle(NULL hThread) is benign (invalid-handle error,
+          no side effects, PAL and Windows alike)
+Event state: hevntInitialScriptCompleted deliberately stays reset —
+          only the spawning thread waits on it, only after a spawn that
+          did start; every earlier child already set it during its own
+          spawn-wait and never signals it again, so there is no stale
+          waiter; the next spawn resets it again anyway
+Thread rule: failure handling entirely on the spawning (parent) thread;
+          applies unchanged to nested sub-agent spawns (each agent owns
+          its own children list on its own thread)
+Failure paths: the only new failure branch is the one being handled;
+          errorCode/errorMessage surface through the pre-existing
+          SetExceptionIf mechanism like every other branch of this
+          function
+Tests: tools/host-spawn-check/ (A/B below); no rlexe entry — thread
+          exhaustion is not deterministically reachable in-gate
+```
+
+Evidence: Mac ARM64, both profiles; driver injects a one-`pthread_create`
+`EAGAIN` window at the libc boundary (the real exhaustion errno; the PAL
+then takes its genuine failure path end to end — `ulimit -u` was
+measured useless for this on macOS: RLIMIT_NPROC gates fork only).
+Binaries (SHA-256): pre-fix test `ae1a0b89…185`, pre-fix debug
+`2dfb264e…831` (string-verified fix-free), post-fix test `44a8980e…783`,
+post-fix debug `99d7ae86…bf5` (fix message present).
+
+| Leg | Runs | Result |
+|---|---|---|
+| Pre-fix test (base `4f564ea04`) | 12 | **12 hang / 0 caught** |
+| Pre-fix debug (base `4f564ea04`) | 12 | **12 hang / 0 caught** |
+| Post-fix test (`fd7b022b1`) | 12 | **12 caught / 0 hang** |
+| Post-fix debug (`fd7b022b1`) | 12 | **12 caught / 0 hang** |
+
+Post-fix runs print `phase1=5`, `caught=Failed to create the agent
+thread.`, `phase2=1` and exit 0 (the spawn after the refusal succeeds —
+host state consistent — and end-of-main joins every started agent).
+Controls: bare and disarmed-shim runs unchanged. Spawn-success path:
+agents100 20/20 clean test, 10/10 debug. Focused S6e suite 7/7 test,
+7/7 debug. Gates: test **PASS 2031/0**; debug **PASS 2083/0** (one first
+attempt measured 2082/1 — `DebuggerCommon/globalFuncVars.js`, whose
+debugger-baseline output gained a PAL `InternalSetThreadPriority`
+warning under machine load; no agents involved, 5/5 clean in isolation,
+0 failures in the logged full rerun). Pins untouched at 2031/2083.
+
+Residual (host-spawn-check): the injection is at the libc boundary, not
+a genuine kernel EAGAIN (identical errno and PAL path, different
+refuser); Windows `CreateThread` failure is unexercised; a child
+`ThreadProc` that fails before its own `SetEvent(parent event)` (e.g.
+`JsCreateRuntime` OOM) still hangs the parent spawn-wait — pre-existing,
+same shape as before this repair, recorded here rather than fixed
+(rollback of a half-initialized child is a larger change).
+
+### Review outcome (host-spawn-check)
+
+Both reviewers **ACCEPTED** with zero `[bug]` findings.
+
+- **General review**: fix verified on **both** PAL NULL sub-cases —
+  `pthread_create` failure and `ThreadEntry` startup failure
+  (`ERROR_INTERNAL_ERROR`), where the host `ThreadProc` provably never
+  ran (`SetStartStatus` gates the start routine), so `pop_back`+`delete`
+  is safe in each (folded note: `JsErrorOutOfMemory` is exact for the
+  first sub-case and imprecise-but-harmless for the second). Full event
+  census, `CloseHandle(NULL)` benign path, ownership record, and
+  methodology all verified; A/B independently reproduced (3/3 hang
+  pre-fix base, 3/3 caught post-fix). The gate flap was classified
+  pre-existing by rerunning `globalFuncVars.js` under real load
+  (5/5 pass pre AND post): PAL debug-profile
+  `InternalSetThreadPriority` `ASSERT` noise under transient machine
+  load, unrelated to this branch (no agents; the branch is unreachable
+  without a refused create).
+- **Adversarial review**: interposer fidelity probed (denial lands on
+  the agent create; no false-"caught" path possible given the driver's
+  classification); controls byte-identical; success path unchanged
+  (agents100 20/20+5/5, agents200 mixed 3/3+2/2 with exact report
+  counts, nested 22×2, byte-identical stdout on all legs); composed
+  failures all green (first-ever, later, sub-agent, repeated
+  consecutive, mid-report — each with consistent state and a working
+  post-failure spawn); event-state reasoning confirmed by source and a
+  fail-then-4-successes script; both gates **PASS 2031/0 and 2083/0**
+  (flake not reproducible under deliberate 8-spinner load, 209/209 ×5
+  per leg on the DebuggerCommon folder).
+- **New pre-existing defect found (card filed)**: `WScript.Broadcast`
+  SIGSEGVs (100% repro, N=1..200, identical pre-fix base and post-fix)
+  when passed a non-SharedArrayBuffer (e.g. an `Int32Array` view)
+  instead of throwing — host-robustness card: validate the broadcast
+  argument type. Also filed as a low-priority infra note: the
+  debug-profile PAL thread-priority `ASSERT` print can leak into
+  baseline output under extreme load (both classified pre-existing by
+  the reviewers).
+- Folded nits: README stale error string and copied-binary dylib note;
+  `failthreads.c` single-spawning-thread counter caveat; gate-log
+  retention note (reviewer reruns substantiate the in-receipt numbers).
 
 ## Scope
 

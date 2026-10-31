@@ -876,6 +876,39 @@ JsValueRef WScriptJsrt::LoadScript(JsValueRef callee, LPCSTR fileName,
             return ((RuntimeThreadData*)param)->ThreadProc();
         }, (void*)child, NULL, NULL);
 
+        if (child->hThread == nullptr)
+        {
+            // CreateThread failed (thread/resource exhaustion — realistic
+            // under agent churn; the PAL returns NULL after pthread_create
+            // fails, pal/src/thread/pal_thread.cpp). The child thread never
+            // started, so nothing else can reference `child`: this thread
+            // is the sole mutator of children (it pushed the child just
+            // above and no script ran since), so pop_back unlinks exactly
+            // the failed child. Delete it here instead of leaving a
+            // NULL-hThread entry for the end-of-main join, where
+            // WaitForSingleObject(NULL) trips the per-child Assert on debug
+            // profiles and releases a never-started child on release.
+            // ~RuntimeThreadData's CloseHandle(NULL hThread) is benign
+            // (invalid-handle error, no side effects).
+            threadData->children.pop_back();
+            delete child;
+
+            // hevntInitialScriptCompleted deliberately stays reset: only
+            // this thread waits on it, only after a spawn that did start,
+            // and every earlier child already set it during its own
+            // spawn-wait and never signals it again — so there is no stale
+            // waiter to release, and the next spawn resets it again
+            // anyway.
+
+            // Surface through this function's existing errorCode/errorMessage
+            // path: the PAL maps a failed pthread_create to
+            // ERROR_NOT_ENOUGH_MEMORY, so JsErrorOutOfMemory is the closest
+            // JsRT code.
+            errorCode = JsErrorOutOfMemory;
+            errorMessage = _u("Failed to create the agent thread.");
+            goto Error;
+        }
+
         WaitForSingleObject(threadData->hevntInitialScriptCompleted, INFINITE);
     }
     else
