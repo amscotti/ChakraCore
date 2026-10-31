@@ -61,6 +61,9 @@
     (const void*)(unsigned long)&replacement, \
     (const void*)(unsigned long)&replacee };
 
+// NOTE: counters are non-atomic longs. Safe only under the driver's
+// single-spawning-thread serialization (agents spawn sequentially through
+// the host spawn-wait handshake); not a general-purpose interposer.
 static long g_created = -1;
 
 static long budget(void)

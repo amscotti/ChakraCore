@@ -722,6 +722,47 @@ refuser); Windows `CreateThread` failure is unexercised; a child
 same shape as before this repair, recorded here rather than fixed
 (rollback of a half-initialized child is a larger change).
 
+### Review outcome (host-spawn-check)
+
+Both reviewers **ACCEPTED** with zero `[bug]` findings.
+
+- **General review**: fix verified on **both** PAL NULL sub-cases —
+  `pthread_create` failure and `ThreadEntry` startup failure
+  (`ERROR_INTERNAL_ERROR`), where the host `ThreadProc` provably never
+  ran (`SetStartStatus` gates the start routine), so `pop_back`+`delete`
+  is safe in each (folded note: `JsErrorOutOfMemory` is exact for the
+  first sub-case and imprecise-but-harmless for the second). Full event
+  census, `CloseHandle(NULL)` benign path, ownership record, and
+  methodology all verified; A/B independently reproduced (3/3 hang
+  pre-fix base, 3/3 caught post-fix). The gate flap was classified
+  pre-existing by rerunning `globalFuncVars.js` under real load
+  (5/5 pass pre AND post): PAL debug-profile
+  `InternalSetThreadPriority` `ASSERT` noise under transient machine
+  load, unrelated to this branch (no agents; the branch is unreachable
+  without a refused create).
+- **Adversarial review**: interposer fidelity probed (denial lands on
+  the agent create; no false-"caught" path possible given the driver's
+  classification); controls byte-identical; success path unchanged
+  (agents100 20/20+5/5, agents200 mixed 3/3+2/2 with exact report
+  counts, nested 22×2, byte-identical stdout on all legs); composed
+  failures all green (first-ever, later, sub-agent, repeated
+  consecutive, mid-report — each with consistent state and a working
+  post-failure spawn); event-state reasoning confirmed by source and a
+  fail-then-4-successes script; both gates **PASS 2031/0 and 2083/0**
+  (flake not reproducible under deliberate 8-spinner load, 209/209 ×5
+  per leg on the DebuggerCommon folder).
+- **New pre-existing defect found (card filed)**: `WScript.Broadcast`
+  SIGSEGVs (100% repro, N=1..200, identical pre-fix base and post-fix)
+  when passed a non-SharedArrayBuffer (e.g. an `Int32Array` view)
+  instead of throwing — host-robustness card: validate the broadcast
+  argument type. Also filed as a low-priority infra note: the
+  debug-profile PAL thread-priority `ASSERT` print can leak into
+  baseline output under extreme load (both classified pre-existing by
+  the reviewers).
+- Folded nits: README stale error string and copied-binary dylib note;
+  `failthreads.c` single-spawning-thread counter caveat; gate-log
+  retention note (reviewer reruns substantiate the in-receipt numbers).
+
 ## Scope
 
 1. A **foreign** `Atomics.notify` (a different `ThreadContext`) now wakes a

@@ -113,11 +113,18 @@ from exactly this configuration. A post-fix run prints
 exits 0: the exception is catchable, the next spawn succeeds, and the
 end-of-main join collects every successfully started agent.
 
-Controls (base binary): no shim — all spawns succeed, `ERROR: spawn
-unexpectedly succeeded`, exit 0; shim loaded but disarmed (no
-`FAILTHREADS_AT`) — identical to the bare run. Earlier preliminary legs
-with the first script revision (fixed try-block spawn index) reproduced
-the same 12/12 hangs on both pre-fix profiles.
+Controls (base binary): no shim — all spawns succeed, `ERROR: no spawn
+refused (no thread budget injected?)`, exit 0; shim loaded but disarmed
+(no `FAILTHREADS_AT`) — identical to the bare run. Earlier preliminary
+legs with the first script revision (fixed try-block spawn index)
+reproduced the same 12/12 hangs on both pre-fix profiles.
+
+Notes: the test-profile `ch` dlopens `libChakraCore.dylib` from its own
+directory — when copying binaries for legs, copy the dylib beside them
+or a copied launcher exits rc=5 (a loud `other`, never a silent
+misclassification). `failthreads.c` counters are non-atomic; safe under
+the driver's single-spawning-thread serialization assumption (noted in
+the source).
 
 Spawn-success path unchanged: `tools/host-exit-join/drive.sh` on the
 post-fix binaries — agents100 test 20/20 clean, debug 10/10 clean.
