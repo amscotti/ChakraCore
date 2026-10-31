@@ -763,10 +763,18 @@ so near-equal fires could invert order (30/2400 on debug, surfaced by the
 post-E1 debug gate); the repair chains latched tokens at latch time under
 the waiter-list CS and claims them head-first on the registrant thread
 (0/2400 post-fix; 7,800 adversarial pass-observations clean; dual ACCEPT;
-gates unchanged). All active feature/triage
+gates unchanged). The end-of-main join card was then closed by the
+host-exit-join lane (merge `5f4e722d1`, receipt section in the S6e doc):
+the PAL caps a single wait at 64 handles, so >64 accumulated agent
+children failed the old aggregate join (debug assert; release-profile
+delete-without-join UAF, 33/50 SIGSEGV at 100 agents) — the fix signals
+all children then joins each individually and deletes only after
+observing exit (50/50 clean, cap-edge 63–66 and 400-agent adversarial
+scale clean, ≤64 semantics byte-identical; dual ACCEPT; gates unchanged).
+All active feature/triage
 worktrees are merged; next work items are
-the remaining S8/P-eval residuals, the recorded S6e exit-assert card
-(~100+ agents at end-of-main), lead-surrogate lacunarity, and the C4
+the remaining S8/P-eval residuals, the unchecked-`CreateThread` spawn
+follow-up card, lead-surrogate lacunarity, and the C4
 qualification work (full baseline rerun, host-reported negative phase). Tracked eval residuals: P4 body eval with non-simple
 parameters; P2 hidden outer lexical and JSC/Node delete difference.
 S3 (Unicode data decision), S6 default (product/security decision),

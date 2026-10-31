@@ -419,9 +419,11 @@ flush-and-raw-exit teardown that removed the deterministic Quit crash
 families. The residual ~0.3% pre-Quit agent-startup SIGBUS was then
 root-caused as a card-table stack-coverage gap and fixed by the E1 engine
 lane (`OnThreadInit` page-count round-up; merge `3574b6168`; gates
-unchanged at 2031/2083), and a follow-up repair restored guaranteed FIFO
+unchanged at 2031/2083), a follow-up repair restored guaranteed FIFO
 resolution order for cross-agent `waitAsync` (per-notify-pass ordered
-chain, head-first registrant claims; merge `02c45f214`).
+chain, head-first registrant claims; merge `02c45f214`), and the
+end-of-main child join was bounded to per-child waits (PAL 64-handle
+cap made >64 agents crash with a UAF; merge `5f4e722d1`).
 BigInt is now enabled by default; `-ESBigInt-`
 restores the old
 default-off profile, and the class-elements corpus improved to **5,892/5,897**
