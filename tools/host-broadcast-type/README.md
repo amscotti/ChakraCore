@@ -42,6 +42,13 @@ Mechanism, from source:
 `$262.agent.broadcast` is `WScript.Broadcast` (`bin/ch/262.js`), so both
 script entry points share this callback and one fix covers both.
 
+Review repair (leak): the validation extraction AddRefs on success, so
+an agentless valid broadcast (`threadData == nullptr`) must release the
+staged handle itself — the agents-present handshake's release never
+runs. `leakprobe.js` + `leakdrive.sh` isolate this by peak RSS (needs
+`-Test262`, else `WScript.Broadcast` is not installed); see the receipt
+follow-up in `doc/c2-s6-cross-agent-waitasync.md` for the A/B numbers.
+
 ## Fix
 
 Validate the broadcast argument and check the API return **before

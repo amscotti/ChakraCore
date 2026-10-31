@@ -1763,6 +1763,19 @@ JsValueRef __stdcall WScriptJsrt::BroadcastCallback(JsValueRef callee, bool isCo
 
             ChakraRTInterface::JsReleaseSharedArrayBufferContentHandle(threadData->sharedContent);
         }
+        else
+        {
+            // Validation above extracted the content handle, which AddRefs
+            // on success (JsrtCore.cpp). With no agent children threadData
+            // is null (it is created only at the crossthread inject), so
+            // the handshake — including its release — never runs: drop the
+            // reference here. Without this, every agentless valid
+            // broadcast leaked one SharedContents reference, pinning its
+            // buffer until runtime disposal (pre-repair leak isolated by
+            // the host-broadcast-type review; probe:
+            // tools/host-broadcast-type/leakprobe.js).
+            ChakraRTInterface::JsReleaseSharedArrayBufferContentHandle(sharedContent);
+        }
     }
 
 Error:

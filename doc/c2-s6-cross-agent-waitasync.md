@@ -766,10 +766,12 @@ Both reviewers **ACCEPTED** with zero `[bug]` findings.
 
 ### Follow-up: host-broadcast-type — `WScript.Broadcast(non-SAB)` crashed live agents
 
-Status: diagnosis `56849176f`, fix `91f4db697`, receipt (this
-section), branch `host-broadcast-type` (base `78376e684` = main, gates
+Status: diagnosis `56849176f`, fix `91f4db697`, review repair +
+receipt amendment (this section; the lane's final pre-merge commit),
+branch `host-broadcast-type` (base `78376e684` = main, gates
 2031/2083 → 2032/2084). Retires the card filed in the review outcome
-above.
+above. Both reviews ACCEPTed the crash fix but found the same
+introduced leak, repaired below (repair iteration).
 
 Root cause: `BroadcastCallback` passed `arguments[1]` to
 `JsGetSharedArrayBufferContent(..., &threadData->sharedContent)`
@@ -803,16 +805,23 @@ adding one would grow the change beyond host-robustness). On the
 failure path no child is signaled, nothing is written to
 `sharedContent`, and no handle is released.
 
-Ownership record (memory-management): **no ownership changes** — pure
-argument validation. The content handle's protocol is untouched:
-success = local staging → commit to `threadData->sharedContent` →
-child wrappers AddRef → parent releases after the all-children
-handshake (all pre-existing); failure = no handle acquired at all
-(the API writes nothing on failure, verified from source), and
-`sharedContent` keeping its prior value stays safe precisely because
-no child is signaled — children read the field only after a signal,
-and the next successful broadcast overwrites it first. Allocation
-domains, thread rules and release authority are all unchanged.
+Ownership record (memory-management): **no ownership protocol changes;
+one acquire/release pair made explicit per path.** The validation
+extraction AddRefs on success (`JsrtCore.cpp`: `(*content)->AddRef()`
+before `MarkCrossRuntime`), so every completed `Broadcast` acquires
+one content reference. Three paths: (1) agents present — local
+staging → commit to `threadData->sharedContent` → child wrappers
+AddRef → parent releases after the all-children handshake
+(pre-existing, unchanged); (2) agentless success (`threadData ==
+nullptr`; threadData is created only at the crossthread inject) —
+acquire-and-**release** the staged local immediately: nothing is
+committed and no child exists to receive it (added by the review
+repair; the first fix version leaked this reference, one pinned
+`SharedContents` per agentless valid broadcast, contradicting this
+record — see below); (3) failure — acquires nothing (the API writes
+no out-param on failure, verified from source), signals nothing,
+releases nothing. Allocation domains, thread rules and release
+authority are unchanged.
 
 Evidence: Mac ARM64, test profile (`zig-out/bin/ch`) and debug-static
 (`out/debug-static/bin/ch`); driver `tools/host-broadcast-type/
@@ -838,6 +847,42 @@ debug. Focused S6e suite plus the new entry: **8/8 test, 8/8 debug**
 in `tools/build/gate_counts.json` (lineage: "The host-broadcast-type
 repair added s6-broadcast-type.js"; first pin bump since the S6e
 landing).
+
+**Review repair (agentless-broadcast leak).** The first fix version
+validated before the `if (threadData)` guard, and the extraction
+AddRefs on success — with `threadData == nullptr` (no agent ever
+started) an agentless valid `WScript.Broadcast(sab)` took a reference
+that the skipped handshake never released: one leaked
+`SharedContents` per call, unbounded in a loop (pre-fix this path
+acquired nothing). Repair: on `threadData == nullptr` after
+successful validation, release the staged local with the same
+`JsReleaseSharedArrayBufferContentHandle` the handshake uses, then
+return normally; throw-on-bad-argument behavior is unchanged
+(failure still acquires nothing). Probe
+`tools/host-broadcast-type/leakprobe.js` + `leakdrive.sh`
+(RSS-isolation: fresh 64 KiB SAB per iteration, broadcast vs
+control; note `WScript.Broadcast` requires `-Test262` — without it
+the probe's first broadcast throws a host TypeError — and macOS
+`/usr/bin/time -l` reports bytes). Mac ARM64:
+
+| Leg | Profile / iters | Broadcast leg | Control leg |
+|---|---|---|---|
+| Pre-repair (`91f4db697`) | test / 20000 | **1279 MiB** | 738 MiB |
+| Pre-repair (`91f4db697`) | debug / 6000 | **544 MiB + `ASSERTION 73055 (AllocationPolicyManager.h:54) currentMemory == 0`** (rc=133) | 315 MiB |
+| Post-repair | test / 20000 | **540 MiB** | 742 MiB |
+| Post-repair | debug / 6000 | **315 MiB, rc=0, no assert** | 315 MiB |
+
+(At 6000 iters on test both legs read ~400 MiB — the control's
+unreferenced buffers are GC-lag-pinned to exit, masking the delta;
+20000 separates pinned-from-lagged. The debug profile's exit
+accounting assert catches the leak outright.) Post-repair
+re-verification: s6-broadcast-type.js 5/5 direct per binary;
+repro drive 5/5 clean throw per profile; focused S6e suite **8/8
+test, 8/8 debug**; gates **test 2032/0, debug 2084/0** (pins
+unchanged). Reviewer nit folded: the general reviewer's
+`zig build check` aggregate run failed only on lock contention —
+every component passed individually both before and after the
+repair (the numbers above and in-lane logs).
 
 In-gate negative coverage (`test/es7/s6-broadcast-type.js`, ~1 s,
 deterministic — unlike the spawn-check card this defect needs no
