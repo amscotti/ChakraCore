@@ -325,6 +325,7 @@ EXDEF3_WMS(CALL,                    ProfiledNewScObjectSpread,  PROFILEDOP(OP_Pr
   DEF3_WMS(CUSTOM_L_Value,          LdLen_A,                    OP_LdLen, ElementCP)
   DEF3_WMS(CUSTOM_L_Value,          ProfiledLdLen_A,            PROFILEDOP(OP_ProfiledLdLen, OP_LdLen), ProfiledElementCP)
   DEF2_WMS(XXtoA1Mem,               LdUndef,                    JavascriptOperators::OP_LdUndef)
+EXDEF2_WMS(XXtoA1Mem,               LdUndef_ReuseLoc,           JavascriptOperators::OP_LdUndef)
   DEF2_WMS(XXtoA1Mem,               LdNaN,                      JavascriptOperators::OP_LdNaN)
   DEF2_WMS(XXtoA1Mem,               LdInfinity,                 JavascriptOperators::OP_LdInfinity)
   DEF2_WMS(XXtoA1Mem,               LdTrue,                     JavascriptBoolean::OP_LdTrue)

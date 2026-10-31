@@ -537,7 +537,15 @@ Peeps::PeepBranch(IR::BranchInstr *branchInstr, bool *const peepedRef)
                     }
                     IR::Instr *newInstr = IR::Instr::New(newOpcode, branchInstr->m_func);
                     newInstr->SetSrc1(branchInstr->GetSrc1());
-                    newInstr->SetSrc2(branchInstr->GetSrc2());
+                    // BrOnHasProperty/BrOnNoProperty carry only Src1 (the
+                    // property sym); SetSrc2 dereferences its argument.
+                    // The S14-P5 captured-base HasProperty probe can make
+                    // such a branch target the next instruction, reaching
+                    // this dead-branch conversion for the first time.
+                    if (branchInstr->GetSrc2())
+                    {
+                        newInstr->SetSrc2(branchInstr->GetSrc2());
+                    }
                     branchInstr->InsertBefore(newInstr);
                     newInstr->SetByteCodeOffset(branchInstr);
                 }

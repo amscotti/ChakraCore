@@ -1614,6 +1614,9 @@ IRBuilder::BuildReg1(Js::OpCode newOpcode, uint32 offset, Js::RegSlot R0)
             break;
         }
 
+    case Js::OpCode::LdUndef_ReuseLoc:
+        reuseLoc = true;
+        // fall through
     case Js::OpCode::LdUndef:
         {
             const auto addrOpnd = IR::AddrOpnd::New(m_func->GetScriptContextInfo()->GetUndefinedAddr(), IR::AddrOpndKindDynamicVar, m_func, true);
