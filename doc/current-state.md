@@ -1,7 +1,7 @@
 # Current State of ChakraCore
 
 Engine-source baseline `97e68c917` (19 Feb 2026; see §7), with modernization
-execution/decisions updated through 2026-10-29. Version **1.13.0 dev**
+execution/decisions updated through 2026-10-31. Version **1.13.0 dev**
 (`lib/Common/ChakraCoreVersion.h:19-21`, `CHAKRA_CORE_VERSION_RELEASE 0` at :58).
 MIT license (`LICENSE.txt`). Every claim below cites an in-repo path; line numbers
 were verified against this HEAD.
@@ -354,7 +354,9 @@ and SharedArrayBuffer/Atomics remain off by default. The
 SAB+Atomics flag-on surface now includes growable SharedArrayBuffer and
 non-shared Atomics, but the feature remains OFF by default pending the
 product/security decision; keep all three flagged until deliberately enabled. (e) C++17 + Rotor PAL; x86/ARM win-only;
-ARM64 JIT broken off-Windows — PAL/backend first. (f) No sandbox/heap cage, no
+ARM64 JIT now works on macOS (the Zig `jit` profile merged 2026-10-31, with
+documented coverage limits in [arm64-macos-jit.md](arm64-macos-jit.md));
+ARM64 JIT on Linux and native x64 Linux JIT remain unproved (B4). (f) No sandbox/heap cage, no
 pointer compression; mark-sweep GC with concurrent/parallel mark + concurrent sweep
 — hostile-input handling is a threat-model decision. (g) Legacy floors describe
 the old build, not a compatibility commitment for this revival. Modern floors may
@@ -374,7 +376,8 @@ full ES2025 conformance — see [modernization-plan.md](modernization-plan.md) �
 (l) Zig 0.17.0 is installed/pinned and reports Clang 22.1.8. Build rework and
 `@cImport` removal / external `translate-c` APIs were checked against its release
 notes and installed sources. The Mac no-JIT C/C++/assembly-at-scale pilot has run;
-JIT/WASM/WABT and other platforms are subsequent milestones. Native callback
+the Mac ARM64 JIT profile has since landed and merged (2026-10-31);
+Linux JIT/WASM/WABT behavior and other platforms remain subsequent milestones (B4/B6). Native callback
 retention uses `forceUndefinedSymbol`, not WASM-only `export_symbol_names`.
 The original regex delta was a 16 MiB linker stack default: an explicit 8 MiB
 stack restores 1959/0, rather than requiring a test waiver. ZLS has no 0.17 release
@@ -448,5 +451,17 @@ The 30-directory fixture-cache subset has also been rerun with the fixed
 harness: **1,367/998 of 2,365**, 0 pass→fail and 102 fail→pass versus the old
 precombined result ([c4-fixture-rerun.md](c4-fixture-rerun.md)). S3
 Unicode/ICU, S6 default enablement, B4 Linux/JIT/WASM and C4 host-negative
-qualification remain decision- or hardware-blocked; no JIT, Linux, native-x64,
-TTD or multi-agent claim is made.
+qualification remain decision- or hardware-blocked; no Linux, native-x64 or
+TTD claim is made.
+
+**ARM64 macOS JIT checkpoint (2026-10-31):** the worktree JIT port merged
+into this branch (`9004b3ed7`, docs `56c767e07`). The `jit` profile gates:
+dynapogo 2001/286 and interpreted 2426/397 with every failure the documented
+asm.js/WASM Mac gap and zero signals, disable_jit 2032/0 on the JIT binary,
+`zig build -Dprofile=jit check` green; no-JIT gates unchanged at 2032/0 and
+2084/0. JIT coverage limits: direct-eval callers and eval code run
+interpreted, 18 class/private/import-attribute opcodes abort to the
+interpreter, and asm.js/WASM have no ARM64 Mac implementation in this
+profile — full record in [arm64-macos-jit.md](arm64-macos-jit.md). This is
+Mac-only JIT evidence; it is not B4 and makes no Linux or test262-under-JIT
+claim.

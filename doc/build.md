@@ -2,7 +2,9 @@
 
 > This document is the **legacy** build reference. The active build front end
 > on this branch is Zig (`mise exec -- zig build`, `zig build check`,
-> `zig build check-selftest`, profiles via `-Dprofile=`), specified by
+> `zig build check-selftest`, profiles via `-Dprofile=` — including the
+> ARM64 macOS `-Dprofile=jit` merged 2026-10-31, see
+> [arm64-macos-jit.md](arm64-macos-jit.md)), specified by
 > [modernization-plan.md](modernization-plan.md) §2 and the B1–B3 records
 > indexed in [README.md](README.md); §14 below records the original pilot.
 

@@ -11,7 +11,7 @@ foundational documents and the earliest receipts only.
 | Document | Contents |
 |---|---|
 | [current-state.md](current-state.md) | What the project is today: inventory, architecture/build/test summaries, platforms, activity, constraints, gaps |
-| [arm64-macos-jit.md](arm64-macos-jit.md) | Worktree-only ARM64 macOS JIT. **Milestone M1**, tag `jit-arm64-macos-m1`: disable_jit 1973/0; interpreted 2367/397 and dynapogo 1943/286, every failure the documented asm.js/WASM feature gap, zero signals; `zig build -Dprofile=jit check` and the default no-JIT B2/B3 gate green |
+| [arm64-macos-jit.md](arm64-macos-jit.md) | ARM64 macOS JIT (merged into this branch 2026-10-31, `9004b3ed7`; M1 tag `jit-arm64-macos-m1`): final gates dynapogo 2001/286 and interpreted 2426/397, every failure the documented asm.js/WASM feature gap, zero signals; disable_jit 2032/0; `zig build -Dprofile=jit check` and the no-JIT gates (2032/0, 2084/0) green; direct-eval and 18 class/private/import opcodes stay interpreted |
 | [architecture.md](architecture.md) | Engine architecture: component map, execution pipeline, JIT tiers, JsRT API, threading, GC, Intl/WASM, with a Mermaid diagram |
 | [build.md](build.md) | Build process: entry points, prerequisites, Unix + Windows builds, CMake structure, ICU matrix, codegen, outputs, testing, CI, staleness |
 | [modernization-plan.md](modernization-plan.md) | Executable roadmap: staged build/platform rollout (F0–B3 verified, B4 blocked), C2 compatibility batches toward full ES2025, optional Zig integration |

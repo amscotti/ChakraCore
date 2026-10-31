@@ -17,7 +17,7 @@
 > TypedArray tracking + bounded Float16 slice, S13 WeakRef +
 > FinalizationRegistry, S14 P1–P7, and the
 > S14 block-scope and statement-level early-error clusters are closed on
-> Mac no-JIT (JIT claims gated on B4), receipts in [c2-s4.md](c2-s4.md),
+> Mac no-JIT (JIT-wide claims gated on B4; Mac JIT regression evidence added 2026-10-31, below), receipts in [c2-s4.md](c2-s4.md),
 > [c2-s5.md](c2-s5.md), [c2-s10.md](c2-s10.md),
 > [c2-s11.md](c2-s11.md), [c2-s7-matchall.md](c2-s7-matchall.md),
 > [c2-s9-namedgroups.md](c2-s9-namedgroups.md),
@@ -64,7 +64,7 @@ handling have been validated before its results are used as a completion gate.
 | B6 | Windows feasibility and rollout; later target extensions | Stable build contracts | Separate expansion |
 | Z1 | One useful mixed C++/Zig unit behind a tested C ABI | B3; B4 if the unit ships on Linux | Optional pilot |
 | C1 | Qualified ES2025 test policy and triaged failures | Stable Mac build at B3 | Recorded (CONDITIONAL) |
-| C2 | Bounded compatibility batches and partial releases | C1; B4 before JIT-wide enablement | In progress (S4/S5/S10/S11/S7-matchAll/S9 named-groups + d-flag + duplicate named groups + lookbehind + ES2025 modifiers; S1 class elements complete: public/private instance+static fields, private methods/accessors incl. async/generator and statics, computed field names, `super` in field initializers, static blocks and direct-eval `super` early errors (integrated elements corpus now 5,892/5,897 after default BigInt; eval-code 454/0); S6a flag-on growable SAB/non-shared Atomics (default remains off); S6b flag-on `Atomics.pause` + single-thread `Atomics.waitAsync` (finite timeouts landed as S6d and cross-agent suspension as S6e); S6c flag-on BigInt64Array/BigUint64Array Atomics incl. BigInt wait/notify/waitAsync validation; S6d finite `Atomics.waitAsync` timeouts via an optional additive host timer callback; S6e flag-on cross-agent `Atomics.waitAsync` (native wake latch, registrant-thread monitor tasks, child message queues; POSIX `WScript.Quit` flush + raw-exit teardown; SAB default remains off); S8 immutable ArrayBuffer (`immutable`, `transferToImmutable`, `sliceToImmutable`, write protections; JIT/TTD residuals); S3-a Unicode property escapes under `u` on ICU 79.1 (deterministic code-point-set matcher); S3-b RegExp `v`/Unicode Sets mode incl. `\q`, set operations and properties-of-strings; S9 u-mode RegExp strictness/canonical astral semantics plus S9-b code-point-aware literal search/builtin flag derivation; S2 BigInt is now enabled by default after a full default/disable audit plus bytecode serialization and debugger-display repairs; S8 resizable ArrayBuffer + TypedArray tracking + Float16 (DataView/Math.f16round slice and Float16Array); S12 import attributes + JSON modules (additive host contract); S13 symbol keys, WeakRef, FinalizationRegistry; S14 P1–P7 — all closed on Mac no-JIT; JIT claims gated on B4) |
+| C2 | Bounded compatibility batches and partial releases | C1; B4 before JIT-wide enablement | In progress (S4/S5/S10/S11/S7-matchAll/S9 named-groups + d-flag + duplicate named groups + lookbehind + ES2025 modifiers; S1 class elements complete: public/private instance+static fields, private methods/accessors incl. async/generator and statics, computed field names, `super` in field initializers, static blocks and direct-eval `super` early errors (integrated elements corpus now 5,892/5,897 after default BigInt; eval-code 454/0); S6a flag-on growable SAB/non-shared Atomics (default remains off); S6b flag-on `Atomics.pause` + single-thread `Atomics.waitAsync` (finite timeouts landed as S6d and cross-agent suspension as S6e); S6c flag-on BigInt64Array/BigUint64Array Atomics incl. BigInt wait/notify/waitAsync validation; S6d finite `Atomics.waitAsync` timeouts via an optional additive host timer callback; S6e flag-on cross-agent `Atomics.waitAsync` (native wake latch, registrant-thread monitor tasks, child message queues; POSIX `WScript.Quit` flush + raw-exit teardown; SAB default remains off); S8 immutable ArrayBuffer (`immutable`, `transferToImmutable`, `sliceToImmutable`, write protections; JIT/TTD residuals); S3-a Unicode property escapes under `u` on ICU 79.1 (deterministic code-point-set matcher); S3-b RegExp `v`/Unicode Sets mode incl. `\q`, set operations and properties-of-strings; S9 u-mode RegExp strictness/canonical astral semantics plus S9-b code-point-aware literal search/builtin flag derivation; S2 BigInt is now enabled by default after a full default/disable audit plus bytecode serialization and debugger-display repairs; S8 resizable ArrayBuffer + TypedArray tracking + Float16 (DataView/Math.f16round slice and Float16Array); S12 import attributes + JSON modules (additive host contract); S13 symbol keys, WeakRef, FinalizationRegistry; S14 P1–P7 — all closed on Mac no-JIT; Mac ARM64 JIT regression suites green 2026-10-31, test262-under-JIT and Linux claims still gated on B4) |
 | C3 | Larger runtime/object-model feature projects | C1 and their feature prerequisites | Separate projects |
 | C4 | Verified full ES2025 core-language result | Required C2/C3 work and qualified runner | Long-term objective |
 
@@ -112,8 +112,10 @@ Boundaries:
 | Pinned test262 diagnostic: 61,565 passed / 31,576 failed in 93,141 scenarios | A reproducible place to investigate feature debt; not an ES2025 score |
 | Sources inspected at `97e68c917` | Architecture/build map and current conditional feature paths |
 
-The Mac pilot does not compile Backend, WasmReader or WABT. It still obtains
-configuration through CMake before replay; B1/B2 must make Zig own that work.
+The original Mac pilot did not compile Backend, WasmReader or WABT. It still
+obtained configuration through CMake before replay; B1/B2 made Zig own that
+work, and the Mac ARM64 `jit` profile now compiles and runs the Backend
+(merged 2026-10-31; [arm64-macos-jit.md](arm64-macos-jit.md)).
 Windows, other CPUs, LTO and a hermetic dependency package remain
 unproved; Linux x64 JIT compiles and links in the B4 Zig graph, but its
 behavior is unproved — zero Linux behavior checks have run (B4 is
@@ -142,8 +144,10 @@ Reference material:
 ## 2. Phase 1 — Own the existing C/C++ build with Zig
 
 The initial delivery scope is **native ARM64 macOS, shared/no-JIT, RelWithDebInfo,
-system ICU**, followed by **native x64 Linux with JIT**. Work in small build-graph
-slices and compare each against the recorded reference configuration.
+system ICU**, followed by **native x64 Linux with JIT**. (Out-of-band update
+2026-10-31: a native ARM64 macOS JIT profile also landed and merged from the
+worktree port; it does not change the Linux B4 scope below.) Work in small
+build-graph slices and compare each against the recorded reference configuration.
 
 **Initial build-migration completion:** B1–B4 green for the declared Mac/Linux
 profiles. B5 is the release-package gate; B6 tracks later platform expansion.
@@ -160,8 +164,10 @@ The eventual single build front end remains the goal as those platforms graduate
 - For B4, choose and record a modern Linux distribution, libc minimum, CPU target
   and ICU configuration before accepting its baseline. For B6, do the same for
   Windows/SDK/tooling. Higher floors are acceptable policy choices.
-- The first active Zig matrix is Mac ARM64/no-JIT and Linux x64/JIT after their
-  gates pass. Windows keeps its legacy MSBuild route until its own rollout is
+- The first active Zig matrix was Mac ARM64/no-JIT and Linux x64/JIT after their
+  gates pass. As of 2026-10-31 the active Mac matrix also includes the merged
+  ARM64 `jit` profile; Linux x64/JIT still enters only through B4. Windows
+  keeps its legacy MSBuild route until its own rollout is
   verified. x86/ARM/Android and additional OS/architecture combinations enter the
   supported matrix only through an explicit expansion milestone.
 - Legacy Azure/Cirrus recipes are comparison data, not a requirement to reproduce
@@ -281,12 +287,15 @@ Done when a second clean environment can build/install/test the package with its
 declared inputs, with a documented SDK acquisition contract and versioned artifact
 manifest. The first release must also rotate the serialized-bytecode release
 GUID (`ByteCodeCacheReleaseFileVersion.h`): this branch changed the serialized
-format versus `97e68c917` (appended `ctBigInt`, new function-attribute bits)
-but only ever regenerated the no-JIT built-in blobs, and
+format versus `97e68c917` (appended `ctBigInt`, new function-attribute bits,
+and with the 2026-10-31 JIT merge an appended built-in property
+(`ENTRY(bigint)`) and extended opcode), and every regen so far — including
+for the now-merged Mac JIT variant — was single-variant, while
 `tools/regenByteCode.py` mints a new GUID only on a dual-variant (JIT + no-JIT)
-regen — so until B4 supplies the JIT variant, serialized caches written by a
-baseline build and by this branch share a GUID despite the format difference.
-No cross-version serialized-cache compatibility is claimed before that rotation. A claim of byte-identical reproducibility additionally needs two-build
+regen. Serialized caches written by a baseline build and by this branch
+therefore still share a GUID despite the format differences; B5 must perform
+the coordinated dual-variant regen/rotation. No cross-version
+serialized-cache compatibility is claimed before that rotation. A claim of byte-identical reproducibility additionally needs two-build
 comparison and controlled timestamp/build-ID inputs (including the existing
 `__DATE__`/`__TIME__` behavior); it is a separate proof from behavior parity.
 
@@ -430,7 +439,9 @@ Done per batch when:
 - inherited regression checks remain green; parser/bytecode changes have regenerated
   and verified built-in bytecode where required;
 - interpreter and applicable SimpleJIT/FullJIT paths pass before enabling globally
-  on JIT configurations (B4 supplies that environment);
+  on JIT configurations (since 2026-10-31 the merged Mac ARM64 `jit` profile
+  supplies that environment for regression suites; each batch's test262 corpus
+  under SimpleJIT/FullJIT and any Linux JIT claim remain owed — Linux via B4);
 - the pinned full comparison reports no unexplained new failures; deliberate
   expected-output changes are reviewed individually;
 - any default-flag change has its own coverage and release note. BigInt/SAB/RegExp
@@ -482,6 +493,20 @@ SimpleJIT/FullJIT (dynapogo) before any JIT-configuration claim.**
 Documented gaps, not defects in the fourteen methods: the typed-array
 default comparator treats `-0` and `+0` as equal (shared with
 `.sort()`); `ESBigInt` is off; resizable ArrayBuffer is S8.
+
+**Mac ARM64 JIT evidence update (2026-10-31).** With the JIT merge
+(`9004b3ed7`), the es7/regression half of the per-batch JIT obligations
+above (S4/S5/S10/S11 and the later S1/S2/S3/S6/S7/S8/S9/S12/S13/S14
+surfaces) now has Mac evidence: dynapogo 2001/286 and interpreted
+2426/397 with every failure the asm.js/WASM gap and zero signals,
+including es7 96/0 under dynapogo. Shapes the old backend cannot
+faithfully compile — direct-eval callers and eval code, the 18
+class/private/import-attribute opcodes, one labeled-break-from-`finally`
+CFG shape — run interpreted by design, so those functions are not
+JIT-compiled even though their tests pass. What remains owed per batch
+before any broader JIT-configuration claim: its test262 corpus under
+SimpleJIT/FullJIT, and Linux JIT evidence via B4. The kill switches
+recorded above are unchanged.
 
 #### C3 — Larger runtime projects
 
@@ -541,8 +566,12 @@ claim. Separately expand Intl (RelativeTimeFormat, ListFormat, DisplayNames,
 Locale, Segmenter, DurationFormat) and decide maintained ICU acquisition/versioning;
 separately stabilize WASM multi-value, SIMD and threads, then assess further proposals.
 
-**P2 — Longer-range architecture:** ARM64 JIT off Windows, additional platforms,
-and researched performance/memory designs. Sandboxing/pointer compression and
+**P2 — Longer-range architecture:** ARM64 JIT on further platforms (macOS
+landed 2026-10-31; Linux is B4-adjacent), JIT coverage ports for the
+interpreted-only shapes recorded in [arm64-macos-jit.md](arm64-macos-jit.md)
+(eval-from-JIT-frames fidelity, the 18 class/private/import opcodes), an
+ARM64 asm.js/WASM port, additional platforms, and researched
+performance/memory designs. Sandboxing/pointer compression and
 competitor tier counts are research, not this migration's completion gates.
 
 **P3 — Release/tooling health:** publish results and feature manifests as batches
@@ -595,10 +624,17 @@ Decision/rollback points:
 - [x] B3: Each declared Mac profile, dependency rebuild behavior and clean CI;
   scoped default rollout. (*CONDITIONAL on the first green post-merge
   Actions run; recipe validated by lint + literal local simulation.)
+- [x] ARM64 macOS JIT profile (out-of-band worktree port, not a lettered
+  milestone): rebased onto `aa42bb4f1`, merged 2026-10-31 (`9004b3ed7`);
+  `zig build -Dprofile=jit check` green, interpreted/dynapogo failing only
+  on the asm.js/WASM Mac gap, no-JIT gates unchanged. Coverage limits and
+  remaining JIT ports are recorded in [arm64-macos-jit.md](arm64-macos-jit.md).
 - [ ] B4: Linux native baseline/pilot and JIT/WASM/native/profile CI gates;
   scoped Linux rollout. (**BLOCKED-with-green-build**: the Zig build is
   green, but zero behavior checks have run — [b4-gate.md](b4-gate.md).)
-- [ ] B5: Controlled dependency/artifact package and clean-machine floor testing.
+  The merged Mac ARM64 JIT above is not B4 evidence.
+- [ ] B5: Controlled dependency/artifact package and clean-machine floor
+  testing, including the serialized-bytecode GUID rotation (§2.2 B5).
 - [ ] B6: Windows feasibility, then declared-profile parity; further expansions
   approved individually.
 - [ ] Z1: One useful C-ABI integration, **if selected**; further replacements
@@ -632,7 +668,14 @@ review repair (2026-10-31) fixed the CI selftest tally that would have
 kept the first Actions run red (B3 stays CONDITIONAL until that run is
 green), the agent-init-failure spawn hang, host teardown ordering, SCA
 cross-runtime marking, and stale status text; gates re-verified
-unchanged at 2032/2084.
+unchanged at 2032/2084. The ARM64 macOS JIT worktree port then rebased
+onto that checkpoint and merged (2026-10-31, merge `9004b3ed7`, docs
+`56c767e07`): `zig build -Dprofile=jit check` green, interpreted
+2426/397 and dynapogo 2001/286 with every failure the asm.js/WASM Mac
+gap and zero signals, disable_jit 2032/0 on the JIT binary, and the
+2032/2084 no-JIT gates re-verified unchanged after the merge. That
+closure also caught and fixed a wrong-format no-JIT bytecode regen
+(JIT binary had written the nojit headers) before it could ship.
 Merged lanes: S1 public/private instance+static fields and private methods/accessors, S2 arithmetic + BigInt64Array/Uint64Array + collections/
 DataView, S8 resizable ArrayBuffer/transfer + TypedArray tracking, S13
 WeakRef + FinalizationRegistry, and S14 P1/P2/P3/P4/P5/P6/P7
@@ -688,7 +731,8 @@ defect fixed in loop 2), and import attributes + JSON modules
 ([c2-s12-import-attributes.md](c2-s12-import-attributes.md); additive
 JsRT fetch-with-attributes callback, legacy hosts unaffected; two
 loop-2 defects fixed in a user-authorized loop 3; `OP_ImportCallWithOptions`
-JIT lowering owed at B4). The final wave-3 repair cycle then closed the
+JIT lowering still owed — on the merged Mac ARM64 JIT the opcode aborts to
+the interpreter, and native lowering remains follow-up work). The final wave-3 repair cycle then closed the
 10 direct-eval `super` early-error scenarios (merge `ea8f253ac`; lexical
 HomeObject propagation through arrows/eval bodies, full eval-code
 454/0, class-elements 5,888/9 unchanged; legacy fixtures updated to the
@@ -707,7 +751,11 @@ finite timeout and cross-agent suspension remain), moving the gates to
 focused eval-code 454/0, gates unchanged). S8 then landed the bounded
 immutable-ArrayBuffer surface (merge `4ac863379`, receipt
 [c2-s8-immutable.md](c2-s8-immutable.md): focused 84/38 default and
-118/122 flag-on, adjacent +110 fail→pass / 0 pass→fail; JIT/TTD residuals),
+118/122 flag-on, adjacent +110 fail→pass / 0 pass→fail; JIT/TTD residuals —
+post-JIT-merge probe (2026-10-31) shows sloppy indexed stores no-op and
+DataView stores throw identically interpreted and under full JIT, but the
+inlined fast-path audit is still not done, so JIT immutable write safety
+remains unclaimed in general),
 moving the gates to 2022/2074. S3-a then landed Unicode property escapes
 under the `u` flag on ICU 79.1 (merge `1d92d7b37`, receipt
 [c2-s3-property-escapes.md](c2-s3-property-escapes.md): bounded RegExp
@@ -812,10 +860,19 @@ release (RSS A/B and the debug allocation-accounting assert both
 confirm); the deterministic `s6-broadcast-type.js` rlexe entry moved
 the gates to **2032/2084** (dual ACCEPT after repair). All active
 feature/triage
-worktrees are merged; next work items are
-the remaining S8/P-eval residuals, lead-surrogate lacunarity, and the
+worktrees are merged — including, as of 2026-10-31, the ARM64 macOS JIT
+worktree itself. Next work items are
+the remaining S8/P-eval residuals, lead-surrogate lacunarity, the
 C4 qualification work (full baseline rerun, host-reported negative
-phase). Tracked eval residuals: P4 body eval with non-simple
+phase), per-batch test262 runs under SimpleJIT/FullJIT on the merged
+Mac profile, and the JIT follow-ups recorded in
+[arm64-macos-jit.md](arm64-macos-jit.md): eval declaration fidelity from
+JIT frames (so direct-eval callers/eval code can JIT), native lowering
+for the 18 aborting class/private/import opcodes, the
+labeled-break-from-`finally` GlobOpt shape, the S8 immutable
+inlined-store audit, an ARM64 asm.js/WASM port or an explicit reviewed
+platform exclusion, and the B5 bytecode-GUID rotation. Tracked eval
+residuals: P4 body eval with non-simple
 parameters; P2 hidden outer lexical and JSC/Node delete difference.
 S3 (Unicode data decision), S6 default (product/security decision),
 B4 and C4 remain decision- or gate-blocked. A repair loop then closed
@@ -845,8 +902,10 @@ clusters are closed on Mac no-JIT
 [c2-s9-modifiers.md](c2-s9-modifiers.md),
 [c2-s8-float16.md](c2-s8-float16.md),
 [c2-s14-blockscope.md](c2-s14-blockscope.md),
-[c2-s14-statement-early-errors.md](c2-s14-statement-early-errors.md)). JIT
-claims still wait on B4. S14 fixed the `Block : { StatementList }`
+[c2-s14-statement-early-errors.md](c2-s14-statement-early-errors.md)). JIT-wide
+and Linux claims still wait on B4; Mac ARM64 JIT regression evidence for
+these surfaces landed with the 2026-10-31 JIT merge (see the JIT evidence
+update in §4.1), with test262-under-JIT still owed per batch. S14 fixed the `Block : { StatementList }`
 lexical/var early errors (block-scope corpus 167/287 → 287/287, 120/0
 fail→pass) and moved the gates to 1976/2028. S14 sub-batch 2 then closed
 the measured for-head, switch CaseBlock, catch-parameter and unlabelled
@@ -876,8 +935,8 @@ matchAll corpus 132/140; the 8 residue is BigInt/v-flag parse debt
 plus 4 `species-regexp-get-*` scenarios that need the
 `-ES6RegExPrototypeProperties` substrate). The flag stays off by
 default; the batch also regenerated the checked-in nojit bytecode
-headers (three PropertyIds appended; B4 must regenerate the jit
-variants). S9 sub-batch 1 then landed the named-groups core
+headers (three PropertyIds appended; the jit variants were regenerated
+as part of the 2026-10-31 JIT merge). S9 sub-batch 1 then landed the named-groups core
 unconditionally (`(?<name>...)`, `\k<name>`, the `groups` object on
 exec/match results, `$<name>` substitution on both replace paths;
 receipt [c2-s9-namedgroups.md](c2-s9-namedgroups.md)): corpus 158/184
@@ -998,7 +1057,9 @@ Float16Array (S8 remainder), or the S1 tail residuals.
 runner via the preferred path to green in [b4-gate.md](b4-gate.md) §4(a),
 record the legacy then Zig interpreted/dynapogo counts natively, and judge
 behavior/ABI parity only from that native execution — not from emulation
-or cross-linking from Mac.
+or cross-linking from Mac. The merged Mac ARM64 JIT does not substitute
+for this gate; it only retires the "JIT untested anywhere" caveat for the
+Mac profile.
 
 ## Appendix — Evidence and deferred research
 

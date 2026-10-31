@@ -879,12 +879,17 @@ substitution: `ftell` on a FIFO is 0 and an empty script exits 0.
 
 ## 1. Where the work lives
 
+This section records the arrangement while the port was unmerged. Since
+2026-10-31 both trees carry the same code: `modernize/baseline` builds the
+ARM64 backend via `-Dprofile=jit`, and the `jit/arm64-macos` worktree is
+fully contained in it (kept only as the historical development checkout).
+
 | Tree | Path | Branch | Role |
 |---|---|---|---|
-| Modernization checkout | `<modernization-checkout>` | `modernize/baseline` | Interpreter and language features. JIT stays compiled out. |
-| This worktree | `<worktree>` | `jit/arm64-macos` | The only tree that builds the ARM64 backend. |
+| Modernization checkout | `<modernization-checkout>` | `modernize/baseline` | Interpreter and language features. JIT stayed compiled out. |
+| This worktree | `<worktree>` | `jit/arm64-macos` | Was the only tree that built the ARM64 backend. |
 
-Edits for this port go in the worktree only. The modernization checkout has
+Edits for this port went in the worktree only. The modernization checkout has
 carried unrelated uncommitted parser work during this effort; that work is not
 part of the JIT port and is not copied here. The port is committed as
 `07d6965e8`, `2372fcc81`, `9ccc535a8`, `fcbc434c9`, `9e1e4cb55`,

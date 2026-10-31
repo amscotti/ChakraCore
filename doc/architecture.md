@@ -345,4 +345,7 @@ compat layer (`bin/ch/WScriptJsrt.cpp`); GCStress (`bin/GCStress`).
 Supported per `README.md:7`: x64 on Linux/macOS/Windows; x86 and ARM are
 Windows-only (x86/ARM Linux and ARM macOS listed as a future goal). CMake
 also models Android/ARM. ARM64-Linux and ARM64 JIT off Windows carry
-unsupported/non-functional warnings (root `CMakeLists.txt:547-555`).
+unsupported/non-functional warnings in the legacy build (root
+`CMakeLists.txt:547-555`). On this branch, macOS ARM64 JIT is supported
+through the Zig `jit` profile instead (merged 2026-10-31;
+[arm64-macos-jit.md](arm64-macos-jit.md)); ARM64-Linux remains unsupported.

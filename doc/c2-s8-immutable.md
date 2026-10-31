@@ -209,6 +209,13 @@ attached, immutable and byte-identical.
   immutable-buffer check and were not audited or executed. Immutable write
   safety must not be claimed under JIT until B4 adds/validates that fast-path
   check or an invalidation equivalent. B4 also owns Linux evidence.
+  *Update 2026-10-31:* the Mac ARM64 JIT has merged, so this surface now
+  executes under JIT. A focused probe shows sloppy indexed stores no-op
+  and DataView stores throw identically interpreted and under full JIT,
+  and the es7 immutable tests pass under dynapogo — but the inlined
+  fast-path audit is still not done, so this residual stands: JIT
+  immutable write safety remains unclaimed in general until the fast
+  paths are audited or gain an explicit check/invalidation.
 - **`return-immutable.js` host harness limitation.** The pinned test calls
   `$DETACHBUFFER` on a source that `transferToImmutable` already detached. The
   Chakra test262 host implements `$262.detachArrayBuffer` with

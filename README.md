@@ -36,15 +36,18 @@ If you find a security issue in the Master branch of Chakracore but not in 1.11 
 ## Building ChakraCore
 
 > **This branch (`modernize/baseline`)** builds on macOS ARM64 with the Zig
-> 0.17.0 front end pinned in `mise.toml` (shared/no-JIT profiles; see
-> [doc/modernization-plan.md](doc/modernization-plan.md) for status and
-> [doc/README.md](doc/README.md) for the doc index):
+> 0.17.0 front end pinned in `mise.toml` (shared/no-JIT profiles plus the
+> ARM64 macOS `jit` profile merged 2026-10-31; see
+> [doc/modernization-plan.md](doc/modernization-plan.md) for status,
+> [doc/arm64-macos-jit.md](doc/arm64-macos-jit.md) for the JIT record and
+> coverage limits, and [doc/README.md](doc/README.md) for the doc index):
 >
 > ```sh
 > mise exec -- zig build                 # default (test) profile
 > mise exec -- zig build check           # regression + bytecode + native + smoke + metadata gates
 > mise exec -- zig build check -Dprofile=debug-static
 > mise exec -- zig build check -Dprofile=release-shared
+> mise exec -- zig build check -Dprofile=jit   # ARM64 macOS JIT smoke + bytecode gates
 > ```
 >
 > The legacy CMake/MSBuild instructions below remain the reference for the
