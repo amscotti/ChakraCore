@@ -1683,15 +1683,35 @@ JsValueRef __stdcall WScriptJsrt::BroadcastCallback(JsValueRef callee, bool isCo
     HRESULT hr = E_FAIL;
     JsValueRef returnValue = JS_INVALID_REFERENCE;
     JsErrorCode errorCode = JsNoError;
+    LPCWSTR errorMessage = _u("invalid call to WScript.Broadcast");
 
     IfJsrtErrorSetGo(ChakraRTInterface::JsGetUndefinedValue(&returnValue));
 
     if (argumentCount > 1)
     {
+        // Validate the broadcast argument BEFORE signaling any child. On a
+        // non-SharedArrayBuffer the call below fails WITHOUT writing the out
+        // parameter (JsrtCore.cpp returns JsErrorInvalidArgument before the
+        // store), so signaling children anyway — as the old unchecked code
+        // did — made every live child consume a stale/null
+        // threadData->sharedContent handle and crash in its
+        // JsCreateSharedArrayBufferWithSharedContent. Stage the handle in a
+        // local and commit it to threadData->sharedContent only on success,
+        // so a rejected broadcast leaves host state and every child
+        // untouched. A JsErrorFatal (SAB without content) is rejected the
+        // same way: no child may be signaled for unusable content either.
+        JsSharedArrayBufferContentHandle sharedContent = nullptr;
+        if (ChakraRTInterface::JsGetSharedArrayBufferContent(arguments[1], &sharedContent) != JsNoError)
+        {
+            errorCode = JsErrorInvalidArgument;
+            errorMessage = _u("WScript.Broadcast requires a SharedArrayBuffer");
+            goto Error;
+        }
+
         auto& threadData = GetRuntimeThreadLocalData().threadData;
         if (threadData)
         {
-            ChakraRTInterface::JsGetSharedArrayBufferContent(arguments[1], &threadData->sharedContent);
+            threadData->sharedContent = sharedContent;
 
             // Signal every child, then wait for EACH live child to consume
             // the content (its child-side wrapper AddRef'd it) before the
@@ -1746,6 +1766,7 @@ JsValueRef __stdcall WScriptJsrt::BroadcastCallback(JsValueRef callee, bool isCo
     }
 
 Error:
+    SetExceptionIf(errorCode, errorMessage);
     return returnValue;
 }
 
