@@ -4992,6 +4992,15 @@ GlobOpt::ValueNumberDst(IR::Instr **pInstr, Value *src1Val, Value *src2Val)
 
     case Js::OpCode::Not_A:
     {
+        if (CONFIG_FLAG(ESBigInt) && !(src1Val && src1ValueInfo->IsNumber()))
+        {
+            // ValueType has no BigInt bit: ~ on a BigInt produces a BigInt,
+            // so the dst must not be claimed definite int unless the src
+            // is proven numeric. Otherwise a consumer (e.g. an outer ~)
+            // type-specializes against a BigInt var with no bailout.
+            return CreateDstUntransferredValue(ValueType::Uninitialized, instr, src1Val, src2Val);
+        }
+
         if (!src1Val || !src1ValueInfo->GetIntValMinMax(&min1, &max1, this->DoAggressiveIntTypeSpec()))
         {
             min1 = INT32_MIN;
@@ -5009,6 +5018,14 @@ GlobOpt::ValueNumberDst(IR::Instr **pInstr, Value *src1Val, Value *src2Val)
     case Js::OpCode::Shr_A:
     case Js::OpCode::ShrU_A:
     {
+        if (CONFIG_FLAG(ESBigInt) &&
+            !(src1Val && src1ValueInfo->IsNumber() && src2Val && src2ValueInfo->IsNumber()))
+        {
+            // Bitwise ops on BigInts produce BigInts (see Not_A above);
+            // don't claim a definite int/number dst from unproven srcs.
+            return CreateDstUntransferredValue(ValueType::Uninitialized, instr, src1Val, src2Val);
+        }
+
         if (!src1Val || !src1ValueInfo->GetIntValMinMax(&min1, &max1, this->DoAggressiveIntTypeSpec()))
         {
             min1 = INT32_MIN;
@@ -5038,6 +5055,12 @@ GlobOpt::ValueNumberDst(IR::Instr **pInstr, Value *src1Val, Value *src2Val)
     case Js::OpCode::Incr_A:
     case Js::OpCode::Decr_A:
     {
+        if (CONFIG_FLAG(ESBigInt) && !(src1Val && src1ValueInfo->IsNumber()))
+        {
+            // ++/-- on a BigInt produces a BigInt (see Not_A above).
+            return CreateDstUntransferredValue(ValueType::Uninitialized, instr, src1Val, src2Val);
+        }
+
         ValueType valueType;
         if(src1Val)
         {

@@ -28435,9 +28435,18 @@ Lowerer::GenerateSymbolTest(IR::RegOpnd *srcReg, IR::Instr *insertInstr, IR::Lab
 void
 Lowerer::LowerConvNum(IR::Instr *instrLoad, bool noMathFastPath)
 {
+    // Conv_Num is ToNumber (throws on BigInt); Conv_Numeric is ToNumeric
+    // (returns a BigInt unchanged). They share the tagged-int fast path
+    // below but must call different helpers for everything else.
+    const bool isConvNumeric = instrLoad->m_opcode == Js::OpCode::Conv_Numeric;
+    const IR::JnHelperMethod fullHelper =
+        isConvNumeric ? IR::HelperOp_ConvNumeric_Full : IR::HelperOp_ConvNumber_Full;
+    const IR::JnHelperMethod inPlaceHelper =
+        isConvNumeric ? IR::HelperOp_ConvNumericInPlace : IR::HelperOp_ConvNumberInPlace;
+
     if (PHASE_OFF(Js::OtherFastPathPhase, this->m_func) || noMathFastPath || !instrLoad->GetSrc1()->IsRegOpnd())
     {
-        this->LowerUnaryHelperMemWithTemp2(instrLoad, IR_HELPER_OP_FULL_OR_INPLACE(ConvNumber));
+        this->LowerUnaryHelperMemWithTemp2(instrLoad, fullHelper, inPlaceHelper);
         return;
     }
 
@@ -28487,7 +28496,7 @@ Lowerer::LowerConvNum(IR::Instr *instrLoad, bool noMathFastPath)
         {
             instrLoad->InsertAfter(labelDone);
         }
-        this->LowerUnaryHelperMemWithTemp2(instrLoad, IR_HELPER_OP_FULL_OR_INPLACE(ConvNumber));
+        this->LowerUnaryHelperMemWithTemp2(instrLoad, fullHelper, inPlaceHelper);
     }
     else
     {
