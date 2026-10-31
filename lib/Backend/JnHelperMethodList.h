@@ -71,6 +71,8 @@ HELPERCALLCHK(Op_EnsureNoRootProperty, Js::JavascriptOperators::OP_EnsureNoRootP
 HELPERCALLCHK(Op_EnsureNoRootRedeclProperty, Js::JavascriptOperators::OP_EnsureNoRootRedeclProperty, AttrCanThrow | AttrCanNotBeReentrant)
 HELPERCALLCHK(Op_EnsureCanDeclGloFunc, Js::JavascriptOperators::OP_EnsureCanDeclGloFunc, AttrCanThrow | AttrCanNotBeReentrant)
 HELPERCALLCHK(Op_EnsureNoRedeclPropertyScoped, Js::JavascriptOperators::OP_ScopedEnsureNoRedeclProperty, AttrCanThrow | AttrCanNotBeReentrant)
+HELPERCALLCHK(Op_ScopedEnsureCanDeclGloFunc, Js::JavascriptOperators::OP_ScopedEnsureCanDeclGloFunc, AttrCanThrow | AttrCanNotBeReentrant)
+HELPERCALLCHK(Op_ScopedEnsureNoGlobalLexical, Js::JavascriptOperators::OP_ScopedEnsureNoGlobalLexical, AttrCanThrow | AttrCanNotBeReentrant)
 
 HELPERCALLCHK(Op_ToSpreadedFunctionArgument, Js::JavascriptOperators::OP_LdCustomSpreadIteratorList, AttrCanThrow)
 HELPERCALLCHK(Op_ConvObject, Js::JavascriptOperators::ToObject, AttrCanThrow | AttrCanNotBeReentrant)
@@ -179,7 +181,7 @@ HELPERCALLCHK(Op_InitClassMemberGet, Js::JavascriptOperators::OP_InitClassMember
 HELPERCALLCHK(Op_InitClassMemberGetComputedName, Js::JavascriptOperators::OP_InitClassMemberGetComputedName, AttrCanThrow)
 HELPERCALLCHK(Op_InitClassMemberComputedName, Js::JavascriptOperators::OP_InitClassMemberComputedName, AttrCanThrow)
 
-HELPERCALLCHK(Op_InitFuncScoped, Js::JavascriptOperators::OP_InitFuncScoped, AttrCanThrow | AttrCanNotBeReentrant)
+HELPERCALLCHK(Op_InitFuncScoped, Js::JavascriptOperators::OP_InitFuncScoped, AttrCanThrow)
 HELPERCALLCHK(Op_DeleteProperty, Js::JavascriptOperators::OP_DeleteProperty, AttrCanThrow)
 HELPERCALLCHK(Op_DeleteRootProperty, Js::JavascriptOperators::OP_DeleteRootProperty, AttrCanThrow)
 HELPERCALLCHK(Op_DeletePropertyScoped, Js::JavascriptOperators::OP_DeletePropertyScoped, AttrCanThrow)

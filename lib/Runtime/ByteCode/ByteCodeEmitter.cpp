@@ -9631,19 +9631,18 @@ void EmitCallTarget(
                     // HasProperty before Get; the call target load must do
                     // the same for a dynamic/with instance.
                     Js::PropertyIdIndexType propertyIndex = funcInfo->FindOrAddReferencedPropertyId(propertyId);
-                    Js::ByteCodeLabel presentLabel = byteCodeGenerator->Writer()->DefineLabel();
                     Js::ByteCodeLabel missingLabel = byteCodeGenerator->Writer()->DefineLabel();
                     Js::ByteCodeLabel doneLabel = byteCodeGenerator->Writer()->DefineLabel();
-                    byteCodeGenerator->Writer()->BrProperty(Js::OpCode::BrOnHasProperty, presentLabel, *callObjLocation, propertyIndex);
                     // Emit the method load before the missing-binding def
                     // in bytecode order: it is the first def of the call
                     // target temp, and the missing path's def below reuses
                     // that temp sym (LdUndef_ReuseLoc; there is no
                     // LdMethodFld_ReuseLoc). A plain LdUndef emitted first
                     // would make IRBuilder rename the temp at the method
-                    // load and orphan the missing path's def.
-                    byteCodeGenerator->Writer()->Br(missingLabel);
-                    byteCodeGenerator->Writer()->MarkLabel(presentLabel);
+                    // load and orphan the missing path's def. BrOnNoProperty
+                    // (same HasProperty probe, inverted sense) keeps the
+                    // method load on the fallthrough path.
+                    byteCodeGenerator->Writer()->BrProperty(Js::OpCode::BrOnNoProperty, missingLabel, *callObjLocation, propertyIndex);
                     EmitMethodFld(pnodeNameTarget, *callObjLocation, propertyId, byteCodeGenerator, funcInfo);
                     byteCodeGenerator->Writer()->Br(doneLabel);
                     byteCodeGenerator->Writer()->MarkLabel(missingLabel);

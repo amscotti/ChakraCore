@@ -559,6 +559,14 @@ SCCLiveness::ProcessStackSymUse(StackSym * stackSym, IR::Instr * instr, int usag
 
     if (lifetime == nullptr)
     {
+        // A bailout-referenced sym can legitimately have no lifetime when
+        // GlobOpt eliminated or copy-propagated its only def on some
+        // paths (reachable with the baseline GetBindingValue probe
+        // shapes in inlined with-scope call loads). Upstream this hit
+        // AnalysisAssertMsg and then dereferenced the null lifetime in
+        // optimized builds. Abort this codegen attempt instead; the
+        // function stays interpreted.
+        throw Js::OperationAbortedException();
 #if DBG
         char16 debugStringBuffer[MAX_FUNCTION_BODY_DEBUG_STRING_SIZE];
         Output::Print(_u("Function: %s (%s)       "), this->func->GetJITFunctionBody()->GetDisplayName(), this->func->GetDebugNumberSet(debugStringBuffer));
