@@ -751,17 +751,110 @@ Both reviewers **ACCEPTED** with zero `[bug]` findings.
   fail-then-4-successes script; both gates **PASS 2031/0 and 2083/0**
   (flake not reproducible under deliberate 8-spinner load, 209/209 ×5
   per leg on the DebuggerCommon folder).
-- **New pre-existing defect found (card filed)**: `WScript.Broadcast`
+- **New pre-existing defect found (card filed)**: ~~`WScript.Broadcast`
   SIGSEGVs (100% repro, N=1..200, identical pre-fix base and post-fix)
   when passed a non-SharedArrayBuffer (e.g. an `Int32Array` view)
   instead of throwing — host-robustness card: validate the broadcast
-  argument type. Also filed as a low-priority infra note: the
+  argument type~~ **Fixed** by the host-broadcast-type follow-up below
+  (diagnosis `56849176f`, fix `91f4db697`). Also filed as a low-priority infra note: the
   debug-profile PAL thread-priority `ASSERT` print can leak into
   baseline output under extreme load (both classified pre-existing by
   the reviewers).
 - Folded nits: README stale error string and copied-binary dylib note;
   `failthreads.c` single-spawning-thread counter caveat; gate-log
   retention note (reviewer reruns substantiate the in-receipt numbers).
+
+### Follow-up: host-broadcast-type — `WScript.Broadcast(non-SAB)` crashed live agents
+
+Status: diagnosis `56849176f`, fix `91f4db697`, receipt (this
+section), branch `host-broadcast-type` (base `78376e684` = main, gates
+2031/2083 → 2032/2084). Retires the card filed in the review outcome
+above.
+
+Root cause: `BroadcastCallback` passed `arguments[1]` to
+`JsGetSharedArrayBufferContent(..., &threadData->sharedContent)`
+without checking the return value. On a non-SAB the engine returns
+`JsErrorInvalidArgument` **without writing the out parameter**
+(`JsrtCore.cpp`: the `VarIs<SharedArrayBuffer>` check returns before
+the store), so `sharedContent` kept its prior value — `nullptr` (the
+`RuntimeThreadData` constructor) on the first broadcast, or a stale
+already-released handle after an earlier valid broadcast (the parent
+releases the handle after the all-children handshake). The callback
+then signaled every child anyway, and each live child consumed the
+handle: `JsCreateSharedArrayBufferWithSharedContent(parent->
+sharedContent, ...)` dereferences it (`CreateSharedArrayBuffer(
+(SharedContents*)h)` then `->MarkCrossRuntime()`) — SIGSEGV in the
+child, before the caller's `try/catch` could print anything. Without
+live children the failed call silently returned `undefined` (also
+wrong, non-fatal). `$262.agent.broadcast` **is** `WScript.Broadcast`
+(`bin/ch/262.js`), so both script entry points share this one
+callback and the fix covers both.
+
+Design (host-side only, ~20 lines): validate **before** signaling.
+The content handle is staged in a local and committed to
+`threadData->sharedContent` only on `JsNoError`; any failure (non-SAB
+→ `JsErrorInvalidArgument`; SAB-without-content → `JsErrorFatal`) is
+rejected with `JsErrorInvalidArgument` + "WScript.Broadcast requires
+a SharedArrayBuffer" through this function's existing
+`errorCode`/`errorMessage`/`SetExceptionIf` path — the same
+script-catchable bad-argument shape every sibling `WScript` callback
+already uses (`ChakraRTInterface` has no `JsCreateTypeError` hook;
+adding one would grow the change beyond host-robustness). On the
+failure path no child is signaled, nothing is written to
+`sharedContent`, and no handle is released.
+
+Ownership record (memory-management): **no ownership changes** — pure
+argument validation. The content handle's protocol is untouched:
+success = local staging → commit to `threadData->sharedContent` →
+child wrappers AddRef → parent releases after the all-children
+handshake (all pre-existing); failure = no handle acquired at all
+(the API writes nothing on failure, verified from source), and
+`sharedContent` keeping its prior value stays safe precisely because
+no child is signaled — children read the field only after a signal,
+and the next successful broadcast overwrites it first. Allocation
+domains, thread rules and release authority are all unchanged.
+
+Evidence: Mac ARM64, test profile (`zig-out/bin/ch`) and debug-static
+(`out/debug-static/bin/ch`); driver `tools/host-broadcast-type/
+drive.sh` (classifies SIGSEGV vs clean catchable throw), reproducer
+`repro.js` (the card's, verbatim). Binaries (SHA-256): pre-fix test
+`1a1b6fdf…5c64`, pre-fix debug `519ee87a…f3a8` (base `78376e684`);
+post-fix test `4b7b18d0…d9a`, post-fix debug `a2c1b049…d77` (fix
+`91f4db697`).
+
+| Leg | Binary | Runs | Result |
+|---|---|---|---|
+| Pre-fix test | base `78376e684` | 10 (+5) | **15/15 SIGSEGV** (rc=139), no output |
+| Pre-fix debug | base `78376e684` | 10 (+5) | **15/15 SIGSEGV** (rc=139), no output |
+| Post-fix test | fix `91f4db697` | 20 | **20/20 clean throw + survived**, exit 0 |
+| Post-fix debug | fix `91f4db697` | 20 | **20/20 clean throw + survived**, exit 0 |
+
+Post-fix runs print `threw: Error: WScript.Broadcast requires a
+SharedArrayBuffer` then `survived`. Valid-broadcast regression:
+agents100 (`tools/host-exit-join/`) 20/20 clean test, 10/10 clean
+debug. Focused S6e suite plus the new entry: **8/8 test, 8/8 debug**
+(`runtests.py -t|-d --variants=disable_jit`). Gates: test **PASS
+2032/0**, debug **PASS 2084/0** — pins bumped 2031/2083 → 2032/2084
+in `tools/build/gate_counts.json` (lineage: "The host-broadcast-type
+repair added s6-broadcast-type.js"; first pin bump since the S6e
+landing).
+
+In-gate negative coverage (`test/es7/s6-broadcast-type.js`, ~1 s,
+deterministic — unlike the spawn-check card this defect needs no
+resource limits): six non-SAB argument shapes throw a catchable Error
+naming SharedArrayBuffer, the live agent was **not** signaled (SAB
+contents untouched), and a subsequent valid broadcast is still
+consumed with the agent live (`got 1`).
+
+Residual (host-broadcast-type): `WScript.Broadcast()` with no
+argument still silently returns `undefined` (unchanged, consistent
+with `ReceiveBroadcast`/`Report`); a SAB whose content handle was
+already released through separate API misuse is not additionally
+defended (engine-side concern); `ch` profiles without
+`-Test262`/`-ESSharedArrayBuffer` never reach this path. Process
+note: the gate-lock wrapper's `exec` drops its EXIT trap, so every
+acquisition leaks the lock dir — the reclaim protocol (no live
+zig/runtests/test262 → `rmdir`) is what all lanes actually rely on.
 
 ## Scope
 
