@@ -276,6 +276,7 @@ private:
     IR::Instr *     LowerBrCMem(IR::Instr * instr, IR::JnHelperMethod helperMethod, bool noMathFastPath, bool isHelper = true);
     IR::Instr *     LowerBrFncApply(IR::Instr * instr, IR::JnHelperMethod helperMethod);
     IR::Instr *     LowerBrProperty(IR::Instr * instr, IR::JnHelperMethod helperMethod);
+    IR::Instr *     LowerDeadBrOnHasProperty(IR::Instr * instr);
     IR::Instr *     LowerBrOnClassConstructor(IR::Instr *instr, IR::JnHelperMethod helperMethod);
     IR::Instr*      LowerMultiBr(IR::Instr * instr, IR::JnHelperMethod helperMethod);
     IR::Instr*      LowerMultiBr(IR::Instr * instr);

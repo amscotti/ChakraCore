@@ -2808,7 +2808,7 @@ Lowerer::LowerRange(IR::Instr *instrStart, IR::Instr *instrEnd, bool defaultDoFa
             break;
 
         case Js::OpCode::DeadBrOnHasProperty:
-            this->LowerUnaryHelperMem(instr, IR::HelperOp_HasProperty);
+            this->LowerDeadBrOnHasProperty(instr);
             break;
 
         case Js::OpCode::DeletedNonHelperBranch:
@@ -10843,6 +10843,37 @@ Lowerer::LowerBrFncApply(IR::Instr * instr, IR::JnHelperMethod helperMethod) {
 /// Lowerer::LowerBrProperty - lower branch-on-has/no-property
 ///
 ///----------------------------------------------------------------------------
+IR::Instr *
+Lowerer::LowerDeadBrOnHasProperty(IR::Instr * instr)
+{
+    // The branch was dead (target is the next instruction), but the
+    // HasProperty probe must still run for its observable side effects
+    // (e.g. proxy "has" traps from the captured-base PutValue probe).
+    // Src1 is a property sym opnd, so it must be passed as
+    // (instance, propertyId) like LowerBrProperty does; the generic unary
+    // helper path would queue the sym opnd itself as a single argument.
+    IR::Instr * instrPrev;
+    IR::Instr * instrCall;
+    IR::Opnd *  opndSrc;
+    IR::Opnd *  opndDst;
+
+    opndSrc = instr->UnlinkSrc1();
+    AssertMsg(opndSrc->IsSymOpnd() && opndSrc->AsSymOpnd()->m_sym->IsPropertySym(),
+              "Expected propertySym as src of DeadBrOnHasProperty");
+
+    instrPrev = LoadScriptContext(instr);
+    this->LoadPropertySymAsArgument(instr, opndSrc);
+
+    opndDst = IR::RegOpnd::New(StackSym::New(TyMachReg, this->m_func), TyMachReg, this->m_func);
+    instrCall = IR::Instr::New(Js::OpCode::Call, opndDst, IR::HelperCallOpnd::New(IR::HelperOp_HasProperty, this->m_func), this->m_func);
+
+    instr->InsertBefore(instrCall);
+    instrCall = m_lowererMD.LowerCall(instrCall, 0);
+
+    instr->Remove();
+    return instrPrev;
+}
+
 IR::Instr *
 Lowerer::LowerBrProperty(IR::Instr * instr, IR::JnHelperMethod helper)
 {
