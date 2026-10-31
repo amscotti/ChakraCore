@@ -6733,6 +6733,18 @@ IRBuilder::BuildProfiled2CallIExtended(Js::OpCode opcode, uint32 offset, Js::Reg
 IR::Instr *
 IRBuilder::BuildCallI_Helper(Js::OpCode newOpcode, uint32 offset, Js::RegSlot dstRegSlot, Js::RegSlot Src1RegSlot, Js::ArgSlot ArgCount, Js::ProfileId profileId, Js::CallFlags flags, Js::InlineCacheIndex inlineCacheIndex)
 {
+    // Direct eval inside parameter defaults (before BeginBodyScope in a
+    // non-merged param scope): EvalDeclarationInstantiation must check
+    // the parameter environment (baseline S14, e.g. `var arguments` is a
+    // SyntaxError there), but the frame display reconstructed from a
+    // JIT frame does not carry the parameter scope faithfully, so the
+    // eval silently targets the body var environment. Keep such
+    // functions interpreted.
+    if (flags == Js::CallFlags::CallFlags_ExtraArg && !this->IsParamScopeDone())
+    {
+        throw Js::OperationAbortedException();
+    }
+
     IR::Instr * instr;
     IR::RegOpnd *   dstOpnd;
     IR::RegOpnd *   src1Opnd;

@@ -621,6 +621,28 @@ namespace Js
             ZeroMemory(this->bufferContent->GetBuffer() + oldByteLength, newByteLength - oldByteLength);
         }
         this->bufferLength = newByteLength;
+
+        // TypedArray views cache their effective length in the
+        // ArrayObject length field (read directly by JIT inline caches
+        // and bounds checks); refresh it for every live view.
+        auto refreshView = [](ArrayBufferParent* parent)
+        {
+            if (parent != nullptr && TypedArrayBase::Is(JavascriptOperators::GetTypeId(parent)))
+            {
+                UnsafeVarTo<TypedArrayBase>(parent)->RefreshEffectiveLength();
+            }
+        };
+        if (this->primaryParent != nullptr)
+        {
+            refreshView(this->primaryParent->Get());
+        }
+        if (this->otherParents != nullptr)
+        {
+            this->otherParents->Map([&](RecyclerWeakReference<ArrayBufferParent>* item)
+            {
+                refreshView(item->Get());
+            });
+        }
     }
 
     // ArrayBuffer.prototype.resize ( newLength )

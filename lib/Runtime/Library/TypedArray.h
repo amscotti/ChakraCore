@@ -198,7 +198,14 @@ namespace Js
             {
                 return availableLength;
             }
-            return length <= availableLength ? length : 0;
+            return capturedLength <= availableLength ? capturedLength : 0;
+        }
+
+        // Keep the ArrayObject length field equal to GetLength() after a
+        // buffer resize (see capturedLength above).
+        void RefreshEffectiveLength()
+        {
+            this->length = GetLength();
         }
 
         bool IsOutOfBounds() const
@@ -208,7 +215,7 @@ namespace Js
             {
                 return true;
             }
-            return !lengthTracking && length > (bufferByteLength - byteOffset) / BYTES_PER_ELEMENT;
+            return !lengthTracking && capturedLength > (bufferByteLength - byteOffset) / BYTES_PER_ELEMENT;
         }
 
         uint32 GetByteLength() const { return GetLength() * BYTES_PER_ELEMENT; }
@@ -267,6 +274,13 @@ namespace Js
         Field(uint32) byteOffset;
         FieldNoBarrier(BYTE*) buffer;   // beginning of mapped array.
         Field(bool) lengthTracking;     // No explicit length: follow the buffer
+        // Explicit length captured at construction (fixed views only).
+        // The inherited ArrayObject length field always holds the
+        // *effective* length instead: ArrayBuffer::Resize refreshes it
+        // (RefreshEffectiveLength) so direct field readers - notably
+        // JIT inline-cache length loads and bounds checks, which read
+        // the field without calling GetLength - observe current values.
+        Field(uint32) capturedLength;
 
     public:
         static uint32 GetOffsetOfBuffer()  { return offsetof(TypedArrayBase, buffer); }
