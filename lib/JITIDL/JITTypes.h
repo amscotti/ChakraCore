@@ -70,7 +70,10 @@ typedef unsigned char boolean;
 #define __JITTypes_h__
 
 // TODO: OOP JIT, how do we make this better?
-const int VTABLE_COUNT = 60;
+// Must equal VTableValue::Count (BackendApi.h); 61 since C2-S8 added
+// VtableFloat16Array. The no-JIT baseline never compiles the asserting
+// TU (ScriptContext.cpp), so the drift only surfaced in JIT builds.
+const int VTABLE_COUNT = 61;
 const int EQUIVALENT_TYPE_CACHE_SIZE = 8;
 
 typedef IDL_DEF([context_handle]) void * PTHREADCONTEXT_HANDLE;
