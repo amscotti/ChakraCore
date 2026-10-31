@@ -4952,6 +4952,18 @@ BasicBlock::MergePredBlocksValueMaps(GlobOpt* globOpt)
 
             Assert(pred->GetDataUseCount());
 
+            if (pred->globOptData.globOpt == nullptr)
+            {
+                // This predecessor was never visited by GlobOpt, so its
+                // block data (value maps, live fields) does not exist.
+                // A labeled break out of a finally can produce such an
+                // edge through a finally-clone block that is reachable
+                // only from a landing pad. Abort JIT for this function
+                // (it stays interpreted) instead of dereferencing the
+                // uninitialized block data in Clone/MergeBlockData below.
+                throw Js::OperationAbortedException();
+            }
+
             // First pred?
             if (blockData.symToValueMap == nullptr)
             {

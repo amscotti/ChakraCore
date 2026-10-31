@@ -332,6 +332,17 @@ IRBuilder::AddEnvOpndForInnerFrameDisplay(IR::Instr *instr, uint offset)
 void
 IRBuilder::Build()
 {
+    // Eval script functions: baseline S14 declaration instantiation
+    // (EnsureNo*Redecl* / scoped global-lexical checks) reads scope
+    // objects and slot arrays whose JIT materialization does not match
+    // the interpreter's, producing wrong redeclaration verdicts both
+    // ways. Keep eval code interpreted for now (see the direct-eval
+    // guard in BuildCallI_Helper).
+    if (m_func->GetJITFunctionBody()->IsEval())
+    {
+        throw Js::OperationAbortedException();
+    }
+
     m_funcAlloc = m_func->m_alloc;
 
 
@@ -694,6 +705,37 @@ IRBuilder::Build()
         }
 #endif
         AssertOrFailFastMsg(Js::OpCodeUtil::IsValidByteCodeOpcode(newOpcode), "Error getting opcode from m_jnReader.Op()");
+
+        switch (newOpcode)
+        {
+        // Baseline class-fields/private-name/import-attributes opcodes
+        // (C2-S1/S12) have no ARM64 backend lowering yet; the per-layout
+        // builders below Fatal() on them. Abort this codegen attempt so
+        // the function stays interpreted (formally out of JIT coverage,
+        // like asm.js/WASM) instead of crashing the process. Porting
+        // these lowerings is tracked in doc/arm64-macos-jit.md.
+        case Js::OpCode::HasPrivateField:
+        case Js::OpCode::ImportCallWithOptions:
+        case Js::OpCode::InitClassField:
+        case Js::OpCode::InitClassFieldComputedName:
+        case Js::OpCode::InitPrivateField:
+        case Js::OpCode::InitPrivateMethod:
+        case Js::OpCode::InitStaticPrivateField:
+        case Js::OpCode::LdPrivateAccessor:
+        case Js::OpCode::LdPrivateBrand:
+        case Js::OpCode::LdPrivateDynamic:
+        case Js::OpCode::LdPrivateField:
+        case Js::OpCode::LdPrivateMethod:
+        case Js::OpCode::NewPrivateName:
+        case Js::OpCode::SetPrivateDefinition:
+        case Js::OpCode::StPrivateAccessor:
+        case Js::OpCode::StPrivateDynamic:
+        case Js::OpCode::StPrivateField:
+        case Js::OpCode::StPrivateMethod:
+            throw Js::OperationAbortedException();
+        default:
+            break;
+        }
 
         uint layoutAndSize = layoutSize * Js::OpLayoutType::Count + Js::OpCodeUtil::GetOpCodeLayout(newOpcode);
         switch(layoutAndSize)
@@ -1614,6 +1656,9 @@ IRBuilder::BuildReg1(Js::OpCode newOpcode, uint32 offset, Js::RegSlot R0)
             break;
         }
 
+    case Js::OpCode::LdUndef_ReuseLoc:
+        reuseLoc = true;
+        // fall through
     case Js::OpCode::LdUndef:
         {
             const auto addrOpnd = IR::AddrOpnd::New(m_func->GetScriptContextInfo()->GetUndefinedAddr(), IR::AddrOpndKindDynamicVar, m_func, true);
@@ -2928,6 +2973,15 @@ IRBuilder::BuildUnsigned1(Js::OpCode newOpcode, uint32 offset, uint32 num)
         {
             // The reg and constant are both src operands.
             IR::Instr* instr = IR::Instr::New(Js::OpCode::InvalCachedScope, m_func);
+            // Baseline private-brand env loads can reach env access in a
+            // function whose binding never requested an env register
+            // (the interpreter reads the display from the closure).
+            // The backend has no way to address the environment then;
+            // abort codegen instead of building a NoRegister operand.
+            if (m_func->GetJITFunctionBody()->GetEnvReg() == Js::Constants::NoRegister)
+            {
+                throw Js::OperationAbortedException();
+            }
             IR::RegOpnd *envOpnd = this->BuildSrcOpnd(m_func->GetJITFunctionBody()->GetEnvReg());
             instr->SetSrc1(envOpnd);
             IR::IntConstOpnd *envIndex = IR::IntConstOpnd::New(num, TyInt32, m_func, true);
@@ -3863,6 +3917,10 @@ IRBuilder::BuildElementSlotI1(Js::OpCode newOpcode, uint32 offset, Js::RegSlot r
             reuseLoc = true;
             // fall through
         case Js::OpCode::LdEnvObj:
+            if (this->GetEnvReg() == Js::Constants::NoRegister)
+            {
+                throw Js::OperationAbortedException();
+            }
             fieldOpnd = this->BuildFieldOpnd(Js::OpCode::LdSlotArr, this->GetEnvReg(), slotId, (Js::PropertyIdIndexType)-1, PropertyKindSlotArray);
             regOpnd = this->BuildDstOpnd(regSlot, TyVar, false, reuseLoc);
             instr = IR::Instr::New(Js::OpCode::LdSlotArr, regOpnd, fieldOpnd, m_func);
@@ -4045,6 +4103,10 @@ IRBuilder::BuildElementSlotI2(Js::OpCode newOpcode, uint32 offset, Js::RegSlot r
         case Js::OpCode::StEnvObjSlot:
         case Js::OpCode::StEnvObjSlotChkUndecl:
 
+            if (this->GetEnvReg() == Js::Constants::NoRegister)
+            {
+                throw Js::OperationAbortedException();
+            }
             fieldOpnd = this->BuildFieldOpnd(Js::OpCode::LdSlotArr, this->GetEnvReg(), slotId1, (Js::PropertyIdIndexType)-1, PropertyKindSlotArray);
             regOpnd = IR::RegOpnd::New(TyVar, m_func);
             instr = IR::Instr::New(Js::OpCode::LdSlotArr, regOpnd, fieldOpnd, m_func);
@@ -5062,6 +5124,10 @@ IRBuilder::BuildElementScopedU(Js::OpCode newOpcode, uint32 offset)
     Assert(!OpCodeAttr::IsProfiledOp(newOpcode));
     Assert(OpCodeAttr::HasMultiSizeLayout(newOpcode));
     auto layout = m_jnReader.GetLayout<Js::OpLayoutT_ElementScopedU<SizePolicy>>();
+    if (GetEnvReg() == Js::Constants::NoRegister)
+    {
+        throw Js::OperationAbortedException();
+    }
     BuildElementU(newOpcode, offset, GetEnvReg(), layout->PropertyIdIndex);
 }
 
@@ -6678,6 +6744,32 @@ IRBuilder::BuildProfiled2CallIExtended(Js::OpCode opcode, uint32 offset, Js::Reg
 IR::Instr *
 IRBuilder::BuildCallI_Helper(Js::OpCode newOpcode, uint32 offset, Js::RegSlot dstRegSlot, Js::RegSlot Src1RegSlot, Js::ArgSlot ArgCount, Js::ProfileId profileId, Js::CallFlags flags, Js::InlineCacheIndex inlineCacheIndex)
 {
+    // Direct eval: baseline S14 EvalDeclarationInstantiation consults
+    // the caller's frame display and scope slot arrays (parameter
+    // environment for defaults, lexical block scopes, global lexical
+    // declarations). The display reconstructed from a JIT frame does
+    // not carry those scopes faithfully - e.g. `var arguments` in a
+    // parameter default silently succeeded, and indirect eval after
+    // global block `let` declarations falsely reported redeclaration.
+    // Keep functions containing direct eval interpreted until eval
+    // declaration fidelity from JIT frames is ported. (CallFlags_
+    // ExtraArg alone is this backend's direct-eval marker; see the
+    // CallIEval conversions in the call-flag builders above.)
+    if ((flags & Js::CallFlags::CallFlags_Eval) != 0 ||
+        flags == Js::CallFlags::CallFlags_ExtraArg || newOpcode == Js::OpCode::CallIEval)
+    {
+#ifdef PERF_HINT
+        // Lowering would have written this hint for the CallIEval; the
+        // abort keeps the function interpreted, which is exactly what
+        // the hint reports, so emit it here instead.
+        if (PHASE_TRACE1(Js::PerfHintPhase))
+        {
+            WritePerfHint(PerfHints::CallsEval, this->m_func, offset);
+        }
+#endif
+        throw Js::OperationAbortedException();
+    }
+
     IR::Instr * instr;
     IR::RegOpnd *   dstOpnd;
     IR::RegOpnd *   src1Opnd;
@@ -7467,6 +7559,10 @@ IRBuilder::BuildBrEnvProperty(Js::OpCode newOpcode, uint32 offset)
     IR::SymOpnd *fieldOpnd;
     PropertySym *fieldSym;
 
+    if (this->GetEnvReg() == Js::Constants::NoRegister)
+    {
+        throw Js::OperationAbortedException();
+    }
     fieldOpnd = this->BuildFieldOpnd(Js::OpCode::LdSlotArr, this->GetEnvReg(), branchInsn->SlotIndex, (Js::PropertyIdIndexType)-1, PropertyKindSlotArray);
     regOpnd = IR::RegOpnd::New(TyVar, m_func);
     instr = IR::Instr::New(Js::OpCode::LdSlotArr, regOpnd, fieldOpnd, m_func);

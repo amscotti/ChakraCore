@@ -31,6 +31,7 @@ enum BucketId
     Bucket1024,
     Bucket2048,
     Bucket4096,
+    Bucket16384,
     LargeObjectList,
     NumBuckets
 };
@@ -53,7 +54,10 @@ struct Page
 
     bool IsEmpty()
     {
-        return freeBitVector.IsFull();
+        // A page tracks exactly ChunkCount chunks. The remaining bits of a
+        // 64-bit BVUnit are never initialized or set on the 4 KiB/32-chunk
+        // targets, so IsFull() (all bits set) cannot be used here.
+        return freeBitVector.Count() == ChunkCount;
     }
 
     bool CanAllocate(BucketId targetBucket)
@@ -65,17 +69,33 @@ struct Page
       address(address),
       segment(segment),
       currentBucket(bucket),
-      freeBitVector(0xFFFFFFFF),
+      freeBitVector(0),
     isDecommitted(false),
     inFullList(false)
     {
+        // Set exactly the tracked chunks. The vector is 64 bits wide on
+        // TARGET_64 even when only 32 chunks are tracked, so a raw all-ones
+        // initializer would misreport the empty-page chunk count there.
+        freeBitVector.SetRange(0, ChunkCount);
+        Assert(freeBitVector.Count() == ChunkCount);
     }
 
-    // Each bit in the bit vector corresponds to 128 bytes of memory
-    // This implies that 128 bytes is the smallest allocation possible
+    // Each bit in the bit vector corresponds to Alignment bytes of memory.
+    // This implies that Alignment is the smallest allocation possible.
+    //
+    // Apple ARM64 host pages are 16 KiB. Cover the whole host page so the
+    // allocator does not waste 12 KiB of every page and a 16 KiB request is a
+    // page-sized small allocation rather than a large-object allocation.
+    // Every other target keeps the historical 4 KiB logical page.
+#if defined(__APPLE__) && defined(_M_ARM64) && defined(TARGET_64)
+    static const uint MaxAllocationSize = 16384;
+    static const uint sizePerBit = 256; // MaxAllocationSize / 64 chunks
+#else
     static const uint MaxAllocationSize = 4096;
-    static const uint sizePerBit = MaxAllocationSize / 32; // pagesize / freeBitVector bit count
-    static const uint Alignment = sizePerBit; // 128
+    static const uint sizePerBit = 128; // MaxAllocationSize / 32 chunks
+#endif
+    static const uint Alignment = sizePerBit;
+    static const uint ChunkCount = MaxAllocationSize / Alignment;
 };
 
 struct Allocation

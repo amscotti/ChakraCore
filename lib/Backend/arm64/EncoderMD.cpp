@@ -1511,11 +1511,26 @@ EncoderMD::BaseAndOffsetFromSym(IR::SymOpnd *symOpnd, RegNum *pBaseReg, int32 *p
     if (stackSym->IsParamSlotSym())
     {
         offset += func->m_localStackHeight + func->m_ArgumentsOffset;
+#if defined(__APPLE__)
+        // Slots 0-7 are the homed registers. Later slots are in the caller's
+        // argv image, which begins at [incoming_sp + 8*8] rather than at
+        // [incoming_sp].
+        if ((stackSym->m_offset + symOpnd->m_offset) >= (int32)(NUM_INT_ARG_REGS * MachRegInt))
+        {
+            offset += NUM_INT_ARG_REGS * MachRegInt;
+        }
+#endif
         if (!EncoderMD::CanEncodeLoadStoreOffset(offset))
         {
             // Use the frame pointer. No need to hoist an offset for a param.
             baseReg = FRAME_REG;
             offset = stackSym->m_offset + symOpnd->m_offset - (Js::JavascriptFunctionArgIndex_Frame * MachRegInt);
+#if defined(__APPLE__)
+            if ((stackSym->m_offset + symOpnd->m_offset) >= (int32)(NUM_INT_ARG_REGS * MachRegInt))
+            {
+                offset += NUM_INT_ARG_REGS * MachRegInt;
+            }
+#endif
             Assert(EncoderMD::CanEncodeLoadStoreOffset(offset));
         }
     }

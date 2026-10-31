@@ -35,6 +35,9 @@ Abstract:
 #include <string.h>
 #include <unistd.h>
 #include <limits.h>
+#if defined(__APPLE__) && defined(_M_ARM64)
+#include <pthread.h>
+#endif
 
 #if HAVE_VM_ALLOCATE
 #include <mach/vm_map.h>
@@ -108,7 +111,8 @@ Function:
 static LPVOID ReserveVirtualMemory(
                IN CPalThread *pthrCurrent, /* Currently executing thread */
                IN LPVOID lpAddress,        /* Region to reserve or commit */
-               IN SIZE_T dwSize);          /* Size of Region */
+               IN SIZE_T dwSize,           /* Size of Region */
+               IN BOOL jitRegion);         /* Create the mapping with MAP_JIT */
 
 /*++
 Function:
@@ -162,6 +166,9 @@ void VIRTUALCleanup()
               pEntry->startBoundary );
         InternalFree(pEntry->pAllocState);
         InternalFree(pEntry->pProtectionState );
+#if defined(__APPLE__) && defined(_M_ARM64)
+        InternalFree(pEntry->pJitState );
+#endif
 #if MMAP_DOESNOT_ALLOW_REMAP
         InternalFree(pEntry->pDirtyPages );
 #endif
@@ -200,6 +207,26 @@ void VIRTUALCleanup()
 
     TRACE( "Deleting the Virtual Critical Sections. \n" );
     DeleteCriticalSection( &virtual_critsec );
+}
+
+/***
+ *
+ *  VIRTUALJitWriteProtect()
+ *          Apple ARM64 MAP_JIT pages are writable only from a thread that has
+ *          called pthread_jit_write_protect_np(0). The state is per thread;
+ *          other threads keep executing the same page. Every other platform
+ *          has no equivalent state and this is a no-op.
+ */
+BOOL
+PALAPI
+VIRTUALJitWriteProtect( IN BOOL writeable )
+{
+#if defined(__APPLE__) && defined(_M_ARM64)
+    pthread_jit_write_protect_np(writeable ? 0 : 1);
+#else
+    UNREFERENCED_PARAMETER(writeable);
+#endif
+    return TRUE;
 }
 
 /***
@@ -459,6 +486,53 @@ static BOOL VIRTUALSetPageBits ( UINT nStatus, SIZE_T nStartingBit,
     return TRUE;
 }
 
+#if defined(__APPLE__) && defined(_M_ARM64)
+/****
+ *
+ * VIRTUALIsJitPageMapped
+ *
+ *  IN SIZE_T nBitToRetrieve - Which page to check.
+ *
+ *  Returns TRUE if the page has already been mprotected
+ *  PROT_READ|PROT_WRITE|PROT_EXEC. That transition is one-way for a MAP_JIT
+ *  mapping on Apple Silicon: a second mprotect, including PROT_NONE, fails
+ *  with EACCES (13).
+ *
+ */
+static BOOL VIRTUALIsJitPageMapped( SIZE_T nBitToRetrieve, CONST PCMI pInformation )
+{
+    SIZE_T nByteOffset = 0;
+    UINT nBitOffset = 0;
+
+    if ( !pInformation || !pInformation->pJitState )
+    {
+        return FALSE;
+    }
+
+    nByteOffset = nBitToRetrieve / CHAR_BIT;
+    nBitOffset = nBitToRetrieve % CHAR_BIT;
+
+    return ( pInformation->pJitState[ nByteOffset ] & (1 << nBitOffset) ) != 0;
+}
+
+/****
+ *
+ * VIRTUALSetJitPageMapped
+ *
+ *  Mark a range of pages as already mprotected RWX.
+ *
+ */
+static BOOL VIRTUALSetJitPageMapped( SIZE_T nStartingBit, SIZE_T nNumberOfBits, PCMI pInformation )
+{
+    if ( !pInformation || !pInformation->pJitState )
+    {
+        return FALSE;
+    }
+
+    return VIRTUALSetPageBits( 1, nStartingBit, nNumberOfBits, pInformation->pJitState );
+}
+#endif // defined(__APPLE__) && defined(_M_ARM64)
+
 /****
  *
  * VIRTUALSetAllocState
@@ -651,6 +725,11 @@ static BOOL VIRTUALReleaseMemory( PCMI pMemoryToBeReleased )
     InternalFree( pMemoryToBeReleased->pProtectionState );
     pMemoryToBeReleased->pProtectionState = NULL;
 
+#if defined(__APPLE__) && defined(_M_ARM64)
+    InternalFree( pMemoryToBeReleased->pJitState );
+    pMemoryToBeReleased->pJitState = NULL;
+#endif
+
 #if MMAP_DOESNOT_ALLOW_REMAP
     InternalFree( pMemoryToBeReleased->pDirtyPages );
     pMemoryToBeReleased->pDirtyPages = NULL;
@@ -752,7 +831,8 @@ static BOOL VIRTUALStoreAllocationInfo(
             IN UINT_PTR startBoundary,      /* Start of the region. */
             IN SIZE_T memSize,            /* Size of the region. */
             IN DWORD flAllocationType,  /* Allocation Types. */
-            IN DWORD flProtection )     /* Protections flags on the memory. */
+            IN DWORD flProtection,      /* Protections flags on the memory. */
+            IN BOOL jitRegion)          /* Apple ARM64 MAP_JIT region. */
 {
     PCMI pNewEntry       = NULL;
     PCMI pMemInfo        = NULL;
@@ -777,6 +857,7 @@ static BOOL VIRTUALStoreAllocationInfo(
     pNewEntry->memSize          = memSize;
     pNewEntry->allocationType   = flAllocationType;
     pNewEntry->accessProtection = flProtection;
+    pNewEntry->jitRegion        = jitRegion ? 1 : 0;
 
     nBufferSize = memSize / VIRTUAL_PAGE_SIZE / CHAR_BIT;
     if ( ( memSize / VIRTUAL_PAGE_SIZE ) % CHAR_BIT != 0 )
@@ -786,11 +867,17 @@ static BOOL VIRTUALStoreAllocationInfo(
 
     pNewEntry->pAllocState      = (BYTE*)InternalMalloc( nBufferSize  );
     pNewEntry->pProtectionState = (BYTE*)InternalMalloc( (memSize / VIRTUAL_PAGE_SIZE)  );
+#if defined(__APPLE__) && defined(_M_ARM64)
+    pNewEntry->pJitState        = pNewEntry->jitRegion ? (BYTE*)InternalMalloc( nBufferSize ) : NULL;
+#endif
 #if MMAP_DOESNOT_ALLOW_REMAP
     pNewEntry->pDirtyPages  = (BYTE*)InternalMalloc( nBufferSize );
 #endif //
 
     if ( pNewEntry->pAllocState && pNewEntry->pProtectionState
+#if defined(__APPLE__) && defined(_M_ARM64)
+        && (!pNewEntry->jitRegion || pNewEntry->pJitState)
+#endif
 #if MMAP_DOESNOT_ALLOW_REMAP
         && pNewEntry->pDirtyPages
 #endif // MMAP_DOESNOT_ALLOW_REMAP
@@ -800,6 +887,12 @@ static BOOL VIRTUALStoreAllocationInfo(
 #if MMAP_DOESNOT_ALLOW_REMAP
         memset (pNewEntry->pDirtyPages, 0, nBufferSize);
 #endif // MMAP_DOESNOT_ALLOW_REMAP
+#if defined(__APPLE__) && defined(_M_ARM64)
+        if (pNewEntry->pJitState)
+        {
+            memset(pNewEntry->pJitState, 0, nBufferSize);
+        }
+#endif
         VIRTUALSetAllocState( MEM_RESERVE, 0, nBufferSize * CHAR_BIT, pNewEntry );
         memset( pNewEntry->pProtectionState,
             VIRTUALConvertWinFlags( flProtection ),
@@ -814,6 +907,11 @@ static BOOL VIRTUALStoreAllocationInfo(
         if (pNewEntry->pDirtyPages) InternalFree( pNewEntry->pDirtyPages );
         pNewEntry->pDirtyPages = NULL;
 #endif //
+
+#if defined(__APPLE__) && defined(_M_ARM64)
+        if (pNewEntry->pJitState) InternalFree( pNewEntry->pJitState );
+        pNewEntry->pJitState = NULL;
+#endif
 
         if (pNewEntry->pProtectionState) InternalFree( pNewEntry->pProtectionState );
         pNewEntry->pProtectionState = NULL;
@@ -914,17 +1012,30 @@ static BOOL VIRTUALUpdateAllocationInfo(
         if (pExistingEntry->pProtectionState) InternalFree(pExistingEntry->pProtectionState);
         pExistingEntry->pProtectionState = NULL;
 
+#if defined(__APPLE__) && defined(_M_ARM64)
+        if (pExistingEntry->pJitState) InternalFree(pExistingEntry->pJitState);
+        pExistingEntry->pJitState = NULL;
+#endif
+
         if (pExistingEntry->pAllocState) InternalFree(pExistingEntry->pAllocState);
         pExistingEntry->pAllocState = NULL;
     }
 
     pExistingEntry->pAllocState = (BYTE*)InternalMalloc(nBufferSize);
     pExistingEntry->pProtectionState = (BYTE*)InternalMalloc((memSize / VIRTUAL_PAGE_SIZE));
+#if defined(__APPLE__) && defined(_M_ARM64)
+    // VirtualFreeEnclosing_ runs on a reservation before its first commit,
+    // so no page has made the one-way RWX transition yet.
+    pExistingEntry->pJitState = pExistingEntry->jitRegion ? (BYTE*)InternalMalloc(nBufferSize) : NULL;
+#endif
 #if MMAP_DOESNOT_ALLOW_REMAP
     pExistingEntry->pDirtyPages = (BYTE*)InternalMalloc(nBufferSize);
 #endif //  MMAP_DOESNOT_ALLOW_REMAP
 
     if (pExistingEntry->pAllocState && pExistingEntry->pProtectionState
+#if defined(__APPLE__) && defined(_M_ARM64)
+        && (!pExistingEntry->jitRegion || pExistingEntry->pJitState)
+#endif
 #if MMAP_DOESNOT_ALLOW_REMAP
         && pExistingEntry->pDirtyPages
 #endif // MMAP_DOESNOT_ALLOW_REMAP
@@ -934,6 +1045,12 @@ static BOOL VIRTUALUpdateAllocationInfo(
 #if MMAP_DOESNOT_ALLOW_REMAP
         memset(pExistingEntry->pDirtyPages, 0, nBufferSize);
 #endif // pExistingEntry
+#if defined(__APPLE__) && defined(_M_ARM64)
+        if (pExistingEntry->pJitState)
+        {
+            memset(pExistingEntry->pJitState, 0, nBufferSize);
+        }
+#endif
         VIRTUALSetAllocState(MEM_RESERVE, 0, nBufferSize * CHAR_BIT, pExistingEntry);
         memset(pExistingEntry->pProtectionState,
             VIRTUALConvertWinFlags(pExistingEntry->accessProtection),
@@ -948,6 +1065,11 @@ static BOOL VIRTUALUpdateAllocationInfo(
         if (pExistingEntry->pDirtyPages) InternalFree(pExistingEntry->pDirtyPages);
         pExistingEntry->pDirtyPages = NULL;
 #endif //
+
+#if defined(__APPLE__) && defined(_M_ARM64)
+        if (pExistingEntry->pJitState) InternalFree(pExistingEntry->pJitState);
+        pExistingEntry->pJitState = NULL;
+#endif
 
         if (pExistingEntry->pProtectionState) InternalFree(pExistingEntry->pProtectionState);
         pExistingEntry->pProtectionState = NULL;
@@ -970,6 +1092,31 @@ done:
  *              exists, and that would be very complicated to work around.
  *
  */
+/* Apple ARM64 code pages must be born MAP_JIT. MEM_RESERVE_EXECUTABLE
+   marks the pre-reserved code heap, which is reserved PAGE_READWRITE
+   and only later committed executable. An executable protect flag marks
+   every other code reservation. */
+static BOOL VIRTUALRegionIsJit(DWORD flAllocationType, DWORD flProtect)
+{
+#if defined(__APPLE__) && defined(_M_ARM64)
+    switch (flProtect & 0xff)
+    {
+        case PAGE_EXECUTE:
+        case PAGE_EXECUTE_READ:
+        case PAGE_EXECUTE_READWRITE:
+        case PAGE_EXECUTE_WRITECOPY:
+            return TRUE;
+        default:
+            break;
+    }
+    return (flAllocationType & MEM_RESERVE_EXECUTABLE) != 0;
+#else
+    (void)flAllocationType;
+    (void)flProtect;
+    return FALSE;
+#endif
+}
+
 static LPVOID VIRTUALReserveMemory(
                 IN CPalThread *pthrCurrent, /* Currently executing thread */
                 IN LPVOID lpAddress,        /* Region to reserve or commit */
@@ -991,18 +1138,14 @@ static LPVOID VIRTUALReserveMemory(
     MemSize = ( ((UINT_PTR)lpAddress + dwSize + VIRTUAL_PAGE_MASK) & ~VIRTUAL_PAGE_MASK ) -
                StartBoundary;
 
-    if ((flAllocationType & MEM_RESERVE_EXECUTABLE) != 0)
-    {
-        fprintf(stderr, "MEM_RESERVE_EXECUTABLE is not supported!");
-        abort();
-    }
+    BOOL jitRegion = VIRTUALRegionIsJit(flAllocationType, flProtect);
 
     InternalEnterCriticalSection(pthrCurrent, &virtual_critsec);
 
     if (pRetVal == NULL)
     {
         // Try to reserve memory from the OS
-        pRetVal = ReserveVirtualMemory(pthrCurrent, (LPVOID)StartBoundary, MemSize);
+        pRetVal = ReserveVirtualMemory(pthrCurrent, (LPVOID)StartBoundary, MemSize, jitRegion);
     }
 
     if (pRetVal != NULL)
@@ -1020,7 +1163,7 @@ static LPVOID VIRTUALReserveMemory(
         }
 #endif  // MMAP_IGNORES_HINT
         if ( !VIRTUALStoreAllocationInfo( StartBoundary, MemSize,
-                                   flAllocationType, flProtect ) )
+                                   flAllocationType, flProtect, jitRegion ) )
         {
             ASSERT( "Unable to store the structure in the list.\n");
             pthrCurrent->SetLastError( ERROR_INTERNAL_ERROR );
@@ -1042,9 +1185,38 @@ static LPVOID VIRTUALReserveMemory(
 static LPVOID ReserveVirtualMemory(
                 IN CPalThread *pthrCurrent, /* Currently executing thread */
                 IN LPVOID lpAddress,        /* Region to reserve or commit */
-                IN SIZE_T dwSize)           /* Size of Region */
+                IN SIZE_T dwSize,           /* Size of Region */
+                IN BOOL jitRegion)          /* Create the mapping with MAP_JIT */
 {
     LPVOID pRetVal = NULL;
+
+#if defined(__APPLE__) && defined(_M_ARM64)
+    if (jitRegion)
+    {
+        /* MAP_JIT has to be on the first mmap. vm_allocate plus a later
+           MAP_FIXED mmap returns EINVAL, and so does MAP_FIXED|MAP_JIT
+           over an existing mapping. PROT_NONE is enough; commit uses
+           mprotect. */
+        int mmapFlags = MAP_ANON | MAP_PRIVATE | MAP_JIT;
+        pRetVal = mmap(lpAddress, dwSize, PROT_NONE, mmapFlags, -1, 0);
+        if (pRetVal == MAP_FAILED)
+        {
+            ERROR("Failed to reserve MAP_JIT memory (%d)=%s.\n", errno, strerror(errno));
+            pthrCurrent->SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+            return NULL;
+        }
+        if (lpAddress != NULL && (UINT_PTR)pRetVal != (UINT_PTR)lpAddress)
+        {
+            ERROR("MAP_JIT reserve did not return the requested address.\n");
+            pthrCurrent->SetLastError(ERROR_INVALID_ADDRESS);
+            munmap(pRetVal, dwSize);
+            return NULL;
+        }
+        return pRetVal;
+    }
+#else
+    (void)jitRegion;
+#endif
 #if !defined(__APPLE__) && !defined(vm_address_t)
 #define vm_address_t UINT_PTR
 #endif
@@ -1268,6 +1440,42 @@ static LPVOID VIRTUALCommitMemory(
             if (mprotect((void *) StartBoundary, MemSize, PROT_WRITE | PROT_READ) == 0)
                 pRet = (void *)StartBoundary;
 #else // MMAP_DOESNOT_ALLOW_REMAP
+#if defined(__APPLE__) && defined(_M_ARM64)
+            if (pInformation->jitRegion)
+            {
+                /* A MAP_JIT page accepts exactly one mprotect after its
+                   PROT_NONE reservation: this RWX transition. A second
+                   mprotect, including PROT_NONE, fails with EACCES (13). Pages
+                   already mapped are only zeroed again. Executing threads see
+                   RX through their default per-thread write-protect state. */
+                BOOL mapped = TRUE;
+                for (SIZE_T i = 0; i < runLength; i++)
+                {
+                    if (!VIRTUALIsJitPageMapped(runStart + i, pInformation))
+                    {
+                        if (mprotect((void *)(StartBoundary + i * VIRTUAL_PAGE_SIZE),
+                                     VIRTUAL_PAGE_SIZE,
+                                     PROT_READ | PROT_WRITE | PROT_EXEC) != 0)
+                        {
+                            ERROR("mprotect(RWX) on a MAP_JIT page failed. Error(%d)=%s\n",
+                                  errno, strerror(errno));
+                            mapped = FALSE;
+                            break;
+                        }
+                        VIRTUALSetJitPageMapped(runStart + i, 1, pInformation);
+                    }
+                }
+                if (mapped)
+                {
+                    VIRTUALJitWriteProtect(TRUE);
+                    memset((void *) StartBoundary, 0, MemSize);
+                    VIRTUALJitWriteProtect(FALSE);
+                    FlushInstructionCache(GetCurrentProcess(), (LPCVOID)StartBoundary, MemSize);
+                    pRet = (void *)StartBoundary;
+                }
+            }
+            else
+#endif
             pRet = mmap((void *) StartBoundary, MemSize, PROT_WRITE | PROT_READ,
                      MAP_ANON | MAP_FIXED | MAP_PRIVATE, -1, 0);
 #endif // MMAP_DOESNOT_ALLOW_REMAP
@@ -1312,6 +1520,31 @@ static LPVOID VIRTUALCommitMemory(
         if (protectionState != vProtect)
         {
             // Change permissions.
+#if defined(__APPLE__) && defined(_M_ARM64)
+            if (pInformation->jitRegion)
+            {
+                /* The RWX transition already happened at first commit. Only
+                   the calling thread's per-thread execute/write state and the
+                   logical protection change now. */
+                if (vProtect == VIRTUAL_READWRITE || vProtect == VIRTUAL_EXECUTE_READWRITE)
+                {
+                    VIRTUALJitWriteProtect(TRUE);
+                }
+                else if (vProtect == VIRTUAL_EXECUTE_READ)
+                {
+                    VIRTUALJitWriteProtect(FALSE);
+                }
+                else
+                {
+                    ERROR("Unsupported protection 0x%x for a MAP_JIT region.\n", flProtect);
+                    pthrCurrent->SetLastError(ERROR_INVALID_ACCESS);
+                    goto error;
+                }
+                memset(pInformation->pProtectionState + runStart,
+                       vProtect, runLength);
+            }
+            else
+#endif
             if (mprotect((void *) StartBoundary, MemSize, nProtect) != -1)
             {
                 memset(pInformation->pProtectionState + runStart,
@@ -1769,6 +2002,13 @@ VirtualAlloc_(
         }
     }
 
+    /* On Apple ARM64 MAP_JIT regions, MEM_COMMIT maps/zeroes the pages and
+       leaves the calling thread in execute mode (the JIT write window closed)
+       even when flProtect is PAGE_READWRITE. flProtect is the page's logical
+       protection, not a request to leave the thread writable. Direct embedders
+       that need to write must call VirtualProtect(..., PAGE_READWRITE) after
+       the commit; PAGE_EXECUTE_READ closes the window again. Internal JIT
+       callers already use the per-thread window around their writes. */
     if ( flAllocationType & MEM_COMMIT )
     {
         InternalEnterCriticalSection(pthrCurrent, &virtual_critsec);
@@ -1936,7 +2176,11 @@ VirtualAlloc(
 
     if (reserve || commit)
     {
-        char *address = (char*) VirtualAlloc_(nullptr, dwSize, MEM_RESERVE, flProtect);
+        // MEM_RESERVE_EXECUTABLE qualifies the reservation (Apple ARM64 uses
+        // it to choose MAP_JIT). Keep it on the reservation and drop it with
+        // MEM_RESERVE afterwards; the later call is a commit, not a reserve.
+        DWORD reserveType = MEM_RESERVE | (flAllocationType & MEM_RESERVE_EXECUTABLE);
+        char *address = (char*) VirtualAlloc_(nullptr, dwSize, reserveType, flProtect);
         if (!address)
         {
             return nullptr;
@@ -1944,7 +2188,7 @@ VirtualAlloc(
 
         if (reserve)
         {
-            flAllocationType &= ~MEM_RESERVE;
+            flAllocationType &= ~(MEM_RESERVE | MEM_RESERVE_EXECUTABLE);
         }
 
         SIZE_T diff = ((ULONG_PTR)address % KB64);
@@ -1955,7 +2199,7 @@ VirtualAlloc(
 
             // looks like ``pushed new address + dwSize`` is not available
             // try on a bigger surface
-            address = (char*)VirtualAlloc_(nullptr, dwSize + KB64, MEM_RESERVE, flProtect);
+            address = (char*)VirtualAlloc_(nullptr, dwSize + KB64, reserveType, flProtect);
             if (!address)
             {
                 // This is an actual OOM.
@@ -2089,6 +2333,21 @@ VirtualFree(
             goto VirtualFreeExit;
         }
 
+        {
+            SIZE_T firstPage = (StartBoundary - pUnCommittedMem->startBoundary) /
+                               VIRTUAL_PAGE_SIZE;
+            SIZE_T regionPageCount = pUnCommittedMem->memSize / VIRTUAL_PAGE_SIZE;
+            SIZE_T pagesToChange = MemSize / VIRTUAL_PAGE_SIZE;
+            if (firstPage >= regionPageCount ||
+                pagesToChange > regionPageCount - firstPage)
+            {
+                ERROR( "VirtualFree range extends beyond the reserved region.\n" );
+                pthrCurrent->SetLastError( ERROR_INVALID_ADDRESS );
+                bRetVal = FALSE;
+                goto VirtualFreeExit;
+            }
+        }
+
         TRACE( "Un-committing the following page(s) %d to %d.\n",
                StartBoundary, MemSize );
 
@@ -2099,16 +2358,54 @@ VirtualFree(
 #else // MMAP_DOESNOT_ALLOW_REMAP
         // Explicitly calling mmap instead of mprotect here makes it
         // that much more clear to the operating system that we no
-        // longer need these pages.
+        // longer need these pages. MAP_JIT regions are the exception:
+        // after the first commit makes the one-way RWX transition, a second
+        // mprotect (including PROT_NONE) fails with EACCES (13), and
+        // mmap(MAP_FIXED|MAP_JIT) cannot replace the mapping either. On this
+        // host madvise(MADV_DONTNEED) is advisory and does not release a
+        // partially live MAP_JIT segment, so decommit is containment rather
+        // than a physical release: zero every committed page under this
+        // thread's write window first, then keep madvise as a hint. A stale
+        // call into the page executes zero instructions and traps (SIGILL)
+        // instead of running stale code. Whole-segment release still unmaps
+        // in the MEM_RELEASE path below.
+        BOOL decommitOk = FALSE;
+#if defined(__APPLE__) && defined(_M_ARM64)
+        if (pUnCommittedMem->jitRegion)
+        {
+            SIZE_T firstPage = (StartBoundary - pUnCommittedMem->startBoundary) /
+                               VIRTUAL_PAGE_SIZE;
+            SIZE_T pageCount = MemSize / VIRTUAL_PAGE_SIZE;
+            VIRTUALJitWriteProtect(TRUE);
+            for (SIZE_T i = 0; i < pageCount; i++)
+            {
+                if (VIRTUALIsPageCommitted(firstPage + i, pUnCommittedMem))
+                {
+                    memset((void *)(StartBoundary + i * VIRTUAL_PAGE_SIZE),
+                           0, VIRTUAL_PAGE_SIZE);
+                }
+            }
+            VIRTUALJitWriteProtect(FALSE);
+            // ARM64 I-cache is not coherent with the D-cache stores above.
+            // Without this a stale entry point can still execute the old
+            // instructions even though the backing bytes are zero.
+            FlushInstructionCache(GetCurrentProcess(), (LPCVOID)StartBoundary, MemSize);
+            decommitOk = madvise((LPVOID)StartBoundary, MemSize, MADV_DONTNEED) == 0;
+        }
+        else
+#endif
+        {
 #if RESERVE_FROM_BACKING_FILE
-        if ( mmap( (LPVOID)StartBoundary, MemSize, PROT_NONE,
+            decommitOk = mmap( (LPVOID)StartBoundary, MemSize, PROT_NONE,
                    MAP_FIXED | MAP_PRIVATE, gBackingFile,
                    (char *) StartBoundary - (char *) gBackingBaseAddress ) !=
-             MAP_FAILED )
+                 MAP_FAILED;
 #else   // RESERVE_FROM_BACKING_FILE
-        if ( mmap( (LPVOID)StartBoundary, MemSize, PROT_NONE,
-                   MAP_FIXED | MAP_ANON | MAP_PRIVATE, -1, 0 ) != MAP_FAILED )
+            decommitOk = mmap( (LPVOID)StartBoundary, MemSize, PROT_NONE,
+                   MAP_FIXED | MAP_ANON | MAP_PRIVATE, -1, 0 ) != MAP_FAILED;
 #endif  // RESERVE_FROM_BACKING_FILE
+        }
+        if (decommitOk)
 #endif // MMAP_DOESNOT_ALLOW_REMAP
         {
 #if (MMAP_ANON_IGNORES_PROTECTION && !MMAP_DOESNOT_ALLOW_REMAP)
@@ -2153,6 +2450,13 @@ VirtualFree(
             VIRTUALFindRegionInformation( (UINT_PTR)lpAddress );
 
         if ( !pMemoryToBeReleased )
+        {
+            ERROR( "lpAddress must be the base address returned by VirtualAlloc.\n" );
+            pthrCurrent->SetLastError( ERROR_INVALID_ADDRESS );
+            bRetVal = FALSE;
+            goto VirtualFreeExit;
+        }
+        if ( (UINT_PTR)lpAddress != pMemoryToBeReleased->startBoundary )
         {
             ERROR( "lpAddress must be the base address returned by VirtualAlloc.\n" );
             pthrCurrent->SetLastError( ERROR_INVALID_ADDRESS );
@@ -2259,6 +2563,17 @@ VirtualProtect(
     MemSize = (((UINT_PTR)(dwSize) + ((UINT_PTR)(lpAddress) & VIRTUAL_PAGE_MASK)
                 + VIRTUAL_PAGE_MASK) & ~VIRTUAL_PAGE_MASK);
 
+    // A zero or wrapping size has no pages to protect. Reject it before the
+    // Apple JIT branch can flip the calling thread's process-wide MAP_JIT
+    // write/execute state (VirtualProtect(p, 0, PAGE_READWRITE) would
+    // otherwise leave the thread unable to execute any JIT page).
+    if (dwSize == 0 || MemSize < dwSize)
+    {
+        ERROR("VirtualProtect: invalid size %zu.\n", (size_t)dwSize);
+        SetLastError(ERROR_INVALID_PARAMETER);
+        goto ExitVirtualProtect;
+    }
+
 #if DEBUG
     if ( VIRTUALContainsInvalidProtectionFlags( flNewProtect ) )
     {
@@ -2268,6 +2583,7 @@ VirtualProtect(
         SetLastError( ERROR_INVALID_PARAMETER );
         goto ExitVirtualProtect;
     }
+#endif
 
     if ( !lpflOldProtect)
     {
@@ -2275,20 +2591,31 @@ VirtualProtect(
         SetLastError( ERROR_NOACCESS );
         goto ExitVirtualProtect;
     }
-#endif
 
     pEntry = VIRTUALFindRegionInformation( StartBoundary );
     if ( NULL != pEntry )
     {
+        SIZE_T regionPageCount = pEntry->memSize / VIRTUAL_PAGE_SIZE;
+
         /* See if the pages are committed. */
         Index = OffSet = StartBoundary - pEntry->startBoundary == 0 ?
              0 : ( StartBoundary - pEntry->startBoundary ) / VIRTUAL_PAGE_SIZE;
         NumberOfPagesToChange = MemSize / VIRTUAL_PAGE_SIZE;
 
+        /* Reject a range that starts outside the region or would write past
+           pEntry->memSize before changing any per-page state. */
+        if ( OffSet >= regionPageCount ||
+             NumberOfPagesToChange > regionPageCount - OffSet )
+        {
+            ERROR( "VirtualProtect range extends beyond the reserved region.\n" );
+            SetLastError( ERROR_INVALID_ADDRESS );
+            goto ExitVirtualProtect;
+        }
+
         TRACE( "Number of pages to check %d, starting page %d \n",
                NumberOfPagesToChange, Index );
 
-        for ( ; Index < NumberOfPagesToChange; Index++  )
+        for ( ; Index < OffSet + NumberOfPagesToChange; Index++  )
         {
             if ( !VIRTUALIsPageCommitted( Index, pEntry ) )
             {
@@ -2299,6 +2626,45 @@ VirtualProtect(
             }
         }
     }
+
+#if defined(__APPLE__) && defined(_M_ARM64)
+    if ( NULL != pEntry && pEntry->jitRegion )
+    {
+        /* A MAP_JIT page is already mapped PREAD|PWRITE|PEXEC once. Never
+           mprotect it again: on Apple Silicon the second mprotect, even
+           PROT_NONE or the same flags, fails with EACCES (13). The write window is the
+           calling thread's per-thread state, so other threads keep executing
+           the page. */
+        BYTE vProtect = VIRTUALConvertWinFlags( flNewProtect );
+        switch ( vProtect )
+        {
+        case VIRTUAL_READWRITE:
+        case VIRTUAL_EXECUTE_READWRITE:
+            VIRTUALJitWriteProtect( TRUE );
+            break;
+        case VIRTUAL_EXECUTE_READ:
+            VIRTUALJitWriteProtect( FALSE );
+            break;
+        default:
+            /* PAGE_NOACCESS, PAGE_EXECUTE, and PAGE_READONLY would need a
+               second mprotect, which a MAP_JIT page rejects. The DBG_DUMP
+               PAGEALLOCATOR_PROTECT_FREEPAGE path that requests PAGE_NOACCESS
+               is therefore unsupported on Apple ARM64; the fast jit profile
+               does not use it. */
+            ERROR( "Protection 0x%x cannot be applied to a MAP_JIT region.\n",
+                   flNewProtect );
+            pthrCurrent->SetLastError( ERROR_INVALID_ACCESS );
+            goto ExitVirtualProtect;
+        }
+
+        *lpflOldProtect =
+            VIRTUALConvertVirtualFlags( pEntry->pProtectionState[ OffSet ] );
+        memset( pEntry->pProtectionState + OffSet, vProtect,
+                NumberOfPagesToChange );
+        bRetVal = TRUE;
+        goto ExitVirtualProtect;
+    }
+#endif
 
     if ( 0 == mprotect( (LPVOID)StartBoundary, MemSize,
                    W32toUnixAccessControl( flNewProtect ) ) )

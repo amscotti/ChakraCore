@@ -286,6 +286,25 @@ namespace Js
         }
         else
         {
+#if defined(__APPLE__) && defined(_M_ARM64)
+            // A native Apple ARM64 frame with calls homes x0-x7 and keeps the
+            // caller's argv image immediately after those homes. The first
+            // five user arguments are still at fp+40..fp+72, but argument 5
+            // onward is in the caller image, which starts eight slots after
+            // GetCurrentArgv() (fp+80). Function.prototype.arguments and the
+            // WER argument reader need one contiguous array. Detect the
+            // eight-home shape by its duplicated function/callInfo header
+            // rather than pulling backend-only Func state into the runtime.
+            const uint homedParamCount = 8;
+            void **argv = this->GetCurrentArgv();
+            if (this->interpreterFrame == nullptr &&
+                argv[homedParamCount] == argv[0] &&
+                argv[homedParamCount + 1] == argv[1])
+            {
+                return &argv[
+                    JavascriptFunctionArgIndex_SecondScriptArg + homedParamCount];
+            }
+#endif
             return &this->GetCurrentArgv()[JavascriptFunctionArgIndex_SecondScriptArg];
         }
     }

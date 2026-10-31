@@ -63,20 +63,39 @@ void PDataManager::UnregisterPdata(RUNTIME_FUNCTION* pdata)
 #else  // !_WIN32
 
 // ----------------------------------------------------------------------------
-//  !_WIN32 x64 unwind uses .eh_frame
+//  !_WIN32 x64 unwind uses .eh_frame. ARM64 still emits Windows unwind codes.
 // ----------------------------------------------------------------------------
 
 void PDataManager::RegisterPdata(RUNTIME_FUNCTION* pdataStart,
     _In_ const ULONG_PTR functionStart, _In_ const ULONG_PTR functionEnd,
     _Out_ PVOID* pdataTable, ULONG entryCount, ULONG maxEntryCount)
 {
+#if defined(__APPLE__) && defined(_M_ARM64)
+    // Apple registers one FDE per call. The buffer is a CIE followed by one
+    // FDE; mac_fde_wrapper skips the CIE (id 0). These bytes stay readable
+    // for the life of the thunk block. Close() unregisters before decommit.
+    typedef void (*mac_fde_reg_op)(const void* addr);
+    extern void mac_fde_wrapper(const char* dataStart, mac_fde_reg_op reg_op);
+    (void)functionStart;
+    (void)functionEnd;
+    (void)entryCount;
+    (void)maxEntryCount;
+    mac_fde_wrapper((const char*)pdataStart, __register_frame);
+#else
     __REGISTER_FRAME(pdataStart);
+#endif
     *pdataTable = pdataStart;
 }
 
 void PDataManager::UnregisterPdata(RUNTIME_FUNCTION* pdata)
 {
+#if defined(__APPLE__) && defined(_M_ARM64)
+    typedef void (*mac_fde_reg_op)(const void* addr);
+    extern void mac_fde_wrapper(const char* dataStart, mac_fde_reg_op reg_op);
+    mac_fde_wrapper((const char*)pdata, __deregister_frame);
+#else
     __DEREGISTER_FRAME(pdata);
+#endif
 }
 
 #endif  // !_WIN32

@@ -13,8 +13,11 @@
 //! MacOSX SDK 26.5, Zig 0.17.0. debug-static (Debug + static embedding, no
 //! dylib, ch links the whole engine) and release-shared (Release -O3
 //! -DNDEBUG, smoke-gate checks) select their legacy-exact defines/flags/
-//! graph shape; their full green is B3.2/B3.3's job. Anything else fails
-//! before doing work. B3.4 isolation: test installs natively into
+//! graph shape; their full green is B3.2/B3.3's job. `-Dprofile=jit` is
+//! the worktree ARM64 macOS JIT port: the test graph with DISABLE_JIT
+//! removed and the ARM64 backend group added. It installs to `out/jit/`
+//! and does not replace the test profile's zig-out tree. Anything else
+//! fails before doing work. B3.4 isolation: test installs natively into
 //! `--prefix` (default zig-out); non-test profiles copy out to fixed
 //! `out/<profile>/` side prefixes (build.zig cannot read --prefix in
 //! 0.17, so fixed destinations are the only enforceable isolation).
@@ -47,7 +50,11 @@
 //! objects, then the static archive members. The PAL deviation is
 //! dispositioned in doc/b2-verification.md: the reordered C/asm/mach
 //! inputs carry no dynamic initializers, so their relative order is
-//! unobservable at startup.
+//! unobservable at startup. The jit profile appends its 89 backend TUs
+//! after the contract objects, while the reference links
+//! ${chakra_backend_objects} between Jsrt.Core and Common.Common. The
+//! backend does have dynamic initializers, so this remains a known,
+//! disclosed deviation rather than a proven equivalence.
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -117,12 +124,15 @@ const Profile = enum {
     @"test",
     debug_static,
     release_shared,
+    /// Worktree-only ARM64 macOS JIT. Same flags as test, without DISABLE_JIT.
+    jit,
 
     fn name(self: Profile) []const u8 {
         return switch (self) {
             .@"test" => "test",
             .debug_static => "debug-static",
             .release_shared => "release-shared",
+            .jit => "jit",
         };
     }
 
@@ -132,11 +142,12 @@ const Profile = enum {
 };
 
 fn gateProfile(b: *std.Build) Profile {
-    const raw = b.option([]const u8, "profile", "Build profile: test (default), debug-static, release-shared") orelse "test";
+    const raw = b.option([]const u8, "profile", "Build profile: test (default), debug-static, release-shared, jit") orelse "test";
     if (std.mem.eql(u8, raw, "test")) return .@"test";
     if (std.mem.eql(u8, raw, "debug-static")) return .debug_static;
     if (std.mem.eql(u8, raw, "release-shared")) return .release_shared;
-    fail("unsupported -Dprofile={s}: expected one of: test, debug-static, release-shared", .{raw});
+    if (std.mem.eql(u8, raw, "jit")) return .jit;
+    fail("unsupported -Dprofile={s}: expected one of: test, debug-static, release-shared, jit", .{raw});
 }
 
 fn gateOptimize(b: *std.Build, profile: Profile) std.builtin.Optimize {
@@ -144,10 +155,10 @@ fn gateOptimize(b: *std.Build, profile: Profile) std.builtin.Optimize {
     // Zig mode is pinned per profile so a mode name alone can never select
     // a different engine configuration (modernization-plan.md section B3).
     const want: std.builtin.Optimize = switch (profile) {
-        .@"test", .release_shared => .fast,
+        .@"test", .release_shared, .jit => .fast,
         .debug_static => .debug,
     };
-    const choice = b.option(std.builtin.Optimize, "optimize", "Optimization (pinned per profile: fast for test/release-shared, debug for debug-static)") orelse want;
+    const choice = b.option(std.builtin.Optimize, "optimize", "Optimization (pinned per profile: fast for test/release-shared/jit, debug for debug-static)") orelse want;
     if (choice == want) return choice;
     switch (profile) {
         .@"test" => fail("unsupported -Doptimize={t}: this profile (RelWithDebInfo Test, -O3 -g) supports only fast", .{choice}),
@@ -312,12 +323,23 @@ fn appendTuFlags(ctx: *const Ctx, run: *std.Build.Step.Run, g: *const tables.Gro
     // CHAKRA_STATIC_LIBRARY; release-shared drops the Test define (NDEBUG
     // arrives via the flag slot below, as in CMAKE_*_FLAGS_RELEASE).
     const defines = switch (ctx.profile) {
-        .@"test" => if (g.pal) tables.pal_defines else tables.engine_defines,
+        // jit reuses the test tables and drops DISABLE_JIT so every TU,
+        // PAL included, is compiled with native codegen enabled.
+        .@"test", .jit => if (g.pal) tables.pal_defines else tables.engine_defines,
         .debug_static => if (g.pal) tables.pal_defines_debug_static else tables.engine_defines_debug_static,
         .release_shared => if (g.pal) tables.pal_defines_release else tables.engine_defines_release,
     };
-    for (defines) |d| run.addArg(d);
+    for (defines) |d| {
+        if (ctx.profile == .jit and std.mem.eql(u8, d, "-DDISABLE_JIT=1")) continue;
+        run.addArg(d);
+    }
     if (g.target_define) |d| run.addArg(d);
+    // CMake sets this on the Language and Library targets when BuildJIT
+    // is on (lib/Runtime/Language/CMakeLists.txt, Library/CMakeLists.txt).
+    // arm64_Thunks.S emits the dynamic-interpreter entry points only
+    // under this define.
+    if (ctx.profile == .jit and (g == &tables.language_group or g == &tables.library_group))
+        run.addArg("-D_ENABLE_DYNAMIC_THUNKS=1");
 
     const is_ch = g == &tables.ch_group;
     if (g.pal) run.addPrefixedDirectoryArg("-I", ctx.config_dir);
@@ -347,7 +369,7 @@ fn appendTuFlags(ctx: *const Ctx, run: *std.Build.Step.Run, g: *const tables.Gro
             // to none - a driver-default correction in the same
             // category as -UNDEBUG/-fno-sanitize below.
             switch (ctx.profile) {
-                .@"test" => for ([_][]const u8{ "-O3", "-g" }) |f| run.addArg(f),
+                .@"test", .jit => for ([_][]const u8{ "-O3", "-g" }) |f| run.addArg(f),
                 .debug_static => run.addArg("-g"),
                 .release_shared => for ([_][]const u8{ "-O3", "-DNDEBUG", "-g0" }) |f| run.addArg(f),
             }
@@ -392,7 +414,7 @@ fn appendTuFlags(ctx: *const Ctx, run: *std.Build.Step.Run, g: *const tables.Gro
             // takes an explicit -g0 (`zig cc` emits DWARF unless told
             // otherwise - same driver-default correction as C++ above).
             const opt_flag: ?[]const u8 = switch (ctx.profile) {
-                .@"test" => "-O2",
+                .@"test", .jit => "-O2",
                 .debug_static => null,
                 .release_shared => "-O3",
             };
@@ -626,16 +648,63 @@ pub fn build(b: *std.Build) void {
             }
         }
     }
+    // JIT-only: ARM64 backend objects join the static archive and the
+    // dylib. Numbered after the contract TUs so the test/debug/release
+    // object counts and link order stay put. CMake links Backend after
+    // Jsrt.Core; appending here is the first-link order (a known
+    // deviation; see the file header).
+    var backend_n: u32 = 0;
+    var backend_expected: u32 = 0;
+    if (profile == .jit) {
+        const g = &tables.backend_group;
+        backend_expected = @intCast(g.cxx.len + g.c.len + g.asm_files.len);
+        // A source added to backend_group must be reflected here. This
+        // catches a table/loop mismatch that the old
+        // `expect_base + backend_n` assertion could not see.
+        std.debug.assert(backend_expected == 89);
+        for (g.cxx) |src| {
+            static_objs.append(arena, compileTu(&ctx, g, src, .cxx, n)) catch @panic("OOM");
+            n += 1;
+            backend_n += 1;
+        }
+        for (g.c) |src| {
+            static_objs.append(arena, compileTu(&ctx, g, src, .c, n)) catch @panic("OOM");
+            n += 1;
+            backend_n += 1;
+        }
+        for (g.asm_files) |src| {
+            static_objs.append(arena, compileTu(&ctx, g, src, .asm_, n)) catch @panic("OOM");
+            n += 1;
+            backend_n += 1;
+        }
+        std.debug.assert(backend_n == backend_expected);
+    }
     // Static: 540 - 3 dylib TUs + TestHooks in ch = 538.
-    const expect_total: u32 = if (is_static) 538 else 540;
+    // jit adds the 89 backend TUs on top of the shared 540 => 629.
+    const expect_base: u32 = if (is_static) 538 else 540;
+    const expect_total: u32 = expect_base + backend_expected;
     std.debug.assert(n == expect_total);
     const expect_singular: usize = if (is_static) 0 else 3;
     std.debug.assert(singular_libs.items.len == expect_singular);
 
     // libChakraCoreStatic.a (contract section 5.2).
-    const static_mod = createLinkModule(&ctx);
-    for (static_objs.items) |o| static_mod.addObjectFile(o);
-    const static_lib = b.addLibrary(.{ .name = "ChakraCoreStatic", .root_module = static_mod });
+    // The jit profile's -g objects sum past 2GB. Zig's archiver then
+    // fails with "failed to write: Unexpected" (the partial file is a
+    // zero-filled multi-gigabyte blob). libtool writes that archive.
+    // The dylib and ch do not consume it; they link the objects.
+    const static_lib: ?*std.Build.Step.Compile = if (profile == .jit) null else blk: {
+        const static_mod = createLinkModule(&ctx);
+        for (static_objs.items) |o| static_mod.addObjectFile(o);
+        break :blk b.addLibrary(.{ .name = "ChakraCoreStatic", .root_module = static_mod });
+    };
+    const static_archive: std.Build.LazyPath = if (static_lib) |lib| lib.getEmittedBin() else blk: {
+        // ZERO_AR_DATE makes libtool write the deterministic epoch/0:0
+        // member metadata that Zig's archiver uses for the no-JIT archive.
+        const lt = b.addSystemCommand(&.{ "/usr/bin/env", "ZERO_AR_DATE=1", "/usr/bin/libtool", "-static", "-o" });
+        const out = lt.addOutputFileArg("libChakraCoreStatic.a");
+        for (static_objs.items) |o| lt.addFileArg(o);
+        break :blk out;
+    };
 
     const icu_lib = b.fmt("{s}/../lib", .{icu_include});
     // libChakraCore.dylib (contract section 5.6, shared profiles only):
@@ -718,7 +787,15 @@ pub fn build(b: *std.Build) void {
     const gs_mod = createLinkModule(&ctx);
     for (gs_objs.items) |o| gs_mod.addObjectFile(o);
     addSdkLinkPaths(&ctx, gs_mod);
-    gs_mod.linkLibrary(static_lib);
+    if (static_lib) |lib| {
+        gs_mod.linkLibrary(lib);
+    } else {
+        // Archive semantics: GCStress's stubs (StubExternalApi.cpp)
+        // satisfy symbols that the engine also defines. Linking every
+        // object would duplicate those symbols. A normal .a search
+        // keeps the stubs and pulls the rest.
+        gs_mod.addObjectFile(static_archive);
+    }
     gs_mod.linkFramework("CoreFoundation", .{});
     gs_mod.linkFramework("Security", .{});
     const gs = b.addExecutable(.{ .name = "GCStress", .root_module = gs_mod });
@@ -736,7 +813,7 @@ pub fn build(b: *std.Build) void {
         b.installArtifact(ch);
         b.installArtifact(gs);
         if (dylib) |lib| b.installArtifact(lib);
-        b.installArtifact(static_lib);
+        b.installArtifact(static_lib.?);
         for (singular_libs.items) |lib| b.installArtifact(lib);
         // Co-location edge (contract sections 5.6-5.7, shared profiles only): the
         // reference POST_BUILD copies both ch and libChakraCore.dylib to the
@@ -784,7 +861,7 @@ pub fn build(b: *std.Build) void {
             cp.addArg("--symlink=lib/libChakraCore.dylib=libChakraCore.1.dylib");
             cp.addArg("--symlink=lib/libChakraCore.1.dylib=libChakraCore.1.0.0.dylib");
         }
-        cp.addPrefixedFileArg("--map=lib/libChakraCoreStatic.a=", static_lib.getEmittedBin());
+        cp.addPrefixedFileArg("--map=lib/libChakraCoreStatic.a=", static_archive);
         for (singular_libs.items) |lib| {
             cp.addPrefixedFileArg(b.fmt("--map=lib/lib{s}.a=", .{lib.name}), lib.getEmittedBin());
         }
@@ -981,7 +1058,7 @@ pub fn build(b: *std.Build) void {
         dbg_native.addArg(dbg_cxx);
         dbg_native.addArg("--static");
         dbg_native.addArg(b.fmt("--archive={s}", .{dbg_archive_str}));
-        dbg_native.addFileInput(static_lib.getEmittedBin());
+        dbg_native.addFileInput(static_lib.?.getEmittedBin());
         dbg_native.step.dependOn(cp_step);
         dbg_native.stdio = .inherit;
         const dbg_native_top = b.step("check-native", "Run the static embedding tests against debug-static artifacts, with linkage proof (not part of the default build)");
@@ -1017,6 +1094,55 @@ pub fn build(b: *std.Build) void {
         dbg_check_top.dependOn(&dbg_smoke.step);
         dbg_check_top.dependOn(&dbg_metadata.step);
         dbg_check_top.dependOn(selftest_top);
+        return;
+    }
+
+    // Worktree ARM64 macOS JIT. The interpreter contract stays on the
+    // default test profile. This check is a smoke of out/jit/bin/ch;
+    // the regression suite is not a gate of this profile.
+    if (profile == .jit) {
+        const cp_step = &copy_out.?.step;
+        const jit_ch_str = "out/jit/bin/ch";
+        const jit_smoke = b.addSystemCommand(&.{python});
+        jit_smoke.addFileArg(b.path("tools/build/check_smoke.py"));
+        jit_smoke.addArg(jit_ch_str);
+        jit_smoke.addFileInput(ch.getEmittedBin());
+        jit_smoke.addArg("--profile");
+        jit_smoke.addArg("test");
+        jit_smoke.step.dependOn(cp_step);
+        jit_smoke.stdio = .inherit;
+        const jit_smoke_top = b.step("check-smoke", "Assert jit ch version/flag/snippet output (not part of the default build)");
+        jit_smoke_top.dependOn(&jit_smoke.step);
+
+        // JIT-specific runtime smoke: require the native backend symbol and
+        // execute a hot call/rest/apply script under both -mic and
+        // -forceNative. check_smoke.py alone is interpreter-only.
+        const jit_runtime = b.addSystemCommand(&.{python});
+        jit_runtime.addFileArg(b.path("tools/build/check_jit.py"));
+        jit_runtime.addArg(jit_ch_str);
+        jit_runtime.step.dependOn(cp_step);
+        jit_runtime.stdio = .inherit;
+        const jit_runtime_top = b.step("check-jit", "Require the ARM64 JIT backend symbol and run a JIT hot-call/rest/apply smoke (not part of the default build)");
+        jit_runtime_top.dependOn(&jit_runtime.step);
+
+        // The JIT profile consumes the checked-in JIT builtin bytecode
+        // headers. Verify them with the just-installed ch; the no-JIT
+        // headers are a separate check on the default profile.
+        const jit_verify_bc = b.addSystemCommand(&.{python});
+        jit_verify_bc.addFileArg(b.path("tools/build/verify_bytecode_pure.py"));
+        jit_verify_bc.addFileArg(b.path("tools/regenByteCode.py"));
+        jit_verify_bc.addArg("--jit");
+        jit_verify_bc.addArg("--verify");
+        jit_verify_bc.addArg("--binary=out/jit/bin/ch");
+        jit_verify_bc.step.dependOn(cp_step);
+        jit_verify_bc.stdio = .inherit;
+        const jit_verify_bc_top = b.step("verify-bytecode", "Verify checked-in JIT built-in bytecode with the just-built jit ch (pure scratch-tree check; not part of the default build)");
+        jit_verify_bc_top.dependOn(&jit_verify_bc.step);
+
+        const jit_check_top = b.step("check", "Full ARM64 macOS JIT smoke: generic smoke, native backend symbol, JIT hot-call/rest/apply, and JIT bytecode verification");
+        jit_check_top.dependOn(&jit_smoke.step);
+        jit_check_top.dependOn(&jit_runtime.step);
+        jit_check_top.dependOn(&jit_verify_bc.step);
         return;
     }
 

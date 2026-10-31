@@ -549,6 +549,9 @@ namespace Js
         savedPolymorphicCacheState(0),
         debuggerScopeIndex(0),
         m_hasFinally(false),
+#if ENABLE_SUSPENDED_COROUTINE_REPARSE_GUARD
+        liveCoroutineFrameCount(0),
+#endif
 #if ENABLE_PROFILE_INFO
         dynamicProfileInfo(nullptr),
 #endif
@@ -679,6 +682,9 @@ namespace Js
         savedPolymorphicCacheState(0),
         debuggerScopeIndex(0),
         m_hasFinally(false),
+#if ENABLE_SUSPENDED_COROUTINE_REPARSE_GUARD
+        liveCoroutineFrameCount(0),
+#endif
 #if ENABLE_PROFILE_INFO
         dynamicProfileInfo(nullptr),
 #endif
@@ -5123,7 +5129,9 @@ namespace Js
         }
 #endif
         // The current function is already compiled. In order to prep this function to ready for debug mode, most of the previous information need to be thrown away.
-        // Clean up the nested functions
+        // Clean up the nested functions. This must happen even when the parent
+        // body is pinned below: their deferred-parsing thunks must be resolved,
+        // or a nested call after attach can recurse in the deferred parser.
         this->ForEachNestedFunc([&](FunctionProxy* proxy, uint32 index)
         {
             // Note: redeferred functions may have fully compiled children. If we find a redeferred function, keep walking.
@@ -5133,6 +5141,30 @@ namespace Js
             }
             return true;
         });
+
+#if ENABLE_SUSPENDED_COROUTINE_REPARSE_GUARD
+        if (this->IsFunctionBody() && this->GetFunctionBody()->HasLiveCoroutineFrames())
+        {
+            // A debugger attach switches this context to debug mode and reparses
+            // every already-parsed body. A suspended generator frame kept a raw
+            // ByteCodeReader and operand metadata into this body's bytecode,
+            // const table and statement maps. Dropping them here leaves the
+            // resume path reading freed or replaced state, which produced a
+            // bare value instead of an iterator result. Keep this body intact
+            // and defer its reparse (and breakpoints in it) until the last live
+            // generator frame completes or is finalized. Nested bodies were
+            // cleaned above so their entry points are not left deferred.
+            //
+            // The attach pass has already pointed the default entry point at a
+            // deferred-parsing thunk. Leaving it there would make the resumed
+            // generator call back into the deferred parse path, which can only
+            // fail or recurse because this body is deliberately not reparsed.
+            // Recreate the entry points without touching the bytecode or
+            // metadata the suspended frame reads.
+            this->GetFunctionBody()->ResetEntryPoint();
+            return;
+        }
+#endif
 
         this->CleanupToReparseHelper();
         if (this->IsFunctionBody())

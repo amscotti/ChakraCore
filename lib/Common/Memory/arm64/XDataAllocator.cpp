@@ -18,6 +18,14 @@ CompileAssert(false)
 #include "PlatformAgnostic/AssemblyCommon.h" // __REGISTER_FRAME / __DEREGISTER_FRAME
 #endif
 
+// File scope, outside namespace Memory. A block-scope extern inside
+// XDataAllocator::Register would declare Memory::mac_fde_wrapper, which
+// AssemblyCommon.cpp does not define.
+#if !defined(_WIN32) && defined(__APPLE__) && ENABLE_NATIVE_CODEGEN
+typedef void (*mac_fde_reg_op)(const void* addr);
+extern void mac_fde_wrapper(const char* dataStart, mac_fde_reg_op reg_op);
+#endif
+
 XDataAllocator::XDataAllocator(BYTE* address, uint size) :
     freeList(nullptr),
     start(address),
@@ -77,7 +85,15 @@ bool XDataAllocator::Alloc(ULONG_PTR functionStart, DWORD functionSize,
 #ifndef _WIN32
     if (xdata->address)
     {
+        // Apple ARM64: the slot is in the MAP_JIT segment; the write window
+        // is per thread.
+#if defined(__APPLE__) && defined(_M_ARM64)
+        VIRTUALJitWriteProtect(TRUE);
+#endif
         ClearHead(xdata->address);  // mark empty .eh_frame
+#if defined(__APPLE__) && defined(_M_ARM64)
+        VIRTUALJitWriteProtect(FALSE);
+#endif
     }
 #endif
 
@@ -147,8 +163,17 @@ void XDataAllocator::Register(XDataAllocation * xdataInfo, ULONG_PTR functionSta
 #endif
 
 #else  // !_WIN32
+#if defined(__APPLE__) && ENABLE_NATIVE_CODEGEN
+    // The slot holds a CIE and one FDE. An empty head means emit did not fit;
+    // registering a partial record would make libunwind read off the end.
+    if (ReadHead(xdataInfo->address) != 0)
+    {
+        ::mac_fde_wrapper((const char*)xdataInfo->address, __register_frame);
+    }
+#else
     Assert(ReadHead(xdataInfo->address));  // should be non-empty .eh_frame
     __REGISTER_FRAME(xdataInfo->address);
+#endif
 #endif
 }
 
@@ -156,7 +181,14 @@ void XDataAllocator::Register(XDataAllocation * xdataInfo, ULONG_PTR functionSta
 void XDataAllocator::Unregister(XDataAllocation * xdataInfo)
 {
 #ifndef _WIN32
+#if defined(__APPLE__) && ENABLE_NATIVE_CODEGEN
+    if (ReadHead(xdataInfo->address) != 0)
+    {
+        ::mac_fde_wrapper((const char*)xdataInfo->address, __deregister_frame);
+    }
+#else
     Assert(ReadHead(xdataInfo->address));  // should be non-empty .eh_frame
     __DEREGISTER_FRAME(xdataInfo->address);
+#endif
 #endif
 }

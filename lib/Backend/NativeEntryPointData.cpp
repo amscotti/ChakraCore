@@ -335,6 +335,17 @@ NativeEntryPointData::CleanupXDataInfo()
         {
             HeapDelete(this->xdataInfo);
         }
+#else
+#if defined(_M_ARM)
+        // The in-proc ARM32 JIT registers the XDataAllocation embedded in its
+        // CustomHeap allocation (Encoder.cpp). CustomHeap::Free releases the
+        // .eh_frame storage through FreeXdata and recycles the embedded struct
+        // with the allocation, so only unregister here; HeapDelete on this
+        // interior pointer would be an invalid free.
+#else
+        // XDataAllocation is allocated with HeapNewZ in NativeCodeGenerator.
+        HeapDelete(this->xdataInfo);
+#endif
 #endif
         this->xdataInfo = nullptr;
     }

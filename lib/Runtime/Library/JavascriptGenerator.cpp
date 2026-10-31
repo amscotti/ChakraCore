@@ -10,6 +10,24 @@ using namespace Js;
 
 namespace
 {
+    // The retained write-barrier frame is tagged with the low bit (the frame is
+    // at least pointer-aligned) so the recycler's conservative heap scan sees
+    // an unaligned value and does not mark the frame as live.
+    const uintptr_t WriteBarrierFrameTag = 1;
+
+    uintptr_t TagWriteBarrierFrame(InterpreterStackFrame* frame)
+    {
+        Assert(frame != nullptr);
+        Assert((reinterpret_cast<uintptr_t>(frame) & WriteBarrierFrameTag) == 0);
+        return reinterpret_cast<uintptr_t>(frame) | WriteBarrierFrameTag;
+    }
+
+    InterpreterStackFrame* UntagWriteBarrierFrame(uintptr_t taggedFrame)
+    {
+        Assert(taggedFrame != 0);
+        return reinterpret_cast<InterpreterStackFrame*>(taggedFrame & ~WriteBarrierFrameTag);
+    }
+
     // RAII helper to set the state of the generator to completed if an exception is 
     // thrown or if the save state InterpreterStackFrame is never created implying 
     // the generator is JITed and returned without ever yielding
@@ -61,7 +79,13 @@ JavascriptGenerator::JavascriptGenerator(
         frame(nullptr),
         state(GeneratorState::SuspendedStart),
         scriptFunction(scriptFunction),
-        resumeYieldObject(nullptr) {}
+        resumeYieldObject(nullptr),
+        writeBarrierFrame(0)
+#if ENABLE_SUSPENDED_COROUTINE_REPARSE_GUARD
+        , liveCoroutineFunctionBody(nullptr)
+        , liveCoroutineFrameCounted(false)
+#endif
+{}
 
 JavascriptGenerator* JavascriptGenerator::New(
     Recycler* recycler,
@@ -82,7 +106,13 @@ JavascriptGenerator* JavascriptGenerator::New(
     Arguments heapArgs(args.Info, unsafe_write_barrier_cast<Var*>(argValuesCopy));
 
 #if GLOBAL_ENABLE_WRITE_BARRIER
-    if (CONFIG_FLAG(ForceSoftwareWriteBarrier))
+    // On Apple ARM64 the reparse guard also needs Finalize to run for a
+    // collected suspended generator even if the software write barrier is
+    // disabled at runtime. Finalization is what drops the FunctionBody's live
+    // frame count in that case. The extra finalizer for non-generator
+    // JavascriptGenerator users is a no-op; keeping it unconditional avoids
+    // relying on flags that are not final yet at allocation time.
+    if (CONFIG_FLAG(ForceSoftwareWriteBarrier) || ENABLE_SUSPENDED_COROUTINE_REPARSE_GUARD)
     {
         JavascriptGenerator* obj = RecyclerNewFinalized(
             recycler,
@@ -91,7 +121,7 @@ JavascriptGenerator* JavascriptGenerator::New(
             heapArgs,
             scriptFunction);
 
-        if (obj->args.Values != nullptr)
+        if (CONFIG_FLAG(ForceSoftwareWriteBarrier) && obj->args.Values != nullptr)
         {
             recycler->RegisterPendingWriteBarrierBlock(
                 obj->args.Values,
@@ -120,10 +150,32 @@ void JavascriptGenerator::SetFrame(InterpreterStackFrame* frame, size_t bytes)
 {
     Assert(this->frame == nullptr);
     this->frame = frame;
+#if ENABLE_SUSPENDED_COROUTINE_REPARSE_GUARD
+    // The frame's ByteCodeReader and operand metadata point into this body.
+    // Count it exactly once for the generator's lifetime; completion or the
+    // generator's finalizer releases the count even after the JIT epilogue has
+    // nulled `frame`.
+    Assert(!this->liveCoroutineFrameCounted);
+    Assert(this->liveCoroutineFunctionBody == nullptr);
+    FunctionBody* functionBody = frame->GetFunctionBody();
+    Assert(functionBody != nullptr);
+    // Synchronous and async generators keep a resumable InterpreterStackFrame
+    // whose reader points into this body. Plain async functions use the same
+    // JavascriptGenerator object but their debugger attach/locals path expects
+    // the body to be reparsed; do not pin those bodies.
+    if (functionBody->IsGenerator())
+    {
+        functionBody->AddLiveCoroutineFrame();
+        this->liveCoroutineFunctionBody = functionBody;
+        this->liveCoroutineFrameCounted = true;
+    }
+#endif
 #if GLOBAL_ENABLE_WRITE_BARRIER
     if (CONFIG_FLAG(ForceSoftwareWriteBarrier))
     {
+        Assert(this->writeBarrierFrame == 0);
         GetScriptContext()->GetRecycler()->RegisterPendingWriteBarrierBlock(frame, bytes);
+        this->writeBarrierFrame = TagWriteBarrierFrame(frame);
     }
 #endif
 }
@@ -137,18 +189,69 @@ void JavascriptGenerator::SetFrameSlots(Js::RegSlot slotCount, Field(Var)* frame
         GetFrame()->m_localSlots[i] = frameSlotArray[i];
 }
 
+void JavascriptGenerator::UnregisterPendingWriteBarrierBlocks()
+{
+#if GLOBAL_ENABLE_WRITE_BARRIER
+    if (!CONFIG_FLAG(ForceSoftwareWriteBarrier))
+    {
+        return;
+    }
+
+    auto* recycler = GetScriptContext()->GetRecycler();
+
+    // SetState(Completed) clears these pointers, so each registration is
+    // removed exactly once: here while the generator is still suspended, or
+    // from the completion transition before the pointers are cleared.
+    //
+    // The JIT epilogue nulls `frame` before completion is observed, so prefer
+    // the address retained by SetFrame. Clearing it before the unregister
+    // keeps the cleanup exactly once; the `frame` fallback covers a frame
+    // registered without a retained address.
+    if (this->writeBarrierFrame != 0)
+    {
+        InterpreterStackFrame* registeredFrame = UntagWriteBarrierFrame(this->writeBarrierFrame);
+        this->writeBarrierFrame = 0;
+        recycler->UnRegisterPendingWriteBarrierBlock(registeredFrame);
+    }
+    else if (this->frame)
+    {
+        recycler->UnRegisterPendingWriteBarrierBlock(this->frame);
+    }
+
+    if (this->args.Values)
+    {
+        recycler->UnRegisterPendingWriteBarrierBlock(this->args.Values);
+        recycler->UnRegisterPendingWriteBarrierBlock(&this->args.Values);
+    }
+#endif
+}
+
+#if ENABLE_SUSPENDED_COROUTINE_REPARSE_GUARD
+void JavascriptGenerator::ReleaseLiveCoroutineFrame()
+{
+    if (this->liveCoroutineFrameCounted)
+    {
+        Assert(this->liveCoroutineFunctionBody != nullptr);
+        this->liveCoroutineFunctionBody->RemoveLiveCoroutineFrame();
+        this->liveCoroutineFunctionBody = nullptr;
+        this->liveCoroutineFrameCounted = false;
+    }
+}
+#endif
+
 #if GLOBAL_ENABLE_WRITE_BARRIER
 void JavascriptGenerator::Finalize(bool isShutdown)
 {
-    if (CONFIG_FLAG(ForceSoftwareWriteBarrier) && !isShutdown)
+    if (!isShutdown)
     {
-        auto* recycler = GetScriptContext()->GetRecycler();
-        
-        if (this->frame)
-            recycler->UnRegisterPendingWriteBarrierBlock(this->frame);
-
-        if (this->args.Values)
-            recycler->UnRegisterPendingWriteBarrierBlock(this->args.Values);
+#if ENABLE_SUSPENDED_COROUTINE_REPARSE_GUARD
+        // A collected suspended generator will never resume, so it no longer
+        // needs the FunctionBody's bytecode pinned. Shutdown skips this: the
+        // context and its bodies are going away together, and ordering between
+        // the generator and FunctionBody finalizers is not guaranteed.
+        ReleaseLiveCoroutineFrame();
+#endif
+        UnregisterPendingWriteBarrierBlocks();
     }
 }
 #endif

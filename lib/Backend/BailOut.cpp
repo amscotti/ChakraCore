@@ -1149,7 +1149,15 @@ BailOutRecord::BailOutCommonNoCodeGen(Js::JavascriptCallStackLayout * layout, Ba
     Assert(bailOutRecord->parent == nullptr);
     Assert(Js::VarIs<Js::ScriptFunction>(layout->functionObject));
     Js::ScriptFunction ** functionRef = (Js::ScriptFunction **)&layout->functionObject;
-    Js::ArgumentReader args(&layout->callInfo, layout->args);
+    // FromFramePointer addresses the homed x0. function, callInfo, and the
+    // arguments-object slot stay on that pointer. On Apple the contiguous
+    // argv image begins after the 8 homes, so args[0] ("this") is 8 pointers
+    // further on. A bailout frame has a call, so those 8 homes exist.
+    Js::Var *argValues = layout->args;
+#if defined(__APPLE__) && defined(_M_ARM64)
+    argValues += 8;
+#endif
+    Js::ArgumentReader args(&layout->callInfo, argValues);
     Js::Var result = BailOutHelper(layout, functionRef, args, false, bailOutRecord, bailOutOffset, returnAddress, bailOutKind, registerSaves, bailOutReturnValue, layout->GetArgumentsObjectLocation(), branchValue, argoutRestoreAddress);
     return result;
 }

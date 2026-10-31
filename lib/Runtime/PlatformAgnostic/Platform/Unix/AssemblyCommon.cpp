@@ -7,7 +7,12 @@
 #include "Common.h"
 #include "PlatformAgnostic/AssemblyCommon.h"
 
-#if !defined(DISABLE_JIT) && defined(_AMD64_)
+#if !defined(DISABLE_JIT) && (defined(_AMD64_) || defined(_M_ARM64))
+// The header only declares this typedef for AMD64 Apple. ARM64 keeps that
+// header unchanged and names the callback here.
+#if !defined(_AMD64_) || !defined(__APPLE__)
+typedef void (*mac_fde_reg_op)(const void* addr);
+#endif
 extern void mac_fde_wrapper(const char *dataStart, mac_fde_reg_op reg_op)
 {
     const char *head = dataStart;

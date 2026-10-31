@@ -266,7 +266,8 @@ namespace Js
         ArrayBufferParent(type, mappedLength, arrayBuffer),
         byteOffset(offSet),
         BYTES_PER_ELEMENT(elementSize),
-        lengthTracking(lengthTracking)
+        lengthTracking(lengthTracking),
+        capturedLength(mappedLength)
     {
     }
 

@@ -201,6 +201,19 @@ void CodeGenWorkItem::OnRemoveFromJitQueue(NativeCodeGenerator* generator)
 
 void CodeGenWorkItem::OnWorkItemProcessFail(NativeCodeGenerator* codeGen)
 {
+#if PDATA_ENABLED && !defined(_WIN32)
+    // Defensive early unregister for a future post-registration codegen
+    // failure, before the entry point records its native code. Normal cleanup
+    // handles the installed path; CleanupXDataInfo clears the pointer, making
+    // that later cleanup a null-safe no-op. A failure before registration
+    // leaves xdataInfo null, and a loop-body Reset has already cleaned and
+    // dropped its NativeEntryPointData.
+    if (this->entryPointInfo != nullptr && this->entryPointInfo->HasNativeEntryPointData())
+    {
+        this->entryPointInfo->GetNativeEntryPointData()->CleanupXDataInfo();
+    }
+#endif
+
     if (!isAllocationCommitted && this->allocation != nullptr && this->allocation->allocation != nullptr)
     {
 #if DBG

@@ -5723,7 +5723,11 @@ static void EmitGetBindingValueWithObject(
     }
     else
     {
-        byteCodeGenerator->Writer()->Reg1(Js::OpCode::LdUndef, lhsLocation);
+        // lhsLocation is defined on every path through the enclosing
+        // dynamic-load join, so this def must reuse the location's temp
+        // sym (as LdFld_ReuseLoc below does): a plain LdUndef def makes
+        // IRBuilder rename the temp, orphaning the default path's def.
+        byteCodeGenerator->Writer()->Reg1(Js::OpCode::LdUndef_ReuseLoc, lhsLocation);
     }
     byteCodeGenerator->Writer()->Br(doneLabel);
 
@@ -7105,29 +7109,39 @@ Js::RegSlot EmitAssignmentReferenceBase(ParseNode *lhs, ByteCodeGenerator *byteC
         for (int i = 0;; i++)
         {
             byteCodeGenerator->Writer()->MarkLabel(recList.Item(i).label);
+            // Every def of referenceBaseLocation after the InitUndecl
+            // above must reuse its temp sym (_ReuseLoc forms): a plain
+            // def makes IRBuilder rename the temp, orphaning the
+            // InitUndecl def at the join (interpreter-safe, JIT-wrong).
             switch (recList.Item(i).kind)
             {
             case DynamicLoadKind::Local:
-                byteCodeGenerator->Writer()->Reg1(Js::OpCode::LdLocalObj, referenceBaseLocation);
+                byteCodeGenerator->Writer()->Reg1(Js::OpCode::LdLocalObj_ReuseLoc, referenceBaseLocation);
                 break;
 
             case DynamicLoadKind::ParamObj:
-                byteCodeGenerator->Writer()->Reg1(Js::OpCode::LdParamObj, referenceBaseLocation);
+            {
+                // No LdParamObj_ReuseLoc: load to a fresh temp, then copy.
+                Js::RegSlot paramObjectReg = funcInfo->AcquireTmpRegister();
+                byteCodeGenerator->Writer()->Reg1(Js::OpCode::LdParamObj, paramObjectReg);
+                byteCodeGenerator->Writer()->Reg2(Js::OpCode::Ld_A_ReuseLoc, referenceBaseLocation, paramObjectReg);
+                funcInfo->ReleaseTmpRegister(paramObjectReg);
                 break;
+            }
 
             case DynamicLoadKind::Env:
-                byteCodeGenerator->Writer()->SlotI1(Js::OpCode::LdEnvObj, referenceBaseLocation, recList.Item(i).index);
+                byteCodeGenerator->Writer()->SlotI1(Js::OpCode::LdEnvObj_ReuseLoc, referenceBaseLocation, recList.Item(i).index);
                 break;
 
             case DynamicLoadKind::LocalWith:
-                byteCodeGenerator->Writer()->Reg2(Js::OpCode::UnwrapWithObj, referenceBaseLocation, recList.Item(i).instance);
+                byteCodeGenerator->Writer()->Reg2(Js::OpCode::UnwrapWithObj_ReuseLoc, referenceBaseLocation, recList.Item(i).instance);
                 break;
 
             case DynamicLoadKind::EnvWith:
             {
                 Js::RegSlot withLocation = funcInfo->AcquireTmpRegister();
                 byteCodeGenerator->Writer()->SlotI1(Js::OpCode::LdEnvObj, withLocation, recList.Item(i).index);
-                byteCodeGenerator->Writer()->Reg2(Js::OpCode::UnwrapWithObj, referenceBaseLocation, withLocation);
+                byteCodeGenerator->Writer()->Reg2(Js::OpCode::UnwrapWithObj_ReuseLoc, referenceBaseLocation, withLocation);
                 funcInfo->ReleaseTmpRegister(withLocation);
                 break;
             }
@@ -8520,13 +8534,16 @@ void EmitLoad(
         }
         else
         {
-            byteCodeGenerator->Writer()->Reg1(Js::OpCode::LdUndef, lhs->location);
+            // Join-temp def: reuse the temp sym (see
+            // EmitGetBindingValueWithObject), or IRBuilder renames the
+            // temp and orphans the EmitPropLoad def above.
+            byteCodeGenerator->Writer()->Reg1(Js::OpCode::LdUndef_ReuseLoc, lhs->location);
         }
         byteCodeGenerator->Writer()->Br(doneLabel);
 
         byteCodeGenerator->Writer()->MarkLabel(presentLabel);
         uint cacheId = funcInfo->FindOrAddInlineCacheId(referenceBaseLocation, propertyId, false, false);
-        byteCodeGenerator->Writer()->PatchableProperty(Js::OpCode::LdFld, lhs->location, referenceBaseLocation, cacheId);
+        byteCodeGenerator->Writer()->PatchableProperty(Js::OpCode::LdFld_ReuseLoc, lhs->location, referenceBaseLocation, cacheId);
         // A captured declarative base may still be in TDZ. The normal load
         // path checks this; the direct property load must do so explicitly.
         byteCodeGenerator->Writer()->Reg1(Js::OpCode::ChkUndecl, lhs->location);
@@ -9614,9 +9631,21 @@ void EmitCallTarget(
                     // HasProperty before Get; the call target load must do
                     // the same for a dynamic/with instance.
                     Js::PropertyIdIndexType propertyIndex = funcInfo->FindOrAddReferencedPropertyId(propertyId);
-                    Js::ByteCodeLabel presentLabel = byteCodeGenerator->Writer()->DefineLabel();
+                    Js::ByteCodeLabel missingLabel = byteCodeGenerator->Writer()->DefineLabel();
                     Js::ByteCodeLabel doneLabel = byteCodeGenerator->Writer()->DefineLabel();
-                    byteCodeGenerator->Writer()->BrProperty(Js::OpCode::BrOnHasProperty, presentLabel, *callObjLocation, propertyIndex);
+                    // Emit the method load before the missing-binding def
+                    // in bytecode order: it is the first def of the call
+                    // target temp, and the missing path's def below reuses
+                    // that temp sym (LdUndef_ReuseLoc; there is no
+                    // LdMethodFld_ReuseLoc). A plain LdUndef emitted first
+                    // would make IRBuilder rename the temp at the method
+                    // load and orphan the missing path's def. BrOnNoProperty
+                    // (same HasProperty probe, inverted sense) keeps the
+                    // method load on the fallthrough path.
+                    byteCodeGenerator->Writer()->BrProperty(Js::OpCode::BrOnNoProperty, missingLabel, *callObjLocation, propertyIndex);
+                    EmitMethodFld(pnodeNameTarget, *callObjLocation, propertyId, byteCodeGenerator, funcInfo);
+                    byteCodeGenerator->Writer()->Br(doneLabel);
+                    byteCodeGenerator->Writer()->MarkLabel(missingLabel);
                     if (funcInfo->GetIsStrictMode() || byteCodeGenerator->forceStrictModeForClassComputedPropertyName)
                     {
                         byteCodeGenerator->Writer()->W1(Js::OpCode::RuntimeReferenceError, SCODE_CODE(JSERR_CantAssignTo));
@@ -9628,14 +9657,12 @@ void EmitCallTarget(
                         // unresolvable/global reference still throws.
                         Js::ByteCodeLabel errorLabel = byteCodeGenerator->Writer()->DefineLabel();
                         byteCodeGenerator->Writer()->BrReg2(Js::OpCode::BrEq_A, errorLabel, *callObjLocation, ByteCodeGenerator::RootObjectRegister);
-                        byteCodeGenerator->Writer()->Reg1(Js::OpCode::LdUndef, pnodeNameTarget->location);
+                        byteCodeGenerator->Writer()->Reg1(Js::OpCode::LdUndef_ReuseLoc, pnodeNameTarget->location);
                         byteCodeGenerator->Writer()->Br(doneLabel);
                         byteCodeGenerator->Writer()->MarkLabel(errorLabel);
                         byteCodeGenerator->Writer()->W1(Js::OpCode::RuntimeReferenceError, SCODE_CODE(JSERR_CantAssignTo));
                         byteCodeGenerator->Writer()->Br(doneLabel);
                     }
-                    byteCodeGenerator->Writer()->MarkLabel(presentLabel);
-                    EmitMethodFld(pnodeNameTarget, *callObjLocation, propertyId, byteCodeGenerator, funcInfo);
                     byteCodeGenerator->Writer()->MarkLabel(doneLabel);
                     break;
                 }

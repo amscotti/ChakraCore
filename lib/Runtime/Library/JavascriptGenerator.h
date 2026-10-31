@@ -42,9 +42,26 @@ public:
 
     void SetState(GeneratorState state)
     {
+        const bool isCompleting = state == GeneratorState::Completed &&
+            this->state != GeneratorState::Completed;
+
         this->state = state;
+        if (isCompleting)
+        {
+            // Completion drops the generator's references to the frame and
+            // argument buffer. Remove their pending software write-barrier
+            // entries while the pointers still identify the registered blocks.
+            UnregisterPendingWriteBarrierBlocks();
+        }
+
         if (state == GeneratorState::Completed)
         {
+#if ENABLE_SUSPENDED_COROUTINE_REPARSE_GUARD
+            // Completion is observed after the JIT epilogue may already have
+            // nulled `frame`, so use the retained FunctionBody registration
+            // rather than the frame to release the reparse guard.
+            ReleaseLiveCoroutineFrame();
+#endif
             frame = nullptr;
             args.Values = nullptr;
             scriptFunction = nullptr;
@@ -61,7 +78,28 @@ private:
     Field(ScriptFunction*) scriptFunction;
     Field(DynamicObject*) resumeYieldObject;
 
+    // Address of the frame registered with the software write barrier. The JIT
+    // epilogue nulls `frame` before completion is observed, so this retained
+    // address is the only stable way to unregister the pending block.
+    // The low bit is tagged so the conservative heap scan does not treat this
+    // bookkeeping word as a live GC reference. It is cleared when the block is
+    // unregistered and is never used to access the frame.
+    uintptr_t writeBarrierFrame;
+
+#if ENABLE_SUSPENDED_COROUTINE_REPARSE_GUARD
+    // FunctionBody that owns the bytecode backing the suspended frame. This
+    // Field keeps the body alive for as long as the generator can resume into
+    // it; the paired count on that body blocks a debugger reparse from freeing
+    // the bytecode. Set by SetFrame and released exactly once on completion or
+    // on finalization of a collected suspended generator.
+    Field(FunctionBody*) liveCoroutineFunctionBody;
+    bool liveCoroutineFrameCounted;
+
+    void ReleaseLiveCoroutineFrame();
+#endif
+
     void SetResumeYieldProperties(Var value, ResumeYieldKind kind);
+    void UnregisterPendingWriteBarrierBlocks();
 
 protected:
     DEFINE_VTABLE_CTOR_MEMBER_INIT(JavascriptGenerator, DynamicObject, args);

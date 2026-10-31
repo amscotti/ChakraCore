@@ -945,6 +945,13 @@ MACRO_EXTEND_WMS(       StPrivateDynamic, Reg4,      OpSideEffect|OpOpndHasImpli
 // ImportCall) before any JIT-configuration claim for import() with options.
 MACRO_EXTEND_WMS(       ImportCallWithOptions, Reg3,          OpSideEffect|OpHasImplicitCall)
 
+// S14-P5 GetBindingValue probes define the load result on the
+// missing-binding path of a control-flow join whose other defs use
+// _ReuseLoc forms; LdUndef has no reuse form, so the backend renamed
+// the temp and orphaned the default path's def (interpreter-safe,
+// JIT-wrong). Appended last so no established opcode value shifts.
+MACRO_EXTEND_WMS(       LdUndef_ReuseLoc,    Reg1,           OpByteCodeOnly|OpCanCSE)       // Load 'undefined'
+
 #undef MACRO_WMS_PROFILED
 #undef MACRO_WMS_PROFILED2
 #undef MACRO_WMS_PROFILED_OP

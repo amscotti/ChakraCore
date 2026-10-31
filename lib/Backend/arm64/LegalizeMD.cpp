@@ -756,6 +756,11 @@ void LegalizeMD::LegalizeLDIMM(IR::Instr * instr, IntConstType immed)
         // Label (offset:fake)
         // MOVZ DST, Label
         // MOVK DST, Label <- was the LDIMM
+        //
+        // On 64-bit the encoded InlineeCallInfo is (inlineeStartOffset << 32) | argCount
+        // (see Js::InlineeCallInfo), so the upper two half-words must be emitted as well.
+        // Without them the runtime frame layout stores only the argument count and the
+        // stack walker reads InlineeStartOffset == 0 for inlinees that have no frame record.
 
         Assert(Security::DontEncode(instr->GetSrc1()));
 
@@ -772,6 +777,13 @@ void LegalizeMD::LegalizeLDIMM(IR::Instr * instr, IntConstType immed)
         // Typically (and worst case) we'll need to load 64 bits.
         IR::Instr* bits0_15 = IR::Instr::New(Js::OpCode::MOVZ, instr->GetDst(), target, IR::IntConstOpnd::New(0, IRType::TyUint8, instr->m_func, true), instr->m_func);
         instr->InsertBefore(bits0_15);
+
+#if TARGET_64
+        IR::Instr* bits32_47 = IR::Instr::New(Js::OpCode::MOVK, instr->GetDst(), target, IR::IntConstOpnd::New(32, IRType::TyUint8, instr->m_func, true), instr->m_func);
+        instr->InsertBefore(bits32_47);
+        IR::Instr* bits48_63 = IR::Instr::New(Js::OpCode::MOVK, instr->GetDst(), target, IR::IntConstOpnd::New(48, IRType::TyUint8, instr->m_func, true), instr->m_func);
+        instr->InsertBefore(bits48_63);
+#endif
 
         instr->ReplaceSrc1(target);
         instr->SetSrc2(IR::IntConstOpnd::New(16, IRType::TyUint8, instr->m_func, true));

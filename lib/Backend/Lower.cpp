@@ -2808,7 +2808,7 @@ Lowerer::LowerRange(IR::Instr *instrStart, IR::Instr *instrEnd, bool defaultDoFa
             break;
 
         case Js::OpCode::DeadBrOnHasProperty:
-            this->LowerUnaryHelperMem(instr, IR::HelperOp_HasProperty);
+            this->LowerDeadBrOnHasProperty(instr);
             break;
 
         case Js::OpCode::DeletedNonHelperBranch:
@@ -4453,6 +4453,10 @@ IR::Instr* Lowerer::LowerProfiledNewArray(IR::JitProfilingInstr* instr, bool has
     {
         const int32 argCount = m_lowererMD.LowerCallArgs(instr, Js::CallFlags_New, 4);
 
+        // This is the deliberate exception to the helper platform-ABI rule:
+        // HelperProfiledNewScObjArray consumes the JS argc/argv image, so the
+        // call is lowered with argCount (and Apple homes x0-x7). Pure helpers
+        // use ChangeToHelperCall, which passes 0 and does not home.
         m_lowererMD.LoadHelperArgument(instr, IR::Opnd::CreateProfileIdOpnd(instr->arrayProfileId, m_func));
         m_lowererMD.LoadHelperArgument(instr, IR::Opnd::CreateProfileIdOpnd(instr->profileId, m_func));
         m_lowererMD.LoadHelperArgument(instr, IR::Opnd::CreateFramePointerOpnd(m_func));
@@ -10840,6 +10844,37 @@ Lowerer::LowerBrFncApply(IR::Instr * instr, IR::JnHelperMethod helperMethod) {
 ///
 ///----------------------------------------------------------------------------
 IR::Instr *
+Lowerer::LowerDeadBrOnHasProperty(IR::Instr * instr)
+{
+    // The branch was dead (target is the next instruction), but the
+    // HasProperty probe must still run for its observable side effects
+    // (e.g. proxy "has" traps from the captured-base PutValue probe).
+    // Src1 is a property sym opnd, so it must be passed as
+    // (instance, propertyId) like LowerBrProperty does; the generic unary
+    // helper path would queue the sym opnd itself as a single argument.
+    IR::Instr * instrPrev;
+    IR::Instr * instrCall;
+    IR::Opnd *  opndSrc;
+    IR::Opnd *  opndDst;
+
+    opndSrc = instr->UnlinkSrc1();
+    AssertMsg(opndSrc->IsSymOpnd() && opndSrc->AsSymOpnd()->m_sym->IsPropertySym(),
+              "Expected propertySym as src of DeadBrOnHasProperty");
+
+    instrPrev = LoadScriptContext(instr);
+    this->LoadPropertySymAsArgument(instr, opndSrc);
+
+    opndDst = IR::RegOpnd::New(StackSym::New(TyMachReg, this->m_func), TyMachReg, this->m_func);
+    instrCall = IR::Instr::New(Js::OpCode::Call, opndDst, IR::HelperCallOpnd::New(IR::HelperOp_HasProperty, this->m_func), this->m_func);
+
+    instr->InsertBefore(instrCall);
+    instrCall = m_lowererMD.LowerCall(instrCall, 0);
+
+    instr->Remove();
+    return instrPrev;
+}
+
+IR::Instr *
 Lowerer::LowerBrProperty(IR::Instr * instr, IR::JnHelperMethod helper)
 {
     IR::Instr * instrPrev;
@@ -11424,8 +11459,18 @@ IR::Instr *Lowerer::LowerRestParameter(IR::Opnd *formalsOpnd, IR::Opnd *dstOpnd,
     // Elements pointer = ebp + (formals count + formals offset + 1)*sizeof(Var)
     IR::RegOpnd *srcOpnd = isGenerator ? generatorArgsPtrOpnd : IR::Opnd::CreateFramePointerOpnd(this->m_func);
     uint16 actualOffset = isGenerator ? 0 : GetFormalParamOffset(); //4
+    IntConstType byteOffset = (formalsOpnd->AsIntConstOpnd()->GetValue() + actualOffset) * MachPtr;
+#if defined(__APPLE__) && defined(_M_ARM64)
+    // Homes cover user arguments 0-4 only, and the next word is the caller
+    // image's function pointer. Rest needs one contiguous array, which the
+    // caller image provides 64 bytes past that homed formula.
+    if (!isGenerator)
+    {
+        byteOffset += 8 * MachPtr;
+    }
+#endif
     IR::RegOpnd *argPtrOpnd = IR::RegOpnd::New(TyMachPtr, this->m_func);
-    InsertAdd(false, argPtrOpnd, srcOpnd, IR::IntConstOpnd::New((formalsOpnd->AsIntConstOpnd()->GetValue() + actualOffset) * MachPtr, TyMachPtr, this->m_func), helperCallInstr);
+    InsertAdd(false, argPtrOpnd, srcOpnd, IR::IntConstOpnd::New(byteOffset, TyMachPtr, this->m_func), helperCallInstr);
     m_lowererMD.LoadHelperArgument(helperCallInstr, argPtrOpnd);
 
     m_lowererMD.LoadHelperArgument(helperCallInstr, excessOpnd);
@@ -15929,7 +15974,6 @@ IR::BranchInstr *Lowerer::InsertTestBranch(
  * $continueLabel : fall through
 */
 void Lowerer::InsertAddWithOverflowCheck(
-    const bool needFlags,
     IR::Opnd *const dst,
     IR::Opnd *src1,
     IR::Opnd *src2,
@@ -15937,7 +15981,9 @@ void Lowerer::InsertAddWithOverflowCheck(
     IR::Instr **const onOverflowInsertBeforeInstrRef)
 {
     Func * func = insertBeforeInstr->m_func;
-    InsertAdd(needFlags, dst, src1, src2, insertBeforeInstr);
+    // The branch below consumes the overflow flag. ARM/ARM64 ADD does not
+    // update flags (unlike x86), so this add must always set them.
+    InsertAdd(true, dst, src1, src2, insertBeforeInstr);
 
     IR::LabelInstr *const continueLabel = IR::LabelInstr::New(Js::OpCode::Label, func, false);
     InsertBranch(LowererMD::MDNotOverflowBranchOpcode, continueLabel, insertBeforeInstr);
@@ -22035,7 +22081,26 @@ Lowerer::GenerateLoadStackArgumentByIndex(IR::Opnd *dst, IR::RegOpnd *indexOpnd,
     Assert(GetFormalParamOffset() == 4);
     const BYTE indirScale = this->m_lowererMD.GetDefaultIndirScale();
 
-    argIndirOpnd = IR::IndirOpnd::New(ebpOpnd, indexOpnd, indirScale, TyMachReg, this->m_func);
+    IR::RegOpnd *loadIndex = indexOpnd;
+#if defined(__APPLE__) && defined(_M_ARM64)
+    // fp+(index+actualOffset)*8 hits a home while that sum is below 10
+    // (eight homes at fp+16). new.target passes callInfo.Count, so Count 5
+    // stays put and Count >= 6 steps into the caller image. A stack-args
+    // load passes the user index with actualOffset 5, so user arg 5 and
+    // later take the same step. The caller's index register is not modified.
+    if (!func->GetJITFunctionBody()->IsCoroutine())
+    {
+        loadIndex = IR::RegOpnd::New(indexOpnd->GetType(), func);
+        InsertMove(loadIndex, indexOpnd, instr);
+        IR::LabelInstr *noBias = IR::LabelInstr::New(Js::OpCode::Label, func, true);
+        int32 threshold = 10 - actualOffset;
+        InsertCompareBranch(loadIndex, IR::IntConstOpnd::New(threshold, TyInt32, func), Js::OpCode::BrLt_A, noBias, instr);
+        InsertAdd(false, loadIndex, loadIndex, IR::IntConstOpnd::New(8, TyInt32, func), instr);
+        instr->InsertBefore(noBias);
+    }
+#endif
+
+    argIndirOpnd = IR::IndirOpnd::New(ebpOpnd, loadIndex, indirScale, TyMachReg, this->m_func);
     argIndirOpnd->SetOffset(actualOffset << indirScale);
 
     Lowerer::InsertMove(dst, argIndirOpnd, instr);
@@ -22122,13 +22187,36 @@ Lowerer::GetArgsIndirOpndForTopFunction(IR::Instr* ldElem, IR::Opnd* valueOpnd)
     if (valueOpnd->IsIntConstOpnd())
     {
         IntConstType offset = (valueOpnd->AsIntConstOpnd()->GetValue() + actualOffset) * MachPtr;
+#if defined(__APPLE__) && defined(_M_ARM64)
+        // User arguments 0-4 are the homed x3-x7. A later index falls into the
+        // caller image, which begins eight pointers after the homed slot.
+        // A frame that reads its arguments homes all eight registers.
+        if (!m_func->GetJITFunctionBody()->IsCoroutine() &&
+            valueOpnd->AsIntConstOpnd()->GetValue() >= 5)
+        {
+            offset += 8 * MachPtr;
+        }
+#endif
         // TODO: Assert(Math::FitsInDWord(offset));
         argIndirOpnd = IR::IndirOpnd::New(baseOpnd, (int32)offset, TyMachReg, this->m_func);
     }
     else
     {
+        IR::RegOpnd *indexReg = valueOpnd->AsRegOpnd();
+#if defined(__APPLE__) && defined(_M_ARM64)
+        if (!m_func->GetJITFunctionBody()->IsCoroutine())
+        {
+            IR::RegOpnd *adjusted = IR::RegOpnd::New(indexReg->GetType(), this->m_func);
+            InsertMove(adjusted, indexReg, ldElem);
+            IR::LabelInstr *noBias = IR::LabelInstr::New(Js::OpCode::Label, this->m_func, true);
+            InsertCompareBranch(adjusted, IR::IntConstOpnd::New(5, TyInt32, this->m_func), Js::OpCode::BrLt_A, noBias, ldElem);
+            InsertAdd(false, adjusted, adjusted, IR::IntConstOpnd::New(8, TyInt32, this->m_func), ldElem);
+            ldElem->InsertBefore(noBias);
+            indexReg = adjusted;
+        }
+#endif
         const BYTE indirScale = this->m_lowererMD.GetDefaultIndirScale();
-        argIndirOpnd = IR::IndirOpnd::New(baseOpnd->AsRegOpnd(), valueOpnd->AsRegOpnd(), indirScale, TyMachReg, this->m_func);
+        argIndirOpnd = IR::IndirOpnd::New(baseOpnd->AsRegOpnd(), indexReg, indirScale, TyMachReg, this->m_func);
 
         // Need to offset valueOpnd by 5. Instead of changing valueOpnd, we can just add an offset to the indir. Changing
         // valueOpnd requires creation of a temp sym (if it's not already a temp) so that the value of the sym that
@@ -26159,7 +26247,7 @@ Lowerer::LowerSetConcatStrMultiItem(IR::Instr * instr)
     }
 
     IR::Instr *onOverflowInsertBeforeInstr;
-    InsertAddWithOverflowCheck(false, dstLength, dstLength, srcLength, instr, &onOverflowInsertBeforeInstr);
+    InsertAddWithOverflowCheck(dstLength, dstLength, srcLength, instr, &onOverflowInsertBeforeInstr);
     IR::Instr* callInstr = IR::Instr::New(Js::OpCode::Call, func);
     callInstr->SetSrc1(IR::HelperCallOpnd::New(IR::HelperOp_OutOfMemoryError, func));
 
@@ -28347,9 +28435,18 @@ Lowerer::GenerateSymbolTest(IR::RegOpnd *srcReg, IR::Instr *insertInstr, IR::Lab
 void
 Lowerer::LowerConvNum(IR::Instr *instrLoad, bool noMathFastPath)
 {
+    // Conv_Num is ToNumber (throws on BigInt); Conv_Numeric is ToNumeric
+    // (returns a BigInt unchanged). They share the tagged-int fast path
+    // below but must call different helpers for everything else.
+    const bool isConvNumeric = instrLoad->m_opcode == Js::OpCode::Conv_Numeric;
+    const IR::JnHelperMethod fullHelper =
+        isConvNumeric ? IR::HelperOp_ConvNumeric_Full : IR::HelperOp_ConvNumber_Full;
+    const IR::JnHelperMethod inPlaceHelper =
+        isConvNumeric ? IR::HelperOp_ConvNumericInPlace : IR::HelperOp_ConvNumberInPlace;
+
     if (PHASE_OFF(Js::OtherFastPathPhase, this->m_func) || noMathFastPath || !instrLoad->GetSrc1()->IsRegOpnd())
     {
-        this->LowerUnaryHelperMemWithTemp2(instrLoad, IR_HELPER_OP_FULL_OR_INPLACE(ConvNumber));
+        this->LowerUnaryHelperMemWithTemp2(instrLoad, fullHelper, inPlaceHelper);
         return;
     }
 
@@ -28399,7 +28496,7 @@ Lowerer::LowerConvNum(IR::Instr *instrLoad, bool noMathFastPath)
         {
             instrLoad->InsertAfter(labelDone);
         }
-        this->LowerUnaryHelperMemWithTemp2(instrLoad, IR_HELPER_OP_FULL_OR_INPLACE(ConvNumber));
+        this->LowerUnaryHelperMemWithTemp2(instrLoad, fullHelper, inPlaceHelper);
     }
     else
     {
@@ -29206,17 +29303,37 @@ void Lowerer::LowerGeneratorHelper::InsertNullOutGeneratorFrameInEpilogue(IR::La
     IR::RegOpnd* dstOpnd = IR::RegOpnd::New(TyMachReg, this->func);
 
     // Since we are already in the epilogue, use one of the caller-saved
-    // registers to store the address to our interpreter frame
+    // registers to store the address to our interpreter frame. These
+    // instructions are created after register allocation, so a register left
+    // unset would be encoded as RegNOREG (x15 on ARM64, pc on ARM32) rather
+    // than being allocated.
 #if defined(_M_X64)
     dstOpnd->SetReg(RegRCX);
 #elif defined(_M_IX86)
     dstOpnd->SetReg(RegECX);
+#elif defined(_M_ARM64) || defined(_M_ARM)
+    dstOpnd->SetReg(RegR12);
 #endif
 
     InsertMove(dstOpnd, srcOpnd, insertionPoint);
 
     IR::IndirOpnd* indirOpnd = IR::IndirOpnd::New(dstOpnd, Js::JavascriptGenerator::GetFrameOffset(), TyMachPtr, this->func);
+#if defined(_M_ARM64)
+    // ARM64 has no store-immediate form. Store the zero register directly
+    // instead of asking the post-regalloc legalizer to materialize null in a
+    // register that it has not allocated.
+    IR::Opnd* addrOpnd = IR::RegOpnd::New(nullptr, RegZR, TyMachPtr, this->func);
+#elif defined(_M_ARM)
+    // ARM32 has no zero register. RegR3 is caller-saved but not a zero
+    // register, so materialize zero into it explicitly. Do not use RegR12:
+    // it is the ARM32 SCRATCH_REG and holds the generator address here.
+    InsertMove(IR::RegOpnd::New(nullptr, RegR3, TyMachPtr, this->func),
+               IR::AddrOpnd::NewNull(this->func),
+               insertionPoint);
+    IR::Opnd* addrOpnd = IR::RegOpnd::New(nullptr, RegR3, TyMachPtr, this->func);
+#else
     IR::AddrOpnd* addrOpnd = IR::AddrOpnd::NewNull(this->func);
+#endif
     InsertMove(indirOpnd, addrOpnd, insertionPoint, false /* generateWriteBarrier */);
 }
 

@@ -231,7 +231,16 @@ void
 JITOutput::RecordUnwindInfo(BYTE *unwindInfo, size_t size, BYTE * xdataAddr, BYTE* localXdataAddr)
 {
     Assert(XDATA_SIZE >= size);
+    // Apple ARM64: the xdata slot lives in the same MAP_JIT segment as the
+    // code. The write window is per thread, so open and close it around the
+    // copy instead of mprotecting the page.
+#if defined(__APPLE__) && defined(_M_ARM64)
+    VIRTUALJitWriteProtect(TRUE);
+#endif
     memcpy_s(localXdataAddr, XDATA_SIZE, unwindInfo, size);
+#if defined(__APPLE__) && defined(_M_ARM64)
+    VIRTUALJitWriteProtect(FALSE);
+#endif
     m_outputData->xdataAddr = (intptr_t)xdataAddr;
 }
 

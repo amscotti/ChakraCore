@@ -251,8 +251,13 @@ namespace Js
 #else
                 Js::Configuration::Global.flags.ForceDynamicProfile ||
 #endif
-                !scriptContext->GetConfig()->IsNoNative() ||
-                (functionBody && functionBody->IsInDebugMode())
+                // Dynamic profile info is a JIT feature. Do not let debug mode
+                // request it when native codegen is unavailable: debugger
+                // reparse would then add profile opcodes to a suspended
+                // coroutine's bytecode and the saved offset would no longer
+                // name the same opcode. Reparse can still change the layout for
+                // other reasons; that pre-existing lifetime issue is separate.
+                !scriptContext->GetConfig()->IsNoNative()
 #ifdef DYNAMIC_PROFILE_STORAGE
                 || DynamicProfileStorage::DoCollectInfo()
 #endif

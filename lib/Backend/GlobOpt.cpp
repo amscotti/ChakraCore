@@ -4992,6 +4992,15 @@ GlobOpt::ValueNumberDst(IR::Instr **pInstr, Value *src1Val, Value *src2Val)
 
     case Js::OpCode::Not_A:
     {
+        if (CONFIG_FLAG(ESBigInt) && !(src1Val && src1ValueInfo->IsNumber()))
+        {
+            // ValueType has no BigInt bit: ~ on a BigInt produces a BigInt,
+            // so the dst must not be claimed definite int unless the src
+            // is proven numeric. Otherwise a consumer (e.g. an outer ~)
+            // type-specializes against a BigInt var with no bailout.
+            return CreateDstUntransferredValue(ValueType::Uninitialized, instr, src1Val, src2Val);
+        }
+
         if (!src1Val || !src1ValueInfo->GetIntValMinMax(&min1, &max1, this->DoAggressiveIntTypeSpec()))
         {
             min1 = INT32_MIN;
@@ -5009,6 +5018,14 @@ GlobOpt::ValueNumberDst(IR::Instr **pInstr, Value *src1Val, Value *src2Val)
     case Js::OpCode::Shr_A:
     case Js::OpCode::ShrU_A:
     {
+        if (CONFIG_FLAG(ESBigInt) &&
+            !(src1Val && src1ValueInfo->IsNumber() && src2Val && src2ValueInfo->IsNumber()))
+        {
+            // Bitwise ops on BigInts produce BigInts (see Not_A above);
+            // don't claim a definite int/number dst from unproven srcs.
+            return CreateDstUntransferredValue(ValueType::Uninitialized, instr, src1Val, src2Val);
+        }
+
         if (!src1Val || !src1ValueInfo->GetIntValMinMax(&min1, &max1, this->DoAggressiveIntTypeSpec()))
         {
             min1 = INT32_MIN;
@@ -5038,6 +5055,12 @@ GlobOpt::ValueNumberDst(IR::Instr **pInstr, Value *src1Val, Value *src2Val)
     case Js::OpCode::Incr_A:
     case Js::OpCode::Decr_A:
     {
+        if (CONFIG_FLAG(ESBigInt) && !(src1Val && src1ValueInfo->IsNumber()))
+        {
+            // ++/-- on a BigInt produces a BigInt (see Not_A above).
+            return CreateDstUntransferredValue(ValueType::Uninitialized, instr, src1Val, src2Val);
+        }
+
         ValueType valueType;
         if(src1Val)
         {
@@ -11381,7 +11404,15 @@ GlobOpt::ToVar(IR::Instr *instr, IR::RegOpnd *regOpnd, BasicBlock *block, Value 
         return instr;
     }
 
-    Assert(block->globOptData.IsTypeSpecialized(varSym));
+    if (!block->globOptData.IsTypeSpecialized(varSym))
+    {
+        // The newer language bytecode can produce a Var use without a
+        // type-specialized representation (for example BrNotAddr_A in the
+        // baseline debugger tests). The normal path below assumes this cannot
+        // happen and would emit inconsistent IR. Abort this codegen attempt
+        // and let execution fall back instead of failing fatally.
+        throw Js::OperationAbortedException();
+    }
 
     if (!value)
     {
@@ -11945,6 +11976,29 @@ GlobOpt::ToTypeSpecUse(IR::Instr *instr, IR::Opnd *opnd, BasicBlock *block, Valu
                 //      y = obj * 0.2;  -> if obj has valueof, we'll only call valueof once on the FromVar conversion...
                 Assert(bailOutKind != IR::BailOutInvalid);
                 isBailout = true;
+            }
+
+            if (isBailout && CONFIG_FLAG(ESBigInt))
+            {
+                // BigInt is a primitive (TypeIds_BigInt <=
+                // TypeIds_LastJavascriptPrimitiveType) but ToNumber on it
+                // throws, and the interpreter operator would have taken
+                // the BigInt path instead. BailOutOnNotPrimitive and
+                // BailOutPrimitiveButString both let BigInt through to
+                // the conversion helper. Strengthen to bailouts whose
+                // predicates reject BigInt, so execution falls back to
+                // the interpreter operator. ValueType has no BigInt bit,
+                // so this applies whenever the operand is not proven
+                // numeric above.
+                if (toType == TyInt32 && bailOutKind == IR::BailOutOnNotPrimitive)
+                {
+                    bailOutKind = IR::BailOutIntOnly;
+                }
+                else if (toType == TyFloat64 && bailOutKind == IR::BailOutPrimitiveButString)
+                {
+                    bailOutKind = IR::BailOutNumberOnly;
+                    typeSpecSym->m_requiresBailOnNotNumber = true;
+                }
             }
         }
 

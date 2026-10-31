@@ -74,7 +74,13 @@
     ; x3 -- size of stack args area
     ; x4 -- exception object (for arm64_CallCatch only)
 
-    PROLOG_SAVE_REG_PAIR d8, d9, -240
+    ; Pre-index. The parent pdata/FDE unwinds this frame from SP, and the
+    ; 240-byte register area has to exist before the later stores. A plain
+    ; [sp, #-240] store does not allocate that area.
+    stp     d8, d9, [sp, #-240]!
+    .cfi_adjust_cfa_offset 240
+    .cfi_rel_offset d8, 0
+    .cfi_rel_offset d9, 8
     PROLOG_SAVE_REG_PAIR d10, d11, 16
     PROLOG_SAVE_REG_PAIR d12, d13, 32
     PROLOG_SAVE_REG_PAIR d14, d15, 48

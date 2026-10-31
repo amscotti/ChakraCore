@@ -8195,6 +8195,24 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
         JIT_HELPER_END(Op_LoadHeapArgsCached);
     }
 
+    static BOOL IsStrictModeForHeapArguments(JavascriptFunction *funcCallee)
+    {
+        // Generator/async-function objects carry the built-in entry FunctionInfo,
+        // whose proxy is null. Resolve the GeneratorVirtualScriptFunction that
+        // holds the original script's strict flag; the real function object is
+        // what arguments.callee exposes, but it must not lose the body's mode.
+        if (VarIs<JavascriptGeneratorFunction>(funcCallee))
+        {
+            GeneratorVirtualScriptFunction *scriptFunction =
+                UnsafeVarTo<JavascriptGeneratorFunction>(funcCallee)->GetGeneratorVirtualScriptFunction();
+            if (scriptFunction != nullptr)
+            {
+                return scriptFunction->IsStrictMode();
+            }
+        }
+        return funcCallee->IsStrictMode();
+    }
+
     Var JavascriptOperators::FillScopeObject(JavascriptFunction *funcCallee, uint32 actualsCount, uint32 formalsCount, Var frameObj, Var * paramAddr,
         Js::PropertyIdArray *propIds, HeapArgumentsObject * argsObj, ScriptContext * scriptContext, bool nonSimpleParamList, bool useCachedScope)
     {
@@ -8281,7 +8299,7 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
                 JavascriptOperators::SetItem(argsObj, argsObj, i, *tmpAddr, scriptContext, PropertyOperation_None, /* skipPrototypeCheck = */ TRUE);
             }
 
-            if (funcCallee->IsStrictMode())
+            if (IsStrictModeForHeapArguments(funcCallee))
             {
                 // If the formals are let decls, then we just overwrote the frame object slots with
                 // Undecl sentinels, and we can use the original arguments that were passed to the HeapArgumentsObject.
@@ -8294,7 +8312,7 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
     HeapArgumentsObject *JavascriptOperators::CreateHeapArguments(JavascriptFunction *funcCallee, uint32 actualsCount, uint32 formalsCount, Var frameObj, ScriptContext* scriptContext)
     {
         JavascriptLibrary *library = scriptContext->GetLibrary();
-        HeapArgumentsObject *argsObj = library->CreateHeapArguments(frameObj, formalsCount, !!funcCallee->IsStrictMode());
+        HeapArgumentsObject *argsObj = library->CreateHeapArguments(frameObj, formalsCount, !!IsStrictModeForHeapArguments(funcCallee));
 
 #if DBG
         DynamicTypeHandler* typeHandler = argsObj->GetTypeHandler();
@@ -8307,7 +8325,7 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
 
         JavascriptOperators::SetProperty(argsObj, argsObj, PropertyIds::length, JavascriptNumber::ToVar(actualsCount, scriptContext), scriptContext);
         JavascriptOperators::SetProperty(argsObj, argsObj, PropertyIds::_symbolIterator, library->EnsureArrayPrototypeValuesFunction(), scriptContext);
-        if (funcCallee->IsStrictMode())
+        if (IsStrictModeForHeapArguments(funcCallee))
         {
             JavascriptFunction* restrictedPropertyAccessor = library->GetThrowTypeErrorRestrictedPropertyAccessorFunction();
             argsObj->SetAccessors(PropertyIds::callee, restrictedPropertyAccessor, restrictedPropertyAccessor, PropertyOperation_NonFixedValue);

@@ -276,6 +276,7 @@ private:
     IR::Instr *     LowerBrCMem(IR::Instr * instr, IR::JnHelperMethod helperMethod, bool noMathFastPath, bool isHelper = true);
     IR::Instr *     LowerBrFncApply(IR::Instr * instr, IR::JnHelperMethod helperMethod);
     IR::Instr *     LowerBrProperty(IR::Instr * instr, IR::JnHelperMethod helperMethod);
+    IR::Instr *     LowerDeadBrOnHasProperty(IR::Instr * instr);
     IR::Instr *     LowerBrOnClassConstructor(IR::Instr *instr, IR::JnHelperMethod helperMethod);
     IR::Instr*      LowerMultiBr(IR::Instr * instr, IR::JnHelperMethod helperMethod);
     IR::Instr*      LowerMultiBr(IR::Instr * instr);
@@ -414,7 +415,7 @@ public:
 
 public:
     static void InsertDecUInt32PreventOverflow(IR::Opnd *const dst, IR::Opnd *const src, IR::Instr *const insertBeforeInstr, IR::Instr * *const onOverflowInsertBeforeInstrRef = nullptr);
-    static void InsertAddWithOverflowCheck(const bool needFlags, IR::Opnd *const dst, IR::Opnd *src1, IR::Opnd *src2, IR::Instr *const insertBeforeInstr, IR::Instr **const onOverflowInsertBeforeInstrRef);
+    static void InsertAddWithOverflowCheck(IR::Opnd *const dst, IR::Opnd *src1, IR::Opnd *src2, IR::Instr *const insertBeforeInstr, IR::Instr **const onOverflowInsertBeforeInstrRef);
 
     void InsertFloatCheckForZeroOrNanBranch(IR::Opnd *const src, const bool branchOnZeroOrNan, IR::LabelInstr *const target, IR::LabelInstr *const fallthroughLabel, IR::Instr *const insertBeforeInstr);
 

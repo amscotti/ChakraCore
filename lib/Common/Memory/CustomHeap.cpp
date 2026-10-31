@@ -18,6 +18,19 @@
 #include <malloc.h>
 #endif
 
+// Apple ARM64 MAP_JIT write windows are per thread. Every other platform has
+// no equivalent state, and the engine does not call into the Unix PAL there.
+#if defined(__APPLE__) && defined(_M_ARM64)
+static inline void CustomHeapJitWriteProtect(BOOL writeable)
+{
+    VIRTUALJitWriteProtect(writeable);
+}
+#else
+static inline void CustomHeapJitWriteProtect(BOOL)
+{
+}
+#endif
+
 namespace Memory
 {
 namespace CustomHeap
@@ -420,7 +433,10 @@ Allocation* Heap<TAlloc, TPreReservedAlloc>::AllocLargeObject(size_t bytes, usho
         {
             return nullptr;
         }
+        // Apple ARM64 MAP_JIT segment: a write window is per thread.
+        CustomHeapJitWriteProtect(TRUE);
         FillDebugBreak((BYTE*)localAddr, pages*AutoSystemInfo::PageSize);
+        CustomHeapJitWriteProtect(FALSE);
         this->codePageAllocators->FreeLocal(localAddr, segment);
 
         if (this->processHandle == GetCurrentProcess())
@@ -465,14 +481,17 @@ Allocation* Heap<TAlloc, TPreReservedAlloc>::AllocLargeObject(size_t bytes, usho
     if (allocation == nullptr)
     {
         AutoCriticalSection autoLock(&this->codePageAllocators->cs);
-        this->codePageAllocators->Release(address, pages, segment);
 
+        // Release the secondary (xdata) allocation before releasing the pages:
+        // for an allocation larger than maxAllocPageCount, Release reaches
+        // ReleaseSegment, which frees the segment and its secondary allocator.
 #if PDATA_ENABLED
         if(pdataCount > 0)
         {
             this->codePageAllocators->ReleaseSecondary(xdata, segment);
         }
 #endif
+        this->codePageAllocators->Release(address, pages, segment);
         return nullptr;
     }
 
@@ -528,7 +547,11 @@ DWORD Heap<TAlloc, TPreReservedAlloc>::EnsureAllocationExecuteWriteable(Allocati
     }
     else
     {
+        #if defined(__APPLE__) && defined(_M_ARM64)
+        return EnsureAllocationReadWrite<PAGE_READWRITE>(allocation); // PAGE_EXECUTE_READWRITE banned on Apple Silicon
+        #else
         return EnsureAllocationReadWrite<PAGE_EXECUTE_READWRITE>(allocation);
+        #endif
     }
 }
 
@@ -542,6 +565,9 @@ void Heap<TAlloc, TPreReservedAlloc>::FreeLargeObjects()
 #if PDATA_ENABLED
         Assert(allocation.xdata.IsFreed());
 #endif
+        // Release does not write code bytes; close this thread's window before
+        // it so release/decommit never runs under a caller's write window.
+        CustomHeapJitWriteProtect(FALSE);
         this->codePageAllocators->Release(allocation.address, allocation.GetPageCount(), allocation.largeObjectAllocation.segment);
 
         largeObjectIter.RemoveCurrent(this->auxiliaryAllocator);
@@ -558,6 +584,8 @@ void Heap<TAlloc, TPreReservedAlloc>::FreeLargeObject(Allocation* allocation)
 #if PDATA_ENABLED
     Assert(allocation->xdata.IsFreed());
 #endif
+    // Release does not write code bytes; close this thread's window first.
+    CustomHeapJitWriteProtect(FALSE);
     this->codePageAllocators->Release(allocation->address, allocation->GetPageCount(), allocation->largeObjectAllocation.segment);
 
     this->largeObjectAllocations.RemoveElement(this->auxiliaryAllocator, allocation);
@@ -577,6 +605,7 @@ bool Heap<TAlloc, TPreReservedAlloc>::AllocInPage(Page* page, size_t bytes, usho
     }
 
     Assert(Math::IsPow2((int32)bytes));
+    Assert(GetChunkSizeForBytes(bytes) <= Page::ChunkCount);
 
     uint length = GetChunkSizeForBytes(bytes);
     BVIndex index = GetFreeIndexForPage(page, bytes);
@@ -671,6 +700,16 @@ bool Heap<TAlloc, TPreReservedAlloc>::AllocInPage(Page* page, size_t bytes, usho
 template<typename TAlloc, typename TPreReservedAlloc>
 Page* Heap<TAlloc, TPreReservedAlloc>::AllocNewPage(BucketId bucket, bool canAllocInPreReservedHeapPageSegment, bool isAnyJittedCode, _Inout_ bool* isAllJITCodeInPreReservedRegion)
 {
+    // AllocPages(1) below returns one host page. Page::MaxAllocationSize and
+    // Page::Alignment describe the chunks inside it and must not exceed the
+    // host page. On Apple ARM64 the constants cover the full 16 KiB host page;
+    // every other target keeps the historical 4 KiB logical page, so a larger
+    // host page would leave its remainder unused.
+    Assert(AutoSystemInfo::PageSize >= Page::MaxAllocationSize);
+#if defined(__APPLE__) && defined(_M_ARM64) && defined(TARGET_64)
+    Assert(AutoSystemInfo::PageSize == Page::MaxAllocationSize);
+#endif
+
     void* pageSegment = nullptr;
 
     char* address = nullptr;
@@ -689,7 +728,10 @@ Page* Heap<TAlloc, TPreReservedAlloc>::AllocNewPage(BucketId bucket, bool canAll
     {
         return nullptr;
     }
+    // Apple ARM64 MAP_JIT segment: a write window is per thread.
+    CustomHeapJitWriteProtect(TRUE);
     FillDebugBreak((BYTE*)localAddr, AutoSystemInfo::PageSize);
+    CustomHeapJitWriteProtect(FALSE);
     this->codePageAllocators->FreeLocal(localAddr, pageSegment);
 
     DWORD protectFlags = 0;
@@ -822,6 +864,13 @@ bool Heap<TAlloc, TPreReservedAlloc>::FreeAllocation(Allocation* object)
 
     uint freeBitsCount = page->freeBitVector.Count();
 
+    // The page tracks exactly Page::ChunkCount chunks; BVUnit may have more
+    // bits (64 on TARGET_64 even when only 32 chunks are tracked). Only the
+    // tracked chunks are initialized and used, so compare against the chunk
+    // count rather than BitsPerWord when deciding whether the page is becoming
+    // empty.
+    const uint pageChunkCount = Page::ChunkCount;
+
     // Make sure that the section under interest or the whole page has not already been freed
     if (page->IsEmpty() || page->freeBitVector.TestAnyInRange(index, length))
     {
@@ -847,6 +896,7 @@ bool Heap<TAlloc, TPreReservedAlloc>::FreeAllocation(Allocation* object)
             char* localAddr = this->codePageAllocators->AllocLocal(object->address, object->size, page->segment);
             if (!localAddr)
             {
+                CustomHeapJitWriteProtect(FALSE);
                 MemoryOperationLastError::RecordError(JSERR_FatalMemoryExhaustion);
                 return false;
             }
@@ -864,6 +914,10 @@ bool Heap<TAlloc, TPreReservedAlloc>::FreeAllocation(Allocation* object)
             this->totalAllocationSize -= pageSize;
 #endif
             this->auxiliaryAllocator->Free(object, sizeof(Allocation));
+            // The page is gone. The release path does not write code bytes, so
+            // close the per-thread write window opened by
+            // EnsureAllocationWriteable before releasing/decommitting.
+            CustomHeapJitWriteProtect(FALSE);
             {
                 AutoCriticalSection autoLock(&this->codePageAllocators->cs);
                 this->codePageAllocators->ReleasePages(pageAddress, 1, segment);
@@ -876,13 +930,30 @@ bool Heap<TAlloc, TPreReservedAlloc>::FreeAllocation(Allocation* object)
     // If the page is about to become empty then we should not need
     // to set it to executable and we don't expect to restore the
     // previous protection settings.
-    if (freeBitsCount == BVUnit::BitsPerWord - length)
+    if (freeBitsCount == pageChunkCount - length)
     {
         EnsureAllocationWriteable(object);
         FreeAllocationHelper(object, index, length);
-        Assert(page->IsEmpty());
+        Assert(page->freeBitVector.Count() == pageChunkCount);
 
-        this->buckets[page->currentBucket].RemoveElement(this->auxiliaryAllocator, page);
+        char* pageAddress = page->address;
+        BucketId bucket = page->currentBucket;
+
+        this->buckets[bucket].RemoveElement(this->auxiliaryAllocator, page);
+        // The page is removed from its bucket. Restore the thread's execute
+        // state before releasing the page; the release path does not write
+        // code bytes.
+        CustomHeapJitWriteProtect(FALSE);
+        {
+            AutoCriticalSection autoLock(&this->codePageAllocators->cs);
+            this->codePageAllocators->ReleasePages(pageAddress, 1, segment);
+        }
+        VerboseHeapTrace(_u("Releasing empty page 0x%p in bucket %d\n"), pageAddress, bucket);
+
+#if DBG_DUMP
+        this->freeObjectSize -= pageSize;
+        this->totalAllocationSize -= pageSize;
+#endif
         return false;
     }
     else
@@ -890,7 +961,7 @@ bool Heap<TAlloc, TPreReservedAlloc>::FreeAllocation(Allocation* object)
         EnsureAllocationExecuteWriteable(object);
         FreeAllocationHelper(object, index, length);
 
-        // after freeing part of the page, the page should be in PAGE_EXECUTE_READWRITE protection, and turning to PAGE_EXECUTE_READ (always with TARGETS_NO_UPDATE state)
+        // after freeing part of the page, the page should be in PAGE_EXECUTE_READWRITE protection (PAGE_READWRITE on Apple Silicon), and turning to PAGE_EXECUTE_READ (always with TARGETS_NO_UPDATE state)
 
         DWORD protectFlags = 0;
 
@@ -903,7 +974,11 @@ bool Heap<TAlloc, TPreReservedAlloc>::FreeAllocation(Allocation* object)
             protectFlags = PAGE_EXECUTE_READ;
         }
 
+        #if defined(__APPLE__) && defined(_M_ARM64)
+        this->codePageAllocators->ProtectPages(page->address, 1, segment, protectFlags, PAGE_READWRITE); // write window is PAGE_READWRITE on Apple Silicon
+        #else
         this->codePageAllocators->ProtectPages(page->address, 1, segment, protectFlags, PAGE_EXECUTE_READWRITE);
+        #endif
 
         return true;
     }
@@ -971,6 +1046,8 @@ void Heap<TAlloc, TPreReservedAlloc>::FreePage(Page* page)
     size_t freeSpace = page->freeBitVector.Count() * Page::Alignment;
 
     VerboseHeapTrace(_u("Removing page in bucket %d, freeSpace: %d\n"), page->currentBucket, freeSpace);
+    // Release does not write code bytes; close this thread's window first.
+    CustomHeapJitWriteProtect(FALSE);
     this->codePageAllocators->ReleasePages(page->address, 1, page->segment);
 
 #if DBG_DUMP
@@ -1065,13 +1142,14 @@ void Heap<TAlloc, TPreReservedAlloc>::DumpStats()
     HeapTrace(_u("Buckets: \n"));
     for (int i = 0; i < BucketId::NumBuckets; i++)
     {
-        Output::Print(_u("\t%d => %u ["), (1 << (i + 7)), buckets[i].Count());
+        Output::Print(_u("\t%d => %u ["), Page::Alignment << i, buckets[i].Count());
 
         FOREACH_DLISTBASE_ENTRY_EDITING(Page, page, &this->buckets[i], bucketIter)
         {
-            BVUnit usedBitVector = page.freeBitVector;
-            usedBitVector.ComplimentAll(); // Get the actual used bit vector
-            Output::Print(_u(" %u "), usedBitVector.Count() * Page::Alignment); // Print out the space used in this page
+            // Count only the tracked chunks; the high bits of a 64-bit BVUnit
+            // are not part of a 4 KiB page on non-Apple builds.
+            uint usedChunks = Page::ChunkCount - page.freeBitVector.Count();
+            Output::Print(_u(" %u "), usedChunks * Page::Alignment); // Print out the space used in this page
         }
 
         NEXT_DLISTBASE_ENTRY_EDITING
