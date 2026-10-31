@@ -12,7 +12,11 @@ campaign under `out/s6e-teardown-review/` (both git-ignored evidence) and
 corrects the evidence labels below. A later conformance repair (branch
 `s6e-fifo-resolution`, base `3574b6168` = main: diagnosis `533e41d37`,
 fix `d99ab67c0`) fixes foreign-notify-pass FIFO **resolution** order —
-see "S6e conformance repair" below. `ESSharedArrayBuffer` (and `ESBigInt` for the BigInt64 paths)
+see "S6e conformance repair" below. A later host teardown repair
+(branch `host-exit-join`, base `84bda26de` = main: diagnosis
+`d640a56e6`, fix `17c05c557`) fixes the iteration-3 end-of-main join
+over >64 accumulated agents — see "S6e host teardown repair" below.
+`ESSharedArrayBuffer` (and `ESBigInt` for the BigInt64 paths)
 remain **off by default** (BigInt itself is default-on since S2); this slice
 changes no default. It supersedes the cross-agent residual of
 [c2-s6-waitasync.md](c2-s6-waitasync.md) (S6b); S6d finite timeouts are
@@ -454,6 +458,10 @@ debug `633049b0…a39` (`out/s6e-fifo-bins/ch-pre-debug`), post-fix debug
   (introduced by the iteration-3 host teardown, not by this repair);
   the committed test (~15 agents) and both gates never hit it; all
   in-process oracles complete before the assert, so data is unaffected.
+  **Fixed** by the host-exit-join repair below (branch `host-exit-join`,
+  base `84bda26de`): pre-fix it was worse than an assert — on test
+  profiles the same 100-agent repro SIGSEGV'd 33/50 (delete loop freeing
+  `RuntimeThreadData` whose threads were never observed exiting).
 
 ### Review outcome (FIFO repair)
 
@@ -478,6 +486,145 @@ Both reviewers **ACCEPTED** with zero `[bug]` findings.
   (claims serialize on the registrant thread and require no unsettled
   same-registrant predecessor), not scheduler luck. Its one `[risk]` is
   the pre-existing exit assert recorded above.
+
+## S6e host teardown repair: bounded end-of-main join (host-exit-join)
+
+Status: diagnosis + repro tooling `d640a56e6`, fix `17c05c557`, receipt
+(this section), branch `host-exit-join` (base `84bda26de` = main, gates
+2031/2083). Retires the "pre-existing exit assert under very-high agent
+churn" residual recorded in the FIFO-repair residuals above.
+
+### Root cause
+
+`WScriptJsrt::Uninitialize`'s end-of-main join made **one**
+`WaitForMultipleObjects(count, ...)` call over every handle in
+`threadData->children`, then `Assert(waitRet == WAIT_OBJECT_0)` and
+unconditionally deleted every child. The PAL rejects `nCount >
+MAXIMUM_WAIT_OBJECTS` (64) (`pal/src/synchmgr/wait.cpp`), and the
+children list only ever grows before that point — established lifecycle
+facts: children are `push_back`'d on the owning parent thread in
+`LoadScriptCallback` *before* `CreateThread`; `leaving()` never unlinks
+a child (it only sets the child's own flag, and a leaving child still
+parks in its wait loop until shutdown/broadcast); the sole removal is
+the `clear()` in the join block itself. So a process that starts more
+than 64 agents joins 65+ handles: debug profiles assert (the residual
+above), and release/test profiles fall through to the delete loop with
+**no thread having been observed exiting** — freeing `RuntimeThreadData`
+objects (events, `hThread`, `messageQueue`, `csReportQ`) their threads
+still touch. A use-after-free, not just a bad exit code: the 100-agent
+repro SIGSEGV'd 33/50 pre-fix on the test profile.
+
+### Design
+
+Three passes over `threadData->children`, all on the owning parent
+thread: `SetEvent(child->hevntShutdown)` for every child **before any
+waiting** (unchanged); `WaitForSingleObject(child->hThread, INFINITE)`
+per child (each handle individually waited — no `nCount` limit, so the
+64-handle PAL cap is irrelevant); only after every child was
+individually observed exited, `delete` each and `clear()`. The list is
+iterated unlocked because it is mutated only on this same thread (facts
+above); children never mutate the parent's list. Semantics for ≤64
+children are identical to the old code (signal-all, join-all,
+delete-all); no engine change; `WScript.Quit` raw-exit and agent
+semantics untouched. Per-child waits also pinpoint a failing handle in
+the per-child `Assert` instead of one aggregate.
+
+### Ownership record (memory-management)
+
+```text
+Resource: RuntimeThreadData objects in threadData->children (host-side
+          new/delete; events, hThread, messageQueue, csReportQ inside)
+Owner: the owning parent thread's children list — unchanged; sole
+          release authority remains this Uninitialize block (delete +
+          clear), now strictly after each child's thread was observed
+          exited via its waited handle
+Transfer/invalidation: child->parent valid from push_back (parent
+          thread, before CreateThread) until the parent's delete;
+          no child ever touches the parent's list or another child
+Thread rule: signal/wait/delete all on the parent thread; the child's
+          last touch of its own RuntimeThreadData precedes its thread
+          exit, which the parent observes through the handle wait
+Failure paths: a WAIT_FAILED (invalid handle) trips the per-child
+          Assert on debug profiles — same contract as before; the
+          ASSERTION output identifies the source line inside the loop
+          (pinpointing the exact child requires a debugger stop with the
+          iterator in scope); release profiles keep the pre-existing
+          unconditional-delete shape
+```
+
+### Evidence
+
+Mac ARM64, test profile (`zig-out/bin/ch`) and debug-static
+(`out/debug-static/bin/ch`), repro `tools/host-exit-join/agents100.js`
+(100 agents: 50 report+`leaving()`, 50 just complete their initial
+script — both classes park and remain in `children`; main then ends),
+driver `tools/host-exit-join/drive.sh`. Binaries (SHA-256): pre-fix
+test `ea6e3f7c…9be` (preserved `out/host-exit-join-bins/ch-pre-test`),
+pre-fix debug `291ba391…d66` (`ch-pre-debug`, static), post-fix debug
+`df5d20f2…045` (`ch-post-debug`), post-fix test `896b8b8f…840`
+(zig-out; dylib `6c63d966…5b`, unchanged by this host-only fix).
+
+| Leg | Binary | Runs | Result |
+|---|---|---|---|
+| Pre-fix test | base `84bda26de` | 50 | 17 clean / **33 SIGSEGV** (one SIGABRT) |
+| Pre-fix debug | base `84bda26de` | 10 | **10/10 `ASSERTION (WScriptJsrt.cpp:1345)`** (exit 133) |
+| Post-fix debug | fix `17c05c557` | 50 | **50/50 clean exit 0** |
+| Post-fix test | fix `17c05c557` | 50 | **50/50 clean exit 0** |
+
+- Focused S6e suite (`runtests.py -t|-d --variants=disable_jit`):
+  s6-waitasync-cross-agent, s6-waitasync-pause, s6-bigint-atomics,
+  s6-growable-nonshared, atomics_test, sharedarraybuffer, bigint64array
+  → **7/7 test, 7/7 debug**.
+- Gates: `check_regression.py --select test --expected-passed 2031` →
+  **PASS 2031/0**; `--select debug --expected-passed 2083` →
+  **PASS 2083/0**. Pins in `tools/build/gate_counts.json` untouched
+  (no new rlexe entry: 100 agent-runtime creations exceed what the
+  debug regression gate can afford reliably; the repro is committed as
+  evidence tooling instead).
+
+### Residual (host-exit-join)
+
+- Sequential per-child joins cost one syscall per agent (N ≤ a few
+  hundred in any realistic host); all children exit concurrently after
+  the signal pass, so wall time stays ≈ the slowest child's exit.
+- **Wedged-agent failure mode (adversarial review)**: with >64 agents, a
+  wedged (`while(true)`) agent now deterministically wedges process exit
+  (per-child INFINITE waits) where the pre-fix code crashed with a UAF;
+  with ≤64 agents both old and new code hang. Strictly a better failure
+  mode, pre-existing INFINITE semantics — but a host needing bounded
+  exit has no watchdog.
+- The child-side `Error` path of `RuntimeThreadData::ThreadProc` still
+  skips joining its own sub-agents, but it is unreachable after any
+  script ran (all `Error` exits precede `JsRun`; sub-agents are created
+  only by script) — pre-existing, unchanged.
+- `CreateThread`'s return value at the spawn site is unchecked
+  (pre-existing): a failed spawn leaves `hThread == NULL`, and the join's
+  `WaitForSingleObject(NULL)` would trip the per-child Assert (debug) or
+  delete a never-started child (release) — same shape pre- and post-fix.
+  Follow-up card; no change in this repair.
+- Review note: `-CollectGarbage` is not a real `ch` flag (silently
+  accepted; the `CollectGarbage()` global is undefined in these
+  profiles, so committed tests' `typeof` guards never fire) — GC legs
+  were approximated with allocation-pressure churn (100–400 runtime
+  creations) instead.
+
+### Review outcome (host-exit-join)
+
+Both reviewers **ACCEPTED** with zero `[bug]` and zero `[risk]`
+findings. The general review re-verified the three-pass structure,
+children-lifecycle facts, ownership record, ≤64 semantics equivalence,
+and hang-predicate equivalence from source, and re-ran the A/B plus
+both gates (2031/0, 2083/0). The adversarial review executed ~250
+process-exits: scale to **400 agents** (exit 0, no crash/hang,
+≈linear wall time), cap-edge counts **63/64/65/66** (pre-fix UAF
+8/12 at 65/66 — matching the receipt's 33/50 at 100 — post-fix zero
+across 72 edge runs), teardown races (mid-leaving, pending monitors,
+timers, broadcast cutoff, nested sub-agents, raw-exit Quit with 70
+live children, 3–4-way concurrent load) all clean, and ≤64 semantics
+byte-identical pre vs post on both profiles. Its nits are folded
+above (wedged-agent failure mode, GC-flag note); the general review's
+assert-wording and unchecked-`CreateThread` nits are folded above and
+filed as a follow-up card.
 
 ## Scope
 
