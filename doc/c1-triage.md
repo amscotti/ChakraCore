@@ -881,6 +881,7 @@ still owns JIT-configuration claims.)*
 | S6d finite `waitAsync` timeouts (flag-on) | Landed `9a6524b8b` + repairs `d702ea085`, `2a2b37148`, `c71f35ff3` (merge `dd6434127`) | additive optional host timer callback; recycler-owned timeout task; waitAsync 116/202 → 122/202, +6/0; huge-delay host wrap fixed; gates unchanged 2026/2078 | cross-agent waitAsync, no timer callback fallback, stale-task shutdown latency, TTD replay, B4 |
 | S6e cross-agent `waitAsync` (flag-on) | Landed `d972c53fe` + repairs `e547fa345`, `e23fc6f6b`, teardown-only `a78a5dba4` + receipt `866a03c82` (merge `6900598e4`); FIFO resolution repair `533e41d37`/`d99ab67c0` + receipt `d9a6f2d7b`, `a16657242` (merge `02c45f214`) | native wake latch + registrant-thread monitor tasks + child message queues; POSIX `WScript.Quit` flush + raw `::_exit` teardown (no PAL/runtime cleanup), eliminating the deterministic Quit crash families; waitAsync selection 122/80 → 201/1 (repeat 199/3), 0 pass→fail; Atomics selection 691/83, SAB 204/4, merged ≈895/982; new test 1 entry; gates 2030/2082 → 2031/2083. FIFO repair: per-notify-pass ordered chain + head-first claims restored guaranteed per-agent FIFO resolution (30/2400 pre → 0/2400 post; 7,800 adversarial pass-observations clean), gates unchanged | pre-Quit multi-agent startup SIGBUS fixed by E1 (merge `3574b6168`), exit assert under >64 agents fixed by host-exit-join `d640a56e6`/`17c05c557` (merge `5f4e722d1`; pre-fix release UAF 33/50 at 100 agents, post 50/50 clean; 400-agent adversarial scale clean), unnotified cross-runtime waits poll, blocked-stdout Quit hang (pre-existing), TTD+Quit log truncation (pre-existing), SAB default off, B4 |
 | E1 agent-startup SIGBUS (engine defect) | Fixed `944921636` + receipt `58d02c90b`, `e28b11109` (merge `3574b6168`) | card-table stack-coverage gap: `X64WriteBarrierCardTableManager::OnThreadInit` rounded stack pages down, dropping the unaligned top partial page (macOS pthread `stackaddr`) from section commit; stack write barriers on `WriteBarrierPtr` temporaries then read uncommitted PROT_NONE card pages (deterministic `+0x5c000` signature, not a race); one-line round-up fix, ownership unchanged; 55/11200 → 0/2450 interposed churn (clean 0.24% → 0/500); dual ACCEPT; gates unchanged 2031/2083 | PAL low-end up-round coverage gap (documented), malloc'd `WriteBarrierPtr` theoretical gap, statistical bounds, B4 |
+| Host robustness follow-ups (join/spawn/broadcast) | join `17c05c557` (merge `5f4e722d1`); spawn-check `fd7b022b1` (merge `a77b1a49d`); broadcast-type `91f4db697` + leak repair `eb1c49f8f` (merge `da9911395`) | end-of-main join bounded to per-child waits (PAL 64-handle cap made >64 agents crash with a release UAF, 33/50 at 100 agents; post 50/50 clean, 400-agent scale clean); failed agent spawns roll back and report catchable `JsErrorOutOfMemory` instead of hanging the parent forever (12/12→12/12 both profiles); `WScript.Broadcast` non-SAB argument now throws instead of SIGSEGVing with live agents (15/15→20/20 both profiles) with balanced agentless acquire-and-release after a review-found leak; new `s6-broadcast-type.js` entry moved gates 2031/2083 → 2032/2084; each lane dual-ACCEPT | pre-existing 5s broadcast-consumed timeout release, no-arg Broadcast silent undefined, plain-Error-not-TypeError, engine-side mis-released handle undefended, B4 |
 | S12 import attributes + JSON modules | Landed `ee826e889` + fixes `36043391d`, `d0223ff1a` (merge `78cc4f412`) | import corpus delta +12 net / 0 p→f (lane-run 565/172 vs 553/184); loop-3 dual ACCEPT (user-authorized) | `OP_ImportCallWithOptions` JIT lowering (B4); BOM-JSON; debug metadata leg pre-existing |
 | S2 arithmetic/bitwise/shift | Landed `1c5d5b2fc` | scoped 444/2, 80/0; broad 1,027/1,027; Node differentials | BigInt64Array/BigUint64Array, Map/Set identity, literal property names, giant ToString, JIT |
 | S2 BigInt64Array | Landed `f5f0efef5` | 944/0; 958/1016; ctors 24/24, 166/0; internals 163/0 | DataView BigInt, internals, Map/Set identity, SAB, JIT |
@@ -898,15 +899,16 @@ still owns JIT-configuration claims.)*
 | S14 hidden-outer eval `arguments` | Landed `d9a1998d1` (merge `13e925a75`) | catch-hidden top-level lexical now SyntaxError; parameter/simple-catch/with/arrow controls preserved; eval-code 454/0; no gate change | JIT/TTD (B4) |
 | S14 P5 | Landed `8b5f28c06` | 50/50; broad 50/0; wider 65/0 non-import | eval/function-expression; proxy descriptor; JIT |
 
-Full gates at this checkpoint: **2031/0 test**, **2083/0 debug-static**
+Full gates at this checkpoint: **2032/0 test**, **2084/0 debug-static**
 (single-sourced in `tools/build/gate_counts.json`; repair-loop
 `-noDeferParse` rlexe variants moved 2013/2065 → 2016/2068, S6a added
 one entry, eval-super added three parse-mode entries, S6b added the
 waitAsync/pause entry, S8 immutable added one entry, S3-a property
 escapes added one entry, S3-b `v` mode added one entry, S9 u-mode
 strictness added one entry, S6c BigInt Atomics added one entry, S2
-BigInt default enablement added four entries, and S6e cross-agent
-waitAsync added one entry). Integrated
+BigInt default enablement added four entries, S6e cross-agent
+waitAsync added one entry, and the host-broadcast-type repair added one
+entry (2031/2083 → 2032/2084)). Integrated
 class-elements corpus re-runs 2026-10-20: wave-2
 (`out/test262-c2-s1-wave2`) **5,854/5,897**, 3,865 f→p / 0 p→f vs
 2026-10-19; wave-3 (`out/test262-c2-wave3`, after the S1-tail lane)
@@ -933,10 +935,13 @@ spawn used to hang the parent forever on the initial-script event
 (reproduced 12/12 per profile via a libc-boundary `EAGAIN` injection);
 the fix rolls the failed child back and surfaces a catchable
 `JsErrorOutOfMemory` (12/12 caught, post-failure spawns consistent,
-dual ACCEPT, gates unchanged). Next work items are the
-`WScript.Broadcast` type-validation card (non-SharedArrayBuffer argument
-SIGSEGVs 100%, pre-existing, found by review), the
-remaining S8/P-eval residuals, and C4
+dual ACCEPT, gates unchanged). The `WScript.Broadcast` type-validation
+card was then closed by the host-broadcast-type lane (merge
+`da9911395`: non-SAB argument now throws instead of SIGSEGVing with
+live agents; balanced agentless acquire-and-release after a
+review-found leak; new `s6-broadcast-type.js` entry moved the gates to
+2032/2084; dual ACCEPT after one repair iteration). Next work items
+are the remaining S8/P-eval residuals, and C4
 qualification (full baseline rerun,
 host-reported negative phase). P5 residual: eval/function-expression
 reference paths and pre-existing proxy descriptor duplication.

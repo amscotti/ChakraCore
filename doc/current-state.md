@@ -56,13 +56,15 @@ This `doc/` folder is the start of durable in-repo documentation. The
 feature inventory and line anchors below are the 2026-10-10 baseline
 snapshot; the modernization branch has since added the C2 surfaces listed
 in [modernization-plan.md](modernization-plan.md) §6 and its receipts.
-Latest merged checkpoint (2026-10-30): **2031/0 test**, **2083/0
+Latest merged checkpoint (2026-10-31): **2032/0 test**, **2084/0
 debug-static**, including direct-eval `super` early errors, the flag-on
 S6a growable-SAB/non-shared-Atomics slice, S6b `Atomics.pause` /
 single-thread `Atomics.waitAsync`, S6c BigInt Atomics, S6d finite
 waitAsync timeouts, S6e flag-on cross-agent `waitAsync` (native wake
 latch, registrant-thread monitors, child message queues, POSIX
-`WScript.Quit` raw-exit teardown), default-on BigInt, the S14 hidden-outer
+`WScript.Quit` raw-exit teardown, FIFO resolution-order repair, and
+the host join/spawn/broadcast robustness follow-ups), default-on
+BigInt, the S14 hidden-outer
 eval-`arguments` fix, the bounded S8 immutable-ArrayBuffer surface, both
 S3 RegExp slices (`u` property escapes and `v` Unicode Sets mode), S9
 u-mode RegExp strictness, and S9-b code-point-aware RegExp search/builtin
@@ -404,8 +406,8 @@ The first [conformance baseline](conformance-baseline.md) ran 93,141 scenarios
 from 48,598 files: 61,565 passed / 31,576 failed, with 902 explicit skips. Its
 corpus includes post-ES2025 proposals and uses default language flags.
 
-**Modernization checkpoint (2026-10-30):** the merged branch is green at
-**2031/0 test** and **2083/0 debug-static** on Mac ARM64 no-JIT. Direct-eval
+**Modernization checkpoint (2026-10-31):** the merged branch is green at
+**2032/0 test** and **2084/0 debug-static** on Mac ARM64 no-JIT. Direct-eval
 `super` early errors are closed (eval-code 454/0; object-literal function/arrow
 false accepts fixed in `39e9f2a16`), the flag-on S6a slice has growable
 SharedArrayBuffer plus ES2020 non-shared Atomics (focused S6 574/982;
@@ -423,9 +425,12 @@ unchanged at 2031/2083), a follow-up repair restored guaranteed FIFO
 resolution order for cross-agent `waitAsync` (per-notify-pass ordered
 chain, head-first registrant claims; merge `02c45f214`), the
 end-of-main child join was bounded to per-child waits (PAL 64-handle
-cap made >64 agents crash with a UAF; merge `5f4e722d1`), and a failed
+cap made >64 agents crash with a UAF; merge `5f4e722d1`), a failed
 agent-thread spawn now rolls back and reports a catchable error instead
-of hanging the parent forever (merge `a77b1a49d`).
+of hanging the parent forever (merge `a77b1a49d`), and `WScript.Broadcast`
+now validates its argument — a non-SharedArrayBuffer used to SIGSEGV
+100% with live agents (merge `da9911395`; the new
+`s6-broadcast-type.js` entry moved the gates to 2032/2084).
 BigInt is now enabled by default; `-ESBigInt-`
 restores the old
 default-off profile, and the class-elements corpus improved to **5,892/5,897**

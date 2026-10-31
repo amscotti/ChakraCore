@@ -597,8 +597,8 @@ Decision/rollback points:
   tracked until C4, optional ecosystem scope has separate gates.
 - [ ] C4: Published qualified ES2025 result on the claimed default configurations.
 
-**Latest integration checkpoint (2026-10-30):** main is clean at the
-**2031/0 test** and **2083/0 debug-static** gates (re-verified after every
+**Latest integration checkpoint (2026-10-31):** main is clean at the
+**2032/0 test** and **2084/0 debug-static** gates (re-verified after every
 merge and repair below; counts are single-sourced in
 `tools/build/gate_counts.json` — Float16Array's new test file moved
 2012/2064 → 2013/2065, repair-loop `-noDeferParse` rlexe variants
@@ -611,8 +611,9 @@ entry (2020/2072 → 2021/2073), S8 immutable ArrayBuffer added one entry
 (2023/2075 → 2024/2076), S9 u-mode RegExp strictness added one entry
 (2024/2076 → 2025/2077), S6c BigInt Atomics added one entry
 (2025/2077 → 2026/2078), S2 BigInt default enablement added four
-entries (2026/2078 → 2030/2082), and S6e cross-agent waitAsync added
-one entry (2030/2082 → 2031/2083)).
+entries (2026/2078 → 2030/2082), S6e cross-agent waitAsync added
+one entry (2030/2082 → 2031/2083), and the host-broadcast-type repair
+added one entry (2031/2083 → 2032/2084)).
 Merged lanes: S1 public/private instance+static fields and private methods/accessors, S2 arithmetic + BigInt64Array/Uint64Array + collections/
 DataView, S8 resizable ArrayBuffer/transfer + TypedArray tracking, S13
 WeakRef + FinalizationRegistry, and S14 P1/P2/P3/P4/P5/P6/P7
@@ -779,13 +780,23 @@ the genuine PAL failure path); the fix rolls the failed child back on
 the spawning thread and surfaces a catchable `JsErrorOutOfMemory`
 (12/12 caught on both profiles, post-failure state consistent, nested
 sub-agent spawns covered, dual ACCEPT; gates unchanged 2031/2083). Its
-adversarial review filed one new pre-existing defect: `WScript.Broadcast`
-SIGSEGVs (100% repro) on a non-SharedArrayBuffer argument —
-type-validation card open. All active feature/triage
+adversarial review filed one new pre-existing defect that was then
+closed by the host-broadcast-type lane (merge `da9911395`, receipt
+section in the S6e doc): `WScript.Broadcast` with a non-SharedArrayBuffer
+argument SIGSEGVed 100% with live agents (unchecked
+`JsGetSharedArrayBufferContent` left stale content that signaled
+children dereferenced) — the fix validates before signaling, throws a
+catchable sibling-shaped Error (15/15 SIGSEGV → 20/20 clean throws,
+both profiles; validation matrix incl. proxies/growable/cross-runtime
+clean), and after a review-found agentless handle leak adds a balanced
+release (RSS A/B and the debug allocation-accounting assert both
+confirm); the deterministic `s6-broadcast-type.js` rlexe entry moved
+the gates to **2032/2084** (dual ACCEPT after repair). All active
+feature/triage
 worktrees are merged; next work items are
-the remaining S8/P-eval residuals, the `WScript.Broadcast` type card,
-lead-surrogate lacunarity, and the C4
-qualification work (full baseline rerun, host-reported negative phase). Tracked eval residuals: P4 body eval with non-simple
+the remaining S8/P-eval residuals, lead-surrogate lacunarity, and the
+C4 qualification work (full baseline rerun, host-reported negative
+phase). Tracked eval residuals: P4 body eval with non-simple
 parameters; P2 hidden outer lexical and JSC/Node delete difference.
 S3 (Unicode data decision), S6 default (product/security decision),
 B4 and C4 remain decision- or gate-blocked. A repair loop then closed
