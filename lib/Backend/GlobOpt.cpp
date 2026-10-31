@@ -11954,6 +11954,29 @@ GlobOpt::ToTypeSpecUse(IR::Instr *instr, IR::Opnd *opnd, BasicBlock *block, Valu
                 Assert(bailOutKind != IR::BailOutInvalid);
                 isBailout = true;
             }
+
+            if (isBailout && CONFIG_FLAG(ESBigInt))
+            {
+                // BigInt is a primitive (TypeIds_BigInt <=
+                // TypeIds_LastJavascriptPrimitiveType) but ToNumber on it
+                // throws, and the interpreter operator would have taken
+                // the BigInt path instead. BailOutOnNotPrimitive and
+                // BailOutPrimitiveButString both let BigInt through to
+                // the conversion helper. Strengthen to bailouts whose
+                // predicates reject BigInt, so execution falls back to
+                // the interpreter operator. ValueType has no BigInt bit,
+                // so this applies whenever the operand is not proven
+                // numeric above.
+                if (toType == TyInt32 && bailOutKind == IR::BailOutOnNotPrimitive)
+                {
+                    bailOutKind = IR::BailOutIntOnly;
+                }
+                else if (toType == TyFloat64 && bailOutKind == IR::BailOutPrimitiveButString)
+                {
+                    bailOutKind = IR::BailOutNumberOnly;
+                    typeSpecSym->m_requiresBailOnNotNumber = true;
+                }
+            }
         }
 
         if (isBailout)

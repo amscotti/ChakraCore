@@ -708,6 +708,7 @@ ENTRY2(_newTarget, _u("*new.target*"))
 ENTRY_SYMBOL(_symbolMatchAll, _u("Symbol.matchAll"))
 ENTRY2(_RuntimeFunctionNameId_matchAll, _u("[Symbol.matchAll]"))
 ENTRY(matchAll)
+ENTRY(bigint)
 
 
 // Note: Do not add fields for conditionally-compiled PropertyIds into this file.
