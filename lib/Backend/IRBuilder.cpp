@@ -332,6 +332,17 @@ IRBuilder::AddEnvOpndForInnerFrameDisplay(IR::Instr *instr, uint offset)
 void
 IRBuilder::Build()
 {
+    // Eval script functions: baseline S14 declaration instantiation
+    // (EnsureNo*Redecl* / scoped global-lexical checks) reads scope
+    // objects and slot arrays whose JIT materialization does not match
+    // the interpreter's, producing wrong redeclaration verdicts both
+    // ways. Keep eval code interpreted for now (see the direct-eval
+    // guard in BuildCallI_Helper).
+    if (m_func->GetJITFunctionBody()->IsEval())
+    {
+        throw Js::OperationAbortedException();
+    }
+
     m_funcAlloc = m_func->m_alloc;
 
 
@@ -6733,14 +6744,19 @@ IRBuilder::BuildProfiled2CallIExtended(Js::OpCode opcode, uint32 offset, Js::Reg
 IR::Instr *
 IRBuilder::BuildCallI_Helper(Js::OpCode newOpcode, uint32 offset, Js::RegSlot dstRegSlot, Js::RegSlot Src1RegSlot, Js::ArgSlot ArgCount, Js::ProfileId profileId, Js::CallFlags flags, Js::InlineCacheIndex inlineCacheIndex)
 {
-    // Direct eval inside parameter defaults (before BeginBodyScope in a
-    // non-merged param scope): EvalDeclarationInstantiation must check
-    // the parameter environment (baseline S14, e.g. `var arguments` is a
-    // SyntaxError there), but the frame display reconstructed from a
-    // JIT frame does not carry the parameter scope faithfully, so the
-    // eval silently targets the body var environment. Keep such
-    // functions interpreted.
-    if (flags == Js::CallFlags::CallFlags_ExtraArg && !this->IsParamScopeDone())
+    // Direct eval: baseline S14 EvalDeclarationInstantiation consults
+    // the caller's frame display and scope slot arrays (parameter
+    // environment for defaults, lexical block scopes, global lexical
+    // declarations). The display reconstructed from a JIT frame does
+    // not carry those scopes faithfully - e.g. `var arguments` in a
+    // parameter default silently succeeded, and indirect eval after
+    // global block `let` declarations falsely reported redeclaration.
+    // Keep functions containing direct eval interpreted until eval
+    // declaration fidelity from JIT frames is ported. (CallFlags_
+    // ExtraArg alone is this backend's direct-eval marker; see the
+    // CallIEval conversions in the call-flag builders above.)
+    if ((flags & Js::CallFlags::CallFlags_Eval) != 0 ||
+        flags == Js::CallFlags::CallFlags_ExtraArg || newOpcode == Js::OpCode::CallIEval)
     {
         throw Js::OperationAbortedException();
     }
