@@ -26,7 +26,7 @@
 > [c2-s14-statement-early-errors.md](c2-s14-statement-early-errors.md) and
 > [c2-flag-audits.md](c2-flag-audits.md). Engine/legacy-build references use baseline
 > `97e68c917`; execution evidence and the [B1-B3 review](b1-b3-review.md)
-> are recorded through 2026-10-15 local time.
+> are recorded through 2026-10-31 local time.
 > This is a staged roadmap for a small maintained fork, not a dated delivery promise.
 
 ## Read this first
@@ -272,7 +272,14 @@ recipe as reference data while deciding the maintained package's dependency vers
 
 Done when a second clean environment can build/install/test the package with its
 declared inputs, with a documented SDK acquisition contract and versioned artifact
-manifest. A claim of byte-identical reproducibility additionally needs two-build
+manifest. The first release must also rotate the serialized-bytecode release
+GUID (`ByteCodeCacheReleaseFileVersion.h`): this branch changed the serialized
+format versus `97e68c917` (appended `ctBigInt`, new function-attribute bits)
+but only ever regenerated the no-JIT built-in blobs, and
+`tools/regenByteCode.py` mints a new GUID only on a dual-variant (JIT + no-JIT)
+regen — so until B4 supplies the JIT variant, serialized caches written by a
+baseline build and by this branch share a GUID despite the format difference.
+No cross-version serialized-cache compatibility is claimed before that rotation. A claim of byte-identical reproducibility additionally needs two-build
 comparison and controlled timestamp/build-ID inputs (including the existing
 `__DATE__`/`__TIME__` behavior); it is a separate proof from behavior parity.
 
@@ -516,8 +523,8 @@ batch receipts below): optional chaining/logical assignment;
 class syntax; replaceAll/matchAll and the copy-by-change family; inherited
 ES2018 RegExp gaps and import-attribute syntax. Named groups, the `d`
 flag, duplicate named groups, and lookbehind have landed (see the
-C2-S9 receipt). Runtime probes still reject property escapes, `v`, and import
-attributes. Audit BigInt, SAB/Atomics and
+C2-S9 receipt). Property escapes (S3-a), the `v` flag (S3-b) and import
+attributes (S12) have since landed as well (see the §6 receipts). Audit BigInt, SAB/Atomics and
 RegExp-symbol/prototype-property flags through enabled conformance runs.
 
 **P1 — Required remaining core and independent ecosystem work:** ES2024/2025
@@ -613,7 +620,12 @@ entry (2020/2072 → 2021/2073), S8 immutable ArrayBuffer added one entry
 (2025/2077 → 2026/2078), S2 BigInt default enablement added four
 entries (2026/2078 → 2030/2082), S6e cross-agent waitAsync added
 one entry (2030/2082 → 2031/2083), and the host-broadcast-type repair
-added one entry (2031/2083 → 2032/2084)).
+added one entry (2031/2083 → 2032/2084)). A subsequent whole-branch
+review repair (2026-10-31) fixed the CI selftest tally that would have
+kept the first Actions run red (B3 stays CONDITIONAL until that run is
+green), the agent-init-failure spawn hang, host teardown ordering, SCA
+cross-runtime marking, and stale status text; gates re-verified
+unchanged at 2032/2084.
 Merged lanes: S1 public/private instance+static fields and private methods/accessors, S2 arithmetic + BigInt64Array/Uint64Array + collections/
 DataView, S8 resizable ArrayBuffer/transfer + TypedArray tracking, S13
 WeakRef + FinalizationRegistry, and S14 P1/P2/P3/P4/P5/P6/P7

@@ -226,6 +226,21 @@ DWORD RuntimeThreadData::ThreadProc()
 
 Error:
 
+    // Release the spawning parent before anything else: it waits with an
+    // INFINITE timeout on hevntInitialScriptCompleted
+    // (WScriptJsrt::LoadScriptCallback, crossthread branch), and until
+    // this fix only the success path above ever set that event — a child
+    // whose runtime/context creation or host Initialize failed landed
+    // here, exited, and left the parent blocked forever. `parent` is
+    // assigned before CreateThread and outlives this thread (the parent
+    // joins children before deleting them). On the leaving-loop `break`
+    // path that also reaches this label the event was already set during
+    // spawn, so re-setting the manual-reset event is a no-op.
+    if (this->parent != nullptr)
+    {
+        SetEvent(this->parent->hevntInitialScriptCompleted);
+    }
+
     if (agentQueue != nullptr)
     {
         agentQueue->RemoveAll();

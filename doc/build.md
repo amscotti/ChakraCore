@@ -1,5 +1,11 @@
 # ChakraCore Build
 
+> This document is the **legacy** build reference. The active build front end
+> on this branch is Zig (`mise exec -- zig build`, `zig build check`,
+> `zig build check-selftest`, profiles via `-Dprofile=`), specified by
+> [modernization-plan.md](modernization-plan.md) §2 and the B1–B3 records
+> indexed in [README.md](README.md); §14 below records the original pilot.
+
 Legacy build-source references are pinned to baseline `97e68c917`. This document
 describes the existing reference build:
 a dual-entry system — `build.sh` + CMake on Unix, MSBuild solution + `.cmd` drivers

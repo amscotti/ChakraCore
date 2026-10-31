@@ -35,6 +35,22 @@ If you find a security issue in the Master branch of Chakracore but not in 1.11 
 
 ## Building ChakraCore
 
+> **This branch (`modernize/baseline`)** builds on macOS ARM64 with the Zig
+> 0.17.0 front end pinned in `mise.toml` (shared/no-JIT profiles; see
+> [doc/modernization-plan.md](doc/modernization-plan.md) for status and
+> [doc/README.md](doc/README.md) for the doc index):
+>
+> ```sh
+> mise exec -- zig build                 # default (test) profile
+> mise exec -- zig build check           # regression + bytecode + native + smoke + metadata gates
+> mise exec -- zig build check -Dprofile=debug-static
+> mise exec -- zig build check -Dprofile=release-shared
+> ```
+>
+> The legacy CMake/MSBuild instructions below remain the reference for the
+> upstream `master` build and for platforms the Zig build does not cover yet
+> (Linux behavior is gated on the B4 milestone; Windows is B6).
+
 You can build ChakraCore on Windows 7 SP1 or above, and Windows Server 2008 R2 or above, with either Visual Studio 2015 or 2017 with C++ support installed.  Once you have Visual Studio installed:
 
 * Clone ChakraCore through ```git clone https://github.com/Microsoft/ChakraCore.git```

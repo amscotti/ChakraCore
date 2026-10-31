@@ -642,6 +642,11 @@ pub fn build(b: *std.Build) void {
     metadata_top.dependOn(&metadata.step);
 
     const check_top = b.step("check", "Full legacy-equivalent verification: regression, bytecode (--jit), native embedding, smoke, metadata (not part of the default build)");
+    // Negative controls ride along with the full check, mirroring the
+    // Mac graph ("Wired into every profile's `check`" in build.zig);
+    // without this the Linux gates' can-fail proofs never ran under
+    // `zig build check` on Linux.
+    check_top.dependOn(selftest_top);
     check_top.dependOn(&regression.step);
     check_top.dependOn(&verify_bc.step);
     check_top.dependOn(&native.step);

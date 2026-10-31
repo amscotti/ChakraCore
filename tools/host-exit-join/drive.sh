@@ -34,3 +34,7 @@ while [ "$i" -lt "$RUNS" ]; do
 done
 
 echo "bin=$BIN runs=$RUNS clean=$CLEAN asserts=$ASSERTS signals=$SIGNALS other=$OTHER"
+# Exit-code contract: 0 only when every run was clean, so this driver can
+# gate (an A/B run against a pre-fix binary is SUPPOSED to exit 1 while
+# still printing its assert/signal tally above).
+[ "$ASSERTS" -eq 0 ] && [ "$SIGNALS" -eq 0 ] && [ "$OTHER" -eq 0 ] && [ "$CLEAN" -eq "$RUNS" ]

@@ -159,8 +159,8 @@ assignment, class fields/`#private`/static blocks, `replaceAll`, `matchAll`,
 `WeakRef`, `FinalizationRegistry`, named capture groups/lookbehind, import
 attributes, or RegExp `d`/`v` flags. The modernization branch has since landed
 those C2 surfaces, including `u` Unicode property escapes and `v` Unicode Sets
-mode on ICU 79.1; decorators and `queueMicrotask` remain unimplemented. BigInt,
-RegExp symbols
+mode on ICU 79.1; decorators and `queueMicrotask` remain unimplemented. BigInt
+is enabled by default (S2, kill switch `-ESBigInt-`); RegExp symbols
 and SAB/Atomics remain default-off; the SAB/Atomics flag-on surface now includes
 growable buffers and non-shared Atomics but awaits the product/security
 decision. The repeatable probe is `tools/test262/feature-probe.js`; see

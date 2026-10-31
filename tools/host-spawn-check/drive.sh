@@ -53,3 +53,7 @@ while [ "$i" -lt "$RUNS" ]; do
 done
 
 echo "bin=$BIN runs=$RUNS caught=$CAUGHT hangs=$HANGS other=$OTHER"
+# Exit-code contract: 0 only when every run took the post-fix clean-error
+# path, so this driver can gate (an A/B run against a pre-fix binary is
+# SUPPOSED to exit 1 while still printing its hang tally above).
+[ "$HANGS" -eq 0 ] && [ "$OTHER" -eq 0 ] && [ "$CAUGHT" -eq "$RUNS" ]

@@ -36,6 +36,19 @@ $262.agent.start(`
     });
 `);
 
+// --- Negative: a missing argument throws the same rejection ---------------
+var threwNoArg = null;
+try {
+    WScript.Broadcast();
+} catch (e) {
+    threwNoArg = e;
+}
+check(threwNoArg !== null, "broadcast with no argument threw, got " + threwNoArg);
+if (threwNoArg !== null) {
+    check(/SharedArrayBuffer/.test(String(threwNoArg.message || threwNoArg)),
+        "no-argument rejection message names SharedArrayBuffer, got " + threwNoArg.message);
+}
+
 // --- Negative: non-SAB arguments throw, and the agent is untouched --------
 var badArgs = [i32, 123, "sab", {}, null, undefined];
 for (var i = 0; i < badArgs.length; i++) {

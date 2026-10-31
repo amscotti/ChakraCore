@@ -21,9 +21,10 @@ never the exit code alone:
      `hello world` + `PASS`.
 
 Legs 3-5 need engine execution, which currently aborts during
-runtime init under qemu-user (see doc/b4-linux.md section 8: the
-same binary profile is green on native CI, so the abort is
-environmental). A leg that observes the abort signature (SIGABRT,
+runtime init under qemu-user (see doc/b4-linux.md stage 4: a
+qemu-user defect on guest open of /proc/self/maps, believed
+environmental — but no native Linux behavior run exists yet, so
+this is unproven; B4 remains BLOCKED-with-green-build). A leg that observes the abort signature (SIGABRT,
 silent stdout, and a pure qemu signal-6 stderr observation — at
 least one `uncaught target signal 6 (` occurrence and no other
 qemu-phrased signal occurrence)

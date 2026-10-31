@@ -909,7 +909,17 @@ JsValueRef WScriptJsrt::LoadScript(JsValueRef callee, LPCSTR fileName,
             goto Error;
         }
 
-        WaitForSingleObject(threadData->hevntInitialScriptCompleted, INFINITE);
+        // Wait for the child's initial script OR the child thread itself:
+        // ThreadProc's Error path now sets the event, but a child thread
+        // that dies without reaching it (fatal error, unhandled
+        // exception) must not block this spawn forever either. Either
+        // outcome ends the spawn wait; a dead child simply never reports,
+        // exactly like an agent whose initial script threw (JsRun errors
+        // are not surfaced here).
+        {
+            HANDLE spawnWaitHandles[] = { threadData->hevntInitialScriptCompleted, child->hThread };
+            WaitForMultipleObjects(_countof(spawnWaitHandles), spawnWaitHandles, FALSE, INFINITE);
+        }
     }
     else
     {
@@ -1350,16 +1360,11 @@ bool WScriptJsrt::Uninitialize()
     // corruption, not a controlled teardown. Only the main thread (no
     // threadData, or the root RuntimeThreadData with no parent) may clear
     // them; children only join their own sub-agents.
-    if (threadData == nullptr || threadData->parent == nullptr)
-    {
-        // moduleRecordMap is a global std::map, its destructor may access overridden
-        // "operator delete" / global HeapAllocator::Instance. Clear it manually here
-        // to avoid worrying about global destructor order.
-        moduleRecordMap.clear();
-        moduleDirMap.clear();
-        moduleErrMap.clear();
-        scriptDirMap.clear();
-    }
+    const bool isMainThread = (threadData == nullptr || threadData->parent == nullptr);
+    // The global map clears run at the END of this function, after the
+    // child join below: live agent threads consume those maps (module
+    // loads resolve through them), so clearing them before the join
+    // raced child reads against the main thread's mutation.
 
     if (threadData && !threadData->children.empty())
     {
@@ -1384,20 +1389,47 @@ bool WScriptJsrt::Uninitialize()
         }
 
         //Clang does not support "for each" yet
+        // Record each join result instead of Assert-ing it: profiles
+        // that compile Assert out must not delete a RuntimeThreadData
+        // whose thread was never observed exited (WaitForSingleObject
+        // fails outright on an invalid handle without waiting).
+        std::vector<DWORD> waitResults;
+        waitResults.reserve(threadData->children.size());
         for(auto i = threadData->children.begin(); i!= threadData->children.end(); i++)
         {
-            DWORD waitRet = WaitForSingleObject((*i)->hThread, INFINITE);
-            Assert(waitRet == WAIT_OBJECT_0);
+            waitResults.push_back(WaitForSingleObject((*i)->hThread, INFINITE));
         }
 
-        // Every child above was individually observed exited before any
-        // delete runs.
+        // Delete only children individually observed exited above. A
+        // child whose wait failed is deliberately leaked instead:
+        // freeing memory a possibly-live thread still touches is the
+        // exact failure this join exists to prevent, and teardown is
+        // process-final anyway.
+        size_t waitIndex = 0;
         for (auto i = threadData->children.begin(); i != threadData->children.end(); i++)
         {
-            delete *i;
+            if (waitResults[waitIndex++] == WAIT_OBJECT_0)
+            {
+                delete *i;
+            }
         }
 
         threadData->children.clear();
+    }
+
+    if (isMainThread)
+    {
+        // moduleRecordMap is a global std::map, its destructor may access overridden
+        // "operator delete" / global HeapAllocator::Instance. Clear it manually here
+        // to avoid worrying about global destructor order. Safe now:
+        // every agent thread that could read these maps has been joined
+        // above (a child whose join failed may still be live, but its
+        // RuntimeThreadData was leaked rather than freed, and process
+        // teardown is already under way).
+        moduleRecordMap.clear();
+        moduleDirMap.clear();
+        moduleErrMap.clear();
+        scriptDirMap.clear();
     }
 
     return true;
@@ -1686,6 +1718,17 @@ JsValueRef __stdcall WScriptJsrt::BroadcastCallback(JsValueRef callee, bool isCo
     LPCWSTR errorMessage = _u("invalid call to WScript.Broadcast");
 
     IfJsrtErrorSetGo(ChakraRTInterface::JsGetUndefinedValue(&returnValue));
+
+    if (argumentCount <= 1)
+    {
+        // A missing argument is the same host-usage error as an explicit
+        // non-SharedArrayBuffer below; without this check the old
+        // `argumentCount > 1` guard silently returned undefined for
+        // WScript.Broadcast() while WScript.Broadcast(undefined) threw.
+        errorCode = JsErrorInvalidArgument;
+        errorMessage = _u("WScript.Broadcast requires a SharedArrayBuffer");
+        goto Error;
+    }
 
     if (argumentCount > 1)
     {

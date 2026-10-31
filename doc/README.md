@@ -2,8 +2,11 @@
 
 In-repo documentation for the ChakraCore modernization effort. Engine and legacy
 build references are pinned to baseline `97e68c917`; execution results and
-modernization decisions are updated through 2026-10-15. See
-[current-state.md](current-state.md) §7 for activity context.
+modernization decisions are updated through 2026-10-31. See
+[current-state.md](current-state.md) §7 for activity context. The complete
+per-batch C2 receipt ledger (S1–S14, E1, host slices) lives in
+[modernization-plan.md](modernization-plan.md) §6; the table below indexes the
+foundational documents and the earliest receipts only.
 
 | Document | Contents |
 |---|---|

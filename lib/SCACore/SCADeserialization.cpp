@@ -221,6 +221,16 @@ namespace Js
                 m_reader->Read((intptr_t*)&sharedContents);
 
                 SharedArrayBuffer* arrayBuffer = lib->CreateSharedArrayBuffer(sharedContents);
+                // Deserialization materializes a wrapper over contents
+                // produced by another runtime, so the contents are
+                // cross-runtime by construction — mark them exactly as
+                // JsCreateSharedArrayBufferWithSharedContent does
+                // (JsrtCore.cpp). Without this, Atomics.waitAsync
+                // registrations through an SCA-created wrapper never
+                // schedule a monitor task and stay deaf to foreign
+                // notifies (the SharedArrayBuffer.h contract comment
+                // already promised this marking).
+                sharedContents->MarkCrossRuntime();
                 Assert(arrayBuffer->IsWebAssemblyArrayBuffer() == sharedContents->IsWebAssembly());
                 *dst = arrayBuffer;
             }

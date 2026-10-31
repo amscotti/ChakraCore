@@ -210,7 +210,11 @@ jobs:
               line="release-shared: hello=PASS native=shared-PASS"
               ;;
           esac
-          test "$(grep -c 'ALL NEGATIVE CONTROLS BEHAVE' ci-evidence/selftest.log)" = '4'
+          # Expected count derived from the check-selftest script list in
+          # build.zig (each script's --self-test prints the line once), so
+          # adding a gate script cannot silently rot this tally.
+          want_selftests="$(python3 -c "import re; s=open('build.zig').read(); m=re.search(r'selftest_top.*?for \(\[_\]\[\]const u8\{(.*?)\}\)', s, re.S); assert m, 'selftest list not found in build.zig'; print(m.group(1).count('.py'))")"
+          test "$(grep -c 'ALL NEGATIVE CONTROLS BEHAVE' ci-evidence/selftest.log)" = "$want_selftests"
           echo "$line" | tee ci-evidence/tally.txt
           echo "tally=$line" >> "$GITHUB_OUTPUT"
           echo "- $line" >> "$GITHUB_STEP_SUMMARY"

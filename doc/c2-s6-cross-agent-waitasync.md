@@ -1242,7 +1242,11 @@ no-ops; prior full-build gates 568/568 and 546/546 stand).
   (2 ms) plus host sleep granularity — the host timer contract's few-ms
   early/late fire (S6d) applies. No fairness/starvation claim beyond FIFO
   list order.
-- **Rare SIGBUS at agent startup (engine race, out of scope)**:
+- **Rare SIGBUS at agent startup (engine race, out of scope; CLOSED
+  since by E1 — root-caused and fixed in
+  [e1-agent-startup-sigbus.md](e1-agent-startup-sigbus.md), merged at
+  the 84bda26de checkpoint; the contemporaneous record below is kept
+  as the pre-fix evidence)**:
   concurrent `JsCreateContext` → `ScriptContext::Initialize` →
   `JavascriptLibrary::InitializePrototypes` → `JavascriptStringObject`
   ctor (JavascriptStringObject.cpp:36) faults on a fixed page offset

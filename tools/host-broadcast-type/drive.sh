@@ -37,3 +37,7 @@ while [ "$i" -lt "$RUNS" ]; do
 done
 
 echo "bin=$BIN runs=$RUNS threw=$THREW crashes=$CRASHES other=$OTHER"
+# Exit-code contract: 0 only when every run took the post-fix throw path,
+# so this driver can gate (an A/B run against a pre-fix binary is
+# SUPPOSED to exit 1 while still printing its crash tally above).
+[ "$CRASHES" -eq 0 ] && [ "$OTHER" -eq 0 ] && [ "$THREW" -eq "$RUNS" ]
