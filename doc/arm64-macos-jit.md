@@ -1,28 +1,35 @@
 # ARM64 macOS JIT
 
-Status of the native JIT port for Apple ARM64, as of 2026-10-18. This is a
-worktree effort. It is not a C2 language batch, and it is not milestone B4.
-B4 in [modernization-plan.md](modernization-plan.md) is the still-blocked
-Linux x64 JIT proof. The language work stays on the modernization branch,
-interpreted, with `-DDISABLE_JIT=1`. This document is the record of what the
-Mac JIT port has proved, how the Apple calling convention differs from the
-Windows ARM64 frame the backend was written for, and the steps still required
-before the branch can merge.
+Status of the native JIT port for Apple ARM64, as of 2026-10-31. The port
+was developed in a worktree on `jit/arm64-macos`, rebased onto
+`modernize/baseline` `aa42bb4f1`, and merged into `modernize/baseline` on
+2026-10-31 as merge commit `9004b3ed7` (not pushed). It is not a C2 language
+batch, and it is not milestone B4. B4 in
+[modernization-plan.md](modernization-plan.md) is the still-blocked Linux x64
+JIT proof, and JIT-wide claims stay gated on it. This document is the record
+of what the Mac JIT port has proved, how the Apple calling convention
+differs from the Windows ARM64 frame the backend was written for, and the
+coverage limits under which it merged. Read
+[Rebase onto `aa42bb4f1` and merge closure](#rebase-onto-aa42bb4f1-and-merge-closure-2026-10-31)
+for the merge gates; the M1 and handoff sections below are the historical
+record (their commit hashes are pre-rebase).
 
-Read [Current state and handoff](#current-state-and-handoff) before editing.
-The functional work is committed on `jit/arm64-macos`: `07d6965e8` (`jit:
-native ARM64 macOS port`), `2372fcc81` (JIT build/runtime/bytecode checks),
-`9ccc535a8` (XData lifecycle + installer symlink hardening), `fcbc434c9`
-(generator write-barrier and empty-page leaks), and `9e1e4cb55` (full 64-bit
-InlineeCallInfo label). The local tag `jit-arm64-macos-m1` marks that
-checkpoint. Post-M1 follow-ups are `209f18d80` (generator callee/strictness and
-Apple 16 KiB heap pages) and `a2dac362e` (suspended-generator reparse guard).
-The branch is not merged.
-The installed binary is `out/jit/bin/libChakraCore.dylib`, 26238904 bytes,
-timestamp 2026-10-18 22:54. `out/jit/bin/ch` is the host (788320 bytes); it
-dlopens the sibling dylib, so trust the dylib timestamp. The suite logs named
-below are ephemeral local artifacts from the original runs; they are not
-checked in.
+The functional port commits are `07d6965e8` (`jit: native ARM64 macOS port`),
+`2372fcc81` (JIT build/runtime/bytecode checks), `9ccc535a8` (XData lifecycle
++ installer symlink hardening), `fcbc434c9` (generator write-barrier and
+empty-page leaks), and `9e1e4cb55` (full 64-bit InlineeCallInfo label). The
+local tag `jit-arm64-macos-m1` marks that checkpoint. Post-M1 follow-ups are
+`209f18d80` (generator callee/strictness and Apple 16 KiB heap pages) and
+`a2dac362e` (suspended-generator reparse guard). The 2026-10-31 rebase-and-
+merge closure added `ff632f124`, `1610cd085`, `b6cdf59ad`, `bb93519a8`,
+`464c2eb73`, `4b916acd0`, `5e926f62d`, `841c3fa6d`, `fbbcedb3d`,
+`2eaa51bf5`, `12e536169`, `c69f32879` and `1cc618e87` on top; see the merge
+closure section for what each fixed.
+The merge-gate binary was `out/jit/bin/libChakraCore.dylib`, 27519592 bytes,
+timestamp 2026-10-31 18:51. `out/jit/bin/ch` is the host (807296 bytes); it
+dlopens the sibling dylib, so trust the dylib timestamp. The suite logs
+named below are ephemeral local artifacts from the original runs; they are
+not checked in.
 
 Path convention: `<worktree>` is this checkout, and
 `<modernization-checkout>` is the sibling ChakraCore checkout on
@@ -36,7 +43,8 @@ Recorded 2026-10-18. Local annotated tag: `jit-arm64-macos-m1` (not pushed).
 
 Scope: Apple ARM64 macOS only. This is the `jit/arm64-macos` worktree port,
 not B4 and not a C2 language batch. The language work stays on the
-modernization branch with `-DDISABLE_JIT=1`. The port is not merged.
+modernization branch with `-DDISABLE_JIT=1`. The port is not merged
+(as of this 2026-10-18 record; merged 2026-10-31, see merge closure).
 
 Functional gate, measured on `out/jit/bin/libChakraCore.dylib` (13:58,
 26,238,584 bytes):
@@ -138,6 +146,92 @@ JIT profile is not yet a full-language supported profile:
   branch is not merge-ready until these tests are either ported or formally
   scoped out of the JIT profile's supported coverage.
 
+### Rebase onto `aa42bb4f1` and merge closure (2026-10-31)
+
+`jit/arm64-macos` was rebased onto `modernize/baseline` `aa42bb4f1` (the
+pre-rebase tip `d90662bad` is preserved on
+`jit/arm64-macos-integration-20261019`) and the coverage gaps above were
+closed to merge. The governing fix strategy for baseline C2 shapes the old
+backend cannot faithfully compile is abort-to-interpreter
+(`Js::OperationAbortedException` from IRBuilder/GlobOpt): correctness and
+mergeability first, JIT coverage second. What landed after the rebase:
+
+- `ff632f124` — `VTABLE_COUNT` 60 → 61 for baseline's `VtableFloat16Array`.
+- `1610cd085` — the `with`/`eval` profiled-store blocker: S14-P5 reference-
+  base probes used plain defs at joins, so IRBuilder renamed the temp and
+  orphaned the `InitUndecl` def. All reference-base defs are now reuse-loc
+  forms (new `LdUndef_ReuseLoc` appended at the end of the extended opcode
+  list so established opcode values do not shift), plus a null-Src2 guard
+  in `Peeps::PeepBranch`.
+- `bb93519a8` — abort codegen for the 18 unported class-field/private-name/
+  import-attribute opcodes and for env access with no env register.
+- `464c2eb73` — abort on lifetime-less bailout syms; register the scoped-
+  ensure helpers the full-JIT build needs.
+- `4b916acd0` — BigInt-safe numeric conversion bailouts; `"bigint"` typeof
+  string interned (`PROPERTY_STRING` + appended `ENTRY(bigint)`), both
+  builtin bytecode variants regenerated.
+- `5e926f62d` — resizable TypedArray effective length kept in the inherited
+  `length` field JIT code reads directly; `ArrayBuffer::Resize` refreshes
+  views. Direct eval in parameter scopes stays interpreted.
+- `841c3fa6d` — direct-eval callers and eval script functions stay
+  interpreted: S14 `EvalDeclarationInstantiation` reads frame displays and
+  scope slot arrays that JIT frames do not materialize faithfully.
+  `1cc618e87` restores the `CallsEval` PerfHint that abort bypassed.
+- `fbbcedb3d` — `DeadBrOnHasProperty` (the sloppy-mode captured-base
+  PutValue probe) is now lowered with (instance, propertyId) arguments;
+  the generic unary-helper path passed the property sym opnd itself, so
+  proxy `has` traps never fired for that probe.
+- `2eaa51bf5` — abort GlobOpt when a predecessor block (finally-clone edge
+  from a labeled break out of a `finally`) was never visited and has no
+  block data, instead of segfaulting in `CloneBlockData`.
+- `12e536169` — split the `ConvNumber` JIT helpers back to
+  ToNumber/ToNumberInPlace and add `ConvNumeric` helpers for
+  ToNumeric/ToNumericInPlace, selected per opcode in `LowerConvNum`
+  (unary `+` on a BigInt threw nothing and returned the BigInt); GlobOpt
+  no longer claims definite-int/number dsts for `Not_A`, the bitwise ops,
+  or `Incr_A`/`Decr_A` under ESBigInt unless srcs are proven numeric
+  (`~(~0n)` threw "Number expected" from a bailout-less conversion).
+- `c69f32879` — the no-JIT builtin bytecode headers were regenerated with
+  the JIT binary in `4b916acd0`, which writes JIT-format bytecode
+  (`regenByteCode.py` does not select the format; the binary does). No-JIT
+  builds misread them (`Array.prototype.filter` returned empty,
+  `WScript.Arguments.filter` segfaulted, 545 `disable_jit` failures, and
+  `verify_bytecode_pure` flagged it). Regenerated with the no-JIT
+  test-profile binary; the headers now differ from baseline only by the
+  `ENTRY(bigint)` property-count shift.
+
+Final gates on the rebased tip `1cc618e87` (JIT binary above), run
+2026-10-31:
+
+| Check | Result |
+|---|---|
+| `dynapogo` (JIT binary) | **2001 / 286** — every failure asm.js/WASM; **zero signals** (two consecutive runs) |
+| `interpreted` (JIT binary) | **2426 / 397** — every failure asm.js/WASM (incl. `Bugs/fabs1.js`, an asm.js test); **zero signals** |
+| `disable_jit` (JIT binary) | **2032 / 0** |
+| `zig build check` (test profile) | **2032 / 0**, bytecode verify green |
+| `zig build check -Dprofile=debug-static` | **2084 / 0** |
+| `zig build -Dprofile=jit check` | green: smoke, `check_jit`, `--jit` bytecode verify |
+| `zig build check-selftest` | green |
+
+Coverage limits carried into the merge, stated deliberately:
+
+- **asm.js/WASM** remain the documented Mac feature gap: the profile does
+  not define `ASMJS_PLAT`/`ENABLE_WASM`. A suite exit 1 whose failures all
+  classify as asm.js/WASM with zero signals is the expected JIT-profile
+  result, not a merge blocker.
+- **Direct-eval callers and eval code run interpreted.** That is a JIT
+  coverage limit, not full eval JIT support.
+- **18 class-field/private/import-attribute opcodes** abort codegen to the
+  interpreter, as does the labeled-break-from-`finally` CFG shape in
+  GlobOpt. Porting any of these is follow-up work.
+- **Serialized bytecode GUID rotation is still owed at B5**: the property-
+  count and opcode changes did not rotate the release GUID (the regen tool
+  mints only on a dual-variant run), so no cross-version bytecode-cache
+  compatibility is claimed.
+
+Merged into `modernize/baseline` as `9004b3ed7` (merge, not fast-forward;
+not pushed).
+
 #### Suspended-generator reparse guard (Apple ARM64)
 
 `ParseableFunctionInfo::CleanupToReparse` normally drops the bytecode block,
@@ -231,7 +325,8 @@ try/finally shapes. The three suite runs below were rerun on the 22:54 binary
   failures, zero signals. The two StackTrace line diffs are fixed.
 
 The branch is committed (`07d6965e8`, `2372fcc81`, `9ccc535a8`, `fcbc434c9`,
-`9e1e4cb55`, `209f18d80`, `a2dac362e`) but not merged.
+`9e1e4cb55`, `209f18d80`, `a2dac362e`) but not merged (as of this handoff;
+merged 2026-10-31, see merge closure).
 `zig build -Dprofile=jit check` runs the generic smoke, `check_jit.py`, and
 `verify_bytecode_pure.py --jit --verify`. The JIT static archive is
 deterministic (`ZERO_AR_DATE=1`, epoch/0:0 member metadata). The base object
@@ -793,7 +888,8 @@ Edits for this port go in the worktree only. The modernization checkout has
 carried unrelated uncommitted parser work during this effort; that work is not
 part of the JIT port and is not copied here. The port is committed as
 `07d6965e8`, `2372fcc81`, `9ccc535a8`, `fcbc434c9`, `9e1e4cb55`,
-`209f18d80`, and `a2dac362e`; it is not merged.
+`209f18d80`, and `a2dac362e`; it is not merged (as of this record; merged
+2026-10-31, see merge closure).
 
 The standing arrangement:
 

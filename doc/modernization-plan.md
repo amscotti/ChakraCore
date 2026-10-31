@@ -24,7 +24,14 @@
 > [c2-s9-modifiers.md](c2-s9-modifiers.md),
 > [c2-s14-blockscope.md](c2-s14-blockscope.md),
 > [c2-s14-statement-early-errors.md](c2-s14-statement-early-errors.md) and
-> [c2-flag-audits.md](c2-flag-audits.md). Engine/legacy-build references use baseline
+> [c2-flag-audits.md](c2-flag-audits.md). The native **ARM64 macOS JIT** port
+> (separate worktree effort, not a C2 batch and not B4) merged into this
+> branch on 2026-10-31 (`9004b3ed7`): the `jit` Zig profile is green on
+> Mac ARM64 with dynapogo/interpreted suites failing only on the documented
+> asm.js/WASM Mac gap, and the no-JIT gates unchanged at 2032/0 and 2084/0;
+> evidence and coverage limits (direct-eval and 18 class/private/import
+> opcodes stay interpreted) are in [arm64-macos-jit.md](arm64-macos-jit.md).
+> Linux x64 JIT claims remain gated on B4 as below. Engine/legacy-build references use baseline
 > `97e68c917`; execution evidence and the [B1-B3 review](b1-b3-review.md)
 > are recorded through 2026-10-31 local time.
 > This is a staged roadmap for a small maintained fork, not a dated delivery promise.
