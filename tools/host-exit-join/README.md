@@ -27,5 +27,8 @@ check; release/test profiles fall through to the delete loop and free
   Used for the pre/post A/B legs on the test and debug-static profiles.
 
 Not added as an rlexe entry: 100 agent-runtime creations exceed what the
-debug regression gate can afford reliably; the gates' pins stay 2031/2083
-(see the receipt in `doc/c2-s6-cross-agent-waitasync.md`).
+debug regression gate can afford reliably; the gates' pins stayed
+2031/2083 through this repair (see the receipt in
+`doc/c2-s6-cross-agent-waitasync.md`). They were later bumped to
+2032/2084 by the host-broadcast-type lane's rlexe entry, unrelated to
+this tooling.

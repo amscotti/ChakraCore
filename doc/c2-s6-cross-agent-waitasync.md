@@ -751,17 +751,155 @@ Both reviewers **ACCEPTED** with zero `[bug]` findings.
   fail-then-4-successes script; both gates **PASS 2031/0 and 2083/0**
   (flake not reproducible under deliberate 8-spinner load, 209/209 ×5
   per leg on the DebuggerCommon folder).
-- **New pre-existing defect found (card filed)**: `WScript.Broadcast`
+- **New pre-existing defect found (card filed)**: ~~`WScript.Broadcast`
   SIGSEGVs (100% repro, N=1..200, identical pre-fix base and post-fix)
   when passed a non-SharedArrayBuffer (e.g. an `Int32Array` view)
   instead of throwing — host-robustness card: validate the broadcast
-  argument type. Also filed as a low-priority infra note: the
+  argument type~~ **Fixed** by the host-broadcast-type follow-up below
+  (diagnosis `56849176f`, fix `91f4db697`). Also filed as a low-priority infra note: the
   debug-profile PAL thread-priority `ASSERT` print can leak into
   baseline output under extreme load (both classified pre-existing by
   the reviewers).
 - Folded nits: README stale error string and copied-binary dylib note;
   `failthreads.c` single-spawning-thread counter caveat; gate-log
   retention note (reviewer reruns substantiate the in-receipt numbers).
+
+### Follow-up: host-broadcast-type — `WScript.Broadcast(non-SAB)` crashed live agents
+
+Status: diagnosis `56849176f`, fix `91f4db697`, review repair +
+receipt amendment (this section; the lane's final pre-merge commit),
+branch `host-broadcast-type` (base `78376e684` = main, gates
+2031/2083 → 2032/2084). Retires the card filed in the review outcome
+above. Both reviews ACCEPTed the crash fix but found the same
+introduced leak, repaired below (repair iteration).
+
+Root cause: `BroadcastCallback` passed `arguments[1]` to
+`JsGetSharedArrayBufferContent(..., &threadData->sharedContent)`
+without checking the return value. On a non-SAB the engine returns
+`JsErrorInvalidArgument` **without writing the out parameter**
+(`JsrtCore.cpp`: the `VarIs<SharedArrayBuffer>` check returns before
+the store), so `sharedContent` kept its prior value — `nullptr` (the
+`RuntimeThreadData` constructor) on the first broadcast, or a stale
+already-released handle after an earlier valid broadcast (the parent
+releases the handle after the all-children handshake). The callback
+then signaled every child anyway, and each live child consumed the
+handle: `JsCreateSharedArrayBufferWithSharedContent(parent->
+sharedContent, ...)` dereferences it (`CreateSharedArrayBuffer(
+(SharedContents*)h)` then `->MarkCrossRuntime()`) — SIGSEGV in the
+child, before the caller's `try/catch` could print anything. Without
+live children the failed call silently returned `undefined` (also
+wrong, non-fatal). `$262.agent.broadcast` **is** `WScript.Broadcast`
+(`bin/ch/262.js`), so both script entry points share this one
+callback and the fix covers both.
+
+Design (host-side only, ~20 lines): validate **before** signaling.
+The content handle is staged in a local and committed to
+`threadData->sharedContent` only on `JsNoError`; any failure (non-SAB
+→ `JsErrorInvalidArgument`; SAB-without-content → `JsErrorFatal`) is
+rejected with `JsErrorInvalidArgument` + "WScript.Broadcast requires
+a SharedArrayBuffer" through this function's existing
+`errorCode`/`errorMessage`/`SetExceptionIf` path — the same
+script-catchable bad-argument shape every sibling `WScript` callback
+already uses (`ChakraRTInterface` has no `JsCreateTypeError` hook;
+adding one would grow the change beyond host-robustness). On the
+failure path no child is signaled, nothing is written to
+`sharedContent`, and no handle is released.
+
+Ownership record (memory-management): **no ownership protocol changes;
+one acquire/release pair made explicit per path.** The validation
+extraction AddRefs on success (`JsrtCore.cpp`: `(*content)->AddRef()`
+before `MarkCrossRuntime`), so every completed `Broadcast` acquires
+one content reference. Three paths: (1) agents present — local
+staging → commit to `threadData->sharedContent` → child wrappers
+AddRef → parent releases after the all-children handshake
+(pre-existing, unchanged); (2) agentless success (`threadData ==
+nullptr`; threadData is created only at the crossthread inject) —
+acquire-and-**release** the staged local immediately: nothing is
+committed and no child exists to receive it (added by the review
+repair; the first fix version leaked this reference, one pinned
+`SharedContents` per agentless valid broadcast, contradicting this
+record — see below); (3) failure — acquires nothing (the API writes
+no out-param on failure, verified from source), signals nothing,
+releases nothing. Allocation domains, thread rules and release
+authority are unchanged.
+
+Evidence: Mac ARM64, test profile (`zig-out/bin/ch`) and debug-static
+(`out/debug-static/bin/ch`); driver `tools/host-broadcast-type/
+drive.sh` (classifies SIGSEGV vs clean catchable throw), reproducer
+`repro.js` (the card's, verbatim). Binaries (SHA-256): pre-fix test
+`1a1b6fdf…5c64`, pre-fix debug `519ee87a…f3a8` (base `78376e684`);
+post-fix test `4b7b18d0…d9a`, post-fix debug `a2c1b049…d77` (fix
+`91f4db697`).
+
+| Leg | Binary | Runs | Result |
+|---|---|---|---|
+| Pre-fix test | base `78376e684` | 10 (+5) | **15/15 SIGSEGV** (rc=139), no output |
+| Pre-fix debug | base `78376e684` | 10 (+5) | **15/15 SIGSEGV** (rc=139), no output |
+| Post-fix test | fix `91f4db697` | 20 | **20/20 clean throw + survived**, exit 0 |
+| Post-fix debug | fix `91f4db697` | 20 | **20/20 clean throw + survived**, exit 0 |
+
+Post-fix runs print `threw: Error: WScript.Broadcast requires a
+SharedArrayBuffer` then `survived`. Valid-broadcast regression:
+agents100 (`tools/host-exit-join/`) 20/20 clean test, 10/10 clean
+debug. Focused S6e suite plus the new entry: **8/8 test, 8/8 debug**
+(`runtests.py -t|-d --variants=disable_jit`). Gates: test **PASS
+2032/0**, debug **PASS 2084/0** — pins bumped 2031/2083 → 2032/2084
+in `tools/build/gate_counts.json` (lineage: "The host-broadcast-type
+repair added s6-broadcast-type.js"; first pin bump since the S6e
+landing).
+
+**Review repair (agentless-broadcast leak).** The first fix version
+validated before the `if (threadData)` guard, and the extraction
+AddRefs on success — with `threadData == nullptr` (no agent ever
+started) an agentless valid `WScript.Broadcast(sab)` took a reference
+that the skipped handshake never released: one leaked
+`SharedContents` per call, unbounded in a loop (pre-fix this path
+acquired nothing). Repair: on `threadData == nullptr` after
+successful validation, release the staged local with the same
+`JsReleaseSharedArrayBufferContentHandle` the handshake uses, then
+return normally; throw-on-bad-argument behavior is unchanged
+(failure still acquires nothing). Probe
+`tools/host-broadcast-type/leakprobe.js` + `leakdrive.sh`
+(RSS-isolation: fresh 64 KiB SAB per iteration, broadcast vs
+control; note `WScript.Broadcast` requires `-Test262` — without it
+the probe's first broadcast throws a host TypeError — and macOS
+`/usr/bin/time -l` reports bytes). Mac ARM64:
+
+| Leg | Profile / iters | Broadcast leg | Control leg |
+|---|---|---|---|
+| Pre-repair (`91f4db697`) | test / 20000 | **1279 MiB** | 738 MiB |
+| Pre-repair (`91f4db697`) | debug / 6000 | **544 MiB + `ASSERTION 73055 (AllocationPolicyManager.h:54) currentMemory == 0`** (rc=133) | 315 MiB |
+| Post-repair | test / 20000 | **540 MiB** | 742 MiB |
+| Post-repair | debug / 6000 | **315 MiB, rc=0, no assert** | 315 MiB |
+
+(At 6000 iters on test both legs read ~400 MiB — the control's
+unreferenced buffers are GC-lag-pinned to exit, masking the delta;
+20000 separates pinned-from-lagged. The debug profile's exit
+accounting assert catches the leak outright.) Post-repair
+re-verification: s6-broadcast-type.js 5/5 direct per binary;
+repro drive 5/5 clean throw per profile; focused S6e suite **8/8
+test, 8/8 debug**; gates **test 2032/0, debug 2084/0** (pins
+unchanged). Reviewer nit folded: the general reviewer's
+`zig build check` aggregate run failed only on lock contention —
+every component passed individually both before and after the
+repair (the numbers above and in-lane logs).
+
+In-gate negative coverage (`test/es7/s6-broadcast-type.js`, ~1 s,
+deterministic — unlike the spawn-check card this defect needs no
+resource limits): six non-SAB argument shapes throw a catchable Error
+naming SharedArrayBuffer, the live agent was **not** signaled (SAB
+contents untouched), and a subsequent valid broadcast is still
+consumed with the agent live (`got 1`).
+
+Residual (host-broadcast-type): `WScript.Broadcast()` with no
+argument still silently returns `undefined` (unchanged, consistent
+with `ReceiveBroadcast`/`Report`); a SAB whose content handle was
+already released through separate API misuse is not additionally
+defended (engine-side concern); `ch` profiles without
+`-Test262`/`-ESSharedArrayBuffer` never reach this path. Process
+note: the gate-lock wrapper's `exec` drops its EXIT trap, so every
+acquisition leaks the lock dir — the reclaim protocol (no live
+zig/runtests/test262 → `rmdir`) is what all lanes actually rely on.
 
 ## Scope
 
