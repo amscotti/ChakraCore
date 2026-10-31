@@ -771,10 +771,20 @@ delete-without-join UAF, 33/50 SIGSEGV at 100 agents) — the fix signals
 all children then joins each individually and deletes only after
 observing exit (50/50 clean, cap-edge 63–66 and 400-agent adversarial
 scale clean, ≤64 semantics byte-identical; dual ACCEPT; gates unchanged).
-All active feature/triage
+The unchecked-`CreateThread` card was then closed by the host-spawn-check
+lane (merge `a77b1a49d`, receipt section in the S6e doc): a failed agent
+spawn hung the parent forever on the initial-script event (12/12 hangs
+per profile, reproduced via a libc-boundary `EAGAIN` injection driving
+the genuine PAL failure path); the fix rolls the failed child back on
+the spawning thread and surfaces a catchable `JsErrorOutOfMemory`
+(12/12 caught on both profiles, post-failure state consistent, nested
+sub-agent spawns covered, dual ACCEPT; gates unchanged 2031/2083). Its
+adversarial review filed one new pre-existing defect: `WScript.Broadcast`
+SIGSEGVs (100% repro) on a non-SharedArrayBuffer argument —
+type-validation card open. All active feature/triage
 worktrees are merged; next work items are
-the remaining S8/P-eval residuals, the unchecked-`CreateThread` spawn
-follow-up card, lead-surrogate lacunarity, and the C4
+the remaining S8/P-eval residuals, the `WScript.Broadcast` type card,
+lead-surrogate lacunarity, and the C4
 qualification work (full baseline rerun, host-reported negative phase). Tracked eval residuals: P4 body eval with non-simple
 parameters; P2 hidden outer lexical and JSC/Node delete difference.
 S3 (Unicode data decision), S6 default (product/security decision),

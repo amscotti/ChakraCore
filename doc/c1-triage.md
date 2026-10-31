@@ -927,8 +927,15 @@ agent children made the old join fail (debug assert; release-profile
 delete-without-join UAF, 33/50 SIGSEGV at 100 agents) — the fix joins
 each child individually and deletes only after observing exit (post-fix
 50/50 clean, 400-agent adversarial scale clean, gates unchanged
-2031/2083). Next work items are the unchecked-`CreateThread` follow-up
-card, the
+2031/2083). The unchecked-`CreateThread` follow-up was then closed by
+the host-spawn-check lane (merge `a77b1a49d`): a failed agent-thread
+spawn used to hang the parent forever on the initial-script event
+(reproduced 12/12 per profile via a libc-boundary `EAGAIN` injection);
+the fix rolls the failed child back and surfaces a catchable
+`JsErrorOutOfMemory` (12/12 caught, post-failure spawns consistent,
+dual ACCEPT, gates unchanged). Next work items are the
+`WScript.Broadcast` type-validation card (non-SharedArrayBuffer argument
+SIGSEGVs 100%, pre-existing, found by review), the
 remaining S8/P-eval residuals, and C4
 qualification (full baseline rerun,
 host-reported negative phase). P5 residual: eval/function-expression
