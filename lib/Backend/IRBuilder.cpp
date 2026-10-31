@@ -6758,6 +6758,15 @@ IRBuilder::BuildCallI_Helper(Js::OpCode newOpcode, uint32 offset, Js::RegSlot ds
     if ((flags & Js::CallFlags::CallFlags_Eval) != 0 ||
         flags == Js::CallFlags::CallFlags_ExtraArg || newOpcode == Js::OpCode::CallIEval)
     {
+#ifdef PERF_HINT
+        // Lowering would have written this hint for the CallIEval; the
+        // abort keeps the function interpreted, which is exactly what
+        // the hint reports, so emit it here instead.
+        if (PHASE_TRACE1(Js::PerfHintPhase))
+        {
+            WritePerfHint(PerfHints::CallsEval, this->m_func, offset);
+        }
+#endif
         throw Js::OperationAbortedException();
     }
 
