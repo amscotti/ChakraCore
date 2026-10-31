@@ -545,9 +545,11 @@ Thread rule: signal/wait/delete all on the parent thread; the child's
           last touch of its own RuntimeThreadData precedes its thread
           exit, which the parent observes through the handle wait
 Failure paths: a WAIT_FAILED (invalid handle) trips the per-child
-          Assert on debug profiles — same contract as before, now
-          attributed to the specific child; release profiles keep the
-          pre-existing unconditional-delete shape
+          Assert on debug profiles — same contract as before; the
+          ASSERTION output identifies the source line inside the loop
+          (pinpointing the exact child requires a debugger stop with the
+          iterator in scope); release profiles keep the pre-existing
+          unconditional-delete shape
 ```
 
 ### Evidence
@@ -585,10 +587,44 @@ pre-fix debug `291ba391…d66` (`ch-pre-debug`, static), post-fix debug
 - Sequential per-child joins cost one syscall per agent (N ≤ a few
   hundred in any realistic host); all children exit concurrently after
   the signal pass, so wall time stays ≈ the slowest child's exit.
+- **Wedged-agent failure mode (adversarial review)**: with >64 agents, a
+  wedged (`while(true)`) agent now deterministically wedges process exit
+  (per-child INFINITE waits) where the pre-fix code crashed with a UAF;
+  with ≤64 agents both old and new code hang. Strictly a better failure
+  mode, pre-existing INFINITE semantics — but a host needing bounded
+  exit has no watchdog.
 - The child-side `Error` path of `RuntimeThreadData::ThreadProc` still
   skips joining its own sub-agents, but it is unreachable after any
   script ran (all `Error` exits precede `JsRun`; sub-agents are created
   only by script) — pre-existing, unchanged.
+- `CreateThread`'s return value at the spawn site is unchecked
+  (pre-existing): a failed spawn leaves `hThread == NULL`, and the join's
+  `WaitForSingleObject(NULL)` would trip the per-child Assert (debug) or
+  delete a never-started child (release) — same shape pre- and post-fix.
+  Follow-up card; no change in this repair.
+- Review note: `-CollectGarbage` is not a real `ch` flag (silently
+  accepted; the `CollectGarbage()` global is undefined in these
+  profiles, so committed tests' `typeof` guards never fire) — GC legs
+  were approximated with allocation-pressure churn (100–400 runtime
+  creations) instead.
+
+### Review outcome (host-exit-join)
+
+Both reviewers **ACCEPTED** with zero `[bug]` and zero `[risk]`
+findings. The general review re-verified the three-pass structure,
+children-lifecycle facts, ownership record, ≤64 semantics equivalence,
+and hang-predicate equivalence from source, and re-ran the A/B plus
+both gates (2031/0, 2083/0). The adversarial review executed ~250
+process-exits: scale to **400 agents** (exit 0, no crash/hang,
+≈linear wall time), cap-edge counts **63/64/65/66** (pre-fix UAF
+8/12 at 65/66 — matching the receipt's 33/50 at 100 — post-fix zero
+across 72 edge runs), teardown races (mid-leaving, pending monitors,
+timers, broadcast cutoff, nested sub-agents, raw-exit Quit with 70
+live children, 3–4-way concurrent load) all clean, and ≤64 semantics
+byte-identical pre vs post on both profiles. Its nits are folded
+above (wedged-agent failure mode, GC-flag note); the general review's
+assert-wording and unchecked-`CreateThread` nits are folded above and
+filed as a follow-up card.
 
 ## Scope
 
