@@ -62,10 +62,12 @@ What is and is not exercised, honestly:
 
 ## Files
 
-- `spawnfail.js` — repro. 5 agents spawn (phase 1), the 6th spawn is the
-  one the driver refuses, a 7th (phase 2) proves the host state is
-  consistent again post-fix; main then ends and the end-of-main join runs
-  over every successfully started agent.
+- `spawnfail.js` — repro. 5 agents spawn (phase 1), then spawns continue
+  in a try/catch loop until one is refused (the driver denies exactly one
+  create somewhere in that window; the loop absorbs the per-profile
+  startup-count variance — 3 test / 2 debug), then one more (phase 2)
+  proves the host state is consistent again post-fix; main then ends and
+  the end-of-main join runs over every successfully started agent.
 - `failthreads.c` — `DYLD_INSERT_LIBRARIES` shim (`__DATA,__interpose`
   section; see its header comment for why symbol shadowing and
   `dlsym(RTLD_NEXT)` both fail on modern dyld, with the measurements).
@@ -76,23 +78,59 @@ What is and is not exercised, honestly:
   times and tallies `caught / hangs / other` (class definitions in the
   header comment). Requires `cc` and coreutils `timeout`.
 
-The budget used by the driver: 3 startup creates (measured, test and
-debug profiles — stable across repeated runs; agents create exactly one
-thread each, and neither profile showed lazy engine thread creation
-during the churn window) + the 5 phase-1 agents.
+The budget used by the driver: `FAILTHREADS_AT=8` (deny the 9th create:
+3 startup + 5 phase-1 agents on test, 2 + 5 + the first loop spawn on
+debug) with `FAILTHREADS_DENY=1` (exactly one refusal, then creates
+succeed again — the consistency probe needs one). Startup counts were
+measured per profile (stable across repeated runs; agents create exactly
+one thread each, and neither profile showed lazy engine thread creation
+during the churn window).
 
 ## Pre-fix evidence (this repair's A leg)
 
-Test-profile binary at base `4f564ea04`
-(`zig-out/bin/ch`, SHA-256 `beea7257…32af`), driver
-`drive.sh <bin> 12`:
+Driver `drive.sh <bin> 12`; final `spawnfail.js` (loop version) for all
+four legs. Binaries (SHA-256): pre-fix test `ae1a0b89…185`
+(`zig-out/bin/ch`, base `4f564ea04`), pre-fix debug `2dfb264e…831`
+(`out/debug-static/bin/ch`), post-fix test `44a8980e…783`, post-fix
+debug `99d7ae86…bf5`. Each rebuild at the same source produces a fresh
+link instance (Mach-O UUID), so identities are pinned per leg; each
+pre-fix binary was string-verified to lack the fix's message and each
+post-fix binary to contain it. Startup pthread_creates before the script
+spawns agents: 3 on the test profile, 2 on debug (measured, stable).
 
-| Leg | Result |
-|---|---|
-| `drive.sh` (12 runs, injected refusal) | **12 hang / 0 caught / 0 other** |
-| Control: no shim (bare `ch -Test262 spawnfail.js`) | all spawns succeed, `ERROR: spawn unexpectedly succeeded`, exit 0 |
-| Control: shim loaded but disarmed (no `FAILTHREADS_AT`) | identical to bare run, exit 0 |
+| Leg | Binary | Runs | Result |
+|---|---|---|---|
+| Pre-fix test (base `4f564ea04`) | `ae1a0b89…185` | 12 | **12 hang / 0 caught / 0 other** |
+| Pre-fix debug (base `4f564ea04`) | `2dfb264e…831` | 12 | **12 hang / 0 caught / 0 other** |
+| Post-fix test (fix commit) | `44a8980e…783` | 12 | **12 caught / 0 hang / 0 other** |
+| Post-fix debug (fix commit) | `99d7ae86…bf5` | 12 | **12 caught / 0 hang / 0 other** |
 
-A hung run prints `phase1=5` (per-line flush survives the kill) and
-nothing else — it never returns from the 6th `$262.agent.start`; the
-sampled stack above is from exactly this configuration.
+A hung pre-fix run prints `phase1=5` and nothing more (per-line flush
+survives the kill) — it never returns from the refused
+`$262.agent.start`; the sampled stack in the defect section above is
+from exactly this configuration. A post-fix run prints
+`phase1=5`, `caught=Failed to create the agent thread.`, `phase2=1` and
+exits 0: the exception is catchable, the next spawn succeeds, and the
+end-of-main join collects every successfully started agent.
+
+Controls (base binary): no shim — all spawns succeed, `ERROR: spawn
+unexpectedly succeeded`, exit 0; shim loaded but disarmed (no
+`FAILTHREADS_AT`) — identical to the bare run. Earlier preliminary legs
+with the first script revision (fixed try-block spawn index) reproduced
+the same 12/12 hangs on both pre-fix profiles.
+
+Spawn-success path unchanged: `tools/host-exit-join/drive.sh` on the
+post-fix binaries — agents100 test 20/20 clean, debug 10/10 clean.
+Focused S6e suite (`runtests.py --test|--debug --variants=disable_jit`,
+s6-waitasync-cross-agent, s6-waitasync-pause, s6-bigint-atomics,
+s6-growable-nonshared, atomics_test, sharedarraybuffer, bigint64array):
+**7/7 test, 7/7 debug**. Gates: `check_regression.py --select test
+--expected-passed 2031` → **PASS 2031/0**; `--select debug
+--expected-passed 2083` → **PASS 2083/0** (one first attempt measured
+2082/1: `DebuggerCommon/globalFuncVars.js`, a debugger-baseline test
+whose output gained a PAL `InternalSetThreadPriority` warning under
+machine load — no agents, unrelated path; 5/5 clean in isolation and
+0 failures in the logged full rerun). Pins in
+`tools/build/gate_counts.json` untouched: thread-exhaustion is not
+deterministically reachable in-gate, so no new rlexe entry (same
+reasoning as the host-exit-join repro tooling).

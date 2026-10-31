@@ -7,11 +7,15 @@
 // check" section).
 //
 // The driver (drive.sh) injects a transient thread-exhaustion window via
-// failthreads.c: ch's pthread budget covers startup (3 creates measured,
-// both profiles) plus the phase-1 agents, then exactly ONE pthread_create
-// is refused with EAGAIN — the same errno a thread-exhausted kernel
-// returns — and later creates succeed again (agents parking frees nothing
-// here; the window is the interposer's, modelling churn).
+// failthreads.c: ch's pthread budget covers startup (3 creates measured
+// on the test profile, 2 on debug) plus the phase-1 agents, then exactly
+// ONE pthread_create is refused with EAGAIN — the same errno a
+// thread-exhausted kernel returns — and later creates succeed again
+// (agents parking frees nothing here; the window is the interposer's,
+// modelling churn). Because the startup count differs per profile, the
+// refused spawn is "the first one past the budget, wherever it lands in
+// the loop below" — the loop absorbs that variance (old fixed-iteration
+// versions put the refusal outside the try on debug).
 //
 //   pre-fix:  the refused spawn hangs the main thread forever in
 //             WaitForSingleObject(hevntInitialScriptCompleted) at
@@ -36,13 +40,23 @@ for (var i = 0; i < PHASE1; i++) {
 }
 print("phase1=" + ok);
 
-// This spawn is the one the driver refuses (budget = 3 startup + PHASE1).
-// Pre-fix it never returns; post-fix it throws.
-try {
-    $262.agent.start("var parked = true;");
-    print("ERROR: spawn unexpectedly succeeded (no thread budget injected?)");
-} catch (e) {
-    print("caught=" + e.message);
+// Spawns continue until one is refused (the driver denies exactly one
+// create somewhere in this window). Pre-fix the first refused spawn
+// never returns; post-fix each refusal is a catchable exception.
+var caught = false;
+var tries = 0;
+while (!caught && tries < 6) {
+    tries++;
+    try {
+        $262.agent.start("var parked = true;");
+        print("spawn-ok=" + tries);
+    } catch (e) {
+        print("caught=" + e.message);
+        caught = true;
+    }
+}
+if (!caught) {
+    print("ERROR: no spawn refused (no thread budget injected?)");
 }
 
 // Consistency probe: the transient window is over. If the failed spawn
