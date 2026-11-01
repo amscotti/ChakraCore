@@ -357,9 +357,16 @@ static Var MapGroupByCallCallback(RecyclableObject* callback, Var value, uint32 
 {
     JS_REENTRANCY_LOCK(jsReentLock, scriptContext->GetThreadContext());
     Var key = nullptr;
+    // Arm the C++->JS callback call for JIT-compiled callers (EntryForEach
+    // idiom): the interpreter's OP_Call region does not extend into a
+    // builtin re-entry.
     JS_REENTRANT(jsReentLock,
-        key = CALL_FUNCTION(scriptContext->GetThreadContext(), callback, CallInfo(CallFlags_Value, 3),
-            scriptContext->GetLibrary()->GetUndefined(), value, JavascriptNumber::ToVar(index, scriptContext)));
+        BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+        {
+            key = CALL_FUNCTION(scriptContext->GetThreadContext(), callback, CallInfo(CallFlags_Value, 3),
+                scriptContext->GetLibrary()->GetUndefined(), value, JavascriptNumber::ToVar(index, scriptContext));
+        }
+        END_SAFE_REENTRANT_CALL);
     return key;
 }
 
