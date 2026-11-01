@@ -571,6 +571,11 @@
   </test>
   <test>
     <default>
+      <files>immutable-store-jit.js</files>
+    </default>
+  </test>
+  <test>
+    <default>
       <files>property-enumeration-order.js</files>
       <compile-flags>-args summary -endargs</compile-flags>
     </default>
