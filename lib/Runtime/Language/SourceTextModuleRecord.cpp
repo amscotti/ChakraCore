@@ -932,6 +932,20 @@ namespace Js
                 {
                     Assert(childModuleRecord->WasParsed());
                     childModuleRecord->ModuleDeclarationInstantiation();
+                    // ES2025 16.2.1.5 ModuleDeclarationInstantiation (via
+                    // InnerModuleLink): a dependency's failed link is this
+                    // module's failed link, and the root's instantiation
+                    // must surface it (NotifyHostAboutModuleReady carries
+                    // errorObject) before any module-body evaluation.
+                    // InitializeLocalImports/InitializeIndirectExports
+                    // record a child's unresolvable binding on the child's
+                    // own record without throwing, so propagate the first
+                    // child error here (first-wins, matching
+                    // OnChildModuleReady's error propagation).
+                    if (childModuleRecord->errorObject != nullptr && this->errorObject == nullptr)
+                    {
+                        this->errorObject = childModuleRecord->errorObject;
+                    }
                 });
             }
 
