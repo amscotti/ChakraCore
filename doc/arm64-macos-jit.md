@@ -1,6 +1,10 @@
 # ARM64 macOS JIT
 
-Status of the native JIT port for Apple ARM64, as of 2026-10-31. The port
+Status of the native JIT port for Apple ARM64, as of 2026-10-31, with
+closure follow-ups recorded 2026-11-01 (the strict-generator-arguments
+JIT test, the reviewed asm.js/WASM platform exclusion, and the S8
+immutable-store fast-path audit cross-reference in
+[Known open engine issues](#known-open-engine-issues)). The port
 was developed in a worktree on `jit/arm64-macos`, rebased onto
 `modernize/baseline` `aa42bb4f1`, and merged into `modernize/baseline` on
 2026-10-31 as merge commit `9004b3ed7` (not pushed). It is not a C2 language
@@ -218,7 +222,9 @@ Coverage limits carried into the merge, stated deliberately:
 - **asm.js/WASM** remain the documented Mac feature gap: the profile does
   not define `ASMJS_PLAT`/`ENABLE_WASM`. A suite exit 1 whose failures all
   classify as asm.js/WASM with zero signals is the expected JIT-profile
-  result, not a merge blocker.
+  result, not a merge blocker. Reviewed as an accepted platform exclusion
+  on 2026-11-01; see
+  [asm.js/WASM on ARM64: reviewed platform exclusion](#asmjswasm-on-arm64-reviewed-platform-exclusion-2026-11-01).
 - **Direct-eval callers and eval code run interpreted.** That is a JIT
   coverage limit, not full eval JIT support.
 - **18 class-field/private/import-attribute opcodes** abort codegen to the
@@ -304,6 +310,68 @@ zero signals. One earlier full `interpreted` run on the same binary hit a
 non-reproducible SIGSEGV in the random `Array/array_sort_random.js`; 90 focused
 reruns and two subsequent full runs passed. It is tracked as an unisolated
 flake, not a confirmed guard regression.
+
+### asm.js/WASM on ARM64: reviewed platform exclusion (2026-11-01)
+
+Decision: **asm.js and WebAssembly are excluded from the ARM64 macOS JIT
+profile by engine structure, not by accident, and the exclusion is now
+explicitly reviewed and accepted.** A native ARM64 asm.js/WASM port is a
+separate project and is not owed by this port.
+
+The structure, verified from `lib/Common/CommonDefines.h`:
+
+```cpp
+#if (defined(_M_IX86) || defined(_M_X64)) && !defined(DISABLE_JIT)
+#define ASMJS_PLAT
+#endif
+
+#if defined(ASMJS_PLAT)
+#define ENABLE_WASM
+#define ENABLE_WASM_THREADS
+#define ENABLE_WASM_SIMD
+```
+
+`ASMJS_PLAT` — and with it the whole `ENABLE_WASM*` family — is defined
+only for the x86/x64 JIT; ARM32 and ARM64 never define it. The asm.js
+pipeline (module validation, the asm.js code generator, and the WASM
+bytecode/instantiation machinery keyed on the same macro) is implemented
+against the x86/x64 backends; the ARM64 backend simply has no asm.js
+tier to compile it. That is why an asm.js test on this profile fails its
+baseline at exit 0 (missing `Successfully compiled asm.js code` message)
+and a WebAssembly test fails with `WebAssembly is not defined`.
+
+Evidence for the exclusion, from fresh full-suite runs on 2026-11-01
+(`out/jit/bin/ch` built from this tree with the `jit-closure-1` test
+additions; every failure exits 0 — **zero signals** in both runs):
+
+- `interpreted` (`-maxInterpretCount:1 -maxSimpleJitRunCount:1 -bgjit-`):
+  **2429 passed / 397 failed.** The 397 failures are exactly:
+  `AsmJs` 92, `AsmJSFloat` 14, `ASMJSParser` 1 (folders tagged
+  `require_asmjs` in `test/rlexedirs.xml`), `wasm` 56, `WasmSpec` 231,
+  `WasmSpec.MultiValue` 2 (folders tagged `require_wasm`), plus
+  `Bugs/fabs1.js` (its own entry in `test/Bugs/rlexe.xml` is tagged
+  `require_asmjs`). Zero failures outside that set.
+- `dynapogo` (`-forceNative -off:simpleJit -bgJitDelay:0`): **2004
+  passed / 286 failed.** The 286 failures are exactly: `AsmJs` 92,
+  `AsmJSFloat` 14, `ASMJSParser` 1, `wasm` 54, `WasmSpec` 123,
+  `WasmSpec.MultiValue` 2 — every one in a `require_wasm`-tagged folder
+  (`Bugs/fabs1.js` is excluded here by its `exclude_dynapogo` tag). Zero
+  failures outside that set. (The recorded merge-closure baseline was
+  2001/286; the passed count moved with the branch's added tests, the
+  failure set did not.)
+
+The `require_asmjs`/`require_wasm` tags are the runtools' intended
+mechanism for excluding these folders on unsupported architectures, and
+the folder list above is exactly the tagged set. The exclusion does not
+fire on this host because `test/runtests.py` hard-codes `arch = 'x64'`
+on non-Windows — the already-documented runner quirk (see
+[Suite results](#suite-results) and section 6); the no-JIT gate avoids
+the same pile through `require_backend`. That quirk is why the JIT
+variants run these tests at all, and it stays as documented: do not add
+an arm64-only filter, do not delete or edit the tags, and do not treat
+this failure shape as a compiler regression. A JIT-profile suite run is
+green-for-merge when its failures are exactly this tagged asm.js/WASM
+set with zero signals.
 
 ## Current state and handoff
 
@@ -780,15 +848,47 @@ them as fixed by this port.
   async body to retain/rebase its reader and bytecode across reparse, or a
   separate debug FunctionBody; the generator-only live-frame count cannot
   cover it without losing the async debugger locals baseline.
-- **Strict generator arguments test coverage.** The ARM64 coroutine
-  `LoadHeapArguments` now passes the real generator function object, and
+- **JIT typed-array store fast paths bypass ArrayBuffer immutability
+  (found 2026-11-01, open).** The S8 immutable-ArrayBuffer inlined-store
+  audit (`doc/c2-s8-immutable.md`, "JIT/B4 blocker" update) proved the
+  ARM64 JIT writes immutable buffers through the inlined indexed-store
+  fast path (`GenerateFastStElemI` → `GenerateFastElemIIntIndexCommon`:
+  type/bounds guards only, no immutable check) and, at source level,
+  through the `OP_Memset`/`OP_Memcopy` loop fusions
+  (`DirectSetItemAtRange`). Sloppy stores write silently where the
+  interpreter no-ops, strict stores skip the TypeError. DataView setters,
+  Atomics, Float16Array and the helper-call path are verified safe.
+  Repros and the fix direction are recorded in the S8 receipt; the fix
+  (immutable guard/bailout in the fast path plus a
+  `DirectSetItemAtRange` check) is follow-up work, not part of the
+  `jit-closure-1` measurement lane.
+- **Strict generator arguments test coverage — closed 2026-11-01.** The
+  ARM64 coroutine `LoadHeapArguments` now passes the real generator
+  function object, and
   `JavascriptOperators::IsStrictModeForHeapArguments` recovers strictness
   from the `GeneratorVirtualScriptFunction`. Strict generators now get the
   `%ThrowTypeError%` callee accessor and an unmapped arguments object on the
   interpreter and JIT; sloppy `arguments.callee === g` passes under
-  `-JitES6Generators`. There is no checked-in strict generator test that runs
-  the JIT combination; the evidence is manual probes. Add one before
-  enabling coroutine JIT by default.
+  `-JitES6Generators`. The checked-in JIT-combination test now exists:
+  `test/es6/strict-generator-args-jit.js`, registered once in
+  `test/es6/rlexe.xml` with `-JitES6Generators` (no `exclude_nonative`, so
+  it also runs in the no-JIT gates and moved them 2034/2086 → 2035/2087).
+  The warm loops (3000 resumes) prove the generator bodies actually JIT:
+  `-trace:bailout` shows `BailOutForGeneratorYield` records naming
+  `strictGen`, `calleeGen` and `sloppyGen` under `-mic:1 -bgjit-`, the
+  interpreted-variant flags, and `-forceNative -off:simpleJit
+  -bgJitDelay:0` alike, and the test passes in all 20 probed flag/tier
+  combinations (including `-nonative`). Two coverage observations from
+  writing it, recorded so they are not rediscovered: (a) a `try/catch`
+  in a generator body keeps that coroutine interpreted on this port (no
+  backend abort is logged; the body simply never produces yield-bailout
+  records), so JIT-combination generator tests must keep the throwing
+  accesses out of the warm body — the test drives the throwing callee
+  read with a fresh generator per iteration instead; (b) the engine's
+  unmapped arguments install only the `callee` throwing accessor;
+  `caller` is absent (`typeof "undefined"`), which is the ES6+
+  `CreateUnmappedArgumentsObject` shape and is identical on the
+  interpreter and the JIT — not a divergence.
 - **TTD debug loop selection.** The TTD debug loop is split profiled/unprofiled
   and compile-verified, but there is no supported short TTD+debugger-action
   test in this tree. Record the gap rather than claiming it is exercised.
