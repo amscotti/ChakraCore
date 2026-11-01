@@ -81,7 +81,8 @@ namespace Js
             DynamicObject(type),
             isDetached(false),
             infoBits(0),
-            externalized(false) { }
+            externalized(false),
+            isImmutable(false) { }
 
         bool IsDetached() { return isDetached; }
 
@@ -103,12 +104,22 @@ namespace Js
         void SetExtraInfoBits(char info) { infoBits = info; }
 
         static int GetIsDetachedOffset() { return offsetof(ArrayBufferBase, isDetached); }
+        static int GetIsImmutableOffset() { return offsetof(ArrayBufferBase, isImmutable); }
 
         void Externalize() { this->externalized = true; }
     protected:
         Field(bool) isDetached;
         Field(bool) externalized;
         Field(char) infoBits;
+        // [[ArrayBufferIsImmutable]] presence bit, set only by
+        // ArrayBuffer::SetImmutable (transferToImmutable/sliceToImmutable
+        // destinations, before any view exists). It lives in the shared
+        // ArrayBufferBase header rather than under ArrayBuffer so the JIT's
+        // typed-array store fast path can load and branch on it at a common
+        // offset with no type check: SharedArrayBuffer and every mutable
+        // buffer keep it false forever, so "byte is set" is exactly
+        // IsImmutableBuffer().
+        Field(bool) isImmutable;
     };
 
     template <> bool VarIsImpl<ArrayBufferBase>(RecyclableObject* obj);
@@ -292,7 +303,7 @@ namespace Js
         Field(uint32) maxByteLength;      // Immutable resizable limit; logical length for fixed buffers
         Field(uint32) allocatedByteLength; // Physical allocation extent (maxByteLength for resizable)
         Field(bool) isResizable;          // Whether [[ArrayBufferMaxByteLength]] exists
-        Field(bool) isImmutable;          // Whether [[ArrayBufferIsImmutable]] exists
+        // isImmutable is inherited from ArrayBufferBase (see there).
     };
 
     // [[ArrayBufferIsImmutable]] is present only on non-shared ArrayBuffers.
@@ -330,6 +341,11 @@ namespace Js
         {
             return this->arrayBuffer;
         }
+
+        // Offset of the buffer object pointer (NOT the raw data pointer,
+        // which is TypedArrayBase::GetOffsetOfBuffer); used by the JIT's
+        // typed-array store fast path to reach the ArrayBufferBase header.
+        static int GetOffsetOfArrayBuffer() { return offsetof(ArrayBufferParent, arrayBuffer); }
 
 #if ENABLE_TTD
     public:

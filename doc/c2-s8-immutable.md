@@ -288,6 +288,12 @@ attached, immutable and byte-identical.
      behaviorally in this engine — it is recorded from source plus the
      observed writes. Any fix for hole 1 must also add the immutable
      check here.
+     *Fix landed 2026-11-01, lane `jit-immutable-store`:* both holes are
+     closed - the JIT typed-array store fast path gained an immutable-buffer
+     guard (a single-byte test of the `ArrayBufferBase` header, where the
+     `isImmutable` field now lives), and both `DirectSetItemAtRange`
+     overloads reject an immutable destination. Verification and perf:
+     [doc/c2-jit-immutable-store.md](c2-jit-immutable-store.md).
   3. **Verified safe — everything else that reaches buffer memory.**
      DataView setters have no inlined backend path (all entrypoints run
      `GetWritableViewIndex`, which rejects immutable): probed 1000/1000

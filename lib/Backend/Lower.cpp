@@ -17126,6 +17126,32 @@ Lowerer::GenerateFastElemIIntIndexCommon(
     {
         *pIsTypedArrayElement = true;
 
+        if (isStore)
+        {
+            // An immutable-backed view must not take the inline store below:
+            // the direct write would bypass the [[ArrayBufferIsImmutable]]
+            // store rejection that the SetElementI helper implements (sloppy
+            // no-op, strict TypeError). isImmutable lives in the
+            // ArrayBufferBase header and is only ever set on immutable
+            // ArrayBuffers (always false for SharedArrayBuffer and every
+            // mutable buffer), so a single byte load is a type-safe test:
+            //  MOV arrayBuffer, [array + offset(arrayBuffer)]
+            //  CMP [arrayBuffer + offset(isImmutable)], 0
+            //  JNE $cantUseArray
+            IR::RegOpnd *const arrayBufferOpnd = IR::RegOpnd::New(TyMachPtr, m_func);
+            const IR::AutoReuseOpnd autoReuseArrayBufferOpnd(arrayBufferOpnd, m_func);
+            InsertMove(
+                arrayBufferOpnd,
+                IR::IndirOpnd::New(arrayOpnd, Js::ArrayBufferParent::GetOffsetOfArrayBuffer(), TyMachPtr, m_func),
+                instr);
+            InsertCompareBranch(
+                IR::IndirOpnd::New(arrayBufferOpnd, Js::ArrayBufferBase::GetIsImmutableOffset(), TyInt8, m_func),
+                IR::IntConstOpnd::New(0, TyInt8, m_func),
+                Js::OpCode::BrNeq_A,
+                labelCantUseArray,
+                instr);
+        }
+
         if(doUpperBoundCheck)
         {
             if(!headSegmentLengthOpnd)

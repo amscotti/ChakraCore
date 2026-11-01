@@ -418,6 +418,15 @@ namespace Js
             // caller checks that src and dst index are the same
             Assert(iSrcStart == iDstStart);
 
+            if (IsImmutableBuffer(GetArrayBuffer()))
+            {
+                // Reading the immutable SOURCE stays legal; only this
+                // destination write is rejected. Same contract as
+                // BaseTypedDirectSetItem: report failure so the Memcopy
+                // caller bails out and replays the per-element stores.
+                return FALSE;
+            }
+
             if (this->IsDetachedBuffer() || fromArray->IsDetachedBuffer())
             {
                 JavascriptError::ThrowTypeError(GetScriptContext(), JSERR_DetachedTypedArray);
@@ -464,6 +473,15 @@ namespace Js
             if (CrossSite::IsCrossSiteObjectTyped(this))
             {
                 return false;
+            }
+
+            if (IsImmutableBuffer(GetArrayBuffer()))
+            {
+                // Same contract as BaseTypedDirectSetItem: an immutable
+                // destination rejects the write. Report failure so the
+                // Memset caller bails out and the per-element stores no-op
+                // (sloppy) or throw TypeError (strict).
+                return FALSE;
             }
 
             if (this->IsDetachedBuffer()) // 9.4.5.9 IntegerIndexedElementSet

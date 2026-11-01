@@ -1189,7 +1189,7 @@ namespace Js
     template <class Allocator>
     ArrayBuffer::ArrayBuffer(uint32 length, DynamicType * type, Allocator allocator) :
         ArrayBufferBase(type), bufferContent(nullptr), bufferLength(0),
-        maxByteLength(0), allocatedByteLength(0), isResizable(false), isImmutable(false)
+        maxByteLength(0), allocatedByteLength(0), isResizable(false)
     {
         if (length > MaxArrayBufferLength)
         {
@@ -1241,7 +1241,7 @@ namespace Js
     template <class Allocator>
     ArrayBuffer::ArrayBuffer(uint32 length, uint32 maxByteLength, DynamicType * type, Allocator allocator) :
         ArrayBufferBase(type), bufferContent(nullptr), bufferLength(0),
-        maxByteLength(maxByteLength), allocatedByteLength(0), isResizable(true), isImmutable(false)
+        maxByteLength(maxByteLength), allocatedByteLength(0), isResizable(true)
     {
         if (maxByteLength > MaxArrayBufferLength)
         {
@@ -1296,7 +1296,7 @@ namespace Js
 
     ArrayBuffer::ArrayBuffer(RefCountedBuffer* buffContent, uint32 length, DynamicType * type)
        : ArrayBufferBase(type), bufferContent(nullptr), bufferLength(length),
-       maxByteLength(length), allocatedByteLength(length), isResizable(false), isImmutable(false)
+       maxByteLength(length), allocatedByteLength(length), isResizable(false)
     {
         if (length > MaxArrayBufferLength)
         {
@@ -1320,7 +1320,7 @@ namespace Js
 
     ArrayBuffer::ArrayBuffer(byte* buffer, uint32 length, DynamicType * type, bool isExternal) :
         ArrayBufferBase(type), bufferContent(nullptr), bufferLength(length),
-        maxByteLength(length), allocatedByteLength(length), isResizable(false), isImmutable(false)
+        maxByteLength(length), allocatedByteLength(length), isResizable(false)
     {
         if (length > MaxArrayBufferLength)
         {
