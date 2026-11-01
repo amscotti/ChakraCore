@@ -1,8 +1,10 @@
 # C2-S14 residual: body eval with non-simple parameters
 
-Status: **fixed on this branch** (diagnosis `47a357092`; fix/tests/pins and
-receipt commits follow). Mac interpreter/no-JIT (test + debug-static
-profiles); JIT out of scope for this lane.
+Status: **fixed on this branch, including the review repair** (catch-pattern
+bindings in the eval preflight, parameter named `arguments`; diagnosis
+`47a357092`; fix/tests/pins `c1b769e1f`; repair + receipt commits follow).
+Mac interpreter/no-JIT (test + debug-static profiles); JIT out of scope for
+this lane.
 
 Tracked P4 residual from `doc/c2-s14-global-eval-declarations.md`: a sloppy
 direct eval in the body of a function with a non-simple parameter list
@@ -131,6 +133,75 @@ accounting (per repo `AGENTS.md`, `doc/memory-management.md` was not
 re-consulted beyond confirming the change is outside its scope: one boolean
 on the parse node, consumed by existing scope/emission machinery).
 
+## Repair iteration (post-review)
+
+### Catch bindings in the eval preflight
+
+Root cause (review finding, blocking): `PseudoActivationObject::
+EnsureNoRedeclProperty` (`lib/Runtime/Types/ActivationObject.cpp`) returned
+`false` unconditionally, so the generic preflight walk
+(`JavascriptOperators.cpp`, `OP_ScopedEnsureNoRedeclProperty`) skipped
+catch-scope bindings for every name; only the `arguments`-specialized branch
+implemented the correct simple-vs-pattern distinction. This was pre-existing
+on main, and main still reported `SyntaxError` for the lane-exposed shape
+only accidentally, through the merged scope: with the forced split the
+destructured catch binding vanished from the walk entirely.
+
+Fix: `PseudoActivationObject::EnsureNoRedeclProperty` now performs the same
+`noRedecl`-aware check the arguments branch uses — a let-like (pattern)
+catch binding conflicts (`SyntaxError`), a simple catch parameter does not
+(Annex B.3.5), and the walk continues either way. No call-site change: the
+generic walk is the only effective caller.
+
+### Parameter named `arguments`
+
+`(function(arguments = 1){ eval('var arguments'); return typeof arguments })()`
+now returns `"undefined"` (Node) instead of `"number"`. The guard's first
+repair attempt exposed a classification problem: the built-in arguments
+node, a formal named `arguments`, and a body `var arguments` can share one
+symbol, and which node owns the symbol's declaration distinguishes them.
+`BodyRedeclaresParameter` now classifies via the formals chain
+(`MapFormals`, parse-time safe — pattern sub-walks are NOT safe: a deferred
+formal's pattern has no sub-AST yet, which crashed the first attempt) plus
+the `fpnArguments` builtin flag and the well-known arguments pid
+(`Symbol::IsArguments()` reads the declaration node's flag, which a winning
+body var no longer carries). Body `var arguments` keeps the merged scope
+(probe g2: `7` = Node); the parameter-only shape flips and shadows.
+
+### Residual corrections
+
+- The earlier "eval'd non-colliding declarations visible to parameter
+  closures" bullet was stale: the lane's forced split FIXED probe a2
+  (`function a2(cb = () => q, a = 1) { eval('var q = 3'); ... }` now gives
+  `[3, ReferenceError]` = Node; main gives `[3, 3]`). Removed.
+- Compound redeclaration residual, reworded: the guard is per-function, so
+  the over-reported `SyntaxError` fires for **any** eval'd
+  parameter-name/`arguments` declaration in a function whose body
+  redeclares **any** parameter symbol — including when the eval'd name
+  differs from the body var's parameter (`function (p=1,q=2){ var q;
+  eval('var p') }` → throw; Node `[undefined,2]`) and for body
+  `var arguments` + eval'd `var arguments` (main-identical).
+
+### Tracked residual card (not fixed, pre-existing)
+
+`(function(a = 1){ return typeof arguments.callee })()` — Node throws
+`TypeError` (callee poisoning for non-simple parameter lists), we return
+`"function"`. Eval-independent; recorded for a future slice.
+
+### Repair evidence
+
+- Catch battery (12 shapes incl. the lane-exposed c1, pre-existing c2-c4/c7
+  `catch({a})`/`catch([a])`/`catch({b})` now throwing, simple-catch-param
+  no-throw controls c5/c6/c11, pattern read c8, nested c12) — identical to
+  Node v26.5.0.
+- test262 `language/eval-code/**`: **454/0** (no flip; the catch shapes are
+  not covered there). A `language/statements/try` + annexB spot check is
+  391/7 with all 7 failures main-identical pre-existing (3× `tco-*`
+  out-of-stack, 4× annexB `catch-redeclared-*-var` loop shapes); verified by
+  running the same 8 files against the main binary (6/7, same set).
+- Gates unchanged at the existing pins: test **2033/0**, debug-static
+  **2085/0**.
+
 ## Coverage and evidence
 
 Focused test: `test/es7/s14-eval-nonsimple-var.js`, registered in
@@ -142,8 +213,11 @@ and post-eval assignments, post-eval closures, method/generator/arrow
 forms, eval'd `var arguments`, indirect eval, simple-parameter positive
 controls (no throw, binding reuse), body-lexical collisions that must still
 throw, the varEnv-terminating walk over an outer `let`, the pre-split
-parameter-closure control, and the formals-eval split path with body
-var/function collisions.
+parameter-closure control, the formals-eval split path with body
+var/function collisions, destructured catch bindings that must throw
+(object/array patterns, param and non-param names) with simple catch
+parameter no-throw controls, a parameter named `arguments` shadowed by an
+eval var, and body `var arguments` keeping the body declaration value.
 
 Legacy expectation updates, limited to formerly non-conforming throws:
 `test/es6/default.js` (2 assertions) and `test/es6/rest.js` (6 assertions)
@@ -168,18 +242,19 @@ pins moved 2032→2033 / 2084→2085 with a `_lineage` note appending
 2033/2085)" and this receipt; `tools/build/test_build_tools.py` (62 tests,
 including the pin-consistency tests) passes.
 
-Residuals (not claimed):
-- Compound redeclaration shape (body var/function of a parameter name + eval
-  declaration of the same name, no parameter closure): keeps today's
-  over-reported SyntaxError (identical to main; probe p5/p6/n10/p9/p10/q6f).
+Residuals (not claimed; see also the repair-iteration corrections above):
+- Compound redeclaration shape — any eval'd parameter-name or `arguments`
+  var/function declaration in a function whose body statically redeclares
+  any parameter symbol (no parameter closure): keeps the over-reported
+  `SyntaxError`, identical to main (probes p5/p6/n10/p9/p10/q6f, and
+  differing-name shapes like `function (p=1,q=2){ var q; eval('var p') }`).
   A full fix needs the split decided before the body is parsed (reparse or
   post-hoc symbol re-binding) so the body declaration gets its own
   body-scope symbol.
-- In split functions the placement/visibility of eval'd *non-colliding*
-  declarations for parameter-list closures — probe a2 on main:
-  `function a2(cb = () => q, a = 1) { eval('var q = 3'); ... }` gives
-  `[3, 3]` where Node gives `[3, ReferenceError]` — a pre-existing property
-  of the already-split path, unchanged by this slice.
+- `arguments.callee` poisoning for non-simple parameter lists
+  (`(function(a = 1){ return typeof arguments.callee })()` returns
+  `"function"`; Node throws `TypeError`) — pre-existing, eval-independent,
+  tracked card.
 - JIT lowering of the eval declaration ops remains the separately tracked
   B4/eval-declaration follow-up; Mac interpreter/no-JIT evidence only, per
   the lane scope.
