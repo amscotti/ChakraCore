@@ -648,7 +648,7 @@ Decision/rollback points:
 - [ ] C4: Published qualified ES2025 result on the claimed default configurations.
 
 **Latest integration checkpoint (2026-11-01):** main is clean at the
-**2035/0 test** and **2087/0 debug-static** gates (re-verified after every
+**2036/0 test** and **2088/0 debug-static** gates (re-verified after every
 merge and repair below; counts are single-sourced in
 `tools/build/gate_counts.json` — Float16Array's new test file moved
 2012/2064 → 2013/2065, repair-loop `-noDeferParse` rlexe variants
@@ -665,8 +665,9 @@ entries (2026/2078 → 2030/2082), S6e cross-agent waitAsync added
 one entry (2030/2082 → 2031/2083), and the host-broadcast-type repair
 added one entry (2031/2083 → 2032/2084), and the s14-eval-nonsimple-var
 lane added one entry (2032/2084 → 2033/2085), the jit-reentrancy-fix lane added
-one entry (2033/2085 → 2034/2086), and the jit-closure-1 lane added one
-entry (2034/2086 → 2035/2087)). A subsequent whole-branch
+one entry (2033/2085 → 2034/2086), the jit-closure-1 lane added one
+entry (2034/2086 → 2035/2087), and the jit-immutable-store lane added one
+entry (2035/2087 → 2036/2088)). A subsequent whole-branch
 review repair (2026-10-31) fixed the CI selftest tally that would have
 kept the first Actions run red (B3 stays CONDITIONAL until that run is
 green), the agent-init-failure spawn hang, host teardown ordering, SCA
