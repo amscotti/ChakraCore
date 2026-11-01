@@ -14,7 +14,10 @@ verification is no-JIT per the S12 stance.
 
 ### 1.1 Child link errors must propagate to the root's instantiation
 
-ES2025 16.2.1.5 *ModuleDeclarationInstantiation* (via *InnerModuleLink*):
+ES2025 16.2.1.6.1.2 *Link* / 16.2.1.6.1.2.1 *InnerModuleLinking* (the
+operation named *ModuleDeclarationInstantiation* in pre-2020 editions;
+per review, cite the current numbering — the cited semantics are
+identical):
 when a module links its requested modules, a dependency's failed link **is
 the requesting module's failed link** — for each required module the
 instantiation recursion returns the dependency's abrupt completion, so the
@@ -161,9 +164,16 @@ Borrow invalidation: GC only; the record roots the value exactly as it
   roots parse-error errorObjects today.
 User-code/reentrancy: the validation run executes JSON.parse (pure). It
   resolves `JSON` from the global — the same object the synthesized body
-  would use at evaluation, so validation and evaluation cannot disagree;
-  a host application that replaces global JSON changes both identically
-  (a known limit of the synthetic-module design, not newly introduced).
+  would use at evaluation, so a **stateless** tamper changes both
+  identically and validation/evaluation cannot disagree; a **stateful**
+  replacement CAN make them disagree (validation passes, evaluation
+  throws — review-verified with a throw-on-2nd-call parse; valid
+  documents are also observably parsed twice, `calls=2`). Static imports
+  are untamperable in practice (both parses precede the importing
+  module's body); only dynamic `import()` after tamper is exposed, with
+  behavior byte-identical to base. A known limit of the synthetic-module
+  design, not newly introduced (the spec's ParseJSONModule uses the
+  intrinsic ParseJSON).
 Failure: if the host cannot run validation (JsCreateString/JsRun API
   failure), the legacy evaluation-time behavior stands (honest fallback);
   if recording fails, the empty-parse fallback surfaces a URIError —
@@ -259,6 +269,26 @@ judging instead.
 
 ## 8. Residuals
 
+- **Review outcome (dual ACCEPT)**: general review verified both spec
+  rules, root causes, ownership records and every quantitative claim
+  (probes/corpus/gate reproduced exactly); adversarial review ran graph
+  -shape campaigns (cycles, diamonds, 200-deep/100-wide graphs, TLA
+  graphs — **TLA behaves identically: resolution, no async escape**,
+  added as probe p17 semantics), GC-lifetime stress under
+  `-CollectGarbage` (zero asserts), JSON injection/tamper matrices
+  (escaping cannot break out; static imports untamperable; dynamic
+  tamper byte-identical to base), and identity preservation. Folded
+  below.
+- **Multi-error selection order (pre-existing, low)**: when several
+  children fail to link, the winning error follows `childrenModuleSet`
+  dictionary iteration order, not the spec's requestedModules source
+  order. Deterministic across runs and byte-identical to base (the
+  prepass walk shares the dictionary); recorded, not fixed here.
+- **NUL truncation (pre-existing)**: a JSON document with an embedded
+  NUL loads as the truncated prefix (C-string pipeline); identical at
+  base.
+- Ownership-record source anchors in §3.1 are base-file line numbers
+  (the lane's fix shifts them +14); §2.1 anchors are marked "at base".
 - `import-defer-of-syntax-error-fails.js` stays downgraded: the parser
   rejects `import defer` syntax at parse (post-ES2025 syntax, out of
   scope) — marker `parse` ≠ declared `resolution`, correctly.
