@@ -6911,11 +6911,52 @@ bool Parser::BodyRedeclaresParameter(ParseNodeFnc *pnodeFnc, ParseNodeBlock *pno
         }
     }
 
+    // A node is a parameter-scope declaration (not a body declaration) when
+    // it is the built-in arguments node or a formal identifier in the
+    // formals chain. Pattern-bound identifiers are never visited here: they
+    // own their symbol's declaration node until a body declaration takes it
+    // over, and those take-overs are classified by the arguments check
+    // below or by the body function-declaration scan above. (Walking
+    // pattern sub-nodes here would be unsafe at parse time: a deferred
+    // formal's pattern has no sub-AST yet.)
+    auto isFormalOrBuiltinNode = [pnodeFnc](ParseNode *pnode) {
+        if ((pnode->grfpn & PNodeFlags::fpnArguments) != 0)
+        {
+            return true;
+        }
+        bool found = false;
+        MapFormals(pnodeFnc, [pnode, &found](ParseNode *pnodeArg) {
+            if (pnodeArg == pnode)
+            {
+                found = true;
+            }
+        });
+        return found;
+    };
+
     bool redeclares = false;
-    paramScope->ForEachSymbolUntil([&redeclares, pnodeFnc](Symbol *paramSym) {
+    paramScope->ForEachSymbolUntil([&redeclares, pnodeFnc, &isFormalOrBuiltinNode, this](Symbol *paramSym) {
+        // A body var named "arguments" can win the built-in arguments
+        // symbol's declaration node (CreateDeclNode's "new declaration
+        // wins" case); its storage must keep the merged scope. A formal
+        // named "arguments" wins the node instead and is a formal, and the
+        // builtin node is identified by its flag. (Symbol::IsArguments
+        // reads the declaration node's flag, which the winning body var no
+        // longer carries, so match the well-known pid.)
+        ParseNode *declNode = paramSym->GetDecl();
+        if (paramSym->GetPid() == wellKnownPropertyPids.arguments &&
+            declNode != nullptr &&
+            !isFormalOrBuiltinNode(declNode))
+        {
+            redeclares = true;
+            return true;
+        }
+        // A body declaration node kept the parameter symbol as its storage.
         for (ParseNode *pnode = pnodeFnc->pnodeVars; pnode != nullptr; pnode = pnode->AsParseNodeVar()->pnodeNext)
         {
-            if (pnode->AsParseNodeVar()->sym == paramSym && paramSym->GetDecl() != pnode)
+            if (pnode->AsParseNodeVar()->sym == paramSym &&
+                paramSym->GetDecl() != pnode &&
+                !isFormalOrBuiltinNode(pnode))
             {
                 redeclares = true;
                 return true;

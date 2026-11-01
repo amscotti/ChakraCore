@@ -224,6 +224,17 @@ namespace Js
 
     BOOL PseudoActivationObject::EnsureNoRedeclProperty(PropertyId propertyId)
     {
+        // Catch and function-expression scopes can sit between a direct
+        // eval and its variable environment, and EvalDeclarationInstantiation
+        // checks every var name against those intermediate environments.
+        // Annex B.3.5 lets a simple catch parameter be redeclared by a var,
+        // so only a let-like (pattern) catch binding conflicts. Either way
+        // this scope is not the variable environment, so the walk continues.
+        bool noRedecl = false;
+        if (GetTypeHandler()->HasProperty(this, propertyId, &noRedecl) && noRedecl)
+        {
+            JavascriptError::ThrowSyntaxError(GetScriptContext(), ERRRedeclaration);
+        }
         return false;
     }
 

@@ -153,6 +153,37 @@ var tests = [
             assert.areEqual(5, (function (a = eval("")) { var a = 5; eval("var a"); return a; })(), "body var then eval var keeps the value");
             assert.areEqual(3, (function (a = eval("")) { function a() { return 3; } eval("var a"); return a(); })(), "function declaration then eval var");
         }
+    },
+    {
+        name: "eval var over a destructured catch binding throws (ES2025 19.2.1.3 step 3.b intermediate environment)",
+        body() {
+            assert.throws(function () { (function (a = 1) { try { throw { a: 3 }; } catch ({ a }) { eval("var a = 2"); } return a; })(); }, SyntaxError, "non-simple parameter and same-named catch pattern binding");
+            assert.throws(function () { (function () { try { throw { a: 1 }; } catch ({ a }) { eval("var a"); } })(); }, SyntaxError, "simple parameter list, object pattern");
+            assert.throws(function () { (function () { try { throw [1]; } catch ([a]) { eval("var a"); } })(); }, SyntaxError, "array pattern");
+            assert.throws(function () { (function () { try { throw { b: 1 }; } catch ({ b }) { eval("var b"); } })(); }, SyntaxError, "pattern name unrelated to any parameter");
+            assert.throws(function () { (function (p = 1) { try { throw { b: 1 }; } catch ({ b }) { eval("var b"); } })(); }, SyntaxError, "non-simple parameter list, pattern name not a parameter");
+        }
+    },
+    {
+        name: "eval var over a simple catch parameter stays legal (Annex B.3.5)",
+        body() {
+            assert.areEqual(5, (function () { try { throw 1; } catch (a) { eval("var a = 5"); return a; } })(), "assignment reaches the innermost (catch) binding");
+            assert.areEqual(1, (function () { try { throw 1; } catch (a) { eval("var a"); return a; } })(), "no initializer keeps the catch value");
+            assert.areEqual(4, (function (p = 1) { try { throw 9; } catch (e) { eval("var e = 4"); return e; } })(), "inside a non-simple parameter function");
+            assert.areEqual(7, (function () { try { throw { a: 7 }; } catch ({ a }) { return a; } })(), "catch pattern binding itself is unaffected");
+        }
+    },
+    {
+        name: "a parameter named arguments is shadowed by an eval var in the body environment",
+        body() {
+            assert.areEqual("undefined", (function (arguments = 1) { eval("var arguments"); return typeof arguments; })(), "typeof after no-init var");
+        }
+    },
+    {
+        name: "body var arguments with a non-simple parameter list keeps the body declaration value",
+        body() {
+            assert.areEqual(7, (function (a = 1) { var arguments = 7; eval("var arguments"); return arguments; })(), "an existing varEnv binding is not re-initialized");
+        }
     }
 ];
 
