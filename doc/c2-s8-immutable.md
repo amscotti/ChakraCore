@@ -239,13 +239,22 @@ attached, immutable and byte-identical.
      same vtable, real length). Runtime evidence on the 2026-11-01
      `out/jit` build (commit `95c39c07b`), store site warmed on a mutable
      `Float64Array` (20 000 calls) and then fed a
-     `new Float64Array(transferToImmutable result)`, under default
-     tier-up, `-mic:1 -bgjit-`, `-maxInterpretCount:1
-     -maxSimpleJitRunCount:1 -bgjit-`, and `-forceNative -off:simpleJit
-     -bgJitDelay:0` alike: sloppy `ta[1] = v` silently writes
-     (`view[1] === 9.25`; the interpreter no-ops), and the strict store
-     writes silently with **no TypeError** (0/1000 throws, 1000/1000
-     writes; the interpreter throws 1000/1000). `-trace:TypedArrayTypeSpec
+     `new Float64Array(transferToImmutable result)`. **Blast radius
+     (review-corrected): the hole covers ALL NINE backend-specialized
+     numeric classes — Int8, Uint8, Uint8Clamped, Int16, Uint16, Int32,
+     Uint32, Float32, Float64 (each silently writes where the
+     interpreter no-ops; strict stores skip the TypeError, 0/1000 vs
+     interpreter 1000/1000) whenever its own class warms the site —
+     but only under PROFILE-FED full JIT: default tier-up,
+     `-mic:1 -bgjit-`, and the suite's "interpreted" flags
+     (`-maxInterpretCount:1 -maxSimpleJitRunCount:1 -bgjit-`, which tier
+     to full JIT with profile) reproduce it; `-forceNative
+     -off:simpleJit -bgJitDelay:0` (no profile feedback) and
+     SimpleJit-only do NOT (the draft's "alike" claim was wrong —
+     forceNative leaves `view[1] === 0`). BigInt64/BigUint64 and
+     Float16 are SAFE (no backend specialization → helper path).**
+     Threat-model consequence: the dynapogo suite variant never fires
+     the hole; only default-configuration tier-up does. `-trace:TypedArrayTypeSpec
      -trace:Lowerer` shows the site lowering through the typed-array fast
      path ("base value type: Float64Array, not specialized") — the src
      need not be type-specialized; only the base must profile as a typed
@@ -344,3 +353,20 @@ attached, immutable and byte-identical.
 - Cross-realm species/ArrayBuffer-object behavior was not added to the focused
   lane; Chakra's existing `proto-from-ctor-realm` failures are unchanged in the
   adjacent run. No new cross-realm claim is made.
+
+### Review outcome (jit-closure-1 audit; dual ACCEPT, corrections folded)
+
+Both reviewers ACCEPTed. Folded corrections: the hole's blast radius is
+all nine backend-specialized numeric classes (not just the demonstrated
+Float64), and it fires only under profile-fed full JIT (default
+tier-up / `-mic:1` / the "interpreted" variant flags); forceNative,
+dynapogo, and SimpleJit-only are safe — the fix lane must target the
+profile-fed path and gate its regression test on default-tier-up, not
+forceNative. Also folded: Float16 loop-shape stores ARE behaviorally
+isolatable (unlike Float64 they cannot fall back to hole 1) and probe
+clean in every tier; the builtins/species/Atomics/DataView/reentrancy/
+RAB/detach-realloc memory-safety shapes are all clean (no unchecked
+write path beyond the two named holes); `OP_StNativeIdx` does not exist
+in this tree. Operational note recorded: gates require the mise-pinned
+Zig 0.17.0 — plain `zig build` picks up Homebrew 0.16 and dies at
+`build.zig:153`.
