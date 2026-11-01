@@ -216,6 +216,107 @@ attached, immutable and byte-identical.
   fast-path audit is still not done, so this residual stands: JIT
   immutable write safety remains unclaimed in general until the fast
   paths are audited or gain an explicit check/invalidation.
+  *Update 2026-11-01 (inlined fast-path audit, lane `jit-closure-1`):*
+  the audit is complete. **JIT immutable write safety does not hold; two
+  named holes write immutable buffers under the ARM64 JIT.** All store
+  paths that reach buffer memory were enumerated from source (the
+  lowering is shared `lib/Backend/Lower.cpp`; `lib/Backend/arm64/` has no
+  TypedArray store of its own):
+  1. **Hole, proven at runtime — the inlined indexed-store fast path.**
+     `StElemI_A`/`StElemI_A_Strict` lowers through
+     `Lowerer::GenerateFastStElemI` → `GenerateFastElemICommon` →
+     `GenerateFastElemIIntIndexCommon` (`lib/Backend/Lower.cpp`) when the
+     store site profiles its base as a typed array. The emitted guards
+     are: base type check (`GenerateArrayTest` vtable test / profile
+     type check), non-negative int index, and an unsigned upper bound
+     against the view's `length` field (the effective length for
+     length-tracking RAB views; zeroed on detach by
+     `ClearLengthAndBufferOnDetach`, which is why detached views fail the
+     bound and take the helper). The element address is the view's raw
+     `TypedArrayBase::buffer` BYTE\* plus scaled index, and the store
+     writes it directly. **There is no immutability check, and the type
+     check cannot distinguish an immutable-backed view** (same class,
+     same vtable, real length). Runtime evidence on the 2026-11-01
+     `out/jit` build (commit `95c39c07b`), store site warmed on a mutable
+     `Float64Array` (20 000 calls) and then fed a
+     `new Float64Array(transferToImmutable result)`, under default
+     tier-up, `-mic:1 -bgjit-`, `-maxInterpretCount:1
+     -maxSimpleJitRunCount:1 -bgjit-`, and `-forceNative -off:simpleJit
+     -bgJitDelay:0` alike: sloppy `ta[1] = v` silently writes
+     (`view[1] === 9.25`; the interpreter no-ops), and the strict store
+     writes silently with **no TypeError** (0/1000 throws, 1000/1000
+     writes; the interpreter throws 1000/1000). `-trace:TypedArrayTypeSpec
+     -trace:Lowerer` shows the site lowering through the typed-array fast
+     path ("base value type: Float64Array, not specialized") — the src
+     need not be type-specialized; only the base must profile as a typed
+     array, so a Var value stores via the inline float conversion the
+     same way. Minimal repros (scratch files, shapes reproduced here):
+     ```js
+     function store(ta, v) { ta[1] = v; }                  // sloppy: silent JIT write
+     function storeStrict(ta, v) { "use strict"; ta[1] = v; } // strict: no TypeError under JIT
+     var mut = new Float64Array(4);
+     for (var k = 0; k < 20000; k++) store(mut, k + 0.5);  // profile + tier up
+     var iab = (new ArrayBuffer(32)).transferToImmutable();
+     var view = new Float64Array(iab);
+     for (var k = 0; k < 1000; k++) store(view, 9.25);     // JIT: view[1] === 9.25
+     ```
+     A warmed `for (i = 0; i < 8; i++) ta[i] = v;` loop shape writes
+     8/8 elements identically, and the same hole is reachable through a
+     resizable source: `new ArrayBuffer(32,{maxByteLength:64})` →
+     `transferToImmutable()` → in-bounds store on the fixed immutable
+     result mutates it (while the shrunk-OOB no-op and the detached old
+     views behave correctly in every tier).
+  2. **Hole, source-level (behaviorally subsumed by 1) — the MemSet/MemCopy
+     loop fusions.** `GlobOpt::CollectMemsetStElementI`/`CollectMemcopyStElementI`
+     fuse consecutive typed-array element stores in loops into
+     `OpCode::Memset`/`Memcopy` helpers:
+     `Js::JavascriptOperators::OP_Memset`/`OP_Memcopy` →
+     `TypedArray::DirectSetItemAtRange` (`lib/Runtime/Library/TypedArray.h`),
+     which checks detached (and clamps bounds) but **not the immutable
+     bit**. The probes write 8/8 elements through the loop shapes, and
+     `-off:MemSet` still writes because the per-element stores inline via
+     hole 1, so the fusion's own missing check cannot be isolated
+     behaviorally in this engine — it is recorded from source plus the
+     observed writes. Any fix for hole 1 must also add the immutable
+     check here.
+  3. **Verified safe — everything else that reaches buffer memory.**
+     DataView setters have no inlined backend path (all entrypoints run
+     `GetWritableViewIndex`, which rejects immutable): probed 1000/1000
+     TypeError, no write, interpreted and under full JIT. Atomics
+     store/RMW are builtin helpers (the only inlined atomics are the WASM
+     lowerings, compiled out on ARM64); probed 1000/1000 TypeError, no
+     write, all tiers (`-ESSharedArrayBuffer`). `Float16Array` stores
+     never type-specialize (`ObjectType::Float16Array` has no case in the
+     backend specialization switches; there is no `Float16` reference in
+     `lib/Backend` at all), so they always take the helper whose
+     `BaseTypedDirectSetItem` checks `IsImmutableBuffer`: sloppy no write
+     / strict TypeError 1000/1000, all tiers. The helper-call store path
+     itself (`OP_SetElementI` → `BaseTypedDirectSetItem` /
+     `BaseTypedBigIntDirectSetItem`) checks the immutable bit — that is
+     the reference behavior the fast paths bypass.
+  4. **Detached-after-freeze interplay.** An immutable buffer cannot be
+     detached (`transfer`, `transferToFixedLength`, debug
+     `ArrayBuffer.detach`, `JsDetachArrayBuffer` all reject it), so the
+     remaining shape is a view over the *source* that
+     `transferToImmutable` detached: the warmed JIT store site hits its
+     bounds guard (length cleared to 0), bails out
+     (`BailOutOnArrayAccessHelperCall`, confirmed with
+     `-trace:bailout`), and the helper throws the detached TypeError —
+     identical to the interpreter; the immutable copy stays untouched.
+     No write, no divergence found.
+
+  Why the 2026-10-31 probe and the interpreted-suite pass did not catch
+  this: dynapogo compiles without prior profile data, so single-shot
+  stores lower to the checked helper, and no checked-in test warms a
+  store site that is then fed an immutable-backed view — the hole needs a
+  site that is *both* profiled as a typed-array store *and* later sees an
+  immutable-backed view of the same class, which is exactly what the
+  probes construct. **Fix is follow-up work outside `jit-closure-1`**
+  (an immutable-bit guard/bailout in the typed-array store fast path and
+  an immutable check in `DirectSetItemAtRange`); per the lane's scope no
+  engine change was made here. Until that lands, immutable write safety
+  under the JIT must continue to be withheld, now with these named holes
+  instead of an unaudited residual.
 - **`return-immutable.js` host harness limitation.** The pinned test calls
   `$DETACHBUFFER` on a source that `transferToImmutable` already detached. The
   Chakra test262 host implements `$262.detachArrayBuffer` with
