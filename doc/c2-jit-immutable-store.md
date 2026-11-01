@@ -5,9 +5,9 @@
 
 # C2-JIT: immutable-store fast-path conformance fix (jit-closure-1 holes 1+2)
 
-Status: **in progress** — lane `jit-immutable-store`, base `90f65f75f`.
-Baseline evidence below was measured on the clean base build
-(`out/jit/bin/ch`, `-Dprofile=jit`, sources at `90f65f75f`).
+Status: **fixed** — lane `jit-immutable-store`, receipt
+[doc/c2-jit-immutable-store.md](c2-jit-immutable-store.md). Guard design,
+perf numbers, verification tables and residuals are recorded there.
 
 ## Root cause
 
@@ -125,10 +125,78 @@ recomputed by `offsetof`; TTD/serialization never carried the bit — the S8
 residual is unchanged). Immutable buffers remain ordinary recycler
 `JavascriptArrayBuffer` allocations under the S8 ownership record.
 
-## Post-fix results
+## Post-fix results (same probes, fixed `out/jit` build)
 
-(pending)
+Repro matrix — 12 classes × sloppy/strict × single/loop × five flag sets,
+all runs byte-identical to the interpreter:
+
+| class \ flags | default tier-up | `-mic:1 -bgjit-` | interpreted-variant | forceNative | `-nonative` |
+|---|---|---|---|---|---|
+| Int8..Float64 (nine specialized) | clean | clean | clean | clean | clean |
+| BigInt64 / BigUint64 / Float16 | clean | clean | clean | clean | clean |
+
+"Sloppy no-op + strict TypeError 1000/1000, bytes unchanged" in every
+mode; pre-fix the three profile-fed modes wrote all nine specialized
+classes and skipped the TypeErrors (0/1000), matching the audit.
+
+Adversarial battery (builtins set/fill/copyWithin/sort/reverse, generic
+fill no-op range, species reads, DataView, Atomics with
+`-ESSharedArrayBuffer`, RAB shrink/transfer mid-loop, valueOf-detach
+reentrancy, detach-realloc): **BATTERY CLEAN** in default, `-mic:1
+-bgjit-`, interpreted-variant, forceNative, `-nonative` and the SAB flag
+run. (Two battery expectations were corrected during the run and are
+recorded here so they are not rediscovered: `transferToImmutable` of a
+shrunk RAB legitimately copies the earlier in-bounds mutable write, and
+`map` on an immutable SOURCE is a legal read producing a fresh mutable
+result — only immutable species/create destinations reject.)
+
+Checked-in regression `test/es7/immutable-store-jit.js` (registered in
+`test/es7/rlexe.xml`, no flags, no baseline): prints `pass` and exits 0
+in all five modes above, plus dynapogo (suite default variant).
+
+Hot mutable-store microbench (same binary family, medians; before = clean
+base build, after = fixed build):
+
+| shape | before (`-mic:1 -bgjit-`) | after | before (default) | after (default) |
+|---|---|---|---|---|
+| store1 ×30M (one store/call) | 111 ms | 110 ms | 110 ms | 110 ms |
+| store8 ×7.5M (8 stores/call, 60M stores) | 33 ms | 43 ms | 33 ms | 43 ms |
+| loop8 ×7.5M (induction loop, 8 stores/iter) | 240 ms | 236 ms | 235 ms | 235 ms |
+
+Guard cost: **zero** within noise on call-bound and loop-bound shapes
+(the audit's repro shapes); **+0.17 ns/store (~0.5 cycle, +30%)** only on
+the store-saturated unrolled shape where eight guarded sites execute per
+call body — the price of the second load (buffer object header) plus
+test/branch per store site. A cheaper alternative — caching the immutable
+bit on `TypedArrayBase` — was considered and rejected: the raw
+`TypedArrayBase::buffer` pointer is assigned outside the primary ctor
+(`TypedArray.h`'s `TypedArray(DynamicType*)` marshaling shape, and
+`ClearLengthAndBufferOnDetach`), so a view-cached bit would duplicate
+buffer state with a staleness class across those sites; the direct
+single-byte read of the ArrayBufferBase header has no such coherence
+obligation (see the memory statement below).
+
+Gates:
+
+| gate | result |
+|---|---|
+| `zig build -Dprofile=jit check` | green (check_jit/check_smoke PASS) |
+| `zig build check` (test profile, no-JIT) | **2036/0** (was 2035/0; +1 = the new rlexe entry; suite 43.6 s) |
+| `zig build -Dprofile=debug-static check` | **2088/0** (was 2087/0; suite 181.6 s; the new test costs ~5.6 s on the debug binary) |
+| `zig build check-build-tools` | 62/62 OK (gate_counts consumers) |
+| test262 `s8-resizable` (incl. the immutable/sliceToImmutable/transferToImmutable corpora) × {nojit, interp, fulljit} | 804/30 of 834 in every mode, **0 diffs vs nojit** |
+| test262 `s8-float16` × {nojit, interp, fulljit} | 4966/492 of 5458 in every mode, **0 diffs vs nojit** |
 
 ## Residuals
 
-(pending)
+- The immutable-bit byte lives in the `ArrayBufferBase` header; a mutable
+  store now touches the buffer object's cache line per store site. The
+  measured cost is quantified above; if a future hot kernel regresses,
+  the view-cached-bit design sketch (and its coherence hazards) is
+  recorded here as the starting point.
+- x64/Windows backends share `Lower.cpp` and get the same guard by
+  construction, but only ARM64 macOS was executed (B4 owns Linux and the
+  Windows proof).
+- The S8 residuals (TTD snapshots drop the immutable bit, no OS page
+  protection, `return-immutable.js` host harness) are unchanged.
+

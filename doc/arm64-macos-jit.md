@@ -860,8 +860,9 @@ them as fixed by this port.
   Atomics, Float16Array and the helper-call path are verified safe.
   Repros and the fix direction are recorded in the S8 receipt; the fix
   (immutable guard/bailout in the fast path plus a
-  `DirectSetItemAtRange` check) is follow-up work, not part of the
-  `jit-closure-1` measurement lane.
+  `DirectSetItemAtRange` check) landed 2026-11-01 in the
+  `jit-immutable-store` lane — see
+  [doc/c2-jit-immutable-store.md](c2-jit-immutable-store.md).
 - **Strict generator arguments test coverage — closed 2026-11-01.** The
   ARM64 coroutine `LoadHeapArguments` now passes the real generator
   function object, and
