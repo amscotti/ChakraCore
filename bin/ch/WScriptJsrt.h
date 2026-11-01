@@ -75,6 +75,13 @@ public:
     static void AddMessageQueue(MessageQueue *messageQueue);
     static void PushMessage(MessageBase *message) { messageQueue->InsertSorted(message); }
 
+    // Negative-phase classification (host flag -NegativePhaseReport). The
+    // marker lets a test runner re-judge negative scenarios by the stage the
+    // failure actually originated from, replacing output-shape heuristics;
+    // classification mapping and limits in doc/c1-negative-phase.md.
+    static void NoteModuleGraphFailure();
+    static void ReportNegativePhaseMarker(bool parseStageFailure);
+
     static JsErrorCode FetchImportedModule(_In_ JsModuleRecord referencingModule, _In_ JsValueRef specifier, _Outptr_result_maybenull_ JsModuleRecord* dependentModuleRecord);
     static JsErrorCode FetchImportedModuleFromScript(_In_ DWORD_PTR dwReferencingSourceContext, _In_ JsValueRef specifier, _Outptr_result_maybenull_ JsModuleRecord* dependentModuleRecord);
     static JsErrorCode FetchImportedModuleWithAttributes(_In_ JsModuleRecord referencingModule, _In_ JsValueRef specifier, _In_ JsValueRef attributes, _Outptr_result_maybenull_ JsModuleRecord* dependentModuleRecord);

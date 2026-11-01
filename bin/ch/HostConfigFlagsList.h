@@ -21,5 +21,6 @@ FLAG(bool, Module,                          "load the script as a module", false
 FLAG(bool, TrackRejectedPromises,           "Enable tracking of unhandled promise rejections", false)
 FLAG(BSTR, CustomConfigFile,                "Custom config file to be used to pass in additional flags to Chakra", NULL)
 FLAG(bool, ExecuteWithBgParse,              "Load script with bgparse (note: requires bgparse and parserstatecache be on as well)", false)
+FLAG(bool, NegativePhaseReport,             "On unhandled error, emit one CH_NEGATIVE_PHASE: parse|resolution|runtime marker line on stderr, classified from where the failure originated (test262 negative-phase re-judging; see doc/c1-negative-phase.md)", false)
 #undef FLAG
 #endif
