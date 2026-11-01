@@ -181,6 +181,13 @@ body var no longer carries). Body `var arguments` keeps the merged scope
   differs from the body var's parameter (`function (p=1,q=2){ var q;
   eval('var p') }` → throw; Node `[undefined,2]`) and for body
   `var arguments` + eval'd `var arguments` (main-identical).
+- Pattern-bound formal named `arguments` with an **inner default**
+  (`[arguments = 5] = []` in the parameter list) still returns
+  `typeof arguments === "number"` where Node gives `"undefined"`
+  (9 shapes: eval-var/eval-var+read/closure × fn/arrow/method;
+  main-identical, review-found — the pattern-default node is
+  misclassified as a body declaration winning the `arguments` symbol).
+  Small follow-up in the same `BodyRedeclaresParameter` classifier.
 
 ### Tracked residual card (not fixed, pre-existing)
 
