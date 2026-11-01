@@ -375,8 +375,14 @@ static bool SetMethodCallHas(const SetLikeRecord& record, Var value, ScriptConte
 {
     JS_REENTRANCY_LOCK(jsReentLock, scriptContext->GetThreadContext());
     Var result = nullptr;
+    // The C++->JS call must be armed for JIT-compiled callers too (the
+    // interpreter's OP_Call region does not extend into a builtin re-entry).
     JS_REENTRANT(jsReentLock,
-        result = CALL_FUNCTION(scriptContext->GetThreadContext(), record.has, CallInfo(CallFlags_Value, 2), record.setLike, value));
+        BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+        {
+            result = CALL_FUNCTION(scriptContext->GetThreadContext(), record.has, CallInfo(CallFlags_Value, 2), record.setLike, value);
+        }
+        END_SAFE_REENTRANT_CALL);
     return JavascriptConversion::ToBool(result, scriptContext);
 }
 
@@ -386,8 +392,14 @@ static SetLikeKeysIterator GetSetLikeKeysIterator(const SetLikeRecord& record, S
 {
     JS_REENTRANCY_LOCK(jsReentLock, scriptContext->GetThreadContext());
     Var iteratorVar = nullptr;
+    // Arm the keys() call itself; the "next" Get below routes through
+    // ExecuteImplicitCall, which arms itself.
     JS_REENTRANT(jsReentLock,
-        iteratorVar = CALL_FUNCTION(scriptContext->GetThreadContext(), record.keys, CallInfo(CallFlags_Value, 1), record.setLike));
+        BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+        {
+            iteratorVar = CALL_FUNCTION(scriptContext->GetThreadContext(), record.keys, CallInfo(CallFlags_Value, 1), record.setLike);
+        }
+        END_SAFE_REENTRANT_CALL);
     if (!JavascriptOperators::IsObject(iteratorVar))
     {
         JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedObject);
@@ -405,7 +417,16 @@ static bool SetLikeKeysStep(const SetLikeKeysIterator& keysIterator, Var* valueO
 {
     JS_REENTRANCY_LOCK(jsReentLock, scriptContext->GetThreadContext());
     bool hasValue = false;
-    JS_REENTRANT(jsReentLock, hasValue = JavascriptOperators::IteratorStepAndValue(keysIterator.iterator, scriptContext, keysIterator.next, valueOut));
+    // IteratorStepAndValue's user transitions (next, done, value) each arm
+    // themselves through ExecuteImplicitCall today; this wrapper arm is
+    // defense-in-depth so a future direct-call fast path inside the iterator
+    // helpers (see the CONSIDER there) stays armed for Set-method callers.
+    JS_REENTRANT(jsReentLock,
+        BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+        {
+            hasValue = JavascriptOperators::IteratorStepAndValue(keysIterator.iterator, scriptContext, keysIterator.next, valueOut);
+        }
+        END_SAFE_REENTRANT_CALL);
     return hasValue;
 }
 
@@ -431,7 +452,11 @@ static void CloseKeysIteratorNormalCompletion(const SetLikeKeysIterator& keysIte
     {
         JS_REENTRANCY_LOCK(jsReentLock, scriptContext->GetThreadContext());
         JS_REENTRANT(jsReentLock,
-            result = CALL_FUNCTION(scriptContext->GetThreadContext(), callable, CallInfo(CallFlags_Value, 1), keysIterator.iterator));
+            BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+            {
+                result = CALL_FUNCTION(scriptContext->GetThreadContext(), callable, CallInfo(CallFlags_Value, 1), keysIterator.iterator);
+            }
+            END_SAFE_REENTRANT_CALL);
     }
     if (!JavascriptOperators::IsObject(result))
     {
