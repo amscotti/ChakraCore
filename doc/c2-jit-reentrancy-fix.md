@@ -94,6 +94,17 @@ flag restored by the destructor. Verified per shape by
   `return()` runs observably on the isSupersetOf/isDisjointFrom early-false
   paths; a throwing `return()` propagates (this close site is on a *normal*
   completion); a non-object `return()` result is a `TypeError`.
+  Review-folded precision: the close is **size-gated** — `isSupersetOf`
+  closes only when receiver size ≥ record size, `isDisjointFrom` only when
+  receiver size > record size; smaller receivers return false without
+  reading `keys` (matches test262). Also noted: `difference`'s keys-walk
+  deletes record keys unconditionally (no `has` consult,
+  JavascriptSet.cpp:607-613 — spec-consistent, deserves the same branch
+  comment `intersection` has).
+- **FRR-cleanup coverage residual (review)**: FinalizationRegistry
+  cleanup-callback → armed builtins is unverifiable in this host (no
+  script-exposed GC; 200 registrations + 200k-object churn never fired
+  cleanup). Same arming gate, but unexercised — recorded, not claimed.
 - **`ToBoolean(has())`** — a result object with throwing `valueOf` is truthy
   **without** `valueOf` being called (ToBool runs no user code).
 - **groupBy callback throw** — sentinel propagates, the items iterator is

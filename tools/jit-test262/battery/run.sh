@@ -20,10 +20,13 @@ run_one() {
     flags=$1; name=$2; script=$3
     rc=0
     if [ "$script" = "callback-probes.js" ]; then
-        "$CH" -args "$ITERS" -endargs $flags "$HERE/$script" >/dev/null 2>&1 || rc=$?
+        out=$("$CH" -args "$ITERS" -endargs $flags "$HERE/$script" 2>&1) || rc=$?
     else
-        "$CH" $flags "$HERE/$script" >/dev/null 2>&1 || rc=$?
+        out=$("$CH" $flags "$HERE/$script" 2>&1) || rc=$?
     fi
+    # ch exits 0 on uncaught script exceptions — require the pass marker
+    # (review risk-1 hardening).
+    case "$out" in *pass*) ;; *) rc=1;; esac
     printf '%s' "$rc"
 }
 
