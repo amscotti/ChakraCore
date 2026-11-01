@@ -54,8 +54,12 @@ var tests = [
       // Redeclaration errors - non-simple in this case means any parameter list with a default expression
       assert.doesNotThrow(function () { eval("function foo(a = 1) { var a; }"); },            "Var redeclaration with a non-simple parameter list");
       assert.doesNotThrow(function () { eval("function foo(a = 1, b) { var b; }"); },         "Var redeclaration does not throw with a non-simple parameter list on a non-default parameter");
-      assert.throws(function () { function foo(a = 1) { eval('var a;'); }; foo() },     SyntaxError, "Var redeclaration throws with a non-simple parameter list inside an eval", "Let/Const redeclaration");
-      assert.throws(function () { function foo(a = 1, b) { eval('var b;'); }; foo(); }, SyntaxError, "Var redeclaration throws with a non-simple parameter list on a non-default parameter inside eval", "Let/Const redeclaration");
+      // A body eval's var environment is the body environment, which sits
+      // inside the parameter environment (ES2025 10.2.11): the eval'd var
+      // creates a separate binding there instead of redeclaring the
+      // parameter, and body reads resolve to it.
+      assert.areEqual(undefined, function foo(a = 1) { eval('var a;'); return a; }(), "Body eval var of a parameter name creates a separate binding");
+      assert.areEqual(undefined, function foo(a = 1, b) { eval('var b;'); return b; }(), "Body eval var of a non-default parameter name creates a separate binding");
 
       assert.throws(function () { eval("function foo(a) { let a; };"); }, SyntaxError, "Duplicate let decalration in the body should throw redeclaration error", "Let/Const redeclaration");
       assert.throws(function () { eval("function foo(a) { const a = 1; };"); }, SyntaxError, "Duplicate const decalration in the body should throw redeclaration error", "Let/Const redeclaration");

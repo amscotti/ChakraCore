@@ -6865,6 +6865,67 @@ void Parser::AppendFunctionToScopeList(bool fDeclaration, ParseNodeFnc * pnodeFn
 /***************************************************************************
 Parse a function definition.
 ***************************************************************************/
+// True when a body-level var or function declaration node reuses a symbol
+// declared in the function's parameter scope. Under the merged param/body
+// sharing such a node keeps the parameter symbol as its storage, so the
+// param/body scopes cannot be split after the fact for this function.
+bool Parser::BodyRedeclaresParameter(ParseNodeFnc *pnodeFnc, ParseNodeBlock *pnodeBodyBlock)
+{
+    Scope *paramScope = pnodeFnc->pnodeScopes != nullptr ? pnodeFnc->pnodeScopes->scope : nullptr;
+    if (paramScope == nullptr)
+    {
+        return false;
+    }
+
+    // A body-level function declaration binds its name node to the shared
+    // parameter symbol (and for non-formal parameter symbols promotes it to
+    // STFunction). Such declarations sit in the body block's scope list.
+    if (pnodeBodyBlock != nullptr)
+    {
+        for (ParseNode *pnode = pnodeBodyBlock->pnodeScopes; pnode != nullptr;)
+        {
+            switch (pnode->nop)
+            {
+            case knopFncDecl:
+                if (pnode->AsParseNodeFnc()->pnodeName != nullptr &&
+                    pnode->AsParseNodeFnc()->pnodeName->sym != nullptr &&
+                    pnode->AsParseNodeFnc()->pnodeName->sym->GetScope() == paramScope)
+                {
+                    return true;
+                }
+                pnode = pnode->AsParseNodeFnc()->pnodeNext;
+                break;
+            case knopBlock:
+                pnode = pnode->AsParseNodeBlock()->pnodeNext;
+                break;
+            case knopCatch:
+                pnode = pnode->AsParseNodeCatch()->pnodeNext;
+                break;
+            case knopWith:
+                pnode = pnode->AsParseNodeWith()->pnodeNext;
+                break;
+            default:
+                Assert(UNREACHED);
+                return false;
+            }
+        }
+    }
+
+    bool redeclares = false;
+    paramScope->ForEachSymbolUntil([&redeclares, pnodeFnc](Symbol *paramSym) {
+        for (ParseNode *pnode = pnodeFnc->pnodeVars; pnode != nullptr; pnode = pnode->AsParseNodeVar()->pnodeNext)
+        {
+            if (pnode->AsParseNodeVar()->sym == paramSym && paramSym->GetDecl() != pnode)
+            {
+                redeclares = true;
+                return true;
+            }
+        }
+        return false;
+    });
+    return redeclares;
+}
+
 template<bool buildAST>
 void Parser::ParseFncDeclHelper(ParseNodeFnc * pnodeFnc, LPCOLESTR pNameHint, ushort flags, bool fUnaryOrParen, bool noStmtContext, bool *pNeedScanRCurly, bool skipFormals, IdentPtr* pFncNamePid, bool fAllowIn)
 {
@@ -7324,6 +7385,35 @@ void Parser::ParseFncDeclHelper(ParseNodeFnc * pnodeFnc, LPCOLESTR pNameHint, us
             {
                 this->ParseNestedDeferredFunc(pnodeFnc, fLambda, pNeedScanRCurly, &strictModeTurnedOn, fAllowIn);
             }
+        }
+
+        // A sloppy direct eval in the body of a function with a non-simple
+        // parameter list must put its var/function declarations in the body
+        // (variable) environment: EvalDeclarationInstantiation (ES2025
+        // 19.2.1.3 step 3.b) checks names only in the environments between
+        // the eval's lexical environment and its variable environment, and
+        // FunctionDeclarationInstantiation (10.2.11) binds non-simple
+        // parameters outside that variable environment. The merge decision
+        // above ran before the body was parsed, so an eval seen only in the
+        // body (parsed here or recorded by the deferred scan) still leaves
+        // the scopes merged; the eval preflight would then observe the
+        // parameter activation and wrongly report a redeclaration. Force the
+        // same split ParseFncFormals applies to eval seen in the formals.
+        //
+        // The split may only be forced while the body's declarations were
+        // parsed with the split already in effect - the pre-7236 sharing
+        // bound any body var/function declaration of a parameter name to
+        // the parameter symbol, and that storage is what a later eval
+        // declaration would have to reuse (ES2025 19.2.1.3 step 15.b:
+        // an existing varEnv binding is not re-initialized). Such compound
+        // redeclarations keep the merged behavior instead; the remaining
+        // over-report there is the tracked residual.
+        if (pnodeFnc->HasNonSimpleParameterList() &&
+            pnodeFnc->IsBodyAndParamScopeMerged() &&
+            pnodeFnc->CallsEval() &&
+            !BodyRedeclaresParameter(pnodeFnc, pnodeInnerBlock))
+        {
+            pnodeFnc->ResetBodyAndParamScopeMerged();
         }
 
         // Restore the paren count for any outer spread/rest error checking.

@@ -652,6 +652,8 @@ private:
         }
     }
 
+    bool BodyRedeclaresParameter(ParseNodeFnc *pnodeFnc, ParseNodeBlock *pnodeBodyBlock);
+
     struct ParserState
     {
         ParseNodePtr *m_ppnodeScopeSave;
