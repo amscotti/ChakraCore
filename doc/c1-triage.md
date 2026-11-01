@@ -927,8 +927,9 @@ still owns JIT-configuration claims.)*
 | S12 module phase fidelity | Landed `37725d8c1` + receipt `34296622b`, `d1ad6f0a2` (merge `8f17ba38d`) | child link errors propagate to root declaration-instantiation (first-wins `errorObject`, mirroring OnChildModuleReady) and JSON modules parse at load (`JsRun`-validated synthetic source, exception recorded pre-parse with identity preserved); module-code 524/602→534/602 with 10 wrong-phase downgrades→0; import 28/135→29/135 (json-invalid flips; import-defer parser gap stays); zero pass→fail; gates unchanged 2033/2085 | multi-error dictionary-order selection (pre-existing), stateful global-JSON tamper (host harness), NUL truncation (pre-existing), sticky witness, JIT/TTD out of scope |
 | C2 test262-under-JIT campaign | Landed `ee6af9618` + receipt `d1bed69fd`, `38e519225` (merge `37123ee48`) | 19 batches × 3 modes, 57 runs, controls 25×57; **17/19 per-batch JIT obligations discharged at zero JIT-vs-noJIT diff**; 172 diffs = one root cause (C2-JIT-1/2 Set-methods/groupBy reentrancy aborts, **default-flags reachable** — severity-upgraded by review); 20 waitAsync flakes mode-invariant; campaign.py tooling committed for reruns; no engine source changed; dual ACCEPT | C2-JIT-1/2 (→ fix lane below), s12 base drift −2 (→ forensics), Linux JIT via B4 |
 | JIT reentrancy fix (C2-JIT-1/2) | Landed `3b609690a` + receipts `f4b97fa59`, `33af3ae2a` (merge `88c11c4d0`) | armed the 7 un-armed C++→JS transitions (Set.cpp ×4, Map.cpp, Object.cpp ×2 — Object.groupBy has its own copy) with the EntryForEach combined idiom; pre-fix 20/20 battery aborts incl. default flags → post-fix 30/30 green with asserted values; exception semantics preserved (close-once, original-error-beats-throwing-return); 51-probe callback sweep clean pre+post; corpora recovered to exact nojit parity (s10 372/0, s11 170/0); **19/19 JIT obligations now discharged on Mac ARM64**; new `setmethods-groupby-warmed.js` entry; gates 2033/2085 → **2034/2086**; dual ACCEPT | Map-groupBy wrapper-arm asymmetry (cosmetic), FRR-cleanup-callback arming unexercisable in host, Linux JIT via B4 |
+| JIT closure bundle (audit/test/exclusion) | Landed `102dc188a` + receipts `63356c904`, `fd8554874`, `50c9dc66c` (merge `90f65f75f`) | S8 immutable inlined-store AUDIT complete: safety does NOT hold under JIT — the profile-fed full-JIT fast path silently writes immutable buffers (9 numeric classes, strict no-throw); repros + review-corrected blast radius recorded, fix filed (→ jit-immutable-store lane); strict-generator-args JIT test added (`strict-generator-args-jit.js`, tier-up proven); asm.js/WASM ARM64 exclusion formally recorded (interpreted 2429/397, dynapogo 2004/286, zero failures outside tagged folders, zero signals); gates 2034/2086 → **2035/2087**; dual ACCEPT | immutable-store hole (fix lane), try/catch keeps coroutine bodies interpreted, Zig 0.17 pin trap (doc note), Linux via B4 |
 
-Full gates at this checkpoint: **2034/0 test**, **2086/0 debug-static**
+Full gates at this checkpoint: **2035/0 test**, **2087/0 debug-static**
 (single-sourced in `tools/build/gate_counts.json`; repair-loop
 `-noDeferParse` rlexe variants moved 2013/2065 → 2016/2068, S6a added
 one entry, eval-super added three parse-mode entries, S6b added the
@@ -938,8 +939,9 @@ strictness added one entry, S6c BigInt Atomics added one entry, S2
 BigInt default enablement added four entries, S6e cross-agent
 waitAsync added one entry, the host-broadcast-type repair added one
 entry (2031/2083 → 2032/2084), and the s14-eval-nonsimple-var lane
-added one entry (2032/2084 → 2033/2085), and the jit-reentrancy-fix lane added
-one entry (2033/2085 → 2034/2086)). Integrated
+added one entry (2032/2084 → 2033/2085), the jit-reentrancy-fix lane added
+one entry (2033/2085 → 2034/2086), and the jit-closure-1 lane added one
+entry (2034/2086 → 2035/2087)). Integrated
 class-elements corpus re-runs 2026-10-20: wave-2
 (`out/test262-c2-s1-wave2`) **5,854/5,897**, 3,865 f→p / 0 p→f vs
 2026-10-19; wave-3 (`out/test262-c2-wave3`, after the S1-tail lane)
