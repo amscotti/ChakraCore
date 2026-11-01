@@ -177,11 +177,70 @@ Tests: §5 json probes + json-invalid corpus flip §6.
 ## 4. Probe battery
 
 `out/s12phase/` (scripts listed in appendix A; run as
-`ch -NegativePhaseReport -Module <p*.js>`).
+`ch -NegativePhaseReport -Module <p*.js>`). "Marker" = first stderr line;
+"identity" = the reported error; side-effect checks assert stdout is empty
+for every failing module graph (no body evaluated).
 
-## 5. Results (to be completed after the fix build)
+## 5. Probe results (before = base build, after = this lane)
 
-## 6. Corpus (to be completed)
+| Probe | Shape | Before | After |
+|---|---|---|---|
+| p1 depth-1, named import of failing module | root resolves the binding itself | `resolution`, SyntaxError `Module import nonExistent cannot be resolved`, no stdout *(already correct)* | unchanged |
+| p1b depth-1, side-effect import (exact corpus shape) | child self-link error below root | **`runtime`**, same SyntaxError, no stdout | **`resolution`**, same SyntaxError, no stdout |
+| p2 depth 2 / p3 depth 3 (N) | deepest child fails | **`runtime`** | **`resolution`**, SyntaxError identity, no stdout |
+| p4 multiple failing children | `f-self` + `f-self2` | **`runtime`** | `resolution`; one error reported (`otherMissing` — dictionary order), first-wins per spec's single-error completion |
+| p5 child link error **and** root link error | both | `resolution` (root's own `notExported` wins) | unchanged: root's own InitializeLocalImports error wins (its own init precedes the children recursion) |
+| p6 invalid JSON document | `bad.json` `{"a": }` | **`runtime`**, `SyntaxError: JSON.parse Error: Unexpected input at position:7` | **`resolution`**, the **same** `JSON.parse` SyntaxError (identity preserved from the validation run) |
+| p7 valid JSON | `good.json` | `default=42`, no marker | unchanged |
+| p8/p8b BOM'd JSON valid/invalid | U+FEFF prefix | **`runtime`** (`JSON.parse` rejects U+FEFF: `Invalid character at position:1`) | **`resolution`**, same SyntaxError (accept/reject behavior unchanged — engine JSON conformance; only the phase moved) |
+| p9 JSON requested without attributes | `.json` parsed as a JS module | `resolution`, dependency parse SyntaxError | unchanged (S12 path) |
+| p9b JSON requested with `type:'css'` | fetch failure | `parse` marker, `Error: fetch import module failed` | unchanged — pre-existing marker precedence (§8) |
+| p10 mixed graph (link-error child + invalid-JSON child) | both gaps | **`runtime`** (link error via evaluation channel) | **`resolution`**, JSON SyntaxError (the load-stage failure precedes instantiation) |
+| p11 evaluate-then-fail | `print` + `throw TypeError` | `runtime`, `EVAL-RAN` on stdout | unchanged (legitimate runtime phase, Module code frame) |
+| p12 root's own link error | unresolvable root import | `resolution` | unchanged |
+| p13 circular graph (positive) | A↔B cycle + root | `CYCLE-OK 1` | unchanged (propagation is cycle-safe: `SetWasDeclarationInitialized` precedes the recursion, so a revisited module returns early) |
+| p14 dynamic import of link-error module | `import('./f-self.js')` | rejection `SyntaxError` (handled, no marker) | unchanged rejection value |
+| p15 evaluating sibling + failing sibling | `f-side` (prints) + `f-self` | **`runtime`**, no stdout | `resolution`, no stdout — note: in this engine *neither* behavior ran sibling code (`ModuleEvaluationPrepass` walks every child before any body resumes; bodies are lazy generators), so the observable phase distinction is the report channel/marker, not stdout suppression |
+| p16/p16b dynamic JSON invalid/valid | `import('./bad.json', {with:{type:'json'}})` | rejection/fulfillment | unchanged identities: `REJECTED SyntaxError` / `FULFILLED 42` (for invalid JSON the rejection now originates at load) |
+
+**Side effects:** every failing-graph probe (p1b–p6, p8, p8b, p10, p15) has
+empty stdout before **and** after; a root that would `print` on evaluation
+does not print when a child fails to link. The one evaluation that did run
+before the fix at the JSON site was the synthetic body itself (whose only
+action was the throwing `JSON.parse`); it no longer runs.
+
+## 6. Corpus before/after (same pinned checkout `2e0a5676`, marker re-judging active, identical `run.py` invocations)
+
+| Selection | Before (base `f3ef8cdb0`) | After (this lane) | Delta |
+|---|---|---|---|
+| `test/language/module-code/**` | 524/602, **10 downgrades** | **534/602, 0 downgrades** | +10 fail→pass, 0 pass→fail |
+| `test/language/import/**` | 28/135, 2 downgrades | **29/135, 1 downgrade** | +1 fail→pass, 0 pass→fail |
+| `test/language/eval-code/**` | 454/454, 0 downgrades | 454/454, 0 downgrades | no movement |
+
+The 10 module-code flips are exactly the 10 recorded wrong-phase scenarios:
+9 `import-attributes/*` attribute-shape tests (`allow-nlt-before-with`,
+8× `import-attribute-*`; all side-effect-import the
+`ensure-linking-error_FIXTURE.js` child-link-error shape) plus
+`instn-star-err-not-found.js` (the faulty child's
+`InitializeIndirectExports` error, previously discarded by the root's
+recursion). The import flip is `json-invalid.js`. The one remaining
+downgrade is `import-defer/errors/syntax-error/import-defer-of-syntax-error-fails.js`
+— **classified: parser gap**, the engine rejects post-ES2025 `import defer`
+syntax at parse (marker `parse` ≠ declared `resolution`); it stays
+downgraded correctly and is untouched by this lane.
+
+**Focused rlexe (S12 suites):** `runtests.py -t --variants disable_jit
+test/es6module` = **31/31**; `module-syntax.js` = **11/11** in normal,
+`-forcedeferparse` and `-nodeferparse` modes (run from the test's
+directory — see the pre-existing CWD note below).
+
+**Pre-existing quirks verified identical at base** (binary A/B on a
+stash-reverted build): running `module-syntax.js` from a different CWD
+fails entry 9 (10/11) because string-loaded modules resolve fixture
+specifiers against the process CWD; and a simplified 17×-`WScript.LoadModule`
+sequence skips 6 module evaluations (12/18). Both reproduce byte-identically
+on the base binary — host string-module record-reuse/CWD behavior that
+predates this lane, not regressions.
 
 ## 7. Gates (to be completed)
 

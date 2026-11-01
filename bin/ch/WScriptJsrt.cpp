@@ -2309,6 +2309,8 @@ Error:
 // Forward declarations for the import-attributes host support below.
 static JsErrorCode ReadModuleAttributes(JsValueRef attributes, bool* hasAttributes, std::string* canonicalOut, std::string* typeOut);
 static char* WrapJsonModuleSource(LPCSTR jsonText);
+static char* BuildJsonParseSource(LPCSTR jsonText, const char* prefix, const char* suffix);
+static bool ValidateJsonModuleSource(JsModuleRecord moduleRecord, LPCSTR jsonParseSource);
 
 WScriptJsrt::ModuleMessage::ModuleMessage(JsModuleRecord module, JsValueRef specifier, std::string* filePathPtr, std::string* mapKeyPtr, bool isJson, bool direct)
     : MessageBase(0), moduleRecord(module), specifier(specifier), isJsonModule(isJson), directParse(direct)
@@ -2413,12 +2415,19 @@ HRESULT WScriptJsrt::ModuleMessage::Call(LPCSTR fileName)
                 // (CreateDefaultExportSyntheticModule). The file text is
                 // evaluated through JSON.parse rather than pasted as an
                 // object literal, so keys such as "__proto__" keep their
-                // parsed-value semantics. Invalid JSON therefore throws a
-                // SyntaxError at evaluation time.
+                // parsed-value semantics. Per the spec the document is
+                // parsed when the module is loaded (ParseJSONModule), so a
+                // malformed document is validated here — a resolution-stage
+                // load failure carrying JSON.parse's own SyntaxError —
+                // instead of surfacing at the synthetic body's evaluation.
+                char* jsonValidationSource = BuildJsonParseSource(fileContent, "JSON.parse('", "');");
+                bool jsonValid = (jsonValidationSource != nullptr) &&
+                    ValidateJsonModuleSource(moduleRecord, jsonValidationSource);
+                free((void*)jsonValidationSource);
                 char* jsonModuleSource = WrapJsonModuleSource(fileContent);
                 free((void*)fileContent);
                 fileContent = nullptr;
-                if (jsonModuleSource == nullptr)
+                if (jsonModuleSource == nullptr || jsonValidationSource == nullptr)
                 {
                     NoteModuleGraphFailure();
                     hr = E_OUTOFMEMORY;
@@ -2430,6 +2439,27 @@ HRESULT WScriptJsrt::ModuleMessage::Call(LPCSTR fileName)
                     {
                         LoadScript(nullptr, filePath == nullptr ? *specifierStr : filePath->c_str(), nullptr, "module", true, WScriptJsrt::FinalizeFree, false);
                     }
+                    free((void*)jsonModuleSource);
+                    goto Error;
+                }
+                if (!jsonValid)
+                {
+                    // Invalid JSON document: ValidateJsonModuleSource
+                    // recorded JSON.parse's SyntaxError on the module
+                    // record; an empty parse drives the dependency-failure
+                    // notification while keeping that recorded error
+                    // identity. This is the module-graph load stage, so
+                    // witness resolution.
+                    NoteModuleGraphFailure();
+                    if (directParse)
+                    {
+                        ParseModuleSourceOnRecord(moduleRecord, nullptr, 0);
+                    }
+                    else
+                    {
+                        LoadScript(nullptr, filePath == nullptr ? *specifierStr : filePath->c_str(), nullptr, "module", true, WScriptJsrt::FinalizeFree, false);
+                    }
+                    free((void*)jsonModuleSource);
                     goto Error;
                 }
                 fileContent = jsonModuleSource;
@@ -2543,22 +2573,64 @@ static JsErrorCode ReadModuleAttributes(JsValueRef attributes, bool* hasAttribut
 // exact file text.
 static char* WrapJsonModuleSource(LPCSTR jsonText)
 {
-    static const char prefix[] = "export default JSON.parse('";
-    static const char suffix[] = "');";
+    return BuildJsonParseSource(jsonText, "export default JSON.parse('", "');");
+}
+
+// Runs the JSON.parse expression built from the file text (the payload of
+// the synthesized module body) in the current context. Returns true when
+// the document is valid JSON (or validation cannot run, e.g. host-side OOM,
+// in which case the legacy evaluation-time behavior stands). On failure the
+// engine's own SyntaxError from JSON.parse is recorded on the module record
+// via JsModuleHostInfo_Exception, so the link phase propagates that exact
+// error identity: per the spec (ParseJSONModule during module loading), a
+// malformed JSON module fails to LOAD — a resolution-stage failure — rather
+// than failing later when the synthetic module's body would have evaluated.
+// The record is unparsed at this point, which is the state
+// JsModuleHostInfo_Exception requires; ParseModuleSourceOnRecord(nullptr)
+// then drives the existing dependency-failure notification while
+// SourceTextModuleRecord::ParseSource keeps the pre-recorded error object.
+static bool ValidateJsonModuleSource(JsModuleRecord moduleRecord, LPCSTR jsonParseSource)
+{
+    JsValueRef sourceRef = nullptr;
+    JsValueRef sourceName = nullptr;
+    if (ChakraRTInterface::JsCreateString(jsonParseSource, strlen(jsonParseSource), &sourceRef) != JsNoError ||
+        ChakraRTInterface::JsCreateString("json-module-parse", 17, &sourceName) != JsNoError)
+    {
+        return true;
+    }
+    if (ChakraRTInterface::JsRun(sourceRef, JS_SOURCE_CONTEXT_NONE, sourceName,
+        JsParseScriptAttributeNone, nullptr) == JsNoError)
+    {
+        return true;
+    }
+    JsValueRef exception = nullptr;
+    if (ChakraRTInterface::JsGetAndClearException(&exception) != JsNoError || exception == nullptr)
+    {
+        return true;
+    }
+    ChakraRTInterface::JsSetModuleHostInfo(moduleRecord, JsModuleHostInfo_Exception, exception);
+    return false;
+}
+// Builds `<prefix><escaped file text><suffix>` where the escape rules keep
+// the file text byte-exact inside a single-quoted JS string literal: only
+// the single quote, backslash and JS line terminators (incl. U+2028/U+2029)
+// are escaped. Returns a malloc'd buffer (caller frees) or nullptr on OOM.
+static char* BuildJsonParseSource(LPCSTR jsonText, const char* prefix, const char* suffix)
+{
     static const char lineSeparatorEscape[] = "\\u2028";
     static const char paragraphSeparatorEscape[] = "\\u2029";
     size_t length = strlen(jsonText);
     // Worst case: every byte doubles, plus two 6-byte escapes per 3-byte
     // sequence, plus prefix/suffix/NUL.
-    size_t capacity = (sizeof(prefix) - 1) + 2 * length + (sizeof(suffix) - 1) + 1;
+    size_t capacity = strlen(prefix) + 2 * length + strlen(suffix) + 1;
     char* out = (char*)malloc(capacity);
     if (out == nullptr)
     {
         return nullptr;
     }
     char* cursor = out;
-    memcpy(cursor, prefix, sizeof(prefix) - 1);
-    cursor += sizeof(prefix) - 1;
+    memcpy(cursor, prefix, strlen(prefix));
+    cursor += strlen(prefix);
     for (size_t i = 0; i < length; i++)
     {
         unsigned char c = (unsigned char)jsonText[i];
@@ -2591,8 +2663,8 @@ static char* WrapJsonModuleSource(LPCSTR jsonText)
             *cursor++ = (char)c;
         }
     }
-    memcpy(cursor, suffix, sizeof(suffix) - 1);
-    cursor += sizeof(suffix) - 1;
+    memcpy(cursor, suffix, strlen(suffix));
+    cursor += strlen(suffix);
     *cursor = '\0';
     return out;
 }
