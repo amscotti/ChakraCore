@@ -242,7 +242,20 @@ sequence skips 6 module evaluations (12/18). Both reproduce byte-identically
 on the base binary — host string-module record-reuse/CWD behavior that
 predates this lane, not regressions.
 
-## 7. Gates (to be completed)
+## 7. Gates
+
+Both no-JIT gates through the shared lock (`sh /tmp/opencode/cc-gate-lock.sh
+mise exec -- zig build ...`), pins untouched (no `rlexe.xml`/gate-count
+edits; the existing S12 suites already pin the JSON-module positives):
+
+- `zig build check-regression` (test): **2033/0** (pin 2033).
+- `zig build -Dprofile=debug-static check-regression`: **2085/0** (pin 2085).
+
+No new rlexe entry was added: a deterministic child-link-error/invalid-JSON
+scenario needs the module message queue to drain before the failure is
+observable, which the synchronous `testModuleScript(shouldFail)` pattern
+cannot express; the corpus flips (§6) pin the behavior under marker
+judging instead.
 
 ## 8. Residuals
 
@@ -254,19 +267,70 @@ predates this lane, not regressions.
   `JsParseModuleSource` → `JsErrorScriptCompile`, so the marker reports
   `parse` although the witness was set (observed `p9b`: `Error: fetch
   import module failed`, marker `parse`). Pre-existing marker precedence
-  (parse beats the witness), unchanged by this lane.
+  (parse beats the witness), unchanged by this lane; a future fix is a
+  host-side distinction between root-parse and graph-load failures.
 - JSON BOM: this engine's `JSON.parse` rejects a leading U+FEFF, so BOM'd
   JSON modules fail (now at resolution, `SyntaxError`), matching the
   engine's own JSON conformance; the phase moved, the accept/reject
   behavior did not.
-- JIT (B4) verification remains out of scope; TTD unchanged (module
-  records/error paths are not TTD-instrumented by this lane).
+- JSON validation resolves `JSON` from the global (intrinsic `%JSON.parse%`
+  is not exposed to hosts); the synthesized body does the same, so
+  validation and evaluation cannot disagree, but a host that replaces
+  global `JSON` changes both identically — a synthetic-module design limit
+  inherited from S12.
+- Pre-existing host quirks (verified identical on a stash-reverted base
+  build): string-loaded modules resolve fixture specifiers against the
+  process CWD, so `module-syntax.js` fails one entry when run from another
+  directory; and a many-`LoadModule`-in-one-script sequence skips some
+  module evaluations (12/18 in a simplified repro) through the host's
+  string-module record reuse. Neither is affected by this lane.
+- JIT (B4) verification remains out of scope (the merged Mac ARM64 `jit`
+  profile was not built or run); both fixes are in interpreter/runtime
+  module machinery, but `Lower.cpp` JIT behavior for module linking is
+  unverified. TTD stance: unchanged — no TTD instrumentation added or
+  altered; module-record error propagation is not TTD-recorded (same as
+  the pre-existing errorObject paths it reuses).
+- The gate-lock helper leaks its lock directory across `exec`, requiring
+  verified-stale reclaims between sequential gate invocations (observed
+  twice this session; process table checked per the rule before each
+  reclaim).
 
 ## Appendix A — probe sources
 
-See `out/s12phase/` in the lane worktree (uncommitted scratch by repo
-convention); the fixtures are: `f-self.js`/`f-self2.js` (self link error,
-the `ensure-linking-error_FIXTURE.js` shape), `mid1.js`/`mid2.js` (depth),
-`f-ok.js`, `f-side.js` (evaluating sibling), `good.json`/`bad.json`/
-`bom-good.json`/`bom-bad.json`, `cyc-a.js`/`cyc-b.js` (cycle), and roots
-`p1*`–`p15` as described in §5's table.
+`out/s12phase/` (lane worktree, uncommitted scratch by repo convention):
+
+```text
+f-self.js   import { nonExistent } from './f-self.js';          # the ensure-linking-error shape
+f-self2.js  import { otherMissing } from './f-self2.js';
+mid1.js     import './f-self.js';      mid2.js  import './mid1.js';
+f-ok.js     export const ok = 1;       f-side.js  print('SIBLING-RAN'); export const s = 1;
+good.json   {"answer": 42}             bad.json  {"a": }
+bom-good.json / bom-bad.json           U+FEFF-prefixed variants of the above
+cyc-a.js / cyc-b.js                    mutually-importing pair
+p1-depth1.js        print('ROOT-EVALUATED'); import { nonExistent } from './f-self.js';
+p1b-side-effect-import.js  print('ROOT-EVALUATED'); import './f-self.js';
+p2-depth2.js / p3-depth3.js      via mid1/mid2;   p4-multi.js two failing children
+p5-root-and-child.js  root + child link errors;   p15-sibling.js evaluating + failing sibling
+p6-json-invalid.js / p7-json-valid.js / p8-json-bom.js / p8b-json-bom-invalid.js
+p9-json-noattrs.js / p9b-json-wrong-type.js       S12 attribute paths
+p10-mixed.js         link-error child + invalid-JSON child
+p11-eval-fail.js     print + throw TypeError (stays runtime)
+p12-root-link-error.js  root's own unresolvable import
+p13-cycle.js         circular graph positive
+p14-dynamic.js / p16-dynamic-json-invalid.js / p16b-dynamic-json-valid.js
+```
+
+Run: `zig-out/bin/ch -NegativePhaseReport -Module <file>` (stdout = side
+effects, stderr line 1 = phase marker).
+
+## Files
+
+- `lib/Runtime/Language/SourceTextModuleRecord.cpp`: child-link-error
+  propagation in `ModuleDeclarationInstantiation`'s children recursion
+  (one guarded assignment + comment).
+- `bin/ch/WScriptJsrt.cpp`: `BuildJsonParseSource` (parameterized
+  refactor of `WrapJsonModuleSource`), `ValidateJsonModuleSource`
+  (load-stage `JSON.parse` validation, records the engine's SyntaxError),
+  wiring in `ModuleMessage::Call`'s `isJsonModule` arm with the
+  recorded-error/empty-parse failure path.
+- `doc/c2-s12-module-phase.md`: this receipt.
