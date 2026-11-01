@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -130,8 +131,50 @@ def harness(binary, corpus, patterns, output, args, controls=False):
         shutil.rmtree(temporary, ignore_errors=True)
 
 
+MARKER_PATTERN = re.compile(r'^CH_NEGATIVE_PHASE: (parse|resolution|runtime)$', re.MULTILINE)
+
+
+def marker_evidence(record):
+    """Host-reported negative phase from the CH_NEGATIVE_PHASE marker.
+
+    ``ch -NegativePhaseReport`` emits exactly one marker line on stderr, at
+    the first unhandled-error report, classified from where the failure
+    originated (parse/compile stage of the root entry point, a module-graph
+    failure witnessed while loading/linking, or evaluation) — never from
+    error-message text. See doc/c1-negative-phase.md for the classification
+    mapping and its honest limits.
+
+    Spoofing defense (marker text is attacker-controlled once it travels in
+    a thrown error's string): the REAL marker is the **first** marker-shaped
+    stderr line and it must be **line 1** of stderr. Soundness rests on the
+    emission-site audit: every ReportNegativePhaseMarker call site
+    immediately precedes its PrintException, and no test-reachable API
+    writes stderr before the first error report (print/console go to
+    stdout; agent processes are separate and silent here) — so a forged
+    marker-shaped line can only appear AFTER the real one, inside the error
+    message text. Returns ``(phase, state)`` with state ``'line1'`` (trust
+    the marker), ``'displaced'`` (a marker-shaped line exists but not at
+    line 1 — never trusted; the caller falls back to the shape heuristic
+    loudly), or ``'absent'`` (no marker: pre-flag host, or a crash/timeout
+    that never reached an error report).
+    """
+    stderr = (record.get('rawResult') or {}).get('stderr') or ''
+    first = MARKER_PATTERN.search(stderr)
+    if first is None:
+        return None, 'absent'
+    if first.start() == 0:
+        return first.group(1), 'line1'
+    return None, 'displaced'
+
+
+def marker_phase(record):
+    """Phase of the trusted (line-1) host marker, or None."""
+    return marker_evidence(record)[0]
+
+
 def phase_evidence(record):
-    """Observable phase shape of a control's recorded error (C1).
+    """Observable phase shape of a recorded error (C1 heuristic; now the
+    marker-less fallback for :func:`negative_phase_judgement`).
 
     The upstream validator checks the negative error *name* only. For the
     qualification controls we additionally require the observable shape to be
@@ -153,7 +196,13 @@ def phase_evidence(record):
     """
     raw = record.get('rawResult') or {}
     stack = (raw.get('error') or {}).get('stack') or []
-    if (raw.get('stderr') or '').startswith('thrown at ') and not stack:
+    # Strip the marker line(s) before shape checks: with the flag on the
+    # marker precedes the error report, which would otherwise break the
+    # loader-prefix detection (marker-judged records never consult the
+    # shape, but the recorded evidence should reflect the true shape).
+    stderr = re.sub(r'^CH_NEGATIVE_PHASE: (?:parse|resolution|runtime)\r?\n?', '',
+                    raw.get('stderr') or '', count=1)
+    if stderr.startswith('thrown at ') and not stack:
         return 'loader-prefix'
     if not stack:
         return 'empty-stack'
@@ -165,23 +214,44 @@ def phase_evidence(record):
     return 'other-frame'
 
 
-def control_passed(record):
-    """Harness outcome downgraded by negative-phase evidence (controls only)."""
-    if not record['result']['pass']:
-        return False
+def negative_phase_judgement(record):
+    """Re-judge a negative scenario by the host-reported phase.
+
+    Primary evidence is the host marker (:func:`marker_phase`): a harness
+    pass stands only if the marker's phase equals the declared
+    ``negative.phase`` and, for parse/resolution, no test code executed
+    (which the host's classification already guarantees by construction;
+    the stdout check stays as a second signal). When the marker is absent —
+    a pre-flag host, or a crash/timeout that never reached an error report —
+    fall back to the C1 output-shape heuristic (:func:`phase_evidence`).
+    Returns ``(ok, evidence)``; ``evidence['judged_by']`` records which
+    path judged the scenario ('marker', 'shape', or 'not-negative').
+    """
     negative = (record.get('attrs') or {}).get('negative') or {}
     phase = negative.get('phase')
-    if not phase:
-        return True
-    shape = phase_evidence(record)
     executed = bool((record.get('rawResult') or {}).get('stdout'))
+    if not phase:
+        return True, {'declared': None, 'marker': None, 'marker_state': None,
+                      'shape': None, 'executed': executed, 'judged_by': 'not-negative'}
+    shape = phase_evidence(record)
+    marker, marker_state = marker_evidence(record)
+    if marker_state == 'line1':
+        ok = marker == phase and not (marker in ('parse', 'resolution') and executed)
+        return ok, {'declared': phase, 'marker': marker, 'marker_state': marker_state,
+                    'shape': shape, 'executed': executed, 'judged_by': 'marker'}
     if phase == 'parse':
-        return not executed and shape in ('parse-frame', 'loader-prefix')
-    if phase == 'resolution':
-        return not executed and shape == 'loader-prefix'
-    if phase == 'runtime':
-        return shape != 'parse-frame'
-    return True
+        ok = not executed and shape in ('parse-frame', 'loader-prefix')
+    elif phase == 'resolution':
+        ok = not executed and shape == 'loader-prefix'
+    else:
+        ok = shape != 'parse-frame'
+    # Loud fallback: distinguish a marker-less record (pre-flag host,
+    # crash/timeout) from one carrying a displaced — untrusted —
+    # marker-shaped line.
+    return ok, {'declared': phase, 'marker': None, 'marker_state': marker_state,
+                'shape': shape, 'executed': executed,
+                'judged_by': 'shape' if marker_state == 'absent'
+                else 'shape:marker-displaced'}
 
 
 def main():
@@ -194,7 +264,7 @@ def main():
     parser.add_argument('--node', default='node')
     parser.add_argument('--jobs', type=int, default=8)
     parser.add_argument('--timeout', type=int, default=10000, help='per-scenario timeout, milliseconds')
-    parser.add_argument('--host-flags', default='-nonative -Test262 -CollectGarbage')
+    parser.add_argument('--host-flags', default='-nonative -Test262 -CollectGarbage -NegativePhaseReport')
     parser.add_argument('patterns', nargs='*', help='quoted test262-relative globs')
     args = parser.parse_args()
     args.binary, args.checkout, args.output = (path.resolve() for path in (args.binary, args.checkout, args.output))
@@ -216,9 +286,23 @@ def main():
     for record in controls:
         name = Path(record['file']).name
         observed[name] += 1
-        if control_passed(record) != expected.get(name):
+        ok, evidence = negative_phase_judgement(record)
+        # Emit-once verification: a failing run carries exactly one host
+        # marker line, at line 1 of stderr. The spoof control deliberately
+        # adds a forged marker-shaped line inside its error text, so there
+        # the count is exactly two and the first (trusted) marker must be
+        # the real phase — never the forged one.
+        marker_lines = MARKER_PATTERN.findall((record.get('rawResult') or {}).get('stderr') or '')
+        if name == 'fail-marker-spoof.js':
+            if marker_lines != ['runtime', 'parse']:
+                raise ValueError(f'control {name}: expected the real runtime marker followed '
+                                 f'by exactly the forged parse line, found {marker_lines}')
+        elif len(marker_lines) > 1:
+            raise ValueError(f'control {name}: expected at most one host marker line '
+                             f'(emit-once), found {len(marker_lines)}: {marker_lines}')
+        if (record['result']['pass'] and ok) != expected.get(name):
             raise ValueError(f'control {name} produced the wrong outcome: {record["result"]} '
-                             f'(phase evidence: {phase_evidence(record)})')
+                             f'(phase evidence: {evidence})')
     if set(observed) != set(expected) or any(count != 1 for count in observed.values()):
         raise ValueError('control coverage is incomplete')
     print(f'Controls passed: {len(controls)} scenarios (including deliberate failures)', flush=True)
@@ -232,6 +316,34 @@ def main():
     checkout(args.checkout, prepare=False)
     if artifact_identity(args.binary) != identity:
         raise ValueError('binary/library/harness inputs changed during the baseline run')
+    # Re-judge every negative scenario against the host-reported phase: a
+    # harness pass is downgraded when the marker (or, in its absence, the
+    # legacy shape heuristic) contradicts the declared negative.phase. Each
+    # negative record carries its evidence in results.json (schema addition
+    # 'phase_evidence': declared/marker/shape/executed/judged_by).
+    downgraded = Counter()
+    judged_by = Counter()
+    for record in records:
+        negative = (record.get('attrs') or {}).get('negative') or {}
+        if not negative.get('phase'):
+            continue
+        ok, evidence = negative_phase_judgement(record)
+        record['phase_evidence'] = evidence
+        judged_by[evidence['judged_by'] if record['result']['pass']
+                  else f'{evidence["judged_by"]}+harness-failed'] += 1
+        if record['result']['pass'] and not ok:
+            record['result'] = {
+                'pass': False,
+                'message': (f'Negative phase mismatch: declared {evidence["declared"]}, '
+                            f'host reported {evidence["marker"] or evidence["shape"]} '
+                            f'(judged by {evidence["judged_by"]})'),
+            }
+            downgraded[evidence['judged_by']] += 1
+    if judged_by:
+        # Rewrite results.json so the recorded records carry the re-judged
+        # outcomes and phase evidence (the harness wrote its raw stream
+        # before judging).
+        (args.output / 'results.json').write_text(json.dumps(records) + '\n')
     totals = Counter('passed' if record['result']['pass'] else 'failed' for record in records)
     features = {}
     for record in records:
@@ -255,9 +367,19 @@ def main():
         'passed': totals['passed'], 'failed': totals['failed'], 'features': features,
         'controls': len(controls),
         'input_identity': identity,
-        'limitations': ['upstream validator checks negative error type, not every negative phase; '
-                        'controls add phase-evidence checks and analyze.py audits recorded phases '
-                        '(see doc/c1-triage.md for the residual heuristic limits)',
+        'negative_phase': {
+            'mechanism': ('host marker CH_NEGATIVE_PHASE (ch -NegativePhaseReport), one stderr '
+                          'line per failing run classified from where the failure originated; '
+                          'the C1 output-shape heuristic is the fallback only when the marker '
+                          'is absent (crash/timeout/pre-flag host)'),
+            'downgraded_pass_to_fail': dict(downgraded),
+            'judged': dict(judged_by),
+        },
+        'limitations': ['negative scenarios are re-judged against the host-reported phase '
+                        'marker (schema addition: per-record phase_evidence; see '
+                        'doc/c1-negative-phase.md for the classification mapping and the '
+                        'module-graph limits that remain); the shape heuristic only judges '
+                        'marker-less records',
                         'corpus includes post-ES2025 proposals; use edition-policy.json + analyze.py '
                         'for the edition-selected score'],
     }

@@ -80,6 +80,51 @@ std::map<JsModuleRecord, ModuleState>  WScriptJsrt::moduleErrMap;
 std::map<DWORD_PTR, std::string> WScriptJsrt::scriptDirMap;
 DWORD_PTR WScriptJsrt::sourceContext = 0;
 
+// Negative-phase classification state (host flag -NegativePhaseReport).
+// Ownership record: two process-global bools on the native C++ side, written
+// and read only on the host thread at existing error-report sites. No JsRT
+// handle is retained, no allocation happens, and no GC-visible state is
+// introduced, so this adds no rooting/ownership obligations. `ch` runs one
+// script per process; the witness is set while loading/linking the module
+// graph and consumed (once) at the first unhandled-error report.
+static bool s_moduleGraphFailureWitness = false;
+static bool s_negativePhaseMarkerEmitted = false;
+
+void WScriptJsrt::NoteModuleGraphFailure()
+{
+    if (HostConfigFlags::flags.NegativePhaseReportIsEnabled)
+    {
+        s_moduleGraphFailureWitness = true;
+    }
+}
+
+// Emits the single CH_NEGATIVE_PHASE marker line for this run, classified
+// from where the failure originated (never from error message text):
+//   parse      the root entry point failed in the parse/compile stage
+//              (JsRun/JsParseModuleSource => JsErrorScriptCompile: the
+//              engine rejected the source before any code executed);
+//   resolution a module-graph failure witnessed while loading/linking (the
+//              engine completed resolution unsuccessfully —
+//              NotifyModuleReady with an exception — a host fetch callback
+//              failure, or a dependency module that failed to parse),
+//              before any module-body evaluation;
+//   runtime    anything else: the error surfaced during evaluation (script
+//              or module body, nested eval/LoadScript parse failures,
+//              message-queue callbacks).
+// Emit-once: the first unhandled-error report classifies the run.
+void WScriptJsrt::ReportNegativePhaseMarker(bool parseStageFailure)
+{
+    if (!HostConfigFlags::flags.NegativePhaseReportIsEnabled || s_negativePhaseMarkerEmitted)
+    {
+        return;
+    }
+    s_negativePhaseMarkerEmitted = true;
+    const char* phase = parseStageFailure ? "parse"
+        : (s_moduleGraphFailureWitness ? "resolution" : "runtime");
+    fprintf(stderr, "CH_NEGATIVE_PHASE: %s\n", phase);
+}
+
+
 // Message queue for the current thread: the per-child agent queue when
 // running inside a crossthread agent thread (S6e), otherwise the main host
 // queue. Prevents WScript.SetTimeout/ClearTimeout and samethread script
@@ -735,6 +780,15 @@ JsErrorCode WScriptJsrt::LoadModuleFromString(LPCSTR fileName, LPCSTR fileConten
         ChakraRTInterface::JsSetException(errorObject);
         moduleErrMap[requestModule] = ErroredModule;
         return errorCode;
+    }
+    if (errorCode != JsNoError && moduleErrMap[requestModule] != RootModule)
+    {
+        // A dependency module failed to parse while the module graph was
+        // loading (the error stays on its record for the engine link
+        // phase). Witness the module-graph (resolution) stage for the
+        // negative-phase marker; the root module's own parse errors take
+        // the loud path above and stay parse-stage.
+        NoteModuleGraphFailure();
     }
     return JsNoError;
 }
@@ -2199,6 +2253,7 @@ WScriptJsrt::CallbackMessage::~CallbackMessage()
     ChakraRTInterface::JsHasException(&hasException);
     if (hasException)
     {
+        ReportNegativePhaseMarker(false);
         WScriptJsrt::PrintException("", JsErrorScriptException);
     }
     JsErrorCode errorCode = ChakraRTInterface::JsRelease(m_function, nullptr);
@@ -2243,6 +2298,7 @@ HRESULT WScriptJsrt::CallbackMessage::CallFunction(LPCSTR fileName)
     if (errorCode != JsNoError)
     {
         hr = E_FAIL;
+        ReportNegativePhaseMarker(false);
         PrintException(fileName, errorCode);
     }
 
@@ -2311,6 +2367,7 @@ HRESULT WScriptJsrt::ModuleMessage::Call(LPCSTR fileName)
             errorCode = ChakraRTInterface::JsModuleEvaluation(moduleRecord, &result);
             if (errorCode != JsNoError)
             {
+                ReportNegativePhaseMarker(false);
                 PrintException(fileName, errorCode); // this should not be called
             }
         }
@@ -2326,6 +2383,9 @@ HRESULT WScriptJsrt::ModuleMessage::Call(LPCSTR fileName)
 
             if (FAILED(hr))
             {
+                // The host failed to load a dependency of the module graph
+                // while it was loading: witness the resolution stage.
+                NoteModuleGraphFailure();
                 if (!HostConfigFlags::flags.MuteHostErrorMsgIsEnabled)
                 {
                     auto actualModuleRecord = moduleRecordMap.find(*mapKey);
@@ -2360,6 +2420,7 @@ HRESULT WScriptJsrt::ModuleMessage::Call(LPCSTR fileName)
                 fileContent = nullptr;
                 if (jsonModuleSource == nullptr)
                 {
+                    NoteModuleGraphFailure();
                     hr = E_OUTOFMEMORY;
                     if (directParse)
                     {
@@ -2395,6 +2456,7 @@ JsErrorCode WScriptJsrt::ReportModuleCompletionCallback(JsModuleRecord module, J
     {
         JsValueRef specifier = JS_INVALID_REFERENCE;
         ChakraRTInterface::JsGetModuleHostInfo(module, JsModuleHostInfo_Url, &specifier);
+        ReportNegativePhaseMarker(false);
         PrintException(AutoString(specifier).GetString(), JsErrorCode::JsErrorScriptException, exception);
     }
     return JsNoError;
@@ -2544,6 +2606,7 @@ JsErrorCode WScriptJsrt::FetchImportedModuleHelperWithAttributes(JsModuleRecord 
 
     if (specifierStr.Initialize(specifier) != JsNoError)
     {
+        NoteModuleGraphFailure();
         return specifierStr.GetError();
     }
 
@@ -2553,6 +2616,7 @@ JsErrorCode WScriptJsrt::FetchImportedModuleHelperWithAttributes(JsModuleRecord 
     JsErrorCode attributesError = ReadModuleAttributes(attributes, &hasAttributes, &canonicalAttributes, &attributeType);
     if (attributesError != JsNoError)
     {
+        NoteModuleGraphFailure();
         return attributesError;
     }
 
@@ -2561,6 +2625,7 @@ JsErrorCode WScriptJsrt::FetchImportedModuleHelperWithAttributes(JsModuleRecord 
     specifierFullPath += *specifierStr;
     if (_fullpath(fullPath, specifierFullPath.c_str(), _MAX_PATH) == nullptr)
     {
+        NoteModuleGraphFailure();
         return JsErrorInvalidArgument;
     }
 
@@ -2587,6 +2652,7 @@ JsErrorCode WScriptJsrt::FetchImportedModuleHelperWithAttributes(JsModuleRecord 
         // Unsupported "type" values fail the load. The engine surfaces this
         // as an import failure (a link error for static imports, a promise
         // rejection for dynamic imports).
+        NoteModuleGraphFailure();
         return JsErrorInvalidArgument;
     }
 
@@ -2605,10 +2671,17 @@ JsErrorCode WScriptJsrt::FetchImportedModuleHelperWithAttributes(JsModuleRecord 
         ModuleMessage* moduleMessage = WScriptJsrt::ModuleMessage::CreateWithAttributes(moduleRecord, specifier, &filePathKey, &pathKey, isJsonModule);
         if (moduleMessage == nullptr)
         {
+            NoteModuleGraphFailure();
             return JsErrorOutOfMemory;
         }
         WScriptJsrt::PushMessage(moduleMessage);
         *dependentModuleRecord = moduleRecord;
+    }
+    else
+    {
+        // The fetch callback failed, so the module graph cannot finish
+        // loading: a resolution-stage failure.
+        NoteModuleGraphFailure();
     }
     return errorCode;
 }
@@ -2622,6 +2695,7 @@ JsErrorCode WScriptJsrt::FetchImportedModuleHelper(JsModuleRecord referencingMod
 
     if (specifierStr.Initialize(specifier) != JsNoError)
     {
+        NoteModuleGraphFailure();
         return specifierStr.GetError();
     }
 
@@ -2630,6 +2704,7 @@ JsErrorCode WScriptJsrt::FetchImportedModuleHelper(JsModuleRecord referencingMod
     specifierFullPath += *specifierStr;
     if (_fullpath(fullPath, specifierFullPath.c_str(), _MAX_PATH) == nullptr)
     {
+        NoteModuleGraphFailure();
         return JsErrorInvalidArgument;
     }
 
@@ -2650,10 +2725,17 @@ JsErrorCode WScriptJsrt::FetchImportedModuleHelper(JsModuleRecord referencingMod
         ModuleMessage* moduleMessage = WScriptJsrt::ModuleMessage::Create(referencingModule, specifier, &pathKey);
         if (moduleMessage == nullptr)
         {
+            NoteModuleGraphFailure();
             return JsErrorOutOfMemory;
         }
         WScriptJsrt::PushMessage(moduleMessage);
         *dependentModuleRecord = moduleRecord;
+    }
+    else
+    {
+        // The fetch callback failed, so the module graph cannot finish
+        // loading: a resolution-stage failure.
+        NoteModuleGraphFailure();
     }
     return errorCode;
 }
@@ -2710,18 +2792,27 @@ JsErrorCode WScriptJsrt::FetchImportedModuleFromScriptWithAttributes(_In_ JsSour
 // Callback from chakraCore when the module resolution is finished, either successfully or unsuccessfully.
 JsErrorCode WScriptJsrt::NotifyModuleReadyCallback(_In_opt_ JsModuleRecord referencingModule, _In_opt_ JsValueRef exceptionVar)
 {
-    if (exceptionVar != nullptr && HostConfigFlags::flags.TraceHostCallbackIsEnabled)
+    if (exceptionVar != nullptr)
     {
-        JsValueRef specifier = JS_INVALID_REFERENCE;
-        ChakraRTInterface::JsGetModuleHostInfo(referencingModule, JsModuleHostInfo_Url, &specifier);
-        AutoString fileName;
-        if (specifier != JS_INVALID_REFERENCE)
+        // The engine finished resolving this module graph unsuccessfully
+        // (link/instantiation error before any module-body evaluation —
+        // e.g. an unresolvable import/export). Witness the resolution
+        // stage for the negative-phase marker.
+        NoteModuleGraphFailure();
+
+        if (HostConfigFlags::flags.TraceHostCallbackIsEnabled)
         {
-            fileName.Initialize(specifier);
+            JsValueRef specifier = JS_INVALID_REFERENCE;
+            ChakraRTInterface::JsGetModuleHostInfo(referencingModule, JsModuleHostInfo_Url, &specifier);
+            AutoString fileName;
+            if (specifier != JS_INVALID_REFERENCE)
+            {
+                fileName.Initialize(specifier);
+            }
+            wprintf(_u("NotifyModuleReadyCallback(exception) %S\n"), fileName.GetString());
         }
-        wprintf(_u("NotifyModuleReadyCallback(exception) %S\n"), fileName.GetString());
     }
-    
+
     if (moduleErrMap[referencingModule] != ErroredModule)
     {
         WScriptJsrt::ModuleMessage* moduleMessage =

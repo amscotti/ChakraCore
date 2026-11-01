@@ -24,24 +24,38 @@ Failure buckets are assigned by the first matching rule (failures only):
   5. engine-defect-on-existing  everything else (assertions, wrong error
                             types, wrong values, failing negatives)
 
-Negative-phase audit (heuristic, passed negatives only). The upstream
-validator checks the error *name*, not the phase. From rawResult we can only
-observe: stdout (a parse/resolution error must not execute test code, so any
-stdout is suspect), the stderr "thrown at <file>:" loader prefix, and the top
-stack frame shape (this host reports parse errors as tab-prefixed
-"\\tat code (f-...js:L:C)" — a runtime throw from a function literally named
-``code`` frames as space-prefixed "   at code (...)" and does not match —
-while runtime errors frame as "at Global code / Module code / eval code /
-<function>"). Resolution evidence is the loader prefix *together with* an
-empty JS stack; a loader prefix accompanied by a JS stack is classified by
-its top frame instead, and an empty stack without the loader prefix counts
-as no evidence. A passed negative is flagged suspect when its observable
-shape contradicts the declared phase; for a declared runtime phase any
-non-parse frame is accepted (runtime-frame, other-frame, loader-prefix and
-empty-stack alike), matching run.py's control rule — only a parse-style
-frame contradicts it. This cannot catch, e.g., a runtime
-instantiation SyntaxError reported with a parse-style frame; see
-doc/c1-triage.md.
+Negative-phase audit (marker-first, passed negatives only). The upstream
+validator checks the error *name*, not the phase. New runs recorded by
+run.py carry a host-reported phase per negative scenario: ``ch
+-NegativePhaseReport`` emits one ``CH_NEGATIVE_PHASE:
+parse|resolution|runtime`` stderr line at the first unhandled-error report,
+classified from where the failure originated (never from message text);
+run.py re-judges every negative against it and stores the evidence in each
+record's ``phase_evidence`` (``declared``/``marker``/``shape``/``executed``
+/``judged_by``). For those records this audit only counts (marker-judged
+passes are clean by construction; run.py already downgraded the
+mismatches, which are visible as result.message "Negative phase
+mismatch"). Records without a marker — legacy baselines, or crashes and
+timeouts that never reached an error report — fall back to the C1
+output-shape heuristic. From rawResult that heuristic can only observe:
+stdout (a parse/resolution error must not execute test code, so any
+stdout is suspect), the stderr "thrown at <file>:" loader prefix, and the
+top stack frame shape (this host reports parse errors as tab-prefixed
+"\\tat code (f-...js:L:C)" — a runtime throw from a function literally
+named ``code`` frames as space-prefixed "   at code (...)" and does not
+match — while runtime errors frame as "at Global code / Module code /
+eval code / <function>"). Resolution evidence is the loader prefix
+*together with* an empty JS stack; a loader prefix accompanied by a JS
+stack is classified by its top frame instead, and an empty stack without
+the loader prefix counts as no evidence. A passed negative is flagged
+suspect when its observable shape contradicts the declared phase; for a
+declared runtime phase any non-parse frame is accepted (runtime-frame,
+other-frame, loader-prefix and empty-stack alike), matching run.py's
+control rule — only a parse-style frame contradicts it. The shape
+heuristic cannot catch, e.g., a runtime instantiation SyntaxError reported
+with a parse-style frame, nor distinguish a module-graph loading failure
+from a runtime throw through the stackless loader channel; see
+doc/c1-triage.md and doc/c1-negative-phase.md.
 
 Input validation is loud, never silent: empty/non-list results, a non-list
 ``features`` value, a non-boolean ``result.pass``, or a duplicate
@@ -53,9 +67,12 @@ from collections import Counter, defaultdict
 import hashlib
 import json
 from pathlib import Path
+import re
 import sys
 
 HERE = Path(__file__).resolve().parent
+
+MARKER_PATTERN = re.compile(r'^CH_NEGATIVE_PHASE: (parse|resolution|runtime)$', re.MULTILINE)
 
 
 def load_policy(path):
@@ -129,7 +146,12 @@ def frame_shape(record):
     """Classify the top stack frame / loader prefix of a recorded error."""
     raw = record.get('rawResult') or {}
     stack = error_of(record).get('stack') or []
-    if (raw.get('stderr') or '').startswith('thrown at ') and not stack:
+    # Marker runs: strip the marker line so the loader-prefix check sees the
+    # error report that follows it (only reached for marker-less records,
+    # kept robust for hybrid data).
+    stderr = re.sub(r'^CH_NEGATIVE_PHASE: (?:parse|resolution|runtime)\r?\n?', '',
+                    raw.get('stderr') or '', count=1)
+    if stderr.startswith('thrown at ') and not stack:
         return 'loader-prefix'
     if not stack:
         return 'empty-stack'
@@ -141,8 +163,43 @@ def frame_shape(record):
     return 'other-frame'
 
 
+def marker_evidence(record):
+    """(phase, state) of the CH_NEGATIVE_PHASE marker evidence.
+
+    First-wins with a line-1 tripwire, matching run.py's judging: the real
+    host marker is the first marker-shaped stderr line and must be line 1
+    (every host emission site immediately precedes its error report, and
+    nothing test-reachable writes stderr before the first error report, so
+    a forged marker-shaped line — e.g. inside a thrown error's toString —
+    can only follow the real one). State 'displaced' lines exist but are
+    never trusted; 'absent' means no marker line at all. Reads run.py's
+    recorded phase_evidence when present (its marker/marker_state fields),
+    otherwise computes from raw stderr.
+    """
+    evidence = record.get('phase_evidence')
+    if isinstance(evidence, dict) and 'marker_state' in evidence:
+        return evidence.get('marker'), evidence.get('marker_state')
+    stderr = (record.get('rawResult') or {}).get('stderr') or ''
+    first = MARKER_PATTERN.search(stderr)
+    if first is None:
+        return None, 'absent'
+    if first.start() == 0:
+        return first.group(1), 'line1'
+    return None, 'displaced'
+
+
+def marker_phase(record):
+    """Phase of the trusted (line-1) host marker, or None."""
+    return marker_evidence(record)[0]
+
+
 def phase_suspect_reasons(record):
     """Observable contradictions between a passed negative and its phase."""
+    if marker_phase(record):
+        # Marker-judged record: the host-reported phase already re-judged
+        # this scenario in run.py; its (possibly misleading) output shape is
+        # not evidence. Shape checks apply to marker-less records only.
+        return []
     phase = ((record.get('attrs') or {}).get('negative') or {}).get('phase')
     shape = frame_shape(record)
     stdout = (record.get('rawResult') or {}).get('stdout') or ''
@@ -246,9 +303,15 @@ def analyze(records, category, flag_tags, summary=None):
             edition_messages[message] += 1
 
     audit = {}
+    marker_judged_total = 0
+    marker_downgrades = []
     for phase in ('parse', 'resolution', 'runtime'):
-        passed_neg = [r for r in records if r['result']['pass']
-                      and ((r.get('attrs') or {}).get('negative') or {}).get('phase') == phase]
+        negatives = [r for r in records
+                     if ((r.get('attrs') or {}).get('negative') or {}).get('phase') == phase]
+        passed_neg = [r for r in negatives if r['result']['pass']]
+        marker_judged = [r for r in negatives if marker_phase(r)]
+        marker_displaced = sum(1 for r in negatives
+                               if marker_evidence(r)[1] == 'displaced')
         suspects, reasons = [], Counter()
         for record in passed_neg:
             found = phase_suspect_reasons(record)
@@ -256,14 +319,25 @@ def analyze(records, category, flag_tags, summary=None):
                 reasons.update(found)
                 suspects.append({'file': record['file'], 'scenario': record.get('scenario'),
                                  'reasons': found})
+        for record in negatives:
+            if not record['result']['pass'] and \
+                    ((record.get('result') or {}).get('message') or '').startswith('Negative phase mismatch'):
+                marker_downgrades.append({'file': record['file'], 'scenario': record.get('scenario'),
+                                          'phase': phase, 'message': record['result']['message']})
         audit[phase] = {
             'passed_negatives': len(passed_neg),
             'suspects': len(suspects),
             'suspect_reasons': dict(reasons.most_common()),
             'suspect_records': suspects,
+            'marker': {'judged': len(marker_judged),
+                       'judged_passed': sum(1 for r in marker_judged if r['result']['pass']),
+                       'displaced_untrusted': marker_displaced},
         }
+        marker_judged_total += len(marker_judged)
     audit['passed_negatives_total'] = sum(audit[p]['passed_negatives']
                                           for p in ('parse', 'resolution', 'runtime'))
+    audit['marker_judged_total'] = marker_judged_total
+    audit['marker_downgraded_by_run_py'] = marker_downgrades
 
     excluded_passed = sum(1 for r in excluded if r['result']['pass'])
     class_union = sum(1 for r in edition if not r['result']['pass']
@@ -323,9 +397,13 @@ def render_text(report):
     lines.append('negative_phase_audit (passed negatives / suspects):')
     for phase in ('parse', 'resolution', 'runtime'):
         entry = report['negative_phase_audit'][phase]
+        marker = entry['marker']
         lines.append(f"  {phase}: {entry['passed_negatives']} passed, {entry['suspects']} suspects "
-                     f"{entry['suspect_reasons']}")
+                     f"{entry['suspect_reasons']} (marker-judged {marker['judged_passed']}/"
+                     f"{marker['judged']})")
     lines.append(f"  passed_negatives_total: {report['negative_phase_audit']['passed_negatives_total']}")
+    lines.append(f"  marker_judged_total: {report['negative_phase_audit']['marker_judged_total']}")
+    lines.append(f"  marker_downgraded_by_run_py: {len(report['negative_phase_audit']['marker_downgraded_by_run_py'])}")
     lines.append('edition_top_failure_messages:')
     for message, count in report['edition_top_failure_messages'].items():
         lines.append(f'  {count}  {message}')
@@ -337,7 +415,7 @@ def render_text(report):
 
 
 def rec(file, passed, features=None, negative=None, error=None, message=None,
-        stdout='', stderr='', stack=None, code=0):
+        stdout='', stderr='', stack=None, code=0, phase_evidence=None):
     attrs = {'features': features} if features else {}
     if negative:
         attrs['negative'] = negative
@@ -347,9 +425,12 @@ def rec(file, passed, features=None, negative=None, error=None, message=None,
     err = None
     if error:
         err = {'name': error[0], 'message': error[1], 'stack': stack or []}
-    return {'file': file, 'scenario': 'default', 'attrs': attrs, 'result': result,
-            'rawResult': {'stdout': stdout, 'stderr': stderr, 'error': err,
-                          'exitStatus': {'code': code, 'signal': None}}}
+    record = {'file': file, 'scenario': 'default', 'attrs': attrs, 'result': result,
+              'rawResult': {'stdout': stdout, 'stderr': stderr, 'error': err,
+                            'exitStatus': {'code': code, 'signal': None}}}
+    if phase_evidence is not None:
+        record['phase_evidence'] = phase_evidence
+    return record
 
 
 def self_test():
@@ -442,6 +523,53 @@ def self_test():
     assert g['negative_phase_audit']['passed_negatives_total'] == 12
     parse_audit = g['negative_phase_audit']['parse']
     assert parse_audit['suspects'] == 12 and len(parse_audit['suspect_records']) == 12, parse_audit
+    assert g['negative_phase_audit']['marker_judged_total'] == 0  # legacy records: no markers
+    assert g['negative_phase_audit']['marker_downgraded_by_run_py'] == []
+
+    # Marker-judged records (schema addition from run.py): the host marker
+    # re-judged them, so misleading shapes are not suspects, and run.py's
+    # downgrades are listed from their result messages.
+    marker_records = [
+        # passed parse negative, marker parse, deliberately misleading
+        # runtime-style shape: not a suspect (marker is authoritative)
+        rec('m1.js', True, negative={'phase': 'parse', 'type': 'SyntaxError'},
+            error=('SyntaxError', 'compile channel'), stack=global_stack,
+            stderr='CH_NEGATIVE_PHASE: parse\n',
+            phase_evidence={'declared': 'parse', 'marker': 'parse', 'marker_state': 'line1',
+                            'shape': 'runtime-frame', 'executed': False, 'judged_by': 'marker'}),
+        # downgraded by run.py: marker runtime contradicted declared parse
+        rec('m2.js', False, negative={'phase': 'parse', 'type': 'SyntaxError'},
+            error=('SyntaxError', 'let/const redeclaration'), stack=parse_stack,
+            message='Negative phase mismatch: declared parse, host reported runtime (judged by marker)',
+            stderr='CH_NEGATIVE_PHASE: runtime\n',
+            phase_evidence={'declared': 'parse', 'marker': 'runtime', 'marker_state': 'line1',
+                            'shape': 'parse-frame', 'executed': False, 'judged_by': 'marker'}),
+        # marker read from raw stderr even without phase_evidence (line 1)
+        rec('m3.js', True, negative={'phase': 'resolution', 'type': 'SyntaxError'},
+            error=('SyntaxError', 'Module import x cannot be resolved'),
+            stderr='CH_NEGATIVE_PHASE: resolution\nthrown at f.js:\n^\nModule import x cannot be resolved\n'),
+        # spoof: a forged marker-shaped line after the real line-1 marker is
+        # ignored (first-wins) — the real parse marker judges this record
+        rec('m4.js', True, negative={'phase': 'parse', 'type': 'SyntaxError'},
+            error=('SyntaxError', 'masquerade with forged marker'),
+            stderr='CH_NEGATIVE_PHASE: parse\nSyntaxError: masquerade\nCH_NEGATIVE_PHASE: runtime\n'),
+        # displaced: a marker-shaped line NOT at line 1 is never trusted;
+        # the record falls back to the shape audit (here: no evidence)
+        rec('m5.js', True, negative={'phase': 'parse', 'type': 'SyntaxError'},
+            error=('SyntaxError', 'silent'), stderr='host loader note\nCH_NEGATIVE_PHASE: parse\n'),
+    ]
+    m = analyze(marker_records, category, flag_tags)['negative_phase_audit']
+    assert m['parse']['passed_negatives'] == 3 and m['parse']['suspects'] == 1, m['parse']
+    assert m['parse']['suspect_reasons'] == {'no-parse-frame:empty-stack': 1}, m['parse']
+    assert m['parse']['marker'] == {'judged': 3, 'judged_passed': 2,
+                                    'displaced_untrusted': 1}, m['parse']['marker']
+    assert m['resolution']['marker'] == {'judged': 1, 'judged_passed': 1,
+                                         'displaced_untrusted': 0}, m['resolution']['marker']
+    assert m['resolution']['suspects'] == 0, m['resolution']
+    assert m['marker_judged_total'] == 4
+    downgraded = m['marker_downgraded_by_run_py']
+    assert len(downgraded) == 1 and downgraded[0]['file'] == 'm2.js' \
+        and downgraded[0]['phase'] == 'parse', downgraded
 
     def must_raise(bad, why):
         try:

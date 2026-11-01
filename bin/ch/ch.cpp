@@ -470,6 +470,13 @@ HRESULT RunScript(const char* fileName, LPCSTR fileContents, size_t fileLength, 
 
         if(runScript != JsNoError)
         {
+            // Negative-phase marker (flag -NegativePhaseReport): classify
+            // from the entry point's own stage — JsErrorScriptCompile means
+            // the engine rejected the root source (script or root module)
+            // in the parse/compile stage, before any code executed; any
+            // other failure surfaced during evaluation or while the module
+            // graph was loading/linking (see WScriptJsrt's witnesses).
+            WScriptJsrt::ReportNegativePhaseMarker(runScript == JsErrorCode::JsErrorScriptCompile);
             WScriptJsrt::PrintException(fileName, runScript);
         }
         else
