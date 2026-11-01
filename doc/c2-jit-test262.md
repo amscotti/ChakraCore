@@ -183,12 +183,18 @@ enumeration is complete for this class; the suggested sweep is done),
 verified zero-diff batches byte-identical under `--jobs 1`, and
 confirmed the flake class shows zero mode correlation under load. Its
 severity upgrade (default-flags reachability) and the interp-boundary
-correction are folded above. One `[bug]` outside this lane: the s12
-nojit base (563/737) is 2 passes below the S12 receipt's recorded
-565/172 with per-scenario outcomes identical between main and the
-campaign — mode-invariant base-state drift attributable to the
-`s12-module-phase` lane (`8f17ba38d`); filed to that owner for a
-per-scenario A/B repair. Nit folded: single-file `--jobs 1` shapes of
+correction are folded above. **s12 drift — RESOLVED (forensics, 2026-11-01):** the suspected
+`s12-module-phase` regression is exonerated. Per-scenario A/B of the
+exact S12 globs (737 scenarios) on the pre-module-phase binary
+(`c1-negative-phase` `zig-out`, ≡ base state) vs current main:
+**552/185 → 563/174 — exactly 11 fail→pass, 0 pass→fail**, the precise
+predicted set (`json-invalid`, 9 attribute-shape tests,
+`instn-star-err-not-found`). The −13 gap vs the S12 receipt's recorded
+565/172 predates module-phase (the pre-leg already reads 552) and
+matches that receipt's own documented `--jobs`/run-order flakiness in
+the dynamic-import trees; the reviewer's "identical between main and
+campaign" observation held because both measured current main. No
+engine bug; current authoritative s12 nojit state is 563/174. Nit folded: single-file `--jobs 1` shapes of
 the waitAsync flake family fail deterministically — the run-to-run
 flipping is corpus-shape-dependent; classification unchanged.
 
