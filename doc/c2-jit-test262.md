@@ -140,18 +140,57 @@ builtin with neither flag set and the first C++→JS call fails fast.
 `BEGIN_SAFE_REENTRANT_CALL` arming these helpers lack, which is why the older
 callback builtins (sort comparators, `forEach`) are clean.
 
-Caller-mode matrix for C2-JIT-1 (200-iteration warmed caller,
-`out/jit/bin/ch`): `-nonative` pass; `-maxInterpretCount:1
--maxSimpleJitRunCount:1 -bgjit-` **abort** (tier-up to full JIT);
-`-forceNative -off:simpleJit -bgJitDelay:0` **abort**; `-forceNative
--off:fulljit` (forced SimpleJit) **abort**; `-mic:1 -bgjit- -off:fulljit`
-and default flags pass in the same 200-iteration probe. So the abort follows
-**any JIT-compiled caller** (SimpleJit or full JIT), not only `-forceNative`.
-The interp-mode corpus runs escape it only because test262 top-level scripts
-execute once and never tier up. The in-tree rlexe gate missed it for the same
-reason plus shape: `test/es7/setmethods.js` passes under the fulljit flags
-(verified, exit 0) because its Set-like arguments are recorder objects whose
-JS getters run before the first un-armed `CALL_FUNCTION`.
+Caller-mode matrix for C2-JIT-1 (warmed caller,
+`out/jit/bin/ch`; corrected per review): `-nonative` pass; interp flags
+(`-maxInterpretCount:1 -maxSimpleJitRunCount:1 -bgjit-`) **abort once
+the loop crosses the tier-up threshold** (review binary-searched the
+boundary to 300 < n ≤ 400 iterations; 200/300-iteration warmers pass
+10/10); `-forceNative -off:simpleJit -bgJitDelay:0` **abort**;
+`-forceNative -off:fulljit` (forced SimpleJit) **abort**; `-mic:1
+-bgjit- -off:fulljit` **abort**; **and default flags (no flags at all)
+ABORT too — racy at a 200-iteration warmer (0 134 0 134 0 over 5 runs,
+background-JIT race) and deterministic at ≥1000 iterations for both
+union and groupBy**. So the abort follows **any JIT-compiled caller**
+(SimpleJit or full JIT), and C2-JIT-1/2 are reachable from **ordinary
+default-configuration user code** — a hot loop (≥~400 iterations under
+interp flags, ~1000 under default background JIT) that calls a Set
+method or groupBy SIGABRTs the process. **Severity per review: not an
+exotic-configuration defect; the fix lane is prioritized accordingly.**
+The interp-mode corpus runs escape it only because test262 loops stay
+below the tier-up threshold (tier-up is loop-threshold-based, not
+invocation-count-based — a corpus with a ≥400-iteration loop would
+silently become a warmed-JIT corpus). The in-tree rlexe gate missed it
+for the same reason plus shape: `test/es7/setmethods.js` passes under
+the fulljit flags (verified, exit 0) because its Set-like arguments are
+recorder objects whose JS getters run before the first un-armed
+`CALL_FUNCTION`.
+
+**Review outcome (dual ACCEPT with corrections folded):** the general
+review verified methodology (flags verbatim from arm64-macos-jit §6,
+corpora verbatim from each receipt incl. the 1,730-file S2 selection,
+corpus-clean checks, controls **25** per run — the draft's "18" was a
+stale count), re-derived the campaign table end-to-end, confirmed the
+17/19 discharge statements by independent rerun, verified the flake
+class (mode-invariant), and produced the fix-lane sweep list:
+**unarmed sites** = `JavascriptSet.cpp` {374, 385, 404, 431},
+`JavascriptMap.cpp` {356}, and `JavascriptObject.cpp` {1232, 1222} —
+`Object.groupBy` has its **own** `GroupByCallCallback` copy (the draft's
+"shared by both groupBy entries" was wrong; the fix lane must patch
+both). The adversarial review confirmed the three modes are genuinely
+distinct regimes, ran a 42-probe callback-builtin sweep under fulljit
+(**no builtin beyond Set-methods/groupBy aborts — the two-surface
+enumeration is complete for this class; the suggested sweep is done),
+verified zero-diff batches byte-identical under `--jobs 1`, and
+confirmed the flake class shows zero mode correlation under load. Its
+severity upgrade (default-flags reachability) and the interp-boundary
+correction are folded above. One `[bug]` outside this lane: the s12
+nojit base (563/737) is 2 passes below the S12 receipt's recorded
+565/172 with per-scenario outcomes identical between main and the
+campaign — mode-invariant base-state drift attributable to the
+`s12-module-phase` lane (`8f17ba38d`); filed to that owner for a
+per-scenario A/B repair. Nit folded: single-file `--jobs 1` shapes of
+the waitAsync flake family fail deterministically — the run-to-run
+flipping is corpus-shape-dependent; classification unchanged.
 
 **Class (d) — timing flakes (not JIT divergences).** s6-sab-atomics showed
 9 interp / 11 fulljit diffs, every one an `Atomics.waitAsync`
