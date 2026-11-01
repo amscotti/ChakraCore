@@ -13,9 +13,11 @@ repeatable upstream baseline **before** feature implementation.
   for this development tool, not for building or embedding the engine.
 - Default selection: `test/language`, `test/built-ins`, `test/annexB`. Intl402 and
   staging can be selected explicitly with quoted patterns.
-- Default host flags: `-nonative -Test262 -CollectGarbage`. Language flags such as
-  `ESBigInt` / `ESSharedArrayBuffer` keep the engine's defaults unless explicitly
-  selected in a separately named run.
+- Default host flags: `-nonative -Test262 -CollectGarbage -NegativePhaseReport`
+  (the last one enables the host's negative-phase marker; see
+  [doc/c1-negative-phase.md](../../doc/c1-negative-phase.md)). Language flags
+  such as `ESBigInt` / `ESSharedArrayBuffer` keep the engine's defaults unless
+  explicitly selected in a separately named run.
 
 The corpus follows the current draft and includes **post-ES2025 proposals**.
 Its broad pass rate is diagnostic, not an ES2025 conformance claim. The C1
@@ -72,7 +74,7 @@ conformance check just because a host invocation returned zero.
 
 ## Controls and host adaptation
 
-Each run first verifies twenty fixtures under `controls/test/` (recursively): successful sync,
+Each run first verifies twenty-four fixtures under `controls/test/` (recursively): successful sync,
 async, module, parse-negative, runtime-negative, realm and buffer-detachment cases;
 plus deliberately failing assertions, wrong negative error types, and nonzero
 empty-output exits. All expected outcomes must match. This catches the shell's
@@ -89,11 +91,26 @@ and passes the masquerades, so `run.py` downgrades
 a control pass whose recorded evidence contradicts the declared phase:
 stdout execution markers, the tab-prefixed `\tat code (` parse frame, the
 `thrown at …:` module-loader prefix together with an empty JS stack, and
-Global/Module code runtime frames. This
-phase-evidence check applies to controls only; corpus scenarios are audited
-after the fact by `analyze.py` (next section). Limits are recorded in
-[doc/c1-triage.md](../../doc/c1-triage.md) §3 — qualification is CONDITIONAL,
-not full phase certification.
+Global/Module code runtime frames.
+
+**Host-reported phase (C4 preparation).** `ch -NegativePhaseReport` now
+emits exactly one machine-readable marker line on stderr at the first
+unhandled-error report — `CH_NEGATIVE_PHASE: parse|resolution|runtime` —
+classified from *where the failure originated* (which JsRT entry point
+failed and at which stage), never from error-message text; with the flag
+off, `ch` output is byte-identical. `run.py` passes the flag by default
+and re-judges **every** negative scenario (controls and corpus) against
+the marker, keeping the shape heuristic above only as a fallback for
+marker-less records (crashes, timeouts, pre-flag hosts). Four further
+controls cover the marker itself, including deliberately misleading
+shapes that only the real marker can catch: a dependency module that
+fails to parse (a resolution-phase graph-loading failure whose
+loader-prefix shape would also satisfy a declared parse phase), and a
+stackless throw from module evaluation (a runtime-phase failure whose
+`thrown at` loader shape would also satisfy a declared resolution
+phase). The classification mapping, its source anchors and its honest
+limits (deep-child link errors, deferred-parse early errors) are in
+[doc/c1-negative-phase.md](../../doc/c1-negative-phase.md).
 
 `harness.js` retains the upstream compiler, error parser and runner, adding only
 testing-host adaptation:
@@ -128,10 +145,16 @@ the corpus total. Strict/default scenarios count separately, except module/raw
 tests. Preserve the revision, configuration and host skips when comparing runs.
 
 The upstream validator checks negative **error names**, not every distinction
-between parse, resolution and runtime phases. C1 narrows that gap for the
-controls (above) and audits recorded corpus data, but explicit host-reported
-phase is still required before calling a full edition green; baseline data
-alone cannot certify it.
+between parse, resolution and runtime phases. With the host-reported phase
+marker (`-NegativePhaseReport`) the runner re-judges every negative scenario
+by the stage the failure actually originated from; the C1 shape heuristic
+remains only as the marker-less fallback. Schema additions for marker runs:
+each negative record in `results.json` carries a `phase_evidence` object
+(`declared`/`marker`/`shape`/`executed`/`judged_by`), downgraded mismatches
+carry `result.message` starting `Negative phase mismatch:`, `summary.json`
+gains a `negative_phase` section, and `analyze.py`'s audit adds
+`marker`/`marker_judged_total`/`marker_downgraded_by_run_py` fields (legacy
+records keep their exact C1 shape-audit semantics).
 
 ## Edition policy and analysis (C1)
 
