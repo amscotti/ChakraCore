@@ -905,6 +905,13 @@
   </test>
   <test>
     <default>
+      <files>strict-generator-args-jit.js</files>
+      <compile-flags>-JitES6Generators</compile-flags>
+      <tags>exclude_arm</tags>
+    </default>
+  </test>
+  <test>
+    <default>
       <files>generators-applyargs.js</files>
       <!-- -off:inlineapply triggers the use of the ApplyArgs bytecode -->
       <compile-flags>-ES6Generators -off:inlineapply</compile-flags>
