@@ -69,7 +69,9 @@ eval-`arguments` fix and eval-nonsimple-var/catch-preflight repair,
 and the C1 host-reported negative-phase marker with a fresh
 marker-era full baseline (93,141 scenarios: 77,257 passed / 15,884
 failed, every negative phase-re-judged; receipt
-[c1-negative-phase.md](c1-negative-phase.md)), the bounded S8
+[c1-negative-phase.md](c1-negative-phase.md)), the module phase-fidelity
+repairs (child link errors propagate to root instantiation; JSON modules
+parse at load; merge `8f17ba38d`), the bounded S8
 immutable-ArrayBuffer surface, both
 S3 RegExp slices (`u` property escapes and `v` Unicode Sets mode), S9
 u-mode RegExp strictness, and S9-b code-point-aware RegExp search/builtin

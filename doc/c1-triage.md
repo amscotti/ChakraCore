@@ -924,6 +924,7 @@ still owns JIT-configuration claims.)*
 | S14 P5 | Landed `8b5f28c06` | 50/50; broad 50/0; wider 65/0 non-import | eval/function-expression; proxy descriptor; JIT |
 | S14 eval-nonsimple-var + catch preflight | Landed `c1b769e1f` + repair `0d1c1e771` + receipts `9b45dd45d`…`216d6160e` (merge `e0751e70d`) | body eval over non-simple params no longer over-reports SyntaxError (post-body-parse scope split, compound guard); eval preflight checks destructured catch bindings for all names (pre-existing gap); param named `arguments` shadows; 1,000+ review shapes Node-exact; legacy fixtures updated; new test entry; gates 2032/2084 → 2033/2085 | compound redeclaration family, pattern-default `[arguments=5]=[]` corner, `arguments.callee` poisoning card, eval-declaration JIT fidelity (separate), B4 |
 | C1 negative-phase marker + fresh baseline | Landed `ccd0814c6`…`291d9c45a` + spoof repair `c4f6c1031` (merge `c381c2e37`) | `ch -NegativePhaseReport` origin-classified phase marker; runner re-judges every negative (first-wins + line-1 after adversarial spoof proof); 25 controls; flag-off byte-identical 317/317; fresh full baseline 93,141 → 77,257/15,884, 8,751 marker-judged, 12 downgrades (the known 12), zero natural forgeries; dual ACCEPT after one repair | child link-error propagation + JSON.parse instantiation (engine gaps now exposed), sticky witness, agent-thread/dynamic-import marker-less, certification-grade rerun owed to C4 |
+| S12 module phase fidelity | Landed `37725d8c1` + receipt `34296622b`, `d1ad6f0a2` (merge `8f17ba38d`) | child link errors propagate to root declaration-instantiation (first-wins `errorObject`, mirroring OnChildModuleReady) and JSON modules parse at load (`JsRun`-validated synthetic source, exception recorded pre-parse with identity preserved); module-code 524/602→534/602 with 10 wrong-phase downgrades→0; import 28/135→29/135 (json-invalid flips; import-defer parser gap stays); zero pass→fail; gates unchanged 2033/2085 | multi-error dictionary-order selection (pre-existing), stateful global-JSON tamper (host harness), NUL truncation (pre-existing), sticky witness, JIT/TTD out of scope |
 
 Full gates at this checkpoint: **2033/0 test**, **2085/0 debug-static**
 (single-sourced in `tools/build/gate_counts.json`; repair-loop
@@ -973,11 +974,14 @@ eval-residuals lane then closed the P4 body-eval item (merge
 `arguments`-param shadowing; gates 2032/2084 → 2033/2085). The
 c1-negative-phase lane then delivered the host-reported negative phase
 and a fresh marker-era full baseline (merge `c381c2e37`; see §3 update
-and [c1-negative-phase.md](c1-negative-phase.md)). Next work items are
-the phase-exposed engine gaps (child link-error propagation to root
-declaration-instantiation, JSON module `JSON.parse` at instantiation —
-each flips 10 corpus wrong-phase outcomes to genuine), the
-test262-under-JIT per-batch campaign, the JIT follow-ups, the B5
+and [c1-negative-phase.md](c1-negative-phase.md)). The two phase-exposed
+engine gaps were then closed by the s12-module-phase lane (merge
+`8f17ba38d`, receipt [c2-s12-module-phase.md](c2-s12-module-phase.md)):
+child module link errors now propagate to root declaration-instantiation
+and JSON modules parse at load — module-code 534/602 with all 10
+wrong-phase downgrades eliminated, `json-invalid` genuine, zero
+pass→fail, gates unchanged 2033/2085, dual ACCEPT. Next work items are
+the test262-under-JIT per-batch campaign, the JIT follow-ups, the B5
 bytecode-GUID rotation, and the certification-grade C4 full rerun once
 those land. P5 residual: eval/function-expression
 reference paths and pre-existing proxy descriptor duplication.

@@ -884,13 +884,15 @@ fresh full pinned baseline (93,141 scenarios: **77,257/15,884**,
 controls 25/25, 8,751 marker-judged negatives, 12 downgrades —
 failures halved vs the C1-era 61,565/31,576 record; merge `c381c2e37`,
 receipt [c1-negative-phase.md](c1-negative-phase.md); dual ACCEPT after
-one repair). The marker also exposed two phase-fidelity engine gaps now
-tracked for C4: child module link errors surfacing at evaluation
-(should propagate to root declaration-instantiation) and JSON module
-`JSON.parse` running at evaluation rather than instantiation. Remaining
-C4 work: those engine gaps, then the certification-grade full
-rerun. Next up: per-batch test262 runs under SimpleJIT/FullJIT on the
-merged
+one repair). The marker also exposed two phase-fidelity engine gaps that
+were then closed by the s12-module-phase lane (merge `8f17ba38d`,
+receipt [c2-s12-module-phase.md](c2-s12-module-phase.md)): child module
+link errors now propagate to root declaration-instantiation and JSON
+modules parse at load — module-code 534/602 with all 10 wrong-phase
+downgrades eliminated, `json-invalid` genuine, zero pass→fail, gates
+unchanged 2033/2085, dual ACCEPT. Remaining C4 work: the
+certification-grade full rerun. Next up: per-batch test262 runs under
+SimpleJIT/FullJIT on the merged
 Mac profile, and the JIT follow-ups recorded in
 [arm64-macos-jit.md](arm64-macos-jit.md): eval declaration fidelity from
 JIT frames (so direct-eval callers/eval code can JIT), native lowering
