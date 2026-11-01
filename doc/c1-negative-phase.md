@@ -195,11 +195,19 @@ upstream — independent of phases.
 
 ## 5. Residuals and what C4 still owes
 
-1. **Full pinned-corpus baseline rerun** — the next step, not this lane: a
-   fresh `run.py` invocation over the default patterns into a new output
-   dir, then `analyze.py`, giving the first edition-selected score whose
-   negatives are phase-proven. Until then the §2 C1 headline numbers stand
-   (with the 12-suspect sensitivity now measured concretely above).
+1. **Full pinned-corpus baseline rerun — completed** (2026-11-01, this
+   lane's binary, fresh `out/test262-np-baseline`, marker judging active):
+   broad **77,257 / 15,884 (82.95%)**, edition-selected **76,453 / 4,091
+   (94.92%)** of 80,544 scenarios. This is the first full-corpus result
+   whose passing negatives are phase-proven: 8,751 negatives carry a host
+   marker (8,661 passed), 0 shape suspects, and exactly **12 downgrades
+   corpus-wide — the same 12 characterized in §4** (no additional
+   wrong-phase pass exists anywhere in the corpus; 79 negatives were
+   judged by the shape fallback only because the harness failed them
+   without an error report). The numbers are not comparable to the
+   recorded C1 headline (61,565/31,576; this base includes every S1–S14
+   batch landed since); C4's certification decision now has a
+   phase-qualified starting point plus the engine follow-ups below.
 2. **Engine follow-up (closes the 10 marker-only catches honestly at the
    source):** propagate child-module link errors into the root's
    declaration-instantiation so `NotifyHostAboutModuleReady` carries the
