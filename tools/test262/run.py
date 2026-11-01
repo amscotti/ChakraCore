@@ -134,7 +134,7 @@ def harness(binary, corpus, patterns, output, args, controls=False):
 MARKER_PATTERN = re.compile(r'^CH_NEGATIVE_PHASE: (parse|resolution|runtime)$', re.MULTILINE)
 
 
-def marker_phase(record):
+def marker_evidence(record):
     """Host-reported negative phase from the CH_NEGATIVE_PHASE marker.
 
     ``ch -NegativePhaseReport`` emits exactly one marker line on stderr, at
@@ -143,9 +143,33 @@ def marker_phase(record):
     failure witnessed while loading/linking, or evaluation) — never from
     error-message text. See doc/c1-negative-phase.md for the classification
     mapping and its honest limits.
+
+    Spoofing defense (marker text is attacker-controlled once it travels in
+    a thrown error's string): the REAL marker is the **first** marker-shaped
+    stderr line and it must be **line 1** of stderr. Soundness rests on the
+    emission-site audit: every ReportNegativePhaseMarker call site
+    immediately precedes its PrintException, and no test-reachable API
+    writes stderr before the first error report (print/console go to
+    stdout; agent processes are separate and silent here) — so a forged
+    marker-shaped line can only appear AFTER the real one, inside the error
+    message text. Returns ``(phase, state)`` with state ``'line1'`` (trust
+    the marker), ``'displaced'`` (a marker-shaped line exists but not at
+    line 1 — never trusted; the caller falls back to the shape heuristic
+    loudly), or ``'absent'`` (no marker: pre-flag host, or a crash/timeout
+    that never reached an error report).
     """
-    found = MARKER_PATTERN.findall((record.get('rawResult') or {}).get('stderr') or '')
-    return found[-1] if found else None
+    stderr = (record.get('rawResult') or {}).get('stderr') or ''
+    first = MARKER_PATTERN.search(stderr)
+    if first is None:
+        return None, 'absent'
+    if first.start() == 0:
+        return first.group(1), 'line1'
+    return None, 'displaced'
+
+
+def marker_phase(record):
+    """Phase of the trusted (line-1) host marker, or None."""
+    return marker_evidence(record)[0]
 
 
 def phase_evidence(record):
@@ -207,22 +231,27 @@ def negative_phase_judgement(record):
     phase = negative.get('phase')
     executed = bool((record.get('rawResult') or {}).get('stdout'))
     if not phase:
-        return True, {'declared': None, 'marker': None, 'shape': None,
-                      'executed': executed, 'judged_by': 'not-negative'}
+        return True, {'declared': None, 'marker': None, 'marker_state': None,
+                      'shape': None, 'executed': executed, 'judged_by': 'not-negative'}
     shape = phase_evidence(record)
-    marker = marker_phase(record)
-    if marker:
+    marker, marker_state = marker_evidence(record)
+    if marker_state == 'line1':
         ok = marker == phase and not (marker in ('parse', 'resolution') and executed)
-        return ok, {'declared': phase, 'marker': marker, 'shape': shape,
-                    'executed': executed, 'judged_by': 'marker'}
+        return ok, {'declared': phase, 'marker': marker, 'marker_state': marker_state,
+                    'shape': shape, 'executed': executed, 'judged_by': 'marker'}
     if phase == 'parse':
         ok = not executed and shape in ('parse-frame', 'loader-prefix')
     elif phase == 'resolution':
         ok = not executed and shape == 'loader-prefix'
     else:
         ok = shape != 'parse-frame'
-    return ok, {'declared': phase, 'marker': None, 'shape': shape,
-                'executed': executed, 'judged_by': 'shape'}
+    # Loud fallback: distinguish a marker-less record (pre-flag host,
+    # crash/timeout) from one carrying a displaced — untrusted —
+    # marker-shaped line.
+    return ok, {'declared': phase, 'marker': None, 'marker_state': marker_state,
+                'shape': shape, 'executed': executed,
+                'judged_by': 'shape' if marker_state == 'absent'
+                else 'shape:marker-displaced'}
 
 
 def main():
@@ -258,6 +287,19 @@ def main():
         name = Path(record['file']).name
         observed[name] += 1
         ok, evidence = negative_phase_judgement(record)
+        # Emit-once verification: a failing run carries exactly one host
+        # marker line, at line 1 of stderr. The spoof control deliberately
+        # adds a forged marker-shaped line inside its error text, so there
+        # the count is exactly two and the first (trusted) marker must be
+        # the real phase — never the forged one.
+        marker_lines = MARKER_PATTERN.findall((record.get('rawResult') or {}).get('stderr') or '')
+        if name == 'fail-marker-spoof.js':
+            if marker_lines != ['runtime', 'parse']:
+                raise ValueError(f'control {name}: expected the real runtime marker followed '
+                                 f'by exactly the forged parse line, found {marker_lines}')
+        elif len(marker_lines) > 1:
+            raise ValueError(f'control {name}: expected at most one host marker line '
+                             f'(emit-once), found {len(marker_lines)}: {marker_lines}')
         if (record['result']['pass'] and ok) != expected.get(name):
             raise ValueError(f'control {name} produced the wrong outcome: {record["result"]} '
                              f'(phase evidence: {evidence})')

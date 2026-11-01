@@ -74,7 +74,7 @@ conformance check just because a host invocation returned zero.
 
 ## Controls and host adaptation
 
-Each run first verifies twenty-four fixtures under `controls/test/` (recursively): successful sync,
+Each run first verifies twenty-five fixtures under `controls/test/` (recursively): successful sync,
 async, module, parse-negative, runtime-negative, realm and buffer-detachment cases;
 plus deliberately failing assertions, wrong negative error types, and nonzero
 empty-output exits. All expected outcomes must match. This catches the shell's
@@ -108,7 +108,10 @@ fails to parse (a resolution-phase graph-loading failure whose
 loader-prefix shape would also satisfy a declared parse phase), and a
 stackless throw from module evaluation (a runtime-phase failure whose
 `thrown at` loader shape would also satisfy a declared resolution
-phase). The classification mapping, its source anchors and its honest
+phase). A fifth adversarial control throws an error whose text carries a
+forged `CH_NEGATIVE_PHASE` line — the runner trusts only the first
+marker-shaped line and only at line 1 of stderr, so the forgery is
+ignored and the masquerade is downgraded. The classification mapping, its source anchors and its honest
 limits (deep-child link errors, deferred-parse early errors) are in
 [doc/c1-negative-phase.md](../../doc/c1-negative-phase.md).
 
@@ -150,7 +153,10 @@ marker (`-NegativePhaseReport`) the runner re-judges every negative scenario
 by the stage the failure actually originated from; the C1 shape heuristic
 remains only as the marker-less fallback. Schema additions for marker runs:
 each negative record in `results.json` carries a `phase_evidence` object
-(`declared`/`marker`/`shape`/`executed`/`judged_by`), downgraded mismatches
+(`declared`/`marker`/`marker_state`/`shape`/`executed`/`judged_by`, where
+`judged_by` distinguishes `marker` from the shape fallbacks `shape` and
+`shape:marker-displaced` — an untrusted marker-shaped line not at line 1
+of stderr), downgraded mismatches
 carry `result.message` starting `Negative phase mismatch:`, `summary.json`
 gains a `negative_phase` section, and `analyze.py`'s audit adds
 `marker`/`marker_judged_total`/`marker_downgraded_by_run_py` fields (legacy

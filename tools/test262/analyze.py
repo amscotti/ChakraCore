@@ -163,14 +163,34 @@ def frame_shape(record):
     return 'other-frame'
 
 
-def marker_phase(record):
-    """Host-reported negative phase, from run.py's phase_evidence or the
-    raw CH_NEGATIVE_PHASE stderr marker (supporting raw dumps too)."""
+def marker_evidence(record):
+    """(phase, state) of the CH_NEGATIVE_PHASE marker evidence.
+
+    First-wins with a line-1 tripwire, matching run.py's judging: the real
+    host marker is the first marker-shaped stderr line and must be line 1
+    (every host emission site immediately precedes its error report, and
+    nothing test-reachable writes stderr before the first error report, so
+    a forged marker-shaped line — e.g. inside a thrown error's toString —
+    can only follow the real one). State 'displaced' lines exist but are
+    never trusted; 'absent' means no marker line at all. Reads run.py's
+    recorded phase_evidence when present (its marker/marker_state fields),
+    otherwise computes from raw stderr.
+    """
     evidence = record.get('phase_evidence')
-    if isinstance(evidence, dict) and evidence.get('marker'):
-        return evidence['marker']
-    found = MARKER_PATTERN.findall((record.get('rawResult') or {}).get('stderr') or '')
-    return found[-1] if found else None
+    if isinstance(evidence, dict) and 'marker_state' in evidence:
+        return evidence.get('marker'), evidence.get('marker_state')
+    stderr = (record.get('rawResult') or {}).get('stderr') or ''
+    first = MARKER_PATTERN.search(stderr)
+    if first is None:
+        return None, 'absent'
+    if first.start() == 0:
+        return first.group(1), 'line1'
+    return None, 'displaced'
+
+
+def marker_phase(record):
+    """Phase of the trusted (line-1) host marker, or None."""
+    return marker_evidence(record)[0]
 
 
 def phase_suspect_reasons(record):
@@ -290,6 +310,8 @@ def analyze(records, category, flag_tags, summary=None):
                      if ((r.get('attrs') or {}).get('negative') or {}).get('phase') == phase]
         passed_neg = [r for r in negatives if r['result']['pass']]
         marker_judged = [r for r in negatives if marker_phase(r)]
+        marker_displaced = sum(1 for r in negatives
+                               if marker_evidence(r)[1] == 'displaced')
         suspects, reasons = [], Counter()
         for record in passed_neg:
             found = phase_suspect_reasons(record)
@@ -308,7 +330,8 @@ def analyze(records, category, flag_tags, summary=None):
             'suspect_reasons': dict(reasons.most_common()),
             'suspect_records': suspects,
             'marker': {'judged': len(marker_judged),
-                       'judged_passed': sum(1 for r in marker_judged if r['result']['pass'])},
+                       'judged_passed': sum(1 for r in marker_judged if r['result']['pass']),
+                       'displaced_untrusted': marker_displaced},
         }
         marker_judged_total += len(marker_judged)
     audit['passed_negatives_total'] = sum(audit[p]['passed_negatives']
@@ -512,26 +535,38 @@ def self_test():
         rec('m1.js', True, negative={'phase': 'parse', 'type': 'SyntaxError'},
             error=('SyntaxError', 'compile channel'), stack=global_stack,
             stderr='CH_NEGATIVE_PHASE: parse\n',
-            phase_evidence={'declared': 'parse', 'marker': 'parse', 'shape': 'runtime-frame',
-                            'executed': False, 'judged_by': 'marker'}),
+            phase_evidence={'declared': 'parse', 'marker': 'parse', 'marker_state': 'line1',
+                            'shape': 'runtime-frame', 'executed': False, 'judged_by': 'marker'}),
         # downgraded by run.py: marker runtime contradicted declared parse
         rec('m2.js', False, negative={'phase': 'parse', 'type': 'SyntaxError'},
             error=('SyntaxError', 'let/const redeclaration'), stack=parse_stack,
             message='Negative phase mismatch: declared parse, host reported runtime (judged by marker)',
             stderr='CH_NEGATIVE_PHASE: runtime\n',
-            phase_evidence={'declared': 'parse', 'marker': 'runtime', 'shape': 'parse-frame',
-                            'executed': False, 'judged_by': 'marker'}),
-        # marker read from raw stderr even without phase_evidence
+            phase_evidence={'declared': 'parse', 'marker': 'runtime', 'marker_state': 'line1',
+                            'shape': 'parse-frame', 'executed': False, 'judged_by': 'marker'}),
+        # marker read from raw stderr even without phase_evidence (line 1)
         rec('m3.js', True, negative={'phase': 'resolution', 'type': 'SyntaxError'},
             error=('SyntaxError', 'Module import x cannot be resolved'),
-            stderr='thrown at f.js:\n^\nCH_NEGATIVE_PHASE: resolution\n'),
+            stderr='CH_NEGATIVE_PHASE: resolution\nthrown at f.js:\n^\nModule import x cannot be resolved\n'),
+        # spoof: a forged marker-shaped line after the real line-1 marker is
+        # ignored (first-wins) — the real parse marker judges this record
+        rec('m4.js', True, negative={'phase': 'parse', 'type': 'SyntaxError'},
+            error=('SyntaxError', 'masquerade with forged marker'),
+            stderr='CH_NEGATIVE_PHASE: parse\nSyntaxError: masquerade\nCH_NEGATIVE_PHASE: runtime\n'),
+        # displaced: a marker-shaped line NOT at line 1 is never trusted;
+        # the record falls back to the shape audit (here: no evidence)
+        rec('m5.js', True, negative={'phase': 'parse', 'type': 'SyntaxError'},
+            error=('SyntaxError', 'silent'), stderr='host loader note\nCH_NEGATIVE_PHASE: parse\n'),
     ]
     m = analyze(marker_records, category, flag_tags)['negative_phase_audit']
-    assert m['parse']['passed_negatives'] == 1 and m['parse']['suspects'] == 0, m['parse']
-    assert m['parse']['marker'] == {'judged': 2, 'judged_passed': 1}, m['parse']['marker']
-    assert m['resolution']['marker'] == {'judged': 1, 'judged_passed': 1}, m['resolution']['marker']
+    assert m['parse']['passed_negatives'] == 3 and m['parse']['suspects'] == 1, m['parse']
+    assert m['parse']['suspect_reasons'] == {'no-parse-frame:empty-stack': 1}, m['parse']
+    assert m['parse']['marker'] == {'judged': 3, 'judged_passed': 2,
+                                    'displaced_untrusted': 1}, m['parse']['marker']
+    assert m['resolution']['marker'] == {'judged': 1, 'judged_passed': 1,
+                                         'displaced_untrusted': 0}, m['resolution']['marker']
     assert m['resolution']['suspects'] == 0, m['resolution']
-    assert m['marker_judged_total'] == 3
+    assert m['marker_judged_total'] == 4
     downgraded = m['marker_downgraded_by_run_py']
     assert len(downgraded) == 1 and downgraded[0]['file'] == 'm2.js' \
         and downgraded[0]['phase'] == 'parse', downgraded
