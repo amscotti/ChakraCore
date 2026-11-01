@@ -165,7 +165,31 @@ It is not an ES2025 conformance claim: the negative-phase residual gap in
 §3 and the tag-granularity limit in §1 still apply, and C4 additionally
 requires the default configuration to enable the features.
 
-## 3. Negative-phase qualification — CONDITIONAL
+## 3. Negative-phase qualification — host marker delivered (C1 condition met; certification-grade gaps tracked)
+
+**Update (2026-11-01):** the host now reports the phase explicitly. Lane
+`c1-negative-phase` (merge `c381c2e37`, receipt
+[c1-negative-phase.md](c1-negative-phase.md)) added `ch
+-NegativePhaseReport` — one stderr marker line per failing run
+(`CH_NEGATIVE_PHASE: parse|resolution|runtime`), classified solely from
+failure origin — and `run.py`/`analyze.py` now re-judge every negative
+corpus scenario against the declared `negative.phase` (first-marker-wins
++ line-1 tripwire after an adversarial spoofing repair; shape heuristic
+is the marker-less fallback only; 25 controls incl. a forged-marker
+control). Flag-off output is byte-identical (317/317). A fresh full
+pinned-corpus baseline was recorded with phase re-judging (93,141
+scenarios: 77,257 passed / 15,884 failed, controls 25/25, 8,751
+marker-judged negatives, 12 downgrades = the audit's known 12; zero
+natural forgeries/displacements across 23,517 marker-carrying records).
+What still blocks certification-grade phase claims (engine gaps the
+marker exposes, tracked for C4): child module link errors surface at
+evaluation instead of propagating to root declaration-instantiation
+(10 corpus scenarios), JSON module `JSON.parse` runs at evaluation
+rather than instantiation, the sticky resolution witness on handled
+dynamic-import rejections (latent, 0 incidence), agent-thread and
+dynamic-import failures emit no marker (shape fallback), and the
+deferred-parse/compile-channel stage-reporting limits. The original
+audit text follows.
 
 **The gap.** The upstream validator (`test262-harness/lib/validator.js`,
 read this session) accepts a negative test when the thrown error's *name*
@@ -899,6 +923,7 @@ still owns JIT-configuration claims.)*
 | S14 hidden-outer eval `arguments` | Landed `d9a1998d1` (merge `13e925a75`) | catch-hidden top-level lexical now SyntaxError; parameter/simple-catch/with/arrow controls preserved; eval-code 454/0; no gate change | JIT/TTD (B4) |
 | S14 P5 | Landed `8b5f28c06` | 50/50; broad 50/0; wider 65/0 non-import | eval/function-expression; proxy descriptor; JIT |
 | S14 eval-nonsimple-var + catch preflight | Landed `c1b769e1f` + repair `0d1c1e771` + receipts `9b45dd45d`…`216d6160e` (merge `e0751e70d`) | body eval over non-simple params no longer over-reports SyntaxError (post-body-parse scope split, compound guard); eval preflight checks destructured catch bindings for all names (pre-existing gap); param named `arguments` shadows; 1,000+ review shapes Node-exact; legacy fixtures updated; new test entry; gates 2032/2084 → 2033/2085 | compound redeclaration family, pattern-default `[arguments=5]=[]` corner, `arguments.callee` poisoning card, eval-declaration JIT fidelity (separate), B4 |
+| C1 negative-phase marker + fresh baseline | Landed `ccd0814c6`…`291d9c45a` + spoof repair `c4f6c1031` (merge `c381c2e37`) | `ch -NegativePhaseReport` origin-classified phase marker; runner re-judges every negative (first-wins + line-1 after adversarial spoof proof); 25 controls; flag-off byte-identical 317/317; fresh full baseline 93,141 → 77,257/15,884, 8,751 marker-judged, 12 downgrades (the known 12), zero natural forgeries; dual ACCEPT after one repair | child link-error propagation + JSON.parse instantiation (engine gaps now exposed), sticky witness, agent-thread/dynamic-import marker-less, certification-grade rerun owed to C4 |
 
 Full gates at this checkpoint: **2033/0 test**, **2085/0 debug-static**
 (single-sourced in `tools/build/gate_counts.json`; repair-loop
@@ -945,10 +970,16 @@ review-found leak; new `s6-broadcast-type.js` entry moved the gates to
 2032/2084; dual ACCEPT after one repair iteration). The S14
 eval-residuals lane then closed the P4 body-eval item (merge
 `e0751e70d`: non-simple-param body-eval vars, catch-binding preflight,
-`arguments`-param shadowing; gates 2032/2084 → 2033/2085). Next work
-items are the C4 qualification work (full baseline rerun, host-reported
-negative phase), per-batch test262 under SimpleJIT/FullJIT, and the JIT
-follow-ups. P5 residual: eval/function-expression
+`arguments`-param shadowing; gates 2032/2084 → 2033/2085). The
+c1-negative-phase lane then delivered the host-reported negative phase
+and a fresh marker-era full baseline (merge `c381c2e37`; see §3 update
+and [c1-negative-phase.md](c1-negative-phase.md)). Next work items are
+the phase-exposed engine gaps (child link-error propagation to root
+declaration-instantiation, JSON module `JSON.parse` at instantiation —
+each flips 10 corpus wrong-phase outcomes to genuine), the
+test262-under-JIT per-batch campaign, the JIT follow-ups, the B5
+bytecode-GUID rotation, and the certification-grade C4 full rerun once
+those land. P5 residual: eval/function-expression
 reference paths and pre-existing proxy descriptor duplication.
 
 ## 8. Separate inventories

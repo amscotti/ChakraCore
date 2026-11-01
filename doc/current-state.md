@@ -65,7 +65,12 @@ latch, registrant-thread monitors, child message queues, POSIX
 `WScript.Quit` raw-exit teardown, FIFO resolution-order repair, and
 the host join/spawn/broadcast robustness follow-ups), default-on
 BigInt, the S14 hidden-outer
-eval-`arguments` fix, the bounded S8 immutable-ArrayBuffer surface, both
+eval-`arguments` fix and eval-nonsimple-var/catch-preflight repair,
+and the C1 host-reported negative-phase marker with a fresh
+marker-era full baseline (93,141 scenarios: 77,257 passed / 15,884
+failed, every negative phase-re-judged; receipt
+[c1-negative-phase.md](c1-negative-phase.md)), the bounded S8
+immutable-ArrayBuffer surface, both
 S3 RegExp slices (`u` property escapes and `v` Unicode Sets mode), S9
 u-mode RegExp strictness, and S9-b code-point-aware RegExp search/builtin
 flag derivation.

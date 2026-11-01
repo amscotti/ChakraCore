@@ -877,7 +877,20 @@ iteration. Next work items are
 the remaining eval compound-family residuals (documented in the
 receipt), lead-surrogate lacunarity (S3-decision-blocked), the
 C4 qualification work (full baseline rerun, host-reported negative
-phase), per-batch test262 runs under SimpleJIT/FullJIT on the merged
+phase), the c1-negative-phase lane delivered exactly that: `ch
+-NegativePhaseReport` origin-classified phase markers with corpus-wide
+re-judging (spoof-hardened after adversarial review), 25 controls, and a
+fresh full pinned baseline (93,141 scenarios: **77,257/15,884**,
+controls 25/25, 8,751 marker-judged negatives, 12 downgrades —
+failures halved vs the C1-era 61,565/31,576 record; merge `c381c2e37`,
+receipt [c1-negative-phase.md](c1-negative-phase.md); dual ACCEPT after
+one repair). The marker also exposed two phase-fidelity engine gaps now
+tracked for C4: child module link errors surfacing at evaluation
+(should propagate to root declaration-instantiation) and JSON module
+`JSON.parse` running at evaluation rather than instantiation. Remaining
+C4 work: those engine gaps, then the certification-grade full
+rerun. Next up: per-batch test262 runs under SimpleJIT/FullJIT on the
+merged
 Mac profile, and the JIT follow-ups recorded in
 [arm64-macos-jit.md](arm64-macos-jit.md): eval declaration fidelity from
 JIT frames (so direct-eval callers/eval code can JIT), native lowering
