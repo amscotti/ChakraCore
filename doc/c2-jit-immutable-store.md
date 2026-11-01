@@ -200,3 +200,35 @@ Gates:
 - The S8 residuals (TTD snapshots drop the immutable bit, no OS page
   protection, `return-immutable.js` host harness) are unchanged.
 
+
+### Review outcome (dual ACCEPT, observations resolved)
+
+Both reviewers ACCEPTed with zero `[bug]` findings. The general review
+verified the layout move end-to-end (SAB type-confusion rationale
+confirmed; `SetImmutable` has exactly two call sites, both on fresh
+allocations before views exist; old views of a `transferToImmutable`
+source see a DETACHED buffer, so the immutable bit never transitions on
+a view-visible buffer — no 0→1 race), the guard funnel/label semantics
+(`labelCantUseArray == labelHelper` for typed arrays → exact
+`OP_SetElementI` replay), hole-2 upfront checks (zero partial writes),
+and every quantitative claim. The adversarial review hunted layout
+consumers (SCA serialization copies bytes only; TTD snapshots bytes
+only; no offsetof/static_assert consumers), proved SAB-backed views
+type-safe through warmed sites, verified freeze-race/reentrancy/hole-2
+exactly-once behavior across modes, confirmed fusion is load-bearing
+via a 7x timing discriminator, and ran perf beyond store8 (invisible on
+load-dominated/non-TA workloads).
+
+Folded notes: (1) pre-existing, residual — the store helper checks
+immutability BEFORE ToNumeric conversion of the value (spec converts
+first; tier-identical, out of this lane); (2) pre-existing, residual —
+sloppy stores to DETACHED typed arrays throw TypeError in this engine
+where spec says no-op (tier-identical; do not conflate with
+sloppy-immutable no-op); (3) the adversarial review's four ad-hoc
+dynapogo failures in `matchall.js`/`s6-growable-nonshared.js` were
+RESOLVED as invocation artifacts: both tests require their per-entry
+rlexe flags (e.g. `-ES6RegExSymbols`), reproduce identically on the
+no-JIT binary without them, and the authoritative es7 dynapogo leg on
+the fixed binary is **99/0**. Operational gotcha recorded: runtests.py
+needs an ABSOLUTE `--binary` path (it chdirs per test); a relative path
+fails every test at spawn.
