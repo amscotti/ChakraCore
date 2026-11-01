@@ -647,8 +647,8 @@ Decision/rollback points:
   tracked until C4, optional ecosystem scope has separate gates.
 - [ ] C4: Published qualified ES2025 result on the claimed default configurations.
 
-**Latest integration checkpoint (2026-10-31):** main is clean at the
-**2032/0 test** and **2084/0 debug-static** gates (re-verified after every
+**Latest integration checkpoint (2026-11-01):** main is clean at the
+**2033/0 test** and **2085/0 debug-static** gates (re-verified after every
 merge and repair below; counts are single-sourced in
 `tools/build/gate_counts.json` — Float16Array's new test file moved
 2012/2064 → 2013/2065, repair-loop `-noDeferParse` rlexe variants
@@ -663,7 +663,8 @@ entry (2020/2072 → 2021/2073), S8 immutable ArrayBuffer added one entry
 (2025/2077 → 2026/2078), S2 BigInt default enablement added four
 entries (2026/2078 → 2030/2082), S6e cross-agent waitAsync added
 one entry (2030/2082 → 2031/2083), and the host-broadcast-type repair
-added one entry (2031/2083 → 2032/2084)). A subsequent whole-branch
+added one entry (2031/2083 → 2032/2084), and the s14-eval-nonsimple-var
+lane added one entry (2032/2084 → 2033/2085)). A subsequent whole-branch
 review repair (2026-10-31) fixed the CI selftest tally that would have
 kept the first Actions run red (B3 stays CONDITIONAL until that run is
 green), the agent-init-failure spawn hang, host teardown ordering, SCA
@@ -861,8 +862,20 @@ confirm); the deterministic `s6-broadcast-type.js` rlexe entry moved
 the gates to **2032/2084** (dual ACCEPT after repair). All active
 feature/triage
 worktrees are merged — including, as of 2026-10-31, the ARM64 macOS JIT
-worktree itself. Next work items are
-the remaining S8/P-eval residuals, lead-surrogate lacunarity, the
+worktree itself. The S14 eval-residuals lane then closed the P4
+body-eval item (merge `e0751e70d`, receipt
+[c2-s14-eval-nonsimple-var.md](c2-s14-eval-nonsimple-var.md)): body eval
+over non-simple parameters no longer over-reports `SyntaxError` (the
+param/body scope split is now forced post-body-parse when the body calls
+eval, with a compound-redeclaration guard), the eval preflight now
+checks destructured catch bindings for all names (a review-found
+pre-existing gap), and a parameter named `arguments` shadows correctly —
+all Node-verified across 1,000+ review shapes; legacy non-conforming
+fixtures updated; gates **2032/2084 → 2033/2085** via the new
+`s14-eval-nonsimple-var.js` entry; dual ACCEPT after one repair
+iteration. Next work items are
+the remaining eval compound-family residuals (documented in the
+receipt), lead-surrogate lacunarity (S3-decision-blocked), the
 C4 qualification work (full baseline rerun, host-reported negative
 phase), per-batch test262 runs under SimpleJIT/FullJIT on the merged
 Mac profile, and the JIT follow-ups recorded in

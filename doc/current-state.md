@@ -56,7 +56,7 @@ This `doc/` folder is the start of durable in-repo documentation. The
 feature inventory and line anchors below are the 2026-10-10 baseline
 snapshot; the modernization branch has since added the C2 surfaces listed
 in [modernization-plan.md](modernization-plan.md) §6 and its receipts.
-Latest merged checkpoint (2026-10-31): **2032/0 test**, **2084/0
+Latest merged checkpoint (2026-11-01): **2033/0 test**, **2085/0
 debug-static**, including direct-eval `super` early errors, the flag-on
 S6a growable-SAB/non-shared-Atomics slice, S6b `Atomics.pause` /
 single-thread `Atomics.waitAsync`, S6c BigInt Atomics, S6d finite
@@ -409,8 +409,8 @@ The first [conformance baseline](conformance-baseline.md) ran 93,141 scenarios
 from 48,598 files: 61,565 passed / 31,576 failed, with 902 explicit skips. Its
 corpus includes post-ES2025 proposals and uses default language flags.
 
-**Modernization checkpoint (2026-10-31):** the merged branch is green at
-**2032/0 test** and **2084/0 debug-static** on Mac ARM64 no-JIT. Direct-eval
+**Modernization checkpoint (2026-11-01):** the merged branch is green at
+**2033/0 test** and **2085/0 debug-static** on Mac ARM64 no-JIT. Direct-eval
 `super` early errors are closed (eval-code 454/0; object-literal function/arrow
 false accepts fixed in `39e9f2a16`), the flag-on S6a slice has growable
 SharedArrayBuffer plus ES2020 non-shared Atomics (focused S6 574/982;

@@ -898,8 +898,9 @@ still owns JIT-configuration claims.)*
 | S14 P2 | Landed `526931bc5` | 192/0; 157/0; controls preserved | JSC/Node delete difference; JIT |
 | S14 hidden-outer eval `arguments` | Landed `d9a1998d1` (merge `13e925a75`) | catch-hidden top-level lexical now SyntaxError; parameter/simple-catch/with/arrow controls preserved; eval-code 454/0; no gate change | JIT/TTD (B4) |
 | S14 P5 | Landed `8b5f28c06` | 50/50; broad 50/0; wider 65/0 non-import | eval/function-expression; proxy descriptor; JIT |
+| S14 eval-nonsimple-var + catch preflight | Landed `c1b769e1f` + repair `0d1c1e771` + receipts `9b45dd45d`…`216d6160e` (merge `e0751e70d`) | body eval over non-simple params no longer over-reports SyntaxError (post-body-parse scope split, compound guard); eval preflight checks destructured catch bindings for all names (pre-existing gap); param named `arguments` shadows; 1,000+ review shapes Node-exact; legacy fixtures updated; new test entry; gates 2032/2084 → 2033/2085 | compound redeclaration family, pattern-default `[arguments=5]=[]` corner, `arguments.callee` poisoning card, eval-declaration JIT fidelity (separate), B4 |
 
-Full gates at this checkpoint: **2032/0 test**, **2084/0 debug-static**
+Full gates at this checkpoint: **2033/0 test**, **2085/0 debug-static**
 (single-sourced in `tools/build/gate_counts.json`; repair-loop
 `-noDeferParse` rlexe variants moved 2013/2065 → 2016/2068, S6a added
 one entry, eval-super added three parse-mode entries, S6b added the
@@ -907,8 +908,9 @@ waitAsync/pause entry, S8 immutable added one entry, S3-a property
 escapes added one entry, S3-b `v` mode added one entry, S9 u-mode
 strictness added one entry, S6c BigInt Atomics added one entry, S2
 BigInt default enablement added four entries, S6e cross-agent
-waitAsync added one entry, and the host-broadcast-type repair added one
-entry (2031/2083 → 2032/2084)). Integrated
+waitAsync added one entry, the host-broadcast-type repair added one
+entry (2031/2083 → 2032/2084), and the s14-eval-nonsimple-var lane
+added one entry (2032/2084 → 2033/2085)). Integrated
 class-elements corpus re-runs 2026-10-20: wave-2
 (`out/test262-c2-s1-wave2`) **5,854/5,897**, 3,865 f→p / 0 p→f vs
 2026-10-19; wave-3 (`out/test262-c2-wave3`, after the S1-tail lane)
@@ -940,10 +942,13 @@ card was then closed by the host-broadcast-type lane (merge
 `da9911395`: non-SAB argument now throws instead of SIGSEGVing with
 live agents; balanced agentless acquire-and-release after a
 review-found leak; new `s6-broadcast-type.js` entry moved the gates to
-2032/2084; dual ACCEPT after one repair iteration). Next work items
-are the remaining S8/P-eval residuals, and C4
-qualification (full baseline rerun,
-host-reported negative phase). P5 residual: eval/function-expression
+2032/2084; dual ACCEPT after one repair iteration). The S14
+eval-residuals lane then closed the P4 body-eval item (merge
+`e0751e70d`: non-simple-param body-eval vars, catch-binding preflight,
+`arguments`-param shadowing; gates 2032/2084 → 2033/2085). Next work
+items are the C4 qualification work (full baseline rerun, host-reported
+negative phase), per-batch test262 under SimpleJIT/FullJIT, and the JIT
+follow-ups. P5 residual: eval/function-expression
 reference paths and pre-existing proxy descriptor duplication.
 
 ## 8. Separate inventories
