@@ -1,0 +1,2553 @@
+{
+ "s1-class": {
+  "diffs": {
+   "fulljit": {
+    "diff_count": 0,
+    "entries": []
+   },
+   "interp": {
+    "diff_count": 0,
+    "entries": []
+   }
+  },
+  "extra_flags": "",
+  "fulljit": {
+   "failed": 124,
+   "files": 8426,
+   "passed": 16565,
+   "scenarios": 16689
+  },
+  "interp": {
+   "failed": 124,
+   "files": 8426,
+   "passed": 16565,
+   "scenarios": 16689
+  },
+  "nojit": {
+   "failed": 124,
+   "files": 8426,
+   "passed": 16565,
+   "scenarios": 16689
+  },
+  "receipt": "doc/c2-s1-tail-privates.md (elements subset); c1-triage S1 full trees",
+  "receipt_totals": "elements dirs only: 5888/9; full-tree totals recorded by this campaign's nojit run"
+ },
+ "s10-copy": {
+  "diffs": {
+   "fulljit": {
+    "diff_count": 0,
+    "entries": []
+   },
+   "interp": {
+    "diff_count": 0,
+    "entries": []
+   }
+  },
+  "extra_flags": "",
+  "fulljit": {
+   "failed": 0,
+   "files": 137,
+   "passed": 274,
+   "scenarios": 274
+  },
+  "interp": {
+   "failed": 0,
+   "files": 137,
+   "passed": 274,
+   "scenarios": 274
+  },
+  "nojit": {
+   "failed": 0,
+   "files": 137,
+   "passed": 274,
+   "scenarios": 274
+  },
+  "receipt": "doc/c2-s10.md",
+  "receipt_totals": "246/28 of 274"
+ },
+ "s10-setmethods": {
+  "diffs": {
+   "fulljit": {
+    "diff_count": 154,
+    "entries": [
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/union/allows-set-like-class.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/union/allows-set-like-class.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/union/add-not-called.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/union/add-not-called.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/union/appends-new-values.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/union/appends-new-values.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/union/allows-set-like-object.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/union/allows-set-like-object.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/union/combines-same-sets.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/union/combines-itself.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/union/combines-same-sets.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/union/combines-sets.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/union/combines-sets.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/union/combines-empty-sets.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/union/combines-itself.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/union/combines-empty-sets.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/union/converts-negative-zero.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/union/converts-negative-zero.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/union/result-order.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/union/result-order.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/union/set-like-array.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/union/set-like-array.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/union/subclass-symbol-species.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/union/subclass-symbol-species.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/union/subclass-receiver-methods.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/union/subclass.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/union/subclass.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/union/subclass-receiver-methods.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/intersection/add-not-called.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/intersection/allows-set-like-class.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/intersection/allows-set-like-object.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/intersection/allows-set-like-class.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/intersection/allows-set-like-object.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/intersection/add-not-called.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/intersection/combines-same-sets.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/intersection/combines-sets.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/intersection/combines-sets.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/intersection/combines-same-sets.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/intersection/combines-itself.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/intersection/combines-itself.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/intersection/converts-negative-zero.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/intersection/converts-negative-zero.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/intersection/result-order.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/intersection/result-order.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/intersection/set-like-array.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/intersection/set-like-array.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/intersection/subclass-receiver-methods.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/intersection/subclass-symbol-species.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/intersection/subclass-receiver-methods.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/intersection/subclass-symbol-species.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/difference/allows-set-like-class.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/difference/allows-set-like-object.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/difference/add-not-called.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/difference/allows-set-like-object.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/difference/add-not-called.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/intersection/subclass.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/intersection/subclass.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/difference/allows-set-like-class.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/difference/combines-itself.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/difference/combines-sets.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/difference/combines-same-sets.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/difference/combines-same-sets.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/difference/combines-itself.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/difference/combines-sets.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/difference/converts-negative-zero.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/difference/converts-negative-zero.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/difference/set-like-array.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/difference/result-order.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/difference/result-order.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/difference/set-like-array.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/difference/subclass-receiver-methods.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/difference/subclass-receiver-methods.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/difference/subclass-symbol-species.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/difference/subclass-symbol-species.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/difference/subclass.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/symmetricDifference/allows-set-like-object.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/symmetricDifference/allows-set-like-object.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/symmetricDifference/add-not-called.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/symmetricDifference/allows-set-like-class.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/symmetricDifference/allows-set-like-class.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/symmetricDifference/add-not-called.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/difference/subclass.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/symmetricDifference/combines-sets.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/symmetricDifference/combines-same-sets.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/symmetricDifference/combines-sets.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/symmetricDifference/combines-itself.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/symmetricDifference/combines-empty-sets.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/symmetricDifference/combines-empty-sets.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/symmetricDifference/combines-same-sets.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/symmetricDifference/combines-itself.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/symmetricDifference/converts-negative-zero.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/symmetricDifference/converts-negative-zero.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/symmetricDifference/set-like-array.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/symmetricDifference/result-order.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/symmetricDifference/result-order.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/symmetricDifference/set-like-array.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/symmetricDifference/subclass-receiver-methods.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/symmetricDifference/subclass.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/symmetricDifference/subclass-symbol-species.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/symmetricDifference/subclass.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/symmetricDifference/subclass-symbol-species.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/symmetricDifference/subclass-receiver-methods.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isSubsetOf/allows-set-like-class.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isSubsetOf/allows-set-like-object.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isSubsetOf/allows-set-like-object.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isSubsetOf/allows-set-like-class.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isSubsetOf/compares-same-sets.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isSubsetOf/compares-itself.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isSubsetOf/compares-same-sets.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isSubsetOf/compares-itself.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isSubsetOf/compares-sets.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isSubsetOf/compares-sets.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isSubsetOf/set-like-array.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isSubsetOf/set-like-array.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isSubsetOf/subclass-receiver-methods.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isSubsetOf/subclass-receiver-methods.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isSupersetOf/allows-set-like-object.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isSupersetOf/allows-set-like-object.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isSupersetOf/allows-set-like-class.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isSupersetOf/allows-set-like-class.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isSupersetOf/compares-empty-sets.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isSupersetOf/compares-itself.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isSupersetOf/compares-empty-sets.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isSupersetOf/compares-itself.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isSupersetOf/compares-same-sets.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isSupersetOf/converts-negative-zero.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isSupersetOf/compares-sets.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isSupersetOf/compares-sets.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isSupersetOf/compares-same-sets.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isSupersetOf/converts-negative-zero.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isSupersetOf/set-like-iter-return.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isSupersetOf/set-like-iter-return.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isDisjointFrom/allows-set-like-class.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isSupersetOf/subclass-receiver-methods.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isSupersetOf/subclass-receiver-methods.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isDisjointFrom/allows-set-like-class.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isDisjointFrom/allows-set-like-object.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isDisjointFrom/allows-set-like-object.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isDisjointFrom/compares-empty-sets.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isDisjointFrom/compares-empty-sets.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isDisjointFrom/compares-same-sets.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isDisjointFrom/compares-same-sets.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isDisjointFrom/compares-itself.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isDisjointFrom/compares-sets.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isDisjointFrom/compares-itself.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isDisjointFrom/converts-negative-zero.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isDisjointFrom/converts-negative-zero.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isDisjointFrom/compares-sets.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isDisjointFrom/set-like-array.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isDisjointFrom/set-like-iter-return.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isDisjointFrom/set-like-iter-return.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isDisjointFrom/set-like-array.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isDisjointFrom/subclass-receiver-methods.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Set/prototype/isDisjointFrom/subclass-receiver-methods.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     }
+    ]
+   },
+   "interp": {
+    "diff_count": 0,
+    "entries": []
+   }
+  },
+  "extra_flags": "",
+  "fulljit": {
+   "failed": 154,
+   "files": 186,
+   "passed": 218,
+   "scenarios": 372
+  },
+  "interp": {
+   "failed": 0,
+   "files": 186,
+   "passed": 372,
+   "scenarios": 372
+  },
+  "nojit": {
+   "failed": 0,
+   "files": 186,
+   "passed": 372,
+   "scenarios": 372
+  },
+  "receipt": "doc/c2-s10.md",
+  "receipt_totals": "330/42 of 372"
+ },
+ "s11-remainder": {
+  "diffs": {
+   "fulljit": {
+    "diff_count": 18,
+    "entries": [
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Object/groupBy/callback-throws.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Object/groupBy/callback-throws.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Object/groupBy/invalid-property-key.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Object/groupBy/invalid-property-key.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Object/groupBy/evenOdd.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Object/groupBy/evenOdd.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Object/groupBy/null-prototype.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Object/groupBy/null-prototype.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Object/groupBy/string.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Object/groupBy/string.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Map/groupBy/callback-throws.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Map/groupBy/callback-throws.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Map/groupBy/evenOdd.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Map/groupBy/evenOdd.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Map/groupBy/map-instance.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Map/groupBy/string.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Map/groupBy/map-instance.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Map/groupBy/string.js",
+      "message": "Host exited abnormally: {\"code\":null,\"signal\":\"SIGABRT\"}",
+      "mode": "fail",
+      "mode_shape": "crash:SIGABRT",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     }
+    ]
+   },
+   "interp": {
+    "diff_count": 0,
+    "entries": []
+   }
+  },
+  "extra_flags": "",
+  "fulljit": {
+   "failed": 18,
+   "files": 85,
+   "passed": 152,
+   "scenarios": 170
+  },
+  "interp": {
+   "failed": 0,
+   "files": 85,
+   "passed": 170,
+   "scenarios": 170
+  },
+  "nojit": {
+   "failed": 0,
+   "files": 85,
+   "passed": 170,
+   "scenarios": 170
+  },
+  "receipt": "doc/c2-s11.md",
+  "receipt_totals": "166/4 of 170"
+ },
+ "s11-replaceall": {
+  "diffs": {
+   "fulljit": {
+    "diff_count": 0,
+    "entries": []
+   },
+   "interp": {
+    "diff_count": 0,
+    "entries": []
+   }
+  },
+  "extra_flags": "",
+  "fulljit": {
+   "failed": 28,
+   "files": 45,
+   "passed": 62,
+   "scenarios": 90
+  },
+  "interp": {
+   "failed": 28,
+   "files": 45,
+   "passed": 62,
+   "scenarios": 90
+  },
+  "nojit": {
+   "failed": 28,
+   "files": 45,
+   "passed": 62,
+   "scenarios": 90
+  },
+  "receipt": "doc/c2-s11.md",
+  "receipt_totals": "60/30 of 90 (default flags; 86/4 with -ES6RegExSymbols)"
+ },
+ "s12-modules": {
+  "diffs": {
+   "fulljit": {
+    "diff_count": 0,
+    "entries": []
+   },
+   "interp": {
+    "diff_count": 0,
+    "entries": []
+   }
+  },
+  "extra_flags": "",
+  "fulljit": {
+   "failed": 174,
+   "files": 728,
+   "passed": 563,
+   "scenarios": 737
+  },
+  "interp": {
+   "failed": 174,
+   "files": 728,
+   "passed": 563,
+   "scenarios": 737
+  },
+  "nojit": {
+   "failed": 174,
+   "files": 728,
+   "passed": 563,
+   "scenarios": 737
+  },
+  "receipt": "doc/c2-s12-import-attributes.md",
+  "receipt_totals": "565/172 of 737"
+ },
+ "s13-weakref-fr": {
+  "diffs": {
+   "fulljit": {
+    "diff_count": 0,
+    "entries": []
+   },
+   "interp": {
+    "diff_count": 0,
+    "entries": []
+   }
+  },
+  "extra_flags": "",
+  "fulljit": {
+   "failed": 0,
+   "files": 76,
+   "passed": 152,
+   "scenarios": 152
+  },
+  "interp": {
+   "failed": 0,
+   "files": 76,
+   "passed": 152,
+   "scenarios": 152
+  },
+  "nojit": {
+   "failed": 0,
+   "files": 76,
+   "passed": 152,
+   "scenarios": 152
+  },
+  "receipt": "doc/c2-s13-weakref.md + doc/c2-s13-finalization-registry.md",
+  "receipt_totals": "WeakRef 58/0 of 58 + FinalizationRegistry 94/0 of 94"
+ },
+ "s14-blockscope": {
+  "diffs": {
+   "fulljit": {
+    "diff_count": 0,
+    "entries": []
+   },
+   "interp": {
+    "diff_count": 0,
+    "entries": []
+   }
+  },
+  "extra_flags": "",
+  "fulljit": {
+   "failed": 0,
+   "files": 145,
+   "passed": 287,
+   "scenarios": 287
+  },
+  "interp": {
+   "failed": 0,
+   "files": 145,
+   "passed": 287,
+   "scenarios": 287
+  },
+  "nojit": {
+   "failed": 0,
+   "files": 145,
+   "passed": 287,
+   "scenarios": 287
+  },
+  "receipt": "doc/c2-s14-annexb-var-skip.md / doc/c2-s14-blockscope.md",
+  "receipt_totals": "287/0 of 287"
+ },
+ "s14-eval": {
+  "diffs": {
+   "fulljit": {
+    "diff_count": 0,
+    "entries": []
+   },
+   "interp": {
+    "diff_count": 0,
+    "entries": []
+   }
+  },
+  "extra_flags": "",
+  "fulljit": {
+   "failed": 0,
+   "files": 347,
+   "passed": 454,
+   "scenarios": 454
+  },
+  "interp": {
+   "failed": 0,
+   "files": 347,
+   "passed": 454,
+   "scenarios": 454
+  },
+  "nojit": {
+   "failed": 0,
+   "files": 347,
+   "passed": 454,
+   "scenarios": 454
+  },
+  "receipt": "doc/c2-s14-eval-nonsimple-var.md / doc/c2-s14-eval-hidden-outer.md",
+  "receipt_totals": "454/0 of 454"
+ },
+ "s14-labeled-finally": {
+  "diffs": {
+   "fulljit": {
+    "diff_count": 0,
+    "entries": []
+   },
+   "interp": {
+    "diff_count": 0,
+    "entries": []
+   }
+  },
+  "extra_flags": "",
+  "fulljit": {
+   "failed": 12,
+   "files": 610,
+   "passed": 1171,
+   "scenarios": 1183
+  },
+  "interp": {
+   "failed": 12,
+   "files": 610,
+   "passed": 1171,
+   "scenarios": 1183
+  },
+  "nojit": {
+   "failed": 12,
+   "files": 610,
+   "passed": 1171,
+   "scenarios": 1183
+  },
+  "receipt": "doc/c2-s14-labeled-break-finally.md",
+  "receipt_totals": "1171/12 of 1183"
+ },
+ "s2-bigint": {
+  "diffs": {
+   "fulljit": {
+    "diff_count": 0,
+    "entries": []
+   },
+   "interp": {
+    "diff_count": 0,
+    "entries": []
+   }
+  },
+  "extra_flags": "",
+  "fulljit": {
+   "failed": 904,
+   "files": 1729,
+   "passed": 2531,
+   "scenarios": 3435
+  },
+  "interp": {
+   "failed": 904,
+   "files": 1729,
+   "passed": 2531,
+   "scenarios": 3435
+  },
+  "nojit": {
+   "failed": 904,
+   "files": 1729,
+   "passed": 2531,
+   "scenarios": 3435
+  },
+  "receipt": "doc/c2-s2-bigint-default.md",
+  "receipt_totals": "A1 flag-on pre-flip 2531/904 of 3435; BigInt is default-on at this base, nojit run is the reference"
+ },
+ "s3a-property-escapes": {
+  "diffs": {
+   "fulljit": {
+    "diff_count": 0,
+    "entries": []
+   },
+   "interp": {
+    "diff_count": 0,
+    "entries": []
+   }
+  },
+  "extra_flags": "",
+  "fulljit": {
+   "failed": 118,
+   "files": 990,
+   "passed": 1862,
+   "scenarios": 1980
+  },
+  "interp": {
+   "failed": 118,
+   "files": 990,
+   "passed": 1862,
+   "scenarios": 1980
+  },
+  "nojit": {
+   "failed": 118,
+   "files": 990,
+   "passed": 1862,
+   "scenarios": 1980
+  },
+  "receipt": "doc/c2-s3-property-escapes.md; final state per doc/c2-s9-codepoint-search.md",
+  "receipt_totals": "1828/152 (S3-b final) -> 1862/118 (S9 final) of 1980"
+ },
+ "s3b-v-universe": {
+  "diffs": {
+   "fulljit": {
+    "diff_count": 0,
+    "entries": []
+   },
+   "interp": {
+    "diff_count": 0,
+    "entries": []
+   }
+  },
+  "extra_flags": "",
+  "fulljit": {
+   "failed": 28,
+   "files": 187,
+   "passed": 346,
+   "scenarios": 374
+  },
+  "interp": {
+   "failed": 28,
+   "files": 187,
+   "passed": 346,
+   "scenarios": 374
+  },
+  "nojit": {
+   "failed": 28,
+   "files": 187,
+   "passed": 346,
+   "scenarios": 374
+  },
+  "receipt": "doc/c2-s3-v-flag.md; v-universe spelling per doc/c2-s9-codepoint-search.md",
+  "receipt_totals": "346/28 of 374"
+ },
+ "s4-optchain": {
+  "diffs": {
+   "fulljit": {
+    "diff_count": 0,
+    "entries": []
+   },
+   "interp": {
+    "diff_count": 0,
+    "entries": []
+   }
+  },
+  "extra_flags": "",
+  "fulljit": {
+   "failed": 6,
+   "files": 116,
+   "passed": 202,
+   "scenarios": 208
+  },
+  "interp": {
+   "failed": 6,
+   "files": 116,
+   "passed": 202,
+   "scenarios": 208
+  },
+  "nojit": {
+   "failed": 6,
+   "files": 116,
+   "passed": 202,
+   "scenarios": 208
+  },
+  "receipt": "doc/c2-s4.md",
+  "receipt_totals": "154/54 of 208"
+ },
+ "s5-iterator": {
+  "diffs": {
+   "fulljit": {
+    "diff_count": 0,
+    "entries": []
+   },
+   "interp": {
+    "diff_count": 0,
+    "entries": []
+   }
+  },
+  "extra_flags": "",
+  "fulljit": {
+   "failed": 474,
+   "files": 654,
+   "passed": 834,
+   "scenarios": 1308
+  },
+  "interp": {
+   "failed": 474,
+   "files": 654,
+   "passed": 834,
+   "scenarios": 1308
+  },
+  "nojit": {
+   "failed": 474,
+   "files": 654,
+   "passed": 834,
+   "scenarios": 1308
+  },
+  "receipt": "doc/c2-s5.md",
+  "receipt_totals": "812/496 of 1308"
+ },
+ "s6-sab-atomics": {
+  "diffs": {
+   "fulljit": {
+    "diff_count": 11,
+    "entries": [
+     {
+      "direction": "fail->pass",
+      "file": "built-ins/Atomics/waitAsync/no-spurious-wakeup-no-operation.js",
+      "message": "",
+      "mode": "pass",
+      "mode_shape": "wrong-result",
+      "nojit": "fail",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Atomics/waitAsync/no-spurious-wakeup-on-add.js",
+      "message": "Test262Error: The result of evaluating `(lapse >= TIMEOUT)` is true",
+      "mode": "fail",
+      "mode_shape": "wrong-result",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "fail->pass",
+      "file": "built-ins/Atomics/waitAsync/no-spurious-wakeup-on-add.js",
+      "message": "",
+      "mode": "pass",
+      "mode_shape": "wrong-result",
+      "nojit": "fail",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "fail->pass",
+      "file": "built-ins/Atomics/waitAsync/no-spurious-wakeup-on-and.js",
+      "message": "",
+      "mode": "pass",
+      "mode_shape": "wrong-result",
+      "nojit": "fail",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "fail->pass",
+      "file": "built-ins/Atomics/waitAsync/no-spurious-wakeup-on-or.js",
+      "message": "",
+      "mode": "pass",
+      "mode_shape": "wrong-result",
+      "nojit": "fail",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "fail->pass",
+      "file": "built-ins/Atomics/waitAsync/bigint/no-spurious-wakeup-on-and.js",
+      "message": "",
+      "mode": "pass",
+      "mode_shape": "wrong-result",
+      "nojit": "fail",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Atomics/waitAsync/bigint/no-spurious-wakeup-on-compareExchange.js",
+      "message": "Test262Error: The result of evaluating `(lapse >= TIMEOUT)` is true",
+      "mode": "fail",
+      "mode_shape": "wrong-result",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "fail->pass",
+      "file": "built-ins/Atomics/waitAsync/bigint/no-spurious-wakeup-on-exchange.js",
+      "message": "",
+      "mode": "pass",
+      "mode_shape": "wrong-result",
+      "nojit": "fail",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "fail->pass",
+      "file": "built-ins/Atomics/waitAsync/bigint/no-spurious-wakeup-on-or.js",
+      "message": "",
+      "mode": "pass",
+      "mode_shape": "wrong-result",
+      "nojit": "fail",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "fail->pass",
+      "file": "built-ins/Atomics/waitAsync/bigint/no-spurious-wakeup-on-sub.js",
+      "message": "",
+      "mode": "pass",
+      "mode_shape": "wrong-result",
+      "nojit": "fail",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "pass->fail",
+      "file": "built-ins/Atomics/waitAsync/bigint/no-spurious-wakeup-on-xor.js",
+      "message": "Test262Error: The result of evaluating `(lapse >= TIMEOUT)` is true",
+      "mode": "fail",
+      "mode_shape": "wrong-result",
+      "nojit": "pass",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     }
+    ]
+   },
+   "interp": {
+    "diff_count": 9,
+    "entries": [
+     {
+      "direction": "fail->pass",
+      "file": "built-ins/Atomics/waitAsync/no-spurious-wakeup-no-operation.js",
+      "message": "",
+      "mode": "pass",
+      "mode_shape": "wrong-result",
+      "nojit": "fail",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "fail->pass",
+      "file": "built-ins/Atomics/waitAsync/no-spurious-wakeup-on-add.js",
+      "message": "",
+      "mode": "pass",
+      "mode_shape": "wrong-result",
+      "nojit": "fail",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "fail->pass",
+      "file": "built-ins/Atomics/waitAsync/no-spurious-wakeup-on-and.js",
+      "message": "",
+      "mode": "pass",
+      "mode_shape": "wrong-result",
+      "nojit": "fail",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "fail->pass",
+      "file": "built-ins/Atomics/waitAsync/no-spurious-wakeup-on-or.js",
+      "message": "",
+      "mode": "pass",
+      "mode_shape": "wrong-result",
+      "nojit": "fail",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "fail->pass",
+      "file": "built-ins/Atomics/waitAsync/no-spurious-wakeup-on-sub.js",
+      "message": "",
+      "mode": "pass",
+      "mode_shape": "wrong-result",
+      "nojit": "fail",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "fail->pass",
+      "file": "built-ins/Atomics/waitAsync/bigint/no-spurious-wakeup-on-and.js",
+      "message": "",
+      "mode": "pass",
+      "mode_shape": "wrong-result",
+      "nojit": "fail",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "fail->pass",
+      "file": "built-ins/Atomics/waitAsync/bigint/no-spurious-wakeup-on-exchange.js",
+      "message": "",
+      "mode": "pass",
+      "mode_shape": "wrong-result",
+      "nojit": "fail",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     },
+     {
+      "direction": "fail->pass",
+      "file": "built-ins/Atomics/waitAsync/bigint/no-spurious-wakeup-on-or.js",
+      "message": "",
+      "mode": "pass",
+      "mode_shape": "wrong-result",
+      "nojit": "fail",
+      "nojit_shape": "wrong-result",
+      "scenario": "strict mode"
+     },
+     {
+      "direction": "fail->pass",
+      "file": "built-ins/Atomics/waitAsync/bigint/no-spurious-wakeup-on-sub.js",
+      "message": "",
+      "mode": "pass",
+      "mode_shape": "wrong-result",
+      "nojit": "fail",
+      "nojit_shape": "wrong-result",
+      "scenario": "default"
+     }
+    ]
+   }
+  },
+  "extra_flags": "-ESSharedArrayBuffer",
+  "fulljit": {
+   "failed": 86,
+   "files": 491,
+   "passed": 896,
+   "scenarios": 982
+  },
+  "interp": {
+   "failed": 82,
+   "files": 491,
+   "passed": 900,
+   "scenarios": 982
+  },
+  "nojit": {
+   "failed": 91,
+   "files": 491,
+   "passed": 891,
+   "scenarios": 982
+  },
+  "receipt": "doc/c2-s6-growable-nonshared.md",
+  "receipt_totals": "574/408 of 982"
+ },
+ "s8-float16": {
+  "diffs": {
+   "fulljit": {
+    "diff_count": 0,
+    "entries": []
+   },
+   "interp": {
+    "diff_count": 0,
+    "entries": []
+   }
+  },
+  "extra_flags": "",
+  "fulljit": {
+   "failed": 492,
+   "files": 2752,
+   "passed": 4966,
+   "scenarios": 5458
+  },
+  "interp": {
+   "failed": 492,
+   "files": 2752,
+   "passed": 4966,
+   "scenarios": 5458
+  },
+  "nojit": {
+   "failed": 492,
+   "files": 2752,
+   "passed": 4966,
+   "scenarios": 5458
+  },
+  "receipt": "doc/c2-s8-float16array.md",
+  "receipt_totals": "681/765 + 1676/1214 + 882/240 (three sub-runs)"
+ },
+ "s8-resizable": {
+  "diffs": {
+   "fulljit": {
+    "diff_count": 0,
+    "entries": []
+   },
+   "interp": {
+    "diff_count": 0,
+    "entries": []
+   }
+  },
+  "extra_flags": "",
+  "fulljit": {
+   "failed": 30,
+   "files": 417,
+   "passed": 804,
+   "scenarios": 834
+  },
+  "interp": {
+   "failed": 30,
+   "files": 417,
+   "passed": 804,
+   "scenarios": 834
+  },
+  "nojit": {
+   "failed": 30,
+   "files": 417,
+   "passed": 804,
+   "scenarios": 834
+  },
+  "receipt": "doc/c2-s8-resizable.md",
+  "receipt_totals": "424/834 (resizable receipt final)"
+ },
+ "s9-regexp": {
+  "diffs": {
+   "fulljit": {
+    "diff_count": 0,
+    "entries": []
+   },
+   "interp": {
+    "diff_count": 0,
+    "entries": []
+   }
+  },
+  "extra_flags": "",
+  "fulljit": {
+   "failed": 84,
+   "files": 814,
+   "passed": 1544,
+   "scenarios": 1628
+  },
+  "interp": {
+   "failed": 84,
+   "files": 814,
+   "passed": 1544,
+   "scenarios": 1628
+  },
+  "nojit": {
+   "failed": 84,
+   "files": 814,
+   "passed": 1544,
+   "scenarios": 1628
+  },
+  "receipt": "doc/c2-s9-u-strictness.md final state (literals + adjacent + annexB)",
+  "receipt_totals": "480/0 + 988/20 of 1008 + annexB 286/64 of 350"
+ }
+}

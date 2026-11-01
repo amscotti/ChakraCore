@@ -1,0 +1,224 @@
+{
+  "comment": "C2 per-batch test262 corpora for the Mac ARM64 JIT measurement campaign (doc/c2-jit-test262.md). Globs and flags are taken from each batch receipt's own evidence section; 'receipt' records the receipt's final no-JIT totals on the same pinned corpus for cross-checking.",
+  "modes": {
+    "nojit":  "-nonative",
+    "interp": "-maxInterpretCount:1 -maxSimpleJitRunCount:1 -bgjit-",
+    "fulljit": "-forceNative -off:simpleJit -bgJitDelay:0"
+  },
+  "common_flags": "-Test262 -CollectGarbage -NegativePhaseReport",
+  "batches": [
+    {
+      "name": "s4-optchain",
+      "receipt": "doc/c2-s4.md",
+      "globs": [
+        "test/language/expressions/optional-chaining/**/*.js",
+        "test/language/expressions/logical-assignment/**/*.js"
+      ],
+      "extra_flags": "",
+      "receipt_totals": "154/54 of 208"
+    },
+    {
+      "name": "s5-iterator",
+      "receipt": "doc/c2-s5.md",
+      "globs": ["test/built-ins/Iterator/**/*.js"],
+      "extra_flags": "",
+      "receipt_totals": "812/496 of 1308"
+    },
+    {
+      "name": "s10-copy",
+      "receipt": "doc/c2-s10.md",
+      "globs": [
+        "test/built-ins/Array/prototype/toReversed/**/*.js",
+        "test/built-ins/Array/prototype/toSorted/**/*.js",
+        "test/built-ins/Array/prototype/toSpliced/**/*.js",
+        "test/built-ins/Array/prototype/with/**/*.js",
+        "test/built-ins/TypedArray/prototype/toReversed/**/*.js",
+        "test/built-ins/TypedArray/prototype/toSorted/**/*.js",
+        "test/built-ins/TypedArray/prototype/with/**/*.js"
+      ],
+      "extra_flags": "",
+      "receipt_totals": "246/28 of 274"
+    },
+    {
+      "name": "s10-setmethods",
+      "receipt": "doc/c2-s10.md",
+      "globs": [
+        "test/built-ins/Set/prototype/union/**/*.js",
+        "test/built-ins/Set/prototype/intersection/**/*.js",
+        "test/built-ins/Set/prototype/difference/**/*.js",
+        "test/built-ins/Set/prototype/symmetricDifference/**/*.js",
+        "test/built-ins/Set/prototype/isSubsetOf/**/*.js",
+        "test/built-ins/Set/prototype/isSupersetOf/**/*.js",
+        "test/built-ins/Set/prototype/isDisjointFrom/**/*.js"
+      ],
+      "extra_flags": "",
+      "receipt_totals": "330/42 of 372"
+    },
+    {
+      "name": "s11-replaceall",
+      "receipt": "doc/c2-s11.md",
+      "globs": ["test/built-ins/String/prototype/replaceAll/**/*.js"],
+      "extra_flags": "",
+      "receipt_totals": "60/30 of 90 (default flags; 86/4 with -ES6RegExSymbols)"
+    },
+    {
+      "name": "s11-remainder",
+      "receipt": "doc/c2-s11.md",
+      "globs": [
+        "test/built-ins/Object/groupBy/**/*.js",
+        "test/built-ins/Map/groupBy/**/*.js",
+        "test/built-ins/RegExp/escape/**/*.js",
+        "test/built-ins/Promise/try/**/*.js",
+        "test/built-ins/Promise/withResolvers/**/*.js",
+        "test/built-ins/String/prototype/isWellFormed/**/*.js",
+        "test/built-ins/String/prototype/toWellFormed/**/*.js"
+      ],
+      "extra_flags": "",
+      "receipt_totals": "166/4 of 170"
+    },
+    {
+      "name": "s1-class",
+      "receipt": "doc/c2-s1-tail-privates.md (elements subset); c1-triage S1 full trees",
+      "globs": [
+        "test/language/statements/class/**/*.js",
+        "test/language/expressions/class/**/*.js"
+      ],
+      "extra_flags": "",
+      "receipt_totals": "elements dirs only: 5888/9; full-tree totals recorded by this campaign's nojit run"
+    },
+    {
+      "name": "s2-bigint",
+      "receipt": "doc/c2-s2-bigint-default.md",
+      "globs": [],
+      "globs_from_file": "tools/jit-test262/s2-bigint-selection.txt",
+      "extra_flags": "",
+      "receipt_totals": "A1 flag-on pre-flip 2531/904 of 3435; BigInt is default-on at this base, nojit run is the reference"
+    },
+    {
+      "name": "s3a-property-escapes",
+      "receipt": "doc/c2-s3-property-escapes.md; final state per doc/c2-s9-codepoint-search.md",
+      "globs": [
+        "test/built-ins/RegExp/property-escapes/**/*.js",
+        "test/built-ins/RegExp/match-indices/**/*.js",
+        "test/built-ins/RegExp/lookBehind/**/*.js",
+        "test/built-ins/RegExp/named-groups/**/*.js",
+        "test/built-ins/RegExp/regexp-modifiers/**/*.js",
+        "test/language/literals/regexp/**/*.js"
+      ],
+      "extra_flags": "",
+      "receipt_totals": "1828/152 (S3-b final) -> 1862/118 (S9 final) of 1980"
+    },
+    {
+      "name": "s3b-v-universe",
+      "receipt": "doc/c2-s3-v-flag.md; v-universe spelling per doc/c2-s9-codepoint-search.md",
+      "globs": [
+        "test/built-ins/RegExp/unicodeSets/**/*.js",
+        "test/built-ins/RegExp/prototype/unicodeSets/**/*.js",
+        "test/built-ins/RegExp/property-escapes/generated/strings/**/*.js",
+        "test/built-ins/RegExp/prototype/exec/regexp-builtin-exec-v-u-flag.js",
+        "test/built-ins/RegExp/prototype/flags/this-val-regexp.js",
+        "test/built-ins/String/prototype/match/regexp-prototype-match-v-u-flag.js",
+        "test/built-ins/String/prototype/matchAll/regexp-prototype-matchAll-v-u-flag.js",
+        "test/built-ins/String/prototype/replace/regexp-prototype-replace-v-u-flag.js",
+        "test/built-ins/String/prototype/search/regexp-prototype-search-v-flag.js",
+        "test/built-ins/String/prototype/search/regexp-prototype-search-v-u-flag.js"
+      ],
+      "extra_flags": "",
+      "receipt_totals": "346/28 of 374"
+    },
+    {
+      "name": "s6-sab-atomics",
+      "receipt": "doc/c2-s6-growable-nonshared.md",
+      "globs": [
+        "test/built-ins/Atomics/**/*.js",
+        "test/built-ins/SharedArrayBuffer/**/*.js"
+      ],
+      "extra_flags": "-ESSharedArrayBuffer",
+      "receipt_totals": "574/408 of 982"
+    },
+    {
+      "name": "s8-resizable",
+      "receipt": "doc/c2-s8-resizable.md",
+      "globs": [
+        "test/built-ins/ArrayBuffer/**/*.js",
+        "test/built-ins/DataView/**/*resizable*",
+        "test/built-ins/TypedArray/**/*resizable*",
+        "test/built-ins/TypedArray/**/*out-of-bounds*"
+      ],
+      "extra_flags": "",
+      "receipt_totals": "424/834 (resizable receipt final)"
+    },
+    {
+      "name": "s8-float16",
+      "receipt": "doc/c2-s8-float16array.md",
+      "globs": [
+        "test/built-ins/TypedArrayConstructors/**/*.js",
+        "test/built-ins/TypedArray/**/*.js",
+        "test/built-ins/DataView/**/*.js"
+      ],
+      "extra_flags": "",
+      "receipt_totals": "681/765 + 1676/1214 + 882/240 (three sub-runs)"
+    },
+    {
+      "name": "s9-regexp",
+      "receipt": "doc/c2-s9-u-strictness.md final state (literals + adjacent + annexB)",
+      "globs": [
+        "test/language/literals/regexp/**/*.js",
+        "test/built-ins/RegExp/*.js",
+        "test/built-ins/RegExp/CharacterClassEscapes/**/*.js",
+        "test/built-ins/RegExp/dotall/**/*.js",
+        "test/annexB/built-ins/RegExp/**/*.js",
+        "test/annexB/built-ins/String/prototype/split/**/*.js",
+        "test/annexB/built-ins/String/prototype/replace/**/*.js",
+        "test/annexB/language/literals/regexp/**/*.js"
+      ],
+      "extra_flags": "",
+      "receipt_totals": "480/0 + 988/20 of 1008 + annexB 286/64 of 350"
+    },
+    {
+      "name": "s12-modules",
+      "receipt": "doc/c2-s12-import-attributes.md",
+      "globs": [
+        "test/language/import/**/*.js",
+        "test/language/module-code/**/*.js"
+      ],
+      "extra_flags": "",
+      "receipt_totals": "565/172 of 737"
+    },
+    {
+      "name": "s13-weakref-fr",
+      "receipt": "doc/c2-s13-weakref.md + doc/c2-s13-finalization-registry.md",
+      "globs": [
+        "test/built-ins/WeakRef/**/*.js",
+        "test/built-ins/FinalizationRegistry/**/*.js"
+      ],
+      "extra_flags": "",
+      "receipt_totals": "WeakRef 58/0 of 58 + FinalizationRegistry 94/0 of 94"
+    },
+    {
+      "name": "s14-blockscope",
+      "receipt": "doc/c2-s14-annexb-var-skip.md / doc/c2-s14-blockscope.md",
+      "globs": ["test/language/block-scope/**/*.js"],
+      "extra_flags": "",
+      "receipt_totals": "287/0 of 287"
+    },
+    {
+      "name": "s14-eval",
+      "receipt": "doc/c2-s14-eval-nonsimple-var.md / doc/c2-s14-eval-hidden-outer.md",
+      "globs": ["test/language/eval-code/**/*.js"],
+      "extra_flags": "",
+      "receipt_totals": "454/0 of 454"
+    },
+    {
+      "name": "s14-labeled-finally",
+      "receipt": "doc/c2-s14-labeled-break-finally.md",
+      "globs": [
+        "test/language/statements/labeled/**/*.js",
+        "test/language/statements/try/**/*.js",
+        "test/language/statements/for/**/*.js"
+      ],
+      "extra_flags": "",
+      "receipt_totals": "1171/12 of 1183"
+    }
+  ]
+}
