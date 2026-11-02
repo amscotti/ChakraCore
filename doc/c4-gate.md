@@ -70,15 +70,18 @@ BLOCKED: C4 now has a phase-proven starting point and an exact owed list.
    compound-assignment/eval-var family 66+ (S14 stream, documented
    residuals); detached-buffer TypedArray/DataView ~104
    (align-detached-buffer decision); class-element residue ~84 (S1 tail);
-   `let`-newline ASI over-rejection 22; early-error executions ~70 (S14);
+   rfm `let`-newline ASI over-rejection 14; early-error executions ~70 (S14);
    property-escapes residue 114 (S3 lead-surrogate, decision-blocked);
    cross-realm 185; `Reflect`/`Proxy` tails.
 3. **host 426** — *host lane.* 419 are dynamic-import fixture
    `URIError`s from the ch host loader; fix the loader or record the
    host-applicability limit explicitly (it is currently an unjustified
-   failure, not a skip).
+   failure, not a skip). Review correction: the remaining 7 are 1
+   harness-shaped module-resolution failure + 6 deterministic
+   engine timeouts (4 Array integer-limit O(2^53) work, 2 Atomics-wait
+   hangs) — engine-owned work, not loader issues.
 4. **required-feature-missing 220** — mostly collapses with 1(b) (156
-   RegExp/prototype getters); remainder ~64: `let`-ASI 22 and misc
+   RegExp/prototype getters); remainder ~64: `let`-ASI 14 (review-corrected; rfm-bucketed over-rejections, S14-adjacent) and misc
    parse-gaps, each small enough to fold into S14-adjacent lanes.
 
 Zero-failure clauses 3–6 need no work; re-run this lane's commands after

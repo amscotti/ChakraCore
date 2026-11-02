@@ -45,14 +45,14 @@ classification, not per-test root-cause proof). Broad failures 15,873 =
 |---|---:|---|
 | post-ES2025 (excluded from edition score) | 11,793 | `Temporal` 9,226; `Array.fromAsync` 186; `explicit-resource-management` 709; `source-phase-imports` 187+83; `ShadowRealm` 124 … |
 | disabled-flag | **1,734** | `ESSharedArrayBuffer` **1,176** (Atomics 744, SharedArrayBuffer 208, SAB-gated TypedArray/DataView 186, …); `ES6RegExSymbols` **558** (RegExp Symbol protocol 412, String matchAll 96, RegExpStringIterator 34, …) |
-| engine-defect-on-existing | **1,700** | dynamic-import (non-host-shaped) 124; compound-assignment 66; detached-buffer TypedArray/DataView ~104; class residue ~84; `let`-ASI over-rejection; early-error `$DONOTEVALUATE` executions ~70; … |
+| engine-defect-on-existing | **1,700** | dynamic-import (non-host-shaped) 124; compound-assignment 66; detached-buffer TypedArray/DataView ~104; class residue ~84; rfm `let`-ASI over-rejection (14; mis-signaled as missing — the feature exists); early-error `$DONOTEVALUATE` executions ~70; … |
 | host | **426** | dynamic-import fixture loader `URIError` 419 (+4 Array, 2 Atomics wait, 1 module-code) |
-| required-feature-missing | **220** | `RegExp/prototype` accessor getters (the `-ES6RegExPrototypeProperties` substrate seen through the missing-signal rule: `dotAll`/`flags`/`source`/`hasIndices`/… descriptors absent) 156; `let`-newline ASI SyntaxErrors 22; … |
+| required-feature-missing | **220** | `RegExp/prototype` accessor getters (the `-ES6RegExPrototypeProperties` substrate seen through the missing-signal rule: `dotAll`/`flags`/`source`/`hasIndices`/… descriptors absent) 156; `let`-newline ASI SyntaxErrors 14 (review-corrected from 22; all 14 sit in this rfm bucket — the earlier engine-defect listing was a double-count); … |
 
 Top edition-selected failure directories: `RegExp/prototype` 588 ·
 `language/expressions/dynamic-import` 543 · `Atomics` 746 ·
 `SharedArrayBuffer` 208 · `TypedArray/prototype` 128 ·
-`TypedArrayConstructors/internals` 116 · `String/prototype` 116 ·
+`TypedArrayConstructors/internals` 116 · `String/prototype` 114 (review-corrected) ·
 `RegExp/property-escapes` 112 · `language/expressions/compound-assignment` 66.
 
 ## 3. Negative-phase statistics (host-reported phase)
@@ -64,7 +64,7 @@ Top edition-selected failure directories: `RegExp/prototype` 588 ·
   (`Negative phase mismatch`): the post-ES2025-excluded `import-defer`
   scenario — correct: the parser still rejects `import defer` at parse
   where resolution is declared.
-- 79 marker-less negatives (crash/timeout shape fallback; all
+- 79 fallback negatives (78 marker+harness-failed — markers present but the harness failed, so pass-side judging does not apply; 1 truly marker-less; review-corrected wording; all
   harness-failed): 78 `marker+harness-failed`, 1 `shape+harness-failed`.
 - 0 shape suspects among marker-judged records (clean by construction).
 - Known host limits carried from [c1-negative-phase.md](c1-negative-phase.md):

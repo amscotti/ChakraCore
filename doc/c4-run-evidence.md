@@ -96,7 +96,7 @@ that worktree's `out/test262-np-baseline`), key `(file, scenario)`:
 
 ## 4. Feature probes (observed)
 
-- Committed probe: `zig-out/bin/ch tools/test262/feature-probe.js` →
+- Committed probe: `zig-out/bin/ch feature-probe.js  # CWD must be tools/test262 (module fixtures resolve against CWD)` →
   `FEATURE-PROBE-COMPLETE`; transcript quoted in
   [c4-manifest.md](c4-manifest.md) §5.
 - Extended ES2025 probe (`out/test262-c4-cert/es2025-probe.js`, saved from
