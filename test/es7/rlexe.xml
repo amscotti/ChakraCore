@@ -2,6 +2,12 @@
 <regress-exe>
   <test>
     <default>
+      <files>async-microtask-order.js</files>
+      <baseline>async-microtask-order.baseline</baseline>
+    </default>
+  </test>
+  <test>
+    <default>
       <files>asyncawait-syntax.js</files>
       <compile-flags>-nodeferparse -args summary -endargs</compile-flags>
     </default>

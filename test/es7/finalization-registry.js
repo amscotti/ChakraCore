@@ -190,7 +190,13 @@ removedRegistry.register(removedTarget, removedHeld, removedToken);
 removedTarget = null;
 removedRegistry.unregister(removedToken);
 
-// Unregistered by a 0 ms host task before the queued cleanup job runs.
+// Cleanup-job ordering vs a 0 ms host task. Cleanup jobs are engine host
+// tasks (EnqueueTask → promise continuation), so with the corrected host
+// semantics (gc-async-continuation, doc/e2-gc-async-continuation.md) the
+// job queued by the script-time CollectGarbage drains at the microtask
+// checkpoint BEFORE any timer message — a later 0 ms timer can no longer
+// unregister the cell first. The timer therefore observes the callback
+// already ran (unregister returns false, timerSeen incremented).
 var timerToken = {};
 var timerTarget = {};
 var timerHeld = { marker: "timer-unregistered" };
@@ -198,8 +204,8 @@ var timerSeen = 0;
 var timerRegistry = new FinalizationRegistry(function () { timerSeen++; });
 timerRegistry.register(timerTarget, timerHeld, timerToken);
 timerTarget = null;
-WScript.SetTimeout(function unregisterBeforeCleanup() {
-    check(timerRegistry.unregister(timerToken) === true, "timer unregister");
+WScript.SetTimeout(function unregisterAfterCleanup() {
+    check(timerRegistry.unregister(timerToken) === false, "timer unregister after cleanup job");
 }, 0);
 
 // Duplicate registrations of the same target produce two independent cells,
@@ -269,7 +275,7 @@ WScript.SetTimeout(function job2() {
         "duplicate registrations produce two cleanup callbacks");
     check(typeof persistHeldRef.deref() === "object", "heldValue strongly held while target is alive");
     check(multiA.length >= MULTI_COUNT - CLEAR_ALLOWANCE && multiB.length >= MULTI_COUNT - CLEAR_ALLOWANCE, "multiple registries/registrations");
-    check(timerSeen === 0, "unregister before cleanup prevents callback");
+    check(timerSeen === 1, "cleanup job runs before the 0 ms timer");
     check(removedSeen === 0, "unregister prevents callback");
     check(liveSeen === 0, "no cleanup while target strongly reachable");
 
@@ -311,7 +317,7 @@ WScript.SetTimeout(function job2() {
             }
         }
         check(weakHeldObjects >= B_COUNT - CLEAR_ALLOWANCE, "weak-target heldValues strongly held");
-        check(timerSeen === 0 && removedSeen === 0, "no callback after unregister");
+        check(timerSeen === 1 && removedSeen === 0, "no callback after synchronous unregister");
         check(failures.length === 0, "no recorded failures");
         print("pass");
     }, 10);

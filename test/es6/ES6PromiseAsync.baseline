@@ -199,25 +199,12 @@ Test #92 - Error handler #3 called with err.errors = undefined
 Test #6 - Error handler #2 called with err = thenable.get:error!
 Test #8 - Error handler #2 called with err = success.throw:error
 Test #9 - Error handler #2 called with err = error.throw:error
-Test #10 - Error handler called with err = TypeError: Object used to resolve a promise creates a circular resolution
 Test #12 - Catch handler #2 called with err = error2
 Test #13 - Success handler #1 called with result = ok
 Test #14 - Success handler #1 called with result = success
 Test #26 - Success handler #1 called with result = first promise
-Test #27 - p1 success: p1
-Test #27 - p2 success: p2
-Test #27 - p3 failure: p3
-Test #28 - p1 failure: p1
-Test #28 - p2 success: p2
-Test #28 - p3 success: p3
 Test #29 - Success handler #1 called with result = first promise value
 Test #36 - Error handler #1 called with err = third promise
-Test #37 - p1 success: p1
-Test #37 - p2 success: p2
-Test #37 - p3 failure: p3
-Test #38 - p1 success: p1
-Test #38 - p2 success: p2
-Test #38 - p3 success: p3
 Test #39 - Success handler #1 called with result = success value 1,42,TypeError: an error
 Test #47 - Success handler #1b called with result = '3' (isArray = false) (fulfillCalled = false)
 Test #48 - Error handler #1 called with err = 2
@@ -225,50 +212,63 @@ Test #59 - Success - Rejected status and value passed through finally with not c
 Test #60 - Success - Resolved status and value passed through finally with not callable argument
 Test #61 - Success - own rejection passed through finally
 Test #62 - Success - own rejection passed through finally
-Test #64 - p1 success: p1
-Test #64 - p4 failure: p4
-Test #65 - p1 failure: p1
-Test #68 - p1 success: p1
-Test #68 - p2 success: p2
-Test #68 - p3 success: p3
-Test #69 - p1 success: p1
 Test #70 - Success - [{"status":"fulfilled","value":"p1"},{"status":"fulfilled","value":"p2"}]
 Test #82 - Success handler #1 called with result = first promise
-Test #83 - p1 success: p1
-Test #83 - p2 success: p2
-Test #83 - p3 failure: p3
-Test #84 - p1 failure: p1
-Test #84 - p2 success: p2
-Test #84 - p3 success: p3
-Test #85 - 2 failure: 2
-Test #85 - 3 success: 3
-Test #85 - 4 failure: 4
-Test #86 - 2 failure: 2
-Test #86 - 3 failure: 3
-Test #86 - 4 failure: 4
 Test #7 - Error handler #2 called with err = thenable.call:error!
 Test #13 - Catch handler #2 called with err = error2
 Test #15 - Catch handler #1 called with err = failure
-Test #27 - Success handler #1 called with result = p1
-Test #28 - Error handler #1 called with err = p1
-Test #37 - Error handler #1 called with err = p3
-Test #38 - Success handler #1 called with result = p1,p2,p3
 Test #43 - Catch handler #1 called with err = expected1
 Test #43 - Catch handler #2 called with err = expected2
 Test #43 - Catch handler #3 called with err = expected3
-Test #64 - Success - [{"status":"fulfilled","value":"p1"},{"status":"fulfilled","value":"p2"},{"status":"rejected","reason":"p3"},{"status":"rejected","reason":"p4"}]
-Test #65 - Success - [{"status":"rejected","reason":"p1"},{"status":"rejected","reason":"p2"},{"status":"rejected","reason":"p3"}]
-Test #69 - Success: [{"status":"fulfilled","value":"p1"}]
-Test #69 - p1 success: p2
-Test #69 - p1 failure: e2
-Test #83 - Success handler #1 called with result = p1
-Test #84 - Success handler #1 called with result = p2
-Test #85 - Success handler #1 called with result = 3
-Test #86 - Error handler #1 called with err = AggregateError: Promise.any all promises rejected.
-Test #86 - Error handler #1 called with err.message = "Promise.any all promises rejected."
-Test #86 - Error handler #1 called with err.name = AggregateError
-Test #86 - Error handler #1 called with err.errors = [1,2,3,4,5]
 Test #4 - Success handler #2 called with result = chain:success2
 Test #57 - Success - Rejected status and value passed through finally
 Test #58 - Success - Resolved status and value passed through finally
 Test #47 - Success handler #2 called with result = '0,,4' (length = 3) (isArray = true) (fulfillCalled = true)
+Test #10 - Error handler called with err = TypeError: Object used to resolve a promise creates a circular resolution
+Test #27 - p1 success: p1
+Test #27 - Success handler #1 called with result = p1
+Test #27 - p2 success: p2
+Test #27 - p3 failure: p3
+Test #28 - p1 failure: p1
+Test #28 - Error handler #1 called with err = p1
+Test #28 - p2 success: p2
+Test #28 - p3 success: p3
+Test #37 - p1 success: p1
+Test #37 - p2 success: p2
+Test #37 - p3 failure: p3
+Test #37 - Error handler #1 called with err = p3
+Test #38 - p1 success: p1
+Test #38 - p2 success: p2
+Test #38 - p3 success: p3
+Test #38 - Success handler #1 called with result = p1,p2,p3
+Test #64 - p1 success: p1
+Test #64 - p4 failure: p4
+Test #64 - Success - [{"status":"fulfilled","value":"p1"},{"status":"fulfilled","value":"p2"},{"status":"rejected","reason":"p3"},{"status":"rejected","reason":"p4"}]
+Test #65 - p1 failure: p1
+Test #65 - Success - [{"status":"rejected","reason":"p1"},{"status":"rejected","reason":"p2"},{"status":"rejected","reason":"p3"}]
+Test #68 - p1 success: p1
+Test #68 - p2 success: p2
+Test #68 - p3 success: p3
+Test #69 - p1 success: p1
+Test #69 - Success: [{"status":"fulfilled","value":"p1"}]
+Test #69 - p1 success: p2
+Test #69 - p1 failure: e2
+Test #83 - p1 success: p1
+Test #83 - Success handler #1 called with result = p1
+Test #83 - p2 success: p2
+Test #83 - p3 failure: p3
+Test #84 - p1 failure: p1
+Test #84 - p2 success: p2
+Test #84 - Success handler #1 called with result = p2
+Test #84 - p3 success: p3
+Test #85 - 2 failure: 2
+Test #85 - 3 success: 3
+Test #85 - Success handler #1 called with result = 3
+Test #85 - 4 failure: 4
+Test #86 - 2 failure: 2
+Test #86 - 3 failure: 3
+Test #86 - 4 failure: 4
+Test #86 - Error handler #1 called with err = AggregateError: Promise.any all promises rejected.
+Test #86 - Error handler #1 called with err.message = "Promise.any all promises rejected."
+Test #86 - Error handler #1 called with err.name = AggregateError
+Test #86 - Error handler #1 called with err.errors = [1,2,3,4,5]
