@@ -652,6 +652,15 @@ Decision/rollback points:
 - [ ] C2/C3: Feature-specific receipts and partial releases; required work remains
   tracked until C4, optional ecosystem scope has separate gates.
 - [ ] C4: Published qualified ES2025 result on the claimed default configurations.
+  (*BLOCKED-with-certified-baseline*: the certification-grade full-corpus
+  run, the published feature/result manifest and the clause-by-clause gate
+  verdict are recorded (2026-11-02, lane `c4-certification` on `ba796f74f`,
+  no engine changes) — controls 25/25, broad 77,268/15,873,
+  edition-selected 76,464/4,080 (94.93%), 8,751 marker-judged negatives,
+  1 downgrade, gates 2038/2090 + bytecode/native green; the suite is not
+  green and SAB/Atomics + the two RegExp flag surfaces are not default —
+  [c4-gate.md](c4-gate.md), [c4-manifest.md](c4-manifest.md),
+  [c4-run-evidence.md](c4-run-evidence.md).*)
 
 **Latest integration checkpoint (2026-11-01):** main is clean at the
 **2038/0 test** and **2090/0 debug-static** gates (re-verified after every
