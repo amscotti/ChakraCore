@@ -124,7 +124,14 @@ const tests = [
             `);    
             import('LoadOrder4');
             AddPromise(test, import('LoadOrder1').then(() => import('LoadOrder7').then(x => x.default.toString())),
-                "LO2a1,LO3a1,LO2a2,LO3a2,LO2a3,LO5a1,LO2a4,LO5a2,LO2a5,LO6,LO2a6,LO4,LO7", false);
+                // Corrected host microtask order (gc-async-continuation,
+                // doc/e2-gc-async-continuation.md): each module's await-0
+                // resume chain completes in dependency order before the next
+                // module's load message evaluates it. The old string encoded
+                // the pre-fix interleave where delay-0 module-load messages
+                // jumped ahead of pending promise continuations
+                // (LO2a3,LO5a1,LO2a4,LO5a2,... tail).
+                "LO2a1,LO3a1,LO2a2,LO3a2,LO2a3,LO2a4,LO2a5,LO2a6,LO4,LO5a1,LO5a2,LO6,LO7", false);
         }
     },
     {
@@ -197,7 +204,16 @@ const tests = [
                 arr.push("CD6a2");
             `);
             import ('CyclicDouble4');
-            AddPromise(test, import ('CyclicDouble1').then(() => import('CyclicDouble6').then(x => x.default.toString())), "CD2a1,CD2a2,CD3a1,CD3a2,CD5,CD4a1,CD6a1,CD4a2,CD6a2", false);
+            // Interleaving note: with the host's corrected microtask
+            // semantics (promise continuations drain before queued host
+            // messages — gc-async-continuation, doc/e2-gc-async-continuation.md),
+            // each suspended module's await-0 resume completes in dependency
+            // order before the later dynamically imported graph (CD5/CD6)
+            // evaluates, matching the single-cycle CyclicOrder test above.
+            // The old expected string encoded the pre-fix order where a
+            // delay-0 module-load message jumped ahead of pending promise
+            // continuations (CD5,CD4a1,CD6a1,CD4a2,CD6a2 tail).
+            AddPromise(test, import ('CyclicDouble1').then(() => import('CyclicDouble6').then(x => x.default.toString())), "CD2a1,CD2a2,CD3a1,CD3a2,CD4a1,CD4a2,CD5,CD6a1,CD6a2", false);
         }
     },
     {

@@ -119,6 +119,12 @@ public:
                 Remove(node);
                 return;
             }
+            // Advance: without this, a predicate that misses the head (e.g.
+            // ClearTimeout for a timer sitting behind earlier-queued
+            // messages) spun forever on the first entry — a latent hang the
+            // microtask-before-timer ordering made reachable
+            // (gc-async-continuation, doc/e2-gc-async-continuation.md).
+            node = node->next;
         }
     }
 
@@ -215,10 +221,32 @@ class MessageQueue
     SortedList<ListEntry> m_queue;
 
 public:
-    void InsertSorted(MessageBase *message)
+    // `immediate` marks a microtask message (a promise-continuation task
+    // raised by the engine's JsSetPromiseContinuationCallback). ES job
+    // semantics require the continuation queued by a finished callback to
+    // run before the next macrotask (timer), so immediate messages carry
+    // due time 0 — strictly before every timed message, whose due time is
+    // always GetTickCount64()+delay (a large positive ms-since-boot value).
+    // SortedList inserts equal keys after existing entries, so immediate
+    // messages keep FIFO order among themselves. Without this, an immediate
+    // task stamped "now" could land after an already-queued timer whose
+    // absolute due time is <= now (a slow earlier callback overrunning a
+    // pending timer's deadline, or a timer stamped in the same millisecond),
+    // and the continuation would silently run after later timers — observed
+    // as async functions never resuming (gc-async-continuation,
+    // doc/e2-gc-async-continuation.md).
+    void InsertSorted(MessageBase *message, bool immediate = false)
     {
-        message->BeginTimer();
-        unsigned long long time = message->GetTime();
+        unsigned long long time;
+        if (immediate)
+        {
+            time = 0;
+        }
+        else
+        {
+            message->BeginTimer();
+            time = message->GetTime();
+        }
         m_queue.Insert(ListEntry(time, message));
     }
 

@@ -2921,8 +2921,14 @@ void WScriptJsrt::PromiseContinuationCallback(JsValueRef task, void *callbackSta
     Assert(callbackState != JS_INVALID_REFERENCE);
     MessageQueue * messageQueue = (MessageQueue *)callbackState;
 
+    // The task is a microtask: it must run before any pending timer
+    // message (InsertSorted(.., immediate=true) pins its due time ahead of
+    // every timed entry), matching the ES host contract that continuations
+    // queued by a completed callback drain before the next macrotask.
+    // The CallbackMessage ctor AddRefs the task so it stays rooted across
+    // GCs while queued; the dtor releases it after the call.
     WScriptJsrt::CallbackMessage *msg = new WScriptJsrt::CallbackMessage(0, task);
-    messageQueue->InsertSorted(msg);
+    messageQueue->InsertSorted(msg, /*immediate*/ true);
 }
 
 void WScriptJsrt::TimerContinuationCallback(JsValueRef task, unsigned int delayMilliseconds, void *callbackState)

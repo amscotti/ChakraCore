@@ -1234,6 +1234,21 @@ namespace Js
     {
         if (DecrementAwaited())
         {
+            // A cyclic importer can receive this decrement from a child's
+            // async completion before its own evaluation has started (e.g.
+            // a dynamically imported module whose load message is still
+            // queued while a child it imports in a cycle already finished).
+            // FinishModuleEvaluation on a module that never began evaluating
+            // would dereference its null generator and tripped asserts on
+            // wasParsed/evaluating/declaration-initialized state. Mirrors the
+            // IsEvaluating() guard at the other DecrementAwaited call site
+            // in FinishModuleEvaluation. The awaited-count bookkeeping stays
+            // balanced: the module's own ModuleEvaluation later sees
+            // awaitedModules == 0 and evaluates normally.
+            if (!IsEvaluating())
+            {
+                return;
+            }
             JavascriptExceptionObject *exception = nullptr;
             try
             {

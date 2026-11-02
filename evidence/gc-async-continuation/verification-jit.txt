@@ -1,0 +1,2 @@
+== jit binary + fix (new regression test)
+-- rc=0
