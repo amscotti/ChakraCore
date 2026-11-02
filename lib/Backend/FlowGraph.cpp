@@ -4961,6 +4961,15 @@ BasicBlock::MergePredBlocksValueMaps(GlobOpt* globOpt)
                 // only from a landing pad. Abort JIT for this function
                 // (it stays interpreted) instead of dereferencing the
                 // uninitialized block data in Clone/MergeBlockData below.
+                if (PHASE_TRACE(Js::BailOutPhase, globOpt->func))
+                {
+                    char16 debugStringBuffer[MAX_FUNCTION_BODY_DEBUG_STRING_SIZE];
+                    Output::Print(_u("    Aborting JIT: %s (%s): block #%u has unvisited predecessor #%u (finally-clone edge)\n"),
+                        globOpt->func->GetJITFunctionBody()->GetDisplayName(),
+                        globOpt->func->GetDebugNumberSet(debugStringBuffer),
+                        this->GetBlockNum(), pred->GetBlockNum());
+                    Output::Flush();
+                }
                 throw Js::OperationAbortedException();
             }
 
