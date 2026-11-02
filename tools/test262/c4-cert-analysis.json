@@ -1,0 +1,1516 @@
+{
+  "broad": {
+    "failed": 15873,
+    "passed": 77268,
+    "scenarios": 93141,
+    "unique_files": 48598
+  },
+  "bucket_top_messages": {
+    "disabled-flag": {
+      "Expected a Test262Error but got a TypeError": 120,
+      "Expected a TypeError but got a ReferenceError": 38,
+      "Expected no error, got ReferenceError: 'Atomics' is not defined": 310,
+      "Expected no error, got ReferenceError: 'SharedArrayBuffer' is not defined": 658,
+      "Expected no error, got ReferenceError: 'SharedArrayBuffer' is not defined (Testing with BigInt64Arra": 30,
+      "Expected no error, got ReferenceError: 'SharedArrayBuffer' is not defined (Testing with Float64Array": 28,
+      "Expected no error, got TypeError: Object doesn't support property or method 'undefined'": 222,
+      "Expected no error, got TypeError: Unable to get property 'call' of undefined or null reference": 40
+    },
+    "engine-defect-on-existing": {
+      "Expected a TypeError but got a Test262Error": 70,
+      "Expected a TypeError to be thrown but no exception was thrown at all": 63,
+      "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makeP": 50,
+      "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePa": 54,
+      "Expected test to throw error of type SyntaxError, got Test262: This statement should not be evaluate": 70,
+      "Expected true but got false": 48,
+      "Test262Error: Expected SameValue(\u00ab\"URIError\"\u00bb, \u00ab\"SyntaxError\"\u00bb) to be true": 64,
+      "name should be an own property": 50
+    },
+    "host": {
+      "Expected no error, got URIError: ./2nd-param_FIXTURE.js": 17,
+      "Expected no error, got URIError: ./dynamic-import-module_FIXTURE.js": 74,
+      "Expected no error, got URIError: ./empty_FIXTURE.js": 20,
+      "Expected no error, got URIError: ./eval-gtbndng-indirect-update-dflt_FIXTURE.js": 36,
+      "Expected no error, got URIError: ./eval-gtbndng-indirect-update_FIXTURE.js": 36,
+      "Expected no error, got URIError: ./for-await-resolution-and-error-a_FIXTURE.js": 4,
+      "Expected no error, got URIError: ./module-code_FIXTURE.js": 199,
+      "Host exited abnormally: {\"code\":null,\"signal\":\"SIGKILL\"}": 6
+    },
+    "post-ES2025": {
+      "Calling as constructor Expected a TypeError but got a ReferenceError": 238,
+      "Expected no error, got ReferenceError: 'AsyncDisposableStack' is not defined": 200,
+      "Expected no error, got ReferenceError: 'DisposableStack' is not defined": 178,
+      "Expected no error, got ReferenceError: 'ShadowRealm' is not defined": 118,
+      "Expected no error, got ReferenceError: 'Temporal' is not defined": 8320,
+      "Expected no error, got SyntaxError: 'import.' is only valid if followed by 'meta'": 185,
+      "Expected no error, got SyntaxError: Expected ';'": 227,
+      "Expected no error, got TypeError: Object doesn't support property or method 'fromAsync'": 128
+    },
+    "required-feature-missing": {
+      "Expected no error, got SyntaxError: 'as' is only valid if followed by an identifier.": 5,
+      "Expected no error, got SyntaxError: Declaration outside statement context": 7,
+      "Expected no error, got SyntaxError: Destructuring declarations must have an initializer": 7,
+      "Expected no error, got SyntaxError: Invalid destructuring assignment target": 12,
+      "Expected no error, got SyntaxError: Unexpected token 'string literal' after '{'": 4,
+      "Expected no error, got TypeError: Unable to get property 'get' of undefined or null reference": 144,
+      "Expected no error, got TypeError: Unable to get property 'hasOwnProperty' of undefined or null refer": 8,
+      "Expected no error, got TypeError: Unable to get property 'set' of undefined or null reference": 10
+    }
+  },
+  "derived_aggregates": {
+    "class_family_union_edition_failures": 82,
+    "class_family_union_rule": "scenarios failing in the edition-selected set with at least one feature tag starting with \"class\"",
+    "excluded_passed": 804,
+    "passed_negatives_total": 8672
+  },
+  "edition_selected": {
+    "failed": 4080,
+    "passed": 76464,
+    "scenarios": 80544,
+    "unique_files": 42203
+  },
+  "edition_top_failure_messages": {
+    "Expected a Test262Error but got a TypeError": 124,
+    "Expected a TypeError but got a Test262Error": 70,
+    "Expected a TypeError to be thrown but no exception was thrown at all": 63,
+    "Expected no error, got ReferenceError: 'Atomics' is not defined": 310,
+    "Expected no error, got ReferenceError: 'SharedArrayBuffer' is not defined": 658,
+    "Expected no error, got TypeError: Object doesn't support property or method 'undefined'": 222,
+    "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makeP": 50,
+    "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePa": 54,
+    "Expected no error, got TypeError: Unable to get property 'get' of undefined or null reference": 144,
+    "Expected no error, got URIError: ./dynamic-import-module_FIXTURE.js": 74,
+    "Expected no error, got URIError: ./module-code_FIXTURE.js": 199,
+    "Expected test to throw error of type SyntaxError, got Test262: This statement should not be evaluate": 70,
+    "Expected true but got false": 52,
+    "Test262Error: Expected SameValue(\u00ab\"URIError\"\u00bb, \u00ab\"SyntaxError\"\u00bb) to be true": 64,
+    "name should be an own property": 50
+  },
+  "edition_top_message_tags": {
+    "Expected a Test262Error but got a TypeError": {
+      "Symbol.match": 18,
+      "Symbol.matchAll": 26,
+      "Symbol.replace": 36,
+      "Symbol.species": 24,
+      "Symbol.split": 30
+    },
+    "Expected a TypeError but got a Test262Error": {
+      "Reflect": 2,
+      "Reflect.construct": 2,
+      "logical-assignment-operators": 6,
+      "untagged": 62
+    },
+    "Expected a TypeError to be thrown but no exception was thrown at all": {
+      "Proxy": 16,
+      "Reflect": 6,
+      "proxy-missing-checks": 6,
+      "resizable-arraybuffer": 6,
+      "untagged": 32
+    },
+    "Expected no error, got ReferenceError: 'Atomics' is not defined": {
+      "Atomics": 310,
+      "Atomics.waitAsync": 200,
+      "SharedArrayBuffer": 194,
+      "TypedArray": 210,
+      "arrow-function": 168
+    },
+    "Expected no error, got ReferenceError: 'SharedArrayBuffer' is not defined": {
+      "Atomics": 338,
+      "BigInt": 118,
+      "SharedArrayBuffer": 604,
+      "Symbol": 156,
+      "TypedArray": 396
+    },
+    "Expected no error, got TypeError: Object doesn't support property or method 'undefined'": {
+      "Symbol.match": 48,
+      "Symbol.matchAll": 52,
+      "Symbol.replace": 76,
+      "Symbol.species": 14,
+      "Symbol.split": 32
+    },
+    "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makeP": {
+      "BigInt": 50,
+      "Reflect": 6,
+      "TypedArray": 50,
+      "align-detached-buffer-semantics-with-web-reality": 30,
+      "cross-realm": 8
+    },
+    "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePa": {
+      "Reflect": 8,
+      "TypedArray": 54,
+      "align-detached-buffer-semantics-with-web-reality": 32,
+      "array-find-from-last": 4,
+      "cross-realm": 8
+    },
+    "Expected no error, got TypeError: Unable to get property 'get' of undefined or null reference": {
+      "Symbol": 34,
+      "cross-realm": 18,
+      "regexp-dotall": 18,
+      "regexp-match-indices": 18,
+      "untagged": 64
+    },
+    "Expected no error, got URIError: ./dynamic-import-module_FIXTURE.js": {
+      "async-iteration": 8,
+      "dynamic-import": 74
+    },
+    "Expected no error, got URIError: ./module-code_FIXTURE.js": {
+      "Symbol": 20,
+      "Symbol.iterator": 4,
+      "Symbol.toStringTag": 24,
+      "async-iteration": 8,
+      "dynamic-import": 199
+    },
+    "Expected test to throw error of type SyntaxError, got Test262: This statement should not be evaluate": {
+      "async-iteration": 5,
+      "destructuring-binding": 6,
+      "generators": 11,
+      "object-rest": 6,
+      "untagged": 36
+    },
+    "Expected true but got false": {
+      "Proxy": 6,
+      "Reflect": 10,
+      "Symbol.replace": 2,
+      "cross-realm": 8,
+      "untagged": 40
+    },
+    "Test262Error: Expected SameValue(\u00ab\"URIError\"\u00bb, \u00ab\"SyntaxError\"\u00bb) to be true": {
+      "async-iteration": 8,
+      "dynamic-import": 64
+    },
+    "name should be an own property": {
+      "Promise.allSettled": 4,
+      "class": 4,
+      "destructuring-binding": 20,
+      "generators": 6,
+      "untagged": 20
+    }
+  },
+  "excluded_from_edition": {
+    "failed": 11793,
+    "passed": 804,
+    "post-ES2025-proposal": 12597,
+    "scenarios": 12597
+  },
+  "failure_buckets": {
+    "disabled-flag": 1734,
+    "engine-defect-on-existing": 1700,
+    "host": 426,
+    "post-ES2025": 11793,
+    "required-feature-missing": 220
+  },
+  "negative_phase_audit": {
+    "marker_downgraded_by_run_py": [
+      {
+        "file": "test/language/import/import-defer/errors/syntax-error/import-defer-of-syntax-error-fails.js",
+        "message": "Negative phase mismatch: declared resolution, host reported parse (judged by marker)",
+        "phase": "resolution",
+        "scenario": "default"
+      }
+    ],
+    "marker_judged_total": 8751,
+    "parse": {
+      "marker": {
+        "displaced_untrusted": 0,
+        "judged": 8652,
+        "judged_passed": 8581
+      },
+      "passed_negatives": 8581,
+      "suspect_reasons": {},
+      "suspect_records": [],
+      "suspects": 0
+    },
+    "passed_negatives_total": 8672,
+    "resolution": {
+      "marker": {
+        "displaced_untrusted": 0,
+        "judged": 34,
+        "judged_passed": 33
+      },
+      "passed_negatives": 33,
+      "suspect_reasons": {},
+      "suspect_records": [],
+      "suspects": 0
+    },
+    "runtime": {
+      "marker": {
+        "displaced_untrusted": 0,
+        "judged": 65,
+        "judged_passed": 58
+      },
+      "passed_negatives": 58,
+      "suspect_reasons": {},
+      "suspect_records": [],
+      "suspects": 0
+    }
+  },
+  "per_feature": {
+    "AggregateError": {
+      "broad_failed": 2,
+      "broad_passed": 60,
+      "category": "required-ES2025",
+      "edition_failed": 2,
+      "edition_passed": 60
+    },
+    "Array.fromAsync": {
+      "broad_failed": 186,
+      "broad_passed": 0,
+      "category": "post-ES2025-proposal",
+      "edition_failed": 0,
+      "edition_passed": 0
+    },
+    "Array.prototype.at": {
+      "broad_failed": 0,
+      "broad_passed": 24,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 24
+    },
+    "Array.prototype.flat": {
+      "broad_failed": 2,
+      "broad_passed": 28,
+      "category": "required-ES2025",
+      "edition_failed": 2,
+      "edition_passed": 28
+    },
+    "Array.prototype.flatMap": {
+      "broad_failed": 2,
+      "broad_passed": 39,
+      "category": "required-ES2025",
+      "edition_failed": 2,
+      "edition_passed": 39
+    },
+    "Array.prototype.includes": {
+      "broad_failed": 6,
+      "broad_passed": 84,
+      "category": "required-ES2025",
+      "edition_failed": 4,
+      "edition_passed": 84
+    },
+    "Array.prototype.values": {
+      "broad_failed": 0,
+      "broad_passed": 8,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 8
+    },
+    "ArrayBuffer": {
+      "broad_failed": 216,
+      "broad_passed": 334,
+      "category": "required-ES2025",
+      "edition_failed": 206,
+      "edition_passed": 322
+    },
+    "Atomics": {
+      "broad_failed": 764,
+      "broad_passed": 0,
+      "category": "required-ES2025",
+      "edition_failed": 746,
+      "edition_passed": 0
+    },
+    "Atomics.pause": {
+      "broad_failed": 10,
+      "broad_passed": 0,
+      "category": "post-ES2025-proposal",
+      "edition_failed": 0,
+      "edition_passed": 0
+    },
+    "Atomics.waitAsync": {
+      "broad_failed": 202,
+      "broad_passed": 0,
+      "category": "required-ES2025",
+      "edition_failed": 202,
+      "edition_passed": 0
+    },
+    "BigInt": {
+      "broad_failed": 740,
+      "broad_passed": 2191,
+      "category": "required-ES2025",
+      "edition_failed": 378,
+      "edition_passed": 2191
+    },
+    "DataView": {
+      "broad_failed": 112,
+      "broad_passed": 274,
+      "category": "required-ES2025",
+      "edition_failed": 112,
+      "edition_passed": 246
+    },
+    "DataView.prototype.getFloat32": {
+      "broad_failed": 2,
+      "broad_passed": 12,
+      "category": "required-ES2025",
+      "edition_failed": 2,
+      "edition_passed": 12
+    },
+    "DataView.prototype.getFloat64": {
+      "broad_failed": 2,
+      "broad_passed": 8,
+      "category": "required-ES2025",
+      "edition_failed": 2,
+      "edition_passed": 8
+    },
+    "DataView.prototype.getInt16": {
+      "broad_failed": 2,
+      "broad_passed": 12,
+      "category": "required-ES2025",
+      "edition_failed": 2,
+      "edition_passed": 12
+    },
+    "DataView.prototype.getInt32": {
+      "broad_failed": 2,
+      "broad_passed": 12,
+      "category": "required-ES2025",
+      "edition_failed": 2,
+      "edition_passed": 12
+    },
+    "DataView.prototype.getInt8": {
+      "broad_failed": 2,
+      "broad_passed": 8,
+      "category": "required-ES2025",
+      "edition_failed": 2,
+      "edition_passed": 8
+    },
+    "DataView.prototype.getUint16": {
+      "broad_failed": 2,
+      "broad_passed": 12,
+      "category": "required-ES2025",
+      "edition_failed": 2,
+      "edition_passed": 12
+    },
+    "DataView.prototype.getUint32": {
+      "broad_failed": 2,
+      "broad_passed": 12,
+      "category": "required-ES2025",
+      "edition_failed": 2,
+      "edition_passed": 12
+    },
+    "DataView.prototype.setUint8": {
+      "broad_failed": 16,
+      "broad_passed": 96,
+      "category": "required-ES2025",
+      "edition_failed": 16,
+      "edition_passed": 96
+    },
+    "Error.isError": {
+      "broad_failed": 24,
+      "broad_passed": 0,
+      "category": "post-ES2025-proposal",
+      "edition_failed": 0,
+      "edition_passed": 0
+    },
+    "FinalizationRegistry": {
+      "broad_failed": 0,
+      "broad_passed": 98,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 98
+    },
+    "Float16Array": {
+      "broad_failed": 0,
+      "broad_passed": 98,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 98
+    },
+    "Float32Array": {
+      "broad_failed": 8,
+      "broad_passed": 4,
+      "category": "required-ES2025",
+      "edition_failed": 8,
+      "edition_passed": 4
+    },
+    "Float64Array": {
+      "broad_failed": 8,
+      "broad_passed": 4,
+      "category": "required-ES2025",
+      "edition_failed": 8,
+      "edition_passed": 4
+    },
+    "Int16Array": {
+      "broad_failed": 0,
+      "broad_passed": 4,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 4
+    },
+    "Int32Array": {
+      "broad_failed": 0,
+      "broad_passed": 8,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 8
+    },
+    "Int8Array": {
+      "broad_failed": 10,
+      "broad_passed": 66,
+      "category": "required-ES2025",
+      "edition_failed": 10,
+      "edition_passed": 60
+    },
+    "Intl.Era-monthcode": {
+      "broad_failed": 20,
+      "broad_passed": 0,
+      "category": "post-ES2025-proposal",
+      "edition_failed": 0,
+      "edition_passed": 0
+    },
+    "Iterator.prototype.join": {
+      "broad_failed": 32,
+      "broad_passed": 4,
+      "category": "post-ES2025-proposal",
+      "edition_failed": 0,
+      "edition_passed": 0
+    },
+    "Map": {
+      "broad_failed": 4,
+      "broad_passed": 76,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 74
+    },
+    "Math.sumPrecise": {
+      "broad_failed": 20,
+      "broad_passed": 0,
+      "category": "post-ES2025-proposal",
+      "edition_failed": 0,
+      "edition_passed": 0
+    },
+    "Object.fromEntries": {
+      "broad_failed": 0,
+      "broad_passed": 50,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 50
+    },
+    "Object.hasOwn": {
+      "broad_failed": 0,
+      "broad_passed": 124,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 124
+    },
+    "Object.is": {
+      "broad_failed": 0,
+      "broad_passed": 4,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 4
+    },
+    "Promise": {
+      "broad_failed": 0,
+      "broad_passed": 8,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 8
+    },
+    "Promise.allSettled": {
+      "broad_failed": 12,
+      "broad_passed": 192,
+      "category": "required-ES2025",
+      "edition_failed": 12,
+      "edition_passed": 192
+    },
+    "Promise.any": {
+      "broad_failed": 8,
+      "broad_passed": 176,
+      "category": "required-ES2025",
+      "edition_failed": 8,
+      "edition_passed": 176
+    },
+    "Promise.prototype.finally": {
+      "broad_failed": 8,
+      "broad_passed": 50,
+      "category": "required-ES2025",
+      "edition_failed": 8,
+      "edition_passed": 50
+    },
+    "Proxy": {
+      "broad_failed": 160,
+      "broad_passed": 767,
+      "category": "required-ES2025",
+      "edition_failed": 138,
+      "edition_passed": 767
+    },
+    "Reflect": {
+      "broad_failed": 260,
+      "broad_passed": 637,
+      "category": "required-ES2025",
+      "edition_failed": 212,
+      "edition_passed": 637
+    },
+    "Reflect.construct": {
+      "broad_failed": 412,
+      "broad_passed": 940,
+      "category": "required-ES2025",
+      "edition_failed": 70,
+      "edition_passed": 936
+    },
+    "Reflect.set": {
+      "broad_failed": 10,
+      "broad_passed": 82,
+      "category": "required-ES2025",
+      "edition_failed": 8,
+      "edition_passed": 82
+    },
+    "Reflect.setPrototypeOf": {
+      "broad_failed": 10,
+      "broad_passed": 36,
+      "category": "required-ES2025",
+      "edition_failed": 10,
+      "edition_passed": 36
+    },
+    "RegExp.escape": {
+      "broad_failed": 0,
+      "broad_passed": 40,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 40
+    },
+    "Set": {
+      "broad_failed": 0,
+      "broad_passed": 76,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 68
+    },
+    "ShadowRealm": {
+      "broad_failed": 124,
+      "broad_passed": 0,
+      "category": "post-ES2025-proposal",
+      "edition_failed": 0,
+      "edition_passed": 0
+    },
+    "SharedArrayBuffer": {
+      "broad_failed": 918,
+      "broad_passed": 0,
+      "category": "required-ES2025",
+      "edition_failed": 912,
+      "edition_passed": 0
+    },
+    "String.fromCodePoint": {
+      "broad_failed": 0,
+      "broad_passed": 44,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 44
+    },
+    "String.prototype.at": {
+      "broad_failed": 0,
+      "broad_passed": 22,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 22
+    },
+    "String.prototype.endsWith": {
+      "broad_failed": 2,
+      "broad_passed": 52,
+      "category": "required-ES2025",
+      "edition_failed": 2,
+      "edition_passed": 52
+    },
+    "String.prototype.includes": {
+      "broad_failed": 2,
+      "broad_passed": 50,
+      "category": "required-ES2025",
+      "edition_failed": 2,
+      "edition_passed": 50
+    },
+    "String.prototype.isWellFormed": {
+      "broad_failed": 0,
+      "broad_passed": 16,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 16
+    },
+    "String.prototype.matchAll": {
+      "broad_failed": 30,
+      "broad_passed": 0,
+      "category": "required-ES2025",
+      "edition_failed": 30,
+      "edition_passed": 0
+    },
+    "String.prototype.replaceAll": {
+      "broad_failed": 28,
+      "broad_passed": 52,
+      "category": "required-ES2025",
+      "edition_failed": 28,
+      "edition_passed": 52
+    },
+    "String.prototype.toWellFormed": {
+      "broad_failed": 0,
+      "broad_passed": 16,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 16
+    },
+    "String.prototype.trimEnd": {
+      "broad_failed": 0,
+      "broad_passed": 48,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 48
+    },
+    "String.prototype.trimStart": {
+      "broad_failed": 0,
+      "broad_passed": 46,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 46
+    },
+    "Symbol": {
+      "broad_failed": 1168,
+      "broad_passed": 1672,
+      "category": "required-ES2025",
+      "edition_failed": 367,
+      "edition_passed": 1656
+    },
+    "Symbol.asyncIterator": {
+      "broad_failed": 0,
+      "broad_passed": 1076,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 1076
+    },
+    "Symbol.hasInstance": {
+      "broad_failed": 0,
+      "broad_passed": 34,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 34
+    },
+    "Symbol.isConcatSpreadable": {
+      "broad_failed": 2,
+      "broad_passed": 65,
+      "category": "required-ES2025",
+      "edition_failed": 2,
+      "edition_passed": 65
+    },
+    "Symbol.iterator": {
+      "broad_failed": 37,
+      "broad_passed": 3665,
+      "category": "required-ES2025",
+      "edition_failed": 35,
+      "edition_passed": 3661
+    },
+    "Symbol.match": {
+      "broad_failed": 142,
+      "broad_passed": 32,
+      "category": "required-ES2025",
+      "edition_failed": 142,
+      "edition_passed": 32
+    },
+    "Symbol.matchAll": {
+      "broad_failed": 112,
+      "broad_passed": 12,
+      "category": "required-ES2025",
+      "edition_failed": 112,
+      "edition_passed": 12
+    },
+    "Symbol.prototype.description": {
+      "broad_failed": 6,
+      "broad_passed": 10,
+      "category": "required-ES2025",
+      "edition_failed": 6,
+      "edition_passed": 10
+    },
+    "Symbol.replace": {
+      "broad_failed": 162,
+      "broad_passed": 28,
+      "category": "required-ES2025",
+      "edition_failed": 162,
+      "edition_passed": 28
+    },
+    "Symbol.search": {
+      "broad_failed": 56,
+      "broad_passed": 16,
+      "category": "required-ES2025",
+      "edition_failed": 56,
+      "edition_passed": 16
+    },
+    "Symbol.species": {
+      "broad_failed": 90,
+      "broad_passed": 478,
+      "category": "required-ES2025",
+      "edition_failed": 90,
+      "edition_passed": 470
+    },
+    "Symbol.split": {
+      "broad_failed": 98,
+      "broad_passed": 16,
+      "category": "required-ES2025",
+      "edition_failed": 98,
+      "edition_passed": 16
+    },
+    "Symbol.toPrimitive": {
+      "broad_failed": 96,
+      "broad_passed": 370,
+      "category": "required-ES2025",
+      "edition_failed": 92,
+      "edition_passed": 370
+    },
+    "Symbol.toStringTag": {
+      "broad_failed": 57,
+      "broad_passed": 140,
+      "category": "required-ES2025",
+      "edition_failed": 43,
+      "edition_passed": 140
+    },
+    "Symbol.unscopables": {
+      "broad_failed": 0,
+      "broad_passed": 54,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 54
+    },
+    "Temporal": {
+      "broad_failed": 9226,
+      "broad_passed": 0,
+      "category": "post-ES2025-proposal",
+      "edition_failed": 0,
+      "edition_passed": 0
+    },
+    "TypedArray": {
+      "broad_failed": 1130,
+      "broad_passed": 3866,
+      "category": "required-ES2025",
+      "edition_failed": 1010,
+      "edition_passed": 3826
+    },
+    "TypedArray.prototype.at": {
+      "broad_failed": 0,
+      "broad_passed": 26,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 26
+    },
+    "Uint16Array": {
+      "broad_failed": 8,
+      "broad_passed": 4,
+      "category": "required-ES2025",
+      "edition_failed": 8,
+      "edition_passed": 4
+    },
+    "Uint32Array": {
+      "broad_failed": 0,
+      "broad_passed": 4,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 4
+    },
+    "Uint8Array": {
+      "broad_failed": 10,
+      "broad_passed": 16,
+      "category": "required-ES2025",
+      "edition_failed": 10,
+      "edition_passed": 12
+    },
+    "Uint8ClampedArray": {
+      "broad_failed": 8,
+      "broad_passed": 4,
+      "category": "required-ES2025",
+      "edition_failed": 8,
+      "edition_passed": 4
+    },
+    "WeakMap": {
+      "broad_failed": 43,
+      "broad_passed": 114,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 92
+    },
+    "WeakRef": {
+      "broad_failed": 0,
+      "broad_passed": 74,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 74
+    },
+    "WeakSet": {
+      "broad_failed": 0,
+      "broad_passed": 68,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 68
+    },
+    "__getter__": {
+      "broad_failed": 4,
+      "broad_passed": 50,
+      "category": "required-ES2025",
+      "edition_failed": 4,
+      "edition_passed": 50
+    },
+    "__proto__": {
+      "broad_failed": 8,
+      "broad_passed": 32,
+      "category": "required-ES2025",
+      "edition_failed": 4,
+      "edition_passed": 32
+    },
+    "__setter__": {
+      "broad_failed": 4,
+      "broad_passed": 50,
+      "category": "required-ES2025",
+      "edition_failed": 4,
+      "edition_passed": 50
+    },
+    "align-detached-buffer-semantics-with-web-reality": {
+      "broad_failed": 110,
+      "broad_passed": 180,
+      "category": "required-ES2025",
+      "edition_failed": 110,
+      "edition_passed": 180
+    },
+    "arbitrary-module-namespace-names": {
+      "broad_failed": 9,
+      "broad_passed": 7,
+      "category": "required-ES2025",
+      "edition_failed": 9,
+      "edition_passed": 7
+    },
+    "array-find-from-last": {
+      "broad_failed": 12,
+      "broad_passed": 194,
+      "category": "required-ES2025",
+      "edition_failed": 12,
+      "edition_passed": 194
+    },
+    "array-grouping": {
+      "broad_failed": 0,
+      "broad_passed": 56,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 56
+    },
+    "arraybuffer-transfer": {
+      "broad_failed": 8,
+      "broad_passed": 110,
+      "category": "required-ES2025",
+      "edition_failed": 8,
+      "edition_passed": 106
+    },
+    "arrow-function": {
+      "broad_failed": 620,
+      "broad_passed": 1180,
+      "category": "required-ES2025",
+      "edition_failed": 246,
+      "edition_passed": 1174
+    },
+    "async-functions": {
+      "broad_failed": 156,
+      "broad_passed": 1146,
+      "category": "required-ES2025",
+      "edition_failed": 156,
+      "edition_passed": 1146
+    },
+    "async-iteration": {
+      "broad_failed": 177,
+      "broad_passed": 9616,
+      "category": "required-ES2025",
+      "edition_failed": 153,
+      "edition_passed": 9590
+    },
+    "await-dictionary": {
+      "broad_failed": 174,
+      "broad_passed": 4,
+      "category": "post-ES2025-proposal",
+      "edition_failed": 0,
+      "edition_passed": 0
+    },
+    "caller": {
+      "broad_failed": 0,
+      "broad_passed": 23,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 23
+    },
+    "change-array-by-copy": {
+      "broad_failed": 0,
+      "broad_passed": 274,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 274
+    },
+    "class": {
+      "broad_failed": 182,
+      "broad_passed": 9237,
+      "category": "required-ES2025",
+      "edition_failed": 76,
+      "edition_passed": 9231
+    },
+    "class-fields-private": {
+      "broad_failed": 2,
+      "broad_passed": 2245,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 2245
+    },
+    "class-fields-private-in": {
+      "broad_failed": 0,
+      "broad_passed": 38,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 38
+    },
+    "class-fields-public": {
+      "broad_failed": 2,
+      "broad_passed": 4096,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 4096
+    },
+    "class-methods-private": {
+      "broad_failed": 0,
+      "broad_passed": 3401,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 3401
+    },
+    "class-static-block": {
+      "broad_failed": 8,
+      "broad_passed": 122,
+      "category": "required-ES2025",
+      "edition_failed": 6,
+      "edition_passed": 120
+    },
+    "class-static-fields-private": {
+      "broad_failed": 0,
+      "broad_passed": 686,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 686
+    },
+    "class-static-fields-public": {
+      "broad_failed": 0,
+      "broad_passed": 421,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 421
+    },
+    "class-static-methods-private": {
+      "broad_failed": 0,
+      "broad_passed": 3009,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 3009
+    },
+    "coalesce-expression": {
+      "broad_failed": 2,
+      "broad_passed": 46,
+      "category": "required-ES2025",
+      "edition_failed": 2,
+      "edition_passed": 46
+    },
+    "computed-property-names": {
+      "broad_failed": 44,
+      "broad_passed": 902,
+      "category": "required-ES2025",
+      "edition_failed": 44,
+      "edition_passed": 902
+    },
+    "const": {
+      "broad_failed": 0,
+      "broad_passed": 29,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 29
+    },
+    "cross-realm": {
+      "broad_failed": 223,
+      "broad_passed": 153,
+      "category": "required-ES2025",
+      "edition_failed": 185,
+      "edition_passed": 149
+    },
+    "decorators": {
+      "broad_failed": 38,
+      "broad_passed": 4,
+      "category": "post-ES2025-proposal",
+      "edition_failed": 0,
+      "edition_passed": 0
+    },
+    "default-parameters": {
+      "broad_failed": 0,
+      "broad_passed": 4514,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 4514
+    },
+    "destructuring-assignment": {
+      "broad_failed": 0,
+      "broad_passed": 217,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 217
+    },
+    "destructuring-binding": {
+      "broad_failed": 70,
+      "broad_passed": 13059,
+      "category": "required-ES2025",
+      "edition_failed": 70,
+      "edition_passed": 13059
+    },
+    "dynamic-import": {
+      "broad_failed": 836,
+      "broad_passed": 1071,
+      "category": "required-ES2025",
+      "edition_failed": 545,
+      "edition_passed": 631
+    },
+    "error-cause": {
+      "broad_failed": 0,
+      "broad_passed": 10,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 10
+    },
+    "error-stack-accessor": {
+      "broad_failed": 70,
+      "broad_passed": 0,
+      "category": "post-ES2025-proposal",
+      "edition_failed": 0,
+      "edition_passed": 0
+    },
+    "explicit-resource-management": {
+      "broad_failed": 709,
+      "broad_passed": 133,
+      "category": "post-ES2025-proposal",
+      "edition_failed": 0,
+      "edition_passed": 0
+    },
+    "exponentiation": {
+      "broad_failed": 16,
+      "broad_passed": 190,
+      "category": "required-ES2025",
+      "edition_failed": 12,
+      "edition_passed": 190
+    },
+    "export-star-as-namespace-from-module": {
+      "broad_failed": 8,
+      "broad_passed": 15,
+      "category": "required-ES2025",
+      "edition_failed": 8,
+      "edition_passed": 15
+    },
+    "for-in-order": {
+      "broad_failed": 0,
+      "broad_passed": 18,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 18
+    },
+    "for-of": {
+      "broad_failed": 0,
+      "broad_passed": 10,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 10
+    },
+    "generators": {
+      "broad_failed": 142,
+      "broad_passed": 7925,
+      "category": "required-ES2025",
+      "edition_failed": 82,
+      "edition_passed": 7911
+    },
+    "globalThis": {
+      "broad_failed": 0,
+      "broad_passed": 161,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 161
+    },
+    "hashbang": {
+      "broad_failed": 0,
+      "broad_passed": 35,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 35
+    },
+    "immutable-arraybuffer": {
+      "broad_failed": 31,
+      "broad_passed": 96,
+      "category": "post-ES2025-proposal",
+      "edition_failed": 0,
+      "edition_passed": 0
+    },
+    "import-attributes": {
+      "broad_failed": 32,
+      "broad_passed": 128,
+      "category": "required-ES2025",
+      "edition_failed": 19,
+      "edition_passed": 128
+    },
+    "import-bytes": {
+      "broad_failed": 5,
+      "broad_passed": 0,
+      "category": "post-ES2025-proposal",
+      "edition_failed": 0,
+      "edition_passed": 0
+    },
+    "import-defer": {
+      "broad_failed": 213,
+      "broad_passed": 175,
+      "category": "post-ES2025-proposal",
+      "edition_failed": 0,
+      "edition_passed": 0
+    },
+    "import-text": {
+      "broad_failed": 7,
+      "broad_passed": 0,
+      "category": "post-ES2025-proposal",
+      "edition_failed": 0,
+      "edition_passed": 0
+    },
+    "import.meta": {
+      "broad_failed": 1,
+      "broad_passed": 27,
+      "category": "required-ES2025",
+      "edition_failed": 1,
+      "edition_passed": 27
+    },
+    "iterator-chunking": {
+      "broad_failed": 138,
+      "broad_passed": 18,
+      "category": "post-ES2025-proposal",
+      "edition_failed": 0,
+      "edition_passed": 0
+    },
+    "iterator-helpers": {
+      "broad_failed": 0,
+      "broad_passed": 786,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 786
+    },
+    "iterator-includes": {
+      "broad_failed": 80,
+      "broad_passed": 8,
+      "category": "post-ES2025-proposal",
+      "edition_failed": 0,
+      "edition_passed": 0
+    },
+    "iterator-sequencing": {
+      "broad_failed": 58,
+      "broad_passed": 6,
+      "category": "post-ES2025-proposal",
+      "edition_failed": 0,
+      "edition_passed": 0
+    },
+    "joint-iteration": {
+      "broad_failed": 154,
+      "broad_passed": 10,
+      "category": "post-ES2025-proposal",
+      "edition_failed": 0,
+      "edition_passed": 0
+    },
+    "json-modules": {
+      "broad_failed": 3,
+      "broad_passed": 12,
+      "category": "required-ES2025",
+      "edition_failed": 2,
+      "edition_passed": 12
+    },
+    "json-parse-with-source": {
+      "broad_failed": 42,
+      "broad_passed": 0,
+      "category": "post-ES2025-proposal",
+      "edition_failed": 0,
+      "edition_passed": 0
+    },
+    "json-superset": {
+      "broad_failed": 0,
+      "broad_passed": 8,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 8
+    },
+    "legacy-regexp": {
+      "broad_failed": 52,
+      "broad_passed": 0,
+      "category": "post-ES2025-proposal",
+      "edition_failed": 0,
+      "edition_passed": 0
+    },
+    "let": {
+      "broad_failed": 4,
+      "broad_passed": 127,
+      "category": "required-ES2025",
+      "edition_failed": 4,
+      "edition_passed": 127
+    },
+    "logical-assignment-operators": {
+      "broad_failed": 6,
+      "broad_passed": 180,
+      "category": "required-ES2025",
+      "edition_failed": 6,
+      "edition_passed": 180
+    },
+    "new.target": {
+      "broad_failed": 11,
+      "broad_passed": 114,
+      "category": "required-ES2025",
+      "edition_failed": 7,
+      "edition_passed": 114
+    },
+    "nonextensible-applies-to-private": {
+      "broad_failed": 3,
+      "broad_passed": 0,
+      "category": "post-ES2025-proposal",
+      "edition_failed": 0,
+      "edition_passed": 0
+    },
+    "numeric-separator-literal": {
+      "broad_failed": 8,
+      "broad_passed": 310,
+      "category": "required-ES2025",
+      "edition_failed": 8,
+      "edition_passed": 310
+    },
+    "object-rest": {
+      "broad_failed": 6,
+      "broad_passed": 707,
+      "category": "required-ES2025",
+      "edition_failed": 6,
+      "edition_passed": 707
+    },
+    "object-spread": {
+      "broad_failed": 0,
+      "broad_passed": 238,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 238
+    },
+    "optional-catch-binding": {
+      "broad_failed": 0,
+      "broad_passed": 10,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 10
+    },
+    "optional-chaining": {
+      "broad_failed": 0,
+      "broad_passed": 112,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 112
+    },
+    "promise-try": {
+      "broad_failed": 0,
+      "broad_passed": 30,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 30
+    },
+    "promise-with-resolvers": {
+      "broad_failed": 3,
+      "broad_passed": 13,
+      "category": "required-ES2025",
+      "edition_failed": 2,
+      "edition_passed": 13
+    },
+    "proxy-missing-checks": {
+      "broad_failed": 6,
+      "broad_passed": 0,
+      "category": "required-ES2025",
+      "edition_failed": 6,
+      "edition_passed": 0
+    },
+    "regexp-dotall": {
+      "broad_failed": 26,
+      "broad_passed": 8,
+      "category": "required-ES2025",
+      "edition_failed": 26,
+      "edition_passed": 8
+    },
+    "regexp-duplicate-named-groups": {
+      "broad_failed": 2,
+      "broad_passed": 30,
+      "category": "required-ES2025",
+      "edition_failed": 2,
+      "edition_passed": 30
+    },
+    "regexp-lookbehind": {
+      "broad_failed": 0,
+      "broad_passed": 38,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 38
+    },
+    "regexp-match-indices": {
+      "broad_failed": 26,
+      "broad_passed": 36,
+      "category": "required-ES2025",
+      "edition_failed": 26,
+      "edition_passed": 36
+    },
+    "regexp-modifiers": {
+      "broad_failed": 0,
+      "broad_passed": 460,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 460
+    },
+    "regexp-named-groups": {
+      "broad_failed": 20,
+      "broad_passed": 180,
+      "category": "required-ES2025",
+      "edition_failed": 20,
+      "edition_passed": 180
+    },
+    "regexp-unicode-property-escapes": {
+      "broad_failed": 114,
+      "broad_passed": 1248,
+      "category": "required-ES2025",
+      "edition_failed": 114,
+      "edition_passed": 1248
+    },
+    "regexp-v-flag": {
+      "broad_failed": 28,
+      "broad_passed": 346,
+      "category": "required-ES2025",
+      "edition_failed": 28,
+      "edition_passed": 346
+    },
+    "resizable-arraybuffer": {
+      "broad_failed": 130,
+      "broad_passed": 806,
+      "category": "required-ES2025",
+      "edition_failed": 130,
+      "edition_passed": 800
+    },
+    "rest-parameters": {
+      "broad_failed": 0,
+      "broad_passed": 192,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 192
+    },
+    "set-methods": {
+      "broad_failed": 0,
+      "broad_passed": 372,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 372
+    },
+    "source-phase-imports": {
+      "broad_failed": 187,
+      "broad_passed": 284,
+      "category": "post-ES2025-proposal",
+      "edition_failed": 0,
+      "edition_passed": 0
+    },
+    "source-phase-imports-module-source": {
+      "broad_failed": 83,
+      "broad_passed": 120,
+      "category": "post-ES2025-proposal",
+      "edition_failed": 0,
+      "edition_passed": 0
+    },
+    "stable-array-sort": {
+      "broad_failed": 0,
+      "broad_passed": 8,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 8
+    },
+    "stable-typedarray-sort": {
+      "broad_failed": 0,
+      "broad_passed": 2,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 2
+    },
+    "string-trimming": {
+      "broad_failed": 0,
+      "broad_passed": 108,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 108
+    },
+    "super": {
+      "broad_failed": 0,
+      "broad_passed": 38,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 38
+    },
+    "symbols-as-weakmap-keys": {
+      "broad_failed": 15,
+      "broad_passed": 40,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 40
+    },
+    "tail-call-optimization": {
+      "broad_failed": 34,
+      "broad_passed": 1,
+      "category": "required-ES2025",
+      "edition_failed": 34,
+      "edition_passed": 1
+    },
+    "template": {
+      "broad_failed": 0,
+      "broad_passed": 2,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 2
+    },
+    "top-level-await": {
+      "broad_failed": 22,
+      "broad_passed": 256,
+      "category": "required-ES2025",
+      "edition_failed": 6,
+      "edition_passed": 256
+    },
+    "u180e": {
+      "broad_failed": 0,
+      "broad_passed": 50,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 50
+    },
+    "uint8array-base64": {
+      "broad_failed": 120,
+      "broad_passed": 20,
+      "category": "post-ES2025-proposal",
+      "edition_failed": 0,
+      "edition_passed": 0
+    },
+    "untagged": {
+      "broad_failed": 588,
+      "broad_passed": 30923,
+      "category": "required-ES2025 (untagged)",
+      "edition_failed": 588,
+      "edition_passed": 30923
+    },
+    "upsert": {
+      "broad_failed": 96,
+      "broad_passed": 46,
+      "category": "post-ES2025-proposal",
+      "edition_failed": 0,
+      "edition_passed": 0
+    },
+    "well-formed-json-stringify": {
+      "broad_failed": 0,
+      "broad_passed": 2,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 2
+    }
+  },
+  "policy": "/Users/ascotti/Documents/code/ChakraCore-wt/c4-certification/tools/test262/edition-policy.json",
+  "policy_sha256": "0dfae80f22b0cdf18d1d0b40079d7b3a278c2f43903017ccb49280a1858f6af2",
+  "records": 93141,
+  "results": "out/test262-c4-cert/results.json",
+  "skipped": {
+    "note": "host-filter skips recorded by run.py; absent from results.json by construction",
+    "reasons": {
+      "blocking-host": 4,
+      "duplicate-module-scenario": 828,
+      "unsupported-optional-HTMLDDA-host": 70
+    },
+    "scenarios": 902
+  },
+  "unknown_feature_tags_treated_required": []
+}
