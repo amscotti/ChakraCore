@@ -294,8 +294,13 @@ for the now-merged Mac JIT variant — was single-variant, while
 `tools/regenByteCode.py` mints a new GUID only on a dual-variant (JIT + no-JIT)
 regen. Serialized caches written by a baseline build and by this branch
 therefore still share a GUID despite the format differences; B5 must perform
-the coordinated dual-variant regen/rotation. No cross-version
-serialized-cache compatibility is claimed before that rotation. A claim of byte-identical reproducibility additionally needs two-build
+the coordinated dual-variant regen/rotation. **Update 2026-11-01: the
+rotation is done** — dual-variant regen from variant-correct binaries, new
+GUID `55c5da6d-dcde-42f9-8112-f7f698fcc96c`, stale-GUID caches rejected at
+load (receipt with per-variant header identity, gates and a runtime
+rejection demo in [b5-guid-rotation.md](b5-guid-rotation.md)); the
+remaining B5 work is the package/floor scope above. No cross-version
+serialized-cache compatibility is claimed beyond that rotation boundary. A claim of byte-identical reproducibility additionally needs two-build
 comparison and controlled timestamp/build-ID inputs (including the existing
 `__DATE__`/`__TIME__` behavior); it is a separate proof from behavior parity.
 
@@ -634,7 +639,8 @@ Decision/rollback points:
   green, but zero behavior checks have run — [b4-gate.md](b4-gate.md).)
   The merged Mac ARM64 JIT above is not B4 evidence.
 - [ ] B5: Controlled dependency/artifact package and clean-machine floor
-  testing, including the serialized-bytecode GUID rotation (§2.2 B5).
+  testing. The serialized-bytecode GUID rotation is done
+  (§2.2 B5, [b5-guid-rotation.md](b5-guid-rotation.md)).
 - [ ] B6: Windows feasibility, then declared-profile parity; further expansions
   approved individually.
 - [ ] Z1: One useful C-ABI integration, **if selected**; further replacements
@@ -901,8 +907,10 @@ Mac profile, and the JIT follow-ups recorded in
 JIT frames (so direct-eval callers/eval code can JIT), native lowering
 for the 18 aborting class/private/import opcodes, the
 labeled-break-from-`finally` GlobOpt shape, the S8 immutable
-inlined-store audit, an ARM64 asm.js/WASM port or an explicit reviewed
-platform exclusion, and the B5 bytecode-GUID rotation. Tracked eval
+inlined-store audit, and an ARM64 asm.js/WASM port or an explicit
+reviewed platform exclusion. (The B5 bytecode-GUID rotation listed
+here previously is done:
+[b5-guid-rotation.md](b5-guid-rotation.md).) Tracked eval
 residuals: P4 body eval with non-simple
 parameters; P2 hidden outer lexical and JSC/Node delete difference.
 S3 (Unicode data decision), S6 default (product/security decision),
