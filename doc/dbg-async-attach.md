@@ -262,3 +262,45 @@ reparse (rollback path is analysis-only), TTD replay under dynamic attach.
   suspended frame completes or its generator is collected — the same
   bounded retention the generator pin introduces; its inline caches stay
   registered until the body's normal `Finalize`→`Cleanup`.
+
+### Review outcome (dual ACCEPT, nits folded; new pre-existing defect filed)
+
+Both reviewers ACCEPTed. The general review verified the invalidation
+chain and both failure layers from source, every frame-body read site,
+the identity-takeover mechanism (deferred-parse promotion; the
+CVE-2019-0923 fail-fast now checks the FRESH body — cross-body
+stability), ownership/rooting (plain-async spawns ARE
+JavascriptGenerators retained by promise-reaction closures;
+`liveCoroutineFunctionBody` rooted; RecyclerNewFinalized release
+exactly-once), and reproduced all evidence (repro 34/34 across
+profiles, DebuggerCommon 210/0, gates 2037/0 + 2089/0). The adversarial
+review passed multi-await/re-attach/generator-mix/closure/TLA/eval/
+`new Function`/deferred shapes and deep-after-await EH shapes; verified
+the debugger boundary behaves exactly as disclosed (breakpoint fires
+once, on the fresh-body invocation; the suspended frame silently
+misses it); JIT-profile es7 failures empirically identical to base.
+
+Folded nits: (1) TLA/global-body asymmetry — `Parse` excludes
+`GetIsGlobalFunc()` from the fresh-body path while `CleanupToReparse`'s
+keep-whole branch does not: a suspended TLA module body is kept whole
+with NO debug bytecode until completion (benign; completion identical
+to base; align or comment in future debugger work); (2)
+`UpdateFunctionBodyImpl`'s relaxed assert keys on
+`HasLiveSuspendedAsyncFrames` state, not the construction site — a
+future unintended replacement would pass silently (comment exists);
+consider a debug-build caller assert; (3) OOM rollback can leave the
+Utf8SourceInfo dictionary pointing at the half-populated fresh body
+(analysis-only, fatal-by-policy, disclosed); (4) retired-body
+boundedness under REAL GC pressure is unverified — blocked by the
+defect below; light evidence (10 attach cycles, max RSS 86 MB) only.
+
+**New pre-existing engine defect (adversarial review; HIGH priority,
+own lane required):** GC pressure while async frames are suspended
+**silently drops promise continuations** — no debugger involved,
+exit 0, base-identical (verified against the 710af1307 base binary):
+churn (15×12000 objects) between suspension and resolve leaves the
+awaiting function never resumed, and after the churn even a NEW async
+function awaiting an ALREADY-RESOLVED promise never resumes. This
+silently loses user continuations and currently blocks true
+GC-pressure validation of coroutine lifetime work (including this
+lane's pin). Filed as the next lane.
