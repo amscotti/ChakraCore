@@ -230,10 +230,11 @@ Coverage limits carried into the merge, stated deliberately:
 - **18 class-field/private/import-attribute opcodes** abort codegen to the
   interpreter, as does the labeled-break-from-`finally` CFG shape in
   GlobOpt. Porting any of these is follow-up work.
-- **Serialized bytecode GUID rotation is still owed at B5**: the property-
-  count and opcode changes did not rotate the release GUID (the regen tool
-  mints only on a dual-variant run), so no cross-version bytecode-cache
-  compatibility is claimed.
+- **Serialized bytecode GUID rotation: done (2026-11-01)**. The
+  dual-variant regen/rotation this merge deferred has been performed
+  (new GUID `55c5da6d-dcde-42f9-8112-f7f698fcc96c`; stale-GUID caches
+  are rejected at load rather than misread); see
+  [b5-guid-rotation.md](b5-guid-rotation.md).
 
 Merged into `modernize/baseline` as `9004b3ed7` (merge, not fast-forward;
 not pushed).
