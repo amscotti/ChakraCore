@@ -654,7 +654,7 @@ Decision/rollback points:
 - [ ] C4: Published qualified ES2025 result on the claimed default configurations.
 
 **Latest integration checkpoint (2026-11-01):** main is clean at the
-**2037/0 test** and **2089/0 debug-static** gates (re-verified after every
+**2038/0 test** and **2090/0 debug-static** gates (re-verified after every
 merge and repair below; counts are single-sourced in
 `tools/build/gate_counts.json` — Float16Array's new test file moved
 2012/2064 → 2013/2065, repair-loop `-noDeferParse` rlexe variants
