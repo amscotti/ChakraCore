@@ -673,7 +673,11 @@ added one entry (2031/2083 → 2032/2084), and the s14-eval-nonsimple-var
 lane added one entry (2032/2084 → 2033/2085), the jit-reentrancy-fix lane added
 one entry (2033/2085 → 2034/2086), the jit-closure-1 lane added one
 entry (2034/2086 → 2035/2087), and the jit-immutable-store lane added one
-entry (2035/2087 → 2036/2088)). A subsequent whole-branch
+entry (2035/2087 → 2036/2088)). The dbg-async-attach lane then closed the
+suspended plain-async pending-await resume abort after dynamic debugger
+attach (separate debug FunctionBody for the suspended case; deterministic
+`DebuggerCommon/AsyncSuspendedResume.js`) and moved the gates
+2036/2088 → 2037/2089 ([dbg-async-attach.md](dbg-async-attach.md)). A subsequent whole-branch
 review repair (2026-10-31) fixed the CI selftest tally that would have
 kept the first Actions run red (B3 stays CONDITIONAL until that run is
 green), the agent-init-failure spawn hang, host teardown ordering, SCA

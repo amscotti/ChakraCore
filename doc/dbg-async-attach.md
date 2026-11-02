@@ -5,8 +5,10 @@ Defect: the second open engine issue in
 [arm64-macos-jit.md](arm64-macos-jit.md) "Known open engine issues" —
 *Suspended async-function resume after dynamic debugger attach aborts*.
 
-Status: diagnosis complete (below), fix implemented, see "Fix" and
-"Verification".
+Status: **fixed on this lane** — diagnosis (§1-2), ownership record (§3),
+design (§4) and verification (§5) below; commits `0fc0dfbfd` (diagnosis),
+`26055a0c2` (fix + test), and this receipt. The
+[arm64-macos-jit.md](arm64-macos-jit.md) known-issues bullet is closed.
 
 ## 1. Reproduction
 
@@ -201,7 +203,35 @@ Why not the alternatives:
 
 ## 5. Verification
 
-See §5 table in the final receipt (filled after gates).
+| Check | Binary / command | Result |
+|---|---|---|
+| Doc repro (`AsyncSuspendedResume.js` shape, one await) | `out/debug-static/bin/ch` (debug-static, asserts) | 25/25 exit 0, `before/done/after 41` (base `710af1307`: 20/20 abort, exit 133) |
+| Same | `zig-out/bin/ch` (test profile, release) | 25/25 exit 0 |
+| Same | `out/jit/bin/ch` (JIT profile) | 20/20 exit 0 |
+| Committed test (adds a second invocation on the fresh debug body while the first frame is suspended) | all three profiles | 20/20 each, exact baseline order `before/done/before/after 41/after 41` |
+| Nested (closure) plain async suspended at attach (scratch) | debug-static | exit 0, both frames complete correctly |
+| Re-attach while a post-attach invocation is suspended (scratch) | debug-static | exit 0, both frames complete correctly |
+| Generator guard still intact: yield/attach/resume | debug-static `-nonative -off:DynamicProfile` and `-ForceSoftwareWriteBarrier-` | iterator results `{"value":2,"done":false}`, `{"done":true}`, exit 0 |
+| Async locals/stepping baseline | `DebuggerCommon/AsyncDynamicAttach.js` on all three profiles | `PASSED` (its `bp:locals()` dump fires on a new invocation) |
+| Debugger + async suites | `runtests.py --debug ... test/Debugger test/DebuggerCommon test/es7 test/es6` | **567/0** |
+| Same | `runtests.py --test ...` (release) | **562/0** |
+| Same + `es6GeneratorJit` | `runtests.py --test` on the **JIT** binary | **406/0** and **479/0** (both variant groups) |
+| Gate: no-JIT test profile | `zig build check-regression` | **2037/0** (pin bumped 2036→2037) |
+| Gate: debug-static | `zig build check-regression -Dprofile=debug-static` | **2089/0** (pin bumped 2088→2089) |
+| JIT-profile focused diff vs base | `runtests.py --test` on jit binary, `test/es7` | failing set identical to the base build (`matchall`, `s6-growable-nonshared`, `bigint64array`, `resizable-typedarray` — pre-existing default-variant failures); one `class-private-methods.js` blip did not reproduce in 5 direct runs + 2 full dir runs (load flake) |
+
+Pin decision: one new rlexe entry (`test/DebuggerCommon/AsyncSuspendedResume.js`,
+`exclude_dynapogo`, like its attach-test sibling) appears in both gate
+selections → **2036→2037 test / 2088→2089 debug**, lineage recorded in
+`tools/build/gate_counts.json`.
+
+Coverage of the changed failure/reentrancy paths actually exercised:
+pending-await resume across reparse (the defect), fresh-body execution of
+a second invocation, nested-closure async bodies, generator pin
+(non-regression), attach with an async-generator (via the Debugger suite's
+async-generator tests and `DebuggerCommon`), and detach/attach ordering via
+the suite's attach/detach tests. Not exercised: OOM during the fresh-body
+reparse (rollback path is analysis-only), TTD replay under dynamic attach.
 
 ## 6. Residuals
 
@@ -209,14 +239,26 @@ See §5 table in the final receipt (filled after gates).
   plain async (and generator) suspended bodies keep the original
   in-place reparse lifetime problem there, as before this lane.
 - Breakpoints/stepping *inside the already-suspended frame* remain
-  unavailable until it completes (the old body has no debug probes) —
-  same tradeoff as the generator guard, scoped to the live frame; the
-  function itself is fully debuggable via the fresh body.
+  unavailable until it completes (the original body has no debug probes)
+  — same tradeoff as the generator guard, scoped to the live frame; the
+  function itself is fully debuggable via the fresh body from the moment
+  the attach completes.
+- Bailout-only paths (`BailOut.cpp` reads the yield register via the
+  script function's proxy body) were left as-is: post-attach execution is
+  interpretation-only, and the coroutine yield-register stability
+  (CVE-2019-0923 fail-fast) covers them by construction; they are not
+  reachable in the attach scenario this lane fixes.
+- OOM/SOE during the fresh-body reparse rolls the proxy back to the
+  original body (AutoRestoreFunctionInfo; its end-of-scope assert now
+  accepts a whole, bytecode-bearing FunctionBody as a rollback target).
+  The original body's entry points may then still be the re-defer thunks
+  from the attach pre-pass, so a failure that late remains
+  fatal-by-policy (`DEBUGGER_ATTACHDETACH_FATAL_ERROR_IF_FAILED`), as
+  before. This rollback path is analysis-only (not covered by a test).
 - TTD stance: unchanged — TTD forces debug mode from the start; dynamic
   attach mid-TTD is out of scope for this lane, same as the generator
   guard.
-- OOM/SOE during the fresh-body reparse rolls the proxy back to the
-  original body (AutoRestoreFunctionInfo); the original body's entry
-  points may then still be the re-defer thunks from the attach pre-pass,
-  so a failure that late remains fatal-by-policy
-  (`DEBUGGER_ATTACHDETACH_FATAL_ERROR_IF_FAILED`), as before.
+- The retired body (and its bytecode/ICs) stays alive until the last
+  suspended frame completes or its generator is collected — the same
+  bounded retention the generator pin introduces; its inline caches stay
+  registered until the body's normal `Finalize`→`Cleanup`.
