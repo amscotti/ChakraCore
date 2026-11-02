@@ -223,3 +223,45 @@ header constant).
 The broader B5 package/floor work (controlled dependencies, clean
 machine floor, artifact manifest) is untouched — see §2.2 B5. This
 lane only rotates the GUID and proves the rejection boundary.
+
+### Review outcome (dual ACCEPT, hazards folded)
+
+Both reviewers ACCEPTed with zero `[bug]`. Independently verified: the
+mint's honesty (`--binary` can never mint — script defaults + dual-flag
+requirement; committed header byte-exact 742/742 to the script's
+template output for the minted GUID), meaningful detection (baseline
+divergence 15.5-16.9k lines/header), determinism (adversarial reran the
+dual-variant regen twice — no-mint path, byte-identical headers), the
+GUID boundary (stamps before body interpretation; engineering scheme
+unaffected; old GUID only in prose; new GUID proven embedded at runtime
+in both dylibs via serialized-cache stamps), cross-variant rejection in
+BOTH directions plus end-to-end deserialization (not just acceptance),
+and the gates (2036/0 twice; jit verify leg green).
+
+**Folded hazards/nits (both reviews):**
+- **Single-variant `--binary` OVERWRITE hazard (required before B5
+  package/floor work):** a `--skip-build --binary=<wrong-variant>` run
+  trusts the FLAG, not the binary — it silently rewrites that variant's
+  tracked headers with wrong-format content (~15.8k diff lines, variant
+  signature at byte offset 4), warning-only, **exit 0**, GUID kept (mint
+  is dual-variant-only), and builtin headers carry fixed `0,0,0,0`
+  stamps so NO version check rejects a wrong-variant builtin at load —
+  only the next gate's variant-correct verify leg backstops it. Rule for
+  future rotations: pair `--binary` with the correct variant flag and
+  verify all four header sha256 against the receipt table before
+  committing; a tooling guard (variant-signature check, or nonzero exit
+  on single-variant content change) is the required fix before B5
+  package/floor.
+- `regenByteCode.py:263` writes the GUID header via lowercase
+  `lib/Runtime/Bytecode/` — same file on macOS's case-insensitive FS,
+  but on **Linux** the mint would create a NEW untracked file and leave
+  the tracked header unrotated, undetectable by `--verify`. Pre-existing
+  upstream; flagged to the B5 package/Linux lane.
+- The stale pre-rotation copies under `out/{noJit,jit}/debug/` (18:40 <
+  mint) would stamp the OLD GUID in any future release-scheme demo —
+  use `zig-out/bin` / `out/jit/bin` (post-rotation) for demos.
+- Engineering-scheme collision safety rests on `__TIME__` granularity
+  (two format-changing builds in the same clock minute share stamps) —
+  pre-existing; noted for B5 package work.
+- Receipt prose fix: the lock was orphaned five times (17:43, 18:35,
+  19:29, 20:19, 21:14), not three; the doubled "and" is corrected here.
