@@ -1,0 +1,19 @@
+== test-profile binary + fix
+scriptend
+start1
+resumed:1:7
+END
+-- rc=0
+scriptend
+f-start
+g-start
+f-resumed:7
+g-resumed:99
+END
+-- rc=0
+scriptend
+f-start
+f-resumed:1
+timer2
+END
+-- rc=0

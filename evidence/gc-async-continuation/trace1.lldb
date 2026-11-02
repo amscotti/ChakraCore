@@ -1,0 +1,8 @@
+break set -n "Js::JavascriptPromise::EnqueuePromiseReactionTask"
+break command add -o "bt 1" -o "continue" 1
+break set -n "WScriptJsrt::PromiseContinuationCallback"
+break command add -o "continue" 2
+break set -n "Js::JavascriptPromise::EntryReactionTaskFunction"
+break command add -o "continue" 3
+run evidence/gc-async-continuation/h5.js
+quit
