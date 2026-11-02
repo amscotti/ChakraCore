@@ -176,3 +176,33 @@ automatically (re-verified by both green gates above).
 - The recycler-side exoneration is specific to this repro shape (one
   collection, conservative marking plus host JsAddRef); it does not certify
   promise machinery under GCStress beyond the existing gate coverage.
+
+### Review outcome (dual ACCEPT, nits folded)
+
+Both reviewers ACCEPTed with zero `[bug]`/`[risk]`. The general review
+reran the t-order A/B on base vs fixed vs Node oracle, verified every
+queue reader's due-0 handling, the TLA guard's count balance, and that
+the 72-line baseline change is a pure reordering to the Node/spec order
+(sorted old == sorted new byte-identical; base binary reproduces the
+old baseline). The adversarial review audited all three insertion
+sites (single immediate producer), established the drain policy from
+source (one message per `ProcessAll` iteration; immediates drain
+before the next timed message — the ES job contract), ran a 32-shape
+mixed matrix with programmatic invariant checking (zero violations),
+verified starvation behavior equals Node (10k chain drains then timers;
+infinite chain hangs identically), the ClearTimeout matrix incl.
+reentrancy, and the S6e trio at 20/20 + 5/5×4.
+
+Folded nits: (1) among ALREADY-OVERDUE timers ch deadline-orders
+(delay-0 batch before delay-1) where Node/libuv coalesces 0/1ms into a
+FIFO bucket — documented-granularity class (Chrome-like), not
+ES-observable, but ch can swap that interleave run-to-run when a slow
+callback overruns ms boundaries (inherent to the absolute-deadline
+queue; deterministic gate baselines never mix the shape); (2) NEW
+pre-existing follow-up card: dynamic `import()` during TLA evaluation
+of a module the imported graph statically imports back never settles
+(identical on base; re-entering an evaluating module shouldn't block;
+no crash) — filed for a TLA follow-up lane; (3) FinalizationRegistry
+cleanup jobs now always precede any 0ms timer (host-legitimate,
+documented in-test; a future host wanting V8-style separate-task
+cleanup should note it).
