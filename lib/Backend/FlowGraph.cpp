@@ -597,7 +597,50 @@ FlowGraph::Build(void)
         } NEXT_BLOCK_ALL;
     }
 
+    // A finally-to-early-exit edge (InsertEdgeFromFinallyToEarlyExit) whose
+    // target precedes the finally in the block list is a back edge of a CFG
+    // cycle that no bytecode loop covers: the join block is inside the
+    // enclosing try while the finally end is laid out after it. GlobOpt's
+    // forward pass visits blocks in list order and merges every predecessor
+    // when it first reaches the join, so that finally-end predecessor would
+    // still have uninitialized globOptData (the labeled-break-from-finally
+    // abort/SEGV class). Mark such targets as loop tops -- exactly what a
+    // continue target after a finally already is, and what IRBuilder does
+    // for backward bytecode branches -- so FindLoops builds a Loop for the
+    // cycle and GlobOpt's loop pre-pass merges the back edge after the
+    // finally-end blocks have been visited. Block numbers are final list
+    // positions here, so the comparison cannot misclassify a forward edge.
+    SList<BasicBlock*> finallyEarlyExitLoopHeads(this->alloc);
+    FOREACH_BLOCK(edgeBlock, this)
+    {
+        IR::Instr *lastInstr = edgeBlock->GetLastInstr();
+        if (lastInstr != nullptr && lastInstr->IsBranchInstr() &&
+            lastInstr->AsBranchInstr()->m_brFinallyToEarlyExit)
+        {
+            IR::LabelInstr *exitLabel = lastInstr->AsBranchInstr()->GetTarget();
+            BasicBlock *exitBlock = exitLabel != nullptr ? exitLabel->GetBasicBlock() : nullptr;
+            if (exitBlock != nullptr && !exitBlock->isDeleted && !exitBlock->isLoopHeader &&
+                exitBlock->GetBlockNum() < edgeBlock->GetBlockNum())
+            {
+                exitLabel->m_isLoopTop = true;
+                this->SetBlockTargetAndLoopFlag(exitLabel);
+                finallyEarlyExitLoopHeads.Push(exitBlock);
+            }
+        }
+    } NEXT_BLOCK;
+
     this->FindLoops();
+
+    // Flag the loops FindLoops built for those heads as synthetic. Their
+    // "body" spans the finally and its entries rather than a source loop;
+    // break-block relocation must not move the enclosing try's blocks.
+    FOREACH_SLIST_ENTRY(BasicBlock*, headBlock, &finallyEarlyExitLoopHeads)
+    {
+        if (headBlock->loop != nullptr)
+        {
+            headBlock->loop->isFinallyEarlyExitLoop = true;
+        }
+    } NEXT_SLIST_ENTRY;
 
 #if DBG_DUMP
     if (PHASE_DUMP(Js::FGBuildPhase, this->GetFunc()))
@@ -1205,8 +1248,11 @@ FlowGraph::CanonicalizeLoops()
     for (Loop *loop = this->loopList; loop; loop = loop->next)
     {
         loop->InsertLandingPad(this);
-        if (!this->func->HasTry() || this->func->DoOptimizeTry())
+        if (!loop->isFinallyEarlyExitLoop && (!this->func->HasTry() || this->func->DoOptimizeTry()))
         {
+            // Skip break-block relocation for finally-early-exit loops: the
+            // blocks between their head and the finally end belong to the
+            // enclosing try/catch, not to break edges out of a source loop.
             bool relocated = loop->RemoveBreakBlocks(this);
             if (!breakBlockRelocated && relocated)
             {
@@ -2408,18 +2454,30 @@ FlowGraph::RemoveUnreachableBlocks()
     }
     NEXT_BLOCK;
 
+    // Mark reachable blocks with a worklist rather than a single forward
+    // sweep. A finally-to-early-exit edge (InsertEdgeFromFinallyToEarlyExit)
+    // can be the only predecessor of its target, and the finally end is
+    // laid out after that target -- a forward sweep would remove the still
+    // reachable target and leave the branch into it dangling.
+    SList<BasicBlock*> worklist(this->alloc);
     this->blockList->isVisited = true;
+    worklist.Push(this->blockList);
+    while (!worklist.Empty())
+    {
+        BasicBlock *block = worklist.Pop();
+        FOREACH_SUCCESSOR_BLOCK(succ, block)
+        {
+            if (!succ->isVisited)
+            {
+                succ->isVisited = true;
+                worklist.Push(succ);
+            }
+        } NEXT_SUCCESSOR_BLOCK;
+    }
 
     FOREACH_BLOCK_EDITING(block, this)
     {
-        if (block->isVisited)
-        {
-            FOREACH_SUCCESSOR_BLOCK(succ, block)
-            {
-                succ->isVisited = true;
-            } NEXT_SUCCESSOR_BLOCK;
-        }
-        else
+        if (!block->isVisited)
         {
             this->RemoveBlock(block);
         }
