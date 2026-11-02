@@ -677,7 +677,18 @@ entry (2035/2087 → 2036/2088)). The dbg-async-attach lane then closed the
 suspended plain-async pending-await resume abort after dynamic debugger
 attach (separate debug FunctionBody for the suspended case; deterministic
 `DebuggerCommon/AsyncSuspendedResume.js`) and moved the gates
-2036/2088 → 2037/2089 ([dbg-async-attach.md](dbg-async-attach.md)). A subsequent whole-branch
+2036/2088 → 2037/2089 ([dbg-async-attach.md](dbg-async-attach.md)). The
+gc-async-continuation lane then closed that review's filed "GC drops promise
+continuations" defect — root-caused to `ch` host message ordering (promise
+microtasks stamped "now" among absolute-due timers; the GC exonerated by
+pointer-stable traces), fixed with microtask-before-timer draining plus the
+two latent bugs the corrected order exposed (TLA
+`DecrementAndEvaluateIfNothingAwaited` null-generator crash on cyclic
+importers; `SortedList::Remove`'s non-advancing ClearTimeout hang), with
+deliberate expected-output corrections to ES6PromiseAsync (baseline regen),
+finalization-registry.js and top-level-await.js, adding
+`es7/async-microtask-order.js` and moving the gates 2037/2089 → 2038/2090
+([e2-gc-async-continuation.md](e2-gc-async-continuation.md)). A subsequent whole-branch
 review repair (2026-10-31) fixed the CI selftest tally that would have
 kept the first Actions run red (B3 stays CONDITIONAL until that run is
 green), the agent-init-failure spawn hang, host teardown ordering, SCA

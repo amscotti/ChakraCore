@@ -303,4 +303,8 @@ awaiting function never resumed, and after the churn even a NEW async
 function awaiting an ALREADY-RESOLVED promise never resumes. This
 silently loses user continuations and currently blocks true
 GC-pressure validation of coroutine lifetime work (including this
-lane's pin). Filed as the next lane.
+lane's pin). Filed as the next lane. **Closed by the gc-async-continuation
+lane (2026-11-02): GC exonerated — the drop was `ch` host message ordering
+(promise microtasks stamped "now" among absolute-due timers); fix, evidence
+and the exposed latent TLA/SortedList bugs in
+[e2-gc-async-continuation.md](e2-gc-async-continuation.md).**
