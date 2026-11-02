@@ -161,9 +161,13 @@ void JavascriptGenerator::SetFrame(InterpreterStackFrame* frame, size_t bytes)
     Assert(functionBody != nullptr);
     // Synchronous and async generators keep a resumable InterpreterStackFrame
     // whose reader points into this body. Plain async functions use the same
-    // JavascriptGenerator object but their debugger attach/locals path expects
-    // the body to be reparsed; do not pin those bodies.
-    if (functionBody->IsGenerator())
+    // JavascriptGenerator object: their frames are counted too, but a debugger
+    // reparse treats them differently - the body is not pinned; the reparse
+    // gets a fresh FunctionBody and this body stays whole for the suspended
+    // frames (FunctionBody::NewDebugReparseBodyForSuspendedAsync) - so the
+    // debugger's locals/stepping baseline for plain async functions is
+    // preserved. See doc/dbg-async-attach.md.
+    if (functionBody->IsCoroutine())
     {
         functionBody->AddLiveCoroutineFrame();
         this->liveCoroutineFunctionBody = functionBody;
@@ -279,10 +283,16 @@ Var JavascriptGenerator::CallGenerator(Var data, ResumeYieldKind resumeKind)
     {
         // if the function already has a state it may be going to resume in the jit
         // if so copy any innerScopes into registers jit can access
-        uint32 innerScopeCount = this->scriptFunction->GetFunctionBody()->GetInnerScopeCount();
+        // Read inner-scope layout from the frame's body: after a debug reparse
+        // the script function's proxy may point at a fresh body while a
+        // suspended frame still executes the original one (the coroutine
+        // inner-scope numbering is stable across the reparse, but the frame's
+        // body is the authority for the frame's layout).
+        FunctionBody* frameBody = this->frame->GetFunctionBody();
+        uint32 innerScopeCount = frameBody->GetInnerScopeCount();
         for (uint32 i = 0; i < innerScopeCount; ++i)
         {
-            Js::RegSlot reg = this->scriptFunction->GetFunctionBody()->GetFirstInnerScopeRegister() + i;
+            Js::RegSlot reg = frameBody->GetFirstInnerScopeRegister() + i;
             this->frame->SetNonVarReg(reg, this->frame->InnerScopeFromIndex(i));
         }
     }

@@ -2032,7 +2032,15 @@ skipThunk:
 
             if (newInstance != nullptr)
             {
-                newInstance->SetNonVarReg(executeFunction->GetYieldRegister(), args[1]);
+                // Resuming an existing suspended frame: write the resume value to
+                // the YIELD register of the FRAME's body. After a debug reparse the
+                // entry body (executeFunction, from the script function's proxy)
+                // may be a fresh FunctionBody while the suspended frame still
+                // executes the original one; the frame's body is the authority for
+                // the frame's register layout. (For coroutines the yield register
+                // is additionally asserted identical across the reparse - see
+                // DebugContext::RundownSourcesAndReparse.)
+                newInstance->SetNonVarReg(newInstance->GetFunctionBody()->GetYieldRegister(), args[1]);
 
                 // The debugger relies on comparing stack addresses of frames to decide when a step_out is complete so
                 // give the InterpreterStackFrame a legit enough stack address to make this comparison work.

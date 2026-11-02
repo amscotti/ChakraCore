@@ -2326,6 +2326,24 @@ namespace Js
 
         static FunctionBody * NewFromParseableFunctionInfo(ParseableFunctionInfo * info);
 
+#if ENABLE_SUSPENDED_COROUTINE_REPARSE_GUARD
+        // Debugger-attach reparse support for plain async functions with live
+        // suspended frames (see CleanupToReparse and ParseableFunctionInfo::Parse).
+        // True when this body is a plain async body (not a generator/async
+        // generator body) whose bytecode must stay untouched by a reparse
+        // because suspended frames still read it.
+        bool HasLiveSuspendedAsyncFrames() const
+        {
+            return this->IsAsync() && !this->IsGenerator() && this->HasLiveCoroutineFrames();
+        }
+
+        // Create a fresh FunctionBody that takes over this body's function
+        // identity (FunctionInfo, nested infos, local function id) for a debug
+        // reparse, leaving this body whole for its suspended frames. See
+        // doc/dbg-async-attach.md for the ownership record.
+        static FunctionBody * NewDebugReparseBodyForSuspendedAsync(FunctionBody * suspendedBody);
+#endif
+
         FunctionEntryPointInfo * GetEntryPointInfo(int index) const;
         FunctionEntryPointInfo * TryGetEntryPointInfo(int index) const;
 
@@ -3505,7 +3523,16 @@ namespace Js
                 functionInfo->SetOriginalEntryPoint(originalEntryPoint);
             }
 
-            Assert(this->pfi == nullptr || (this->pfi->GetFunctionInfo()->GetFunctionProxy() == this->pfi && !this->pfi->IsFunctionBody()));
+            Assert(this->pfi == nullptr || (this->pfi->GetFunctionInfo()->GetFunctionProxy() == this->pfi
+                // The suspended-async debug reparse rolls back to a FunctionBody
+                // that was deliberately left whole (its suspended frames still
+                // read it), so restoring to it is sound. See
+                // FunctionBody::NewDebugReparseBodyForSuspendedAsync.
+                && (!this->pfi->IsFunctionBody()
+#if ENABLE_SUSPENDED_COROUTINE_REPARSE_GUARD
+                    || this->pfi->GetFunctionBody()->GetByteCode() != nullptr
+#endif
+                    )));
         }
         void Clear() { pfi = nullptr; funcBody = nullptr; }
 
