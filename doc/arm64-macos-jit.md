@@ -90,16 +90,18 @@ single `HelperProfiledNewScObjArray` homing exception are documented at their
 call sites. Gates on the 22:54 binary: `disable_jit` 1973/0, `interpreted`
 2367/397 (asm.js/WASM only), `dynapogo` 1943/286 (asm.js/WASM only), zero
 signals. The suspended-generator reparse lifetime now has an Apple ARM64
-live-frame guard; plain async functions remain exposed (pending-await attach
-can abort in `AsyncSpawnStep`). See
+live-frame guard; the plain-async pending-await variant of the same defect
+(suspended resume abort in `AsyncSpawnStep`) was fixed 2026-11-01 by the
+`dbg-async-attach` lane with a separate debug FunctionBody for the
+suspended case ([dbg-async-attach.md](dbg-async-attach.md)). See
 [Suspended-generator reparse guard](#suspended-generator-reparse-guard-apple-arm64).
 
 Non-blocking follow-ups are listed in
 [Known open engine issues](#known-open-engine-issues) and the
 [Swarm review queue](#swarm-review-queue): debugger breakpoint deferral in
-suspended generator bodies, the async-function pending-await crash, and
-unbuilt Windows/ARM32 builds, TTD+debugger-action coverage, and hardened
-entitlement paths.
+suspended generator bodies (the async-function pending-await crash was
+closed 2026-11-01), and unbuilt Windows/ARM32 builds, TTD+debugger-action
+coverage, and hardened entitlement paths.
 
 ### Integration checkpoint — modernize/baseline 7eeccbb5
 
@@ -302,9 +304,11 @@ suspended generator is dropped and collected under
 `-ForceGCAfterJSONParse`, which exercises the `Finalize` decrement. A normal
 (non-coroutine) function's post-attach `locals()` breakpoint still fires.
 `test/DebuggerCommon/generators.js` with `-debuglaunch` still prints `PASS`.
-`AsyncDynamicAttach.js` passes its `locals()`/stepping baseline, but it does
-not cover a pending-await resume; plain async functions are not pinned and
-remain exposed (see [Known open engine issues](#known-open-engine-issues)).
+`AsyncDynamicAttach.js` passes its `locals()`/stepping baseline; a
+pending-await resume is covered by `AsyncSuspendedResume.js`, and plain
+async bodies are no longer reparsed in place while a frame is suspended
+(the reparse gets a separate debug FunctionBody — fixed 2026-11-01, see
+[dbg-async-attach.md](dbg-async-attach.md)).
 Nested helper/closure calls after attach now resume correctly. Full suites on
 this binary: `disable_jit` 1973/0; `interpreted` 2367/397 (all 397 asm/WASM),
 zero signals. One earlier full `interpreted` run on the same binary hit a
@@ -826,29 +830,30 @@ them as fixed by this port.
   with live generator frames uncleaned. As a consequence, breakpoints,
   stepping and locals in that body are not available while a frame is live;
   they require a later detach/attach after the last frame completes. Plain
-  async functions are not counted, so `AsyncDynamicAttach.js` retains its
-  normal locals/stepping behavior, but that does not make a pending-await
-  resume safe; see the next bullet. Non-Apple targets still have the original
+  async functions are handled separately (see the next bullet, now fixed):
+  their suspended frames keep the original body whole while the reparse
+  targets a fresh debug FunctionBody, so plain async locals/stepping work
+  from attach time. Non-Apple targets still have the original
   reparse lifetime problem. This is the documented tradeoff, not full
   debugger support for suspended generator bodies.
-- **Suspended async-function resume after dynamic attach (Apple ARM64).**
-  The generator guard deliberately does not pin plain async bodies, because the
-  debugger's `locals()`/stepping baseline needs a reparse. A pending-await
-  async function attached mid-flight can resume with a non-iterator value and
-  abort in `JavascriptAsyncFunction::AsyncSpawnStep` (`SIGABRT`,
-  `FatalInternalError`). Minimal repro:
-  ```js
-  var resolveIt;
-  var p = new Promise(function (r) { resolveIt = r; });
-  async function f() { print("before"); var v = await p; print("after " + v); }
-  f();
-  WScript.Attach(function () { resolveIt(41); });
-  ```
-  This is pre-existing before the generator guard (observed on 21:22 and 22:21); `AsyncDynamicAttach.js` passes but
-  does not exercise a pending-await resume. A full fix needs the suspended
-  async body to retain/rebase its reader and bytecode across reparse, or a
-  separate debug FunctionBody; the generator-only live-frame count cannot
-  cover it without losing the async debugger locals baseline.
+- **Suspended async-function resume after dynamic attach (Apple ARM64) —
+  closed 2026-11-01.** The generator guard deliberately did not pin plain
+  async bodies, because the debugger's `locals()`/stepping baseline needs a
+  reparse; a pending-await async function attached mid-flight resumed with a
+  non-iterator value and aborted in `JavascriptAsyncFunction::AsyncSpawnStep`
+  (`SIGABRT`, `FatalInternalError`), or — with the old bytecode buffer still
+  mapped — completed its remaining code correctly but failed the completion
+  length check and left the generator Suspended. Fixed by the
+  `dbg-async-attach` lane: the debug reparse of a plain async body with live
+  suspended frames now targets a **separate fresh FunctionBody** (the
+  original body stays whole and self-consistent for its suspended frames;
+  the fresh body takes over the function identity, so breakpoints, locals,
+  stepping and new invocations work). Deterministic test
+  `test/DebuggerCommon/AsyncSuspendedResume.js` (pending-await resume plus a
+  second invocation on the debug body); `AsyncDynamicAttach.js` retains its
+  baseline. Design, ownership record and verification:
+  [dbg-async-attach.md](dbg-async-attach.md). Non-Apple targets keep the
+  original reparse lifetime problem (guard compiled out).
 - **JIT typed-array store fast paths bypass ArrayBuffer immutability
   (found 2026-11-01, open).** The S8 immutable-ArrayBuffer inlined-store
   audit (`doc/c2-s8-immutable.md`, "JIT/B4 blocker" update) proved the

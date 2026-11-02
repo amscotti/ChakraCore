@@ -1525,7 +1525,26 @@ FuncInfo * ByteCodeGenerator::StartBindFunction(const char16 *name, uint nameLen
                 }
                 else
                 {
-                    parseableFunctionInfo = reuseNestedFunc->GetFunctionBody();
+#if ENABLE_SUSPENDED_COROUTINE_REPARSE_GUARD
+                    Js::FunctionBody * nestedBody = reuseNestedFunc->GetFunctionBody();
+                    if (nestedBody->HasLiveSuspendedAsyncFrames())
+                    {
+                        // Nested plain async function suspended mid-flight while
+                        // the debugger reparses its parent. Reuse would
+                        // repopulate the suspended frames' body in place (the
+                        // suspended-async attach abort); instead give this
+                        // reparse a fresh body and leave the suspended one whole.
+                        // Its CleanupToReparse pass already skipped it.
+                        Js::FunctionBody * freshBody =
+                            Js::FunctionBody::NewDebugReparseBodyForSuspendedAsync(nestedBody);
+                        autoRestoreFunctionInfo.funcBody = freshBody;
+                        parseableFunctionInfo = freshBody;
+                    }
+                    else
+#endif
+                    {
+                        parseableFunctionInfo = reuseNestedFunc->GetFunctionBody();
+                    }
                 }
                 Assert((parseableFunctionInfo->GetAttributes() & StableFunctionInfoAttributesMask) == (attributes & StableFunctionInfoAttributesMask));
             }
@@ -3512,7 +3531,17 @@ void VisitNestedScopes(ParseNode* pnodeScopeList, ParseNode* pnodeParent, ByteCo
                         Js::FunctionProxy* proxy = pLastReuseFunc->GetNestedFunctionProxy((*pIndex));
                         if (proxy && proxy->IsFunctionBody())
                         {
-                            byteCodeGenerator->pCurrentFunction = proxy->GetFunctionBody();
+                            Js::FunctionBody * nestedBody = proxy->GetFunctionBody();
+#if ENABLE_SUSPENDED_COROUTINE_REPARSE_GUARD
+                            if (nestedBody->HasLiveSuspendedAsyncFrames())
+                            {
+                                // Same as the reuseNestedFunc pickup below: never
+                                // repopulate a plain async body with live suspended
+                                // frames; reparse into a fresh body instead.
+                                nestedBody = Js::FunctionBody::NewDebugReparseBodyForSuspendedAsync(nestedBody);
+                            }
+#endif
+                            byteCodeGenerator->pCurrentFunction = nestedBody;
                         }
                         else
                         {
@@ -3543,7 +3572,20 @@ void VisitNestedScopes(ParseNode* pnodeScopeList, ParseNode* pnodeParent, ByteCo
                         && !byteCodeGenerator->pCurrentFunction
                         && reuseNestedFunc->IsFunctionBody())
                     {
-                        byteCodeGenerator->pCurrentFunction = reuseNestedFunc->GetFunctionBody();
+                        Js::FunctionBody * nestedBody = reuseNestedFunc->GetFunctionBody();
+#if ENABLE_SUSPENDED_COROUTINE_REPARSE_GUARD
+                        if (nestedBody->HasLiveSuspendedAsyncFrames())
+                        {
+                            // Nested plain async function suspended mid-flight
+                            // while the debugger reparses its parent. Filling this
+                            // body in place would invalidate its suspended frames
+                            // (the suspended-async attach abort): give the reparse
+                            // a fresh FunctionBody and leave the suspended one
+                            // whole. CleanupToReparse already skipped cleaning it.
+                            nestedBody = Js::FunctionBody::NewDebugReparseBodyForSuspendedAsync(nestedBody);
+                        }
+#endif
+                        byteCodeGenerator->pCurrentFunction = nestedBody;
                     }
                 }
             }

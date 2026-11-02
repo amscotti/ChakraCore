@@ -515,6 +515,31 @@ namespace Js
         return functionBody;
     }
 
+#if ENABLE_SUSPENDED_COROUTINE_REPARSE_GUARD
+    FunctionBody *
+    FunctionBody::NewDebugReparseBodyForSuspendedAsync(FunctionBody * suspendedBody)
+    {
+        // A plain async function can be attached while one of its frames is
+        // suspended at an await. The suspended frame keeps a raw ByteCodeReader
+        // into this body's bytecode plus cached aux/inline-cache state, so the
+        // body must stay exactly as it is until the last frame completes. The
+        // debugger still needs debug bytecode for the function (breakpoints,
+        // locals, stepping, new invocations), so give the debug reparse a fresh
+        // FunctionBody that takes over the function identity instead of
+        // repopulating this one in place. The fresh body installs itself into
+        // the function info (its constructor calls UpdateFunctionBodyImpl) and
+        // registers itself under the same local function id when it receives
+        // bytecode (Utf8SourceInfo::SetFunctionBody replaces this body's
+        // entry); the suspended frames keep this body alive through each
+        // JavascriptGenerator's liveCoroutineFunctionBody, and its inline
+        // caches stay registered until the body's normal finalization.
+        Assert(suspendedBody->HasLiveSuspendedAsyncFrames());
+        Assert(suspendedBody->GetFunctionInfo()->GetFunctionProxy() == suspendedBody);
+
+        return FunctionBody::NewFromParseableFunctionInfo(suspendedBody);
+    }
+#endif
+
     FunctionBody::FunctionBody(ScriptContext* scriptContext, const char16* displayName, uint displayNameLength, uint displayShortNameOffset, uint nestedCount,
         Utf8SourceInfo* utf8SourceInfo, uint uFunctionNumber, uint uScriptId,
         Js::LocalFunctionId  functionId, FunctionInfo::Attributes attributes, FunctionBodyFlags flags
@@ -766,6 +791,11 @@ namespace Js
 
         SetCountField(CounterFields::ConstantCount, 1);
 
+        // Installing this body into the proxy installs it as the function's
+        // body (see UpdateFunctionBodyImpl). For a plain async body with live
+        // suspended frames this replaces the original body, which stays whole
+        // for its suspended frames; see
+        // FunctionBody::NewDebugReparseBodyForSuspendedAsync.
         proxy->UpdateFunctionBodyImpl(this);
 
         this->m_defaultEntryPointInfo = RecyclerNewFinalized(scriptContext->GetRecycler(),
@@ -2066,7 +2096,17 @@ namespace Js
     {
         FunctionInfo *functionInfo = this->GetFunctionInfo();
         Assert(functionInfo->GetFunctionProxy() == this);
+#if ENABLE_SUSPENDED_COROUTINE_REPARSE_GUARD
+        // A plain async FunctionBody with live suspended frames is deliberately
+        // replaced (not reparsed in place) by a fresh body during a debugger
+        // attach; the suspended frames keep reading the original body. See
+        // FunctionBody::NewDebugReparseBodyForSuspendedAsync and
+        // doc/dbg-async-attach.md.
+        Assert(!this->IsFunctionBody() || body == this
+            || ((FunctionBody*)this)->HasLiveSuspendedAsyncFrames());
+#else
         Assert(!this->IsFunctionBody() || body == this);
+#endif
         functionInfo->SetFunctionProxy(body);
         body->SetFunctionInfo(functionInfo);
         body->SetAttributes((FunctionInfo::Attributes)(functionInfo->GetAttributes() & ~(FunctionInfo::Attributes::DeferredParse | FunctionInfo::Attributes::DeferredDeserialize)));
@@ -2401,8 +2441,34 @@ namespace Js
 
                     if (funcBody->GetByteCode())
                     {
-                        // The current function needs to be cleaned up before getting generated in the debug mode.
-                        funcBody->CleanupToReparse();
+#if ENABLE_SUSPENDED_COROUTINE_REPARSE_GUARD
+                        if (funcBody->HasLiveSuspendedAsyncFrames() && !funcBody->GetIsGlobalFunc())
+                        {
+                            // Plain async function suspended mid-flight (pending
+                            // await) while the debugger attaches. Reparsing this
+                            // body in place would invalidate its suspended frames
+                            // (raw reader into the bytecode block, cached aux/
+                            // inline-cache state, completion-length checks) - the
+                            // suspended-async attach abort. Give the debug
+                            // reparse a fresh FunctionBody and leave this body
+                            // whole; the codegen below populates the fresh body,
+                            // which takes over the function identity and
+                            // registers itself in the source info. See
+                            // doc/dbg-async-attach.md.
+                            funcBody = FunctionBody::NewDebugReparseBodyForSuspendedAsync(funcBody);
+                            autoRestoreFunctionInfo.funcBody = funcBody;
+                            // Re-arm the rollback (it was cleared above for the
+                            // in-place reparse flow): if parsing/codegen fails,
+                            // restore the function info to the original body,
+                            // which is still whole and executable.
+                            autoRestoreFunctionInfo.pfi = this;
+                        }
+                        else
+#endif
+                        {
+                            // The current function needs to be cleaned up before getting generated in the debug mode.
+                            funcBody->CleanupToReparse();
+                        }
                     }
 
                 }
@@ -5145,24 +5211,42 @@ namespace Js
 #if ENABLE_SUSPENDED_COROUTINE_REPARSE_GUARD
         if (this->IsFunctionBody() && this->GetFunctionBody()->HasLiveCoroutineFrames())
         {
-            // A debugger attach switches this context to debug mode and reparses
-            // every already-parsed body. A suspended generator frame kept a raw
-            // ByteCodeReader and operand metadata into this body's bytecode,
-            // const table and statement maps. Dropping them here leaves the
-            // resume path reading freed or replaced state, which produced a
-            // bare value instead of an iterator result. Keep this body intact
-            // and defer its reparse (and breakpoints in it) until the last live
-            // generator frame completes or is finalized. Nested bodies were
-            // cleaned above so their entry points are not left deferred.
-            //
-            // The attach pass has already pointed the default entry point at a
-            // deferred-parsing thunk. Leaving it there would make the resumed
-            // generator call back into the deferred parse path, which can only
-            // fail or recurse because this body is deliberately not reparsed.
-            // Recreate the entry points without touching the bytecode or
-            // metadata the suspended frame reads.
-            this->GetFunctionBody()->ResetEntryPoint();
-            return;
+            if (this->GetFunctionBody()->IsGenerator())
+            {
+                // A debugger attach switches this context to debug mode and reparses
+                // every already-parsed body. A suspended generator frame kept a raw
+                // ByteCodeReader and operand metadata into this body's bytecode,
+                // const table and statement maps. Dropping them here leaves the
+                // resume path reading freed or replaced state, which produced a
+                // bare value instead of an iterator result. Keep this body intact
+                // and defer its reparse (and breakpoints in it) until the last live
+                // generator frame completes or is finalized. Nested bodies were
+                // cleaned above so their entry points are not left deferred.
+                //
+                // The attach pass has already pointed the default entry point at a
+                // deferred-parsing thunk. Leaving it there would make the resumed
+                // generator call back into the deferred parse path, which can only
+                // fail or recurse because this body is deliberately not reparsed.
+                // Recreate the entry points without touching the bytecode or
+                // metadata the suspended frame reads.
+                this->GetFunctionBody()->ResetEntryPoint();
+                return;
+            }
+
+            if (this->GetFunctionBody()->HasLiveSuspendedAsyncFrames())
+            {
+                // Plain async body with live suspended frames. Unlike the
+                // generator case above, the function still gets debug bytecode:
+                // the reparse target becomes a fresh FunctionBody (see
+                // ParseableFunctionInfo::Parse and the ByteCodeGenerator nested-
+                // function pickups, which call
+                // NewDebugReparseBodyForSuspendedAsync). This body only needs to
+                // stay whole here: no cleanup, no entry-point change (it is never
+                // entered again; its suspended frames resume on it and the
+                // function identity moves to the fresh body). Nested bodies were
+                // cleaned above so they are not left deferred.
+                return;
+            }
         }
 #endif
 
