@@ -2383,6 +2383,7 @@ HRESULT WScriptJsrt::ModuleMessage::Call(LPCSTR fileName)
         {
             hr = Helpers::LoadScriptFromFile(*specifierStr, fileContent, nullptr, filePath, true);
 
+
             if (FAILED(hr))
             {
                 // The host failed to load a dependency of the module graph
@@ -2669,6 +2670,23 @@ static char* BuildJsonParseSource(LPCSTR jsonText, const char* prefix, const cha
     return out;
 }
 
+// True for specifiers that already name a location from the filesystem root
+// ('/' or '\', or a Windows drive letter). The fetch helpers prepend the
+// referencing script/module directory to relative specifiers; concatenating
+// a directory onto an absolute path would only produce a wrong location.
+static bool IsAbsolutePath(LPCSTR specifier)
+{
+    if (specifier == nullptr || specifier[0] == '\0')
+    {
+        return false;
+    }
+    if (specifier[0] == '/' || specifier[0] == '\\')
+    {
+        return true;
+    }
+    return (isalpha((unsigned char)specifier[0]) && specifier[1] == ':');
+}
+
 JsErrorCode WScriptJsrt::FetchImportedModuleHelperWithAttributes(JsModuleRecord referencingModule,
     JsValueRef specifier, JsValueRef attributes, _Out_ JsModuleRecord* dependentModuleRecord, LPCSTR refdir)
 {
@@ -2693,7 +2711,7 @@ JsErrorCode WScriptJsrt::FetchImportedModuleHelperWithAttributes(JsModuleRecord 
     }
 
     char fullPath[_MAX_PATH];
-    std::string specifierFullPath = refdir ? refdir : "";
+    std::string specifierFullPath = (refdir != nullptr && !IsAbsolutePath(*specifierStr)) ? refdir : "";
     specifierFullPath += *specifierStr;
     if (_fullpath(fullPath, specifierFullPath.c_str(), _MAX_PATH) == nullptr)
     {
@@ -2772,7 +2790,7 @@ JsErrorCode WScriptJsrt::FetchImportedModuleHelper(JsModuleRecord referencingMod
     }
 
     char fullPath[_MAX_PATH];
-    std::string specifierFullPath = refdir ? refdir : "";
+    std::string specifierFullPath = (refdir != nullptr && !IsAbsolutePath(*specifierStr)) ? refdir : "";
     specifierFullPath += *specifierStr;
     if (_fullpath(fullPath, specifierFullPath.c_str(), _MAX_PATH) == nullptr)
     {
@@ -2833,9 +2851,23 @@ JsErrorCode WScriptJsrt::FetchImportedModule(_In_ JsModuleRecord referencingModu
 // we are not doing any translation, just treat the specifier as fileName.
 // While this call will come back directly from runtime script or module code, the additional
 // task can be scheduled asynchronously that executed later.
+// A relative specifier must resolve against the importing script's own directory
+// (HostImportModuleDynamically hands the referencing script's source context to
+// the host): the harness materializes each test next to its fixtures and runs
+// the host from an unrelated CWD. scriptDirMap carries that directory for every
+// source context passed to JsRun (ch's RunScript entry points and
+// WScript.LoadScript's "self"/"samethread" paths, via RegisterScriptDir).
+// Unregistered contexts (e.g. synthetic sources) keep the legacy CWD fallback.
 JsErrorCode WScriptJsrt::FetchImportedModuleFromScript(_In_ JsSourceContext dwReferencingSourceContext,
     _In_ JsValueRef specifier, _Outptr_result_maybenull_ JsModuleRecord* dependentModuleRecord)
 {
+    auto scriptDirEntry = scriptDirMap.find(static_cast<DWORD_PTR>(dwReferencingSourceContext));
+    if (scriptDirEntry != scriptDirMap.end())
+    {
+        std::string dir = scriptDirEntry->second;
+        return FetchImportedModuleHelper(nullptr, specifier, dependentModuleRecord, dir.c_str());
+    }
+
     return FetchImportedModuleHelper(nullptr, specifier, dependentModuleRecord);
 }
 
@@ -2858,6 +2890,14 @@ JsErrorCode WScriptJsrt::FetchImportedModuleWithAttributes(_In_ JsModuleRecord r
 JsErrorCode WScriptJsrt::FetchImportedModuleFromScriptWithAttributes(_In_ JsSourceContext dwReferencingSourceContext,
     _In_ JsValueRef specifier, _In_ JsValueRef attributes, _Outptr_result_maybenull_ JsModuleRecord* dependentModuleRecord)
 {
+    // Same script-relative resolution as FetchImportedModuleFromScript above.
+    auto scriptDirEntry = scriptDirMap.find(static_cast<DWORD_PTR>(dwReferencingSourceContext));
+    if (scriptDirEntry != scriptDirMap.end())
+    {
+        std::string dir = scriptDirEntry->second;
+        return FetchImportedModuleHelperWithAttributes(nullptr, specifier, attributes, dependentModuleRecord, dir.c_str());
+    }
+
     return FetchImportedModuleHelperWithAttributes(nullptr, specifier, attributes, dependentModuleRecord);
 }
 
