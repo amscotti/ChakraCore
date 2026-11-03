@@ -635,13 +635,31 @@ using namespace Js;
                     if (pfuncCaller != nullptr && pfuncCaller->IsScriptFunction() && walker.IsJavascriptFrame())
                     {
                         InterpreterStackFrame *callerFrame = walker.GetCurrentInterpreterFrame();
-                        // Direct eval in a parameter initializer runs while the
-                        // caller's parameter scope is still the active
-                        // environment. Its variable environment is the outer
-                        // call environment, not the parameter scope.
+                        // Direct eval in a parameter initializer: baseline S14
+                        // EvalDeclarationInstantiation checks the caller's
+                        // parameter environment only while default parameters
+                        // are evaluating (a split, not-yet-done parameter
+                        // scope). A live interpreted frame tracks that in
+                        // IsParamScopeDone, and is the authority.
+                        //
+                        // A native (JIT) frame has no interpreter frame at
+                        // all, and a bailout frame's flag is only correct
+                        // when the bailout resumed inside the parameter
+                        // region (bailout frame construction does not run
+                        // InitializeClosures, so a frame that bailed out in
+                        // the body region keeps the reset value). Neither
+                        // can be trusted directly. Codegen aborts for direct
+                        // eval call sites in a split parameter region (and
+                        // in loop bodies; see IRBuilder::BuildCallI_Helper),
+                        // so a native or bailout frame can only reach a
+                        // direct eval call from the body region, where the
+                        // parameter scope is done. Treat both as done.
+                        const bool callerFrameTracksParamScope =
+                            callerFrame != nullptr &&
+                            !callerFrame->TestFlags(InterpreterStackFrameFlags_FromBailOut);
+                        evalInParamScope = callerFrameTracksParamScope && !callerFrame->IsParamScopeDone();
                         FunctionBody *callerBody = pfuncCaller->GetFunctionBody();
                         FunctionInfo *callerInfo = callerBody->GetFunctionInfo();
-                        evalInParamScope = callerFrame != nullptr && !callerFrame->IsParamScopeDone();
                         evalInArrowParamScope = evalInParamScope && callerBody->IsLambda();
                         evalCallerParameterArguments = callerInfo->HasParameterNamedArguments();
                     }

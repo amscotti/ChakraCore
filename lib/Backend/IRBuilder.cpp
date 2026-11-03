@@ -333,11 +333,12 @@ void
 IRBuilder::Build()
 {
     // Eval script functions: baseline S14 declaration instantiation
-    // (EnsureNo*Redecl* / scoped global-lexical checks) reads scope
-    // objects and slot arrays whose JIT materialization does not match
-    // the interpreter's, producing wrong redeclaration verdicts both
-    // ways. Keep eval code interpreted for now (see the direct-eval
-    // guard in BuildCallI_Helper).
+    // (EnsureNo*Redecl* / scoped global-lexical checks) runs in the eval
+    // body itself, whose JIT materialization of the eval's own scoped
+    // checks does not match the interpreter's (false Let/Const
+    // redeclaration verdicts, e.g. indirect eval after global block-scope
+    // let declarations). Keep eval code interpreted (see the narrowed
+    // direct-eval guard in BuildCallI_Helper for the caller-side shapes).
     if (m_func->GetJITFunctionBody()->IsEval())
     {
         throw Js::OperationAbortedException();
@@ -6744,30 +6745,40 @@ IRBuilder::BuildProfiled2CallIExtended(Js::OpCode opcode, uint32 offset, Js::Reg
 IR::Instr *
 IRBuilder::BuildCallI_Helper(Js::OpCode newOpcode, uint32 offset, Js::RegSlot dstRegSlot, Js::RegSlot Src1RegSlot, Js::ArgSlot ArgCount, Js::ProfileId profileId, Js::CallFlags flags, Js::InlineCacheIndex inlineCacheIndex)
 {
-    // Direct eval: baseline S14 EvalDeclarationInstantiation consults
-    // the caller's frame display and scope slot arrays (parameter
-    // environment for defaults, lexical block scopes, global lexical
-    // declarations). The display reconstructed from a JIT frame does
-    // not carry those scopes faithfully - e.g. `var arguments` in a
-    // parameter default silently succeeded, and indirect eval after
-    // global block `let` declarations falsely reported redeclaration.
-    // Keep functions containing direct eval interpreted until eval
-    // declaration fidelity from JIT frames is ported. (CallFlags_
-    // ExtraArg alone is this backend's direct-eval marker; see the
-    // CallIEval conversions in the call-flag builders above.)
+    // Direct eval: baseline S14 EvalDeclarationInstantiation consults the
+    // caller's frame display and scope slot arrays (parameter environment
+    // for defaults, lexical block scopes, global lexical declarations).
+    // Body-region frame displays are materialized faithfully by the same
+    // runtime scope ops the interpreter runs, so direct-eval callers JIT.
+    // Two shapes still abort and stay interpreted:
+    //  - a call site in a split function's parameter region
+    //    (!IsParamScopeDone): the runtime's evalInParamScope determination
+    //    (GlobalObject::VEval) can only read that state from a live
+    //    interpreted frame; native and bailout frames cannot carry it, and
+    //    the S14 parameter-environment checks (e.g. `var arguments` in a
+    //    parameter default is a SyntaxError) must not be skipped.
+    //  - a loop-body work item: the stack walker skips loop-body frames, so
+    //    VEval would attribute the eval to the wrong caller frame.
+    // Eval script functions themselves stay interpreted (the IsEval abort
+    // in Build). (CallFlags_ExtraArg alone is this backend's direct-eval
+    // marker; see the CallIEval conversions in the call-flag builders
+    // above.)
     if ((flags & Js::CallFlags::CallFlags_Eval) != 0 ||
         flags == Js::CallFlags::CallFlags_ExtraArg || newOpcode == Js::OpCode::CallIEval)
     {
-#ifdef PERF_HINT
-        // Lowering would have written this hint for the CallIEval; the
-        // abort keeps the function interpreted, which is exactly what
-        // the hint reports, so emit it here instead.
-        if (PHASE_TRACE1(Js::PerfHintPhase))
+        if (!this->IsParamScopeDone() || this->IsLoopBody())
         {
-            WritePerfHint(PerfHints::CallsEval, this->m_func, offset);
-        }
+#ifdef PERF_HINT
+            // Lowering would have written this hint for the CallIEval; the
+            // abort keeps the function interpreted, which is exactly what
+            // the hint reports, so emit it here instead.
+            if (PHASE_TRACE1(Js::PerfHintPhase))
+            {
+                WritePerfHint(PerfHints::CallsEval, this->m_func, offset);
+            }
 #endif
-        throw Js::OperationAbortedException();
+            throw Js::OperationAbortedException();
+        }
     }
 
     IR::Instr * instr;
