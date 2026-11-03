@@ -630,6 +630,11 @@ public:
     bool                isLeaf : 1;
     bool                isProcessed : 1; // Set and reset at varying places according to the phase we're in.
                                          // For example, in the lowerer, it'll be set to true when we process the loopTop for a certain loop
+    bool                isFinallyEarlyExitLoop : 1; // Synthetic loop built around the back edge a
+                                         // finally-to-early-exit edge creates when the early-exit
+                                         // target precedes the finally in the block list (labeled
+                                         // break/return out of a finally). Keeps CanonicalizeLoops
+                                         // from relocating the enclosing try's blocks as break blocks.
     struct MemCopyCandidate;
     struct MemSetCandidate;
     struct MemOpCandidate
