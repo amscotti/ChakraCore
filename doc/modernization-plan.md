@@ -662,6 +662,39 @@ Decision/rollback points:
   [c4-gate.md](c4-gate.md), [c4-manifest.md](c4-manifest.md),
   [c4-run-evidence.md](c4-run-evidence.md).*)
 
+**Restart point (2026-11-03) — working policy and remaining Mac work.**
+From this point development is **mainline-only**: lanes execute as
+sequential commits directly on `modernize/baseline` (no per-lane
+worktrees — all 31 were removed 2026-11-03 with their branches
+preserved; the V workflow — implementer, general + adversarial review,
+bounded repair, green gates before continuing — is unchanged). The
+shared gate lock and the mise Zig 0.17.0 pin still govern every
+build/gate. Current state: gates **2038/0 test / 2090/0 debug-static**,
+`zig build -Dprofile=jit check` green, serialized-bytecode GUID
+rotated, and the **C4 certified baseline published**
+([c4-manifest.md](c4-manifest.md), [c4-gate.md](c4-gate.md)):
+edition-selected **76,464/4,080 of 80,544 (94.93%)**, verdict
+BLOCKED-with-certified-baseline. Remaining Mac-accomplishable work, in
+order: (A) JIT coverage ports — labeled-break-`finally` GlobOpt (in
+review at the time of this note), eval-declaration fidelity, the 18
+class/private/import-attribute opcodes; (B) C4 path-to-green engine
+work — the dynamic-import host-loader lane (−545, biggest unowned
+cluster), cross-realm (185), detach-buffer (~104), S14 compound-assign
+(66) + let-ASI (14), S1 class tail (~84), early-error executions
+(~70), then the smaller documented partials (BigInt 378, resizable-AB
+130, matchAll 30, replaceAll 28, TCO 34, 6 deterministic timeouts);
+(C) small recorded cards — regen-tool overwrite guard + Linux
+case-sensitivity, sloppy-detached-store divergence, `arguments.callee`
+poisoning, `[arguments=5]=[]` corner, dynamic-import-during-TLA,
+module multi-error ordering, sticky resolution witness, Map-groupBy
+arm asymmetry, S6e residuals (witness race, 2ms polling, blocked-stdout
+Quit hang, TTD+Quit truncation); (D) a whole-branch review/cleanup
+sweep + stale-doc pass + flake-family hardening; (E) testing quality —
+baseline-refresh scripting, debugger/TTD gaps, a bounded GCStress
+campaign. Blocked beyond the Mac: the SAB/Atomics and ICU/Unicode pin
+decisions, B3's first green Actions run (needs a push), B4 Linux
+(the certified baseline is re-proven there), B6 Windows.
+
 **Latest integration checkpoint (2026-11-01):** main is clean at the
 **2038/0 test** and **2090/0 debug-static** gates (re-verified after every
 merge and repair below; counts are single-sourced in

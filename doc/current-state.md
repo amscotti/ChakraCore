@@ -56,7 +56,7 @@ This `doc/` folder is the start of durable in-repo documentation. The
 feature inventory and line anchors below are the 2026-10-10 baseline
 snapshot; the modernization branch has since added the C2 surfaces listed
 in [modernization-plan.md](modernization-plan.md) §6 and its receipts.
-Latest merged checkpoint (2026-11-02): **2038/0 test**, **2090/0
+Latest merged checkpoint (2026-11-03): **2038/0 test**, **2090/0
 debug-static**, including direct-eval `super` early errors, the flag-on
 S6a growable-SAB/non-shared-Atomics slice, S6b `Atomics.pause` /
 single-thread `Atomics.waitAsync`, S6c BigInt Atomics, S6d finite
@@ -76,6 +76,16 @@ immutable-ArrayBuffer surface, both
 S3 RegExp slices (`u` property escapes and `v` Unicode Sets mode), S9
 u-mode RegExp strictness, and S9-b code-point-aware RegExp search/builtin
 flag derivation.
+
+
+**Restart-point note (2026-11-03):** development is now mainline-only
+on `modernize/baseline` (worktree lanes retired; branches preserved).
+The C4 certified ES2025 baseline is published at edition-selected
+**76,464/4,080 of 80,544 (94.93%)** — see
+[c4-manifest.md](c4-manifest.md) and [c4-gate.md](c4-gate.md); the
+ordered remaining Mac work (JIT coverage ports, C4 path-to-green
+engine lanes, recorded cards, review/cleanup, testing quality) is in
+[modernization-plan.md](modernization-plan.md) §6's Restart point.
 
 ## 3. Architecture (summary)
 
