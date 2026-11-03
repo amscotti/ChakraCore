@@ -135,6 +135,13 @@ private:
 
     void                BuildReg1(Js::OpCode newOpcode, uint32 offset, Js::RegSlot R0);
     void                BuildReg2(Js::OpCode newOpcode, uint32 offset, Js::RegSlot R0, Js::RegSlot R1, uint32 nextOffset);
+    // Shared builder for private-element/class-field opcodes whose JIT
+    // lowering is a single runtime helper call (see Lowerer::
+    // LowerPrivateElementHelperCall). src1 becomes the helper's first C
+    // parameter; extra1/extra2 (in C-parameter order) ride an ExtendArg_A
+    // chain linked from src2, as BuildInitClass does for NewClassConstructor.
+    void                BuildPrivateElementHelper(Js::OpCode newOpcode, uint32 offset, IR::RegOpnd *dstOpnd,
+                                                  IR::Opnd *src1Opnd, IR::Opnd *extra1Opnd, IR::Opnd *extra2Opnd = nullptr);
     void                BuildProfiledReg2(Js::OpCode newOpcode, uint32 offset, Js::RegSlot dstRegSlot, Js::RegSlot srcRegSlot, Js::ProfileId profileId);
     void                BuildReg3(Js::OpCode newOpcode, uint32 offset, Js::RegSlot dstRegSlot, Js::RegSlot src1RegSlot,
                             Js::RegSlot src2RegSlot, Js::ProfileId profileId);

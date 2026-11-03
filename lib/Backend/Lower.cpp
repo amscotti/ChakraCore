@@ -2931,6 +2931,100 @@ Lowerer::LowerRange(IR::Instr *instrStart, IR::Instr *instrEnd, bool defaultDoFa
             break;
         }
 
+        case Js::OpCode::ImportCallWithOptions:
+        {
+            // Reg3: dst = OP_ImportCallWithOptions(function, specifier(R1),
+            // options(R2), scriptContext), mirroring ImportCall above.
+            IR::Opnd *src1Opnd = instr->UnlinkSrc1();
+            IR::Opnd *src2Opnd = instr->UnlinkSrc2();
+            IR::Opnd *functionObjOpnd = nullptr;
+            m_lowererMD.LoadFunctionObjectOpnd(instr, functionObjOpnd);
+
+            LoadScriptContext(instr);
+            m_lowererMD.LoadHelperArgument(instr, src2Opnd);
+            m_lowererMD.LoadHelperArgument(instr, src1Opnd);
+            m_lowererMD.LoadHelperArgument(instr, functionObjOpnd);
+            m_lowererMD.ChangeToHelperCall(instr, IR::HelperImportCallWithOptions);
+
+            break;
+        }
+
+        // C2-A3: class-field/private-element opcodes, each lowered to its
+        // interpreter implementation as a single runtime helper call. The
+        // Reg3 shapes carry both parameters as real src operands; the rest
+        // carry extra parameters on an ExtendArg_A chain (see
+        // LowerPrivateElementHelperCall).
+        case Js::OpCode::NewPrivateName:
+        {
+            LoadScriptContext(instr);
+            m_lowererMD.ChangeToHelperCall(instr, IR::HelperNewPrivateName);
+            break;
+        }
+
+        case Js::OpCode::LdPrivateField:
+        case Js::OpCode::LdPrivateMethod:
+        case Js::OpCode::LdPrivateAccessor:
+        case Js::OpCode::LdPrivateDynamic:
+        case Js::OpCode::HasPrivateField:
+        case Js::OpCode::StPrivateMethod:
+        {
+            IR::Opnd *src1Opnd = instr->UnlinkSrc1();
+            IR::Opnd *src2Opnd = instr->UnlinkSrc2();
+            IR::JnHelperMethod helperMethod;
+            switch (instr->m_opcode)
+            {
+                case Js::OpCode::LdPrivateField:        helperMethod = IR::HelperLdPrivateField; break;
+                case Js::OpCode::LdPrivateMethod:       helperMethod = IR::HelperLdPrivateMethod; break;
+                case Js::OpCode::LdPrivateAccessor:     helperMethod = IR::HelperLdPrivateAccessor; break;
+                case Js::OpCode::LdPrivateDynamic:      helperMethod = IR::HelperLdPrivateDynamic; break;
+                case Js::OpCode::HasPrivateField:       helperMethod = IR::HelperHasPrivateField; break;
+                default:                                helperMethod = IR::HelperStPrivateMethod; break;
+            }
+            LoadScriptContext(instr);
+            m_lowererMD.LoadHelperArgument(instr, src2Opnd);
+            m_lowererMD.LoadHelperArgument(instr, src1Opnd);
+            m_lowererMD.ChangeToHelperCall(instr, helperMethod);
+            break;
+        }
+
+        case Js::OpCode::InitPrivateMethod:
+            this->LowerPrivateElementHelperCall(instr, IR::HelperInitPrivateMethod, true);
+            break;
+
+        case Js::OpCode::StPrivateField:
+            this->LowerPrivateElementHelperCall(instr, IR::HelperStPrivateField, true);
+            break;
+
+        case Js::OpCode::InitPrivateField:
+            this->LowerPrivateElementHelperCall(instr, IR::HelperInitPrivateField, true);
+            break;
+
+        case Js::OpCode::InitStaticPrivateField:
+            this->LowerPrivateElementHelperCall(instr, IR::HelperInitStaticPrivateField, true);
+            break;
+
+        case Js::OpCode::StPrivateDynamic:
+            this->LowerPrivateElementHelperCall(instr, IR::HelperStPrivateDynamic, true);
+            break;
+
+        case Js::OpCode::StPrivateAccessor:
+            this->LowerPrivateElementHelperCall(instr, IR::HelperStPrivateAccessor, true);
+            break;
+
+        case Js::OpCode::SetPrivateDefinition:
+            this->LowerPrivateElementHelperCall(instr, IR::HelperSetPrivateDefinition, true);
+            break;
+
+        case Js::OpCode::InitClassField:
+            // Helper is (instance, propertyId, value) without a script
+            // context parameter (it reads one from the instance).
+            this->LowerPrivateElementHelperCall(instr, IR::HelperInitClassField, false);
+            break;
+
+        case Js::OpCode::InitClassFieldComputedName:
+            this->LowerPrivateElementHelperCall(instr, IR::HelperInitClassFieldComputedName, true);
+            break;
+
         case Js::OpCode::SetComputedNameVar:
         {
             IR::Opnd *src2Opnd = instr->UnlinkSrc2();
@@ -6876,6 +6970,47 @@ Lowerer::LowerRestify(IR::Instr * newRestInstr)
     newRestInstr->SetSrc2(src1);
 
     return m_lowererMD.LowerCallHelper(newRestInstr);
+}
+
+///----------------------------------------------------------------------------
+///
+/// Lowerer::LowerPrivateElementHelperCall
+///
+///     Lower a private-element/class-field opcode to a single call of its
+///     runtime helper (the interpreter's implementation). The helper's
+///     signature is (param1, ..., paramN, ScriptContext*) where param1 is the
+///     instr's src1 and param2..paramN ride an ExtendArg_A chain linked from
+///     src2 with the last parameter outermost. Arguments are queued with
+///     LoadHelperArgument in reverse parameter order (the ARM64/x64 arg
+///     placement convention), the script context first when the helper takes
+///     it. The chain instrs stay in the IR until the generic ExtendArg_A case
+///     removes them; their operands have already been queued as call
+///     arguments here.
+///
+///----------------------------------------------------------------------------
+
+IR::Instr *
+Lowerer::LowerPrivateElementHelperCall(IR::Instr *instr, IR::JnHelperMethod helperMethod, bool loadScriptContext)
+{
+    IR::Opnd *src1Opnd = instr->UnlinkSrc1();
+    IR::Opnd *chainOpnd = instr->UnlinkSrc2();
+
+    if (loadScriptContext)
+    {
+        LoadScriptContext(instr);
+    }
+
+    while (chainOpnd != nullptr)
+    {
+        IR::RegOpnd *linkOpnd = chainOpnd->AsRegOpnd();
+        IR::Instr *linkInstr = linkOpnd->m_sym->m_instrDef;
+        Assert(linkInstr && linkInstr->m_opcode == Js::OpCode::ExtendArg_A && linkInstr->GetDst() == linkOpnd);
+        m_lowererMD.LoadHelperArgument(instr, linkInstr->GetSrc1());
+        chainOpnd = linkInstr->GetSrc2();
+    }
+
+    m_lowererMD.LoadHelperArgument(instr, src1Opnd);
+    return m_lowererMD.ChangeToHelperCall(instr, helperMethod);
 }
 
 ///----------------------------------------------------------------------------

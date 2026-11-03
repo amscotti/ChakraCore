@@ -710,29 +710,13 @@ IRBuilder::Build()
         switch (newOpcode)
         {
         // Baseline class-fields/private-name/import-attributes opcodes
-        // (C2-S1/S12) have no ARM64 backend lowering yet; the per-layout
-        // builders below Fatal() on them. Abort this codegen attempt so
-        // the function stays interpreted (formally out of JIT coverage,
-        // like asm.js/WASM) instead of crashing the process. Porting
-        // these lowerings is tracked in doc/arm64-macos-jit.md.
-        case Js::OpCode::HasPrivateField:
-        case Js::OpCode::ImportCallWithOptions:
-        case Js::OpCode::InitClassField:
-        case Js::OpCode::InitClassFieldComputedName:
-        case Js::OpCode::InitPrivateField:
-        case Js::OpCode::InitPrivateMethod:
-        case Js::OpCode::InitStaticPrivateField:
-        case Js::OpCode::LdPrivateAccessor:
+        // (C2-S1/S12) are JIT-lowered as pure runtime helper calls (see
+        // Lowerer::LowerPrivateElementHelperCall and the per-layout builders).
+        // LdPrivateBrand is the remaining exception: its implementation walks
+        // the eval scope chain via InterpreterStackFrame state that the JIT
+        // cannot materialize here, so abort this codegen attempt and keep the
+        // function interpreted (tracked in doc/c2-jit-private-opcodes.md).
         case Js::OpCode::LdPrivateBrand:
-        case Js::OpCode::LdPrivateDynamic:
-        case Js::OpCode::LdPrivateField:
-        case Js::OpCode::LdPrivateMethod:
-        case Js::OpCode::NewPrivateName:
-        case Js::OpCode::SetPrivateDefinition:
-        case Js::OpCode::StPrivateAccessor:
-        case Js::OpCode::StPrivateDynamic:
-        case Js::OpCode::StPrivateField:
-        case Js::OpCode::StPrivateMethod:
             throw Js::OperationAbortedException();
         default:
             break;
@@ -1803,6 +1787,53 @@ IRBuilder::BuildReg1(Js::OpCode newOpcode, uint32 offset, Js::RegSlot R0)
 
 ///----------------------------------------------------------------------------
 ///
+/// IRBuilder::BuildPrivateElementHelper
+///
+///     Build the IR instr for a private-element/class-field opcode that the
+///     Lowerer turns into a single runtime helper call. src1 becomes the
+///     helper's first C parameter; extra operands (in C-parameter order) ride
+///     an ExtendArg_A chain linked from src2 (the last extra outermost), the
+///     same shape BuildInitClass builds for NewClassConstructor. Callers must
+///     build all source operands before dstOpnd so an overlapped src/dst
+///     bytecode register (SetPrivateDefinition, InitPrivateMethod) reads its
+///     old value.
+///
+///----------------------------------------------------------------------------
+
+void
+IRBuilder::BuildPrivateElementHelper(Js::OpCode newOpcode, uint32 offset, IR::RegOpnd *dstOpnd,
+                                      IR::Opnd *src1Opnd, IR::Opnd *extra1Opnd, IR::Opnd *extra2Opnd)
+{
+    Assert(src1Opnd);
+    Assert(extra1Opnd);
+
+    IR::Instr *linkInstr = nullptr;
+    // Build the chain in C-parameter order (extra1 first): the Lowerer walks
+    // it from src2 outward, seeing the LAST parameter first, which is exactly
+    // the reverse order LoadHelperArgument wants (see
+    // Lowerer::LowerPrivateElementHelperCall).
+    for (IR::Opnd *extraOpnd : { extra1Opnd, extra2Opnd })
+    {
+        if (extraOpnd == nullptr)
+        {
+            continue;
+        }
+        IR::RegOpnd *linkOpnd = IR::RegOpnd::New(TyVar, m_func);
+        IR::Instr *extendInstr = IR::Instr::New(Js::OpCode::ExtendArg_A, linkOpnd, extraOpnd, m_func);
+        if (linkInstr != nullptr)
+        {
+            extendInstr->SetSrc2(linkInstr->GetDst());
+        }
+        this->AddInstr(extendInstr, offset);
+        linkInstr = extendInstr;
+    }
+
+    IR::Instr *instr = IR::Instr::New(newOpcode, dstOpnd, src1Opnd, linkInstr->GetDst(), m_func);
+    this->AddInstr(instr, offset);
+}
+
+///----------------------------------------------------------------------------
+///
 /// IRBuilder::BuildReg2
 ///
 ///     Build IR instr for a Reg2 instruction.
@@ -1849,6 +1880,16 @@ IRBuilder::BuildReg2(Js::OpCode newOpcode, uint32 offset, Js::RegSlot R0, Js::Re
         newOpcode = Js::OpCode::UnwrapWithObj;
         reuseLoc = true;
         break;
+
+    case Js::OpCode::InitPrivateMethod:
+    {
+        // R0 is both the source instance and the destination; R1 is the brand.
+        // Build the instance src before the dst so R0's old value is read.
+        IR::Opnd *instanceOpnd = this->BuildSrcOpnd(R0);
+        IR::RegOpnd *dstOpnd = this->BuildDstOpnd(R0);
+        this->BuildPrivateElementHelper(newOpcode, offset, dstOpnd, instanceOpnd, src1Opnd);
+        return;
+    }
 
     case Js::OpCode::SpreadObjectLiteral:
         // fall through
@@ -2369,6 +2410,19 @@ IRBuilder::BuildReg4U(Js::OpCode newOpcode, uint32 offset, Js::RegSlot R0, Js::R
             break;
         }
 
+        case Js::OpCode::StPrivateAccessor:
+        {
+            // R0 = result, R1 = instance, R2 = brand, R3 = value. SlotIndex is
+            // unused by the semantics (the emitter writes 0 and the interpreter
+            // ignores it), so it does not reach the IR.
+            IR::Opnd *instanceOpnd = BuildSrcOpnd(R1);
+            IR::Opnd *brandOpnd = BuildSrcOpnd(R2);
+            IR::Opnd *valueOpnd = BuildSrcOpnd(R3);
+            IR::RegOpnd *dstOpnd = BuildDstOpnd(R0);
+            BuildPrivateElementHelper(newOpcode, offset, dstOpnd, instanceOpnd, brandOpnd, valueOpnd);
+            break;
+        }
+
         default:
             AssertMsg(false, "Unknown Reg4U opcode");
             break;
@@ -2477,6 +2531,29 @@ IRBuilder::BuildReg4(Js::OpCode newOpcode, uint32 offset, Js::RegSlot dstRegSlot
                     Js::RegSlot src2RegSlot, Js::RegSlot src3RegSlot)
 {
     IR::Instr *     instr = nullptr;
+
+    // Private-element stores: R0 = result, R1 = instance, R2 = brand,
+    // R3 = value; lowered as one runtime helper call
+    // (instance, brand, value, scriptContext).
+    switch (newOpcode)
+    {
+    case Js::OpCode::StPrivateField:
+    case Js::OpCode::InitPrivateField:
+    case Js::OpCode::InitStaticPrivateField:
+    case Js::OpCode::StPrivateDynamic:
+    {
+        IR::Opnd *instanceOpnd = this->BuildSrcOpnd(src1RegSlot);
+        IR::Opnd *brandOpnd = this->BuildSrcOpnd(src2RegSlot);
+        IR::Opnd *valueOpnd = this->BuildSrcOpnd(src3RegSlot);
+        IR::RegOpnd *dstOpnd = this->BuildDstOpnd(dstRegSlot);
+        this->BuildPrivateElementHelper(newOpcode, offset, dstOpnd, instanceOpnd, brandOpnd, valueOpnd);
+        return;
+    }
+
+    default:
+        break;
+    }
+
     Assert(newOpcode == Js::OpCode::Concat3 || newOpcode == Js::OpCode::Restify);
 
     IR::RegOpnd * src1Opnd = this->BuildSrcOpnd(src1RegSlot);
@@ -2595,6 +2672,21 @@ void
 IRBuilder::BuildReg2B1(Js::OpCode newOpcode, uint32 offset, Js::RegSlot dstRegSlot, Js::RegSlot srcRegSlot, byte index)
 {
     Assert(OpCodeAttr::HasMultiSizeLayout(newOpcode));
+
+    if (newOpcode == Js::OpCode::SetPrivateDefinition)
+    {
+        // R0 holds the value being defined and receives the result; R1 is the
+        // brand; the byte operand is the definition kind (0 method, 1 getter,
+        // 2 setter). Helper: (brand, value, kind, scriptContext). Build the
+        // value src before the dst so R0's old value is read.
+        IR::Opnd *valueOpnd = this->BuildSrcOpnd(dstRegSlot);
+        IR::Opnd *brandOpnd = this->BuildSrcOpnd(srcRegSlot);
+        IR::Opnd *kindOpnd = IR::IntConstOpnd::New(index, TyUint8, m_func);
+        IR::RegOpnd *dstOpnd = this->BuildDstOpnd(dstRegSlot);
+        this->BuildPrivateElementHelper(newOpcode, offset, dstOpnd, brandOpnd, valueOpnd, kindOpnd);
+        return;
+    }
+
     Assert(newOpcode == Js::OpCode::SetConcatStrMultiItem);
 
     IR::Instr *     instr;
@@ -4103,12 +4195,38 @@ IRBuilder::BuildElementSlotI2(Js::OpCode newOpcode, uint32 offset, Js::RegSlot r
         case Js::OpCode::StEnvSlotChkUndecl:
         case Js::OpCode::StEnvObjSlot:
         case Js::OpCode::StEnvObjSlotChkUndecl:
-
-            if (this->GetEnvReg() == Js::Constants::NoRegister)
+        {
+            // A class method can read the class-block scope (the hidden
+            // private-brand const) without its binding ever allocating an env
+            // register — the interpreter reads the display from the closure.
+            // Materialize the environment from the function object the same
+            // way a LdEnv opcode lowers (Lowerer::LowerLdEnv loads
+            // ScriptFunction::environment, constant for a function that never
+            // re-scopes), and use it as the slot-array base instead of
+            // aborting codegen. The temp's sym id is not a bytecode register,
+            // so build its field operand directly (as BuildLoopBodySlotOpnd
+            // does) rather than through BuildFieldOpnd's register mapping.
+            Js::RegSlot envBaseReg = this->GetEnvReg();
+            if (envBaseReg == Js::Constants::NoRegister)
             {
-                throw Js::OperationAbortedException();
+                IR::RegOpnd *envOpnd = IR::RegOpnd::New(TyVar, m_func);
+                if (envOpnd->m_sym->m_isSingleDef)
+                {
+                    envOpnd->m_sym->m_isNotNumber = true;
+                }
+                this->AddInstr(IR::Instr::New(Js::OpCode::LdEnv, envOpnd, m_func), offset);
+                // Pointer-based construction: by-ID lookups (FindOrCreate)
+                // are only valid for bytecode-register ids — during inlinee
+                // IR building the sym table's ID adjustment would corrupt
+                // the lookup.
+                PropertySym *envSlotArraySym = PropertySym::New(
+                    envOpnd->m_sym, slotId1, (uint32)-1, (uint)-1, PropertyKindSlotArray, m_func);
+                fieldOpnd = IR::SymOpnd::New(envSlotArraySym, TyVar, m_func);
             }
-            fieldOpnd = this->BuildFieldOpnd(Js::OpCode::LdSlotArr, this->GetEnvReg(), slotId1, (Js::PropertyIdIndexType)-1, PropertyKindSlotArray);
+            else
+            {
+                fieldOpnd = this->BuildFieldOpnd(Js::OpCode::LdSlotArr, envBaseReg, slotId1, (Js::PropertyIdIndexType)-1, PropertyKindSlotArray);
+            }
             regOpnd = IR::RegOpnd::New(TyVar, m_func);
             instr = IR::Instr::New(Js::OpCode::LdSlotArr, regOpnd, fieldOpnd, m_func);
             this->AddInstr(instr, offset);
@@ -4171,6 +4289,7 @@ IRBuilder::BuildElementSlotI2(Js::OpCode newOpcode, uint32 offset, Js::RegSlot r
                 InsertBailOnNoProfile(instr);
             }
             break;
+        }
 
         case Js::OpCode::StInnerObjSlot:
         case Js::OpCode::StInnerObjSlotChkUndecl:
@@ -4723,6 +4842,21 @@ IRBuilder::BuildElementCP(Js::OpCode newOpcode, uint32 offset, Js::RegSlot insta
 
     Js::PropertyId  propertyId;
     bool isProfiled = OpCodeAttr::IsProfiledOp(newOpcode);
+
+    if (newOpcode == Js::OpCode::InitClassField)
+    {
+        // Class field definitions (CreateDataPropertyOrThrow) are lowered as
+        // one runtime helper call (instance, propertyId, value) with no
+        // destination; the property id rides the ExtendArg chain like the
+        // other private-element opcodes. No field/inline-cache symbols are
+        // built: the define is intentionally uncached.
+        propertyId = m_func->GetJITFunctionBody()->GetPropertyIdFromCacheId(inlineCacheIndex);
+        IR::Opnd *instanceOpnd = this->BuildSrcOpnd(instance);
+        IR::Opnd *valueOpnd = this->BuildSrcOpnd(regSlot);
+        IR::Opnd *propertyIdOpnd = IR::IntConstOpnd::New(propertyId, TyInt32, m_func);
+        this->BuildPrivateElementHelper(newOpcode, offset, nullptr, instanceOpnd, propertyIdOpnd, valueOpnd);
+        return;
+    }
 
     if (isProfiled)
     {
@@ -5727,6 +5861,19 @@ IRBuilder::BuildElementI(Js::OpCode newOpcode, uint32 offset, Js::RegSlot baseRe
                         Js::RegSlot regSlot, Js::ProfileId profileId)
 {
     Assert(OpCodeAttr::HasMultiSizeLayout(newOpcode));
+
+    if (newOpcode == Js::OpCode::InitClassFieldComputedName)
+    {
+        // Computed-key class field definition, lowered as one runtime helper
+        // call (instance, key, value) with no destination and no element
+        // inline cache: the key register already holds the
+        // ToPropertyKey-converted key.
+        IR::Opnd *instanceOpnd = this->BuildSrcOpnd(baseRegSlot);
+        IR::Opnd *keyOpnd = this->BuildSrcOpnd(indexRegSlot);
+        IR::Opnd *valueOpnd = this->BuildSrcOpnd(regSlot);
+        this->BuildPrivateElementHelper(newOpcode, offset, nullptr, instanceOpnd, keyOpnd, valueOpnd);
+        return;
+    }
 
     ValueType arrayType;
     const Js::LdElemInfo *ldElemInfo = nullptr;

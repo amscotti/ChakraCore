@@ -146,6 +146,13 @@ private:
     IR::Instr *     LowerNewScGenFuncHomeObj(IR::Instr *instr);
     IR::Instr *     LowerStPropIdArrFromVar(IR::Instr *instr);
     IR::Instr *     LowerRestify(IR::Instr *instr);
+    // Lower a private-element/class-field opcode whose IR shape is
+    // dst (optional) + src1 (first helper parameter) + an ExtendArg_A chain
+    // linked from src2 carrying the remaining parameters (last parameter
+    // outermost), as built by IRBuilder::BuildPrivateElementHelper. Emits one
+    // call to the given runtime helper; leftover ExtendArg_A instrs are
+    // removed by the generic ExtendArg_A case in LowerInstruction.
+    IR::Instr *     LowerPrivateElementHelperCall(IR::Instr *instr, IR::JnHelperMethod helperMethod, bool loadScriptContext);
     IR::Instr*      GenerateCompleteStFld(IR::Instr* instr, bool emitFastPath, IR::JnHelperMethod monoHelperAfterFastPath, IR::JnHelperMethod polyHelperAfterFastPath,
                         IR::JnHelperMethod monoHelperWithoutFastPath, IR::JnHelperMethod polyHelperWithoutFastPath, bool withPutFlags, Js::PropertyOperationFlags flags);
     bool            GenerateStFldWithCachedType(IR::Instr * instrStFld, bool* continueAsHelperOut, IR::LabelInstr** labelHelperOut, IR::RegOpnd** typeOpndOut);
