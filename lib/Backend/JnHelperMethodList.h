@@ -564,7 +564,34 @@ HELPERCALLCHK(LdHomeObjProto,           Js::JavascriptOperators::OP_LdHomeObjPro
 HELPERCALLCHK(LdFuncObjProto,           Js::JavascriptOperators::OP_LdFuncObjProto, AttrCanNotBeReentrant)
 
 HELPERCALLCHK(ImportCall,               Js::JavascriptOperators::OP_ImportCall, 0)
+HELPERCALLCHK(ImportCallWithOptions,    Js::JavascriptOperators::OP_ImportCallWithOptions, 0)
 HELPERCALLCHK(LdImportMeta,             Js::JavascriptOperators::OP_LdImportMeta, 0)
+
+// C2-A3: class-fields/private-elements/import-attributes opcodes, lowered as
+// pure runtime helper calls (the interpreter's implementation). Attributes
+// mirror each helper's reach: helpers that only allocate/record never call
+// back into script, so they carry AttrCanNotBeReentrant (which the DBG
+// reconcile check requires when the bytecode opcode lacks implicit-call
+// attributes); the rest can throw brand-check TypeErrors (AttrCanThrow) and
+// accessors may call user getters (reentrant). LdPrivateBrand has no entry:
+// its eval-scope walk is not helper-callable and the opcode still aborts
+// codegen (see doc/c2-jit-private-opcodes.md).
+HELPERCALLCHK(InitClassField,           Js::JavascriptOperators::OP_InitClassField, AttrCanThrow)
+HELPERCALLCHK(NewPrivateName,           Js::JavascriptOperators::OP_NewPrivateName, AttrCanNotBeReentrant)
+HELPERCALLCHK(LdPrivateField,           Js::JavascriptOperators::OP_LdPrivateField, AttrCanThrow)
+HELPERCALLCHK(StPrivateField,           Js::JavascriptOperators::OP_StPrivateField, AttrCanThrow)
+HELPERCALLCHK(InitPrivateField,         Js::JavascriptOperators::OP_InitPrivateField, AttrCanThrow)
+HELPERCALLCHK(HasPrivateField,          Js::JavascriptOperators::OP_HasPrivateFieldVar, AttrCanThrow)
+HELPERCALLCHK(SetPrivateDefinition,     Js::JavascriptOperators::OP_SetPrivateDefinition, 0)
+HELPERCALLCHK(InitPrivateMethod,        Js::JavascriptOperators::OP_InitPrivateMethod, AttrCanThrow | AttrCanNotBeReentrant)
+HELPERCALLCHK(LdPrivateMethod,          Js::JavascriptOperators::OP_LdPrivateMethod, AttrCanThrow)
+HELPERCALLCHK(LdPrivateAccessor,        Js::JavascriptOperators::OP_LdPrivateAccessor, AttrCanThrow)
+HELPERCALLCHK(StPrivateAccessor,        Js::JavascriptOperators::OP_StPrivateAccessor, AttrCanThrow)
+HELPERCALLCHK(StPrivateMethod,          Js::JavascriptOperators::OP_StPrivateMethod, AttrCanThrow | AttrCanNotBeReentrant)
+HELPERCALLCHK(InitStaticPrivateField,   Js::JavascriptOperators::OP_InitStaticPrivateField, AttrCanThrow)
+HELPERCALLCHK(InitClassFieldComputedName, Js::JavascriptOperators::OP_InitClassFieldComputedName, AttrCanThrow)
+HELPERCALLCHK(LdPrivateDynamic,         Js::JavascriptOperators::OP_LdPrivateDynamic, AttrCanThrow)
+HELPERCALLCHK(StPrivateDynamic,         Js::JavascriptOperators::OP_StPrivateDynamic, AttrCanThrow)
 HELPERCALLCHK(NewAsyncFromSyncIterator, Js::JavascriptOperators::OP_NewAsyncFromSyncIterator, AttrCanNotBeReentrant)
 HELPERCALLCHK(NewAwaitObject,           Js::JavascriptOperators::OP_NewAwaitObject, AttrCanNotBeReentrant)
 

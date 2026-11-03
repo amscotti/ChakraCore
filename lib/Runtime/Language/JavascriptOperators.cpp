@@ -3486,6 +3486,16 @@ CommonNumber:
         return GetPrivateBrandMap(brand)->Has(UnsafeVarTo<RecyclableObject>(instance)) ? TRUE : FALSE;
     }
 
+    Var JavascriptOperators::OP_HasPrivateFieldVar(Var instance, Var brand, ScriptContext * scriptContext)
+    {
+        // Var-boolean form shared by the interpreter handler and the JIT
+        // helper-call lowering (the JIT moves the helper's x0 return straight
+        // into the destination register, so it must already be a Var).
+        return OP_HasPrivateField(instance, brand, scriptContext)
+            ? scriptContext->GetLibrary()->GetTrue()
+            : scriptContext->GetLibrary()->GetFalse();
+    }
+
     // S1 private methods/accessors. The method/accessor functions are created
     // once per class evaluation and stored in the brand WeakMap under the map
     // itself (a hidden self-key). Instances get a brand entry whose value is
@@ -11459,11 +11469,11 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
 
     Var JavascriptOperators::OP_ImportCallWithOptions(_In_ JavascriptFunction *function, _In_ Var specifier, _In_ Var options, _In_ ScriptContext* scriptContext)
     {
-        // Interpreter-only until B4 lowers this opcode for the JIT (see the
-        // S12 receipt): no JIT_HELPER registration, which would otherwise
-        // require a Backend helper entry. The macros expand empty without
-        // native codegen, so behavior here is identical either way.
+        // Callable as a JIT helper (mirrors OP_ImportCall above): the reentrant
+        // macro keeps the JnHelperMethodList attributes honest in DBG builds.
+        JIT_HELPER_REENTRANT_HEADER(ImportCallWithOptions);
         return ImportCallImpl(function, specifier, options, scriptContext);
+        JIT_HELPER_END(ImportCallWithOptions);
     }
 
     Var JavascriptOperators::OP_NewAwaitObject(ScriptContext* scriptContext)

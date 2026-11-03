@@ -5169,9 +5169,8 @@ skipThunk:
     template <class T>
     void InterpreterStackFrame::OP_HasPrivateField(const unaligned T* playout)
     {
-        BOOL result = JavascriptOperators::OP_HasPrivateField(
-            GetReg(playout->R1), GetReg(playout->R2), scriptContext);
-        SetReg(playout->R0, result ? scriptContext->GetLibrary()->GetTrue() : scriptContext->GetLibrary()->GetFalse());
+        SetReg(playout->R0, JavascriptOperators::OP_HasPrivateFieldVar(
+            GetReg(playout->R1), GetReg(playout->R2), scriptContext));
     }
 
     template <class T>
