@@ -73,7 +73,12 @@ BLOCKED: C4 now has a phase-proven starting point and an exact owed list.
    rfm `let`-newline ASI over-rejection 14; early-error executions ~70 (S14);
    property-escapes residue 114 (S3 lead-surrogate, decision-blocked);
    cross-realm 185; `Reflect`/`Proxy` tails.
-3. **host 426** — *host lane.* 419 are dynamic-import fixture
+3. **host — DONE for the loader class (B1, 2026-11-03):** dynamic-import
+   fixture resolution fixed (script-relative); the certified host
+   bucket drops 426 → **7** (1 module-code parse-shape + 4 Array
+   integer-limit timeouts + 2 Atomics-wait hangs, all engine-owned
+   work). Engine-defect correspondingly **1,700 → 1,646**. Historical
+   remainder of this clause (pre-B1): 419 are dynamic-import fixture
    `URIError`s from the ch host loader; fix the loader or record the
    host-applicability limit explicitly (it is currently an unjustified
    failure, not a skip). Review correction: the remaining 7 are 1

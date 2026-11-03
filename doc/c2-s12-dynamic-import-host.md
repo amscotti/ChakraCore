@@ -163,3 +163,41 @@ accounting for these selections.
   not a regression; noted for a future host lane.
 - `module-syntax.js` foreign-CWD quirk: unchanged (string-module path,
   `WScript.LoadModule`, deliberately untouched).
+
+### Review outcome (dual ACCEPT, corrections folded)
+
+Both reviewers ACCEPTed with zero `[bug]`. The general review
+reproduced the full delta from raw artifacts (key-join: 473 fail→pass,
+0 pass→fail, module-code/import bit-unmoved) plus an independent full
+rerun (one opposite-direction flake only); verified the 3257 contract
+flip is the only script-in-subdir shape in the rlexe tree with the
+baseline unchanged; and confirmed all three card repros. The
+adversarial review ran a script-vs-module convergence matrix over 16
+specifier shapes (byte-identical resolution everywhere; bare/`./`
+converge; `_MAX_PATH` guarded) and constructed the registration
+completeness set (eval/new Function/timer/async/LoadScriptFile all
+resolve correctly; unregistered contexts are synthetic-source ones
+where CWD is the only candidate — pre-fix behavior).
+
+**Folded corrections:** (1) **[risk]** module-issued ABSOLUTE
+specifiers now load any readable file (before: dir-concatenated
+mangling → URIError). This matches the script path and the unsandboxed
+test host's existing `LoadScriptFile('/any/path')` reach — not a
+regression in kind, but a widening on the module side that this
+receipt now states explicitly. (2) The host-arithmetic in the C4 delta
+was wrong: host 426 → **7** (419 loader fixed; B1-6 stays host; 4
+Array + 2 Atomics timeouts unchanged), engine-defect 1,700 → **1,646**.
+(3) The "every JsRun context" claim is overstated: registration sits
+in the TTD-enabled branch of `ch.cpp` and misses
+crossthread/serialized/bg-parse/parser-state paths — all safely
+CWD-fallback (legacy behavior); a non-TTD build would revert main
+-script registration (these binaries are TTD-enabled). (4) B1-2's
+family count is 4 by name filter (13 was family-overlap counting).
+(5) `c:foo.js`-shaped relative names skip the script dir on POSIX
+(Windows-drive heuristic — identical both paths; arcane, documented).
+(6) No percent-decode/query-strip — consistent with the module path
+and LoadScriptFile; documented, not fixed. (7) Stray whitespace-only
+hunk noted. (8) The adversarial reviewer's jit-profile default-sweep
+observation (WasmSpec/AsmJs/jsapi categories outside the disable_jit
+pin) is the known tagged gap plus out-of-pin categories — the
+`-Dprofile=jit check` gate remains the authoritative jit gate.
