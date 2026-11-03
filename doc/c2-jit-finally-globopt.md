@@ -210,3 +210,26 @@ objects reused, archive rebuilt).
   `test/es7/labeled-break-finally.js` family plus the test262 corpus.
 - `tools/test262` needed `npm ci --ignore-scripts` in this worktree for
   the campaign runner (dependency install only; no lockfile change).
+
+### Review outcome (dual ACCEPT, nits folded)
+
+Both reviewers ACCEPTed with zero `[bug]`. The general review verified
+the loop-modeling anchor-for-anchor (synthetic loops over real CFG
+edges are strictly conservative; every loop block provably visited
+before the header's final merge; `RemoveBreakBlocks` skip and the
+renumber guard confirmed; positive JIT-execution proof via live
+bailout records). The adversarial review ran an 8-file miscompile
+corpus (~30k warm iterations/shape: nested finallys, throw/return
+through chains, generators with yield-in-finally, async finally+await,
+type phase flips across the modeled edge, two-finallys-to-one-label,
+only-back-edge joins) — byte-identical to the interpreter everywhere,
+zero aborts, debug-static asserts clean. Folded nits: (1) the
+dynapogo "286 exactly" figure is machine-load-dependent — a host-flaky
+es7 subset (`matchall`, `s6-growable-nonshared`, `bigint64array`,
+`resizable-typedarray` + `async-microtask-order`/`finalization-registry`
+under load) fails on BASE too and passes standalone; future suite
+receipts should record `-j` and note this flaky subset; (2) the abort
+trace's wording deviates slightly from the GlobOpt precedent it claims
+to match; (3) record binary SHAs in the receipt itself (freshness was
+provable only via the campaign summary). Backstop retained and
+unexercised by every constructed shape (matches the residual).
