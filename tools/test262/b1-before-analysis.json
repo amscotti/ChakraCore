@@ -1,0 +1,445 @@
+{
+  "broad": {
+    "failed": 1012,
+    "passed": 1625,
+    "scenarios": 2637,
+    "unique_files": 1733
+  },
+  "bucket_top_messages": {
+    "engine-defect-on-existing": {
+      "Expected a ReferenceError to be thrown but no exception was thrown at all": 7,
+      "Expected test to throw error of type SyntaxError, got Test262: This statement should not be evaluate": 13,
+      "Test did not run to completion": 18,
+      "Test262Error: Expected SameValue(\u00ab\"URIError\"\u00bb, \u00ab\"SyntaxError\"\u00bb) to be true": 64,
+      "Test262Error: Expected SameValue(\u00ab\"URIError\"\u00bb, \u00ab\"TypeError\"\u00bb) to be true": 32,
+      "binding is created but not initialized Expected a ReferenceError to be thrown but no exception was t": 7,
+      "binding rejects assignment Expected a TypeError to be thrown but no exception was thrown at all": 7,
+      "correct name is assigned Expected SameValue(\u00ab\"\"\u00bb, \u00ab\"default\"\u00bb) to be true": 5
+    },
+    "host": {
+      "Expected no error, got URIError: ./2nd-param_FIXTURE.js": 17,
+      "Expected no error, got URIError: ./define-own-property_FIXTURE.js": 4,
+      "Expected no error, got URIError: ./dynamic-import-module_FIXTURE.js": 74,
+      "Expected no error, got URIError: ./empty_FIXTURE.js": 20,
+      "Expected no error, got URIError: ./eval-gtbndng-indirect-update-dflt_FIXTURE.js": 36,
+      "Expected no error, got URIError: ./eval-gtbndng-indirect-update_FIXTURE.js": 36,
+      "Expected no error, got URIError: ./for-await-resolution-and-error-a_FIXTURE.js": 4,
+      "Expected no error, got URIError: ./module-code_FIXTURE.js": 199
+    },
+    "post-ES2025": {
+      "Expected no error, got Error: fetch import module failed": 10,
+      "Expected no error, got SyntaxError: 'import.' is only valid if followed by 'meta'": 185,
+      "Expected no error, got SyntaxError: Expected 'from' after import or export clause.": 96,
+      "Expected no error, got SyntaxError: Unexpected token '.' after 'import'": 108,
+      "Expected no error, got URIError: ./2nd-param_FIXTURE.json": 2,
+      "Negative phase mismatch: declared resolution, host reported parse (judged by marker)": 1,
+      "asyncTest called without async flag": 2
+    },
+    "required-feature-missing": {
+      "Expected no error, got ReferenceError: 'assert' is not defined": 1,
+      "Expected no error, got SyntaxError: 'as' is only valid if followed by an identifier.": 5,
+      "Expected no error, got SyntaxError: Unexpected token 'string literal' after '{'": 4
+    }
+  },
+  "derived_aggregates": {
+    "class_family_union_edition_failures": 0,
+    "class_family_union_rule": "scenarios failing in the edition-selected set with at least one feature tag starting with \"class\"",
+    "excluded_passed": 455,
+    "passed_negatives_total": 926
+  },
+  "edition_selected": {
+    "failed": 608,
+    "passed": 1170,
+    "scenarios": 1778,
+    "unique_files": 1231
+  },
+  "edition_top_failure_messages": {
+    "Expected a ReferenceError to be thrown but no exception was thrown at all": 7,
+    "Expected no error, got SyntaxError: 'as' is only valid if followed by an identifier.": 5,
+    "Expected no error, got URIError: ./2nd-param_FIXTURE.js": 17,
+    "Expected no error, got URIError: ./dynamic-import-module_FIXTURE.js": 74,
+    "Expected no error, got URIError: ./empty_FIXTURE.js": 20,
+    "Expected no error, got URIError: ./eval-gtbndng-indirect-update-dflt_FIXTURE.js": 36,
+    "Expected no error, got URIError: ./eval-gtbndng-indirect-update_FIXTURE.js": 36,
+    "Expected no error, got URIError: ./module-code_FIXTURE.js": 199,
+    "Expected test to throw error of type SyntaxError, got Test262: This statement should not be evaluate": 13,
+    "Test did not run to completion": 18,
+    "Test262Error: Expected SameValue(\u00ab\"URIError\"\u00bb, \u00ab\"SyntaxError\"\u00bb) to be true": 64,
+    "Test262Error: Expected SameValue(\u00ab\"URIError\"\u00bb, \u00ab\"TypeError\"\u00bb) to be true": 32,
+    "binding is created but not initialized Expected a ReferenceError to be thrown but no exception was t": 7,
+    "binding rejects assignment Expected a TypeError to be thrown but no exception was thrown at all": 7,
+    "correct name is assigned Expected SameValue(\u00ab\"\"\u00bb, \u00ab\"default\"\u00bb) to be true": 5
+  },
+  "edition_top_message_tags": {
+    "Expected a ReferenceError to be thrown but no exception was thrown at all": {
+      "let": 2,
+      "untagged": 5
+    },
+    "Expected no error, got SyntaxError: 'as' is only valid if followed by an identifier.": {
+      "Reflect": 1,
+      "arbitrary-module-namespace-names": 5
+    },
+    "Expected no error, got URIError: ./2nd-param_FIXTURE.js": {
+      "Proxy": 2,
+      "Symbol": 4,
+      "async-functions": 4,
+      "dynamic-import": 17,
+      "import-attributes": 17
+    },
+    "Expected no error, got URIError: ./dynamic-import-module_FIXTURE.js": {
+      "async-iteration": 8,
+      "dynamic-import": 74
+    },
+    "Expected no error, got URIError: ./empty_FIXTURE.js": {
+      "dynamic-import": 20
+    },
+    "Expected no error, got URIError: ./eval-gtbndng-indirect-update-dflt_FIXTURE.js": {
+      "async-iteration": 4,
+      "dynamic-import": 36
+    },
+    "Expected no error, got URIError: ./eval-gtbndng-indirect-update_FIXTURE.js": {
+      "async-iteration": 4,
+      "dynamic-import": 36
+    },
+    "Expected no error, got URIError: ./module-code_FIXTURE.js": {
+      "Symbol": 20,
+      "Symbol.iterator": 4,
+      "Symbol.toStringTag": 24,
+      "async-iteration": 8,
+      "dynamic-import": 199
+    },
+    "Expected test to throw error of type SyntaxError, got Test262: This statement should not be evaluate": {
+      "dynamic-import": 4,
+      "generators": 1,
+      "new.target": 1,
+      "untagged": 7
+    },
+    "Test did not run to completion": {
+      "dynamic-import": 15,
+      "promise-with-resolvers": 2,
+      "top-level-await": 3
+    },
+    "Test262Error: Expected SameValue(\u00ab\"URIError\"\u00bb, \u00ab\"SyntaxError\"\u00bb) to be true": {
+      "async-iteration": 8,
+      "dynamic-import": 64
+    },
+    "Test262Error: Expected SameValue(\u00ab\"URIError\"\u00bb, \u00ab\"TypeError\"\u00bb) to be true": {
+      "async-iteration": 4,
+      "dynamic-import": 32
+    },
+    "binding is created but not initialized Expected a ReferenceError to be thrown but no exception was t": {
+      "untagged": 7
+    },
+    "binding rejects assignment Expected a TypeError to be thrown but no exception was thrown at all": {
+      "generators": 1,
+      "untagged": 6
+    },
+    "correct name is assigned Expected SameValue(\u00ab\"\"\u00bb, \u00ab\"default\"\u00bb) to be true": {
+      "generators": 2,
+      "untagged": 3
+    }
+  },
+  "excluded_from_edition": {
+    "failed": 404,
+    "passed": 455,
+    "post-ES2025-proposal": 859,
+    "scenarios": 859
+  },
+  "failure_buckets": {
+    "engine-defect-on-existing": 178,
+    "host": 420,
+    "post-ES2025": 404,
+    "required-feature-missing": 10
+  },
+  "negative_phase_audit": {
+    "marker_downgraded_by_run_py": [
+      {
+        "file": "test/language/import/import-defer/errors/syntax-error/import-defer-of-syntax-error-fails.js",
+        "message": "Negative phase mismatch: declared resolution, host reported parse (judged by marker)",
+        "phase": "resolution",
+        "scenario": "default"
+      }
+    ],
+    "marker_judged_total": 941,
+    "parse": {
+      "marker": {
+        "displaced_untrusted": 0,
+        "judged": 899,
+        "judged_passed": 885
+      },
+      "passed_negatives": 885,
+      "suspect_reasons": {},
+      "suspect_records": [],
+      "suspects": 0
+    },
+    "passed_negatives_total": 926,
+    "resolution": {
+      "marker": {
+        "displaced_untrusted": 0,
+        "judged": 34,
+        "judged_passed": 33
+      },
+      "passed_negatives": 33,
+      "suspect_reasons": {},
+      "suspect_records": [],
+      "suspects": 0
+    },
+    "runtime": {
+      "marker": {
+        "displaced_untrusted": 0,
+        "judged": 8,
+        "judged_passed": 8
+      },
+      "passed_negatives": 8,
+      "suspect_reasons": {},
+      "suspect_records": [],
+      "suspects": 0
+    }
+  },
+  "per_feature": {
+    "BigInt": {
+      "broad_failed": 2,
+      "broad_passed": 6,
+      "category": "required-ES2025",
+      "edition_failed": 2,
+      "edition_passed": 6
+    },
+    "Proxy": {
+      "broad_failed": 4,
+      "broad_passed": 2,
+      "category": "required-ES2025",
+      "edition_failed": 4,
+      "edition_passed": 2
+    },
+    "Reflect": {
+      "broad_failed": 10,
+      "broad_passed": 8,
+      "category": "required-ES2025",
+      "edition_failed": 10,
+      "edition_passed": 8
+    },
+    "Symbol": {
+      "broad_failed": 33,
+      "broad_passed": 9,
+      "category": "required-ES2025",
+      "edition_failed": 33,
+      "edition_passed": 9
+    },
+    "Symbol.iterator": {
+      "broad_failed": 9,
+      "broad_passed": 1,
+      "category": "required-ES2025",
+      "edition_failed": 9,
+      "edition_passed": 1
+    },
+    "Symbol.toStringTag": {
+      "broad_failed": 35,
+      "broad_passed": 6,
+      "category": "required-ES2025",
+      "edition_failed": 35,
+      "edition_passed": 6
+    },
+    "arbitrary-module-namespace-names": {
+      "broad_failed": 9,
+      "broad_passed": 7,
+      "category": "required-ES2025",
+      "edition_failed": 9,
+      "edition_passed": 7
+    },
+    "async-functions": {
+      "broad_failed": 4,
+      "broad_passed": 0,
+      "category": "required-ES2025",
+      "edition_failed": 4,
+      "edition_passed": 0
+    },
+    "async-iteration": {
+      "broad_failed": 66,
+      "broad_passed": 68,
+      "category": "required-ES2025",
+      "edition_failed": 42,
+      "edition_passed": 46
+    },
+    "class": {
+      "broad_failed": 0,
+      "broad_passed": 43,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 43
+    },
+    "class-fields-private": {
+      "broad_failed": 0,
+      "broad_passed": 13,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 13
+    },
+    "class-fields-public": {
+      "broad_failed": 0,
+      "broad_passed": 1,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 1
+    },
+    "class-static-fields-private": {
+      "broad_failed": 0,
+      "broad_passed": 1,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 1
+    },
+    "const": {
+      "broad_failed": 0,
+      "broad_passed": 1,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 1
+    },
+    "dynamic-import": {
+      "broad_failed": 836,
+      "broad_passed": 1071,
+      "category": "required-ES2025",
+      "edition_failed": 545,
+      "edition_passed": 631
+    },
+    "exponentiation": {
+      "broad_failed": 0,
+      "broad_passed": 2,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 2
+    },
+    "export-star-as-namespace-from-module": {
+      "broad_failed": 8,
+      "broad_passed": 15,
+      "category": "required-ES2025",
+      "edition_failed": 8,
+      "edition_passed": 15
+    },
+    "generators": {
+      "broad_failed": 6,
+      "broad_passed": 21,
+      "category": "required-ES2025",
+      "edition_failed": 6,
+      "edition_passed": 21
+    },
+    "globalThis": {
+      "broad_failed": 0,
+      "broad_passed": 11,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 11
+    },
+    "immutable-arraybuffer": {
+      "broad_failed": 5,
+      "broad_passed": 0,
+      "category": "post-ES2025-proposal",
+      "edition_failed": 0,
+      "edition_passed": 0
+    },
+    "import-attributes": {
+      "broad_failed": 32,
+      "broad_passed": 128,
+      "category": "required-ES2025",
+      "edition_failed": 19,
+      "edition_passed": 128
+    },
+    "import-bytes": {
+      "broad_failed": 5,
+      "broad_passed": 0,
+      "category": "post-ES2025-proposal",
+      "edition_failed": 0,
+      "edition_passed": 0
+    },
+    "import-defer": {
+      "broad_failed": 213,
+      "broad_passed": 173,
+      "category": "post-ES2025-proposal",
+      "edition_failed": 0,
+      "edition_passed": 0
+    },
+    "import-text": {
+      "broad_failed": 7,
+      "broad_passed": 0,
+      "category": "post-ES2025-proposal",
+      "edition_failed": 0,
+      "edition_passed": 0
+    },
+    "import.meta": {
+      "broad_failed": 0,
+      "broad_passed": 1,
+      "category": "required-ES2025",
+      "edition_failed": 0,
+      "edition_passed": 1
+    },
+    "json-modules": {
+      "broad_failed": 3,
+      "broad_passed": 12,
+      "category": "required-ES2025",
+      "edition_failed": 2,
+      "edition_passed": 12
+    },
+    "let": {
+      "broad_failed": 4,
+      "broad_passed": 6,
+      "category": "required-ES2025",
+      "edition_failed": 4,
+      "edition_passed": 6
+    },
+    "new.target": {
+      "broad_failed": 3,
+      "broad_passed": 0,
+      "category": "required-ES2025",
+      "edition_failed": 3,
+      "edition_passed": 0
+    },
+    "nonextensible-applies-to-private": {
+      "broad_failed": 1,
+      "broad_passed": 0,
+      "category": "post-ES2025-proposal",
+      "edition_failed": 0,
+      "edition_passed": 0
+    },
+    "promise-with-resolvers": {
+      "broad_failed": 3,
+      "broad_passed": 1,
+      "category": "required-ES2025",
+      "edition_failed": 2,
+      "edition_passed": 1
+    },
+    "source-phase-imports": {
+      "broad_failed": 179,
+      "broad_passed": 282,
+      "category": "post-ES2025-proposal",
+      "edition_failed": 0,
+      "edition_passed": 0
+    },
+    "source-phase-imports-module-source": {
+      "broad_failed": 83,
+      "broad_passed": 120,
+      "category": "post-ES2025-proposal",
+      "edition_failed": 0,
+      "edition_passed": 0
+    },
+    "top-level-await": {
+      "broad_failed": 18,
+      "broad_passed": 247,
+      "category": "required-ES2025",
+      "edition_failed": 6,
+      "edition_passed": 247
+    },
+    "untagged": {
+      "broad_failed": 36,
+      "broad_passed": 204,
+      "category": "required-ES2025 (untagged)",
+      "edition_failed": 36,
+      "edition_passed": 204
+    }
+  },
+  "policy": "/Users/ascotti/Documents/code/ChakraCore/tools/test262/edition-policy.json",
+  "policy_sha256": "0dfae80f22b0cdf18d1d0b40079d7b3a278c2f43903017ccb49280a1858f6af2",
+  "records": 2637,
+  "results": "out/b1-diag/before-di/results.json",
+  "skipped": null,
+  "unknown_feature_tags_treated_required": []
+}
