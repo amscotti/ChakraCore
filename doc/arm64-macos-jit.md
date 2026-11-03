@@ -227,8 +227,14 @@ Coverage limits carried into the merge, stated deliberately:
   result, not a merge blocker. Reviewed as an accepted platform exclusion
   on 2026-11-01; see
   [asm.js/WASM on ARM64: reviewed platform exclusion](#asmjswasm-on-arm64-reviewed-platform-exclusion-2026-11-01).
-- **Direct-eval callers and eval code run interpreted.** That is a JIT
-  coverage limit, not full eval JIT support.
+- **Direct-eval callers: body-region call sites now JIT; eval code runs
+  interpreted** (updated 2026-11-03). `841c3fa6d`'s caller-side abort is
+  narrowed to direct-eval sites in a split parameter region and loop-body
+  work items, and `GlobalObject::VEval` derives `evalInParamScope` only
+  from live interpreter frames (native/bailout frames are body-region by
+  the abort policy). Eval script functions themselves stay interpreted.
+  Analysis, boundary and evidence:
+  [c2-jit-eval-fidelity.md](c2-jit-eval-fidelity.md).
 - **18 class-field/private/import-attribute opcodes** abort codegen to the
   interpreter. The labeled-break-from-`finally` CFG shape in GlobOpt no
   longer aborts: finally-to-early-exit back edges are modeled as loops and

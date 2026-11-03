@@ -1,7 +1,7 @@
 # A2: direct-eval caller JIT fidelity (S14 EvalDeclarationInstantiation)
 
-Status: **in progress** (gap analysis complete, increment landed, verification
-below). Lane objective from
+Status: **landed** — gap analysis commit `8fe7d1d77`, increment `7de0ee0d9`,
+this receipt on top. Lane objective from
 [arm64-macos-jit.md](arm64-macos-jit.md)'s coverage limits: make JIT frames
 materialize what the baseline S14 eval machinery reads so direct-eval callers
 can JIT, or land the largest correct increment with an honest boundary.
@@ -157,3 +157,103 @@ five questions of [memory-management.md](memory-management.md) were applied;
 there is no new resource to record.
 
 (Verification tables, coverage evidence and gates: appended in commit (c).)
+
+## 7. Verification (all on `out/jit/bin`, this lane's build)
+
+Repro probes — interpreter-identical under default, dynapogo
+(`-forceNative -off:simpleJit -bgJitDelay:0`), interpreted-variant
+(`-maxInterpretCount:1 -maxSimpleJitRunCount:1 -bgjit-`) and `-mic:1
+-bgjit-`:
+
+| Probe | Result |
+|---|---|
+| A param-default `var arguments` | SyntaxError (was NO-THROW from JIT'd caller) |
+| B indirect eval after global block `let` | NO-THROW (unchanged) |
+| C catch hides body `let arguments` | SyntaxError (was NO-THROW) |
+| D nested blocks, param named `arguments` | `b` |
+| E arrow param-scope eval, body write | `q` |
+| F param named `arguments` through catch | `b` (was `a`) |
+| G arrow param-scope eval, body delete | `false,p` (was ReferenceError) |
+
+Focused eval suites (rlexe, jit binary):
+
+| Selection | dynapogo | interpreted |
+|---|---|---|
+| `LetConst/eval1.js`, `eval_fncdecl.js`, `funcDeclConflict.js` | 4/0 | 4/0 |
+| `strict/21.functionDeclaration.js` | 2/0 | 2/0 |
+| `es6/blockscope-functionbinding.js` | 2/0 | 2/0 |
+| `es7` eval files (`global-eval-declarations`, `eval-arguments-declarations`, `s14-eval-nonsimple-var`, `blockscope-early-errors`, `eval-super-early`) | 7/0 | 7/0 |
+| `PerfHint/try_with_eval_perfhint{,_l2}.js` | (interpreted-variant tag) | 2/0 |
+
+test262 `s14-eval` batch (`tools/jit-test262`, pinned `2e0a5676`,
+`test/language/eval-code/**`, 454 scenarios):
+
+| Mode | Result |
+|---|---|
+| nojit (`-nonative`) | 454/0 |
+| interp | 454/0, 0 diffs vs nojit |
+| fulljit | 454/0, 0 diffs vs nojit |
+
+Full suites:
+
+| Check | Result | Expected |
+|---|---|---|
+| `dynapogo` (jit binary) | **2006 / 286** | 286 exactly the tagged asm.js/WASM set (AsmJs 92, AsmJSFloat 14, ASMJSParser 1, wasm 54, WasmSpec 123, WasmSpec.MultiValue 2); zero signals; failure set identical to the merge-closure record, zero new failures |
+| `interpreted` (jit binary) | **2432 / 397** | 397 exactly the tagged set incl. `Bugs/fabs1.js`; zero signals |
+| `disable_jit` (jit binary) | **2038 / 0** | gate |
+| `zig build check` (test profile) | **2038 / 0** | pin unchanged |
+| `zig build check -Dprofile=debug-static` | **2090 / 0** | pin unchanged |
+| `zig build -Dprofile=jit check` | green (`check_jit: PASS`, bytecode up to date, smoke PASS) | |
+
+No gate pins moved and no new rlexe entry was added: the correctness net for
+this change is the existing focused suites — `es7/eval-arguments-declarations`
+and its siblings now execute their eval-caller functions under the JIT tiers
+(they previously passed only because the abort kept those callers
+interpreted), and the test262 `s14-eval` batch runs in all three modes. A
+JS-visible test cannot assert tiering (the coverage witness below relies on
+`-trace:bailout`), so a new deterministic test would only duplicate
+`eval-arguments-declarations` shapes.
+
+## 8. Coverage-gain evidence (before/after, same script, same flags)
+
+`jit-witness.js`: a body-region direct-eval caller (`eval("")` plus a
+`try/catch` warm loop), warmed 3000 iterations, then a throw.
+
+- **Before** (wide abort, rebuilt for the A/B): no bailout records — the
+  function never executes JIT code; `-trace:PerfHint` prints the CallsEval
+  hint **once**, from the IRBuilder abort site (the `1cc618e87` path).
+- **After** (this change): `-mic:1 -bgjit- -trace:bailout` records
+  `BailOut: function: evalCaller ... Kind: BailOutOnNoProfile`, and under
+  the dynapogo flags `Kind: BailOutOnException` — JIT code executing. The
+  CallsEval hint now comes from the normal lowering path
+  (`Lower.cpp` `WritePerfHint`), which is why
+  `PerfHint/try_with_eval_perfhint` still matches its baseline unchanged.
+- A param-region eval caller (`function f(p = eval("1"))`) still aborts and
+  still emits the hint from the abort site — the narrowed boundary keeps the
+  `1cc618e87` behavior for the shapes it still governs.
+
+## 9. Residual
+
+- **Eval-generated code stays interpreted** (the `IsEval()` abort). The
+  experiment showed eval bodies JIT'd produce false Let/Const redeclaration
+  verdicts (`LetConst/eval1` with deferparse, `eval_fncdecl`,
+  `funcDeclConflict`, `blockscope-functionbinding`,
+  `global-eval-declarations`), a wrong `CanDeclareGlobalFunction` TypeError,
+  and a SIGSEGV in `strict/21.functionDeclaration.js` — the eval body's own
+  S14 scoped-check materialization is a separate porting surface that was
+  never claimed.
+- Direct-eval call sites in a **split parameter region** and in **loop
+  bodies** stay interpreted (the narrowed abort). The param-region exclusion
+  exists because `evalInParamScope` is per-frame dynamic state that only a
+  live interpreted frame carries; porting it to native frames would need the
+  caller's `BeginBodyScope` bytecode offset derivable at runtime (the
+  bailout-frame flag alone cannot carry it, and serializing a new
+  FunctionBody offset would rotate the bytecode GUID).
+- The bailout-frame `isParamScopeDone` reset (bailout construction skips
+  `InitializeClosures`) is now irrelevant to `VEval` (it distrusts bailout
+  frames) but remains a latent divergence for any future reader of that
+  flag on bailout frames.
+- Non-Apple targets: the `VEval` fix is platform-neutral engine code and
+  the ARM64 caller-side guard is in shared IRBuilder code, but only the Mac
+  ARM64 JIT profile is exercised by these gates (B4 owns Linux evidence).
+
