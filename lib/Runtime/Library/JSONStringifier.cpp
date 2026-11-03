@@ -128,9 +128,16 @@ JSONStringifier::ReadReplacer(_In_opt_ Var replacer)
             {
                 this->replacerFunction = replacerObj;
             }
-            else if (JavascriptOperators::IsArray(replacerObj))
+            else if (VarIs<JavascriptProxy>(replacerObj) && VarTo<JavascriptProxy>(replacerObj)->IsRevoked())
             {
-                Recycler* recycler = this->scriptContext->GetRecycler();
+                // ES2025 7.2.2 IsArray step 3a on a revoked Proxy: throw the
+                // TypeError in this (caller's) realm - the generic
+                // JavascriptOperators::IsArray walk would throw it from the
+                // proxy's realm via GetTarget().
+                JavascriptError::ThrowTypeError(this->scriptContext, JSERR_ErrorOnRevokedProxy, _u(""));
+            }
+            else if (JavascriptOperators::IsArray(replacerObj))
+            {                Recycler* recycler = this->scriptContext->GetRecycler();
 
                 BVSparse<Recycler> propertyListBV(recycler);
                 this->propertyList = RecyclerNew(recycler, PropertyList, recycler);

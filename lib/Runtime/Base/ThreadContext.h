@@ -939,6 +939,13 @@ public:
 
     BOOL HasPreviousHostScriptContext();
     HostScriptContext* GetPreviousHostScriptContext() ;
+    // Innermost entered script's context, stepping over a CommonThunk-pushed
+    // callee entry: CrossSite::CommonThunk pushes the CALLEE's host script
+    // context around cross-site calls, so for an internal method executing in
+    // `calleeContext` (e.g. a Proxy's [[Call]]) the spec "current realm" (the
+    // caller's) is the entry *below* that push when the top is the callee.
+    // Returns nullptr when no script is entered (host-driven calls).
+    Js::ScriptContext* GetCallerScriptContextForCallee(Js::ScriptContext* calleeContext);
     void PushHostScriptContext(HostScriptContext* topProvider);
     HostScriptContext* PopHostScriptContext();
 

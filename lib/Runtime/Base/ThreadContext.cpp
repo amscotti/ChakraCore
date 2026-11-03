@@ -4112,8 +4112,23 @@ HostScriptContext* ThreadContext::GetPreviousHostScriptContext()
     return hostScriptContextStack->Peek();
 }
 
-void ThreadContext::PushHostScriptContext(HostScriptContext* topProvider)
+Js::ScriptContext* ThreadContext::GetCallerScriptContextForCallee(Js::ScriptContext* calleeContext)
 {
+    if (!HasPreviousHostScriptContext())
+    {
+        return nullptr;
+    }
+    HostScriptContext* top = hostScriptContextStack->Peek();
+    if (top->GetScriptContext() == calleeContext && hostScriptContextStack->Count() >= 2)
+    {
+        // The top entry is the CommonThunk push for this callee (see
+        // CrossSite::CommonThunk): the cross-site caller is right below it.
+        return hostScriptContextStack->Peek(1)->GetScriptContext();
+    }
+    return top->GetScriptContext();
+}
+
+void ThreadContext::PushHostScriptContext(HostScriptContext* topProvider){
     // script engine can be created coming from GetDispID, so push/pop can be
     // happening after the first round of enterscript as well. we might need to
     // revisit the whole callRootLevel but probably not now.

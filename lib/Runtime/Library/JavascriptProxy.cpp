@@ -30,6 +30,7 @@ namespace Js
     {
         if (IsRevoked())
         {
+            if (getenv("B2_DBG")) { fputs("GetHandler-throw\n", stderr); }
             JavascriptError::ThrowTypeError(GetScriptContext(), JSERR_ErrorOnRevokedProxy, _u(""));
         }
         return handler;
@@ -2103,6 +2104,26 @@ namespace Js
         ARGUMENTS(args, callInfo);
         ScriptContext* scriptContext = function->GetScriptContext();
 
+        // ES2025 10.5.12/10.5.13: a Proxy's [[Call]]/[[Construct]] are internal
+        // methods and do not push a new execution context, so spec "current
+        // realm" work inside them - the trap arguments array
+        // (CreateArrayFromList) and every validation TypeError - belongs to
+        // the CALLER's realm, not the proxy's. This entry point receives no
+        // request context, so derive the caller from the host script-context
+        // stack (stepping over the cross-site thunk push when the call was
+        // dispatched through one); fall back to the proxy's context for
+        // host-driven calls with no script entered.
+        ThreadContext* threadContext = scriptContext->GetThreadContext();
+        ScriptContext* requestContext = scriptContext;
+        if (threadContext->HasPreviousHostScriptContext())
+        {
+            ScriptContext* callerContext = threadContext->GetCallerScriptContextForCallee(scriptContext);
+            if (callerContext != nullptr)
+            {
+                requestContext = callerContext;
+            }
+        }
+
         BOOL hasOverridingNewTarget = args.HasNewTarget();
         bool isCtorSuperCall = JavascriptOperators::GetAndAssertIsConstructorSuperCall(args);
         bool isNewCall = args.IsNewCall() || hasOverridingNewTarget;
@@ -2112,11 +2133,11 @@ namespace Js
         {
             if (args.Info.Flags & CallFlags_New)
             {
-                JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedFunction, _u("construct"));
+                JavascriptError::ThrowTypeError(requestContext, JSERR_NeedFunction, _u("construct"));
             }
             else
             {
-                JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedFunction, _u("call"));
+                JavascriptError::ThrowTypeError(requestContext, JSERR_NeedFunction, _u("call"));
             }
         }
 
@@ -2140,15 +2161,15 @@ namespace Js
 
         if (args.Info.Flags & CallFlags_New)
         {
-            callMethod = proxy->GetMethodHelper(PropertyIds::construct, scriptContext);
+            callMethod = proxy->GetMethodHelper(PropertyIds::construct, requestContext);
         }
         else
         {
-            callMethod = proxy->GetMethodHelper(PropertyIds::apply, scriptContext);
+            callMethod = proxy->GetMethodHelper(PropertyIds::apply, requestContext);
         }
         if (!JavascriptConversion::IsCallable(targetObj))
         {
-            JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedFunction, _u("call"));
+            JavascriptError::ThrowTypeError(requestContext, JSERR_NeedFunction, _u("call"));
         }
 
         if (nullptr == callMethod)
@@ -2157,7 +2178,7 @@ namespace Js
             // too many arguments
             if (args.Info.Count >= USHORT_MAX) //check against CallInfo::kMaxCountArgs if newCount is ever made int
             {
-                JavascriptError::ThrowRangeError(scriptContext, JSERR_ArgListTooLarge);
+                JavascriptError::ThrowRangeError(requestContext, JSERR_ArgListTooLarge);
             }
 
             // in [[construct]] case, we don't need to check if the function is a constructor: the function should throw there.
@@ -2166,7 +2187,7 @@ namespace Js
             {
                 if (!JavascriptOperators::IsConstructor(targetObj))
                 {
-                    JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NeedFunction, _u("construct"));
+                    JavascriptError::ThrowTypeError(requestContext, JSERR_This_NeedFunction, _u("construct"));
                 }
 
                 // args.Values[0] will be null in the case where NewTarget is initially provided by proxy.
@@ -2177,6 +2198,15 @@ namespace Js
                         newThisObject = JavascriptOperators::NewScObjectNoCtorCommon(proxy, scriptContext, false);
                     }
                     END_SAFE_REENTRANT_CALL
+                    // ES2025 9.4.13 GetPrototypeFromConstructor step 4 via
+                    // 7.3.27 GetFunctionRealm: after a non-object
+                    // newTarget.prototype, a proxy newTarget revoked by that
+                    // very property lookup (its get trap) must surface the
+                    // caller-realm TypeError instead of defaulting silently.
+                    if (proxy->IsRevoked())
+                    {
+                        JavascriptError::ThrowTypeError(requestContext, JSERR_ErrorOnRevokedProxy, _u("construct"));
+                    }
                     args.Values[0] = newThisObject;
                 }
                 else
@@ -2256,10 +2286,16 @@ namespace Js
             return aReturnValue;
         }
 
-        JavascriptArray* argList = scriptContext->GetLibrary()->CreateArray(callInfo.Count - 1);
+        // ES2025 10.5.12 [[Call]] step 7 / 10.5.13 [[Construct]] step 7:
+        // CreateArrayFromList runs in the caller's realm. Argument values are
+        // marshaled into that realm first: the engine's array storage paths
+        // assert (debug) that elements never need marshaling relative to the
+        // array's script context, and MarshalVar is identity for same-realm
+        // values, so only genuine cross-site values are wrapped in place.
+        JavascriptArray* argList = requestContext->GetLibrary()->CreateArray(callInfo.Count - 1);
         for (uint i = 1; i < callInfo.Count; i++)
         {
-            argList->DirectSetItemAt(i - 1, args[i]);
+            argList->DirectSetItemAt(i - 1, CrossSite::MarshalVar(requestContext, args[i], scriptContext));
         }
 
         Var varArgs[4];
@@ -2272,7 +2308,7 @@ namespace Js
         {
             if (!JavascriptOperators::IsConstructor(targetObj))
             {
-                JavascriptError::ThrowTypeError(scriptContext, JSERR_NotAConstructor);
+                JavascriptError::ThrowTypeError(requestContext, JSERR_NotAConstructor);
             }
 
             varArgs[2] = argList;
@@ -2298,7 +2334,7 @@ namespace Js
         {
             if (!Js::JavascriptOperators::IsObject(trapResult))
             {
-                JavascriptError::ThrowTypeError(scriptContext, JSERR_InconsistentTrapResult, _u("construct"));
+                JavascriptError::ThrowTypeError(requestContext, JSERR_InconsistentTrapResult, _u("construct"));
             }
         }
         return trapResult;

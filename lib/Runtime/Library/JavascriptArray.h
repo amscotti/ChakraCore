@@ -226,6 +226,9 @@ namespace Js
 
         void SetLength(uint32 newLength);
         BOOL SetLength(Var newLength);
+        // Caller-realm context for the ArraySetLength RangeError (ES2025
+        // 10.4.2.2; see JavascriptArray::SetLength(Var)).
+        static ScriptContext* ArraySetLengthErrorScriptContext(ScriptContext* arrayScriptContext);
         virtual void ClearElements(SparseArraySegmentBase *seg, uint32 newSegmentLength);
 
         class EntryInfo

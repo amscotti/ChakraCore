@@ -2909,7 +2909,7 @@ using namespace Js;
             int32 lenValue = TaggedInt::ToInt32(newLength);
             if (lenValue < 0)
             {
-                scriptContext = GetScriptContext();
+                scriptContext = JavascriptArray::ArraySetLengthErrorScriptContext(GetScriptContext());
                 if (scriptContext->GetThreadContext()->RecordImplicitException())
                 {
                     JavascriptError::ThrowRangeError(scriptContext, JSERR_ArrayLengthAssignIncorrect);
@@ -2945,11 +2945,32 @@ using namespace Js;
 
             if (threadContext->RecordImplicitException())
             {
-                JavascriptError::ThrowRangeError(scriptContext, JSERR_ArrayLengthAssignIncorrect);
+                // ES2025 10.4.2.2 ArraySetLength: the RangeError is thrown by
+                // the [[Set]] internal method, i.e. in the CALLER's realm, not
+                // the array's. SetLength receives no request context, so use
+                // the host script-context stack, stepping over a cross-site
+                // thunk push when the set was dispatched through one.
+                JavascriptError::ThrowRangeError(
+                    JavascriptArray::ArraySetLengthErrorScriptContext(scriptContext),
+                    JSERR_ArrayLengthAssignIncorrect);
             }
         }
 
         return TRUE;
+    }
+
+    ScriptContext* JavascriptArray::ArraySetLengthErrorScriptContext(ScriptContext* arrayScriptContext)
+    {
+        ThreadContext* threadContext = arrayScriptContext->GetThreadContext();
+        if (threadContext->HasPreviousHostScriptContext())
+        {
+            ScriptContext* callerContext = threadContext->GetCallerScriptContextForCallee(arrayScriptContext);
+            if (callerContext != nullptr)
+            {
+                return callerContext;
+            }
+        }
+        return arrayScriptContext;
     }
 
     void JavascriptArray::ClearElements(SparseArraySegmentBase *seg, uint32 newSegmentLength)

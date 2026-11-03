@@ -79,12 +79,20 @@ namespace Js
         }
         else if (object->GetTypeId() == TypeIds_Proxy)
         {
-            RecyclableObject * target = VarTo<JavascriptProxy>(object)->GetTarget();
-            if (JavascriptConversion::IsCallable(target))
+            // A revoked proxy has no target to consult; marshaling must not
+            // invoke internal methods (the spec's property read of
+            // `revocable().proxy` after revoke is an opaque pass-through).
+            // Leave its entry point alone: [[Call]]/[[Construct]] still run
+            // (FunctionCallTrap) and throw the caller-realm revoked TypeError.
+            if (!VarTo<JavascriptProxy>(object)->IsRevoked())
             {
-                Assert(JavascriptProxy::FunctionCallTrap == object->GetEntryPoint());
-                TTD_XSITE_LOG(scriptContext, "setEntryPoint->CrossSiteProxyCallTrap ", object);
-                object->GetDynamicType()->SetEntryPoint(CrossSite::CrossSiteProxyCallTrap);
+                RecyclableObject * target = VarTo<JavascriptProxy>(object)->GetTarget();
+                if (JavascriptConversion::IsCallable(target))
+                {
+                    Assert(JavascriptProxy::FunctionCallTrap == object->GetEntryPoint());
+                    TTD_XSITE_LOG(scriptContext, "setEntryPoint->CrossSiteProxyCallTrap ", object);
+                    object->GetDynamicType()->SetEntryPoint(CrossSite::CrossSiteProxyCallTrap);
+                }
             }
         }
     }
