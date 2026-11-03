@@ -230,8 +230,11 @@ Coverage limits carried into the merge, stated deliberately:
 - **Direct-eval callers and eval code run interpreted.** That is a JIT
   coverage limit, not full eval JIT support.
 - **18 class-field/private/import-attribute opcodes** abort codegen to the
-  interpreter, as does the labeled-break-from-`finally` CFG shape in
-  GlobOpt. Porting any of these is follow-up work.
+  interpreter. The labeled-break-from-`finally` CFG shape in GlobOpt no
+  longer aborts: finally-to-early-exit back edges are modeled as loops and
+  those functions JIT-compile correctly
+  (2026-11-02; see [c2-jit-finally-globopt.md](c2-jit-finally-globopt.md)).
+  Porting the remaining opcodes is follow-up work.
 - **Serialized bytecode GUID rotation: done (2026-11-01)**. The
   dual-variant regen/rotation this merge deferred has been performed
   (new GUID `55c5da6d-dcde-42f9-8112-f7f698fcc96c`; stale-GUID caches
