@@ -257,3 +257,38 @@ JS-visible test cannot assert tiering (the coverage witness below relies on
   the ARM64 caller-side guard is in shared IRBuilder code, but only the Mac
   ARM64 JIT profile is exercised by these gates (B4 owns Linux evidence).
 
+
+### Review outcome (dual ACCEPT, nits folded)
+
+Both reviewers ACCEPTed with zero `[bug]`/`[risk]`. The general review
+proved the policy/runtime agreement from source (no build shape can
+place a param-region eval site in JIT'd code; the runtime trust rule
+covers exactly the frame types that can no longer carry one) and
+demonstrated non-vacuity directly (a JIT'd caller bails on exception
+and the eval runs correctly from the bailout frame — the old
+catch-pollution bug shape is gone). The adversarial review ran 32
+probe shapes across default/dynapogo/-nonative (zero divergences),
+boundary compositions from both sides (native frames with positive
+tiering evidence; 3001 forced bailouts executing eval on bailout
+frames; inlinee attribution; eval-in-eval; getters/setters; derived
+ctors), speculation-through-eval attacks (scope mutation, `arguments`
+writes, object-shape changes, loop-local type churn), and the full
+suites: dynapogo **2006/286 exact-tagged at `-j4`**, interpreted
+2432/397, disable_jit 2038/0, s14-eval 454/0 ×2 fresh.
+
+**Folded nits:** (1) the inlinee-abort claim is vacuous — every
+`GetCallsEval()` function is `SetDontInline(true)` at bytecode
+generation (`ByteCodeEmitter.cpp:4135-4137`), which is the REAL (and
+stronger) guard for the inlinee composition (it also blocks
+misattribution of eval-caller metadata to an inlining caller); the
+IRBuilder inlinee-abort path is unreachable for eval sites — the
+receipt names the actual mechanism here. (2) The dynapogo 286 figure
+is parallelism-sensitive: at the runner's default 10 threads, 5
+load-flake failures appear (es7 bigint64array/matchall/
+resizable-typedarray/s6-growable-nonshared + FuncBody timeout-kill),
+all passing standalone with identical commands; **the recorded
+2006/286 is a `-j4` figure** — future suite receipts should record
+parallelism. (3) Generator/async eval callers show no bailout records
+under `-JitES6Generators` — likely never JIT'd on this port, so the
+boundary statement's coroutine coverage has no positive tiering
+evidence (outputs identical either way; no claim made).
