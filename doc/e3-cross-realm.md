@@ -105,3 +105,36 @@ Engine-defect edition-selected failures: **−132 expected** (130 cross-realm +
 engine-defect figure should be updated to the C4 refresh's measured numbers
 after review acceptance of this lane; the disabled-flag (B/SAB) and
 detached-buffer (C) families do not move (they are bucketed elsewhere).
+
+### Review outcome (dual ACCEPT with conditions, folded)
+
+Both reviewers ACCEPTed. The general review verified the three root
+fixes anchor-for-anchor (9.4.13/7.3.27 fallback incl. the 43-entry
+intrinsic table; 10.5.12/10.5.13 caller-realm semantics; 10.5.15
+revoked-IsConstructor; the MarshalDynamicObject change is the spec-
+correct unblock of D1 with no dependent callers). The adversarial
+review proved the +98 same-realm bonus clean (recorded pair re-diffed
++98/0; fresh untouched surfaces +24/0 with zero collateral; hot paths
+FASTER not slower; ownership verified), attacked Proxy mechanics
+(3-realm chains, revoke-during-trap, reflective newTargets), and both
+gates live (2040/0, 2092/0).
+
+**Folded conditions:** (1) the `B2_DBG` getenv hook removed from
+`JavascriptProxy.cpp` (this commit); (2) **R3 broadened**: the
+caller-realm idiom (`GetCallerScriptContextForCallee`) misselects in
+ANY cross-realm-entered frame (Q1: other-realm fn entered cross-site
+makes a same-realm proxy call → args array/validation errors land in
+the OUTER realm; Node oracle disagrees) and in nested proxy forwards
+(N1: inner trap's args from the forwarding proxy's realm) — value
+IDENTITY is preserved in all shapes; zero corpus exposure (0 p2f over
+13,507 scenarios); the fix is frame-accurate caller-realm tracking
+(engine TODO card R3'). (3) Formatting drift fixed
+(JSONStringifier/ThreadContext braces, this commit). (4) Nits
+recorded: `GetFunctionRealm`'s unused `requestContext` param + stale
+comment; `IsConstructor(revoked proxy over non-ctor target)` returns
+true (spec false — differently-messaged TypeError; folded into R3');
+SAB lambda `static_cast<JavascriptLibrary*>` fragility for
+host-embedded base libraries; pre-existing out-of-lane cards: revoked
+proxy rejected as Proxy-creation handler (spec/V8 allow), revoked-
+arrow construct message divergence. (5) R6 confirmed genuinely
+debug-only (`#if DBG` at source; no gate test reaches it).

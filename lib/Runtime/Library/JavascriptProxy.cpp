@@ -30,7 +30,6 @@ namespace Js
     {
         if (IsRevoked())
         {
-            if (getenv("B2_DBG")) { fputs("GetHandler-throw\n", stderr); }
             JavascriptError::ThrowTypeError(GetScriptContext(), JSERR_ErrorOnRevokedProxy, _u(""));
         }
         return handler;

@@ -137,7 +137,8 @@ JSONStringifier::ReadReplacer(_In_opt_ Var replacer)
                 JavascriptError::ThrowTypeError(this->scriptContext, JSERR_ErrorOnRevokedProxy, _u(""));
             }
             else if (JavascriptOperators::IsArray(replacerObj))
-            {                Recycler* recycler = this->scriptContext->GetRecycler();
+            {
+                Recycler* recycler = this->scriptContext->GetRecycler();
 
                 BVSparse<Recycler> propertyListBV(recycler);
                 this->propertyList = RecyclerNew(recycler, PropertyList, recycler);

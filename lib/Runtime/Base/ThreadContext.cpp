@@ -4128,7 +4128,8 @@ Js::ScriptContext* ThreadContext::GetCallerScriptContextForCallee(Js::ScriptCont
     return top->GetScriptContext();
 }
 
-void ThreadContext::PushHostScriptContext(HostScriptContext* topProvider){
+void ThreadContext::PushHostScriptContext(HostScriptContext* topProvider)
+{
     // script engine can be created coming from GetDispID, so push/pop can be
     // happening after the first round of enterscript as well. we might need to
     // revisit the whole callRootLevel but probably not now.
