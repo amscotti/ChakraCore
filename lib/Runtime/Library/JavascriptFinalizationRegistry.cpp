@@ -14,35 +14,9 @@ namespace Js
     }
 
     // OrdinaryCreateFromConstructor -> GetPrototypeFromConstructor ->
-    // GetFunctionRealm. A Proxy or bound function does not necessarily carry
-    // its target's ScriptContext, so follow the spec's target chain instead of
-    // using newTargetObject->GetScriptContext(). GetTarget() throws the
-    // specified TypeError for a revoked Proxy.
-    static ScriptContext* GetFunctionRealm(RecyclableObject* function)
-    {
-        while (true)
-        {
-            if (VarIs<JavascriptProxy>(function))
-            {
-                function = VarTo<JavascriptProxy>(function)->GetTarget();
-                continue;
-            }
-
-            if (VarIs<BoundFunction>(function))
-            {
-                JavascriptFunction* target = VarTo<BoundFunction>(function)->GetTargetFunction();
-                if (target == nullptr)
-                {
-                    AssertMsg(false, "BoundFunction without a callable target");
-                    return function->GetScriptContext();
-                }
-                function = target;
-                continue;
-            }
-
-            return function->GetScriptContext();
-        }
-    }
+    // GetFunctionRealm is shared with JavascriptOperators (proxy/bound target
+    // chain); JavascriptFinalizationRegistry kept its local copy until the
+    // helper moved so both sites can't drift apart.
 
     static bool IsValidWeakKey(Var value, RecyclableObject** object)
     {
@@ -117,7 +91,7 @@ namespace Js
         }
         else
         {
-            ScriptContext* newTargetContext = GetFunctionRealm(newTargetObject);
+            ScriptContext* newTargetContext = JavascriptOperators::GetFunctionRealm(newTargetObject, scriptContext);
             if (newTargetContext != nullptr && newTargetContext != scriptContext)
             {
                 DynamicObject* realmProto = newTargetContext->GetLibrary()->GetFinalizationRegistryPrototype();

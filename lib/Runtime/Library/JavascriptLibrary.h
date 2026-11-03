@@ -653,6 +653,10 @@ namespace Js
         DynamicObject* GetMissingPropertyHolder() const { return missingPropertyHolder; }
 
         JavascriptFunction* GetSharedArrayBufferConstructor() { return sharedArrayBufferConstructor; }
+        // Realm-fallback intrinsic (ES2025 9.4.13 step 4b); see
+        // JavascriptOperators::OrdinaryCreateFromConstructor. The field lives
+        // here (not JavascriptLibraryBase) with the other SAB intrinsics.
+        DynamicObject* GetSharedArrayBufferPrototype() { return sharedArrayBufferPrototype; }
         DynamicObject* GetAtomicsObject() { return atomicsObject; }
 
         DynamicObject* GetWebAssemblyCompileErrorPrototype() const { return webAssemblyCompileErrorPrototype; }

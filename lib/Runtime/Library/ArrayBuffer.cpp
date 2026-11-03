@@ -503,6 +503,19 @@ namespace Js
         {
             JavascriptObject::ChangePrototype(newArr, newTargetPrototype, true, scriptContext);
         }
+        else if (isCtorSuperCall)
+        {
+            // ES2025 9.4.13 step 4b (proto-from-ctor-realm): newTarget.prototype
+            // was not an object, so the default [[Prototype]] comes from
+            // GetFunctionRealm(newTarget)'s ArrayBuffer.prototype. newArr carries
+            // this realm's intrinsic; resolve the constructor-realm counterpart.
+            ScriptContext* constructorRealm = JavascriptOperators::GetFunctionRealm(VarTo<RecyclableObject>(newTarget), scriptContext);
+            DynamicObject* realmProto = JavascriptOperators::GetRealmIntrinsicPrototype(newArr->GetPrototype(), constructorRealm, scriptContext);
+            if (realmProto != nullptr && realmProto != newArr->GetPrototype())
+            {
+                JavascriptObject::ChangePrototype(newArr, realmProto, true, scriptContext);
+            }
+        }
         return newArr;
     }
 

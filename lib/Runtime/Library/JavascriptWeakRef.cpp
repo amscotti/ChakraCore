@@ -83,7 +83,8 @@ namespace Js
         }
         else
         {
-            ScriptContext* newTargetContext = newTargetObject->GetScriptContext();
+            // Realm fallback via the shared spec chain (proxy/bound targets included).
+            ScriptContext* newTargetContext = JavascriptOperators::GetFunctionRealm(newTargetObject, scriptContext);
             if (newTargetContext != nullptr && newTargetContext != scriptContext)
             {
                 DynamicObject* realmProto = newTargetContext->GetLibrary()->GetWeakRefPrototype();

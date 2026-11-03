@@ -16,6 +16,8 @@
 #include "Library/JavascriptGeneratorFunction.h"
 #include "Library/JavascriptAsyncFunction.h"
 #include "Library/JavascriptWeakMap.h"
+#include "Library/JavascriptProxy.h"
+#include "Library/BoundFunction.h"
 
 #include "Library/ForInObjectEnumerator.h"
 #include "Library/ES5Array.h"
@@ -1661,6 +1663,19 @@ CommonNumber:
         JavascriptProxy * proxy = instance;
         while (true)
         {
+            if (proxy->IsRevoked())
+            {
+                // ES2025 10.5.15 ProxyCreate: [[Construct]] is fixed at
+                // creation (present iff the original target was a
+                // constructor), so a revoked proxy is still "a constructor"
+                // for IsConstructor; its [[Construct]] then throws the
+                // caller-realm revoked-proxy TypeError (a revoked proxy of a
+                // non-constructor target also throws a TypeError there,
+                // differing only in message). Don't walk GetTarget() here:
+                // it throws for revoked proxies, surfacing the error from
+                // the proxy's realm instead of [[Construct]]'s caller realm.
+                return true;
+            }
             RecyclableObject* targetInstance = proxy->GetTarget();
             proxy = JavascriptOperators::TryFromVar<JavascriptProxy>(targetInstance);
             if (proxy == nullptr)
@@ -12396,6 +12411,105 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
         return JavascriptOperators::OrdinaryCreateFromConstructor(constructor, scriptContext->GetLibrary()->CreateObject(), nullptr, scriptContext);
     }
 
+    ScriptContext* JavascriptOperators::GetFunctionRealm(RecyclableObject* function, ScriptContext* requestContext)
+    {
+        // ES2025 7.3.27 GetFunctionRealm. A Proxy or bound function does not
+        // necessarily carry its target's ScriptContext, so follow the spec's
+        // target chain instead of using function->GetScriptContext(). A revoked
+        // Proxy target throws JSERR_ErrorOnRevokedProxy from GetTarget().
+        while (true)
+        {
+            if (VarIs<JavascriptProxy>(function))
+            {
+                function = VarTo<JavascriptProxy>(function)->GetTarget();
+                continue;
+            }
+
+            if (VarIs<BoundFunction>(function))
+            {
+                JavascriptFunction* target = VarTo<BoundFunction>(function)->GetTargetFunction();
+                if (target == nullptr)
+                {
+                    AssertMsg(false, "BoundFunction without a callable target");
+                    return function->GetScriptContext();
+                }
+                function = target;
+                continue;
+            }
+
+            return function->GetScriptContext();
+        }
+    }
+
+    // Intrinsic prototypes reachable as an intrinsicDefaultProto argument of
+    // ES2025 9.4.13 GetPrototypeFromConstructor (step 4b realm fallback in
+    // OrdinaryCreateFromConstructor below). Captureless lambdas give the
+    // heterogeneous library getters/fields one uniform callable type.
+    typedef DynamicObject* (*RealmIntrinsicProtoGetter)(JavascriptLibraryBase* library);
+    static const RealmIntrinsicProtoGetter realmIntrinsicProtoGetters[] =
+    {
+        [](JavascriptLibraryBase* library) { return library->GetObjectPrototype(); },
+        [](JavascriptLibraryBase* library) { return library->GetFunctionPrototype(); },
+        [](JavascriptLibraryBase* library) { return library->GetGeneratorFunctionPrototype(); },
+        [](JavascriptLibraryBase* library) { return library->GetAsyncFunctionPrototype(); },
+        [](JavascriptLibraryBase* library) { return library->GetAsyncGeneratorFunctionPrototype(); },
+        [](JavascriptLibraryBase* library) { return library->GetArrayPrototype(); },
+        [](JavascriptLibraryBase* library) { return library->GetStringPrototype(); },
+        [](JavascriptLibraryBase* library) { return library->GetBooleanPrototype(); },
+        [](JavascriptLibraryBase* library) { return library->GetNumberPrototype(); },
+        [](JavascriptLibraryBase* library) { return library->GetBigIntPrototype(); },
+        [](JavascriptLibraryBase* library) { return library->GetDatePrototype(); },
+        [](JavascriptLibraryBase* library) { return library->GetRegExpPrototype(); },
+        [](JavascriptLibraryBase* library) { return library->GetErrorPrototype(); },
+        [](JavascriptLibraryBase* library) { return library->GetEvalErrorPrototype(); },
+        [](JavascriptLibraryBase* library) { return library->GetRangeErrorPrototype(); },
+        [](JavascriptLibraryBase* library) { return library->GetReferenceErrorPrototype(); },
+        [](JavascriptLibraryBase* library) { return library->GetSyntaxErrorPrototype(); },
+        [](JavascriptLibraryBase* library) { return library->GetTypeErrorPrototype(); },
+        [](JavascriptLibraryBase* library) { return library->GetURIErrorPrototype(); },
+        [](JavascriptLibraryBase* library) { return library->GetAggregateErrorPrototype(); },
+        [](JavascriptLibraryBase* library) { return library->GetMapPrototype(); },
+        [](JavascriptLibraryBase* library) { return library->GetSetPrototype(); },
+        [](JavascriptLibraryBase* library) { return library->GetWeakMapPrototype(); },
+        [](JavascriptLibraryBase* library) { return library->GetWeakSetPrototype(); },
+        [](JavascriptLibraryBase* library) { return library->GetWeakRefPrototype(); },
+        [](JavascriptLibraryBase* library) { return library->GetFinalizationRegistryPrototype(); },
+        [](JavascriptLibraryBase* library) { return library->GetPromisePrototype(); },
+        [](JavascriptLibraryBase* library) { return library->GetArrayBufferPrototype(); },
+        [](JavascriptLibraryBase* library) { return static_cast<JavascriptLibrary*>(library)->GetSharedArrayBufferPrototype(); },
+        [](JavascriptLibraryBase* library) { return library->GetDataViewPrototype(); },
+        [](JavascriptLibraryBase* library) { return library->GetInt8ArrayPrototype(); },
+        [](JavascriptLibraryBase* library) { return library->GetUint8ArrayPrototype(); },
+        [](JavascriptLibraryBase* library) { return library->GetUint8ClampedArrayPrototype(); },
+        [](JavascriptLibraryBase* library) { return library->GetInt16ArrayPrototype(); },
+        [](JavascriptLibraryBase* library) { return library->GetUint16ArrayPrototype(); },
+        [](JavascriptLibraryBase* library) { return library->GetInt32ArrayPrototype(); },
+        [](JavascriptLibraryBase* library) { return library->GetUint32ArrayPrototype(); },
+        [](JavascriptLibraryBase* library) { return library->GetFloat32ArrayPrototype(); },
+        [](JavascriptLibraryBase* library) { return library->GetFloat64ArrayPrototype(); },
+        [](JavascriptLibraryBase* library) { return library->GetFloat16ArrayPrototype(); },
+        [](JavascriptLibraryBase* library) { return library->GetBigInt64ArrayPrototype(); },
+        [](JavascriptLibraryBase* library) { return library->GetBigUint64ArrayPrototype(); }
+    };
+
+    DynamicObject* JavascriptOperators::GetRealmIntrinsicPrototype(RecyclableObject* currentIntrinsic, ScriptContext* constructorRealm, ScriptContext* scriptContext)
+    {
+        if (constructorRealm == nullptr || constructorRealm == scriptContext || currentIntrinsic == nullptr)
+        {
+            return nullptr;
+        }
+        JavascriptLibraryBase* library = scriptContext->GetLibrary();
+        JavascriptLibraryBase* realmLibrary = constructorRealm->GetLibrary();
+        for (RealmIntrinsicProtoGetter getter : realmIntrinsicProtoGetters)
+        {
+            if (getter(library) == currentIntrinsic)
+            {
+                return getter(realmLibrary);
+            }
+        }
+        return nullptr;
+    }
+
     RecyclableObject* JavascriptOperators::OrdinaryCreateFromConstructor(RecyclableObject* constructor, RecyclableObject* obj, DynamicObject* intrinsicProto, ScriptContext* scriptContext)
     {
         // There isn't a good way for us to add internal properties to objects in Chakra.
@@ -12409,8 +12523,27 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
             VarTo<DynamicObject>(proto) != intrinsicProto)
         {
             JavascriptObject::ChangePrototype(obj, VarTo<RecyclableObject>(proto), /*validate*/true, scriptContext);
+            return obj;
         }
 
+        // ES2025 9.4.13 GetPrototypeFromConstructor step 4b: constructor.prototype
+        // is not an object, so the default [[Prototype]] is the intrinsic named
+        // intrinsicDefaultProto *of the realm of the constructor*
+        // (7.3.27 GetFunctionRealm), not of the currently executing builtin.
+        // obj (and intrinsicProto, when passed) was created from the current
+        // realm's library, so resolve the counterpart intrinsic there by
+        // matching this realm's prototype. No table match (an intrinsic not
+        // listed above, e.g. a subclass path) keeps the current-realm default.
+        ScriptContext* constructorRealm = JavascriptOperators::GetFunctionRealm(constructor, scriptContext);
+        if (constructorRealm != nullptr && constructorRealm != scriptContext)
+        {
+            RecyclableObject* currentIntrinsic = intrinsicProto != nullptr ? intrinsicProto : obj->GetPrototype();
+            DynamicObject* realmProto = JavascriptOperators::GetRealmIntrinsicPrototype(currentIntrinsic, constructorRealm, scriptContext);
+            if (realmProto != nullptr && realmProto != currentIntrinsic)
+            {
+                JavascriptObject::ChangePrototype(obj, realmProto, /*validate*/true, scriptContext);
+            }
+        }
         return obj;
     }
 

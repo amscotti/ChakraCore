@@ -155,6 +155,25 @@ namespace Js
         DynamicObject* GetAsyncFunctionPrototype() const { return asyncFunctionPrototype; }
         DynamicObject* GetAsyncGeneratorFunctionPrototype() const { return asyncGeneratorFunctionPrototype; }
 
+        // Realm-fallback intrinsics (ES2025 9.4.13 GetPrototypeFromConstructor
+        // step 4b): these prototypes are intrinsicDefaultProto values for
+        // constructors whose proto-from-ctor-realm path resolves them from a
+        // newTarget's realm library; see JavascriptOperators::OrdinaryCreateFromConstructor.
+        DynamicObject* GetArrayBufferPrototype() { return arrayBufferPrototype; }
+        DynamicObject* GetDataViewPrototype() { return dataViewPrototype; }
+        DynamicObject* GetInt8ArrayPrototype() { return Int8ArrayPrototype; }
+        DynamicObject* GetUint8ArrayPrototype() { return Uint8ArrayPrototype; }
+        DynamicObject* GetUint8ClampedArrayPrototype() { return Uint8ClampedArrayPrototype; }
+        DynamicObject* GetInt16ArrayPrototype() { return Int16ArrayPrototype; }
+        DynamicObject* GetUint16ArrayPrototype() { return Uint16ArrayPrototype; }
+        DynamicObject* GetInt32ArrayPrototype() { return Int32ArrayPrototype; }
+        DynamicObject* GetUint32ArrayPrototype() { return Uint32ArrayPrototype; }
+        DynamicObject* GetFloat32ArrayPrototype() { return Float32ArrayPrototype; }
+        DynamicObject* GetFloat64ArrayPrototype() { return Float64ArrayPrototype; }
+        DynamicObject* GetFloat16ArrayPrototype() { return Float16ArrayPrototype; }
+        DynamicObject* GetBigInt64ArrayPrototype() { return BigInt64ArrayPrototype; }
+        DynamicObject* GetBigUint64ArrayPrototype() { return BigUint64ArrayPrototype; }
+
         DynamicObject* GetErrorPrototype() const { return errorPrototype; }
         DynamicObject* GetEvalErrorPrototype() const { return evalErrorPrototype; }
         DynamicObject* GetRangeErrorPrototype() const { return rangeErrorPrototype; }
