@@ -214,3 +214,35 @@ triage, content subsumed by the recorded gate receipts) was removed.
   pre-amend hash `bd0593e97`).
 - (this commit) — a3 receipt + probes: `test/es7/class-private-jit-probes.js`
   + `rlexe.xml` entry, gate-count pin bumps, this receipt.
+
+### Review outcome (dual ACCEPT, nits folded)
+
+Both reviewers ACCEPTed with zero `[bug]`. The general review audited
+all 17 lowered opcodes' argument orders one-by-one against the
+interpreter handlers and the ARM64 reversed-queue convention (zero
+skew), the ExtendArg chain lifecycle (leak-free), dst==src ordering,
+and the reentrancy attributes (truthful in both directions). The
+adversarial review dynamically attacked skew with distinct-operand
+identities (29 checks incl. dual-brand swaps, SetPrivateDefinition
+kinds, ImportCallWithOptions arg discriminators), inlinee depth-3
+compositions re-attacking both fixed marshalling traps, throws/EH
+from helpers inside finally synthetic loops and resume-after-throw
+(exact counts, no double-handle), eval-in-eval LdPrivateDynamic, and
+cross-realm brands — byte-identical across all four modes everywhere;
+corpus key-joins 0-flip (s1-class, s12); dynapogo `-j4` **2007/286
+exact-tagged**; debug-static asserts clean. The serialized-format
+question dissolved: `OP_HasPrivateFieldVar` is a C++ helper function,
+not a new opcode — no format change, no GUID rotation owed
+(`55c5da6d…` stands).
+
+**Folded nits:** (1) the pointer-based-PropertySym citation should
+reference the inlinee-ID-adjustment rationale (the receipt's
+`BuildLoopBodySlotOpnd` cite is loose — that helper uses FindOrCreate);
+(2) un-interned slot-array PropertySyms cost CSE/PRE only
+(correctness-neutral); (3) `InitClassField`'s top-level propertyId
+resolution matches every pre-existing ElementCP site (family-wide
+pre-existing pattern); (4) `HelperSetPrivateDefinition`/
+`HelperImportCallWithOptions` carry attrs `0` — conservative direction
+(provably non-reentrant/no-sync-throw per the ImportCall precedent);
+(5) the [risk-LOW] stale-env observation is exactly the already-carded
+`LdEnvObj`/`InvalCachedScope` set, not a new hole.
