@@ -872,7 +872,8 @@ private:
         BOOL allowInit = TRUE,
         BOOL isTopVarParse = TRUE,
         BOOL isFor = FALSE,
-        BOOL* nativeForOk = nullptr);
+        BOOL* nativeForOk = nullptr,
+        BOOL* pfForOfOk = nullptr);
     BOOL TokIsForInOrForOf();
 
     template<bool buildAST>

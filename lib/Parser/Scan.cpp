@@ -115,6 +115,11 @@ void Scanner<EncodingPolicy>::ClearStates()
 
     m_fYieldIsKeywordRegion = false;
     m_fAwaitIsKeywordRegion = false;
+    // Only ScanIdentifierContinue writes this; zero it here so a caller
+    // querying it for the very first token(s) (before any identifier has
+    // been scanned) cannot read an uninitialized bit — ParseMetaProperty
+    // consults it for `new.target`/`import.meta` escape rejection.
+    m_lastIdentifierHasEscape = false;
 
     m_line = 0;
     m_scanState = ScanStateNormal;
@@ -1373,6 +1378,22 @@ LOneOctal:
                 }
 
                 ch = static_cast< OLECHAR >(ch * 8 + wT);
+                break;
+
+            case '8':
+            case '9':
+                // \8 and \9 are NonOctalDecimalEscapeSequences in sloppy
+                // string literals, but no template production admits them:
+                // they cook to undefined (12.3.9.1), an early Syntax Error
+                // in untagged templates. Reject at scan time like the other
+                // legacy octal shapes above; the raw string still records
+                // the escape for tagged use, matching the existing
+                // treatment of \1..\7 escapes.
+                if (stringTemplateMode)
+                {
+                    errorType = (uint)ERRES5NoOctal;
+                    goto ReturnScanError;
+                }
                 break;
 
             case kchRET:        // 0xD

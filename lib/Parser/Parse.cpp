@@ -2959,6 +2959,14 @@ IdentPtr Parser::ParseMetaProperty(tokens metaParentKeyword, charcount_t ichMin,
         case tkNEW:
             if (id == this->GetTargetPid())
             {
+                // `new.target` is a NewTarget meta property: the keyword and
+                // its property may not contain Unicode escape sequences
+                // (15.8.2 static semantics). The scanner folds escapes into
+                // the identifier, so reject on the escape marker.
+                if (this->GetScanner()->LastIdentifierHasEscape())
+                {
+                    Error(ERRsyntax);
+                }
                 ThrowNewTargetSyntaxErrForGlobalScope();
                 if (pfCanAssign)
                 {
@@ -2970,6 +2978,12 @@ IdentPtr Parser::ParseMetaProperty(tokens metaParentKeyword, charcount_t ichMin,
         case tkIMPORT:
             if (id == this->GetMetaPid())
             {
+                // Same rule for `import.meta` (16.2.1): no escape sequences
+                // in either keyword.
+                if (this->GetScanner()->LastIdentifierHasEscape())
+                {
+                    Error(ERRsyntax);
+                }
                 if (pfCanAssign)
                 {
                     *pfCanAssign = FALSE;
@@ -4599,6 +4613,11 @@ ParseNodePtr Parser::ParseTerm(BOOL fAllowCall,
                     Error(ERRTokenAfter, _u("import"), _u("new"));
                 }
                 pnode = ParseImportCall<buildAST>();
+                // An ImportCall is an ~invalid~ assignment target in every
+                // mode (no Annex B.3.9 web-compat production covers it), so
+                // `import('') = 1`, `++import('')` and for-in/of heads over
+                // it are early Syntax Errors.
+                fCanAssign = FALSE;
                 break;
             case tkDot:
                 if (!(m_grfscr & fscrIsModuleCode) || !m_scriptContext->GetConfig()->IsESImportMetaEnabled())
@@ -4994,6 +5013,7 @@ ParseNodePtr Parser::ParsePostfixOperators(
         case tkLParen:
         {
             AutoMarkInParsingArgs autoMarkInParsingArgs(this);
+            bool completedNewWithArgs = false;
 
             if (fInNew)
             {
@@ -5019,6 +5039,7 @@ ParseNodePtr Parser::ParsePostfixOperators(
                     pToken->tk = tkNone; // This is no longer an identifier
                 }
                 fInNew = FALSE;
+                completedNewWithArgs = true;
                 ChkCurTok(tkRParen, ERRnoRparen);
             }
             else
@@ -5145,10 +5166,29 @@ ParseNodePtr Parser::ParsePostfixOperators(
             }
             if (pfCanAssign)
             {
-                *pfCanAssign = fCanAssignToCallResult && 
-                               (m_sourceContextInfo ?
-                                !PHASE_ON_RAW(Js::EarlyErrorOnAssignToCallPhase, m_sourceContextInfo->sourceContextId, GetCurrentFunctionNode()->functionId) :
-                                !PHASE_ON1(Js::EarlyErrorOnAssignToCallPhase));
+                if (completedNewWithArgs)
+                {
+                    // `new C(...)` is not a web-compat assignment target: the
+                    // Annex B.3.9 runtime-error allowance covers only the two
+                    // CallExpression productions, so a new-expression is an
+                    // ~invalid~ target for `=`, compound assignment, update
+                    // operators and for-in/of heads in every mode. The early
+                    // error sites treat !fCanAssign as a parse-time
+                    // SyntaxError (EarlyReferenceErrorsPhase is default-on).
+                    *pfCanAssign = FALSE;
+                }
+                else
+                {
+                    // A call result is a ~web-compat~ target only in sloppy
+                    // code (Annex B.3.9 step 1a); strict code returns
+                    // ~invalid~ for CallExpression, so `f() = 1` etc. become
+                    // early Syntax Errors there, while sloppy code keeps the
+                    // runtime ReferenceError behavior.
+                    *pfCanAssign = fCanAssignToCallResult && !IsStrictMode() &&
+                                   (m_sourceContextInfo ?
+                                    !PHASE_ON_RAW(Js::EarlyErrorOnAssignToCallPhase, m_sourceContextInfo->sourceContextId, GetCurrentFunctionNode()->functionId) :
+                                    !PHASE_ON1(Js::EarlyErrorOnAssignToCallPhase));
+                }
             }
             if (pfIsDotOrIndex)
             {
@@ -6087,8 +6127,12 @@ ParseNodePtr Parser::ParseMemberList(LPCOLESTR pNameHint, uint32* pNameHintLengt
             this->GetScanner()->ScanForcingPid();
         }
 
-        if (isGenerator && m_token.tk != tkLParen)
+        if ((isGenerator || isAsyncMethod) && m_token.tk != tkLParen)
         {
+            // Once `async`/`*` commits to a method prefix, the property name
+            // must begin a method: `{async foo: 1}` and `{async async}` are
+            // not shorthand/colon productions (the async rewind above only
+            // covers `{async}`, `{async,}`, `{async: x}` and newline forms).
             Error(ERRnoLparen);
         }
 
@@ -6397,6 +6441,14 @@ ParseNodePtr Parser::ParseMemberList(LPCOLESTR pNameHint, uint32* pNameHintLengt
         this->GetScanner()->ScanForcingPid();
         if (tkRCurly == m_token.tk)
         {
+            if (seenRest && isObjectPattern)
+            {
+                // ObjectBindingPattern / ObjectAssignmentPattern have no
+                // `{ ... BindingRestElement , }` production: unlike array
+                // patterns and object *literals*, a rest property may not be
+                // followed by a trailing comma (ERRDestructRestLast).
+                Error(ERRDestructRestLast);
+            }
             break;
         }
         if (seenRest) // Rest must be in the last position.
@@ -8201,6 +8253,22 @@ void Parser::ParseFncName(ParseNodeFnc * pnodeFnc, ushort flags, IdentPtr* pFncN
             IdentifierExpectedError(m_token);
         }
         return;
+    }
+
+    // An async function *expression*'s own name is a
+    // BindingIdentifier[~Yield, +Await] (15.8): `await` is rejected even
+    // where the ambient context scans it as a plain identifier (sloppy
+    // script top level), matching the tkAWAIT region case rejected above.
+    // Declarations inherit the ambient [?Await] instead, so a sloppy
+    // top-level `async function await(){}` stays legal and inside an
+    // await-region it is already rejected through the tkAWAIT path.
+    // (IdentifierExpectedError asserts a non-tkID token, so report through
+    // the generic invalid-identifier error with the offending name.)
+    if (!fDeclaration && pnodeFnc->IsAsync() && m_token.tk == tkID &&
+        CheckContextualKeyword(wellKnownPropertyPids.await))
+    {
+        Error(ERRInvalidIdentifier, m_token.GetIdentifier(this->GetHashTbl())->Psz(),
+              GetTokenString(GetScanner()->GetPrevious()));
     }
 
     Assert(m_token.tk == tkID || (m_token.tk == tkYIELD && !fDeclaration) || (m_token.tk == tkAWAIT && !fDeclaration));
@@ -12094,8 +12162,14 @@ ParseNodePtr Parser::ParseExpr(int oplMin,
         }
         else
         {
-            // Disallow spread after a unary operator.
-            pnodeT = ParseExpr<buildAST>(opl, &fCanAssign, TRUE, FALSE, nullptr /*hint*/, nullptr /*hintLength*/, nullptr /*hintOffset*/, &operandToken, true, nullptr, plastRParen);
+            // Disallow spread after a unary operator. The operand parse
+            // threads the ambient [In] parameter: `yield *` takes an
+            // AssignmentExpression[?In], so under a ~In context (native for
+            // init) `in` must not bind inside the operand — otherwise
+            // `for (yield * '' in {}; ;) ;` parses the head as one
+            // expression instead of leaving `in` to expose the invalid
+            // for-in target.
+            pnodeT = ParseExpr<buildAST>(opl, &fCanAssign, fAllowIn, FALSE, nullptr /*hint*/, nullptr /*hintLength*/, nullptr /*hintOffset*/, &operandToken, true, nullptr, plastRParen);
         }
 
         if (nop != knopYieldLeaf)
@@ -12810,7 +12884,8 @@ ParseNodePtr Parser::ParseVariableDeclaration(
     BOOL allowInit/* = TRUE*/,
     BOOL isTopVarParse/* = TRUE*/,
     BOOL isFor/* = FALSE*/,
-    BOOL* nativeForOk /*= nullptr*/)
+    BOOL* nativeForOk /*= nullptr*/,
+    BOOL* pfForOfOk /*= nullptr*/)
 {
     ParseNodePtr pnodeThis = nullptr;
     ParseNodePtr pnodeInit;
@@ -12898,6 +12973,14 @@ ParseNodePtr Parser::ParseVariableDeclaration(
                 if (pfForInOk && (declarationType == tkLET || declarationType == tkCONST || IsStrictMode()))
                 {
                     *pfForInOk = FALSE;
+                }
+                // A for-of head never admits a binding initializer: Annex B
+                // B.3.5 extends only for-in, and only for a sloppy `var`
+                // binding, so the for-of-only suppression is unconditional
+                // where the for-in flag above keeps the legacy allowance.
+                if (pfForOfOk)
+                {
+                    *pfForOfOk = FALSE;
                 }
 
                 this->GetScanner()->Scan();
@@ -13451,6 +13534,15 @@ LRestart:
             {
                 Error(ERRStmtOfWithIsLabelledFunc);
             }
+            // #sec-if-statement-static-semantics-early-errors: it is a Syntax
+            // Error if IsLabelledFunction(Statement) of either clause is true.
+            // The Annex B.3.3 clause extension admits only the sole,
+            // unlabelled FunctionDeclaration (`if (c) function f(){}`), so the
+            // labelled form is rejected even in sloppy mode.
+            else if (m_pstmtCur && m_pstmtCur->pnodeStmt && m_pstmtCur->GetNop() == knopIf)
+            {
+                Error(ERRStmtOfIfIsLabelledFunc);
+            }
 
             ParseNodeFnc* pNodeFnc = nullptr;
 
@@ -13627,6 +13719,7 @@ LRestart:
         RestorePoint startExprOrIdentifier;
         fForInOrOfOkay = TRUE;
         fCanAssign = TRUE;
+        BOOL fForOfHeadOk = TRUE;
         tok = m_token.tk;
         BOOL nativeForOkay = TRUE;
 
@@ -13656,7 +13749,8 @@ LRestart:
                         , /*allowInit*/TRUE
                         , /*isTopVarParse*/TRUE
                         , /*isFor*/TRUE
-                        , &nativeForOkay);
+                        , &nativeForOkay
+                        , &fForOfHeadOk);
                     break;
                 }
                 this->GetScanner()->SeekTo(parsedLet);
@@ -13680,7 +13774,8 @@ LRestart:
                 , /*allowInit*/TRUE
                 , /*isTopVarParse*/TRUE
                 , /*isFor*/TRUE
-                , &nativeForOkay);
+                , &nativeForOkay
+                , &fForOfHeadOk);
         }
         break;
         case tkSColon:
@@ -13750,7 +13845,7 @@ LRestart:
                 Error(ERRTokenAfter, _u("in"), _u("for await"));
             }
 
-            if ((buildAST && nullptr == pnodeT) || !fForInOrOfOkay)
+            if ((buildAST && nullptr == pnodeT) || !fForInOrOfOkay || (isForOf && !fForOfHeadOk))
             {
                 if (isForOf)
                 {

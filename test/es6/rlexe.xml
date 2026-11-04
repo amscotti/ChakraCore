@@ -1538,4 +1538,22 @@
     <baseline>bug_19225364.baseline</baseline>
   </default>
 </test>
+<test>
+  <default>
+    <files>early-error-targets.js</files>
+    <compile-flags>-args summary -endargs</compile-flags>
+  </default>
+</test>
+<test>
+  <default>
+    <files>early-error-targets.js</files>
+    <compile-flags>-force:deferparse -args summary -endargs</compile-flags>
+  </default>
+</test>
+<test>
+  <default>
+    <files>early-error-targets.js</files>
+    <compile-flags>-noDeferParse -args summary -endargs</compile-flags>
+  </default>
+</test>
 </regress-exe>
