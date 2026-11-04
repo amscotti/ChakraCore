@@ -10485,7 +10485,7 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
             // viii. If Desc has an[[Enumerable]] field and if Desc.[[Enumerable]] is false, return false.
             // ix. If Desc has a[[Writable]] field and if Desc.[[Writable]] is false, return false.
             if (descriptor.IsAccessorDescriptor()
-                || (descriptor.ConfigurableSpecified() && descriptor.IsConfigurable())
+                || (descriptor.ConfigurableSpecified() && !descriptor.IsConfigurable())
                 || (descriptor.EnumerableSpecified() && !descriptor.IsEnumerable())
                 || (descriptor.WritableSpecified() && !descriptor.IsWritable()))
             {

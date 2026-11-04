@@ -28,16 +28,14 @@ var proxy = new Proxy(array, handler);
 
 try
 {
-    // By spec, Array.prototype.filter (and other built-ins) adds configurable properties to a new array, created from ArraySpeciesCreate. 
-    // If the constructed array is a TypedArray, setting of index properties should throw a type error because they cannot be configurable.
+    // Post-ES2016 (tc39 PR #2164): defining configurable index properties on a
+    // TypedArray succeeds silently, so filter with a TypedArray species result
+    // completes without throwing (Node-verified).
     var boundFilter = Array.prototype.filter.bind(proxy);
     boundFilter(function() { return true; });
-    WScript.Echo("TypeError expected. TypedArray indicies should be non-configurable.");
+    WScript.Echo("passed");
 }
 catch (e)
 {
-    if (e == "TypeError: Cannot redefine property '0'")
-    {
-        WScript.Echo("passed");
-    }
+    WScript.Echo("unexpected throw: " + e);
 }

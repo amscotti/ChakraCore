@@ -203,3 +203,47 @@ iterations call back with `undefined`).
 | `zig build -Dprofile=debug-static check-regression` | **2093/0** (was 2092/0; rc=0) |
 | `zig build -Dprofile=jit check` | **646/646**, check_jit PASS (`-mic:1 -bgjit-` and `-forceNative` probes), check_smoke PASS, bytecode up to date — run because TypedArray.h/.cpp are shared engine paths; no detach-check reorder was made in fast paths, so no s8 campaign re-run is owed |
 | `zig build check-build-tools` | **2/2 OK** (gate_counts consumers, updated pins) |
+
+### Review outcome (dual ACCEPT-conditional, folded + repair iteration)
+
+The general review ACCEPTed (spec-verified step-for-step against the
+ES2025 published snapshot; engine ≡ Node across 39 shapes; funnel
+proven). The adversarial review ACCEPTed conditionally and found two
+REAL pre-existing spec bugs, now handled:
+
+**Repaired in this fold:** `[[DefineOwnProperty]]`'s stale ES2016
+`configurable` rule (JavascriptOperators.cpp — the main TypedArray
+branch rejected present-and-TRUE; post-#2164 spec/Node reject only
+present-and-FALSE). One-character fix; the IMMUTABLE branch's
+present-and-TRUE rejection is **S8-intentional** (modeled as
+non-configurable storage; its committed test pins it — deliberately
+NOT changed). Legacy 2016-era pins updated to spec/Node:
+`objectproperty.js` (configurable:true now no-throw — verifyNoThrow +
+regenerated baseline), `reflect_defineProperty.js` (the "valid
+descriptor" test's descriptor corrected to configurable:true + a new
+cfg-false rejection test), `FilterWithTypedArray.js` (filter with TA
+species completes per Node), `toPrimitive.js` (callback descriptor
+made spec-valid). Engine ≡ Node verified for every changed shape.
+
+**Cards filed (adversarial findings):** B1 — `Reflect.set` with an
+invalid index at entry returns false and SKIPS the value conversion
+(spec: converts first, returns true; entry plumbing bypasses the
+primitives; corpus-invisible); B3 — RAB-shrunk-to-OOB `delete` returns
+false/throws-strict where spec says true (only `IsDetachedBuffer` is
+keyed; `IsValidIntegerIndex` OOB half unimplemented in DeleteItem);
+B4 — `sort()` comparator-detach: engine throws (spec-correct), Node
+doesn't (V8 divergence; recorded like the on-heap caveat); B6 —
+`Object.freeze` on attached non-empty TA doesn't throw (Node does);
+general-review nit — attached-OOB `delete` returns false (spec: true;
+same IsValidIntegerIndex half as B3's card).
+
+**Receipt corrections:** §2's "every consumer inherits through these
+primitives" is false for the Reflect.set/defineProperty ENTRY
+plumbing (B1's root); §4's "line for line" excludes B1/B2/B4 shapes;
+spec citations updated to ES2025 numbering (10.4.5.18
+TypedArraySetElement / 10.4.5.6 [[Set]]); §1's defineProperty row —
+Reflect returns false at entry (the TypeError belongs to the
+Object.defineProperty surface); the memcopy-fusion Assert-placement
+observation recorded (pre-detached arrays reach the Assert before the
+FALSE return in asserts builds — unchanged shape, unreachable from
+corpus paths).

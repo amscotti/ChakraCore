@@ -244,7 +244,7 @@ for (var i = 0; i < typedArray.length; i++)
 {
 verifyNoThrow(function(obj){Object.defineProperty(obj, "1", {value: 1})}, typedObjectInstances[i]);
 verifyThrow(function(obj){Object.defineProperty(obj, "1", {value: 1, writable: false})}, typedObjectInstances[i]);
-verifyThrow(function(obj){Object.defineProperty(obj, "1", {value: 1, configurable: true})}, typedObjectInstances[i]);
+verifyNoThrow(function(obj){Object.defineProperty(obj, "1", {value: 1, configurable: true})}, typedObjectInstances[i]);
 verifyThrow(function(obj){Object.defineProperty(obj, "1", {get: function(){throw "error"}})}, typedObjectInstances[i]);
 verifyNoThrow(function(obj){Object.defineProperty(obj, "hello", {value: 1})}, typedObjectInstances[i]);
 verifyNoThrow(function(obj) { obj.foo = 'hello';}, typedObjectInstances[i]);

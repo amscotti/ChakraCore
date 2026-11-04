@@ -138,12 +138,26 @@ var tests = [
             const sample = new Float64Array(2)
             var result = Reflect.defineProperty(sample, "0", {
                 value: 42,
-                configurable: false,
+                configurable: true,
                 enumerable: true,
                 writable: true,
             }); 
             assert.areEqual(sample[0], 42, "the value should be 42");
             assert.areEqual(result, true, "expect true");                    
+        }
+    },
+    {
+        name: "Reflect define Property for typedarray rejects configurable:false descriptors (post-ES2016 rule)",
+        body: function () {
+            const sample = new Float64Array(2)
+            var result = Reflect.defineProperty(sample, "0", {
+                value: 42,
+                configurable: false,
+                enumerable: true,
+                writable: true,
+            });
+            assert.areEqual(sample[0], 0, "the value should be 0");
+            assert.areEqual(result, false, "expect false");
         }
     },
 ];

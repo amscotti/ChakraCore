@@ -713,7 +713,7 @@ var tests = [
 
             var p4_typedarray = function(x)
             {
-                    Object.defineProperty(a4_typedarray, "1", {configurable : false, value: 30});
+                    Object.defineProperty(a4_typedarray, "1", {configurable : true, value: 30});
                     return x * x;
             };
             var a4_typedarray = new Int32Array([1, 2, 3, 4, 5]);
@@ -944,10 +944,10 @@ var tests = [
             var p11_typedarray = {
                 [Symbol.toPrimitive] (hint) {
                     // The first element changes during the visit to the first element; so it's side-effect won't be seen by filter method.
-                    Object.defineProperty(a11_typedarray, "0", {configurable : false, value:30 });
+                    Object.defineProperty(a11_typedarray, "0", {configurable : true, value:30 });
 
                     // The last element changes during the visit to the first element; so it's side-effect will be seen by filter method.
-                    Object.defineProperty(a11_typedarray, "4", {configurable : false, value:30 });
+                    Object.defineProperty(a11_typedarray, "4", {configurable : true, value:30 });
                     return 0;
                 }
             };
@@ -1025,10 +1025,10 @@ var tests = [
                     if(index==0)
                     {
                         // The first element changes during the visit to the first element; so it's side-effect won't be seen by forEach method.
-                        Object.defineProperty(a18_typedarray, "0", {configurable : false, value:30 });
+                        Object.defineProperty(a18_typedarray, "0", {configurable : true, value:30 });
 
                         // The last element changes during the visit to the first element; so it's side-effect will be seen by forEach method.
-                        Object.defineProperty(a18_typedarray, "1", {configurable : false, value:30 });
+                        Object.defineProperty(a18_typedarray, "1", {configurable : true, value:30 });
                     }
                     else
                     {
@@ -1070,7 +1070,7 @@ var tests = [
 
             var p21_typedarray = {
                 [Symbol.toPrimitive] (hint) {
-                    Object.defineProperty(a21_typedarray, "0", {configurable : false, value:30 });
+                    Object.defineProperty(a21_typedarray, "0", {configurable : true, value:30 });
                     return -2;
                 }
             };

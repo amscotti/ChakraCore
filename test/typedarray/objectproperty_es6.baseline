@@ -1799,14 +1799,6 @@ SUCCEEDED: get expected exception Cannot redefine non-configurable property '1'
 SUCCEEDED: get expected exception Cannot redefine non-configurable property '1'
 SUCCEEDED: get expected exception Cannot redefine non-configurable property '1'
 SUCCEEDED: get expected exception Cannot redefine non-configurable property '1'
-SUCCEEDED: get expected exception Cannot redefine non-configurable property '1'
-SUCCEEDED: get expected exception Cannot redefine non-configurable property '1'
-SUCCEEDED: get expected exception Cannot redefine non-configurable property '1'
-SUCCEEDED: get expected exception Cannot redefine non-configurable property '1'
-SUCCEEDED: get expected exception Cannot redefine non-configurable property '1'
-SUCCEEDED: get expected exception Cannot redefine non-configurable property '1'
-SUCCEEDED: get expected exception Cannot redefine non-configurable property '1'
-SUCCEEDED: get expected exception Cannot redefine non-configurable property '1'
 Verify call to built-in property
 SUCCEEDED: get expected exception Function expected
 SUCCEEDED: get expected exception Function expected

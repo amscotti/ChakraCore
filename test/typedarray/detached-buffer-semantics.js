@@ -204,3 +204,14 @@ assertEq(detachDuringIteration(BigInt64Array, 0), 2, "every (BigInt) runs all ca
 })();
 
 console.log("pass");
+
+// B3-review fold: TypedArray [[DefineOwnProperty]] uses the post-ES2016 rule —
+// configurable/enumerable/writable fields reject only when present-and-FALSE
+// (the ES2016 present-and-true rule for configurable was stale; Node-verified).
+function chk(name, actual, expected) { if (actual !== expected) { throw new Error(name + ": expected " + expected + ", got " + actual); } }
+var dPfull = new Uint8Array(2);
+chk("full descriptor with configurable:true accepted", Reflect.defineProperty(dPfull, 0, { value: 42, writable: true, enumerable: true, configurable: true }), true);
+chk("full descriptor stores the value", dPfull[0], 42);
+chk("configurable:false rejected", Reflect.defineProperty(dPfull, 1, { configurable: false }), false);
+chk("enumerable:false rejected", Reflect.defineProperty(dPfull, 1, { enumerable: false }), false);
+chk("writable:false rejected", Reflect.defineProperty(dPfull, 1, { writable: false }), false);
