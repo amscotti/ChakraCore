@@ -427,6 +427,11 @@ Below test fails with difference in space. Investigate the cause and re-enable t
   </test>
   <test>
     <default>
+      <files>detached-buffer-semantics.js</files>
+    </default>
+  </test>
+  <test>
+    <default>
       <files>bug18321215.js</files>
     </default>
   </test>

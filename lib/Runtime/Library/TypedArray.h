@@ -361,11 +361,9 @@ namespace Js
 
         inline Var BaseTypedDirectGetItem(_In_ uint32 index)
         {
-            if (this->IsDetachedBuffer()) // 9.4.5.8 IntegerIndexedElementGet
-            {
-                JavascriptError::ThrowTypeError(GetScriptContext(), JSERR_DetachedTypedArray);
-            }
-
+            // IntegerIndexedElementGet: a detached view reads as undefined.
+            // Detach clears length to 0 (ClearLengthAndBufferOnDetach), so the
+            // bounds check below returns undefined without touching buffer.
             if (index < GetLength())
             {
                 Assert((index + 1)* sizeof(TypeName)+GetByteOffset() <= GetArrayBuffer()->GetByteLength());
@@ -377,11 +375,7 @@ namespace Js
 
         inline Var TypedDirectGetItemWithCheck(_In_ uint32 index)
         {
-            if (this->IsDetachedBuffer()) // 9.4.5.8 IntegerIndexedElementGet
-            {
-                JavascriptError::ThrowTypeError(GetScriptContext(), JSERR_DetachedTypedArray);
-            }
-
+            // IntegerIndexedElementGet: a detached view reads as undefined.
             if (index < GetLength())
             {
                 Assert((index + 1)* sizeof(TypeName)+GetByteOffset() <= GetArrayBuffer()->GetByteLength());
@@ -429,7 +423,10 @@ namespace Js
 
             if (this->IsDetachedBuffer() || fromArray->IsDetachedBuffer())
             {
-                JavascriptError::ThrowTypeError(GetScriptContext(), JSERR_DetachedTypedArray);
+                // A detached source or destination replays the per-element
+                // stores through the helper path (silent no-op stores), same
+                // contract as the immutable rejection above.
+                return FALSE;
             }
 
             // Fixup destination start in case it's negative
@@ -486,7 +483,9 @@ namespace Js
 
             if (this->IsDetachedBuffer()) // 9.4.5.9 IntegerIndexedElementSet
             {
-                JavascriptError::ThrowTypeError(GetScriptContext(), JSERR_DetachedTypedArray);
+                // Detached destination: bail out so the caller replays the
+                // per-element stores, which no-op silently (helper path).
+                return FALSE;
             }
             uint32 newStart = start, newLength = length;
 
@@ -543,7 +542,11 @@ namespace Js
 
             if (this->IsDetachedBuffer()) // 9.4.5.9 IntegerIndexedElementSet
             {
-                JavascriptError::ThrowTypeError(GetScriptContext(), JSERR_DetachedTypedArray);
+                // The value conversion above ran first (observable). A
+                // detached store is a silent no-op that reports success:
+                // IntegerIndexedElementSet returns a normal completion, so
+                // neither sloppy nor strict assignment throws.
+                return TRUE;
             }
 
             if (index >= GetLength())
@@ -572,7 +575,14 @@ namespace Js
 
             TypeName typedValue = convFunc(value, GetScriptContext());
 
-            if (this->IsDetachedBuffer() || index >= GetLength())
+            if (this->IsDetachedBuffer())
+            {
+                // Same contract as the numeric path: the conversion above is
+                // observable, the store itself is a silent success.
+                return TRUE;
+            }
+
+            if (index >= GetLength())
             {
                 return FALSE;
             }
@@ -597,11 +607,8 @@ namespace Js
             // Therefore it was brought out and above the IsDetached check
             convFunc(value, GetScriptContext());
 
-            if (this->IsDetachedBuffer()) // 9.4.5.9 IntegerIndexedElementSet
-            {
-                JavascriptError::ThrowTypeError(GetScriptContext(), JSERR_DetachedTypedArray);
-            }
-
+            // The conversion above is observable; the store itself is skipped
+            // (OOB or detached index) without throwing.
             return FALSE;
         }
 

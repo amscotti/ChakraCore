@@ -202,14 +202,16 @@ var tests = [
             assert.strictEqual(1, detachedThrowCalls, "detached conversion failure runs once");
 
             // Control: the existing non-BigInt path already converts OOB
-            // values and throws for a detached numeric store.
+            // values; a detached numeric store is a silent no-op
+            // (web-reality alignment).
             var control = new Uint8Array(1);
             var controlCalls = 0;
             control[10] = { valueOf() { controlCalls++; return 5; } };
             assert.strictEqual(1, controlCalls, "Uint8 OOB store converts once");
             var detachedControl = new Uint8Array(1);
             detachedControl.buffer.transfer();
-            assertThrowsTypeError(function () { detachedControl[0] = 1; }, "detached Uint8 store still throws");
+            detachedControl[0] = 1;
+            assert.areEqual(undefined, detachedControl[0], "detached Uint8 store is a silent no-op");
         }
     },
     {

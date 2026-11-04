@@ -666,11 +666,8 @@ namespace Js
 
     PropertyQueryFlags TypedArrayBase::HasItemQuery(uint32 index)
     {
-        if (this->IsDetachedBuffer())
-        {
-            JavascriptError::ThrowTypeError(GetScriptContext(), JSERR_DetachedTypedArray);
-        }
-
+        // [[HasProperty]] on a detached view is false for every canonical
+        // index (IsValidIntegerIndex is false once detached).
         if (index < GetLength())
         {
             return PropertyQueryFlags::Property_Found;
@@ -681,6 +678,14 @@ namespace Js
 
     BOOL TypedArrayBase::DeleteItem(uint32 index, Js::PropertyOperationFlags flags)
     {
+        if (this->IsDetachedBuffer())
+        {
+            // [[Delete]] on a detached view succeeds for every canonical
+            // index, including strict mode (the index no longer exists to
+            // be non-configurable). Attached indexes keep the cant-delete
+            // behavior below.
+            return TRUE;
+        }
         JavascriptError::ThrowCantDeleteIfStrictModeOrNonconfigurable(
             flags, GetScriptContext(), GetScriptContext()->GetIntegerString(index)->GetString());
         return FALSE;
@@ -3921,10 +3926,7 @@ namespace Js
     template<>
     inline Var Int64Array::DirectGetItem(_In_ uint32 index)
     {
-        if (this->IsDetachedBuffer())
-        {
-            JavascriptError::ThrowTypeError(GetScriptContext(), JSERR_DetachedTypedArray);
-        }
+        // IntegerIndexedElementGet: a detached view reads as undefined.
         if (index < GetLength())
         {
             Assert((index + 1) * sizeof(int64) + GetByteOffset() <= GetArrayBuffer()->GetByteLength());
@@ -3963,10 +3965,7 @@ namespace Js
     template<>
     inline Var Uint64Array::DirectGetItem(_In_ uint32 index)
     {
-        if (this->IsDetachedBuffer())
-        {
-            JavascriptError::ThrowTypeError(GetScriptContext(), JSERR_DetachedTypedArray);
-        }
+        // IntegerIndexedElementGet: a detached view reads as undefined.
         if (index < GetLength())
         {
             Assert((index + 1) * sizeof(uint64) + GetByteOffset() <= GetArrayBuffer()->GetByteLength());
@@ -4005,10 +4004,7 @@ namespace Js
     template<>
     inline Var Float16Array::DirectGetItem(_In_ uint32 index)
     {
-        if (this->IsDetachedBuffer())
-        {
-            JavascriptError::ThrowTypeError(GetScriptContext(), JSERR_DetachedTypedArray);
-        }
+        // IntegerIndexedElementGet: a detached view reads as undefined.
         if (index < GetLength())
         {
             Assert((index + 1) * sizeof(Float16Bits) + GetByteOffset() <= GetArrayBuffer()->GetByteLength());

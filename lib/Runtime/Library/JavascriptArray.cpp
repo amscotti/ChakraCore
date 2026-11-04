@@ -9937,6 +9937,15 @@ Case0:
             }
         }
 
+        // %TypedArray%.prototype.fill re-checks detachment after the value and
+        // index coercions (user code may detach there) and before any write,
+        // even for an empty fill range. The generic Array.prototype.fill path
+        // keeps ordinary [[Set]] semantics and stays silent.
+        if (isTypedArrayEntryPoint && typedArrayBase->IsDetachedBuffer())
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, _u("[TypedArray].prototype.fill"));
+        }
+
         if (k < MaxArrayLength)
         {
             int64 end = min<int64>(finalVal, MaxArrayLength);

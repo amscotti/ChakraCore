@@ -603,8 +603,11 @@ var tests = [
             buf.transfer();
             assert.strictEqual(0, ta.length, "length after detach");
             assert.strictEqual(0, ta.byteLength, "byteLength after detach");
-            assert.throws(function () { ta[0]; }, TypeError, "get after detach");
-            assert.throws(function () { ta[0] = 1; }, TypeError, "set after detach");
+            // Web-reality detached semantics: element reads see undefined and
+            // stores are silent no-ops; validating builtins still throw.
+            assert.strictEqual(undefined, ta[0], "get after detach");
+            ta[0] = 1;
+            assert.strictEqual(undefined, ta[0], "set after detach is a no-op");
             assert.throws(function () { ta.set([1]); }, TypeError, "set() after detach");
             assert.throws(function () { Array.from(ta); }, TypeError, "iteration after detach");
 

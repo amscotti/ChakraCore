@@ -460,8 +460,11 @@ var tests = [
             assert.areEqual(0, auto.byteLength, "detached auto byteLength");
             assert.areEqual(0, auto.byteOffset, "detached auto byteOffset");
             assert.areEqual(0, fixed.length, "detached fixed length");
-            assertThrowsTypeError(function () { return auto[0]; }, "detached get");
-            assertThrowsTypeError(function () { auto[0] = 1; }, "detached set");
+            // Web-reality detached semantics: element access is undefined/
+            // silent; validating builtins (at/fill/set) still throw.
+            assert.areEqual(undefined, auto[0], "detached get");
+            auto[0] = 1;
+            assert.areEqual(undefined, auto[0], "detached set is a no-op");
             assertThrowsTypeError(function () { auto.at(0); }, "detached at");
             assertThrowsTypeError(function () { auto.fill(1); }, "detached fill");
             assertThrowsTypeError(function () { auto.set([]); }, "detached set method");
