@@ -1,0 +1,770 @@
+{
+ "lane": "b4-compound-assign-let-asi",
+ "base_commit": "e720da0d2",
+ "corpus_revision": "2e0a56762801e275a9fdf96dc49d90ba0cddcf63",
+ "oracle": "Node v26.5.0",
+ "selections": [
+  {
+   "name": "compound-assignment",
+   "pattern": "test/language/expressions/compound-assignment/**",
+   "before": {
+    "passed": 720,
+    "failed": 66,
+    "scenarios": 786
+   },
+   "artifact": "out/test262-b4-ca-before"
+  },
+  {
+   "name": "let-asi",
+   "patterns": "let-{block,identifier,array}-with-newline.js under for/for-in/for-of/for-await-of/if/while/with/labeled/do-while",
+   "before": {
+    "passed": 11,
+    "failed": 14,
+    "scenarios": 25
+   },
+   "artifact": "out/test262-b4-letasi-before"
+  }
+ ],
+ "families": {
+  "nullish-base-before-topropertykey": 44,
+  "topropertykey-exactly-once": 22,
+  "let-block-asi": 7,
+  "let-identifier-asi": 7
+ },
+ "records": [
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.10_T2.js",
+   "scenario": "default",
+   "family": "nullish-base-before-topropertykey",
+   "message": "Expected a TypeError but got a Test262Error",
+   "operator": "^=",
+   "variant": "T2",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.10_T1.js",
+   "scenario": "default",
+   "family": "nullish-base-before-topropertykey",
+   "message": "Expected a TypeError but got a Test262Error",
+   "operator": "^=",
+   "variant": "T1",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.10_T2.js",
+   "scenario": "strict mode",
+   "family": "nullish-base-before-topropertykey",
+   "message": "Expected a TypeError but got a Test262Error",
+   "operator": "^=",
+   "variant": "T2",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.10_T1.js",
+   "scenario": "strict mode",
+   "family": "nullish-base-before-topropertykey",
+   "message": "Expected a TypeError but got a Test262Error",
+   "operator": "^=",
+   "variant": "T1",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.10_T4.js",
+   "scenario": "default",
+   "family": "topropertykey-exactly-once",
+   "message": "Expected true but got false",
+   "operator": "^=",
+   "variant": "T4",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.11_T2.js",
+   "scenario": "strict mode",
+   "family": "nullish-base-before-topropertykey",
+   "message": "Expected a TypeError but got a Test262Error",
+   "operator": "|=",
+   "variant": "T2",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.11_T2.js",
+   "scenario": "default",
+   "family": "nullish-base-before-topropertykey",
+   "message": "Expected a TypeError but got a Test262Error",
+   "operator": "|=",
+   "variant": "T2",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.11_T1.js",
+   "scenario": "default",
+   "family": "nullish-base-before-topropertykey",
+   "message": "Expected a TypeError but got a Test262Error",
+   "operator": "|=",
+   "variant": "T1",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.10_T4.js",
+   "scenario": "strict mode",
+   "family": "topropertykey-exactly-once",
+   "message": "Expected true but got false",
+   "operator": "^=",
+   "variant": "T4",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.11_T1.js",
+   "scenario": "strict mode",
+   "family": "nullish-base-before-topropertykey",
+   "message": "Expected a TypeError but got a Test262Error",
+   "operator": "|=",
+   "variant": "T1",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.11_T4.js",
+   "scenario": "strict mode",
+   "family": "topropertykey-exactly-once",
+   "message": "Expected true but got false",
+   "operator": "|=",
+   "variant": "T4",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.1_T2.js",
+   "scenario": "default",
+   "family": "nullish-base-before-topropertykey",
+   "message": "Expected a TypeError but got a Test262Error",
+   "operator": "*=",
+   "variant": "T2",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.1_T1.js",
+   "scenario": "default",
+   "family": "nullish-base-before-topropertykey",
+   "message": "Expected a TypeError but got a Test262Error",
+   "operator": "*=",
+   "variant": "T1",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.1_T2.js",
+   "scenario": "strict mode",
+   "family": "nullish-base-before-topropertykey",
+   "message": "Expected a TypeError but got a Test262Error",
+   "operator": "*=",
+   "variant": "T2",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.11_T4.js",
+   "scenario": "default",
+   "family": "topropertykey-exactly-once",
+   "message": "Expected true but got false",
+   "operator": "|=",
+   "variant": "T4",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.1_T1.js",
+   "scenario": "strict mode",
+   "family": "nullish-base-before-topropertykey",
+   "message": "Expected a TypeError but got a Test262Error",
+   "operator": "*=",
+   "variant": "T1",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.2_T1.js",
+   "scenario": "strict mode",
+   "family": "nullish-base-before-topropertykey",
+   "message": "Expected a TypeError but got a Test262Error",
+   "operator": "/=",
+   "variant": "T1",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.2_T2.js",
+   "scenario": "strict mode",
+   "family": "nullish-base-before-topropertykey",
+   "message": "Expected a TypeError but got a Test262Error",
+   "operator": "/=",
+   "variant": "T2",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.2_T1.js",
+   "scenario": "default",
+   "family": "nullish-base-before-topropertykey",
+   "message": "Expected a TypeError but got a Test262Error",
+   "operator": "/=",
+   "variant": "T1",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.1_T4.js",
+   "scenario": "default",
+   "family": "topropertykey-exactly-once",
+   "message": "Expected true but got false",
+   "operator": "*=",
+   "variant": "T4",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.1_T4.js",
+   "scenario": "strict mode",
+   "family": "topropertykey-exactly-once",
+   "message": "Expected true but got false",
+   "operator": "*=",
+   "variant": "T4",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.2_T2.js",
+   "scenario": "default",
+   "family": "nullish-base-before-topropertykey",
+   "message": "Expected a TypeError but got a Test262Error",
+   "operator": "/=",
+   "variant": "T2",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.3_T2.js",
+   "scenario": "strict mode",
+   "family": "nullish-base-before-topropertykey",
+   "message": "Expected a TypeError but got a Test262Error",
+   "operator": "%=",
+   "variant": "T2",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.3_T1.js",
+   "scenario": "default",
+   "family": "nullish-base-before-topropertykey",
+   "message": "Expected a TypeError but got a Test262Error",
+   "operator": "%=",
+   "variant": "T1",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.3_T1.js",
+   "scenario": "strict mode",
+   "family": "nullish-base-before-topropertykey",
+   "message": "Expected a TypeError but got a Test262Error",
+   "operator": "%=",
+   "variant": "T1",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.2_T4.js",
+   "scenario": "default",
+   "family": "topropertykey-exactly-once",
+   "message": "Expected true but got false",
+   "operator": "/=",
+   "variant": "T4",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.3_T2.js",
+   "scenario": "default",
+   "family": "nullish-base-before-topropertykey",
+   "message": "Expected a TypeError but got a Test262Error",
+   "operator": "%=",
+   "variant": "T2",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.2_T4.js",
+   "scenario": "strict mode",
+   "family": "topropertykey-exactly-once",
+   "message": "Expected true but got false",
+   "operator": "/=",
+   "variant": "T4",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.4_T2.js",
+   "scenario": "default",
+   "family": "nullish-base-before-topropertykey",
+   "message": "Expected a TypeError but got a Test262Error",
+   "operator": "+=",
+   "variant": "T2",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.3_T4.js",
+   "scenario": "default",
+   "family": "topropertykey-exactly-once",
+   "message": "Expected true but got false",
+   "operator": "%=",
+   "variant": "T4",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.4_T1.js",
+   "scenario": "strict mode",
+   "family": "nullish-base-before-topropertykey",
+   "message": "Expected a TypeError but got a Test262Error",
+   "operator": "+=",
+   "variant": "T1",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.3_T4.js",
+   "scenario": "strict mode",
+   "family": "topropertykey-exactly-once",
+   "message": "Expected true but got false",
+   "operator": "%=",
+   "variant": "T4",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.4_T1.js",
+   "scenario": "default",
+   "family": "nullish-base-before-topropertykey",
+   "message": "Expected a TypeError but got a Test262Error",
+   "operator": "+=",
+   "variant": "T1",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.4_T2.js",
+   "scenario": "strict mode",
+   "family": "nullish-base-before-topropertykey",
+   "message": "Expected a TypeError but got a Test262Error",
+   "operator": "+=",
+   "variant": "T2",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.4_T4.js",
+   "scenario": "strict mode",
+   "family": "topropertykey-exactly-once",
+   "message": "Expected true but got false",
+   "operator": "+=",
+   "variant": "T4",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.5_T1.js",
+   "scenario": "strict mode",
+   "family": "nullish-base-before-topropertykey",
+   "message": "Expected a TypeError but got a Test262Error",
+   "operator": "-=",
+   "variant": "T1",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.5_T1.js",
+   "scenario": "default",
+   "family": "nullish-base-before-topropertykey",
+   "message": "Expected a TypeError but got a Test262Error",
+   "operator": "-=",
+   "variant": "T1",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.5_T2.js",
+   "scenario": "strict mode",
+   "family": "nullish-base-before-topropertykey",
+   "message": "Expected a TypeError but got a Test262Error",
+   "operator": "-=",
+   "variant": "T2",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.5_T2.js",
+   "scenario": "default",
+   "family": "nullish-base-before-topropertykey",
+   "message": "Expected a TypeError but got a Test262Error",
+   "operator": "-=",
+   "variant": "T2",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.4_T4.js",
+   "scenario": "default",
+   "family": "topropertykey-exactly-once",
+   "message": "Expected true but got false",
+   "operator": "+=",
+   "variant": "T4",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.5_T4.js",
+   "scenario": "default",
+   "family": "topropertykey-exactly-once",
+   "message": "Expected true but got false",
+   "operator": "-=",
+   "variant": "T4",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.5_T4.js",
+   "scenario": "strict mode",
+   "family": "topropertykey-exactly-once",
+   "message": "Expected true but got false",
+   "operator": "-=",
+   "variant": "T4",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.6_T2.js",
+   "scenario": "strict mode",
+   "family": "nullish-base-before-topropertykey",
+   "message": "Expected a TypeError but got a Test262Error",
+   "operator": "<<=",
+   "variant": "T2",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.6_T2.js",
+   "scenario": "default",
+   "family": "nullish-base-before-topropertykey",
+   "message": "Expected a TypeError but got a Test262Error",
+   "operator": "<<=",
+   "variant": "T2",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.6_T1.js",
+   "scenario": "default",
+   "family": "nullish-base-before-topropertykey",
+   "message": "Expected a TypeError but got a Test262Error",
+   "operator": "<<=",
+   "variant": "T1",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.6_T1.js",
+   "scenario": "strict mode",
+   "family": "nullish-base-before-topropertykey",
+   "message": "Expected a TypeError but got a Test262Error",
+   "operator": "<<=",
+   "variant": "T1",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.6_T4.js",
+   "scenario": "default",
+   "family": "topropertykey-exactly-once",
+   "message": "Expected true but got false",
+   "operator": "<<=",
+   "variant": "T4",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.7_T2.js",
+   "scenario": "default",
+   "family": "nullish-base-before-topropertykey",
+   "message": "Expected a TypeError but got a Test262Error",
+   "operator": ">>=",
+   "variant": "T2",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.7_T1.js",
+   "scenario": "default",
+   "family": "nullish-base-before-topropertykey",
+   "message": "Expected a TypeError but got a Test262Error",
+   "operator": ">>=",
+   "variant": "T1",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.7_T1.js",
+   "scenario": "strict mode",
+   "family": "nullish-base-before-topropertykey",
+   "message": "Expected a TypeError but got a Test262Error",
+   "operator": ">>=",
+   "variant": "T1",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.7_T2.js",
+   "scenario": "strict mode",
+   "family": "nullish-base-before-topropertykey",
+   "message": "Expected a TypeError but got a Test262Error",
+   "operator": ">>=",
+   "variant": "T2",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.6_T4.js",
+   "scenario": "strict mode",
+   "family": "topropertykey-exactly-once",
+   "message": "Expected true but got false",
+   "operator": "<<=",
+   "variant": "T4",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.7_T4.js",
+   "scenario": "default",
+   "family": "topropertykey-exactly-once",
+   "message": "Expected true but got false",
+   "operator": ">>=",
+   "variant": "T4",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.8_T2.js",
+   "scenario": "strict mode",
+   "family": "nullish-base-before-topropertykey",
+   "message": "Expected a TypeError but got a Test262Error",
+   "operator": ">>>=",
+   "variant": "T2",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.8_T1.js",
+   "scenario": "strict mode",
+   "family": "nullish-base-before-topropertykey",
+   "message": "Expected a TypeError but got a Test262Error",
+   "operator": ">>>=",
+   "variant": "T1",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.8_T2.js",
+   "scenario": "default",
+   "family": "nullish-base-before-topropertykey",
+   "message": "Expected a TypeError but got a Test262Error",
+   "operator": ">>>=",
+   "variant": "T2",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.7_T4.js",
+   "scenario": "strict mode",
+   "family": "topropertykey-exactly-once",
+   "message": "Expected true but got false",
+   "operator": ">>=",
+   "variant": "T4",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.8_T1.js",
+   "scenario": "default",
+   "family": "nullish-base-before-topropertykey",
+   "message": "Expected a TypeError but got a Test262Error",
+   "operator": ">>>=",
+   "variant": "T1",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.9_T2.js",
+   "scenario": "default",
+   "family": "nullish-base-before-topropertykey",
+   "message": "Expected a TypeError but got a Test262Error",
+   "operator": "&=",
+   "variant": "T2",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.9_T1.js",
+   "scenario": "default",
+   "family": "nullish-base-before-topropertykey",
+   "message": "Expected a TypeError but got a Test262Error",
+   "operator": "&=",
+   "variant": "T1",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.9_T1.js",
+   "scenario": "strict mode",
+   "family": "nullish-base-before-topropertykey",
+   "message": "Expected a TypeError but got a Test262Error",
+   "operator": "&=",
+   "variant": "T1",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.8_T4.js",
+   "scenario": "default",
+   "family": "topropertykey-exactly-once",
+   "message": "Expected true but got false",
+   "operator": ">>>=",
+   "variant": "T4",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.8_T4.js",
+   "scenario": "strict mode",
+   "family": "topropertykey-exactly-once",
+   "message": "Expected true but got false",
+   "operator": ">>>=",
+   "variant": "T4",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.9_T2.js",
+   "scenario": "strict mode",
+   "family": "nullish-base-before-topropertykey",
+   "message": "Expected a TypeError but got a Test262Error",
+   "operator": "&=",
+   "variant": "T2",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.9_T4.js",
+   "scenario": "strict mode",
+   "family": "topropertykey-exactly-once",
+   "message": "Expected true but got false",
+   "operator": "&=",
+   "variant": "T4",
+   "flags": {}
+  },
+  {
+   "file": "test/language/expressions/compound-assignment/S11.13.2_A7.9_T4.js",
+   "scenario": "default",
+   "family": "topropertykey-exactly-once",
+   "message": "Expected true but got false",
+   "operator": "&=",
+   "variant": "T4",
+   "flags": {}
+  },
+  {
+   "file": "test/language/statements/for/let-block-with-newline.js",
+   "scenario": "default",
+   "family": "let-block-asi",
+   "message": "Expected no error, got SyntaxError: Destructuring declarations must have an initializer",
+   "statement": "let-block-with-newline.js",
+   "flags": {
+    "noStrict": true
+   }
+  },
+  {
+   "file": "test/language/statements/for/let-identifier-with-newline.js",
+   "scenario": "default",
+   "family": "let-identifier-asi",
+   "message": "Expected no error, got SyntaxError: Declaration outside statement context",
+   "statement": "let-identifier-with-newline.js",
+   "flags": {
+    "noStrict": true
+   }
+  },
+  {
+   "file": "test/language/statements/for-in/let-identifier-with-newline.js",
+   "scenario": "default",
+   "family": "let-identifier-asi",
+   "message": "Expected no error, got SyntaxError: Declaration outside statement context",
+   "statement": "let-identifier-with-newline.js",
+   "flags": {
+    "noStrict": true
+   }
+  },
+  {
+   "file": "test/language/statements/for-in/let-block-with-newline.js",
+   "scenario": "default",
+   "family": "let-block-asi",
+   "message": "Expected no error, got SyntaxError: Destructuring declarations must have an initializer",
+   "statement": "let-block-with-newline.js",
+   "flags": {
+    "noStrict": true
+   }
+  },
+  {
+   "file": "test/language/statements/for-of/let-identifier-with-newline.js",
+   "scenario": "default",
+   "family": "let-identifier-asi",
+   "message": "Expected no error, got SyntaxError: Declaration outside statement context",
+   "statement": "let-identifier-with-newline.js",
+   "flags": {
+    "noStrict": true
+   }
+  },
+  {
+   "file": "test/language/statements/for-of/let-block-with-newline.js",
+   "scenario": "default",
+   "family": "let-block-asi",
+   "message": "Expected no error, got SyntaxError: Destructuring declarations must have an initializer",
+   "statement": "let-block-with-newline.js",
+   "flags": {
+    "noStrict": true
+   }
+  },
+  {
+   "file": "test/language/statements/for-await-of/let-identifier-with-newline.js",
+   "scenario": "default",
+   "family": "let-identifier-asi",
+   "message": "Expected no error, got SyntaxError: Declaration outside statement context",
+   "statement": "let-identifier-with-newline.js",
+   "flags": {
+    "noStrict": true
+   }
+  },
+  {
+   "file": "test/language/statements/for-await-of/let-block-with-newline.js",
+   "scenario": "default",
+   "family": "let-block-asi",
+   "message": "Expected no error, got SyntaxError: Destructuring declarations must have an initializer",
+   "statement": "let-block-with-newline.js",
+   "flags": {
+    "noStrict": true
+   }
+  },
+  {
+   "file": "test/language/statements/if/let-identifier-with-newline.js",
+   "scenario": "default",
+   "family": "let-identifier-asi",
+   "message": "Expected no error, got SyntaxError: Declaration outside statement context",
+   "statement": "let-identifier-with-newline.js",
+   "flags": {
+    "noStrict": true
+   }
+  },
+  {
+   "file": "test/language/statements/if/let-block-with-newline.js",
+   "scenario": "default",
+   "family": "let-block-asi",
+   "message": "Expected no error, got SyntaxError: Destructuring declarations must have an initializer",
+   "statement": "let-block-with-newline.js",
+   "flags": {
+    "noStrict": true
+   }
+  },
+  {
+   "file": "test/language/statements/while/let-block-with-newline.js",
+   "scenario": "default",
+   "family": "let-block-asi",
+   "message": "Expected no error, got SyntaxError: Destructuring declarations must have an initializer",
+   "statement": "let-block-with-newline.js",
+   "flags": {
+    "noStrict": true
+   }
+  },
+  {
+   "file": "test/language/statements/while/let-identifier-with-newline.js",
+   "scenario": "default",
+   "family": "let-identifier-asi",
+   "message": "Expected no error, got SyntaxError: Declaration outside statement context",
+   "statement": "let-identifier-with-newline.js",
+   "flags": {
+    "noStrict": true
+   }
+  },
+  {
+   "file": "test/language/statements/with/let-block-with-newline.js",
+   "scenario": "default",
+   "family": "let-block-asi",
+   "message": "Expected no error, got SyntaxError: Destructuring declarations must have an initializer",
+   "statement": "let-block-with-newline.js",
+   "flags": {
+    "noStrict": true
+   }
+  },
+  {
+   "file": "test/language/statements/with/let-identifier-with-newline.js",
+   "scenario": "default",
+   "family": "let-identifier-asi",
+   "message": "Expected no error, got SyntaxError: Declaration outside statement context",
+   "statement": "let-identifier-with-newline.js",
+   "flags": {
+    "noStrict": true
+   }
+  }
+ ]
+}
