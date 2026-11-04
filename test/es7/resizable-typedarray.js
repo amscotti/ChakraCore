@@ -796,6 +796,120 @@ var tests = [
             assertThrowsTypeError(function () { return dataView.byteOffset; }, "DataView OOB byteOffset");
             assertThrowsTypeError(function () { dataView.getUint8(0); }, "DataView OOB get");
         }
+    },
+    {
+        name: "fill revalidates bounds after value and index coercions",
+        body() {
+            function coerceAndShrink(site) {
+                var rab = new ArrayBuffer(4, { maxByteLength: 8 });
+                var fixed = new Uint8Array(rab, 0, 4);
+                var evil = {
+                    valueOf: function () {
+                        rab.resize(2);
+                        return site === "value" ? 3 : site === "start" ? 1 : 2;
+                    }
+                };
+                return function () {
+                    if (site === "value") fixed.fill(evil, 1, 2);
+                    else if (site === "start") fixed.fill(3, evil, 2);
+                    else fixed.fill(3, 1, evil);
+                };
+            }
+            ["value", "start", "end"].forEach(function (site) {
+                assertThrowsTypeError(coerceAndShrink(site), "fill coercion at " + site + " makes the view OOB");
+            });
+
+            // A length-tracking view is never out of bounds after a shrink;
+            // fill proceeds over the smaller live range.
+            var rab = new ArrayBuffer(4, { maxByteLength: 8 });
+            var tracking = new Uint8Array(rab);
+            var evil = { valueOf: function () { rab.resize(2); return 7; } };
+            tracking.fill(evil);
+            assert.areEqual(7, tracking[0], "tracking fill after shrink writes");
+            assert.areEqual(7, tracking[1], "tracking fill covers live range");
+        }
+    },
+    {
+        name: "OOB canonical index stores convert first, then revalidate",
+        body() {
+            var rab = new ArrayBuffer(0, { maxByteLength: 1 });
+            var ta = new Int8Array(rab);
+            var grows = { valueOf: function () { rab.resize(1); return 100; } };
+            ta[0] = grows;
+            assert.areEqual(1, ta.length, "index became valid during coercion");
+            assert.areEqual(100, ta[0], "store happened after coercion");
+
+            // The conversion is observable even when the index stays invalid.
+            var rab2 = new ArrayBuffer(4, { maxByteLength: 8 });
+            var fixed = new Uint8Array(rab2, 0, 4);
+            rab2.resize(2);
+            var converted = false;
+            var observes = { valueOf: function () { converted = true; return 5; } };
+            fixed[3] = observes;
+            assert.isTrue(converted, "OOB store still converts");
+            assert.areEqual(0, fixed.length, "OOB fixed view reports zero length");
+            assert.areEqual(undefined, fixed[3], "no store for a still-OOB index");
+
+            // Non-canonical indices never store, even if the buffer grows
+            // during their conversion. (Note: a computed -0 keys ToString to
+            // "0" and is a valid index; the canonical-form probe is "-0".)
+            var rab3 = new ArrayBuffer(2, { maxByteLength: 8 });
+            var ta3 = new Uint8Array(rab3);
+            var growAll = { valueOf: function () { rab3.resize(8); return 9; } };
+            ta3[1.5] = growAll;
+            ta3["-0"] = growAll;
+            ta3[-1] = growAll;
+            assert.areEqual(8, ta3.length, "buffer grew");
+            assert.areEqual(0, ta3[0], "fractional/\"-0\"/negative indices never store");
+            assert.areEqual(0, ta3[2], "fractional index does not alias a valid one");
+
+            // A conversion that detaches keeps the silent no-op contract.
+            var buf = new ArrayBuffer(4);
+            var detachable = new Uint8Array(buf);
+            var evict = { valueOf: function () { buf.transfer(); return 1; } };
+            detachable[1] = evict;
+            assert.areEqual(0, detachable.length, "detached during coercion");
+        }
+    },
+    {
+        name: "Generic Array.prototype.map and reduceRight skip out-of-bounds indices",
+        body() {
+            var buf = new ArrayBuffer(3, { maxByteLength: 4 });
+            var sample = new Uint8Array(buf);
+            var elements = [];
+            var result = Array.prototype.map.call(sample, function (element) {
+                if (elements.length === 0) buf.resize(2);
+                elements.push(element);
+                return 42;
+            });
+            assert.areEqual("0,0", elements.join(","), "callback only for present indices");
+            assert.areEqual(3, result.length, "result keeps the captured length");
+            assert.areEqual(42, result[0], "mapped value at 0");
+            assert.areEqual(42, result[1], "mapped value at 1");
+            assert.areEqual(undefined, result[2], "absent index reads undefined");
+            assert.isFalse(2 in result, "absent index stays a hole");
+
+            var rab = new ArrayBuffer(4, { maxByteLength: 8 });
+            var fixed = new Uint8Array(rab, 0, 4);
+            fixed.set([0, 2, 4, 6]);
+            var seen = [];
+            Array.prototype.reduceRight.call(fixed, function (acc, element) {
+                if (seen.length === 1) rab.resize(3);
+                seen.push(element);
+                return acc;
+            }, "initial");
+            assert.areEqual("6,4", seen.join(","), "reduceRight stops at OOB indices");
+
+            // The no-initial-value form finds the last present index only
+            // (a fixed view that went OOB has none and throws TypeError).
+            var rab2 = new ArrayBuffer(4, { maxByteLength: 8 });
+            var tracking2 = new Uint8Array(rab2);
+            var fixedOOB = new Uint8Array(rab2, 0, 4);
+            tracking2.set([1, 2, 3, 4]);
+            rab2.resize(2);
+            assert.areEqual(1, Array.prototype.reduceRight.call(tracking2, function (acc, e) { return e; }), "initial value from present indices");
+            assert.throws(function () { Array.prototype.reduceRight.call(fixedOOB, function (acc, e) { return e; }); }, TypeError, "no present index");
+        }
     }
 ];
 

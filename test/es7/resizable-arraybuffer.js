@@ -668,6 +668,95 @@ var tests = [
                 assert.throws(function () { new ArrayBuffer.prototype[name](); }, TypeError);
             });
         }
+    },
+    {
+        name: "Object.freeze/seal/preventExtensions on TypedArrays (SetIntegrityLevel)",
+        body() {
+            // Any view over a resizable buffer can regain integer-indexed
+            // properties when the buffer grows: [[PreventExtensions]] reports
+            // false, so all three Object.* integrity entry points throw.
+            [function (rab) { return new Uint8Array(rab, 0, 4); },
+             function (rab) { return new Uint8Array(rab, 2, 2); },
+             function (rab) { return new Uint8Array(rab); },
+             function (rab) { return new Uint8Array(rab, 2); },
+             function (rab) { return new Uint8Array(rab, 0, 0); },
+             function (rab) { return new Uint8Array(rab, 2, 0); }].forEach(function (view) {
+                var rab = new ArrayBuffer(4, { maxByteLength: 8 });
+                var ta = view(rab);
+                assert.throws(function () { Object.preventExtensions(ta); }, TypeError, "preventExtensions resizable " + ta.byteOffset + "/" + ta.length);
+                assert.throws(function () { Object.seal(ta); }, TypeError, "seal resizable " + ta.byteOffset + "/" + ta.length);
+                assert.throws(function () { Object.freeze(ta); }, TypeError, "freeze resizable " + ta.byteOffset + "/" + ta.length);
+                assert.isFalse(Reflect.preventExtensions(ta), "Reflect.preventExtensions reports false for " + ta.byteOffset + "/" + ta.length);
+                assert.isTrue(Object.isExtensible(ta), "resizable view stays extensible");
+            });
+
+            // A zeroed length-tracking view over a resized-to-zero buffer is
+            // still resizable-backed and also rejected.
+            var rab = new ArrayBuffer(4, { maxByteLength: 8 });
+            var tracking = new Uint8Array(rab);
+            rab.resize(0);
+            assert.throws(function () { Object.freeze(tracking); }, TypeError, "freeze zero-length tracking");
+            assert.throws(function () { Object.seal(tracking); }, TypeError, "seal zero-length tracking");
+
+            // Views over ordinary fixed buffers have configurable:true
+            // integer indices: non-empty views reject seal/freeze, while
+            // preventExtensions and zero-length views succeed.
+            var plain = new Uint8Array(4);
+            assert.doesNotThrow(function () { Object.preventExtensions(plain); }, "preventExtensions plain");
+            assert.throws(function () { Object.seal(plain); }, TypeError, "seal plain non-empty");
+            assert.throws(function () { Object.freeze(new Uint8Array(4)); }, TypeError, "freeze plain non-empty");
+            assert.doesNotThrow(function () { Object.freeze(new Uint8Array(0)); }, "freeze plain empty");
+            assert.doesNotThrow(function () { Object.seal(new Uint8Array(0)); }, "seal plain empty");
+        }
+    },
+    {
+        name: "Array.prototype.join reads length before separator conversion",
+        body() {
+            var rab = new ArrayBuffer(4, { maxByteLength: 8 });
+            var fixed = new Uint8Array(rab, 0, 4);
+            var evilShrink = { toString: function () { rab.resize(2); return "."; } };
+            assert.areEqual("...", Array.prototype.join.call(fixed, evilShrink), "fixed view shrinks OOB: captured length, empty elements");
+
+            var rab2 = new ArrayBuffer(4, { maxByteLength: 8 });
+            var fixed2 = new Uint8Array(rab2, 0, 4);
+            var evilGrow = { toString: function () { rab2.resize(6); return "."; } };
+            assert.areEqual("0.0.0.0", Array.prototype.join.call(fixed2, evilGrow), "fixed view grows: captured length");
+
+            var rab3 = new ArrayBuffer(4, { maxByteLength: 8 });
+            var tracking = new Uint8Array(rab3);
+            var evilTrack = { toString: function () { rab3.resize(2); return "."; } };
+            assert.areEqual("0.0..", Array.prototype.join.call(tracking, evilTrack), "tracking view shrinks: OOB elements empty");
+
+            var arrayLike = { length: 3, 0: 1, 1: 2, 2: 3 };
+            var evilLike = { toString: function () { arrayLike.length = 1; return "."; } };
+            assert.areEqual("1.2.3", Array.prototype.join.call(arrayLike, evilLike), "array-like length captured before conversion");
+        }
+    },
+    {
+        name: "TypedArray constructor from a source over a resizable buffer",
+        body() {
+            var rab = new ArrayBuffer(4, { maxByteLength: 8 });
+            var full = new Uint8Array(rab);
+            for (var i = 0; i < 4; i++) full[i] = i + 1;
+            var fixed = new Uint8Array(rab, 0, 4);
+            var tracking = new Uint8Array(rab);
+            var trackingWithOffset = new Uint8Array(rab, 2);
+
+            rab.resize(3);
+            assert.throws(function () { new Uint8Array(fixed); }, TypeError, "fixed source out of bounds");
+            assert.areEqual(1, new Uint8Array(tracking)[0], "tracking source uses current length");
+            assert.areEqual(3, new Uint8Array(tracking).length, "tracking source length");
+            assert.areEqual(3, new Uint8Array(trackingWithOffset)[0], "offset tracking source");
+
+            rab.resize(0);
+            assert.throws(function () { new Uint8Array(fixed); }, TypeError, "fixed source still out of bounds at zero");
+            assert.areEqual(0, new Uint8Array(tracking).length, "tracking source at zero");
+            assert.throws(function () { new Uint8Array(trackingWithOffset); }, TypeError, "offset source out of bounds");
+
+            rab.resize(6);
+            assert.areEqual(4, new Uint8Array(fixed).length, "fixed source back in bounds");
+            assert.areEqual(6, new Uint8Array(tracking).length, "tracking source regrown");
+        }
     }
 ];
 

@@ -95,21 +95,23 @@ var tests = [
     }
   },
   {
-    // what is the spec??? 
-    // v8 doesn't allow freezing typed arrays at all
+    // Resolved spec question (previously commented "should it throw?"):
+    // TypedArray integer indices are configurable:true, so the frozen walk's
+    // DefinePropertyOrThrow(configurable: false, writable: false) rejects and
+    // Object.freeze throws a TypeError on any non-empty TypedArray. Existing
+    // elements remain writable ([[PreventExtensions]] ran before the throw).
     name: "Add, delete, modify indexed elements of a typed array after freezing",
     body: function () {
         let a = new Int8Array(1);
         a[0] = 42;
 
-        Object.freeze(a); // should it throw?
+        assert.throws(function () { Object.freeze(a); }, TypeError,
+          "Object.freeze throws on a non-empty TypedArray",
+          "Object is not an ArrayBuffer");
 
         assert.isFalse(Object.isExtensible(a));
-        assert.isTrue(Object.isSealed(a));
-        assert.isTrue(Object.isFrozen(a)); // should it return false?
 
-        // current behavior:
-        // even though the array is frozen it's ok to modify existing elements
+        // even though the freeze threw, it's ok to modify existing elements
         a[0] = 17;
         assert.areEqual(17, a[0]);
     }

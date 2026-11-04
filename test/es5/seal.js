@@ -86,21 +86,20 @@ var tests = [
         let a = new Int8Array(1);
         a[0] = 42;
 
-        Object.seal(a);
+        // TypedArray integer-indexed properties are configurable:true, so the
+        // sealed walk's DefinePropertyOrThrow(configurable: false) rejects and
+        // Object.seal throws a TypeError (resolved spec question; V8/JSC and
+        // the pinned test262 agree). [[PreventExtensions]] succeeded before
+        // the rejection, so the view is no longer extensible but its existing
+        // elements remain writable.
+        assert.throws(function () { Object.seal(a); }, TypeError,
+          "Object.seal throws on a non-empty TypedArray",
+          "Object is not an ArrayBuffer");
         assert.isFalse(Object.isExtensible(a));
-        assert.isTrue(Object.isSealed(a));
 
-        /* 
-        Typed arrays never allow adding or removing elements - should we test
-        that attempt to add in strict mode doesn't throw as for standard arrays?
-        (that's the current behavior of v8 and Chakra)
-        Not clear what the spec is. 
-
-        assert.throws(function () { 'use strict'; a[1] = 17; }, TypeError, 
-          "Should throw on creating a new property in sealed object in strict mode", 
-          "Cannot create property for a non-extensible object");
-        */
-
+        // ok to modify the existing element
+        a[0] = 17;
+        assert.areEqual(17, a[0]);
         // ok to modify the existing element
         a[0] = 17;
         assert.areEqual(17, a[0]);
@@ -157,11 +156,13 @@ var tests = [
         assert.isTrue(Object.isSealed(arr));
         assert.isFalse(Object.isFrozen(arr));
 
-        // typed arrays
+        // typed arrays: non-empty views reject sealing (configurable:true
+        // integer indices; see the typed-array test above), while empty views
+        // have no integer keys and seal successfully.
         let ta = new Int8Array(4);
-        Object.seal(ta);
-        assert.isTrue(Object.isSealed(ta));
-        assert.isFalse(Object.isFrozen(ta));
+        assert.throws(function () { Object.seal(ta); }, TypeError,
+          "Object.seal throws on a non-empty TypedArray",
+          "Object is not an ArrayBuffer");
 
         // empty typed arrays are effectively frozen after being sealed
         let ta_empty = new Int8Array(0);

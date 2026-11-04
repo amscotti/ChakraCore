@@ -4512,6 +4512,20 @@ using namespace Js;
 
         SETOBJECT_FOR_MUTATION(jsReentLock, args[0]);
 
+        // 23.1.3.16 Array.prototype.join step 2 reads `length` BEFORE the
+        // separator ToString (step 4). The separator conversion can run user
+        // code that resizes a TypedArray's buffer or re-shapes an array-like,
+        // so the generic (non-Array) receiver path must capture the length
+        // first. The Array fast path reads its own segment lengths and cannot
+        // observe this ordering.
+        int64 capturedLength = -1;
+        JavascriptArray* fastArray = JavascriptArray::TryVarToNonES5Array(args[0]);
+        if (!(fastArray != nullptr && fastArray->GetScriptContext() == scriptContext) &&
+            VarIs<RecyclableObject>(args[0]))
+        {
+            JS_REENTRANT(jsReentLock, capturedLength = (int64)JavascriptArray::OP_GetLength(args[0], scriptContext));
+        }
+
         JavascriptString* separator;
         if (args.Info.Count >= 2)
         {
@@ -4531,7 +4545,7 @@ using namespace Js;
             separator = scriptContext->GetLibrary()->GetCommaDisplayString();
         }
 
-        JS_REENTRANT_UNLOCK(jsReentLock, return JoinHelper(args[0], separator, scriptContext));
+        JS_REENTRANT_UNLOCK(jsReentLock, return JoinHelper(args[0], separator, scriptContext, capturedLength));
         JIT_HELPER_END(Array_Join);
     }
 
@@ -4548,7 +4562,7 @@ using namespace Js;
         }
     }
 
-    JavascriptString* JavascriptArray::JoinHelper(Var thisArg, JavascriptString* separator, ScriptContext* scriptContext)
+    JavascriptString* JavascriptArray::JoinHelper(Var thisArg, JavascriptString* separator, ScriptContext* scriptContext, int64 capturedLength /* = -1 */)
     {
         JS_REENTRANCY_LOCK(jsReentLock, scriptContext->GetThreadContext());
         SETOBJECT_FOR_MUTATION(jsReentLock, thisArg);
@@ -4615,7 +4629,7 @@ using namespace Js;
             }
             else if (VarIs<RecyclableObject>(thisArg))
             {
-                JS_REENTRANT(jsReentLock, res = JoinOtherHelper(VarTo<RecyclableObject>(thisArg), separator, scriptContext));
+                JS_REENTRANT(jsReentLock, res = JoinOtherHelper(VarTo<RecyclableObject>(thisArg), separator, scriptContext, capturedLength));
             }
             else
             {
@@ -4739,7 +4753,7 @@ Case0:
         }
     }
 
-    JavascriptString* JavascriptArray::JoinOtherHelper(RecyclableObject* object, JavascriptString* separator, ScriptContext* scriptContext)
+    JavascriptString* JavascriptArray::JoinOtherHelper(RecyclableObject* object, JavascriptString* separator, ScriptContext* scriptContext, int64 capturedLength /* = -1 */)
     {
         JS_REENTRANCY_LOCK(jsReentLock, scriptContext->GetThreadContext());
         SETOBJECT_FOR_MUTATION(jsReentLock, object);
@@ -4747,8 +4761,19 @@ Case0:
         // In ES6-mode, we always load the length property from the object instead of using the internal slot.
         // Even for arrays, this is now observable via proxies.
         // If source object is not an array, we fall back to this behavior anyway.
-        JS_REENTRANT(jsReentLock,
-            int64 cSrcLength = (int64)OP_GetLength(object, scriptContext));
+        // A non-negative capturedLength was read by the caller before the
+        // separator conversion (Array.prototype.join reads `length` first);
+        // it takes the place of this read.
+        int64 cSrcLength;
+        if (capturedLength >= 0)
+        {
+            cSrcLength = capturedLength;
+        }
+        else
+        {
+            JS_REENTRANT(jsReentLock,
+                cSrcLength = (int64)OP_GetLength(object, scriptContext));
+        }
 
         switch (cSrcLength)
         {
@@ -9937,11 +9962,13 @@ Case0:
             }
         }
 
-        // %TypedArray%.prototype.fill re-checks detachment after the value and
-        // index coercions (user code may detach there) and before any write,
-        // even for an empty fill range. The generic Array.prototype.fill path
-        // keeps ordinary [[Set]] semantics and stays silent.
-        if (isTypedArrayEntryPoint && typedArrayBase->IsDetachedBuffer())
+        // %TypedArray%.prototype.fill re-checks detachment and bounds after
+        // the value and index coercions (user code may detach or shrink past
+        // a fixed view's range there) and before any write, even for an empty
+        // fill range (ValidateTypedArrayBounds). The generic
+        // Array.prototype.fill path keeps ordinary [[Set]] semantics and
+        // stays silent.
+        if (isTypedArrayEntryPoint && (typedArrayBase->IsDetachedBuffer() || typedArrayBase->IsOutOfBounds()))
         {
             JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, _u("[TypedArray].prototype.fill"));
         }
@@ -10216,34 +10243,42 @@ Case0:
 
             // %TypedArray%.prototype.map uses its captured length even after a
             // species shrink. The generic Array.prototype.map path instead
-            // walks its own `length` property and only invokes the callback
-            // for indices that are actually present on the TypedArray.
+            // walks its own `length` property and consults HasProperty per
+            // index: the callback runs only for indices still present on the
+            // TypedArray, and the result gets `undefined` (via
+            // CreateDataPropertyOrThrow) for the rest.
             uint32 mapLength = (uint32)length;
-            if (!isTypedArrayEntryPoint)
-            {
-                mapLength = min(mapLength, typedArrayBase->GetLength());
-            }
+            bool genericReceiver = !isTypedArrayEntryPoint;
 
             // The species constructor or a callback may shrink or detach the
             // source. TypedArray map still calls the callback over the captured
             // length; an OOB or detached Get produces undefined.
             for (uint32 k = 0; k < mapLength; k++)
             {
-                // No need to do HasItem, as it cannot be observable unless 'typedArrayBase' is proxy. And we have established that it is indeed typedarray.
-
-                element = (!typedArrayBase->IsDetachedBuffer() && k < typedArrayBase->GetLength())
-                    ? typedArrayBase->DirectGetItem(k)
-                    : scriptContext->GetLibrary()->GetUndefined();
-                JS_REENTRANT(jsReentLock,
-                    BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
-                    {
-                        mappedValue = CALL_FUNCTION(scriptContext->GetThreadContext(), callBackFn, callBackFnInfo, thisArg,
-                                element,
-                                JavascriptNumber::ToVar(k, scriptContext),
-                                obj);
-                    }
-                    END_SAFE_REENTRANT_CALL
-                );
+                bool kPresent = !typedArrayBase->IsDetachedBuffer() && k < typedArrayBase->GetLength();
+                if (!genericReceiver || kPresent)
+                {
+                    element = kPresent ?
+                        typedArrayBase->DirectGetItem(k) :
+                        scriptContext->GetLibrary()->GetUndefined();
+                    JS_REENTRANT(jsReentLock,
+                        BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+                        {
+                            mappedValue = CALL_FUNCTION(scriptContext->GetThreadContext(), callBackFn, callBackFnInfo, thisArg,
+                                    element,
+                                    JavascriptNumber::ToVar(k, scriptContext),
+                                    obj);
+                        }
+                        END_SAFE_REENTRANT_CALL
+                    );
+                }
+                else
+                {
+                    // HasProperty(O, Pk) was false: the callback is skipped
+                    // and the result index is left as a hole (matching
+                    // Array.prototype.map on absent indices).
+                    continue;
+                }
 
                 // If newObj is a TypedArray, set the mappedValue directly, otherwise it should be an array, set that item to that array
                 if (newTypedArray)
@@ -10703,6 +10738,7 @@ Case0:
         }
 
         // If we came from Array.prototype.reduceRight and source object is not a JavascriptArray, source could be a TypedArray
+        bool isTypedArrayEntryPoint = typedArrayBase != nullptr;
         if (typedArrayBase == nullptr && pArr == nullptr && VarIs<TypedArrayBase>(obj))
         {
             typedArrayBase = UnsafeVarTo<TypedArrayBase>(obj);
@@ -10733,9 +10769,15 @@ Case0:
 
                 for (; k < end && bPresent == false; k++)
                 {
-                    // No need to do HasItem, as it cannot be observable unless 'typedArrayBase' is proxy. And we have established that it is indeed typedarray.
-
                     index = length - k - 1;
+                    // Generic Array.prototype.reduceRight consults
+                    // HasProperty per index, so a TypedArray index that went
+                    // out of bounds (resize during iteration) is skipped.
+                    if (!isTypedArrayEntryPoint &&
+                        (typedArrayBase->IsDetachedBuffer() || (uint32)index >= typedArrayBase->GetLength()))
+                    {
+                        continue;
+                    }
                     element = typedArrayBase->DirectGetItem((uint32)index);
                     bPresent = true;
                     accumulator = element;
@@ -10769,9 +10811,16 @@ Case0:
 
             for (; k < end; k++)
             {
-                // No need to do HasItem, as it cannot be observable unless 'typedArrayBase' is proxy. And we have established that it is indeed typedarray.
-
                 index = length - k - 1;
+                // Generic Array.prototype.reduceRight consults HasProperty
+                // per index: the callback is skipped for indices that went
+                // out of bounds (or the whole view, once detached) while an
+                // earlier callback resized the buffer.
+                if (!isTypedArrayEntryPoint &&
+                    (typedArrayBase->IsDetachedBuffer() || (uint32)index >= typedArrayBase->GetLength()))
+                {
+                    continue;
+                }
                 element = typedArrayBase->DirectGetItem((uint32)index);
 
                 JS_REENTRANT(jsReentLock,

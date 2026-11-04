@@ -262,6 +262,24 @@ namespace Js
         Var target = args[1];
 
         RecyclableObject* targetObj = VarTo<RecyclableObject>(target);
+
+        // A TypedArray over a resizable ArrayBuffer (or growable
+        // SharedArrayBuffer) can gain integer-indexed properties again when
+        // the buffer grows: its [[PreventExtensions]] returns false without
+        // marking the view non-extensible. Object.preventExtensions throws
+        // on that false result; Reflect.preventExtensions reports it.
+        if (VarIs<TypedArrayBase>(targetObj))
+        {
+            TypedArrayBase* typedArray = UnsafeVarTo<TypedArrayBase>(targetObj);
+            ArrayBufferBase* buffer = typedArray->GetArrayBuffer();
+            bool canRegainProperties =
+                (VarIs<ArrayBuffer>(buffer) && VarTo<ArrayBuffer>(buffer)->IsResizable()) ||
+                (VarIs<SharedArrayBuffer>(buffer) && VarTo<SharedArrayBuffer>(buffer)->IsGrowable());
+            if (canRegainProperties)
+            {
+                return scriptContext->GetLibrary()->GetFalse();
+            }
+        }
         GlobalObject* globalObject = targetObj->GetLibrary()->GetGlobalObject();
         if (globalObject != targetObj && globalObject && (globalObject->ToThis() == targetObj))
         {

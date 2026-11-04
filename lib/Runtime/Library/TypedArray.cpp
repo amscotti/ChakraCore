@@ -350,6 +350,14 @@ namespace Js
                         JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, _u("[TypedArray]"));
                     }
 
+                    // TypedArrayFromTypedArray step 2: a source whose fixed
+                    // view is out of bounds (the resizable buffer shrank past
+                    // its range) is rejected before any element is copied.
+                    if (typedArraySource->IsOutOfBounds())
+                    {
+                        JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, _u("[TypedArray]"));
+                    }
+
                     elementCount = typedArraySource->GetLength();
                     if (elementCount >= ArrayBuffer::MaxArrayBufferLength / elementSize)
                     {
@@ -2936,7 +2944,8 @@ namespace Js
     _Use_decl_annotations_ BOOL TypedArrayBase::ValidateIndexAndDirectSetItem(Js::Var index, Js::Var value, bool * isNumericIndex)
     {
         bool skipSetItem = false;
-        uint32 indexToSet = ValidateAndReturnIndex(index, &skipSetItem, isNumericIndex);
+        bool indexOutOfBounds = false;
+        uint32 indexToSet = ValidateAndReturnIndex(index, &skipSetItem, isNumericIndex, &indexOutOfBounds);
 
         // If index is not numeric, goto [[Set]] property path
         if (*isNumericIndex)
@@ -2947,9 +2956,19 @@ namespace Js
             {
                 return FALSE;
             }
-            return skipSetItem ?
-                DirectSetItemNoSet(indexToSet, value) :
-                DirectSetItem(indexToSet, value);
+            if (!skipSetItem)
+            {
+                return DirectSetItem(indexToSet, value);
+            }
+            // TypedArraySetElement converts the value first (observable user
+            // code) and only then rechecks the index: an index that is out of
+            // bounds now may become valid while the conversion grows the
+            // buffer, in which case the store happens. Non-canonical indices
+            // (negative, -0, fractional) can never become valid and only run
+            // the conversion.
+            return indexOutOfBounds ?
+                DirectSetItem(indexToSet, value) :
+                DirectSetItemNoSet(indexToSet, value);
         }
         else
         {
@@ -2970,16 +2989,22 @@ namespace Js
     //    b. if index < 0 or index >= length, skip set operation
     //    NOTE: if index == -0, it is treated as 0 and perform set operation
     //          as per 7.1.12.1 of ES6 spec 7.1.12.1 ToString Applied to the Number Type
-    _Use_decl_annotations_ uint32 TypedArrayBase::ValidateAndReturnIndex(Js::Var index, bool * skipOperation, bool * isNumericIndex)
+    // A canonical non-negative integer that is only out of *bounds* (case
+    // 1.c / 2.a / 3.b with a non-negative integral index) also sets
+    // indexOutOfBounds: its value conversion runs first and the store is
+    // retried against the post-conversion length.
+    _Use_decl_annotations_ uint32 TypedArrayBase::ValidateAndReturnIndex(Js::Var index, bool * skipOperation, bool * isNumericIndex, bool * indexOutOfBounds)
     {
         *skipOperation = false;
         *isNumericIndex = true;
+        *indexOutOfBounds = false;
         uint32 length = GetLength();
 
         if (TaggedInt::Is(index))
         {
             int32 indexInt = TaggedInt::ToInt32(index);
             *skipOperation = (indexInt < 0 || (uint32)indexInt >= length);
+            *indexOutOfBounds = *skipOperation && indexInt >= 0;
             return (uint32)indexInt;
         }
         else
@@ -3021,6 +3046,7 @@ namespace Js
             else if (uint32Index >= GetLength())
             {
                 *skipOperation = true;
+                *indexOutOfBounds = true;
             }
             return uint32Index;
         }

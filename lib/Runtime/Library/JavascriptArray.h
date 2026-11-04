@@ -613,10 +613,10 @@ namespace Js
 
         static int64 GetFromLastIndex(Var arg, int64 length, ScriptContext *scriptContext);
         static JavascriptString* JoinToString(Var value, ScriptContext* scriptContext);
-        static JavascriptString* JoinHelper(Var thisArg, JavascriptString* separatorStr, ScriptContext* scriptContext);
+        static JavascriptString* JoinHelper(Var thisArg, JavascriptString* separatorStr, ScriptContext* scriptContext, int64 capturedLength = -1);
         template <typename T>
         static JavascriptString* JoinArrayHelper(T * arr, JavascriptString* separatorStr, ScriptContext* scriptContext);
-        static JavascriptString* JoinOtherHelper(RecyclableObject *object, JavascriptString* separatorStr, ScriptContext* scriptContext);
+        static JavascriptString* JoinOtherHelper(RecyclableObject *object, JavascriptString* separatorStr, ScriptContext* scriptContext, int64 capturedLength = -1);
 
         template <bool includesAlgorithm>
         static Var IndexOfHelper(Arguments const & args, ScriptContext *scriptContext);

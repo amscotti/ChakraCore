@@ -433,7 +433,10 @@ CommonNumber:
     {
         if (JavascriptString::IsNegZero(aValue))
         {
-            *indexValue = -0;
+            // The numeric value of the String "-0" is the Number -0: this
+            // must be a double constant (-0.0), not the integer constant -0
+            // (which is +0.0 after integer promotion).
+            *indexValue = -0.0;
             return TRUE;
         }
 

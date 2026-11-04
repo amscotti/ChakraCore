@@ -857,6 +857,47 @@ Var JavascriptObject::EntrySetPrototypeOf(RecyclableObject* function, CallInfo c
     return object;
 }
 
+    // TypedArray integrity-level semantics (7.3.15 SetIntegrityLevel over
+    // the TypedArray [[PreventExtensions]]/[[DefineOwnProperty]] internal
+    // methods): a view over a resizable ArrayBuffer (or growable
+    // SharedArrayBuffer) can gain and lose integer-indexed properties when
+    // the buffer is resized, so its [[PreventExtensions]] returns false and
+    // Object.preventExtensions/seal/freeze throw a TypeError (the Object.*
+    // built-ins throw when SetIntegrityLevel/[[PreventExtensions]] reports
+    // failure). Any other TypedArray with a non-zero length has
+    // configurable:true integer indices, so the sealed/frozen walk rejects
+    // the first DefinePropertyOrThrow and also throws; a zero-length view
+    // over a fixed buffer has no integer keys and stays accepted.
+    static void ThrowIfTypedArrayCannotSetIntegrityLevel(RecyclableObject* object, bool levelSealedOrFrozen, ScriptContext* scriptContext)
+    {
+        if (!VarIs<TypedArrayBase>(object))
+        {
+            return;
+        }
+
+        TypedArrayBase* typedArray = UnsafeVarTo<TypedArrayBase>(object);
+        ArrayBufferBase* buffer = typedArray->GetArrayBuffer();
+        bool canRegainProperties =
+            (VarIs<ArrayBuffer>(buffer) && VarTo<ArrayBuffer>(buffer)->IsResizable()) ||
+            (VarIs<SharedArrayBuffer>(buffer) && VarTo<SharedArrayBuffer>(buffer)->IsGrowable());
+
+        if (canRegainProperties)
+        {
+            // [[PreventExtensions]] reports false without any side effect;
+            // Object.preventExtensions/seal/freeze throw on that result.
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedArrayBufferObject, _u("Object"));
+        }
+
+        if (levelSealedOrFrozen && typedArray->GetLength() > 0)
+        {
+            // SetIntegrityLevel runs [[PreventExtensions]] first: the view
+            // becomes non-extensible, and the sealed/frozen walk then rejects
+            // the first configurable:false DefinePropertyOrThrow for its
+            // configurable:true integer indices.
+            object->PreventExtensions();
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedArrayBufferObject, _u("Object"));
+        }
+    }
 Var JavascriptObject::EntrySeal(RecyclableObject* function, CallInfo callInfo, ...)
 {
     PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
@@ -880,6 +921,8 @@ Var JavascriptObject::EntrySeal(RecyclableObject* function, CallInfo callInfo, .
 
 
     RecyclableObject *object = VarTo<RecyclableObject>(args[1]);
+
+    ThrowIfTypedArrayCannotSetIntegrityLevel(object, /*levelSealedOrFrozen*/true, scriptContext);
 
     GlobalObject* globalObject = object->GetLibrary()->GetGlobalObject();
     if (globalObject != object && globalObject && (globalObject->ToThis() == object))
@@ -913,6 +956,8 @@ Var JavascriptObject::EntryFreeze(RecyclableObject* function, CallInfo callInfo,
 
     RecyclableObject *object = VarTo<RecyclableObject>(args[1]);
 
+    ThrowIfTypedArrayCannotSetIntegrityLevel(object, /*levelSealedOrFrozen*/true, scriptContext);
+
     GlobalObject* globalObject = object->GetLibrary()->GetGlobalObject();
     if (globalObject != object && globalObject && (globalObject->ToThis() == object))
     {
@@ -944,6 +989,8 @@ Var JavascriptObject::EntryPreventExtensions(RecyclableObject* function, CallInf
     }
 
     RecyclableObject *object = VarTo<RecyclableObject>(args[1]);
+
+    ThrowIfTypedArrayCannotSetIntegrityLevel(object, /*levelSealedOrFrozen*/false, scriptContext);
 
     GlobalObject* globalObject = object->GetLibrary()->GetGlobalObject();
     if (globalObject != object && globalObject && (globalObject->ToThis() == object))
