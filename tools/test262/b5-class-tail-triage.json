@@ -1,0 +1,1194 @@
+{
+ "base_commit": "f085b4742",
+ "corpus": "2e0a56762801e275a9fdf96dc49d90ba0cddcf63",
+ "lane": "b5-class-tail",
+ "oracle": "Node v26.5.0 + ES2025 spec snapshot",
+ "population": "class-directory failures at base (124 scenarios); super/static-init-await populations in the same run are outside this directory filter and tracked in the same families",
+ "records": [
+  {
+   "family": "caller-arguments-own-props",
+   "file": "language/expressions/class/async-gen-method-static/forbidden-ext/b2/cls-expr-async-gen-meth-static-forbidden-ext-indirect-access-own-prop-caller-get.js",
+   "message": "Test262Error: Expected SameValue(\u00abasync *method() {",
+   "scenario": "default",
+   "tags": [
+    "arrow-function",
+    "async-functions",
+    "async-iteration",
+    "class"
+   ]
+  },
+  {
+   "family": "caller-arguments-own-props",
+   "file": "language/expressions/class/async-gen-method-static/forbidden-ext/b2/cls-expr-async-gen-meth-static-forbidden-ext-indirect-access-own-prop-caller-value.js",
+   "message": "Test262Error: Expected SameValue(\u00abasync *method() {",
+   "scenario": "default",
+   "tags": [
+    "arrow-function",
+    "async-functions",
+    "async-iteration",
+    "class"
+   ]
+  },
+  {
+   "family": "caller-arguments-own-props",
+   "file": "language/expressions/class/async-gen-method-static/forbidden-ext/b2/cls-expr-async-gen-meth-static-forbidden-ext-indirect-access-prop-caller.js",
+   "message": "Test262Error: Expected SameValue(\u00abasync *method() {",
+   "scenario": "default",
+   "tags": [
+    "arrow-function",
+    "async-functions",
+    "async-iteration",
+    "class"
+   ]
+  },
+  {
+   "family": "caller-arguments-own-props",
+   "file": "language/expressions/class/async-gen-method/forbidden-ext/b2/cls-expr-async-gen-meth-forbidden-ext-indirect-access-own-prop-caller-get.js",
+   "message": "Test262Error: Expected SameValue(\u00abasync *method() {",
+   "scenario": "default",
+   "tags": [
+    "arrow-function",
+    "async-functions",
+    "async-iteration",
+    "class"
+   ]
+  },
+  {
+   "family": "caller-arguments-own-props",
+   "file": "language/expressions/class/async-gen-method/forbidden-ext/b2/cls-expr-async-gen-meth-forbidden-ext-indirect-access-own-prop-caller-value.js",
+   "message": "Test262Error: Expected SameValue(\u00abasync *method() {",
+   "scenario": "default",
+   "tags": [
+    "arrow-function",
+    "async-functions",
+    "async-iteration",
+    "class"
+   ]
+  },
+  {
+   "family": "caller-arguments-own-props",
+   "file": "language/expressions/class/async-gen-method/forbidden-ext/b2/cls-expr-async-gen-meth-forbidden-ext-indirect-access-prop-caller.js",
+   "message": "Test262Error: Expected SameValue(\u00abasync *method() {",
+   "scenario": "default",
+   "tags": [
+    "arrow-function",
+    "async-functions",
+    "async-iteration",
+    "class"
+   ]
+  },
+  {
+   "family": "caller-arguments-own-props",
+   "file": "language/expressions/class/async-method-static/forbidden-ext/b2/cls-expr-async-meth-static-forbidden-ext-indirect-access-own-prop-caller-get.js",
+   "message": "Test262Error: Expected SameValue(\u00abasync method() {",
+   "scenario": "default",
+   "tags": [
+    "arrow-function",
+    "async-functions",
+    "class"
+   ]
+  },
+  {
+   "family": "caller-arguments-own-props",
+   "file": "language/expressions/class/async-method-static/forbidden-ext/b2/cls-expr-async-meth-static-forbidden-ext-indirect-access-own-prop-caller-value.js",
+   "message": "Test262Error: Expected SameValue(\u00abasync method() {",
+   "scenario": "default",
+   "tags": [
+    "arrow-function",
+    "async-functions",
+    "class"
+   ]
+  },
+  {
+   "family": "caller-arguments-own-props",
+   "file": "language/expressions/class/async-method-static/forbidden-ext/b2/cls-expr-async-meth-static-forbidden-ext-indirect-access-prop-caller.js",
+   "message": "Test262Error: Expected SameValue(\u00abasync method() {",
+   "scenario": "default",
+   "tags": [
+    "arrow-function",
+    "async-functions",
+    "class"
+   ]
+  },
+  {
+   "family": "caller-arguments-own-props",
+   "file": "language/expressions/class/async-method/forbidden-ext/b2/cls-expr-async-meth-forbidden-ext-indirect-access-own-prop-caller-get.js",
+   "message": "Test262Error: Expected SameValue(\u00abasync method() {",
+   "scenario": "default",
+   "tags": [
+    "arrow-function",
+    "async-functions",
+    "class"
+   ]
+  },
+  {
+   "family": "caller-arguments-own-props",
+   "file": "language/expressions/class/async-method/forbidden-ext/b2/cls-expr-async-meth-forbidden-ext-indirect-access-own-prop-caller-value.js",
+   "message": "Test262Error: Expected SameValue(\u00abasync method() {",
+   "scenario": "default",
+   "tags": [
+    "arrow-function",
+    "async-functions",
+    "class"
+   ]
+  },
+  {
+   "family": "caller-arguments-own-props",
+   "file": "language/expressions/class/async-method/forbidden-ext/b2/cls-expr-async-meth-forbidden-ext-indirect-access-prop-caller.js",
+   "message": "Test262Error: Expected SameValue(\u00abasync method() {",
+   "scenario": "default",
+   "tags": [
+    "arrow-function",
+    "async-functions",
+    "class"
+   ]
+  },
+  {
+   "family": "out-of-scope-post-ES2025-decorators",
+   "file": "language/expressions/class/decorator/syntax/class-valid/decorator-member-expr-private-identifier.js",
+   "message": "Expected no error, got SyntaxError: Invalid character",
+   "scenario": "default",
+   "tags": [
+    "class",
+    "decorators"
+   ]
+  },
+  {
+   "family": "out-of-scope-post-ES2025-decorators",
+   "file": "language/expressions/class/decorator/syntax/class-valid/decorator-member-expr-private-identifier.js",
+   "message": "Expected no error, got SyntaxError: Invalid character",
+   "scenario": "strict mode",
+   "tags": [
+    "class",
+    "decorators"
+   ]
+  },
+  {
+   "family": "out-of-scope-post-ES2025-decorators",
+   "file": "language/expressions/class/decorator/syntax/valid/decorator-call-expr-identifier-reference-yield.js",
+   "message": "Expected no error, got SyntaxError: Invalid character",
+   "scenario": "default",
+   "tags": [
+    "class",
+    "decorators"
+   ]
+  },
+  {
+   "family": "out-of-scope-post-ES2025-decorators",
+   "file": "language/expressions/class/decorator/syntax/valid/decorator-call-expr-identifier-reference.js",
+   "message": "Expected no error, got SyntaxError: Invalid character",
+   "scenario": "default",
+   "tags": [
+    "class",
+    "decorators"
+   ]
+  },
+  {
+   "family": "out-of-scope-post-ES2025-decorators",
+   "file": "language/expressions/class/decorator/syntax/valid/decorator-call-expr-identifier-reference.js",
+   "message": "Expected no error, got SyntaxError: Invalid character",
+   "scenario": "strict mode",
+   "tags": [
+    "class",
+    "decorators"
+   ]
+  },
+  {
+   "family": "out-of-scope-post-ES2025-decorators",
+   "file": "language/expressions/class/decorator/syntax/valid/decorator-member-expr-decorator-member-expr.js",
+   "message": "Expected no error, got SyntaxError: Invalid character",
+   "scenario": "default",
+   "tags": [
+    "class",
+    "decorators"
+   ]
+  },
+  {
+   "family": "out-of-scope-post-ES2025-decorators",
+   "file": "language/expressions/class/decorator/syntax/valid/decorator-member-expr-decorator-member-expr.js",
+   "message": "Expected no error, got SyntaxError: Invalid character",
+   "scenario": "strict mode",
+   "tags": [
+    "class",
+    "decorators"
+   ]
+  },
+  {
+   "family": "out-of-scope-post-ES2025-decorators",
+   "file": "language/expressions/class/decorator/syntax/valid/decorator-member-expr-identifier-reference-yield.js",
+   "message": "Expected no error, got SyntaxError: Invalid character",
+   "scenario": "default",
+   "tags": [
+    "class",
+    "decorators"
+   ]
+  },
+  {
+   "family": "out-of-scope-post-ES2025-decorators",
+   "file": "language/expressions/class/decorator/syntax/valid/decorator-member-expr-identifier-reference.js",
+   "message": "Expected no error, got SyntaxError: Invalid character",
+   "scenario": "default",
+   "tags": [
+    "class",
+    "decorators"
+   ]
+  },
+  {
+   "family": "out-of-scope-post-ES2025-decorators",
+   "file": "language/expressions/class/decorator/syntax/valid/decorator-member-expr-identifier-reference.js",
+   "message": "Expected no error, got SyntaxError: Invalid character",
+   "scenario": "strict mode",
+   "tags": [
+    "class",
+    "decorators"
+   ]
+  },
+  {
+   "family": "out-of-scope-post-ES2025-decorators",
+   "file": "language/expressions/class/decorator/syntax/valid/decorator-parenthesized-expr-identifier-reference-yield.js",
+   "message": "Expected no error, got SyntaxError: Invalid character",
+   "scenario": "default",
+   "tags": [
+    "class",
+    "decorators"
+   ]
+  },
+  {
+   "family": "out-of-scope-post-ES2025-decorators",
+   "file": "language/expressions/class/decorator/syntax/valid/decorator-parenthesized-expr-identifier-reference.js",
+   "message": "Expected no error, got SyntaxError: Invalid character",
+   "scenario": "default",
+   "tags": [
+    "class",
+    "decorators"
+   ]
+  },
+  {
+   "family": "out-of-scope-post-ES2025-decorators",
+   "file": "language/expressions/class/decorator/syntax/valid/decorator-parenthesized-expr-identifier-reference.js",
+   "message": "Expected no error, got SyntaxError: Invalid character",
+   "scenario": "strict mode",
+   "tags": [
+    "class",
+    "decorators"
+   ]
+  },
+  {
+   "family": "out-of-scope-post-ES2025-decorators",
+   "file": "language/expressions/class/elements/syntax/valid/grammar-field-accessor.js",
+   "message": "Expected no error, got SyntaxError: Expected '('",
+   "scenario": "default",
+   "tags": [
+    "decorators",
+    "class"
+   ]
+  },
+  {
+   "family": "out-of-scope-post-ES2025-decorators",
+   "file": "language/expressions/class/elements/syntax/valid/grammar-field-accessor.js",
+   "message": "Expected no error, got SyntaxError: Expected '('",
+   "scenario": "strict mode",
+   "tags": [
+    "decorators",
+    "class"
+   ]
+  },
+  {
+   "family": "caller-arguments-own-props",
+   "file": "language/expressions/class/gen-method-static/forbidden-ext/b2/cls-expr-gen-meth-static-forbidden-ext-indirect-access-own-prop-caller-get.js",
+   "message": "CH_NEGATIVE_PHASE: runtime\nthrown at f-1793757221248-66253-gztymk.jys2o.js:\n^\nTest262Error: Expected SameValue(\u00ab*method(",
+   "scenario": "default",
+   "tags": [
+    "class",
+    "generators"
+   ]
+  },
+  {
+   "family": "caller-arguments-own-props",
+   "file": "language/expressions/class/gen-method-static/forbidden-ext/b2/cls-expr-gen-meth-static-forbidden-ext-indirect-access-own-prop-caller-value.js",
+   "message": "CH_NEGATIVE_PHASE: runtime\nthrown at f-1793757221292-66253-5ulexc.rqub8.js:\n^\nTest262Error: Expected SameValue(\u00ab*method(",
+   "scenario": "default",
+   "tags": [
+    "class",
+    "generators"
+   ]
+  },
+  {
+   "family": "caller-arguments-own-props",
+   "file": "language/expressions/class/gen-method-static/forbidden-ext/b2/cls-expr-gen-meth-static-forbidden-ext-indirect-access-prop-caller.js",
+   "message": "CH_NEGATIVE_PHASE: runtime\nthrown at f-1793757221300-66253-1e1gy3r.nw60j.js:\n^\nTest262Error: Expected SameValue(\u00ab*method",
+   "scenario": "default",
+   "tags": [
+    "class",
+    "generators"
+   ]
+  },
+  {
+   "family": "caller-arguments-own-props",
+   "file": "language/expressions/class/gen-method/forbidden-ext/b2/cls-expr-gen-meth-forbidden-ext-indirect-access-own-prop-caller-get.js",
+   "message": "CH_NEGATIVE_PHASE: runtime\nthrown at f-1793757221222-66253-k3h0uc.2j42.js:\n^\nTest262Error: Expected SameValue(\u00ab*method()",
+   "scenario": "default",
+   "tags": [
+    "class",
+    "generators"
+   ]
+  },
+  {
+   "family": "caller-arguments-own-props",
+   "file": "language/expressions/class/gen-method/forbidden-ext/b2/cls-expr-gen-meth-forbidden-ext-indirect-access-own-prop-caller-value.js",
+   "message": "CH_NEGATIVE_PHASE: runtime\nthrown at f-1793757221227-66253-1q4rf1e.zn1m.js:\n^\nTest262Error: Expected SameValue(\u00ab*method(",
+   "scenario": "default",
+   "tags": [
+    "class",
+    "generators"
+   ]
+  },
+  {
+   "family": "caller-arguments-own-props",
+   "file": "language/expressions/class/gen-method/forbidden-ext/b2/cls-expr-gen-meth-forbidden-ext-indirect-access-prop-caller.js",
+   "message": "CH_NEGATIVE_PHASE: runtime\nthrown at f-1793757221232-66253-wq5gw3.unh9.js:\n^\nTest262Error: Expected SameValue(\u00ab*method()",
+   "scenario": "default",
+   "tags": [
+    "class",
+    "generators"
+   ]
+  },
+  {
+   "family": "caller-arguments-own-props",
+   "file": "language/expressions/class/method-static/forbidden-ext/b2/cls-expr-meth-static-forbidden-ext-indirect-access-own-prop-caller-get.js",
+   "message": "Expected no error, got TypeError: 'arguments', 'callee' and 'caller' are restricted function properties and cannot be ac",
+   "scenario": "default",
+   "tags": [
+    "class"
+   ]
+  },
+  {
+   "family": "caller-arguments-own-props",
+   "file": "language/expressions/class/method-static/forbidden-ext/b2/cls-expr-meth-static-forbidden-ext-indirect-access-own-prop-caller-value.js",
+   "message": "Expected no error, got TypeError: 'arguments', 'callee' and 'caller' are restricted function properties and cannot be ac",
+   "scenario": "default",
+   "tags": [
+    "class"
+   ]
+  },
+  {
+   "family": "caller-arguments-own-props",
+   "file": "language/expressions/class/method-static/forbidden-ext/b2/cls-expr-meth-static-forbidden-ext-indirect-access-prop-caller.js",
+   "message": "Expected no error, got TypeError: 'arguments', 'callee' and 'caller' are restricted function properties and cannot be ac",
+   "scenario": "default",
+   "tags": [
+    "class"
+   ]
+  },
+  {
+   "family": "caller-arguments-own-props",
+   "file": "language/expressions/class/method/forbidden-ext/b2/cls-expr-meth-forbidden-ext-indirect-access-own-prop-caller-get.js",
+   "message": "Expected no error, got TypeError: 'arguments', 'callee' and 'caller' are restricted function properties and cannot be ac",
+   "scenario": "default",
+   "tags": [
+    "class"
+   ]
+  },
+  {
+   "family": "caller-arguments-own-props",
+   "file": "language/expressions/class/method/forbidden-ext/b2/cls-expr-meth-forbidden-ext-indirect-access-own-prop-caller-value.js",
+   "message": "Expected no error, got TypeError: 'arguments', 'callee' and 'caller' are restricted function properties and cannot be ac",
+   "scenario": "default",
+   "tags": [
+    "class"
+   ]
+  },
+  {
+   "family": "caller-arguments-own-props",
+   "file": "language/expressions/class/method/forbidden-ext/b2/cls-expr-meth-forbidden-ext-indirect-access-prop-caller.js",
+   "message": "Expected no error, got TypeError: 'arguments', 'callee' and 'caller' are restricted function properties and cannot be ac",
+   "scenario": "default",
+   "tags": [
+    "class"
+   ]
+  },
+  {
+   "family": "anon-class-name",
+   "file": "language/expressions/class/name.js",
+   "message": "name should be an own property",
+   "scenario": "default",
+   "tags": []
+  },
+  {
+   "family": "anon-class-name",
+   "file": "language/expressions/class/name.js",
+   "message": "name should be an own property",
+   "scenario": "strict mode",
+   "tags": []
+  },
+  {
+   "family": "out-of-scope-disabled-flag-SAB",
+   "file": "language/expressions/class/subclass-builtins/subclass-SharedArrayBuffer.js",
+   "message": "Expected no error, got ReferenceError: 'SharedArrayBuffer' is not defined",
+   "scenario": "default",
+   "tags": [
+    "SharedArrayBuffer"
+   ]
+  },
+  {
+   "family": "out-of-scope-disabled-flag-SAB",
+   "file": "language/expressions/class/subclass-builtins/subclass-SharedArrayBuffer.js",
+   "message": "Expected no error, got ReferenceError: 'SharedArrayBuffer' is not defined",
+   "scenario": "strict mode",
+   "tags": [
+    "SharedArrayBuffer"
+   ]
+  },
+  {
+   "family": "caller-arguments-own-props",
+   "file": "language/statements/class/async-gen-method-static/forbidden-ext/b2/cls-decl-async-gen-meth-static-forbidden-ext-indirect-access-own-prop-caller-get.js",
+   "message": "Test262Error: Expected SameValue(\u00abasync *method() {",
+   "scenario": "default",
+   "tags": [
+    "arrow-function",
+    "async-functions",
+    "async-iteration",
+    "class"
+   ]
+  },
+  {
+   "family": "caller-arguments-own-props",
+   "file": "language/statements/class/async-gen-method-static/forbidden-ext/b2/cls-decl-async-gen-meth-static-forbidden-ext-indirect-access-own-prop-caller-value.js",
+   "message": "Test262Error: Expected SameValue(\u00abasync *method() {",
+   "scenario": "default",
+   "tags": [
+    "arrow-function",
+    "async-functions",
+    "async-iteration",
+    "class"
+   ]
+  },
+  {
+   "family": "caller-arguments-own-props",
+   "file": "language/statements/class/async-gen-method-static/forbidden-ext/b2/cls-decl-async-gen-meth-static-forbidden-ext-indirect-access-prop-caller.js",
+   "message": "Test262Error: Expected SameValue(\u00abasync *method() {",
+   "scenario": "default",
+   "tags": [
+    "arrow-function",
+    "async-functions",
+    "async-iteration",
+    "class"
+   ]
+  },
+  {
+   "family": "caller-arguments-own-props",
+   "file": "language/statements/class/async-gen-method/forbidden-ext/b2/cls-decl-async-gen-meth-forbidden-ext-indirect-access-own-prop-caller-get.js",
+   "message": "Test262Error: Expected SameValue(\u00abasync *method() {",
+   "scenario": "default",
+   "tags": [
+    "arrow-function",
+    "async-functions",
+    "async-iteration",
+    "class"
+   ]
+  },
+  {
+   "family": "caller-arguments-own-props",
+   "file": "language/statements/class/async-gen-method/forbidden-ext/b2/cls-decl-async-gen-meth-forbidden-ext-indirect-access-own-prop-caller-value.js",
+   "message": "Test262Error: Expected SameValue(\u00abasync *method() {",
+   "scenario": "default",
+   "tags": [
+    "arrow-function",
+    "async-functions",
+    "async-iteration",
+    "class"
+   ]
+  },
+  {
+   "family": "caller-arguments-own-props",
+   "file": "language/statements/class/async-gen-method/forbidden-ext/b2/cls-decl-async-gen-meth-forbidden-ext-indirect-access-prop-caller.js",
+   "message": "Test262Error: Expected SameValue(\u00abasync *method() {",
+   "scenario": "default",
+   "tags": [
+    "arrow-function",
+    "async-functions",
+    "async-iteration",
+    "class"
+   ]
+  },
+  {
+   "family": "caller-arguments-own-props",
+   "file": "language/statements/class/async-method-static/forbidden-ext/b2/cls-decl-async-meth-static-forbidden-ext-indirect-access-own-prop-caller-get.js",
+   "message": "Test262Error: Expected SameValue(\u00abasync method() {",
+   "scenario": "default",
+   "tags": [
+    "arrow-function",
+    "async-functions",
+    "class"
+   ]
+  },
+  {
+   "family": "caller-arguments-own-props",
+   "file": "language/statements/class/async-method-static/forbidden-ext/b2/cls-decl-async-meth-static-forbidden-ext-indirect-access-own-prop-caller-value.js",
+   "message": "Test262Error: Expected SameValue(\u00abasync method() {",
+   "scenario": "default",
+   "tags": [
+    "arrow-function",
+    "async-functions",
+    "class"
+   ]
+  },
+  {
+   "family": "caller-arguments-own-props",
+   "file": "language/statements/class/async-method-static/forbidden-ext/b2/cls-decl-async-meth-static-forbidden-ext-indirect-access-prop-caller.js",
+   "message": "Test262Error: Expected SameValue(\u00abasync method() {",
+   "scenario": "default",
+   "tags": [
+    "arrow-function",
+    "async-functions",
+    "class"
+   ]
+  },
+  {
+   "family": "caller-arguments-own-props",
+   "file": "language/statements/class/async-method/forbidden-ext/b2/cls-decl-async-meth-forbidden-ext-indirect-access-own-prop-caller-get.js",
+   "message": "Test262Error: Expected SameValue(\u00abasync method() {",
+   "scenario": "default",
+   "tags": [
+    "arrow-function",
+    "async-functions",
+    "class"
+   ]
+  },
+  {
+   "family": "caller-arguments-own-props",
+   "file": "language/statements/class/async-method/forbidden-ext/b2/cls-decl-async-meth-forbidden-ext-indirect-access-own-prop-caller-value.js",
+   "message": "Test262Error: Expected SameValue(\u00abasync method() {",
+   "scenario": "default",
+   "tags": [
+    "arrow-function",
+    "async-functions",
+    "class"
+   ]
+  },
+  {
+   "family": "caller-arguments-own-props",
+   "file": "language/statements/class/async-method/forbidden-ext/b2/cls-decl-async-meth-forbidden-ext-indirect-access-prop-caller.js",
+   "message": "Test262Error: Expected SameValue(\u00abasync method() {",
+   "scenario": "default",
+   "tags": [
+    "arrow-function",
+    "async-functions",
+    "class"
+   ]
+  },
+  {
+   "family": "class-decl-completion",
+   "file": "language/statements/class/cptn-decl.js",
+   "message": "Expected SameValue(\u00abclass C {}\u00bb, \u00abundefined\u00bb) to be true",
+   "scenario": "default",
+   "tags": []
+  },
+  {
+   "family": "class-decl-completion",
+   "file": "language/statements/class/cptn-decl.js",
+   "message": "Expected SameValue(\u00abclass C {}\u00bb, \u00abundefined\u00bb) to be true",
+   "scenario": "strict mode",
+   "tags": []
+  },
+  {
+   "family": "out-of-scope-post-ES2025-decorators",
+   "file": "language/statements/class/decorator/syntax/class-valid/decorator-member-expr-private-identifier.js",
+   "message": "Expected no error, got SyntaxError: Invalid character",
+   "scenario": "default",
+   "tags": [
+    "class",
+    "decorators"
+   ]
+  },
+  {
+   "family": "out-of-scope-post-ES2025-decorators",
+   "file": "language/statements/class/decorator/syntax/class-valid/decorator-member-expr-private-identifier.js",
+   "message": "Expected no error, got SyntaxError: Invalid character",
+   "scenario": "strict mode",
+   "tags": [
+    "class",
+    "decorators"
+   ]
+  },
+  {
+   "family": "out-of-scope-post-ES2025-decorators",
+   "file": "language/statements/class/decorator/syntax/valid/class-element-decorator-call-expr-identifier-reference.js",
+   "message": "Expected no error, got SyntaxError: Invalid character",
+   "scenario": "default",
+   "tags": [
+    "class",
+    "decorators"
+   ]
+  },
+  {
+   "family": "out-of-scope-post-ES2025-decorators",
+   "file": "language/statements/class/decorator/syntax/valid/class-element-decorator-call-expr-identifier-reference.js",
+   "message": "Expected no error, got SyntaxError: Invalid character",
+   "scenario": "strict mode",
+   "tags": [
+    "class",
+    "decorators"
+   ]
+  },
+  {
+   "family": "out-of-scope-post-ES2025-decorators",
+   "file": "language/statements/class/decorator/syntax/valid/class-element-decorator-member-expr-decorator-member-expr.js",
+   "message": "Expected no error, got SyntaxError: Invalid character",
+   "scenario": "default",
+   "tags": [
+    "class",
+    "decorators"
+   ]
+  },
+  {
+   "family": "out-of-scope-post-ES2025-decorators",
+   "file": "language/statements/class/decorator/syntax/valid/class-element-decorator-member-expr-decorator-member-expr.js",
+   "message": "Expected no error, got SyntaxError: Invalid character",
+   "scenario": "strict mode",
+   "tags": [
+    "class",
+    "decorators"
+   ]
+  },
+  {
+   "family": "out-of-scope-post-ES2025-decorators",
+   "file": "language/statements/class/decorator/syntax/valid/class-element-decorator-member-expr-identifier-reference.js",
+   "message": "Expected no error, got SyntaxError: Invalid character",
+   "scenario": "default",
+   "tags": [
+    "class",
+    "decorators"
+   ]
+  },
+  {
+   "family": "out-of-scope-post-ES2025-decorators",
+   "file": "language/statements/class/decorator/syntax/valid/class-element-decorator-member-expr-identifier-reference.js",
+   "message": "Expected no error, got SyntaxError: Invalid character",
+   "scenario": "strict mode",
+   "tags": [
+    "class",
+    "decorators"
+   ]
+  },
+  {
+   "family": "out-of-scope-post-ES2025-decorators",
+   "file": "language/statements/class/decorator/syntax/valid/class-element-decorator-parenthesized-expr-identifier-reference.js",
+   "message": "Expected no error, got SyntaxError: Invalid character",
+   "scenario": "default",
+   "tags": [
+    "class",
+    "decorators"
+   ]
+  },
+  {
+   "family": "out-of-scope-post-ES2025-decorators",
+   "file": "language/statements/class/decorator/syntax/valid/class-element-decorator-parenthesized-expr-identifier-reference.js",
+   "message": "Expected no error, got SyntaxError: Invalid character",
+   "scenario": "strict mode",
+   "tags": [
+    "class",
+    "decorators"
+   ]
+  },
+  {
+   "family": "out-of-scope-post-ES2025-decorators",
+   "file": "language/statements/class/decorator/syntax/valid/decorator-call-expr-identifier-reference-yield.js",
+   "message": "Expected no error, got SyntaxError: Invalid character",
+   "scenario": "default",
+   "tags": [
+    "class",
+    "decorators"
+   ]
+  },
+  {
+   "family": "out-of-scope-post-ES2025-decorators",
+   "file": "language/statements/class/decorator/syntax/valid/decorator-call-expr-identifier-reference.js",
+   "message": "Expected no error, got SyntaxError: Invalid character",
+   "scenario": "default",
+   "tags": [
+    "class",
+    "decorators"
+   ]
+  },
+  {
+   "family": "out-of-scope-post-ES2025-decorators",
+   "file": "language/statements/class/decorator/syntax/valid/decorator-call-expr-identifier-reference.js",
+   "message": "Expected no error, got SyntaxError: Invalid character",
+   "scenario": "strict mode",
+   "tags": [
+    "class",
+    "decorators"
+   ]
+  },
+  {
+   "family": "out-of-scope-post-ES2025-decorators",
+   "file": "language/statements/class/decorator/syntax/valid/decorator-member-expr-decorator-member-expr.js",
+   "message": "Expected no error, got SyntaxError: Invalid character",
+   "scenario": "default",
+   "tags": [
+    "class",
+    "decorators"
+   ]
+  },
+  {
+   "family": "out-of-scope-post-ES2025-decorators",
+   "file": "language/statements/class/decorator/syntax/valid/decorator-member-expr-decorator-member-expr.js",
+   "message": "Expected no error, got SyntaxError: Invalid character",
+   "scenario": "strict mode",
+   "tags": [
+    "class",
+    "decorators"
+   ]
+  },
+  {
+   "family": "out-of-scope-post-ES2025-decorators",
+   "file": "language/statements/class/decorator/syntax/valid/decorator-member-expr-identifier-reference-yield.js",
+   "message": "Expected no error, got SyntaxError: Invalid character",
+   "scenario": "default",
+   "tags": [
+    "class",
+    "decorators"
+   ]
+  },
+  {
+   "family": "out-of-scope-post-ES2025-decorators",
+   "file": "language/statements/class/decorator/syntax/valid/decorator-member-expr-identifier-reference.js",
+   "message": "Expected no error, got SyntaxError: Invalid character",
+   "scenario": "default",
+   "tags": [
+    "class",
+    "decorators"
+   ]
+  },
+  {
+   "family": "out-of-scope-post-ES2025-decorators",
+   "file": "language/statements/class/decorator/syntax/valid/decorator-member-expr-identifier-reference.js",
+   "message": "Expected no error, got SyntaxError: Invalid character",
+   "scenario": "strict mode",
+   "tags": [
+    "class",
+    "decorators"
+   ]
+  },
+  {
+   "family": "out-of-scope-post-ES2025-decorators",
+   "file": "language/statements/class/decorator/syntax/valid/decorator-parenthesized-expr-identifier-reference-yield.js",
+   "message": "Expected no error, got SyntaxError: Invalid character",
+   "scenario": "default",
+   "tags": [
+    "class",
+    "decorators"
+   ]
+  },
+  {
+   "family": "out-of-scope-post-ES2025-decorators",
+   "file": "language/statements/class/decorator/syntax/valid/decorator-parenthesized-expr-identifier-reference.js",
+   "message": "Expected no error, got SyntaxError: Invalid character",
+   "scenario": "default",
+   "tags": [
+    "class",
+    "decorators"
+   ]
+  },
+  {
+   "family": "out-of-scope-post-ES2025-decorators",
+   "file": "language/statements/class/decorator/syntax/valid/decorator-parenthesized-expr-identifier-reference.js",
+   "message": "Expected no error, got SyntaxError: Invalid character",
+   "scenario": "strict mode",
+   "tags": [
+    "class",
+    "decorators"
+   ]
+  },
+  {
+   "family": "ctor-own-prop-order",
+   "file": "language/statements/class/definition/fn-length-static-precedence-order.js",
+   "message": "Actual [prototype, length, name, method] and expected [length, name, prototype, method] should have the same contents. ",
+   "scenario": "default",
+   "tags": [
+    "generators"
+   ]
+  },
+  {
+   "family": "ctor-own-prop-order",
+   "file": "language/statements/class/definition/fn-length-static-precedence-order.js",
+   "message": "Actual [prototype, length, name, method] and expected [length, name, prototype, method] should have the same contents. ",
+   "scenario": "strict mode",
+   "tags": [
+    "generators"
+   ]
+  },
+  {
+   "family": "ctor-own-prop-order",
+   "file": "language/statements/class/definition/fn-name-static-precedence-order.js",
+   "message": "Actual [prototype, length, name, method] and expected [length, name, prototype, method] should have the same contents. ",
+   "scenario": "default",
+   "tags": [
+    "generators"
+   ]
+  },
+  {
+   "family": "ctor-own-prop-order",
+   "file": "language/statements/class/definition/fn-name-static-precedence-order.js",
+   "message": "Actual [prototype, length, name, method] and expected [length, name, prototype, method] should have the same contents. ",
+   "scenario": "strict mode",
+   "tags": [
+    "generators"
+   ]
+  },
+  {
+   "family": "yield-newline-star",
+   "file": "language/statements/class/definition/methods-gen-yield-star-after-newline.js",
+   "message": "Expected test to throw error of type SyntaxError, got Test262: This statement should not be evaluated.",
+   "scenario": "default",
+   "tags": [
+    "generators"
+   ]
+  },
+  {
+   "family": "yield-newline-star",
+   "file": "language/statements/class/definition/methods-gen-yield-star-after-newline.js",
+   "message": "Expected test to throw error of type SyntaxError, got Test262: This statement should not be evaluated.",
+   "scenario": "strict mode",
+   "tags": [
+    "generators"
+   ]
+  },
+  {
+   "family": "out-of-scope-post-ES2025-nonextensible",
+   "file": "language/statements/class/elements/private-class-field-on-nonextensible-objects.js",
+   "message": "Expected a TypeError to be thrown but no exception was thrown at all",
+   "scenario": "strict mode",
+   "tags": [
+    "class",
+    "class-fields-private",
+    "class-fields-public",
+    "nonextensible-applies-to-private"
+   ]
+  },
+  {
+   "family": "out-of-scope-post-ES2025-decorators",
+   "file": "language/statements/class/elements/syntax/valid/grammar-field-accessor.js",
+   "message": "Expected no error, got SyntaxError: Expected '('",
+   "scenario": "default",
+   "tags": [
+    "decorators",
+    "class"
+   ]
+  },
+  {
+   "family": "out-of-scope-post-ES2025-decorators",
+   "file": "language/statements/class/elements/syntax/valid/grammar-field-accessor.js",
+   "message": "Expected no error, got SyntaxError: Expected '('",
+   "scenario": "strict mode",
+   "tags": [
+    "decorators",
+    "class"
+   ]
+  },
+  {
+   "family": "caller-arguments-own-props",
+   "file": "language/statements/class/gen-method-static/forbidden-ext/b2/cls-decl-gen-meth-static-forbidden-ext-indirect-access-own-prop-caller-get.js",
+   "message": "CH_NEGATIVE_PHASE: runtime\nthrown at f-1793757404038-66253-1h3czzr.9h8c.js:\n^\nTest262Error: Expected SameValue(\u00ab*method(",
+   "scenario": "default",
+   "tags": [
+    "class",
+    "generators"
+   ]
+  },
+  {
+   "family": "caller-arguments-own-props",
+   "file": "language/statements/class/gen-method-static/forbidden-ext/b2/cls-decl-gen-meth-static-forbidden-ext-indirect-access-own-prop-caller-value.js",
+   "message": "CH_NEGATIVE_PHASE: runtime\nthrown at f-1793757404043-66253-1aw1k4l.ab73.js:\n^\nTest262Error: Expected SameValue(\u00ab*method(",
+   "scenario": "default",
+   "tags": [
+    "class",
+    "generators"
+   ]
+  },
+  {
+   "family": "caller-arguments-own-props",
+   "file": "language/statements/class/gen-method-static/forbidden-ext/b2/cls-decl-gen-meth-static-forbidden-ext-indirect-access-prop-caller.js",
+   "message": "CH_NEGATIVE_PHASE: runtime\nthrown at f-1793757404049-66253-d39eml.xvs3s.js:\n^\nTest262Error: Expected SameValue(\u00ab*method(",
+   "scenario": "default",
+   "tags": [
+    "class",
+    "generators"
+   ]
+  },
+  {
+   "family": "caller-arguments-own-props",
+   "file": "language/statements/class/gen-method/forbidden-ext/b2/cls-decl-gen-meth-forbidden-ext-indirect-access-own-prop-caller-get.js",
+   "message": "CH_NEGATIVE_PHASE: runtime\nthrown at f-1793757404012-66253-11wcqzz.63oh.js:\n^\nTest262Error: Expected SameValue(\u00ab*method(",
+   "scenario": "default",
+   "tags": [
+    "class",
+    "generators"
+   ]
+  },
+  {
+   "family": "caller-arguments-own-props",
+   "file": "language/statements/class/gen-method/forbidden-ext/b2/cls-decl-gen-meth-forbidden-ext-indirect-access-own-prop-caller-value.js",
+   "message": "CH_NEGATIVE_PHASE: runtime\nthrown at f-1793757404023-66253-1160wey.9dp3.js:\n^\nTest262Error: Expected SameValue(\u00ab*method(",
+   "scenario": "default",
+   "tags": [
+    "class",
+    "generators"
+   ]
+  },
+  {
+   "family": "caller-arguments-own-props",
+   "file": "language/statements/class/gen-method/forbidden-ext/b2/cls-decl-gen-meth-forbidden-ext-indirect-access-prop-caller.js",
+   "message": "CH_NEGATIVE_PHASE: runtime\nthrown at f-1793757404017-66253-1r3elft.x9e5h.js:\n^\nTest262Error: Expected SameValue(\u00ab*method",
+   "scenario": "default",
+   "tags": [
+    "class",
+    "generators"
+   ]
+  },
+  {
+   "family": "caller-arguments-own-props",
+   "file": "language/statements/class/method-static/forbidden-ext/b2/cls-decl-meth-static-forbidden-ext-indirect-access-own-prop-caller-get.js",
+   "message": "Expected no error, got TypeError: 'arguments', 'callee' and 'caller' are restricted function properties and cannot be ac",
+   "scenario": "default",
+   "tags": [
+    "class"
+   ]
+  },
+  {
+   "family": "caller-arguments-own-props",
+   "file": "language/statements/class/method-static/forbidden-ext/b2/cls-decl-meth-static-forbidden-ext-indirect-access-own-prop-caller-value.js",
+   "message": "Expected no error, got TypeError: 'arguments', 'callee' and 'caller' are restricted function properties and cannot be ac",
+   "scenario": "default",
+   "tags": [
+    "class"
+   ]
+  },
+  {
+   "family": "caller-arguments-own-props",
+   "file": "language/statements/class/method-static/forbidden-ext/b2/cls-decl-meth-static-forbidden-ext-indirect-access-prop-caller.js",
+   "message": "Expected no error, got TypeError: 'arguments', 'callee' and 'caller' are restricted function properties and cannot be ac",
+   "scenario": "default",
+   "tags": [
+    "class"
+   ]
+  },
+  {
+   "family": "caller-arguments-own-props",
+   "file": "language/statements/class/method/forbidden-ext/b2/cls-decl-meth-forbidden-ext-indirect-access-own-prop-caller-get.js",
+   "message": "Expected no error, got TypeError: 'arguments', 'callee' and 'caller' are restricted function properties and cannot be ac",
+   "scenario": "default",
+   "tags": [
+    "class"
+   ]
+  },
+  {
+   "family": "caller-arguments-own-props",
+   "file": "language/statements/class/method/forbidden-ext/b2/cls-decl-meth-forbidden-ext-indirect-access-own-prop-caller-value.js",
+   "message": "Expected no error, got TypeError: 'arguments', 'callee' and 'caller' are restricted function properties and cannot be ac",
+   "scenario": "default",
+   "tags": [
+    "class"
+   ]
+  },
+  {
+   "family": "caller-arguments-own-props",
+   "file": "language/statements/class/method/forbidden-ext/b2/cls-decl-meth-forbidden-ext-indirect-access-prop-caller.js",
+   "message": "Expected no error, got TypeError: 'arguments', 'callee' and 'caller' are restricted function properties and cannot be ac",
+   "scenario": "default",
+   "tags": [
+    "class"
+   ]
+  },
+  {
+   "family": "out-of-scope-disabled-flag-SAB",
+   "file": "language/statements/class/subclass-builtins/subclass-SharedArrayBuffer.js",
+   "message": "Expected no error, got ReferenceError: 'SharedArrayBuffer' is not defined",
+   "scenario": "default",
+   "tags": [
+    "SharedArrayBuffer"
+   ]
+  },
+  {
+   "family": "out-of-scope-disabled-flag-SAB",
+   "file": "language/statements/class/subclass-builtins/subclass-SharedArrayBuffer.js",
+   "message": "Expected no error, got ReferenceError: 'SharedArrayBuffer' is not defined",
+   "scenario": "strict mode",
+   "tags": [
+    "SharedArrayBuffer"
+   ]
+  },
+  {
+   "family": "default-ctor-spread",
+   "file": "language/statements/class/subclass/default-constructor-spread-override.js",
+   "message": "@@iterator invoked",
+   "scenario": "default",
+   "tags": [
+    "Symbol.iterator"
+   ]
+  },
+  {
+   "family": "default-ctor-spread",
+   "file": "language/statements/class/subclass/default-constructor-spread-override.js",
+   "message": "@@iterator invoked",
+   "scenario": "strict mode",
+   "tags": [
+    "Symbol.iterator"
+   ]
+  },
+  {
+   "family": "derived-return-override",
+   "file": "language/statements/class/subclass/derived-class-return-override-catch-finally-arrow.js",
+   "message": "Expected no error, got ReferenceError: Use before declaration",
+   "scenario": "default",
+   "tags": []
+  },
+  {
+   "family": "derived-return-override",
+   "file": "language/statements/class/subclass/derived-class-return-override-catch-finally-arrow.js",
+   "message": "Expected no error, got ReferenceError: Use before declaration",
+   "scenario": "strict mode",
+   "tags": []
+  },
+  {
+   "family": "derived-return-override",
+   "file": "language/statements/class/subclass/derived-class-return-override-catch-finally.js",
+   "message": "Expected no error, got ReferenceError: Use before declaration",
+   "scenario": "default",
+   "tags": []
+  },
+  {
+   "family": "derived-return-override",
+   "file": "language/statements/class/subclass/derived-class-return-override-catch-finally.js",
+   "message": "Expected no error, got ReferenceError: Use before declaration",
+   "scenario": "strict mode",
+   "tags": []
+  },
+  {
+   "family": "derived-return-override",
+   "file": "language/statements/class/subclass/derived-class-return-override-catch-super-arrow.js",
+   "message": "Expected a TypeError to be thrown but no exception was thrown at all",
+   "scenario": "default",
+   "tags": []
+  },
+  {
+   "family": "derived-return-override",
+   "file": "language/statements/class/subclass/derived-class-return-override-catch-super-arrow.js",
+   "message": "Expected a TypeError to be thrown but no exception was thrown at all",
+   "scenario": "strict mode",
+   "tags": []
+  },
+  {
+   "family": "derived-return-override",
+   "file": "language/statements/class/subclass/derived-class-return-override-catch-super.js",
+   "message": "Expected a TypeError to be thrown but no exception was thrown at all",
+   "scenario": "default",
+   "tags": []
+  },
+  {
+   "family": "derived-return-override",
+   "file": "language/statements/class/subclass/derived-class-return-override-catch-super.js",
+   "message": "Expected a TypeError to be thrown but no exception was thrown at all",
+   "scenario": "strict mode",
+   "tags": []
+  },
+  {
+   "family": "derived-return-override",
+   "file": "language/statements/class/subclass/derived-class-return-override-catch.js",
+   "message": "Expected a TypeError to be thrown but no exception was thrown at all",
+   "scenario": "default",
+   "tags": []
+  },
+  {
+   "family": "derived-return-override",
+   "file": "language/statements/class/subclass/derived-class-return-override-catch.js",
+   "message": "Expected a TypeError to be thrown but no exception was thrown at all",
+   "scenario": "strict mode",
+   "tags": []
+  },
+  {
+   "family": "derived-return-override",
+   "file": "language/statements/class/subclass/derived-class-return-override-finally-super-arrow.js",
+   "message": "Expected no error, got ReferenceError: Use before declaration",
+   "scenario": "default",
+   "tags": []
+  },
+  {
+   "family": "derived-return-override",
+   "file": "language/statements/class/subclass/derived-class-return-override-finally-super-arrow.js",
+   "message": "Expected no error, got ReferenceError: Use before declaration",
+   "scenario": "strict mode",
+   "tags": []
+  },
+  {
+   "family": "derived-return-override",
+   "file": "language/statements/class/subclass/derived-class-return-override-finally-super.js",
+   "message": "Expected no error, got ReferenceError: Use before declaration",
+   "scenario": "default",
+   "tags": []
+  },
+  {
+   "family": "derived-return-override",
+   "file": "language/statements/class/subclass/derived-class-return-override-finally-super.js",
+   "message": "Expected no error, got ReferenceError: Use before declaration",
+   "scenario": "strict mode",
+   "tags": []
+  },
+  {
+   "family": "derived-return-override",
+   "file": "language/statements/class/subclass/derived-class-return-override-for-of-arrow.js",
+   "message": "Expected no error, got ReferenceError: Use before declaration",
+   "scenario": "default",
+   "tags": []
+  },
+  {
+   "family": "derived-return-override",
+   "file": "language/statements/class/subclass/derived-class-return-override-for-of-arrow.js",
+   "message": "Expected no error, got ReferenceError: Use before declaration",
+   "scenario": "strict mode",
+   "tags": []
+  },
+  {
+   "family": "derived-return-override",
+   "file": "language/statements/class/subclass/derived-class-return-override-for-of.js",
+   "message": "Expected a Test262Error but got a TypeError",
+   "scenario": "default",
+   "tags": []
+  },
+  {
+   "family": "derived-return-override",
+   "file": "language/statements/class/subclass/derived-class-return-override-for-of.js",
+   "message": "Expected a Test262Error but got a TypeError",
+   "scenario": "strict mode",
+   "tags": []
+  },
+  {
+   "family": "out-of-scope-post-ES2025-nonextensible",
+   "file": "language/statements/class/subclass/private-class-field-on-nonextensible-return-override.js",
+   "message": "Expected a TypeError to be thrown but no exception was thrown at all",
+   "scenario": "strict mode",
+   "tags": [
+    "class",
+    "class-fields-private",
+    "class-fields-public",
+    "nonextensible-applies-to-private"
+   ]
+  },
+  {
+   "family": "super-eval-order",
+   "file": "language/statements/class/super/in-constructor-superproperty-evaluation.js",
+   "message": "`super[super()]` via `new Derived()` throws a ReferenceError Expected a ReferenceError but got a Test262Error",
+   "scenario": "default",
+   "tags": []
+  },
+  {
+   "family": "super-eval-order",
+   "file": "language/statements/class/super/in-constructor-superproperty-evaluation.js",
+   "message": "`super[super()]` via `new Derived()` throws a ReferenceError Expected a ReferenceError but got a Test262Error",
+   "scenario": "strict mode",
+   "tags": []
+  }
+ ],
+ "source_run": "out/test262-b4-wide-after (post-B4 wide run at base)"
+}
