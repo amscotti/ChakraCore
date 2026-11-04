@@ -11,9 +11,9 @@
 void EmitMethodFld(ParseNode *pnode, Js::RegSlot callObjLocation, Js::PropertyId propertyId, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo, bool registerCacheIdForCall);
 void EmitMethodElem(ParseNode *pnode, Js::RegSlot callObjLocation, Js::RegSlot indexLocation, ByteCodeGenerator *byteCodeGenerator);
 void EmitReference(ParseNode *pnode, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo);
-void EmitAssignment(ParseNode *asgnNode, ParseNode *lhs, Js::RegSlot rhsLocation, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo, Js::RegSlot referenceBaseLocation = Js::Constants::NoRegister);
+void EmitAssignment(ParseNode *asgnNode, ParseNode *lhs, Js::RegSlot rhsLocation, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo, Js::RegSlot referenceBaseLocation = Js::Constants::NoRegister, Js::RegSlot convertedKeyLocation = Js::Constants::NoRegister);
 Js::RegSlot EmitAssignmentReferenceBase(ParseNode *lhs, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo);
-void EmitLoad(ParseNode *rhs, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo, Js::RegSlot referenceBaseLocation = Js::Constants::NoRegister);
+void EmitLoad(ParseNode *rhs, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo, Js::RegSlot referenceBaseLocation = Js::Constants::NoRegister, Js::RegSlot *convertedKeyLocation = nullptr);
 void EmitCall(ParseNodeCall* pnodeCall, ByteCodeGenerator* byteCodeGenerator, FuncInfo* funcInfo, BOOL fReturnValue, BOOL fEvaluateComponents, Js::RegSlot overrideThisLocation = Js::Constants::NoRegister, Js::RegSlot newTargetLocation = Js::Constants::NoRegister);
 void EmitStartupYield(ByteCodeGenerator* byteCodeGenerator, FuncInfo* funcInfo);
 void EmitYield(Js::RegSlot resultReg, Js::RegSlot inputReg, ByteCodeGenerator* byteCodeGenerator, FuncInfo* funcInfo);
@@ -8308,7 +8308,8 @@ void EmitAssignment(
     Js::RegSlot rhsLocation,
     ByteCodeGenerator *byteCodeGenerator,
     FuncInfo *funcInfo,
-    Js::RegSlot referenceBaseLocation)
+    Js::RegSlot referenceBaseLocation,
+    Js::RegSlot convertedKeyLocation)
 {
     switch (lhs->nop)
     {
@@ -8433,9 +8434,16 @@ void EmitAssignment(
             targetLocation = byteCodeGenerator->EmitLdObjProto(Js::OpCode::LdHomeObjProto, targetLocation, funcInfo);
         }
 
+        // A compound load hoisted the reference: the store must reuse the key
+        // register that already holds the ToPropertyKey-converted key instead
+        // of the raw key expression value (exactly-once conversion).
+        Js::RegSlot keyLocation = convertedKeyLocation != Js::Constants::NoRegister
+            ? convertedKeyLocation
+            : lhs->AsParseNodeBin()->pnode2->location;
+
         byteCodeGenerator->Writer()->Element(
             ByteCodeGenerator::GetStElemIOpCode(funcInfo),
-            rhsLocation, targetLocation, lhs->AsParseNodeBin()->pnode2->location);
+            rhsLocation, targetLocation, keyLocation);
 
         break;
     }
@@ -8487,7 +8495,8 @@ void EmitLoad(
     ParseNode *lhs,
     ByteCodeGenerator *byteCodeGenerator,
     FuncInfo *funcInfo,
-    Js::RegSlot referenceBaseLocation)
+    Js::RegSlot referenceBaseLocation,
+    Js::RegSlot *convertedKeyLocation)
 {
     // Emit the instructions to load the value into the LHS location. Do not assign/free any temps
     // in the process.
@@ -8572,11 +8581,56 @@ void EmitLoad(
     }
 
     case knopIndex:
+    {
         funcInfo->AcquireLoc(lhs);
         EmitReference(lhs, byteCodeGenerator, funcInfo);
+        Js::RegSlot keyLocation = lhs->AsParseNodeBin()->pnode2->location;
+        if (convertedKeyLocation != nullptr)
+        {
+            // Compound load-then-store (compound assignment, logical
+            // assignment, ++/--): hoist the GetValue reference semantics of
+            // ES2025 above the load. ToObject(base) throws the null/undefined
+            // TypeError BEFORE ToPropertyKey(key), and the converted key is
+            // computed once and memoized in a register the matching store
+            // reuses (sec-getvalue / sec-putvalue convert a non-key
+            // ReferencedName at most once). The caller owns the temp and
+            // releases it after the store, above the base/key reference
+            // registers (temp-stack LIFO).
+            Js::RegSlot baseLocation = lhs->AsParseNodeBin()->pnode1->location;
+            Js::ByteCodeLabel notNull = byteCodeGenerator->Writer()->DefineLabel();
+            byteCodeGenerator->Writer()->BrReg2(
+                Js::OpCode::BrNeq_A, notNull, baseLocation, funcInfo->nullConstantRegister);
+            byteCodeGenerator->Writer()->W1(Js::OpCode::RuntimeTypeError, SCODE_CODE(JSERR_ObjectCoercible));
+            byteCodeGenerator->Writer()->MarkLabel(notNull);
+            Js::ByteCodeLabel notUndefined = byteCodeGenerator->Writer()->DefineLabel();
+            byteCodeGenerator->Writer()->BrReg2(
+                Js::OpCode::BrNeq_A, notUndefined, baseLocation, funcInfo->undefinedConstantRegister);
+            byteCodeGenerator->Writer()->W1(Js::OpCode::RuntimeTypeError, SCODE_CODE(JSERR_ObjectCoercible));
+            byteCodeGenerator->Writer()->MarkLabel(notUndefined);
+
+            if (!funcInfo->RegIsConst(keyLocation))
+            {
+                // Only a heap-object key has an observable ToPropertyKey.
+                // Primitives (tagged int, string, symbol, number) keep their
+                // raw representation so the element-load/store fast paths and
+                // the element register conventions are unchanged.
+                Js::RegSlot keyTmp = funcInfo->AcquireTmpRegister();
+                byteCodeGenerator->Writer()->Reg2(Js::OpCode::Ld_A, keyTmp, keyLocation);
+                Js::ByteCodeLabel convertKey = byteCodeGenerator->Writer()->DefineLabel();
+                Js::ByteCodeLabel keyDone = byteCodeGenerator->Writer()->DefineLabel();
+                byteCodeGenerator->Writer()->BrReg1(Js::OpCode::BrOnObject_A, convertKey, keyLocation);
+                byteCodeGenerator->Writer()->Br(keyDone);
+                byteCodeGenerator->Writer()->MarkLabel(convertKey);
+                byteCodeGenerator->Writer()->Reg2(Js::OpCode::Conv_Prop, keyTmp, keyTmp);
+                byteCodeGenerator->Writer()->MarkLabel(keyDone);
+                keyLocation = keyTmp;
+                *convertedKeyLocation = keyTmp;
+            }
+        }
         byteCodeGenerator->Writer()->Element(
-            Js::OpCode::LdElemI_A, lhs->location, lhs->AsParseNodeBin()->pnode1->location, lhs->AsParseNodeBin()->pnode2->location);
+            Js::OpCode::LdElemI_A, lhs->location, lhs->AsParseNodeBin()->pnode1->location, keyLocation);
         break;
+    }
 
         // f(x) +=
     case knopCall:
@@ -11671,7 +11725,7 @@ void EmitBinaryOpnds(ParseNode* pnode1, ParseNode* pnode2, ByteCodeGenerator* by
     Emit(pnode2, byteCodeGenerator, funcInfo, false, false, computedPropertyLocation);
 }
 
-void EmitBinaryReference(ParseNode *pnode1, ParseNode *pnode2, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo, BOOL fLoadLhs, BOOL fEmitRhs = TRUE, Js::RegSlot *referenceBaseLocation = nullptr)
+void EmitBinaryReference(ParseNode *pnode1, ParseNode *pnode2, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo, BOOL fLoadLhs, BOOL fEmitRhs = TRUE, Js::RegSlot *referenceBaseLocation = nullptr, Js::RegSlot *convertedKeyLocation = nullptr)
 {
     // Make sure that the RHS of an assignment doesn't kill the opnd's of the expression on the LHS.
     switch (pnode1->nop)
@@ -11728,7 +11782,8 @@ void EmitBinaryReference(ParseNode *pnode1, ParseNode *pnode2, ByteCodeGenerator
     {
         // Emit code to load the value of the LHS.
         EmitLoad(pnode1, byteCodeGenerator, funcInfo,
-            referenceBaseLocation != nullptr ? *referenceBaseLocation : Js::Constants::NoRegister);
+            referenceBaseLocation != nullptr ? *referenceBaseLocation : Js::Constants::NoRegister,
+            convertedKeyLocation);
     }
     else
     {
@@ -13141,13 +13196,14 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
             funcInfo->AcquireLoc(pnode);
 
             Js::RegSlot referenceBaseLocation = Js::Constants::NoRegister;
+            Js::RegSlot convertedKeyLocation = Js::Constants::NoRegister;
             if (pnode1->nop == knopName && !pnode1->AsParseNodeName()->IsSpecialName())
             {
                 referenceBaseLocation = EmitAssignmentReferenceBase(pnode1, byteCodeGenerator, funcInfo);
             }
 
             // Load the initial value, convert it (this is the expression result), and increment it.
-            EmitLoad(pnode1, byteCodeGenerator, funcInfo, referenceBaseLocation);
+            EmitLoad(pnode1, byteCodeGenerator, funcInfo, referenceBaseLocation, &convertedKeyLocation);
             const Js::OpCode op2 = isESBigIntEnabled ? Js::OpCode::Conv_Numeric : Js::OpCode::Conv_Num;
             byteCodeGenerator->Writer()->Reg2(op2, pnode->location, pnode1->location);
 
@@ -13171,12 +13227,16 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
             }
 
             // Store the incremented value.
-            EmitAssignment(nullptr, pnode1, incDecResult, byteCodeGenerator, funcInfo, referenceBaseLocation);
+            EmitAssignment(nullptr, pnode1, incDecResult, byteCodeGenerator, funcInfo, referenceBaseLocation, convertedKeyLocation);
 
             // Release the incremented value and the l-value.
             if (incDecResult != pnode1->location)
             {
                 funcInfo->ReleaseTmpRegister(incDecResult);
+            }
+            if (convertedKeyLocation != Js::Constants::NoRegister)
+            {
+                funcInfo->ReleaseTmpRegister(convertedKeyLocation);
             }
             funcInfo->ReleaseLoad(pnode1);
             if (referenceBaseLocation != Js::Constants::NoRegister)
@@ -13216,6 +13276,7 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
             need_result_location ? funcInfo->AcquireLoc(pnode) : Js::Constants::NoRegister;
 
         Js::RegSlot referenceBaseLocation = Js::Constants::NoRegister;
+        Js::RegSlot convertedKeyLocation = Js::Constants::NoRegister;
         if (pnode1->nop == knopName && !pnode1->AsParseNodeName()->IsSpecialName())
         {
             referenceBaseLocation = EmitAssignmentReferenceBase(pnode1, byteCodeGenerator, funcInfo);
@@ -13223,19 +13284,23 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
 
         if (need_result_location)
         {
-            EmitLoad(pnode1, byteCodeGenerator, funcInfo, referenceBaseLocation);
+            EmitLoad(pnode1, byteCodeGenerator, funcInfo, referenceBaseLocation, &convertedKeyLocation);
             byteCodeGenerator->Writer()->Reg2(op, result_location, pnode1->location);
 
             // Store the incremented value and release the l-value.
-            EmitAssignment(nullptr, pnode1, result_location, byteCodeGenerator, funcInfo, referenceBaseLocation);
+            EmitAssignment(nullptr, pnode1, result_location, byteCodeGenerator, funcInfo, referenceBaseLocation, convertedKeyLocation);
         }
         else
         {
-            EmitLoad(pnode1, byteCodeGenerator, funcInfo, referenceBaseLocation);
+            EmitLoad(pnode1, byteCodeGenerator, funcInfo, referenceBaseLocation, &convertedKeyLocation);
             byteCodeGenerator->Writer()->Reg2(op, pnode1->location, pnode1->location);
 
             // Store the incremented value and release the l-value.
-            EmitAssignment(nullptr, pnode1, pnode1->location, byteCodeGenerator, funcInfo, referenceBaseLocation);
+            EmitAssignment(nullptr, pnode1, pnode1->location, byteCodeGenerator, funcInfo, referenceBaseLocation, convertedKeyLocation);
+        }
+        if (convertedKeyLocation != Js::Constants::NoRegister)
+        {
+            funcInfo->ReleaseTmpRegister(convertedKeyLocation);
         }
         funcInfo->ReleaseLoad(pnode1);
         if (referenceBaseLocation != Js::Constants::NoRegister)
@@ -13850,6 +13915,7 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
         ParseNode *lhs = pnode->AsParseNodeBin()->pnode1;
         ParseNode *rhs = pnode->AsParseNodeBin()->pnode2;
         Js::RegSlot referenceBaseLocation = Js::Constants::NoRegister;
+        Js::RegSlot convertedKeyLocation = Js::Constants::NoRegister;
 
         // Assign a register for the result only if the result is used or the LHS can't be assigned to
         // (i.e., is a constant).
@@ -13864,22 +13930,26 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
             const Js::RegSlot result_location = funcInfo->AcquireLoc(pnode);
 
             // Grab a register for the initial value and load it.
-            EmitBinaryReference(lhs, rhs, byteCodeGenerator, funcInfo, true, true, &referenceBaseLocation);
+            EmitBinaryReference(lhs, rhs, byteCodeGenerator, funcInfo, true, true, &referenceBaseLocation, &convertedKeyLocation);
             funcInfo->ReleaseLoc(rhs);
             // Do the arithmetic, store the result, and release the l-value.
             byteCodeGenerator->Writer()->Reg3(nopToOp[pnode->nop], result_location, lhs->location, rhs->location);
 
-            EmitAssignment(pnode, lhs, result_location, byteCodeGenerator, funcInfo, referenceBaseLocation);
+            EmitAssignment(pnode, lhs, result_location, byteCodeGenerator, funcInfo, referenceBaseLocation, convertedKeyLocation);
         }
         else
         {
             // Grab a register for the initial value and load it. Might modify lhs->location.
-            EmitBinaryReference(lhs, rhs, byteCodeGenerator, funcInfo, true, true, &referenceBaseLocation);
+            EmitBinaryReference(lhs, rhs, byteCodeGenerator, funcInfo, true, true, &referenceBaseLocation, &convertedKeyLocation);
 
             funcInfo->ReleaseLoc(rhs);
             // Do the arithmetic, store the result, and release the l-value.
             byteCodeGenerator->Writer()->Reg3(nopToOp[pnode->nop], lhs->location, lhs->location, rhs->location);
-            EmitAssignment(nullptr, lhs, lhs->location, byteCodeGenerator, funcInfo, referenceBaseLocation);
+            EmitAssignment(nullptr, lhs, lhs->location, byteCodeGenerator, funcInfo, referenceBaseLocation, convertedKeyLocation);
+        }
+        if (convertedKeyLocation != Js::Constants::NoRegister)
+        {
+            funcInfo->ReleaseTmpRegister(convertedKeyLocation);
         }
         funcInfo->ReleaseLoad(lhs);
         if (referenceBaseLocation != Js::Constants::NoRegister)
@@ -13904,11 +13974,12 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
         ParseNode *lhs = pnode->AsParseNodeBin()->pnode1;
         ParseNode *rhs = pnode->AsParseNodeBin()->pnode2;
         Js::RegSlot referenceBaseLocation = Js::Constants::NoRegister;
+        Js::RegSlot convertedKeyLocation = Js::Constants::NoRegister;
 
         funcInfo->AcquireLoc(pnode);
         Js::ByteCodeLabel doneLabel = byteCodeGenerator->Writer()->DefineLabel();
 
-        EmitBinaryReference(lhs, rhs, byteCodeGenerator, funcInfo, true, false, &referenceBaseLocation);
+        EmitBinaryReference(lhs, rhs, byteCodeGenerator, funcInfo, true, false, &referenceBaseLocation, &convertedKeyLocation);
         byteCodeGenerator->Writer()->Reg2(Js::OpCode::Ld_A, pnode->location, lhs->location);
 
         if (pnode->nop == knopAsgLogAnd)
@@ -13925,9 +13996,13 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
         }
 
         Emit(rhs, byteCodeGenerator, funcInfo, false);
-        EmitAssignment(nullptr, lhs, rhs->location, byteCodeGenerator, funcInfo, referenceBaseLocation);
+        EmitAssignment(nullptr, lhs, rhs->location, byteCodeGenerator, funcInfo, referenceBaseLocation, convertedKeyLocation);
         byteCodeGenerator->Writer()->Reg2(Js::OpCode::Ld_A_ReuseLoc, pnode->location, rhs->location);
         funcInfo->ReleaseLoc(rhs);
+        if (convertedKeyLocation != Js::Constants::NoRegister)
+        {
+            funcInfo->ReleaseTmpRegister(convertedKeyLocation);
+        }
 
         byteCodeGenerator->Writer()->MarkLabel(doneLabel);
         funcInfo->ReleaseLoad(lhs);

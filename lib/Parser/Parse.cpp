@@ -13497,8 +13497,22 @@ LRestart:
                     Error(ERRLabelBeforeLexicalDeclaration); 
                 }
             }
-            else if (this->NextTokenConfirmsLetDecl())
+            else if (this->NextTokenConfirmsLetDecl() &&
+                (m_token.tk == tkLBrack ||
+                 !this->GetScanner()->FHadNewLine() ||
+                 (m_pstmtCur != nullptr && m_pstmtCur->GetNop() == knopBlock)))
             {
+                // A LexicalDeclaration is only a Statement inside a block's
+                // StatementList. In a bare statement position (the body of
+                // if/else/while/for/for-in/for-of/with), `let` followed by a
+                // newline and then an identifier or `{` is the identifier
+                // `let` with ASI inserting the semicolon: a Declaration
+                // cannot be the single statement, and the ExpressionStatement
+                // lookahead restriction only excludes `let [`, which stays a
+                // Syntax Error through the declaration path regardless of the
+                // newline. With no newline - or inside a real block, where
+                // `let \n x` is still the declaration per the grammar - keep
+                // the declaration parse.
                 pnode = ParseVariableDeclaration<buildAST>(tkLET, ichMin);
                 goto LNeedTerminator;
             }

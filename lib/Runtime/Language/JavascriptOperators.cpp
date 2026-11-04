@@ -452,15 +452,33 @@ using namespace Js;
 
     Js::JavascriptString* GetPropertyDisplayNameForError(Var prop, ScriptContext* scriptContext)
     {
+        // The name only formats an error message, and every caller computes it
+        // while a TypeError (null/undefined element base, or a missing method)
+        // is already pending. Per ES2025 (sec-getvalue / sec-putvalue step
+        // order) that TypeError is thrown by ToObject(base) BEFORE ToPropertyKey
+        // runs, so this conversion must not observe user code: a key whose
+        // ToString would call (or throw in) a user toString/valueOf is reported
+        // without a name rather than replacing the pending error. Primitives
+        // convert without user code and keep naming the property.
         JavascriptString* str;
-        JavascriptSymbol *symbol = JavascriptOperators::TryFromVar<JavascriptSymbol>(prop);
-        if (symbol)
+        switch (JavascriptOperators::GetTypeId(prop))
         {
-            str = JavascriptSymbol::ToString(symbol->GetValue(), scriptContext);
-        }
-        else
-        {
+        case TypeIds_String:
+            str = UnsafeVarTo<JavascriptString>(prop);
+            break;
+        case TypeIds_Symbol:
+            str = JavascriptSymbol::ToString(UnsafeVarTo<JavascriptSymbol>(prop)->GetValue(), scriptContext);
+            break;
+        case TypeIds_Integer:
+        case TypeIds_Number:
+        case TypeIds_Boolean:
+        case TypeIds_Undefined:
+        case TypeIds_Null:
             str = JavascriptConversion::ToString(prop, scriptContext);
+            break;
+        default:
+            str = scriptContext->GetLibrary()->GetEmptyString();
+            break;
         }
 
         return str;

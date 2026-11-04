@@ -5269,11 +5269,45 @@ void AssignRegisters(ParseNode *pnode, ByteCodeGenerator *byteCodeGenerator)
     case knopDecPre:
     case knopIncPre:
         byteCodeGenerator->EnregisterConstant(1);
+        if (pnode->AsParseNodeUni()->pnode1->nop == knopIndex)
+        {
+            // The compound element load guards its base with a null/undefined
+            // TypeError before ToPropertyKey; those comparisons run on the
+            // constant registers, which must exist before temp allocation.
+            byteCodeGenerator->AssignNullConstRegister();
+            byteCodeGenerator->AssignUndefinedConstRegister();
+        }
         CheckMaybeEscapedUse(pnode->AsParseNodeUni()->pnode1, byteCodeGenerator);
+        break;
+    case knopAsgAdd:
+    case knopAsgSub:
+    case knopAsgMul:
+    case knopAsgDiv:
+    case knopAsgExpo:
+    case knopAsgMod:
+    case knopAsgAnd:
+    case knopAsgXor:
+    case knopAsgOr:
+    case knopAsgLsh:
+    case knopAsgRsh:
+    case knopAsgRs2:
+    case knopAsgLogAnd:
+    case knopAsgLogOr:
+        if (pnode->AsParseNodeBin()->pnode1->nop == knopIndex)
+        {
+            // Same as the ++/-- case above: a compound element load needs the
+            // null/undefined constants for its base guard.
+            byteCodeGenerator->AssignNullConstRegister();
+            byteCodeGenerator->AssignUndefinedConstRegister();
+        }
+        // Same escaped-use walk the default case gives other binary operators.
+        CheckMaybeEscapedUse(pnode->AsParseNodeBin()->pnode1, byteCodeGenerator);
+        CheckMaybeEscapedUse(pnode->AsParseNodeBin()->pnode2, byteCodeGenerator);
         break;
     case knopCoalesce:
     case knopAsgCoalesce:
         byteCodeGenerator->AssignNullConstRegister();
+        byteCodeGenerator->AssignUndefinedConstRegister();
         // Both children need the same escaped-use walk the default case
         // gives other binary operators (||, &&, &&=, ||=): without it a
         // function expression as a direct operand (y ?? function(){},
