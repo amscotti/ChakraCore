@@ -332,6 +332,87 @@ var tests = [
             scriptOK("ordinary labels in static block",
                 "class C { static { outer: inner: 0; } }");
         }
+    },
+    {
+        name: "super element references capture GetSuperBase after the key Expression (MakeSuperPropertyReference order)",
+        body() {
+            function events(kind, swapInExpression) {
+                var log = [];
+                var oldP = { get g() { log.push("old-get"); return "old"; }, set g(v) { log.push("old-set:" + v); } };
+                var newP = { get g() { log.push("new-get"); return "new"; }, set g(v) { log.push("new-set:" + v); } };
+                var obj;
+                obj = {
+                    __proto__: oldP,
+                    m(swap) {
+                        // Expression-time swap: the comma expression runs while
+                        // the key Expression is evaluated, i.e. BEFORE
+                        // MakeSuperPropertyReference performs GetSuperBase
+                        // (sec-super-keyword-runtime-semantics-evaluation), so
+                        // both the load and the store must use the NEW chain.
+                        if (swapInExpression) {
+                            if (kind === "store") { super[(swap(), "g")] = 9; return "stored"; }
+                            if (kind === "compound") { return super[(swap(), "g")] += 1; }
+                            if (kind === "logical") { return super[(swap(), "g")] ||= 5; }
+                            if (kind === "inc") { return super[(swap(), "g")]++; }
+                            return super[(swap(), "g")];
+                        }
+                        // ToPropertyKey-time swap control: the toString runs
+                        // AFTER GetSuperBase, so the captured base stays the
+                        // OLD chain (test262
+                        // prop-expr-getsuperbase-before-topropertykey-*).
+                        var key = { toString() { swap(); return "g"; } };
+                        if (kind === "store") { super[key] = 9; return "stored"; }
+                        if (kind === "compound") { return super[key] += 1; }
+                        return super[key];
+                    }
+                };
+                var swap = function () { Object.setPrototypeOf(obj, newP); };
+                var r = obj.m(swap);
+                return r + " | " + log.join(",");
+            }
+
+            // Expression-time swap: every form resolves the new chain.
+            assert.areEqual("new | new-get", events("read", true), "expression swap read");
+            assert.areEqual("stored | new-set:9", events("store", true), "expression swap store");
+            assert.areEqual("new1 | new-get,new-set:new1", events("compound", true), "expression swap compound");
+            assert.areEqual("new | new-get", events("logical", true), "expression swap logical (falsy: no store)");
+            assert.areEqual("NaN | new-get,new-set:NaN", events("inc", true), "expression swap increment");
+
+            // ToPropertyKey-time swap control: the captured base is the old
+            // chain for the load and the store (spec keeps one reference; the
+            // Node oracle re-resolves the compound store through the new
+            // chain -- a V8 deviation from the single-reference PutValue, not
+            // followed here, matching the B4-2 card's store-through-the-second-
+            // key lineage).
+            assert.areEqual("old | old-get", events("read", false), "toString swap read uses the old chain");
+            assert.areEqual("stored | old-set:9", events("store", false), "toString swap store uses the old chain");
+            assert.areEqual("old1 | old-get,old-set:old1", events("compound", false), "toString swap compound keeps the captured base");
+        }
+    },
+    {
+        name: "own writable caller/arguments properties win over the legacy read-only layer",
+        body() {
+            var f = function () { return 1; };
+            Object.defineProperty(f, "caller", { value: 42, writable: true, configurable: true });
+            assert.areEqual(42, f.caller, "own caller readable");
+            f.caller = 7;
+            assert.areEqual(7, f.caller, "plain assignment writes the own caller");
+            assert.isTrue(Reflect.set(f, "caller", 9), "Reflect.set returns true for the own caller");
+            assert.areEqual(9, f.caller, "Reflect.set wrote the own caller");
+
+            var g = function () { return 2; };
+            Object.defineProperty(g, "arguments", { value: 40, writable: true, configurable: true });
+            g.arguments = 8;
+            assert.areEqual(8, g.arguments, "plain assignment writes the own arguments");
+
+            // Without an own property the legacy layer is unchanged: sloppy
+            // writes stay silent no-ops and strict writes throw.
+            var h = function () { return 3; };
+            h.caller = 1;
+            assert.areEqual(null, h.caller, "legacy read still works after a sloppy write");
+            assert.throws(function () { "use strict"; h.caller = 1; }, TypeError,
+                "strict write to the legacy caller still throws");
+        }
     }
 ];
 

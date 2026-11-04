@@ -264,3 +264,46 @@ C4 measurement should confirm the totals with zero regressions.
   `test/es7/class-private-methods.js` and
   `test/es7/class-static-private-fields.js` no longer read the value of a
   class *declaration* out of `eval` (class expressions instead).
+
+### Review outcome (dual ACCEPT on repair; adversarial REJECT-as-is resolved)
+
+The general review ACCEPTed with two bug conditions; the adversarial
+review REJECTED as-is, flipping to ACCEPT on the same two patches —
+both landed (integrator-executed after the implementer session hit a
+usage-limit window; one missing array comma in the regression test
+fixed en route).
+
+1. **B5-4 (lane-introduced regression) REPAIRED:** the
+   `captureBaseInPlace` branch now emits the key Expression BEFORE
+   acquiring the carrier + `LdHomeObjProto` (ES2025
+   MakeSuperPropertyReference order: this-check → Expression →
+   GetSuperBase → ToPropertyKey/RHS); `FuncInfo::ReleaseReference`
+   reorders to carrier-first LIFO (debug asserts the discipline).
+   Regression test: expression-time home-prototype swaps resolve the
+   NEW chain for read/store/compound/logical/increment; a
+   toString-time swap (ToPropertyKey) correctly keeps the captured
+   OLD chain (with the Node deviation there recorded against the
+   B4-2 single-reference lineage). The rvalue/call paths were already
+   correct and are untouched.
+2. **B5-6 REPAIRED:** both legacy store sites (`JavascriptFunction::
+   SetProperty` isReadOnly branch and `SetProperty_Internal`'s
+   short-circuit) now mirror the gOPD guard's `!HasProperty`
+   condition — a user-installed own `caller`/`arguments` property is
+   an ordinary writable property (Node: assignment writes it,
+   `Reflect.set` returns true). Regression shapes included.
+3. **B5-5 corrected as PRE-EXISTING** (adversarial verified on the
+   pre-lane binary): `(async function await(){})` is accepted outside
+   await regions on BOTH old and new engines — one-line scanner
+   condition, unpinned by any corpus; carded.
+4. **New card — Reflect.set oracle split (pre-existing):** plain
+   `f.caller = 1` on a sloppy fn is a silent no-op (matching Node);
+   `Reflect.set(f, 'caller', v)` without an own property hits the
+   poison accessor and THROWS the restricted-properties TypeError
+   (spec-letter, Node-deviating). Three behaviors for one property
+   once defineProperty is in play; the deviation is now explicitly
+   carded rather than half-accidental.
+5. **B5-2 broadened:** computed-key super stores lose the
+   OrdinarySet RECEIVER for data properties too (`super[k]='v'` →
+   base's property vs Node's own property; pre-existing on the
+   pre-lane binary; literal/dot forms correct) — the card now covers
+   the receiver, not just accessor this-binding.

@@ -6957,26 +6957,30 @@ void EmitSuperPropertyReferenceOperands(ParseNodeBin *pnodeIndex, ByteCodeGenera
     funcInfo->ReleaseTmpRegister(thisTmp);
 
     Emit(pnodeIndex->pnode1, byteCodeGenerator, funcInfo, false);
+    Emit(pnodeIndex->pnode2, byteCodeGenerator, funcInfo, false);
     if (captureBaseInPlace)
     {
-        // The captured base must outlive the key conversion and (for compound
-        // assignment) the RHS. It is carried in the super reference's pnodeThis
-        // node location (otherwise unused on load/store paths, which emit only
-        // the scratch this-binding check): node locations persist until the
-        // consumer releases them. Never overwrite the super reference's own
-        // register -- it holds the shared home-object symbol value that later
-        // super references in the same function reload through.
+        // MakeSuperPropertyReference runs AFTER the Expression is evaluated
+        // and BEFORE its ToPropertyKey / a later RHS (ES2025
+        // sec-super-keyword-runtime-semantics-evaluation: Expression ->
+        // GetValue -> MakeSuperPropertyReference -> GetSuperBase; the outer
+        // GetValue/PutValue performs ToPropertyKey). The base is captured
+        // here, after the key Expression's side effects: an Expression-time
+        // home-prototype swap resolves the NEW chain, while a swap inside
+        // the key's toString (ToPropertyKey time) still sees the OLD chain.
+        //
+        // The captured base must outlive the key conversion and (for
+        // compound assignment) the RHS. It is carried in the super
+        // reference's pnodeThis node location (otherwise unused on
+        // load/store paths, which emit only the scratch this-binding
+        // check): node locations persist until the consumer releases them.
+        // Never overwrite the super reference's own register -- it holds
+        // the shared home-object symbol value that later super references
+        // in the same function reload through.
         ParseNodeSpecialName *pnodeThisCarrier = pnodeIndex->AsParseNodeSuperReference()->pnodeThis;
         funcInfo->AcquireLoc(pnodeThisCarrier);
         byteCodeGenerator->Writer()->Reg2(
             Js::OpCode::LdHomeObjProto, pnodeThisCarrier->location, pnodeIndex->pnode1->location);
-        Emit(pnodeIndex->pnode2, byteCodeGenerator, funcInfo, false);
-    }
-    else
-    {
-        // Short-lived base (plain rvalue load / call target): the site
-        // derives the base itself, in the historical emission shape.
-        Emit(pnodeIndex->pnode2, byteCodeGenerator, funcInfo, false);
     }
 }
 

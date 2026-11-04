@@ -2931,18 +2931,22 @@ LABEL1:
 
     BOOL JavascriptFunction::SetProperty(PropertyId propertyId, Var value, PropertyOperationFlags flags, PropertyValueInfo* info)
     {
+        // The legacy read-only treatment applies only when no real own
+        // caller/arguments property exists: a user-installed own property
+        // (defineProperty) is an ordinary writable/configurable property and
+        // stores must reach it (mirrors the [[GetOwnProperty]] guard).
         bool isReadOnly = false;
         switch (propertyId)
         {
         case PropertyIds::caller:
-            if (this->HasRestrictedProperties())
+            if (this->HasRestrictedProperties() && !this->HasProperty(propertyId))
             {
                 isReadOnly = true;
             }
             break;
 
         case PropertyIds::arguments:
-            if (this->HasRestrictedProperties())
+            if (this->HasRestrictedProperties() && !this->HasProperty(propertyId))
             {
                 isReadOnly = true;
             }

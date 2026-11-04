@@ -294,16 +294,17 @@ void FuncInfo::ReleaseReference(ParseNode *pnode)
         break;
 
     case knopIndex:
-        this->ReleaseLoc(pnode->AsParseNodeBin()->pnode2);
         // A super element reference carries its captured GetSuperBase value
-        // in the pnodeThis node location (acquired between the super operand
-        // and the key expression in EmitSuperPropertyReferenceOperands), so
-        // release it between the key and the super operand to preserve the
-        // temp-stack LIFO discipline.
+        // in the pnodeThis node location, acquired AFTER the key expression
+        // (MakeSuperPropertyReference order) in
+        // EmitSuperPropertyReferenceOperands -- so it is the top-most of the
+        // three and must be released first to preserve the temp-stack LIFO
+        // discipline (debug builds assert it).
         if (ByteCodeGenerator::IsSuper(pnode->AsParseNodeBin()->pnode1))
         {
             this->ReleaseLoc(pnode->AsParseNodeSuperReference()->pnodeThis);
         }
+        this->ReleaseLoc(pnode->AsParseNodeBin()->pnode2);
         this->ReleaseLoc(pnode->AsParseNodeBin()->pnode1);
         break;
 

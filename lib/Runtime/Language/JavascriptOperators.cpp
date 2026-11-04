@@ -3097,7 +3097,8 @@ CommonNumber:
         BOOL setAccessorResult = FALSE;
         if ((propertyId == PropertyIds::caller || propertyId == PropertyIds::arguments) &&
             VarIs<JavascriptFunction>(object) &&
-            VarTo<JavascriptFunction>(object)->HasRestrictedProperties())
+            VarTo<JavascriptFunction>(object)->HasRestrictedProperties() &&
+            !object->HasProperty(propertyId))
         {
             // Legacy `caller`/`arguments` on sloppy script functions behave as
             // read-only own data for stores: the store must not continue to
