@@ -8259,13 +8259,17 @@ void Parser::ParseFncName(ParseNodeFnc * pnodeFnc, ushort flags, IdentPtr* pFncN
     // BindingIdentifier[~Yield, +Await] (15.8): `await` is rejected even
     // where the ambient context scans it as a plain identifier (sloppy
     // script top level), matching the tkAWAIT region case rejected above.
+    // The check is on the folded name (StringValue), so an escaped spelling
+    // (`aw\u0061it`) must reject too — the scanner interns it under the same
+    // pid as the literal spelling, so compare pid identity directly instead
+    // of CheckContextualKeyword, which excludes escaped spellings.
     // Declarations inherit the ambient [?Await] instead, so a sloppy
     // top-level `async function await(){}` stays legal and inside an
     // await-region it is already rejected through the tkAWAIT path.
     // (IdentifierExpectedError asserts a non-tkID token, so report through
     // the generic invalid-identifier error with the offending name.)
     if (!fDeclaration && pnodeFnc->IsAsync() && m_token.tk == tkID &&
-        CheckContextualKeyword(wellKnownPropertyPids.await))
+        m_token.GetIdentifier(this->GetHashTbl()) == wellKnownPropertyPids.await)
     {
         Error(ERRInvalidIdentifier, m_token.GetIdentifier(this->GetHashTbl())->Psz(),
               GetTokenString(GetScanner()->GetPrevious()));

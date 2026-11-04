@@ -1891,10 +1891,21 @@ LReserved:
                 goto LDone;
             }
 
+// These fast paths are reached only for the literal (unescaped)
+// spellings — an escaped identifier takes the '\\' case below and
+// ScanIdentifierContinue — so the pre-interned PID they emit can never
+// carry an escape. Write the per-token escape marker here as well:
+// consult sites (ParseMetaProperty, CheckContextualKeyword, async/let
+// detection) must not read a stale true left over from an earlier
+// escaped identifier (`var q\u0071 = 1; new.target;` misreporting the
+// meta property as escaped), including across the deferred re-parse
+// boundary, where a first-time syntax error trips the
+// no-syntax-errors-on-reparse assert.
 LEval:
             {
                 token = tkID;
                 if (!this->m_parser) goto LIdentifier;
+                m_lastIdentifierHasEscape = false;
                 m_ptoken->SetIdentifier(this->m_parser->GetEvalPid());
                 goto LDone;
             }
@@ -1903,6 +1914,7 @@ LArguments:
             {
                 token = tkID;
                 if (!this->m_parser) goto LIdentifier;
+                m_lastIdentifierHasEscape = false;
                 m_ptoken->SetIdentifier(this->m_parser->GetArgumentsPid());
                 goto LDone;
             }
@@ -1911,6 +1923,7 @@ LTarget:
             {
                 token = tkID;
                 if (!this->m_parser) goto LIdentifier;
+                m_lastIdentifierHasEscape = false;
                 m_ptoken->SetIdentifier(this->m_parser->GetTargetPid());
                 goto LDone;
             }
