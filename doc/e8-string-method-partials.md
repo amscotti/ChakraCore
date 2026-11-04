@@ -112,7 +112,7 @@ recorded decision still owes and prove no second defect hides underneath:
 
 | Selection | Flag | Result |
 |---|---|---|
-| matchAll 50 scenarios | `-ES6RegExSymbols` | **50/0** (S7's residual 8 → 0: BigInt, named-groups/v-flag and species-get legs all closed by later lanes) |
+| matchAll 50 scenarios | `-ES6RegExSymbols` | **50/0** (S7's in-selection residual 8 → 0: BigInt and named-groups/v-flag legs closed by later lanes; review-corrected: the 4 species-get scenarios are OUTSIDE this selection and still fail 0/4 under symbols-only — they close via the proto-props substrate, verified 4/4 two-flag) |
 | replaceAll 92 scenarios | `-ES6RegExSymbols` | **92/0** (S11's residual 4 → 0) |
 | match-indices 84 scenarios | `-ES6RegExPrototypeProperties` | **84/0** |
 
@@ -191,3 +191,21 @@ disabled-flag/rfm buckets they already occupy).
 - Node differentials: the three batteries of §4 (scripts in the run log; two Node-side defects found, ch spec-correct on both).
 - Gates (unchanged tree, same binaries): `zig build check` regression **2048/0**, verify-bytecode "source headers unchanged", native/smoke/metadata PASS; `zig build check-regression -Dprofile=debug-static` **2100/0**. No test landed; pin delta N/A.
 - `git status` clean before and after; only this receipt and the triage artifact are committed.
+
+### Review outcome (ACCEPT; corrections folded)
+
+Single-review certification (zero-change lane; classification risk
+covered by spot-reading). All six measured numbers, the tag counts,
+ceilings, controls, and the zero-change surface reproduced exactly on
+ONE current binary. Folded: (1) the species-legs parenthetical
+corrected (they need proto-props, not symbols — verified 4/4 two-flag);
+(2) binary bookkeeping: the before/ceilings halves ran on two builds
+(`30c7e1ec`/`5e210836` — the named binary no longer exists); the
+review's single-binary reproduction discharges the data, but triage
+lanes must name both builds or explain the rebuild — recorded as the
+standard here; (3) artifact label (matchIndices failing_files lists
+the 13 TAGGED files; 24 files fail incl. 11 same-substrate untagged
+`flags/*`); (4) "two Node-side defects" — defect 2 is a formatting
+difference, not a behavioral defect (corrected); (5) matchAll-30 is a
+manifest §5b disabled-flag entry (inside the 558), not §5c; (6) "15
+failing files" → 23 (15 = the tagged subset).
