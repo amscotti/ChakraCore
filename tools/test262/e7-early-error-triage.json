@@ -1,0 +1,85 @@
+{
+ "before_run": "out/test262-e7-dne-before (da0a72dbb clean build), 39301 scenarios",
+ "failing_files": [
+  "test/language/expressions/assignment/dstr/obj-rest-before-comma-invalid.js",
+  "test/language/expressions/assignmenttargettype/direct-callexpression-as-for-in-lhs.js",
+  "test/language/expressions/assignmenttargettype/direct-callexpression-as-for-of-lhs.js",
+  "test/language/expressions/assignmenttargettype/direct-callexpression-in-compound-assignment.js",
+  "test/language/expressions/assignmenttargettype/direct-callexpression-in-postfix-update.js",
+  "test/language/expressions/assignmenttargettype/direct-callexpression-in-prefix-update.js",
+  "test/language/expressions/assignmenttargettype/direct-callexpression.js",
+  "test/language/expressions/assignmenttargettype/direct-new-memberexpression-arguments.js",
+  "test/language/expressions/assignmenttargettype/parenthesized-callexpression-in-compound-assignment.js",
+  "test/language/expressions/assignmenttargettype/parenthesized-callexpression.js",
+  "test/language/expressions/assignmenttargettype/parenthesized-new-memberexpression-arguments.js",
+  "test/language/expressions/async-generator/early-errors-expression-await-as-function-binding-identifier.js",
+  "test/language/expressions/dynamic-import/syntax/invalid/invalid-assignmenttargettype-syntax-error-3-update-expression.js",
+  "test/language/expressions/dynamic-import/syntax/invalid/invalid-assignmenttargettype-syntax-error-4-update-expression.js",
+  "test/language/expressions/import.meta/syntax/escape-sequence-meta.js",
+  "test/language/expressions/new.target/escaped-target.js",
+  "test/language/expressions/object/prop-def-invalid-async-prefix.js",
+  "test/language/expressions/template-literal/invalid-legacy-octal-escape-sequence-8.js",
+  "test/language/expressions/template-literal/invalid-legacy-octal-escape-sequence-9.js",
+  "test/language/expressions/yield/star-in-iteration-stmt.js",
+  "test/language/statements/for-await-of/head-var-init.js",
+  "test/language/statements/for-in/dstr/obj-rest-before-comma-invalid.js",
+  "test/language/statements/for-of/dstr/obj-rest-before-comma-invalid.js",
+  "test/language/statements/for-of/head-var-init.js",
+  "test/language/statements/if/labelled-fn-stmt-first.js",
+  "test/language/statements/if/labelled-fn-stmt-lone.js",
+  "test/language/statements/if/labelled-fn-stmt-second.js"
+ ],
+ "families": {
+  "A1-strict-call-targets": {
+   "rule": "ES2027 13.15.1/13.4.1/14.7.5.1: AssignmentTargetType of a strict CallExpression is invalid (Annex B.3.9 web-compat is sloppy-only)",
+   "scenarios": 8
+  },
+  "A2-new-expression-targets": {
+   "rule": "new-expressions are not web-compat productions; invalid in every mode",
+   "scenarios": 4
+  },
+  "B-import-call-update-targets": {
+   "rule": "ImportCall is an invalid target in every mode (extends card B1-2's diagnosis)",
+   "scenarios": 4
+  },
+  "C-template-octal-8-9": {
+   "rule": "12.3.9.1: cooked undefined (\\8/\\9 are NotEscapeSequence for templates) is an early error in untagged templates",
+   "scenarios": 4
+  },
+  "D-for-of-var-init": {
+   "rule": "for-of heads admit no binding initializer; Annex B B.3.5 extends for-in only, sloppy var only",
+   "scenarios": 2
+  },
+  "E-if-clause-labelled-fn": {
+   "rule": "14.7.1: IsLabelledFunction(Statement) early error for either clause; B.3.3 admits only the sole unlabelled form",
+   "scenarios": 3
+  },
+  "F-async-expr-named-await": {
+   "rule": "15.8/15.9: async (generator) function expression names are BindingIdentifier[+Await] regardless of ambient",
+   "scenarios": 2
+  },
+  "G-escaped-meta-properties": {
+   "rule": "15.8.2/16.2.1: new.target/import.meta must not contain escape sequences",
+   "scenarios": 3
+  },
+  "H-obj-pattern-rest-trailing-comma": {
+   "rule": "no { BindingRestElement , } production in object binding/assignment patterns",
+   "scenarios": 6
+  },
+  "I-yield-star-in-absorption": {
+   "rule": "yield * threads the ambient [?In]; in a native-for head [~In] leaves 'in' to expose the invalid for-in target",
+   "scenarios": 2
+  },
+  "J-async-prefix-not-method": {
+   "rule": "{async async} / {async name: v} are not PropertyDefinition productions",
+   "scenarios": 2
+  }
+ },
+ "lane": "e7-early-error-executions",
+ "negative_phase_downgrades": 0,
+ "oracle": "Node v26.5.0 rejects all 13 canonical probe shapes; V8 diverges from ES2027 13.15.1 on strict call-result assignments (parses them, runtime ReferenceError) - the spec text quoted by the tests and test262's declared negative phase:parse require the parse error.",
+ "scenarios": 40,
+ "scope": "test/language/statements/** + test/language/expressions/**, $DONOTEVALUATE cluster",
+ "signature": "harness message 'Expected test to throw error of type SyntaxError, got Test262: This statement should not be evaluated'",
+ "unique_files": 27
+}
