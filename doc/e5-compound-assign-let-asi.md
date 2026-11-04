@@ -164,3 +164,43 @@ measurement should confirm 4,080 − 112 = **3,968** with zero regressions.
 The let-ASI 14 leave the required-feature-missing bucket
 (review-corrected misclassification per c4-manifest §2) and the 98 others
 leave the engine-defect bucket.
+
+### Review outcome (dual ACCEPT with conditions, folded)
+
+Both reviewers ACCEPTed with zero lane-introduced `[bug]`. The general
+review verified all three fixes from source and spec (the BrNeq_A×2
+guard is exactly null/undefined; ToPropertyKey-before-RHS ordering;
+heap-object gating keeps primitives raw — patched-BigInt-toString runs
+zero times; const registers pre-allocated for every compound shape)
+and recomputed the full arithmetic (112 f→p / 0 p→f over 39,757,
+composition exact). The adversarial review attacked with mutating-key
+discriminators across all 13 compound operators + logical assignment +
+pre/post inc/dec (engine converts exactly once AND stores through the
+FIRST key — Node stores through the second; the engine even survives
+generator suspension with the memoized temp intact: `o[k] += (yield)`
+resumes correctly where Node corrupts the store), reentrancy
+(throwing toString depth-3, nested compounds, 60-100k warm bailout
+loops — exact in all modes), and a 45-shape parser battery (≡ Node in
+all three parse modes).
+
+**Folded conditions:**
+1. **B4-4 card (pre-existing):** `super[k] += v` (and `super.k +=`)
+   runs the getter AND — for computed/name keys — the STORE with the
+   **home-object prototype as receiver** (instance reads the pollution
+   via the chain); even dot-form getters get the wrong `this`.
+   Pre-existence confirmed (receiver semantics unchanged by this
+   lane); wide-run 0-p2f confirms no corpus masking; fix belongs to a
+   future super-semantics lane. 2. **B4-1 corrected:** the card's
+   `for (let \n of [])` claim does NOT reproduce (both engines
+   reject); the accurate kernel is `for (let \n in {})` accepted by
+   BOTH engine and Node (matching oracle, no action) — card rewritten
+   as a non-issue. 3. **Gate logs archived** under `out/b4-gate-logs/`.
+
+**Folded nits:** the AssignRegisters↔emission pairing risk comment
+(future compound opcodes without an AssignRegisters case assert in
+debug and emit BrNeq_A against NoRegister in release — noted at the
+guard's next touch); error-text asymmetry (compound vs plain nullish
+messages — cosmetic, nothing pins either); knopCoalesce's idempotent
+undefined-const reservation; non-const primitive keys pay one extra
+Ld_A copy (perf-only); the stale `ca-after` mid-lane artifact
+annotated (786/0 comes from `after2`).
