@@ -680,6 +680,15 @@ CommonNumber:
 
     JavascriptString *JavascriptConversion::ToLocaleString(Var aValue, ScriptContext* scriptContext)
     {
+        // Array.prototype.toLocaleString step 10.a / %TypedArray%.prototype.
+        // toLocaleString: each element contributes ToString(Invoke(element,
+        // "toLocaleString")). The method is resolved through the element's
+        // prototype chain, so the primitive formatters
+        // (Number/Boolean/Symbol/BigInt.prototype.toLocaleString) are
+        // user-observable and an override that throws propagates; the direct
+        // primitive formatting this function used to perform skipped that
+        // lookup entirely. Primitives are boxed only to resolve the property;
+        // the call itself receives the original value as the receiver.
         switch (JavascriptOperators::GetTypeId(aValue))
         {
         case TypeIds_Undefined:
@@ -688,30 +697,14 @@ CommonNumber:
         case TypeIds_Null:
             return scriptContext->GetLibrary()->GetNullDisplayString();
 
-        case TypeIds_Integer:
-            return JavascriptNumber::ToLocaleString(TaggedInt::ToInt32(aValue), scriptContext);
-
-        case TypeIds_Boolean:
-            return UnsafeVarTo<JavascriptBoolean>(aValue)->GetValue() ? scriptContext->GetLibrary()->GetTrueDisplayString() : scriptContext->GetLibrary()->GetFalseDisplayString();
-
-        case TypeIds_Int64Number:
-            return JavascriptNumber::ToLocaleString((double)UnsafeVarTo<JavascriptInt64Number>(aValue)->GetValue(), scriptContext);
-
-        case TypeIds_UInt64Number:
-            return JavascriptNumber::ToLocaleString((double)UnsafeVarTo<JavascriptUInt64Number>(aValue)->GetValue(), scriptContext);
-
-        case TypeIds_Number:
-            return JavascriptNumber::ToLocaleString(JavascriptNumber::GetValue(aValue), scriptContext);
-
-        case TypeIds_Symbol:
-            return UnsafeVarTo<JavascriptSymbol>(aValue)->ToString(scriptContext);
-
-        case TypeIds_BigInt:
-            return UnsafeVarTo<JavascriptBigInt>(aValue)->ToString(scriptContext);
-
         default:
             {
-                RecyclableObject* object = VarTo<RecyclableObject>(aValue);
+                RecyclableObject* object = nullptr;
+                if (!JavascriptConversion::ToObject(aValue, scriptContext, &object))
+                {
+                    JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NullOrUndefined, _u("toLocaleString"));
+                }
+
                 Var value = JavascriptOperators::GetProperty(object, PropertyIds::toLocaleString, scriptContext, NULL);
 
                 if (JavascriptConversion::IsCallable(value))
