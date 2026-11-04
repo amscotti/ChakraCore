@@ -1,0 +1,97 @@
+{
+ "lane": "b9-resizable-ab-partial",
+ "source_run": "out/test262-b9-rab-before (HEAD d3533db71 test-profile no-JIT, default flags, corpus 2e0a5676)",
+ "selection": {
+  "definition": "all 421 non-SharedArrayBuffer corpus files tagged features:[resizable-arraybuffer] (471 tagged total; 50 also require SharedArrayBuffer and stay in the S6 disabled-flag bucket)",
+  "scenarios": 842,
+  "before_passed": 810,
+  "before_failed": 32
+ },
+ "cert_manifest_record": {
+  "edition_failed": 130,
+  "engine": "ba796f74f",
+  "attribution": "stale at lane start: B3 detach lane (ac4c9d413) and S8 typedarray tracking (859b07d13) already absorbed 98 of the 130; fresh triage at d3533db71 = 32 failing scenarios / 16 files"
+ },
+ "fresh_triage_families": {
+  "generic_array_join_order": {
+   "scenarios": 4,
+   "files": ["Array/prototype/join/coerced-separator-grow.js", "Array/prototype/join/coerced-separator-shrink.js"],
+   "bucket": "engine-defect-on-existing",
+   "verdict": "Node v26.5.0 + ECMA-262 23.1.3.16: length is read before the separator ToString; ch read it after, so a resize inside the coercion changed the iterated length",
+   "fixed": true
+  },
+  "generic_array_map_reduceright_presence": {
+   "scenarios": 8,
+   "files": ["Array/prototype/map/callbackfn-resize-arraybuffer.js", "Array/prototype/map/resizable-buffer-shrink-mid-iteration.js", "Array/prototype/reduceRight/callbackfn-resize-arraybuffer.js", "Array/prototype/reduceRight/resizable-buffer-shrink-mid-iteration.js"],
+   "bucket": "engine-defect-on-existing",
+   "verdict": "Node + spec 23.1.3.10/23.1.3.24: generic map/reduceRight consult HasProperty per index and skip OOB indices (result index left a hole); the TypedArray fast paths called the callback for OOB indices (map) or clamped the loop to a stale length (reduceRight)",
+   "fixed": true
+  },
+  "object_integrity_on_typedarrays": {
+   "scenarios": 2,
+   "files": ["Object/freeze/typedarray-backed-by-resizable-buffer.js"],
+   "bucket": "engine-defect-on-existing",
+   "verdict": "Node + ECMA-262 (10.4.5.1 [[PreventExtensions]], 7.3.15, 20.1.2.6/20.1.2.20/20.1.2.22): any TA over a resizable buffer rejects preventExtensions/seal/freeze with TypeError; non-empty TAs over fixed buffers reject seal/freeze (configurable:true integer indices); zero-length fixed views succeed",
+   "fixed": true
+  },
+  "typedarray_fill_post_coercion_bounds": {
+   "scenarios": 2,
+   "files": ["TypedArray/prototype/fill/coerced-value-start-end-resize.js"],
+   "bucket": "engine-defect-on-existing",
+   "verdict": "Node + spec 23.2.3.9 step 7 ValidateTypedArrayBounds after the value/start/end coercions; fill only re-checked detachment, not a fixed view gone OOB",
+   "fixed": true
+  },
+  "ctor_from_oob_source_ta": {
+   "scenarios": 2,
+   "files": ["TypedArrayConstructors/ctors/typedarray-arg/src-typedarray-resizable-buffer.js"],
+   "bucket": "engine-defect-on-existing",
+   "verdict": "Node + spec TypedArrayFromTypedArray step: an out-of-bounds fixed source throws TypeError instead of constructing an empty view",
+   "fixed": true
+  },
+  "oob_index_set_coercion_order": {
+   "scenarios": 2,
+   "files": ["TypedArrayConstructors/internals/Set/resized-out-of-bounds-to-in-bounds-index.js"],
+   "bucket": "engine-defect-on-existing (was S8-typedarray residual + B8-2 double-card)",
+   "verdict": "Node + spec 10.4.5.18 TypedArraySetElement: ToNumber/ToBigInt runs first, then the index is revalidated (store happens if the coercion grew the buffer back over the index); ch pre-checked bounds and skipped the store",
+   "fixed": true
+  },
+  "atomics_flag_gated": {
+   "scenarios": 10,
+   "files": ["Atomics/notify/retrieve-length-before-index-coercion*.js", "Atomics/wait/retrieve-length-before-index-coercion.js", "Atomics/waitAsync/retrieve-length-before-index-coercion.js"],
+   "bucket": "disabled-flag (-ESSharedArrayBuffer, manifest 5b: 1176 owed, S6 product decision)",
+   "verdict": "ReferenceError 'Atomics'/'SharedArrayBuffer' is not defined under default flags; flag-on ceiling verified separately",
+   "fixed": false
+  },
+  "reflect_construct_prototype_order": {
+   "scenarios": 2,
+   "files": ["ArrayBuffer/options-maxbytelength-compared-before-object-creation.js"],
+   "bucket": "engine-defect-on-existing (inherited, S8-resizable receipt Residuals)",
+   "verdict": "Reflect.construct pre-creates the result and reads newTarget.prototype in JavascriptReflect::EntryConstruct before the constructor body, so the constructor's RangeError cannot precede the getter; unbounded (needs Reflect.construct redesign)",
+   "fixed": false
+  }
+ },
+ "bonus_fixes": {
+  "canonical_numeric_index_string_neg0": "CanonicalNumericIndexString returned +0.0 for the String '-0' (C integer -0 promotes to +0.0), so ta[\"-0\"] stored/read index 0; fixed to -0.0 (matches Node on store/read/has/getOwnPropertyDescriptor probes)",
+  "array_prototype_methods_called_as_functions": "test/built-ins/Array/prototype/methods-called-as-functions.js (2 scenarios) flipped fail->pass with the join/map fixes",
+  "reflect_preventextensions_false": "Reflect.preventExtensions now reports false (no mutation) for a TA over a resizable buffer instead of marking it non-extensible; Object.* throws, Reflect reports the boolean (no corpus test)"
+ },
+ "flag_on_ceiling": {
+  "flags": "-ESSharedArrayBuffer",
+  "files": 5,
+  "scenarios": 10,
+  "passed": 10,
+  "residual": "all 10 Atomics scenarios pass flag-on; purely the recorded S6 flag decision"
+ },
+ "before_after_whole_selection": {
+  "fail_to_pass": 20,
+  "pass_to_fail": 0
+ },
+ "adjacent_corpus": {
+  "globs": "test/built-ins/{Array/prototype,Object,Reflect,TypedArray,TypedArrayConstructors,ArrayBuffer,DataView}/**/*.js",
+  "scenarios": 18593,
+  "base": "out/test262-b9-adj-base (d3533db71 binary)",
+  "after": "out/test262-b9-adj-final",
+  "fail_to_pass": 22,
+  "pass_to_fail": 0
+ }
+}
