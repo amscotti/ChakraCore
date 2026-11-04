@@ -187,3 +187,41 @@ tools/test262/run.py --binary $PWD/zig-out/bin/ch --checkout $PWD/out/test262 \
 test/runtests.py --test --variants=disable_jit --binary …/ch test/es7 test/BigInt
 zig build check;  zig build -Dprofile=debug-static check-regression;  zig build -Dprofile=jit check
 ```
+
+### Review outcome (dual ACCEPT with mandatory cards, folded)
+
+The general review verified the fix spec-exact on both served paths
+(including the primitive-receiver subtlety: sloppy callees box, strict
+see the primitive — callee-side ToThis per spec), ownership clean
+(per-element boxing is the spec-forced shape; wrapper never escapes),
+and all arithmetic reproduced. The adversarial review ran a 75+-shape
+×4-binary matrix (reentrancy to 1451-deep, 300k churn in the
+per-element window, detach+RAB mid-iteration, Proxy/null-proto/sparse,
+JIT forceNative warm loops — all byte-identical to Node), reran the
+full 2,883-scenario selection byte-identical, and confirmed the
+B8-2/B8-3 cards' exact file sets and ceilings.
+
+**Folded mandatory cards:**
+- **B8-6 (locale-arg forwarding, pre-existing, THIS FAMILY):**
+  `EntryToLocaleString` never reads `args[1..2]` — the element call is
+  `CallInfo(1)` with zero arguments. ES2023+ Array §23.1.3.29 and the
+  %TypedArray% path forward «locales, options» to each element call;
+  the fix's comment cited the pre-2021 `Invoke` text. Node forwards
+  (`[1,2].toLocaleString("de-DE",{...})` → each element sees the args);
+  ch passes none (so `[123456789n].toLocaleString("de-DE")` ignores
+  the locale). Pre-existing (old paths never forwarded either), 0
+  corpus coverage — but this lane owns the family's semantics, so the
+  card is mandatory: thread locales/options through
+  `EntryToLocaleString`/`TypedArrayBase::EntryToLocaleString` →
+  `ToLocaleString` (`CallInfo(3)` when supplied).
+- **B8-7 (default-locale BigInt grouping):** `[123456789n].toLocaleString()`
+  → ch `"123456789"`, Node `"123,456,789"` (numbers DO group) —
+  pre-existing in `BigInt.prototype.toLocaleString` itself, zero
+  corpus coverage; carded.
+- Attribution hedge: 378→304 = ≥58 documented by B3's artifact, the
+  remainder by exclusion (b2/b5 wide flips incl. the
+  subclass-BigInt64Array files) — not a flat 74.
+- "17-shape byte-identical" scoped: the non-callable TypeError MESSAGE
+  differs from Node (type identical, messages not spec'd). The
+  `out/release-shared` dir is a stale pre-lane build (hygiene note;
+  authoritative runs use `zig-out`, sha-matched).
