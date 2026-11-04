@@ -308,3 +308,20 @@ rejected, async methods named await legal — PropertyName, not a binding).
   `zig build check` rc=0 — regression **2048/0**, bytecode up to date,
   `test-shared-basic` PASS; `zig build -Dprofile=debug-static
   check-regression` rc=0 — **2100/0**.
+
+### Review outcome (dual ACCEPT after repair)
+
+Both reviews initially REJECTed narrowly (family G's stale escape bit
+— the LTarget/LEval/LArguments fast paths never wrote it, causing
+spurious rejections, a parse-mode verdict flip, and a deferred-reparse
+assertion on legal code; family F's pid-identity await check missing
+escaped spellings). Both repaired at `ed9b4bf78` (fast-path writes +
+folded-name comparison; tests extended to 12 sub-tests incl.
+poisoned-escape and deferred-reparse controls across all three rlexe
+variants) and both reviewers confirmed ACCEPT with all repros
+resolved. The adversarial review's N2/N4 module claims were WITHDRAWN
+(artifacts of probing the legacy `-ES6Module` flag path — the correct
+`-module`/LoadModule paths reject and enable import.meta ≡ Node); the
+legacy-flag divergence itself is recorded as a pre-existing card.
+Non-blocking recommendations folded: the poisoned/escaped controls are
+permanent rlexe entries; `-ES6Module` alignment is a follow-up card.
