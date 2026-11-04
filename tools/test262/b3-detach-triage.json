@@ -1,0 +1,1315 @@
+{
+ "lane": "b3-detach-buffer",
+ "base_commit": "ac4c9d413",
+ "corpus_revision": "2e0a56762801e275a9fdf96dc49d90ba0cddcf63",
+ "selections": [
+  "test/built-ins/TypedArray/**/*detach* + DataView + ArrayBuffer detach/transfer (444 scenarios)",
+  "test/built-ins/TypedArrayConstructors/**/*detach* (126 scenarios)"
+ ],
+ "edition_selected_failures": 124,
+ "families": {
+  "iteration-callback-detach": 36,
+  "search-fromindex-coercion": 24,
+  "get-getownproperty-undefined": 16,
+  "set-defineproperty-silent-true": 16,
+  "delete-true": 10,
+  "hasproperty-false": 8,
+  "filter-detach": 6,
+  "from-mapper-detaches-result": 6,
+  "set-array-arg-no-throw": 2
+ },
+ "records": [
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/Delete/BigInt/detached-buffer-key-is-not-numeric-index.js",
+   "scenario": "default",
+   "family": "delete-true",
+   "message": "The value of `delete sample[0]` is true Expected SameValue(\u00abfalse\u00bb, \u00abtrue\u00bb) to be true (Testing with BigInt64Array and m",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "BigInt",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/Delete/BigInt/detached-buffer-key-is-not-numeric-index.js",
+   "scenario": "strict mode",
+   "family": "delete-true",
+   "message": "Expected no error, got TypeError: Calling delete on '0' is not allowed in strict mode (Testing with BigInt64Array and ma",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "BigInt",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/Delete/BigInt/detached-buffer-realm.js",
+   "scenario": "default",
+   "family": "delete-true",
+   "message": "The value of `delete sample[0]` is true Expected SameValue(\u00abfalse\u00bb, \u00abtrue\u00bb) to be true (Testing with Float64Array and ma",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "cross-realm",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/Delete/BigInt/detached-buffer-realm.js",
+   "scenario": "strict mode",
+   "family": "delete-true",
+   "message": "Expected no error, got TypeError: Calling delete on '0' is not allowed in strict mode (Testing with Float64Array and mak",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "cross-realm",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/Delete/BigInt/detached-buffer.js",
+   "scenario": "default",
+   "family": "delete-true",
+   "message": "The value of `delete sample[0]` is true Expected SameValue(\u00abfalse\u00bb, \u00abtrue\u00bb) to be true (Testing with BigInt64Array and m",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "BigInt",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/Delete/BigInt/detached-buffer.js",
+   "scenario": "strict mode",
+   "family": "delete-true",
+   "message": "Expected no error, got TypeError: Calling delete on '0' is not allowed in strict mode (Testing with BigInt64Array and ma",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "BigInt",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/Delete/detached-buffer-realm.js",
+   "scenario": "default",
+   "family": "delete-true",
+   "message": "The value of `delete sample[0]` is true Expected SameValue(\u00abfalse\u00bb, \u00abtrue\u00bb) to be true (Testing with Float64Array and ma",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "cross-realm",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/Delete/detached-buffer-realm.js",
+   "scenario": "strict mode",
+   "family": "delete-true",
+   "message": "Expected no error, got TypeError: Calling delete on '0' is not allowed in strict mode (Testing with Float64Array and mak",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "cross-realm",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/Delete/detached-buffer.js",
+   "scenario": "default",
+   "family": "delete-true",
+   "message": "The value of `delete sample[0]` is true Expected SameValue(\u00abfalse\u00bb, \u00abtrue\u00bb) to be true (Testing with Float64Array and ma",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/Delete/detached-buffer.js",
+   "scenario": "strict mode",
+   "family": "delete-true",
+   "message": "Expected no error, got TypeError: Calling delete on '0' is not allowed in strict mode (Testing with Float64Array and mak",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/filter/BigInt/callbackfn-detachbuffer-kept-undefined.js",
+   "scenario": "default",
+   "family": "filter-detach",
+   "message": "All callbacks run before converting the kept values Expected SameValue(\u00ab1\u00bb, \u00ab3\u00bb) to be true (Testing with BigInt64Array ",
+   "features": [
+    "BigInt",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/filter/BigInt/callbackfn-detachbuffer-kept-undefined.js",
+   "scenario": "strict mode",
+   "family": "filter-detach",
+   "message": "All callbacks run before converting the kept values Expected SameValue(\u00ab1\u00bb, \u00ab3\u00bb) to be true (Testing with BigInt64Array ",
+   "features": [
+    "BigInt",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/filter/BigInt/callbackfn-detachbuffer.js",
+   "scenario": "default",
+   "family": "filter-detach",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "BigInt",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/filter/BigInt/callbackfn-detachbuffer.js",
+   "scenario": "strict mode",
+   "family": "filter-detach",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "BigInt",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/filter/callbackfn-detachbuffer.js",
+   "scenario": "default",
+   "family": "filter-detach",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/filter/callbackfn-detachbuffer.js",
+   "scenario": "strict mode",
+   "family": "filter-detach",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/from/from-array-mapper-detaches-result.js",
+   "scenario": "default",
+   "family": "from-mapper-detaches-result",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached.",
+   "features": [
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/from/from-array-mapper-detaches-result.js",
+   "scenario": "strict mode",
+   "family": "from-mapper-detaches-result",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached.",
+   "features": [
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/from/from-typedarray-into-itself-mapper-detaches-result.js",
+   "scenario": "default",
+   "family": "from-mapper-detaches-result",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached.",
+   "features": [
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/from/from-typedarray-into-itself-mapper-detaches-result.js",
+   "scenario": "strict mode",
+   "family": "from-mapper-detaches-result",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached.",
+   "features": [
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/from/from-typedarray-mapper-detaches-result.js",
+   "scenario": "default",
+   "family": "from-mapper-detaches-result",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached.",
+   "features": [
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/from/from-typedarray-mapper-detaches-result.js",
+   "scenario": "strict mode",
+   "family": "from-mapper-detaches-result",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached.",
+   "features": [
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/Get/BigInt/detached-buffer-realm.js",
+   "scenario": "default",
+   "family": "get-getownproperty-undefined",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "BigInt",
+    "cross-realm",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/Get/BigInt/detached-buffer-realm.js",
+   "scenario": "strict mode",
+   "family": "get-getownproperty-undefined",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "BigInt",
+    "cross-realm",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/Get/BigInt/detached-buffer.js",
+   "scenario": "default",
+   "family": "get-getownproperty-undefined",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "BigInt",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/Get/BigInt/detached-buffer.js",
+   "scenario": "strict mode",
+   "family": "get-getownproperty-undefined",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "BigInt",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/Get/detached-buffer-realm.js",
+   "scenario": "default",
+   "family": "get-getownproperty-undefined",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "cross-realm",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/Get/detached-buffer-realm.js",
+   "scenario": "strict mode",
+   "family": "get-getownproperty-undefined",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "cross-realm",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/Get/detached-buffer.js",
+   "scenario": "default",
+   "family": "get-getownproperty-undefined",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/Get/detached-buffer.js",
+   "scenario": "strict mode",
+   "family": "get-getownproperty-undefined",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/GetOwnProperty/BigInt/detached-buffer-realm.js",
+   "scenario": "default",
+   "family": "get-getownproperty-undefined",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "BigInt",
+    "cross-realm",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/GetOwnProperty/BigInt/detached-buffer-realm.js",
+   "scenario": "strict mode",
+   "family": "get-getownproperty-undefined",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "BigInt",
+    "cross-realm",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/GetOwnProperty/BigInt/detached-buffer.js",
+   "scenario": "default",
+   "family": "get-getownproperty-undefined",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "BigInt",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/GetOwnProperty/BigInt/detached-buffer.js",
+   "scenario": "strict mode",
+   "family": "get-getownproperty-undefined",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "BigInt",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/GetOwnProperty/detached-buffer-realm.js",
+   "scenario": "default",
+   "family": "get-getownproperty-undefined",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "cross-realm",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/GetOwnProperty/detached-buffer-realm.js",
+   "scenario": "strict mode",
+   "family": "get-getownproperty-undefined",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "cross-realm",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/GetOwnProperty/detached-buffer.js",
+   "scenario": "default",
+   "family": "get-getownproperty-undefined",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/GetOwnProperty/detached-buffer.js",
+   "scenario": "strict mode",
+   "family": "get-getownproperty-undefined",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/HasProperty/BigInt/detached-buffer-realm.js",
+   "scenario": "default",
+   "family": "hasproperty-false",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "BigInt",
+    "cross-realm",
+    "Reflect",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/HasProperty/BigInt/detached-buffer-realm.js",
+   "scenario": "strict mode",
+   "family": "hasproperty-false",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "BigInt",
+    "cross-realm",
+    "Reflect",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/HasProperty/BigInt/detached-buffer.js",
+   "scenario": "default",
+   "family": "hasproperty-false",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "BigInt",
+    "Reflect",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/HasProperty/BigInt/detached-buffer.js",
+   "scenario": "strict mode",
+   "family": "hasproperty-false",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "BigInt",
+    "Reflect",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/HasProperty/detached-buffer-realm.js",
+   "scenario": "default",
+   "family": "hasproperty-false",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "cross-realm",
+    "Reflect",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/HasProperty/detached-buffer-realm.js",
+   "scenario": "strict mode",
+   "family": "hasproperty-false",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "cross-realm",
+    "Reflect",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/HasProperty/detached-buffer.js",
+   "scenario": "default",
+   "family": "hasproperty-false",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "Reflect",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/HasProperty/detached-buffer.js",
+   "scenario": "strict mode",
+   "family": "hasproperty-false",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "Reflect",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/every/BigInt/callbackfn-detachbuffer.js",
+   "scenario": "default",
+   "family": "iteration-callback-detach",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "BigInt",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/every/BigInt/callbackfn-detachbuffer.js",
+   "scenario": "strict mode",
+   "family": "iteration-callback-detach",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "BigInt",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/every/callbackfn-detachbuffer.js",
+   "scenario": "default",
+   "family": "iteration-callback-detach",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/every/callbackfn-detachbuffer.js",
+   "scenario": "strict mode",
+   "family": "iteration-callback-detach",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/find/BigInt/predicate-may-detach-buffer.js",
+   "scenario": "default",
+   "family": "iteration-callback-detach",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "BigInt",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/find/BigInt/predicate-may-detach-buffer.js",
+   "scenario": "strict mode",
+   "family": "iteration-callback-detach",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "BigInt",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/find/predicate-may-detach-buffer.js",
+   "scenario": "default",
+   "family": "iteration-callback-detach",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/find/predicate-may-detach-buffer.js",
+   "scenario": "strict mode",
+   "family": "iteration-callback-detach",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/findIndex/BigInt/predicate-may-detach-buffer.js",
+   "scenario": "default",
+   "family": "iteration-callback-detach",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "BigInt",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/findIndex/BigInt/predicate-may-detach-buffer.js",
+   "scenario": "strict mode",
+   "family": "iteration-callback-detach",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "BigInt",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/findIndex/predicate-may-detach-buffer.js",
+   "scenario": "default",
+   "family": "iteration-callback-detach",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/findIndex/predicate-may-detach-buffer.js",
+   "scenario": "strict mode",
+   "family": "iteration-callback-detach",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/findLast/BigInt/predicate-may-detach-buffer.js",
+   "scenario": "default",
+   "family": "iteration-callback-detach",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "BigInt",
+    "TypedArray",
+    "array-find-from-last"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/findLast/BigInt/predicate-may-detach-buffer.js",
+   "scenario": "strict mode",
+   "family": "iteration-callback-detach",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "BigInt",
+    "TypedArray",
+    "array-find-from-last"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/findLast/predicate-may-detach-buffer.js",
+   "scenario": "default",
+   "family": "iteration-callback-detach",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "TypedArray",
+    "array-find-from-last"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/findLast/predicate-may-detach-buffer.js",
+   "scenario": "strict mode",
+   "family": "iteration-callback-detach",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "TypedArray",
+    "array-find-from-last"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/findLastIndex/BigInt/predicate-may-detach-buffer.js",
+   "scenario": "default",
+   "family": "iteration-callback-detach",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "BigInt",
+    "TypedArray",
+    "array-find-from-last"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/findLastIndex/BigInt/predicate-may-detach-buffer.js",
+   "scenario": "strict mode",
+   "family": "iteration-callback-detach",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "BigInt",
+    "TypedArray",
+    "array-find-from-last"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/findLastIndex/predicate-may-detach-buffer.js",
+   "scenario": "default",
+   "family": "iteration-callback-detach",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "TypedArray",
+    "array-find-from-last"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/findLastIndex/predicate-may-detach-buffer.js",
+   "scenario": "strict mode",
+   "family": "iteration-callback-detach",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "TypedArray",
+    "array-find-from-last"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/forEach/BigInt/callbackfn-detachbuffer.js",
+   "scenario": "default",
+   "family": "iteration-callback-detach",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "BigInt",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/forEach/BigInt/callbackfn-detachbuffer.js",
+   "scenario": "strict mode",
+   "family": "iteration-callback-detach",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "BigInt",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/forEach/callbackfn-detachbuffer.js",
+   "scenario": "default",
+   "family": "iteration-callback-detach",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/forEach/callbackfn-detachbuffer.js",
+   "scenario": "strict mode",
+   "family": "iteration-callback-detach",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/reduce/BigInt/callbackfn-detachbuffer.js",
+   "scenario": "default",
+   "family": "iteration-callback-detach",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "BigInt",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/reduce/BigInt/callbackfn-detachbuffer.js",
+   "scenario": "strict mode",
+   "family": "iteration-callback-detach",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "BigInt",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/reduce/callbackfn-detachbuffer.js",
+   "scenario": "default",
+   "family": "iteration-callback-detach",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/reduce/callbackfn-detachbuffer.js",
+   "scenario": "strict mode",
+   "family": "iteration-callback-detach",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/reduceRight/BigInt/callbackfn-detachbuffer.js",
+   "scenario": "default",
+   "family": "iteration-callback-detach",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "BigInt",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/reduceRight/BigInt/callbackfn-detachbuffer.js",
+   "scenario": "strict mode",
+   "family": "iteration-callback-detach",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "BigInt",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/reduceRight/callbackfn-detachbuffer.js",
+   "scenario": "default",
+   "family": "iteration-callback-detach",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/reduceRight/callbackfn-detachbuffer.js",
+   "scenario": "strict mode",
+   "family": "iteration-callback-detach",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/some/BigInt/callbackfn-detachbuffer.js",
+   "scenario": "default",
+   "family": "iteration-callback-detach",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "BigInt",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/some/BigInt/callbackfn-detachbuffer.js",
+   "scenario": "strict mode",
+   "family": "iteration-callback-detach",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "BigInt",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/some/callbackfn-detachbuffer.js",
+   "scenario": "default",
+   "family": "iteration-callback-detach",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/some/callbackfn-detachbuffer.js",
+   "scenario": "strict mode",
+   "family": "iteration-callback-detach",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/includes/BigInt/detached-buffer-during-fromIndex-returns-false-for-zero.js",
+   "scenario": "default",
+   "family": "search-fromindex-coercion",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "BigInt",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/includes/BigInt/detached-buffer-during-fromIndex-returns-false-for-zero.js",
+   "scenario": "strict mode",
+   "family": "search-fromindex-coercion",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "BigInt",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/includes/BigInt/detached-buffer-during-fromIndex-returns-true-for-undefined.js",
+   "scenario": "default",
+   "family": "search-fromindex-coercion",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "BigInt",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/includes/BigInt/detached-buffer-during-fromIndex-returns-true-for-undefined.js",
+   "scenario": "strict mode",
+   "family": "search-fromindex-coercion",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "BigInt",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/includes/detached-buffer-during-fromIndex-returns-false-for-zero.js",
+   "scenario": "default",
+   "family": "search-fromindex-coercion",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/includes/detached-buffer-during-fromIndex-returns-false-for-zero.js",
+   "scenario": "strict mode",
+   "family": "search-fromindex-coercion",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/includes/detached-buffer-during-fromIndex-returns-true-for-undefined.js",
+   "scenario": "default",
+   "family": "search-fromindex-coercion",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/includes/detached-buffer-during-fromIndex-returns-true-for-undefined.js",
+   "scenario": "strict mode",
+   "family": "search-fromindex-coercion",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/indexOf/BigInt/detached-buffer-during-fromIndex-returns-minus-one-for-undefined.js",
+   "scenario": "default",
+   "family": "search-fromindex-coercion",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "BigInt",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/indexOf/BigInt/detached-buffer-during-fromIndex-returns-minus-one-for-undefined.js",
+   "scenario": "strict mode",
+   "family": "search-fromindex-coercion",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "BigInt",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/indexOf/BigInt/detached-buffer-during-fromIndex-returns-minus-one-for-zero.js",
+   "scenario": "default",
+   "family": "search-fromindex-coercion",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "BigInt",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/indexOf/BigInt/detached-buffer-during-fromIndex-returns-minus-one-for-zero.js",
+   "scenario": "strict mode",
+   "family": "search-fromindex-coercion",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "BigInt",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/indexOf/detached-buffer-during-fromIndex-returns-minus-one-for-undefined.js",
+   "scenario": "default",
+   "family": "search-fromindex-coercion",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/indexOf/detached-buffer-during-fromIndex-returns-minus-one-for-undefined.js",
+   "scenario": "strict mode",
+   "family": "search-fromindex-coercion",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/indexOf/detached-buffer-during-fromIndex-returns-minus-one-for-zero.js",
+   "scenario": "default",
+   "family": "search-fromindex-coercion",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/indexOf/detached-buffer-during-fromIndex-returns-minus-one-for-zero.js",
+   "scenario": "strict mode",
+   "family": "search-fromindex-coercion",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/lastIndexOf/BigInt/detached-buffer-during-fromIndex-returns-minus-one-for-undefined.js",
+   "scenario": "default",
+   "family": "search-fromindex-coercion",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "BigInt",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/lastIndexOf/BigInt/detached-buffer-during-fromIndex-returns-minus-one-for-undefined.js",
+   "scenario": "strict mode",
+   "family": "search-fromindex-coercion",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "BigInt",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/lastIndexOf/BigInt/detached-buffer-during-fromIndex-returns-minus-one-for-zero.js",
+   "scenario": "default",
+   "family": "search-fromindex-coercion",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "BigInt",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/lastIndexOf/BigInt/detached-buffer-during-fromIndex-returns-minus-one-for-zero.js",
+   "scenario": "strict mode",
+   "family": "search-fromindex-coercion",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "BigInt",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/lastIndexOf/detached-buffer-during-fromIndex-returns-minus-one-for-undefined.js",
+   "scenario": "default",
+   "family": "search-fromindex-coercion",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/lastIndexOf/detached-buffer-during-fromIndex-returns-minus-one-for-undefined.js",
+   "scenario": "strict mode",
+   "family": "search-fromindex-coercion",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/lastIndexOf/detached-buffer-during-fromIndex-returns-minus-one-for-zero.js",
+   "scenario": "default",
+   "family": "search-fromindex-coercion",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/lastIndexOf/detached-buffer-during-fromIndex-returns-minus-one-for-zero.js",
+   "scenario": "strict mode",
+   "family": "search-fromindex-coercion",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/set/array-arg-targetbuffer-detached-on-get-src-value-no-throw.js",
+   "scenario": "default",
+   "family": "set-array-arg-no-throw",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArray/prototype/set/array-arg-targetbuffer-detached-on-get-src-value-no-throw.js",
+   "scenario": "strict mode",
+   "family": "set-array-arg-no-throw",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/DefineOwnProperty/BigInt/tonumber-value-detached-buffer.js",
+   "scenario": "default",
+   "family": "set-defineproperty-silent-true",
+   "message": "Reflect.defineProperty(ta, 0, {value: {valueOf() {$DETACHBUFFER(ta.buffer); return 42n;}}}) must return true Expected Sa",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "BigInt",
+    "Reflect",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/DefineOwnProperty/BigInt/tonumber-value-detached-buffer.js",
+   "scenario": "strict mode",
+   "family": "set-defineproperty-silent-true",
+   "message": "Reflect.defineProperty(ta, 0, {value: {valueOf() {$DETACHBUFFER(ta.buffer); return 42n;}}}) must return true Expected Sa",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "BigInt",
+    "Reflect",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/DefineOwnProperty/tonumber-value-detached-buffer.js",
+   "scenario": "default",
+   "family": "set-defineproperty-silent-true",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "Reflect",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/DefineOwnProperty/tonumber-value-detached-buffer.js",
+   "scenario": "strict mode",
+   "family": "set-defineproperty-silent-true",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "Reflect",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/Set/BigInt/detached-buffer-realm.js",
+   "scenario": "default",
+   "family": "set-defineproperty-silent-true",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "BigInt",
+    "cross-realm",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/Set/BigInt/detached-buffer-realm.js",
+   "scenario": "strict mode",
+   "family": "set-defineproperty-silent-true",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "BigInt",
+    "cross-realm",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/Set/BigInt/detached-buffer.js",
+   "scenario": "default",
+   "family": "set-defineproperty-silent-true",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "BigInt",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/Set/BigInt/detached-buffer.js",
+   "scenario": "strict mode",
+   "family": "set-defineproperty-silent-true",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "BigInt",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/Set/BigInt/tonumber-value-detached-buffer.js",
+   "scenario": "default",
+   "family": "set-defineproperty-silent-true",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "BigInt",
+    "Reflect",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/Set/BigInt/tonumber-value-detached-buffer.js",
+   "scenario": "strict mode",
+   "family": "set-defineproperty-silent-true",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with BigInt64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "BigInt",
+    "Reflect",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/Set/detached-buffer-realm.js",
+   "scenario": "default",
+   "family": "set-defineproperty-silent-true",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "cross-realm",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/Set/detached-buffer-realm.js",
+   "scenario": "strict mode",
+   "family": "set-defineproperty-silent-true",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "cross-realm",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/Set/detached-buffer.js",
+   "scenario": "default",
+   "family": "set-defineproperty-silent-true",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/Set/detached-buffer.js",
+   "scenario": "strict mode",
+   "family": "set-defineproperty-silent-true",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/Set/tonumber-value-detached-buffer.js",
+   "scenario": "default",
+   "family": "set-defineproperty-silent-true",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "Reflect",
+    "TypedArray"
+   ]
+  },
+  {
+   "file": "test/built-ins/TypedArrayConstructors/internals/Set/tonumber-value-detached-buffer.js",
+   "scenario": "strict mode",
+   "family": "set-defineproperty-silent-true",
+   "message": "Expected no error, got TypeError: The ArrayBuffer is detached. (Testing with Float64Array and makePassthrough.)",
+   "features": [
+    "align-detached-buffer-semantics-with-web-reality",
+    "Reflect",
+    "TypedArray"
+   ]
+  }
+ ]
+}
