@@ -554,9 +554,10 @@ const tests = [
             }
             assert.areEqual(5, new N().im());
 
-            // Each class evaluation creates a fresh static brand.
-            var C1 = eval("class C1 { static #m() { return 1; } static call() { return this.#m(); } }");
-            var C2 = eval("class C2 { static #m() { return 2; } static call() { return this.#m(); } }");
+            // Each class evaluation creates a fresh static brand. (Class
+            // expression form: a class declaration's completion is empty.)
+            var C1 = eval("(class C1 { static #m() { return 1; } static call() { return this.#m(); } })");
+            var C2 = eval("(class C2 { static #m() { return 2; } static call() { return this.#m(); } })");
             assert.areEqual(1, C1.call());
             assert.areEqual(2, C2.call());
             assert.throws(function () { C1.call.call(C2); }, TypeError);
@@ -580,7 +581,9 @@ const tests = [
 
             // A private identifier is never a PropName, so the static
             // "prototype" early error does not apply (matching instances).
-            var P = eval("class P { static #prototype() { return 1; } static call() { return this.#prototype(); } }");
+            // (Class expression form: a class *declaration* has an empty
+            // completion value, so eval would return undefined.)
+            var P = eval("(class P { static #prototype() { return 1; } static call() { return this.#prototype(); } })");
             assert.areEqual(1, P.call());
         }
     },

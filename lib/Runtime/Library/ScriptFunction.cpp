@@ -151,15 +151,28 @@ using namespace Js;
             scriptFunction->SetPrototype(constructorParent);
         }
 
+        // Slot layout (FunctionWithNonWritablePrototypeLengthAndNameTypeDescriptors):
+        // 0 = length, 1 = name, 2 = prototype (the prototype is filled by
+        // InitClassHelper/lowering after the constructor object exists).
         Var length = TaggedInt::ToVarUnchecked((*infoRef)->GetFunctionProxy()->EnsureDeserialized()->GetReportedInParamsCount() - 1);
-        scriptFunction->SetSlot(SetSlotArguments(Constants::NoProperty, 1, length));
+        scriptFunction->SetSlot(SetSlotArguments(Constants::NoProperty, 0, length));
 
         if (!scriptFunction->IsAnonymousFunction() && !scriptFunction->GetFunctionInfo()->HasComputedName())
         {
             JavascriptString * functionName = nullptr;
             bool result = scriptFunction->GetFunctionName(&functionName);
             Assert(result);
-            scriptFunction->SetSlot(SetSlotArguments(Constants::NoProperty, 2, functionName));
+            scriptFunction->SetSlot(SetSlotArguments(Constants::NoProperty, 1, functionName));
+        }
+        else
+        {
+            // An anonymous class expression still owns a "name" property whose
+            // value is the empty string (ClassExpression evaluates
+            // ClassDefinitionEvaluation with className "", which performs
+            // SetFunctionName(F, "")). NamedEvaluation on assignment or
+            // property/variable initialization later redefines it in place.
+            scriptFunction->SetSlot(SetSlotArguments(Constants::NoProperty, 1,
+                scriptFunction->GetScriptContext()->GetLibrary()->GetEmptyString()));
         }
 
         return scriptFunction;
@@ -945,10 +958,11 @@ using namespace Js;
         if (GetFunctionInfo()->IsClassConstructor())
         {
             // For class with computed name, we wait until now to set the name property.
+            // Class constructor slot layout: length(0), name(1), prototype(2).
             JavascriptString * functionName = nullptr;
             bool result = GetFunctionName(&functionName);
             Assert(result);
-            SetSlot(SetSlotArguments(Constants::NoProperty, 2, functionName));
+            SetSlot(SetSlotArguments(Constants::NoProperty, 1, functionName));
         }
     }
 
@@ -959,10 +973,11 @@ using namespace Js;
         if (GetFunctionInfo()->IsClassConstructor())
         {
             // For class with computed name, we wait until now to set the name property.
+            // Class constructor slot layout: length(0), name(1), prototype(2).
             JavascriptString * functionName = nullptr;
             bool result = GetFunctionName(&functionName);
             Assert(result);
-            SetSlot(SetSlotArguments(Constants::NoProperty, 2, functionName));
+            SetSlot(SetSlotArguments(Constants::NoProperty, 1, functionName));
         }
     }
 

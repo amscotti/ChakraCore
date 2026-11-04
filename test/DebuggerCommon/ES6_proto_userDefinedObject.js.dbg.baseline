@@ -60,9 +60,7 @@
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string MyObj",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string MyObj"
       }
     },
     "locals": {
@@ -118,9 +116,7 @@
           "constructor": "function <large string>"
         },
         "length": "number 0",
-        "name": "string MyObj",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string MyObj"
       }
     },
     "globals": {}

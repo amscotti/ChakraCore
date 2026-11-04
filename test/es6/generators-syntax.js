@@ -159,13 +159,11 @@ var tests = [
             assert.areEqual(1, x, "Assignment expression is evaluated as a separate expression");
 
             g1 = 10;
-            function *gf2() {
-                return yield
-                    *g1;
-            }
-            var g2 = gf2();
-            assert.areEqual({value: undefined, done: false}, g2.next(), "If there is a new line between yield and star then yield is treated as yield with no assignment expression");
-            assert.areEqual({value: 100, done: true}, g2.next(10), "*g1 gets treated as a multiplication operation");
+            // ES2025 YieldExpression: `yield *` requires no LineTerminator
+            // between `yield` and `*`, and `*` cannot start a statement, so
+            // ASI cannot rescue the newline form (test262
+            // statements/class/definition/methods-gen-yield-star-after-newline.js).
+            assert.throws(function() { eval("function *gf2() { return yield\n*g1; }"); }, SyntaxError, "yield followed by a newline and * is a SyntaxError");
         }
     },
     {

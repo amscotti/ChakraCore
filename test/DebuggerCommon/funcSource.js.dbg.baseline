@@ -21,18 +21,14 @@
         "f": {
           "#__proto__": "function function() {\n    [native code]\n}",
           "prototype": "Object {...}",
-          "name": "string f",
-          "caller": "object null",
-          "arguments": "object null",
-          "length": "number 0"
+          "length": "number 0",
+          "name": "string f"
         },
         "g": {
           "#__proto__": "function function() {\n    [native code]\n}",
           "prototype": "Object {...}",
-          "name": "string g",
-          "caller": "object null",
-          "arguments": "object null",
-          "length": "number 0"
+          "length": "number 0",
+          "name": "string g"
         }
       }
     },

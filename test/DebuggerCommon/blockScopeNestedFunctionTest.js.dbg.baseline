@@ -43,9 +43,7 @@
         "#__proto__": "function function() {\n    [native code]\n}",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string innerInnerFunc",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string innerInnerFunc"
       }
     },
     "scopes0": {
@@ -81,9 +79,7 @@
         "#__proto__": "function function() {\n    [native code]\n}",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string innerInnerFunc",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string innerInnerFunc"
       }
     },
     "scopes0": {
@@ -187,9 +183,7 @@
         "#__proto__": "function function() {\n    [native code]\n}",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string innerInnerFunc",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string innerInnerFunc"
       }
     },
     "scopes0": {

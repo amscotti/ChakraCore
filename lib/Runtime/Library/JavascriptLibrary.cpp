@@ -64,11 +64,14 @@ namespace Js
         SimplePropertyDescriptor(NO_WRITE_BARRIER_TAG(BuiltInPropertyRecords::length), PropertyConfigurable),
     };
 
+    // Class constructor own-property insertion order is length, name,
+    // prototype (FunctionCreate/SetFunctionName run before MakeConstructor,
+    // sec-runtime-semantics-classdefinitionevaluation), then static elements.
     SimplePropertyDescriptor const JavascriptLibrary::FunctionWithNonWritablePrototypeLengthAndNameTypeDescriptors[3] =
     {
-        SimplePropertyDescriptor(NO_WRITE_BARRIER_TAG(BuiltInPropertyRecords::prototype), PropertyNone),
         SimplePropertyDescriptor(NO_WRITE_BARRIER_TAG(BuiltInPropertyRecords::length), PropertyConfigurable),
-        SimplePropertyDescriptor(NO_WRITE_BARRIER_TAG(BuiltInPropertyRecords::name), PropertyConfigurable)
+        SimplePropertyDescriptor(NO_WRITE_BARRIER_TAG(BuiltInPropertyRecords::name), PropertyConfigurable),
+        SimplePropertyDescriptor(NO_WRITE_BARRIER_TAG(BuiltInPropertyRecords::prototype), PropertyNone)
     };
 
     SimplePropertyDescriptor const JavascriptLibrary::ModuleNamespaceTypeDescriptors[1] =
@@ -1206,7 +1209,11 @@ namespace Js
 
     DynamicTypeHandler * JavascriptLibrary::AnonymousClassConstructorTypeHandler()
     {
-        return &SharedFunctionWithNonWritablePrototypeAndLengthTypeHandler;
+        // Anonymous class expressions also own a "name" property (the empty
+        // string per SetFunctionName in ClassDefinitionEvaluation; later
+        // NamedEvaluation redefines it in place), so they share the named
+        // constructor shape: length, name, prototype.
+        return &SharedFunctionWithNonWritablePrototypeLengthAndNameTypeHandler;
     }
 
     DynamicTypeHandler * JavascriptLibrary::GetDeferredPrototypeFunctionWithLengthTypeHandler(ScriptContext* scriptContext)

@@ -20,15 +20,13 @@
       "callee": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
-        "name": "string foo",
-        "caller": "object null",
-        "arguments": "Object {...}",
-        "length": "number 0"
+        "length": "number 0",
+        "name": "string foo"
       },
       "Symbol.iterator": {
         "#__proto__": "function <large string>",
-        "name": "string values",
-        "length": "number 0"
+        "length": "number 0",
+        "name": "string values"
       }
     },
     "locals": {
@@ -60,10 +58,8 @@
       "foo": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
-        "name": "string foo",
-        "caller": "object null",
-        "arguments": "Object {...}",
-        "length": "number 0"
+        "length": "number 0",
+        "name": "string foo"
       }
     }
   }

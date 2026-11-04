@@ -469,6 +469,24 @@
   </test>
   <test>
     <default>
+      <files>class-tail-semantics.js</files>
+      <compile-flags>-args summary -endargs</compile-flags>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>class-tail-semantics.js</files>
+      <compile-flags>-force:deferparse -args summary -endargs</compile-flags>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>class-tail-semantics.js</files>
+      <compile-flags>-noDeferParse -args summary -endargs</compile-flags>
+    </default>
+  </test>
+  <test>
+    <default>
       <files>labeled-break-finally.js</files>
       <compile-flags>-args summary -endargs</compile-flags>
     </default>

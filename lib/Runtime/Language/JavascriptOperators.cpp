@@ -1577,6 +1577,19 @@ CommonNumber:
         Var getter, setter;
         if (false == JavascriptOperators::GetOwnAccessors(obj, propertyId, &getter, &setter, scriptContext))
         {
+            // "caller"/"arguments" expose no own property on function objects:
+            // the legacy stack-walk read for sloppy script functions lives in
+            // JavascriptFunction::GetPropertyBuiltIns (kept for ordinary
+            // GetProperty), but [[GetOwnProperty]] — and therefore
+            // getOwnPropertyDescriptor/hasOwnProperty — must observe a missing
+            // property unless user code defined a real own one
+            // (sec-addrestrictedfunctionproperties).
+            if ((propertyId == PropertyIds::caller || propertyId == PropertyIds::arguments) &&
+                VarIs<JavascriptFunction>(obj) &&
+                !obj->HasProperty(propertyId))
+            {
+                return FALSE;
+            }
             Var value = nullptr;
             if (false == JavascriptOperators::GetOwnProperty(obj, propertyId, &value, scriptContext, nullptr))
             {
@@ -3082,6 +3095,20 @@ CommonNumber:
         }
 
         BOOL setAccessorResult = FALSE;
+        if ((propertyId == PropertyIds::caller || propertyId == PropertyIds::arguments) &&
+            VarIs<JavascriptFunction>(object) &&
+            VarTo<JavascriptFunction>(object)->HasRestrictedProperties())
+        {
+            // Legacy `caller`/`arguments` on sloppy script functions behave as
+            // read-only own data for stores: the store must not continue to
+            // %FunctionPrototype%'s poison accessor (which throws even in
+            // sloppy code). JavascriptFunction::SetProperty performs the same
+            // silent-ignore/strict-ThrowCantAssign handling once the receiver
+            // virtual runs; replicate it here because this proto-chain probe
+            // runs first.
+            JavascriptError::ThrowCantAssignIfStrictMode(propertyOperationFlags, requestContext);
+            return FALSE;
+        }
         if (SetAccessorOrNonWritableProperty(receiver, object, propertyId, newValue, info, requestContext, propertyOperationFlags, isRoot, false, &setAccessorResult))
         {
             return setAccessorResult;

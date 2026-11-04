@@ -61,9 +61,7 @@
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string foo",
-        "caller": "object null",
-        "arguments": "Object {...}"
+        "name": "string foo"
       }
     },
     "arguments": {
@@ -86,9 +84,7 @@
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string foo",
-        "caller": "object null",
-        "arguments": "Object {...}"
+        "name": "string foo"
       },
       "Symbol.iterator": {
         "#__proto__": "function <large string>",
@@ -119,9 +115,7 @@
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string foo",
-        "caller": "object null",
-        "arguments": "Object {...}"
+        "name": "string foo"
       }
     }
   }

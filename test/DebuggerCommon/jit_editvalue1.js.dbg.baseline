@@ -82,10 +82,8 @@
       "k1": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
-        "name": "string k1",
-        "caller": "object null",
-        "arguments": "object null",
-        "length": "number 0"
+        "length": "number 0",
+        "name": "string k1"
       }
     }
   }

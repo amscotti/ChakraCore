@@ -20,15 +20,13 @@
       "callee": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
-        "name": "string <large string>",
-        "caller": "object null",
-        "arguments": "Object {...}",
-        "length": "number 0"
+        "length": "number 0",
+        "name": "string <large string>"
       },
       "Symbol.iterator": {
         "#__proto__": "function <large string>",
-        "name": "string values",
-        "length": "number 0"
+        "length": "number 0",
+        "name": "string values"
       }
     },
     "locals": {
@@ -82,10 +80,8 @@
       "blockScopeBasicLetConstTestFunc": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
-        "name": "string <large string>",
-        "caller": "object null",
-        "arguments": "Object {...}",
-        "length": "number 0"
+        "length": "number 0",
+        "name": "string <large string>"
       }
     }
   }

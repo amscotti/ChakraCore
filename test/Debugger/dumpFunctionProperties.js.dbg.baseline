@@ -4,10 +4,8 @@
       {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
-        "name": "string foo",
-        "caller": "object null",
-        "arguments": "Object {...}",
-        "length": "number 0"
+        "length": "number 0",
+        "name": "string foo"
       }
     ]
   },
@@ -30,13 +28,6 @@
         "prototype": {
           "#__proto__": "Object {...}",
           "constructor": "function <large string>"
-        },
-        "caller": "object null",
-        "arguments": {
-          "#__proto__": "Object {...}",
-          "length": "number 0",
-          "callee": "function <large string>",
-          "Symbol.iterator": "function <large string>"
         },
         "length": "number 0"
       }
@@ -77,18 +68,14 @@
       {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
-        "name": "string same",
-        "caller": "function <large string>",
-        "arguments": "Object {...}",
-        "length": "number 1"
+        "length": "number 1",
+        "name": "string same"
       },
       {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
-        "name": "string Global code",
-        "caller": "object null",
-        "arguments": "object null",
-        "length": "number -1"
+        "length": "number -1",
+        "name": "string Global code"
       }
     ]
   },
@@ -125,34 +112,26 @@
       {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
-        "name": "string three",
-        "caller": "function <large string>",
-        "arguments": "Object {...}",
-        "length": "number 3"
+        "length": "number 3",
+        "name": "string three"
       },
       {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
-        "name": "string two",
-        "caller": "function <large string>",
-        "arguments": "Object {...}",
-        "length": "number 2"
+        "length": "number 2",
+        "name": "string two"
       },
       {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
-        "name": "string one",
-        "caller": "object null",
-        "arguments": "Object {...}",
-        "length": "number 1"
+        "length": "number 1",
+        "name": "string one"
       },
       {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
-        "name": "string Global code",
-        "caller": "object null",
-        "arguments": "object null",
-        "length": "number -1"
+        "length": "number -1",
+        "name": "string Global code"
       }
     ]
   }

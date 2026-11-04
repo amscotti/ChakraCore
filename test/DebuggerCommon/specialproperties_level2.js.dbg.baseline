@@ -25,10 +25,8 @@
           "constructor": "function function(a,b){\r\n    this.length = 100;\r\n}",
           "length": "number 200"
         },
-        "name": "string c",
-        "caller": "object null",
-        "arguments": "object null",
-        "length": "number 2"
+        "length": "number 2",
+        "name": "string c"
       }
     }
   },
@@ -62,10 +60,8 @@
         "#__proto__": {
           "#__proto__": "function function() {\n    [native code]\n}",
           "prototype": "Object {...}",
-          "name": "string anonymous",
-          "caller": "object null",
-          "arguments": "object null",
-          "length": "number 0"
+          "length": "number 0",
+          "name": "string anonymous"
         },
         "length": "number 4",
         "[1]": "string 1",

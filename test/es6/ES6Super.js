@@ -181,7 +181,9 @@ var tests = [
         class A extends Object { constructor() { super(value = 1); } }
         Object.setPrototypeOf(A, toString);
         assert.throws(()=>new A(), TypeError, "Function is not a constructor", "Function is not a constructor");
-        assert.areEqual(undefined, value);
+        // ES2025 SuperCall evaluates ArgumentList before the IsConstructor
+        // TypeError (sec-super-keyword-runtime-semantics-evaluation).
+        assert.areEqual(1, value);
     }
   },
   {

@@ -70,7 +70,7 @@ var tests = [
             assert.areEqual("", (function*(){})["name"]);
 
             //classes
-            assert.isFalse(Object.hasOwnProperty.call(class {}, 'name'), "[hasPropertyCheck]: anonymous class does not have a name property");
+            assert.isTrue(Object.hasOwnProperty.call(class {}, 'name'), "[hasPropertyCheck]: anonymous class owns a name property (empty string; SetFunctionName in ClassExpression's ClassDefinitionEvaluation)");
             assert.areEqual("", class {}.name);
             assert.areEqual("", class {}['name']);
 

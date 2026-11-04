@@ -86,33 +86,25 @@
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string g",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string g"
       },
       "f": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string f",
-        "caller": "object null",
-        "arguments": "Object {...}"
+        "name": "string f"
       },
       "g1": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string g1",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string g1"
       },
       "f1": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string f1",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string f1"
       },
       "d": "number 7"
     },
@@ -136,9 +128,7 @@
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string f",
-        "caller": "object null",
-        "arguments": "Object {...}"
+        "name": "string f"
       },
       "Symbol.iterator": {
         "#__proto__": "function <large string>",
@@ -178,33 +168,25 @@
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string g",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string g"
       },
       "f": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string f",
-        "caller": "object null",
-        "arguments": "Object {...}"
+        "name": "string f"
       },
       "g1": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string g1",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string g1"
       },
       "f1": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string f1",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string f1"
       },
       "d": "number 7"
     }
@@ -296,33 +278,25 @@
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string g",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string g"
       },
       "f": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string f",
-        "caller": "object null",
-        "arguments": "Object {...}"
+        "name": "string f"
       },
       "g1": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string g1",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string g1"
       },
       "f1": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string f1",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string f1"
       },
       "d": "number 7"
     },
@@ -346,9 +320,7 @@
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string f",
-        "caller": "object null",
-        "arguments": "Object {...}"
+        "name": "string f"
       },
       "Symbol.iterator": {
         "#__proto__": "function <large string>",
@@ -388,33 +360,25 @@
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string g",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string g"
       },
       "f": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string f",
-        "caller": "object null",
-        "arguments": "Object {...}"
+        "name": "string f"
       },
       "g1": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string g1",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string g1"
       },
       "f1": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string f1",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string f1"
       },
       "d": "number 7"
     }
@@ -506,33 +470,25 @@
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string g",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string g"
       },
       "f": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string f",
-        "caller": "object null",
-        "arguments": "Object {...}"
+        "name": "string f"
       },
       "g1": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string g1",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string g1"
       },
       "f1": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string f1",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string f1"
       },
       "d": "number 7"
     },
@@ -556,9 +512,7 @@
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string f",
-        "caller": "object null",
-        "arguments": "Object {...}"
+        "name": "string f"
       },
       "Symbol.iterator": {
         "#__proto__": "function <large string>",
@@ -598,33 +552,25 @@
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string g",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string g"
       },
       "f": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string f",
-        "caller": "object null",
-        "arguments": "Object {...}"
+        "name": "string f"
       },
       "g1": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string g1",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string g1"
       },
       "f1": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string f1",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string f1"
       },
       "d": "number 7"
     }
@@ -716,33 +662,25 @@
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string g",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string g"
       },
       "f": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string f",
-        "caller": "object null",
-        "arguments": "Object {...}"
+        "name": "string f"
       },
       "g1": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string g1",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string g1"
       },
       "f1": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string f1",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string f1"
       },
       "d": "number 7"
     },
@@ -766,9 +704,7 @@
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string f",
-        "caller": "object null",
-        "arguments": "Object {...}"
+        "name": "string f"
       },
       "Symbol.iterator": {
         "#__proto__": "function <large string>",
@@ -808,33 +744,25 @@
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string g",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string g"
       },
       "f": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string f",
-        "caller": "object null",
-        "arguments": "Object {...}"
+        "name": "string f"
       },
       "g1": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string g1",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string g1"
       },
       "f1": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string f1",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string f1"
       },
       "d": "number 7"
     }
@@ -926,33 +854,25 @@
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string g",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string g"
       },
       "f": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string f",
-        "caller": "object null",
-        "arguments": "Object {...}"
+        "name": "string f"
       },
       "g1": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string g1",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string g1"
       },
       "f1": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string f1",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string f1"
       },
       "d": "number 7"
     },
@@ -976,9 +896,7 @@
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string f",
-        "caller": "object null",
-        "arguments": "Object {...}"
+        "name": "string f"
       },
       "Symbol.iterator": {
         "#__proto__": "function <large string>",
@@ -1018,33 +936,25 @@
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string g",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string g"
       },
       "f": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string f",
-        "caller": "object null",
-        "arguments": "Object {...}"
+        "name": "string f"
       },
       "g1": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string g1",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string g1"
       },
       "f1": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string f1",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string f1"
       },
       "d": "number 7"
     }

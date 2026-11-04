@@ -23,9 +23,7 @@
         "#__proto__": "function function() {\n    [native code]\n}",
         "prototype": "Object {...}",
         "length": "number 1",
-        "name": "string level2Func",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string level2Func"
       },
       "level_1_identifier_1": "string level1_1",
       "level_1_identifier_0": "string level1_0",
@@ -34,9 +32,7 @@
         "#__proto__": "function function() {\n    [native code]\n}",
         "prototype": "Object {...}",
         "length": "number 3",
-        "name": "string verify",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string verify"
       },
       "level_0_identifier_0": "string level0"
     },

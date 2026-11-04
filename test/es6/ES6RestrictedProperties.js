@@ -22,20 +22,19 @@ function verifyAttributes(obj, prop, attribs, name) {
 }
 
 function verifyHasRestrictedOwnProperties(obj, name) {
-    // NOTE: Results for this test method differ from other engines
-
-    // NOTE: sm seems to make sloppy-mode functions behave like strict-mode functions for caller/arguments
-    assert.isTrue(obj.hasOwnProperty('caller'), name + " reports (hasOwnProperty('caller')===false)")
-    assert.isTrue(obj.hasOwnProperty('arguments'), name + " reports (hasOwnProperty('arguments')===false)")
+    // ES2025 sec-addrestrictedfunctionproperties: no function object has own
+    // caller/arguments; the poison accessors live on %FunctionPrototype% only
+    // (matching V8). The legacy stack-walk read for sloppy functions without
+    // such an own property is preserved (returns null when not on the stack).
+    assert.isFalse(obj.hasOwnProperty('caller'), name + " reports (hasOwnProperty('caller')===true)")
+    assert.isFalse(obj.hasOwnProperty('arguments'), name + " reports (hasOwnProperty('arguments')===true)")
 
     var names = Object.getOwnPropertyNames(obj);
-    assert.areNotEqual(-1, names.findIndex((e) => { return e === 'arguments'; }), name + " has 'arguments' own property (as reported by Object.getOwnPropertyNames)");
-    assert.areNotEqual(-1, names.findIndex((e) => { return e === 'caller'; }), name + " has 'caller' own property (as reported by Object.getOwnPropertyNames)");
+    assert.areEqual(-1, names.findIndex((e) => { return e === 'arguments'; }), name + " has no 'arguments' own property (as reported by Object.getOwnPropertyNames)");
+    assert.areEqual(-1, names.findIndex((e) => { return e === 'caller'; }), name + " has no 'caller' own property (as reported by Object.getOwnPropertyNames)");
 
-    verifyAttributes(obj, 'caller', { writable: false, enumerable: false, configurable: false }, name);
-    assert.isFalse(obj.propertyIsEnumerable('caller'), name + " says 'caller' property is not enumerable");
-    verifyAttributes(obj, 'arguments', { writable: false, enumerable: false, configurable: false }, name);
-    assert.isFalse(obj.propertyIsEnumerable('arguments'), name + " says 'arguments' property is not enumerable");
+    assert.areEqual(undefined, Object.getOwnPropertyDescriptor(obj, 'caller'), name + " has no 'caller' property descriptor");
+    assert.areEqual(undefined, Object.getOwnPropertyDescriptor(obj, 'arguments'), name + " has no 'arguments' property descriptor");
 
     assert.areEqual(null, obj.caller, name + " says 'caller' property is null")
     assert.areEqual(null, obj.arguments, name + " says 'arguments' property is null")
@@ -51,17 +50,20 @@ function verifyHasRestrictedOwnProperties(obj, name) {
     assert.areEqual(null, obj.arguments, name + " says 'arguments' property is null")
 
     // NOTE: sm fails non-strict function
-    assert.throws(function() { Object.defineProperty(obj, 'arguments', { value: 123 }); }, TypeError, name + " has 'arguments' property as non-writable, non-configurable", "Cannot modify non-writable property 'arguments'");
-    assert.throws(function() { Object.defineProperty(obj, 'caller', { value: 123 }); }, TypeError, name + " has 'caller' property as non-writable, non-configurable", "Cannot modify non-writable property 'caller'");
+    // With no virtual own restricted property, defineProperty defines a real
+    // own one (sec-addrestrictedfunctionproperties; user-defined own
+    // 'caller'/'arguments' are legal on sloppy functions).
+    assert.doesNotThrow(function() { Object.defineProperty(obj, 'arguments', { value: 123, configurable: true }); }, name + " allows defining an own 'arguments' property");
+    assert.doesNotThrow(function() { Object.defineProperty(obj, 'caller', { value: 123, configurable: true }); }, name + " allows defining an own 'caller' property");
 
     // NOTE: other engines: the above defineProperty makes the following not fail unless the above lines are commented-out because the above do not throw and therefore actually do the defineProperty)
     // NOTE: sm fails non-strict function
-    assert.isFalse(delete obj.arguments, name + " has 'arguments' property as non-configurable so delete returns false");
-    assert.isFalse(delete obj.caller, name + " has 'caller' property as non-configurable so delete returns false");
+    assert.isTrue(delete obj.arguments, name + " has no own 'arguments' so delete returns true");
+    assert.isTrue(delete obj.caller, name + " has no own 'caller' so delete returns true");
 
     // NOTE: sm also fails non-strict function
-    assert.throws(function() { 'use strict'; delete obj.caller; }, TypeError, name + " has 'caller' own property but it is not configurable so we will throw in strict mode", "Calling delete on 'caller' is not allowed in strict mode");
-    assert.throws(function() { 'use strict'; delete obj.arguments; }, TypeError, name + " has 'arguments' own property but it is not configurable so we will throw in strict mode", "Calling delete on 'arguments' is not allowed in strict mode");
+    assert.isTrue((function() { 'use strict'; return delete obj.caller; })(), name + " has no own 'caller' so strict delete returns true");
+    assert.isTrue((function() { 'use strict'; return delete obj.arguments; })(), name + " has no own 'arguments' so strict delete returns true");
 }
 
 function verifyDoesNotHaveRestrictedOwnProperties(obj, name) {

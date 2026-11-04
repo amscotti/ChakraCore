@@ -11,10 +11,8 @@
       "foo": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
-        "name": "string foo",
-        "caller": "object null",
-        "arguments": "object null",
-        "length": "number 2"
+        "length": "number 2",
+        "name": "string foo"
       },
       "arr": {
         "#__proto__": "Array []",
@@ -44,10 +42,8 @@
       "foo": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
-        "name": "string foo",
-        "caller": "object null",
-        "arguments": "object null",
-        "length": "number 2"
+        "length": "number 2",
+        "name": "string foo"
       },
       "arr": {
         "#__proto__": "Array []",

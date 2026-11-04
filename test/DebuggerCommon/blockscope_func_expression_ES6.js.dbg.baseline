@@ -37,9 +37,7 @@
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string bar",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string bar"
       }
     },
     "globals": {}

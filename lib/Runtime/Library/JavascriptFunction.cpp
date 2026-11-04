@@ -1102,6 +1102,23 @@ using namespace Js;
                         argsIndex += size;
                     }
                 }
+                else if (JavascriptArray * directArray = JavascriptArray::TryVarToNonES5Array(instance))
+                {
+                    // Default derived constructor rest forwarding: the emitter
+                    // passed the engine-built rest array straight through (no
+                    // LdCustomSpreadIteratorList), so copy its elements
+                    // without the iterator protocol, matching the specified
+                    // built-in default constructor. The array is freshly
+                    // packed from the incoming argument list, so element
+                    // reads cannot run user code.
+                    uint32 length = directArray->GetLength();
+                    for (uint32 i = 0; i < length; i++)
+                    {
+                        Var element = directArray->DirectGetItem(i);
+                        destArgs.Values[argsIndex++] =
+                            element != nullptr ? element : scriptContext->GetLibrary()->GetUndefined();
+                    }
+                }
                 else
                 {
                     Assert(JavascriptOperators::IsUndefinedObject(instance));
@@ -2520,16 +2537,15 @@ LABEL1:
 
     PropertyQueryFlags JavascriptFunction::HasPropertyQuery(PropertyId propertyId, _Inout_opt_ PropertyValueInfo* info)
     {
-        switch (propertyId)
-        {
-        case PropertyIds::caller:
-        case PropertyIds::arguments:
-            if (this->HasRestrictedProperties())
-            {
-                return PropertyQueryFlags::Property_Found;
-            }
-            break;
-        }
+        // "caller"/"arguments" are deliberately NOT reported as own properties here.
+        // ES2015-era engines exposed them as virtual own data properties on legacy
+        // (sloppy) script functions; the ES2025 spec has no such own properties on any
+        // function (sec-addrestrictedfunctionproperties installs %ThrowTypeError%
+        // accessors on %FunctionPrototype% only). hasOwnProperty/gOPD/DefineOwnProperty
+        // must therefore see an ordinary missing property, so user-defined own
+        // "caller"/"arguments" properties are definable and readable. The legacy
+        // stack-walking *read* for sloppy script functions without such an own
+        // property is preserved through GetPropertyBuiltIns below.
         return DynamicObject::HasPropertyQuery(propertyId, info);
     }
 
@@ -2541,20 +2557,10 @@ LABEL1:
         Assert(setter);
         Assert(requestContext);
 
-        if (this->HasRestrictedProperties())
-        {
-            switch (propertyId)
-            {
-            case PropertyIds::caller:
-            case PropertyIds::arguments:
-                if (this->GetEntryPoint() == JavascriptFunction::PrototypeEntryPoint)
-                {
-                    *setter = *getter = requestContext->GetLibrary()->GetThrowTypeErrorRestrictedPropertyAccessorFunction();
-                    return true;
-                }
-                break;
-            }
-        }
+        // "caller"/"arguments" expose no virtual own accessors on functions; the
+        // %FunctionPrototype% poison accessors are real properties on the prototype
+        // object and are found through the ordinary store (HasPropertyQuery no longer
+        // fabricates them, sec-addrestrictedfunctionproperties).
 
         return __super::GetAccessors(propertyId, getter, setter, requestContext);
     }
@@ -2590,80 +2596,29 @@ LABEL1:
         Assert(setterValue);
         Assert(requestContext);
 
-        switch (propertyId)
-        {
-        case PropertyIds::caller:
-        case PropertyIds::arguments:
-            if (this->HasRestrictedProperties()) {
-                PropertyValueInfo::SetNoCache(info, this);
-                if (this->GetEntryPoint() == JavascriptFunction::PrototypeEntryPoint)
-                {
-                    *setterValue = requestContext->GetLibrary()->GetThrowTypeErrorRestrictedPropertyAccessorFunction();
-                    *descriptorFlags = Accessor;
-                }
-                else
-                {
-                    *descriptorFlags = Data;
-                }
-                return true;
-            }
-            break;
-        }
+        // No virtual own "caller"/"arguments" setter data on functions; writes are
+        // handled by JavascriptFunction::SetProperty (legacy read-only semantics)
+        // and otherwise fall through to the ordinary own/prototype property store.
 
         return false;
     }
 
     BOOL JavascriptFunction::IsConfigurable(PropertyId propertyId)
     {
-        if (DynamicObject::GetPropertyIndex(propertyId) == Constants::NoSlot)
-        {
-            switch (propertyId)
-            {
-            case PropertyIds::caller:
-            case PropertyIds::arguments:
-                if (this->HasRestrictedProperties())
-                {
-                    return false;
-                }
-                break;
-            }
-        }
+        // No virtual non-configurable own "caller"/"arguments" on functions:
+        // they are ordinary missing properties until user code defines them
+        // (sec-addrestrictedfunctionproperties; legacy reads live in
+        // GetPropertyBuiltIns, legacy read-only writes in SetProperty).
         return DynamicObject::IsConfigurable(propertyId);
     }
 
     BOOL JavascriptFunction::IsEnumerable(PropertyId propertyId)
     {
-        if (DynamicObject::GetPropertyIndex(propertyId) == Constants::NoSlot)
-        {
-            switch (propertyId)
-            {
-            case PropertyIds::caller:
-            case PropertyIds::arguments:
-                if (this->HasRestrictedProperties())
-                {
-                    return false;
-                }
-                break;
-            }
-        }
         return DynamicObject::IsEnumerable(propertyId);
     }
 
     BOOL JavascriptFunction::IsWritable(PropertyId propertyId)
     {
-        if (DynamicObject::GetPropertyIndex(propertyId) == Constants::NoSlot)
-        {
-            switch (propertyId)
-            {
-            case PropertyIds::caller:
-            case PropertyIds::arguments:
-                if (this->HasRestrictedProperties())
-                {
-                    return false;
-                }
-                break;
-            }
-        }
         return DynamicObject::IsWritable(propertyId);
     }
 
@@ -2683,7 +2638,10 @@ LABEL1:
     // Returns the number of special non-enumerable properties this type has.
     uint JavascriptFunction::GetSpecialPropertyCount() const
     {
-        return this->HasRestrictedProperties() ? _countof(specialPropertyIds) : 0;
+        // Zero: "caller"/"arguments" are not own properties of functions (they
+        // must not appear in own-keys; legacy reads still work through
+        // GetPropertyBuiltIns and the %FunctionPrototype% accessors).
+        return 0;
     }
 
     // Returns the list of special non-enumerable properties for the type.
@@ -3040,18 +2998,8 @@ LABEL1:
 
     BOOL JavascriptFunction::DeleteProperty(PropertyId propertyId, PropertyOperationFlags flags)
     {
-        switch (propertyId)
-        {
-        case PropertyIds::caller:
-        case PropertyIds::arguments:
-            if (this->HasRestrictedProperties())
-            {
-                JavascriptError::ThrowCantDeleteIfStrictMode(flags, this->GetScriptContext(), this->GetScriptContext()->GetPropertyName(propertyId)->GetBuffer());
-                return false;
-            }
-            break;
-        }
-
+        // No virtual own "caller"/"arguments" to refuse deletion of; deleting a
+        // missing property succeeds, deleting a user-defined own one is ordinary.
         BOOL result = DynamicObject::DeleteProperty(propertyId, flags);
 
         if (result && (propertyId == PropertyIds::prototype || propertyId == PropertyIds::_symbolHasInstance))
@@ -3069,15 +3017,6 @@ LABEL1:
 
     BOOL JavascriptFunction::DeleteProperty(JavascriptString *propertyNameString, PropertyOperationFlags flags)
     {
-        if (BuiltInPropertyRecords::caller.Equals(propertyNameString) || BuiltInPropertyRecords::arguments.Equals(propertyNameString))
-        {
-            if (this->HasRestrictedProperties())
-            {
-                JavascriptError::ThrowCantDeleteIfStrictMode(flags, this->GetScriptContext(), propertyNameString->GetString());
-                return false;
-            }
-        }
-
         BOOL result = DynamicObject::DeleteProperty(propertyNameString, flags);
 
         if (result && (BuiltInPropertyRecords::prototype.Equals(propertyNameString) || BuiltInPropertyRecords::_symbolHasInstance.Equals(propertyNameString)))

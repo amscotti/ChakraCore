@@ -8178,10 +8178,22 @@ void Parser::ParseFncName(ParseNodeFnc * pnodeFnc, ushort flags, IdentPtr* pFncN
 
     pnodeFnc->pnodeName = nullptr;
 
+    // Function expressions can be named yield/await even inside generator/async
+    // functions (their own grammar parameters are [~Yield, ~Await]); a generator
+    // rejects only `yield` and an async function only `await` as its own name,
+    // strict mode still rejects `yield` as a BindingIdentifier, and `await` is
+    // reserved for declaration names by module/async/static-block [Await]
+    // contexts, which scan it as tkAWAIT through the enclosing region. Class
+    // static blocks are strict code whose await-is-keyword region previously
+    // rejected expression names like `(function await(await) {})` here; those
+    // are legal (test262 expressions/{function,generators}/
+    // static-init-await-binding.js).
     if ((m_token.tk != tkID || flags & fFncNoName)
-        && (IsStrictMode() || fDeclaration
-            || pnodeFnc->IsGenerator() || pnodeFnc->IsAsync()
-                || (m_token.tk != tkYIELD && m_token.tk != tkAWAIT))) // Function expressions can have the name yield/await even inside generator/async functions
+        && ((IsStrictMode() && m_token.tk != tkAWAIT)
+            || fDeclaration
+            || (pnodeFnc->IsGenerator() && m_token.tk == tkYIELD)
+            || (pnodeFnc->IsAsync() && m_token.tk == tkAWAIT)
+                || (m_token.tk != tkYIELD && m_token.tk != tkAWAIT)))
     {
         if (fDeclaration ||
             m_token.IsReservedWord())  // For example:  var x = (function break(){});
@@ -8719,6 +8731,14 @@ ParseNodeFnc * Parser::GenerateEmptyConstructor(bool extends)
             //                        ^^^^^^^^^^^^^^^
             Assert(argsId);
             ParseNodeUni * spreadArg = CreateUniNode(knopEllipsis, argsId, pnodeFnc->ichMin, pnodeFnc->ichLim);
+            // The default derived constructor is not user source: per
+            // ClassDefinitionEvaluation it is a built-in that forwards the
+            // argument list to the super constructor directly, without the
+            // iterator protocol. Mark the synthetic spread so the emitter
+            // spreads the engine-built rest array by its elements instead of
+            // through @@iterator (user-written `super(...args)` keeps the
+            // observable iteration).
+            spreadArg->grfpn |= PNodeFlags::fpnSyntheticNode;
             ParseNodeSpecialName * superRef = ReferenceSpecialName(wellKnownPropertyPids._superConstructor, pnodeFnc->ichMin, pnodeFnc->ichLim, true);
             pnodeFnc->SetHasSuperReference(TRUE);
             ParseNodeSuperCall * callNode = CreateSuperCallNode(superRef, spreadArg);
@@ -12048,6 +12068,14 @@ ParseNodePtr Parser::ParseExpr(int oplMin,
             this->GetScanner()->Scan();
             nop = knopYieldStar;
         }
+        else if (nop == knopYield && m_token.tk == tkStar && this->GetScanner()->FHadNewLine())
+        {
+            // YieldExpression's delegation form requires no LineTerminator
+            // between `yield` and `*` (SS: YieldExpression : yield [no
+            // LineTerminator here] * AssignmentExpression), and `*` cannot
+            // begin a statement, so ASI cannot rescue the newline form.
+            Error(ERRsyntax);
+        }
 
         if (nop == knopYield)
         {
@@ -14488,6 +14516,20 @@ LDefaultToken:
                 if (m_inClassFieldInitializer && pidInner == wellKnownPropertyPids.arguments)
                 {
                     m_classFieldInitializerUsesArguments = true;
+                }
+                // LabelIdentifier `await` is an early error inside a class
+                // static block (sec-class-definitions-static-semantics-early-
+                // errors: the label is nested, without crossing a function or
+                // static-initialization-block boundary, within the block).
+                // The await-is-keyword scan region can be off on the parse
+                // pass that reaches this lookahead (e.g. the deferred reparse
+                // of the block helper), so also match the identifier when the
+                // enclosing function is the static block itself.
+                if (pidInner == wellKnownPropertyPids.await &&
+                    (m_inClassStaticBlock ||
+                     (GetCurrentFunctionNode() != nullptr && GetCurrentFunctionNode()->isClassStaticBlock)))
+                {
+                    Error(ERRsyntax);
                 }
                 // We have a label.
                 if (LabelExists(pidInner, pLabelIdList))

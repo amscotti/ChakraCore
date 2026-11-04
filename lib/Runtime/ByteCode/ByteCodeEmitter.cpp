@@ -11,6 +11,7 @@
 void EmitMethodFld(ParseNode *pnode, Js::RegSlot callObjLocation, Js::PropertyId propertyId, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo, bool registerCacheIdForCall);
 void EmitMethodElem(ParseNode *pnode, Js::RegSlot callObjLocation, Js::RegSlot indexLocation, ByteCodeGenerator *byteCodeGenerator);
 void EmitReference(ParseNode *pnode, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo);
+void EmitSuperPropertyReferenceOperands(ParseNodeBin *pnodeIndex, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo, bool captureBaseInPlace = true);
 void EmitAssignment(ParseNode *asgnNode, ParseNode *lhs, Js::RegSlot rhsLocation, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo, Js::RegSlot referenceBaseLocation = Js::Constants::NoRegister, Js::RegSlot convertedKeyLocation = Js::Constants::NoRegister);
 Js::RegSlot EmitAssignmentReferenceBase(ParseNode *lhs, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo);
 void EmitLoad(ParseNode *rhs, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo, Js::RegSlot referenceBaseLocation = Js::Constants::NoRegister, Js::RegSlot *convertedKeyLocation = nullptr);
@@ -2590,7 +2591,16 @@ void ByteCodeGenerator::EmitSuperCall(FuncInfo* funcInfo, ParseNodeSuperCall * p
     Js::ByteCodeLabel useSuperCallResultLabel = this->Writer()->DefineLabel();
     Js::ByteCodeLabel doneLabel = this->Writer()->DefineLabel();
 
-    Js::RegSlot tmpReg = this->EmitLdObjProto(Js::OpCode::LdFuncObjProto, pnodeSuperCall->pnodeTarget->location, funcInfo);
+    Js::RegSlot tmpReg = funcInfo->AcquireTmpRegister();
+    // Load GetSuperConstructor WITHOUT the IsConstructor check: per
+    // SuperCall (sec-super-keyword-runtime-semantics-evaluation) the
+    // ArgumentsListEvaluation runs before the "If IsConstructor(func) is
+    // false, throw a TypeError" step, and the call site's LdFuncObjProto
+    // (emitted after the argument list) performs that check. LdHomeObjProto
+    // is the plain non-throwing prototype load (returns undefined for
+    // null/undefined/non-object receivers).
+    this->Writer()->Reg2(Js::OpCode::LdHomeObjProto, tmpReg, pnodeSuperCall->pnodeTarget->location);
+    funcInfo->ReleaseTmpRegister(tmpReg);
     this->Writer()->BrReg1(Js::OpCode::BrOnClassConstructor, useNewTargetForThisLabel, tmpReg);
     this->Writer()->Reg2(Js::OpCode::NewScObjectNoCtorFull, thisForSuperCall, pnodeSuperCall->pnodeNewTarget->location);
     this->Writer()->Br(Js::OpCode::Br, makeCallLabel);
@@ -2962,6 +2972,28 @@ void ByteCodeGenerator::EmitClassConstructorEndCode(FuncInfo *funcInfo)
         EmitPropLoad(ByteCodeGenerator::ReturnRegister, thisSym, thisSym->GetPid(), funcInfo, true);
         this->m_writer.Reg1(Js::OpCode::ChkUndecl, ByteCodeGenerator::ReturnRegister);
     }
+}
+
+void ByteCodeGenerator::EmitDerivedClassConstructorReturnCheck(FuncInfo *funcInfo)
+{
+    Assert(funcInfo->IsClassConstructor() && !funcInfo->IsBaseClassConstructor());
+
+    // [[Construct]] steps 9-11 for derived constructors, applied to the body's
+    // final completion value (the return register):
+    //   value is an Object   -> return it (no this-binding check);
+    //   value is not Object and not undefined -> throw TypeError;
+    //   value is undefined   -> return GetThisBinding() (ReferenceError if the
+    //                           this binding was never initialized by super()).
+    Js::RegSlot undefinedConstantRegister = funcInfo->undefinedConstantRegister;
+    Js::ByteCodeLabel returnExprLabel = this->m_writer.DefineLabel();
+    this->m_writer.BrReg1(Js::OpCode::BrOnObject_A, returnExprLabel, ByteCodeGenerator::ReturnRegister);
+
+    Js::ByteCodeLabel returnThisLabel = this->m_writer.DefineLabel();
+    this->m_writer.BrReg2(Js::OpCode::BrSrEq_A, returnThisLabel, ByteCodeGenerator::ReturnRegister, undefinedConstantRegister);
+    this->m_writer.W1(Js::OpCode::RuntimeTypeError, SCODE_CODE(JSERR_ClassDerivedConstructorInvalidReturnType));
+    this->m_writer.MarkLabel(returnThisLabel);
+    this->EmitClassConstructorEndCode(funcInfo);
+    this->m_writer.MarkLabel(returnExprLabel);
 }
 
 void ByteCodeGenerator::EmitThis(FuncInfo *funcInfo, Js::RegSlot lhsLocation, Js::RegSlot fromRegister)
@@ -6903,6 +6935,51 @@ void ByteCodeGenerator::EndSubexpression(ParseNode* node)
     m_writer.EndSubexpression(node);
 }
 
+// Emits the operands of a `super[Expression]` reference in spec order:
+// this-binding check, then the super base load, then the Expression. With
+// captureBaseInPlace the home-object prototype (GetSuperBase) is captured
+// into a dedicated register (carried on the reference's pnodeThis node) so
+// later loads/stores through this reference reuse the same base even if the
+// key conversion or the RHS replaces the home object's prototype; without it
+// a short-lived fresh temp is used, matching the pre-lane emission shape.
+void EmitSuperPropertyReferenceOperands(ParseNodeBin *pnodeIndex, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo, bool captureBaseInPlace)
+{
+    Assert(pnodeIndex->nop == knopIndex);
+    Assert(ByteCodeGenerator::IsSuper(pnodeIndex->pnode1));
+
+    // GetThisBinding: ReferenceError before anything else observes the key.
+    // The check is emitted into a scratch temp (the consumer sites may also
+    // load `this` later for the call/this-override; an extra pure load is
+    // unobservable).
+    ParseNodeSpecialName *pnodeThis = pnodeIndex->AsParseNodeSuperReference()->pnodeThis;
+    Js::RegSlot thisTmp = funcInfo->AcquireTmpRegister();
+    byteCodeGenerator->EmitPropLoadThis(thisTmp, pnodeThis, funcInfo, true);
+    funcInfo->ReleaseTmpRegister(thisTmp);
+
+    Emit(pnodeIndex->pnode1, byteCodeGenerator, funcInfo, false);
+    if (captureBaseInPlace)
+    {
+        // The captured base must outlive the key conversion and (for compound
+        // assignment) the RHS. It is carried in the super reference's pnodeThis
+        // node location (otherwise unused on load/store paths, which emit only
+        // the scratch this-binding check): node locations persist until the
+        // consumer releases them. Never overwrite the super reference's own
+        // register -- it holds the shared home-object symbol value that later
+        // super references in the same function reload through.
+        ParseNodeSpecialName *pnodeThisCarrier = pnodeIndex->AsParseNodeSuperReference()->pnodeThis;
+        funcInfo->AcquireLoc(pnodeThisCarrier);
+        byteCodeGenerator->Writer()->Reg2(
+            Js::OpCode::LdHomeObjProto, pnodeThisCarrier->location, pnodeIndex->pnode1->location);
+        Emit(pnodeIndex->pnode2, byteCodeGenerator, funcInfo, false);
+    }
+    else
+    {
+        // Short-lived base (plain rvalue load / call target): the site
+        // derives the base itself, in the historical emission shape.
+        Emit(pnodeIndex->pnode2, byteCodeGenerator, funcInfo, false);
+    }
+}
+
 void EmitReference(ParseNode *pnode, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo)
 {
     // Generate code for the LHS of an assignment.
@@ -6913,6 +6990,20 @@ void EmitReference(ParseNode *pnode, ByteCodeGenerator *byteCodeGenerator, FuncI
         break;
 
     case knopIndex:
+        if (ByteCodeGenerator::IsSuper(pnode->AsParseNodeBin()->pnode1))
+        {
+            // SuperProperty : super [ Expression ] evaluates the this-binding
+            // check (GetThisBinding -> ReferenceError in an uninitialized
+            // derived constructor) BEFORE the Expression, and captures the
+            // base (GetSuperBase, the home object's prototype) BEFORE the
+            // key's ToPropertyKey or a later RHS can replace the home
+            // object's prototype (sec-super-keyword-runtime-semantics-evaluation,
+            // sec-makesuperpropertyreference). The captured proto is carried
+            // on the pnodeThis node so every later load or store of this
+            // reference reuses the same base register.
+            EmitSuperPropertyReferenceOperands(pnode->AsParseNodeBin(), byteCodeGenerator, funcInfo);
+            break;
+        }
         Emit(pnode->AsParseNodeBin()->pnode1, byteCodeGenerator, funcInfo, false);
         Emit(pnode->AsParseNodeBin()->pnode2, byteCodeGenerator, funcInfo, false);
         break;
@@ -8422,17 +8513,14 @@ void EmitAssignment(
 
     case knopIndex:
     {
-        Js::RegSlot targetLocation = lhs->AsParseNodeBin()->pnode1->location;
-
-        if (ByteCodeGenerator::IsSuper(lhs->AsParseNodeBin()->pnode1))
-        {
-            // We need to emit the 'this' node for the super reference even if we aren't planning to use the 'this' value.
-            // This is because we might be in a derived class constructor where we haven't yet called super() to bind the 'this' value.
-            // See ecma262 abstract operation 'MakeSuperPropertyReference'
-            Emit(lhs->AsParseNodeSuperReference()->pnodeThis, byteCodeGenerator, funcInfo, false);
-            funcInfo->ReleaseLoc(lhs->AsParseNodeSuperReference()->pnodeThis);
-            targetLocation = byteCodeGenerator->EmitLdObjProto(Js::OpCode::LdHomeObjProto, targetLocation, funcInfo);
-        }
+        // For a super reference, EmitReference already ran the this-binding
+        // check (before the key expression) and captured GetSuperBase into the
+        // pnodeThis-carried register, so the store reuses that base: the key's
+        // ToPropertyKey and the RHS cannot re-resolve a different prototype
+        // (sec-makesuperpropertyreference, PutValue).
+        Js::RegSlot targetLocation = ByteCodeGenerator::IsSuper(lhs->AsParseNodeBin()->pnode1)
+            ? lhs->AsParseNodeSuperReference()->pnodeThis->location
+            : lhs->AsParseNodeBin()->pnode1->location;
 
         // A compound load hoisted the reference: the store must reuse the key
         // register that already holds the ToPropertyKey-converted key instead
@@ -8445,6 +8533,13 @@ void EmitAssignment(
             ByteCodeGenerator::GetStElemIOpCode(funcInfo),
             rhsLocation, targetLocation, keyLocation);
 
+        // The captured-base carriage (pnodeThis node location, acquired in
+        // EmitSuperPropertyReferenceOperands before the key expression) sits
+        // below the key/RHS reference registers on the temp stack, so it
+        // cannot be LIFO-released here (debug builds assert the discipline);
+        // it stays allocated for the rest of the function. This is
+        // correctness-neutral and bounded by the number of super element
+        // store sites.
         break;
     }
 
@@ -8585,6 +8680,12 @@ void EmitLoad(
         funcInfo->AcquireLoc(lhs);
         EmitReference(lhs, byteCodeGenerator, funcInfo);
         Js::RegSlot keyLocation = lhs->AsParseNodeBin()->pnode2->location;
+        // For a super reference the base register holds the captured
+        // GetSuperBase value carried on the pnodeThis node (see
+        // EmitSuperPropertyReferenceOperands).
+        Js::RegSlot baseLocation = ByteCodeGenerator::IsSuper(lhs->AsParseNodeBin()->pnode1)
+            ? lhs->AsParseNodeSuperReference()->pnodeThis->location
+            : lhs->AsParseNodeBin()->pnode1->location;
         if (convertedKeyLocation != nullptr)
         {
             // Compound load-then-store (compound assignment, logical
@@ -8596,7 +8697,6 @@ void EmitLoad(
             // ReferencedName at most once). The caller owns the temp and
             // releases it after the store, above the base/key reference
             // registers (temp-stack LIFO).
-            Js::RegSlot baseLocation = lhs->AsParseNodeBin()->pnode1->location;
             Js::ByteCodeLabel notNull = byteCodeGenerator->Writer()->DefineLabel();
             byteCodeGenerator->Writer()->BrReg2(
                 Js::OpCode::BrNeq_A, notNull, baseLocation, funcInfo->nullConstantRegister);
@@ -8628,7 +8728,7 @@ void EmitLoad(
             }
         }
         byteCodeGenerator->Writer()->Element(
-            Js::OpCode::LdElemI_A, lhs->location, lhs->AsParseNodeBin()->pnode1->location, keyLocation);
+            Js::OpCode::LdElemI_A, lhs->location, baseLocation, keyLocation);
         break;
     }
 
@@ -8916,17 +9016,36 @@ void EmitOneArg(
     {
         Assert(spreadIndices != nullptr);
         spreadIndices->elements[spreadIndex++] = argIndex + 1; // account for 'this'
-        Js::RegSlot regVal = funcInfo->AcquireTmpRegister();
-        byteCodeGenerator->Writer()->Reg2(Js::OpCode::LdCustomSpreadIteratorList, regVal, pnode->location);
-        if (noArgOuts)
+        if ((pnode->grfpn & PNodeFlags::fpnSyntheticNode) != 0)
         {
-            byteCodeGenerator->Writer()->Reg2(Js::OpCode::Ld_A, argTempLocation, regVal);
+            // The parser-synthesized default derived constructor's rest
+            // forward: ClassDefinitionEvaluation specifies a built-in that
+            // passes the argument list straight through (no iterator
+            // protocol), so hand the engine-built rest array to the spread
+            // machinery directly; SpreadArgs copies its elements.
+            if (noArgOuts)
+            {
+                byteCodeGenerator->Writer()->Reg2(Js::OpCode::Ld_A, argTempLocation, pnode->location);
+            }
+            else
+            {
+                byteCodeGenerator->Writer()->ArgOut<true>(argIndex + 1, pnode->location, callSiteId, emitProfiledArgout);
+            }
         }
         else
         {
-            byteCodeGenerator->Writer()->ArgOut<true>(argIndex + 1, regVal, callSiteId, emitProfiledArgout);
+            Js::RegSlot regVal = funcInfo->AcquireTmpRegister();
+            byteCodeGenerator->Writer()->Reg2(Js::OpCode::LdCustomSpreadIteratorList, regVal, pnode->location);
+            if (noArgOuts)
+            {
+                byteCodeGenerator->Writer()->Reg2(Js::OpCode::Ld_A, argTempLocation, regVal);
+            }
+            else
+            {
+                byteCodeGenerator->Writer()->ArgOut<true>(argIndex + 1, regVal, callSiteId, emitProfiledArgout);
+            }
+            funcInfo->ReleaseTmpRegister(regVal);
         }
-        funcInfo->ReleaseTmpRegister(regVal);
     }
     else
     {
@@ -9619,19 +9738,30 @@ void EmitCallTarget(
             // arg or opnd2 side-effects as it's the "this" pointer.
             SaveOpndValue(pnodeTarget->AsParseNodeBin()->pnode1, funcInfo);
         }
-        Emit(pnodeTarget->AsParseNodeBin()->pnode1, byteCodeGenerator, funcInfo, false);
-        Emit(pnodeTarget->AsParseNodeBin()->pnode2, byteCodeGenerator, funcInfo, false);
+        if (ByteCodeGenerator::IsSuper(pnodeTarget->AsParseNodeBin()->pnode1))
+        {
+            // The this-binding check runs before the key expression
+            // (sec-super-keyword-runtime-semantics-evaluation); the rest keeps
+            // the historical emission shape (operands, this load, fresh base
+            // temp) because the call sequence's register contract is
+            // load-bearing.
+            EmitSuperPropertyReferenceOperands(pnodeTarget->AsParseNodeBin(), byteCodeGenerator, funcInfo,
+                /*captureBaseInPlace*/ false);
+        }
+        else
+        {
+            Emit(pnodeTarget->AsParseNodeBin()->pnode1, byteCodeGenerator, funcInfo, false);
+            Emit(pnodeTarget->AsParseNodeBin()->pnode2, byteCodeGenerator, funcInfo, false);
+        }
 
         Js::RegSlot indexLocation = pnodeTarget->AsParseNodeBin()->pnode2->location;
         Js::RegSlot protoLocation = pnodeTarget->AsParseNodeBin()->pnode1->location;
 
         if (ByteCodeGenerator::IsSuper(pnodeTarget->AsParseNodeBin()->pnode1))
         {
+            // Function calls on the 'super' object should maintain current 'this' pointer
             Emit(pnodeTarget->AsParseNodeSuperReference()->pnodeThis, byteCodeGenerator, funcInfo, false);
             protoLocation = byteCodeGenerator->EmitLdObjProto(Js::OpCode::LdHomeObjProto, protoLocation, funcInfo);
-            funcInfo->ReleaseLoc(pnodeTarget->AsParseNodeSuperReference()->pnodeThis);
-
-            // Function calls on the 'super' object should maintain current 'this' pointer
             *thisLocation = pnodeTarget->AsParseNodeSuperReference()->pnodeThis->location;
             *releaseThisLocation = false;
         }
@@ -9642,6 +9772,13 @@ void EmitCallTarget(
 
         EmitMethodElem(pnodeTarget, protoLocation, indexLocation, byteCodeGenerator);
 
+        // Release in LIFO order: for a super target, pnodeThis was acquired
+        // after the key operands, so it must be released first (debug builds
+        // assert the temp-stack discipline).
+        if (ByteCodeGenerator::IsSuper(pnodeTarget->AsParseNodeBin()->pnode1))
+        {
+            funcInfo->ReleaseLoc(pnodeTarget->AsParseNodeSuperReference()->pnodeThis);
+        }
         funcInfo->ReleaseLoc(pnodeTarget->AsParseNodeBin()->pnode2); // don't release indexLocation until after we use it.
 
         if (ByteCodeGenerator::IsSuper(pnodeTarget->AsParseNodeBin()->pnode1))
@@ -13608,16 +13745,24 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
     case knopIndex:
     {
         STARTSTATEMENET_IFTOPLEVEL(isTopLevel, pnode);
-        EmitBinaryOpnds(pnode->AsParseNodeBin()->pnode1, pnode->AsParseNodeBin()->pnode2, byteCodeGenerator, funcInfo);
-
-        Js::RegSlot callObjLocation = pnode->AsParseNodeBin()->pnode1->location;
-        Js::RegSlot protoLocation = callObjLocation;
-
         if (ByteCodeGenerator::IsSuper(pnode->AsParseNodeBin()->pnode1))
         {
-            Emit(pnode->AsParseNodeSuperReference()->pnodeThis, byteCodeGenerator, funcInfo, false);
-            protoLocation = byteCodeGenerator->EmitLdObjProto(Js::OpCode::LdHomeObjProto, callObjLocation, funcInfo);
-            funcInfo->ReleaseLoc(pnode->AsParseNodeSuperReference()->pnodeThis);
+            // this-binding check before the key expression, then the operands;
+            // the base is captured into a fresh temp after the key expression
+            // evaluation and before the element op performs ToPropertyKey
+            // (sec-super-keyword-runtime-semantics-evaluation).
+            EmitSuperPropertyReferenceOperands(pnode->AsParseNodeBin(), byteCodeGenerator, funcInfo,
+                /*captureBaseInPlace*/ false);
+        }
+        else
+        {
+            EmitBinaryOpnds(pnode->AsParseNodeBin()->pnode1, pnode->AsParseNodeBin()->pnode2, byteCodeGenerator, funcInfo);
+        }
+
+        Js::RegSlot protoLocation = pnode->AsParseNodeBin()->pnode1->location;
+        if (ByteCodeGenerator::IsSuper(pnode->AsParseNodeBin()->pnode1))
+        {
+            protoLocation = byteCodeGenerator->EmitLdObjProto(Js::OpCode::LdHomeObjProto, protoLocation, funcInfo);
         }
 
         funcInfo->ReleaseLoc(pnode->AsParseNodeBin()->pnode2);
@@ -14108,21 +14253,36 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
         // load undefined for the fallthrough case:
         if (!funcInfo->IsGlobalFunction())
         {
-            if (funcInfo->IsClassConstructor())
+            if (funcInfo->IsClassConstructor() && funcInfo->IsBaseClassConstructor())
             {
-                // For class constructors, we need to explicitly load 'this' into the return register.
+                // For base class constructors, 'this' is always bound at entry, so
+                // the fall-through return value is 'this'.
                 byteCodeGenerator->EmitClassConstructorEndCode(funcInfo);
             }
             else
             {
                 // In the global function, implicit return values are copied to the return register, and if
                 // necessary the return register is initialized at the top. Don't clobber the value here.
+                // Derived class constructors: the fall-through completion is undefined; the
+                // this-binding/value processing below (after singleExit) turns it
+                // into the [[Construct]] result. Doing it at the single exit, rather
+                // than at each return statement, means finally blocks and iterator
+                // close handlers that run after a `return` still observe (and can
+                // satisfy) the checks, and the TypeError for a primitive return value
+                // cannot be intercepted by the constructor body's own try/catch
+                // (sec-ecmascript-function-objects-construct-argumentslist-newtarget
+                // steps 9-11).
                 byteCodeGenerator->Writer()->Reg1(Js::OpCode::LdUndef, ByteCodeGenerator::ReturnRegister);
             }
         }
 
         // Label for non-fall-through return
         byteCodeGenerator->Writer()->MarkLabel(funcInfo->singleExit);
+
+        if (funcInfo->IsClassConstructor() && !funcInfo->IsBaseClassConstructor())
+        {
+            byteCodeGenerator->EmitDerivedClassConstructorReturnCheck(funcInfo);
+        }
 
         if (funcInfo->GetHasCachedScope())
         {
@@ -14301,36 +14461,26 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
         {
             byteCodeGenerator->Writer()->Reg1(Js::OpCode::LdUndef, ByteCodeGenerator::ReturnRegister);
         }
-        if (funcInfo->IsClassConstructor())
+        if (funcInfo->IsClassConstructor() && funcInfo->IsBaseClassConstructor())
         {
-            // return expr; // becomes like below:
+            // Base class constructor: `return expr;` becomes like below:
             //
             // if (IsObject(expr)) {
             //   return expr;
-            // } else if (IsBaseClassConstructor) {
+            // } else {
             //   return this;
-            // } else if (!IsUndefined(expr)) {
-            //   throw TypeError;
             // }
+            // ('this' is always bound at entry for base constructors, so this
+            // inline rewrite has no observable ordering effect.)
 
             Js::ByteCodeLabel returnExprLabel = byteCodeGenerator->Writer()->DefineLabel();
             byteCodeGenerator->Writer()->BrReg1(Js::OpCode::BrOnObject_A, returnExprLabel, ByteCodeGenerator::ReturnRegister);
-
-            if (funcInfo->IsBaseClassConstructor())
-            {
-                byteCodeGenerator->Writer()->Reg2(Js::OpCode::Ld_A, ByteCodeGenerator::ReturnRegister, funcInfo->GetThisSymbol()->GetLocation());
-            }
-            else
-            {
-                Js::ByteCodeLabel returnThisLabel = byteCodeGenerator->Writer()->DefineLabel();
-                byteCodeGenerator->Writer()->BrReg2(Js::OpCode::BrSrEq_A, returnThisLabel, ByteCodeGenerator::ReturnRegister, funcInfo->undefinedConstantRegister);
-                byteCodeGenerator->Writer()->W1(Js::OpCode::RuntimeTypeError, SCODE_CODE(JSERR_ClassDerivedConstructorInvalidReturnType));
-                byteCodeGenerator->Writer()->MarkLabel(returnThisLabel);
-                byteCodeGenerator->EmitClassConstructorEndCode(funcInfo);
-            }
-
+            byteCodeGenerator->Writer()->Reg2(Js::OpCode::Ld_A, ByteCodeGenerator::ReturnRegister, funcInfo->GetThisSymbol()->GetLocation());
             byteCodeGenerator->Writer()->MarkLabel(returnExprLabel);
         }
+        // Derived class constructors emit no return-value processing here: the
+        // checks run once at the single exit (see knopEndCode), after finally
+        // blocks and iterator close handlers have completed.
         if (pnodeReturn->grfnop & fnopCleanup)
         {
             byteCodeGenerator->EmitJumpCleanup(nullptr, funcInfo);

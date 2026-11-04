@@ -52,17 +52,13 @@
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string foo2",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string foo2"
       },
       "bar4": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string bar4",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string bar4"
       }
     },
     "globals": {
@@ -93,17 +89,13 @@
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string foo2",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string foo2"
       },
       "bar4": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string bar4",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string bar4"
       }
     },
     "globals": {
@@ -134,17 +126,13 @@
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string foo2",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string foo2"
       },
       "bar4": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string bar4",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string bar4"
       }
     },
     "globals": {

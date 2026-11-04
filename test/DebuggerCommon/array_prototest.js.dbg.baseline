@@ -47,25 +47,19 @@
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string foo",
-        "caller": "object null",
-        "arguments": "Object {...}"
+        "name": "string foo"
       },
       "foo1": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string foo1",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string foo1"
       },
       "foo2": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string foo2",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string foo2"
       }
     },
     "arguments": {
@@ -88,9 +82,7 @@
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string foo",
-        "caller": "object null",
-        "arguments": "Object {...}"
+        "name": "string foo"
       },
       "Symbol.iterator": {
         "#__proto__": "function <large string>",
@@ -267,25 +259,19 @@
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string foo",
-        "caller": "object null",
-        "arguments": "Object {...}"
+        "name": "string foo"
       },
       "foo1": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string foo1",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string foo1"
       },
       "foo2": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string foo2",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string foo2"
       }
     }
   },
@@ -337,25 +323,19 @@
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string foo",
-        "caller": "object null",
-        "arguments": "Object {...}"
+        "name": "string foo"
       },
       "foo1": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string foo1",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string foo1"
       },
       "foo2": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string foo2",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string foo2"
       }
     },
     "arguments": {
@@ -378,9 +358,7 @@
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string foo",
-        "caller": "object null",
-        "arguments": "Object {...}"
+        "name": "string foo"
       },
       "Symbol.iterator": {
         "#__proto__": "function <large string>",
@@ -580,25 +558,19 @@
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string foo",
-        "caller": "object null",
-        "arguments": "Object {...}"
+        "name": "string foo"
       },
       "foo1": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string foo1",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string foo1"
       },
       "foo2": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string foo2",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string foo2"
       }
     }
   },

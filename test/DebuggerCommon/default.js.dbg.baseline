@@ -10263,9 +10263,7 @@
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string arguments",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string arguments"
       },
       "d": {
         "#__proto__": "Object {...}",
@@ -10334,9 +10332,7 @@
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string arguments",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string arguments"
       },
       "c": {
         "#__proto__": "Object {...}",
@@ -10428,9 +10424,7 @@
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string arguments",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string arguments"
       },
       "d": {
         "#__proto__": "Object {...}",
@@ -10451,9 +10445,7 @@
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string arguments",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string arguments"
       }
     }
   },
@@ -10626,9 +10618,7 @@
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string c",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string c"
       },
       "d": "undefined undefined"
     },
@@ -10666,9 +10656,7 @@
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string c",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string c"
       },
       "d": "number 1"
     },
@@ -10691,9 +10679,7 @@
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string c",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string c"
       }
     }
   }

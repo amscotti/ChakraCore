@@ -22,9 +22,7 @@
         "callee": {
           "#__proto__": "function <large string>",
           "prototype": "Object {...}",
-          "length": "number 0",
-          "caller": "object null",
-          "arguments": "Object {...}"
+          "length": "number 0"
         },
         "Symbol.iterator": {
           "#__proto__": "function <large string>",
@@ -99,8 +97,6 @@
           "#__proto__": "function <large string>",
           "prototype": "Object {...}",
           "length": "number 0",
-          "caller": "object null",
-          "arguments": "object null",
           "[104]": "string 104"
         },
         "[4]": {

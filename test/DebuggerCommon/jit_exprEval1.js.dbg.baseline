@@ -103,9 +103,7 @@
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 1",
-        "name": "string f6",
-        "caller": "function <large string>",
-        "arguments": "Object {...}"
+        "name": "string f6"
       }
     },
     "globals": {
@@ -245,9 +243,7 @@
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 1",
-        "name": "string f6",
-        "caller": "function <large string>",
-        "arguments": "Object {...}"
+        "name": "string f6"
       }
     },
     "globals": {

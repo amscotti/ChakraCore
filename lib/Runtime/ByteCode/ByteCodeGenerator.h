@@ -350,6 +350,7 @@ public:
     void LoadSuperConstructorObject(FuncInfo *funcInfo);
     void EmitSuperCall(FuncInfo* funcInfo, ParseNodeSuperCall * pnodeSuperCall, BOOL fReturnValue, BOOL fEvaluateComponents);
     void EmitClassConstructorEndCode(FuncInfo *funcInfo);
+    void EmitDerivedClassConstructorReturnCheck(FuncInfo *funcInfo);
     void EmitClassFieldInitializerCalls(ParseNode * pnodeFields, FuncInfo * funcInfo, Js::RegSlot thisLocation = Js::Constants::NoRegister);
     void EmitStaticClassFieldDefinition(ParseNode * pnodeField, Js::RegSlot classLocation, FuncInfo * funcInfo);
     void EmitStaticClassBlockDefinition(ParseNode * pnodeMember, Js::RegSlot classLocation, FuncInfo * funcInfo);

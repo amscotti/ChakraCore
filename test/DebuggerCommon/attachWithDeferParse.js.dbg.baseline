@@ -54,17 +54,13 @@
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string f1",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string f1"
       },
       "g": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string g",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string g"
       }
     },
     "globals": {
@@ -103,25 +99,19 @@
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 2",
-        "name": "string s",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string s"
       },
       "f1": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string f1",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string f1"
       },
       "g": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string g",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string g"
       }
     },
     "globals": {

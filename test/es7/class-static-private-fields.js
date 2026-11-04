@@ -351,7 +351,9 @@ const tests = [
             assert.doesNotThrow(function () { eval("class C { static async * #m() {} }"); });
             assert.doesNotThrow(function () { eval("class C { static {} }"); }, "static block");
             assert.doesNotThrow(function () { eval("class C { static ['computed'] = 1; }"); });
-            assert.areEqual(1, eval("class C { static ['computed'] = 1; }").computed);
+            // Class expression form: a class declaration's completion is
+            // empty, so eval of a declaration returns undefined.
+            assert.areEqual(1, eval("(class C { static ['computed'] = 1; })").computed);
 
             // Static initializer early errors match public fields.
             assert.throws(function () { eval("class C { static #x = arguments; }"); }, SyntaxError);

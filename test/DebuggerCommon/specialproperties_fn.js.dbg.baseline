@@ -17,10 +17,8 @@
       "arguments.callee": {
         "#__proto__": "function function() {\n    [native code]\n}",
         "prototype": "Object {...}",
-        "name": "string test",
-        "caller": "function function bar(){\t\r\n\ttest(1, 2, 3);\r\n}",
-        "arguments": "Object {...}",
-        "length": "number 3"
+        "length": "number 3",
+        "name": "string test"
       }
     }
   },
@@ -29,10 +27,8 @@
       "arguments.callee.caller": {
         "#__proto__": "function function() {\n    [native code]\n}",
         "prototype": "Object {...}",
-        "name": "string bar",
-        "caller": "object null",
-        "arguments": "Object {...}",
-        "length": "number 0"
+        "length": "number 0",
+        "name": "string bar"
       }
     }
   },
@@ -40,8 +36,8 @@
     "evaluate": {
       "arrow": {
         "#__proto__": "function function() {\n    [native code]\n}",
-        "name": "string arrow",
-        "length": "number 0"
+        "length": "number 0",
+        "name": "string arrow"
       }
     }
   }

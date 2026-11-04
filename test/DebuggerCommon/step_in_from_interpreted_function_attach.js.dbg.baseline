@@ -69,25 +69,19 @@
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string foo",
-        "caller": "function <large string>",
-        "arguments": "Object {...}"
+        "name": "string foo"
       },
       "bar": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string bar",
-        "caller": "function <large string>",
-        "arguments": "Object {...}"
+        "name": "string bar"
       },
       "Run": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string Run",
-        "caller": "object null",
-        "arguments": "Object {...}"
+        "name": "string Run"
       }
     },
     "arguments": {
@@ -110,9 +104,7 @@
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string bar",
-        "caller": "function <large string>",
-        "arguments": "Object {...}"
+        "name": "string bar"
       },
       "Symbol.iterator": {
         "#__proto__": "function <large string>",
@@ -286,25 +278,19 @@
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string foo",
-        "caller": "function <large string>",
-        "arguments": "Object {...}"
+        "name": "string foo"
       },
       "bar": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string bar",
-        "caller": "function <large string>",
-        "arguments": "Object {...}"
+        "name": "string bar"
       },
       "Run": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string Run",
-        "caller": "object null",
-        "arguments": "Object {...}"
+        "name": "string Run"
       }
     }
   }

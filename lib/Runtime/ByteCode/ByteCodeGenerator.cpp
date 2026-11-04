@@ -630,6 +630,14 @@ bool IsExpressionStatement(ParseNode* stmt, const Js::ScriptContext *const scrip
         // declaration does not produce a value for the program.
         return !stmt->AsParseNodeFnc()->IsDeclaration();
     }
+    if (stmt->nop == knopClassDecl && stmt->AsParseNodeClass()->pnodeDeclName != nullptr)
+    {
+        // Class declarations likewise produce an empty completion
+        // (sec-runtime-semantics-bindingclassdeclarationevaluation returns
+        // NormalCompletion(empty)); only the class expression evaluates to
+        // the constructor.
+        return false;
+    }
     if ((stmt->nop >= 0) && (stmt->nop<knopLim))
     {
         return (ParseNode::Grfnop(stmt->nop) & fnopNotExprStmt) == 0;

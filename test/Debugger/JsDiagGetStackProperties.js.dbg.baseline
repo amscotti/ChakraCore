@@ -90,25 +90,19 @@
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string innerFunc1",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string innerFunc1"
       },
       "innerFunc2": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string innerFunc2",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string innerFunc2"
       },
       "innerFunc3": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",
         "length": "number 0",
-        "name": "string innerFunc3",
-        "caller": "object null",
-        "arguments": "object null"
+        "name": "string innerFunc3"
       }
     },
     "globals": {

@@ -8120,7 +8120,8 @@ skipThunk:
         ScriptFunction * constructor = ScriptFunction::OP_NewClassConstructor(environment, infoRef, proto, constructorParent);
 
         proto->SetSlot(SetSlotArguments(Constants::NoProperty, 0, constructor));
-        constructor->SetSlot(SetSlotArguments(Constants::NoProperty, 0, proto));
+        // Class constructor slot layout: length(0), name(1), prototype(2).
+        constructor->SetSlot(SetSlotArguments(Constants::NoProperty, 2, proto));
 
         SetReg(protoReg, proto);
         return constructor;
