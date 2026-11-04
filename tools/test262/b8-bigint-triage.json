@@ -1,0 +1,144 @@
+{
+ "before_after_whole_selection": {
+  "fail_to_pass": 18,
+  "pass_to_fail": 0
+ },
+ "cert_manifest_record": {
+  "edition_failed": 378,
+  "edition_passed": 2191,
+  "engine": "ba796f74f"
+ },
+ "flips": {
+  "fail_to_pass": [
+   [
+    "test/built-ins/TypedArray/prototype/toLocaleString/BigInt/calls-tolocalestring-from-each-value.js",
+    "default"
+   ],
+   [
+    "test/built-ins/TypedArray/prototype/toLocaleString/BigInt/calls-tolocalestring-from-each-value.js",
+    "strict mode"
+   ],
+   [
+    "test/built-ins/TypedArray/prototype/toLocaleString/BigInt/calls-tostring-from-each-value.js",
+    "default"
+   ],
+   [
+    "test/built-ins/TypedArray/prototype/toLocaleString/BigInt/calls-tostring-from-each-value.js",
+    "strict mode"
+   ],
+   [
+    "test/built-ins/TypedArray/prototype/toLocaleString/BigInt/calls-valueof-from-each-value.js",
+    "default"
+   ],
+   [
+    "test/built-ins/TypedArray/prototype/toLocaleString/BigInt/calls-valueof-from-each-value.js",
+    "strict mode"
+   ],
+   [
+    "test/built-ins/TypedArray/prototype/toLocaleString/BigInt/return-abrupt-from-firstelement-tolocalestring.js",
+    "default"
+   ],
+   [
+    "test/built-ins/TypedArray/prototype/toLocaleString/BigInt/return-abrupt-from-firstelement-tolocalestring.js",
+    "strict mode"
+   ],
+   [
+    "test/built-ins/TypedArray/prototype/toLocaleString/BigInt/return-abrupt-from-firstelement-tostring.js",
+    "default"
+   ],
+   [
+    "test/built-ins/TypedArray/prototype/toLocaleString/BigInt/return-abrupt-from-firstelement-tostring.js",
+    "strict mode"
+   ],
+   [
+    "test/built-ins/TypedArray/prototype/toLocaleString/BigInt/return-abrupt-from-firstelement-valueof.js",
+    "default"
+   ],
+   [
+    "test/built-ins/TypedArray/prototype/toLocaleString/BigInt/return-abrupt-from-firstelement-valueof.js",
+    "strict mode"
+   ],
+   [
+    "test/built-ins/TypedArray/prototype/toLocaleString/BigInt/return-abrupt-from-nextelement-tolocalestring.js",
+    "default"
+   ],
+   [
+    "test/built-ins/TypedArray/prototype/toLocaleString/BigInt/return-abrupt-from-nextelement-tolocalestring.js",
+    "strict mode"
+   ],
+   [
+    "test/built-ins/TypedArray/prototype/toLocaleString/BigInt/return-abrupt-from-nextelement-tostring.js",
+    "default"
+   ],
+   [
+    "test/built-ins/TypedArray/prototype/toLocaleString/BigInt/return-abrupt-from-nextelement-tostring.js",
+    "strict mode"
+   ],
+   [
+    "test/built-ins/TypedArray/prototype/toLocaleString/BigInt/return-abrupt-from-nextelement-valueof.js",
+    "default"
+   ],
+   [
+    "test/built-ins/TypedArray/prototype/toLocaleString/BigInt/return-abrupt-from-nextelement-valueof.js",
+    "strict mode"
+   ]
+  ],
+  "pass_to_fail": []
+ },
+ "fresh_triage": {
+  "attribution_378_to_304": "B3 detach-buffer lane (ac4c9d413, landed after the manifest engine checkpoint ba796f74f) fixed the detached TypedArray families incl. BigInt64 views; manifest 378 -> fresh 304 at e1a84575c",
+  "bigint_tagged_scenarios": 2883,
+  "edition_selected_failed_after": 286,
+  "edition_selected_failed_before": 304,
+  "families": {
+   "sab-flag": {
+    "bucket": "disabled-flag",
+    "examples": [
+     "test/built-ins/Atomics/add/bigint/bad-range.js",
+     "test/built-ins/Atomics/add/bigint/good-views.js",
+     "test/built-ins/Atomics/add/bigint/non-shared-bufferdata.js",
+     "test/built-ins/Atomics/and/bigint/bad-range.js",
+     "test/built-ins/Atomics/and/bigint/good-views.js",
+     "test/built-ins/Atomics/and/bigint/non-shared-bufferdata.js"
+    ],
+    "files": 132,
+    "scenarios": 264
+   },
+   "ta-internals": {
+    "bucket": "engine-defect",
+    "examples": [
+     "test/built-ins/TypedArrayConstructors/internals/DefineOwnProperty/BigInt/key-is-numericindex.js",
+     "test/built-ins/TypedArrayConstructors/internals/Delete/BigInt/key-is-out-of-bounds-non-strict.js",
+     "test/built-ins/TypedArrayConstructors/internals/Delete/BigInt/key-is-out-of-bounds-strict.js",
+     "test/built-ins/TypedArrayConstructors/internals/GetOwnProperty/BigInt/index-prop-desc.js",
+     "test/built-ins/TypedArrayConstructors/internals/Set/BigInt/indexed-value.js",
+     "test/built-ins/TypedArrayConstructors/internals/Set/BigInt/key-is-canonical-invalid-index-prototype-chain-set.js"
+    ],
+    "files": 12,
+    "scenarios": 22
+   },
+   "toLocaleString": {
+    "bucket": "engine-defect",
+    "examples": [
+     "test/built-ins/TypedArray/prototype/toLocaleString/BigInt/calls-tolocalestring-from-each-value.js",
+     "test/built-ins/TypedArray/prototype/toLocaleString/BigInt/calls-tostring-from-each-value.js",
+     "test/built-ins/TypedArray/prototype/toLocaleString/BigInt/calls-valueof-from-each-value.js",
+     "test/built-ins/TypedArray/prototype/toLocaleString/BigInt/return-abrupt-from-firstelement-tolocalestring.js",
+     "test/built-ins/TypedArray/prototype/toLocaleString/BigInt/return-abrupt-from-firstelement-tostring.js",
+     "test/built-ins/TypedArray/prototype/toLocaleString/BigInt/return-abrupt-from-firstelement-valueof.js"
+    ],
+    "files": 9,
+    "scenarios": 18
+   }
+  }
+ },
+ "lane": "b8-bigint-partial",
+ "sab_flag_on_ceiling": {
+  "flags": "-ESSharedArrayBuffer",
+  "passed": 234,
+  "residual": "Atomics wait/notify/waitAsync multi-agent waiter-list tests (host $262.agent class; non-BigInt analogs fail identically, S2 A3b/A3c)",
+  "scenarios": 264,
+  "still_failing": 30
+ },
+ "source_run": "out/test262-b8-bigint-before (HEAD e1a84575c, test profile no-JIT, default flags, corpus 2e0a5676)"
+}
