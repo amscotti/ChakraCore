@@ -1091,7 +1091,12 @@ Useful host commands, all against `out/jit/bin/ch`:
 
 `ch -c` and `ch -e` are not valid. Do not pass `-RecyclerStress`. Do not run
 two suites at once: they share `profile.dpl.*` files. Host `print` is the
-script's output channel.
+script's output channel. Do not pass `-dynamicprofilecache` and
+`-dynamicprofileinput` naming files in the same process: the input file is
+imported and the cache file it names is overwritten, not merged
+(`lib/Runtime/Language/DynamicProfileStorage.cpp:329-338`) — keep the
+write side (`interpreted`) and the read side (`dynapogo`) in separate
+variant processes, as the runner does.
 
 The JIT static archive is about 2.2 GB because the objects are built with
 `-g`. Zig 0.17's archiver cannot write an archive that large. This profile

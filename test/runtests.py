@@ -144,6 +144,11 @@ if binary == None:
         binary = os.path.join(repo_root, 'Build', build, 'bin', '{}_{}'.format(arch, flavor), binary_name)
     else:
         binary = os.path.join(repo_root, 'out', flavor, binary_name)
+# Tests run with cwd set to each test's folder, so a relative --binary
+# would be re-resolved per test and fail with FileNotFoundError for every
+# test. Resolve it once, against the invocation directory (see
+# doc/arm64-macos-jit.md).
+binary = os.path.abspath(binary)
 
 if not os.path.isfile(binary):
     print('{} not found. Aborting.'.format(binary))

@@ -24,6 +24,11 @@ foundational documents and the earliest receipts only.
 
 Conventions:
 
+- Lane receipts archive their final-state gate logs lane-named under
+  `out/` and cite them (started by the B4 lane — `out/b4-gate-logs/`;
+  e.g. `out/e7-gate-test.log` / `out/e7-gate-debug.log`, re-run on the
+  exact committed tree after the review legs), per the evidence-hygiene
+  lessons in [b4-gate.md](b4-gate.md) and [b4-linux.md](b4-linux.md).
 - Engine/build claims cite in-repo `path:line` references at the pinned baseline;
   external toolchain and language-edition claims cite primary sources.
 - `build.md` distinguishes source-inspected recipes from run-verified results:
