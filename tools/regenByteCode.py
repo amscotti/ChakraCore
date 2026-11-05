@@ -161,6 +161,11 @@ def load_file(path, mode):
         else:
             return open(path, mode, newline='\n')
     else:
+        # POSIX: newline='' disables universal-newline translation so CRLF
+        # originals restore byte-identically (review fix: text-mode read
+        # collapses \r\n to \n, making the guard's restore lossy).
+        if sys.version_info[0] >= 3:
+            return open(path, mode, newline='')
         return open(path, mode)
 
 # Regenerate the bytecode
