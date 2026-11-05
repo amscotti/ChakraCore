@@ -5359,7 +5359,7 @@ Case0:
             n = JavascriptConversion::ToUInt32(length, scriptContext);
         }
 
-        // ES2025 22.1.3.22 Array.prototype.push, step 5: if len + argCount >
+        // ES2025 23.1.3.23 Array.prototype.push, step 5: if len + argCount >
         // 2^53 - 1, throw a TypeError before storing any item. Without this an
         // array-like whose ToLength-saturated 'length' is already 2^53 - 1
         // silently stores one more element past the safe-integer limit instead
@@ -6412,7 +6412,7 @@ Case0:
         JIT_HELPER_END(Array_Slice);
     }
 
-    // Array.prototype.slice as described in ES6.0 (draft 22) Section 22.1.3.22
+    // Array.prototype.slice as described in ES6.0 (draft 22) Section 23.1.3.23
     template <typename T>
     Var JavascriptArray::SliceHelper(JavascriptArray* pArr, Js::TypedArrayBase* typedArrayBase, RecyclableObject* obj, T length, Arguments& args, ScriptContext* scriptContext)
     {
@@ -8080,7 +8080,7 @@ Case0:
         JS_REENTRANT(jsReentLock, BigIndex length = OP_GetLength(dynamicObject, scriptContext));
         if (unshiftElements > 0)
         {
-            // ES2025 22.1.3.35 Array.prototype.unshift, step 4.a: if
+            // ES2025 23.1.3.37 Array.prototype.unshift, step 4.a: if
             // len + argCount > 2^53 - 1, throw a TypeError before moving any
             // element. The Unshift walks below would otherwise iterate a
             // ToLength-saturated 'length' — O(2^53) work and a runner timeout.

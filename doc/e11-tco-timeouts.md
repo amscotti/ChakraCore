@@ -168,3 +168,30 @@ test/runtests.py --test --variants=disable_jit --binary …/ch test/Array test/e
 test/runtests.py --test --variants=disable_jit --binary …/ch test/es7              # 107/0
 zig build check;  zig build -Dprofile=debug-static check-regression;  zig build -Dprofile=jit check
 ```
+
+### Review outcome (dual ACCEPT, nits folded)
+
+Both reviews ACCEPTed with zero `[bug]`. The general review verified
+the three validation sites spec-exact at placement/arithmetic/order
+against the real ES2025 text; the adversarial review ran 40+ shapes
+(coercion-order discriminators with mutating getters, species traps,
+proxies, typed arrays, arguments, the full boundary matrix) —
+constructor-level identical to Node everywhere; E11-2's pre-existence
+proven by construction (purely additive diff); TCO uniformity and V8
+parity confirmed (independent depth 6,718; build-dependent: 7,192 jit /
+1,438 debug — only the ≪100,000 ordering is load-bearing).
+
+**Folded:** (1) spec citations corrected in code comments and here —
+push **23.1.3.23 s4**, splice **23.1.3.31 s9**, unshift **23.1.3.37
+s4.a** (the old numbers were the corpus tests' ES2015-era frontmatter
+mislabeled ES2025); (2) the host arithmetic corrected: post-B1 the
+certified host bucket was already **7**, so E11's reclassification
+makes it **7 → 1** (not 426→421); (3) the "44" is an approximate
+agent-shaped-FAILURE count (112 files/224 scenarios use $262.agent;
+107 use getReport) — scope noted; (4) the parity-hang informational
+note (unshift/splice just under the cap do spec-mandated O(len) walks
+that hang in BOTH engines — a future fuzz lane shouldn't misread it);
+(5) two review pins added to the test (species non-observation before
+the throw; delete-only-at-cap exits via the species RangeError); (6)
+before-run provenance note (record dylib hashes, not just the
+launcher).
