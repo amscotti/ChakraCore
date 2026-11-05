@@ -1384,7 +1384,7 @@ LOneOctal:
             case '9':
                 // \8 and \9 are NonOctalDecimalEscapeSequences in sloppy
                 // string literals, but no template production admits them:
-                // they cook to undefined (12.3.9.1), an early Syntax Error
+                // they cook to undefined (ES2025 13.2.8.1), an early Syntax Error
                 // in untagged templates. Reject at scan time like the other
                 // legacy octal shapes above; the raw string still records
                 // the escape for tagged use, matching the existing

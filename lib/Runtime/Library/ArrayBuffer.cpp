@@ -505,7 +505,7 @@ namespace Js
         }
         else if (isCtorSuperCall)
         {
-            // ES2025 9.4.13 step 4b (proto-from-ctor-realm): newTarget.prototype
+            // ES2025 10.1.14 step 4b (proto-from-ctor-realm): newTarget.prototype
             // was not an object, so the default [[Prototype]] comes from
             // GetFunctionRealm(newTarget)'s ArrayBuffer.prototype. newArr carries
             // this realm's intrinsic; resolve the constructor-realm counterpart.

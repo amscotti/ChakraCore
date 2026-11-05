@@ -12459,7 +12459,7 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
 
     ScriptContext* JavascriptOperators::GetFunctionRealm(RecyclableObject* function, ScriptContext* requestContext)
     {
-        // ES2025 7.3.27 GetFunctionRealm. A Proxy or bound function does not
+        // ES2025 7.3.24 GetFunctionRealm. A Proxy or bound function does not
         // necessarily carry its target's ScriptContext, so follow the spec's
         // target chain instead of using function->GetScriptContext(). A revoked
         // Proxy target throws JSERR_ErrorOnRevokedProxy from GetTarget().
@@ -12488,7 +12488,7 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
     }
 
     // Intrinsic prototypes reachable as an intrinsicDefaultProto argument of
-    // ES2025 9.4.13 GetPrototypeFromConstructor (step 4b realm fallback in
+    // ES2025 10.1.14 GetPrototypeFromConstructor (step 4b realm fallback in
     // OrdinaryCreateFromConstructor below). Captureless lambdas give the
     // heterogeneous library getters/fields one uniform callable type.
     typedef DynamicObject* (*RealmIntrinsicProtoGetter)(JavascriptLibraryBase* library);
@@ -12572,10 +12572,10 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
             return obj;
         }
 
-        // ES2025 9.4.13 GetPrototypeFromConstructor step 4b: constructor.prototype
+        // ES2025 10.1.14 GetPrototypeFromConstructor step 4b: constructor.prototype
         // is not an object, so the default [[Prototype]] is the intrinsic named
         // intrinsicDefaultProto *of the realm of the constructor*
-        // (7.3.27 GetFunctionRealm), not of the currently executing builtin.
+        // (7.3.24 GetFunctionRealm), not of the currently executing builtin.
         // obj (and intrinsicProto, when passed) was created from the current
         // realm's library, so resolve the counterpart intrinsic there by
         // matching this realm's prototype. No table match (an intrinsic not

@@ -4,7 +4,7 @@
 //-------------------------------------------------------------------------------------------------------
 // E11: ES2025 early length-limit validation for Array.prototype.push/splice/unshift on
 // generic receivers. Each must throw a TypeError before moving or storing any element when
-// the resulting length would exceed 2^53-1 (22.1.3.22 step 5, 22.1.3.31 step 8, 22.1.3.35
+// the resulting length would exceed 2^53-1 (23.1.3.23 step 5, 23.1.3.31 step 8, 23.1.3.37
 // step 4.a), instead of attempting O(2^53) work (splice/unshift) or silently storing one
 // element past the limit (push). Coercion order is observable: 'length' (and for splice,
 // start/deleteCount) is read before the throw. See doc/e11-tco-timeouts.md.

@@ -316,13 +316,13 @@ namespace Js
 
         static RecyclableObject* CreateFromConstructor(RecyclableObject* constructor, ScriptContext* scriptContext);
         static RecyclableObject* OrdinaryCreateFromConstructor(RecyclableObject* constructor, RecyclableObject* obj, DynamicObject* intrinsicProto, ScriptContext* scriptContext);
-        // ES2025 7.3.27 GetFunctionRealm: a Proxy or bound function does not
+        // ES2025 7.3.24 GetFunctionRealm: a Proxy or bound function does not
         // necessarily carry its target's ScriptContext, so follow the spec's
         // target chain (revoked-proxy targets throw the specified TypeError
         // from the passed requestContext). Returns nullptr only for objects
         // with no script context at all (e.g. host dispatch surfaces).
         static ScriptContext* GetFunctionRealm(RecyclableObject* function, ScriptContext* requestContext);
-        // ES2025 9.4.13 GetPrototypeFromConstructor step 4b realm fallback:
+        // ES2025 10.1.14 GetPrototypeFromConstructor step 4b realm fallback:
         // given the current realm's intrinsic prototype (the intrinsicDefaultProto
         // counterpart), resolve the same intrinsic from `constructorRealm`'s
         // library. Returns nullptr when the prototype is not one of the listed

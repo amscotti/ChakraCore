@@ -3,13 +3,13 @@
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 // Focused regression tests for the B2 cross-realm lane (doc/e3-cross-realm.md):
-//  - ES2025 9.4.13 GetPrototypeFromConstructor step 4b: default [[Prototype]]
+//  - ES2025 10.1.14 GetPrototypeFromConstructor step 4b: default [[Prototype]]
 //    from GetFunctionRealm(newTarget)'s realm (proxy/bound target chains).
 //  - ES2025 10.5.12/10.5.13: proxy [[Call]]/[[Construct]] validation TypeErrors
 //    and the trap arguments array belong to the CALLER's realm.
 //  - Revoked proxies stay constructable (ProxyCreate fixes [[Construct]] at
 //    creation) and surface the revoked TypeError from [[Construct]].
-//  - ES2025 10.4.2.2 ArraySetLength RangeError in the caller's realm.
+//  - ES2025 10.4.2.4 ArraySetLength RangeError in the caller's realm.
 //  - ES2025 7.2.2 IsArray on a revoked Proxy throws in the caller's realm
 //    (JSON.stringify replacer path).
 // A realm is a real second script context: WScript.LoadScript(s, 'samethread').

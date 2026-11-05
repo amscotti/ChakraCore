@@ -2945,7 +2945,7 @@ using namespace Js;
 
             if (threadContext->RecordImplicitException())
             {
-                // ES2025 10.4.2.2 ArraySetLength: the RangeError is thrown by
+                // ES2025 10.4.2.4 ArraySetLength: the RangeError is thrown by
                 // the [[Set]] internal method, i.e. in the CALLER's realm, not
                 // the array's. SetLength receives no request context, so use
                 // the host script-context stack, stepping over a cross-site
@@ -4512,7 +4512,7 @@ using namespace Js;
 
         SETOBJECT_FOR_MUTATION(jsReentLock, args[0]);
 
-        // 23.1.3.16 Array.prototype.join step 2 reads `length` BEFORE the
+        // 23.1.3.18 Array.prototype.join step 2 reads `length` BEFORE the
         // separator ToString (step 4). The separator conversion can run user
         // code that resizes a TypedArray's buffer or re-shapes an array-like,
         // so the generic (non-Array) receiver path must capture the length
@@ -7232,7 +7232,7 @@ Case0:
         Var* insertArgs = args.Info.Count > 3 ? &args.Values[3] : nullptr;
         uint32 insertLen = args.Info.Count > 3 ? args.Info.Count - 3 : 0;
 
-        // ES2025 22.1.3.31 Array.prototype.splice, step 8: if
+        // ES2025 23.1.3.31 Array.prototype.splice, step 8: if
         // len + insertCount - actualDeleteCount > 2^53 - 1, throw a TypeError
         // before any element is moved (deleteLen is already clamped to len, so
         // the subtraction cannot underflow). The generic ObjectSpliceHelper

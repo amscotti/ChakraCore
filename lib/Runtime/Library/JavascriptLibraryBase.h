@@ -155,7 +155,7 @@ namespace Js
         DynamicObject* GetAsyncFunctionPrototype() const { return asyncFunctionPrototype; }
         DynamicObject* GetAsyncGeneratorFunctionPrototype() const { return asyncGeneratorFunctionPrototype; }
 
-        // Realm-fallback intrinsics (ES2025 9.4.13 GetPrototypeFromConstructor
+        // Realm-fallback intrinsics (ES2025 10.1.14 GetPrototypeFromConstructor
         // step 4b): these prototypes are intrinsicDefaultProto values for
         // constructors whose proto-from-ctor-realm path resolves them from a
         // newTarget's realm library; see JavascriptOperators::OrdinaryCreateFromConstructor.

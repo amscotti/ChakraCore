@@ -2197,8 +2197,8 @@ namespace Js
                         newThisObject = JavascriptOperators::NewScObjectNoCtorCommon(proxy, scriptContext, false);
                     }
                     END_SAFE_REENTRANT_CALL
-                    // ES2025 9.4.13 GetPrototypeFromConstructor step 4 via
-                    // 7.3.27 GetFunctionRealm: after a non-object
+                    // ES2025 10.1.14 GetPrototypeFromConstructor step 4 via
+                    // 7.3.24 GetFunctionRealm: after a non-object
                     // newTarget.prototype, a proxy newTarget revoked by that
                     // very property lookup (its get trap) must surface the
                     // caller-realm TypeError instead of defaulting silently.
