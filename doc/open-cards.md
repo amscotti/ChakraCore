@@ -24,6 +24,7 @@ checkout (`out/test262`).
 | fixed-here (this sweep) | 6 |
 | not-reproducible (incl. oracle convergence) | 6 |
 | record-only / no-action (differentials, awareness notes) | 9 |
+| open, e12 GCStress campaign (tool crash + RecyclerTest assert, below) | 2 |
 
 ---
 
@@ -44,7 +45,7 @@ checkout (`out/test262`).
 | c2-s13-symbol-keys: symbol keys strongly retained (memory bound); registered-symbol message wording; getOrInsert out of slice | c2-s13 | open (design bound) | no surface change since; WeakRef/FR now exist (s13b) so the bound is observable |
 | E8-5 vacuous passes at flag-off | e8 | open (flag-flip checklist) | re-witness at any flag flip; flag-on they pass (e8 §3) |
 | E8-4 S7 `AdvanceStringIndex` +1/code-unit for `u`; S11 absent-`flags` internal bit | e8 | open (no witness) | no corpus or probe witness today |
-| c2-jit-test262 timing flakes (waitAsync no-spurious-wakeup) | c2-jit-test262 | open (harness) | mode-invariant flake; harness pinning (`--jobs 1`) suggested |
+| c2-jit-test262 timing flakes (waitAsync no-spurious-wakeup) | c2-jit-test262 | open (harness) | e12 re-measure (2026-11-05, current binary): flake is flag-on-campaign-only — 9-file `--jobs 1` selection flips 2→4 `lapse >= TIMEOUT` failures run-to-run, single file alone passes 4/4, default-flag shape 0/18 deterministic (`Atomics` undefined); certified refresh (flag-off) and every rlexe gate (in-tree `es7/s6-waitasync-*.js` only) are structurally exempt — load-robustness note in tools/test262/README.md; flag-on campaigns pin `--jobs 1` per-file or ignore the family |
 | b5-guid: regen mint is dual-variant-only; engineering-scheme `__TIME__` granularity; lowercase `Bytecode/` path on Linux; stale `out/{noJit,jit}/debug` copies | b5-guid-rotation | open (B5 package/floor) | the single-variant **overwrite guard** is fixed-here (§4); the rest ride B5 packaging |
 | c1/c2-s10: error-text differences in Set methods (`Object expected` vs Node texts) | c2-s10 | record-only | error types match; corpus checks types only |
 
@@ -100,7 +101,9 @@ checkout (`out/test262`).
 | Windows/x64 backend proofs for shared `Lower.cpp` guards | c2-jit-immutable-store | open (B4) | ARM64 macOS only exercised |
 | FRR cleanup-callback arming unexercisable in host | c2-jit-reentrancy-fix | open (coverage) | no script-exposed GC in ch; 200-reg churn never fired cleanup |
 | B1-B3 review items: hosted-CI clause conditional on first green Actions run | b1-b3-review | open (CI) | process item |
-| dbg-async-attach / GCStress / concurrent-GC matrices (s13 weakref/FR, enumeration-order) | c2-s13, c2-s14 | open (B4/GCStress) | not run by those lanes |
+| dbg-async-attach / GCStress / concurrent-GC matrices (s13 weakref/FR, enumeration-order) | c2-s13, c2-s14 | partially run (e12) | the bounded GCStress campaign ran (e12 §2): rlexe core 582/0 identical under `-CollectGarbage -GCMemoryThreshold:1`, concurrent axes and rescan-protect; the classic `-ForceGCTimeout`/`-GcStress` host flags never existed in this tree; two new cards below. Full-tree and JIT-profile GCStress matrices still unrun |
+| bin/GCStress standalone startup SIGSEGV (null ThreadService → `InitializeConcurrent` → `HasCallback()`) | e12 | open (tooling) | 100% repro: `zig-out/bin/GCStress` → rc=139 in ~0.02 s (crash report `SimpleRecyclerTest → EnableConcurrent → InitializeConcurrent → HasCallback`, addr 0x0); `GCStress.cpp` passes `Initialize(false, nullptr)` while the ENABLE_CONCURRENT_GC + debug-config default branch calls `EnableConcurrent(nullptr)` (Recycler.cpp:823-855, 4818). Workaround (verified): `GCStress -js -off:ConcurrentCollect` runs (10-min bounded run clean) |
+| `ch -RecyclerTest` StressTester OBJALIGN assert (debug-static) | e12 | open (GC owner) | 100% repro: `out/debug-static/bin/ch -RecyclerTest test/Basics/hello.js` (any script) → `ASSERTION 41943/41946 (lib/Common/Memory/StressTest.cpp:48)`, rc=133, same seed each run; `-RecyclerTest` is `#if DBG` (ThreadContext.cpp:803) so no gate leg reaches it |
 
 ## 4. Tooling-owned cards
 

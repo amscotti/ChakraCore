@@ -73,7 +73,83 @@ C4 refresh joins against it per-key. Analysis committed:
 
 ## 2. GCStress campaign (bounded, rlexe core)
 
-*(filled by commit 2/3 — see §2 below as amended)*
+**Flag surface, honestly enumerated** (observed `ch -?` + source anchors on
+this exact build; the flag list is generated from the compiled table, so
+`-?` is the compiled-in truth):
+
+- The classic full-Chakra host flags **do not exist here**:
+  `-ForceGCTimeout:100 …` → `Invalid Flag : -ForceGCTimeout:100` (receipt
+  `out/e12-ch-flaglist.txt`); `-TrackGCTimeout`/`-GcStress` likewise, and
+  `git log -S ForceGCTimeout -- lib/Common/ConfigFlagsList.h` is empty —
+  they never existed in this tree (they are MSHTML-host ch flags).
+- Compile-out on this build: `-RecyclerVerifyMark`
+  (`#ifdef RECYCLER_VERIFY_MARK`, ConfigFlagsList.h:1524),
+  `-DumpFragmentationStats` (`#ifdef DUMP_FRAGMENTATION_STATS`, :1067) —
+  neither appears in `ch -?`.
+- Compiled in and used below: `-CollectGarbage`, `-GCMemoryThreshold:N`
+  (bounds uncollected-MB before an allocation-initiated collection;
+  Recycler.cpp:337-341 → RecyclerHeuristic `MaxUncollectedAllocBytes`),
+  `-RecyclerProtectPagesOnRescan`, `-ConcurrentRuntime`,
+  `-ForceBlockingConcurrentCollect`. `-RecyclerTest` parses but its
+  `StressTester` is `#if DBG` (ThreadContext.cpp:803-808) — inert in the
+  test profile.
+
+**Suite campaign** (test-profile binary of §1, gate-exact
+`--variants=disable_jit -j 4`, folders `es5 es6 es7 TypedArray Array` —
+582 entries; first attempt with bare folder names selected 0 tests: the
+loader resolves folder args against CWD, use `test/<folder>` paths):
+
+| config | flags (added to `-WERExceptionSupport`) | result |
+|---|---|---|
+| baseline | none | **582/0** |
+| A — allocation-forced GC | `-CollectGarbage -GCMemoryThreshold:1` | **582/0** identical |
+| B — concurrent axes | `-ConcurrentRuntime -ForceBlockingConcurrentCollect -CollectGarbage` | **582/0** identical |
+| C — A + rescan page protection | `-CollectGarbage -GCMemoryThreshold:1 -RecyclerProtectPagesOnRescan` | **582/0** identical |
+
+Zero failures, crashes, asserts or timeout-kills in every config; the
+pass set is identical per folder (Array 120, TypedArray 60, es5 56,
+es6 238, es7 108). Config A provably stresses the GC: a churn probe
+(10M objects, 40 rounds) peaks at **237.8 MB RSS by default vs 63.5 MB
+with `-GCMemoryThreshold:1`** — collections really fire; the suites just
+hold under them. Total campaign wall ≈ 21 min (well inside the ~2 h bound).
+`-ForceGCAfterJSONParse` was enumerated but not campaigned (JSON-parse-
+scoped; no JSON folder in the rlexe core selection).
+
+**Two findings, both carded (§2.1), neither fixed here:**
+
+1. **`bin/GCStress` standalone SIGSEGVs at startup on this build** —
+   100% deterministic, ~0.02 s, empty output (block-buffered stdout lost).
+   Repro: `zig-out/bin/GCStress` → rc=139; macOS crash report stack:
+   `SimpleRecyclerTest` → `Recycler::EnableConcurrent` →
+   `Recycler::InitializeConcurrent` → `JsUtil::ThreadService::HasCallback()`
+   with `threadService == nullptr` (KERN_INVALID_ADDRESS at 0x0). Root
+   cause: GCStress.cpp constructs the recycler with
+   `recyclerInstance->Initialize(false, nullptr /* threadService */)` and
+   this `ENABLE_CONCURRENT_GC` + debug-config build takes the default-
+   concurrent branch (Recycler.cpp:823-855) → `EnableConcurrent(nullptr)`
+   → unconditional `threadService->HasCallback()` (Recycler.cpp:4818).
+   Confirmed by workaround: `zig-out/bin/GCStress -js -off:ConcurrentCollect`
+   disables the concurrent path and the tool runs (heap walk over 599,967
+   objects in a 120 s bound; 10-min bounded run in
+   `out/e12-gcstress-binary-10min.log`). The engine API contract (null
+   ThreadService requires forceInThread) is violated by the *tool*, which
+   predates the zig build that first shipped it on this platform.
+2. **`ch -RecyclerTest` on the debug-static profile asserts deterministically**:
+   `ASSERTION 41943/41946 (lib/Common/Memory/StressTest.cpp:48)
+   (addr & (OBJALIGN-1)) == 0` in `TestObject::Get`, rc=133 (SIGTRAP),
+   same random seed every run. Repro:
+   `out/debug-static/bin/ch -RecyclerTest test/Basics/hello.js` (any
+   script). The DBG StressTester trips over an object pointer that fails
+   its OBJALIGN alignment check — either a recycler alignment contract
+   issue on this target or StressTester bit-rot; owner: GC lane. Not
+   reachable from any gate (no gate leg passes `-RecyclerTest`).
+
+## 2.1 Cards filed
+
+Added to [open-cards.md](open-cards.md): GCStress-tool null-ThreadService
+startup crash (tooling, workaround recorded); `-RecyclerTest` StressTester
+OBJALIGN assert (GC owner). Updated the c2-jit-test262 waitAsync flake
+card with the §3.1 findings.
 
 ## 3. Flake-family hardening
 
