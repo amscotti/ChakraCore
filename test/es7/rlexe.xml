@@ -541,6 +541,12 @@
   </test>
   <test>
     <default>
+      <files>array-length-limit-throws.js</files>
+      <compile-flags>-CollectGarbage -args summary -endargs</compile-flags>
+    </default>
+  </test>
+  <test>
+    <default>
       <files>bigint-default.js</files>
       <compile-flags>-args summary -endargs</compile-flags>
     </default>

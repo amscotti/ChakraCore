@@ -5358,6 +5358,18 @@ Case0:
         {
             n = JavascriptConversion::ToUInt32(length, scriptContext);
         }
+
+        // ES2025 22.1.3.22 Array.prototype.push, step 5: if len + argCount >
+        // 2^53 - 1, throw a TypeError before storing any item. Without this an
+        // array-like whose ToLength-saturated 'length' is already 2^53 - 1
+        // silently stores one more element past the safe-integer limit instead
+        // of throwing (observed: no throw where Node v26.5 throws TypeError).
+        if ((n.IsSmallIndex() ? (uint64)n.GetSmallIndex() : n.GetBigIndex()) + (argCount - 1)
+            > FiftyThirdPowerOfTwoMinusOne)
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_IllegalArraySizeAndLength);
+        }
+
         // First handle "small" indices.
         uint index;
         for (index=1; index < argCount && n < JavascriptArray::MaxArrayLength; ++index, ++n)
@@ -7220,6 +7232,18 @@ Case0:
         Var* insertArgs = args.Info.Count > 3 ? &args.Values[3] : nullptr;
         uint32 insertLen = args.Info.Count > 3 ? args.Info.Count - 3 : 0;
 
+        // ES2025 22.1.3.31 Array.prototype.splice, step 8: if
+        // len + insertCount - actualDeleteCount > 2^53 - 1, throw a TypeError
+        // before any element is moved (deleteLen is already clamped to len, so
+        // the subtraction cannot underflow). The generic ObjectSpliceHelper
+        // below would otherwise shift a ToLength-saturated 'length' —
+        // O(2^53) work and a runner timeout. Real-array lengths (uint32)
+        // cannot reach the limit, so the fast path is unaffected.
+        if ((length - deleteLen) + insertLen > FiftyThirdPowerOfTwoMinusOne)
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_IllegalArraySizeAndLength);
+        }
+
         // Force check the prototype as we may insert values more than current elements
         if (pArr != nullptr && !HasAnyES5ArrayInPrototypeChain(pArr, true /*forceCheckProtoChain*/))
         {
@@ -8056,6 +8080,15 @@ Case0:
         JS_REENTRANT(jsReentLock, BigIndex length = OP_GetLength(dynamicObject, scriptContext));
         if (unshiftElements > 0)
         {
+            // ES2025 22.1.3.35 Array.prototype.unshift, step 4.a: if
+            // len + argCount > 2^53 - 1, throw a TypeError before moving any
+            // element. The Unshift walks below would otherwise iterate a
+            // ToLength-saturated 'length' — O(2^53) work and a runner timeout.
+            if (length > BigIndex(FiftyThirdPowerOfTwoMinusOne - unshiftElements))
+            {
+                JavascriptError::ThrowTypeError(scriptContext, JSERR_IllegalArraySizeAndLength);
+            }
+
             uint32 MaxSpaceUint32 = MaxArrayLength - unshiftElements;
             // Note: end will always be a smallIndex either it is less than length in which case it is MaxSpaceUint32
             // or MaxSpaceUint32 is greater than length meaning length is a uint32 number
