@@ -272,9 +272,12 @@ namespace Js
         {
             TypedArrayBase* typedArray = UnsafeVarTo<TypedArrayBase>(targetObj);
             ArrayBufferBase* buffer = typedArray->GetArrayBuffer();
+            // Explicit-length views over growable SABs are fixed-length and
+            // preventable (ES2027 10.4.5.1 + IsTypedArrayFixedLength); only
+            // length-tracking growable-SAB views report false here.
             bool canRegainProperties =
                 (VarIs<ArrayBuffer>(buffer) && VarTo<ArrayBuffer>(buffer)->IsResizable()) ||
-                (VarIs<SharedArrayBuffer>(buffer) && VarTo<SharedArrayBuffer>(buffer)->IsGrowable());
+                (VarIs<SharedArrayBuffer>(buffer) && VarTo<SharedArrayBuffer>(buffer)->IsGrowable() && typedArray->IsLengthTracking());
             if (canRegainProperties)
             {
                 return scriptContext->GetLibrary()->GetFalse();

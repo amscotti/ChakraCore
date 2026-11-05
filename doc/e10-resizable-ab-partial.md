@@ -134,3 +134,37 @@ its own feature tags in the manifest join). The remaining 12 split 10
 SAB-flag-gated (§5b decision bucket) + 2 inherited Reflect.construct order
 (card 2). The manifest's `resizable-arraybuffer 130` line and §5c partial
 table should be refreshed by the next measurement lane.
+
+### Review outcome (dual REJECT → repair landed)
+
+Both reviews found the same **lane-introduced regression**: explicit-
+length views over growable SharedArrayBuffers wrongly refused
+`preventExtensions`/returned false (the new `canRegainProperties`
+sites keyed on buffer growability with no view-length check; the base
+binary was Node-correct). Per ES2027 10.4.5.1 + IsTypedArrayFixedLength,
+an explicit-length growable-SAB view IS fixed-length (growable SABs
+never shrink) and follows OrdinaryPreventExtensions; only
+length-tracking growable-SAB views stay non-preventable. **Repaired**
+at both sites (`typedArray->IsLengthTracking()` required in the SAB
+arm; the ArrayBuffer arm untouched — the 30-shape integrity matrix
+verified it Node-matching) with a flag-on regression test added to
+`resizable-typedarray.js`. Node-divergence note: `Object.seal` on the
+same view throws in ch post-fix (spec-correct configurable:false walk)
+where Node does not — spec followed, carded.
+
+**Folded cards:** B9-7 — gOPD on TA integer indices reports
+`configurable:false` (spec/Node: `true`; `TypedArrayBase::
+IsConfigurable` pre-existing; this lane's seal/freeze rationale
+assumed c:true — the honest card is the gOPD divergence, superseding
+the old card-6 wording; fix at a future slice since it changes
+engine-wide numeric-property semantics). B9-8 — `Reflect.set`
+conversion-only stores return false for ALL canonical non-indices
+(OOB/negative/-0/fractional; spec 10.4.5.18 returns true; pre-existing
+shape touched-but-not-closed; the Proxy-set-delegation TypeError
+cascade included). Receipt corrections: the "or growable-SAB view →
+TypeError" claim in the commit/receipt was wrong (now fixed in code);
+spec anchors corrected (join 23.1.3.18, map 23.1.3.21, reduceRight
+23.1.3.25, ValidateTypedArrayBounds 23.2.4.5); the s8 nojit row is
+806/28; the map-loop comment (holes, not CreateDataPropertyOrThrow
+undefined); the EntryJoin fast-path comment's "cannot observe" claim
+false (receipt card §4.3 stands); `test/es5/seal.js` duplicate block.

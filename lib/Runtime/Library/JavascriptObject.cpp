@@ -877,9 +877,14 @@ Var JavascriptObject::EntrySetPrototypeOf(RecyclableObject* function, CallInfo c
 
         TypedArrayBase* typedArray = UnsafeVarTo<TypedArrayBase>(object);
         ArrayBufferBase* buffer = typedArray->GetArrayBuffer();
+        // ES2027 10.4.5.1 + IsTypedArrayFixedLength: an explicit-length view
+        // over a growable SharedArrayBuffer IS fixed-length (growable SABs
+        // never shrink, so the view can never go out of bounds) and follows
+        // OrdinaryPreventExtensions. Only length-tracking views over growable
+        // SABs remain non-preventable (review-found regression fix).
         bool canRegainProperties =
             (VarIs<ArrayBuffer>(buffer) && VarTo<ArrayBuffer>(buffer)->IsResizable()) ||
-            (VarIs<SharedArrayBuffer>(buffer) && VarTo<SharedArrayBuffer>(buffer)->IsGrowable());
+            (VarIs<SharedArrayBuffer>(buffer) && VarTo<SharedArrayBuffer>(buffer)->IsGrowable() && typedArray->IsLengthTracking());
 
         if (canRegainProperties)
         {
