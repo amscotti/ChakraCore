@@ -20,6 +20,7 @@ foundational documents and the earliest receipts only.
 | [c2-flag-audits.md](c2-flag-audits.md) | Measured enabled-flag audits for BigInt, SharedArrayBuffer/Atomics and the RegExp symbol family |
 | [b1-b3-review.md](b1-b3-review.md) / [b4-gate.md](b4-gate.md) / [b4-review.md](b4-review.md) | External reviews and gate verdicts for B1–B3 and B4 |
 | [conformance-baseline.md](conformance-baseline.md) | Pinned upstream diagnostic baseline: configuration, executed/skip counts, feature debt and edition-gate limits |
+| [e12-testing-quality.md](e12-testing-quality.md) | Testing-quality lane: one-command certified-baseline refresh (`tools/test262/refresh_baseline.py`) with its validation run, the bounded GCStress campaign over the rlexe core, and flake-family hardening (waitAsync corpus family note, FuncBody timeout) |
 | [memory-management.md](memory-management.md) | Coding-assistant ownership guide: TigerStyle/Ghostty/Bun lessons applied to allocators, GC/FFI, callbacks, async lifetime and focused tests |
 
 Conventions:

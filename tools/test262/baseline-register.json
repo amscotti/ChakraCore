@@ -1,0 +1,80 @@
+{
+  "schema": 1,
+  "note": "Register of certified test262 baseline runs (tools/test262/refresh_baseline.py). Entries record the run identity and where its raw results lived; out/ is untracked, so results_retained=false means the per-key results are gone and future refreshes can only compare totals. Append entries via refresh_baseline.py --publish (commit the file manually); the c4-cert entry below was back-filled from doc/c4-run-evidence.md.",
+  "runs": [
+    {
+      "id": "c1-baseline",
+      "date": "2026-10-30",
+      "engine_commit": "b490dc6de",
+      "results_dir": "out/test262-c1-baseline",
+      "results_retained": false,
+      "broad": {
+        "passed": 61565,
+        "failed": 31576,
+        "scenarios": 93141
+      },
+      "edition_selected": {
+        "passed": 60896,
+        "failed": 19648,
+        "scenarios": 80544
+      },
+      "evidence": "doc/conformance-baseline.md"
+    },
+    {
+      "id": "c1-negative-phase",
+      "date": "2026-11-01",
+      "engine_commit": "b490dc6de+c1-lane",
+      "results_dir": "out/test262-np-baseline",
+      "results_retained": false,
+      "broad": {
+        "passed": 77257,
+        "failed": 15884,
+        "scenarios": 93141
+      },
+      "edition_selected": {
+        "passed": 76453,
+        "failed": 4091,
+        "scenarios": 80544
+      },
+      "evidence": "doc/c1-negative-phase.md"
+    },
+    {
+      "id": "c4-cert",
+      "date": "2026-11-02",
+      "engine_commit": "ba796f74f",
+      "binary_sha256": "bc74751bd857da0c6dab51d66d73761f18bc877f05aff9780eeefcfafce99f09",
+      "results_dir": "out/test262-c4-cert",
+      "results_retained": false,
+      "broad": {
+        "passed": 77268,
+        "failed": 15873,
+        "scenarios": 93141
+      },
+      "edition_selected": {
+        "passed": 76464,
+        "failed": 4080,
+        "scenarios": 80544
+      },
+      "evidence": "doc/c4-run-evidence.md"
+    },
+    {
+      "id": "refresh-2026-11-05",
+      "date": "2026-11-05",
+      "engine_commit": "4e9f95da7e8283bd7033cdbaf18ab9f2805b1f72",
+      "binary_sha256": "5e210836f51f1a02453a2427836b224d99f7f4811163c53f1dd28ac9dfea7028",
+      "results_dir": "out/test262-e12-refresh",
+      "results_retained": true,
+      "broad": {
+        "passed": 78399,
+        "failed": 14742,
+        "scenarios": 93141
+      },
+      "edition_selected": {
+        "passed": 77595,
+        "failed": 2949,
+        "scenarios": 80544
+      },
+      "evidence": "doc/e12-testing-quality.md"
+    }
+  ]
+}

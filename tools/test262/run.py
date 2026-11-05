@@ -35,6 +35,25 @@ def artifact_identity(binary):
     return {str(path): digest(path) for path in paths}
 
 
+def engine_identity():
+    """(commit, dirty) of the engine tree the binary was invoked from.
+
+    Recorded in summary.json so later tools (refresh_baseline.py's delta
+    join) can attribute flips to the commit range between two runs. The
+    pair is evidence metadata only — the run never verifies the binary
+    was built from this tree (the binary hash is the identity that
+    matters); None/None when not a git checkout.
+    """
+    try:
+        commit = subprocess.check_output(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'],
+                                         text=True, stderr=subprocess.DEVNULL).strip()
+        dirty = bool(subprocess.check_output(['git', '-C', str(ROOT), 'status', '--porcelain'],
+                                             text=True, stderr=subprocess.DEVNULL).strip())
+    except (OSError, subprocess.SubprocessError):
+        return None, None
+    return commit, dirty
+
+
 def checkout(directory, prepare):
     if prepare:
         if not (directory / '.git').is_dir():
@@ -345,6 +364,7 @@ def main():
         # before judging).
         (args.output / 'results.json').write_text(json.dumps(records) + '\n')
     totals = Counter('passed' if record['result']['pass'] else 'failed' for record in records)
+    engine_commit, engine_dirty = engine_identity()
     features = {}
     for record in records:
         for feature in record['attrs'].get('features', []) or ['untagged']:
@@ -355,6 +375,7 @@ def main():
     summary = {
         'scope': LOCK['scope'], 'test262_revision': LOCK['revision'],
         'recorded_utc': datetime.now(timezone.utc).isoformat(),
+        'engine_commit': engine_commit, 'engine_tree_dirty': engine_dirty,
         'binary_sha256': digest(args.binary),
         'shared_libraries': {path.name: digest(path) for path in shared},
         'package_lock_sha256': digest(HERE / 'package-lock.json'),

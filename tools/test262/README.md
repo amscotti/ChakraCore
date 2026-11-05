@@ -72,6 +72,32 @@ with conformance failures returns **1**; a failed control, modified checkout,
 harness failure, invalid/no results returns **2**. Neither becomes a successful
 conformance check just because a host invocation returned zero.
 
+## Certified-baseline refresh (one command, manual)
+
+`refresh_baseline.py` collapses the C4 certification procedure
+([doc/c4-run-evidence.md](../../doc/c4-run-evidence.md) §2) into one manual
+command: certified full-corpus `run.py` (default host flags incl.
+`-NegativePhaseReport`, jobs 8, absolute binary), `analyze.py`, a per-key
+`(file, scenario)` delta join against the previous certified run with
+attribution hints (engine commits between the two runs' recorded
+`engine_commit`s — `summary.json` records it since this lane — plus doc/
+receipts naming each flipped file), and a dated markdown report:
+
+```sh
+python3 tools/test262/refresh_baseline.py --binary "$PWD/zig-out/bin/ch"   # ~19 min
+python3 tools/test262/refresh_baseline.py --skip-run --results out/run-new \
+  --previous out/run-old        # re-report/join two existing runs
+python3 tools/test262/refresh_baseline.py --self-test
+```
+
+The previous run resolves from `--previous` or the newest
+`baseline-register.json` entry that still retains its `results.json` on disk
+(`out/` is untracked; when no per-key data survives, the report says so and
+compares register totals only). `--publish` appends the run to the register —
+commit that file manually. Nothing invokes this automatically; it is the
+pre-C4/C4-refresh procedure, and its validation run is recorded in
+[doc/e12-testing-quality.md](../../doc/e12-testing-quality.md).
+
 ## Controls and host adaptation
 
 Each run first verifies twenty-five fixtures under `controls/test/` (recursively): successful sync,
@@ -135,9 +161,11 @@ language features. The original module source runs once, as test262 requires.
 - `controls.json`: expected pass/fail controls, separate from corpus statistics.
 - `results.json`: full JSON scenario results, metadata and raw host output.
 - `*.stderr.log`: harness diagnostics and explicit skip records.
-- `summary.json`: corpus revision, binary/shared-library hashes, dependency-lock
-  hash, Node version, command/flags/patterns, scenario and unique source-file
-  totals, pass/fail totals, skip reasons and per-feature counts.
+- `summary.json`: corpus revision, engine commit + tree-dirty flag (recorded
+  for later delta attribution; not a build-provenance claim), binary/shared-library
+  hashes, dependency-lock hash, Node version, command/flags/patterns, scenario
+  and unique source-file totals, pass/fail totals, skip reasons and per-feature
+  counts.
 
 The runner fingerprints binary/library and harness inputs before execution and
 rejects a run if they or the pinned checkout change during it. Result arrays and
