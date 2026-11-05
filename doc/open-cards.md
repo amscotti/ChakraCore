@@ -25,6 +25,8 @@ checkout (`out/test262`).
 | not-reproducible (incl. oracle convergence) | 6 |
 | record-only / no-action (differentials, awareness notes) | 9 |
 | open, e12 GCStress campaign (tool crash + RecyclerTest assert, below) | 2 |
+| open, e12 fulljit SIGSEGV family (deterministic 109 + load-only crasher, below) | 2 |
+| record-only, e12 (dynapogo variant needs jit-profile binary) | 1 |
 
 ---
 
@@ -104,6 +106,9 @@ checkout (`out/test262`).
 | dbg-async-attach / GCStress / concurrent-GC matrices (s13 weakref/FR, enumeration-order) | c2-s13, c2-s14 | partially run (e12) | the bounded GCStress campaign ran (e12 §2): rlexe core 582/0 identical under `-CollectGarbage -GCMemoryThreshold:1`, concurrent axes and rescan-protect; the classic `-ForceGCTimeout`/`-GcStress` host flags never existed in this tree; two new cards below. Full-tree and JIT-profile GCStress matrices still unrun |
 | bin/GCStress standalone startup SIGSEGV (null ThreadService → `InitializeConcurrent` → `HasCallback()`) | e12 | open (tooling) | 100% repro: `zig-out/bin/GCStress` → rc=139 in ~0.02 s (crash report `SimpleRecyclerTest → EnableConcurrent → InitializeConcurrent → HasCallback`, addr 0x0); `GCStress.cpp` passes `Initialize(false, nullptr)` while the ENABLE_CONCURRENT_GC + debug-config default branch calls `EnableConcurrent(nullptr)` (Recycler.cpp:823-855, 4818). Workaround (verified): `GCStress -js -off:ConcurrentCollect` runs (10-min bounded run clean) |
 | `ch -RecyclerTest` StressTester OBJALIGN assert (debug-static) | e12 | open (GC owner) | 100% repro: `out/debug-static/bin/ch -RecyclerTest test/Basics/hello.js` (any script) → `ASSERTION 41943/41946 (lib/Common/Memory/StressTest.cpp:48)`, rc=133, same seed each run; `-RecyclerTest` is `#if DBG` (ThreadContext.cpp:803) so no gate leg reaches it |
+| fulljit deterministic SIGSEGV family, 109 non-WASM rlexe tests (dynapogo flags) incl. es7 matchall/bigint64array/resizable-typedarray | e12 (supersedes c2-jit-eval-fidelity's "5 load-flakes" note) | **open (JIT lane)** | full dynapogo `-j10` at HEAD: 1907/398 (receipt base: 2006/286), 115 SIGSEGV + 3 SIGBUS, 109 non-WASM (es6 46, es7 38, Array 5, Bugs 4, Function 4…). Standalone repro: `out/jit/bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -ES6RegExSymbols -args summary -endargs test/es7/matchall.js` → rc=139 (same for bigint64array/resizable-typedarray/array_findlast/SpecialSymbolCapture; profile input real/missing/absent all crash; `-nonative` passes). Stack: JIT frames → `NewScObjectCommon` → `GetPrototypeObjectForConstructorCache` → `GetTypeId(void*)` → `GetType()` bad object. Window Nov 3→5 (e/b-lane commits; their gates re-ran the 646-entry jit check only). No-JIT gates unaffected (2051/2103) |
+| fulljit load-only crasher (JIT-race candidate): es6/blockscope-functionbinding.js passes standalone, SIGSEGV at `-j10` | e12 | open (JIT lane) | standalone dynapogo rc=0; crash observed in `out/e12-dynapogo-j10-before.log`; same owner as the family above |
+| dynapogo/interpreted `profile.dpl` note: runtests' interpreted/dynapogo variants require a JIT-profile binary | e12 | record-only | the no-JIT test profile compiles out `-dynamicprofileinput`/`-dynamicprofilecache` (`DYNAMIC_PROFILE_STORAGE` ← `ENABLE_PROFILE_INFO`, CommonDefines.h:273-284, 386-388): running those variants against `zig-out/bin/ch` fails every test instantly with `Invalid Flag`; use `out/jit/bin/ch` (fresh `zig build -Dprofile=jit`) |
 
 ## 4. Tooling-owned cards
 

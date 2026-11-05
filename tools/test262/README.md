@@ -190,6 +190,19 @@ gains a `negative_phase` section, and `analyze.py`'s audit adds
 `marker`/`marker_judged_total`/`marker_downgraded_by_run_py` fields (legacy
 records keep their exact C1 shape-audit semantics).
 
+**Load-robustness note (measured 2026-11-05, doc/e12-testing-quality.md
+§3.1).** The `Atomics.waitAsync` `no-spurious-wakeup-*` corpus family is
+wall-clock flaky **only under flag-on corpus campaigns**
+(`-ESSharedArrayBuffer`): a 9-file `--jobs 1` selection flipped 2→4
+`lapse >= TIMEOUT` failures run-to-run (different files and scenarios),
+while each file alone passed deterministically (4/4) and the default-flag
+shape is fully deterministic (0/18, `Atomics` undefined). Consequences:
+the certified baseline refresh never sees this family (flag-off), and no
+rlexe gate contains these corpus files (the in-tree gate coverage is the
+S6 lanes' own `es7/s6-waitasync-*.js`, green on every recorded gate run).
+Flag-on campaigns must not count run-to-run diffs in this family as
+engine regressions — pin `--jobs 1` per-file, or ignore the family.
+
 ## Edition policy and analysis (C1)
 
 `edition-policy.json` classifies every feature tag in the recorded baseline

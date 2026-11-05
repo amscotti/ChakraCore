@@ -153,8 +153,92 @@ card with the §3.1 findings.
 
 ## 3. Flake-family hardening
 
-*(filled by commit 3/3 — see §3 below as amended)*
+### 3.1 (a) waitAsync `no-spurious-wakeup-*` corpus family
+
+Fresh measurements on the HEAD binary (every run `run.py`, pinned corpus):
+
+| shape | flags | result |
+|---|---|---|
+| 9 files, `--jobs 1` (run 1) | `-ESSharedArrayBuffer` | 16/2 — `no-operation/strict`, `on-sub/strict` fail `lapse >= TIMEOUT` |
+| 9 files, `--jobs 1` (run 2) | `-ESSharedArrayBuffer` | 14/4 — `on-add/strict`, `no-operation/default`, `on-compareExchange/default`, `on-store/default` fail |
+| `on-add.js` alone × 4 | `-ESSharedArrayBuffer` | **4/4 green (deterministic pass)** |
+| 9 files × 2, `--jobs 8` | default (certified) | **0/18 deterministic** (`ReferenceError: 'Atomics' is not defined`) |
+
+Conclusions, folded into the register card and a load-robustness note in
+`tools/test262/README.md`: (1) the family is wall-clock flaky **only in
+the flag-on multi-file corpus shape** — the failing set changes files and
+scenarios run-to-run (`lapse >= TIMEOUT` = waitAsync resolved earlier
+than requested); (2) single-file shapes are deterministic (passes at
+HEAD; the c2-jit review's "fails deterministically" applied to its own
+base/flags); (3) **the gate never hits it**: no rlexe suite contains
+corpus files — in-tree coverage is the S6 lanes' own
+`es7/s6-waitasync-{pause,cross-agent}.js`, green on every recorded gate
+run; (4) the certified baseline refresh never hits it (flag-off shape is
+deterministically failing on the missing SAB feature). No test change is
+possible anyway (pinned corpus) and none needed.
+
+### 3.2 (b) dynapogo `-j10` es7/FuncBody "host-flaky" subset — superseded by a real defect
+
+The booked story (c2-jit-eval-fidelity: 5 load-flakes at the runner's
+default 10 threads — es7 `matchall`/`s6-growable-nonshared`/
+`bigint64array`/`resizable-typedarray` + `FuncBody` timeout-kill at
+38.8 s vs the 60 s ceiling, all passing standalone) was re-measured at
+HEAD on the **jit-profile binary** (`out/jit/bin/ch`, today's
+`zig build -Dprofile=jit` of HEAD; behavior-verified as HEAD via the e11
+push-limit and b9 TA-delete probes; `zig-out/bin/ch` remains the test
+profile — a first reproduction attempt against it failed every test
+because the no-JIT test profile compiles out `-dynamicprofileinput`,
+`DYNAMIC_PROFILE_STORAGE` needing `ENABLE_PROFILE_INFO`,
+CommonDefines.h:273-284):
+
+- Full dynapogo suite, `-j10`: **1907/398** in 517 s — vs the receipt's
+  2006/286 at `-j4` on its base. 285 of the failures are the expected
+  tagged asm.js/WASM set (rc=0 baseline mismatches); **115 exit −11
+  (SIGSEGV) and 3 −10 (SIGBUS)**, 109 of them non-WASM (es6 46, es7 38,
+  Array 5, Bugs 4, Function 4, …).
+- **Deterministic, load-independent**: `es7/matchall.js`,
+  `es7/bigint64array.js`, `es7/resizable-typedarray.js`,
+  `Array/array_findlast.js`, `Basics/SpecialSymbolCapture.js` each
+  SIGSEGV **standalone** under `-forceNative -off:simpleJit
+  -bgJitDelay:0` (rc=139, with a real profile input, a missing one, and
+  no profile flag at all); `matchall.js` passes under `-nonative` on the
+  same binary. Representative stack (macOS crash report):
+  `NewScObjectNoArg` → `ExecuteImplicitCall` → `CallDarwinArm64Method`
+  (JIT frames) → `NewScObjectCommon` →
+  `GetPrototypeObjectForConstructorCache` → `PrototypeObject` →
+  `GetTypeId(void*)` → `RecyclableObject::GetType()` on a bad object.
+- **At least one genuinely load-only crasher**:
+  `es6/blockscope-functionbinding.js` passes standalone but SIGSEGV'd in
+  the `-j10` run — a JIT-race candidate.
+- **The booked flake members that did NOT regress**: `FuncBody.js`
+  (0.02–0.06 s standalone under dynapogo flags; **passed** under full
+  `-j10` load — the 38.8 s timeout-kill does not reproduce at HEAD) and
+  `es7/s6-growable-nonshared.js` (2.18 s standalone, passed at `-j10`).
+
+Disposition: **no rlexe.xml timeout change** — the only candidates the
+bump was for (FuncBody, s6-growable) are fast and green under load at
+HEAD; nothing measured justifies touching the attribute (and a timeout
+cannot fix a SIGSEGV). The 3 regressed members are **carded to the JIT
+lane** (register: "fulljit deterministic SIGSEGV family") with repro
+commands; regression window Nov 3→5 (the e/b-lanes' engine commits —
+their receipts re-ran `-Dprofile=jit check` (646-entry subset), not the
+full dynapogo suite, so this class went unobserved by the lane gates;
+the no-JIT gates at 2051/2103 are unaffected). Bisect and fix belong to
+the JIT owner, not this measurement lane.
 
 ## 4. Gates
 
-*(recorded with commit 3/3)*
+Final tree (after the jit-profile measurements, the test profile was
+rebuilt at HEAD; the lane adds no test entry — no rlexe.xml change — so
+the pins stay **2051/2103**):
+
+| gate | result | log |
+|---|---|---|
+| `zig build` (test profile) | rc=0 | `out/e12-gate-test.log` |
+| `zig build check` (test profile) | rc=0 — `check_regression: PASS: passed 2051 / failed 0`; bytecode nojit "up to date"; `check_native: PASS: test-shared-basic`; `check_smoke` PASS; `check_metadata` PASS | `out/e12-gate-test.log` |
+| `zig build -Dprofile=debug-static check-regression` | rc=0 — `Total: passed 2103, failed 0`, `check_regression: PASS` | `out/e12-gate-debug.log` |
+
+The jit-profile full-suite finding (§3.2) does not touch these gates:
+they run the no-JIT `disable_jit` variant, and the jit `check` gate's
+646-entry selection is the one that missed the family — recorded in the
+card as the reason it went unobserved.
