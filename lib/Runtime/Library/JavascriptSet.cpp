@@ -609,6 +609,11 @@ Var JavascriptSet::EntryDifference(RecyclableObject* function, CallInfo callInfo
         while (SetLikeKeysStep(keysIterator, &value, scriptContext))
         {
             value = CanonicalizeSetMethodKey(value, scriptContext);
+            // Keys-walk: membership is checked against the private copy only —
+            // no other.has call and no live-receiver consult (unlike
+            // intersection's keys-walk, which checks the live receiver).
+            // Both asymmetries are per the ES2025 algorithm: record keys are
+            // simply removed from the copy when it still contains them.
             if (result->Has(value))
             {
                 result->Delete(value);

@@ -763,6 +763,75 @@ class BytecodePurityTests(unittest.TestCase):
             self.assertEqual(original.read_bytes(), b"original header\n")
 
 
+@unittest.skipUnless(os.name == "posix", "the regen stub binary is a POSIX shell script")
+class RegenSingleVariantGuardTests(unittest.TestCase):
+    """The regenByteCode.py single-variant overwrite guard (b5-guid-rotation
+    hazard): a --jit/--noJit-only run whose content differs from the checked-in
+    headers must refuse (exit 1) and restore the headers instead of silently
+    rewriting them."""
+
+    def make_fixture(self, root):
+        js_dir = root / "lib/Runtime/Library/InJavascript"
+        js_dir.mkdir(parents=True)
+        for name in ("JsBuiltIn.nojit.bc.64b.h", "JsBuiltIn.nojit.bc.32b.h",
+                     "JsBuiltIn.bc.64b.h", "JsBuiltIn.bc.32b.h"):
+            (js_dir / name).write_bytes(b"original header\n")
+        (js_dir / "Intl.js").write_text("// fixture\n")
+        (js_dir / "Array_prototype.js").write_text("// fixture\n")
+        (js_dir / "Math_object.js").write_text("// fixture\n")
+        tools = root / "tools"
+        tools.mkdir()
+        shutil.copyfile(HERE.parent / "regenByteCode.py", tools / "regenByteCode.py")
+        stub = root / "stub-ch.sh"
+        stub.write_text("#!/bin/sh\nprintf 'stub bytecode output\\\\n'\n")
+        stub.chmod(0o755)
+        return js_dir, stub
+
+    def invoke(self, root, extra):
+        cmd = [sys.executable, str(root / "tools/regenByteCode.py"),
+               "--skip-build", "--noJit", "--binary=" + str(root / "stub-ch.sh")] + extra
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+
+    def test_single_variant_content_change_is_refused_and_restored(self):
+        with tempfile.TemporaryDirectory(prefix="regen-guard-test-") as tmp:
+            root = Path(tmp)
+            js_dir, stub = self.make_fixture(root)
+            proc = self.invoke(root, [])
+            self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+            self.assertIn("REFUSED", proc.stdout + proc.stderr)
+            for name in ("JsBuiltIn.nojit.bc.64b.h", "JsBuiltIn.nojit.bc.32b.h",
+                         "JsBuiltIn.bc.64b.h", "JsBuiltIn.bc.32b.h"):
+                self.assertEqual((js_dir / name).read_bytes(), b"original header\n",
+                                 name + " restored byte-identical")
+
+    def test_single_variant_no_change_stays_green(self):
+        with tempfile.TemporaryDirectory(prefix="regen-guard-green-test-") as tmp:
+            root = Path(tmp)
+            js_dir, stub = self.make_fixture(root)
+            # Pre-write the exact content the stub generates so the run is a
+            # no-op: generate once with the escape hatch, snapshot, restore the
+            # snapshot as the baseline, then run guarded.
+            proc = self.invoke(root, ["--allow-single-variant-write"])
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            snapshot = {name: (js_dir / name).read_bytes()
+                        for name in ("JsBuiltIn.nojit.bc.64b.h", "JsBuiltIn.nojit.bc.32b.h")}
+            proc = self.invoke(root, [])
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            self.assertIn("not required", proc.stdout + proc.stderr)
+            for name, content in snapshot.items():
+                self.assertEqual((js_dir / name).read_bytes(), content)
+
+    def test_escape_hatch_allows_scratch_single_variant_writes(self):
+        with tempfile.TemporaryDirectory(prefix="regen-guard-escape-test-") as tmp:
+            root = Path(tmp)
+            js_dir, stub = self.make_fixture(root)
+            proc = self.invoke(root, ["--allow-single-variant-write"])
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            self.assertIn("one variant only", proc.stdout + proc.stderr)
+            self.assertNotEqual((js_dir / "JsBuiltIn.nojit.bc.64b.h").read_bytes(),
+                                b"original header\n")
+
+
 @unittest.skipUnless(os.name == "posix", "Mac check helpers use POSIX process groups")
 class SubprocessLifetimeTests(unittest.TestCase):
     @classmethod

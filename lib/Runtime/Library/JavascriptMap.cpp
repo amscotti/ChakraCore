@@ -349,7 +349,18 @@ static bool MapGroupByIteratorStepAndValue(RecyclableObject* iterator, Recyclabl
 {
     JS_REENTRANCY_LOCK(jsReentLock, scriptContext->GetThreadContext());
     bool hasValue = false;
-    JS_REENTRANT(jsReentLock, hasValue = JavascriptOperators::IteratorStepAndValue(iterator, scriptContext, next, valueOut));
+    // IteratorStepAndValue's user transitions (next, done, value) each arm
+    // themselves through ExecuteImplicitCall today; this wrapper arm is
+    // defense-in-depth so a future direct-call fast path inside the iterator
+    // helpers (see the CONSIDER there) stays armed for groupBy callers.
+    // Mirrors Object.groupBy's GroupByIteratorStepAndValue (JavascriptObject.cpp)
+    // and SetLikeKeysStep (JavascriptSet.cpp).
+    JS_REENTRANT(jsReentLock,
+        BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+        {
+            hasValue = JavascriptOperators::IteratorStepAndValue(iterator, scriptContext, next, valueOut);
+        }
+        END_SAFE_REENTRANT_CALL);
     return hasValue;
 }
 

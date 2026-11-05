@@ -694,6 +694,15 @@ namespace Js
             // behavior below.
             return TRUE;
         }
+        // ES2025 %TypedArray% [[Delete]]: IsValidIntegerIndex is false for an
+        // out-of-bounds index (including a length-tracking or fixed view over
+        // a shrunk resizable buffer), and [[Delete]] returns true without
+        // consulting configurability or the prototype. In-range indexes keep
+        // the cant-delete behavior below.
+        if (index >= this->GetLength())
+        {
+            return TRUE;
+        }
         JavascriptError::ThrowCantDeleteIfStrictModeOrNonconfigurable(
             flags, GetScriptContext(), GetScriptContext()->GetIntegerString(index)->GetString());
         return FALSE;

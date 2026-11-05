@@ -21,7 +21,7 @@ checkout (`out/test262`).
 | open-verified (engine defect, owner lane pending) | 38 |
 | decision (flag/feature posture, incl. SAB/RegExp/TCO/module-host families) | 21 |
 | fixed-by-later-lane (verified this sweep) | 7 |
-| fix-in-flight (this sweep, next commit) | 6 |
+| fixed-here (this sweep) | 6 |
 | not-reproducible (incl. oracle convergence) | 6 |
 | record-only / no-action (differentials, awareness notes) | 9 |
 
@@ -106,12 +106,12 @@ checkout (`out/test262`).
 
 | Card | Source | Status | Evidence |
 |---|---|---|---|
-| regen single-variant `--binary` overwrite hazard (guard required before B5 package/floor) | b5-guid-rotation | **fix-in-flight** | `tools/regenByteCode.py` will refuse a single-variant run whose content differs from the checked-in headers (exit 1, headers restored byte-identical); `--allow-single-variant-write` escape hatch for scratch trees; 3 negative/positive controls in `tools/build/test_build_tools.py` (`RegenSingleVariantGuardTests`), gate `check-build-tools` 65/65 |
+| regen single-variant `--binary` overwrite hazard (guard required before B5 package/floor) | b5-guid-rotation | **fixed-here** | `tools/regenByteCode.py` now refuses a single-variant run whose content differs from the checked-in headers (exit 1, headers restored byte-identical); `--allow-single-variant-write` escape hatch for scratch trees; 3 negative/positive controls in `tools/build/test_build_tools.py` (`RegenSingleVariantGuardTests`), gate `check-build-tools` 65/65 |
 | `regenByteCode.py --verify` rewrites headers / self-heals | b2 | closed by wrapper (pre-existing) | gate runs through `verify_bytecode_pure.py` (restore + rc); guard above now also covers raw single-variant runs |
-| Map-groupBy wrapper-arm asymmetry (cosmetic) | c1-triage/c2-jit-reentrancy-fix | **fix-in-flight** | `MapGroupByIteratorStepAndValue` to mirror Object.groupBy's `BEGIN_SAFE_REENTRANT_CALL` defense-in-depth arm; no behavior change by construction (transitions self-arm via `ExecuteImplicitCall` today); warmed coverage stays `setmethods-groupby-warmed.js` |
-| `difference` keys-walk branch comment | c2-jit-reentrancy-fix review | **fix-in-flight** | inline comment at `EntryDifference`'s keys-walk documenting the no-`has`/no-live-receiver consult (vs `intersection`'s live-receiver check), per the ES2025 algorithm |
-| B8-7 BigInt default-locale grouping | e9 | **fix-in-flight** | `BigInt.prototype.toLocaleString` to group through `NumberToDefaultLocaleString` (same non-Intl path as Number); probe: `[123456789n].toLocaleString()` → `"123,456,789"` (Node-identical incl. negative and >bufSize heap path); focused test `typedarray-oob-delete-and-bigint-locale.js`; B8-6 (locale-arg forwarding) stays open |
-| e4-B3 RAB-shrunk-to-OOB `delete` returns false/throws; e4 review nit attached-OOB `delete` returns false | e4 | **fix-in-flight** | `TypedArrayBase::DeleteItem` to return true when `index >= GetLength()` (ES2025 IsValidIntegerIndex half); probes: `delete=true` for shrunk + attached-OOB incl. strict; corpus `internals/Delete/**` + `ArrayBuffer/prototype/resizable/**` now 68/74 with only 6 SAB-flag-gated failures left (was failing the OOB scenarios); in-range cant-delete pinned by the new test and existing `test/TypedArray/delete.js` |
+| Map-groupBy wrapper-arm asymmetry (cosmetic) | c1-triage/c2-jit-reentrancy-fix | **fixed-here** | `MapGroupByIteratorStepAndValue` now mirrors Object.groupBy's `BEGIN_SAFE_REENTRANT_CALL` defense-in-depth arm; no behavior change by construction (transitions self-arm via `ExecuteImplicitCall` today); warmed coverage stays `setmethods-groupby-warmed.js` |
+| `difference` keys-walk branch comment | c2-jit-reentrancy-fix review | **fixed-here** | inline comment at `EntryDifference`'s keys-walk documenting the no-`has`/no-live-receiver consult (vs `intersection`'s live-receiver check), per the ES2025 algorithm |
+| B8-7 BigInt default-locale grouping | e9 | **fixed-here** | `BigInt.prototype.toLocaleString` groups through `NumberToDefaultLocaleString` (same non-Intl path as Number); probe: `[123456789n].toLocaleString()` → `"123,456,789"` (Node-identical incl. negative and >bufSize heap path); focused test `typedarray-oob-delete-and-bigint-locale.js`; B8-6 (locale-arg forwarding) stays open |
+| e4-B3 RAB-shrunk-to-OOB `delete` returns false/throws; e4 review nit attached-OOB `delete` returns false | e4 | **fixed-here** | `TypedArrayBase::DeleteItem` returns true when `index >= GetLength()` (ES2025 IsValidIntegerIndex half); probes: `delete=true` for shrunk + attached-OOB incl. strict; corpus `internals/Delete/**` + `ArrayBuffer/prototype/resizable/**` now 68/74 with only 6 SAB-flag-gated failures left (was failing the OOB scenarios); in-range cant-delete pinned by the new test and existing `test/TypedArray/delete.js` |
 
 ## 5. Cards closed by later lanes (verified this sweep)
 
@@ -127,9 +127,9 @@ checkout (`out/test262`).
 
 ## Gate deltas
 
-`tools/build/gate_counts.json`: expected **2050/2102 → 2051/2103** (+1 = the focused
-regression `test/es7/typedarray-oob-delete-and-bigint-locale.js`). Gates to re-run
-after the fixes land: `zig build check` **2051/0** (bytecode verify, native,
+`tools/build/gate_counts.json`: **2050/2102 → 2051/2103** (+1 = the focused
+regression `test/es7/typedarray-oob-delete-and-bigint-locale.js`). Gates run
+after the fixes: `zig build check` **2051/0** (bytecode verify, native,
 smoke, metadata, self-tests PASS), `-Dprofile=debug-static check-regression`
 **2103/0**, `-Dprofile=jit check` **646/646** (check_jit PASS, bytecode up to
 date), `check-build-tools` **65 tests OK** (3 new guard controls included).

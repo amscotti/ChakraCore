@@ -902,7 +902,45 @@ namespace Js
         ScriptContext* scriptContext = function->GetScriptContext();
 
         AssertMsg(args.HasArg(), "Should always have implicit 'this'");
-        return ThisBigIntValue(args[0], scriptContext)->ToString(scriptContext);
+        JavascriptBigInt* bigint = ThisBigIntValue(args[0], scriptContext);
+
+        // Default-locale grouping mirrors Number.prototype.toLocaleString's
+        // non-Intl path (JavascriptNumber::ToLocaleString): group the decimal
+        // digit string through PlatformAgnostic::Numbers::Utility::NumberToDefaultLocaleString.
+        // Locale/options arguments are deliberately not forwarded (recorded
+        // B8-6 card; zero corpus coverage).
+        static const int bufSize = 1280;
+        WCHAR stackBuffer[bufSize];
+        WCHAR* pszRes = stackBuffer;
+        WCHAR* pszToBeFreed = nullptr;
+
+        JavascriptString* decimalStr = bigint->ToString(scriptContext);
+        const char16* szValue = decimalStr->GetSz();
+        const size_t szLength = decimalStr->GetLength();
+
+        size_t count = PlatformAgnostic::Numbers::Utility::NumberToDefaultLocaleString(szValue, szLength, pszRes, bufSize);
+        if (count == 0)
+        {
+            // Formatter unavailable: fall back to the plain decimal string.
+            return decimalStr;
+        }
+        if (count > bufSize)
+        {
+            pszRes = pszToBeFreed = HeapNewArray(char16, count);
+            count = PlatformAgnostic::Numbers::Utility::NumberToDefaultLocaleString(szValue, szLength, pszRes, count);
+            if (count == 0)
+            {
+                HeapDeleteArray(count, pszToBeFreed);
+                JavascriptError::ThrowError(scriptContext, VBSERR_InternalError);
+            }
+        }
+
+        JavascriptString* result = JavascriptString::NewCopySz(pszRes, scriptContext);
+        if (pszToBeFreed != nullptr)
+        {
+            HeapDeleteArray(count, pszToBeFreed);
+        }
+        return result;
     }
 
     JavascriptBigInt * JavascriptBigInt::New(JavascriptBigInt * pbi, ScriptContext * scriptContext)
