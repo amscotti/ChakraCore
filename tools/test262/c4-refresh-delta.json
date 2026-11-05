@@ -1,0 +1,339 @@
+{
+ "artifact": "c4-refresh-delta",
+ "bucket_deltas_vs_c4_cert": {
+  "disabled-flag": {
+   "attribution": "flag surfaces unmoved; e11 booked a +2 host->disabled-flag reclassification that cannot materialize: analyze.py rule order puts timeout/abnormal-exit (rule 2) ahead of the tag rule (rule 3), so the 2 Atomics.wait/good-views hangs stay in host",
+   "cert": 1734,
+   "delta": 0,
+   "refresh": 1734
+  },
+  "engine-defect-on-existing": {
+   "attribution": "see stage ledger; booked lanes account for -678, residue -12",
+   "cert": 1700,
+   "delta": -690,
+   "refresh": 1010
+  },
+  "host": {
+   "attribution": "B1 loader fix -419 (dynamic-import fixture URIError family) + e11 -4 (Array push/splice/unshift integer-limit timeouts)",
+   "cert": 426,
+   "delta": -423,
+   "refresh": 3
+  },
+  "required-feature-missing": {
+   "attribution": "e5 let-ASI -14 (booked) + -4 misc parse-gap ripple; RegExp/prototype getter substrate unchanged at exactly 156",
+   "cert": 220,
+   "delta": -18,
+   "refresh": 202
+  }
+ },
+ "description": "Bucket decomposition and delta reconciliation for the C4 certified refresh (edition-selected 4,080 -> 2,949), re-derived 2026-11-05 from the retained e12 refresh results.json with tools/test262/analyze.py and the pinned edition policy. Narrative: doc/c4-refresh.md.",
+ "flag_decision_surface": {
+  "ES6RegExPrototypeProperties_signal_classified_rfm": {
+   "c4_cert": 156,
+   "c4_refresh": 156
+  },
+  "ES6RegExSymbols_gated": {
+   "c4_cert": 558,
+   "c4_refresh": 558
+  },
+  "ESSharedArrayBuffer_gated": {
+   "c4_cert": 1176,
+   "c4_refresh": 1176
+  },
+  "total": {
+   "c4_cert": 1890,
+   "c4_refresh": 1890,
+   "note": "the -1,890 flag-decision figure is exactly unchanged: flipping all three defaults (plus their owed re-checks) would leave 2,949-1,890 = 1,059 edition-selected failures, before any flag-on defect tail (S6e flag-on ceiling ~895/982; e8 flag-on evidence 50/0, 92/0, 84/0)"
+  }
+ },
+ "per_feature_edition_failed_movement": {
+  "AggregateError": {
+   "c4_cert": 2,
+   "c4_refresh": 0,
+   "e7_clean_da0a72dbb": 0
+  },
+  "Array.prototype.flat": {
+   "c4_cert": 2,
+   "c4_refresh": 0,
+   "e7_clean_da0a72dbb": 2
+  },
+  "Array.prototype.flatMap": {
+   "c4_cert": 2,
+   "c4_refresh": 0,
+   "e7_clean_da0a72dbb": 2
+  },
+  "Array.prototype.includes": {
+   "c4_cert": 4,
+   "c4_refresh": 2,
+   "e7_clean_da0a72dbb": 4
+  },
+  "BigInt": {
+   "c4_cert": 378,
+   "c4_refresh": 284,
+   "e7_clean_da0a72dbb": 304
+  },
+  "Proxy": {
+   "c4_cert": 138,
+   "c4_refresh": 100,
+   "e7_clean_da0a72dbb": 100
+  },
+  "Reflect": {
+   "c4_cert": 212,
+   "c4_refresh": 94,
+   "e7_clean_da0a72dbb": 94
+  },
+  "Reflect.construct": {
+   "c4_cert": 70,
+   "c4_refresh": 68,
+   "e7_clean_da0a72dbb": 68
+  },
+  "Symbol": {
+   "c4_cert": 367,
+   "c4_refresh": 317,
+   "e7_clean_da0a72dbb": 319
+  },
+  "Symbol.isConcatSpreadable": {
+   "c4_cert": 2,
+   "c4_refresh": 0,
+   "e7_clean_da0a72dbb": 2
+  },
+  "Symbol.iterator": {
+   "c4_cert": 35,
+   "c4_refresh": 27,
+   "e7_clean_da0a72dbb": 29
+  },
+  "Symbol.species": {
+   "c4_cert": 90,
+   "c4_refresh": 88,
+   "e7_clean_da0a72dbb": 90
+  },
+  "Symbol.toStringTag": {
+   "c4_cert": 43,
+   "c4_refresh": 19,
+   "e7_clean_da0a72dbb": 19
+  },
+  "TypedArray": {
+   "c4_cert": 1010,
+   "c4_refresh": 812,
+   "e7_clean_da0a72dbb": 858
+  },
+  "align-detached-buffer-semantics-with-web-reality": {
+   "c4_cert": 110,
+   "c4_refresh": 28,
+   "e7_clean_da0a72dbb": 32
+  },
+  "array-find-from-last": {
+   "c4_cert": 12,
+   "c4_refresh": 4,
+   "e7_clean_da0a72dbb": 4
+  },
+  "arrow-function": {
+   "c4_cert": 246,
+   "c4_refresh": 192,
+   "e7_clean_da0a72dbb": 192
+  },
+  "async-functions": {
+   "c4_cert": 156,
+   "c4_refresh": 102,
+   "e7_clean_da0a72dbb": 102
+  },
+  "async-iteration": {
+   "c4_cert": 153,
+   "c4_refresh": 82,
+   "e7_clean_da0a72dbb": 85
+  },
+  "class": {
+   "c4_cert": 76,
+   "c4_refresh": 24,
+   "e7_clean_da0a72dbb": 24
+  },
+  "class-static-block": {
+   "c4_cert": 6,
+   "c4_refresh": 0,
+   "e7_clean_da0a72dbb": 0
+  },
+  "cross-realm": {
+   "c4_cert": 185,
+   "c4_refresh": 35,
+   "e7_clean_da0a72dbb": 35
+  },
+  "destructuring-binding": {
+   "c4_cert": 70,
+   "c4_refresh": 64,
+   "e7_clean_da0a72dbb": 70
+  },
+  "dynamic-import": {
+   "c4_cert": 545,
+   "c4_refresh": 68,
+   "e7_clean_da0a72dbb": 72
+  },
+  "exponentiation": {
+   "c4_cert": 12,
+   "c4_refresh": 6,
+   "e7_clean_da0a72dbb": 12
+  },
+  "export-star-as-namespace-from-module": {
+   "c4_cert": 8,
+   "c4_refresh": 0,
+   "e7_clean_da0a72dbb": 0
+  },
+  "generators": {
+   "c4_cert": 82,
+   "c4_refresh": 40,
+   "e7_clean_da0a72dbb": 42
+  },
+  "import-attributes": {
+   "c4_cert": 19,
+   "c4_refresh": 0,
+   "e7_clean_da0a72dbb": 0
+  },
+  "import.meta": {
+   "c4_cert": 1,
+   "c4_refresh": 0,
+   "e7_clean_da0a72dbb": 1
+  },
+  "json-modules": {
+   "c4_cert": 2,
+   "c4_refresh": 0,
+   "e7_clean_da0a72dbb": 0
+  },
+  "logical-assignment-operators": {
+   "c4_cert": 6,
+   "c4_refresh": 0,
+   "e7_clean_da0a72dbb": 0
+  },
+  "new.target": {
+   "c4_cert": 7,
+   "c4_refresh": 5,
+   "e7_clean_da0a72dbb": 5
+  },
+  "object-rest": {
+   "c4_cert": 6,
+   "c4_refresh": 0,
+   "e7_clean_da0a72dbb": 6
+  },
+  "resizable-arraybuffer": {
+   "c4_cert": 130,
+   "c4_refresh": 106,
+   "e7_clean_da0a72dbb": 130
+  },
+  "untagged": {
+   "c4_cert": 588,
+   "c4_refresh": 405,
+   "e7_clean_da0a72dbb": 433
+  }
+ },
+ "refresh_buckets_rederived": {
+  "disabled-flag": 1734,
+  "engine-defect-on-existing": 1010,
+  "host": 3,
+  "note": "independent analyze.py rerun on the retained results.json reproduces tools/test262/e12-refresh-analysis.json failure_buckets exactly; edition-selected bucket sum 1734+1010+202+3 = 2949",
+  "post-ES2025": 11793,
+  "required-feature-missing": 202
+ },
+ "runs": {
+  "c4_cert": {
+   "broad_failed": 15873,
+   "date": "2026-11-02",
+   "edition_failed": 4080,
+   "engine_commit": "ba796f74f",
+   "results_retained": false
+  },
+  "c4_refresh": {
+   "broad_failed": 14742,
+   "date": "2026-11-05",
+   "edition_failed": 2949,
+   "engine_commit": "4e9f95da7",
+   "results": "out/test262-e12-refresh/results.json (retained, registered)"
+  },
+  "e7_clean_midpoint": {
+   "broad_failed": 14858,
+   "edition_failed": 3065,
+   "engine_commit": "da0a72dbb",
+   "results": "out/test262-e7-v-clean/results.json (retained, full corpus)"
+  }
+ },
+ "stage_ledger": {
+  "stage_A_cert_to_e7_clean": {
+   "booked_sum": 999,
+   "edition_delta": -1015,
+   "lanes": [
+    {
+     "booked": 473,
+     "commit": "f6adb94f0",
+     "evidence": "own full key-join 473/0; per-tag dynamic-import -473 exact; includes import-attributes-tagged 19->0 inside the dynamic-import selection (verified on retained out/b1-diag before/after pair) and export-star-tagged 8->0 (await-ns-get-nested-namespace)",
+     "lane": "B1 dynamic-import host loader"
+    },
+    {
+     "booked": 132,
+     "commits": "7e50c538e c4ec5df26 ac4c9d413",
+     "evidence": "cross-realm set +130 and same-realm bonus +2; the affected-surfaces pair (+98) is 96/98 cross-realm-tagged => union 132, no extra",
+     "lane": "B2/e3 cross-realm"
+    },
+    {
+     "booked": 124,
+     "commits": "0cb7b5db3 e720da0d2",
+     "evidence": "includes e3-R2 detached-buffer-realm 20 (cross-realm-tagged: tag view cross-realm -150 = 130+20 exact)",
+     "lane": "B3/e4 detach-buffer"
+    },
+    {
+     "booked": 112,
+     "commit": "375995aec",
+     "evidence": "66 compound + 14 rfm let-ASI + 32 bonus (24 inc/dec, 6 logical-assignment, 2 member)",
+     "lane": "B4/e5 compound-assign + let-ASI"
+    },
+    {
+     "booked": 158,
+     "commits": "9b9ef5d50 da0a72dbb",
+     "evidence": "wide pair 156/0 (80 class dirs + 16 super + 6 static-init + 54 forbidden-ext) + 2 built-ins",
+     "lane": "B5/e6 class-tail"
+    },
+    {
+     "booked": 0,
+     "commits": "dcd37f4f8 0cd8f33b1 7de0ee0d9 03267de1b 1bbbef786",
+     "evidence": "JIT-only; inert in the no-JIT certified configuration",
+     "lane": "jit commits"
+    }
+   ],
+   "measured": -1015,
+   "note": "c4-cert results.json not retained; attributed from lane receipts + retained selection pairs + per-tag join",
+   "per_key": null,
+   "residue": -16,
+   "residue_note": "-12 engine-defect + -4 rfm beyond the receipts booked selections; zero regressions anywhere measurable (all lane pairs 0 pass->fail; every per-tag movement monotonically down). Consistent with corpus-wide ripple of the landed semantics/parse fixes outside each lane measured selection (lanes measured statements+expressions or built-ins-sensitive selections, not the whole corpus). rfm misc (non-RegExp-getter) fell 64->46; the RegExp getter substrate is exactly unchanged (156)."
+  },
+  "stage_B_e7_clean_to_refresh": {
+   "booked_sum": 120,
+   "decomposition": {
+    "C-sweep TA OOB delete (3e14b6a16)": {
+     "evidence": "internals/Delete key-is-out-of-bounds x4 (TypedArray + BigInt variants); the sweep estimate was -6; B8-7 BigInt locale grouping flipped 0 corpus scenarios (probe-pinned)",
+     "flips": 4
+    },
+    "b10/e11 integer-limit TypeErrors (b900d80a1)": {
+     "evidence": "4 former host timeouts + 2 fast-fail + 2 S15.4.4.7_A2_T2; matches the booked -8 exactly",
+     "flips": 8
+    },
+    "b8/e9 BigInt toLocaleString dispatch (6f8f9fe02)": {
+     "evidence": "18 BigInt-tagged + 24 analog flips in the retained join; matches the booked -42 exactly",
+     "flips": 42
+    },
+    "b9/e10 resizable-AB (d28ba6d57 f25e8cb9c)": {
+     "evidence": "20 resizable-tagged + 2 methods-called-as-functions; matches the booked -22 exactly",
+     "flips": 22
+    },
+    "e7 early-error executions (b59bcd2b2, ed9b4bf78)": {
+     "evidence": "own full-corpus key-join 40/0 (out/test262-e7-v-clean -> -fixed)",
+     "flips": 40
+    }
+   },
+   "edition_delta": -116,
+   "measured": 116,
+   "per_key": {
+    "fail_to_pass": 116,
+    "keys": 93141,
+    "pass_to_fail": 0
+   },
+   "residue": 4,
+   "residue_note": "the C-sweep delete-half estimate (-6) measured -4 in the full corpus; no other slack. Buckets: host 7->3 (-4), engine-defect 1122->1010 (-112 = 40+42+22+4+4 exact), rfm and disabled-flag unmoved."
+  }
+ }
+}
