@@ -1,7 +1,7 @@
 # Current State of ChakraCore
 
 Engine-source baseline `97e68c917` (19 Feb 2026; see §7), with modernization
-execution/decisions updated through 2026-10-31. Version **1.13.0 dev**
+execution/decisions updated through 2026-11-05. Version **1.13.0 dev**
 (`lib/Common/ChakraCoreVersion.h:19-21`, `CHAKRA_CORE_VERSION_RELEASE 0` at :58).
 MIT license (`LICENSE.txt`). Every claim below cites an in-repo path; line numbers
 were verified against this HEAD.
@@ -56,8 +56,17 @@ This `doc/` folder is the start of durable in-repo documentation. The
 feature inventory and line anchors below are the 2026-10-10 baseline
 snapshot; the modernization branch has since added the C2 surfaces listed
 in [modernization-plan.md](modernization-plan.md) §6 and its receipts.
-Latest merged checkpoint (2026-11-03): **2038/0 test**, **2090/0
-debug-static**, including direct-eval `super` early errors, the flag-on
+Latest merged checkpoint (2026-11-05): **2051/0 test**, **2103/0
+debug-static** (single-sourced in `tools/build/gate_counts.json`; the
+mainline-only era after 2026-11-03 added the JIT coverage ports
+(a1–a3 + the test262-under-JIT campaign and reentrancy fix), the
+C4 path-to-green engine lanes — dynamic-import host loader, cross-realm,
+detach-buffer, S14 compound-assign + let-ASI, S1 class tail, early-error
+executions, string/RegExp/BigInt/resizable-AB/TCO-timeout partials — and
+the consolidated card register [open-cards.md](open-cards.md); receipts in
+[modernization-plan.md](modernization-plan.md) §6's Restart point). This
+supersedes the 2026-11-03 checkpoint at 2038/2090, which had included
+direct-eval `super` early errors, the flag-on
 S6a growable-SAB/non-shared-Atomics slice, S6b `Atomics.pause` /
 single-thread `Atomics.waitAsync`, S6c BigInt Atomics, S6d finite
 waitAsync timeouts, S6e flag-on cross-agent `waitAsync` (native wake
@@ -78,14 +87,16 @@ u-mode RegExp strictness, and S9-b code-point-aware RegExp search/builtin
 flag derivation.
 
 
-**Restart-point note (2026-11-03):** development is now mainline-only
+**Restart-point note (2026-11-05):** development is mainline-only
 on `modernize/baseline` (worktree lanes retired; branches preserved).
-The C4 certified ES2025 baseline is published at edition-selected
+Gates **2051/0 test / 2103/0 debug-static**. The C4 certified ES2025
+baseline is published at edition-selected
 **76,464/4,080 of 80,544 (94.93%)** — see
 [c4-manifest.md](c4-manifest.md) and [c4-gate.md](c4-gate.md); the
-ordered remaining Mac work (JIT coverage ports, C4 path-to-green
-engine lanes, recorded cards, review/cleanup, testing quality) is in
-[modernization-plan.md](modernization-plan.md) §6's Restart point.
+2026-11-03 work buckets are complete through the D review/cleanup sweep
+(residual cards consolidated in [open-cards.md](open-cards.md)); what
+remains — testing quality, flake-family hardening, the C4 refresh — is
+in [modernization-plan.md](modernization-plan.md) §6's Restart point.
 
 ## 3. Architecture (summary)
 
