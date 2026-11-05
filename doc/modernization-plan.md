@@ -660,87 +660,81 @@ Decision/rollback points:
   receipts, re-verified 2026-11-05 with status and owner lane, lives in
   [open-cards.md](open-cards.md).
 - [ ] C4: Published qualified ES2025 result on the claimed default configurations.
-  (*BLOCKED-with-certified-baseline*: the certification-grade full-corpus
-  run, the published feature/result manifest and the clause-by-clause gate
-  verdict are recorded (2026-11-02, lane `c4-certification` on `ba796f74f`,
-  no engine changes) — controls 25/25, broad 77,268/15,873,
-  edition-selected 76,464/4,080 (94.93%), 8,751 marker-judged negatives,
-  1 downgrade, gates 2038/2090 + bytecode/native green; the suite is not
-  green and SAB/Atomics + the two RegExp flag surfaces are not default —
-  [c4-gate.md](c4-gate.md), [c4-manifest.md](c4-manifest.md),
-  [c4-run-evidence.md](c4-run-evidence.md).*)
+  (*BLOCKED-with-certified-baseline*: certified 2026-11-02 (lane
+  `c4-certification` on `ba796f74f`) and **refreshed 2026-11-05** after
+  the A–E lanes (lane `c4-refresh` on `4e9f95da7`, no engine changes) —
+  controls 25/25, broad 78,399/14,742, edition-selected
+  **77,595/2,949 of 80,544 (96.34%)** (was 76,464/4,080, 94.93%; −1,131
+  flips, 0 regressions, every delta attributed), 8,751 marker-judged
+  negatives, 1 downgrade, gates 2051/2103 green; the suite is not green
+  and SAB/Atomics + the two RegExp flag surfaces are not default (the
+  three decisions are worth exactly −1,890) — [c4-gate.md](c4-gate.md),
+  [c4-manifest.md](c4-manifest.md), [c4-run-evidence.md](c4-run-evidence.md),
+  [c4-refresh.md](c4-refresh.md).*)
 
-**Restart point (2026-11-05, after the D sweep) — working policy and remaining Mac work.**
-Working policy unchanged from the 2026-11-03 restart point: development is
-**mainline-only** — lanes execute as sequential commits directly on
-`modernize/baseline`, no per-lane worktrees (the V workflow — implementer,
-general + adversarial review, bounded repair, green gates before continuing
-— is unchanged), with the shared gate lock and the mise Zig 0.17.0 pin
-governing every build/gate. Current state: gates **2051/0 test / 2103/0
+**Restart point (2026-11-05, after the C4 certified refresh) — the
+Mac-side program is complete.** Lanes A–E of the 2026-11-03 bucket list
+plus the C4 refresh are all landed; development stays **mainline-only**
+on `modernize/baseline` (the V workflow and the shared gate lock/mise
+Zig 0.17.0 pin unchanged). Closing state: gates **2051/0 test / 2103/0
 debug-static**, `zig build -Dprofile=jit check` green, serialized-bytecode
-GUID rotated, and the **C4 certified baseline published**
-([c4-manifest.md](c4-manifest.md), [c4-gate.md](c4-gate.md)):
-edition-selected **76,464/4,080 of 80,544 (94.93%)**, verdict
-BLOCKED-with-certified-baseline. Pin lineage is single-sourced in
-`tools/build/gate_counts.json` (mainline-era rungs 2038/2090 → 2051/2103:
-class-private-jit-probes, crossRealmSemantics, detached-buffer-semantics,
-compound-element-reference, class-tail-semantics, early-error-targets ×3,
-tolocalestring-element-invoke, array-length-limit-throws,
-typedarray-oob-delete-and-bigint-locale).
+GUID rotated, and the **C4 certified baseline refreshed**:
+edition-selected **77,595/2,949 of 80,544 (96.34%)** — broad
+78,399/14,742 — with the delta ledger fully attributed (−1,131 flips vs
+the certified baseline, 0 regressions; buckets: disabled-flag 1,734
+unchanged, engine-defect 1,700→1,010, host 426→3, rfm 220→202;
+[c4-manifest.md](c4-manifest.md), [c4-refresh.md](c4-refresh.md)). The
+verdict stays **BLOCKED-with-certified-baseline**
+([c4-gate.md](c4-gate.md)): the suite is not green and three flag
+surfaces are not default. What remains on the Mac is decision- or
+card-owned work, tracked in [open-cards.md](open-cards.md), not
+unstarted lanes. (The A–E lane receipts: A — JIT coverage ports,
+[c2-jit-finally-globopt.md](c2-jit-finally-globopt.md),
+[c2-jit-eval-fidelity.md](c2-jit-eval-fidelity.md),
+[c2-jit-private-opcodes.md](c2-jit-private-opcodes.md),
+[c2-jit-test262.md](c2-jit-test262.md),
+[c2-jit-reentrancy-fix.md](c2-jit-reentrancy-fix.md),
+[c2-jit-immutable-store.md](c2-jit-immutable-store.md); B — the
+path-to-green engine lanes,
+[c2-s12-dynamic-import-host.md](c2-s12-dynamic-import-host.md),
+[e3-cross-realm.md](e3-cross-realm.md),
+[e4-detach-buffer.md](e4-detach-buffer.md),
+[e5-compound-assign-let-asi.md](e5-compound-assign-let-asi.md),
+[e6-class-tail.md](e6-class-tail.md),
+[e7-early-error-executions.md](e7-early-error-executions.md),
+[e8-string-method-partials.md](e8-string-method-partials.md),
+[e9-bigint-partial.md](e9-bigint-partial.md),
+[e10-resizable-ab-partial.md](e10-resizable-ab-partial.md),
+[e11-tco-timeouts.md](e11-tco-timeouts.md); C — the card register
+[open-cards.md](open-cards.md); D — the review/cleanup sweep; E —
+testing quality [e12-testing-quality.md](e12-testing-quality.md) and
+the refresh [c4-refresh.md](c4-refresh.md). Pin lineage stays
+single-sourced in `tools/build/gate_counts.json`, 2038/2090 →
+2051/2103.)
 
-The 2026-11-03 bucket list is complete through D; only E remains:
+**Blocked on you (the human), not on the code:**
 
-- **(A) JIT coverage ports — complete.** labeled-break-`finally` GlobOpt
-  ([c2-jit-finally-globopt.md](c2-jit-finally-globopt.md)); direct-eval
-  caller fidelity ([c2-jit-eval-fidelity.md](c2-jit-eval-fidelity.md) —
-  eval bodies, param-region sites and loop-body sites stay interpreted by
-  design); the class/private/import-attribute opcodes
-  ([c2-jit-private-opcodes.md](c2-jit-private-opcodes.md) — 17 lowered;
-  `OP_ImportCallWithOptions` lowering rides the module/JIT owners per the
-  register); the per-batch test262-under-JIT campaign, 17/19 batches
-  discharged with C2-JIT-1/2 subsequently fixed
-  ([c2-jit-test262.md](c2-jit-test262.md),
-  [c2-jit-reentrancy-fix.md](c2-jit-reentrancy-fix.md)); the immutable-store
-  JIT guard ([c2-jit-immutable-store.md](c2-jit-immutable-store.md)).
-- **(B) C4 path-to-green engine lanes — complete.** dynamic-import host
-  loader ([c2-s12-dynamic-import-host.md](c2-s12-dynamic-import-host.md),
-  host bucket 426 → 7), cross-realm ([e3-cross-realm.md](e3-cross-realm.md)),
-  detach-buffer ([e4-detach-buffer.md](e4-detach-buffer.md)), S14
-  compound-assign + let-ASI ([e5-compound-assign-let-asi.md](e5-compound-assign-let-asi.md)),
-  S1 class tail ([e6-class-tail.md](e6-class-tail.md)), early-error
-  executions ([e7-early-error-executions.md](e7-early-error-executions.md)),
-  matchAll/replaceAll/match-indices partials
-  ([e8-string-method-partials.md](e8-string-method-partials.md) —
-  substrate-gated, zero engine change), BigInt toLocaleString
-  ([e9-bigint-partial.md](e9-bigint-partial.md)), resizable-AB
-  ([e10-resizable-ab-partial.md](e10-resizable-ab-partial.md)), and the
-  TCO/timeout families ([e11-tco-timeouts.md](e11-tco-timeouts.md)). Each
-  receipt records before/after and its **expected C4 delta**.
-- **(C) recorded cards — register done.** [open-cards.md](open-cards.md)
-  (2026-11-05) consolidates and freshly verifies every receipt card:
-  38 open-verified engine defects (owner lanes: module host surface,
-  super-receiver plumbing, function lane, declaration instantiation, S6e
-  harness), 21 decision cards, 7 fixed-by-later-lane, 6 fixed-in-sweep,
-  6 not-reproducible, 9 record-only. The sweep's own six bounded fixes are
-  landed with pins.
-- **(D) whole-branch review/cleanup sweep — this lane.** Era-diff code
-  sweep (stale spec citations corrected in comments; no debug hooks, dead
-  code, TODO debt or formatting drift found), stale-doc sweep (then-counts
-  policy preserved; hashes and file cross-references verified), and
-  testing hygiene (runtests `--binary` absolutized; the
-  `-dynamicprofilecache`/`-dynamicprofileinput` incompatibility and the
-  B4-started gate-log archival convention documented).
-- **(E) remaining Mac work.** Testing quality — baseline-refresh
-  scripting, debugger/TTD gaps, a bounded GCStress campaign;
-  flake-family hardening (S6e waitAsync wall-clock flakes, runner `--jobs`
-  pinning, per the register); and the **C4 refresh** — re-run the
-  c4-certification lane's commands to regenerate the manifest from
-  `results.json` + the pinned policy (c4-gate.md §3), booking the e-lane
-  deltas recorded in their receipts.
+- **The three flag decisions — the single largest lever, exactly
+  −1,890 edition failures** (unchanged by all of A–E): flip
+  `-ESSharedArrayBuffer` (1,176; recorded product/security decision,
+  S6 — flag-on tail ≈87 per S6e), `-ES6RegExSymbols` (558) and
+  `-ES6RegExPrototypeProperties` (156 of the rfm 202); each flip owes
+  its recorded re-checks (JIT-inlined String/RegExp helper at
+  `ConfigFlagsList.h:1177`; per-batch B4/JIT-corpus obligations).
+- **B3's CI clause still needs a push** — the Actions recipe is
+  validated (lint + literal local simulation) but the first green
+  post-merge run has not happened.
+- **Linux hardware/environment for B4** — the Linux Zig build is green
+  but zero behavior checks have run anywhere; B4 is where this
+  certified baseline is **re-proven on the second declared
+  configuration** (the refresh is one command there:
+  `refresh_baseline.py`).
+- **Windows (B6)** — feasibility slice when chosen.
 
-Blocked beyond the Mac (unchanged): the SAB/Atomics and ICU/Unicode pin
-decisions, B3's first green Actions run (needs a push), B4 Linux
-(the certified baseline is re-proven there), B6 Windows.
+After B4, the re-ranked path to green (c4-gate §3) is: flag decisions
+(2,949 → 1,059), then the engine-defect register (1,010, half of it
+already decision-carded: TCO 34, property escapes 112, dynamic-import
+68, Function/prototype 56), then host 3 and rfm 46.
 
 **Latest integration checkpoint (2026-11-01):** main is clean at the
 **2038/0 test** and **2090/0 debug-static** gates (re-verified after every

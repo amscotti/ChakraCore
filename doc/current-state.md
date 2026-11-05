@@ -89,14 +89,17 @@ flag derivation.
 
 **Restart-point note (2026-11-05):** development is mainline-only
 on `modernize/baseline` (worktree lanes retired; branches preserved).
-Gates **2051/0 test / 2103/0 debug-static**. The C4 certified ES2025
-baseline is published at edition-selected
-**76,464/4,080 of 80,544 (94.93%)** — see
-[c4-manifest.md](c4-manifest.md) and [c4-gate.md](c4-gate.md); the
-2026-11-03 work buckets are complete through the D review/cleanup sweep
-(residual cards consolidated in [open-cards.md](open-cards.md)); what
-remains — testing quality, flake-family hardening, the C4 refresh — is
-in [modernization-plan.md](modernization-plan.md) §6's Restart point.
+Gates **2051/0 test / 2103/0 debug-static**. The Mac-side program is
+complete (A–E + the C4 certified refresh): the C4 certified ES2025
+baseline stands at edition-selected
+**77,595/2,949 of 80,544 (96.34%)** (was 76,464/4,080, 94.93% at
+certification; −1,131 flips, 0 regressions, all attributed) — see
+[c4-manifest.md](c4-manifest.md), [c4-gate.md](c4-gate.md) and
+[c4-refresh.md](c4-refresh.md); residual cards consolidated in
+[open-cards.md](open-cards.md); the closing state and the
+blocked-on-you list (flag decisions, B3 CI push, B4 Linux, B6 Windows)
+are in [modernization-plan.md](modernization-plan.md) §6's Restart
+point.
 
 ## 3. Architecture (summary)
 
