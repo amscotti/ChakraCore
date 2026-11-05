@@ -302,6 +302,13 @@ fixed en route).
    (spec-letter, Node-deviating). Three behaviors for one property
    once defineProperty is in play; the deviation is now explicitly
    carded rather than half-accidental.
+   → (2026-11-05 C sweep) B5-1's parse-mode split **no longer reproduces**
+   (uniform TypeError in default and deferparse runs; Node returns null)
+   and B5-5 **no longer reproduces** (current binary rejects
+   `(async function await(){})` like Node) — this lane's own Parse.cpp
+   await rule closed it; the Reflect.set split and the element-form
+   super receivers remain open-verified (super/ corpus 204/204 green);
+   see doc/open-cards.md.
 5. **B5-2 broadened:** computed-key super stores lose the
    OrdinarySet RECEIVER for data properties too (`super[k]='v'` →
    base's property vs Node's own property; pre-existing on the

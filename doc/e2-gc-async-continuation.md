@@ -202,7 +202,11 @@ queue; deterministic gate baselines never mix the shape); (2) NEW
 pre-existing follow-up card: dynamic `import()` during TLA evaluation
 of a module the imported graph statically imports back never settles
 (identical on base; re-entering an evaluating module shouldn't block;
-no crash) — filed for a TLA follow-up lane; (3) FinalizationRegistry
+no crash) — filed for a TLA follow-up lane
+→ (2026-11-05 C sweep) corpus witness identified:
+`top-level-await/pending-async-dep-from-cycle.js` and
+`fulfillment-order.js` hang ("Test did not run to completion") on the
+current binary — still open; see doc/open-cards.md;; (3) FinalizationRegistry
 cleanup jobs now always precede any 0ms timer (host-legitimate,
 documented in-test; a future host wanting V8-style separate-task
 cleanup should note it).

@@ -91,7 +91,9 @@ pair used a baseline binary rebuilt from clean `9f9850f9d` into
 ## 5. Residual cards
 
 - **R1 (28 edition failures)**: flag substrates — B: RegExp prototype getters (20, `-ES6RegExPrototypeProperties` decision), SAB-gated (8, `-ESSharedArrayBuffer` decision). Expected to clear only if/when those flags flip default; the family-A machinery already resolves them when on.
+  → (2026-11-05 C sweep) unchanged, still open-verified; see doc/open-cards.md.
 - **R2 (20)**: TA internals `detached-buffer-realm` — owned by the detached-buffer semantics lane (non-realm siblings fail identically).
+  → **fixed by the e4 detach lane** (2026-11-05 C sweep: Get/Delete/GetOwnProperty/HasProperty/Set detached-buffer-realm all pass); see doc/open-cards.md.
 - **R3 (4)**: derived-constructor completion errors carry the callee realm (bytecode `RuntimeTypeError` / `JSERR_BadSuperReference`); caller-realm plumbing through the ctor epilogue owed. Same card notes the nested-realm limit of the host-script-context idiom (a caller frame entered via another realm's `eval` is not distinguished; no corpus scenario exercises it today).
 - **R4 (1)**: direct-eval-position call of a cross-realm `eval` treated as direct eval (var leaks into the caller's frame).
 - **R5 (2)**: sloppy put on a primitive base skips a Proxy in the prototype chain (same-realm repro; not realm-specific).

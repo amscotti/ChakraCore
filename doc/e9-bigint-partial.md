@@ -165,6 +165,11 @@ plain and `-CollectGarbage`.
 |---|---:|---|---|
 | B8-1 (closed) `%TypedArray%.prototype.toLocaleString` override family | was 18 BigInt + 24 analogs | **fixed this lane** | — |
 | B8-2 typed-array integer-indexed internals semantics: canonical-non-index `[[Set]]` fall-through (`Reflect.set("-0"/"1.1") → true`, no receiver property), valid-index stores bypassing prototype setters, OOB `delete → true` (incl. strict), index descriptor `configurable: true` | 22 BigInt-tagged + ~40 non-BigInt analogs (inherited — non-BigInt analogs fail identically, verified same-binary) | typed-array `[[Set]]`/`[[Delete]]`/descriptor substrate; belongs to the §5c "TypedArray surfaces ~1,010" partial, not BigInt | typed-array internals lane |
+
+→ (2026-11-05 C sweep) the **`[[Delete]]` half of B8-2 is fixed**
+(`TypedArrayBase::DeleteItem` OOB → true; internals/Delete corpus green
+modulo SAB-gated) and **B8-7 is fixed** (BigInt default-locale grouping);
+the `[[Set]]`/descriptor halves remain open; see doc/open-cards.md.
 | B8-3 `ESSharedArrayBuffer` off (Atomics BigInt ops, SAB-gated ctors/views) | 264 | recorded product/security decision (plan §4.1 S6, §5b table); flag-on ceiling **234/264** | flag-flip decision lane |
 | B8-4 Atomics big-int multi-agent waiter-list (`wait`/`notify`/`waitAsync`: lapse, notify-count, waiter identity) | 30 (flag-on) | host class: `$262.agent` cross-agent support absent; non-BigInt analogs fail identically (S2 A3b/A3c 148/68 vs 146/70) | host/agent lane |
 | B8-5 (carried, unchanged) JIT BigInt surfaces (`Lower.cpp:23967` `!ESBigInt` equality fast path; no BigInt JIT lowering/IC evidence), TTD BigInt recording, `JsGetValueType` = `JsObject`, giant-decimal quadratic `ToString`/parse (performance only — 0 corpus failures, 0 timeouts) | 0 corpus | S2-default residuals, restated as still-true after this lane's run | B4/TTD/JsRT/perf lanes |
@@ -218,6 +223,9 @@ B8-2/B8-3 cards' exact file sets and ceilings.
   → ch `"123456789"`, Node `"123,456,789"` (numbers DO group) —
   pre-existing in `BigInt.prototype.toLocaleString` itself, zero
   corpus coverage; carded.
+  → (2026-11-05 C sweep) **fixed** — BigInt.prototype.toLocaleString now
+  groups through the default-locale formatter like Number's non-Intl path;
+  B8-6 (locale-arg forwarding) remains open; see doc/open-cards.md.
 - Attribution hedge: 378→304 = ≥58 documented by B3's artifact, the
   remainder by exclusion (b2/b5 wide flips incl. the
   subclass-BigInt64Array files) — not a flat 74.

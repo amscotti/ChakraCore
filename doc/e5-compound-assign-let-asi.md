@@ -141,6 +141,8 @@ lowering), not the interpreter.
   compound element-assignment keys twice (verified: `o[k()] *= v` → 2 on
   Node, 1 on this engine). ES2025 memoization + test262 followed; recorded
   so future oracle comparisons don't read it as an engine bug.
+  → (2026-11-05 C sweep) **oracle converged**: Node v26.5.0 now converts
+  once; not-reproducible; see doc/open-cards.md.
 - **CARD B4-3 — destructuring memoization unprobed upstream.**
   `[o[k]] = [v]`, object destructuring and for-of/for-in head targets
   measure exactly-once on both this engine and Node today; the emission

@@ -160,6 +160,8 @@ same 40, nothing else moved in `test/language/**`, `test/built-ins/**` or
   scope; the card's remaining shapes (e.g. `import()` in for-heads/`=` at
   statement level) ride the same parser rule and are expected green on the
   next full manifest refresh.
+  → (2026-11-05 C sweep) confirmed **green**: both remaining shapes are
+  SyntaxErrors on the current binary; see doc/open-cards.md.
 
 Repair-iteration cards (both B6 reviews; §8 has the fixes and evidence):
 

@@ -220,6 +220,10 @@ well inside runtests' 60 s per-test timeout even at debug-build speeds.
   enumeration is implemented verbatim and so a future built-in-iterator
   fast path inside `IteratorStepAndValue` (the CONSIDER at
   JavascriptOperators.cpp:12371) cannot reopen this hole for these callers.
+  → (2026-11-05 C sweep) `MapGroupByIteratorStepAndValue` now carries the
+  same wrapper arm (closing the Map-groupBy asymmetry noted in the c1
+  triage) and `EntryDifference`'s keys-walk has the branch comment
+  requested by the review; see doc/open-cards.md.
 - Linux JIT evidence remains owed via B4 (unchanged from the campaign
   receipt).
 - Lane process residue: during battery construction this lane twice

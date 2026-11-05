@@ -252,6 +252,11 @@ and the gates (2036/0 twice; jit verify leg green).
   committing; a tooling guard (variant-signature check, or nonzero exit
   on single-variant content change) is the required fix before B5
   package/floor.
+  → (2026-11-05 C sweep) the **guard has landed**: a single-variant run
+  whose content differs from the checked-in headers now refuses (exit 1)
+  and restores the headers byte-identical, with an
+  `--allow-single-variant-write` scratch escape hatch; see
+  doc/open-cards.md.
 - `regenByteCode.py:263` writes the GUID header via lowercase
   `lib/Runtime/Bytecode/` — same file on macOS's case-insensitive FS,
   but on **Linux** the mint would create a NEW untracked file and leave

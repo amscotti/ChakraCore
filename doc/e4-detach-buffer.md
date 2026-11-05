@@ -237,6 +237,11 @@ doesn't (V8 divergence; recorded like the on-heap caveat); B6 —
 general-review nit — attached-OOB `delete` returns false (spec: true;
 same IsValidIntegerIndex half as B3's card).
 
+→ (2026-11-05 C sweep) B3 + the general-review nit **fixed** in
+`TypedArrayBase::DeleteItem` (OOB canonical index → true); B6 **no longer
+reproduces** (both engines throw TypeError today — e10's seal/freeze work);
+B1 still open-verified; see doc/open-cards.md.
+
 **Receipt corrections:** §2's "every consumer inherits through these
 primitives" is false for the Reflect.set/defineProperty ENTRY
 plumbing (B1's root); §4's "line for line" excludes B1/B2/B4 shapes;
