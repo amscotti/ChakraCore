@@ -296,7 +296,13 @@ if changes_detected == True:
         print("Bytecode updated for one variant only - ensure you re-run for both variants before submitting code")
     else:
         print('Generating new GUID for new bytecode')
-        guid_header = load_file(base_path + '/../lib/Runtime/Bytecode/ByteCodeCacheReleaseFileVersion.h', 'w')
+        # Tracked-path casing: the directory is lib/Runtime/ByteCode (capital
+        # C, as git tracks it). A lowercase 'Bytecode' component wrote the
+        # SAME file on case-insensitive macOS but created an UNTRACKED
+        # lib/Runtime/Bytecode/ file on case-sensitive Linux, leaving the
+        # tracked header stale (swarm-triage mint-path fix; pinned by
+        # tools/build/test_build_tools.py RegenGuidPathTests).
+        guid_header = load_file(base_path + '/../lib/Runtime/ByteCode/ByteCodeCacheReleaseFileVersion.h', 'w')
         guid = str(uuid.uuid4())
 
         output_str = '''//-------------------------------------------------------------------------------------------------------

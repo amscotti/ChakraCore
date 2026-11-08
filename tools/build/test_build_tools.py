@@ -832,6 +832,74 @@ class RegenSingleVariantGuardTests(unittest.TestCase):
                                 b"original header\n")
 
 
+class RegenGuidPathTests(unittest.TestCase):
+    """The GUID mint path (swarm-trie mint-path fix, must-before-Linux): the
+    release-file-version header must be written through the TRACKED casing
+    lib/Runtime/ByteCode/ (capital C). A lowercase 'Bytecode' component
+    wrote the same file on case-insensitive macOS but created an UNTRACKED
+    sibling on case-sensitive Linux, leaving the tracked header stale."""
+
+    TRACKED = "lib/Runtime/ByteCode/ByteCodeCacheReleaseFileVersion.h"
+
+    def make_fixture(self, root):
+        js_dir = root / "lib/Runtime/Library/InJavascript"
+        js_dir.mkdir(parents=True)
+        for name in ("JsBuiltIn.nojit.bc.64b.h", "JsBuiltIn.nojit.bc.32b.h",
+                     "JsBuiltIn.bc.64b.h", "JsBuiltIn.bc.32b.h"):
+            (js_dir / name).write_bytes(b"original header\n")
+        (js_dir / "Intl.js").write_text("// fixture\n")
+        (js_dir / "Array_prototype.js").write_text("// fixture\n")
+        (js_dir / "Math_object.js").write_text("// fixture\n")
+        tools = root / "tools"
+        tools.mkdir()
+        shutil.copyfile(HERE.parent / "regenByteCode.py", tools / "regenByteCode.py")
+        # Dual-variant stub binaries at the default out/ paths, so the run
+        # passes the single-variant guard and reaches the GUID mint. Their
+        # output differs from the pre-written headers => changes detected.
+        for variant in ("noJit", "jit"):
+            stub = root / "out" / variant / "debug" / "ch"
+            stub.parent.mkdir(parents=True)
+            stub.write_text("#!/bin/sh\nprintf 'stub bytecode output\\\\n'\n")
+            stub.chmod(0o755)
+        guid_header = root / self.TRACKED
+        guid_header.parent.mkdir(parents=True)
+        guid_header.write_text("// old version header\n")
+        return js_dir, guid_header
+
+    def test_mint_writes_the_tracked_cased_path(self):
+        with tempfile.TemporaryDirectory(prefix="regen-guid-path-test-") as tmp:
+            root = Path(tmp)
+            js_dir, guid_header = self.make_fixture(root)
+            proc = subprocess.run(
+                [sys.executable, str(root / "tools/regenByteCode.py"), "--skip-build"],
+                capture_output=True, text=True, timeout=60)
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            self.assertIn("Generating new GUID", proc.stdout + proc.stderr)
+            # The tracked-path file was overwritten in place (not shadowed).
+            content = guid_header.read_text()
+            self.assertNotIn("old version header", content)
+            self.assertIn("byteCodeCacheReleaseFileVersion", content)
+            # Exact-cased directory entries: on a case-sensitive filesystem a
+            # lowercase-writing script leaves a 'Bytecode' sibling; on a
+            # case-insensitive one the constant check below still pins it.
+            self.assertIn("ByteCode", os.listdir(root / "lib/Runtime"))
+            self.assertNotIn("Bytecode", os.listdir(root / "lib/Runtime"))
+            self.assertIn("ByteCodeCacheReleaseFileVersion.h",
+                          os.listdir(root / "lib/Runtime/ByteCode"))
+            self.assertNotIn("Bytecode", os.listdir(root / "lib/Runtime/ByteCode"))
+
+    def test_script_uses_the_exact_tracked_cased_constant(self):
+        source = (HERE.parent / "regenByteCode.py").read_text()
+        self.assertIn("'/../lib/Runtime/ByteCode/ByteCodeCacheReleaseFileVersion.h'",
+                      source)
+        self.assertNotIn("'/../lib/Runtime/Bytecode/ByteCodeCacheReleaseFileVersion.h'",
+                         source)
+        # And the constant names a file git actually tracks.
+        tracked = subprocess.run(["git", "-C", str(ROOT), "ls-files", "--",
+                                  self.TRACKED], capture_output=True, text=True)
+        self.assertEqual(tracked.stdout.strip(), self.TRACKED)
+
+
 @unittest.skipUnless(os.name == "posix", "Mac check helpers use POSIX process groups")
 class SubprocessLifetimeTests(unittest.TestCase):
     @classmethod
