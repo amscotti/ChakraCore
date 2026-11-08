@@ -27,6 +27,7 @@ checkout (`out/test262`).
 | open, e12 GCStress campaign (tool crash + RecyclerTest assert, below) | 2 |
 | open, e12 fulljit SIGSEGV family (deterministic 109 + load-only crasher, below) | 2 |
 | record-only, e12 (dynapogo variant needs jit-profile binary) | 1 |
+| open, e13 swarm-triage disposition (below) | 4 |
 
 ---
 
@@ -48,7 +49,7 @@ checkout (`out/test262`).
 | E8-5 vacuous passes at flag-off | e8 | open (flag-flip checklist) | re-witness at any flag flip; flag-on they pass (e8 §3) |
 | E8-4 S7 `AdvanceStringIndex` +1/code-unit for `u`; S11 absent-`flags` internal bit | e8 | open (no witness) | no corpus or probe witness today |
 | c2-jit-test262 timing flakes (waitAsync no-spurious-wakeup) | c2-jit-test262 | open (harness) | e12 re-measure (2026-11-05, current binary): flake is flag-on-campaign-only — 9-file `--jobs 1` selection flips 2→4 `lapse >= TIMEOUT` failures run-to-run, single file alone passes 4/4, default-flag shape 0/18 deterministic (`Atomics` undefined); certified refresh (flag-off) and every rlexe gate (in-tree `es7/s6-waitasync-*.js` only) are structurally exempt — load-robustness note in tools/test262/README.md; flag-on campaigns pin `--jobs 1` per-file or ignore the family |
-| b5-guid: regen mint is dual-variant-only; engineering-scheme `__TIME__` granularity; lowercase `Bytecode/` path on Linux; stale `out/{noJit,jit}/debug` copies | b5-guid-rotation | open (B5 package/floor) | the single-variant **overwrite guard** is fixed-here (§4); the rest ride B5 packaging |
+| b5-guid: regen mint is dual-variant-only; engineering-scheme `__TIME__` granularity; ~~lowercase `Bytecode/` path on Linux~~; stale `out/{noJit,jit}/debug` copies | b5-guid-rotation | open (B5 package/floor) | the single-variant **overwrite guard** is fixed-here (§4); the lowercase `Bytecode/` GUID-header path is **fixed by e13** (mint-path commit: tracked casing + RegenGuidPathTests, build-tools 65→67); the rest ride B5 packaging |
 | c1/c2-s10: error-text differences in Set methods (`Object expected` vs Node texts) | c2-s10 | record-only | error types match; corpus checks types only |
 
 ## 2. Engine-lane-owned cards (open-verified today)
@@ -114,7 +115,8 @@ checkout (`out/test262`).
 
 | Card | Source | Status | Evidence |
 |---|---|---|---|
-| regen single-variant `--binary` overwrite hazard (guard required before B5 package/floor) | b5-guid-rotation | **fixed-here** | `tools/regenByteCode.py` now refuses a single-variant run whose content differs from the checked-in headers (exit 1, headers restored byte-identical); `--allow-single-variant-write` escape hatch for scratch trees; 3 negative/positive controls in `tools/build/test_build_tools.py` (`RegenSingleVariantGuardTests`), gate `check-build-tools` 65/65 |
+| regen single-variant `--binary` overwrite hazard (guard required before B5 package/floor) | b5-guid-rotation | **fixed-here** | `tools/regenByteCode.py` now refuses a single-variant run whose content differs from the checked-in headers (exit 1, headers restored byte-identical); `--allow-single-variant-write` escape hatch for scratch trees; 3 negative/positive controls in `tools/build/test_build_tools.py` (`RegenSingleVariantGuardTests`), gate `check-build-tools` (now 67/67: e13 added `RegenGuidPathTests`, next row); the lowercase `Bytecode/` path half of the b5-guid card is **fixed by e13** (next row) |
+| GUID mint path casing: `regenByteCode.py` wrote `lib/Runtime/Bytecode/` while git tracks `lib/Runtime/ByteCode/` — same file on case-insensitive macOS, an UNTRACKED file + stale tracked header on case-sensitive Linux (must-fix before B4) | e13 swarm-triage (architecture lens; the b5-guid card's lowercase-path residue) | **fixed-here (e13)** | path constant now uses the tracked casing; `RegenGuidPathTests` pins it functionally (fixture dual-variant mint: the tracked-path file is overwritten in place and no `Bytecode` sibling directory entry exists — catches the split on case-sensitive filesystems) and by exact-cased constant + `git ls-files` (catches it everywhere) |
 | `regenByteCode.py --verify` rewrites headers / self-heals | b2 | closed by wrapper (pre-existing) | gate runs through `verify_bytecode_pure.py` (restore + rc); guard above now also covers raw single-variant runs |
 | Map-groupBy wrapper-arm asymmetry (cosmetic) | c1-triage/c2-jit-reentrancy-fix | **fixed-here** | `MapGroupByIteratorStepAndValue` now mirrors Object.groupBy's `BEGIN_SAFE_REENTRANT_CALL` defense-in-depth arm; no behavior change by construction (transitions self-arm via `ExecuteImplicitCall` today); warmed coverage stays `setmethods-groupby-warmed.js` |
 | `difference` keys-walk branch comment | c2-jit-reentrancy-fix review | **fixed-here** | inline comment at `EntryDifference`'s keys-walk documenting the no-`has`/no-live-receiver consult (vs `intersection`'s live-receiver check), per the ES2025 algorithm |
@@ -133,6 +135,18 @@ checkout (`out/test262`).
 | B4-4 store half (dot + compound stores) | e6 lane | probes: correct receivers today (see §2) |
 | B4-2 Node double-conversion | oracle (V8 fix) | Node now converts once (see §1) |
 
+## 6. Swarm-triage disposition cards (e13)
+
+Filed by the five-lens swarm triage (doc/e13-swarm-triage.md) — accepted
+findings whose fixes are deliberately deferred, with their bounds.
+
+| Card | Source | Status | Evidence / notes |
+|---|---|---|---|
+| T3 broadcast 5s-overrun wrong-content pairing | e13 (concurrency lens T3) | open (host/agent lane) | `WScriptJsrt.cpp` BroadcastCallback: after the bounded 5 s per-child consumed-ack wait the parent proceeds with only the `live agent did not acknowledge broadcast` stderr warning; a child that acknowledges late (or a callback still pending when the NEXT broadcast overwrites `parent->sharedContent`) can pair broadcast N's wakeup with broadcast N+1's content. Bounded (test262 agent semantics only), warned on stderr, memory-safe (each consumer's wrapper AddRef's the handle it actually reads) — a code-quality risk, not a crash path |
+| WScriptJsrt.cpp split before further Linux/host extension | e13 (architecture lens) | open (refactor suggestion) | ~3.1k lines mixing host-object installation, the global module/script registries, agent lifecycle (S6e) and negative-phase classification; R1 added the host-globals lock across all of them. Split into cohesive units (module registry / agent runtime / WScript surface) before the Linux host work extends it further |
+| JSERR dedicated-message follow-up (NeedArrayBufferObject reuse) | e13 (compat lens) | open (low) | the ES2025 ArrayBuffer accessor entries (resizable/maxByteLength/immutable/… receiver checks, `ArrayBuffer.cpp` ~18 sites + `AtomicsObject.cpp:94`) all throw `JSERR_NeedArrayBufferObject` ("ArrayBuffer object expected"); type-correct but the shared text loses which accessor rejected. Dedicated JSERR strings when the message table is next touched |
+| regen-guard create-on-refuse edge | e13 (tests/docs lens) | open (tooling, low) | `regenByteCode.py` restores only headers that EXISTED before the run (`written_files` is appended only when `os.path.exists`); a refused single-variant run in a tree missing one checked-in header still leaves that header newly created (untracked). Refuse-on-create or delete-on-restore when the guard is next touched |
+
 ## Gate deltas
 
 `tools/build/gate_counts.json`: **2050/2102 → 2051/2103** (+1 = the focused
@@ -141,3 +155,8 @@ after the fixes: `zig build check` **2051/0** (bytecode verify, native,
 smoke, metadata, self-tests PASS), `-Dprofile=debug-static check-regression`
 **2103/0**, `-Dprofile=jit check` **646/646** (check_jit PASS, bytecode up to
 date), `check-build-tools` **65 tests OK** (3 new guard controls included).
+
+e13 swarm-triage lane (doc/e13-swarm-triage.md): gate counts unchanged
+**2051/2103** (host/tooling/docs only, no new rlexe entries);
+`check-build-tools` **65 → 67** (+2 `RegenGuidPathTests` for the mint-path
+casing fix).
