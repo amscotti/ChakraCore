@@ -80,6 +80,37 @@ std::map<JsModuleRecord, ModuleState>  WScriptJsrt::moduleErrMap;
 std::map<DWORD_PTR, std::string> WScriptJsrt::scriptDirMap;
 DWORD_PTR WScriptJsrt::sourceContext = 0;
 
+// The module/script maps and the source-context counter above are
+// process-global mutable state. Since S6e, crossthread agents run
+// WScript.LoadScript and the module fetch callbacks on their own threads
+// concurrently with the main thread, so every map read/write/clear takes
+// one lock (the file's existing lock idiom, matching RuntimeThreadData's
+// csReportQ) and the counter is interlocked. The lock object is created
+// on first use (thread-safe local static) and deliberately leaked:
+// WScriptJsrt has no single guaranteed entry point per reaching thread,
+// and a process-lifetime lock must not depend on global destructor order
+// (see the map-destructor note in Uninitialize).
+static CRITICAL_SECTION* HostGlobalsCS()
+{
+    static CRITICAL_SECTION* s_cs = [] {
+        CRITICAL_SECTION* cs = new CRITICAL_SECTION();
+        InitializeCriticalSection(cs);
+        return cs;
+    }();
+    return s_cs;
+}
+
+// RAII guard so early returns between map operations cannot strand the
+// lock. Never held across an engine call that can re-enter a host fetch
+// callback (JsParseModuleSource / JsModuleEvaluation take it only outside
+// these scopes), so plain (non-recursive) discipline suffices.
+struct HostGlobalsLock
+{
+    CRITICAL_SECTION* cs;
+    HostGlobalsLock() : cs(HostGlobalsCS()) { EnterCriticalSection(cs); }
+    ~HostGlobalsLock() { LeaveCriticalSection(cs); }
+};
+
 // Negative-phase classification state (host flag -NegativePhaseReport).
 // Ownership record: two process-global bools on the native C++ side, written
 // and read only on the host thread at existing error-report sites. No JsRT
@@ -163,11 +194,21 @@ MessageQueue* WScriptJsrt::GetThreadMessageQueue()
 
 DWORD_PTR WScriptJsrt::GetNextSourceContext()
 {
-    return sourceContext++;
+    // Interlocked (not just under HostGlobalsLock) so source ids can never
+    // duplicate even if a future access site misses the lock; every current
+    // caller also holds the lock. The -1 preserves the original
+    // post-increment semantics (returns the value before the increment);
+    // DWORD_PTR is pointer-sized, so pick the matching interlocked width.
+#if _WIN64
+    return (DWORD_PTR)InterlockedIncrement64(reinterpret_cast<volatile LONGLONG*>(&sourceContext)) - 1;
+#else
+    return (DWORD_PTR)InterlockedIncrement(reinterpret_cast<volatile LONG*>(&sourceContext)) - 1;
+#endif
 }
 
 void WScriptJsrt::RegisterScriptDir(DWORD_PTR sourceContext, LPCSTR fullDirNarrow)
 {
+    HostGlobalsLock lock;
     GetDir(fullDirNarrow, &scriptDirMap[sourceContext]);
 }
 
@@ -617,15 +658,27 @@ JsValueRef __stdcall WScriptJsrt::GetModuleNamespace(JsValueRef callee, bool isC
             }
             else
             {
-                auto moduleEntry = moduleRecordMap.find(fullPath);
-                if (moduleEntry == moduleRecordMap.end())
+                JsModuleRecord record;
+                {
+                    HostGlobalsLock lock;
+                    auto moduleEntry = moduleRecordMap.find(fullPath);
+                    if (moduleEntry == moduleRecordMap.end())
+                    {
+                        record = JS_INVALID_REFERENCE;
+                    }
+                    else
+                    {
+                        record = moduleEntry->second;
+                    }
+                }
+                if (record == JS_INVALID_REFERENCE)
                 {
                     errorCode = JsErrorInvalidArgument;
                     errorMessage = _u("Need to supply a path for an already loaded module for WScript.GetModuleNamespace");
                 }
                 else
                 {
-                    errorCode = ChakraRTInterface::JsGetModuleNamespace(moduleEntry->second, &returnValue);
+                    errorCode = ChakraRTInterface::JsGetModuleNamespace(record, &returnValue);
                     if (errorCode == JsErrorModuleNotEvaluated)
                     {
                         errorMessage = _u("GetModuleNamespace called with un-evaluated module");
@@ -691,7 +744,14 @@ JsValueRef WScriptJsrt::LoadScriptHelper(JsValueRef callee, bool isConstructCall
             isFile = false;
             if (isSourceModule)
             {
-                sprintf_s(fileNameBuffer, MAX_PATH, "moduleScript%i.js", (int)sourceContext);
+                int nextId;
+                {
+                    // Diagnostic filename only (display/uniqueness); read
+                    // the shared counter under the host-globals lock.
+                    HostGlobalsLock lock;
+                    nextId = (int)sourceContext;
+                }
+                sprintf_s(fileNameBuffer, MAX_PATH, "moduleScript%i.js", nextId);
                 fileNameNarrow = fileNameBuffer;
             }
         }
@@ -734,54 +794,72 @@ JsErrorCode WScriptJsrt::LoadModuleFromString(LPCSTR fileName, LPCSTR fileConten
     DWORD_PTR dwSourceCookie = WScriptJsrt::GetNextSourceContext();
     JsModuleRecord requestModule = JS_INVALID_REFERENCE;
     LPCSTR moduleRecordKey = fullName ? fullName : fileName;
-    auto moduleRecordEntry = moduleRecordMap.find(std::string(moduleRecordKey));
     JsErrorCode errorCode = JsNoError;
 
     // we need to create a new moduleRecord if the specifier (fileName) is not found;
-    // otherwise we'll use the old one.
-    if (moduleRecordEntry == moduleRecordMap.end())
+    // otherwise we'll use the old one. The find + initialize + register block is
+    // atomic under the host-globals lock so two threads loading the same key
+    // cannot both create records (the second overwriting the first's map entry).
+    // JsInitializeModuleRecord does not re-enter host callbacks, so holding the
+    // lock across it cannot deadlock against a fetch on another thread.
     {
-        JsValueRef specifier = nullptr;
-        if (isFile && fullName)
-        {
-            errorCode = ChakraRTInterface::JsCreateString(
-                fullName, strlen(fullName), &specifier);
-        }
-        if (errorCode == JsNoError)
-        {
-            errorCode = ChakraRTInterface::JsInitializeModuleRecord(
-                nullptr, specifier, &requestModule);
-        }
-        if (errorCode == JsNoError)
-        {
-            if (fullName)
-            {
-                GetDir(fullName, &moduleDirMap[requestModule]);
-            }
+        HostGlobalsLock lock;
+        auto moduleRecordEntry = moduleRecordMap.find(std::string(moduleRecordKey));
 
-            moduleRecordMap[std::string(moduleRecordKey)] = requestModule;
-            moduleErrMap[requestModule] = RootModule;
+        if (moduleRecordEntry == moduleRecordMap.end())
+        {
+            JsValueRef specifier = nullptr;
+            if (isFile && fullName)
+            {
+                errorCode = ChakraRTInterface::JsCreateString(
+                    fullName, strlen(fullName), &specifier);
+            }
+            if (errorCode == JsNoError)
+            {
+                errorCode = ChakraRTInterface::JsInitializeModuleRecord(
+                    nullptr, specifier, &requestModule);
+            }
+            if (errorCode == JsNoError)
+            {
+                if (fullName)
+                {
+                    GetDir(fullName, &moduleDirMap[requestModule]);
+                }
+
+                moduleRecordMap[std::string(moduleRecordKey)] = requestModule;
+                moduleErrMap[requestModule] = RootModule;
+            }
         }
-    }
-    else
-    {
-        requestModule = moduleRecordEntry->second;
+        else
+        {
+            requestModule = moduleRecordEntry->second;
+        }
     }
     IfJsrtErrorFailLogAndRetErrorCode(errorCode);
     JsValueRef errorObject = JS_INVALID_REFERENCE;
 
     // ParseModuleSource is sync, while additional fetch & evaluation are async.
+    // Run it OUTSIDE the host-globals lock: the engine calls the host's fetch
+    // callbacks synchronously from inside it, and those re-take the lock.
     unsigned int fileContentLength = (fileContent == nullptr) ? 0 : (unsigned int)strlen(fileContent);
  
     errorCode = ChakraRTInterface::JsParseModuleSource(requestModule, dwSourceCookie, (LPBYTE)fileContent,
         fileContentLength, JsParseModuleSourceFlags_DataIsUTF8, &errorObject);
-    if ((errorCode != JsNoError) && errorObject != JS_INVALID_REFERENCE && fileContent != nullptr && !HostConfigFlags::flags.IgnoreScriptErrorCode && moduleErrMap[requestModule] == RootModule)
+    bool rootAtParse = false;
+    {
+        HostGlobalsLock lock;
+        rootAtParse = (moduleErrMap[requestModule] == RootModule);
+    }
+    if ((errorCode != JsNoError) && errorObject != JS_INVALID_REFERENCE && fileContent != nullptr && !HostConfigFlags::flags.IgnoreScriptErrorCode && rootAtParse)
     {
         ChakraRTInterface::JsSetException(errorObject);
-        moduleErrMap[requestModule] = ErroredModule;
+        {
+            HostGlobalsLock lock;
+            moduleErrMap[requestModule] = ErroredModule;
+        }
         return errorCode;
     }
-    if (errorCode != JsNoError && moduleErrMap[requestModule] != RootModule)
+    if (errorCode != JsNoError && !rootAtParse)
     {
         // A dependency module failed to parse while the module graph was
         // loading (the error stays on its record for the engine link
@@ -1479,7 +1557,9 @@ bool WScriptJsrt::Uninitialize()
         // every agent thread that could read these maps has been joined
         // above (a child whose join failed may still be live, but its
         // RuntimeThreadData was leaked rather than freed, and process
-        // teardown is already under way).
+        // teardown is already under way). The clears still take the
+        // host-globals lock for uniformity with every other access site.
+        HostGlobalsLock lock;
         moduleRecordMap.clear();
         moduleDirMap.clear();
         moduleErrMap.clear();
@@ -2364,7 +2444,12 @@ HRESULT WScriptJsrt::ModuleMessage::Call(LPCSTR fileName)
     HRESULT hr;
     if (specifier == nullptr)
     {
-        if (moduleErrMap[moduleRecord] != ErroredModule)
+        bool errored;
+        {
+            HostGlobalsLock lock;
+            errored = (moduleErrMap[moduleRecord] == ErroredModule);
+        }
+        if (!errored)
         {
             errorCode = ChakraRTInterface::JsModuleEvaluation(moduleRecord, &result);
             if (errorCode != JsNoError)
@@ -2391,8 +2476,14 @@ HRESULT WScriptJsrt::ModuleMessage::Call(LPCSTR fileName)
                 NoteModuleGraphFailure();
                 if (!HostConfigFlags::flags.MuteHostErrorMsgIsEnabled)
                 {
-                    auto actualModuleRecord = moduleRecordMap.find(*mapKey);
-                    if (actualModuleRecord == moduleRecordMap.end() || moduleErrMap[actualModuleRecord->second] == RootModule)
+                    bool reportLoadFailure;
+                    {
+                        HostGlobalsLock lock;
+                        auto actualModuleRecord = moduleRecordMap.find(*mapKey);
+                        reportLoadFailure = (actualModuleRecord == moduleRecordMap.end() ||
+                                             moduleErrMap[actualModuleRecord->second] == RootModule);
+                    }
+                    if (reportLoadFailure)
                     {
                         fprintf(stderr, "Couldn't load file '%s'\n", specifierStr.GetString());
                     }
@@ -2729,51 +2820,62 @@ JsErrorCode WScriptJsrt::FetchImportedModuleHelperWithAttributes(JsModuleRecord 
         moduleKey += canonicalAttributes;
     }
 
-    auto moduleEntry = moduleRecordMap.find(moduleKey);
-    if (moduleEntry != moduleRecordMap.end())
+    // Identity lookup and record registration are atomic under the
+    // host-globals lock (same find-then-create race as LoadModuleFromString;
+    // JsInitializeModuleRecord does not re-enter host callbacks). The
+    // message creation/queueing runs after the lock is released.
     {
-        *dependentModuleRecord = moduleEntry->second;
-        return JsNoError;
+        HostGlobalsLock lock;
+        auto moduleEntry = moduleRecordMap.find(moduleKey);
+        if (moduleEntry != moduleRecordMap.end())
+        {
+            *dependentModuleRecord = moduleEntry->second;
+            return JsNoError;
+        }
+
+        bool isJsonModule = (attributeType == "json");
+        if (hasAttributes && !attributeType.empty() && !isJsonModule)
+        {
+            // Unsupported "type" values fail the load. The engine surfaces this
+            // as an import failure (a link error for static imports, a promise
+            // rejection for dynamic imports).
+            NoteModuleGraphFailure();
+            return JsErrorInvalidArgument;
+        }
+
+        JsErrorCode errorCode = ChakraRTInterface::JsInitializeModuleRecord(referencingModule, specifier, &moduleRecord);
+        if (errorCode == JsNoError)
+        {
+            GetDir(fullPath, &moduleDirMap[moduleRecord]);
+            std::string pathKey = moduleKey;
+            moduleRecordMap[pathKey] = moduleRecord;
+            moduleErrMap[moduleRecord] = ImportedModule;
+        }
+        else
+        {
+            // The fetch callback failed, so the module graph cannot finish
+            // loading: a resolution-stage failure.
+            NoteModuleGraphFailure();
+            return errorCode;
+        }
     }
 
     bool isJsonModule = (attributeType == "json");
-    if (hasAttributes && !attributeType.empty() && !isJsonModule)
+    std::string pathKey = moduleKey;
+    std::string filePathKey(fullPath);
+    // Note: unlike the legacy Create call above (which passes the
+    // referencing module and re-derives the record from the file path),
+    // the attributes-aware message must target the fetched record
+    // directly, since its map key embeds the attributes.
+    ModuleMessage* moduleMessage = WScriptJsrt::ModuleMessage::CreateWithAttributes(moduleRecord, specifier, &filePathKey, &pathKey, isJsonModule);
+    if (moduleMessage == nullptr)
     {
-        // Unsupported "type" values fail the load. The engine surfaces this
-        // as an import failure (a link error for static imports, a promise
-        // rejection for dynamic imports).
         NoteModuleGraphFailure();
-        return JsErrorInvalidArgument;
+        return JsErrorOutOfMemory;
     }
-
-    JsErrorCode errorCode = ChakraRTInterface::JsInitializeModuleRecord(referencingModule, specifier, &moduleRecord);
-    if (errorCode == JsNoError)
-    {
-        GetDir(fullPath, &moduleDirMap[moduleRecord]);
-        std::string pathKey = moduleKey;
-        moduleRecordMap[pathKey] = moduleRecord;
-        moduleErrMap[moduleRecord] = ImportedModule;
-        std::string filePathKey(fullPath);
-        // Note: unlike the legacy Create call above (which passes the
-        // referencing module and re-derives the record from the file path),
-        // the attributes-aware message must target the fetched record
-        // directly, since its map key embeds the attributes.
-        ModuleMessage* moduleMessage = WScriptJsrt::ModuleMessage::CreateWithAttributes(moduleRecord, specifier, &filePathKey, &pathKey, isJsonModule);
-        if (moduleMessage == nullptr)
-        {
-            NoteModuleGraphFailure();
-            return JsErrorOutOfMemory;
-        }
-        WScriptJsrt::PushMessage(moduleMessage);
-        *dependentModuleRecord = moduleRecord;
-    }
-    else
-    {
-        // The fetch callback failed, so the module graph cannot finish
-        // loading: a resolution-stage failure.
-        NoteModuleGraphFailure();
-    }
-    return errorCode;
+    WScriptJsrt::PushMessage(moduleMessage);
+    *dependentModuleRecord = moduleRecord;
+    return JsNoError;
 }
 
 JsErrorCode WScriptJsrt::FetchImportedModuleHelper(JsModuleRecord referencingModule,
@@ -2798,36 +2900,42 @@ JsErrorCode WScriptJsrt::FetchImportedModuleHelper(JsModuleRecord referencingMod
         return JsErrorInvalidArgument;
     }
 
-    auto moduleEntry = moduleRecordMap.find(std::string(fullPath));
-    if (moduleEntry != moduleRecordMap.end())
+    // Identity lookup and record registration are atomic under the
+    // host-globals lock (find-then-create race as above); the message
+    // creation/queueing runs after the lock is released.
     {
-        *dependentModuleRecord = moduleEntry->second;
-        return JsNoError;
-    }
+        HostGlobalsLock lock;
+        auto moduleEntry = moduleRecordMap.find(std::string(fullPath));
+        if (moduleEntry != moduleRecordMap.end())
+        {
+            *dependentModuleRecord = moduleEntry->second;
+            return JsNoError;
+        }
 
-    JsErrorCode errorCode = ChakraRTInterface::JsInitializeModuleRecord(referencingModule, specifier, &moduleRecord);
-    if (errorCode == JsNoError)
-    {
+        JsErrorCode errorCode = ChakraRTInterface::JsInitializeModuleRecord(referencingModule, specifier, &moduleRecord);
+        if (errorCode != JsNoError)
+        {
+            // The fetch callback failed, so the module graph cannot finish
+            // loading: a resolution-stage failure.
+            NoteModuleGraphFailure();
+            return errorCode;
+        }
         GetDir(fullPath, &moduleDirMap[moduleRecord]);
         std::string pathKey = std::string(fullPath);
         moduleRecordMap[pathKey] = moduleRecord;
         moduleErrMap[moduleRecord] = ImportedModule;
-        ModuleMessage* moduleMessage = WScriptJsrt::ModuleMessage::Create(referencingModule, specifier, &pathKey);
-        if (moduleMessage == nullptr)
-        {
-            NoteModuleGraphFailure();
-            return JsErrorOutOfMemory;
-        }
-        WScriptJsrt::PushMessage(moduleMessage);
-        *dependentModuleRecord = moduleRecord;
     }
-    else
+
+    std::string pathKey = std::string(fullPath);
+    ModuleMessage* moduleMessage = WScriptJsrt::ModuleMessage::Create(referencingModule, specifier, &pathKey);
+    if (moduleMessage == nullptr)
     {
-        // The fetch callback failed, so the module graph cannot finish
-        // loading: a resolution-stage failure.
         NoteModuleGraphFailure();
+        return JsErrorOutOfMemory;
     }
-    return errorCode;
+    WScriptJsrt::PushMessage(moduleMessage);
+    *dependentModuleRecord = moduleRecord;
+    return JsNoError;
 }
 
 // Callback from chakracore to fetch dependent module. In the test harness,
@@ -2837,10 +2945,21 @@ JsErrorCode WScriptJsrt::FetchImportedModuleHelper(JsModuleRecord referencingMod
 JsErrorCode WScriptJsrt::FetchImportedModule(_In_ JsModuleRecord referencingModule,
     _In_ JsValueRef specifier, _Outptr_result_maybenull_ JsModuleRecord* dependentModuleRecord)
 {
-    auto moduleDirEntry = moduleDirMap.find(referencingModule);
-    if (moduleDirEntry != moduleDirMap.end())
+    // Copy the referencing module's directory out under the lock, then
+    // resolve without holding it (the helper re-takes the lock).
+    std::string dir;
+    bool hasDir = false;
     {
-        std::string dir = moduleDirEntry->second;
+        HostGlobalsLock lock;
+        auto moduleDirEntry = moduleDirMap.find(referencingModule);
+        if (moduleDirEntry != moduleDirMap.end())
+        {
+            dir = moduleDirEntry->second;
+            hasDir = true;
+        }
+    }
+    if (hasDir)
+    {
         return FetchImportedModuleHelper(referencingModule, specifier, dependentModuleRecord, dir.c_str());
     }
 
@@ -2861,10 +2980,19 @@ JsErrorCode WScriptJsrt::FetchImportedModule(_In_ JsModuleRecord referencingModu
 JsErrorCode WScriptJsrt::FetchImportedModuleFromScript(_In_ JsSourceContext dwReferencingSourceContext,
     _In_ JsValueRef specifier, _Outptr_result_maybenull_ JsModuleRecord* dependentModuleRecord)
 {
-    auto scriptDirEntry = scriptDirMap.find(static_cast<DWORD_PTR>(dwReferencingSourceContext));
-    if (scriptDirEntry != scriptDirMap.end())
+    std::string dir;
+    bool hasDir = false;
     {
-        std::string dir = scriptDirEntry->second;
+        HostGlobalsLock lock;
+        auto scriptDirEntry = scriptDirMap.find(static_cast<DWORD_PTR>(dwReferencingSourceContext));
+        if (scriptDirEntry != scriptDirMap.end())
+        {
+            dir = scriptDirEntry->second;
+            hasDir = true;
+        }
+    }
+    if (hasDir)
+    {
         return FetchImportedModuleHelper(nullptr, specifier, dependentModuleRecord, dir.c_str());
     }
 
@@ -2877,10 +3005,19 @@ JsErrorCode WScriptJsrt::FetchImportedModuleFromScript(_In_ JsSourceContext dwRe
 JsErrorCode WScriptJsrt::FetchImportedModuleWithAttributes(_In_ JsModuleRecord referencingModule,
     _In_ JsValueRef specifier, _In_ JsValueRef attributes, _Outptr_result_maybenull_ JsModuleRecord* dependentModuleRecord)
 {
-    auto moduleDirEntry = moduleDirMap.find(referencingModule);
-    if (moduleDirEntry != moduleDirMap.end())
+    std::string dir;
+    bool hasDir = false;
     {
-        std::string dir = moduleDirEntry->second;
+        HostGlobalsLock lock;
+        auto moduleDirEntry = moduleDirMap.find(referencingModule);
+        if (moduleDirEntry != moduleDirMap.end())
+        {
+            dir = moduleDirEntry->second;
+            hasDir = true;
+        }
+    }
+    if (hasDir)
+    {
         return FetchImportedModuleHelperWithAttributes(referencingModule, specifier, attributes, dependentModuleRecord, dir.c_str());
     }
 
@@ -2891,10 +3028,19 @@ JsErrorCode WScriptJsrt::FetchImportedModuleFromScriptWithAttributes(_In_ JsSour
     _In_ JsValueRef specifier, _In_ JsValueRef attributes, _Outptr_result_maybenull_ JsModuleRecord* dependentModuleRecord)
 {
     // Same script-relative resolution as FetchImportedModuleFromScript above.
-    auto scriptDirEntry = scriptDirMap.find(static_cast<DWORD_PTR>(dwReferencingSourceContext));
-    if (scriptDirEntry != scriptDirMap.end())
+    std::string dir;
+    bool hasDir = false;
     {
-        std::string dir = scriptDirEntry->second;
+        HostGlobalsLock lock;
+        auto scriptDirEntry = scriptDirMap.find(static_cast<DWORD_PTR>(dwReferencingSourceContext));
+        if (scriptDirEntry != scriptDirMap.end())
+        {
+            dir = scriptDirEntry->second;
+            hasDir = true;
+        }
+    }
+    if (hasDir)
+    {
         return FetchImportedModuleHelperWithAttributes(nullptr, specifier, attributes, dependentModuleRecord, dir.c_str());
     }
 
@@ -2925,7 +3071,12 @@ JsErrorCode WScriptJsrt::NotifyModuleReadyCallback(_In_opt_ JsModuleRecord refer
         }
     }
 
-    if (moduleErrMap[referencingModule] != ErroredModule)
+    bool errored;
+    {
+        HostGlobalsLock lock;
+        errored = (moduleErrMap[referencingModule] == ErroredModule);
+    }
+    if (!errored)
     {
         WScriptJsrt::ModuleMessage* moduleMessage =
             WScriptJsrt::ModuleMessage::Create(referencingModule, nullptr);
