@@ -672,6 +672,21 @@ Decision/rollback points:
   [c4-manifest.md](c4-manifest.md), [c4-run-evidence.md](c4-run-evidence.md),
   [c4-refresh.md](c4-refresh.md).*)
 
+**Swarm review (2026-11-08) — CLEARED FOR THE LINUX SWITCH.** Five
+specialized lenses (memory/GC/ownership, concurrency/threading,
+architecture/JsRT-boundaries/format, code quality, test/doc integrity)
+reviewed the full `f305a175f..HEAD` arc: **all five ACCEPT, zero
+[bug]s**. Triage landed the R1 host-global-map synchronization fix
+(+ the PushMessage agent-routing repair it exposed), the
+case-sensitive `ByteCode/` mint-path fix, dylib-digest provenance
+recording, and the nit batch; four new cards filed
+([e13-swarm-triage.md](e13-swarm-triage.md), independently verified).
+Gates 2051/0 + 2103/0 + jit check green. Carried conditions for the
+Linux lane: own or disable-list the fulljit SIGSEGV family before
+Linux JIT gates are authoritative; re-verify the A3 helper arg-order
+convention on x64 once; `refresh_baseline.py` now records dylib
+digests for native re-proof.
+
 **Restart point (2026-11-05, after the C4 certified refresh) — the
 Mac-side program is complete.** Lanes A–E of the 2026-11-03 bucket list
 plus the C4 refresh are all landed; development stays **mainline-only**
