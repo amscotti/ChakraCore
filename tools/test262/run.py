@@ -184,13 +184,14 @@ def marker_evidence(record):
 
     Spoofing defense (marker text is attacker-controlled once it travels in
     a thrown error's string): the REAL marker is the **first** marker-shaped
-    stderr line and it must be **line 1** of stderr. Soundness rests on the
-    emission-site audit: every ReportNegativePhaseMarker call site
-    immediately precedes its PrintException, and no test-reachable API
-    writes stderr before the first error report (print/console go to
-    stdout; agent processes are separate and silent here) — so a forged
-    marker-shaped line can only appear AFTER the real one, inside the error
-    message text. Returns ``(phase, state)`` with state ``'line1'`` (trust
+    stderr line and it must be **line 1** of stderr. The soundness bound is
+    those two rules themselves, not stderr separation (S6e crossthread
+    agents are threads sharing this process's stderr, and their reports can
+    interleave): a forged line is judged from only when it is both first
+    and at line 1, marker-judging still requires equality with the declared
+    negative.phase, and anything after line 1 is never trusted. Every
+    ReportNegativePhaseMarker call site immediately precedes its
+    PrintException. Returns ``(phase, state)`` with state ``'line1'`` (trust
     the marker), ``'displaced'`` (a marker-shaped line exists but not at
     line 1 — never trusted; the caller falls back to the shape heuristic
     loudly), or ``'absent'`` (no marker: pre-flag host, or a crash/timeout

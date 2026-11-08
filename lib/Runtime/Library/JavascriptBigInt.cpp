@@ -927,6 +927,11 @@ namespace Js
         if (count > bufSize)
         {
             pszRes = pszToBeFreed = HeapNewArray(char16, count);
+            // NOTE (inherited upstream wart, release-safe): `count` is
+            // reassigned below, so the error-path HeapDeleteArray(count, ...)
+            // frees with 0 instead of the allocated element count when the
+            // retry returns 0; the free itself is by pointer (the count only
+            // feeds debug fill), so only the debug-fill is under-sized.
             count = PlatformAgnostic::Numbers::Utility::NumberToDefaultLocaleString(szValue, szLength, pszRes, count);
             if (count == 0)
             {

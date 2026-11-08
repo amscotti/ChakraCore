@@ -594,9 +594,17 @@ pre-fix debug `291ba391…d66` (`ch-pre-debug`, static), post-fix debug
   mode, pre-existing INFINITE semantics — but a host needing bounded
   exit has no watchdog.
 - The child-side `Error` path of `RuntimeThreadData::ThreadProc` still
-  skips joining its own sub-agents, but it is unreachable after any
-  script ran (all `Error` exits precede `JsRun`; sub-agents are created
-  only by script) — pre-existing, unchanged.
+  skips joining its own sub-agents. Correction (2026-11-08, swarm-triage
+  T4): this receipt previously claimed "all `Error` exits precede
+  `JsRun`" — wrong. The wait-loop `break` path (`waitRet` neither
+  `WAIT_OBJECT_0[+1]` nor `WAIT_TIMEOUT`, the `Assert(false)` arm) falls
+  through to the `Error` label AFTER `JsRun` ran, and an agent that
+  spawned sub-agents would skip their join there (the `Error` label never
+  calls `WScriptJsrt::Uninitialize`). Practically unreachable on this
+  host: the two handles are valid for the thread's whole lifetime, so
+  `WaitForMultipleObjects` cannot return `WAIT_FAILED` here — the path
+  exists only as the assert's compiled-out fall-through. Pre-existing,
+  unchanged.
 - ~~`CreateThread`'s return value at the spawn site is unchecked
   (pre-existing)~~ **Fixed** by the host-spawn-check follow-up below
   (diagnosis `325d015c7`, fix `fd7b022b1`): the failure is worse than

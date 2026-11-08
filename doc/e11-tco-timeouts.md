@@ -116,7 +116,11 @@ null-until-report contract every other agent test relies on) or surface
 agent-thread errors onto stderr (which eshost's error parser treats as host
 errors, risking the 44 flag-on agent scenarios). **Reclassify, don't fix**:
 host bucket 426 → 421 (−4 Array fixed, −2 moved), disabled-flag bucket
-1,734 → 1,736.
+1,734 → 1,736. *(2026-11-08 correction pointer: the −2 host→disabled-flag
+move never materialized — analyze.py's first-match bucket rules keep
+timeout/abnormal-exit scenarios in `host`, so the later c4-refresh
+decomposition measured host 7→3, not the predicted 7→1, and disabled-flag
+stayed 1,734; see doc/c4-refresh.md "Reclassification honesty note".)*
 
 ## 3. Before / after (this HEAD, default flags, pinned corpus)
 
@@ -151,6 +155,9 @@ which expects the same throw for `length: Infinity`; the file is untagged,
 hence edition-selected per the policy rule — verified from the before-run
 attrs). 0 regressions; host bucket 426 → 421 (−4 fixed, −2 Atomics
 reclassified per §2.B2), disabled-flag bucket 1,734 → 1,736.
+*(2026-11-08 pointer: the §2.B2 −2 reclassification is impossible under the
+bucket rules — corrected figures in doc/c4-refresh.md: host 7→3, not 7→1;
+disabled-flag 1,734, not 1,736.)*
 
 ## 5. Commands
 

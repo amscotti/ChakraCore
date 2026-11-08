@@ -155,7 +155,6 @@ void WScriptJsrt::ReportNegativePhaseMarker(bool parseStageFailure)
     fprintf(stderr, "CH_NEGATIVE_PHASE: %s\n", phase);
 }
 
-
 // Message queue for the current thread: the per-child agent queue when
 // running inside a crossthread agent thread (S6e), otherwise the main host
 // queue. Prevents WScript.SetTimeout/ClearTimeout and samethread script
@@ -871,7 +870,6 @@ JsErrorCode WScriptJsrt::LoadModuleFromString(LPCSTR fileName, LPCSTR fileConten
     return JsNoError;
 }
 
-
 JsValueRef WScriptJsrt::LoadScript(JsValueRef callee, LPCSTR fileName,
     LPCSTR fileContent, LPCSTR scriptInjectType, bool isSourceModule, JsFinalizeCallback finalizeCallback, bool isFile)
 {
@@ -1500,11 +1498,15 @@ bool WScriptJsrt::Uninitialize()
 
     if (threadData && !threadData->children.empty())
     {
-        // Children are never unlinked before this point: LoadScriptCallback
-        // push_backs each child on THIS (the owning parent's) thread before
-        // CreateThread, leaving() only sets the child's own flag, and the
-        // sole removal is the clear() below — so this list is mutated only
-        // on this thread and these passes need no lock.
+        // Children are normally never unlinked before this point:
+        // LoadScriptCallback push_backs each child on THIS (the owning
+        // parent's) thread before CreateThread, leaving() only sets the
+        // child's own flag, and the only in-flight removal is the
+        // failed-spawn pop_back in that same LoadScriptCallback (which
+        // unlinks exactly the child whose CreateThread returned null,
+        // before any script ran on this thread) — so this list is mutated
+        // only on this thread and these passes need no lock. The clear()
+        // below is the sole removal on the normal path.
         //
         // Signal shutdown for ALL children BEFORE any waiting, then join
         // each child's thread handle individually. WaitForMultipleObjects
@@ -2468,7 +2470,6 @@ HRESULT WScriptJsrt::ModuleMessage::Call(LPCSTR fileName)
         {
             hr = Helpers::LoadScriptFromFile(*specifierStr, fileContent, nullptr, filePath, true);
 
-
             if (FAILED(hr))
             {
                 // The host failed to load a dependency of the module graph
@@ -2686,7 +2687,7 @@ static bool ValidateJsonModuleSource(JsModuleRecord moduleRecord, LPCSTR jsonPar
     JsValueRef sourceRef = nullptr;
     JsValueRef sourceName = nullptr;
     if (ChakraRTInterface::JsCreateString(jsonParseSource, strlen(jsonParseSource), &sourceRef) != JsNoError ||
-        ChakraRTInterface::JsCreateString("json-module-parse", 17, &sourceName) != JsNoError)
+        ChakraRTInterface::JsCreateString("json-module-parse", strlen("json-module-parse"), &sourceName) != JsNoError)
     {
         return true;
     }

@@ -100,14 +100,16 @@ are unsynchronized; see §5.7 for the theoretical S6e agent-thread caveat.)
   and place a forged marker line in its own error report. The runner trusts
   only the **first** marker-shaped stderr line, and only when it is
   **line 1** of stderr (`marker_evidence`, states `line1` / `displaced` /
-  `absent`). Soundness follows from the emission-site audit: every
-  `ReportNegativePhaseMarker` call site immediately precedes its
-  `PrintException`, and no test-reachable API writes stderr before the
-  first error report (print/console go to stdout; `$262.agent` children
-  are separate processes whose stderr is not this record's) — so a forged
-  line can only appear *after* the real marker. A displaced marker-shaped
-  line is never judged from; the record falls back to the shape heuristic
-  *loudly* (`judged_by: 'shape:marker-displaced'`).
+  `absent`). Correction (2026-11-08, swarm-triage): S6e crossthread agents
+  are *threads* of this process — their error reports share this stderr —
+  so "agents are separate processes whose stderr is not this record's"
+  was not the sound bound. The sound bounds are first-wins judging plus
+  the line-1 tripwire themselves: a forged line can only be judged from if
+  it is both the first marker-shaped line and line 1 of stderr (and
+  marker-judging still requires equality with the declared
+  `negative.phase` — a mismatch downgrades loudly instead of passing);
+  everything after line 1 falls back to the shape heuristic loudly
+  (`judged_by: 'shape:marker-displaced'`).
 - **Every** negative scenario (controls and corpus) is re-judged by
   `negative_phase_judgement()`: the trusted marker's phase must equal the
   declared `negative.phase` (plus no stdout for parse/resolution). The C1
@@ -265,20 +267,29 @@ upstream — independent of phases.
    (all 12 downgrades individually verified as true wrong-phase passes).
    C4 fix: clear the witness when a dynamic-import rejection is handled,
    or honor the witness only for module-channel reports.
-6. **Agent-thread and dynamic-import failures emit no marker** (agent
-   children are separate processes; dynamic-import failures surface as
-   handled promise rejections, not unhandled-error reports) — those
-   records use the shape fallback. Suggested C4 tripwire: flag any
-   harness-*passed positive* record carrying a marker line (a passing
-   run should never have an unhandled-error report); in the completed
-   baseline every marker-carrying record is a failing run or a passed
-   negative, consistent with that invariant.
+6. **Agent-thread and dynamic-import failures emit no marker on the main
+   thread's report channel** (a crossthread agent's initial-script errors
+   are deliberately unsurfaced by the spawn wait, and dynamic-import
+   failures surface as handled promise rejections, not unhandled-error
+   reports) — those records use the shape fallback. Suggested C4
+   tripwire: flag any harness-*passed positive* record carrying a marker
+   line (a passing run should never have an unhandled-error report); in
+   the completed baseline every marker-carrying record is a failing run
+   or a passed negative, consistent with that invariant.
 7. **Memory note correction:** the witness/marker state is process-global
    and *unsynchronized*; S6e crossthread agents run script on other
    threads, so an agent-thread unhandled error could in principle emit a
-   duplicate marker or race the bools. No test-reachable path observed
-   (agents fail silently in separate processes); C4 hardening would make
-   the emission atomic or thread-aware.
+   duplicate marker or race the bools. Correction (2026-11-08,
+   swarm-triage): the earlier "no test-reachable path observed (agents
+   fail silently in separate processes)" justification was wrong —
+   agents are threads of this process (an agent-side module-eval error
+   does reach `PrintException` on its thread). What actually bounds the
+   risk is first-wins judging plus the line-1 tripwire (§6): any
+   marker-shaped line an agent error plants is judged from only when it
+   is the first such line at line 1, and a phase mismatch downgrades
+   loudly rather than passing; emit-once is per-thread only, so a
+   duplicate marker *line* remains possible. C4 hardening would make the
+   emission atomic or thread-aware.
 
 ## 6. Repair iteration (2026-11-01): marker spoofing
 
