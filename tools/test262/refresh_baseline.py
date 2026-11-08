@@ -201,8 +201,10 @@ def render_report(summary, report, join, attribution, register_entry, results_di
     lines += ['## 1. Run identity', '']
     engine = summary.get('engine_commit') or 'not recorded'
     dirty = ' (tree dirty at run time!)' if summary.get('engine_tree_dirty') else ''
+    dylib = summary.get('engine_dylib_sha256')
     lines += [f"- Engine commit: `{engine}`{dirty}",
-              f"- Binary SHA-256: `{summary['binary_sha256']}`",
+              f"- Binary SHA-256 (launcher): `{summary['binary_sha256']}`",
+              f"- Engine dylib SHA-256: `{dylib if dylib else 'none recorded (static build or pre-recording run)'}`",
               f"- Corpus revision: `{summary['test262_revision']}` (patterns: "
               f"{', '.join(summary['patterns'])})",
               f"- Host flags: `{summary['host_flags']}` · jobs {summary['jobs']} · "
@@ -301,6 +303,7 @@ def register_entry_for(summary, report, results_dir):
             'date': datetime.now(timezone.utc).strftime('%Y-%m-%d'),
             'engine_commit': summary.get('engine_commit'),
             'binary_sha256': summary['binary_sha256'],
+            'engine_dylib_sha256': summary.get('engine_dylib_sha256'),
             'results_dir': str(Path(results_dir).relative_to(ROOT)),
             'results_retained': True,
             'broad': {k: report['broad'][k] for k in ('passed', 'failed', 'scenarios')},

@@ -30,9 +30,28 @@ def digest(path):
 
 def artifact_identity(binary):
     paths = [binary, HERE / 'package-lock.json', HERE / 'harness.js', HERE / 'host-filter.js']
-    paths += [path for path in binary.parent.glob('libChakraCore.*')
-              if path.suffix in ('.dylib', '.so')]
+    paths += shared_library_paths(binary)
     return {str(path): digest(path) for path in paths}
+
+
+def shared_library_paths(binary):
+    """Engine shared libraries sitting beside the binary (libChakraCore.*)."""
+    return sorted(path for path in binary.parent.glob('libChakraCore.*')
+                  if path.suffix in ('.dylib', '.so'))
+
+
+def resolve_engine_dylib(binary):
+    """The engine dylib beside the binary, or None on a static build.
+
+    The launcher `ch` and the engine live in separate files on the shared
+    profiles (e.g. an ~0.8 MB ch plus a ~23 MB libChakraCore.dylib on Mac),
+    so binary_sha256 alone pins only the launcher: engine-side rebuilds
+    would leave summary.json's primary identity unchanged. First match by
+    name for determinism; every match is still itemized in
+    shared_libraries.
+    """
+    paths = shared_library_paths(binary)
+    return paths[0] if paths else None
 
 
 def engine_identity():
@@ -370,13 +389,14 @@ def main():
         for feature in record['attrs'].get('features', []) or ['untagged']:
             counts = features.setdefault(feature, {'passed': 0, 'failed': 0})
             counts['passed' if record['result']['pass'] else 'failed'] += 1
-    shared = [path for path in args.binary.parent.glob('libChakraCore.*')
-              if path.suffix in ('.dylib', '.so')]
+    shared = shared_library_paths(args.binary)
+    engine_dylib = resolve_engine_dylib(args.binary)
     summary = {
         'scope': LOCK['scope'], 'test262_revision': LOCK['revision'],
         'recorded_utc': datetime.now(timezone.utc).isoformat(),
         'engine_commit': engine_commit, 'engine_tree_dirty': engine_dirty,
         'binary_sha256': digest(args.binary),
+        'engine_dylib_sha256': digest(engine_dylib) if engine_dylib else None,
         'shared_libraries': {path.name: digest(path) for path in shared},
         'package_lock_sha256': digest(HERE / 'package-lock.json'),
         'node_version': subprocess.check_output([args.node, '--version'], text=True).strip(),
