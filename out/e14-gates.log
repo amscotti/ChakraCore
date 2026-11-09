@@ -1,0 +1,462 @@
+=== zig build check (test profile) ===
+b2 profile: target=aarch64-macos.26.0 sdk=/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk@26.5 icu-include=/opt/homebrew/opt/icu4c/include zig=0.17.0 python=/Users/ascotti/.local/share/mise/installs/python/3.12/bin/python3
+pal-config: 95/95 checks match the contract (33 fixed-by-target, 62 compile-checked, 32 runtime-verified) [profile test]
+self-test 8 ignores + PASS accepted    -> PASS
+self-test missing PASS line rejected   -> PASS
+self-test 7 ignores rejected           -> PASS
+self-test FAILED line rejected         -> PASS
+self-test exact-format FAILED rejected -> PASS
+self-test mid-line FAILED substring accepted -> PASS
+self-test static: 8 PASS + shared ignore accepted -> PASS
+self-test static: property assertion rejected -> PASS
+self-test static: 7 PASS rejected      -> PASS
+self-test static: missing shared ignore rejected -> PASS
+self-test static: shared PASS rejected -> PASS
+self-test static: FAILED line rejected -> PASS
+self-test static: shared log rejected  -> PASS
+self-test makefile: archive + force_load accepted -> PASS
+self-test makefile: dylib link rejected -> PASS
+self-test makefile: no force_load rejected -> PASS
+check_native: running in /var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/check-native-selftest-08rdqs7t/native-tests: bash /var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/check-native-selftest-08rdqs7t/native-tests/test_native.sh /nonexistent/ch RelWithDebInfo clang clang++ /Users/ascotti/Documents/code/ChakraCore/test
+
+########## Running POSIX Native Tests ###########
+Using CC [clang]
+Using CXX [clang++]
+
+Testing test-static-c98
+/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/check-native-selftest-08rdqs7t/native-tests/test_native.sh: line 23: /nonexistent/ch: No such file or directory
+self-test bogus ch exits nonzero (rc=1) -> PASS
+self-test missing compilers fail gate loudly (rc=2) -> PASS
+self-test --static without --archive fails loudly (rc=2) -> PASS
+self-test --build-type with --static fails loudly (rc=2) -> PASS
+self-test --build-type without value fails loudly (rc=2) -> PASS
+check_native self-test: ALL NEGATIVE CONTROLS BEHAVE
+check_regression_linux: FAIL: --variants in extras collides with the per-variant loop; run one variant via a manual runtests.py invocation instead
+self-test single summary parses                    -> PASS
+self-test missing summary is None                  -> PASS
+self-test lookalike rejected                       -> PASS
+self-test duplicate summary raises                 -> PASS
+self-test no baseline recorded (gate cannot pass yet) -> PASS
+self-test --variants in extras rejected            -> PASS
+self-test all-abort grades BLOCKED                 -> PASS
+self-test genuine all-fail grades FAIL             -> PASS
+self-test mixed pass+abort grades FAIL             -> PASS
+self-test summary-less qemu abort grades BLOCKED   -> PASS
+self-test summary-less bare abort rc grades FAIL   -> PASS
+self-test summary-less shell-Aborted-only grades FAIL -> PASS
+self-test all-fail shell-Aborted-only grades FAIL  -> PASS
+self-test recorded baseline + rc=0 grades PASS     -> PASS
+self-test matching counts + rc=139 grades FAIL naming rc -> PASS
+self-test all-signal-11 0/N grades FAIL            -> PASS
+self-test summary-less signal-11 grades FAIL       -> PASS
+self-test all-signal-61 0/N grades FAIL            -> PASS
+self-test summary-less signal-61 grades FAIL       -> PASS
+self-test mixed sig6+sig11 0/N grades FAIL (veto)  -> PASS
+self-test mixed sig6+sig11 same-line 0/N grades FAIL (veto) -> PASS
+self-test two sig6 on one line 0/2 grades BLOCKED  -> PASS
+self-test summary-less mixed sig6+sig11 grades FAIL (veto) -> PASS
+self-test summary-less mixed same-line grades FAIL (veto) -> PASS
+self-test all-signal-6 0/N at rc=0 grades FAIL not BLOCKED -> PASS
+self-test summary-less signal-6 at rc=0 grades FAIL -> PASS
+self-test baseline restored to all-None after controls -> PASS
+check_regression_linux self-test: ALL NEGATIVE CONTROLS BEHAVE
+check_metadata_linux: elf /var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/check-metadata-linux-selftest-qurz_9j7/good.so -> 64-bit LSB machine=62 type=3
+self-test synthetic ELF64/DYN passes elf gate          -> PASS
+check_metadata_linux: elf /var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/check-metadata-linux-selftest-qurz_9j7/good.so -> 64-bit LSB machine=62 type=3
+self-test synthetic ELF64/DYN fails EXEC gate          -> PASS
+self-test text file fails elf gate                     -> PASS
+check_metadata_linux: elf /var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/check-metadata-linux-selftest-qurz_9j7/arm.so -> 64-bit LSB machine=183 type=3
+self-test aarch64 ELF fails machine gate               -> PASS
+self-test icu pair, no c++ runtime passes needed gate  -> PASS
+self-test missing icu18n fails needed gate             -> PASS
+self-test libstdc++ NEEDED fails needed gate           -> PASS
+check_metadata_linux: sha256 /var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/check-metadata-linux-selftest-qurz_9j7/wabt.h -> 09025609d4f04697
+self-test matching sha passes bytes gate               -> PASS
+check_metadata_linux: sha256 /var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/check-metadata-linux-selftest-qurz_9j7/wabt.h -> 09025609d4f04697
+self-test wrong sha fails bytes gate                   -> PASS
+self-test present marker passes marker gate            -> PASS
+self-test absent marker fails marker gate              -> PASS
+self-test missing file fails bytes gate                -> PASS
+self-test empty ref fails exact-set export gate naming empty -> PASS
+self-test empty ref fails subset export gate naming empty -> PASS
+self-test missing ref fails exact-set export gate      -> PASS
+self-test missing ref fails subset export gate         -> PASS
+self-test non-ELF target fails exact-set export gate   -> PASS
+self-test non-ELF target fails subset export gate      -> PASS
+self-test text file fails archive gate                 -> PASS
+check_metadata_linux: ar /var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/check-metadata-linux-selftest-qurz_9j7/synthetic.a -> 1 members (want 1)
+self-test synthetic archive passes at its member count -> PASS
+check_metadata_linux: ar /var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/check-metadata-linux-selftest-qurz_9j7/synthetic.a -> 1 members (want 2)
+self-test archive count mismatch fails archive gate    -> PASS
+self-test identical staged header passes header gate   -> PASS
+self-test tampered staged header fails header gate     -> PASS
+self-test missing staged header fails header gate      -> PASS
+check_metadata_linux self-test: ALL NEGATIVE CONTROLS BEHAVE
+common: TIMEOUT after 1s: /Users/ascotti/.local/share/mise/installs/python/3.12/bin/python3 -c import time; time.sleep(30)
+self-test exact baseline   -> PASS (verdict=accept err=None)
+self-test one failure      -> PASS (verdict=reject err='count mismatch: got passed 2051 / failed 1, require passed 2051 / failed 0')
+self-test wrong passed     -> PASS (verdict=reject err='count mismatch: got passed 2055 / failed 0, require passed 2051 / failed 0')
+self-test wrong total      -> PASS (verdict=reject err="expected exactly one 'Total: passed N, failed M' summary line, got 2: [(2051, 0), (10, 0)]")
+self-test duplicate summary -> PASS (verdict=reject err="expected exactly one 'Total: passed N, failed M' summary line, got 2: [(2051, 0), (2051, 0)]")
+self-test missing summary  -> PASS (verdict=reject err="no 'Total: passed N, failed M' summary line in runtests.py output")
+self-test lookalike line   -> PASS (verdict=reject err="no 'Total: passed N, failed M' summary line in runtests.py output")
+self-test debug baseline   -> PASS (verdict=accept)
+self-test debug vs test    -> PASS (verdict=reject)
+self-test test vs debug    -> PASS (verdict=reject)
+self-test debug flag map   -> PASS
+self-test hung child       -> PASS (TimeoutExpired raised)
+check_regression self-test: ALL NEGATIVE CONTROLS BEHAVE
+check_regression: running: /Users/ascotti/.local/share/mise/installs/python/3.12/bin/python3 ./test/runtests.py --test --variants=disable_jit --binary=/Users/ascotti/Documents/code/ChakraCore/zig-out/bin/ch
+############# ChakraCore Test Suite #############
+Testing Test build
+Using 10 threads
+
+############# Starting disable_jit tests #############
+  exclude: exclude_amd64
+  exclude: exclude_mac
+  exclude: exclude_interpreted
+  exclude: exclude_x64
+  exclude: fails_interpreted
+  exclude: exclude_test
+  exclude: fail
+  exclude: exclude_xplat
+  exclude: fails_disable_jit
+  exclude: require_simd
+  exclude: slow
+  exclude: exclude_disable_jit
+  exclude: require_backend
+
+############ Results for disable_jit tests ###########
+262: passed 1, failed 0
+Array: passed 120, failed 0
+Basics: passed 47, failed 0
+BigInt: passed 11, failed 0
+Boolean: passed 3, failed 0
+Bugs: passed 102, failed 0
+Closures: passed 26, failed 0
+ControlFlow: passed 17, failed 0
+Conversions: passed 5, failed 0
+Date: passed 9, failed 0
+Debugger: passed 19, failed 0
+DebuggerCommon: passed 210, failed 0
+EH: passed 40, failed 0
+Error: passed 25, failed 0
+Function: passed 70, failed 0
+GlobalFunctions: passed 13, failed 0
+InlineCaches: passed 24, failed 0
+Intl: passed 17, failed 0
+JSON: passed 14, failed 0
+LetConst: passed 63, failed 0
+Lib: passed 11, failed 0
+Math: passed 9, failed 0
+Miscellaneous: passed 9, failed 0
+Number: passed 11, failed 0
+Object: passed 65, failed 0
+Operators: passed 29, failed 0
+Prototypes: passed 9, failed 0
+RWC: passed 1, failed 0
+RegAlloc: passed 1, failed 0
+Regex: passed 40, failed 0
+Scanner: passed 3, failed 0
+StackTrace: passed 18, failed 0
+Strings: passed 43, failed 0
+TTBasic: passed 142, failed 0
+TTExecuteBasic: passed 28, failed 0
+TaggedIntegers: passed 14, failed 0
+TryCatch: passed 1, failed 0
+UnifiedRegex: passed 22, failed 0
+UnitTestFramework: passed 1, failed 0
+es5: passed 56, failed 0
+es6: passed 238, failed 0
+es6module: passed 31, failed 0
+es7: passed 108, failed 0
+fieldopts: passed 122, failed 0
+loop: passed 10, failed 0
+strict: passed 98, failed 0
+switchStatement: passed 26, failed 0
+typedarray: passed 60, failed 0
+utf8: passed 9, failed 0
+----------------------------
+Total: passed 2051, failed 0
+Time taken for disable_jit tests: 42.33 seconds
+
+[42.33 seconds] Success!
+check_regression: exit=0 parsed=(2051, 0) require passed 2051 / failed 0
+check_regression: PASS: passed 2051 / failed 0
+check_smoke: ch -v -> rc=0 out='ch version 1.13.0.0-beta' err=''
+check_smoke: ch --this-flag-does-not-exist -> rc=5 out=['Invalid Flag : --this-flag-does-not-exist'] err=[]
+check_smoke: snippet -> rc=0 out='zig-smoke-ok 2\n' err=''
+check_smoke: PASS: version + invalid-flag + snippet outputs match
+check_smoke_linux: ch -v -> rc=3 out='' err=''
+self-test silent rc-3 decoy fails version gate         -> PASS
+check_smoke_linux: ch --help -> rc=3 lines=0
+self-test silent rc-3 decoy fails help gate            -> PASS
+check_smoke_linux: ch --this-flag-does-not-exist -> rc=3 out=[] err=[]
+self-test silent rc-3 decoy fails invalid-flag gate    -> PASS
+check_smoke_linux: snippet -> rc=3 out='' err=''
+self-test silent rc-3 decoy fails snippet gate         -> PASS
+check_smoke_linux: ch -v -> rc=0 out='' err=''
+self-test silent rc-0 decoy fails version gate         -> PASS
+check_smoke_linux: ch --help -> rc=0 lines=0
+self-test silent rc-0 decoy fails help gate            -> PASS
+check_smoke_linux: snippet -> rc=0 out='' err=''
+self-test silent rc-0 decoy fails snippet gate         -> PASS
+check_smoke_linux: ch --this-flag-does-not-exist -> rc=0 out=[] err=[]
+self-test silent rc-0 decoy fails invalid-flag gate    -> PASS
+check_smoke_linux: ch --this-flag-does-not-exist -> rc=134 out=[] err=['qemu-x86_64: uncaught target signal 6 (Aborted) - core dumped']
+self-test qemu-signed rc-134 decoy grades BLOCKED on invalid-flag -> PASS
+check_smoke_linux: snippet -> rc=134 out='' err='qemu-x86_64: uncaught target signal 6 (Aborted) - core dumped\n'
+self-test qemu-signed rc-134 decoy grades BLOCKED on snippet -> PASS
+check_smoke_linux: hello -> rc=134 out='' err='qemu-x86_64: uncaught target signal 6 (Aborted) - core dumped\n'
+self-test qemu-signed rc-134 decoy grades BLOCKED on hello -> PASS
+check_smoke_linux: ch -v -> rc=134 out='' err='qemu-x86_64: uncaught target signal 6 (Aborted) - core dumped\n'
+self-test qemu-signed rc-134 decoy fails version (not BLOCKED) -> PASS
+check_smoke_linux: snippet -> rc=134 out='' err=''
+self-test rc-134 decoy without qemu line is FAIL not BLOCKED -> PASS
+check_smoke_linux: snippet -> rc=134 out='junk\n' err='qemu-x86_64: uncaught target signal 6 (Aborted) - core dumped\n'
+self-test noisy rc-134 decoy is FAIL not BLOCKED       -> PASS
+check_smoke_linux: snippet -> rc=134 out='' err='qemu-x86_64: uncaught target signal 61 (Real-time event 61) - core dumped\n'
+self-test signal-61 rc-134 decoy is FAIL not BLOCKED   -> PASS
+self-test is_abort is False for signal 61              -> PASS
+self-test is_abort is True for pure signal 6           -> PASS
+self-test is_abort is False for mixed sig6+sig11 lines -> PASS
+self-test is_abort is False for mixed sig11+sig6 lines -> PASS
+self-test is_abort is False for mixed sig6+sig11 same line -> PASS
+check_smoke_linux: ch -v -> rc=0 out='ch version 1.13.0.0-beta' err=''
+self-test version-text decoy passes version gate       -> PASS
+check_smoke_linux: ch --help -> rc=0 lines=1
+self-test usage-text decoy passes help gate            -> PASS
+check_smoke_linux: ch --this-flag-does-not-exist -> rc=5 out=['Invalid Flag : --this-flag-does-not-exist'] err=[]
+self-test flag-text rc-5 decoy passes invalid-flag gate -> PASS
+check_smoke_linux: snippet -> rc=0 out='zig-smoke-ok 2\n' err=''
+self-test snippet-text decoy passes snippet gate       -> PASS
+check_smoke_linux: hello -> rc=0 out='hello world\nPASS\n' err=''
+self-test hello-text decoy passes hello gate           -> PASS
+self-test hung probe raises TimeoutExpired             -> PASS
+check_smoke_linux self-test: ALL NEGATIVE CONTROLS BEHAVE
+check_smoke: ch -v -> rc=3 out='' err=''
+self-test silent rc-3 decoy fails version gate     -> PASS
+check_smoke: ch --this-flag-does-not-exist -> rc=3 out=[] err=[]
+self-test silent rc-3 decoy fails invalid-flag gate -> PASS
+check_smoke: snippet -> rc=3 out='' err=''
+self-test silent rc-3 decoy fails snippet gate     -> PASS
+check_smoke: ch -v -> rc=0 out='' err=''
+self-test silent rc-0 decoy fails version gate     -> PASS
+check_smoke: ch --this-flag-does-not-exist -> rc=0 out=[] err=[]
+self-test silent rc-0 decoy fails invalid-flag gate -> PASS
+check_smoke: snippet -> rc=0 out='' err=''
+self-test silent rc-0 decoy fails snippet gate     -> PASS
+check_smoke: ch --this-flag-does-not-exist -> rc=0 out=['Invalid Flag : --this-flag-does-not-exist'] err=[]
+self-test rc-0 text decoy passes debug invalid-flag -> PASS
+check_smoke: ch --this-flag-does-not-exist -> rc=0 out=['Invalid Flag : --this-flag-does-not-exist'] err=[]
+self-test rc-0 text decoy fails test invalid-flag  -> PASS
+check_smoke: ch --this-flag-does-not-exist -> rc=5 out=['Invalid Flag : --this-flag-does-not-exist'] err=[]
+self-test rc-5 text decoy passes test invalid-flag -> PASS
+check_smoke: ch --this-flag-does-not-exist -> rc=5 out=['Invalid Flag : --this-flag-does-not-exist'] err=[]
+self-test rc-5 text decoy fails debug invalid-flag -> PASS
+check_smoke: ch --this-flag-does-not-exist -> rc=0 out=[] err=[]
+self-test silent rc-0 decoy fails debug invalid-flag -> PASS
+check_smoke: ch --this-flag-does-not-exist -> rc=0 out=[] err=[]
+self-test silent rc-0 decoy passes release invalid-flag -> PASS
+check_smoke: ch --this-flag-does-not-exist -> rc=0 out=['Invalid Flag : --this-flag-does-not-exist'] err=[]
+self-test rc-0 text decoy fails release invalid-flag -> PASS
+check_smoke: ch --this-flag-does-not-exist -> rc=5 out=['Invalid Flag : --this-flag-does-not-exist'] err=[]
+self-test rc-5 text decoy fails release invalid-flag -> PASS
+check_smoke: ch --this-flag-does-not-exist -> rc=0 out=[] err=[]
+self-test silent rc-0 decoy fails test invalid-flag (already pinned above) -> PASS
+check_smoke: hello -> rc=0 out='hello world\nPASS\n' err=''
+self-test exact hello decoy passes hello gate      -> PASS
+check_smoke: hello -> rc=0 out='' err=''
+self-test silent rc-0 decoy fails hello gate       -> PASS
+check_smoke: hello -> rc=3 out='' err=''
+self-test silent rc-3 decoy fails hello gate       -> PASS
+self-test hung probe raises TimeoutExpired         -> PASS
+check_smoke self-test: ALL NEGATIVE CONTROLS BEHAVE
+check_native: running in /var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/check-native-rljlgjuh/native-tests: bash /var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/check-native-rljlgjuh/native-tests/test_native.sh /Users/ascotti/Documents/code/ChakraCore/zig-out/bin/ch RelWithDebInfo /usr/bin/clang /usr/bin/clang++ /Users/ascotti/Documents/code/ChakraCore
+
+########## Running POSIX Native Tests ###########
+Using CC [/usr/bin/clang]
+Using CXX [/usr/bin/clang++]
+
+Testing test-static-c98
+Ignoring test-static-c98
+Testing test-static-char
+Ignoring test-static-char
+Testing test-static-char16
+Ignoring test-static-char16
+Testing test-static-external
+Ignoring test-static-external
+Testing test-static-native
+Ignoring test-static-native
+Testing test-static-pal
+Ignoring test-static-pal
+Testing test-static-property
+Ignoring test-static-property
+Testing test-static-property-symbol
+Ignoring test-static-property-symbol
+Testing test-shared-basic
+test-shared-basic : PASS
+check_native: exit=0
+check_native: PASS: test-shared-basic : PASS, 8 static suites ignored
+................................................................./Users/ascotti/.local/share/mise/installs/python/3.12.13/lib/python3.12/threading.py:1016: ResourceWarning: unclosed file <_io.TextIOWrapper name=3 encoding='UTF-8'>
+  del self._target, self._args, self._kwargs
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+common: TIMEOUT after 0.3s: /Users/ascotti/.local/share/mise/installs/python/3.12/bin/python3 -c import subprocess, sys, time; subprocess.Popen([sys.executable, '-c', "import time; from pathlib import Path; time.sleep(1); Path('/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/check-timeout-test-l4wanv4q/surviving-descendant').write_text('still running')"]); print('descendant-ready', flush=True); time.sleep(0)
+.common: TIMEOUT after 0.3s: /Users/ascotti/.local/share/mise/installs/python/3.12/bin/python3 -c import subprocess, sys, time; subprocess.Popen([sys.executable, '-c', "import time; from pathlib import Path; time.sleep(1); Path('/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/check-timeout-test-2cl7lwm3/surviving-descendant').write_text('still running')"]); print('descendant-ready', flush=True); time.sleep(5)
+.
+----------------------------------------------------------------------
+Ran 67 tests in 10.942s
+
+OK
+check_metadata: minos /var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/check-metadata-selftest-yujczyqm/garbage.dylib -> None
+self-test garbage victim fails minos gate                      -> PASS
+check_metadata: stack /var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/check-metadata-selftest-yujczyqm/garbage.dylib -> None
+self-test garbage victim fails stack gate                      -> PASS
+self-test garbage victim fails exports gate                    -> PASS
+check_metadata: archive lib/libChakraCoreStatic.a -> 624 bytes
+self-test garbage victim fails static-archive gate             -> PASS
+self-test garbage victim fails self-contained gate             -> PASS
+self-test dylib present fails static no-dylib gate             -> PASS
+self-test empty dir fails header gate (4 missing)              -> PASS
+self-test missing marker fails marker gate                     -> PASS
+check_metadata: marker /var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/check-metadata-selftest-yujczyqm/.profile -> 'debug-static'
+self-test own marker passes marker gate                        -> PASS
+check_metadata: marker /var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/check-metadata-selftest-yujczyqm/.profile -> 'debug-static'
+self-test foreign marker fails marker gate                     -> PASS
+self-test parser reads doctored minos/stack                    -> PASS
+self-test parser yields None on garbage                        -> PASS
+self-test debug-static wants stacksize 0                       -> PASS
+self-test test wants stacksize 8388608                         -> PASS
+self-test release-shared wants stacksize 8388608               -> PASS
+self-test static archive wants 526 members                     -> PASS
+check_metadata self-test: ALL NEGATIVE CONTROLS BEHAVE
+######### Verifying generated bytecode #########
+OS is Linux or macOS
+Regenerating bytecode for no-jit build only
+Checking bytecode in file /var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/verify-bytecode-03w9_nsp/tools/../lib/Runtime/Library/InJavascript/JsBuiltIn.nojit.bc.64b.h
+Checking bytecode in file /var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/verify-bytecode-03w9_nsp/tools/../lib/Runtime/Library/InJavascript/JsBuiltIn.nojit.bc.32b.h
+Bytecode is up to date
+
+verify_bytecode_pure: source headers unchanged; regen exit 0
+check_metadata: marker /Users/ascotti/Documents/code/ChakraCore/zig-out/.profile -> 'test'
+check_metadata: minos /Users/ascotti/Documents/code/ChakraCore/zig-out/bin/ch -> '26.0'
+check_metadata: minos /Users/ascotti/Documents/code/ChakraCore/zig-out/bin/GCStress -> '26.0'
+check_metadata: minos /Users/ascotti/Documents/code/ChakraCore/zig-out/bin/libChakraCore.dylib -> '26.0'
+check_metadata: minos /Users/ascotti/Documents/code/ChakraCore/zig-out/lib/libChakraCore.1.0.0.dylib -> '26.0'
+check_metadata: stack /Users/ascotti/Documents/code/ChakraCore/zig-out/bin/ch -> 8388608
+check_metadata: stack /Users/ascotti/Documents/code/ChakraCore/zig-out/bin/GCStress -> 8388608
+check_metadata: header include/ChakraCore.h -> 86202 bytes md5=1311ad26f5e5 byte-identical
+check_metadata: header include/ChakraCommon.h -> 100458 bytes md5=a5beca0a8329 byte-identical
+check_metadata: header include/ChakraDebug.h -> 47103 bytes md5=a18fad7d61b6 byte-identical
+check_metadata: header include/ChakraCoreVersion.h -> 2734 bytes md5=a76dacb02b15 byte-identical
+check_metadata: exports /Users/ascotti/Documents/code/ChakraCore/zig-out/bin/libChakraCore.dylib -> 18291 T symbols, required 8/8 present
+check_metadata: PASS: minos 26.0 (otool+vtool), 8MiB stacks, 4 headers byte-identical, 8 JsRT exports present
+rc=0
+
+=== zig build -Dprofile=debug-static check-regression ===
+b3 profile=debug-static: target=aarch64-macos.26.0 sdk=/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk@26.5 icu-include=/opt/homebrew/opt/icu4c/include zig=0.17.0 python=/Users/ascotti/.local/share/mise/installs/python/3.12/bin/python3
+b3 profile=debug-static: side prefix out/debug-static (--prefix is ignored for this profile; only test uses the install prefix)
+pal-config: 95/95 checks match the contract (33 fixed-by-target, 62 compile-checked, 32 runtime-verified) [profile debug-static]
+install_profile: out/debug-static: 0 copied, 0 repaired, 9 unchanged, 0 orphans removed (9 managed)
+check_regression: running: /Users/ascotti/.local/share/mise/installs/python/3.12/bin/python3 ./test/runtests.py --debug --variants=disable_jit --binary=/Users/ascotti/Documents/code/ChakraCore/out/debug-static/bin/ch
+############# ChakraCore Test Suite #############
+Testing Debug build
+Using 10 threads
+
+############# Starting disable_jit tests #############
+  exclude: exclude_mac
+  exclude: exclude_amd64
+  exclude: require_backend
+  exclude: exclude_interpreted
+  exclude: exclude_disable_jit
+  exclude: fails_interpreted
+  exclude: require_simd
+  exclude: exclude_x64
+  exclude: slow
+  exclude: fails_disable_jit
+  exclude: exclude_xplat
+  exclude: exclude_debug
+  exclude: fail
+
+############ Results for disable_jit tests ###########
+262: passed 1, failed 0
+Array: passed 124, failed 0
+Basics: passed 51, failed 0
+BigInt: passed 11, failed 0
+Boolean: passed 3, failed 0
+Bugs: passed 102, failed 0
+Closures: passed 29, failed 0
+ControlFlow: passed 17, failed 0
+Conversions: passed 5, failed 0
+Date: passed 10, failed 0
+Debugger: passed 19, failed 0
+DebuggerCommon: passed 210, failed 0
+DynamicCode: passed 1, failed 0
+EH: passed 40, failed 0
+Error: passed 25, failed 0
+Function: passed 77, failed 0
+GlobalFunctions: passed 14, failed 0
+InlineCaches: passed 24, failed 0
+Intl: passed 17, failed 0
+JSON: passed 16, failed 0
+LetConst: passed 63, failed 0
+Lib: passed 11, failed 0
+Math: passed 9, failed 0
+Miscellaneous: passed 10, failed 0
+Number: passed 11, failed 0
+Object: passed 65, failed 0
+Operators: passed 29, failed 0
+Prototypes: passed 9, failed 0
+RWC: passed 1, failed 0
+RegAlloc: passed 1, failed 0
+Regex: passed 41, failed 0
+Scanner: passed 3, failed 0
+StackTrace: passed 18, failed 0
+Strings: passed 43, failed 0
+TTBasic: passed 142, failed 0
+TTExecuteBasic: passed 28, failed 0
+TaggedIntegers: passed 23, failed 0
+TryCatch: passed 1, failed 0
+UnifiedRegex: passed 22, failed 0
+UnitTestFramework: passed 1, failed 0
+es5: passed 59, failed 0
+es6: passed 243, failed 0
+es6module: passed 31, failed 0
+es7: passed 108, failed 0
+fieldopts: passed 122, failed 0
+loop: passed 10, failed 0
+strict: passed 107, failed 0
+switchStatement: passed 26, failed 0
+typedarray: passed 61, failed 0
+utf8: passed 9, failed 0
+----------------------------
+Total: passed 2103, failed 0
+Time taken for disable_jit tests: 181.89 seconds
+
+[181.89 seconds] Success!
+check_regression: exit=0 parsed=(2103, 0) require passed 2103 / failed 0
+check_regression: PASS: passed 2103 / failed 0
+rc=0
+
+=== zig build -Dprofile=jit check ===
+b3 profile=jit: target=aarch64-macos.26.0 sdk=/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk@26.5 icu-include=/opt/homebrew/opt/icu4c/include zig=0.17.0 python=/Users/ascotti/.local/share/mise/installs/python/3.12/bin/python3
+b3 profile=jit: side prefix out/jit (--prefix is ignored for this profile; only test uses the install prefix)
+pal-config: 95/95 checks match the contract (33 fixed-by-target, 62 compile-checked, 32 runtime-verified) [profile jit]
+install_profile: out/jit: 0 copied, 0 repaired, 16 unchanged, 0 orphans removed (16 managed)
+check_jit: NativeCodeGenerator symbol present
+check_jit: -mic:1 -bgjit- -> rc=0 out='jit-add 5\njit-rest 2\njit-apply 28\njit-class-keys length,name,prototype\njit-class-vals 0,P,true\njit-class-new 7,true\njit-class-derived true,true,Anon' err=''
+check_jit: -forceNative -off:simpleJit -bgJitDelay:0 -> rc=0 out='jit-add 5\njit-rest 2\njit-apply 28\njit-class-keys length,name,prototype\njit-class-vals 0,P,true\njit-class-new 7,true\njit-class-derived true,true,Anon' err=''
+check_jit: PASS
+######### Verifying generated bytecode #########
+OS is Linux or macOS
+Regenerating bytecode for jit build only
+Checking bytecode in file /var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/verify-bytecode-hf6lyjx3/tools/../lib/Runtime/Library/InJavascript/JsBuiltIn.bc.64b.h
+Checking bytecode in file /var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/verify-bytecode-hf6lyjx3/tools/../lib/Runtime/Library/InJavascript/JsBuiltIn.bc.32b.h
+Bytecode is up to date
+
+verify_bytecode_pure: source headers unchanged; regen exit 0
+check_smoke: ch -v -> rc=0 out='ch version 1.13.0.0-beta' err=''
+check_smoke: ch --this-flag-does-not-exist -> rc=5 out=['Invalid Flag : --this-flag-does-not-exist'] err=[]
+check_smoke: snippet -> rc=0 out='zig-smoke-ok 2\n' err=''
+check_smoke: PASS: version + invalid-flag + snippet outputs match
+rc=0

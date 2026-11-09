@@ -1,0 +1,3890 @@
+############# ChakraCore Test Suite #############
+Testing Test build
+Using 10 threads
+
+############# Starting dynapogo tests #############
+  exclude: slow
+  exclude: exclude_dynapogo
+  exclude: fails_dynapogo
+  exclude: exclude_amd64
+  exclude: exclude_x64
+  exclude: fail
+  exclude: exclude_xplat
+  exclude: require_simd
+  exclude: exclude_mac
+  exclude: require_disable_jit
+  exclude: exclude_test
+[4/2305 2.24] Failed -> AsmJs/ReadFixOffset.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.214 -testtrace:asmjs -nonative /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/ReadFixOffset.js
+Output: (at line 1)
+----------------------------
+read8    HEAP8  [4095]   = all[0](undefined); = 0
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[6/2305 2.25] Failed -> AsmJs/constbrbug.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.278 -testtrace:asmjs -maic:0 /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/constbrbug.js
+Output: (at line 1)
+----------------------------
+0
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[15/2305 2.28] Failed -> AsmJs/useasmbug.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.279 -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/useasmbug.js
+Output: (at line 1)
+----------------------------
+
+----------------------------
+Expected Output:
+----------------------------
+Asm.js compilation failed.
+----------------------------
+exit code: 0
+
+[16/2305 2.30] Failed -> AsmJs/functiontablebug.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.217 -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/functiontablebug.js
+Output: (at line 1)
+----------------------------
+3
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[20/2305 2.21] Failed -> ASMJSParser/UnaryPos.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2 -on:asmjs -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/ASMJSParser/UnaryPos.js
+Output: (at line 1)
+----------------------------
+pass
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[24/2305 2.20] Failed -> AsmJs/nanbug.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.218 -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/nanbug.js
+Output: (at line 1)
+----------------------------
+NaN
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[25/2305 2.22] Failed -> AsmJs/lambda.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.280 -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/lambda.js
+Output: (at line 1)
+----------------------------
+
+----------------------------
+Expected Output:
+----------------------------
+lambda functions are not allowed
+----------------------------
+exit code: 0
+
+[32/2305 2.19] Failed -> AsmJs/nanbug.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.219 -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/nanbug.js
+Output: (at line 1)
+----------------------------
+NaN
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[34/2305 2.19] Failed -> AsmJs/badFunctionType.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.281 -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/badFunctionType.js
+Output: (at line 3)
+----------------------------
+
+----------------------------
+Expected Output:
+----------------------------
+invalid function flags detected
+----------------------------
+exit code: 0
+
+[41/2305 2.20] Failed -> AsmJs/switchbug.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.220 -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/switchbug.js
+Output: (at line 1)
+----------------------------
+206
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[44/2305 2.23] Failed -> AsmJs/badFunctionType.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.282 -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/badFunctionType.js
+Output: (at line 3)
+----------------------------
+
+----------------------------
+Expected Output:
+----------------------------
+invalid function flags detected
+----------------------------
+exit code: 0
+
+[51/2305 2.25] Failed -> AsmJs/fgpeepsbug.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.221 -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/fgpeepsbug.js
+Output: (at line 1)
+----------------------------
+0
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[54/2305 2.21] Failed -> AsmJs/exports.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.283 -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/exports.js
+Output: (at line 1)
+----------------------------
+10
+----------------------------
+Expected Output:
+----------------------------
+Warning: redefining export
+----------------------------
+exit code: 0
+
+[64/2305 2.23] Failed -> AsmJs/cseBug.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.222 -testtrace:asmjs -off:deferparse /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/cseBug.js
+Output: (at line 1)
+----------------------------
+258
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[73/2305 2.23] Failed -> AsmJs/regress_hascalls.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.285 /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/regress_hascalls.js
+
+Output:
+----------------------------
+TypeError: Object expected
+	at foo() (regress_hascalls.js:10:5)
+	at bar() (regress_hascalls.js:13:5)
+	at Global code (regress_hascalls.js:19:3)
+
+----------------------------
+exit code: 0
+
+[99/2305 2.27] Failed -> AsmJSFloat/BasicMathOp.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.135 -on:asmjs -testtrace:asmjs -on:asmjs -testtrace:asmjsinterpreter /Users/ascotti/Documents/code/ChakraCore/test/AsmJSFloat/BasicMathOp.js
+Output: (at line 1)
+----------------------------
+458.2671203613281
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[101/2305 2.21] Failed -> AsmJs/constTest.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.226 -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/constTest.js
+Output: (at line 1)
+----------------------------
+2
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[102/2305 2.21] Failed -> AsmJs/maybecallbug.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.288 -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/maybecallbug.js
+exit code: 0
+
+[109/2305 2.22] Failed -> AsmJSFloat/Float64-LoadandStore.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.136 -on:asmjs -testtrace:asmjs -on:asmjs -testtrace:asmjsinterpreter /Users/ascotti/Documents/code/ChakraCore/test/AsmJSFloat/Float64-LoadandStore.js
+Output: (at line 1)
+----------------------------
+1.5
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[111/2305 2.19] Failed -> AsmJs/constTest.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.227 -testtrace:asmjs -nonative /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/constTest.js
+Output: (at line 1)
+----------------------------
+2
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[112/2305 2.20] Failed -> AsmJs/divByConstants.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.289 -testtrace:asmjs -maic:1 /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/divByConstants.js
+Output: (at line 1)
+----------------------------
+PASSED
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[119/2305 2.18] Failed -> AsmJSFloat/LdUndefFromHeap.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.137 -on:asmjs -testtrace:asmjs -on:asmjs -testtrace:asmjsinterpreter /Users/ascotti/Documents/code/ChakraCore/test/AsmJSFloat/LdUndefFromHeap.js
+Output: (at line 1)
+----------------------------
+0
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[121/2305 2.18] Failed -> AsmJs/ffibug.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.229 -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/ffibug.js
+Output: (at line 1)
+----------------------------
+-2147483648
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[122/2305 2.16] Failed -> AsmJs/divByConstants_Unsigned.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.290 -testtrace:asmjs -maic:1 /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/divByConstants_Unsigned.js
+Output: (at line 1)
+----------------------------
+PASSED
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[129/2305 2.19] Failed -> AsmJSFloat/NestedMathLibCalls.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.138 -on:asmjs -testtrace:asmjs -on:asmjs -testtrace:asmjsinterpreter /Users/ascotti/Documents/code/ChakraCore/test/AsmJSFloat/NestedMathLibCalls.js
+Output: (at line 1)
+----------------------------
+2.5
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[131/2305 2.21] Failed -> AsmJs/ternaryfloat.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.230 -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/ternaryfloat.js
+Output: (at line 1)
+----------------------------
+2
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[132/2305 2.22] Failed -> AsmJs/bug16252562.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.291 -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/bug16252562.js
+Output: (at line 1)
+----------------------------
+new.target: function () { console.log(`new.target: ${new.target}`); }
+----------------------------
+Expected Output:
+----------------------------
+
+----------------------------
+exit code: 0
+
+[139/2305 2.25] Failed -> AsmJSFloat/NotOperator.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.139 -on:asmjs -testtrace:asmjs -on:asmjs -testtrace:asmjsinterpreter /Users/ascotti/Documents/code/ChakraCore/test/AsmJSFloat/NotOperator.js
+Output: (at line 1)
+----------------------------
+-2
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[141/2305 2.22] Failed -> AsmJs/minintbug.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.231 -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/minintbug.js
+Output: (at line 1)
+----------------------------
+1
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[149/2305 2.20] Failed -> AsmJSFloat/StoreDoubleToFloat32.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.140 -on:asmjs -testtrace:asmjs -on:asmjs -testtrace:asmjsinterpreter /Users/ascotti/Documents/code/ChakraCore/test/AsmJSFloat/StoreDoubleToFloat32.js
+Output: (at line 1)
+----------------------------
+1.5
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[151/2305 2.25] Failed -> AsmJs/floatmod.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.232 -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/floatmod.js
+Output: (at line 1)
+----------------------------
+0
+----------------------------
+Expected Output:
+----------------------------
+
+----------------------------
+exit code: 0
+
+[159/2305 2.19] Failed -> AsmJSFloat/StoreFloatToFloat32.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.141 -on:asmjs -testtrace:asmjs -on:asmjs -testtrace:asmjsinterpreter /Users/ascotti/Documents/code/ChakraCore/test/AsmJSFloat/StoreFloatToFloat32.js
+Output: (at line 1)
+----------------------------
+1.5
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[161/2305 2.20] Failed -> AsmJs/floatmod.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.233 -forceserialized -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/floatmod.js
+Output: (at line 1)
+----------------------------
+0
+----------------------------
+Expected Output:
+----------------------------
+
+----------------------------
+exit code: 0
+
+[167/2305 2.21] Failed -> AsmJSFloat/BasicMathOp.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.142 -on:asmjs -testtrace:asmjs -mtjrc:1 /Users/ascotti/Documents/code/ChakraCore/test/AsmJSFloat/BasicMathOp.js
+Output: (at line 1)
+----------------------------
+458.2671203613281
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[171/2305 2.23] Failed -> AsmJs/invalidIntLiteral.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.234 -testtrace:asmjs -force:deferparse /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/invalidIntLiteral.js
+Output: (at line 1)
+----------------------------
+-2147483649
+----------------------------
+Expected Output:
+----------------------------
+Var declaration with integer literal outside range [-2^31, 2^32)
+----------------------------
+exit code: 0
+
+[177/2305 2.25] Failed -> AsmJSFloat/Float64-LoadandStore.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.143 -on:asmjs -testtrace:asmjs -mtjrc:1 /Users/ascotti/Documents/code/ChakraCore/test/AsmJSFloat/Float64-LoadandStore.js
+Output: (at line 1)
+----------------------------
+1.5
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[182/2305 2.21] Failed -> AsmJs/fstpbug.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.235 -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/fstpbug.js
+Output: (at line 1)
+----------------------------
+30.25
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[187/2305 2.19] Failed -> AsmJSFloat/LdUndefFromHeap.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.144 -on:asmjs -testtrace:asmjs -mtjrc:1 /Users/ascotti/Documents/code/ChakraCore/test/AsmJSFloat/LdUndefFromHeap.js
+Output: (at line 1)
+----------------------------
+0
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[192/2305 2.19] Failed -> AsmJs/break2.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.236 -testtrace:asmjs -bgjit- -lic:1 /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/break2.js
+Output: (at line 1)
+----------------------------
+104
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[197/2305 2.19] Failed -> AsmJSFloat/NestedMathLibCalls.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.145 -on:asmjs -testtrace:asmjs -mtjrc:1 /Users/ascotti/Documents/code/ChakraCore/test/AsmJSFloat/NestedMathLibCalls.js
+Output: (at line 1)
+----------------------------
+2.5
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[202/2305 2.21] Failed -> AsmJs/break3.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.237 -testtrace:asmjs -bgjit- -lic:1 /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/break3.js
+Output: (at line 1)
+----------------------------
+193.69490725149805
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[207/2305 2.19] Failed -> AsmJSFloat/NotOperator.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.146 -on:asmjs -testtrace:asmjs -mtjrc:1 /Users/ascotti/Documents/code/ChakraCore/test/AsmJSFloat/NotOperator.js
+Output: (at line 1)
+----------------------------
+-2
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[212/2305 2.23] Failed -> AsmJs/return1.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.238 -off:deferparse -testtrace:asmjs -bgjit- -lic:1 /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/return1.js
+Output: (at line 1)
+----------------------------
+124
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[217/2305 2.24] Failed -> AsmJSFloat/StoreDoubleToFloat32.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.147 -on:asmjs -testtrace:asmjs -mtjrc:1 /Users/ascotti/Documents/code/ChakraCore/test/AsmJSFloat/StoreDoubleToFloat32.js
+Output: (at line 1)
+----------------------------
+1.5
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[222/2305 2.21] Failed -> AsmJs/return2.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.239 -off:deferparse -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/return2.js
+Output: (at line 1)
+----------------------------
+undefined
+----------------------------
+Expected Output:
+----------------------------
+
+----------------------------
+exit code: 0
+
+[227/2305 2.21] Failed -> AsmJSFloat/StoreFloatToFloat32.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.148 -on:asmjs -testtrace:asmjs -mtjrc:1 /Users/ascotti/Documents/code/ChakraCore/test/AsmJSFloat/StoreFloatToFloat32.js
+Output: (at line 1)
+----------------------------
+1.5
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[231/2305 2.16] Failed -> AsmJs/return3.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.240 -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/return3.js
+Output: (at line 1)
+----------------------------
+undefined
+----------------------------
+Expected Output:
+----------------------------
+
+----------------------------
+exit code: 0
+
+[241/2305 2.20] Failed -> AsmJs/returndouble.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.241 -testtrace:asmjs -bgjit- -lic:1 /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/returndouble.js
+Output: (at line 1)
+----------------------------
+74.67777168749056
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[247/2305 2.23] Failed -> AsmJs/ArrayView.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.150 -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/ArrayView.js
+Output: (at line 1)
+----------------------------
+0 0 0 0 0 0 0 0
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[251/2305 2.19] Failed -> AsmJs/break1.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.242 -testtrace:asmjs -bgjit- -lic:1 /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/break1.js
+Output: (at line 1)
+----------------------------
+22
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[257/2305 2.46] Failed -> AsmJs/BasicBranching.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.151 -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/BasicBranching.js
+Output: (at line 1)
+----------------------------
+t1   +a[0](undefined) = 3
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[261/2305 2.24] Failed -> AsmJs/JitToLoopBody.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.243 -testtrace:asmjs -bgjit- -lic:1 -maic:1 /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/JitToLoopBody.js
+Output: (at line 1)
+----------------------------
+1.5
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[267/2305 2.35] Failed -> AsmJs/basicComparisonDouble.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.153 -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/basicComparisonDouble.js
+Output: (at line 1)
+----------------------------
+Comparison for doubles
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[271/2305 2.19] Failed -> AsmJs/LoopBodyToJit.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.244 -testtrace:asmjs -bgjit- -lic:1 -maic:1 /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/LoopBodyToJit.js
+Output: (at line 1)
+----------------------------
+110.25
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[278/2305 2.38] Failed -> AsmJs/basicComparisonInt.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.154 -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/basicComparisonInt.js
+Output: (at line 1)
+----------------------------
+Comparison for ints
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[281/2305 2.22] Failed -> AsmJs/breakfloat1.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.245 -testtrace:asmjs -bgjit- -lic:1 /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/breakfloat1.js
+Output: (at line 1)
+----------------------------
+79
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[288/2305 2.30] Failed -> AsmJs/basicComparisonUInt.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.155 -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/basicComparisonUInt.js
+Output: (at line 1)
+----------------------------
+Comparison for unsigned ints
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[291/2305 2.19] Failed -> AsmJs/returnFloat.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.246 -testtrace:asmjs -bgjit- -lic:1 /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/returnFloat.js
+Output: (at line 1)
+----------------------------
+64
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[298/2305 2.22] Failed -> AsmJs/BasicLooping.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.156 -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/BasicLooping.js
+Output: (at line 1)
+----------------------------
+f1 a[0](undefined) , a[0](undefined) = NaN
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[301/2305 2.20] Failed -> AsmJs/unitybug.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.247 -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/unitybug.js
+Output: (at line 1)
+----------------------------
+-3
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[309/2305 2.37] Failed -> AsmJs/basicMathIntSpecific.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.158 -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/basicMathIntSpecific.js
+Output: (at line 1)
+----------------------------
+a[0](undefined) |   a[0](undefined) = 0
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[311/2305 2.20] Failed -> AsmJs/unitybug.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.248 -testtrace:asmjs -nonative /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/unitybug.js
+Output: (at line 1)
+----------------------------
+-3
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[319/2305 2.21] Failed -> AsmJs/basicMathUnary.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.159 -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/basicMathUnary.js
+Output: (at line 1)
+----------------------------
+i   +a[0](undefined) = 0
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[321/2305 2.21] Failed -> AsmJs/argoutcapturebug.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.250 -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/argoutcapturebug.js
+Output: (at line 1)
+----------------------------
+11
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[329/2305 2.22] Failed -> AsmJs/BasicSwitch.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.160 -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/BasicSwitch.js
+Output: (at line 1)
+----------------------------
+f1 a[0](undefined) = 0
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[331/2305 2.19] Failed -> AsmJs/ReadAV1.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.251 -testtrace:asmjs -off:deferparse /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/ReadAV1.js
+Output: (at line 1)
+----------------------------
+
+----------------------------
+Expected Output:
+----------------------------
+Call must be of the form id(...)
+----------------------------
+exit code: 0
+
+[339/2305 2.20] Failed -> AsmJs/CompositionMathUnary.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.161 -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/CompositionMathUnary.js
+Output: (at line 1)
+----------------------------
+i   +a[0](undefined) = 1
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[341/2305 2.20] Failed -> AsmJs/clz32.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.252 -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/clz32.js
+Output: (at line 1)
+----------------------------
+32
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[349/2305 2.42] Failed -> AsmJs/FunctionCalls.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.162 -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/FunctionCalls.js
+Output: (at line 1)
+----------------------------
+0
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[351/2305 2.20] Failed -> AsmJs/clz32.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.253 -testtrace:asmjs -nonative /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/clz32.js
+Output: (at line 1)
+----------------------------
+32
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[360/2305 2.20] Failed -> AsmJs/negZero.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.255 -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/negZero.js
+Output: (at line 1)
+----------------------------
+0
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[361/2305 2.28] Failed -> AsmJs/FunctionCalls.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.163 -ForceStaticInterpreterThunk -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/FunctionCalls.js
+Output: (at line 1)
+----------------------------
+0
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[370/2305 2.19] Failed -> AsmJs/shadowingBug.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.256 -forcedeferparse -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/shadowingBug.js
+Output: (at line 1)
+----------------------------
+0
+----------------------------
+Expected Output:
+----------------------------
+
+----------------------------
+exit code: 0
+
+[372/2305 2.32] Failed -> AsmJs/functiontablecalls.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.164 -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/functiontablecalls.js
+Output: (at line 1)
+----------------------------
+f1 (a[0](undefined) , a[0](undefined) )= 5
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[380/2305 2.19] Failed -> AsmJs/blockLabelBug.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.257 -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/blockLabelBug.js
+Output: (at line 1)
+----------------------------
+Pass
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[382/2305 2.43] Failed -> AsmJs/MathBuiltinsCall.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.165 -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/MathBuiltinsCall.js
+Output: (at line 1)
+----------------------------
+f1   (a[0](undefined))= NaN
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[390/2305 2.26] Failed -> AsmJs/switchJumpTable.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.258 -testtrace:asmjs -maic:1 /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/switchJumpTable.js
+Output: (at line 1)
+----------------------------
+1
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[392/2305 2.32] Failed -> AsmJs/MathBuiltinsCall.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.166 -testtrace:asmjs -maic:1 -sse:3 /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/MathBuiltinsCall.js
+Output: (at line 1)
+----------------------------
+f1   (a[0](undefined))= NaN
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[400/2305 2.23] Failed -> AsmJs/switchBinaryTraverse.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.259 -testtrace:asmjs -maic:1 /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/switchBinaryTraverse.js
+Output: (at line 1)
+----------------------------
+1
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[402/2305 2.23] Failed -> AsmJs/ModuleVarRead.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.167 -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/ModuleVarRead.js
+Output: (at line 1)
+----------------------------
++E;      2.718281828459045
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[408/2305 2.21] Failed -> AsmJs/lowererdivbug.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.260 -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/lowererdivbug.js
+Output: (at line 1)
+----------------------------
+-134217728
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[412/2305 2.23] Failed -> AsmJs/ModuleVarWrite.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.168 -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/ModuleVarWrite.js
+Output: (at line 1)
+----------------------------
+set  (a[0](undefined))= undefined
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[417/2305 2.25] Failed -> AsmJs/qmarkbug.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.261 -forcedeferparse -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/qmarkbug.js
+exit code: 0
+
+[424/2305 2.49] Failed -> AsmJs/ReadArrayView.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.169 -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/ReadArrayView.js
+Output: (at line 1)
+----------------------------
+read8    HEAP8  [0]   = all[0](undefined); = 0
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[427/2305 2.20] Failed -> AsmJs/uint.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.262 -maic:1 -off:deferparse -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/uint.js
+Output: (at line 1)
+----------------------------
+0
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[434/2305 2.18] Failed -> AsmJs/ReadFixOffset.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.170 -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/ReadFixOffset.js
+Output: (at line 1)
+----------------------------
+read8    HEAP8  [4095]   = all[0](undefined); = 0
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[444/2305 2.24] Failed -> AsmJs/relink.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.171 -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/relink.js
+Output: (at line 1)
+----------------------------
+import func, val 8
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[448/2305 2.24] Failed -> AsmJs/asmjscctx.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.264 -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/asmjscctx.js
+Output: (at line 1)
+----------------------------
+1
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[454/2305 2.25] Failed -> AsmJs/relink.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.172 -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/relink.js
+Output: (at line 1)
+----------------------------
+import func, val 8
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[458/2305 2.23] Failed -> AsmJs/constloads.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.265 -testtrace:asmjs -maic:1 /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/constloads.js
+Output: (at line 1)
+----------------------------
+Passed
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[464/2305 2.22] Failed -> AsmJs/relink.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.173 -forceserialized -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/relink.js
+Output: (at line 1)
+----------------------------
+import func, val 8
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[468/2305 2.30] Failed -> AsmJs/vardeclnorhs.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.266 -testtrace:asmjs -maic:1 /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/vardeclnorhs.js
+Output: (at line 1)
+----------------------------
+
+----------------------------
+Expected Output:
+----------------------------
+The righthand side of a var declaration missing an initialization (empty)
+----------------------------
+exit code: 0
+
+[474/2305 2.26] Failed -> AsmJs/relink.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.174 -forceserialized -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/relink.js
+Output: (at line 1)
+----------------------------
+import func, val 8
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[484/2305 2.25] Failed -> AsmJs/ArrayView.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.197 -testtrace:asmjs -nonative /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/ArrayView.js
+Output: (at line 1)
+----------------------------
+0 0 0 0 0 0 0 0
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[494/2305 2.35] Failed -> AsmJs/BasicBranching.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.198 -testtrace:asmjs -nonative /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/BasicBranching.js
+Output: (at line 1)
+----------------------------
+t1   +a[0](undefined) = 3
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[498/2305 2.21] Failed -> AsmJs/badFunctionType.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.269 -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/badFunctionType.js
+Output: (at line 3)
+----------------------------
+
+----------------------------
+Expected Output:
+----------------------------
+invalid function flags detected
+----------------------------
+exit code: 0
+
+[504/2305 2.23] Failed -> AsmJs/BasicLooping.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.202 -testtrace:asmjs -nonative /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/BasicLooping.js
+Output: (at line 1)
+----------------------------
+f1 a[0](undefined) , a[0](undefined) = NaN
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[514/2305 2.21] Failed -> AsmJs/basicMathUnary.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.205 -testtrace:asmjs -nonative /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/basicMathUnary.js
+Output: (at line 1)
+----------------------------
+i   +a[0](undefined) = 0
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[524/2305 2.20] Failed -> AsmJs/BasicSwitch.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.206 -testtrace:asmjs -nonative /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/BasicSwitch.js
+Output: (at line 1)
+----------------------------
+f1 a[0](undefined) = 0
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[534/2305 2.17] Failed -> AsmJs/CompositionMathUnary.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.207 -testtrace:asmjs -nonative /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/CompositionMathUnary.js
+Output: (at line 1)
+----------------------------
+i   +a[0](undefined) = 1
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[546/2305 2.34] Failed -> AsmJs/FunctionCalls.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.208 -testtrace:asmjs -nonative /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/FunctionCalls.js
+Output: (at line 1)
+----------------------------
+0
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[556/2305 2.27] Failed -> AsmJs/functiontablecalls.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.209 -testtrace:asmjs -nonative /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/functiontablecalls.js
+Output: (at line 1)
+----------------------------
+f1 (a[0](undefined) , a[0](undefined) )= 5
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[561/2305 2.18] Failed -> AsmJs/nested.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.276 -forcedeferparse -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/nested.js
+Output: (at line 1)
+----------------------------
+
+----------------------------
+Expected Output:
+----------------------------
+closure functions are not allowed
+----------------------------
+exit code: 0
+
+[566/2305 2.30] Failed -> AsmJs/MathBuiltinsCall.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.210 -testtrace:asmjs -nonative /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/MathBuiltinsCall.js
+Output: (at line 1)
+----------------------------
+f1   (a[0](undefined))= NaN
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[569/2305 2.19] Failed -> AsmJs/notBinaryPropertyDefinition.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.277 -ES2018ObjectRestSpread -testtrace:asmjs /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/notBinaryPropertyDefinition.js
+Output: (at line 1)
+----------------------------
+
+----------------------------
+Expected Output:
+----------------------------
+Return object member must be an assignment expression
+----------------------------
+exit code: 0
+
+[576/2305 2.23] Failed -> AsmJs/ModuleVarRead.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.211 -testtrace:asmjs -nonative /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/ModuleVarRead.js
+Output: (at line 1)
+----------------------------
++E;      2.718281828459045
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[586/2305 2.23] Failed -> AsmJs/ModuleVarWrite.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.212 -testtrace:asmjs -nonative /Users/ascotti/Documents/code/ChakraCore/test/AsmJs/ModuleVarWrite.js
+Output: (at line 1)
+----------------------------
+set  (a[0](undefined))= undefined
+----------------------------
+Expected Output:
+----------------------------
+Successfully compiled asm.js code
+----------------------------
+exit code: 0
+
+[1144/2305 2.17] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.1984 -wasm -args chakra_generated/chakra_i32.wast -endargs -wasmMathExFilter /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+1024/1024 tests passed.
+----------------------------
+exit code: 0
+
+[1148/2305 2.19] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2092 -wasm -args testsuite/core/memory_trap.wast -endargs -wasmfastarray- /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+173/173 tests passed.
+----------------------------
+exit code: 0
+
+[1149/2305 2.21] Failed -> WasmSpec.MultiValue/simple_block.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2203 -wasm -WasmMultiValue /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec.MultiValue/simple_block.js
+
+Output:
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+	at Global code (simple_block.js:3:1)
+
+----------------------------
+exit code: 0
+
+[1154/2305 2.21] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.1985 -wasm -args chakra_generated/chakra_i64.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+1024/1024 tests passed.
+----------------------------
+exit code: 0
+
+[1158/2305 2.21] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2093 -wasm -args testsuite/core/nop.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+88/88 tests passed.
+----------------------------
+exit code: 0
+
+[1159/2305 2.21] Failed -> WasmSpec.MultiValue/blocktypes.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2204 -wasm -WasmMultiValue /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec.MultiValue/blocktypes.js
+
+Output:
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+	at Global code (blocktypes.js:3:1)
+
+----------------------------
+exit code: 0
+
+[1164/2305 2.25] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.1987 -wasm -args chakra_generated/chakra_i64.wast -endargs -wasmMathExFilter /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+1024/1024 tests passed.
+----------------------------
+exit code: 0
+
+[1168/2305 2.22] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2095 -wasm -args testsuite/core/return.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+67/67 tests passed.
+----------------------------
+exit code: 0
+
+[1174/2305 2.23] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.1988 -wasm -args testsuite/core/address.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+243/243 tests passed.
+----------------------------
+exit code: 0
+
+[1178/2305 2.21] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2097 -wasm -args testsuite/core/select.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+99/99 tests passed.
+----------------------------
+exit code: 0
+
+[1184/2305 2.20] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.1990 -wasm -args testsuite/core/address.wast -endargs -wasmfastarray- /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+243/243 tests passed.
+----------------------------
+exit code: 0
+
+[1188/2305 2.23] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2099 -wasm -args testsuite/core/set_local.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+47/47 tests passed.
+----------------------------
+exit code: 0
+
+[1194/2305 2.22] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.1991 -wasm -args testsuite/core/align.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+156/156 tests passed.
+----------------------------
+exit code: 0
+
+[1198/2305 2.25] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2101 -wasm -args testsuite/core/skip-stack-guard-page.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+11/11 tests passed.
+----------------------------
+exit code: 0
+
+[1204/2305 2.21] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.1993 -wasm -args testsuite/core/binary.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+81/81 tests passed.
+----------------------------
+exit code: 0
+
+[1208/2305 2.25] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2103 -wasm -args testsuite/core/stack.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+5/5 tests passed.
+----------------------------
+exit code: 0
+
+[1214/2305 2.23] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.1995 -wasm -args testsuite/core/block.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+168/168 tests passed.
+----------------------------
+exit code: 0
+
+[1218/2305 2.25] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2105 -wasm -args testsuite/core/start.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+1
+----------------------------
+exit code: 0
+
+[1223/2305 2.25] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.1997 -wasm -args testsuite/core/br.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+71/71 tests passed.
+----------------------------
+exit code: 0
+
+[1228/2305 2.25] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2107 -wasm -args testsuite/core/store.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+26/26 tests passed.
+----------------------------
+exit code: 0
+
+[1233/2305 2.24] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.1999 -wasm -args testsuite/core/br_if.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+113/113 tests passed.
+----------------------------
+exit code: 0
+
+[1238/2305 2.21] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2109 -wasm -args testsuite/core/switch.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+28/28 tests passed.
+----------------------------
+exit code: 0
+
+[1243/2305 2.19] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2001 -wasm -args testsuite/core/br_table.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+162/162 tests passed.
+----------------------------
+exit code: 0
+
+[1248/2305 2.18] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2111 -wasm -args testsuite/core/tee_local.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+79/79 tests passed.
+----------------------------
+exit code: 0
+
+[1253/2305 2.19] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2003 -wasm -args testsuite/core/break-drop.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+4/4 tests passed.
+----------------------------
+exit code: 0
+
+[1258/2305 2.22] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2113 -wasm -args testsuite/core/token.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+2/2 tests passed.
+----------------------------
+exit code: 0
+
+[1263/2305 2.21] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2005 -wasm -args testsuite/core/call.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+76/76 tests passed.
+----------------------------
+exit code: 0
+
+[1268/2305 2.23] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2115 -wasm -args testsuite/core/traps.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+36/36 tests passed.
+----------------------------
+exit code: 0
+
+[1273/2305 2.21] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2007 -wasm -args testsuite/core/call_indirect.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+146/146 tests passed.
+----------------------------
+exit code: 0
+
+[1278/2305 2.19] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2117 -wasm -args testsuite/core/traps.wast -endargs -wasmfastarray- /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+36/36 tests passed.
+----------------------------
+exit code: 0
+
+[1283/2305 2.23] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2009 -wasm -args testsuite/core/const.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+52/52 tests passed.
+----------------------------
+exit code: 0
+
+[1288/2305 2.30] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2118 -wasm -args testsuite/core/traps.wast -endargs -wasmMathExFilter /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+36/36 tests passed.
+----------------------------
+exit code: 0
+
+[1293/2305 2.24] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2011 -wasm -args testsuite/core/conversions.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+402/402 tests passed.
+----------------------------
+exit code: 0
+
+[1298/2305 2.26] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2119 -wasm -args testsuite/core/type.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+5/5 tests passed.
+----------------------------
+exit code: 0
+
+[1303/2305 2.26] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2013 -wasm -args testsuite/core/custom.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+10/10 tests passed.
+----------------------------
+exit code: 0
+
+[1308/2305 2.21] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2121 -wasm -args testsuite/core/typecheck.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+193/193 tests passed.
+----------------------------
+exit code: 0
+
+[1313/2305 2.19] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2015 -wasm -args testsuite/core/data.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+45/45 tests passed.
+----------------------------
+exit code: 0
+
+[1318/2305 2.21] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2123 -wasm -args testsuite/core/unreachable.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+62/62 tests passed.
+----------------------------
+exit code: 0
+
+[1323/2305 2.23] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2017 -wasm -args testsuite/core/elem.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+54/54 tests passed.
+----------------------------
+exit code: 0
+
+[1328/2305 2.23] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2125 -wasm -args testsuite/core/unreached-invalid.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+111/111 tests passed.
+----------------------------
+exit code: 0
+
+[1333/2305 2.21] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2019 -wasm -args testsuite/core/endianness.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+69/69 tests passed.
+----------------------------
+exit code: 0
+
+[1338/2305 2.21] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2127 -wasm -args testsuite/core/unwind.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+50/50 tests passed.
+----------------------------
+exit code: 0
+
+[1343/2305 2.22] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2021 -wasm -args testsuite/core/exports.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+82/82 tests passed.
+----------------------------
+exit code: 0
+
+[1348/2305 2.23] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2129 -wasm -args testsuite/core/utf8-custom-section-id.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+176/176 tests passed.
+----------------------------
+exit code: 0
+
+[1353/2305 2.24] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2023 -wasm -args testsuite/core/f32.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+2501/2501 tests passed.
+----------------------------
+exit code: 0
+
+[1358/2305 2.23] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2131 -wasm -args testsuite/core/utf8-import-field.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+176/176 tests passed.
+----------------------------
+exit code: 0
+
+[1363/2305 2.21] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2025 -wasm -args testsuite/core/f32_bitwise.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+361/361 tests passed.
+----------------------------
+exit code: 0
+
+[1368/2305 2.24] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2133 -wasm -args testsuite/core/utf8-import-module.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+176/176 tests passed.
+----------------------------
+exit code: 0
+
+[1373/2305 2.21] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2027 -wasm -args testsuite/core/f32_cmp.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+2401/2401 tests passed.
+----------------------------
+exit code: 0
+
+[1378/2305 2.21] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2135 -wasm -args testsuite/core/utf8-invalid-encoding.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+176/176 tests passed.
+----------------------------
+exit code: 0
+
+[1383/2305 2.21] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2029 -wasm -args testsuite/core/f64.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+2501/2501 tests passed.
+----------------------------
+exit code: 0
+
+[1388/2305 2.17] Failed -> WasmSpec/jsapi.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2137 -wasm -args testsuite/js-api/interface.any.js -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/jsapi.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+Harness Status: OK
+----------------------------
+exit code: 0
+
+[1393/2305 2.17] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2031 -wasm -args testsuite/core/f64_bitwise.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+361/361 tests passed.
+----------------------------
+exit code: 0
+
+[1398/2305 2.18] Failed -> WasmSpec/jsapi.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2139 -wasm -args testsuite/js-api/constructor/compile.any.js -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/jsapi.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+Harness Status: OK
+----------------------------
+exit code: 0
+
+[1401/2305 2.22] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2033 -wasm -args testsuite/core/f64_cmp.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+2401/2401 tests passed.
+----------------------------
+exit code: 0
+
+[1407/2305 2.18] Failed -> WasmSpec/jsapi.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2141 -wasm -args testsuite/js-api/constructor/instantiate-bad-imports.any.js -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/jsapi.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+Harness Status: OK
+----------------------------
+exit code: 0
+
+[1411/2305 2.20] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2035 -wasm -args testsuite/core/fac.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+7/7 tests passed.
+----------------------------
+exit code: 0
+
+[1417/2305 2.19] Failed -> WasmSpec/jsapi.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2143 -wasm -args testsuite/js-api/constructor/instantiate.any.js -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/jsapi.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+Harness Status: OK
+----------------------------
+exit code: 0
+
+[1421/2305 2.14] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2037 -wasm -args testsuite/core/float_exprs.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+900/900 tests passed.
+----------------------------
+exit code: 0
+
+[1427/2305 2.17] Failed -> WasmSpec/jsapi.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2145 -wasm -args testsuite/js-api/constructor/validate.any.js -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/jsapi.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+Harness Status: OK
+----------------------------
+exit code: 0
+
+[1431/2305 2.23] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2039 -wasm -args testsuite/core/float_literals.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+161/161 tests passed.
+----------------------------
+exit code: 0
+
+[1437/2305 2.23] Failed -> WasmSpec/jsapi.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2147 -wasm -args testsuite/js-api/global/constructor.any.js -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/jsapi.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+Harness Status: OK
+----------------------------
+exit code: 0
+
+[1441/2305 2.24] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2041 -wasm -args testsuite/core/float_memory.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+90/90 tests passed.
+----------------------------
+exit code: 0
+
+[1447/2305 2.26] Failed -> WasmSpec/jsapi.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2149 -wasm -args testsuite/js-api/global/toString.any.js -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/jsapi.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+Harness Status: OK
+----------------------------
+exit code: 0
+
+[1452/2305 2.27] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2043 -wasm -args testsuite/core/float_memory.wast -endargs -wasmfastarray- /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+90/90 tests passed.
+----------------------------
+exit code: 0
+
+[1457/2305 2.25] Failed -> WasmSpec/jsapi.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2151 -wasm -args testsuite/js-api/global/value-get-set.any.js -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/jsapi.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+Harness Status: OK
+----------------------------
+exit code: 0
+
+[1462/2305 2.26] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2044 -wasm -args testsuite/core/float_misc.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+441/441 tests passed.
+----------------------------
+exit code: 0
+
+[1467/2305 2.26] Failed -> WasmSpec/jsapi.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2153 -wasm -args testsuite/js-api/global/valueOf.any.js -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/jsapi.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+Harness Status: OK
+----------------------------
+exit code: 0
+
+[1472/2305 2.23] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2046 -wasm -args testsuite/core/forward.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+5/5 tests passed.
+----------------------------
+exit code: 0
+
+[1477/2305 2.21] Failed -> WasmSpec/jsapi.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2155 -wasm -args testsuite/js-api/instance/constructor-bad-imports.any.js -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/jsapi.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+Harness Status: OK
+----------------------------
+exit code: 0
+
+[1481/2305 2.21] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2048 -wasm -args testsuite/core/func.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+123/123 tests passed.
+----------------------------
+exit code: 0
+
+[1486/2305 2.22] Failed -> WasmSpec/jsapi.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2157 -wasm -args testsuite/js-api/instance/constructor.any.js -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/jsapi.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+Harness Status: OK
+----------------------------
+exit code: 0
+
+[1490/2305 2.24] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2050 -wasm -args testsuite/core/func_ptrs.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+83
+----------------------------
+exit code: 0
+
+[1495/2305 2.23] Failed -> WasmSpec/jsapi.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2159 -wasm -args testsuite/js-api/instance/exports.any.js -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/jsapi.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+Harness Status: OK
+----------------------------
+exit code: 0
+
+[1499/2305 2.23] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2052 -wasm -args testsuite/core/get_local.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+27/27 tests passed.
+----------------------------
+exit code: 0
+
+[1504/2305 2.22] Failed -> WasmSpec/jsapi.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2161 -wasm -args testsuite/js-api/instance/toString.any.js -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/jsapi.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+Harness Status: OK
+----------------------------
+exit code: 0
+
+[1508/2305 2.26] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2054 -wasm -args testsuite/core/globals.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+(49) testsuite/core/globals.wast:248: generate module  failed. Unexpected Error: CompileError: Mutable globals cannot be exported
+----------------------------
+exit code: 0
+
+[1513/2305 2.23] Failed -> WasmSpec/jsapi.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2163 -wasm -args testsuite/js-api/memory/buffer.any.js -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/jsapi.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+Harness Status: OK
+----------------------------
+exit code: 0
+
+[1518/2305 2.22] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2056 -wasm -args testsuite/core/i32.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+360/360 tests passed.
+----------------------------
+exit code: 0
+
+[1523/2305 2.22] Failed -> WasmSpec/jsapi.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2165 -wasm -args testsuite/js-api/memory/constructor.any.js -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/jsapi.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+Harness Status: OK
+----------------------------
+exit code: 0
+
+[1528/2305 2.22] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2058 -wasm -args testsuite/core/i32.wast -endargs -wasmMathExFilter /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+360/360 tests passed.
+----------------------------
+exit code: 0
+
+[1533/2305 2.26] Failed -> WasmSpec/jsapi.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2167 -wasm -args testsuite/js-api/memory/grow.any.js -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/jsapi.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+Harness Status: OK
+----------------------------
+exit code: 0
+
+[1538/2305 2.21] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2059 -wasm -args testsuite/core/i64.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+360/360 tests passed.
+----------------------------
+exit code: 0
+
+[1543/2305 2.23] Failed -> WasmSpec/jsapi.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2169 -wasm -args testsuite/js-api/memory/toString.any.js -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/jsapi.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+Harness Status: OK
+----------------------------
+exit code: 0
+
+[1548/2305 2.22] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2061 -wasm -args testsuite/core/i64.wast -endargs -wasmMathExFilter /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+360/360 tests passed.
+----------------------------
+exit code: 0
+
+[1553/2305 2.22] Failed -> WasmSpec/jsapi.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2171 -wasm -args testsuite/js-api/module/constructor.any.js -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/jsapi.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+Harness Status: OK
+----------------------------
+exit code: 0
+
+[1558/2305 2.23] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2062 -wasm -args testsuite/core/if.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+133/133 tests passed.
+----------------------------
+exit code: 0
+
+[1562/2305 2.23] Failed -> WasmSpec/jsapi.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2173 -wasm -args testsuite/js-api/module/customSections.any.js -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/jsapi.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+Harness Status: OK
+----------------------------
+exit code: 0
+
+[1568/2305 2.22] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2064 -wasm -args testsuite/core/imports.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+13
+----------------------------
+exit code: 0
+
+[1572/2305 2.23] Failed -> WasmSpec/jsapi.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2175 -wasm -args testsuite/js-api/module/exports.any.js -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/jsapi.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+Harness Status: OK
+----------------------------
+exit code: 0
+
+[1578/2305 2.27] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2066 -wasm -args testsuite/core/inline-module.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+1/1 tests passed.
+----------------------------
+exit code: 0
+
+[1582/2305 2.25] Failed -> WasmSpec/jsapi.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2177 -wasm -args testsuite/js-api/module/imports.any.js -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/jsapi.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+Harness Status: OK
+----------------------------
+exit code: 0
+
+[1588/2305 2.23] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2068 -wasm -args testsuite/core/int_exprs.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+108/108 tests passed.
+----------------------------
+exit code: 0
+
+[1592/2305 2.25] Failed -> WasmSpec/jsapi.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2179 -wasm -args testsuite/js-api/module/toString.any.js -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/jsapi.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+Harness Status: OK
+----------------------------
+exit code: 0
+
+[1598/2305 2.22] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2070 -wasm -args testsuite/core/int_exprs.wast -endargs -wasmMathExFilter /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+108/108 tests passed.
+----------------------------
+exit code: 0
+
+[1602/2305 2.23] Failed -> WasmSpec/jsapi.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2181 -wasm -args testsuite/js-api/table/constructor.any.js -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/jsapi.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+Harness Status: OK
+----------------------------
+exit code: 0
+
+[1608/2305 2.30] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2071 -wasm -args testsuite/core/int_literals.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+51/51 tests passed.
+----------------------------
+exit code: 0
+
+[1612/2305 2.25] Failed -> WasmSpec/jsapi.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2183 -wasm -args testsuite/js-api/table/get-set.any.js -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/jsapi.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+Harness Status: OK
+----------------------------
+exit code: 0
+
+[1618/2305 2.23] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2073 -wasm -args testsuite/core/labels.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+29/29 tests passed.
+----------------------------
+exit code: 0
+
+[1622/2305 2.22] Failed -> WasmSpec/jsapi.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2185 -wasm -args testsuite/js-api/table/grow.any.js -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/jsapi.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+Harness Status: OK
+----------------------------
+exit code: 0
+
+[1628/2305 2.22] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2075 -wasm -args testsuite/core/left-to-right.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+96/96 tests passed.
+----------------------------
+exit code: 0
+
+[1632/2305 2.23] Failed -> WasmSpec/jsapi.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2187 -wasm -args testsuite/js-api/table/length.any.js -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/jsapi.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+Harness Status: OK
+----------------------------
+exit code: 0
+
+[1638/2305 2.24] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2077 -wasm -args testsuite/core/linking.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+(12) testsuite/core/linking.wast:39: generate module  as $Mg failed. Unexpected Error: CompileError: Mutable globals cannot be exported
+----------------------------
+exit code: 0
+
+[1641/2305 2.25] Failed -> WasmSpec/jsapi.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2189 -wasm -args testsuite/js-api/table/toString.any.js -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/jsapi.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+Harness Status: OK
+----------------------------
+exit code: 0
+
+[1648/2305 2.22] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2079 -wasm -args testsuite/core/load.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+65/65 tests passed.
+----------------------------
+exit code: 0
+
+[1650/2305 2.25] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.1972 -wasm -args chakra/chakra_atomic_load.wast -endargs -WasmThreads -ESSharedArrayBuffer /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+22/22 tests passed.
+----------------------------
+exit code: 0
+
+[1652/2305 2.25] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2191 -wasm -args features/extends/extends_i32.wast -endargs -WasmSignExtends /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+15/15 tests passed.
+----------------------------
+exit code: 0
+
+[1658/2305 2.23] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2081 -wasm -args testsuite/core/loop.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+78/78 tests passed.
+----------------------------
+exit code: 0
+
+[1660/2305 2.23] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.1974 -wasm -args chakra/chakra_atomic_load.wast -endargs -WasmThreads -ESSharedArrayBuffer -WasmSharedArrayVirtualBuffer- -WasmFastArray- /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+22/22 tests passed.
+----------------------------
+exit code: 0
+
+[1662/2305 2.28] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2193 -wasm -args features/extends/extends_i64.wast -endargs -WasmSignExtends /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+25/25 tests passed.
+----------------------------
+exit code: 0
+
+[1669/2305 2.23] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2083 -wasm -args testsuite/core/memory.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+71/71 tests passed.
+----------------------------
+exit code: 0
+
+[1670/2305 2.22] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.1975 -wasm -args chakra/chakra_atomic_store.wast -endargs -WasmThreads -ESSharedArrayBuffer /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+18/18 tests passed.
+----------------------------
+exit code: 0
+
+[1671/2305 2.22] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2195 -wasm -args features/nontrapping/nontrapping_conversions.wast -endargs -WasmNontrapping /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+181/181 tests passed.
+----------------------------
+exit code: 0
+
+[1679/2305 2.21] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2085 -wasm -args testsuite/core/memory.wast -endargs -wasmfastarray- /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+71/71 tests passed.
+----------------------------
+exit code: 0
+
+[1680/2305 2.24] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.1977 -wasm -args chakra/chakra_atomic_store.wast -endargs -WasmThreads -ESSharedArrayBuffer -WasmSharedArrayVirtualBuffer- -WasmFastArray- /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+18/18 tests passed.
+----------------------------
+exit code: 0
+
+[1681/2305 2.23] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2197 -wasm -args features/threads/atomic_load.wast -endargs -WasmThreads -ESSharedArrayBuffer /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+13/13 tests passed.
+----------------------------
+exit code: 0
+
+[1688/2305 2.21] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2086 -wasm -args testsuite/core/memory_grow.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+89/89 tests passed.
+----------------------------
+exit code: 0
+
+[1690/2305 2.24] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.1978 -wasm -args chakra_generated/chakra_extends_i32.wast -endargs -WasmSignExtends /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+15/15 tests passed.
+----------------------------
+exit code: 0
+
+[1691/2305 2.25] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2199 -wasm -args features/threads/atomic_load.wast -endargs -WasmThreads -ESSharedArrayBuffer -WasmSharedArrayVirtualBuffer- -WasmFastArray- /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+13/13 tests passed.
+----------------------------
+exit code: 0
+
+[1698/2305 2.23] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2088 -wasm -args testsuite/core/memory_redundancy.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+8/8 tests passed.
+----------------------------
+exit code: 0
+
+[1700/2305 2.20] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.1980 -wasm -args chakra_generated/chakra_extends_i64.wast -endargs -WasmSignExtends /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+25/25 tests passed.
+----------------------------
+exit code: 0
+
+[1701/2305 2.24] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2200 -wasm -args features/threads/atomic_store.wast -endargs -WasmThreads -ESSharedArrayBuffer /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+13/13 tests passed.
+----------------------------
+exit code: 0
+
+[1708/2305 2.22] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2090 -wasm -args testsuite/core/memory_trap.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+173/173 tests passed.
+----------------------------
+exit code: 0
+
+[1710/2305 2.23] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.1982 -wasm -args chakra_generated/chakra_i32.wast -endargs /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+1024/1024 tests passed.
+----------------------------
+exit code: 0
+
+[1711/2305 2.23] Failed -> WasmSpec/spec.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.2202 -wasm -args features/threads/atomic_store.wast -endargs -WasmThreads -ESSharedArrayBuffer -WasmSharedArrayVirtualBuffer- -WasmFastArray- /Users/ascotti/Documents/code/ChakraCore/test/WasmSpec/spec.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+13/13 tests passed.
+----------------------------
+exit code: 0
+
+[1914/2305 2.18] Failed -> wasm/controlflow.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3199 -wasm /Users/ascotti/Documents/code/ChakraCore/test/wasm/controlflow.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+2
+----------------------------
+exit code: 0
+
+[1924/2305 2.17] Failed -> wasm/f32.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3200 -wasm /Users/ascotti/Documents/code/ChakraCore/test/wasm/f32.js
+
+Output:
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+	at Global code (f32.js:6:1)
+
+----------------------------
+exit code: 0
+
+[1934/2305 2.16] Failed -> wasm/f64.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3201 -wasm /Users/ascotti/Documents/code/ChakraCore/test/wasm/f64.js
+
+Output:
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+	at Global code (f64.js:6:1)
+
+----------------------------
+exit code: 0
+
+[1943/2305 2.15] Failed -> wasm/math.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3202 -wasm -wasmi64 /Users/ascotti/Documents/code/ChakraCore/test/wasm/math.js
+
+Output:
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+	at Global code (math.js:27:1)
+
+----------------------------
+exit code: 0
+
+[1953/2305 2.17] Failed -> wasm/dropteelocal.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3203 -wasm /Users/ascotti/Documents/code/ChakraCore/test/wasm/dropteelocal.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+100
+----------------------------
+exit code: 0
+
+[1964/2305 2.19] Failed -> wasm/i32_popcnt.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3204 -wasm /Users/ascotti/Documents/code/ChakraCore/test/wasm/i32_popcnt.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+2
+----------------------------
+exit code: 0
+
+[1973/2305 2.19] Failed -> wasm/f32address.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3205 -wasm /Users/ascotti/Documents/code/ChakraCore/test/wasm/f32address.js
+
+Output:
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+	at Global code (f32address.js:8:1)
+
+----------------------------
+exit code: 0
+
+[1983/2305 2.15] Failed -> wasm/divByConstants.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3206 -wasm /Users/ascotti/Documents/code/ChakraCore/test/wasm/divByConstants.js
+
+Output:
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+	at Global code (divByConstants.js:106:1)
+
+----------------------------
+exit code: 0
+
+[1993/2305 2.18] Failed -> wasm/divByConstants_unsigned.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3207 -wasm /Users/ascotti/Documents/code/ChakraCore/test/wasm/divByConstants_unsigned.js
+
+Output:
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+	at Global code (divByConstants_unsigned.js:91:1)
+
+----------------------------
+exit code: 0
+
+[2003/2305 2.19] Failed -> wasm/global.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3208 -wasm -wasmi64 /Users/ascotti/Documents/code/ChakraCore/test/wasm/global.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+Print all i32
+----------------------------
+exit code: 0
+
+[2013/2305 2.19] Failed -> wasm/basic.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3209 -wasm /Users/ascotti/Documents/code/ChakraCore/test/wasm/basic.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+function a[2]() { [native code] }
+----------------------------
+exit code: 0
+
+[2023/2305 2.17] Failed -> wasm/basic.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3210 -ForceStaticInterpreterThunk -wasm /Users/ascotti/Documents/code/ChakraCore/test/wasm/basic.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+function a[2]() { [native code] }
+----------------------------
+exit code: 0
+
+[2034/2305 2.16] Failed -> wasm/table.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3211 -wasm /Users/ascotti/Documents/code/ChakraCore/test/wasm/table.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+15
+----------------------------
+exit code: 0
+
+[2043/2305 2.17] Failed -> wasm/badfuncformat.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3212 /Users/ascotti/Documents/code/ChakraCore/test/wasm/badfuncformat.js
+
+Output:
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+	at Global code (badfuncformat.js:7:1)
+
+----------------------------
+exit code: 0
+
+[2054/2305 2.20] Failed -> wasm/table_imports.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3213 -wasm -wasmi64 /Users/ascotti/Documents/code/ChakraCore/test/wasm/table_imports.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+3
+----------------------------
+exit code: 0
+
+[2063/2305 2.16] Failed -> wasm/table_signatures.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3214 -wasm -args --no-verbose -endargs /Users/ascotti/Documents/code/ChakraCore/test/wasm/table_signatures.js
+
+Output:
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+	at Global code (table_signatures.js:86:1)
+
+----------------------------
+exit code: 0
+
+[2074/2305 2.17] Failed -> wasm/call.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3215 -wasm /Users/ascotti/Documents/code/ChakraCore/test/wasm/call.js
+Output: (at line 2)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+Instanciate call.0.wasm
+----------------------------
+exit code: 0
+
+[2084/2305 2.20] Failed -> wasm/array.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3216 -wasm /Users/ascotti/Documents/code/ChakraCore/test/wasm/array.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+97
+----------------------------
+exit code: 0
+
+[2094/2305 2.18] Failed -> wasm/trunc.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3217 -wasm /Users/ascotti/Documents/code/ChakraCore/test/wasm/trunc.js
+
+Output:
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+	at Global code (trunc.js:27:1)
+
+----------------------------
+exit code: 0
+
+[2103/2305 2.18] Failed -> wasm/api.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3218 -wasm /Users/ascotti/Documents/code/ChakraCore/test/wasm/api.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+
+----------------------------
+exit code: 0
+
+[2113/2305 2.16] Failed -> wasm/invalid_global_mut.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3219 -wasm /Users/ascotti/Documents/code/ChakraCore/test/wasm/invalid_global_mut.js
+
+Output:
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+	at Global code (invalid_global_mut.js:9:1)
+
+----------------------------
+exit code: 0
+
+[2123/2305 2.17] Failed -> wasm/bugs.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3220 -wasm /Users/ascotti/Documents/code/ChakraCore/test/wasm/bugs.js
+
+Output:
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+	at main() (bugs.js:16:3)
+	at Global code (bugs.js:57:1)
+
+----------------------------
+exit code: 0
+
+[2133/2305 2.16] Failed -> wasm/inlining.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3222 /Users/ascotti/Documents/code/ChakraCore/test/wasm/inlining.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+-1970372561
+----------------------------
+exit code: 0
+
+[2143/2305 2.17] Failed -> wasm/debugger_basic.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3224 -wasm -dbgbaseline:debugger_basic.js.dbg.baseline /Users/ascotti/Documents/code/ChakraCore/test/wasm/debugger_basic.js
+
+Output:
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+	at Global code (debugger_basic.js:28:1)
+
+----------------------------
+exit code: 0
+
+[2153/2305 2.15] Failed -> wasm/debugger_basic.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3225 -wasm -maic:1 -dbgbaseline:debugger_basic.js.dbg.baseline /Users/ascotti/Documents/code/ChakraCore/test/wasm/debugger_basic.js
+
+Output:
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+	at Global code (debugger_basic.js:28:1)
+
+----------------------------
+exit code: 0
+
+[2163/2305 2.21] Failed -> wasm/debugger_basic.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3226 -wasm -debuglaunch -args debuglaunch -endargs -dbgbaseline:debugger_basic_launch.js.dbg.baseline /Users/ascotti/Documents/code/ChakraCore/test/wasm/debugger_basic.js
+
+Output:
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+	at Global code (debugger_basic.js:28:1)
+Error: Step 2; Local Diff on: baseline.0: 
+Error: Value 1:{"breakpoints":[]}
+Error: Value 2:undefined
+
+Error: Step 2; Local Diff on: baseline.1: 
+Error: Value 1:{"this":"Object {...}","arguments":"Object {...}","locals":{"mem":"WebAssembly.Memory {...}","table":"WebAssembly.Table {...}","module":"WebAssembly.Module {...}","instance":"WebAssembly.Instance {...}","foo":"function <large string>"}}
+Error: Value 2:undefined
+
+Error: Step 2; Local Diff on: baseline.2: 
+Error: Value 1:{"callStack":[{"line":50,"column":2,"sourceText":"debugger","function":"makeInstance"},{"line":53,"column":0,"sourceText":"const {exports: {a, b, c}} = makeInstance(val => {\r\n  print(val);\r\n  // causes exception\r\n  return val.b.c;\r\n})","function":"Global code"}]}
+Error: Value 2:undefined
+
+Error: Step 2; Local Diff on: baseline.3: 
+Error: Value 1:{"breakpoints":[]}
+Error: Value 2:undefined
+
+Error: Step 2; Local Diff on: baseline.4: 
+Error: Value 1:{"this":"Object {...}","arguments":"Object {...}"}
+Error: Value 2:undefined
+
+Error: Step 2; Local Diff on: baseline.5: 
+Error: Value 1:{"callStack":[{"line":72,"column":2,"sourceText":"debugger","function":"runA"}]}
+Error: Value 2:undefined
+
+Error: Step 2; Local Diff on: baseline.6: 
+Error: Value 1:{"breakpoints":[]}
+Error: Value 2:undefined
+
+Error: Step 2; Local Diff on: baseline.7: 
+Error: Value 1:{"this":"Object {...}","arguments":"Object {...}","locals":{"mem":"WebAssembly.Memory {...}","table":"WebAssembly.Table {...}","module":"WebAssembly.Module {...}","instance":"WebAssembly.Instance {...}","foo":"function <large string>"}}
+Error: Value 2:undefined
+
+Error: Step 2; Local Diff on: baseline.8: 
+Error: Value 1:{"callStack":[{"line":50,"column":2,"sourceText":"debugger","function":"makeInstance"},{"line":118,"column":4,"sourceText":"const {exports: {c: newC}} = makeInstance(val => {\r\n      debugger;\r\n      testValue = val;\r\n    })","function":"Anonymous function"}]}
+Error: Value 2:undefined
+
+Error: Step 2; Local Diff on: baseline.9: 
+Error: Value 1:{"breakpoints":[]}
+Error: Value 2:undefined
+
+Error: Step 2; Local Diff on: baseline.10: 
+Error: Value 1:{"arguments":"Object {...}","locals":{"newC":"function <large string>","testValue":"number 0"}}
+Error: Value 2:undefined
+
+Error: Step 2; Local Diff on: baseline.11: 
+Error: Value 1:{"callStack":[{"line":122,"column":4,"sourceText":"debugger","function":"Anonymous function"}]}
+Error: Value 2:undefined
+
+Error: Step 2; Local Diff on: baseline.12: 
+Error: Value 1:{"breakpoints":[]}
+Error: Value 2:undefined
+
+Error: Step 2; Local Diff on: baseline.13: 
+Error: Value 1:{"arguments":"Object {...}","locals":{"val":"number 15"},"scopes0":"undefined undefined"}
+Error: Value 2:undefined
+
+Error: Step 2; Local Diff on: baseline.14: 
+Error: Value 1:{"callStack":[{"line":119,"column":6,"sourceText":"debugger","function":"Anonymous function"},{"line":123,"column":4,"sourceText":"newC(15)","function":"Anonymous function"}]}
+Error: Value 2:undefined
+
+Error: TEST FAILED
+Rebase file created at 'debugger_basic.js.dbg.baseline.rebase'
+ERROR: 
+
+----------------------------
+exit code: 0
+
+[2173/2305 2.16] Failed -> wasm/response.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3232 -wasm /Users/ascotti/Documents/code/ChakraCore/test/wasm/response.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+Passed: WebAssembly.compileStreaming(buffer => Error)
+----------------------------
+exit code: 0
+
+[2183/2305 2.22] Failed -> wasm/i64.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3233 -wasm -args --no-verbose -endargs /Users/ascotti/Documents/code/ChakraCore/test/wasm/i64.js
+
+Output:
+----------------------------
+*** Running test #1 (0): test i64.eq
+Test threw exception: ReferenceError: 'WebAssembly' is not defined
+	at WasmModuleBuilder.prototype.instantiate (wasm-module-builder.js:657:5)
+	at body (i64.js:123:5)
+	at runTest (UnitTestFramework.js:261:17)
+	at runTests (UnitTestFramework.js:185:21)
+	at run (UnitTestFramework.js:240:13)
+	at Global code (i64.js:163:1)
+FAILED
+*** Running test #2 (1): test i64.ne
+Test threw exception: ReferenceError: 'WebAssembly' is not defined
+	at WasmModuleBuilder.prototype.instantiate (wasm-module-builder.js:657:5)
+	at body (i64.js:123:5)
+	at runTest (UnitTestFramework.js:261:17)
+	at runTests (UnitTestFramework.js:185:21)
+	at run (UnitTestFramework.js:240:13)
+	at Global code (i64.js:163:1)
+FAILED
+*** Running test #3 (2): test i64.lt_s
+Test threw exception: ReferenceError: 'WebAssembly' is not defined
+	at WasmModuleBuilder.prototype.instantiate (wasm-module-builder.js:657:5)
+	at body (i64.js:123:5)
+	at runTest (UnitTestFramework.js:261:17)
+	at runTests (UnitTestFramework.js:185:21)
+	at run (UnitTestFramework.js:240:13)
+	at Global code (i64.js:163:1)
+FAILED
+*** Running test #4 (3): test i64.lt_u
+Test threw exception: ReferenceError: 'WebAssembly' is not defined
+	at WasmModuleBuilder.prototype.instantiate (wasm-module-builder.js:657:5)
+	at body (i64.js:123:5)
+	at runTest (UnitTestFramework.js:261:17)
+	at runTests (UnitTestFramework.js:185:21)
+	at run (UnitTestFramework.js:240:13)
+	at Global code (i64.js:163:1)
+FAILED
+*** Running test #5 (4): test i64.gt_s
+Test threw exception: ReferenceError: 'WebAssembly' is not defined
+	at WasmModuleBuilder.prototype.instantiate (wasm-module-builder.js:657:5)
+	at body (i64.js:123:5)
+	at runTest (UnitTestFramework.js:261:17)
+	at runTests (UnitTestFramework.js:185:21)
+	at run (UnitTestFramework.js:240:13)
+	at Global code (i64.js:163:1)
+FAILED
+*** Running test #6 (5): test i64.gt_u
+Test threw exception: ReferenceError: 'WebAssembly' is not defined
+	at WasmModuleBuilder.prototype.instantiate (wasm-module-builder.js:657:5)
+	at body (i64.js:123:5)
+	at runTest (UnitTestFramework.js:261:17)
+	at runTests (UnitTestFramework.js:185:21)
+	at run (UnitTestFramework.js:240:13)
+	at Global code (i64.js:163:1)
+FAILED
+*** Running test #7 (6): test i64.le_s
+Test threw exception: ReferenceError: 'WebAssembly' is not defined
+	at WasmModuleBuilder.prototype.instantiate (wasm-module-builder.js:657:5)
+	at body (i64.js:123:5)
+	at runTest (UnitTestFramework.js:261:17)
+	at runTests (UnitTestFramework.js:185:21)
+	at run (UnitTestFramework.js:240:13)
+	at Global code (i64.js:163:1)
+FAILED
+*** Running test #8 (7): test i64.le_u
+Test threw exception: ReferenceError: 'WebAssembly' is not defined
+	at WasmModuleBuilder.prototype.instantiate (wasm-module-builder.js:657:5)
+	at body (i64.js:123:5)
+	at runTest (UnitTestFramework.js:261:17)
+	at runTests (UnitTestFramework.js:185:21)
+	at run (UnitTestFramework.js:240:13)
+	at Global code (i64.js:163:1)
+FAILED
+*** Running test #9 (8): test i64.ge_s
+Test threw exception: ReferenceError: 'WebAssembly' is not defined
+	at WasmModuleBuilder.prototype.instantiate (wasm-module-builder.js:657:5)
+	at body (i64.js:123:5)
+	at runTest (UnitTestFramework.js:261:17)
+	at runTests (UnitTestFramework.js:185:21)
+	at run (UnitTestFramework.js:240:13)
+	at Global code (i64.js:163:1)
+FAILED
+*** Running test #10 (9): test i64.ge_u
+Test threw exception: ReferenceError: 'WebAssembly' is not defined
+	at WasmModuleBuilder.prototype.instantiate (wasm-module-builder.js:657:5)
+	at body (i64.js:123:5)
+	at runTest (UnitTestFramework.js:261:17)
+	at runTests (UnitTestFramework.js:185:21)
+	at run (UnitTestFramework.js:240:13)
+	at Global code (i64.js:163:1)
+FAILED
+*** Running test #11 (10): test i64.eq branching
+Test threw exception: ReferenceError: 'WebAssembly' is not defined
+	at WasmModuleBuilder.prototype.instantiate (wasm-module-builder.js:657:5)
+	at body (i64.js:150:5)
+	at runTest (UnitTestFramework.js:261:17)
+	at runTests (UnitTestFramework.js:185:21)
+	at run (UnitTestFramework.js:240:13)
+	at Global code (i64.js:163:1)
+FAILED
+*** Running test #12 (11): test i64.ne branching
+Test threw exception: ReferenceError: 'WebAssembly' is not defined
+	at WasmModuleBuilder.prototype.instantiate (wasm-module-builder.js:657:5)
+	at body (i64.js:150:5)
+	at runTest (UnitTestFramework.js:261:17)
+	at runTests (UnitTestFramework.js:185:21)
+	at run (UnitTestFramework.js:240:13)
+	at Global code (i64.js:163:1)
+FAILED
+*** Running test #13 (12): test i64.lt_s branching
+Test threw exception: ReferenceError: 'WebAssembly' is not defined
+	at WasmModuleBuilder.prototype.instantiate (wasm-module-builder.js:657:5)
+	at body (i64.js:150:5)
+	at runTest (UnitTestFramework.js:261:17)
+	at runTests (UnitTestFramework.js:185:21)
+	at run (UnitTestFramework.js:240:13)
+	at Global code (i64.js:163:1)
+FAILED
+*** Running test #14 (13): test i64.lt_u branching
+Test threw exception: ReferenceError: 'WebAssembly' is not defined
+	at WasmModuleBuilder.prototype.instantiate (wasm-module-builder.js:657:5)
+	at body (i64.js:150:5)
+	at runTest (UnitTestFramework.js:261:17)
+	at runTests (UnitTestFramework.js:185:21)
+	at run (UnitTestFramework.js:240:13)
+	at Global code (i64.js:163:1)
+FAILED
+*** Running test #15 (14): test i64.gt_s branching
+Test threw exception: ReferenceError: 'WebAssembly' is not defined
+	at WasmModuleBuilder.prototype.instantiate (wasm-module-builder.js:657:5)
+	at body (i64.js:150:5)
+	at runTest (UnitTestFramework.js:261:17)
+	at runTests (UnitTestFramework.js:185:21)
+	at run (UnitTestFramework.js:240:13)
+	at Global code (i64.js:163:1)
+FAILED
+*** Running test #16 (15): test i64.gt_u branching
+Test threw exception: ReferenceError: 'WebAssembly' is not defined
+	at WasmModuleBuilder.prototype.instantiate (wasm-module-builder.js:657:5)
+	at body (i64.js:150:5)
+	at runTest (UnitTestFramework.js:261:17)
+	at runTests (UnitTestFramework.js:185:21)
+	at run (UnitTestFramework.js:240:13)
+	at Global code (i64.js:163:1)
+FAILED
+*** Running test #17 (16): test i64.le_s branching
+Test threw exception: ReferenceError: 'WebAssembly' is not defined
+	at WasmModuleBuilder.prototype.instantiate (wasm-module-builder.js:657:5)
+	at body (i64.js:150:5)
+	at runTest (UnitTestFramework.js:261:17)
+	at runTests (UnitTestFramework.js:185:21)
+	at run (UnitTestFramework.js:240:13)
+	at Global code (i64.js:163:1)
+FAILED
+*** Running test #18 (17): test i64.le_u branching
+Test threw exception: ReferenceError: 'WebAssembly' is not defined
+	at WasmModuleBuilder.prototype.instantiate (wasm-module-builder.js:657:5)
+	at body (i64.js:150:5)
+	at runTest (UnitTestFramework.js:261:17)
+	at runTests (UnitTestFramework.js:185:21)
+	at run (UnitTestFramework.js:240:13)
+	at Global code (i64.js:163:1)
+FAILED
+*** Running test #19 (18): test i64.ge_s branching
+Test threw exception: ReferenceError: 'WebAssembly' is not defined
+	at WasmModuleBuilder.prototype.instantiate (wasm-module-builder.js:657:5)
+	at body (i64.js:150:5)
+	at runTest (UnitTestFramework.js:261:17)
+	at runTests (UnitTestFramework.js:185:21)
+	at run (UnitTestFramework.js:240:13)
+	at Global code (i64.js:163:1)
+FAILED
+*** Running test #20 (19): test i64.ge_u branching
+Test threw exception: ReferenceError: 'WebAssembly' is not defined
+	at WasmModuleBuilder.prototype.instantiate (wasm-module-builder.js:657:5)
+	at body (i64.js:150:5)
+	at runTest (UnitTestFramework.js:261:17)
+	at runTests (UnitTestFramework.js:185:21)
+	at run (UnitTestFramework.js:240:13)
+	at Global code (i64.js:163:1)
+FAILED
+Summary of tests: total executed: 20; passed: 0; failed: 20
+
+----------------------------
+exit code: 0
+
+[2193/2305 2.16] Failed -> wasm/cse.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3236 -wasm -maic:0 -WasmAssignModuleID -testtrace:cse:2.0-99.999 /Users/ascotti/Documents/code/ChakraCore/test/wasm/cse.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+ --- CSE (foo_i32[0]): Add_I4
+----------------------------
+exit code: 0
+
+[2203/2305 2.20] Failed -> wasm/signextend.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3237 -wasm -args --no-verbose -endargs /Users/ascotti/Documents/code/ChakraCore/test/wasm/signextend.js
+
+Output:
+----------------------------
+*** Running test #1 (0): i32.extend8_s cse
+Test threw exception: ReferenceError: 'WebAssembly' is not defined
+	at body (signextend.js:15:7)
+	at runTest (UnitTestFramework.js:261:17)
+	at runTests (UnitTestFramework.js:185:21)
+	at run (UnitTestFramework.js:240:13)
+	at Global code (signextend.js:77:1)
+FAILED
+*** Running test #2 (1): i32.extend16_s cse
+Test threw exception: ReferenceError: 'WebAssembly' is not defined
+	at body (signextend.js:15:7)
+	at runTest (UnitTestFramework.js:261:17)
+	at runTests (UnitTestFramework.js:185:21)
+	at run (UnitTestFramework.js:240:13)
+	at Global code (signextend.js:77:1)
+FAILED
+*** Running test #3 (2): i64.extend8_s cse
+Test threw exception: ReferenceError: 'WebAssembly' is not defined
+	at body (signextend.js:15:7)
+	at runTest (UnitTestFramework.js:261:17)
+	at runTests (UnitTestFramework.js:185:21)
+	at run (UnitTestFramework.js:240:13)
+	at Global code (signextend.js:77:1)
+FAILED
+*** Running test #4 (3): i64.extend16_s cse
+Test threw exception: ReferenceError: 'WebAssembly' is not defined
+	at body (signextend.js:15:7)
+	at runTest (UnitTestFramework.js:261:17)
+	at runTests (UnitTestFramework.js:185:21)
+	at run (UnitTestFramework.js:240:13)
+	at Global code (signextend.js:77:1)
+FAILED
+*** Running test #5 (4): i64.extend32_s cse
+Test threw exception: ReferenceError: 'WebAssembly' is not defined
+	at body (signextend.js:15:7)
+	at runTest (UnitTestFramework.js:261:17)
+	at runTests (UnitTestFramework.js:185:21)
+	at run (UnitTestFramework.js:240:13)
+	at Global code (signextend.js:77:1)
+FAILED
+*** Running test #6 (5): i32.extend8_s/i32.extend16_s no cse
+Test threw exception: ReferenceError: 'WebAssembly' is not defined
+	at body (signextend.js:15:7)
+	at runTest (UnitTestFramework.js:261:17)
+	at runTests (UnitTestFramework.js:185:21)
+	at run (UnitTestFramework.js:240:13)
+	at Global code (signextend.js:77:1)
+FAILED
+*** Running test #7 (6): i32.extend16_s/i32.extend8_s no cse
+Test threw exception: ReferenceError: 'WebAssembly' is not defined
+	at body (signextend.js:15:7)
+	at runTest (UnitTestFramework.js:261:17)
+	at runTests (UnitTestFramework.js:185:21)
+	at run (UnitTestFramework.js:240:13)
+	at Global code (signextend.js:77:1)
+FAILED
+*** Running test #8 (7): i64.extend8_s/i64.extend16_s no cse
+Test threw exception: ReferenceError: 'WebAssembly' is not defined
+	at body (signextend.js:15:7)
+	at runTest (UnitTestFramework.js:261:17)
+	at runTests (UnitTestFramework.js:185:21)
+	at run (UnitTestFramework.js:240:13)
+	at Global code (signextend.js:77:1)
+FAILED
+*** Running test #9 (8): i64.extend8_s/i64.extend32_s no cse
+Test threw exception: ReferenceError: 'WebAssembly' is not defined
+	at body (signextend.js:15:7)
+	at runTest (UnitTestFramework.js:261:17)
+	at runTests (UnitTestFramework.js:185:21)
+	at run (UnitTestFramework.js:240:13)
+	at Global code (signextend.js:77:1)
+FAILED
+*** Running test #10 (9): i64.extend16_s/i64.extend8_s no cse
+Test threw exception: ReferenceError: 'WebAssembly' is not defined
+	at body (signextend.js:15:7)
+	at runTest (UnitTestFramework.js:261:17)
+	at runTests (UnitTestFramework.js:185:21)
+	at run (UnitTestFramework.js:240:13)
+	at Global code (signextend.js:77:1)
+FAILED
+*** Running test #11 (10): i64.extend16_s/i64.extend32_s no cse
+Test threw exception: ReferenceError: 'WebAssembly' is not defined
+	at body (signextend.js:15:7)
+	at runTest (UnitTestFramework.js:261:17)
+	at runTests (UnitTestFramework.js:185:21)
+	at run (UnitTestFramework.js:240:13)
+	at Global code (signextend.js:77:1)
+FAILED
+*** Running test #12 (11): i64.extend32_s/i64.extend8_s no cse
+Test threw exception: ReferenceError: 'WebAssembly' is not defined
+	at body (signextend.js:15:7)
+	at runTest (UnitTestFramework.js:261:17)
+	at runTests (UnitTestFramework.js:185:21)
+	at run (UnitTestFramework.js:240:13)
+	at Global code (signextend.js:77:1)
+FAILED
+*** Running test #13 (12): i64.extend32_s/i64.extend16_s no cse
+Test threw exception: ReferenceError: 'WebAssembly' is not defined
+	at body (signextend.js:15:7)
+	at runTest (UnitTestFramework.js:261:17)
+	at runTests (UnitTestFramework.js:185:21)
+	at run (UnitTestFramework.js:240:13)
+	at Global code (signextend.js:77:1)
+FAILED
+Summary of tests: total executed: 13; passed: 0; failed: 13
+
+----------------------------
+exit code: 0
+
+[2213/2305 2.20] Failed -> wasm/memory.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3238 -wasm /Users/ascotti/Documents/code/ChakraCore/test/wasm/memory.js
+
+Output:
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+	at test(object) (memory.js:50:3)
+	at Global code (memory.js:138:1)
+
+----------------------------
+exit code: 0
+
+[2223/2305 2.18] Failed -> wasm/memory.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3239 -wasm -wasmfastarray- /Users/ascotti/Documents/code/ChakraCore/test/wasm/memory.js
+
+Output:
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+	at test(object) (memory.js:50:3)
+	at Global code (memory.js:138:1)
+
+----------------------------
+exit code: 0
+
+[2233/2305 2.16] Failed -> wasm/superlongsignaturemismatch.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3240 -wasm /Users/ascotti/Documents/code/ChakraCore/test/wasm/superlongsignaturemismatch.js
+
+Output:
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+	at Global code (superlongsignaturemismatch.js:20:1)
+
+----------------------------
+exit code: 0
+
+[2243/2305 2.20] Failed -> wasm/binary.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3241 -wasm -args --no-verbose -endargs /Users/ascotti/Documents/code/ChakraCore/test/wasm/binary.js
+
+Output:
+----------------------------
+*** Running test #1 (0): memory.size reserved
+Test threw exception: ReferenceError: 'WebAssembly' is not defined
+	at body (binary.js:22:9)
+	at runTest (UnitTestFramework.js:261:17)
+	at runTests (UnitTestFramework.js:185:21)
+	at run (UnitTestFramework.js:240:13)
+	at Global code (binary.js:51:1)
+FAILED
+*** Running test #2 (1): memory.grow reserved
+Test threw exception: ReferenceError: 'WebAssembly' is not defined
+	at body (binary.js:22:9)
+	at runTest (UnitTestFramework.js:261:17)
+	at runTests (UnitTestFramework.js:185:21)
+	at run (UnitTestFramework.js:240:13)
+	at Global code (binary.js:51:1)
+FAILED
+*** Running test #3 (2): call_indirect reserved
+Test threw exception: ReferenceError: 'WebAssembly' is not defined
+	at body (binary.js:22:9)
+	at runTest (UnitTestFramework.js:261:17)
+	at runTests (UnitTestFramework.js:185:21)
+	at run (UnitTestFramework.js:240:13)
+	at Global code (binary.js:51:1)
+FAILED
+Summary of tests: total executed: 3; passed: 0; failed: 3
+
+----------------------------
+exit code: 0
+
+[2244/2305 2.19] Failed -> wasm/unsigned.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3188 -wasm -args 0 5 -endargs /Users/ascotti/Documents/code/ChakraCore/test/wasm/unsigned.js
+
+Output:
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+	at generateModule(object) (unsigned.js:231:3)
+	at Global code (unsigned.js:282:5)
+
+----------------------------
+exit code: 0
+
+[2253/2305 2.20] Failed -> wasm/binary.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3242 -wasm -args --no-verbose -endargs /Users/ascotti/Documents/code/ChakraCore/test/wasm/binary.js
+
+Output:
+----------------------------
+*** Running test #1 (0): memory.size reserved
+Test threw exception: ReferenceError: 'WebAssembly' is not defined
+	at body (binary.js:22:9)
+	at runTest (UnitTestFramework.js:261:17)
+	at runTests (UnitTestFramework.js:185:21)
+	at run (UnitTestFramework.js:240:13)
+	at Global code (binary.js:51:1)
+FAILED
+*** Running test #2 (1): memory.grow reserved
+Test threw exception: ReferenceError: 'WebAssembly' is not defined
+	at body (binary.js:22:9)
+	at runTest (UnitTestFramework.js:261:17)
+	at runTests (UnitTestFramework.js:185:21)
+	at run (UnitTestFramework.js:240:13)
+	at Global code (binary.js:51:1)
+FAILED
+*** Running test #3 (2): call_indirect reserved
+Test threw exception: ReferenceError: 'WebAssembly' is not defined
+	at body (binary.js:22:9)
+	at runTest (UnitTestFramework.js:261:17)
+	at runTests (UnitTestFramework.js:185:21)
+	at run (UnitTestFramework.js:240:13)
+	at Global code (binary.js:51:1)
+FAILED
+Summary of tests: total executed: 3; passed: 0; failed: 3
+
+----------------------------
+exit code: 0
+
+[2254/2305 2.20] Failed -> wasm/unsigned.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3189 -wasm -args 6 10 -endargs /Users/ascotti/Documents/code/ChakraCore/test/wasm/unsigned.js
+
+Output:
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+	at generateModule(object) (unsigned.js:231:3)
+	at Global code (unsigned.js:282:5)
+
+----------------------------
+exit code: 0
+
+[2263/2305 2.17] Failed -> wasm/polyinline.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3243 -maxinterpretcount:2 -off:simplejit /Users/ascotti/Documents/code/ChakraCore/test/wasm/polyinline.js
+
+Output:
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+	at Global code (polyinline.js:6:1)
+
+----------------------------
+exit code: 0
+
+[2264/2305 2.19] Failed -> wasm/unsigned.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3190 -wasm -args 11 15 -endargs /Users/ascotti/Documents/code/ChakraCore/test/wasm/unsigned.js
+
+Output:
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+	at generateModule(object) (unsigned.js:231:3)
+	at Global code (unsigned.js:282:5)
+
+----------------------------
+exit code: 0
+
+[2273/2305 2.17] Failed -> wasm/loopstslot.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3247 -forcejitloopbody /Users/ascotti/Documents/code/ChakraCore/test/wasm/loopstslot.js
+
+Output:
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+	at Global code (loopstslot.js:6:1)
+
+----------------------------
+exit code: 0
+
+[2274/2305 2.19] Failed -> wasm/unsigned.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3191 -wasm -args 16 20 -endargs /Users/ascotti/Documents/code/ChakraCore/test/wasm/unsigned.js
+
+Output:
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+	at generateModule(object) (unsigned.js:231:3)
+	at Global code (unsigned.js:282:5)
+
+----------------------------
+exit code: 0
+
+[2283/2305 2.18] Failed -> wasm/loopyield.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3248 -forcejitloopbody /Users/ascotti/Documents/code/ChakraCore/test/wasm/loopyield.js
+
+Output:
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+	at Global code (loopyield.js:5:1)
+
+----------------------------
+exit code: 0
+
+[2284/2305 2.17] Failed -> wasm/unsigned.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3192 -wasm -args 21 -endargs /Users/ascotti/Documents/code/ChakraCore/test/wasm/unsigned.js
+
+Output:
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+	at generateModule(object) (unsigned.js:231:3)
+	at Global code (unsigned.js:282:5)
+
+----------------------------
+exit code: 0
+
+[2292/2305 2.16] Failed -> wasm/loopyieldnested.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3249 -lic:10 -bgjit- /Users/ascotti/Documents/code/ChakraCore/test/wasm/loopyieldnested.js
+
+Output:
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+	at Global code (loopyieldnested.js:6:1)
+
+----------------------------
+exit code: 0
+
+[2293/2305 2.21] Failed -> wasm/regress.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3193 -wasm -args --no-verbose -endargs /Users/ascotti/Documents/code/ChakraCore/test/wasm/regress.js
+
+Output:
+----------------------------
+*** Running test #1 (0): polymorphic operators regression
+Test threw exception: ReferenceError: 'WebAssembly' is not defined
+	at body (regress.js:53:7)
+	at runTest (UnitTestFramework.js:261:17)
+	at runTests (UnitTestFramework.js:185:21)
+	at run (UnitTestFramework.js:240:13)
+	at Global code (regress.js:125:1)
+FAILED
+*** Running test #2 (1): tracing regression test
+Test threw exception: assert.fail failed at (regress.js:73:9)
+   Message: Wrong error: ReferenceError: 'WebAssembly' is not defined
+FAILED
+*** Running test #3 (2): Error message truncation test
+Test threw exception: assert.isTrue failed at (regress.js:97:7):
+  expected: true
+    actual: false
+   
+FAILED
+Summary of tests: total executed: 3; passed: 0; failed: 3
+
+----------------------------
+exit code: 0
+
+[2297/2305 2.18] Failed -> wasm/loopyieldtypes.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3250 -forcejitloopbody /Users/ascotti/Documents/code/ChakraCore/test/wasm/loopyieldtypes.js
+
+Output:
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+	at Global code (loopyieldtypes.js:5:1)
+
+----------------------------
+exit code: 0
+
+[2298/2305 2.22] Failed -> wasm/regress.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3194 -wasm -args --no-verbose --no-wabt -endargs /Users/ascotti/Documents/code/ChakraCore/test/wasm/regress.js
+
+Output:
+----------------------------
+*** Running test #1 (0): tracing regression test
+Test threw exception: assert.fail failed at (regress.js:73:9)
+   Message: Wrong error: ReferenceError: 'WebAssembly' is not defined
+FAILED
+*** Running test #2 (1): Error message truncation test
+Test threw exception: assert.isTrue failed at (regress.js:97:7):
+  expected: true
+    actual: false
+   
+FAILED
+Summary of tests: total executed: 2; passed: 0; failed: 2
+
+----------------------------
+exit code: 0
+
+[2299/2305 2.17] Failed -> wasm/loopyieldregress.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3251 -lic:0 -bgjit- /Users/ascotti/Documents/code/ChakraCore/test/wasm/loopyieldregress.js
+
+Output:
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+	at Global code (loopyieldregress.js:87:1)
+
+----------------------------
+exit code: 0
+
+[2300/2305 2.17] Failed -> wasm/rot.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3195 -wasm /Users/ascotti/Documents/code/ChakraCore/test/wasm/rot.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+44
+----------------------------
+exit code: 0
+
+[2301/2305 2.18] Failed -> wasm/atomics_test.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3252 -wasmthreads -ESSharedArrayBuffer -args summary -endargs /Users/ascotti/Documents/code/ChakraCore/test/wasm/atomics_test.js
+
+Output:
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+	at makeSharedArrayBuffer(number) (atomics_test.js:8:3)
+	at Global code (atomics_test.js:33:1)
+
+----------------------------
+exit code: 0
+
+[2302/2305 2.16] Failed -> wasm/fastarray.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3196 -wasm -WasmFastArray- /Users/ascotti/Documents/code/ChakraCore/test/wasm/fastarray.js
+
+Output:
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+	at runScenario() (fastarray.js:17:3)
+	at Global code (fastarray.js:35:1)
+
+----------------------------
+exit code: 0
+
+[2303/2305 2.24] Failed -> wasm/reload.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3253 -wasmthreads -ESSharedArrayBuffer /Users/ascotti/Documents/code/ChakraCore/test/wasm/reload.js
+
+Output:
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+	at test(boolean) (reload.js:11:3)
+	at Global code (reload.js:90:1)
+
+----------------------------
+exit code: 0
+
+[2304/2305 2.22] Failed -> wasm/fastarray.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3197 -wasm -WasmFastArray /Users/ascotti/Documents/code/ChakraCore/test/wasm/fastarray.js
+
+Output:
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+	at runScenario() (fastarray.js:17:3)
+	at Global code (fastarray.js:35:1)
+
+----------------------------
+exit code: 0
+
+[2305/2305 2.25] Failed -> wasm/misc.js
+/private/var/folders/95/d0xgc08d0rxc36f8llb8yhtc0000gn/T/opencode/e14/private-bin/ch -ExtendedErrorStackForTestHost -BaselineMode -WERExceptionSupport -forceNative -off:simpleJit -bgJitDelay:0 -dynamicprofileinput:profile.dpl.3198 -wasm /Users/ascotti/Documents/code/ChakraCore/test/wasm/misc.js
+Output: (at line 1)
+----------------------------
+ReferenceError: 'WebAssembly' is not defined
+----------------------------
+Expected Output:
+----------------------------
+40
+----------------------------
+exit code: 0
+
+
+############ Results for dynapogo tests ###########
+262: passed 1, failed 0
+ASMJSParser: passed 1, failed 1
+Array: passed 122, failed 0
+AsmJSFloat: passed 0, failed 14
+AsmJs: passed 16, failed 92
+Basics: passed 47, failed 0
+BigInt: passed 11, failed 0
+Boolean: passed 3, failed 0
+Bugs: passed 98, failed 0
+Closures: passed 23, failed 0
+ControlFlow: passed 17, failed 0
+Conversions: passed 5, failed 0
+Date: passed 9, failed 0
+Debugger: passed 19, failed 0
+DebuggerCommon: passed 157, failed 0
+EH: passed 39, failed 0
+Error: passed 24, failed 0
+FixedFields: passed 18, failed 0
+FlowGraph: passed 5, failed 0
+Function: passed 66, failed 0
+GlobalFunctions: passed 13, failed 0
+InlineCaches: passed 24, failed 0
+Intl: passed 17, failed 0
+JSON: passed 14, failed 0
+LetConst: passed 50, failed 0
+Lib: passed 11, failed 0
+Math: passed 9, failed 0
+Miscellaneous: passed 9, failed 0
+Number: passed 11, failed 0
+Object: passed 60, failed 0
+Operators: passed 29, failed 0
+Optimizer: passed 197, failed 0
+PRE: passed 1, failed 0
+Prototypes: passed 9, failed 0
+RWC: passed 1, failed 0
+RegAlloc: passed 1, failed 0
+Regex: passed 40, failed 0
+Scanner: passed 3, failed 0
+StackTrace: passed 16, failed 0
+Strings: passed 43, failed 0
+TaggedIntegers: passed 15, failed 0
+TryCatch: passed 1, failed 0
+UnifiedRegex: passed 22, failed 0
+UnitTestFramework: passed 1, failed 0
+WasmSpec: passed 0, failed 123
+WasmSpec.MultiValue: passed 0, failed 2
+bailout: passed 17, failed 0
+es5: passed 56, failed 0
+es6: passed 223, failed 0
+es6GeneratorJit: passed 11, failed 0
+es6module: passed 23, failed 0
+es7: passed 108, failed 0
+fieldopts: passed 71, failed 0
+inlining: passed 45, failed 0
+loop: passed 10, failed 0
+stackfunc: passed 5, failed 0
+strict: passed 78, failed 0
+switchStatement: passed 25, failed 0
+typedarray: passed 60, failed 0
+utf8: passed 9, failed 0
+wasm: passed 0, failed 54
+----------------------------
+Total: passed 2019, failed 286
+Time taken for dynapogo tests: 527.62 seconds
+
+[527.62 seconds] Failed!

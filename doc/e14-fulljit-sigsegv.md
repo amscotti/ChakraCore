@@ -10,9 +10,9 @@ blockscope-functionbinding crasher.
 ## 1. Reproduction and minimization
 
 The e12 standalone repro reproduced at HEAD (rc=139, deterministic). A
-fresh lldb backtrace with ASLR enabled (`target.disable-aslr false` — with
-ASLR disabled the garbage read lands on mapped memory and the process
-exits 0, one reason the defect is layout-flaky under debuggers):
+fresh lldb backtrace (`lldb -b`, direct `run`; a stop-at-entry launch
+`process launch -s true` happens to exit 0 — the initial stop perturbs
+the layout — which is one reason the defect is flaky under debuggers):
 
 ```
 frame #0: Js::RecyclableObject::GetType(this=0x0)          RecyclableObject.h:276
@@ -131,48 +131,82 @@ unchanged, only the byte displacement is corrected.
   a class, reads `P.length, P.name, P.prototype === P.prototype`,
   constructs `new P()` and a derived anonymous class, and pins
   `getOwnPropertyNames` — all under both `-mic:1 -bgjit-` and
-  `-forceNative -off:simpleJit -bgJitDelay:0`. Negative control: with
-  the fix reverted this smoke fails with rc=139 on the `-forceNative`
-  leg (verified by rebuilding the broken Lower.cpp), so the gate now
-  fails on any reintroduction.
+  `-forceNative -off:simpleJit -bgJitDelay:0`. Negative control
+  (executed twice this lane): with the fix stashed and the jit profile
+  rebuilt, the smoke fails exactly as designed —
+  `check_jit: FAIL: -forceNative -off:simpleJit -bgJitDelay:0 exited
+  -11`, the crash landing at `jit-class-vals` (reading `P.length`, the
+  corrupted slot) while the `-mic` leg still passes — and after
+  restoring the fix and rebuilding it is green again. (The second,
+  accidental control: a full `-j10` dynapogo suite that overlapped a
+  broken-binary window reproduced the e12 before-shape, 115×`-11` +
+  6×`-10`, against 0 signals on the fixed binary — §5.)
 
 ## 5. Verification
 
 | Check | Before (e12 / HEAD d0b2dc019) | After |
 |---|---|---|
-| Standalone repro matchall.js, dynapogo flags | rc=139 deterministic | **20/20 clean** |
-| matchall.js default tier / `-mic:1 -bgjit-` | crash family context | 5/5 and 10/10 clean |
-| Witness w1–w7 (class decl/expr/derived/extends, plain fn) | all class shapes rc=139 | all rc=0; 20/20 on w4 |
-| bigint64array / resizable-typedarray / array_findlast dynapogo flags | SIGSEGV | 3/3 each clean |
-| Full dynapogo suite `-j4` | 1907/398, 115×SIGSEGV + 3×SIGBUS (e12 `-j10`) | **2019/286, zero signal exits** — failures exactly at the 286 receipt base; +13 passes vs the 2006 base are later lanes' fixes (sweep/e11/e13) |
-| Full dynapogo suite `-j10` rerun (load-only crasher) | 1907/398, blockscope-functionbinding SIGSEGV | **1994/311, zero signal exits**; blockscope-functionbinding clean; the +25 vs j4 are load-order flakes (matchall/bigint64array/s6-growable/wasm timeouts pass 5/5 standalone with their exact j10 flags — masked non-crash assertions now observable where the crash used to abort first) |
-| interpreted variant (broken binary rebuilt for the control) | 2424/418 with **20 signal crashes** — the same family: classes.js, ES6SubclassableBuiltins, class-private-{fields,methods,jit-probes}, toStringTag, regex-prototype-properties, bug_OS16649604, typedarray_bugfixes | **2441/401, 3 signal crashes** = the pre-existing bug_OS21193960 + Array_TypeConfusion_bugs set (identical on broken and fixed) |
-| no-JIT gates `check-regression` test / debug-static | 2051 / 2103 | **2051 / 2103** (out/e14-gates.log, rc=0 chain) |
-| `zig build -Dprofile=jit check` | PASS (646 steps, pre-gap) | **PASS** incl. extended check_jit smoke + bytecode verify |
-| Negative control (fix reverted, rebuilt) | — | `check_jit: FAIL: -forceNative -off:simpleJit -bgJitDelay:0 exited -11` immediately after the key-order line — the smoke catches the defect class |
+| Standalone repro matchall.js, dynapogo flags | rc=139 deterministic | **20/20 clean** (summary `pass`) |
+| matchall.js default tier (no forceNative) | crash family context | 20/20 clean |
+| Minimal witnesses (empty class + one `new`; named/derived/`extends RegExp` classes with warmup loops; plain `function F(){}` control) | every class shape rc=139, plain fn rc=0 | all rc=0; plain fn unchanged |
+| bigint64array / resizable-typedarray / array_findlast / SpecialSymbolCapture dynapogo flags | SIGSEGV | all rc=0, `pass` |
+| Full dynapogo suite `-j4` (`runtests.py --test --variants dynapogo`) | 1907/398 at `-j10` (e12): 115×SIGSEGV + 3×SIGBUS | **2019/286, 0×`-11`, 0×`-10`** — failures confined to the tagged asm.js/WASM dirs (AsmJs 92, WasmSpec 123, wasm 54, AsmJSFloat 14, WasmSpec.MultiValue 2, ASMJSParser 1) |
+| Full dynapogo suite `-j10` (load-only crasher leg) | es6/blockscope-functionbinding.js SIGSEGV at `-j10` only | **2019/286, 0×`-11`, 0×`-10`**; es6 223/0, es7 108/0 |
+| interpreted variant (`--variants interpreted`) | — | 2441/401 with 3 signal exits — the pre-existing `Bugs/bug_OS21193960.js` + `Array/Array_TypeConfusion_bugs.js` pair (both variants), unrelated by construction: the fixed store lives in JIT-generated native code and never executes without native tiers |
+| no-JIT gates `zig build check` / debug-static `check-regression` | 2051 / 2103 | **2051 / 2103** (`out/e14-gates.log`, rc=0 chain) |
+| `zig build -Dprofile=jit check` | PASS (646-step gate, pre-gap) | **PASS** incl. the extended check_jit smoke + bytecode verify (`out/e14-gates.log`) |
+| Negative control (fix stashed, jit profile rebuilt) | — | `check_jit: FAIL: -forceNative -off:simpleJit -bgJitDelay:0 exited -11` — crash at `jit-class-vals` (reading the corrupted length slot) while the `-mic` leg passes; restored + rebuilt → PASS |
+
+Both recorded after-suites report identical totals at `-j4` and `-j10`.
+Versus the e12-era receipt base (2006/286 at `-j4` on its older base),
+passed grew 2006→2019 because the e5–e13 lanes added focused rlexe
+entries; the invariant that matters — failed = the same 286 tagged-only
+population, zero signal exits — is restored exactly (286 tagged + 118
+signal exits ≈ e12's 398 before-failures).
+
+**Verification-hygiene incident (for log archaeology):** two sessions
+ran this lane's verification concurrently. One full `-j10` "after" run
+overlapped a broken-binary negative-control window and reproduced the
+before-shape (115×`-11` + 6×`-10`); another was doubly interleaved
+into one log with unattributable totals. Both logs were discarded. The
+recorded `-j10` after-run executed against an immutable private copy of
+the fixed binaries (ch + libChakraCore.dylib; dylib md5
+`f8fe4f76715281910af6d572e21cef29`, identical to the installed
+`out/jit/bin/libChakraCore.dylib`), and the `-j4` after-run's whole
+window (18:37–18:58) precedes the first broken-binary install
+(19:03:29) — both logs are fixed-binary evidence. The interpreted
+after-log (19:01) is likewise inside the fixed window.
 
 ## 6. Logs
 
-- `out/e14-dynapogo-j4-after.log` — full dynapogo `-j4`: 2019/286, 0 signal.
-- `out/e14-dynapogo-j10-after.log` — `-j10` rerun: 1994/311, 0 signal.
-- `out/e14-interpreted-after.log` — interpreted variant, fixed: 2441/401, 3 pre-existing crashes (broken-binary control in /tmp during the session: 2424/418, 20 crashes).
-- `out/e14-gates.log` — no-JIT gates (2051/0, 2103/0) + jit check PASS.
+- `out/e12-dynapogo-j10-before.log` — baseline: 1907/398, 115×SIGSEGV +
+  3×SIGBUS.
+- `out/e14-dynapogo-j4-after.log` — full dynapogo `-j4`, fixed binary:
+  2019/286, zero signal exits.
+- `out/e14-dynapogo-j10-after.log` — full dynapogo `-j10` against the
+  immutable fixed-binary copy: 2019/286, zero signal exits.
+- `out/e14-interpreted-after.log` — interpreted variant, fixed binary:
+  2441/401, 3 pre-existing signal exits (bug_OS21193960,
+  Array_TypeConfusion_bugs ×2).
+- `out/e14-gates.log` — test-profile `zig build check` (2051/0),
+  debug-static `check-regression` (2103/0), `-Dprofile=jit check`
+  (check_jit PASS with the extended smoke, bytecode headers unchanged).
 
 ## 7. Residuals
 
 - The e12 card's 3 SIGBUS and 6 WASM-tagged signal exits belong to the
-  same 118-crash population; both after-suite runs show zero exits of
-  either kind, so they were all the same defect under different memory
-  layouts (a corrupted `length`/`name` Var read can fault at addresses
-  other than 0x8 depending on the pointer bytes).
-- Masked, non-crash assertions are now observable where the crash used
-  to abort the script first (e.g. matchall test #15 lastIndex
-  [[Set]]-on-failed-match-reset under one specific profile input at
-  `-j10`); they pass standalone 5/5 with identical flags and are
-  load-order flakes, but the lastIndex shape is worth a look whenever
-  the regex-era lanes resume — not this lane's defect (it exists only
-  as a nondeterministic tiering flake and predates the fix by being
-  unreachable).
+  same 118-crash population; both recorded after-suite runs show zero
+  signal exits of either kind, so they were all the same defect under
+  different memory layouts (a corrupted `length`/`name` Var read can
+  fault at addresses other than 0x8 depending on the pointer bytes).
+- dynapogo remains load-sensitive outside this defect: the discarded
+  contended runs showed a handful of extra non-signal failures whose
+  names are all inside the recorded runs' passing sets. Not a defect of
+  this fix; worth remembering when reading ad-hoc `-j10` runs on a
+  busy machine.
+- The interpreted variant's `bug_OS21193960` /
+  `Array_TypeConfusion_bugs` signal exits are pre-existing (present
+  with and without the fix) and stay on the books as separate items.
 - No other unscaled constant-slot `IndirOpnd` store exists in the
   lowerer (audited: only LowerNewClassConstructor's two sites; slot 0's
   byte offset 0 is correct by identity).
