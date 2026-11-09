@@ -12,8 +12,14 @@ it can run against every profile. This gate is JIT-specific:
      (nm finds NativeCodeGenerator; a DISABLE_JIT build has no such symbol);
   2. a physical script runs under `-mic:1 -bgjit-` and under
      `-forceNative -off:simpleJit -bgJitDelay:0`, producing the expected
-     output. The script exercises a hot call, rest arguments, and apply,
-     so the JIT-configured interpreter and the native compiler both run;
+     output. The script exercises a hot call, rest arguments, apply, and
+     a class definition + instantiation, so the JIT-configured interpreter
+     and the native compiler both run. The class leg pins
+     LowerNewClassConstructor's aux-slot stores: e14
+     (doc/e14-fulljit-sigsegv.md) showed a byte-offset/slot-index mixup
+     there reads a null prototype Var out of the class constructor and
+     SIGSEGVs every dynapogo-mode `new` -- invisible to a classless
+     smoke, which is why this gate missed the 109-test fulljit family;
   3. `verify_bytecode_pure.py --jit --verify` (run as a separate build step)
      checks the JIT builtin bytecode headers consumed by this profile.
 
@@ -38,8 +44,24 @@ for (var i = 0; i < 200; i++) { total = add(2, 3); }
 print("jit-add " + total);
 print("jit-rest " + rest(1, 2, 3));
 print("jit-apply " + sum.apply(undefined, [1, 2, 3, 4, 5, 6, 7]));
+// e14: a JIT-created class constructor (LowerNewClassConstructor writes the
+// prototype slot from lowered code) whose slot VALUES are read and whose
+// result is constructed. The fulljit family crashed in
+// NewScObjectCommon -> GetTypeId(null) because a byte-vs-slot offset mixup
+// left the prototype slot zeroed; reading length/name/prototype and calling
+// new covers that path under both flag sets.
+class P { constructor() { this.x = 7; } }
+print("jit-class-keys " + Object.getOwnPropertyNames(P).join(","));
+print("jit-class-vals " + P.length + "," + P.name + "," + (P.prototype === P.prototype));
+var p = new P();
+print("jit-class-new " + p.x + "," + (p instanceof P));
+var Anon = class extends P {};
+var a = new Anon();
+print("jit-class-derived " + (a instanceof Anon) + "," + (a instanceof P) + "," + Anon.name);
 """
-WANT = ["jit-add 5", "jit-rest 2", "jit-apply 28"]
+WANT = ["jit-add 5", "jit-rest 2", "jit-apply 28",
+        "jit-class-keys length,name,prototype", "jit-class-vals 0,P,true",
+        "jit-class-new 7,true", "jit-class-derived true,true,Anon"]
 
 
 def check_symbols(ch):

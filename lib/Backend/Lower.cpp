@@ -26284,11 +26284,14 @@ Lowerer::LowerNewClassConstructor(IR::Instr * instr)
     InsertMove(IR::IndirOpnd::New(opndAuxSlots, 0, TyMachPtr, m_func, true), opndConstructor, instrNext, false);
 
     // Put proto in constructor's slot 2 (class constructor slot layout:
-    // length(0), name(1), prototype(2)).
+    // length(0), name(1), prototype(2)). IndirOpnd offsets are bytes, so scale
+    // the slot index by sizeof(Var) like the other constant aux-slot stores
+    // (byte offset 2 would misalign the store and leave the prototype slot
+    // null: a garbage-Var read in NewScObjectCommon -> GetTypeId).
 
     opndAuxSlots = IR::RegOpnd::New(TyMachPtr, m_func);
     InsertMove(opndAuxSlots, IR::IndirOpnd::New(opndConstructor, Js::DynamicObject::GetOffsetOfAuxSlots(), TyMachPtr, m_func, true), instrNext, false);
-    InsertMove(IR::IndirOpnd::New(opndAuxSlots, 2, TyMachPtr, m_func, true), opndProto, instrNext, false);
+    InsertMove(IR::IndirOpnd::New(opndAuxSlots, 2 * sizeof(Js::Var), TyMachPtr, m_func, true), opndProto, instrNext, false);
 
     return instrPrev;
 }
