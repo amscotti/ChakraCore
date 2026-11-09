@@ -213,3 +213,30 @@ after-log (19:01) is likewise inside the fixed window.
 - Linux JIT gates can now treat dynapogo as authoritative for this
   family; the standing Mac-only evidence cards (open-cards.md:103/104)
   still require Linux runs.
+
+### Review outcome (dual ACCEPT, folds landed)
+
+Both reviewers ACCEPTed with zero `[bug]`. The general review verified
+the offset semantics and ran an independent 65-site audit (no other
+unscaled stores; the concat-idiom identified as the unit-confusion
+source); the smoke was proven capable of catching B5 at landing. The
+adversarial review ran a 348-site parser audit (3 hits, all benign),
+set-delta forensics proving the blast radius EXACTLY the non-WASM
+signal-exit set with zero baseline contamination, runtime ground-truth
+verification of every B5 shape site (slot-index APIs interpreter-side,
+byte-offset JIT-side, now consistent), A3 marshalling arg-order
+re-derivation, an independent dynapogo slice of the affected dirs
+(617/0), and live check_jit verification under both tiers.
+
+**Folds:** the stale j10 figures (1994/311) were corrected to the
+authoritative preserved 2019/286 by the second implementer session
+(`69281b6e4`) — both preserved j10 runs are set-identical to j4 (zero
+signals); the adversarial R1 is thereby discharged. R2 noted: the
+interpreted before-control log (broken-binary, 20 crashes) is
+unpreserved — the 20→0 delta rests on the receipt plus the 3 residual
+crashers verified identical; accepted. Nits folded: "length alone
+SIGSEGVs" phrasing corrected (length reads as a huge TaggedInt; the
+crash comes from the name read and `new`); `out/b3-base-bin` is a
+pre-BUG (Nov 3) reference, not pre-fix. The masked matchall #15 flake
+is proven independent (zero path intersection; 40/40 clean) and stays
+carded for the regex lanes.
