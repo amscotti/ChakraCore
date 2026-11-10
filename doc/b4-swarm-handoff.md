@@ -170,3 +170,20 @@ marked high.
 - Every finding/fix needs a `file:line` anchor and a reproduction or
   differential proof; style preferences are not bugs.
 - Keep engine code/tests/comments free of plan-phase references.
+
+## 7. Mac ARM64 cross-check (2026-11-10)
+
+The batch was pulled to the Mac ARM64 host and the full gate suite
+re-run at `d3059b79e` (the handoff HEAD):
+
+| Gate | Result |
+|---|---|
+| `zig build check-regression` (test) | **2051/0 PASS** |
+| `zig build check-regression -Dprofile=debug-static` | **2103/0 PASS** |
+| `zig build -Dprofile=jit check` | **PASS — 646/646 steps** |
+
+The shared-code fixes in this batch (numeric range guards,
+`toExponential`/`toPrecision` ordering, typed-array index guard,
+oversized repeat/pad, bounded FDE/CIE handling, regex terminator
+cache, WASM validation-only codegen) are cross-platform neutral: both
+Mac pins are unchanged and the JIT check is green.
