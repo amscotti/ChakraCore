@@ -61,6 +61,23 @@ var tests = [
         test(Float64Array);
     }
   },
+  {
+    name: "Out-of-range numeric indices must not wrap to a valid element",
+    body: function () {
+        var a = new Uint8Array([1, 2, 3, 4]);
+        a[4294967296] = 99;   // 2^32 must not wrap to index 0
+        a[4294967297] = 77;   // ... nor to index 1
+        a[-1] = 55;
+        assert.areEqual(1, a[0], "2^32 store must not hit element 0");
+        assert.areEqual(2, a[1], "2^32+1 store must not hit element 1");
+        assert.areEqual(undefined, a["4294967296"], "out-of-range index is not stored");
+        assert.areEqual(undefined, a[-1], "negative numeric index is not stored");
+
+        var b = new Uint8Array([1, 2, 3, 4]);
+        for (var i = 0; i < 3; i++) { b[4294967296] = 99; } // exercise a hot set site
+        assert.areEqual(1, b[0], "JIT out-of-range store must not wrap");
+    }
+  },
 ];
 
 testRunner.runTests(tests, { verbose: WScript.Arguments[0] != "summary" });

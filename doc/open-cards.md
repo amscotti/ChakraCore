@@ -169,3 +169,20 @@ e13 swarm-triage lane (doc/e13-swarm-triage.md): gate counts unchanged
 **2051/2103** (host/tooling/docs only, no new rlexe entries);
 `check-build-tools` **65 → 67** (+2 `RegenGuidPathTests` for the mint-path
 casing fix).
+
+## 8. B4 swarm review residuals (2026-11-10)
+
+Filed by the ten-lens review swarm on `4779e73bc`. Fixed-in-tree items are
+listed in the commit receipt; these are the deliberately deferred ones.
+
+| Card | Source | Status | Evidence / notes |
+|---|---|---|---|
+| ES2018 100-digit `toFixed`/`toPrecision`/`toExponential` | RL-02/RL-04, SEC-04 | open (feature, medium) | The formatter computes at most 20 significant digits (`kcchMaxSig`, `NumberUtilities_strtod.cpp:17`); raising the API cap to 100 without an exact-conversion path would emit wrong low digits. Range checks and argument coercion are fixed; the 4 certified `range.js` failures remain. |
+| `Number.prototype.toString(radix)` low digits for large integers | RL-06 | open (correctness, medium-low) | 195/439 integer-valued fuzz doubles mismatch exact base-36 for large magnitudes; the 180 test262 Number/toString tests are blind here. Needs an exact big-integer radix conversion, not a guard. |
+| Async debugger attach + suspended coroutine reparse family | CA-01…CA-05 | open (debugger, high) | In-place debug reparse of a live plain-async body leaves `GeneratorStateHelper::IsDone` reading the old block against a longer body; verified hang, detach SIGSEGV, and generator returning `undefined`. `ENABLE_SUSPENDED_COROUTINE_REPARSE_GUARD` is 0 on Linux x64; the guard is coupled to `GLOBAL_ENABLE_WRITE_BARRIER` and needs a frame-lifetime fix that also works where the finalized-allocation arm is compiled out. |
+| ARM/ARM64 CIE-vs-FDE registration | MEM/portability findings | open (portability, medium) | `ChakraEhFrameFdeStart` is x86-64 gated; `arm/` and `arm64/` `XDataAllocator` still pass the CIE start to `__register_frame`. Non-Apple ARM64 also emits Windows `.xdata`, so the fix must select by buffer format, not architecture. |
+| `_LIBCPP_VERSION` as unwinder contract proxy | ARCH-04, PORT-01 | open (build-contract, medium) | The FDE-vs-CIE choice is inferred from a stdlib header macro, not from the linked unwinder. A libstdc++-headers + LLVM-libunwind build would register nothing. Replace with a build-contract define when a second unwinder profile exists. |
+| FullJit without dynamic profile is ungated | B4-JIT-05 | open (coverage, low) | Both Linux regression variants either disable simple JIT or supply `-dynamicprofileinput`; a no-profile FullJit run (287/0 in the reviewer probe, 35 s) is a distinct path worth adding as a third variant. |
+| `check-jit` proves output, not execution | BT-03 | open (tooling, medium) | The gate checks an `nm` symbol and identical stdout from `-mic`/`-forceNative`; a build that ignores the JIT flags still passes. Add a JIT-only observable (e.g. a compiled-function counter) as a control. |
+| Deep legacy regex class nesting hard-fails at ~36k | pr-02 | open (parser, low) | VValidateClass's stack probe raises the stack-overflow ParseError even though Node accepts 40k nested `[`; the VScanAbort bound does not cover the probe path. |
+| `WebAssembly.Module` vs `WebAssembly.validate` deferred gap | SEC-02 | open (wasm, medium) | Deferred bodies are not validated at construction, so invalid bytes can construct a Module that only throws on first call. Eager `ValidateFunction` was attempted and reverted: it mutated the shared reader/function info and rejected valid import/instance modules (`WasmSpec/jsapi`). Needs a side-effect-free validator. |

@@ -3043,7 +3043,15 @@ namespace Js
                 dIndexValue = JavascriptNumber::GetValue(index);
             }
 
-            // OK to lose data because we want to verify ToInteger()
+            // OK to lose data because we want to verify ToInteger().
+            // Range-check in double space first: the uint32 cast is UB
+            // outside [0, 2^32-1] and clang 22 folds the round-trip check
+            // below to true, so a[2^32] wrapped to element 0 and wrote it.
+            if (!(dIndexValue >= 0.0 && dIndexValue <= 4294967295.0))
+            {
+                *skipOperation = true;
+                return 0;
+            }
             uint32 uint32Index = (uint32)dIndexValue;
 
             // IsInteger()

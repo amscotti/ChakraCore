@@ -121,8 +121,19 @@ namespace Js
         else
 #endif
         {
-            // The cast will result in 0x8000000000000000 in T4_64 if the value is NaN Inf or Zero, or overflows int64
-            T4_64 = static_cast<INT64>(T1);
+            // The cast is UB outside int64; guard in double space and use the
+            // same overflow sentinel the hardware conversion produces.
+            if (T1 >= -9223372036854775808.0 && T1 < 9223372036854775808.0)
+            {
+                T4_64 = static_cast<INT64>(T1);
+            }
+            else
+            {
+                // Match the x64 conversion sentinel: all NaN/Inf/out-of-range
+                // values produce INT64_MIN. (The *InvalidInt64 names are
+                // historically reversed relative to their bit patterns.)
+                T4_64 = Pos_InvalidInt64;
+            }
         }
 
 #if defined(_M_ARM32_OR_ARM64)

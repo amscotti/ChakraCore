@@ -35,6 +35,10 @@ struct XDataAllocation : public SecondaryAllocation
 #ifdef _WIN32
     RUNTIME_FUNCTION pdata;
     FunctionTableHandle functionTable;
+#else
+    // Exact pointer handed to __register_frame, reused for deregistration:
+    // the buffer head is cleared on reuse, so recomputing it can differ.
+    const void* registeredFde = nullptr;
 #endif
 };
 

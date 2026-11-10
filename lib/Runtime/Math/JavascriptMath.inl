@@ -292,7 +292,17 @@ namespace Js
             // in which case we'll use slow path.
 
             // Try casting to int32 first. Results in 0x80000000 if it overflows.
-            int32 T4_32 = static_cast<int32>(T1);
+            // Guard in double space: the cast is UB outside int32 and clang 22
+            // can fold the sentinel test below.
+            int32 T4_32;
+            if (T1 >= -2147483648.0 && T1 <= 2147483647.0)
+            {
+                T4_32 = static_cast<int32>(T1);
+            }
+            else
+            {
+                T4_32 = 0x80000000;
+            }
             if (T4_32 != 0x80000000)
             {
                 return T4_32;

@@ -817,6 +817,22 @@ var tests = [
             assert.areEqual(null, /[\q{ab}]/iv.exec("ba"), "order still matters");
         }
     },
+    {
+        name: "Speculative v-scan is bounded at the literal terminator",
+        body() {
+            // The trailing comment is part of the pass-0 speculative scan
+            // window; it must not be parsed as part of the literal.
+            var trailing = /[[]/u; // trailing comment with \p{Nope}
+            assert.areEqual(true, trailing.test("["), "legacy class literal with trailing source");
+
+            compileOk("/[[]/u");
+            compileOk("/[[]/");
+            compileError("/[\\p{Nope}]/u");
+
+            var nestedLegacy = /[a[b]c]/; // nested '[' is literal in a legacy class
+            assert.areEqual(false, nestedLegacy.test("b"), "legacy nested class stays literal");
+        }
+    },
 ];
 
 testRunner.runTests(tests, { verbose: WScript.Arguments[0] != "summary" });

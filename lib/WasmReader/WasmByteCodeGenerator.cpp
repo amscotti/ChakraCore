@@ -600,10 +600,15 @@ void WasmBytecodeGenerator::GenerateFunction()
 #endif
 
     Js::AsmJsFunctionInfo* info = GetFunctionBody()->GetAsmJsFunctionInfo();
-    mTypedRegisterAllocator.CommitToFunctionBody(GetFunctionBody());
-    mTypedRegisterAllocator.CommitToFunctionInfo(info, GetFunctionBody());
-
-    GetFunctionBody()->CheckAndSetOutParamMaxDepth(m_maxArgOutDepth);
+    if (!IsValidating())
+    {
+        // Validation must not publish frame/register layout: the deferred
+        // compile of the same body runs this path again and SetTotalSizeinBytes
+        // asserts on a second commit.
+        mTypedRegisterAllocator.CommitToFunctionBody(GetFunctionBody());
+        mTypedRegisterAllocator.CommitToFunctionInfo(info, GetFunctionBody());
+        GetFunctionBody()->CheckAndSetOutParamMaxDepth(m_maxArgOutDepth);
+    }
     autoDisableInterrupt.Completed();
 }
 

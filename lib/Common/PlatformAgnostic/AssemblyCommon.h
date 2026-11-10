@@ -29,9 +29,14 @@ inline const void* ChakraEhFrameFdeStart(const void* ehframe)
         | (static_cast<uint32_t>(bytes[1]) << 8)
         | (static_cast<uint32_t>(bytes[2]) << 16)
         | (static_cast<uint32_t>(bytes[3]) << 24);
-    if (cieLength == 0xffffffffu)
+    // A CIE length outside this range cannot describe the CIE+FDE buffers we
+    // hand to __register_frame (XDATA_SIZE is 0x80). Do not derive a pointer
+    // past the buffer and do not abort the process on malformed input: fall
+    // back to the raw pointer so the caller's registration is at least
+    // bounded to the object it owns.
+    if (cieLength < 4 || cieLength > 0x100)
     {
-        __builtin_trap();
+        return ehframe;
     }
     return bytes + sizeof(uint32_t) + cieLength;
 #else

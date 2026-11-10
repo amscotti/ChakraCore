@@ -233,6 +233,7 @@ namespace UnifiedRegex
         , vClassSawNested(false)
         , vScanSpeculative(false)
         , vScanLimit(nullptr)
+        , vLiteralEnd(nullptr)
         , vClassSpanStart(nullptr)
         , vClassSpanEnd(nullptr)
         , decimalEscapes(nullptr)
@@ -1245,16 +1246,21 @@ namespace UnifiedRegex
         // stop at the literal terminator. This lets valid nested v classes
         // finish while still preventing the scan from reading the tail of
         // the source line.
-        const EncodedChar* literalEnd = legacyEnd;
-        while (literalEnd < inputLim && *literalEnd != 0 &&
-               *literalEnd != '/' && *literalEnd != '\n' && *literalEnd != '\r')
+        const EncodedChar* literalEnd = this->vLiteralEnd;
+        if (literalEnd == nullptr || literalEnd < legacyEnd)
         {
-            if (*literalEnd == '\\' && literalEnd + 1 < inputLim)
+            literalEnd = legacyEnd;
+            while (literalEnd < inputLim && *literalEnd != 0 &&
+                   *literalEnd != '/' && *literalEnd != '\n' && *literalEnd != '\r')
             {
-                literalEnd += 2;
-                continue;
+                if (*literalEnd == '\\' && literalEnd + 1 < inputLim)
+                {
+                    literalEnd += 2;
+                    continue;
+                }
+                ++literalEnd;
             }
-            ++literalEnd;
+            this->vLiteralEnd = literalEnd;
         }
         this->vScanLimit = literalEnd;
         bool mayContainStrings = false;
@@ -6368,6 +6374,7 @@ namespace UnifiedRegex
 
         // Body, pass 0
         SetPosition(input, inputLim, true);
+        this->vLiteralEnd = nullptr;
 
         PatternPass0();
         outBodyEncodedChars = Chars<EncodedChar>::OSB(next, input);
@@ -6441,6 +6448,7 @@ namespace UnifiedRegex
 
         // Body, pass 0
         SetPosition(input, inputLim, true);
+        this->vLiteralEnd = nullptr;
         PatternPass0();
         outBodyEncodedChars = Chars<EncodedChar>::OSB(next, input);
         outBodyChars = Pos();

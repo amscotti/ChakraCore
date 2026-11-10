@@ -3216,6 +3216,15 @@ case_2:
         }
         finalBufferCount = finalBufferCount + 1;
 
+        // The recycler aborts the process for a single allocation at or above
+        // MaxSingleAllocSizeInMB (2048 MB default), and MaxCharLength allows a
+        // buffer whose char16 size exceeds that. Throw the spec-level
+        // RangeError instead of dying in LargeAlloc.
+        if (finalBufferCount >= (1u << 30))
+        {
+            JavascriptError::ThrowRangeError(scriptContext, JSERR_OutOfBoundString);
+        }
+
         char16* buffer = RecyclerNewArrayLeaf(scriptContext->GetRecycler(), char16, finalBufferCount);
 
         if (currentLength == 1)

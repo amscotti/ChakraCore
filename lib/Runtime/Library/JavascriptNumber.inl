@@ -274,7 +274,7 @@ namespace Js
                 Js::JavascriptError::ThrowOutOfMemoryError(scriptContext);
             }
 
-            nOut1 = Js::NumberUtilities::FDblToStr(value, Js::NumberUtilities::FormatFixed, formatDigits, psz, nOut);
+            nOut1 = Js::NumberUtilities::FDblToStr(value, formatType, formatDigits, psz, nOut);
             Assert(nOut1 == nOut);
         }
 

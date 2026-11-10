@@ -612,8 +612,6 @@ namespace Js
         }
 
         JavascriptString * nanF;
-        if (nullptr != (nanF = ToStringNanOrInfinite(value, scriptContext)))
-            return nanF;
 
         // If the Fraction param. is not present we have to output as many fractional digits as we can
         int fractionDigits = -1;
@@ -636,12 +634,23 @@ namespace Js
             }
             else
             {
-                fractionDigits = (int)JavascriptConversion::ToInteger(aFractionDigits, scriptContext);
+                double fractionDigitsRaw = JavascriptConversion::ToInteger(aFractionDigits, scriptContext);
+                // ES2018 allows 0..100; check in double space before the cast.
+                if (!noRangeCheck && !(fractionDigitsRaw >= 0 && fractionDigitsRaw <= 20))
+                {
+                    JavascriptError::ThrowRangeError(scriptContext, JSERR_FractionOutOfRange);
+                }
+                fractionDigits = (int)fractionDigitsRaw;
             }
-            if(!noRangeCheck && (fractionDigits < 0 || fractionDigits >20))
+            if(!noRangeCheck && (fractionDigits < 0 || fractionDigits > 20))
             {
                 JavascriptError::ThrowRangeError(scriptContext, JSERR_FractionOutOfRange);
             }
+        }
+
+        if (nullptr != (nanF = ToStringNanOrInfinite(value, scriptContext)))
+        {
+            return nanF;
         }
 
         return FormatDoubleToString(value, Js::NumberUtilities::FormatExponential, fractionDigits, scriptContext);
@@ -678,7 +687,6 @@ namespace Js
             JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NeedNumber, _u("Number.prototype.toFixed"));
         }
         int fractionDigits = 0;
-        bool isFractionDigitsInfinite = false;
         if(args.Info.Count > 1)
         {
             //use the first arg as the fraction digits, ignore the rest.
@@ -696,9 +704,12 @@ namespace Js
             else
             {
                 double fractionDigitsRaw = JavascriptConversion::ToInteger(aFractionDigits, scriptContext);
-                isFractionDigitsInfinite =
-                    fractionDigitsRaw == JavascriptNumber::NEGATIVE_INFINITY ||
-                    fractionDigitsRaw == JavascriptNumber::POSITIVE_INFINITY;
+                // Range-check in double space before the int cast (UB outside
+                // int; the current formatter supports 0..20 fractional digits).
+                if (!(fractionDigitsRaw >= 0 && fractionDigitsRaw <= 20))
+                {
+                    JavascriptError::ThrowRangeError(scriptContext, JSERR_FractionOutOfRange);
+                }
                 fractionDigits = (int)fractionDigitsRaw;
             }
         }
@@ -764,7 +775,14 @@ namespace Js
         }
         else
         {
-            precision = (int) JavascriptConversion::ToInt32(aPrecision, scriptContext);
+            double precisionRaw = JavascriptConversion::ToInteger(aPrecision, scriptContext);
+            // Range-check in double space before the int cast (UB outside
+            // int; the current formatter supports 1..21 significant digits).
+            if (!(precisionRaw >= 1 && precisionRaw <= 21))
+            {
+                JavascriptError::ThrowRangeError(scriptContext, JSERR_PrecisionOutOfRange);
+            }
+            precision = (int)precisionRaw;
         }
 
         JavascriptString * nanF;
@@ -903,7 +921,14 @@ namespace Js
             }
             else if(JavascriptOperators::GetTypeId(aRadix) != TypeIds_Undefined)
             {
-                radix = (int)JavascriptConversion::ToInteger(aRadix,scriptContext);
+                double radixRaw = JavascriptConversion::ToInteger(aRadix,scriptContext);
+                // Range-check in double space before the int cast (UB outside
+                // int; clang folds the later range check otherwise).
+                if (!(radixRaw >= 2 && radixRaw <= 36))
+                {
+                    JavascriptError::ThrowRangeError(scriptContext, JSERR_FunctionArgument_Invalid, _u("Number.prototype.toString"));
+                }
+                radix = (int)radixRaw;
             }
 
         }

@@ -161,7 +161,9 @@ void XDataAllocator::Register(XDataAllocation * xdataInfo, ULONG_PTR functionSta
 
 #else  // !_WIN32
     Assert(ReadHead(xdataInfo->address));  // should be non-empty .eh_frame
-    __REGISTER_FRAME(ChakraEhFrameFdeStart(xdataInfo->address));
+    const void* fdeStart = ChakraEhFrameFdeStart(xdataInfo->address);
+    xdataInfo->registeredFde = fdeStart;
+    __REGISTER_FRAME(fdeStart);
 #endif
 }
 
@@ -177,6 +179,13 @@ void XDataAllocator::Unregister(XDataAllocation * xdataInfo)
 
 #else  // !_WIN32
     Assert(ReadHead(xdataInfo->address));  // should be non-empty .eh_frame
-    __DEREGISTER_FRAME(ChakraEhFrameFdeStart(xdataInfo->address));
+    // __deregister_frame matches the exact address passed to register; the
+    // buffer may have been cleared or reused since, so never recompute it.
+    const void* fdeStart = xdataInfo->registeredFde;
+    if (fdeStart != nullptr)
+    {
+        __DEREGISTER_FRAME(fdeStart);
+        xdataInfo->registeredFde = nullptr;
+    }
 #endif
 }

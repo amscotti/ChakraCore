@@ -629,6 +629,14 @@ var tests = [
             fround_testsub();
             fround_testsub(); // ok till this point
             assert.areEqual(  1, fround_testsub(), "Math.fround() expects both input and output type specialized to float64") ;
+
+            // Constant folding must not materialize out-of-int32-range float
+            // constants as TaggedInt(INT_MIN); the JIT path owns this fold.
+            function froundBoundary() { return Math.fround(2147483647); }
+            froundBoundary();
+            froundBoundary();
+            assert.areEqual(2147483648, froundBoundary(), "Math.fround(2147483647) constant fold");
+            assert.isTrue(Math.exp(30) > 1e13, "Math.exp(30) constant fold");
         }
     },
 ];

@@ -217,6 +217,10 @@ WebAssemblyModule::CreateModule(
             currentBody = webAssemblyModule->GetWasmFunctionInfo(i)->GetBody();
             if (PHASE_ENABLED(WasmDeferredPhase, currentBody))
             {
+                // Deferred compilation: validate at first call. Eager validation
+                // here used the shared WasmReaderInfo and rejected valid
+                // import/instance modules (WasmSpec/jsapi), so the
+                // validate-vs-constructor gap stays a tracked open card.
                 continue;
             }
             readerInfo = currentBody->GetAsmJsFunctionInfo()->GetWasmReaderInfo();

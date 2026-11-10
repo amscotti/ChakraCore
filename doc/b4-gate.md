@@ -20,8 +20,12 @@ record ([b3-profiles.md](b3-profiles.md) §12).
 > by the run are fixed and documented in
 > [b4-linux-run.md](b4-linux-run.md). The certified Linux test262 baseline
 > is recorded: **77,354 / 3,190** edition-selected (vs Mac
-> 77,595/2,949); the delta is Unicode-version skew from system ICU 74.2
-> (Unicode 15.1), with identical engine-defect/feature buckets.
+> 77,595/2,949). The delta is **not** pure Unicode skew: the
+> engine-defect-on-existing bucket is 1,164 vs Mac 1,010 (+154), the
+> required-feature-missing bucket is 278 vs 202 (+76), and the host
+> bucket is 14 vs 3 (jobs=8 oversubscription SIGKILLs). Only the host
+> delta is attributed; the +230 engine/feature delta is tracked as a
+> follow-up, not claimed identical.
 
 ## 1. Final proof re-runs (2026-10-12, this step)
 
@@ -164,6 +168,12 @@ Every B4.1–B4.3 doc pointer checked still resolves; **zero dangles**:
 | B4.3 metadata | artifact-identity gate green | .so 236/236, ch 1248⊇1, archives 667/90/1/11 | [b4-linux.md](b4-linux.md) §8.6, re-run §1.2 |
 | B4.3 execution | BLOCKED by root-caused qemu 10.2.3 address-layout abort (guest stack ~247TB vs PAL 128TB ceiling); legacy binary aborts identically | 0 JS ran on either binary | [b4-linux.md](b4-linux.md) §8.2 |
 | B4.4 (this step) | Mac no-regression + Linux green-leg re-proof + hygiene + verdict | 1959/0, 27 OK, rc=0 ×3, 0 cores, 0 dangles | §1 above |
+
+The B4.3 rows above are the original in-container observations. After the
+native Linux run added `JavascriptWeakRef.cpp` and
+`JavascriptFinalizationRegistry.cpp`, the live tree builds **684** TUs and
+the metadata gate reports **237** `.so` exports, **669** archive members
+(90 PAL / 1 Codex / 11 PlatformAgnostic); those are the current pins.
 
 ## 3. B4 Done, clause by clause (plan §B4)
 
