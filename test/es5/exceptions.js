@@ -285,12 +285,12 @@ catch(o)
 //17.7.4.5
 try
 {
-    var x = (123.45).toFixed(25);
-    write("(123.45).toFixed(25);  - no exception: not expected es3, es5")
+    var x = (123.45).toFixed(101);
+    write("(123.45).toFixed(101);  - no exception: not expected es3, es5")
 }
 catch(o)
 {
-    write("(123.45).toFixed(25); - RangeError exception : expected es3, es5::: " + o)
+    write("(123.45).toFixed(101); - RangeError exception : expected es3, es5::: " + o)
 }
 
 

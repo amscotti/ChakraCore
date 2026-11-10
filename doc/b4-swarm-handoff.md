@@ -147,6 +147,14 @@ marked high.
 
 ## 5. Suggested order for the next agent
 
+D1–D4 batch update (2026-11-10): D1, D2+D3 and D4 are implemented
+and dual-reviewed on Mac ARM64; Mac gates are 2053/0 test, 2105/0
+debug-static, jit 646/646, and targeted Number test262 is 276/276. The
+remaining work is the **Linux native verification** (D1 attach/detach,
+WASM deferred validation, regression pin re-record) and the full
+certified test262 run. See [b4-d1-d4.md](b4-d1-d4.md) §5 for the exact
+checklist before continuing with the list below.
+
 1. Run the **full certified test262** on `250d25175` and record the
    before/after key-join. This is the missing global evidence.
 2. D1, because it is the only crash/hang family still reachable from the

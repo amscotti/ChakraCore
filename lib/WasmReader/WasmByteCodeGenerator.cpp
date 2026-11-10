@@ -617,7 +617,13 @@ void WasmBytecodeGenerator::EnregisterLocals()
     uint32 nLocals = m_funcInfo->GetLocalCount();
     m_locals = AnewArray(&m_alloc, WasmLocal, nLocals);
 
-    m_funcInfo->GetBody()->SetFirstTmpReg(nLocals);
+    // Validation must not publish frame layout: SetFirstTmpReg is one-shot
+    // (FunctionBody asserts it is not reset), and the deferred compile of the
+    // same body runs this path again. Only the real compile owns the field.
+    if (!IsValidating())
+    {
+        m_funcInfo->GetBody()->SetFirstTmpReg(nLocals);
+    }
     for (uint32 i = 0; i < nLocals; ++i)
     {
         WasmTypes::WasmType type = m_funcInfo->GetLocal(i);

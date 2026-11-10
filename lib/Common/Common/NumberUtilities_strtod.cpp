@@ -2332,6 +2332,351 @@ static int RoundTo(byte *pbSrc, byte *pbLim, int nDigits, __out_bcount(nDigits+1
     return retVal;
 }
 
+#if NUMBERUTILS_EXACT_FORMATTING
+// The exact decimal expansion of a double has at most 767 significant digits
+// (the largest is a subnormal: mantissa * 5^1074). Asking to_chars for 767
+// fractional digits in scientific form therefore exposes every digit without
+// rounding, and 768 significant digits leaves one spare. The tie rule is
+// applied below on the magnitude (round half up), matching the spec's "pick
+// the larger n" for positive magnitudes and the existing formatter's behavior
+// for negative values.
+static const int kcchExactSigDigits = 767;
+
+static bool GetExactSignificantDigits(double dbl, char* digits, int* pn, int* pExp10)
+{
+    Assert(dbl > 0);
+    char buf[kcchExactSigDigits + 32];
+    auto res = std::to_chars(buf, buf + sizeof(buf), dbl, std::chars_format::scientific, kcchExactSigDigits);
+    if (res.ec != std::errc())
+    {
+        return false;
+    }
+    *res.ptr = '\0';
+
+    char* p = buf;
+    int n = 0;
+    digits[n++] = *p++;
+    int exp = 0;
+    if (*p == '.')
+    {
+        ++p;
+        while (*p != '\0' && *p != 'e' && *p != 'E')
+        {
+            digits[n++] = *p++;
+        }
+    }
+    if (*p == 'e' || *p == 'E')
+    {
+        ++p;
+        bool negative = false;
+        if (*p == '+' || *p == '-')
+        {
+            negative = (*p == '-');
+            ++p;
+        }
+        while (*p >= '0' && *p <= '9')
+        {
+            exp = exp * 10 + (*p - '0');
+            ++p;
+        }
+        if (negative)
+        {
+            exp = -exp;
+        }
+    }
+    while (n > 1 && digits[n - 1] == '0')
+    {
+        --n;
+    }
+    *pn = n;
+    *pExp10 = exp + 1;
+    return true;
+}
+
+// Round the exact digit string to 'keep' significant digits, half up on the
+// magnitude. Returns the resulting digit count (the caller pads with zeros).
+static int RoundExactDigits(char* digits, int n, int keep, int* pExp10)
+{
+    if (keep >= n)
+    {
+        return n;
+    }
+    if (keep <= 0)
+    {
+        return 0;
+    }
+    if (digits[keep] >= '5')
+    {
+        int i = keep - 1;
+        while (i >= 0)
+        {
+            if (digits[i] == '9')
+            {
+                digits[i] = '0';
+                --i;
+            }
+            else
+            {
+                ++digits[i];
+                break;
+            }
+        }
+        if (i < 0)
+        {
+            memmove(digits + 1, digits, keep);
+            digits[0] = '1';
+            ++(*pExp10);
+        }
+    }
+    return keep;
+}
+
+// Render rounded digits in fixed notation with exactly 'fractionDigits' digits
+// after the point.
+static int RenderExactFixed(char* out, const char* digits, int n, int exp10, int fractionDigits, bool negative)
+{
+    int len = 0;
+    if (negative)
+    {
+        out[len++] = '-';
+    }
+    if (exp10 <= 0)
+    {
+        out[len++] = '0';
+        if (fractionDigits > 0)
+        {
+            out[len++] = '.';
+            const int leadingZeros = -exp10;
+            for (int i = 0; i < fractionDigits; ++i)
+            {
+                if (i < leadingZeros)
+                {
+                    out[len++] = '0';
+                }
+                else
+                {
+                    const int digit = i - leadingZeros;
+                    out[len++] = (digit < n) ? digits[digit] : '0';
+                }
+            }
+        }
+    }
+    else
+    {
+        for (int i = 0; i < exp10; ++i)
+        {
+            out[len++] = (i < n) ? digits[i] : '0';
+        }
+        if (fractionDigits > 0)
+        {
+            out[len++] = '.';
+            for (int i = 0; i < fractionDigits; ++i)
+            {
+                const int digit = exp10 + i;
+                out[len++] = (digit < n) ? digits[digit] : '0';
+            }
+        }
+    }
+    out[len] = '\0';
+    return len;
+}
+
+// Render rounded digits in exponential notation with exactly 'fractionDigits'
+// digits after the point.
+static int RenderExactExponential(char* out, const char* digits, int n, int exp10, int fractionDigits, bool negative)
+{
+    int len = 0;
+    if (negative)
+    {
+        out[len++] = '-';
+    }
+    out[len++] = digits[0];
+    if (fractionDigits > 0)
+    {
+        out[len++] = '.';
+        for (int i = 1; i <= fractionDigits; ++i)
+        {
+            out[len++] = (i < n) ? digits[i] : '0';
+        }
+    }
+    out[len++] = 'e';
+    int exp = exp10 - 1;
+    if (exp < 0)
+    {
+        out[len++] = '-';
+        exp = -exp;
+    }
+    else
+    {
+        out[len++] = '+';
+    }
+    char expDigits[8];
+    int expCount = 0;
+    do
+    {
+        expDigits[expCount++] = (char)('0' + (exp % 10));
+        exp /= 10;
+    } while (exp != 0);
+    while (expCount > 0)
+    {
+        out[len++] = expDigits[--expCount];
+    }
+    out[len] = '\0';
+    return len;
+}
+
+static int RenderExactZero(char* out, bool negative, bool exponential, int fractionDigits)
+{
+    int len = 0;
+    if (negative)
+    {
+        out[len++] = '-';
+    }
+    out[len++] = '0';
+    if (exponential)
+    {
+        if (fractionDigits > 0)
+        {
+            out[len++] = '.';
+            for (int i = 0; i < fractionDigits; ++i)
+            {
+                out[len++] = '0';
+            }
+        }
+        out[len++] = 'e';
+        out[len++] = '+';
+        out[len++] = '0';
+    }
+    else
+    {
+        if (fractionDigits > 0)
+        {
+            out[len++] = '.';
+            for (int i = 0; i < fractionDigits; ++i)
+            {
+                out[len++] = '0';
+            }
+        }
+    }
+    out[len] = '\0';
+    return len;
+}
+
+// Format a finite double with the exact decimal path. Returns the number of
+// characters written including the terminating NUL, or 0 if the conversion
+// failed (the caller then falls back to the legacy path).
+static int FormatExactDouble(double dbl, NumberUtilities::FormatType ft, int nDigits, char16* pchDst, int cchDst)
+{
+    bool negative = dbl < 0;
+    if (negative)
+    {
+        dbl = -dbl;
+    }
+
+    // A fixed-format result can reach 309 integer digits (largest double) plus
+    // 100 fractional digits, a sign, and the point; exponential/precision
+    // results are shorter.
+    char out[512];
+    int len;
+
+    if (dbl == 0)
+    {
+        // toPrecision(p) of zero is "0." followed by p-1 zeros (p significant
+        // digits including the leading zero); the other formats use p
+        // fractional digits.
+        const bool exponential = (ft == NumberUtilities::FormatExponential);
+        const int fractionDigits = (ft == NumberUtilities::FormatPrecision) ? nDigits - 1 : nDigits;
+        len = RenderExactZero(out, negative, exponential, fractionDigits);
+    }
+    else
+    {
+        char digits[kcchExactSigDigits + 1];
+        int n = 0;
+        int exp10 = 0;
+        if (!GetExactSignificantDigits(dbl, digits, &n, &exp10))
+        {
+            return 0;
+        }
+
+        if (ft == NumberUtilities::FormatFixed)
+        {
+            const int keep = exp10 + nDigits;
+            if (keep < 0)
+            {
+                len = RenderExactZero(out, negative, false, nDigits);
+            }
+            else if (keep == 0)
+            {
+                if (digits[0] < '5')
+                {
+                    len = RenderExactZero(out, negative, false, nDigits);
+                }
+                else if (nDigits == 0)
+                {
+                    len = 0;
+                    if (negative)
+                    {
+                        out[len++] = '-';
+                    }
+                    out[len++] = '1';
+                    out[len] = '\0';
+                }
+                else
+                {
+                    len = 0;
+                    if (negative)
+                    {
+                        out[len++] = '-';
+                    }
+                    out[len++] = '0';
+                    out[len++] = '.';
+                    for (int i = 0; i < nDigits - 1; ++i)
+                    {
+                        out[len++] = '0';
+                    }
+                    out[len++] = '1';
+                    out[len] = '\0';
+                }
+            }
+            else
+            {
+                n = RoundExactDigits(digits, n, keep, &exp10);
+                len = RenderExactFixed(out, digits, n, exp10, nDigits, negative);
+            }
+        }
+        else if (ft == NumberUtilities::FormatExponential)
+        {
+            n = RoundExactDigits(digits, n, nDigits + 1, &exp10);
+            len = RenderExactExponential(out, digits, n, exp10, nDigits, negative);
+        }
+        else
+        {
+            Assert(ft == NumberUtilities::FormatPrecision);
+            n = RoundExactDigits(digits, n, nDigits, &exp10);
+            const int exp = exp10 - 1;
+            if (exp < -6 || exp >= nDigits)
+            {
+                len = RenderExactExponential(out, digits, n, exp10, nDigits - 1, negative);
+            }
+            else
+            {
+                len = RenderExactFixed(out, digits, n, exp10, nDigits - exp10, negative);
+            }
+        }
+    }
+
+    Assert(len > 0 && len + 1 <= (int)sizeof(out));
+    if (cchDst >= len + 1)
+    {
+        for (int i = 0; i <= len; ++i)
+        {
+            pchDst[i] = (char16)out[i];
+        }
+    }
+    return len + 1;
+}
+#endif // NUMBERUTILS_EXACT_FORMATTING
+
 /*
 * Format a number according to the given 'FormatType'. Used by
 * the toFixed, toExponential and toPrecision methods.
@@ -2376,6 +2721,25 @@ int Js::NumberUtilities::FDblToStr(double dbl, Js::NumberUtilities::FormatType f
         }
         return n;
     }
+#if NUMBERUTILS_EXACT_FORMATTING
+    // Every requested-digit format goes through the exact decimal expansion.
+    // The legacy BCD paths compute at most 20 significant digits (and their
+    // fast path can return fewer), so they misround at any digit count when
+    // the value sits near a boundary: 1.2345e27.toPrecision(4) rounded up,
+    // 0.1.toExponential(16) lost a digit, and 5e-324.toExponential(1) read
+    // "5.0e-324". Exact formatting is ~181 ns/call for the 767-digit
+    // expansion, which is small relative to the builtin call overhead. The
+    // shortest -1 forms (toExponential() and toLocaleString's fixed form)
+    // stay on the legacy path.
+    if (nDigits >= 0)
+    {
+        int nExact = FormatExactDouble(dbl, ft, nDigits, pchDst, cchDst);
+        if (nExact > 0)
+        {
+            return nExact;
+        }
+    }
+#endif
     if (0 == dbl)
     {
         rgb[0] = 0;
@@ -2598,79 +2962,76 @@ BOOL Js::NumberUtilities::FNonZeroFiniteDblToStr(double dbl, _In_range_(2, 36) i
         Js::NumberUtilities::LuHiDbl(dbl) &= 0x7FFFFFFF;
     }
 
-    // We special case log computations for powers of 2.
-    int cbitDigit = 0;
-    switch (radix)
-    {
-        case  2: cbitDigit = 1; break;
-        case  4: cbitDigit = 2; break;
-        case  8: cbitDigit = 3; break;
-        case 16: cbitDigit = 4; break;
-        case 32: cbitDigit = 5; break;
-    }
-
-    // REVIEW : fix this to do more accurate conversions? This is exact for
-    // powers of 2, but not for other radixes.
-    // REVIEW : round?
     const int maxOutDigits = g_rgcchSig[radix];
     __analysis_assume(maxOutDigits > 0);
 
-    // Output the integer portion.
-    if (1 <= dbl)
+    // Output the integer portion exactly. The integer part of a double is
+    // exactly representable, so build it as a big integer (mantissa shifted by
+    // the binary exponent) and divide by the radix. The old double-division
+    // loop lost low-order digits once the divisor left the 53-bit mantissa.
+    double fraction;
     {
-        double valueDen;
+        const uint32 hi = Js::NumberUtilities::LuHiDbl(dbl);
+        const uint32 lo = Js::NumberUtilities::LuLoDbl(dbl);
+        int exp2 = (int)((hi & 0x7FF00000) >> 20);
+        uint64 mantissa = ((uint64)(hi & 0xFFFFF) << 32) | lo;
 
-        if (0 != cbitDigit)
+        BigUInt integerPart;
+        bool initialized = true;
+        if (exp2 != 0)
         {
-            int wExp2 = (int)((Js::NumberUtilities::LuHiDbl(dbl) & 0x7FF00000) >> 20) - 0x03FF;
+            exp2 -= 0x03FF;
+            mantissa |= (uint64)1 << 52;
+            uint32 limbs[2] = { (uint32)mantissa, (uint32)(mantissa >> 32) };
+            initialized = integerPart.FInitFromRglu(limbs, 2);
+            if (initialized)
+            {
+                const int binaryExp = exp2 - 52;
+                if (binaryExp >= 0)
+                {
+                    initialized = integerPart.FShiftLeft(binaryExp);
+                }
+                else
+                {
+                    integerPart.ShiftRight(-binaryExp);
+                }
+            }
+        }
+        if (!initialized)
+        {
+            return FALSE;
+        }
 
-            int wExp = wExp2 / cbitDigit;
-            wExp2 = wExp * cbitDigit;
-
-            Js::NumberUtilities::LuHiDbl(valueDen) = (uint32)(0x03FF + wExp2) << 20;
-            Js::NumberUtilities::LuLoDbl(valueDen) = 0;
-            cchSig = abs(wExp) + 1;
+        char16 reversed[1100];
+        int digitCount = 0;
+        if (integerPart.Clu() == 0)
+        {
+            reversed[digitCount++] = '0';
+            cchSig = 0;
         }
         else
         {
-            cchSig = 1;
-            double valueT;
-            for (valueDen = 1; (valueT = valueDen * radix) <= dbl; valueDen = valueT)
+            while (integerPart.Clu() != 0)
             {
-                cchSig++;
+                Assert(digitCount < (int)(sizeof(reversed) / sizeof(reversed[0])));
+                reversed[digitCount++] = ToDigit((int32)integerPart.DivRemSmall((uint32)radix));
             }
+            cchSig = digitCount;
         }
-        AssertMsg(valueDen <= dbl && dbl < valueDen * radix, "Bad floating point format");
 
-        __analysis_assume(cchSig >= 0);
-
-        if (len < cchSig + 1)
+        if (len < digitCount + 1)
         {
             return FALSE; //We run out of buffer size.
         }
-        len -= cchSig;
-        for (cch = 0; cch < cchSig; cch++)
+        len -= digitCount;
+        for (cch = digitCount - 1; cch >= 0; --cch)
         {
-            wDig = (int)(dbl / valueDen);
-            if (wDig >= radix)
-            {
-                wDig = radix - 1;
-            }
-            *ppsz++ = ToDigit(wDig);
-            dbl -= wDig * valueDen;
-            valueDen /= radix;
+            *ppsz++ = reversed[cch];
         }
+
+        fraction = dbl - floor(dbl);
     }
-    else
-    {
-        if (len < 2)
-        {
-            return FALSE; //We run out of buffer size.
-        }
-        len--;
-        *ppsz++ = '0';
-        cchSig = 0;
-    }
+    dbl = fraction;
 
     // Output the fractional portion.
     if (0 != dbl && cchSig < maxOutDigits)

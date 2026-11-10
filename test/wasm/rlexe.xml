@@ -458,4 +458,11 @@
     <compile-flags>-wasmthreads -ESSharedArrayBuffer</compile-flags>
   </default>
 </test>
+<test>
+  <default>
+    <files>deferred-invalid-body.js</files>
+    <compile-flags>-wasm -args summary -endargs</compile-flags>
+    <tags>exclude_win7</tags>
+  </default>
+</test>
 </regress-exe>

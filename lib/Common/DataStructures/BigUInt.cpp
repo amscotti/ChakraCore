@@ -443,6 +443,26 @@ LNegative:
         AssertBi(this);
     }
 
+    uint32 BigUInt::DivRemSmall(uint32 divisor)
+    {
+        AssertBi(this);
+        Assert(divisor != 0);
+
+        uint64 rem = 0;
+        for (int32 ilu = m_clu - 1; ilu >= 0; --ilu)
+        {
+            uint64 cur = (rem << 32) | m_prglu[ilu];
+            m_prglu[ilu] = (uint32)(cur / divisor);
+            rem = cur % divisor;
+        }
+
+        while (m_clu > 0 && m_prglu[m_clu - 1] == 0)
+            --m_clu;
+
+        AssertBi(this);
+        return (uint32)rem;
+    }
+
     int BigUInt::DivRem(BigUInt *pbi)
     {
         AssertBi(this);

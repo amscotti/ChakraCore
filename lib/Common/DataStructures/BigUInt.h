@@ -50,6 +50,9 @@ namespace Js
         bool FAdd(BigUInt *pbi);
         void Subtract(BigUInt *pbi);
         int DivRem(BigUInt *pbi);
+        // Divide in place by a small (32-bit) divisor and return the remainder.
+        // Used for exact radix conversion of the integer part of a double.
+        uint32 DivRemSmall(uint32 divisor);
 
         int32 Clu(void); // return current length
         uint32 Lu(int32 ilu); // return digit at position ilu start from 0

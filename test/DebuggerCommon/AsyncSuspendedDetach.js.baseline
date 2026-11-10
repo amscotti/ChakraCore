@@ -1,0 +1,11 @@
+async before
+gen before
+gen first done=false value=1
+collected
+done
+async before
+detached
+gen after
+gen second done=true value=undefined
+async after 41
+async after 41

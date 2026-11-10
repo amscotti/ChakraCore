@@ -733,6 +733,18 @@ the refresh [c4-refresh.md](c4-refresh.md). Pin lineage stays
 single-sourced in `tools/build/gate_counts.json`, 2038/2090 →
 2051/2103.)
 
+**B4 Linux x64 + D1–D4 update (2026-11-10).** B4 completed natively on
+the proof host ([b4-linux-run.md](b4-linux-run.md)): Linux gates
+**2841/0 interpreted / 2305/0 dynapogo**, first certified Linux
+test262 baseline **77,354 / 3,190** edition-selected. The B4 swarm
+batch and the D1–D4 batch then landed on Mac: gates are now
+**2053/0 test / 2105/0 debug-static**, `zig build -Dprofile=jit check`
+646/646, targeted Number test262 **276/276**. D1 (portable suspended-
+coroutine guard), D2 (exact 0..100-digit Number formatting), D3 (exact
+integer radix) and D4 (deferred WASM validation) are implemented and
+reviewed; the Linux native run, the Linux pin re-record, and the full
+certified test262 refresh remain ([b4-d1-d4.md](b4-d1-d4.md) §5).
+
 **Blocked on you (the human), not on the code:**
 
 - **The three flag decisions — the single largest lever, exactly

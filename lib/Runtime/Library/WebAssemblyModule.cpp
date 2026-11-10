@@ -217,10 +217,15 @@ WebAssemblyModule::CreateModule(
             currentBody = webAssemblyModule->GetWasmFunctionInfo(i)->GetBody();
             if (PHASE_ENABLED(WasmDeferredPhase, currentBody))
             {
-                // Deferred compilation: validate at first call. Eager validation
-                // here used the shared WasmReaderInfo and rejected valid
-                // import/instance modules (WasmSpec/jsapi), so the
-                // validate-vs-constructor gap stays a tracked open card.
+                // Deferred compilation: the body is compiled at first call, but
+                // its bytes must still be validated at construction so an
+                // invalid body cannot construct a Module that only throws when
+                // invoked. ValidateFunction uses an empty writer and does not
+                // publish frame/register layout, so the later deferred compile
+                // still owns that state (the earlier eager attempt failed
+                // precisely because it committed the layout).
+                readerInfo = currentBody->GetAsmJsFunctionInfo()->GetWasmReaderInfo();
+                Wasm::WasmBytecodeGenerator::ValidateFunction(scriptContext, readerInfo);
                 continue;
             }
             readerInfo = currentBody->GetAsmJsFunctionInfo()->GetWasmReaderInfo();

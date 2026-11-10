@@ -1378,7 +1378,15 @@
       <files>AsyncSuspendedResume.js</files>
       <compile-flags>-dbgbaseline:AsyncSuspendedResume.js.dbg.baseline</compile-flags>
       <baseline>AsyncSuspendedResume.js.baseline</baseline>
-      <tags>exclude_dynapogo,exclude_linux</tags>
+      <tags>exclude_dynapogo</tags>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>AsyncSuspendedDetach.js</files>
+      <compile-flags>-CollectGarbage -dbgbaseline:AsyncSuspendedDetach.js.dbg.baseline</compile-flags>
+      <baseline>AsyncSuspendedDetach.js.baseline</baseline>
+      <tags>exclude_dynapogo</tags>
     </default>
   </test>
 </regress-exe>

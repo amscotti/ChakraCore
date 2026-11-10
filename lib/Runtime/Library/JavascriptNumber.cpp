@@ -13,6 +13,18 @@ namespace Js
 {
     DEFINE_RECYCLER_TRACKER_PERF_COUNTER(JavascriptNumber);
 
+    // The ES2018 range is 0..100 fractional digits and 1..100 significant
+    // digits. Builds whose formatter cannot produce exact digits beyond the
+    // legacy budget keep the old caps so they throw rather than emit wrong
+    // low digits.
+#if NUMBERUTILS_EXACT_FORMATTING
+    static const int kMaxFractionDigits = 100;
+    static const int kMaxPrecision = 100;
+#else
+    static const int kMaxFractionDigits = 20;
+    static const int kMaxPrecision = 21;
+#endif
+
     Var JavascriptNumber::ToVarNoCheck(double value, ScriptContext* scriptContext)
     {
         return JavascriptNumber::NewInlined(value, scriptContext);
@@ -653,15 +665,7 @@ namespace Js
             return nanF;
         }
 
-        if(!noRangeCheck && (fractionDigits < 0 || fractionDigits > 100))
-        {
-            JavascriptError::ThrowRangeError(scriptContext, JSERR_FractionOutOfRange);
-        }
-
-        // The formatter supports 20 fractional digits; finite values above
-        // that still take the pre-existing RangeError (100-digit exact
-        // formatting is a tracked open card).
-        if (fractionDigits > 20)
+        if(!noRangeCheck && (fractionDigits < 0 || fractionDigits > kMaxFractionDigits))
         {
             JavascriptError::ThrowRangeError(scriptContext, JSERR_FractionOutOfRange);
         }
@@ -718,8 +722,8 @@ namespace Js
             {
                 double fractionDigitsRaw = JavascriptConversion::ToInteger(aFractionDigits, scriptContext);
                 // Range-check in double space before the int cast (UB outside
-                // int; the current formatter supports 0..20 fractional digits).
-                if (!(fractionDigitsRaw >= 0 && fractionDigitsRaw <= 20))
+                // int). ES2018 allows 0..100 fractional digits.
+                if (!(fractionDigitsRaw >= 0 && fractionDigitsRaw <= kMaxFractionDigits))
                 {
                     JavascriptError::ThrowRangeError(scriptContext, JSERR_FractionOutOfRange);
                 }
@@ -727,7 +731,7 @@ namespace Js
             }
         }
 
-        if (fractionDigits < 0 || fractionDigits > 20)
+        if (fractionDigits < 0 || fractionDigits > kMaxFractionDigits)
         {
             JavascriptError::ThrowRangeError(scriptContext, JSERR_FractionOutOfRange);
         }
@@ -807,17 +811,11 @@ namespace Js
             return nanF;
         }
 
-        if(precision < 1 || precision > 100)
+        if(precision < 1 || precision > kMaxPrecision)
         {
             JavascriptError::ThrowRangeError(scriptContext, JSERR_PrecisionOutOfRange);
         }
 
-        // The formatter supports 21 significant digits; finite values above
-        // that still take the pre-existing RangeError.
-        if (precision > 21)
-        {
-            JavascriptError::ThrowRangeError(scriptContext, JSERR_PrecisionOutOfRange);
-        }
         return FormatDoubleToString(value, NumberUtilities::FormatPrecision, precision, scriptContext);
     }
 

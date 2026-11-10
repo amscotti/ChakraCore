@@ -243,18 +243,23 @@
 #endif
 
 // A suspended generator/async frame keeps a raw ByteCodeReader and operand
-// metadata pointing into the FunctionBody's bytecode block. On Apple ARM64 the
-// generator is finalizable (the software write barrier is always compiled in),
-// so count live suspended frames per FunctionBody and refuse to drop that
-// bytecode for a debugger reparse while a frame can still resume into it.
+// metadata pointing into the FunctionBody's bytecode block. Count live
+// suspended frames per FunctionBody and refuse to drop that bytecode for a
+// debugger reparse while a frame can still resume into it (plain async bodies
+// instead hand the reparse a fresh FunctionBody, leaving the suspended frame's
+// body whole — see doc/dbg-async-attach.md).
+//
 // The GLOBAL_ENABLE_WRITE_BARRIER term below is load-bearing, not incidental:
 // the guard's release path for the frame count runs from JavascriptGenerator's
 // finalizer, and the finalized-allocation arm that installs it
 // (JavascriptGenerator::New) is compiled only under GLOBAL_ENABLE_WRITE_BARRIER.
-// Enabling the guard without the write barrier would count frames that never
-// decrement, permanently pinning that FunctionBody's bytecode — keep the two
-// macros coupled.
-#if defined(__APPLE__) && defined(_M_ARM64) && GLOBAL_ENABLE_WRITE_BARRIER
+// Enabling the guard where that arm is absent would count frames that never
+// decrement, permanently pinning the FunctionBody's bytecode. Non-Windows
+// builds define the write barrier (and therefore the finalizer), so they all
+// get the guard. Windows defines it only for ForceSWB builds; those have the
+// same finalizer, so the pairing still holds, and default Windows builds keep
+// the guard off.
+#if GLOBAL_ENABLE_WRITE_BARRIER
 #define ENABLE_SUSPENDED_COROUTINE_REPARSE_GUARD 1
 #else
 #define ENABLE_SUSPENDED_COROUTINE_REPARSE_GUARD 0

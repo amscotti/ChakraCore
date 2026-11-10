@@ -652,4 +652,10 @@
       <compile-flags>-args summary -endargs</compile-flags>
     </default>
   </test>
+  <test>
+    <default>
+      <files>number-formatting-exact.js</files>
+      <compile-flags>-ESBigInt -args summary -endargs</compile-flags>
+    </default>
+  </test>
 </regress-exe>

@@ -5,6 +5,26 @@
 //-------------------------------------------------------------------------------------------------------
 #pragma once
 
+// Exact double-to-decimal formatting for the ES2018 range above the legacy
+// formatter's digit budget. std::to_chars is correctly rounded and supports
+// the precision needed to expose every digit of a binary double; the version
+// checks below are the toolchains that ship a conforming floating-point
+// overload. When unavailable, the callers keep the legacy 20/21-digit caps.
+#if defined(__has_include)
+#if __has_include(<charconv>)
+#include <charconv>
+#define NUMBERUTILS_HAS_CHARCONV 1
+#endif
+#endif
+#if defined(NUMBERUTILS_HAS_CHARCONV) && \
+    ((defined(_LIBCPP_VERSION) && _LIBCPP_VERSION >= 14000) || \
+     (defined(__GLIBCXX__) && __GLIBCXX__ >= 20210427) || \
+     (defined(_MSC_VER) && _MSC_VER >= 1924))
+#define NUMBERUTILS_EXACT_FORMATTING 1
+#else
+#define NUMBERUTILS_EXACT_FORMATTING 0
+#endif
+
 enum class LikelyNumberType
 {
     Double,
