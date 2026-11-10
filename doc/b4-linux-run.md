@@ -248,3 +248,18 @@ interpreted **2841/0** and dynapogo **2305/0**.
    once the certified test262 run is recorded.
 3. Card the debugger async-attach hang in `doc/open-cards.md` with the
    reproduction and stack evidence (done in §7 of that file).
+
+## 9. Mac ARM64 cross-check (2026-11-09)
+
+The B4 changes were pulled back to the Mac ARM64 host and the full gate
+suite re-run on `modernize/baseline` (merge commit `694dfb701`):
+
+| Gate | Result |
+|---|---|
+| `zig build check-regression` (test) | **2051/0 PASS** |
+| `zig build check-regression -Dprofile=debug-static` | **2103/0 PASS** |
+| `zig build -Dprofile=jit check` | **PASS — 646/646 steps** |
+
+The x64-gated unwind helper (`ChakraEhFrameFdeStart`), the seven
+numeric-UB range guards and the speculative v-scan fix are
+cross-platform neutral as designed; Mac pins unchanged.
