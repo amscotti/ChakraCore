@@ -7399,10 +7399,17 @@ GlobOpt::OptConstFoldUnary(
                                       // Make sure that it is cleared if it was initially present.
     if (!isInt)
     {
-        value = (int32)fValue;
-        if (fValue == (double)value)
+        // Range-check in double space first: the cast is UB outside int32
+        // and clang 22 folds the round-trip comparison to true under that
+        // assumption, folding e.g. Math.fround(2147483647) to
+        // IntConstOpnd(INT_MIN) instead of a float constant.
+        if (fValue >= -2147483648.0 && fValue <= 2147483647.0)
         {
-            isInt = true;
+            value = (int32)fValue;
+            if (fValue == (double)value)
+            {
+                isInt = true;
+            }
         }
     }
     if (isInt)

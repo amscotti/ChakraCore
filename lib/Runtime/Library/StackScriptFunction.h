@@ -74,8 +74,8 @@ namespace Js
             template<class Fn>
             void ForEachStackNestedFunctionNative(JavascriptStackWalker const& walker, FunctionBody * callerFunctionBody, Fn fn);
 
-            static uintptr_t GetNativeFrameDisplayIndex(FunctionBody * functionBody);
-            static uintptr_t GetNativeScopeSlotsIndex(FunctionBody * functionBody);
+            static intptr_t GetNativeFrameDisplayIndex(FunctionBody * functionBody);
+            static intptr_t GetNativeScopeSlotsIndex(FunctionBody * functionBody);
         };
 
         ScriptFunction * boxedScriptFunction;

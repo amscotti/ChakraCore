@@ -7,8 +7,37 @@
 
 #ifndef _WIN32
 
+#include <cstdint>
+
 extern "C" void __register_frame(const void* ehframe);
 extern "C" void __deregister_frame(const void* ehframe);
+
+// LLVM libunwind (linked by Zig's static libc++) implements the Darwin
+// __register_frame contract: the argument is a single FDE pointer. GCC's
+// libgcc instead expects the CIE at the start of a .eh_frame table. Our
+// EmitBuffer/EhFrame buffers are CIE + FDE, so on a libc++ build advance to
+// the FDE; a libstdc++ build keeps the CIE pointer.
+inline const void* ChakraEhFrameFdeStart(const void* ehframe)
+{
+#if defined(_LIBCPP_VERSION) && !defined(__APPLE__) && (defined(_M_X64) || defined(__x86_64__))
+    const unsigned char* bytes = static_cast<const unsigned char*>(ehframe);
+    // DWARF frame entry: 4-byte little-endian length (excluding itself),
+    // followed by the CIE id. 64-bit .eh_frame is not emitted here; the
+    // 0xffffffff escape would make the skip below wrong, so fail loudly
+    // in debug builds.
+    uint32_t cieLength = static_cast<uint32_t>(bytes[0])
+        | (static_cast<uint32_t>(bytes[1]) << 8)
+        | (static_cast<uint32_t>(bytes[2]) << 16)
+        | (static_cast<uint32_t>(bytes[3]) << 24);
+    if (cieLength == 0xffffffffu)
+    {
+        __builtin_trap();
+    }
+    return bytes + sizeof(uint32_t) + cieLength;
+#else
+    return ehframe;
+#endif
+}
 
 #if defined(_AMD64_) && !defined(DISABLE_JIT)
 #if defined(__APPLE__) // no multi fde support

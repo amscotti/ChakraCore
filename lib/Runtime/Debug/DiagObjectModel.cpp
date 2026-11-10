@@ -2024,9 +2024,16 @@ namespace Js
                 value = numobj->GetValue();
             }
 
-            // For fractional values, radix is ignored.
-            int32 l = (int32)value;
-            bool isZero = JavascriptNumber::IsZero(value - (double)l);
+            // For fractional values, radix is ignored. Range-check before the
+            // int32 cast (UB outside int32; clang 22 can fold the fractional
+            // test under the invalid-cast assumption).
+            int32 l = 0;
+            bool isZero = false;
+            if (value >= -2147483648.0 && value <= 2147483647.0)
+            {
+                l = (int32)value;
+                isZero = JavascriptNumber::IsZero(value - (double)l);
+            }
 
             if (radix == 10 || !isZero)
             {

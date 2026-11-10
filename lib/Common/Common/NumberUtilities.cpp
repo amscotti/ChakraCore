@@ -400,6 +400,20 @@ using namespace Js;
         Assert(plw);
         double dblT;
 
+        // Reject out-of-range values BEFORE the int32 cast: converting a
+        // double outside [-2^31, 2^31-1] to int32 is undefined behavior, and
+        // clang 22 (the Zig 0.17 Linux build) folds the round-trip comparison
+        // below to true under that assumption. That turned every integer
+        // literal >= 2^31 into a wrapped TaggedInt (e.g. 2147483648 ->
+        // -2147483648; 0 >= 9007199254740991 -> true). Keep the range test in
+        // double arithmetic (both bounds are exactly representable) and keep
+        // the bit comparison so -0.0 still reports false, as before.
+        if (!(dbl >= -2147483648.0 && dbl <= 2147483647.0))
+        {
+            *plw = 0;
+            return FALSE;
+        }
+
         *plw = (int32)dbl;
         dblT = (double)*plw;
         return Js::NumberUtilities::LuHiDbl(dblT) == Js::NumberUtilities::LuHiDbl(dbl) && Js::NumberUtilities::LuLoDbl(dblT) == Js::NumberUtilities::LuLoDbl(dbl);

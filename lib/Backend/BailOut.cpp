@@ -1673,7 +1673,11 @@ BailOutRecord::BailOutHelper(Js::JavascriptCallStackLayout * layout, Js::ScriptF
         if (localFrameDisplayReg != Js::Constants::NoRegister)
         {
             Js::FrameDisplay *localFrameDisplay;
-            uintptr_t frameDisplayIndex = (uintptr_t)(
+            // Signed: these are negative frame offsets. Computing them as
+            // uintptr_t makes the pointer arithmetic overflow (UB), and clang
+            // 22 then emits 32-bit OR-based address math, producing
+            // 0xffffffffffffffc0 instead of argv-64 on x64.
+            intptr_t frameDisplayIndex = (intptr_t)(
 #if _M_IX86 || _M_AMD64
                 executeFunction->GetInParamsCount() == 0 ?
                 Js::JavascriptFunctionArgIndex_StackFrameDisplayNoArg :
@@ -1687,7 +1691,7 @@ BailOutRecord::BailOutHelper(Js::JavascriptCallStackLayout * layout, Js::ScriptF
         if (localClosureReg != Js::Constants::NoRegister)
         {
             Js::Var localClosure;
-            uintptr_t scopeSlotsIndex = (uintptr_t)(
+            intptr_t scopeSlotsIndex = (intptr_t)(
 #if _M_IX86 || _M_AMD64
                 executeFunction->GetInParamsCount() == 0 ?
                 Js::JavascriptFunctionArgIndex_StackScopeSlotsNoArg :

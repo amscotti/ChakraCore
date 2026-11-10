@@ -106,6 +106,12 @@ Term ::= ... | '(' '?' '=' Disjunction ')' [removed] | '(' '?' '!' Disjunction '
 
 namespace UnifiedRegex
 {
+    // Thrown when the speculative pre-flag pass-0 v-class validation reaches
+    // the end of the regex literal. The speculative scan must never hard-fail
+    // a pattern that is valid under the legacy (non-v) grammar; the same text
+    // is re-parsed in pass 1 once the flags are known.
+    struct VScanAbort {};
+
     template <typename P, const bool IsLiteral>
     const CharCount Parser<P, IsLiteral>::initLitbufSize;
 
@@ -225,6 +231,7 @@ namespace UnifiedRegex
         , vScratchUnitsCap(0)
         , vLastScanIsStringProperty(false)
         , vClassSawNested(false)
+        , vScanSpeculative(false)
         , vClassSpanStart(nullptr)
         , vClassSpanEnd(nullptr)
         , decimalEscapes(nullptr)
@@ -1214,7 +1221,20 @@ namespace UnifiedRegex
         const size_t savedMultiUnits = this->GetMultiUnits();
         bool mayContainStrings = false;
         this->vClassSawNested = false;
-        VValidateClass(mayContainStrings);
+        const bool savedVScanSpeculative = this->vScanSpeculative;
+        this->vScanSpeculative = true;
+        try
+        {
+            VValidateClass(mayContainStrings);
+        }
+        catch (VScanAbort&)
+        {
+            // Speculative scan hit the literal end. Flags are not known yet,
+            // so this must not fail a legal legacy class; pass 1 re-parses
+            // the text under the real flags.
+            mayContainStrings = false;
+        }
+        this->vScanSpeculative = savedVScanSpeculative;
         // For the ']'-atom rule in TermPass0 (see there): record the span
         // the v validator consumed (from the '[' through its matching ']').
         // A legacy ']' atom is genuine v class content exactly when it lies
@@ -2663,7 +2683,19 @@ namespace UnifiedRegex
         Char c = this->template ReadFull<true>(next, inputLim);
         // No embedded newlines in literals
         if (IsLiteral && standardChars->IsNewline(c))
+        {
+            if (this->vScanSpeculative)
+            {
+                // The pre-flag v-class validation is speculative: the same
+                // text may be a legal legacy class (e.g. /[[]/). Reaching a
+                // newline means the v interpretation ran past the literal;
+                // record the v-only error and abort this scan, leaving the
+                // legacy pass to parse the text.
+                DeferredFailIfUnicodeSets(JSERR_RegExpNoBracket);
+                throw VScanAbort();
+            }
             Fail(ERRnoSlash);
+        }
         return c;
     }
 

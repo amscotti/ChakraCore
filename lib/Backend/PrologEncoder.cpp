@@ -207,10 +207,22 @@ void PrologEncoder::EncodeSmallProlog(uint8 prologSize, size_t size)
 {
     auto fde = ehFrame.GetFDE();
 
-    // prolog: push rbp
-    fde->cfi_advance_loc(1);                    // DW_CFA_advance_loc: 1
+    // prolog: push rbp; mov rbp, rsp
+    fde->cfi_advance_loc(1);                    // DW_CFA_advance_loc: 1 (after push rbp)
     fde->cfi_def_cfa_offset(MachPtr * 2);       // DW_CFA_def_cfa_offset: 16
-    fde->cfi_offset(GetDwarfRegNum(LowererMDArch::GetRegFramePointer()), 2); // DW_CFA_offset: r6 (rbp) at cfa-16
+    fde->cfi_offset(GetDwarfRegNum(LowererMDArch::GetRegFramePointer()), 2); // DW_CFA_offset: rbp at cfa-16
+    // Pin CFA to rbp for every later PC in the thunk block. The emitted
+    // interpreter thunk's call stubs (`call *rax`) run with rSP = rbp - 8
+    // (the call's return address), so the rSP-relative rule above is only
+    // true between push rbp and the call. Without this rule a C++
+    // exception thrown from interpreted JS cannot unwind through the
+    // stub: phase 1 reads the return address from the saved-rbp slot and
+    // self-loops instead of reaching the JsRT catch. macOS ARM64 already
+    // had its own frame-pointer-based FDE (DarwinEhFrame.h); this is the
+    // SysV x64 equivalent.
+    fde->cfi_advance_loc(3);                    // DW_CFA_advance_loc: 3 (after mov rbp, rsp)
+    fde->cfi_def_cfa(GetDwarfRegNum(LowererMDArch::GetRegFramePointer()),
+                     static_cast<unsigned>(MachPtr * 2));
 
     ehFrame.End();
 }

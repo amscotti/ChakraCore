@@ -3,6 +3,7 @@
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #include "Backend.h"
+#include <cstdint>
 
 // Conditionally-compiled on x64 and arm/arm64
 #if PDATA_ENABLED
@@ -66,6 +67,12 @@ void PDataManager::UnregisterPdata(RUNTIME_FUNCTION* pdata)
 //  !_WIN32 x64 unwind uses .eh_frame. ARM64 still emits Windows unwind codes.
 // ----------------------------------------------------------------------------
 
+// LLVM libunwind (linked by Zig's static libc++) implements the Darwin
+// __register_frame contract: the argument must point at a single FDE, not at
+// the CIE that precedes it. GCC's libgcc __register_frame instead takes the
+// CIE start and walks the table. Our EhFrame buffer is always CIE + one FDE,
+// so ChakraEhFrameFdeStart advances past the CIE on libc++ builds. The
+// macOS ARM64 branch below keeps its wrapper (which performs the same skip).
 void PDataManager::RegisterPdata(RUNTIME_FUNCTION* pdataStart,
     _In_ const ULONG_PTR functionStart, _In_ const ULONG_PTR functionEnd,
     _Out_ PVOID* pdataTable, ULONG entryCount, ULONG maxEntryCount)
@@ -81,10 +88,12 @@ void PDataManager::RegisterPdata(RUNTIME_FUNCTION* pdataStart,
     (void)entryCount;
     (void)maxEntryCount;
     mac_fde_wrapper((const char*)pdataStart, __register_frame);
-#else
-    __REGISTER_FRAME(pdataStart);
-#endif
     *pdataTable = pdataStart;
+#else
+    const void* fdeStart = ChakraEhFrameFdeStart(pdataStart);
+    __REGISTER_FRAME(fdeStart);
+    *pdataTable = const_cast<void*>(fdeStart);
+#endif
 }
 
 void PDataManager::UnregisterPdata(RUNTIME_FUNCTION* pdata)

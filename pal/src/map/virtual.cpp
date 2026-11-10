@@ -224,7 +224,9 @@ VIRTUALJitWriteProtect( IN BOOL writeable )
 #if defined(__APPLE__) && defined(_M_ARM64)
     pthread_jit_write_protect_np(writeable ? 0 : 1);
 #else
-    UNREFERENCED_PARAMETER(writeable);
+    // PAL sources do not include palrt.h (the only UNREFERENCED_PARAMETER
+    // definition); use the local (void) style already used above.
+    (void)writeable;
 #endif
     return TRUE;
 }

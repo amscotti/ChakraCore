@@ -69,6 +69,16 @@ namespace Js
         {
             Assert(int32Value);
 
+            // Range-check in double space before the cast: converting a
+            // double outside int32 is undefined behavior, and clang 22 folds
+            // the round-trip comparison below to true under that assumption
+            // (Zig 0.17 Linux build). 2147483648 then looked like an int32
+            // and array/index paths truncated large values.
+            if (!(value >= -2147483648.0 && value <= 2147483647.0))
+            {
+                return false;
+            }
+
             const int32 i = static_cast<int32>(value);
             if (static_cast<double>(i) != value || (!acceptNegZero && IsNegZero(value)))
             {

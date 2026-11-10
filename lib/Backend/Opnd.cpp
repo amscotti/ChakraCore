@@ -2212,11 +2212,18 @@ AddrOpnd::NewFromNumber(double value, Func *func, bool dontEncode /* = false */)
     // - This avoids extra GC.
     //
 
-    int nValue      = (int) value;
-    double dblCheck = (double) nValue;
-    if ((dblCheck == value) && (!Js::TaggedInt::IsOverflow(nValue)))
+    // Range-check in double space before the cast: the conversion is UB
+    // outside int32 and clang 22 folds the round-trip comparison to true,
+    // turning every large float constant into TaggedInt(INT_MIN) under the
+    // Linux JIT (2.53425738368173E+18 printed as -2147483648).
+    if (value >= -2147483648.0 && value <= 2147483647.0)
     {
-        return New(Js::TaggedInt::ToVarUnchecked(nValue), AddrOpndKindConstantVar, func, dontEncode);
+        int nValue      = (int) value;
+        double dblCheck = (double) nValue;
+        if ((dblCheck == value) && (!Js::TaggedInt::IsOverflow(nValue)))
+        {
+            return New(Js::TaggedInt::ToVarUnchecked(nValue), AddrOpndKindConstantVar, func, dontEncode);
+        }
     }
 
     return NewFromNumberVar(value, func, dontEncode);

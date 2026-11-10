@@ -99,6 +99,17 @@ namespace Js
         // - This avoids extra GC.
         //
 
+        // Reject out-of-int32-range values before the cast: converting a
+        // double outside [-2^31, 2^31-1] to int is undefined behavior, and
+        // clang 22 folds the round-trip comparison below to true under that
+        // assumption. With TaggedInt's full-int32 range on 64-bit, that made
+        // every float constant >= 2^31 a TaggedInt of INT_MIN (2147483648
+        // printed as -2147483648, 9007199254740991 compared as -2147483648).
+        if (!(value >= -2147483648.0 && value <= 2147483647.0))
+        {
+            return JavascriptNumber::NewInlined(value, scriptContext);
+        }
+
         int nValue      = (int) value;
         double dblCheck = (double) nValue;
         if ((dblCheck == value) && (!TaggedInt::IsOverflow(nValue)))
@@ -117,6 +128,12 @@ namespace Js
         if(value <= 0)
         {
             return *isInt32 = TryGetInt32Value(value, int32Value);
+        }
+
+        // Guard the uint32 cast in double space (NaN fails this too).
+        if (!(value <= 4294967295.0))
+        {
+            return false;
         }
 
         const uint32 i = static_cast<uint32>(value);

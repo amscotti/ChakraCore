@@ -431,58 +431,58 @@ namespace Js
         }
     }
 
-    uintptr_t StackScriptFunction::BoxState::GetNativeFrameDisplayIndex(FunctionBody * functionBody)
+    intptr_t StackScriptFunction::BoxState::GetNativeFrameDisplayIndex(FunctionBody * functionBody)
     {
 #if _M_IX86 || _M_AMD64
         if (functionBody->GetInParamsCount() == 0)
         {
-            return (uintptr_t)JavascriptFunctionArgIndex_StackFrameDisplayNoArg;
+            return (intptr_t)JavascriptFunctionArgIndex_StackFrameDisplayNoArg;
         }
         else
 #endif
         {
-            return (uintptr_t)JavascriptFunctionArgIndex_StackFrameDisplay;
+            return (intptr_t)JavascriptFunctionArgIndex_StackFrameDisplay;
         }
     }
 
-    uintptr_t StackScriptFunction::BoxState::GetNativeScopeSlotsIndex(FunctionBody * functionBody)
+    intptr_t StackScriptFunction::BoxState::GetNativeScopeSlotsIndex(FunctionBody * functionBody)
     {
 #if _M_IX86 || _M_AMD64
         if (functionBody->GetInParamsCount() == 0)
         {
-            return (uintptr_t)JavascriptFunctionArgIndex_StackScopeSlotsNoArg;
+            return (intptr_t)JavascriptFunctionArgIndex_StackScopeSlotsNoArg;
         }
         else
 #endif
         {
-            return (uintptr_t)JavascriptFunctionArgIndex_StackScopeSlots;
+            return (intptr_t)JavascriptFunctionArgIndex_StackScopeSlots;
         }
     }
 
     FrameDisplay * StackScriptFunction::BoxState::GetFrameDisplayFromNativeFrame(JavascriptStackWalker const& walker, FunctionBody * callerFunctionBody)
     {
-        uintptr_t frameDisplayIndex = GetNativeFrameDisplayIndex(callerFunctionBody);
+        intptr_t frameDisplayIndex = GetNativeFrameDisplayIndex(callerFunctionBody);
         void **argv = walker.GetCurrentArgv();
         return (Js::FrameDisplay*)argv[frameDisplayIndex];
     }
 
     Var * StackScriptFunction::BoxState::GetScopeSlotsFromNativeFrame(JavascriptStackWalker const& walker, FunctionBody * callerFunctionBody)
     {
-        uintptr_t scopeSlotsIndex = GetNativeScopeSlotsIndex(callerFunctionBody);
+        intptr_t scopeSlotsIndex = GetNativeScopeSlotsIndex(callerFunctionBody);
         void **argv = walker.GetCurrentArgv();
         return (Var*)argv[scopeSlotsIndex];
     }
 
     void StackScriptFunction::BoxState::SetFrameDisplayFromNativeFrame(JavascriptStackWalker const& walker, FunctionBody * callerFunctionBody, FrameDisplay * frameDisplay)
     {
-        uintptr_t frameDisplayIndex = GetNativeFrameDisplayIndex(callerFunctionBody);
+        intptr_t frameDisplayIndex = GetNativeFrameDisplayIndex(callerFunctionBody);
         void **argv = walker.GetCurrentArgv();
         ((FrameDisplay**)argv)[frameDisplayIndex] = frameDisplay;
     }
 
     void StackScriptFunction::BoxState::SetScopeSlotsFromNativeFrame(JavascriptStackWalker const& walker, FunctionBody * callerFunctionBody, Var * scopeSlots)
     {
-        uintptr_t scopeSlotsIndex = GetNativeScopeSlotsIndex(callerFunctionBody);
+        intptr_t scopeSlotsIndex = GetNativeScopeSlotsIndex(callerFunctionBody);
         void **argv = walker.GetCurrentArgv();
         ((Var**)argv)[scopeSlotsIndex] = scopeSlots;
     }
