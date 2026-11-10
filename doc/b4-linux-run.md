@@ -39,7 +39,8 @@ aborting. `check-smoke` has a dedicated unhandled-throw leg with decoys.
 
 ### 1.3 Numeric UB truncating every large number (clang 22)
 
-Five double-to-int32 conversions checked the round-trip after an
+Seven double-to-int32 conversions (six engine sites plus the debugger-display
+cast) checked the round-trip after an
 out-of-range `(int)` cast. Clang 22 assumes the cast is defined, folds the
 comparison to true, and on this ABI (`k_nMinValue == INT_MIN`) produces
 `TaggedInt(INT_MIN)`:
@@ -132,6 +133,14 @@ C2-S13 TUs (`JavascriptWeakRef.cpp`, `JavascriptFinalizationRegistry.cpp`).
   standalone and the next full interpreted + dynapogo run was 2841/0 +
   2305/0. Recorded as a rare non-reproducible simple-JIT flake pending a
   dedicated stress reproduction, not a repeatable gate failure.
+- Known residual of the same numeric-UB class: `ToInt32Core`
+  (`lib/Runtime/Math/JavascriptMath.inl:295`) and `TryToInt64`
+  (`lib/Common/Common/NumberUtilities.inl:125`) still cast an
+  unconstrained double before their sentinel/round-trip checks. Clang 22
+  did not exploit these in this build — 840 differential numeric
+  expressions plus `|0`/`>>>0` at 2^31/2^32/1e21/NaN/Inf match Node in
+  interpreter and JIT — so they are recorded, not changed, to keep this
+  lane's diff bounded.
 
 ## 4. test262 Certified Linux baseline
 
