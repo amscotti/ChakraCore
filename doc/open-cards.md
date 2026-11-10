@@ -158,6 +158,13 @@ smoke, metadata, self-tests PASS), `-Dprofile=debug-static check-regression`
 **2103/0**, `-Dprofile=jit check` **646/646** (check_jit PASS, bytecode up to
 date), `check-build-tools` **65 tests OK** (3 new guard controls included).
 
+## 7. B4 Linux x64 residuals (doc/b4-linux-run.md)
+
+| Card | Source | Status | Evidence / notes |
+|---|---|---|---|
+| Dynamic debugger attach + suspended async resume hangs on Linux (`test/DebuggerCommon/AsyncSuspendedResume.js`) | B4 Linux run | open (Linux debugger) | Native x64: prints `before/done/before/after 41/after 41` then stays in the `WScript.Attach` / `CallbackMessage::CallFunction` message loop indefinitely (no exit at 150 s; gdb interrupt shows `Debugger::SourceRunDown` path). Tagged `exclude_linux` (new platform tag in `test/runtests.py`) pending the Linux debugger dynamic-attach implementation; not an engine-semantics defect outside the debugger |
+| `test/Function/FuncBody.bug232281.js` O(depth²) stack walk through `eval` | B4 Linux run | open (performance, low) | Full-JIT recursion with `eval("  ")` per frame completes correctly (caught "Out of stack space") in 4m27s on the 4 vCPU proof host vs the legacy 60 s deadline. Cause: each `VEval` walks the whole stack (`JavascriptStackWalker::GetCaller` → `IsNativeAddress`), so overflow depth D costs O(D²). Linux gate widens the deadline to 480 s without changing selection |
+
 e13 swarm-triage lane (doc/e13-swarm-triage.md): gate counts unchanged
 **2051/2103** (host/tooling/docs only, no new rlexe entries);
 `check-build-tools` **65 → 67** (+2 `RegenGuidPathTests` for the mint-path

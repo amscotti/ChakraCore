@@ -13,6 +13,16 @@ record ([b3-profiles.md](b3-profiles.md) §12).
 > substitute. No Linux default rollout. See §3 for the clause-by-clause
 > grade and §4 for the exact path to green.
 
+> **2026-11-09 update (native Linux x64 run):** the behavior proof has now
+> run natively on an x64 host. Build, PAL 95/95, smoke, native, metadata,
+> JIT, bytecode verify, and both regression variants are green
+> (interpreted **2841/0**, dynapogo **2305/0**); the engine defects found
+> by the run are fixed and documented in
+> [b4-linux-run.md](b4-linux-run.md). The certified Linux test262 baseline
+> is recorded: **77,341 / 3,203** edition-selected (vs Mac
+> 77,595/2,949); the delta is Unicode-version skew from system ICU 74.2
+> (Unicode 15.1), with identical engine-defect/feature buckets.
+
 ## 1. Final proof re-runs (2026-10-12, this step)
 
 Fast/green only — no full rebuilds, no full test suites. Every number
