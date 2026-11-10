@@ -8,7 +8,7 @@
 //! glibc 2.39 floor. 684 compiles (Backend/WasmReader/wabt included),
 //! static + 3 singular archives, libChakraCore.so, dynamic ch, GCStress,
 //! staged headers, plus the `check` aggregation (regression, bytecode,
-//! native embedding, smoke, metadata) and `check-selftest` controls.
+//! native embedding, smoke, JIT smoke, metadata) and `check-selftest` controls.
 //!
 //! Structure mirrors build.zig (Mac): tables-driven compiles with native
 //! depfiles, generator/input edges (jstoc, PAL config, wabt config),
@@ -654,7 +654,7 @@ pub fn build(b: *std.Build) void {
     const metadata_top = b.step("check-metadata", "Assert artifact metadata: ELF, SONAME, exports, configs, headers, archives (not part of the default build)");
     metadata_top.dependOn(&metadata.step);
 
-    const check_top = b.step("check", "Full legacy-equivalent verification: regression, bytecode (--jit), native embedding, smoke, metadata (not part of the default build)");
+    const check_top = b.step("check", "Full legacy-equivalent verification: regression, bytecode (--jit), native embedding, smoke, JIT smoke, metadata (not part of the default build)");
     // Negative controls ride along with the full check, mirroring the
     // Mac graph ("Wired into every profile's `check`" in build.zig);
     // without this the Linux gates' can-fail proofs never ran under

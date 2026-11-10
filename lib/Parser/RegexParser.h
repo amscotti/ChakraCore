@@ -337,6 +337,7 @@ namespace UnifiedRegex
         bool vLastScanIsStringProperty; // set by ScanPropertyEscapeBodyPass0
         bool vClassSawNested;               // pass 0: this v class contains a nested '['
         bool vScanSpeculative;              // pass 0: validating a class before flags are known
+        const EncodedChar* vScanLimit;      // pass 0: legacy class end for the speculative scan
         const EncodedChar* vClassSpanStart; // pass 0: span the v validator consumed ('[' .. after ']')
         const EncodedChar* vClassSpanEnd;   // pass 0: ']'-atom rule in TermPass0
 

@@ -78,10 +78,16 @@ as an ES2024 v-mode class. For a legal legacy class containing `[` (e.g.
 `/[-\/\\^$*+?.()|[\]{}]/g`) the v interpretation ran past the literal end
 and `NextChar` hard-failed on the newline (`SyntaxError: Expected '/'`).
 The speculative scan now aborts through `VScanAbort`, records the v-only
-deferred error, and leaves the legacy pass to parse the text. This cleared
-all 54 WasmSpec failures (jsapi.js loads `testharness.js`, whose
-`escapeRegExp` uses that class). v-mode itself is unchanged and verified
-(`/[a&&a]/v`, `\q{ab|cd}`, `[a--b]`, and `/[[]/v` rejecting).
+deferred error, and leaves the legacy pass to parse the text. The scan is
+bounded at the **legacy class end** (first unescaped `]`); past that point
+it aborts without consuming, and on abort it restores the three
+deferred-error slots, so trailing same-line text cannot leak a spurious
+`\p{...}` error: `var re = /[[]/u; // see \p{Nope}` parses, while
+`/[[]/v` and `/[/]/v` still reject and `/[a&&a]/v`/`\q{ab|cd}`/`[a--b]`
+still work. This cleared all 54 WasmSpec failures
+(jsapi.js loads `testharness.js`, whose `escapeRegExp` uses that class).
+v-mode itself is unchanged and verified (`/[a&&a]/v`, `\q{ab|cd}`,
+`[a--b]`, and `/[[]/v` rejecting).
 
 ## 2. Gate evidence (native)
 
@@ -103,6 +109,11 @@ Linux selection is the x64-eligible subset (2841 interpreted / 2305
 dynapogo scenarios), so it legitimately differs from the Mac pins
 (2051/2103); the per-variant totals are the authoritative Linux baseline.
 
+ABI-visible updates this run: `linux_exports_so.txt` gained
+`JsSetTimerContinuationCallback` (**236 → 237** symbols), and the
+static archive expectation moved **667 → 669** members for the two
+C2-S13 TUs (`JavascriptWeakRef.cpp`, `JavascriptFinalizationRegistry.cpp`).
+
 ## 3. Platform exclusions and accommodations (honest residuals)
 
 - `test/DebuggerCommon/AsyncSuspendedResume.js` is tagged
@@ -114,8 +125,13 @@ dynapogo scenarios), so it legitimately differs from the Mac pins
 - `test/Function/FuncBody.bug232281.js` completes correctly in 4m27s
   (stack overflow through an eval-per-frame recursion; the stack walk in
   `VEval` makes it O(depth²)). The Linux gate raises the per-test deadline
-  to 480 s; the selection is unchanged. This is a slow-host performance
+  to 900 s; the selection is unchanged. This is a slow-host performance
   delta, not a wrong result.
+- One interpreted-suite run produced a single SIGSEGV in
+  `test/es7/class-private-methods.js` (no output); the test passes 3/3
+  standalone and the next full interpreted + dynapogo run was 2841/0 +
+  2305/0. Recorded as a rare non-reproducible simple-JIT flake pending a
+  dedicated stress reproduction, not a repeatable gate failure.
 
 ## 4. test262 Certified Linux baseline
 
@@ -138,29 +154,31 @@ produced:
 | measure | Mac certified (e12) | Linux certified (jobs=8) | Linux jobs=4 |
 |---|---:|---:|---:|
 | broad | 78,399 / 14,742 | 78,145 / 14,996 | 78,169 / 14,972 |
-| edition-selected | **77,595 / 2,949** | **77,341 / 3,203** | 77,365 / 3,179 |
+| edition-selected | **77,595 / 2,949** | **77,354 / 3,190** | 77,365 / 3,179 |
 | disabled-flag | 1,734 | 1,734 | 1,734 |
 | post-ES2025 excluded | 11,793 | 11,793 | 11,793 |
 | engine-defect-on-existing | 1,010 | 1,164 | 1,164 |
 | required-feature-missing | 202 | 278 | 278 |
-| host | 3 | **27** | 3 |
+| host | 3 | **14** | 3 |
 
-The certified run's host bucket is 27 vs 3 because the 4-vCPU proof host
-is oversubscribed 2:1 by the mandated `--jobs 8`; 24 `decodeURI`/
-`decodeURIComponent` scenarios are SIGKILLed at the 10 s deadline. Each
-such file takes ~2.6 s on an idle core and passes individually
-(`S15.1.3.1_A1.10_T1.js` verified directly). The **engine-defect and
-required-feature buckets are identical between the jobs=8 and jobs=4
-runs**, so the host bucket is the only difference. The +230/+254 delta
-vs Mac is the Unicode-version skew described above (ICU 74.2 = Unicode
-15.1), not an engine regression.
+The final certified run's host bucket is 14 vs 3: the 4-vCPU proof host
+is oversubscribed 2:1 by the mandated `--jobs 8`, and a handful of
+`decodeURI`/`decodeURIComponent` loops are SIGKILLed at the 10 s
+deadline. Each such file takes ~2.6 s on an idle core and passes
+individually (`S15.1.3.1_A1.10_T1.js` verified directly). The
+**engine-defect (1,164) and required-feature (278) buckets are identical
+across the jobs=8 and jobs=4 runs**, so the host bucket is the only
+environmental difference. The +241 delta vs Mac is the Unicode-version
+skew described above (ICU 74.2 = Unicode 15.1), not an engine
+regression.
 
 Run identity and artifacts: `out/test262-cert-linux-20261109/`
 (`refresh-report.md`, `refresh-analysis.json`, retained `results.json`);
 corpus `2e0a5676`, Node v26.7.0, controls 25/25, skips 902 (828
 duplicate-module + 70 HTMLDDA + 4 blocking-host, unchanged), 8,751
-negatives marker-judged, 1 marker downgrade. The tree was dirty at run
-time by design — the run measures the uncommitted fixes above; the
+negatives marker-judged, 1 marker downgrade. The final certified run (`out/test262-cert-linux-final/`) measured the
+binary with the final v-scan bound (`3450e23a…`); its totals are the
+table above. The tree was dirty at run time by design — the run measures the uncommitted fixes above; the
 launcher/dylib hashes are the ones in §7.
 
 ## 6. Review record
@@ -183,6 +201,13 @@ gates re-run:
 - **[nit] receipt counts/commands**: corrected the selection to
   `2841 interpreted / 2305 dynapogo` and the PAL evidence command to
   `zig build` (the contract is printed by the configure step).
+- **[bug] speculative v-scan state leak (first review, second pass)**: the
+  pre-flag v validator could read past the literal's `/` into trailing
+  same-line source and record a deferred `\p{...}` error for a valid
+  `/.../u` literal (`var re = /[[]/u; // \p{Nope}` was a SyntaxError).
+  The scan now stops at an unescaped `/` and snapshots/restores the three
+  deferred-error slots on abort. Probes: the repro parses; `/[[]/`,
+  `/[|]/`, `/[a[b]c]/`, `/[[]/v` and `\q`/`&&`/`--` v cases match Node.
 - **[bug] self-test after baseline pinning (second review)**: the
   negative control that asserted `RECORDED_BASELINE` is all-None no
   longer held once the real Linux pins were recorded. The control now
@@ -203,7 +228,7 @@ interpreted **2841/0** and dynapogo **2305/0**.
 ## 7. Binary identity
 
 - `zig-out/bin/ch` SHA-256 `054addb0fa67a8fb2e1ab63ddb5b630dd3630d9f33c5052c11a24db95bad4789`
-- `zig-out/bin/libChakraCore.so` SHA-256 `63afc70be6adecab6d30e583235cd0409790cfabaac8681e9b895bc123270818`
+- `zig-out/bin/libChakraCore.so` SHA-256 `3450e23a58f15eb065e8e16ed3f974a1ba56add7f2ed24e810b5742ee029bb59`
 
 ## 8. Residual work
 

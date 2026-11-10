@@ -232,6 +232,7 @@ namespace UnifiedRegex
         , vLastScanIsStringProperty(false)
         , vClassSawNested(false)
         , vScanSpeculative(false)
+        , vScanLimit(nullptr)
         , vClassSpanStart(nullptr)
         , vClassSpanEnd(nullptr)
         , decimalEscapes(nullptr)
@@ -1219,8 +1220,53 @@ namespace UnifiedRegex
     {
         const EncodedChar* savedNext = next;
         const size_t savedMultiUnits = this->GetMultiUnits();
+        // Legacy class end (after its first unescaped ']'), computed without
+        // touching parser state. The speculative v scan must stop there: past
+        // it the text belongs to the rest of the literal, not this class.
+        const EncodedChar* legacyEnd = next;
+        while (legacyEnd < inputLim && *legacyEnd != 0)
+        {
+            if (*legacyEnd == '\\')
+            {
+                legacyEnd += (legacyEnd + 1 < inputLim) ? 2 : 1;
+                continue;
+            }
+            if (*legacyEnd == ']')
+            {
+                ++legacyEnd;
+                break;
+            }
+            ++legacyEnd;
+        }
+        const EncodedChar* const savedVScanLimit = this->vScanLimit;
+        // The regex literal ends at the first unescaped '/' after the legacy
+        // class close. A v class may legitimately extend past that close
+        // (nested classes, e.g. /[a[b]c]/v), so do not stop at legacyEnd;
+        // stop at the literal terminator. This lets valid nested v classes
+        // finish while still preventing the scan from reading the tail of
+        // the source line.
+        const EncodedChar* literalEnd = legacyEnd;
+        while (literalEnd < inputLim && *literalEnd != 0 &&
+               *literalEnd != '/' && *literalEnd != '\n' && *literalEnd != '\r')
+        {
+            if (*literalEnd == '\\' && literalEnd + 1 < inputLim)
+            {
+                literalEnd += 2;
+                continue;
+            }
+            ++literalEnd;
+        }
+        this->vScanLimit = literalEnd;
         bool mayContainStrings = false;
         this->vClassSawNested = false;
+        // The speculative scan can leave the class and read trailing source
+        // (up to a newline or '/'). Any deferred error it records from that
+        // tail is not a property of this literal; snapshot the three
+        // deferred slots and restore them if the scan aborts.
+        ParseError* const savedUnicodeError = this->deferredIfUnicodeError;
+        ParseError* const savedSetsError = this->deferredIfUnicodeSetsError;
+        ParseError* const savedNoSetsError = this->deferredIfUnicodeNoSetsError;
+        bool aborted = false;
         const bool savedVScanSpeculative = this->vScanSpeculative;
         this->vScanSpeculative = true;
         try
@@ -1232,9 +1278,23 @@ namespace UnifiedRegex
             // Speculative scan hit the literal end. Flags are not known yet,
             // so this must not fail a legal legacy class; pass 1 re-parses
             // the text under the real flags.
+            aborted = true;
             mayContainStrings = false;
+            this->deferredIfUnicodeError = savedUnicodeError;
+            this->deferredIfUnicodeSetsError = savedSetsError;
+            this->deferredIfUnicodeNoSetsError = savedNoSetsError;
+        }
+        catch (...)
+        {
+            // Keep the speculative flag scoped even if a hard ParseError/OOM
+            // escapes; the caller unwinds the parser, but a future caller
+            // that catches and reuses it must not inherit a stale flag.
+            this->vScanSpeculative = savedVScanSpeculative;
+            this->vScanLimit = savedVScanLimit;
+            throw;
         }
         this->vScanSpeculative = savedVScanSpeculative;
+        this->vScanLimit = savedVScanLimit;
         // For the ']'-atom rule in TermPass0 (see there): record the span
         // the v validator consumed (from the '[' through its matching ']').
         // A legacy ']' atom is genuine v class content exactly when it lies
@@ -1244,6 +1304,7 @@ namespace UnifiedRegex
         // starts a second class inside the v class's span) must not
         // shrink the recorded span; keep the enclosing one when the new
         // span lies inside it.
+        if (!aborted)
         {
             const EncodedChar* newStart = savedNext - 1;
             const EncodedChar* newEnd = next;
@@ -1609,6 +1670,13 @@ namespace UnifiedRegex
         // Read a full code point: a raw surrogate pair is ONE v-class
         // operand ([😀--x] would otherwise validate as two items and the
         // -- operator would be rejected as a union chain).
+        // A raw character at or past the legacy class end belongs to the
+        // rest of the literal, not this class. Stop without consuming; pass 1
+        // re-parses under the real flags anyway.
+        if (this->vScanSpeculative && next >= this->vScanLimit)
+        {
+            throw VScanAbort();
+        }
         Char c = NextChar();
         if (VDetail::IsHighSurrogateUnit(c) && !IsEOF() && ECLookahead() != 0)
         {
@@ -1659,6 +1727,10 @@ namespace UnifiedRegex
             {
                 DeferredFailIfUnicodeSets(JSERR_RegExpSyntax);
                 return;
+            }
+            if (this->vScanSpeculative && next >= this->vScanLimit)
+            {
+                throw VScanAbort();
             }
             EncodedChar ec = ECLookahead();
             if (ec == '}')
@@ -1765,6 +1837,10 @@ namespace UnifiedRegex
                 }
             }
             // Raw character: syntax characters and reserved pairs rejected.
+            if (this->vScanSpeculative && next >= this->vScanLimit)
+            {
+                throw VScanAbort();
+            }
             Char c = NextChar();
             if (VDetail::IsClassSetSyntaxChar(c))
             {

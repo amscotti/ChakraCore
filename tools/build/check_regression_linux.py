@@ -26,12 +26,14 @@ from the exit code alone; a nonzero exit, a missing summary, or 2+
 summary lines fails loudly. Overall: PASS iff every variant passes;
 any FAIL verdict fails the gate; otherwise BLOCKED.
 
-Linux has NO recorded baseline counts yet (the suite has never run
-green here: doc/b4-linux.md section 8). Until counts are recorded in
-RECORDED_BASELINE below, a completed run prints its OBSERVED counts
-and exits 1 asking for them to be recorded after validation — a
-completed run never silently passes, and an aborted run (engine init
-abort under qemu) reports BLOCKED with 0 ran.
+Linux baseline counts are recorded in RECORDED_BASELINE below
+(interpreted 2841/0, dynapogo 2305/0; see doc/b4-linux-run.md). A
+completed run must match its variant's pair exactly; an aborted run
+(engine init abort under qemu) reports BLOCKED with 0 ran, and a
+completed run with no recorded pair still fails loudly asking for the
+counts to be recorded after validation — a completed run never silently
+passes. Re-record only after a green run on a native host and a receipt
+update recording why the counts changed.
 
 Usage: check_regression_linux.py <runtests.py> <ch> [extra runtests args...]
        [--self-test]
@@ -52,7 +54,7 @@ VARIANTS = ("interpreted", "dynapogo")
 
 # Recorded Linux baselines. Observed on the native x64 proof host
 # (4 vCPU, glibc 2.39, Zig 0.17.0/clang 22) on 2026-11-09 after the Linux
-# engine fixes recorded in doc/b4-linux.md: interpreted 2841/0 and
+# engine fixes recorded in doc/b4-linux-run.md: interpreted 2841/0 and
 # dynapogo 2305/0. Counts differ from Mac (2051/0 and 2103/0) because the
 # Linux selection runs the x64-eligible subset (include_slow off, platform
 # exclusions); the two counts are the authoritative Linux baseline.
@@ -160,10 +162,11 @@ def main(argv):
     # The legacy 60s default assumes the much faster reference host. On the
     # Linux x64 proof box (4 vCPUs), Function/FuncBody.bug232281.js completes
     # correctly in ~4m27s (it stack-overflows through an eval-per-frame
-    # recursion), so a 60s deadline reports a false timeout. Keep the
-    # selection identical and widen only the deadline; callers can override.
+    # recursion), so a 60s deadline reports a false timeout. 900s leaves
+    # ~3.4x headroom for a contended 4-worker run while keeping a genuine
+    # hang bounded. Selection is unchanged; callers can override.
     if not any(a == "--timeout" or a.startswith("--timeout=") for a in extra):
-        extra = list(extra) + ["--timeout", "480"]
+        extra = list(extra) + ["--timeout", "900"]
     for p in (runtests, ch):
         if not os.path.isfile(p):
             print("check_regression_linux: missing file: %s" % p,

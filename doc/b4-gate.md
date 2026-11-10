@@ -19,7 +19,7 @@ record ([b3-profiles.md](b3-profiles.md) §12).
 > (interpreted **2841/0**, dynapogo **2305/0**); the engine defects found
 > by the run are fixed and documented in
 > [b4-linux-run.md](b4-linux-run.md). The certified Linux test262 baseline
-> is recorded: **77,341 / 3,203** edition-selected (vs Mac
+> is recorded: **77,354 / 3,190** edition-selected (vs Mac
 > 77,595/2,949); the delta is Unicode-version skew from system ICU 74.2
 > (Unicode 15.1), with identical engine-defect/feature buckets.
 

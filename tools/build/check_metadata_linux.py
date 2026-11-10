@@ -19,7 +19,7 @@ Sub-checks against the install prefix (zig-out):
      -static-libstdc++ — same property, different runtime).
   3. Version-script exports (`nm -D --defined-only`): the EXACT
      committed set for the .so (tools/build/linux_exports_so.txt:
-     236 symbols incl. DllMain + Js* at B4 record time — export
+     237 symbols incl. DllMain + Js* at B4 record time — export
      membership is source- and script-determined, so any delta is
      a real finding). Provenance honesty: the B4 record does NOT
      document whether linux_exports_*.txt were captured from the
