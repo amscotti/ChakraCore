@@ -615,12 +615,12 @@ namespace Js
 
         // If the Fraction param. is not present we have to output as many fractional digits as we can
         int fractionDigits = -1;
+        bool noRangeCheck = args.Info.Count <= 1;
 
         if(args.Info.Count > 1)
         {
             //use the first arg as the fraction digits, ignore the rest.
             Var aFractionDigits = args[1];
-            bool noRangeCheck = false;
 
             // shortcut for tagged int's
             if(TaggedInt::Is(aFractionDigits))
@@ -635,22 +635,35 @@ namespace Js
             else
             {
                 double fractionDigitsRaw = JavascriptConversion::ToInteger(aFractionDigits, scriptContext);
-                // ES2018 allows 0..100; check in double space before the cast.
-                if (!noRangeCheck && !(fractionDigitsRaw >= 0 && fractionDigitsRaw <= 20))
+                // Avoid the UB cast; the range check is after the NaN/Infinity
+                // return, per the spec's ordering.
+                if (fractionDigitsRaw >= -2147483648.0 && fractionDigitsRaw <= 2147483647.0)
                 {
-                    JavascriptError::ThrowRangeError(scriptContext, JSERR_FractionOutOfRange);
+                    fractionDigits = (int)fractionDigitsRaw;
                 }
-                fractionDigits = (int)fractionDigitsRaw;
-            }
-            if(!noRangeCheck && (fractionDigits < 0 || fractionDigits > 20))
-            {
-                JavascriptError::ThrowRangeError(scriptContext, JSERR_FractionOutOfRange);
+                else
+                {
+                    fractionDigits = fractionDigitsRaw < 0 ? (-2147483647 - 1) : 2147483647;
+                }
             }
         }
 
         if (nullptr != (nanF = ToStringNanOrInfinite(value, scriptContext)))
         {
             return nanF;
+        }
+
+        if(!noRangeCheck && (fractionDigits < 0 || fractionDigits > 100))
+        {
+            JavascriptError::ThrowRangeError(scriptContext, JSERR_FractionOutOfRange);
+        }
+
+        // The formatter supports 20 fractional digits; finite values above
+        // that still take the pre-existing RangeError (100-digit exact
+        // formatting is a tracked open card).
+        if (fractionDigits > 20)
+        {
+            JavascriptError::ThrowRangeError(scriptContext, JSERR_FractionOutOfRange);
         }
 
         return FormatDoubleToString(value, Js::NumberUtilities::FormatExponential, fractionDigits, scriptContext);
@@ -776,13 +789,16 @@ namespace Js
         else
         {
             double precisionRaw = JavascriptConversion::ToInteger(aPrecision, scriptContext);
-            // Range-check in double space before the int cast (UB outside
-            // int; the current formatter supports 1..21 significant digits).
-            if (!(precisionRaw >= 1 && precisionRaw <= 21))
+            // Avoid the UB cast; the range check is after the NaN/Infinity
+            // return, per the spec's ordering.
+            if (precisionRaw >= -2147483648.0 && precisionRaw <= 2147483647.0)
             {
-                JavascriptError::ThrowRangeError(scriptContext, JSERR_PrecisionOutOfRange);
+                precision = (int)precisionRaw;
             }
-            precision = (int)precisionRaw;
+            else
+            {
+                precision = precisionRaw < 0 ? (-2147483647 - 1) : 2147483647;
+            }
         }
 
         JavascriptString * nanF;
@@ -791,7 +807,14 @@ namespace Js
             return nanF;
         }
 
-        if(precision < 1 || precision > 21)
+        if(precision < 1 || precision > 100)
+        {
+            JavascriptError::ThrowRangeError(scriptContext, JSERR_PrecisionOutOfRange);
+        }
+
+        // The formatter supports 21 significant digits; finite values above
+        // that still take the pre-existing RangeError.
+        if (precision > 21)
         {
             JavascriptError::ThrowRangeError(scriptContext, JSERR_PrecisionOutOfRange);
         }
