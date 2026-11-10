@@ -631,6 +631,19 @@ pub fn build(b: *std.Build) void {
     const smoke_top = b.step("check-smoke", "Assert ch version/flag output text and script execution (not part of the default build)");
     smoke_top.dependOn(&smoke.step);
 
+    // (4b) JIT smoke: the test profile is shared/JIT-on, so prove the native
+    // backend is present and both the -mic and dynapogo class/helper paths
+    // run. check_jit.py is shared with the macOS jit profile; it selects
+    // libChakraCore.so on Linux. The e14 class probe pins the aux-slot
+    // store that produced the fulljit SIGSEGV family.
+    const jit_smoke = b.addSystemCommand(&.{python});
+    jit_smoke.addFileArg(b.path("tools/build/check_jit.py"));
+    jit_smoke.addFileArg(installed_ch);
+    jit_smoke.step.dependOn(install);
+    jit_smoke.stdio = .inherit;
+    const jit_top = b.step("check-jit", "JIT smoke: NativeCodeGenerator present; -mic and dynapogo class/helper checks (not part of the default build)");
+    jit_top.dependOn(&jit_smoke.step);
+
     // (5) Metadata gates: ELF, SONAME/NEEDED, version-script exports,
     // configs, headers, archives.
     const metadata = b.addSystemCommand(&.{python});
@@ -651,5 +664,6 @@ pub fn build(b: *std.Build) void {
     check_top.dependOn(&verify_bc.step);
     check_top.dependOn(&native.step);
     check_top.dependOn(&smoke.step);
+    check_top.dependOn(&jit_smoke.step);
     check_top.dependOn(&metadata.step);
 }

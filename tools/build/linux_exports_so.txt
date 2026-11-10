@@ -194,6 +194,7 @@ JsSetRuntimeBeforeSweepCallback
 JsSetRuntimeDomWrapperTracingCallbacks
 JsSetRuntimeMemoryAllocationCallback
 JsSetRuntimeMemoryLimit
+JsSetTimerContinuationCallback
 JsStrictEquals
 JsStringToPointer
 JsTTDCheckAndAssertIfTTDRunning

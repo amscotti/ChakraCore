@@ -53,6 +53,9 @@ SNIPPET = 'print("zig-smoke-ok " + (1+1));\n'
 SNIPPET_WANT = "zig-smoke-ok 2"
 HELLO_REL = os.path.join("test", "Basics", "hello.js")
 HELLO_WANT = ["hello world", "PASS"]
+THROW_SNIPPET = 'throw new Error("smoke-boom");\n'
+THROW_MARKER = "CH_NEGATIVE_PHASE: runtime"
+THROW_TEXT = "Error: smoke-boom"
 # SIGABRT exit presentations: 134 via shells, -6 via subprocess on signal.
 ABORT_RCS = (134, -6)
 
@@ -142,6 +145,29 @@ def check_hello(ch, hello_path):
     if out.splitlines() != HELLO_WANT:
         return ("hello.js stdout %r != %r"
                 % (out.splitlines(), HELLO_WANT))
+    return None
+
+
+def check_unhandled_throw(ch, throw_path):
+    """An unhandled JS throw must reach the JsRT catch and the
+    negative-phase marker, not abort through libc++abi. This is the
+    Linux x64 dynamic-interpreter-thunk unwind regression: the emitted
+    call stubs have no usable FDE unless the CIE is skipped for LLVM
+    libunwind and the CFA is rbp-based (PrologEncoder/PDataManager)."""
+    rc, out, err = common.run_capture(
+        [ch, "-Test262", "-NegativePhaseReport", throw_path])
+    combined = out + err
+    print("check_smoke_linux: unhandled-throw -> rc=%d out=%r err=%r"
+          % (rc, out[:80], err[:120]))
+    if rc in ABORT_RCS or "libc++abi: terminating" in combined:
+        return ("unhandled JS throw aborted the process (rc=%d): %r"
+                % (rc, combined.splitlines()[:3]))
+    if rc != 0:
+        return "unhandled-throw exited %d, require 0 (err=%r)" % (rc, err)
+    if THROW_MARKER not in err:
+        return "unhandled-throw stderr lacks %r (got %r)" % (THROW_MARKER, err)
+    if THROW_TEXT not in combined:
+        return "unhandled-throw output lacks %r (got %r)" % (THROW_TEXT, combined)
     return None
 
 
@@ -264,6 +290,18 @@ def self_test():
                             "#!/bin/sh\necho 'hello world'\necho 'PASS'\nexit 0\n")
         bad += report("hello-text decoy passes hello gate",
                       check_hello(decoy_hello, snippet) is None)
+        decoy_throw = decoy(
+            "decoy-throw.sh",
+            "#!/bin/sh\necho 'Error: smoke-boom' >&2\n"
+            "echo 'CH_NEGATIVE_PHASE: runtime' >&2\nexit 0\n")
+        bad += report("unhandled-throw text decoy passes throw gate",
+                      check_unhandled_throw(decoy_throw, snippet) is None)
+        decoy_abort_throw = decoy(
+            "decoy-abort-throw.sh",
+            "#!/bin/sh\necho 'libc++abi: terminating due to uncaught "
+            "exception of type Js::JavascriptException' >&2\nexit 134\n")
+        bad += report("libc++abi abort decoy fails throw gate",
+                      check_unhandled_throw(decoy_abort_throw, snippet) is not None)
         try:
             common.run_capture([sys.executable, "-c",
                                 "import time; time.sleep(30)"], timeout=1)
@@ -304,6 +342,9 @@ def main(argv):
         snippet = os.path.join(tmp, "snippet.js")
         with open(snippet, "w") as f:
             f.write(SNIPPET)
+        throw_snippet = os.path.join(tmp, "throw.js")
+        with open(throw_snippet, "w") as f:
+            f.write(THROW_SNIPPET)
         try:
             failures = [
                 ("version", check_version(ch)),
@@ -311,6 +352,7 @@ def main(argv):
                 ("invalid-flag", check_invalid_flag(ch, snippet)),
                 ("snippet", check_snippet(ch, snippet)),
                 ("hello", check_hello(ch, hello_path)),
+                ("unhandled-throw", check_unhandled_throw(ch, throw_snippet)),
             ]
         except subprocess.TimeoutExpired as e:
             failures = [("timeout", "ch probe exceeded the %ds ceiling: %s"
@@ -327,7 +369,7 @@ def main(argv):
                   file=sys.stderr)
         return 1
     print("check_smoke_linux: PASS: version + help + invalid-flag + "
-          "snippet + hello.js outputs match")
+          "snippet + hello.js + unhandled-throw outputs match")
     return 0
 
 

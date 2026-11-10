@@ -28,6 +28,7 @@ Exit code: 0 iff every sub-check passes.
 """
 
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -65,10 +66,13 @@ WANT = ["jit-add 5", "jit-rest 2", "jit-apply 28",
 
 
 def check_symbols(ch):
-    dylib = os.path.join(os.path.dirname(os.path.abspath(ch)), "libChakraCore.dylib")
+    dylib_name = ("libChakraCore.dylib" if sys.platform == "darwin"
+                  else "libChakraCore.so")
+    dylib = os.path.join(os.path.dirname(os.path.abspath(ch)), dylib_name)
     if not os.path.isfile(dylib):
         return "sibling dylib not found: %s" % dylib
-    rc, out, err = common.run_capture(["/usr/bin/nm", dylib])
+    nm = shutil.which("nm") or "/usr/bin/nm"
+    rc, out, err = common.run_capture([nm, dylib])
     if rc != 0:
         return "nm %s exited %d: %s" % (dylib, rc, err.strip())
     if "NativeCodeGenerator" not in out:

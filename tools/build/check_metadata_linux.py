@@ -59,7 +59,8 @@ Sub-checks against the install prefix (zig-out):
   5. The 4 staged public headers present, nonempty and byte-identical
      to their lib/ sources; bin/ and lib/ .so copies identical;
      archives present with legacy-exact member counts
-     (static 667, Pal 90, Codex 1, PlatformAgnostic 11; `ar t`).
+     (static 669 after the two C2-S13 TUs, Pal 90, Codex 1,
+     PlatformAgnostic 11; `ar t`).
   6. The `.profile` marker reads `test`.
 
 Every sub-check fails loudly with diagnostics on mismatch.
@@ -89,7 +90,10 @@ WANT_ICU_NEEDED = ("libicuuc.so.74", "libicui18n.so.74")
 FORBID_NEEDED_SUBSTRS = ("libstdc++", "libc++")
 WANT_WABT_SHA256 = "4d365a89ec93f99a52137a5db99446514892cf928b2ff4a824ca997a271749d9"
 WANT_MEMBERS = {
-    "lib/libChakraCoreStatic.a": 667,
+    # 667 at the B4.3 reference graph; +2 for the C2-S13 WeakRef/
+    # FinalizationRegistry TUs added on the branch after that reference
+    # (tables_linux.zig now compiles 684 TUs), asserted by this gate.
+    "lib/libChakraCoreStatic.a": 669,
     "lib/libChakra.Pal.Singular.a": 90,
     "lib/libChakra.Common.Codex.Singular.a": 1,
     "lib/libChakra.Runtime.PlatformAgnostic.Singular.a": 11,

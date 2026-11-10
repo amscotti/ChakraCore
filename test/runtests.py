@@ -195,6 +195,9 @@ if args.sanitize != None:
 if sys.platform == 'darwin':
     not_tags.add('exclude_mac')
 
+if sys.platform.startswith('linux'):
+    not_tags.add('exclude_linux')
+
 if 'require_icu' in not_tags or 'exclude_noicu' in not_tags:
     not_tags.add('Intl')
 

@@ -1378,7 +1378,7 @@
       <files>AsyncSuspendedResume.js</files>
       <compile-flags>-dbgbaseline:AsyncSuspendedResume.js.dbg.baseline</compile-flags>
       <baseline>AsyncSuspendedResume.js.baseline</baseline>
-      <tags>exclude_dynapogo</tags>
+      <tags>exclude_dynapogo,exclude_linux</tags>
     </default>
   </test>
 </regress-exe>

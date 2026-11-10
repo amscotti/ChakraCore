@@ -50,11 +50,13 @@ from check_regression import parse_total
 # single-variant invocations (see module docstring).
 VARIANTS = ("interpreted", "dynapogo")
 
-# Recorded Linux baselines: none yet (see module docstring). A (passed,
-# failed) pair per variant goes here once observed on an
-# execution-capable host and validated; until then completed runs exit 1
-# with observed counts.
-RECORDED_BASELINE = {"interpreted": None, "dynapogo": None}
+# Recorded Linux baselines. Observed on the native x64 proof host
+# (4 vCPU, glibc 2.39, Zig 0.17.0/clang 22) on 2026-11-09 after the Linux
+# engine fixes recorded in doc/b4-linux.md: interpreted 2841/0 and
+# dynapogo 2305/0. Counts differ from Mac (2051/0 and 2103/0) because the
+# Linux selection runs the x64-eligible subset (include_slow off, platform
+# exclusions); the two counts are the authoritative Linux baseline.
+RECORDED_BASELINE = {"interpreted": (2841, 0), "dynapogo": (2305, 0)}
 
 
 def grade_variant(variant, rc, lines):
@@ -155,6 +157,13 @@ def main(argv):
               "collides with the per-variant loop; run one variant via a "
               "manual runtests.py invocation instead", file=sys.stderr)
         return 2
+    # The legacy 60s default assumes the much faster reference host. On the
+    # Linux x64 proof box (4 vCPUs), Function/FuncBody.bug232281.js completes
+    # correctly in ~4m27s (it stack-overflows through an eval-per-frame
+    # recursion), so a 60s deadline reports a false timeout. Keep the
+    # selection identical and widen only the deadline; callers can override.
+    if not any(a == "--timeout" or a.startswith("--timeout=") for a in extra):
+        extra = list(extra) + ["--timeout", "480"]
     for p in (runtests, ch):
         if not os.path.isfile(p):
             print("check_regression_linux: missing file: %s" % p,
@@ -223,10 +232,18 @@ def self_test():
         bad += report("duplicate summary raises", False)
     except ValueError:
         bad += report("duplicate summary raises", True)
-    # No-baseline pin: with RECORDED_BASELINE all-None the gate
-    # cannot pass.
-    bad += report("no baseline recorded (gate cannot pass yet)",
-                  all(v is None for v in RECORDED_BASELINE.values()))
+    # No-baseline pin: with RECORDED_BASELINE all-None the gate cannot
+    # pass. Temporarily clear the recorded baseline, assert the old
+    # behavior, then restore the real pins.
+    saved_for_none = RECORDED_BASELINE
+    try:
+        globals()["RECORDED_BASELINE"] = {"interpreted": None, "dynapogo": None}
+        verdict, detail = grade_variant(
+            "interpreted", 0, ["Total: passed 10, failed 0"])
+        bad += report("no baseline recorded (gate cannot pass yet)",
+                      verdict == "FAIL" and "no Linux baseline" in detail)
+    finally:
+        globals()["RECORDED_BASELINE"] = saved_for_none
     # Variants-extras guard: --variants in extras is rejected before
     # any file check or suite launch (existing files prove the guard,
     # not the isfile check, fires).
@@ -340,8 +357,8 @@ def self_test():
                       == "FAIL")
     finally:
         globals()["RECORDED_BASELINE"] = saved_baseline
-    bad += report("baseline restored to all-None after controls",
-                  all(v is None for v in RECORDED_BASELINE.values()))
+    bad += report("baseline restored after controls",
+                  RECORDED_BASELINE == saved_baseline)
     print("check_regression_linux self-test: %s"
           % ("ALL NEGATIVE CONTROLS BEHAVE" if bad == 0
              else "%d CONTROL(S) MISBEHAVE" % bad))
