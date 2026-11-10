@@ -348,6 +348,12 @@ Before selecting it, identify a concrete benefit and a rollback-sized patch.
 Use the [ownership record and verification workflow](memory-management.md#3-write-the-ownership-record)
 for the selected allocation/borrow/root contract.
 
+The standing conversion policy, wedge ladder and preconditions are
+recorded in [zig-strategy.md](zig-strategy.md) (2026-11-09): no
+engine-core port; incremental Zig for C-ABI boundary components
+(N-API → host slices → PAL subsystems), each parity-gated and
+delete-the-old. Read it before proposing any Zig replacement.
+
 Deliver:
 
 1. A narrow C header contract: functions, opaque handles or plain structs, error
