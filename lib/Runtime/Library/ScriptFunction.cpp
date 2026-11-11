@@ -616,7 +616,7 @@ using namespace Js;
 
     JavascriptArrayBuffer* AsmJsScriptFunction::GetAsmJsArrayBuffer() const
     {
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
         return (JavascriptArrayBuffer*)PointerValue(
             *(this->GetModuleEnvironment() + AsmJsModuleMemory::MemoryTableBeginOffset));
 #else

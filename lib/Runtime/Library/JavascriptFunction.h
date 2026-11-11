@@ -115,7 +115,7 @@ namespace Js
 
         Var CallFunction(Arguments args);
         Var CallRootFunction(Arguments args, ScriptContext * scriptContext, bool inScript);
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
         template <typename T>
         static T VECTORCALL CallAsmJsFunction(RecyclableObject * function, JavascriptMethod entryPoint, Var * argv, uint argsSize, byte* reg);
         static PossibleAsmJsReturnValues CallAsmJsFunctionX86Thunk(RecyclableObject * function, JavascriptMethod entryPoint, Var * argv, uint argsSize, byte* reg);

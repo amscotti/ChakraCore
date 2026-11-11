@@ -21,4 +21,4 @@ api t length=1
 api t get0===f=true
 api t grow=1
 api t length after grow=2
-call threw name=RuntimeError message=WebAssembly execution is not supported on this platform isRuntimeError=true
+call returned 42

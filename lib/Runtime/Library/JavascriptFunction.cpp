@@ -12,6 +12,9 @@
 #include "ByteCode/PropertyIdArray.h"
 #include "Language/AsmJsModule.h"
 #endif
+#if defined(_M_ARM64) && defined(ENABLE_ASMJS)
+#include "Language/InterpreterStackFrame.h"
+#endif
 
 #ifdef _M_IX86
 #ifdef _CONTROL_FLOW_GUARD
@@ -1580,6 +1583,97 @@ dbl_align:
 
 #endif
         return varResult;
+    }
+#endif
+
+#if defined(_M_ARM64) && defined(ENABLE_ASMJS)
+    // ARM64 internal (wasm -> wasm / asm.js -> asm.js) calls, W3
+    // interpreter-only (doc/wasm-arm64-abi.md sections 2-3). argv is the
+    // caller's m_outParams: [functionObject][unboxed args...] already in
+    // AsmJsCallStackLayout shape (no copying, no boxing). Ensure wasm
+    // bytecode on first call, then dispatch to AsmJsInterpreter<T> in C++.
+    // The entryPoint (jsMethod) is the delay thunk for the interpreter
+    // tier; it is not register-punned here -- the interpreter is invoked
+    // directly. Traps propagate as C++ exceptions to the frame.
+    template <> int JavascriptFunction::CallAsmJsFunction<int>(RecyclableObject * function, JavascriptMethod entryPoint, Var * argv, uint argsSize, byte* reg)
+    {
+        ScriptFunction* func = (ScriptFunction*)function;
+        if (func->GetFunctionBody()->IsWasmFunction())
+        {
+            JavascriptMethod next = WasmLibrary::EnsureWasmEntrypoint(func);
+            if (next != nullptr)
+            {
+                WasmLibrary::WasmLazyTrapCallback(function, CallInfo());
+                return 0;
+            }
+        }
+        AsmJsCallStackLayout* layout = (AsmJsCallStackLayout*)argv;
+        layout->functionObject = func;
+        return InterpreterStackFrame::AsmJsInterpreter<int>(layout);
+    }
+    template <> int64 JavascriptFunction::CallAsmJsFunction<int64>(RecyclableObject * function, JavascriptMethod entryPoint, Var * argv, uint argsSize, byte* reg)
+    {
+        ScriptFunction* func = (ScriptFunction*)function;
+        if (func->GetFunctionBody()->IsWasmFunction())
+        {
+            JavascriptMethod next = WasmLibrary::EnsureWasmEntrypoint(func);
+            if (next != nullptr)
+            {
+                WasmLibrary::WasmLazyTrapCallback(function, CallInfo());
+                return 0;
+            }
+        }
+        AsmJsCallStackLayout* layout = (AsmJsCallStackLayout*)argv;
+        layout->functionObject = func;
+        return InterpreterStackFrame::AsmJsInterpreter<int64>(layout);
+    }
+    template <> float JavascriptFunction::CallAsmJsFunction<float>(RecyclableObject * function, JavascriptMethod entryPoint, Var * argv, uint argsSize, byte* reg)
+    {
+        ScriptFunction* func = (ScriptFunction*)function;
+        if (func->GetFunctionBody()->IsWasmFunction())
+        {
+            JavascriptMethod next = WasmLibrary::EnsureWasmEntrypoint(func);
+            if (next != nullptr)
+            {
+                WasmLibrary::WasmLazyTrapCallback(function, CallInfo());
+                return 0;
+            }
+        }
+        AsmJsCallStackLayout* layout = (AsmJsCallStackLayout*)argv;
+        layout->functionObject = func;
+        return InterpreterStackFrame::AsmJsInterpreter<float>(layout);
+    }
+    template <> double JavascriptFunction::CallAsmJsFunction<double>(RecyclableObject * function, JavascriptMethod entryPoint, Var * argv, uint argsSize, byte* reg)
+    {
+        ScriptFunction* func = (ScriptFunction*)function;
+        if (func->GetFunctionBody()->IsWasmFunction())
+        {
+            JavascriptMethod next = WasmLibrary::EnsureWasmEntrypoint(func);
+            if (next != nullptr)
+            {
+                WasmLibrary::WasmLazyTrapCallback(function, CallInfo());
+                return 0;
+            }
+        }
+        AsmJsCallStackLayout* layout = (AsmJsCallStackLayout*)argv;
+        layout->functionObject = func;
+        return InterpreterStackFrame::AsmJsInterpreter<double>(layout);
+    }
+    template <> AsmJsSIMDValue JavascriptFunction::CallAsmJsFunction<AsmJsSIMDValue>(RecyclableObject * function, JavascriptMethod entryPoint, Var * argv, uint argsSize, byte* reg)
+    {
+        // SIMD internal calls fail controlled until W8 (ABI section 8).
+        JavascriptError::ThrowTypeError(function->GetScriptContext(), WASMERR_InvalidTypeConversion);
+        AsmJsSIMDValue out;
+        out.Zero();
+        return out;
+    }
+
+    PossibleAsmJsReturnValues JavascriptFunction::CallAsmJsFunctionX86Thunk(RecyclableObject * function, JavascriptMethod entryPoint, Var * argv, uint argsSize, byte* reg)
+    {
+        // ARM64: no x86-thunk shape; fail controlled (unused -- the ARM64
+        // CallAsmJsFunction specializations above dispatch in C++).
+        JavascriptError::ThrowWebAssemblyRuntimeError(function->GetScriptContext(), WASMERR_ExecutionNotSupported);
+        return {};
     }
 #endif
 

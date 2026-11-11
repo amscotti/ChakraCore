@@ -552,7 +552,7 @@ namespace Js
         return callSiteInfo[callSiteId].isArgConstant;
     }
 
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
     void DynamicProfileInfo::RecordAsmJsCallSiteInfo(FunctionBody* callerBody, ProfileId callSiteId, FunctionBody* calleeBody)
     {
         AutoCriticalSection cs(&this->callSiteInfoCS);

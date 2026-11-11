@@ -33,6 +33,11 @@ namespace Js {
 #if _M_X64
     Var BoxAsmJsReturnValue(ScriptFunction* func, int64 intRetVal, double doubleRetVal, float floatRetVal, __m128 simdReturn);
     int GetStackSizeForAsmJsUnboxing(ScriptFunction* func);
+#elif defined(_M_ARM64)
+    // ARM64 (doc/wasm-arm64-abi.md sections 2-3,6): no __m128 on ARM64.
+    // SIMD box takes AsmJsSIMDValue; SIMD returns fail controlled (W8).
+    Var BoxAsmJsReturnValue(ScriptFunction* func, int64 intRetVal, double doubleRetVal, float floatRetVal, const AsmJsSIMDValue& simdReturn);
+    int GetStackSizeForAsmJsUnboxing(ScriptFunction* func);
 #endif
 
     class AsmJsCompilationException

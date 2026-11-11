@@ -5808,6 +5808,15 @@ ScriptContext::GetJitFuncRangeCache()
     {
 #ifdef ASMJS_PLAT
         return (JavascriptMethod)this->asmJsInterpreterThunkEmitter->GetNextThunk(ppDynamicInterpreterThunk);
+#elif defined(_M_ARM64)
+        // ARM64 W3: no dynamic asm emitter (interpreter-only, C++ dispatch).
+        // Return the delay/interpreter entry directly; ppDynamicInterpreterThunk
+        // stays null so cleanup releases nothing. The wasm entry paths
+        // (AsmJsExternalEntryPoint / CallAsmJsFunction) run the interpreter
+        // without the emitted thunk; this covers FunctionBody
+        // GenerateDynamicInterpreterThunk if reached (e.g. background codegen).
+        *ppDynamicInterpreterThunk = nullptr;
+        return (JavascriptMethod)&Js::InterpreterStackFrame::AsmJsDelayDynamicInterpreterThunk;
 #else
         __debugbreak();
         return nullptr;
@@ -5835,6 +5844,9 @@ ScriptContext::GetJitFuncRangeCache()
     {
 #ifdef ASMJS_PLAT
         this->asmJsInterpreterThunkEmitter->Release(address, addtoFreeList);
+#elif defined(_M_ARM64)
+        // ARM64: GetNext returns the delay thunk (no allocation, see above).
+        Assert(address == nullptr || address == (BYTE*)&Js::InterpreterStackFrame::AsmJsDelayDynamicInterpreterThunk);
 #else
         Assert(UNREACHED);
 #endif

@@ -21,6 +21,9 @@
 //-------------------------------------------------------------------------------------------------------
 
 #include "RuntimeLanguagePch.h"
+#if defined(_M_ARM64)
+#include "Language/InterpreterStackFrame.h"
+#endif
 
 #ifdef ENABLE_ASMJS
 namespace Js
@@ -332,7 +335,7 @@ namespace Js
         return address;
     }
 
-#if _M_X64
+#if _M_X64 || _M_ARM64
 
     // returns an array containing the size of each argument
     uint *GetArgsSizesArray(ScriptFunction* func)
@@ -356,7 +359,11 @@ namespace Js
         return argSize;
     }
 
+#if _M_ARM64
+    Var BoxAsmJsReturnValue(ScriptFunction* func, int64 intRetVal, double doubleRetVal, float floatRetVal, const AsmJsSIMDValue& simdRetVal)
+#else
     Var BoxAsmJsReturnValue(ScriptFunction* func, int64 intRetVal, double doubleRetVal, float floatRetVal, __m128 simdRetVal)
+#endif
     {
         // ExternalEntryPoint doesn't know the return value, so it will send garbage for everything except actual return type
         Var returnValue = nullptr;
@@ -418,7 +425,11 @@ namespace Js
         return returnValue;
     }
 
-#elif _M_IX86
+#endif
+
+// External entry points (x86 inline-asm + ARM64 C++). x64 uses the
+// amd64_Thunks.S native thunk and has no C++ definition here.
+#if _M_IX86
     Var AsmJsExternalEntryPoint(RecyclableObject* entryObject, CallInfo callInfo, ...)
     {
         ARGUMENTS(args, callInfo);
@@ -556,13 +567,97 @@ namespace Js
         }
         return returnValue;
     }
-#else
-    // ARM64 (doc/wasm-arm64-plan.md): no JIT entry until W4. Fail with a
-    // controlled error, never a fail-fast. Replaced by the ABI entry in W3/W4.
+#elif defined(_M_ARM64)
+    // ARM64 external (JS -> wasm/asm.js) entry, W3 interpreter-only
+    // (doc/wasm-arm64-abi.md sections 2-3,6). Pure C++: probe, unbox,
+    // interpret via AsmJsInterpreter<T>, box. Matches the x64 shape
+    // (UnboxAsmJsArguments -> target -> BoxAsmJsReturnValue) without
+    // naked-asm thunks: reuse the shared AsmJsCallStackLayout as-is (Q1).
     Var AsmJsExternalEntryPoint(RecyclableObject* entryObject, CallInfo callInfo, ...)
     {
-        JavascriptError::ThrowWebAssemblyRuntimeError(entryObject->GetScriptContext(), WASMERR_ExecutionNotSupported);
-        return nullptr;
+        ARGUMENTS(args, callInfo);
+        ScriptFunction* func = (ScriptFunction*)entryObject;
+        ScriptContext* scriptContext = func->GetScriptContext();
+        AsmJsFunctionInfo* info = func->GetFunctionBody()->GetAsmJsFunctionInfo();
+
+        // Generate wasm bytecode / install lazy trap on first call (mirrors
+        // the x64 delay thunk; asm.js bytecode already exists).
+        if (func->GetFunctionBody()->IsWasmFunction())
+        {
+            JavascriptMethod next = WasmLibrary::EnsureWasmEntrypoint(func);
+            if (next != nullptr)
+            {
+                // Lazy trap: throw the stored error (never returns normally).
+                WasmLibrary::WasmLazyTrapCallback(entryObject, callInfo);
+                return JavascriptOperators::OP_LdUndef(scriptContext);
+            }
+            // A non-null non-trap entry would be a JIT tier-up target (not
+            // installed on ARM64); fall through to the interpreter, which is
+            // the correct tier for W3.
+        }
+
+        // SIMD-typed signatures fail controlled until W8 (ABI section 8).
+        // ENABLE_WASM_SIMD is off so this is a parity guard; keep the throw.
+#ifdef ENABLE_WASM_SIMD
+        switch (info->GetReturnType().which())
+        {
+        case AsmJsRetType::Int32x4:
+        case AsmJsRetType::Bool32x4:
+        case AsmJsRetType::Bool16x8:
+        case AsmJsRetType::Bool8x16:
+        case AsmJsRetType::Float32x4:
+        case AsmJsRetType::Float64x2:
+        case AsmJsRetType::Int64x2:
+        case AsmJsRetType::Int16x8:
+        case AsmJsRetType::Int8x16:
+        case AsmJsRetType::Uint32x4:
+        case AsmJsRetType::Uint16x8:
+        case AsmJsRetType::Uint8x16:
+            JavascriptError::ThrowTypeError(scriptContext, WASMERR_InvalidTypeConversion);
+            break;
+        default:
+            break;
+        }
+#endif
+
+        int argSize = GetStackSizeForAsmJsUnboxing(func);
+        // Layout buffer: [functionObject][unboxed args...]. Unbox skips the
+        // first MachPtr slot (the function object); store func there after.
+        void* buf = _alloca(argSize);
+        UnboxAsmJsArguments(func, args.Values + 1, (char*)buf, callInfo);
+        AsmJsCallStackLayout* layout = (AsmJsCallStackLayout*)buf;
+        layout->functionObject = func;
+
+        AsmJsSIMDValue zeroSimd;
+        zeroSimd.Zero();
+        switch (info->GetReturnType().which())
+        {
+        case AsmJsRetType::Void:
+        case AsmJsRetType::Signed:
+        {
+            int ret = InterpreterStackFrame::AsmJsInterpreter<int>(layout);
+            return BoxAsmJsReturnValue(func, ret, 0.0, 0.0f, zeroSimd);
+        }
+        case AsmJsRetType::Int64:
+        {
+            int64 ret = InterpreterStackFrame::AsmJsInterpreter<int64>(layout);
+            return BoxAsmJsReturnValue(func, ret, 0.0, 0.0f, zeroSimd);
+        }
+        case AsmJsRetType::Double:
+        {
+            double ret = InterpreterStackFrame::AsmJsInterpreter<double>(layout);
+            return BoxAsmJsReturnValue(func, 0, ret, 0.0f, zeroSimd);
+        }
+        case AsmJsRetType::Float:
+        {
+            float ret = InterpreterStackFrame::AsmJsInterpreter<float>(layout);
+            return BoxAsmJsReturnValue(func, 0, 0.0, ret, zeroSimd);
+        }
+        default:
+            Assume(UNREACHED);
+            JavascriptError::ThrowTypeError(scriptContext, WASMERR_InvalidTypeConversion);
+            return nullptr;
+        }
     }
 #endif
 

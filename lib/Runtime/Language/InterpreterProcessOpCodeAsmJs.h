@@ -3,7 +3,7 @@
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
 #define PROCESS_FALLTHROUGH_ASM(name, func) \
     case OpCodeAsmJs::name:
 #define PROCESS_FALLTHROUGH_ASM_COMMON(name, func, suffix) \

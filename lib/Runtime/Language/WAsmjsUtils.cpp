@@ -91,6 +91,11 @@ namespace WAsmJs
     bool ShouldJitFunction(Js::FunctionBody* body, uint interpretedCount)
     {
 #if ENABLE_NATIVE_CODEGEN
+#if defined(_M_ARM64)
+        // ARM64 W3: interpreter-only until W4/W5 lower the 17 stubs.
+        // Never tier wasm/asm.js to JIT here (would hit UNREACHED lowering).
+        return false;
+#endif
         if (PHASE_OFF(Js::BackEndPhase, body) ||
             PHASE_OFF(Js::FullJitPhase, body) ||
             body->GetScriptContext()->GetConfig()->IsNoNative() ||

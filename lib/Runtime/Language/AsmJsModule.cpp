@@ -1840,10 +1840,9 @@ namespace Js
                 AnalysisAssert(asmBuffer);
 #ifdef _M_X64
                 const bool isOptimizedBuffer = true;
-#elif _M_IX86
-                const bool isOptimizedBuffer = false;
 #else
-                Assert(UNREACHED);
+                // x86 + ARM64 (D3 generic path, doc/wasm-arm64-plan.md):
+                // keep the generic TypedArray buffer, no assert.
                 const bool isOptimizedBuffer = false;
 #endif
                 Assert(isOptimizedBuffer == asmBuffer->IsValidVirtualBufferLength(asmBuffer->GetByteLength()));

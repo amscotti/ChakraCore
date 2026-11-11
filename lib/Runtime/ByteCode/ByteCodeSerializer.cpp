@@ -882,7 +882,7 @@ public:
         uint offset;
     };
 
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
     HRESULT RewriteAsmJsByteCodesInto(BufferBuilderList & builder, LPCWSTR clue, FunctionBody * function, ByteBlock * byteBlock, SerializedFieldList& definedFields)
     {
         SListCounted<AuxRecord> auxRecords(alloc);
@@ -1600,7 +1600,7 @@ public:
         }
     }
 
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
     uint32 AddAsmJsConstantTable(BufferBuilderList & builder, FunctionBody * function)
     {
         uint32 size = 0;
@@ -1972,7 +1972,7 @@ public:
         return size;
     }
 
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
     uint32 AddAsmJsFunctionInfo(BufferBuilderList & builder, FunctionBody * function)
     {
         uint32 size = 0;
@@ -2154,7 +2154,7 @@ public:
                 }
             }
 
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
             if (function->GetAsmJsFunctionInfo())
             {
                 definedFields.has_asmJsInfo = true;
@@ -2169,7 +2169,7 @@ public:
             }
 #endif
 
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
             if (function->GetIsAsmJsFunction())
             {
                 AddAsmJsConstantTable(builder, function);
@@ -2304,7 +2304,7 @@ public:
             | (isAnonymous ? ffIsAnonymous : 0)
             | (function->m_isMethod ? ffIsMethod : 0)
             | (function->m_isClassMember ? ffIsClassMember : 0)
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
             | (function->m_isAsmjsMode ? ffIsAsmJsMode : 0)
             | (function->m_isAsmJsFunction ? ffIsAsmJsFunction : 0)
 #endif
@@ -3292,7 +3292,7 @@ public:
         return current;
     }
 
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
     const byte * ReadAsmJsConstantsTable(const byte * current, FunctionBody * function)
     {
 #ifdef BYTE_CODE_MAGIC_CONSTANTS
@@ -3844,7 +3844,7 @@ public:
         return current;
     }
 
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
     const byte * ReadAsmJsFunctionInfo(const byte * current, FunctionBody * function)
     {
 #ifdef BYTE_CODE_MAGIC_CONSTANTS
@@ -4314,7 +4314,7 @@ public:
             (*functionBody)->m_ChildCallsEval = (bitflags & ffChildCallsEval) ? true : false;
             (*functionBody)->m_hasReferenceableBuiltInArguments = (bitflags & ffHasReferenceableBuiltInArguments) ? true : false;
             (*functionBody)->m_isParamAndBodyScopeMerged = (bitflags & ffIsParamAndBodyScopeMerged) ? true : false;
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
             (*functionBody)->m_isAsmJsFunction = (bitflags & ffIsAsmJsFunction) ? true : false;
             (*functionBody)->m_isAsmjsMode = (bitflags & ffIsAsmJsMode) ? true : false;
 #endif
@@ -4334,7 +4334,7 @@ public:
                 }
             }
 
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
             if (definedFields->has_asmJsInfo)
             {
                 byte asmJsInfoKind;
@@ -4355,7 +4355,7 @@ public:
 #endif
 
             // Read constants table
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
             if ((*functionBody)->GetIsAsmJsFunction())
             {
                 current = ReadAsmJsConstantsTable(current, *functionBody);

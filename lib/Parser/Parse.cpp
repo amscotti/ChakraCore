@@ -7400,7 +7400,7 @@ void Parser::ParseFncDeclHelper(ParseNodeFnc * pnodeFnc, LPCOLESTR pNameHint, us
 
         if (fLambda)
         {
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
             if (m_InAsmMode && (isTopLevelDeferredFunc && m_deferAsmJs))
             {
                 // asm.js doesn't support lambda functions
@@ -15734,7 +15734,7 @@ bool Parser::CheckStrictModeStrPid(IdentPtr pid)
 
 bool Parser::CheckAsmjsModeStrPid(IdentPtr pid)
 {
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
     if (!CONFIG_FLAG(AsmJs))
     {
         return false;

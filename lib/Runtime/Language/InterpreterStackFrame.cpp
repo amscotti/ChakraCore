@@ -1756,12 +1756,73 @@ skipThunk:
             jmp eax;
         }
     }
+#elif defined(_M_ARM64) && defined(ENABLE_ASMJS)
+    Var InterpreterStackFrame::AsmJsDelayDynamicInterpreterThunk(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        // ARM64 delay/interpreter entry, W3 interpreter-only
+        // (doc/wasm-arm64-abi.md sections 2-3,6). Pure C++: ensure wasm
+        // bytecode, unbox Var args, interpret via AsmJsInterpreter<T>,
+        // box. Mirrors AsmJsExternalEntryPoint (AsmJsUtils.cpp); the
+        // external entry funnels here on x64 via the jsMethod indirection,
+        // on ARM64 both entry shapes share this body. Internal
+        // wasm->wasm calls use CallAsmJsFunction (JavascriptFunction.cpp)
+        // which dispatches to AsmJsInterpreter<T> directly.
+        ARGUMENTS(args, callInfo);
+        ScriptFunction* func = (ScriptFunction*)function;
+        ScriptContext* scriptContext = func->GetScriptContext();
+        AsmJsFunctionInfo* info = func->GetFunctionBody()->GetAsmJsFunctionInfo();
+
+        if (func->GetFunctionBody()->IsWasmFunction())
+        {
+            JavascriptMethod next = WasmLibrary::EnsureWasmEntrypoint(func);
+            if (next != nullptr)
+            {
+                WasmLibrary::WasmLazyTrapCallback(function, callInfo);
+                return JavascriptOperators::OP_LdUndef(scriptContext);
+            }
+        }
+
+        int argSize = GetStackSizeForAsmJsUnboxing(func);
+        void* buf = _alloca(argSize);
+        UnboxAsmJsArguments(func, args.Values + 1, (char*)buf, callInfo);
+        AsmJsCallStackLayout* layout = (AsmJsCallStackLayout*)buf;
+        layout->functionObject = func;
+
+        AsmJsSIMDValue zeroSimd;
+        zeroSimd.Zero();
+        switch (info->GetReturnType().which())
+        {
+        case AsmJsRetType::Void:
+        case AsmJsRetType::Signed:
+        {
+            int ret = InterpreterStackFrame::AsmJsInterpreter<int>(layout);
+            return BoxAsmJsReturnValue(func, ret, 0.0, 0.0f, zeroSimd);
+        }
+        case AsmJsRetType::Int64:
+        {
+            int64 ret = InterpreterStackFrame::AsmJsInterpreter<int64>(layout);
+            return BoxAsmJsReturnValue(func, ret, 0.0, 0.0f, zeroSimd);
+        }
+        case AsmJsRetType::Double:
+        {
+            double ret = InterpreterStackFrame::AsmJsInterpreter<double>(layout);
+            return BoxAsmJsReturnValue(func, 0, ret, 0.0f, zeroSimd);
+        }
+        case AsmJsRetType::Float:
+        {
+            float ret = InterpreterStackFrame::AsmJsInterpreter<float>(layout);
+            return BoxAsmJsReturnValue(func, 0, 0.0, ret, zeroSimd);
+        }
+        default:
+            Assume(UNREACHED);
+            JavascriptError::ThrowTypeError(scriptContext, WASMERR_InvalidTypeConversion);
+            return nullptr;
+        }
+    }
 #elif !defined(_M_AMD64)
     Var InterpreterStackFrame::AsmJsDelayDynamicInterpreterThunk(RecyclableObject* function, CallInfo callInfo, ...)
     {
-        // ARM64 asm.js/wasm execution is not available until W3
-        // (doc/wasm-arm64-plan.md): fail with a controlled error, never
-        // a fail-fast. Replaced by the ARM64 thunk in W3.
+        // Other non-x64/non-ARM64 arches: controlled failure, never a fail-fast.
         JavascriptError::ThrowWebAssemblyRuntimeError(function->GetScriptContext(), WASMERR_ExecutionNotSupported);
         return nullptr;
     }
@@ -1796,7 +1857,7 @@ skipThunk:
         return false
 #if DYNAMIC_INTERPRETER_THUNK
             || entryPoint == InterpreterStackFrame::DelayDynamicInterpreterThunk
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
             || entryPoint == InterpreterStackFrame::AsmJsDelayDynamicInterpreterThunk
 #endif
 #endif
@@ -1809,11 +1870,23 @@ skipThunk:
 
 #if DYNAMIC_INTERPRETER_THUNK
 #pragma optimize("", off)
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
+#if defined(_M_IX86) || defined(_M_X64)
     void InterpreterStackFrame::StaticInterpreterAsmThunk(RecyclableObject* function, ...)
     {
         InterpreterAsmThunk((AsmJsCallStackLayout*)&function);
     }
+#elif defined(_M_ARM64)
+    void InterpreterStackFrame::StaticInterpreterAsmThunk(RecyclableObject* function, ...)
+    {
+        // ARM64 (doc/wasm-arm64-plan.md W3): wasm/asm.js calls funnel through
+        // AsmJsExternalEntryPoint / CallAsmJsFunction which dispatch to
+        // AsmJsInterpreter<T> in C++ (ABI doc sections 2-3). The static
+        // dispatch thunk is unused on ARM64; reach here only via a stale
+        // entry point, so fail controlled rather than miscompile.
+        JavascriptError::ThrowWebAssemblyRuntimeError(function->GetScriptContext(), WASMERR_ExecutionNotSupported);
+    }
+#endif
 #endif
 
 #if defined(_M_ARM64) && defined(_WIN32)
@@ -2182,7 +2255,7 @@ skipThunk:
         }
 #endif
 
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
         if (isAsmJs)
         {
             asmJsReturn->i = newInstance->GetRegRawInt(0);
@@ -2208,7 +2281,7 @@ skipThunk:
         return aReturn;
     }
 
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
 
 #if _M_IX86
     void InterpreterStackFrame::AsmJsInterpreter(AsmJsCallStackLayout* stack, byte* retDst)
@@ -2269,7 +2342,7 @@ skipThunk:
         }
     }
 
-#elif _M_X64
+#elif _M_X64 || _M_ARM64
     typedef double(*AsmJsInterpreterDoubleEP)(AsmJsCallStackLayout*, void *);
     typedef float(*AsmJsInterpreterFloatEP)(AsmJsCallStackLayout*, void *);
     typedef int(*AsmJsInterpreterIntEP)(AsmJsCallStackLayout*, void *);
@@ -2346,10 +2419,12 @@ skipThunk:
         return asmJsReturn.GetRetVal<T>();
     }
 
+#if defined(_M_X64)
     __m128 InterpreterStackFrame::AsmJsInterpreterSimdJs(AsmJsCallStackLayout* layout)
     {
         return AsmJsInterpreter<X86SIMDValue>(layout).m128_value;
     }
+#endif
 #endif
 #endif
 
@@ -2655,7 +2730,7 @@ skipThunk:
     }
 
 
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
     Var InterpreterStackFrame::ProcessAsmJsModule()
     {
         FunctionBody* asmJsModuleFunctionBody = GetFunctionBody();
@@ -3325,7 +3400,7 @@ skipThunk:
 #undef PROVIDE_INTERPRETER_STMTS
 #endif
 
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
 #define INTERPRETERLOOPNAME ProcessAsmJs
 #define INTERPRETER_ASMJS
 #include "InterpreterProcessOpCodeAsmJs.h"
@@ -3450,7 +3525,7 @@ skipThunk:
             }
         }
 
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
         if (GetFunctionBody()->GetIsAsmjsMode())
         {
             FunctionBody *const functionBody = GetFunctionBody();
@@ -3847,7 +3922,7 @@ skipThunk:
 
     }
 
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
     void InterpreterStackFrame::OP_ProfiledCallAsmInternal(RegSlot funcReg, RegSlot returnReg, ProfileId profileId)
     {
         Var target = GetRegRawPtr(funcReg);
@@ -5989,7 +6064,7 @@ skipThunk:
         return OP_ProfiledLoopBodyStart<layoutSize, profiled>(loopId);
     }
 
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
     template <LayoutSize layoutSize, bool profiled>
     const byte * InterpreterStackFrame::OP_ProfiledWasmLoopBodyStart(const byte * ip)
     {
@@ -9104,7 +9179,7 @@ skipThunk:
         return this->paramClosure;
     }
 
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
     template <typename ArrayType, typename RegType>
     void InterpreterStackFrame::OP_StArr(uint32 index, RegSlot regSlot)
     {
@@ -9184,7 +9259,7 @@ skipThunk:
 #endif
     }
 
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
     template <typename ArrayType, typename RegType>
     void InterpreterStackFrame::OP_LdArr(uint32 index, RegSlot regSlot)
     {

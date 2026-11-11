@@ -64,8 +64,8 @@ var tests = [
         body() {
             var module = new WebAssembly.Module(validModule);
             var instance = new WebAssembly.Instance(module);
-            assert.isObject(instance);
-            assert.isObject(instance.exports);
+            assert.isTrue(instance !== null && typeof instance === "object");
+            assert.isTrue(instance.exports !== null && typeof instance.exports === "object");
         }
     },
     {

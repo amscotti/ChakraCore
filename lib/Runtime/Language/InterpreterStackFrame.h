@@ -93,7 +93,7 @@ namespace Js
 
         struct AsmJsReturnStruct
         {
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
             int32 i;
             int64 l;
             float f;
@@ -105,7 +105,9 @@ namespace Js
             template<> int64 GetRetVal<int64>() { return l; }
             template<> float GetRetVal<float>() { return f; }
             template<> double GetRetVal<double>() { return d; }
+#if defined(_M_IX86) || defined(_M_X64)
             template<> X86SIMDValue GetRetVal<X86SIMDValue>() { return X86SIMDValue::ToX86SIMDValue(simd); }
+#endif
 #endif
         };
 
@@ -351,16 +353,20 @@ namespace Js
         static int GetAsmJsArgSize(AsmJsCallStackLayout * stack);
         static int GetDynamicRetType(AsmJsCallStackLayout * stack);
         _NOINLINE static void AsmJsInterpreter(AsmJsCallStackLayout * stack, byte* retDst);
-#elif _M_X64
+#elif _M_X64 || _M_ARM64
         template <typename T>
         static T AsmJsInterpreter(AsmJsCallStackLayout* layout);
         static void * GetAsmJsInterpreterEntryPoint(AsmJsCallStackLayout* stack);
+#if defined(_M_X64)
         static __m128 AsmJsInterpreterSimdJs(AsmJsCallStackLayout* func);
 #endif
+#endif
 
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
         static void StaticInterpreterAsmThunk(RecyclableObject* function, ...);
+#if defined(_M_IX86) || defined(_M_X64)
         static void InterpreterAsmThunk(AsmJsCallStackLayout* layout);
+#endif
 #endif
 
 #if DYNAMIC_INTERPRETER_THUNK

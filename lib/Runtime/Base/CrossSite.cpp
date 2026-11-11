@@ -435,7 +435,7 @@ namespace Js
 
         if (funcInfo->HasBody())
         {
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
             if (funcInfo->GetFunctionProxy()->IsFunctionBody() &&
                 funcInfo->GetFunctionBody()->GetIsAsmJsFunction())
             {

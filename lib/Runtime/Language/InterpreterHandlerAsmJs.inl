@@ -3,7 +3,7 @@
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
 // See  Lib\Runtime\Language\InterpreterProcessOpCodeAsmJs.h  for Handler Process
 //         (   HandlerProcess , OpCodeAsmJs ,        HandlerFunction       , LayoutAsmJs , Type  )
 //         (        |         ,     |       ,              |               ,      |      ,   |   )
