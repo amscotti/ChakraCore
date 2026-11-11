@@ -171,7 +171,34 @@ Var WebAssembly::EntryInstantiateBound(RecyclableObject* function, CallInfo call
     Var importObj = callInfo.Count > 1 ? args[1] : function->GetScriptContext()->GetLibrary()->GetUndefined();
     Var bufferSrc = callInfo.Count > 2 ? args[2] : function->GetScriptContext()->GetLibrary()->GetUndefined();
 
-    return CALL_ENTRYPOINT_NOASSERT(EntryInstantiate, function, CallInfo(CallFlags_Value, 3), thisVar, bufferSrc, importObj);
+    // Inline EntryInstantiate to avoid Darwin ARM64 CALL_ENTRYPOINT 3-arg variadic bug
+    // (same root cause as compileStreaming direct path: CALL_ENTRYPOINT loses args on ARM64)
+    ScriptContext* scriptContext = function->GetScriptContext();
+    Var resultObject = nullptr;
+    try
+    {
+        // EntryInstantiate expects args[1]=bufferSrc/module, args[2]=importObject
+        // Here bufferSrc is already args[2] from bound call, importObj is args[1]
+        // So we simulate EntryInstantiate's logic directly
+        if (VarIs<WebAssemblyModule>(bufferSrc))
+        {
+            resultObject = WebAssemblyInstance::CreateInstance(VarTo<WebAssemblyModule>(bufferSrc), importObj);
+        }
+        else
+        {
+            WebAssemblySource src(bufferSrc, true, scriptContext);
+            WebAssemblyModule* wasmModule = WebAssemblyModule::CreateModule(scriptContext, &src);
+            WebAssemblyInstance* instance = WebAssemblyInstance::CreateInstance(wasmModule, importObj);
+            resultObject = JavascriptOperators::NewJavascriptObjectNoArg(scriptContext);
+            JavascriptOperators::OP_SetProperty(resultObject, PropertyIds::module, wasmModule, scriptContext);
+            JavascriptOperators::OP_SetProperty(resultObject, PropertyIds::instance, instance, scriptContext);
+        }
+        return JavascriptPromise::CreateResolvedPromise(resultObject, scriptContext);
+    }
+    catch (JavascriptException & e)
+    {
+        return JavascriptPromise::CreateRejectedPromise(e.GetAndClear()->GetThrownObject(scriptContext), scriptContext);
+    }
 }
 
 Var WebAssembly::EntryValidate(RecyclableObject* function, CallInfo callInfo, ...)
@@ -236,7 +263,7 @@ Var WebAssembly::EntryQueryResponse(RecyclableObject* function, CallInfo callInf
     END_SAFE_REENTRANT_CALL
 
     // Make sure res.arrayBuffer() is a Promise
-    if (!VarIs<JavascriptPromise>(arrayBufferRes))
+    if (arrayBufferRes == nullptr || !VarIs<JavascriptPromise>(arrayBufferRes))
     {
         JavascriptError::ThrowTypeError(scriptContext, WASMERR_NeedResponse);
     }
@@ -245,7 +272,7 @@ Var WebAssembly::EntryQueryResponse(RecyclableObject* function, CallInfo callInf
 
 bool WebAssembly::IsResponseObject(Var responseObject, ScriptContext* scriptContext)
 {
-    if (!VarIs<RecyclableObject>(responseObject))
+    if (responseObject == nullptr || !VarIs<RecyclableObject>(responseObject))
     {
         return false;
     }
@@ -266,12 +293,29 @@ Var WebAssembly::TryResolveResponse(RecyclableObject* function, Var thisArg, Var
     bool isResponse = IsResponseObject(responseArg, scriptContext);
     if (isResponse)
     {
-        CallInfo newCallInfo;
-        newCallInfo.Count = 2;
         // We already have a response object, query it now
-        responsePromise = CALL_ENTRYPOINT_NOASSERT(EntryQueryResponse, function, Js::CallInfo(CallFlags_Value, 2), thisArg, responseArg);
+        // Inline EntryQueryResponse to avoid Darwin ARM64 CALL_ENTRYPOINT 2-arg variadic bug
+        // (direct EntryQueryResponse via CALL_ENTRYPOINT_NOASSERT loses args on ARM64)
+        PropertyString* propStr = scriptContext->GetPropertyString(PropertyIds::arrayBuffer);
+        Var arrayBufferProp = JavascriptOperators::OP_GetElementI(responseArg, propStr, scriptContext);
+        if (!JavascriptConversion::IsCallable(arrayBufferProp))
+        {
+            JavascriptError::ThrowTypeError(scriptContext, WASMERR_NeedResponse);
+        }
+        RecyclableObject* arrayBufferFunc = VarTo<RecyclableObject>(arrayBufferProp);
+        Var arrayBufferRes = nullptr;
+        BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+        {
+            arrayBufferRes = CALL_FUNCTION(scriptContext->GetThreadContext(), arrayBufferFunc, Js::CallInfo(CallFlags_Value, 1), responseArg);
+        }
+        END_SAFE_REENTRANT_CALL
+        if (arrayBufferRes == nullptr || !VarIs<JavascriptPromise>(arrayBufferRes))
+        {
+            JavascriptError::ThrowTypeError(scriptContext, WASMERR_NeedResponse);
+        }
+        responsePromise = arrayBufferRes;
     }
-    else if (VarIs<JavascriptPromise>(responseArg))
+    else if (responseArg != nullptr && VarIs<JavascriptPromise>(responseArg))
     {
         JavascriptPromise* promise = (JavascriptPromise*)responseArg;
         // Wait until this promise resolves and then try to query the response object (if it's a response object)

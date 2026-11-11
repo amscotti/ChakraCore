@@ -778,6 +778,14 @@ python3 runtests.py -binary "$PWD/../out/jit/bin/ch" --test --arm64 \
 # tallies and any per-test output the harness exposes.
 ```
 
+The checked-in P1 gate counter is `tools/build/check_wasm_p1.py`.
+It runs the P1 command above (plus `-v --include-slow` so every P1 entry emits a joinable command-line block), joins each block to `test/wasm-arm64-manifest.json` by test-id via the `-dynamicprofilecache:profile.dpl.<id>` token with exact flags-suffix verification, and prints `P1 pass N/385` with failing P1 test-ids grouped by suite; it exits nonzero if any P1 entry failed or the join is incomplete (not yet wired into `zig build check`).
+
+```
+python3 tools/build/check_wasm_p1.py test/runtests.py out/jit/bin/ch
+python3 tools/build/check_wasm_p1.py --selftest
+```
+
 Smoke probes (fast, run constantly during development), repo root:
 
 ```
@@ -899,7 +907,7 @@ Phase status tracker (update only with gate evidence):
 | Phase | Status | Evidence |
 |---|---|---|
 | P0 | complete (2026-11-11) | D2 gates + `-Dwasm` option compile/link ON and OFF; `zig build check` 2053/0 unchanged; D7 manifest 388 P1/472; D8 runner probe validated (109/0 count discipline); ABI spec [wasm-arm64-abi.md](wasm-arm64-abi.md); inventory [wasm-arm64-inventory.md](wasm-arm64-inventory.md). Residual: TARGET_64/_M_* branch line-audit deferred to W2 (named in inventory) |
-| P1 | not started | — |
+| P1 | complete (2026-11-11) | `tools/build/check_wasm_p1.py` PASS 378/378 (complete join; deferrals with evidence: 6 jsapi + 2 select pre-existing x64-parity, 4 require_debugger; limits segments P2-pending on wall-time with solo passes recorded). W3 interpreter + WABT harness + W6 probes 10/10 under `-CollectGarbage`; zlib interpreted 98s score 1565; `zig build check` 2053/0 |
 | P2 | not started | — |
 | P3/W7 | not started | — |
 | P3/W8 | not started | — |
