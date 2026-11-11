@@ -345,6 +345,21 @@ def classify_suite(suite, raw_entries):
         if not non_wasm_override:
             features.add("mvp")
         phase = assign_phase(suite, canonical_features(features), raw["tags"])
+        # Override 3 (2026-11-11, tranche-4 jsapi disposition): the 6
+        # WasmSpec jsapi Table/Instance entries are deferred. Their
+        # failures are proven pre-existing on x64 semantics (test
+        # builder emits double-end function bodies the arch-neutral
+        # reader correctly rejects; baselines stale since 2018, strict
+        # check from 2016). Re-include only after the test-side fix
+        # (addBody([]) in get-set.any.js/instanceTestFactory.js) and
+        # baselines re-recorded from an x64 host. Do NOT relax the
+        # reader. Entries: Table get-set x2 + instantiate/constructor
+        # groups x4.
+        if f"{suite}[{item['index']}]" in {
+            "WasmSpec[171]", "WasmSpec[172]", "WasmSpec[185]",
+            "WasmSpec[186]", "WasmSpec[211]", "WasmSpec[212]",
+        }:
+            phase = "deferred"
         entries.append({
             "test-id": f"{suite}[{item['index']}]",
             "suite": suite,
@@ -407,13 +422,14 @@ def check_overrides(entries):
             f"wabt pairing: expected 1 wabt / 1 wabt-free, "
             f"got {len(wabt)} / {len(wabt_free)}")
     deferred = [e for e in entries if e["phase"] == "deferred"]
-    if len(deferred) != 4:
+    if len(deferred) != 10:  # 4 require_debugger + 6 jsapi (override 3)
         raise AssertionError(f"deferred: expected 4, got {len(deferred)}")
     pending = [e for e in entries if e["phase"] == "P2-pending"]
-    # 28 at W0 + 1 W2 arm64_w2.js guardrail probe (exclude_x64: ARM64-only
-    # until W3; retagged when the probe converges with x64 behavior).
-    if len(pending) != 29:
-        raise AssertionError(f"P2-pending: expected 29, got {len(pending)}")
+    # 28 at W0. The W2 arm64_w2.js guardrail probe (+1 exclude_x64) was
+    # retagged when W3 landed the interpreter (it now runs on all arches),
+    # so the count is back to 28.
+    if len(pending) != 28:
+        raise AssertionError(f"P2-pending: expected 28, got {len(pending)}")
     float_entries = [e for e in entries if e["suite"] == "AsmJSFloat"]
     if len(float_entries) != 14 or any(
             e["phase"] != "P2" for e in float_entries):
@@ -423,8 +439,8 @@ def check_overrides(entries):
     threads = [e for e in wasmspec if "threads" in e["features"]]
     if len(threads) != 12 or any(e["phase"] == "P1" for e in threads):
         raise AssertionError("WasmSpec threads: expected 12 all out of P1")
-    if sum(1 for e in wasmspec if e["phase"] == "P1") != 219:
-        raise AssertionError("WasmSpec P1 count != 219")
+    if sum(1 for e in wasmspec if e["phase"] == "P1") != 213:
+        raise AssertionError("WasmSpec P1 count != 213")
 
 
 def print_counts(manifest):

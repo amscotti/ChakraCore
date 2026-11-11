@@ -274,6 +274,10 @@ const Ctx = struct {
     zig_exe: []const u8,
     config_dir: std.Build.LazyPath,
     config_h: std.Build.LazyPath,
+    // wabt config.h (generated only under -Dwasm=true; otherwise
+    // aliases of the pal-config paths above, never consumed).
+    wabt_dir: std.Build.LazyPath,
+    wabt_h: std.Build.LazyPath,
     gen_dir: std.Build.LazyPath,
     dbg_header: std.Build.LazyPath,
 };
@@ -338,6 +342,12 @@ fn appendTuFlags(ctx: *const Ctx, run: *std.Build.Step.Run, g: *const tables.Gro
     // W0 -Dwasm (doc/wasm-arm64-plan.md): only on jit+wasm, so the
     // option-off command lines are byte-identical to today.
     if (ctx.wasm) run.addArg("-DWASM_ARM64_PORT=1");
+    // CAN_BUILD_WABT mirrors the CMake define (CMakeLists.txt:283 and
+    // the Linux engine_defines): on the wasm build the vendored WABT
+    // compiles and CommonDefines enables ENABLE_WABT via its ARM64
+    // disjunct. Wasm-conditional only, so option-off lines are
+    // byte-identical to today.
+    if (ctx.wasm) run.addArg("-DCAN_BUILD_WABT");
     // CMake sets this on the Language and Library targets when BuildJIT
     // is on (lib/Runtime/Language/CMakeLists.txt, Library/CMakeLists.txt).
     // arm64_Thunks.S emits the dynamic-interpreter entry points only
@@ -354,7 +364,13 @@ fn appendTuFlags(ctx: *const Ctx, run: *std.Build.Step.Run, g: *const tables.Gro
     for (g.extra_includes, 0..) |dir, i| {
         if (is_ch and i == tables.gen_include_index)
             run.addPrefixedDirectoryArg("-I", ctx.gen_dir);
-        run.addArg(b.fmt("-I{s}", .{dir}));
+        // Generated-dir marker (tables.zig wabt_group carries the
+        // Linux spelling): substituted with the build-owned wabt
+        // config dir, same convention as the gen_dir marker above.
+        if (std.mem.eql(u8, dir, "build-xplat/lib/wabt"))
+            run.addPrefixedDirectoryArg("-I", ctx.wabt_dir)
+        else
+            run.addArg(b.fmt("-I{s}", .{dir}));
     }
     if (g.pal) run.addArg("-Ipal/src/include");
     run.addArg("-isystem");
@@ -494,7 +510,65 @@ fn compileTu(ctx: *const Ctx, g: *const tables.Group, src: []const u8, lang: Lan
     // non-includers conservatively (config.h bytes change only when
     // probe results change, so the cost is nil).
     if (g.pal) run.addFileInput(ctx.config_h);
+    // The generated wabt config.h is an explicit input of every wabt
+    // compile (same pattern as the PAL edge above; tools/build/linux.zig
+    // wires the identical edge for wabt_group).
+    if (g == &tables.wabt_group) run.addFileInput(ctx.wabt_h);
     return out;
+}
+
+// wabt config.h: fixed-by-profile substitution of lib/wabt/src/config.h.in
+// (configure_file, lib/wabt/CMakeLists.txt:41-44). Copied from
+// tools/build/linux.zig renderWabtConfig: the CMake checks evaluate
+// identically on macOS ARM64 (alloca.h and strings.h ship in the Mac
+// SDK; sysconf/snprintf/ssize_t/strcasecmp all present; SIZEOF_SIZE_T 8).
+// Any template drift fails loudly, so the substitution cannot silently
+// diverge from the vendored template.
+fn renderWabtConfig(arena: std.mem.Allocator, template: []const u8) []const u8 {
+    const values = [_]struct { name: []const u8, val: []const u8 }{
+        .{ .name = "HAVE_ALLOCA_H", .val = "1" },
+        .{ .name = "HAVE_UNISTD_H", .val = "1" },
+        .{ .name = "HAVE_SNPRINTF", .val = "1" },
+        .{ .name = "HAVE_SYSCONF", .val = "1" },
+        .{ .name = "HAVE_SSIZE_T", .val = "1" },
+        .{ .name = "HAVE_STRCASECMP", .val = "1" },
+        .{ .name = "HAVE_WIN32_VT100", .val = "0" },
+        .{ .name = "COMPILER_IS_CLANG", .val = "1" },
+        .{ .name = "COMPILER_IS_GNU", .val = "0" },
+        .{ .name = "COMPILER_IS_MSVC", .val = "0" },
+        .{ .name = "WITH_EXCEPTIONS", .val = "0" },
+    };
+    var out: std.ArrayList(u8) = .empty;
+    var it = std.mem.splitScalar(u8, template, '\n');
+    var n_sub: usize = 0;
+    var first = true;
+    while (it.next()) |line| {
+        if (!first) out.append(arena, '\n') catch @panic("OOM");
+        first = false;
+        if (std.mem.startsWith(u8, line, "#cmakedefine01 ")) {
+            const name = line["#cmakedefine01 ".len..];
+            var found = false;
+            for (values) |v| {
+                if (std.mem.eql(u8, name, v.name)) {
+                    out.print(arena, "#define {s} {s}", .{ name, v.val }) catch @panic("OOM");
+                    found = true;
+                    n_sub += 1;
+                }
+            }
+            if (!found) fail("wabt config template drift: unknown #cmakedefine01 {s}", .{name});
+        } else if (std.mem.indexOf(u8, line, "@SIZEOF_SIZE_T@") != null) {
+            const rep = std.mem.replaceOwned(u8, arena, line, "@SIZEOF_SIZE_T@", "8") catch @panic("OOM");
+            out.appendSlice(arena, rep) catch @panic("OOM");
+            n_sub += 1;
+        } else {
+            if (std.mem.indexOfScalar(u8, line, '@') != null)
+                fail("wabt config template drift: unhandled @VAR@ in: {s}", .{line});
+            out.appendSlice(arena, line) catch @panic("OOM");
+        }
+    }
+    if (n_sub != values.len + 1)
+        fail("wabt config template drift: {d} substitutions (want {d})", .{ n_sub, values.len + 1 });
+    return out.toOwnedSlice(arena) catch @panic("OOM");
 }
 
 pub fn build(b: *std.Build) void {
@@ -575,6 +649,30 @@ pub fn build(b: *std.Build) void {
     if (wasm and profile != .jit)
         fail("-Dwasm=true requires -Dprofile=jit (DISABLE_JIT profiles cannot enable ENABLE_WASM/ENABLE_ASMJS on ARM64)", .{});
 
+    // Build-owned wabt config.h (fixed-by-profile substitution of
+    // lib/wabt/src/config.h.in, same generator as the Linux graph).
+    // Generated only under -Dwasm=true: every consumer is wasm-conditional,
+    // so the option-off graph (including zig build check) never reads the
+    // template. The template read is root-anchored, never CWD-relative.
+    var wabt_dir: std.Build.LazyPath = wf.getDirectory();
+    var wabt_h: std.Build.LazyPath = config_h;
+    if (wasm) {
+        const root = b.root.root_dir.path orelse
+            fail("cannot resolve the build root path; refusing a CWD-relative wabt template read", .{});
+        const wabt_in_path = std.fmt.allocPrint(arena, "{s}/lib/wabt/src/config.h.in", .{root}) catch @panic("OOM");
+        const wabt_in_file = std.Io.Dir.openFileAbsolute(b.graph.io, wabt_in_path, .{}) catch
+            fail("cannot read {s}", .{wabt_in_path});
+        defer wabt_in_file.close(b.graph.io);
+        var wabt_in_r = wabt_in_file.readerStreaming(b.graph.io, &.{});
+        const wabt_template = wabt_in_r.interface.allocRemaining(arena, .limited(1 << 20)) catch
+            fail("cannot read {s}", .{wabt_in_path});
+        const wabt_bytes = renderWabtConfig(arena, wabt_template);
+        const wabt_wf = b.addWriteFiles();
+        wabt_h = wabt_wf.add("config.h", wabt_bytes);
+        wabt_dir = wabt_wf.getDirectory();
+        std.debug.print("wabt config.h: {d} bytes from lib/wabt/src/config.h.in\n", .{wabt_bytes.len});
+    }
+
     const ctx = Ctx{
         .b = b,
         .profile = profile,
@@ -589,6 +687,8 @@ pub fn build(b: *std.Build) void {
         .zig_exe = b.graph.zig_exe,
         .config_dir = wf.getDirectory(),
         .config_h = config_h,
+        .wabt_dir = wabt_dir,
+        .wabt_h = wabt_h,
         .gen_dir = gen_dir,
         .dbg_header = dbg_header,
     };
@@ -693,25 +793,35 @@ pub fn build(b: *std.Build) void {
         }
         std.debug.assert(backend_n == backend_expected);
     }
-    // W0 wasm extras (jit+wasm only): WasmReader (11) + WasmLibrary (7)
-    // join the static graph after the backend, numbered contiguously.
-    // Option-off adds nothing, so expect_total is the historical total.
+    // W0 wasm extras (jit+wasm only): WasmReader (11) + WasmLibrary (8,
+    // incl. WabtInterface.cpp) + WABT (37) join the static graph after the
+    // backend, numbered contiguously. Option-off adds nothing, so
+    // expect_total is the historical total.
     var wasm_expected: u32 = 0;
     if (ctx.wasm) {
-        for ([_]*const tables.Group{ &tables.wasmreader_group, &tables.wasm_library_group }) |g| {
+        const wasm_groups = [_]*const tables.Group{ &tables.wasmreader_group, &tables.wasm_library_group, &tables.wabt_group };
+        for (wasm_groups) |g| {
             wasm_expected += @intCast(g.cxx.len + g.c.len + g.asm_files.len);
         }
-        std.debug.assert(wasm_expected == 18);
-        for ([_]*const tables.Group{ &tables.wasmreader_group, &tables.wasm_library_group }) |g| {
+        std.debug.assert(wasm_expected == 56);
+        for (wasm_groups) |g| {
             for (g.cxx) |src| {
                 static_objs.append(arena, compileTu(&ctx, g, src, .cxx, n)) catch @panic("OOM");
+                n += 1;
+            }
+            for (g.c) |src| {
+                static_objs.append(arena, compileTu(&ctx, g, src, .c, n)) catch @panic("OOM");
+                n += 1;
+            }
+            for (g.asm_files) |src| {
+                static_objs.append(arena, compileTu(&ctx, g, src, .asm_, n)) catch @panic("OOM");
                 n += 1;
             }
         }
     }
     // Static: 540 - 3 dylib TUs + TestHooks in ch = 538.
     // jit adds the 89 backend TUs on top of the shared 540 => 629.
-    // jit+wasm adds 18 more => 647.
+    // jit+wasm adds 56 more => 685.
     const expect_base: u32 = if (is_static) 538 else 540;
     const expect_total: u32 = expect_base + backend_expected + wasm_expected;
     std.debug.assert(n == expect_total);

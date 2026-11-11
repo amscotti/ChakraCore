@@ -477,4 +477,30 @@
     <compile-flags>-wasm</compile-flags>
   </default>
 </test>
+<!-- W6 GC churn probe (doc/wasm-arm64-plan.md W6.4): looped
+     instantiate/call/memory.grow/export-read over an MVP wasm module plus
+     a verifiable JS object graph under -CollectGarbage. require_backend
+     keeps it out of the disable_jit gate counts; -CollectGarbage enables
+     the CollectGarbage() builtin the probe asserts on. -->
+<test>
+  <default>
+    <files>gc_churn.js</files>
+    <baseline>gc_churn.baseline</baseline>
+    <compile-flags>-wasm -CollectGarbage</compile-flags>
+    <tags>require_backend</tags>
+  </default>
+</test>
+<!-- W6 pointer-lookalike probe (doc/wasm-arm64-plan.md W6 DoD): wasm
+     exports hold a pointer-shaped i32 and an f64 NaN across an import
+     that forces a full collection; asserts no crash, WeakRef clearance
+     after GC, and uncorrupted returns. Same flag/tag rationale as
+     gc_churn above. Exact-address limitation stated in the probe. -->
+<test>
+  <default>
+    <files>gc_lookalike.js</files>
+    <baseline>gc_lookalike.baseline</baseline>
+    <compile-flags>-wasm -CollectGarbage</compile-flags>
+    <tags>require_backend</tags>
+  </default>
+</test>
 </regress-exe>

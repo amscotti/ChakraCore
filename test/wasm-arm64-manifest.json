@@ -1721,7 +1721,7 @@
       "features": [
         "mvp"
       ],
-      "phase": "P1",
+      "phase": "deferred",
       "runnerTags": [],
       "suite": "WasmSpec",
       "test-id": "WasmSpec[171]"
@@ -1730,7 +1730,7 @@
       "features": [
         "mvp"
       ],
-      "phase": "P1",
+      "phase": "deferred",
       "runnerTags": [
         "exclude_dynapogo"
       ],
@@ -1861,7 +1861,7 @@
       "features": [
         "mvp"
       ],
-      "phase": "P1",
+      "phase": "deferred",
       "runnerTags": [],
       "suite": "WasmSpec",
       "test-id": "WasmSpec[185]"
@@ -1870,7 +1870,7 @@
       "features": [
         "mvp"
       ],
-      "phase": "P1",
+      "phase": "deferred",
       "runnerTags": [
         "exclude_dynapogo"
       ],
@@ -2121,7 +2121,7 @@
       "features": [
         "mvp"
       ],
-      "phase": "P1",
+      "phase": "deferred",
       "runnerTags": [],
       "suite": "WasmSpec",
       "test-id": "WasmSpec[211]"
@@ -2130,7 +2130,7 @@
       "features": [
         "mvp"
       ],
-      "phase": "P1",
+      "phase": "deferred",
       "runnerTags": [
         "exclude_dynapogo"
       ],
@@ -3094,12 +3094,32 @@
       "features": [
         "mvp"
       ],
-      "phase": "P2-pending",
-      "runnerTags": [
-        "exclude_x64"
-      ],
+      "phase": "P1",
+      "runnerTags": [],
       "suite": "wasm",
       "test-id": "wasm[67]"
+    },
+    {
+      "features": [
+        "mvp"
+      ],
+      "phase": "P1",
+      "runnerTags": [
+        "require_backend"
+      ],
+      "suite": "wasm",
+      "test-id": "wasm[68]"
+    },
+    {
+      "features": [
+        "mvp"
+      ],
+      "phase": "P1",
+      "runnerTags": [
+        "require_backend"
+      ],
+      "suite": "wasm",
+      "test-id": "wasm[69]"
     },
     {
       "features": [
@@ -4760,7 +4780,7 @@
   "meta": {
     "counts": "rlexe entries (variants included), never files",
     "generator": "tools/build/gen_wasm_manifest.py",
-    "p1": 388,
+    "p1": 385,
     "plan": "doc/wasm-arm64-plan.md D7",
     "suites": {
       "ASMJSParser": {
@@ -4790,10 +4810,11 @@
       },
       "WasmSpec": {
         "entries": 231,
-        "p1": 219,
+        "p1": 213,
         "phases": {
-          "P1": 219,
-          "P3": 12
+          "P1": 213,
+          "P3": 12,
+          "deferred": 6
         },
         "rlexe": "test/WasmSpec/rlexe.xml"
       },
@@ -4806,11 +4827,11 @@
         "rlexe": "test/WasmSpec.MultiValue/rlexe.xml"
       },
       "wasm": {
-        "entries": 68,
-        "p1": 46,
+        "entries": 70,
+        "p1": 49,
         "phases": {
-          "P1": 46,
-          "P2-pending": 6,
+          "P1": 49,
+          "P2-pending": 5,
           "P3": 3,
           "deferred": 4,
           "excluded": 9
@@ -4827,6 +4848,6 @@
       }
     },
     "test-id": "<suite>[<0-based rlexe entry ordinal>]",
-    "total": 473
+    "total": 475
   }
 }

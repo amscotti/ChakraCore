@@ -1206,10 +1206,9 @@ pub const backend_group = Group{
 
 // W0 ARM64 WebAssembly transplant (doc/wasm-arm64-plan.md W0 task 1).
 // Transcribed from the Linux inventory (tools/build/tables_linux.zig
-// wasmreader_group + the 7 Library units at :886-892). Compiled only
-// by -Dwasm=true -Dprofile=jit (build.zig); NOT a member of
-// object_groups, so the option-off graph is untouched. WabtInterface.cpp
-// stays out with WABT (no WABT group).
+// wasmreader_group + the 8 Library units at :886-893, WabtInterface.cpp
+// included). Compiled only by -Dwasm=true -Dprofile=jit (build.zig);
+// NOT a member of object_groups, so the option-off graph is untouched.
 pub const wasmreader_group = Group{
     .cxx = &.{
         "lib/WasmReader/WasmParseTree.cpp",
@@ -1246,8 +1245,71 @@ pub const wasm_library_group = Group{
         "lib/Runtime/Library/WebAssemblyMemory.cpp",
         "lib/Runtime/Library/WebAssemblyModule.cpp",
         "lib/Runtime/Library/WebAssemblyTable.cpp",
+        "lib/Runtime/Library/WabtInterface.cpp",
     },
-    .extra_includes = &(runtime_includes_base ++ [_][]const u8{"lib/Runtime/Library"}),
+    // lib/wabt/chakra: wabtapi.h for WabtInterface.cpp (tables_linux
+    // rt_library_group carries the same dir as ../../wabt/chakra).
+    .extra_includes = &(runtime_includes_base ++ [_][]const u8{ "lib/Runtime/Library", "lib/wabt/chakra" }),
+};
+
+// WABT translator (vendored lib/wabt) for the -Dwasm=true Mac build.
+// Transcribed from the Linux inventory (tools/build/tables_linux.zig
+// wabt_group :1051+). The "build-xplat/lib/wabt" marker is substituted
+// by build.zig with the generated-config dir (same marker spelling as
+// the Linux graph); config.h comes from the lib/wabt/src/config.h.in
+// substitution in build.zig (mirrors lib/wabt/CMakeLists.txt:41-44 via
+// configure_file). The vendored sources compile unmodified on macOS
+// ARM64: the Linux config values hold (alloca.h/strings.h ship in the
+// Mac SDK), and the Mac build carries no -Werror. NOT a member of
+// object_groups; compiled only by -Dwasm=true -Dprofile=jit.
+pub const wabt_group = Group{
+    .cxx = &.{
+        "lib/wabt/chakra/wabtapi.cc",
+        "lib/wabt/src/apply-names.cc",
+        "lib/wabt/src/binary.cc",
+        "lib/wabt/src/binary-reader.cc",
+        "lib/wabt/src/binary-reader-ir.cc",
+        "lib/wabt/src/binary-reader-logging.cc",
+        "lib/wabt/src/binary-writer.cc",
+        "lib/wabt/src/binary-writer-spec.cc",
+        "lib/wabt/src/binding-hash.cc",
+        "lib/wabt/src/color.cc",
+        "lib/wabt/src/common.cc",
+        "lib/wabt/src/config.cc",
+        "lib/wabt/src/error-formatter.cc",
+        "lib/wabt/src/expr-visitor.cc",
+        "lib/wabt/src/feature.cc",
+        "lib/wabt/src/filenames.cc",
+        "lib/wabt/src/generate-names.cc",
+        "lib/wabt/src/hash-util.cc",
+        "lib/wabt/src/ir.cc",
+        "lib/wabt/src/leb128.cc",
+        "lib/wabt/src/lexer-source.cc",
+        "lib/wabt/src/lexer-source-line-finder.cc",
+        "lib/wabt/src/literal.cc",
+        "lib/wabt/src/opcode.cc",
+        "lib/wabt/src/option-parser.cc",
+        "lib/wabt/src/resolve-names.cc",
+        "lib/wabt/src/stream.cc",
+        "lib/wabt/src/string-view.cc",
+        "lib/wabt/src/token.cc",
+        "lib/wabt/src/tracing.cc",
+        "lib/wabt/src/type-checker.cc",
+        "lib/wabt/src/utf8.cc",
+        "lib/wabt/src/validator.cc",
+        "lib/wabt/src/wast-parser.cc",
+        "lib/wabt/src/wat-writer.cc",
+        "lib/wabt/src/prebuilt/wast-lexer-gen.cc",
+    },
+    .c = &.{
+        "lib/wabt/src/opcode-code-table.c",
+    },
+    .extra_includes = &.{
+        "lib/wabt/chakra",
+        "lib/wabt",
+        "build-xplat/lib/wabt",
+        "lib/wabt/src/prebuilt",
+    },
 };
 
 // The 20 OBJECT groups in ChakraCoreStatic link order

@@ -265,6 +265,10 @@ selection mechanism:
   (`ENABLE_FAST_ARRAYBUFFER` is Windows-only — applicability, not a
   porting gap); disabled-form entries **stay** as generic-path
   controls.
+  (Revised: the Mac `-Dwasm` build now compiles the vendored WABT
+  (§9.4), so no `--no-wabt` selection is needed for the harness to
+  run; the manifest still records the sibling classification for
+  phase bookkeeping.)
 
 D8. **Capability-based runner gating (W0 scope).** `runtests.py`
 forces `arch='x64'` off-Windows (`:112-115`), which makes the
@@ -725,10 +729,14 @@ Enabling mechanics a sub-agent must handle explicitly:
   follow-up) or by teaching the generator — never by editing the
   generated XML or regenerating an x64 baseline from an ARM64 run.
 - WABT: `test/wasm/rlexe.xml:40-50` has a default (WABT) regress
-  entry and a `--no-wabt` variant. The manifest selects
-  `--no-wabt` and excludes the WABT entry until §9.4 is revisited;
-  running `test/wasm` unfiltered on a no-WABT build includes a
-  known failure by construction.
+  entry and a `--no-wabt` variant. The manifest still selects
+  `--no-wabt` and phase-excludes the WABT entry (it remains P3 until
+  a manifest regeneration promotes it), but the Mac `-Dwasm` build
+  now compiles the vendored WABT (revised §9.4), so both variants
+  run — the exclusion is bookkeeping, not a build gap. The whole
+  WasmSpec harness depends on this converter (`WebAssembly.wabt.
+  convertWast2Wasm` in `test/WasmSpec/spec.js`), which is why the
+  P1 gate cannot be met without it (§9.4).
 - `-WasmFastArray` (2 entries in `test/wasm`): permanently
   inapplicable here (`ENABLE_FAST_ARRAYBUFFER` is Windows-only,
   §1). Manifest excludes with that reason; this is an applicability
@@ -840,10 +848,21 @@ this codebase (splay).
    P1 gate for interpreter availability in test profile, P2 gate for
    the `jit` profile — with `modernization-plan.md` updated in the
    same change (it currently lists this port as P2 future work).
-4. **WABT on Mac** — default decided: skip. The manifest selects
-   the `--no-wabt` variants (D7); building vendored WABT on Mac is
-   revisited only if a concrete test-tooling need appears that
-   `--no-wabt` cannot cover.
+4. **WABT on Mac** — REVISED 2026-11-11: build it. The original
+   "skip, select `--no-wabt`" decision cannot meet the P1 gate: the
+   entire WasmSpec harness (`test/WasmSpec/spec.js`) reaches the
+   converter unconditionally (`WebAssembly.wabt.convertWast2Wasm`),
+   and `--no-wabt` does not cover that use — 183 of 388 P1 entries
+   fail at the harness with `convertWast2Wasm` undefined. The Mac
+   `-Dwasm=true` build now compiles the vendored WABT
+   (`lib/wabt`, `tools/build/tables.zig` `wabt_group` +
+   `WabtInterface.cpp`, `config.h` from the `lib/wabt/src/config.h.in`
+   substitution mirroring `lib/wabt/CMakeLists.txt:41-44`, and
+   `ENABLE_WABT` via the D2 disjunct with `CAN_BUILD_WABT`). The
+   vendored sources compile unmodified. The manifest is untouched:
+   its `wabt`/`wabt-free` sibling classification remains for phase
+   bookkeeping (the one `wabt`-feature entry stays P3 until a
+   regeneration promotes it); W0's skip text above is historical.
 
 ## 10. Sub-agent handoff protocol
 

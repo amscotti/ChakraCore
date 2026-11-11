@@ -740,11 +740,17 @@
 #if defined(ASMJS_PLAT)
 #define ENABLE_WASM_THREADS
 #define ENABLE_WASM_SIMD
-
-#ifdef CAN_BUILD_WABT
-#define ENABLE_WABT
 #endif
 
+// ENABLE_WABT: vendored WABT (lib/wabt) builds wherever the build
+// defines CAN_BUILD_WABT (CMakeLists.txt / Linux engine_defines) AND
+// the asm.js platform gate holds: ASMJS_PLAT on x86/x64, or the W0
+// ARM64 port disjunct (WASM_ARM64_PORT, -Dwasm=true on jit). D6: x86/x64
+// state byte-identical to before (ASMJS_PLAT && CAN_BUILD_WABT on, off
+// otherwise); on ARM64 off without -Dwasm. SIMD/THREADS stay ASMJS_PLAT-
+// only (W8/W9); WABT itself is arch-neutral.
+#if defined(CAN_BUILD_WABT) && (defined(ASMJS_PLAT) || (defined(_M_ARM64) && defined(WASM_ARM64_PORT)))
+#define ENABLE_WABT
 #endif
 
 #if _M_IX86
