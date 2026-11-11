@@ -59,6 +59,24 @@ public:
         return Location(location, Type::Scanned);
     }
 
+    // Heap-internal scanned slot (inside a recycler object, not a stack
+    // root). Plain stores are visible to a concurrent rescan only where
+    // the OS tracks dirty pages (RECYCLER_WRITE_WATCH, Windows). On
+    // software-write-barrier platforms the store must set the card --
+    // exactly like an engine Field store -- or a concurrent marker that
+    // already scanned the containing object never sees the new reference
+    // and sweeps a live target (standalone concurrent GCStress crashed
+    // this way on macOS). Stack roots keep using Scanned: ScanStack
+    // rescans them in-thread.
+    static Location ScannedHeap(RecyclerTestObject ** location)
+    {
+#ifdef RECYCLER_WRITE_WATCH
+        return Location(location, Type::Scanned);
+#else
+        return Location(location, Type::Barrier);
+#endif
+    }
+
     static Location Rooted(RecyclerTestObject ** location)
     {
         return Location(location, Type::Rooted);

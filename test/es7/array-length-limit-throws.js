@@ -1,7 +1,7 @@
-//-------------------------------------------------------------------------------------------------------
+//---------------------------------------------------------------------------------------------------------
 // Copyright (c) ChakraCore Project Contributors. All rights reserved.
-// Licensed under the MIT License. See LICENSE.txt file in the project root for full license information.
-//-------------------------------------------------------------------------------------------------------
+// Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+//---------------------------------------------------------------------------------------------------------
 // E11: ES2025 early length-limit validation for Array.prototype.push/splice/unshift on
 // generic receivers. Each must throw a TypeError before moving or storing any element when
 // the resulting length would exceed 2^53-1 (23.1.3.23 step 5, 23.1.3.31 step 8, 23.1.3.37

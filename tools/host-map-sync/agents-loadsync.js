@@ -1,7 +1,7 @@
-//-------------------------------------------------------------------------------------------------------
+//---------------------------------------------------------------------------------------------------------
 // Copyright (c) ChakraCore Project Contributors. All rights reserved.
-// Licensed under the MIT License. See LICENSE.txt file in the project root for full license information.
-//-------------------------------------------------------------------------------------------------------
+// Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+//---------------------------------------------------------------------------------------------------------
 // host-map-sync repro (swarm-triage R1): the host's process-global module/
 // script maps (moduleRecordMap, moduleDirMap, moduleErrMap, scriptDirMap)
 // and the source-context counter in bin/ch/WScriptJsrt.cpp are hit from

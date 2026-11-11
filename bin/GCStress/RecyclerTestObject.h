@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #include "stdafx.h"
@@ -180,7 +181,7 @@ public:
     virtual bool TryGetRandomLocation(Location * location) override
     {
         // Get a random slot and construct a Location for it
-        *location = Location::Scanned(&references[GetRandomInteger(count)]);
+        *location = Location::ScannedHeap(&references[GetRandomInteger(count)]);
 
         return true;
     }
@@ -198,7 +199,7 @@ protected:
 
 private:
     Field(unsigned int) count;
-    FieldNoBarrier(RecyclerTestObject *) references[0];  // SWB-TODO: is this correct?
+    FieldNoBarrier(RecyclerTestObject *) references[0];  // Raw storage; the write barrier for stores is applied by Location (ScannedHeap/Barrier), not the field type.
 };
 
 template <unsigned int minCount, unsigned int maxCount>
@@ -243,7 +244,7 @@ protected:
 
 private:
     Field(unsigned int) count;
-    FieldNoBarrier(RecyclerTestObject *) references[0];  // SWB-TODO: is this correct?
+    FieldNoBarrier(RecyclerTestObject *) references[0];  // Raw storage; the write barrier for stores is applied by Location (ScannedHeap/Barrier), not the field type.
 };
 
 // TrackedObject must be a FinalizableObject (in order to be 'new'ed with RecyclerNewTrackedLeafPlusZ)
@@ -311,7 +312,7 @@ protected:
 
 private:
     Field(unsigned int) count;
-    FieldNoBarrier(RecyclerTestObject *) references[0];  // SWB-TODO: is this correct?
+    FieldNoBarrier(RecyclerTestObject *) references[0];  // Raw tagged storage; traced explicitly by Mark() from the tracker queue, so no store barrier is needed.
 };
 
 // A type of object that is finalizable, but not traced/tracked so that it can be used to test finalization
@@ -340,7 +341,7 @@ public:
     virtual bool TryGetRandomLocation(Location * location) override
     {
         // Get a random slot and construct a Location for it
-        *location = Location::Scanned(&references[GetRandomInteger(count)]);
+        *location = Location::ScannedHeap(&references[GetRandomInteger(count)]);
 
         return true;
     }
@@ -365,7 +366,7 @@ protected:
 
 private:
     Field(unsigned int) count;
-    FieldNoBarrier(RecyclerTestObject *) references[0];  // SWB-TODO: is this correct?
+    FieldNoBarrier(RecyclerTestObject *) references[0];  // Raw storage; the write barrier for stores is applied by Location (ScannedHeap/Barrier), not the field type.
 };
 
 #ifdef RECYCLER_VISITED_HOST
@@ -486,6 +487,6 @@ private:
     Field(AllocationType) type;
     Field(void*) unmanagedResource;
     Field(unsigned int) count;
-    FieldNoBarrier(RecyclerTestObject *) references[0];  // SWB-TODO: is this correct? (copied from TrackedObject)
+    FieldNoBarrier(RecyclerTestObject *) references[0];  // Raw tagged storage; traced explicitly by Mark(), like TrackedObject, so no store barrier is needed. (copied from TrackedObject)
 };
 #endif

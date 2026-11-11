@@ -1023,5 +1023,62 @@ class SubprocessLifetimeTests(unittest.TestCase):
                 pass
 
 
+class GcStressStartupContractTests(unittest.TestCase):
+    """GCStress startup (e12 card, fixed 2026-11-10): GCStress passes a
+    null ThreadService* meaning "no host callback; Recycler owns its
+    background thread". Calling HasCallback() through that null pointer
+    was UB whose this-null check clang elides -> startup SIGSEGV at 0x0
+    (crash report GCStress-2026-11-05: HasCallback <- InitializeConcurrent
+    <- EnableConcurrent). These pins keep the null contract out of the
+    member call: HasCallback must not test `this`, and the Recycler must
+    guard/normalize a null service before any member call. Source pins
+    (same style as RegenGuidPathTests); the behavioral proof is the
+    bounded GCStress run recorded in doc/review-swarm-fixes.md."""
+
+    def test_has_callback_does_not_test_this(self):
+        text = (ROOT / "lib/Common/Common/ThreadService.h").read_text()
+        self.assertNotIn("this != nullptr", text)
+        self.assertIn("return threadService != nullptr;", text)
+
+    def test_recycler_normalizes_null_thread_service(self):
+        text = (ROOT / "lib/Common/Memory/Recycler.cpp").read_text()
+        self.assertIn(
+            "if (threadService == nullptr || !threadService->HasCallback())",
+            text)
+        self.assertIn("noCallbackThreadService", text)
+
+    def test_gcstress_still_exercises_null_service_path(self):
+        text = (ROOT / "bin/GCStress/GCStress.cpp").read_text()
+        self.assertIn("nullptr /* threadService */", text)
+
+
+class GcStressConcurrentContractTests(unittest.TestCase):
+    """Concurrent GCStress (fixed 2026-11-10 follow-up): heap-internal
+    Scanned slots used plain stores, which only Windows write-watch
+    (RECYCLER_WRITE_WATCH) makes visible to a concurrent rescan. On
+    software-write-barrier platforms the store must set the card or a
+    live target is swept (vptr-null crash in GetRandomLocation;
+    Scanned-only graph crashed, Barrier-only and barrier-store graphs
+    survived). Pins: ScannedHeap exists with the write-watch split and
+    Scanned/Finalized objects use it for heap slots. Behavioral proof:
+    bounded concurrent GCStress soaks in doc/review-swarm-fixes.md."""
+
+    def test_scanned_heap_factory_splits_on_write_watch(self):
+        text = (ROOT / "bin/GCStress/GCStress.h").read_text()
+        self.assertIn("static Location ScannedHeap", text)
+        self.assertIn("RECYCLER_WRITE_WATCH", text)
+
+    def test_scanned_and_finalized_use_scanned_heap(self):
+        text = (ROOT / "bin/GCStress/RecyclerTestObject.h").read_text()
+        self.assertEqual(text.count("Location::ScannedHeap(&references"), 2)
+        self.assertNotIn("Location::Scanned(&references", text)
+
+    def test_recycler_stress_alignment_matches_allocator(self):
+        # HeapConstants::ObjectGranularity is 16 (mask 0xF); asserting 32
+        # false-fired -RecyclerTest on legitimate 16-mod-32 objects.
+        text = (ROOT / "lib/Common/Memory/StressTest.h").read_text()
+        self.assertIn("const int OBJALIGN = 16;", text)
+
+
 if __name__ == "__main__":
     unittest.main()

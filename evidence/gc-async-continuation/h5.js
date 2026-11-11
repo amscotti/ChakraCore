@@ -1,3 +1,7 @@
+// -------------------------------------------------------------------------------------------------------
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
+// Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+// -------------------------------------------------------------------------------------------------------
 // H5: after churn, does a NEW async fn complete while the old suspended one never resumes?
 var out = [];
 var r1 = null;

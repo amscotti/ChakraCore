@@ -1,3 +1,7 @@
+// -------------------------------------------------------------------------------------------------------
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
+// Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+// -------------------------------------------------------------------------------------------------------
 // sigbus-trace: DYLD_INSERT_LIBRARIES diagnostic for the agent-startup SIGBUS.
 // Records munmap / PROT_NONE-refault / vm_deallocate operations (with shallow
 // backtraces + thread ids) in a lock-protected ring; installs a SA_SIGINFO
@@ -5,6 +9,17 @@
 // thread's backtrace, mach region state at si_addr, and every recorded op
 // whose range covers si_addr (i.e. who unmapped the page), then _exit(66).
 // Unhandled faults chain to the previous handler (PAL SEH).
+//
+// WARNING — NOT async-signal-safe, by design tradeoff: fault_handler and
+// everything it calls (pthread_mutex_lock on log_mtx, fprintf, backtrace,
+// dladdr, mach_vm_region, getenv) violate the POSIX async-signal-safe list.
+// If a fault lands while any thread holds log_mtx (e.g. inside record()),
+// the handler can self-deadlock instead of reporting; heap/stdio state can
+// also be torn. The `handling` reentrancy guard only stops recursive entry
+// from the handler's own faults — it does not fix the mutex deadlock. Treat
+// this strictly as a best-effort, read-only diagnostic for a process that
+// is already crashing: never link it into the engine, never ship it, and
+// prefer a debugger capture when the hang itself would destroy evidence.
 #define _GNU_SOURCE
 #include <sys/types.h>
 #include <sys/mman.h>
@@ -49,18 +64,6 @@ static volatile int in_fault = 0;
 
 static uint64_t now_ns(void) {
   return (uint64_t)mach_absolute_time();
-}
-
-static void record2(const char *kind, uintptr_t a, uintptr_t b) {
-  if (!ready) return;
-  pthread_mutex_lock(&log_mtx);
-  oprec_t *r = &ring[__sync_fetch_and_add(&ring_head, 1) & (RING - 1)];
-  strlcpy(r->kind, kind, sizeof(r->kind));
-  r->start = a; r->size = b;
-  r->tid = (uint64_t)pthread_mach_thread_np(pthread_self());
-  r->ts = now_ns();
-  r->nframes = 0;
-  pthread_mutex_unlock(&log_mtx);
 }
 
 static void record(const char *kind, uintptr_t start, size_t size, int with_bt) {
@@ -161,16 +164,6 @@ static void dump_region(uintptr_t addr) {
   } else {
     fprintf(stderr, "  no mach region at/after fault address (address space end?)\n");
   }
-}
-
-static uintptr_t resolve_sym(const char *imageSub, uintptr_t symOff) {
-  for (uint32_t i = 0; i < _dyld_image_count(); i++) {
-    const char *name = _dyld_get_image_name(i);
-    if (name && strstr(name, imageSub)) {
-      return (uintptr_t)_dyld_get_image_vmaddr_slide(i) + symOff;
-    }
-  }
-  return 0;
 }
 
 static const char *trace_image(void) {
@@ -423,11 +416,9 @@ static void fault_handler(int sig, siginfo_t *si, void *uc) {
     if (r->kind[0] == 0) break;
     uintptr_t end = r->start + r->size;
     uintptr_t f = (uintptr_t)si->si_addr;
-    long dist = -1;
-    if (f >= r->start && f < end) dist = 0;
-    else if (f < r->start && (long)(r->start - f) < 0x400000) dist = (long)(r->start - f);
-    else if (f >= end && (long)(f - end) < 0x400000) dist = (long)(f - end);
-    if (dist == 0) {
+    // Covering test only; compare in uintptr_t (a long cast truncates the
+    // distance on LP64 for gaps over 2GB and could alias a far range).
+    if (f >= r->start && f < end) {
       found++;
       fprintf(stderr, "  [%u] COVERING %s range=%p..%p size=0x%zx tid=%llu ts=%llu\n",
               head - i, r->kind, (void *)r->start, (void *)end, r->size, r->tid, r->ts);
@@ -457,7 +448,7 @@ static void *probe_thread(void *arg) {
   // Call the engine's exported OnThreadInit on this fresh secondary thread,
   // so we can observe (in the mmap ring) whether it commits this thread's
   // stack card sections.
-  void (*onThreadInit)() = (void (*)())arg;
+  void (*onThreadInit)(void) = (void (*)(void))arg;
   mach_vm_address_t vaddr = (mach_vm_address_t)&arg & ~0xfffull;
   mach_vm_size_t vsize = 0;
   vm_region_basic_info_data_64_t info; mach_msg_type_number_t cnt = VM_REGION_BASIC_INFO_COUNT_64; mach_port_t obj;
@@ -527,10 +518,20 @@ static void *probe_deferred(void *unused) {
       // boundaries; each calls OnThreadInit. If OnThreadInit works for
       // secondary threads, a card commit must appear for the first stack
       // that lands in an uncommitted section.
+      int spawned = 0;
       for (int t = 0; t < 700; t++) {
         pthread_t pt2;
-        pthread_create(&pt2, NULL, probe_thread, fn);
+        int rc = pthread_create(&pt2, NULL, probe_thread, fn);
+        if (rc != 0) {
+          fprintf(stderr, "[sigbus-trace] probe pthread_create %d failed: %s\n", t, strerror(rc));
+          break;
+        }
+        // Detached: probe threads run OnThreadInit and return; nobody
+        // joins them, so do not leak 700 joinable-thread handles/stacks.
+        pthread_detach(pt2);
+        spawned++;
       }
+      fprintf(stderr, "[sigbus-trace] probe spawned %d/700 threads\n", spawned);
       sleep(3); // let them run; stacks stay alive until process end
       fprintf(stderr, "[sigbus-trace] probe wave done\n");
       return NULL;

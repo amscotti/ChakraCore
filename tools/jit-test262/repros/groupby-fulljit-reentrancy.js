@@ -1,3 +1,7 @@
+// -------------------------------------------------------------------------------------------------------
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
+// Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+// -------------------------------------------------------------------------------------------------------
 // Repro C2-JIT-2: Object.groupBy / Map.groupBy abort under a JIT-compiled
 // caller (fulljit / dynapogo flags). Recorded by doc/c2-jit-test262.md; do
 // not fix here — fixes get their own lane.

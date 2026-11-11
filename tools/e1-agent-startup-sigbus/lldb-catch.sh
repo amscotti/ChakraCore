@@ -1,4 +1,8 @@
 #!/bin/sh
+# -------------------------------------------------------------------------------------------------------
+# Copyright (c) ChakraCore Project Contributors. All rights reserved.
+# Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+# -------------------------------------------------------------------------------------------------------
 # Retry-loop lldb catch with OnSegmentAlloc/OnThreadInit tracing.
 DIR=/Users/ascotti/Documents/code/ChakraCore-wt/agent-startup-sigbus/out/sigbus
 COUNT=${1:-30}

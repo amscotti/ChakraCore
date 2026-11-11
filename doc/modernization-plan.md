@@ -2,9 +2,15 @@
 
 > Status: F0–B3 verified — three Mac profiles green, incremental proofs,
 > CI recipe validated (CONDITIONAL on the first green post-merge Actions run);
-> **B4 is BLOCKED-with-green-build** — the Linux Zig build is green, but zero
-> behavior checks have run anywhere ([B4 gate verdict](b4-gate.md),
-> [post-B4 review](b4-review.md)). **C1 is recorded (CONDITIONAL)** — edition
+> **B4 behavior proof completed natively on the Linux proof host**
+> (2026-11-09/10: interpreted **2841/0**, dynapogo **2305/0**, certified
+> Linux test262 **77,354/3,190** — [B4 native run](b4-linux-run.md),
+> [B4 gate verdict update](b4-gate.md)); what remains owed before any
+> Linux default-rollout claim is the post-D1–D4 native handoff
+> ([b4-d1-d4.md](b4-d1-d4.md) §5: Linux regression re-run + pin re-record +
+> certified refresh) and a first green hosted-CI run. The +230
+> engine/feature delta vs Mac is tracked, not claimed identical.
+> **C1 is recorded (CONDITIONAL)** — edition
 > policy, triage and shortlist are in [c1-triage.md](c1-triage.md);
 > qualification is conditional on explicit host-reported negative phase
 > before any full result is certified. **C2 is in progress** — batches
@@ -31,9 +37,16 @@
 > asm.js/WASM Mac gap, and the no-JIT gates unchanged at 2032/0 and 2084/0;
 > evidence and coverage limits (direct-eval and 18 class/private/import
 > opcodes stay interpreted) are in [arm64-macos-jit.md](arm64-macos-jit.md).
-> Linux x64 JIT claims remain gated on B4 as below. Engine/legacy-build references use baseline
+> Linux x64 JIT test262/rollout claims remain gated as below (Mac ARM64
+> JIT test262 discharged; Linux proof-host run recorded, D1–D4 handoff
+> owed). Engine/legacy-build references use baseline
 > `97e68c917`; execution evidence and the [B1-B3 review](b1-b3-review.md)
-> are recorded through 2026-10-31 local time.
+> are recorded through 2026-11-10 local time. Push scope for this branch
+> tip is pinned in [the swarm-review fix receipt](review-swarm-fixes.md):
+> demonstrated green is Mac no-JIT + Mac ARM64 JIT + Linux proof-host;
+> concurrent-GC/full GCStress matrices, Recycler/C OOM rollback, a
+> measured perf gate, external-ArrayBuffer finalizer native tests and a
+> Phase-3 API/versioning decision remain explicitly unclaimed there.
 > This is a staged roadmap for a small maintained fork, not a dated delivery promise.
 
 ## Read this first
@@ -59,7 +72,7 @@ handling have been validated before its results are used as a completion gate.
 | B1 | Explicit Mac build/PAL configuration contract | F0 | Verified |
 | B2 | Source-only Mac `zig build` and `zig build check` | B1 | Verified |
 | B3 | Mac build profiles, incremental correctness and CI | B2 | Verified* |
-| B4 | Native x64 Linux JIT/WASM/WABT proof and Zig build | B2; B3 before default rollout | **BLOCKED-with-green-build** (native baseline pending) |
+| B4 | Native x64 Linux JIT/WASM/WABT proof and Zig build | B2; B3 before default rollout | **Proven on proof host** (native run + certified baseline recorded; post-D1–D4 Linux handoff §5 and hosted-CI green still owed before default rollout) |
 | B5 | First release package with controlled dependencies | B3; B4 for a two-platform package | Planned |
 | B6 | Windows feasibility and rollout; later target extensions | Stable build contracts | Separate expansion |
 | Z1 | One useful mixed C++/Zig unit behind a tested C ABI | B3; B4 if the unit ships on Linux | Optional pilot |
@@ -117,9 +130,9 @@ obtained configuration through CMake before replay; B1/B2 made Zig own that
 work, and the Mac ARM64 `jit` profile now compiles and runs the Backend
 (merged 2026-10-31; [arm64-macos-jit.md](arm64-macos-jit.md)).
 Windows, other CPUs, LTO and a hermetic dependency package remain
-unproved; Linux x64 JIT compiles and links in the B4 Zig graph, but its
-behavior is unproved — zero Linux behavior checks have run (B4 is
-BLOCKED-with-green-build). The number of diagnostic failures is neither the number of bugs nor an
+unproved; Linux x64 JIT behavior was proved natively on the proof host
+(2026-11-09/10, see Status above), with the post-D1–D4 native handoff
+still owed. The number of diagnostic failures is neither the number of bugs nor an
 effort estimate: tags overlap, negative tests can pass for unsupported syntax, and
 the corpus contains later proposals (including Temporal).
 
@@ -646,9 +659,11 @@ Decision/rollback points:
   on the asm.js/WASM Mac gap, no-JIT gates unchanged. Coverage limits and
   remaining JIT ports are recorded in [arm64-macos-jit.md](arm64-macos-jit.md).
 - [ ] B4: Linux native baseline/pilot and JIT/WASM/native/profile CI gates;
-  scoped Linux rollout. (**BLOCKED-with-green-build**: the Zig build is
-  green, but zero behavior checks have run — [b4-gate.md](b4-gate.md).)
-  The merged Mac ARM64 JIT above is not B4 evidence.
+  scoped Linux rollout. Native behavior proof and certified baseline are
+  recorded ([b4-linux-run.md](b4-linux-run.md)); the box stays unchecked
+  only for the rollout tail — post-D1–D4 native handoff
+  ([b4-d1-d4.md](b4-d1-d4.md) §5) and hosted-CI green. The merged Mac
+  ARM64 JIT above is not B4 evidence.
 - [ ] B5: Controlled dependency/artifact package and clean-machine floor
   testing. The serialized-bytecode GUID rotation is done
   (§2.2 B5, [b5-guid-rotation.md](b5-guid-rotation.md)).
@@ -757,11 +772,11 @@ certified test262 refresh remain ([b4-d1-d4.md](b4-d1-d4.md) §5).
 - **B3's CI clause still needs a push** — the Actions recipe is
   validated (lint + literal local simulation) but the first green
   post-merge run has not happened.
-- **Linux hardware/environment for B4** — the Linux Zig build is green
-  but zero behavior checks have run anywhere; B4 is where this
-  certified baseline is **re-proven on the second declared
-  configuration** (the refresh is one command there:
-  `refresh_baseline.py`).
+- **Linux hardware/environment for B4** — the native proof ran on the
+  proof host (2026-11-09/10); still owed there: the post-D1–D4 handoff
+  ([b4-d1-d4.md](b4-d1-d4.md) §5: regression re-run expecting
+  2845/2307, `RECORDED_BASELINE` re-record only after green, certified
+  refresh via `refresh_baseline.py`) plus a first green hosted-CI run.
 - **Windows (B6)** — feasibility slice when chosen.
 
 After B4, the re-ranked path to green (c4-gate §3) is: flag decisions

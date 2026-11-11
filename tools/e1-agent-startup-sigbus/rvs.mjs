@@ -1,3 +1,7 @@
+// -------------------------------------------------------------------------------------------------------
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
+// Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+// -------------------------------------------------------------------------------------------------------
 // Churn driver for the agent-startup SIGBUS lane (adapted from the S6e
 // reviewer's rvb.mjs). Params: <bin> <killms> <agents> <count> <par> [interp]
 import { spawn } from 'node:child_process';

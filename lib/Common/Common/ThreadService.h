@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #pragma once
@@ -37,9 +38,14 @@ namespace JsUtil
             return result;
         }
 
+        // Precondition: a valid ThreadService object. A null ThreadService*
+        // means "no host callback" and must be normalized or guarded by the
+        // caller (Recycler::EnableConcurrent does this); calling a member
+        // through a null pointer is UB and modern optimizers elide any
+        // this-null check, which crashed GCStress at address 0.
         bool HasCallback() const
         {
-            return this != nullptr && threadService != nullptr;
+            return threadService != nullptr;
         }
 
         bool IsInCallback() const

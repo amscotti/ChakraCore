@@ -1,3 +1,7 @@
+// -------------------------------------------------------------------------------------------------------
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
+// Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+// -------------------------------------------------------------------------------------------------------
 // Agentless valid-broadcast leak probe (host-broadcast-type repair).
 //
 // WScript.Broadcast over a real SharedArrayBuffer with NO $262.agent

@@ -1,4 +1,8 @@
 #!/bin/sh
+# -------------------------------------------------------------------------------------------------------
+# Copyright (c) ChakraCore Project Contributors. All rights reserved.
+# Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+# -------------------------------------------------------------------------------------------------------
 # RSS-isolation A/B for the agentless-broadcast leak probe
 # (host-broadcast-type repair iteration).
 # Usage: sh tools/host-broadcast-type/leakdrive.sh <ch-binary> [iters=6000]

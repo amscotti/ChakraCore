@@ -4815,7 +4815,10 @@ Recycler::InitializeConcurrent(JsUtil::ThreadService *threadService)
 #if DBG_DUMP
         markContext.GetPageAllocator()->debugName = _u("ConcurrentCollect");
 #endif
-        if (!threadService->HasCallback())
+        // A null service means "no host callback; own the background
+        // thread" (GCStress passes nullptr). Guard before any member call:
+        // threadService->HasCallback() on a null pointer is UB.
+        if (threadService == nullptr || !threadService->HasCallback())
         {
 #ifdef IDLE_DECOMMIT_ENABLED
             concurrentIdleDecommitEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
@@ -5084,6 +5087,18 @@ Recycler::EnableConcurrent(JsUtil::ThreadService *threadService, bool startAllTh
     if (this->disableConcurrent)
     {
         return false;
+    }
+
+    // Normalize a null service (GCStress) to a process-lifetime
+    // no-callback instance so this->threadService is never null while
+    // concurrent GC is enabled; every later HasCallback()/Invoke() site
+    // then calls through a valid object. Semantics are unchanged:
+    // HasCallback() is false, so the Recycler-owned-thread paths run.
+    // (FinalizeConcurrent still nulls the member at teardown.)
+    if (threadService == nullptr)
+    {
+        static JsUtil::ThreadService noCallbackThreadService(nullptr);
+        threadService = &noCallbackThreadService;
     }
 
     if (!this->InitializeConcurrent(threadService))

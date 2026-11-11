@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# -------------------------------------------------------------------------------------------------------
+# Copyright (c) ChakraCore Project Contributors. All rights reserved.
+# Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+# -------------------------------------------------------------------------------------------------------
 """Patch a serialized-bytecode cache file's version stamps.
 
 The serializer writes byteCodeCacheReleaseFileVersion as four DWORDs

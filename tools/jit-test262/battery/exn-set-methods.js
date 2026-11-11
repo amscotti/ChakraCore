@@ -1,3 +1,7 @@
+// -------------------------------------------------------------------------------------------------------
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
+// Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+// -------------------------------------------------------------------------------------------------------
 // Exception-semantics battery for the Set.prototype set methods
 // (jit-reentrancy-fix lane). Verifies the BEGIN_SAFE_REENTRANT_CALL arming did
 // not change the spec's abrupt-completion behavior: the USER exception object

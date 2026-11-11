@@ -1,3 +1,7 @@
+// -------------------------------------------------------------------------------------------------------
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
+// Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+// -------------------------------------------------------------------------------------------------------
 // Deterministic (timing-free) microtask-vs-timer ordering probe:
 // after timer1's callback returns, the promise continuation (microtask)
 // must run before timer2 (another macrotask). Output must be:

@@ -1,3 +1,7 @@
+// -------------------------------------------------------------------------------------------------------
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
+// Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+// -------------------------------------------------------------------------------------------------------
 // Exception-semantics battery for Object.groupBy / Map.groupBy
 // (jit-reentrancy-fix lane). Verifies the BEGIN_SAFE_REENTRANT_CALL arming of
 // GroupByCallCallback / MapGroupByCallCallback did not change the spec's

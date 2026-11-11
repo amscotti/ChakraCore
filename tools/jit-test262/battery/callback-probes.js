@@ -1,3 +1,7 @@
+// -------------------------------------------------------------------------------------------------------
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
+// Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+// -------------------------------------------------------------------------------------------------------
 // Callback-builtin probe battery (jit-reentrancy-fix lane), rebuilt from the
 // adversarial review's 42-probe sweep list (doc/c2-jit-test262.md review
 // outcome). Every probe is a C++ builtin that re-enters JS (comparator,

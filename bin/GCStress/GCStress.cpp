@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #include "stdafx.h"
@@ -275,7 +276,21 @@ void SimpleRecyclerTest()
 
         recyclerInstance = HeapNewZ(Recycler, nullptr, &pageAllocator, Js::Throw::OutOfMemory, Js::Configuration::Global.flags, nullptr);
 
+        // nullptr service = no host callback; the Recycler owns its
+        // background thread (normalized in Recycler::EnableConcurrent).
         recyclerInstance->Initialize(false /* forceInThread */, nullptr /* threadService */);
+
+        // Mirror ThreadContext::EnsureRecycler's post-init contract: this
+        // mutator thread is the recycler's bound thread (stack base +
+        // main-thread handle for stack scans), and the write-barrier card
+        // table must be committed for this thread's stack before any
+        // concurrent collection can rescan it.
+        recyclerInstance->SetIsThreadBound();
+#ifdef RECYCLER_WRITE_BARRIER
+#ifdef TARGET_64
+        VerifyCondition(RecyclerWriteBarrierManager::OnThreadInit());
+#endif
+#endif
 
 #if FALSE
         // TODO: Support EnableImplicitRoots call on Recycler (or similar, e.g. constructor param)

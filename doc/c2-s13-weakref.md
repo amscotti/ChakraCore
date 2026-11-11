@@ -124,6 +124,31 @@ Profiler/debug registration: `ProfilerRegisterWeakRef` registers the dynamic
 includes WeakRef. `ScriptContext::DumpTypeCounts` now prints a WeakRef row
 using `TypeIds_WeakRef`.
 
+**Trace mechanism (verified 2026-11-10 review-fix pass).** There is no
+per-type Mark/Trace visitor to instantiate for these types, and none is
+missing. `JavascriptWeakRef`, `JavascriptFinalizationRegistry`, its
+`CellList`/`FinalizationRegistryCell`s and the cleanup task function are
+all allocated with `RecyclerNew`/`RecyclerNewEnumClass`
+(`JavascriptLibrary.cpp` CreateWeakRef/CreateFinalizationRegistry/
+CreateFinalizationRegistryCleanupTaskFunction;
+`JavascriptFinalizationRegistry.cpp:217,226` for the list/cells), i.e.
+normal (non-leaf) recycler blocks. Marking a normal block scans the whole
+object extent: `SmallNormalHeapBlock` calls
+`Recycler::ScanObjectInlineInterior(address, objectSize)`
+(`SmallNormalHeapBlock.cpp` ScanMark/ScanNewImplicitRoots), so every
+pointer slot after the `DynamicObject`/`RuntimeFunction` base — `Field
+targetWeakRef`, `Field cleanupCallback/cells`, cell `Field heldValue`
+(strong, by design) and cell weak-handle fields, task `Field registry` —
+is traced exactly like the established sibling pattern
+(`JavascriptMap`'s `Field(MapUnion)` etc.). `Field` additionally gives
+write-barrier stores on `GLOBAL_ENABLE_WRITE_BARRIER` builds
+(`WriteBarrierMacros.h`). Weak handles themselves are owned by the
+recycler's `weakReferenceMap` (`Recycler.inl` FindOrCreateWeakReferenceHandle)
+and cleared by the weak sweep above; their lifetime does not depend on
+being scanned. What this does **not** prove: concurrent/parallel mark
+behavior of these fields under load — that remains the GCStress card
+below, not a tracing gap.
+
 `AddToKeptObjects` is implemented by `ThreadContext::KeepDuringJob` and the
 agent/thread-wide rooted `keptObjects` list. The constructor calls it before the
 reentrant `NewTarget.prototype` lookup, and `deref` calls it before returning a

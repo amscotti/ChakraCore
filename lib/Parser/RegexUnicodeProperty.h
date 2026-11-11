@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 // ECMAScript Unicode property escapes (\p{...}/\P{...} under the u flag):
@@ -15,6 +16,13 @@
 #pragma once
 
 #include "RuntimeCommon.h"
+
+// ICU C headers belong at global scope: including them inside the
+// namespace below would nest ICU's symbols (and its include guards)
+// under UnifiedRegex::UnicodeProperty, breaking any second includer.
+#include <unicode/uchar.h>
+#include <unicode/uscript.h>
+#include <unicode/uset.h>
 
 namespace UnifiedRegex
 {
@@ -90,10 +98,6 @@ namespace UnifiedRegex
         // compiler's existing arena ownership (ctAllocator during parsing,
         // cloned into the runtime allocator by the node transfer passes).
         // ---------------------------------------------------------------------------
-
-#include <unicode/uchar.h>
-#include <unicode/uscript.h>
-#include <unicode/uset.h>
 
         // ES2024 binary property names and aliases (exact spellings). The
         // RegExp-specific Any/Assigned/ASCII are resolved separately.

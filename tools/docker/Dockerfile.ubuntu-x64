@@ -1,3 +1,7 @@
+# -------------------------------------------------------------------------------------------------------
+# Copyright (c) ChakraCore Project Contributors. All rights reserved.
+# Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+# -------------------------------------------------------------------------------------------------------
 # B4 Linux baseline environment: native x64 (amd64) Ubuntu with JIT-capable toolchain.
 #
 # Chosen from legacy CI (azure-pipelines.yml, CMake job): the primary Linux

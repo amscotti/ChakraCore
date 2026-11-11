@@ -106,14 +106,39 @@ void JsrtContextCore::OnScriptLoad(Js::JavascriptFunction * scriptFunction, Js::
 
 HRESULT ChakraCoreHostScriptContext::FetchImportedModule(Js::ModuleRecordBase* referencingModule, LPCOLESTR specifier, Js::Var attributes, Js::ModuleRecordBase** dependentModuleRecord)
 {
-    // Ownership record: `specifierVar` and `attributes` are Recycler GC values
-    // created/held by the engine caller; this frame passes them to the host
-    // synchronously. The host must JsAddRef any value it retains past return
-    // (Jsrt.cpp:601-720); no engine root is held on the host's behalf.
-    // Borrow invalidation: a host callback may run script and trigger GC;
-    // the caller's C++ locals stay on the scanned native stack (same as the
-    // pre-existing specifier-only path). No reentrancy-safe mutation of these
-    // values occurs here.
+    // Ownership record (doc/memory-management.md section 3):
+    // Resource/creation: `specifierVar`, a Recycler string created here by
+    // JavascriptString::NewCopySz; `attributes`, an engine Var built by the
+    // caller (or the library undefined when the caller passes nullptr);
+    // *dependentModuleRecord, published only on NOERROR below.
+    // Domain/allocator: Recycler/JS value (this context's Recycler). No
+    // native heap, arena or Zig allocation; no pool, no retained capacity.
+    // Owner/transfer: the engine caller owns both values; this frame passes
+    // them to the host synchronously. The host must JsAddRef any value it
+    // retains past return (Jsrt.cpp:601-720); no engine root is held on the
+    // host's behalf, and this frame takes no AddRef to release later.
+    // Borrow invalidation: a host callback may run script and trigger GC,
+    // detach or runtime disposal after return; the caller's C++ locals stay
+    // on the scanned native stack (same as the pre-existing specifier-only
+    // path), and nothing here is used after the callback returns except the
+    // dependentRecord out-param.
+    // Thread/context: the script thread bound to this runtime with this
+    // ScriptContext current (GetScriptContext()); callers are module
+    // instantiation (SourceTextModuleRecord) and dynamic import
+    // (JavascriptOperators, under BEGIN_LEAVE_SCRIPT). The host callback
+    // runs synchronously on that thread inside AUTO_NO_EXCEPTION_REGION and
+    // must not reenter a different runtime/context. Any host JsRelease of a
+    // retained value must run on a thread bound to this runtime.
+    // Failure exits (nothing is published, no root is held, on every one):
+    // NewCopySz OOM/stack-overflow throws before any host call (callers
+    // translate or let the engine exception propagate, as before); a host
+    // JsErrorCode != JsNoError maps to E_INVALIDARG with
+    // *dependentModuleRecord untouched; attributes with no
+    // attributes-capable callback returns E_NOTIMPL before allocating or
+    // calling the host (callers turn it into a TypeError load failure); no
+    // callback at all returns E_INVALIDARG. Accounting: one Recycler
+    // string per fetch, reclaimed by the collector; exhaustion is the
+    // NewCopySz throw above.
     if (fetchImportedModuleWithAttributesCallback != nullptr)
     {
         Js::JavascriptString* specifierVar = Js::JavascriptString::NewCopySz(specifier, GetScriptContext());
@@ -157,6 +182,12 @@ HRESULT ChakraCoreHostScriptContext::FetchImportedModule(Js::ModuleRecordBase* r
 
 HRESULT ChakraCoreHostScriptContext::FetchImportedModuleFromScript(JsSourceContext dwReferencingSourceContext, LPCOLESTR specifier, Js::Var attributes, Js::ModuleRecordBase** dependentModuleRecord)
 {
+    // Ownership record: identical contract to FetchImportedModule above
+    // (Recycler specifierVar created here, synchronous host pass-through,
+    // host JsAddRef to retain, script thread/current context only, same
+    // E_NOTIMPL/E_INVALIDARG failure exits with nothing published). The
+    // only difference is the referencing identity: a host source-context
+    // cookie instead of a referencing module record.
     if (fetchImportedModuleFromScriptWithAttributesCallback != nullptr)
     {
         Js::JavascriptString* specifierVar = Js::JavascriptString::NewCopySz(specifier, GetScriptContext());

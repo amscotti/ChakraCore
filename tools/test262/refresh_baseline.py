@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-#-----------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------------
 # Copyright (c) ChakraCore Project Contributors. All rights reserved.
 # Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
-#-----------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------------
 """One-command certified-baseline refresh: run + analyze + delta join + dated report.
 
 Manual invocation only (nothing wires this into a gate). It collapses the

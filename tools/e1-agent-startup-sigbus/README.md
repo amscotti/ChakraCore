@@ -4,6 +4,13 @@ Read-only diagnostics for the agent-startup SIGBUS diagnosed in
 `doc/e1-agent-startup-sigbus.md`. Nothing here is wired into the build or
 test gates; these are evidence-collection tools.
 
+> **Safety:** `sigbus-trace.c`'s fault handler is deliberately **not**
+> async-signal-safe (mutex/`fprintf`/`backtrace`/`dladdr`/`mach_vm_region`
+> in the handler — see the warning at the top of the file). It can deadlock
+> a faulting process that holds `log_mtx`. Use it only against processes
+> that are already crashing; never link or ship it. `cs-hammer.c` accepts
+> thread counts `1..64` only.
+
 - `sigbus-trace.c` — DYLD_INSERT_LIBRARIES interposer. Interposes
   `munmap`/`mmap`/`mprotect`/`vm_allocate`/`vm_deallocate` into a ring; on
   SIGBUS/SIGSEGV prints siginfo, registers, backtrace, the PAL PCMI

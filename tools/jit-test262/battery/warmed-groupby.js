@@ -1,3 +1,7 @@
+// -------------------------------------------------------------------------------------------------------
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
+// Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+// -------------------------------------------------------------------------------------------------------
 // C2-JIT-2 warmed-caller battery (jit-reentrancy-fix lane).
 //
 // Drives Object.groupBy and Map.groupBy from a >=1000-iteration loop so the

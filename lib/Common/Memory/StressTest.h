@@ -1,11 +1,16 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #if DBG
 
-// Recycler requires 16/32 byte alignment
-const int OBJALIGN = sizeof(void*) * 4;
+// The Recycler guarantees HeapConstants::ObjectGranularity (16-byte)
+// alignment for allocations (HeapInfo::ObjectAlignmentMask == 0xF);
+// it does not guarantee 32. Asserting 32 here false-fires on legitimate
+// 16-mod-32 objects. Keep the check at the allocator's real guarantee:
+// HeapConstants::ObjectGranularity in Memory/HeapConstants.h.
+const int OBJALIGN = 16;
 
 enum CreateOptions
 {

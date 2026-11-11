@@ -209,10 +209,13 @@ namespace Js
 
         // ES2026 25.4.12: no argument validation or coercion, no observable
         // effect other than timing. Use the architecture spin-wait hint.
-#if defined(_M_ARM64)
-        __yield();
-#elif defined(__aarch64__)
+        // Order matters: clang defines both _M_ARM64 (via the target
+        // defines) and __aarch64__, but only MSVC provides __yield
+        // without <arm_acle.h>; use the asm form for clang/GCC first.
+#if defined(__aarch64__)
         __asm__ __volatile__("yield" ::: "memory");
+#elif defined(_M_ARM64)
+        __yield();
 #else
         YieldProcessor();
 #endif

@@ -1,7 +1,7 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
 // Copyright (c) ChakraCore Project Contributors. All rights reserved.
-// Licensed under the MIT license. See LICENSE.txt in the project root for license information.
+// Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 // C2-S1: private instance methods (`#m(){}`) and private accessors
 // (`get #x(){}` / `set #x(v){}`), private static methods and accessors

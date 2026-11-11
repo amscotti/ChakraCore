@@ -40,6 +40,7 @@ git diff --name-only `git merge-base origin/master HEAD` HEAD |
     grep -v -E '\.inc$' |
     grep -v -E '\.cmake$' |
     grep -v -E '\.json$' |
+    grep -v -E '\.(log|time)$' |
     grep -v -E '\.man$' |
     grep -v -E '\.testconfig$' |
     grep -v -E '\.editorconfig$' |
@@ -55,7 +56,13 @@ git diff --name-only `git merge-base origin/master HEAD` HEAD |
     grep -v -E 'bin/NativeTests/Scripts/splay.js$' |
     grep -v -E 'libChakraCoreLib.version|ch.version' |
     grep -v -E 'lib/Backend/CRC.h' |
-    xargs -I % sh -c "echo 'Check Copyright > Checking %'; python tools/StyleChecks/check_copyright.py % > $ERRFILETEMP || cat $ERRFILETEMP >> $ERRFILE"
+    while IFS= read -r file; do
+        # (while-read loop, not xargs -I %: BSD xargs aborts with
+        # "command line cannot be assembled, too long" on branch-sized
+        # file lists, silently truncating the check mid-list.)
+        echo "Check Copyright > Checking $file"
+        python tools/StyleChecks/check_copyright.py "$file" > $ERRFILETEMP || cat $ERRFILETEMP >> $ERRFILE
+    done
 
 rm -f $ERRFILETEMP
 

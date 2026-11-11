@@ -1,4 +1,8 @@
 #!/bin/sh
+# -------------------------------------------------------------------------------------------------------
+# Copyright (c) ChakraCore Project Contributors. All rights reserved.
+# Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+# -------------------------------------------------------------------------------------------------------
 # A/B driver for the host-broadcast-type repair
 # (doc/c2-s6-cross-agent-waitasync.md, follow-up to host-spawn-check).
 # Usage: sh tools/host-broadcast-type/drive.sh <ch-binary> [runs=20]

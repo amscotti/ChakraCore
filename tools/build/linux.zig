@@ -580,6 +580,17 @@ pub fn build(b: *std.Build) void {
         }),
     });
     selftest_top.dependOn(&b.addRunArtifact(gate_tests).step);
+    // Native-owner example tests (doc/memory-management.md section 5):
+    // mirrors build.zig so the sole checkAllAllocationFailures coverage
+    // is gated on Linux too (injected-allocator domain only).
+    const owned_bytes_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("doc/examples/owned-bytes.zig"),
+            .target = b.graph.host,
+            .optimize = .debug,
+        }),
+    });
+    selftest_top.dependOn(&b.addRunArtifact(owned_bytes_tests).step);
     const tools_test_top = b.step("check-build-tools", "Failure-path tests for the verification tools (no engine build required)");
     tools_test_top.dependOn(&tools_test.step);
 

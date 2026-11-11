@@ -239,6 +239,11 @@ a Recycler object or a complete JsRT bridge. The allocator state must outlive it
 mise exec -- zig test doc/examples/owned-bytes.zig
 ```
 
+The same four tests also run as a `check-selftest` leg in both build
+graphs (`build.zig`, `tools/build/linux.zig`), which every profile's
+`check` depends on — so the example cannot rot ungated. Gating does not
+widen its scope: it still proves the injected-allocator domain only.
+
 The tests cover success, copy independence, repeated create/destroy, foreign-status
 rejection before publication, and every
 deterministic allocation-failure point using

@@ -913,6 +913,18 @@ pub fn build(b: *std.Build) void {
     tools_test.addFileArg(b.path("tools/build/test_build_tools.py"));
     tools_test.stdio = .inherit;
     selftest_top.dependOn(&tools_test.step);
+    // Native-owner example tests (doc/memory-management.md section 5):
+    // hermetic, host-only, no engine build required. Wired here so the
+    // sole checkAllAllocationFailures coverage cannot rot ungated; it
+    // proves the injected-allocator domain only, not Recycler/C OOM.
+    const owned_bytes_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("doc/examples/owned-bytes.zig"),
+            .target = b.graph.host,
+            .optimize = .debug,
+        }),
+    });
+    selftest_top.dependOn(&b.addRunArtifact(owned_bytes_tests).step);
     const tools_test_top = b.step("check-build-tools", "Failure-path tests for the B1-B3 verification tools (no engine build required)");
     tools_test_top.dependOn(&tools_test.step);
 

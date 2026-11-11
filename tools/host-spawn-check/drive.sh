@@ -1,4 +1,8 @@
 #!/bin/sh
+# -------------------------------------------------------------------------------------------------------
+# Copyright (c) ChakraCore Project Contributors. All rights reserved.
+# Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+# -------------------------------------------------------------------------------------------------------
 # A/B driver for the host-spawn-check repair (doc/c2-s6-cross-agent-waitasync.md).
 # Usage: sh tools/host-spawn-check/drive.sh <ch-binary> [runs=10]
 #

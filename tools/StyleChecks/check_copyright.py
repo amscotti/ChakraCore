@@ -14,7 +14,10 @@ import re
 copyright_lines = [
     r'-------------------------------------------------------------------------------------------------------',
     r' Copyright \(C\) Microsoft( Corporation and contributors)?\. All rights reserved\.',
-    r' Copyright \(c\)( 2022)? ChakraCore Project Contributors\. All rights reserved\.',
+    # Legacy files carry the 2021 contributors year; accept any 4-digit
+    # year exactly like project_copyright_lines below. The Microsoft,
+    # contributors and license lines are still all required verbatim.
+    r' Copyright \(c\)( \d{4})? ChakraCore Project Contributors\. All rights reserved\.',
     r' Licensed under the MIT license\. See LICENSE\.txt file in the project root for full license information\.',
     r'.*' # the above should always be followed by at least one other line, so make sure that line is present
 ]

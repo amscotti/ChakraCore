@@ -1,7 +1,7 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
 // Copyright (c) ChakraCore Project Contributors. All rights reserved.
-// Licensed under the MIT license. See LICENSE.txt in the project root for full license information.
+// Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 // C2-S1: private static class fields (`static #x;`, `static #x = expr;`),
 // plus static-block access to private names

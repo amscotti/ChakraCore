@@ -1264,14 +1264,21 @@ namespace UnifiedRegex
         }
         this->vScanLimit = literalEnd;
         bool mayContainStrings = false;
+        const bool savedSawNested = this->vClassSawNested;
         this->vClassSawNested = false;
         // The speculative scan can leave the class and read trailing source
         // (up to a newline or '/'). Any deferred error it records from that
-        // tail is not a property of this literal; snapshot the three
-        // deferred slots and restore them if the scan aborts.
+        // tail is not a property of this literal; snapshot every deferred
+        // slot and restore them if the scan aborts. (Today the validate
+        // pass writes only the Sets slot directly and the Unicode/NoSets
+        // slots via ScanPropertyEscapeBodyPass0; snapshotting the fourth
+        // slot keeps the abort path complete if a helper starts using it.
+        // The validate pass never touches the pass-1 build buffers
+        // vStringBuffer/vScratch*/namedGroups, so no reset is owed there.)
         ParseError* const savedUnicodeError = this->deferredIfUnicodeError;
         ParseError* const savedSetsError = this->deferredIfUnicodeSetsError;
         ParseError* const savedNoSetsError = this->deferredIfUnicodeNoSetsError;
+        ParseError* const savedNotUnicodeError = this->deferredIfNotUnicodeError;
         bool aborted = false;
         const bool savedVScanSpeculative = this->vScanSpeculative;
         this->vScanSpeculative = true;
@@ -1289,6 +1296,8 @@ namespace UnifiedRegex
             this->deferredIfUnicodeError = savedUnicodeError;
             this->deferredIfUnicodeSetsError = savedSetsError;
             this->deferredIfUnicodeNoSetsError = savedNoSetsError;
+            this->deferredIfNotUnicodeError = savedNotUnicodeError;
+            this->vClassSawNested = savedSawNested;
         }
         catch (...)
         {
@@ -1297,6 +1306,7 @@ namespace UnifiedRegex
             // that catches and reuses it must not inherit a stale flag.
             this->vScanSpeculative = savedVScanSpeculative;
             this->vScanLimit = savedVScanLimit;
+            this->vClassSawNested = savedSawNested;
             throw;
         }
         this->vScanSpeculative = savedVScanSpeculative;

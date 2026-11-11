@@ -16,7 +16,7 @@ fi
 ERRFILE=check_eol.sh.err
 rm -f $ERRFILE
 
-git diff --name-only `git merge-base origin/master HEAD` HEAD | grep -v -E "(test/.*\\.js|\\.cmd|\\.baseline|\\.wasm|\\.wast|\\.vcxproj|\\.vcproj|\\.sln|\\.man|\\.png)" | xargs -I % ./tools/StyleChecks/check_file_eol.sh %
+git diff --name-only `git merge-base origin/master HEAD` HEAD | grep -v -E "(test/.*\\.js|\\.cmd|\\.baseline|\\.wasm|\\.wast|\\.vcxproj|\\.vcproj|\\.sln|\\.man|\\.png)" | while IFS= read -r file; do ./tools/StyleChecks/check_file_eol.sh "$file"; done
 
 if [ -e $ERRFILE ]; then # if error file exists then there were errors
     >&2 echo "--------------" # leading >&2 means echo to stderr

@@ -140,6 +140,18 @@ goes through swappable thunks on `EntryPointInfo`.
   `ParseType_Upfront` / `ParseType_Deferred`. Deferred functions parse on
   demand; `BackgroundParseItem` is a `JsUtil::Job`
   (`BackgroundParser.h:10-21`) so deferred parses run in parallel.
+- **Parser is coupled to Runtime at the TU level — do not describe it as
+  Runtime-free.** 26 of 27 Parser translation units include `ParserPch.h`
+  (only `HashFunc.cpp` does not),
+  whose "Runtime includes" block (`ParserPch.h:21-29`) pulls in
+  `Runtime.h`, `ByteCode/Symbol.h|Scope.h|FuncInfo.h|ScopeInfo.h`,
+  `Library/JavascriptFunction.h` and
+  `Language/JavascriptStackWalker.h`. The narrower boundary that does
+  hold is per-file: e.g. `RegexParser.cpp` receives the runtime only as a
+  `ScriptContext*` parameter and includes no `Runtime/Library` concrete
+  type (`JavascriptLibrary`, `ArrayBuffer`, …) directly. A grep of one
+  `.cpp` therefore understates coupling; judge Parser/RUNTIME claims
+  against `ParserPch.h`, not a single file.
 
 ### 3.2 Bytecode generation (and serialization)
 
