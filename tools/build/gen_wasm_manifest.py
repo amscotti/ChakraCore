@@ -410,8 +410,10 @@ def check_overrides(entries):
     if len(deferred) != 4:
         raise AssertionError(f"deferred: expected 4, got {len(deferred)}")
     pending = [e for e in entries if e["phase"] == "P2-pending"]
-    if len(pending) != 28:
-        raise AssertionError(f"P2-pending: expected 28, got {len(pending)}")
+    # 28 at W0 + 1 W2 arm64_w2.js guardrail probe (exclude_x64: ARM64-only
+    # until W3; retagged when the probe converges with x64 behavior).
+    if len(pending) != 29:
+        raise AssertionError(f"P2-pending: expected 29, got {len(pending)}")
     float_entries = [e for e in entries if e["suite"] == "AsmJSFloat"]
     if len(float_entries) != 14 or any(
             e["phase"] != "P2" for e in float_entries):

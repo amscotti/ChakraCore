@@ -1,6 +1,9 @@
 # ARM64 asm.js/WASM ABI — design spec (W1, D4)
 
-Status: design, no code yet. Owner: unassigned. Base commit: `97ee0be`.
+Status: design; W0 gate plumbing and W2 guardrails landed, no ABI code
+yet. Owner: unassigned. Base commit: `498d64abf`.
+Second-reader review 2026-11-11: approve-with-corrections (C1–C8
+applied same day).
 Plan: [wasm-arm64-plan.md](wasm-arm64-plan.md) W1 + D4.
 This document DECIDES the ARM64 asm.js/WASM calling convention. W3/W4 must
 implement against it. Deviations require a recorded amendment here, not a
@@ -58,7 +61,8 @@ Marking: every statement below is tagged `[x64 fact]`, `[decision]`, or
 - `[x64 fact]` `AsmJsVarType::Which` is the variable/argument subset:
   `Int, Int64, Double, Float` (+ SIMD) — `lib/Runtime/Language/AsmJsTypes.h:244-262`.
 - `[x64 fact]` The wasm value-type universe `WasmTypes::WasmType` is
-  `Void=0, I32=1, I64=2, F32=3, F64=4, V128=5`, with `Ptr, Any` as extra
+  `Void=0, I32=1, I64=2, F32=3, F64=4, V128=5` (`V128` only under
+  `#ifdef ENABLE_WASM_SIMD`), with `Ptr, Any` as extra
   non-local sentinels — `lib/WasmReader/WasmParseTree.h:36-60`.
 - `[x64 fact]` `WasmSignature` stores params (`m_params`), results
   (`m_results`), counts (`m_paramsCount`, `m_resultsCount`), a computed
@@ -166,7 +170,7 @@ Marking: every statement below is tagged `[x64 fact]`, `[decision]`, or
   `GetRetVal<T>()` specializations — `lib/Runtime/Language/InterpreterStackFrame.h:94-110`
   (struct at `:94-109`).
 - `[x64 fact]` The x64 native thunk `InterpreterAsmThunk` (in
-  `amd64_Thunks.S`) pushes `rbp`, saves `rdi/rsi` (the AAPCS64/sysv arg
+  `amd64_Thunks.S`) pushes `rbp`, saves `rdi/rsi` (the x64 SysV arg
   registers), calls `GetAsmJsInterpreterEntryPoint`, then `call rax` and
   returns — `lib/Runtime/Language/amd64/amd64_Thunks.S:171-200` (entry at
   `:179`, dispatch at `:191`, indirect call at `:196`).
@@ -269,7 +273,7 @@ Marking: every statement below is tagged `[x64 fact]`, `[decision]`, or
   `LowerWasmArrayBoundsCheck` at `lib/Backend/amd64/LowererMDArch.cpp:1142-1143`.
   The generic `Lower.cpp` path uses `GenerateRuntimeError(...
   WASMERR_ArrayIndexOutOfRange, HelperOp_WebAssemblyRuntimeError)` —
-  `lib/Backend/Lower.cpp:9722` (single line at `:9722`). Divide-by-zero
+  `lib/Backend/Lower.cpp:9723`. Divide-by-zero
   uses `GenerateThrow(WASMERR_DivideByZero)` — `lib/Backend/Lower.cpp:27454`
   and `:27462`.
 - `[x64 fact]` Non-trapping float→int trunc: the saturating variant clamps
@@ -306,8 +310,8 @@ Marking: every statement below is tagged `[x64 fact]`, `[decision]`, or
   — `lib/Runtime/Base/FunctionBody.h:1587-1590`
   (accessor at `:1587`). The per-function asm.js flag is
   `GetIsAsmJsFunction()` / `m_isAsmJsFunction` —
-  `lib/Runtime/Base/FunctionBody.h:2461-2469` and `:1826` (field at
-  `:1826`, accessor at `:2467-2469`).
+  `lib/Runtime/Base/FunctionBody.h:2462-2471` and `:1826` (field at
+  `:1826`, setter at `:2462-2465`, accessor at `:2468-2471`).
 - `[x64 fact]` `InterpreterFrame` vs native distinction for
   `GetCurrentCodeAddr` / `GetArgv`: native frames read argv directly from
   the x64 stack frame (`frame+2`), interpreter frames via the
@@ -533,10 +537,11 @@ Marking: every statement below is tagged `[x64 fact]`, `[decision]`, or
   interpreter recursion limits depend on it; dropping it would change
   overflow behavior (and therefore `RangeError` timing) vs the oracle.
 - `[decision]` **Stack-probe policy (JIT wasm bodies): REUSE the existing
-  ARM64 `GenerateStackAllocation`** — direct `sub SP` for small stacks
-  (`IsSmallStack(probeSize)`), `_chkstk` helper call
-  (`HelperCRT_chkstk`, size in `SP_ALLOC_SCRATCH_REG`) for
-  `size > PAGESIZE - MachStackAlignment`, exactly as the JS JIT does on
+  ARM64 `GenerateStackAllocation(instr, allocSize, probeSize)`** —
+  direct `sub SP` when `IsSmallStack(probeSize)`
+  (`probeSize < PAGESIZE - MachStackAlignment`), `_chkstk` helper call
+  (`HelperCRT_chkstk`, size in `SP_ALLOC_SCRATCH_REG`) otherwise,
+  exactly as the JS JIT does on
   ARM64. Justification: the ARM64 backend already implements this
   (`lib/Backend/arm64/LowerMD.cpp:1064-1114`, small arm at `:1073-1082`,
   chkstk arm at `:1086-1113`, helper at `:1098`); duplicating it for wasm
@@ -559,13 +564,15 @@ Marking: every statement below is tagged `[x64 fact]`, `[decision]`, or
 - `[decision]` **Callee writes multi-value results to a caller-owned
   return area.** For `GetResultCount() <= 1` the callee returns in
   `W0`/`S0`/`D0` as today (§3). For `GetResultCount() >= 2` the caller
-  passes a hidden `x8` (result-area pointer) as the *first* internal
-  register, followed by the regular AAPCS64 arg registers shifted by one
-  slot (`x0` … `x6`, `d0` … `d6`). The callee stores result `k` at
+  passes a hidden `x8` (result-area pointer) per the standard
+  AAPCS64 indirect-result rule: `x8` is separate from the argument
+  registers, so regular args keep the full window (`x0` … `x7`,
+  `d0` … `d7`, no shift). The callee stores result `k` at
   `x8 + 8*k` in declared signature order (0 first). Justification:
   `x8` is the AAPCS64 indirect-result register (AAPCS64 §5.4.2); using
-  the host convention beats inventing a new slot, and the area is exactly
-  what the caller's `WasmSignature` describes (`m_results[k]`).
+  the host convention unchanged beats inventing a new slot, and the
+  area is exactly what the caller's `WasmSignature` describes
+  (`m_results[k]`).
 - `[decision]` **Ownership:** the caller allocates the result area on its
   own stack frame (in the §6 locals region, `Align(count*8, 16)` bytes,
   zero-initialized before the call) and keeps it live until the results
@@ -736,18 +743,24 @@ explicit `GenerateThrow` / `GenerateRuntimeError`).
 
 ## 11. Open questions
 
-1. `[open]` **Q1 (W0/W1 boundary): Where is the ARM64
-   `AsmJsCallStackLayout` defined?** x64 uses the shared header struct
-   (§1.1). ARM64 needs the same `{functionObject, args[]}` shape for the
-   interpreter thunk, but the internal JIT convention (§3) does not carry
-   it. Decide whether ARM64 reuses the shared struct or gets a B4-gated
-   arch-specific definition. (P1 decision point.)
+1. `[open]` **Q1 (W0/W1 boundary): reuse the shared
+   `AsmJsCallStackLayout` as-is, or add a gated ARM64 definition?**
+   The struct already exists arch-neutrally in the shared header
+   (`JavascriptStackWalker.h:37-41`, no arch gate; ARM64 walker
+   includes it at `:19-21`). ARM64 needs the same
+   `{functionObject, args[]}` shape for the interpreter thunk; the
+   internal JIT convention (§3) does not carry it. (P1 decision point.)
 2. `[open]` **Q2 (W4): Internal-call lowering entry point.** Does
    `LowerCallArgs`/`HomeJsCallArgs` get reused, or is a new
-   `LowerAsmJsCallArgs` needed (§3)? Affects `arm64/LowerMD.cpp` only,
-   not this ABI.
+   `LowerAsmJsCallArgs` needed (§3)? Note ARM64 `HomeJsCallArgs`
+   today homes only *int* arg registers (`LowerMD.cpp:841-854`,
+   `__APPLE__`-only); internal-convention float args (`d0-d7`) have
+   no homing path and must be covered by whichever answer W4 picks.
+   Affects `arm64/LowerMD.cpp` only, not this ABI.
 3. `[open]` **Q3 (W4): `FMOV S ↔ W` vs `FCVT` encoding choice for f32
-   bitcasts** (§4). Record the NaN-payload behavior once chosen.
+   bitcasts** (§4). Both encodings are already implemented
+   (`EncoderMD.cpp:1210` FCVT, `:1279` FMOV); only the NaN-payload
+   choice is open. Record it once chosen.
 4. `[open]` **Q4 (W3/W7): `AsmJsRetType` multi-value arm vs
    `WasmSignature`-keyed area path** (§7). This doc recommends the
    signature-keyed path; W3/W7 confirm before coding.
@@ -755,9 +768,15 @@ explicit `GenerateThrow` / `GenerateRuntimeError`).
    walker (§9). Requirement is fixed; encoding is open.
 6. `[open]` **Q6 (W0): `WasmI64` debug-path re-gating** (§10). Gate
    mechanics are W0/D2, not W1.
-7. `[open]` **Q7 (W4/W5): OSR / bailout for wasm tier.** Does the x64
-   tier have wasm bailouts, and should ARM64 mirror them? Out of scope for
-   the ABI; recorded so W5 does not assume an answer.
+7. `[decision]` **Q7 (W4/W5): no wasm bailouts — mirror x64.**
+   Fact (second-reader verified): the x64 tier has none —
+   `ConvertToBailOut` is an AsmJs-never path
+   (`SwitchIRBuilder.cpp:96-99`), no `BailOutInstr` is created under
+   `IsAsmJsMode` in amd64 lowering, and tier-up is one-shot via
+   `JitFunctionIfReady` gated on
+   `GetEntryPoint()==AsmJsExternalEntryPoint`
+   (`InterpreterStackFrame.cpp:2874-2876`). ARM64 mirrors: no OSR,
+   no bailouts; W5 implements one-shot tier-up only.
 
 
 

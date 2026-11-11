@@ -249,7 +249,7 @@ selection mechanism:
   arch-dependent; each gets an include/exclude decision with reason
   in the manifest). W0 records the exact resulting P1 entry count
   in this plan — recorded 2026-11-11 from the generated manifest:
-  **388 P1 entries of 472** (WasmSpec 219, wasm 46, AsmJs 121,
+  **388 P1 entries of 473** (WasmSpec 219, wasm 46, AsmJs 121,
   ASMJSParser 2; remainder: P3 29, P2-pending 28, P2 14, excluded 9,
   deferred 4). Candidate arithmetic from the 2026-11-11 swarm
   (WasmSpec 214 incl. mathEx-featureless pin, before fast-array-

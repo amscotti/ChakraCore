@@ -613,7 +613,7 @@ namespace Js
                 }
             }
         }
-#elif _M_X64
+#elif TARGET_64
         else
         {
             argSize = ArgSlotMath::Mul(GetArgCount(), (uint16)MachPtr);

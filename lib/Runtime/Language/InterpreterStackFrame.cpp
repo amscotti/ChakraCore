@@ -1759,8 +1759,10 @@ skipThunk:
 #elif !defined(_M_AMD64)
     Var InterpreterStackFrame::AsmJsDelayDynamicInterpreterThunk(RecyclableObject* function, CallInfo callInfo, ...)
     {
-        // Asm.js only supported on x64 and x86
-        AssertOrFailFast(UNREACHED);
+        // ARM64 asm.js/wasm execution is not available until W3
+        // (doc/wasm-arm64-plan.md): fail with a controlled error, never
+        // a fail-fast. Replaced by the ARM64 thunk in W3.
+        JavascriptError::ThrowWebAssemblyRuntimeError(function->GetScriptContext(), WASMERR_ExecutionNotSupported);
         return nullptr;
     }
 #endif

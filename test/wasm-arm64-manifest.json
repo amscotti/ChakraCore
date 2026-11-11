@@ -3092,6 +3092,17 @@
     },
     {
       "features": [
+        "mvp"
+      ],
+      "phase": "P2-pending",
+      "runnerTags": [
+        "exclude_x64"
+      ],
+      "suite": "wasm",
+      "test-id": "wasm[67]"
+    },
+    {
+      "features": [
         "mvp",
         "simd"
       ],
@@ -4795,11 +4806,11 @@
         "rlexe": "test/WasmSpec.MultiValue/rlexe.xml"
       },
       "wasm": {
-        "entries": 67,
+        "entries": 68,
         "p1": 46,
         "phases": {
           "P1": 46,
-          "P2-pending": 5,
+          "P2-pending": 6,
           "P3": 3,
           "deferred": 4,
           "excluded": 9
@@ -4816,6 +4827,6 @@
       }
     },
     "test-id": "<suite>[<0-based rlexe entry ordinal>]",
-    "total": 472
+    "total": 473
   }
 }

@@ -422,6 +422,7 @@ RT_ERROR_MSG(WASMERR_InvalidMaximumSize, 7029, "Imported %s maximum size (%u) is
 RT_ERROR_MSG(WASMERR_InvalidMemoryType, 7030, "Imported %s type is %s, expected %s", "Invalid memory type", kjstWebAssemblyLinkError, 0)
 RT_ERROR_MSG(WASMERR_UnalignedAtomicAccess, 7031, "", "Atomic memory access is unaligned", kjstWebAssemblyRuntimeError, 0)
 RT_ERROR_MSG(WASMERR_SharedNoMaximum, 7032, "", "Shared memory must have a maximum size", kjstTypeError, 0)
+RT_ERROR_MSG(WASMERR_ExecutionNotSupported, 7033, "", "WebAssembly execution is not supported on this platform", kjstWebAssemblyRuntimeError, 0)
 
 // Wabt Errors
 RT_ERROR_MSG(WABTERR_WabtError, 7200, "%s", "Wabt Error.", kjstTypeError, 0)

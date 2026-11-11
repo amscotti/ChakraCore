@@ -557,11 +557,11 @@ namespace Js
         return returnValue;
     }
 #else
-    // W0 ARM64 (doc/wasm-arm64-plan.md): no x86/x64 entry impl yet.
-    // Controlled fail-fast until W1/W3 define the ABI entry.
+    // ARM64 (doc/wasm-arm64-plan.md): no JIT entry until W4. Fail with a
+    // controlled error, never a fail-fast. Replaced by the ABI entry in W3/W4.
     Var AsmJsExternalEntryPoint(RecyclableObject* entryObject, CallInfo callInfo, ...)
     {
-        AssertOrFailFast(UNREACHED);
+        JavascriptError::ThrowWebAssemblyRuntimeError(entryObject->GetScriptContext(), WASMERR_ExecutionNotSupported);
         return nullptr;
     }
 #endif

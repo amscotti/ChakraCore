@@ -465,4 +465,17 @@
     <tags>exclude_win7</tags>
   </default>
 </test>
+<!-- W2 probe (doc/wasm-arm64-plan.md): validate/compile/instantiate,
+     memory/table/global readback, controlled export-call error.
+     ARM64-only until W3 lands the interpreter (on x64 the exported
+     function executes instead of throwing), hence exclude_x64.
+     W3 updates this probe: the call then returns a real value. -->
+<test>
+  <default>
+    <files>arm64_w2.js</files>
+    <baseline>arm64_w2.baseline</baseline>
+    <compile-flags>-wasm</compile-flags>
+    <tags>exclude_x64</tags>
+  </default>
+</test>
 </regress-exe>

@@ -1,0 +1,24 @@
+validate=true
+exports=f:function,mem:memory,t:table,g:global
+imports=env.inc:function
+instance exports=f,mem,t,g
+g=7
+mem is Memory=true
+mem bytes=65536
+data=65,66,67,68
+mem grow=1
+mem bytes after grow=131072
+t is Table=true
+t length=1
+t get0=null
+t get0===f=true
+t grow=1
+t length after grow=2
+api mem bytes=65536
+api mem grow=1
+api mem bytes after grow=131072
+api t length=1
+api t get0===f=true
+api t grow=1
+api t length after grow=2
+call threw name=RuntimeError message=WebAssembly execution is not supported on this platform isRuntimeError=true
