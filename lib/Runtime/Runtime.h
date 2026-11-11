@@ -281,8 +281,10 @@ namespace Js
     class AsmJsTypedArrayFunction;
     class AsmJsMathFunction;
     class AsmJsMathConst;
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
     Var AsmJsExternalEntryPoint(Js::RecyclableObject* entryObject, Js::CallInfo callInfo, ...);
+#endif
+#ifdef ASMJS_PLAT
     class AsmJsCodeGenerator;
     class AsmJsEncoder;
 #endif

@@ -263,6 +263,7 @@ fn gateIcu(b: *std.Build) []const u8 {
 const Ctx = struct {
     b: *std.Build,
     profile: Profile,
+    wasm: bool,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.Optimize,
     sdk_path: []const u8,
@@ -334,6 +335,9 @@ fn appendTuFlags(ctx: *const Ctx, run: *std.Build.Step.Run, g: *const tables.Gro
         run.addArg(d);
     }
     if (g.target_define) |d| run.addArg(d);
+    // W0 -Dwasm (doc/wasm-arm64-plan.md): only on jit+wasm, so the
+    // option-off command lines are byte-identical to today.
+    if (ctx.wasm) run.addArg("-DWASM_ARM64_PORT=1");
     // CMake sets this on the Language and Library targets when BuildJIT
     // is on (lib/Runtime/Language/CMakeLists.txt, Library/CMakeLists.txt).
     // arm64_Thunks.S emits the dynamic-interpreter entry points only
@@ -562,9 +566,19 @@ pub fn build(b: *std.Build) void {
     const dbg_header = jstoc.addOutputFileArg("DbgController.js.h");
     const gen_dir = dbg_header.dirname();
 
+    // W0 ARM64 WebAssembly option (doc/wasm-arm64-plan.md W0 task 2):
+    // -Dwasm=true, default off. Decided here: option-on under a
+    // DISABLE_JIT profile fails loudly (test/debug-static/release-shared
+    // all define DISABLE_JIT, where ASMJS_PLAT/ENABLE_ASMJS are off by
+    // construction). No silent gate-off.
+    const wasm = b.option(bool, "wasm", "ARM64 WebAssembly/asm.js port (jit profile only, default off)") orelse false;
+    if (wasm and profile != .jit)
+        fail("-Dwasm=true requires -Dprofile=jit (DISABLE_JIT profiles cannot enable ENABLE_WASM/ENABLE_ASMJS on ARM64)", .{});
+
     const ctx = Ctx{
         .b = b,
         .profile = profile,
+        .wasm = wasm,
         .target = target,
         .optimize = optimize,
         .sdk_path = sdk_path,
@@ -679,10 +693,27 @@ pub fn build(b: *std.Build) void {
         }
         std.debug.assert(backend_n == backend_expected);
     }
+    // W0 wasm extras (jit+wasm only): WasmReader (11) + WasmLibrary (7)
+    // join the static graph after the backend, numbered contiguously.
+    // Option-off adds nothing, so expect_total is the historical total.
+    var wasm_expected: u32 = 0;
+    if (ctx.wasm) {
+        for ([_]*const tables.Group{ &tables.wasmreader_group, &tables.wasm_library_group }) |g| {
+            wasm_expected += @intCast(g.cxx.len + g.c.len + g.asm_files.len);
+        }
+        std.debug.assert(wasm_expected == 18);
+        for ([_]*const tables.Group{ &tables.wasmreader_group, &tables.wasm_library_group }) |g| {
+            for (g.cxx) |src| {
+                static_objs.append(arena, compileTu(&ctx, g, src, .cxx, n)) catch @panic("OOM");
+                n += 1;
+            }
+        }
+    }
     // Static: 540 - 3 dylib TUs + TestHooks in ch = 538.
     // jit adds the 89 backend TUs on top of the shared 540 => 629.
+    // jit+wasm adds 18 more => 647.
     const expect_base: u32 = if (is_static) 538 else 540;
-    const expect_total: u32 = expect_base + backend_expected;
+    const expect_total: u32 = expect_base + backend_expected + wasm_expected;
     std.debug.assert(n == expect_total);
     const expect_singular: usize = if (is_static) 0 else 3;
     std.debug.assert(singular_libs.items.len == expect_singular);

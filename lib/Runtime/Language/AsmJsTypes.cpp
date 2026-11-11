@@ -23,7 +23,7 @@
 
 #include "RuntimeLanguagePch.h"
 
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
 #include "ByteCode/ByteCodeWriter.h"
 #include "ByteCode/AsmJsByteCodeWriter.h"
 #include "Language/AsmJsByteCodeGenerator.h"

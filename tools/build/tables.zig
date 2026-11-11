@@ -1204,6 +1204,52 @@ pub const backend_group = Group{
     },
 };
 
+// W0 ARM64 WebAssembly transplant (doc/wasm-arm64-plan.md W0 task 1).
+// Transcribed from the Linux inventory (tools/build/tables_linux.zig
+// wasmreader_group + the 7 Library units at :886-892). Compiled only
+// by -Dwasm=true -Dprofile=jit (build.zig); NOT a member of
+// object_groups, so the option-off graph is untouched. WabtInterface.cpp
+// stays out with WABT (no WABT group).
+pub const wasmreader_group = Group{
+    .cxx = &.{
+        "lib/WasmReader/WasmParseTree.cpp",
+        "lib/WasmReader/WasmBinaryReader.cpp",
+        "lib/WasmReader/WasmByteCodeGenerator.cpp",
+        "lib/WasmReader/WasmCustomReader.cpp",
+        "lib/WasmReader/WasmDataSegment.cpp",
+        "lib/WasmReader/WasmElementSegment.cpp",
+        "lib/WasmReader/WasmFunctionInfo.cpp",
+        "lib/WasmReader/WasmGlobal.cpp",
+        "lib/WasmReader/WasmReaderPch.cpp",
+        "lib/WasmReader/WasmSection.cpp",
+        "lib/WasmReader/WasmSignature.cpp",
+    },
+    .extra_includes = &.{
+        "lib/WasmReader",
+        "lib/WasmReader/../JITIDL",
+        "lib/WasmReader/../Backend",
+        "lib/WasmReader/../Runtime",
+        "lib/WasmReader/../Runtime/ByteCode",
+        "lib/WasmReader/../Parser",
+    },
+};
+
+// W0 ARM64 WebAssembly JS-API units (see wasmreader_group note).
+// Includes mirror library_group's tail (runtime_includes_base ++
+// lib/Runtime/Library) so the 7 TUs see the same headers.
+pub const wasm_library_group = Group{
+    .cxx = &.{
+        "lib/Runtime/Library/WasmLibrary.cpp",
+        "lib/Runtime/Library/WebAssembly.cpp",
+        "lib/Runtime/Library/WebAssemblyEnvironment.cpp",
+        "lib/Runtime/Library/WebAssemblyInstance.cpp",
+        "lib/Runtime/Library/WebAssemblyMemory.cpp",
+        "lib/Runtime/Library/WebAssemblyModule.cpp",
+        "lib/Runtime/Library/WebAssemblyTable.cpp",
+    },
+    .extra_includes = &(runtime_includes_base ++ [_][]const u8{"lib/Runtime/Library"}),
+};
+
 // The 20 OBJECT groups in ChakraCoreStatic link order
 // (lib/CMakeLists.txt:21-47).
 pub const object_groups: []const *const Group = &.{

@@ -722,8 +722,22 @@
 #define ASMJS_PLAT
 #endif
 
-#if defined(ASMJS_PLAT)
+// W0 D2 gate matrix (doc/wasm-arm64-plan.md): ENABLE_ASMJS is the
+// arch-neutral asm.js surface. On x86/x64 it follows ASMJS_PLAT
+// (second disjunct always false there, D6: x86/x64 state unchanged);
+// on ARM64 it turns on with the W0 build option (-Dwasm in build.zig,
+// WASM_ARM64_PORT define).
+#if defined(ASMJS_PLAT) || (defined(_M_ARM64) && defined(WASM_ARM64_PORT))
+#define ENABLE_ASMJS
+#endif
+
+// ENABLE_WASM: on everywhere ASMJS_PLAT is, plus on ARM64 behind the
+// W0 build option. SIMD/THREADS stay x86/x64-only until W8/W9.
+#if defined(ASMJS_PLAT) || (defined(_M_ARM64) && defined(WASM_ARM64_PORT))
 #define ENABLE_WASM
+#endif
+
+#if defined(ASMJS_PLAT)
 #define ENABLE_WASM_THREADS
 #define ENABLE_WASM_SIMD
 

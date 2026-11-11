@@ -17,6 +17,7 @@ import traceback
 import argparse
 import xml.etree.ElementTree as ET
 import re
+import tempfile
 import time
 
 # handle command line args
@@ -111,7 +112,11 @@ elif args.arm64:
 
 if arch == None:
     arch = os.environ.get('_BuildArch', 'x86')
-if sys.platform != 'win32':
+# D8.1: honor an explicit --arm64 on darwin (real arm64 arch/tagging there)
+# before the xplat force-to-x64. Windows and Linux-x64 resolution unchanged;
+# invocations that do not pass --arm64 unchanged. 32-bit arm still resolves
+# to x64 off-Windows, so it stays excluded.
+if sys.platform != 'win32' and not (sys.platform == 'darwin' and args.arm64):
     arch = 'x64'    # xplat: hard code arch == x64
 arch_alias = 'amd64' if arch == 'x64' else None
 
@@ -184,9 +189,100 @@ if sys.platform != 'win32':
 else:
     not_tags.add('exclude_windows')
 
-# exclude tests that depend on features not supported on a platform
-if arch == 'arm' or arch == 'arm64':
+# exclude tests that depend on features not supported on a platform.
+# 32-bit arm stays excluded here; darwin/arm64 is decided by the capability
+# probe below, not by arch name (D8.3: the probe replaces arch-name guessing
+# as phases land; tags stay the coarse filter). Non-darwin arm64 (Windows)
+# keeps the name-based exclusion, as the probe is darwin-only.
+if arch == 'arm' or (arch == 'arm64' and sys.platform != 'darwin'):
     not_tags.add('require_asmjs')
+
+# D8.3 capability probe (darwin/arm64 runs only). Each probe runs the
+# resolved binary once on a tiny generated script with a short timeout; on
+# failure, hang, nonzero exit, or unparseable output the matching require_*
+# tag is added to not_tags and the suites are excluded with a printed reason
+# (excluded, never a suite failure). Non-arm64 runs never probe and never
+# exclude. 32-bit arm never reaches here (it resolves to x64, see above).
+CAPABILITY_PROBE_TIMEOUT = 10  # seconds; probes are one-liners
+
+_WASM_PROBE_SCRIPT = (
+    'print(typeof WebAssembly);\n'
+    'var probeBuf = new ArrayBuffer(8);\n'
+    'var probeBytes = new Uint8Array(probeBuf);\n'
+    'probeBytes[0] = 0; probeBytes[1] = 97; probeBytes[2] = 115;\n'
+    'probeBytes[3] = 109; probeBytes[4] = 1; probeBytes[5] = 0;\n'
+    'probeBytes[6] = 0; probeBytes[7] = 0;\n'
+    'print(WebAssembly.validate(probeBuf));\n'
+)
+
+_ASMJS_PROBE_SCRIPT = (
+    'function ProbeModule(stdlib) {\n'
+    '    "use asm";\n'
+    '    var fround = stdlib.Math.fround;\n'
+    '    function add(a, b) { a = a|0; b = b|0; return (a+b)|0; }\n'
+    '    function addf(a, b) { a = fround(a); b = fround(b);\n'
+    '        return fround(a+b); }\n'
+    '    return { add: add, addf: addf };\n'
+    '}\n'
+    'var probeModule = ProbeModule({Math: Math});\n'
+    'print(probeModule.add(2, 3));\n'
+)
+
+
+def _run_capability_probe(tag, name, script, extra_flags, expect):
+    """Run one capability probe once against `binary`; if unsupported, add
+    `tag` to not_tags and print the reason. Returns True if supported."""
+    probe_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+                mode='w', suffix='.js', delete=False) as probe_file:
+            probe_file.write(script)
+            probe_path = probe_file.name
+        try:
+            proc = SP.run([binary] + extra_flags + [probe_path],
+                          stdout=SP.PIPE, stderr=SP.STDOUT,
+                          timeout=CAPABILITY_PROBE_TIMEOUT)
+        except SP.TimeoutExpired:
+            print('[capability probe] {} unsupported by {}: probe '
+                  'timed out after {}s; excluding {} tests'.format(
+                      name, binary, CAPABILITY_PROBE_TIMEOUT, tag))
+            not_tags.add(tag)
+            return False
+        except OSError as e:
+            print('[capability probe] {} unsupported by {}: probe '
+                  'failed to run ({}); excluding {} tests'.format(
+                      name, binary, e, tag))
+            not_tags.add(tag)
+            return False
+        output = proc.stdout.replace(b'\r\n', b'\n').decode(
+            'utf-8', 'replace')
+        lines = [line.strip() for line in output.split('\n')]
+        if proc.returncode != 0 or not expect(lines):
+            print('[capability probe] {} unsupported by {}: probe exit '
+                  '{}, output: {}; excluding {} tests'.format(
+                      name, binary, proc.returncode,
+                      ' | '.join(lines)[:200] or '<empty>', tag))
+            not_tags.add(tag)
+            return False
+        print('[capability probe] {} supported by {}'.format(name, binary))
+        return True
+    finally:
+        if probe_path is not None and os.path.exists(probe_path):
+            os.unlink(probe_path)
+
+
+# Guarded by __name__: spawned pool workers re-execute the module body
+# (as '__mp_main__'), so an unguarded probe would run once per worker.
+# The parent run still precedes variant construction in main().
+if __name__ == '__main__' and sys.platform == 'darwin' and arch == 'arm64':
+    _run_capability_probe(
+        'require_wasm', 'WebAssembly', _WASM_PROBE_SCRIPT,
+        [], lambda lines: 'object' in lines and 'true' in lines)
+    _run_capability_probe(
+        'require_asmjs', 'asm.js', _ASMJS_PROBE_SCRIPT,
+        ['-BaselineMode', '-testtrace:asmjs'],
+        lambda lines: any('Successfully compiled asm.js code' in line
+                          for line in lines) and '5' in lines)
 
 # exclude tests known to fail under certain sanitizers
 if args.sanitize != None:
@@ -689,9 +785,16 @@ class TestLoader(object):
                 else:
                     test[c.tag] = c.text
 
-            condition = testXml.find('condition')
-            if condition != None:
-                test_override(condition, 'target', arch_alias, test)
+            conditions = testXml.findall('condition')
+            if conditions:
+                # D8.2: compare against arch itself as well as the amd64
+                # alias so <target>arm64</target> fires on arm64 runs, while
+                # <target>amd64</target> stays x64-only. Every condition is
+                # considered in document order so a later match wins (the
+                # typedarray template carries one condition per arch).
+                for condition in conditions:
+                    test_override(condition, 'target', arch_alias, test)
+                    test_override(condition, 'target', arch, test)
 
             return test
 

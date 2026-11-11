@@ -57,7 +57,7 @@ namespace Js
     class DebuggerScope;
     class FunctionEntryPointInfo;
 
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
     class AsmJsFunctionInfo;
     class AmsJsModuleInfo;
 #endif
@@ -542,11 +542,6 @@ namespace Js
         void SetTJCodeSize(ptrdiff_t size);
         void SetTJNativeAddress(Js::JavascriptMethod address, void * validationCookie);
 
-        void SetIsAsmJSFunction(bool value)
-        {
-            this->isAsmJsFunction = value;
-        }
-
         void SetTJCodeGenDone()
         {
             Assert(isAsmJsFunction);
@@ -556,6 +551,12 @@ namespace Js
 
         void SetIsTJMode(bool value);
         bool GetIsTJMode() const;
+#endif
+#ifdef ENABLE_ASMJS
+        void SetIsAsmJSFunction(bool value)
+        {
+            this->isAsmJsFunction = value;
+        }
 #endif
 
         bool GetIsAsmJSFunction()const
@@ -1527,7 +1528,7 @@ namespace Js
 
         DEFINE_VTABLE_CTOR_NO_REGISTER(ParseableFunctionInfo, FunctionProxy);
         FunctionBody* Parse(ScriptFunction ** functionRef = nullptr, bool isByteCodeDeserialization = false);
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
         FunctionBody* ParseAsmJs(Parser * p, _Out_ CompileScriptException * se, _Out_ ParseNodeProg ** ptree);
 #endif
 
@@ -2450,7 +2451,7 @@ namespace Js
             Assert(this->GetLoopHeaderArray() != nullptr);
             return this->GetLoopHeaderArray();
         }
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
         void SetIsAsmJsFullJitScheduled(bool val){ m_isAsmJsScheduledForFullJIT = val; }
         bool GetIsAsmJsFullJitScheduled(){ return m_isAsmJsScheduledForFullJIT; }
         uint32 GetAsmJSTotalLoopCount() const
@@ -3202,7 +3203,7 @@ namespace Js
         void SetLiteralRegexs(UnifiedRegex::RegexPattern ** literalRegexes) { this->SetAuxPtr<AuxPointerType::LiteralRegexes>(literalRegexes); }
         UnifiedRegex::RegexPattern *GetLiteralRegex(const uint index);
         UnifiedRegex::RegexPattern *GetLiteralRegexWithLock(const uint index);
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
         AsmJsFunctionInfo* GetAsmJsFunctionInfo() const { return this->GetAuxPtr<AuxPointerType::AsmJsFunctionInfo>(); }
         AsmJsFunctionInfo* GetAsmJsFunctionInfoWithLock()const { return this->GetAuxPtrWithLock<AuxPointerType::AsmJsFunctionInfo>(); }
         AsmJsFunctionInfo* AllocateAsmJsFunctionInfo();

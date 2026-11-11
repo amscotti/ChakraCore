@@ -24,7 +24,7 @@
 #pragma once
 #include "Language/WAsmjsUtils.h"
 
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
 namespace Wasm
 {
     struct WasmReaderInfo;

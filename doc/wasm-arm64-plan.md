@@ -13,15 +13,14 @@ is listed there as P2, "an ARM64 asm.js/WASM port"),
 allocation, GC tracing/barriers, stack walking, or host boundaries),
 [build-contract-mac.md](build-contract-mac.md) (Mac build graph).
 
-Prerequisite lane (not in HEAD `61b6af3f6` at plan time): the ARM64 JIT
-software write-barrier fix (`lib/Backend/Lower.cpp`,
-`lib/Backend/arm64/LowerMD.{h,cpp}`, `test/es7/jit-write-barrier.*`)
-and the bench harness/receipt (`tools/bench/`,
-[perf-baseline.md](perf-baseline.md)) are pending commit in the same
-working tree. This plan depends on both (W6.3 reuses the barrier path;
-success criterion 3 re-records the receipt). Before W0 starts, verify
-that lane has landed and record its commit hash here; do not execute
-against a tree where it is still uncommitted local state.
+Prerequisite lane: landed as commit `97ee0be80` (ARM64 JIT software
+write-barrier fix in `lib/Backend/Lower.cpp`,
+`lib/Backend/arm64/LowerMD.{h,cpp}`, `test/es7/jit-write-barrier.*`;
+bench harness/receipt in `tools/bench/`,
+[perf-baseline.md](perf-baseline.md); this plan). This plan depends
+on both halves (W6.3 reuses the barrier path; success criterion 3
+re-records the receipt). Execute only against a tree containing
+`97ee0be80` or later.
 
 ## Goal
 
@@ -249,7 +248,10 @@ selection mechanism:
   excluded from P1 and individually assessed at P2 (OOM behavior is
   arch-dependent; each gets an include/exclude decision with reason
   in the manifest). W0 records the exact resulting P1 entry count
-  in this plan; candidate arithmetic from the 2026-11-11 swarm
+  in this plan — recorded 2026-11-11 from the generated manifest:
+  **388 P1 entries of 472** (WasmSpec 219, wasm 46, AsmJs 121,
+  ASMJSParser 2; remainder: P3 29, P2-pending 28, P2 14, excluded 9,
+  deferred 4). Candidate arithmetic from the 2026-11-11 swarm
   (WasmSpec 214 incl. mathEx-featureless pin, before fast-array-
   disabled inclusion) is superseded by the generator's output.
   Later phases widen the set by feature, and each phase gate names
@@ -877,7 +879,7 @@ Phase status tracker (update only with gate evidence):
 
 | Phase | Status | Evidence |
 |---|---|---|
-| P0 | not started | — |
+| P0 | complete (2026-11-11) | D2 gates + `-Dwasm` option compile/link ON and OFF; `zig build check` 2053/0 unchanged; D7 manifest 388 P1/472; D8 runner probe validated (109/0 count discipline); ABI spec [wasm-arm64-abi.md](wasm-arm64-abi.md); inventory [wasm-arm64-inventory.md](wasm-arm64-inventory.md). Residual: TARGET_64/_M_* branch line-audit deferred to W2 (named in inventory) |
 | P1 | not started | — |
 | P2 | not started | — |
 | P3/W7 | not started | — |

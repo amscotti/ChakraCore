@@ -22,7 +22,7 @@
 
 #include "RuntimeLanguagePch.h"
 
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
 namespace Js
 {
 
@@ -555,6 +555,14 @@ namespace Js
             JavascriptError::ThrowTypeError(func->GetScriptContext(), WASMERR_InvalidTypeConversion);
         }
         return returnValue;
+    }
+#else
+    // W0 ARM64 (doc/wasm-arm64-plan.md): no x86/x64 entry impl yet.
+    // Controlled fail-fast until W1/W3 define the ABI entry.
+    Var AsmJsExternalEntryPoint(RecyclableObject* entryObject, CallInfo callInfo, ...)
+    {
+        AssertOrFailFast(UNREACHED);
+        return nullptr;
     }
 #endif
 

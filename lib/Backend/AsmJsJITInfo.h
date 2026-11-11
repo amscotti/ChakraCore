@@ -7,7 +7,7 @@
 
 class AsmJsJITInfo
 {
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
 public:
     AsmJsJITInfo(AsmJsDataIDL * data);
 

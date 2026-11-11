@@ -5,7 +5,7 @@
 
 #pragma once
 
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
 #define ASMMATH_BUILTIN_SIZE (32)
 #define ASMARRAY_BUILTIN_SIZE (16)
 namespace Js {

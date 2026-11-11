@@ -3110,6 +3110,7 @@ Lowerer::LowerRange(IR::Instr *instrStart, IR::Instr *instrEnd, bool defaultDoFa
             break;
 #endif
 #ifdef ENABLE_WASM
+#ifdef ASMJS_PLAT
         case Js::OpCode::Copysign_A:
             m_lowererMD.GenerateCopysign(instr);
             break;
@@ -3133,7 +3134,7 @@ Lowerer::LowerRange(IR::Instr *instrStart, IR::Instr *instrEnd, bool defaultDoFa
 
             m_lowererMD.GenerateFastInlineBuiltInCall(instr, (IR::JnHelperMethod)0);
             break;
-
+#endif
         case Js::OpCode::ThrowRuntimeError:
             GenerateThrow(instr->UnlinkSrc1(), instr);
             instr->Remove();

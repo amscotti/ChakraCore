@@ -4,7 +4,7 @@
 //-------------------------------------------------------------------------------------------------------
 #pragma once
 
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
 namespace Js
 {
     enum EBinaryMathOpCodes: int;

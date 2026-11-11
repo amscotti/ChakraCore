@@ -2683,7 +2683,7 @@ namespace Js
         return returnFunctionBody;
     }
 
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
     FunctionBody* ParseableFunctionInfo::ParseAsmJs(Parser * ps, _Out_ CompileScriptException * se, _Out_ ParseNodeProg ** parseTree)
     {
         Assert(IsDeferredParseFunction());
@@ -3752,7 +3752,7 @@ namespace Js
 
         FunctionBody* body = this->GetFunctionBody();
         Unused(body); // in some configuration
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
         if (body->GetIsAsmJsFunction())
         {
 #ifdef ENABLE_WASM
@@ -6656,7 +6656,7 @@ namespace Js
         this->SetLiteralRegexs(RecyclerNewArrayZ(m_scriptContext->GetRecycler(), UnifiedRegex::RegexPattern *, literalRegexCount));
     }
 
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
     AsmJsFunctionInfo* FunctionBody::AllocateAsmJsFunctionInfo()
     {
         Assert( !this->GetAsmJsFunctionInfo() );
@@ -7264,7 +7264,7 @@ namespace Js
     {
         return
             !PHASE_OFF(Js::SimpleJitPhase, this) &&
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
             !GetIsAsmjsMode() &&
 #endif
             !GetScriptContext()->GetConfig()->IsNoNative() &&
@@ -7278,7 +7278,7 @@ namespace Js
     {
         return
             !PHASE_OFF(Js::SimpleJitPhase, this) &&
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
             !GetIsAsmjsMode() &&
 #endif
             !GetScriptContext()->GetConfig()->IsNoNative() &&
@@ -7317,7 +7317,7 @@ namespace Js
     {
         Assert(DoInterpreterProfile());
 
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
         if (this->GetIsAsmjsMode()) return false;
 #endif
 
@@ -9479,7 +9479,7 @@ namespace Js
                     functionBody->SetDefaultFunctionEntryPointInfo(simpleJitEntryPointInfo, newEntryPoint->GetNativeEntrypoint());
                     functionBody->ResetSimpleJitLimitAndCallCount();
                 }
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
                 else if (functionBody->GetIsAsmJsFunction())
                 {
                     // the new entrypoint will be set to interpreter

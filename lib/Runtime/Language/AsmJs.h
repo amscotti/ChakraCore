@@ -22,7 +22,7 @@
 
 #pragma once
 
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
 namespace Js
 {
     struct ExclusiveContext

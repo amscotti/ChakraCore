@@ -5,7 +5,7 @@
 
 #include "Backend.h"
 
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
 AsmJsJITInfo::AsmJsJITInfo(AsmJsDataIDL * data) :
     m_data(*data)
 {

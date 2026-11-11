@@ -64,7 +64,7 @@ namespace Js
         const unaligned OpLayout##layout* layout(const byte*& ip);
 #include "LayoutTypes.h"
 
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
 #define LAYOUT_TYPE(layout) \
         const unaligned OpLayout##layout* layout(); \
         const unaligned OpLayout##layout* layout(const byte*& ip);

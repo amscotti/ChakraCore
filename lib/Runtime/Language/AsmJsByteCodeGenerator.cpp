@@ -5,7 +5,7 @@
 
 #include "RuntimeLanguagePch.h"
 
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
 #include "ByteCode/Symbol.h"
 #include "ByteCode/FuncInfo.h"
 #ifdef DBG_DUMP

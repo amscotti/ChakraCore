@@ -4,7 +4,7 @@
 //-------------------------------------------------------------------------------------------------------
 #include "Backend.h"
 
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
 namespace OpCodeAttrAsmJs
 {
     enum OpCodeAttrEnum
