@@ -248,6 +248,11 @@ public:
             void        GenerateFunctionObjectTest(IR::Instr * callInstr, IR::RegOpnd  *functionOpnd, bool isHelper, IR::LabelInstr* continueAfterExLabel = nullptr);
 
             static IR::Instr * ChangeToWriteBarrierAssign(IR::Instr * assignInstr, const Func* func);
+            static void GenerateWriteBarrierAssign(IR::IndirOpnd * opndDst, IR::Opnd * opndSrc, IR::Instr * insertBeforeInstr);
+            static void GenerateWriteBarrierAssign(IR::MemRefOpnd * opndDst, IR::Opnd * opndSrc, IR::Instr * insertBeforeInstr);
+#ifdef RECYCLER_WRITE_BARRIER_JIT
+            static IR::Instr * GenerateWriteBarrier(IR::Instr * assignInstr);
+#endif
             
             int                 GetHelperArgsCount() { return this->helperCallArgsCount; }
             void                ResetHelperArgsCount() { this->helperCallArgsCount = 0; }
