@@ -160,12 +160,6 @@ Js::ArgSlot WasmSignature::GetParamSize(Js::ArgSlot index) const
 
 void WasmSignature::FinalizeSignature()
 {
-    if (GetResultCount() > 1)
-    {
-        // Do not support short signature with multiple returns at this time
-        return;
-    }
-    Local resultType = GetResultCount() == 1 ? GetResult(0) : WasmTypes::Void;
     Assert(m_paramSize == Js::Constants::InvalidArgSlot);
     Assert(m_shortSig == Js::Constants::InvalidSignature);
     const Js::ArgSlot paramCount = GetParamCount();
@@ -177,6 +171,13 @@ void WasmSignature::FinalizeSignature()
             throw WasmCompilationException(_u("Argument size too big"));
         }
     }
+    if (GetResultCount() > 1)
+    {
+        // Do not support short signature with multiple returns at this time;
+        // multi-value rides WasmSignature::GetResultCount() (ABI Q4).
+        return;
+    }
+    Local resultType = GetResultCount() == 1 ? GetResult(0) : WasmTypes::Void;
 
     // 3 bits for result type, 3 for each arg
     const uint32 nBitsForResult = 3;

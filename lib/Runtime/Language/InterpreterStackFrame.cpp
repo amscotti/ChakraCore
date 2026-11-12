@@ -1802,6 +1802,21 @@ skipThunk:
         }
         va_end(ap);
 
+#ifdef ENABLE_WASM
+        // W7 multi-value: interpret, box N slots per WasmSignature into an
+        // Array (ABI Q4). The single-valued paths below are unchanged.
+        {
+            const Wasm::WasmSignature* wasmSig = info->GetWasmSignature();
+            if (wasmSig != nullptr && wasmSig->IsMultiValue())
+            {
+                const uint32 resultCount = wasmSig->GetResultCount();
+                uint64* retBuf = (uint64*)_alloca(::Math::Align<int32>((int32)(resultCount * sizeof(uint64)), 16));
+                InterpreterStackFrame::AsmJsInterpreterMulti(layout, retBuf);
+                return BoxWasmMultiResult(func, wasmSig, retBuf);
+            }
+        }
+#endif
+
         AsmJsSIMDValue zeroSimd;
         zeroSimd.Zero();
         switch (info->GetReturnType().which())
@@ -2307,6 +2322,48 @@ skipThunk:
             asmJsReturn->d = newInstance->GetRegRawDouble(0);
             asmJsReturn->f = newInstance->GetRegRawFloat(0);
             asmJsReturn->simd = newInstance->GetRegRawSimd(0);
+            // W7 multi-value: copy return slots 0..N-1 (result k in slot k of
+            // its per-type space) as raw 8B bits for per-slot boxing.
+            if (asmJsReturn->multiRet != nullptr && asmJsReturn->multiRetCount > 0)
+            {
+                const Wasm::WasmSignature* sig = function->GetFunctionBody()->GetAsmJsFunctionInfo()->GetWasmSignature();
+                Assert(sig != nullptr);
+                const uint32 count = asmJsReturn->multiRetCount < sig->GetResultCount() ? asmJsReturn->multiRetCount : sig->GetResultCount();
+                for (uint32 k = 0; k < count; ++k)
+                {
+                    uint64 bits = 0;
+                    switch (sig->GetResult(k))
+                    {
+                    case Wasm::WasmTypes::I32:
+                    {
+                        int32 v = newInstance->GetRegRawInt((Js::RegSlot)k);
+                        bits = (uint64)(int64)v;
+                        break;
+                    }
+                    case Wasm::WasmTypes::I64:
+                        bits = (uint64)newInstance->GetRegRawInt64((Js::RegSlot)k);
+                        break;
+                    case Wasm::WasmTypes::F32:
+                    {
+                        float v = newInstance->GetRegRawFloat((Js::RegSlot)k);
+                        uint32 b = 0;
+                        __builtin_memcpy(&b, &v, sizeof(float));
+                        bits = (uint64)b;
+                        break;
+                    }
+                    case Wasm::WasmTypes::F64:
+                    {
+                        double v = newInstance->GetRegRawDouble((Js::RegSlot)k);
+                        __builtin_memcpy(&bits, &v, sizeof(double));
+                        break;
+                    }
+                    default:
+                        bits = 0;
+                        break;
+                    }
+                    asmJsReturn->multiRet[k] = bits;
+                }
+            }
         }
 #endif
 
@@ -2461,6 +2518,26 @@ skipThunk:
         InterpreterHelper(function, args, returnAddress, addressOfReturnAddress, &asmJsReturn);
 
         return asmJsReturn.GetRetVal<T>();
+    }
+
+    void InterpreterStackFrame::AsmJsInterpreterMulti(AsmJsCallStackLayout* layout, uint64* outRet)
+    {
+        Js::ScriptFunction * function = Js::VarTo<Js::ScriptFunction>(layout->functionObject);
+        const Wasm::WasmSignature* sig = function->GetFunctionBody()->GetAsmJsFunctionInfo()->GetWasmSignature();
+        Assert(sig != nullptr && sig->GetResultCount() > 1);
+        const uint32 resultCount = sig->GetResultCount();
+        int  flags = CallFlags_Value;
+        ArgSlot nbArgs = ArgSlotMath::Add(function->GetFunctionBody()->GetAsmJsFunctionInfo()->GetArgCount(), 1);
+
+        CallInfo callInfo((CallFlags)flags, nbArgs);
+        ArgumentReader args(&callInfo, (Var*)layout->args);
+        void* returnAddress = _ReturnAddress();
+        void* addressOfReturnAddress = _AddressOfReturnAddress();
+        function->GetFunctionBody()->EnsureDynamicProfileInfo();
+        AsmJsReturnStruct asmJsReturn = { 0 };
+        asmJsReturn.multiRet = outRet;
+        asmJsReturn.multiRetCount = resultCount;
+        InterpreterHelper(function, args, returnAddress, addressOfReturnAddress, &asmJsReturn);
     }
 
 #if defined(_M_X64)

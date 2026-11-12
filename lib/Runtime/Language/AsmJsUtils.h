@@ -26,6 +26,13 @@
 // Removed code from original location, if the expression is true, check if extra code needed
 #define MaybeTodo( expr ) AssertMsg( !(expr), "Unhandled scenario in asm.js" )
 
+#ifdef ENABLE_WASM
+namespace Wasm
+{
+    class WasmSignature;
+}
+#endif
+
 namespace Js {
 
 #pragma warning (suppress: 25057) // Suppress unannotated buffer warning
@@ -41,6 +48,15 @@ namespace Js {
     // SIMD box takes AsmJsSIMDValue; SIMD returns fail controlled (W8).
     Var BoxAsmJsReturnValue(ScriptFunction* func, int64 intRetVal, double doubleRetVal, float floatRetVal, const AsmJsSIMDValue& simdReturn);
     int GetStackSizeForAsmJsUnboxing(ScriptFunction* func);
+#endif
+
+#if defined(_M_X64) || defined(_M_ARM64)
+#ifdef ENABLE_WASM
+    // W7 multi-value: box N raw 8B result bits per WasmSignature types into
+    // a JS Array (element k from values[k]); i64/v128 fail with TypeError
+    // exactly like BoxAsmJsReturnValue unless WasmI64 objects are enabled.
+    Var BoxWasmMultiResult(ScriptFunction* func, const Wasm::WasmSignature* sig, const uint64* values);
+#endif
 #endif
 
     class AsmJsCompilationException

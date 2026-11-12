@@ -464,24 +464,41 @@ void WasmModuleGenerator::GenerateFunctionHeader(uint32 index)
         argSizeArray[i] = wasmInfo->GetSignature()->GetParamSize(i);
     }
     info->SetArgByteSize(wasmInfo->GetSignature()->GetParamsSize());
-    if (wasmInfo->GetSignature()->GetResultCount() <= 1)
+    // W7 multi-value: keep AsmJsRetType placeholder single-valued (ABI Q4);
+    // N results ride WasmSignature::GetResultCount() > 1.
     {
-        WasmTypes::WasmType returnType = wasmInfo->GetSignature()->GetResultCount() == 1 ? wasmInfo->GetSignature()->GetResult(0) : WasmTypes::Void;
+        WasmTypes::WasmType returnType = wasmInfo->GetSignature()->GetResultCount() >= 1 ? wasmInfo->GetSignature()->GetResult(0) : WasmTypes::Void;
         info->SetReturnType(WasmToAsmJs::GetAsmJsReturnType(returnType));
     }
-    else
-    {
-        throw WasmCompilationException(_u("Multi return values not supported"));
-    }
+}
+
+namespace
+{
+    // W7 multi-value: reserved return slots per register space (result k in
+    // slot k of its type space). Set to max(1, function result count) by
+    // GenerateFunctionBytecode before the generator constructs its spaces.
+    // thread_local: first-call/deferred codegen runs on the executing thread
+    // and modules can be instantiated across workers, so two threads may
+    // codegen different functions concurrently.
+    thread_local uint32 s_wasmReturnSlotsReserved = 1;
 }
 
 WAsmJs::RegisterSpace* AllocateRegisterSpace(ArenaAllocator* alloc, WAsmJs::Types)
 {
-    return Anew(alloc, WAsmJs::RegisterSpace, 1);
+    return Anew(alloc, WAsmJs::RegisterSpace, s_wasmReturnSlotsReserved > 1 ? s_wasmReturnSlotsReserved : 1);
 }
 
 void WasmBytecodeGenerator::GenerateFunctionBytecode(Js::ScriptContext* scriptContext, WasmReaderInfo* readerinfo, bool validateOnly /*= false*/)
 {
+    // Set reserved return slots before the generator constructs its register
+    // spaces (AllocateRegisterSpace reads the static in the allocator ctor).
+    struct ReservedSlotsGuard
+    {
+        ReservedSlotsGuard(uint32 n) : saved(s_wasmReturnSlotsReserved) { s_wasmReturnSlotsReserved = n; }
+        ~ReservedSlotsGuard() { s_wasmReturnSlotsReserved = saved; }
+        uint32 saved;
+    };
+    ReservedSlotsGuard guard(readerinfo->m_funcInfo->GetResultCount());
     WasmBytecodeGenerator generator(scriptContext, readerinfo, validateOnly);
     generator.GenerateFunction();
 }
@@ -1702,7 +1719,11 @@ void WasmBytecodeGenerator::EmitReturnExpr(PolymorphicEmitInfo* explicitRetInfo)
     {
         EmitInfo info = retExprInfo.GetInfo(i);
         Js::OpCodeAsmJs retOp = GetReturnOp(info.type);
-        m_writer->Conv(retOp, 0, info.location);
+        // W7: result k goes to return slot k (per-type slot index), not all to
+        // 0. PopStackPolymorphic pops top-first, so GetInfo(i) is result
+        // (Count-1-i) in signature order; write that slot.
+        const uint32 resultIndex = retExprInfo.Count() - 1 - i;
+        m_writer->Conv(retOp, (Js::RegSlot)resultIndex, info.location);
         ReleaseLocation(&info);
     }
     m_writer->AsmBr(m_funcInfo->GetExitLabel());

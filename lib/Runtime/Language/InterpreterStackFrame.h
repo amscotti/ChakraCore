@@ -99,6 +99,11 @@ namespace Js
             float f;
             double d;
             AsmJsSIMDValue simd;
+            // W7 multi-value: when non-null, InterpreterHelper also copies
+            // return slots 0..multiRetCount-1 (raw 8B each, bits of the
+            // per-result-type value) here. Caller sizes the buffer.
+            uint64* multiRet = nullptr;
+            uint32 multiRetCount = 0;
 
             template<typename T> T GetRetVal();
             template<> int32 GetRetVal<int32>() { return i; }
@@ -356,6 +361,9 @@ namespace Js
 #elif _M_X64 || _M_ARM64
         template <typename T>
         static T AsmJsInterpreter(AsmJsCallStackLayout* layout);
+        // W7 multi-value: interpret and fill outRet[0..N-1] with raw 8B bits
+        // of return slot k (result k, per ABI Q4).
+        static void AsmJsInterpreterMulti(AsmJsCallStackLayout* layout, uint64* outRet);
         static void * GetAsmJsInterpreterEntryPoint(AsmJsCallStackLayout* stack);
 #if defined(_M_X64)
         static __m128 AsmJsInterpreterSimdJs(AsmJsCallStackLayout* func);

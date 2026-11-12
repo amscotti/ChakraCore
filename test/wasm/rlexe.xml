@@ -523,4 +523,14 @@
     <tags>require_backend</tags>
   </default>
 </test>
+<!-- W7 multi-value probe (ABI Q4): a (func (result i32 i32)) export called
+     from JS returns Array [1,2]. Same rationale as the W6 probes above. -->
+<test>
+  <default>
+    <files>multivalue_return.js</files>
+    <baseline>multivalue_return.baseline</baseline>
+    <compile-flags>-wasm -WasmMultiValue</compile-flags>
+    <tags>require_backend</tags>
+  </default>
+</test>
 </regress-exe>

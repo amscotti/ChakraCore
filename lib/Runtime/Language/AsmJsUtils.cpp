@@ -430,6 +430,61 @@ namespace Js
         return returnValue;
     }
 
+#ifdef ENABLE_WASM
+    // W7 multi-value: box N raw 8B result bits per WasmSignature types into
+    // a JS Array (element k from values[k]).
+    Var BoxWasmMultiResult(ScriptFunction* func, const Wasm::WasmSignature* sig, const uint64* values)
+    {
+        Assert(sig != nullptr && sig->GetResultCount() > 1);
+        ScriptContext* scriptContext = func->GetScriptContext();
+        const uint32 resultCount = sig->GetResultCount();
+        JavascriptArray* arrayObj = scriptContext->GetLibrary()->CreateArray(resultCount);
+        for (uint32 k = 0; k < resultCount; ++k)
+        {
+            const uint64 raw = values[k];
+            Var element = nullptr;
+            switch (sig->GetResult(k))
+            {
+            case Wasm::WasmTypes::I32:
+                element = JavascriptNumber::ToVar((int)(int32)raw, scriptContext);
+                break;
+            case Wasm::WasmTypes::I64:
+            {
+#if ENABLE_DEBUG_CONFIG_OPTIONS
+                if (CONFIG_FLAG(WasmI64))
+                {
+                    element = CreateI64ReturnObject((int64)raw, scriptContext);
+                    break;
+                }
+#endif
+                JavascriptError::ThrowTypeError(scriptContext, WASMERR_InvalidTypeConversion);
+                break;
+            }
+            case Wasm::WasmTypes::F64:
+            {
+                double d = 0.0;
+                __builtin_memcpy(&d, &raw, sizeof(double));
+                element = JavascriptNumber::NewWithCheck(d, scriptContext);
+                break;
+            }
+            case Wasm::WasmTypes::F32:
+            {
+                float f = 0.0f;
+                const uint32 bits32 = (uint32)raw;
+                __builtin_memcpy(&f, &bits32, sizeof(float));
+                element = JavascriptNumber::NewWithCheck(f, scriptContext);
+                break;
+            }
+            default:
+                JavascriptError::ThrowTypeError(scriptContext, WASMERR_InvalidTypeConversion);
+                break;
+            }
+            arrayObj->DirectSetItemAt(k, element);
+        }
+        return arrayObj;
+    }
+#endif
+
 #endif
 
 // External entry points (x86 inline-asm + ARM64 C++). x64 uses the
@@ -650,6 +705,19 @@ namespace Js
                            jsMethod != (JavascriptMethod)&Js::AsmJsExternalEntryPoint &&
 #endif
                            true);
+#ifdef ENABLE_WASM
+            // W7: the JIT single-return convention cannot carry N results
+            // (LowerRet/LowerAsmJsCallI still single-valued), so multi-value
+            // functions always take the interpreter path. JIT-tier runs thus
+            // stay correct; the x8 area is a later step.
+            {
+                const Wasm::WasmSignature* wasmSig = info->GetWasmSignature();
+                if (wasmSig != nullptr && wasmSig->IsMultiValue())
+                {
+                    useJit = false;
+                }
+            }
+#endif
             if (useJit)
             {
                 int unboxSize = GetStackSizeForAsmJsUnboxing(func);
@@ -720,6 +788,21 @@ namespace Js
         UnboxAsmJsArguments(func, args.Values + 1, (char*)buf, callInfo);
         AsmJsCallStackLayout* layout = (AsmJsCallStackLayout*)buf;
         layout->functionObject = func;
+
+#ifdef ENABLE_WASM
+        // W7 multi-value: interpreted path already requested (multi-value
+        // functions are never JIT-dispatched, see useJit below).
+        {
+            const Wasm::WasmSignature* wasmSig = info->GetWasmSignature();
+            if (wasmSig != nullptr && wasmSig->IsMultiValue())
+            {
+                const uint32 resultCount = wasmSig->GetResultCount();
+                uint64* retBuf = (uint64*)_alloca(::Math::Align<int32>((int32)(resultCount * sizeof(uint64)), 16));
+                InterpreterStackFrame::AsmJsInterpreterMulti(layout, retBuf);
+                return BoxWasmMultiResult(func, wasmSig, retBuf);
+            }
+        }
+#endif
 
         AsmJsSIMDValue zeroSimd;
         zeroSimd.Zero();

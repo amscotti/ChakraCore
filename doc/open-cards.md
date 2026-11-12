@@ -95,6 +95,7 @@ checkout (`out/test262`).
 | e5-B4-1 `for (let \n of/in)` | e5 | not-reproducible (already retracted at review) | probes: `let \n of` rejected by both; `let \n in` accepted by both (matching oracle) |
 | e5-B4-3 destructuring memoization upstream unprobed | e5 | open (watch) | probe: converts once on both engines; re-check on corpus revisions |
 | B5-5 `(async function await(){})` accepted | e6 | fixed-by-e6 (own Parse.cpp await rule) | probe: SyntaxError on current binary ("Unexpected invalid identifier 'await' after 'function'"); Node also rejects |
+| W6 deep-unwind: C++ exception through ~240+ consecutive JIT frames lost inside Apple system libunwind phase-1 ("no handler found") | wasm-arm64 W6 | open (external/Apple; shallow delivery unaffected) | FDE bytes field-by-field correct (standalone decoder), single `__register_frame` per FDE, fp chain intact (lldb walks 241+ frames), same-libunwind manual `unw_step` walks full 260-frame stack, count-dependent/function-independent/layout-sensitive; 'P' personality path rejected (zero visits); static-libunwind engine linkage ruled NO-GO (same-lineage split-cache hazard) — cheapest rule-out is an isolated harness replaying the 260-frame throw. Blocks clean deep StackOverflow/Unreachable delivery only; reserve-floor fix (`025e24851`) bounds the hang. Ownership record: [wasm-arm64-w6-ownership.md](wasm-arm64-w6-ownership.md) |
 
 ## 3. Hardware/B4-owned cards
 
