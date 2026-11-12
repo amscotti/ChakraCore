@@ -140,9 +140,14 @@ TOKEN_FEATURELESS = {
 # The enabled form of wasmsharedarrayvirtualbuffer is intentionally NOT
 # listed: it does not occur in the tree and would be an error until
 # classified, rather than a guess.
+# wasmthreads/essharedarraybuffer disabled forms pin the default-off
+# posture (negative tests such as threads rejection); the enabled forms
+# still map to the "threads" feature (P3) via TOKEN_FEATURES.
 DISABLED_FEATURELESS_BASES = {
     "wasmfastarray",
     "wasmsharedarrayvirtualbuffer",
+    "wasmthreads",
+    "essharedarraybuffer",
 }
 
 NONATIVE_TOKEN = "nonative"
@@ -590,6 +595,10 @@ def run_selftest():
     check(token_features(tokenize("-nonative")) == set(), "nonative inert")
     check(token_features(tokenize("-WasmSharedArrayVirtualBuffer-")) == set(),
           "disabled virtualbuffer featureless")
+    check(token_features(tokenize("-WasmThreads-")) == set(),
+          "disabled threads pins default-off")
+    check(token_features(tokenize("-ESSharedArrayBuffer-")) == set(),
+          "disabled SAB pins default-off")
     check(token_features(tokenize("-WasmSignExtends")) == {"sign-ext"}, "sign-ext")
     check(token_features(tokenize("-wasmsignextends")) == {"sign-ext"},
           "lowercase sign-ext")

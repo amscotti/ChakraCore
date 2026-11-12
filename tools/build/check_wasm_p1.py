@@ -41,9 +41,9 @@ flags mismatch, missing -nonative / -maxInterpretCount:1, unknown
 test-id, duplicate test-id, or missing P1 entry fails loudly.
 
 Exact counts (no silent defaults): the manifest P1 total must equal
-378, exactly one "Total: passed N, failed M" summary line must be
+381, exactly one "Total: passed N, failed M" summary line must be
 present, and per-test statuses must sum exactly to it. Exit 0 iff all
-378 P1 entries passed with a complete join; nonzero if any P1 entry
+381 P1 entries passed with a complete join; nonzero if any P1 entry
 failed or the join is incomplete. Without -v, passed blocks have no
 command line and the join fails loudly (rerun with -v).
 """
@@ -61,7 +61,7 @@ import common
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 
-EXPECTED_P1_TOTAL = 378
+EXPECTED_P1_TOTAL = 381
 P1_SUITES = ["WasmSpec", "wasm", "AsmJs", "ASMJSParser"]
 
 TOTAL_RE = re.compile(r"^Total: passed (\d+), failed (\d+)\s*$")
@@ -76,7 +76,7 @@ def load_manifest(path):
 
     Returns (entries, meta_dict). Validation covers shape, duplicate
     test-ids, and meta total/p1 consistency when meta is present. The
-    P1-total pin (378) is checked by the grader, not here, so unit
+    P1-total pin (381) is checked by the grader, not here, so unit
     fixtures can use smaller manifests with their own pin.
     """
     try:
@@ -690,7 +690,7 @@ def self_test():
                 ] + good[2:-1]
         check("lookalike Total", look, test_root, man, expected=4,
               want_ok=False)
-        # Real-manifest pin: the checked-in manifest must hold 378 P1.
+        # Real-manifest pin: the checked-in manifest must hold 381 P1.
         real_path = os.path.join(ROOT, "test", "wasm-arm64-manifest.json")
         entries, _m = load_manifest(real_path)
         p1n = sum(1 for e in entries if e["phase"] == "P1")

@@ -236,6 +236,7 @@ void LegalizeMD::LegalizeSrc(IR::Instr * instr, IR::Opnd * opnd, uint opndNum)
     case IR::OpndKindAddr:
     case IR::OpndKindHelperCall:
     case IR::OpndKindIntConst:
+    case IR::OpndKindInt64Const:
         LegalizeImmed(instr, opnd, opndNum, opnd->GetImmediateValue(instr->m_func), forms);
         break;
 

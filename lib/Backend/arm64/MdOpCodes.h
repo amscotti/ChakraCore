@@ -86,6 +86,7 @@ MACRO(ORR,        Reg3,       0,              UNUSED,   LEGAL_ALU3,     UNUSED, 
 MACRO(PLD,        Reg2,       0,              UNUSED,   LEGAL_PLD,      UNUSED,   DL__)
 MACRO(REM,        Reg3,       OpSideEffect,   UNUSED,   LEGAL_REG3,     UNUSED,   D___)
 MACRO(RET,        Reg2,       OpSideEffect,   UNUSED,   LEGAL_REG2_ND,  UNUSED,   D___)
+MACRO(RORV,       Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)
 MACRO(SBFX,       Reg3,       0,              UNUSED,   LEGAL_BITFIELD, UNUSED,   D___)
 MACRO(SDIV,       Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)
 MACRO(SMADDL,     Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)

@@ -1807,15 +1807,27 @@ skipThunk:
         switch (info->GetReturnType().which())
         {
         case AsmJsRetType::Void:
-        case AsmJsRetType::Signed:
         {
             int ret = InterpreterStackFrame::AsmJsInterpreter<int>(layout);
             return BoxAsmJsReturnValue(func, ret, 0.0, 0.0f, zeroSimd);
         }
+        case AsmJsRetType::Signed:
+        {
+            int ret = InterpreterStackFrame::AsmJsInterpreter<int>(layout);
+            // The only callers that reach this delay entry are JIT-compiled
+            // wasm-internal callers (TryCallAsmJsJit and the external entry
+            // both refuse it; the interpreter bypasses it). They read the raw
+            // i32 from w0 (ABI section 3), so return it unboxed rather than a
+            // TaggedInt Var whose low32 only matches by accident.
+            return reinterpret_cast<Var>((int64)ret);
+        }
         case AsmJsRetType::Int64:
         {
             int64 ret = InterpreterStackFrame::AsmJsInterpreter<int64>(layout);
-            return BoxAsmJsReturnValue(func, ret, 0.0, 0.0f, zeroSimd);
+            // Same as Signed above: JIT-internal callers read the raw i64 from
+            // x0. Boxing here would leave a heap-object Var in x0, which the
+            // caller would misread as the result (first-call garbage).
+            return reinterpret_cast<Var>(ret);
         }
         case AsmJsRetType::Double:
         {

@@ -6207,6 +6207,31 @@ br2_Common:
         instr = newInstr;
         break;
 
+    case Js::OpCode::Rol_I4:
+    case Js::OpCode::Ror_I4:
+    {
+        // ARM64 has no ROL; RORV (rotate right, variable) covers both:
+        // ror(x,y) = RORV, rol(x,y) = ror(x,-y). RORV reads the amount
+        // mod 32/64 in hardware, matching wasm rotate semantics. A const
+        // amount is hoisted to a register by the RORV legalizer (LEGAL_REG3).
+        IR::Opnd *dst = instr->GetDst();
+        IR::Opnd *src2 = instr->UnlinkSrc2();
+        IRType type = dst->GetType();
+        if (instr->m_opcode == Js::OpCode::Rol_I4)
+        {
+            // negAmt = 0 - amt (SUB with ZR; const amt is hoisted by the
+            // SUB legalizer). (-y) mod 32/64 == (w-y) mod 32/64.
+            IR::RegOpnd *negReg = IR::RegOpnd::New(type, instr->m_func);
+            IR::Instr *negInstr = IR::Instr::New(Js::OpCode::SUB, negReg, IR::RegOpnd::New(nullptr, RegZR, type, instr->m_func), src2, instr->m_func);
+            instr->InsertBefore(negInstr);
+            LegalizeMD::LegalizeInstr(negInstr);
+            src2 = negReg;
+        }
+        instr->SetSrc2(src2);
+        instr->m_opcode = Js::OpCode::RORV;
+        break;
+    }
+
     default:
         AssertMsg(UNREACHED, "NYI I4 instr");
         break;
@@ -7242,11 +7267,50 @@ LowererMD::GenerateFastInlineBuiltInMathMinMax(IR::Instr* instr)
         instr->Remove();
     }
 
-    else if (dst->IsFloat64())
+    else if (dst->IsFloat64() || dst->IsFloat32())
     {
-        // (min) FMIN dst, src1, src2
-        // (max) FMAX dst, src1, src2
-        instr->m_opcode = (instr->m_opcode == Js::OpCode::InlineMathMin) ? Js::OpCode::FMIN : Js::OpCode::FMAX;
+        // WASM/JS min/max need NaN propagation (either operand NaN ->
+        // canonical NaN) plus correct ordered comparison including +/-0
+        // ties. ARM64 FMIN/FMAX implement minNum/maxNum for ordered inputs
+        // but return the numeric operand when exactly one input is NaN, so
+        // check each operand against itself first (unordered iff NaN) and
+        // fall back to FMIN/FMAX otherwise:
+        //   if (src1 != src1) goto nan; if (src2 != src2) goto nan;
+        //   dst = FMIN/FMAX(src1, src2); goto done;
+        // nan: dst = canonical NaN;
+        // done:
+        // (The previous code emitted bare FMIN/FMAX, miscompiling f32.min/
+        // max entirely for f32 dsts and NaN inputs for f64: f32.min always
+        // returned src1, f64.max(Inf,NaN) returned Inf.)
+        const bool isMin = instr->m_opcode == Js::OpCode::InlineMathMin;
+        IR::Opnd *src1 = instr->GetSrc1();
+        IR::Opnd *src2 = instr->GetSrc2();
+        IR::LabelInstr *labelNaN = IR::LabelInstr::New(Js::OpCode::Label, m_func, true);
+        IR::LabelInstr *labelDone = IR::LabelInstr::New(Js::OpCode::Label, m_func);
+        this->m_lowerer->InsertCompareBranch(src1, src1, Js::OpCode::BrNeq_A, labelNaN, instr);
+        this->m_lowerer->InsertCompareBranch(src2, src2, Js::OpCode::BrNeq_A, labelNaN, instr);
+        instr->m_opcode = isMin ? Js::OpCode::FMIN : Js::OpCode::FMAX;
+        IR::BranchInstr *brDone = IR::BranchInstr::New(Js::OpCode::B, labelDone, m_func);
+        instr->InsertAfter(brDone);
+        brDone->InsertAfter(labelNaN);
+        labelNaN->InsertAfter(labelDone);
+        // Canonical quiet NaN in the destination width, pooled by exact bits
+        // (float<->double round-trips are exact, so the double carrier
+        // preserves the f32 payload).
+        double nanValue;
+        if (dst->IsFloat32())
+        {
+            uint32 nanBits = 0x7FC00000u;
+            float nanFloat;
+            memcpy(&nanFloat, &nanBits, sizeof(nanFloat));
+            nanValue = nanFloat;
+        }
+        else
+        {
+            uint64 nanBits = 0x7FF8000000000000ull;
+            memcpy(&nanValue, &nanBits, sizeof(nanValue));
+        }
+        this->LoadFloatValue(dst, nanValue, labelDone);
     }
 }
 
@@ -7504,7 +7568,10 @@ LowererMD::EmitReinterpretPrimitive(IR::Opnd* dst, IR::Opnd* src, IR::Instr* ins
     Assert(dst && src);
     Assert(dst->GetSize() == src->GetSize());
     Assert(dst->GetType() != src->GetType());
-    // Bitcast: float <-> int of same size via FMOV_GEN (NEON INS/UMOV).
+    // Bitcast: float <-> int of same size via FMOV_GEN (scalar FMOV/UMOV).
+    // FMOV_GEN is LEGAL_REG2, so a non-register source (e.g. an i64 const)
+    // is hoisted to a register by the legalizer (LegalizeSrc handles
+    // Int64ConstOpnd via LDIMM).
     IR::Instr *instr = IR::Instr::New(Js::OpCode::FMOV_GEN, dst, src, m_func);
     insertBeforeInstr->InsertBefore(instr);
     LegalizeMD::LegalizeInstr(instr);

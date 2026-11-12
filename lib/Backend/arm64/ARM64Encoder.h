@@ -1552,6 +1552,35 @@ EmitUdiv64(
 }
 
 //
+// RORV dest, source1, source2 (rotate right by variable amount;
+// the amount is read mod 32/64, matching wasm rotl/rotr semantics)
+//
+
+inline
+int
+EmitRorv(
+    Arm64CodeEmitter &Emitter,
+    Arm64SimpleRegisterParam Dest,
+    Arm64SimpleRegisterParam Src1,
+    Arm64SimpleRegisterParam Src2
+    )
+{
+    return EmitDivideCommon(Emitter, Dest, Src1, Src2, 0x1ac02c00);
+}
+
+inline
+int
+EmitRorv64(
+    Arm64CodeEmitter &Emitter,
+    Arm64SimpleRegisterParam Dest,
+    Arm64SimpleRegisterParam Src1,
+    Arm64SimpleRegisterParam Src2
+    )
+{
+    return EmitDivideCommon(Emitter, Dest, Src1, Src2, 0x9ac02c00);
+}
+
+//
 // AND dest, source1, source2 [with optional shift]
 // ANDS dest, source1, source2 [with optional shift]
 // BIC dest, source1, source2 [with optional shift]

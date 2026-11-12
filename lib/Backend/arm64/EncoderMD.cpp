@@ -1116,7 +1116,14 @@ EncoderMD::GenerateEncoding(IR::Instr* instr, BYTE *pc)
         Assert(dst->IsRegOpnd());
         Assert(src1->IsRegOpnd());
         Assert(src2->IsRegOpnd());
-        bytes = EmitMsub(Emitter, this->GetRegEncode(dst->AsRegOpnd()), this->GetRegEncode(src2->AsRegOpnd()), this->GetRegEncode(dst->AsRegOpnd()), this->GetRegEncode(src1->AsRegOpnd()));
+        if (dst->GetSize() == 8)
+        {
+            bytes = EmitMsub64(Emitter, this->GetRegEncode(dst->AsRegOpnd()), this->GetRegEncode(src2->AsRegOpnd()), this->GetRegEncode(dst->AsRegOpnd()), this->GetRegEncode(src1->AsRegOpnd()));
+        }
+        else
+        {
+            bytes = EmitMsub(Emitter, this->GetRegEncode(dst->AsRegOpnd()), this->GetRegEncode(src2->AsRegOpnd()), this->GetRegEncode(dst->AsRegOpnd()), this->GetRegEncode(src1->AsRegOpnd()));
+        }
         break;
 
     case Js::OpCode::NOP:
@@ -1143,6 +1150,10 @@ EncoderMD::GenerateEncoding(IR::Instr* instr, BYTE *pc)
     // Legalizer should convert this to UDIV/MSUB before getting here
     case Js::OpCode::UREM:
         Assert(false);
+        break;
+
+    case Js::OpCode::RORV:
+        bytes = this->EmitOp3Register(Emitter, instr, EmitRorv, EmitRorv64);
         break;
 
     case Js::OpCode::SBFX:
@@ -1306,12 +1317,21 @@ EncoderMD::GenerateEncoding(IR::Instr* instr, BYTE *pc)
         Assert(dst->IsFloat() != src1->IsFloat());
         if (dst->IsFloat())
         {
-            bytes = EmitNeonIns(Emitter, this->GetFloatRegEncode(dst->AsRegOpnd()), 0, this->GetRegEncode(src1->AsRegOpnd()), (size == 8) ? SIZE_1D : SIZE_1S);
+            // Scalar FMOV (D,V / S,V) rather than INS: the canonical
+            // reg<->reg bitcast, matching the UMOV path below.
+            if (size == 8)
+            {
+                bytes = EmitNeonFmovFromGeneral64(Emitter, this->GetFloatRegEncode(dst->AsRegOpnd()), this->GetRegEncode(src1->AsRegOpnd()), SIZE_1D);
+            }
+            else
+            {
+                bytes = EmitNeonFmovFromGeneral(Emitter, this->GetFloatRegEncode(dst->AsRegOpnd()), this->GetRegEncode(src1->AsRegOpnd()), SIZE_1S);
+            }
         }
         else
         {
             if (size == 8)
-            { 
+            {
                 bytes = EmitNeonUmov64(Emitter, this->GetFloatRegEncode(dst->AsRegOpnd()), this->GetRegEncode(src1->AsRegOpnd()), 0, (size == 8) ? SIZE_1D : SIZE_1S);
             }
             else
