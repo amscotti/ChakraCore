@@ -7624,14 +7624,29 @@ LowererMD::LoadFloatZero(IR::Opnd * opndDst, IR::Instr * instrInsert)
 IR::Instr *
 LowererMD::LoadFloatValue(IR::Opnd * opndDst, double value, IR::Instr * instrInsert)
 {
+    // Pool and load the constant in the destination's width (mirrors the
+    // shared LowererMD::LoadFloatValue<T> template, which is not compiled
+    // on ARM64). A float32 destination must load 4 float bytes: pooling the
+    // double bits and issuing a 64-bit load leaves the low word (which the
+    // s-register consumer reads) zero, silently producing 0.0f.
+    const bool isFloat64 = opndDst->IsFloat64();
+    Assert(isFloat64 || opndDst->IsFloat32());
     // Floating point zero is a common value to load.  Let's use a single memory location instead of allocating new memory for each.
     const bool isFloatZero = value == 0.0 && !Js::JavascriptNumber::IsNegZero(value); // (-0.0 == 0.0) yields true
-    if (isFloatZero)
+    if (isFloatZero && isFloat64)
     {
         return LowererMD::LoadFloatZero(opndDst, instrInsert);
     }
-    void * pValue = NativeCodeDataNewNoFixup(instrInsert->m_func->GetNativeCodeDataAllocator(), DoubleType<DataDesc_LowererMD_LoadFloatValue_Double>, value);
+    void * pValue;
     IR::Opnd * opnd;
+    if (isFloat64)
+    {
+        pValue = NativeCodeDataNewNoFixup(instrInsert->m_func->GetNativeCodeDataAllocator(), DoubleType<DataDesc_LowererMD_LoadFloatValue_Double>, value);
+    }
+    else
+    {
+        pValue = NativeCodeDataNewNoFixup(instrInsert->m_func->GetNativeCodeDataAllocator(), FloatType<DataDesc_LowererMD_LoadFloatValue_Float>, (float)value);
+    }
     if (instrInsert->m_func->IsOOPJIT())
     {
         int offset = NativeCodeData::GetDataTotalOffset(pValue);
@@ -7642,7 +7657,7 @@ LowererMD::LoadFloatValue(IR::Opnd * opndDst, double value, IR::Instr * instrIns
             IR::MemRefOpnd::New(instrInsert->m_func->GetWorkItem()->GetWorkItemData()->nativeDataAddr, TyMachPtr, instrInsert->m_func, IR::AddrOpndKindDynamicNativeCodeDataRef),
             instrInsert);
 
-        opnd = IR::IndirOpnd::New(addressRegOpnd, offset, TyMachDouble,
+        opnd = IR::IndirOpnd::New(addressRegOpnd, offset, isFloat64 ? TyMachDouble : TyFloat32,
 #if DBG
             NativeCodeData::GetDataDescription(pValue, instrInsert->m_func->m_alloc),
 #endif
@@ -7650,7 +7665,7 @@ LowererMD::LoadFloatValue(IR::Opnd * opndDst, double value, IR::Instr * instrIns
     }
     else
     {
-        opnd = IR::MemRefOpnd::New((void*)pValue, TyMachDouble, instrInsert->m_func);
+        opnd = IR::MemRefOpnd::New((void*)pValue, isFloat64 ? TyMachDouble : TyFloat32, instrInsert->m_func);
     }
     IR::Instr * instr = IR::Instr::New(Js::OpCode::FLDR, opndDst, opnd, instrInsert->m_func);
     instrInsert->InsertBefore(instr);
