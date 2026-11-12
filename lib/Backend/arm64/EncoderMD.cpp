@@ -1140,6 +1140,11 @@ EncoderMD::GenerateEncoding(IR::Instr* instr, BYTE *pc)
         Assert(false);
         break;
 
+    // Legalizer should convert this to UDIV/MSUB before getting here
+    case Js::OpCode::UREM:
+        Assert(false);
+        break;
+
     case Js::OpCode::SBFX:
         bytes = this->EmitBitfield(Emitter, instr, EmitSbfx, EmitSbfx64);
         break;
@@ -1189,6 +1194,10 @@ EncoderMD::GenerateEncoding(IR::Instr* instr, BYTE *pc)
 
     case Js::OpCode::UBFX:
         bytes = this->EmitBitfield(Emitter, instr, EmitUbfx, EmitUbfx64);
+        break;
+
+    case Js::OpCode::UDIV:
+        bytes = this->EmitOp3Register(Emitter, instr, EmitUdiv, EmitUdiv64);
         break;
 
     case Js::OpCode::FABS:

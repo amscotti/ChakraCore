@@ -101,6 +101,8 @@ MACRO(TBNZ,       BrReg2,     OpSideEffect,   UNUSED,   LEGAL_TBZ,      UNUSED, 
 MACRO(TBZ,        BrReg2,     OpSideEffect,   UNUSED,   LEGAL_TBZ,      UNUSED,   D___)
 MACRO(TST,        Reg2,       OpSideEffect,   UNUSED,   LEGAL_PSEUDO,   UNUSED,   D__S)
 MACRO(UBFX,       Reg3,       0,              UNUSED,   LEGAL_BITFIELD, UNUSED,   D___)
+MACRO(UDIV,       Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)
+MACRO(UREM,       Reg3,       OpSideEffect,   UNUSED,   LEGAL_REG3,     UNUSED,   D___)
 
 // Pseudo-op that loads the size of the arg out area. A special op with no src is used so that the
 // actual arg out size can be fixed up by the encoder.

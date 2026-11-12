@@ -6107,13 +6107,17 @@ LowererMD::EmitInt4Instr(IR::Instr *instr)
         break;
 
     case Js::OpCode::DivU_I4:
-        AssertMsg(UNREACHED, "Unsigned div NYI");
+        instr->m_opcode = Js::OpCode::UDIV;
+        break;
+
     case Js::OpCode::Div_I4:
         instr->m_opcode = Js::OpCode::SDIV;
         break;
 
     case Js::OpCode::RemU_I4:
-        AssertMsg(UNREACHED, "Unsigned rem NYI");
+        instr->m_opcode = Js::OpCode::UREM;
+        break;
+
     case Js::OpCode::Rem_I4:
         instr->m_opcode = Js::OpCode::REM;
         break;
@@ -7822,7 +7826,7 @@ LowererMD::FinalLower()
                     }
                 }
             }
-            else if (LowererMD::IsAssign(instr) || instr->m_opcode == Js::OpCode::LEA || instr->m_opcode == Js::OpCode::LDARGOUTSZ || instr->m_opcode == Js::OpCode::REM)
+            else if (LowererMD::IsAssign(instr) || instr->m_opcode == Js::OpCode::LEA || instr->m_opcode == Js::OpCode::LDARGOUTSZ || instr->m_opcode == Js::OpCode::REM || instr->m_opcode == Js::OpCode::UREM)
             {
                 // Cleanup spill code
                 // INSTR_BACKWARD_EDITING_IN_RANGE implies that next loop iteration will use instrPrev (instr->m_prev computed before entering current loop iteration).
@@ -7998,6 +8002,48 @@ LowererMD::FinalLowerAssign(IR::Instr * instr)
         {
             // dst = SDIV src1, src2
             IR::Instr *divInstr = IR::Instr::New(Js::OpCode::SDIV, dst, src1, src2, instr->m_func);
+            instr->InsertBefore(divInstr);
+
+            // dst = MSUB src1, src2, dst (dst = src1 - src2 * dst)
+            instr->m_opcode = Js::OpCode::MSUB;
+        }
+        return true;
+    }
+    else if (instr->m_opcode == Js::OpCode::UREM)
+    {
+        IR::Opnd* dst = instr->GetDst();
+        IR::Opnd* src1 = instr->GetSrc1();
+        IR::Opnd* src2 = instr->GetSrc2();
+
+        Assert(src1->IsRegOpnd());
+        Assert(src2->IsRegOpnd());
+
+        RegNum dstReg = dst->AsRegOpnd()->GetReg();
+
+        if (dstReg == src1->AsRegOpnd()->GetReg() || dstReg == src2->AsRegOpnd()->GetReg())
+        {
+            Assert(src1->AsRegOpnd()->GetReg() != SCRATCH_REG);
+            Assert(src2->AsRegOpnd()->GetReg() != SCRATCH_REG);
+            Assert(src1->GetType() == src2->GetType());
+
+            // r17 = UDIV src1, src2
+            IR::RegOpnd *regScratch = IR::RegOpnd::New(nullptr, SCRATCH_REG, src1->GetType(), instr->m_func);
+            IR::Instr *insertInstr = IR::Instr::New(Js::OpCode::UDIV, regScratch, src1, src2, instr->m_func);
+            instr->InsertBefore(insertInstr);
+
+            // r17 = MSUB src1, src2, r17 (r17 = src1 - src2 * r17)
+            insertInstr = IR::Instr::New(Js::OpCode::MSUB, regScratch, src1, src2, instr->m_func);
+            instr->InsertBefore(insertInstr);
+
+            // mov dst, r17
+            insertInstr = IR::Instr::New(dst->IsFloat() ? Js::OpCode::FMOV : Js::OpCode::MOV, dst, regScratch, instr->m_func);
+            instr->InsertBefore(insertInstr);
+            instr->Remove();
+        }
+        else
+        {
+            // dst = UDIV src1, src2
+            IR::Instr *divInstr = IR::Instr::New(Js::OpCode::UDIV, dst, src1, src2, instr->m_func);
             instr->InsertBefore(divInstr);
 
             // dst = MSUB src1, src2, dst (dst = src1 - src2 * dst)
