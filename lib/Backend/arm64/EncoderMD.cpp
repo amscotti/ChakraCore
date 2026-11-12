@@ -931,6 +931,10 @@ EncoderMD::GenerateEncoding(IR::Instr* instr, BYTE *pc)
         bytes = this->EmitOp2Register(Emitter, instr, EmitClz, EmitClz64);
         break;
 
+    case Js::OpCode::RBIT:
+        bytes = this->EmitOp2Register(Emitter, instr, EmitRbit, EmitRbit64);
+        break;
+
     // Legalizer should convert this to SUBS before getting here
     case Js::OpCode::CMP:
         Assert(false);

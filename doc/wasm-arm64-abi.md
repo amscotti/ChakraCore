@@ -784,3 +784,22 @@ explicit `GenerateThrow` / `GenerateRuntimeError`).
 
 
 
+
+### W5 decision addenda (2026-11-11)
+
+#### Q2 — float args ride int (x) slots (LowerMD feature, not D-register)
+
+[decision] **Internal wasm → wasm / wasm → helper float args ride x-regs.** The ABI §3
+"takes d0-d7 for floats" is superseded for the wasm-internal path on ARM64. Evidence:
+`LowerCallArgs` (`lib/Backend/arm64/LowerMD.cpp:958-978`) translates a float source to an
+x-register via `FMOV_GEN` bitcopy (never `MOV float->int`), `AsmJsJitCall`
+(`lib/Backend/arm64/Thunks.S:96-117`) loads only `x0-x7` from the slot image, and `UnboxAsmJsArguments` stores float/double as 8-byte slot values (`*(float*)argDst` / `*(double*)argDst` in `lib/Runtime/Language/AsmJsUtils.cpp:298,321`). `LowerEntryInstr` homes only `x0-x7` (`lib/Backend/arm64/LowerMD.cpp:1742-1759`, `FirstIntArgReg`..`LastIntArgReg`). `HomeJsCallArgs` therefore only homes x-regs (`:1104-1132`); d-register homing is not needed for wasm-internal image. `GetOpndForArgSlot` float branch serves only helper calls (`d0-d7` for `JnHelperMethod`s), not the wasm-internal slot image. Differential probes (8-arg float, internal float 8/9-arg, int 6-9) match interpreter vs JIT; see §Q2 validation note. The doc §3 AAPCS64 d-register text remains the long-term ideal; the implementation's slot-bit transport is the gated contract until W8 SIMD needs Q.
+
+#### Q4 — multi-value is WasmSignature-keyed (W7 implements)
+
+[decision] **Keep `AsmJsRetType` single-valued; multi-value rides `WasmSignature::GetResultCount()>1`.** Rationale: `WasmSignature` already stores `m_results[]` / count (`lib/WasmReader/WasmSignature.h:26-27`, `lib/WasmReader/WasmSignature.cpp:45-74`), while `AsmJsRetType` and `AsmJsReturnStruct` are single-valued (`lib/Runtime/Language/AsmJsTypes.h:176-218`, `lib/Runtime/Language/InterpreterStackFrame.h:94-110`). The packed short-sig is already disabled for >1 result (`WasmSignature.cpp:163-169`). New groundwork: `IsMultiValue()/IsSingleValue()/IsVoid()` helpers in `WasmSignature.h` (W5). The §7 x8 area design is kept but not implemented until W7 (rejected until then with a controlled `SignatureMismatch` check).
+
+#### Q5 — frame side-table minimal encoding (W3/W6)
+
+[decision] **Side-table keyed by any return address in the JIT body → {frame extent, arg count}.** Required until W6 refines: `CheckJavascriptFrame` already excludes asm.js frames by `GetIsAsmjsMode()` (`lib/Runtime/Language/JavascriptStackWalker.cpp:1017-1020` reads, `FunctionBody::GetIsAsmjsMode` in `lib/Runtime/Base/FunctionBody.h:1587-1590`); the side table only needs to record extent+arg layout so the walker can skip the frame without decoding `CallInfo`. Minimal encoding: for each jitted asm.js function, a vector of `{codeStart, codeEnd, frameSize, argSlotCount}` built from `Func::m_localStackHeight + HomedParamsSize` at emit time (`LowerMD.cpp:1588-1592` layout) and consulted by `JavascriptStackWalker::IsNativeAddress` / GC scan. It is emitted via `NativeCodeData` (same as pdata/xdata) and lives as long as the heap block (`EmitBufferManager`). No interpreter side needed (interpreter frames use `InterpreterStackFrame` chain). W6 will replace with a per-function table if needed; the walker skip rule is fixed: skip wasm frames, never decode them as JS.
+

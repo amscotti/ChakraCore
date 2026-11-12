@@ -101,10 +101,10 @@ public:
             bool            GenerateFastCmXxTaggedInt(IR::Instr *instr, bool isInHelper = false);
             IR::Instr *     GenerateConvBool(IR::Instr *instr);
             void            GenerateClz(IR::Instr * instr);
-            void            GenerateCtz(IR::Instr * instr) { Assert(UNREACHED); }
-            void            GeneratePopCnt(IR::Instr * instr) { Assert(UNREACHED); }
+            void            GenerateCtz(IR::Instr * instr);
+            void            GeneratePopCnt(IR::Instr * instr);
             template <bool Saturate>
-            void            GenerateTruncWithCheck(IR::Instr * instr) { Assert(UNREACHED); }
+            void            GenerateTruncWithCheck(IR::Instr * instr);
             void            GenerateFastDivByPow2(IR::Instr *instr);
             bool            GenerateFastDivAndRem(IR::Instr* instrDiv, IR::LabelInstr* bailOutLabel = nullptr);
             bool            GenerateFastAdd(IR::Instr * instrAdd);
@@ -184,14 +184,14 @@ public:
             void                EmitIntToFloat(IR::Opnd *dst, IR::Opnd *src, IR::Instr *instrInsert);
             void                EmitUIntToFloat(IR::Opnd *dst, IR::Opnd *src, IR::Instr *instrInsert);
             void                EmitFloatToInt(IR::Opnd *dst, IR::Opnd *src, IR::Instr *instrInsert, IR::Instr * instrBailOut = nullptr, IR::LabelInstr * labelBailOut = nullptr);
-            void                EmitFloat32ToFloat64(IR::Opnd *dst, IR::Opnd *src, IR::Instr *instrInsert) { Assert(UNREACHED); }
-            void                EmitInt64toFloat(IR::Opnd *dst, IR::Opnd *src, IR::Instr *instrInsert) {  Assert(UNREACHED); }
+            void                EmitFloat32ToFloat64(IR::Opnd *dst, IR::Opnd *src, IR::Instr *instrInsert);
+            void                EmitInt64toFloat(IR::Opnd *dst, IR::Opnd *src, IR::Instr *instrInsert);
             static IR::Instr *  InsertConvertFloat64ToInt32(const RoundMode roundMode, IR::Opnd *const dst, IR::Opnd *const src, IR::Instr *const insertBeforeInstr);
             void                EmitIntToLong(IR::Opnd *dst, IR::Opnd *src, IR::Instr *instrInsert);
             void                EmitUIntToLong(IR::Opnd *dst, IR::Opnd *src, IR::Instr *instrInsert);
             void                EmitLongToInt(IR::Opnd *dst, IR::Opnd *src, IR::Instr *instrInsert);
-            void                EmitSignExtend(IR::Instr * instr) { Assert(UNREACHED); }
-            void                EmitReinterpretPrimitive(IR::Opnd* dst, IR::Opnd* src, IR::Instr* insertBeforeInstr) { Assert(UNREACHED); }
+            void                EmitSignExtend(IR::Instr * instr);
+            void                EmitReinterpretPrimitive(IR::Opnd* dst, IR::Opnd* src, IR::Instr* insertBeforeInstr);
             void                EmitLoadFloatFromNumber(IR::Opnd *dst, IR::Opnd *src, IR::Instr *insertInstr);
             IR::LabelInstr*     EmitLoadFloatCommon(IR::Opnd *dst, IR::Opnd *src, IR::Instr *insertInstr, bool needHelperLabel);
             static IR::Instr *  LoadFloatZero(IR::Opnd * opndDst, IR::Instr * instrInsert);
@@ -267,6 +267,9 @@ public:
 
 private:
     static  IR::Instr *     ChangeToAssign(IR::Instr * instr, IRType destType);
+    template <bool Saturate>
+    IR::Opnd*               GenerateTruncChecks(IR::Instr* instr, IR::LabelInstr* doneLabel);
+    IR::RegOpnd*            MaterializeDoubleConst(intptr_t constAddr, IR::Instr* instr);
     void GenerateAssignForBuiltinArg(
         RegNum dstReg,
         IR::Opnd* srcOpnd,

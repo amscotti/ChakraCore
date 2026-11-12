@@ -559,6 +559,16 @@ DoD: `test/AsmJs` (144 entries) and `test/AsmJsFloat` pass on the
 of success criterion 3 passes (asm.js trace asserted + median wall
 ≤ 20 s over 5 bench runs).
 
+Entry-convention invariant (tranche 7 finding, must hold for every
+slice): the Var-convention `AsmJsExternalEntryPoint` serves JS
+dispatch only (DynamicType entry installed at link). Every address
+reachable by slot-image callers (`entryPointInfo->jsMethod`,
+original entry, `AsmJsGetEntryPoint`, `CheckAsmJsCodeGen` idle
+return, Expire/debugger fallbacks) must be slot-image-compatible
+(JIT code, codegen thunk, or the slot-image delay thunk). Installing
+the Var entry there segfaults deterministically on the first
+JIT→uncompiled-callee call (tranche-7 merge validation).
+
 Depends on: W4 slices 1–2 minimum.
 
 ### W6 — GC, stack walking, and memory safety (P1 interpreter scope; P2 JIT scope)

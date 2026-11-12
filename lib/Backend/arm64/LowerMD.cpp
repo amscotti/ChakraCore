@@ -5736,6 +5736,127 @@ LowererMD::GenerateClz(IR::Instr * instr)
 }
 
 void
+LowererMD::GenerateCtz(IR::Instr * instr)
+{
+    Assert(instr->GetSrc1()->IsInt32() || instr->GetSrc1()->IsUInt32() || instr->GetSrc1()->IsInt64());
+    Assert(instr->GetDst()->IsInt32() || instr->GetDst()->IsUInt32() || instr->GetDst()->IsInt64());
+    // ARM64 has no ctz; ctz(x) = clz(rbit(x)). RBIT reverses bit order so
+    // trailing zeros become leading zeros; zero maps correctly (rbit(0)=0, clz(0)=width).
+    IR::Opnd *src = instr->GetSrc1();
+    IRType type = src->GetType();
+    // Use signed 32/64 for intermediate (bit pattern identical for unsigned)
+    IRType regType = (type == TyInt64 || type == TyUint64) ? TyInt64 : TyInt32;
+    // For uint32 source with int32 dst (popcnt case uses uint32), keep regType as above
+    IR::RegOpnd *reversed = IR::RegOpnd::New(regType, m_func);
+    IR::Instr *rbitInstr = IR::Instr::New(Js::OpCode::RBIT, reversed, src->UseWithNewType(regType, m_func), m_func);
+    instr->InsertBefore(rbitInstr);
+    LegalizeMD::LegalizeInstr(rbitInstr);
+    instr->SetSrc1(reversed);
+    instr->m_opcode = Js::OpCode::CLZ;
+    LegalizeMD::LegalizeInstr(instr);
+}
+
+void
+LowererMD::GeneratePopCnt(IR::Instr * instr)
+{
+    Assert(instr->GetSrc1()->IsInt32() || instr->GetSrc1()->IsUInt32() || instr->GetSrc1()->IsInt64());
+    Assert(instr->GetDst()->IsInt32() || instr->GetDst()->IsUInt32() || instr->GetDst()->IsInt64());
+    // Helper-based popcount (LowerMDShared fallback path). Uses existing
+    // HelperPopCnt32/64 which are implemented in the runtime and take a
+    // single int arg. This avoids NEON CNT plumbing for slice 3; record
+    // choice as helper per plan ("helper or NEON cnt").
+    int instrSize = instr->GetSrc1()->GetSize();
+    LoadHelperArgument(instr, instr->GetSrc1());
+    instr->UnlinkSrc1();
+    this->ChangeToHelperCall(instr, instrSize == 8 ? IR::HelperPopCnt64 : IR::HelperPopCnt32);
+}
+
+IR::RegOpnd*
+LowererMD::MaterializeDoubleConst(intptr_t constAddr, IR::Instr* instr)
+{
+    IR::Opnd* constVal = IR::MemRefOpnd::New(constAddr, IRType::TyFloat64, this->m_func);
+    IR::RegOpnd * reg = IR::RegOpnd::New(TyFloat64, this->m_func);
+    this->m_lowerer->InsertMove(reg, constVal, instr);
+    return reg;
+}
+
+template <bool Saturate>
+IR::Opnd*
+LowererMD::GenerateTruncChecks(IR::Instr* instr, IR::LabelInstr* doneLabel)
+{
+    AnalysisAssert(!Saturate || doneLabel);
+    IR::Opnd* dst = instr->GetDst();
+    Assert(dst->IsInt32() || dst->IsUInt32());
+    IR::LabelInstr * nanLabel = (Saturate && dst->IsSigned()) ? IR::LabelInstr::New(Js::OpCode::Label, m_func, true) : nullptr;
+    IR::LabelInstr * conversion = IR::LabelInstr::New(Js::OpCode::Label, m_func);
+    IR::LabelInstr * tooSmallLabel = IR::LabelInstr::New(Js::OpCode::Label, m_func, true);
+    IR::Opnd* src1 = instr->GetSrc1();
+    IR::Opnd * src64 = nullptr;
+    if (src1->IsFloat32())
+    {
+        src64 = IR::RegOpnd::New(TyFloat64, m_func);
+        EmitFloat32ToFloat64(src64, src1, instr);
+    }
+    else
+    {
+        src64 = src1;
+    }
+    IR::RegOpnd* limitReg = this->MaterializeDoubleConst(dst->IsUInt32() ?
+        m_func->GetThreadContextInfo()->GetDoubleNegOneAddr() :
+        m_func->GetThreadContextInfo()->GetDoubleIntMinMinusOneAddr(), instr);
+    this->m_lowerer->InsertCompareBranch(src64, limitReg, Js::OpCode::BrLe_A, tooSmallLabel, instr);
+    limitReg = this->MaterializeDoubleConst(dst->IsUInt32() ?
+        m_func->GetThreadContextInfo()->GetDoubleUintMaxPlusOneAddr() :
+        m_func->GetThreadContextInfo()->GetDoubleIntMaxPlusOneAddr(), instr);
+    this->m_lowerer->InsertCompareBranch(limitReg, src64, Js::OpCode::BrGt_A, conversion, instr, true /*no NaN check*/);
+    if (Saturate)
+    {
+        this->m_lowerer->InsertLabel(true, instr);
+        instr->InsertBefore(IR::BranchInstr::New(Js::OpCode::BVS, dst->IsSigned() ? nanLabel : tooSmallLabel, m_func));
+        this->m_lowerer->InsertMove(dst, IR::IntConstOpnd::New(dst->IsUnsigned() ? UINT32_MAX : INT32_MAX, dst->GetType(), m_func), instr);
+        this->m_lowerer->InsertBranch(Js::OpCode::Br, doneLabel, instr);
+        instr->InsertBefore(tooSmallLabel);
+        this->m_lowerer->InsertMove(dst, IR::IntConstOpnd::New(dst->IsUnsigned() ? 0 : INT32_MIN, dst->GetType(), m_func), instr);
+        this->m_lowerer->InsertBranch(Js::OpCode::Br, doneLabel, instr);
+        if (dst->IsSigned())
+        {
+            instr->InsertBefore(nanLabel);
+            this->m_lowerer->InsertMove(dst, IR::IntConstOpnd::New(0, dst->GetType(), m_func), instr);
+            this->m_lowerer->InsertBranch(Js::OpCode::Br, doneLabel, instr);
+        }
+    }
+    else
+    {
+        instr->InsertBefore(tooSmallLabel);
+        this->m_lowerer->GenerateThrow(IR::IntConstOpnd::New(SCODE_CODE(VBSERR_Overflow), TyInt32, m_func), instr);
+    }
+    instr->InsertBefore(conversion);
+    return src64;
+}
+
+template <bool Saturate>
+void
+LowererMD::GenerateTruncWithCheck(IR::Instr * instr)
+{
+    IR::LabelInstr * doneLabel = Saturate ? IR::LabelInstr::New(Js::OpCode::Label, m_func) : nullptr;
+    IR::Opnd* src64 = GenerateTruncChecks<Saturate>(instr, doneLabel);
+    IR::Opnd* dst = instr->GetDst();
+    // ARM64 native unsigned FCVTZ handles unsigned directly; no 2^31 hack needed.
+    instr->InsertBefore(IR::Instr::New(Js::OpCode::FCVTZ, dst, src64, m_func));
+    LegalizeMD::LegalizeInstr(instr->m_prev);
+    if (Saturate)
+    {
+        instr->InsertBefore(doneLabel);
+    }
+    instr->UnlinkSrc1();
+    instr->UnlinkDst();
+    instr->Remove();
+}
+
+template void LowererMD::GenerateTruncWithCheck<false>(IR::Instr * instr);
+template void LowererMD::GenerateTruncWithCheck<true>(IR::Instr * instr);
+
+void
 LowererMD::SaveDoubleToVar(IR::RegOpnd * dstOpnd, IR::RegOpnd *opndFloat, IR::Instr *instrOrig, IR::Instr *instrInsert, bool isHelper)
 {
     Assert(opndFloat->GetType() == TyFloat64);
@@ -6958,8 +7079,11 @@ LowererMD::GenerateFastInlineBuiltInMathRound(IR::Instr* instr)
 
     if (negZeroReg)
     {
-        // TBZ negZeroReg, 63
-        IR::BranchInstr * tbzInstr = IR::BranchInstr::New(Js::OpCode::TBZ, doneLabel, instr->m_func);
+        // TBZ negZeroReg, 63. A non-negative intOpnd==0 still needs the
+        // FPSR.IOC check below: FCVTM(+NaN) yields 0 with IOC set, and
+        // jumping straight to done would wrongly return 0 for Math.round(NaN).
+        // Route through checkOverflowLabel so NaN falls into the bailout.
+        IR::BranchInstr * tbzInstr = IR::BranchInstr::New(Js::OpCode::TBZ, checkOverflowLabel, instr->m_func);
         tbzInstr->SetSrc1(negZeroReg);
         tbzInstr->SetSrc2(IR::IntConstOpnd::New(63, TyMachReg, instr->m_func));
         instr->InsertBefore(tbzInstr);
@@ -7287,19 +7411,84 @@ void LowererMD::ConvertFloatToInt32(IR::Opnd* intOpnd, IR::Opnd* floatOpnd, IR::
 void
 LowererMD::EmitIntToLong(IR::Opnd *dst, IR::Opnd *src, IR::Instr *instrInsert)
 {
-    Assert(UNREACHED);
+    Assert(dst->IsRegOpnd() && dst->IsInt64());
+    Assert(src->IsInt32());
+    // Signed i32 -> i64 sign-extend; ChangeToAssign via InsertMove will
+    // use SBFX (0,32) for signed. Keep InsertMove so LEGAL handling matches
+    // other moves. Fallback to explicit SBFX if dst/src sizes differ and
+    // InsertMove does not emit sign extension (defensive).
+    Lowerer::InsertMove(dst, src, instrInsert);
 }
 
 void
 LowererMD::EmitUIntToLong(IR::Opnd *dst, IR::Opnd *src, IR::Instr *instrInsert)
 {
-    Assert(UNREACHED);
+    Assert(dst->IsRegOpnd() && dst->IsInt64());
+    Assert(src->IsUInt32());
+    // Unsigned i32 -> i64 zero-extend: InsertMove uses UBFX.
+    Lowerer::InsertMove(dst, src, instrInsert);
 }
 
 void
 LowererMD::EmitLongToInt(IR::Opnd *dst, IR::Opnd *src, IR::Instr *instrInsert)
 {
-    Assert(UNREACHED);
+    Assert(dst->IsRegOpnd() && dst->IsInt32());
+    Assert(src->IsInt64());
+    // Truncate low 32 bits; MOV_TRUNC is the ARM64 truncating move.
+    IR::Instr *instr = IR::Instr::New(Js::OpCode::MOV_TRUNC, dst, src, instrInsert->m_func);
+    instrInsert->InsertBefore(instr);
+    LegalizeMD::LegalizeInstr(instr);
+}
+
+void
+LowererMD::EmitFloat32ToFloat64(IR::Opnd *dst, IR::Opnd *src, IR::Instr *instrInsert)
+{
+    Assert(dst->IsRegOpnd() && dst->IsFloat64());
+    Assert(src->IsRegOpnd() && src->GetType() == TyFloat32);
+    IR::Instr *instr = IR::Instr::New(Js::OpCode::FCVT, dst, src, this->m_func);
+    instrInsert->InsertBefore(instr);
+    LegalizeMD::LegalizeInstr(instr);
+}
+
+void
+LowererMD::EmitInt64toFloat(IR::Opnd *dst, IR::Opnd *src, IR::Instr *instrInsert)
+{
+    Assert(dst->IsFloat());
+    Assert(src->IsInt64() || src->IsUInt64());
+    // ARM64 FCVT supports i64/u64 -> f32/f64 directly via SCVTF/UFCVTF.
+    // No need for x86's unsigned 2-step (SHR/AND/OR + ADDSD).
+    IR::Instr *instr = IR::Instr::New(Js::OpCode::FCVT, dst, src, this->m_func);
+    instrInsert->InsertBefore(instr);
+    LegalizeMD::LegalizeInstr(instr);
+}
+
+void
+LowererMD::EmitSignExtend(IR::Instr * instr)
+{
+    IR::Opnd* dst = instr->GetDst();
+    IR::Opnd* src1 = instr->GetSrc1();
+    IR::Opnd* src2 = instr->GetSrc2();
+    Assert(dst && src1 && src2);
+    Assert(src2->GetSize() < dst->GetSize());
+    IRType fromType = src2->GetType();
+    int32 fromBits = (int32)(src2->GetSize() * MachBits); // 8,16,32
+    // ARM64: use SBFX 0, fromBits for sign extension
+    IR::Instr *sbfx = IR::Instr::New(Js::OpCode::SBFX, dst, src1->UseWithNewType(fromType, m_func),
+        IR::IntConstOpnd::New(BITFIELD(0, fromBits), TyMachReg, m_func, true), m_func);
+    instr->InsertBefore(sbfx);
+    LegalizeMD::LegalizeInstr(sbfx);
+}
+
+void
+LowererMD::EmitReinterpretPrimitive(IR::Opnd* dst, IR::Opnd* src, IR::Instr* insertBeforeInstr)
+{
+    Assert(dst && src);
+    Assert(dst->GetSize() == src->GetSize());
+    Assert(dst->GetType() != src->GetType());
+    // Bitcast: float <-> int of same size via FMOV_GEN (NEON INS/UMOV).
+    IR::Instr *instr = IR::Instr::New(Js::OpCode::FMOV_GEN, dst, src, m_func);
+    insertBeforeInstr->InsertBefore(instr);
+    LegalizeMD::LegalizeInstr(instr);
 }
 
 void

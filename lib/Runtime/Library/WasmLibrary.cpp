@@ -24,6 +24,11 @@ namespace Js
     void WasmLibrary::ResetFunctionBodyDefaultEntryPoint(FunctionBody* body)
     {
         body->GetDefaultFunctionEntryPointInfo()->SetIsAsmJSFunction(true);
+        // Slot-image delay thunk: internal (JIT/interpreter) callers resolve
+        // jsMethod/original and jump with the unboxed slot image. The
+        // Var-convention AsmJsExternalEntryPoint serves JS dispatch only (via
+        // the DynamicType entry installed at link) and must never be a
+        // slot-image target (deterministic SIGSEGV otherwise).
         body->GetDefaultFunctionEntryPointInfo()->jsMethod = AsmJsDefaultEntryThunk;
         body->SetOriginalEntryPoint(AsmJsDefaultEntryThunk);
         // Reset jit status for this function

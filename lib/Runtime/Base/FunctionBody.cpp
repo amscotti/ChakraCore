@@ -3759,11 +3759,22 @@ namespace Js
             if (body->IsWasmFunction() && body->GetByteCodeCount() == 0)
             {
                 // The only valid 2 entrypoints if the function hasn't been parsed
+                // ARM64: JS dispatch uses the Var-convention external entry
+                // (installed at link); EnsureWasmEntrypoint parses on first call.
+#if defined(_M_ARM64)
+                return directEntryPoint == (JavascriptMethod)&Js::AsmJsExternalEntryPoint || directEntryPoint == WasmLibrary::WasmLazyTrapCallback;
+#else
                 return directEntryPoint == AsmJsDefaultEntryThunk || directEntryPoint == WasmLibrary::WasmLazyTrapCallback;
+#endif
             }
 #endif
             // Entrypoints valid only for asm.js/wasm
-            if (directEntryPoint == AsmJsDefaultEntryThunk || IsAsmJsCodeGenThunk(directEntryPoint))
+            // (includes the Var-convention external entry: JS dispatch)
+            if (directEntryPoint == AsmJsDefaultEntryThunk || IsAsmJsCodeGenThunk(directEntryPoint)
+#if defined(_M_ARM64)
+                || directEntryPoint == (JavascriptMethod)&Js::AsmJsExternalEntryPoint
+#endif
+                )
             {
                 return true;
             }
@@ -9483,12 +9494,15 @@ namespace Js
                 else if (functionBody->GetIsAsmJsFunction())
                 {
                     // the new entrypoint will be set to interpreter
+                    // (slot-image delay thunk: the expired entry is resolved
+                    // by internal callers with the unboxed slot image; the
+                    // Var-convention external entry would segfault there).
                     newEntryPoint = functionBody->CreateNewDefaultEntryPoint();
                     newEntryPoint->SetIsAsmJSFunction(true);
                     newEntryPoint->jsMethod = AsmJsDefaultEntryThunk;
+                    this->functionProxy->SetOriginalEntryPoint(AsmJsDefaultEntryThunk);
                     functionBody->SetIsAsmJsFullJitScheduled(false);
                     functionBody->SetDefaultInterpreterExecutionMode();
-                    this->functionProxy->SetOriginalEntryPoint(AsmJsDefaultEntryThunk);
                 }
 #endif
                 else

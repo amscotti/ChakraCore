@@ -629,4 +629,10 @@
       <compile-flags>-force:deferparse</compile-flags>
     </default>
   </test>
+  <test>
+    <default>
+      <files>math-round-nan.js</files>
+      <compile-flags>-mic:1 -off:simplejit -bgjit-</compile-flags>
+    </default>
+  </test>
 </regress-exe>

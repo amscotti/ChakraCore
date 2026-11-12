@@ -639,10 +639,17 @@ namespace Js
         // original, which cannot consume the AAPCS64 image (W4 slices 1+2).
         {
             JavascriptMethod jsMethod = ((Js::FunctionEntryPointInfo*)func->GetEntryPointInfo())->jsMethod;
+            // Defense in depth: the Var-convention external entry serves JS
+            // dispatch only and can never drive a slot-image call. Treat it
+            // as interpreter-tier like the delay thunks.
             bool useJit = (jsMethod != nullptr &&
                            jsMethod != InterpreterStackFrame::AsmJsDelayDynamicInterpreterThunk &&
                            jsMethod != InterpreterStackFrame::DelayDynamicInterpreterThunk &&
-                           jsMethod != GetCheckAsmJsCodeGenThunk());
+                           jsMethod != GetCheckAsmJsCodeGenThunk() &&
+#if defined(_M_ARM64)
+                           jsMethod != (JavascriptMethod)&Js::AsmJsExternalEntryPoint &&
+#endif
+                           true);
             if (useJit)
             {
                 int unboxSize = GetStackSizeForAsmJsUnboxing(func);

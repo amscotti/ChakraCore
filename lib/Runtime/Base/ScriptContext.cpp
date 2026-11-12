@@ -5809,12 +5809,10 @@ ScriptContext::GetJitFuncRangeCache()
 #ifdef ASMJS_PLAT
         return (JavascriptMethod)this->asmJsInterpreterThunkEmitter->GetNextThunk(ppDynamicInterpreterThunk);
 #elif defined(_M_ARM64)
-        // ARM64 W3: no dynamic asm emitter (interpreter-only, C++ dispatch).
-        // Return the delay/interpreter entry directly; ppDynamicInterpreterThunk
-        // stays null so cleanup releases nothing. The wasm entry paths
-        // (AsmJsExternalEntryPoint / CallAsmJsFunction) run the interpreter
-        // without the emitted thunk; this covers FunctionBody
-        // GenerateDynamicInterpreterThunk if reached (e.g. background codegen).
+        // ARM64: delay thunk expects the slot-image (unboxed) convention
+        // used by internal callers. The Var-convention external entry serves
+        // JS dispatch only (DynamicType entry) and must never be installed
+        // where slot-image callers resolve it.
         *ppDynamicInterpreterThunk = nullptr;
         return (JavascriptMethod)&Js::InterpreterStackFrame::AsmJsDelayDynamicInterpreterThunk;
 #else

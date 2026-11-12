@@ -1604,10 +1604,17 @@ dbl_align:
     static bool TryCallAsmJsJit(ScriptFunction* func, Var* argv, uint argsSize, byte* outRet)
     {
         JavascriptMethod jsMethod = ((Js::FunctionEntryPointInfo*)func->GetEntryPointInfo())->jsMethod;
+        // Defense in depth: the Var-convention external entry serves JS
+        // dispatch only and can never drive a slot-image call. If one is
+        // ever resolved here, interpret instead of bridging into it.
         if (jsMethod == nullptr ||
             jsMethod == InterpreterStackFrame::AsmJsDelayDynamicInterpreterThunk ||
             jsMethod == InterpreterStackFrame::DelayDynamicInterpreterThunk ||
-            jsMethod == GetCheckAsmJsCodeGenThunk())
+            jsMethod == GetCheckAsmJsCodeGenThunk()
+#if defined(_M_ARM64)
+            || jsMethod == (JavascriptMethod)&Js::AsmJsExternalEntryPoint
+#endif
+            )
         {
             // Interpreter-tier (DelayThunks) or codegen-pending (thunk jumps to
             // the Var-convention original): caller interprets (W4 slices 1+2).

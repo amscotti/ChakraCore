@@ -25,6 +25,14 @@ public:
     void SetResult(Local type, uint32 index);
     uint32 GetResultCount() const { return m_resultsCount; }
     Local GetResult(uint32 index) const;
+    // W5 Q4: WasmSignature-keyed multi-value groundwork (decision §7).
+    // Keep keyed off WasmSignature, not AsmJsRetType (which stays
+    // single-valued). W7 implements the area transfer; until then
+    // multi-value signatures are rejected at compile/link with
+    // WASMERR_SignatureMismatch (see gate in FinalizeSignature).
+    bool IsMultiValue() const { return GetResultCount() > 1; }
+    bool IsSingleValue() const { return GetResultCount() == 1; }
+    bool IsVoid() const { return GetResultCount() == 0; }
 
     void FinalizeSignature();
     uint32 GetSignatureId() const;
