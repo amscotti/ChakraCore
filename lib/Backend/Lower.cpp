@@ -3114,26 +3114,34 @@ Lowerer::LowerRange(IR::Instr *instrStart, IR::Instr *instrEnd, bool defaultDoFa
         case Js::OpCode::Copysign_A:
             m_lowererMD.GenerateCopysign(instr);
             break;
-
+#endif
+#ifdef ENABLE_ASMJS
         case Js::OpCode::Trunc_A:
+            // ARM64 has no SSE4.1 gate: always use the math helper.
+#if defined(_M_X64) || defined(_M_IX86)
             if (!AutoSystemInfo::Data.SSE4_1Available())
+#endif
             {
                 m_lowererMD.HelperCallForAsmMathBuiltin(instr, IR::HelperDirectMath_TruncFlt, IR::HelperDirectMath_TruncDb);
                 break;
             }
-
+#if defined(_M_X64) || defined(_M_IX86)
             m_lowererMD.GenerateFastInlineBuiltInCall(instr, (IR::JnHelperMethod)0);
             break;
+#endif
 
         case Js::OpCode::Nearest_A:
+#if defined(_M_X64) || defined(_M_IX86)
             if (!AutoSystemInfo::Data.SSE4_1Available())
+#endif
             {
                 m_lowererMD.HelperCallForAsmMathBuiltin(instr, IR::HelperDirectMath_NearestFlt, IR::HelperDirectMath_NearestDb);
                 break;
             }
-
+#if defined(_M_X64) || defined(_M_IX86)
             m_lowererMD.GenerateFastInlineBuiltInCall(instr, (IR::JnHelperMethod)0);
             break;
+#endif
 #endif
         case Js::OpCode::ThrowRuntimeError:
             GenerateThrow(instr->UnlinkSrc1(), instr);
@@ -9632,7 +9640,7 @@ IR::Instr* InsertMaskableMove(bool isStore, bool generateWriteBarrier, IR::Opnd*
 IR::Instr *
 Lowerer::LowerLdArrViewElem(IR::Instr * instr)
 {
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
     Assert(m_func->GetJITFunctionBody()->IsAsmJsMode());
     Assert(instr);
     Assert(instr->m_opcode == Js::OpCode::LdArrViewElem);
@@ -9971,7 +9979,7 @@ IR::Instr * Lowerer::LowerLdAtomicsWasm(IR::Instr * instr)
 IR::Instr *
 Lowerer::LowerStArrViewElem(IR::Instr * instr)
 {
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
     Assert(m_func->GetJITFunctionBody()->IsAsmJsMode());
     Assert(instr);
     Assert(instr->m_opcode == Js::OpCode::StArrViewElem);

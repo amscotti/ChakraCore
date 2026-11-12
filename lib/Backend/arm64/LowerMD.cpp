@@ -312,8 +312,9 @@ LowererMD::LowerCall(IR::Instr * callInstr, Js::ArgSlot argCount)
         Js::OpCode assignOp;
         RegNum returnReg;
 
-        if(dstOpnd->IsFloat64())
+        if(dstOpnd->IsFloat64() || dstOpnd->IsFloat32())
         {
+            // f32 returns in s0 (low half of d0, ABI section 4); f64 in d0.
             assignOp = Js::OpCode::FMOV;
             returnReg = RETURN_DBL_REG;
         }
@@ -692,6 +693,232 @@ LowererMD::LowerCallI(IR::Instr * callInstr, ushort callFlags, bool isHelper, IR
     return ret;
 }
 
+// W4 slice 1 (doc/wasm-arm64-plan.md): asm.js internal/external call lowering.
+// Internal (wasm -> wasm/asm.js) calls load the entrypoint through the
+// ScriptFunction EntryPointInfo jsMethod indirection (mirrors the x64
+// GeneratePreCall AsmJsCallI branch) and pass unboxed args in the wasm
+// slot positions (doc/wasm-arm64-abi.md sections 2-3: internal convention),
+// like x64. External (wasm -> JS import) calls load the Type entrypoint and
+// pass Var args (boxing already done by IRBuilder ToVar conversions).
+IR::Instr *
+LowererMD::GeneratePreCallAsmJs(IR::Instr * callInstr, IR::Opnd * functionObjOpnd, IR::Instr * insertBeforeInstrForCFGCheck)
+{
+#if !defined(ENABLE_WASM)
+    // Asm.js entrypoint resolution (JnHelper AsmJsGetEntryPoint) only
+    // exists in wasm builds; unreachable otherwise.
+    (void)callInstr; (void)functionObjOpnd; (void)insertBeforeInstrForCFGCheck;
+    Assert(UNREACHED);
+    return nullptr;
+#else
+    if (insertBeforeInstrForCFGCheck == nullptr)
+    {
+        insertBeforeInstrForCFGCheck = callInstr;
+    }
+    Assert(functionObjOpnd->IsRegOpnd());
+    // Resolve the internal-call entrypoint (EntryPointInfo::jsMethod) through
+    // the JnHelper machinery rather than a hand-written field chain: the
+    // three-load chain is not lowered reliably on this backend (a torn load
+    // walks to a bogus small address and AsmJsJitCall jumps to 0x1b90/0x1ba0),
+    // while FunctionEntryPointInfo::GetAddress() itself uses this exact
+    // indirection. AsmJsGetEntryPoint does no allocation and cannot reenter.
+    IR::RegOpnd * entryPointOpnd = IR::RegOpnd::New(TyMachPtr, m_func);
+    entryPointOpnd->m_isCallArg = true;
+    IR::Instr * helperCall = IR::Instr::New(Js::OpCode::Call, entryPointOpnd, m_func);
+    insertBeforeInstrForCFGCheck->InsertBefore(helperCall);
+    LoadHelperArgument(helperCall, functionObjOpnd);
+    IR::Instr * call = ChangeToHelperCall(helperCall, IR::HelperOp_GetAsmJsEntryPoint);
+    // The internal call must present the callee function object in x0
+    // (slot 0): the callee reads [fp+0x10] as its function object for its own
+    // module lookups, and a JIT->JIT caller must establish it (the blr
+    // target would otherwise occupy x0, breaking the second level of nested
+    // internal calls). Park the entrypoint in fixed x16 and restore the
+    // function object into fixed x0 right before the internal call.
+    // (ChangeToHelperCall's LowerCall forces entryPointOpnd's result into x0.)
+    IR::RegOpnd * x16Opnd = IR::RegOpnd::New(nullptr, RegR16, TyMachPtr, m_func);
+    IR::RegOpnd * x0Opnd = IR::RegOpnd::New(nullptr, RegR0, TyMachPtr, m_func);
+    Lowerer::InsertMove(x16Opnd, entryPointOpnd, insertBeforeInstrForCFGCheck);
+    Lowerer::InsertMove(x0Opnd, functionObjOpnd, insertBeforeInstrForCFGCheck);
+    callInstr->SetSrc1(x16Opnd);
+    return helperCall;
+#endif
+}
+
+IR::Instr *
+LowererMD::LowerAsmJsCallI(IR::Instr * callInstr)
+{
+    IR::Opnd * functionObjOpnd = callInstr->UnlinkSrc1();
+    IR::Instr * stackParamInsert = GeneratePreCallAsmJs(callInstr, functionObjOpnd, nullptr);
+    // W4 slice 1: wasm params occupy arg slots 3+k in the callee (the codegen
+    // param layout: slot 0 = function, 1,2 = callinfo/env, 3+k = wasm args;
+    // see IRBuilderAsmJs ParamSlotSym(k+1) + formal-param offset). The other
+    // helpers/agreement with the external bridge (which presents [func][gap]
+    // [gap][args] in the slot image) agree on slots 3+k, so extraParams = 2.
+    int32 argCount = this->LowerCallArgs(callInstr, stackParamInsert, Js::CallFlags_Value, 2);
+    IR::Instr * ret = this->LowerCall(callInstr, (Js::ArgSlot)argCount);
+    return ret;
+}
+
+IR::Instr *
+LowererMD::LowerAsmJsCallE(IR::Instr * callInstr)
+{
+    IR::Opnd * functionObjOpnd = callInstr->UnlinkSrc1();
+    Assert(functionObjOpnd->IsRegOpnd());
+    IR::Instr * stackParamInsert = GeneratePreCall(callInstr, functionObjOpnd, nullptr);
+    IR::IntConstOpnd *callInfo = nullptr;
+    int32 argCount = this->LowerCallArgs(callInstr, stackParamInsert, Js::CallFlags_Value, 1, &callInfo);
+    IR::Opnd * opndParam = this->GetOpndForArgSlot(0);
+    Lowerer::InsertMove(opndParam, functionObjOpnd, callInstr);
+    IR::Instr * ret = this->LowerCall(callInstr, (Js::ArgSlot)argCount);
+    return ret;
+}
+
+IR::Instr *
+LowererMD::LoadFloatHelperArgument(IR::Instr * instrInsert, IR::Opnd * opndArg)
+{
+    Assert(opndArg->IsFloat32());
+    return LoadHelperArgument(instrInsert, opndArg);
+}
+
+void
+LowererMD::HelperCallForAsmMathBuiltin(IR::Instr* instr, IR::JnHelperMethod helperMethodFloat, IR::JnHelperMethod helperMethodDouble)
+{
+    Assert(instr->m_opcode == Js::OpCode::InlineMathFloor || instr->m_opcode == Js::OpCode::InlineMathCeil || instr->m_opcode == Js::OpCode::Trunc_A || instr->m_opcode == Js::OpCode::Nearest_A);
+    Assert(instr->GetDst()->IsFloat());
+    Assert(instr->GetDst()->GetType() == instr->GetSrc1()->GetType());
+    Assert(!instr->GetSrc2());
+    IR::Opnd * argOpnd = instr->UnlinkSrc1();
+    IR::JnHelperMethod helperMethod;
+    if (argOpnd->IsFloat32())
+    {
+        helperMethod = helperMethodFloat;
+        LoadFloatHelperArgument(instr, argOpnd);
+    }
+    else
+    {
+        helperMethod = helperMethodDouble;
+        LoadDoubleHelperArgument(instr, argOpnd);
+    }
+    ChangeToHelperCall(instr, helperMethod);
+}
+
+IR::Instr *
+LowererMD::LowerExitInstrAsmJs(IR::ExitInstr * exitInstr)
+{
+    // Epilogue is identical to the JS epilogue (return value already in x0/d0 via LowerRet).
+    return LowerExitInstr(exitInstr);
+}
+
+// W4 slice 2 (doc/wasm-arm64-plan.md): memory ops with explicit bounds
+// checks against the generic buffer (D3, doc/wasm-arm64-abi.md section 8).
+// Ports the x64 LowerWasmArrayBoundsCheck / LowerAsmJs{Ld,St}ElemHelper
+// shapes; traps via GenerateThrow(WASMERR_ArrayIndexOutOfRange), no signals.
+IR::Instr *
+LowererMD::LowerWasmArrayBoundsCheck(IR::Instr * instr, IR::Opnd *addrOpnd)
+{
+    IR::IndirOpnd * indirOpnd = addrOpnd->AsIndirOpnd();
+    IR::RegOpnd * indexOpnd = indirOpnd->GetIndexOpnd();
+    if (indexOpnd && !indexOpnd->IsIntegral32())
+    {
+        Assert(UNREACHED);
+        m_lowerer->GenerateThrow(IR::IntConstOpnd::New(WASMERR_ArrayIndexOutOfRange, TyInt32, m_func), instr);
+        return instr;
+    }
+    if (m_func->GetJITFunctionBody()->UsesWAsmJsFastVirtualBuffer())
+    {
+        return instr;
+    }
+    Assert(instr->GetSrc2());
+    IR::LabelInstr * helperLabel = Lowerer::InsertLabel(true, instr);
+    IR::LabelInstr * loadLabel = Lowerer::InsertLabel(false, instr);
+    IR::LabelInstr * doneLabel = Lowerer::InsertLabel(false, instr);
+    uint32 offset = indirOpnd->GetOffset();
+    IR::Opnd *arrayLenOpnd = instr->GetSrc2();
+    IR::Int64ConstOpnd * constOffsetOpnd = IR::Int64ConstOpnd::New((int64)addrOpnd->GetSize() + (int64)offset, TyInt64, m_func);
+    IR::Opnd *cmpOpnd;
+    if (indexOpnd != nullptr)
+    {
+        cmpOpnd = IR::RegOpnd::New(TyInt64, m_func);
+        Lowerer::InsertAdd(true, cmpOpnd, indexOpnd, constOffsetOpnd, helperLabel);
+    }
+    else
+    {
+        cmpOpnd = constOffsetOpnd;
+    }
+    m_lowerer->InsertCompareBranch(cmpOpnd, arrayLenOpnd, Js::OpCode::BrGt_A, true, helperLabel, helperLabel);
+    m_lowerer->GenerateThrow(IR::IntConstOpnd::New(WASMERR_ArrayIndexOutOfRange, TyInt32, m_func), loadLabel);
+    Lowerer::InsertBranch(Js::OpCode::Br, loadLabel, helperLabel);
+    return doneLabel;
+}
+
+IR::Instr *
+LowererMD::LowerAsmJsLdElemHelper(IR::Instr * instr)
+{
+    IR::Instr * done;
+    IR::Opnd * src1 = instr->UnlinkSrc1();
+    IRType type = src1->GetType();
+    IR::RegOpnd * indexOpnd = src1->AsIndirOpnd()->GetIndexOpnd();
+#if ENABLE_FAST_ARRAYBUFFER
+    if (CONFIG_FLAG(WasmFastArray) && m_func->GetJITFunctionBody()->IsWasmFunction())
+    {
+        return instr;
+    }
+#endif
+    {
+        IR::LabelInstr * helperLabel = Lowerer::InsertLabel(true, instr);
+        IR::LabelInstr * loadLabel = Lowerer::InsertLabel(false, instr);
+        IR::LabelInstr * doneLabel = Lowerer::InsertLabel(false, instr);
+        IR::Opnd *cmpOpnd;
+        if (indexOpnd)
+        {
+            cmpOpnd = indexOpnd;
+        }
+        else
+        {
+            cmpOpnd = IR::IntConstOpnd::New(src1->AsIndirOpnd()->GetOffset(), TyUint32, m_func);
+        }
+        m_lowerer->InsertCompareBranch(cmpOpnd, instr->UnlinkSrc2(), Js::OpCode::BrGe_A, true, helperLabel, helperLabel);
+        Lowerer::InsertBranch(Js::OpCode::Br, loadLabel, helperLabel);
+        if (IRType_IsFloat(type))
+        {
+            Lowerer::InsertMove(instr->UnlinkDst(), IR::FloatConstOpnd::New(Js::NumberConstants::NaN, type, m_func), loadLabel);
+        }
+        else
+        {
+            Lowerer::InsertMove(instr->UnlinkDst(), IR::IntConstOpnd::New(0, TyInt8, m_func), loadLabel);
+        }
+        Lowerer::InsertBranch(Js::OpCode::Br, doneLabel, loadLabel);
+        done = doneLabel;
+    }
+    return done;
+}
+
+IR::Instr *
+LowererMD::LowerAsmJsStElemHelper(IR::Instr * instr)
+{
+    IR::Instr * done;
+    IR::Opnd * dst = instr->UnlinkDst();
+    IR::RegOpnd * indexOpnd = dst->AsIndirOpnd()->GetIndexOpnd();
+    {
+        IR::LabelInstr * helperLabel = Lowerer::InsertLabel(true, instr);
+        IR::LabelInstr * storeLabel = Lowerer::InsertLabel(false, instr);
+        IR::LabelInstr * doneLabel = Lowerer::InsertLabel(false, instr);
+        IR::Opnd * cmpOpnd;
+        if (indexOpnd)
+        {
+            cmpOpnd = dst->AsIndirOpnd()->GetIndexOpnd();
+        }
+        else
+        {
+            cmpOpnd = IR::IntConstOpnd::New(dst->AsIndirOpnd()->GetOffset(), TyUint32, m_func);
+        }
+        m_lowerer->InsertCompareBranch(cmpOpnd, instr->UnlinkSrc2(), Js::OpCode::BrGe_A, true, helperLabel, helperLabel);
+        Lowerer::InsertBranch(Js::OpCode::Br, storeLabel, helperLabel);
+        Lowerer::InsertBranch(Js::OpCode::Br, doneLabel, storeLabel);
+        done = doneLabel;
+    }
+    return done;
+}
+
 int32
 LowererMD::LowerCallArgs(IR::Instr *callInstr, IR::Instr *stackParamInsert, ushort callFlags, Js::ArgSlot extraParams, IR::IntConstOpnd **callInfoOpndRef)
 {
@@ -728,6 +955,29 @@ LowererMD::LowerCallArgs(IR::Instr *callInstr, IR::Instr *stackParamInsert, usho
         opndParam = this->GetOpndForArgSlot(argSlotNum + extraParams, nullptr, true);
 
         src2Opnd = argInstr->UnlinkSrc2();
+        // W4 slice 1: asm.js float args ride in int slots (callee homes x-regs;
+        // docs section 3 internal convention is slot-based, floats as bits).
+        // MOV float->int is illegal on ARM64; transfer bits via FMOV_GEN to a
+        // same-size int reg first (f64->x, f32->x32). The bitcopy must not
+        // itself land in the fixed x0 (GeneratePreCallAsmJs parks the callee
+        // function object there): use fixed scratch x9, never an arg slot.
+        if (argInstr->GetSrc1()->IsFloat() && !opndParam->IsFloat())
+        {
+            IRType tempType = argInstr->GetSrc1()->IsFloat32() ? TyInt32 : TyMachReg;
+            IR::RegOpnd * tempInt = opndParam->IsRegOpnd()
+                ? IR::RegOpnd::New(nullptr, RegR9, tempType, this->m_func)
+                : IR::RegOpnd::New(tempType, this->m_func);
+            IR::Instr * movGen = IR::Instr::New(Js::OpCode::FMOV_GEN, tempInt, argInstr->GetSrc1(), this->m_func);
+            if (opndParam->IsRegOpnd())
+            {
+                callInstr->InsertBefore(movGen);
+            }
+            else
+            {
+                stackParamInsert->InsertBefore(movGen);
+            }
+            argInstr->SetSrc1(tempInt);
+        }
         argInstr->ReplaceDst(opndParam);
         argInstr->Unlink();
         if (opndParam->IsRegOpnd())
@@ -749,23 +999,33 @@ LowererMD::LowerCallArgs(IR::Instr *callInstr, IR::Instr *stackParamInsert, usho
     IR::Instr *startCallInstr = argLinkSym->m_instrDef;
 
     AssertMsg(startCallInstr->m_opcode == Js::OpCode::StartCall || startCallInstr->m_opcode == Js::OpCode::LoweredStartCall, "Problem with arg chain.");
-    AssertMsg(startCallInstr->GetArgOutCount(/*getInterpreterArgOutCount*/ false) == argCount,
+    AssertMsg(startCallInstr->GetArgOutCount(/*getInterpreterArgOutCount*/ false) == argCount ||
+              m_func->GetJITFunctionBody()->IsAsmJsMode(),
         "ArgCount doesn't match StartCall count");
 
     // Deal with the SC.
     this->LowerStartCall(startCallInstr);
 
-    // Second argument is the callinfo.
-    IR::IntConstOpnd *opndCallInfo = Lowerer::MakeCallInfoConst(callFlags, argCount, m_func);
-    if(callInfoOpndRef)
+    // W4 slice 1: internal asm.js calls (AsmJsCallI) take no CallInfo slot
+    // (mirrors the x64 `m_opcode != AsmJsCallI` skip); external (AsmJsCallE)
+    // and JS calls keep it at slot `extraParams`.
+    if (callInstr->m_opcode != Js::OpCode::AsmJsCallI)
     {
-        opndCallInfo->Use(m_func);
-        *callInfoOpndRef = opndCallInfo;
+        // Second argument is the callinfo.
+        IR::IntConstOpnd *opndCallInfo = Lowerer::MakeCallInfoConst(callFlags, argCount, m_func);
+        if(callInfoOpndRef)
+        {
+            opndCallInfo->Use(m_func);
+            *callInfoOpndRef = opndCallInfo;
+        }
+        opndParam = this->GetOpndForArgSlot(extraParams);
+        Lowerer::InsertMove(opndParam, opndCallInfo, callInstr);
+        return argCount + 1 + extraParams; // + 1 for call flags
     }
-    opndParam = this->GetOpndForArgSlot(extraParams);
-    Lowerer::InsertMove(opndParam, opndCallInfo, callInstr);
-
-    return argCount + 1 + extraParams; // + 1 for call flags
+    // Include the hidden +1 so HomeJsCallArgs homes every wasm arg slot on
+    // ARM64 Apple (wasm arg k arrives at slot extraParams+k+1): CallE's
+    // +1 covers slots 2+ the same way, so no ABI change either way.
+    return argCount + 1 + extraParams; // + 1 to home the last wasm arg slot
 }
 
 IR::Instr *
@@ -788,7 +1048,10 @@ LowererMD::LoadHelperArgument(IR::Instr * instr, IR::Opnd * opndArgValue)
 
     helperCallArgs[helperCallArgsCount++] = opndArgValue;
 
-    if (opndArgValue->GetType() == TyMachDouble)
+    // Helper float args (incl. TyFloat32) ride the double-arg slots: they
+    // must count as double args, or LowerCall's helper-homing loop reads
+    // a float-typed arg with doubleArgsLeft==0 and underflows GetOpndForArgSlot.
+    if (opndArgValue->IsFloat())
     {
         this->helperCallDoubleArgsCount++;
     }
@@ -2565,6 +2828,44 @@ LowererMD::GenerateWriteBarrier(IR::Instr * assignInstr)
 IR::Instr *
 LowererMD::LowerRet(IR::Instr * retInstr)
 {
+    // W4 slice 1: asm.js returns use the internal convention (ABI section 3):
+    // i32/i64 in x0, f32 in s0 (low half of d0, section 4), f64 in d0.
+#if defined(ENABLE_WASM)
+    if (m_func->GetJITFunctionBody()->IsAsmJsMode() && !m_func->IsLoopBody())
+    {
+        Js::AsmJsRetType::Which asmType = m_func->GetJITFunctionBody()->GetAsmJsInfo()->GetRetType();
+        if (asmType == Js::AsmJsRetType::Void)
+        {
+            return retInstr;
+        }
+        IRType regType = TyMachReg;
+        RegNum regNum = RETURN_REG;
+        switch (asmType)
+        {
+        case Js::AsmJsRetType::Double:
+            regType = TyFloat64;
+            regNum = RETURN_DBL_REG;
+            break;
+        case Js::AsmJsRetType::Float:
+            regType = TyFloat32;
+            regNum = RETURN_DBL_REG;
+            break;
+        case Js::AsmJsRetType::Signed:
+        case Js::AsmJsRetType::Int64:
+            regType = TyMachReg;
+            regNum = RETURN_REG;
+            break;
+        default:
+            Assert(UNREACHED);
+            break;
+        }
+        IR::RegOpnd *retReg = IR::RegOpnd::New(regType, m_func);
+        retReg->SetReg(regNum);
+        Lowerer::InsertMove(retReg, retInstr->UnlinkSrc1(), retInstr);
+        retInstr->SetSrc1(retReg);
+        return retInstr;
+    }
+#endif
     IR::RegOpnd *retReg = IR::RegOpnd::New(TyMachReg, m_func);
     retReg->SetReg(RETURN_REG);
     Lowerer::InsertMove(retReg, retInstr->UnlinkSrc1(), retInstr);
@@ -5465,7 +5766,12 @@ LowererMD::SaveDoubleToVar(IR::RegOpnd * dstOpnd, IR::RegOpnd *opndFloat, IR::In
         instrInsert->InsertBefore(newInstr);
         LowererMD::Legalize(newInstr);
 
-        newInstr = IR::Instr::New(Js::OpCode::CMP, tmp, IR::IntConstOpnd::New(0x7FF, TyMachReg, m_func, true), m_func);
+        // CMP is built dst-less with both operands wired (asm64 legalize turns
+        // it into SUBS RegZR, src1, src2; a dst-anchored CMP leaves src2 null
+        // and faults at Encode). Use the canonical compare-with-imm idiom.
+        newInstr = IR::Instr::New(Js::OpCode::CMP, this->m_func);
+        newInstr->SetSrc1(tmp);
+        newInstr->SetSrc2(IR::IntConstOpnd::New(0x7FF, TyMachReg, m_func, true));
         instrInsert->InsertBefore(newInstr);
         LowererMD::Legalize(newInstr);
 
@@ -6434,6 +6740,24 @@ void LowererMD::GenerateFastInlineBuiltInCall(IR::Instr* instr, IR::JnHelperMeth
 
     case Js::OpCode::InlineMathFloor:
     case Js::OpCode::InlineMathCeil:
+        // W4 slices 1+2 (doc/wasm-arm64-plan.md): the wasm/asm.js floor and
+        // ceil keep their float result (BuildDouble2/BuildFloat2 emit
+        // TyFloat64/32 dst), but GenerateFastInlineBuiltInMathFloorCeil is
+        // the JS integer fast path (Asserts Int32 dst). Route float dsts
+        // through the CRT helpers, mirroring the x64 SSE4.1-less fallback
+        // in Lower.cpp. Integer dsts stay on the fast path.
+        if (!instr->GetDst()->IsInt32())
+        {
+            if (instr->m_opcode == Js::OpCode::InlineMathFloor)
+            {
+                HelperCallForAsmMathBuiltin(instr, IR::HelperDirectMath_FloorFlt, IR::HelperDirectMath_FloorDb);
+            }
+            else
+            {
+                HelperCallForAsmMathBuiltin(instr, IR::HelperDirectMath_CeilFlt, IR::HelperDirectMath_CeilDb);
+            }
+            break;
+        }
         Assert(helperMethod == (IR::JnHelperMethod)0);
         return GenerateFastInlineBuiltInMathFloorCeil(instr);
 

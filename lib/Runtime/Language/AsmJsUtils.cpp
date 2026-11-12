@@ -181,6 +181,11 @@ namespace Js
     }
 #endif
 
+    JavascriptMethod AsmJsGetEntryPoint(ScriptFunction* func)
+    {
+        return func->GetEntryPointInfo()->jsMethod;
+    }
+
     void * UnboxAsmJsArguments(ScriptFunction* func, Var * origArgs, char * argDst, CallInfo callInfo)
     {
         void * address = reinterpret_cast<void*>(func->GetEntryPointInfo()->jsMethod);
@@ -568,6 +573,10 @@ namespace Js
         return returnValue;
     }
 #elif defined(_M_ARM64)
+    // Bridge to JIT-compiled wasm/async.js code (Thunks.S AsmJsJitCall).
+    // Loads the slot image from the layout buffer (x0-x7 + [sp] overflow),
+    // calls the entrypoint, writes x0/d0 to outRet (16 bytes).
+    extern "C" void AsmJsJitCall(void* entry, void* layout, void* outRet);
     // ARM64 external (JS -> wasm/asm.js) entry, W3 interpreter-only
     // (doc/wasm-arm64-abi.md sections 2-3,6). Pure C++: probe, unbox,
     // interpret via AsmJsInterpreter<T>, box. Matches the x64 shape
@@ -579,21 +588,21 @@ namespace Js
         ScriptFunction* func = (ScriptFunction*)entryObject;
         ScriptContext* scriptContext = func->GetScriptContext();
         AsmJsFunctionInfo* info = func->GetFunctionBody()->GetAsmJsFunctionInfo();
+        // (W4 slices 1-2 debug print removed.)
 
         // Generate wasm bytecode / install lazy trap on first call (mirrors
         // the x64 delay thunk; asm.js bytecode already exists).
+        // Only WasmLazyTrapCallback means trap; CheckAsmJsCodeGenThunk / JIT
+        // code addresses are the JIT dispatch below (W4).
         if (func->GetFunctionBody()->IsWasmFunction())
         {
             JavascriptMethod next = WasmLibrary::EnsureWasmEntrypoint(func);
-            if (next != nullptr)
+            if (next == WasmLibrary::WasmLazyTrapCallback)
             {
                 // Lazy trap: throw the stored error (never returns normally).
                 WasmLibrary::WasmLazyTrapCallback(entryObject, callInfo);
                 return JavascriptOperators::OP_LdUndef(scriptContext);
             }
-            // A non-null non-trap entry would be a JIT tier-up target (not
-            // installed on ARM64); fall through to the interpreter, which is
-            // the correct tier for W3.
         }
 
         // SIMD-typed signatures fail controlled until W8 (ABI section 8).
@@ -619,6 +628,74 @@ namespace Js
             break;
         }
 #endif
+
+        // Dispatch: interpreter (DelayThunks) vs JIT (JIT code address). The
+        // JIT body consumes the args slot image [func][gap][gap][args...]
+        // (wasm param k at arg slot 3+k, matching the codegen param layout;
+        // AsmJsJitCall loads x0-x7 from the image and sets sp = base, so
+        // overflow slot s is at [sp + 8*s]) per ABI sections 2-3,6.
+        // CheckAsmJsCodeGenThunk (codegen pending)
+        // interprets this call: the thunk would jump to the Var-convention
+        // original, which cannot consume the AAPCS64 image (W4 slices 1+2).
+        {
+            JavascriptMethod jsMethod = ((Js::FunctionEntryPointInfo*)func->GetEntryPointInfo())->jsMethod;
+            bool useJit = (jsMethod != nullptr &&
+                           jsMethod != InterpreterStackFrame::AsmJsDelayDynamicInterpreterThunk &&
+                           jsMethod != InterpreterStackFrame::DelayDynamicInterpreterThunk &&
+                           jsMethod != GetCheckAsmJsCodeGenThunk());
+            if (useJit)
+            {
+                int unboxSize = GetStackSizeForAsmJsUnboxing(func);
+                // Free reserve BELOW the args image for the JIT callee frame:
+                // AsmJsJitCall sets sp = base and the prologue sub's sp
+                // by the frame size. Without the reserve the frame lands on
+                // the bridge frame below and corrupts its saved fp/lr.
+                // Realistic asm.js/wasm frames are a few KB (register area +
+                // spill slots); 64KB covers ~8K spill slots with margin.
+                const int reserve = 65536;
+                byte* raw = (byte*)_alloca(unboxSize + 16 + reserve);
+                byte* base = (byte*)(((uintptr_t)raw + 15) & ~(uintptr_t)15) + reserve;
+                *(ScriptFunction**)base = func;
+                *(uint64*)(base + MachPtr) = 0;
+                *(uint64*)(base + 2 * MachPtr) = 0;
+                // UnboxAsmJsArguments skips one MachPtr slot (argDst + MachPtr);
+                // pass base + 2*MachPtr so arg k lands at [base + 24 + 8*k]
+                // (slot 3+k).
+                UnboxAsmJsArguments(func, args.Values + 1, (char*)base + 2 * MachPtr, callInfo);
+                byte outRet[16];
+                AsmJsJitCall((void*)jsMethod, (void*)base, outRet);
+                AsmJsSIMDValue zeroSimd2;
+                zeroSimd2.Zero();
+                switch (info->GetReturnType().which())
+                {
+                case AsmJsRetType::Void:
+                case AsmJsRetType::Signed:
+                {
+                    int ret = (int)(*(int64*)outRet);
+                    return BoxAsmJsReturnValue(func, ret, 0.0, 0.0f, zeroSimd2);
+                }
+                case AsmJsRetType::Int64:
+                {
+                    int64 ret = *(int64*)outRet;
+                    return BoxAsmJsReturnValue(func, ret, 0.0, 0.0f, zeroSimd2);
+                }
+                case AsmJsRetType::Double:
+                {
+                    double ret = *(double*)(outRet + 8);
+                    return BoxAsmJsReturnValue(func, 0, ret, 0.0f, zeroSimd2);
+                }
+                case AsmJsRetType::Float:
+                {
+                    float ret = *(float*)(outRet + 8);
+                    return BoxAsmJsReturnValue(func, 0, 0.0, ret, zeroSimd2);
+                }
+                default:
+                    Assume(UNREACHED);
+                    JavascriptError::ThrowTypeError(scriptContext, WASMERR_InvalidTypeConversion);
+                    return nullptr;
+                }
+            }
+        }
 
         int argSize = GetStackSizeForAsmJsUnboxing(func);
         // Layout buffer: [functionObject][unboxed args...]. Unbox skips the

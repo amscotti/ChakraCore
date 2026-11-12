@@ -77,7 +77,7 @@ BOOL IsAsmJsCodeGenThunk(Js::JavascriptMethod codeAddress);
 typedef Js::JavascriptMethod (*CheckCodeGenFunction)(Js::ScriptFunction * function);
 CheckCodeGenFunction GetCheckCodeGenFunction(Js::JavascriptMethod codeAddress);
 Js::JavascriptMethod GetCheckCodeGenThunk();
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
 Js::JavascriptMethod GetCheckAsmJsCodeGenThunk();
 #endif
 

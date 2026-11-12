@@ -117,7 +117,7 @@ Js::JavascriptMethod GetCheckCodeGenThunk()
     return NativeCodeGenerator::CheckCodeGenThunk;
 }
 
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
 Js::JavascriptMethod GetCheckAsmJsCodeGenThunk()
 {
     return NativeCodeGenerator::CheckAsmJsCodeGenThunk;

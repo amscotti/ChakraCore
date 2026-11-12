@@ -60,7 +60,7 @@ IRBuilderSwitchAdapter::ConvertToBailOut(IR::Instr * instr, IR::BailOutKind kind
 ///     by a SwitchIRBuilder to an IRBuilder instance
 ///----------------------------------------------------------------------------
 
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
 void
 IRBuilderAsmJsSwitchAdapter::AddBranchInstr(IR::BranchInstr * instr, uint32 offset, uint32 targetOffset, bool clearBackEdge)
 {

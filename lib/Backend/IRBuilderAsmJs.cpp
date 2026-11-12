@@ -4,7 +4,7 @@
 //-------------------------------------------------------------------------------------------------------
 
 #include "Backend.h"
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
 #include "ByteCode/OpCodeUtilAsmJs.h"
 #include "../../WasmReader/WasmParseTree.h"
 
@@ -1826,7 +1826,7 @@ IRBuilderAsmJs::BuildAsmCall(Js::OpCodeAsmJs newOpcode, uint32 offset, Js::ArgSl
         {
 #if _M_IX86
             argOffset -= argInstr->GetDst()->GetSize();
-#elif _M_X64
+#elif _M_X64 || _M_ARM64
             argOffset -= (argInstr->GetDst()->GetSize() <= MachPtr ? MachPtr : argInstr->GetDst()->GetSize());
 #else
             Assert(UNREACHED);

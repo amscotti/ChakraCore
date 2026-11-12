@@ -1759,15 +1759,14 @@ skipThunk:
 #elif defined(_M_ARM64) && defined(ENABLE_ASMJS)
     Var InterpreterStackFrame::AsmJsDelayDynamicInterpreterThunk(RecyclableObject* function, CallInfo callInfo, ...)
     {
-        // ARM64 delay/interpreter entry, W3 interpreter-only
-        // (doc/wasm-arm64-abi.md sections 2-3,6). Pure C++: ensure wasm
-        // bytecode, unbox Var args, interpret via AsmJsInterpreter<T>,
-        // box. Mirrors AsmJsExternalEntryPoint (AsmJsUtils.cpp); the
-        // external entry funnels here on x64 via the jsMethod indirection,
-        // on ARM64 both entry shapes share this body. Internal
-        // wasm->wasm calls use CallAsmJsFunction (JavascriptFunction.cpp)
-        // which dispatches to AsmJsInterpreter<T> directly.
-        ARGUMENTS(args, callInfo);
+        // ARM64 delay/interpreter entry: wasm-internal AAPCS64 call frame
+        // (ABI sections 2-3,6). Entered via the wasm->wasm I_Call jsMethod
+        // indirection (GeneratePreCallAsmJs): x0 = func object, slots 1-2 =
+        // gaps, already-unboxed args at slots 3+k (varargs after the two
+        // named params: x3..x7, then stack, every arg an 8-byte slot). No
+        // CallInfo and nothing to unbox: the wasm caller already placed
+        // the args in the unboxed layout. Same interpretation as
+        // AsmJsExternalEntryPoint's useJit==false branch.
         ScriptFunction* func = (ScriptFunction*)function;
         ScriptContext* scriptContext = func->GetScriptContext();
         AsmJsFunctionInfo* info = func->GetFunctionBody()->GetAsmJsFunctionInfo();
@@ -1775,18 +1774,33 @@ skipThunk:
         if (func->GetFunctionBody()->IsWasmFunction())
         {
             JavascriptMethod next = WasmLibrary::EnsureWasmEntrypoint(func);
-            if (next != nullptr)
+            if (next == WasmLibrary::WasmLazyTrapCallback)
             {
-                WasmLibrary::WasmLazyTrapCallback(function, callInfo);
+                WasmLibrary::WasmLazyTrapCallback(function, CallInfo());
                 return JavascriptOperators::OP_LdUndef(scriptContext);
             }
         }
 
         int argSize = GetStackSizeForAsmJsUnboxing(func);
         void* buf = _alloca(argSize);
-        UnboxAsmJsArguments(func, args.Values + 1, (char*)buf, callInfo);
         AsmJsCallStackLayout* layout = (AsmJsCallStackLayout*)buf;
         layout->functionObject = func;
+        Assert(info->GetArgByteSize() == (int)info->GetArgCount() * MachPtr);
+        // The wasm caller frames up [func][gap][gap][unboxed args...] with
+        // slots 0-2 and the args mirrored into the caller's [sp + 8*slot]
+        // argv image (ABI sections 2-3,6); the vararg stream on this build
+        // reads that image contiguously (v0=[sp+0]=func), so wasm arg k is
+        // vararg index 3+k.
+        va_list ap;
+        va_start(ap, callInfo);
+        (void)va_arg(ap, uint64); // slot 0 (func object image)
+        (void)va_arg(ap, uint64); // slot 1 (first gap)
+        (void)va_arg(ap, uint64); // slot 2 (second gap)
+        for (uint32 k = 0; k < info->GetArgCount(); ++k)
+        {
+            *(uint64*)((byte*)layout + sizeof(Js::JavascriptFunction*) + k * MachPtr) = va_arg(ap, uint64);
+        }
+        va_end(ap);
 
         AsmJsSIMDValue zeroSimd;
         zeroSimd.Zero();
@@ -1811,7 +1825,14 @@ skipThunk:
         case AsmJsRetType::Float:
         {
             float ret = InterpreterStackFrame::AsmJsInterpreter<float>(layout);
-            return BoxAsmJsReturnValue(func, 0, 0.0, ret, zeroSimd);
+            // The asm.js ABI returns f32 in s0: the wasm-internal caller
+            // reads s0 after this thunk returns. BoxAsmJsReturnValue leaves
+            // d0 = (double)ret and s0 = 0 in its exit state -- restore s0.
+            Var result = BoxAsmJsReturnValue(func, 0, 0.0, ret, zeroSimd);
+            uint32 retBits;
+            __builtin_memcpy(&retBits, &ret, sizeof(float));
+            __asm__ volatile ("fmov s0, %w0" :: "r"(retBits));
+            return result;
         }
         default:
             Assume(UNREACHED);

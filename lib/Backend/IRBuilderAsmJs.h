@@ -5,7 +5,7 @@
 
 #pragma once
 
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
 namespace AsmJsRegSlots
 {
     enum ConstSlots

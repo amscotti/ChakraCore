@@ -409,7 +409,7 @@ Func::TryCodegen()
 
         BEGIN_CODEGEN_PHASE(this, Js::IRBuilderPhase);
 
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
         if (GetJITFunctionBody()->IsAsmJsMode())
         {
             IRBuilderAsmJs asmIrBuilder(this);

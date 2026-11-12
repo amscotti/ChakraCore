@@ -96,6 +96,7 @@ HELPERCALLCHK(Op_Rem_Double, Js::NumberUtilities::Modulus, AttrCanNotBeReentrant
 #ifdef ENABLE_WASM
 HELPERCALLCHK(Op_CheckWasmSignature, Js::WebAssembly::CheckSignature, AttrCanThrow | AttrCanNotBeReentrant)
 HELPERCALLCHK(Op_GrowWasmMemory, Js::WebAssemblyMemory::GrowHelper, AttrCanNotBeReentrant)
+HELPERCALLCHK(Op_GetAsmJsEntryPoint, Js::AsmJsGetEntryPoint, AttrCanNotBeReentrant)
 #if DBG
 HELPERCALLCHK(Op_WasmMemoryTraceWrite, Js::WebAssemblyMemory::TraceMemWrite, AttrCanNotBeReentrant)
 #endif

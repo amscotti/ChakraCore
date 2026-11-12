@@ -13,6 +13,7 @@
 #include "ByteCode/StatementReader.h"
 #include "Language/EHBailoutData.h"
 #include "Language/AsmJsTypes.h"
+#include "Language/AsmJsUtils.h"
 #include "Language/AsmJsModule.h"
 #include "Language/ProfilingHelpers.h"
 #include "Language/FunctionCodeGenRuntimeData.h"

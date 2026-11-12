@@ -260,7 +260,7 @@ JITTimeFunctionBody::InitializeJITFunctionData(
         jitBody->callSiteToCallApplyCallSiteArrayCount = jitBody->profiledCallSiteCount;
         jitBody->callSiteToCallApplyCallSiteArray = callSiteToCallApplyCallSiteArray;
     }
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
     if (functionBody->GetIsAsmJsFunction())
     {
         jitBody->asmJsData = Anew(arena, AsmJsDataIDL);

@@ -119,7 +119,7 @@ public:
             bool            GenerateFastShiftRight(IR::Instr * instrShift);
             void            GenerateFastBrS(IR::BranchInstr *brInstr);
             void            GenerateFastInlineBuiltInCall(IR::Instr* instr, IR::JnHelperMethod helperMethod);
-            void            HelperCallForAsmMathBuiltin(IR::Instr* instr, IR::JnHelperMethod helperMethodFloat, IR::JnHelperMethod helperMethodDouble) { Assert(UNREACHED); } // only for asm.js
+            void            HelperCallForAsmMathBuiltin(IR::Instr* instr, IR::JnHelperMethod helperMethodFloat, IR::JnHelperMethod helperMethodDouble); // only for asm.js
             void            GenerateSmIntTest(IR::Opnd *opndSrc, IR::Instr *insertInstr, IR::LabelInstr *labelHelper, IR::Instr **instrFirst = nullptr, bool fContinueLabel = false);
             IR::RegOpnd *   LoadNonnegativeIndex(IR::RegOpnd *indexOpnd, const bool skipNegativeCheck, IR::LabelInstr *const notTaggedIntLabel, IR::LabelInstr *const negativeLabel, IR::Instr *const insertBeforeInstr);
             IR::RegOpnd *   GenerateUntagVar(IR::RegOpnd * opnd, IR::LabelInstr * labelFail, IR::Instr * insertBeforeInstr, bool generateTagCheck = true);
@@ -163,19 +163,19 @@ public:
             int32               LowerCallArgs(IR::Instr * callInstr, IR::Instr * stackParamInsert, ushort callFlags, Js::ArgSlot extraParams = 1 /* for function object */, IR::IntConstOpnd **callInfoOpndRef = nullptr);
             int32               LowerCallArgs(IR::Instr * callInstr, ushort callFlags, Js::ArgSlot extraParams = 1 /* for function object */, IR::IntConstOpnd **callInfoOpndRef = nullptr) { return LowerCallArgs(callInstr, callInstr, callFlags, extraParams, callInfoOpndRef); }
             IR::Instr *         LowerStartCall(IR::Instr * instr);
-            IR::Instr *         LowerAsmJsCallI(IR::Instr * callInstr) { Assert(UNREACHED); return nullptr; }
-            IR::Instr *         LowerAsmJsCallE(IR::Instr * callInstr) { Assert(UNREACHED); return nullptr; }
-            IR::Instr *         LowerWasmArrayBoundsCheck(IR::Instr * instr, IR::Opnd *addrOpnd) { Assert(UNREACHED); return nullptr; }
+            IR::Instr *         LowerAsmJsCallI(IR::Instr * callInstr);
+            IR::Instr *         LowerAsmJsCallE(IR::Instr * callInstr);
+            IR::Instr *         LowerWasmArrayBoundsCheck(IR::Instr * instr, IR::Opnd *addrOpnd);
             void                LowerAtomicStore(IR::Opnd * dst, IR::Opnd * src1, IR::Instr * insertBeforeInstr) { Assert(UNREACHED); }
             void                LowerAtomicLoad(IR::Opnd* dst, IR::Opnd* src1, IR::Instr* insertBeforeInstr) { Assert(UNREACHED); }
-            IR::Instr *         LowerAsmJsStElemHelper(IR::Instr * callInstr) { Assert(UNREACHED); return nullptr; }
-            IR::Instr *         LowerAsmJsLdElemHelper(IR::Instr * callInstr) { Assert(UNREACHED); return nullptr; }
+            IR::Instr *         LowerAsmJsStElemHelper(IR::Instr * callInstr);
+            IR::Instr *         LowerAsmJsLdElemHelper(IR::Instr * callInstr);
             IR::Instr *         LowerCallIDynamic(IR::Instr *callInstr, IR::Instr*saveThisArgOutInstr, IR::Opnd *argsLength, ushort callFlags, IR::Instr * insertBeforeInstrForCFG = nullptr);
             IR::Instr *         LoadHelperArgument(IR::Instr * instr, IR::Opnd * opndArg);
             IR::Instr *         LoadDynamicArgument(IR::Instr * instr, uint argNumber = 1);
             IR::Instr *         LoadDynamicArgumentUsingLength(IR::Instr *instr);
             IR::Instr *         LoadDoubleHelperArgument(IR::Instr * instr, IR::Opnd * opndArg);
-            IR::Instr *         LoadFloatHelperArgument(IR::Instr * instr, IR::Opnd * opndArg) { Assert(UNREACHED); return nullptr; } // only used for asm.js right now
+            IR::Instr *         LoadFloatHelperArgument(IR::Instr * instr, IR::Opnd * opndArg); // only used for asm.js right now
             IR::Instr *         LowerToFloat(IR::Instr *instr);
      static IR::BranchInstr *   LowerFloatCondBranch(IR::BranchInstr *instrBranch, bool ignoreNaN = false);
             void                ConvertFloatToInt32(IR::Opnd* intOpnd, IR::Opnd* floatOpnd, IR::LabelInstr * labelHelper, IR::LabelInstr * labelDone, IR::Instr * instInsert);
@@ -199,7 +199,7 @@ public:
 
             IR::Instr *         LowerEntryInstr(IR::EntryInstr * entryInstr);
             IR::Instr *         LowerExitInstr(IR::ExitInstr * exitInstr);
-            IR::Instr *         LowerExitInstrAsmJs(IR::ExitInstr * exitInstr) { Assert(UNREACHED); return nullptr; }
+            IR::Instr *         LowerExitInstrAsmJs(IR::ExitInstr * exitInstr);
             IR::Instr *         LoadNewScObjFirstArg(IR::Instr * instr, IR::Opnd * dst, ushort extraArgs = 0);
             IR::Instr *         LowerTry(IR::Instr *instr, IR::JnHelperMethod helperMethod);
             IR::Instr *         LowerLeaveNull(IR::Instr *instr);
@@ -273,6 +273,7 @@ private:
         IR::Instr* instr);
 
     IR::Instr*  GeneratePreCall(IR::Instr * callInstr, IR::Opnd  *functionOpnd, IR::Instr * insertBeforeInstrForCFGCheck);
+    IR::Instr*  GeneratePreCallAsmJs(IR::Instr * callInstr, IR::Opnd * functionObjOpnd, IR::Instr * insertBeforeInstrForCFGCheck);
     void        SetMaxArgSlots(Js::ArgSlot actualCount /*including this*/);
 // Data
 protected:

@@ -222,7 +222,7 @@ NativeCodeGenerator::DoBackEnd(Js::FunctionBody *fn)
     return (
         !PHASE_OFF(Js::BackEndPhase, fn)
         && !fn->IsGeneratorAndJitIsDisabled()
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
         && !fn->IsAsmJSModule()
 #endif
     );
@@ -561,7 +561,7 @@ NativeCodeGenerator::GenerateFunction(Js::FunctionBody *fn, Js::ScriptFunction *
         Assert(fn->IsInterpreterThunk() || fn->IsSimpleJitOriginalEntryPoint());
     }
     bool doPreJit = IS_PREJIT_ON();
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
     if (fn->GetIsAsmjsMode())
     {
         AnalysisAssert(function != nullptr);
@@ -661,7 +661,7 @@ void NativeCodeGenerator::GenerateLoopBody(Js::FunctionBody * fn, Js::LoopHeader
         loopHeader->ResetInterpreterCount();
         return;
     }
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
     if (fn->GetIsAsmJsFunction())
     {
         Js::LoopEntryPointInfo* loopEntryPointInfo = (Js::LoopEntryPointInfo*)entryPoint;
@@ -1552,7 +1552,7 @@ NativeCodeGenerator::IsThunk(Js::JavascriptMethod codeAddress)
 bool
 NativeCodeGenerator::IsAsmJsCodeGenThunk(Js::JavascriptMethod codeAddress)
 {
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
     return codeAddress == NativeCodeGenerator::CheckAsmJsCodeGenThunk;
 #else
     return false;

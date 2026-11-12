@@ -30,6 +30,9 @@ namespace Js {
 
 #pragma warning (suppress: 25057) // Suppress unannotated buffer warning
     void * UnboxAsmJsArguments(ScriptFunction* func, Var * origArgs, char * argDst, CallInfo callInfo);
+    // W4 slice 1: resolve the internal-call entrypoint (EntryPointInfo
+    // jsMethod) from JIT code via the helper machinery.
+    JavascriptMethod AsmJsGetEntryPoint(ScriptFunction* func);
 #if _M_X64
     Var BoxAsmJsReturnValue(ScriptFunction* func, int64 intRetVal, double doubleRetVal, float floatRetVal, __m128 simdReturn);
     int GetStackSizeForAsmJsUnboxing(ScriptFunction* func);

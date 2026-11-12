@@ -52,7 +52,7 @@ void SetProfileMode(BOOL fSet);
 public:
     static Js::Var CheckCodeGenThunk(Js::RecyclableObject* function, Js::CallInfo callInfo, ...);
 
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
     static Js::Var CheckAsmJsCodeGenThunk(Js::RecyclableObject* function, Js::CallInfo callInfo, ...);
 #endif
     static bool IsThunk(Js::JavascriptMethod codeAddress);
