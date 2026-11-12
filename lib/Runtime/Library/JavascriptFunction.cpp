@@ -1633,7 +1633,13 @@ dbl_align:
         *(uint64*)(base + sizeof(Var)) = 0;
         *(uint64*)(base + 2 * sizeof(Var)) = 0;
         memcpy(base + 3 * sizeof(Var), (byte*)argv + sizeof(Var), byteSize);
-        AsmJsJitCall((void*)jsMethod, (void*)base, outRet);
+        {
+            // Bound JIT frames to the alloca reserve (see AsmJsExternalEntryPoint):
+            // deeper recursion throws StackOverflow via the prolog floor check.
+            ThreadContext::WasmStackReserveFloorGuard floorGuard(
+                func->GetScriptContext()->GetThreadContext(), (uintptr_t)raw);
+            AsmJsJitCall((void*)jsMethod, (void*)base, outRet);
+        }
         return true;
     }
     template <> int JavascriptFunction::CallAsmJsFunction<int>(RecyclableObject * function, JavascriptMethod entryPoint, Var * argv, uint argsSize, byte* reg)

@@ -1343,6 +1343,69 @@ LowererMD::GenerateStackProbe(IR::Instr *insertInstr, bool afterProlog)
 }
 
 //
+// Emits an inline reserve-floor check after the prolog (FDE-covered, mirroring
+// the small-stack probe). The ARM64 wasm entry alloca reserves a fixed region
+// below the slot image; unbounded recursion would grow past it and clobber the
+// bridge frame (sending the stack walker into a cycle). On breach the helper
+// throws StackOverflow while the chain is still intact. A zero floor disables
+// the check naturally (sp is always above frameSize). No entry registers are
+// clobbered on the fast path; the slow path never returns.
+//
+void
+LowererMD::GenerateWasmReserveFloorCheck(IR::Instr *insertInstr)
+{
+    intptr_t floorAddr = m_func->GetThreadContextInfo()->GetWasmReserveFloorAddr();
+    if (floorAddr == 0)
+    {
+        // Out-of-process codegen: no floor to check against.
+        return;
+    }
+
+    // Same margin as the stack probe.
+    uint32 frameSize = this->m_func->m_localStackHeight + Js::Constants::MinStackJIT;
+
+    IR::RegOpnd *scratchOpnd = IR::RegOpnd::New(nullptr, SCRATCH_REG, TyMachReg, this->m_func);
+    IR::LabelInstr *helperLabel = IR::LabelInstr::New(Js::OpCode::Label, this->m_func, false);
+    IR::LabelInstr *doneLabelInstr = IR::LabelInstr::New(Js::OpCode::Label, this->m_func, false);
+    IR::Instr *instr;
+
+    // LDIMM r17, floorAddr; LDR r17, [r17]
+    Lowerer::InsertMove(scratchOpnd, IR::AddrOpnd::New(floorAddr, IR::AddrOpndKindDynamicMisc, this->m_func), insertInstr);
+    Lowerer::InsertMove(scratchOpnd, IR::IndirOpnd::New(scratchOpnd, 0, TyMachReg, this->m_func), insertInstr);
+
+    // MOV r15, frameSize; ADDS r17, r17, r15; BVS helper (overflow: fail safe)
+    IR::Opnd* spAllocRegOpnd = IR::RegOpnd::New(nullptr, SP_ALLOC_SCRATCH_REG, TyMachReg, this->m_func);
+    Lowerer::InsertMove(spAllocRegOpnd, IR::IntConstOpnd::New(frameSize, TyMachReg, this->m_func), insertInstr);
+    instr = IR::Instr::New(Js::OpCode::ADDS, scratchOpnd, scratchOpnd, spAllocRegOpnd, this->m_func);
+    insertInstr->InsertBefore(instr);
+    instr = IR::BranchInstr::New(Js::OpCode::BVS, helperLabel, this->m_func);
+    insertInstr->InsertBefore(instr);
+
+    // CMP sp, r17; BHI done
+    instr = IR::Instr::New(Js::OpCode::CMP, this->m_func);
+    instr->SetSrc1(IR::RegOpnd::New(nullptr, GetRegStackPointer(), TyMachReg, this->m_func));
+    instr->SetSrc2(scratchOpnd);
+    insertInstr->InsertBefore(instr);
+    LegalizeMD::LegalizeInstr(instr);
+    instr = IR::BranchInstr::New(Js::OpCode::BHI, doneLabelInstr, this->m_func);
+    insertInstr->InsertBefore(instr);
+
+    // Slow path: helper re-verifies and throws StackOverflow (noreturn).
+    insertInstr->InsertBefore(helperLabel);
+    IR::RegOpnd *r0Opnd = IR::RegOpnd::New(nullptr, RegR0, TyMachReg, this->m_func);
+    Lowerer::InsertMove(r0Opnd, IR::IntConstOpnd::New(frameSize, TyMachReg, this->m_func, true), insertInstr);
+    IR::RegOpnd *r1Opnd = IR::RegOpnd::New(nullptr, RegR1, TyMachReg, this->m_func);
+    Lowerer::InsertMove(r1Opnd, this->m_lowerer->LoadScriptContextOpnd(insertInstr), insertInstr);
+    IR::RegOpnd *r2Opnd = IR::RegOpnd::New(nullptr, RegR2, TyMachReg, m_func);
+    Lowerer::InsertMove(r2Opnd, IR::HelperCallOpnd::New(IR::HelperProbeWasmReserveFloor, this->m_func), insertInstr);
+    instr = IR::Instr::New(Js::OpCode::BLR, this->m_func);
+    instr->SetSrc1(r2Opnd);
+    insertInstr->InsertBefore(instr);
+
+    insertInstr->InsertBefore(doneLabelInstr);
+}
+
+//
 // Emits the code to allocate 'size' amount of space on stack. for values smaller than PAGE_SIZE
 // this will just emit sub SP,size otherwise calls _chkstk.
 //
@@ -1799,6 +1862,16 @@ LowererMD::LowerEntryInstr(IR::EntryInstr * entryInstr)
     if (layout.HasCalls() && fStackProbeAfterProlog)
     {
         GenerateStackProbe(insertInstr, true); //stack is already aligned in this case
+    }
+
+    // Guard the slot-image reserve floor after the prolog (FDE-covered, like the
+    // small-stack probe above) so a reserve breach throws from unwindable code.
+    // Only asm.js/wasm functions run under AsmJsJitCall with the fixed alloca
+    // reserve. The prolog has already allocated the frame; the check trips one
+    // frame later, still far above the reserve bottom.
+    if (m_func->GetJITFunctionBody()->IsAsmJsMode())
+    {
+        GenerateWasmReserveFloorCheck(insertInstr);
     }
 
 #if defined(__APPLE__) && defined(_M_ARM64)

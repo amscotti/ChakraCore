@@ -101,6 +101,8 @@ public:
 
     virtual intptr_t GetThreadStackLimitAddr() const = 0;
 
+    virtual intptr_t GetWasmReserveFloorAddr() const = 0;
+
     virtual intptr_t GetDisableImplicitFlagsAddr() const = 0;
     virtual intptr_t GetImplicitCallFlagsAddr() const = 0;
 

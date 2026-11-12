@@ -440,6 +440,8 @@ private:
     StackProber * GetStackProber() const { return this->stackProber; }
     size_t GetStackLimitForCurrentThread() const;
     void SetStackLimitForCurrentThread(size_t limit);
+    uintptr_t GetWasmStackReserveFloor() const { return this->wasmStackReserveFloor; }
+    void SetWasmStackReserveFloor(uintptr_t floor) { this->wasmStackReserveFloor = floor; }
 
     // The current heap enumeration object being used during enumeration.
     IActiveScriptProfilerHeapEnum* heapEnum;
@@ -615,6 +617,12 @@ private:
     ThreadContextFlags threadContextFlags;
     DWORD currentThreadId;
     mutable size_t stackLimitForCurrentThread;
+    // ARM64 wasm/JIT entry reserve floor: when nonzero, JITted wasm frames must stay
+    // above this address. The 64KB alloca reserve below the slot image cannot hold
+    // arbitrarily deep recursion; the prolog floor check throws StackOverflow before
+    // frames can collide with the bridge frame. Save/restore around each stub entry
+    // (LIFO for re-entrant wasm->JS->wasm); zero disables the check.
+    uintptr_t wasmStackReserveFloor;
     StackProber * stackProber;
     bool isThreadBound;
     bool hasThrownPendingException;
@@ -1341,6 +1349,7 @@ public:
     virtual HANDLE GetProcessHandle() const override;
 
     virtual intptr_t GetThreadStackLimitAddr() const override;
+    virtual intptr_t GetWasmReserveFloorAddr() const override;
 
 #if ENABLE_NATIVE_CODEGEN && defined(ENABLE_WASM_SIMD)
     virtual intptr_t GetSimdTempAreaAddr(uint8 tempIndex) const override;
@@ -1497,6 +1506,27 @@ public:
     {
         ProbeCurrentStack(size, scriptContext);
     }
+    static void __stdcall ProbeWasmReserveFloor(size_t frameSize, Js::ScriptContext *scriptContext);
+
+    // RAII holder for the wasm reserve floor: sets the floor on construction,
+    // restores the previous value on destruction (normal return and C++ unwind).
+    // Nesting is LIFO for re-entrant wasm->JS->wasm calls.
+    class WasmStackReserveFloorGuard
+    {
+    public:
+        WasmStackReserveFloorGuard(ThreadContext *threadContext, uintptr_t floor)
+            : m_threadContext(threadContext), m_prevFloor(threadContext->GetWasmStackReserveFloor())
+        {
+            threadContext->SetWasmStackReserveFloor(floor);
+        }
+        ~WasmStackReserveFloorGuard()
+        {
+            m_threadContext->SetWasmStackReserveFloor(m_prevFloor);
+        }
+    private:
+        ThreadContext *m_threadContext;
+        uintptr_t m_prevFloor;
+    };
 
 #if ENABLE_PROFILE_INFO
     void EnsureSourceProfileManagersByUrlMap();

@@ -419,6 +419,7 @@ HELPERCALL(ScrRegEx_OP_NewRegEx, Js::JavascriptRegExp::OP_NewRegEx, AttrCanNotBe
 #endif
 HELPERCALL(ProbeCurrentStack, ThreadContext::ProbeCurrentStack, AttrCanNotBeReentrant)
 HELPERCALL(ProbeCurrentStack2, ThreadContext::ProbeCurrentStack2, AttrCanNotBeReentrant)
+HELPERCALL(ProbeWasmReserveFloor, ThreadContext::ProbeWasmReserveFloor, AttrCanNotBeReentrant)
 
 HELPERCALLCHK(AdjustSlots, Js::DynamicTypeHandler::AdjustSlots_Jit, AttrCanNotBeReentrant)
 HELPERCALLCHK(InvalidateProtoCaches, Js::JavascriptOperators::OP_InvalidateProtoCaches, AttrCanNotBeReentrant)

@@ -39,6 +39,7 @@ public:
     virtual size_t GetScriptStackLimit() const override;
 
     virtual intptr_t GetThreadStackLimitAddr() const override;
+    virtual intptr_t GetWasmReserveFloorAddr() const override;
 
 #ifdef ENABLE_WASM_SIMD
     virtual intptr_t GetSimdTempAreaAddr(uint8 tempIndex) const override;

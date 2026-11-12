@@ -659,6 +659,8 @@ namespace Js
                 // the bridge frame below and corrupts its saved fp/lr.
                 // Realistic asm.js/wasm frames are a few KB (register area +
                 // spill slots); 64KB covers ~8K spill slots with margin.
+                // W6: bound JIT frames to the 64KB alloca reserve; deeper
+                // recursion throws StackOverflow via the prolog floor check.
                 const int reserve = 65536;
                 byte* raw = (byte*)_alloca(unboxSize + 16 + reserve);
                 byte* base = (byte*)(((uintptr_t)raw + 15) & ~(uintptr_t)15) + reserve;
@@ -670,7 +672,14 @@ namespace Js
                 // (slot 3+k).
                 UnboxAsmJsArguments(func, args.Values + 1, (char*)base + 2 * MachPtr, callInfo);
                 byte outRet[16];
-                AsmJsJitCall((void*)jsMethod, (void*)base, outRet);
+                {
+                    // Bound JIT frames to the alloca reserve: raw is the post-alloca
+                    // stack bottom. Deeper recursion throws StackOverflow via the
+                    // prolog floor check instead of clobbering the bridge frame.
+                    ThreadContext::WasmStackReserveFloorGuard floorGuard(
+                        func->GetScriptContext()->GetThreadContext(), (uintptr_t)raw);
+                    AsmJsJitCall((void*)jsMethod, (void*)base, outRet);
+                }
                 AsmJsSIMDValue zeroSimd2;
                 zeroSimd2.Zero();
                 switch (info->GetReturnType().which())

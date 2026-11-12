@@ -91,6 +91,7 @@ ThreadContext::RecyclableData::RecyclableData(Recycler *const recycler) :
 ThreadContext::ThreadContext(AllocationPolicyManager * allocationPolicyManager, JsUtil::ThreadService::ThreadServiceCallback threadServiceCallback, bool enableExperimentalFeatures) :
     currentThreadId(::GetCurrentThreadId()),
     stackLimitForCurrentThread(0),
+    wasmStackReserveFloor(0),
     stackProber(nullptr),
     isThreadBound(false),
     hasThrownPendingException(false),
@@ -321,6 +322,12 @@ intptr_t
 ThreadContext::GetThreadStackLimitAddr() const
 {
     return (intptr_t)GetAddressOfStackLimitForCurrentThread();
+}
+
+intptr_t
+ThreadContext::GetWasmReserveFloorAddr() const
+{
+    return (intptr_t)&this->wasmStackReserveFloor;
 }
 
 #if ENABLE_NATIVE_CODEGEN && defined(ENABLE_WASM_SIMD)
@@ -1865,6 +1872,27 @@ ThreadContext::ProbeCurrentStack(size_t size, Js::ScriptContext *scriptContext)
     Assert(scriptContext != nullptr);
     Assert(scriptContext->GetThreadContext() == GetContextForCurrentThread());
     scriptContext->GetThreadContext()->ProbeStack(size, scriptContext);
+}
+
+/* static */ void __stdcall
+ThreadContext::ProbeWasmReserveFloor(size_t frameSize, Js::ScriptContext *scriptContext)
+{
+    // ARM64 wasm entry guard: the slot-image alloca reserves a fixed region below
+    // the entry for JIT frames. Unbounded recursion would grow past the reserve and
+    // clobber the bridge frame, sending the stack walker into a cycle. Throw a
+    // clean StackOverflow while the chain is still intact. Zero floor disables.
+    Assert(scriptContext != nullptr);
+    ThreadContext *threadContext = scriptContext->GetThreadContext();
+    Assert(threadContext == GetContextForCurrentThread());
+    uintptr_t floor = threadContext->wasmStackReserveFloor;
+    if (floor != 0)
+    {
+        size_t sp = (size_t)_AddressOfReturnAddress();
+        if (sp < floor + frameSize)
+        {
+            Js::Throw::StackOverflow(scriptContext, _ReturnAddress());
+        }
+    }
 }
 
 /* static */ void

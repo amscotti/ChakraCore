@@ -94,6 +94,13 @@ ServerThreadContext::GetThreadStackLimitAddr() const
     return static_cast<intptr_t>(m_threadContextData.threadStackLimitAddr);
 }
 
+intptr_t
+ServerThreadContext::GetWasmReserveFloorAddr() const
+{
+    // Out-of-process codegen has no live wasm reserve floor to check against.
+    return 0;
+}
+
 size_t
 ServerThreadContext::GetScriptStackLimit() const
 {
