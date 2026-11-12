@@ -845,8 +845,18 @@ LowererMD::LowerWasmArrayBoundsCheck(IR::Instr * instr, IR::Opnd *addrOpnd)
     IR::Opnd *cmpOpnd;
     if (indexOpnd != nullptr)
     {
+        // Wasm addresses are 32-bit unsigned: zero-extend the index to
+        // 64-bit before the 64-bit bounds add. A 32-bit add would wrap
+        // (0xFFFFFFFC + 4 -> 0) and let negative/wraparound addresses
+        // escape the check and fault (test/wasm/memory.js segfault).
+        IR::RegOpnd *extIndex = IR::RegOpnd::New(TyInt64, m_func);
+        IR::Instr *ubfx = IR::Instr::New(Js::OpCode::UBFX, extIndex,
+            indexOpnd->UseWithNewType(TyInt32, m_func),
+            IR::IntConstOpnd::New(BITFIELD(0, 32), TyMachReg, m_func, true), m_func);
+        helperLabel->InsertBefore(ubfx);
+        LegalizeMD::LegalizeInstr(ubfx);
         cmpOpnd = IR::RegOpnd::New(TyInt64, m_func);
-        Lowerer::InsertAdd(true, cmpOpnd, indexOpnd, constOffsetOpnd, helperLabel);
+        Lowerer::InsertAdd(true, cmpOpnd, extIndex, constOffsetOpnd, helperLabel);
     }
     else
     {
@@ -7575,6 +7585,55 @@ LowererMD::EmitReinterpretPrimitive(IR::Opnd* dst, IR::Opnd* src, IR::Instr* ins
     IR::Instr *instr = IR::Instr::New(Js::OpCode::FMOV_GEN, dst, src, m_func);
     insertBeforeInstr->InsertBefore(instr);
     LegalizeMD::LegalizeInstr(instr);
+}
+
+void
+LowererMD::GenerateCopysign(IR::Instr *instr)
+{
+    // dst = copysign(src1, src2): magnitude of src1, sign of src2.
+    // The shared lowering emits x86 SSE (ANDPS/ORPS), which ARM64 does not
+    // implement, so bit-twiddle in the integer domain with proven
+    // primitives (FMOV_GEN, LDIMM-hoisted masks, AND/ORR):
+    //   i1 = reinterpret(src1); i2 = reinterpret(src2)
+    //   i1 &= absMask; i2 &= signMask; i = i1 | i2; dst = reinterpret(i)
+    IR::Opnd *dst = instr->GetDst();
+    IR::Opnd *src1 = instr->GetSrc1();
+    IR::Opnd *src2 = instr->GetSrc2();
+    const bool is32 = (dst->GetSize() == 4);
+    IRType intType = is32 ? TyInt32 : TyInt64;
+    const uint64 absBits = is32 ? 0x7FFFFFFFull : 0x7FFFFFFFFFFFFFFFull;
+    const uint64 signBits = is32 ? 0x80000000ull : 0x8000000000000000ull;
+
+    IR::RegOpnd *i1 = IR::RegOpnd::New(intType, m_func);
+    IR::RegOpnd *i2 = IR::RegOpnd::New(intType, m_func);
+    this->EmitReinterpretPrimitive(i1, src1, instr);
+    this->EmitReinterpretPrimitive(i2, src2, instr);
+
+    IR::RegOpnd *absMask = IR::RegOpnd::New(intType, m_func);
+    IR::RegOpnd *signMask = IR::RegOpnd::New(intType, m_func);
+    if (is32)
+    {
+        Lowerer::InsertMove(absMask, IR::IntConstOpnd::New((int32)absBits, intType, m_func), instr);
+        Lowerer::InsertMove(signMask, IR::IntConstOpnd::New((int32)signBits, intType, m_func), instr);
+    }
+    else
+    {
+        Lowerer::InsertMove(absMask, IR::Int64ConstOpnd::New((int64)absBits, intType, m_func), instr);
+        Lowerer::InsertMove(signMask, IR::Int64ConstOpnd::New((int64)signBits, intType, m_func), instr);
+    }
+
+    IR::Instr *and1 = IR::Instr::New(Js::OpCode::AND, i1, i1, absMask, m_func);
+    instr->InsertBefore(and1);
+    LegalizeMD::LegalizeInstr(and1);
+    IR::Instr *and2 = IR::Instr::New(Js::OpCode::AND, i2, i2, signMask, m_func);
+    instr->InsertBefore(and2);
+    LegalizeMD::LegalizeInstr(and2);
+    IR::Instr *orr = IR::Instr::New(Js::OpCode::ORR, i1, i1, i2, m_func);
+    instr->InsertBefore(orr);
+    LegalizeMD::LegalizeInstr(orr);
+
+    this->EmitReinterpretPrimitive(dst, i1, instr);
+    instr->Remove();
 }
 
 void

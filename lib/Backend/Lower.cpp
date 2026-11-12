@@ -3110,7 +3110,9 @@ Lowerer::LowerRange(IR::Instr *instrStart, IR::Instr *instrEnd, bool defaultDoFa
             break;
 #endif
 #ifdef ENABLE_WASM
-#ifdef ASMJS_PLAT
+#if defined(ASMJS_PLAT) || defined(_M_ARM64)
+// ARM64 implements GenerateCopysign with integer bit ops (LowerMD.cpp);
+// x86/x64 use the shared SSE lowering (LowerMDShared.cpp).
         case Js::OpCode::Copysign_A:
             m_lowererMD.GenerateCopysign(instr);
             break;

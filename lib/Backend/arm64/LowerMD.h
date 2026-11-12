@@ -103,6 +103,7 @@ public:
             void            GenerateClz(IR::Instr * instr);
             void            GenerateCtz(IR::Instr * instr);
             void            GeneratePopCnt(IR::Instr * instr);
+            void            GenerateCopysign(IR::Instr * instr);
             template <bool Saturate>
             void            GenerateTruncWithCheck(IR::Instr * instr);
             void            GenerateFastDivByPow2(IR::Instr *instr);
