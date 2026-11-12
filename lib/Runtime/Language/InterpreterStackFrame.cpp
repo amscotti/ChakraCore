@@ -1832,7 +1832,18 @@ skipThunk:
         case AsmJsRetType::Double:
         {
             double ret = InterpreterStackFrame::AsmJsInterpreter<double>(layout);
-            return BoxAsmJsReturnValue(func, 0, ret, 0.0f, zeroSimd);
+            // The only callers that reach this delay entry are JIT-compiled
+            // wasm-internal callers: they read the raw f64 from d0 (ABI
+            // section 3), so return it unboxed like Signed/Int64 above.
+            // Box first (keeps a valid Var in x0 for any Var caller), then
+            // restore d0 explicitly: boxing does not leave the value in d0
+            // (first-call f64 NaN payloads arrived canonicalized). Mirrors
+            // the Float case restoring s0 below.
+            Var result = BoxAsmJsReturnValue(func, 0, ret, 0.0f, zeroSimd);
+            uint64 retBits;
+            __builtin_memcpy(&retBits, &ret, sizeof(double));
+            __asm__ volatile ("fmov d0, %x0" :: "r"(retBits));
+            return result;
         }
         case AsmJsRetType::Float:
         {

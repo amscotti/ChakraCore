@@ -7767,6 +7767,49 @@ LowererMD::LoadFloatZero(IR::Opnd * opndDst, IR::Instr * instrInsert)
 }
 
 IR::Instr *
+LowererMD::LoadFloatValue(IR::Opnd * opndDst, float value, IR::Instr * instrInsert)
+{
+    // Float overload: pool the 4 float bytes directly. Without this overload,
+    // a float argument binds to the double overload below (name hiding) and
+    // round-trips float->double->float in C++, which quiets signaling NaNs
+    // (f32.const nan:0x200000 pooled as 0x7FE00000 instead of 0x7FA00000).
+    if (opndDst->IsFloat64())
+    {
+        // Widening move (float const to double dst): keep the historical
+        // convert-then-pool behavior.
+        return LowererMD::LoadFloatValue(opndDst, (double)value,
+                                         instrInsert);
+    }
+    Assert(opndDst->IsFloat32());
+    void * pValue = NativeCodeDataNewNoFixup(instrInsert->m_func->GetNativeCodeDataAllocator(), FloatType<DataDesc_LowererMD_LoadFloatValue_Float>, value);
+    IR::Opnd * opnd;
+    if (instrInsert->m_func->IsOOPJIT())
+    {
+        int offset = NativeCodeData::GetDataTotalOffset(pValue);
+        auto addressRegOpnd = IR::RegOpnd::New(TyMachPtr, instrInsert->m_func);
+
+        Lowerer::InsertMove(
+            addressRegOpnd,
+            IR::MemRefOpnd::New(instrInsert->m_func->GetWorkItem()->GetWorkItemData()->nativeDataAddr, TyMachPtr, instrInsert->m_func, IR::AddrOpndKindDynamicNativeCodeDataRef),
+            instrInsert);
+
+        opnd = IR::IndirOpnd::New(addressRegOpnd, offset, TyFloat32,
+#if DBG
+            NativeCodeData::GetDataDescription(pValue, instrInsert->m_func->m_alloc),
+#endif
+            instrInsert->m_func, true);
+    }
+    else
+    {
+        opnd = IR::MemRefOpnd::New((void*)pValue, TyFloat32, instrInsert->m_func);
+    }
+    IR::Instr * instr = IR::Instr::New(Js::OpCode::FLDR, opndDst, opnd, instrInsert->m_func);
+    instrInsert->InsertBefore(instr);
+    LegalizeMD::LegalizeInstr(instr);
+    return instr;
+}
+
+IR::Instr *
 LowererMD::LoadFloatValue(IR::Opnd * opndDst, double value, IR::Instr * instrInsert)
 {
     // Pool and load the constant in the destination's width (mirrors the

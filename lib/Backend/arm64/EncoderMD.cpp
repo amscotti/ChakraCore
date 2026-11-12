@@ -999,7 +999,18 @@ EncoderMD::GenerateEncoding(IR::Instr* instr, BYTE *pc)
 
     case Js::OpCode::LDRS:
         Assert(instr->GetDst()->GetSize() <= instr->GetSrc1()->GetSize() || instr->GetSrc1()->IsSigned());
-        bytes = this->EmitLoadStore(Emitter, instr, instr->GetSrc1(), instr->GetDst(), EmitLdrsbRegister, EmitLdrshRegister, EmitLdrswRegister64, EmitLdrRegister64, EmitLdrsbOffset, EmitLdrshOffset, EmitLdrswOffset64, EmitLdrOffset64);
+        if (instr->GetDst()->GetSize() == MachPtr && instr->GetSrc1()->GetSize() <= 2)
+        {
+            // Signed 8/16-bit load into a 64-bit dst (i64.load8_s/16_s):
+            // LDRSB/LDRSH Xt sign-extends to 64 bits. The Wt forms only
+            // extend to 32 bits, leaving the upper half zero (observed
+            // 0x00000000FFFFFFEF for -17). Narrow dsts keep Wt forms.
+            bytes = this->EmitLoadStore(Emitter, instr, instr->GetSrc1(), instr->GetDst(), EmitLdrsbRegister64, EmitLdrshRegister64, EmitLdrswRegister64, EmitLdrRegister64, EmitLdrsbOffset64, EmitLdrshOffset64, EmitLdrswOffset64, EmitLdrOffset64);
+        }
+        else
+        {
+            bytes = this->EmitLoadStore(Emitter, instr, instr->GetSrc1(), instr->GetDst(), EmitLdrsbRegister, EmitLdrshRegister, EmitLdrswRegister64, EmitLdrRegister64, EmitLdrsbOffset, EmitLdrshOffset, EmitLdrswOffset64, EmitLdrOffset64);
+        }
         break;
 
     // Note: src2 is really the second destination register, due to limitations of IR::Instr
