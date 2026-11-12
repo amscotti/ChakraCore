@@ -3430,7 +3430,14 @@ void LowererMD::GenerateFastCmXx(IR::Instr *instr)
     IR::Opnd * src1 = instr->UnlinkSrc1();
     IR::Opnd * src2 = instr->UnlinkSrc2();
     IR::Opnd * dst = instr->UnlinkDst();
-    bool isIntDst = dst->AsRegOpnd()->m_sym->IsInt32();
+    // Decide the int (1/0) vs Var (ValueTrue/ValueFalse library pointers)
+    // branch from the destination operand's type, not the symbol's type.
+    // A Var-typed slot used for a 32-bit compare result has a TyInt32 opnd
+    // wrapping a non-int32 sym; choosing the Var branch then LDIMMs a 64-bit
+    // library address into the 32-bit destination, which LegalizeLDIMM
+    // encodes as MOVK(LSL #32) on a W register - an unallocated encoding
+    // (SIGILL on ARM64). Matches GenerateFastCmXxTaggedInt above.
+    bool isIntDst = dst->IsInt32();
     bool isFloatSrc = src1->IsFloat();
     Assert(!isFloatSrc || src2->IsFloat());
     Assert(!src1->IsInt64() || src2->IsInt64());

@@ -503,4 +503,24 @@
     <tags>require_backend</tags>
   </default>
 </test>
+<!-- W4 DoD negative test (doc/wasm-arm64-plan.md W4 DoD): wasm atomics must
+     be rejected at compile/validate time with threads OFF, in interpreter
+     (-nonative) and FullJIT (-ForceNative -off:simpleJit) tiers. Folder tags
+     already carry require_backend/require_wasm; the per-entry require_backend
+     documents that this suite stays out of the disable_jit gate counts (same
+     rationale as the W6 probes above). -->
+<test>
+  <default>
+    <files>atomics_threads_off.js</files>
+    <compile-flags>-nonative -WasmThreads- -ESSharedArrayBuffer-</compile-flags>
+    <tags>require_backend</tags>
+  </default>
+</test>
+<test>
+  <default>
+    <files>atomics_threads_off.js</files>
+    <compile-flags>-ForceNative -off:simpleJit -WasmThreads- -ESSharedArrayBuffer-</compile-flags>
+    <tags>require_backend</tags>
+  </default>
+</test>
 </regress-exe>
