@@ -257,6 +257,13 @@
   </test>
   <test>
     <default>
+      <files>internalCallNestedArgs.js</files>
+      <baseline>internalCallNestedArgs.baseline</baseline>
+      <compile-flags>-testtrace:asmjs -oopjit- -off:fulljit</compile-flags>
+    </default>
+  </test>
+  <test>
+    <default>
       <files>BasicLooping.js</files>
       <baseline>BasicLooping.baseline</baseline>
       <tags>exclude_x64</tags>

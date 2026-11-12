@@ -276,7 +276,7 @@ private:
         IR::Instr* instr);
 
     IR::Instr*  GeneratePreCall(IR::Instr * callInstr, IR::Opnd  *functionOpnd, IR::Instr * insertBeforeInstrForCFGCheck);
-    IR::Instr*  GeneratePreCallAsmJs(IR::Instr * callInstr, IR::Opnd * functionObjOpnd, IR::Instr * insertBeforeInstrForCFGCheck);
+    IR::Instr*  GeneratePreCallAsmJs(IR::Instr * callInstr, IR::Opnd * functionObjOpnd, IR::Instr * insertBeforeInstrForCFGCheck, IR::RegOpnd ** entryPointOpndOut);
     void        SetMaxArgSlots(Js::ArgSlot actualCount /*including this*/);
 // Data
 protected:

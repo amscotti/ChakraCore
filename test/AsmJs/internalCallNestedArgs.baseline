@@ -1,0 +1,5 @@
+Successfully compiled asm.js code
+run(100) = 2131 want 2131
+run(104) = 2197 want 2197
+run(200) = 3781 want 3781
+PASS

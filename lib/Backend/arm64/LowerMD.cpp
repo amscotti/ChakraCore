@@ -701,12 +701,12 @@ LowererMD::LowerCallI(IR::Instr * callInstr, ushort callFlags, bool isHelper, IR
 // like x64. External (wasm -> JS import) calls load the Type entrypoint and
 // pass Var args (boxing already done by IRBuilder ToVar conversions).
 IR::Instr *
-LowererMD::GeneratePreCallAsmJs(IR::Instr * callInstr, IR::Opnd * functionObjOpnd, IR::Instr * insertBeforeInstrForCFGCheck)
+LowererMD::GeneratePreCallAsmJs(IR::Instr * callInstr, IR::Opnd * functionObjOpnd, IR::Instr * insertBeforeInstrForCFGCheck, IR::RegOpnd ** entryPointOpndOut)
 {
 #if !defined(ENABLE_WASM)
     // Asm.js entrypoint resolution (JnHelper AsmJsGetEntryPoint) only
     // exists in wasm builds; unreachable otherwise.
-    (void)callInstr; (void)functionObjOpnd; (void)insertBeforeInstrForCFGCheck;
+    (void)callInstr; (void)functionObjOpnd; (void)insertBeforeInstrForCFGCheck; (void)entryPointOpndOut;
     Assert(UNREACHED);
     return nullptr;
 #else
@@ -727,18 +727,12 @@ LowererMD::GeneratePreCallAsmJs(IR::Instr * callInstr, IR::Opnd * functionObjOpn
     insertBeforeInstrForCFGCheck->InsertBefore(helperCall);
     LoadHelperArgument(helperCall, functionObjOpnd);
     IR::Instr * call = ChangeToHelperCall(helperCall, IR::HelperOp_GetAsmJsEntryPoint);
-    // The internal call must present the callee function object in x0
-    // (slot 0): the callee reads [fp+0x10] as its function object for its own
-    // module lookups, and a JIT->JIT caller must establish it (the blr
-    // target would otherwise occupy x0, breaking the second level of nested
-    // internal calls). Park the entrypoint in fixed x16 and restore the
-    // function object into fixed x0 right before the internal call.
     // (ChangeToHelperCall's LowerCall forces entryPointOpnd's result into x0.)
-    IR::RegOpnd * x16Opnd = IR::RegOpnd::New(nullptr, RegR16, TyMachPtr, m_func);
-    IR::RegOpnd * x0Opnd = IR::RegOpnd::New(nullptr, RegR0, TyMachPtr, m_func);
-    Lowerer::InsertMove(x16Opnd, entryPointOpnd, insertBeforeInstrForCFGCheck);
-    Lowerer::InsertMove(x0Opnd, functionObjOpnd, insertBeforeInstrForCFGCheck);
-    callInstr->SetSrc1(x16Opnd);
+    // The park/restore moves are emitted by the caller AFTER LowerCallArgs:
+    // arg materialization may need scratch regs, and a restore emitted here
+    // would be a dead def (no IR consumer reads x0) that the allocator may
+    // clobber before the branch.
+    *entryPointOpndOut = entryPointOpnd;
     return helperCall;
 #endif
 }
@@ -747,13 +741,27 @@ IR::Instr *
 LowererMD::LowerAsmJsCallI(IR::Instr * callInstr)
 {
     IR::Opnd * functionObjOpnd = callInstr->UnlinkSrc1();
-    IR::Instr * stackParamInsert = GeneratePreCallAsmJs(callInstr, functionObjOpnd, nullptr);
+    IR::RegOpnd * entryPointOpnd = nullptr;
+    IR::Instr * stackParamInsert = GeneratePreCallAsmJs(callInstr, functionObjOpnd, nullptr, &entryPointOpnd);
     // W4 slice 1: wasm params occupy arg slots 3+k in the callee (the codegen
     // param layout: slot 0 = function, 1,2 = callinfo/env, 3+k = wasm args;
     // see IRBuilderAsmJs ParamSlotSym(k+1) + formal-param offset). The other
     // helpers/agreement with the external bridge (which presents [func][gap]
     // [gap][args] in the slot image) agree on slots 3+k, so extraParams = 2.
     int32 argCount = this->LowerCallArgs(callInstr, stackParamInsert, Js::CallFlags_Value, 2);
+    // The internal call must present the callee function object in x0
+    // (slot 0): the callee reads [fp+0x10] as its function object for its own
+    // module lookups, and a JIT->JIT caller must establish it (the blr
+    // target would otherwise occupy x0, breaking the second level of nested
+    // internal calls). Park the entrypoint in fixed x16 and restore the
+    // function object into fixed x0 AFTER arg lowering (mirrors CallE order):
+    // arg materialization above may use x0 as scratch, and an earlier restore
+    // is a dead def the allocator can clobber (Octane zlib SIGSEGV).
+    IR::RegOpnd * x16Opnd = IR::RegOpnd::New(nullptr, RegR16, TyMachPtr, m_func);
+    IR::RegOpnd * x0Opnd = IR::RegOpnd::New(nullptr, RegR0, TyMachPtr, m_func);
+    Lowerer::InsertMove(x16Opnd, entryPointOpnd, callInstr);
+    Lowerer::InsertMove(x0Opnd, functionObjOpnd, callInstr);
+    callInstr->SetSrc1(x16Opnd);
     IR::Instr * ret = this->LowerCall(callInstr, (Js::ArgSlot)argCount);
     return ret;
 }
