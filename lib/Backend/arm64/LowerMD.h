@@ -88,7 +88,7 @@ public:
             IR::Instr *     LoadArgumentsFromFrame(IR::Instr * instr);
             IR::Instr *     LowerRet(IR::Instr * instr);
             IR::Instr *     LowerCondBranch(IR::Instr * instr);
-            // W8-NEON slice 1: NEON-native SIMD lowering (slice-1 opcodes only).
+            // W8-NEON slices 1+2a: NEON-native SIMD lowering.
             // Any other Simd128 opcode fails safe via FailFast, never miscompiles.
             // Loads/stores (LdArr/StArr 16B) are part of slice 1 because every
             // wasm.simd test needs them; they lower to Q MOVQ via bounds-checked paths.
@@ -101,6 +101,10 @@ public:
             IR::Instr *         Simd128ConvertToStore(IR::Opnd * dst, IR::Opnd * src, IR::Instr * instr);
             IR::Instr *         Simd128AsmJsLowerLoadElem(IR::Instr * instr);
             IR::Instr *         Simd128AsmJsLowerStoreElem(IR::Instr * instr);
+            // W8-NEON slice 2a: Ne lowers to CMEQ plus a bitwise NOT (PMVN).
+            // Only Ne needs a pair; every other integer compare is one NEON
+            // instruction (Lt/Le via operand swap in TryLowerMappedInstruction).
+            IR::Instr *         Simd128LowerCompareInverted(IR::Instr * instr, Js::OpCode cmpOpcode);
             IR::Instr *     LoadFunctionObjectOpnd(IR::Instr *instr, IR::Opnd *&functionObjOpnd);
             IR::Instr *     GenerateSmIntPairTest(IR::Instr * instrInsert, IR::Opnd * opndSrc1, IR::Opnd * opndSrc2, IR::LabelInstr * labelFail);
 #if DBG

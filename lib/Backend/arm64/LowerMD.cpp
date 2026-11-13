@@ -2411,6 +2411,66 @@ LowererMD::Simd128InitOpcodeMap()
     SET_NEONOPCODE(Simd128_Mul_F4, MULPS);
     SET_NEONOPCODE(Simd128_Div_F4, DIVPS);
     SET_NEONOPCODE(Simd128_Sqrt_F4, SQRTPS);
+    // Slice 2a: integer compares. Eq is bitwise-identical across signed/
+    // unsigned spellings, so U aliases share CMEQ. Signed Gt uses CMGT,
+    // unsigned Gt uses CMHI (native unsigned compare; no x86-style sign-bias
+    // sequence needed). Ge uses CMGE (signed) / CMHS (unsigned) directly;
+    // Lt/Le reach the same instructions via operand swap in
+    // Simd128TryLowerMappedInstruction. Ne is not mapped (CMEQ+PMVN pair in
+    // Simd128LowerUnMappedInstruction). Result lanes are all-ones/all-zero
+    // masks natively. B-type sources have no compare IR opcodes (Bool is only
+    // the result type), so no B entries are needed.
+    SET_NEONOPCODE(Simd128_Eq_I4, CMEQ);
+    SET_NEONOPCODE(Simd128_Eq_U4, CMEQ);
+    SET_NEONOPCODE(Simd128_Eq_I8, CMEQ);
+    SET_NEONOPCODE(Simd128_Eq_U8, CMEQ);
+    SET_NEONOPCODE(Simd128_Eq_I16, CMEQ);
+    SET_NEONOPCODE(Simd128_Eq_U16, CMEQ);
+    SET_NEONOPCODE(Simd128_Gt_I4, CMGT);
+    SET_NEONOPCODE(Simd128_Gt_I8, CMGT);
+    SET_NEONOPCODE(Simd128_Gt_I16, CMGT);
+    SET_NEONOPCODE(Simd128_Lt_I4, CMGT);
+    SET_NEONOPCODE(Simd128_Lt_I8, CMGT);
+    SET_NEONOPCODE(Simd128_Lt_I16, CMGT);
+    SET_NEONOPCODE(Simd128_GtEq_I4, CMGE);
+    SET_NEONOPCODE(Simd128_GtEq_I8, CMGE);
+    SET_NEONOPCODE(Simd128_GtEq_I16, CMGE);
+    SET_NEONOPCODE(Simd128_LtEq_I4, CMGE);
+    SET_NEONOPCODE(Simd128_LtEq_I8, CMGE);
+    SET_NEONOPCODE(Simd128_LtEq_I16, CMGE);
+    SET_NEONOPCODE(Simd128_Gt_U4, CMHI);
+    SET_NEONOPCODE(Simd128_Gt_U8, CMHI);
+    SET_NEONOPCODE(Simd128_Gt_U16, CMHI);
+    SET_NEONOPCODE(Simd128_Lt_U4, CMHI);
+    SET_NEONOPCODE(Simd128_Lt_U8, CMHI);
+    SET_NEONOPCODE(Simd128_Lt_U16, CMHI);
+    SET_NEONOPCODE(Simd128_GtEq_U4, CMHS);
+    SET_NEONOPCODE(Simd128_GtEq_U8, CMHS);
+    SET_NEONOPCODE(Simd128_GtEq_U16, CMHS);
+    SET_NEONOPCODE(Simd128_LtEq_U4, CMHS);
+    SET_NEONOPCODE(Simd128_LtEq_U8, CMHS);
+    SET_NEONOPCODE(Simd128_LtEq_U16, CMHS);
+    // Slice 2a: V128Not. The wasm decoder maps v128.not to Simd128_Not_I4;
+    // the asm.js Not_*/B* spellings are the same bitwise complement, so they
+    // share PMVN (vector MVN, no all-ones mask load like x64 XORPS).
+    SET_NEONOPCODE(Simd128_Not_I4, PMVN);
+    SET_NEONOPCODE(Simd128_Not_I8, PMVN);
+    SET_NEONOPCODE(Simd128_Not_I16, PMVN);
+    SET_NEONOPCODE(Simd128_Not_U4, PMVN);
+    SET_NEONOPCODE(Simd128_Not_U8, PMVN);
+    SET_NEONOPCODE(Simd128_Not_U16, PMVN);
+    SET_NEONOPCODE(Simd128_Not_B4, PMVN);
+    SET_NEONOPCODE(Simd128_Not_B8, PMVN);
+    // Slice 2a: integer multiply. NEON MUL keeps the low half per lane
+    // (2's-complement wrap), matching wasm mul semantics, so one MD opcode
+    // covers I4/U4 (4S), I8/U8 (8H) and I16/U16 (16B); lane size comes from
+    // the IR type. (No I2 mul exists in this vintage.)
+    SET_NEONOPCODE(Simd128_Mul_I4, PMULW);
+    SET_NEONOPCODE(Simd128_Mul_U4, PMULW);
+    SET_NEONOPCODE(Simd128_Mul_I8, PMULW);
+    SET_NEONOPCODE(Simd128_Mul_U8, PMULW);
+    SET_NEONOPCODE(Simd128_Mul_I16, PMULW);
+    SET_NEONOPCODE(Simd128_Mul_U16, PMULW);
 }
 
 IR::Instr *
@@ -2441,6 +2501,46 @@ LowererMD::Simd128TryLowerMappedInstruction(IR::Instr *instr)
     Assert(instr->GetDst() && instr->GetDst()->IsRegOpnd() && instr->GetDst()->IsSimd128());
     Assert(instr->GetSrc1() && instr->GetSrc1()->IsRegOpnd() && instr->GetSrc1()->IsSimd128());
     Assert(!instr->GetSrc2() || (instr->GetSrc2()->IsRegOpnd() && instr->GetSrc2()->IsSimd128()));
+    // Slice 2a: Lt/Le via operand swap (mirrors x64 Simd128TryLowerMappedInstruction,
+    // which swaps Lt to Gt; extended here to Le via Ge for both signs).
+    // Lt(a,b) == Gt(b,a); Le(a,b) == Ge(b,a); unsigned pairs use CMHI/CMHS.
+    bool swapOperands = false;
+    switch (instr->m_opcode)
+    {
+    case Js::OpCode::Simd128_Lt_I4:
+    case Js::OpCode::Simd128_Lt_I8:
+    case Js::OpCode::Simd128_Lt_I16:
+        Assert(opcode == Js::OpCode::CMGT);
+        swapOperands = true;
+        break;
+    case Js::OpCode::Simd128_Lt_U4:
+    case Js::OpCode::Simd128_Lt_U8:
+    case Js::OpCode::Simd128_Lt_U16:
+        Assert(opcode == Js::OpCode::CMHI);
+        swapOperands = true;
+        break;
+    case Js::OpCode::Simd128_LtEq_I4:
+    case Js::OpCode::Simd128_LtEq_I8:
+    case Js::OpCode::Simd128_LtEq_I16:
+        Assert(opcode == Js::OpCode::CMGE);
+        swapOperands = true;
+        break;
+    case Js::OpCode::Simd128_LtEq_U4:
+    case Js::OpCode::Simd128_LtEq_U8:
+    case Js::OpCode::Simd128_LtEq_U16:
+        Assert(opcode == Js::OpCode::CMHS);
+        swapOperands = true;
+        break;
+    default:
+        break;
+    }
+    if (swapOperands)
+    {
+        IR::Opnd *src1 = instr->UnlinkSrc1();
+        IR::Opnd *src2 = instr->UnlinkSrc2();
+        instr->SetSrc1(src2);
+        instr->SetSrc2(src1);
+    }
     instr->m_opcode = opcode;
     LegalizeMD::LegalizeInstr(instr);
     return true;
@@ -2450,8 +2550,10 @@ IR::Instr *
 LowererMD::Simd128LowerUnMappedInstruction(IR::Instr *instr)
 {
     // Slice-1 unmapped: LdC (constant load via MOVQ) and 16-byte LdArr/StArr
-    // (Q loads/stores for wasm memory) are lowered; every other opcode fails
-    // safe (controlled FailFast, never silent miscompile).
+    // (Q loads/stores for wasm memory) are lowered.
+    // Slice 2a unmapped: Ne (CMEQ + PMVN pair; every other integer compare is
+    // a single mapped NEON instruction).
+    // Every other opcode fails safe (controlled FailFast, never silent miscompile).
     if (instr->m_opcode == Js::OpCode::Simd128_LdC)
     {
         return Simd128LoadConst(instr);
@@ -2490,11 +2592,41 @@ LowererMD::Simd128LowerUnMappedInstruction(IR::Instr *instr)
     case Js::OpCode::Simd128_StArrConst_F4:
         Assert(m_func->GetJITFunctionBody()->IsAsmJsMode());
         return Simd128AsmJsLowerStoreElem(instr);
+    case Js::OpCode::Simd128_Neq_I4:
+    case Js::OpCode::Simd128_Neq_I8:
+    case Js::OpCode::Simd128_Neq_I16:
+    case Js::OpCode::Simd128_Neq_U4:
+    case Js::OpCode::Simd128_Neq_U8:
+    case Js::OpCode::Simd128_Neq_U16:
+        return Simd128LowerCompareInverted(instr, Js::OpCode::CMEQ);
     default:
         break;
     }
-    AssertOrFailFastMsg(false, "W8-NEON slice 1: unlowered Simd128 opcode, refusing to miscompile");
+    AssertOrFailFastMsg(false, "W8-NEON slices 1+2a: unlowered Simd128 opcode, refusing to miscompile");
     return nullptr;
+}
+
+IR::Instr *
+LowererMD::Simd128LowerCompareInverted(IR::Instr *instr, Js::OpCode cmpOpcode)
+{
+    // Slice 2a: Ne(a,b) == NOT(Eq(a,b)). NEON compares already produce
+    // all-ones/all-zero masks, so bitwise NOT (PMVN, vector MVN) inverts the
+    // mask: no all-ones constant load like x64 Simd128LowerNotEqual.
+    Assert(instr->GetDst() && instr->GetDst()->IsRegOpnd() && instr->GetDst()->IsSimd128());
+    Assert(instr->GetSrc1() && instr->GetSrc1()->IsRegOpnd() && instr->GetSrc1()->IsSimd128());
+    Assert(instr->GetSrc2() && instr->GetSrc2()->IsRegOpnd() && instr->GetSrc2()->IsSimd128());
+    IR::Opnd *dst = instr->GetDst();
+    IR::Opnd *src1 = instr->GetSrc1();
+    IR::Opnd *src2 = instr->GetSrc2();
+    IR::Instr *cmpInstr = IR::Instr::New(cmpOpcode, dst, src1, src2, m_func);
+    instr->InsertBefore(cmpInstr);
+    LegalizeMD::LegalizeInstr(cmpInstr);
+    IR::Instr *notInstr = IR::Instr::New(Js::OpCode::PMVN, dst, dst, m_func);
+    instr->InsertBefore(notInstr);
+    LegalizeMD::LegalizeInstr(notInstr);
+    IR::Instr *instrPrev = instr->m_prev;
+    instr->Remove();
+    return instrPrev;
 }
 
 IR::Instr *

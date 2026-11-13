@@ -154,3 +154,18 @@ MACRO(SUBPS,       Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,
 MACRO(MULPS,       Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)
 MACRO(DIVPS,       Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)
 MACRO(SQRTPS,      Reg2,       0,              UNUSED,   LEGAL_REG2,     UNUSED,   D___)
+
+// W8-NEON slice 2a: integer compares, vector NOT, integer multiply.
+// Lane size comes from the IR type via NeonSizeForSimdType (like PADDD),
+// so one MD opcode covers 4S/8H/16B. CMGE/CMHS give signed/unsigned Ge
+// directly; Lt/Le reach them via operand swap in
+// Simd128TryLowerMappedInstruction; Ne (and only Ne) needs a CMEQ+PMVN
+// pair. PMVN is bitwise (SIZE_16B) so one opcode covers every Not lane
+// shape; PMULW wraps per lane like wasm (low half kept).
+MACRO(CMEQ,        Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)
+MACRO(CMGT,        Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)
+MACRO(CMGE,        Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)
+MACRO(CMHI,        Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)
+MACRO(CMHS,        Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)
+MACRO(PMVN,        Reg2,       0,              UNUSED,   LEGAL_REG2,     UNUSED,   D___)
+MACRO(PMULW,       Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)

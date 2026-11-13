@@ -1583,6 +1583,37 @@ EncoderMD::GenerateEncoding(IR::Instr* instr, BYTE *pc)
         bytes = this->EmitOp2NeonRegister(Emitter, instr, EmitNeonFsqrt, SIZE_4S);
         break;
 
+    // W8-NEON slice 2a: integer compares produce all-ones/all-zero masks
+    // natively; lane size comes from the IR type (Bool result lanes match the
+    // compared lanes). PMVN is bitwise (SIZE_16B); PMULW wraps per lane.
+    case Js::OpCode::CMEQ:
+        bytes = this->EmitOp3NeonRegister(Emitter, instr, EmitNeonCmeq, NeonSizeForSimdType(instr->GetDst()->GetType()));
+        break;
+
+    case Js::OpCode::CMGT:
+        bytes = this->EmitOp3NeonRegister(Emitter, instr, EmitNeonCmgt, NeonSizeForSimdType(instr->GetDst()->GetType()));
+        break;
+
+    case Js::OpCode::CMGE:
+        bytes = this->EmitOp3NeonRegister(Emitter, instr, EmitNeonCmge, NeonSizeForSimdType(instr->GetDst()->GetType()));
+        break;
+
+    case Js::OpCode::CMHI:
+        bytes = this->EmitOp3NeonRegister(Emitter, instr, EmitNeonCmhi, NeonSizeForSimdType(instr->GetDst()->GetType()));
+        break;
+
+    case Js::OpCode::CMHS:
+        bytes = this->EmitOp3NeonRegister(Emitter, instr, EmitNeonCmhs, NeonSizeForSimdType(instr->GetDst()->GetType()));
+        break;
+
+    case Js::OpCode::PMVN:
+        bytes = this->EmitOp2NeonRegister(Emitter, instr, EmitNeonNot, SIZE_16B);
+        break;
+
+    case Js::OpCode::PMULW:
+        bytes = this->EmitOp3NeonRegister(Emitter, instr, EmitNeonMul, NeonSizeForSimdType(instr->GetDst()->GetType()));
+        break;
+
     // Opcode not yet implemented
     default:
 #if DBG_DUMP

@@ -4421,7 +4421,14 @@ void IRBuilderAsmJs::BuildInt8x16_1Int16(Js::OpCodeAsmJs newOpcode, uint32 offse
 void
 IRBuilderAsmJs::BuildBool8x16_1Int8x16_2(Js::OpCodeAsmJs newOpcode, uint32 offset, BUILD_SIMD_ARGS_REG3)
 {
-    BuildSimd_3(newOpcode, offset, dstRegSlot, src1RegSlot, src2RegSlot, TySimd128B8, TySimd128I8);
+    // SLICE-2A root-cause fix (pre-existing on all arches): the layout name
+    // is Bool8x16 (16 lanes of 8-bit bool) over Int8x16 (16 lanes of 8-bit
+    // int), so the IR types must be the 16-lane B16/I16, matching the
+    // unsigned sibling BuildBool8x16_1Uint8x16_2 (B16/U16). The old B8/I8
+    // (8 lanes of 16-bit) was invisible to the interpreter (untyped v128)
+    // and to x64 (lane-explicit MD opcodes) but mis-sized any consumer that
+    // derives lane width from the IR type (ARM64 NEON encoder).
+    BuildSimd_3(newOpcode, offset, dstRegSlot, src1RegSlot, src2RegSlot, TySimd128B16, TySimd128I16);
 }
 
 void
