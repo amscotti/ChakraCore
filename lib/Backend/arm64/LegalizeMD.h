@@ -52,6 +52,8 @@ struct LegalInstrForms
 #define LEGAL_ALU2     { L_Reg,     { (LegalForms)(L_Reg | L_ImmLog12), L_None } }
 #define LEGAL_ALU3     { L_Reg,     { L_Reg,     (LegalForms)(L_Reg | L_ImmLog12) } }
 #define LEGAL_SHIFT    { L_Reg,     { L_Reg,     (LegalForms)(L_Reg | L_ImmU6) } }
+// W8-NEON slice 2b: INSV (dst vec, lane imm, scalar reg).
+#define LEGAL_INS      { L_Reg,     { L_ImmU6,   L_Reg } }
 #define LEGAL_BITFIELD { L_Reg,     { L_Reg,     L_ImmU6U6 } }
 #define LEGAL_BLAB     LEGAL_NONE
 #define LEGAL_CALL     { L_Reg,     { L_Lab20 ,  L_None } } // Not currently generated, offset check is missing

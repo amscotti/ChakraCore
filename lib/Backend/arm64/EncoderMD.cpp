@@ -1614,6 +1614,188 @@ EncoderMD::GenerateEncoding(IR::Instr* instr, BYTE *pc)
         bytes = this->EmitOp3NeonRegister(Emitter, instr, EmitNeonMul, NeonSizeForSimdType(instr->GetDst()->GetType()));
         break;
 
+    // W8-NEON slice 2b: lane ops + conversions. Lane size derives from the
+    // IR type; INSV/DUPELV lane immediates come from the lowerer (splat uses
+    // lane 0; replace/shuffle lanes are validated at parse), UMOVV/SMOVV
+    // lanes are guarded by MovElementCommon's encoding assert.
+    case Js::OpCode::INSV:
+    {
+        // Scalar into one lane (the lowerer copies the vector first, so the
+        // untouched lanes preserve; splat uses lane 0).
+        IR::Opnd *dst = instr->GetDst();
+        IR::Opnd *laneOpnd = instr->GetSrc1();
+        IR::Opnd *scalarOpnd = instr->GetSrc2();
+        Assert(dst->IsRegOpnd() && laneOpnd->IsIntConstOpnd() && scalarOpnd->IsRegOpnd());
+        int32 lane = laneOpnd->AsIntConstOpnd()->AsInt32();
+        Assert(lane >= 0);
+        NEON_SIZE laneSize;
+        if (scalarOpnd->GetSize() == 8)
+        {
+            // I2/D2 replace: the 64-bit scalar selects 1D lanes (a D2
+            // destination reuses the F4 type, so the scalar decides).
+            laneSize = SIZE_1D;
+            Assert(lane < 2);
+        }
+        else
+        {
+            NEON_SIZE vecSize = NeonSizeForSimdType(dst->GetType());
+            laneSize = vecSize == SIZE_2D ? SIZE_1D : vecSize == SIZE_4S ? SIZE_1S : vecSize == SIZE_8H ? SIZE_1H : SIZE_1B;
+            Assert(lane < (vecSize == SIZE_2D ? 2 : vecSize == SIZE_4S ? 4 : vecSize == SIZE_8H ? 8 : 16));
+            Assert(laneSize != SIZE_1D);
+        }
+        bytes = EmitNeonIns(Emitter, NeonRegisterParam(this->GetRegEncode(dst->AsRegOpnd()), 16), (ULONG)lane,
+            Arm64SimpleRegisterParam(this->GetRegEncode(scalarOpnd->AsRegOpnd())), laneSize);
+        break;
+    }
+
+    case Js::OpCode::DUPELV:
+    {
+        // DUP-element: replicate one lane to all lanes (splat's second half).
+        IR::Opnd *dst = instr->GetDst();
+        IR::Opnd *src1 = instr->GetSrc1();
+        Assert(dst->IsRegOpnd() && src1->IsRegOpnd() && instr->GetSrc2()->IsIntConstOpnd());
+        int32 lane = instr->GetSrc2()->AsIntConstOpnd()->AsInt32();
+        Assert(lane >= 0);
+        NEON_SIZE vecSize = NeonSizeForSimdType(dst->GetType());
+        Assert(lane < (vecSize == SIZE_2D ? 2 : vecSize == SIZE_4S ? 4 : vecSize == SIZE_8H ? 8 : 16));
+        bytes = EmitNeonDupElement(Emitter, NeonRegisterParam(this->GetRegEncode(dst->AsRegOpnd()), 16),
+            NeonRegisterParam(this->GetRegEncode(src1->AsRegOpnd()), 16), (ULONG)lane, vecSize);
+        break;
+    }
+
+    case Js::OpCode::DUPGV:
+    {
+        // DUP-general for 64-bit splats (I2/D2): replicate Xn[63:0] to both
+        // lanes. The scalar is always 64-bit (floats bitcast via FMOV_GEN by
+        // the lowerer); 32-bit and narrower splats use INSV + DUPELV, whose
+        // lane size comes from the distinct destination types.
+        IR::Opnd *dst = instr->GetDst();
+        IR::Opnd *src1 = instr->GetSrc1();
+        Assert(dst->IsRegOpnd() && src1->IsRegOpnd() && src1->GetSize() == 8);
+        bytes = EmitNeonDup(Emitter, NeonRegisterParam(this->GetRegEncode(dst->AsRegOpnd()), 16),
+            Arm64SimpleRegisterParam(this->GetRegEncode(src1->AsRegOpnd())), SIZE_2D);
+        break;
+    }
+
+    case Js::OpCode::UMOVV:
+    {
+        // One lane to a general register, zero-extended.
+        IR::Opnd *dst = instr->GetDst();
+        IR::Opnd *src1 = instr->GetSrc1();
+        Assert(dst->IsRegOpnd() && src1->IsRegOpnd() && instr->GetSrc2()->IsIntConstOpnd());
+        int32 lane = instr->GetSrc2()->AsIntConstOpnd()->AsInt32();
+        Assert(lane >= 0);
+        if (dst->GetSize() == 8)
+        {
+            // I2/D2 extract (D2 bitcast back via FMOV_GEN by the lowerer).
+            Assert(lane < 2);
+            bytes = EmitNeonUmov64(Emitter, Arm64SimpleRegisterParam(this->GetRegEncode(dst->AsRegOpnd())),
+                NeonRegisterParam(this->GetRegEncode(src1->AsRegOpnd()), 16), (ULONG)lane, SIZE_1D);
+        }
+        else
+        {
+            Assert(dst->GetSize() == 4);
+            NEON_SIZE laneSize;
+            switch (src1->GetType())
+            {
+            case TySimd128F4:
+            case TySimd128I4:
+            case TySimd128U4:
+                Assert(lane < 4);
+                laneSize = SIZE_1S;
+                break;
+            case TySimd128I8:
+            case TySimd128U8:
+                Assert(lane < 8);
+                laneSize = SIZE_1H;
+                break;
+            case TySimd128I16:
+            case TySimd128U16:
+                Assert(lane < 16);
+                laneSize = SIZE_1B;
+                break;
+            default:
+                AssertMsg(false, "UMOVV: unexpected vector type");
+                laneSize = SIZE_1S;
+                break;
+            }
+            bytes = EmitNeonUmov(Emitter, Arm64SimpleRegisterParam(this->GetRegEncode(dst->AsRegOpnd())),
+                NeonRegisterParam(this->GetRegEncode(src1->AsRegOpnd()), 16), (ULONG)lane, laneSize);
+        }
+        break;
+    }
+
+    case Js::OpCode::SMOVV:
+    {
+        // One 8/16-bit lane to a general register, sign-extended.
+        IR::Opnd *dst = instr->GetDst();
+        IR::Opnd *src1 = instr->GetSrc1();
+        Assert(dst->IsRegOpnd() && src1->IsRegOpnd() && instr->GetSrc2()->IsIntConstOpnd());
+        Assert(dst->GetSize() == 4);
+        int32 lane = instr->GetSrc2()->AsIntConstOpnd()->AsInt32();
+        Assert(lane >= 0);
+        NEON_SIZE laneSize;
+        switch (src1->GetType())
+        {
+        case TySimd128I8:
+            Assert(lane < 8);
+            laneSize = SIZE_1H;
+            break;
+        case TySimd128I16:
+            Assert(lane < 16);
+            laneSize = SIZE_1B;
+            break;
+        default:
+            AssertMsg(false, "SMOVV: unexpected vector type");
+            laneSize = SIZE_1H;
+            break;
+        }
+        bytes = EmitNeonSmov(Emitter, Arm64SimpleRegisterParam(this->GetRegEncode(dst->AsRegOpnd())),
+            NeonRegisterParam(this->GetRegEncode(src1->AsRegOpnd()), 16), (ULONG)lane, laneSize);
+        break;
+    }
+
+    case Js::OpCode::TBLV:
+        bytes = this->EmitOp3NeonRegister(Emitter, instr, EmitNeonTbl, SIZE_16B);
+        break;
+
+    case Js::OpCode::SCVTFV:
+        // static_cast selects the vector (FloatBinaryCommon) overload over
+        // the scalar (ConvertScalarCommon) twin.
+        bytes = this->EmitOp2NeonRegister(Emitter, instr,
+            static_cast<int(*)(Arm64CodeEmitter&, NeonRegisterParam, NeonRegisterParam, NEON_SIZE)>(EmitNeonScvtf),
+            NeonSizeForSimdType(instr->GetDst()->GetType()));
+        break;
+
+    case Js::OpCode::UCVTFV:
+        bytes = this->EmitOp2NeonRegister(Emitter, instr,
+            static_cast<int(*)(Arm64CodeEmitter&, NeonRegisterParam, NeonRegisterParam, NEON_SIZE)>(EmitNeonUcvtf),
+            NeonSizeForSimdType(instr->GetDst()->GetType()));
+        break;
+
+    case Js::OpCode::FCVTZSV:
+        bytes = this->EmitOp2NeonRegister(Emitter, instr, EmitNeonFcvtzs, NeonSizeForSimdType(instr->GetDst()->GetType()));
+        break;
+
+    case Js::OpCode::FCVTZUV:
+        bytes = this->EmitOp2NeonRegister(Emitter, instr, EmitNeonFcvtzu, NeonSizeForSimdType(instr->GetDst()->GetType()));
+        break;
+
+    case Js::OpCode::FCMGEV:
+        Assert(NeonSizeForSimdType(instr->GetDst()->GetType()) == SIZE_4S);
+        bytes = this->EmitOp3NeonRegister(Emitter, instr, EmitNeonFcmge, SIZE_4S);
+        break;
+
+    case Js::OpCode::FCMGTV:
+        Assert(NeonSizeForSimdType(instr->GetDst()->GetType()) == SIZE_4S);
+        bytes = this->EmitOp3NeonRegister(Emitter, instr, EmitNeonFcmgt, SIZE_4S);
+        break;
+
+    case Js::OpCode::FCMEQV:
+        Assert(NeonSizeForSimdType(instr->GetDst()->GetType()) == SIZE_4S);
+        bytes = this->EmitOp3NeonRegister(Emitter, instr, EmitNeonFcmeq, SIZE_4S);
+        break;
+
     // Opcode not yet implemented
     default:
 #if DBG_DUMP

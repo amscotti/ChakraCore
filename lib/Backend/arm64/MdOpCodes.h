@@ -169,3 +169,32 @@ MACRO(CMHI,        Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,
 MACRO(CMHS,        Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)
 MACRO(PMVN,        Reg2,       0,              UNUSED,   LEGAL_REG2,     UNUSED,   D___)
 MACRO(PMULW,       Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)
+
+// W8-NEON slice 2b: SIMD lane ops + float<->int conversions.
+// Lane sizes come from the IR type (NeonSizeForSimdType, or the encoder's
+// scalar mapping); signedness (UMOV vs SMOV) is chosen by the lowerer from
+// the IR opcode. Splat is INSV lane 0 followed by DUPELV (DUP-element
+// replicates one lane to all lanes; each MD instr is one machine word),
+// except 64-bit splats which are a single DUPGV (the scalar size selects 2D
+// lanes since D2 reuses the F4 type);
+// UMOVV/SMOVV move one lane to a general register (zero-/sign-extend);
+// INSV inserts a scalar into one lane (the lowerer copies the vector first);
+// TBLV is the single-table shuffle step (out-of-range indices write 0).
+// SCVTFV/UCVTFV are exact (round-to-nearest, like x64 CVTDQ2PS with its
+// fixup); FCVTZSV/FCVTZUV truncate toward zero but saturate where x64
+// CVTTPS2DQ yields INT_MIN, so the lowerer range-checks explicitly and traps
+// exactly like x64. FCMGEV/FCMGTV/FCMEQV build the can't-trap lane masks
+// those range checks reduce (via UMOVV + CBNZ).
+MACRO(DUPELV,      Reg2,       0,              UNUSED,   LEGAL_SHIFT,    UNUSED,   D___)
+MACRO(DUPGV,       Reg2,       0,              UNUSED,   LEGAL_REG2,     UNUSED,   D___)
+MACRO(UMOVV,       Reg2,       0,              UNUSED,   LEGAL_SHIFT,    UNUSED,   D___)
+MACRO(SMOVV,       Reg2,       0,              UNUSED,   LEGAL_SHIFT,    UNUSED,   D___)
+MACRO(INSV,        Reg3,       0,              UNUSED,   LEGAL_INS,      UNUSED,   D___)
+MACRO(TBLV,        Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)
+MACRO(SCVTFV,      Reg2,       0,              UNUSED,   LEGAL_REG2,     UNUSED,   D___)
+MACRO(UCVTFV,      Reg2,       0,              UNUSED,   LEGAL_REG2,     UNUSED,   D___)
+MACRO(FCVTZSV,     Reg2,       0,              UNUSED,   LEGAL_REG2,     UNUSED,   D___)
+MACRO(FCVTZUV,     Reg2,       0,              UNUSED,   LEGAL_REG2,     UNUSED,   D___)
+MACRO(FCMGEV,      Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)
+MACRO(FCMGTV,      Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)
+MACRO(FCMEQV,      Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)

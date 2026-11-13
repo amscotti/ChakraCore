@@ -2553,10 +2553,56 @@ LowererMD::Simd128LowerUnMappedInstruction(IR::Instr *instr)
     // (Q loads/stores for wasm memory) are lowered.
     // Slice 2a unmapped: Ne (CMEQ + PMVN pair; every other integer compare is
     // a single mapped NEON instruction).
+    // Slice 2b unmapped: splat/extract/replace/shuffle + conversions below.
     // Every other opcode fails safe (controlled FailFast, never silent miscompile).
     if (instr->m_opcode == Js::OpCode::Simd128_LdC)
     {
         return Simd128LoadConst(instr);
+    }
+    switch (instr->m_opcode)
+    {
+    case Js::OpCode::Simd128_Splat_I4:
+    case Js::OpCode::Simd128_Splat_U4:
+    case Js::OpCode::Simd128_Splat_I8:
+    case Js::OpCode::Simd128_Splat_U8:
+    case Js::OpCode::Simd128_Splat_I16:
+    case Js::OpCode::Simd128_Splat_U16:
+    case Js::OpCode::Simd128_Splat_I2:
+    case Js::OpCode::Simd128_Splat_F4:
+    case Js::OpCode::Simd128_Splat_D2:
+        return Simd128LowerSplat(instr);
+    case Js::OpCode::Simd128_ExtractLane_I4:
+    case Js::OpCode::Simd128_ExtractLane_U4:
+    case Js::OpCode::Simd128_ExtractLane_I8:
+    case Js::OpCode::Simd128_ExtractLane_U8:
+    case Js::OpCode::Simd128_ExtractLane_I16:
+    case Js::OpCode::Simd128_ExtractLane_U16:
+    case Js::OpCode::Simd128_ExtractLane_I2:
+    case Js::OpCode::Simd128_ExtractLane_F4:
+    case Js::OpCode::Simd128_ExtractLane_D2:
+        return Simd128LowerExtractLane(instr);
+    case Js::OpCode::Simd128_ReplaceLane_I4:
+    case Js::OpCode::Simd128_ReplaceLane_U4:
+    case Js::OpCode::Simd128_ReplaceLane_I8:
+    case Js::OpCode::Simd128_ReplaceLane_U8:
+    case Js::OpCode::Simd128_ReplaceLane_I16:
+    case Js::OpCode::Simd128_ReplaceLane_U16:
+    case Js::OpCode::Simd128_ReplaceLane_I2:
+    case Js::OpCode::Simd128_ReplaceLane_F4:
+    case Js::OpCode::Simd128_ReplaceLane_D2:
+        return Simd128LowerReplaceLane(instr);
+    case Js::OpCode::Simd128_Shuffle_U16:
+        return Simd128LowerShuffle(instr);
+    case Js::OpCode::Simd128_FromFloat32x4_I4:
+        return Simd128LowerInt32x4FromFloat32x4(instr);
+    case Js::OpCode::Simd128_FromFloat32x4_U4:
+        return Simd128LowerUint32x4FromFloat32x4(instr);
+    case Js::OpCode::Simd128_FromInt32x4_F4:
+        return Simd128LowerFloat32x4FromInt32x4(instr);
+    case Js::OpCode::Simd128_FromUint32x4_F4:
+        return Simd128LowerFloat32x4FromUint32x4(instr);
+    default:
+        break;
     }
     switch (instr->m_opcode)
     {
@@ -2602,7 +2648,7 @@ LowererMD::Simd128LowerUnMappedInstruction(IR::Instr *instr)
     default:
         break;
     }
-    AssertOrFailFastMsg(false, "W8-NEON slices 1+2a: unlowered Simd128 opcode, refusing to miscompile");
+    AssertOrFailFastMsg(false, "W8-NEON slices 1+2a+2b: unlowered Simd128 opcode, refusing to miscompile");
     return nullptr;
 }
 
@@ -2625,6 +2671,566 @@ LowererMD::Simd128LowerCompareInverted(IR::Instr *instr, Js::OpCode cmpOpcode)
     instr->InsertBefore(notInstr);
     LegalizeMD::LegalizeInstr(notInstr);
     IR::Instr *instrPrev = instr->m_prev;
+    instr->Remove();
+    return instrPrev;
+}
+
+// Slice 2b: unpack the ExtendArg_A chain. Local equivalent of the shared x86
+// helper (LowerMDSharedSimd128.cpp is not compiled for ARM64).
+SList<IR::Opnd*> *
+LowererMD::Simd128GetExtendedArgs(IR::Instr *instr)
+{
+    SList<IR::Opnd*> *args = JitAnew(m_lowerer->m_alloc, SList<IR::Opnd*>, m_lowerer->m_alloc);
+    IR::Instr *pInstr = instr;
+    IR::Opnd *dst = nullptr, *src1 = nullptr, *src2 = nullptr;
+
+    if (pInstr->GetDst())
+    {
+        dst = pInstr->UnlinkDst();
+    }
+
+    src1 = pInstr->UnlinkSrc1();
+    Assert(src1->GetStackSym()->IsSingleDef());
+
+    pInstr = src1->GetStackSym()->GetInstrDef();
+
+    while (pInstr && pInstr->m_opcode == Js::OpCode::ExtendArg_A)
+    {
+        Assert(pInstr->GetSrc1());
+        src1 = pInstr->GetSrc1()->Copy(this->m_func);
+        if (src1->IsRegOpnd())
+        {
+            this->m_lowerer->addToLiveOnBackEdgeSyms->Set(src1->AsRegOpnd()->m_sym->m_id);
+        }
+        args->Push(src1);
+
+        if (pInstr->GetSrc2())
+        {
+            src2 = pInstr->GetSrc2();
+            Assert(src2->GetStackSym()->IsSingleDef());
+            pInstr = src2->GetStackSym()->GetInstrDef();
+        }
+        else
+        {
+            pInstr = nullptr;
+        }
+    }
+    args->Push(dst);
+    Assert(args->Count() > 3);
+    return args;
+}
+
+// Slice 2b: materialize a 16-byte SIMD constant (replicated u32 or 16 lane
+// bytes) via the function constant pool, like Simd128LoadConst.
+IR::RegOpnd *
+LowererMD::Simd128MaterializeConst(AsmJsSIMDValue value, IRType type, IR::Instr *insertBeforeInstr)
+{
+    void *pValue = NativeCodeDataNewNoFixup(this->m_func->GetNativeCodeDataAllocator(), SIMDType<DataDesc_LowererMD_Simd128LoadConst>, value);
+    IR::Opnd *simdRef;
+    if (!m_func->IsOOPJIT())
+    {
+        simdRef = IR::MemRefOpnd::New((void *)pValue, type, m_func);
+    }
+    else
+    {
+        int offset = NativeCodeData::GetDataTotalOffset(pValue);
+        simdRef = IR::IndirOpnd::New(IR::RegOpnd::New(m_func->GetTopFunc()->GetNativeCodeDataSym(), TyVar, m_func), offset, type,
+#if DBG
+            NativeCodeData::GetDataDescription(pValue, m_func->m_alloc),
+#endif
+            m_func, true);
+        m_lowerer->addToLiveOnBackEdgeSyms->Set(m_func->GetTopFunc()->GetNativeCodeDataSym()->m_id);
+    }
+    IR::RegOpnd *tmp = IR::RegOpnd::New(type, m_func);
+    IR::Instr *load = IR::Instr::New(Js::OpCode::MOVQ, tmp, simdRef, m_func);
+    insertBeforeInstr->InsertBefore(load);
+    LegalizeMD::LegalizeInstr(load);
+    return tmp;
+}
+
+// Slice 2b: trap (RangeError, like x64) if any of the 4 mask lanes is
+// all-ones. Reduces via UMOVV lane extracts + scalar ORR, then CBZ skips
+// over the runtime call on the all-zero (no-trap) path.
+void
+LowererMD::Simd128TrapIfMaskNonZero(IR::RegOpnd *mask, IR::Instr *instr)
+{
+    Assert(mask->IsSimd128());
+    IR::RegOpnd *reduced = IR::RegOpnd::New(TyInt32, m_func);
+    IR::RegOpnd *lane = IR::RegOpnd::New(TyInt32, m_func);
+    for (int i = 0; i < 4; i++)
+    {
+        IR::Instr *extract = IR::Instr::New(Js::OpCode::UMOVV, i == 0 ? (IR::Opnd*)reduced : (IR::Opnd*)lane,
+            mask, IR::IntConstOpnd::New(i, TyInt32, m_func), m_func);
+        instr->InsertBefore(extract);
+        LegalizeMD::LegalizeInstr(extract);
+        if (i > 0)
+        {
+            IR::Instr *orr = IR::Instr::New(Js::OpCode::ORR, reduced, reduced, lane, m_func);
+            instr->InsertBefore(orr);
+            LegalizeMD::LegalizeInstr(orr);
+        }
+    }
+    IR::LabelInstr *doneLabel = IR::LabelInstr::New(Js::OpCode::Label, m_func);
+    IR::Instr *branch = IR::BranchInstr::New(Js::OpCode::CBZ, doneLabel, m_func);
+    branch->SetSrc1(reduced);
+    instr->InsertBefore(branch);
+    m_lowerer->GenerateRuntimeError(instr, JSERR_ArgumentOutOfRange, IR::HelperOp_RuntimeRangeError);
+    instr->InsertBefore(doneLabel);
+}
+
+// Slice 2b: splat one scalar to all lanes (NEON INS lane 0, then DUP-element
+// lane 0 to all lanes, as two MD instrs since each encodes one machine
+// word). Float scalars are bitcast via FMOV_GEN first (f64→f32 demoted via
+// FCVT, mirroring x64's CVTSD2SS step); 8/16-bit truncation is inherent in
+// the lane-sized INS, matching x64's truncate-then-broadcast.
+IR::Instr *
+LowererMD::Simd128LowerSplat(IR::Instr *instr)
+{
+    IR::Instr *instrPrev = instr->m_prev;
+    IR::Opnd *dst = instr->GetDst();
+    IR::Opnd *src1 = instr->GetSrc1();
+    Assert(dst && dst->IsRegOpnd() && dst->IsSimd128());
+    Assert(src1 && src1->IsRegOpnd() && !src1->IsSimd128());
+    Assert(!instr->GetSrc2());
+
+    switch (instr->m_opcode)
+    {
+    case Js::OpCode::Simd128_Splat_F4:
+        if (src1->GetType() == TyFloat64)
+        {
+            IR::RegOpnd *f32tmp = IR::RegOpnd::New(TyFloat32, m_func);
+            IR::Instr *cvt = IR::Instr::New(Js::OpCode::FCVT, f32tmp, src1, m_func);
+            instr->InsertBefore(cvt);
+            LegalizeMD::LegalizeInstr(cvt);
+            src1 = f32tmp;
+        }
+        Assert(src1->GetType() == TyFloat32);
+        {
+            IR::RegOpnd *bits = IR::RegOpnd::New(TyInt32, m_func);
+            IR::Instr *bitcast = IR::Instr::New(Js::OpCode::FMOV_GEN, bits, src1, m_func);
+            instr->InsertBefore(bitcast);
+            LegalizeMD::LegalizeInstr(bitcast);
+            src1 = bits;
+        }
+        break;
+    case Js::OpCode::Simd128_Splat_D2:
+        Assert(src1->GetType() == TyFloat64);
+        {
+            IR::RegOpnd *bits = IR::RegOpnd::New(TyInt64, m_func);
+            IR::Instr *bitcast = IR::Instr::New(Js::OpCode::FMOV_GEN, bits, src1, m_func);
+            instr->InsertBefore(bitcast);
+            LegalizeMD::LegalizeInstr(bitcast);
+            src1 = bits;
+        }
+        break;
+    case Js::OpCode::Simd128_Splat_I4:
+    case Js::OpCode::Simd128_Splat_U4:
+    case Js::OpCode::Simd128_Splat_I8:
+    case Js::OpCode::Simd128_Splat_U8:
+    case Js::OpCode::Simd128_Splat_I16:
+    case Js::OpCode::Simd128_Splat_U16:
+        Assert(src1->GetType() == TyInt32 || src1->GetType() == TyUint32);
+        break;
+    case Js::OpCode::Simd128_Splat_I2:
+        Assert(src1->GetType() == TyInt64);
+        break;
+    default:
+        AssertOrFailFastMsg(false, "W8-NEON slice 2b: unlowered splat (bool splats)");
+        return nullptr;
+    }
+
+    if (src1->GetSize() == 8)
+    {
+        // I2/D2: single DUP-general (the 64-bit scalar selects 2D lanes;
+        // the F4-typed D2 destination cannot).
+        Assert(instr->m_opcode == Js::OpCode::Simd128_Splat_I2 || instr->m_opcode == Js::OpCode::Simd128_Splat_D2);
+        IR::Instr *dup = IR::Instr::New(Js::OpCode::DUPGV, dst, src1, m_func);
+        instr->InsertBefore(dup);
+        LegalizeMD::LegalizeInstr(dup);
+    }
+    else
+    {
+        IR::Opnd *laneZero = IR::IntConstOpnd::New(0, TyInt32, m_func);
+        IR::Instr *ins = IR::Instr::New(Js::OpCode::INSV, dst, laneZero, src1, m_func);
+        instr->InsertBefore(ins);
+        LegalizeMD::LegalizeInstr(ins);
+        IR::Instr *dup = IR::Instr::New(Js::OpCode::DUPELV, dst, dst, laneZero, m_func);
+        instr->InsertBefore(dup);
+        LegalizeMD::LegalizeInstr(dup);
+    }
+    instr->Remove();
+    return instrPrev;
+}
+
+// Slice 2b: one lane to a scalar register. UMOV zero-extends (unsigned and
+// 32/64-bit lanes); SMOV sign-extends 8/16-bit lanes. Float lanes go through
+// a general register and back via FMOV_GEN. Bool extracts stay FailFast.
+IR::Instr *
+LowererMD::Simd128LowerExtractLane(IR::Instr *instr)
+{
+    IR::Instr *instrPrev = instr->m_prev;
+    IR::Opnd *dst = instr->GetDst();
+    IR::Opnd *src1 = instr->GetSrc1();
+    IR::Opnd *src2 = instr->GetSrc2();
+    Assert(dst && dst->IsRegOpnd() && !dst->IsSimd128());
+    Assert(src1 && src1->IsRegOpnd() && src1->IsSimd128());
+    Assert(src2 && src2->IsIntConstOpnd());
+    uint lane = src2->AsIntConstOpnd()->AsUint32();
+
+    Js::OpCode movOpcode = Js::OpCode::UMOVV;
+    switch (instr->m_opcode)
+    {
+    case Js::OpCode::Simd128_ExtractLane_I4:
+    case Js::OpCode::Simd128_ExtractLane_U4:
+    case Js::OpCode::Simd128_ExtractLane_F4:
+        Assert(lane < 4);
+        break;
+    case Js::OpCode::Simd128_ExtractLane_I8:
+        Assert(lane < 8);
+        movOpcode = Js::OpCode::SMOVV;
+        break;
+    case Js::OpCode::Simd128_ExtractLane_U8:
+        Assert(lane < 8);
+        break;
+    case Js::OpCode::Simd128_ExtractLane_I16:
+        Assert(lane < 16);
+        movOpcode = Js::OpCode::SMOVV;
+        break;
+    case Js::OpCode::Simd128_ExtractLane_U16:
+        Assert(lane < 16);
+        break;
+    case Js::OpCode::Simd128_ExtractLane_I2:
+    case Js::OpCode::Simd128_ExtractLane_D2:
+        Assert(lane < 2);
+        break;
+    default:
+        AssertOrFailFastMsg(false, "W8-NEON slice 2b: unlowered extract-lane (bool lanes)");
+        return nullptr;
+    }
+
+    IR::Opnd *intDst = dst;
+    IR::RegOpnd *tmp = nullptr;
+    if (instr->m_opcode == Js::OpCode::Simd128_ExtractLane_F4)
+    {
+        tmp = IR::RegOpnd::New(TyInt32, m_func);
+        intDst = tmp;
+    }
+    else if (instr->m_opcode == Js::OpCode::Simd128_ExtractLane_D2)
+    {
+        tmp = IR::RegOpnd::New(TyInt64, m_func);
+        intDst = tmp;
+    }
+    IR::Instr *extract = IR::Instr::New(movOpcode, intDst, src1, src2, m_func);
+    instr->InsertBefore(extract);
+    LegalizeMD::LegalizeInstr(extract);
+    if (tmp)
+    {
+        IR::Instr *bitcast = IR::Instr::New(Js::OpCode::FMOV_GEN, dst, tmp, m_func);
+        instr->InsertBefore(bitcast);
+        LegalizeMD::LegalizeInstr(bitcast);
+    }
+    instr->Remove();
+    return instrPrev;
+}
+
+// Slice 2b: scalar into one lane. The untouched lanes preserve (copy first,
+// then INS), matching x64. Float scalars are bitcast via FMOV_GEN.
+IR::Instr *
+LowererMD::Simd128LowerReplaceLane(IR::Instr *instr)
+{
+    IR::Instr *instrPrev = instr->m_prev;
+    SList<IR::Opnd*> *args = Simd128GetExtendedArgs(instr);
+    IR::Opnd *dst = args->Pop();
+    IR::Opnd *src1 = args->Pop();
+    IR::Opnd *laneOpnd = args->Pop();
+    IR::Opnd *scalarOpnd = args->Pop();
+    Assert(dst->IsSimd128() && src1->IsSimd128());
+    Assert(laneOpnd->IsIntConstOpnd());
+    uint lane = laneOpnd->AsIntConstOpnd()->AsUint32();
+
+    switch (instr->m_opcode)
+    {
+    case Js::OpCode::Simd128_ReplaceLane_I4:
+    case Js::OpCode::Simd128_ReplaceLane_U4:
+    case Js::OpCode::Simd128_ReplaceLane_F4:
+        Assert(lane < 4);
+        break;
+    case Js::OpCode::Simd128_ReplaceLane_I8:
+    case Js::OpCode::Simd128_ReplaceLane_U8:
+        Assert(lane < 8);
+        break;
+    case Js::OpCode::Simd128_ReplaceLane_I16:
+    case Js::OpCode::Simd128_ReplaceLane_U16:
+        Assert(lane < 16);
+        break;
+    case Js::OpCode::Simd128_ReplaceLane_I2:
+    case Js::OpCode::Simd128_ReplaceLane_D2:
+        Assert(lane < 2);
+        break;
+    default:
+        AssertOrFailFastMsg(false, "W8-NEON slice 2b: unlowered replace-lane (bool lanes)");
+        return nullptr;
+    }
+
+    IR::Instr *copy = IR::Instr::New(Js::OpCode::MOVQ, dst, src1, m_func);
+    instr->InsertBefore(copy);
+    LegalizeMD::LegalizeInstr(copy);
+
+    IR::Opnd *scalar = scalarOpnd;
+    if (scalar->IsFloat())
+    {
+        IR::RegOpnd *bits = IR::RegOpnd::New(scalar->GetSize() == 8 ? TyInt64 : TyInt32, m_func);
+        IR::Instr *bitcast = IR::Instr::New(Js::OpCode::FMOV_GEN, bits, scalar, m_func);
+        instr->InsertBefore(bitcast);
+        LegalizeMD::LegalizeInstr(bitcast);
+        scalar = bits;
+    }
+    else if (!scalar->IsRegOpnd())
+    {
+        IR::RegOpnd *tmp = IR::RegOpnd::New(scalar->GetType(), m_func);
+        m_lowerer->InsertMove(tmp, scalar, instr);
+        scalar = tmp;
+    }
+    IR::Instr *insert = IR::Instr::New(Js::OpCode::INSV, dst, laneOpnd, scalar, m_func);
+    instr->InsertBefore(insert);
+    LegalizeMD::LegalizeInstr(insert);
+    instr->Remove();
+    return instrPrev;
+}
+
+// Slice 2b: i8x16.shuffle. Two single-table TBLVs (the second table is src2
+// indexed by lane-16) ORed together. TBL writes 0 for out-of-range indices,
+// so lanes >= 16 vanish from the first table and lanes < 16 vanish from the
+// second (lane-16 wraps to >= 0xF0); lanes >= 32 vanish from both. Lanes
+// 16-31 select src2 bytes, exactly like the interpreter.
+IR::Instr *
+LowererMD::Simd128LowerShuffle(IR::Instr *instr)
+{
+    IR::Instr *instrPrev = instr->m_prev;
+    SList<IR::Opnd*> *args = Simd128GetExtendedArgs(instr);
+    Assert(args->Count() == 19);
+    IR::Opnd *dst = args->Pop();
+    IR::Opnd *src1 = args->Pop();
+    IR::Opnd *src2 = args->Pop();
+    Assert(dst->IsSimd128() && src1->IsSimd128() && src2->IsSimd128());
+
+    AsmJsSIMDValue mask1 = {};
+    AsmJsSIMDValue mask2 = {};
+    for (uint i = 0; i < 16; i++)
+    {
+        IR::Opnd *laneOpnd = args->Pop();
+        Assert(laneOpnd->IsIntConstOpnd());
+        uint lane = laneOpnd->AsIntConstOpnd()->AsUint32();
+        mask1.u8[i] = (uint8)lane;
+        mask2.u8[i] = (uint8)(lane - 16);
+    }
+    IR::RegOpnd *indices1 = Simd128MaterializeConst(mask1, TySimd128U16, instr);
+    IR::RegOpnd *indices2 = Simd128MaterializeConst(mask2, TySimd128U16, instr);
+    IR::RegOpnd *sel1 = IR::RegOpnd::New(TySimd128U16, m_func);
+    IR::Instr *tbl1 = IR::Instr::New(Js::OpCode::TBLV, sel1, src1, indices1, m_func);
+    instr->InsertBefore(tbl1);
+    LegalizeMD::LegalizeInstr(tbl1);
+    IR::RegOpnd *sel2 = IR::RegOpnd::New(TySimd128U16, m_func);
+    IR::Instr *tbl2 = IR::Instr::New(Js::OpCode::TBLV, sel2, src2, indices2, m_func);
+    instr->InsertBefore(tbl2);
+    LegalizeMD::LegalizeInstr(tbl2);
+    IR::Instr *orr = IR::Instr::New(Js::OpCode::POR, dst, sel1, sel2, m_func);
+    instr->InsertBefore(orr);
+    LegalizeMD::LegalizeInstr(orr);
+    instr->Remove();
+    return instrPrev;
+}
+
+// Slice 2b: i32x4.trunc_sat_f32x4_s. FCVTZS truncates toward zero but
+// saturates (NaN->0, OOB->clamp) where x64 CVTTPS2DQ yields INT_MIN, so the
+// x64 range checks are reproduced explicitly: NaN traps (wasm only, like
+// x64; asm.js NaN is fixed up to INT_MIN instead), lanes >= 2^31 or
+// < -2^31 trap. Result lanes are bit-identical to x64 in every case.
+IR::Instr *
+LowererMD::Simd128LowerInt32x4FromFloat32x4(IR::Instr *instr)
+{
+    IR::Instr *instrPrev = instr->m_prev;
+    IR::Opnd *dst = instr->GetDst();
+    IR::Opnd *src = instr->GetSrc1();
+    Assert(dst && dst->IsSimd128() && src && src->IsSimd128());
+
+    IR::Instr *convert = IR::Instr::New(Js::OpCode::FCVTZSV, dst, src, m_func);
+    instr->InsertBefore(convert);
+    LegalizeMD::LegalizeInstr(convert);
+
+    IR::RegOpnd *nanMask = IR::RegOpnd::New(TySimd128I4, m_func);
+    IR::Instr *cmpSelf = IR::Instr::New(Js::OpCode::FCMEQV, nanMask, src, src, m_func);
+    instr->InsertBefore(cmpSelf);
+    LegalizeMD::LegalizeInstr(cmpSelf);
+    if (m_func->GetJITFunctionBody()->IsWasmFunction())
+    {
+        IR::Instr *notNan = IR::Instr::New(Js::OpCode::PMVN, nanMask, nanMask, m_func);
+        instr->InsertBefore(notNan);
+        LegalizeMD::LegalizeInstr(notNan);
+        Simd128TrapIfMaskNonZero(nanMask, instr);
+    }
+    else
+    {
+        // asm.js: CVTTPS2DQ yields INT_MIN for NaN; reproduce with an OR.
+        AsmJsSIMDValue intMin = {};
+        intMin.i32[0] = intMin.i32[1] = intMin.i32[2] = intMin.i32[3] = (int32)0x80000000;
+        IR::RegOpnd *intMinVec = Simd128MaterializeConst(intMin, TySimd128I4, instr);
+        IR::RegOpnd *nanBits = IR::RegOpnd::New(TySimd128I4, m_func);
+        IR::Instr *notNan = IR::Instr::New(Js::OpCode::PMVN, nanBits, nanMask, m_func);
+        instr->InsertBefore(notNan);
+        LegalizeMD::LegalizeInstr(notNan);
+        IR::Instr *andOp = IR::Instr::New(Js::OpCode::PAND, nanBits, nanBits, intMinVec, m_func);
+        instr->InsertBefore(andOp);
+        LegalizeMD::LegalizeInstr(andOp);
+        IR::Instr *orOp = IR::Instr::New(Js::OpCode::POR, dst, dst, nanBits, m_func);
+        instr->InsertBefore(orOp);
+        LegalizeMD::LegalizeInstr(orOp);
+    }
+
+    AsmJsSIMDValue two31 = {};
+    two31.i32[0] = two31.i32[1] = two31.i32[2] = two31.i32[3] = (int32)0x4F000000;
+    IR::RegOpnd *two31Vec = Simd128MaterializeConst(two31, TySimd128F4, instr);
+    IR::RegOpnd *geMask = IR::RegOpnd::New(TySimd128I4, m_func);
+    IR::Instr *cmpGe = IR::Instr::New(Js::OpCode::FCMGEV, geMask, src, two31Vec, m_func);
+    instr->InsertBefore(cmpGe);
+    LegalizeMD::LegalizeInstr(cmpGe);
+
+    AsmJsSIMDValue negTwo31 = {};
+    negTwo31.i32[0] = negTwo31.i32[1] = negTwo31.i32[2] = negTwo31.i32[3] = (int32)0xCF000000;
+    IR::RegOpnd *negTwo31Vec = Simd128MaterializeConst(negTwo31, TySimd128F4, instr);
+    IR::RegOpnd *ltMask = IR::RegOpnd::New(TySimd128I4, m_func);
+    IR::Instr *cmpGt = IR::Instr::New(Js::OpCode::FCMGTV, ltMask, negTwo31Vec, src, m_func);
+    instr->InsertBefore(cmpGt);
+    LegalizeMD::LegalizeInstr(cmpGt);
+
+    IR::RegOpnd *oobMask = IR::RegOpnd::New(TySimd128I4, m_func);
+    IR::Instr *orMasks = IR::Instr::New(Js::OpCode::POR, oobMask, geMask, ltMask, m_func);
+    instr->InsertBefore(orMasks);
+    LegalizeMD::LegalizeInstr(orMasks);
+    Simd128TrapIfMaskNonZero(oobMask, instr);
+
+    instr->Remove();
+    return instrPrev;
+}
+
+// Slice 2b: i32x4.trunc_sat_f32x4_u. Mirrors the x64 sequence (NaN trap,
+// lanes <= -1 trap, subtract 2^31 from lanes >= 2^31, truncate, INT_MIN
+// check catches originals >= 2^32, add 2^31 back), with NEON compares. The
+// only structural change: the >= 2^32 check compares the adjusted float
+// against 2^31 (FCVTZS saturates to INT_MAX where CVTTPS2DQ marks INT_MIN),
+// which traps exactly the same lanes as x64.
+IR::Instr *
+LowererMD::Simd128LowerUint32x4FromFloat32x4(IR::Instr *instr)
+{
+    IR::Instr *instrPrev = instr->m_prev;
+    IR::Opnd *dst = instr->GetDst();
+    IR::Opnd *src = instr->GetSrc1();
+    Assert(dst && dst->IsSimd128() && src && src->IsSimd128());
+
+    // NaN traps (x64 traps via its explicit check on wasm and via the
+    // INT_MIN marker on asm.js; trap unconditionally here).
+    IR::RegOpnd *nanMask = IR::RegOpnd::New(TySimd128I4, m_func);
+    IR::Instr *cmpSelf = IR::Instr::New(Js::OpCode::FCMEQV, nanMask, src, src, m_func);
+    instr->InsertBefore(cmpSelf);
+    LegalizeMD::LegalizeInstr(cmpSelf);
+    IR::Instr *notNan = IR::Instr::New(Js::OpCode::PMVN, nanMask, nanMask, m_func);
+    instr->InsertBefore(notNan);
+    LegalizeMD::LegalizeInstr(notNan);
+    Simd128TrapIfMaskNonZero(nanMask, instr);
+
+    // Lanes <= -1 trap: saturating-convert then trap on negative results.
+    // (Covers exactly the x64 CMPLEPS(src, -1.0) lanes; (-1, 0) converts to
+    // 0 and passes on both.)
+    IR::RegOpnd *signCheck = IR::RegOpnd::New(TySimd128I4, m_func);
+    IR::Instr *signConvert = IR::Instr::New(Js::OpCode::FCVTZSV, signCheck, src, m_func);
+    instr->InsertBefore(signConvert);
+    LegalizeMD::LegalizeInstr(signConvert);
+    // Zero from the constant pool (a PXOR zero-idiom with one reg three
+    // times over does not complete the backend; use distinct operands).
+    AsmJsSIMDValue zeroBits = {};
+    zeroBits.i32[0] = zeroBits.i32[1] = zeroBits.i32[2] = zeroBits.i32[3] = 0;
+    IR::RegOpnd *zero = Simd128MaterializeConst(zeroBits, TySimd128I4, instr);
+    IR::RegOpnd *negMask = IR::RegOpnd::New(TySimd128I4, m_func);
+    IR::Instr *cmpGeZero = IR::Instr::New(Js::OpCode::CMGE, negMask, signCheck, zero, m_func);
+    instr->InsertBefore(cmpGeZero);
+    LegalizeMD::LegalizeInstr(cmpGeZero);
+    IR::Instr *notNeg = IR::Instr::New(Js::OpCode::PMVN, negMask, negMask, m_func);
+    instr->InsertBefore(notNeg);
+    LegalizeMD::LegalizeInstr(notNeg);
+    Simd128TrapIfMaskNonZero(negMask, instr);
+
+    AsmJsSIMDValue two31f = {};
+    two31f.i32[0] = two31f.i32[1] = two31f.i32[2] = two31f.i32[3] = (int32)0x4F000000;
+    IR::RegOpnd *two31fVec = Simd128MaterializeConst(two31f, TySimd128F4, instr);
+    IR::RegOpnd *geMask = IR::RegOpnd::New(TySimd128I4, m_func);
+    IR::Instr *cmpGe = IR::Instr::New(Js::OpCode::FCMGEV, geMask, src, two31fVec, m_func);
+    instr->InsertBefore(cmpGe);
+    LegalizeMD::LegalizeInstr(cmpGe);
+
+    IR::RegOpnd *sub = IR::RegOpnd::New(TySimd128F4, m_func);
+    IR::Instr *andSub = IR::Instr::New(Js::OpCode::PAND, sub, two31fVec, geMask, m_func);
+    instr->InsertBefore(andSub);
+    LegalizeMD::LegalizeInstr(andSub);
+    IR::RegOpnd *adjusted = IR::RegOpnd::New(TySimd128F4, m_func);
+    IR::Instr *subInstr = IR::Instr::New(Js::OpCode::SUBPS, adjusted, src, sub, m_func);
+    instr->InsertBefore(subInstr);
+    LegalizeMD::LegalizeInstr(subInstr);
+
+    IR::Instr *convert = IR::Instr::New(Js::OpCode::FCVTZUV, dst, adjusted, m_func);
+    instr->InsertBefore(convert);
+    LegalizeMD::LegalizeInstr(convert);
+
+    // Adjusted lanes still >= 2^31 were >= 2^32 originally: trap.
+    IR::RegOpnd *oobMask = IR::RegOpnd::New(TySimd128I4, m_func);
+    IR::Instr *cmpOob = IR::Instr::New(Js::OpCode::FCMGEV, oobMask, adjusted, two31fVec, m_func);
+    instr->InsertBefore(cmpOob);
+    LegalizeMD::LegalizeInstr(cmpOob);
+    Simd128TrapIfMaskNonZero(oobMask, instr);
+
+    // Add 2^31 back to adjusted lanes: (2^31 & ge) added to dst.
+    AsmJsSIMDValue two31i = {};
+    two31i.i32[0] = two31i.i32[1] = two31i.i32[2] = two31i.i32[3] = (int32)0x80000000;
+    IR::RegOpnd *two31iVec = Simd128MaterializeConst(two31i, TySimd128I4, instr);
+    IR::RegOpnd *addBack = IR::RegOpnd::New(TySimd128I4, m_func);
+    IR::Instr *andAdd = IR::Instr::New(Js::OpCode::PAND, addBack, two31iVec, geMask, m_func);
+    instr->InsertBefore(andAdd);
+    LegalizeMD::LegalizeInstr(andAdd);
+    IR::Instr *addInstr = IR::Instr::New(Js::OpCode::PADDD, dst, dst, addBack, m_func);
+    instr->InsertBefore(addInstr);
+    LegalizeMD::LegalizeInstr(addInstr);
+
+    instr->Remove();
+    return instrPrev;
+}
+
+// Slice 2b: f32x4.convert_i32x4_s. SCVTF is correctly-rounded (round to
+// nearest), exactly matching x64 CVTDQ2PS lane for lane.
+IR::Instr *
+LowererMD::Simd128LowerFloat32x4FromInt32x4(IR::Instr *instr)
+{
+    IR::Instr *instrPrev = instr->m_prev;
+    IR::Opnd *dst = instr->GetDst();
+    IR::Opnd *src = instr->GetSrc1();
+    Assert(dst && dst->IsSimd128() && src && src->IsSimd128());
+    IR::Instr *convert = IR::Instr::New(Js::OpCode::SCVTFV, dst, src, m_func);
+    instr->InsertBefore(convert);
+    LegalizeMD::LegalizeInstr(convert);
+    instr->Remove();
+    return instrPrev;
+}
+
+// Slice 2b: f32x4.convert_i32x4_u. UCVTF handles the full u32 range natively
+// with round-to-nearest, exactly matching x64's CVTDQ2PS-plus-2^32-fixup.
+IR::Instr *
+LowererMD::Simd128LowerFloat32x4FromUint32x4(IR::Instr *instr)
+{
+    IR::Instr *instrPrev = instr->m_prev;
+    IR::Opnd *dst = instr->GetDst();
+    IR::Opnd *src = instr->GetSrc1();
+    Assert(dst && dst->IsSimd128() && src && src->IsSimd128());
+    IR::Instr *convert = IR::Instr::New(Js::OpCode::UCVTFV, dst, src, m_func);
+    instr->InsertBefore(convert);
+    LegalizeMD::LegalizeInstr(convert);
     instr->Remove();
     return instrPrev;
 }

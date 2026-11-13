@@ -105,6 +105,26 @@ public:
             // Only Ne needs a pair; every other integer compare is one NEON
             // instruction (Lt/Le via operand swap in TryLowerMappedInstruction).
             IR::Instr *         Simd128LowerCompareInverted(IR::Instr * instr, Js::OpCode cmpOpcode);
+            // W8-NEON slice 2b: lane ops + conversions. Splat broadcasts one
+            // scalar (INSV lane 0 + DUPELV); extract moves one lane out (UMOVV/SMOVV, floats
+            // via FMOV_GEN); replace copies the vector then inserts (INSV);
+            // shuffle is two single-table TBLVs (second table indexed by
+            // lane-16) ORed together; conversions mirror the x64 range-check
+            // sequences and trap exactly like x64.
+            IR::Instr *         Simd128LowerSplat(IR::Instr * instr);
+            IR::Instr *         Simd128LowerExtractLane(IR::Instr * instr);
+            IR::Instr *         Simd128LowerReplaceLane(IR::Instr * instr);
+            IR::Instr *         Simd128LowerShuffle(IR::Instr * instr);
+            IR::Instr *         Simd128LowerInt32x4FromFloat32x4(IR::Instr * instr);
+            IR::Instr *         Simd128LowerUint32x4FromFloat32x4(IR::Instr * instr);
+            IR::Instr *         Simd128LowerFloat32x4FromInt32x4(IR::Instr * instr);
+            IR::Instr *         Simd128LowerFloat32x4FromUint32x4(IR::Instr * instr);
+            IR::RegOpnd *       Simd128MaterializeConst(AsmJsSIMDValue value, IRType type, IR::Instr * insertBeforeInstr);
+            void                Simd128TrapIfMaskNonZero(IR::RegOpnd * mask, IR::Instr * instr);
+            // Local equivalent of the shared x86 helper (LowerMDSharedSimd128
+            // is not compiled for ARM64): unpack the ExtendArg_A chain into
+            // popped operands [dst, src1, ...].
+            SList<IR::Opnd*> *  Simd128GetExtendedArgs(IR::Instr * instr);
             IR::Instr *     LoadFunctionObjectOpnd(IR::Instr *instr, IR::Opnd *&functionObjOpnd);
             IR::Instr *     GenerateSmIntPairTest(IR::Instr * instrInsert, IR::Opnd * opndSrc1, IR::Opnd * opndSrc2, IR::LabelInstr * labelFail);
 #if DBG
