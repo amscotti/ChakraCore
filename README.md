@@ -81,6 +81,54 @@ _A note about using ChakraCore_: ChakraCore is a JavaScript engine, it does not 
 Alternatively, if you are using the [vcpkg](https://github.com/Microsoft/vcpkg/) dependency manager you can download and install ChakraCore with CMake integration in a single command:
 * vcpkg install chakracore
 
+## Node-API provider (`libChakraNodeApi`)
+
+ChakraCore on this branch can host Node-API addons through a separate
+shared library, `libChakraNodeApi`, implemented on ChakraCore's JsRT C
+API. The provider **implements the Node-API v8 engine surface
+(`js_native_api.h`) plus the plan §4 Table B functions under the §3.2 host
+contract**. This does not provide a Node.js runtime: there is no
+`require`/CommonJS resolution, `process`, Node built-ins, timers, a
+`node` executable, or npm, and the provider must never be described as
+Node runtime compatibility. Addons requesting `NAPI_VERSION` >
+8 are rejected at load; v9/v10 symbols are absent.
+
+Known non-conformances (see `doc/node-api-receipt.md` for the
+probe-backed record):
+
+- No JS `Buffer` global. Provider Buffers are `Uint8Array` views
+  marked by a provider-private symbol (`napi_is_buffer` checks the
+  marker); `typeof Buffer === 'undefined'`.
+- `BigInt64`/`BigUint64` typed arrays return `napi_generic_failure`.
+- Async work / thread-safe functions / `napi_get_uv_event_loop`
+  return `napi_generic_failure` unless the host injects the §3.2
+  scheduling/uv services (the tree's `ch-nodeapi` test host injects
+  none, so they fail there by design).
+- `napi_async_init`/`napi_async_destroy` bookkeeping only:
+  async_hooks propagation is a documented no-op.
+
+Build and gate the provider on macOS arm64 (Zig 0.17.0 via mise,
+always through the gate lock `/tmp/opencode/cc-gate-lock.sh`):
+
+```sh
+/tmp/opencode/cc-gate-lock.sh mise exec -- zig build libChakraNodeApi
+# installs lib/libChakraNodeApi.dylib + include/nodeapi/ (test profile)
+/tmp/opencode/cc-gate-lock.sh mise exec -- zig build check-nodeapi
+# verifies exactly 145 napi_* + 5 host = 150 exports (fails on missing/extra)
+/tmp/opencode/cc-gate-lock.sh mise exec -- zig build check-nodeapi -Dprofile=jit
+```
+
+The exports gate (`check-nodeapi`) is a separate step on purpose
+(plan PR-10): it runs for the shared profiles (`test`, `jit`) and is
+not part of `zig build check`, so engine regression pins in
+`tools/build/gate_counts.json` are untouched. A from-scratch consumer
+(`zig cc -DNAPI_VERSION=8 -I<installed>/include/nodeapi`, linking the
+built provider, run through `tools/nodeapi/ch-nodeapi` — no Node
+executable) is the packaging proof; macOS arm64 probe tallies,
+the consumer proof log, and the honest Linux x64 status (not run,
+provider not wired in `tools/build/linux.zig`) live in
+`doc/node-api-receipt.md`.
+
 ## Contribute
 
 Contributions to ChakraCore are welcome.  Here is how you can contribute to ChakraCore:

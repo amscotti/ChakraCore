@@ -946,6 +946,113 @@ pub fn build(b: *std.Build) void {
     // legacy; test/release keep 8MB.
     gs.stack_size = if (profile == .debug_static) 0 else 8 * 1024 * 1024;
 
+    // Node-API provider (plan N1.1 / PR-3, Wave 1): libChakraNodeApi, a
+    // standalone shared library built from lib/NodeApi provider TUs and
+    // linked against libChakraCore via Module/linkLibrary (the same Module
+    // path as the dylib/ch links) -- NOT dynamic_lookup: the provider is a
+    // dependent dylib of libChakraCore (LC_LOAD_DYLIB
+    // @rpath/libChakraCore.dylib, resolved from the host's rpaths at
+    // dlopen). Shared profiles only (test + jit); debug-static has no dylib
+    // to link. Not part of the default build and alters no existing
+    // artifact (N1.6 moves the source lists into tools/build/tables.zig +
+    // check-nodeapi). Provider TUs compile via `zig c++` SystemCommands,
+    // mirroring the ch-nodeapi step below.
+    //
+    // Source selection: NodeApiEnv.cpp + NodeApiScopes.cpp +
+    // NodeApiLifetime.cpp + NodeApiRefs.cpp + NodeApiValues.cpp +
+    // NodeApiErrorsImpl.cpp + NodeApiObjects.cpp +
+    // NodeApiFunctions.cpp + NodeApiBinary.cpp + NodeApiPromise.cpp +
+    // NodeApiScript.cpp + NodeApiWrap.cpp + NodeApiAsyncContext.cpp
+    // (all of lib/NodeApi). An
+    // earlier draft excluded NodeApiRefs.cpp because its stand-in host
+    // cast napi_env to a prefix-compatible NodeApiRefsEnv; N1.3 has since
+    // reconciled onto an opaque NodeApiRefsState stored in
+    // NodeEnv::refs_state with registry-resolved accessors (NodeApiEnv.h),
+    // so it joins this library now. NodeApiFunctions.cpp (N2.4) joins
+    // because the N2.3 joint stub it replaced was deleted: without it
+    // NodeApiObjects.cpp's napi_define_properties has no definition of
+    // napi_create_function and the library does not link (landed wiring
+    // by N2.6; N2.4 owns the TU, not this list).
+    const prov_lib: ?*std.Build.Step.Compile = if (is_static) null else blk: {
+        var prov_objs: std.ArrayList(std.Build.LazyPath) = .empty;
+        for ([_][]const u8{
+            "lib/NodeApi/NodeApiEnv.cpp",
+            "lib/NodeApi/NodeApiScopes.cpp",
+            "lib/NodeApi/NodeApiLifetime.cpp",
+            "lib/NodeApi/NodeApiRefs.cpp",
+            "lib/NodeApi/NodeApiValues.cpp",
+            "lib/NodeApi/NodeApiErrorsImpl.cpp",
+            "lib/NodeApi/NodeApiObjects.cpp",
+            "lib/NodeApi/NodeApiFunctions.cpp",
+            "lib/NodeApi/NodeApiBinary.cpp",
+            "lib/NodeApi/NodeApiPromise.cpp",
+            "lib/NodeApi/NodeApiScript.cpp",
+            "lib/NodeApi/NodeApiWrap.cpp",
+            "lib/NodeApi/NodeApiBuffers.cpp",
+            "lib/NodeApi/NodeApiAsync.cpp",
+            "lib/NodeApi/NodeApiAsyncContext.cpp",
+            "lib/NodeApi/NodeApiHost.cpp",
+        }) |src| {
+            const tu = b.addSystemCommand(&.{ ctx.zig_exe, "c++" });
+            tu.addArg("-target");
+            tu.addArg(profile_target);
+            tu.addArg("--sysroot");
+            tu.addArg(ctx.sdk_path);
+            tu.addArg("-std=gnu++17");
+            tu.addArg("-O3");
+            tu.addArg("-g");
+            tu.addArg("-fPIC");
+            // HIGH-5: hidden by default. The 145 napi_* declarations
+            // already carry __attribute__((visibility("default")))
+            // via NAPI_EXTERN in the vendored headers, and the two
+            // host entries carry it on their NodeApiEnv.cpp
+            // definitions, so exactly those survive. nodeapi::* C++
+            // internals, NodeApi* helpers, chakra_nodeapi_test_*
+            // hooks, and operator new/delete stay hidden. The
+            // provider explicitly does NOT define
+            // CHAKRA_NODEAPI_TEST_HOOKS (release must not export
+            // the root-counter hooks).
+            tu.addArg("-fvisibility=hidden");
+            tu.addArg("-DNAPI_VERSION=8");
+            tu.addArg("-Ilib/Jsrt");
+            tu.addArg("-Iinclude/nodeapi");
+            tu.addArg("-Ilib/NodeApi");
+            tu.addArg("-isystem");
+            tu.addArg(ctx.sdk_isystem);
+            tu.addArg("-F");
+            tu.addArg("/System/Library/Frameworks");
+            tu.addArg("-mcpu=apple_m1");
+            tu.addArg("-Wno-date-time");
+            tu.addArg("-o");
+            const out = tu.addOutputFileArg(b.fmt("{s}.o", .{std.fs.path.basename(src)}));
+            tu.addArg("-c");
+            tu.addFileArg(b.path(src));
+            prov_objs.append(arena, out) catch @panic("OOM");
+        }
+        const mod = createLinkModule(&ctx);
+        for (prov_objs.items) |o| mod.addObjectFile(o);
+        mod.linkLibrary(dylib.?);
+        addSdkLinkPaths(&ctx, mod);
+        // No direct ICU / CoreFoundation / Security edges: the
+        // provider references no ICU or framework symbols (verified
+        // via `nm -u` on the built dylib: only Js* + libc/libSystem),
+        // and the engine dylib already carries ICU as LC_LOAD_DYLIB.
+        // Linking ICU here would add hardcoded -L paths that cannot
+        // work under --sysroot (the ch-nodeapi host documents the
+        // same for its SystemCommand link) and would duplicate the
+        // engine's dependency. The Module link therefore keeps only
+        // the dependent-dylib edge to libChakraCore.
+        const lib = b.addLibrary(.{
+            .name = "ChakraNodeApi",
+            .root_module = mod,
+            .linkage = .dynamic,
+            .version = .{ .major = 1, .minor = 0, .patch = 0 },
+        });
+        lib.install_name = "@rpath/libChakraNodeApi.dylib";
+        lib.headerpad_max_install_names = true;
+        break :blk lib;
+    };
+
     // B3.4 isolation: the test profile owns the native install system
     // (the exact B2 tree, honoring --prefix); non-test profiles
     // install NOTHING natively and copy out to fixed out/<profile>/
@@ -1002,6 +1109,16 @@ pub fn build(b: *std.Build) void {
             cp.addArg("--symlink=lib/libChakraCore.dylib=libChakraCore.1.dylib");
             cp.addArg("--symlink=lib/libChakraCore.1.dylib=libChakraCore.1.0.0.dylib");
         }
+        // Node-API provider (N1.1, N5.5): out/<profile>/lib/libChakraNodeApi.dylib
+        // plus the vendored N-API headers at out/<profile>/include/nodeapi/
+        // (consumer builds need both; the private host header
+        // lib/NodeApi/NodeApiHostApi.h is intentionally NOT staged).
+        if (prov_lib) |lib| {
+            cp.addPrefixedFileArg("--map=lib/libChakraNodeApi.dylib=", lib.getEmittedBin());
+            for ([_][]const u8{ "include/nodeapi/js_native_api.h", "include/nodeapi/js_native_api_types.h", "include/nodeapi/node_api.h", "include/nodeapi/node_api_types.h" }) |hdr| {
+                cp.addPrefixedFileArg(b.fmt("--map={s}=", .{hdr}), b.path(b.fmt("include/nodeapi/{s}", .{std.fs.path.basename(hdr)})));
+            }
+        }
         cp.addPrefixedFileArg("--map=lib/libChakraCoreStatic.a=", static_archive);
         for (singular_libs.items) |lib| {
             cp.addPrefixedFileArg(b.fmt("--map=lib/lib{s}.a=", .{lib.name}), lib.getEmittedBin());
@@ -1032,6 +1149,61 @@ pub fn build(b: *std.Build) void {
         rm.stdio = .inherit;
         rm.has_side_effects = true;
         b.getUninstallStep().dependOn(&rm.step);
+    }
+
+    // Node-API provider step (N1.1, PR-3, N5.5): `zig build libChakraNodeApi`
+    // builds libChakraNodeApi (shared profiles only). Test profile installs
+    // it to <prefix>/lib/libChakraNodeApi.dylib (beside the ch-nodeapi
+    // host's default provider lookup) plus the vendored headers to
+    // <prefix>/include/nodeapi/ (N5.5 consumer builds need both);
+    // jit copies dylib + headers to out/jit/ via the copy-out step
+    // above. Not part of the default build.
+    if (prov_lib) |lib| {
+        const prov_step = b.step("libChakraNodeApi", "Build libChakraNodeApi (N1.1 provider) linked against libChakraCore (shared profiles test + jit; not part of the default build)");
+        if (profile == .@"test") {
+            prov_step.dependOn(&b.addInstallFile(lib.getEmittedBin(), "lib/libChakraNodeApi.dylib").step);
+            for ([_][]const u8{ "js_native_api.h", "js_native_api_types.h", "node_api.h", "node_api_types.h" }) |hdr| {
+                prov_step.dependOn(&b.addInstallFile(
+                    b.path(b.fmt("include/nodeapi/{s}", .{hdr})),
+                    b.fmt("include/nodeapi/{s}", .{hdr}),
+                ).step);
+            }
+        } else {
+            prov_step.dependOn(&copy_out.?.step);
+        }
+    }
+
+    // Node-API exports gate (N1.6/N5.5, HIGH-5): `zig build check-nodeapi`
+    // verifies libChakraNodeApi exports EXACTLY the allowlist in
+    // tools/build/nodeapi_exports.txt (full 145 napi_* + 5 host = 150)
+    // and that the allowlist
+    // matches its generator (tools/build/gen_nodeapi_exports.py
+    // --check, which builds it from doc/node-api-inventory.md +
+    // the §3.2 host list). Missing or extra symbol = failure.
+    // Shared profiles only (prov_lib exists); debug-static has no
+    // provider and therefore no step (its build stays working).
+    // Kept separate from `check` (N5.5, PR-10): the provider is
+    // shared-profiles only and its gate couples engine verification
+    // to provider surface, so wiring it into the shared `check` tops
+    // would add provider failure surface to the regression gate
+    // without moving its gate_counts.json pins. Run it explicitly
+    // for both shared profiles (test + jit).
+    if (prov_lib) |lib| {
+        const exports_gen_check = b.addSystemCommand(&.{python});
+        exports_gen_check.addFileArg(b.path("tools/build/gen_nodeapi_exports.py"));
+        exports_gen_check.addArg("--check");
+        exports_gen_check.stdio = .inherit;
+        const exports_check = b.addSystemCommand(&.{python});
+        exports_check.addFileArg(b.path("tools/build/check_nodeapi.py"));
+        exports_check.addPrefixedFileArg("--dylib=", lib.getEmittedBin());
+        exports_check.addPrefixedFileArg("--exports=", b.path("tools/build/nodeapi_exports.txt"));
+        exports_check.addPrefixedFileArg("--inventory=", b.path("doc/node-api-inventory.md"));
+        exports_check.step.dependOn(&lib.step);
+        exports_check.step.dependOn(&exports_gen_check.step);
+        exports_check.stdio = .inherit;
+        const check_nodeapi_top = b.step("check-nodeapi", "Verify libChakraNodeApi exports exactly tools/build/nodeapi_exports.txt (full 145 + 5 = 150; not part of the default build or check)");
+        check_nodeapi_top.dependOn(&exports_gen_check.step);
+        check_nodeapi_top.dependOn(&exports_check.step);
     }
 
     // Negative controls: each check script's --self-test proves its
@@ -1394,4 +1566,121 @@ pub fn build(b: *std.Build) void {
     check_top.dependOn(&smoke.step);
     check_top.dependOn(&metadata.step);
     check_top.dependOn(selftest_top);
+
+    // N0.3 Node-API test host (doc/node-api-plan.md N0.3, test profile
+    // only): standalone ch-nodeapi executable + test-only stub provider
+    // + hello/negative addons. Built via `zig c++` SystemCommands
+    // (linux-graph pattern: Module linking cannot express the
+    // dlopen/undefined-symbol shape). Isolated new step (`zig build
+    // ch-nodeapi`); never part of the default build and never alters
+    // existing artifacts. The stub (tools/nodeapi/stub/) is TEST-ONLY,
+    // not libChakraNodeApi (Wave 1+). Host+stub leave Js* undefined in
+    // the stub (resolved from the engine dylib at load); addons leave
+    // napi_* undefined (resolved from the provider RTLD_GLOBAL).
+    const nodeapi_step = b.step("ch-nodeapi", "Build the Node-API test host (N0.3): ch-nodeapi + test-only stub provider + hello/negative addons (test profile only; not part of the default build)");
+    const engine_lib = dylib.?.getEmittedBin();
+    const nodeapi_target = profile_target;
+    const nodeapi_opt = [_][]const u8{ "-O3", "-g" };
+    // Host executable, linked against the engine dylib.
+    const nodeapi_host = b.addSystemCommand(&.{ ctx.zig_exe, "c++" });
+    nodeapi_host.addArg("-target");
+    nodeapi_host.addArg(nodeapi_target);
+    nodeapi_host.addArg("--sysroot");
+    nodeapi_host.addArg(ctx.sdk_path);
+    nodeapi_host.addArg("-std=gnu++17");
+    for (nodeapi_opt) |f| nodeapi_host.addArg(f);
+    nodeapi_host.addArg("-DNAPI_VERSION=8");
+    nodeapi_host.addArg("-Ilib/Jsrt");
+    nodeapi_host.addArg("-Iinclude/nodeapi");
+    nodeapi_host.addArg("-Ilib/NodeApi");
+    nodeapi_host.addArg("-isystem");
+    nodeapi_host.addArg(ctx.sdk_isystem);
+    nodeapi_host.addArg("-F");
+    nodeapi_host.addArg("/System/Library/Frameworks");
+    nodeapi_host.addArg("-mcpu=apple_m1");
+    nodeapi_host.addArg("-Wno-date-time");
+    nodeapi_host.addArg("-o");
+    const nodeapi_host_bin = nodeapi_host.addOutputFileArg("ch-nodeapi");
+    nodeapi_host.addFileArg(b.path("tools/nodeapi/ch-nodeapi.cpp"));
+    nodeapi_host.addFileArg(engine_lib);
+    // No ICU link flags: the host references no ICU symbols directly (the
+    // engine dylib carries its own ICU dependency), and a `-L/opt/homebrew`
+    // flag cannot work under `--sysroot` anyway -- Zig's driver resolves
+    // `-L` against the sysroot (probed: a raw `-L` and an icu_lib-derived
+    // `-L` both expand to `<sdk>/opt/homebrew/...` and fail). The Module-
+    // based links (dylib/ch) keep using addLibraryPath + linkSystemLibrary
+    // for their own ICU edges; this SystemCommand link needs neither.
+    nodeapi_host.addArg("-framework");
+    nodeapi_host.addArg("CoreFoundation");
+    nodeapi_host.addArg("-framework");
+    nodeapi_host.addArg("Security");
+    // The host calls provider napi_* entries directly for registration glue
+    // (open/create-object scope around napi_register_module_v1) which are
+    // provided at load by the RTLD_GLOBAL provider (plan section 1.3), so
+    // they stay undefined here -- the same dynamic_lookup shape as the stub
+    // and addons below. Js* resolve from the engine dylib linked above.
+    nodeapi_host.addArg("-Wl,-undefined,dynamic_lookup");
+    // The engine dylib's install_name is @rpath/libChakraCore.dylib;
+    // the host needs @executable_path rpaths so dyld finds the
+    // co-located copy installed below (bin/). This mirrors the B2
+    // co-location edge ch relies on (ch.goes via dlopen instead).
+    nodeapi_host.addArg("-Wl,-rpath,@executable_path");
+    nodeapi_host.addArg("-Wl,-rpath,@executable_path/../lib");
+    nodeapi_host.step.dependOn(&dylib.?.step);
+    nodeapi_step.dependOn(&b.addInstallFile(nodeapi_host_bin, "bin/ch-nodeapi").step);
+    // Co-located engine dylib so the host resolves @rpath at launch.
+    nodeapi_step.dependOn(&b.addInstallFile(engine_lib, "bin/libChakraCore.dylib").step);
+    // Test-only stub provider shared library.
+    const nodeapi_stub = b.addSystemCommand(&.{ ctx.zig_exe, "c++" });
+    nodeapi_stub.addArg("-target");
+    nodeapi_stub.addArg(nodeapi_target);
+    nodeapi_stub.addArg("--sysroot");
+    nodeapi_stub.addArg(ctx.sdk_path);
+    nodeapi_stub.addArg("-std=gnu++17");
+    for (nodeapi_opt) |f| nodeapi_stub.addArg(f);
+    nodeapi_stub.addArg("-fPIC");
+    nodeapi_stub.addArg("-shared");
+    nodeapi_stub.addArg("-Wl,-undefined,dynamic_lookup");
+    nodeapi_stub.addArg("-DNAPI_VERSION=8");
+    nodeapi_stub.addArg("-Ilib/Jsrt");
+    nodeapi_stub.addArg("-Iinclude/nodeapi");
+    nodeapi_stub.addArg("-Ilib/NodeApi");
+    nodeapi_stub.addArg("-isystem");
+    nodeapi_stub.addArg(ctx.sdk_isystem);
+    nodeapi_stub.addArg("-F");
+    nodeapi_stub.addArg("/System/Library/Frameworks");
+    nodeapi_stub.addArg("-mcpu=apple_m1");
+    nodeapi_stub.addArg("-Wno-date-time");
+    nodeapi_stub.addArg("-o");
+    const nodeapi_stub_bin = nodeapi_stub.addOutputFileArg("libChakraNodeApiStub.dylib");
+    nodeapi_stub.addFileArg(b.path("tools/nodeapi/stub/stub_provider.cpp"));
+    nodeapi_step.dependOn(&b.addInstallFile(nodeapi_stub_bin, "lib/libChakraNodeApiStub.dylib").step);
+    // Test addons (.node = shared library + .js drivers, NAPI_VERSION=8).
+    for ([_][]const u8{ "hello_world", "version_reject", "missing_register", "promise_probe", "return_replaces" }) |name| {
+        const addon = b.addSystemCommand(&.{ ctx.zig_exe, "c++" });
+        addon.addArg("-target");
+        addon.addArg(nodeapi_target);
+        addon.addArg("--sysroot");
+        addon.addArg(ctx.sdk_path);
+        addon.addArg("-std=gnu++17");
+        for (nodeapi_opt) |f| addon.addArg(f);
+        addon.addArg("-fPIC");
+        addon.addArg("-shared");
+        addon.addArg("-Wl,-undefined,dynamic_lookup");
+        addon.addArg("-DNAPI_VERSION=8");
+        addon.addArg("-Iinclude/nodeapi");
+        addon.addArg("-isystem");
+        addon.addArg(ctx.sdk_isystem);
+        addon.addArg("-F");
+        addon.addArg("/System/Library/Frameworks");
+        addon.addArg("-mcpu=apple_m1");
+        addon.addArg("-Wno-date-time");
+        addon.addArg("-o");
+        const addon_bin = addon.addOutputFileArg(b.fmt("{s}.node", .{name}));
+        addon.addFileArg(b.path(b.fmt("tools/nodeapi/addons/{s}.cpp", .{name})));
+        nodeapi_step.dependOn(&b.addInstallFile(addon_bin, b.fmt("lib/nodeapi-addons/{s}.node", .{name})).step);
+    }
+    for ([_][]const u8{ "hello_world", "promise_probe", "return_replaces" }) |name| {
+        nodeapi_step.dependOn(&b.addInstallFile(b.path(b.fmt("tools/nodeapi/addons/{s}.js", .{name})), b.fmt("lib/nodeapi-addons/{s}.js", .{name})).step);
+    }
 }
