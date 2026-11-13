@@ -219,8 +219,8 @@ public:
             IR::Instr *         LowerAsmJsCallI(IR::Instr * callInstr);
             IR::Instr *         LowerAsmJsCallE(IR::Instr * callInstr);
             IR::Instr *         LowerWasmArrayBoundsCheck(IR::Instr * instr, IR::Opnd *addrOpnd);
-            void                LowerAtomicStore(IR::Opnd * dst, IR::Opnd * src1, IR::Instr * insertBeforeInstr) { Assert(UNREACHED); }
-            void                LowerAtomicLoad(IR::Opnd* dst, IR::Opnd* src1, IR::Instr* insertBeforeInstr) { Assert(UNREACHED); }
+            void                LowerAtomicStore(IR::Opnd * dst, IR::Opnd * src1, IR::Instr * insertBeforeInstr);
+            void                LowerAtomicLoad(IR::Opnd* dst, IR::Opnd* src1, IR::Instr* insertBeforeInstr);
             IR::Instr *         LowerAsmJsStElemHelper(IR::Instr * callInstr);
             IR::Instr *         LowerAsmJsLdElemHelper(IR::Instr * callInstr);
             IR::Instr *         LowerCallIDynamic(IR::Instr *callInstr, IR::Instr*saveThisArgOutInstr, IR::Opnd *argsLength, ushort callFlags, IR::Instr * insertBeforeInstrForCFG = nullptr);

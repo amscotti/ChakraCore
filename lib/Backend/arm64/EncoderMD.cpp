@@ -436,6 +436,50 @@ int EncoderMD::EmitLoadStore(Arm64CodeEmitter &Emitter, IR::Instr* instr, IR::Op
     }
 }
 
+template<typename _RegFunc8, typename _RegFunc16, typename _RegFunc32, typename _RegFunc64>
+int EncoderMD::EmitAtomicLoadStore(Arm64CodeEmitter &Emitter, IR::Instr* instr, IR::Opnd* memOpnd, IR::Opnd* srcDstOpnd, _RegFunc8 reg8, _RegFunc16 reg16, _RegFunc32 reg32, _RegFunc64 reg64)
+{
+    Assert(srcDstOpnd->IsRegOpnd());
+    Assert(memOpnd->IsIndirOpnd() || memOpnd->IsSymOpnd());
+
+    int size = memOpnd->GetSize();
+    Assert(size == 1 || size == 2 || size == 4 || size == 8);
+
+    ARM64_REGISTER indexReg;
+    ARM64_REGISTER baseReg;
+    BYTE indexScale;
+    int32 offset;
+    if (DecodeMemoryOpnd(memOpnd, baseReg, indexReg, indexScale, offset))
+    {
+        // LDAR/STLR only encode [Xn]; the lowerer materializes the address
+        // into a base register. Fail loud instead of dropping the index.
+        AssertOrFailFastMsg(false, "EmitAtomicLoadStore failed to encode: indexed address");
+        return 0;
+    }
+    if (offset != 0)
+    {
+        AssertOrFailFastMsg(false, "EmitAtomicLoadStore failed to encode: non-zero offset");
+        return 0;
+    }
+
+    if (size == 8)
+    {
+        return reg64(Emitter, this->GetRegEncode(srcDstOpnd->AsRegOpnd()), baseReg);
+    }
+    else if (size == 4)
+    {
+        return reg32(Emitter, this->GetRegEncode(srcDstOpnd->AsRegOpnd()), baseReg);
+    }
+    else if (size == 2)
+    {
+        return reg16(Emitter, this->GetRegEncode(srcDstOpnd->AsRegOpnd()), baseReg);
+    }
+    else
+    {
+        return reg8(Emitter, this->GetRegEncode(srcDstOpnd->AsRegOpnd()), baseReg);
+    }
+}
+
 template<typename _OffFunc32, typename _OffFunc64>
 int EncoderMD::EmitLoadStorePair(Arm64CodeEmitter &Emitter, IR::Instr* instr, IR::Opnd* memOpnd, IR::Opnd* srcDst1Opnd, IR::Opnd* srcDst2Opnd, _OffFunc32 off32, _OffFunc64 off64)
 {
@@ -1117,6 +1161,10 @@ EncoderMD::GenerateEncoding(IR::Instr* instr, BYTE *pc)
         }
         break;
 
+    case Js::OpCode::LDAR:
+        bytes = this->EmitAtomicLoadStore(Emitter, instr, instr->GetSrc1(), instr->GetDst(), EmitLdarb, EmitLdarh, EmitLdar, EmitLdar64);
+        break;
+
     // Note: src2 is really the second destination register, due to limitations of IR::Instr
     case Js::OpCode::LDP:
         bytes = this->EmitLoadStorePair(Emitter, instr, instr->GetSrc1(), instr->GetDst(), instr->GetSrc2(), EmitLdpOffset, EmitLdpOffset64);
@@ -1287,6 +1335,10 @@ EncoderMD::GenerateEncoding(IR::Instr* instr, BYTE *pc)
             break;
         }
         bytes = this->EmitLoadStore(Emitter, instr, instr->GetDst(), instr->GetSrc1(), EmitStrbRegister, EmitStrhRegister, EmitStrRegister, EmitStrRegister64, EmitStrbOffset, EmitStrhOffset, EmitStrOffset, EmitStrOffset64);
+        break;
+
+    case Js::OpCode::STLR:
+        bytes = this->EmitAtomicLoadStore(Emitter, instr, instr->GetDst(), instr->GetSrc1(), EmitStlrb, EmitStlrh, EmitStlr, EmitStlr64);
         break;
 
     case Js::OpCode::STP:

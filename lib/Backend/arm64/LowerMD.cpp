@@ -876,6 +876,69 @@ LowererMD::LowerWasmArrayBoundsCheck(IR::Instr * instr, IR::Opnd *addrOpnd)
     return doneLabel;
 }
 
+void
+LowererMD::LowerAtomicStore(IR::Opnd * dst, IR::Opnd * src1, IR::Instr * insertBeforeInstr)
+{
+    Assert(IRType_IsNativeInt(dst->GetType()));
+    Assert(IRType_IsNativeInt(src1->GetType()));
+    Func* func = insertBeforeInstr->m_func;
+
+    IR::IndirOpnd* indir = dst->AsIndirOpnd();
+    IRType memType = indir->GetType();
+
+    // STLR only encodes [Xn], so materialize the full address (base +
+    // index*scale + constOffset) into a TyMachPtr register first.
+    IR::RegOpnd* addr = IR::RegOpnd::New(TyMachPtr, func);
+    Lowerer::InsertLea(addr, indir, insertBeforeInstr);
+
+    // Size the temp to the memory width so InsertMove truncates the (possibly
+    // wider) value register, matching the x64 XCHG lowering.
+    IR::RegOpnd* tmpSrc = IR::RegOpnd::New(memType, func);
+    Lowerer::InsertMove(tmpSrc, src1, insertBeforeInstr);
+
+    IR::IndirOpnd* addrMem = IR::IndirOpnd::New(addr, 0, memType, func);
+    IR::Instr* stlr = IR::Instr::New(Js::OpCode::STLR, addrMem, tmpSrc, func);
+    insertBeforeInstr->InsertBefore(stlr);
+}
+
+void
+LowererMD::LowerAtomicLoad(IR::Opnd* dst, IR::Opnd* src1, IR::Instr* insertBeforeInstr)
+{
+    Assert(IRType_IsNativeInt(dst->GetType()));
+    Assert(IRType_IsNativeInt(src1->GetType()));
+    Func* func = insertBeforeInstr->m_func;
+
+    IR::IndirOpnd* indir = src1->AsIndirOpnd();
+    IRType memType = indir->GetType();
+
+    // LDAR only encodes [Xn], so materialize the full address (base +
+    // index*scale + constOffset) into a TyMachPtr register first.
+    IR::RegOpnd* addr = IR::RegOpnd::New(TyMachPtr, func);
+    Lowerer::InsertLea(addr, indir, insertBeforeInstr);
+
+    IR::IndirOpnd* addrMem = IR::IndirOpnd::New(addr, 0, memType, func);
+    IR::Instr* ldar = IR::Instr::New(Js::OpCode::LDAR, dst, addrMem, func);
+    insertBeforeInstr->InsertBefore(ldar);
+
+    if (m_func->GetJITFunctionBody()->UsesWAsmJsFastVirtualBuffer())
+    {
+        // We need to have an AV when accessing out of bounds memory even if the dst is not used
+        // Make sure LinearScan doesn't dead store this instruction
+        ldar->hasSideEffects = true;
+    }
+
+    // LDAR always zero-extends, so a narrow signed access must be
+    // sign-extended to the destination width (mirrors the LDRS split that
+    // LegalizeLoad does for plain loads).
+    if (IRType_IsSignedInt(memType) && TySize[memType] < dst->GetSize())
+    {
+        IR::Instr* sbfx = IR::Instr::New(Js::OpCode::SBFX, dst, dst,
+            IR::IntConstOpnd::New(BITFIELD(0, TySize[memType] * MachBits), TyMachReg, func, true), func);
+        insertBeforeInstr->InsertBefore(sbfx);
+        LegalizeMD::LegalizeInstr(sbfx);
+    }
+}
+
 IR::Instr *
 LowererMD::LowerAsmJsLdElemHelper(IR::Instr * instr)
 {

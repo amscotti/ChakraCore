@@ -505,7 +505,7 @@ def print_counts(manifest):
               f"({info['phases']})")
     print(f"  total: {meta['p1']} P1 of {meta['total']}")
     anchors = [
-        "threads excluded from P1 (WasmSpec 12 + wasm 2)",
+        "threads excluded from P1 (WasmSpec 12 + wasm 4: atomics_test, reload + 2 atomics_gc_stress tiers)",
         "lowercase -wasmthreads classified threads",
         "enabled fast-array excluded while disabled stays in P1",
         "mathEx featureless included in P1",
@@ -527,7 +527,7 @@ def run_anchor_checks(entries):
     wasm_threads = [e for e in entries
                     if e["suite"] == "wasm" and "threads" in e["features"]]
     checks.append(("lowercase -wasmthreads classified threads",
-                   len(wasm_threads) == 2 and all(
+                   len(wasm_threads) == 4 and all(
                        e["phase"] == "P3" for e in wasm_threads)))
     fast_excluded = [e for e in entries if "fast-array" in e["features"]]
     checks.append(("enabled fast-array excluded",

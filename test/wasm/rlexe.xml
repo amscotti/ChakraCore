@@ -523,6 +523,26 @@
     <tags>require_backend</tags>
   </default>
 </test>
+<!-- W9 threads/atomics GC stress probe (doc/wasm-arm64-plan.md W9 DoD):
+     looped i32.atomic.store8 + plain i32.load over a module-defined shared
+     memory with forced collections and a verifiable JS graph, in the
+     interpreter (-nonative) and FullJIT (-ForceNative -off:simpleJit)
+     tiers. Uses -CollectGarbage like the W6 gc_churn probe; fails if a
+     collection corrupts the shared buffer or the JIT atomic sequence. -->
+<test>
+  <default>
+    <files>atomics_gc_stress.js</files>
+    <compile-flags>-nonative -wasmthreads -ESSharedArrayBuffer -CollectGarbage</compile-flags>
+    <tags>require_backend</tags>
+  </default>
+</test>
+<test>
+  <default>
+    <files>atomics_gc_stress.js</files>
+    <compile-flags>-ForceNative -off:simpleJit -wasmthreads -ESSharedArrayBuffer -CollectGarbage</compile-flags>
+    <tags>require_backend</tags>
+  </default>
+</test>
 <!-- W7 multi-value probe (ABI Q4): a (func (result i32 i32)) export called
      from JS returns Array [1,2]. Same rationale as the W6 probes above. -->
 <test>

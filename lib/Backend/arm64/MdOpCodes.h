@@ -236,3 +236,13 @@ MACRO(SQADDV,      Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,
 MACRO(SQSUBV,      Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)
 MACRO(UQADDV,      Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)
 MACRO(UQSUBV,      Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)
+
+// Wasm atomics: LDAR (acquire load) / STLR (release store) for
+// LowerAtomicLoad/Store. Appended at EOF to preserve existing MD opcode
+// values. Operands are (dst, [addr]) / ([addr], src) where addr is a
+// register holding the materialized address; the encoder only supports the
+// [Xn] form, so the lowerer LEAs the address into a TyMachPtr register.
+// OpSideEffect keeps them from being CSE/DCE'd or reordered; DL__/DS__
+// make EncoderMD classify them as loads/stores.
+MACRO(LDAR,        Reg2,       OpSideEffect,   UNUSED,   LEGAL_LOAD,     UNUSED,   DL__)
+MACRO(STLR,        Reg2,       OpSideEffect,   UNUSED,   LEGAL_STORE,    UNUSED,   DS__)

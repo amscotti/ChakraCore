@@ -238,6 +238,11 @@ private:
     template<typename _RegFunc8, typename _RegFunc16, typename _RegFunc32, typename _RegFunc64, typename _OffFunc8, typename _OffFunc16, typename _OffFunc32, typename _OffFunc64>
         int EmitLoadStore(Arm64CodeEmitter &Emitter, IR::Instr* instr, IR::Opnd* memOpnd, IR::Opnd* srcDstOpnd, _RegFunc8 reg8, _RegFunc16 reg16, _RegFunc32 reg32, _RegFunc64 reg64, _OffFunc8 off8, _OffFunc16 off16, _OffFunc32 off32, _OffFunc64 off64);
     template<typename _OffFunc32, typename _OffFunc64> int EmitLoadStorePair(Arm64CodeEmitter &Emitter, IR::Instr* instr, IR::Opnd* memOpnd, IR::Opnd* srcDst1Opnd, IR::Opnd* srcDst2Opnd, _OffFunc32 off32, _OffFunc64 off64);
+    // LDAR/STLR only encode [Xn]: mirrors EmitLoadStore's size dispatch but
+    // fails fast on an indexed address or non-zero offset (the lowerer must
+    // have materialized the address into a base register).
+    template<typename _RegFunc8, typename _RegFunc16, typename _RegFunc32, typename _RegFunc64>
+        int EmitAtomicLoadStore(Arm64CodeEmitter &Emitter, IR::Instr* instr, IR::Opnd* memOpnd, IR::Opnd* srcDstOpnd, _RegFunc8 reg8, _RegFunc16 reg16, _RegFunc32 reg32, _RegFunc64 reg64);
 
     // Branch operations
     template<typename _Emitter> int EmitUnconditionalBranch(Arm64CodeEmitter &Emitter, IR::Instr* instr, _Emitter emitter);

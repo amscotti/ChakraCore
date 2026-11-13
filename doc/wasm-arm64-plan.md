@@ -679,6 +679,28 @@ DoD: the 14 `-ESSharedArrayBuffer` entries pass in both tiers;
 concurrent-GC + shared-memory stress probe survives (W6 extension);
 no behavior change when the flag is off.
 
+Status 2026-11-13 (landed, flags default off; §9.2 default-on decision
+still open): gate widened (`CommonDefines.h`: `ENABLE_WASM_THREADS`
+on `ASMJS_PLAT || (_M_ARM64 && WASM_ARM64_PORT)`; all newly compiled
+regions verified arch-neutral, no `#else` flips). ARM64 JIT lowering
+is LDAR/STLR (`LowerMD.{h,cpp}`, new `MdOpCodes` LDAR/STLR +
+`EncoderMD` wiring; encodings already existed in `ARM64Encoder.h`).
+Load/store-only matches this vintage (`OpCodesAsmJs.h`: no atomic
+RMW opcodes; `WasmBinaryOpCodes.h` 0x10-0x1d loads/stores, RMW
+hard-disabled; no wasm wait/notify — JS `Atomics.wait/notify`
+unchanged). Narrow-signed-load SBFX fixup is included but unreachable
+(no signed-narrow atomic load opcodes exist); it mirrors
+`LegalizeLoad`'s LDRS split. Evidence: 12 WasmSpec threads +
+`atomics_test.js` + `reload.js` pass interp + FullJIT (incl.
+`-MaxAsmJsInterpreterRunCount:0` forced-JIT); `atomics_gc_stress.js`
+(new, 200 rounds shared-memory + forced GC + graph checks) passes
+both tiers; `atomics_threads_off.js` negatives pass both tiers; P1
+381/381 interp; P1 --jit 250/381 (4 pre-existing stack-exhaustion
+failures, unchanged); `wasm.simd` 12/12 x2 + 8/8 oracles; `zig
+build check` rc=0. Ownership: no new retained state — IR arena
+discipline unchanged, shared-memory lifecycle unchanged (existing
+owners), no new roots/handles.
+
 Depends on: P2, §9 decision. Highest concurrency risk; do not
 parallelize with W6 changes to the same files.
 

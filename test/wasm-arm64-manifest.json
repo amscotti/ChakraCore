@@ -3146,7 +3146,7 @@
     {
       "features": [
         "mvp",
-        "multi-value"
+        "threads"
       ],
       "phase": "P3",
       "runnerTags": [
@@ -3154,6 +3154,30 @@
       ],
       "suite": "wasm",
       "test-id": "wasm[72]"
+    },
+    {
+      "features": [
+        "mvp",
+        "threads"
+      ],
+      "phase": "P3",
+      "runnerTags": [
+        "require_backend"
+      ],
+      "suite": "wasm",
+      "test-id": "wasm[73]"
+    },
+    {
+      "features": [
+        "mvp",
+        "multi-value"
+      ],
+      "phase": "P3",
+      "runnerTags": [
+        "require_backend"
+      ],
+      "suite": "wasm",
+      "test-id": "wasm[74]"
     },
     {
       "features": [
@@ -4871,13 +4895,13 @@
         "rlexe": "test/WasmSpec.MultiValue/rlexe.xml"
       },
       "wasm": {
-        "entries": 73,
+        "entries": 75,
         "p1": 47,
         "phases": {
           "P1": 47,
           "P2": 1,
           "P2-pending": 8,
-          "P3": 4,
+          "P3": 6,
           "deferred": 4,
           "excluded": 9
         },
@@ -4893,6 +4917,6 @@
       }
     },
     "test-id": "<suite>[<0-based rlexe entry ordinal>]",
-    "total": 479
+    "total": 481
   }
 }
