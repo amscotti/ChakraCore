@@ -679,8 +679,9 @@ DoD: the 14 `-ESSharedArrayBuffer` entries pass in both tiers;
 concurrent-GC + shared-memory stress probe survives (W6 extension);
 no behavior change when the flag is off.
 
-Status 2026-11-13 (landed, flags default off; §9.2 default-on decision
-still open): gate widened (`CommonDefines.h`: `ENABLE_WASM_THREADS`
+Status 2026-11-13 (landed, threads default ON per §9.2 decision;
+`ConfigFlagsList.h`: `WasmThreads` and `ESSharedArrayBuffer` defaults
+`false` -> `true`): gate widened (`CommonDefines.h`: `ENABLE_WASM_THREADS`
 on `ASMJS_PLAT || (_M_ARM64 && WASM_ARM64_PORT)`; all newly compiled
 regions verified arch-neutral, no `#else` flips). ARM64 JIT lowering
 is LDAR/STLR (`LowerMD.{h,cpp}`, new `MdOpCodes` LDAR/STLR +
@@ -697,7 +698,11 @@ unchanged). Narrow-signed-load SBFX fixup is included but unreachable
 both tiers; `atomics_threads_off.js` negatives pass both tiers; P1
 381/381 interp; P1 --jit 250/381 (4 pre-existing stack-exhaustion
 failures, unchanged); `wasm.simd` 12/12 x2 + 8/8 oracles; `zig
-build check` rc=0. Ownership: no new retained state — IR arena
+build check` rc=0. Default-on validation (same binary family,
+rebuilt): threads spec passes flagless, JS SAB works flagless,
+es7 SAB trio passes with/without the flag, P1 381/381 interp +
+250/381 --jit (same 4 pre-existing), full threads acceptance re-green.
+Ownership: no new retained state — IR arena
 discipline unchanged, shared-memory lifecycle unchanged (existing
 owners), no new roots/handles.
 
@@ -876,13 +881,18 @@ this codebase (splay).
 
 1. **End-state ambition** — RESOLVED 2026-11-11: full surface
    (JIT + SIMD + threads) is the committed goal. See D1.
-2. **SAB/threads enablement posture** (before W9 ships): threads
-   will be built (decision 1); the open half is whether
-   `SharedArrayBuffer`/wasm threads ship behind the existing
-   `-ESSharedArrayBuffer` default-off flag or enabled by default.
-   Security posture decision, not an engineering one. W9
-   implementation may proceed flag-gated while this is open;
-   flipping any default may not.
+2. **SAB/threads enablement posture** — RESOLVED 2026-11-13:
+   default ON. `WasmThreads` and `ESSharedArrayBuffer` defaults
+   flipped `false` -> `true` (`lib/Common/ConfigFlagsList.h`) after
+   the W9 lane validated green (threads acceptance 3 tiers,
+   `reload.js` shared growth, stress probe, P1 381/381 interp +
+   250/381 --jit with only pre-existing failures, SIMD net green).
+   Rationale: matches the sign-ext/nontrapping precedent, flags are
+   coupled (one without the other is inert), suites needing SAB
+   already opt in explicitly. Residuals, not blockers: no true
+   cross-thread contention is exercisable from `ch` (no Workers —
+   same posture as x64); this vintage has no wasm `wait`/`notify`,
+   so "on" means atomics + shared memory.
 3. **Default-on timing** (at each phase gate): when does the W0
    build option flip to default-on for Mac profiles — recommended:
    P1 gate for interpreter availability in test profile, P2 gate for
