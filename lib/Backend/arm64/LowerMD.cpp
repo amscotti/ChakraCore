@@ -5,6 +5,7 @@
 //-------------------------------------------------------------------------------------------------------
 
 #include "Backend.h"
+#include "Arm64StackLayout.h"
 #include "Language/JavascriptFunctionArgIndex.h"
 
 const Js::OpCode LowererMD::MDUncondBranchOpcode = Js::OpCode::B;
@@ -1511,97 +1512,6 @@ LowererMD::GenerateStackDeallocation(IR::Instr *instr, uint32 allocSize)
 
 
 
-class ARM64StackLayout
-{
-    //
-    // Canonical ARM64 prolog/epilog stack layout (stack grows downward):
-    //
-    //    +-------------------------------------+
-    //    |     caller-allocated parameters     |
-    //    +=====================================+-----> SP at time of call
-    //    |   callee-saved parameters (x0-x7)   |
-    //    +-------------------------------------+
-    //    |    frame pointer + link register    |
-    //    +-------------------------------------+-----> updated FP points here
-    //    |  arguments slot + StackFunctionList |
-    //    +-------------------------------------+
-    //    |   callee-saved registers (x19-x28)  |
-    //    +-------------------------------------+
-    //    |    callee-saved FP regs (d8-d15)    |
-    //    +-------------------------------------+-----> == regOffset
-    //    |            locals area              |
-    //    +-------------------------------------+-----> locals pointer if not SP
-    //    |     caller-allocated parameters     |
-    //    +=====================================+-----> SP points here when done
-    //
-
-public:
-    ARM64StackLayout(Func* func);
-
-    // Getters
-    bool HasCalls() const { return m_hasCalls; }
-    bool HasTry() const { return m_hasTry; }
-    ULONG ArgSlotCount() const { return m_argSlotCount; }
-    BitVector HomedParams() const { return m_homedParams; }
-    BitVector HomedSimd() const { return m_homedSimd; }
-    BitVector SavedRegisters() const { return m_savedRegisters; }
-    BitVector SavedDoubles() const { return m_savedDoubles; }
-    BitVector SavedSimd() const { return m_savedSimd; }
-
-    // Locals area sits right after space allocated for arguments
-    ULONG LocalsOffset() const { return this->m_argSlotCount * MachRegInt; }
-    ULONG LocalsSize() const { return this->m_localsArea; }
-
-    // Saved non-volatile double registers sit past the locals area
-    ULONG SavedDoublesOffset() const { return this->LocalsOffset() + this->LocalsSize(); }
-    ULONG SavedDoublesSize() const { return this->m_savedDoubles.Count() * MachRegDouble; }
-
-    // Saved 128-bit SIMD registers (Q8-15, count*16) sit after scalar doubles.
-    // Q8-15 alias D8-15 (same hardware, Reg.h); a SIMD function moves its
-    // callee-saved vector saves here so they are stored/restored at full
-    // 16-byte width. Non-SIMD functions have an empty area (no layout change).
-    ULONG SavedSimdOffset() const { return this->SavedDoublesOffset() + this->SavedDoublesSize(); }
-    ULONG SavedSimdSize() const { return this->m_savedSimd.Count() * MachRegSimd128; }
-
-    // Saved non-volatile integer registers sit after the saved doubles+simd
-    ULONG SavedRegistersOffset() const { return this->SavedSimdOffset() + this->SavedSimdSize(); }
-    ULONG SavedRegistersSize() const { return this->m_savedRegisters.Count() * MachRegInt; }
-
-    // The argument slot and StackFunctionList entry come after the saved integer registers
-    ULONG ArgSlotOffset() const { return this->SavedRegistersOffset() + this->SavedRegistersSize(); }
-    ULONG ArgSlotSize() const { return this->m_hasCalls ? (2 * MachRegInt) : 0; }
-
-    // Next comes the frame chain
-    ULONG FpLrOffset() const { return this->ArgSlotOffset() + this->ArgSlotSize(); }
-    ULONG FpLrSize() const { return this->m_hasCalls ? (2 * MachRegInt) : 0; }
-
-    // Followed by any homed parameters
-    ULONG HomedParamsOffset() const { return this->FpLrOffset() + this->FpLrSize(); }
-    ULONG HomedParamsSize() const { return this->m_homedParams.Count() * MachRegInt; }
-
-    // W8-NEON slice 1: homed 128-bit params (Q0-7, count*16) after int homes.
-    ULONG HomedSimdOffset() const { return this->HomedParamsOffset() + this->HomedParamsSize(); }
-    ULONG HomedSimdSize() const { return this->m_homedSimd.Count() * MachRegSimd128; }
-
-    // And that's the total stack allocation
-    ULONG TotalStackSize() const { return this->HomedSimdOffset() + this->HomedSimdSize(); }
-
-    // The register area is the area at the far end that doesn't include locals or arg slots
-    ULONG RegisterAreaOffset() const { return this->SavedDoublesOffset(); }
-    ULONG RegisterAreaSize() const { return this->TotalStackSize() - this->RegisterAreaOffset(); }
-
-private:
-    bool m_hasCalls;
-    bool m_hasTry;
-    ULONG m_argSlotCount;
-    ULONG m_localsArea;
-    BitVector m_homedParams;
-    BitVector m_homedSimd;
-    BitVector m_savedRegisters;
-    BitVector m_savedDoubles;
-    BitVector m_savedSimd;
-};
-
 ARM64StackLayout::ARM64StackLayout(Func* func)
     : m_hasCalls(false),
     m_hasTry(func->HasTry()),
@@ -2401,8 +2311,17 @@ LowererMD::Simd128InitOpcodeMap()
     SET_NEONOPCODE(Simd128_Sub_U16, PSUBD);
     SET_NEONOPCODE(Simd128_Add_I2, PADDQ);
     SET_NEONOPCODE(Simd128_Sub_I2, PSUBQ);
-    SET_NEONOPCODE(Simd128_Add_D2, PADDQ);
-    SET_NEONOPCODE(Simd128_Sub_D2, PSUBQ);
+    // Slice 2e (D2 arithmetic): float64x2 add/sub/mul/div/sqrt are NEON
+    // float vector ops (FADD etc. with SIZE_2D), NOT the integer PADDQ/PSUBQ
+    // the D2 spellings were previously lumped with I2 under. Integer 64-bit
+    // lanes keep PADDQ/PSUBQ; double lanes need float arithmetic (integer
+    // add of double bit patterns silently miscomputes, e.g. 1.0+2.0 would
+    // yield +Inf bits).
+    SET_NEONOPCODE(Simd128_Add_D2, ADDPD);
+    SET_NEONOPCODE(Simd128_Sub_D2, SUBPD);
+    SET_NEONOPCODE(Simd128_Mul_D2, MULPD);
+    SET_NEONOPCODE(Simd128_Div_D2, DIVPD);
+    SET_NEONOPCODE(Simd128_Sqrt_D2, SQRTPD);
     // Floating add/sub/mul/div/sqrt are the same vector shape (FADD etc. with
     // SIZE_4S/SIZE_2D), so they are included; scalar FADD/FMUL/FDIV/FSQRT MD
     // opcodes are distinct (EmitNeonFadd with SIZE_1S/1D).
@@ -2471,6 +2390,57 @@ LowererMD::Simd128InitOpcodeMap()
     SET_NEONOPCODE(Simd128_Mul_U8, PMULW);
     SET_NEONOPCODE(Simd128_Mul_I16, PMULW);
     SET_NEONOPCODE(Simd128_Mul_U16, PMULW);
+    // Slice 2c: saturating integer arithmetic. NEON SQADD/SQSUB/UQADD/
+    // UQSUB saturate per lane exactly like the wasm add_sat/sub_sat
+    // families (signed saturate to the lane's INT_MIN/INT_MAX, unsigned
+    // add saturates to UINT_MAX, unsigned sub saturates to 0), so one MD
+    // opcode covers the I8 (16-bit lanes) and I16 (8-bit lanes) spellings
+    // alike; the lane size comes from the IR type. There is no 32-bit
+    // saturating family in this vintage (no such wasm opcode), and no
+    // narrow/widening-load IR opcodes at all (no load8x8/load16x4/
+    // load32x2/load64x2 in WasmBinaryOpcodesSimd.h), so those stay FailFast
+    // by absence: nothing can construct them.
+    SET_NEONOPCODE(Simd128_AddSaturate_I8, SQADDV);
+    SET_NEONOPCODE(Simd128_SubSaturate_I8, SQSUBV);
+    SET_NEONOPCODE(Simd128_AddSaturate_I16, SQADDV);
+    SET_NEONOPCODE(Simd128_SubSaturate_I16, SQSUBV);
+    SET_NEONOPCODE(Simd128_AddSaturate_U8, UQADDV);
+    SET_NEONOPCODE(Simd128_SubSaturate_U8, UQSUBV);
+    SET_NEONOPCODE(Simd128_AddSaturate_U16, UQADDV);
+    SET_NEONOPCODE(Simd128_SubSaturate_U16, UQSUBV);
+    // Slice 2d: float compares. NEON FCMEQ/FCMGT/FCMGE yield all-ones on
+    // true and all-zero on false-or-NaN with no trap, matching wasm compare
+    // semantics exactly (eq false on NaN, ordered false on NaN). Lt/Le go
+    // through the operand swap below; Ne goes through CompareInverted.
+    // Lane size comes from the IR type (F4/B4 -> 4S, D2/I2 -> 2D).
+    SET_NEONOPCODE(Simd128_Eq_F4, FCMEQV);
+    SET_NEONOPCODE(Simd128_Gt_F4, FCMGTV);
+    SET_NEONOPCODE(Simd128_GtEq_F4, FCMGEV);
+    SET_NEONOPCODE(Simd128_Lt_F4, FCMGTV);
+    SET_NEONOPCODE(Simd128_LtEq_F4, FCMGEV);
+    SET_NEONOPCODE(Simd128_Eq_D2, FCMEQV);
+    SET_NEONOPCODE(Simd128_Gt_D2, FCMGTV);
+    SET_NEONOPCODE(Simd128_GtEq_D2, FCMGEV);
+    SET_NEONOPCODE(Simd128_Lt_D2, FCMGTV);
+    SET_NEONOPCODE(Simd128_LtEq_D2, FCMGEV);
+    // Slice 2e: negate. NEON NEG negates each integer lane (2's complement,
+    // matching wasm neg for I4/I8/I16/I2; unsigned spellings U4/U8/U16 map
+    // here too since negation is bitwise-identical regardless of signedness)
+    // and FNEG flips each float lane's sign bit (NaN-quiet, matching wasm
+    // F4/D2 neg). Lane size comes from the IR type.
+    SET_NEONOPCODE(Simd128_Neg_I4, NEGV);
+    SET_NEONOPCODE(Simd128_Neg_I8, NEGV);
+    SET_NEONOPCODE(Simd128_Neg_I16, NEGV);
+    SET_NEONOPCODE(Simd128_Neg_I2, NEGV);
+    SET_NEONOPCODE(Simd128_Neg_U4, NEGV);
+    SET_NEONOPCODE(Simd128_Neg_U8, NEGV);
+    SET_NEONOPCODE(Simd128_Neg_U16, NEGV);
+    SET_NEONOPCODE(Simd128_Neg_F4, FNEGV);
+    SET_NEONOPCODE(Simd128_Neg_D2, FNEGV);
+    // Slice 2e (abs): NEON FABS per lane (NaN-quiet, -0 -> +0), matching
+    // wasm abs exactly. Lane size comes from the IR type.
+    SET_NEONOPCODE(Simd128_Abs_F4, FABSV);
+    SET_NEONOPCODE(Simd128_Abs_D2, FABSV);
 }
 
 IR::Instr *
@@ -2531,6 +2501,19 @@ LowererMD::Simd128TryLowerMappedInstruction(IR::Instr *instr)
         Assert(opcode == Js::OpCode::CMHS);
         swapOperands = true;
         break;
+    // Slice 2d: float Lt/Le swap onto Gt/Ge. Lt(a,b) == Gt(b,a) and
+    // Le(a,b) == Ge(b,a) hold bitwise for NaN too (both sides all-zero),
+    // so no NaN fixup is needed (unlike min/max).
+    case Js::OpCode::Simd128_Lt_F4:
+    case Js::OpCode::Simd128_Lt_D2:
+        Assert(opcode == Js::OpCode::FCMGTV);
+        swapOperands = true;
+        break;
+    case Js::OpCode::Simd128_LtEq_F4:
+    case Js::OpCode::Simd128_LtEq_D2:
+        Assert(opcode == Js::OpCode::FCMGEV);
+        swapOperands = true;
+        break;
     default:
         break;
     }
@@ -2554,6 +2537,12 @@ LowererMD::Simd128LowerUnMappedInstruction(IR::Instr *instr)
     // Slice 2a unmapped: Ne (CMEQ + PMVN pair; every other integer compare is
     // a single mapped NEON instruction).
     // Slice 2b unmapped: splat/extract/replace/shuffle + conversions below.
+    // Slice 2c unmapped: shifts, float min/max (F4 + D2). Saturating
+    // arithmetic is mapped (single NEON instruction each).
+    // Slice 2d unmapped: float Ne (F4 + D2) via CompareInverted; every other
+    // float compare is mapped (single NEON instruction each, Lt/Le swapped).
+    // Slice 2e unmapped: bitselect + any_true/all_true (B4/B8/B16); negate
+    // maps directly (single NEON instruction each).
     // Every other opcode fails safe (controlled FailFast, never silent miscompile).
     if (instr->m_opcode == Js::OpCode::Simd128_LdC)
     {
@@ -2601,6 +2590,28 @@ LowererMD::Simd128LowerUnMappedInstruction(IR::Instr *instr)
         return Simd128LowerFloat32x4FromInt32x4(instr);
     case Js::OpCode::Simd128_FromUint32x4_F4:
         return Simd128LowerFloat32x4FromUint32x4(instr);
+    case Js::OpCode::Simd128_Min_F4:
+    case Js::OpCode::Simd128_Max_F4:
+        return Simd128LowerMinMax_F4(instr);
+    case Js::OpCode::Simd128_Min_D2:
+    case Js::OpCode::Simd128_Max_D2:
+        return Simd128LowerMinMax_D2(instr);
+    case Js::OpCode::Simd128_ShLtByScalar_I4:
+    case Js::OpCode::Simd128_ShLtByScalar_U4:
+    case Js::OpCode::Simd128_ShRtByScalar_I4:
+    case Js::OpCode::Simd128_ShRtByScalar_U4:
+    case Js::OpCode::Simd128_ShLtByScalar_I8:
+    case Js::OpCode::Simd128_ShLtByScalar_U8:
+    case Js::OpCode::Simd128_ShRtByScalar_I8:
+    case Js::OpCode::Simd128_ShRtByScalar_U8:
+    case Js::OpCode::Simd128_ShLtByScalar_I16:
+    case Js::OpCode::Simd128_ShLtByScalar_U16:
+    case Js::OpCode::Simd128_ShRtByScalar_I16:
+    case Js::OpCode::Simd128_ShRtByScalar_U16:
+    case Js::OpCode::Simd128_ShLtByScalar_I2:
+    case Js::OpCode::Simd128_ShRtByScalar_I2:
+    case Js::OpCode::Simd128_ShRtByScalar_U2:
+        return Simd128LowerShift(instr);
     default:
         break;
     }
@@ -2645,10 +2656,28 @@ LowererMD::Simd128LowerUnMappedInstruction(IR::Instr *instr)
     case Js::OpCode::Simd128_Neq_U8:
     case Js::OpCode::Simd128_Neq_U16:
         return Simd128LowerCompareInverted(instr, Js::OpCode::CMEQ);
+    // Slice 2d: float Ne is NOT(Eq), same shape as integer Ne. NEON FCMEQ
+    // yields 0 on any NaN lane, so inversion yields 1 (true) exactly when
+    // the wasm ne semantics require it.
+    case Js::OpCode::Simd128_Neq_F4:
+    case Js::OpCode::Simd128_Neq_D2:
+        return Simd128LowerCompareInverted(instr, Js::OpCode::FCMEQV);
+    // Slice 2e: bitselect (local mirror of the shared 3-instruction shape)
+    // and any_true/all_true (canonicalize + reduce + move + shift).
+    case Js::OpCode::Simd128_BitSelect_I4:
+        return Simd128LowerBitSelect_NEON(instr);
+    case Js::OpCode::Simd128_AnyTrue_B4:
+    case Js::OpCode::Simd128_AnyTrue_B8:
+    case Js::OpCode::Simd128_AnyTrue_B16:
+        return Simd128LowerAnyTrue_NEON(instr, false);
+    case Js::OpCode::Simd128_AllTrue_B4:
+    case Js::OpCode::Simd128_AllTrue_B8:
+    case Js::OpCode::Simd128_AllTrue_B16:
+        return Simd128LowerAnyTrue_NEON(instr, true);
     default:
         break;
     }
-    AssertOrFailFastMsg(false, "W8-NEON slices 1+2a+2b: unlowered Simd128 opcode, refusing to miscompile");
+    AssertOrFailFastMsg(false, "W8-NEON slices 1+2a+2b+2c+2d+2e: unlowered Simd128 opcode, refusing to miscompile");
     return nullptr;
 }
 
@@ -2670,6 +2699,119 @@ LowererMD::Simd128LowerCompareInverted(IR::Instr *instr, Js::OpCode cmpOpcode)
     IR::Instr *notInstr = IR::Instr::New(Js::OpCode::PMVN, dst, dst, m_func);
     instr->InsertBefore(notInstr);
     LegalizeMD::LegalizeInstr(notInstr);
+    IR::Instr *instrPrev = instr->m_prev;
+    instr->Remove();
+    return instrPrev;
+}
+
+// Slice 2e: bitselect. Local mirror of the shared
+// LowererMD::LowerSimd128BitSelect shape (LowerMDSharedSimd128.cpp is not
+// compiled for ARM64, so the shared helper is unavailable here):
+// dst = ((src1 ^ src2) & mask) ^ src2, three bitwise instructions. PAND and
+// PXOR encode fixed SIZE_16B (bitwise, lane-agnostic), so the I4 lane type
+// needs no special handling.
+IR::Instr *
+LowererMD::Simd128LowerBitSelect_NEON(IR::Instr *instr)
+{
+    SList<IR::Opnd*> *args = Simd128GetExtendedArgs(instr);
+    IR::Opnd *dst = args->Pop();
+    IR::Opnd *src1 = args->Pop();
+    IR::Opnd *src2 = args->Pop();
+    IR::Opnd *mask = args->Pop();
+
+    IR::Instr *xorInstr = IR::Instr::New(Js::OpCode::PXOR, dst, src1, src2, m_func);
+    instr->InsertBefore(xorInstr);
+    LegalizeMD::LegalizeInstr(xorInstr);
+
+    IR::Instr *andInstr = IR::Instr::New(Js::OpCode::PAND, dst, dst, mask, m_func);
+    instr->InsertBefore(andInstr);
+    LegalizeMD::LegalizeInstr(andInstr);
+
+    IR::Instr *xor2Instr = IR::Instr::New(Js::OpCode::PXOR, dst, dst, src2, m_func);
+    instr->InsertBefore(xor2Instr);
+    LegalizeMD::LegalizeInstr(xor2Instr);
+
+    IR::Instr *instrPrev = instr->m_prev;
+    instr->Remove();
+    return instrPrev;
+}
+
+// Slice 2e: v128.any_true / v128.all_true for B4/B8/B16. NEON has no
+// PMOVMSK-style mask extraction, so canonicalize each lane to all-ones /
+// all-zero and reduce across lanes:
+//   zero  = PXOR(src, src)      // all-zero vector (xor-zeroing idiom)
+//   eq    = CMEQ(src, zero)     // all-ones where the lane is zero
+//   canon = PMVN(eq)            // all-ones where the lane is non-zero
+//   red   = UMAXV/UMINV(canon)  // any: max is all-ones iff some lane true;
+//                               // all: min is all-ones iff every lane true
+//   w     = UMOV(red, lane 0)   // scalar 0 or all-ones, zero-extended to W
+//   dst   = LSR(w, #shift)      // top bit down: 31 (B4), 15 (B8), 7 (B16)
+// All temporaries carry the matching INT lane type (I4/I8/I16), not the B
+// bool type: every encoder in this chain derives its lane size from the IR
+// type, and UMOVV only accepts the I/U spellings (the bits are identical to
+// the B lanes, and CMEQ/PMVN/UMAXV/UMINV are lane-content-agnostic here).
+IR::Instr *
+LowererMD::Simd128LowerAnyTrue_NEON(IR::Instr *instr, bool isAll)
+{
+    Assert(instr->GetDst() && instr->GetDst()->IsRegOpnd());
+    Assert(instr->GetSrc1() && instr->GetSrc1()->IsRegOpnd() && instr->GetSrc1()->IsSimd128());
+    IR::Opnd *dst = instr->GetDst();
+    IR::Opnd *src1 = instr->GetSrc1();
+
+    IRType laneType;
+    uint32 shift;
+    switch (instr->m_opcode)
+    {
+    case Js::OpCode::Simd128_AnyTrue_B4:
+    case Js::OpCode::Simd128_AllTrue_B4:
+        laneType = TySimd128I4;
+        shift = 31;
+        break;
+    case Js::OpCode::Simd128_AnyTrue_B8:
+    case Js::OpCode::Simd128_AllTrue_B8:
+        laneType = TySimd128I8;
+        shift = 15;
+        break;
+    case Js::OpCode::Simd128_AnyTrue_B16:
+    case Js::OpCode::Simd128_AllTrue_B16:
+        laneType = TySimd128I16;
+        shift = 7;
+        break;
+    default:
+        AssertMsg(UNREACHED, "Simd128LowerAnyTrue_NEON: unexpected opcode");
+        return nullptr;
+    }
+
+    IR::RegOpnd *zeroVec = IR::RegOpnd::New(laneType, m_func);
+    IR::Instr *zeroInstr = IR::Instr::New(Js::OpCode::PXOR, zeroVec, src1, src1, m_func);
+    instr->InsertBefore(zeroInstr);
+    LegalizeMD::LegalizeInstr(zeroInstr);
+
+    IR::RegOpnd *eqMask = IR::RegOpnd::New(laneType, m_func);
+    IR::Instr *cmpInstr = IR::Instr::New(Js::OpCode::CMEQ, eqMask, src1, zeroVec, m_func);
+    instr->InsertBefore(cmpInstr);
+    LegalizeMD::LegalizeInstr(cmpInstr);
+
+    IR::RegOpnd *canon = IR::RegOpnd::New(laneType, m_func);
+    IR::Instr *notInstr = IR::Instr::New(Js::OpCode::PMVN, canon, eqMask, m_func);
+    instr->InsertBefore(notInstr);
+    LegalizeMD::LegalizeInstr(notInstr);
+
+    IR::RegOpnd *reduced = IR::RegOpnd::New(laneType, m_func);
+    IR::Instr *reduceInstr = IR::Instr::New(isAll ? Js::OpCode::UMINV : Js::OpCode::UMAXV, reduced, canon, m_func);
+    instr->InsertBefore(reduceInstr);
+    LegalizeMD::LegalizeInstr(reduceInstr);
+
+    IR::Instr *movInstr = IR::Instr::New(Js::OpCode::UMOVV, dst, reduced,
+        IR::IntConstOpnd::New(0, TyUint8, m_func, true), m_func);
+    instr->InsertBefore(movInstr);
+    LegalizeMD::LegalizeInstr(movInstr);
+
+    IR::Instr *shiftInstr = IR::Instr::New(Js::OpCode::LSR, dst, dst,
+        IR::IntConstOpnd::New(shift, TyUint8, m_func, true), m_func);
+    instr->InsertBefore(shiftInstr);
+    LegalizeMD::LegalizeInstr(shiftInstr);
+
     IR::Instr *instrPrev = instr->m_prev;
     instr->Remove();
     return instrPrev;
@@ -3235,6 +3377,305 @@ LowererMD::Simd128LowerFloat32x4FromUint32x4(IR::Instr *instr)
     return instrPrev;
 }
 
+// Slice 2c: variable-count shifts. The wasm count is a scalar i32 masked to
+// the lane width (count & (laneBits - 1)), matching the interpreter and x64;
+// negative counts wrap per C++ & semantics. The masked count is splatted to
+// a vector (INS lane 0 + DUP-element, like splat; UBFX + DUP-general for
+// 64-bit lanes, since a 32-bit GPR cannot feed a 64-bit INS lane) and the
+// shift runs per lane: SSHL for left and arithmetic-right (a negative shift
+// vector element shifts right), USHL for logical-right. Lane size comes from
+// the vector IR type. Unlike x64, which helpers the i64x2 arithmetic-right
+// shift for lack of a 64-bit PSRAD, NEON SSHL handles 2D lanes natively, so
+// all 15 shift opcodes lower inline with no helper.
+IR::Instr *
+LowererMD::Simd128LowerShift(IR::Instr *instr)
+{
+    IR::Instr *instrPrev = instr->m_prev;
+    IR::Opnd *dst = instr->GetDst();
+    IR::Opnd *src1 = instr->GetSrc1();
+    IR::Opnd *src2 = instr->GetSrc2();
+    Assert(dst && dst->IsRegOpnd() && dst->IsSimd128());
+    Assert(src1 && src1->IsRegOpnd() && src1->IsSimd128());
+    Assert(src2);
+
+    uint32 countMask = 0;
+    bool isRight = false;
+    bool isUnsignedRight = false;
+    bool is64Bit = false;
+    switch (instr->m_opcode)
+    {
+    case Js::OpCode::Simd128_ShLtByScalar_I4:
+    case Js::OpCode::Simd128_ShLtByScalar_U4:
+        countMask = 31;
+        break;
+    case Js::OpCode::Simd128_ShRtByScalar_I4:
+        countMask = 31;
+        isRight = true;
+        break;
+    case Js::OpCode::Simd128_ShRtByScalar_U4:
+        countMask = 31;
+        isRight = true;
+        isUnsignedRight = true;
+        break;
+    case Js::OpCode::Simd128_ShLtByScalar_I8:
+    case Js::OpCode::Simd128_ShLtByScalar_U8:
+        countMask = 15;
+        break;
+    case Js::OpCode::Simd128_ShRtByScalar_I8:
+        countMask = 15;
+        isRight = true;
+        break;
+    case Js::OpCode::Simd128_ShRtByScalar_U8:
+        countMask = 15;
+        isRight = true;
+        isUnsignedRight = true;
+        break;
+    case Js::OpCode::Simd128_ShLtByScalar_I16:
+    case Js::OpCode::Simd128_ShLtByScalar_U16:
+        countMask = 7;
+        break;
+    case Js::OpCode::Simd128_ShRtByScalar_I16:
+        countMask = 7;
+        isRight = true;
+        break;
+    case Js::OpCode::Simd128_ShRtByScalar_U16:
+        countMask = 7;
+        isRight = true;
+        isUnsignedRight = true;
+        break;
+    case Js::OpCode::Simd128_ShLtByScalar_I2:
+        countMask = 63;
+        is64Bit = true;
+        break;
+    case Js::OpCode::Simd128_ShRtByScalar_I2:
+        countMask = 63;
+        isRight = true;
+        is64Bit = true;
+        break;
+    case Js::OpCode::Simd128_ShRtByScalar_U2:
+        countMask = 63;
+        isRight = true;
+        isUnsignedRight = true;
+        is64Bit = true;
+        break;
+    default:
+        AssertOrFailFastMsg(false, "W8-NEON slice 2c: unlowered shift opcode");
+        return nullptr;
+    }
+
+    IR::RegOpnd *countReg;
+    if (src2->IsRegOpnd())
+    {
+        countReg = src2->AsRegOpnd();
+    }
+    else
+    {
+        countReg = IR::RegOpnd::New(TyInt32, m_func);
+        Lowerer::InsertMove(countReg, src2, instr);
+    }
+
+    IR::RegOpnd *masked = IR::RegOpnd::New(TyInt32, m_func);
+    IR::Instr *maskInstr = IR::Instr::New(Js::OpCode::AND, masked, countReg,
+        IR::IntConstOpnd::New(countMask, TyInt32, m_func), m_func);
+    instr->InsertBefore(maskInstr);
+    LegalizeMD::LegalizeInstr(maskInstr);
+
+    // The shift-vector element is signed: negate the masked count for right
+    // shifts (0 - count), so SSHL/USHL shift right by the masked amount.
+    IR::RegOpnd *shiftScalar32 = masked;
+    IR::RegOpnd *shiftScalar64 = nullptr;
+    if (isRight)
+    {
+        if (is64Bit)
+        {
+            IR::RegOpnd *wide = IR::RegOpnd::New(TyInt64, m_func);
+            IR::Instr *widen = IR::Instr::New(Js::OpCode::UBFX, wide, masked,
+                IR::IntConstOpnd::New(BITFIELD(0, 32), TyMachReg, m_func), m_func);
+            instr->InsertBefore(widen);
+            LegalizeMD::LegalizeInstr(widen);
+            shiftScalar64 = IR::RegOpnd::New(TyInt64, m_func);
+            IR::Instr *neg = IR::Instr::New(Js::OpCode::SUB, shiftScalar64,
+                IR::RegOpnd::New(nullptr, RegZR, TyInt64, m_func), wide, m_func);
+            instr->InsertBefore(neg);
+            LegalizeMD::LegalizeInstr(neg);
+        }
+        else
+        {
+            IR::RegOpnd *neg = IR::RegOpnd::New(TyInt32, m_func);
+            IR::Instr *negInstr = IR::Instr::New(Js::OpCode::SUB, neg,
+                IR::RegOpnd::New(nullptr, RegZR, TyInt32, m_func), masked, m_func);
+            instr->InsertBefore(negInstr);
+            LegalizeMD::LegalizeInstr(negInstr);
+            shiftScalar32 = neg;
+        }
+    }
+    else if (is64Bit)
+    {
+        shiftScalar64 = IR::RegOpnd::New(TyInt64, m_func);
+        IR::Instr *widen = IR::Instr::New(Js::OpCode::UBFX, shiftScalar64, masked,
+            IR::IntConstOpnd::New(BITFIELD(0, 32), TyMachReg, m_func), m_func);
+        instr->InsertBefore(widen);
+        LegalizeMD::LegalizeInstr(widen);
+    }
+
+    IR::RegOpnd *countVec = IR::RegOpnd::New(src1->GetType(), m_func);
+    if (is64Bit)
+    {
+        Assert(shiftScalar64);
+        IR::Instr *dup = IR::Instr::New(Js::OpCode::DUPGV, countVec, shiftScalar64, m_func);
+        instr->InsertBefore(dup);
+        LegalizeMD::LegalizeInstr(dup);
+    }
+    else
+    {
+        IR::Opnd *laneZero = IR::IntConstOpnd::New(0, TyInt32, m_func);
+        IR::Instr *ins = IR::Instr::New(Js::OpCode::INSV, countVec, laneZero, shiftScalar32, m_func);
+        instr->InsertBefore(ins);
+        LegalizeMD::LegalizeInstr(ins);
+        IR::Instr *dup = IR::Instr::New(Js::OpCode::DUPELV, countVec, countVec, laneZero, m_func);
+        instr->InsertBefore(dup);
+        LegalizeMD::LegalizeInstr(dup);
+    }
+
+    Js::OpCode shiftOpcode = isUnsignedRight ? Js::OpCode::USHLV : Js::OpCode::SSHLV;
+    IR::Instr *shift = IR::Instr::New(shiftOpcode, dst, src1, countVec, m_func);
+    instr->InsertBefore(shift);
+    LegalizeMD::LegalizeInstr(shift);
+    instr->Remove();
+    return instrPrev;
+}
+
+// Slice 2c: f32x4.min/max. The interpreter propagates NaN lanes bit-for-bit
+// (the first NaN operand wins, payload preserved) and folds -0/+0 to -0
+// (min) or +0 (max), while NEON FMIN/FMAX produce a default NaN whenever
+// either lane is NaN. So the lowerer computes the numeric min/max
+// (FMINNMV/FMAXNMV, which agree with the interpreter on all non-NaN lanes)
+// and blends the original NaN lanes back explicitly:
+//   result = (a & aNaN) | (b & bNaN & ~aNaN) | (numeric & ~aNaN & ~bNaN).
+// FCMEQV yields all-ones exactly where a lane is NOT NaN (sNaN compares
+// false too, and cannot trap: FP traps stay off), so PMVN gives the NaN
+// masks. PAND/POR are bitwise and preserve payloads and sNaN bits, unlike
+// a bare FMIN/FMAX. (x64's MINPS/MAXPS sequences differ from the
+// interpreter when both lanes are NaN with different payloads; this
+// sequence matches the interpreter in every case.)
+IR::Instr *
+LowererMD::Simd128LowerMinMax_F4(IR::Instr *instr)
+{
+    IR::Instr *instrPrev = instr->m_prev;
+    IR::Opnd *dst = instr->GetDst();
+    IR::Opnd *src1 = instr->GetSrc1();
+    IR::Opnd *src2 = instr->GetSrc2();
+    Assert(dst && dst->IsRegOpnd() && dst->IsSimd128());
+    Assert(src1 && src1->IsRegOpnd() && src1->IsSimd128());
+    Assert(src2 && src2->IsRegOpnd() && src2->IsSimd128());
+    Assert(instr->m_opcode == Js::OpCode::Simd128_Min_F4 || instr->m_opcode == Js::OpCode::Simd128_Max_F4);
+
+    Js::OpCode minmaxOpcode = (instr->m_opcode == Js::OpCode::Simd128_Min_F4) ? Js::OpCode::FMINNMV : Js::OpCode::FMAXNMV;
+    IR::RegOpnd *numeric = IR::RegOpnd::New(TySimd128F4, m_func);
+    IR::Instr *minmax = IR::Instr::New(minmaxOpcode, numeric, src1, src2, m_func);
+    instr->InsertBefore(minmax);
+    LegalizeMD::LegalizeInstr(minmax);
+
+    IR::RegOpnd *eqA = IR::RegOpnd::New(TySimd128I4, m_func);
+    IR::Instr *cmpA = IR::Instr::New(Js::OpCode::FCMEQV, eqA, src1, src1, m_func);
+    instr->InsertBefore(cmpA);
+    LegalizeMD::LegalizeInstr(cmpA);
+    IR::RegOpnd *nanA = IR::RegOpnd::New(TySimd128I4, m_func);
+    IR::Instr *notA = IR::Instr::New(Js::OpCode::PMVN, nanA, eqA, m_func);
+    instr->InsertBefore(notA);
+    LegalizeMD::LegalizeInstr(notA);
+
+    IR::RegOpnd *eqB = IR::RegOpnd::New(TySimd128I4, m_func);
+    IR::Instr *cmpB = IR::Instr::New(Js::OpCode::FCMEQV, eqB, src2, src2, m_func);
+    instr->InsertBefore(cmpB);
+    LegalizeMD::LegalizeInstr(cmpB);
+    IR::RegOpnd *nanB = IR::RegOpnd::New(TySimd128I4, m_func);
+    IR::Instr *notB = IR::Instr::New(Js::OpCode::PMVN, nanB, eqB, m_func);
+    instr->InsertBefore(notB);
+    LegalizeMD::LegalizeInstr(notB);
+
+    IR::RegOpnd *bOnly = IR::RegOpnd::New(TySimd128I4, m_func);
+    IR::Instr *bOnlyInstr = IR::Instr::New(Js::OpCode::PAND, bOnly, nanB, eqA, m_func);
+    instr->InsertBefore(bOnlyInstr);
+    LegalizeMD::LegalizeInstr(bOnlyInstr);
+    IR::RegOpnd *neither = IR::RegOpnd::New(TySimd128I4, m_func);
+    IR::Instr *neitherInstr = IR::Instr::New(Js::OpCode::PAND, neither, eqA, eqB, m_func);
+    instr->InsertBefore(neitherInstr);
+    LegalizeMD::LegalizeInstr(neitherInstr);
+
+    IR::RegOpnd *t1 = IR::RegOpnd::New(TySimd128I4, m_func);
+    IR::Instr *t1Instr = IR::Instr::New(Js::OpCode::PAND, t1, src1, nanA, m_func);
+    instr->InsertBefore(t1Instr);
+    LegalizeMD::LegalizeInstr(t1Instr);
+    IR::RegOpnd *t2 = IR::RegOpnd::New(TySimd128I4, m_func);
+    IR::Instr *t2Instr = IR::Instr::New(Js::OpCode::PAND, t2, src2, bOnly, m_func);
+    instr->InsertBefore(t2Instr);
+    LegalizeMD::LegalizeInstr(t2Instr);
+    IR::RegOpnd *t3 = IR::RegOpnd::New(TySimd128I4, m_func);
+    IR::Instr *t3Instr = IR::Instr::New(Js::OpCode::PAND, t3, numeric, neither, m_func);
+    instr->InsertBefore(t3Instr);
+    LegalizeMD::LegalizeInstr(t3Instr);
+
+    IR::RegOpnd *t12 = IR::RegOpnd::New(TySimd128I4, m_func);
+    IR::Instr *or12 = IR::Instr::New(Js::OpCode::POR, t12, t1, t2, m_func);
+    instr->InsertBefore(or12);
+    LegalizeMD::LegalizeInstr(or12);
+    IR::Instr *blend = IR::Instr::New(Js::OpCode::POR, dst, t12, t3, m_func);
+    instr->InsertBefore(blend);
+    LegalizeMD::LegalizeInstr(blend);
+
+    instr->Remove();
+    return instrPrev;
+}
+
+// Slice 2c: f64x2.min/max. The interpreter implements the C++ ternary
+// (a<b)?a:b / (a>b)?a:b per lane, so any NaN comparison is false and the
+// second operand wins bit-for-bit (payload preserved), and ties (-0/+0,
+// equal values) also take the second operand. The lowerer mirrors that
+// exactly: mask=(b>a) for min [(a>b) for max], result=(a&mask)|(b&~mask).
+// FCMGTV yields all-ones on true and all-zero on false-or-NaN (no trap),
+// so the blend selects original lane bits in every case, including NaN
+// payloads and sNaN. (x64 maps these to MINPD/MAXPD, whose
+// second-operand-wins NaN semantics coincide with the ternary.)
+IR::Instr *
+LowererMD::Simd128LowerMinMax_D2(IR::Instr *instr)
+{
+    IR::Instr *instrPrev = instr->m_prev;
+    IR::Opnd *dst = instr->GetDst();
+    IR::Opnd *src1 = instr->GetSrc1();
+    IR::Opnd *src2 = instr->GetSrc2();
+    Assert(dst && dst->IsRegOpnd() && dst->IsSimd128());
+    Assert(src1 && src1->IsRegOpnd() && src1->IsSimd128());
+    Assert(src2 && src2->IsRegOpnd() && src2->IsSimd128());
+    Assert(instr->m_opcode == Js::OpCode::Simd128_Min_D2 || instr->m_opcode == Js::OpCode::Simd128_Max_D2);
+
+    IR::Opnd *cmpSrc1 = (instr->m_opcode == Js::OpCode::Simd128_Min_D2) ? src2 : src1;
+    IR::Opnd *cmpSrc2 = (instr->m_opcode == Js::OpCode::Simd128_Min_D2) ? src1 : src2;
+    IR::RegOpnd *mask = IR::RegOpnd::New(TySimd128I2, m_func);
+    IR::Instr *cmp = IR::Instr::New(Js::OpCode::FCMGTV, mask, cmpSrc1, cmpSrc2, m_func);
+    instr->InsertBefore(cmp);
+    LegalizeMD::LegalizeInstr(cmp);
+    IR::RegOpnd *nmask = IR::RegOpnd::New(TySimd128I2, m_func);
+    IR::Instr *notMask = IR::Instr::New(Js::OpCode::PMVN, nmask, mask, m_func);
+    instr->InsertBefore(notMask);
+    LegalizeMD::LegalizeInstr(notMask);
+
+    IR::RegOpnd *t1 = IR::RegOpnd::New(TySimd128I2, m_func);
+    IR::Instr *t1Instr = IR::Instr::New(Js::OpCode::PAND, t1, src1, mask, m_func);
+    instr->InsertBefore(t1Instr);
+    LegalizeMD::LegalizeInstr(t1Instr);
+    IR::RegOpnd *t2 = IR::RegOpnd::New(TySimd128I2, m_func);
+    IR::Instr *t2Instr = IR::Instr::New(Js::OpCode::PAND, t2, src2, nmask, m_func);
+    instr->InsertBefore(t2Instr);
+    LegalizeMD::LegalizeInstr(t2Instr);
+    IR::Instr *blend = IR::Instr::New(Js::OpCode::POR, dst, t1, t2, m_func);
+    instr->InsertBefore(blend);
+    LegalizeMD::LegalizeInstr(blend);
+
+    instr->Remove();
+    return instrPrev;
+}
+
 IR::Instr *
 LowererMD::Simd128ConvertToLoad(IR::Opnd * dst, IR::Opnd * src, IR::Instr * instr)
 {
@@ -3272,22 +3713,48 @@ LowererMD::Simd128AsmJsLowerLoadElem(IR::Instr * instr)
     IR::Opnd * dst = instr->GetDst();
     IR::Opnd * src1 = instr->GetSrc1();
     Assert(dst && dst->IsSimd128() && src1->IsSimd128() && src1->IsIndirOpnd());
-    // Bounds: same branch shape as the scalar LowerAsmJsLdElemHelper
-    // (compare index against length, out-of-bounds goes to the helper
-    // block), but SIMD OOB is a trap, mirroring x64's isSimdLoad path.
+    // Bounds: trap iff effectiveEnd = index + offset + 16 > length (the
+    // access is 16 bytes; comparing index >= length misses the [len-16,
+    // len) window). Mirrors LowerWasmArrayBoundsCheck's 64-bit sum shape;
+    // SIMD OOB is a trap like x64's isSimdLoad path.
+    IR::IndirOpnd *indirOpnd = src1->AsIndirOpnd();
+    IR::RegOpnd *indexOpnd = indirOpnd->GetIndexOpnd();
+    int32 offset = indirOpnd->GetOffset();
 #if ENABLE_FAST_ARRAYBUFFER
     const bool isWasmFast = CONFIG_FLAG(WasmFastArray) && m_func->GetJITFunctionBody()->IsWasmFunction();
 #else
     const bool isWasmFast = false;
 #endif
+    // The ARM64 encoder emits a single DWORD per instruction, so a
+    // base+index MOVQ would lose its address word. Materialize
+    // EA = base + index in IR (zero-extended) and use the direct form.
+    IR::RegOpnd *extIndex = nullptr;
     if (!isWasmFast)
     {
-        IR::RegOpnd * indexOpnd = instr->GetSrc1()->AsIndirOpnd()->GetIndexOpnd();
         IR::LabelInstr * helperLabel = Lowerer::InsertLabel(true, instr);
         IR::LabelInstr * loadLabel = Lowerer::InsertLabel(false, instr);
         IR::LabelInstr * doneLabel = Lowerer::InsertLabel(false, instr);
-        IR::Opnd * cmpOpnd = indexOpnd ? (IR::Opnd*)indexOpnd : (IR::Opnd*)IR::IntConstOpnd::New(instr->GetSrc1()->AsIndirOpnd()->GetOffset(), TyUint32, m_func);
-        m_lowerer->InsertCompareBranch(cmpOpnd, instr->UnlinkSrc2(), Js::OpCode::BrGe_A, true, helperLabel, helperLabel);
+        IR::Int64ConstOpnd *constEndOff =
+            IR::Int64ConstOpnd::New((int64)16 + (int64)offset, TyInt64, m_func);
+        IR::Opnd *cmpOpnd;
+        if (indexOpnd != nullptr)
+        {
+            // Wasm addresses are 32-bit unsigned: zero-extend (same
+            // rationale as LowerWasmArrayBoundsCheck).
+            extIndex = IR::RegOpnd::New(TyInt64, m_func);
+            IR::Instr *ubfx = IR::Instr::New(Js::OpCode::UBFX, extIndex,
+                indexOpnd->UseWithNewType(TyInt32, m_func),
+                IR::IntConstOpnd::New(BITFIELD(0, 32), TyMachReg, m_func, true), m_func);
+            helperLabel->InsertBefore(ubfx);
+            LegalizeMD::LegalizeInstr(ubfx);
+            cmpOpnd = IR::RegOpnd::New(TyInt64, m_func);
+            Lowerer::InsertAdd(true, cmpOpnd, extIndex, constEndOff, helperLabel);
+        }
+        else
+        {
+            cmpOpnd = constEndOff;
+        }
+        m_lowerer->InsertCompareBranch(cmpOpnd, instr->UnlinkSrc2(), Js::OpCode::BrGt_A, true, helperLabel, helperLabel);
         Lowerer::InsertBranch(Js::OpCode::Br, loadLabel, helperLabel);
         // SIMD OOB load is a trap (mirrors x64 LowerAsmJsLdElemHelper
         // isSimdLoad). Insert at loadLabel so the call lands at the end of
@@ -3295,6 +3762,27 @@ LowererMD::Simd128AsmJsLowerLoadElem(IR::Instr * instr)
         m_lowerer->GenerateRuntimeError(loadLabel, JSERR_ArgumentOutOfRange, IR::HelperOp_RuntimeRangeError);
         Lowerer::InsertBranch(Js::OpCode::Br, doneLabel, loadLabel);
         (void)doneLabel;
+    }
+    if (indexOpnd != nullptr)
+    {
+        if (extIndex == nullptr)
+        {
+            extIndex = IR::RegOpnd::New(TyInt64, m_func);
+            IR::Instr *ubfx = IR::Instr::New(Js::OpCode::UBFX, extIndex,
+                indexOpnd->UseWithNewType(TyInt32, m_func),
+                IR::IntConstOpnd::New(BITFIELD(0, 32), TyMachReg, m_func, true), m_func);
+            instr->InsertBefore(ubfx);
+            LegalizeMD::LegalizeInstr(ubfx);
+        }
+        IR::RegOpnd *eaBase = IR::RegOpnd::New(TyMachPtr, m_func);
+        IR::Instr *eaAdd = IR::Instr::New(Js::OpCode::Add_A, eaBase,
+            indirOpnd->GetBaseOpnd(),
+            extIndex->UseWithNewType(TyMachPtr, m_func), m_func);
+        LowererMD::ChangeToAdd(eaAdd, false);
+        instr->InsertBefore(eaAdd);
+        LegalizeMD::LegalizeInstr(eaAdd);
+        indirOpnd->ReplaceBaseOpnd(eaBase);
+        indirOpnd->SetIndexOpnd(nullptr);
     }
     return Simd128ConvertToLoad(dst, src1, instr);
 }
@@ -3307,19 +3795,43 @@ LowererMD::Simd128AsmJsLowerStoreElem(IR::Instr * instr)
     IR::Opnd * src1 = instr->GetSrc1();
     Assert(dst && dst->IsIndirOpnd() && dst->IsSimd128());
     Assert(src1 && src1->IsSimd128() && src1->IsRegOpnd());
+    // Bounds: trap iff effectiveEnd = index + offset + 16 > length (see the
+    // load path above for the window rationale). The encoder emits a single
+    // DWORD per instruction, so materialize EA = base + index in IR and use
+    // the direct form here too.
+    IR::IndirOpnd *indirOpnd = dst->AsIndirOpnd();
+    IR::RegOpnd *indexOpnd = indirOpnd->GetIndexOpnd();
+    int32 offset = indirOpnd->GetOffset();
 #if ENABLE_FAST_ARRAYBUFFER
     const bool isWasmFast = CONFIG_FLAG(WasmFastArray) && m_func->GetJITFunctionBody()->IsWasmFunction();
 #else
     const bool isWasmFast = false;
 #endif
+    IR::RegOpnd *extIndex = nullptr;
     if (!isWasmFast)
     {
-        IR::RegOpnd * indexOpnd = dst->AsIndirOpnd()->GetIndexOpnd();
         IR::LabelInstr * helperLabel = Lowerer::InsertLabel(true, instr);
         IR::LabelInstr * storeLabel = Lowerer::InsertLabel(false, instr);
         IR::LabelInstr * doneLabel = Lowerer::InsertLabel(false, instr);
-        IR::Opnd * cmpOpnd = indexOpnd ? (IR::Opnd*)indexOpnd : (IR::Opnd*)IR::IntConstOpnd::New(dst->AsIndirOpnd()->GetOffset(), TyUint32, m_func);
-        m_lowerer->InsertCompareBranch(cmpOpnd, instr->UnlinkSrc2(), Js::OpCode::BrGe_A, true, helperLabel, helperLabel);
+        IR::Int64ConstOpnd *constEndOff =
+            IR::Int64ConstOpnd::New((int64)16 + (int64)offset, TyInt64, m_func);
+        IR::Opnd *cmpOpnd;
+        if (indexOpnd != nullptr)
+        {
+            extIndex = IR::RegOpnd::New(TyInt64, m_func);
+            IR::Instr *ubfx = IR::Instr::New(Js::OpCode::UBFX, extIndex,
+                indexOpnd->UseWithNewType(TyInt32, m_func),
+                IR::IntConstOpnd::New(BITFIELD(0, 32), TyMachReg, m_func, true), m_func);
+            helperLabel->InsertBefore(ubfx);
+            LegalizeMD::LegalizeInstr(ubfx);
+            cmpOpnd = IR::RegOpnd::New(TyInt64, m_func);
+            Lowerer::InsertAdd(true, cmpOpnd, extIndex, constEndOff, helperLabel);
+        }
+        else
+        {
+            cmpOpnd = constEndOff;
+        }
+        m_lowerer->InsertCompareBranch(cmpOpnd, instr->UnlinkSrc2(), Js::OpCode::BrGt_A, true, helperLabel, helperLabel);
         Lowerer::InsertBranch(Js::OpCode::Br, storeLabel, helperLabel);
         // SIMD OOB store is a trap (mirrors x64 LowerAsmJsStElemHelper
         // isSimdStore). Insert at storeLabel so the call lands at the end
@@ -3327,6 +3839,27 @@ LowererMD::Simd128AsmJsLowerStoreElem(IR::Instr * instr)
         m_lowerer->GenerateRuntimeError(storeLabel, JSERR_ArgumentOutOfRange, IR::HelperOp_RuntimeRangeError);
         Lowerer::InsertBranch(Js::OpCode::Br, doneLabel, storeLabel);
         (void)doneLabel;
+    }
+    if (indexOpnd != nullptr)
+    {
+        if (extIndex == nullptr)
+        {
+            extIndex = IR::RegOpnd::New(TyInt64, m_func);
+            IR::Instr *ubfx = IR::Instr::New(Js::OpCode::UBFX, extIndex,
+                indexOpnd->UseWithNewType(TyInt32, m_func),
+                IR::IntConstOpnd::New(BITFIELD(0, 32), TyMachReg, m_func, true), m_func);
+            instr->InsertBefore(ubfx);
+            LegalizeMD::LegalizeInstr(ubfx);
+        }
+        IR::RegOpnd *eaBase = IR::RegOpnd::New(TyMachPtr, m_func);
+        IR::Instr *eaAdd = IR::Instr::New(Js::OpCode::Add_A, eaBase,
+            indirOpnd->GetBaseOpnd(),
+            extIndex->UseWithNewType(TyMachPtr, m_func), m_func);
+        LowererMD::ChangeToAdd(eaAdd, false);
+        instr->InsertBefore(eaAdd);
+        LegalizeMD::LegalizeInstr(eaAdd);
+        indirOpnd->ReplaceBaseOpnd(eaBase);
+        indirOpnd->SetIndexOpnd(nullptr);
     }
     return Simd128ConvertToStore(dst, src1, instr);
 }

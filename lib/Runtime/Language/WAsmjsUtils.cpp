@@ -234,6 +234,7 @@ namespace WAsmJs
         case TySimd128B4:
         case TySimd128B8:
         case TySimd128B16:
+        case TySimd128I2:
         case TySimd128D2:
             return WAsmJs::SIMD;
         }

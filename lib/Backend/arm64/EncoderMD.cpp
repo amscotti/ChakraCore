@@ -832,13 +832,14 @@ int EncoderMD::EmitNeonMoveOrLoadStore(Arm64CodeEmitter &Emitter, IR::Instr *ins
         }
         if (DecodeMemoryOpnd(src1, baseReg, indexReg, indexScale, offset))
         {
-            // Indexed (Wasm mem access): NEON has no register form, so
-            // materialize addr = base + index*scale into SCRATCH and use the
-            // offset form.
-            int bytes = 0;
-            bytes += EmitAddRegister64(Emitter, Arm64SimpleRegisterParam(EncoderMD::GetRegEncode(SCRATCH_REG)), Arm64SimpleRegisterParam(baseReg), Arm64RegisterParam(indexReg, SHIFT_LSL, indexScale));
-            bytes += EmitNeonLdrOffset(Emitter, NeonRegisterParam(this->GetRegEncode(dst->AsRegOpnd()), 16), SIZE_1Q, Arm64SimpleRegisterParam(EncoderMD::GetRegEncode(SCRATCH_REG)), offset);
-            return bytes;
+            // Indexed MOVQ is unreachable: Simd128AsmJsLower{Load,Store}Elem
+            // materializes EA = base + index in IR, so only the direct form
+            // reaches the encoder. The old SCRATCH sequence is removed
+            // because GenerateEncoding emits a single DWORD per instruction
+            // and silently dropped the second word (stale Q values, stores
+            // that never landed). Fail loud instead of miscompiling.
+            AssertOrFailFastMsg(false, "W8-NEON: indexed MOVQ must be materialized in IR before encoding");
+            return 0;
         }
         return EmitNeonLdrOffset(Emitter, NeonRegisterParam(this->GetRegEncode(dst->AsRegOpnd()), 16), SIZE_1Q, baseReg, offset);
     }
@@ -849,10 +850,11 @@ int EncoderMD::EmitNeonMoveOrLoadStore(Arm64CodeEmitter &Emitter, IR::Instr *ins
         ARM64_REGISTER indexReg; ARM64_REGISTER baseReg; BYTE indexScale; int32 offset;
         if (DecodeMemoryOpnd(dst, baseReg, indexReg, indexScale, offset))
         {
-            int bytes = 0;
-            bytes += EmitAddRegister64(Emitter, Arm64SimpleRegisterParam(EncoderMD::GetRegEncode(SCRATCH_REG)), Arm64SimpleRegisterParam(baseReg), Arm64RegisterParam(indexReg, SHIFT_LSL, indexScale));
-            bytes += EmitNeonStrOffset(Emitter, NeonRegisterParam(this->GetRegEncode(src1->AsRegOpnd()), 16), SIZE_1Q, Arm64SimpleRegisterParam(EncoderMD::GetRegEncode(SCRATCH_REG)), offset);
-            return bytes;
+            // Same as the load path above: the lowerer materializes EA in
+            // IR, so an indexed store reaching the encoder is a lowering
+            // defect. Fail loud instead of miscompiling.
+            AssertOrFailFastMsg(false, "W8-NEON: indexed MOVQ store must be materialized in IR before encoding");
+            return 0;
         }
         return EmitNeonStrOffset(Emitter, NeonRegisterParam(this->GetRegEncode(src1->AsRegOpnd()), 16), SIZE_1Q, baseReg, offset);
     }
@@ -1583,6 +1585,28 @@ EncoderMD::GenerateEncoding(IR::Instr* instr, BYTE *pc)
         bytes = this->EmitOp2NeonRegister(Emitter, instr, EmitNeonFsqrt, SIZE_4S);
         break;
 
+    // W8-NEON slice 2e (D2 arithmetic): float64x2 is the same NEON float
+    // vector shape as F4 with SIZE_2D lanes.
+    case Js::OpCode::ADDPD:
+        bytes = this->EmitOp3NeonRegister(Emitter, instr, EmitNeonFadd, SIZE_2D);
+        break;
+
+    case Js::OpCode::SUBPD:
+        bytes = this->EmitOp3NeonRegister(Emitter, instr, EmitNeonFsub, SIZE_2D);
+        break;
+
+    case Js::OpCode::MULPD:
+        bytes = this->EmitOp3NeonRegister(Emitter, instr, EmitNeonFmul, SIZE_2D);
+        break;
+
+    case Js::OpCode::DIVPD:
+        bytes = this->EmitOp3NeonRegister(Emitter, instr, EmitNeonFdiv, SIZE_2D);
+        break;
+
+    case Js::OpCode::SQRTPD:
+        bytes = this->EmitOp2NeonRegister(Emitter, instr, EmitNeonFsqrt, SIZE_2D);
+        break;
+
     // W8-NEON slice 2a: integer compares produce all-ones/all-zero masks
     // natively; lane size comes from the IR type (Bool result lanes match the
     // compared lanes). PMVN is bitwise (SIZE_16B); PMULW wraps per lane.
@@ -1608,6 +1632,32 @@ EncoderMD::GenerateEncoding(IR::Instr* instr, BYTE *pc)
 
     case Js::OpCode::PMVN:
         bytes = this->EmitOp2NeonRegister(Emitter, instr, EmitNeonNot, SIZE_16B);
+        break;
+
+    // W8-NEON slice 2e: negate + cross-lane reduction. Lane size comes from
+    // the IR type (neg preserves lanes: I4/I8/I16 -> 4S/8H/16B, I2 -> 2D;
+    // F4 -> 4S, D2 -> 2D; the reduction reads the same lanes it reduces).
+    case Js::OpCode::NEGV:
+        bytes = this->EmitOp2NeonRegister(Emitter, instr, EmitNeonNeg, NeonSizeForSimdType(instr->GetSrc1()->GetType()));
+        break;
+
+    case Js::OpCode::FNEGV:
+        bytes = this->EmitOp2NeonRegister(Emitter, instr, EmitNeonFneg, NeonSizeForSimdType(instr->GetSrc1()->GetType()));
+        break;
+
+    case Js::OpCode::UMAXV:
+        bytes = this->EmitOp2NeonRegister(Emitter, instr, EmitNeonUmaxv, NeonSizeForSimdType(instr->GetSrc1()->GetType()));
+        break;
+
+    case Js::OpCode::UMINV:
+        bytes = this->EmitOp2NeonRegister(Emitter, instr, EmitNeonUminv, NeonSizeForSimdType(instr->GetSrc1()->GetType()));
+        break;
+
+    // W8-NEON slice 2e (abs): NEON FABS clears the sign bit per lane,
+    // matching wasm abs exactly (NaN-quiet, -0 -> +0). Lane size from the
+    // IR type (F4 -> 4S, D2 -> 2D).
+    case Js::OpCode::FABSV:
+        bytes = this->EmitOp2NeonRegister(Emitter, instr, EmitNeonFabs, NeonSizeForSimdType(instr->GetSrc1()->GetType()));
         break;
 
     case Js::OpCode::PMULW:
@@ -1781,19 +1831,67 @@ EncoderMD::GenerateEncoding(IR::Instr* instr, BYTE *pc)
         bytes = this->EmitOp2NeonRegister(Emitter, instr, EmitNeonFcvtzu, NeonSizeForSimdType(instr->GetDst()->GetType()));
         break;
 
+    // W8-NEON slice 2d: FCMGEV lane size derives from the SOURCE operand
+    // type, not the mask destination (F4 -> 4S, D2 -> 2D). The destination
+    // of a float compare is a bool-mask container whose lane type does not
+    // reliably describe the compared lanes (f64x2.eq registers Float64x2_3
+    // yet behaved 4S when sized from the destination). The comparison acts
+    // on the source lanes, so the source type is the sound size key; every
+    // existing caller passes float sources.
     case Js::OpCode::FCMGEV:
-        Assert(NeonSizeForSimdType(instr->GetDst()->GetType()) == SIZE_4S);
-        bytes = this->EmitOp3NeonRegister(Emitter, instr, EmitNeonFcmge, SIZE_4S);
+        Assert(instr->GetSrc1()->IsSimd128()
+            && (instr->GetSrc1()->GetType() == TySimd128F4 || instr->GetSrc1()->GetType() == TySimd128D2));
+        bytes = this->EmitOp3NeonRegister(Emitter, instr, EmitNeonFcmge, NeonSizeForSimdType(instr->GetSrc1()->GetType()));
         break;
 
+    // W8-NEON slice 2c/2d: FCMGTV/FCMEQV lane size derives from the SOURCE
+    // operand type (F4 -> 4S, D2 -> 2D), not the mask destination; see the
+    // FCMGEV note. Every caller passes float sources, so existing 4S/2D
+    // behavior is unchanged.
     case Js::OpCode::FCMGTV:
-        Assert(NeonSizeForSimdType(instr->GetDst()->GetType()) == SIZE_4S);
-        bytes = this->EmitOp3NeonRegister(Emitter, instr, EmitNeonFcmgt, SIZE_4S);
+        Assert(instr->GetSrc1()->IsSimd128()
+            && (instr->GetSrc1()->GetType() == TySimd128F4 || instr->GetSrc1()->GetType() == TySimd128D2));
+        bytes = this->EmitOp3NeonRegister(Emitter, instr, EmitNeonFcmgt, NeonSizeForSimdType(instr->GetSrc1()->GetType()));
         break;
 
     case Js::OpCode::FCMEQV:
-        Assert(NeonSizeForSimdType(instr->GetDst()->GetType()) == SIZE_4S);
-        bytes = this->EmitOp3NeonRegister(Emitter, instr, EmitNeonFcmeq, SIZE_4S);
+        Assert(instr->GetSrc1()->IsSimd128()
+            && (instr->GetSrc1()->GetType() == TySimd128F4 || instr->GetSrc1()->GetType() == TySimd128D2));
+        bytes = this->EmitOp3NeonRegister(Emitter, instr, EmitNeonFcmeq, NeonSizeForSimdType(instr->GetSrc1()->GetType()));
+        break;
+
+    // W8-NEON slice 2c: float min/max (numeric), vector shifts, saturating
+    // integer arithmetic. Lane size derives from the destination IR type.
+    case Js::OpCode::FMINNMV:
+        bytes = this->EmitOp3NeonRegister(Emitter, instr, EmitNeonFminnm, NeonSizeForSimdType(instr->GetDst()->GetType()));
+        break;
+
+    case Js::OpCode::FMAXNMV:
+        bytes = this->EmitOp3NeonRegister(Emitter, instr, EmitNeonFmaxnm, NeonSizeForSimdType(instr->GetDst()->GetType()));
+        break;
+
+    case Js::OpCode::SSHLV:
+        bytes = this->EmitOp3NeonRegister(Emitter, instr, EmitNeonSshl, NeonSizeForSimdType(instr->GetDst()->GetType()));
+        break;
+
+    case Js::OpCode::USHLV:
+        bytes = this->EmitOp3NeonRegister(Emitter, instr, EmitNeonUshl, NeonSizeForSimdType(instr->GetDst()->GetType()));
+        break;
+
+    case Js::OpCode::SQADDV:
+        bytes = this->EmitOp3NeonRegister(Emitter, instr, EmitNeonSqadd, NeonSizeForSimdType(instr->GetDst()->GetType()));
+        break;
+
+    case Js::OpCode::SQSUBV:
+        bytes = this->EmitOp3NeonRegister(Emitter, instr, EmitNeonSqsub, NeonSizeForSimdType(instr->GetDst()->GetType()));
+        break;
+
+    case Js::OpCode::UQADDV:
+        bytes = this->EmitOp3NeonRegister(Emitter, instr, EmitNeonUqadd, NeonSizeForSimdType(instr->GetDst()->GetType()));
+        break;
+
+    case Js::OpCode::UQSUBV:
+        bytes = this->EmitOp3NeonRegister(Emitter, instr, EmitNeonUqsub, NeonSizeForSimdType(instr->GetDst()->GetType()));
         break;
 
     // Opcode not yet implemented
@@ -1969,9 +2067,9 @@ EncoderMD::BaseAndOffsetFromSym(IR::SymOpnd *symOpnd, RegNum *pBaseReg, int32 *p
     {
         offset += func->m_localStackHeight + func->m_ArgumentsOffset;
 #if defined(__APPLE__)
-        // Slots 0-7 are the homed registers. Later slots are in the caller's
-        // argv image, which begins at [incoming_sp + 8*8] rather than at
-        // [incoming_sp].
+        // Slots 0-7 are the homed registers. Later slots live in the
+        // caller's argv image at [incoming_sp + 8*slot]: 64 bytes past the
+        // homed area, matching the x64 convention this port follows.
         if ((stackSym->m_offset + symOpnd->m_offset) >= (int32)(NUM_INT_ARG_REGS * MachRegInt))
         {
             offset += NUM_INT_ARG_REGS * MachRegInt;

@@ -88,7 +88,7 @@ public:
             IR::Instr *     LoadArgumentsFromFrame(IR::Instr * instr);
             IR::Instr *     LowerRet(IR::Instr * instr);
             IR::Instr *     LowerCondBranch(IR::Instr * instr);
-            // W8-NEON slices 1+2a: NEON-native SIMD lowering.
+            // W8-NEON slices 1+2a+2b+2c+2d+2e: NEON-native SIMD lowering.
             // Any other Simd128 opcode fails safe via FailFast, never miscompiles.
             // Loads/stores (LdArr/StArr 16B) are part of slice 1 because every
             // wasm.simd test needs them; they lower to Q MOVQ via bounds-checked paths.
@@ -119,6 +119,20 @@ public:
             IR::Instr *         Simd128LowerUint32x4FromFloat32x4(IR::Instr * instr);
             IR::Instr *         Simd128LowerFloat32x4FromInt32x4(IR::Instr * instr);
             IR::Instr *         Simd128LowerFloat32x4FromUint32x4(IR::Instr * instr);
+            // W8-NEON slice 2c: shifts (scalar count masked to the lane
+            // width, splatted, then SSHL/USHL) and float min/max (numeric
+            // min/max blended with the original NaN lanes to match the
+            // interpreter bit-for-bit, incl. NaN payloads). Saturating
+            // arithmetic maps directly (see Simd128InitOpcodeMap).
+            IR::Instr *         Simd128LowerShift(IR::Instr * instr);
+            IR::Instr *         Simd128LowerMinMax_F4(IR::Instr * instr);
+            IR::Instr *         Simd128LowerMinMax_D2(IR::Instr * instr);
+            // W8-NEON slice 2e: bitselect (local mirror of the shared
+            // 3-instruction shape) + any_true/all_true (canonicalize via
+            // CMEQ+PMVN, reduce via UMAXV/UMINV, UMOV lane 0 to GPR, LSR to
+            // 0/1). Negate and abs map directly (see Simd128InitOpcodeMap).
+            IR::Instr *         Simd128LowerBitSelect_NEON(IR::Instr * instr);
+            IR::Instr *         Simd128LowerAnyTrue_NEON(IR::Instr * instr, bool isAll);
             IR::RegOpnd *       Simd128MaterializeConst(AsmJsSIMDValue value, IRType type, IR::Instr * insertBeforeInstr);
             void                Simd128TrapIfMaskNonZero(IR::RegOpnd * mask, IR::Instr * instr);
             // Local equivalent of the shared x86 helper (LowerMDSharedSimd128

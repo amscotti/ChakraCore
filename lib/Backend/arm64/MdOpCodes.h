@@ -154,6 +154,14 @@ MACRO(SUBPS,       Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,
 MACRO(MULPS,       Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)
 MACRO(DIVPS,       Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)
 MACRO(SQRTPS,      Reg2,       0,              UNUSED,   LEGAL_REG2,     UNUSED,   D___)
+// W8-NEON slice 2e (D2 arithmetic): float64x2 add/sub/mul/div/sqrt. Same
+// vector shape as the F4 family (EmitNeonFadd etc.) with SIZE_2D. Reg3 for
+// the binary ops, Reg2 for sqrt.
+MACRO(ADDPD,       Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)
+MACRO(SUBPD,       Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)
+MACRO(MULPD,       Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)
+MACRO(DIVPD,       Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)
+MACRO(SQRTPD,      Reg2,       0,              UNUSED,   LEGAL_REG2,     UNUSED,   D___)
 
 // W8-NEON slice 2a: integer compares, vector NOT, integer multiply.
 // Lane size comes from the IR type via NeonSizeForSimdType (like PADDD),
@@ -169,6 +177,19 @@ MACRO(CMHI,        Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,
 MACRO(CMHS,        Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)
 MACRO(PMVN,        Reg2,       0,              UNUSED,   LEGAL_REG2,     UNUSED,   D___)
 MACRO(PMULW,       Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)
+
+// W8-NEON slice 2e: negate + cross-lane reduction. NEGV is integer negate
+// (2's complement per lane); FNEGV is float negate (sign-bit flip per lane,
+// NaN-quiet). UMAXV/UMINV reduce a vector to one scalar lane (unsigned max /
+// min across lanes; the scalar lands in lane 0). Lane sizes come from the IR
+// type via NeonSizeForSimdType. LEGAL_REG2: operands are registers only;
+// lane-index immediates (UMOVV lane 0 in the any/all_true expansion) use the
+// LEGAL_SHIFT form of UMOVV, and the final 0/1 shift uses LEGAL_SHIFT LSR.
+MACRO(NEGV,        Reg2,       0,              UNUSED,   LEGAL_REG2,     UNUSED,   D___)
+MACRO(FNEGV,       Reg2,       0,              UNUSED,   LEGAL_REG2,     UNUSED,   D___)
+MACRO(UMAXV,       Reg2,       0,              UNUSED,   LEGAL_REG2,     UNUSED,   D___)
+MACRO(UMINV,       Reg2,       0,              UNUSED,   LEGAL_REG2,     UNUSED,   D___)
+MACRO(FABSV,       Reg2,       0,              UNUSED,   LEGAL_REG2,     UNUSED,   D___)
 
 // W8-NEON slice 2b: SIMD lane ops + float<->int conversions.
 // Lane sizes come from the IR type (NeonSizeForSimdType, or the encoder's
@@ -198,3 +219,20 @@ MACRO(FCVTZUV,     Reg2,       0,              UNUSED,   LEGAL_REG2,     UNUSED,
 MACRO(FCMGEV,      Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)
 MACRO(FCMGTV,      Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)
 MACRO(FCMEQV,      Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)
+
+// W8-NEON slice 2c: float min/max (numeric), vector shifts, saturating
+// integer arithmetic. FMINNMV/FMAXNMV are the numeric (NaN-suppressing)
+// min/max; the lowerer blends in the original NaN lanes explicitly to match
+// the interpreter bit-for-bit. SSHLV/USHLV take a splatted shift-count
+// vector (positive = left, negative = right). SQADDV/SQSUBV/UQADDV/UQSUBV
+// saturate per lane exactly like the wasm add_sat/sub_sat families. Lane
+// size for every one of these comes from the IR type via
+// NeonSizeForSimdType, like the slice-1/2a vector ops.
+MACRO(FMINNMV,     Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)
+MACRO(FMAXNMV,     Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)
+MACRO(SSHLV,       Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)
+MACRO(USHLV,       Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)
+MACRO(SQADDV,      Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)
+MACRO(SQSUBV,      Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)
+MACRO(UQADDV,      Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)
+MACRO(UQSUBV,      Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)
