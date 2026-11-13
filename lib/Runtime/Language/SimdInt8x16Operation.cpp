@@ -93,21 +93,21 @@ namespace Js
     SIMDValue SIMDInt8x16Operation::OpAddSaturate(const SIMDValue& aValue, const SIMDValue& bValue)
     {
         SIMDValue result;
-        int mask = 0x80;
         for (uint idx = 0; idx < 16; ++idx)
         {
-            int8 val1 = aValue.i8[idx];
-            int8 val2 = bValue.i8[idx];
-            int8 sum = val1 + val2;
+            int sum = (int)aValue.i8[idx] + (int)bValue.i8[idx];
 
-            result.i8[idx] = sum;
-            if (val1 > 0 && val2 > 0 && sum < 0)
+            if (sum > 0x7F)
             {
                 result.i8[idx] = 0x7F;
             }
-            else if (val1 < 0 && val2 < 0 && sum > 0)
+            else if (sum < -0x80)
             {
-                result.i8[idx] = static_cast<int8>(mask);
+                result.i8[idx] = static_cast<int8>(0x80);
+            }
+            else
+            {
+                result.i8[idx] = static_cast<int8>(sum);
             }
         }
         return result;
@@ -116,21 +116,21 @@ namespace Js
     SIMDValue SIMDInt8x16Operation::OpSubSaturate(const SIMDValue& aValue, const SIMDValue& bValue)
     {
         SIMDValue result;
-        int mask = 0x80;
         for (uint idx = 0; idx < 16; ++idx)
         {
-            int8 val1 = aValue.i8[idx];
-            int8 val2 = bValue.i8[idx];
-            int16 diff = val1 + val2;
+            int diff = (int)aValue.i8[idx] - (int)bValue.i8[idx];
 
-            result.i8[idx] = static_cast<int8>(diff);
             if (diff > 0x7F)
             {
                 result.i8[idx] = 0x7F;
             }
-            else if (diff < 0x80)
+            else if (diff < -0x80)
             {
-                result.i8[idx] = static_cast<int8>(mask);
+                result.i8[idx] = static_cast<int8>(0x80);
+            }
+            else
+            {
+                result.i8[idx] = static_cast<int8>(diff);
             }
         }
         return result;

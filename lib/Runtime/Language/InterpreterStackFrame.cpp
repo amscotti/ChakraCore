@@ -2489,7 +2489,12 @@ skipThunk:
         case Js::AsmJsRetType::Uint16x8:
         case Js::AsmJsRetType::Uint8x16:
         {
+#if defined(_M_X64)
             entryPoint = (void*)Js::InterpreterStackFrame::AsmJsInterpreterSimdJs;
+#else
+            // ARM64: x64 __m128 entry does not exist here (W8).
+            entryPoint = (void*)Js::InterpreterStackFrame::AsmJsInterpreterSimd;
+#endif
             break;
         }
 #endif
@@ -2544,6 +2549,11 @@ skipThunk:
     __m128 InterpreterStackFrame::AsmJsInterpreterSimdJs(AsmJsCallStackLayout* layout)
     {
         return AsmJsInterpreter<X86SIMDValue>(layout).m128_value;
+    }
+#elif defined(_M_ARM64)
+    AsmJsSIMDValue InterpreterStackFrame::AsmJsInterpreterSimd(AsmJsCallStackLayout* layout)
+    {
+        return AsmJsInterpreter<AsmJsSIMDValue>(layout);
     }
 #endif
 #endif
@@ -4132,7 +4142,13 @@ skipThunk:
 #else
             m_localSimdSlots[returnReg] = JavascriptFunction::CallAsmJsFunction<AsmJsSIMDValue>(function, jsMethod, m_outParams, alignedArgsSize, reg);
 #endif // _M_X64
-#endif // _WIN32
+#elif defined(_M_ARM64)
+            // W8 (interpreter-first): ARM64 SIMD internal calls store via
+            // the portable path (interpreter). Linux x64 intentionally
+            // untouched (D6: x64 identical; the latent drop stays a
+            // follow-up).
+            m_localSimdSlots[returnReg] = JavascriptFunction::CallAsmJsFunction<AsmJsSIMDValue>(function, jsMethod, m_outParams, alignedArgsSize, reg);
+#endif // _WIN32 / _M_ARM64
             break;
 #endif // ENABLE_WASM_SIMD
         default:

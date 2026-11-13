@@ -4,6 +4,8 @@
 //-------------------------------------------------------------------------------------------------------
 
 #include "RuntimeLanguagePch.h"
+#include "Language/AsmJsTypes.h"
+#include "../../WasmReader/WasmParseTree.h"
 
 #if defined(ASMJS_PLAT) || defined(ENABLE_WASM)
 #include "InterpreterStackFrame.h"
@@ -88,6 +90,52 @@ namespace WAsmJs
 #endif
     }
 
+    bool FunctionUsesSimd(Js::FunctionBody* body)
+    {
+#ifdef ENABLE_WASM_SIMD
+        if (body == nullptr)
+        {
+            return false;
+        }
+        Js::AsmJsFunctionInfo* info = body->GetAsmJsFunctionInfo();
+        if (info == nullptr)
+        {
+            return false;
+        }
+        bool hasSimd = info->GetReturnType().toVarType().isSIMD()
+            || info->GetReturnType().which() == Js::AsmJsRetType::Int64x2;
+        for (Js::ArgSlot i = 0; i < info->GetArgCount() && !hasSimd; ++i)
+        {
+            hasSimd = info->GetArgType(i).isSIMD();
+        }
+        hasSimd = hasSimd
+            || info->GetSimdVarCount() > 0
+            || info->GetSimdTmpCount() > 0
+            || info->GetSimdConstCount() > 0;
+#ifdef ENABLE_WASM
+        {
+            const Wasm::WasmSignature* wasmSig = info->GetWasmSignature();
+            if (wasmSig != nullptr)
+            {
+                for (Js::ArgSlot i = 0; i < wasmSig->GetParamCount() && !hasSimd; ++i)
+                {
+                    hasSimd = wasmSig->GetParam(i) == WasmTypes::V128;
+                }
+                const uint32 resultCount = wasmSig->GetResultCount();
+                for (uint32 i = 0; i < resultCount && !hasSimd; ++i)
+                {
+                    hasSimd = wasmSig->GetResult(i) == WasmTypes::V128;
+                }
+            }
+        }
+#endif
+        return hasSimd;
+#else
+        (void)body;
+        return false;
+#endif
+    }
+
     bool ShouldJitFunction(Js::FunctionBody* body, uint interpretedCount)
     {
 #if ENABLE_NATIVE_CODEGEN
@@ -101,6 +149,16 @@ namespace WAsmJs
         {
             return false;
         }
+#if defined(_M_ARM64) && defined(ENABLE_WASM_SIMD)
+        // W8 interim: ARM64 has no SIMD (NEON) lowering yet, so SIMD
+        // functions must never tier up (WasmLibrary schedules JIT at
+        // parse time, independent of the AsmJsUtils dispatch gate).
+        // x86/x64 tier-up for SIMD is unchanged (LowerMDSharedSimd128).
+        if (FunctionUsesSimd(body))
+        {
+            return false;
+        }
+#endif
 #if ENABLE_OOP_NATIVE_CODEGEN
         if (JITManager::GetJITManager()->IsOOPJITEnabled() && !JITManager::GetJITManager()->IsConnected())
         {

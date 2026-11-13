@@ -3215,7 +3215,10 @@ Lowerer::LowerRange(IR::Instr *instrStart, IR::Instr *instrEnd, bool defaultDoFa
             break;
 
         default:
-#ifdef ENABLE_WASM_SIMD
+#if defined(ENABLE_WASM_SIMD) && (_M_IX86 || _M_AMD64)
+        // W8: ARM64 has no SIMD lowering yet; P5 keeps SIMD functions
+        // interpreted, so SIMD IR is unreachable on ARM64. x86/x64
+        // behavior is unchanged.
             if (IsSimd128Opcode(instr->m_opcode))
             {
                 instrPrev = m_lowererMD.Simd128Instruction(instr);

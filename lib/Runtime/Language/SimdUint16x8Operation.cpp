@@ -50,7 +50,7 @@ namespace Js
 
         for(uint idx = 0; idx < 8; ++idx)
         {
-            result.u16[idx] = (aValue.u16[idx] < bValue.u16[idx]) ? 0xff : 0x0;
+            result.u16[idx] = (aValue.u16[idx] < bValue.u16[idx]) ? 0xffff : 0x0;
         }
         return result;
     }
@@ -61,7 +61,7 @@ namespace Js
 
         for (uint idx = 0; idx < 8; ++idx)
         {
-            result.u16[idx] = (aValue.u16[idx] <= bValue.u16[idx]) ? 0xff : 0x0;
+            result.u16[idx] = (aValue.u16[idx] <= bValue.u16[idx]) ? 0xffff : 0x0;
         }
         return result;
     }

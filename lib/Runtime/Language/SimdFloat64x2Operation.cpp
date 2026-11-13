@@ -291,5 +291,18 @@ namespace Js
 
         return result;
     }
+
+    // Pure scalar i64 -> f64x2 conversion (mirrors
+    // SimdFloat64x2OperationX86X64.cpp). W8: defined here so the
+    // ARM-visible TU provides OpConv without any intrinsics.
+    template<typename T>
+    void SIMDFloat64x2Operation::OpConv(SIMDValue* dst, SIMDValue* src)
+    {
+        dst->f64[0] = (double)(T)src->i64[0];
+        dst->f64[1] = (double)(T)src->i64[1];
+    }
+
+    template void SIMDFloat64x2Operation::OpConv<int64>(SIMDValue* dst, SIMDValue* src);
+    template void SIMDFloat64x2Operation::OpConv<uint64>(SIMDValue* dst, SIMDValue* src);
 }
 #endif

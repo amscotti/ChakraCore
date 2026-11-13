@@ -80,12 +80,22 @@ ServerThreadContext::GetImplicitCallFlagsAddr() const
 }
 
 #ifdef ENABLE_WASM_SIMD
+#if _M_IX86 || _M_AMD64
 intptr_t
 ServerThreadContext::GetSimdTempAreaAddr(uint8 tempIndex) const
 {
     Assert(tempIndex < SIMD_TEMP_SIZE);
     return m_threadContextData.simdTempAreaBaseAddr + tempIndex * sizeof(_x86_SIMDValue);
 }
+#else
+// ARM64 (W8 interim): see ThreadContext.cpp; unreachable under P5.
+intptr_t
+ServerThreadContext::GetSimdTempAreaAddr(uint8 tempIndex) const
+{
+    Assert(tempIndex < SIMD_TEMP_SIZE);
+    return 0;
+}
+#endif
 #endif
 
 intptr_t

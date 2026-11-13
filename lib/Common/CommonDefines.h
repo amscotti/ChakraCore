@@ -739,6 +739,11 @@
 
 #if defined(ASMJS_PLAT)
 #define ENABLE_WASM_THREADS
+#endif
+
+// W8: SIMD is interpreter-first on ARM64 (NEON lowering is second-half
+// debt); THREADS stays ASMJS_PLAT-only for W9.
+#if defined(ASMJS_PLAT) || (defined(_M_ARM64) && defined(WASM_ARM64_PORT))
 #define ENABLE_WASM_SIMD
 #endif
 

@@ -718,6 +718,18 @@ namespace Js
                 }
             }
 #endif
+#if defined(ENABLE_WASM_SIMD) && defined(_M_ARM64)
+            // W8 interim: ARM64 JIT lowering for SIMD (NEON) is not yet
+            // implemented (W8-second-half debt; see doc/wasm-arm64-plan.md),
+            // so functions whose signature or bytecode carries SIMD always
+            // take the interpreter path (mirrors the W7 multi-value gate
+            // above). Tier-up is blocked too (WAsmJs::ShouldJitFunction).
+            // ARM64-only: x86/x64 SIMD JIT lowering is unchanged.
+            if (WAsmJs::FunctionUsesSimd(func->GetFunctionBody()))
+            {
+                useJit = false;
+            }
+#endif
             if (useJit)
             {
                 int unboxSize = GetStackSizeForAsmJsUnboxing(func);

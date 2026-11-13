@@ -113,6 +113,7 @@ namespace Js
 #if defined(_M_IX86) || defined(_M_X64)
             template<> X86SIMDValue GetRetVal<X86SIMDValue>() { return X86SIMDValue::ToX86SIMDValue(simd); }
 #endif
+            template<> AsmJsSIMDValue GetRetVal<AsmJsSIMDValue>() { return simd; }
 #endif
         };
 
@@ -367,6 +368,11 @@ namespace Js
         static void * GetAsmJsInterpreterEntryPoint(AsmJsCallStackLayout* stack);
 #if defined(_M_X64)
         static __m128 AsmJsInterpreterSimdJs(AsmJsCallStackLayout* func);
+#elif defined(_M_ARM64)
+        // W8 (interpreter-first): ARM64 SIMD return entry, pure C++;
+        // mirrors AsmJsInterpreter<T>. NEON JIT return is second-half
+        // debt; the x64 __m128 arm above stays intact.
+        static AsmJsSIMDValue AsmJsInterpreterSimd(AsmJsCallStackLayout* layout);
 #endif
 #endif
 

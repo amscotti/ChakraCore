@@ -39,13 +39,26 @@ namespace Js
     bool SIMDBool32x4Operation::OpAllTrue(const SIMDValue& val)
     {
         SIMDValue simd = SIMDUtils::CanonicalizeToBools<T>(val); //copy-by-value since we need to modify the copy
-        return simd.i32[SIMD_X] && simd.i32[SIMD_Y] && simd.i32[SIMD_Z] && simd.i32[SIMD_W];
+        // W8: check every T-lane (the i32-lane check was wrong below
+        // 32-bit lane width, where one i32 covers two bool lanes).
+        const T* lanes = (const T*)simd.i8;
+        uint size = 16 / sizeof(T);
+        for (uint i = 0; i < size; ++i)
+        {
+            if (!lanes[i])
+            {
+                return false;
+            }
+        }
+        return true;
     }
 
+    template bool SIMDBool32x4Operation::OpAllTrue<int64>(const SIMDValue& val);
     template bool SIMDBool32x4Operation::OpAllTrue<int32>(const SIMDValue& val);
     template bool SIMDBool32x4Operation::OpAllTrue<int16>(const SIMDValue& val);
     template bool SIMDBool32x4Operation::OpAllTrue<int8>(const SIMDValue& val);
     //
+    template bool SIMDBool32x4Operation::OpAnyTrue<int64>(const SIMDValue& val);
     template bool SIMDBool32x4Operation::OpAnyTrue<int32>(const SIMDValue& val);
     template bool SIMDBool32x4Operation::OpAnyTrue<int16>(const SIMDValue& val);
     template bool SIMDBool32x4Operation::OpAnyTrue<int8>(const SIMDValue& val);

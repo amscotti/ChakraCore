@@ -184,8 +184,11 @@ elif args.show_passes:
 
 # xplat: temp hard coded to exclude unsupported tests
 if sys.platform != 'win32':
-    not_tags.add('exclude_xplat')
-    not_tags.add('require_simd')
+    # W8: SIMD is runnable on darwin/arm64 (interpreter-first), so only
+    # Linux keeps the xplat/simd exclusion. Windows is unchanged.
+    if not (sys.platform == 'darwin' and arch == 'arm64'):
+        not_tags.add('exclude_xplat')
+        not_tags.add('require_simd')
 else:
     not_tags.add('exclude_windows')
 

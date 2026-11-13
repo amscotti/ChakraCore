@@ -1728,11 +1728,24 @@ dbl_align:
     }
     template <> AsmJsSIMDValue JavascriptFunction::CallAsmJsFunction<AsmJsSIMDValue>(RecyclableObject * function, JavascriptMethod entryPoint, Var * argv, uint argsSize, byte* reg)
     {
-        // SIMD internal calls fail controlled until W8 (ABI section 8).
-        JavascriptError::ThrowTypeError(function->GetScriptContext(), WASMERR_InvalidTypeConversion);
-        AsmJsSIMDValue out;
-        out.Zero();
-        return out;
+        // W8 (interpreter-first): SIMD internal calls interpret via the
+        // P3 interpreter path. No JIT bridge: AsmJsJitCall carries only
+        // x0/d0, not q0 (W8-second-half NEON debt; see P5).
+        ScriptFunction* func = (ScriptFunction*)function;
+        if (func->GetFunctionBody()->IsWasmFunction())
+        {
+            JavascriptMethod next = WasmLibrary::EnsureWasmEntrypoint(func);
+            if (next == WasmLibrary::WasmLazyTrapCallback)
+            {
+                WasmLibrary::WasmLazyTrapCallback(function, CallInfo());
+                AsmJsSIMDValue out;
+                out.Zero();
+                return out;
+            }
+        }
+        AsmJsCallStackLayout* layout = (AsmJsCallStackLayout*)argv;
+        layout->functionObject = func;
+        return InterpreterStackFrame::AsmJsInterpreter<AsmJsSIMDValue>(layout);
     }
 
     PossibleAsmJsReturnValues JavascriptFunction::CallAsmJsFunctionX86Thunk(RecyclableObject * function, JavascriptMethod entryPoint, Var * argv, uint argsSize, byte* reg)

@@ -31,6 +31,11 @@ namespace WAsmJs
 #endif
     void JitFunctionIfReady(class Js::ScriptFunction* func, uint interpretedCount = 0);
     bool ShouldJitFunction(class Js::FunctionBody* body, uint interpretedCount = 0);
+    // W8 interim (doc/wasm-arm64-plan.md): true when the function's
+    // signature or bytecode carries SIMD (v128 params/results, SIMD
+    // args, or SIMD local/const/tmp slots). ARM64 keeps such functions
+    // interpreted until NEON lowering lands (W8-second-half debt).
+    bool FunctionUsesSimd(class Js::FunctionBody* body);
 
     typedef Js::RegSlot RegSlot;
 

@@ -331,11 +331,23 @@ ThreadContext::GetWasmReserveFloorAddr() const
 }
 
 #if ENABLE_NATIVE_CODEGEN && defined(ENABLE_WASM_SIMD)
+#if _M_IX86 || _M_AMD64
 intptr_t
 ThreadContext::GetSimdTempAreaAddr(uint8 tempIndex) const
 {
     return (intptr_t)&X86_TEMP_SIMD[tempIndex];
 }
+#else
+// ARM64 (W8 interim): the x86 SIMD temp area does not exist here and
+// the SIMD JIT path that consumes it is disabled (P5), so this helper
+// is unreachable. Keep the override for interface concreteness.
+intptr_t
+ThreadContext::GetSimdTempAreaAddr(uint8 tempIndex) const
+{
+    Assert(tempIndex < SIMD_TEMP_SIZE);
+    return 0;
+}
+#endif
 #endif
 
 intptr_t

@@ -161,21 +161,21 @@ namespace Js
     SIMDValue SIMDInt16x8Operation::OpAddSaturate(const SIMDValue& aValue, const SIMDValue& bValue)
     {
         SIMDValue result;
-        int mask = 0x8000;
         for (uint idx = 0; idx < 8; ++idx)
         {
-            int16 val1 = aValue.i16[idx];
-            int16 val2 = bValue.i16[idx];
-            int16 sum = val1 + val2;
+            int sum = (int)aValue.i16[idx] + (int)bValue.i16[idx];
 
-            result.i16[idx] = sum;
-            if (val1 > 0 && val2 > 0 && sum < 0)
+            if (sum > 0x7fff)
             {
                 result.i16[idx] = 0x7fff;
             }
-            else if (val1 < 0 && val2 < 0 && sum > 0)
+            else if (sum < -0x8000)
             {
-                result.i16[idx] = static_cast<int16>(mask);
+                result.i16[idx] = static_cast<int16>(0x8000);
+            }
+            else
+            {
+                result.i16[idx] = static_cast<int16>(sum);
             }
         }
         return result;
@@ -184,18 +184,22 @@ namespace Js
     SIMDValue SIMDInt16x8Operation::OpSubSaturate(const SIMDValue& aValue, const SIMDValue& bValue)
     {
         SIMDValue result;
-        int mask = 0x8000;
         for (uint idx = 0; idx < 8; ++idx)
         {
-            int16 val1 = aValue.i16[idx];
-            int16 val2 = bValue.i16[idx];
-            int16 diff = val1 + val2;
+            int diff = (int)aValue.i16[idx] - (int)bValue.i16[idx];
 
-            result.i16[idx] = static_cast<int16>(diff);
             if (diff > 0x7fff)
+            {
                 result.i16[idx] = 0x7fff;
-            else if (diff < 0x8000)
-                result.i16[idx] = static_cast<int16>(mask);
+            }
+            else if (diff < -0x8000)
+            {
+                result.i16[idx] = static_cast<int16>(0x8000);
+            }
+            else
+            {
+                result.i16[idx] = static_cast<int16>(diff);
+            }
         }
         return result;
     }
@@ -229,7 +233,7 @@ namespace Js
 
         for (uint idx = 0; idx < 8; ++idx)
         {
-            result.i16[idx] = (aValue.i16[idx] < bValue.i16[idx]) ? aValue.i16[idx] : bValue.i16[idx];
+            result.i16[idx] = (aValue.i16[idx] < bValue.i16[idx]) ? -1 : 0;
         }
 
         return result;
@@ -241,7 +245,7 @@ namespace Js
 
         for (uint idx = 0; idx < 8; ++idx)
         {
-            result.i16[idx] = (aValue.i16[idx] <= bValue.i16[idx]) ? aValue.i16[idx] : bValue.i16[idx];
+            result.i16[idx] = (aValue.i16[idx] <= bValue.i16[idx]) ? -1 : 0;
         }
 
         return result;
@@ -253,7 +257,7 @@ namespace Js
 
         for (uint idx = 0; idx < 8; ++idx)
         {
-            result.i16[idx] = (aValue.i16[idx] == bValue.i16[idx]) ? aValue.i16[idx] : bValue.i16[idx];
+            result.i16[idx] = (aValue.i16[idx] == bValue.i16[idx]) ? -1 : 0;
         }
 
         return result;
@@ -265,7 +269,7 @@ namespace Js
 
         for (uint idx = 0; idx < 8; ++idx)
         {
-            result.i16[idx] = (aValue.i16[idx] != bValue.i16[idx]) ? aValue.i16[idx] : bValue.i16[idx];
+            result.i16[idx] = (aValue.i16[idx] != bValue.i16[idx]) ? -1 : 0;
         }
 
         return result;
@@ -277,7 +281,7 @@ namespace Js
 
         for (uint idx = 0; idx < 8; ++idx)
         {
-            result.i16[idx] = (aValue.i16[idx] > bValue.i16[idx]) ? aValue.i16[idx] : bValue.i16[idx];
+            result.i16[idx] = (aValue.i16[idx] > bValue.i16[idx]) ? -1 : 0;
         }
 
         return result;
@@ -289,7 +293,7 @@ namespace Js
 
         for (uint idx = 0; idx < 8; ++idx)
         {
-            result.i16[idx] = (aValue.i16[idx] >= bValue.i16[idx]) ? aValue.i16[idx] : bValue.i16[idx];
+            result.i16[idx] = (aValue.i16[idx] >= bValue.i16[idx]) ? -1 : 0;
         }
 
         return result;
