@@ -103,9 +103,13 @@ must not touch them; provider tests use their own build step).
 
 - Plan v2 (audited, 26 task cards, waves 0–5, gates G0–G5):
   `doc/node-api-plan.md` — committed on this branch.
-- Implementation: **not started**. Wave 0 is the entry point.
-- Known open decisions: PR-1…PR-12 (recommendations recorded in the
-  plan; step 1 above closes them).
+- Implementation: **G0–G5 complete on macOS arm64** (2026-11-13).
+  Provider `libChakraNodeApi` committed (f50b390d3) + conformance/
+  probes/receipts (b18392821). js-native-api 43/26/0, gate 2053/0,
+  probes 3117/profile, stress ALL PASS. Linux x64 NOT RUN (provider
+  not wired in `tools/build/linux.zig`; not claimed).
+- PR-1…PR-12 closed as recorded in plan §2.2 (C++ through v1 per
+  PR-4; Zig re-evaluation only after G5 with fresh spike).
 - **PR-4 decision 2026-11-11 (plan §2.1 D5): C++ through provider v1
   if G5 passes; Zig re-evaluation after G5.** Wave 1 provider is C++17
   (ABI-identical to Zig); do not port before G5 without a new decision
