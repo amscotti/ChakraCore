@@ -555,6 +555,181 @@ pub fn build(b: *std.Build) void {
 
     const installed_ch: std.Build.LazyPath = .{ .relative = .{ .base = .install_bin, .sub_path = "ch" } };
 
+    // Node-API provider (plan N1.1 / PR-3, Waves 1-5): libChakraNodeApi.so,
+    // ELF mirror of the macOS provider step in build.zig. Same 16 TUs,
+    // same flags modulo toolchain spellings (-target/sysroot/mcpu/-F are
+    // macOS-only; no -Werror — the provider mirrors the Mac provider's
+    // warning policy, not the engine's). Hidden visibility so exactly the
+    // 145 napi_* (NAPI_EXTERN default) + 5 chakra_nodeapi_* (explicit
+    // default on definitions) survive. Links against libChakraCore.so
+    // (DT_NEEDED); --no-undefined proves the Js* set at build time (all
+    // needed Js* are in the committed linux exports set). Not part of the
+    // default build; `zig build libChakraNodeApi` on Linux builds it.
+    var prov_objs: std.ArrayList(std.Build.LazyPath) = .empty;
+    for ([_][]const u8{
+        "lib/NodeApi/NodeApiEnv.cpp",
+        "lib/NodeApi/NodeApiScopes.cpp",
+        "lib/NodeApi/NodeApiLifetime.cpp",
+        "lib/NodeApi/NodeApiRefs.cpp",
+        "lib/NodeApi/NodeApiValues.cpp",
+        "lib/NodeApi/NodeApiErrorsImpl.cpp",
+        "lib/NodeApi/NodeApiObjects.cpp",
+        "lib/NodeApi/NodeApiFunctions.cpp",
+        "lib/NodeApi/NodeApiBinary.cpp",
+        "lib/NodeApi/NodeApiPromise.cpp",
+        "lib/NodeApi/NodeApiScript.cpp",
+        "lib/NodeApi/NodeApiWrap.cpp",
+        "lib/NodeApi/NodeApiBuffers.cpp",
+        "lib/NodeApi/NodeApiAsync.cpp",
+        "lib/NodeApi/NodeApiAsyncContext.cpp",
+        "lib/NodeApi/NodeApiHost.cpp",
+    }) |src| {
+        const tu = b.addSystemCommand(&.{ ctx.zig_exe, "c++" });
+        tu.addArg("-target");
+        tu.addArg(profile_target);
+        tu.addArg("-std=gnu++17");
+        for ([_][]const u8{ "-O3", "-g", "-fPIC" }) |f| tu.addArg(f);
+        tu.addArg("-fvisibility=hidden");
+        tu.addArg("-DNAPI_VERSION=8");
+        tu.addArg("-Ilib/Jsrt");
+        tu.addArg("-Iinclude/nodeapi");
+        tu.addArg("-Ilib/NodeApi");
+        // Explicit-target zig cc searches only bundled headers; /usr/include
+        // is the system dir (engine §3 -isystem over -I: the full C library
+        // must not shadow the bundled headers). Honors -Dicu-include.
+        tu.addArg("-isystem");
+        tu.addArg(ctx.icu_include);
+        tu.addArg("-Wno-date-time");
+        tu.addArg("-o");
+        const out = tu.addOutputFileArg(b.fmt("{s}.o", .{std.fs.path.basename(src)}));
+        tu.addArg("-c");
+        tu.addFileArg(b.path(src));
+        prov_objs.append(arena, out) catch @panic("OOM");
+    }
+    const prov_link = b.addSystemCommand(&.{ctx.zig_exe});
+    prov_link.addArg("c++");
+    prov_link.addArg("-target");
+    prov_link.addArg(profile_target);
+    for ([_][]const u8{ "-fPIC", "-shared", "-Wl,-soname,libChakraNodeApi.so" }) |f| prov_link.addArg(f);
+    // Engine beside the provider (lib/); $ORIGIN is the ELF spelling of
+    // @rpath/@executable_path. The host adds $ORIGIN/../lib as well.
+    prov_link.addArg("-Wl,-rpath,$ORIGIN");
+    prov_link.addArg("-Wl,-rpath,$ORIGIN/../lib");
+    for (prov_objs.items) |o| prov_link.addFileArg(o);
+    prov_link.addFileArg(so_bin);
+    prov_link.addArg("-o");
+    const prov_so = prov_link.addOutputFileArg("libChakraNodeApi.so");
+    for ([_][]const u8{ "-lpthread", "-ldl" }) |f| prov_link.addArg(f);
+    prov_link.addArg("-Wl,--no-undefined");
+    prov_link.step.dependOn(&so_link.step);
+    install.dependOn(&b.addInstallFile(prov_so, "lib/libChakraNodeApi.so").step);
+    const prov_step = b.step("libChakraNodeApi", "Build libChakraNodeApi (N1.1 provider) linked against libChakraCore (Linux test profile; not part of the default build)");
+    prov_step.dependOn(&b.addInstallFile(prov_so, "lib/libChakraNodeApi.so").step);
+    for ([_][]const u8{ "js_native_api.h", "js_native_api_types.h", "node_api.h", "node_api_types.h" }) |hdr| {
+        prov_step.dependOn(&b.addInstallFile(
+            b.path(b.fmt("include/nodeapi/{s}", .{hdr})),
+            b.fmt("include/nodeapi/{s}", .{hdr}),
+        ).step);
+    }
+
+    // Node-API exports gate (N1.6/N5.5): same allowlist, mirrored step.
+    // Kept separate from `check` (PR-10): provider is additive code; its
+    // gate must not move gate_counts.json pins. Runs on Linux via the
+    // ELF fallback in check_nodeapi.py (nm -g --defined-only).
+    const exports_gen_check = b.addSystemCommand(&.{python});
+    exports_gen_check.addFileArg(b.path("tools/build/gen_nodeapi_exports.py"));
+    exports_gen_check.addArg("--check");
+    exports_gen_check.stdio = .inherit;
+    const exports_check = b.addSystemCommand(&.{python});
+    exports_check.addFileArg(b.path("tools/build/check_nodeapi.py"));
+    exports_check.addPrefixedFileArg("--dylib=", prov_so);
+    exports_check.addPrefixedFileArg("--exports=", b.path("tools/build/nodeapi_exports.txt"));
+    exports_check.addPrefixedFileArg("--inventory=", b.path("doc/node-api-inventory.md"));
+    exports_check.step.dependOn(&prov_link.step);
+    exports_check.step.dependOn(&exports_gen_check.step);
+    exports_check.stdio = .inherit;
+    const check_nodeapi_top = b.step("check-nodeapi", "Verify libChakraNodeApi exports exactly tools/build/nodeapi_exports.txt (full 145 + 5 = 150; not part of the default build or check)");
+    check_nodeapi_top.dependOn(&exports_gen_check.step);
+    check_nodeapi_top.dependOn(&exports_check.step);
+
+    // Node-API test host (N0.3), ELF mirror of the macOS ch-nodeapi step.
+    // ELF differences, each deliberate:
+    // * No -Wl,-undefined,dynamic_lookup: the host calls provider napi_*
+    //   directly for registration glue (open/create/close scope). Linking
+    //   the provider .so satisfies them at link time (DT_NEEDED) instead
+    //   of leaving them undefined for RTLD_GLOBAL resolution. Addons still
+    //   leave napi_* undefined (.so default) and resolve at dlopen.
+    // * RUNPATH is $ORIGIN (bin/ for the co-located libChakraCore.so)
+    //   plus $ORIGIN/../lib (provider + lib engine copy).
+    // * -pie matches the ch/GCStress links; -ldl/-lpthread cover
+    //   dlopen/dladdr/threads (glibc >= 2.34 merges them; harmless).
+    // NOT part of the default build; `zig build ch-nodeapi` on Linux.
+    const nodeapi_host = b.addSystemCommand(&.{ctx.zig_exe});
+    nodeapi_host.addArg("c++");
+    nodeapi_host.addArg("-target");
+    nodeapi_host.addArg(profile_target);
+    nodeapi_host.addArg("-std=gnu++17");
+    for ([_][]const u8{ "-O3", "-g", "-fPIE", "-pie" }) |f| nodeapi_host.addArg(f);
+    nodeapi_host.addArg("-DNAPI_VERSION=8");
+    nodeapi_host.addArg("-Ilib/Jsrt");
+    nodeapi_host.addArg("-Iinclude/nodeapi");
+    nodeapi_host.addArg("-Ilib/NodeApi");
+    nodeapi_host.addArg("-isystem");
+    nodeapi_host.addArg(ctx.icu_include);
+    nodeapi_host.addArg("-Wno-date-time");
+    nodeapi_host.addArg("-o");
+    const nodeapi_host_bin = nodeapi_host.addOutputFileArg("ch-nodeapi");
+    nodeapi_host.addFileArg(b.path("tools/nodeapi/ch-nodeapi.cpp"));
+    nodeapi_host.addFileArg(prov_so);
+    nodeapi_host.addFileArg(so_bin);
+    nodeapi_host.addArg("-Wl,-rpath,$ORIGIN");
+    nodeapi_host.addArg("-Wl,-rpath,$ORIGIN/../lib");
+    for ([_][]const u8{ "-ldl", "-lpthread" }) |f| nodeapi_host.addArg(f);
+    nodeapi_host.step.dependOn(&so_link.step);
+    nodeapi_host.step.dependOn(&prov_link.step);
+    const nodeapi_step = b.step("ch-nodeapi", "Build the Node-API test host (N0.3): ch-nodeapi + test-only stub provider + hello/negative addons (Linux test profile only; not part of the default build)");
+    nodeapi_step.dependOn(&b.addInstallFile(nodeapi_host_bin, "bin/ch-nodeapi").step);
+    nodeapi_step.dependOn(&b.addInstallFile(prov_so, "lib/libChakraNodeApi.so").step);
+    // Test-only stub provider. Same undefined-Js* shape as macOS: a .so
+    // may carry undefined Js* by default, resolved at dlopen from the
+    // engine already loaded by the host's DT_NEEDED. Links no engine.
+    const nodeapi_stub = b.addSystemCommand(&.{ctx.zig_exe});
+    nodeapi_stub.addArg("c++");
+    nodeapi_stub.addArg("-target");
+    nodeapi_stub.addArg(profile_target);
+    nodeapi_stub.addArg("-std=gnu++17");
+    for ([_][]const u8{ "-O3", "-g", "-fPIC", "-shared" }) |f| nodeapi_stub.addArg(f);
+    nodeapi_stub.addArg("-DNAPI_VERSION=8");
+    nodeapi_stub.addArg("-Ilib/Jsrt");
+    nodeapi_stub.addArg("-Iinclude/nodeapi");
+    nodeapi_stub.addArg("-Ilib/NodeApi");
+    nodeapi_stub.addArg("-isystem");
+    nodeapi_stub.addArg(ctx.icu_include);
+    nodeapi_stub.addArg("-Wno-date-time");
+    nodeapi_stub.addArg("-o");
+    const nodeapi_stub_bin = nodeapi_stub.addOutputFileArg("libChakraNodeApiStub.so");
+    nodeapi_stub.addFileArg(b.path("tools/nodeapi/stub/stub_provider.cpp"));
+    nodeapi_step.dependOn(&b.addInstallFile(nodeapi_stub_bin, "lib/libChakraNodeApiStub.so").step);
+    // Test addons (.node + .js drivers, NAPI_VERSION=8). Undefined napi_*
+    // by default (.so), resolved at dlopen from the provider.
+    for ([_][]const u8{ "hello_world", "version_reject", "missing_register", "promise_probe", "return_replaces" }) |name| {
+        const addon = b.addSystemCommand(&.{ctx.zig_exe});
+        addon.addArg("c++");
+        addon.addArg("-target");
+        addon.addArg(profile_target);
+        addon.addArg("-std=gnu++17");
+        for ([_][]const u8{ "-O3", "-g", "-fPIC", "-shared" }) |f| addon.addArg(f);
+        addon.addArg("-DNAPI_VERSION=8");
+        addon.addArg("-Iinclude/nodeapi");
+        addon.addArg("-o");
+        const addon_bin = addon.addOutputFileArg(b.fmt("{s}.node", .{name}));
+        addon.addFileArg(b.path(b.fmt("tools/nodeapi/addons/{s}.cpp", .{name})));
+        nodeapi_step.dependOn(&b.addInstallFile(addon_bin, b.fmt("lib/nodeapi-addons/{s}.node", .{name})).step);
+    }
+    for ([_][]const u8{ "hello_world", "promise_probe", "return_replaces" }) |name| {
+        nodeapi_step.dependOn(&b.addInstallFile(b.path(b.fmt("tools/nodeapi/addons/{s}.js", .{name})), b.fmt("lib/nodeapi-addons/{s}.js", .{name})).step);
+    }
+
     // Negative controls for the Linux gates (mirrors check-selftest).
     const selftest_top = b.step("check-selftest", "Negative controls for every Linux check gate (not part of the default build)");
     for ([_][]const u8{ "check_regression_linux.py", "check_smoke_linux.py", "check_metadata_linux.py", "check_native.py" }) |script| {

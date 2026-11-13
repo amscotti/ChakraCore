@@ -97,7 +97,9 @@ SHIMS_DIR = NODEAPI_TEST_DIR / "shims"
 HEADERS_INC = REPO_ROOT / "include" / "nodeapi"
 HOST_CANDIDATES = [REPO_ROOT / "tools" / "nodeapi" / "ch-nodeapi",
                    REPO_ROOT / "zig-out" / "bin" / "ch-nodeapi"]
-PROVIDER_PATH = REPO_ROOT / "zig-out" / "lib" / "libChakraNodeApi.dylib"
+PROVIDER_PATH = (REPO_ROOT / "zig-out" / "lib" / "libChakraNodeApi.so"
+                 if sys.platform.startswith("linux")
+                 else REPO_ROOT / "zig-out" / "lib" / "libChakraNodeApi.dylib")
 RESULTS_DIR = NODEAPI_TEST_DIR / "results"
 DEFAULT_RESULTS = RESULTS_DIR / "node-addon-api.json"
 
@@ -508,19 +510,30 @@ def build_group(work_root: Path, work_test: Path, group: str, spec: dict,
     mini.parent.mkdir(parents=True, exist_ok=True)
     mini.write_text(mini_binding_source(spec.get("inits", [(spec.get("key"), spec.get("init"))])))
     sources = [str(work_test / s) for s in spec["sources"]] + [str(mini)]
-    target = "aarch64-macos.26.0"
-    sdk = subprocess.run(["xcrun", "--show-sdk-path"],
-                         capture_output=True, text=True).stdout.strip()
-    cxxflags = [
-        "c++", "-target", target, "--sysroot", sdk,
-        "-std=gnu++17", "-O2", "-fPIC", "-shared",
-        f"-DNAPI_VERSION={NAPI_VERSION}",
-        "-DNODE_GYP_MODULE_NAME=addon",
-        f"-I{HEADERS_INC}", f"-I{work_test}",
-        f"-I{work_test / 'test' / 'common'}",
-    ]
-    if sys.platform == "darwin":
-        cxxflags += ["-undefined", "dynamic_lookup"]
+    if sys.platform.startswith("linux"):
+        cxxflags = [
+            "c++", "-target", "x86_64-linux-gnu",
+            "-std=gnu++17", "-O2", "-fPIC", "-shared",
+            f"-DNAPI_VERSION={NAPI_VERSION}",
+            "-DNODE_GYP_MODULE_NAME=addon",
+            f"-I{HEADERS_INC}", f"-I{work_test}",
+            f"-I{work_test / 'test' / 'common'}",
+            "-isystem", "/usr/include",
+        ]
+    else:
+        target = "aarch64-macos.26.0"
+        sdk = subprocess.run(["xcrun", "--show-sdk-path"],
+                             capture_output=True, text=True).stdout.strip()
+        cxxflags = [
+            "c++", "-target", target, "--sysroot", sdk,
+            "-std=gnu++17", "-O2", "-fPIC", "-shared",
+            f"-DNAPI_VERSION={NAPI_VERSION}",
+            "-DNODE_GYP_MODULE_NAME=addon",
+            f"-I{HEADERS_INC}", f"-I{work_test}",
+            f"-I{work_test / 'test' / 'common'}",
+        ]
+        if sys.platform == "darwin":
+            cxxflags += ["-undefined", "dynamic_lookup"]
     cmd = gate_lock_command("zig", *cxxflags, "-o", str(out_addon), *sources)
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True,
@@ -661,7 +674,7 @@ def main() -> int:
                 if host is None or provider is None:
                     rec.update(status="skip", reason=PROVIDER_GAP,
                                detail="ch-nodeapi host binary and/or "
-                                      "zig-out/lib/libChakraNodeApi.dylib "
+                                      "zig-out/lib/libChakraNodeApi.so (Linux) / .dylib (macOS) "
                                       "not found (build via gate-locked "
                                       "`zig build ch-nodeapi`)")
                 else:

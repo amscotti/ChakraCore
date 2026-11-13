@@ -4,7 +4,7 @@
 > the N5.5 packaging slice (owner: N5.5).
 
 Owner: N5.5. Status: **G5 packaging slice green on macOS arm64;
-Linux x64 NOT RUN** (see §6). This receipt satisfies the PR-1
+Linux x64 WIRED (2026-11-13, `tools/build/linux.zig`), NOT RUN** (see §12). This receipt satisfies the PR-1
 wording gate (PR-1 in `doc/node-api-plan.md` §2.2): the only public
 claim is the engine surface plus Table B under the §3.2 host
 contract. It never claims a Node runtime.
@@ -398,7 +398,7 @@ directly, outside the gate lock; the checked-in
 `node-direct` differential record, not a provider pass). Do not read
 that file as provider evidence.
 
-**Linux x64: NOT RUN — provider NOT WIRED in `tools/build/linux.zig`.**
+**Linux x64: WIRED, NOT RUN** (provider wired in `tools/build/linux.zig` on 2026-11-13; see §12. At landing it was NOT WIRED.)
 Verbatim status (a Mac arm64 run can never stand in for Linux, plan
 §7 rule 6):
 
@@ -1210,3 +1210,36 @@ per profile. All 14 probes green on `test` (jit runner note in §5
 above still applies to errors/host; isolated jit binaries verified
 passing). `zig build check` still 2053/0; js-native-api matrix still
 43/26/0; stress still ALL PASS.
+
+### 12. Linux x64 wiring (2026-11-13; WIRED, NOT RUN)
+
+`tools/build/linux.zig` now builds the provider test-host stack on the
+native x86_64 Linux test profile (same 16 TUs, same allowlist, same
+NAPI_VERSION=8; ELF spellings only — `-fPIC/-shared/-Wl,-soname`,
+`$ORIGIN` RUNPATH, `--no-undefined` for the provider). Steps (test only;
+Linux has no jit profile step):
+
+- `zig build libChakraNodeApi` → `lib/libChakraNodeApi.so` +
+  `include/nodeapi/*.h` (4 vendored headers)
+- `zig build check-nodeapi` → `--check` + ELF `nm -g --defined-only`
+  comparison (exact 150; runtime operator new/delete filtered, as on Mac)
+- `zig build ch-nodeapi` → `bin/ch-nodeapi` (linked to engine + provider
+  `.so` via DT_NEEDED — no `-undefined dynamic_lookup` on ELF; addons
+  still leave `napi_*` undefined and resolve at `dlopen`) +
+  `lib/libChakraNodeApiStub.so` + `lib/nodeapi-addons/{hello_world,
+  version_reject, missing_register, promise_probe, return_replaces}.node/.js`
+
+Test runners are platform-branched (`linux` vs `darwin` in `run_*.sh`,
+`run_stress.sh`, `run_node_addon_api_matrix.py`; `run_matrix.py` was
+already Linux-ready except the NAA provider `.so` path, now branched).
+Linux runs the `test` leg only — there is no Linux `-Dprofile=jit`
+slot in the drivers; the jit wording in runner echoes is retained for
+macOS only.
+
+**Linux x64: NOT RUN.** No Linux artifact has been built or executed
+here (this host is macOS ARM64; per plan §7 rule 6 a Mac run can never
+stand in for Linux). `zig fmt` parses the Linux graph and macOS
+builds/tests are unaffected (the Linux import is comptime-gated on
+`builtin.os.tag == .linux`). Native validation (provider/host builds,
+probes, matrices) is deferred to the Linux host. Until then every
+Linux claim in this receipt remains unproven.

@@ -23,17 +23,32 @@ cd "$REPO"
 GATE=${CC_GATE_LOCK:-/tmp/opencode/cc-gate-lock.sh}
 REPEATS=${REPEATS:-10}
 
-TARGET="aarch64-macos.26.0"
-SDK=$(xcrun --show-sdk-path 2>/dev/null || true)
-if [ -z "$SDK" ]; then
-  echo "run_stress: cannot locate macOS SDK (xcrun failed)" >&2
-  exit 1
+# Platform branch (Linux x86_64 mirror; test leg only, no jit on Linux).
+if [ "$(uname -s)" = "Linux" ]; then
+  TARGET="x86_64-linux-gnu"
+  SDK=""
+  ENGINE_NAME="libChakraCore.so"
+  ENGINE_TEST="zig-out/bin/libChakraCore.so"
+  PROVIDER_NAME="libChakraNodeApi.so"
+  LINK_SYSTEM="-ldl -lpthread"
+  RPATH_FLAG="-Wl,-rpath,\$ORIGIN"
+  CXXFLAGS="-target $TARGET -std=gnu++17 -O3 -g -Wno-date-time -DNAPI_VERSION=8 -DCHAKRA_NODEAPI_TEST_HOOKS -Ilib/Jsrt -Iinclude/nodeapi -Ilib/NodeApi -isystem /usr/include"
+  ADDON_FLAGS="-target $TARGET -std=gnu++17 -O3 -g -Wno-date-time -DNAPI_VERSION=8 -fPIC -shared -Iinclude/nodeapi -Ilib/Jsrt -isystem /usr/include"
+else
+  TARGET="aarch64-macos.26.0"
+  SDK=$(xcrun --show-sdk-path 2>/dev/null || true)
+  if [ -z "$SDK" ]; then
+    echo "run_stress: cannot locate macOS SDK (xcrun failed)" >&2
+    exit 1
+  fi
+  ENGINE_NAME="libChakraCore.dylib"
+  ENGINE_TEST="zig-out/bin/libChakraCore.dylib"
+  PROVIDER_NAME="libChakraNodeApi.dylib"
+  LINK_SYSTEM="-framework CoreFoundation -framework Security"
+  RPATH_FLAG="-Wl,-rpath,@executable_path"
+  CXXFLAGS="-target $TARGET --sysroot $SDK -std=gnu++17 -O3 -g -mcpu=apple_m1 -Wno-date-time -DNAPI_VERSION=8 -DCHAKRA_NODEAPI_TEST_HOOKS -Ilib/Jsrt -Iinclude/nodeapi -Ilib/NodeApi -isystem $SDK/usr/include -F/System/Library/Frameworks"
+  ADDON_FLAGS="-target $TARGET --sysroot $SDK -std=gnu++17 -O3 -g -mcpu=apple_m1 -Wno-date-time -DNAPI_VERSION=8 -fPIC -shared -Iinclude/nodeapi -Ilib/Jsrt -isystem $SDK/usr/include -F/System/Library/Frameworks -Wl,-undefined,dynamic_lookup"
 fi
-
-CXXFLAGS="-target $TARGET --sysroot $SDK -std=gnu++17 -O3 -g -mcpu=apple_m1 -Wno-date-time \
-  -DNAPI_VERSION=8 -DCHAKRA_NODEAPI_TEST_HOOKS \
-  -Ilib/Jsrt -Iinclude/nodeapi -Ilib/NodeApi \
-  -isystem $SDK/usr/include -F/System/Library/Frameworks"
 
 PROVIDER_TUS="
   lib/NodeApi/NodeApiEnv.cpp
@@ -58,10 +73,10 @@ run_probe() {
   # $1 probe cpp, $2 engine lib, $3 out bin, $4 label
   # shellcheck disable=SC2086
   "$GATE" mise exec -- zig c++ $CXXFLAGS $PROVIDER_TUS "$1" "$2" \
-    -framework CoreFoundation -framework Security \
-    -Wl,-rpath,@executable_path \
+    $LINK_SYSTEM \
+    $RPATH_FLAG \
     -o "$3"
-  cp "$2" "$(dirname "$3")/libChakraCore.dylib"
+  cp "$2" "$(dirname "$3")/$ENGINE_NAME"
 }
 
 run_repeated() {
@@ -82,14 +97,23 @@ if [ "${SKIP_BUILD:-0}" != "1" ]; then
   echo "===== building test-profile engine + provider ====="
   "$GATE" mise exec -- zig build libChakraNodeApi
   "$GATE" mise exec -- zig build ch-nodeapi
-  echo "===== building jit-profile engine + provider ====="
-  "$GATE" mise exec -- zig build -Dprofile=jit libChakraNodeApi
+  if [ "$(uname -s)" != "Linux" ]; then
+    echo "===== building jit-profile engine + provider ====="
+    "$GATE" mise exec -- zig build -Dprofile=jit libChakraNodeApi
+  else
+    echo "===== linux: jit profile does not exist; test leg only ====="
+  fi
 fi
 
 rc=0
 
 echo "############ gc_churn_stress ############"
-for pair in "test:$REPO/zig-out/bin/libChakraCore.dylib" "jit:$REPO/out/jit/bin/libChakraCore.dylib"; do
+if [ "$(uname -s)" = "Linux" ]; then
+  PAIRS="test:$REPO/$ENGINE_TEST"
+else
+  PAIRS="test:$REPO/zig-out/bin/libChakraCore.dylib jit:$REPO/out/jit/bin/libChakraCore.dylib"
+fi
+for pair in $PAIRS; do
   prof=${pair%%:*}
   eng=${pair#*:}
   if [ ! -f "$eng" ]; then
@@ -103,7 +127,12 @@ for pair in "test:$REPO/zig-out/bin/libChakraCore.dylib" "jit:$REPO/out/jit/bin/
 done
 
 echo "############ env_churn_stress ############"
-for pair in "test:$REPO/zig-out/bin/libChakraCore.dylib" "jit:$REPO/out/jit/bin/libChakraCore.dylib"; do
+if [ "$(uname -s)" = "Linux" ]; then
+  PAIRS="test:$REPO/$ENGINE_TEST"
+else
+  PAIRS="test:$REPO/zig-out/bin/libChakraCore.dylib jit:$REPO/out/jit/bin/libChakraCore.dylib"
+fi
+for pair in $PAIRS; do
   prof=${pair%%:*}
   eng=${pair#*:}
   if [ ! -f "$eng" ]; then
@@ -117,7 +146,12 @@ for pair in "test:$REPO/zig-out/bin/libChakraCore.dylib" "jit:$REPO/out/jit/bin/
 done
 
 echo "############ tsfn_teardown_stress ############"
-for pair in "test:$REPO/zig-out/bin/libChakraCore.dylib" "jit:$REPO/out/jit/bin/libChakraCore.dylib"; do
+if [ "$(uname -s)" = "Linux" ]; then
+  PAIRS="test:$REPO/$ENGINE_TEST"
+else
+  PAIRS="test:$REPO/zig-out/bin/libChakraCore.dylib jit:$REPO/out/jit/bin/libChakraCore.dylib"
+fi
+for pair in $PAIRS; do
   prof=${pair%%:*}
   eng=${pair#*:}
   if [ ! -f "$eng" ]; then
@@ -135,19 +169,14 @@ echo "############ ch-nodeapi gc-hook proof ############"
 # addon is built on demand (not part of `zig build ch-nodeapi`) and
 # linked with undefined napi_* (resolved from the provider RTLD_GLOBAL).
 HOST="$REPO/zig-out/bin/ch-nodeapi"
-PROV="$REPO/zig-out/lib/libChakraNodeApi.dylib"
+PROV="$REPO/zig-out/lib/$PROVIDER_NAME"
 if [ ! -f "$HOST" ] || [ ! -f "$PROV" ]; then
   echo "run_stress: ch-nodeapi/provider missing (build without SKIP_BUILD)" >&2
   rc=1
 else
-  "$GATE" mise exec -- zig c++ \
-    -target "$TARGET" --sysroot "$SDK" -std=gnu++17 -O3 -g -mcpu=apple_m1 \
-    -Wno-date-time -DNAPI_VERSION=8 -fPIC -shared \
-    -Iinclude/nodeapi -Ilib/Jsrt \
-    -isystem "$SDK/usr/include" -F/System/Library/Frameworks \
+  "$GATE" mise exec -- zig c++ $ADDON_FLAGS \
     test/nodeapi/stress/gc_hook_addon.cpp \
-    -Wl,-undefined,dynamic_lookup \
-    -framework CoreFoundation -framework Security \
+    $LINK_SYSTEM \
     -o "$WORK/gc_hook_addon.node"
   i=1
   while [ "$i" -le "$REPEATS" ]; do
@@ -162,4 +191,4 @@ if [ "$rc" -ne 0 ]; then
   echo "run_stress: FAILED (see output above)" >&2
   exit 1
 fi
-echo "run_stress: ALL PASS (test + jit, ${REPEATS} repeats each)"
+if [ "$(uname -s)" = "Linux" ]; then echo "run_stress: ALL PASS (test, ${REPEATS} repeats)"; else echo "run_stress: ALL PASS (test + jit, ${REPEATS} repeats each)"; fi

@@ -31,22 +31,31 @@ cd "$REPO"
 
 GATE=${CC_GATE_LOCK:-/tmp/opencode/cc-gate-lock.sh}
 
-TARGET="aarch64-macos.26.0"
-SDK=$(xcrun --show-sdk-path 2>/dev/null || true)
-if [ -z "$SDK" ]; then
-  echo "run_coerce_probe: cannot locate macOS SDK (xcrun failed)" >&2
-  exit 1
+# Platform branch (Linux x86_64 mirror of the macOS ARM64 shape).
+# Linux: test profile only (tools/build/linux.zig has no jit);
+# the jit leg below is skipped on Linux. Flags mirror linux.zig's
+# provider/host compiles (ELF spellings: no sysroot/mcpu/frameworks).
+if [ "$(uname -s)" = "Linux" ]; then
+  TARGET="x86_64-linux-gnu"
+  SDK=""
+  ENGINE_NAME="libChakraCore.so"
+  ENGINE_TEST="zig-out/bin/libChakraCore.so"
+  LINK_SYSTEM="-ldl -lpthread"
+  RPATH_FLAG="-Wl,-rpath,\$ORIGIN"
+  CXXFLAGS="-target $TARGET -std=gnu++17 -O3 -g -Wno-date-time -DNAPI_VERSION=8 -DCHAKRA_NODEAPI_TEST_HOOKS -Ilib/Jsrt -Iinclude/nodeapi -Ilib/NodeApi -isystem /usr/include"
+else
+  TARGET="aarch64-macos.26.0"
+  SDK=$(xcrun --show-sdk-path 2>/dev/null || true)
+  if [ -z "$SDK" ]; then
+    echo "run_coerce_probe: cannot locate macOS SDK (xcrun failed)" >&2
+    exit 1
+  fi
+  ENGINE_NAME="libChakraCore.dylib"
+  ENGINE_TEST="zig-out/bin/libChakraCore.dylib"
+  LINK_SYSTEM="-framework CoreFoundation -framework Security"
+  RPATH_FLAG="-Wl,-rpath,@executable_path"
+  CXXFLAGS="-target $TARGET --sysroot $SDK -std=gnu++17 -O3 -g -mcpu=apple_m1 -Wno-date-time -DNAPI_VERSION=8 -DCHAKRA_NODEAPI_TEST_HOOKS -Ilib/Jsrt -Iinclude/nodeapi -Ilib/NodeApi -isystem $SDK/usr/include -F/System/Library/Frameworks"
 fi
-
-# Mirror of build.zig's ch-nodeapi compile/link flags (test profile values):
-# -std=gnu++17 -DNAPI_VERSION=8 -mcpu=apple_m1, includes lib/Jsrt +
-# include/nodeapi + lib/NodeApi. Probe adds -DCHAKRA_NODEAPI_TEST_HOOKS
-# (R-REF-14 root counter) so the counter exists; it is never exported
-# from release libChakraNodeApi (N1.6 inventory).
-CXXFLAGS="-target $TARGET --sysroot $SDK -std=gnu++17 -O3 -g -mcpu=apple_m1 -Wno-date-time \
-  -DNAPI_VERSION=8 -DCHAKRA_NODEAPI_TEST_HOOKS \
-  -Ilib/Jsrt -Iinclude/nodeapi -Ilib/NodeApi \
-  -isystem $SDK/usr/include -F/System/Library/Frameworks"
 
 run_profile() {
   profile="$1"
@@ -76,11 +85,11 @@ run_profile() {
     lib/NodeApi/NodeApiErrorsImpl.cpp \
     test/nodeapi/probes/coerce_probe.cpp \
     "$engine_lib" \
-    -framework CoreFoundation -framework Security \
-    -Wl,-rpath,@executable_path \
+    $LINK_SYSTEM \
+    $RPATH_FLAG \
     -o "$out_bin"
   # Co-locate the engine dylib with the probe binary (@rpath).
-  cp "$engine_lib" "$(dirname "$out_bin")/libChakraCore.dylib"
+  cp "$engine_lib" "$(dirname "$out_bin")/$ENGINE_NAME"
   "$out_bin"
 }
 
@@ -91,16 +100,22 @@ trap 'rm -rf "$WORK"' EXIT
 if [ "${SKIP_BUILD:-0}" != "1" ]; then
   echo "===== building test-profile engine (zig build libChakraNodeApi) ====="
   "$GATE" mise exec -- zig build libChakraNodeApi
-  echo "===== building jit-profile engine (zig build -Dprofile=jit libChakraNodeApi) ====="
-  "$GATE" mise exec -- zig build -Dprofile=jit libChakraNodeApi
+  if [ "$(uname -s)" != "Linux" ]; then
+    echo "===== building jit-profile engine (zig build -Dprofile=jit libChakraNodeApi) ====="
+    "$GATE" mise exec -- zig build -Dprofile=jit libChakraNodeApi
+  else
+    echo "===== linux: jit profile does not exist; test leg only ====="
+  fi
 fi
 
 rc=0
-run_profile "test" "$REPO/zig-out/bin/libChakraCore.dylib" "$WORK/coerce-probe-test" || rc=$?
-run_profile "jit" "$REPO/out/jit/bin/libChakraCore.dylib" "$WORK/coerce-probe-jit" || rc=$?
+run_profile "test" "$REPO/$ENGINE_TEST" "$WORK/coerce-probe-test" || rc=$?
+if [ "$(uname -s)" != "Linux" ]; then
+  run_profile "jit" "$REPO/out/jit/bin/libChakraCore.dylib" "$WORK/coerce-probe-jit" || rc=$?
+fi
 
 if [ $rc -ne 0 ]; then
   echo "run_coerce_probe: FAILED (see output above)" >&2
   exit 1
 fi
-echo "run_coerce_probe: ALL PASS (test + jit)"
+if [ "$(uname -s)" = "Linux" ]; then echo "run_coerce_probe: ALL PASS (test)"; else echo "run_coerce_probe: ALL PASS (test + jit)"; fi

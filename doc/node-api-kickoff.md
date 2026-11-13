@@ -106,8 +106,10 @@ must not touch them; provider tests use their own build step).
 - Implementation: **G0–G5 complete on macOS arm64** (2026-11-13).
   Provider `libChakraNodeApi` committed (f50b390d3) + conformance/
   probes/receipts (b18392821). js-native-api 43/26/0, gate 2053/0,
-  probes 3117/profile, stress ALL PASS. Linux x64 NOT RUN (provider
-  not wired in `tools/build/linux.zig`; not claimed).
+  probes 3117/profile, stress ALL PASS. Linux x64 WIRED
+  (`tools/build/linux.zig` provider/host/check-nodeapi steps,
+  platform-branched runners), NOT RUN — no native execution yet
+  (testing deferred to the Linux host; not claimed).
 - PR-1…PR-12 closed as recorded in plan §2.2 (C++ through v1 per
   PR-4; Zig re-evaluation only after G5 with fresh spike).
 - **PR-4 decision 2026-11-11 (plan §2.1 D5): C++ through provider v1
