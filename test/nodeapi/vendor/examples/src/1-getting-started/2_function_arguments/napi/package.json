@@ -1,0 +1,14 @@
+{
+  "name": "function_arguments_napi",
+  "version": "0.0.0",
+  "description": "Node.js Addons Example #2",
+  "main": "addon.js",
+  "private": true,
+  "dependencies": {
+    "bindings": "~1.5.0"
+  },
+  "scripts": {
+    "test": "node addon.js"
+  },
+  "gypfile": true
+}

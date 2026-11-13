@@ -106,3 +106,7 @@ must not touch them; provider tests use their own build step).
 - Implementation: **not started**. Wave 0 is the entry point.
 - Known open decisions: PR-1…PR-12 (recommendations recorded in the
   plan; step 1 above closes them).
+- **PR-4 decision 2026-11-11 (plan §2.1 D5): C++ through provider v1
+  if G5 passes; Zig re-evaluation after G5.** Wave 1 provider is C++17
+  (ABI-identical to Zig); do not port before G5 without a new decision
+  record.

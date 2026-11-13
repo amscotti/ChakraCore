@@ -215,7 +215,7 @@ success; publish pass/skip/todo counts, never bare pass rates.
 | D2 | `napi_value` **is** `JsValueRef` (direct cast), under conditions §3.4. No wrapper allocation per value. |
 | D3 | All provider-created JS functions use `JsCreateEnhancedFunction`; the callback thunk is §3.8. Plain `JsCreateFunction` is not used for N-API callbacks. |
 | D4 | User finalizers **never run inside a GC callback**. GC-side code only enqueues; finalizers drain on the env thread at defined points (§3.7). |
-| D5 | Implementation language: **Zig 0.17** (per zig-strategy wedge #1), proven by spike N0.2; if the spike fails its criteria, fall back to C++ by decision record amending this plan — a task may not silently switch languages. |
+| D5 | Implementation language: **Zig 0.17** (per zig-strategy wedge #1), proven by spike N0.2; if the spike fails its criteria, fall back to C++ by decision record amending this plan — a task may not silently switch languages. **Decision record 2026-11-11 (PR-4): C++ through provider v1 if G5 passes, Zig re-evaluation after (see §10).** Wave 1 (`lib/NodeApi/NodeApiEnv.*`, `NodeApiScopes.*`, `NodeApiRefs.*`, `NodeApiLifetime.*`) is C++17 behind the same C ABI (ABI-identical to a Zig port); porting now would churn the landed kernel for no ABI gain before G1. Rationale: no N0.2 Zig spike evidence for the provider surface exists, C++ is table-stakes for the JsRT C-API call sites, and the C surface is language-agnostic. Re-evaluate a Zig port only from G5 evidence with a fresh spike; a port before G5 needs its own decision record. This amends D5 per its own fallback clause and closes PR-4. **Amendment 2026-11-12 (Wave-2 review, exception discipline): C++ exceptions stay ON (-std=gnu++17, no -fno-exceptions).** `-fno-exceptions` was probed and rejected: every provider TU uses try/catch for allocation OOM (`std::vector`/`string`/`new` throwing `bad_alloc`/`length_error`) because no C++ exception may cross the `extern "C"` napi_* boundary, and `-fno-exceptions` makes `try` a compile error (verified 2026-11-12: `cannot use 'try' with exceptions disabled`), so the one-flag option would force a full alloc-site refactor with no ABI gain (N0.2 rationale: C ABI identical either way, so the flag buys no Zig-port argument). Discipline: throws originate only from C++ allocation/library code inside a TU; every `extern "C"` entry that can allocate or invoke user callbacks catches `(...)` and maps to `napi_generic_failure` with a recorded last_error, preserving any pending JS exception. |
 | D6 | Shared-code edits (anything outside the new provider/test dirs) must be arch- and behavior-neutral for existing platforms, or gated, and must say which in the change description. |
 | D7 | Unsupported or host-less functions return `napi_generic_failure` with a recorded last-error message. Missing symbols, silent no-ops, and fake success are defects. |
 | D8 | No string `eval` of provider-generated code for missing engine features. Approved intrinsic-call paths (calling `Object.freeze`, `Symbol.for`, `BigInt(...)` etc. via `JsCallFunction`) are allowed and specified per task; compiling a fixed internal helper snippet at env creation is allowed only where a task says so. |
@@ -471,10 +471,20 @@ On invocation the thunk:
    A pending JS exception after the callback propagates as the
    function's exception (status handling per §3.10).
 
-Function `length`: JsRT has no arity parameter. After creation, the
-provider defines the function's `length` property to the requested
-value (configurable per JS semantics) in N2.4; verify against the
-vendored function tests.
+Function names and `length`: the `length` parameter of
+`napi_create_function` / `napi_define_class` is the UTF-8 **name**
+length in bytes (or `NAPI_AUTO_LENGTH`), not a function arity.
+Upstream Node proves this: vendored
+`test_function/test_function.c` creates
+`napi_create_function(env, "Name_extra", 5, ...)` and
+`test_function/test.js` asserts `fn.name === 'Name_'`
+(truncation), with no `Function.length` arity assertion
+(`src/js_native_api_v8.cc` uses `length` only to build the name
+string; V8 `Function::New` defaults `Function.length` to 0).
+The provider therefore truncates the name per `length` and
+defines `Function.length` to the V8 default 0 via a real
+descriptor (N2.4); `Function.length` is never set to the
+`napi` `length` value.
 
 ### 3.9 Buffers (PR-6 design)
 
@@ -558,7 +568,7 @@ implement them. SyntaxError creation/throw is likewise v9
 | Date create/read/is-date | Global `Date` constructor + `getTime` + `instanceof` intrinsic calls (N2.6) | JsRT date export lane |
 | Detached query | Investigate `JsGetArrayBufferStorage` behavior on detached buffers in N3.1; JS `ArrayBuffer.prototype.detached` getter if present | JsRT `JsIsDetachedArrayBuffer` export lane |
 | Freeze/seal | `Object.freeze`/`Object.seal` intrinsic calls (N2.3) | — (intrinsic calls are semantically exact) |
-| Function `length` | Post-create property define (N2.4), verified by tests | — |
+| Function `length` | `napi_create_function` `length` is the UTF-8 **name** length (not arity); `Function.length` stays V8 default 0 via post-create define to 0 (N2.4), per vendored `test_function` (`"Name_extra",5` ⇒ `name === 'Name_'`) | — |
 | Wrap/finalizer on arbitrary objects, env-thread exactly-once | Side table + before-collect trampoline + drain queue (N3.3) | JsRT weak-cell export lane — **stop-and-escalate**, do not heuristic around it |
 | BigInt64/BigUint64 typed arrays | `napi_generic_failure` + recorded non-conformance (N3.1) | JsRT `JsTypedArrayType` extension lane |
 | Weak `napi_ref` (count 0) | `JsCreateWeakReference` (N1.3) | — (API exists; semantics verified by test_reference) |
@@ -950,14 +960,18 @@ provider on macOS arm64, and N1.2–N1.4 probes are green.
   in/out argc (return required argc when argv too small, per header
   docs); `napi_call_function` (this = argv convention translated to
   JsRT's arguments[0]=this); `napi_new_instance` via
-  `JsConstructObject`; function `length` via post-create define;
+  `JsConstructObject`; names: `napi_create_function` `length` is the
+  UTF-8 name length, `Function.length` stays V8 default 0 (post-create
+  define to 0, per vendored `test_function` `"Name_extra",5` ⇒
+  `name === 'Name_'`);
   `napi_define_class` = enhanced ctor + property definition split by
   `napi_static` between constructor and prototype.
 - **Done when:** probes: pass-arguments (argc/argv/this/data),
   construct call with `new.target` from `Reflect.construct`
   (≠ callee case), nested native→JS→native callback with record
   restore, callback throwing ⇒ pending exception at the JS caller,
-  `length` correct for arities 0..5.
+  `Function.name` truncated per name-lengths 0..5 and
+  `Function.length === 0` (V8 default, not arity).
 - **Prove:** probes + `bin/NativeTests/JsRTApiTest.cpp` semantics
   cross-checked (argument layout oracle).
 - **Ownership:** required — thunk records (owned by the function's
@@ -1361,6 +1375,11 @@ its lane; skip lists are data with reasons, reviewed at each gate.
   weak-cell finalizer delivery — each filed from §4.3 evidence.
 - **A Node runtime on ChakraCore** (§0 C): separate project; this
   plan's provider is a prerequisite, not a down payment claim.
+- **Zig provider port (PR-4 / D5 decision record 2026-11-11)**:
+  re-evaluate a Zig port of `libChakraNodeApi` only after G5 passes
+  in C++; the C ABI is identical, so this is a mechanical port gated
+  on fresh spike evidence (compile friction, header translation,
+  link/run), not part of this plan's gates.
 
 ## 11. Status tracker
 

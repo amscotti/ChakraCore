@@ -1,0 +1,6 @@
+# Generated outputs (plan §7: generated files never land in the source tree).
+results/
+build/
+*.node
+*.dylib
+*.so
