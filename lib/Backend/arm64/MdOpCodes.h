@@ -136,3 +136,21 @@ MACRO(FSUB,        Reg3,      0,              UNUSED,   LEGAL_REG3,     UNUSED, 
 MACRO(FSQRT,       Reg2,      0,              UNUSED,   LEGAL_REG2,     UNUSED,   D___)
 MACRO(FSTR,        Reg2,      0,              UNUSED,   LEGAL_STORE,    UNUSED,   DS__)
 MACRO(FSTP,        Reg2,      0,              UNUSED,   LEGAL_STOREP,   UNUSED,   DS__)
+
+// W8-NEON slice 1 vector ops (128-bit Q). Appended after FSTP to preserve
+// existing MD opcode values.
+MACRO(MOVQ,        Reg2,       0,              UNUSED,   LEGAL_REG2,     UNUSED,   DM__)
+MACRO(STPQ,        Reg3,       0,              UNUSED,   LEGAL_STOREP,   UNUSED,   DS__)
+MACRO(LDPQ,        Reg3,       0,              UNUSED,   LEGAL_LOADP,    UNUSED,   DL__)
+MACRO(PAND,        Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)
+MACRO(POR,         Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)
+MACRO(PXOR,        Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)
+MACRO(PADDD,       Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)
+MACRO(PSUBD,       Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)
+MACRO(PADDQ,       Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)
+MACRO(PSUBQ,       Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)
+MACRO(ADDPS,       Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)
+MACRO(SUBPS,       Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)
+MACRO(MULPS,       Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)
+MACRO(DIVPS,       Reg3,       0,              UNUSED,   LEGAL_REG3,     UNUSED,   D___)
+MACRO(SQRTPS,      Reg2,       0,              UNUSED,   LEGAL_REG2,     UNUSED,   D___)

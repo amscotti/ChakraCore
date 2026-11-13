@@ -15,6 +15,11 @@ private:
     Func      * func;
     uint32      maxOpHelperSpilledLiveranges;
     StackSym   *vfpSymTable[VFP_REGCOUNT];
+    // W8-NEON slice 1: 16-byte spill slots for Q regs (typed by operand
+    // IsSimd128, same register file as D; see Reg.h). Beside vfpSymTable so
+    // a float64 value spilled from D0 and a 16-byte value spilled from Q0 do
+    // not share a slot width.
+    StackSym   *simdSymTable[SIMD_REGCOUNT];
 
 public:
     LinearScanMD(Func *func);
@@ -40,6 +45,9 @@ public:
     }
 
     StackSym   *EnsureSpillSymForVFPReg(RegNum reg, Func *func);
+    // 16-byte spill for a SIMD value in a Q register. `type` is the
+    // operand IRType (IsSimd128); the slot is 16-byte typed.
+    StackSym   *EnsureSpillSymForSimdReg(RegNum reg, Func *func, IRType type);
 
     void        LegalizeDef(IR::Instr * instr);
     void        LegalizeUse(IR::Instr * instr, IR::Opnd * opnd);

@@ -30,6 +30,7 @@ public:
 
     LowererMD(Func *func) :
         m_func(func),
+        m_simd128OpCodesMap(nullptr),
         helperCallArgsCount(0),
         helperCallDoubleArgsCount(0)
     {
@@ -87,6 +88,19 @@ public:
             IR::Instr *     LoadArgumentsFromFrame(IR::Instr * instr);
             IR::Instr *     LowerRet(IR::Instr * instr);
             IR::Instr *     LowerCondBranch(IR::Instr * instr);
+            // W8-NEON slice 1: NEON-native SIMD lowering (slice-1 opcodes only).
+            // Any other Simd128 opcode fails safe via FailFast, never miscompiles.
+            // Loads/stores (LdArr/StArr 16B) are part of slice 1 because every
+            // wasm.simd test needs them; they lower to Q MOVQ via bounds-checked paths.
+            void                Simd128InitOpcodeMap();
+            IR::Instr *         Simd128Instruction(IR::Instr * instr);
+            bool                Simd128TryLowerMappedInstruction(IR::Instr * instr);
+            IR::Instr *         Simd128LowerUnMappedInstruction(IR::Instr * instr);
+            IR::Instr *         Simd128LoadConst(IR::Instr * instr);
+            IR::Instr *         Simd128ConvertToLoad(IR::Opnd * dst, IR::Opnd * src, IR::Instr * instr);
+            IR::Instr *         Simd128ConvertToStore(IR::Opnd * dst, IR::Opnd * src, IR::Instr * instr);
+            IR::Instr *         Simd128AsmJsLowerLoadElem(IR::Instr * instr);
+            IR::Instr *         Simd128AsmJsLowerStoreElem(IR::Instr * instr);
             IR::Instr *     LoadFunctionObjectOpnd(IR::Instr *instr, IR::Opnd *&functionObjOpnd);
             IR::Instr *     GenerateSmIntPairTest(IR::Instr * instrInsert, IR::Opnd * opndSrc1, IR::Opnd * opndSrc2, IR::LabelInstr * labelFail);
 #if DBG
@@ -231,11 +245,17 @@ public:
             static RegNum       GetRegStackPointer() { return RegSP; }
             static RegNum       GetRegFramePointer() { return RegFP; }
 
-            static RegNum       GetRegReturn(IRType type) { return IRType_IsFloat(type) ? RegNOREG : RegR0; }
+            static RegNum       GetRegReturn(IRType type) { return (IRType_IsFloat(type) || IRType_IsSimd128(type)) ? (RegNum)RegQ0 : RegR0; }
+            // W8-NEON slice 1: AsmJs return uses Q0 for 128-bit (x64 XMM0 analogue).
+            static RegNum       GetRegReturnAsmJs(IRType type) { return (IRType_IsFloat(type) || IRType_IsSimd128(type)) ? (RegNum)RegQ0 : RegR0; }
             static RegNum       GetRegArgI4(int32 argNum) { return RegNOREG; }
             static RegNum       GetRegArgR8(int32 argNum) { return RegNOREG; }
-            static Js::OpCode   GetLoadOp(IRType type) { return IRType_IsFloat(type) ? Js::OpCode::FLDR : Js::OpCode::LDR; }
-            static Js::OpCode   GetStoreOp(IRType type) { return IRType_IsFloat(type) ? Js::OpCode::FSTR : Js::OpCode::STR; }
+            static Js::OpCode   GetLoadOp(IRType type) { return IRType_IsSimd128(type) ? Js::OpCode::LDR : (IRType_IsFloat(type) ? Js::OpCode::FLDR : Js::OpCode::LDR); }
+            static Js::OpCode   GetStoreOp(IRType type) { return IRType_IsSimd128(type) ? Js::OpCode::STR : (IRType_IsFloat(type) ? Js::OpCode::FSTR : Js::OpCode::STR); }
+            // 128-bit assign is a Q move (MdOpCodes.h NEONMOV); scalar keeps FMOV/LD/ST.
+            static Js::OpCode   GetAssignOp(IRType type) { return IRType_IsSimd128(type) ? Js::OpCode::MOVQ : (IRType_IsFloat(type) ? Js::OpCode::FMOV : Js::OpCode::MOV); }
+            // Param/return Q regs (ABI: Q0-7 args, Q0 return; Q8-15 callee-saved).
+            static RegNum       GetRegSimdArg(int32 argNum) { return (argNum >= 0 && argNum < 8) ? (RegNum)(RegQ0 + argNum) : RegNOREG; }
 
             static BYTE         GetDefaultIndirScale()
             {
@@ -285,6 +305,8 @@ private:
 protected:
     Func *          m_func;
     Lowerer *       m_lowerer;
+    // W8-NEON slice 1 NEON opcode map (slice-1 MD opcodes only).
+    Js::OpCode *    m_simd128OpCodesMap;
 
     //
     // Support to load helper arguments.

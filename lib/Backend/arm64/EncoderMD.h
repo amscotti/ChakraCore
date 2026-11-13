@@ -3,6 +3,7 @@
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #include "ARM64Encoder.h"
+#include "ARM64NeonEncoder.h"
 #include "LegalizeMD.h"
 
 class Encoder;
@@ -248,6 +249,12 @@ private:
     template<typename _Emitter, typename _Emitter64> int EmitMovConstant(Arm64CodeEmitter &Emitter, IR::Instr* instr, _Emitter emitter, _Emitter64 emitter64);
     template<typename _Emitter, typename _Emitter64> int EmitBitfield(Arm64CodeEmitter &Emitter, IR::Instr *instr, _Emitter emitter, _Emitter64 emitter64);
     template<typename _Emitter, typename _Emitter64> int EmitConditionalSelect(Arm64CodeEmitter &Emitter, IR::Instr *instr, int condition, _Emitter emitter, _Emitter64 emitter64);
+
+    // W8-NEON slice 1 vector ops (128-bit Q)
+    static NEON_SIZE NeonSizeForSimdType(IRType type);
+    template<typename _Emitter> int EmitOp2NeonRegister(Arm64CodeEmitter &Emitter, IR::Instr *instr, _Emitter emitter, NEON_SIZE neonSize);
+    template<typename _Emitter> int EmitOp3NeonRegister(Arm64CodeEmitter &Emitter, IR::Instr *instr, _Emitter emitter, NEON_SIZE neonSize);
+    int EmitNeonMoveOrLoadStore(Arm64CodeEmitter &Emitter, IR::Instr *instr, bool isLoad);
 
     // Floating point instructions
     template<typename _Emitter> int EmitOp2FpRegister(Arm64CodeEmitter &Emitter, IR::Instr *instr, _Emitter emitter);

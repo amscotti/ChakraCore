@@ -27,6 +27,7 @@ LinearScanMD::Init(LinearScan *linearScan)
     }
 
     memset((void*)this->vfpSymTable, 0, sizeof(this->vfpSymTable));
+    memset((void*)this->simdSymTable, 0, sizeof(this->simdSymTable));
 }
 
 StackSym *
@@ -44,6 +45,27 @@ LinearScanMD::EnsureSpillSymForVFPReg(RegNum reg, Func *func)
 
         __analysis_assume(reg - RegD0 < VFP_REGCOUNT);
         this->vfpSymTable[reg - RegD0] = sym;
+    }
+
+    return sym;
+}
+
+StackSym *
+LinearScanMD::EnsureSpillSymForSimdReg(RegNum reg, Func *func, IRType type)
+{
+    Assert(REGNUM_ISQREG(reg));
+    Assert(IRType_IsSimd128(type));
+
+    __analysis_assume(reg - RegQ0 < SIMD_REGCOUNT);
+    StackSym *sym = this->simdSymTable[reg - RegQ0];
+
+    if (sym == nullptr)
+    {
+        sym = StackSym::New(type, func);
+        func->StackAllocate(sym, MachRegSimd128);
+
+        __analysis_assume(reg - RegQ0 < SIMD_REGCOUNT);
+        this->simdSymTable[reg - RegQ0] = sym;
     }
 
     return sym;
@@ -108,20 +130,49 @@ LinearScanMD::InsertOpHelperSpillsAndRestores(const OpHelperBlock& opHelperBlock
 
         if (RegTypes[opHelperSpilledLifetime.reg] == TyFloat64)
         {
-            IR::RegOpnd * regOpnd = IR::RegOpnd::New(nullptr, opHelperSpilledLifetime.reg, TyMachDouble, this->func);
-
-            if (!sym)
+            // W8-NEON slice 1: a SIMD-typed lifetime in a Q register
+            // (RegQn == RegDn, same hardware) spills as 16B via Q STR/LDR,
+            // a scalar float64 via FSTR/FLDR. The width is keyed off the
+            // operand IsSimd128 type (the Q range aliases D, see Reg.h) so
+            // the two tables stay separate.
+            IRType spillType = opHelperSpilledLifetime.lifetime->sym->GetType();
+            bool isSimd = IRType_IsSimd128(spillType) && REGNUM_ISQREG(opHelperSpilledLifetime.reg);
+            if (isSimd)
             {
-                sym = EnsureSpillSymForVFPReg(regOpnd->GetReg(), this->func);
+                IR::RegOpnd * regOpnd = IR::RegOpnd::New(nullptr, opHelperSpilledLifetime.reg, spillType, this->func);
+                if (!sym)
+                {
+                    sym = EnsureSpillSymForSimdReg(regOpnd->GetReg(), this->func, spillType);
+                }
+                IR::Instr * pushInstr = IR::Instr::New(Js::OpCode::STR, IR::SymOpnd::New(sym, spillType, this->func), regOpnd, this->func);
+                opHelperBlock.opHelperLabel->InsertAfter(pushInstr);
+                pushInstr->CopyNumber(opHelperBlock.opHelperLabel);
+                this->LegalizeDef(pushInstr);
+                if (opHelperSpilledLifetime.reload)
+                {
+                    IR::Instr * popInstr = IR::Instr::New(Js::OpCode::LDR, regOpnd, IR::SymOpnd::New(sym, spillType, this->func), this->func);
+                    opHelperBlock.opHelperEndInstr->InsertBefore(popInstr);
+                    popInstr->CopyNumber(opHelperBlock.opHelperEndInstr);
+                    this->LegalizeUse(popInstr, popInstr->GetSrc1());
+                }
             }
-            IR::Instr * pushInstr = IR::Instr::New(Js::OpCode::FSTR, IR::SymOpnd::New(sym, TyMachDouble, this->func), regOpnd, this->func);
-            opHelperBlock.opHelperLabel->InsertAfter(pushInstr);
-            pushInstr->CopyNumber(opHelperBlock.opHelperLabel);
-            if (opHelperSpilledLifetime.reload)
+            else
             {
-                IR::Instr * popInstr = IR::Instr::New(Js::OpCode::FLDR, regOpnd, IR::SymOpnd::New(sym, TyMachDouble, this->func), this->func);
-                opHelperBlock.opHelperEndInstr->InsertBefore(popInstr);
-                popInstr->CopyNumber(opHelperBlock.opHelperEndInstr);
+                IR::RegOpnd * regOpnd = IR::RegOpnd::New(nullptr, opHelperSpilledLifetime.reg, TyMachDouble, this->func);
+
+                if (!sym)
+                {
+                    sym = EnsureSpillSymForVFPReg(regOpnd->GetReg(), this->func);
+                }
+                IR::Instr * pushInstr = IR::Instr::New(Js::OpCode::FSTR, IR::SymOpnd::New(sym, TyMachDouble, this->func), regOpnd, this->func);
+                opHelperBlock.opHelperLabel->InsertAfter(pushInstr);
+                pushInstr->CopyNumber(opHelperBlock.opHelperLabel);
+                if (opHelperSpilledLifetime.reload)
+                {
+                    IR::Instr * popInstr = IR::Instr::New(Js::OpCode::FLDR, regOpnd, IR::SymOpnd::New(sym, TyMachDouble, this->func), this->func);
+                    opHelperBlock.opHelperEndInstr->InsertBefore(popInstr);
+                    popInstr->CopyNumber(opHelperBlock.opHelperEndInstr);
+                }
             }
         }
         else
@@ -225,27 +276,30 @@ LinearScanMD::GenerateBailOut(
     {
         // Load the register save space address for the specified register into the scratch register:
         //     ldimm SCRATCH_REG, regSaveSpace
+        // W8-NEON slice 1: float-file slots are strided (GetRegisterSaveIndex).
         LinearScan::InsertMove(
             IR::RegOpnd::New(nullptr, SCRATCH_REG, TyMachPtr, func),
-            IR::AddrOpnd::New(&registerSaveSpace[reg - 1], IR::AddrOpndKindDynamicMisc, func),
+            IR::AddrOpnd::New(&registerSaveSpace[GetRegisterSaveIndex(reg) - 1], IR::AddrOpndKindDynamicMisc, func),
             instr);
     };
 
     const auto SaveReg = [&](const RegNum reg)
     {
-        Assert(registerSaveSyms[reg - 1]);
+        Assert(registerSaveSyms[GetRegisterSaveIndex(reg) - 1]);
 
         //     LoadRegSaveSpaceIntoScratch(reg)
         //     mov  [SCRATCH_REG], reg
         LoadRegSaveSpaceIntoScratch(reg);
-        const IRType regType = RegTypes[reg];
+        // SIMD values need the 16-byte move, not the 8-byte float move.
+        IRType symType = registerSaveSyms[GetRegisterSaveIndex(reg) - 1]->GetType();
+        const IRType moveType = IRType_IsSimd128(symType) ? symType : RegTypes[reg];
         LinearScan::InsertMove(
             IR::IndirOpnd::New(
                 IR::RegOpnd::New(nullptr, SCRATCH_REG, TyMachPtr, func),
                 0,
-                regType,
+                moveType,
                 func),
-            IR::RegOpnd::New(registerSaveSyms[reg - 1], reg, regType, func),
+            IR::RegOpnd::New(registerSaveSyms[GetRegisterSaveIndex(reg) - 1], reg, moveType, func),
             instr);
     };
 
@@ -344,17 +398,42 @@ LinearScanMD::GenerateBailOut(
 
 uint LinearScanMD::GetRegisterSaveIndex(RegNum reg)
 {
+    // W8-NEON slice 1: Q/D registers hold up to 16 bytes (2 Js::Var slots),
+    // like x64 XMM. Stride 2 for the float file; int regs stride 1.
+    if (RegTypes[reg] == TyFloat64)
+    {
+        return (reg - RegD0) * (MachRegSimd128 / MachRegInt) + RegD0;
+    }
     return reg;
 }
 
 // static
 RegNum LinearScanMD::GetRegisterFromSaveIndex(uint offset)
 {
+    if (offset >= RegD0 && offset <= (RegD29 - RegD0) * (MachRegSimd128 / MachRegInt) + RegD0)
+    {
+        return (RegNum)((offset - RegD0) / (MachRegSimd128 / MachRegInt) + RegD0);
+    }
     return (RegNum)offset;
 }
 
 RegNum LinearScanMD::GetParamReg(IR::SymOpnd *symOpnd, Func *func)
 {
+    // W8-NEON slice 1: SIMD params use Q0-7 (alias D0-7), mirroring the
+    // AsmJs convention where float/SIMD params share the vector file.
+    if (func->GetJITFunctionBody()->IsAsmJsMode() && !func->IsLoopBody())
+    {
+        if (IRType_IsSimd(symOpnd->GetType()))
+        {
+            switch (symOpnd->m_sym->AsStackSym()->GetParamSlotNum())
+            {
+            case 1: return (RegNum)RegQ1;
+            case 2: return (RegNum)RegQ2;
+            case 3: return (RegNum)RegQ3;
+            default: return RegNOREG;
+            }
+        }
+    }
     /* TODO - Add ARM32 support according to register calling convention */
     return RegNOREG;
 }

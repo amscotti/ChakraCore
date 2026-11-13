@@ -93,6 +93,52 @@ REGDAT(D29,     d29,      NEONREG_D29,   TyFloat64,  0)
 //REGDAT(D30,     d30,      NEONREG_D30,   TyFloat64,  RA_CALLEESAVE)
 //REGDAT(D31,     d31,      NEONREG_D31,   TyFloat64,  RA_CALLEESAVE)
 
+// W8-NEON slice 1 Q registers (128-bit). NEONREG_Qn (ARM64Encoder.h:82) is
+// the same encode as NEONREG_Dn (same hardware vector register, wider view),
+// and Q0-31 as distinct RegNums would overflow the 64-bit BitVector
+// allocator (RegNumCount is 64). The Q class is therefore defined as aliases
+// to D (see Reg.h: RegQn = RegDn, TyFloat64 per x64 XMM precedent, Q8-15
+// callee-saved exactly as D8-15). The listing below documents the Q set for
+// grep/encoder parity; the RegNum/encode mappings live in Reg.h.
+// Q0  NEONREG_Q0  TyFloat64  caller-saved (alias RegD0)
+// Q1  NEONREG_Q1  TyFloat64  caller-saved (alias RegD1)
+// Q2  NEONREG_Q2  TyFloat64  caller-saved (alias RegD2)
+// Q3  NEONREG_Q3  TyFloat64  caller-saved (alias RegD3)
+// Q4  NEONREG_Q4  TyFloat64  caller-saved (alias RegD4)
+// Q5  NEONREG_Q5  TyFloat64  caller-saved (alias RegD5)
+// Q6  NEONREG_Q6  TyFloat64  caller-saved (alias RegD6)
+// Q7  NEONREG_Q7  TyFloat64  caller-saved (alias RegD7)
+// Q8  NEONREG_Q8  TyFloat64  callee-saved (alias RegD8)
+// Q9  NEONREG_Q9  TyFloat64  callee-saved (alias RegD9)
+// Q10 NEONREG_Q10 TyFloat64  callee-saved (alias RegD10)
+// Q11 NEONREG_Q11 TyFloat64  callee-saved (alias RegD11)
+// Q12 NEONREG_Q12 TyFloat64  callee-saved (alias RegD12)
+// Q13 NEONREG_Q13 TyFloat64  callee-saved (alias RegD13)
+// Q14 NEONREG_Q14 TyFloat64  callee-saved (alias RegD14)
+// Q15 NEONREG_Q15 TyFloat64  callee-saved (alias RegD15)
+// Q16 NEONREG_Q16 TyFloat64  caller-saved (alias RegD16)
+// Q17 NEONREG_Q17 TyFloat64  caller-saved (alias RegD17)
+// Q18 NEONREG_Q18 TyFloat64  caller-saved (alias RegD18)
+// Q19 NEONREG_Q19 TyFloat64  caller-saved (alias RegD19)
+// Q20 NEONREG_Q20 TyFloat64  caller-saved (alias RegD20)
+// Q21 NEONREG_Q21 TyFloat64  caller-saved (alias RegD21)
+// Q22 NEONREG_Q22 TyFloat64  caller-saved (alias RegD22)
+// Q23 NEONREG_Q23 TyFloat64  caller-saved (alias RegD23)
+// Q24 NEONREG_Q24 TyFloat64  caller-saved (alias RegD24)
+// Q25 NEONREG_Q25 TyFloat64  caller-saved (alias RegD25)
+// Q26 NEONREG_Q26 TyFloat64  caller-saved (alias RegD26)
+// Q27 NEONREG_Q27 TyFloat64  caller-saved (alias RegD27)
+// Q28 NEONREG_Q28 TyFloat64  caller-saved (alias RegD28)
+// Q29 NEONREG_Q29 TyFloat64  caller-saved (alias RegD29)
+// Q30 NEONREG_Q30 TyFloat64  caller-saved (alias RegD0; D30 excluded for BitVector limit)
+// Q31 NEONREG_Q31 TyFloat64  caller-saved (alias RegD1; D31 excluded for BitVector limit)
+#define FIRST_SIMD_ARG_REG RegQ0
+#define LAST_SIMD_REG RegQ29
+#define LAST_SIMD_REG_NUM 29
+#define FIRST_SIMD_CALLEE_SAVED_REG RegQ8
+#define LAST_SIMD_CALLEE_SAVED_REG RegQ15
+#define SIMD_REGCOUNT VFP_REGCOUNT
+
 // NOTE: Any ordering change in reg list or addition/deletion requires a corresponding update in SaveAllRegistersAndBailOut/SaveAllRegistersAndBranchBailOut
 
 #define FIRST_DOUBLE_ARG_REG RegD0

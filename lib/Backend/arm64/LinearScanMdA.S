@@ -34,23 +34,25 @@ NESTED_ENTRY _ZN12LinearScanMD26SaveAllRegistersAndBailOutEP13BailOutRecord, _TE
     stp x27, x28, [x17, #27*8]
     str fp, [x17, #29*8]
     ; skip lr, sp, zr
+    ; W8-NEON slice 1: Q regs are 16 bytes (stride 2 vars), matching
+    ; LinearScanMD::GetRegisterSaveIndex. Qn == Dn hardware, wider store.
     add x17, x17, #33*8
-    stp d0, d1, [x17, #0*8]
-    stp d2, d3, [x17, #2*8]
-    stp d4, d5, [x17, #4*8]
-    stp d6, d7, [x17, #6*8]
-    stp d8, d9, [x17, #8*8]
-    stp d10, d11, [x17, #10*8]
-    stp d12, d13, [x17, #12*8]
-    stp d14, d15, [x17, #14*8]
-    stp d16, d17, [x17, #16*8]
-    stp d18, d19, [x17, #18*8]
-    stp d20, d21, [x17, #20*8]
-    stp d22, d23, [x17, #22*8]
-    stp d24, d25, [x17, #24*8]
-    stp d26, d27, [x17, #26*8]
-    stp d28, d29, [x17, #28*8]
-    ;stp d30, d31, [x17, #30*8]
+    stp q0, q1, [x17, #0*16]
+    stp q2, q3, [x17, #2*16]
+    stp q4, q5, [x17, #4*16]
+    stp q6, q7, [x17, #6*16]
+    stp q8, q9, [x17, #8*16]
+    stp q10, q11, [x17, #10*16]
+    stp q12, q13, [x17, #12*16]
+    stp q14, q15, [x17, #14*16]
+    stp q16, q17, [x17, #16*16]
+    stp q18, q19, [x17, #18*16]
+    stp q20, q21, [x17, #20*16]
+    stp q22, q23, [x17, #22*16]
+    stp q24, q25, [x17, #24*16]
+    stp q26, q27, [x17, #26*16]
+    stp q28, q29, [x17, #28*16]
+    ;stp q30, q31, [x17, #30*16]
 
     b C_FUNC(_ZN13BailOutRecord7BailOutEPKS_)
 
@@ -84,23 +86,25 @@ NESTED_ENTRY _ZN12LinearScanMD32SaveAllRegistersAndBranchBailOutEP19BranchBailOu
     stp x27, x28, [x17, #27*8]
     str fp, [x17, #29*8]
     ; skip lr, sp, zr
+    ; W8-NEON slice 1: Q regs are 16 bytes (stride 2 vars), matching
+    ; LinearScanMD::GetRegisterSaveIndex. Qn == Dn hardware, wider store.
     add x17, x17, #33*8
-    stp d0, d1, [x17, #0*8]
-    stp d2, d3, [x17, #2*8]
-    stp d4, d5, [x17, #4*8]
-    stp d6, d7, [x17, #6*8]
-    stp d8, d9, [x17, #8*8]
-    stp d10, d11, [x17, #10*8]
-    stp d12, d13, [x17, #12*8]
-    stp d14, d15, [x17, #14*8]
-    stp d16, d17, [x17, #16*8]
-    stp d18, d19, [x17, #18*8]
-    stp d20, d21, [x17, #20*8]
-    stp d22, d23, [x17, #22*8]
-    stp d24, d25, [x17, #24*8]
-    stp d26, d27, [x17, #26*8]
-    stp d28, d29, [x17, #28*8]
-    ;stp d30, d31, [x17, #30*8]
+    stp q0, q1, [x17, #0*16]
+    stp q2, q3, [x17, #2*16]
+    stp q4, q5, [x17, #4*16]
+    stp q6, q7, [x17, #6*16]
+    stp q8, q9, [x17, #8*16]
+    stp q10, q11, [x17, #10*16]
+    stp q12, q13, [x17, #12*16]
+    stp q14, q15, [x17, #14*16]
+    stp q16, q17, [x17, #16*16]
+    stp q18, q19, [x17, #18*16]
+    stp q20, q21, [x17, #20*16]
+    stp q22, q23, [x17, #22*16]
+    stp q24, q25, [x17, #24*16]
+    stp q26, q27, [x17, #26*16]
+    stp q28, q29, [x17, #28*16]
+    ;stp q30, q31, [x17, #30*16]
 
     b C_FUNC(_ZN19BranchBailOutRecord7BailOutEPKS_i)
 

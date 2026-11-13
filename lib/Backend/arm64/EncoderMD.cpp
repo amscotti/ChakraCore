@@ -762,6 +762,102 @@ int EncoderMD::EmitConvertToInt(Arm64CodeEmitter &Emitter, IR::Instr* instr, _In
     return 0;
 }
 
+// W8-NEON slice 1: map the SIMD IR type to its vector lane size.
+NEON_SIZE
+EncoderMD::NeonSizeForSimdType(IRType type)
+{
+    switch (type)
+    {
+    case TySimd128F4: return SIZE_4S;
+    case TySimd128D2: return SIZE_2D;
+    case TySimd128I4:
+    case TySimd128U4:
+    case TySimd128B4: return SIZE_4S;
+    case TySimd128I8:
+    case TySimd128U8:
+    case TySimd128B8: return SIZE_8H;
+    case TySimd128I16:
+    case TySimd128U16:
+    case TySimd128B16: return SIZE_16B;
+    case TySimd128I2: return SIZE_2D;
+    default:
+        AssertMsg(false, "NeonSizeForSimdType: not a Simd128 type");
+        return SIZE_16B;
+    }
+}
+
+template<typename _Emitter>
+int EncoderMD::EmitOp2NeonRegister(Arm64CodeEmitter &Emitter, IR::Instr *instr, _Emitter emitter, NEON_SIZE neonSize)
+{
+    IR::Opnd* dst = instr->GetDst();
+    IR::Opnd* src1 = instr->GetSrc1();
+    Assert(dst->IsRegOpnd());
+    Assert(src1->IsRegOpnd());
+    return emitter(Emitter, NeonRegisterParam(this->GetRegEncode(dst->AsRegOpnd()), 16), NeonRegisterParam(this->GetRegEncode(src1->AsRegOpnd()), 16), neonSize);
+}
+
+template<typename _Emitter>
+int EncoderMD::EmitOp3NeonRegister(Arm64CodeEmitter &Emitter, IR::Instr *instr, _Emitter emitter, NEON_SIZE neonSize)
+{
+    IR::Opnd* dst = instr->GetDst();
+    IR::Opnd* src1 = instr->GetSrc1();
+    IR::Opnd* src2 = instr->GetSrc2();
+    Assert(dst->IsRegOpnd());
+    Assert(src1->IsRegOpnd());
+    Assert(src2->IsRegOpnd());
+    return emitter(Emitter, NeonRegisterParam(this->GetRegEncode(dst->AsRegOpnd()), 16), NeonRegisterParam(this->GetRegEncode(src1->AsRegOpnd()), 16), NeonRegisterParam(this->GetRegEncode(src2->AsRegOpnd()), 16), neonSize);
+}
+
+// MOVQ covers Q reg<->reg (EmitNeonMov), Q reg<-mem (LDR Q), and mem<-Q reg
+// (STR Q) for spill/constant loads. Callers legalize the non-reg forms.
+int EncoderMD::EmitNeonMoveOrLoadStore(Arm64CodeEmitter &Emitter, IR::Instr *instr, bool isLoad)
+{
+    IR::Opnd* dst = instr->GetDst();
+    IR::Opnd* src1 = instr->GetSrc1();
+    if (dst->IsRegOpnd() && src1->IsRegOpnd())
+    {
+        return EmitNeonMov(Emitter, NeonRegisterParam(this->GetRegEncode(dst->AsRegOpnd()), 16), NeonRegisterParam(this->GetRegEncode(src1->AsRegOpnd()), 16), SIZE_16B);
+    }
+    if (isLoad)
+    {
+        Assert(dst->IsRegOpnd());
+        Assert(src1->IsSymOpnd() || src1->IsIndirOpnd() || src1->IsMemRefOpnd());
+        ARM64_REGISTER indexReg; ARM64_REGISTER baseReg; BYTE indexScale; int32 offset;
+        // MemRefOpnd (constant pool) is addressed via a base register after
+        // legalization; Sym/Indir use the standard decoder.
+        if (src1->IsMemRefOpnd())
+        {
+            AssertMsg(false, "MOVQ from MemRef must be legalized to Indir first");
+            return 0;
+        }
+        if (DecodeMemoryOpnd(src1, baseReg, indexReg, indexScale, offset))
+        {
+            // Indexed (Wasm mem access): NEON has no register form, so
+            // materialize addr = base + index*scale into SCRATCH and use the
+            // offset form.
+            int bytes = 0;
+            bytes += EmitAddRegister64(Emitter, Arm64SimpleRegisterParam(EncoderMD::GetRegEncode(SCRATCH_REG)), Arm64SimpleRegisterParam(baseReg), Arm64RegisterParam(indexReg, SHIFT_LSL, indexScale));
+            bytes += EmitNeonLdrOffset(Emitter, NeonRegisterParam(this->GetRegEncode(dst->AsRegOpnd()), 16), SIZE_1Q, Arm64SimpleRegisterParam(EncoderMD::GetRegEncode(SCRATCH_REG)), offset);
+            return bytes;
+        }
+        return EmitNeonLdrOffset(Emitter, NeonRegisterParam(this->GetRegEncode(dst->AsRegOpnd()), 16), SIZE_1Q, baseReg, offset);
+    }
+    else
+    {
+        Assert(src1->IsRegOpnd());
+        Assert(dst->IsSymOpnd() || dst->IsIndirOpnd());
+        ARM64_REGISTER indexReg; ARM64_REGISTER baseReg; BYTE indexScale; int32 offset;
+        if (DecodeMemoryOpnd(dst, baseReg, indexReg, indexScale, offset))
+        {
+            int bytes = 0;
+            bytes += EmitAddRegister64(Emitter, Arm64SimpleRegisterParam(EncoderMD::GetRegEncode(SCRATCH_REG)), Arm64SimpleRegisterParam(baseReg), Arm64RegisterParam(indexReg, SHIFT_LSL, indexScale));
+            bytes += EmitNeonStrOffset(Emitter, NeonRegisterParam(this->GetRegEncode(src1->AsRegOpnd()), 16), SIZE_1Q, Arm64SimpleRegisterParam(EncoderMD::GetRegEncode(SCRATCH_REG)), offset);
+            return bytes;
+        }
+        return EmitNeonStrOffset(Emitter, NeonRegisterParam(this->GetRegEncode(src1->AsRegOpnd()), 16), SIZE_1Q, baseReg, offset);
+    }
+}
+
 template<typename _Emitter>
 int EncoderMD::EmitConditionalSelectFp(Arm64CodeEmitter &Emitter, IR::Instr *instr, int condition, _Emitter emitter)
 {
@@ -993,6 +1089,12 @@ EncoderMD::GenerateEncoding(IR::Instr* instr, BYTE *pc)
         break;
 
     case Js::OpCode::LDR:
+        if (IRType_IsSimd128(instr->GetDst()->GetType()))
+        {
+            // W8-NEON slice 1: 16B Q load for SIMD spills.
+            bytes = this->EmitNeonMoveOrLoadStore(Emitter, instr, true);
+            break;
+        }
         Assert(instr->GetDst()->GetSize() <= instr->GetSrc1()->GetSize() || instr->GetSrc1()->IsUnsigned());
         bytes = this->EmitLoadStore(Emitter, instr, instr->GetSrc1(), instr->GetDst(), EmitLdrbRegister, EmitLdrhRegister, EmitLdrRegister, EmitLdrRegister64, EmitLdrbOffset, EmitLdrhOffset, EmitLdrOffset, EmitLdrOffset64);
         break;
@@ -1176,6 +1278,12 @@ EncoderMD::GenerateEncoding(IR::Instr* instr, BYTE *pc)
         break;
 
     case Js::OpCode::STR:
+        if (IRType_IsSimd128(instr->GetSrc1()->GetType()))
+        {
+            // W8-NEON slice 1: 16B Q store for SIMD spills.
+            bytes = this->EmitNeonMoveOrLoadStore(Emitter, instr, false);
+            break;
+        }
         bytes = this->EmitLoadStore(Emitter, instr, instr->GetDst(), instr->GetSrc1(), EmitStrbRegister, EmitStrhRegister, EmitStrRegister, EmitStrRegister64, EmitStrbOffset, EmitStrhOffset, EmitStrOffset, EmitStrOffset64);
         break;
 
@@ -1382,6 +1490,97 @@ EncoderMD::GenerateEncoding(IR::Instr* instr, BYTE *pc)
 
     case Js::OpCode::FSTP:
         bytes = this->EmitLoadStoreFpPair(Emitter, instr, instr->GetDst(), instr->GetSrc1(), instr->GetSrc2(), EmitNeonStpOffset);
+        break;
+
+    // W8-NEON slice 1 vector ops. The floating families (ADDPS/SUBPS/MULPS/
+    // DIVPS/SQRTPS) are the same vector shape as scalar FADD/FSUB/FMUL/FDIV/
+    // FSQRT (EmitNeonFadd etc.) with a vector SIZE, so they are included.
+    case Js::OpCode::MOVQ:
+        bytes = this->EmitNeonMoveOrLoadStore(Emitter, instr, instr->GetSrc1() && !instr->GetSrc1()->IsRegOpnd());
+        break;
+
+    case Js::OpCode::STPQ:
+    {
+        IR::Opnd* memOpnd = instr->GetDst();
+        IR::Opnd* src1Opnd = instr->GetSrc1();
+        IR::Opnd* src2Opnd = instr->GetSrc2();
+        Assert(memOpnd->IsIndirOpnd() || memOpnd->IsSymOpnd());
+        Assert(src1Opnd->IsRegOpnd());
+        Assert(src2Opnd->IsRegOpnd());
+        ARM64_REGISTER indexReg; ARM64_REGISTER baseReg; BYTE indexScale; int32 offset;
+        if (DecodeMemoryOpnd(memOpnd, baseReg, indexReg, indexScale, offset))
+        {
+            AssertMsg(false, "STPQ with indexed memory not supported");
+            break;
+        }
+        bytes = EmitNeonStpOffset(Emitter, NeonRegisterParam(this->GetRegEncode(src1Opnd->AsRegOpnd()), 16), NeonRegisterParam(this->GetRegEncode(src2Opnd->AsRegOpnd()), 16), SIZE_1Q, baseReg, offset);
+        break;
+    }
+
+    case Js::OpCode::LDPQ:
+    {
+        IR::Opnd* memOpnd = instr->GetSrc1();
+        IR::Opnd* dst1Opnd = instr->GetDst();
+        IR::Opnd* dst2Opnd = instr->GetSrc2();
+        Assert(memOpnd->IsIndirOpnd() || memOpnd->IsSymOpnd());
+        Assert(dst1Opnd->IsRegOpnd());
+        Assert(dst2Opnd->IsRegOpnd());
+        ARM64_REGISTER indexReg; ARM64_REGISTER baseReg; BYTE indexScale; int32 offset;
+        if (DecodeMemoryOpnd(memOpnd, baseReg, indexReg, indexScale, offset))
+        {
+            AssertMsg(false, "LDPQ with indexed memory not supported");
+            break;
+        }
+        bytes = EmitNeonLdpOffset(Emitter, NeonRegisterParam(this->GetRegEncode(dst1Opnd->AsRegOpnd()), 16), NeonRegisterParam(this->GetRegEncode(dst2Opnd->AsRegOpnd()), 16), SIZE_1Q, baseReg, offset);
+        break;
+    }
+
+    case Js::OpCode::PAND:
+        bytes = this->EmitOp3NeonRegister(Emitter, instr, EmitNeonAnd, SIZE_16B);
+        break;
+
+    case Js::OpCode::POR:
+        bytes = this->EmitOp3NeonRegister(Emitter, instr, EmitNeonOrrRegister, SIZE_16B);
+        break;
+
+    case Js::OpCode::PXOR:
+        bytes = this->EmitOp3NeonRegister(Emitter, instr, EmitNeonEor, SIZE_16B);
+        break;
+
+    case Js::OpCode::PADDD:
+        bytes = this->EmitOp3NeonRegister(Emitter, instr, EmitNeonAdd, NeonSizeForSimdType(instr->GetDst()->GetType()));
+        break;
+
+    case Js::OpCode::PSUBD:
+        bytes = this->EmitOp3NeonRegister(Emitter, instr, EmitNeonSub, NeonSizeForSimdType(instr->GetDst()->GetType()));
+        break;
+
+    case Js::OpCode::PADDQ:
+        bytes = this->EmitOp3NeonRegister(Emitter, instr, EmitNeonAdd, SIZE_2D);
+        break;
+
+    case Js::OpCode::PSUBQ:
+        bytes = this->EmitOp3NeonRegister(Emitter, instr, EmitNeonSub, SIZE_2D);
+        break;
+
+    case Js::OpCode::ADDPS:
+        bytes = this->EmitOp3NeonRegister(Emitter, instr, EmitNeonFadd, SIZE_4S);
+        break;
+
+    case Js::OpCode::SUBPS:
+        bytes = this->EmitOp3NeonRegister(Emitter, instr, EmitNeonFsub, SIZE_4S);
+        break;
+
+    case Js::OpCode::MULPS:
+        bytes = this->EmitOp3NeonRegister(Emitter, instr, EmitNeonFmul, SIZE_4S);
+        break;
+
+    case Js::OpCode::DIVPS:
+        bytes = this->EmitOp3NeonRegister(Emitter, instr, EmitNeonFdiv, SIZE_4S);
+        break;
+
+    case Js::OpCode::SQRTPS:
+        bytes = this->EmitOp2NeonRegister(Emitter, instr, EmitNeonFsqrt, SIZE_4S);
         break;
 
     // Opcode not yet implemented

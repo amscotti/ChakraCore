@@ -3215,10 +3215,11 @@ Lowerer::LowerRange(IR::Instr *instrStart, IR::Instr *instrEnd, bool defaultDoFa
             break;
 
         default:
-#if defined(ENABLE_WASM_SIMD) && (_M_IX86 || _M_AMD64)
-        // W8: ARM64 has no SIMD lowering yet; P5 keeps SIMD functions
-        // interpreted, so SIMD IR is unreachable on ARM64. x86/x64
-        // behavior is unchanged.
+#if defined(ENABLE_WASM_SIMD) && (_M_IX86 || _M_AMD64 || _M_ARM64)
+        // W8-NEON slice 1: ARM64 dispatch enabled; Simd128Instruction on
+        // ARM64 handles slice-1 NEON families and fails safe otherwise.
+        // FunctionUsesSimd/ShouldJitFunction gates stay intact, so SIMD
+        // functions remain interpreted by default.
             if (IsSimd128Opcode(instr->m_opcode))
             {
                 instrPrev = m_lowererMD.Simd128Instruction(instr);

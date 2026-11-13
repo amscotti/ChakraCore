@@ -37,6 +37,7 @@ LowererMD::IsAssign(const IR::Instr *instr)
 {
     return (instr->m_opcode == Js::OpCode::MOV ||
             instr->m_opcode == Js::OpCode::FMOV ||
+            instr->m_opcode == Js::OpCode::MOVQ ||
             instr->m_opcode == Js::OpCode::LDIMM ||
             instr->m_opcode == Js::OpCode::LDR ||
             instr->m_opcode == Js::OpCode::LDRS ||
@@ -312,7 +313,13 @@ LowererMD::LowerCall(IR::Instr * callInstr, Js::ArgSlot argCount)
         Js::OpCode assignOp;
         RegNum returnReg;
 
-        if(dstOpnd->IsFloat64() || dstOpnd->IsFloat32())
+        if (IRType_IsSimd128(dstOpnd->GetType()))
+        {
+            // W8-NEON slice 1: 128-bit returns in Q0 via 16-byte move.
+            assignOp = GetAssignOp(dstOpnd->GetType());
+            returnReg = (RegNum)RegQ0;
+        }
+        else if(dstOpnd->IsFloat64() || dstOpnd->IsFloat32())
         {
             // f32 returns in s0 (low half of d0, ABI section 4); f64 in d0.
             assignOp = Js::OpCode::FMOV;
@@ -365,7 +372,7 @@ LowererMD::LowerCall(IR::Instr * callInstr, Js::ArgSlot argCount)
         IR::Opnd *helperArgOpnd = this->helperCallArgs[this->helperCallArgsCount - argsLeft];
         IR::Opnd * opndParam = nullptr;
 
-        if (helperArgOpnd->IsFloat())
+        if (helperArgOpnd->IsFloat() || IRType_IsSimd128(helperArgOpnd->GetType()))
         {
             opndParam = this->GetOpndForArgSlot(doubleArgsLeft - 1, helperArgOpnd);
             AssertMsg(opndParam->IsRegOpnd(), "NYI for other kind of operands");
@@ -1155,6 +1162,38 @@ LowererMD::GetOpndForArgSlot(Js::ArgSlot argSlot, IR::Opnd * argOpnd, bool jsSta
     IR::Opnd * opndParam = nullptr;
 
     IRType type = argOpnd ? argOpnd->GetType() : TyMachReg;
+    // W8-NEON slice 1: 128-bit args use Q0-7, then 16-byte stack slots.
+    if (argOpnd != nullptr && IRType_IsSimd128(type))
+    {
+        if (argSlot < 8)
+        {
+            IR::RegOpnd *regOpnd = IR::RegOpnd::New(nullptr, (RegNum)(RegQ0 + argSlot), type, this->m_func);
+            regOpnd->m_isCallArg = true;
+            opndParam = regOpnd;
+        }
+        else
+        {
+            IR::RegOpnd * spBase = IR::RegOpnd::New(nullptr, this->GetRegStackPointer(), TyMachReg, this->m_func);
+            IntConstType offset;
+#if defined(__APPLE__)
+            if (jsStackImage)
+            {
+                offset = argSlot * MachRegSimd128;
+            }
+            else
+#endif
+            {
+                offset = (int32)((argSlot - 8) * MachRegSimd128);
+            }
+            opndParam = IR::IndirOpnd::New(spBase, int32(offset), type, this->m_func);
+            uint32 needed = (uint32)((offset + MachRegSimd128) / MachRegInt);
+            if (this->m_func->m_argSlotsForFunctionsCalled < needed)
+            {
+                this->m_func->m_argSlotsForFunctionsCalled = needed;
+            }
+        }
+        return opndParam;
+    }
     if (argOpnd == nullptr || !argOpnd->IsFloat())
     {
         if (argSlot < NUM_INT_ARG_REGS)
@@ -1504,8 +1543,10 @@ public:
     bool HasTry() const { return m_hasTry; }
     ULONG ArgSlotCount() const { return m_argSlotCount; }
     BitVector HomedParams() const { return m_homedParams; }
+    BitVector HomedSimd() const { return m_homedSimd; }
     BitVector SavedRegisters() const { return m_savedRegisters; }
     BitVector SavedDoubles() const { return m_savedDoubles; }
+    BitVector SavedSimd() const { return m_savedSimd; }
 
     // Locals area sits right after space allocated for arguments
     ULONG LocalsOffset() const { return this->m_argSlotCount * MachRegInt; }
@@ -1515,8 +1556,15 @@ public:
     ULONG SavedDoublesOffset() const { return this->LocalsOffset() + this->LocalsSize(); }
     ULONG SavedDoublesSize() const { return this->m_savedDoubles.Count() * MachRegDouble; }
 
-    // Saved non-volatile integer registers sit after the saved doubles
-    ULONG SavedRegistersOffset() const { return this->SavedDoublesOffset() + this->SavedDoublesSize(); }
+    // Saved 128-bit SIMD registers (Q8-15, count*16) sit after scalar doubles.
+    // Q8-15 alias D8-15 (same hardware, Reg.h); a SIMD function moves its
+    // callee-saved vector saves here so they are stored/restored at full
+    // 16-byte width. Non-SIMD functions have an empty area (no layout change).
+    ULONG SavedSimdOffset() const { return this->SavedDoublesOffset() + this->SavedDoublesSize(); }
+    ULONG SavedSimdSize() const { return this->m_savedSimd.Count() * MachRegSimd128; }
+
+    // Saved non-volatile integer registers sit after the saved doubles+simd
+    ULONG SavedRegistersOffset() const { return this->SavedSimdOffset() + this->SavedSimdSize(); }
     ULONG SavedRegistersSize() const { return this->m_savedRegisters.Count() * MachRegInt; }
 
     // The argument slot and StackFunctionList entry come after the saved integer registers
@@ -1531,8 +1579,12 @@ public:
     ULONG HomedParamsOffset() const { return this->FpLrOffset() + this->FpLrSize(); }
     ULONG HomedParamsSize() const { return this->m_homedParams.Count() * MachRegInt; }
 
+    // W8-NEON slice 1: homed 128-bit params (Q0-7, count*16) after int homes.
+    ULONG HomedSimdOffset() const { return this->HomedParamsOffset() + this->HomedParamsSize(); }
+    ULONG HomedSimdSize() const { return this->m_homedSimd.Count() * MachRegSimd128; }
+
     // And that's the total stack allocation
-    ULONG TotalStackSize() const { return this->HomedParamsOffset() + this->HomedParamsSize(); }
+    ULONG TotalStackSize() const { return this->HomedSimdOffset() + this->HomedSimdSize(); }
 
     // The register area is the area at the far end that doesn't include locals or arg slots
     ULONG RegisterAreaOffset() const { return this->SavedDoublesOffset(); }
@@ -1544,8 +1596,10 @@ private:
     ULONG m_argSlotCount;
     ULONG m_localsArea;
     BitVector m_homedParams;
+    BitVector m_homedSimd;
     BitVector m_savedRegisters;
     BitVector m_savedDoubles;
+    BitVector m_savedSimd;
 };
 
 ARM64StackLayout::ARM64StackLayout(Func* func)
@@ -1596,6 +1650,46 @@ ARM64StackLayout::ARM64StackLayout(Func* func)
             }
         }
 
+        // W8-NEON slice 1: for AsmJs SIMD functions, the callee-saved vector
+        // saves move to the 16-byte SavedSimd area (Q8-15, same RegNums as
+        // D8-15) so full 128-bit values survive calls. Non-SIMD functions
+        // keep the scalar layout bit-identical.
+        bool funcUsesSimd = false;
+        if (func->GetJITFunctionBody()->IsAsmJsMode())
+        {
+            const AsmJsJITInfo *info = func->GetJITFunctionBody()->GetAsmJsInfo();
+            if (info != nullptr)
+            {
+                Js::AsmJsRetType::Which ret = info->GetRetType();
+                funcUsesSimd = (ret == Js::AsmJsRetType::Int32x4 || ret == Js::AsmJsRetType::Int16x8 ||
+                    ret == Js::AsmJsRetType::Int8x16 || ret == Js::AsmJsRetType::Uint32x4 ||
+                    ret == Js::AsmJsRetType::Uint16x8 || ret == Js::AsmJsRetType::Uint8x16 ||
+                    ret == Js::AsmJsRetType::Bool32x4 || ret == Js::AsmJsRetType::Bool16x8 ||
+                    ret == Js::AsmJsRetType::Bool8x16 || ret == Js::AsmJsRetType::Float32x4 ||
+                    ret == Js::AsmJsRetType::Float64x2 || ret == Js::AsmJsRetType::Int64x2);
+                for (Js::ArgSlot i = 0; i < info->GetArgCount() && !funcUsesSimd; ++i)
+                {
+                    Js::AsmJsVarType::Which a = info->GetArgType(i);
+                    funcUsesSimd = (a == Js::AsmJsVarType::Int32x4 || a == Js::AsmJsVarType::Int16x8 ||
+                        a == Js::AsmJsVarType::Int8x16 || a == Js::AsmJsVarType::Uint32x4 ||
+                        a == Js::AsmJsVarType::Uint16x8 || a == Js::AsmJsVarType::Uint8x16 ||
+                        a == Js::AsmJsVarType::Bool32x4 || a == Js::AsmJsVarType::Bool16x8 ||
+                        a == Js::AsmJsVarType::Bool8x16 || a == Js::AsmJsVarType::Float32x4 ||
+                        a == Js::AsmJsVarType::Float64x2);
+                }
+                funcUsesSimd = funcUsesSimd || info->GetSimdVarCount() > 0 || info->GetSimdTmpCount() > 0
+                    || info->GetSimdConstCount() > 0;
+            }
+        }
+        if (funcUsesSimd && !this->m_savedDoubles.IsEmpty())
+        {
+            this->m_savedSimd = this->m_savedDoubles;
+            this->m_savedDoubles.ClearAll();
+        }
+        // W8-NEON slice 1: remember SIMD use for homing below (Q0-7, 16B stack).
+        // Layout totals must include the homed-simd area, so the check is
+        // duplicated after HasCalls is known; the flag is recomputed there.
+
         // Determine if there are nested calls.
         //
         // If the function has a try, we need to have the same register saves in the prolog as the 
@@ -1638,6 +1732,37 @@ ARM64StackLayout::ARM64StackLayout(Func* func)
             homedParams += 1;
         }
         this->m_homedParams.SetRange(0, (homedParams < NUM_INT_ARG_REGS) ? homedParams : NUM_INT_ARG_REGS);
+        // W8-NEON slice 1: home Q0-7 (16B each) for SIMD functions that call.
+        // Q params arrive in Q0-7 (GetParamReg); a call clobbers Q0-7
+        // (caller-saved), so they are homed like the int params.
+        if (funcUsesSimd && this->m_hasCalls)
+        {
+            const AsmJsJITInfo *info2 = func->GetJITFunctionBody()->GetAsmJsInfo();
+            int simdHomed = 0;
+            if (info2 != nullptr)
+            {
+                for (Js::ArgSlot i = 0; i < info2->GetArgCount() && simdHomed < 8; ++i)
+                {
+                    Js::AsmJsVarType::Which a = info2->GetArgType(i);
+                    if (a == Js::AsmJsVarType::Int32x4 || a == Js::AsmJsVarType::Int16x8 ||
+                        a == Js::AsmJsVarType::Int8x16 || a == Js::AsmJsVarType::Uint32x4 ||
+                        a == Js::AsmJsVarType::Uint16x8 || a == Js::AsmJsVarType::Uint8x16 ||
+                        a == Js::AsmJsVarType::Bool32x4 || a == Js::AsmJsVarType::Bool16x8 ||
+                        a == Js::AsmJsVarType::Bool8x16 || a == Js::AsmJsVarType::Float32x4 ||
+                        a == Js::AsmJsVarType::Float64x2)
+                    {
+                        // Q index matches the vector-arg position, not the
+                        // overall slot; home the first Q regs conservatively.
+                        simdHomed++;
+                    }
+                }
+            }
+            // Round to pairs for STP alignment; always home at least Q0-Q1.
+            if (simdHomed > 0 && (simdHomed % 2) != 0) simdHomed++;
+            if (simdHomed == 0) simdHomed = 2;
+            if (simdHomed > 8) simdHomed = 8;
+            this->m_homedSimd.SetRange(RegQ0, simdHomed);
+        }
     }
 }
 
@@ -1749,6 +1874,25 @@ LowererMD::LowerEntryInstr(IR::EntryInstr * entryInstr)
         }
     }
 
+    // W8-NEON slice 1: save Q8-15 as 16-byte pairs (STPQ, count*16).
+    if (!layout.SavedSimd().IsEmpty())
+    {
+        ULONG curOffset = layout.SavedSimdOffset() - stackAllocation2;
+        for (RegNum curReg = FIRST_CALLEE_SAVED_DBL_REG; curReg <= LAST_CALLEE_SAVED_DBL_REG; curReg = RegNum(curReg + 2))
+        {
+            if (layout.SavedSimd().Test(curReg))
+            {
+                RegNum nextReg = RegNum(curReg + 1);
+                IR::Instr * instrStp = IR::Instr::New(Js::OpCode::STPQ,
+                    IR::IndirOpnd::New(spOpnd, curOffset, TyMachReg, this->m_func),
+                    IR::RegOpnd::New(curReg, TySimd128I4, this->m_func),
+                    IR::RegOpnd::New(nextReg, TySimd128I4, this->m_func), this->m_func);
+                insertInstr->InsertBefore(instrStp);
+                curOffset += 2 * MachRegSimd128;
+            }
+        }
+    }
+
     // Save integer registers in pairs
     if (!layout.SavedRegisters().IsEmpty())
     {
@@ -1838,6 +1982,25 @@ LowererMD::LowerEntryInstr(IR::EntryInstr * entryInstr)
         }
     }
 
+    // W8-NEON slice 1: home Q0-7 (16B each) in pairs.
+    if (!layout.HomedSimd().IsEmpty())
+    {
+        ULONG curOffset = layout.HomedSimdOffset() - regAreaBaseOffset;
+        for (RegNum curReg = (RegNum)RegQ0; curReg <= (RegNum)RegQ7; curReg = RegNum(curReg + 2))
+        {
+            if (layout.HomedSimd().Test(curReg))
+            {
+                RegNum nextReg = RegNum(curReg + 1);
+                IR::Instr * instrStp = IR::Instr::New(Js::OpCode::STPQ,
+                    IR::IndirOpnd::New(regAreaBaseOpnd, curOffset, TyMachReg, this->m_func),
+                    IR::RegOpnd::New(curReg, TySimd128I4, this->m_func),
+                    IR::RegOpnd::New(nextReg, TySimd128I4, this->m_func), this->m_func);
+                insertInstr->InsertBefore(instrStp);
+                curOffset += 2 * MachRegSimd128;
+            }
+        }
+    }
+
     // Compute the locals pointer if needed
     RegNum localsReg = this->m_func->GetLocalsPointer();
     if (localsReg != RegSP)
@@ -1892,6 +2055,20 @@ LowererMD::LowerEntryInstr(IR::EntryInstr * entryInstr)
                     unwind->AddDarwinSave((uint16)(EncoderMD::GetRegEncode(curReg) - NEONREG_BASE + 64), offset);
                     unwind->AddDarwinSave((uint16)(EncoderMD::GetRegEncode(RegNum(curReg + 1)) - NEONREG_BASE + 64), offset + MachRegDouble);
                     offset += 2 * MachRegDouble;
+                }
+            }
+        }
+        // W8-NEON slice 1: Q8-15 Darwin Vn (64+n), 16-byte stride.
+        if (!layout.SavedSimd().IsEmpty())
+        {
+            ULONG offset = layout.SavedSimdOffset();
+            for (RegNum curReg = FIRST_CALLEE_SAVED_DBL_REG; curReg <= LAST_CALLEE_SAVED_DBL_REG; curReg = RegNum(curReg + 2))
+            {
+                if (layout.SavedSimd().Test(curReg))
+                {
+                    unwind->AddDarwinSave((uint16)(EncoderMD::GetRegEncode(curReg) - NEONREG_BASE + 64), offset);
+                    unwind->AddDarwinSave((uint16)(EncoderMD::GetRegEncode(RegNum(curReg + 1)) - NEONREG_BASE + 64), offset + MachRegSimd128);
+                    offset += 2 * MachRegSimd128;
                 }
             }
         }
@@ -1998,6 +2175,25 @@ LowererMD::LowerExitInstr(IR::ExitInstr * exitInstr)
                     IR::RegOpnd::New(curReg, TyMachDouble, this->m_func),
                     IR::IndirOpnd::New(spOpnd, curOffset, TyMachReg, this->m_func),
                     IR::RegOpnd::New(nextReg, TyMachDouble, this->m_func), this->m_func);
+                exitInstr->InsertBefore(instrLdp);
+            }
+        }
+    }
+
+    // W8-NEON slice 1: restore Q8-15 (LDPQ, 16-byte pairs).
+    if (!layout.SavedSimd().IsEmpty())
+    {
+        ULONG curOffset = layout.SavedSimdOffset() - stackAllocation2 + layout.SavedSimdSize();
+        for (RegNum curReg = RegNum(LAST_CALLEE_SAVED_DBL_REG - 1); curReg >= FIRST_CALLEE_SAVED_DBL_REG; curReg = RegNum(curReg - 2))
+        {
+            if (layout.SavedSimd().Test(curReg))
+            {
+                curOffset -= 2 * MachRegSimd128;
+                RegNum nextReg = RegNum(curReg + 1);
+                IR::Instr * instrLdp = IR::Instr::New(Js::OpCode::LDPQ,
+                    IR::RegOpnd::New(curReg, TySimd128I4, this->m_func),
+                    IR::IndirOpnd::New(spOpnd, curOffset, TyMachReg, this->m_func),
+                    IR::RegOpnd::New(nextReg, TySimd128I4, this->m_func), this->m_func);
                 exitInstr->InsertBefore(instrLdp);
             }
         }
@@ -2139,7 +2335,295 @@ LowererMD::Init(Lowerer *lowerer)
     // The arg slot count computed by an earlier phase (e.g., IRBuilder) doesn't work for
     // ARM if it accounts for nesting. Clear it here and let Lower compute its own value.
     this->m_func->m_argSlotsForFunctionsCalled = 0;
+#ifdef ENABLE_WASM_SIMD
+    Simd128InitOpcodeMap();
+#endif
 }
+
+// W8-NEON slice 1: NEON-native opcode map. Unlike the x86 SSE map
+// (LowerMDSharedSimd128.cpp), this maps only the slice-1 direct families;
+// everything else stays unmapped and fails safe in Simd128Instruction.
+#ifdef ENABLE_WASM_SIMD
+#define GET_NEONOPCODE(irOpcode) m_simd128OpCodesMap[(uint32)(irOpcode - Js::OpCode::Simd128_Start)]
+#define SET_NEONOPCODE(irOpcode, mdOpcode) \
+    Assert((uint32)m_simd128OpCodesMap[(uint32)(Js::OpCode::irOpcode - Js::OpCode::Simd128_Start)] == 0);\
+    Assert(Js::OpCode::mdOpcode > Js::OpCode::MDStart);\
+    m_simd128OpCodesMap[(uint32)(Js::OpCode::irOpcode - Js::OpCode::Simd128_Start)] = Js::OpCode::mdOpcode;
+
+void
+LowererMD::Simd128InitOpcodeMap()
+{
+    m_simd128OpCodesMap = JitAnewArrayZ(m_lowerer->m_alloc, Js::OpCode, Js::Simd128OpcodeCount());
+    Assert(Js::OpCode::Simd128_End + (Js::OpCode)1 == Js::OpCode::Simd128_Start_Extend);
+    // Logical (bitwise, SIZE_16B): PAND/POR/PXOR cover And/Or/Xor across
+    // lane shapes (I4/I8/I16/U/B variants are the same instruction).
+    SET_NEONOPCODE(Simd128_And_I4, PAND);
+    SET_NEONOPCODE(Simd128_And_I8, PAND);
+    SET_NEONOPCODE(Simd128_And_I16, PAND);
+    SET_NEONOPCODE(Simd128_And_U4, PAND);
+    SET_NEONOPCODE(Simd128_And_U8, PAND);
+    SET_NEONOPCODE(Simd128_And_U16, PAND);
+    SET_NEONOPCODE(Simd128_And_B4, PAND);
+    SET_NEONOPCODE(Simd128_And_B8, PAND);
+    SET_NEONOPCODE(Simd128_And_B16, PAND);
+    SET_NEONOPCODE(Simd128_Or_I4, POR);
+    SET_NEONOPCODE(Simd128_Or_I8, POR);
+    SET_NEONOPCODE(Simd128_Or_I16, POR);
+    SET_NEONOPCODE(Simd128_Or_U4, POR);
+    SET_NEONOPCODE(Simd128_Or_U8, POR);
+    SET_NEONOPCODE(Simd128_Or_U16, POR);
+    SET_NEONOPCODE(Simd128_Or_B4, POR);
+    SET_NEONOPCODE(Simd128_Or_B8, POR);
+    SET_NEONOPCODE(Simd128_Or_B16, POR);
+    SET_NEONOPCODE(Simd128_Xor_I4, PXOR);
+    SET_NEONOPCODE(Simd128_Xor_I8, PXOR);
+    SET_NEONOPCODE(Simd128_Xor_I16, PXOR);
+    SET_NEONOPCODE(Simd128_Xor_U4, PXOR);
+    SET_NEONOPCODE(Simd128_Xor_U8, PXOR);
+    SET_NEONOPCODE(Simd128_Xor_U16, PXOR);
+    SET_NEONOPCODE(Simd128_Xor_B4, PXOR);
+    SET_NEONOPCODE(Simd128_Xor_B8, PXOR);
+    SET_NEONOPCODE(Simd128_Xor_B16, PXOR);
+    // Integer add/sub. PADDD/PSUBD use the 4S form (32-bit lanes); PADDQ/PSUBQ
+    // use the 2D form (64-bit lanes). 8/16-bit lanes are the same add/sub
+    // with a narrower lane size, encoded from the IR type in EmitNeon.
+    SET_NEONOPCODE(Simd128_Add_I4, PADDD);
+    SET_NEONOPCODE(Simd128_Sub_I4, PSUBD);
+    SET_NEONOPCODE(Simd128_Add_I8, PADDD);
+    SET_NEONOPCODE(Simd128_Sub_I8, PSUBD);
+    SET_NEONOPCODE(Simd128_Add_I16, PADDD);
+    SET_NEONOPCODE(Simd128_Sub_I16, PSUBD);
+    SET_NEONOPCODE(Simd128_Add_U4, PADDD);
+    SET_NEONOPCODE(Simd128_Sub_U4, PSUBD);
+    SET_NEONOPCODE(Simd128_Add_U8, PADDD);
+    SET_NEONOPCODE(Simd128_Sub_U8, PSUBD);
+    SET_NEONOPCODE(Simd128_Add_U16, PADDD);
+    SET_NEONOPCODE(Simd128_Sub_U16, PSUBD);
+    SET_NEONOPCODE(Simd128_Add_I2, PADDQ);
+    SET_NEONOPCODE(Simd128_Sub_I2, PSUBQ);
+    SET_NEONOPCODE(Simd128_Add_D2, PADDQ);
+    SET_NEONOPCODE(Simd128_Sub_D2, PSUBQ);
+    // Floating add/sub/mul/div/sqrt are the same vector shape (FADD etc. with
+    // SIZE_4S/SIZE_2D), so they are included; scalar FADD/FMUL/FDIV/FSQRT MD
+    // opcodes are distinct (EmitNeonFadd with SIZE_1S/1D).
+    SET_NEONOPCODE(Simd128_Add_F4, ADDPS);
+    SET_NEONOPCODE(Simd128_Sub_F4, SUBPS);
+    SET_NEONOPCODE(Simd128_Mul_F4, MULPS);
+    SET_NEONOPCODE(Simd128_Div_F4, DIVPS);
+    SET_NEONOPCODE(Simd128_Sqrt_F4, SQRTPS);
+}
+
+IR::Instr *
+LowererMD::Simd128Instruction(IR::Instr *instr)
+{
+    if (!instr->GetDst())
+    {
+        Assert(!instr->m_func->GetJITFunctionBody()->IsAsmJsMode());
+        IR::Instr *pInstr = instr->m_prev;
+        instr->Remove();
+        return pInstr;
+    }
+    if (Simd128TryLowerMappedInstruction(instr))
+    {
+        return instr->m_prev;
+    }
+    return Simd128LowerUnMappedInstruction(instr);
+}
+
+bool
+LowererMD::Simd128TryLowerMappedInstruction(IR::Instr *instr)
+{
+    Js::OpCode opcode = GET_NEONOPCODE(instr->m_opcode);
+    if ((uint32)opcode == 0)
+    {
+        return false;
+    }
+    Assert(instr->GetDst() && instr->GetDst()->IsRegOpnd() && instr->GetDst()->IsSimd128());
+    Assert(instr->GetSrc1() && instr->GetSrc1()->IsRegOpnd() && instr->GetSrc1()->IsSimd128());
+    Assert(!instr->GetSrc2() || (instr->GetSrc2()->IsRegOpnd() && instr->GetSrc2()->IsSimd128()));
+    instr->m_opcode = opcode;
+    LegalizeMD::LegalizeInstr(instr);
+    return true;
+}
+
+IR::Instr *
+LowererMD::Simd128LowerUnMappedInstruction(IR::Instr *instr)
+{
+    // Slice-1 unmapped: LdC (constant load via MOVQ) and 16-byte LdArr/StArr
+    // (Q loads/stores for wasm memory) are lowered; every other opcode fails
+    // safe (controlled FailFast, never silent miscompile).
+    if (instr->m_opcode == Js::OpCode::Simd128_LdC)
+    {
+        return Simd128LoadConst(instr);
+    }
+    switch (instr->m_opcode)
+    {
+    case Js::OpCode::Simd128_LdArr_I4:
+    case Js::OpCode::Simd128_LdArr_I8:
+    case Js::OpCode::Simd128_LdArr_I16:
+    case Js::OpCode::Simd128_LdArr_U4:
+    case Js::OpCode::Simd128_LdArr_U8:
+    case Js::OpCode::Simd128_LdArr_U16:
+    case Js::OpCode::Simd128_LdArr_F4:
+    case Js::OpCode::Simd128_LdArrConst_I4:
+    case Js::OpCode::Simd128_LdArrConst_I8:
+    case Js::OpCode::Simd128_LdArrConst_I16:
+    case Js::OpCode::Simd128_LdArrConst_U4:
+    case Js::OpCode::Simd128_LdArrConst_U8:
+    case Js::OpCode::Simd128_LdArrConst_U16:
+    case Js::OpCode::Simd128_LdArrConst_F4:
+        Assert(m_func->GetJITFunctionBody()->IsAsmJsMode());
+        return Simd128AsmJsLowerLoadElem(instr);
+    case Js::OpCode::Simd128_StArr_I4:
+    case Js::OpCode::Simd128_StArr_I8:
+    case Js::OpCode::Simd128_StArr_I16:
+    case Js::OpCode::Simd128_StArr_U4:
+    case Js::OpCode::Simd128_StArr_U8:
+    case Js::OpCode::Simd128_StArr_U16:
+    case Js::OpCode::Simd128_StArr_F4:
+    case Js::OpCode::Simd128_StArrConst_I4:
+    case Js::OpCode::Simd128_StArrConst_I8:
+    case Js::OpCode::Simd128_StArrConst_I16:
+    case Js::OpCode::Simd128_StArrConst_U4:
+    case Js::OpCode::Simd128_StArrConst_U8:
+    case Js::OpCode::Simd128_StArrConst_U16:
+    case Js::OpCode::Simd128_StArrConst_F4:
+        Assert(m_func->GetJITFunctionBody()->IsAsmJsMode());
+        return Simd128AsmJsLowerStoreElem(instr);
+    default:
+        break;
+    }
+    AssertOrFailFastMsg(false, "W8-NEON slice 1: unlowered Simd128 opcode, refusing to miscompile");
+    return nullptr;
+}
+
+IR::Instr *
+LowererMD::Simd128ConvertToLoad(IR::Opnd * dst, IR::Opnd * src, IR::Instr * instr)
+{
+    // Slice 1 supports only full 16-byte loads (dataWidth 16); partial loads
+    // (12/8/4) need MOVSD/MOVSS sequences that are not part of this slice.
+    Assert(instr->dataWidth == 16);
+    IR::Instr * instrPrev = instr->m_prev;
+    IR::Instr * newInstr = IR::Instr::New(GetAssignOp(src->GetType()), dst, src, instr->m_func);
+    instr->InsertBefore(newInstr);
+    LegalizeMD::LegalizeInstr(newInstr);
+    instr->Remove();
+    return instrPrev;
+}
+
+IR::Instr *
+LowererMD::Simd128ConvertToStore(IR::Opnd * dst, IR::Opnd * src, IR::Instr * instr)
+{
+    Assert(instr->dataWidth == 16);
+    IR::Instr * instrPrev = instr->m_prev;
+    IR::Instr * newInstr = IR::Instr::New(GetAssignOp(dst->GetType()), dst, src, instr->m_func);
+    // GetAssignOp returns MOVQ (dst mem, src reg) for stores.
+    newInstr->m_opcode = GetAssignOp(dst->GetType());
+    // For stores the IR shape is (dst mem, src reg); MOVQ handles mem dst.
+    // Rebuild in (dst,src) order for the encoder store path.
+    instr->InsertBefore(newInstr);
+    LegalizeMD::LegalizeInstr(newInstr);
+    instr->Remove();
+    return instrPrev;
+}
+
+IR::Instr *
+LowererMD::Simd128AsmJsLowerLoadElem(IR::Instr * instr)
+{
+    IR::Instr * instrPrev = instr->m_prev;
+    IR::Opnd * dst = instr->GetDst();
+    IR::Opnd * src1 = instr->GetSrc1();
+    Assert(dst && dst->IsSimd128() && src1->IsSimd128() && src1->IsIndirOpnd());
+    // Bounds: same branch shape as the scalar LowerAsmJsLdElemHelper
+    // (compare index against length, out-of-bounds goes to the helper
+    // block), but SIMD OOB is a trap, mirroring x64's isSimdLoad path.
+#if ENABLE_FAST_ARRAYBUFFER
+    const bool isWasmFast = CONFIG_FLAG(WasmFastArray) && m_func->GetJITFunctionBody()->IsWasmFunction();
+#else
+    const bool isWasmFast = false;
+#endif
+    if (!isWasmFast)
+    {
+        IR::RegOpnd * indexOpnd = instr->GetSrc1()->AsIndirOpnd()->GetIndexOpnd();
+        IR::LabelInstr * helperLabel = Lowerer::InsertLabel(true, instr);
+        IR::LabelInstr * loadLabel = Lowerer::InsertLabel(false, instr);
+        IR::LabelInstr * doneLabel = Lowerer::InsertLabel(false, instr);
+        IR::Opnd * cmpOpnd = indexOpnd ? (IR::Opnd*)indexOpnd : (IR::Opnd*)IR::IntConstOpnd::New(instr->GetSrc1()->AsIndirOpnd()->GetOffset(), TyUint32, m_func);
+        m_lowerer->InsertCompareBranch(cmpOpnd, instr->UnlinkSrc2(), Js::OpCode::BrGe_A, true, helperLabel, helperLabel);
+        Lowerer::InsertBranch(Js::OpCode::Br, loadLabel, helperLabel);
+        // SIMD OOB load is a trap (mirrors x64 LowerAsmJsLdElemHelper
+        // isSimdLoad). Insert at loadLabel so the call lands at the end of
+        // the helper block, before the in-bounds load.
+        m_lowerer->GenerateRuntimeError(loadLabel, JSERR_ArgumentOutOfRange, IR::HelperOp_RuntimeRangeError);
+        Lowerer::InsertBranch(Js::OpCode::Br, doneLabel, loadLabel);
+        (void)doneLabel;
+    }
+    return Simd128ConvertToLoad(dst, src1, instr);
+}
+
+IR::Instr *
+LowererMD::Simd128AsmJsLowerStoreElem(IR::Instr * instr)
+{
+    IR::Instr * instrPrev = instr->m_prev;
+    IR::Opnd * dst = instr->GetDst();
+    IR::Opnd * src1 = instr->GetSrc1();
+    Assert(dst && dst->IsIndirOpnd() && dst->IsSimd128());
+    Assert(src1 && src1->IsSimd128() && src1->IsRegOpnd());
+#if ENABLE_FAST_ARRAYBUFFER
+    const bool isWasmFast = CONFIG_FLAG(WasmFastArray) && m_func->GetJITFunctionBody()->IsWasmFunction();
+#else
+    const bool isWasmFast = false;
+#endif
+    if (!isWasmFast)
+    {
+        IR::RegOpnd * indexOpnd = dst->AsIndirOpnd()->GetIndexOpnd();
+        IR::LabelInstr * helperLabel = Lowerer::InsertLabel(true, instr);
+        IR::LabelInstr * storeLabel = Lowerer::InsertLabel(false, instr);
+        IR::LabelInstr * doneLabel = Lowerer::InsertLabel(false, instr);
+        IR::Opnd * cmpOpnd = indexOpnd ? (IR::Opnd*)indexOpnd : (IR::Opnd*)IR::IntConstOpnd::New(dst->AsIndirOpnd()->GetOffset(), TyUint32, m_func);
+        m_lowerer->InsertCompareBranch(cmpOpnd, instr->UnlinkSrc2(), Js::OpCode::BrGe_A, true, helperLabel, helperLabel);
+        Lowerer::InsertBranch(Js::OpCode::Br, storeLabel, helperLabel);
+        // SIMD OOB store is a trap (mirrors x64 LowerAsmJsStElemHelper
+        // isSimdStore). Insert at storeLabel so the call lands at the end
+        // of the helper block, before the in-bounds store.
+        m_lowerer->GenerateRuntimeError(storeLabel, JSERR_ArgumentOutOfRange, IR::HelperOp_RuntimeRangeError);
+        Lowerer::InsertBranch(Js::OpCode::Br, doneLabel, storeLabel);
+        (void)doneLabel;
+    }
+    return Simd128ConvertToStore(dst, src1, instr);
+}
+
+IR::Instr *
+LowererMD::Simd128LoadConst(IR::Instr *instr)
+{
+    Assert(instr->GetDst() && instr->m_opcode == Js::OpCode::Simd128_LdC);
+    Assert(instr->GetDst()->IsSimd128());
+    Assert(instr->GetSrc1()->IsSimd128());
+    Assert(instr->GetSrc1()->IsSimd128ConstOpnd());
+    Assert(instr->GetSrc2() == nullptr);
+    AsmJsSIMDValue value = instr->GetSrc1()->AsSimd128ConstOpnd()->m_value;
+    void *pValue = NativeCodeDataNewNoFixup(this->m_func->GetNativeCodeDataAllocator(), SIMDType<DataDesc_LowererMD_Simd128LoadConst>, value);
+    IR::Opnd *simdRef;
+    if (!m_func->IsOOPJIT())
+    {
+        simdRef = IR::MemRefOpnd::New((void *)pValue, instr->GetDst()->GetType(), instr->m_func);
+    }
+    else
+    {
+        int offset = NativeCodeData::GetDataTotalOffset(pValue);
+        simdRef = IR::IndirOpnd::New(IR::RegOpnd::New(m_func->GetTopFunc()->GetNativeCodeDataSym(), TyVar, m_func), offset, instr->GetDst()->GetType(),
+#if DBG
+            NativeCodeData::GetDataDescription(pValue, m_func->m_alloc),
+#endif
+            m_func, true);
+        m_lowerer->addToLiveOnBackEdgeSyms->Set(m_func->GetTopFunc()->GetNativeCodeDataSym()->m_id);
+    }
+    instr->ReplaceSrc1(simdRef);
+    instr->m_opcode = GetAssignOp(instr->GetDst()->GetType());
+    LegalizeMD::LegalizeInstr(instr);
+    return instr->m_prev;
+}
+#endif
 
 ///----------------------------------------------------------------------------
 ///
@@ -2946,6 +3430,57 @@ LowererMD::LowerRet(IR::Instr * retInstr)
             regType = TyMachReg;
             regNum = RETURN_REG;
             break;
+#ifdef ENABLE_WASM_SIMD
+        // W8-NEON slice 1: 128-bit returns in Q0 (GetRegReturnAsmJs).
+        case Js::AsmJsRetType::Int32x4:
+            regType = TySimd128I4;
+            regNum = GetRegReturnAsmJs(regType);
+            break;
+        case Js::AsmJsRetType::Int16x8:
+            regType = TySimd128I8;
+            regNum = GetRegReturnAsmJs(regType);
+            break;
+        case Js::AsmJsRetType::Int8x16:
+            regType = TySimd128I16;
+            regNum = GetRegReturnAsmJs(regType);
+            break;
+        case Js::AsmJsRetType::Uint32x4:
+            regType = TySimd128U4;
+            regNum = GetRegReturnAsmJs(regType);
+            break;
+        case Js::AsmJsRetType::Uint16x8:
+            regType = TySimd128U8;
+            regNum = GetRegReturnAsmJs(regType);
+            break;
+        case Js::AsmJsRetType::Uint8x16:
+            regType = TySimd128U16;
+            regNum = GetRegReturnAsmJs(regType);
+            break;
+        case Js::AsmJsRetType::Bool32x4:
+            regType = TySimd128B4;
+            regNum = GetRegReturnAsmJs(regType);
+            break;
+        case Js::AsmJsRetType::Bool16x8:
+            regType = TySimd128B8;
+            regNum = GetRegReturnAsmJs(regType);
+            break;
+        case Js::AsmJsRetType::Bool8x16:
+            regType = TySimd128B16;
+            regNum = GetRegReturnAsmJs(regType);
+            break;
+        case Js::AsmJsRetType::Float32x4:
+            regType = TySimd128F4;
+            regNum = GetRegReturnAsmJs(regType);
+            break;
+        case Js::AsmJsRetType::Float64x2:
+            regType = TySimd128D2;
+            regNum = GetRegReturnAsmJs(regType);
+            break;
+        case Js::AsmJsRetType::Int64x2:
+            regType = TySimd128I2;
+            regNum = GetRegReturnAsmJs(regType);
+            break;
+#endif
         default:
             Assert(UNREACHED);
             break;
