@@ -1048,8 +1048,9 @@ LowererMD::LowerCallArgs(IR::Instr *callInstr, IR::Instr *stackParamInsert, usho
         // docs section 3 internal convention is slot-based, floats as bits).
         // MOV float->int is illegal on ARM64; transfer bits via FMOV_GEN to a
         // same-size int reg first (f64->x, f32->x32). The bitcopy must not
-        // itself land in the fixed x0 (GeneratePreCallAsmJs parks the callee
-        // function object there): use fixed scratch x9, never an arg slot.
+        // itself land in the fixed x0 (LowerAsmJsCallI parks the callee
+        // function object there, post-f231bd844): use fixed scratch x9,
+        // never an arg slot.
         if (argInstr->GetSrc1()->IsFloat() && !opndParam->IsFloat())
         {
             IRType tempType = argInstr->GetSrc1()->IsFloat32() ? TyInt32 : TyMachReg;

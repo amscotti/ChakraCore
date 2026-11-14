@@ -1,6 +1,7 @@
 # Node-API (N-API) provider — implementation plan
 
-Status: **plan only; no implementation started.** Owner: unassigned.
+Status: **provider v1 landed on macOS arm64 (G0–G4 + G5-macOS-slice
+green 2026-11-13); Linux x64 wired, not run.** Owner: unassigned.
 Last updated: 2026-11-11. Base commit: `48b7db6d8`
 (`modernize/baseline`). This revision replaces the 2026-11-11 first
 draft; it folds in three audits (official Node 22 header inventory,

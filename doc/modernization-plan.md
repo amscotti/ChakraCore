@@ -77,7 +77,7 @@ handling have been validated before its results are used as a completion gate.
 | B6 | Windows feasibility and rollout; later target extensions | Stable build contracts | Separate expansion |
 | Z1 | One useful mixed C++/Zig unit behind a tested C ABI | B3; B4 if the unit ships on Linux | Optional pilot |
 | C1 | Qualified ES2025 test policy and triaged failures | Stable Mac build at B3 | Recorded (CONDITIONAL) |
-| C2 | Bounded compatibility batches and partial releases | C1; B4 before JIT-wide enablement | In progress (S4/S5/S10/S11/S7-matchAll/S9 named-groups + d-flag + duplicate named groups + lookbehind + ES2025 modifiers; S1 class elements complete: public/private instance+static fields, private methods/accessors incl. async/generator and statics, computed field names, `super` in field initializers, static blocks and direct-eval `super` early errors (integrated elements corpus now 5,892/5,897 after default BigInt; eval-code 454/0); S6a flag-on growable SAB/non-shared Atomics (default remains off); S6b flag-on `Atomics.pause` + single-thread `Atomics.waitAsync` (finite timeouts landed as S6d and cross-agent suspension as S6e); S6c flag-on BigInt64Array/BigUint64Array Atomics incl. BigInt wait/notify/waitAsync validation; S6d finite `Atomics.waitAsync` timeouts via an optional additive host timer callback; S6e flag-on cross-agent `Atomics.waitAsync` (native wake latch, registrant-thread monitor tasks, child message queues; POSIX `WScript.Quit` flush + raw-exit teardown; SAB default remains off); S8 immutable ArrayBuffer (`immutable`, `transferToImmutable`, `sliceToImmutable`, write protections; JIT/TTD residuals); S3-a Unicode property escapes under `u` on ICU 79.1 (deterministic code-point-set matcher); S3-b RegExp `v`/Unicode Sets mode incl. `\q`, set operations and properties-of-strings; S9 u-mode RegExp strictness/canonical astral semantics plus S9-b code-point-aware literal search/builtin flag derivation; S2 BigInt is now enabled by default after a full default/disable audit plus bytecode serialization and debugger-display repairs; S8 resizable ArrayBuffer + TypedArray tracking + Float16 (DataView/Math.f16round slice and Float16Array); S12 import attributes + JSON modules (additive host contract); S13 symbol keys, WeakRef, FinalizationRegistry; S14 P1–P7 — all closed on Mac no-JIT; Mac ARM64 JIT regression suites green 2026-10-31, test262-under-JIT and Linux claims still gated on B4) |
+| C2 | Bounded compatibility batches and partial releases | C1; B4 before JIT-wide enablement | In progress (S4/S5/S10/S11/S7-matchAll/S9 named-groups + d-flag + duplicate named groups + lookbehind + ES2025 modifiers; S1 class elements complete: public/private instance+static fields, private methods/accessors incl. async/generator and statics, computed field names, `super` in field initializers, static blocks and direct-eval `super` early errors (integrated elements corpus now 5,892/5,897 after default BigInt; eval-code 454/0); S6a flag-on growable SAB/non-shared Atomics (default remains off — pending-refresh: 7412beb56 flipped threads/SAB defaults ON, re-measurement owed); S6b flag-on `Atomics.pause` + single-thread `Atomics.waitAsync` (finite timeouts landed as S6d and cross-agent suspension as S6e); S6c flag-on BigInt64Array/BigUint64Array Atomics incl. BigInt wait/notify/waitAsync validation; S6d finite `Atomics.waitAsync` timeouts via an optional additive host timer callback; S6e flag-on cross-agent `Atomics.waitAsync` (native wake latch, registrant-thread monitor tasks, child message queues; POSIX `WScript.Quit` flush + raw-exit teardown; SAB default remains off — pending-refresh: 7412beb56 flipped threads/SAB defaults ON, re-measurement owed); S8 immutable ArrayBuffer (`immutable`, `transferToImmutable`, `sliceToImmutable`, write protections; JIT/TTD residuals); S3-a Unicode property escapes under `u` on ICU 79.1 (deterministic code-point-set matcher); S3-b RegExp `v`/Unicode Sets mode incl. `\q`, set operations and properties-of-strings; S9 u-mode RegExp strictness/canonical astral semantics plus S9-b code-point-aware literal search/builtin flag derivation; S2 BigInt is now enabled by default after a full default/disable audit plus bytecode serialization and debugger-display repairs; S8 resizable ArrayBuffer + TypedArray tracking + Float16 (DataView/Math.f16round slice and Float16Array); S12 import attributes + JSON modules (additive host contract); S13 symbol keys, WeakRef, FinalizationRegistry; S14 P1–P7 — all closed on Mac no-JIT; Mac ARM64 JIT regression suites green 2026-10-31, test262-under-JIT and Linux claims still gated on B4) |
 | C3 | Larger runtime/object-model feature projects | C1 and their feature prerequisites | Separate projects |
 | C4 | Verified full ES2025 core-language result | Required C2/C3 work and qualified runner | Long-term objective |
 
@@ -689,7 +689,9 @@ Decision/rollback points:
   flips, 0 regressions, every delta attributed), 8,751 marker-judged
   negatives, 1 downgrade, gates 2051/2103 green; the suite is not green
   and SAB/Atomics + the two RegExp flag surfaces are not default (the
-  three decisions are worth exactly −1,890) — [c4-gate.md](c4-gate.md),
+  three decisions are worth exactly −1,890 — pending-refresh: 7412beb56
+  flipped threads/SAB defaults ON so the SAB-off portion is stale until
+  re-measured; numbers not recomputed here) — [c4-gate.md](c4-gate.md),
   [c4-manifest.md](c4-manifest.md), [c4-run-evidence.md](c4-run-evidence.md),
   [c4-refresh.md](c4-refresh.md).*)
 
@@ -763,7 +765,9 @@ certified test262 refresh remain ([b4-d1-d4.md](b4-d1-d4.md) §5).
 **Blocked on you (the human), not on the code:**
 
 - **The three flag decisions — the single largest lever, exactly
-  −1,890 edition failures** (unchanged by all of A–E): flip
+  −1,890 edition failures** (unchanged by all of A–E; pending-refresh:
+  7412beb56 flipped threads/SAB defaults ON so the SAB-off portion is
+  stale until re-measured — numbers not recomputed here): flip
   `-ESSharedArrayBuffer` (1,176; recorded product/security decision,
   S6 — flag-on tail ≈87 per S6e), `-ES6RegExSymbols` (558) and
   `-ES6RegExPrototypeProperties` (156 of the rfm 202); each flip owes
@@ -1235,7 +1239,9 @@ moved 22/100 to 94/100 with 72/0 fail→pass; the 6 residue are the 4
 support stay in the remaining S8/C3 work. Gates moved
 1981/2033 → 1982/2034.
 S6 shows zero regressions under `-ESSharedArrayBuffer` but
-needs a product/security decision before any default, plus
+needs a product/security decision before any default (pending-refresh:
+defaults already flipped ON by 7412beb56; decision note stale until
+re-measured), plus
 waitAsync/growable/non-shared-Atomics work; S2's flagged path no longer
 has a host-crash class but its arithmetic/typed-array completion still
 stays C3-large. With the S1 class-elements surface complete (2026-10-20

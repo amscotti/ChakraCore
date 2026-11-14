@@ -103,9 +103,11 @@ must not touch them; provider tests use their own build step).
 
 - Plan v2 (audited, 26 task cards, waves 0–5, gates G0–G5):
   `doc/node-api-plan.md` — committed on this branch.
-- Implementation: **G0–G5 complete on macOS arm64** (2026-11-13).
+- Implementation: **G0–G4 + G5-macOS-slice complete on macOS arm64**
+  (2026-11-13); **G5 blocked on Linux execution** (plan §5 G5 requires
+  macOS arm64 *and* Linux x64 receipts — Linux is wired, not run).
   Provider `libChakraNodeApi` committed (f50b390d3) + conformance/
-  probes/receipts (b18392821). js-native-api 43/26/0, gate 2053/0,
+  probes/receipts (b18392821). js-native-api 43/26/0, gate 2054/0,
   probes 3117/profile, stress ALL PASS. Linux x64 WIRED
   (`tools/build/linux.zig` provider/host/check-nodeapi steps,
   platform-branched runners), NOT RUN — no native execution yet

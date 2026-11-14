@@ -43,9 +43,9 @@ Non-goals).
    (`-WasmSignExtends`, default on) + non-trapping float-to-int
    (`-WasmNontrapping`, default on) + multi-value + SIMD + threads.
    Threads are *built and tested* behind `-WasmThreads` /
-   `-ESSharedArrayBuffer` (both default off today); whether they are
-   ever default-on is the §9.2 product decision, not part of this
-   criterion.
+   `-ESSharedArrayBuffer` (both default on since §9.2 RESOLVED
+   default-on, 7412beb56); the default-on posture itself is recorded
+   in §9.2, not part of this criterion.
 2. The suites in §5 pass on darwin/arm64 in the variants each phase
    claims, with counts recorded in a receipt next to this file.
 3. asm.js (`"use asm"`) modules validate and run on darwin/arm64,
@@ -91,7 +91,7 @@ All paths below were read in-tree; line numbers are as of base commit
 | Layer | State | Evidence |
 |---|---|---|
 | Feature gate | `ASMJS_PLAT` defined only for `_M_IX86`/`_M_X64` && !`DISABLE_JIT`; `ENABLE_WASM`, `ENABLE_WASM_THREADS`, `ENABLE_WASM_SIMD` hang off it | `lib/Common/CommonDefines.h:721-728` |
-| Feature flags | Runtime flags refine the surface per module: `WasmSignExtends` default **true**, `WasmNontrapping` default **true**, `WasmThreads` default false, `ESSharedArrayBuffer` default false. `test/WasmSpec/features/` has `extends`, `nontrapping`, `threads` subdirs | `lib/Common/ConfigFlagsList.h:443,445-446,712,986-989` |
+| Feature flags | Runtime flags refine the surface per module: `WasmSignExtends` default **true**, `WasmNontrapping` default **true**, `WasmThreads` default **true**, `ESSharedArrayBuffer` default **true** (both flipped false→true per §9.2 RESOLVED, 7412beb56). `test/WasmSpec/features/` has `extends`, `nontrapping`, `threads` subdirs | `lib/Common/ConfigFlagsList.h:443,445-446,712,986-989` |
 | asm.js sources | All 8 `AsmJs*.cpp` (parser/validator, bytecode gen, module, link, types, utils, codegen, encoder) are wholesale `#ifdef ASMJS_PLAT` — they compile **empty** on ARM64. Enabling `ENABLE_WASM` alone does not bring up asm.js; the gate matrix (D2) must split arch-neutral asm.js logic from x86/x64 JIT emission | `lib/Runtime/Language/AsmJs.cpp:24`, `AsmJsByteCodeGenerator.cpp:8`, same guard in `AsmJs{CodeGenerator,Encoder,Link,Module,Types,Utils}.cpp` |
 | Fast array buffer | `ENABLE_FAST_ARRAYBUFFER` is Windows-only (`_WIN32 && TARGET_64 && !_M_ARM64`); token-wise there are 3 fast-array entries in `test/wasm` (1 enabled form `:68`, 2 disabled forms `:62,:360`) plus disabled-form variants in WasmSpec. Only the **enabled** form is inapplicable on macOS/Linux; disabled forms exercise D3's generic path and stay (D7 token map) | `lib/Common/CommonDefines.h:326` (TODO comment: "Disable VirtualTypedArray on ARM64 till we make sure it works correctly"); `test/wasm/rlexe.xml:62,68,360` |
 | Test runner | `arch` is force-set to `'x64'` on every non-Windows host, so the arm/arm64 `require_asmjs` exclusion never fires on this Mac, `exclude_arm64` tags never apply, and baseline `<condition><target>` overrides only ever compare against the `amd64` alias (an `arm64` target condition already exists in-tree and is dead code). Suites therefore *run* on Mac today and fail for missing engine support, not runner gating | `test/runtests.py:112-115` (force x64), `:188-189` (dead exclusion), `:159-162,676-694` (alias/override); dormant template `test/typedarray/rlexe.xml:149-160` |
@@ -110,8 +110,9 @@ so sub-agents do not chase ghosts):
 
 - There is no `test/wasmthreads` directory. Threads/atomics coverage
   is `-ESSharedArrayBuffer`-flagged entries inside `test/WasmSpec`
-  (12) and `test/wasm` (2). `ESSharedArrayBuffer` defaults false
-  (`lib/Common/ConfigFlagsList.h:712`).
+  (12) and `test/wasm` (2). `ESSharedArrayBuffer` defaults true
+  (flipped false→true per §9.2 RESOLVED, 7412beb56;
+  `lib/Common/ConfigFlagsList.h:712`).
 - The ARM64 JIT gap is 17 stubbed lowerer methods, not four.
 - The Mac source table is `tools/build/tables.zig`; there is no
   `tables_macos.zig`. The Linux table is the copy source.
@@ -249,9 +250,9 @@ selection mechanism:
   arch-dependent; each gets an include/exclude decision with reason
   in the manifest). W0 records the exact resulting P1 entry count
   in this plan — recorded 2026-11-11 from the generated manifest:
-  **388 P1 entries of 473** (WasmSpec 219, wasm 46, AsmJs 121,
-  ASMJSParser 2; remainder: P3 29, P2-pending 28, P2 14, excluded 9,
-  deferred 4). Candidate arithmetic from the 2026-11-11 swarm
+  **381 P1 entries of 481** (WasmSpec 211, wasm 47, AsmJs 121,
+  ASMJSParser 2; remainder: P3 32, P2-pending 31, P2 15, excluded 10,
+  deferred 12). Candidate arithmetic from the 2026-11-11 swarm
   (WasmSpec 214 incl. mathEx-featureless pin, before fast-array-
   disabled inclusion) is superseded by the generator's output.
   Later phases widen the set by feature, and each phase gate names
@@ -658,9 +659,8 @@ Objective: `ENABLE_WASM_THREADS` on ARM64: shared memories, wasm
 atomics, `wait`/`notify`.
 
 Precondition: none for building it (committed scope, D1); the
-enablement posture (§9.2 — flag-gated vs default-on) must be decided
-before W9 *ships*, and W9 work proceeds behind the existing flags
-until then. `ESSharedArrayBuffer` currently defaults false
+enablement posture (§9.2 — RESOLVED default-on, 7412beb56) was decided
+before W9 *shipped*. `ESSharedArrayBuffer` now defaults true
 (`ConfigFlagsList.h:712`); the 14 flagged test entries (WasmSpec 12
 + wasm 2) are the acceptance set.
 
@@ -717,9 +717,9 @@ Suite inventory (rlexe `<test>` entries, verified):
 |---|---|---|---|
 | `test/WasmSpec` | 231 | `require_backend, require_wasm` | P1 per D7 manifest set (mvp+sign-ext+nontrapping; threads entries wait for W9) → P2 full minus SIMD/threads → W9 completes |
 | `test/WasmSpec.MultiValue` | 2 | `require_backend, require_wasm` | P3/W7 (may pass earlier; claim only at W7) |
-| `test/wasm` | 67 | `require_backend, require_wasm` | P1 → P2 |
+| `test/wasm` | 75 | `require_backend, require_wasm` | P1 → P2 |
 | `test/wasm.simd` | 12 | `require_wasm, require_backend, exclude_xplat` | P3/W8 |
-| `test/AsmJs` | 144 | `require_asmjs` (per-suite) | P1 interp → P2 JIT |
+| `test/AsmJs` | 145 | `require_asmjs` (per-suite) | P1 interp → P2 JIT |
 | `test/AsmJsFloat` (`AsmJSFloat` dir casing varies) | 14 | `require_asmjs` | P2 |
 | `test/ASMJSParser` | 2 | `require_backend, require_asmjs` | P1 |
 
@@ -816,7 +816,7 @@ python3 runtests.py -binary "$PWD/../out/jit/bin/ch" --test --arm64 \
 ```
 
 The checked-in P1 gate counter is `tools/build/check_wasm_p1.py`.
-It runs the P1 command above (plus `-v --include-slow` so every P1 entry emits a joinable command-line block), joins each block to `test/wasm-arm64-manifest.json` by test-id via the `-dynamicprofilecache:profile.dpl.<id>` token with exact flags-suffix verification, and prints `P1 pass N/385` with failing P1 test-ids grouped by suite; it exits nonzero if any P1 entry failed or the join is incomplete (not yet wired into `zig build check`).
+It runs the P1 command above (plus `-v --include-slow` so every P1 entry emits a joinable command-line block), joins each block to `test/wasm-arm64-manifest.json` by test-id via the `-dynamicprofilecache:profile.dpl.<id>` token with exact flags-suffix verification, and prints `P1 pass N/381` with failing P1 test-ids grouped by suite; it exits nonzero if any P1 entry failed or the join is incomplete (not yet wired into `zig build check`).
 
 ```
 python3 tools/build/check_wasm_p1.py test/runtests.py out/jit/bin/ch
@@ -902,7 +902,7 @@ this codebase (splay).
    "skip, select `--no-wabt`" decision cannot meet the P1 gate: the
    entire WasmSpec harness (`test/WasmSpec/spec.js`) reaches the
    converter unconditionally (`WebAssembly.wabt.convertWast2Wasm`),
-   and `--no-wabt` does not cover that use — 183 of 388 P1 entries
+   and `--no-wabt` does not cover that use — 183 of 381 P1 entries
    fail at the harness with `convertWast2Wasm` undefined. The Mac
    `-Dwasm=true` build now compiles the vendored WABT
    (`lib/wabt`, `tools/build/tables.zig` `wabt_group` +
@@ -948,9 +948,9 @@ Phase status tracker (update only with gate evidence):
 
 | Phase | Status | Evidence |
 |---|---|---|
-| P0 | complete (2026-11-11) | D2 gates + `-Dwasm` option compile/link ON and OFF; `zig build check` 2053/0 unchanged; D7 manifest 388 P1/472; D8 runner probe validated (109/0 count discipline); ABI spec [wasm-arm64-abi.md](wasm-arm64-abi.md); inventory [wasm-arm64-inventory.md](wasm-arm64-inventory.md). Residual: TARGET_64/_M_* branch line-audit deferred to W2 (named in inventory) |
-| P1 | complete (2026-11-11) | `tools/build/check_wasm_p1.py` PASS 378/378 (complete join; deferrals with evidence: 6 jsapi + 2 select pre-existing x64-parity, 4 require_debugger; limits segments P2-pending on wall-time with solo passes recorded). W3 interpreter + WABT harness + W6 probes 10/10 under `-CollectGarbage`; zlib interpreted 98s score 1565; `zig build check` 2053/0 |
-| P2 | not started | — |
-| P3/W7 | not started | — |
-| P3/W8 | not started | — |
-| P3/W9 | not started (enablement posture §9.2 open; build is committed) | — |
+| P0 | complete (2026-11-11) | D2 gates + `-Dwasm` option compile/link ON and OFF; `zig build check` 2054/0 unchanged; D7 manifest 381 P1/481; D8 runner probe validated (109/0 count discipline); ABI spec [wasm-arm64-abi.md](wasm-arm64-abi.md); inventory [wasm-arm64-inventory.md](wasm-arm64-inventory.md). Residual: TARGET_64/_M_* branch line-audit deferred to W2 (named in inventory) |
+| P1 | complete (2026-11-11) | `tools/build/check_wasm_p1.py` PASS 378/378 (complete join; deferrals with evidence: 6 jsapi + 2 select pre-existing x64-parity, 4 require_debugger; limits segments P2-pending on wall-time with solo passes recorded). W3 interpreter + WABT harness + W6 probes 10/10 under `-CollectGarbage`; zlib interpreted 98s score 1565; `zig build check` 2054/0 |
+| P2 | complete (2026-11-12) | W4/W5 JIT lowering tranches (78a45af4f slices 1-2, 5f9e8c87f numeric + integration) + P2 `--jit` gate (bc70ffa9d) |
+| P3/W7 | complete (2026-11-12) | Multi-value interpreter path + W6 ownership record (d63309337); W7-JIT slice gap card (2e9b0d6d0) |
+| P3/W8 | complete (2026-11-12/13) | SIMD interpreter-first 12/12 wasm.simd + P1 381/381 (520b47738); NEON slices 1 (512d6643c), 2a (98fb750a1), 2b (0025305b0), 2c+2d+2e (124424139) |
+| P3/W9 | complete (2026-11-13; enablement §9.2 RESOLVED default-on) | Threads/atomics gate + LDAR/STLR lowering + stress probe (dc502c51a); defaults flipped true (7412beb56) |

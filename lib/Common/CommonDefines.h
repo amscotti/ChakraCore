@@ -741,11 +741,10 @@
 #define ENABLE_WASM_THREADS
 #endif
 
-// W8: SIMD is interpreter-first on ARM64 (NEON lowering is second-half
-// debt). W9: THREADS rides the same ARM64 disjunct; runtime flags
-// (-WasmThreads/-ESSharedArrayBuffer, both default off) still gate
-// all behavior, and ARM64 JIT atomic lowering lives behind the
-// LowerAtomic stubs until slice W9b lands (fail-fast, not silent).
+// W8: SIMD is interpreter-first on ARM64 with NEON JIT lowering landed.
+// W9 threads landed (LDAR/STLR lowering, dc502c51a); runtime flags
+// (-WasmThreads/-ESSharedArrayBuffer, both default on since 7412beb56)
+// still gate all behavior.
 #if defined(ASMJS_PLAT) || (defined(_M_ARM64) && defined(WASM_ARM64_PORT))
 #define ENABLE_WASM_SIMD
 #endif

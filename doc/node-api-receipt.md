@@ -1005,7 +1005,7 @@ Results table (provider vs differential; triage for the 8 remaining provider fai
 | `test/typedarray-bigint.js` | FAIL | PASS | plan §4.3 gap: BigInt64 typed arrays = napi_generic_failure |
 | `test/typedarray.js` | FAIL | PASS | plan §4.3 gap: BigInt64 typed arrays = napi_generic_failure |
 
-### 11.3 Failure triage (the 13)
+### 11.3 Failure triage (the 8)
 
 1. **Numeric → name coercion gap (4):** `basic_types/value.js`,
    `globalObject/global_object_get_property.js`,
@@ -1208,7 +1208,7 @@ What was fixed in this follow-up (status-conformance bugs, not text):
 Probe tallies updated: `objects` 326 -> 341, `coerce` 430 -> 434
 per profile. All 14 probes green on `test` (jit runner note in §5
 above still applies to errors/host; isolated jit binaries verified
-passing). `zig build check` still 2053/0; js-native-api matrix still
+passing). `zig build check` still 2054/0; js-native-api matrix still
 43/26/0; stress still ALL PASS.
 
 ### 12. Linux x64 wiring (2026-11-13; WIRED, NOT RUN)
