@@ -387,6 +387,29 @@ runners (separate WORK dirs per profile), not to this packaging
 slice, and is left as a follow-up. Test-profile probes are
 unaffected and all green.
 
+Fresh-build evidence 2026-11-14 (F5 lane, this tree; F2 credit for the
+diagnosis): the plain-jit profile build broke at W8-slice-1 —
+`lib/Backend/arm64/LowerMD.cpp` referenced `Js::AsmJsRetType` with
+`ENABLE_ASMJS` off. Local JIT validation always used `-Dwasm=true`
+and no CI leg builds plain `-Dprofile=jit`, so it broke unnoticed
+(F2 documented the breakage and the workaround). Fixed 2026-11-14 by
+compiling the `IsAsmJsMode()`-gated SIMD detection out under
+`#ifdef ENABLE_ASMJS` (unreachable by construction when off; no
+asm.js function can exist). `zig build -Dprofile=jit libChakraNodeApi`
+and full `zig build -Dprofile=jit` are green on engines built fresh in
+this tree (`out/jit/bin/libChakraCore.dylib`,
+`zig-out/bin/libChakraCore.dylib`). Re-anchored probes with
+`SKIP_BUILD=1` on those engines: `run_host_probe.sh` reports
+`run_host_probe: ALL PASS (test + jit)` (`host_probe: 88 checks,
+0 failures` on both profiles); `run_errors_probe.sh` reports
+`errors_probe: 179 checks, 0 failures` on the test leg, the shared-dir
+jit leg still `Killed: 9` (the pre-existing runner shape above,
+unchanged), and the same jit engine reports
+`errors_probe: 179 checks, 0 failures` in an isolated dir (both
+SIGABRT probes rc=134 as expected). CI: the `zig-macos.yml` nodeapi
+job now also builds `-Dprofile=jit libChakraNodeApi` (new plain-jit
+guard step), so this profile cannot regress silently again.
+
 Not run on this host (not claimed): `scopes_probe`, `teardown_probe`,
 `env_addr_reuse_probe` have no `run_*.sh` runner (legacy
 self-contained drivers superseded by the runner probes above) and

@@ -1628,7 +1628,11 @@ ARM64StackLayout::ARM64StackLayout(Func* func)
         // saves move to the 16-byte SavedSimd area (Q8-15, same RegNums as
         // D8-15) so full 128-bit values survive calls. Non-SIMD functions
         // keep the scalar layout bit-identical.
+        // No asm.js function can exist with ENABLE_ASMJS off, so the SIMD
+        // detection below is compiled out there (Js::AsmJsRetType and the
+        // AsmJsJITInfo accessors only exist under ENABLE_ASMJS).
         bool funcUsesSimd = false;
+#ifdef ENABLE_ASMJS
         if (func->GetJITFunctionBody()->IsAsmJsMode())
         {
             const AsmJsJITInfo *info = func->GetJITFunctionBody()->GetAsmJsInfo();
@@ -1655,6 +1659,7 @@ ARM64StackLayout::ARM64StackLayout(Func* func)
                     || info->GetSimdConstCount() > 0;
             }
         }
+#endif
         if (funcUsesSimd && !this->m_savedDoubles.IsEmpty())
         {
             this->m_savedSimd = this->m_savedDoubles;
@@ -1709,6 +1714,9 @@ ARM64StackLayout::ARM64StackLayout(Func* func)
         // W8-NEON slice 1: home Q0-7 (16B each) for SIMD functions that call.
         // Q params arrive in Q0-7 (GetParamReg); a call clobbers Q0-7
         // (caller-saved), so they are homed like the int params.
+        // Compiled out with ENABLE_ASMJS off: funcUsesSimd is always false
+        // there, so this block is unreachable by construction.
+#ifdef ENABLE_ASMJS
         if (funcUsesSimd && this->m_hasCalls)
         {
             const AsmJsJITInfo *info2 = func->GetJITFunctionBody()->GetAsmJsInfo();
@@ -1737,6 +1745,7 @@ ARM64StackLayout::ARM64StackLayout(Func* func)
             if (simdHomed > 8) simdHomed = 8;
             this->m_homedSimd.SetRange(RegQ0, simdHomed);
         }
+#endif
     }
 }
 

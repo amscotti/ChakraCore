@@ -398,6 +398,10 @@ jobs:
         run: |
           set -euo pipefail
           mise exec -- zig build libChakraNodeApi 2>&1 | tee ci-evidence/nodeapi-provider.log
+      - name: zig build -Dprofile=jit libChakraNodeApi (plain-jit guard)
+        run: |
+          set -euo pipefail
+          mise exec -- zig build -Dprofile=jit libChakraNodeApi 2>&1 | tee ci-evidence/nodeapi-provider-jit.log
       - name: zig build ch-nodeapi
         run: |
           set -euo pipefail
@@ -411,7 +415,8 @@ jobs:
         run: |
           set -euo pipefail
           grep -F 'check_nodeapi: PASS' ci-evidence/nodeapi-check.log
-          line="nodeapi: provider=built host=built exports=PASS"
+          test -s ci-evidence/nodeapi-provider-jit.log
+          line="nodeapi: provider=built(+jit) host=built exports=PASS"
           echo "$line" | tee ci-evidence/tally.txt
           echo "tally=$line" >> "$GITHUB_OUTPUT"
           echo "- $line" >> "$GITHUB_STEP_SUMMARY"
