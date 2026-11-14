@@ -359,56 +359,49 @@ Tallies (checks per profile; `test` and `jit` identical where PASS):
 | binary (N3.1) | 226 | PASS | PASS |
 | buffers (N4.2) | 102 | PASS | PASS |
 | coerce (N2.6 incl. boxed-BigInt) | 434 | PASS | PASS |
-| errors (N2.5) | 179 | PASS | see below |
+| errors (N2.5) | 179 | PASS | PASS |
 | functions (N2.4) | 187 | PASS | PASS |
 | gate (N1.5 pump/closing) | 51 | PASS | PASS |
-| host (N4.1) | 88 | PASS | see below |
+| host (N4.1) | 88 | PASS | PASS |
 | objects (N2.3) | 341 | PASS | PASS |
 | promise_script (N3.4/N3.5) | 195 | PASS | PASS |
 | refs (N1.3) | 211 | PASS | PASS |
 | values (N2.1/N2.2) | 407 | PASS | PASS |
 | wrap (N3.2/N3.3) | 211 | PASS | PASS |
 
-Total: 3117 checks per profile (6234 across both) when jit is run
-isolated (see runner note). Zero probe failures in the checks
-themselves.
+Total: 3117 checks per profile (6234 across both). Zero probe failures
+in the checks themselves.
 
-Runner note (pre-existing, NOT an N5.5 regression): `run_errors_probe.sh`
-and `run_host_probe.sh` use a shared `WORK/libChakraCore.dylib` for
-both profiles; the second (`jit`) overwrite of the ad-hoc-signed
-dylib invalidates its code signature and `dyld` kills the binary
-(`EXC_BAD_ACCESS SIGKILL (Code Signature Invalid)`, ad-hoc
-`linker-signed` engines). The `jit` leg therefore reports
-`main probe failed (jit)` under the runner. In isolated dirs the
-same binaries pass (`errors_probe` 179/179, `host_probe` 88/88 on
-the `jit` engine — verified 2026-11-12). Crash reports for this
-runner shape predate N5.5 (Nov 11). The fix belongs to the probe
-runners (separate WORK dirs per profile), not to this packaging
-slice, and is left as a follow-up. Test-profile probes are
-unaffected and all green.
+Runner note (fixed 2026-11-14, F2 lane; was pre-existing, NOT an N5.5
+regression): `run_errors_probe.sh` and `run_host_probe.sh` shared one
+`WORK/libChakraCore.dylib` across profiles, so the second (`jit`)
+in-place overwrite of the ad-hoc-signed dylib invalidated its code
+signature and `dyld` killed the binary (`EXC_BAD_ACCESS SIGKILL
+(Code Signature Invalid)`). Each runner now builds+runs each profile
+in its own subdir (`$WORK/test`, `$WORK/jit`), so the per-profile
+engine-dylib copy never overwrites the other profile's file; CLI and
+output format are unchanged. Verified on merged mainline with full
+runner builds (each runner builds both profile engines itself):
+`run_errors_probe: ALL PASS (test + jit)` (`179 checks,
+0 failures` per profile), `run_host_probe: ALL PASS (test + jit)`
+(`88 checks, 0 failures` per profile), values-probe control still
+green (F2 verified the same tallies with `SKIP_BUILD=1` on staged
+engines before the merge).
 
-Fresh-build evidence 2026-11-14 (F5 lane, this tree; F2 credit for the
-diagnosis): the plain-jit profile build broke at W8-slice-1 —
-`lib/Backend/arm64/LowerMD.cpp` referenced `Js::AsmJsRetType` with
-`ENABLE_ASMJS` off. Local JIT validation always used `-Dwasm=true`
-and no CI leg builds plain `-Dprofile=jit`, so it broke unnoticed
-(F2 documented the breakage and the workaround). Fixed 2026-11-14 by
-compiling the `IsAsmJsMode()`-gated SIMD detection out under
-`#ifdef ENABLE_ASMJS` (unreachable by construction when off; no
-asm.js function can exist). `zig build -Dprofile=jit libChakraNodeApi`
-and full `zig build -Dprofile=jit` are green on engines built fresh in
-this tree (`out/jit/bin/libChakraCore.dylib`,
-`zig-out/bin/libChakraCore.dylib`). Re-anchored probes with
-`SKIP_BUILD=1` on those engines: `run_host_probe.sh` reports
-`run_host_probe: ALL PASS (test + jit)` (`host_probe: 88 checks,
-0 failures` on both profiles); `run_errors_probe.sh` reports
-`errors_probe: 179 checks, 0 failures` on the test leg, the shared-dir
-jit leg still `Killed: 9` (the pre-existing runner shape above,
-unchanged), and the same jit engine reports
-`errors_probe: 179 checks, 0 failures` in an isolated dir (both
-SIGABRT probes rc=134 as expected). CI: the `zig-macos.yml` nodeapi
-job now also builds `-Dprofile=jit libChakraNodeApi` (new plain-jit
-guard step), so this profile cannot regress silently again.
+Plain-jit build break found through this lane (F5, fixed same day):
+the `-Dprofile=jit` build without `-Dwasm=true` had been broken
+since W8-slice-1 — `lib/Backend/arm64/LowerMD.cpp` referenced
+`Js::AsmJsRetType` with `ENABLE_ASMJS` off (local JIT validation
+always used `-Dwasm=true`, and no CI leg builds plain jit, so it
+broke unnoticed). Fixed by compiling the `IsAsmJsMode()`-gated SIMD
+detection out under `#ifdef ENABLE_ASMJS` (unreachable by
+construction when off; token-identical when on).
+`zig build -Dprofile=jit libChakraNodeApi` and full
+`zig build -Dprofile=jit` are green on fresh engines, and the
+re-anchored `SKIP_BUILD=1` probes above ran on those engines. CI: the
+`zig-macos.yml` nodeapi job now also builds
+`-Dprofile=jit libChakraNodeApi` (plain-jit guard step), so this
+profile cannot regress silently again.
 
 Not run on this host (not claimed): `scopes_probe`, `teardown_probe`,
 `env_addr_reuse_probe` have no `run_*.sh` runner (legacy

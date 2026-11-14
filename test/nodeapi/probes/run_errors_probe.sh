@@ -115,7 +115,16 @@ run_profile() {
 }
 
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/errors-probe.XXXXXX")
+WORK_TEST="$WORK/test"
+WORK_JIT="$WORK/jit"
+mkdir -p "$WORK_TEST" "$WORK_JIT"
 trap 'rm -rf "$WORK"' EXIT
+# NOTE: each profile builds+runs in its own subdir so the per-profile
+# engine-dylib copy (dirname(out_bin)/$ENGINE_NAME, resolved via
+# @executable_path) never overwrites the other profile's file in place.
+# Overwriting a shared WORK/libChakraCore.dylib trips stale macOS
+# code-signature enforcement and dyld SIGKILLs the second (jit) leg
+# (EXC_BAD_ACCESS, Code Signature Invalid).
 
 if [ "${SKIP_BUILD:-0}" != "1" ]; then
   echo "===== building test-profile engine (zig build libChakraNodeApi) ====="
@@ -129,9 +138,9 @@ if [ "${SKIP_BUILD:-0}" != "1" ]; then
 fi
 
 rc=0
-run_profile "test" "$REPO/$ENGINE_TEST" "$WORK/errors-probe-test" || rc=$?
+run_profile "test" "$REPO/$ENGINE_TEST" "$WORK_TEST/errors-probe-test" || rc=$?
 if [ "$(uname -s)" != "Linux" ]; then
-  run_profile "jit" "$REPO/out/jit/bin/libChakraCore.dylib" "$WORK/errors-probe-jit" || rc=$?
+  run_profile "jit" "$REPO/out/jit/bin/libChakraCore.dylib" "$WORK_JIT/errors-probe-jit" || rc=$?
 fi
 
 if [ $rc -ne 0 ]; then
