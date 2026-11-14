@@ -10,9 +10,10 @@ T, normalized by stripping one leading underscore on Mach-O)
 against tools/build/nodeapi_exports.txt. Fails on any missing or
 extra PROVIDER symbol. Also verifies every allowlisted symbol is in
 the normative inventory (doc/node-api-inventory.md, 145 at
-NAPI_VERSION=8) or the private host API (plan §3.2), and that the
-exports file matches the generator
-(tools/build/gen_nodeapi_exports.py --check).
+NAPI_VERSION=8) or the private host API (plan §3.2). The
+exports-file-vs-generator check
+(tools/build/gen_nodeapi_exports.py --check) is a separate step
+owned by `zig build check-nodeapi`, not run by this script.
 
 Full coverage (HIGH-5): the allowlist is the full surface.
 All 145 inventory symbols are landed and must appear in the dylib;

@@ -556,34 +556,18 @@ pub fn build(b: *std.Build) void {
     const installed_ch: std.Build.LazyPath = .{ .relative = .{ .base = .install_bin, .sub_path = "ch" } };
 
     // Node-API provider (plan N1.1 / PR-3, Waves 1-5): libChakraNodeApi.so,
-    // ELF mirror of the macOS provider step in build.zig. Same 16 TUs,
-    // same flags modulo toolchain spellings (-target/sysroot/mcpu/-F are
-    // macOS-only; no -Werror — the provider mirrors the Mac provider's
-    // warning policy, not the engine's). Hidden visibility so exactly the
-    // 145 napi_* (NAPI_EXTERN default) + 5 chakra_nodeapi_* (explicit
-    // default on definitions) survive. Links against libChakraCore.so
-    // (DT_NEEDED); --no-undefined proves the Js* set at build time (all
-    // needed Js* are in the committed linux exports set). Not part of the
-    // default build; `zig build libChakraNodeApi` on Linux builds it.
+    // ELF mirror of the macOS provider step in build.zig. Same 16 TUs
+    // (tables.zig nodeapi_provider_tus, shared via mac_tables), same flags
+    // modulo toolchain spellings (-target/sysroot/mcpu/-F are macOS-only;
+    // no -Werror — the provider mirrors the Mac provider's warning policy,
+    // not the engine's). Hidden visibility so exactly the 145 napi_*
+    // (NAPI_EXTERN default) + 5 chakra_nodeapi_* (explicit default on
+    // definitions) survive. Links against libChakraCore.so (DT_NEEDED);
+    // --no-undefined proves the Js* set at build time (all needed Js* are in
+    // the committed linux exports set). Not part of the default build;
+    // `zig build libChakraNodeApi` on Linux builds it.
     var prov_objs: std.ArrayList(std.Build.LazyPath) = .empty;
-    for ([_][]const u8{
-        "lib/NodeApi/NodeApiEnv.cpp",
-        "lib/NodeApi/NodeApiScopes.cpp",
-        "lib/NodeApi/NodeApiLifetime.cpp",
-        "lib/NodeApi/NodeApiRefs.cpp",
-        "lib/NodeApi/NodeApiValues.cpp",
-        "lib/NodeApi/NodeApiErrorsImpl.cpp",
-        "lib/NodeApi/NodeApiObjects.cpp",
-        "lib/NodeApi/NodeApiFunctions.cpp",
-        "lib/NodeApi/NodeApiBinary.cpp",
-        "lib/NodeApi/NodeApiPromise.cpp",
-        "lib/NodeApi/NodeApiScript.cpp",
-        "lib/NodeApi/NodeApiWrap.cpp",
-        "lib/NodeApi/NodeApiBuffers.cpp",
-        "lib/NodeApi/NodeApiAsync.cpp",
-        "lib/NodeApi/NodeApiAsyncContext.cpp",
-        "lib/NodeApi/NodeApiHost.cpp",
-    }) |src| {
+    for (mac_tables.nodeapi_provider_tus) |src| {
         const tu = b.addSystemCommand(&.{ ctx.zig_exe, "c++" });
         tu.addArg("-target");
         tu.addArg(profile_target);
@@ -732,7 +716,7 @@ pub fn build(b: *std.Build) void {
 
     // Negative controls for the Linux gates (mirrors check-selftest).
     const selftest_top = b.step("check-selftest", "Negative controls for every Linux check gate (not part of the default build)");
-    for ([_][]const u8{ "check_regression_linux.py", "check_smoke_linux.py", "check_metadata_linux.py", "check_native.py" }) |script| {
+    for ([_][]const u8{ "check_regression_linux.py", "check_smoke_linux.py", "check_metadata_linux.py", "check_native.py", "check_nodeapi.py", "gen_nodeapi_exports.py" }) |script| {
         const st = b.addSystemCommand(&.{python});
         st.addFileArg(b.path(b.fmt("tools/build/{s}", .{script})));
         st.addArg("--self-test");

@@ -375,6 +375,53 @@ jobs:
           name: incremental
           path: ci-evidence/
 
+  nodeapi:
+    name: nodeapi (provider + host + exports gate)
+    runs-on: macos-26
+    timeout-minutes: 90
+    outputs:
+      tally: ${{ steps.tally.outputs.tally }}
+    steps:
+      - *checkout
+      - *mise
+      - name: Assert Zig 0.17.0
+        run: |
+          set -euo pipefail
+          test "$(mise exec -- zig version)" = "0.17.0"
+      - *xcode
+      - *icu
+      - name: Record inputs (plan 2.1)
+        run: |
+          set -euo pipefail
+          python3 tools/build/ci_record.py inputs --profile test --out ci-evidence
+      - name: zig build libChakraNodeApi
+        run: |
+          set -euo pipefail
+          mise exec -- zig build libChakraNodeApi 2>&1 | tee ci-evidence/nodeapi-provider.log
+      - name: zig build ch-nodeapi
+        run: |
+          set -euo pipefail
+          mise exec -- zig build ch-nodeapi 2>&1 | tee ci-evidence/nodeapi-host.log
+      - name: zig build check-nodeapi
+        run: |
+          set -euo pipefail
+          mise exec -- zig build check-nodeapi 2>&1 | tee ci-evidence/nodeapi-check.log
+      - name: Tally gate outputs
+        id: tally
+        run: |
+          set -euo pipefail
+          grep -F 'check_nodeapi: PASS' ci-evidence/nodeapi-check.log
+          line="nodeapi: provider=built host=built exports=PASS"
+          echo "$line" | tee ci-evidence/tally.txt
+          echo "tally=$line" >> "$GITHUB_OUTPUT"
+          echo "- $line" >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload nodeapi evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: nodeapi
+          path: ci-evidence/
+
   record:
     name: record (assemble B3 evidence bundle)
     # macos-26 for runner uniformity with the legs (validated); ubuntu-latest is a future cost option — this job is download+bash only.

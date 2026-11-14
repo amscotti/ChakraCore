@@ -76,8 +76,12 @@ static void UnregisterAsyncHandle(void* handle_value) {
 // Lifetime_SetAsyncPump and retained after destroy (so the probe
 // can query violation post-destroy via pointer value) until
 // Lifetime_ClearAsyncPump or the next set for the same value
-// (address reuse) overwrites it. The pump runs on the owner
-// thread during step 4 with no global lock held.
+// (address reuse) overwrites it; NO erase at destroy (step 7),
+// which would break the post-destroy query contract. Retention
+// bound: one O(1) small entry per distinct env address value;
+// allocator reuse keeps a single-thread create/destroy loop O(1)
+// (see the ownership record in NodeApiLifetime.h). The pump runs
+// on the owner thread during step 4 with no global lock held.
 struct AsyncPumpConfig {
   void (*pump)(void* host_ctx) = nullptr;
   void* host_ctx = nullptr;
@@ -341,8 +345,11 @@ void Lifetime_DiscardEnvState(NodeEnv* env) {
   // Pump config/violation are retained by pointer value after
   // discard (map keyed by env value) so the probe can query
   // Lifetime_AsyncViolation(env_value) post-destroy without
-  // dereferencing the freed NodeEnv. The next Set for a reused
+  // dereferencing the freed NodeEnv; erasing here would break
+  // that post-destroy query contract. The next Set for a reused
   // address overwrites, and Lifetime_ClearAsyncPump erases.
+  // Retention bound: one O(1) small entry per distinct env address
+  // (see the ownership record in NodeApiLifetime.h).
   for (auto* h : env->retired_async_handles) {
     UnregisterAsyncHandle(static_cast<void*>(h));
     delete h;

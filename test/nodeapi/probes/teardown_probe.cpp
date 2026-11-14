@@ -12,9 +12,10 @@
 // Asserts (each MUST fail the probe on mismatch, never merely print):
 //   P1-7 instance-data wart: set A then replace with B calls the old
 //     finalizer ZERO times; destroy calls ONLY the current (B) once.
-//   P1-1 ordering: wrap_drain > sync LIFO > async reverse > instance
-//     finalizer > refs_scopes_release, log compared VERBATIM (plus
-//     closing/dead bookends).
+//   P1-1 ordering: wrap_drain > sync LIFO > async reverse >
+//     refs_scopes_release > instance finalizer (N5.1 amendment:
+//     instance runs AFTER the wraps backstop, step 6d, before dead),
+//     log compared VERBATIM (plus closing/dead bookends).
 //   Exactly-once: each hook/finalizer fires once across destroy.
 //   Remove-unknown => napi_invalid_arg (sync pair, async NULL,
 //     async double-remove, async post-destroy handle value).
@@ -358,9 +359,10 @@ int main() {
     std::vector<std::string> expected = {
         "closing", "wrap_drain",
         "sync:S3", "sync:S2", "sync:S1",
+        "refs_scopes_release",
         "instance:FinB",
-        "refs_scopes_release", "dead"};
-    LogEquals(expected, "P1-1: sync LIFO + instance order verbatim");
+        "dead"};
+    LogEquals(expected, "P1-1: sync LIFO order verbatim (N5.1: instance after refs)");
   }
   std::printf("phase3 (P1-1 sync): done\n");
 
@@ -392,9 +394,10 @@ int main() {
     std::vector<std::string> expected = {
         "closing", "wrap_drain",
         "async:A2", "async:A1",
+        "refs_scopes_release",
         "instance:FinB",
-        "refs_scopes_release", "dead"};
-    LogEquals(expected, "async: reverse order verbatim (no sync hooks)");
+        "dead"};
+    LogEquals(expected, "async: reverse order verbatim (no sync hooks; N5.1 instance after refs)");
   }
   std::printf("phase4 (async): done\n");
 
@@ -420,9 +423,10 @@ int main() {
         "closing", "wrap_drain",
         "sync:S2", "sync:S1",
         "async:A2", "async:A1",
+        "refs_scopes_release",
         "instance:FinB",
-        "refs_scopes_release", "dead"};
-    LogEquals(expected, "P1-1: full verbatim wrap>sync>async>instance>refs");
+        "dead"};
+    LogEquals(expected, "P1-1: full verbatim wrap>sync>async>refs>instance (N5.1)");
   }
   std::printf("phase5 (P1-1 full): done\n");
 

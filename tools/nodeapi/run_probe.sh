@@ -13,11 +13,27 @@
 # Env overrides (same names as the commands they wrap):
 #   CC_GATE_LOCK=path  GATE lock script (default /tmp/opencode/cc-gate-lock.sh)
 #   SKIP_BUILD=1       reuse already-built engine dylibs (CI fast path)
+#   NODEAPI_TARGET=t   zig -target (default per platform branch below)
+#   NODEAPI_SDK=path   SDK sysroot (default: xcrun on macOS, empty on Linux)
 #
 # The driver is a self-contained C++ driver using the private host API shape
-# (not an addon through ch-nodeapi) because the real provider (N1.1) has not
-# landed; see test/nodeapi/probes/scopes_probe.cpp header. Exit code is
-# nonzero if either profile's run fails.
+# (not an addon through ch-nodeapi): scopes_probe predates the real N1.1 env
+# and drives ScopesProbe_CreateEnv via scopes_shim.cpp, which provides the
+# nodeapi::CheckAlive/SetLastError symbols NodeApiScopes.cpp links against.
+# Linking NodeApiEnv.cpp would duplicate those symbols, so the Scopes+shim
+# TU set is the current (correct) set for this probe, not a pre-Env stale
+# set; see test/nodeapi/probes/scopes_shim.h. Exit code is nonzero if either
+# profile's run fails.
+#
+# Supported entry point: the canonical per-probe runner is
+# test/nodeapi/probes/run_scopes_probe.sh (same TU set, platform-branched).
+# This file is kept for history and kept runnable; new automation should call
+# the probes-dir runner. Note: test/nodeapi/run_matrix.py does NOT supersede
+# this probe -- it runs vendored addon targets (.node) via ch-nodeapi, not
+# this self-contained scopes driver.
+#
+# The GC probes in scopes_probe.cpp are optnone (conservative stack scan is
+# optimizer-sensitive at -O3; the provider TU stays at the profile default).
 
 set -eu
 
@@ -26,23 +42,31 @@ cd "$REPO"
 
 GATE=${CC_GATE_LOCK:-/tmp/opencode/cc-gate-lock.sh}
 
-TARGET="aarch64-macos.26.0"
-SDK=$(xcrun --show-sdk-path 2>/dev/null || true)
-if [ -z "$SDK" ]; then
-  echo "run_probe: cannot locate macOS SDK (xcrun failed)" >&2
-  exit 1
+# Platform branch (Linux x86_64 mirror of the macOS ARM64 shape).
+# Linux: test profile only (tools/build/linux.zig has no jit);
+# the jit leg below is skipped on Linux. Flags mirror linux.zig's
+# provider/host compiles (ELF spellings: no sysroot/mcpu/frameworks).
+if [ "$(uname -s)" = "Linux" ]; then
+  TARGET="${NODEAPI_TARGET:-x86_64-linux-gnu}"
+  SDK="${NODEAPI_SDK:-}"
+  ENGINE_NAME="libChakraCore.so"
+  ENGINE_TEST="zig-out/bin/libChakraCore.so"
+  LINK_SYSTEM="-ldl -lpthread"
+  RPATH_FLAG="-Wl,-rpath,\$ORIGIN"
+  CXXFLAGS="-target $TARGET -std=gnu++17 -O3 -g -Wno-date-time -DNAPI_VERSION=8 -DCHAKRA_NODEAPI_TEST_HOOKS -Ilib/Jsrt -Iinclude/nodeapi -Ilib/NodeApi -Itest/nodeapi/probes -isystem /usr/include"
+else
+  TARGET="${NODEAPI_TARGET:-aarch64-macos.26.0}"
+  SDK="${NODEAPI_SDK:-$(xcrun --show-sdk-path 2>/dev/null || true)}"
+  if [ -z "$SDK" ]; then
+    echo "run_probe: cannot locate macOS SDK (xcrun failed)" >&2
+    exit 1
+  fi
+  ENGINE_NAME="libChakraCore.dylib"
+  ENGINE_TEST="zig-out/bin/libChakraCore.dylib"
+  LINK_SYSTEM="-framework CoreFoundation -framework Security"
+  RPATH_FLAG="-Wl,-rpath,@executable_path"
+  CXXFLAGS="-target $TARGET --sysroot $SDK -std=gnu++17 -O3 -g -mcpu=apple_m1 -Wno-date-time -DNAPI_VERSION=8 -DCHAKRA_NODEAPI_TEST_HOOKS -Ilib/Jsrt -Iinclude/nodeapi -Ilib/NodeApi -Itest/nodeapi/probes -isystem $SDK/usr/include -F/System/Library/Frameworks"
 fi
-
-# Mirror of build.zig's ch-nodeapi compile/link flags (test profile values):
-# -std=gnu++17 -DNAPI_VERSION=8 -mcpu=apple_m1, includes lib/Jsrt +
-# include/nodeapi + lib/NodeApi. Probe adds -DCHAKRA_NODEAPI_TEST_HOOKS
-# (R-REF-14 root counter) and the probes include dir. The GC probes in
-# scopes_probe.cpp are optnone (conservative stack scan is optimizer-
-# sensitive at -O3; the provider TU stays at the profile default).
-CXXFLAGS="-target $TARGET --sysroot $SDK -std=gnu++17 -O3 -g -mcpu=apple_m1 -Wno-date-time \
-  -DNAPI_VERSION=8 -DCHAKRA_NODEAPI_TEST_HOOKS \
-  -Ilib/Jsrt -Iinclude/nodeapi -Ilib/NodeApi -Itest/nodeapi/probes \
-  -isystem $SDK/usr/include -F/System/Library/Frameworks"
 
 run_profile() {
   profile="$1"
@@ -61,9 +85,10 @@ run_profile() {
     test/nodeapi/probes/scopes_shim.cpp \
     test/nodeapi/probes/scopes_probe.cpp \
     "$engine_lib" \
-    -framework CoreFoundation -framework Security \
-    -Wl,-rpath,"$(dirname "$engine_lib")" \
+    $LINK_SYSTEM \
+    $RPATH_FLAG \
     -o "$out_bin"
+  cp "$engine_lib" "$(dirname "$out_bin")/$ENGINE_NAME"
   "$out_bin"
 }
 
@@ -74,16 +99,22 @@ trap 'rm -rf "$WORK"' EXIT
 if [ "${SKIP_BUILD:-0}" != "1" ]; then
   echo "===== building test-profile engine (zig build ch-nodeapi) ====="
   "$GATE" mise exec -- zig build ch-nodeapi
-  echo "===== building jit-profile engine (zig build -Dprofile=jit) ====="
-  "$GATE" mise exec -- zig build -Dprofile=jit
+  if [ "$(uname -s)" != "Linux" ]; then
+    echo "===== building jit-profile engine (zig build -Dprofile=jit) ====="
+    "$GATE" mise exec -- zig build -Dprofile=jit
+  else
+    echo "===== linux: jit profile does not exist; test leg only ====="
+  fi
 fi
 
 rc=0
-run_profile "test" "$REPO/zig-out/bin/libChakraCore.dylib" "$WORK/scopes-probe-test" || rc=$?
-run_profile "jit" "$REPO/out/jit/bin/libChakraCore.dylib" "$WORK/scopes-probe-jit" || rc=$?
+run_profile "test" "$REPO/$ENGINE_TEST" "$WORK/scopes-probe-test" || rc=$?
+if [ "$(uname -s)" != "Linux" ]; then
+  run_profile "jit" "$REPO/out/jit/bin/libChakraCore.dylib" "$WORK/scopes-probe-jit" || rc=$?
+fi
 
 if [ $rc -ne 0 ]; then
   echo "run_probe: FAILED (see output above)" >&2
   exit 1
 fi
-echo "run_probe: ALL PASS (test + jit)"
+if [ "$(uname -s)" = "Linux" ]; then echo "run_probe: ALL PASS (test)"; else echo "run_probe: ALL PASS (test + jit)"; fi

@@ -182,10 +182,12 @@ napi_status ToObject(napi_env env, napi_value in, napi_value* out) {
   JsValueRef obj = JS_INVALID_REFERENCE;
   JsErrorCode e = JsConvertValueToObject(ToJs(in), &obj);
   if (e != JsNoError) return MapJsError(env, e, "ToObject");
-  // Borrow: the converted object is reachable from `in` (identity)
-  // or freshly boxed. Callers that run user code before use (the
-  // value-key APIs, via CoercePropertyKey's ToString) hold a
-  // ScratchRoot over *out; other callers use out immediately.
+  // The converted object may be freshly boxed (identity when `in`
+  // is already an object). Every caller MUST hold a ScratchRoot
+  // over *out across any Js* call or coercion/callback that can
+  // run user code or trigger GC (getters/setters, ToString/
+  // ToPropertyKey, descriptors); boxed wrappers are not otherwise
+  // reachable from `in` and can be collected mid-call.
   *out = FromJs(obj);
   return napi_ok;
 }
@@ -970,6 +972,7 @@ napi_status NAPI_CDECL napi_has_own_property(napi_env env, napi_value object,
   napi_value obj = nullptr;
   napi_status s = ToObject(env, object, &obj);
   if (s != napi_ok) return s;
+  ScratchRoot obj_root(ToJs(obj));
   s = CheckName(env, key);
   if (s != napi_ok) return s;
   bool has = false;
@@ -1005,6 +1008,7 @@ napi_status NAPI_CDECL napi_get_named_property(napi_env env, napi_value object,
   napi_value obj = nullptr;
   napi_status s = ToObject(env, object, &obj);
   if (s != napi_ok) return s;
+  ScratchRoot obj_root(ToJs(obj));
   JsPropertyIdRef id = JS_INVALID_REFERENCE;
   s = NamedId(env, utf8name, &id, "get_named_property: utf8name is NULL");
   if (s != napi_ok) return s;
@@ -1030,6 +1034,7 @@ napi_status NAPI_CDECL napi_set_named_property(napi_env env, napi_value object,
   napi_value obj = nullptr;
   napi_status s = ToObject(env, object, &obj);
   if (s != napi_ok) return s;
+  ScratchRoot obj_root(ToJs(obj));
   JsPropertyIdRef id = JS_INVALID_REFERENCE;
   s = NamedId(env, utf8name, &id, "set_named_property: utf8name is NULL");
   if (s != napi_ok) return s;
@@ -1063,6 +1068,7 @@ napi_status NAPI_CDECL napi_has_named_property(napi_env env, napi_value object,
   napi_value obj = nullptr;
   napi_status s = ToObject(env, object, &obj);
   if (s != napi_ok) return s;
+  ScratchRoot obj_root(ToJs(obj));
   JsPropertyIdRef id = JS_INVALID_REFERENCE;
   s = NamedId(env, utf8name, &id, "has_named_property: utf8name is NULL");
   if (s != napi_ok) return s;
@@ -1095,7 +1101,9 @@ napi_status NAPI_CDECL napi_get_element(napi_env env, napi_value object,
   napi_value obj = nullptr;
   napi_status s = ToObject(env, object, &obj);
   if (s != napi_ok) return s;
+  ScratchRoot obj_root(ToJs(obj));
   JsValueRef idx = IndexNumber(index);
+  ScratchRoot idx_root(idx);
   JsValueRef v = JS_INVALID_REFERENCE;
   JsErrorCode e = JsGetIndexedProperty(ToJs(obj), idx, &v);
   if (e != JsNoError) return MapJsError(env, e, "get_element");
@@ -1117,7 +1125,9 @@ napi_status NAPI_CDECL napi_set_element(napi_env env, napi_value object,
   napi_value obj = nullptr;
   napi_status s = ToObject(env, object, &obj);
   if (s != napi_ok) return s;
+  ScratchRoot obj_root(ToJs(obj));
   JsValueRef idx = IndexNumber(index);
+  ScratchRoot idx_root(idx);
   JsErrorCode e = JsSetIndexedProperty(ToJs(obj), idx, ToJs(value));
   if (e != JsNoError) return MapJsError(env, e, "set_element");
   nodeapi::ClearLastError(env);
@@ -1141,7 +1151,9 @@ napi_status NAPI_CDECL napi_has_element(napi_env env, napi_value object,
   napi_value obj = nullptr;
   napi_status s = ToObject(env, object, &obj);
   if (s != napi_ok) return s;
+  ScratchRoot obj_root(ToJs(obj));
   JsValueRef idx = IndexNumber(index);
+  ScratchRoot idx_root(idx);
   bool has = false;
   JsErrorCode e = JsHasIndexedProperty(ToJs(obj), idx, &has);
   if (e != JsNoError) return MapJsError(env, e, "has_element");
@@ -1163,7 +1175,9 @@ napi_status NAPI_CDECL napi_delete_element(napi_env env, napi_value object,
   napi_value obj = nullptr;
   napi_status s = ToObject(env, object, &obj);
   if (s != napi_ok) return s;
+  ScratchRoot obj_root(ToJs(obj));
   JsValueRef idx = IndexNumber(index);
+  ScratchRoot idx_root(idx);
   bool need_bool = (result != nullptr);
   bool had_before = false;
   if (need_bool) {
@@ -1209,6 +1223,7 @@ napi_status NAPI_CDECL napi_define_properties(
   napi_value obj = nullptr;
   napi_status s = ToObject(env, object, &obj);
   if (s != napi_ok) return s;
+  ScratchRoot obj_root(ToJs(obj));
 
   // Descriptor field ids, created once for the whole call.
   JsPropertyIdRef id_value = JS_INVALID_REFERENCE;
@@ -1409,6 +1424,7 @@ napi_status NAPI_CDECL napi_get_property_names(napi_env env, napi_value object,
   napi_value obj = nullptr;
   napi_status s = ToObject(env, object, &obj);
   if (s != napi_ok) return s;
+  ScratchRoot obj_root(ToJs(obj));
   // napi_get_property_names == get_all(include prototypes, enumerable,
   // skip symbols, numbers to strings) per the vendored test_object
   // expectation (includes inherited, excludes symbols and
@@ -1471,6 +1487,7 @@ napi_status NAPI_CDECL napi_get_all_property_names(
   napi_value obj = nullptr;
   napi_status s = ToObject(env, object, &obj);
   if (s != napi_ok) return s;
+  ScratchRoot obj_root(ToJs(obj));
   JsValueRef arr = JS_INVALID_REFERENCE;
   s = CollectPropertyNames(env, obj, key_mode, key_filter, key_conversion, &arr);
   if (s != napi_ok) return s;
@@ -1501,6 +1518,7 @@ napi_status NAPI_CDECL napi_get_prototype(napi_env env, napi_value object,
   napi_value obj = nullptr;
   napi_status s = ToObject(env, object, &obj);
   if (s != napi_ok) return s;
+  ScratchRoot obj_root(ToJs(obj));
   JsValueRef proto = JS_INVALID_REFERENCE;
   JsErrorCode e = JsGetPrototype(ToJs(obj), &proto);
   if (e != JsNoError) return MapJsError(env, e, "get_prototype");
@@ -1524,6 +1542,7 @@ napi_status NAPI_CDECL NodeApiObjects_SetPrototype(napi_env env,
   napi_value obj = nullptr;
   napi_status s = ToObject(env, object, &obj);
   if (s != napi_ok) return s;
+  ScratchRoot obj_root(ToJs(obj));
   JsErrorCode e = JsSetPrototype(ToJs(obj), ToJs(prototype));
   if (e != JsNoError) return MapJsError(env, e, "set_prototype");
   nodeapi::ClearLastError(env);
@@ -1544,6 +1563,7 @@ napi_status NAPI_CDECL napi_object_freeze(napi_env env, napi_value object) {
   napi_value obj = nullptr;
   napi_status s = ToObject(env, object, &obj);
   if (s != napi_ok) return s;
+  ScratchRoot obj_root(ToJs(obj));
   s = CallIntrinsic(env, obj, "freeze", "object_freeze");
   if (s != napi_ok) return s;
   nodeapi::ClearLastError(env);
@@ -1561,6 +1581,7 @@ napi_status NAPI_CDECL napi_object_seal(napi_env env, napi_value object) {
   napi_value obj = nullptr;
   napi_status s = ToObject(env, object, &obj);
   if (s != napi_ok) return s;
+  ScratchRoot obj_root(ToJs(obj));
   s = CallIntrinsic(env, obj, "seal", "object_seal");
   if (s != napi_ok) return s;
   nodeapi::ClearLastError(env);

@@ -115,9 +115,13 @@ NODE_VERSION = "22.22.3"
 NODE_COMMIT = "fdfa0ff0dbaf0fbf4d7d6d89a2ab807f3177fa5c"
 EXAMPLES_COMMIT = "1e4f284f30ed0ac40ec216bdf93ab12f726039a3"
 NAPI_VERSION = 8
-MISE_NODE_22 = Path(
-    "/Users/ascotti/.local/share/mise/installs/node/22.22.3/bin/node")
-MISE_ZIG_017 = Path("/Users/ascotti/.local/share/mise/installs/zig/0.17.0/bin/zig")
+# Mise install paths are env-overridable (same defaults).
+MISE_NODE_22 = Path(os.environ.get(
+    "NODEAPI_MISE_NODE",
+    "/Users/ascotti/.local/share/mise/installs/node/22.22.3/bin/node"))
+MISE_ZIG_017 = Path(os.environ.get(
+    "NODEAPI_MISE_ZIG",
+    "/Users/ascotti/.local/share/mise/installs/zig/0.17.0/bin/zig"))
 
 # ---------------------------------------------------------------------------
 # Skip reasons (taxonomy strings recorded in results + manifest).

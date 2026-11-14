@@ -36,11 +36,25 @@
 //       with no global lock held (R-ENV-12) and may call
 //       napi_remove_async_cleanup_hook; context does NOT need to be
 //       entered for the pump itself (host pump enters its own context).
-//     Release: erase on Clear or overwrite; map entries are O(1) small
-//       native memory per env ever seen, freed at process exit. If a
-//       host never clears, entries accumulate per env value (probe
-//       always clears; real host should clear after destroy or rely
-//       on address-reuse overwrite). No root count contribution.
+//     Release: erase on Clear or overwrite; NO erase at destroy
+//       (Lifetime_DiscardEnvState, step 7) -- the post-destroy query
+//       contract (Lifetime_AsyncViolation(env_value) after destroy
+//       returns, relied on by the gate_probe phases and the step-7
+//       discard comment) requires the entry to survive destroy.
+//       Erasing at destroy would break that contract, so the entry
+//       is retained until Clear or next Set.
+//     Retention bound (decisive): one O(1) small native entry
+//       (AsyncPumpConfig, ~32 bytes + one map bucket) per distinct
+//       env ADDRESS value ever pumped. The map never holds more
+//       entries than distinct env addresses; allocator reuse makes a
+//       single-thread create/destroy loop O(1) (same block, next Set
+//       overwrites). Growth beyond that needs many distinct
+//       concurrent addresses, i.e. many live NodeEnvs, each of which
+//       already costs far more than one entry. A host that creates
+//       many short-lived envs at fresh addresses without reusing
+//       them should call Lifetime_ClearAsyncPump after destroy
+//       (the probe does); entries are otherwise freed at process
+//       exit. No root count contribution.
 //     Tests: gate_probe phases A-C (self-remove 0 iters, non-remove
 //       bound 5 + violation + timeout event, deferred 2 iters).
 //

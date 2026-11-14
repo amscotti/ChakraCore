@@ -9,8 +9,9 @@ Source directory at vendor time:
 Files below were copied verbatim; no edits were applied to the copied
 bytes. Internal `#include "js_native_api_types.h"` etc. references need
 no adjustment: all four files live in this directory and include each
-other by bare quoted filename. License headers in the source files were
-preserved by the verbatim copy.
+other by bare quoted filename. The vendored headers carry no license
+block (each starts at `#ifndef`); the MIT license text is by reference
+only — see the License section below (upstream Node.js MIT).
 
 ## Files
 
@@ -53,11 +54,16 @@ or test code: defining it would hide
 
 ## License
 
-Node.js headers are licensed under the MIT License (see Node 22.22.3
-`LICENSE` at the install root; the relevant notice for these headers
-is reproduced below). The vendored copies retain that notice by
-reference to this manifest; no license text was removed from the
-copied files.
+Node.js headers are licensed under the MIT License. The vendored
+headers carry no license block; the MIT notice is included by
+reference in this manifest only (no license text was added to or
+removed from the copied bytes). Upstream Node.js 22.22.3 paths: the
+four headers as `src/js_native_api.h`, `src/js_native_api_types.h`,
+`src/node_api.h`, `src/node_api_types.h` in the Node source tree
+(installed as `include/node/js_native_api.h`,
+`include/node/js_native_api_types.h`, `include/node/node_api.h`,
+`include/node/node_api_types.h`); the MIT License text at the
+install-root `LICENSE` file.
 
 > Node.js is licensed for use as follows:
 >

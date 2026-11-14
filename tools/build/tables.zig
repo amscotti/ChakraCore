@@ -1312,6 +1312,29 @@ pub const wabt_group = Group{
     },
 };
 
+// Node-API provider TUs (N1.1, 16 sources): the single list iterated by
+// build.zig (macOS) and tools/build/linux.zig (via mac_tables) so the two
+// graphs cannot drift. Platform flags differ (see each graph's provider
+// stanza); the TU membership is shared.
+pub const nodeapi_provider_tus: []const []const u8 = &.{
+    "lib/NodeApi/NodeApiEnv.cpp",
+    "lib/NodeApi/NodeApiScopes.cpp",
+    "lib/NodeApi/NodeApiLifetime.cpp",
+    "lib/NodeApi/NodeApiRefs.cpp",
+    "lib/NodeApi/NodeApiValues.cpp",
+    "lib/NodeApi/NodeApiErrorsImpl.cpp",
+    "lib/NodeApi/NodeApiObjects.cpp",
+    "lib/NodeApi/NodeApiFunctions.cpp",
+    "lib/NodeApi/NodeApiBinary.cpp",
+    "lib/NodeApi/NodeApiPromise.cpp",
+    "lib/NodeApi/NodeApiScript.cpp",
+    "lib/NodeApi/NodeApiWrap.cpp",
+    "lib/NodeApi/NodeApiBuffers.cpp",
+    "lib/NodeApi/NodeApiAsync.cpp",
+    "lib/NodeApi/NodeApiAsyncContext.cpp",
+    "lib/NodeApi/NodeApiHost.cpp",
+};
+
 // The 20 OBJECT groups in ChakraCoreStatic link order
 // (lib/CMakeLists.txt:21-47).
 pub const object_groups: []const *const Group = &.{

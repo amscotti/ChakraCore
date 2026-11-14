@@ -21,6 +21,11 @@
 //   - napi_create_external_buffer: finalizer fires exactly once on
 //     collect (GC via JsCollectGarbage + next napi entry drain;
 //     deferred until drain, exactly-once across repeated GC).
+//   - Detach preserves the view finalizer (NodeApiBuffers.cpp:67-72):
+//     detaching the backing ArrayBuffer does NOT drop the user's
+//     finalizer (it is on the view via napi_add_finalizer); a detached
+//     external Buffer's finalizer still fires exactly once when the
+//     view is collected.
 //   - napi_is_buffer: Buffer is true, plain Uint8Array is NOT a Buffer,
 //     ArrayBuffer / object / number are not Buffers.
 //   - napi_get_buffer_info: data ptr + length tuple correct for
@@ -529,6 +534,72 @@ int main() {
     // Just free manually to avoid leak report.
     delete[] extData;
     expect(RootCount() == Baseline(), "null-finalizer at baseline");
+  }
+
+  // ---- Detach preserves the view finalizer ----
+  {
+    std::fprintf(stdout, "-- case external-detach-finalizer --\n");
+    char* extData = new char[64];
+    std::memcpy(extData, "detach!!", 8);
+    void* hint = reinterpret_cast<void*>(0x5678);
+    g_ext_finalizer_calls = 0;
+    g_ext_finalizer_last_data = nullptr;
+    g_ext_finalizer_last_hint = nullptr;
+    napi_handle_scope s = OpenScope();
+    napi_value buf = nullptr;
+    expect_status(napi_create_external_buffer(env, 64, extData, ExtFinalize, hint, &buf),
+                  napi_ok, "detach: create_external_buffer ok");
+    expect(buf != nullptr, "detach: buf non-null");
+    // Extract the backing ArrayBuffer via the view, then detach it.
+    // The user finalizer lives on the view (napi_add_finalizer), not on
+    // the ArrayBuffer, so detaching must not drop it (covers the claim
+    // at NodeApiBuffers.cpp:67-72).
+    napi_value ab = nullptr;
+    napi_typedarray_type t2 = napi_int8_array;
+    size_t l2 = 0;
+    void* d2 = nullptr;
+    size_t off = 0;
+    expect_status(napi_get_typedarray_info(env, buf, &t2, &l2, &d2, &ab, &off),
+                  napi_ok, "detach: get_typedarray_info ok");
+    expect(ab != nullptr, "detach: AB non-null");
+    expect_status(napi_detach_arraybuffer(env, ab), napi_ok, "detach: detach_arraybuffer ok");
+    bool isDet = false;
+    expect_status(napi_is_detached_arraybuffer(env, ab, &isDet), napi_ok,
+                  "detach: is_detached ok");
+    expect(isDet == true, "detach: backing AB detached");
+    // Fresh borrow after detach is invalidated (NULL/0 via the N3.1
+    // composition documented in NodeApiBuffers.cpp R4) -- but the view
+    // finalizer is unaffected.
+    void* infoData = reinterpret_cast<void*>(0xdeadbeef);
+    size_t infoLen = 12345;
+    expect_status(napi_get_buffer_info(env, buf, &infoData, &infoLen), napi_ok,
+                  "detach: get_buffer_info after detach ok");
+    expect(infoLen == 0, "detach: get_buffer_info len 0 after detach");
+    expect(infoData == nullptr, "detach: get_buffer_info data nullptr after detach");
+    CloseScope(s);  // Release scope root; view now only held by GC/heap.
+    buf = nullptr;
+    ClearStack();
+    force_gc(rt);
+    expect(g_ext_finalizer_calls == 0, "detach: finalizer not run during GC (enqueue only)");
+    napi_handle_scope s2 = OpenScope();
+    napi_value dummy = nullptr;
+    void* dummyData = nullptr;
+    expect_status(napi_create_buffer(env, 1, &dummyData, &dummy), napi_ok,
+                  "detach: drain-trigger create ok");
+    (void)dummy;
+    CloseScope(s2);
+    expect(g_ext_finalizer_calls == 1, "detach: finalizer fired once after detach+collect");
+    expect(g_ext_finalizer_last_data == extData, "detach: finalizer data matches");
+    expect(g_ext_finalizer_last_hint == hint, "detach: finalizer hint matches");
+    force_gc(rt);
+    napi_handle_scope s3 = OpenScope();
+    napi_value tmp = nullptr;
+    void* td = nullptr;
+    napi_create_buffer(env, 1, &td, &tmp);
+    (void)tmp;
+    CloseScope(s3);
+    expect(g_ext_finalizer_calls == 1, "detach: finalizer still once after second GC");
+    expect(RootCount() == Baseline(), "detach at baseline");
   }
 
   // ---- Plain Uint8Array is NOT a Buffer ----

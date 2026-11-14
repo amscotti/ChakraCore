@@ -87,7 +87,10 @@ extern "C" {
 typedef struct chakra_nodeapi_host_services {
   /* Async work / TSFN scheduling. post_task queues fn(arg) on the env
    * thread; post_work runs execute(arg) off-thread then post_task(complete,
-   * arg). Return false = cannot accept. NULL = service absent. */
+   * arg). post_task tasks run in FIFO posting order (TSFN graceful
+   * drain-before-finalize relies on it; finalize is still correct in
+   * any order via its defensive abort). Return false = cannot accept.
+   * NULL = service absent. */
   bool (*post_task)(void* host_ctx, void (*fn)(void*), void* arg);
   bool (*post_work)(void* host_ctx, void (*execute)(void*),
                     void (*complete)(void*), void* arg);

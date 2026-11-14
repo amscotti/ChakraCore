@@ -454,15 +454,15 @@ receipt/README only). Full existing gate (gate-locked, test profile):
 ```sh
 /tmp/opencode/cc-gate-lock.sh mise exec -- zig build check
 # check_metadata: PASS (minos 26.0, 8MiB stacks, 4 headers)
-# check_regression: exit=0 parsed=(2053, 0) require passed 2053 / failed 0
-#   Total: passed 2053, failed 0
+# check_regression: exit=0 parsed=(2054, 0) require passed 2054 / failed 0
+#   Total: passed 2054, failed 0
 # verify_bytecode_pure: source headers unchanged; regen exit 0
 # check_native: PASS (test-shared-basic : PASS, 8 static suites ignored)
 # check_smoke + check-selftest + Linux gate scripts self-tests: ALL BEHAVE
 ```
 
-Tally: **2053 passed / 0 failed**, exactly the `test` pin
-(`2053/0`). The `debug` pin (`2105/0`, `debug-static` profile) was
+Tally: **2054 passed / 0 failed**, exactly the `test` pin
+(`2054/0`). The `debug` pin (`2106/0`, `debug-static` profile) was
 not re-run in this slice (no `debug-static` build in N5.5); the
 file is unchanged, so the pin is untouched, but that profile's
 green is not claimed from this receipt.

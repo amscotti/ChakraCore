@@ -182,6 +182,18 @@ napi_status SettleCommon(napi_env env, napi_deferred deferred,
   JsValueRef undef = JS_INVALID_REFERENCE;
   JsErrorCode ec = JsGetUndefinedValue(&undef);
   if (ec != JsNoError) {
+    /* Guaranteed release: the record's roots must drop on every
+     * exit (R1 balanced accounting), including this failure path
+     * before JsCallFunction. Mirrors the release after the call
+     * below (and the pump's release on its undefined failure). */
+    if (rec->resolve_fn != JS_INVALID_REFERENCE) {
+      (void)JsRelease(rec->resolve_fn, nullptr);
+      rec->resolve_fn = JS_INVALID_REFERENCE;
+    }
+    if (rec->reject_fn != JS_INVALID_REFERENCE) {
+      (void)JsRelease(rec->reject_fn, nullptr);
+      rec->reject_fn = JS_INVALID_REFERENCE;
+    }
     return MapJs(env, ec, what);
   }
   JsValueRef args[2] = {undef, reinterpret_cast<JsValueRef>(value)};

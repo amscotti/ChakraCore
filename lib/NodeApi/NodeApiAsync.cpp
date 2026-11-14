@@ -52,6 +52,13 @@ struct AsyncWork {
   std::atomic<int> state{kWorkCreated};
   std::atomic<bool> cancel_requested{false};
   std::atomic<bool> complete_delivered{false};
+  /* Set by the execute trampoline when user execute throws a C++
+   * exception; read by the completion trampoline to deliver
+   * napi_generic_failure to complete (instead of napi_ok). Written
+   * only on the worker thread before the host posts completion;
+   * the post gives the happens-before edge to the completion read.
+   * Reset on every queue cycle. */
+  std::atomic<bool> execute_failed{false};
   /* Atomic native refs: 1 owner (create..delete/destroy) + 1 worker
    * (queue..complete-drop). Freed when the last ref drops. */
   std::atomic<int> refs{1};
@@ -376,24 +383,13 @@ void WorkExecuteTramp(void* arg) {
   try {
     exec(env, data);
   } catch (...) {
-    /* User execute threw a C++ exception. Mark the record so the
-     * completion trampoline delivers napi_generic_failure instead of
-     * napi_ok. Reuse complete_delivered? No (it means delivered).
-     * Use a dedicated transition: state stays Executing; the flag is
-     * carried via cancel_requested? No -- add a side channel: if the
-     * exception is caught, flip state to Completed with an error? The
-     * execute/complete contract has only ok/cancelled statuses; a
-     * throwing execute is an addon bug. Record it by setting
-     * cancel_requested=false and leaving state Executing; the
-     * completion trampoline delivers ok (host-equivalent: Node
-     * terminates on a throwing execute). To avoid hiding the bug,
-     * overwrite the completion status path: store a transient error
-     * marker in `data`? Instead, record in the record via state
-     * (none fits). Simplest faithful choice: treat throw as cancelled
-     * delivery (napi_cancelled is also wrong). Keep the throw
-     * contained: log nothing, deliver ok (documented: addon C++
-     * exceptions in execute are caught and the completion still
-     * fires with ok; the probe never throws). */
+    /* User execute threw a C++ exception. Never let it cross the
+     * host worker boundary: mark the record so the completion
+     * trampoline delivers napi_generic_failure (via SetLastError)
+     * instead of napi_ok. State stays Executing; the failure shows
+     * up only as the completion status (state still becomes
+     * Completed, i.e. deletable, after delivery). */
+    w->execute_failed.store(true, std::memory_order_release);
   }
 }
 
@@ -418,6 +414,11 @@ void WorkCompleteTramp(void* arg) {
   }
   napi_env env = w->env;
   bool cancelled = w->cancel_requested.load(std::memory_order_acquire);
+  bool execute_failed = w->execute_failed.load(std::memory_order_acquire);
+  /* An execute exception outranks cancel-ok bookkeeping for the
+   * status only: the work still becomes Completed (deletable).
+   * Cancel only ever wins before user execute runs, so a failed
+   * execute here was not cancelled. */
   int state_after = cancelled ? kWorkCancelled : kWorkCompleted;
   /* Env liveness by value (never dereference a dead env). Complete
    * delivery requires a live Alive env on the owner thread. */
@@ -439,7 +440,16 @@ void WorkCompleteTramp(void* arg) {
   }
   napi_async_complete_callback complete = w->complete;
   void* data = w->data;
-  napi_status status = cancelled ? napi_cancelled : napi_ok;
+  napi_status status = execute_failed
+                           ? napi_generic_failure
+                           : (cancelled ? napi_cancelled : napi_ok);
+  if (execute_failed) {
+    /* Mirror the delivered status in last_error (the file's
+     * SetLastError discipline), so complete asking
+     * napi_get_last_error sees generic_failure, not stale ok. */
+    nodeapi::SetLastError(env, napi_generic_failure,
+                          "async work: execute threw");
+  }
   StoreWorkState(w, state_after);
   if (complete != nullptr) {
     nodeapi::ContextGuard guard(env);
@@ -531,6 +541,9 @@ void TsfnDrainTramp(void* arg) {
   nodeapi::ContextGuard guard(env);
   for (;;) {
     TsfnItem* item = nullptr;
+    napi_threadsafe_function_call_js cb = nullptr;
+    JsValueRef func = JS_INVALID_REFERENCE;
+    void* context = nullptr;
     {
       std::lock_guard<std::mutex> lk(st->mutex);
       if (st->queue.empty()) {
@@ -550,6 +563,18 @@ void TsfnDrainTramp(void* arg) {
       }
       item = st->queue.front();
       st->queue.pop_front();
+      /* Load call data under st->mutex (lock-order proof: this
+       * mutex is a leaf; drain releases g_tsfns_mutex before taking
+       * it, and cross-thread callers take it only after
+       * LookupTsfn's map-mutex increment, never while holding
+       * another mutex; it is never held across user/host code
+       * (R-ENV-12) -- this is three pointer copies). Func is
+       * released only by ReleaseFuncRoot on this same env thread
+       * (finalize/teardown, serialized after drain via post_task),
+       * so no use-after-release across the unlock either. */
+      cb = st->call_js_cb;
+      func = st->func;
+      context = st->context;
       st->cv.notify_all(); /* space freed for blocking callers */
     }
     /* Deliver outside the TSFN mutex (R-ENV-12). */
@@ -557,18 +582,6 @@ void TsfnDrainTramp(void* arg) {
     delete item;
     /* The item's state ref drops AFTER delivery (delivery may enqueue
      * more items, which take their own refs). */
-    napi_threadsafe_function_call_js cb = nullptr;
-    JsValueRef func = JS_INVALID_REFERENCE;
-    void* context = nullptr;
-    {
-      /* Load call data without holding the mutex long (fields are set
-       * once at create and never mutated except func root release at
-       * finalize, which cannot run concurrently: finalize runs on the
-       * same env thread, serialized after this drain task). */
-      cb = st->call_js_cb;
-      func = st->func;
-      context = st->context;
-    }
     size_t entry_depth = NodeApiScopes_Depth(env);
     napi_handle_scope implicit = nullptr;
     napi_status openSt = NodeApiScopes_OpenImplicit(env, &implicit);
@@ -1128,6 +1141,7 @@ napi_status NAPI_CDECL napi_create_async_work(
   w->state.store(kWorkCreated, std::memory_order_release);
   w->cancel_requested.store(false, std::memory_order_release);
   w->complete_delivered.store(false, std::memory_order_release);
+  w->execute_failed.store(false, std::memory_order_release);
   w->refs.store(1, std::memory_order_release);
   napi_async_work handle = reinterpret_cast<napi_async_work>(w);
   try {
@@ -1199,6 +1213,7 @@ napi_status NAPI_CDECL napi_queue_async_work(node_api_basic_env env_raw,
   }
   w->cancel_requested.store(false, std::memory_order_release);
   w->complete_delivered.store(false, std::memory_order_release);
+  w->execute_failed.store(false, std::memory_order_release);
   bool posted = false;
   try {
     posted = svc.post_work(host_ctx, WorkExecuteTramp, WorkCompleteTramp, w);

@@ -954,9 +954,9 @@ pub fn build(b: *std.Build) void {
     // @rpath/libChakraCore.dylib, resolved from the host's rpaths at
     // dlopen). Shared profiles only (test + jit); debug-static has no dylib
     // to link. Not part of the default build and alters no existing
-    // artifact (N1.6 moves the source lists into tools/build/tables.zig +
-    // check-nodeapi). Provider TUs compile via `zig c++` SystemCommands,
-    // mirroring the ch-nodeapi step below.
+    // artifact. The TU list is shared with the Linux graph via
+    // tools/build/tables.zig (nodeapi_provider_tus). Provider TUs compile
+    // via `zig c++` SystemCommands, mirroring the ch-nodeapi step below.
     //
     // Source selection: NodeApiEnv.cpp + NodeApiScopes.cpp +
     // NodeApiLifetime.cpp + NodeApiRefs.cpp + NodeApiValues.cpp +
@@ -975,24 +975,7 @@ pub fn build(b: *std.Build) void {
     // by N2.6; N2.4 owns the TU, not this list).
     const prov_lib: ?*std.Build.Step.Compile = if (is_static) null else blk: {
         var prov_objs: std.ArrayList(std.Build.LazyPath) = .empty;
-        for ([_][]const u8{
-            "lib/NodeApi/NodeApiEnv.cpp",
-            "lib/NodeApi/NodeApiScopes.cpp",
-            "lib/NodeApi/NodeApiLifetime.cpp",
-            "lib/NodeApi/NodeApiRefs.cpp",
-            "lib/NodeApi/NodeApiValues.cpp",
-            "lib/NodeApi/NodeApiErrorsImpl.cpp",
-            "lib/NodeApi/NodeApiObjects.cpp",
-            "lib/NodeApi/NodeApiFunctions.cpp",
-            "lib/NodeApi/NodeApiBinary.cpp",
-            "lib/NodeApi/NodeApiPromise.cpp",
-            "lib/NodeApi/NodeApiScript.cpp",
-            "lib/NodeApi/NodeApiWrap.cpp",
-            "lib/NodeApi/NodeApiBuffers.cpp",
-            "lib/NodeApi/NodeApiAsync.cpp",
-            "lib/NodeApi/NodeApiAsyncContext.cpp",
-            "lib/NodeApi/NodeApiHost.cpp",
-        }) |src| {
+        for (tables.nodeapi_provider_tus) |src| {
             const tu = b.addSystemCommand(&.{ ctx.zig_exe, "c++" });
             tu.addArg("-target");
             tu.addArg(profile_target);
@@ -1215,7 +1198,7 @@ pub fn build(b: *std.Build) void {
     // (linux.zig registers the same list for Linux targets). Wired into
     // every profile's `check` below so the merge gates exercise them.
     const selftest_top = b.step("check-selftest", "Negative controls for every check gate (not part of the default build)");
-    for ([_][]const u8{ "check_regression.py", "check_native.py", "check_smoke.py", "check_metadata.py", "check_regression_linux.py", "check_smoke_linux.py", "check_metadata_linux.py" }) |script| {
+    for ([_][]const u8{ "check_regression.py", "check_native.py", "check_smoke.py", "check_metadata.py", "check_regression_linux.py", "check_smoke_linux.py", "check_metadata_linux.py", "check_nodeapi.py", "gen_nodeapi_exports.py" }) |script| {
         const st = b.addSystemCommand(&.{python});
         st.addFileArg(b.path(b.fmt("tools/build/{s}", .{script})));
         st.addArg("--self-test");

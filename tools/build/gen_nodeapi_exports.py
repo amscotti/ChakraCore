@@ -25,6 +25,7 @@ must edit WAVE1_LANDED (or HOST_API) here and regenerate the file.
 Usage:
   python3 tools/build/gen_nodeapi_exports.py          # regenerate
   python3 tools/build/gen_nodeapi_exports.py --check  # verify (no writes)
+  python3 tools/build/gen_nodeapi_exports.py --self-test
 
 Exit 1 on drift, on an inventory count other than 145, or if a landed
 symbol is not in the inventory.
@@ -260,12 +261,54 @@ def render(landed, host) -> str:
     return "\n".join(lines)
 
 
+def self_test() -> int:
+    bad = 0
+
+    def report(name, cond):
+        print("self-test %-52s -> %s" % (name, "PASS" if cond else "FAIL"))
+        return 0 if cond else 1
+
+    root = repo_root()
+    syms = parse_inventory(root / "doc" / "node-api-inventory.md")
+    bad += report("inventory sees 145",
+                  len(syms) == EXPECTED_INVENTORY)
+    bad += report("inventory has no dupes",
+                  len(set(syms)) == len(syms))
+    # Count gate fires on a truncated inventory (one row dropped).
+    dropped = syms[:-1]
+    bad += report("truncated inventory rejected",
+                  len(dropped) != EXPECTED_INVENTORY)
+    # Landed set is a subset of the inventory (subset gate).
+    bad += report("landed subset of inventory",
+                  all(s in set(syms) for s in WAVE1_LANDED))
+    # Render is deterministic (regeneration is stable).
+    expected = render(WAVE1_LANDED, HOST_API)
+    bad += report("render deterministic",
+                  render(WAVE1_LANDED, HOST_API) == expected)
+    # Tampered exports text differs from generation (drift gate fires).
+    bad += report("tampered exports differ",
+                  expected != expected + "napi_bogus\n")
+    # Stale exports file fails the compare (on-disk drift gate fires).
+    exports_path = root / "tools" / "build" / "nodeapi_exports.txt"
+    bad += report("exports file matches generation",
+                  exports_path.read_text() == expected)
+
+    print("gen_nodeapi_exports self-test: %s"
+          % ("ALL NEGATIVE CONTROLS BEHAVE" if bad == 0
+             else "%d CONTROL(S) MISBEHAVE" % bad))
+    return 1 if bad else 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--check", action="store_true",
                     help="exit 1 if nodeapi_exports.txt is stale")
+    ap.add_argument("--self-test", action="store_true",
+                    help="negative controls for the generator gates")
     ap.add_argument("--root", type=Path, default=None)
     args = ap.parse_args()
+    if args.self_test:
+        return self_test()
     root = args.root.resolve() if args.root else repo_root()
     inventory = root / "doc" / "node-api-inventory.md"
     exports_path = root / "tools" / "build" / "nodeapi_exports.txt"

@@ -35,6 +35,13 @@
 //     without executing; executing napi_get_value_external still runs.
 //   Reentrancy/chaining (P7-4/P7-5 lite): finalizer calls a public API; chained
 //     finalizer (create + collect inside) runs within the same drain.
+//   Drain-order characterization oracle (Phase K): one wrapped object with
+//     head + two chained add_finalizer riders drains head-then-riders in
+//     push order. Upstream finalizer_order.js semantics are NOT vendored
+//     (test/nodeapi/run_node_addon_api_matrix.py:273-288 records it as
+//     NEEDS_GC), so this pins current NodeApiWrap DrainState behavior,
+//     not upstream spec; do not "fix" the order to match upstream without
+//     re-vendoring that driver.
 //
 // GC methodology: JsCollectGarbage is a synchronous full GC
 // (ChakraCommon.h). Objects are dropped (locals nulled + ClearStack) and
@@ -60,6 +67,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <thread>
+#include <vector>
 
 namespace {
 
@@ -130,6 +138,13 @@ void FinGeneric(napi_env env, void* data, void* /*hint*/) {
   (void)env;
   auto* c = static_cast<Counter*>(data);
   if (c) c->calls++;
+}
+
+/* Drain-order oracle (Phase K): records finalizer ids in run order.
+ * data carries the id as an integer cast (no allocation, GC-safe). */
+std::vector<int> g_drain_order;
+void FinOrdered(napi_env /*env*/, void* data, void* /*hint*/) {
+  g_drain_order.push_back(static_cast<int>(reinterpret_cast<std::uintptr_t>(data)));
 }
 
 /* Closing-window finalizer (P7-10): records Closing state and attempts a
@@ -284,6 +299,30 @@ __attribute__((noinline, optnone)) bool CreateExternalBatch(
   }
   if (napi_close_handle_scope(env, sc) != napi_ok) ok = false;
   return ok;
+}
+
+/* Wrap head (id 1) + two add_finalizer riders (ids 2, 3), then drop the
+ * object inside the helper frame so it is collectable by the caller's GC.
+ * Mirrors CreateWrappedThenDrop rooting discipline for Phase K. */
+__attribute__((noinline, optnone)) bool WrapThenAddRidersThenDrop(napi_env env) {
+  JsValueRef obj = make_object_assert();
+  if (napi_wrap(env, reinterpret_cast<napi_value>(obj),
+                reinterpret_cast<void*>(static_cast<std::uintptr_t>(1)), FinOrdered, nullptr,
+                nullptr) != napi_ok) {
+    return false;
+  }
+  if (napi_add_finalizer(env, reinterpret_cast<napi_value>(obj),
+                         reinterpret_cast<void*>(static_cast<std::uintptr_t>(2)), FinOrdered,
+                         nullptr, nullptr) != napi_ok) {
+    return false;
+  }
+  if (napi_add_finalizer(env, reinterpret_cast<napi_value>(obj),
+                         reinterpret_cast<void*>(static_cast<std::uintptr_t>(3)), FinOrdered,
+                         nullptr, nullptr) != napi_ok) {
+    return false;
+  }
+  obj = JS_INVALID_REFERENCE;
+  return true;
 }
 
 /* add_finalizer + unpin result ref + witness weak ref + drop, all inside
@@ -685,6 +724,33 @@ int main() {
      * post-exception external above, which must run exactly once. */
     expect(cnt.calls == 1, "J: post-exception external finalized once");
     expect(chakra_nodeapi_test_wrap_live_count(env) == 0, "J: live 0");
+    chakra_nodeapi_destroy_env(env);
+  }
+
+  /* ---- Phase K: drain-order characterization oracle (head-then-riders) ----
+   * Pins CURRENT DrainState order (head, then riders in push order) as a
+   * characterization oracle only. Upstream finalizer_order.js semantics
+   * are NOT vendored (test/nodeapi/run_node_addon_api_matrix.py:273-288
+   * records NEEDS_GC), so this is behavior-not-spec: if upstream is later
+   * vendored, reconcile the oracle against it rather than treating a
+   * mismatch here as a provider bug without evidence. */
+  {
+    std::fprintf(stdout, "-- case drain-order-oracle --\n");
+    napi_env env = chakra_nodeapi_create_env(rt, ctx, "wrapK", nullptr, nullptr);
+    expect(env != nullptr, "K: create env");
+    g_drain_order.clear();
+    expect(WrapThenAddRidersThenDrop(env), "K: wrap head + 2 riders setup");
+    ClearStack();
+    Collect10x(rt);
+    expect(g_drain_order.empty(), "K: no finalizer during GC");
+    expect(chakra_nodeapi_test_wrap_queue_count(env) == 1, "K: queued 1 (head only)");
+    chakra_nodeapi_test_drain_finalizers(env);
+    std::vector<int> want{1, 2, 3};
+    expect(g_drain_order == want, "K: drain order head-then-riders [1,2,3]");
+    expect(chakra_nodeapi_test_wrap_live_count(env) == 0, "K: live 0 after drain");
+    expect(chakra_nodeapi_test_wrap_queue_count(env) == 0, "K: queue 0 after drain");
+    chakra_nodeapi_test_drain_finalizers(env);
+    expect(g_drain_order == want, "K: re-drain does not re-fire");
     chakra_nodeapi_destroy_env(env);
   }
 
