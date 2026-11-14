@@ -104,7 +104,7 @@ AMD64-only), `_ENABLE_DYNAMIC_THUNKS`
 In observed order (duplicates are real — both occurrences are on the command
 line):
 
-1. `-mmacosx-version-min=10.9 -std=gnu++11` — `CMakeLists.txt:347-351`
+1. `-mmacosx-version-min=13.3 -std=gnu++11` — `CMakeLists.txt:347-351`
    (`MACOSX_DEPLOYMENT_TARGET` unset in the reference env).
 2. 25 `-Wno-*` suppressions — `CMakeLists.txt:410-436`:
    `-Wno-ignored-attributes -Wno-parentheses-equality -Wno-reorder
@@ -132,7 +132,7 @@ line):
    (`lib/CMakeLists.txt:1`) and on the shared-lib objects (automatic for
    `SHARED`); neither on GCStress objects (observed).
 9. Global `add_compile_options` — `-arch arm64` (dup of 7; only repo
-   source is `CMakeLists.txt:309`), `-mmacosx-version-min=10.9` (dup of 1;
+   source is `CMakeLists.txt:309`), `-mmacosx-version-min=13.3` (dup of 1;
    `add_compile_options` source `CMakeLists.txt:347` plus the
    `CMAKE_CXX_FLAGS` copy at `:350-351`), `-fasm-blocks -fms-extensions
    -fwrapv` (`CMakeLists.txt:460-464`). The `-arch arm64` duplication
@@ -144,7 +144,7 @@ line):
 
 ### 2.2 C (`clang`, 21 units — all `pal/src/safecrt/*.c`)
 
-`-mmacosx-version-min=10.9 -std=gnu99` (`CMakeLists.txt:348-349`),
+`-mmacosx-version-min=13.3 -std=gnu99` (`CMakeLists.txt:348-349`),
 `-O2 -g -DNDEBUG` (CMake builtin default `CMAKE_C_FLAGS_RELWITHDEBINFO`; the
 repo overrides only the C++ variant), `-arch arm64`, then the same global
 `add_compile_options` as §2.1 item 9 plus PAL `-fstack-protector -fno-builtin
@@ -1102,7 +1102,7 @@ etc.), resolves them against the group directories plus
   for the 21 safecrt C files and 10 ASM files only.
 - **Q5** — `-std=gnu++11` (`CMakeLists.txt:351`) is always overridden by
   the later `-std=gnu++17` (`CMAKE_CXX_STANDARD`, `:398-399`); likewise
-  `-arch arm64` (`:309`) and `-mmacosx-version-min=10.9` (`:347`, plus the
+  `-arch arm64` (`:309`) and `-mmacosx-version-min=13.3` (`:347`, plus the
   `CMAKE_CXX_FLAGS` copy at `:350-351`) each appear twice on the command
   line. The `-arch arm64` duplication mechanism is UNCERTAIN (see §8 U2).
 - **Q6** — `HAVE_LIBICU_UCHAR_H` (`CMakeLists.txt:598-602`) is a plain
@@ -1130,7 +1130,7 @@ etc.), resolves them against the group directories plus
   search: the only other `-arch` sources are the inactive `:288` i386 and
   `:299` arm branches). Why one source line yields two occurrences is
   UNCERTAIN on mechanism. The value itself (`-arch arm64`, twice) is
-  observed, not invented. (`-mmacosx-version-min=10.9` also appears twice
+  observed, not invented. (`-mmacosx-version-min=13.3` also appears twice
   but has two distinct sources — `:347` and `:350-351` — so its
   duplication is explained.)
 

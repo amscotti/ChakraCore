@@ -700,6 +700,54 @@ class GateCountsTests(unittest.TestCase):
         self.assertIn("gate_counts.json", proc.stderr)
 
 
+class LegacyMacFloorTests(unittest.TestCase):
+    """Legacy cmake leg (F1) macOS floor pin: the default
+    -mmacosx-version-min in CMakeLists.txt must stay at or above 13.3,
+    the availability floor of libc++'s floating-point std::to_chars
+    (used by the exact Number formatter, NUMBERUTILS_EXACT_FORMATTING).
+    Rolling it back re-breaks the F1 compile with
+    "'to_chars' is unavailable: introduced in macOS 13.3"."""
+
+    # to_chars(char*, char*, double, chars_format, int) is
+    # macOS 13.3+ in every SDK the F1 leg builds against.
+    MIN_FLOOR = (13, 3)
+
+    def osx_default_block(self):
+        import re
+        text = (ROOT / "CMakeLists.txt").read_text()
+        # The deployment-target block (not the earlier arch-flags
+        # CC_TARGET_OS_OSX block): the default floor lives here.
+        start = text.index('set(OSX_DEPLOYMENT_TARGET "$ENV{MACOSX_DEPLOYMENT_TARGET} CC")')
+        # Column-0 else(): the inner env-override fallback is indented.
+        end = re.search(r"^else\(\)", text[start:], re.MULTILINE).start()
+        return text[start:start + end]
+
+    def test_default_floor_meets_tochars_availability(self):
+        import re
+        block = self.osx_default_block()
+        floors = re.findall(r"-mmacosx-version-min=(\d+)\.(\d+)", block)
+        self.assertTrue(floors, "no -mmacosx-version-min in OSX block")
+        for major, minor in floors:
+            self.assertGreaterEqual(
+                (int(major), int(minor)), self.MIN_FLOOR,
+                "legacy floor below to_chars availability")
+
+    def test_no_pre_tochars_floor_left_in_osx_default(self):
+        block = self.osx_default_block()
+        self.assertNotIn("10.9", block)
+
+    def test_exact_gate_requires_cpp17_declarations(self):
+        # The SDK guards the floating-point to_chars declarations on
+        # _LIBCPP_STD_VER >= 17; without the same requirement here a
+        # pre-C++17 effective standard selects the exact path and dies
+        # with "no member named 'to_chars'" instead of clean fallback.
+        text = (ROOT / "lib/Common/Common/NumberUtilities.h").read_text()
+        gate = text[text.index("#if defined(NUMBERUTILS_HAS_CHARCONV)"):]
+        gate = gate[:gate.index("NUMBERUTILS_EXACT_FORMATTING 1")]
+        self.assertIn("_LIBCPP_STD_VER", gate)
+        self.assertIn("17", gate)
+
+
 class BytecodePurityTests(unittest.TestCase):
     def make_fixture(self, root, verdict=0, interrupt=False):
         js_dir = root / "lib/Runtime/Library/InJavascript"

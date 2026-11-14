@@ -343,12 +343,17 @@ elseif(CC_TARGET_OS_OSX)
     if(NOT CC_XCODE_PROJECT)
       set(OSX_DEPLOYMENT_TARGET "$ENV{MACOSX_DEPLOYMENT_TARGET} CC")
       if (${OSX_DEPLOYMENT_TARGET} STREQUAL " CC")
-        set(OSX_DEPLOYMENT_TARGET "10.9")
-        add_compile_options(-mmacosx-version-min=10.9)
+        # Floor 13.3: libc++'s floating-point std::to_chars (used by the
+        # exact Number formatter, NUMBERUTILS_EXACT_FORMATTING) is
+        # availability-gated on macOS 13.3; an older
+        # -mmacosx-version-min makes NumberUtilities_strtod.cpp fail
+        # to compile ('to_chars' is unavailable).
+        set(OSX_DEPLOYMENT_TARGET "13.3")
+        add_compile_options(-mmacosx-version-min=13.3)
         set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} \
-          -mmacosx-version-min=10.9 -std=gnu99")
+          -mmacosx-version-min=13.3 -std=gnu99")
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} \
-          -mmacosx-version-min=10.9 -std=gnu++11")
+          -mmacosx-version-min=13.3 -std=gnu++11")
       else()
         set(OSX_DEPLOYMENT_TARGET "$ENV{MACOSX_DEPLOYMENT_TARGET}")
         message(WARNING "-- !! macOS Deployment Target was set to $ENV{MACOSX_DEPLOYMENT_TARGET}. Using it as is.")

@@ -9,7 +9,11 @@
 // formatter's digit budget. std::to_chars is correctly rounded and supports
 // the precision needed to expose every digit of a binary double; the version
 // checks below are the toolchains that ship a conforming floating-point
-// overload. When unavailable, the callers keep the legacy 20/21-digit caps.
+// overload. The libc++ prong also requires C++17: the SDK guards the
+// floating-point overloads on _LIBCPP_STD_VER >= 17 (and on the macOS 13.3
+// availability floor, which the cmake legacy build meets via its default
+// -mmacosx-version-min). When unavailable, the callers keep the legacy
+// 20/21-digit caps.
 #if defined(__has_include)
 #if __has_include(<charconv>)
 #include <charconv>
@@ -17,7 +21,8 @@
 #endif
 #endif
 #if defined(NUMBERUTILS_HAS_CHARCONV) && \
-    ((defined(_LIBCPP_VERSION) && _LIBCPP_VERSION >= 14000) || \
+    ((defined(_LIBCPP_VERSION) && _LIBCPP_VERSION >= 14000 && \
+      defined(_LIBCPP_STD_VER) && _LIBCPP_STD_VER >= 17) || \
      (defined(__GLIBCXX__) && __GLIBCXX__ >= 20210427) || \
      (defined(_MSC_VER) && _MSC_VER >= 1924))
 #define NUMBERUTILS_EXACT_FORMATTING 1
