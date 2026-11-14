@@ -1855,9 +1855,17 @@ skipThunk:
             // (first-call f64 NaN payloads arrived canonicalized). Mirrors
             // the Float case restoring s0 below.
             Var result = BoxAsmJsReturnValue(func, 0, ret, 0.0f, zeroSimd);
+#if defined(_MSC_VER)
+            // MSVC defines _M_ARM64 for ARM64 targets but supports no inline
+            // asm on ARM64, so the d0 restore below is not expressible here.
+            // Do NOT silently skip the restore (wasm-internal callers read the
+            // raw f64 from d0); this needs the B6 Windows port.
+#error "B6 port required: f64 d0 restore uses GNU inline asm, unsupported by MSVC ARM64"
+#else
             uint64 retBits;
             __builtin_memcpy(&retBits, &ret, sizeof(double));
             __asm__ volatile ("fmov d0, %x0" :: "r"(retBits));
+#endif
             return result;
         }
         case AsmJsRetType::Float:
@@ -1867,9 +1875,17 @@ skipThunk:
             // reads s0 after this thunk returns. BoxAsmJsReturnValue leaves
             // d0 = (double)ret and s0 = 0 in its exit state -- restore s0.
             Var result = BoxAsmJsReturnValue(func, 0, 0.0, ret, zeroSimd);
+#if defined(_MSC_VER)
+            // MSVC defines _M_ARM64 for ARM64 targets but supports no inline
+            // asm on ARM64, so the s0 restore below is not expressible here.
+            // Do NOT silently skip the restore (wasm-internal callers read the
+            // raw f32 from s0); this needs the B6 Windows port.
+#error "B6 port required: f32 s0 restore uses GNU inline asm, unsupported by MSVC ARM64"
+#else
             uint32 retBits;
             __builtin_memcpy(&retBits, &ret, sizeof(float));
             __asm__ volatile ("fmov s0, %w0" :: "r"(retBits));
+#endif
             return result;
         }
         default:
