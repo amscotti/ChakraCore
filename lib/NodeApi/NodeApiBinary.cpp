@@ -69,14 +69,21 @@
 //       native queue mutation under mutex (never across user code). Drain
 //       on owner thread with env context entered.
 //     Release on success/partial failure/exception/OOM/cancel/shutdown:
-//       Exactly once via drain (delete after invocation) or, if the env is
-//       already dead at drain time, delete without invocation (stale
-//       generation guard, no use-after-free). Shutdown: records for buffers
-//       still live at destroy die with the runtime; if the env is destroyed
-//       before the buffer is collected, the trampoline will enqueue under a
-//       dead generation; the next Drain (or never) deletes without calling
-//       the user finalizer (leak of user external_data, not a UAF; probe
-//       does not cover post-destroy collect).
+//       Exactly once. While the env is live, via drain (delete after
+//       invocation; reentrant drain sees an empty queue because the queue
+//       is moved out before invoking). At destroy, the step-2 drain
+//       invokes records queued while Alive (Closing env, context entered,
+//       same posture as wrap finalizers); stragglers enqueued during
+//       teardown user code are deleted without invocation just after the
+//       live entry is erased (step 7, pure native, no context needed).
+//       After the live entry is erased, the trampoline's generation check
+//       fails and the record is deleted without invocation at enqueue
+//       time (never queued under a dead generation, so no Drain can fetch
+//       it and no dead-generation queue can accumulate). Shutdown: records
+//       for buffers still live at destroy die with the runtime. Deleting
+//       without invocation leaks the user's external_data (not a UAF);
+//       invoking with a dead env would be a UAF, so the dead path never
+//       invokes.
 //     Memory accounting/capacity: one record per live external buffer;
 //       queue vectors hold at most live uncollected external buffers
 //       (bounded by JS heap). OOM in record alloc => generic_failure,
@@ -84,8 +91,9 @@
 //     Tests: test/nodeapi/probes/binary_probe.cpp external finalizer fires
 //       once on collect (GC via JsCollectGarbage + next napi call drain).
 //     Residual uncertainty: detached-external finalizer leak (see above);
-//       finalizer after env destroy not invoked (leak, not crash); Linux
-//       x64 not claimed.
+//       post-destroy collects are deleted without invocation at enqueue
+//       time (A8-1; record itself never leaks, user external_data does);
+//       Linux x64 not claimed.
 //
 //   R4 storage borrows (get_*_info):
 //     Resource: raw BYTE* + length from JsGet*Storage (borrow, not root).
@@ -139,6 +147,8 @@
 #include "ChakraCommon.h"
 #include "ChakraCore.h"
 
+#include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -238,14 +248,19 @@ napi_status MakeIdMap(napi_env env, const char* name, JsPropertyIdRef* out,
   return napi_ok;
 }
 
+}  // namespace (helpers above stay TU-local; the queue below is global
+   // so NodeApiEnv.cpp's destroy path can drain/discard it via
+   // NodeApiBinary.h -- one entity, no anonymous-namespace duplicate)
+
 // --- External ArrayBuffer finalizer queue (§3.7-style, N3.2-compatible) ---
 //
 // The queue is keyed by per-env generation (not by env pointer value) to
-// survive address reuse: a trampoline for a dead env enqueues under its
-// dead generation; the next Drain for a new env at the same address sees a
-// different generation and never dispatches stale records. Stale records
-// are deleted without invoking user code (no UAF; leak of user data is
-// preferable to calling a finalizer with a dead env).
+// survive address reuse: a trampoline for a dead env fails the
+// generation-aware liveness check and its record is deleted at enqueue
+// time without invoking user code (no UAF; the dead generation never
+// enters the queue, so no Drain can fetch it). A8-1 destroy coverage:
+// step-2 drain invokes records queued while Alive; the step-7 tail
+// discards stragglers after the live entry is erased.
 
 struct ExternalRecord {
   napi_env env = nullptr;
@@ -258,13 +273,36 @@ struct ExternalRecord {
 std::mutex g_ext_mutex;
 std::unordered_map<uint64_t, std::vector<ExternalRecord*>> g_ext_queues;
 
+// Live-record accounting for tests/probes (A8-1 proof): incremented when a
+// record is allocated, decremented when it is deleted on any path.
+std::atomic<size_t> g_ext_live_records{0};
+
+void DeleteExtRecord(ExternalRecord* rec) {
+  if (rec == nullptr) return;
+  g_ext_live_records.fetch_sub(1, std::memory_order_relaxed);
+  delete rec;
+}
+
 void EnqueueRecord(ExternalRecord* rec) {
   if (!rec) return;
+  // A8-1: never queue under a dead generation. The trampoline runs on an
+  // arbitrary GC thread, possibly after the env was destroyed (or after
+  // the address was reused by a new env with a new generation). The
+  // generation-aware lookup consults the registry by value and never
+  // dereferences a dead env; on miss the record is deleted here without
+  // invoking the user finalizer (invoking with a dead env would be a UAF).
+  // Lock order is registry-then-ext (never the reverse), matching drain.
+  nodeapi::NodeEnv* nenv = nullptr;
+  if (!nodeapi::LookupLiveEnvWithGeneration(
+          static_cast<void*>(rec->env), rec->generation, &nenv)) {
+    DeleteExtRecord(rec);
+    return;
+  }
   std::lock_guard<std::mutex> lk(g_ext_mutex);
   try {
     g_ext_queues[rec->generation].push_back(rec);
   } catch (...) {
-    delete rec;
+    DeleteExtRecord(rec);
   }
 }
 
@@ -279,8 +317,10 @@ void ExternalArrayBufferTrampoline(void* state) {
 
 // Drain on env thread with a live env and the context entered.
 // Moves the queue out before invoking (lock never held across user code).
-// If the env is dead or generation-mismatched, records are deleted without
-// invocation.
+// The caller must hold a live env (EntryGuard, or destroy's Closing guard);
+// records queued under this env's generation are invoked exactly once. If
+// the env is not live, nothing is fetched (records for dead generations
+// are deleted at enqueue time and never accumulate; see EnqueueRecord).
 void DrainExternalFinalizers(napi_env env) {
   if (!env) return;
   nodeapi::NodeEnv* nenv = nullptr;
@@ -305,9 +345,48 @@ void DrainExternalFinalizers(napi_env env) {
         // No C++ exception may escape extern "C".
       }
     }
-    delete rec;
+    DeleteExtRecord(rec);
   }
 }
+
+// A8-1 destroy tail (step 7): discard records still queued for a destroyed
+// env's generation WITHOUT invoking the user finalizer. Runs after the
+// live registry entry is erased, so no new record for this generation can
+// be enqueued afterwards (the enqueue-time generation check fails); this
+// closes the window between the step-2 invoke-drain and the erase. Pure
+// native (mutex + delete only): no context, no JS, safe after teardown.
+// Only deletes this generation's queue; live generations are untouched.
+void NodeApiBinary_DestroyForEnv(napi_env env, uint64_t generation) {
+  (void)env;  // Keyed by generation, never dereferenced (may be Dead/deleted).
+  if (generation == 0) return;
+  std::vector<ExternalRecord*> leftover;
+  {
+    std::lock_guard<std::mutex> lk(g_ext_mutex);
+    auto it = g_ext_queues.find(generation);
+    if (it != g_ext_queues.end()) {
+      leftover = std::move(it->second);
+      g_ext_queues.erase(it);
+    }
+  }
+  for (auto* rec : leftover) {
+    DeleteExtRecord(rec);
+  }
+}
+
+size_t NodeApiBinary_ExternalLiveCount() {
+  return g_ext_live_records.load(std::memory_order_relaxed);
+}
+
+size_t NodeApiBinary_ExternalQueuedCount() {
+  std::lock_guard<std::mutex> lk(g_ext_mutex);
+  size_t n = 0;
+  for (const auto& kv : g_ext_queues) {
+    n += kv.second.size();
+  }
+  return n;
+}
+
+namespace {
 
 // Detached detection via ArrayBuffer.prototype.detached getter.
 // Evidence (verified at build time): the accessor "detached" is registered
@@ -504,9 +583,10 @@ napi_status NAPI_CDECL napi_create_external_arraybuffer(
                             "create_external_arraybuffer: record OOM");
       return napi_generic_failure;
     }
+    g_ext_live_records.fetch_add(1, std::memory_order_relaxed);
     nodeapi::NodeEnv* nenv = nullptr;
     if (!nodeapi::LookupLiveEnv(static_cast<void*>(env), &nenv)) {
-      delete rec;
+      DeleteExtRecord(rec);
       return napi_invalid_arg;
     }
     rec->env = env;
@@ -522,7 +602,7 @@ napi_status NAPI_CDECL napi_create_external_arraybuffer(
   JsErrorCode ec = JsCreateExternalArrayBuffer(external_data, len32, tramp,
                                                tramp_state, &buf);
   if (ec != JsNoError) {
-    delete rec;  // Transfer never happened; delete inline.
+    DeleteExtRecord(rec);  // Transfer never happened; delete inline.
     return MapJsError(env, ec, "JsCreateExternalArrayBuffer");
   }
   ScratchRoot bufRoot(buf);

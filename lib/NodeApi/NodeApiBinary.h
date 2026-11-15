@@ -28,4 +28,24 @@
 
 #include "js_native_api.h" /* napi_status, napi_value, NAPI_VERSION=8 */
 
+#include <cstddef> /* size_t */
+#include <cstdint> /* uint64_t */
+
+// Drain external-ArrayBuffer finalizer records queued for env's generation,
+// invoking each user finalizer once (env thread, context entered by the
+// caller). No-op when env is not live; dead-generation records never queue
+// (deleted at enqueue time), so no stale dispatch is possible.
+void DrainExternalFinalizers(napi_env env);
+
+// Destroy tail (call after the live registry entry is erased): delete any
+// records still queued for `generation` WITHOUT invoking user finalizers.
+// Pure native (no context/JS). Only that generation's queue is touched.
+void NodeApiBinary_DestroyForEnv(napi_env env, uint64_t generation);
+
+// Introspection for tests/probes (A8-1): live ExternalRecord objects, and
+// the total number of records currently queued. Both are zero when every
+// record was invoked-or-discarded exactly once.
+size_t NodeApiBinary_ExternalLiveCount();
+size_t NodeApiBinary_ExternalQueuedCount();
+
 #endif /* CHAKRA_NODEAPI_BINARY_H_ */

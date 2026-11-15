@@ -70,10 +70,11 @@ struct PromiseQueue {
 };
 
 /* Global map: context VALUE -> queue. Consulted by VALUE before any
- * dereference (registry pattern). Entries are never erased (queue
- * objects are process-lifetime per context; only tasks are released).
- * The mutex is never held across user code (the trampoline releases
- * it before returning; the pump holds it only to pop one task). */
+ * dereference (registry pattern). Entries are unlinked at env destroy
+ * (A8-3; the queue objects themselves stay process-lifetime, only the
+ * map entry is erased so a reused context VALUE installs fresh). The
+ * mutex is never held across user code (the trampoline releases it
+ * before returning; the pump holds it only to pop one task). */
 std::mutex g_queue_mutex;
 std::unordered_map<JsContextRef, PromiseQueue*> g_queues;
 
@@ -237,10 +238,16 @@ void NodeApiPromise_DestroyForEnv(napi_env env) {
     ReleaseRecord(kv.second);
   }
   st->deferreds.clear();
-  /* Release every queued continuation task for this env's context.
-   * The queue object itself stays (shared, process-lifetime); only
-   * its tasks are dropped. This upholds R5 (no root survives runtime
-   * disposal) even when the host did not pump to quiet. */
+  /* Release every queued continuation task for this env's context, then
+   * UNLINK the queue entry (A8-3). This upholds R5 (no root survives
+   * runtime disposal) even when the host did not pump to quiet, and stops
+   * a later env that reuses this JsContextRef VALUE from aliasing a stale
+   * queue (which would skip installation of a fresh queue and misroute
+   * continuations). The queue OBJECT itself is intentionally not deleted:
+   * it stays process-lifetime as before, because the engine trampoline
+   * still references it and later teardown-step user code (wraps
+   * backstop) may still trigger it; unlinking only affects fresh
+   * lookups/installs. */
   nodeapi::NodeEnv* nenv = nullptr;
   if (!nodeapi::LookupLiveEnv(static_cast<void*>(env), &nenv)) return;
   JsContextRef ctx = nenv->context;
@@ -258,6 +265,16 @@ void NodeApiPromise_DestroyForEnv(napi_env env) {
   }
   for (JsValueRef t : leftover) {
     (void)JsRelease(t, nullptr);
+  }
+  {
+    std::lock_guard<std::mutex> lk(g_queue_mutex);
+    // A8-3: erase by VALUE (registry pattern). Only unlinks if this
+    // context still maps to the same queue object just drained, so a
+    // newer install (if any) is never removed.
+    auto it = g_queues.find(ctx);
+    if (it != g_queues.end() && it->second == q) {
+      g_queues.erase(it);
+    }
   }
 }
 

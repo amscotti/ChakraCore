@@ -88,6 +88,13 @@ struct TsfnItem {
  * and per-env loop count. Worker paths never touch the func root (R3). */
 struct TsfnState {
   napi_env env = nullptr;
+  /* A8-2: per-state generation distinguishing address reuse. Assigned
+   * once at create (before map publication; immutable afterwards) from a
+   * process-wide monotone counter. Posted host tasks carry the expected
+   * value; a stale task for a freed state whose address was reused by a
+   * new TSFN fails the generation check and is dropped without touching
+   * the new state (pointer comparison alone cannot detect this ABA). */
+  uint64_t tsfn_generation = 0;
   std::thread::id owner_thread;
   void* context = nullptr;
   JsValueRef func = JS_INVALID_REFERENCE; /* rooted at create, released at finalize */
@@ -131,6 +138,61 @@ std::unordered_map<napi_async_work, AsyncWork*> g_works;
 
 std::mutex g_tsfns_mutex;
 std::unordered_map<napi_threadsafe_function, TsfnState*> g_tsfns;
+
+/* A8-2: monotone TSFN generation source. 0 is never issued (0 means
+ * "no generation", mirroring the env registry). Wraps after 2^64-1. */
+std::atomic<uint64_t> g_tsfn_next_generation{1};
+
+uint64_t NextTsfnGeneration() {
+  uint64_t g = g_tsfn_next_generation.fetch_add(1, std::memory_order_relaxed);
+  if (g == 0) g = g_tsfn_next_generation.fetch_add(1, std::memory_order_relaxed);
+  return g;
+}
+
+/* A8-2: posted host-task argument. Carries the TSFN state plus the
+ * generation observed at post time, so the trampoline can reject a stale
+ * task whose state address was reused by a new TSFN. Heap-allocated at
+ * post (nothrow); owned by the posted task and deleted by the trampoline
+ * on exactly one path (live or stale -- never dereferencing a stale
+ * state). If the host never runs the task, the arg leaks with the task
+ * itself (pre-existing host obligation: posted tasks must run). */
+struct TsfnTaskArg {
+  TsfnState* state = nullptr;
+  uint64_t generation = 0;
+};
+
+TsfnTaskArg* MakeTsfnTaskArg(TsfnState* st) {
+  if (st == nullptr) return nullptr;
+  TsfnTaskArg* arg = new (std::nothrow) TsfnTaskArg();
+  if (arg == nullptr) return nullptr;
+  // Generation is immutable after create-publication, so reading it here
+  // (post path, state known live by the caller) is safe.
+  arg->state = st;
+  arg->generation = st->tsfn_generation;
+  return arg;
+}
+
+/* Validate a posted task arg under the map mutex and take a native ref.
+ * Returns the live state, or nullptr for a stale task (null arg/state,
+ * map miss, pointer mismatch, or generation mismatch after address
+ * reuse). Always deletes the arg; never dereferences a stale state:
+ * it->second is live (it is in the map), so reading its generation on
+ * the pointer-match path is safe. A reused address carries a new
+ * generation, so the stale task is dropped without touching the new state.
+ * On success the caller holds one native ref (must DropTsfnRef). */
+TsfnState* ClaimTsfnTaskArg(TsfnTaskArg* arg) {
+  if (arg == nullptr) return nullptr;
+  TsfnState* st = arg->state;
+  uint64_t gen = arg->generation;
+  delete arg;
+  if (st == nullptr) return nullptr;
+  std::lock_guard<std::mutex> lk(g_tsfns_mutex);
+  auto it = g_tsfns.find(reinterpret_cast<napi_threadsafe_function>(st));
+  if (it == g_tsfns.end() || it->second != st) return nullptr;
+  if (it->second->tsfn_generation != gen) return nullptr;
+  it->second->state_refs.fetch_add(1, std::memory_order_acq_rel);
+  return it->second;
+}
 
 /* Callback record entry for env-thread trampolines (brief: completion /
  * drain run with context enter + scope + a callback record entry). The
@@ -499,21 +561,11 @@ void WorkCompleteTramp(void* arg) {
  * the env is not Alive. Each item holds a state ref from enqueue;
  * delivery drops it after invocation. */
 void TsfnDrainTramp(void* arg) {
-  auto* st = static_cast<TsfnState*>(arg);
+  /* A8-2: generation-checked claim (see ClaimTsfnTaskArg). A stale task
+   * whose state was finalized+freed -- including one whose address was
+   * reused by a new TSFN -- is dropped without touching any state. */
+  TsfnState* st = ClaimTsfnTaskArg(static_cast<TsfnTaskArg*>(arg));
   if (st == nullptr) return;
-  /* Validate liveness by value via the handle map (the task arg may be
-   * stale after teardown finalized+freed the state). Lookup+increment
-   * under the map mutex; on miss the state is gone -- drop the task. */
-  bool needs_drop = false;
-  {
-    std::lock_guard<std::mutex> lk(g_tsfns_mutex);
-    auto it = g_tsfns.find(reinterpret_cast<napi_threadsafe_function>(st));
-    if (it == g_tsfns.end() || it->second != st) {
-      return; /* stale task: state already finalized/freed */
-    }
-    st->state_refs.fetch_add(1, std::memory_order_acq_rel);
-    needs_drop = true;
-  }
   napi_env env = st->env;
   nodeapi::NodeEnv* nenv = nullptr;
   bool alive = false;
@@ -639,18 +691,11 @@ void TsfnDrainTramp(void* arg) {
  * reusing the queue check). Releases the JS func root on the env thread,
  * drops the owner ref, erases the handle map + owned set entry. */
 void TsfnFinalizeTramp(void* arg) {
-  auto* st = static_cast<TsfnState*>(arg);
+  /* A8-2: generation-checked claim (see ClaimTsfnTaskArg). A stale task
+   * for an already-finalized state -- including address reuse by a new
+   * TSFN -- is dropped without touching any state. */
+  TsfnState* st = ClaimTsfnTaskArg(static_cast<TsfnTaskArg*>(arg));
   if (st == nullptr) return;
-  bool needs_drop = false;
-  {
-    std::lock_guard<std::mutex> lk(g_tsfns_mutex);
-    auto it = g_tsfns.find(reinterpret_cast<napi_threadsafe_function>(st));
-    if (it == g_tsfns.end() || it->second != st) {
-      return; /* already finalized by teardown/sync path */
-    }
-    st->state_refs.fetch_add(1, std::memory_order_acq_rel);
-    needs_drop = true;
-  }
   napi_env env = st->env;
   nodeapi::NodeEnv* nenv = nullptr;
   bool allowed = false;
@@ -756,7 +801,15 @@ bool ScheduleFinalize(TsfnState* st) {
     st->finalizing = false;
     return false;
   }
-  bool ok = svc.post_task(host_ctx, TsfnFinalizeTramp, st);
+  // A8-2: the finalize task carries (state, generation); the tramp owns
+  // the arg on post success and deletes it inline otherwise.
+  TsfnTaskArg* task_arg = MakeTsfnTaskArg(st);
+  bool ok = false;
+  if (task_arg != nullptr) {
+    ok = svc.post_task(host_ctx, TsfnFinalizeTramp, task_arg);
+    if (ok) task_arg = nullptr;
+    delete task_arg;
+  }
   if (!ok) {
     std::lock_guard<std::mutex> lk(st->mutex);
     st->finalizing = false;
@@ -1423,6 +1476,8 @@ napi_status NAPI_CDECL napi_create_threadsafe_function(
     }
   }
   st->env = env;
+  // A8-2: issue the ABA generation BEFORE map publication (immutable after).
+  st->tsfn_generation = NextTsfnGeneration();
   {
     nodeapi::NodeEnv* nenv = nullptr;
     if (nodeapi::LookupLiveEnv(static_cast<void*>(env), &nenv)) {
@@ -1578,13 +1633,20 @@ napi_status NAPI_CDECL napi_call_threadsafe_function(
     chakra_nodeapi_host_services svc{};
     void* host_ctx = nullptr;
     bool posted = false;
-    if (FetchServices(st->env, &svc, &host_ctx) && svc.post_task != nullptr) {
+    // A8-2: the posted task carries (state, generation); arg OOM behaves
+    // like a post failure (existing rollback below). The tramp owns the
+    // arg on post success.
+    TsfnTaskArg* task_arg = MakeTsfnTaskArg(st);
+    if (task_arg != nullptr && FetchServices(st->env, &svc, &host_ctx) &&
+        svc.post_task != nullptr) {
       try {
-        posted = svc.post_task(host_ctx, TsfnDrainTramp, st);
+        posted = svc.post_task(host_ctx, TsfnDrainTramp, task_arg);
       } catch (...) {
         posted = false;
       }
+      if (posted) task_arg = nullptr;
     }
+    delete task_arg;
     if (!posted) {
       /* Roll back this enqueue (item + flag). No external call runs
        * under the TSFN mutex (R-ENV-12): remove under the lock, then
@@ -1608,14 +1670,19 @@ napi_status NAPI_CDECL napi_call_threadsafe_function(
         chakra_nodeapi_host_services svc2{};
         void* host_ctx2 = nullptr;
         bool retried = false;
-        if (FetchServices(st->env, &svc2, &host_ctx2) &&
+        // A8-2: retry carries a fresh (state, generation) arg; owned by
+        // the task on success, deleted inline otherwise.
+        TsfnTaskArg* retry_arg = MakeTsfnTaskArg(st);
+        if (retry_arg != nullptr && FetchServices(st->env, &svc2, &host_ctx2) &&
             svc2.post_task != nullptr) {
           try {
-            retried = svc2.post_task(host_ctx2, TsfnDrainTramp, st);
+            retried = svc2.post_task(host_ctx2, TsfnDrainTramp, retry_arg);
           } catch (...) {
             retried = false;
           }
+          if (retried) retry_arg = nullptr;
         }
+        delete retry_arg;
         if (!retried) {
           std::lock_guard<std::mutex> lk(st->mutex);
           if (st->queue.empty()) st->drain_scheduled = false;

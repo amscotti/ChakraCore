@@ -14,7 +14,9 @@
 //      napi_generic_failure (lifetime gates in NodeApiLifetime.cpp).
 //   2. Drain the finalizer queue (N3.2, real: nodeapi_wrap_drain,
 //      drain until empty, R-WRAP-8), after the "wrap_drain" marker so
-//      the P1-1 verbatim ordering probe still compares.
+//      the P1-1 verbatim ordering probe still compares; then the
+//      external-ArrayBuffer drain (A8-1, invoke queued-while-Alive
+//      records, no marker emitted).
 //   3. Sync cleanup hooks, LIFO (NodeApiLifetime).
 //   4. Async cleanup hooks (NodeApiLifetime; completion pump = N4.3).
 //   5. Instance-data finalizer (NodeApiLifetime).
@@ -37,6 +39,7 @@
 
 #include "NodeApiEnv.h"
 #include "NodeApiAsyncContext.h"
+#include "NodeApiBinary.h"
 #include "NodeApiLifetime.h"
 #include "NodeApiPromise.h"
 #include "NodeApiRefs.h"
@@ -699,9 +702,18 @@ void chakra_nodeapi_destroy_env(napi_env env_value) {
     // (R-WRAP-8). The "wrap_drain" marker is emitted first so the P1-1
     // verbatim ordering probe still compares the whole sequence;
     // the drain itself runs wrap finalizers with a live (Closing) env,
-    // without holding the queue lock across user finalizers.
+    // without holding the queue lock across user finalizers. Stragglers
+    // enqueued during teardown are discarded without invocation at
+    // step 7 (NodeApiBinary_DestroyForEnv, after the live entry is
+    // erased), and post-destroy collects never queue (enqueue-time
+    // generation check).
     nodeapi::EmitTeardownEvent(env, "wrap_drain");
     ::nodeapi_wrap_drain(env_value);
+    // A8-1: invoke external-ArrayBuffer finalizer records queued while
+    // Alive (Closing env, context entered -- same posture as wrap
+    // finalizers above). Records enqueued later during teardown are
+    // discarded without invocation at step 7.
+    DrainExternalFinalizers(env_value);
 
     // Step 3-5 (N1.4). NOTE (N5.1 vendored-oracle amendment):
     // the instance finalizer historically ran here (plan 3.6 step 5),
@@ -738,6 +750,11 @@ void chakra_nodeapi_destroy_env(napi_env env_value) {
     g_live_envs.erase(key);
     DeadInsertLocked(key, live_generation);
   }
+  // A8-1: discard stragglers queued for this (now dead) generation without
+  // invocation. Runs AFTER the live entry is erased, so no new record for
+  // this generation can be enqueued afterwards (the enqueue-time
+  // generation check fails). Pure native; no context needed.
+  NodeApiBinary_DestroyForEnv(env_value, live_generation);
   g_live_count.fetch_sub(1, std::memory_order_relaxed);
   delete env;
 }

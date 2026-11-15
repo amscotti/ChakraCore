@@ -39,6 +39,7 @@
 
 #include "NodeApiHostApi.h"
 #include "js_native_api.h"
+#include "NodeApiBinary.h"
 #include "NodeApiEnv.h"
 #include "NodeApiScopes.h"
 #include "ChakraCommon.h"
@@ -248,6 +249,31 @@ void ExtFinalize(napi_env, void* data, void* hint) {
   // Free the external buffer (provider does not own it; finalizer owns).
   // Use delete to match allocation via new[] in probe.
   delete[] static_cast<char*>(data);
+}
+
+// Create an external ArrayBuffer and release every reference to it, in a
+// dedicated frame: no JsValueRef escapes to the caller, so after return
+// the only thing keeping the buffer alive is GC reachability (plus any
+// conservative stack residue, flushed by ChurnStack before collecting).
+// Returns the create status.
+napi_status CreateUnrootedExternal(napi_env env, void* data, size_t len,
+                                   void* hint) {
+  napi_handle_scope s = nullptr;
+  if (napi_open_handle_scope(env, &s) != napi_ok) return napi_generic_failure;
+  napi_value ab = nullptr;
+  napi_status st =
+      napi_create_external_arraybuffer(env, data, len, ExtFinalize, hint, &ab);
+  (void)napi_close_handle_scope(env, s);
+  return st;
+}
+
+// Overwrite the current stack region so stale conservative roots (e.g. a
+// spilled JsValueRef from the creating frame, kept alive by -O3 codegen)
+// do not pin an otherwise unreachable buffer across a forced GC.
+inline void ChurnStack() {
+  volatile char buf[8192];
+  for (size_t i = 0; i < sizeof(buf); i++) buf[i] = static_cast<char>(i & 0x7f);
+  ClearStack();
 }
 
 // Detach callback: JS-invoked native function that detaches its argument.
@@ -806,6 +832,97 @@ int main() {
     }
     CloseScope(s);
     expect(RootCount() == Baseline(), "pending at baseline");
+  }
+
+  // ---- A8-1 destroy-before-drain (external finalizer lifetime) ----
+  // A record enqueued-but-undrained at destroy must be invoked by the
+  // destroy drain (no intervening napi call); a buffer collected only
+  // after destroy must have its record deleted without invocation and
+  // must not leak (live/queued counts return to baseline).
+  {
+    std::fprintf(stdout, "-- case external-destroy-before-drain --\n");
+    JsRuntimeHandle rt2 = JS_INVALID_REFERENCE;
+    JsContextRef ctx2 = JS_INVALID_REFERENCE;
+    if (JsCreateRuntime(JsRuntimeAttributeNone, nullptr, &rt2) != JsNoError) {
+      std::fprintf(stderr, "FATAL: second runtime failed\n");
+      return 2;
+    }
+    if (JsCreateContext(rt2, &ctx2) != JsNoError) {
+      std::fprintf(stderr, "FATAL: second context failed\n");
+      return 2;
+    }
+    if (JsSetCurrentContext(ctx2) != JsNoError) {
+      std::fprintf(stderr, "FATAL: enter ctx2 failed\n");
+      return 2;
+    }
+    napi_env env2 = chakra_nodeapi_create_env(rt2, ctx2, nullptr, nullptr, nullptr);
+    expect(env2 != nullptr, "destroy-drain: env2 created");
+    size_t live0 = NodeApiBinary_ExternalLiveCount();
+    size_t queued0 = NodeApiBinary_ExternalQueuedCount();
+    int calls0 = g_ext_finalizer_calls;
+    // Variant 1: collect while live, then destroy with no further napi
+    // call on env2. The destroy drain must invoke the finalizer. The
+    // poll loop makes the premise non-vacuous: it only proceeds once the
+    // record is provably queued-but-undrained (a conservative stack root
+    // under -O3 can otherwise pin the buffer and skip collection).
+    char* extData2 = new char[32];
+    std::memcpy(extData2, "destroy-drain", 13);
+    void* hint2 = reinterpret_cast<void*>(0xD15C);
+    expect_status(CreateUnrootedExternal(env2, extData2, 32, hint2), napi_ok,
+                  "destroy-drain: create ext2");
+    bool queued = false;
+    for (int i = 0; i < 30; i++) {
+      ChurnStack();
+      force_gc(rt2);
+      if (NodeApiBinary_ExternalQueuedCount() == queued0 + 1) {
+        queued = true;
+        break;
+      }
+    }
+    expect(queued, "destroy-drain: record queued, not yet drained");
+    chakra_nodeapi_destroy_env(env2);
+    expect(g_ext_finalizer_calls == calls0 + 1,
+           "destroy-drain: finalizer ran at destroy");
+    expect(g_ext_finalizer_last_data == extData2, "destroy-drain: finalizer data");
+    expect(g_ext_finalizer_last_hint == hint2, "destroy-drain: finalizer hint");
+    expect(NodeApiBinary_ExternalLiveCount() == live0,
+           "destroy-drain: no live records");
+    expect(NodeApiBinary_ExternalQueuedCount() == queued0,
+           "destroy-drain: queue empty");
+    // Variant 2: destroy first, collect after. The trampoline must drop
+    // the record without invocation (dead generation); nothing leaks.
+    // The poll only proceeds once the post-destroy collect provably ran
+    // (live count back at baseline via the enqueue-time drop).
+    napi_env env3 = chakra_nodeapi_create_env(rt2, ctx2, nullptr, nullptr, nullptr);
+    expect(env3 != nullptr, "destroy-drain: env3 created");
+    int calls1 = g_ext_finalizer_calls;
+    char* extData3 = new char[16];
+    std::memcpy(extData3, "post-destroy", 12);
+    expect_status(CreateUnrootedExternal(env3, extData3, 16, nullptr), napi_ok,
+                  "destroy-drain: create ext3");
+    chakra_nodeapi_destroy_env(env3);
+    expect(g_ext_finalizer_calls == calls1,
+           "destroy-drain: no finalizer before collect");
+    bool dropped = false;
+    for (int i = 0; i < 30; i++) {
+      ChurnStack();
+      force_gc(rt2);
+      if (NodeApiBinary_ExternalLiveCount() == live0) {
+        dropped = true;
+        break;
+      }
+    }
+    expect(dropped, "destroy-drain: post-destroy collect ran");
+    expect(g_ext_finalizer_calls == calls1,
+           "destroy-drain: post-destroy collect not invoked");
+    expect(NodeApiBinary_ExternalQueuedCount() == queued0,
+           "destroy-drain: post-destroy queue empty");
+    // extData3 is never freed by a finalizer (deleted without invocation
+    // by design); free it here to keep the harness leak-free.
+    delete[] extData3;
+    expect(JsSetCurrentContext(ctx) == JsNoError, "destroy-drain: restore ctx");
+    JsDisposeRuntime(rt2);
+    expect(RootCount() == Baseline(), "destroy-drain at baseline");
   }
 
   chakra_nodeapi_destroy_env(env);
