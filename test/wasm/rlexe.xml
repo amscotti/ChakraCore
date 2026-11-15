@@ -465,6 +465,13 @@
     <tags>exclude_win7</tags>
   </default>
 </test>
+<test>
+  <default>
+    <files>simdMemalign.js</files>
+    <compile-flags>-wasm -wasmsimd -args summary -endargs</compile-flags>
+    <tags>exclude_win7</tags>
+  </default>
+</test>
 <!-- W3 probe (doc/wasm-arm64-plan.md): validate/compile/instantiate,
      memory/table/global readback, and a real export-call value.
      W2 threw RuntimeError WASMERR_ExecutionNotSupported; W3 executes

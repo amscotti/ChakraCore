@@ -1633,7 +1633,8 @@ EmitInfo WasmBytecodeGenerator::EmitSimdMemAccess(Js::OpCodeAsmJs op, const Wasm
     WasmTypes::WasmType type = signature[0];
     SetUsesMemory(0);
 
-    const uint32 naturalAlignment = 16;
+    // memarg alignment is a log2 exponent; v128 natural alignment is 16 bytes = exponent 4
+    const uint32 naturalAlignment = 4;
     const uint alignment = GetReader()->m_currentNode.mem.alignment;
     const uint offset = GetReader()->m_currentNode.mem.offset;
 

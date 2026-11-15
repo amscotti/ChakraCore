@@ -666,6 +666,13 @@
   </test>
   <test>
     <default>
+      <files>ffiLinkParam.js</files>
+      <baseline>ffiLinkParam.baseline</baseline>
+      <compile-flags>-testtrace:asmjs</compile-flags>
+    </default>
+  </test>
+  <test>
+    <default>
       <files>ternaryfloat.js</files>
       <baseline>ternaryfloat.baseline</baseline>
       <compile-flags>-testtrace:asmjs</compile-flags>
