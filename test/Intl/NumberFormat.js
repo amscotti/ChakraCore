@@ -282,6 +282,110 @@ const tests = [
                 { type: "percent", value: "%" }
             ]);
         }
+    },
+    {
+        name: "BigInt exact formatting (FormatNumericToString)",
+        body() {
+            if (WScript.Platform.INTL_LIBRARY === "winglob") {
+                return; // Windows.Globalization has no exact BigInt path
+            }
+
+            const big = 123456789012345678901234567890n;
+            const negBig = -123456789012345678901234567890n;
+
+            function assertBigInt(locale, options, n, expected, expectedParts) {
+                const nf = new Intl.NumberFormat(locale, options);
+                assert.areEqual(locale, nf.resolvedOptions().locale, `This test requires ${locale} support`);
+
+                const formatted = nf.format(n);
+                assert.areEqual(expected, formatted, `format(${n}) [${locale} ${JSON.stringify(options)}]`);
+
+                const actualParts = nf.formatToParts(n);
+                assert.isTrue(Array.isArray(actualParts), `formatToParts(${n}) did not return an array`);
+                assert.areEqual(expected, actualParts.map((part) => part.value).join(""), `formatToParts(${n}) join mismatch`);
+
+                if (expectedParts !== undefined) {
+                    assert.areEqual(expectedParts.length, actualParts.length, `formatToParts(${n}) returned wrong number of parts`);
+                    expectedParts.forEach((part, i) => {
+                        assert.areEqual(part.type, actualParts[i].type, `formatToParts(${n}) returned bad type for part ${i}`);
+                        assert.areEqual(part.value, actualParts[i].value, `formatToParts(${n}) returned bad value for part ${i}`);
+                    });
+                }
+            }
+
+            // Exact decimal output across grouping locales (uniform, dot-group, 3-2-2).
+            assertBigInt("en-US", undefined, big, "123,456,789,012,345,678,901,234,567,890");
+            assertBigInt("de-DE", undefined, big, "123.456.789.012.345.678.901.234.567.890");
+            assertBigInt("en-IN", undefined, big, "1,23,45,67,89,01,23,45,67,89,01,23,45,67,890");
+
+            // Values straddling 2^53 must not lose precision; negatives keep their sign.
+            assertBigInt("en-US", undefined, 9007199254740993n, "9,007,199,254,740,993");
+            assertBigInt("en-US", undefined, 9007199254740992n, "9,007,199,254,740,992");
+            assertBigInt("en-US", undefined, negBig, "-123,456,789,012,345,678,901,234,567,890", [
+                { type: "minusSign", value: "-" },
+                { type: "integer", value: "123" },
+                { type: "group", value: "," },
+                { type: "integer", value: "456" },
+                { type: "group", value: "," },
+                { type: "integer", value: "789" },
+                { type: "group", value: "," },
+                { type: "integer", value: "012" },
+                { type: "group", value: "," },
+                { type: "integer", value: "345" },
+                { type: "group", value: "," },
+                { type: "integer", value: "678" },
+                { type: "group", value: "," },
+                { type: "integer", value: "901" },
+                { type: "group", value: "," },
+                { type: "integer", value: "234" },
+                { type: "group", value: "," },
+                { type: "integer", value: "567" },
+                { type: "group", value: "," },
+                { type: "integer", value: "890" }
+            ]);
+            assertBigInt("en-US", undefined, 0n, "0", [{ type: "integer", value: "0" }]);
+            assertBigInt("en-US", undefined, 5n, "5", [{ type: "integer", value: "5" }]);
+
+            // Small BigInt values agree with their Number counterparts.
+            assert.areEqual(new Intl.NumberFormat("en-US").format(5000), new Intl.NumberFormat("en-US").format(5000n), "small BigInt/Number parity");
+
+            // Digit options.
+            assertBigInt("en-US", { minimumFractionDigits: 2 }, 5n, "5.00", [
+                { type: "integer", value: "5" },
+                { type: "decimal", value: "." },
+                { type: "fraction", value: "00" }
+            ]);
+            assertBigInt("en-US", { minimumIntegerDigits: 5 }, 42n, "00,042");
+            assertBigInt("en-US", { useGrouping: false }, big, "123456789012345678901234567890");
+
+            // Percent scales by 100 exactly.
+            // NOTE: this engine reports the percent-sign part as "percent" on both the
+            // Number and BigInt paths (Node/spec say "percentSign"); pinned as-is.
+            assertBigInt("en-US", { style: "percent" }, 5n, "500%", [
+                { type: "integer", value: "500" },
+                { type: "percent", value: "%" }
+            ]);
+            assertBigInt("en-US", { style: "percent" }, big, "12,345,678,901,234,567,890,123,456,789,000%");
+
+            // Currency styles.
+            assertBigInt("en-US", { style: "currency", currency: "USD" }, 5n, "$5.00", [
+                { type: "currency", value: "$" },
+                { type: "integer", value: "5" },
+                { type: "decimal", value: "." },
+                { type: "fraction", value: "00" }
+            ]);
+            assertBigInt("en-US", { style: "currency", currency: "USD" }, -5n, "-$5.00");
+            assertBigInt("en-US", { style: "currency", currency: "JPY" }, 5n, "¥5");
+            assertBigInt("de-DE", { style: "currency", currency: "EUR" }, 5n, "5,00\u00A0€");
+
+            // Significant digits round exactly (half away from zero).
+            assertBigInt("en-US", { maximumSignificantDigits: 3 }, 123456789n, "123,000,000");
+            assertBigInt("en-US", { minimumSignificantDigits: 5 }, 123n, "123.00");
+            assertBigInt("en-US", { maximumSignificantDigits: 2 }, -1250n, "-1,300");
+
+            // Non-Latin digits map through the formatter's zero digit.
+            assertBigInt("ar-EG", undefined, big, "١٢٣٬٤٥٦٬٧٨٩٬٠١٢٬٣٤٥٬٦٧٨٬٩٠١٬٢٣٤٬٥٦٧٬٨٩٠");
+        }
     }
 ];
 

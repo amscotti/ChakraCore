@@ -2387,6 +2387,300 @@ DEFINE_ISXLOCALEAVAILABLE(PR, uloc)
     };
 #endif
 
+    struct BigIntNumberFormatField
+    {
+        int kind;   // UNumberFormatFields value
+        int start;  // inclusive
+        int end;    // exclusive
+    };
+
+    static bool IsBigIntNumericMiddleField(int kind)
+    {
+        return kind == UNUM_INTEGER_FIELD
+            || kind == UNUM_GROUPING_SEPARATOR_FIELD
+            || kind == UNUM_DECIMAL_SEPARATOR_FIELD
+            || kind == UNUM_FRACTION_FIELD;
+    }
+
+    // Formats a BigInt value exactly with a cached UNumberFormat (ECMA-402 FormatNumericToString).
+    //
+    // The unum_* C API only formats int32/int64/double, and it has no exact-decimal entry point
+    // (no unum_formatDecimal in the C API, verified through ICU 79), so a BigInt wider than 64
+    // bits cannot be passed to ICU directly without losing precision. Instead this formats a small
+    // exact reference value of the same sign (+1.0/-1.0) with unum_formatDoubleForFields and reuses
+    // its affix (prefix/suffix) runs verbatim -- preserving the formatter's localized
+    // currency/percent/minus patterns and their field classifications -- while the numeric middle
+    // (grouped integer digits, decimal separator, fraction zeros) is rebuilt from the BigInt's
+    // exact decimal digits using the formatter's own zero digit, grouping/decimal separators,
+    // grouping sizes and digit options. format() and formatToParts() therefore agree by
+    // construction. Grouping replication (primary size for the rightmost group, secondary size
+    // thereafter) matches ICU/DecimalFormat behavior, including non-uniform patterns like en-IN.
+    //
+    // Significant-digit rounding uses round-half-away-from-zero (the ECMA-402 default "halfExpand",
+    // matching Node). The engine's double path forces UNUM_ROUND_HALFUP, so negative exact-half
+    // inputs can differ between the double and BigInt paths; pre-existing double behavior is
+    // untouched.
+    //
+    // Ownership record -- scratch (digit work buffer, assembled output, reference fields) is
+    // call-local Recycler leaf memory (no GC pointers, no tracing); the UNumberFormat is borrowed
+    // from the state's cached finalizable for the call duration and never retained; the only
+    // publication is the returned string/array. No JS callbacks run while assembling, so there
+    // are no reentrancy or invalidation points. ICU failures surface through ICU_ASSERT, matching
+    // the double path's policy.
+    static Var FormatBigIntWithNumberFormat(
+        _In_ JavascriptBigInt *bigint,
+        _In_ DynamicObject *state,
+        _In_ UNumberFormat *fmt,
+        _In_ bool toParts,
+        _In_ ScriptContext *scriptContext)
+    {
+        Recycler *recycler = scriptContext->GetRecycler();
+
+        JavascriptString *digits = bigint->ToString(scriptContext);
+        const char16 *digitsSz = digits->GetSz();
+        charcount_t digitsLen = digits->GetLength();
+        AssertOrFailFast(digitsLen > 0);
+        bool isNegative = (digitsSz[0] == _u('-'));
+        uint32 magStart = isNegative ? 1u : 0u;
+        uint32 magLen = (uint32)digitsLen - magStart;
+        AssertOrFailFast(magLen >= 1);
+
+        NumberFormatStyle style = AssertEnumProperty<NumberFormatStyle>(state, PropertyIds::formatterToUse);
+
+        bool significantUsed = unum_getAttribute(fmt, UNUM_SIGNIFICANT_DIGITS_USED) != 0;
+        int minSig = 0, maxSig = 0, minInt = 0, minFrac = 0;
+        if (significantUsed)
+        {
+            minSig = unum_getAttribute(fmt, UNUM_MIN_SIGNIFICANT_DIGITS);
+            maxSig = unum_getAttribute(fmt, UNUM_MAX_SIGNIFICANT_DIGITS);
+            if (minSig < 1) minSig = 1;
+            if (maxSig < 1) maxSig = 1;
+            if (minSig > maxSig) minSig = maxSig;
+        }
+        else
+        {
+            minInt = unum_getAttribute(fmt, UNUM_MIN_INTEGER_DIGITS);
+            minFrac = unum_getAttribute(fmt, UNUM_MIN_FRACTION_DIGITS);
+            if (minInt < 0) minInt = 0;
+            if (minFrac < 0) minFrac = 0;
+        }
+
+        // Work buffer: magnitude + percent scaling + minimum-integer padding + rounding overflow.
+        uint32 capacity = magLen + 3 + (uint32)minInt;
+        char16 *intBuf = RecyclerNewArrayLeaf(recycler, char16, capacity);
+        for (uint32 i = 0; i < magLen; i++)
+        {
+            AssertOrFailFast(digitsSz[magStart + i] >= _u('0') && digitsSz[magStart + i] <= _u('9'));
+            intBuf[i] = digitsSz[magStart + i];
+        }
+        uint32 intLen = magLen;
+
+        if (style == NumberFormatStyle::Percent)
+        {
+            // Percent scales the value by 100, exactly.
+            intBuf[intLen++] = _u('0');
+            intBuf[intLen++] = _u('0');
+        }
+
+        // Normalize a zero magnitude to a single digit: scaling must not leave a multi-digit
+        // "000", which the formatter would render literally, while the numeric zero formats
+        // as "0" (minimum integer digits apply to the numeric value, not to scaling zeros).
+        // No-op for nonzero magnitudes, which never have leading zeros here.
+        {
+            uint32 firstNonZero = 0;
+            while (firstNonZero + 1 < intLen && intBuf[firstNonZero] == _u('0')) firstNonZero++;
+            if (firstNonZero > 0)
+            {
+                for (uint32 i = 0; i + firstNonZero < intLen; i++) intBuf[i] = intBuf[i + firstNonZero];
+                intLen -= firstNonZero;
+            }
+        }
+
+        uint32 fracLen = 0;
+        if (significantUsed)
+        {
+            if ((int)intLen > maxSig)
+            {
+                bool roundUp = intBuf[maxSig] >= _u('5'); // half away from zero on the magnitude
+                if (roundUp)
+                {
+                    int i = maxSig - 1;
+                    while (i >= 0 && intBuf[i] == _u('9'))
+                    {
+                        intBuf[i] = _u('0');
+                        i--;
+                    }
+                    if (i < 0)
+                    {
+                        // 999.. + 1 overflow: 1 followed by zeros, one digit longer.
+                        intBuf[0] = _u('1');
+                        for (uint32 j = 1; j <= intLen; j++) intBuf[j] = _u('0');
+                        intLen++;
+                    }
+                    else
+                    {
+                        intBuf[i]++;
+                        for (uint32 j = (uint32)maxSig; j < intLen; j++) intBuf[j] = _u('0');
+                    }
+                }
+                else
+                {
+                    for (uint32 j = (uint32)maxSig; j < intLen; j++) intBuf[j] = _u('0');
+                }
+            }
+            if (minSig > (int)intLen) fracLen = (uint32)minSig - intLen;
+        }
+        else
+        {
+            if (minInt > (int)intLen)
+            {
+                uint32 pad = (uint32)minInt - intLen;
+                for (uint32 j = intLen; j > 0; j--) intBuf[j + pad - 1] = intBuf[j - 1];
+                for (uint32 j = 0; j < pad; j++) intBuf[j] = _u('0');
+                intLen = (uint32)minInt;
+            }
+            fracLen = (uint32)minFrac;
+        }
+
+        UErrorCode symStatus = U_ZERO_ERROR;
+        UChar zeroSym[16];
+        UChar groupSym[16];
+        UChar decimalSym[16];
+        int32_t zeroSymLen = unum_getSymbol(fmt, UNUM_ZERO_DIGIT_SYMBOL, zeroSym, 16, &symStatus);
+        ICU_ASSERT(symStatus, true);
+        int32_t groupSymLen = unum_getSymbol(fmt, UNUM_GROUPING_SEPARATOR_SYMBOL, groupSym, 16, &symStatus);
+        ICU_ASSERT(symStatus, true);
+        int32_t decimalSymLen = unum_getSymbol(fmt, UNUM_DECIMAL_SEPARATOR_SYMBOL, decimalSym, 16, &symStatus);
+        ICU_ASSERT(symStatus, true);
+        // Digit mapping requires a single zero character (true of every ICU decimal numbering system).
+        AssertOrFailFastMsg(zeroSymLen == 1, "FormatBigIntWithNumberFormat: non-decimal numbering system");
+        AssertOrFailFast(groupSymLen >= 1 && decimalSymLen >= 1);
+        char16 zeroDigit = (char16)zeroSym[0];
+
+        // Reference value of the same sign: its affix runs are reused verbatim, its numeric
+        // middle is discarded and rebuilt exactly below.
+        double refNum = isNegative ? -1.0 : 1.0;
+        UErrorCode refStatus = U_ZERO_ERROR;
+        ScopedUFieldPositionIterator refFields(ufieldpositer_open(&refStatus));
+        ICU_ASSERT(refStatus, true);
+        char16 *refFormatted = nullptr;
+        int refLen = 0;
+        EnsureBuffer([&](UChar *buf, int bufLen, UErrorCode *status)
+        {
+            return unum_formatDoubleForFields(fmt, refNum, buf, bufLen, refFields, status);
+        }, recycler, &refFormatted, &refLen);
+
+        uint32 refRunCap = (uint32)refLen * 2 + 4;
+        BigIntNumberFormatField *refRuns = RecyclerNewArrayLeaf(recycler, BigIntNumberFormatField, refRunCap);
+        uint32 refRunCount = 0;
+        int runStart = 0, runEnd = 0;
+        int refMidStart = refLen, refMidEnd = 0;
+        for (int kind = ufieldpositer_next(refFields, &runStart, &runEnd); kind >= 0; kind = ufieldpositer_next(refFields, &runStart, &runEnd))
+        {
+            AssertOrFailFast(refRunCount < refRunCap);
+            AssertOrFailFast(runStart >= 0 && runStart < runEnd && runEnd <= refLen);
+            refRuns[refRunCount].kind = kind;
+            refRuns[refRunCount].start = runStart;
+            refRuns[refRunCount].end = runEnd;
+            refRunCount++;
+            if (IsBigIntNumericMiddleField(kind))
+            {
+                if (runStart < refMidStart) refMidStart = runStart;
+                if (runEnd > refMidEnd) refMidEnd = runEnd;
+            }
+        }
+        AssertOrFailFastMsg(refMidStart < refMidEnd, "FormatBigIntWithNumberFormat: reference has no numeric fields");
+
+        bool groupingUsed = unum_getAttribute(fmt, UNUM_GROUPING_USED) != 0;
+        int32_t primarySize = unum_getAttribute(fmt, UNUM_GROUPING_SIZE);
+        int32_t secondarySize = unum_getAttribute(fmt, UNUM_SECONDARY_GROUPING_SIZE);
+        if (secondarySize <= 0) secondarySize = primarySize;
+
+        // Numeric middle: grouped integer digits, then the decimal separator and fraction zeros.
+        uint32 midCap = intLen * ((uint32)groupSymLen + 1) + (uint32)decimalSymLen + fracLen + 1;
+        char16 *mid = RecyclerNewArrayLeaf(recycler, char16, midCap);
+        BigIntNumberFormatField *midRuns = RecyclerNewArrayLeaf(recycler, BigIntNumberFormatField, intLen * 2 + 4);
+        uint32 midRunCount = 0;
+        uint32 midPos = 0;
+        for (uint32 i = 0; i < intLen; i++)
+        {
+            if (groupingUsed && primarySize > 0 && secondarySize > 0)
+            {
+                uint32 distFromRight = intLen - i;
+                if (distFromRight < intLen && distFromRight >= (uint32)primarySize &&
+                    (distFromRight - (uint32)primarySize) % (uint32)secondarySize == 0)
+                {
+                    uint32 sepStart = midPos;
+                    for (int32_t g = 0; g < groupSymLen; g++) mid[midPos++] = (char16)groupSym[g];
+                    midRuns[midRunCount].kind = UNUM_GROUPING_SEPARATOR_FIELD;
+                    midRuns[midRunCount].start = (int)sepStart;
+                    midRuns[midRunCount].end = (int)midPos;
+                    midRunCount++;
+                }
+            }
+            midRuns[midRunCount].kind = UNUM_INTEGER_FIELD;
+            midRuns[midRunCount].start = (int)midPos;
+            midRuns[midRunCount].end = (int)(midPos + 1);
+            midRunCount++;
+            mid[midPos++] = (char16)(zeroDigit + (intBuf[i] - _u('0')));
+        }
+        if (fracLen > 0)
+        {
+            uint32 decStart = midPos;
+            for (int32_t d = 0; d < decimalSymLen; d++) mid[midPos++] = (char16)decimalSym[d];
+            midRuns[midRunCount].kind = UNUM_DECIMAL_SEPARATOR_FIELD;
+            midRuns[midRunCount].start = (int)decStart;
+            midRuns[midRunCount].end = (int)midPos;
+            midRunCount++;
+            uint32 fracStart = midPos;
+            for (uint32 f = 0; f < fracLen; f++) mid[midPos++] = zeroDigit;
+            midRuns[midRunCount].kind = UNUM_FRACTION_FIELD;
+            midRuns[midRunCount].start = (int)fracStart;
+            midRuns[midRunCount].end = (int)midPos;
+            midRunCount++;
+        }
+        uint32 midLen = midPos;
+
+        uint32 prefixLen = (uint32)refMidStart;
+        uint32 suffixLen = (uint32)refLen - (uint32)refMidEnd;
+        uint32 outLen = prefixLen + midLen + suffixLen;
+        AssertOrFailFast(outLen > 0);
+        char16 *out = RecyclerNewArrayLeaf(recycler, char16, outLen);
+        for (uint32 i = 0; i < prefixLen; i++) out[i] = refFormatted[i];
+        for (uint32 i = 0; i < midLen; i++) out[prefixLen + i] = mid[i];
+        for (uint32 i = 0; i < suffixLen; i++) out[prefixLen + midLen + i] = refFormatted[refMidEnd + i];
+
+        if (!toParts)
+        {
+            return JavascriptString::NewWithBuffer(out, outLen, scriptContext);
+        }
+
+        NumberFormatPartsBuilder nfpb(isNegative ? -1.0 : 1.0, out, outLen, scriptContext);
+        for (uint32 r = 0; r < refRunCount; r++)
+        {
+            if (refRuns[r].end <= refMidStart)
+            {
+                // Prefix run: coordinates are already output coordinates.
+                nfpb.InsertPart(static_cast<UNumberFormatFields>(refRuns[r].kind), refRuns[r].start, refRuns[r].end);
+            }
+        }
+        for (uint32 r = 0; r < midRunCount; r++)
+        {
+            nfpb.InsertPart(static_cast<UNumberFormatFields>(midRuns[r].kind),
+                (int)prefixLen + midRuns[r].start, (int)prefixLen + midRuns[r].end);
+        }
+        int suffixDelta = (int)(prefixLen + midLen) - refMidEnd;
+        for (uint32 r = 0; r < refRunCount; r++)
+        {
+            if (refRuns[r].start >= refMidEnd)
+            {
+                nfpb.InsertPart(static_cast<UNumberFormatFields>(refRuns[r].kind),
+                    refRuns[r].start + suffixDelta, refRuns[r].end + suffixDelta);
+            }
+        }
+        return nfpb.ToPartsArray();
+    }
+
     Var IntlEngineInterfaceExtensionObject::EntryIntl_FormatNumber(RecyclableObject* function, CallInfo callInfo, ...)
     {
         EngineInterfaceObject_CommonFunctionProlog(function, callInfo);
@@ -2394,18 +2688,28 @@ DEFINE_ISXLOCALEAVAILABLE(PR, uloc)
 #if defined(INTL_ICU)
         INTL_CHECK_ARGS(
             args.Info.Count == 5 &&
-            (TaggedInt::Is(args[1]) || JavascriptNumber::Is(args[1])) &&
+            (TaggedInt::Is(args[1]) || JavascriptNumber::Is(args[1]) || VarIs<JavascriptBigInt>(args[1])) &&
             DynamicObject::IsBaseDynamicObject(args[2]) &&
             VarIs<JavascriptBoolean>(args[3]) &&
             VarIs<JavascriptBoolean>(args[4])
         );
 
-        double num = JavascriptConversion::ToNumber(args[1], scriptContext);
         DynamicObject *state = UnsafeVarTo<DynamicObject>(args[2]);
         bool toParts = UnsafeVarTo<JavascriptBoolean>(args[3])->GetValue();
         bool forNumberPrototypeToLocaleString = UnsafeVarTo<JavascriptBoolean>(args[4])->GetValue();
         Var cachedUNumberFormat = nullptr; // cached by EntryIntl_CacheNumberFormat
         AssertOrFailFast(state->GetInternalProperty(state, InternalPropertyIds::CachedUNumberFormat, &cachedUNumberFormat, NULL, scriptContext));
+
+        auto fmt = static_cast<FinalizableUNumberFormat *>(cachedUNumberFormat);
+
+        if (VarIs<JavascriptBigInt>(args[1]))
+        {
+            // Exact BigInt formatting (ECMA-402 FormatNumericToString): bypass the lossy double path.
+            INTL_TRACE("Calling NumberFormat.prototype.format(bigint), toParts=%d", (int)toParts);
+            return FormatBigIntWithNumberFormat(VarTo<JavascriptBigInt>(args[1]), state, *fmt, toParts, scriptContext);
+        }
+
+        double num = JavascriptConversion::ToNumber(args[1], scriptContext);
 
         if (forNumberPrototypeToLocaleString)
         {
@@ -2423,7 +2727,6 @@ DEFINE_ISXLOCALEAVAILABLE(PR, uloc)
             INTL_TRACE("Calling NumberFormat.prototype.format(%f)", num);
         }
 
-        auto fmt = static_cast<FinalizableUNumberFormat *>(cachedUNumberFormat);
         char16 *formatted = nullptr;
         int formattedLen = 0;
 
