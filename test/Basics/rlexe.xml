@@ -343,4 +343,9 @@
       <compile-flags>-args summary -endargs</compile-flags>
     </default>
   </test>
+  <test>
+    <default>
+      <files>SmIntPairOps.js</files>
+    </default>
+  </test>
 </regress-exe>

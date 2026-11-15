@@ -6646,10 +6646,25 @@ LowererMD::GenerateSmIntPairTest(
 
     opndReg = IR::RegOpnd::New(TyMachReg, this->m_func);
 
+    // Bit derivation (INT32VAR, VarTag_Shift == 48): a tagged int Var is
+    // (uint32)value | (0x1 << 48), so bits[63:32] are always 0x00010000.
+    // LSR src1, #48 isolates src1[63:48] (= 0x0001, the var tag) in the low
+    // 16 bits; LSR src2, #32 isolates src2[63:32] (= 0x00010000) in the low
+    // 32 bits. ORR combines them to 0x00010001 == AtomTag_Pair for genuine
+    // int pairs, so EOR vs AtomTag_Pair yields 0 and CBNZ falls through to
+    // the fast path. This mirrors the x64 sequence (SHR src1, VarTag_Shift /
+    // SHR src2, 32 / OR / CMP AtomTag_Pair) and TaggedInt::IsPair.
+    //
+    // (The previous UBFX/BFXIL sequence extracted src1[63:32] into the low
+    // 32 bits and discarded the inserted s2 bits, yielding 0x00000001 for
+    // every int pair, so the pair test could never pass and every var-var
+    // int fast path fell through to helper calls. See doc/a6-smint-pair-test.md.)
+
     // s1 = MOV src1
-    // s1 = UBFX s1, VarTagShift - 16, 64 - (VarTag_Shift - 16)
+    // s1 = LSR s1, VarTag_Shift
     // s2 = MOV src2
-    // s1 = BFXIL s2, VarTagShift, 64 - VarTag_Shift
+    // s2 = LSR s2, 32
+    // s1 = ORR s1, s2        ------ move both tags to the lower 32 bits
     // s1 = EOR s1, AtomTag_Pair  ------ compare the tags together to the expected tag pair
     // CBNZ s1, $fail
 
@@ -6658,9 +6673,9 @@ LowererMD::GenerateSmIntPairTest(
     instr = IR::Instr::New(Js::OpCode::MOV, opndReg, opndSrc1, this->m_func);
     instrInsert->InsertBefore(instr);
 
-    // s1 = UBFX s1, VarTagShift - 16, 64 - (VarTag_Shift - 16)
+    // s1 = LSR s1, VarTag_Shift
 
-    instr = IR::Instr::New(Js::OpCode::UBFX, opndReg, opndReg, IR::IntConstOpnd::New(BITFIELD(Js::VarTag_Shift - 16, 64 - (Js::VarTag_Shift - 16)), TyMachReg, this->m_func), this->m_func);
+    instr = IR::Instr::New(Js::OpCode::LSR, opndReg, opndReg, IR::IntConstOpnd::New(Js::VarTag_Shift, TyUint8, this->m_func, true), this->m_func);
     instrInsert->InsertBefore(instr);
 
     // s2 = MOV src2
@@ -6669,9 +6684,14 @@ LowererMD::GenerateSmIntPairTest(
     instr = IR::Instr::New(Js::OpCode::MOV, opndReg1, opndSrc2, this->m_func);
     instrInsert->InsertBefore(instr);
 
-    // s1 = BFXIL s2, VarTagShift, 64 - VarTag_Shift
+    // s2 = LSR s2, 32
 
-    instr = IR::Instr::New(Js::OpCode::BFXIL, opndReg, opndReg1, IR::IntConstOpnd::New(BITFIELD(Js::VarTag_Shift, 64 - Js::VarTag_Shift), TyMachReg, this->m_func), this->m_func);
+    instr = IR::Instr::New(Js::OpCode::LSR, opndReg1, opndReg1, IR::IntConstOpnd::New(32, TyUint8, this->m_func, true), this->m_func);
+    instrInsert->InsertBefore(instr);
+
+    // s1 = ORR s1, s2
+
+    instr = IR::Instr::New(Js::OpCode::ORR, opndReg, opndReg, opndReg1, this->m_func);
     instrInsert->InsertBefore(instr);
 
     opndReg = opndReg->UseWithNewType(TyInt32, this->m_func)->AsRegOpnd();
