@@ -1465,12 +1465,34 @@ CommonNumber:
             case TypeIds_Number:
             case TypeIds_Int64Number:
             case TypeIds_UInt64Number:
-            case TypeIds_Undefined:
             case TypeIds_Null:
             case TypeIds_Symbol:
                 // ToBigInt(Number) is a TypeError; only the BigInt
                 // constructor's explicit NumberToBigInt step accepts Numbers.
                 JavascriptError::ThrowTypeError(scriptContext, VBSERR_TypeMismatch, _u("ToBigInt"));
+
+            case TypeIds_Undefined:
+            {
+                // Under BailOutOnImplicitCallsPreOp the JIT disables implicit
+                // calls around a helper call. A skipped ToPrimitive then yields
+                // undefined as a placeholder rather than the real conversion;
+                // the post-helper bailout check observes the implicit-call flag
+                // and bails out to the interpreter, which performs the real
+                // conversion. Throwing here would bypass that recovery with
+                // the wrong error (and without ever calling valueOf), so return
+                // a dummy BigInt instead; it is never observed because the
+                // bailout discards this frame and re-executes. A real undefined
+                // (primitiveCoerced == false, or implicit calls enabled, or no
+                // ToPrimitive was skipped) still throws per spec.
+                ThreadContext * threadContext = scriptContext->GetThreadContext();
+                if (primitiveCoerced &&
+                    threadContext->IsDisableImplicitCall() &&
+                    (threadContext->GetImplicitCallFlags() & ImplicitCall_ToPrimitive) != 0)
+                {
+                    return JavascriptBigInt::CreateZero(scriptContext);
+                }
+                JavascriptError::ThrowTypeError(scriptContext, VBSERR_TypeMismatch, _u("ToBigInt"));
+            }
 
             case TypeIds_String:
             {

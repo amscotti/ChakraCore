@@ -215,6 +215,39 @@ var tests = [
         }
     },
     {
+        name: "BigInt-element object stores convert under JIT",
+        body() {
+            // Regression: a JIT-compiled BigInt-element store whose value
+            // needs ToBigInt must call valueOf exactly once and store the
+            // result. The StElem helper used to run with implicit calls
+            // disabled (BailOutOnImplicitCallsPreOp); the skipped conversion
+            // yielded undefined, and ToBigInt threw TypeMismatch on that
+            // placeholder without ever calling valueOf.
+            var view = new BigInt64Array(2);
+
+            var calls0 = 0;
+            view[0] = { valueOf() { calls0++; return 3n; } };
+            assert.strictEqual(1, calls0, "in-bounds store converts exactly once");
+            assert.strictEqual(3n, view[0], "in-bounds store keeps converted value");
+
+            var idx = 1;
+            var calls1 = 0;
+            view[idx] = { valueOf() { calls1++; return 4n; } };
+            assert.strictEqual(1, calls1, "dynamic-index store converts exactly once");
+            assert.strictEqual(4n, view[1], "dynamic-index store keeps converted value");
+
+            var callsOob = 0;
+            view[10] = { valueOf() { callsOob++; return 5n; } };
+            assert.strictEqual(1, callsOob, "out-of-bounds store converts exactly once");
+
+            var unsignedView = new BigUint64Array(1);
+            var unsignedCalls = 0;
+            unsignedView[0] = { valueOf() { unsignedCalls++; return 6n; } };
+            assert.strictEqual(1, unsignedCalls, "unsigned store converts exactly once");
+            assert.strictEqual(6n, unsignedView[0], "unsigned store keeps converted value");
+        }
+    },
+    {
         name: "ArrayBuffer construction, offsets and byteLength",
         body() {
             var buffer = new ArrayBuffer(32);
