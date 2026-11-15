@@ -237,6 +237,7 @@ enum FunctionFlags
     ffIsParamAndBodyScopeMerged        = 0x800000,
     ffIsMethod                         = 0x1000000,
     ffIsClassMember                    = 0x2000000,
+    ffHasHomeObjectContext             = 0x4000000,
 };
 
 enum ScopeInfoFlags : byte
@@ -2304,6 +2305,7 @@ public:
             | (isAnonymous ? ffIsAnonymous : 0)
             | (function->m_isMethod ? ffIsMethod : 0)
             | (function->m_isClassMember ? ffIsClassMember : 0)
+            | (function->m_hasHomeObjectContext ? ffHasHomeObjectContext : 0)
 #ifdef ENABLE_ASMJS
             | (function->m_isAsmjsMode ? ffIsAsmJsMode : 0)
             | (function->m_isAsmJsFunction ? ffIsAsmJsFunction : 0)
@@ -4247,6 +4249,7 @@ public:
         (*function)->m_isDynamicFunction = (bitflags & ffIsDynamicFunction) ? true : false;
         (*function)->m_isMethod = (bitflags & ffIsMethod) ? true : false;
         (*function)->m_isClassMember = (bitflags & ffIsClassMember) ? true : false;
+        (*function)->m_hasHomeObjectContext = (bitflags & ffHasHomeObjectContext) ? true : false;
 
         // This is offsetIntoSource is the start offset in bytes as well.
         (*function)->m_cbStartOffset = offsetIntoSource;
