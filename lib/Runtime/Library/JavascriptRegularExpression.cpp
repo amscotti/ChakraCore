@@ -439,13 +439,13 @@ using namespace Js;
             lastIndexOrFlag = 0;
         else
         {
-            // Does ToInteger(lastIndex) yield an integer in [0, MaxCharCount]?
+            // RegExpBuiltinExec clamps via ToLength(Get(R, "lastIndex")), so
+            // negatives (including -Infinity) and NaN all start at 0; only
+            // +Infinity and values above MaxCharCount are beyond-end.
             double v = JavascriptConversion::ToInteger(lastIndexVar, GetScriptContext());
-            if (JavascriptNumber::IsNan(v))
+            if (JavascriptNumber::IsNan(v) || v <= 0.0)
                 lastIndexOrFlag = 0;
             else if (JavascriptNumber::IsPosInf(v) ||
-                JavascriptNumber::IsNegInf(v) ||
-                v < 0.0 ||
                 v > (double)MaxCharCount)
                 lastIndexOrFlag = InvalidValue;
             else

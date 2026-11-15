@@ -278,10 +278,10 @@ exec(/x/g /*lastIndex=2*/ , "axbxcxd", 3.7);
 r.lastIndex=4
 RegExp.${_,1,...,9}=["axbxcxd","","","","","","","","",""]
 exec(/x/g /*lastIndex=4*/ , "axbxcxd", -4);
-null
-r.lastIndex=0
+["x"] /*input="axbxcxd", index=1*/ 
+r.lastIndex=2
 RegExp.${_,1,...,9}=["axbxcxd","","","","","","","","",""]
-exec(/x/g /*lastIndex=0*/ , "axbxcxd", 2147483647);
+exec(/x/g /*lastIndex=2*/ , "axbxcxd", 2147483647);
 null
 r.lastIndex=0
 RegExp.${_,1,...,9}=["axbxcxd","","","","","","","","",""]
@@ -290,10 +290,10 @@ exec(/x/g /*lastIndex=0*/ , "axbxcxd", NaN);
 r.lastIndex=2
 RegExp.${_,1,...,9}=["axbxcxd","","","","","","","","",""]
 exec(/x/g /*lastIndex=2*/ , "axbxcxd", -Infinity);
-null
-r.lastIndex=0
+["x"] /*input="axbxcxd", index=1*/ 
+r.lastIndex=2
 RegExp.${_,1,...,9}=["axbxcxd","","","","","","","","",""]
-exec(/x/g /*lastIndex=0*/ , "axbxcxd", Infinity);
+exec(/x/g /*lastIndex=2*/ , "axbxcxd", Infinity);
 null
 r.lastIndex=0
 RegExp.${_,1,...,9}=["axbxcxd","","","","","","","","",""]
@@ -338,3 +338,34 @@ RegExp.${_,1,...,9}=["axbxcxd","","","","","","","","",""]
 *********************************
 undefined
 undefined
+*********************************************
+*** negative lastIndex clamps to 0 (ToLength) ***
+*********************************************
+test(/x/ /*lastIndex=0*/ , "axbxcxd", -1);
+false
+r.lastIndex=0
+RegExp.${_,1,...,9}=["b","","","","","","","","",""]
+exec(/x/ /*lastIndex=0*/ , "axbxcxd", -1);
+null
+r.lastIndex=0
+RegExp.${_,1,...,9}=["b","","","","","","","","",""]
+test(/x/ /*lastIndex=0*/ , "axbxcxd", -Infinity);
+false
+r.lastIndex=0
+RegExp.${_,1,...,9}=["b","","","","","","","","",""]
+test(/x/g /*lastIndex=6*/ , "axbxcxd", -1);
+true
+r.lastIndex=2
+RegExp.${_,1,...,9}=["axbxcxd","","","","","","","","",""]
+test(/x/g /*lastIndex=2*/ , "axbxcxd", -Infinity);
+true
+r.lastIndex=2
+RegExp.${_,1,...,9}=["axbxcxd","","","","","","","","",""]
+test(/x/g /*lastIndex=2*/ , "axbxcxd", -0.5);
+true
+r.lastIndex=2
+RegExp.${_,1,...,9}=["axbxcxd","","","","","","","","",""]
+exec(/x/g /*lastIndex=2*/ , "axbxcxd", -0.5);
+["x"] /*input="axbxcxd", index=1*/ 
+r.lastIndex=2
+RegExp.${_,1,...,9}=["axbxcxd","","","","","","","","",""]

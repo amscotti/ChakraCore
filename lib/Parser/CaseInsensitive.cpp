@@ -58,6 +58,10 @@ namespace UnifiedRegex
 
         // For case-folding entries, version 8.0.0 of CaseFolding.txt located at [1] was used.
         // [1] http://www.unicode.org/Public/8.0.0/ucd/CaseFolding.txt
+        // The Osage, Medefaidrin and Adlam pairs below were added in Unicode
+        // 9.0 (all status C in CaseFolding.txt, verified unchanged in the
+        // current UCD). There is no regeneration script for this table;
+        // further post-8.0 additions need the same manual treatment.
         static constexpr Transform transforms[] =
         {
             { 1, MappingSource::UnicodeData, 0x0041, 0x004a, 0, 32, 32, 32 },
@@ -421,10 +425,19 @@ namespace UnifiedRegex
             { 1, MappingSource::UnicodeData, 0xff41, 0xff5a, -32, 0, 0, 0 },
             { 1, MappingSource::CaseFolding, 0x10400, 0x10427, 0, 40, 40, 40 },
             { 1, MappingSource::CaseFolding, 0x10428, 0x1044f, -40, 0, 0, 0 },
+            // Unicode 9.0 Osage (CaseFolding.txt: 104B0; C; 104D8 through 104D3; C; 104FB).
+            { 1, MappingSource::CaseFolding, 0x104b0, 0x104d3, 0, 40, 40, 40 },
+            { 1, MappingSource::CaseFolding, 0x104d8, 0x104fb, -40, 0, 0, 0 },
             { 1, MappingSource::CaseFolding, 0x10c80, 0x10cb2, 0, 64, 64, 64 },
             { 1, MappingSource::CaseFolding, 0x10cc0, 0x10cf2, -64, 0, 0, 0 },
             { 1, MappingSource::CaseFolding, 0x118a0, 0x118bf, 0, 32, 32, 32 },
             { 1, MappingSource::CaseFolding, 0x118c0, 0x118df, -32, 0, 0, 0 },
+            // Unicode 9.0 Medefaidrin (CaseFolding.txt: 16E40; C; 16E60 through 16E5F; C; 16E7F).
+            { 1, MappingSource::CaseFolding, 0x16e40, 0x16e5f, 0, 32, 32, 32 },
+            { 1, MappingSource::CaseFolding, 0x16e60, 0x16e7f, -32, 0, 0, 0 },
+            // Unicode 9.0 Adlam (CaseFolding.txt: 1E900; C; 1E922 through 1E921; C; 1E943).
+            { 1, MappingSource::CaseFolding, 0x1e900, 0x1e921, 0, 34, 34, 34 },
+            { 1, MappingSource::CaseFolding, 0x1e922, 0x1e943, -34, 0, 0, 0 },
         };
 
         static const int numTransforms = sizeof(transforms) / sizeof(Transform);

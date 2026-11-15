@@ -42,9 +42,11 @@ namespace Js
         static const CharCount NotCachedValue = (CharCount)-2;
 
     private:
-        //  2. ToNumber(lastIndexVar) yields +inf or -inf or an integer not in range [0, MaxCharCount]
+        //  2. ToNumber(lastIndexVar) yields +inf or an integer not in range [0, MaxCharCount]
         static const CharCount InvalidValue = CharCountFlag;
-        //  3. ToNumber(lastIndexVar) yields NaN, +0, -0 or an integer in range [0, MaxCharCount]
+        //  3. ToNumber(lastIndexVar) yields NaN, +0, -0, -inf, a negative,
+        //     or an integer in range [0, MaxCharCount] (negatives clamp to 0
+        //     per ToLength in RegExpBuiltinExec)
         Field(CharCount) lastIndexOrFlag;
 
         static JavascriptRegExp * GetJavascriptRegExp(Arguments& args, PCWSTR varName, ScriptContext* scriptContext);

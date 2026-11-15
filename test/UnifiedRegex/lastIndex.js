@@ -384,3 +384,17 @@ echo(r.exec("b").lastIndex);
 
 var r = /a?/g;
 echo("b".match(r).lastIndex);
+
+echo("*********************************************");
+echo("*** negative lastIndex clamps to 0 (ToLength) ***");
+echo("*********************************************");
+
+var ry = /x/y;
+test(ry, s1, -1);
+exec(ry, s1, -1);
+test(ry, s1, Number.NEGATIVE_INFINITY);
+test(rg, s1, -1);
+test(rg, s1, Number.NEGATIVE_INFINITY);
+test(rg, s1, -0.5);
+exec(rg, s1, -0.5);
+
