@@ -315,7 +315,7 @@ namespace Js
         return arrayBufferState.Detach();
     }
 
-    void ArrayBuffer::AddParent(ArrayBufferParent* parent)
+    void ArrayBufferBase::AddParent(ArrayBufferParent* parent)
     {
         if (this->primaryParent == nullptr || this->primaryParent->Get() == nullptr)
         {
@@ -639,6 +639,11 @@ namespace Js
         // TypedArray views cache their effective length in the
         // ArrayObject length field (read directly by JIT inline caches
         // and bounds checks); refresh it for every live view.
+        RefreshParentsEffectiveLength();
+    }
+
+    void ArrayBufferBase::RefreshParentsEffectiveLength()
+    {
         auto refreshView = [](ArrayBufferParent* parent)
         {
             if (parent != nullptr && TypedArrayBase::Is(JavascriptOperators::GetTypeId(parent)))

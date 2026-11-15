@@ -1,10 +1,11 @@
 # JIT-REG card: s6-growable-nonshared.js — stale auto-length TypedArray/DataView after SAB grow under FullJIT+PGO
 
-Status: NOT a post-e14 regression. Bisected to pre-existing (present at e14-green
-tree 69281b6e4 AND pre-b5 tree 6c1470f9d with identical failing lines).
-Root cause (code-confirmed): `SharedArrayBuffer::Grow` does not refresh live
-views' cached effective-length field. Carded for follow-up lane (fix needs SAB
-parent tracking + GC-field review, not one-line). Do NOT fix in a JIT lane.
+Status: FIXED by the S6 follow-up lane (this card). Was NOT a post-e14
+regression — bisected to pre-existing (present at e14-green tree 69281b6e4 AND
+pre-b5 tree 6c1470f9d with identical failing lines).
+Root cause (code-confirmed): `SharedArrayBuffer::Grow` did not refresh live
+views' cached effective-length field. Fixed as designed below (SAB parent
+tracking on the shared base + refresh walks in both growth paths).
 
 ## Failing tests (3 subtests, ONE mechanism)
 
@@ -89,10 +90,67 @@ print("pass");
   WebAssembly unsupported, so no WASM+JIT confirmation possible on this host).
 - Recommendation: same follow-up lane fixes both; do not split.
 
-## Follow-up guidance
+## Fix (S6 lane) — LANDED, uncommitted in lane worktree
 
-Fix = add SAB parent tracking (new GC-retained fields → read
-`doc/memory-management.md` first per AGENTS.md ownership rule) + refresh walk in
-`SharedArrayBuffer::Grow` (+ `GrowMemory`), then re-verify s6 PGO 13/13 plus the
-RAB differential and the es7 folder. Deliberately NOT fixed here: not
-one-line-class, touches GC fields and two growth paths.
+Design (per `doc/memory-management.md` §2/§3/§7; ownership record lives in
+`ArrayBuffer.h` on the hoisted fields):
+
+- Parent tracking could NOT live on `SharedContents`: it is `HeapNew` native
+  memory shared across runtimes, while parent entries are per-runtime
+  `RecyclerWeakReference` handles. So tracking is per-wrapper, on the
+  `SharedArrayBuffer` wrapper's own Recycler — the same domain/owner as the
+  existing `ArrayBuffer` mechanism (guide §2: Recycler/JS value domain).
+- No parallel rooting scheme: the fields (`primaryParent`,
+  `OtherParents : SList<RecyclerWeakReference<…>*>`, `ParentsCleanupThreshold`),
+  `AddParent`, and the refresh walk were hoisted verbatim from `ArrayBuffer`
+  into `ArrayBufferBase` (`ArrayBuffer.h`, `ArrayBuffer.cpp`). `ArrayBuffer`
+  behavior is a pure move (same code, same GC tracing/barriers via `Field`).
+  Views already register through `ArrayBufferParent`'s ctor — the SAB no-op
+  `AddParent` was the only blocker.
+- `SharedArrayBuffer::Grow` and `WebAssemblySharedArrayBuffer::GrowMemory`
+  (same omission — the WASM path does NOT differ, fixed identically) call the
+  shared `ArrayBufferBase::RefreshParentsEffectiveLength()` after bumping
+  `bufferLength`. DataView needs no refresh (getters compute live).
+- Reentrancy/threading: the walk calls only `RefreshEffectiveLength` (pure
+  field store, no user code, no allocation) on the owning runtime's script
+  thread — same contract as `ArrayBuffer::Resize`.
+- Known limitation: a second wrapper over the same `SharedContents` in
+  ANOTHER runtime keeps its own list; cross-runtime growth does not refresh
+  views there (touching another runtime's GC objects from the growing thread
+  is not permitted). Single-runtime s6 tests are fully covered.
+
+Files: `lib/Runtime/Library/ArrayBuffer.h`, `ArrayBuffer.cpp`
+(`ArrayBufferBase::AddParent` + `RefreshParentsEffectiveLength`, hoist),
+`lib/Runtime/Library/SharedArrayBuffer.cpp` (`Grow`, `GrowMemory` refresh
+calls). No test files added: `test/es7/s6-growable-nonshared.js` IS the
+regression (now 13/13).
+
+Verification (ARM64 macOS, `zig build -Dprofile=jit` → `out/jit/bin/ch`,
+base 9d12aebf3; all under the shared gate lock):
+
+- Pre-fix repro on this host: PGO recipe fails exactly as carded (tests #6
+  @line 210, #12 @line 518, #13 @line 550; 10/13).
+- Post-fix: min-repro `pass`; full file PGO 13/13
+  (`total executed: 13; passed: 13; failed: 0`); interpreted leg `pass`.
+- Hoist regressions: RAB min-repro + `resizable-arraybuffer.js` +
+  `resizable-typedarray.js` under PGO all `pass`; interpreted green:
+  `sharedarraybuffer.js`, `s6-bigint-atomics.js`, `atomics_test.js`,
+  `immutable-arraybuffer.js`, `typedarray/detached-buffer-semantics.js`,
+  `typedarray/dataview{,1,2}.js` (2 baselines MATCH, dataview2 8/8),
+  `typedarray/arraybufferType.js` (baseline MATCH),
+  `typedarray/arraybuffer.js` (content-identical modulo CRLF runner artifact).
+- GC-stress spot (`-CollectGarbage`, 50 buffers × views + DataViews, 8 grow/
+  collect/verify rounds, view-drop + regrow exercising nulled weak handles):
+  `pass` interpreted AND under PGO.
+- Build: both edited TUs compile clean under the exact jit flags (no errors,
+  no file-specific warnings); `RefreshParentsEffectiveLength` confirmed in
+  the shipped dylib.
+
+NOT verified (explicit): `WebAssemblySharedArrayBuffer::GrowMemory` call site
+did not compile in this profile (`ENABLE_WASM_THREADS` off on ARM64 without
+`-Dwasm`; no WASM symbols in dylib) — validated by identical-pattern call
+compiled in `Grow`, unconditional in-scope base-method declaration, and no new
+names/headers. Needs a `-Dwasm=true` build or x64 host. `zig build check`
+(test profile) not run: disk at ~300 MB free vs multi-GB full-profile
+compile; skipped rather than risk the shared gate + disk. Cross-runtime
+(agent-to-agent) view refresh remains a documented non-goal (see limitation).

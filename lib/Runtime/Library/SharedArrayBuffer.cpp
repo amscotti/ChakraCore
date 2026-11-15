@@ -383,6 +383,14 @@ namespace Js
             Assert(sharedContents->buffer != nullptr);
             ZeroMemory(sharedContents->buffer + oldByteLength, newByteLength - oldByteLength);
             sharedContents->bufferLength = newByteLength;
+
+            // Views cache their effective length in the ArrayObject length
+            // field (read directly by JIT inline caches and bounds checks);
+            // refresh every live same-runtime view. Views register through
+            // ArrayBufferParent's constructor now that AddParent tracks them
+            // on the shared base. DataView needs no refresh: its getters
+            // compute the length live from GetByteLength().
+            RefreshParentsEffectiveLength();
         }
     }
 
@@ -938,6 +946,11 @@ namespace Js
         }
         ZeroMemory(buffer + bufferLength, growSize);
         sharedContents->bufferLength = newBufferLength;
+        // Same staleness contract as SharedArrayBuffer::Grow: refresh every
+        // live same-runtime TypedArray view's cached effective length. This
+        // covers JS TypedArray views created over the wasm shared memory's
+        // buffer object (they register via ArrayBufferParent's constructor).
+        RefreshParentsEffectiveLength();
         ValidateBuffer();
         return true;
     }

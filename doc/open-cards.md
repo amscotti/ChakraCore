@@ -139,6 +139,7 @@ checkout (`out/test262`).
 | B5-1 parse-mode split | e6 lane | uniform throw in default and deferparse runs (see §1) |
 | B4-4 store half (dot + compound stores) | e6 lane | probes: correct receivers today (see §2) |
 | B4-2 Node double-conversion | oracle (V8 fix) | Node now converts once (see §1) |
+| JITREG-S6 stale auto-length TypedArray/DataView after SAB grow under FullJIT+PGO (es7 `s6-growable-nonshared.js` #6/#12/#13) | JITREG-S6 lane (this commit) | root cause: `SharedArrayBuffer::Grow` never refreshed live views' cached effective-length field (views never registered — base `AddParent` was a no-op for SAB). Fix: parent tracking hoisted to `ArrayBufferBase`, refresh walks in `ArrayBuffer::Grow`, `SharedArrayBuffer::Grow`, and the wasm `GrowMemory` path. Receipt: `doc/jitreg-s6-growable-sab.md`. Parent-validated: `zig build check` green, es6 224/0, es7 interp 111/0, es7 dynapogo 109/2 (remaining failures exactly the pre-existing matchall #15 + bigint64array PGO cards) |
 
 ## 6. Swarm-triage disposition cards (e13)
 

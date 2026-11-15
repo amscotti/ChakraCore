@@ -83,7 +83,9 @@ namespace Js
             isDetached(false),
             infoBits(0),
             externalized(false),
-            isImmutable(false) { }
+            isImmutable(false),
+            primaryParent(nullptr),
+            otherParents(nullptr) { }
 
         bool IsDetached() { return isDetached; }
 
@@ -96,10 +98,22 @@ namespace Js
         virtual bool IsWebAssemblyArrayBuffer() { return false; }
         virtual ArrayBuffer * GetAsArrayBuffer() = 0;
         virtual SharedArrayBuffer * GetAsSharedArrayBuffer() { return nullptr; }
-        virtual void AddParent(ArrayBufferParent* parent) { }
+        virtual void AddParent(ArrayBufferParent* parent);
         virtual uint32 GetByteLength() const = 0;
         virtual BYTE* GetBuffer() const = 0;
         virtual bool IsValidVirtualBufferLength(uint length) const { return false; };
+
+        static const uint32 ParentsCleanupThreshold = 1000;
+
+        // Refresh the cached effective length (the ArrayObject length field)
+        // of every live TypedArray view over this buffer. The JIT's inline
+        // caches and bounds checks read that field directly without calling
+        // GetLength, so every growth path must call this after bumping the
+        // logical length. Collected views leave null weak references and are
+        // skipped. Must run on the owning runtime's script thread: the parent
+        // list holds only same-runtime views (see AddParent), so a growth in
+        // another runtime over shared contents cannot refresh views here.
+        void RefreshParentsEffectiveLength();
 
         char GetExtraInfoBits() { return infoBits; }
         void SetExtraInfoBits(char info) { infoBits = info; }
@@ -121,6 +135,44 @@ namespace Js
         // buffer keep it false forever, so "byte is set" is exactly
         // IsImmutableBuffer().
         Field(bool) isImmutable;
+
+        // View-parent tracking shared by resizable ArrayBuffers and growable
+        // SharedArrayBuffers. Views (TypedArrayBase, DataView) register via
+        // ArrayBufferParent's constructor, which calls AddParent on their
+        // buffer regardless of buffer kind.
+        //
+        // Ownership record (doc/memory-management.md section 3):
+        // Domain: Recycler/JS value, same runtime as this wrapper. Owner: this
+        //   wrapper; no transfer point; aliases are weak only.
+        // Allocation: CreateWeakReferenceHandle / RecyclerNew(OtherParents) on
+        //   this wrapper's Recycler, lazily in AddParent; released with the
+        //   wrapper by the collector. Weak handles never keep views alive.
+        // Borrow invalidation: a collected view's handle reads null and is
+        //   skipped (AddParent reuses a nulled primary slot; the refresh walk
+        //   and Detach null-check every handle). Shared buffers never detach;
+        //   growable capacity is preallocated so the base pointer is stable.
+        // Reentrancy: the refresh walk calls only
+        //   TypedArrayBase::RefreshEffectiveLength (a field store fed by
+        //   GetLength); it runs no user code and allocates nothing.
+        // Thread/context: AddParent and the refresh walk run on the owning
+        //   runtime's script thread and touch only same-runtime objects. A
+        //   second wrapper over the same SharedContents in another runtime
+        //   keeps its own list; cross-runtime growth does not refresh views
+        //   here (touching another runtime's GC objects from the growing
+        //   thread is not permitted).
+        //In most cases, the buffer will only have one parent
+        Field(RecyclerWeakReference<ArrayBufferParent>*) primaryParent;
+
+        struct OtherParents :public SList<RecyclerWeakReference<ArrayBufferParent>*, Recycler>
+        {
+            OtherParents(Recycler* recycler)
+                :SList<RecyclerWeakReference<ArrayBufferParent>*, Recycler>(recycler), increasedCount(0)
+            {
+            }
+            Field(uint) increasedCount;
+        };
+
+        Field(OtherParents*) otherParents;
     };
 
     template <> bool VarIsImpl<ArrayBufferBase>(RecyclableObject* obj);
@@ -257,7 +309,6 @@ namespace Js
         typedef void(__cdecl *FreeFn)(void*);
         virtual FreeFn GetArrayBufferFreeFn() { return nullptr; }
         static int GetByteLengthOffset() { return offsetof(ArrayBuffer, bufferLength); }
-        virtual void AddParent(ArrayBufferParent* parent) override;
 
         void Detach();
 #if defined(TARGET_64)
@@ -267,8 +318,6 @@ namespace Js
         // maximum 1G to avoid arithmetic overflow.
         static const uint32 MaxArrayBufferLength = 1 << 30;
 #endif
-        static const uint32 ParentsCleanupThreshold = 1000;
-
         virtual bool IsValidAsmJsBufferLength(uint length, bool forceCheck = false) { return false; }
         virtual bool IsArrayBuffer() override { return true; }
         virtual bool IsSharedArrayBuffer() override { return false; }
@@ -286,19 +335,6 @@ namespace Js
         // This function will be called from External buffer and projection buffer as they pass the buffer
         virtual void ReleaseBufferContent();
 
-        //In most cases, the ArrayBuffer will only have one parent
-        Field(RecyclerWeakReference<ArrayBufferParent>*) primaryParent;
-
-        struct OtherParents :public SList<RecyclerWeakReference<ArrayBufferParent>*, Recycler>
-        {
-            OtherParents(Recycler* recycler)
-                :SList<RecyclerWeakReference<ArrayBufferParent>*, Recycler>(recycler), increasedCount(0)
-            {
-            }
-            Field(uint) increasedCount;
-        };
-
-        Field(OtherParents*) otherParents;
         FieldNoBarrier(RefCountedBuffer *) bufferContent;
         Field(uint32) bufferLength;       // Current [[ArrayBufferByteLength]]
         Field(uint32) maxByteLength;      // Immutable resizable limit; logical length for fixed buffers
