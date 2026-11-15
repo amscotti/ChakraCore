@@ -213,6 +213,19 @@ after-log (19:01) is likewise inside the fixed window.
 - Linux JIT gates can now treat dynapogo as authoritative for this
   family; the standing Mac-only evidence cards (open-cards.md:103/104)
   still require Linux runs.
+- PGO methodology gap (found 2026-11-14 by the JIT-reg diagnostic
+  lane): a dynapogo-only run (`--variants dynapogo` without an
+  interpreted leg) produces no `profile.dpl`, so PGO-gated paths never
+  execute and the leg is vacuous for profile-dependent miscompiles.
+  The canonical form is `--variants interpreted dynapogo` (or the
+  two-step profile recipe). Three assertion failures that predate this
+  fix persist under the canonical form — es7/s6-growable-nonshared.js
+  (SAB grow view-length staleness), es7/matchall.js #15 (StFld through
+  non-writable attribute), es7/bigint64array.js (typed-store ToNumber
+  instead of ToBigInt) — carded with min-repros and narrowed sites in
+  doc/jitreg-s6-growable-sab.md, doc/jitreg-matchall-lastindex.md,
+  doc/jitreg-bigint64array-store.md. They are not regressions from any
+  Nov 9–14 lane (reproduced identically on the e14 tree and pre-b5).
 
 ### Review outcome (dual ACCEPT, folds landed)
 
