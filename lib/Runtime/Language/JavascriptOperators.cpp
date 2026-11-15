@@ -8046,7 +8046,17 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
 
         Assert(addr != nullptr);
 
-        return *addr;
+        Var value = *addr;
+        // Module export slots are pre-filled with the undeclared-block-var
+        // sentinel; a load that executes before the export's declaration is
+        // initialized is in TDZ and must throw ReferenceError (the JIT-emitted
+        // ChkUndecl after LdModuleSlot covers compiled code; this covers the
+        // interpreter helper path).
+        if (scriptContext->IsUndeclBlockVar(value))
+        {
+            JavascriptError::ThrowReferenceError(scriptContext, JSERR_UseBeforeDeclaration);
+        }
+        return value;
     }
 
     void JavascriptOperators::OP_StModuleSlot(uint moduleIndex, uint slotIndex, Var value, ScriptContext* scriptContext)

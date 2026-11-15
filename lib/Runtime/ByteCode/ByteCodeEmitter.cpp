@@ -1723,6 +1723,20 @@ void ByteCodeGenerator::DefineUserVars(FuncInfo *funcInfo)
                 }
                 sym->SetHasInit(TRUE);
             }
+            else if (sym->GetSymbolType() == STVariable && sym->GetIsModuleExportStorage() && !sym->GetIsBlockVar())
+            {
+                // Uninitialized `export var` bindings must read `undefined`
+                // (hoisted + initialized at instantiation), but module export
+                // slots are pre-filled with the undeclared-block-var TDZ
+                // sentinel and no assignment ever writes them. Initialize the
+                // slot here, at module-body entry before any user code runs.
+                // Initialized vars are overwritten by their own assignment;
+                // let/const (block vars) keep the sentinel for TDZ.
+                Js::RegSlot undefReg = funcInfo->AcquireTmpRegister();
+                this->m_writer.Reg1(Js::OpCode::LdUndef, undefReg);
+                EmitModuleExportAccess(sym, Js::OpCode::StModuleSlot, undefReg, funcInfo);
+                funcInfo->ReleaseTmpRegister(undefReg);
+            }
         }
 
     }
@@ -4516,6 +4530,15 @@ void ByteCodeGenerator::EmitModuleExportAccess(Symbol* sym, Js::OpCode opcode, J
     if (EnsureSymbolModuleSlots(sym, funcInfo))
     {
         this->Writer()->SlotI2(opcode, location, sym->GetModuleIndex(), sym->GetScopeSlot());
+        if (opcode == Js::OpCode::LdModuleSlot)
+        {
+            // Module export slots are pre-filled with the undeclared-block-var
+            // sentinel (SourceTextModuleRecord::InitializeLocalExports). A load
+            // that executes before the export's declaration is initialized is
+            // in TDZ and must throw ReferenceError, matching the ChkUndecl
+            // emitted for local let/const loads (also covers typeof-import).
+            this->Writer()->Reg1(Js::OpCode::ChkUndecl, location);
+        }
     }
     else
     {

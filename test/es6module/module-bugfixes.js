@@ -188,7 +188,11 @@ var tests = [
                 Default();
                 one();
                 assert.isUndefined(two);
-                assert.isUndefined(otherDefault);
+                // otherDefault is test5236b's default-exported class,
+                // still uninitialized while test5236c evaluates: reading it
+                // must throw ReferenceError (Node oracle throws on the
+                // identical shape), not yield undefined.
+                assert.throws(() => otherDefault, ReferenceError, "class default export is TDZ until its module evaluates");
                 `);
 
             testRunner.LoadModule('import "test5236a";', undefined, false);

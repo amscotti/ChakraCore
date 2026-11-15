@@ -1509,7 +1509,13 @@ namespace Js
     void SourceTextModuleRecord::InitializeLocalExports()
     {
         Recycler* recycler = scriptContext->GetRecycler();
-        Var undefineValue = scriptContext->GetLibrary()->GetUndefined();
+        // Pre-fill with the undeclared-block-var sentinel (the same TDZ marker
+        // used for local let/const) instead of undefined: a cross-module read
+        // of a binding whose declaration has not been evaluated yet must throw
+        // ReferenceError. The load paths (LdModuleSlot via ChkUndecl in the
+        // emitter/interpreter helper, ModuleNamespace::GetNSSlot) check for
+        // this sentinel; declaration evaluation overwrites it via StModuleSlot.
+        Var undeclValue = scriptContext->GetLibrary()->GetUndeclBlockVar();
         if (localSlotCount == InvalidSlotCount)
         {
             uint currentSlotCount = 0;
@@ -1576,7 +1582,7 @@ namespace Js
             localExportSlots = RecyclerNewArray(recycler, Field(Var), currentSlotCount + 1);
             for (uint i = 0; i < currentSlotCount; i++)
             {
-                localExportSlots[i] = undefineValue;
+                localExportSlots[i] = undeclValue;
             }
             localExportSlots[currentSlotCount] = nullptr;
 

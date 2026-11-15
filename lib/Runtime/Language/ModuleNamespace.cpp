@@ -355,7 +355,17 @@ namespace Js
     Var ModuleNamespace::GetNSSlot(BigPropertyIndex propertyIndex)
     {
         Assert((uint)propertyIndex < static_cast<SourceTextModuleRecord*>(static_cast<ModuleRecordBase*>(moduleRecord))->GetLocalExportCount());
-        return this->nsSlots[propertyIndex];
+        Var value = this->nsSlots[propertyIndex];
+        // Local export slots are pre-filled with the undeclared-block-var
+        // sentinel; reading an export whose declaration has not been evaluated
+        // yet is in TDZ and must throw ReferenceError (matches the
+        // LdModuleSlot/ChkUndecl path for direct import reads).
+        ScriptContext* scriptContext = GetScriptContext();
+        if (scriptContext->IsUndeclBlockVar(value))
+        {
+            JavascriptError::ThrowReferenceError(scriptContext, JSERR_UseBeforeDeclaration);
+        }
+        return value;
     }
 
     PropertyId ModuleNamespace::GetPropertyId(BigPropertyIndex index)

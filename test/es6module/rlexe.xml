@@ -210,4 +210,12 @@
       <compile-flags>-ESDynamicImport -ESTopLevelAwait -module</compile-flags>
     </default>
   </test>
+  <test>
+    <default>
+      <files>module-cycletdz.js</files>
+      <baseline>module-cycletdz.baseline</baseline>
+      <compile-flags>-ESDynamicImport -MuteHostErrorMsg</compile-flags>
+      <tags>exclude_sanitize_address</tags>
+    </default>
+  </test>
 </regress-exe>
