@@ -808,8 +808,17 @@ Js::JavascriptArray* ByteCodeGenerator::BuildArrayFromStringList(ParseNode* stri
     {
         Assert(stringNodeList->AsParseNodeBin()->pnode1->nop == knopStr);
 
-        pid = stringNodeList->AsParseNodeBin()->pnode1->AsParseNodeStr()->pid;
-        str = Js::JavascriptString::NewCopyBuffer(pid->Psz(), pid->Cch(), scriptContext);
+        if (stringNodeList->AsParseNodeBin()->pnode1->AsParseNodeStr()->isCookedUndefined)
+        {
+            // Tagged-template escape with no cooked value (ES2025
+            // NotEscapeSequence): the callsite element is undefined.
+            str = scriptContext->GetLibrary()->GetUndefined();
+        }
+        else
+        {
+            pid = stringNodeList->AsParseNodeBin()->pnode1->AsParseNodeStr()->pid;
+            str = Js::JavascriptString::NewCopyBuffer(pid->Psz(), pid->Cch(), scriptContext);
+        }
         pArr->SetItemWithAttributes(index, str, PropertyEnumerable);
 
         stringNodeList = stringNodeList->AsParseNodeBin()->pnode2;
@@ -818,8 +827,17 @@ Js::JavascriptArray* ByteCodeGenerator::BuildArrayFromStringList(ParseNode* stri
 
     Assert(stringNodeList->nop == knopStr);
 
-    pid = stringNodeList->AsParseNodeStr()->pid;
-    str = Js::JavascriptString::NewCopyBuffer(pid->Psz(), pid->Cch(), scriptContext);
+    if (stringNodeList->AsParseNodeStr()->isCookedUndefined)
+    {
+        // Tagged-template escape with no cooked value (ES2025
+        // NotEscapeSequence): the callsite element is undefined.
+        str = scriptContext->GetLibrary()->GetUndefined();
+    }
+    else
+    {
+        pid = stringNodeList->AsParseNodeStr()->pid;
+        str = Js::JavascriptString::NewCopyBuffer(pid->Psz(), pid->Cch(), scriptContext);
+    }
     pArr->SetItemWithAttributes(index, str, PropertyEnumerable);
 
     return pArr;

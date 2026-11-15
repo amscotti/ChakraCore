@@ -504,6 +504,15 @@ public:
         return m_OctOrLeadingZeroOnLastTKNumber;
     }
 
+    // True if the last scanned template piece contained an escape sequence
+    // with no cooked value (ES2025 NotEscapeSequence: cooked is undefined).
+    // The scanner records the source text in the raw string and keeps
+    // scanning; the parser reports the early error for untagged templates.
+    bool HadInvalidEscapeOnLastTemplate()
+    {
+        return m_hadInvalidEscapeOnLastTemplate;
+    }
+
     // Returns the character offset of the first token. The character offset is the offset the first character of the token would
     // have if the entire file was converted to Unicode (UTF16-LE).
     charcount_t IchMinTok(void) const
@@ -737,7 +746,7 @@ private:
     bool m_OctOrLeadingZeroOnLastTKNumber :1;
     bool m_EscapeOnLastTkStrCon:1;
     bool m_lastIdentifierHasEscape:1;
-    BOOL m_fNextStringTemplateIsTagged:1;   // the next string template scanned has a tag (must create raw strings)
+    bool m_hadInvalidEscapeOnLastTemplate :1; // last template piece had an escape with no cooked value (cooked=undefined)
     BYTE m_DeferredParseFlags:2;            // suppressStrPid and suppressIdPid    
     bool es6UnicodeMode;                // True if ES6Unicode Extensions are enabled.
     bool m_fYieldIsKeywordRegion;       // Whether to treat 'yield' as an identifier or keyword

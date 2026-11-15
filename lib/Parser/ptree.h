@@ -354,6 +354,10 @@ public:
     ParseNodeStr(charcount_t ichMin, charcount_t ichLim, IdentPtr pid);
 
     IdentPtr const pid;
+    // True when this node is a tagged-template cooked string whose escape has
+    // no cooked value (ES2025 NotEscapeSequence): the callsite element is
+    // undefined. Only set on tagged-template cooked pieces.
+    bool isCookedUndefined = false;
 
     DISABLE_SELF_CAST(ParseNodeStr);
 

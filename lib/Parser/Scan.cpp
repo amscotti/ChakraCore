@@ -110,7 +110,7 @@ void Scanner<EncodingPolicy>::ClearStates()
     m_doubleQuoteOnLastTkStrCon = FALSE;
     m_OctOrLeadingZeroOnLastTKNumber = false;
     m_EscapeOnLastTkStrCon = false;
-    m_fNextStringTemplateIsTagged = false;
+    m_hadInvalidEscapeOnLastTemplate = false;
     m_DeferredParseFlags = ScanFlagNone;
 
     m_fYieldIsKeywordRegion = false;
@@ -1088,6 +1088,7 @@ tokens Scanner<EncodingPolicy>::ScanStringConstant(OLECHAR delim, EncodedCharPtr
     // Reset
     m_OctOrLeadingZeroOnLastTKNumber = false;
     m_EscapeOnLastTkStrCon = FALSE;
+    m_hadInvalidEscapeOnLastTemplate = false;
 
     m_tempChBuf.Reset();
 
@@ -1223,7 +1224,12 @@ LMainDefault:
                 if (Js::NumberUtilities::FHexDigit(c = this->ReadFirst(p, last), &wT))
                     goto LFourHex;
                 else if (c != '{' || !this->es6UnicodeMode)
+                {
+                    // No cooked value in templates: record the source char in
+                    // the raw string and resume scanning at ReturnScanError.
+                    m_tempChBufSecondary.template AppendCh<createRawString>(c);
                     goto ReturnScanError;
+                }
 
                 Assert(c == '{');
                 // c should definitely be a '{' which should be appended to the raw string.
@@ -1232,6 +1238,9 @@ LMainDefault:
                 //At least one digit is expected
                 if (!Js::NumberUtilities::FHexDigit(c = this->ReadFirst(p, last), &wT))
                 {
+                    // No cooked value in templates: record the source char in
+                    // the raw string and resume scanning at ReturnScanError.
+                    m_tempChBufSecondary.template AppendCh<createRawString>(c);
                     goto ReturnScanError;
                 }
 
@@ -1247,6 +1256,8 @@ LMainDefault:
 
                     if (codePoint > 0x10FFFF)
                     {
+                        // The digits consumed so far are already in the raw
+                        // string; ReturnScanError resumes scanning (tagged use).
                         errorType = (uint)ERRInvalidCodePoint;
                         goto ReturnScanError;
                     }
@@ -1254,7 +1265,10 @@ LMainDefault:
 
                 if (c != '}')
                 {
+                    // No cooked value in templates: record the source char in
+                    // the raw string and resume scanning at ReturnScanError.
                     errorType = (uint)ERRMissingCurlyBrace;
+                    m_tempChBufSecondary.template AppendCh<createRawString>(c);
                     goto ReturnScanError;
                 }
 
@@ -1283,7 +1297,12 @@ LFourHex:
 
                 codePoint += static_cast<codepoint_t>(wT * 0x1000);
                 if (!Js::NumberUtilities::FHexDigit(c = this->ReadFirst(p, last), &wT))
+                {
+                    // No cooked value in templates: record the source char in
+                    // the raw string and resume scanning at ReturnScanError.
+                    m_tempChBufSecondary.template AppendCh<createRawString>(c);
                     goto ReturnScanError;
+                }
 
                 // Append fourth (or second) hex digit character to the raw string.
                 m_tempChBufSecondary.template AppendCh<createRawString>(c);
@@ -1293,7 +1312,12 @@ LFourHex:
 LTwoHex:
                 // This code path doesn't expect curly.
                 if (!Js::NumberUtilities::FHexDigit(c = this->ReadFirst(p, last), &wT))
+                {
+                    // No cooked value in templates: record the source char in
+                    // the raw string and resume scanning at ReturnScanError.
+                    m_tempChBufSecondary.template AppendCh<createRawString>(c);
                     goto ReturnScanError;
+                }
 
                 // Append first hex digit character to the raw string.
                 m_tempChBufSecondary.template AppendCh<createRawString>(c);
@@ -1301,7 +1325,12 @@ LTwoHex:
                 codePoint += static_cast<codepoint_t>(wT * 0x0010);
 
                 if (!Js::NumberUtilities::FHexDigit(c = this->ReadFirst(p, last), &wT))
+                {
+                    // No cooked value in templates: record the source char in
+                    // the raw string and resume scanning at ReturnScanError.
+                    m_tempChBufSecondary.template AppendCh<createRawString>(c);
                     goto ReturnScanError;
+                }
 
                 codePoint += static_cast<codepoint_t>(wT);
 
@@ -1315,6 +1344,8 @@ LTwoHex:
                 }
                 else
                 {
+                    // The digits consumed so far are already in the raw
+                    // string; ReturnScanError resumes scanning (tagged use).
                     goto ReturnScanError;
                 }
                 break;
@@ -1326,13 +1357,16 @@ LTwoHex:
 
                 ch -= '0';
 
-                // Octal escape sequences are not allowed inside string template literals
+                // Octal escape sequences have no cooked value inside string
+                // template literals: record the source char in the raw string
+                // and resume scanning at ReturnScanError (tagged use).
                 if (stringTemplateMode)
                 {
                     c = this->PeekFirst(p, last);
                     if (ch != 0 || (c >= '0' && c <= '7'))
                     {
                         errorType = (uint)ERRES5NoOctal;
+                        m_tempChBufSecondary.template AppendCh<createRawString>(static_cast<OLECHAR>(ch + '0'));
                         goto ReturnScanError;
                     }
                     break;
@@ -1358,10 +1392,13 @@ LTwoHex:
             case '7':
                 // 1 to 2 octal digits
 
-                // Octal escape sequences are not allowed inside string template literals
+                // Octal escape sequences have no cooked value inside string
+                // template literals: record the source char in the raw string
+                // and resume scanning at ReturnScanError (tagged use).
                 if (stringTemplateMode)
                 {
                     errorType = (uint)ERRES5NoOctal;
+                    m_tempChBufSecondary.template AppendCh<createRawString>(ch);
                     goto ReturnScanError;
                 }
 
@@ -1384,16 +1421,20 @@ LOneOctal:
             case '9':
                 // \8 and \9 are NonOctalDecimalEscapeSequences in sloppy
                 // string literals, but no template production admits them:
-                // they cook to undefined (ES2025 13.2.8.1), an early Syntax Error
-                // in untagged templates. Reject at scan time like the other
-                // legacy octal shapes above; the raw string still records
-                // the escape for tagged use, matching the existing
-                // treatment of \1..\7 escapes.
+                // they cook to undefined (ES2025 12.9.5.2), an early SyntaxError
+                // in untagged templates. Record the escape in the raw string
+                // and resume scanning at ReturnScanError (tagged use), matching
+                // the treatment of \1..\7 escapes above.
                 if (stringTemplateMode)
                 {
                     errorType = (uint)ERRES5NoOctal;
+                    m_tempChBufSecondary.template AppendCh<createRawString>(ch);
                     goto ReturnScanError;
                 }
+                // In strict mode these are early SyntaxErrors (Annex B allows
+                // them only when [~Strict]); report via the same flag as the
+                // 0-7 octal escapes above so the strict checks fire.
+                m_OctOrLeadingZeroOnLastTKNumber = true;
                 break;
 
             case kchRET:        // 0xD
@@ -1438,6 +1479,20 @@ LEcmaEscapeLineBreak:
                     errorType = (uint)ERRnoStrEnd;
 
 ReturnScanError:
+                    // An invalid escape inside a string template has no cooked
+                    // value (ES2025 12.9.5.2 NotEscapeSequence) but the raw
+                    // string must still record the source text: each goto above
+                    // appended the offending char(s) to the raw buffer. When
+                    // source remains (p < last rules out a truncated literal),
+                    // mark cooked-undefined and resume scanning; the parser
+                    // reports the early error for untagged templates while
+                    // tagged templates keep cooked=undefined. Anything else
+                    // (plain strings, or truncated input) still errors here.
+                    if (stringTemplateMode && p < last)
+                    {
+                        m_hadInvalidEscapeOnLastTemplate = true;
+                        continue;
+                    }
                     m_currentCharacter = p - 1;
                     Error(errorType);
                 }

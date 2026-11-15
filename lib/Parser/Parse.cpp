@@ -11512,6 +11512,14 @@ ParseNodePtr Parser::ParseStringTemplateDecl(ParseNodePtr pnodeTagFnc)
             Error(ERRES5NoOctal);
         }
 
+        // An escape with no cooked value (e.g. \1, \8, \unicode) is an early
+        // error in untagged templates; tagged templates keep cooked=undefined
+        // (the scanner recorded the source text in the raw string).
+        if (!isTagged && this->GetScanner()->HadInvalidEscapeOnLastTemplate())
+        {
+            Error(ERRES5NoOctal);
+        }
+
         // We are not able to pass more than a ushort worth of arguments to the tag
         // so use that as a logical limit on the number of string constant pieces.
         if (stringConstantCount >= Js::Constants::MaxAllowedArgs)
@@ -11527,6 +11535,7 @@ ParseNodePtr Parser::ParseStringTemplateDecl(ParseNodePtr pnodeTagFnc)
         if (buildAST)
         {
             stringLiteral = CreateStrNode(m_token.GetStr());
+            stringLiteral->isCookedUndefined = this->GetScanner()->HadInvalidEscapeOnLastTemplate();
 
             AddToNodeList(&pnodeStringLiterals, &lastStringLiteralNodeRef, stringLiteral);
 
