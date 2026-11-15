@@ -23420,6 +23420,24 @@ bool Lowerer::GenerateFastStFldForCustomProperty(IR::Instr *const instr, IR::Lab
         objectOpnd->SetValueType(objectValueType.ToDefiniteObject());
     }
 
+    //     cmp byte [object + offset(lastIndexNonWritable)], 0
+    //     jne $helper
+    // A { writable: false } redefine of the virtual "lastIndex" property flips
+    // lastIndexNonWritable without changing the object's type, so the vtable
+    // guard above still passes. The helper honors the flag through the
+    // observable [[Set]] (sloppy ignore / strict throw); the inlined store
+    // below must not run when it is set.
+    if(!labelHelper)
+    {
+        *labelHelperRef = labelHelper = IR::LabelInstr::New(Js::OpCode::Label, func, true);
+    }
+    InsertCompareBranch(
+        IR::IndirOpnd::New(objectOpnd, Js::JavascriptRegExp::GetOffsetOfLastIndexNonWritable(), TyInt8, func),
+        IR::IntConstOpnd::New(0, TyInt8, func, true),
+        Js::OpCode::BrNeq_A,
+        labelHelper,
+        instr);
+
     //     mov [object + offset(lastIndexVar)], src
     //     mov [object + offset(lastIndexOrFlag)], Js::JavascriptRegExp::NotCachedValue
     //     jmp $done

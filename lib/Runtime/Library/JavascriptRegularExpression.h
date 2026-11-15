@@ -110,6 +110,7 @@ namespace Js
         static uint GetOffsetOfPattern() { return offsetof(JavascriptRegExp, pattern); }
         static uint GetOffsetOfSplitPattern() { return offsetof(JavascriptRegExp, splitPattern); }
         static uint GetOffsetOfLastIndexVar() { return offsetof(JavascriptRegExp, lastIndexVar); }
+        static uint GetOffsetOfLastIndexNonWritable() { return offsetof(JavascriptRegExp, lastIndexNonWritable); }
         static uint GetOffsetOfLastIndexOrFlag() { return offsetof(JavascriptRegExp, lastIndexOrFlag); }
 
         inline UnifiedRegex::RegexPattern* GetPattern() const { return pattern; }
