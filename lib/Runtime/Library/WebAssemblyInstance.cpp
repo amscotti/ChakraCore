@@ -10,6 +10,10 @@
 namespace Js
 {
 
+#if defined(ENABLE_ASMJS) && defined(_M_AMD64)
+Var AsmJsExternalEntryPointMulti(RecyclableObject* entryObject, CallInfo callInfo, ...);
+#endif
+
 Var GetImportVariable(Wasm::WasmImport* wi, ScriptContext* ctx, Var ffi)
 {
     PropertyRecord const * modPropertyRecord = nullptr;
@@ -177,7 +181,20 @@ void WebAssemblyInstance::CreateWasmFunctions(WebAssemblyModule * wasmModule, Sc
         FunctionEntryPointInfo* entrypointInfo = (FunctionEntryPointInfo*)funcObj->GetEntryPointInfo();
         AssertOrFailFast(entrypointInfo->GetIsAsmJSFunction());
         AssertOrFailFast(!funcObj->IsCrossSiteObject());
-        funcObj->SetEntryPoint(Js::AsmJsExternalEntryPoint);
+        // W7 multi-value: x64 JS dispatch must not use the single-return
+        // assembly external entry; route it through the C++ helper that
+        // interprets and boxes all result slots. ARM64 already uses the C++
+        // external entry and handles multi-value there.
+#if defined(_M_AMD64)
+        if (sig->GetResultCount() > 1)
+        {
+            funcObj->SetEntryPoint(Js::AsmJsExternalEntryPointMulti);
+        }
+        else
+#endif
+        {
+            funcObj->SetEntryPoint(Js::AsmJsExternalEntryPoint);
+        }
         entrypointInfo->jsMethod = funcObj->GetFunctionInfo()->GetOriginalEntryPoint();
         if (!PHASE_ENABLED(WasmDeferredPhase, body))
         {

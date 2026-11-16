@@ -182,6 +182,8 @@ void FinReentrant(napi_env env, void* data, void* /*hint*/) {
 
 /* Chained finalizer (P7-5): creates + collects a second external from
  * inside the first drain; drain-until-empty must run it too. */
+__attribute__((noinline)) void ClearStack();
+
 struct ChainState {
   napi_env env = nullptr;
   JsRuntimeHandle rt = JS_INVALID_REFERENCE;
@@ -214,6 +216,7 @@ void FinChainedFirst(napi_env env, void* data, void* /*hint*/) {
   }
   (void)napi_close_handle_scope(env, sc);
   ext = nullptr;
+  ClearStack();
   bool prev_gc = g_in_gc;
   g_in_gc = true;
   for (int i = 0; i < 10; i++) JsCollectGarbage(cs->rt);

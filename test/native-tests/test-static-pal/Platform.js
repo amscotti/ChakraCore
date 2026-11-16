@@ -45,7 +45,7 @@ else\n\
 \tCFLAGS=-lstdc++ -std=c++0x -I$(IDIR) -I$(ROOT) -I$(ROOT)/pal/inc/rt -I$(ROOT)/pal/inc -I$(ROOT)/pal -fms-extensions \n\
 \tFORCE_STARTS=-Wl,--whole-archive\n\
 \tFORCE_ENDS=-Wl,--no-whole-archive\n\
-\tLIBS=-pthread -lm -ldl -licuuc -Wno-c++11-compat-deprecated-writable-strings \
+\tLIBS=-pthread -lm -ldl -licuuc -licui18n -licudata -Wno-c++11-compat-deprecated-writable-strings \
     -Wno-deprecated-declarations -Wno-unknown-warning-option -o sample.o\n\
 endif\n\
 \n\

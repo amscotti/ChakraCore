@@ -389,6 +389,14 @@ fn appendTuFlags(ctx: *const Ctx, run: *std.Build.Step.Run, g: *const tables.Gro
         if (!substituted) run.addArg(b.fmt("-I{s}", .{dir}));
     }
     if (g.pal) run.addArg("-Ipal/src/include");
+    // Static ch compiles TestHooks.cpp, whose BackendApi.h includes
+    // EmitBuffer.h; the reference ch target only needs lib/Backend here on
+    // the static profile (shared ch gets TestHooks via the dylib group).
+    if (g == &tables.ch_group and isStaticProfile(ctx.profile))
+    {
+        run.addArg("-Ilib/Backend");
+        run.addArg("-Ilib/Runtime/ByteCode");
+    }
     // The reference passes no ICU -I (system clang searches /usr/include
     // by default); `zig cc` searches only its bundled headers, so the
     // default dir is spelled explicitly. -isystem, not -I: /usr/include
@@ -1095,10 +1103,11 @@ pub fn build(b: *std.Build) void {
     native.addFileArg(b.path("tools/build/check_native.py"));
     native.addFileArg(b.path("test/native-tests/test_native.sh"));
     addChArg(b, native, profile, prefix_dir, ch_bin, artifacts_ready, null);
-    native.addArg(cc);
+    native.addArg(if (is_static) b.fmt("{s} c++", .{ctx.zig_exe}) else cc);
     native.addArg(cxx);
     if (is_static) {
         native.addArg("--static");
+        native.addArg("--archive");
         native.addArg(b.fmt("{s}/lib/libChakraCoreStatic.a", .{prefix_dir}));
         native.addFileInput(archives.get("ChakraCoreStatic").?);
     } else {

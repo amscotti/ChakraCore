@@ -22,7 +22,7 @@
 //-------------------------------------------------------------------------------------------------------
 
 #include "RuntimeLanguagePch.h"
-#if defined(_M_ARM64)
+#if defined(_M_ARM64) || defined(_M_AMD64)
 #include "Language/InterpreterStackFrame.h"
 #endif
 
@@ -488,6 +488,46 @@ namespace Js
 
 #endif
 
+#if defined(ENABLE_WASM) && defined(_M_AMD64)
+    // x64 JS-dispatch entry for a wasm function whose signature has more than
+    // one result. The regular AsmJsExternalEntryPoint is an assembly thunk
+    // that boxes one return register; route multi-value functions through the
+    // shared interpreter + BoxWasmMultiResult path instead. Selected at
+    // WebAssemblyInstance::CreateWasmFunctions when resultCount > 1.
+    Var AsmJsExternalEntryPointMulti(RecyclableObject* entryObject, CallInfo callInfo, ...)
+    {
+        ARGUMENTS(args, callInfo);
+        ScriptFunction* func = (ScriptFunction*)entryObject;
+        ScriptContext* scriptContext = func->GetScriptContext();
+        FunctionBody* body = func->GetFunctionBody();
+
+        if (body->IsWasmFunction())
+        {
+            JavascriptMethod next = WasmLibrary::EnsureWasmEntrypoint(func);
+            if (next == WasmLibrary::WasmLazyTrapCallback)
+            {
+                WasmLibrary::WasmLazyTrapCallback(entryObject, callInfo);
+                return JavascriptOperators::OP_LdUndef(scriptContext);
+            }
+        }
+
+        AsmJsFunctionInfo* info = body->GetAsmJsFunctionInfo();
+        const Wasm::WasmSignature* sig = info->GetWasmSignature();
+        Assert(sig != nullptr && sig->GetResultCount() > 1);
+
+        int argSize = GetStackSizeForAsmJsUnboxing(func);
+        void* buf = _alloca(argSize);
+        AsmJsCallStackLayout* layout = (AsmJsCallStackLayout*)buf;
+        UnboxAsmJsArguments(func, args.Values + 1, (char*)buf, callInfo);
+        layout->functionObject = func;
+
+        const uint32 resultCount = sig->GetResultCount();
+        uint64* retBuf = (uint64*)_alloca(::Math::Align<int32>((int32)(resultCount * sizeof(uint64)), 16));
+        InterpreterStackFrame::AsmJsInterpreterMulti(layout, retBuf);
+        return BoxWasmMultiResult(func, sig, retBuf);
+    }
+#endif
+
 // External entry points (x86 inline-asm + ARM64 C++). x64 uses the
 // amd64_Thunks.S native thunk and has no C++ definition here.
 #if _M_IX86
@@ -851,4 +891,14 @@ namespace Js
 #endif
 
 }
+
+#if defined(DBG) && ENABLE_NATIVE_CODEGEN
+// JitHelperUtils' JIT_HELPER_END macro cannot be used inside namespace Js;
+// define the debug helper-validation symbol explicitly at global scope.
+namespace HelperMethodAttributes
+{
+    const bool JitHelperUtils::helperOp_GetAsmJsEntryPoint_implemented = true;
+}
+#endif
+
 #endif

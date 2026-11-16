@@ -484,7 +484,8 @@ int main() {
      * released above, so the weak referent is now collectable. */
     got = nullptr;
     obj = JS_INVALID_REFERENCE;
-    collect(rt);
+    ClearStack();
+    force_gc(rt);
     napi_value got2 = reinterpret_cast<napi_value>(static_cast<std::uintptr_t>(0xdeadbeef));
     expect_status(napi_get_reference_value(env, ref, &got2), napi_ok,
                   "weak0: get after collect");

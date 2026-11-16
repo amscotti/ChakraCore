@@ -22,9 +22,10 @@ out/<profile> for debug-static / release-shared):
      still carry no C++ runtime.
   3. Version-script exports (`nm -D --defined-only`) on shared profiles:
      the EXACT committed set for the .so (tools/build/linux_exports_so.txt:
-     237 symbols incl. DllMain + Js* at B4 record time -- export
-     membership is source- and script-determined, so any delta is
-     a real finding). Provenance honesty: the B4 record does NOT
+     237 symbols incl. DllMain + Js* at B4 record time; release-shared is
+     234 because non-test profiles omit the three JsPrivate* debug APIs
+     guarded by ENABLE_DEBUG_CONFIG_OPTIONS -- export membership is source-
+     and script-determined, so any other delta is a real finding). Provenance honesty: the B4 record does NOT
      document whether linux_exports_*.txt were captured from the
      legacy reference artifacts or from the Zig-built artifacts,
      so today this gate proves stability against the committed
@@ -92,6 +93,15 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 EXPORTS_SO = os.path.join(HERE, "linux_exports_so.txt")
 EXPORTS_CH = os.path.join(HERE, "linux_exports_ch.txt")
+
+# Non-test profiles compile without ENABLE_DEBUG_CONFIG_OPTIONS, so these
+# Jsrt.cpp CHAKRA_API definitions are absent by design. Keep the exact-set
+# gate for every other symbol.
+RELEASE_SHARED_ABSENT_EXPORTS = frozenset((
+    "JsPrivateCollectGarbageSkipStack",
+    "JsPrivateDetachArrayBuffer",
+    "JsPrivateFreeDetachedArrayBuffer",
+))
 
 PROFILES = ("test", "debug-static", "release-shared")
 DEFAULT_ICU_MAJOR = "74"
@@ -314,9 +324,9 @@ def read_export_ref(ref_file):
         return sorted(line.strip() for line in f if line.strip())
 
 
-def check_exports(path, ref_file):
+def check_exports(path, ref_file, omit=()):
     try:
-        want = read_export_ref(ref_file)
+        want = [s for s in read_export_ref(ref_file) if s not in omit]
     except OSError as e:
         return "cannot read %s: %s" % (ref_file, e)
     if not want:
@@ -775,7 +785,8 @@ def main(argv):
                              os.path.join(prefix, "lib/libChakraCoreStatic.a"))))
     else:
         failures.append(("so-exports", check_exports(
-            os.path.join(prefix, SOLIBS[1]), EXPORTS_SO)))
+            os.path.join(prefix, SOLIBS[1]), EXPORTS_SO,
+            omit=(RELEASE_SHARED_ABSENT_EXPORTS if is_release else ()))))
         failures.append(("ch-exports", check_exports_subset(
             os.path.join(prefix, "bin/ch"), EXPORTS_CH)))
 
@@ -825,7 +836,8 @@ def main(argv):
         print("check_metadata_linux: PASS: profile=%s icu=%s jit=%s ELF + SONAME/NEEDED + "
               "exports (%d/%d) + configs + headers + archives + marker all match"
               % (profile, icu_major, jit,
-                 len(read_export_ref(EXPORTS_SO)),
+                 len(read_export_ref(EXPORTS_SO)) -
+                 (len(RELEASE_SHARED_ABSENT_EXPORTS) if is_release else 0),
                  len(read_export_ref(EXPORTS_CH))))
     return 0
 

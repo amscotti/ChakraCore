@@ -4220,7 +4220,7 @@ Lowerer::GenerateProfiledNewScObjArrayFastPath(IR::Instr *instr, Js::ArrayCallSi
     uint allocationBucketsCount = ArrayType::AllocationBucketsCount;
     uint(*allocationBuckets)[Js::JavascriptArray::AllocationBucketsInfoSize];
     allocationBuckets = ArrayType::allocationBuckets;
-    
+
     IRType missingItemType = (arrayInfo ? arrayInfo->IsNativeIntArray() ? IRType::TyInt32 : arrayInfo->IsNativeFloatArray() ? IRType::TyFloat64 : IRType::TyVar : IRType::TyVar);
     IR::LabelInstr * arrayInitDone = IR::LabelInstr::New(Js::OpCode::Label, func);
 
@@ -4684,7 +4684,7 @@ Lowerer::LowerNewScObject(IR::Instr *newObjInstr, bool callCtor, bool hasArgs, b
             }
             else
             {
-                newScHelper = 
+                newScHelper =
                     (isBaseClassConstructorNewScObject ?
                         (hasArgs ? IR::HelperNewScObjectNoCtorFull : IR::HelperNewScObjectNoArgNoCtorFull) :
                         (hasArgs ? IR::HelperNewScObjectNoCtor : IR::HelperNewScObjectNoArgNoCtor));
@@ -4701,7 +4701,7 @@ Lowerer::LowerNewScObject(IR::Instr *newObjInstr, bool callCtor, bool hasArgs, b
                 Assert(createObjDst == newObjDst);
 
                 // Return the first instruction above the region we've just lowered.
-                return RemoveLoweredRegionStartMarker(startMarkerInstr);                    
+                return RemoveLoweredRegionStartMarker(startMarkerInstr);
             }
         }
     }
@@ -7243,7 +7243,7 @@ Lowerer::LowerStFld(
     IR::Opnd *dst = stFldInstr->UnlinkDst();
     AssertMsg(dst->IsSymOpnd() && dst->AsSymOpnd()->m_sym->IsPropertySym(), "Expected property sym as dst of field store");
 
-    BailOutInfo * bailOutInfo = nullptr; 
+    BailOutInfo * bailOutInfo = nullptr;
     bool doCheckLayout = false;
     IR::PropertySymOpnd * propertySymOpnd = nullptr;
     if (dst->AsSymOpnd()->IsPropertySymOpnd())
@@ -7307,7 +7307,7 @@ Lowerer::LowerStFld(
 
     IR::RegOpnd *opndBase = dst->AsSymOpnd()->CreatePropertyOwnerOpnd(m_func);
 
-    IR::Instr * callInstr = 
+    IR::Instr * callInstr =
         m_lowererMD.ChangeToHelperCall(stFldInstr, helperMethod, labelBailOut, opndBase, propertySymOpnd, isHelper);
 
     if (doCheckLayout)
@@ -9360,7 +9360,7 @@ Lowerer::LowerStElemI(IR::Instr * instr, Js::PropertyOperationFlags flags, bool 
         {
             helperMethod =
                 srcType == TyVar ? IR::HelperOp_SetElementI_Int32 :
-                srcType == TyInt32 ? 
+                srcType == TyInt32 ?
                     (allowConvert ? IR::HelperOp_SetNativeIntElementI_Int32 : IR::HelperOp_SetNativeIntElementI_Int32_NoConvert) :
                     (allowConvert ? IR::HelperOp_SetNativeFloatElementI_Int32 : IR::HelperOp_SetNativeFloatElementI_Int32_NoConvert) ;
         }
@@ -9368,7 +9368,7 @@ Lowerer::LowerStElemI(IR::Instr * instr, Js::PropertyOperationFlags flags, bool 
         {
             helperMethod =
                 srcType == TyVar ? IR::HelperOp_SetElementI_UInt32 :
-                srcType == TyInt32 ? 
+                srcType == TyInt32 ?
                     (allowConvert ? IR::HelperOp_SetNativeIntElementI_UInt32 : IR::HelperOp_SetNativeIntElementI_UInt32_NoConvert) :
                     (allowConvert ? IR::HelperOp_SetNativeFloatElementI_UInt32 : IR::HelperOp_SetNativeFloatElementI_UInt32_NoConvert) ;
         }
@@ -9388,8 +9388,8 @@ Lowerer::LowerStElemI(IR::Instr * instr, Js::PropertyOperationFlags flags, bool 
 
         if (srcType != TyVar)
         {
-            helperMethod = srcType == TyInt32 ? 
-                (allowConvert ? IR::HelperOp_SetNativeIntElementI : IR::HelperOp_SetNativeIntElementI_NoConvert) : 
+            helperMethod = srcType == TyInt32 ?
+                (allowConvert ? IR::HelperOp_SetNativeIntElementI : IR::HelperOp_SetNativeIntElementI_NoConvert) :
                 (allowConvert ? IR::HelperOp_SetNativeFloatElementI : IR::HelperOp_SetNativeFloatElementI_NoConvert);
         }
     }
@@ -12959,7 +12959,7 @@ Lowerer::LowerCheckIsFuncObj(IR::Instr *instr, bool checkFuncInfo)
 {
     // The CheckIsFuncObj instr and CheckFuncInfo instr (checkFuncInfo = true) are used to
     // generate bailout instrs that type check a function (and can also check the func info).
-    // Rather than creating these bailout instrs in Inline, they are created in Lower because 
+    // Rather than creating these bailout instrs in Inline, they are created in Lower because
     // CheckIsFuncObj and CheckFuncInfo instrs can be hoisted outside of loops and thus the
     // bailout instrs created can exist outside of loops.
 
@@ -13441,7 +13441,7 @@ IR::RegOpnd *Lowerer::LowerBailOnNotArray(IR::Instr *const instr)
     IR::RegOpnd *const srcOpnd = instr->UnlinkSrc1()->AsRegOpnd();
     const ValueType srcValueType = srcOpnd->GetValueType();
     IR::RegOpnd *const arrayOpnd =
-        GenerateArrayTest(srcOpnd, bailOutLabel, bailOutLabel, bailOutLabel, true);
+        GenerateArrayTest(srcOpnd, bailOutLabel, bailOutLabel, bailOutLabel, true, false, true);
 
     if (srcValueType.IsLikelyTypedArray() && !srcValueType.IsLikelyOptimizedVirtualTypedArray())
     {
@@ -15062,7 +15062,7 @@ Lowerer::GenerateFastBrOnObject(IR::Instr *instr)
             IR::RegOpnd * opndTypeId = IR::RegOpnd::New(TyInt32, m_func);
             InsertMove(opndTypeId, IR::IndirOpnd::New(typeRegOpnd, Js::Type::GetOffsetOfTypeId(), TyInt32, m_func), instr);
             InsertCompareBranch(opndTypeId,
-                                IR::IntConstOpnd::New(Js::TypeIds_LastJavascriptPrimitiveType, TyInt32, instr->m_func), 
+                                IR::IntConstOpnd::New(Js::TypeIds_LastJavascriptPrimitiveType, TyInt32, instr->m_func),
                                 Js::OpCode::BrGt_A, target, instr);
             InsertCompareBranch(opndTypeId, IR::IntConstOpnd::New(Js::TypeIds_Null, TyInt32, m_func), Js::OpCode::BrEq_A, target, instr);
             break;
@@ -15071,14 +15071,14 @@ Lowerer::GenerateFastBrOnObject(IR::Instr *instr)
         case Js::OpCode::BrOnObject_A:
             InsertCompareBranch(
                 IR::IndirOpnd::New(typeRegOpnd, Js::Type::GetOffsetOfTypeId(), TyInt32, m_func),
-                IR::IntConstOpnd::New(Js::TypeIds_LastJavascriptPrimitiveType, TyInt32, instr->m_func), 
+                IR::IntConstOpnd::New(Js::TypeIds_LastJavascriptPrimitiveType, TyInt32, instr->m_func),
                 Js::OpCode::BrGt_A, target, instr);
             break;
 
         case Js::OpCode::BrOnNotNullObj_A:
             InsertCompareBranch(
                 IR::IndirOpnd::New(typeRegOpnd, Js::Type::GetOffsetOfTypeId(), TyInt32, m_func),
-                IR::IntConstOpnd::New(Js::TypeIds_Null, TyInt32, instr->m_func), 
+                IR::IntConstOpnd::New(Js::TypeIds_Null, TyInt32, instr->m_func),
                 Js::OpCode::BrNeq_A, target, instr);
             break;
 
@@ -22859,7 +22859,7 @@ Lowerer::InsertLazyBailOutThunk()
     {
         moveInstr->GetDst()->AsIndirOpnd()->GetBaseOpnd()->AsRegOpnd()->SetReg(RegArg0);
     }
-    
+
     if (moveInstr->m_prev->GetDst()->IsRegOpnd())
     {
         moveInstr->m_prev->GetDst()->AsRegOpnd()->SetReg(RegArg0);

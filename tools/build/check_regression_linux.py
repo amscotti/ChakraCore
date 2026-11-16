@@ -27,7 +27,8 @@ summary lines fails loudly. Overall: PASS iff every variant passes;
 any FAIL verdict fails the gate; otherwise BLOCKED.
 
 Linux baseline counts are recorded in RECORDED_BASELINE below
-(interpreted 2841/0, dynapogo 2305/0; see doc/b4-linux-run.md). A
+(interpreted 2868/0, dynapogo 2330/0; see doc/b4-linux-run.md and
+doc/linux-handoff.md). A
 completed run must match its variant's pair exactly; an aborted run
 (engine init abort under qemu) reports BLOCKED with 0 ran, and a
 completed run with no recorded pair still fails loudly asking for the
@@ -53,12 +54,16 @@ from check_regression import parse_total
 VARIANTS = ("interpreted", "dynapogo")
 
 # Recorded Linux baselines. Observed on the native x64 proof host
-# (4 vCPU, glibc 2.39, Zig 0.17.0/clang 22) on 2026-11-09 after the Linux
-# engine fixes recorded in doc/b4-linux-run.md: interpreted 2841/0 and
-# dynapogo 2305/0. Counts differ from Mac (2051/0 and 2103/0) because the
-# Linux selection runs the x64-eligible subset (include_slow off, platform
-# exclusions); the two counts are the authoritative Linux baseline.
-RECORDED_BASELINE = {"interpreted": (2841, 0), "dynapogo": (2305, 0)}
+# (4 vCPU, glibc 2.39, Zig 0.17.0/clang 22). Re-recorded 2026-11-16 after
+# B4 D1-D4, W7-W9, A1-A12/JITREG, and Stage 2-4 landed: the test selection
+# gained 26 rlexe entries plus the re-enabled Linux AsyncSuspendedResume
+# (+27 interpreted / +25 dynapogo after tag exclusions), and the D4/WASM
+# validation fixes cleared the remaining failures. Final native counts:
+# interpreted 2868/0, dynapogo 2330/0. Counts differ from Mac (2064/2116)
+# because the Linux selection runs the x64-eligible subset (include_slow
+# off, platform exclusions); the two counts are the authoritative Linux
+# baseline.
+RECORDED_BASELINE = {"interpreted": (2868, 0), "dynapogo": (2330, 0)}
 
 
 def grade_variant(variant, rc, lines):

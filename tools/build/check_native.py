@@ -58,6 +58,7 @@ Exit code: 0 iff the native leg ran green.
 
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -170,7 +171,10 @@ def check_archive_symbols(archive):
         if len(parts) == 3 and parts[1] == "T":
             syms.add(parts[2])
     print("check_native: archive %s -> %d T symbols" % (archive, len(syms)))
-    missing = [s for s in STATIC_REQUIRED_SYMS if s not in syms]
+    # Mach-O prefixes C symbols with '_'; ELF does not. Accept either so the
+    # same embedding contract is checked on both hosts.
+    missing = [s for s in STATIC_REQUIRED_SYMS
+               if s not in syms and s.lstrip("_") not in syms]
     if missing:
         return ["%s: missing JsRT text symbols: %s"
                 % (archive, ", ".join(missing))]
@@ -375,7 +379,8 @@ def main(argv):
     # Lazy compiler resolution (see build.zig): fail HERE at gate time,
     # never at configure time.
     for tool in (cc, cxx):
-        if shutil.which(tool) is None:
+        exe = (shlex.split(tool) or [""])[0]
+        if not exe or shutil.which(exe) is None:
             print("check_native: cannot find compiler %r on PATH; needed "
                   "to build the native embedding test" % tool,
                   file=sys.stderr)

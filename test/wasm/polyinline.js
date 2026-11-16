@@ -13,16 +13,33 @@ const buf = WebAssembly.wabt.convertWast2Wasm(`
     (f64.max (get_local 0) (get_local 1))
   )
 )`);
-const view = new Uint8Array(buf);
-view[buf.byteLength - 1] = 6;
-var mod = new WebAssembly.Module(buf);
-var {min, max} = new WebAssembly.Instance(mod).exports;
-
-function foo(fn) {
-  fn();
+const corrupt = buf.slice(0);
+const view = new Uint8Array(corrupt);
+view[corrupt.byteLength - 1] = 6;
+let rejected = false;
+try
+{
+    new WebAssembly.Module(corrupt);
 }
+catch (e)
+{
+    rejected = e instanceof WebAssembly.CompileError;
+}
+if (!rejected)
+{
+    print("Fail: corrupted module was not rejected");
+}
+else
+{
+    var mod = new WebAssembly.Module(buf);
+    var {min, max} = new WebAssembly.Instance(mod).exports;
 
-try {foo(min);} catch (e) {}
-try {foo(max);} catch (e) {}
-try {foo(min);} catch (e) {}
-print("Pass");
+    function foo(fn) {
+      fn();
+    }
+
+    try {foo(min);} catch (e) {}
+    try {foo(max);} catch (e) {}
+    try {foo(min);} catch (e) {}
+    print("Pass");
+}

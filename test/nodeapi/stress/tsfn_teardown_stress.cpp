@@ -378,6 +378,11 @@ int main() {
         while (true) {
           iter++;
           int* p = new int((int)((t * 100000 + iter) & 0x7fffffff));
+          /* A call that began before destroy completed may legitimately
+           * return ok; sample the flag before the call so only calls
+           * started after destruction are post-destroy successes. */
+          bool started_after_destroy =
+              destroyed_flag.load(std::memory_order_acquire);
           napi_status s = napi_call_threadsafe_function(
               f, p, napi_tsfn_nonblocking);
           if (s == napi_ok) {
@@ -390,8 +395,7 @@ int main() {
               /* fallthrough: producers only increment post_stop_ok on ok. */
             }
           }
-          if (destroyed_flag.load(std::memory_order_acquire) &&
-              s == napi_ok) {
+          if (started_after_destroy && s == napi_ok) {
             post_stop_ok.fetch_add(1, std::memory_order_relaxed);
           }
           /* Periodic acquire/release churn (cross-thread entries). */

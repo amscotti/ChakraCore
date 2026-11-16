@@ -113,8 +113,28 @@ class WasmFunctionBuilder {
         throw new Error('invalid body (entries must be 8 bit numbers): ' + body);
     }
     this.body = body.slice();
-    // Automatically add the end for the function block to the body.
-    this.body.push(kExprEnd);
+    // Automatically add the end for the function block to the body, unless
+    // the caller already supplied the function's final end. Several vendored
+    // WABT tests pass kExprEnd explicitly; a second end fails validation at
+    // WebAssembly.Module construction. Only an end at block nesting depth 0
+    // is the function end (a trailing end can close a block/loop/if).
+    var depth = 0;
+    var hasFunctionEnd = false;
+    for (var i = 0; i < this.body.length; ++i) {
+      var op = this.body[i];
+      if (op === 0x02 || op === 0x03 || op === 0x04) {
+        ++depth;
+      } else if (op === 0x0b) {
+        if (depth > 0) {
+          --depth;
+        } else if (i === this.body.length - 1) {
+          hasFunctionEnd = true;
+        }
+      }
+    }
+    if (!hasFunctionEnd) {
+      this.body.push(kExprEnd);
+    }
     return this;
   }
 

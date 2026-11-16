@@ -113,7 +113,7 @@ case wb##opname: \
     {
     case wbIf:
     case wbLoop:
-    case wbBlock: 
+    case wbBlock:
         if (GetReader()->m_currentNode.block.IsSingleResult())
         {
             Output::Print(_u(" () -> %s"), GetTypeName(GetReader()->m_currentNode.block.GetSingleResult()));
@@ -606,7 +606,7 @@ void WasmBytecodeGenerator::GenerateFunction()
 #if DBG_DUMP
     if ((
         PHASE_DUMP(Js::WasmBytecodePhase, GetFunctionBody()) ||
-        PHASE_DUMP(Js::ByteCodePhase, GetFunctionBody()) 
+        PHASE_DUMP(Js::ByteCodePhase, GetFunctionBody())
         ) && !IsValidating())
     {
         Js::AsmJsByteCodeDumper::Dump(GetFunctionBody(), &mTypedRegisterAllocator, nullptr);
@@ -857,7 +857,13 @@ void WasmBytecodeGenerator::EmitExpr(WasmOp op)
         throw WasmCompilationException(_u("Unknown expression's op 0x%X"), op);
     }
 
-    PushEvalStack(info);
+    // unreachable/br/br_table/return have no result value; their handlers
+    // reset the polymorphic stack. Pushing the Any placeholder would leave a
+    // spurious unconsumed operand at the end of a valid block or function.
+    if (op != wbUnreachable && op != wbBr && op != wbBrTable && op != wbReturn)
+    {
+        PushEvalStack(info);
+    }
     DebugPrintOpEnd();
 }
 
@@ -1058,10 +1064,26 @@ PolymorphicEmitInfo WasmBytecodeGenerator::EmitBlock()
 {
     Js::ByteCodeLabel blockLabel = m_writer->DefineLabel();
 
+    // A nested control frame starts reachable even when the surrounding code
+    // is unreachable; the outer flag is restored after the frame (without
+    // clearing the frame's yielded values).
+    bool outerUnreachable = IsUnreachable();
+    if (outerUnreachable)
+    {
+        isUnreachable = false;
+        m_writer = m_originalWriter;
+    }
+
     BlockInfo* blockInfo = PushLabel(GetReader()->m_currentNode.block, blockLabel);
     EmitBlockCommon(blockInfo);
     m_writer->MarkAsmJsLabel(blockLabel);
     PolymorphicEmitInfo yieldInfo = PopLabel(blockLabel);
+
+    if (outerUnreachable)
+    {
+        isUnreachable = true;
+        m_writer = m_emptyWriter;
+    }
 
     // block yields last value
     return yieldInfo;
@@ -1072,6 +1094,14 @@ PolymorphicEmitInfo WasmBytecodeGenerator::EmitLoop()
     Js::ByteCodeLabel loopTailLabel = m_writer->DefineLabel();
     Js::ByteCodeLabel loopHeadLabel = m_writer->DefineLabel();
     Js::ByteCodeLabel loopLandingPadLabel = m_writer->DefineLabel();
+
+    // Loop is a nested control frame; start reachable, restore outer state.
+    bool outerUnreachable = IsUnreachable();
+    if (outerUnreachable)
+    {
+        isUnreachable = false;
+        m_writer = m_originalWriter;
+    }
 
     // Push possibly yielding loop label before capturing all the yielding registers
     BlockInfo* implicitBlockInfo = PushLabel(GetReader()->m_currentNode.block, loopTailLabel);
@@ -1110,6 +1140,12 @@ PolymorphicEmitInfo WasmBytecodeGenerator::EmitLoop()
     // Pop the implicit block to resolve the yield correctly
     PolymorphicEmitInfo loopInfo = PopLabel(loopTailLabel);
     m_writer->ExitLoop(loopId);
+
+    if (outerUnreachable)
+    {
+        isUnreachable = true;
+        m_writer = m_emptyWriter;
+    }
 
     return loopInfo;
 }
@@ -1367,13 +1403,27 @@ PolymorphicEmitInfo WasmBytecodeGenerator::EmitCall()
 
 PolymorphicEmitInfo WasmBytecodeGenerator::EmitIfElseExpr()
 {
-    Js::ByteCodeLabel falseLabel = m_writer->DefineLabel();
-    Js::ByteCodeLabel endLabel = m_writer->DefineLabel();
-
     EmitInfo checkExpr = PopEvalStack(WasmTypes::I32, _u("If expression must have type i32"));
     ReleaseLocation(&checkExpr);
 
-    m_writer->AsmBrReg1(Js::OpCodeAsmJs::BrFalse_Int, falseLabel, checkExpr.location);
+    // The if body is a nested control frame; it starts reachable even when
+    // the surrounding code is unreachable. Define the labels on the writer
+    // that will actually emit the body, and do not branch on an Any condition
+    // (the whole if is unreachable in that case).
+    bool outerUnreachable = IsUnreachable();
+    if (outerUnreachable)
+    {
+        isUnreachable = false;
+        m_writer = m_originalWriter;
+    }
+
+    Js::ByteCodeLabel falseLabel = m_writer->DefineLabel();
+    Js::ByteCodeLabel endLabel = m_writer->DefineLabel();
+
+    if (!outerUnreachable)
+    {
+        m_writer->AsmBrReg1(Js::OpCodeAsmJs::BrFalse_Int, falseLabel, checkExpr.location);
+    }
 
     BlockInfo* blockInfo = PushLabel(GetReader()->m_currentNode.block, endLabel);
     bool endOnElse = false;
@@ -1400,6 +1450,12 @@ PolymorphicEmitInfo WasmBytecodeGenerator::EmitIfElseExpr()
         throw WasmCompilationException(_u("Expected an else block when 'if' returns a value"));
     }
     m_writer->MarkAsmJsLabel(endLabel);
+
+    if (outerUnreachable)
+    {
+        isUnreachable = true;
+        m_writer = m_emptyWriter;
+    }
 
     return PopLabel(endLabel);
 }
@@ -1503,7 +1559,7 @@ EmitInfo WasmBytecodeGenerator::EmitUnaryExpr(Js::OpCodeAsmJs op, const WasmType
 void WasmBytecodeGenerator::CheckLaneIndex(Js::OpCodeAsmJs op, const uint index)
 {
     uint numLanes;
-    switch (op) 
+    switch (op)
     {
     case Js::OpCodeAsmJs::Simd128_ExtractLane_I2:
     case Js::OpCodeAsmJs::Simd128_ReplaceLane_I2:
@@ -1716,16 +1772,34 @@ EmitInfo WasmBytecodeGenerator::EmitMemAccess(WasmOp wasmOp, const WasmTypes::Wa
 void WasmBytecodeGenerator::EmitReturnExpr(PolymorphicEmitInfo* explicitRetInfo)
 {
     PolymorphicEmitInfo retExprInfo = explicitRetInfo ? *explicitRetInfo : PopStackPolymorphic(m_funcBlock);
+    const bool explicitYield = explicitRetInfo != nullptr;
     for (uint32 i = 0; i < retExprInfo.Count(); ++i)
     {
         EmitInfo info = retExprInfo.GetInfo(i);
         Js::OpCodeAsmJs retOp = GetReturnOp(info.type);
-        // W7: result k goes to return slot k (per-type slot index), not all to
-        // 0. PopStackPolymorphic pops top-first, so GetInfo(i) is result
-        // (Count-1-i) in signature order; write that slot.
+        // PopStackPolymorphic and explicit block yields are both top-first,
+        // so GetInfo(i) is result (Count-1-i) in signature order.
         const uint32 resultIndex = retExprInfo.Count() - 1 - i;
         m_writer->Conv(retOp, (Js::RegSlot)resultIndex, info.location);
-        ReleaseLocation(&info);
+    }
+    // Explicit yields were acquired in signature order, so release them in
+    // reverse allocation order to keep the temp stack LIFO. Popped operands
+    // are already top-first.
+    if (explicitYield)
+    {
+        for (uint32 i = retExprInfo.Count(); i > 0; --i)
+        {
+            EmitInfo info = retExprInfo.GetInfo(i - 1);
+            ReleaseLocation(&info);
+        }
+    }
+    else
+    {
+        for (uint32 i = 0; i < retExprInfo.Count(); ++i)
+        {
+            EmitInfo info = retExprInfo.GetInfo(i);
+            ReleaseLocation(&info);
+        }
     }
     m_writer->AsmBr(m_funcInfo->GetExitLabel());
 
@@ -1734,9 +1808,22 @@ void WasmBytecodeGenerator::EmitReturnExpr(PolymorphicEmitInfo* explicitRetInfo)
 
 EmitInfo WasmBytecodeGenerator::EmitSelect()
 {
-    EmitInfo conditionInfo = PopEvalStack(WasmTypes::I32, _u("select condition must have i32 type"));
-    EmitInfo falseInfo = PopValuePolymorphic();
-    EmitInfo trueInfo = PopEvalStack(falseInfo.type, _u("select operands must both have same type"));
+    // `select` is explicitly polymorphic: in unreachable code it may draw
+    // unknown operands from the bottom of the stack. Other operators must not
+    // do this (see unreached-invalid.wast's i32.eqz(nop) cases), so keep the
+    // exception local instead of weakening PopEvalStack globally.
+    auto popSelectOperand = [this](WasmTypes::WasmType expectedType, const char16* mismatchMessage = nullptr) -> EmitInfo
+    {
+        if (IsUnreachable() && (m_evalStack.Empty() || m_evalStack.Peek().type == WasmTypes::Limit))
+        {
+            return EmitInfo(WasmTypes::Any);
+        }
+        return PopEvalStack(expectedType, mismatchMessage);
+    };
+
+    EmitInfo conditionInfo = popSelectOperand(WasmTypes::I32, _u("select condition must have i32 type"));
+    EmitInfo falseInfo = popSelectOperand(WasmTypes::Any);
+    EmitInfo trueInfo = popSelectOperand(falseInfo.type, _u("select operands must both have same type"));
     ReleaseLocation(&conditionInfo);
     ReleaseLocation(&falseInfo);
     ReleaseLocation(&trueInfo);
@@ -2103,6 +2190,13 @@ PolymorphicEmitInfo WasmBytecodeGenerator::PopStackPolymorphic(const BlockInfo* 
 
 EmitInfo WasmBytecodeGenerator::PopEvalStack(WasmTypes::WasmType expectedType, const char16* mismatchMessage)
 {
+    // Unreachable code is polymorphic: the stack below the scope marker can
+    // supply any operand. Nested control frames reset this flag on entry, so
+    // this does not make `(unreachable) (block (i32.eqz (nop)))` valid.
+    if (IsUnreachable() && (m_evalStack.Empty() || m_evalStack.Peek().type == WasmTypes::Limit))
+    {
+        return EmitInfo(WasmTypes::Any);
+    }
     // The scope marker should at least be there
     Assert(!m_evalStack.Empty());
     EmitInfo info = m_evalStack.Pop();
@@ -2147,12 +2241,6 @@ void WasmBytecodeGenerator::ExitEvalStackScope(const BlockInfo* blockInfo)
 {
     Assert(!m_evalStack.Empty());
     EmitInfo info = m_evalStack.Pop();
-    // It is possible to have unconsumed Any type left on the stack, simply remove them
-    while (info.type == WasmTypes::Any)
-    {
-        Assert(!m_evalStack.Empty());
-        info = m_evalStack.Pop();
-    }
     if (info.type != WasmTypes::Limit)
     {
         // Put info back on stack so we can write it to string
@@ -2168,18 +2256,15 @@ void WasmBytecodeGenerator::SetUnreachableState(bool isUnreachable)
     m_writer = isUnreachable ? m_emptyWriter : m_originalWriter;
     if (isUnreachable)
     {
-        // Replace the current stack with the any type
-        Assert(!m_evalStack.Empty());
-        uint32 popped = 0;
-        while (m_evalStack.Top().type != WasmTypes::Limit)
+        // Unreachable code is polymorphic. Values that existed before the
+        // unreachable instruction are dead; discard them instead of
+        // preserving placeholder entries. Later instructions can still pop
+        // Any operands via PopEvalStack, but a value they leave behind is
+        // unconsumed and must fail the block/function stack-height check.
+        while (!m_evalStack.Empty() && m_evalStack.Top().type != WasmTypes::Limit)
         {
             EmitInfo info = m_evalStack.Pop();
             ReleaseLocation(&info);
-            ++popped;
-        }
-        while (popped-- > 0)
-        {
-            m_evalStack.Push(EmitInfo(WasmTypes::Any));
         }
     }
     this->isUnreachable = isUnreachable;

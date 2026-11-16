@@ -46,7 +46,7 @@ RUN () {
     if [[ $RES =~ "# IGNORE_THIS_TEST" ]]; then
         echo "Ignoring $TEST_PATH"
     else
-        SAFE_RUN "cd $TEST_PATH && make CC=${CC} CXX=${CXX}"
+        SAFE_RUN "cd $TEST_PATH && make CC=\"${CC}\" CXX=\"${CXX}\""
         RES=$(cd "$TEST_PATH" && ./sample.o)
         local sample_status=$?
         if [[ $sample_status != 0 ]]; then

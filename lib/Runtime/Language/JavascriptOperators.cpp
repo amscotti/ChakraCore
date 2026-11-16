@@ -325,6 +325,7 @@ using namespace Js;
 
     Var JavascriptOperators::ToNumericInPlace(Var aRight, ScriptContext* scriptContext, JavascriptNumber* result)
     {
+        JIT_HELPER_REENTRANT_HEADER(Op_ConvNumericInPlace);
         TypeId typeId = JavascriptOperators::GetTypeId(aRight);
         if (typeId == TypeIds_BigInt)
         {
@@ -340,6 +341,7 @@ using namespace Js;
             return JavascriptOperators::ToNumberInPlace(primitive, scriptContext, result);
         }
         return JavascriptOperators::ToNumberInPlace(aRight, scriptContext, result);
+        JIT_HELPER_END(Op_ConvNumericInPlace);
     }
 
     Var JavascriptOperators::Typeof(Var var, ScriptContext* scriptContext)
@@ -2228,7 +2230,7 @@ CommonNumber:
     void JavascriptOperators::TryCacheMissingProperty(Var instance, Var cacheInstance, bool isRoot, PropertyId propertyId, ScriptContext* requestContext, _Inout_ PropertyValueInfo * info)
     {
         // Here, any well-behaved subclasses of DynamicObject can opt in to getting included in the missing property cache.
-        // For now, we only include basic objects and arrays. 
+        // For now, we only include basic objects and arrays.
         if (PHASE_OFF1(MissingPropertyCachePhase) || isRoot || !(DynamicObject::IsBaseDynamicObject(instance) || DynamicObject::IsAnyArray(instance)))
         {
             return;
@@ -3402,6 +3404,7 @@ CommonNumber:
 
     BOOL JavascriptOperators::OP_InitClassField(Var instance, PropertyId propertyId, Var newValue)
     {
+    JIT_HELPER_REENTRANT_HEADER(InitClassField);
         Assert(!TaggedNumber::Is(instance));
         RecyclableObject * object = VarTo<RecyclableObject>(instance);
         ScriptContext * scriptContext = object->GetScriptContext();
@@ -3414,6 +3417,8 @@ CommonNumber:
         descriptor.SetEnumerable(true);
         descriptor.SetConfigurable(true);
         return JavascriptObject::DefineOwnPropertyHelper(object, propertyId, descriptor, scriptContext, true);
+
+        JIT_HELPER_END(InitClassField);
     }
 
     // S1 computed field names: dynamic-key variant of OP_InitClassField with
@@ -3422,6 +3427,7 @@ CommonNumber:
     // GetPropertyId performs no further user-visible conversion here.
     BOOL JavascriptOperators::OP_InitClassFieldComputedName(Var instance, Var elementName, Var newValue, ScriptContext* scriptContext)
     {
+    JIT_HELPER_REENTRANT_HEADER(InitClassFieldComputedName);
         Assert(!TaggedNumber::Is(instance));
         PropertyId propertyId = JavascriptOperators::GetPropertyId(elementName, scriptContext);
         RecyclableObject * object = VarTo<RecyclableObject>(instance);
@@ -3440,6 +3446,8 @@ CommonNumber:
         descriptor.SetEnumerable(true);
         descriptor.SetConfigurable(true);
         return JavascriptObject::DefineOwnPropertyHelper(object, propertyId, descriptor, scriptContext, true);
+
+        JIT_HELPER_END(InitClassFieldComputedName);
     }
 
     // S1 private instance fields. Each private name is a per-class-evaluation
@@ -3460,11 +3468,15 @@ CommonNumber:
 
     Var JavascriptOperators::OP_NewPrivateName(ScriptContext * scriptContext)
     {
+    JIT_HELPER_NOT_REENTRANT_NOLOCK_HEADER(NewPrivateName);
         return scriptContext->GetLibrary()->CreateWeakMap();
+
+        JIT_HELPER_END(NewPrivateName);
     }
 
     Var JavascriptOperators::OP_LdPrivateField(Var instance, Var brand, ScriptContext * scriptContext)
     {
+    JIT_HELPER_REENTRANT_HEADER(LdPrivateField);
         if (!JavascriptOperators::IsObject(instance))
         {
             ThrowPrivateBrandCheck(scriptContext);
@@ -3477,10 +3489,13 @@ CommonNumber:
             ThrowPrivateBrandCheck(scriptContext);
         }
         return value;
+
+        JIT_HELPER_END(LdPrivateField);
     }
 
     Var JavascriptOperators::OP_StPrivateField(Var instance, Var brand, Var newValue, ScriptContext * scriptContext)
     {
+    JIT_HELPER_REENTRANT_HEADER(StPrivateField);
         if (!JavascriptOperators::IsObject(instance))
         {
             ThrowPrivateBrandCheck(scriptContext);
@@ -3494,10 +3509,13 @@ CommonNumber:
         }
         brandMap->Set(object, newValue);
         return newValue;
+
+        JIT_HELPER_END(StPrivateField);
     }
 
     Var JavascriptOperators::OP_InitPrivateField(Var instance, Var brand, Var newValue, ScriptContext * scriptContext)
     {
+    JIT_HELPER_REENTRANT_HEADER(InitPrivateField);
         if (!JavascriptOperators::IsObject(instance))
         {
             ThrowPrivateBrandCheck(scriptContext);
@@ -3513,10 +3531,13 @@ CommonNumber:
         }
         brandMap->Set(object, newValue);
         return newValue;
+
+        JIT_HELPER_END(InitPrivateField);
     }
 
     Var JavascriptOperators::OP_InitStaticPrivateField(Var instance, Var brand, Var newValue, ScriptContext * scriptContext)
     {
+    JIT_HELPER_REENTRANT_HEADER(InitStaticPrivateField);
         if (!JavascriptOperators::IsObject(instance))
         {
             ThrowPrivateBrandCheck(scriptContext);
@@ -3535,6 +3556,8 @@ CommonNumber:
         }
         brandMap->Set(object, newValue);
         return newValue;
+
+        JIT_HELPER_END(InitStaticPrivateField);
     }
 
     BOOL JavascriptOperators::OP_HasPrivateField(Var instance, Var brand, ScriptContext * scriptContext)
@@ -3549,12 +3572,15 @@ CommonNumber:
 
     Var JavascriptOperators::OP_HasPrivateFieldVar(Var instance, Var brand, ScriptContext * scriptContext)
     {
+    JIT_HELPER_REENTRANT_HEADER(HasPrivateField);
         // Var-boolean form shared by the interpreter handler and the JIT
         // helper-call lowering (the JIT moves the helper's x0 return straight
         // into the destination register, so it must already be a Var).
         return OP_HasPrivateField(instance, brand, scriptContext)
             ? scriptContext->GetLibrary()->GetTrue()
             : scriptContext->GetLibrary()->GetFalse();
+
+        JIT_HELPER_END(HasPrivateField);
     }
 
     // S1 private methods/accessors. The method/accessor functions are created
@@ -3591,6 +3617,7 @@ CommonNumber:
 
     Var JavascriptOperators::OP_SetPrivateDefinition(Var brand, Var value, uint8 kind, ScriptContext * scriptContext)
     {
+    JIT_HELPER_REENTRANT_HEADER(SetPrivateDefinition);
         JavascriptWeakMap * brandMap = GetPrivateBrandMap(brand);
         if (kind == 0)
         {
@@ -3605,10 +3632,13 @@ CommonNumber:
             record, kind == 1 ? Js::PropertyIds::get : Js::PropertyIds::set, value);
         Assert(defined);
         return value;
+
+        JIT_HELPER_END(SetPrivateDefinition);
     }
 
     Var JavascriptOperators::OP_InitPrivateMethod(Var instance, Var brand, ScriptContext * scriptContext)
     {
+    JIT_HELPER_NOT_REENTRANT_NOLOCK_HEADER(InitPrivateMethod);
         if (!JavascriptOperators::IsObject(instance))
         {
             ThrowPrivateBrandCheck(scriptContext);
@@ -3626,10 +3656,13 @@ CommonNumber:
         // throw if no field remains installable.
         brandMap->Set(object, scriptContext->GetLibrary()->GetUndefined());
         return instance;
+
+        JIT_HELPER_END(InitPrivateMethod);
     }
 
     Var JavascriptOperators::OP_LdPrivateMethod(Var instance, Var brand, ScriptContext * scriptContext)
     {
+    JIT_HELPER_REENTRANT_HEADER(LdPrivateMethod);
         if (!JavascriptOperators::IsObject(instance))
         {
             ThrowPrivateBrandCheck(scriptContext);
@@ -3642,10 +3675,13 @@ CommonNumber:
         Var value = GetPrivateDefinition(brandMap);
         Assert(value != nullptr);
         return value;
+
+        JIT_HELPER_END(LdPrivateMethod);
     }
 
     Var JavascriptOperators::OP_LdPrivateAccessor(Var instance, Var brand, ScriptContext * scriptContext)
     {
+    JIT_HELPER_REENTRANT_HEADER(LdPrivateAccessor);
         if (!JavascriptOperators::IsObject(instance))
         {
             ThrowPrivateBrandCheck(scriptContext);
@@ -3667,10 +3703,13 @@ CommonNumber:
             JavascriptError::ThrowTypeError(scriptContext, JSERR_PrivateAccessorMissingGetter);
         }
         return JavascriptOperators::CallGetter(UnsafeVarTo<RecyclableObject>(getter), instance, scriptContext);
+
+        JIT_HELPER_END(LdPrivateAccessor);
     }
 
     Var JavascriptOperators::OP_StPrivateAccessor(Var instance, Var brand, Var newValue, ScriptContext * scriptContext)
     {
+    JIT_HELPER_REENTRANT_HEADER(StPrivateAccessor);
         if (!JavascriptOperators::IsObject(instance))
         {
             ThrowPrivateBrandCheck(scriptContext);
@@ -3693,10 +3732,13 @@ CommonNumber:
         }
         JavascriptOperators::CallSetter(UnsafeVarTo<RecyclableObject>(setter), instance, newValue, scriptContext);
         return newValue;
+
+        JIT_HELPER_END(StPrivateAccessor);
     }
 
     Var JavascriptOperators::OP_StPrivateMethod(Var instance, Var brand, ScriptContext * scriptContext)
     {
+    JIT_HELPER_NOT_REENTRANT_NOLOCK_HEADER(StPrivateMethod);
         if (!JavascriptOperators::IsObject(instance) ||
             !GetPrivateBrandMap(brand)->Has(UnsafeVarTo<RecyclableObject>(instance)))
         {
@@ -3704,6 +3746,8 @@ CommonNumber:
         }
         JavascriptError::ThrowTypeError(scriptContext, JSERR_PrivateMethodNotWritable);
         return nullptr;
+
+        JIT_HELPER_END(StPrivateMethod);
     }
 
     // Brand-checked private access for references whose declaration kind is
@@ -3712,6 +3756,7 @@ CommonNumber:
     // accessor, and no shared definition means an instance field.
     Var JavascriptOperators::OP_LdPrivateDynamic(Var instance, Var brand, ScriptContext * scriptContext)
     {
+    JIT_HELPER_REENTRANT_HEADER(LdPrivateDynamic);
         if (!JavascriptOperators::IsObject(instance))
         {
             ThrowPrivateBrandCheck(scriptContext);
@@ -3744,10 +3789,13 @@ CommonNumber:
             JavascriptError::ThrowTypeError(scriptContext, JSERR_PrivateAccessorMissingGetter);
         }
         return JavascriptOperators::CallGetter(UnsafeVarTo<RecyclableObject>(getter), instance, scriptContext);
+
+        JIT_HELPER_END(LdPrivateDynamic);
     }
 
     Var JavascriptOperators::OP_StPrivateDynamic(Var instance, Var brand, Var newValue, ScriptContext * scriptContext)
     {
+    JIT_HELPER_REENTRANT_HEADER(StPrivateDynamic);
         if (!JavascriptOperators::IsObject(instance))
         {
             ThrowPrivateBrandCheck(scriptContext);
@@ -3777,6 +3825,8 @@ CommonNumber:
         }
         JavascriptOperators::CallSetter(UnsafeVarTo<RecyclableObject>(setter), instance, newValue, scriptContext);
         return newValue;
+
+        JIT_HELPER_END(StPrivateDynamic);
     }
 
     BOOL JavascriptOperators::DeleteProperty(RecyclableObject* instance, PropertyId propertyId, PropertyOperationFlags propertyOperationFlags)
@@ -8552,7 +8602,7 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
                 constructor = boundFunc->GetTargetFunction();
             }
         }
-            
+
         Var instOfHandler = JavascriptOperators::GetPropertyNoCache(constructor,
             PropertyIds::_symbolHasInstance, scriptContext);
         if (JavascriptOperators::IsUndefinedObject(instOfHandler))
@@ -12157,6 +12207,7 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
 
     Var JavascriptOperators::ToNumeric(Var aRight, ScriptContext* scriptContext)
     {
+        JIT_HELPER_REENTRANT_HEADER(Op_ConvNumeric_Full);
         TypeId typeId = JavascriptOperators::GetTypeId(aRight);
         if (typeId == TypeIds_BigInt)
         {
@@ -12176,6 +12227,7 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
             return JavascriptOperators::ToNumber(primitive, scriptContext);
         }
         return JavascriptOperators::ToNumber(aRight, scriptContext);
+        JIT_HELPER_END(Op_ConvNumeric_Full);
     }
 
     BOOL JavascriptOperators::IsObject(_In_ RecyclableObject* instance)
