@@ -1,8 +1,8 @@
 # ChakraCore Modernization -- Architecture and Readiness Review
 
 > Date: 2026-11-16
-> Branch / Commit: `modernize/baseline` at `c24266598` (`8f4e85d62..c24266598`
-> integrated + Stage 3B docs & Test262 refresh)
+> Branch / Commit: `modernize/baseline` at `526393e26` (`8f4e85d62..526393e26`
+> integrated: Stage 2/3 code, Test262 refresh, Stage 4 `Inline.cpp` fix & benchmarks)
 > Scope: Synthesis of the Stage 1 architecture audit (`arch-audit`), Stage 2/3
 > P0/P1 architectural and memory-safety fixes, current build/runtime/host
 > layout, verified Mac subsystem test-coverage matrix, explicit residuals and
@@ -295,6 +295,10 @@ unverified claims. Known boundaries at `c24266598`:
 ---
 
 ## 7. Step-by-Step Linux x64 Bring-Up Readiness Checklist
+
+For the complete Linux transfer procedure (build overrides, B4 D1-D4 handoff,
+Linux regression re-pin, Node-API Linux verification, sanitizers, Test262, and
+CI verification), see [linux-handoff.md](linux-handoff.md).
 
 Linux build parameterization and CI definitions (`tools/build/linux.zig`,
 `tools/build/check_metadata_linux.py`, `.github/workflows/zig-linux.yml`) are

@@ -2,38 +2,45 @@
 
 In-repo documentation for the ChakraCore modernization effort. Engine and legacy
 build references are pinned to baseline `97e68c917`; execution results and
-modernization decisions are updated through 2026-11-05. See
-[current-state.md](current-state.md) §7 for activity context. The complete
-per-batch C2 receipt ledger (S1–S14, E1, host slices) lives in
-[modernization-plan.md](modernization-plan.md) §6; the table below indexes the
-foundational documents and the earliest receipts only.
+modernization decisions are updated through 2026-11-16 (`526393e26`). See
+[current-state.md](current-state.md) Section 7 for historical activity context, and
+[architecture-and-readiness-review.md](architecture-and-readiness-review.md) /
+[linux-handoff.md](linux-handoff.md) for current readiness. The complete
+per-batch C2 receipt ledger (S1-S14, E1, host slices) lives in
+[modernization-plan.md](modernization-plan.md) Section 6; the table below indexes the
+foundational documents, readiness reviews, and primary receipts.
 
 | Document | Contents |
 |---|---|
-| [current-state.md](current-state.md) | What the project is today: inventory, architecture/build/test summaries, platforms, activity, constraints, gaps |
-| [arm64-macos-jit.md](arm64-macos-jit.md) | ARM64 macOS JIT (merged into this branch 2026-10-31, `9004b3ed7`; M1 tag `jit-arm64-macos-m1`): final gates dynapogo 2001/286 and interpreted 2426/397, every failure the documented asm.js/WASM feature gap, zero signals; disable_jit 2032/0; `zig build -Dprofile=jit check` and the no-JIT gates (2032/0, 2084/0) green; direct-eval and 18 class/private/import opcodes stay interpreted |
+| [architecture-and-readiness-review.md](architecture-and-readiness-review.md) | System architecture, layout, P0/P1 Mac fixes, 4-profile test matrix, Test262 `refresh-2026-11-16`, residuals, and Linux readiness |
+| [linux-handoff.md](linux-handoff.md) | Linux bring-up and testing handoff: build overrides, B4 D1-D4 handoff, Linux Node-API/variant gates, sanitizers, CI checklist |
+| [perf-baseline.md](perf-baseline.md) | Darwin ARM64 quiet-machine benchmark receipts (`baseline` vs `HEAD` `526393e26` JIT/Interpreter across SunSpider, Kraken, Octane, JetStream) |
+| [node-api-receipt.md](node-api-receipt.md) | Node-API (`NAPI_VERSION=8`) provider/host verification: 150 exports, 18 probes, stress, CMake/matrix results, known diffs |
+| [open-cards.md](open-cards.md) | Residual tracker: open engine/JIT/conformance items, closed cards ledger, and Linux handoff items |
+| [current-state.md](current-state.md) | Baseline repository inventory, architecture/build/test summaries, platforms, activity, constraints, gaps |
+| [arm64-macos-jit.md](arm64-macos-jit.md) | ARM64 macOS JIT (`9004b3ed7`; M1 tag `jit-arm64-macos-m1`) bring-up record |
 | [architecture.md](architecture.md) | Engine architecture: component map, execution pipeline, JIT tiers, JsRT API, threading, GC, Intl/WASM, with a Mermaid diagram |
 | [build.md](build.md) | Build process: entry points, prerequisites, Unix + Windows builds, CMake structure, ICU matrix, codegen, outputs, testing, CI, staleness |
-| [modernization-plan.md](modernization-plan.md) | Executable roadmap: staged build/platform rollout (F0–B3 verified, B4 blocked), C2 compatibility batches toward full ES2025, optional Zig integration |
+| [modernization-plan.md](modernization-plan.md) | Executable roadmap: staged build/platform rollout (F0-B4, B5-B6), Phase-3 JsRT API versioning contract, C2 ES2025 batches, Zig strategy |
 | [c1-triage.md](c1-triage.md) | C1 record: edition policy, qualified runner, root-cause triage and the measured S-row shortlist |
 | [c2-s4.md](c2-s4.md) / [c2-s5.md](c2-s5.md) / [c2-s10.md](c2-s10.md) / [c2-s11.md](c2-s11.md) / [c2-s7-matchall.md](c2-s7-matchall.md) / [c2-s9-namedgroups.md](c2-s9-namedgroups.md) | C2 batch receipts: optional chaining + logical assignment; iterator helpers; Set methods + copy-by-change; small builtins + replaceAll; matchAll + RegExp symbol-protocol fixes; RegExp named groups + `d` flag/indices + duplicate named groups + lookbehind |
 | [c2-flag-audits.md](c2-flag-audits.md) | Measured enabled-flag audits for BigInt, SharedArrayBuffer/Atomics and the RegExp symbol family |
-| [b1-b3-review.md](b1-b3-review.md) / [b4-gate.md](b4-gate.md) / [b4-review.md](b4-review.md) | External reviews and gate verdicts for B1–B3 and B4 |
+| [b1-b3-review.md](b1-b3-review.md) / [b4-gate.md](b4-gate.md) / [b4-review.md](b4-review.md) | External reviews and gate verdicts for B1-B3 and B4 |
 | [conformance-baseline.md](conformance-baseline.md) | Pinned upstream diagnostic baseline: configuration, executed/skip counts, feature debt and edition-gate limits |
-| [e12-testing-quality.md](e12-testing-quality.md) | Testing-quality lane: one-command certified-baseline refresh (`tools/test262/refresh_baseline.py`) with its validation run, the bounded GCStress campaign over the rlexe core, and flake-family hardening (waitAsync corpus family note, FuncBody timeout) |
+| [e12-testing-quality.md](e12-testing-quality.md) | Testing-quality lane: one-command certified-baseline refresh (`tools/test262/refresh_baseline.py`) with its validation run, the bounded GCStress campaign over the rlexe core, and flake-family hardening |
 | [memory-management.md](memory-management.md) | Coding-assistant ownership guide: TigerStyle/Ghostty/Bun lessons applied to allocators, GC/FFI, callbacks, async lifetime and focused tests |
 
 Conventions:
 
 - Lane receipts archive their final-state gate logs lane-named under
-  `out/` and cite them (started by the B4 lane — `out/b4-gate-logs/`;
+  `out/` and cite them (started by the B4 lane -- `out/b4-gate-logs/`;
   e.g. `out/e7-gate-test.log` / `out/e7-gate-debug.log`, re-run on the
   exact committed tree after the review legs), per the evidence-hygiene
   lessons in [b4-gate.md](b4-gate.md) and [b4-linux.md](b4-linux.md).
 - Engine/build claims cite in-repo `path:line` references at the pinned baseline;
   external toolchain and language-edition claims cite primary sources.
 - `build.md` distinguishes source-inspected recipes from run-verified results:
-  §13 records the legacy Mac baseline, §14 the Zig pilot and its corrections.
+  Section 13 records the legacy Mac baseline, Section 14 the Zig pilot and its corrections.
 - Zig 0.17.0 APIs were checked against its installed sources and release notes.
   `[NEEDS VERIFICATION on Zig 0.17]` identifies a specific remaining experiment,
   not an unchecked API spelling. ZLS and incremental-link research do not gate
@@ -42,7 +49,7 @@ Conventions:
   inventories describe reference behavior and future work, not a requirement to
   ship every legacy option or ecosystem feature in the first migration.
 - `[UNVERIFIED EXTERNAL]` marks competitor-ecosystem claims without a primary
-  source — keep generic until sourced.
+  source -- keep generic until sourced.
 
 How these were produced: parallel research agents mapped the architecture, build,
 current state, and feature gaps from repo sources; independent skeptic agents
@@ -53,7 +60,7 @@ the files, and a final review pass re-checked the saved documents.
 The subsequent execution review corrected the JsRT runtime/TLS ownership model,
 inherited ES2018 RegExp gaps, callback-retention API, executable stack setting,
 and deployment-target assumptions. Modern platform floors are intentional policy
-choices ([modernization-plan.md](modernization-plan.md) §2.1), rather than inherited
+choices ([modernization-plan.md](modernization-plan.md) Section 2.1), rather than inherited
 legacy requirements or the build host's defaults. The durable pilot and pinned
 conformance tooling live in [tools/zig-pilot](../tools/zig-pilot/README.md) and
 [tools/test262](../tools/test262/README.md).
