@@ -1,4 +1,8 @@
 #!/bin/sh
+#-------------------------------------------------------------------------------------------------------
+# Copyright (c) ChakraCore Project Contributors. All rights reserved.
+# Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+#-------------------------------------------------------------------------------------------------------
 # N4.4 async work + TSFN + uv probe runner.
 #
 # Builds async_probe.cpp + the reconciled provider TUs against EACH

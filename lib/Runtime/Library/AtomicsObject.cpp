@@ -423,7 +423,7 @@ namespace Js
 
         // A finite positive timeout is schedulable only when the host installed
         // the optional timer continuation callback. Without it (or while TTD is
-        // recording/replaying — the host timer queue is not modeled there) the
+        // recording/replaying -- the host timer queue is not modeled there) the
         // promise stays pending until notify: the S6b documented fallback.
         // TTD status: recording verified (finite timeouts stay pending, no
         // delayed-task scheduling); replay is not exercisable in the current
@@ -490,7 +490,7 @@ namespace Js
             // `monitored` starts false and is published (again under this
             // lock) only after the monitor task was successfully created and
             // enqueued below: until then a foreign notify skips the waiter
-            // entirely — the S6b fallback — so an OOM'ed monitor can never
+            // entirely -- the S6b fallback -- so an OOM'ed monitor can never
             // leave a counted-but-unresolvable wake behind.
             registration = rootBuffer->AddAsyncWaiter(
                 waiter, scriptContext, scriptContext->GetThreadContext(), false /*monitored*/);
@@ -509,7 +509,7 @@ namespace Js
             // 1 ms, so it can never reproduce the synchronous timed-out fast
             // path), clamped to UINT32_MAX ms (~49.7 days). Task
             // creation/enqueue failure (OOM) leaves the registration intact:
-            // the promise stays pending and notify still works — the
+            // the promise stays pending and notify still works -- the
             // no-callback fallback.
             double ceilMs = JavascriptMath::Ceil(realTimeout);
             unsigned int delayMilliseconds =
@@ -613,7 +613,7 @@ namespace Js
             // A same-ThreadContext handoff token was never latched into a
             // notify-pass FIFO chain (only the foreign branch chains, and it
             // removes the token from the list), so its pass links are
-            // permanently null — reading them here needs no CS.
+            // permanently null -- reading them here needs no CS.
             Assert(registration->passPrev == nullptr && registration->passNext == nullptr);
             AtomicsAsyncWaiter* waiter = registration->record;
             if (!waiter->IsSettled() && registration->threadContext == threadContext)

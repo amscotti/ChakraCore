@@ -7,7 +7,7 @@
 // surface list, the function-length deviation (name-length, not
 // arity), and the ownership record.
 //
-// Status discipline (§3.10 / doc/node-api-status-mapping.md C column):
+// Status discipline (section 3.10 / doc/node-api-status-mapping.md C column):
 // validated-first (NULL binding args -> napi_invalid_arg before
 // anything else), then the shared EntryGuard (Closing ->
 // generic_failure, gated functions -> napi_pending_exception without
@@ -18,11 +18,11 @@
 // inspect its own info). Type pre-checks produce napi_invalid_arg
 // for non-function callees (CHECK_TO_FUNCTION in Node, NOT
 // function_expected) and napi_name_expected for descriptor names
-// via napi_define_properties. JsRT errors map per the §3.10 table.
+// via napi_define_properties. JsRT errors map per the section 3.10 table.
 // Success clears last_error (ClearLastError); failures SetLastError.
 // Out-params are written only on success.
 //
-// Thunk (§3.8, semantics §5, R-CB-1..6):
+// Thunk (section 3.8, semantics section 5, R-CB-1..6):
 //   - Invocation layout per bin/NativeTests/JsRTApiTest.cpp:734-866:
 //     arguments[0] == info->thisArg, argumentCount includes `this`.
 //     Hence argc = argumentCount-1, argv = arguments+1.
@@ -46,7 +46,7 @@
 //     is guarded (catch (...) => napi_generic_failure recorded,
 //     pending preserved; return undefined).
 //
-// Thunk ownership (§3.7, see header record): each function owns a
+// Thunk ownership (section 3.7, see header record): each function owns a
 // heap ThunkRecord carried by a hidden-symbol-anchored external
 // object (JsCreateExternalObject + GC finalizer trampoline that
 // only does `delete`). The callback stack itself is transient
@@ -158,7 +158,7 @@ JsErrorCode MakeId(const char* name, JsPropertyIdRef* out) {
 }
 
 // ---------------------------------------------------------------------
-// Thunk record and external anchor (§3.7)
+// Thunk record and external anchor (section 3.7)
 // ---------------------------------------------------------------------
 
 struct ThunkRecord {
@@ -167,7 +167,7 @@ struct ThunkRecord {
   void* data = nullptr;
 };
 
-// GC-side trampoline (§3.7/D4): runs on an arbitrary GC thread with
+// GC-side trampoline (section 3.7/D4): runs on an arbitrary GC thread with
 // no current context. Only deletes the native record. No JS calls,
 // no user finalizer, no provider-container mutation (the record is
 // owned solely by the external object; no table entry to update).
@@ -176,7 +176,7 @@ void ThunkExternalFinalizer(void* data) {
 }
 
 // ---------------------------------------------------------------------
-// Per-env callback stack (§3.8/R-CB-1..3)
+// Per-env callback stack (section 3.8/R-CB-1..3)
 // ---------------------------------------------------------------------
 
 constexpr std::uint64_t kCbMagic = 0xC0FFEE5F00DCA11ULL;
@@ -272,7 +272,7 @@ void SetMismatchPending(napi_env env) {
 }
 
 // ---------------------------------------------------------------------
-// Thunk (§3.8)
+// Thunk (section 3.8)
 // ---------------------------------------------------------------------
 
 JsValueRef ThunkInvoke(JsValueRef callee, JsValueRef* arguments,
@@ -393,7 +393,7 @@ JsValueRef ThunkInvoke(JsValueRef callee, JsValueRef* arguments,
       toReturn = undef;
     } else {
       // Root the return into the caller's scope BEFORE closing
-      // the implicit scope (R-SC-9 / §3.8 step 4), EXCEPT when the
+      // the implicit scope (R-SC-9 / section 3.8 step 4), EXCEPT when the
       // caller is the default scope (outermost JS call). A JS-returned
       // value must be owned by the JS call frame / caller's variable
       // (collectible), not pinned in the provider default scope until
@@ -754,7 +754,7 @@ napi_status NAPI_CDECL napi_create_function(napi_env env, const char* utf8name,
   }
   // Name-length validation precedes the guard when the name is
   // present (Node CHECK_NEW_FROM_UTF8_LEN order: preamble, then
-  // arg checks; provider validates binding args first, §3.10).
+  // arg checks; provider validates binding args first, section 3.10).
   if (utf8name != nullptr && length != NAPI_AUTO_LENGTH &&
       length > static_cast<size_t>(std::numeric_limits<int>::max())) {
     if (env) nodeapi::SetLastError(env, napi_invalid_arg,

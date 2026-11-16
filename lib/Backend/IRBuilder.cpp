@@ -4198,7 +4198,7 @@ IRBuilder::BuildElementSlotI2(Js::OpCode newOpcode, uint32 offset, Js::RegSlot r
         {
             // A class method can read the class-block scope (the hidden
             // private-brand const) without its binding ever allocating an env
-            // register — the interpreter reads the display from the closure.
+            // register -- the interpreter reads the display from the closure.
             // Materialize the environment from the function object the same
             // way a LdEnv opcode lowers (Lowerer::LowerLdEnv loads
             // ScriptFunction::environment, constant for a function that never
@@ -4216,7 +4216,7 @@ IRBuilder::BuildElementSlotI2(Js::OpCode newOpcode, uint32 offset, Js::RegSlot r
                 }
                 this->AddInstr(IR::Instr::New(Js::OpCode::LdEnv, envOpnd, m_func), offset);
                 // Pointer-based construction: by-ID lookups (FindOrCreate)
-                // are only valid for bytecode-register ids — during inlinee
+                // are only valid for bytecode-register ids -- during inlinee
                 // IR building the sym table's ID adjustment would corrupt
                 // the lookup.
                 PropertySym *envSlotArraySym = PropertySym::New(

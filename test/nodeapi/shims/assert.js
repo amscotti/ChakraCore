@@ -1,3 +1,7 @@
+//-------------------------------------------------------------------------------------------------------
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
+// Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+//-------------------------------------------------------------------------------------------------------
 // Minimal `assert` shim for vendored-test drivers on hosts without Node
 // builtins (the Chakra host exposes no require()-able `assert` module).
 //

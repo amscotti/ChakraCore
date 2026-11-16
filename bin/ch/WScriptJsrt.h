@@ -92,7 +92,7 @@ public:
     // crossthread agent thread (S6e). Before R1 this pushed everything onto
     // the main queue unconditionally, so a dynamic import issued inside an
     // agent raced the main loop's queue and its record was parsed/evaluated
-    // on the wrong thread — the import promise then never settled.
+    // on the wrong thread -- the import promise then never settled.
     static void PushMessage(MessageBase *message) { GetThreadMessageQueue()->InsertSorted(message); }
 
     // Leaf RAII guard serializing stderr writes across the main thread and

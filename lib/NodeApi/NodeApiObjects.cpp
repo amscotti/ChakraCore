@@ -6,7 +6,7 @@
 // Node-API objects/arrays/properties (N2.3). See NodeApiObjects.h for the
 // surface list, N2.4/N2.1 coordination seams, and the ownership record.
 //
-// Status discipline (§3.10 / doc/node-api-status-mapping.md C column):
+// Status discipline (section 3.10 / doc/node-api-status-mapping.md C column):
 // validated-first (NULL binding args -> napi_invalid_arg before anything
 // else), then the shared EntryGuard (Closing -> generic_failure, gated
 // functions -> napi_pending_exception without executing, context
@@ -16,7 +16,7 @@
 // C-column "No" (gated). Type pre-checks produce the specific
 // napi_*_expected codes (object_expected via ToObject coercion,
 // name_expected, array_expected, function_expected); JsRT errors map
-// per the §3.10 table. Success clears last_error (ClearLastError);
+// per the section 3.10 table. Success clears last_error (ClearLastError);
 // failures SetLastError. Out-params are written only on success.
 
 #include "NodeApiObjects.h"
@@ -43,7 +43,7 @@ JsValueRef ToJs(napi_value v) { return reinterpret_cast<JsValueRef>(v); }
 napi_value FromJs(JsValueRef v) { return reinterpret_cast<napi_value>(v); }
 
 // ---------------------------------------------------------------------
-// JsErrorCode -> napi_status (§3.10 table). Sets last_error on failure.
+// JsErrorCode -> napi_status (section 3.10 table). Sets last_error on failure.
 // NoError maps to napi_ok without touching last_error (the caller
 // clears it on its success path); exceptions map to
 // napi_pending_exception without clearing (exception stays pending).

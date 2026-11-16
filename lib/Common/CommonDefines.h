@@ -247,7 +247,7 @@
 // suspended frames per FunctionBody and refuse to drop that bytecode for a
 // debugger reparse while a frame can still resume into it (plain async bodies
 // instead hand the reparse a fresh FunctionBody, leaving the suspended frame's
-// body whole — see doc/dbg-async-attach.md).
+// body whole -- see doc/dbg-async-attach.md).
 //
 // The GLOBAL_ENABLE_WRITE_BARRIER term below is load-bearing, not incidental:
 // the guard's release path for the frame count runs from JavascriptGenerator's

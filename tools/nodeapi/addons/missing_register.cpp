@@ -1,3 +1,7 @@
+//-------------------------------------------------------------------------------------------------------
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
+// Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+//-------------------------------------------------------------------------------------------------------
 // Missing-symbol probe (N0.3 negative case): this addon exports neither
 // napi_register_module_v1 nor node_api_module_get_api_version_v1. The
 // host must report a clean error (exit 1, stderr names the missing

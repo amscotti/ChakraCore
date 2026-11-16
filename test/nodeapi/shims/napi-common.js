@@ -1,3 +1,7 @@
+//-------------------------------------------------------------------------------------------------------
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
+// Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+//-------------------------------------------------------------------------------------------------------
 // Minimal `common` shim for node-addon-api test drivers under the Chakra
 // host (plan card N5.3). OUR shim (not vendored upstream); the runner
 // materializes it as `<test>/common.js` in the copied work tree, where it

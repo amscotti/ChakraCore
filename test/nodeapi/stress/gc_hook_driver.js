@@ -1,3 +1,7 @@
+//-------------------------------------------------------------------------------------------------------
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
+// Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+//-------------------------------------------------------------------------------------------------------
 // N5.4 gc-hook proof driver (via ch-nodeapi).
 // Asserts the host `globalThis.gc()` hook exists and drives collection:
 // 12 repeats x 20 externals each; after gc() polling (up to 10 GCs,

@@ -104,7 +104,7 @@ DWORD RuntimeThreadData::ThreadProc()
     // Recycler::FinalizeConcurrent -> RecyclerParallelThread::Shutdown ->
     // ThreadService::HasCallback on a stale pointer; queued-callback
     // context teardown; recycler->IsReentrantState() and
-    // !IsScriptActive() asserts) — with 8+ agents the thread population and
+    // !IsScriptActive() asserts) -- with 8+ agents the thread population and
     // the races multiply. This is the same attribute embedders use for
     // worker runtimes; GC still runs, just in-thread.
     IfJsErrorFailLog(ChakraRTInterface::JsCreateRuntime(
@@ -275,7 +275,7 @@ Error:
     // Release the spawning parent before anything else: it waits with an
     // INFINITE timeout on hevntInitialScriptCompleted
     // (WScriptJsrt::LoadScriptCallback, crossthread branch), and until
-    // this fix only the success path above ever set that event — a child
+    // this fix only the success path above ever set that event -- a child
     // whose runtime/context creation or host Initialize failed landed
     // here, exited, and left the parent blocked forever. `parent` is
     // assigned before CreateThread and outlives this thread (the parent

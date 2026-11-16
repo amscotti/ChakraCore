@@ -3,21 +3,21 @@
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 //
-// Handle scopes + escapable scopes (plan doc/node-api-plan.md §3.5, task N1.2;
-// normative rules doc/node-api-semantics.md §2, R-SC-1..10).
+// Handle scopes + escapable scopes (plan doc/node-api-plan.md section 3.5, task N1.2;
+// normative rules doc/node-api-semantics.md section 2, R-SC-1..10).
 //
 // Scope model (R-SC-1): per-env stack of scopes; each scope is a list of
 // rooted JsValueRef slots (JsAddRef on store, JsRelease on scope close, plan
-// §3.4 R1/R2) plus escapable/escaped flags. The bottom stack entry is the
+// section 3.4 R1/R2) plus escapable/escaped flags. The bottom stack entry is the
 // default scope (R-SC-7), created with the env and closed only at destroy
 // step 6 (NodeApiScopes_DestroyForEnv). Every API returning a new napi_value
 // roots it into the innermost open scope (R-SC-1); this module provides
 // NodeApiScopes_RootIntoInnermost for those lanes (N2.x) and the RootedValue
 // RAII helper for code that needs an explicit, movable root handle.
 //
-// Public napi_* entries implemented here (§3.5, §4 Table A3): open/close
+// Public napi_* entries implemented here (section 3.5, section 4 Table A3): open/close
 // handle scope, open/close escapable handle scope, escape handle. They are
-// EXEMPT from the pending-exception gate (R-SC-8, plan §3.5: the header docs
+// EXEMPT from the pending-exception gate (R-SC-8, plan section 3.5: the header docs
 // list scope close among entries callable with a pending exception) and
 // therefore run without the N1.5 shared guard's pending check. They DO
 // validate env state via the reconciled N1.1 guard (nodeapi::CheckAlive:
@@ -56,10 +56,10 @@
 //   - env thread only (R3 / R-ENV-11). Rooting (JsAddRef/JsRelease) needs a
 //     thread context on the calling thread; wrong-thread calls fail in the
 //     guard before reaching here.
-//   - the env's Chakra context is current on entry (plan §3.2). This module
+//   - the env's Chakra context is current on entry (plan section 3.2). This module
 //     does not enter/restore contexts; it asserts in debug builds.
 //
-// Ownership record (memory-management.md §3; semantics Appendix A.1):
+// Ownership record (memory-management.md section 3; semantics Appendix A.1):
 //
 //   Resource / creation call: Scope (opaque struct, one per open scope)
 //     heap-allocated by NodeApiScopes_OpenImpl, stored in the env's stack.
@@ -126,7 +126,7 @@ struct NodeApiScopeState;
  * recoverable OOM path for env creation). */
 NodeApiScopeState* NodeApiScopes_CreateState(void);
 
-/* Destroy step 6 (plan §3.6): releases every root in every scope
+/* Destroy step 6 (plan section 3.6): releases every root in every scope
  * (top-down, including the default scope) and frees every Scope struct.
  * The NodeApiScopeState itself is NOT freed here (freed by the env owner
  * immediately after via NodeApiScopes_FreeState). Idempotent-safe on
@@ -198,7 +198,7 @@ napi_status NAPI_CDECL napi_escape_handle(napi_env env,
  * value unchanged. Every value-returning API lane (N2.x) calls this
  * exactly once per returned value before returning. Returns napi_ok on
  * success; napi_invalid_arg for NULL env/value. Requires the env context
- * entered (plan §3.2). The caller must have just produced `value` with no
+ * entered (plan section 3.2). The caller must have just produced `value` with no
  * intervening JS execution (R1 ordering: create -> root, synchronously). */
 napi_status NodeApiScopes_RootIntoInnermost(napi_env env, napi_value value);
 

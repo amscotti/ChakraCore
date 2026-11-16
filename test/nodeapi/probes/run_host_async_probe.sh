@@ -1,4 +1,8 @@
 #!/bin/sh
+#-------------------------------------------------------------------------------------------------------
+# Copyright (c) ChakraCore Project Contributors. All rights reserved.
+# Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+#-------------------------------------------------------------------------------------------------------
 # JS-driven async_work + threadsafe_function + --pump-timeout-ms probe runner.
 # Builds host_async_addon.cpp as a .node module and executes host_async_driver.js
 # via ch-nodeapi (provider libChakraNodeApi + host loop services).

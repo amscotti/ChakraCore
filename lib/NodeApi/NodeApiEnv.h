@@ -5,12 +5,12 @@
 //
 // NodeEnv core (lib/NodeApi/NodeApiEnv.*) -- minimal N1.1 skeleton for N1.4.
 //
-// Plan: doc/node-api-plan.md §3.3 (NodeEnv layout), §3.6 (destroy order),
-// §5.1 (layout owned by N1.1). Semantics: doc/node-api-semantics.md §1
-// (R-ENV-*), esp. R-ENV-5/6/7/9/10. Ownership: doc/memory-management.md §3.
+// Plan: doc/node-api-plan.md section 3.3 (NodeEnv layout), section 3.6 (destroy order),
+// section 5.1 (layout owned by N1.1). Semantics: doc/node-api-semantics.md section 1
+// (R-ENV-*), esp. R-ENV-5/6/7/9/10. Ownership: doc/memory-management.md section 3.
 //
 // What this slice provides (and what it deliberately does not):
-//   - Full §3.6 destroy steps 1 (state -> Closing) and 7 (Dead + free +
+//   - Full section 3.6 destroy steps 1 (state -> Closing) and 7 (Dead + free +
 //     tombstone) plus step 2 / step 6 PLACEHOLDER markers so the ordering
 //     probe (P1-1) can compare the whole sequence verbatim today.
 //   - Steps 3-5 delegated to lib/NodeApi/NodeApiLifetime.* (N1.4).
@@ -21,7 +21,7 @@
 //     tasks; they extend this layout, they must not reorder steps 3-5.
 //
 // Assumptions (N1.1 not yet landed in this worktree; recorded per task
-// brief "design to plan §3.6 and state assumptions"):
+// brief "design to plan section 3.6 and state assumptions"):
 //   - A1 Layout: future N1.1 must preserve the fields below and the
 //     step 3-5 wiring. Adding scopes/refs/wraps later is additive.
 //   - A2 Language: this slice is C++ (as is the N0.3 test stub). Plan D5
@@ -31,7 +31,7 @@
 //     surface-identical.
 //   - A3 Context guard: lifetime entries are basic_env level and native
 //     only -- they never call the engine, so they need no
-//     JsSetCurrentContext enter/exit (§3.2). N1.1 now provides
+//     JsSetCurrentContext enter/exit (section 3.2). N1.1 now provides
 //     nodeapi::ContextGuard (RAII save/set/restore); destroy uses it
 //     for the teardown window (scopes teardown releases roots via
 //     JsRelease and needs the env context current), and N1.5's shared
@@ -108,15 +108,15 @@ struct NodeApiScriptState;
 
 namespace nodeapi {
 
-// Env lifecycle state (plan §3.3 / §3.6 step 1,7). Only Alive accepts new
+// Env lifecycle state (plan section 3.3 / section 3.6 step 1,7). Only Alive accepts new
 // public calls; Closing is the teardown window; Dead-before-free is only
 // observable via the debug state query (P1-4b) because the pointer is
 // freed immediately after (R-ENV-10).
 enum class EnvState : std::uint8_t { Alive = 0, Closing = 1, Dead = 2 };
 
-// Minimal NodeEnv (plan §3.3 sketch, N1.4 subset + create-time fields).
+// Minimal NodeEnv (plan section 3.3 sketch, N1.4 subset + create-time fields).
 //
-// Ownership record (memory-management.md §3):
+// Ownership record (memory-management.md section 3):
 //   Resource: NodeEnv (this struct as one allocation).
 //   Domain/allocator: provider native heap, allocated by
 //     chakra_nodeapi_create_env (new), freed only by
@@ -148,7 +148,7 @@ struct NodeEnv {
   chakra_nodeapi_host_services services{};
   void* host_ctx = nullptr;
 
-  // --- N1.4 lifetime state (plan §3.3 fields) ---
+  // --- N1.4 lifetime state (plan section 3.3 fields) ---
   struct InstanceData {
     void* ptr = nullptr; /* user-owned, provider never frees it */
     napi_finalize finalize = nullptr;
@@ -179,7 +179,7 @@ struct NodeEnv {
   // before publication, never mutated afterwards (except delete).
   std::uint64_t generation = 0;
 
-  // --- N1.1 env core (added by N1.1; §3.3 remainder) ---
+  // --- N1.1 env core (added by N1.1; section 3.3 remainder) ---
   // Opaque pointer to NodeApiScopes' ScopeState (N1.2). Created at
   // env creation (default scope, R-SC-7), destroyed at destroy
   // step 6 (NodeApiScopes_DestroyForEnv + FreeState). nullptr until
@@ -214,7 +214,7 @@ struct NodeEnv {
   // only; no lock (env is single-threaded). Additive field (A1).
   bool pending_registrations_consumed = false;
 
-  // Per-env last error (plan §3.10 storage half; N1.5 owns the
+  // Per-env last error (plan section 3.10 storage half; N1.5 owns the
   // mapping discipline). `message` is owned (fixed buffer);
   // `info.error_message` borrows it (refresh on every record).
   // N1.1 never clears on success (see N1.5 disagreement with
@@ -274,7 +274,7 @@ inline const char* DescribeState(EnvState s) {
   return "unknown";
 }
 
-/* Context enter/exit guard (plan §3.2, N1.1): saves the caller's
+/* Context enter/exit guard (plan section 3.2, N1.1): saves the caller's
  * current context (JsGetCurrentContext), sets the env's context
  * (JsSetCurrentContext) if different, and restores the previous
  * on destruction. The caller must have validated the env (alive +
@@ -312,13 +312,13 @@ class ContextGuard {
  *   - Closing/Dead (state != Alive) => napi_generic_failure with
  *     last_error recorded (semantics R-ENV-4).
  * Callers that also validate output pointers should check those
- * first (plan §3.10 validate-first) and then call this. */
+ * first (plan section 3.10 validate-first) and then call this. */
 napi_status CheckAlive(napi_env env);
 
 /* Teardown-compatible validation: like CheckAlive but allows
  * Closing (only Dead-before-free and invalid thread / dead-env
  * fail). Used by teardown-compatible getters/removers that must
- * succeed during destroy steps 2-6 (plan §3.6 + R-ENV-4 exception,
+ * succeed during destroy steps 2-6 (plan section 3.6 + R-ENV-4 exception,
  * lifetime get/remove, ref delete/get, exception queries).
  * Callers that need strict Alive-only use CheckAlive above. The
  * EntryGuard below wraps this + context + pending check. */
@@ -333,7 +333,7 @@ void SetLastError(napi_env env, napi_status status, const char* message);
 
 /* Last-error clearing (N0.6/C column, AMB-STATUS-1 decided):
  * a successful call CLEARS last_error (writes napi_ok). Evidence:
- * doc/node-api-status-mapping.md §4 AMB-STATUS-1 (B "up until a
+ * doc/node-api-status-mapping.md section 4 AMB-STATUS-1 (B "up until a
  * Node-API function is called" + C napi_clear_last_error on every
  * success path) + vendored test_general.c createNapiError /
  * testNapiErrorCleanup (failure then get_last_error_info ==
@@ -384,8 +384,8 @@ class EntryGuard {
   bool allowPending_ = true;
 };
 
-/* Teardown entry points (plan §3.6 steps 2-6). Destroy calls
- * these in §3.6 order; later tasks fill the bodies without
+/* Teardown entry points (plan section 3.6 steps 2-6). Destroy calls
+ * these in section 3.6 order; later tasks fill the bodies without
  * reordering. Steps 3-5 are Lifetime (N1.4). Step 2 (finalizer
  * drain, N3.2) is wired in chakra_nodeapi_destroy_env and step
  * 6c-d (wraps, N3.3) via TeardownWraps; step 6a/6b are real:

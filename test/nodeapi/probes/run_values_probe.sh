@@ -1,4 +1,8 @@
 #!/bin/sh
+#-------------------------------------------------------------------------------------------------------
+# Copyright (c) ChakraCore Project Contributors. All rights reserved.
+# Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+#-------------------------------------------------------------------------------------------------------
 # N2.1/N2.2 values probe runner (plan tasks N2.1/N2.2).
 #
 # Builds the self-contained probe driver (test/nodeapi/probes/values_probe.cpp

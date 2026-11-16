@@ -1576,7 +1576,7 @@ case_2:
                 scriptContext);
         }
 
-        // Invoke(rx, @@matchAll, «S»): a replaced or deleted prototype method
+        // Invoke(rx, @@matchAll, <<S>>): a replaced or deleted prototype method
         // runs here, exactly as a plain call through the property would.
         PCWSTR const matchAllName = _u("RegExp.prototype[Symbol.matchAll]");
         Var matchAll = JavascriptOperators::GetProperty(rx, PropertyIds::_symbolMatchAll, scriptContext);

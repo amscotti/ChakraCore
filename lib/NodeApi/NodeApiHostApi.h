@@ -3,10 +3,10 @@
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 //
-// Private Node-API host API (plan doc/node-api-plan.md §3.2, PR-3/PR-5/PR-8).
+// Private Node-API host API (plan doc/node-api-plan.md section 3.2, PR-3/PR-5/PR-8).
 //
 // This header is PRIVATE: it is the embedder-facing factory for libChakraNodeApi
-// (Node-API has no public napi_create_env, plan §1.3). It is NOT part of the
+// (Node-API has no public napi_create_env, plan section 1.3). It is NOT part of the
 // public Node-API surface, must NOT be installed with the public JsRT headers
 // (lib/Jsrt/Chakra*.h), and must NOT collide with napi_*/node_api_* symbols.
 // It is compiled by the host and the provider with:
@@ -18,31 +18,31 @@
 // (lib/Jsrt/ChakraCommon.h / ChakraCore.h). <uv.h> is never included: the
 // libuv loop is an opaque forward-declared pointer, injected by the host.
 //
-// Ownership / lifetime record (memory-management.md §3):
+// Ownership / lifetime record (memory-management.md section 3):
 //
 //   Resource / creation call: napi_env from chakra_nodeapi_create_env.
 //   Domain and allocator: provider-owned NodeEnv in provider native memory
-//     (never Recycler memory; plan §3.3). Freed only by
-//     chakra_nodeapi_destroy_env on the env thread (plan §3.6 step 7).
+//     (never Recycler memory; plan section 3.3). Freed only by
+//     chakra_nodeapi_destroy_env on the env thread (plan section 3.6 step 7).
 //   Owner; transfer/publication point: provider owns the env; the host owns
 //     the JsRuntimeHandle + JsContextRef and hands them to the provider at
 //     creation. The provider never takes ownership of runtime/context.
-//   Borrow invalidation: env is valid Alive -> Closing -> Dead (plan §3.6).
+//   Borrow invalidation: env is valid Alive -> Closing -> Dead (plan section 3.6).
 //     After destroy the pointer is dead (host use-after-free; no provider
 //     validation through the freed pointer, semantics R-ENV-10). All JsValueRef
 //     roots held by the env are released before JsDisposeRuntime (R5).
 //   Thread/context allowed: create, destroy, and every napi_* entry run on
-//     the env (= host) thread with that thread's context set (plan §3.2).
+//     the env (= host) thread with that thread's context set (plan section 3.2).
 //     No napi_env / napi_value / napi_ref use from worker threads (R3).
 //   Release on success / failure / shutdown: destroy_env is the sole release
-//     authority; it runs the §3.6 sequence (finalizer drain -> sync cleanup
+//     authority; it runs the section 3.6 sequence (finalizer drain -> sync cleanup
 //     hooks LIFO -> async hooks + host pump -> instance finalizer -> refs /
 //     scopes / wrap backstop -> free NodeEnv) before the host may dispose the
 //     Chakra context/runtime. Double destroy is a host error (assert in debug,
 //     no-op in release; the void signature cannot return a status).
 //   Tests: N1.1 (1000x create/destroy, wrong-thread / Closing / Dead probes
-//     P1-* in doc/node-api-semantics.md §1.5); host loader proof in N0.3.
-//   Remaining uncertainty: exact §3.6 step order is checked against vendored
+//     P1-* in doc/node-api-semantics.md section 1.5); host loader proof in N0.3.
+//   Remaining uncertainty: exact section 3.6 step order is checked against vendored
 //     test_finalizer / test_cleanup_hook / test_async_cleanup_hook (N1.4).
 //
 // Promise-pump contract (PR-8, normative):
@@ -66,7 +66,7 @@
 //     The provider NEVER spins its own pump loop and NEVER blocks waiting for
 //     jobs.
 //   - The HOST owns pumping: after running a script (JsRun) and during env
-//     teardown (plan §3.6 step 4, async cleanup hooks), the host must drain
+//     teardown (plan section 3.6 step 4, async cleanup hooks), the host must drain
 //     queued continuations until quiet (e.g. call queued tasks via
 //     JsCallFunction and/or JsIdle until no new tasks arrive). The test host
 //     (tools/nodeapi/ch-nodeapi) pumps explicitly with a bounded iteration
@@ -125,7 +125,7 @@ typedef struct chakra_nodeapi_host_services {
  * `services` may be NULL (equivalent to all-NULL fields).
  * The env records the negotiated API version (provider max = 8 in v1):
  * the host resolves the addon's node_api_module_get_api_version_v1 (absent
- * => 8) and rejects requests > 8 before calling this (plan §1.3, D1).
+ * => 8) and rejects requests > 8 before calling this (plan section 1.3, D1).
  * Returns NULL on failure (host must treat as fatal, not pass onward).
  * The runtime/context must outlive the env; the env never disposes them. */
 napi_env chakra_nodeapi_create_env(JsRuntimeHandle runtime,
@@ -134,7 +134,7 @@ napi_env chakra_nodeapi_create_env(JsRuntimeHandle runtime,
                                    const chakra_nodeapi_host_services* services,
                                    void* host_ctx);
 
-/* Destroy per the §3.6 state machine. Must be called on the env thread,
+/* Destroy per the section 3.6 state machine. Must be called on the env thread,
  * before JsDisposeRuntime, with no provider call in flight. Runs cleanup
  * hooks, finalizers, refs/scopes teardown, then frees NodeEnv. */
 void chakra_nodeapi_destroy_env(napi_env env);

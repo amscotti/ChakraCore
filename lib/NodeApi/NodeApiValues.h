@@ -96,7 +96,7 @@
 //     primitive BigInt => napi_bigint; same object => boxed
 //     Object(1n) => napi_object, as Node reports; the tag alone
 //     cannot split them). PR-9: JsGetValueType reports a BigInt
-//     primitive as JsObject — verified empirically. Residuals of the
+//     primitive as JsObject -- verified empirically. Residuals of the
 //     D8 toString path (PR-9, known): (a) a tampered
 //     Object.prototype.toString or global Object breaks the tag check
 //     (Node uses V8 internals); (b) a Proxy of an array reports
@@ -111,7 +111,7 @@
 //     to_string the reverse). napi_coerce_to_object(null/undefined) is
 //     special-cased: it runs the conversion to obtain the engine's
 //     pending TypeError and returns napi_object_expected, leaving the
-//     TypeError pending — Node-differential verified (status
+//     TypeError pending -- Node-differential verified (status
 //     napi_object_expected with a pending exception). A synthesized
 //     TypeError covers engines that fail to leave pending.
 //     Symbol conversions throw TypeError for to_number/to_string
@@ -138,14 +138,14 @@
 //     so this deviation has no vendored-conformance impact. The probe
 //     asserts the engine truth (NULL-desc description === "").
 //   - Date: create via JsConstructObject on the global Date constructor
-//     (NaN/Infinity => Invalid Date, fractional times truncate — engine
+//     (NaN/Infinity => Invalid Date, fractional times truncate -- engine
 //     semantics, matching the Date constructor); get via the
 //     Date.prototype getTime call (NaN for Invalid Date); is_date /
 //     get_date_value's date_expected pre-check via a prototype-chain
 //     walk to the context's Date.prototype (N2.5 pattern: no user code,
 //     unlike JsInstanceOf). Wrong-type get_date_value =>
 //     napi_date_expected. Tampered Date/getTime globals degrade
-//     (is_date false / generic_failure) — documented PR-9 limit.
+//     (is_date false / generic_failure) -- documented PR-9 limit.
 //   - BigInt (PR-9 string-mediated), Node-differential verified
 //     (test/nodeapi/probes/coerce_probe.cpp + a standalone addon run
 //     under node v26.5.0): creation via BigInt(decimalString) intrinsic
@@ -162,13 +162,13 @@
 //     word_count is required (NULL => napi_invalid_arg). A short buffer
 //     copies min(required, provided) least-significant limbs, no error.
 //     Words create: words is required (NULL => napi_invalid_arg, even
-//     for count 0 — Node differential), word_count > INT_MAX =>
+//     for count 0 -- Node differential), word_count > INT_MAX =>
 //     napi_invalid_arg (before any allocation), word_count > 16384
 //     (conversion-cap; see .cpp) => pending RangeError
 //     "Maximum BigInt size exceeded" (V8-matching message; the cap is a
 //     documented v1 limit of the O(n^2) string path). Non-bigint input
 //     to any get => napi_bigint_expected (JsGetValueType != JsObject,
-//     external, tag mismatch, or boxed — MED-1 fix: a boxed BigInt
+//     external, tag mismatch, or boxed -- MED-1 fix: a boxed BigInt
 //     Object(1n) fails the ToObject-identity check and is rejected).
 //   - napi_instanceof (N2.3, NodeApiObjects.cpp) and napi_is_error
 //     (N2.5, NodeApiErrorsImpl.cpp) are not implemented here; the probe

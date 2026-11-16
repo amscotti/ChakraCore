@@ -1286,7 +1286,7 @@ static bool GroupByIteratorStepAndValue(RecyclableObject* iterator, RecyclableOb
     return hasValue;
 }
 
-// Call(callbackfn, undefined, « value, k »). The CallInfo count includes the
+// Call(callbackfn, undefined, << value, k >>). The CallInfo count includes the
 // receiver, so 3 covers undefined this plus the two arguments.
 static Var GroupByCallCallback(RecyclableObject* callback, Var value, uint32 index, ScriptContext* scriptContext)
 {
@@ -1343,8 +1343,8 @@ Var JavascriptObject::EntryGroupBy(RecyclableObject* function, CallInfo callInfo
     // IteratorStepValue sits OUTSIDE the close-wrapping try: an abrupt next()
     // (a throwing call, done/value getter, or non-object result) propagates
     // without closing (IteratorStepValue has no IfAbruptCloseIterator; Node
-    // 26.5.0 matches). Only the two spec close sites below — Call callbackfn
-    // and ToPropertyKey — close the iterator.
+    // 26.5.0 matches). Only the two spec close sites below -- Call callbackfn
+    // and ToPropertyKey -- close the iterator.
     uint32 k = 0;
     Var value = nullptr;
     while (GroupByIteratorStepAndValue(iterator, next, &value, scriptContext))

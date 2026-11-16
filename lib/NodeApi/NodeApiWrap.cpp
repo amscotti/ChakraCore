@@ -6,10 +6,10 @@
 // N3.2/N3.3 implementation: externals + finalizer queue + wrap/tags/
 // add-finalizer. See NodeApiWrap.h for the design summary, the
 // before-collect reliability evidence, and the pending/closing
-// discipline. This file is the ownership record (plan §3.7 + semantics
-// §4; memory-management.md §3, §5).
+// discipline. This file is the ownership record (plan section 3.7 + semantics
+// section 4; memory-management.md section 3, section 5).
 //
-// Ownership record (memory-management.md §3):
+// Ownership record (memory-management.md section 3):
 //
 //   Resource / creation call / source location:
 //     1) WrapRecord (one per napi_create_external / napi_wrap /
@@ -34,9 +34,9 @@
 //        deletes it).
 //   Domain and allocator instance (including backing allocator):
 //     (1) and (2) live in provider native memory (C++ new/delete).
-//     Never Recycler memory (plan §3.3) and never freed across the
+//     Never Recycler memory (plan section 3.3) and never freed across the
 //     C++/CRT boundary. (3) lives in the Recycler heap, released only
-//     via JsRelease (never freed directly). Destroy order (plan §3.6):
+//     via JsRelease (never freed directly). Destroy order (plan section 3.6):
 //     step 2 drain and step 6 backstop run before refs (6a) and
 //     scopes (6b) teardown end, both before runtime disposal (R5).
 //   Physical allocation base, extent, alignment:
@@ -44,7 +44,7 @@
 //     matching native delete. Js handles are opaque pointers.
 //   Logical length / borrowed views:
 //     Provider state is authoritative; JsAddRef return counts are
-//     never used as logic (plan §3.4 R2). The user_data pointer is
+//     never used as logic (plan section 3.4 R2). The user_data pointer is
 //     user-owned: the provider never allocates/frees it, only stores
 //     it and passes it to napi_finalize. Type tags are 16 bytes
 //     copied BY VALUE into the record at tag time (stack temporaries
@@ -89,7 +89,7 @@
 //     on the env thread). All other entries (lookups, drain, teardown)
 //     run on the env thread with the env context current (EntryGuard
 //     / ContextGuard). Rental threading forbids concurrent runtime use
-//     (mem §2), so teardown concurrent with another thread inside GC
+//     (mem section 2), so teardown concurrent with another thread inside GC
 //     is host misuse. Strong-fallback records and external records
 //     still live at destroy backstop keep their allocation alive for
 //     a possible late GC trampoline (self-delete, see destructor
@@ -105,7 +105,7 @@
 //     the external-created-but-weak-failed OOM path, detached to a
 //     self-deleting leak so a future GC finalize cannot dereference
 //     freed memory; it never runs the user finalizer). Foreign errors
-//     map per plan §3.10. Shutdown: nodeapi_wrap_teardown runs the
+//     map per plan section 3.10. Shutdown: nodeapi_wrap_teardown runs the
 //     step-6 backstop for every remaining live record exactly once
 //     before NodeEnv delete (step 7); already-enqueued records were
 //     drained at step 2 and skipped by the backstop.
@@ -129,7 +129,7 @@
 //     asserts this TU's live count instead. Single data slot per
 //     object: a second data finalizer (wrap after wrap, add_finalizer
 //     after wrap, double add_finalizer) is napi_invalid_arg
-//     (provider choice; plan §3.7 record has one finalize slot).
+//     (provider choice; plan section 3.7 record has one finalize slot).
 
 #include "NodeApiWrap.h"
 

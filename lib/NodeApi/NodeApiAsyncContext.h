@@ -5,20 +5,20 @@
 //
 // Async context + callback scopes (lib/NodeApi/NodeApiAsyncContext.*) -- N4.3.
 //
-// Plan: doc/node-api-plan.md §6 card N4.3, §4 Table B B3, §3.2 host
-// services, §3.6 step 4 (async cleanup completion). Semantics:
-// doc/node-api-semantics.md §1 (lifetime rules R-ENV-4/5/11/12) +
-// §5 (callback discipline, applied by analogy to make_callback).
+// Plan: doc/node-api-plan.md section 6 card N4.3, section 4 Table B B3, section 3.2 host
+// services, section 3.6 step 4 (async cleanup completion). Semantics:
+// doc/node-api-semantics.md section 1 (lifetime rules R-ENV-4/5/11/12) +
+// section 5 (callback discipline, applied by analogy to make_callback).
 // Status mapping: doc/node-api-status-mapping.md C column (B3 rows).
 //
 // =====================================================================
-// LOUD NO-OP WARNING (plan §4 B3, card N4.3 Do step 1):
+// LOUD NO-OP WARNING (plan section 4 B3, card N4.3 Do step 1):
 //   napi_async_init / napi_async_destroy / napi_open_callback_scope
 //   and the async_context parameter of napi_make_callback are
 //   PROVIDER BOOKKEEPING ONLY. This provider implements NO
 //   async_hooks propagation, NO AsyncContext stack, NO
 //   AsyncLocalStorage semantics, and NO context switching across
-//   awaits / callbacks / threads. Runtime scope (§0 C) is out of
+//   awaits / callbacks / threads. Runtime scope (section 0 C) is out of
 //   scope permanently in this plan. Addons that call
 //   async_init and expect a value stored by an earlier native call
 //   to flow through async_hooks into a later JS callback will NOT
@@ -29,7 +29,7 @@
 //   does enter the ENV context (JsSetCurrentContext via EntryGuard)
 //   and open a HANDLE scope, exactly like napi_call_function.
 //   Do not add ALS semantics in a fork without a plan amendment:
-//   see doc/node-api-plan.md §10 for the deferred-lane rules.
+//   see doc/node-api-plan.md section 10 for the deferred-lane rules.
 // =====================================================================
 //
 // Surface implemented here (B3, v8):
@@ -75,7 +75,7 @@
 //     result untouched. Pump throw => napi_pending_exception,
 //     result untouched.
 //
-// Closing policy (plan §3.6 step 1 + R-ENV-4; choice recorded here):
+// Closing policy (plan section 3.6 step 1 + R-ENV-4; choice recorded here):
 //   Strict Alive-only (Closing => generic_failure): async_init,
 //   open_callback_scope, make_callback (all create/invoke).
 //   Teardown-compatible (Closing succeeds): async_destroy,
@@ -91,7 +91,7 @@
 // implemented in different TUs (this TU vs NodeApiScopes.cpp) and
 // never share entries. Do not conflate them (task brief).
 //
-// Async cleanup completion wiring (§3.6 step 4, B6): the provider
+// Async cleanup completion wiring (section 3.6 step 4, B6): the provider
 // does NOT drain async cleanup hooks here; NodeApiLifetime does
 // (Lifetime_RunAsyncCleanupHooks, pump-until-remove via
 // Lifetime_SetAsyncPump). The HOST pump callback passed to
@@ -108,7 +108,7 @@
 // phase only, PR-8 provider-queue case); teardown draining is
 // host-owned.
 //
-// Ownership record (memory-management.md §3; plan N4.3 "required"):
+// Ownership record (memory-management.md section 3; plan N4.3 "required"):
 //
 //   (a) Async context records (napi_async_context__).
 //     Resource: one heap record per napi_async_init ({owner value,
@@ -197,10 +197,10 @@
 //       to close (closed exactly once on every path); the result
 //       value is rooted into the hidden scope, then moved (an extra
 //       root) into the caller's scope via RootIntoCallerScope BEFORE
-//       the hidden scope closes (R-SC-9 / §3.8 step 4 pattern), so
+//       the hidden scope closes (R-SC-9 / section 3.8 step 4 pattern), so
 //       the published result survives. Async context is validated
 //       but NOT entered for ALS (see loud no-op warning); ENV
-//       context is entered via EntryGuard (plan §3.2).
+//       context is entered via EntryGuard (plan section 3.2).
 //     Borrow invalidation: hidden scope close (releases its roots),
 //       pump (tasks released after each JsCallFunction). Result is
 //       invalidated by caller-scope close / destroy step 6b (R1).
@@ -242,7 +242,7 @@
 extern "C" {
 #endif
 
-/* Destroy step 6 (plan §3.6): frees every live + retired async-context
+/* Destroy step 6 (plan section 3.6): frees every live + retired async-context
  * and callback-scope record and erases the per-env AsyncState. Called
  * from NodeApiEnv.cpp (TeardownPromiseScript) with the env in Closing
  * state on the owner thread and the env context entered. Calls no user

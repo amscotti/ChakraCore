@@ -1,3 +1,7 @@
+//-------------------------------------------------------------------------------------------------------
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
+// Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+//-------------------------------------------------------------------------------------------------------
 // Minimal `test/common` shim for the vendored js-native-api runners.
 //
 // Upstream Node's `test/common/index.js` (at the vendored pin) pulls in

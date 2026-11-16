@@ -224,7 +224,7 @@ namespace Js
                 SharedArrayBuffer* arrayBuffer = lib->CreateSharedArrayBuffer(sharedContents);
                 // Deserialization materializes a wrapper over contents
                 // produced by another runtime, so the contents are
-                // cross-runtime by construction — mark them exactly as
+                // cross-runtime by construction -- mark them exactly as
                 // JsCreateSharedArrayBufferWithSharedContent does
                 // (JsrtCore.cpp). Without this, Atomics.waitAsync
                 // registrations through an SCA-created wrapper never

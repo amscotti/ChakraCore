@@ -1,3 +1,7 @@
+//-------------------------------------------------------------------------------------------------------
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
+// Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+//-------------------------------------------------------------------------------------------------------
 // Promise-pump probe (N0.3 / PR-8): exercises the host's continuation
 // pump (install callback + drain until quiet). The addon registers a
 // plain exports object; the JS driver creates a promise chain that only

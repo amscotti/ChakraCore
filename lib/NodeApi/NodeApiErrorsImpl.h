@@ -3,8 +3,8 @@
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 //
-// Errors and throw helpers (plan doc/node-api-plan.md §6 card N2.5, §3.10,
-// §4.1 Table A4 + Table B1).
+// Errors and throw helpers (plan doc/node-api-plan.md section 6 card N2.5, section 3.10,
+// section 4.1 Table A4 + Table B1).
 //
 // Owns lib/NodeApi/NodeApiErrorsImpl.* (A4 create/throw half + B1 fatal
 // interface; full B1 host wiring in N4.1 lands separately). A4 plumbing
@@ -20,9 +20,9 @@
 // NodeApiErrorsImpl does NOT implement the v9 syntax-error pair
 // (node_api_create_syntax_error / node_api_throw_syntax_error, js_native_api.h
 // NAPI_VERSION>=9): adding v9 symbols without the v9 semantics is a
-// conformance bug (plan §1.2). No syntax-error symbol is defined here.
+// conformance bug (plan section 1.2). No syntax-error symbol is defined here.
 //
-// Ownership record (memory-management.md §3; plan N2.5 "not required"):
+// Ownership record (memory-management.md section 3; plan N2.5 "not required"):
 //   Resource: error JsValueRefs created by napi_create_* (returned to the
 //     caller rooted in the innermost scope) plus throw-helper intermediates
 //     (msg/code strings, error object) rooted in the innermost scope before

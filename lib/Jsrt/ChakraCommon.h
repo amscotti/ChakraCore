@@ -2501,8 +2501,8 @@ typedef unsigned short uint16_t;
     /// <remarks>
     ///     <para>
     ///     Requires an active script context. The callback is optional (default unset);
-    ///     without it, engine features that need delayed tasks — currently finite
-    ///     positive <c>Atomics.waitAsync</c> timeouts — keep their pending behavior
+    ///     without it, engine features that need delayed tasks -- currently finite
+    ///     positive <c>Atomics.waitAsync</c> timeouts -- keep their pending behavior
     ///     instead of scheduling. Existing promise continuation behavior is unchanged.
     ///     </para>
     /// </remarks>

@@ -5,15 +5,15 @@
 //
 // Instance data + cleanup hooks (lib/NodeApi/NodeApiLifetime.*) -- N1.4.
 //
-// Plan: doc/node-api-plan.md §6 card N1.4, §3.6 steps 3-5, §3.3 layout.
-// Semantics: doc/node-api-semantics.md §1 (R-ENV-5/7/8/9/10; probes
-// P1-1/P1-2/P1-7) + §3.3-§3.4 rooting (no JS roots here). Vendored
+// Plan: doc/node-api-plan.md section 6 card N1.4, section 3.6 steps 3-5, section 3.3 layout.
+// Semantics: doc/node-api-semantics.md section 1 (R-ENV-5/7/8/9/10; probes
+// P1-1/P1-2/P1-7) + section 3.3-section 3.4 rooting (no JS roots here). Vendored
 // oracles checked: test_instance_data, test_finalizer,
 // test_general/testEnvCleanup.js (see report). No dedicated
 // test_cleanup_hook / test_async_cleanup_hook exists in the vendored
-// js-native-api tree; §3.6 order stands (see report).
+// js-native-api tree; section 3.6 order stands (see report).
 //
-// Ownership record (memory-management.md §3):
+// Ownership record (memory-management.md section 3):
 //
 //   (a) Async pump config + violation (MEDIUM-2, new).
 //     Resource: AsyncPumpConfig {pump, host_ctx, max_iters,
@@ -113,7 +113,7 @@
 //     Tests: P1-7 wart probe (replace then destroy: old 0 calls, new
 //       1 call); P1-1 ordering probe (finalizer after hooks).
 //
-// Closing policy (plan §3.6 step 1 + R-ENV-4, choice recorded here):
+// Closing policy (plan section 3.6 step 1 + R-ENV-4, choice recorded here):
 //   While Closing (destroy steps 2-6), get_instance_data and the two
 //   remove functions succeed (hooks/finalizers need get to read the
 //   data being torn down, and async hooks need remove as their
@@ -145,7 +145,7 @@ namespace nodeapi {
 //     (suppressing it) via napi_remove_env_cleanup_hook.
 //   RunAsyncCleanupHooks (step 4): reverse-registration order; each
 //     hook fires exactly once as fn(handle, data). Then pump-until-
-//     remove per hook (plan §3.6 step 4): after firing, the provider
+//     remove per hook (plan section 3.6 step 4): after firing, the provider
 //     calls the host-injected pump (Lifetime_SetAsyncPump) up to
 //     `max_iters` times (default 1000, probe may set 5-10 for fast
 //     fail) until the hook calls napi_remove_async_cleanup_hook.

@@ -1,3 +1,7 @@
+//-------------------------------------------------------------------------------------------------------
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
+// Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+//-------------------------------------------------------------------------------------------------------
 // Version-rejection probe (N0.3 negative case): this addon requests
 // N-API v9 (> provider max 8, plan D1). The host must reject it with a
 // clean error (exit 1, one stderr line naming the version) and never

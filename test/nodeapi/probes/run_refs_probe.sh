@@ -1,4 +1,8 @@
 #!/bin/sh
+#-------------------------------------------------------------------------------------------------------
+# Copyright (c) ChakraCore Project Contributors. All rights reserved.
+# Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+#-------------------------------------------------------------------------------------------------------
 # N1.3 references probe runner (plan task N1.3, P3-* probes).
 #
 # Builds the self-contained probe driver (test/nodeapi/probes/refs_probe.cpp

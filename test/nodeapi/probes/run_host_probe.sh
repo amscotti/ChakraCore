@@ -1,4 +1,8 @@
 #!/bin/sh
+#-------------------------------------------------------------------------------------------------------
+# Copyright (c) ChakraCore Project Contributors. All rights reserved.
+# Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+#-------------------------------------------------------------------------------------------------------
 # Host probe runner: N4.1 registration + fatal routing.
 #
 # Builds host_probe.cpp against each profile's engine dylib and runs it.

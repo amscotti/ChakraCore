@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 
@@ -25,7 +26,7 @@ public:
     void SetResult(Local type, uint32 index);
     uint32 GetResultCount() const { return m_resultsCount; }
     Local GetResult(uint32 index) const;
-    // W5 Q4: WasmSignature-keyed multi-value groundwork (decision §7).
+    // W5 Q4: WasmSignature-keyed multi-value groundwork (decision section 7).
     // Keep keyed off WasmSignature, not AsmJsRetType (which stays
     // single-valued). W7 implements the area transfer; until then
     // multi-value signatures are rejected at compile/link with

@@ -4,8 +4,8 @@
 //-------------------------------------------------------------------------------------------------------
 //
 // Externals + finalizer queue + wrap/type-tags/add-finalizer (plan
-// doc/node-api-plan.md §3.7, tasks N3.2/N3.3; semantics
-// doc/node-api-semantics.md §4 R-WRAP-1..12, probes P7-*).
+// doc/node-api-plan.md section 3.7, tasks N3.2/N3.3; semantics
+// doc/node-api-semantics.md section 4 R-WRAP-1..12, probes P7-*).
 //
 // Implements the v8 A3 wrap surface:
 //   napi_create_external / napi_get_value_external,
@@ -18,7 +18,7 @@
 //      exactly-once state} on provider native memory (C++ new/delete).
 //     JsCreateExternalObject's single data+callback slot always carries
 //     the provider trampoline + record pointer, never the user's
-//     directly (plan §1.4 audit: the callback is cached per
+//     directly (plan section 1.4 audit: the callback is cached per
 //     (callback, prototype) and fires with no current context).
 //   - GC-side trampolines (JsFinalizeCallback for externals,
 //     JsObjectBeforeCollectCallback for wrapped arbitrary objects) do
@@ -48,7 +48,7 @@
 //     teardown), so NodeEnv's layout (owned by N1.1) is untouched.
 //     This mirrors the NodeApiLifetime async-pump map pattern.
 //
-// Before-collect reliability evidence (AMB-WRAP-2, plan §3.7/§4.3):
+// Before-collect reliability evidence (AMB-WRAP-2, plan section 3.7/section 4.3):
 //   JsSetObjectBeforeCollectCallback (lib/Jsrt/ChakraCommon.h,
 //   implemented in lib/Jsrt/Jsrt.cpp + lib/Common/Memory/Recycler.cpp)
 //   registers a per-object callback that Recycler invokes during the
@@ -62,7 +62,7 @@
 //   collection) with IsInObjectBeforeCollectCallback set, so most JsRT
 //   APIs fail with JsErrorInObjectBeforeCollectCallback there --
 //   which is why the trampoline touches only the atomic state and
-//   the native queue. Rental threading (memory-management.md §2)
+//   the native queue. Rental threading (memory-management.md section 2)
 //   forbids concurrent runtime use, so teardown while another thread
 //   is inside GC is host misuse; if before-collect delivery were
 //   unreliable the probe would fail rather than be faked.

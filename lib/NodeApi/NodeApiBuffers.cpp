@@ -20,7 +20,7 @@
 //     GC'd: JsCreateArrayBuffer.
 //     External: JsCreateExternalArrayBuffer with NULL finalizer (storage
 //     aliases caller's data), the user's finalizer is attached to the
-//     view via napi_add_finalizer (WrapRecord queue, §3.7).
+//     view via napi_add_finalizer (WrapRecord queue, section 3.7).
 //   - Marker: provider-private Symbol per env (global map keyed by
 //     generation, see below). Defined via JsObjectDefineProperty with
 //     a real descriptor object {value:true, writable:false,
@@ -36,7 +36,7 @@
 //     the new work, matching N3.2 drain-point semantics. The lock is
 //     never held across user finalizers (drain moves the queue out).
 //
-// Ownership records (memory-management.md §3; plan §3.4 R1/R4, §3.7):
+// Ownership records (memory-management.md section 3; plan section 3.4 R1/R4, section 3.7):
 //
 //   External Buffer records (napi_create_external_buffer with
 //   non-NULL finalize_cb):
@@ -177,7 +177,7 @@
 //     Tests: buffers_probe marker hidden (enumerable false) + plain
 //       Uint8Array not a Buffer.
 //     Residual uncertainty: a forged marker on a non-view object would
-//       be reported as a Buffer (marker-only check per §3.9); not
+//       be reported as a Buffer (marker-only check per section 3.9); not
 //       exercised by probes.
 //
 //   Returned napi_values (create_* Buffers):
@@ -192,7 +192,7 @@
 //     the opposite failure mode where no record was created and no
 //     finalizer runs).
 //
-// Potential user-code points (R4 / §6):
+// Potential user-code points (R4 / section 6):
 //   - JsObjectDefineProperty with a symbol key and a plain descriptor
 //     object runs no user code (the descriptor is a fresh plain
 //     object; the TypedArray has no proxy traps). The provider holds
@@ -311,7 +311,7 @@ napi_status ValidateSizeToUInt(napi_env env, size_t v, unsigned int* out,
   return napi_ok;
 }
 
-// --- Per-env marker Symbol state (§3.9) ---
+// --- Per-env marker Symbol state (section 3.9) ---
 //
 // The Symbol is created per env (via JsCreateSymbol, never Symbol.for,
 // never exposed) and cached here. Keyed by env generation (not by env
@@ -491,7 +491,7 @@ napi_status MarkBuffer(napi_env env, BufferState* st, JsValueRef ta) {
   return napi_ok;
 }
 
-// Marker check (§3.9): own-property + boolean true. Primitives are
+// Marker check (section 3.9): own-property + boolean true. Primitives are
 // never Buffers; objects without the marker are false. Requires the
 // env context entered. Uses JsGetProperty only (JsHasOwnProperty uses
 // ContextAPIWrapper<true> which verifies the pending exception and
@@ -676,7 +676,7 @@ napi_status NAPI_CDECL napi_create_buffer_copy(napi_env env, size_t length,
 }
 
 // ---------------------------------------------------------------------
-// napi_create_external_buffer (C No: gated, §3.7 WrapRecord path)
+// napi_create_external_buffer (C No: gated, section 3.7 WrapRecord path)
 // ---------------------------------------------------------------------
 
 napi_status NAPI_CDECL napi_create_external_buffer(
@@ -732,7 +732,7 @@ napi_status NAPI_CDECL napi_create_external_buffer(
   if (ss != napi_ok) return ss;
   napi_status ms = MarkBuffer(env, st, ta);
   if (ms != napi_ok) return ms;
-  // Attach the user's finalizer to the view via the §3.7 WrapRecord
+  // Attach the user's finalizer to the view via the section 3.7 WrapRecord
   // path (N3.2). Only when a finalizer was supplied (NULL => no
   // record; the external storage is still aliased).
   if (finalize_cb != nullptr) {

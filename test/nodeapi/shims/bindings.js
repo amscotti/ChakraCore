@@ -1,3 +1,7 @@
+//-------------------------------------------------------------------------------------------------------
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
+// Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+//-------------------------------------------------------------------------------------------------------
 // Minimal `bindings` shim for the vendored node-addon-examples drivers.
 //
 // The examples' JS does `require('bindings')('addon')` (npm dependency,

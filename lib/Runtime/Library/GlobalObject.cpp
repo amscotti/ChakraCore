@@ -689,8 +689,8 @@ using namespace Js;
         // A '#' may introduce a private name resolved against the caller's
         // private environment. The eval-entry validation needs references
         // from nested bodies too, so parse those eagerly below. (The
-        // compiled body itself stays caller-agnostic — dynamic scope-chain
-        // loads plus entry checks — so the eval map remains safe to use.)
+        // compiled body itself stays caller-agnostic -- dynamic scope-chain
+        // loads plus entry checks -- so the eval map remains safe to use.)
         bool mayContainPrivateRef = wcschr(sourceString, _u('#')) != nullptr;
         bool useEvalMap = !VirtualTableInfo<PropertyString>::HasVirtualTable(argString) &&
             debugEvalScriptContext == nullptr &&

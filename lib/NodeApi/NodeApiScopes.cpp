@@ -3,7 +3,7 @@
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 //
-// Handle scopes implementation (plan §3.5, semantics §2). See the header for
+// Handle scopes implementation (plan section 3.5, semantics section 2). See the header for
 // the reconciled N1.1 interface (nodeapi::CheckAlive thread/state guard),
 // the ownership record, and per-function contracts. C++ implementation
 // (GNU++17 via `zig c++`) until PR-4; the extern "C" surface is
@@ -133,7 +133,7 @@ napi_status ValidateEnvAllowClosing(napi_env env, ScopeState** out) {
 }
 
 /* Liveness of the rooting calls below: JsAddRef/JsRelease need a current
- * thread context (R3 / plan §3.2). The entry guard (N1.5) owns context
+ * thread context (R3 / plan section 3.2). The entry guard (N1.5) owns context
  * discipline; in debug we verify a context is current so a mis-entered
  * caller fails loudly instead of silently unrooting. Release builds skip
  * the check (JsRT reports the error and we map it). */

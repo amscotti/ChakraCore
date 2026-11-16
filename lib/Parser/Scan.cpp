@@ -117,7 +117,7 @@ void Scanner<EncodingPolicy>::ClearStates()
     m_fAwaitIsKeywordRegion = false;
     // Only ScanIdentifierContinue writes this; zero it here so a caller
     // querying it for the very first token(s) (before any identifier has
-    // been scanned) cannot read an uninitialized bit — ParseMetaProperty
+    // been scanned) cannot read an uninitialized bit -- ParseMetaProperty
     // consults it for `new.target`/`import.meta` escape rejection.
     m_lastIdentifierHasEscape = false;
 
@@ -1947,8 +1947,8 @@ LReserved:
             }
 
 // These fast paths are reached only for the literal (unescaped)
-// spellings — an escaped identifier takes the '\\' case below and
-// ScanIdentifierContinue — so the pre-interned PID they emit can never
+// spellings -- an escaped identifier takes the '\\' case below and
+// ScanIdentifierContinue -- so the pre-interned PID they emit can never
 // carry an escape. Write the per-token escape marker here as well:
 // consult sites (ParseMetaProperty, CheckContextualKeyword, async/let
 // detection) must not read a stale true left over from an earlier

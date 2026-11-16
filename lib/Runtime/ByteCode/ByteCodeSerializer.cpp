@@ -3404,8 +3404,8 @@ public:
 
                     // The writer emits the exact decimal string of the value,
                     // with a leading '-' for negatives. Recreate the constant
-                    // through RecordBigIntConstant — the same entry point the
-                    // emitter uses — whose literal factory expects the digits
+                    // through RecordBigIntConstant -- the same entry point the
+                    // emitter uses -- whose literal factory expects the digits
                     // and a trailing 'n', with the sign passed separately (a
                     // negative zero canonicalizes to 0n inside the factory).
                     bool isNegative = len > 0 && string[0] == _u('-');

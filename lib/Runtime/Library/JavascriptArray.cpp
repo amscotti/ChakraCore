@@ -7236,7 +7236,7 @@ Case0:
         // len + insertCount - actualDeleteCount > 2^53 - 1, throw a TypeError
         // before any element is moved (deleteLen is already clamped to len, so
         // the subtraction cannot underflow). The generic ObjectSpliceHelper
-        // below would otherwise shift a ToLength-saturated 'length' —
+        // below would otherwise shift a ToLength-saturated 'length' --
         // O(2^53) work and a runner timeout. Real-array lengths (uint32)
         // cannot reach the limit, so the fast path is unaffected.
         if ((length - deleteLen) + insertLen > FiftyThirdPowerOfTwoMinusOne)
@@ -8083,7 +8083,7 @@ Case0:
             // ES2025 23.1.3.37 Array.prototype.unshift, step 4.a: if
             // len + argCount > 2^53 - 1, throw a TypeError before moving any
             // element. The Unshift walks below would otherwise iterate a
-            // ToLength-saturated 'length' — O(2^53) work and a runner timeout.
+            // ToLength-saturated 'length' -- O(2^53) work and a runner timeout.
             if (length > BigIndex(FiftyThirdPowerOfTwoMinusOne - unshiftElements))
             {
                 JavascriptError::ThrowTypeError(scriptContext, JSERR_IllegalArraySizeAndLength);
@@ -8785,7 +8785,7 @@ Case0:
     // Copy-by-change helpers. Each user-visible conversion takes its own
     // reentrancy lock so a nested helper does not observe an outer lock as
     // already closed. ToInteger matches ToIntegerOrInfinity here: NaN and
-    // -0 become +0, and ±Infinity are preserved. ClampRelativeStart,
+    // -0 become +0, and +/-Infinity are preserved. ClampRelativeStart,
     // ClampDeleteCount, and TryActualIndex stay separate from TypedArray's
     // TypedTryActualIndex; the NaN/-0 conversion is ToInteger's, not a
     // second local rule.
@@ -8863,7 +8863,7 @@ Case0:
         return static_cast<uint64>(deleteCount);
     }
 
-    // actualIndex is in [0, len). ±Infinity and every other out-of-range index fail.
+    // actualIndex is in [0, len). +/-Infinity and every other out-of-range index fail.
     static bool TryActualIndex(double relative, uint64 len, uint64* actual)
     {
         if (JavascriptNumber::IsNegInf(relative) || JavascriptNumber::IsPosInf(relative))

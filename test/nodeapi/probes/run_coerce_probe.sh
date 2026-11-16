@@ -1,4 +1,8 @@
 #!/bin/sh
+#-------------------------------------------------------------------------------------------------------
+# Copyright (c) ChakraCore Project Contributors. All rights reserved.
+# Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+#-------------------------------------------------------------------------------------------------------
 # N2.6 coercion/type-check/symbol/Date/BigInt probe runner (plan task N2.6).
 #
 # Builds the self-contained probe driver (test/nodeapi/probes/

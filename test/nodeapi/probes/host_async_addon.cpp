@@ -1,3 +1,7 @@
+//-------------------------------------------------------------------------------------------------------
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
+// Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+//-------------------------------------------------------------------------------------------------------
 // JS-driven async_work + threadsafe_function + pump-timeout probe addon.
 // Built as a standalone .node module and executed via ch-nodeapi.
 

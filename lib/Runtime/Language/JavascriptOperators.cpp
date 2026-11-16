@@ -1580,8 +1580,8 @@ CommonNumber:
             // "caller"/"arguments" expose no own property on function objects:
             // the legacy stack-walk read for sloppy script functions lives in
             // JavascriptFunction::GetPropertyBuiltIns (kept for ordinary
-            // GetProperty), but [[GetOwnProperty]] — and therefore
-            // getOwnPropertyDescriptor/hasOwnProperty — must observe a missing
+            // GetProperty), but [[GetOwnProperty]] -- and therefore
+            // getOwnPropertyDescriptor/hasOwnProperty -- must observe a missing
             // property unless user code defined a real own one
             // (sec-addrestrictedfunctionproperties).
             if ((propertyId == PropertyIds::caller || propertyId == PropertyIds::arguments) &&

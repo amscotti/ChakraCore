@@ -2995,7 +2995,7 @@ LowererMD::Simd128TrapIfMaskNonZero(IR::RegOpnd *mask, IR::Instr *instr)
 
 // Slice 2b: splat one scalar to all lanes (NEON INS lane 0, then DUP-element
 // lane 0 to all lanes, as two MD instrs since each encodes one machine
-// word). Float scalars are bitcast via FMOV_GEN first (f64→f32 demoted via
+// word). Float scalars are bitcast via FMOV_GEN first (f64->f32 demoted via
 // FCVT, mirroring x64's CVTSD2SS step); 8/16-bit truncation is inherent in
 // the lane-sized INS, matching x64's truncate-then-broadcast.
 IR::Instr *

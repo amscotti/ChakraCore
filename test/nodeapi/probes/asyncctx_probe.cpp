@@ -1,3 +1,7 @@
+//-------------------------------------------------------------------------------------------------------
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
+// Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+//-------------------------------------------------------------------------------------------------------
 // asyncctx_probe.cpp — N4.3 async context + callback scopes
 // (plan doc/node-api-plan.md card N4.3, B3 + async-hook completion
 // wiring from N1.4; status rows in doc/node-api-status-mapping.md

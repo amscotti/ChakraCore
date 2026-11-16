@@ -1,4 +1,8 @@
 #!/bin/sh
+#-------------------------------------------------------------------------------------------------------
+# Copyright (c) ChakraCore Project Contributors. All rights reserved.
+# Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+#-------------------------------------------------------------------------------------------------------
 # Errors + throw helpers probe runner (plan doc/node-api-plan.md task N2.5).
 #
 # Builds errors_probe.cpp against each profile's engine dylib and runs it.

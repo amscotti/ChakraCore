@@ -3,7 +3,7 @@
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 //
-// Errors and throw helpers (plan §6 card N2.5). See NodeApiErrorsImpl.h for
+// Errors and throw helpers (plan section 6 card N2.5). See NodeApiErrorsImpl.h for
 // the v8 surface and the realm caveat. C++17 (matching Wave-1 provider);
 // the extern "C" napi_* surface is language-agnostic.
 //
@@ -28,9 +28,9 @@
 //     = No (gated, napi_pending_exception without executing, original
 //     preserved); is_error = Yes (ok+false on wrong type);
 //     fatal_exception = No (gated); fatal_error = Yes noreturn.
-//     Headers alone are silent on gates (status-mapping §0); the C
+//     Headers alone are silent on gates (status-mapping section 0); the C
 //     column is the provider recommendation.
-//   - Throw discipline: plan §3.10: throw helpers set pending via
+//   - Throw discipline: plan section 3.10: throw helpers set pending via
 //     JsSetException and return napi_ok when none pending; if pending,
 //     return napi_pending_exception and leave it. JsSetException itself
 //     (lib/Jsrt/Jsrt.cpp:3249 RecordException) overwrites via
@@ -60,7 +60,7 @@ namespace {
 
 enum class ErrorKind : int { Error = 0, TypeError = 1, RangeError = 2 };
 
-/* JsErrorCode -> napi_status per plan §3.10 table (semantics §6).
+/* JsErrorCode -> napi_status per plan section 3.10 table (semantics section 6).
  * Records last_error (provider-owned buffer) and returns the mapped status.
  * Callers that already produced a more specific status (string_expected,
  * pending gate) do not go through here. */
@@ -79,7 +79,7 @@ napi_status MapJs(napi_env env, JsErrorCode ec, const char* what) {
     return napi_generic_failure;
   }
   if (ec == JsErrorScriptCompile || ec == JsErrorFatal) {
-    /* JsErrorScriptCompile maps to pending only for JsRun (plan §3.10);
+    /* JsErrorScriptCompile maps to pending only for JsRun (plan section 3.10);
      * here (create/throw/is_error) no compile occurs, so treat as
      * generic (do not fabricate a JS exception per OOM rule). */
     nodeapi::SetLastError(env, napi_generic_failure, what);
@@ -177,7 +177,7 @@ napi_status CreateErrorObject(napi_env env, ErrorKind kind,
   return napi_ok;
 }
 
-/* Shared create_* body (kind dispatch). Validate-first order (§3.10):
+/* Shared create_* body (kind dispatch). Validate-first order (section 3.10):
  * result null already checked by caller; here validate code/msg string
  * discipline, then JsCreateError, then code property, then root + publish.
  * EntryGuard was already constructed with allowPending=true (C Yes) so
@@ -395,7 +395,7 @@ extern "C" {
 
 // --- napi_create_error family (A4, C Yes: execute with pending) ---
 // Vendored declarations: js_native_api.h:121-132. Syntax variant (v9) is
-// intentionally absent (plan §1.2).
+// intentionally absent (plan section 1.2).
 
 napi_status NAPI_CDECL napi_create_error(napi_env env, napi_value code,
                                           napi_value msg,
@@ -448,7 +448,7 @@ napi_status NAPI_CDECL napi_create_range_error(napi_env env, napi_value code,
 // --- napi_throw family (A4, C No: gated) ---
 // Vendored declarations: js_native_api.h:382-391. On success sets pending
 // via JsSetException and returns napi_ok; if already pending returns
-// napi_pending_exception and preserves the original (plan §3.10,
+// napi_pending_exception and preserves the original (plan section 3.10,
 // status-mapping throw rows). Syntax throw (v9) intentionally absent.
 
 napi_status NAPI_CDECL napi_throw(napi_env env, napi_value error) {
@@ -529,7 +529,7 @@ napi_status NAPI_CDECL napi_is_error(napi_env env, napi_value value,
 
 /* B1 fatal (napi_fatal_exception / napi_fatal_error) moved to
  * lib/NodeApi/NodeApiHost.cpp for N4.1 full host wiring (registration +
- * fatal in one TU per plan §5.2). This TU retains A4 create/throw only;
+ * fatal in one TU per plan section 5.2). This TU retains A4 create/throw only;
  * do not re-add fatal here (duplicate-symbol link error). */
 
 } /* extern "C" */

@@ -1,3 +1,7 @@
+//-------------------------------------------------------------------------------------------------------
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
+// Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+//-------------------------------------------------------------------------------------------------------
 // `common/gc` shim: `gcUntil` for the vendored js-native-api runners.
 //
 // Upstream `test/common/gc.js` drives real garbage collection through

@@ -206,7 +206,7 @@ class TmpRoot {
  * a second while covering every realistic use (the vendored corpus
  * tops out at 4 words). Beyond the cap: pending RangeError
  * "Maximum BigInt size exceeded" (V8's message; exact text is not
- * conformance per PR-12). V8 itself accepts larger values — a
+ * conformance per PR-12). V8 itself accepts larger values -- a
  * documented v1 limit of the JS-mediated path, not a semantic claim. */
 constexpr size_t kMaxBigIntWords = 16384;
 
@@ -253,8 +253,8 @@ bool IsExternalValue(JsValueRef jsv) {
  * (InExceptionState/ScriptException from the tag call) degrade to
  * *out=false so C-Yes callers keep their napi_ok contract; genuine
  * JsRT failures (OOM/invalid-arg) are mapped. (Defensive: this build's
- * JsCallFunction tolerates a pending exception — verified in the probe
- * — so the degradation branch is cold here.) */
+ * JsCallFunction tolerates a pending exception -- verified in the probe
+ * -- so the degradation branch is cold here.) */
 napi_status TagIsBigInt(napi_env env, JsValueRef jsv, bool* out) {
   *out = false;
   JsValueRef objCtor = JS_INVALID_REFERENCE;
@@ -1089,7 +1089,7 @@ napi_status NAPI_CDECL napi_get_value_string_utf8(napi_env env, napi_value value
   if (tmp_copied != full_len) return map_js(env, JsErrorInvalidArgument, "JsCopyString (size mismatch)");
   size_t trunc_len = (max_bytes < full_len) ? max_bytes : full_len;
   /* Never split a multi-byte sequence (V8 WriteUtf8 / vendored test_string
-   * utf8InsufficientIdx: 2-byte '¡' with cap 3 copies only 1 char). */
+   * utf8InsufficientIdx: 2-byte 'U+00A1' with cap 3 copies only 1 char). */
   while (trunc_len > 0 && trunc_len < full_len) {
     unsigned char next = static_cast<unsigned char>(tmp[trunc_len]);
     if ((next & 0xC0) != 0x80) break;
@@ -1510,7 +1510,7 @@ napi_status NAPI_CDECL napi_create_symbol(napi_env env, napi_value description,
   if (description == nullptr) {
     /* Symbol() via the Symbol intrinsic (NOT JsCreateSymbol(NULL), whose
      * NULL path yields an empty-string description). Note: this build's
-     * Symbol() also stores "" (Chakra engine deviation — no symbol has
+     * Symbol() also stores "" (Chakra engine deviation -- no symbol has
      * a JS-visible undefined description here), but delegating to
      * Symbol() is still the faithful route per plan/N2.6. */
     JsValueRef symFn = JS_INVALID_REFERENCE;

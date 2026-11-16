@@ -1,3 +1,7 @@
+//-------------------------------------------------------------------------------------------------------
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
+// Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+//-------------------------------------------------------------------------------------------------------
 // gate_probe.cpp — MEDIUM-2/3, N0.6/C, missing-symbols probes.
 //
 // Covers (each MUST fail probe on mismatch):

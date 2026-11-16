@@ -51,7 +51,7 @@ namespace Js
         // token latch (the registrant's monitor task resolves it), and an
         // unmonitored foreign waiter is skipped outright. If it ever runs,
         // it marks the record settled WITHOUT releasing the native
-        // registration token or touching the owner wrapper — the token is
+        // registration token or touching the owner wrapper -- the token is
         // released exclusively on the registrant's thread (claim paths) or
         // by wrapper finalization.
         void Abandon();
@@ -77,8 +77,8 @@ namespace Js
         // Cross-agent wake support (S6e). A foreign notify (another
         // ThreadContext) removes the native token from the shared waiter list
         // and atomically sets the token's wake-request flag; the registrant's
-        // host-delayed monitor task — scheduled when the shared content is
-        // cross-runtime — polls that flag and performs the claim/unlink/
+        // host-delayed monitor task -- scheduled when the shared content is
+        // cross-runtime -- polls that flag and performs the claim/unlink/
         // release and the "ok" resolution on the registrant's thread only.
         // Bounded poll interval for the rescheduling monitor, in milliseconds.
         static const unsigned int MonitorPollIntervalMs = 2;
@@ -98,7 +98,7 @@ namespace Js
         bool TryClaimForWakeUnderCS();
         // FIFO pass-order wake claim (S6e conformance repair): walk this
         // token's notify-pass chain from its head and claim the first
-        // unsettled same-ThreadContext chain member — this waiter itself or
+        // unsettled same-ThreadContext chain member -- this waiter itself or
         // a FIFO predecessor. Returns true with *claimed set to the claimed
         // record; the caller resolves it outside the CS. See EntryMonitorTask
         // for the ordering contract.
@@ -132,7 +132,7 @@ namespace Js
         // registration. Only read by TryClaimForTimeout/TryClaimForWake on the
         // registrant's script thread after checking settled: notify resolution
         // and cross-agent Abandon set settled before releasing the token, and
-        // SAB finalization — which deletes tokens without setting settled —
+        // SAB finalization -- which deletes tokens without setting settled --
         // cannot race a live task, because the task roots the record, which
         // roots the wrapper that owns the token and the SharedContents
         // (waiter list). The chain makes every cached pointer valid while the
@@ -156,7 +156,7 @@ namespace Js
         // waiter-list lock: false at registration, flipped to true only
         // after the monitor task was successfully created and enqueued
         // (task-creation OOM keeps it false, so a foreign notify then skips
-        // the waiter — the S6b fallback — instead of counting a wake nobody
+        // the waiter -- the S6b fallback -- instead of counting a wake nobody
         // can resolve). Foreign notifiers read it under the same lock.
         // `wakeRequested` is an atomic latch: a foreign notify sets it
         // (under the waiter-list lock) BEFORE removing the token from the
@@ -180,7 +180,7 @@ namespace Js
         // registrant threads, and relative order across agents is
         // unobservable (each agent drains its own microtask queue). All link
         // reads/writes happen under the waiter-list CS of the list the pass
-        // ran on; a token leaves the chain — SpliceFromPassChain — under that
+        // ran on; a token leaves the chain -- SpliceFromPassChain -- under that
         // same CS on every path that releases it (wake/timeout claim, wrapper
         // finalization), so walkers only ever see live tokens. The notifier's
         // passNext stamp for the next sibling happens after the previous
@@ -249,7 +249,7 @@ namespace Js
     // Field keeps the record alive, the record's traced buffer Field keeps
     // the wrapper alive, and the wrapper in turn OWNS the native
     // registration token and holds the SharedContents reference (native
-    // ownership, not GC rooting — nothing traces through the token). Hence
+    // ownership, not GC rooting -- nothing traces through the token). Hence
     // the record's cached native links stay valid for the task's whole
     // lifetime. Re-enqueues itself at
     // AtomicsAsyncWaiter::MonitorPollIntervalMs while the waiter is pending
@@ -297,7 +297,7 @@ namespace Js
         bool isWebAssembly = false;
         bool isGrowable = false;   // Growable (ES2024) JS SharedArrayBuffer; capacity is maxBufferLength
 
-        // S6e: this content was (or may be) shared with another runtime — a
+        // S6e: this content was (or may be) shared with another runtime -- a
         // host extracted a content handle (JsGetSharedArrayBufferContent) or
         // a wrapper was created from such a handle
         // (JsCreateSharedArrayBufferWithSharedContent / SCA deserialization).
@@ -415,7 +415,7 @@ namespace Js
         // marked cross-runtime for the FIRST time (content-handle
         // extraction). Overridden by JavascriptSharedArrayBuffer to
         // retroactively schedule monitor tasks for async waiters that were
-        // registered while the buffer was still single-runtime — without
+        // registered while the buffer was still single-runtime -- without
         // this they would stay deaf to foreign notifies forever. Runs on
         // the extracting thread, which for a first extraction is the
         // registrant's own runtime/thread.
@@ -621,8 +621,8 @@ namespace Js
         // token has a live monitor task (monitored) is removed from the list,
         // counted, chained to the pass's previously latched token (passPrev/
         // passNext, so the registrant's monitors can resolve the pass in FIFO
-        // order — see AtomicsAsyncWaiter::TryClaimWakeInPassOrder), and its
-        // token's wake-request latch is set atomically — the registrant's
+        // order -- see AtomicsAsyncWaiter::TryClaimWakeInPassOrder), and its
+        // token's wake-request latch is set atomically -- the registrant's
         // monitor task claims and resolves it on its own thread; this thread
         // never touches the record/wrapper. An unmonitored foreign entry is
         // left registered and uncounted (S6b behavior for hosts without the

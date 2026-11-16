@@ -6,8 +6,8 @@
 // Async context + callback scopes (N4.3). See NodeApiAsyncContext.h for
 // the surface, status mapping, Closing policy, and the loud no-op
 // warning (NO async_hooks propagation / AsyncLocalStorage semantics).
-// This file is the ownership record (plan B3 + §3.6; memory-
-// management.md §3).
+// This file is the ownership record (plan B3 + section 3.6; memory-
+// management.md section 3).
 //
 // Implementation notes (Node v22.22.3 via doc/node-api-status-mapping.md):
 //   - napi_async_init: C Yes (executes with pending). Binding NULLs =>
@@ -15,7 +15,7 @@
 //     (ToObject pre-check, no JS throw, mirroring NodeApiObjects.cpp
 //     ToObject); else JsConvertValueToObject. name null/undefined =>
 //     string_expected (pre-check); else JsConvertValueToString.
-//     Convert throws map via §3.10 (pending/generic). The converted
+//     Convert throws map via section 3.10 (pending/generic). The converted
 //     values are discarded (no JS roots retained; see record (a) in
 //     the header -- bookkeeping only, no string copy, no root).
 //   - napi_async_destroy: C Yes. NULL/unknown/foreign/dead/double =>
@@ -138,7 +138,7 @@ napi_status CheckToObject(napi_env env, napi_value in) {
 // ToString pre-check (mirrors the object pattern): JS null/undefined
 // => napi_string_expected without calling the convert. Otherwise
 // JsConvertValueToString; a throw (e.g. symbol, throwing toString)
-// maps via §3.10 (pending). Converted value discarded (no root).
+// maps via section 3.10 (pending). Converted value discarded (no root).
 napi_status CheckToString(napi_env env, napi_value in) {
   JsValueType t = JsUndefined;
   JsErrorCode te = JsGetValueType(ToJs(in), &t);
@@ -607,7 +607,7 @@ napi_status NAPI_CDECL napi_make_callback(napi_env env,
     }
     // C No: gated (pending => pending_exception without executing).
     // Strict Alive-only. needContext enters the ENV context
-    // (plan §3.2); the async_context itself is validated but NOT
+    // (plan section 3.2); the async_context itself is validated but NOT
     // entered for ALS (loud no-op).
     nodeapi::EntryGuard guard(env, /*allowClosing=*/false,
                               /*allowPending=*/false, /*needContext=*/true);
@@ -729,7 +729,7 @@ napi_status NAPI_CDECL napi_make_callback(napi_env env,
       }
     }
     // Move the return into the caller's scope BEFORE closing the
-    // hidden scope (R-SC-9 / §3.8 step 4).
+    // hidden scope (R-SC-9 / section 3.8 step 4).
     napi_status ms = NodeApiScopes_RootIntoCallerScope(env, FromJs(jsResult));
     if (ms != napi_ok) {
       (void)napi_close_handle_scope(env, hidden);

@@ -535,7 +535,7 @@ namespace Js
 
         // ES2026 @@match: global and fullUnicode ('u' OR 'v') derive from ONE
         // observable Get(R, "flags") + ToString (substrate fallback for a
-        // genuine RegExp whose "flags" accessor was not installed — the same
+        // genuine RegExp whose "flags" accessor was not installed -- the same
         // fallback @@matchAll makes; a user-provided value is never ignored).
         bool global = false;
         bool fullUnicode = false;
@@ -1246,7 +1246,7 @@ namespace Js
     {
         // ES2026 @@replace: global and fullUnicode ('u' OR 'v') derive from
         // ONE observable Get(R, "flags") + ToString (substrate fallback for
-        // a genuine RegExp whose "flags" accessor was not installed — the
+        // a genuine RegExp whose "flags" accessor was not installed -- the
         // same fallback @@matchAll makes; a user value is never ignored).
         bool global = false;
         bool unicode = false; // fullUnicode; only read by the loop when global.
@@ -2589,7 +2589,7 @@ namespace Js
         if (scriptContext->GetConfig()->IsES6RegExSymbolsEnabled())
         {
             // ES2018+ RegExpBuiltinExec semantics: "lastIndex" is written
-            // through the observable [[Set]] (Set(R, "lastIndex", …, true)),
+            // through the observable [[Set]] (Set(R, "lastIndex", ..., true)),
             // so a non-writable or accessor "lastIndex" throws or runs user
             // code, and a failed match of a non-global, non-sticky regexp
             // does not touch it at all. See doc/c2-s7-matchall.md.

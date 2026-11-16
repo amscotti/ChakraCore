@@ -4,7 +4,7 @@
 //-------------------------------------------------------------------------------------------------------
 //
 // Host surface: deprecated registration (pending registry) + fatal routing
-// (plan §4 Table B1, task N4.1). See NodeApiHost.h for the ownership
+// (plan section 4 Table B1, task N4.1). See NodeApiHost.h for the ownership
 // record, string-copy rule, unload limits, host invocation design, and
 // fatal routing design.
 //
@@ -123,7 +123,7 @@ __attribute__((visibility("default")))
 napi_status chakra_nodeapi_run_pending_registrations(napi_env env,
                                                      napi_value exports,
                                                      napi_value* result) {
-  /* Validate-first (§3.10): NULL exports/result are invalid_arg even if
+  /* Validate-first (section 3.10): NULL exports/result are invalid_arg even if
    * the env is Closing. Record last_error when the env is live. */
   if (exports == nullptr || result == nullptr) {
     if (env != nullptr) {

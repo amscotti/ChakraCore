@@ -8260,7 +8260,7 @@ void Parser::ParseFncName(ParseNodeFnc * pnodeFnc, ushort flags, IdentPtr* pFncN
     // where the ambient context scans it as a plain identifier (sloppy
     // script top level), matching the tkAWAIT region case rejected above.
     // The check is on the folded name (StringValue), so an escaped spelling
-    // (`aw\u0061it`) must reject too — the scanner interns it under the same
+    // (`aw\u0061it`) must reject too -- the scanner interns it under the same
     // pid as the literal spelling, so compare pid identity directly instead
     // of CheckContextualKeyword, which excludes escaped spellings.
     // Declarations inherit the ambient [?Await] instead, so a sloppy
@@ -12178,7 +12178,7 @@ ParseNodePtr Parser::ParseExpr(int oplMin,
             // Disallow spread after a unary operator. The operand parse
             // threads the ambient [In] parameter: `yield *` takes an
             // AssignmentExpression[?In], so under a ~In context (native for
-            // init) `in` must not bind inside the operand — otherwise
+            // init) `in` must not bind inside the operand -- otherwise
             // `for (yield * '' in {}; ;) ;` parses the head as one
             // expression instead of leaving `in` to expose the invalid
             // for-in target.

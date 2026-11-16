@@ -1,3 +1,7 @@
+//-------------------------------------------------------------------------------------------------------
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
+// Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+//-------------------------------------------------------------------------------------------------------
 // promise_script_probe.cpp — N3.4 promises + N3.5 script/version/memory
 // (plan doc/node-api-plan.md cards N3.4/N3.5, A6 + B7).
 //

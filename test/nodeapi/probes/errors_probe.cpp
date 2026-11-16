@@ -1,3 +1,7 @@
+//-------------------------------------------------------------------------------------------------------
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
+// Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+//-------------------------------------------------------------------------------------------------------
 // errors_probe.cpp — N2.5 errors + throw helpers (plan §6 card N2.5).
 //
 // Covers (each MUST fail probe on mismatch):

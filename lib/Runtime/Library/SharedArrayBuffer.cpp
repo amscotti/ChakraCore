@@ -42,7 +42,7 @@ namespace Js
         // was still single-runtime never scheduled a monitor task (no
         // cross-runtime notifies were possible), so their tokens say
         // monitored == false and a foreign notify would skip and not count
-        // them — a permanently deaf waiter. The contents becoming
+        // them -- a permanently deaf waiter. The contents becoming
         // cross-runtime changes that: schedule monitors for every pending
         // unmonitored record, exactly like EntryWaitAsync does at
         // registration. Runs on the extracting thread; on the first
@@ -72,8 +72,8 @@ namespace Js
             {
                 // Create and enqueue the task BEFORE publishing monitored
                 // (same discipline as EntryWaitAsync): on task-creation OOM
-                // the exception propagates and this waiter — and the ones
-                // after it — keep the S6b skip-and-uncount contract instead
+                // the exception propagates and this waiter -- and the ones
+                // after it -- keep the S6b skip-and-uncount contract instead
                 // of a counted wake nobody can resolve. This thread is the
                 // only drainer of its host queue, so the task cannot run
                 // before publication completes.
@@ -783,7 +783,7 @@ namespace Js
                 // agent's thread can reach the freed token. (Normally a
                 // latched token's live monitor task roots its record and the
                 // wrapper, so this path sees one only after its monitor was
-                // dropped — host queue teardown at child shutdown.) A
+                // dropped -- host queue teardown at child shutdown.) A
                 // never-latched (linked) token was never chained; the splice
                 // is a no-op there.
                 registration->SpliceFromPassChain();
@@ -1107,8 +1107,8 @@ namespace Js
         uint32 removed = 0;
         // FIFO resolution order (S6e conformance repair): chain the foreign
         // tokens this pass latches, in latch (waiter-list) order. This is the
-        // only moment the pass's tokens are all visible in FIFO order — each
-        // is unlinked from the list as it is latched — so the order must be
+        // only moment the pass's tokens are all visible in FIFO order -- each
+        // is unlinked from the list as it is latched -- so the order must be
         // recorded here, at latch time; a firing monitor can no longer
         // discover earlier latched siblings through the waiter list.
         AtomicsAsyncWaiterRegistration* prevLatched = nullptr;
@@ -1123,7 +1123,7 @@ namespace Js
                     // Foreign async waiter whose host has no monitor task for
                     // it (no timer callback, not cross-runtime content, or
                     // TTD): nobody can resolve its record from this thread or
-                    // wake the registrant, so keep the S6b contract — leave
+                    // wake the registrant, so keep the S6b contract -- leave
                     // the waiter registered and do not count it. The check
                     // uses only native token fields under this lock; it never
                     // dereferences the record.
@@ -1135,7 +1135,7 @@ namespace Js
                 // off through the native token only, in this exact order:
                 //   1. set the wake-request latch,
                 //   2. remove the token from this shared list,
-                //   3. linked = false — the notifier's FINAL token touch.
+                //   3. linked = false -- the notifier's FINAL token touch.
                 // Ordering rationale: while linked == true, the only paths
                 // that may delete the token (wrapper finalization via
                 // CancelAsyncWaiters, the registrant's claim via
@@ -1160,7 +1160,7 @@ namespace Js
                 // still race an already-due timeout task on the registrant:
                 // whoever claims first through `settled` wins exactly once,
                 // and the promise may resolve "timed-out" after this notify
-                // returned 1 — the spec's own concurrent-timeout ambiguity.)
+                // returned 1 -- the spec's own concurrent-timeout ambiguity.)
                 AtomicsAsyncWaiterRegistration* registration = agent.asyncRegistration;
                 // Chain the token BEFORE the latch sequence so this token's
                 // own writes are complete when linked = false lands. The
@@ -1310,7 +1310,7 @@ namespace Js
         // re-entry below is safe. JavascriptSharedArrayBuffer::RemoveAsyncWaiter
         // deletes the token; nothing may touch `registration` afterwards.
         waiterList->RemoveAsyncWaiter(registration);
-        // Leave the notify-pass FIFO chain before the release below — a
+        // Leave the notify-pass FIFO chain before the release below -- a
         // timeout can win for a foreign-latched waiter, and later pass-order
         // walks must not reach the freed token. Same CS as the walk.
         registration->SpliceFromPassChain();
@@ -1367,7 +1367,7 @@ namespace Js
         // no-ops without touching the released token. On success the settle
         // and both unlinks happen under the waiter-list lock; the token is
         // released by JavascriptSharedArrayBuffer::RemoveAsyncWaiter on this
-        // (the registrant's) thread — the foreign notifying thread never
+        // (the registrant's) thread -- the foreign notifying thread never
         // frees it, so there is no double delete.
         if (settled || registration == nullptr)
         {
@@ -1402,7 +1402,7 @@ namespace Js
         // The foreign notify already unlinked the token from the shared list
         // (that is what the latch means), but a same-thread notify could not
         // have: it would have handed the token to its own resolution path.
-        // RemoveAsyncWaiter is idempotent — if the token is somehow no longer
+        // RemoveAsyncWaiter is idempotent -- if the token is somehow no longer
         // linked, it returns without touching it.
         waiterList->RemoveAsyncWaiter(registration);
         registration->SpliceFromPassChain();
@@ -1421,11 +1421,11 @@ namespace Js
         // only. The notify pass chained the tokens it latched (passPrev /
         // passNext, stamped at latch time under the waiter-list CS); a
         // monitor whose waiter was woken must not resolve before an earlier
-        // same-ThreadContext waiter of the same pass — ES2025 NotifyWaiters
+        // same-ThreadContext waiter of the same pass -- ES2025 NotifyWaiters
         // fulfills waiters in list order, and one registrant thread observes
         // both resolutions through its single microtask queue. Walk from the
         // chain head and claim the first unsettled same-ThreadContext member:
-        // either this waiter itself (nothing earlier pending — the common
+        // either this waiter itself (nothing earlier pending -- the common
         // single-waiter case, identical work to the pre-repair claim) or a
         // FIFO predecessor, which the caller resolves "ok" and then
         // re-enqueues this monitor to advance the chain. Other-ThreadContext
@@ -1474,9 +1474,9 @@ namespace Js
             if (current->threadContext == registration->threadContext &&
                 !current->record->IsSettled())
             {
-                // Same-ThreadContext predecessor — this thread may touch its
+                // Same-ThreadContext predecessor -- this thread may touch its
                 // record (single-threaded runtime; the token is alive so its
-                // wrapper, hence its record, is rooted) — still unsettled:
+                // wrapper, hence its record, is rooted) -- still unsettled:
                 // claim it first, at most one claim per firing.
                 AtomicsAsyncWaiter* predecessor = current->record;
                 if (predecessor->TryClaimForWakeUnderCS())
@@ -1494,7 +1494,7 @@ namespace Js
             current = next;
         }
 
-        // Self not found in its own chain — bookkeeping bug; fall back to a
+        // Self not found in its own chain -- bookkeeping bug; fall back to a
         // direct claim so the wake still resolves exactly once.
         if (TryClaimForWakeUnderCS())
         {
@@ -1537,7 +1537,7 @@ namespace Js
             // registrant's) thread, in notify-pass FIFO order: the pass
             // chained the tokens it latched, so an earlier same-ThreadContext
             // waiter is claimed and resolved FIRST even when this monitor's
-            // timer fired before the predecessor's — the pre-repair race
+            // timer fired before the predecessor's -- the pre-repair race
             // that inverted resolution order. TryClaimWakeInPassOrder
             // returns the record it claimed (this waiter or a FIFO
             // predecessor); resolve it outside the waiter-list lock. When a
@@ -1547,7 +1547,7 @@ namespace Js
             // chain; the walk claims at most one waiter per firing and the
             // chain strictly shortens, so this terminates. The woken path
             // itself never reschedules at the poll interval. A false return
-            // means a timeout won in between — stop either way.
+            // means a timeout won in between -- stop either way.
             AtomicsAsyncWaiter* claimed = nullptr;
             if (waiter->TryClaimWakeInPassOrder(&claimed))
             {

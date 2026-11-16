@@ -776,7 +776,7 @@ using namespace Js;
             c == _u('~') || c == _u('\'') || c == _u('`') || c == _u('"');
     }
 
-    // The WhiteSpace ∪ LineTerminator set (sec-white-space, sec-line-terminators)
+    // The WhiteSpace union LineTerminator set (sec-white-space, sec-line-terminators)
     // minus the five code points Table 64 already handled above. Same 25-member
     // set as JavascriptString.cpp's IsWhiteSpaceCharacter.
     static bool EscapeIsEsWhitespaceOrLineTerminator(char16 c)
@@ -967,7 +967,7 @@ using namespace Js;
     // ES2020 21.2.5.7 RegExp.prototype[@@matchAll](string) (final
     // formulation, verified against the pinned corpus and Node 26): the this
     // value must be an Object; then ToString(string); SpeciesConstructor;
-    // ToString(Get(R, "flags")); Construct(C, «R, flags»); global/fullUnicode
+    // ToString(Get(R, "flags")); Construct(C, <<R, flags>>); global/fullUnicode
     // derived from the flags STRING (the matcher's "global"/"unicode"
     // properties are never read); ToLength(Get(R, "lastIndex")) transferred
     // to the matcher through the observable [[Set]]. R's @@match is only

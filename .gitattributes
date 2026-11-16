@@ -28,3 +28,5 @@ test/LetConst/for-loop.js whitespace=cr-at-eol
 # C2-S12 appends WithClause coverage to this CRLF module-syntax file;
 # historical lines stay CRLF.
 test/es6module/module-syntax.js whitespace=cr-at-eol
+# Same rationale: historical UnifiedRegex/lastIndex.js keeps CRLF while adding the combined notice.
+test/UnifiedRegex/lastIndex.js whitespace=cr-at-eol

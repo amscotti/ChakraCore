@@ -2026,7 +2026,7 @@ namespace UnifiedRegex
     // transfer passes copy the folded bytes there); no extra retained
     // state, in line with MatchLiteralInst. Folding is Unicode simple case
     // folding (ES2027 MaybeSimpleCaseFolding), implemented with ICU
-    // u_foldCase/U_FOLD_CASE_DEFAULT — a const table lookup on the
+    // u_foldCase/U_FOLD_CASE_DEFAULT -- a const table lookup on the
     // matcher's calling thread, same rental-threading shape as the
     // parse-time ICU use. The stored literal holds the folded pattern code
     // points; an input code point matches iff scf(input) equals the stored

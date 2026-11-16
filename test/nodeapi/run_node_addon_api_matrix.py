@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+#-------------------------------------------------------------------------------------------------------
+# Copyright (c) ChakraCore Project Contributors. All rights reserved.
+# Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+#-------------------------------------------------------------------------------------------------------
 """node-addon-api test matrix runner (plan card N5.3, stretch).
 
 Builds a selected subset of the upstream ``node-addon-api`` C++ test suite

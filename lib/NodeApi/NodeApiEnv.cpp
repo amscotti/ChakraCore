@@ -3,13 +3,13 @@
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 //
-// NodeEnv core: private create/destroy + full §3.6 destroy sequence with
+// NodeEnv core: private create/destroy + full section 3.6 destroy sequence with
 // steps 3-5 delegated to NodeApiLifetime (N1.4). N1.1 additions:
 // context guard, version/last-error entries, scope-state lifecycle,
 // allocator accounting (see NodeApiEnv.h). See NodeApiEnv.h for the
 // layout, assumptions A1-A5, and the ownership record.
 //
-// Destroy order implemented (plan §3.6 / semantics R-ENV-5/R-ENV-7):
+// Destroy order implemented (plan section 3.6 / semantics R-ENV-5/R-ENV-7):
 //   1. state -> Closing (+ log "closing"). New public calls return
 //      napi_generic_failure (lifetime gates in NodeApiLifetime.cpp).
 //   2. Drain the finalizer queue (N3.2, real: nodeapi_wrap_drain,
@@ -32,7 +32,7 @@
 //   7. state -> Dead (+ log "dead"), free hook state, unregister,
 //      delete NodeEnv. Only now may the host dispose runtime/context.
 //
-// Lock discipline (semantics R-ENV-12 / mem §7): the provider-global
+// Lock discipline (semantics R-ENV-12 / mem section 7): the provider-global
 // registry mutex is held ONLY to consult/update the global maps -- never
 // across user code (hook/finalizer invocation) and never while emitting
 // log markers. Env-owned vectors are touched only on the owner thread.
@@ -134,7 +134,7 @@ static void DeadInsertLocked(void* key, std::uint64_t generation) noexcept {
 static std::atomic<size_t> g_live_count{0};
 static std::atomic<size_t> g_total_created{0};
 
-// Provider version struct (plan §4 B7): provider truth, not a Node
+// Provider version struct (plan section 4 B7): provider truth, not a Node
 // runtime claim. Fields: major=1, minor=0, patch=0; release
 // identifies the Chakra provider. See the N1.1 report.
 static const napi_node_version g_provider_version = {
@@ -414,7 +414,7 @@ EntryGuard::EntryGuard(napi_env env_value, bool allowClosing,
     ::nodeapi_wrap_drain(env_value);
   }
   if (!allowPending) {
-    // Need the env context current for JsHasException (plan §3.2).
+    // Need the env context current for JsHasException (plan section 3.2).
     // When needContext false but !allowPending, we must enter
     // the context just for the check; preserve the guard for the
     // caller's window so the checked context stays current.
@@ -539,7 +539,7 @@ size_t DebugDeadEnvCount() noexcept {
 
 extern "C" {
 
-// --- Private host API (§3.2) ---
+// --- Private host API (section 3.2) ---
 // The provider compiles with -fvisibility=hidden (HIGH-5); the 145
 // napi_* entries stay exported via NAPI_EXTERN's default visibility
 // on their vendored declarations, while these two host entries need
@@ -607,7 +607,7 @@ napi_env chakra_nodeapi_create_env(
       DeadOrderRemoveLocked(key);
     }
   } catch (...) {
-    // OOM rollback: publish nothing (memory-management.md §5).
+    // OOM rollback: publish nothing (memory-management.md section 5).
     if (env->script_state != nullptr) {
       NodeApiScript_FreeState(env->script_state);
       env->script_state = nullptr;
@@ -698,7 +698,7 @@ void chakra_nodeapi_destroy_env(napi_env env_value) {
   env->state = nodeapi::EnvState::Closing;
   nodeapi::EmitTeardownEvent(env, "closing");
 
-  // Steps 2-6 run with the env's context current (plan §3.2).
+  // Steps 2-6 run with the env's context current (plan section 3.2).
   // Lifetime entries are native-only (no JS calls) so the guard
   // is a no-op for them, but scopes teardown (step 6b) releases
   // roots via JsRelease and requires the env context.
@@ -863,7 +863,7 @@ int /*bool*/ NodeApiEnv_IsAlive(napi_env env_value) {
 // --- N1.1 napi_* subset (everything else is N1.5/N2-N4) ---
 // basic_env entries that touch only native memory: they validate
 // (null -> thread -> state) but do NOT enter the Chakra context
-// (no Js* calls). Validate-first (§3.10): a NULL output pointer
+// (no Js* calls). Validate-first (section 3.10): a NULL output pointer
 // is napi_invalid_arg even if the env is Closing.
 
 napi_status NAPI_CDECL napi_get_version(node_api_basic_env env_raw,
@@ -969,7 +969,7 @@ napi_status NAPI_CDECL napi_is_exception_pending(napi_env env,
   bool has = false;
   JsErrorCode ec = JsHasException(&has);
   if (ec != JsNoError) {
-    // Best-effort mapping per §3.10: disabled / no-context do not
+    // Best-effort mapping per section 3.10: disabled / no-context do not
     // indicate a pending JS exception the caller can handle; report
     // generic_failure without fabricating a pending state.
     if (ec == JsErrorNoCurrentContext ||

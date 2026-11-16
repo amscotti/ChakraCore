@@ -1,4 +1,8 @@
 #!/bin/sh
+#-------------------------------------------------------------------------------------------------------
+# Copyright (c) ChakraCore Project Contributors. All rights reserved.
+# Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+#-------------------------------------------------------------------------------------------------------
 # Gate probe (MEDIUM-2 pump + MEDIUM-3 Closing parity + N0.6 last-error +
 # missing-symbols). Builds gate_probe.cpp against each profile's engine.
 # Zig invocations run via mise/zig (or $CC_GATE_LOCK when set and executable).

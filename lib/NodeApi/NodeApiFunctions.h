@@ -4,7 +4,7 @@
 //-------------------------------------------------------------------------------------------------------
 //
 // Node-API functions/callbacks (plan doc/node-api-plan.md task N2.4, A2
-// function half; normative §3.8 thunk, doc/node-api-semantics.md §5,
+// function half; normative section 3.8 thunk, doc/node-api-semantics.md section 5,
 // status rows in doc/node-api-status-mapping.md C column).
 //
 // Implements the v8 function surface:
@@ -16,8 +16,8 @@
 // when this TU landed; N2.3's napi_define_properties now calls this
 // TU's napi_create_function for method/getter/setter values.
 //
-// Deviation from plan §3.8 (function `length`, verified 2026-11-12):
-// The plan §3.8 + N2.4 card treat napi_create_function's `length`
+// Deviation from plan section 3.8 (function `length`, verified 2026-11-12):
+// The plan section 3.8 + N2.4 card treat napi_create_function's `length`
 // parameter as the function arity (`Function.length`). Upstream Node
 // v22.22.3 proves it is the utf8name length:
 //   - doc/api/n-api.md napi_create_function: "length: The length of
@@ -37,7 +37,7 @@
 // is engine-independent. The functions probe tests name truncation
 // for lengths 0..5 plus `Length===0`, not arity 0..5.
 //
-// Ownership record (memory-management.md §3; plan §3.7/§3.8):
+// Ownership record (memory-management.md section 3; plan section 3.7/section 3.8):
 //
 //   Resource / creation call / source location:
 //     1) ThunkRecord ({env, napi_callback cb, void* data}), one per
@@ -112,7 +112,7 @@
 //     held by the implicit scope).
 //
 //   Thread/context allowed for use, root changes and destruction:
-//     Owner thread only, env context entered (plan §3.2/R3).
+//     Owner thread only, env context entered (plan section 3.2/R3).
 //     EntryGuard enforces both for the six public entries.
 //     The thunk validates via nodeapi::CheckAlive + ContextGuard
 //     (owner-thread JS invocation); wrong-thread validation fails

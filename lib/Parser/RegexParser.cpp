@@ -806,8 +806,8 @@ namespace UnifiedRegex
         // Mixed BMP/astral membership: ONE deterministic whole-code-point-set
         // atom. The previous representation (BMP prefix + surrogate-pair
         // range arms + lone-surrogate suffix as an alternation) gave a
-        // quantified atom several live arms per iteration — a surrogate pair
-        // could be consumed as one pair arm or as lone units — so a failing
+        // quantified atom several live arms per iteration -- a surrogate pair
+        // could be consumed as one pair arm or as lone units -- so a failing
         // continuation enumerated the partitions and backtracked
         // exponentially. The single matcher resolves each position to
         // exactly one interpretation (member pair = 2 units, else unit).
@@ -1024,7 +1024,7 @@ namespace UnifiedRegex
     // applies) so that &&/-- see closed operands on both sides: under i,
     // [k--[k-k]] must be empty, not {K}. \q multi-code-point members are
     // not stored in the code point set (they are canonical literals); the
-    // single-code-point members the \q path adds ARE closed here — their
+    // single-code-point members the \q path adds ARE closed here -- their
     // scf equivalence is exactly this closure.
     template <typename P, const bool IsLiteral>
     void Parser<P, IsLiteral>::VCloseOperandIfInsensitive(VCSet& set)
@@ -1046,10 +1046,10 @@ namespace UnifiedRegex
     // MaybeSimpleCaseFolding): map every code point with Unicode simple
     // case folding (ICU u_foldCase, U_FOLD_CASE_DEFAULT). scf folds
     // U+212A (KELVIN SIGN) onto 'k' and U+017F (LATIN SMALL LETTER LONG S)
-    // onto 's', so a \q member 'k'/'ss' matches those inputs, while ß
+    // onto 's', so a \q member 'k'/'ss' matches those inputs, while U+00DF
     // (whose simple folding is itself) does not match 'ss'. Node 26.5.0/V8
     // applies an asymmetric subset for single-character members (misses
-    // U+212A there) — documented oracle divergence; this engine implements
+    // U+212A there) -- documented oracle divergence; this engine implements
     // the spec's symmetric scf(x) == scf(y) comparison.
     codepoint_t Parser<P, IsLiteral>::VCanonicalizeCodePoint(codepoint_t cp) const
     {
@@ -1684,7 +1684,7 @@ namespace UnifiedRegex
         // paths consume the offending character first: this is a
         // validation-only scan, and leaving the cursor in place would loop.
         // Read a full code point: a raw surrogate pair is ONE v-class
-        // operand ([😀--x] would otherwise validate as two items and the
+        // operand ([U+1F600--x] would otherwise validate as two items and the
         // -- operator would be rejected as a union chain).
         // A raw character at or past the legacy class end belongs to the
         // rest of the literal, not this class. Stop without consuming; pass 1
@@ -3605,7 +3605,7 @@ namespace UnifiedRegex
         {
             // u-mode: the runtime window is reversed by code points (see
             // BeginLookbehindInst::Exec), so mirror the literal the same
-            // way — reverse the code points but keep a surrogate pair's two
+            // way -- reverse the code points but keep a surrogate pair's two
             // units in order. (Astral pattern characters are two-unit
             // literals here; lone surrogates are one-unit code points.)
             CharCount i = lit->length;
@@ -4376,7 +4376,7 @@ namespace UnifiedRegex
                                 MirrorLookbehindBody(node), /*isSuffixFrame=*/false);
                             return node; // no quantifier allowed
                         }
-                        // (?<Name>...) — name already validated during pass 0
+                        // (?<Name>...) -- name already validated during pass 0
                         // and resolved against the definition registry.
                         ECConsume(2); // ?<
                         ScanGroupName();
@@ -5724,7 +5724,7 @@ namespace UnifiedRegex
 
         // If negation, complement over all code points; under i, close over
         // case equivalence classes first (so [^\p{Lu}]iu does not match 'A',
-        // while the atom form \P{Lu} closes after complementing — see
+        // while the atom form \P{Lu} closes after complementing -- see
         // ParsePropertyEscapePass1).
         CharSet<codepoint_t> negatedSet;
         CharSet<codepoint_t> *toUseForTranslation = &codePointSet;

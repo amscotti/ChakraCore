@@ -3,18 +3,18 @@
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 //
-// Node-API host surface: deprecated registration + fatal routing (plan §4
-// Table B1, task N4.1; §3.2 host contract; §1.3 registration facts).
+// Node-API host surface: deprecated registration + fatal routing (plan section 4
+// Table B1, task N4.1; section 3.2 host contract; section 1.3 registration facts).
 //
 // Owns lib/NodeApi/NodeApiHost.* (N4.1 registration half + B1 fatal full
-// wiring; Buffer/async/TSFN remain future N4.2-N4.4 in this TU per §5.2).
+// wiring; Buffer/async/TSFN remain future N4.2-N4.4 in this TU per section 5.2).
 //
 // What this TU provides:
 //   - napi_module_register(napi_module*): deprecated self-registration path
-//     (plan §1.3). Appends to the process-lifetime pending-module registry
+//     (plan section 1.3). Appends to the process-lifetime pending-module registry
 //     (see below). Callable from any thread (including addon static
 //     constructors at dlopen, before any env exists).
-//   - Private host helpers (§3.2 extension, CHOSEN DESIGN: accessor +
+//   - Private host helpers (section 3.2 extension, CHOSEN DESIGN: accessor +
 //     direct-invoke hybrid, see "Host invocation design" below):
 //       chakra_nodeapi_pending_module_count()
 //       chakra_nodeapi_get_pending_module(index, out)
@@ -29,7 +29,7 @@
 //     moved here from NodeApiErrorsImpl.cpp N2.5 interface). Fatal routing
 //     design is documented below.
 //
-// Pending-module registry ownership record (memory-management.md §3):
+// Pending-module registry ownership record (memory-management.md section 3):
 //
 //   Resource / creation call: PendingModule record { nm_version, nm_flags,
 //     nm_filename copy, nm_register_func, nm_modname copy, nm_priv } created
@@ -150,7 +150,7 @@
 //
 // Fatal routing design (B1):
 //   - napi_fatal_exception(env, err): gated on pending (status-mapping C
-//     column: No; plan §3.10 throw discipline). If a JS exception is
+//     column: No; plan section 3.10 throw discipline). If a JS exception is
 //     pending, returns napi_pending_exception WITHOUT firing the service
 //     and preserves the original. Strict Alive-only (Closing =>
 //     napi_generic_failure via EntryGuard). NULL err => napi_invalid_arg
@@ -161,7 +161,7 @@
 //     before reading the value), then JsRelease, ClearLastError,
 //     napi_ok. The call does NOT set a pending exception. Without a
 //     service (NULL) => print to stderr + std::abort() (never returns),
-//     the plan §3.2 "NULL = abort policy".
+//     the plan section 3.2 "NULL = abort policy".
 //   - napi_fatal_error(location, len, message, len): noreturn, no env
 //     parameter, no pending check (C column Yes). Prints bounded
 //     "%.*s: %.*s" to stderr (cap 1<<20 each, NULL => "") + std::abort().
@@ -228,7 +228,7 @@ napi_status chakra_nodeapi_get_pending_module(
 
 /* Invoke all snapshotted nm_register_func values for `env`.
  *
- * Preconditions (validate-first, plan §3.10):
+ * Preconditions (validate-first, plan section 3.10):
  *   - env must be a live Alive env on the owner thread (else
  *     napi_invalid_arg for NULL/dead/wrong-thread, or
  *     napi_generic_failure when Closing, via EntryGuard).

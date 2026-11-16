@@ -253,7 +253,7 @@ void Lifetime_ClearAsyncPump(const void* env_value) {
 }
 
 void Lifetime_RunAsyncCleanupHooks(NodeEnv* env) {
-  // Pump-until-remove (plan §3.6 step 4, MEDIUM-2). Reverse-
+  // Pump-until-remove (plan section 3.6 step 4, MEDIUM-2). Reverse-
   // registration order is preserved (always take .back()).
   // Per hook: fire once as fn(handle, data), then while it has
   // not self-removed, call the host pump (bounded) until it

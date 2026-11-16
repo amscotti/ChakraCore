@@ -4,14 +4,14 @@
 //-------------------------------------------------------------------------------------------------------
 //
 // Node-API Buffer policy (plan doc/node-api-plan.md task N4.2, B2 group;
-// §3.9 PR-6 design; §4 B2 Buffer disposition; doc/node-api-status-mapping.md
+// section 3.9 PR-6 design; section 4 B2 Buffer disposition; doc/node-api-status-mapping.md
 // Buffer rows).
 //
 // Implements the v8 B2 Buffer surface:
 //   napi_create_buffer / napi_create_buffer_copy /
 //   napi_create_external_buffer / napi_is_buffer / napi_get_buffer_info
 //
-// Marker design (§3.9 / PR-6):
+// Marker design (section 3.9 / PR-6):
 //   A Buffer is a Uint8Array (JsArrayTypeUint8) view over an ArrayBuffer
 //   (GC'd for create/copy, external for create_external) carrying a
 //   provider-private hidden Symbol property set to `true`. The Symbol is
@@ -29,7 +29,7 @@
 // Explicit non-conformances (PR-6, documented in the file header per
 // task N4.2; do not edit planning docs):
 //   - No JS `Buffer` global is provided. Addons needing the global or
-//     require('buffer') are runtime scope (§0 C) and will see no global.
+//     require('buffer') are runtime scope (section 0 C) and will see no global.
 //     This is a recorded non-conformance vs Node.
 //   - No Buffer.prototype methods (alloc, from, concat, slice helpers,
 //     etc.) are provided. The Buffer is a plain Uint8Array view.
@@ -48,7 +48,7 @@
 //     marker true is a Buffer); a forged marker on a non-TypedArray is
 //     possible in theory but not guarded against (documented residual).
 //
-// External buffer finalizer (§3.7 WrapRecord/trampoline path, N3.2):
+// External buffer finalizer (section 3.7 WrapRecord/trampoline path, N3.2):
 //   napi_create_external_buffer uses JsCreateExternalArrayBuffer with
 //   NULL finalizeCallback (storage aliases the caller's `data`), creates
 //   the Uint8Array view + marker, then attaches the user's

@@ -1,3 +1,7 @@
+//-------------------------------------------------------------------------------------------------------
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
+// Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+//-------------------------------------------------------------------------------------------------------
 // Hello-world Node-API addon for the N0.3 loader proof (plan N0.3).
 // Built against the vendored Node 22.22.3 headers at NAPI_VERSION=8
 // (include/nodeapi/, PR-2). Exports a hello() function returning "world".

@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+#-------------------------------------------------------------------------------------------------------
+# Copyright (c) ChakraCore Project Contributors. All rights reserved.
+# Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+#-------------------------------------------------------------------------------------------------------
 """Generate the normative Node-API inventory from vendored headers.
 
 Parses every ``NAPI_EXTERN`` declaration whose name matches

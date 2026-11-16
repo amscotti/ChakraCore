@@ -1,4 +1,8 @@
 #!/bin/sh
+#-------------------------------------------------------------------------------------------------------
+# Copyright (c) ChakraCore Project Contributors. All rights reserved.
+# Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+#-------------------------------------------------------------------------------------------------------
 # Teardown ordering probe runner (N1.4 P1-1/P1-2/P1-7).
 #
 # Builds the self-contained probe driver (test/nodeapi/probes/

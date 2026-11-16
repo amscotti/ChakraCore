@@ -1,3 +1,7 @@
+//-------------------------------------------------------------------------------------------------------
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
+// Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+//-------------------------------------------------------------------------------------------------------
 // async_probe.cpp — N4.4 async work + thread-safe functions + uv loop
 // (plan doc/node-api-plan.md card N4.4, B4/B5; PR-7 host services).
 //

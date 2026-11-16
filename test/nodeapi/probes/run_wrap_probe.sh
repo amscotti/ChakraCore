@@ -1,4 +1,8 @@
 #!/bin/sh
+#-------------------------------------------------------------------------------------------------------
+# Copyright (c) ChakraCore Project Contributors. All rights reserved.
+# Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+#-------------------------------------------------------------------------------------------------------
 # N3.2/N3.3 wrap/finalizer probe runner (plan tasks N3.2/N3.3, P7-* probes).
 #
 # Builds the self-contained probe driver (test/nodeapi/probes/wrap_probe.cpp

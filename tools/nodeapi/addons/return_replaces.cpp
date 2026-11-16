@@ -1,3 +1,7 @@
+//-------------------------------------------------------------------------------------------------------
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
+// Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+//-------------------------------------------------------------------------------------------------------
 // Return-replaces-exports probe (N0.3): Init creates a fresh object,
 // sets a property on it, and returns THAT object instead of the passed
 // exports. The host must bind the returned object (plan §1.3). The
