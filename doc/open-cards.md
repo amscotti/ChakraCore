@@ -170,12 +170,13 @@ findings whose fixes are deliberately deferred, with their bounds.
 ## Gate deltas
 
 `tools/build/gate_counts.json`: **2050/2102 -> 2051/2103** (2026-11-05 C-sweep);
-further rungs through A12 moved to **2059/2111**, and Stage 2/3 (`83ab4d28e` on
+further rungs through A12 moved to **2059/2111**, Stage 2/3 (`83ab4d28e` on
 `2026-11-16`) integrated `+3` `test/es7/` (`float16-jit-bounds.js`,
 `regex-nonwritable-lastindex-jit.js`, `s6-growable-cross-agent.js`) and `+1`
-`test/Bugs/` (`cdjs-mediumblock-interior-gc.js`) to **2063/2115**.
-On `c24266598`, all 4 Zig profiles pass (`test` **2063/0**, `debug-static`
-**2115/0** + 8/8 static native suites, `release-shared` smoke+native+metadata,
+`test/Bugs/` (`cdjs-mediumblock-interior-gc.js`) to **2063/2115**, and Stage 4
+added `test/es7/asmjs-inline-const.js` to **2064/2116**.
+On `c24266598` + Stage 4 `Inline.cpp` fix, all 4 Zig profiles pass (`test` **2064/0**, `debug-static`
+**2116/0** + 8/8 static native suites, `release-shared` smoke+native+metadata,
 `jit` + `wasm` `check-jit` + `check-wasm` **382/382 P1**);
 `check-build-tools` is **81/81** (`test_build_tools.py`), plus `zig test` on
 `tools/linux-gate-tests.zig` (**7/7**) and `doc/examples/owned-bytes.zig` (**4/4**).
@@ -254,3 +255,5 @@ Cards surfaced by the Stage 1 architecture audit (`arch-audit`) and resolved acr
 | Mac StyleChecks BSD `grep -P` false-greens & `origin/master` closure | `arch-audit` | **closed (`9d8d1817a`, `c24266598`)** | Added `tools/StyleChecks/check_style_portable.py` (`--self-test` 15/15) for portable ASCII/tabs checking; fixed `check_eol.sh` (`IRBuilderAsmJs.h`), `check_copyright.sh` (125 files), and `check_ascii.sh` (51 files); all 5 StyleChecks pass 0 vs `origin/master`. |
 | Backend archive link-order deviation | `arch-audit` | **closed (`9d8d1817a`)** | `build.zig:769-790` now compiles and links the 89 Backend TUs immediately after `Jsrt.Core` (before `Common.Common`), matching `lib/CMakeLists.txt:21-28`. |
 | Root `evidence/gc-async-continuation/` clutter | `arch-audit` | **closed (`9d8d1817a`, `docs-cert`)** | Relocated to `doc/evidence/gc-async-continuation/` and updated remaining doc/lldb path references. |
+| ARM64 `-Dwasm=true` (`ENABLE_ASMJS`) inlining `IRBuilder` null `constTableContent` SIGSEGV | Stage 4 (`bench-runner`) | **closed (Stage 4)** | `lib/Backend/Inline.cpp:1517` (`Inline::BuildIRForInlinee`) and `:4104` (`Inline::InlineFunctionCommon`) gated `IRBuilderAsmJs` and `GetAsmJsInfo()->GetArgCount()` on `#ifdef ASMJS_PLAT` (x86/x64-only) instead of `#ifdef ENABLE_ASMJS`. Because `JITTimeFunctionBody::InitializeJITFunctionData` skips `constTableContent` for asm.js functions, `-Dprofile=jit -Dwasm=true` fell through to JS `IRBuilder::BuildConstantLoads()` and dereferenced null `constTableContent` at `0x8` in `JITTimeFunctionBody::GetConstantType` (`JetStream/bigfib.cpp.js` and `JetStream/container.cpp.js` 5/5 SIGSEGV). Switched both `#ifdef` guards to `ENABLE_ASMJS` and pinned with `test/es7/asmjs-inline-const.js` (`2064/2116`; both benchmarks now 5/5 PASS). |
+| `Octane/earley-boyer.js` rare FullJIT `rc=-11` flake | Stage 4 (`bench-runner`) | open (JIT/GC, low repro) | Pre-fix `c24266598` 5-iter bench run hit `1/5` `rc=-11` on run #4 (median `10897.0 +/- 28.5`, no `.ips` report emitted). Subsequent `15/15` standalone runs on `c24266598` and `10/10` post-`Inline.cpp`-fix standalone runs all passed (`rc=0`, scores `10519..11202`); `lldb` process launch times out under the macOS sandbox so no debuggee backtrace was captured. |

@@ -1514,7 +1514,7 @@ Inline::BuildIRForInlinee(Func *inlinee, JITTimeFunctionBody *funcBody, IR::Inst
 
     BEGIN_CODEGEN_PHASE(this->topFunc, Js::IRBuilderPhase);
 
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
     if (this->topFunc->GetJITFunctionBody()->IsAsmJsMode())
     {
         IRBuilderAsmJs irBuilder(inlinee);
@@ -4101,7 +4101,7 @@ Inline::InlineFunctionCommon(IR::Instr *callInstr, bool originalCallTargetOpndIs
     BuildIRForInlinee(inlinee, funcInfo->GetBody(), callInstr, isApplyTarget, recursiveInlineDepth);
 
     Js::ArgSlot formalCount =
-#ifdef ASMJS_PLAT
+#ifdef ENABLE_ASMJS
         funcInfo->GetBody()->IsAsmJsMode() ? funcInfo->GetBody()->GetAsmJsInfo()->GetArgCount() :
 #endif
         funcInfo->GetBody()->GetInParamsCount();

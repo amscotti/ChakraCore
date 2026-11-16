@@ -690,4 +690,9 @@
       <compile-flags>-ESBigInt -ESSharedArrayBuffer -Test262 -CollectGarbage</compile-flags>
     </default>
   </test>
+  <test>
+    <default>
+      <files>asmjs-inline-const.js</files>
+    </default>
+  </test>
 </regress-exe>

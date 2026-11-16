@@ -20,8 +20,8 @@ documentation sync.
 
 Key state on `modernize/baseline` (`c24266598` + Stage 3B `docs-cert`):
 
-- **All 4 Mac ARM64 Zig build profiles pass** (`test` **2063/0**, `debug-static`
-  **2115/0** + `8/8` static native suites, `release-shared` smoke/native/metadata,
+- **All 4 Mac ARM64 Zig build profiles pass** (`test` **2064/0**, `debug-static`
+  **2116/0** + `8/8` static native suites, `release-shared` smoke/native/metadata,
   and `jit` + `-Dwasm=true` `check-jit` + **382/382 P1** WASM).
 - **Node-API (`NAPI_VERSION=8`) passes** `tools/nodeapi/run_probe.sh` and
   **18/18** `test/nodeapi/probes/run_*_probe.sh` on both `test` and `jit`
@@ -192,6 +192,7 @@ verified on `modernize/baseline` (`c24266598`):
 | Node-API OOM rollback, `A8-3` `PromiseQueue*`, `BigInt64` wiring, & `ch-nodeapi` async loop | `69df54b1d`, `29362397a`, `83ab4d28e` (`lib/NodeApi/*`, `tools/nodeapi/ch-nodeapi.cpp`, `test/nodeapi/*`) | Moved `g_live_envs` and state creation inside `try/catch (...)` with `new (std::nothrow)` and full rollback; ref-counted per-context `PromiseQueue*` reclamation + `host_manages_promise_queue`; wired `BigInt64Array`/`BigUint64Array` directly through JsRT; implemented `post_task`/`post_work` worker loop + `--pump-timeout-ms` + clean shutdown in `ch-nodeapi`; scrubbed hardcoded `/Users/ascotti` & `/tmp/opencode` paths. |
 | Unwinder `_LIBCPP_VERSION` proxy & non-Apple ARM/ARM64 FDE registration | `35152953b` (`lib/Common/PlatformAgnostic/AssemblyCommon.h`, `lib/Common/Memory/arm/XDataAllocator.cpp`, `lib/Common/Memory/arm64/XDataAllocator.{h,cpp}`) | Separated `__APPLE__` Mach-O (`mac_fde_wrapper`) from `!__APPLE__ && __ELF__` `CHAKRA_UNWINDER_SINGLE_FDE` CIE-to-FDE walk; gated non-Apple ARM64 `.xdata` registration under `CHAKRA_ARM64_DWARF_EH_FRAME`. |
 | Build, Backend link order, Linux parameterization, WASM manifest, & StyleChecks | `9d8d1817a`, `83ab4d28e`, `c24266598` (`build.zig`, `tools/build/*`, `.github/workflows/*`, `tools/StyleChecks/*`, `doc/evidence/gc-async-continuation/`) | Aligned Backend link order between `Jsrt.Core` and `Common`; parameterized `tools/build/linux.zig` + updated `zig-linux.yml`/`zig-macos.yml`; resynced `wasm-arm64-manifest.json` (`EXPECTED_P1_TOTAL=382`); relocated `evidence/gc-async-continuation/`; replaced BSD `grep -P` false-greens and closed all EOL/copyright/ASCII diffs (`5/5` green). |
+| ARM64 `-Dwasm=true` (`ENABLE_ASMJS`) inlining `IRBuilder` null `constTableContent` SIGSEGV | Stage 4 (`lib/Backend/Inline.cpp`, `test/es7/asmjs-inline-const.js`, `test/es7/rlexe.xml`, `tools/build/gate_counts.json`) | Changed `#ifdef ASMJS_PLAT` to `#ifdef ENABLE_ASMJS` in `Inline::BuildIRForInlinee` (`:1517`) and `Inline::InlineFunctionCommon` (`:4104`) so ARM64 `-Dwasm=true` builds use `IRBuilderAsmJs` and `GetAsmJsInfo()->GetArgCount()` instead of JS `IRBuilder::BuildConstantLoads()` on null `constTableContent` (which SIGSEGV'd `JetStream/bigfib.cpp.js` and `JetStream/container.cpp.js`). Added `asmjs-inline-const.js` (`2064/2116`). |
 
 ---
 
@@ -203,8 +204,8 @@ All checks below were observed passing after the code changes on committed
 
 | Subsystem / Profile | Command / Gate | Result (`c24266598`) | Scope & Notes |
 |---|---|---|---|
-| **Mac `test` profile** (shared, no-JIT) | `zig build check libChakraNodeApi ch-nodeapi check-nodeapi` | **PASS** | `check_regression` **2063/0**; `check-native` (`test-shared-basic` incl. Phase-3 JsRT tests; 8 static ignored); `check-smoke`; `check-metadata` (minos 26.0, 8 MiB stacks, 4 headers identical, 8 JsRT exports); `verify-bytecode`; `check-nodeapi` (`150` symbols); `check-selftest` |
-| **Mac `debug-static` profile** | `zig build -Dprofile=debug-static check` | **PASS** | `check_regression` **2115/0**; `check-native` **8/8** static suites PASS; `check-smoke`; `check-metadata` (minos 26.0, stacksize 0, `526` archive members); `verify-bytecode`; `check-selftest` |
+| **Mac `test` profile** (shared, no-JIT) | `zig build check libChakraNodeApi ch-nodeapi check-nodeapi` | **PASS** | `check_regression` **2064/0**; `check-native` (`test-shared-basic` incl. Phase-3 JsRT tests; 8 static ignored); `check-smoke`; `check-metadata` (minos 26.0, 8 MiB stacks, 4 headers identical, 8 JsRT exports); `verify-bytecode`; `check-nodeapi` (`150` symbols); `check-selftest` |
+| **Mac `debug-static` profile** | `zig build -Dprofile=debug-static check` | **PASS** | `check_regression` **2116/0**; `check-native` **8/8** static suites PASS; `check-smoke`; `check-metadata` (minos 26.0, stacksize 0, `526` archive members); `verify-bytecode`; `check-selftest` |
 | **Mac `release-shared` profile** | `zig build -Dprofile=release-shared check ch-nodeapi` | **PASS** | `check-smoke`; `check-native` (`test-shared-basic`); `check-metadata`; `check-selftest`; builds `ch-nodeapi` |
 | **Mac `jit` + `wasm` profile** | `zig build -Dprofile=jit -Dwasm=true check check-wasm libChakraNodeApi ch-nodeapi check-nodeapi` | **PASS** | `check-jit` PASS; `check-wasm` **382/382 P1 PASS** (`runtests` `438` passed / `15` non-P1 failed of `483` manifest total); `verify-bytecode`; `check-smoke`; `check-nodeapi` (`150`) |
 | **GCStress bounded smoke** | 6s runs on `./zig-out/bin/GCStress` & `./out/jit/bin/GCStress` (default + `-js -ForceBlockingConcurrentCollect`) | **PASS** | Reached gen `73`, `0` failures (bounded smoke, not an unbounded overnight soak) |
@@ -279,6 +280,12 @@ unverified claims. Known boundaries at `c24266598`:
      outside current automated CI.
    - One pre-existing load-only fulljit crasher (`open-cards.md`) stays open
      (the 109-test `LowerNewClassConstructor` SIGSEGV family was closed by e14).
+   - Stage 4 observed an intermittent `1/5` `rc=-11` (SIGSEGV) on
+     `Octane/earley-boyer.js` run #4 of the pre-fix `c24266598` JIT benchmark
+     run (no `.ips` crash file generated; `15/15` subsequent standalone runs
+     on `c24266598` and `10/10` post-`Inline.cpp`-fix standalone runs passed,
+     while `lldb` process launch timed out under the macOS sandbox). Tracked in
+     [open-cards.md](open-cards.md).
    - No formal multi-benchmark perf regression gate beyond `cdjs` 5x checks.
    - `CMakeLists.txt` does not build `lib/NodeApi` or `tools/nodeapi/ch-nodeapi`;
      `tools/RecyclerChecker/` (10 files, CMake-only) stays orphaned from Zig/CI;
