@@ -610,6 +610,16 @@ SmallHeapBlockT<TBlockAttributes>::GetObjectIndexFromBitIndex(ushort bitIndex)
     return objectIndex;
 }
 
+// GC ownership/invalidation record:
+// - Domain/owner: Recycler-owned SmallHeapBlockT pages aligned to
+//   TBlockAttributes::PageCount * AutoSystemInfo::PageSize (128 KiB for Medium blocks
+//   on 16 KiB Apple Silicon pages).
+// - Caller/context: HeapBlockMap32::MarkInterior on mark threads after MarkInternal has
+//   already set the mark bit on candidate.
+// - Invariant: Shift byte offset >> HeapConstants::ObjectAllocationShift before narrowing
+//   to a bit-vector index (ushort) so Medium block offsets in [64 KiB, 128 KiB) do not wrap
+//   modulo 64 KiB, resolve to a wrong lower-64 KiB object, and leave the real object marked
+//   without pushing it to MarkContext (causing skipped child scan and premature sweep).
 template <class TBlockAttributes>
 __forceinline void *
 SmallHeapBlockT<TBlockAttributes>::GetRealAddressFromInterior(void * interiorAddress, uint objectSize, byte bucketIndex)
@@ -617,13 +627,13 @@ SmallHeapBlockT<TBlockAttributes>::GetRealAddressFromInterior(void * interiorAdd
     const ValidPointers<TBlockAttributes> validPointers = HeapInfo::GetValidPointersMapForBucket<TBlockAttributes>(bucketIndex);
     size_t rawInteriorAddress = reinterpret_cast<size_t>(interiorAddress);
     size_t baseAddress = rawInteriorAddress & ~(TBlockAttributes::PageCount * AutoSystemInfo::PageSize - 1);
-    ushort offset = (ushort)(rawInteriorAddress - baseAddress);
-    offset = validPointers.GetInteriorAddressIndex(offset >> HeapConstants::ObjectAllocationShift);
+    uint offset = static_cast<uint>((rawInteriorAddress - baseAddress) >> HeapConstants::ObjectAllocationShift);
+    ushort objectIndex = validPointers.GetInteriorAddressIndex(offset);
 
-    if (offset == SmallHeapBlockT<TBlockAttributes>::InvalidAddressBit)
+    if (objectIndex == SmallHeapBlockT<TBlockAttributes>::InvalidAddressBit)
     {
         return nullptr;
     }
 
-    return reinterpret_cast<void*>(baseAddress + offset * objectSize);
+    return reinterpret_cast<void*>(baseAddress + static_cast<size_t>(objectIndex) * objectSize);
 }

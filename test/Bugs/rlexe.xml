@@ -635,4 +635,9 @@
       <compile-flags>-mic:1 -off:simplejit -bgjit-</compile-flags>
     </default>
   </test>
+  <test>
+    <default>
+      <files>cdjs-mediumblock-interior-gc.js</files>
+    </default>
+  </test>
 </regress-exe>
