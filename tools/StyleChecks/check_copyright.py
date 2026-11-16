@@ -7,6 +7,7 @@
 # Python 2.7 and 3.x compatibility for easier testing regardless of python installation
 from __future__ import print_function
 
+import io
 import sys
 import os.path
 import re
@@ -64,7 +65,7 @@ def report_incorrect(file_name, pairs, fail_line):
         print("    ", fail_line, end="")
         print()
 
-with open(file_name, 'r') as sourcefile:
+with io.open(file_name, 'r', encoding='utf-8', errors='replace') as sourcefile:
     hashbang = sourcefile.readline()
     if not hashbang.startswith("#!"):
         sourcefile.seek(0)

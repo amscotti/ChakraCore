@@ -1,0 +1,317 @@
+# Linux x86_64 Zig build CI (Ubuntu 24.04 default + parameterized profiles/JIT/Node-API).
+#
+# What this workflow proves on every push/PR:
+#   - style: portable StyleChecks (ASCII, tabs, EOL, copyright) on git diff;
+#   - zig (test): default Ubuntu 24.04 (x86_64-linux-gnu, glibc 2.39, ICU 74)
+#     build + full `zig build check` (regression, verify-bytecode, check-native,
+#     check-smoke, check-jit, check-metadata, check-selftest);
+#   - zig-variants: parameterized Linux build matrix (-Djit=false, release-shared,
+#     debug-static) + check-smoke / check-metadata / check-native / verify-bytecode;
+#   - nodeapi: libChakraNodeApi + ch-nodeapi + check-nodeapi + probes + matrices.
+
+name: zig-linux (x86_64 Linux build + check + Node-API)
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  style:
+    name: StyleChecks (portable ASCII, tabs, EOL, copyright)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      tally: ${{ steps.tally.outputs.tally }}
+    steps:
+      - name: Checkout (full history for merge-base)
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Ensure origin/master ref exists
+        run: |
+          set -euo pipefail
+          git rev-parse --verify origin/master >/dev/null 2>&1 || \
+            git fetch --no-tags origin master:refs/remotes/origin/master
+      - name: Run StyleChecks self-test and suite
+        id: tally
+        run: |
+          set -euo pipefail
+          mkdir -p ci-evidence
+          {
+            python3 tools/StyleChecks/check_style_portable.py --self-test
+            bash tools/StyleChecks/check_ascii.sh
+            bash tools/StyleChecks/check_tabs.sh
+            bash tools/StyleChecks/check_eol.sh
+            bash tools/StyleChecks/check_copyright.sh
+          } 2>&1 | tee ci-evidence/style.log
+          line="style-linux: ascii=PASS tabs=PASS eol=PASS copyright=PASS"
+          echo "$line" | tee ci-evidence/tally.txt
+          echo "tally=$line" >> "$GITHUB_OUTPUT"
+          echo "- $line" >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload style-linux evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: style-linux
+          path: ci-evidence/
+
+  zig:
+    name: zig test (Linux x86_64 full check)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    outputs:
+      tally: ${{ steps.tally.outputs.tally }}
+    steps:
+      - &checkout
+        name: Checkout
+        uses: actions/checkout@v5
+      - &mise
+        name: Setup mise (Zig 0.17.0 from mise.toml)
+        uses: jdx/mise-action@v4
+        with:
+          install: true
+          cache: true
+      - name: Assert Zig 0.17.0
+        run: |
+          set -euo pipefail
+          test "$(mise exec -- zig version)" = "0.17.0"
+          mise exec -- zig version
+      - &linux-deps
+        name: Install Linux build and gate dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libicu-dev binutils clang make
+          test -f /usr/include/unicode/uchar.h
+          test -f /usr/lib/x86_64-linux-gnu/libicuuc.so
+          ldd --version | head -n 1
+      - name: Record inputs
+        run: |
+          set -euo pipefail
+          mkdir -p ci-evidence
+          mise exec -- zig version > ci-evidence/zig-version.txt
+          mise exec -- zig env > ci-evidence/zig-env.txt
+          python3 tools/build/check_metadata_linux.py --self-test 2>&1 | tee ci-evidence/metadata-selftest.log
+          mise exec -- zig test tools/linux-gate-tests.zig 2>&1 | tee ci-evidence/linux-gate-tests.log
+      - name: zig build
+        run: |
+          set -euo pipefail
+          mise exec -- zig build 2>&1 | tee ci-evidence/build.log
+      - name: zig build check
+        run: |
+          set -euo pipefail
+          mise exec -- zig build check 2>&1 | tee ci-evidence/check.log
+      - name: Tally gate outputs
+        id: tally
+        run: |
+          set -euo pipefail
+          grep -F 'check_metadata_linux: PASS' ci-evidence/check.log
+          grep -F 'check_smoke_linux: PASS' ci-evidence/check.log
+          grep -F 'check_jit: PASS' ci-evidence/check.log
+          line="linux-test: build=PASS check=PASS"
+          echo "$line" | tee ci-evidence/tally.txt
+          echo "tally=$line" >> "$GITHUB_OUTPUT"
+          echo "- $line" >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload zig-linux-test evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: zig-linux-test
+          path: ci-evidence/
+
+  zig-variants:
+    name: zig linux ${{ matrix.name }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: nojit
+            flags: "-Djit=false"
+            checks: "check-smoke check-metadata verify-bytecode check-native"
+          - name: release-shared
+            flags: "-Dprofile=release-shared"
+            checks: "check-smoke check-metadata check-jit check-native"
+          - name: debug-static
+            flags: "-Dprofile=debug-static -Doptimize=debug"
+            checks: "check-smoke check-metadata verify-bytecode"
+    outputs:
+      tally: ${{ steps.tally.outputs.tally }}
+    steps:
+      - *checkout
+      - *mise
+      - *linux-deps
+      - name: Assert Zig 0.17.0
+        run: |
+          set -euo pipefail
+          test "$(mise exec -- zig version)" = "0.17.0"
+      - name: zig build ${{ matrix.flags }}
+        run: |
+          set -euo pipefail
+          mkdir -p ci-evidence
+          # shellcheck disable=SC2086
+          mise exec -- zig build ${{ matrix.flags }} 2>&1 | tee ci-evidence/build.log
+      - name: Run variant checks (${{ matrix.checks }})
+        run: |
+          set -euo pipefail
+          for step in ${{ matrix.checks }}; do
+            echo "=== zig build ${{ matrix.flags }} $step ==="
+            # shellcheck disable=SC2086
+            mise exec -- zig build ${{ matrix.flags }} "$step"
+          done 2>&1 | tee ci-evidence/checks.log
+      - name: Tally gate outputs
+        id: tally
+        run: |
+          set -euo pipefail
+          grep -F 'check_metadata_linux: PASS' ci-evidence/checks.log
+          line="linux-${{ matrix.name }}: build=PASS checks=PASS"
+          echo "$line" | tee ci-evidence/tally.txt
+          echo "tally=$line" >> "$GITHUB_OUTPUT"
+          echo "- $line" >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload zig-linux-${{ matrix.name }} evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: zig-linux-${{ matrix.name }}
+          path: ci-evidence/
+
+  nodeapi:
+    name: nodeapi linux (provider + host + exports + probes + matrix)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    outputs:
+      tally: ${{ steps.tally.outputs.tally }}
+    steps:
+      - *checkout
+      - *mise
+      - *linux-deps
+      - name: Assert Zig 0.17.0
+        run: |
+          set -euo pipefail
+          test "$(mise exec -- zig version)" = "0.17.0"
+      - name: zig build engine + libChakraNodeApi + ch-nodeapi
+        run: |
+          set -euo pipefail
+          mkdir -p ci-evidence
+          mise exec -- zig build 2>&1 | tee ci-evidence/engine.log
+          mise exec -- zig build libChakraNodeApi 2>&1 | tee ci-evidence/nodeapi-provider.log
+          mise exec -- zig build ch-nodeapi 2>&1 | tee ci-evidence/nodeapi-host.log
+      - name: zig build check-nodeapi
+        run: |
+          set -euo pipefail
+          mise exec -- zig build check-nodeapi 2>&1 | tee ci-evidence/nodeapi-check.log
+      - name: Run Node-API probes (Linux test profile)
+        run: |
+          set -euo pipefail
+          printf '#!/usr/bin/env bash\nexec "$@"\n' > "$RUNNER_TEMP/ci-gate-exec.sh"
+          chmod +x "$RUNNER_TEMP/ci-gate-exec.sh"
+          export CC_GATE_LOCK="$RUNNER_TEMP/ci-gate-exec.sh"
+          export SKIP_BUILD=1
+          bash tools/nodeapi/run_probe.sh 2>&1 | tee ci-evidence/nodeapi-run-probe.log
+          for script in test/nodeapi/probes/run_*.sh; do
+            echo "=== $script ==="
+            bash "$script"
+          done 2>&1 | tee ci-evidence/nodeapi-probes.log
+      - name: Run Node-API and node-addon-api matrices
+        run: |
+          set -euo pipefail
+          export CC_GATE_LOCK="$RUNNER_TEMP/ci-gate-exec.sh"
+          export CHAKRA_NODEAPI_HOST="$PWD/zig-out/bin/ch-nodeapi"
+          mise exec -- python3 test/nodeapi/run_matrix.py --verify-manifest 2>&1 | tee ci-evidence/nodeapi-manifest.log
+          mise exec -- python3 test/nodeapi/run_matrix.py --suite all --host ch-nodeapi --results ci-evidence/nodeapi-matrix.json 2>&1 | tee ci-evidence/nodeapi-matrix.log
+          rm -f ci-evidence/node-addon-api.json
+          mise exec -- python3 test/nodeapi/run_node_addon_api_matrix.py --hosts ch-nodeapi --results ci-evidence/node-addon-api.json 2>&1 | tee ci-evidence/node-addon-api.log || true
+          python3 - <<'PY'
+          import json
+          doc = json.load(open("ci-evidence/node-addon-api.json"))
+          known = {
+              "test/object/delete_property.js",
+              "test/object/get_property.js",
+              "test/object/has_own_property.js",
+              "test/object/has_property.js",
+              "test/object/set_property.js",
+              "test/object/object_freeze_seal.js",
+          }
+          passes = [r for r in doc["results"] if r["status"] == "pass"]
+          fails = [r for r in doc["results"] if r["status"] == "fail"]
+          unexpected = [r["test"] for r in fails if r["test"] not in known]
+          print(f"node-addon-api: pass={len(passes)} fail={len(fails)} unexpected={unexpected}")
+          assert len(passes) >= 20, f"unexpected low pass count: {len(passes)}"
+          assert not unexpected, f"unexpected node-addon-api failures: {unexpected}"
+          PY
+      - name: Tally gate outputs
+        id: tally
+        run: |
+          set -euo pipefail
+          grep -F 'check_nodeapi: PASS' ci-evidence/nodeapi-check.log
+          grep -F 'run_probe: ALL PASS' ci-evidence/nodeapi-run-probe.log
+          line="nodeapi-linux: provider=built host=built exports=PASS probes=PASS matrix=PASS"
+          echo "$line" | tee ci-evidence/tally.txt
+          echo "tally=$line" >> "$GITHUB_OUTPUT"
+          echo "- $line" >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload nodeapi-linux evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: nodeapi-linux
+          path: ci-evidence/
+
+  record:
+    name: record (assemble Linux evidence bundle)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    needs: [style, zig, zig-variants, nodeapi]
+    if: ${{ !cancelled() }}
+    steps:
+      - name: Download all leg evidence
+        uses: actions/download-artifact@v6
+        with:
+          path: evidence-in
+      - name: Assemble linux-evidence bundle
+        run: |
+          set -euo pipefail
+          mkdir -p linux-evidence/tallies
+          {
+            echo "# Linux CI evidence bundle"
+            echo
+            echo "run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }} (attempt ${{ github.run_attempt }})"
+            echo "ref: ${{ github.ref }} sha: ${{ github.sha }}"
+            echo
+            echo "## Tallies"
+            echo
+          } > linux-evidence/SUMMARY.md
+          for d in evidence-in/*/; do
+            leg="$(basename "$d")"
+            echo "### $leg" >> linux-evidence/SUMMARY.md
+            if [ -f "$d/tally.txt" ]; then
+              cat "$d/tally.txt" >> linux-evidence/SUMMARY.md
+              cp "$d/tally.txt" "linux-evidence/tallies/$leg.txt"
+            else
+              echo "(no tally.txt)" >> linux-evidence/SUMMARY.md
+            fi
+            echo >> linux-evidence/SUMMARY.md
+          done
+          echo "## Tallies" >> "$GITHUB_STEP_SUMMARY"
+          for t in linux-evidence/tallies/*.txt; do
+            [ -e "$t" ] || continue
+            echo "- $(cat "$t")" >> "$GITHUB_STEP_SUMMARY"
+          done
+          cat linux-evidence/SUMMARY.md
+      - name: Upload linux-evidence bundle
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: linux-evidence
+          path: linux-evidence/

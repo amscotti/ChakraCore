@@ -16,7 +16,37 @@
 //! files from a test block makes the test runner collect their
 //! test declarations.
 
+const std = @import("std");
+const linux = @import("build/linux.zig");
+
 test {
     _ = @import("pal-config-linux/check.zig");
-    _ = @import("build/linux.zig");
+    _ = linux;
+}
+
+test "linux defaults preserve x86_64-linux-gnu, glibc 2.39, ICU 74" {
+    try std.testing.expectEqualStrings("x86_64-linux-gnu", linux.profile_target);
+    try std.testing.expectEqualStrings("2.39", linux.default_glibc);
+    try std.testing.expectEqualStrings("74", linux.default_icu_major);
+    try std.testing.expectEqualStrings("test", linux.Profile.@"test".name());
+    try std.testing.expectEqualStrings("debug-static", linux.Profile.debug_static.name());
+    try std.testing.expectEqualStrings("release-shared", linux.Profile.release_shared.name());
+}
+
+test "linux parameterized profile, glibc, ICU, and no-jit contracts" {
+    try std.testing.expect(linux.isStaticProfile(.debug_static));
+    try std.testing.expect(!linux.isStaticProfile(.@"test"));
+    try std.testing.expect(!linux.isStaticProfile(.release_shared));
+    try std.testing.expect(linux.isReleaseProfile(.release_shared));
+    try std.testing.expect(!linux.isReleaseProfile(.@"test"));
+
+    try std.testing.expect(linux.glibcFirstLineMatches("ldd (GNU libc) 2.40", "2.40"));
+    try std.testing.expect(!linux.glibcFirstLineMatches("ldd (GNU libc) 2.40", "2.39"));
+    try std.testing.expect(linux.uvernumMatchesMajor("#define U_ICU_VERSION_SHORT \"72\"\n", "72"));
+    try std.testing.expect(!linux.uvernumMatchesMajor("#define U_ICU_VERSION_SHORT \"72\"\n", "74"));
+
+    try std.testing.expectEqual(@as(u32, 684), linux.expectedCompileCount(.@"test", true));
+    try std.testing.expectEqual(@as(u32, 593), linux.expectedCompileCount(.@"test", false));
+    try std.testing.expectEqual(@as(u32, 682), linux.expectedCompileCount(.debug_static, true));
+    try std.testing.expectEqual(@as(u32, 647), linux.expectedCompileCount(.release_shared, true));
 }

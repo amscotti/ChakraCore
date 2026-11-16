@@ -61,6 +61,9 @@ _DROP/
 __pycache__/
 *.tlog/
 /test/_ttdlog/*
+_ttdlog/
+check_*.sh.err
+a.o
 ComputedEnvironment.cmd
 packages/
 profile.dpl.*

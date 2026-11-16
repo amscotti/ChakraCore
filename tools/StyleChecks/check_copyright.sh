@@ -19,7 +19,12 @@ rm -f $ERRFILE
 rm -f $ERRFILETEMP
 
 echo "Check Copyright > Begin Checking..."
-git diff --name-only `git merge-base origin/master HEAD` HEAD |
+BASE_REF="${STYLECHECK_BASE:-origin/master}"
+if ! MERGE_BASE=$(git merge-base "$BASE_REF" HEAD); then
+    >&2 echo "ERROR: git merge-base $BASE_REF HEAD failed"
+    exit 2
+fi
+git diff --name-only "$MERGE_BASE" HEAD |
     grep -v -E '\.git.*' |
     grep -v -E '\.xml$' |
     grep -v -E '\.xsd$' |
@@ -47,6 +52,8 @@ git diff --name-only `git merge-base origin/master HEAD` HEAD |
     grep -v -E '\.proj$' |
     grep -v -E '\.png$' |
     grep -v -E 'packages.config$' |
+    grep -v -E '^include/nodeapi/' |
+    grep -v -E '^test/nodeapi/vendor/' |
     grep -v -E 'lib/wabt/.*' |
     grep -v -E 'test/WasmSpec.*$' |
     grep -v -E 'test/UnitTestFramework/yargs.js$' |
@@ -61,7 +68,7 @@ git diff --name-only `git merge-base origin/master HEAD` HEAD |
         # "command line cannot be assembled, too long" on branch-sized
         # file lists, silently truncating the check mid-list.)
         echo "Check Copyright > Checking $file"
-        python tools/StyleChecks/check_copyright.py "$file" > $ERRFILETEMP || cat $ERRFILETEMP >> $ERRFILE
+        python3 tools/StyleChecks/check_copyright.py "$file" > $ERRFILETEMP || cat $ERRFILETEMP >> $ERRFILE
     done
 
 rm -f $ERRFILETEMP

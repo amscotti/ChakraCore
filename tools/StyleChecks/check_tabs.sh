@@ -14,31 +14,30 @@ if [ $? -ne 0 ]; then
 fi
 
 ERRFILE=check_tabs.sh.err
-rm -f $ERRFILE
+rm -f "$ERRFILE"
 
-# git diff --name-only `git merge-base origin/master HEAD` HEAD | xargs grep -P -l "\t" > /dev/nul
+BASE_REF="${STYLECHECK_BASE:-origin/master}"
+if ! MERGE_BASE=$(git merge-base "$BASE_REF" HEAD); then
+    >&2 echo "ERROR: git merge-base $BASE_REF HEAD failed"
+    exit 2
+fi
 
-git diff --name-only `git merge-base origin/master HEAD` HEAD |
-    xargs grep -P -l "\t" |
-    grep -v -E '^pal/' |
-    grep -v -E '\Makefile$' |
-    grep -v -E '\Makefile.sample$' |
-    grep -v -E '\.sln$' |
-    grep -v -E '\.js$' |
-    grep -v -E '\.baseline$' |
-    grep -v -E '\.wasm$' |
-    grep -v -E '\.wast$' |
-    grep -v -E '\.png$' |
-    grep -v -E '^lib/wabt' |
-    grep -v -E 'bin/External/.*$' |
-    xargs -I % sh -c 'echo --- IN FILE % ---; git blame HEAD -- % | grep -P "(\t|--- IN FILE)"' > check_tabs.sh.err
+set +e
+git diff --name-only "$MERGE_BASE" HEAD |
+    python3 tools/StyleChecks/check_style_portable.py --mode tabs --stdin --errfile "$ERRFILE"
+rc=$?
+set -e
 
-if [ -s $ERRFILE ]; then # if file exists and is non-empty then there were errors
+if [ $rc -gt 1 ]; then
+    exit $rc
+fi
+
+if [ -s "$ERRFILE" ]; then # if file exists and is non-empty then there were errors
     >&2 echo "--------------" # leading >&2 means echo to stderr
     >&2 echo "--- ERRORS ---"
     >&2 echo ""
 
-    cat $ERRFILE 1>&2 # tell the caller there was an error (so the CI task will fail)
+    cat "$ERRFILE" 1>&2 # tell the caller there was an error (so the CI task will fail)
 
     exit 1
 else

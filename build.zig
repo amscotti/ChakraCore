@@ -50,11 +50,10 @@
 //! objects, then the static archive members. The PAL deviation is
 //! dispositioned in doc/b2-verification.md: the reordered C/asm/mach
 //! inputs carry no dynamic initializers, so their relative order is
-//! unobservable at startup. The jit profile appends its 89 backend TUs
-//! after the contract objects, while the reference links
-//! ${chakra_backend_objects} between Jsrt.Core and Common.Common. The
-//! backend does have dynamic initializers, so this remains a known,
-//! disclosed deviation rather than a proven equivalence.
+//! unobservable at startup. On the jit profile, the 89 backend TUs
+//! compile and link immediately after Jsrt.Core (before Common.Common),
+//! matching the reference ${chakra_backend_objects} position in
+//! lib/CMakeLists.txt:21-28.
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -739,6 +738,8 @@ pub fn build(b: *std.Build) void {
         static_objs.append(arena, compileTu(&ctx, &tables.static_src_group, src, .cxx, n)) catch @panic("OOM");
         n += 1;
     }
+    var backend_n: u32 = 0;
+    var backend_expected: u32 = 0;
     for (tables.object_groups) |g| {
         const start = static_objs.items.len;
         for (g.cxx) |src| {
@@ -761,37 +762,32 @@ pub fn build(b: *std.Build) void {
                 singular_libs.append(arena, b.addLibrary(.{ .name = name, .root_module = mod })) catch @panic("OOM");
             }
         }
-    }
-    // JIT-only: ARM64 backend objects join the static archive and the
-    // dylib. Numbered after the contract TUs so the test/debug/release
-    // object counts and link order stay put. CMake links Backend after
-    // Jsrt.Core; appending here is the first-link order (a known
-    // deviation; see the file header).
-    var backend_n: u32 = 0;
-    var backend_expected: u32 = 0;
-    if (profile == .jit) {
-        const g = &tables.backend_group;
-        backend_expected = @intCast(g.cxx.len + g.c.len + g.asm_files.len);
-        // A source added to backend_group must be reflected here. This
-        // catches a table/loop mismatch that the old
-        // `expect_base + backend_n` assertion could not see.
-        std.debug.assert(backend_expected == 89);
-        for (g.cxx) |src| {
-            static_objs.append(arena, compileTu(&ctx, g, src, .cxx, n)) catch @panic("OOM");
-            n += 1;
-            backend_n += 1;
+        // JIT-only: ARM64 backend objects join static_objs right after
+        // Jsrt.Core (before Common.Common), matching lib/CMakeLists.txt:21-28.
+        // Non-jit profiles skip this block so their numbering and archive
+        // layout remain unchanged.
+        if (profile == .jit and g == &tables.jsrt_core_group) {
+            const bg = &tables.backend_group;
+            backend_expected = @intCast(bg.cxx.len + bg.c.len + bg.asm_files.len);
+            // A source added to backend_group must be reflected here.
+            std.debug.assert(backend_expected == 89);
+            for (bg.cxx) |src| {
+                static_objs.append(arena, compileTu(&ctx, bg, src, .cxx, n)) catch @panic("OOM");
+                n += 1;
+                backend_n += 1;
+            }
+            for (bg.c) |src| {
+                static_objs.append(arena, compileTu(&ctx, bg, src, .c, n)) catch @panic("OOM");
+                n += 1;
+                backend_n += 1;
+            }
+            for (bg.asm_files) |src| {
+                static_objs.append(arena, compileTu(&ctx, bg, src, .asm_, n)) catch @panic("OOM");
+                n += 1;
+                backend_n += 1;
+            }
+            std.debug.assert(backend_n == backend_expected);
         }
-        for (g.c) |src| {
-            static_objs.append(arena, compileTu(&ctx, g, src, .c, n)) catch @panic("OOM");
-            n += 1;
-            backend_n += 1;
-        }
-        for (g.asm_files) |src| {
-            static_objs.append(arena, compileTu(&ctx, g, src, .asm_, n)) catch @panic("OOM");
-            n += 1;
-            backend_n += 1;
-        }
-        std.debug.assert(backend_n == backend_expected);
     }
     // W0 wasm extras (jit+wasm only): WasmReader (11) + WasmLibrary (8,
     // incl. WabtInterface.cpp) + WABT (37) join the static graph after the
@@ -1162,7 +1158,7 @@ pub fn build(b: *std.Build) void {
     // and that the allowlist
     // matches its generator (tools/build/gen_nodeapi_exports.py
     // --check, which builds it from doc/node-api-inventory.md +
-    // the §3.2 host list). Missing or extra symbol = failure.
+    // the section 3.2 host list). Missing or extra symbol = failure.
     // Shared profiles only (prov_lib exists); debug-static has no
     // provider and therefore no step (its build stays working).
     // Kept separate from `check` (N5.5, PR-10): the provider is
@@ -1189,6 +1185,140 @@ pub fn build(b: *std.Build) void {
         check_nodeapi_top.dependOn(&exports_check.step);
     }
 
+    // N0.3 Node-API test host (doc/node-api-plan.md N0.3, shared profiles):
+    // standalone ch-nodeapi executable + test-only stub provider + addons.
+    if (dylib) |engine_compile| {
+        const nodeapi_step = b.step("ch-nodeapi", "Build the Node-API test host (N0.3): ch-nodeapi + test-only stub provider + hello/negative addons (shared profiles only; not part of the default build)");
+        const engine_lib = engine_compile.getEmittedBin();
+        const nodeapi_target = profile_target;
+        const nodeapi_opt = [_][]const u8{ "-O3", "-g" };
+
+        const addSideCopy = struct {
+            fn call(builder: *std.Build, py: []const u8, dest_rel: []const u8, src: std.Build.LazyPath, prereq: *std.Build.Step) *std.Build.Step.Run {
+                const scp = builder.addSystemCommand(&.{
+                    py,
+                    "-c",
+                    "import os, shutil, sys, tempfile; src, dst = sys.argv[1], sys.argv[2]; d = os.path.dirname(os.path.abspath(dst)); os.makedirs(d, exist_ok=True); fd, tmp = tempfile.mkstemp(dir=d, prefix='.tmp.'); os.close(fd); shutil.copy2(src, tmp); os.replace(tmp, dst)",
+                });
+                scp.addFileArg(src);
+                scp.addArg(dest_rel);
+                scp.has_side_effects = true;
+                scp.step.dependOn(prereq);
+                return scp;
+            }
+        }.call;
+
+        const nodeapi_host = b.addSystemCommand(&.{ ctx.zig_exe, "c++" });
+        nodeapi_host.addArg("-target");
+        nodeapi_host.addArg(nodeapi_target);
+        nodeapi_host.addArg("--sysroot");
+        nodeapi_host.addArg(ctx.sdk_path);
+        nodeapi_host.addArg("-std=gnu++17");
+        for (nodeapi_opt) |f| nodeapi_host.addArg(f);
+        nodeapi_host.addArg("-DNAPI_VERSION=8");
+        nodeapi_host.addArg("-Ilib/Jsrt");
+        nodeapi_host.addArg("-Iinclude/nodeapi");
+        nodeapi_host.addArg("-Ilib/NodeApi");
+        nodeapi_host.addArg("-isystem");
+        nodeapi_host.addArg(ctx.sdk_isystem);
+        nodeapi_host.addArg("-F");
+        nodeapi_host.addArg("/System/Library/Frameworks");
+        nodeapi_host.addArg("-mcpu=apple_m1");
+        nodeapi_host.addArg("-Wno-date-time");
+        nodeapi_host.addArg("-o");
+        const nodeapi_host_bin = nodeapi_host.addOutputFileArg("ch-nodeapi");
+        nodeapi_host.addFileArg(b.path("tools/nodeapi/ch-nodeapi.cpp"));
+        nodeapi_host.addFileArg(engine_lib);
+        nodeapi_host.addArg("-framework");
+        nodeapi_host.addArg("CoreFoundation");
+        nodeapi_host.addArg("-framework");
+        nodeapi_host.addArg("Security");
+        nodeapi_host.addArg("-Wl,-undefined,dynamic_lookup");
+        nodeapi_host.addArg("-Wl,-rpath,@executable_path");
+        nodeapi_host.addArg("-Wl,-rpath,@executable_path/../lib");
+        nodeapi_host.step.dependOn(&engine_compile.step);
+
+        const nodeapi_stub = b.addSystemCommand(&.{ ctx.zig_exe, "c++" });
+        nodeapi_stub.addArg("-target");
+        nodeapi_stub.addArg(nodeapi_target);
+        nodeapi_stub.addArg("--sysroot");
+        nodeapi_stub.addArg(ctx.sdk_path);
+        nodeapi_stub.addArg("-std=gnu++17");
+        for (nodeapi_opt) |f| nodeapi_stub.addArg(f);
+        nodeapi_stub.addArg("-fPIC");
+        nodeapi_stub.addArg("-shared");
+        nodeapi_stub.addArg("-Wl,-undefined,dynamic_lookup");
+        nodeapi_stub.addArg("-DNAPI_VERSION=8");
+        nodeapi_stub.addArg("-Ilib/Jsrt");
+        nodeapi_stub.addArg("-Iinclude/nodeapi");
+        nodeapi_stub.addArg("-Ilib/NodeApi");
+        nodeapi_stub.addArg("-isystem");
+        nodeapi_stub.addArg(ctx.sdk_isystem);
+        nodeapi_stub.addArg("-F");
+        nodeapi_stub.addArg("/System/Library/Frameworks");
+        nodeapi_stub.addArg("-mcpu=apple_m1");
+        nodeapi_stub.addArg("-Wno-date-time");
+        nodeapi_stub.addArg("-o");
+        const nodeapi_stub_bin = nodeapi_stub.addOutputFileArg("libChakraNodeApiStub.dylib");
+        nodeapi_stub.addFileArg(b.path("tools/nodeapi/stub/stub_provider.cpp"));
+
+        if (profile == .@"test") {
+            nodeapi_step.dependOn(&b.addInstallFile(nodeapi_host_bin, "bin/ch-nodeapi").step);
+            nodeapi_step.dependOn(&b.addInstallFile(engine_lib, "bin/libChakraCore.dylib").step);
+            nodeapi_step.dependOn(&b.addInstallFile(nodeapi_stub_bin, "lib/libChakraNodeApiStub.dylib").step);
+        } else {
+            const side_root = b.fmt("out/{s}", .{profile.name()});
+            const cp_step = &copy_out.?.step;
+            nodeapi_step.dependOn(&addSideCopy(b, python, b.fmt("{s}/bin/ch-nodeapi", .{side_root}), nodeapi_host_bin, cp_step).step);
+            nodeapi_step.dependOn(&addSideCopy(b, python, b.fmt("{s}/lib/libChakraNodeApiStub.dylib", .{side_root}), nodeapi_stub_bin, cp_step).step);
+        }
+        for ([_][]const u8{ "hello_world", "version_reject", "missing_register", "promise_probe", "return_replaces" }) |name| {
+            const addon = b.addSystemCommand(&.{ ctx.zig_exe, "c++" });
+            addon.addArg("-target");
+            addon.addArg(nodeapi_target);
+            addon.addArg("--sysroot");
+            addon.addArg(ctx.sdk_path);
+            addon.addArg("-std=gnu++17");
+            for (nodeapi_opt) |f| addon.addArg(f);
+            addon.addArg("-fPIC");
+            addon.addArg("-shared");
+            addon.addArg("-Wl,-undefined,dynamic_lookup");
+            addon.addArg("-DNAPI_VERSION=8");
+            addon.addArg("-Iinclude/nodeapi");
+            addon.addArg("-isystem");
+            addon.addArg(ctx.sdk_isystem);
+            addon.addArg("-F");
+            addon.addArg("/System/Library/Frameworks");
+            addon.addArg("-mcpu=apple_m1");
+            addon.addArg("-Wno-date-time");
+            addon.addArg("-o");
+            const addon_bin = addon.addOutputFileArg(b.fmt("{s}.node", .{name}));
+            addon.addFileArg(b.path(b.fmt("tools/nodeapi/addons/{s}.cpp", .{name})));
+            if (profile == .@"test") {
+                nodeapi_step.dependOn(&b.addInstallFile(addon_bin, b.fmt("lib/nodeapi-addons/{s}.node", .{name})).step);
+            } else {
+                const side_root = b.fmt("out/{s}", .{profile.name()});
+                nodeapi_step.dependOn(&addSideCopy(b, python, b.fmt("{s}/lib/nodeapi-addons/{s}.node", .{ side_root, name }), addon_bin, &copy_out.?.step).step);
+            }
+        }
+        for ([_][]const u8{ "hello_world", "promise_probe", "return_replaces" }) |name| {
+            const src_js = b.path(b.fmt("tools/nodeapi/addons/{s}.js", .{name}));
+            if (profile == .@"test") {
+                nodeapi_step.dependOn(&b.addInstallFile(src_js, b.fmt("lib/nodeapi-addons/{s}.js", .{name})).step);
+            } else {
+                const side_root = b.fmt("out/{s}", .{profile.name()});
+                nodeapi_step.dependOn(&addSideCopy(b, python, b.fmt("{s}/lib/nodeapi-addons/{s}.js", .{ side_root, name }), src_js, &copy_out.?.step).step);
+            }
+        }
+    } else {
+        const no_nodeapi = b.addSystemCommand(&.{python});
+        no_nodeapi.addArg("-c");
+        no_nodeapi.addArg("import sys; sys.exit('-Dprofile=debug-static has no shared dylib; ch-nodeapi requires a shared profile (test, jit, or release-shared)')");
+        no_nodeapi.stdio = .inherit;
+        const no_nodeapi_top = b.step("ch-nodeapi", "Not applicable on debug-static (requires a shared profile)");
+        no_nodeapi_top.dependOn(&no_nodeapi.step);
+    }
+
     // Negative controls: each check script's --self-test proves its
     // gates CAN fail (doctored logs rejected, tampered victims fail).
     // Hermetic (no install dependency, no profile dependence), so every
@@ -1198,7 +1328,7 @@ pub fn build(b: *std.Build) void {
     // (linux.zig registers the same list for Linux targets). Wired into
     // every profile's `check` below so the merge gates exercise them.
     const selftest_top = b.step("check-selftest", "Negative controls for every check gate (not part of the default build)");
-    for ([_][]const u8{ "check_regression.py", "check_native.py", "check_smoke.py", "check_metadata.py", "check_regression_linux.py", "check_smoke_linux.py", "check_metadata_linux.py", "check_nodeapi.py", "gen_nodeapi_exports.py" }) |script| {
+    for ([_][]const u8{ "check_regression.py", "check_native.py", "check_smoke.py", "check_metadata.py", "check_regression_linux.py", "check_smoke_linux.py", "check_metadata_linux.py", "check_nodeapi.py", "gen_nodeapi_exports.py", "check_wasm_p1.py" }) |script| {
         const st = b.addSystemCommand(&.{python});
         st.addFileArg(b.path(b.fmt("tools/build/{s}", .{script})));
         st.addArg("--self-test");
@@ -1223,6 +1353,28 @@ pub fn build(b: *std.Build) void {
     selftest_top.dependOn(&b.addRunArtifact(owned_bytes_tests).step);
     const tools_test_top = b.step("check-build-tools", "Failure-path tests for the B1-B3 verification tools (no engine build required)");
     tools_test_top.dependOn(&tools_test.step);
+
+    // Wasm P1 gate: requires -Dprofile=jit -Dwasm=true; fails loudly otherwise.
+    var jit_wasm_step: ?*std.Build.Step = null;
+    if (profile == .jit and ctx.wasm) {
+        const jit_wasm = b.addSystemCommand(&.{python});
+        jit_wasm.addFileArg(b.path("tools/build/check_wasm_p1.py"));
+        jit_wasm.addFileArg(b.path("test/runtests.py"));
+        jit_wasm.addArg("out/jit/bin/ch");
+        jit_wasm.addFileInput(ch.getEmittedBin());
+        jit_wasm.step.dependOn(&copy_out.?.step);
+        jit_wasm.stdio = .inherit;
+        const wasm_top = b.step("check-wasm", "Verify Wasm P1 suite against test/wasm-arm64-manifest.json (-Dprofile=jit -Dwasm=true; not part of the default build)");
+        wasm_top.dependOn(&jit_wasm.step);
+        jit_wasm_step = &jit_wasm.step;
+    } else {
+        const no_wasm = b.addSystemCommand(&.{python});
+        no_wasm.addArg("-c");
+        no_wasm.addArg("import sys; sys.exit('check-wasm requires -Dprofile=jit -Dwasm=true')");
+        no_wasm.stdio = .inherit;
+        const wasm_top = b.step("check-wasm", "Not applicable without -Dprofile=jit -Dwasm=true");
+        wasm_top.dependOn(&no_wasm.step);
+    }
 
     // B3.3: release-shared checks (legacy baselines in
     // doc/b3-profiles.md section 5). The legacy Release `ninja check` is a
@@ -1451,6 +1603,7 @@ pub fn build(b: *std.Build) void {
         jit_check_top.dependOn(&jit_smoke.step);
         jit_check_top.dependOn(&jit_runtime.step);
         jit_check_top.dependOn(&jit_verify_bc.step);
+        if (jit_wasm_step) |ws| jit_check_top.dependOn(ws);
         return;
     }
 
@@ -1549,121 +1702,4 @@ pub fn build(b: *std.Build) void {
     check_top.dependOn(&smoke.step);
     check_top.dependOn(&metadata.step);
     check_top.dependOn(selftest_top);
-
-    // N0.3 Node-API test host (doc/node-api-plan.md N0.3, test profile
-    // only): standalone ch-nodeapi executable + test-only stub provider
-    // + hello/negative addons. Built via `zig c++` SystemCommands
-    // (linux-graph pattern: Module linking cannot express the
-    // dlopen/undefined-symbol shape). Isolated new step (`zig build
-    // ch-nodeapi`); never part of the default build and never alters
-    // existing artifacts. The stub (tools/nodeapi/stub/) is TEST-ONLY,
-    // not libChakraNodeApi (Wave 1+). Host+stub leave Js* undefined in
-    // the stub (resolved from the engine dylib at load); addons leave
-    // napi_* undefined (resolved from the provider RTLD_GLOBAL).
-    const nodeapi_step = b.step("ch-nodeapi", "Build the Node-API test host (N0.3): ch-nodeapi + test-only stub provider + hello/negative addons (test profile only; not part of the default build)");
-    const engine_lib = dylib.?.getEmittedBin();
-    const nodeapi_target = profile_target;
-    const nodeapi_opt = [_][]const u8{ "-O3", "-g" };
-    // Host executable, linked against the engine dylib.
-    const nodeapi_host = b.addSystemCommand(&.{ ctx.zig_exe, "c++" });
-    nodeapi_host.addArg("-target");
-    nodeapi_host.addArg(nodeapi_target);
-    nodeapi_host.addArg("--sysroot");
-    nodeapi_host.addArg(ctx.sdk_path);
-    nodeapi_host.addArg("-std=gnu++17");
-    for (nodeapi_opt) |f| nodeapi_host.addArg(f);
-    nodeapi_host.addArg("-DNAPI_VERSION=8");
-    nodeapi_host.addArg("-Ilib/Jsrt");
-    nodeapi_host.addArg("-Iinclude/nodeapi");
-    nodeapi_host.addArg("-Ilib/NodeApi");
-    nodeapi_host.addArg("-isystem");
-    nodeapi_host.addArg(ctx.sdk_isystem);
-    nodeapi_host.addArg("-F");
-    nodeapi_host.addArg("/System/Library/Frameworks");
-    nodeapi_host.addArg("-mcpu=apple_m1");
-    nodeapi_host.addArg("-Wno-date-time");
-    nodeapi_host.addArg("-o");
-    const nodeapi_host_bin = nodeapi_host.addOutputFileArg("ch-nodeapi");
-    nodeapi_host.addFileArg(b.path("tools/nodeapi/ch-nodeapi.cpp"));
-    nodeapi_host.addFileArg(engine_lib);
-    // No ICU link flags: the host references no ICU symbols directly (the
-    // engine dylib carries its own ICU dependency), and a `-L/opt/homebrew`
-    // flag cannot work under `--sysroot` anyway -- Zig's driver resolves
-    // `-L` against the sysroot (probed: a raw `-L` and an icu_lib-derived
-    // `-L` both expand to `<sdk>/opt/homebrew/...` and fail). The Module-
-    // based links (dylib/ch) keep using addLibraryPath + linkSystemLibrary
-    // for their own ICU edges; this SystemCommand link needs neither.
-    nodeapi_host.addArg("-framework");
-    nodeapi_host.addArg("CoreFoundation");
-    nodeapi_host.addArg("-framework");
-    nodeapi_host.addArg("Security");
-    // The host calls provider napi_* entries directly for registration glue
-    // (open/create-object scope around napi_register_module_v1) which are
-    // provided at load by the RTLD_GLOBAL provider (plan section 1.3), so
-    // they stay undefined here -- the same dynamic_lookup shape as the stub
-    // and addons below. Js* resolve from the engine dylib linked above.
-    nodeapi_host.addArg("-Wl,-undefined,dynamic_lookup");
-    // The engine dylib's install_name is @rpath/libChakraCore.dylib;
-    // the host needs @executable_path rpaths so dyld finds the
-    // co-located copy installed below (bin/). This mirrors the B2
-    // co-location edge ch relies on (ch.goes via dlopen instead).
-    nodeapi_host.addArg("-Wl,-rpath,@executable_path");
-    nodeapi_host.addArg("-Wl,-rpath,@executable_path/../lib");
-    nodeapi_host.step.dependOn(&dylib.?.step);
-    nodeapi_step.dependOn(&b.addInstallFile(nodeapi_host_bin, "bin/ch-nodeapi").step);
-    // Co-located engine dylib so the host resolves @rpath at launch.
-    nodeapi_step.dependOn(&b.addInstallFile(engine_lib, "bin/libChakraCore.dylib").step);
-    // Test-only stub provider shared library.
-    const nodeapi_stub = b.addSystemCommand(&.{ ctx.zig_exe, "c++" });
-    nodeapi_stub.addArg("-target");
-    nodeapi_stub.addArg(nodeapi_target);
-    nodeapi_stub.addArg("--sysroot");
-    nodeapi_stub.addArg(ctx.sdk_path);
-    nodeapi_stub.addArg("-std=gnu++17");
-    for (nodeapi_opt) |f| nodeapi_stub.addArg(f);
-    nodeapi_stub.addArg("-fPIC");
-    nodeapi_stub.addArg("-shared");
-    nodeapi_stub.addArg("-Wl,-undefined,dynamic_lookup");
-    nodeapi_stub.addArg("-DNAPI_VERSION=8");
-    nodeapi_stub.addArg("-Ilib/Jsrt");
-    nodeapi_stub.addArg("-Iinclude/nodeapi");
-    nodeapi_stub.addArg("-Ilib/NodeApi");
-    nodeapi_stub.addArg("-isystem");
-    nodeapi_stub.addArg(ctx.sdk_isystem);
-    nodeapi_stub.addArg("-F");
-    nodeapi_stub.addArg("/System/Library/Frameworks");
-    nodeapi_stub.addArg("-mcpu=apple_m1");
-    nodeapi_stub.addArg("-Wno-date-time");
-    nodeapi_stub.addArg("-o");
-    const nodeapi_stub_bin = nodeapi_stub.addOutputFileArg("libChakraNodeApiStub.dylib");
-    nodeapi_stub.addFileArg(b.path("tools/nodeapi/stub/stub_provider.cpp"));
-    nodeapi_step.dependOn(&b.addInstallFile(nodeapi_stub_bin, "lib/libChakraNodeApiStub.dylib").step);
-    // Test addons (.node = shared library + .js drivers, NAPI_VERSION=8).
-    for ([_][]const u8{ "hello_world", "version_reject", "missing_register", "promise_probe", "return_replaces" }) |name| {
-        const addon = b.addSystemCommand(&.{ ctx.zig_exe, "c++" });
-        addon.addArg("-target");
-        addon.addArg(nodeapi_target);
-        addon.addArg("--sysroot");
-        addon.addArg(ctx.sdk_path);
-        addon.addArg("-std=gnu++17");
-        for (nodeapi_opt) |f| addon.addArg(f);
-        addon.addArg("-fPIC");
-        addon.addArg("-shared");
-        addon.addArg("-Wl,-undefined,dynamic_lookup");
-        addon.addArg("-DNAPI_VERSION=8");
-        addon.addArg("-Iinclude/nodeapi");
-        addon.addArg("-isystem");
-        addon.addArg(ctx.sdk_isystem);
-        addon.addArg("-F");
-        addon.addArg("/System/Library/Frameworks");
-        addon.addArg("-mcpu=apple_m1");
-        addon.addArg("-Wno-date-time");
-        addon.addArg("-o");
-        const addon_bin = addon.addOutputFileArg(b.fmt("{s}.node", .{name}));
-        addon.addFileArg(b.path(b.fmt("tools/nodeapi/addons/{s}.cpp", .{name})));
-        nodeapi_step.dependOn(&b.addInstallFile(addon_bin, b.fmt("lib/nodeapi-addons/{s}.node", .{name})).step);
-    }
-    for ([_][]const u8{ "hello_world", "promise_probe", "return_replaces" }) |name| {
-        nodeapi_step.dependOn(&b.addInstallFile(b.path(b.fmt("tools/nodeapi/addons/{s}.js", .{name})), b.fmt("lib/nodeapi-addons/{s}.js", .{name})).step);
-    }
 }

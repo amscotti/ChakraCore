@@ -439,7 +439,7 @@ class NativeVerdictTests(unittest.TestCase):
 
 class EngineInitAbortTests(unittest.TestCase):
     # Strict semantics: BLOCKED means an observed qemu guest SIGABRT
-    # only — at least one qemu `uncaught target signal 6 (`
+    # only -- at least one qemu `uncaught target signal 6 (`
     # occurrence and zero occurrences of any other qemu-phrased
     # signal number (occurrence-based; 61 never reads as 6),
     # nonzero rc, and no ` : PASS` anywhere. A bare shell
@@ -1126,6 +1126,69 @@ class GcStressConcurrentContractTests(unittest.TestCase):
         # false-fired -RecyclerTest on legitimate 16-mod-32 objects.
         text = (ROOT / "lib/Common/Memory/StressTest.h").read_text()
         self.assertIn("const int OBJALIGN = 16;", text)
+
+
+class CheckMetadataLinuxParamTests(unittest.TestCase):
+    """Parameterization contracts for tools/build/check_metadata_linux.py."""
+
+    def test_self_test_exits_zero(self):
+        proc = subprocess.run(
+            [sys.executable, str(HERE / "check_metadata_linux.py"),
+             "--self-test"],
+            capture_output=True, text=True, timeout=30)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("ALL NEGATIVE CONTROLS BEHAVE", proc.stdout)
+
+    def test_profile_and_jit_archive_counts(self):
+        import check_metadata_linux as cml
+        self.assertEqual(cml.want_icu_needed("74"),
+                         ("libicuuc.so.74", "libicui18n.so.74"))
+        self.assertEqual(cml.want_icu_needed("76"),
+                         ("libicuuc.so.76", "libicui18n.so.76"))
+        self.assertEqual(cml.expected_archive_members("test", jit=True)[
+            "lib/libChakraCoreStatic.a"], 669)
+        self.assertEqual(cml.expected_archive_members("test", jit=False)[
+            "lib/libChakraCoreStatic.a"], 578)
+        self.assertEqual(
+            cml.expected_archive_members("release-shared", jit=True)[
+                "lib/libChakraCoreStatic.a"], 632)
+        self.assertEqual(
+            cml.expected_archive_members("release-shared", jit=False)[
+                "lib/libChakraCoreStatic.a"], 541)
+        self.assertEqual(
+            cml.expected_archive_members("debug-static", jit=True),
+            {"lib/libChakraCoreStatic.a": 669})
+        self.assertEqual(
+            cml.expected_archive_members("debug-static", jit=False),
+            {"lib/libChakraCoreStatic.a": 578})
+
+
+class StyleChecksPortableTests(unittest.TestCase):
+    """Contracts for portable Python StyleChecks and vendored exclusions."""
+
+    def test_self_test_exits_zero(self):
+        script = ROOT / "tools/StyleChecks/check_style_portable.py"
+        proc = subprocess.run(
+            [sys.executable, str(script), "--self-test"],
+            capture_output=True, text=True, timeout=30)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("ALL NEGATIVE CONTROLS BEHAVE", proc.stdout)
+
+    def test_copyright_excludes_vendored_nodeapi(self):
+        sh_text = (ROOT / "tools/StyleChecks/check_copyright.sh").read_text()
+        self.assertIn("include/nodeapi/", sh_text)
+        self.assertIn("test/nodeapi/vendor/", sh_text)
+
+
+class BuildZigBackendOrderTests(unittest.TestCase):
+    """Pin Backend TU placement after Jsrt.Core and ch-nodeapi/check-wasm."""
+
+    def test_backend_group_placed_after_jsrt_core(self):
+        bz = (ROOT / "build.zig").read_text()
+        self.assertIn("g == &tables.jsrt_core_group", bz)
+        self.assertIn("const bg = &tables.backend_group;", bz)
+        self.assertIn('b.step("check-wasm"', bz)
+        self.assertIn('b.step("ch-nodeapi"', bz)
 
 
 if __name__ == "__main__":

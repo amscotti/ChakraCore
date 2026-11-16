@@ -16,7 +16,13 @@ fi
 ERRFILE=check_eol.sh.err
 rm -f $ERRFILE
 
-git diff --name-only `git merge-base origin/master HEAD` HEAD | grep -v -E "(test/.*\\.js|\\.cmd|\\.baseline|\\.wasm|\\.wast|\\.vcxproj|\\.vcproj|\\.sln|\\.man|\\.png)" | while IFS= read -r file; do ./tools/StyleChecks/check_file_eol.sh "$file"; done
+BASE_REF="${STYLECHECK_BASE:-origin/master}"
+if ! MERGE_BASE=$(git merge-base "$BASE_REF" HEAD); then
+    >&2 echo "ERROR: git merge-base $BASE_REF HEAD failed"
+    exit 2
+fi
+
+git diff --name-only "$MERGE_BASE" HEAD | grep -v -E "(test/.*\\.js|\\.cmd|\\.baseline|\\.wasm|\\.wast|\\.vcxproj|\\.vcproj|\\.sln|\\.man|\\.png)" | while IFS= read -r file; do ./tools/StyleChecks/check_file_eol.sh "$file"; done
 
 if [ -e $ERRFILE ]; then # if error file exists then there were errors
     >&2 echo "--------------" # leading >&2 means echo to stderr

@@ -14,13 +14,28 @@ if [ $? -ne 0 ]; then
 fi
 
 ERRFILE=check_ascii.sh.err
-rm -f $ERRFILE
-git diff --name-only `git merge-base origin/master HEAD` HEAD | grep -v -E "test/.*|tools/.*|Build/.*|/*.md|/*.txt|/*.vcxproj" | xargs -I % ./tools/StyleChecks/check_file_ascii.sh %
+rm -f "$ERRFILE"
 
-if [ -e $ERRFILE ]; then # if error file exists then there were errors
+BASE_REF="${STYLECHECK_BASE:-origin/master}"
+if ! MERGE_BASE=$(git merge-base "$BASE_REF" HEAD); then
+    >&2 echo "ERROR: git merge-base $BASE_REF HEAD failed"
+    exit 2
+fi
+
+set +e
+git diff --name-only "$MERGE_BASE" HEAD |
+    python3 tools/StyleChecks/check_style_portable.py --mode ascii --stdin --errfile "$ERRFILE"
+rc=$?
+set -e
+
+if [ $rc -gt 1 ]; then
+    exit $rc
+fi
+
+if [ -e "$ERRFILE" ]; then # if error file exists then there were errors
     >&2 echo "--------------" # leading >&2 means echo to stderr
     >&2 echo "--- ERRORS ---"
-    cat $ERRFILE 1>&2 # send output to stderr so it can be redirected as error if desired
+    cat "$ERRFILE" 1>&2 # send output to stderr so it can be redirected as error if desired
     exit 1 # tell the caller there was an error (so the CI task will fail)
 else
     echo "--- NO PROBLEMS DETECTED ---"

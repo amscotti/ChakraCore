@@ -33,7 +33,7 @@ if [ $? -eq 0 ]; then # grep found matches ($?==0), so we found CR (0x0d) in the
     head -n 10 $ERRFILETEMP >> $ERRFILE
 
     # To help the user, display how many lines of hex output actually contained CR.
-    LINECOUNT=`python -c "file=open('$ERRFILETEMP', 'r'); print len(file.readlines())"`
+    LINECOUNT=$(python3 -c "import sys; print(len(open(sys.argv[1], 'r', encoding='utf-8', errors='replace').readlines()))" "$ERRFILETEMP")
     echo "Total hex dump lines containing CR (0x0d): $LINECOUNT" >> $ERRFILE
     echo "--------------" >> $ERRFILE # same length as '--- ERRORS ---'
 fi
