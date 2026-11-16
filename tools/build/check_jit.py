@@ -82,6 +82,12 @@ def check_symbols(ch):
     return None
 
 
+def flaglist_supported(ch):
+    """Release builds intentionally expose no debug/test flaglist."""
+    rc, out, err = common.run_capture([ch, "-?"])
+    return "not supported in Release builds" not in (out + err)
+
+
 def check_run(ch, flags, script_path):
     rc, out, err = common.run_capture([ch] + flags + [script_path])
     print("check_jit: %s -> rc=%d out=%r err=%r"
@@ -106,6 +112,11 @@ def main(argv):
     if failure:
         print("check_jit: FAIL: %s" % failure, file=sys.stderr)
         return 1
+
+    if not flaglist_supported(ch):
+        print("check_jit: SKIP: release build does not support the debug "
+              "flaglist; the JIT runtime leg is inapplicable")
+        return 0
 
     tmp = tempfile.mkdtemp(prefix="check-jit-")
     try:
