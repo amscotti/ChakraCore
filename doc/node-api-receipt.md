@@ -3,16 +3,19 @@
 > §9 is the N5.4 stress/teardown campaign (owner: N5.4). §§1–8 are
 > the N5.5 packaging slice (owner: N5.5).
 
-Owner: N5.5. Status: **G5 packaging slice green on macOS arm64;
-Linux x64 WIRED (2026-11-13, `tools/build/linux.zig`), NOT RUN** (see §12). This receipt satisfies the PR-1
-wording gate (PR-1 in `doc/node-api-plan.md` §2.2): the only public
-claim is the engine surface plus Table B under the §3.2 host
-contract. It never claims a Node runtime.
+Owner: N5.5 (updated 2026-11-16 at Stage 3 integration `c24266598`).
+Status: **G5 + Stage 2/3 hardening green on macOS arm64 (18/18 probe runners +
+`tools/nodeapi/run_probe.sh`, stress 5x, `run_matrix.py` 46/23/0,
+`run_node_addon_api_matrix.py` 52/61/6); Linux x64 WIRED (`.github/workflows/zig-linux.yml`
++ `tools/build/linux.zig`), NOT RUN locally** (see §12 and §13). This receipt
+satisfies the PR-1 wording gate (PR-1 in `doc/node-api-plan.md` §2.2): the only
+public claim is the engine surface plus Table B under the §3.2 host contract.
+It never claims a Node runtime.
 
-Build lock: every `zig` invocation below went through the serialized
-gate lock — `/tmp/opencode/cc-gate-lock.sh mise exec -- zig …`
-(probe runners wrap their own `zig c++` calls the same way). Do not
-run bare `zig build` / `zig cc` alongside a gate-locked build.
+Build lock: `zig` invocations in the runners default to direct `mise exec -- zig`
+/ `zig` on `PATH`, optionally serialized via `CC_GATE_LOCK=<executable>` (historical
+2026-11-12/13 landing runs below used a local `/tmp/opencode/cc-gate-lock.sh` wrapper).
+Do not run bare `zig build` / `zig cc` concurrently against the same build cache.
 
 Toolchain (recorded 2026-11-12, macOS arm64 host):
 
@@ -267,16 +270,21 @@ Buffer (PR-6 marker design, §4), async context/callback scopes
 (bookkeeping + `make_callback`), async work + uv (services-gated),
 thread-safe functions (services-gated), cleanup hooks (sync in the
 lifetime kernel; async completion via host pump), `napi_get_node_version`
-(provider version struct, NOT a Node runtime version). The `ch-nodeapi`
-test host injects **no** scheduling services / no uv loop
-(`services = {}`), so async-work/TSFN/uv fail correctly there; probes
-with injected fake services pass those paths (§5).
+(provider version struct, NOT a Node runtime version). At Stage 2/3,
+`tools/nodeapi/ch-nodeapi` now injects real async host scheduling
+services (`post_task`, `post_work`, `cancel_work`, `ref_loop`,
+`unref_loop`, and `host_manages_promise_queue = true`) and enforces
+`--pump-timeout-ms` (`uv_loop` remains `NULL`, so `napi_get_uv_event_loop`
+continues to return `napi_generic_failure`). Probes without injected
+services (`run_async_probe.sh`) still verify that async-work/TSFN/uv
+return `napi_generic_failure` when services are absent (§5).
 
 Test host: `tools/nodeapi/ch-nodeapi` (provider `RTLD_GLOBAL`,
 addon `RTLD_LOCAL`, version > 8 rejected, fresh exports object,
 return-replaces-exports, `__exports` global, host `print`,
-bounded promise pump — PR-8 provider installs the continuation
-callback only if the host has not; the host owns pumping).
+bounded promise + host-task pump — PR-8 `host_manages_promise_queue`
+handshake prevents provider clobbering, and the provider reclaims its
+own per-context `PromiseQueue*` on last env destroy).
 
 ---
 
@@ -289,27 +297,31 @@ unexplained skips")
   'undefined'` and `instanceof Buffer` throws `ReferenceError` on
   the provider. No pooling, no `Buffer.prototype` methods. Addons
   needing `require('buffer')` are runtime scope (§0 C). Probed:
-  `run_buffers_probe.sh` (102/102 per profile, incl. the two
-  `ReferenceError` checks).
-- **BigInt64/BigUint64 typed arrays → `napi_generic_failure`.**
-  `napi_create_typedarray` with those types has no `JsTypedArrayType`
-  counterpart and returns `napi_generic_failure` with the last error
-  `create_typedarray: BigInt typed arrays unsupported`
-  (`lib/NodeApi/NodeApiBinary.cpp:695-699`). A JS-created
-  `Float16Array` similarly has no `napi` counterpart
-  (`get_typedarray_info` → `generic_failure`). Probed:
-  `run_binary_probe.sh` (226/226 per profile).
-- **Async without host services → `napi_generic_failure`.**
+  `run_buffers_probe.sh` (per profile, incl. the two `ReferenceError`
+  checks).
+- **BigInt64/BigUint64 typed arrays: SUPPORTED in Stage 3 (`c24266598`); `Float16Array` stays `napi_generic_failure`.**
+  Phase-3 JsRT exposes `JsArrayTypeBigInt64`, `JsArrayTypeBigUint64`, and
+  `JsArrayTypeFloat16` (`lib/Jsrt/ChakraCommon.h:533-541`). At `c24266598`,
+  `lib/NodeApi/NodeApiBinary.cpp` (`NapiTypeToJs` / `JsTypeToNapi`) wires
+  `napi_bigint64_array` and `napi_biguint64_array` directly through
+  `JsCreateTypedArray`, `JsGetTypedArrayInfo`, and `JsGetTypedArrayStorage`
+  (removing the old v1 rejection). Only JS-created `Float16Array`
+  (`JsArrayTypeFloat16`) still returns `napi_generic_failure` from
+  `napi_get_typedarray_info` because `NAPI_VERSION=8` defines no float16
+  `napi_typedarray_type` enum member. Probed: `run_binary_probe.sh`
+  (`BINARY_PROBE: PASS (308/308)` per profile), `test_typedarray/test.js`,
+  and `node-addon-api` `test/typedarray*.js` (all PASS).
+- **Async without host services → `napi_generic_failure` (while `ch-nodeapi` now supplies services).**
   `napi_create_async_work`, `napi_queue/cancel/delete_async_work`,
   `napi_get_uv_event_loop`, `napi_create_threadsafe_function`,
   `napi_ref/unref_threadsafe_function` return
   `napi_generic_failure` ("… no host scheduling services") when the
   §3.2 `post_task`/`post_work` pair is absent; `napi_get_uv_event_loop`
-  additionally needs an injected loop. `napi_call/acquire/release/
-  get_context` on stale handles also return `generic_failure`
-  (Node post-finalize status). Probed: `run_async_probe.sh` 280/280
-  (incl. the no-services matrix) with services, correctly failing
-  without them.
+  additionally needs an injected loop (`uv_loop == NULL` in `ch-nodeapi`).
+  `napi_call/acquire/release/get_context` on stale handles also return
+  `generic_failure` (Node post-finalize status). Probed: `run_async_probe.sh`
+  (incl. the no-services matrix) AND `run_host_async_probe.sh` (4/4 via
+  `ch-nodeapi` live services + `--pump-timeout-ms` + `--pump-limit`).
 - **async_hooks propagation is a bookkeeping no-op.** `napi_async_init/
   destroy` record pairing/counts only; `napi_make_callback` runs the
   callback without AsyncLocalStorage propagation (documented
@@ -369,8 +381,13 @@ Tallies (checks per profile; `test` and `jit` identical where PASS):
 | values (N2.1/N2.2) | 407 | PASS | PASS |
 | wrap (N3.2/N3.3) | 211 | PASS | PASS |
 
-Total: 3117 checks per profile (6234 across both). Zero probe failures
-in the checks themselves.
+Total (historical 2026-11-12 14-probe table above): 3117 checks per profile
+(6234 across both). **Current HEAD (`c24266598`, 2026-11-16) runs 18 probe
+runners in `test/nodeapi/probes/run_*_probe.sh` plus `tools/nodeapi/run_probe.sh`
+— all 18 + `run_probe.sh` PASS across both `test` and `jit` profiles** (adding
+`scopes`, `teardown`, `env_addr_reuse`, and `host_async`, plus expanding
+`binary` to `308/308` with `BigInt64Array`/`BigUint64Array` + `Float16Array`
+and expanding `promise_script` for A8-3 `PromiseQueue*` reclamation; see §13).
 
 Runner note (fixed 2026-11-14, F2 lane; was pre-existing, NOT an N5.5
 regression): `run_errors_probe.sh` and `run_host_probe.sh` shared one
@@ -455,9 +472,9 @@ in `build.zig`):
    engine `.so` and needs `-ldl` and ELF `$ORIGIN` rpaths instead
    of `@executable_path`/frameworks).
 5. Then run, on Linux: provider build, `check-nodeapi`, consumer
-   proof, all 14 probe runners, and `zig build check` (Linux
-   `check` aggregation in `linux.zig:668-679`) — their tallies are
-   the Linux receipt.
+   proof, all 18 probe runners + `tools/nodeapi/run_probe.sh`, and `zig build check` (Linux
+   `check` aggregation in `linux.zig`) — their tallies are
+   the Linux receipt (automated in `.github/workflows/zig-linux.yml` `nodeapi` job).
 
 ---
 
@@ -732,11 +749,15 @@ Host wiring (this slice):
 
 ### 10.1 Counts (macOS arm64, darwin-arm64)
 
+Historical N5.1 landing snapshot (2026-11-12, prior to Stage 2/3 async host services and `BigInt64Array`/`BigUint64Array` JsRT wiring):
+
 | Profile | Pass | Skip | Fail | Results JSON |
 |---|---|---|---|---|
 | test (`zig-out`, `ch-nodeapi`) | 43 | 26 | 0 | `test/nodeapi/results/results.json` (also `full-ch.json`) |
 | jit (`out/jit`, manual host) | 43 | 26 | 0 | `test/nodeapi/results/full-ch-jit.json` |
 | node-direct differential (same binaries, same drivers, no `--expose-gc`) | 38 | 26 | 5* | `test/nodeapi/results/full-node.json` |
+
+* **Current `HEAD` (`c24266598`, 2026-11-16):** `python3 test/nodeapi/run_matrix.py --suite all --host ch-nodeapi` reports **`pass=46 skip=23 fail=0`** (total 69). Enabling `post_task`/`post_work` host services in `ch-nodeapi` promoted `examples/5-async-work/async_work_promise/napi/index.js` and `examples/5-async-work/async_work_thread_safe_function/napi/index.js` to **PASS**, and Stage 3 JsRT `BigInt64Array`/`BigUint64Array` wiring promoted `js-native-api/test_typedarray/test.js` to **PASS**. Remaining skips (23): `needs-runtime-global` 9, `needs-node-api-version>8` 12, `provider-gap` 2 (`<uv.h>` and `build_with_cmake`). See §13.
 
 * Differential `fail=5` are exactly the 5 GC-driving drivers that need
 `--expose-gc` (runner never passes it to Node). Re-run individually with
@@ -982,10 +1003,17 @@ Node string/RegExp matcher forms needed by these drivers.
 
 ### 11.2 Counts (darwin-arm64)
 
-- **Provider (ch-nodeapi): 21 pass / 8 fail** over 29 runnable drivers (updated 2026-11-13, see §11.7; was 16/13 at first landing).
-- **Differential (node-direct, same binaries): 29 pass / 0 fail.**
-- **Skips: 61** (taxonomy in §11.4; every suite driver at the pin has a
-  record; no silent skips).
+- **Current `HEAD` (`c24266598`, 2026-11-16, `--hosts both`): `pass=52 skip=61 fail=6`**
+  (`ch-nodeapi`: **23 pass / 6 fail**; `node-direct`: **29 pass / 0 fail**; total 119 records).
+  Stage 3 direct JsRT wiring resolved `test/typedarray.js` and `test/typedarray-bigint.js`
+  (both now **PASS**); only the 6 PR-12 V8 `TypeError` wording checks in `test/object/*` remain fail.
+  In the 61 skips, the 15 `async_worker_*`/`threadsafe_function/*`/`typed_threadsafe_function/*`
+  rows reflect `sources not vendored at this pin` (rather than absent host services, since
+  `ch-nodeapi` now supplies `post_work`/`post_task`).
+- Historical N5.3 landing snapshot (2026-11-13, pre-BigInt64 wiring, §11.7):
+  Provider (ch-nodeapi): 21 pass / 8 fail over 29 runnable drivers (was 16/13 at first landing);
+  Differential (node-direct): 29 pass / 0 fail; Skips: 61 (taxonomy in §11.4; every suite driver
+  at the pin has a record; no silent skips).
 
 Results table (provider vs differential; triage for the 8 remaining provider fails; the 5 fixed since §11.2 was first written are marked FIXED):
 
@@ -1018,8 +1046,8 @@ Results table (provider vs differential; triage for the 8 remaining provider fai
 | `test/object/set_property.js` | FAIL | PASS | PR-12: error text differs from V8; TypeError type correct |
 | `test/object/subscript_operator.js` | PASS | PASS |  |
 | `test/objectwrap_multiple_inheritance.js` | PASS | PASS |  |
-| `test/typedarray-bigint.js` | FAIL | PASS | plan §4.3 gap: BigInt64 typed arrays = napi_generic_failure |
-| `test/typedarray.js` | FAIL | PASS | plan §4.3 gap: BigInt64 typed arrays = napi_generic_failure |
+| `test/typedarray-bigint.js` | PASS (Stage 3, §13; was FAIL pre-JsRT BigInt64) | PASS | Wired directly via `JsArrayTypeBigInt64` / `JsArrayTypeBigUint64` |
+| `test/typedarray.js` | PASS (Stage 3, §13; was FAIL pre-JsRT BigInt64) | PASS | Wired directly via `JsArrayTypeBigInt64` / `JsArrayTypeBigUint64` |
 
 ### 11.3 Failure triage (the 8)
 
@@ -1252,10 +1280,80 @@ Linux runs the `test` leg only — there is no Linux `-Dprofile=jit`
 slot in the drivers; the jit wording in runner echoes is retained for
 macOS only.
 
-**Linux x64: NOT RUN.** No Linux artifact has been built or executed
+**Linux x64: WIRED, NOT RUN locally.** No Linux artifact has been built or executed
 here (this host is macOS ARM64; per plan §7 rule 6 a Mac run can never
 stand in for Linux). `zig fmt` parses the Linux graph and macOS
 builds/tests are unaffected (the Linux import is comptime-gated on
-`builtin.os.tag == .linux`). Native validation (provider/host builds,
-probes, matrices) is deferred to the Linux host. Until then every
-Linux claim in this receipt remains unproven.
+`builtin.os.tag == .linux`). `.github/workflows/zig-linux.yml` defines a
+`nodeapi` job that builds `libChakraNodeApi` and `ch-nodeapi`, runs
+`zig build check-nodeapi`, runs `tools/nodeapi/run_probe.sh` plus all 18
+`test/nodeapi/probes/run_*.sh` scripts, and executes `run_matrix.py` and
+`run_node_addon_api_matrix.py` (asserting zero unexpected failures beyond the
+6 `test/object/*` V8 message diffs). Native execution on Linux CI or a Linux x64
+host remains the closing gate.
+
+---
+
+## 13. Stage 2/3 hardening & conformance update (2026-11-16, HEAD `c24266598`)
+
+Stage 2 (`nodeapi-lane`, `host-jsrt`) and Stage 3 (`integrator`) closed all P0/P1
+Node-API and host boundary findings from the `arch-audit` review:
+
+1. **`extern "C"` OOM & partial-init rollback guards (`lib/NodeApi/`):**
+   - `NodeApiEnv.cpp`: `chakra_nodeapi_create_env` moves `g_live_envs` insertion
+     and `g_dead_envs` tombstone removal inside the `try/catch (...)` block with
+     full rollback of `script_state`, `promise_state`, `refs_state`, `scope_state`,
+     and `env` on OOM; `EntryGuard` paths avoid unguarded throws across `extern "C"`.
+   - `NodeApiPromise.cpp`, `NodeApiWrap.cpp`, `NodeApiScopes.cpp`, `NodeApiRefs.cpp`:
+     allocator/container sites use `new (std::nothrow)` and `try/catch (...)`
+     guards mapping OOM to `napi_generic_failure` (with `SetLastError`) and
+     rolling back partial state rather than crossing `extern "C"`.
+2. **A8-3 `PromiseQueue*` reclamation & `host_manages_promise_queue` (`NodeApiPromise.cpp`, `NodeApiHostApi.h`):**
+   - `chakra_nodeapi_host_services` adds `bool host_manages_promise_queue`. When
+     `true`, `NodeApiPromise_EnsureContinuationInstalled` never clobbers the
+     host's `JsSetPromiseContinuationCallback`.
+   - When `false`, `NodeApiPromise_EnsureContinuationInstalled` shares a
+     ref-counted per-context `PromiseQueue*` in `g_queues`; `NodeApiPromise_DestroyForEnv`
+     decrements `ref_count`, erases from `g_queues`, clears
+     `JsSetPromiseContinuationCallback(nullptr, nullptr)` while the env context
+     is current, releases leftover queued tasks, and `delete`s `PromiseQueue*`.
+3. **Detached external ArrayBuffer finalizer safety (`lib/Jsrt/JsrtExternalArrayBuffer.cpp`, `lib/NodeApi/NodeApiBinary.cpp`):**
+   - `JsrtExternalArrayBuffer` enforces single-owner transfer across
+     `Finalize()`, `CreateDetachedState()`, and `DiscardState()` (clearing the
+     slot before invoking `finalizeCallback`, firing once on GC or discard even
+     after `JsDetachArrayBuffer` or 0-byte external ABs).
+   - `napi_detach_arraybuffer` claims and drains the pending `ExternalRecord`
+     once on detach without leaking or double-finalizing when GC later collects
+     the detached JS object.
+4. **Direct JsRT wiring for `BigInt64Array` / `BigUint64Array` (`lib/NodeApi/NodeApiBinary.cpp`):**
+   - `NapiTypeToJs` and `JsTypeToNapi` map `napi_bigint64_array` <-> `JsArrayTypeBigInt64`
+     and `napi_biguint64_array` <-> `JsArrayTypeBigUint64` directly via
+     `JsCreateTypedArray`, `JsGetTypedArrayInfo`, and `JsGetTypedArrayStorage(..., &elemSizeInt)`,
+     removing the old `ConstructBigIntTypedArray` fallback and v1 rejection.
+   - `JsArrayTypeFloat16` remains mapped to `napi_generic_failure` (`NAPI_VERSION=8`
+     has no float16 `napi_typedarray_type`).
+5. **`ch-nodeapi` async host services & shutdown hygiene (`tools/nodeapi/ch-nodeapi.cpp`):**
+   - `ch-nodeapi` now installs its `promise_continuation` before env creation
+     with `services.host_manages_promise_queue = true` and wires `post_task`,
+     `post_work` (worker pool up to 4 threads), `cancel_work`, `ref_loop`, and
+     `unref_loop`.
+   - `pump_until_quiet` enforces `--pump-timeout-ms` and `--pump-limit`,
+     interleaves promise continuations with FIFO host tasks, and `shutdown_host_loop`
+     joins or detaches blocked workers cleanly on timeout/error exit without
+     triggering dangling `dlclose`.
+   - Hardcoded `/Users/ascotti/` and `/tmp/opencode/cc-gate-lock.sh` paths were
+     removed across `test/nodeapi/run_matrix.py`, `run_node_addon_api_matrix.py`,
+     `stress/run_stress.sh`, `tools/nodeapi/run_probe.sh`, and `test/nodeapi/probes/run_*.sh`
+     in favor of `_resolve_tool` (`NODEAPI_*` / `PATH` / `mise which`) and optional `CC_GATE_LOCK`.
+
+### 13.1 Verified tallies on `HEAD` (`c24266598`, macOS arm64, `SKIP_BUILD=1`)
+
+| Suite / Command | Result | Notes |
+|---|---|---|
+| `zig build libChakraNodeApi ch-nodeapi check-nodeapi` (`test` & `jit`) | **PASS** | `150` allowlist symbols (`145 napi_* + 5 host`) |
+| `tools/nodeapi/run_probe.sh` | **ALL PASS** (`test` + `jit`) | Scopes driver |
+| `18/18` `test/nodeapi/probes/run_*_probe.sh` | **ALL PASS** (`test` + `jit`) | Includes `scopes`, `teardown`, `env_addr_reuse`, `host_async` (4/4), and `binary_probe` **308/308** (incl. `typedarray-bigint` + `Float16Array` check) |
+| `REPEATS=5 sh test/nodeapi/stress/run_stress.sh` | **ALL PASS** (`test` + `jit`) | `gc_churn` 78/78, `env_churn` 1208/1208, `tsfn_teardown` 252/252, `gc_hook` |
+| `python3 test/nodeapi/run_matrix.py --verify-manifest` | **PASS** | `manifest OK` |
+| `python3 test/nodeapi/run_matrix.py --suite all --host ch-nodeapi` | **`pass=46 skip=23 fail=0`** | `async_work_promise`, `async_work_thread_safe_function`, `test_typedarray` now PASS |
+| `python3 test/nodeapi/run_node_addon_api_matrix.py --hosts both` | **`pass=52 skip=61 fail=6`** | `node-direct` 29/0; `ch-nodeapi` 23/6 (`typedarray*.js` now PASS; remaining 6 are the PR-12 `test/object/*` V8 error text assertions) |

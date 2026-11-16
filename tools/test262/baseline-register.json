@@ -75,6 +75,26 @@
         "scenarios": 80544
       },
       "evidence": "doc/e12-testing-quality.md"
+    },
+    {
+      "id": "refresh-2026-11-16",
+      "date": "2026-11-16",
+      "engine_commit": "c24266598c91d866b4024fdf71b82508b25f00a7",
+      "binary_sha256": "6cf5c1d0ee027952f96646fb042bdebab307bb5910c30af4dbc9406cfac5d11f",
+      "engine_dylib_sha256": "4e4fd4c411f0fd350e1646aebce28afb60a6c342efbc082f4a67fe76258762a3",
+      "results_dir": "out/test262-refresh-20261116",
+      "results_retained": false,
+      "broad": {
+        "passed": 79569,
+        "failed": 13572,
+        "scenarios": 93141
+      },
+      "edition_selected": {
+        "passed": 78731,
+        "failed": 1813,
+        "scenarios": 80544
+      },
+      "evidence": "doc/c4-manifest.md"
     }
   ]
 }

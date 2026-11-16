@@ -6,8 +6,8 @@ engine defect ("GC during churn while async frames are suspended silently
 drops promise continuations"); independently reproduced 3/3 on debug-static
 before this lane. **Verdict: GC exonerated — the defect was `ch` host message
 ordering, plus two latent bugs the repair exposed.** Evidence and the
-instrumented traces: `../evidence/gc-async-continuation/` (DIAGNOSIS.md, h0.js,
-h5.js, t-order.js, verification-*.txt).
+instrumented traces: `doc/evidence/gc-async-continuation/` (`DIAGNOSIS.md`, `h0.js`,
+`h5.js`, `t-order.js`, `verification-*.txt`).
 
 ## 1. Root cause chain
 

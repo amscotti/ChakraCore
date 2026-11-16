@@ -1,15 +1,25 @@
 # ChakraCore Modernization Plan
 
-> Status: F0–B3 verified — three Mac profiles green, incremental proofs,
-> CI recipe validated (CONDITIONAL on the first green post-merge Actions run);
+> Status: **F0–B3 verified**, **Stage 2/3 architectural hardening & Test262
+> refresh complete on `modernize/baseline` (`c24266598`, 2026-11-16)** — all
+> four Mac Zig profiles are green (`test` **2063/0**, `debug-static`
+> **2115/0** + `8/8` static native, `release-shared` green, `jit` + `wasm`
+> `check-jit` + **382/382 P1** WASM green), Node-API is verified (`18/18`
+> probes + `tools/nodeapi/run_probe.sh`, `REPEATS=5` stress, `46/23/0` +
+> `52/61/6` matrices), and the Mac **C4 certified baseline refresh
+> (`refresh-2026-11-16`)** stands at **78,731/1,813 of 80,544 (97.75%)**
+> (`-1,136` failures vs `2026-11-05` after `7412beb56` flipped
+> `ESSharedArrayBuffer=true` and Stage 2/3 fixes landed).
 > **B4 behavior proof completed natively on the Linux proof host**
 > (2026-11-09/10: interpreted **2841/0**, dynapogo **2305/0**, certified
 > Linux test262 **77,354/3,190** — [B4 native run](b4-linux-run.md),
 > [B4 gate verdict update](b4-gate.md)); what remains owed before any
-> Linux default-rollout claim is the post-D1–D4 native handoff
-> ([b4-d1-d4.md](b4-d1-d4.md) §5: Linux regression re-run + pin re-record +
-> certified refresh) and a first green hosted-CI run. The +230
-> engine/feature delta vs Mac is tracked, not claimed identical.
+> Linux default-rollout claim is the post-Stage-2/3 native Linux
+> verification in §6 (`tools/build/linux.zig` variant matrix + Node-API +
+> certified refresh) and green hosted GitHub Actions runs. See
+> [architecture-and-readiness-review.md](architecture-and-readiness-review.md)
+> for the full architecture synthesis, test-coverage matrix, explicit
+> residuals, and Linux bring-up checklist.
 > **C1 is recorded (CONDITIONAL)** — edition
 > policy, triage and shortlist are in [c1-triage.md](c1-triage.md);
 > qualification is conditional on explicit host-reported negative phase
@@ -19,34 +29,34 @@
 > ES2025 modifiers), the complete S1 class-elements surface (fields,
 > private methods/accessors incl. async/generator and statics, computed
 > names, `super` in initializers, static blocks, direct-eval/computed-key
-> private visibility), S2 BigInt, S8 resizable ArrayBuffer/transfer +
-> TypedArray tracking + bounded Float16 slice, S13 WeakRef +
-> FinalizationRegistry, S14 P1–P7, and the
-> S14 block-scope and statement-level early-error clusters are closed on
-> Mac no-JIT (JIT-wide claims gated on B4; Mac JIT regression evidence added 2026-10-31, below), receipts in [c2-s4.md](c2-s4.md),
-> [c2-s5.md](c2-s5.md), [c2-s10.md](c2-s10.md),
-> [c2-s11.md](c2-s11.md), [c2-s7-matchall.md](c2-s7-matchall.md),
+> private visibility), S2 BigInt, S6a–S6e SAB/Atomics (`ESSharedArrayBuffer=true`
+> default-on as of `7412beb56`), S8 resizable/immutable ArrayBuffer/transfer +
+> TypedArray tracking + `Float16Array`, S12 import attributes + JSON modules,
+> S13 WeakRef + FinalizationRegistry, S14 P1–P7, and the
+> S14 block-scope and statement-level early-error clusters are landed
+> (receipts in [c2-s4.md](c2-s4.md), [c2-s5.md](c2-s5.md),
+> [c2-s10.md](c2-s10.md), [c2-s11.md](c2-s11.md),
+> [c2-s7-matchall.md](c2-s7-matchall.md),
 > [c2-s9-namedgroups.md](c2-s9-namedgroups.md),
 > [c2-s9-modifiers.md](c2-s9-modifiers.md),
 > [c2-s14-blockscope.md](c2-s14-blockscope.md),
-> [c2-s14-statement-early-errors.md](c2-s14-statement-early-errors.md) and
-> [c2-flag-audits.md](c2-flag-audits.md). The native **ARM64 macOS JIT** port
-> (separate worktree effort, not a C2 batch and not B4) merged into this
-> branch on 2026-10-31 (`9004b3ed7`): the `jit` Zig profile is green on
-> Mac ARM64 with dynapogo/interpreted suites failing only on the documented
-> asm.js/WASM Mac gap, and the no-JIT gates unchanged at 2032/0 and 2084/0;
-> evidence and coverage limits (direct-eval and 18 class/private/import
-> opcodes stay interpreted) are in [arm64-macos-jit.md](arm64-macos-jit.md).
-> Linux x64 JIT test262/rollout claims remain gated as below (Mac ARM64
-> JIT test262 discharged; Linux proof-host run recorded, D1–D4 handoff
-> owed). Engine/legacy-build references use baseline
-> `97e68c917`; execution evidence and the [B1-B3 review](b1-b3-review.md)
-> are recorded through 2026-11-10 local time. Push scope for this branch
-> tip is pinned in [the swarm-review fix receipt](review-swarm-fixes.md):
-> demonstrated green is Mac no-JIT + Mac ARM64 JIT + Linux proof-host;
-> concurrent-GC/full GCStress matrices, Recycler/C OOM rollback, a
-> measured perf gate, external-ArrayBuffer finalizer native tests and a
-> Phase-3 API/versioning decision remain explicitly unclaimed there.
+> [c2-s14-statement-early-errors.md](c2-s14-statement-early-errors.md),
+> and [c2-flag-audits.md](c2-flag-audits.md)). The native **ARM64 macOS JIT**
+> port merged into this branch on 2026-10-31 (`9004b3ed7`) and is verified
+> across Mac JIT regression + WASM P1 + `cdjs` 5x at `c24266598`
+> (coverage notes in [arm64-macos-jit.md](arm64-macos-jit.md)).
+> Engine/legacy-build references use baseline `97e68c917`; execution evidence
+> and the [B1-B3 review](b1-b3-review.md) are updated through 2026-11-16
+> (`c24266598`). Demonstrated green is Mac no-JIT + Mac ARM64 JIT+WASM +
+> Node-API (`libChakraNodeApi` / `ch-nodeapi`) + prior Linux proof-host
+> (`b4-linux-run.md`). Explicit residuals: post-Stage-2/3 native Linux
+> re-run & hosted Actions runs are pending; Mac ASan/TSan/UBSan lanes are
+> not yet configured; CMake does not build `NodeApi`/`ch-nodeapi`; full
+> concurrent GCStress (`>6s` smoke) and a formal perf gate remain outside
+> current claims; and `ES6RegExSymbols` / `ES6RegExPrototypeProperties` stay
+> `false` due to Stage 2 empirical blockers ([c4-gate.md](c4-gate.md) §3).
+> `JsrtExternalArrayBuffer` finalizer native tests and the Phase-3 JsRT
+> additive API versioning contract (§0.1) are now landed and documented.
 > This is a staged roadmap for a small maintained fork, not a dated delivery promise.
 
 ## Read this first
@@ -77,7 +87,7 @@ handling have been validated before its results are used as a completion gate.
 | B6 | Windows feasibility and rollout; later target extensions | Stable build contracts | Separate expansion |
 | Z1 | One useful mixed C++/Zig unit behind a tested C ABI | B3; B4 if the unit ships on Linux | Optional pilot |
 | C1 | Qualified ES2025 test policy and triaged failures | Stable Mac build at B3 | Recorded (CONDITIONAL) |
-| C2 | Bounded compatibility batches and partial releases | C1; B4 before JIT-wide enablement | In progress (S4/S5/S10/S11/S7-matchAll/S9 named-groups + d-flag + duplicate named groups + lookbehind + ES2025 modifiers; S1 class elements complete: public/private instance+static fields, private methods/accessors incl. async/generator and statics, computed field names, `super` in field initializers, static blocks and direct-eval `super` early errors (integrated elements corpus now 5,892/5,897 after default BigInt; eval-code 454/0); S6a flag-on growable SAB/non-shared Atomics (default remains off — pending-refresh: 7412beb56 flipped threads/SAB defaults ON, re-measurement owed); S6b flag-on `Atomics.pause` + single-thread `Atomics.waitAsync` (finite timeouts landed as S6d and cross-agent suspension as S6e); S6c flag-on BigInt64Array/BigUint64Array Atomics incl. BigInt wait/notify/waitAsync validation; S6d finite `Atomics.waitAsync` timeouts via an optional additive host timer callback; S6e flag-on cross-agent `Atomics.waitAsync` (native wake latch, registrant-thread monitor tasks, child message queues; POSIX `WScript.Quit` flush + raw-exit teardown; SAB default remains off — pending-refresh: 7412beb56 flipped threads/SAB defaults ON, re-measurement owed); S8 immutable ArrayBuffer (`immutable`, `transferToImmutable`, `sliceToImmutable`, write protections; JIT/TTD residuals); S3-a Unicode property escapes under `u` on ICU 79.1 (deterministic code-point-set matcher); S3-b RegExp `v`/Unicode Sets mode incl. `\q`, set operations and properties-of-strings; S9 u-mode RegExp strictness/canonical astral semantics plus S9-b code-point-aware literal search/builtin flag derivation; S2 BigInt is now enabled by default after a full default/disable audit plus bytecode serialization and debugger-display repairs; S8 resizable ArrayBuffer + TypedArray tracking + Float16 (DataView/Math.f16round slice and Float16Array); S12 import attributes + JSON modules (additive host contract); S13 symbol keys, WeakRef, FinalizationRegistry; S14 P1–P7 — all closed on Mac no-JIT; Mac ARM64 JIT regression suites green 2026-10-31, test262-under-JIT and Linux claims still gated on B4) |
+| C2 | Bounded compatibility batches and partial releases | C1; B4 before JIT-wide enablement | In progress (S4/S5/S10/S11/S7-matchAll/S9 named-groups + d-flag + duplicate named groups + lookbehind + ES2025 modifiers; S1 class elements complete: public/private instance+static fields, private methods/accessors incl. async/generator and statics, computed field names, `super` in field initializers, static blocks and direct-eval `super` early errors (integrated elements corpus now 5,892/5,897 after default BigInt; eval-code 454/0); S6a–S6e growable/cross-agent SAB, `Atomics.pause`, `Atomics.waitAsync` (single-thread + finite timeouts + cross-agent native wake latch), and BigInt64Array/BigUint64Array Atomics — **`ESSharedArrayBuffer=true` now default-on (`7412beb56`)**, verified in `refresh-2026-11-16` and cross-agent Stage 2 hardenings; S8 immutable/resizable ArrayBuffer + TypedArray tracking + Float16 (`DataView`/`Math.f16round`/`Float16Array` + JIT `Lower.cpp` table/stride/bounds hardening); S3-a Unicode property escapes on ICU 79.1; S3-b RegExp `v` mode; S9 u-mode/S9-b/RegExp non-writable `lastIndex` JIT+slow guards; S2 BigInt default-on; S12 import attributes + JSON modules; S13 symbol keys, WeakRef, FinalizationRegistry; S14 P1–P7; Node-API `libChakraNodeApi` + `ch-nodeapi` async host services. All 4 Mac Zig profiles green (`test` **2063/0**, `debug-static` **2115/0**, `jit` + `wasm` **382/382 P1**); post-Stage-2/3 native Linux run still gated in §6) |
 | C3 | Larger runtime/object-model feature projects | C1 and their feature prerequisites | Separate projects |
 | C4 | Verified full ES2025 core-language result | Required C2/C3 work and qualified runner | Long-term objective |
 
@@ -107,13 +117,70 @@ Goals:
 Boundaries:
 
 - Phases 1–2 preserve public header spellings and the JsRT ABI. New runtime
-  feature/host requirements in Phase 3 need an explicit API/versioning decision.
+  feature/host requirements in Phase 3 follow the **Phase-3 JsRT additive API
+  versioning contract** below.
 - DOM/Node hosting, JIT/GC rewrites, V8/JSC internal-design parity and a language
   migration percentage are outside this roadmap's completion gates.
 - Intl/ECMA-402 and WASM extensions have their own milestones and coverage claims.
   Their entire future feature sets do not gate ES2025 core-language completion.
 - Modern OS/tool floors may be raised deliberately. A supported-platform claim
   requires a declared contract and testing on the relevant platform/floor.
+
+### 0.1 Phase-3 JsRT Additive API Versioning Contract
+
+`ChakraCoreVersion.h` remains at pre-release dev `1.13.0`
+(`CHAKRA_CORE_MAJOR_VERSION=1`, `MINOR=13`, `PATCH=0`, `RELEASE=0`). All
+Phase-3 JsRT extensions are **strictly additive** (appended enum values,
+appended export entries, and opt-in host callbacks) so existing Phase 1–2
+callers preserve binary and source compatibility without breaking existing
+ordinals or struct layouts:
+
+1. **Covered Phase-3 additions:**
+   - `JsTypedArrayType` enumerators (`lib/Jsrt/ChakraCommon.h:533-541`):
+     `JsArrayTypeFloat16` (9), `JsArrayTypeBigInt64` (10), and
+     `JsArrayTypeBigUint64` (11), appended immediately after `JsArrayTypeFloat64`
+     (8) and pinned with compile-time `C_ASSERT` stride checks against
+     `Js::TypeIds_*` (`lib/Jsrt/Jsrt.cpp:2231-2241`).
+   - `JsSetTimerContinuationCallback` (`lib/Jsrt/ChakraCommon.h:2517`,
+     `lib/Jsrt/JsrtCommonExports.inc:106`, `lib/Jsrt/Jsrt.cpp:3601`): optional
+     per-context delayed-task hook used for finite positive `Atomics.waitAsync`
+     timeouts.
+   - `FetchImportedModuleFromScriptWithAttributesCallBack`
+     (`lib/Jsrt/ChakraCore.h:139,251`, `lib/Jsrt/Core/JsrtCore.cpp:188,247`,
+     paired with `FetchImportedModuleWithAttributesCallBack` at `0x9`):
+     ES2025 import-attributes host callback registered via
+     `JsModuleHostInfo_FetchImportedModuleFromScriptWithAttributesCallback` (`0xA`).
+2. **Header parity guarantee:** `zig build check-metadata` (`tools/build/check_metadata.py`)
+   and `check_metadata_linux.py` verify on every profile that the 4 staged public
+   headers (`include/ChakraCore.h`, `ChakraCommon.h`, `ChakraDebug.h`,
+   `ChakraCoreVersion.h`) are non-empty and **byte-identical** to their
+   `lib/` sources, and verify dynamic/static JsRT symbol exports.
+3. **Internal typed-array safety (`JsErrorInvalidArgument`):**
+   `IsPublicTypedArrayTypeId` (`lib/Jsrt/Jsrt.cpp:2243-2247`) restricts
+   `JsGetTypedArrayInfo` and `JsGetTypedArrayStorage` to
+   `TypedArrayBase::Is(typeId) && typeId <= Js::TypeIds_Uint64Array`, returning
+   `JsErrorInvalidArgument` on internal-only `TypeIds_CharArray` and
+   `TypeIds_BoolArray` rather than emitting out-of-range enum values or
+   hitting Debug `AssertMsg(FALSE)` / `JsErrorFatal`. `JsGetTypedArrayStorage`
+   returns `sizeof(uint16)`, `sizeof(int64)`, and `sizeof(uint64)` for the
+   three new element types.
+4. **Runtime compatibility posture for pre-Phase-3 hosts:**
+   - Hosts that never call `JsSetTimerContinuationCallback` retain prior
+     pending behavior on finite `Atomics.waitAsync` timeouts and unaffected
+     promise microtask continuation behavior.
+   - Hosts that only register `FetchImportedModuleCallBack` /
+     `FetchImportedModuleFromScriptCallBack` continue to load attribute-free
+     static and dynamic imports unchanged; only attribute-bearing imports fail
+     until an attributes callback is installed.
+   - Hosts passing unknown `JsTypedArrayType` values or missing constructors to
+     `JsCreateTypedArray` / `JsSetIndexedPropertiesToExternalData` receive
+     `JsErrorInvalidArgument`.
+   - `test/native-tests/jsrt_phase3_tests.h` (`TestExternalArrayBufferLifetimes`,
+     `TestTypedArrayAbi`, `TestTimerContinuationCallback`,
+     `TestFetchImportedModuleFromScriptWithAttributes`) exercises these contracts
+     inside `check-native`. Any future breaking change to existing JsRT
+     signatures or structs requires bumping `CHAKRA_CORE_MINOR_VERSION` or
+     `MAJOR_VERSION` with an explicit migration note.
 
 ## 1. Current evidence and its limits
 
@@ -545,8 +612,9 @@ their own design and experiments. Split implementation, interpreter correctness,
 JIT coverage, GC/ownership invariants and default enablement into reviewable parts.
 
 Do not bundle these into one change or assume they are leaf migrations. Keep
-experimental flags until their active-matrix tests pass. If a required host/API
-contract affects embedders, specify versioning and compatibility before rollout.
+experimental flags until their active-matrix tests pass. Any additive Phase-3
+host/API contract must satisfy the versioning, header-parity, and fallback
+compatibility requirements in §0.1 (`test/native-tests/jsrt_phase3_tests.h`).
 
 #### C4 — Full ES2025 core-language acceptance
 
@@ -660,10 +728,14 @@ Decision/rollback points:
   remaining JIT ports are recorded in [arm64-macos-jit.md](arm64-macos-jit.md).
 - [ ] B4: Linux native baseline/pilot and JIT/WASM/native/profile CI gates;
   scoped Linux rollout. Native behavior proof and certified baseline are
-  recorded ([b4-linux-run.md](b4-linux-run.md)); the box stays unchecked
-  only for the rollout tail — post-D1–D4 native handoff
-  ([b4-d1-d4.md](b4-d1-d4.md) §5) and hosted-CI green. The merged Mac
-  ARM64 JIT above is not B4 evidence.
+  recorded ([b4-linux-run.md](b4-linux-run.md)), and Stage 2/3 (`9d8d1817a`,
+  `c24266598`) parameterized `tools/build/linux.zig` (`-Dglibc`, `-Dicu-*`,
+  `-Dprofile=test|debug-static|release-shared`, `-Djit=true|false`), wired the
+  Linux Node-API stack, added `tools/linux-gate-tests.zig` (7/7 PASS), and
+  added `.github/workflows/zig-linux.yml`; the box stays unchecked pending
+  native execution of the post-D1–D4 + Stage 2/3 Linux bring-up checklist
+  (below and [b4-d1-d4.md](b4-d1-d4.md) §5) and first green hosted-CI run.
+  The merged Mac ARM64 JIT above is not B4 evidence.
 - [ ] B5: Controlled dependency/artifact package and clean-machine floor
   testing. The serialized-bytecode GUID rotation is done
   (§2.2 B5, [b5-guid-rotation.md](b5-guid-rotation.md)).
@@ -681,52 +753,51 @@ Decision/rollback points:
   receipts, re-verified 2026-11-05 with status and owner lane, lives in
   [open-cards.md](open-cards.md).
 - [ ] C4: Published qualified ES2025 result on the claimed default configurations.
-  (*BLOCKED-with-certified-baseline*: certified 2026-11-02 (lane
-  `c4-certification` on `ba796f74f`) and **refreshed 2026-11-05** after
-  the A–E lanes (lane `c4-refresh` on `4e9f95da7`, no engine changes) —
-  controls 25/25, broad 78,399/14,742, edition-selected
-  **77,595/2,949 of 80,544 (96.34%)** (was 76,464/4,080, 94.93%; −1,131
-  flips, 0 regressions, every delta attributed), 8,751 marker-judged
-  negatives, 1 downgrade, gates 2051/2103 green; the suite is not green
-  and SAB/Atomics + the two RegExp flag surfaces are not default (the
-  three decisions are worth exactly −1,890 — pending-refresh: 7412beb56
-  flipped threads/SAB defaults ON so the SAB-off portion is stale until
-  re-measured; numbers not recomputed here) — [c4-gate.md](c4-gate.md),
-  [c4-manifest.md](c4-manifest.md), [c4-run-evidence.md](c4-run-evidence.md),
-  [c4-refresh.md](c4-refresh.md).*)
+  (*BLOCKED-with-certified-baseline*: certified 2026-11-02 (`ba796f74f`),
+  refreshed 2026-11-05 (`4e9f95da7`), and **refreshed 2026-11-16 (`c24266598`,
+  `zig-out/bin/ch`)** after `7412beb56` (`ESSharedArrayBuffer=true`), B4
+  D1–D4, A1–A12/JITREG, and Stage 2/3 — controls `25/25`, broad
+  `79,569/13,572` of `93,141` (`85.43%`, `-1,170` failures), edition-selected
+  **78,731/1,813 of 80,544 (97.75%)** (down `-1,136` failures from
+  `77,595/2,949` = `96.34%`, `0` feature regressions), `902` skips, `8,751`
+  negatives, gates **2063/0 test / 2115/0 debug-static / 382/382 WASM P1**
+  green. `ESSharedArrayBuffer` is now **default-on**; only `ES6RegExSymbols`
+  and `ES6RegExPrototypeProperties` stay `false` intentionally per the
+  Stage 2 empirical audit (`Lower.cpp` fast-paths + `5` legacy failures) —
+  [c4-gate.md](c4-gate.md), [c4-manifest.md](c4-manifest.md),
+  [c4-run-evidence.md](c4-run-evidence.md), [c4-refresh.md](c4-refresh.md).*)
 
-**Swarm review (2026-11-08) — CLEARED FOR THE LINUX SWITCH.** Five
-specialized lenses (memory/GC/ownership, concurrency/threading,
-architecture/JsRT-boundaries/format, code quality, test/doc integrity)
-reviewed the full `f305a175f..HEAD` arc: **all five ACCEPT, zero
-[bug]s**. Triage landed the R1 host-global-map synchronization fix
-(+ the PushMessage agent-routing repair it exposed), the
-case-sensitive `ByteCode/` mint-path fix, dylib-digest provenance
-recording, and the nit batch; four new cards filed
-([e13-swarm-triage.md](e13-swarm-triage.md), independently verified).
-Gates 2051/0 + 2103/0 + jit check green. Carried conditions for the
-Linux lane: own or disable-list the fulljit SIGSEGV family before
-Linux JIT gates are authoritative; re-verify the A3 helper arg-order
-convention on x64 once; `refresh_baseline.py` now records dylib
-digests for native re-proof.
+**Stage 2/3 hardening + architectural review (2026-11-16, `c24266598`).**
+Following the prior 2026-11-08 swarm review, Stage 2/3 closed all high-priority
+architectural/safety findings and expanded test verification: `Lower.cpp`
+`Float16Array` table shift/asserts + `MediumHeapBlock` 16-bit offset truncation
+(`cdjs.js`), JsRT `TypedArray` ABI/internal-type guards (`JsErrorInvalidArgument`)
+& `JsrtExternalArrayBuffer` detached finalizer ownership, cross-runtime GSAB
+release/acquire length atomics, non-writable `lastIndex` RegExp JIT/slow
+guards, `WScriptJsrt` header split + `StderrLock` + atomic `sourceContext` +
+per-child `broadcastQ`, Node-API A8-3 `PromiseQueue*` reclamation +
+`ch-nodeapi` `post_task`/`post_work` + `BigInt64Array`/`BigUint64Array` wiring
++ OOM guards, `AssemblyCommon.h`/`XDataAllocator` unwind portability, Zig
+Backend archive link ordering (`test-shared-basic` + Phase-3 native tests
+link cleanly against shared libs without `libChakraCoreStatic.a`),
+`tools/build/linux.zig` parameterization, portable StyleChecks, and
+relocation to `doc/evidence/gc-async-continuation/`. Full synthesis in
+[architecture-and-readiness-review.md](architecture-and-readiness-review.md).
 
-**Restart point (2026-11-05, after the C4 certified refresh) — the
-Mac-side program is complete.** Lanes A–E of the 2026-11-03 bucket list
-plus the C4 refresh are all landed; development stays **mainline-only**
-on `modernize/baseline` (the V workflow and the shared gate lock/mise
-Zig 0.17.0 pin unchanged). Closing state: gates **2051/0 test / 2103/0
-debug-static**, `zig build -Dprofile=jit check` green, serialized-bytecode
-GUID rotated, and the **C4 certified baseline refreshed**:
-edition-selected **77,595/2,949 of 80,544 (96.34%)** — broad
-78,399/14,742 — with the delta ledger fully attributed (−1,131 flips vs
-the certified baseline, 0 regressions; buckets: disabled-flag 1,734
-unchanged, engine-defect 1,700→1,010, host 426→3, rfm 220→202;
-[c4-manifest.md](c4-manifest.md), [c4-refresh.md](c4-refresh.md)). The
-verdict stays **BLOCKED-with-certified-baseline**
-([c4-gate.md](c4-gate.md)): the suite is not green and three flag
-surfaces are not default. What remains on the Mac is decision- or
-card-owned work, tracked in [open-cards.md](open-cards.md), not
-unstarted lanes. (The A–E lane receipts: A — JIT coverage ports,
+**Restart point (2026-11-16, `c24266598`) — Mac profiles & Stage 3B
+certified baseline complete.** Closing state: **2063/0 test**, **2115/0
+debug-static** (`8/8` static native suites), `release-shared` green,
+`jit` + `wasm` (`check-jit` + **382/382 P1** `check-wasm`), Node-API (`18`
+probes + `run_probe.sh` + `REPEATS=5` stress + `46/23/0` & `52/61/6`), and
+**C4 certified baseline refreshed (`refresh-2026-11-16`)**: edition-selected
+**78,731/1,813 of 80,544 (97.75%)** — broad `79,569/13,572` (`85.43%`) —
+(`disabled-flag` `636` down `-1,098`, `engine-defect-on-existing` `960` down
+`-50`, `required-feature-missing` `200` down `-2`, `host` `17` up `+14`;
+[c4-manifest.md](c4-manifest.md), [c4-gate.md](c4-gate.md)). The verdict
+stays **BLOCKED-with-certified-baseline**: `1,813` edition failures and
+two RegExp substrate flags remain. What remains on Mac is targeted RegExp
+fast-path work and decision/card-owned tail work tracked in
+[open-cards.md](open-cards.md).
 [c2-jit-finally-globopt.md](c2-jit-finally-globopt.md),
 [c2-jit-eval-fidelity.md](c2-jit-eval-fidelity.md),
 [c2-jit-private-opcodes.md](c2-jit-private-opcodes.md),
@@ -762,31 +833,67 @@ integer radix) and D4 (deferred WASM validation) are implemented and
 reviewed; the Linux native run, the Linux pin re-record, and the full
 certified test262 refresh remain ([b4-d1-d4.md](b4-d1-d4.md) §5).
 
-**Blocked on you (the human), not on the code:**
+**Open engineering / decision blockers:**
 
-- **The three flag decisions — the single largest lever, exactly
-  −1,890 edition failures** (unchanged by all of A–E; pending-refresh:
-  7412beb56 flipped threads/SAB defaults ON so the SAB-off portion is
-  stale until re-measured — numbers not recomputed here): flip
-  `-ESSharedArrayBuffer` (1,176; recorded product/security decision,
-  S6 — flag-on tail ≈87 per S6e), `-ES6RegExSymbols` (558) and
-  `-ES6RegExPrototypeProperties` (156 of the rfm 202); each flip owes
-  its recorded re-checks (JIT-inlined String/RegExp helper at
-  `ConfigFlagsList.h:1177`; per-batch B4/JIT-corpus obligations).
+- **Two remaining RegExp substrate flags (`ES6RegExSymbols` and
+  `ES6RegExPrototypeProperties`) — `712` mapped edition failures**
+  (`558` `disabled-flag` + `154` `built-ins/RegExp` `rfm`). **`ESSharedArrayBuffer`
+  is now default-on (`7412beb56`)**, leaving only a `94`-scenario flag-on
+  tail (`78` policy-mapped `disabled-flag` + `16` `host` `Atomics`
+  timeouts/kills). Meanwhile, an empirical Stage 2 audit intentionally kept
+  both RegExp flags **`false`** because of concrete JIT and legacy blockers:
+  `GenerateFastReplace` (`Lower.cpp:20779`) and
+  `GenerateFastInlineStringSplitMatch` (`Lower.cpp:20859`) fast-path
+  `VtableJavascriptRegExp` without delegating to `Symbol.replace`/
+  `Symbol.split`, plus `5` interpreted / `5` dynapogo legacy failures
+  (`Regex/regexSplitOptimization.js`, `Regex/crossContext.js` x2,
+  `es6/proto_basic.js`, `es6/RegExpApisTestWithStickyFlag.js` #16). Each flip
+  owes targeted fixes plus its
+  recorded B4/JIT re-checks.
 - **B3's CI clause still needs a push** — the Actions recipe is
   validated (lint + literal local simulation) but the first green
   post-merge run has not happened.
-- **Linux hardware/environment for B4** — the native proof ran on the
-  proof host (2026-11-09/10); still owed there: the post-D1–D4 handoff
-  ([b4-d1-d4.md](b4-d1-d4.md) §5: regression re-run expecting
-  2845/2307, `RECORDED_BASELINE` re-record only after green, certified
-  refresh via `refresh_baseline.py`) plus a first green hosted-CI run.
+- **Linux hardware/environment for B4 (synced bring-up checklist):**
+  1. Pre-flight on native `x86_64-linux-gnu` (`zig 0.17.0` from `mise.toml`,
+     `libicu-dev`, `binutils`, `clang`, `make`, `python3`; defaults Ubuntu 24.04
+     `-Dglibc=2.39 -Dicu-major=74`, or override `-Dglibc`/`-Dicu-*` for the host):
+     run StyleChecks (`check_style_portable.py --self-test` + all 4 `.sh` scripts
+     vs `origin/master`), `check_metadata_linux.py --self-test`, `zig test
+     tools/linux-gate-tests.zig` (7/7), and `test_build_tools.py` (81/81).
+  2. Default `test` profile (`mise exec -- zig build && zig build check`):
+     verify `95/95` PAL checks, `check-selftest`, `check-smoke`, `check-jit`,
+     `check-native`, `check-metadata` (237 `.so` exports / 669 archive members),
+     and `verify-bytecode`; run `AsyncSuspendedResume.js` and
+     `AsyncSuspendedDetach.js` (20–30x) + `test/wasm/deferred-invalid-body.js` +
+     `WasmSpec/jsapi`, re-verify A3 helper arg-order on x64, and update
+     `RECORDED_BASELINE` in `tools/build/check_regression_linux.py` from
+     `2841/0` & `2305/0` only after green native runs; diff regenerated
+     `linux_exports_{so,ch}.txt` against legacy CMake artifacts if parity is
+     claimed (`check_metadata_linux.py:31-46`).
+  3. Parameterized variant matrix (`.github/workflows/zig-linux.yml`
+     `zig-variants`): `-Djit=false` (`check-smoke check-metadata verify-bytecode
+     check-native`), `-Dprofile=release-shared` (`check-smoke check-metadata
+     check-jit check-native`), and `-Dprofile=debug-static -Doptimize=debug`
+     (`check-smoke check-metadata verify-bytecode`, static `check-native`, and
+     `runtests.py --debug --variants=interpreted test/wasm`).
+  4. Node-API Linux stack (`zig build libChakraNodeApi ch-nodeapi check-nodeapi`):
+     verify `150` ELF exports, run `tools/nodeapi/run_probe.sh` + all `18`
+     `test/nodeapi/probes/run_*.sh` (`SKIP_BUILD=1`), `REPEATS=5
+     test/nodeapi/stress/run_stress.sh`, `run_matrix.py --suite all --host
+     ch-nodeapi`, and `run_node_addon_api_matrix.py --hosts ch-nodeapi` (0
+     unexpected failures outside the 6 `test/object/*` V8 message diffs).
+  5. Certified Linux Test262 refresh (`tools/test262/refresh_baseline.py
+     --binary "$PWD/zig-out/bin/ch" --jobs 8`) + first green hosted GitHub
+     Actions runs (`zig-linux.yml` and `zig-macos.yml`).
 - **Windows (B6)** — feasibility slice when chosen.
 
-After B4, the re-ranked path to green (c4-gate §3) is: flag decisions
-(2,949 → 1,059), then the engine-defect register (1,010, half of it
-already decision-carded: TCO 34, property escapes 112, dynamic-import
-68, Function/prototype 56), then host 3 and rfm 46.
+After `refresh-2026-11-16`, the re-ranked path to green ([c4-gate.md](c4-gate.md) §3)
+is: clear the empirical RegExp fast-path/5-test blockers and flip
+`ES6RegExSymbols` + `ES6RegExPrototypeProperties` (`1,813 -> ~1,101`), then
+work the `engine-defect-on-existing` register (`960`, down `-50` since
+`2026-11-05`), remaining `required-feature-missing` beyond RegExp (`46`),
+and `host` (`17`: `1` labeled-import parser gap + `16` cross-agent
+`Atomics` hang/kill cases).
 
 **Latest integration checkpoint (2026-11-01):** main is clean at the
 **2038/0 test** and **2090/0 debug-static** gates (re-verified after every
@@ -1238,10 +1345,9 @@ moved 22/100 to 94/100 with 72/0 fail→pass; the 6 residue are the 4
 `immutable-buffer` scenarios. `Float16Array` and typed-array element
 support stay in the remaining S8/C3 work. Gates moved
 1981/2033 → 1982/2034.
-S6 shows zero regressions under `-ESSharedArrayBuffer` but
-needs a product/security decision before any default (pending-refresh:
-defaults already flipped ON by 7412beb56; decision note stale until
-re-measured), plus
+S6 (`ESSharedArrayBuffer=true` default-on as of `7412beb56`, verified on
+`refresh-2026-11-16` with `1,098` `disabled-flag` failures cleared and a
+`94`-test flag-on tail across `disabled-flag` and `host`), plus
 waitAsync/growable/non-shared-Atomics work; S2's flagged path no longer
 has a host-crash class but its arithmetic/typed-array completion still
 stays C3-large. With the S1 class-elements surface complete (2026-10-20

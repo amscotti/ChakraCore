@@ -93,41 +93,45 @@ contract**. This does not provide a Node.js runtime: there is no
 Node runtime compatibility. Addons requesting `NAPI_VERSION` >
 8 are rejected at load; v9/v10 symbols are absent.
 
-Known non-conformances (see `doc/node-api-receipt.md` for the
+Known non-conformances (see [doc/node-api-receipt.md](doc/node-api-receipt.md) for the
 probe-backed record):
 
 - No JS `Buffer` global. Provider Buffers are `Uint8Array` views
   marked by a provider-private symbol (`napi_is_buffer` checks the
   marker); `typeof Buffer === 'undefined'`.
-- `BigInt64`/`BigUint64` typed arrays return `napi_generic_failure`.
+- `Float16Array` (JS-created) returns `napi_generic_failure` in
+  `napi_get_typedarray_info` because `NAPI_VERSION=8` defines no float16
+  typed-array enum value. (`BigInt64Array` / `BigUint64Array` are wired
+  directly through Phase-3 JsRT.)
 - Async work / thread-safe functions / `napi_get_uv_event_loop`
   return `napi_generic_failure` unless the host injects the §3.2
-  scheduling/uv services (the tree's `ch-nodeapi` test host injects
-  none, so they fail there by design).
+  scheduling/uv services (the tree's `tools/nodeapi/ch-nodeapi` test host
+  injects `post_task`/`post_work`/`cancel_work`/`ref_loop`/`unref_loop`,
+  with `uv_loop = NULL` so `napi_get_uv_event_loop` still fails cleanly).
 - `napi_async_init`/`napi_async_destroy` bookkeeping only:
   async_hooks propagation is a documented no-op.
 
-Build and gate the provider on macOS arm64 (Zig 0.17.0 via mise,
-always through the gate lock `/tmp/opencode/cc-gate-lock.sh`):
+Build and gate the provider on macOS arm64 (Zig 0.17.0 via mise):
 
 ```sh
-/tmp/opencode/cc-gate-lock.sh mise exec -- zig build libChakraNodeApi
+mise exec -- zig build libChakraNodeApi
 # installs lib/libChakraNodeApi.dylib + include/nodeapi/ (test profile)
-/tmp/opencode/cc-gate-lock.sh mise exec -- zig build check-nodeapi
+mise exec -- zig build check-nodeapi
 # verifies exactly 145 napi_* + 5 host = 150 exports (fails on missing/extra)
-/tmp/opencode/cc-gate-lock.sh mise exec -- zig build check-nodeapi -Dprofile=jit
+mise exec -- zig build check-nodeapi -Dprofile=jit
 ```
 
 The exports gate (`check-nodeapi`) is a separate step on purpose
-(plan PR-10): it runs for the shared profiles (`test`, `jit`) and is
-not part of `zig build check`, so engine regression pins in
-`tools/build/gate_counts.json` are untouched. A from-scratch consumer
+(plan PR-10): it runs for the shared profiles (`test`, `jit`, and
+`release-shared`) and is not part of `zig build check`, so engine regression
+pins in `tools/build/gate_counts.json` are untouched. A from-scratch consumer
 (`zig cc -DNAPI_VERSION=8 -I<installed>/include/nodeapi`, linking the
 built provider, run through `tools/nodeapi/ch-nodeapi` — no Node
-executable) is the packaging proof; macOS arm64 probe tallies,
-the consumer proof log, and the honest Linux x64 status (not run,
-provider not wired in `tools/build/linux.zig`) live in
-`doc/node-api-receipt.md`.
+executable) is the packaging proof; macOS arm64 probe tallies (18 probes +
+`tools/nodeapi/run_probe.sh`, stress, and conformance matrices), the consumer
+proof log, and the Linux x64 status (wired in `tools/build/linux.zig` and
+`.github/workflows/zig-linux.yml`, awaiting native Linux execution) live in
+[doc/node-api-receipt.md](doc/node-api-receipt.md).
 
 ## Contribute
 

@@ -1,8 +1,10 @@
 # Node-API (N-API) provider — implementation plan
 
 Status: **provider v1 landed on macOS arm64 (G0–G4 + G5-macOS-slice
-green 2026-11-13); Linux x64 wired, not run.** Owner: unassigned.
-Last updated: 2026-11-11. Base commit: `48b7db6d8`
+green 2026-11-13; Stage 2/3 OOM/teardown/async-host/BigInt64-TA
+hardening landed 2026-11-16); Linux x64 wired (`.github/workflows/zig-linux.yml`),
+not run locally.** Owner: unassigned.
+Last updated: 2026-11-16 (Stage 3B sync on `c24266598` lineage; plan anchor base: `48b7db6d8`).
 (`modernize/baseline`). This revision replaces the 2026-11-11 first
 draft; it folds in three audits (official Node 22 header inventory,
 JsRT capability mapping, other-engine precedents). Where this plan and
@@ -236,9 +238,9 @@ hitting an undecided PR stops and escalates (§9).
 | PR-4 | Language spike outcome (D5) | Zig unless N0.2 criteria fail. | N1.1+ | Spike report (§6, N0.2) + decision recorded here. |
 | PR-5 | Host contract shape (§3.2) | Private API as sketched in §3.2; host services all optional, absence ⇒ `napi_generic_failure` for dependent functions. | N0.3, N1.1, N4.* | Header sketch reviewed; test host compiles against it. |
 | PR-6 | Buffer policy | Provider-created buffers are `Uint8Array` views marked with a provider-private hidden symbol (§3.9); `napi_is_buffer` checks the marker. We do **not** provide a JS `Buffer` global; addons needing `require('buffer')` are runtime scope (§0, C). Document as known non-conformance vs Node. | N4.2 | Policy paragraph + marker test in N4.2. |
-| PR-7 | Async posture for v1 | Implement N4.3/N4.4 only against injected host services; with no services, async-work/TSFN/uv functions return `napi_generic_failure`. No provider-internal thread pool in v1. | N4.3, N4.4 | Host-contract test with and without services. |
-| PR-8 | Promise pumping | Provider installs the continuation callback only if the host has not; the **host** owns pumping (test host pumps explicitly; embedders must do the same). Provider never spins its own loop. | N3.4, N0.3 | Pump contract in §3.2 header comments + test. |
-| PR-9 | BigInt/Date gaps | v1: JS-mediated via intrinsic calls (D8): `BigInt(string)` for creation, string conversion for reads, `Object.prototype.toString` discrimination for `typeof`, global `Date` constructor/`getTime`/`instanceof` for dates. If N2.6/N3.1 evidence shows this is too slow or wrong, file a separate JsRT-extension engine lane; do not block the provider on it. BigInt64 typed arrays stay `napi_generic_failure` until a JsRT extension exists. | N2.6, N3.1 | Gap table §4.3 updated with chosen path per row. |
+| PR-7 | Async posture for v1 | Implement N4.3/N4.4 only against injected host services; with no services, async-work/TSFN/uv functions return `napi_generic_failure`. No provider-internal thread pool in v1. *(Stage 2/3: `tools/nodeapi/ch-nodeapi` now injects real `post_task`/`post_work`/`cancel_work`/`ref_loop`/`unref_loop` services.)* | N4.3, N4.4 | Host-contract test with and without services (`run_async_probe.sh`, `run_host_async_probe.sh`). |
+| PR-8 | Promise pumping | Provider installs the continuation callback only if the host has not; the **host** owns pumping (test host pumps explicitly; embedders must do the same). Provider never spins its own loop. *(Stage 2/3 A8-3: `services.host_manages_promise_queue` handshake + per-context ref-counted `PromiseQueue*` reclamation.)* | N3.4, N0.3 | Pump contract in §3.2 / `NodeApiHostApi.h` + `run_promise_script_probe.sh`. |
+| PR-9 | BigInt/Date gaps | v1: JS-mediated via intrinsic calls (D8): `BigInt(string)` for creation, string conversion for reads, `Object.prototype.toString` discrimination for `typeof`, global `Date` constructor/`getTime`/`instanceof` for dates. If N2.6/N3.1 evidence shows this is too slow or wrong, file a separate JsRT-extension engine lane; do not block the provider on it. BigInt64 typed arrays stayed `napi_generic_failure` in v1 until Phase-3 JsRT added `JsArrayTypeBigInt64`/`JsArrayTypeBigUint64`, which `NodeApiBinary.cpp` now wires directly. | N2.6, N3.1 | Gap table §4.3 updated; `binary_probe` 308/308 + `test/typedarray*.js` PASS. |
 | PR-10 | Platform/profile order | macOS arm64 first (test + jit profiles), then Linux x64. Provider tests are a separate `zig build check-nodeapi` step and must not move `gate_counts.json` pins. | N1.6, N5.* | Two platform receipts (N5.5). |
 | PR-11 | Test assets | Vendor: Node `test/js-native-api` (subset per N5.1), node-addon-examples `napi/` variants (subset per N5.2). Compile addons directly with `zig cc`/`zig c++` against vendored headers — no node-gyp/npm network dependency in CI. node-gyp consumer proof is a packaging-only check (N5.5, may be manual). | N0.5, N5.1, N5.2 | Asset manifest + runner works offline. |
 | PR-12 | Error semantics policy | Status mapping table in §3.10 is normative; JS-visible semantics (exception type, pending state) are conformance, Node's exact message text is not. Type-mismatch statuses are the specific `napi_*_expected` codes, produced by provider pre-checks — never blanket `napi_invalid_arg`. | N1.5, all impl tasks | Mapping table reviewed; N1.5 tests cover each row. |
@@ -571,7 +573,7 @@ implement them. SyntaxError creation/throw is likewise v9
 | Freeze/seal | `Object.freeze`/`Object.seal` intrinsic calls (N2.3) | — (intrinsic calls are semantically exact) |
 | Function `length` | `napi_create_function` `length` is the UTF-8 **name** length (not arity); `Function.length` stays V8 default 0 via post-create define to 0 (N2.4), per vendored `test_function` (`"Name_extra",5` ⇒ `name === 'Name_'`) | — |
 | Wrap/finalizer on arbitrary objects, env-thread exactly-once | Side table + before-collect trampoline + drain queue (N3.3) | JsRT weak-cell export lane — **stop-and-escalate**, do not heuristic around it |
-| BigInt64/BigUint64 typed arrays | `napi_generic_failure` + recorded non-conformance (N3.1) | JsRT `JsTypedArrayType` extension lane |
+| BigInt64/BigUint64 typed arrays | v1: `napi_generic_failure`; **Stage 3 (`c24266598`): direct JsRT wiring** via `JsArrayTypeBigInt64`/`JsArrayTypeBigUint64` (`ChakraCommon.h:537-541`) | Closed (`NodeApiBinary.cpp`); `JsArrayTypeFloat16` stays `napi_generic_failure` (no N-API v8 type) |
 | Weak `napi_ref` (count 0) | `JsCreateWeakReference` (N1.3) | — (API exists; semantics verified by test_reference) |
 
 ---
@@ -1385,15 +1387,43 @@ its lane; skip lists are data with reasons, reviewed at each gate.
 ## 11. Status tracker
 
 Update only with gate evidence (commands + tallies) in the same change.
+Details and reproduction commands are in [node-api-receipt.md](node-api-receipt.md).
 
-| Wave | Status | Evidence |
+| Wave | Status | Evidence (macOS arm64 unless noted; Linux x64 wired, unrun locally) |
 |---|---|---|
-| 0 — decisions/assets/harness | not started | — |
-| 1 — env + lifetime kernel | not started | — |
-| 2 — values/objects/functions/errors | not started | — |
-| 3 — binary/wrap/promises/script | not started | — |
-| 4 — host surface | not started | — |
-| 5 — conformance + packaging | not started | — |
+| 0 — decisions/assets/harness | **landed & verified** | PR-1..PR-12 recorded (§2.2); generated inventory `doc/node-api-inventory.md` (145 symbols at `NAPI_VERSION=8`); vendored Node 22.22.3 headers + test assets; `ch-nodeapi` (`tools/nodeapi/ch-nodeapi.cpp`) builds and passes addon loading/rejection smoke |
+| 1 — env + lifetime kernel | **landed & verified** | `NodeApiEnv`/`Scopes`/`Lifetime`/`Refs`; `zig build check-nodeapi` PASS (150 symbols: 145 `napi_*` + 5 host); `run_{scopes,refs,teardown,env_addr_reuse,gate}_probe.sh` PASS on `test` + `jit`; `env_churn_stress` 1208/1208 PASS; Stage 2/3 `extern "C"` OOM rollback & `host_manages_promise_queue` handshake |
+| 2 — values/objects/functions/errors | **landed & verified** | `NodeApiValues`/`Objects`/`Functions`/`ErrorsImpl`; `run_{values,objects,functions,errors,coerce}_probe.sh` PASS on `test` + `jit` (incl. numeric `ToPropertyKey` coercion and `napi_instanceof` status fixes) |
+| 3 — binary/wrap/promises/script | **landed & verified** | `NodeApiBinary`/`Wrap`/`Promise`/`Script`; `run_{binary,wrap,promise_script}_probe.sh` PASS on `test` + `jit` (`BINARY_PROBE` 308/308 incl. direct JsRT `BigInt64Array`/`BigUint64Array` wiring + `Float16Array` rejection); `gc_churn_stress` 78/78 PASS; Stage 2/3 A8-3 `PromiseQueue*` reclamation & detached external AB finalizer safety |
+| 4 — host surface | **landed & verified** | `NodeApiHost`/`Buffers`/`Async`/`AsyncContext`; `run_{host,buffers,async,asyncctx,host_async}_probe.sh` PASS on `test` + `jit`; `ch-nodeapi` injects real `post_task`/`post_work`/`cancel_work`/`ref_loop`/`unref_loop` + `--pump-timeout-ms` (`run_host_async_probe.sh` 4/4 PASS); `tsfn_teardown_stress` 252/252 PASS |
+| 5 — conformance + packaging | **macOS arm64 green; Linux x64 wired** | 18/18 `test/nodeapi/probes/run_*_probe.sh` + `tools/nodeapi/run_probe.sh` PASS on `test` + `jit`; `REPEATS=5` stress ALL PASS on `test` + `jit`; `run_matrix.py --suite all --host ch-nodeapi` **46 pass / 23 skip / 0 fail**; `run_node_addon_api_matrix.py --hosts both` **52 pass / 61 skip / 6 fail** (`ch-nodeapi` 23/6 on V8 message text only; `node-direct` 29/0); headers + `libChakraNodeApi` installed & consumer-tested; Linux x64 wired in `tools/build/linux.zig` + `.github/workflows/zig-linux.yml` (unrun locally) |
+
+### Post-plan Stage 2/3 reconciliations (against `modernize/baseline` `c24266598`)
+
+- **PR-8 (`PromiseQueue` & host ownership):** `chakra_nodeapi_host_services`
+  adds `host_manages_promise_queue` (`lib/NodeApi/NodeApiHostApi.h`). When
+  `false`, `NodeApiPromise_EnsureContinuationInstalled` creates at most one
+  ref-counted per-context `PromiseQueue` and `NodeApiPromise_DestroyForEnv`
+  clears `JsSetPromiseContinuationCallback(nullptr, nullptr)` and deletes
+  `PromiseQueue*` when the last env on that context is destroyed (closing
+  the A8-3 leak).
+- **PR-7 / `ch-nodeapi` async services:** `tools/nodeapi/ch-nodeapi.cpp`
+  now provides an active host loop (`post_task`, `post_work`, `cancel_work`,
+  `ref_loop`, `unref_loop`, `host_manages_promise_queue = true`) and honors
+  `--pump-timeout-ms`, enabling async work and TSFN suites in `run_matrix.py`.
+- **PR-9 / §4.3 `BigInt64Array`/`BigUint64Array`:** Phase-3 JsRT added
+  `JsArrayTypeBigInt64` and `JsArrayTypeBigUint64` to `JsTypedArrayType`
+  (`lib/Jsrt/ChakraCommon.h:537-541`), and `lib/NodeApi/NodeApiBinary.cpp`
+  now wires `napi_bigint64_array` / `napi_biguint64_array` directly through
+  `JsCreateTypedArray` / `JsGetTypedArrayInfo` / `JsGetTypedArrayStorage`.
+  `JsArrayTypeFloat16` remains mapped to `napi_generic_failure` (no N-API v8
+  enum counterpart).
+- **OOM & detached external AB hardening:** All `extern "C"` entry points and
+  sub-state creators (`NodeApiEnv`, `NodeApiPromise`, `NodeApiWrap`,
+  `NodeApiScopes`, `NodeApiRefs`) guard `std::nothrow` / `try/catch (...)`
+  and roll back partial allocations; `JsrtExternalArrayBuffer` +
+  `napi_detach_arraybuffer` guarantee single-fire finalization without
+  leaking detached external buffers.
 
 ---
 
@@ -1412,7 +1442,7 @@ Condensed from the JsRT audit (anchors: `C` = `lib/Jsrt/ChakraCommon.h`,
 | Functions | direct (enhanced) | `JsCreateEnhancedFunction` K:404; `JsCallFunction` C:2176; oracle `bin/NativeTests/JsRTApiTest.cpp:734` |
 | Externals | partial | `JsCreateExternalObject` C:1517 (one data+cb, GC-thread, no context) |
 | Wrap/tags/finalizer on arbitrary objects | provider-built | side table + before-collect + drain (§3.7) |
-| Binary | direct classic | C:1990-2159; BigInt64 arrays absent from `JsTypedArrayType` C:492 |
+| Binary | direct classic + BigInt64/BigUint64 | C:1990-2159; `JsArrayTypeFloat16`/`BigInt64`/`BigUint64` at C:533-541 (`BigInt64`/`BigUint64` wired directly in `NodeApiBinary.cpp`) |
 | Promises | near-direct | `JsCreatePromise` K:963 (returns resolve/reject fns); continuation C:2485 |
 | Symbols | partial | `JsCreateSymbol` C:1228 (null-desc quirk); `Symbol.for` via intrinsic call |
 | BigInt / Date | absent | string/intrinsic-mediated (PR-9) or engine lane |
