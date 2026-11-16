@@ -27,6 +27,29 @@ struct HostGlobalsLock
     ~HostGlobalsLock() { LeaveCriticalSection(cs); }
 };
 
+// Leaf critical section serializing stderr emissions across agent threads.
+// Intentionally leaked on teardown like HostGlobalsCS(); never held across
+// JS/JsRT calls or HostGlobalsLock.
+static CRITICAL_SECTION* StderrCS()
+{
+    static CRITICAL_SECTION* s_cs = [] {
+        CRITICAL_SECTION* cs = new CRITICAL_SECTION();
+        InitializeCriticalSection(cs);
+        return cs;
+    }();
+    return s_cs;
+}
+
+WScriptJsrt::StderrLock::StderrLock()
+{
+    EnterCriticalSection(StderrCS());
+}
+
+WScriptJsrt::StderrLock::~StderrLock()
+{
+    LeaveCriticalSection(StderrCS());
+}
+
 // Negative-phase classification state (host flag -NegativePhaseReport).
 // Both flags are std::atomic<bool> because S6e crossthread agents execute and
 // report errors concurrently with the main thread; emission uses
@@ -74,6 +97,10 @@ void WScriptJsrt::ReportNegativePhaseMarker(bool parseStageFailure)
     {
         return;
     }
+    // Hold StderrLock across CAS + emit + fflush so neither CH_NEGATIVE_PHASE
+    // itself nor a sibling thread's subsequent PrintException can interleave or
+    // print ahead of line 1.
+    StderrLock lock;
     bool expected = false;
     if (!s_negativePhaseMarkerEmitted.compare_exchange_strong(expected, true))
     {
@@ -82,6 +109,7 @@ void WScriptJsrt::ReportNegativePhaseMarker(bool parseStageFailure)
     const char* phase = parseStageFailure ? "parse"
         : (s_moduleGraphFailureWitness.load() ? "resolution" : "runtime");
     fprintf(stderr, "CH_NEGATIVE_PHASE: %s\n", phase);
+    fflush(stderr);
 }
 
 MessageQueue* WScriptJsrt::GetThreadMessageQueue()
@@ -96,11 +124,7 @@ MessageQueue* WScriptJsrt::GetThreadMessageQueue()
 
 DWORD_PTR WScriptJsrt::GetNextSourceContext()
 {
-#if _WIN64
-    return (DWORD_PTR)InterlockedIncrement64(reinterpret_cast<volatile LONGLONG*>(&sourceContext)) - 1;
-#else
-    return (DWORD_PTR)InterlockedIncrement(reinterpret_cast<volatile LONG*>(&sourceContext)) - 1;
-#endif
+    return sourceContext.fetch_add(1);
 }
 
 void WScriptJsrt::RegisterScriptDir(DWORD_PTR sourceContext, LPCSTR fullDirNarrow)

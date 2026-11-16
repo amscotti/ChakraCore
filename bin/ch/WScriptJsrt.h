@@ -4,6 +4,7 @@
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #pragma once
+#include <atomic>
 #include <list>
 #include <new>
 
@@ -93,6 +94,19 @@ public:
     // agent raced the main loop's queue and its record was parsed/evaluated
     // on the wrong thread — the import promise then never settled.
     static void PushMessage(MessageBase *message) { GetThreadMessageQueue()->InsertSorted(message); }
+
+    // Leaf RAII guard serializing stderr writes across the main thread and
+    // S6e crossthread agent workers so CH_NEGATIVE_PHASE and PAL stderr lines
+    // cannot tear or reorder. Must never be held across JS/JsRT calls or
+    // HostGlobalsLock.
+    struct StderrLock
+    {
+        StderrLock();
+        ~StderrLock();
+    private:
+        StderrLock(const StderrLock&);
+        StderrLock& operator=(const StderrLock&);
+    };
 
     // Negative-phase classification (host flag -NegativePhaseReport). The
     // marker lets a test runner re-judge negative scenarios by the stage the
@@ -201,11 +215,11 @@ private:
     static MessageQueue* GetThreadMessageQueue();
 
     // Process-global module/script bookkeeping. Since S6e, agent threads
-    // mutate these concurrently with the main thread: every access in
-    // WScriptJsrt.cpp takes the host-globals critical section, and
-    // sourceContext is additionally interlocked (see GetNextSourceContext).
+    // mutate these concurrently with the main thread: map accesses take the
+    // host-globals critical section, while sourceContext is atomic (read
+    // directly with load() and allocated via GetNextSourceContext()).
     static MessageQueue *messageQueue;
-    static DWORD_PTR sourceContext;
+    static std::atomic<DWORD_PTR> sourceContext;
     static std::map<std::string, JsModuleRecord> moduleRecordMap;
     static std::map<JsModuleRecord, std::string> moduleDirMap;
     static std::map<JsModuleRecord, ModuleState> moduleErrMap;

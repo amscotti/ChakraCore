@@ -72,7 +72,7 @@ std::map<std::string, JsModuleRecord>  WScriptJsrt::moduleRecordMap;
 std::map<JsModuleRecord, std::string>  WScriptJsrt::moduleDirMap;
 std::map<JsModuleRecord, ModuleState>  WScriptJsrt::moduleErrMap;
 std::map<DWORD_PTR, std::string> WScriptJsrt::scriptDirMap;
-DWORD_PTR WScriptJsrt::sourceContext = 0;
+std::atomic<DWORD_PTR> WScriptJsrt::sourceContext{ 0 };
 FileNode * SourceMap::root = nullptr;
 
 #define ERROR_MESSAGE_TO_STRING(errorCode, errorMessage, errorMessageString)        \
@@ -257,7 +257,11 @@ JsValueRef WScriptJsrt::LoadScriptFileHelper(JsValueRef callee, JsValueRef *argu
             hr = Helpers::LoadScriptFromFile(*fileName, fileContent);
             if (FAILED(hr))
             {
-                fprintf(stderr, "Couldn't load file '%s'\n", fileName.GetString());
+                {
+                    StderrLock lock;
+                    fprintf(stderr, "Couldn't load file '%s'\n", fileName.GetString());
+                    fflush(stderr);
+                }
                 IfJsrtErrorSetGo(ChakraRTInterface::JsGetUndefinedValue(&returnValue));
                 return returnValue;
             }
@@ -346,11 +350,7 @@ JsValueRef WScriptJsrt::LoadScriptHelper(JsValueRef callee, bool isConstructCall
             isFile = false;
             if (isSourceModule)
             {
-                int nextId;
-                {
-                    HostGlobalsLock lock;
-                    nextId = (int)sourceContext;
-                }
+                const int nextId = (int)sourceContext.load();
                 sprintf_s(fileNameBuffer, MAX_PATH, "moduleScript%i.js", nextId);
                 fileNameNarrow = fileNameBuffer;
             }
@@ -1014,7 +1014,11 @@ JsValueRef __stdcall WScriptJsrt::LoadTextFileCallback(JsValueRef callee, bool i
 
             if (FAILED(hr))
             {
-                fprintf(stderr, "Couldn't load file '%s'\n", fileName.GetString());
+                {
+                    StderrLock lock;
+                    fprintf(stderr, "Couldn't load file '%s'\n", fileName.GetString());
+                    fflush(stderr);
+                }
                 IfJsrtErrorSetGo(ChakraRTInterface::JsGetUndefinedValue(&returnValue));
                 return returnValue;
             }
@@ -1172,7 +1176,11 @@ JsValueRef __stdcall WScriptJsrt::LoadBinaryFileCallback(JsValueRef callee,
 
             if (FAILED(hr))
             {
-                fprintf(stderr, "Couldn't load file '%s'\n", fileName.GetString());
+                {
+                    StderrLock lock;
+                    fprintf(stderr, "Couldn't load file '%s'\n", fileName.GetString());
+                    fflush(stderr);
+                }
                 IfJsrtErrorSetGoLabel(ChakraRTInterface::JsGetUndefinedValue(&returnValue), Error);
                 return returnValue;
             }
@@ -1184,7 +1192,9 @@ JsValueRef __stdcall WScriptJsrt::LoadBinaryFileCallback(JsValueRef callee,
             IfJsrtErrorSetGoLabel(ChakraRTInterface::JsGetArrayBufferStorage(arrayBuffer, &buffer, &bufferLength), ErrorStillFree);
             if (bufferLength < lengthBytes)
             {
+                StderrLock lock;
                 fwprintf(stderr, _u("Array buffer size is insufficient to store the binary file.\n"));
+                fflush(stderr);
             }
             else
             {
@@ -1310,7 +1320,11 @@ bool WScriptJsrt::PrintException(LPCSTR fileName, JsErrorCode jsErrorCode, JsVal
 
             if (errorMessage.Initialize(exception) != JsNoError)
             {
-                fwprintf(stderr, _u("ERROR attempting to coerce error to string, using alternate handler\n"));
+                {
+                    StderrLock lock;
+                    fwprintf(stderr, _u("ERROR attempting to coerce error to string, using alternate handler\n"));
+                    fflush(stderr);
+                }
                 bool hasException = false;
                 ChakraRTInterface::JsHasException(&hasException);
                 if (hasException)
@@ -1347,12 +1361,18 @@ bool WScriptJsrt::PrintException(LPCSTR fileName, JsErrorCode jsErrorCode, JsVal
                         IfJsrtErrorFail(CreatePropertyIdFromString("column", &columnPropertyId), false);
                         IfJsrtErrorFail(ChakraRTInterface::JsGetProperty(metaData, columnPropertyId, &columnProperty), false);
                         IfJsrtErrorFail(ChakraRTInterface::JsNumberToInt(columnProperty, &column), false);
-                        fwprintf(stderr, _u("%ls\n        at code (%S%S:%d:%d)\n"),
-                            errorMessage.GetWideString(), shortFileName, ext, line + 1, column + 1);
+                        {
+                            StderrLock lock;
+                            fwprintf(stderr, _u("%ls\n        at code (%S%S:%d:%d)\n"),
+                                errorMessage.GetWideString(), shortFileName, ext, line + 1, column + 1);
+                            fflush(stderr);
+                        }
                     }
                     else
                     {
+                        StderrLock lock;
                         fwprintf(stderr, _u("%ls\n\tat code (%S%S:\?\?:\?\?)\n"), errorMessage.GetWideString(), shortFileName, ext);
+                        fflush(stderr);
                     }
                     return true;
                 }
@@ -1381,14 +1401,18 @@ bool WScriptJsrt::PrintException(LPCSTR fileName, JsErrorCode jsErrorCode, JsVal
                 _splitpath_s(fileName, nullptr, 0, nullptr, 0, shortFileName, _countof(shortFileName), ext, _countof(ext));
                 if (hasPosition)
                 {
+                    StderrLock lock;
                     fwprintf(stderr, _u("%ls\n\tat code (%S%S:%d:%d)\n"),
                         errorMessage.GetWideString(), shortFileName, ext, (int)line + 1,
                         (int)column + 1);
+                    fflush(stderr);
                 }
                 else
                 {
+                    StderrLock lock;
                     fwprintf(stderr, _u("%ls\n\tat code (%S%S:?)\n"),
                         errorMessage.GetWideString(), shortFileName, ext);
+                    fflush(stderr);
                 }
             }
             else
@@ -1417,25 +1441,33 @@ bool WScriptJsrt::PrintException(LPCSTR fileName, JsErrorCode jsErrorCode, JsVal
                     CHAR ext[_MAX_EXT];
                     _splitpath_s(fName, nullptr, 0, nullptr, 0, shortFileName, _countof(shortFileName), ext, _countof(ext));
 
+                    StderrLock lock;
                     fprintf(stderr, "thrown at %s%s:\n^\n", shortFileName, ext);
                     fwprintf(stderr, _u("%ls\n"), errorMessage.GetWideString());
+                    fflush(stderr);
                 }
                 else
                 {
                     IfJsrtErrorFail(errorStack.Initialize(stackProperty), false);
+                    StderrLock lock;
                     fwprintf(stderr, _u("%ls\n"), errorStack.GetWideString());
+                    fflush(stderr);
                 }
             }
         }
         else
         {
+            StderrLock lock;
             fwprintf(stderr, _u("Error : %ls\n"), errorTypeString);
+            fflush(stderr);
         }
         return true;
     }
     else
     {
+        StderrLock lock;
         fwprintf(stderr, _u("Error : %ls\n"), errorTypeString);
+        fflush(stderr);
     }
     return false;
 }
@@ -1543,8 +1575,12 @@ void WScriptJsrt::PromiseContinuationCallback(JsValueRef task, void *callbackSta
     WScriptJsrt::CallbackMessage *msg = new (std::nothrow) WScriptJsrt::CallbackMessage(0, task);
     if (msg == nullptr || !msg->HasValidRef())
     {
-        fwprintf(stderr, _u("WARNING: failed to retain promise continuation task (err=0x%x)\n"),
-            msg ? msg->GetAddRefError() : JsErrorOutOfMemory);
+        {
+            StderrLock lock;
+            fwprintf(stderr, _u("WARNING: failed to retain promise continuation task (err=0x%x)\n"),
+                msg ? msg->GetAddRefError() : JsErrorOutOfMemory);
+            fflush(stderr);
+        }
         delete msg;
         return;
     }
@@ -1560,8 +1596,12 @@ void WScriptJsrt::TimerContinuationCallback(JsValueRef task, unsigned int delayM
     WScriptJsrt::CallbackMessage *msg = new (std::nothrow) WScriptJsrt::CallbackMessage(delayMilliseconds, task);
     if (msg == nullptr || !msg->HasValidRef())
     {
-        fwprintf(stderr, _u("WARNING: failed to retain timer continuation task (err=0x%x)\n"),
-            msg ? msg->GetAddRefError() : JsErrorOutOfMemory);
+        {
+            StderrLock lock;
+            fwprintf(stderr, _u("WARNING: failed to retain timer continuation task (err=0x%x)\n"),
+                msg ? msg->GetAddRefError() : JsErrorOutOfMemory);
+            fflush(stderr);
+        }
         delete msg;
         return;
     }

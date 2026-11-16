@@ -325,7 +325,9 @@ HRESULT WScriptJsrt::ModuleMessage::Call(LPCSTR fileName)
                     }
                     if (reportLoadFailure)
                     {
+                        StderrLock lock;
                         fprintf(stderr, "Couldn't load file '%s'\n", specifierStr.GetString());
+                        fflush(stderr);
                     }
                 }
                 if (directParse)

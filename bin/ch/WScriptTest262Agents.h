@@ -111,9 +111,12 @@ JsValueRef __stdcall WScriptJsrt::BroadcastCallback(JsValueRef callee, bool isCo
                 if (child->consumedBroadcastSeq.load() < targetSeq && !departed)
                 {
                     ULONGLONG waitedMs = GetTickCount64() - startMs;
-                    fwprintf(stderr, _u("live agent did not acknowledge broadcast (waited %llu ms)\n"),
-                        static_cast<unsigned long long>(waitedMs));
-                    fflush(stderr);
+                    {
+                        StderrLock lock;
+                        fwprintf(stderr, _u("live agent did not acknowledge broadcast (waited %llu ms)\n"),
+                            static_cast<unsigned long long>(waitedMs));
+                        fflush(stderr);
+                    }
                 }
             }
         }
