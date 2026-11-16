@@ -3092,10 +3092,13 @@
     },
     {
       "features": [
-        "mvp"
+        "mvp",
+        "simd"
       ],
-      "phase": "P1",
-      "runnerTags": [],
+      "phase": "P3",
+      "runnerTags": [
+        "exclude_win7"
+      ],
       "suite": "wasm",
       "test-id": "wasm[67]"
     },
@@ -3104,9 +3107,7 @@
         "mvp"
       ],
       "phase": "P1",
-      "runnerTags": [
-        "require_backend"
-      ],
+      "runnerTags": [],
       "suite": "wasm",
       "test-id": "wasm[68]"
     },
@@ -3145,10 +3146,9 @@
     },
     {
       "features": [
-        "mvp",
-        "threads"
+        "mvp"
       ],
-      "phase": "P3",
+      "phase": "P1",
       "runnerTags": [
         "require_backend"
       ],
@@ -3170,7 +3170,7 @@
     {
       "features": [
         "mvp",
-        "multi-value"
+        "threads"
       ],
       "phase": "P3",
       "runnerTags": [
@@ -3178,6 +3178,18 @@
       ],
       "suite": "wasm",
       "test-id": "wasm[74]"
+    },
+    {
+      "features": [
+        "mvp",
+        "multi-value"
+      ],
+      "phase": "P3",
+      "runnerTags": [
+        "require_backend"
+      ],
+      "suite": "wasm",
+      "test-id": "wasm[75]"
     },
     {
       "features": [
@@ -4278,10 +4290,8 @@
       "features": [
         "mvp"
       ],
-      "phase": "P2-pending",
-      "runnerTags": [
-        "exclude_x64"
-      ],
+      "phase": "P1",
+      "runnerTags": [],
       "suite": "AsmJs",
       "test-id": "AsmJs[101]"
     },
@@ -4289,8 +4299,10 @@
       "features": [
         "mvp"
       ],
-      "phase": "P1",
-      "runnerTags": [],
+      "phase": "P2-pending",
+      "runnerTags": [
+        "exclude_x64"
+      ],
       "suite": "AsmJs",
       "test-id": "AsmJs[102]"
     },
@@ -4325,10 +4337,8 @@
       "features": [
         "mvp"
       ],
-      "phase": "P2-pending",
-      "runnerTags": [
-        "exclude_x64"
-      ],
+      "phase": "P1",
+      "runnerTags": [],
       "suite": "AsmJs",
       "test-id": "AsmJs[106]"
     },
@@ -4336,8 +4346,10 @@
       "features": [
         "mvp"
       ],
-      "phase": "P1",
-      "runnerTags": [],
+      "phase": "P2-pending",
+      "runnerTags": [
+        "exclude_x64"
+      ],
       "suite": "AsmJs",
       "test-id": "AsmJs[107]"
     },
@@ -4445,9 +4457,7 @@
         "mvp"
       ],
       "phase": "P1",
-      "runnerTags": [
-        "exclude_drt"
-      ],
+      "runnerTags": [],
       "suite": "AsmJs",
       "test-id": "AsmJs[119]"
     },
@@ -4456,9 +4466,20 @@
         "mvp"
       ],
       "phase": "P1",
-      "runnerTags": [],
+      "runnerTags": [
+        "exclude_drt"
+      ],
       "suite": "AsmJs",
       "test-id": "AsmJs[120]"
+    },
+    {
+      "features": [
+        "mvp"
+      ],
+      "phase": "P1",
+      "runnerTags": [],
+      "suite": "AsmJs",
+      "test-id": "AsmJs[121]"
     },
     {
       "features": [
@@ -4469,7 +4490,7 @@
         "exclude_sanitize_address"
       ],
       "suite": "AsmJs",
-      "test-id": "AsmJs[121]"
+      "test-id": "AsmJs[122]"
     },
     {
       "features": [
@@ -4478,7 +4499,7 @@
       "phase": "P1",
       "runnerTags": [],
       "suite": "AsmJs",
-      "test-id": "AsmJs[122]"
+      "test-id": "AsmJs[123]"
     },
     {
       "features": [
@@ -4489,15 +4510,6 @@
         "exclude_debug",
         "exclude_razzle"
       ],
-      "suite": "AsmJs",
-      "test-id": "AsmJs[123]"
-    },
-    {
-      "features": [
-        "mvp"
-      ],
-      "phase": "P1",
-      "runnerTags": [],
       "suite": "AsmJs",
       "test-id": "AsmJs[124]"
     },
@@ -4515,11 +4527,20 @@
         "mvp"
       ],
       "phase": "P1",
+      "runnerTags": [],
+      "suite": "AsmJs",
+      "test-id": "AsmJs[126]"
+    },
+    {
+      "features": [
+        "mvp"
+      ],
+      "phase": "P1",
       "runnerTags": [
         "exclude_debug"
       ],
       "suite": "AsmJs",
-      "test-id": "AsmJs[126]"
+      "test-id": "AsmJs[127]"
     },
     {
       "features": [
@@ -4531,15 +4552,6 @@
         "exclude_mac",
         "slow"
       ],
-      "suite": "AsmJs",
-      "test-id": "AsmJs[127]"
-    },
-    {
-      "features": [
-        "mvp"
-      ],
-      "phase": "P1",
-      "runnerTags": [],
       "suite": "AsmJs",
       "test-id": "AsmJs[128]"
     },
@@ -4557,9 +4569,7 @@
         "mvp"
       ],
       "phase": "P1",
-      "runnerTags": [
-        "exclude_drt"
-      ],
+      "runnerTags": [],
       "suite": "AsmJs",
       "test-id": "AsmJs[130]"
     },
@@ -4568,7 +4578,9 @@
         "mvp"
       ],
       "phase": "P1",
-      "runnerTags": [],
+      "runnerTags": [
+        "exclude_drt"
+      ],
       "suite": "AsmJs",
       "test-id": "AsmJs[131]"
     },
@@ -4577,9 +4589,7 @@
         "mvp"
       ],
       "phase": "P1",
-      "runnerTags": [
-        "exclude_drt"
-      ],
+      "runnerTags": [],
       "suite": "AsmJs",
       "test-id": "AsmJs[132]"
     },
@@ -4589,8 +4599,7 @@
       ],
       "phase": "P1",
       "runnerTags": [
-        "exclude_drt",
-        "exclude_sanitize_address"
+        "exclude_drt"
       ],
       "suite": "AsmJs",
       "test-id": "AsmJs[133]"
@@ -4613,7 +4622,8 @@
       ],
       "phase": "P1",
       "runnerTags": [
-        "exclude_drt"
+        "exclude_drt",
+        "exclude_sanitize_address"
       ],
       "suite": "AsmJs",
       "test-id": "AsmJs[135]"
@@ -4623,7 +4633,9 @@
         "mvp"
       ],
       "phase": "P1",
-      "runnerTags": [],
+      "runnerTags": [
+        "exclude_drt"
+      ],
       "suite": "AsmJs",
       "test-id": "AsmJs[136]"
     },
@@ -4698,6 +4710,15 @@
       "runnerTags": [],
       "suite": "AsmJs",
       "test-id": "AsmJs[144]"
+    },
+    {
+      "features": [
+        "mvp"
+      ],
+      "phase": "P1",
+      "runnerTags": [],
+      "suite": "AsmJs",
+      "test-id": "AsmJs[145]"
     },
     {
       "features": [
@@ -4847,7 +4868,7 @@
   "meta": {
     "counts": "rlexe entries (variants included), never files",
     "generator": "tools/build/gen_wasm_manifest.py",
-    "p1": 381,
+    "p1": 382,
     "plan": "doc/wasm-arm64-plan.md D7",
     "suites": {
       "ASMJSParser": {
@@ -4867,10 +4888,10 @@
         "rlexe": "test/AsmJSFloat/rlexe.xml"
       },
       "AsmJs": {
-        "entries": 145,
-        "p1": 121,
+        "entries": 146,
+        "p1": 122,
         "phases": {
-          "P1": 121,
+          "P1": 122,
           "P2-pending": 23,
           "excluded": 1
         },
@@ -4895,13 +4916,13 @@
         "rlexe": "test/WasmSpec.MultiValue/rlexe.xml"
       },
       "wasm": {
-        "entries": 75,
+        "entries": 76,
         "p1": 47,
         "phases": {
           "P1": 47,
           "P2": 1,
           "P2-pending": 8,
-          "P3": 6,
+          "P3": 7,
           "deferred": 4,
           "excluded": 9
         },
@@ -4917,6 +4938,6 @@
       }
     },
     "test-id": "<suite>[<0-based rlexe entry ordinal>]",
-    "total": 481
+    "total": 483
   }
 }

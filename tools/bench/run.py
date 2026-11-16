@@ -63,13 +63,10 @@ KNOWN_ISSUES = [
     # Octane/splay.js was tracked here (full-JIT + concurrent-GC crash:
     # missing ARM64 JIT software write barrier). Fixed; a crash now
     # fails the harness as a regression.
-    ("JetStream", "cdjs.js", "interp",
-     "intermittent SIGSEGV under -nonative with concurrent GC "
-     "(pre-existing; clean with -off:ConcurrentMark and under full "
-     "JIT). Carded in doc/open-cards.md."),
-    ("JetStream", "cdjs.js", "simplejit",
-     "same interpreter/concurrent-GC crash as the interp tier; "
-     "carded in doc/open-cards.md."),
+    # JetStream/cdjs.js (interp and simplejit tiers) was tracked here
+    # (16-bit byte-offset truncation in SmallHeapBlockT::GetRealAddressFromInterior
+    # on 128 KiB medium blocks). Fixed; a crash now fails the harness as
+    # a regression.
 ]
 
 MARKER_RE = re.compile(r"###\s*(TIME|SCORE):\s*([0-9]+(?:\.[0-9]+)?)")

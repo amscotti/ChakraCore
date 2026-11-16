@@ -15,9 +15,9 @@
 //     Creates are C-column No (gated); gets/detach/is_detached are Yes
 //     (execute with pending, pending preserved).
 //   - ArrayBuffer creation via JsCreateArrayBuffer; external via
-//     JsCreateExternalArrayBuffer with trampoline §3.7 record.
+//     JsCreateExternalArrayBuffer with trampoline section 3.7 record.
 //   - TypedArray/DataView creation via JsCreateTypedArray / JsCreateDataView.
-//   - Info getters compose JsGet*Info / JsGet*Storage per audit §2.4.
+//   - Info getters compose JsGet*Info / JsGet*Storage per audit section 2.4.
 //   - Detached detection is via the JS ArrayBuffer.prototype.detached getter
 //     (verified present in this build: JavascriptLibrary.cpp registers
 //     accessor "detached" with GetterDetached, ArrayBuffer.cpp:546-562).
@@ -27,17 +27,13 @@
 //     + 268-298), which is indistinguishable from a zero-length attached
 //     buffer (also NULL/0). See the detached-evidence comment on
 //     IsDetachedViaProperty.
-//   - BigInt64/BigUint64 typed arrays work seamlessly both before and after
-//     Stage-3 JsTypedArrayType enum additions:
-//     creation tries `JsCreateTypedArray` with the TypeIds-derived code (10/11)
-//     and falls back to JS `BigInt64Array`/`BigUint64Array` construction via
-//     `JsConstructObject` if `JsCreateTypedArray` returns `JsErrorInvalidArgument`;
-//     inspection reads `int` enum value + passes `elementSize = nullptr` to
-//     `JsGetTypedArrayStorage` to avoid pre-Stage-3 JsRT elementSize switch
-//     aborts. `JsArrayTypeFloat16` (9) has no N-API v8 enum counterpart and
-//     returns `napi_generic_failure` cleanly with no enum UB.
+//   - BigInt64/BigUint64 typed arrays wire directly to JsRT's
+//     `JsArrayTypeBigInt64` and `JsArrayTypeBigUint64` via
+//     `JsCreateTypedArray`, `JsGetTypedArrayInfo`, and
+//     `JsGetTypedArrayStorage(..., &elemSize)`. `JsArrayTypeFloat16` has no
+//     N-API v8 enum counterpart and returns `napi_generic_failure` cleanly.
 //
-// Ownership records (memory-management.md §3; plan §3.7/§3.4 R4):
+// Ownership records (memory-management.md section 3; plan section 3.7/3.4 R4):
 //
 //   External ArrayBuffer records (napi_create_external_arraybuffer):
 //     Resource / creation call: `ExternalRecord` heap allocation
@@ -56,10 +52,10 @@
 //       `g_ext_records` under `g_ext_mutex`:
 //       (a) `napi_detach_arraybuffer` claims and removes `id` + `ab_key` upon
 //           successful `JsDetachArrayBuffer`, enqueues `rec`, and drains via
-//           `DrainExternalFinalizers` once (handling pre-Stage-3 JsRT that skips
-//           detached finalizers AND making any Stage-3 post-detach GC Finalize
-//           find-miss on `id` a zero-touch no-op — no leak, no double-free, no
-//           double user callback).
+//           `DrainExternalFinalizers` once (firing immediately at detach per
+//           Node semantics AND making subsequent GC `Finalize` on the detached
+//           buffer find `id` absent -- a zero-touch no-op: no leak, no
+//           double-free, no double user callback).
 //       (b) GC `ExternalArrayBufferTrampoline(state)` extracts `id` by value,
 //           looks it up in `g_ext_records` (no raw pointer dereference!), removes
 //           it + `ab_key`, and enqueues via `EnqueueRecord`.
@@ -113,7 +109,7 @@
 //     unpublished value is discarded (its external record, if any, will be
 //     freed by GC as above).
 //
-// Potential user-code points (R4 / §6):
+// Potential user-code points (R4 / section 6):
 //   - TypedArray/DataView property getters ("buffer", "byteOffset",
 //     "byteLength", "detached") invoke engine getters (no user trap on the
 //     builtin prototype, but a Proxy or tampered prototype could run user
@@ -242,7 +238,7 @@ napi_status MakeIdMap(napi_env env, const char* name, JsPropertyIdRef* out,
    // so NodeApiEnv.cpp's destroy path can drain/discard it via
    // NodeApiBinary.h -- one entity, no anonymous-namespace duplicate)
 
-// --- External ArrayBuffer finalizer queue (§3.7-style, N3.2-compatible) ---
+// --- External ArrayBuffer finalizer queue (section 3.7-style, N3.2-compatible) ---
 //
 // The queue is keyed by per-env generation (not by env pointer value) to
 // survive address reuse: a trampoline for a dead env fails the
@@ -266,8 +262,8 @@ std::mutex g_ext_mutex;
 std::atomic<uint64_t> g_next_ext_id{1};
 // Unclaimed ExternalRecords keyed by token ID (values are never freed while
 // stored here). Both detach and GC trampoline race to erase & claim `id`
-// under `g_ext_mutex`, guaranteeing at-most-once invocation across both
-// pre-Stage-3 and post-Stage-3 JsrtExternalArrayBuffer behavior.
+// under `g_ext_mutex`, guaranteeing at-most-once invocation across detach
+// and subsequent GC finalization of detached external ArrayBuffers.
 std::unordered_map<uint64_t, ExternalRecord*> g_ext_records;
 // Live external ArrayBuffers per generation (JsValueRef key -> token id)
 // for synchronous claim on napi_detach_arraybuffer.
@@ -457,14 +453,8 @@ napi_status IsDetachedViaProperty(napi_env env, JsValueRef ab, bool* out) {
   return napi_ok;
 }
 
-// NAPI type <-> Js type integer maps (lib/Runtime/Types/TypeId.h +
-// lib/Jsrt/Jsrt.cpp:2233): TypeIds_Float16Array=9, Int64Array=10,
-// Uint64Array=11 relative to TypeIds_Int8Array. Using `int` avoids enum UB
-// when pre-Stage-3 ChakraCommon.h omits JsArrayTypeBigInt64/BigUint64.
-constexpr int kJsArrayTypeBigInt64 = 10;
-constexpr int kJsArrayTypeBigUint64 = 11;
-
-bool NapiTypeToJsInt(napi_typedarray_type n, int* out) {
+// NAPI type <-> JsTypedArrayType enum maps (lib/Jsrt/ChakraCommon.h).
+bool NapiTypeToJs(napi_typedarray_type n, JsTypedArrayType* out) {
   switch (n) {
     case napi_int8_array: *out = JsArrayTypeInt8; return true;
     case napi_uint8_array: *out = JsArrayTypeUint8; return true;
@@ -475,36 +465,13 @@ bool NapiTypeToJsInt(napi_typedarray_type n, int* out) {
     case napi_uint32_array: *out = JsArrayTypeUint32; return true;
     case napi_float32_array: *out = JsArrayTypeFloat32; return true;
     case napi_float64_array: *out = JsArrayTypeFloat64; return true;
-    case napi_bigint64_array: *out = kJsArrayTypeBigInt64; return true;
-    case napi_biguint64_array: *out = kJsArrayTypeBigUint64; return true;
+    case napi_bigint64_array: *out = JsArrayTypeBigInt64; return true;
+    case napi_biguint64_array: *out = JsArrayTypeBigUint64; return true;
     default: return false;
   }
 }
 
-size_t ElemSizeForJsInt(int t) {
-  switch (t) {
-    case JsArrayTypeInt8:
-    case JsArrayTypeUint8:
-    case JsArrayTypeUint8Clamped:
-      return 1;
-    case JsArrayTypeInt16:
-    case JsArrayTypeUint16:
-    case JsArrayTypeFloat16:
-      return 2;
-    case JsArrayTypeInt32:
-    case JsArrayTypeUint32:
-    case JsArrayTypeFloat32:
-      return 4;
-    case JsArrayTypeFloat64:
-    case kJsArrayTypeBigInt64:
-    case kJsArrayTypeBigUint64:
-      return 8;
-    default:
-      return 1;
-  }
-}
-
-bool JsTypeToNapiInt(int j, napi_typedarray_type* out) {
+bool JsTypeToNapi(JsTypedArrayType j, napi_typedarray_type* out) {
   switch (j) {
     case JsArrayTypeInt8: *out = napi_int8_array; return true;
     case JsArrayTypeUint8: *out = napi_uint8_array; return true;
@@ -515,63 +482,11 @@ bool JsTypeToNapiInt(int j, napi_typedarray_type* out) {
     case JsArrayTypeUint32: *out = napi_uint32_array; return true;
     case JsArrayTypeFloat32: *out = napi_float32_array; return true;
     case JsArrayTypeFloat64: *out = napi_float64_array; return true;
-    case kJsArrayTypeBigInt64: *out = napi_bigint64_array; return true;
-    case kJsArrayTypeBigUint64: *out = napi_biguint64_array; return true;
+    case JsArrayTypeBigInt64: *out = napi_bigint64_array; return true;
+    case JsArrayTypeBigUint64: *out = napi_biguint64_array; return true;
     case JsArrayTypeFloat16: return false;  // No N-API v8 counterpart.
     default: return false;
   }
-}
-
-// Construct BigInt64Array / BigUint64Array via the context's JS intrinsic
-// constructor when pre-Stage-3 JsCreateTypedArray does not yet accept 10/11.
-napi_status ConstructBigIntTypedArray(napi_env env, bool is_unsigned,
-                                      unsigned int len32, JsValueRef base,
-                                      unsigned int off32, JsValueRef* out_ta) {
-  *out_ta = JS_INVALID_REFERENCE;
-  JsValueRef global = JS_INVALID_REFERENCE;
-  JsErrorCode ec = JsGetGlobalObject(&global);
-  if (ec != JsNoError) return MapJsError(env, ec, "BigIntTypedArray: global");
-  ScratchRoot globalRoot(global);
-
-  JsPropertyIdRef ctorId = JS_INVALID_REFERENCE;
-  const char* ctorName = is_unsigned ? "BigUint64Array" : "BigInt64Array";
-  napi_status ms = MakeIdMap(env, ctorName, &ctorId, "BigIntTypedArray: id");
-  if (ms != napi_ok) return ms;
-
-  JsValueRef ctor = JS_INVALID_REFERENCE;
-  ec = JsGetProperty(global, ctorId, &ctor);
-  if (ec != JsNoError) return MapJsError(env, ec, "BigIntTypedArray: ctor");
-  ScratchRoot ctorRoot(ctor);
-
-  JsValueType ctorType = JsUndefined;
-  ec = JsGetValueType(ctor, &ctorType);
-  if (ec != JsNoError) return MapJsError(env, ec, "BigIntTypedArray: ctor type");
-  if (ctorType != JsFunction) {
-    nodeapi::SetLastError(env, napi_generic_failure,
-                          "create_typedarray: BigInt TypedArray ctor missing");
-    return napi_generic_failure;
-  }
-
-  JsValueRef lenVal = JS_INVALID_REFERENCE;
-  ec = JsDoubleToNumber(static_cast<double>(len32), &lenVal);
-  if (ec != JsNoError) return MapJsError(env, ec, "BigIntTypedArray: len");
-  ScratchRoot lenRoot(lenVal);
-
-  JsValueRef ta = JS_INVALID_REFERENCE;
-  if (base == JS_INVALID_REFERENCE) {
-    JsValueRef args[2] = {ctor, lenVal};
-    ec = JsConstructObject(ctor, args, 2, &ta);
-  } else {
-    JsValueRef offVal = JS_INVALID_REFERENCE;
-    ec = JsDoubleToNumber(static_cast<double>(off32), &offVal);
-    if (ec != JsNoError) return MapJsError(env, ec, "BigIntTypedArray: off");
-    ScratchRoot offRoot(offVal);
-    JsValueRef args[4] = {ctor, base, offVal, lenVal};
-    ec = JsConstructObject(ctor, args, 4, &ta);
-  }
-  if (ec != JsNoError) return MapJsError(env, ec, "BigIntTypedArray: construct");
-  *out_ta = ta;
-  return napi_ok;
 }
 
 napi_status ValidateSizeToUInt(napi_env env, size_t v, unsigned int* out,
@@ -857,9 +772,9 @@ napi_status NAPI_CDECL napi_detach_arraybuffer(napi_env env,
     return MapJsError(env, ec, "JsDetachArrayBuffer");
   }
   // Claim any pending external-AB finalizer record associated with `ab` so it
-  // runs once on detach even when pre-Stage-3 JsrtExternalArrayBuffer skips
-  // detached finalizers at GC, AND so post-Stage-3 GC finalization finds the
-  // token absent and performs zero work (never double-frees/double-finalizes).
+  // runs once immediately on detach (Node semantics) and subsequent GC
+  // `JsrtExternalArrayBuffer::Finalize` finds the token absent (no-op: never
+  // double-frees or double-finalizes).
   nodeapi::NodeEnv* nenv = nullptr;
   if (nodeapi::LookupLiveEnv(static_cast<void*>(env), &nenv)) {
     uint64_t gen = nenv->generation;
@@ -964,13 +879,12 @@ napi_status NAPI_CDECL napi_create_typedarray(napi_env env,
                             /*allowPending=*/false, /*needContext=*/true);
   if (!guard.ok()) return guard.status();
   DrainExternalFinalizers(env);
-  int jsTypeInt = 0;
-  if (!NapiTypeToJsInt(type, &jsTypeInt)) {
+  JsTypedArrayType jsType = JsArrayTypeUint8;
+  if (!NapiTypeToJs(type, &jsType)) {
     nodeapi::SetLastError(env, napi_invalid_arg,
                           "create_typedarray: bad type");
     return napi_invalid_arg;
   }
-  (void)ElemSizeForJsInt(jsTypeInt);
   unsigned int len32 = 0;
   napi_status vs = ValidateSizeToUInt(env, length, &len32,
                                       "create_typedarray: length too large");
@@ -995,24 +909,8 @@ napi_status NAPI_CDECL napi_create_typedarray(napi_env env,
   }
   ScratchRoot baseRoot(base);
   JsValueRef ta = JS_INVALID_REFERENCE;
-  JsErrorCode ec = JsCreateTypedArray(static_cast<JsTypedArrayType>(jsTypeInt),
-                                      base, off32, len32, &ta);
-  if (ec != JsNoError) {
-    if ((type == napi_bigint64_array || type == napi_biguint64_array) &&
-        ec == JsErrorInvalidArgument) {
-      bool has_pending = false;
-      (void)JsHasException(&has_pending);
-      if (!has_pending) {
-        napi_status bs = ConstructBigIntTypedArray(
-            env, type == napi_biguint64_array, len32, base, off32, &ta);
-        if (bs != napi_ok) return bs;
-      } else {
-        return MapJsError(env, ec, "JsCreateTypedArray");
-      }
-    } else {
-      return MapJsError(env, ec, "JsCreateTypedArray");
-    }
-  }
+  JsErrorCode ec = JsCreateTypedArray(jsType, base, off32, len32, &ta);
+  if (ec != JsNoError) return MapJsError(env, ec, "JsCreateTypedArray");
   ScratchRoot taRoot(ta);
   napi_status rs = RootAndPublish(env, ta, result);
   if (rs != napi_ok) return rs;
@@ -1021,7 +919,7 @@ napi_status NAPI_CDECL napi_create_typedarray(napi_env env,
 }
 
 // ---------------------------------------------------------------------
-// napi_get_typedarray_info (C Yes: executes, composition §2.4)
+// napi_get_typedarray_info (C Yes: executes, composition section 2.4)
 // ---------------------------------------------------------------------
 
 napi_status NAPI_CDECL napi_get_typedarray_info(napi_env env,
@@ -1059,9 +957,8 @@ napi_status NAPI_CDECL napi_get_typedarray_info(napi_env env,
   if (ec != JsNoError) return MapJsError(env, ec, "JsGetTypedArrayInfo");
   ScratchRoot abRoot(jsAB);
 
-  int jsTypeInt = static_cast<int>(jsType);
   napi_typedarray_type napiType;
-  if (!JsTypeToNapiInt(jsTypeInt, &napiType)) {
+  if (!JsTypeToNapi(jsType, &napiType)) {
     nodeapi::SetLastError(env, napi_generic_failure,
                           "get_typedarray_info: unsupported typed array type");
     return napi_generic_failure;
@@ -1069,12 +966,15 @@ napi_status NAPI_CDECL napi_get_typedarray_info(napi_env env,
 
   BYTE* storBuf = nullptr;
   unsigned int storLen = 0;
-  // Pass elementSize = nullptr so pre-Stage-3 JsGetTypedArrayStorage does not
-  // assert/fatal on BigInt64Array/BigUint64Array; element size comes from
-  // ElemSizeForJsInt(jsTypeInt).
-  ec = JsGetTypedArrayStorage(ta, &storBuf, &storLen, nullptr, nullptr);
+  int elemSizeInt = 0;
+  ec = JsGetTypedArrayStorage(ta, &storBuf, &storLen, nullptr, &elemSizeInt);
   if (ec != JsNoError) return MapJsError(env, ec, "JsGetTypedArrayStorage");
-  size_t elemSize = ElemSizeForJsInt(jsTypeInt);
+  if (elemSizeInt <= 0) {
+    nodeapi::SetLastError(env, napi_generic_failure,
+                          "get_typedarray_info: invalid element size");
+    return napi_generic_failure;
+  }
+  size_t elemSize = static_cast<size_t>(elemSizeInt);
   // R4 revalidation: storBuf is already offset (GetByteBuffer includes
   // byteOffset); storLen is the view byteLength. The two calls above
   // execute no JS, but the borrow is still rooted (taRoot/abRoot).
