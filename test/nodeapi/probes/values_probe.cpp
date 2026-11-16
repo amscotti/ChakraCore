@@ -10,7 +10,7 @@
 // chakra_nodeapi_create_env, and exercises the 19 napi_* scalar/string
 // functions in lib/NodeApi/NodeApiValues.cpp in-process (no addon).
 // Run via run_values_probe.sh (compiles with `zig c++` through
-// /tmp/opencode/cc-gate-lock.sh and links the engine dylib).
+// the runner script and links the engine dylib).
 //
 // Coverage (each MUST fail on mismatch):
 //   Numbers: round trips +-2**53 edges, NaN, +-Infinity, fractional

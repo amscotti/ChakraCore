@@ -335,7 +335,8 @@ void teardown_state(RefsState* st) {
 extern "C" {
 
 NodeApiRefsState* NodeApiRefs_CreateState(void) {
-  auto* st = new RefsState();
+  auto* st = new (std::nothrow) RefsState();
+  if (st == nullptr) return nullptr;
   st->baseline = 0;
   return reinterpret_cast<NodeApiRefsState*>(st);
 }

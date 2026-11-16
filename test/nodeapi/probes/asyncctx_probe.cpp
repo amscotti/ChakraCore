@@ -49,7 +49,7 @@
 //      roots held).
 //
 // Build (repo root, via gate lock — see run_asyncctx_probe.sh):
-//   /tmp/opencode/cc-gate-lock.sh mise exec -- zig c++ \
+//   zig c++ \
 //     -std=gnu++17 -DNAPI_VERSION=8 -DCHAKRA_NODEAPI_TEST_HOOKS \
 //     -Iinclude/nodeapi -Ilib/Jsrt -Ilib/NodeApi \
 //     test/nodeapi/probes/asyncctx_probe.cpp \

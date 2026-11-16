@@ -47,10 +47,24 @@
 //
 // Promise-pump contract (PR-8, normative):
 //
-//   - The PROVIDER installs the JsRT promise-continuation callback (or the
-//     host may install it first; the provider installs only if the host has
-//     not, so it never clobbers a host-installed callback). The provider
-//     NEVER spins its own pump loop and NEVER blocks waiting for jobs.
+//   - Public JsRT (`ChakraCommon.h`) has no `JsGetPromiseContinuationCallback`,
+//     so the provider cannot probe whether a host callback was already
+//     installed on a context. Instead, the ownership handshake works in one
+//     of three explicit ways:
+//       1) Host sets `services.host_manages_promise_queue = true` before
+//          `chakra_nodeapi_create_env` (host installed or will install its own
+//          callback; provider leaves `JsSetPromiseContinuationCallback`
+//          untouched and never clobbers the host callback).
+//       2) Host installs its callback *after* `chakra_nodeapi_create_env` returns
+//          (overwriting the provider trampoline for that context before running
+//          JS).
+//       3) Host leaves `host_manages_promise_queue == false` and installs no
+//          callback, using the provider's per-context `PromiseQueue` (installed
+//          at most once per active context without clobbering sibling envs on
+//          the same context, and reclaimed when the last env for that context
+//          is destroyed after clearing `JsSetPromiseContinuationCallback`).
+//     The provider NEVER spins its own pump loop and NEVER blocks waiting for
+//     jobs.
 //   - The HOST owns pumping: after running a script (JsRun) and during env
 //     teardown (plan §3.6 step 4, async cleanup hooks), the host must drain
 //     queued continuations until quiet (e.g. call queued tasks via
@@ -63,7 +77,7 @@
 //     host may also call; the continuation queue is the PR-8 pump.
 //
 // Host services (PR-7): every field of chakra_nodeapi_host_services is
-// optional (NULL = service absent). Absence must surface as
+// optional (NULL/false = service absent). Absence must surface as
 // napi_generic_failure from dependent Table B functions (D7), never fake
 // success. napi_get_uv_event_loop returns the injected loop or
 // napi_generic_failure. post_task/post_work route async work / TSFN
@@ -100,6 +114,10 @@ typedef struct chakra_nodeapi_host_services {
   /* NULL = abort policy (napi_fatal_error / uncaught). */
   void (*fatal_exception)(void* host_ctx, napi_value exc);
   struct uv_loop_s* uv_loop; /* NULL = no uv */
+  /* When true, the host manages JsSetPromiseContinuationCallback (including
+   * pre-create installs) and the provider must not overwrite it during env
+   * creation or clear it on teardown. */
+  bool host_manages_promise_queue;
 } chakra_nodeapi_host_services;
 
 /* Create an env for (runtime, context) owned by the calling thread.

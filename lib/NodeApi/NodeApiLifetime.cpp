@@ -61,9 +61,14 @@ static bool LookupAsyncHandle(void* handle_value, NodeEnv** out_owner) {
   return true;
 }
 
-static void RegisterAsyncHandle(void* handle_value, NodeEnv* owner) {
-  std::lock_guard<std::mutex> lk(g_async_mutex);
-  g_async_live[handle_value] = owner;
+static bool RegisterAsyncHandle(void* handle_value, NodeEnv* owner) noexcept {
+  try {
+    std::lock_guard<std::mutex> lk(g_async_mutex);
+    g_async_live.emplace(handle_value, owner);
+    return true;
+  } catch (...) {
+    return false;
+  }
 }
 
 static void UnregisterAsyncHandle(void* handle_value) {
@@ -104,26 +109,32 @@ static AsyncPumpConfig GetPumpConfig(NodeEnv* env) {
   return d;
 }
 
-static void SetPumpUsed(NodeEnv* env, int used) {
-  std::lock_guard<std::mutex> lk(g_pump_mutex);
-  const void* key = static_cast<const void*>(env);
-  auto& cfg = g_pump_configs[key];
-  if (cfg.max_iters == 0 && cfg.pump == nullptr && cfg.host_ctx == nullptr &&
-      cfg.used_iters == 0 && !cfg.violated) {
-    cfg.max_iters = 1000;
+static void SetPumpUsed(NodeEnv* env, int used) noexcept {
+  try {
+    std::lock_guard<std::mutex> lk(g_pump_mutex);
+    const void* key = static_cast<const void*>(env);
+    auto& cfg = g_pump_configs[key];
+    if (cfg.max_iters == 0 && cfg.pump == nullptr && cfg.host_ctx == nullptr &&
+        cfg.used_iters == 0 && !cfg.violated) {
+      cfg.max_iters = 1000;
+    }
+    cfg.used_iters = used;
+  } catch (...) {
   }
-  cfg.used_iters = used;
 }
 
-static void MarkViolation(NodeEnv* env) {
-  std::lock_guard<std::mutex> lk(g_pump_mutex);
-  const void* key = static_cast<const void*>(env);
-  auto& cfg = g_pump_configs[key];
-  if (cfg.max_iters == 0 && cfg.pump == nullptr && cfg.host_ctx == nullptr &&
-      cfg.used_iters == 0 && !cfg.violated) {
-    cfg.max_iters = 1000;
+static void MarkViolation(NodeEnv* env) noexcept {
+  try {
+    std::lock_guard<std::mutex> lk(g_pump_mutex);
+    const void* key = static_cast<const void*>(env);
+    auto& cfg = g_pump_configs[key];
+    if (cfg.max_iters == 0 && cfg.pump == nullptr && cfg.host_ctx == nullptr &&
+        cfg.used_iters == 0 && !cfg.violated) {
+      cfg.max_iters = 1000;
+    }
+    cfg.violated = true;
+  } catch (...) {
   }
-  cfg.violated = true;
 }
 
 // Resolve a node_api_basic_env value to a live NodeEnv without
@@ -205,15 +216,18 @@ void Lifetime_SetAsyncPump(NodeEnv* env, void (*pump)(void* host_ctx),
   // Consult by pointer value only (no dereference of a dead value is
   // needed to record config; the env value was just validated by the
   // caller as live when Set is called before destroy).
-  std::lock_guard<std::mutex> lk(g_pump_mutex);
-  const void* key = static_cast<const void*>(env);
-  AsyncPumpConfig cfg;
-  cfg.pump = pump;
-  cfg.host_ctx = host_ctx;
-  cfg.max_iters = max_iters > 0 ? max_iters : 1000;
-  cfg.used_iters = 0;
-  cfg.violated = false;
-  g_pump_configs[key] = cfg;
+  try {
+    std::lock_guard<std::mutex> lk(g_pump_mutex);
+    const void* key = static_cast<const void*>(env);
+    AsyncPumpConfig cfg;
+    cfg.pump = pump;
+    cfg.host_ctx = host_ctx;
+    cfg.max_iters = max_iters > 0 ? max_iters : 1000;
+    cfg.used_iters = 0;
+    cfg.violated = false;
+    g_pump_configs[key] = cfg;
+  } catch (...) {
+  }
 }
 
 bool Lifetime_AsyncViolation(const void* env_value) {
@@ -317,7 +331,11 @@ void Lifetime_RunAsyncCleanupHooks(NodeEnv* env) {
         if (current != nullptr) {
           current->completed = true;
           UnregisterAsyncHandle(static_cast<void*>(current));
-          env->retired_async_handles.push_back(current);
+          try {
+            env->retired_async_handles.push_back(current);
+          } catch (...) {
+            delete current;
+          }
         }
       }
     }
@@ -487,6 +505,9 @@ napi_status NAPI_CDECL napi_add_async_cleanup_hook(
   handle->data = arg;
   handle->completed = false;
   try {
+    env->retired_async_handles.reserve(
+        env->retired_async_handles.size() +
+        env->async_cleanup_hooks.size() + 1);
     env->async_cleanup_hooks.push_back(handle);
   } catch (...) {
     delete handle;
@@ -494,7 +515,13 @@ napi_status NAPI_CDECL napi_add_async_cleanup_hook(
                           "add_async_cleanup_hook: OOM");
     return napi_generic_failure;
   }
-  nodeapi::RegisterAsyncHandle(static_cast<void*>(handle), env);
+  if (!nodeapi::RegisterAsyncHandle(static_cast<void*>(handle), env)) {
+    env->async_cleanup_hooks.pop_back();
+    delete handle;
+    nodeapi::SetLastError(reinterpret_cast<napi_env>(env), napi_generic_failure,
+                          "add_async_cleanup_hook: OOM");
+    return napi_generic_failure;
+  }
   *remove_handle = handle;
   nodeapi::ClearLastError(reinterpret_cast<napi_env>(env));
   return napi_ok;
@@ -536,7 +563,11 @@ napi_status NAPI_CDECL napi_remove_async_cleanup_hook(
   list.erase(it);
   remove_handle->completed = true;
   nodeapi::UnregisterAsyncHandle(static_cast<void*>(remove_handle));
-  owner->retired_async_handles.push_back(remove_handle);
+  try {
+    owner->retired_async_handles.push_back(remove_handle);
+  } catch (...) {
+    delete remove_handle;
+  }
   nodeapi::ClearLastError(reinterpret_cast<napi_env>(owner));
   return napi_ok;
 }

@@ -13,7 +13,7 @@
 // / get_cb_info / get_new_target / call_function / new_instance /
 // define_class) in-process (no addon, no ch-nodeapi host). Run via
 // run_functions_probe.sh, which builds with `zig c++` through
-// /tmp/opencode/cc-gate-lock.sh and links the engine
+// the runner script and links the engine
 // libChakraCore.dylib produced by `mise exec -- zig build
 // libChakraNodeApi`.
 //

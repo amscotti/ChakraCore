@@ -286,15 +286,17 @@ inline const char* DescribeState(EnvState s) {
  * JS-calling lanes (N2.x). */
 class ContextGuard {
  public:
-  explicit ContextGuard(napi_env env);
-  ~ContextGuard();
+  ContextGuard() noexcept = default;
+  explicit ContextGuard(napi_env env) noexcept;
+  ~ContextGuard() noexcept;
   ContextGuard(const ContextGuard&) = delete;
   ContextGuard& operator=(const ContextGuard&) = delete;
+  void Enter(napi_env env) noexcept;
   bool entered() const { return entered_; }
 
  private:
-  JsContextRef prev_;
-  bool entered_;
+  JsContextRef prev_ = JS_INVALID_REFERENCE;
+  bool entered_ = false;
 };
 
 /* Validation helper used by every public entry (N1.1; N1.5 reuses).
@@ -372,12 +374,12 @@ class EntryGuard {
   EntryGuard& operator=(const EntryGuard&) = delete;
   bool ok() const { return status_ == napi_ok; }
   napi_status status() const { return status_; }
-  bool entered() const { return guard_ && guard_->entered(); }
+  bool entered() const { return guard_.entered(); }
 
  private:
   napi_status status_ = napi_ok;
   napi_env env_ = nullptr;
-  std::unique_ptr<ContextGuard> guard_;
+  ContextGuard guard_;
   bool allowClosing_ = false;
   bool allowPending_ = true;
 };

@@ -256,7 +256,12 @@ WrapState* LookupState(nodeapi::NodeEnv* env, bool create) {
   WrapState* st = new (std::nothrow) WrapState();
   if (!st) return nullptr;
   st->env = env;
-  g_wrap_states[env] = st;
+  try {
+    g_wrap_states.emplace(env, st);
+  } catch (...) {
+    delete st;
+    return nullptr;
+  }
   return st;
 }
 
@@ -525,10 +530,9 @@ void DrainState(napi_env env, WrapState* st) {
         std::memory_order_relaxed);
     RemoveContainers(st, rec);
     ReleaseHandle(rec);
-    // N5.1: run chained rider finalizers with the head (same
-    // collection event). Snapshot first (finalizers may enqueue).
-    std::vector<WrapRecord*> riders;
-    if (!rec->chained.empty()) riders = rec->chained;
+    // N5.1: move chained rider finalizers with the head (same
+    // collection event) so transfer is noexcept.
+    std::vector<WrapRecord*> riders = std::move(rec->chained);
     if (own) RunFinalizer(env, rec);
     delete rec;
     for (WrapRecord* rider : riders) {
@@ -1210,19 +1214,7 @@ void nodeapi_wrap_teardown(napi_env env) {
    * separate nodeapi_wrap_drain call there). */
   DrainState(env, st);
 
-  /* Snapshot every remaining live record (env thread). Finalizers
-   * running below may mutate the maps (Closing-tolerant removes), so
-   * iterate a stable vector and re-check each record on arrival. */
-  std::vector<WrapRecord*> wraps;
-  std::vector<WrapRecord*> externals;
-  for (auto& kv : st->wraps) {
-    if (kv.second) wraps.push_back(kv.second);
-  }
-  for (WrapRecord* r : st->externals) {
-    if (r) externals.push_back(r);
-  }
-
-  for (WrapRecord* rec : wraps) {
+  auto finalize_wrap_record = [&](WrapRecord* rec) {
     /* Claim exactly once (R-WRAP-6). Queued records were already
      * drained above and freed, so no record here is queued; if one
      * was enqueued by GC from a hook between step 2 and now it is
@@ -1232,7 +1224,7 @@ void nodeapi_wrap_teardown(napi_env env) {
     if (!rec->state.compare_exchange_strong(expected, kDone,
                                             std::memory_order_acq_rel,
                                             std::memory_order_relaxed)) {
-      continue;
+      return;
     }
     /* Find the JS object for before-collect clearing: the wrap map
      * key is the object pointer and the record is still in the map
@@ -1247,9 +1239,8 @@ void nodeapi_wrap_teardown(napi_env env) {
     }
     RemoveContainers(st, rec);
     ReleaseHandle(rec);
-    // N5.1: snapshot riders before running the head finalizer.
-    std::vector<WrapRecord*> riders;
-    if (!rec->chained.empty()) riders = rec->chained;
+    // N5.1: move riders out before running the head finalizer (noexcept).
+    std::vector<WrapRecord*> riders = std::move(rec->chained);
     RunFinalizer(env, rec);
     for (WrapRecord* rider : riders) {
       int rexp = kLive;
@@ -1271,14 +1262,14 @@ void nodeapi_wrap_teardown(napi_env env) {
     } else {
       delete rec;
     }
-  }
+  };
 
-  for (WrapRecord* rec : externals) {
+  auto finalize_external_record = [&](WrapRecord* rec) {
     int expected = kLive;
     if (!rec->state.compare_exchange_strong(expected, kDone,
                                             std::memory_order_acq_rel,
                                             std::memory_order_relaxed)) {
-      continue; /* enqueued by GC between step 2 and now; post-drain runs it */
+      return; /* enqueued by GC between step 2 and now; post-drain runs it */
     }
     RemoveContainers(st, rec);
     ReleaseHandle(rec);
@@ -1288,6 +1279,56 @@ void nodeapi_wrap_teardown(napi_env env) {
      * still fire its finalize later (at runtime disposal). The late
      * trampoline sees DONE + leak_to_gc and deletes the record
      * without touching the (freed) state. */
+  };
+
+  /* Snapshot every remaining live record (env thread). Finalizers
+   * running below may mutate the maps (Closing-tolerant removes), so
+   * iterate a stable vector when allocation succeeds; on OOM fall back
+   * to draining one live record at a time without throwing. */
+  std::vector<WrapRecord*> wraps;
+  std::vector<WrapRecord*> externals;
+  bool snapshot_ok = true;
+  try {
+    wraps.reserve(st->wraps.size());
+    externals.reserve(st->externals.size());
+    for (auto& kv : st->wraps) {
+      if (kv.second) wraps.push_back(kv.second);
+    }
+    for (WrapRecord* r : st->externals) {
+      if (r) externals.push_back(r);
+    }
+  } catch (...) {
+    wraps.clear();
+    externals.clear();
+    snapshot_ok = false;
+  }
+
+  if (snapshot_ok) {
+    for (WrapRecord* rec : wraps) finalize_wrap_record(rec);
+    for (WrapRecord* rec : externals) finalize_external_record(rec);
+  } else {
+    for (;;) {
+      WrapRecord* next = nullptr;
+      for (auto& kv : st->wraps) {
+        if (kv.second && kv.second->state.load(std::memory_order_acquire) == kLive) {
+          next = kv.second;
+          break;
+        }
+      }
+      if (!next) break;
+      finalize_wrap_record(next);
+    }
+    for (;;) {
+      WrapRecord* next = nullptr;
+      for (WrapRecord* r : st->externals) {
+        if (r && r->state.load(std::memory_order_acquire) == kLive) {
+          next = r;
+          break;
+        }
+      }
+      if (!next) break;
+      finalize_external_record(next);
+    }
   }
 
   /* Pick up anything enqueued while backstop finalizers ran (a

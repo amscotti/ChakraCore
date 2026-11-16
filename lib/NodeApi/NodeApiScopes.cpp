@@ -256,14 +256,11 @@ napi_status CloseImpl(napi_env env, napi_handle_scope handle, bool expect_escapa
 extern "C" {
 
 NodeApiScopeState* NodeApiScopes_CreateState(void) {
-  auto* st = new ScopeState();
+  auto* st = new (std::nothrow) ScopeState();
+  if (st == nullptr) return nullptr;
   if (PushScope(st, false, false, true) == nullptr) {
-    /* Env-creation OOM is fatal, not a napi generic_failure: preserve
-     * the Env.cpp rollback path (it catches std::bad_alloc from the
-     * throwing `new ScopeState()` above). PushScope is nothrow, so
-     * convert its nullptr back into the thrown path here. */
     delete st;
-    throw std::bad_alloc();
+    return nullptr;
   }
   st->baseline = TotalRoots(st->stack); /* 0 */
   return reinterpret_cast<NodeApiScopeState*>(st);

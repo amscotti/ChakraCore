@@ -52,29 +52,41 @@ struct DeferredRecord {
   bool settled = false;
 };
 
-/* Per-env state (opaque to NodeApiEnv.h, stored as
- * NodeEnv::promise_state). Completes the forward-declared global
- * ::NodeApiPromiseState (defined at global scope, NOT inside this
- * anonymous namespace, so the extern "C" API signatures name the
- * canonical type). */
-struct PromiseState {
-  std::unordered_map<napi_deferred, DeferredRecord*> deferreds;
-};
-
-/* Provider-owned continuation queue per context. The trampoline's
- * callbackState points at one of these. Tasks are rooted (JsAddRef at
- * enqueue) until pumped (JsRelease after JsCallFunction). */
+/* Provider-owned continuation queue per context (ref-counted across sibling
+ * envs bound to the same JsContextRef when host_manages_promise_queue is
+ * false).
+ *
+ * Ownership / invalidation record (doc/memory-management.md):
+ *   - Domain: C++ heap (`new (std::nothrow) PromiseQueue`), stored by pointer
+ *     in `g_queues[ctx]` and `PromiseState::queue`.
+ *   - Owner: Shared via `PromiseQueue::ref_count` across live envs whose
+ *     `host_manages_promise_queue == false`. The Chakra engine's
+ *     `JsSetPromiseContinuationCallback` callbackState holds a borrowed pointer
+ *     for `ctx`.
+ *   - Roots: Enqueued JS task functions are rooted via `JsAddRef` in
+ *     `ProviderContinuation` and released via `JsRelease` after invocation in
+ *     `NodeApiPromise_Pump` or on final teardown in `NodeApiPromise_DestroyForEnv`.
+ *   - Invalidation & reclamation order (step 6c, `NodeApiPromise_DestroyForEnv`):
+ *     When the last env referencing `q` destroys (`--q->ref_count == 0`) with
+ *     the env's `JsContextRef` entered, we unlink `g_queues[ctx]`, clear the
+ *     engine slot via `JsSetPromiseContinuationCallback(nullptr, nullptr)` BEFORE
+ *     freeing `q` (preventing any late/teardown wrap finalizer on `ctx` from
+ *     invoking `ProviderContinuation(task, freed_q)`), release all remaining
+ *     queued task roots, and then `delete q` (closing A8-3 cleanly). */
 struct PromiseQueue {
   std::vector<JsValueRef> tasks;
   std::mutex mutex;
+  size_t ref_count = 0;
 };
 
-/* Global map: context VALUE -> queue. Consulted by VALUE before any
- * dereference (registry pattern). Entries are unlinked at env destroy
- * (A8-3; the queue objects themselves stay process-lifetime, only the
- * map entry is erased so a reused context VALUE installs fresh). The
- * mutex is never held across user code (the trampoline releases it
- * before returning; the pump holds it only to pop one task). */
+struct PromiseState {
+  std::unordered_map<napi_deferred, DeferredRecord*> deferreds;
+  PromiseQueue* queue = nullptr;
+  JsContextRef installed_context = JS_INVALID_REFERENCE;
+};
+
+/* Global map: context VALUE -> queue. The mutex is never held across user
+ * code or JsSetPromiseContinuationCallback. */
 std::mutex g_queue_mutex;
 std::unordered_map<JsContextRef, PromiseQueue*> g_queues;
 
@@ -222,7 +234,7 @@ napi_status SettleCommon(napi_env env, napi_deferred deferred,
 extern "C" {
 
 NodeApiPromiseState* NodeApiPromise_CreateState(void) {
-  return reinterpret_cast<NodeApiPromiseState*>(new PromiseState());
+  return reinterpret_cast<NodeApiPromiseState*>(new (std::nothrow) PromiseState());
 }
 
 void NodeApiPromise_DestroyForEnv(napi_env env) {
@@ -238,26 +250,36 @@ void NodeApiPromise_DestroyForEnv(napi_env env) {
     ReleaseRecord(kv.second);
   }
   st->deferreds.clear();
-  /* Release every queued continuation task for this env's context, then
-   * UNLINK the queue entry (A8-3). This upholds R5 (no root survives
-   * runtime disposal) even when the host did not pump to quiet, and stops
-   * a later env that reuses this JsContextRef VALUE from aliasing a stale
-   * queue (which would skip installation of a fresh queue and misroute
-   * continuations). The queue OBJECT itself is intentionally not deleted:
-   * it stays process-lifetime as before, because the engine trampoline
-   * still references it and later teardown-step user code (wraps
-   * backstop) may still trigger it; unlinking only affects fresh
-   * lookups/installs. */
-  nodeapi::NodeEnv* nenv = nullptr;
-  if (!nodeapi::LookupLiveEnv(static_cast<void*>(env), &nenv)) return;
-  JsContextRef ctx = nenv->context;
-  if (ctx == JS_INVALID_REFERENCE) return;
-  PromiseQueue* q = nullptr;
+
+  PromiseQueue* q = st->queue;
+  JsContextRef ctx = st->installed_context;
+  st->queue = nullptr;
+  st->installed_context = JS_INVALID_REFERENCE;
+  if (q == nullptr || ctx == JS_INVALID_REFERENCE) return;
+
+  bool last_owner = false;
   {
     std::lock_guard<std::mutex> lk(g_queue_mutex);
-    q = GetQueueLocked(ctx);
+    if (q->ref_count > 0) q->ref_count--;
+    if (q->ref_count == 0) {
+      last_owner = true;
+      auto it = g_queues.find(ctx);
+      if (it != g_queues.end() && it->second == q) {
+        g_queues.erase(it);
+      }
+    }
   }
-  if (q == nullptr) return;
+  if (!last_owner) return;
+
+  /* Invalidate the engine continuation callback BEFORE freeing `q` so no
+   * subsequent promise settlement on `ctx` (e.g. teardown step 6d wraps or
+   * caller work before JsDisposeRuntime) invokes ProviderContinuation with
+   * a dangling `PromiseQueue*`. Only touch the context slot while `ctx` is
+   * confirmed current. */
+  JsContextRef cur = JS_INVALID_REFERENCE;
+  if (JsGetCurrentContext(&cur) == JsNoError && cur == ctx) {
+    (void)JsSetPromiseContinuationCallback(nullptr, nullptr);
+  }
   std::vector<JsValueRef> leftover;
   {
     std::lock_guard<std::mutex> lk(q->mutex);
@@ -266,16 +288,7 @@ void NodeApiPromise_DestroyForEnv(napi_env env) {
   for (JsValueRef t : leftover) {
     (void)JsRelease(t, nullptr);
   }
-  {
-    std::lock_guard<std::mutex> lk(g_queue_mutex);
-    // A8-3: erase by VALUE (registry pattern). Only unlinks if this
-    // context still maps to the same queue object just drained, so a
-    // newer install (if any) is never removed.
-    auto it = g_queues.find(ctx);
-    if (it != g_queues.end() && it->second == q) {
-      g_queues.erase(it);
-    }
-  }
+  delete q;
 }
 
 void NodeApiPromise_FreeState(NodeApiPromiseState* state) {
@@ -287,37 +300,62 @@ void NodeApiPromise_EnsureContinuationInstalled(napi_env env) {
   if (env == nullptr) return;
   nodeapi::NodeEnv* nenv = nullptr;
   if (!nodeapi::LookupLiveEnv(static_cast<void*>(env), &nenv)) return;
+  NodeApiPromiseState* raw = NodeApiEnv_PromiseState(env);
+  if (raw == nullptr) return;
+  auto* st = reinterpret_cast<PromiseState*>(raw);
+  if (nenv->services.host_manages_promise_queue) return;
+  if (st->queue != nullptr) return;
   JsContextRef ctx = nenv->context;
   if (ctx == JS_INVALID_REFERENCE) return;
+
   PromiseQueue* q = nullptr;
   bool need_install = false;
   {
     std::lock_guard<std::mutex> lk(g_queue_mutex);
     q = GetQueueLocked(ctx);
-    if (q == nullptr) {
-      try {
-        q = new PromiseQueue();
-      } catch (...) {
-        return;
-      }
-      g_queues[ctx] = q;
-      need_install = true;
+    if (q != nullptr) {
+      q->ref_count++;
+      st->queue = q;
+      st->installed_context = ctx;
+      return;
     }
+    q = new (std::nothrow) PromiseQueue();
+    if (q == nullptr) return;
+    q->ref_count = 1;
+    try {
+      g_queues.emplace(ctx, q);
+    } catch (...) {
+      delete q;
+      return;
+    }
+    need_install = true;
   }
-  if (!need_install) return;
-  /* Install with the env context current (host sets it before create;
-   * the guard is not constructible here because the env is already
-   * live and we are inside create's registry block -- the caller
-   * guarantees the current-context discipline per plan SS3.2). */
+  (void)need_install;
+
+  /* Install with the env context current (caller guarantees this per
+   * plan SS3.2). If ctx is not current or JsSetPromiseContinuationCallback
+   * fails, roll back the newly created queue so we never leave a dead
+   * entry in g_queues. */
   JsContextRef cur = JS_INVALID_REFERENCE;
-  if (JsGetCurrentContext(&cur) != JsNoError) return;
-  if (cur != ctx) {
-    /* Current context is not the env's: install would target the
-     * wrong script context. Skip (a later napi_create_promise with
-     * the guard entered will still work when the host installs). */
+  if (JsGetCurrentContext(&cur) != JsNoError || cur != ctx ||
+      JsSetPromiseContinuationCallback(ProviderContinuation, q) != JsNoError) {
+    bool erase_and_delete = false;
+    {
+      std::lock_guard<std::mutex> lk(g_queue_mutex);
+      if (q->ref_count > 0) q->ref_count--;
+      if (q->ref_count == 0) {
+        auto it = g_queues.find(ctx);
+        if (it != g_queues.end() && it->second == q) {
+          g_queues.erase(it);
+        }
+        erase_and_delete = true;
+      }
+    }
+    if (erase_and_delete) delete q;
     return;
   }
-  (void)JsSetPromiseContinuationCallback(ProviderContinuation, q);
+  st->queue = q;
+  st->installed_context = ctx;
 }
 
 napi_status NodeApiPromise_Pump(napi_env env, size_t max_tasks,
@@ -331,11 +369,9 @@ napi_status NodeApiPromise_Pump(napi_env env, size_t max_tasks,
   if (!nodeapi::LookupLiveEnv(static_cast<void*>(env), &nenv)) {
     return napi_invalid_arg;
   }
-  JsContextRef ctx = nenv->context;
   PromiseQueue* q = nullptr;
-  {
-    std::lock_guard<std::mutex> lk(g_queue_mutex);
-    q = GetQueueLocked(ctx);
+  if (NodeApiPromiseState* raw = NodeApiEnv_PromiseState(env)) {
+    q = reinterpret_cast<PromiseState*>(raw)->queue;
   }
   if (q == nullptr) {
     /* Host owns the queue (or provider never installed): nothing to
@@ -391,17 +427,20 @@ size_t NodeApiPromise_DeferredCount(napi_env env) {
 
 size_t NodeApiPromise_QueueDepth(napi_env env) {
   if (env == nullptr) return 0;
-  nodeapi::NodeEnv* nenv = nullptr;
-  if (!nodeapi::LookupLiveEnv(static_cast<void*>(env), &nenv)) return 0;
-  PromiseQueue* q = nullptr;
-  {
-    std::lock_guard<std::mutex> lk(g_queue_mutex);
-    q = GetQueueLocked(nenv->context);
-  }
+  NodeApiPromiseState* raw = NodeApiEnv_PromiseState(env);
+  if (raw == nullptr) return 0;
+  PromiseQueue* q = reinterpret_cast<PromiseState*>(raw)->queue;
   if (q == nullptr) return 0;
   std::lock_guard<std::mutex> lk(q->mutex);
   return q->tasks.size();
 }
+
+#ifdef CHAKRA_NODEAPI_TEST_HOOKS
+size_t NodeApiPromise_ActiveQueueCount(void) {
+  std::lock_guard<std::mutex> lk(g_queue_mutex);
+  return g_queues.size();
+}
+#endif
 
 /* --- napi_* entries (C column per doc/node-api-status-mapping.md) --- */
 
@@ -431,21 +470,21 @@ napi_status NAPI_CDECL napi_create_promise(napi_env env,
   JsErrorCode ec = JsCreatePromise(&jp, &jr, &jrej);
   if (ec != JsNoError) return MapJs(env, ec, "JsCreatePromise");
   /* Root both fns into the record (R1). On failure, roll back. */
-  DeferredRecord* rec = nullptr;
-  try {
-    rec = new DeferredRecord();
-  } catch (...) {
+  auto* rec = new (std::nothrow) DeferredRecord();
+  if (rec == nullptr) {
     nodeapi::SetLastError(env, napi_generic_failure,
                           "napi_create_promise: record OOM");
     return napi_generic_failure;
   }
-  if (JsAddRef(jr, nullptr) != JsNoError ||
-      JsAddRef(jrej, nullptr) != JsNoError) {
-    /* JsAddRef failure is unrooted: release whatever was taken and
-     * fail. (In practice AddRef on fresh call-roots cannot fail
-     * except OOM; the check keeps the partial state valid.) */
+  if (JsAddRef(jr, nullptr) != JsNoError) {
+    delete rec;
+    nodeapi::SetLastError(env, napi_generic_failure,
+                          "napi_create_promise: root failed");
+    return napi_generic_failure;
+  }
+  if (JsAddRef(jrej, nullptr) != JsNoError) {
+    /* First root succeeded, second failed: release the first root cleanly. */
     (void)JsRelease(jr, nullptr);
-    (void)JsRelease(jrej, nullptr);
     delete rec;
     nodeapi::SetLastError(env, napi_generic_failure,
                           "napi_create_promise: root failed");
@@ -457,7 +496,14 @@ napi_status NAPI_CDECL napi_create_promise(napi_env env,
   napi_deferred handle = reinterpret_cast<napi_deferred>(rec);
   /* Insert before rooting the promise into the scope, so a scope-root
    * failure can remove the record cleanly (no leaked deferred). */
-  st->deferreds[handle] = rec;
+  try {
+    st->deferreds.emplace(handle, rec);
+  } catch (...) {
+    ReleaseRecord(rec);
+    nodeapi::SetLastError(env, napi_generic_failure,
+                          "napi_create_promise: map OOM");
+    return napi_generic_failure;
+  }
   napi_value nv = reinterpret_cast<napi_value>(jp);
   napi_status rs = NodeApiScopes_RootIntoInnermost(env, nv);
   if (rs != napi_ok) {

@@ -107,17 +107,25 @@ static void DeadOrderRemoveLocked(void* key) {
 // Insert a tombstone (caller holds the mutex) with FIFO eviction
 // at kDeadEnvCap. Re-insert of an already-present key refreshes
 // its order slot (moves to back as newest) with the new value.
-static void DeadInsertLocked(void* key, std::uint64_t generation) {
-  if (g_dead_envs.find(key) != g_dead_envs.end()) {
-    DeadOrderRemoveLocked(key);
-  }
-  g_dead_envs[key] = generation;
-  g_dead_order.push_back(key);
-  while (g_dead_envs.size() > nodeapi::kDeadEnvCap &&
-         !g_dead_order.empty()) {
-    void* old = g_dead_order.front();
-    g_dead_order.pop_front();
-    g_dead_envs.erase(old);
+static void DeadInsertLocked(void* key, std::uint64_t generation) noexcept {
+  try {
+    if (g_dead_envs.find(key) != g_dead_envs.end()) {
+      DeadOrderRemoveLocked(key);
+    }
+    g_dead_envs[key] = generation;
+    try {
+      g_dead_order.push_back(key);
+    } catch (...) {
+      g_dead_envs.erase(key);
+      return;
+    }
+    while (g_dead_envs.size() > nodeapi::kDeadEnvCap &&
+           !g_dead_order.empty()) {
+      void* old = g_dead_order.front();
+      g_dead_order.pop_front();
+      g_dead_envs.erase(old);
+    }
+  } catch (...) {
   }
 }
 
@@ -185,9 +193,12 @@ void EmitTeardownEvent(NodeEnv* env, const char* event) {
   }
 }
 
-ContextGuard::ContextGuard(napi_env env_value)
-    : prev_(JS_INVALID_REFERENCE), entered_(false) {
-  if (!env_value) return;
+ContextGuard::ContextGuard(napi_env env_value) noexcept {
+  Enter(env_value);
+}
+
+void ContextGuard::Enter(napi_env env_value) noexcept {
+  if (entered_ || !env_value) return;
   NodeEnv* env = nullptr;
   if (!LookupLiveEnv(static_cast<void*>(env_value), &env)) return;
   if (!env->runtime || !env->context) return;
@@ -199,7 +210,7 @@ ContextGuard::ContextGuard(napi_env env_value)
   }
 }
 
-ContextGuard::~ContextGuard() {
+ContextGuard::~ContextGuard() noexcept {
   if (entered_) {
     JsSetCurrentContext(prev_);
   }
@@ -390,7 +401,7 @@ EntryGuard::EntryGuard(napi_env env_value, bool allowClosing,
     return;
   }
   if (needContext) {
-    guard_ = std::make_unique<ContextGuard>(env_value);
+    guard_.Enter(env_value);
     // JsHasException requires an active script context; if the
     // guard did not enter (no runtime/context or already current),
     // the pending check below will surface JsErrorNoCurrentContext.
@@ -408,7 +419,7 @@ EntryGuard::EntryGuard(napi_env env_value, bool allowClosing,
     // the context just for the check; preserve the guard for the
     // caller's window so the checked context stays current.
     if (!needContext) {
-      guard_ = std::make_unique<ContextGuard>(env_value);
+      guard_.Enter(env_value);
     }
     bool has = false;
     JsErrorCode ec = JsHasException(&has);
@@ -570,17 +581,31 @@ napi_env chakra_nodeapi_create_env(
     // here so every live env has a scope stack; destroyed at
     // destroy step 6 (TeardownScopes). No JS calls needed.
     env->scope_state = NodeApiScopes_CreateState();
-    // Refs state (N1.3): empty. Created here so every live env has
-    // a refs map; destroyed at destroy step 6a (TeardownRefs).
-    // No JS calls needed (no roots taken at creation).
     env->refs_state = NodeApiRefs_CreateState();
-    // Promise state (N3.4): empty deferred map. Created here so every
-    // live env has a promise map; destroyed at destroy step 6
-    // (TeardownPromiseScript). No JS calls, no roots.
     env->promise_state = NodeApiPromise_CreateState();
-    // Script state (N3.5): external total 0. Created here; destroyed
-    // at destroy step 6. Native-only, no JS calls.
     env->script_state = NodeApiScript_CreateState();
+    if (!env->scope_state || !env->refs_state ||
+        !env->promise_state || !env->script_state) {
+      throw std::bad_alloc();
+    }
+
+    std::lock_guard<std::mutex> lk(g_registry_mutex);
+    // Issue a fresh generation and displace any tombstone at this
+    // address (R-ENV-9, A5): the new live generation supersedes the
+    // old dead one. The old generation remains observable only via
+    // a generation-aware lookup with the remembered value (which
+    // then fails); pointer-only callers now alias the new env by
+    // construction (irreducible without host-passed generations).
+    void* key = static_cast<void*>(env);
+    env->generation = NextGenerationLocked();
+    auto [it, inserted] = g_live_envs.emplace(key, LiveEntry{env, env->generation});
+    if (!inserted) {
+      it->second = LiveEntry{env, env->generation};
+    }
+    if (g_dead_envs.find(key) != g_dead_envs.end()) {
+      g_dead_envs.erase(key);
+      DeadOrderRemoveLocked(key);
+    }
   } catch (...) {
     // OOM rollback: publish nothing (memory-management.md §5).
     if (env->script_state != nullptr) {
@@ -602,31 +627,13 @@ napi_env chakra_nodeapi_create_env(
     delete env;
     return nullptr;
   }
-
-  {
-    std::lock_guard<std::mutex> lk(g_registry_mutex);
-    // Issue a fresh generation and displace any tombstone at this
-    // address (R-ENV-9, A5): the new live generation supersedes the
-    // old dead one. The old generation remains observable only via
-    // a generation-aware lookup with the remembered value (which
-    // then fails); pointer-only callers now alias the new env by
-    // construction (irreducible without host-passed generations).
-    void* key = static_cast<void*>(env);
-    env->generation = NextGenerationLocked();
-    if (g_dead_envs.find(key) != g_dead_envs.end()) {
-      g_dead_envs.erase(key);
-      DeadOrderRemoveLocked(key);
-    }
-    g_live_envs[key] = LiveEntry{env, env->generation};
-  }
   g_live_count.fetch_add(1, std::memory_order_relaxed);
   g_total_created.fetch_add(1, std::memory_order_relaxed);
   napi_env published = reinterpret_cast<napi_env>(env);
   /* N3.4/PR-8: install the provider continuation trampoline for this
-   * context iff the provider has not already (provider-side flag;
-   * undetectable host installs are clobbered -- hosts that want their
-   * own queue must install after create returns). Best-effort: never
-   * fails the create. */
+   * context iff host_manages_promise_queue is false and the provider has
+   * not already installed a shared queue for that context. Best-effort:
+   * never fails the create. */
   NodeApiPromise_EnsureContinuationInstalled(published);
   return published;
 }

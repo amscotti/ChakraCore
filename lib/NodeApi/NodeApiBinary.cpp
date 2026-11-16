@@ -27,72 +27,62 @@
 //     + 268-298), which is indistinguishable from a zero-length attached
 //     buffer (also NULL/0). See the detached-evidence comment on
 //     IsDetachedViaProperty.
-//   - BigInt64/BigUint64 typed arrays have no JsTypedArrayType counterpart
-//     (ChakraCommon.h JsTypedArrayType ends at Float16, 10 values; napi
-//     has 11 with BigInt64/BigUint64). They return napi_generic_failure
-//     with a last-error message (recorded non-conformance per §4.3/PR-9).
-//     Float16 similarly has no napi counterpart; get_typedarray_info on a
-//     JS-created Float16Array also returns generic_failure (documented
-//     extension, not a napi value).
+//   - BigInt64/BigUint64 typed arrays work seamlessly both before and after
+//     Stage-3 JsTypedArrayType enum additions:
+//     creation tries `JsCreateTypedArray` with the TypeIds-derived code (10/11)
+//     and falls back to JS `BigInt64Array`/`BigUint64Array` construction via
+//     `JsConstructObject` if `JsCreateTypedArray` returns `JsErrorInvalidArgument`;
+//     inspection reads `int` enum value + passes `elementSize = nullptr` to
+//     `JsGetTypedArrayStorage` to avoid pre-Stage-3 JsRT elementSize switch
+//     aborts. `JsArrayTypeFloat16` (9) has no N-API v8 enum counterpart and
+//     returns `napi_generic_failure` cleanly with no enum UB.
 //
 // Ownership records (memory-management.md §3; plan §3.7/§3.4 R4):
 //
 //   External ArrayBuffer records (napi_create_external_arraybuffer):
-//     Resource / creation call: ExternalRecord heap allocation (new) in
-//       NodeApiBinary.cpp, transferred to JsCreateExternalArrayBuffer as
-//       callbackState with the trampoline as finalizeCallback.
+//     Resource / creation call: `ExternalRecord` heap allocation
+//       (`new (std::nothrow) ExternalRecord`) tracked in `g_ext_records` under
+//       a monotonic `uint64_t id` token (`g_next_ext_id`) and indexed for
+//       live detach lookup in `g_ext_by_obj[generation][buf] = id`. The token
+//       ID (cast to `void*`), never a raw `ExternalRecord*`, is passed as
+//       `callbackState` to `JsCreateExternalArrayBuffer`.
 //     Domain and allocator: provider native heap (C++ new/delete via the
 //       provider allocator; backing lifetime == process). Never Recycler.
-//     Physical allocation: one ExternalRecord per external buffer (plus the
-//       JsrtExternalArrayBuffer/Recycler object created by JsRT).
-//     Owner; transfer point: The record is owned by the JS ArrayBuffer's
-//       finalize slot after JsCreateExternalArrayBuffer. The finalize
-//       callback (JsrtExternalArrayBuffer::Finalize) owns invocation on
-//       GC. Creation failure before transfer (OOM / JsCreate failure)
-//       deletes the record inline; after transfer, the trampoline owns
-//       queueing, never inline delete.
-//     Borrow invalidation: GC finalization (Finalize or detached-state
-//       DiscardState). Detach transfers the record's callback/state to the
-//       detached-state (JsrtExternalArrayBuffer.cpp:42-67); simple
-//       JsDetachArrayBuffer (ArrayBuffer::Detach) drops the callback (skips
-//       finalize on detached, § below), which is a known JsRT leak for
-//       detached-external finalizers (recorded as residual, not a provider
-//       double-free).
+//     Physical allocation: one `ExternalRecord` per external buffer (plus the
+//       `JsrtExternalArrayBuffer`/Recycler object created by JsRT).
+//     Owner; transfer point: Ownership starts in `g_ext_records` paired with
+//       either the JS ArrayBuffer's finalize slot OR explicit detach via
+//       `napi_detach_arraybuffer`. Exactly ONE path claims `id` out of
+//       `g_ext_records` under `g_ext_mutex`:
+//       (a) `napi_detach_arraybuffer` claims and removes `id` + `ab_key` upon
+//           successful `JsDetachArrayBuffer`, enqueues `rec`, and drains via
+//           `DrainExternalFinalizers` once (handling pre-Stage-3 JsRT that skips
+//           detached finalizers AND making any Stage-3 post-detach GC Finalize
+//           find-miss on `id` a zero-touch no-op — no leak, no double-free, no
+//           double user callback).
+//       (b) GC `ExternalArrayBufferTrampoline(state)` extracts `id` by value,
+//           looks it up in `g_ext_records` (no raw pointer dereference!), removes
+//           it + `ab_key`, and enqueues via `EnqueueRecord`.
+//     Borrow invalidation: `napi_detach_arraybuffer` or GC finalization.
+//       `NodeApiBinary_DestroyForEnv` erases `g_ext_by_obj[generation]` and
+//       deletes undrained `g_ext_queues[generation]`; undetached records left
+//       in `g_ext_records` still resolve via `ExternalArrayBufferTrampoline`
+//       at later GC/disposal where `LookupLiveEnvWithGeneration` returns false
+//       and deletes `rec` without calling user code.
 //     Potential user-code/reentrancy: GC trampoline never calls user code
-//       (D4): it only enqueues the record pointer under a mutex, no JS,
-//       no provider-container mutation beyond the queue push. Drain on env
-//       thread invokes the user napi_finalize(env, data, hint) with a live
-//       env and the context entered (EntryGuard). The user finalizer may
-//       call provider APIs (which re-enter EntryGuard; queue was moved
-//       before invoking, so reentrant drain sees empty).
-//     Thread/context: trampoline on arbitrary GC thread, no context, only
-//       native queue mutation under mutex (never across user code). Drain
-//       on owner thread with env context entered.
+//       (D4): it only looks up `id`, removes it under mutex, and pushes onto
+//       `g_ext_queues[generation]` under `LookupLiveEnvWithGeneration`. Drain on
+//       env thread invokes user `finalize_cb(env, data, hint)` with a live env
+//       and context entered, queue moved out before user execution.
+//     Thread/context: trampoline on arbitrary GC thread, no context, never
+//       mutates JS objects. Drain/detach on owner thread with context entered.
 //     Release on success/partial failure/exception/OOM/cancel/shutdown:
-//       Exactly once. While the env is live, via drain (delete after
-//       invocation; reentrant drain sees an empty queue because the queue
-//       is moved out before invoking). At destroy, the step-2 drain
-//       invokes records queued while Alive (Closing env, context entered,
-//       same posture as wrap finalizers); stragglers enqueued during
-//       teardown user code are deleted without invocation just after the
-//       live entry is erased (step 7, pure native, no context needed).
-//       After the live entry is erased, the trampoline's generation check
-//       fails and the record is deleted without invocation at enqueue
-//       time (never queued under a dead generation, so no Drain can fetch
-//       it and no dead-generation queue can accumulate). Shutdown: records
-//       for buffers still live at destroy die with the runtime. Deleting
-//       without invocation leaks the user's external_data (not a UAF);
-//       invoking with a dead env would be a UAF, so the dead path never
-//       invokes.
-//     Memory accounting/capacity: one record per live external buffer;
-//       queue vectors hold at most live uncollected external buffers
-//       (bounded by JS heap). OOM in record alloc => generic_failure,
+//       Exactly once across detach, GC finalize, OOM rollback, or dead-env
+//       cleanup. OOM in `rec` or `g_ext_records` alloc -> `napi_generic_failure`,
 //       nothing published.
-//     Tests: test/nodeapi/probes/binary_probe.cpp external finalizer fires
-//       once on collect (GC via JsCollectGarbage + next napi call drain).
-//     Residual uncertainty: detached-external finalizer leak (see above);
-//       post-destroy collects are deleted without invocation at enqueue
-//       time (A8-1; record itself never leaks, user external_data does);
+//     Tests: `test/nodeapi/probes/binary_probe.cpp` + `teardown_probe.cpp`
+//       verify external AB normal GC + external AB detach-before-GC + repeated
+//       GC + env teardown leave zero leaked `ExternalRecord`s and fire once.
 //       Linux x64 not claimed.
 //
 //   R4 storage borrows (get_*_info):
@@ -263,19 +253,43 @@ napi_status MakeIdMap(napi_env env, const char* name, JsPropertyIdRef* out,
 // discards stragglers after the live entry is erased.
 
 struct ExternalRecord {
+  uint64_t id = 0;
   napi_env env = nullptr;
   uint64_t generation = 0;
+  JsValueRef ab_key = JS_INVALID_REFERENCE;  // key only, never dereferenced
   node_api_basic_finalize finalize_cb = nullptr;
   void* finalize_data = nullptr;
   void* finalize_hint = nullptr;
 };
 
 std::mutex g_ext_mutex;
+std::atomic<uint64_t> g_next_ext_id{1};
+// Unclaimed ExternalRecords keyed by token ID (values are never freed while
+// stored here). Both detach and GC trampoline race to erase & claim `id`
+// under `g_ext_mutex`, guaranteeing at-most-once invocation across both
+// pre-Stage-3 and post-Stage-3 JsrtExternalArrayBuffer behavior.
+std::unordered_map<uint64_t, ExternalRecord*> g_ext_records;
+// Live external ArrayBuffers per generation (JsValueRef key -> token id)
+// for synchronous claim on napi_detach_arraybuffer.
+std::unordered_map<uint64_t, std::unordered_map<JsValueRef, uint64_t>> g_ext_by_obj;
 std::unordered_map<uint64_t, std::vector<ExternalRecord*>> g_ext_queues;
 
 // Live-record accounting for tests/probes (A8-1 proof): incremented when a
 // record is allocated, decremented when it is deleted on any path.
 std::atomic<size_t> g_ext_live_records{0};
+
+void EraseObjKeyLocked(uint64_t generation, JsValueRef ab_key, uint64_t id) {
+  if (ab_key == JS_INVALID_REFERENCE) return;
+  auto git = g_ext_by_obj.find(generation);
+  if (git == g_ext_by_obj.end()) return;
+  auto oit = git->second.find(ab_key);
+  if (oit != git->second.end() && oit->second == id) {
+    git->second.erase(oit);
+    if (git->second.empty()) {
+      g_ext_by_obj.erase(git);
+    }
+  }
+}
 
 void DeleteExtRecord(ExternalRecord* rec) {
   if (rec == nullptr) return;
@@ -307,11 +321,27 @@ void EnqueueRecord(ExternalRecord* rec) {
 }
 
 // GC-side trampoline (JsFinalizeCallback): runs on arbitrary GC thread
-// with no current context. Only enqueues the record pointer (D4). No JS,
-// no user finalizer, no provider-container mutation beyond the queue push
-// under mutex.
+// with no current context. Receives an integer token ID cast to `void*`
+// (never dereferences `state`), claims the record from `g_ext_records` if
+// not already claimed on detach, and enqueues it (D4). No JS, no user
+// finalizer.
 void ExternalArrayBufferTrampoline(void* state) {
-  auto* rec = static_cast<ExternalRecord*>(state);
+  uint64_t id = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(state));
+  if (id == 0) return;
+  ExternalRecord* rec = nullptr;
+  {
+    std::lock_guard<std::mutex> lk(g_ext_mutex);
+    auto it = g_ext_records.find(id);
+    if (it == g_ext_records.end()) {
+      // Already claimed & finalized during napi_detach_arraybuffer.
+      return;
+    }
+    rec = it->second;
+    g_ext_records.erase(it);
+    if (rec != nullptr) {
+      EraseObjKeyLocked(rec->generation, rec->ab_key, id);
+    }
+  }
   EnqueueRecord(rec);
 }
 
@@ -350,18 +380,17 @@ void DrainExternalFinalizers(napi_env env) {
 }
 
 // A8-1 destroy tail (step 7): discard records still queued for a destroyed
-// env's generation WITHOUT invoking the user finalizer. Runs after the
-// live registry entry is erased, so no new record for this generation can
-// be enqueued afterwards (the enqueue-time generation check fails); this
-// closes the window between the step-2 invoke-drain and the erase. Pure
-// native (mutex + delete only): no context, no JS, safe after teardown.
-// Only deletes this generation's queue; live generations are untouched.
+// env's generation WITHOUT invoking the user finalizer, and drop live-object
+// detach keys for that generation. Undetached records remain in `g_ext_records`
+// until their GC trampoline fires (which sees the dead generation and deletes
+// them without invocation).
 void NodeApiBinary_DestroyForEnv(napi_env env, uint64_t generation) {
   (void)env;  // Keyed by generation, never dereferenced (may be Dead/deleted).
   if (generation == 0) return;
   std::vector<ExternalRecord*> leftover;
   {
     std::lock_guard<std::mutex> lk(g_ext_mutex);
+    g_ext_by_obj.erase(generation);
     auto it = g_ext_queues.find(generation);
     if (it != g_ext_queues.end()) {
       leftover = std::move(it->second);
@@ -428,8 +457,14 @@ napi_status IsDetachedViaProperty(napi_env env, JsValueRef ab, bool* out) {
   return napi_ok;
 }
 
-// NAPI type <-> Js type maps.
-bool NapiTypeToJs(napi_typedarray_type n, JsTypedArrayType* out) {
+// NAPI type <-> Js type integer maps (lib/Runtime/Types/TypeId.h +
+// lib/Jsrt/Jsrt.cpp:2233): TypeIds_Float16Array=9, Int64Array=10,
+// Uint64Array=11 relative to TypeIds_Int8Array. Using `int` avoids enum UB
+// when pre-Stage-3 ChakraCommon.h omits JsArrayTypeBigInt64/BigUint64.
+constexpr int kJsArrayTypeBigInt64 = 10;
+constexpr int kJsArrayTypeBigUint64 = 11;
+
+bool NapiTypeToJsInt(napi_typedarray_type n, int* out) {
   switch (n) {
     case napi_int8_array: *out = JsArrayTypeInt8; return true;
     case napi_uint8_array: *out = JsArrayTypeUint8; return true;
@@ -440,31 +475,36 @@ bool NapiTypeToJs(napi_typedarray_type n, JsTypedArrayType* out) {
     case napi_uint32_array: *out = JsArrayTypeUint32; return true;
     case napi_float32_array: *out = JsArrayTypeFloat32; return true;
     case napi_float64_array: *out = JsArrayTypeFloat64; return true;
-    case napi_bigint64_array:
-    case napi_biguint64_array:
-      return false;  // No Js counterpart; caller maps to generic_failure.
-    default:
-      return false;
+    case napi_bigint64_array: *out = kJsArrayTypeBigInt64; return true;
+    case napi_biguint64_array: *out = kJsArrayTypeBigUint64; return true;
+    default: return false;
   }
 }
 
-size_t ElemSizeForJs(JsTypedArrayType t) {
+size_t ElemSizeForJsInt(int t) {
   switch (t) {
-    case JsArrayTypeInt8: return 1;
-    case JsArrayTypeUint8: return 1;
-    case JsArrayTypeUint8Clamped: return 1;
-    case JsArrayTypeInt16: return 2;
-    case JsArrayTypeUint16: return 2;
-    case JsArrayTypeInt32: return 4;
-    case JsArrayTypeUint32: return 4;
-    case JsArrayTypeFloat32: return 4;
-    case JsArrayTypeFloat64: return 8;
-    case JsArrayTypeFloat16: return 2;
-    default: return 1;
+    case JsArrayTypeInt8:
+    case JsArrayTypeUint8:
+    case JsArrayTypeUint8Clamped:
+      return 1;
+    case JsArrayTypeInt16:
+    case JsArrayTypeUint16:
+    case JsArrayTypeFloat16:
+      return 2;
+    case JsArrayTypeInt32:
+    case JsArrayTypeUint32:
+    case JsArrayTypeFloat32:
+      return 4;
+    case JsArrayTypeFloat64:
+    case kJsArrayTypeBigInt64:
+    case kJsArrayTypeBigUint64:
+      return 8;
+    default:
+      return 1;
   }
 }
 
-bool JsTypeToNapi(JsTypedArrayType j, napi_typedarray_type* out) {
+bool JsTypeToNapiInt(int j, napi_typedarray_type* out) {
   switch (j) {
     case JsArrayTypeInt8: *out = napi_int8_array; return true;
     case JsArrayTypeUint8: *out = napi_uint8_array; return true;
@@ -475,9 +515,63 @@ bool JsTypeToNapi(JsTypedArrayType j, napi_typedarray_type* out) {
     case JsArrayTypeUint32: *out = napi_uint32_array; return true;
     case JsArrayTypeFloat32: *out = napi_float32_array; return true;
     case JsArrayTypeFloat64: *out = napi_float64_array; return true;
-    case JsArrayTypeFloat16: return false;  // No napi counterpart.
+    case kJsArrayTypeBigInt64: *out = napi_bigint64_array; return true;
+    case kJsArrayTypeBigUint64: *out = napi_biguint64_array; return true;
+    case JsArrayTypeFloat16: return false;  // No N-API v8 counterpart.
     default: return false;
   }
+}
+
+// Construct BigInt64Array / BigUint64Array via the context's JS intrinsic
+// constructor when pre-Stage-3 JsCreateTypedArray does not yet accept 10/11.
+napi_status ConstructBigIntTypedArray(napi_env env, bool is_unsigned,
+                                      unsigned int len32, JsValueRef base,
+                                      unsigned int off32, JsValueRef* out_ta) {
+  *out_ta = JS_INVALID_REFERENCE;
+  JsValueRef global = JS_INVALID_REFERENCE;
+  JsErrorCode ec = JsGetGlobalObject(&global);
+  if (ec != JsNoError) return MapJsError(env, ec, "BigIntTypedArray: global");
+  ScratchRoot globalRoot(global);
+
+  JsPropertyIdRef ctorId = JS_INVALID_REFERENCE;
+  const char* ctorName = is_unsigned ? "BigUint64Array" : "BigInt64Array";
+  napi_status ms = MakeIdMap(env, ctorName, &ctorId, "BigIntTypedArray: id");
+  if (ms != napi_ok) return ms;
+
+  JsValueRef ctor = JS_INVALID_REFERENCE;
+  ec = JsGetProperty(global, ctorId, &ctor);
+  if (ec != JsNoError) return MapJsError(env, ec, "BigIntTypedArray: ctor");
+  ScratchRoot ctorRoot(ctor);
+
+  JsValueType ctorType = JsUndefined;
+  ec = JsGetValueType(ctor, &ctorType);
+  if (ec != JsNoError) return MapJsError(env, ec, "BigIntTypedArray: ctor type");
+  if (ctorType != JsFunction) {
+    nodeapi::SetLastError(env, napi_generic_failure,
+                          "create_typedarray: BigInt TypedArray ctor missing");
+    return napi_generic_failure;
+  }
+
+  JsValueRef lenVal = JS_INVALID_REFERENCE;
+  ec = JsDoubleToNumber(static_cast<double>(len32), &lenVal);
+  if (ec != JsNoError) return MapJsError(env, ec, "BigIntTypedArray: len");
+  ScratchRoot lenRoot(lenVal);
+
+  JsValueRef ta = JS_INVALID_REFERENCE;
+  if (base == JS_INVALID_REFERENCE) {
+    JsValueRef args[2] = {ctor, lenVal};
+    ec = JsConstructObject(ctor, args, 2, &ta);
+  } else {
+    JsValueRef offVal = JS_INVALID_REFERENCE;
+    ec = JsDoubleToNumber(static_cast<double>(off32), &offVal);
+    if (ec != JsNoError) return MapJsError(env, ec, "BigIntTypedArray: off");
+    ScratchRoot offRoot(offVal);
+    JsValueRef args[4] = {ctor, base, offVal, lenVal};
+    ec = JsConstructObject(ctor, args, 4, &ta);
+  }
+  if (ec != JsNoError) return MapJsError(env, ec, "BigIntTypedArray: construct");
+  *out_ta = ta;
+  return napi_ok;
 }
 
 napi_status ValidateSizeToUInt(napi_env env, size_t v, unsigned int* out,
@@ -571,41 +665,92 @@ napi_status NAPI_CDECL napi_create_external_arraybuffer(
   JsFinalizeCallback tramp = nullptr;
   void* tramp_state = nullptr;
   if (finalize_cb != nullptr) {
-    try {
-      rec = new ExternalRecord();
-    } catch (...) {
-      nodeapi::SetLastError(env, napi_generic_failure,
-                            "create_external_arraybuffer: record OOM");
-      return napi_generic_failure;
-    }
+    rec = new (std::nothrow) ExternalRecord();
     if (rec == nullptr) {
       nodeapi::SetLastError(env, napi_generic_failure,
                             "create_external_arraybuffer: record OOM");
       return napi_generic_failure;
     }
-    g_ext_live_records.fetch_add(1, std::memory_order_relaxed);
     nodeapi::NodeEnv* nenv = nullptr;
     if (!nodeapi::LookupLiveEnv(static_cast<void*>(env), &nenv)) {
-      DeleteExtRecord(rec);
+      delete rec;
       return napi_invalid_arg;
     }
+    rec->id = g_next_ext_id.fetch_add(1, std::memory_order_relaxed);
     rec->env = env;
     rec->generation = nenv->generation;
     rec->finalize_cb = finalize_cb;
     rec->finalize_data = external_data;
     rec->finalize_hint = finalize_hint;
+    {
+      std::lock_guard<std::mutex> lk(g_ext_mutex);
+      try {
+        g_ext_records.emplace(rec->id, rec);
+      } catch (...) {
+        delete rec;
+        nodeapi::SetLastError(env, napi_generic_failure,
+                              "create_external_arraybuffer: record OOM");
+        return napi_generic_failure;
+      }
+    }
+    g_ext_live_records.fetch_add(1, std::memory_order_relaxed);
     tramp = ExternalArrayBufferTrampoline;
-    tramp_state = rec;
+    tramp_state = reinterpret_cast<void*>(static_cast<uintptr_t>(rec->id));
   }
 
   JsValueRef buf = JS_INVALID_REFERENCE;
   JsErrorCode ec = JsCreateExternalArrayBuffer(external_data, len32, tramp,
                                                tramp_state, &buf);
   if (ec != JsNoError) {
-    DeleteExtRecord(rec);  // Transfer never happened; delete inline.
+    if (rec != nullptr) {
+      {
+        std::lock_guard<std::mutex> lk(g_ext_mutex);
+        g_ext_records.erase(rec->id);
+      }
+      DeleteExtRecord(rec);  // Transfer never happened; delete inline.
+    }
     return MapJsError(env, ec, "JsCreateExternalArrayBuffer");
   }
   ScratchRoot bufRoot(buf);
+  if (rec != nullptr) {
+    std::lock_guard<std::mutex> lk(g_ext_mutex);
+    rec->ab_key = buf;
+    try {
+      g_ext_by_obj[rec->generation][buf] = rec->id;
+    } catch (...) {
+      // Non-fatal: GC trampoline still finds `rec` by token id.
+    }
+  }
+  // Node semantics: external ArrayBuffer created with NULL pointer (and
+  // byte_length == 0) is immediately detached, while still running any
+  // supplied finalize_cb once safely via the detach claim path.
+  if (external_data == nullptr) {
+    (void)JsDetachArrayBuffer(buf);
+    if (rec != nullptr) {
+      bool enqueue_failed = false;
+      {
+        std::lock_guard<std::mutex> lk(g_ext_mutex);
+        EraseObjKeyLocked(rec->generation, buf, rec->id);
+        g_ext_records.erase(rec->id);
+        try {
+          g_ext_queues[rec->generation].push_back(rec);
+        } catch (...) {
+          enqueue_failed = true;
+        }
+      }
+      if (enqueue_failed) {
+        if (rec->finalize_cb != nullptr) {
+          try {
+            rec->finalize_cb(rec->env, rec->finalize_data, rec->finalize_hint);
+          } catch (...) {
+          }
+        }
+        DeleteExtRecord(rec);
+      } else {
+        DrainExternalFinalizers(env);
+      }
+    }
+  }
   // Transfer point for rec ownership is inside JsCreateExternalArrayBuffer
   // (callbackState). After this point, rec is owned by the JS object;
   // never delete inline here.
@@ -711,10 +856,57 @@ napi_status NAPI_CDECL napi_detach_arraybuffer(napi_env env,
     }
     return MapJsError(env, ec, "JsDetachArrayBuffer");
   }
-  // R4 revalidation: after the detach (which can run no user code, but
-  // conceptually invalidates the borrow), no storage is returned, so
-  // nothing further to revalidate. A fresh get_*_info after this sees
-  // NULL/0 (probe-verified).
+  // Claim any pending external-AB finalizer record associated with `ab` so it
+  // runs once on detach even when pre-Stage-3 JsrtExternalArrayBuffer skips
+  // detached finalizers at GC, AND so post-Stage-3 GC finalization finds the
+  // token absent and performs zero work (never double-frees/double-finalizes).
+  nodeapi::NodeEnv* nenv = nullptr;
+  if (nodeapi::LookupLiveEnv(static_cast<void*>(env), &nenv)) {
+    uint64_t gen = nenv->generation;
+    ExternalRecord* detached_rec = nullptr;
+    bool enqueue_failed = false;
+    {
+      std::lock_guard<std::mutex> lk(g_ext_mutex);
+      auto git = g_ext_by_obj.find(gen);
+      if (git != g_ext_by_obj.end()) {
+        auto oit = git->second.find(ab);
+        if (oit != git->second.end()) {
+          uint64_t id = oit->second;
+          git->second.erase(oit);
+          if (git->second.empty()) {
+            g_ext_by_obj.erase(git);
+          }
+          auto rit = g_ext_records.find(id);
+          if (rit != g_ext_records.end()) {
+            detached_rec = rit->second;
+            g_ext_records.erase(rit);
+          }
+        }
+      }
+      if (detached_rec != nullptr) {
+        try {
+          g_ext_queues[gen].push_back(detached_rec);
+        } catch (...) {
+          enqueue_failed = true;
+        }
+      }
+    }
+    if (enqueue_failed && detached_rec != nullptr) {
+      if (detached_rec->finalize_cb != nullptr) {
+        try {
+          detached_rec->finalize_cb(detached_rec->env,
+                                    detached_rec->finalize_data,
+                                    detached_rec->finalize_hint);
+        } catch (...) {
+        }
+      }
+      DeleteExtRecord(detached_rec);
+    } else if (detached_rec != nullptr) {
+      DrainExternalFinalizers(env);
+    }
+  }
+  // R4 revalidation: after the detach (which invalidates backing storage),
+  // no storage pointer is returned, and a fresh get_*_info sees NULL/0.
   nodeapi::ClearLastError(env);
   return napi_ok;
 }
@@ -763,28 +955,22 @@ napi_status NAPI_CDECL napi_create_typedarray(napi_env env,
                                               napi_value arraybuffer,
                                               size_t byte_offset,
                                               napi_value* result) {
-  if (result == nullptr) {
+  if (arraybuffer == nullptr || result == nullptr) {
     if (env) nodeapi::SetLastError(env, napi_invalid_arg,
-                                    "create_typedarray: result is NULL");
+                                    "create_typedarray: null arg");
     return napi_invalid_arg;
   }
   nodeapi::EntryGuard guard(env, /*allowClosing=*/false,
                             /*allowPending=*/false, /*needContext=*/true);
   if (!guard.ok()) return guard.status();
   DrainExternalFinalizers(env);
-  // Type pre-check: BigInt64/BigUint64 -> generic_failure (non-conformance).
-  if (type == napi_bigint64_array || type == napi_biguint64_array) {
-    nodeapi::SetLastError(env, napi_generic_failure,
-                          "create_typedarray: BigInt typed arrays unsupported");
-    return napi_generic_failure;
-  }
-  JsTypedArrayType jsType;
-  if (!NapiTypeToJs(type, &jsType)) {
+  int jsTypeInt = 0;
+  if (!NapiTypeToJsInt(type, &jsTypeInt)) {
     nodeapi::SetLastError(env, napi_invalid_arg,
                           "create_typedarray: bad type");
     return napi_invalid_arg;
   }
-  size_t elemSize = ElemSizeForJs(jsType);
+  (void)ElemSizeForJsInt(jsTypeInt);
   unsigned int len32 = 0;
   napi_status vs = ValidateSizeToUInt(env, length, &len32,
                                       "create_typedarray: length too large");
@@ -796,33 +982,37 @@ napi_status NAPI_CDECL napi_create_typedarray(napi_env env,
   // Alignment is checked by the engine (RangeError -> pending); validated
   // first is the ArrayBuffer check below (invalid_arg if not ArrayBuffer).
 
-  JsValueRef base = JS_INVALID_REFERENCE;
-  if (arraybuffer != nullptr) {
-    JsValueRef ab = ToJs(arraybuffer);
+  JsValueRef base = ToJs(arraybuffer);
+  {
     JsValueType t = JsUndefined;
-    JsErrorCode te = JsGetValueType(ab, &t);
+    JsErrorCode te = JsGetValueType(base, &t);
     if (te != JsNoError) return MapJsError(env, te, "JsGetValueType");
     if (t != JsArrayBuffer) {
       nodeapi::SetLastError(env, napi_invalid_arg,
                             "create_typedarray: not an ArrayBuffer");
       return napi_invalid_arg;
     }
-    base = ab;
-    // R4: root the ArrayBuffer for the create call.
-    // (base is borrowed from the caller's scope; hold a ScratchRoot for
-    // the JsCreateTypedArray window.)
-  } else {
-    // Standalone: byte_offset must be 0 (JsCreateTypedArray contract).
-    if (byte_offset != 0) {
-      nodeapi::SetLastError(env, napi_invalid_arg,
-                            "create_typedarray: offset with no buffer");
-      return napi_invalid_arg;
+  }
+  ScratchRoot baseRoot(base);
+  JsValueRef ta = JS_INVALID_REFERENCE;
+  JsErrorCode ec = JsCreateTypedArray(static_cast<JsTypedArrayType>(jsTypeInt),
+                                      base, off32, len32, &ta);
+  if (ec != JsNoError) {
+    if ((type == napi_bigint64_array || type == napi_biguint64_array) &&
+        ec == JsErrorInvalidArgument) {
+      bool has_pending = false;
+      (void)JsHasException(&has_pending);
+      if (!has_pending) {
+        napi_status bs = ConstructBigIntTypedArray(
+            env, type == napi_biguint64_array, len32, base, off32, &ta);
+        if (bs != napi_ok) return bs;
+      } else {
+        return MapJsError(env, ec, "JsCreateTypedArray");
+      }
+    } else {
+      return MapJsError(env, ec, "JsCreateTypedArray");
     }
   }
-  ScratchRoot baseRoot(base != JS_INVALID_REFERENCE ? base : JS_INVALID_REFERENCE);
-  JsValueRef ta = JS_INVALID_REFERENCE;
-  JsErrorCode ec = JsCreateTypedArray(jsType, base, off32, len32, &ta);
-  if (ec != JsNoError) return MapJsError(env, ec, "JsCreateTypedArray");
   ScratchRoot taRoot(ta);
   napi_status rs = RootAndPublish(env, ta, result);
   if (rs != napi_ok) return rs;
@@ -869,8 +1059,9 @@ napi_status NAPI_CDECL napi_get_typedarray_info(napi_env env,
   if (ec != JsNoError) return MapJsError(env, ec, "JsGetTypedArrayInfo");
   ScratchRoot abRoot(jsAB);
 
+  int jsTypeInt = static_cast<int>(jsType);
   napi_typedarray_type napiType;
-  if (!JsTypeToNapi(jsType, &napiType)) {
+  if (!JsTypeToNapiInt(jsTypeInt, &napiType)) {
     nodeapi::SetLastError(env, napi_generic_failure,
                           "get_typedarray_info: unsupported typed array type");
     return napi_generic_failure;
@@ -878,10 +1069,12 @@ napi_status NAPI_CDECL napi_get_typedarray_info(napi_env env,
 
   BYTE* storBuf = nullptr;
   unsigned int storLen = 0;
-  JsTypedArrayType storType = JsArrayTypeUint8;
-  int elemSize = 0;
-  ec = JsGetTypedArrayStorage(ta, &storBuf, &storLen, &storType, &elemSize);
+  // Pass elementSize = nullptr so pre-Stage-3 JsGetTypedArrayStorage does not
+  // assert/fatal on BigInt64Array/BigUint64Array; element size comes from
+  // ElemSizeForJsInt(jsTypeInt).
+  ec = JsGetTypedArrayStorage(ta, &storBuf, &storLen, nullptr, nullptr);
   if (ec != JsNoError) return MapJsError(env, ec, "JsGetTypedArrayStorage");
+  size_t elemSize = ElemSizeForJsInt(jsTypeInt);
   // R4 revalidation: storBuf is already offset (GetByteBuffer includes
   // byteOffset); storLen is the view byteLength. The two calls above
   // execute no JS, but the borrow is still rooted (taRoot/abRoot).
@@ -898,15 +1091,9 @@ napi_status NAPI_CDECL napi_get_typedarray_info(napi_env env,
     if (is_det) {
       storBuf = nullptr;
       storLen = 0;
-      elemSize = static_cast<int>(ElemSizeForJs(jsType));
     }
   }
-  if (elemSize <= 0) {
-    nodeapi::SetLastError(env, napi_generic_failure,
-                          "get_typedarray_info: bad element size");
-    return napi_generic_failure;
-  }
-  size_t elemCount = static_cast<size_t>(storLen) / static_cast<size_t>(elemSize);
+  size_t elemCount = static_cast<size_t>(storLen) / elemSize;
 
   if (type != nullptr) *type = napiType;
   if (length != nullptr) *length = elemCount;

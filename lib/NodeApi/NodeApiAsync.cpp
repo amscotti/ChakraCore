@@ -194,51 +194,6 @@ TsfnState* ClaimTsfnTaskArg(TsfnTaskArg* arg) {
   return it->second;
 }
 
-/* Callback record entry for env-thread trampolines (brief: completion /
- * drain run with context enter + scope + a callback record entry). The
- * TU-local stack mirrors NodeApiFunctions' stack for balance
- * verification. It is invisible to napi_get_cb_info (which searches the
- * Functions stack); the records exist so nested JS (direct-form funcs,
- * call_js_cb calling napi_call_function) nests correctly and scope
- * balance is enforceable. Push/pop lock only, never across user code. */
-constexpr std::uint64_t kCbMagic = 0x5F00A5C3ACB11ULL;
-struct CallbackInfo {
-  std::uint64_t magic = kCbMagic;
-  napi_env env = nullptr;
-  napi_value thisArg = nullptr;
-  napi_value* argv = nullptr;
-  size_t argc = 0;
-  napi_value newTarget = nullptr;
-  napi_value callee = nullptr;
-  void* data = nullptr;
-};
-std::mutex g_cb_mutex;
-std::unordered_map<napi_env, std::vector<CallbackInfo*>> g_cb_stacks;
-
-bool PushCallback(napi_env env, CallbackInfo* info) {
-  std::lock_guard<std::mutex> lk(g_cb_mutex);
-  try {
-    g_cb_stacks[env].push_back(info);
-    return true;
-  } catch (...) {
-    return false;
-  }
-}
-
-void PopCallback(napi_env env, CallbackInfo* info) {
-  std::lock_guard<std::mutex> lk(g_cb_mutex);
-  auto it = g_cb_stacks.find(env);
-  if (it == g_cb_stacks.end()) return;
-  auto& v = it->second;
-  for (;;) {
-    if (v.empty()) break;
-    CallbackInfo* top = v.back();
-    v.pop_back();
-    if (top == info) break;
-  }
-  if (v.empty()) g_cb_stacks.erase(it);
-}
-
 bool HasPendingException() {
   bool has = false;
   JsErrorCode e = JsHasException(&has);
@@ -519,32 +474,20 @@ void WorkCompleteTramp(void* arg) {
     napi_handle_scope implicit = nullptr;
     napi_status openSt = NodeApiScopes_OpenImplicit(env, &implicit);
     if (openSt == napi_ok && implicit != nullptr) {
-      CallbackInfo cb{};
-      cb.env = env;
-      cb.thisArg = nullptr;
-      cb.argv = nullptr;
-      cb.argc = 0;
-      cb.newTarget = nullptr;
-      cb.callee = nullptr;
-      cb.data = data;
-      bool pushed = PushCallback(env, &cb);
       try {
         complete(env, status, data);
       } catch (...) {
         nodeapi::SetLastError(env, napi_generic_failure,
                               "async complete: user callback threw");
       }
-      if (pushed) {
-        napi_status bal = NodeApiScopes_EnforceImplicitBalance(env, entry_depth);
-        if (bal != napi_ok) {
-          nodeapi::SetLastError(env, bal, "async complete: balance");
-          SetMismatchPending();
-        }
+      napi_status bal = NodeApiScopes_EnforceImplicitBalance(env, entry_depth);
+      if (bal != napi_ok) {
+        nodeapi::SetLastError(env, bal, "async complete: balance");
+        SetMismatchPending();
       }
       if (NodeApiScopes_IsOpen(env, implicit)) {
         (void)napi_close_handle_scope(env, implicit);
       }
-      if (pushed) PopCallback(env, &cb);
     } else {
       /* OOM opening the implicit scope: skip the user callback (never
        * leak). The worker ref still drops below. */
@@ -638,15 +581,6 @@ void TsfnDrainTramp(void* arg) {
     napi_handle_scope implicit = nullptr;
     napi_status openSt = NodeApiScopes_OpenImplicit(env, &implicit);
     if (openSt == napi_ok && implicit != nullptr) {
-      CallbackInfo cbi{};
-      cbi.env = env;
-      cbi.thisArg = nullptr;
-      cbi.argv = nullptr;
-      cbi.argc = 0;
-      cbi.newTarget = nullptr;
-      cbi.callee = FromJs(func);
-      cbi.data = data;
-      bool pushed = PushCallback(env, &cbi);
       try {
         if (cb != nullptr) {
           napi_value js_cb = (func == JS_INVALID_REFERENCE) ? nullptr : FromJs(func);
@@ -665,17 +599,14 @@ void TsfnDrainTramp(void* arg) {
         nodeapi::SetLastError(env, napi_generic_failure,
                               "tsfn drain: user callback threw");
       }
-      if (pushed) {
-        napi_status bal = NodeApiScopes_EnforceImplicitBalance(env, entry_depth);
-        if (bal != napi_ok) {
-          nodeapi::SetLastError(env, bal, "tsfn drain: balance");
-          SetMismatchPending();
-        }
+      napi_status bal = NodeApiScopes_EnforceImplicitBalance(env, entry_depth);
+      if (bal != napi_ok) {
+        nodeapi::SetLastError(env, bal, "tsfn drain: balance");
+        SetMismatchPending();
       }
       if (NodeApiScopes_IsOpen(env, implicit)) {
         (void)napi_close_handle_scope(env, implicit);
       }
-      if (pushed) PopCallback(env, &cbi);
     }
     DropTsfnRef(st); /* item ref */
   }

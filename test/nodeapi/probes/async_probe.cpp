@@ -42,7 +42,7 @@
 //       uv==NULL (scheduling present) => generic_failure.
 //
 // Build (repo root, via gate lock — see run_async_probe.sh):
-//   /tmp/opencode/cc-gate-lock.sh mise exec -- zig c++ \
+//   zig c++ \
 //     -std=gnu++17 -DNAPI_VERSION=8 -DCHAKRA_NODEAPI_TEST_HOOKS \
 //     -Iinclude/nodeapi -Ilib/Jsrt -Ilib/NodeApi \
 //     test/nodeapi/probes/async_probe.cpp + provider TUs \

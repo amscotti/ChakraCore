@@ -1,18 +1,28 @@
 #!/bin/sh
 # Gate probe (MEDIUM-2 pump + MEDIUM-3 Closing parity + N0.6 last-error +
 # missing-symbols). Builds gate_probe.cpp against each profile's engine.
-# All zig invocations go through the serialized gate lock with mise.
+# Zig invocations run via mise/zig (or $CC_GATE_LOCK when set and executable).
 
 set -eu
 
 REPO=$(cd "$(dirname "$0")/../../.." && pwd)
 cd "$REPO"
 
-GATE=${CC_GATE_LOCK:-/tmp/opencode/cc-gate-lock.sh}
+GATE=${CC_GATE_LOCK:-}
+
+run_zig() {
+  if [ -n "$GATE" ] && [ -x "$GATE" ]; then
+    "$GATE" mise exec -- zig "$@"
+  elif command -v mise >/dev/null 2>&1; then
+    mise exec -- zig "$@"
+  else
+    zig "$@"
+  fi
+}
 
 # Platform branch (Linux x86_64 mirror of the macOS ARM64 shape).
-# Linux: test profile only (tools/build/linux.zig has no jit);
-# the jit leg below is skipped on Linux. Flags mirror linux.zig's
+# Linux: run the default test profile leg (`zig-out/bin/libChakraCore.so`);
+# the macOS-only jit leg below is skipped on Linux. Flags mirror linux.zig's
 # provider/host compiles (ELF spellings: no sysroot/mcpu/frameworks).
 if [ "$(uname -s)" = "Linux" ]; then
   TARGET="x86_64-linux-gnu"
@@ -44,11 +54,11 @@ run_profile() {
   echo "===== profile: $profile (engine: $engine_lib) ====="
   if [ ! -f "$engine_lib" ]; then
     echo "run_gate_probe: engine dylib missing for $profile: $engine_lib" >&2
-    echo "hint: run it via: $GATE mise exec -- zig build libChakraNodeApi" >&2
+    echo "hint: run it via: zig build libChakraNodeApi" >&2
     return 1
   fi
   # shellcheck disable=SC2086
-  "$GATE" mise exec -- zig c++ $CXXFLAGS \
+  run_zig c++ $CXXFLAGS \
     lib/NodeApi/NodeApiEnv.cpp \
     lib/NodeApi/NodeApiLifetime.cpp \
     lib/NodeApi/NodeApiRefs.cpp \
@@ -76,12 +86,12 @@ trap 'rm -rf "$WORK"' EXIT
 
 if [ "${SKIP_BUILD:-0}" != "1" ]; then
   echo "===== building test-profile engine (zig build libChakraNodeApi) ====="
-  "$GATE" mise exec -- zig build libChakraNodeApi
+  run_zig build libChakraNodeApi
   if [ "$(uname -s)" != "Linux" ]; then
     echo "===== building jit-profile engine (zig build -Dprofile=jit libChakraNodeApi) ====="
-    "$GATE" mise exec -- zig build -Dprofile=jit libChakraNodeApi
+    run_zig build -Dprofile=jit libChakraNodeApi
   else
-    echo "===== linux: jit profile does not exist; test leg only ====="
+    echo "===== linux: test leg only ====="
   fi
 fi
 

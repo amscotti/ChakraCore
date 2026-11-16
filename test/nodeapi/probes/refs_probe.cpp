@@ -9,7 +9,7 @@
 // (nodeapi_refs_test_create_env), and exercises the five napi_*
 // reference functions in lib/NodeApi/NodeApiRefs.cpp in-process (no
 // addon, no ch-nodeapi host). Run via run_refs_probe.sh, which builds
-// with `zig c++` through /tmp/opencode/cc-gate-lock.sh and links the
+// with `zig c++` through the runner script and links the
 // engine libChakraCore.dylib produced by `mise exec -- zig build`.
 //
 // GC methodology (R-REF-12 / AMB-REF-2): JsCollectGarbage is a

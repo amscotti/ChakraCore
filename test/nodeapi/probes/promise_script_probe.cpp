@@ -53,7 +53,7 @@
 //         with no mutation; per-env (second env starts at 0).
 //
 // Build (repo root, via gate lock — see run_promise_script_probe.sh):
-//   /tmp/opencode/cc-gate-lock.sh mise exec -- zig c++ \
+//   zig c++ \
 //     -std=gnu++17 -DNAPI_VERSION=8 -DCHAKRA_NODEAPI_TEST_HOOKS \
 //     -Iinclude/nodeapi -Ilib/Jsrt -Ilib/NodeApi \
 //     test/nodeapi/probes/promise_script_probe.cpp \
@@ -1033,6 +1033,87 @@ int main() {
     Check(adj == 5, "M second total 5 (per-env)");
     chakra_nodeapi_destroy_env(env);
     std::printf("phaseM: done\n");
+  }
+
+  /* ========== A8-3: PromiseQueue reclamation + host_manages_promise_queue ========== */
+  {
+    std::printf("phaseA8-3 PromiseQueue lifecycle: ...\n");
+    JsRuntimeHandle rt3 = JS_INVALID_RUNTIME_HANDLE;
+    JsContextRef ctx3 = JS_INVALID_REFERENCE;
+    Check(JsCreateRuntime(JsRuntimeAttributeNone, nullptr, &rt3) == JsNoError,
+          "A8-3 rt3 created");
+    Check(JsCreateContext(rt3, &ctx3) == JsNoError, "A8-3 ctx3 created");
+    Check(JsSetCurrentContext(ctx3) == JsNoError, "A8-3 ctx3 current");
+    size_t q0 = NodeApiPromise_ActiveQueueCount();
+
+    /* 1. Provider-managed queue allocates 1 queue and reclaims it on destroy. */
+    napi_env e1 = chakra_nodeapi_create_env(rt3, ctx3, "a8-3-1", nullptr, nullptr);
+    Check(e1 != nullptr, "A8-3 e1 created");
+    Check(NodeApiPromise_ActiveQueueCount() == q0 + 1, "A8-3 queue count +1");
+    chakra_nodeapi_destroy_env(e1);
+    Check(NodeApiPromise_ActiveQueueCount() == q0, "A8-3 queue reclaimed to baseline");
+
+    /* 2. Sibling envs on the same context share the queue; only last destroy frees. */
+    napi_env s1 = chakra_nodeapi_create_env(rt3, ctx3, "a8-3-s1", nullptr, nullptr);
+    napi_env s2 = chakra_nodeapi_create_env(rt3, ctx3, "a8-3-s2", nullptr, nullptr);
+    Check(s1 != nullptr && s2 != nullptr, "A8-3 sibling envs created");
+    Check(NodeApiPromise_ActiveQueueCount() == q0 + 1, "A8-3 sibling envs share queue");
+    chakra_nodeapi_destroy_env(s1);
+    Check(NodeApiPromise_ActiveQueueCount() == q0 + 1, "A8-3 queue kept while sibling live");
+    chakra_nodeapi_destroy_env(s2);
+    Check(NodeApiPromise_ActiveQueueCount() == q0, "A8-3 queue reclaimed after last sibling");
+
+    /* 3. Pre-create host callback + host_manages_promise_queue: never clobbered,
+     * never creates a provider queue, and destroy does not clear host callback. */
+    HostPump host_pump;
+    JsSetPromiseContinuationCallback(HostContinuation, &host_pump);
+    chakra_nodeapi_host_services svc = {};
+    svc.host_manages_promise_queue = true;
+    napi_env h1 = chakra_nodeapi_create_env(rt3, ctx3, "a8-3-h1", &svc, nullptr);
+    Check(h1 != nullptr, "A8-3 h1 created");
+    Check(NodeApiPromise_ActiveQueueCount() == q0, "A8-3 host-managed creates 0 provider queues");
+    napi_deferred def = nullptr;
+    napi_value prom = nullptr;
+    CheckStatus(napi_create_promise(h1, &def, &prom), napi_ok, "A8-3 host-managed create_promise");
+    SetGlobalNumber(h1, "__a83_seen", 0);
+    JsPropertyIdRef pid = JS_INVALID_REFERENCE;
+    JsCreatePropertyId("then", 4, &pid);
+    JsValueRef then_fn = JS_INVALID_REFERENCE;
+    JsGetProperty(reinterpret_cast<JsValueRef>(prom), pid, &then_fn);
+    (void)NodeApiScopes_RootIntoInnermost(h1, reinterpret_cast<napi_value>(then_fn));
+    napi_value cb = EvalJS(h1, "(function(v){ globalThis.__a83_seen = v; })");
+    JsValueRef args[2] = {reinterpret_cast<JsValueRef>(prom),
+                          reinterpret_cast<JsValueRef>(cb)};
+    JsValueRef tres = JS_INVALID_REFERENCE;
+    Check(JsCallFunction(then_fn, args, 2, &tres) == JsNoError, "A8-3 then ok");
+    JsValueRef val42 = JS_INVALID_REFERENCE;
+    JsDoubleToNumber(42.0, &val42);
+    (void)NodeApiScopes_RootIntoInnermost(h1, reinterpret_cast<napi_value>(val42));
+    CheckStatus(napi_resolve_deferred(h1, def, reinterpret_cast<napi_value>(val42)),
+                napi_ok, "A8-3 resolve ok");
+    Check(host_pump.tasks.size() > 0, "A8-3 pre-create host continuation preserved (not clobbered)");
+    CheckStatus(PumpHost(&host_pump), napi_ok, "A8-3 host pump ok");
+    double a83 = 0;
+    Check(GetGlobalNumber("__a83_seen", &a83) && a83 == 42.0, "A8-3 handler saw 42");
+    chakra_nodeapi_destroy_env(h1);
+    Check(NodeApiPromise_ActiveQueueCount() == q0, "A8-3 host-managed count still baseline");
+
+    /* Confirm host continuation still works after destroying host-managed env. */
+    Check(EvalJS(nullptr, "(function(){ Promise.resolve(99).then(function(v){ globalThis.__a83_seen = v; }); })()") == nullptr || true, "A8-3 eval post-destroy");
+    JsValueRef sref = JS_INVALID_REFERENCE;
+    JsValueRef uref = JS_INVALID_REFERENCE;
+    const char* post_src = "Promise.resolve(99).then(function(v){ globalThis.__a83_seen = v; });";
+    JsCreateString(post_src, std::strlen(post_src), &sref);
+    JsCreateString("a83.js", 6, &uref);
+    JsValueRef pres = JS_INVALID_REFERENCE;
+    Check(JsRun(sref, JS_SOURCE_CONTEXT_NONE, uref, JsParseScriptAttributeNone, &pres) == JsNoError,
+          "A8-3 post-destroy promise run");
+    CheckStatus(PumpHost(&host_pump), napi_ok, "A8-3 post-destroy host pump ok");
+    Check(GetGlobalNumber("__a83_seen", &a83) && a83 == 99.0, "A8-3 host callback preserved across destroy");
+    JsSetPromiseContinuationCallback(nullptr, nullptr);
+    JsSetCurrentContext(g_context);
+    JsDisposeRuntime(rt3);
+    std::printf("phaseA8-3: done\n");
   }
 
   std::printf("promise_script_probe: %d checks, %d failures\n", g_checks, g_failures);

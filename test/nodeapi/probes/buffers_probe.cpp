@@ -9,7 +9,7 @@
 // (chakra_nodeapi_create_env) and exercises lib/NodeApi/NodeApiBuffers.cpp
 // in-process (no addon, no ch-nodeapi host). Run via
 // run_buffers_probe.sh, which builds with `zig c++` through
-// /tmp/opencode/cc-gate-lock.sh and links the engine libChakraCore.dylib
+// the runner script and links the engine libChakraCore.dylib
 // produced by `mise exec -- zig build`.
 //
 // Coverage (each MUST fail on mismatch):
@@ -606,8 +606,12 @@ int main() {
   {
     std::fprintf(stdout, "-- case plain-uint8-not-buffer --\n");
     napi_handle_scope s = OpenScope();
+    napi_value backing = nullptr;
+    void* backingData = nullptr;
+    expect_status(napi_create_arraybuffer(env, 8, &backingData, &backing),
+                  napi_ok, "create backing ab for plain Uint8Array");
     napi_value ta = nullptr;
-    expect_status(napi_create_typedarray(env, napi_uint8_array, 8, nullptr, 0, &ta),
+    expect_status(napi_create_typedarray(env, napi_uint8_array, 8, backing, 0, &ta),
                   napi_ok, "create plain Uint8Array ok");
     bool isBuf = true;
     expect_status(napi_is_buffer(env, ta, &isBuf), napi_ok, "is_buffer on plain ok");

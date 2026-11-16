@@ -20,7 +20,7 @@
 //
 // Build (from repo root, via the shared gate lock), mirroring
 // teardown_probe.cpp:
-//   sh /tmp/opencode/cc-gate-lock.sh mise exec -- zig c++ \
+//   sh zig c++ \
 //     -std=gnu++17 -DNAPI_VERSION=8 -DNDEBUG \
 //     -Iinclude/nodeapi -Ilib/Jsrt -Ilib/NodeApi \
 //     test/nodeapi/probes/env_addr_reuse_probe.cpp \
@@ -28,7 +28,7 @@
 //     lib/NodeApi/NodeApiScopes.cpp lib/NodeApi/NodeApiRefs.cpp \
 //     -o /tmp/env_addr_reuse_probe \
 //     -Lzig-out/lib -lChakraCore \
-//     -Wl,-rpath,/Users/ascotti/.local/share/opencode/worktree/b41ea0/node-api/zig-out/lib
+//     -Wl,-rpath,<repo>
 //   /tmp/env_addr_reuse_probe
 //
 // Compiles NodeApiEnv.cpp directly (same binary), so hidden-visibility

@@ -9,7 +9,7 @@
 // (chakra_nodeapi_create_env) and exercises every lib/NodeApi/NodeApiBinary.cpp
 // entry in-process (no addon, no ch-nodeapi host). Run via
 // run_binary_probe.sh, which builds with `zig c++` through
-// /tmp/opencode/cc-gate-lock.sh and links the engine libChakraCore.dylib
+// the runner script and links the engine libChakraCore.dylib
 // produced by `mise exec -- zig build`.
 //
 // Coverage (each MUST fail on mismatch):
@@ -367,6 +367,15 @@ int main() {
     expect_status(napi_is_detached_arraybuffer(env, ab, &detached), napi_ok,
                   "is_detached zero ok");
     expect(detached == false, "zero detached false");
+    // External AB with NULL/0 is immediately detached (Node NullArrayBuffer parity).
+    napi_value nullExt = nullptr;
+    expect_status(napi_create_external_arraybuffer(env, nullptr, 0, nullptr, nullptr,
+                                                   &nullExt),
+                  napi_ok, "create external null/0 ok");
+    bool nullExtDet = false;
+    expect_status(napi_is_detached_arraybuffer(env, nullExt, &nullExtDet),
+                  napi_ok, "is_detached null/0 ok");
+    expect(nullExtDet == true, "null/0 external AB is detached");
     CloseScope(s);
     expect(RootCount() == Baseline(), "zero at baseline");
   }
@@ -476,14 +485,17 @@ int main() {
     };
     for (auto& c : cases) {
       napi_handle_scope s = OpenScope();
-      // Standalone creation (no ArrayBuffer).
       size_t count = 5;
+      void* backData = nullptr;
+      napi_value backAB = nullptr;
+      expect_status(napi_create_arraybuffer(env, count * c.elemSize, &backData, &backAB),
+                    napi_ok, "typedarray backing ab");
       napi_value ta = nullptr;
       char name[64];
-      std::snprintf(name, sizeof(name), "typedarray create %s standalone", c.name);
-      expect_status(napi_create_typedarray(env, c.ntype, count, nullptr, 0, &ta),
+      std::snprintf(name, sizeof(name), "typedarray create %s", c.name);
+      expect_status(napi_create_typedarray(env, c.ntype, count, backAB, 0, &ta),
                     napi_ok, name);
-      expect(ta != nullptr, "standalone ta non-null");
+      expect(ta != nullptr, "ta non-null");
       napi_typedarray_type gotType = napi_int8_array;
       size_t gotLen = 999;
       void* gotData = nullptr;
@@ -497,7 +509,7 @@ int main() {
       expect(gotType == c.ntype, name);
       std::snprintf(name, sizeof(name), "%s len 5", c.name);
       expect(gotLen == count, name);
-      std::snprintf(name, sizeof(name), "%s byte_offset 0 standalone", c.name);
+      std::snprintf(name, sizeof(name), "%s byte_offset 0", c.name);
       expect(gotOff == 0, name);
       std::snprintf(name, sizeof(name), "%s data non-null", c.name);
       expect(gotData != nullptr, name);
@@ -520,7 +532,15 @@ int main() {
              name);
       CloseScope(s);
     }
-    expect(RootCount() == Baseline(), "typedarray standalone at baseline");
+    // Node-API conformance: null arraybuffer returns napi_invalid_arg.
+    {
+      napi_handle_scope s = OpenScope();
+      napi_value null_ta = nullptr;
+      expect_status(napi_create_typedarray(env, napi_uint8_array, 1, nullptr, 0, &null_ta),
+                    napi_invalid_arg, "typedarray null arraybuffer invalid_arg");
+      CloseScope(s);
+    }
+    expect(RootCount() == Baseline(), "typedarray all-types at baseline");
   }
 
   {
@@ -553,16 +573,98 @@ int main() {
   {
     std::fprintf(stdout, "-- case typedarray-bigint --\n");
     napi_handle_scope s = OpenScope();
-    napi_value ta = nullptr;
-    expect_status(napi_create_typedarray(env, napi_bigint64_array, 2, nullptr, 0, &ta),
-                  napi_generic_failure, "bigint64 create generic_failure");
-    const napi_extended_error_info* err = nullptr;
-    napi_get_last_error_info(env, &err);
-    expect(err && err->error_code == napi_generic_failure, "bigint64 last_error generic_failure");
-    expect_status(napi_create_typedarray(env, napi_biguint64_array, 2, nullptr, 0, &ta),
-                  napi_generic_failure, "biguint64 create generic_failure");
+    // Backed BigInt64Array / BigUint64Array
+    TypedCase bigCases[] = {
+        {napi_bigint64_array, "bigint64", 8},
+        {napi_biguint64_array, "biguint64", 8},
+    };
+    for (auto& c : bigCases) {
+      void* backData = nullptr;
+      napi_value backAB = nullptr;
+      expect_status(napi_create_arraybuffer(env, 3 * c.elemSize, &backData, &backAB),
+                    napi_ok, "bigint backing ab");
+      napi_value ta = nullptr;
+      expect_status(napi_create_typedarray(env, c.ntype, 3, backAB, 0, &ta),
+                    napi_ok, "bigint create ok");
+      expect(ta != nullptr, "bigint ta non-null");
+      bool isTA = false;
+      expect_status(napi_is_typedarray(env, ta, &isTA), napi_ok, "bigint is_typedarray ok");
+      expect(isTA, "bigint is_typedarray true");
+      napi_typedarray_type gt = napi_int8_array;
+      size_t gl = 0;
+      void* gd = nullptr;
+      napi_value gab = nullptr;
+      size_t go = 999;
+      expect_status(napi_get_typedarray_info(env, ta, &gt, &gl, &gd, &gab, &go),
+                    napi_ok, "bigint get_typedarray_info ok");
+      expect(gt == c.ntype, "bigint type matches");
+      expect(gl == 3, "bigint len 3");
+      expect(go == 0, "bigint offset 0");
+      expect(gd == backData, "bigint data matches backing");
+      expect(gab == backAB, "bigint buffer matches backing");
+    }
+    // Buffer-backed BigInt64Array with offset 8, length 2
+    void* abData = nullptr;
+    napi_value ab = nullptr;
+    expect_status(napi_create_arraybuffer(env, 32, &abData, &ab), napi_ok,
+                  "bigint backing ab 32");
+    napi_value bta = nullptr;
+    expect_status(napi_create_typedarray(env, napi_bigint64_array, 2, ab, 8, &bta),
+                  napi_ok, "bigint view offset 8");
+    napi_typedarray_type bgt = napi_int8_array;
+    size_t bgl = 0;
+    void* bgd = nullptr;
+    napi_value bgab = nullptr;
+    size_t bgo = 0;
+    expect_status(napi_get_typedarray_info(env, bta, &bgt, &bgl, &bgd, &bgab, &bgo),
+                  napi_ok, "bigint view info ok");
+    expect(bgt == napi_bigint64_array, "bigint view type matches");
+    expect(bgl == 2, "bigint view len 2");
+    expect(bgo == 8, "bigint view offset 8");
+    expect(bgd == static_cast<unsigned char*>(abData) + 8, "bigint view data offset");
+    expect(bgab == ab, "bigint view buffer matches");
+    // Unaligned offset triggers RangeError -> pending_exception
+    napi_value bad_ta = nullptr;
+    expect_status(napi_create_typedarray(env, napi_bigint64_array, 1, ab, 4, &bad_ta),
+                  napi_pending_exception, "bigint unaligned offset pending RangeError");
+    JsValueRef ex = JS_INVALID_REFERENCE;
+    JsGetAndClearException(&ex);
+    if (ex) JsRelease(ex, nullptr);
+    // Detach BigInt64Array backing buffer cleanly -> len 0, data nullptr
+    expect_status(napi_detach_arraybuffer(env, ab), napi_ok, "bigint backing detach ok");
+    void* dgd = reinterpret_cast<void*>(0x1);
+    size_t dgl = 99;
+    expect_status(napi_get_typedarray_info(env, bta, nullptr, &dgl, &dgd, nullptr, nullptr),
+                  napi_ok, "bigint info after detach");
+    expect(dgl == 0, "bigint detached len 0");
+    expect(dgd == nullptr, "bigint detached data null");
+    // Float16Array (JS intrinsic if available): is_typedarray true, get_typedarray_info generic_failure cleanly
+    {
+      JsValueRef f16_script = JS_INVALID_REFERENCE;
+      JsValueRef f16_url = JS_INVALID_REFERENCE;
+      const char* f16_src = "(typeof Float16Array === 'function') ? new Float16Array(2) : null";
+      JsCreateString(f16_src, std::strlen(f16_src), &f16_script);
+      JsCreateString("f16.js", 6, &f16_url);
+      JsValueRef f16_res = JS_INVALID_REFERENCE;
+      if (JsRun(f16_script, JS_SOURCE_CONTEXT_NONE, f16_url,
+                JsParseScriptAttributeNone, &f16_res) == JsNoError &&
+          f16_res != JS_INVALID_REFERENCE) {
+        JsValueType ft = JsUndefined;
+        if (JsGetValueType(f16_res, &ft) == JsNoError && ft == JsTypedArray) {
+          napi_value nf16 = reinterpret_cast<napi_value>(f16_res);
+          bool is_ta = false;
+          expect_status(napi_is_typedarray(env, nf16, &is_ta), napi_ok, "float16 is_typedarray");
+          expect(is_ta, "float16 is_typedarray true");
+          napi_typedarray_type ft_out = napi_int8_array;
+          expect_status(napi_get_typedarray_info(env, nf16, &ft_out, nullptr, nullptr, nullptr, nullptr),
+                        napi_generic_failure, "float16 get_typedarray_info generic_failure");
+        }
+      }
+      if (f16_script) JsRelease(f16_script, nullptr);
+      if (f16_url) JsRelease(f16_url, nullptr);
+    }
     CloseScope(s);
-    expect(RootCount() == Baseline(), "bigint at baseline");
+    expect(RootCount() == Baseline(), "bigint/float16 at baseline");
   }
 
   {
@@ -920,6 +1022,60 @@ int main() {
     // extData3 is never freed by a finalizer (deleted without invocation
     // by design); free it here to keep the harness leak-free.
     delete[] extData3;
+
+    // Variant 3: external AB detached via napi_detach_arraybuffer BEFORE GC.
+    // Finalizer must fire ONCE on detach, live/queued counts must hit baseline
+    // immediately AND stay safe across subsequent GC + destroy (both when
+    // JsrtExternalArrayBuffer skips detached Finalize and under Stage-3
+    // detached Finalize dispatch).
+    napi_env env4 = chakra_nodeapi_create_env(rt2, ctx2, nullptr, nullptr, nullptr);
+    expect(env4 != nullptr, "detach-ext: env4 created");
+    int calls2 = g_ext_finalizer_calls;
+    {
+      napi_handle_scope s4 = nullptr;
+      expect_status(napi_open_handle_scope(env4, &s4), napi_ok, "detach-ext: scope open");
+      char* extData4 = new char[24];
+      std::memcpy(extData4, "detach-external-finalizer", 24);
+      void* hint4 = reinterpret_cast<void*>(0xDE7A);
+      napi_value extAb4 = nullptr;
+      expect_status(napi_create_external_arraybuffer(env4, extData4, 24,
+                                                     ExtFinalize, hint4, &extAb4),
+                    napi_ok, "detach-ext: create ext4");
+      expect(NodeApiBinary_ExternalLiveCount() == live0 + 1,
+             "detach-ext: live count +1");
+      expect_status(napi_detach_arraybuffer(env4, extAb4), napi_ok,
+                    "detach-ext: detach ok");
+      expect(g_ext_finalizer_calls == calls2 + 1,
+             "detach-ext: finalizer fired once on detach");
+      expect(g_ext_finalizer_last_data == extData4, "detach-ext: data matches");
+      expect(g_ext_finalizer_last_hint == hint4, "detach-ext: hint matches");
+      expect(NodeApiBinary_ExternalLiveCount() == live0,
+             "detach-ext: live record freed on detach");
+      expect(NodeApiBinary_ExternalQueuedCount() == queued0,
+             "detach-ext: queue empty after detach");
+      bool isDet = false;
+      expect_status(napi_is_detached_arraybuffer(env4, extAb4, &isDet), napi_ok,
+                    "detach-ext: is_detached query ok");
+      expect(isDet, "detach-ext: detached true");
+      expect_status(napi_detach_arraybuffer(env4, extAb4),
+                    napi_detachable_arraybuffer_expected,
+                    "detach-ext: second detach rejected");
+      expect_status(napi_close_handle_scope(env4, s4), napi_ok, "detach-ext: scope close");
+    }
+    for (int i = 0; i < 6; i++) {
+      ChurnStack();
+      force_gc(rt2);
+    }
+    expect(g_ext_finalizer_calls == calls2 + 1,
+           "detach-ext: post-detach GC still once");
+    expect(NodeApiBinary_ExternalLiveCount() == live0,
+           "detach-ext: post-detach GC live baseline");
+    chakra_nodeapi_destroy_env(env4);
+    expect(g_ext_finalizer_calls == calls2 + 1,
+           "detach-ext: destroy still once");
+    expect(NodeApiBinary_ExternalLiveCount() == live0,
+           "detach-ext: destroy live baseline");
+
     expect(JsSetCurrentContext(ctx) == JsNoError, "destroy-drain: restore ctx");
     JsDisposeRuntime(rt2);
     expect(RootCount() == Baseline(), "destroy-drain at baseline");

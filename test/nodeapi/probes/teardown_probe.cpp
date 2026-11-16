@@ -27,21 +27,14 @@
 //     is a clean no-op (no crash, no double-free, no new log).
 //   NULL-arg validation + wrong-thread rejection.
 //
-// Build (from repo root, via the shared gate lock):
-//   /tmp/opencode/cc-gate-lock.sh mise exec -- zig c++ \
-//     -std=gnu++17 -DNAPI_VERSION=8 \
-//     -Iinclude/nodeapi -Ilib/Jsrt -Ilib/NodeApi \
-//     test/nodeapi/probes/teardown_probe.cpp \
-//     lib/NodeApi/NodeApiEnv.cpp lib/NodeApi/NodeApiLifetime.cpp \
-//     lib/NodeApi/NodeApiScopes.cpp lib/NodeApi/NodeApiRefs.cpp \
-//     -o /tmp/teardown_probe -Lout/jit/lib -lChakraCore \
-//     -Wl,-rpath,/Users/ascotti/.local/share/opencode/worktree/b41ea0/node-api/out/jit/lib
-//   /tmp/teardown_probe
+// Build (from repo root, via test/nodeapi/probes/run_teardown_probe.sh):
+//   sh test/nodeapi/probes/run_teardown_probe.sh
 //
 // Links the real engine (libChakraCore.dylib) for the destroy-time
 // ContextGuard + scopes/refs teardown. Exit 0 = all checks green;
 // 1 = any mismatch (names the check).
 
+#include "NodeApiBinary.h"
 #include "NodeApiHostApi.h"
 #include "js_native_api.h"
 #include "node_api.h"
@@ -586,6 +579,52 @@ int main() {
     chakra_nodeapi_destroy_env(env);
   }
   std::printf("phase9 (thread): done\n");
+
+  // ===== Phase 10: detached external ArrayBuffer teardown (A8-1/detach) =====
+  {
+    napi_env env = chakra_nodeapi_create_env(
+        FakeRuntime(), FakeContext(), "phase10", nullptr, nullptr);
+    Check(env != nullptr, "phase10: create");
+    size_t live0 = NodeApiBinary_ExternalLiveCount();
+    size_t queued0 = NodeApiBinary_ExternalQueuedCount();
+    int ext_calls = 0;
+    void* ext_last_data = nullptr;
+    auto ext_fin = [](napi_env, void* data, void* hint) {
+      int* counter = static_cast<int*>(hint);
+      (*counter)++;
+      delete[] static_cast<char*>(data);
+    };
+    napi_handle_scope s = nullptr;
+    Check(napi_open_handle_scope(env, &s) == napi_ok, "phase10: open scope");
+    char* ext_buf = new char[16];
+    std::memcpy(ext_buf, "teardown-detach", 15);
+    napi_value ab = nullptr;
+    Check(napi_create_external_arraybuffer(env, ext_buf, 16, ext_fin, &ext_calls,
+                                           &ab) == napi_ok,
+          "phase10: create external ab");
+    ext_last_data = ext_buf;
+    (void)ext_last_data;
+    Check(NodeApiBinary_ExternalLiveCount() == live0 + 1,
+          "phase10: live count +1");
+    Check(napi_detach_arraybuffer(env, ab) == napi_ok,
+          "phase10: detach external ab");
+    Check(ext_calls == 1, "phase10: detached finalizer fired once");
+    Check(NodeApiBinary_ExternalLiveCount() == live0,
+          "phase10: live count back to baseline on detach");
+    Check(NodeApiBinary_ExternalQueuedCount() == queued0,
+          "phase10: queue empty after detach");
+    Check(napi_close_handle_scope(env, s) == napi_ok, "phase10: close scope");
+    JsCollectGarbage(FakeRuntime());
+    Check(ext_calls == 1, "phase10: GC after detach still once");
+    chakra_nodeapi_destroy_env(env);
+    JsCollectGarbage(FakeRuntime());
+    Check(ext_calls == 1, "phase10: destroy + GC still once");
+    Check(NodeApiBinary_ExternalLiveCount() == live0,
+          "phase10: post-destroy live baseline");
+    Check(NodeApiBinary_ExternalQueuedCount() == queued0,
+          "phase10: post-destroy queue baseline");
+  }
+  std::printf("phase10 (external-detach-teardown): done\n");
 
   std::printf("teardown_probe: %d checks, %d failures\n", g_checks,
               g_failures);

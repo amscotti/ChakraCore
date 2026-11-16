@@ -77,7 +77,7 @@ napi_status MapRun(napi_env env, JsErrorCode ec, const char* what) {
 extern "C" {
 
 NodeApiScriptState* NodeApiScript_CreateState(void) {
-  return reinterpret_cast<NodeApiScriptState*>(new ScriptState());
+  return reinterpret_cast<NodeApiScriptState*>(new (std::nothrow) ScriptState());
 }
 
 void NodeApiScript_DestroyForEnv(napi_env env) {

@@ -61,11 +61,10 @@ Also pre-classified: drivers gating on ``process.version(s)`` /
 ``env``/``cwd``/``argv``/``platform`` only, so those gates throw under
 the host. They are ``needs-runtime-global`` skips, not failures.
 
-Build discipline: every ``zig c++`` invocation goes through the
-serialized gate lock (``/tmp/opencode/cc-gate-lock.sh`` or
-``$CC_GATE_LOCK`` + ``mise exec``, mirroring
-``tools/nodeapi/run_probe.sh``). Nothing is built by node-gyp/npm and
-nothing is fetched at run time.
+Build discipline: every ``zig c++`` invocation runs ``zig`` resolved via env
+var / ``PATH`` / ``mise which`` (optionally serialized through
+``$CC_GATE_LOCK`` when set and executable). Nothing is built by
+node-gyp/npm and nothing is fetched at run time.
 
 Quick start
 -----------
@@ -106,7 +105,6 @@ DEFAULT_RESULTS = RESULTS_DIR / "node-addon-api.json"
 NAPI_VERSION = 8
 NA_TAG = "v8.9.2"
 NA_COMMIT = "2faf3294972dfcb3707fd5e28d451485f19e3dad"
-MISE_NODE_22 = Path("/Users/ascotti/.local/share/mise/installs/node/22.22.3/bin/node")
 
 NEEDS_GC = "needs-gc"
 NEEDS_RUNTIME = "needs-runtime-global"
@@ -366,42 +364,50 @@ SKIPS: dict[str, tuple[str, str]] = {
     "test/shared_array_buffer.js": (
         NEEDS_VERSION, "SharedArrayBuffer API is NAPI_EXPERIMENTAL "
         "(node_api_*sharedarraybuffer*), absent at NAPI_VERSION=8"),
-    # provider-gap: async-work / TSFN host loop services (PR-7).
+    # provider-gap / sources not vendored: async_worker / TSFN suites.
+    # (ch-nodeapi provides post_work/post_task host services; these entries
+    # remain skipped here because upstream test sources are not vendored at
+    # this pin, or depend on async_hooks / runTestInChildProcess / async test bodies.)
     "test/async_worker_nocallback.js": (
-        PROVIDER_GAP, "async-work + async test body needs host loop "
-        "services the test host does not inject (PR-7)"),
+        PROVIDER_GAP, "async_worker_* sources not vendored at this pin "
+        "(+ async test body)"),
     "test/async_worker_persistent.js": (
-        PROVIDER_GAP, "async-work needs host loop services the test "
-        "host does not inject (PR-7)"),
+        PROVIDER_GAP, "async_worker_* sources not vendored at this pin"),
     "test/threadsafe_function/threadsafe_function.js": (
-        PROVIDER_GAP, "TSFN + async test body needs host loop/services "
-        "(PR-7); producer-thread semantics untestable through the host "
-        "without them"),
+        PROVIDER_GAP, "threadsafe_function/* sources not vendored at this "
+        "pin (+ async test body)"),
     "test/threadsafe_function/threadsafe_function_ctx.js": (
-        PROVIDER_GAP, "TSFN needs host loop/services (PR-7)"),
+        PROVIDER_GAP, "threadsafe_function/* sources not vendored at this pin"),
     "test/threadsafe_function/threadsafe_function_exception.js": (
-        PROVIDER_GAP, "TSFN + runTestInChildProcess needs host "
-        "loop/services (PR-7)"),
+        PROVIDER_GAP, "threadsafe_function/* sources not vendored at this "
+        "pin (+ runTestInChildProcess)"),
     "test/threadsafe_function/threadsafe_function_existing_tsfn.js": (
-        PROVIDER_GAP, "TSFN needs host loop/services (PR-7)"),
+        PROVIDER_GAP, "threadsafe_function/* sources not vendored at this pin"),
     "test/threadsafe_function/threadsafe_function_ptr.js": (
-        PROVIDER_GAP, "TSFN needs host loop/services (PR-7)"),
+        PROVIDER_GAP, "threadsafe_function/* sources not vendored at this pin"),
     "test/threadsafe_function/threadsafe_function_sum.js": (
-        PROVIDER_GAP, "TSFN needs host loop/services (PR-7)"),
+        PROVIDER_GAP, "threadsafe_function/* sources not vendored at this pin"),
     "test/typed_threadsafe_function/typed_threadsafe_function.js": (
-        PROVIDER_GAP, "TSFN needs host loop/services (PR-7)"),
+        PROVIDER_GAP, "typed_threadsafe_function/* sources not vendored at "
+        "this pin"),
     "test/typed_threadsafe_function/typed_threadsafe_function_ctx.js": (
-        PROVIDER_GAP, "TSFN needs host loop/services (PR-7)"),
+        PROVIDER_GAP, "typed_threadsafe_function/* sources not vendored at "
+        "this pin"),
     "test/typed_threadsafe_function/typed_threadsafe_function_exception.js": (
-        PROVIDER_GAP, "TSFN needs host loop/services (PR-7)"),
+        PROVIDER_GAP, "typed_threadsafe_function/* sources not vendored at "
+        "this pin"),
     "test/typed_threadsafe_function/typed_threadsafe_function_existing_tsfn.js": (
-        PROVIDER_GAP, "TSFN needs host loop/services (PR-7)"),
+        PROVIDER_GAP, "typed_threadsafe_function/* sources not vendored at "
+        "this pin"),
     "test/typed_threadsafe_function/typed_threadsafe_function_ptr.js": (
-        PROVIDER_GAP, "TSFN needs host loop/services (PR-7)"),
+        PROVIDER_GAP, "typed_threadsafe_function/* sources not vendored at "
+        "this pin"),
     "test/typed_threadsafe_function/typed_threadsafe_function_sum.js": (
-        PROVIDER_GAP, "TSFN needs host loop/services (PR-7)"),
+        PROVIDER_GAP, "typed_threadsafe_function/* sources not vendored at "
+        "this pin"),
     "test/typed_threadsafe_function/typed_threadsafe_function_unref.js": (
-        PROVIDER_GAP, "TSFN needs host loop/services (PR-7)"),
+        PROVIDER_GAP, "typed_threadsafe_function/* sources not vendored at "
+        "this pin"),
     # provider-gap: async test bodies (host cannot attribute failure).
     "test/callbackInfo.js": (
         PROVIDER_GAP, "async test body: Chakra promise pump swallows "
@@ -438,24 +444,59 @@ def runnable_ids() -> list[str]:
     return sorted(out)
 
 
+def _resolve_tool(env_vars: tuple[str, ...], cmd_name: str) -> Path | None:
+    """Resolve tool via env var -> shutil.which -> mise which."""
+    for env_name in env_vars:
+        val = os.environ.get(env_name, "").strip()
+        if val:
+            p = Path(val)
+            if p.is_file() and os.access(p, os.X_OK):
+                return p
+            found = shutil.which(val)
+            if found:
+                return Path(found)
+    found = shutil.which(cmd_name)
+    if found:
+        return Path(found)
+    mise_bin = shutil.which("mise")
+    if mise_bin:
+        try:
+            proc = subprocess.run([mise_bin, "which", cmd_name],
+                                  capture_output=True, text=True, timeout=10)
+            cand = (proc.stdout or "").strip()
+            if proc.returncode == 0 and cand:
+                p = Path(cand)
+                if p.is_file() and os.access(p, os.X_OK):
+                    return p
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    return None
+
+
 def gate_lock_command(*args: str) -> list[str]:
-    gate = os.environ.get("CC_GATE_LOCK") or "/tmp/opencode/cc-gate-lock.sh"
-    return [gate, "mise", "exec", "--", *args]
+    gate = os.environ.get("CC_GATE_LOCK", "").strip()
+    cmd_args = list(args)
+    if cmd_args and cmd_args[0] == "zig":
+        zig_path = _resolve_tool(("NODEAPI_ZIG", "NODEAPI_MISE_ZIG"), "zig")
+        if zig_path is not None:
+            cmd_args[0] = str(zig_path)
+    mise_bin = shutil.which("mise")
+    if gate and os.path.isfile(gate) and os.access(gate, os.X_OK):
+        if mise_bin and not (cmd_args and Path(cmd_args[0]).is_absolute()):
+            return [gate, mise_bin, "exec", "--", *cmd_args]
+        return [gate, *cmd_args]
+    if cmd_args and Path(cmd_args[0]).is_absolute():
+        return cmd_args
+    if mise_bin:
+        return [mise_bin, "exec", "--", *cmd_args]
+    return cmd_args
 
 
 def find_node(explicit: str | None) -> Path | None:
     if explicit:
         p = Path(explicit)
         return p if p.is_file() else None
-    for cand in [os.environ.get("NODEAPI_NODE") or None, MISE_NODE_22, "node"]:
-        if cand:
-            p = Path(str(cand))
-            if p.is_file():
-                return p
-            found = shutil.which(str(cand))
-            if found:
-                return Path(found)
-    return None
+    return _resolve_tool(("NODEAPI_NODE", "NODEAPI_MISE_NODE"), "node")
 
 
 def find_host() -> Path | None:

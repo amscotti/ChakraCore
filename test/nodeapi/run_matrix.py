@@ -50,10 +50,8 @@ Skip taxonomy (plan N0.5, Wave-5 reclassification)
   source-level ``#define NAPI_VERSION 9/10`` and v9/v10-only symbols
   (``node_api_symbol_for``, syntax-error, external-string,
   property-key), and drivers asserting ``napi_get_version()==10``.
-- ``provider-gap`` — provider/host surface absent even though the v8
-  engine surface is implemented (async-work / TSFN with no host
-  post_work/post_task services per PR-7, libuv ``<uv.h>`` / CMake-only
-  example / unmapped driver).
+- ``provider-gap`` — provider/host surface absent (libuv ``<uv.h>`` /
+  CMake-only example / unmapped driver).
 - ``needs-gc`` — retained for history; post-N5.1 the host provides
   ``global.gc()``, so GC drivers classify as runnable (count 0 unless
   a driver needs GC plus a runtime service).
@@ -115,13 +113,35 @@ NODE_VERSION = "22.22.3"
 NODE_COMMIT = "fdfa0ff0dbaf0fbf4d7d6d89a2ab807f3177fa5c"
 EXAMPLES_COMMIT = "1e4f284f30ed0ac40ec216bdf93ab12f726039a3"
 NAPI_VERSION = 8
-# Mise install paths are env-overridable (same defaults).
-MISE_NODE_22 = Path(os.environ.get(
-    "NODEAPI_MISE_NODE",
-    "/Users/ascotti/.local/share/mise/installs/node/22.22.3/bin/node"))
-MISE_ZIG_017 = Path(os.environ.get(
-    "NODEAPI_MISE_ZIG",
-    "/Users/ascotti/.local/share/mise/installs/zig/0.17.0/bin/zig"))
+
+
+def _resolve_tool(env_vars: tuple[str, ...], cmd_name: str) -> str:
+    """Resolve an external tool via env var -> shutil.which -> mise which."""
+    for env_name in env_vars:
+        val = os.environ.get(env_name, "").strip()
+        if val:
+            p = Path(val)
+            if p.is_file() and os.access(p, os.X_OK):
+                return str(p)
+            found = shutil.which(val)
+            if found:
+                return found
+    found = shutil.which(cmd_name)
+    if found:
+        return found
+    mise_bin = shutil.which("mise")
+    if mise_bin:
+        try:
+            proc = subprocess.run([mise_bin, "which", cmd_name],
+                                  capture_output=True, text=True, timeout=10)
+            cand = (proc.stdout or "").strip()
+            if proc.returncode == 0 and cand:
+                p = Path(cand)
+                if p.is_file() and os.access(p, os.X_OK):
+                    return str(p)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    return ""
 
 # ---------------------------------------------------------------------------
 # Skip reasons (taxonomy strings recorded in results + manifest).
@@ -167,18 +187,12 @@ _ENGINE_MSG_DRIVER = re.compile(
     r"Cannot assign to read only property|"
     r"Cannot set property .*which has only a getter|"
     r"Cannot add property w, object is not extensible")
-# BigInt typed arrays (PR-9): JsRT has no BigInt64 typed-array export,
-# so any driver iterating BigInt64Array/BigUint64Array cannot pass.
-_BIGINT_ARRAY_DRIVER = re.compile(r"BigInt64Array|BigUint64Array")
 _RUNTIME_DRIVER = re.compile(
     r"child_process|worker_threads|require-as|"
     r"Buffer\.(alloc|from|concat)|require\(['\"]buffer['\"]\)|"
     r"\bprocess\s*\.\s*(argv|execPath|on|exit|env|kill|config|versions|umask|"
     r"kill|signal|mainModule)\b")
 _GC_DRIVER = re.compile(r"gcUntil|global\.gc|common/gc")
-_ASYNC_SRC = re.compile(
-    r"napi_(create|queue|cancel|delete)_async_work|"
-    r"napi_create_threadsafe_function")
 _UV_SRC = re.compile(r'#include\s*[<"](uv\.h)[>"]')
 
 
@@ -327,14 +341,6 @@ def classify(target: Target | None, src_text: str, driver_text: str,
         return NEEDS_VERSION, (
             "driver asserts napi_get_version()==10 (Node 22); the v8 "
             "provider correctly returns 8 (plan N1.1)")
-    # N5.1 BigInt typed-array gap (PR-9, known non-conformance):
-    # JsRT provides no BigInt64 typed-array export, so
-    # napi_get_typedarray_info returns generic_failure for them.
-    if _BIGINT_ARRAY_DRIVER.search(driver_text):
-        return PROVIDER_GAP, (
-            "driver creates BigInt64Array/BigUint64Array subjects; "
-            "JsRT has no BigInt64 typed-array export (plan PR-9), so "
-            "napi_get_typedarray_info returns generic_failure")
     # N5.1 engine-message divergence (V8 vs Chakra text, PR-12):
     # drivers assert exact V8 TypeError strings for readonly/getter/
     # non-extensible assignments. The provider correctly defines the
@@ -360,12 +366,6 @@ def classify(target: Target | None, src_text: str, driver_text: str,
         return PROVIDER_GAP, (
             "source includes <uv.h> (libuv); uv headers are never vendored "
             "(PR-2) and the test host injects no uv loop (PR-7)")
-    if _ASYNC_SRC.search(src_text):
-        return PROVIDER_GAP, (
-            "async-work / TSFN (host surface B4/B5): provider implements "
-            "napi_create_async_work/napi_create_threadsafe_function but the "
-            "test host injects no post_work/post_task services (PR-7), so "
-            "they return napi_generic_failure")
     if _RUNTIME_DRIVER.search(driver_text):
         return NEEDS_RUNTIME_GLOBAL, (
             "driver needs Node runtime builtins (child_process / "
@@ -433,27 +433,14 @@ def discover_entries() -> list[Entry]:
 # Build + run (offline; no network, no node-gyp).
 # ---------------------------------------------------------------------------
 
-def find_tool(chain: list[Path | str]) -> str | None:
-    for item in chain:
-        if isinstance(item, Path):
-            if item.is_file() and os.access(item, os.X_OK):
-                return str(item)
-        elif item:
-            found = shutil.which(item)
-            if found:
-                return found
-    return None
-
-
 def find_zig() -> str:
-    return find_tool([shutil.which("zig"), MISE_ZIG_017, "zig"]) or ""
+    return _resolve_tool(("NODEAPI_ZIG", "NODEAPI_MISE_ZIG"), "zig")
 
 
 def find_node(explicit: str | None) -> str:
     if explicit:
         return explicit
-    env = os.environ.get("NODEAPI_NODE", "")
-    return find_tool([env or None, MISE_NODE_22, "node"]) or ""
+    return _resolve_tool(("NODEAPI_NODE", "NODEAPI_MISE_NODE"), "node")
 
 
 def copy_tree(src: Path, dst: Path) -> None:
@@ -515,7 +502,9 @@ def run_entry(entry: Entry, work_root: Path, addon: Path,
         os.pathsep + env["NODE_PATH"] if env.get("NODE_PATH") else "")
     env["NODEAPI_BUILD_DIR"] = (work_test / "build" / "Release").as_posix()
     if host == "ch-nodeapi":
-        cmd = [host_bin, "--addon", str(addon), "--driver", str(driver)]
+        timeout_ms = max(1000, int(timeout) * 1000)
+        cmd = [host_bin, "--pump-timeout-ms", str(timeout_ms),
+               "--addon", str(addon), "--driver", str(driver)]
     else:
         cmd = [node_bin, str(driver)]
     proc = subprocess.run(cmd, capture_output=True, text=True,
@@ -621,14 +610,19 @@ def _run_entries(entries, work_root, args, plat, used_host,
                             "detail": (log or "").strip()[-2000:],
                             "host": used_host, "build": "failed"})
             continue
+        # Upstream binding.c computes 100k primes by O(n^2) trial division (~167s);
+        # grant extra headroom under the default 60s --timeout.
+        entry_timeout = (max(args.timeout, 360)
+                         if args.timeout == 60 and "async_work_thread_safe_function" in entry.test_id
+                         else args.timeout)
         try:
             code, out, err = run_entry(
                 entry, work_root, addon, used_host,
-                host_bin, node_bin, args.timeout)
+                host_bin, node_bin, entry_timeout)
         except subprocess.TimeoutExpired:
             results.append({**base, "status": "fail",
                             "reason": "timeout",
-                            "detail": f"exceeded {args.timeout}s",
+                            "detail": f"exceeded {entry_timeout}s",
                             "host": used_host, "build": "ok"})
             continue
         tail = ((out or "") + "\n" + (err or "")).strip()

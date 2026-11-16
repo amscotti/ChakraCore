@@ -213,16 +213,17 @@ extern "C" {
 struct NodeApiPromiseState;
 
 /* Creates fresh (empty) promise state. Provider-owned; see
- * NodeApiPromise_FreeState. Never returns null on success (aborts via
- * bad_alloc only if the provider cannot allocate env state at all;
- * chakra_nodeapi_create_env treats that as fatal OOM rollback). */
+ * NodeApiPromise_FreeState. Returns nullptr on OOM (never throws across
+ * extern "C"); chakra_nodeapi_create_env treats nullptr as fatal rollback. */
 NodeApiPromiseState* NodeApiPromise_CreateState(void);
 
 /* Destroy step 6 (plan SS3.6): releases resolve/reject roots of every
- * unsettled deferred, frees every deferred record, releases every queued
- * continuation task's root. Must be called on the env thread with the env
- * context entered. Does NOT free the NodeApiPromiseState struct itself
- * (see NodeApiPromise_FreeState). Idempotent-safe. */
+ * unsettled deferred, frees every deferred record, and releases/reclaims
+ * the provider PromiseQueue (after clearing JsSetPromiseContinuationCallback
+ * to nullptr when this env was the last provider-queue owner on that
+ * context). Must be called on the env thread with the env context entered.
+ * Does NOT free the NodeApiPromiseState struct itself (see
+ * NodeApiPromise_FreeState). Idempotent-safe. */
 void NodeApiPromise_DestroyForEnv(napi_env env);
 
 /* Frees the NodeApiPromiseState struct itself, after
@@ -231,13 +232,12 @@ void NodeApiPromise_DestroyForEnv(napi_env env);
 void NodeApiPromise_FreeState(NodeApiPromiseState* state);
 
 /* Installs the provider continuation trampoline for the env's context
- * iff the provider has not already installed one for that context
- * (provider-side flag, PR-8 fallback; undetectable host installs are
- * clobbered -- host must install after env create to win). Called
- * once from chakra_nodeapi_create_env. No-op if already installed.
- * Never fails the create (install errors are ignored; the env is
- * still usable, and a host-installed callback, when present, is the
- * effective one). */
+ * iff `services.host_manages_promise_queue` is false and the provider has
+ * not already installed a shared queue for that context (sibling envs on
+ * the same context reuse the shared queue without overwriting). Called
+ * once from chakra_nodeapi_create_env. No-op if already installed or
+ * host-managed. Never fails the create (install errors roll back any
+ * newly created queue and leave the env usable). */
 void NodeApiPromise_EnsureContinuationInstalled(napi_env env);
 
 /* ----- N1.1 accessor (implemented by NodeApiEnv.cpp via the live
@@ -268,6 +268,12 @@ size_t NodeApiPromise_DeferredCount(napi_env env);
  * context (0 if the provider never installed / host owns the queue).
  * Hidden (probe link only). */
 size_t NodeApiPromise_QueueDepth(napi_env env);
+
+#ifdef CHAKRA_NODEAPI_TEST_HOOKS
+/* Number of active provider-owned PromiseQueue objects currently tracked in
+ * g_queues (zero when all provider-managed envs have been destroyed). */
+size_t NodeApiPromise_ActiveQueueCount(void);
+#endif
 
 #ifdef __cplusplus
 } /* extern "C" */

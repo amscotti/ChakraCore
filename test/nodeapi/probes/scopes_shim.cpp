@@ -149,12 +149,17 @@ napi_env ScopesProbe_CreateEnv(JsRuntimeHandle runtime, JsContextRef context) {
   if (runtime == JS_INVALID_RUNTIME_HANDLE || context == JS_INVALID_REFERENCE) {
     return nullptr;
   }
-  auto* e = new ScopesProbeEnv();
+  auto* e = new (std::nothrow) ScopesProbeEnv();
+  if (e == nullptr) return nullptr;
   e->runtime = runtime;
   e->context = context;
   e->alive = true;
   e->owner_thread = std::this_thread::get_id();
   e->scopes = NodeApiScopes_CreateState(); /* pushes the default scope */
+  if (e->scopes == nullptr) {
+    delete e;
+    return nullptr;
+  }
   /* Context discipline (plan §3.2): the env's context must be current for
    * rooting. The test host leaves it current across runs; the shim
    * defensively enters it so driver calls are self-contained. */

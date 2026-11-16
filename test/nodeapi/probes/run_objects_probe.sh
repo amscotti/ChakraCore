@@ -14,11 +14,11 @@
 # The N2.4 joint stub is deleted; napi_create_function is now the
 # real enhanced-function thunk in NodeApiFunctions.cpp.
 #
-# All zig invocations go through the serialized gate lock with mise:
-#   /tmp/opencode/cc-gate-lock.sh mise exec -- zig ...
+# Zig invocations run directly via mise/zig (optionally serialized if
+# CC_GATE_LOCK points to an executable gate-lock wrapper script).
 #
 # Env overrides (same names as the commands they wrap):
-#   CC_GATE_LOCK=path  GATE lock script (default /tmp/opencode/cc-gate-lock.sh)
+#   CC_GATE_LOCK=path  Optional gate-lock wrapper script (disabled by default)
 #   SKIP_BUILD=1       reuse already-built engine dylibs (CI fast path)
 #
 # Usage (from the repo root; engines build first unless SKIP_BUILD=1):
@@ -30,11 +30,21 @@ set -eu
 REPO=$(cd "$(dirname "$0")/../../.." && pwd)
 cd "$REPO"
 
-GATE=${CC_GATE_LOCK:-/tmp/opencode/cc-gate-lock.sh}
+GATE=${CC_GATE_LOCK:-}
+
+run_zig() {
+  if [ -n "$GATE" ] && [ -x "$GATE" ]; then
+    "$GATE" mise exec -- zig "$@"
+  elif command -v mise >/dev/null 2>&1; then
+    mise exec -- zig "$@"
+  else
+    zig "$@"
+  fi
+}
 
 # Platform branch (Linux x86_64 mirror of the macOS ARM64 shape).
-# Linux: test profile only (tools/build/linux.zig has no jit);
-# the jit leg below is skipped on Linux. Flags mirror linux.zig's
+# Linux: run the default test profile leg (`zig-out/bin/libChakraCore.so`);
+# the macOS-only jit leg below is skipped on Linux. Flags mirror linux.zig's
 # provider/host compiles (ELF spellings: no sysroot/mcpu/frameworks).
 if [ "$(uname -s)" = "Linux" ]; then
   TARGET="x86_64-linux-gnu"
@@ -66,11 +76,11 @@ run_profile() {
   echo "===== profile: $profile (engine: $engine_lib) ====="
   if [ ! -f "$engine_lib" ]; then
     echo "run_objects_probe: engine dylib missing for $profile: $engine_lib" >&2
-    echo "hint: run it via: $GATE mise exec -- zig build ch-nodeapi" >&2
+    echo "hint: run it via: zig build ch-nodeapi" >&2
     return 1
   fi
   # shellcheck disable=SC2086
-  "$GATE" mise exec -- zig c++ $CXXFLAGS \
+  run_zig c++ $CXXFLAGS \
     lib/NodeApi/NodeApiEnv.cpp \
     lib/NodeApi/NodeApiLifetime.cpp \
     lib/NodeApi/NodeApiRefs.cpp \
@@ -100,12 +110,12 @@ trap 'rm -rf "$WORK"' EXIT
 # --- Engine builds (serialized via the gate lock) ---
 if [ "${SKIP_BUILD:-0}" != "1" ]; then
   echo "===== building test-profile engine (zig build ch-nodeapi) ====="
-  "$GATE" mise exec -- zig build ch-nodeapi
+  run_zig build ch-nodeapi
   if [ "$(uname -s)" != "Linux" ]; then
     echo "===== building jit-profile engine (zig build -Dprofile=jit) ====="
-    "$GATE" mise exec -- zig build -Dprofile=jit
+    run_zig build -Dprofile=jit
   else
-    echo "===== linux: jit profile does not exist; test leg only ====="
+    echo "===== linux: test leg only ====="
   fi
 fi
 

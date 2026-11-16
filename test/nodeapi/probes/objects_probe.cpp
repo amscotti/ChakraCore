@@ -10,7 +10,7 @@
 // (nodeapi_refs_test_create_env adapter over chakra_nodeapi_create_env),
 // and exercises every lib/NodeApi/NodeApiObjects.cpp entry in-process
 // (no addon, no ch-nodeapi host). Run via run_objects_probe.sh, which
-// builds with `zig c++` through /tmp/opencode/cc-gate-lock.sh and links
+// builds with `zig c++` through the runner script and links
 // the engine libChakraCore.dylib produced by `mise exec -- zig build`.
 //
 // napi_create_function is the real N2.4 implementation

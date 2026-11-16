@@ -7,11 +7,11 @@
 # provider + ch-nodeapi and runs the gc-hook proof addon/driver REPEATS
 # times. Any failure exits nonzero.
 #
-# All zig invocations go through the serialized gate lock with mise:
-#   /tmp/opencode/cc-gate-lock.sh mise exec -- zig ...
+# Zig invocations run directly via mise/zig (optionally serialized if
+# CC_GATE_LOCK points to an executable gate-lock wrapper script).
 #
 # Env overrides:
-#   CC_GATE_LOCK=path  GATE lock script (default /tmp/opencode/cc-gate-lock.sh)
+#   CC_GATE_LOCK=path  Optional gate-lock wrapper script (disabled by default)
 #   SKIP_BUILD=1       reuse already-built engine dylibs + provider
 #   REPEATS=N          process-level repeats (default 10; must be >=1)
 
@@ -20,10 +20,20 @@ set -eu
 REPO=$(cd "$(dirname "$0")/../../.." && pwd)
 cd "$REPO"
 
-GATE=${CC_GATE_LOCK:-/tmp/opencode/cc-gate-lock.sh}
+GATE=${CC_GATE_LOCK:-}
+
+run_zig() {
+  if [ -n "$GATE" ] && [ -x "$GATE" ]; then
+    "$GATE" mise exec -- zig "$@"
+  elif command -v mise >/dev/null 2>&1; then
+    mise exec -- zig "$@"
+  else
+    zig "$@"
+  fi
+}
 REPEATS=${REPEATS:-10}
 
-# Platform branch (Linux x86_64 mirror; test leg only, no jit on Linux).
+# Platform branch (Linux x86_64 runs the default test profile leg).
 if [ "$(uname -s)" = "Linux" ]; then
   TARGET="x86_64-linux-gnu"
   SDK=""
@@ -72,7 +82,7 @@ PROVIDER_TUS="
 run_probe() {
   # $1 probe cpp, $2 engine lib, $3 out bin, $4 label
   # shellcheck disable=SC2086
-  "$GATE" mise exec -- zig c++ $CXXFLAGS $PROVIDER_TUS "$1" "$2" \
+  run_zig c++ $CXXFLAGS $PROVIDER_TUS "$1" "$2" \
     $LINK_SYSTEM \
     $RPATH_FLAG \
     -o "$3"
@@ -95,13 +105,13 @@ trap 'rm -rf "$WORK"' EXIT
 
 if [ "${SKIP_BUILD:-0}" != "1" ]; then
   echo "===== building test-profile engine + provider ====="
-  "$GATE" mise exec -- zig build libChakraNodeApi
-  "$GATE" mise exec -- zig build ch-nodeapi
+  run_zig build libChakraNodeApi
+  run_zig build ch-nodeapi
   if [ "$(uname -s)" != "Linux" ]; then
     echo "===== building jit-profile engine + provider ====="
-    "$GATE" mise exec -- zig build -Dprofile=jit libChakraNodeApi
+    run_zig build -Dprofile=jit libChakraNodeApi
   else
-    echo "===== linux: jit profile does not exist; test leg only ====="
+    echo "===== linux: test leg only ====="
   fi
 fi
 
@@ -174,7 +184,7 @@ if [ ! -f "$HOST" ] || [ ! -f "$PROV" ]; then
   echo "run_stress: ch-nodeapi/provider missing (build without SKIP_BUILD)" >&2
   rc=1
 else
-  "$GATE" mise exec -- zig c++ $ADDON_FLAGS \
+  run_zig c++ $ADDON_FLAGS \
     test/nodeapi/stress/gc_hook_addon.cpp \
     $LINK_SYSTEM \
     -o "$WORK/gc_hook_addon.node"

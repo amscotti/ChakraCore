@@ -15,7 +15,7 @@
 // and links all three TUs, so any accidental duplicate symbol (e.g. a
 // second napi_is_error) fails at link time.
 // Run via run_coerce_probe.sh (compiles with `zig c++` through
-// /tmp/opencode/cc-gate-lock.sh and links the engine dylib).
+// the runner script and links the engine dylib).
 //
 // Coverage (each MUST fail on mismatch):
 //   - napi_typeof complete table: undefined/null/number/string/bool/

@@ -60,13 +60,18 @@
 #include "ChakraCommon.h"
 #include "ChakraCore.h"
 
+#include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <dlfcn.h>
 #include <map>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <unistd.h>
 #include <vector>
 
@@ -439,11 +444,169 @@ JsValueRef host_require_cb(JsValueRef, bool, JsValueRef* args,
   return undef;
 }
 
-// ---- Promise queue (PR-8) ----
+// ---- Promise + host loop queues (PR-7 / PR-8) ----
 
 struct PumpState {
   std::vector<JsValueRef> tasks; /* each JsAddRef'd */
 };
+
+struct PendingTask {
+  void (*fn)(void*) = nullptr;
+  void* arg = nullptr;
+};
+
+struct WorkItem {
+  void (*execute)(void*) = nullptr;
+  void (*complete)(void*) = nullptr;
+  void* arg = nullptr;
+  bool cancelled = false;
+};
+
+struct HostLoopState {
+  std::mutex mutex;
+  std::condition_variable cv;
+  std::deque<PendingTask> task_queue;
+  std::deque<WorkItem> work_queue;
+  std::vector<std::thread> workers;
+  size_t idle_workers = 0;
+  size_t active_works = 0;
+  size_t loop_refs = 0;
+  bool shutting_down = false;
+};
+
+void worker_thread_main(HostLoopState* st) {
+  for (;;) {
+    WorkItem item{};
+    {
+      std::unique_lock<std::mutex> lk(st->mutex);
+      st->idle_workers++;
+      st->cv.wait(lk, [&] {
+        return st->shutting_down || !st->work_queue.empty();
+      });
+      st->idle_workers--;
+      if (st->shutting_down && st->work_queue.empty()) break;
+      item = st->work_queue.front();
+      st->work_queue.pop_front();
+    }
+    if (!item.cancelled && item.execute != nullptr) {
+      try {
+        item.execute(item.arg);
+      } catch (...) {
+      }
+    }
+    {
+      std::lock_guard<std::mutex> lk(st->mutex);
+      if (item.complete != nullptr && !st->shutting_down) {
+        try {
+          st->task_queue.push_back(PendingTask{item.complete, item.arg});
+        } catch (...) {
+        }
+      }
+      if (st->active_works > 0) st->active_works--;
+      st->cv.notify_all();
+    }
+  }
+}
+
+bool host_post_task(void* host_ctx, void (*fn)(void*), void* arg) {
+  auto* st = static_cast<HostLoopState*>(host_ctx);
+  if (st == nullptr || fn == nullptr) return false;
+  std::lock_guard<std::mutex> lk(st->mutex);
+  if (st->shutting_down) return false;
+  try {
+    st->task_queue.push_back(PendingTask{fn, arg});
+  } catch (...) {
+    return false;
+  }
+  st->cv.notify_all();
+  return true;
+}
+
+bool host_post_work(void* host_ctx, void (*execute)(void*),
+                    void (*complete)(void*), void* arg) {
+  auto* st = static_cast<HostLoopState*>(host_ctx);
+  if (st == nullptr) return false;
+  std::lock_guard<std::mutex> lk(st->mutex);
+  if (st->shutting_down) return false;
+  constexpr size_t kMaxWorkers = 4;
+  if (st->idle_workers == 0 && st->workers.size() < kMaxWorkers) {
+    try {
+      st->workers.emplace_back(worker_thread_main, st);
+    } catch (...) {
+      if (st->workers.empty()) return false;
+    }
+  }
+  try {
+    st->work_queue.push_back(WorkItem{execute, complete, arg, false});
+  } catch (...) {
+    return false;
+  }
+  st->active_works++;
+  st->cv.notify_all();
+  return true;
+}
+
+void host_cancel_work(void* host_ctx, void* arg) {
+  auto* st = static_cast<HostLoopState*>(host_ctx);
+  if (st == nullptr) return;
+  std::lock_guard<std::mutex> lk(st->mutex);
+  for (auto it = st->work_queue.begin(); it != st->work_queue.end(); ++it) {
+    if (it->arg == arg && !it->cancelled) {
+      void (*complete)(void*) = it->complete;
+      st->work_queue.erase(it);
+      if (complete != nullptr && !st->shutting_down) {
+        try {
+          st->task_queue.push_back(PendingTask{complete, arg});
+        } catch (...) {
+        }
+      }
+      if (st->active_works > 0) st->active_works--;
+      st->cv.notify_all();
+      return;
+    }
+  }
+}
+
+void host_ref_loop(void* host_ctx) {
+  auto* st = static_cast<HostLoopState*>(host_ctx);
+  if (st == nullptr) return;
+  std::lock_guard<std::mutex> lk(st->mutex);
+  st->loop_refs++;
+}
+
+void host_unref_loop(void* host_ctx) {
+  auto* st = static_cast<HostLoopState*>(host_ctx);
+  if (st == nullptr) return;
+  std::lock_guard<std::mutex> lk(st->mutex);
+  if (st->loop_refs > 0) st->loop_refs--;
+  if (st->loop_refs == 0) st->cv.notify_all();
+}
+
+bool shutdown_host_loop(HostLoopState* st, bool wait_for_active) {
+  if (st == nullptr) return true;
+  std::vector<std::thread> to_join;
+  bool has_active = false;
+  {
+    std::lock_guard<std::mutex> lk(st->mutex);
+    st->shutting_down = true;
+    has_active = (st->active_works > 0);
+    st->cv.notify_all();
+    to_join.swap(st->workers);
+  }
+  if (!has_active || wait_for_active) {
+    for (auto& w : to_join) {
+      if (w.joinable()) w.join();
+    }
+    return true;
+  }
+  // Timeout/error exit while an uncancellable worker ExecuteWork is still
+  // running: detach workers so process exit honors --pump-timeout-ms
+  // promptly; caller skips dlclose so addon text stays mapped until exit.
+  for (auto& w : to_join) {
+    if (w.joinable()) w.detach();
+  }
+  return false;
+}
 
 void promise_continuation(JsValueRef task, void* state) {
   auto* pump = static_cast<PumpState*>(state);
@@ -452,10 +615,14 @@ void promise_continuation(JsValueRef task, void* state) {
   }
 }
 
-// Run queued promise tasks + JsIdle until quiet. Returns 0 on quiet,
-// 1 on exception / Js error / bound exceeded (message already printed).
-int pump_until_quiet(PumpState* pump, long limit) {
-  for (long iter = 0; iter < limit; iter++) {
+// Run queued promise tasks, FIFO host post_task items, and JsIdle until quiet
+// (both queues empty AND active_works == 0 AND loop_refs == 0). Waits up to
+// `timeout_ms` when waiting on async work / kept-alive TSFNs.
+int pump_until_quiet(PumpState* pump, HostLoopState* loop, long limit,
+                     long timeout_ms, bool allow_wait = true) {
+  const auto deadline = std::chrono::steady_clock::now() +
+                        std::chrono::milliseconds(timeout_ms < 0 ? 0 : timeout_ms);
+  for (long iter = 0; iter < limit;) {
     bool any = false;
     while (!pump->tasks.empty()) {
       any = true;
@@ -478,30 +645,64 @@ int pump_until_quiet(PumpState* pump, long limit) {
         return 1;
       }
     }
-    unsigned int next_tick = 0;
-    JsErrorCode idle_err = JsIdle(&next_tick);
-    // JsIdle needs EnableIdleProcessing; without it this is a no-op
-    // returning max ticks. Treat any error other than NoError as quiet
-    // (no idle work to do) rather than fatal, but surface real errors.
-    if (idle_err == JsNoError && next_tick != static_cast<unsigned int>(-1)) {
-      // Idle work is pending but promise queue is empty: one idle
-      // step can queue continuations, so loop once more. Bound by limit.
-      if (!any) {
-        // Avoid spinning on idle alone: assume idle does not produce
-        // promise work here (runtime created without EnableIdleProcessing).
-        // Break after one extra cycle if no tasks appeared.
-        if (pump->tasks.empty()) {
-          // Single idle tick with no tasks: quiet for our purposes.
-          // The loop will re-check tasks; break to avoid busy spin.
-          break;
+
+    if (loop != nullptr) {
+      for (;;) {
+        PendingTask ht{};
+        {
+          std::lock_guard<std::mutex> lk(loop->mutex);
+          if (loop->task_queue.empty()) break;
+          ht = loop->task_queue.front();
+          loop->task_queue.pop_front();
         }
+        any = true;
+        if (++iter > limit) {
+          std::fprintf(stderr,
+                       "ch-nodeapi: pump exceeded limit %ld tasks (hang?)\n",
+                       limit);
+          return 1;
+        }
+        if (ht.fn != nullptr) {
+          ht.fn(ht.arg);
+          bool has = false;
+          if (JsHasException(&has) == JsNoError && has) {
+            clear_exception("host task threw");
+            return 1;
+          }
+        }
+        // Interleave any promise continuations queued by the host task before
+        // draining further tasks.
+        if (!pump->tasks.empty()) break;
       }
-    } else {
-      if (!any) break;
+      if (!pump->tasks.empty()) continue;
     }
-    if (pump->tasks.empty() && idle_err != JsNoError) break;
+
+    unsigned int next_tick = 0;
+    (void)JsIdle(&next_tick);
+
+    if (!pump->tasks.empty()) continue;
+    if (loop != nullptr) {
+      std::unique_lock<std::mutex> lk(loop->mutex);
+      if (!loop->task_queue.empty()) continue;
+      if (allow_wait && (loop->active_works > 0 || loop->loop_refs > 0)) {
+        bool ready = loop->cv.wait_until(lk, deadline, [&] {
+          return !loop->task_queue.empty() ||
+                 (loop->active_works == 0 && loop->loop_refs == 0) ||
+                 loop->shutting_down;
+        });
+        if (!ready && loop->task_queue.empty() &&
+            (loop->active_works > 0 || loop->loop_refs > 0)) {
+          std::fprintf(stderr,
+                       "ch-nodeapi: pump timed out after %ldms "
+                       "(active_works=%zu, loop_refs=%zu)\n",
+                       timeout_ms, loop->active_works, loop->loop_refs);
+          return 1;
+        }
+        continue;
+      }
+    }
+    if (!any) break;
   }
-  // Loop exits quiet only (bound overflow returned 1 above).
   return 0;
 }
 
@@ -536,7 +737,7 @@ int main(int argc, char** argv) {
     else if (a == "--pump-timeout-ms")
       cfg.pump_timeout_ms = std::atol(need(a.c_str()).c_str());
     else if (a == "-h" || a == "--help") {
-      std::printf("usage: ch-nodeapi [--provider PATH] [--exports NAME] [--pump-limit N] [--addon PATH.node] [--driver PATH.js] [addon.node] [driver.js]\n");
+      std::printf("usage: ch-nodeapi [--provider PATH] [--exports NAME] [--pump-limit N] [--pump-timeout-ms N] [--addon PATH.node] [--driver PATH.js] [addon.node] [driver.js]\n");
       std::printf("  provider: --provider, else $CHAKRA_NODEAPI_PROVIDER, else beside the host\n");
       return 0;
     } else if (!a.empty() && a[0] == '-') {
@@ -724,24 +925,32 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  // --- Create env (provider-owned) ---
+  // Install the host continuation callback BEFORE env creation and mark
+  // `host_manages_promise_queue = true` so the provider preserves the host
+  // callback cleanly without clobbering it. Wire real off-thread post_work,
+  // FIFO post_task, cancel_work, and ref_loop/unref_loop host services.
+  JsSetPromiseContinuationCallback(promise_continuation, &pump);
+
+  HostLoopState host_loop;
   chakra_nodeapi_host_services services = {};
+  services.post_task = host_post_task;
+  services.post_work = host_post_work;
+  services.cancel_work = host_cancel_work;
+  services.ref_loop = host_ref_loop;
+  services.unref_loop = host_unref_loop;
+  services.host_manages_promise_queue = true;
+
+  // --- Create env (provider-owned) ---
   napi_env env = create_env(runtime, context, cfg.addon_path.c_str(),
-                            &services, nullptr);
+                            &services, &host_loop);
   if (!env) {
     std::fprintf(stderr, "ch-nodeapi: chakra_nodeapi_create_env failed\n");
+    shutdown_host_loop(&host_loop, true);
     dlclose(addon);
     dlclose(provider);
     dispose_runtime();
     return 1;
   }
-
-  // Install the host continuation callback AFTER env creation so the
-  // host (last writer) owns the queue (N3.4/PR-8 host-clobber
-  // contract: the provider installs at create; a pre-create host
-  // install would be overwritten and starved). All JS runs after
-  // this point, so no task is lost.
-  JsSetPromiseContinuationCallback(promise_continuation, &pump);
 
   // --- Registration scope + exports + register call (plan §1.3/§3.5) ---
   // The scope stays open until the result is bound to the global, so the
@@ -1004,14 +1213,15 @@ int main(int argc, char** argv) {
       }
       run_rc = 1;
     }
-    // Host pump (PR-8): drain continuations until quiet, even after a
-    // top-level JsRun error, so teardown starts with a quiet queue.
+    // Host pump (PR-7 / PR-8): drain promise continuations + host task queue
+    // while waiting on active works / TSFN loop refs up to --pump-timeout-ms.
     if (run_rc == 0) {
-      // The pump itself reports and returns 1 on overflow/exception.
-      run_rc = pump_until_quiet(&pump, cfg.pump_limit);
+      // The pump itself reports and returns 1 on overflow/timeout/exception.
+      run_rc = pump_until_quiet(&pump, &host_loop, cfg.pump_limit,
+                                cfg.pump_timeout_ms, /*allow_wait=*/true);
     } else {
-      // Still drain to release roots before disposal.
-      pump_until_quiet(&pump, cfg.pump_limit);
+      // Driver failed: drain already-queued items without blocking on infinite refs.
+      pump_until_quiet(&pump, &host_loop, cfg.pump_limit, 0, /*allow_wait=*/false);
     }
     // mustCall verification: the test/common shim records unfulfilled
     // calls; Node fails at process exit. The host replicates that gate
@@ -1034,9 +1244,10 @@ int main(int argc, char** argv) {
           run_rc = 1;
         }
       }
-      // Finalizers may have queued promise continuations; pump again.
+      // Finalizers may have queued promise/host tasks; pump again.
       if (run_rc == 0) {
-        run_rc = pump_until_quiet(&pump, cfg.pump_limit);
+        run_rc = pump_until_quiet(&pump, &host_loop, cfg.pump_limit,
+                                  cfg.pump_timeout_ms, /*allow_wait=*/true);
       }
       if (run_rc == 0) {
         for (auto& kv : req_state.cache) {
@@ -1077,9 +1288,10 @@ int main(int argc, char** argv) {
       req_state.pending_reg_error = JS_INVALID_REFERENCE;
     }
   } else {
-    // Registration-only: still pump once so queued continuations from the
-    // register call run before teardown.
-    run_rc = pump_until_quiet(&pump, cfg.pump_limit);
+    // Registration-only: still pump once so queued continuations / tasks from
+    // the register call run before teardown.
+    run_rc = pump_until_quiet(&pump, &host_loop, cfg.pump_limit,
+                              cfg.pump_timeout_ms, /*allow_wait=*/true);
     if (req_state.pending_reg_error != JS_INVALID_REFERENCE) {
       std::fprintf(stderr, "ch-nodeapi: registration threw with no driver\n");
       JsRelease(req_state.pending_reg_error, nullptr);
@@ -1087,19 +1299,24 @@ int main(int argc, char** argv) {
     }
   }
 
-  // --- Teardown: destroy env BEFORE disposing runtime (§3.6) ---
-  // The host's promise queue must be empty here (pumped to quiet); any
-  // leftovers are released so no root survives disposal (R5).
+  // --- Teardown: destroy env BEFORE shutting down host workers / runtime (§3.6) ---
+  // Note: destroy_env tears down any remaining in-flight async_work / TSFN
+  // handles so post-destroy worker completions safely drop without touching JS.
+  // We also clear queued promise tasks first so no root survives disposal (R5).
   for (JsValueRef t : pump.tasks) JsRelease(t, nullptr);
   pump.tasks.clear();
 
   destroy_env(env);
-  // dlclose order: addon first (depends on provider), provider second,
-  // after the runtime is gone so no JS value references unloaded code.
-  // The host exits immediately after, so macOS RTLD_GLOBAL unload caveats
-  // (symbols may persist) are not observable.
+  // Join all worker threads cleanly when no active ExecuteWork timed out; on
+  // timeout exit with an in-flight worker, detach and skip dlclose so exit
+  // returns immediately without unmapping active addon code.
+  bool joined = shutdown_host_loop(&host_loop, run_rc == 0);
+  // Clear host continuation callback BEFORE disposing runtime.
+  JsSetPromiseContinuationCallback(nullptr, nullptr);
   dispose_runtime();
-  dlclose(addon);
-  dlclose(provider);
+  if (joined) {
+    dlclose(addon);
+    dlclose(provider);
+  }
   return run_rc;
 }
