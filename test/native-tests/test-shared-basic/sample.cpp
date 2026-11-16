@@ -5,6 +5,7 @@
 //-------------------------------------------------------------------------------------------------------
 
 #include "ChakraCore.h"
+#include "../jsrt_phase3_tests.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string>
@@ -82,8 +83,18 @@ int main()
     free(resultSTR);
 
     // Dispose runtime
+    result = JS_INVALID_REFERENCE;
+    resultJSString = JS_INVALID_REFERENCE;
+    fname = JS_INVALID_REFERENCE;
+    scriptSource = JS_INVALID_REFERENCE;
     JsSetCurrentContext(JS_INVALID_REFERENCE);
     JsDisposeRuntime(runtime);
+
+    JsrtPhase3Tests::ScrubStack();
+    if (JsrtPhase3Tests::RunAll() != 0)
+    {
+        return 1;
+    }
 
     return 0;
 }

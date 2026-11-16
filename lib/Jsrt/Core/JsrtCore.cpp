@@ -627,7 +627,7 @@ JsDetachArrayBuffer(
         }
 
         Js::ArrayBuffer* arrayBufferObject = Js::VarTo<Js::ArrayBuffer>(arrayBuffer);
-        if (arrayBufferObject->IsImmutable())
+        if (arrayBufferObject->IsImmutable() || arrayBufferObject->IsDetached())
         {
             return JsErrorInvalidArgument;
         }

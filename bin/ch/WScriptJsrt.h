@@ -5,11 +5,14 @@
 //-------------------------------------------------------------------------------------------------------
 #pragma once
 #include <list>
+#include <new>
 
 enum ModuleState
 {
     RootModule,
     ImportedModule,
+    DynamicImportModule,
+    EvaluatedModule,
     ErroredModule
 };
 
@@ -23,6 +26,8 @@ public:
     class CallbackMessage : public MessageBase
     {
         JsValueRef m_function;
+        bool m_hasRef;
+        JsErrorCode m_addRefError;
 
         CallbackMessage(CallbackMessage const&);
 
@@ -30,12 +35,14 @@ public:
         CallbackMessage(unsigned int time, JsValueRef function);
         ~CallbackMessage();
 
+        bool HasValidRef() const { return m_hasRef; }
+        JsErrorCode GetAddRefError() const { return m_addRefError; }
         HRESULT Call(LPCSTR fileName);
         HRESULT CallFunction(LPCSTR fileName);
         template <class Func>
         static CallbackMessage* Create(JsValueRef function, const Func& func, unsigned int time = 0)
         {
-            return new CustomMessage<Func, CallbackMessage>(time, function, func);
+            return new (std::nothrow) CustomMessage<Func, CallbackMessage>(time, function, func);
         }
     };
 
@@ -48,17 +55,23 @@ public:
         std::string* mapKey;
         bool isJsonModule;
         bool directParse;
+        bool hasModuleRef;
+        bool hasSpecifierRef;
 
         ModuleMessage(JsModuleRecord module, JsValueRef specifier, std::string* filePathPtr, std::string* mapKeyPtr, bool isJson, bool direct);
 
     public:
         ~ModuleMessage();
 
+        bool HasValidRefs() const
+        {
+            return (moduleRecord == nullptr || hasModuleRef) && (specifier == nullptr || hasSpecifierRef);
+        }
         virtual HRESULT Call(LPCSTR fileName) override;
 
         static ModuleMessage* Create(JsModuleRecord module, JsValueRef specifier, std::string* fullPath = nullptr, bool isJson = false)
         {
-            return new ModuleMessage(module, specifier, fullPath, fullPath, isJson, false);
+            return new (std::nothrow) ModuleMessage(module, specifier, fullPath, fullPath, isJson, false);
         }
 
         // Fetch messages for requests carrying import attributes: the record
@@ -67,7 +80,7 @@ public:
         // re-deriving it from the file path.
         static ModuleMessage* CreateWithAttributes(JsModuleRecord module, JsValueRef specifier, std::string* filePath, std::string* mapKey, bool isJson)
         {
-            return new ModuleMessage(module, specifier, filePath, mapKey, isJson, true);
+            return new (std::nothrow) ModuleMessage(module, specifier, filePath, mapKey, isJson, true);
         }
 
     };
@@ -86,6 +99,7 @@ public:
     // failure actually originated from, replacing output-shape heuristics;
     // classification mapping and limits in doc/c1-negative-phase.md.
     static void NoteModuleGraphFailure();
+    static void ClearModuleGraphFailureWitness();
     static void ReportNegativePhaseMarker(bool parseStageFailure);
 
     static JsErrorCode FetchImportedModule(_In_ JsModuleRecord referencingModule, _In_ JsValueRef specifier, _Outptr_result_maybenull_ JsModuleRecord* dependentModuleRecord);

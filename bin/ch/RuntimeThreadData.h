@@ -4,29 +4,38 @@
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #pragma once
+#include <atomic>
+#include <cstdint>
+#include <deque>
 #include <list>
 
 class RuntimeThreadData
 {
 public:
+    struct BroadcastEntry
+    {
+        JsSharedArrayBufferContentHandle content;
+        uint64_t seq;
+    };
+
     RuntimeThreadData();
     ~RuntimeThreadData();
     HANDLE hevntInitialScriptCompleted;
     HANDLE hevntReceivedBroadcast;
     HANDLE hevntShutdown;
     // Set by the child AFTER it consumed the current broadcast's shared
-    // content (its SAB wrapper was created), so the parent can wait for
-    // every live child before releasing the content handle and before a
-    // later broadcast overwrites RuntimeThreadData::sharedContent. Replaces
-    // the old per-broadcast semaphore, which the parent closed after the
-    // FIRST child's release, leaving the remaining children to signal a
-    // closed (possibly recycled) handle. Auto-reset, owned by the child's
-    // RuntimeThreadData for the child's whole lifetime, so the parent never
-    // waits on a handle that can be closed from under it.
+    // content (its SAB wrapper was created), paired with consumedBroadcastSeq
+    // so the parent waits for every live child and broadcast N+1 never
+    // clobbers broadcast N's unconsumed content or confuses late acks.
+    // Auto-reset, owned by the child's RuntimeThreadData for the child's whole
+    // lifetime, so the parent never waits on a handle closed from under it.
     HANDLE hevntBroadcastConsumed;
     HANDLE hThread;
 
-    JsSharedArrayBufferContentHandle sharedContent;
+    CRITICAL_SECTION csBroadcastQ;
+    std::deque<BroadcastEntry> broadcastQ;
+    uint64_t nextBroadcastSeq;
+    std::atomic<uint64_t> consumedBroadcastSeq;
     JsValueRef receiveBroadcastCallbackFunc;
 
 
@@ -53,9 +62,10 @@ public:
     CRITICAL_SECTION csReportQ;
     std::list<std::string> reportQ;
 
-    bool leaving;
+    std::atomic<bool> leaving;
 
 
+    void DrainBroadcastQueue(bool signalConsumed);
     DWORD ThreadProc();
 
 };

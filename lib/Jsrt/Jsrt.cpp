@@ -2180,7 +2180,18 @@ CHAKRA_API JsCreateTypedArray(_In_ JsTypedArrayType arrayType, _In_ JsValueRef b
         case JsArrayTypeFloat16:
             constructorFunc = library->GetFloat16ArrayConstructor();
             break;
+        case JsArrayTypeBigInt64:
+            constructorFunc = library->GetBigInt64ArrayConstructor();
+            break;
+        case JsArrayTypeBigUint64:
+            constructorFunc = library->GetBigUint64ArrayConstructor();
+            break;
         default:
+            return JsErrorInvalidArgument;
+        }
+
+        if (constructorFunc == nullptr)
+        {
             return JsErrorInvalidArgument;
         }
 
@@ -2226,10 +2237,18 @@ C_ASSERT(JsArrayTypeUint32        - Js::TypeIds_Uint32Array       == JsArrayType
 C_ASSERT(JsArrayTypeFloat32       - Js::TypeIds_Float32Array      == JsArrayTypeInt8 - Js::TypeIds_Int8Array);
 C_ASSERT(JsArrayTypeFloat64       - Js::TypeIds_Float64Array      == JsArrayTypeInt8 - Js::TypeIds_Int8Array);
 C_ASSERT(JsArrayTypeFloat16       - Js::TypeIds_Float16Array      == JsArrayTypeInt8 - Js::TypeIds_Int8Array);
+C_ASSERT(JsArrayTypeBigInt64     - Js::TypeIds_Int64Array        == JsArrayTypeInt8 - Js::TypeIds_Int8Array);
+C_ASSERT(JsArrayTypeBigUint64    - Js::TypeIds_Uint64Array       == JsArrayTypeInt8 - Js::TypeIds_Int8Array);
+
+inline bool IsPublicTypedArrayTypeId(Js::TypeId typeId)
+{
+    // Exclude internal-only TypeIds_CharArray and TypeIds_BoolArray (> TypeIds_Uint64Array).
+    return Js::TypedArrayBase::Is(typeId) && typeId <= Js::TypeIds_Uint64Array;
+}
 
 inline JsTypedArrayType GetTypedArrayType(Js::TypeId typeId)
 {
-    Assert(Js::TypedArrayBase::Is(typeId));
+    Assert(IsPublicTypedArrayTypeId(typeId));
     return static_cast<JsTypedArrayType>(typeId + (JsArrayTypeInt8 - Js::TypeIds_Int8Array));
 }
 
@@ -2242,7 +2261,7 @@ CHAKRA_API JsGetTypedArrayInfo(_In_ JsValueRef typedArray, _Out_opt_ JsTypedArra
     {
         const Js::TypeId typeId = Js::JavascriptOperators::GetTypeId(typedArray);
 
-        if (!Js::TypedArrayBase::Is(typeId))
+        if (!IsPublicTypedArrayTypeId(typeId))
         {
             RETURN_NO_EXCEPTION(JsErrorInvalidArgument);
         }
@@ -2307,7 +2326,7 @@ CHAKRA_API JsGetTypedArrayStorage(_In_ JsValueRef instance, _Outptr_result_byteb
     BEGIN_JSRT_NO_EXCEPTION
     {
         const Js::TypeId typeId = Js::JavascriptOperators::GetTypeId(instance);
-        if (!Js::TypedArrayBase::Is(typeId))
+        if (!IsPublicTypedArrayTypeId(typeId))
         {
             RETURN_NO_EXCEPTION(JsErrorInvalidArgument);
         }
@@ -2354,6 +2373,12 @@ CHAKRA_API JsGetTypedArrayStorage(_In_ JsValueRef instance, _Outptr_result_byteb
                     break;
                 case Js::TypeIds_Float16Array:
                     *elementSize = sizeof(uint16);
+                    break;
+                case Js::TypeIds_Int64Array:
+                    *elementSize = sizeof(int64);
+                    break;
+                case Js::TypeIds_Uint64Array:
+                    *elementSize = sizeof(uint64);
                     break;
                 default:
                     AssertMsg(FALSE, "invalid typed array type");
@@ -2488,6 +2513,8 @@ template<> struct TypedArrayTypeTraits<uint32> { static const JsTypedArrayType c
 template<> struct TypedArrayTypeTraits<float> { static const JsTypedArrayType cTypedArrayType = JsTypedArrayType::JsArrayTypeFloat32; };
 template<> struct TypedArrayTypeTraits<double> { static const JsTypedArrayType cTypedArrayType = JsTypedArrayType::JsArrayTypeFloat64; };
 template<> struct TypedArrayTypeTraits<Js::Float16Bits> { static const JsTypedArrayType cTypedArrayType = JsTypedArrayType::JsArrayTypeFloat16; };
+template<> struct TypedArrayTypeTraits<int64> { static const JsTypedArrayType cTypedArrayType = JsTypedArrayType::JsArrayTypeBigInt64; };
+template<> struct TypedArrayTypeTraits<uint64> { static const JsTypedArrayType cTypedArrayType = JsTypedArrayType::JsArrayTypeBigUint64; };
 
 template <class T, bool clamped = false>
 Js::ArrayObject* CreateTypedArray(Js::ScriptContext *scriptContext, void* data, unsigned int length)
@@ -2574,6 +2601,12 @@ CHAKRA_API JsSetIndexedPropertiesToExternalData(
             break;
         case JsArrayTypeFloat16:
             newTypedArray = CreateTypedArray<Js::Float16Bits>(scriptContext, data, elementLength);
+            break;
+        case JsArrayTypeBigInt64:
+            newTypedArray = CreateTypedArray<int64>(scriptContext, data, elementLength);
+            break;
+        case JsArrayTypeBigUint64:
+            newTypedArray = CreateTypedArray<uint64>(scriptContext, data, elementLength);
             break;
         default:
             return JsErrorInvalidArgument;
@@ -2665,6 +2698,12 @@ CHAKRA_API JsGetIndexedPropertiesExternalData(
             break;
         case Js::TypeIds_Float16Array:
             GetObjectArrayData<Js::Float16Bits>(objectArray, buffer, arrayType, elementLength);
+            break;
+        case Js::TypeIds_Int64Array:
+            GetObjectArrayData<int64>(objectArray, buffer, arrayType, elementLength);
+            break;
+        case Js::TypeIds_Uint64Array:
+            GetObjectArrayData<uint64>(objectArray, buffer, arrayType, elementLength);
             break;
         default:
             RETURN_NO_EXCEPTION(JsErrorInvalidArgument);

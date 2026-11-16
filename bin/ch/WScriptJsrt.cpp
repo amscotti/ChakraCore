@@ -14,10 +14,16 @@
 #define CTIME_UNDEFED
 #endif
 #endif
+#include <atomic>
+#include <new>
 #include <vector>
 #include <ctime>
 #include <ratio>
 #include <chrono>
+#ifdef CTIME_UNDEFED
+#define ctime PAL_ctime
+#undef CTIME_UNDEFED
+#endif
 #if !defined(_WIN32)
 #include <unistd.h> // ::_exit (raw, non-PAL process termination for WScript.Quit)
 #endif
@@ -61,113 +67,13 @@
 #define INTL_LIBRARY_TEXT ""
 #endif
 
-struct ArrayBufferTransferInfo {
-    byte* buffer;
-    uint length;
-    ArrayBufferFreeFn freeFn;
-};
-struct SerializerBlob
-{
-    void *data;
-    size_t dataLength;
-    std::vector<ArrayBufferTransferInfo> transferableArrays;
-};
-
 MessageQueue* WScriptJsrt::messageQueue = nullptr;
 std::map<std::string, JsModuleRecord>  WScriptJsrt::moduleRecordMap;
 std::map<JsModuleRecord, std::string>  WScriptJsrt::moduleDirMap;
 std::map<JsModuleRecord, ModuleState>  WScriptJsrt::moduleErrMap;
 std::map<DWORD_PTR, std::string> WScriptJsrt::scriptDirMap;
 DWORD_PTR WScriptJsrt::sourceContext = 0;
-
-// The module/script maps and the source-context counter above are
-// process-global mutable state. Since S6e, crossthread agents run
-// WScript.LoadScript and the module fetch callbacks on their own threads
-// concurrently with the main thread, so every map read/write/clear takes
-// one lock (the file's existing lock idiom, matching RuntimeThreadData's
-// csReportQ) and the counter is interlocked. The lock object is created
-// on first use (thread-safe local static) and deliberately leaked:
-// WScriptJsrt has no single guaranteed entry point per reaching thread,
-// and a process-lifetime lock must not depend on global destructor order
-// (see the map-destructor note in Uninitialize).
-static CRITICAL_SECTION* HostGlobalsCS()
-{
-    static CRITICAL_SECTION* s_cs = [] {
-        CRITICAL_SECTION* cs = new CRITICAL_SECTION();
-        InitializeCriticalSection(cs);
-        return cs;
-    }();
-    return s_cs;
-}
-
-// RAII guard so early returns between map operations cannot strand the
-// lock. Never held across an engine call that can re-enter a host fetch
-// callback (JsParseModuleSource / JsModuleEvaluation take it only outside
-// these scopes), so plain (non-recursive) discipline suffices.
-struct HostGlobalsLock
-{
-    CRITICAL_SECTION* cs;
-    HostGlobalsLock() : cs(HostGlobalsCS()) { EnterCriticalSection(cs); }
-    ~HostGlobalsLock() { LeaveCriticalSection(cs); }
-};
-
-// Negative-phase classification state (host flag -NegativePhaseReport).
-// Ownership record: two process-global bools on the native C++ side, written
-// and read only on the host thread at existing error-report sites. No JsRT
-// handle is retained, no allocation happens, and no GC-visible state is
-// introduced, so this adds no rooting/ownership obligations. `ch` runs one
-// script per process; the witness is set while loading/linking the module
-// graph and consumed (once) at the first unhandled-error report.
-static bool s_moduleGraphFailureWitness = false;
-static bool s_negativePhaseMarkerEmitted = false;
-
-void WScriptJsrt::NoteModuleGraphFailure()
-{
-    if (HostConfigFlags::flags.NegativePhaseReportIsEnabled)
-    {
-        s_moduleGraphFailureWitness = true;
-    }
-}
-
-// Emits the single CH_NEGATIVE_PHASE marker line for this run, classified
-// from where the failure originated (never from error message text):
-//   parse      the root entry point failed in the parse/compile stage
-//              (JsRun/JsParseModuleSource => JsErrorScriptCompile: the
-//              engine rejected the source before any code executed);
-//   resolution a module-graph failure witnessed while loading/linking (the
-//              engine completed resolution unsuccessfully —
-//              NotifyModuleReady with an exception — a host fetch callback
-//              failure, or a dependency module that failed to parse),
-//              before any module-body evaluation;
-//   runtime    anything else: the error surfaced during evaluation (script
-//              or module body, nested eval/LoadScript parse failures,
-//              message-queue callbacks).
-// Emit-once: the first unhandled-error report classifies the run.
-void WScriptJsrt::ReportNegativePhaseMarker(bool parseStageFailure)
-{
-    if (!HostConfigFlags::flags.NegativePhaseReportIsEnabled || s_negativePhaseMarkerEmitted)
-    {
-        return;
-    }
-    s_negativePhaseMarkerEmitted = true;
-    const char* phase = parseStageFailure ? "parse"
-        : (s_moduleGraphFailureWitness ? "resolution" : "runtime");
-    fprintf(stderr, "CH_NEGATIVE_PHASE: %s\n", phase);
-}
-
-// Message queue for the current thread: the per-child agent queue when
-// running inside a crossthread agent thread (S6e), otherwise the main host
-// queue. Prevents WScript.SetTimeout/ClearTimeout and samethread script
-// loads issued from an agent from racing the main thread's queue.
-MessageQueue* WScriptJsrt::GetThreadMessageQueue()
-{
-    RuntimeThreadData* threadData = GetRuntimeThreadLocalData().threadData;
-    if (threadData != nullptr && threadData->messageQueue != nullptr)
-    {
-        return threadData->messageQueue;
-    }
-    return messageQueue;
-}
+FileNode * SourceMap::root = nullptr;
 
 #define ERROR_MESSAGE_TO_STRING(errorCode, errorMessage, errorMessageString)        \
     JsErrorCode errorCode = JsNoError;                                              \
@@ -191,25 +97,10 @@ MessageQueue* WScriptJsrt::GetThreadMessageQueue()
     }                                                                               \
     while(0)
 
-DWORD_PTR WScriptJsrt::GetNextSourceContext()
-{
-    // Interlocked (not just under HostGlobalsLock) so source ids can never
-    // duplicate even if a future access site misses the lock; every current
-    // caller also holds the lock. The -1 preserves the original
-    // post-increment semantics (returns the value before the increment);
-    // DWORD_PTR is pointer-sized, so pick the matching interlocked width.
-#if _WIN64
-    return (DWORD_PTR)InterlockedIncrement64(reinterpret_cast<volatile LONGLONG*>(&sourceContext)) - 1;
-#else
-    return (DWORD_PTR)InterlockedIncrement(reinterpret_cast<volatile LONG*>(&sourceContext)) - 1;
-#endif
-}
-
-void WScriptJsrt::RegisterScriptDir(DWORD_PTR sourceContext, LPCSTR fullDirNarrow)
-{
-    HostGlobalsLock lock;
-    GetDir(fullDirNarrow, &scriptDirMap[sourceContext]);
-}
+#include "WScriptJsrtState.h"
+#include "WScriptSerializer.h"
+#include "WScriptTest262Agents.h"
+#include "WScriptModuleHost.h"
 
 bool WScriptJsrt::CreateArgumentsObject(JsValueRef *argsObject)
 {
@@ -298,36 +189,16 @@ JsValueRef __stdcall WScriptJsrt::EchoCallback(JsValueRef callee, bool isConstru
     }
 }
 
-// Raw process termination for WScript.Quit. The previous design (signal
-// every child's shutdown event, join under a 10 s bound, then ExitProcess)
-// still crashed three ways, because ExitProcess/exit run the PAL
-// process-detach path (JsrtRuntime::Uninitialize, DLL detach, C++/TLS
-// destructors) over runtimes whose threads may still be inside JsRT calls:
-// an AGENT-initiated Quit joins only the calling agent's sub-agents, never
-// the main thread or its siblings (SIGSEGV 18/20 in the adversarial
-// campaign); a WEDGED agent (while(true){}) exhausts the join bound and is
-// hard-terminated mid-JsRun (SIGSEGV 8/8); and the joined path left
-// residual SIGBUS under parallel load. Quit therefore performs NO runtime
-// teardown at all anymore: flush stdout/stderr (PAL_fflush writes the
-// underlying FILE buffers synchronously; Echo already flushes per line),
-// then terminate through the raw syscall path. Nothing that could observe
-// a half-torn-down runtime ever runs: no PAL cleanup, no destructors, no
-// detach notifications, no finalizers — sibling and wedged agent threads
-// simply stop existing, so joining is unnecessary by construction.
+// Raw process termination for WScript.Quit so wedged/sibling agent threads
+// cannot observe a half-torn-down PAL/runtime.
 static DECLSPEC_NORETURN void RawExitProcess(int exitCode)
 {
     fflush(stdout);
     fflush(stderr);
 
 #if defined(_WIN32)
-    // Windows preserves this host's historical ExitProcess semantics; the
-    // adversarial teardown campaign is POSIX (macOS) only.
     ExitProcess(exitCode);
 #else
-    // ::_exit bypasses atexit/PAL/TLS/destructor machinery entirely (pal.h
-    // remaps `exit` but not `_exit`). Only the low 8 bits of the exit
-    // status are observable by wait(), so mask explicitly; rlexe codes
-    // (0/1) and any masked WScript.Quit(n) keep their exact values.
     ::_exit(exitCode & 0xff);
 #endif
 }
@@ -405,7 +276,7 @@ void WScriptJsrt::SetExceptionIf(JsErrorCode errorCode, LPCWSTR errorMessage)
 {
     if (errorCode != JsNoError)
     {
-        // If the exception is already is set - no need to create a new exception.
+        // If the exception is already set - no need to create a new exception.
         bool hasException = false;
         if (!(ChakraRTInterface::JsHasException(&hasException) == JsNoError && hasException))
         {
@@ -423,272 +294,6 @@ void WScriptJsrt::SetExceptionIf(JsErrorCode errorCode, LPCWSTR errorMessage)
             ChakraRTInterface::JsSetException(errorObject);
         }
     }
-}
-
-byte * CHAKRA_CALLBACK ReallocateBufferMemory(void * state, byte *oldBuffer, size_t newSize, size_t *allocatedSize)
-{
-    void* data = realloc((void*)oldBuffer, newSize);
-    if (allocatedSize)
-    {
-        *allocatedSize = newSize;
-    }
-    return (byte*)data;
-}
-
-bool CHAKRA_CALLBACK WriteHostObject(void * state, JsValueRef data)
-{
-    // Not implemented
-    return true;
-}
-
-JsValueRef __stdcall WScriptJsrt::SerializeObject(JsValueRef callee, bool isConstructCall, JsValueRef *arguments, unsigned short argumentCount, void *callbackState)
-{
-    JsErrorCode errorCode = JsNoError;
-    LPCWSTR errorMessage = _u("");
-    JsValueRef returnValue = JS_INVALID_REFERENCE;
-    HRESULT hr = S_OK;
-    JsValueRef *transferVarsArray = nullptr;
-    int transferVarsCount = 0;
-    if (argumentCount < 2)
-    {
-        errorCode = JsErrorInvalidArgument;
-        errorMessage = _u("Need an argument for WScript.Serialize");
-    }
-    else
-    {
-        JsValueRef rootObject = arguments[1];
-        JsValueRef transferArray = nullptr;
-        if (argumentCount > 2)
-        {
-            JsValueType argumentType = JsUndefined;
-            transferArray = arguments[2];
-            IfJsrtErrorSetGo(ChakraRTInterface::JsGetValueType(transferArray, &argumentType));
-
-            if (argumentType != JsUndefined)
-            {
-                if (argumentType != JsArray)
-                {
-                    errorCode = JsErrorInvalidArgument;
-                    goto Error;
-                }
-
-                JsPropertyIdRef lengthPropId;
-                JsValueRef arrayLengthObj = JS_INVALID_REFERENCE;
-                int arrayLength = 0;
-                IfJsrtErrorSetGo(CreatePropertyIdFromString("length", &lengthPropId));
-                IfJsrtErrorSetGo(ChakraRTInterface::JsGetProperty(transferArray, lengthPropId, &arrayLengthObj));
-                IfJsrtErrorSetGo(ChakraRTInterface::JsNumberToInt(arrayLengthObj, &arrayLength));
-                if (arrayLength > 0)
-                {
-                    transferVarsArray = new JsValueRef[arrayLength];
-                    if (transferVarsArray == nullptr)
-                    {
-                        errorCode = JsErrorOutOfMemory;
-                        goto Error;
-                    }
-
-                    for (int i = 0; i < arrayLength; i++)
-                    {
-                        JsValueRef index;
-                        JsValueRef value = JS_INVALID_REFERENCE;
-                        JsValueType jsType = JsUndefined;
-
-                        IfJsrtErrorSetGo(ChakraRTInterface::JsIntToNumber(i, &index));
-                        IfJsrtErrorSetGo(ChakraRTInterface::JsGetIndexedProperty(transferArray, index, &value));
-                        IfJsrtErrorSetGo(ChakraRTInterface::JsGetValueType(value, &jsType));
-                        if (jsType == JsArrayBuffer)
-                        {
-                            *(transferVarsArray + transferVarsCount) = value;
-                            transferVarsCount++;
-                        }
-                    }
-                }
-            }
-        }
-
-        JsVarSerializerHandle serializerHandle = nullptr;
-
-        // This memory will be claimed at WScriptJsrt::Deserialize.
-        SerializerBlob *blob = new SerializerBlob();
-        IfJsrtErrorSetGo(ChakraRTInterface::JsVarSerializer(ReallocateBufferMemory, WriteHostObject, nullptr, &serializerHandle));
-        IfJsrtErrorSetGo(ChakraRTInterface::JsVarSerializerSetTransferableVars(serializerHandle, transferVarsArray, transferVarsCount));
-        IfJsrtErrorSetGo(ChakraRTInterface::JsVarSerializerWriteValue(serializerHandle, rootObject));
-        IfJsrtErrorSetGo(ChakraRTInterface::JsVarSerializerReleaseData(serializerHandle, (byte**)&blob->data, &blob->dataLength));
-
-        for (int i = 0; i < transferVarsCount; i++)
-        {
-            JsValueRef arrayBuffer = transferVarsArray[i];
-            ArrayBufferTransferInfo bufferInfo;
-            IfJsrtErrorSetGo(ChakraRTInterface::JsGetArrayBufferStorage(arrayBuffer, &bufferInfo.buffer, &bufferInfo.length));
-            IfJsrtErrorSetGo(ChakraRTInterface::JsExternalizeArrayBuffer(arrayBuffer));
-            IfJsrtErrorSetGo(ChakraRTInterface::JsGetArrayBufferFreeFunction(arrayBuffer, &bufferInfo.freeFn));
-            blob->transferableArrays.push_back(bufferInfo);
-            IfJsrtErrorSetGo(ChakraRTInterface::JsDetachArrayBuffer(arrayBuffer));
-        }
-
-        errorCode = ChakraRTInterface::JsCreateExternalArrayBuffer((void*)blob, sizeof(SerializerBlob), nullptr, nullptr, &returnValue);
-        IfJsrtErrorSetGo(ChakraRTInterface::JsVarSerializerFree(serializerHandle));
-    }
-Error:
-    SetExceptionIf(errorCode, errorMessage);
-
-    if (transferVarsArray)
-    {
-        delete[] transferVarsArray;
-    }
-
-    return returnValue;
-}
-
-JsValueRef CHAKRA_CALLBACK ReadHostObject(void * state)
-{
-    Assert(false); // TBD
-    return nullptr;
-}
-
-JsValueRef CHAKRA_CALLBACK GetSharedArrayBufferFromId(void * state, uint32_t id)
-{
-    Assert(false); // TBD
-    return nullptr;
-}
-JsValueRef CHAKRA_CALLBACK GetWasmModuleFromId(void * state, uint32_t transfer_id)
-{
-    Assert(false); // TBD
-    return nullptr;
-}
-
-struct BufferFreeFunctionState {
-    ArrayBufferFreeFn freeFn;
-    void* buffer;
-};
-
-void CHAKRA_CALLBACK BufferFreeFunction(void * state)
-{
-    BufferFreeFunctionState* bufferState = (BufferFreeFunctionState*)state;
-    if (!bufferState)
-    {
-        return;
-    }
-    if (bufferState->freeFn)
-    {
-        bufferState->freeFn(bufferState->buffer);
-    }
-    delete bufferState;
-}
-
-JsValueRef __stdcall WScriptJsrt::Deserialize(JsValueRef callee, bool isConstructCall, JsValueRef *arguments, unsigned short argumentCount, void *callbackState)
-{
-    JsErrorCode errorCode = JsNoError;
-    LPCWSTR errorMessage = _u("");
-    JsValueRef returnValue = JS_INVALID_REFERENCE;
-    JsValueRef * transferables = nullptr;
-    HRESULT hr = S_OK;
-    if (argumentCount < 2)
-    {
-        errorCode = JsErrorInvalidArgument;
-        errorMessage = _u("Need an argument for WScript.Deserialize");
-    }
-    else
-    {
-        JsValueRef dataObject = arguments[1];
-        uint32 dataLength = 0;
-        BYTE *data = nullptr;
-        IfJsrtErrorSetGo(ChakraRTInterface::JsGetArrayBufferStorage(dataObject, &data, &dataLength));
-        SerializerBlob *blob = (SerializerBlob*)data;
-        JsVarDeserializerHandle deserializerHandle = nullptr;
-        IfJsrtErrorSetGo(ChakraRTInterface::JsVarDeserializer(blob->data, blob->dataLength, ReadHostObject, GetSharedArrayBufferFromId, nullptr, &deserializerHandle));
-
-        size_t arraySize = blob->transferableArrays.size();
-        if (arraySize > 0)
-        {
-            transferables = new JsValueRef[arraySize];
-
-            for (size_t i = 0; i < arraySize; ++i)
-            {
-                JsValueRef result = nullptr;
-                BufferFreeFunctionState* bufferFreeState = new BufferFreeFunctionState();
-                bufferFreeState->buffer = blob->transferableArrays[i].buffer;
-                bufferFreeState->freeFn = blob->transferableArrays[i].freeFn;
-                IfJsrtErrorSetGo(ChakraRTInterface::JsCreateExternalArrayBuffer(blob->transferableArrays[i].buffer, blob->transferableArrays[i].length, BufferFreeFunction, bufferFreeState, &result));
-                transferables[i] = result;
-            }
-
-            IfJsrtErrorSetGo(ChakraRTInterface::JsVarDeserializerSetTransferableVars(deserializerHandle, transferables, arraySize));
-        }
-
-        IfJsrtErrorSetGo(ChakraRTInterface::JsVarDeserializerReadValue(deserializerHandle, &returnValue));
-        IfJsrtErrorSetGo(ChakraRTInterface::JsVarDeserializerFree(deserializerHandle));
-        delete blob;
-
-    }
-
-Error:
-    SetExceptionIf(errorCode, errorMessage);
-    if (transferables)
-    {
-        delete[] transferables;
-    }
-
-    return returnValue;
-}
-
-JsValueRef __stdcall WScriptJsrt::GetModuleNamespace(JsValueRef callee, bool isConstructCall, JsValueRef *arguments, unsigned short argumentCount, void *callbackState)
-{
-    JsErrorCode errorCode = JsNoError;
-    JsValueRef returnValue = JS_INVALID_REFERENCE;
-    LPCWSTR errorMessage = _u("");
-    char fullPath[_MAX_PATH];
-
-    if (argumentCount < 2)
-    {
-        errorCode = JsErrorInvalidArgument;
-        errorMessage = _u("Need an argument for WScript.GetModuleNamespace");
-    }
-    else
-    {
-        AutoString specifierStr(arguments[1]);
-        errorCode = specifierStr.GetError();
-
-        if (errorCode == JsNoError)
-        {
-            if (_fullpath(fullPath, specifierStr.GetString(), _MAX_PATH) == nullptr)
-            {
-                errorCode = JsErrorInvalidArgument;
-            }
-            else
-            {
-                JsModuleRecord record;
-                {
-                    HostGlobalsLock lock;
-                    auto moduleEntry = moduleRecordMap.find(fullPath);
-                    if (moduleEntry == moduleRecordMap.end())
-                    {
-                        record = JS_INVALID_REFERENCE;
-                    }
-                    else
-                    {
-                        record = moduleEntry->second;
-                    }
-                }
-                if (record == JS_INVALID_REFERENCE)
-                {
-                    errorCode = JsErrorInvalidArgument;
-                    errorMessage = _u("Need to supply a path for an already loaded module for WScript.GetModuleNamespace");
-                }
-                else
-                {
-                    errorCode = ChakraRTInterface::JsGetModuleNamespace(record, &returnValue);
-                    if (errorCode == JsErrorModuleNotEvaluated)
-                    {
-                        errorMessage = _u("GetModuleNamespace called with un-evaluated module");
-                    }
-                }
-            }
-        }
-    }
-
-    SetExceptionIf(errorCode, errorMessage);
-    return returnValue;
 }
 
 JsValueRef __stdcall WScriptJsrt::LoadScriptCallback(JsValueRef callee, bool isConstructCall, JsValueRef *arguments, unsigned short argumentCount, void *callbackState)
@@ -723,8 +328,6 @@ JsValueRef WScriptJsrt::LoadScriptHelper(JsValueRef callee, bool isConstructCall
         bool isFile = true;
 
         IfJsrtErrorSetGo(fileContent.Initialize(arguments[1]));
-        // ExternalArrayBuffer Finalize will clean this up
-        // but only if we actually register a finalizecallback for this
         fileContent.MakePersistent();
 
         if (argumentCount > 2)
@@ -745,8 +348,6 @@ JsValueRef WScriptJsrt::LoadScriptHelper(JsValueRef callee, bool isConstructCall
             {
                 int nextId;
                 {
-                    // Diagnostic filename only (display/uniqueness); read
-                    // the shared counter under the host-globals lock.
                     HostGlobalsLock lock;
                     nextId = (int)sourceContext;
                 }
@@ -757,8 +358,6 @@ JsValueRef WScriptJsrt::LoadScriptHelper(JsValueRef callee, bool isConstructCall
 
         if (*fileContent)
         {
-            // TODO: This is CESU-8. How to tell the engine?
-            // TODO: How to handle this source (script) life time?
             returnValue = LoadScript(callee, fileNameNarrow, *fileContent, *scriptInjectType ? *scriptInjectType : "self", isSourceModule, WScriptJsrt::FinalizeFree, isFile);
         }
     }
@@ -766,108 +365,6 @@ JsValueRef WScriptJsrt::LoadScriptHelper(JsValueRef callee, bool isConstructCall
 Error:
     SetExceptionIf(errorCode, errorMessage);
     return returnValue;
-}
-
-void WScriptJsrt::GetDir(LPCSTR fullPathNarrow, std::string *fullDirNarrow)
-{
-    char fileDrive[_MAX_DRIVE];
-    char fileDir[_MAX_DIR];
-
-    std::string result;
-    if (_splitpath_s(fullPathNarrow, fileDrive, _countof(fileDrive), fileDir, _countof(fileDir), nullptr, 0, nullptr, 0) == 0)
-    {
-        result += fileDrive;
-        result += fileDir;
-    }
-
-    *fullDirNarrow = result;
-}
-
-JsErrorCode WScriptJsrt::ModuleEntryPoint(LPCSTR fileName, LPCSTR fileContent, LPCSTR fullName)
-{
-    return LoadModuleFromString(fileName, fileContent, fullName, true);
-}
-
-JsErrorCode WScriptJsrt::LoadModuleFromString(LPCSTR fileName, LPCSTR fileContent, LPCSTR fullName, bool isFile)
-{
-    DWORD_PTR dwSourceCookie = WScriptJsrt::GetNextSourceContext();
-    JsModuleRecord requestModule = JS_INVALID_REFERENCE;
-    LPCSTR moduleRecordKey = fullName ? fullName : fileName;
-    JsErrorCode errorCode = JsNoError;
-
-    // we need to create a new moduleRecord if the specifier (fileName) is not found;
-    // otherwise we'll use the old one. The find + initialize + register block is
-    // atomic under the host-globals lock so two threads loading the same key
-    // cannot both create records (the second overwriting the first's map entry).
-    // JsInitializeModuleRecord does not re-enter host callbacks, so holding the
-    // lock across it cannot deadlock against a fetch on another thread.
-    {
-        HostGlobalsLock lock;
-        auto moduleRecordEntry = moduleRecordMap.find(std::string(moduleRecordKey));
-
-        if (moduleRecordEntry == moduleRecordMap.end())
-        {
-            JsValueRef specifier = nullptr;
-            if (isFile && fullName)
-            {
-                errorCode = ChakraRTInterface::JsCreateString(
-                    fullName, strlen(fullName), &specifier);
-            }
-            if (errorCode == JsNoError)
-            {
-                errorCode = ChakraRTInterface::JsInitializeModuleRecord(
-                    nullptr, specifier, &requestModule);
-            }
-            if (errorCode == JsNoError)
-            {
-                if (fullName)
-                {
-                    GetDir(fullName, &moduleDirMap[requestModule]);
-                }
-
-                moduleRecordMap[std::string(moduleRecordKey)] = requestModule;
-                moduleErrMap[requestModule] = RootModule;
-            }
-        }
-        else
-        {
-            requestModule = moduleRecordEntry->second;
-        }
-    }
-    IfJsrtErrorFailLogAndRetErrorCode(errorCode);
-    JsValueRef errorObject = JS_INVALID_REFERENCE;
-
-    // ParseModuleSource is sync, while additional fetch & evaluation are async.
-    // Run it OUTSIDE the host-globals lock: the engine calls the host's fetch
-    // callbacks synchronously from inside it, and those re-take the lock.
-    unsigned int fileContentLength = (fileContent == nullptr) ? 0 : (unsigned int)strlen(fileContent);
- 
-    errorCode = ChakraRTInterface::JsParseModuleSource(requestModule, dwSourceCookie, (LPBYTE)fileContent,
-        fileContentLength, JsParseModuleSourceFlags_DataIsUTF8, &errorObject);
-    bool rootAtParse = false;
-    {
-        HostGlobalsLock lock;
-        rootAtParse = (moduleErrMap[requestModule] == RootModule);
-    }
-    if ((errorCode != JsNoError) && errorObject != JS_INVALID_REFERENCE && fileContent != nullptr && !HostConfigFlags::flags.IgnoreScriptErrorCode && rootAtParse)
-    {
-        ChakraRTInterface::JsSetException(errorObject);
-        {
-            HostGlobalsLock lock;
-            moduleErrMap[requestModule] = ErroredModule;
-        }
-        return errorCode;
-    }
-    if (errorCode != JsNoError && !rootAtParse)
-    {
-        // A dependency module failed to parse while the module graph was
-        // loading (the error stays on its record for the engine link
-        // phase). Witness the module-graph (resolution) stage for the
-        // negative-phase marker; the root module's own parse errors take
-        // the loud path above and stay parse-stage.
-        NoteModuleGraphFailure();
-    }
-    return JsNoError;
 }
 
 JsValueRef WScriptJsrt::LoadScript(JsValueRef callee, LPCSTR fileName,
@@ -896,8 +393,6 @@ JsValueRef WScriptJsrt::LoadScript(JsValueRef callee, LPCSTR fileName,
         goto Error;
     }
 
-    // this is called with LoadModuleCallback method as well where caller pass in a string that should be
-    // treated as a module source text instead of opening a new file.
     if (isSourceModule || (strcmp(scriptInjectType, "module") == 0))
     {
         errorCode = LoadModuleFromString(fileName, fileContent, fullPath, isFile);
@@ -915,21 +410,21 @@ JsValueRef WScriptJsrt::LoadScript(JsValueRef callee, LPCSTR fileName,
         JsValueRef fname;
         IfJsrtErrorSetGo(ChakraRTInterface::JsCreateString(fullPath,
             strlen(fullPath), &fname));
-        JsSourceContext sourceContext = GetNextSourceContext();
-        RegisterScriptDir(sourceContext, fullPath);
+        JsSourceContext nextSourceContext = GetNextSourceContext();
+        RegisterScriptDir(nextSourceContext, fullPath);
 
         if (HostConfigFlags::flags.UseParserStateCacheIsEnabled)
         {
             JsValueRef parserState;
             IfJsrtErrorSetGo(ChakraRTInterface::JsSerializeParserState(scriptSource, &parserState, JsParseScriptAttributeNone));
-            errorCode = ChakraRTInterface::JsRunScriptWithParserState(scriptSource, sourceContext, fname, JsParseScriptAttributeNone, parserState, &returnValue);
+            errorCode = ChakraRTInterface::JsRunScriptWithParserState(scriptSource, nextSourceContext, fname, JsParseScriptAttributeNone, parserState, &returnValue);
         }
         else
         {
-            errorCode = ChakraRTInterface::JsRun(scriptSource, sourceContext, fname, JsParseScriptAttributeNone, &returnValue);
+            errorCode = ChakraRTInterface::JsRun(scriptSource, nextSourceContext, fname, JsParseScriptAttributeNone, &returnValue);
         }
 
-        if(errorCode == JsNoError)
+        if (errorCode == JsNoError)
         {
             errorCode = ChakraRTInterface::JsGetGlobalObject(&returnValue);
         }
@@ -940,11 +435,9 @@ JsValueRef WScriptJsrt::LoadScript(JsValueRef callee, LPCSTR fileName,
     {
         JsValueRef newContext = JS_INVALID_REFERENCE;
 
-        // Create a new context and set it as the current context
         IfJsrtErrorSetGo(ChakraRTInterface::JsCreateContext(runtime, &newContext));
 
 #if ENABLE_TTD
-        //We need this here since this context is created in record
         IfJsrtErrorSetGo(ChakraRTInterface::JsSetObjectBeforeCollectCallback(newContext, nullptr, WScriptJsrt::JsContextBeforeCollectCallback));
 #endif
 
@@ -953,7 +446,6 @@ JsValueRef WScriptJsrt::LoadScript(JsValueRef callee, LPCSTR fileName,
         IfJsErrorFailLog(ChakraRTInterface::JsSetPromiseContinuationCallback(PromiseContinuationCallback, (void*)GetThreadMessageQueue()));
         IfJsErrorFailLog(ChakraRTInterface::JsSetTimerContinuationCallback(TimerContinuationCallback, (void*)GetThreadMessageQueue()));
 
-        // Initialize the host objects
         Initialize();
 
         JsValueRef scriptSource;
@@ -962,18 +454,18 @@ JsValueRef WScriptJsrt::LoadScript(JsValueRef callee, LPCSTR fileName,
         JsValueRef fname;
         IfJsrtErrorSetGo(ChakraRTInterface::JsCreateString(fullPath,
             strlen(fullPath), &fname));
-        JsSourceContext sourceContext = GetNextSourceContext();
-        RegisterScriptDir(sourceContext, fullPath);
+        JsSourceContext nextSourceContext = GetNextSourceContext();
+        RegisterScriptDir(nextSourceContext, fullPath);
 
         if (HostConfigFlags::flags.UseParserStateCacheIsEnabled)
         {
             JsValueRef parserState;
             IfJsrtErrorSetGo(ChakraRTInterface::JsSerializeParserState(scriptSource, &parserState, JsParseScriptAttributeNone));
-            errorCode = ChakraRTInterface::JsRunScriptWithParserState(scriptSource, sourceContext, fname, JsParseScriptAttributeNone, parserState, &returnValue);
+            errorCode = ChakraRTInterface::JsRunScriptWithParserState(scriptSource, nextSourceContext, fname, JsParseScriptAttributeNone, parserState, &returnValue);
         }
         else
         {
-            errorCode = ChakraRTInterface::JsRun(scriptSource, sourceContext, fname, JsParseScriptAttributeNone, &returnValue);
+            errorCode = ChakraRTInterface::JsRun(scriptSource, nextSourceContext, fname, JsParseScriptAttributeNone, &returnValue);
         }
 
         if (errorCode == JsNoError)
@@ -981,7 +473,6 @@ JsValueRef WScriptJsrt::LoadScript(JsValueRef callee, LPCSTR fileName,
             errorCode = ChakraRTInterface::JsGetGlobalObject(&returnValue);
         }
 
-        // Set the context back to the old one
         ChakraRTInterface::JsSetCurrentContext(currentContext);
     }
     else if (strcmp(scriptInjectType, "crossthread") == 0)
@@ -997,8 +488,6 @@ JsValueRef WScriptJsrt::LoadScript(JsValueRef callee, LPCSTR fileName,
         threadData->children.push_back(child);
         child->parent = threadData;
 
-        // TODO: need to add a switch in case we don't need to wait for
-        // child initial script completion
         ResetEvent(threadData->hevntInitialScriptCompleted);
 
         child->hThread = ::CreateThread(NULL, NULL, [](void* param) -> DWORD
@@ -1008,44 +497,14 @@ JsValueRef WScriptJsrt::LoadScript(JsValueRef callee, LPCSTR fileName,
 
         if (child->hThread == nullptr)
         {
-            // CreateThread failed (thread/resource exhaustion — realistic
-            // under agent churn; the PAL returns NULL after pthread_create
-            // fails, pal/src/thread/pal_thread.cpp). The child thread never
-            // started, so nothing else can reference `child`: this thread
-            // is the sole mutator of children (it pushed the child just
-            // above and no script ran since), so pop_back unlinks exactly
-            // the failed child. Delete it here instead of leaving a
-            // NULL-hThread entry for the end-of-main join, where
-            // WaitForSingleObject(NULL) trips the per-child Assert on debug
-            // profiles and releases a never-started child on release.
-            // ~RuntimeThreadData's CloseHandle(NULL hThread) is benign
-            // (invalid-handle error, no side effects).
             threadData->children.pop_back();
             delete child;
 
-            // hevntInitialScriptCompleted deliberately stays reset: only
-            // this thread waits on it, only after a spawn that did start,
-            // and every earlier child already set it during its own
-            // spawn-wait and never signals it again — so there is no stale
-            // waiter to release, and the next spawn resets it again
-            // anyway.
-
-            // Surface through this function's existing errorCode/errorMessage
-            // path: the PAL maps a failed pthread_create to
-            // ERROR_NOT_ENOUGH_MEMORY, so JsErrorOutOfMemory is the closest
-            // JsRT code.
             errorCode = JsErrorOutOfMemory;
             errorMessage = _u("Failed to create the agent thread.");
             goto Error;
         }
 
-        // Wait for the child's initial script OR the child thread itself:
-        // ThreadProc's Error path now sets the event, but a child thread
-        // that dies without reaching it (fatal error, unhandled
-        // exception) must not block this spawn forever either. Either
-        // outcome ends the spawn wait; a dead child simply never reports,
-        // exactly like an agent whose initial script threw (JsRun errors
-        // are not surfaced here).
         {
             HANDLE spawnWaitHandles[] = { threadData->hevntInitialScriptCompleted, child->hThread };
             WaitForMultipleObjects(_countof(spawnWaitHandles), spawnWaitHandles, FALSE, INFINITE);
@@ -1068,26 +527,6 @@ Error:
     _flushall();
 
     return value;
-}
-
-JsValueRef WScriptJsrt::MonotonicNowCallback(JsValueRef callee, bool isConstructCall, JsValueRef *arguments, unsigned short argumentCount, void *callbackState)
-{
-    LPCWSTR errorMessage = _u("invalid call to WScript.monotonicNow");
-    JsErrorCode errorCode = JsNoError;
-    HRESULT hr = S_OK;
-    JsValueRef result;
-    
-    IfJsrtErrorSetGo(ChakraRTInterface::JsDoubleToNumber(static_cast<double>(std::chrono::steady_clock::now().time_since_epoch().count()) / 1e6 /* ns in ms */, &result));
-
-#ifdef CTIME_UNDEFED
-#define ctime PAL_ctime
-#undef CTIME_UNDEFED
-#endif
-    return result;
-
-Error:
-    SetExceptionIf(errorCode, errorMessage);
-    return JS_INVALID_REFERENCE;
 }
 
 JsValueRef WScriptJsrt::SetTimeoutCallback(JsValueRef callee, bool isConstructCall, JsValueRef *arguments, unsigned short argumentCount, void *callbackState)
@@ -1113,7 +552,19 @@ JsValueRef WScriptJsrt::SetTimeoutCallback(JsValueRef callee, bool isConstructCa
     IfJsrtErrorSetGo(ChakraRTInterface::JsNumberToDouble(arguments[2], &tmp));
 
     time = static_cast<int>(tmp);
-    msg = new CallbackMessage(time, function);
+    msg = new (std::nothrow) CallbackMessage(time, function);
+    if (msg == nullptr)
+    {
+        errorCode = JsErrorOutOfMemory;
+        goto Error;
+    }
+    if (!msg->HasValidRef())
+    {
+        errorCode = msg->GetAddRefError();
+        delete msg;
+        msg = nullptr;
+        goto Error;
+    }
     GetThreadMessageQueue()->InsertSorted(msg);
 
     IfJsrtErrorSetGo(ChakraRTInterface::JsDoubleToNumber(static_cast<double>(msg->GetId()), &timerId));
@@ -1155,9 +606,21 @@ Error:
 }
 
 template <class DebugOperationFunc>
-void QueueDebugOperation(JsValueRef function, const DebugOperationFunc& operation)
+static JsErrorCode QueueDebugOperation(JsValueRef function, const DebugOperationFunc& operation)
 {
-    WScriptJsrt::PushMessage(WScriptJsrt::CallbackMessage::Create(function, operation));
+    WScriptJsrt::CallbackMessage* msg = WScriptJsrt::CallbackMessage::Create(function, operation);
+    if (msg == nullptr)
+    {
+        return JsErrorOutOfMemory;
+    }
+    if (!msg->HasValidRef())
+    {
+        JsErrorCode err = msg->GetAddRefError();
+        delete msg;
+        return err;
+    }
+    WScriptJsrt::PushMessage(msg);
+    return JsNoError;
 }
 
 JsValueRef WScriptJsrt::AttachCallback(JsValueRef callee, bool isConstructCall, JsValueRef *arguments, unsigned short argumentCount, void *callbackState)
@@ -1177,7 +640,7 @@ JsValueRef WScriptJsrt::AttachCallback(JsValueRef callee, bool isConstructCall, 
         errorCode = JsErrorInvalidArgument;
         goto Error;
     }
-    QueueDebugOperation(arguments[1], [](WScriptJsrt::CallbackMessage& msg)
+    IfJsrtErrorSetGo(QueueDebugOperation(arguments[1], [](WScriptJsrt::CallbackMessage& msg)
     {
         JsContextRef currentContext = JS_INVALID_REFERENCE;
         ChakraRTInterface::JsGetCurrentContext(&currentContext);
@@ -1189,7 +652,7 @@ JsValueRef WScriptJsrt::AttachCallback(JsValueRef callee, bool isConstructCall, 
         debugger->SourceRunDown();
 
         return msg.CallFunction("");
-    });
+    }));
 Error:
     SetExceptionIf(errorCode, errorMessage);
     return JS_INVALID_REFERENCE;
@@ -1212,7 +675,7 @@ JsValueRef WScriptJsrt::DetachCallback(JsValueRef callee, bool isConstructCall, 
         errorCode = JsErrorInvalidArgument;
         goto Error;
     }
-    QueueDebugOperation(arguments[1], [](WScriptJsrt::CallbackMessage& msg)
+    IfJsrtErrorSetGo(QueueDebugOperation(arguments[1], [](WScriptJsrt::CallbackMessage& msg)
     {
         JsContextRef currentContext = JS_INVALID_REFERENCE;
         ChakraRTInterface::JsGetCurrentContext(&currentContext);
@@ -1224,7 +687,7 @@ JsValueRef WScriptJsrt::DetachCallback(JsValueRef callee, bool isConstructCall, 
             debugger->StopDebugging(currentRuntime);
         }
         return msg.CallFunction("");
-    });
+    }));
 Error:
     SetExceptionIf(errorCode, errorMessage);
     return JS_INVALID_REFERENCE;
@@ -1238,7 +701,6 @@ JsValueRef WScriptJsrt::DumpFunctionPositionCallback(JsValueRef callee, bool isC
     {
         if (ChakraRTInterface::JsDiagGetFunctionPosition(arguments[1], &functionPosition) != JsNoError)
         {
-            // If we can't get the functionPosition pass undefined
             IfJsErrorFailLogAndRet(ChakraRTInterface::JsGetUndefinedValue(&functionPosition));
         }
 
@@ -1450,9 +912,6 @@ bool WScriptJsrt::Initialize()
     IfJsrtErrorFail(ChakraRTInterface::JsSetModuleHostInfo(nullptr, JsModuleHostInfo_InitializeImportMetaCallback, (void*)WScriptJsrt::InitializeImportMetaCallback), false);
     IfJsrtErrorFail(ChakraRTInterface::JsSetModuleHostInfo(nullptr, JsModuleHostInfo_ReportModuleCompletionCallback, (void*)WScriptJsrt::ReportModuleCompletionCallback), false);
 
-    // When the command-line argument `-Test262` is set,
-    // WScript will have the extra support API below and $262 will be
-    // added to global scope
     if (HostConfigFlags::flags.Test262)
     {
         IfFalseGo(WScriptJsrt::InstallObjectsOnObject(wscript, "Broadcast", BroadcastCallback));
@@ -1462,7 +921,6 @@ bool WScriptJsrt::Initialize()
         IfFalseGo(WScriptJsrt::InstallObjectsOnObject(wscript, "Leaving", LeavingCallback));
         IfFalseGo(WScriptJsrt::InstallObjectsOnObject(wscript, "Sleep", SleepCallback));
 
-        // $262
         const char Test262[] =
             #include "262.js"
         ;
@@ -1482,68 +940,30 @@ Error:
 bool WScriptJsrt::Uninitialize()
 {
     auto& threadData = GetRuntimeThreadLocalData().threadData;
-
-    // The module/script maps below are process-global std::maps. Agent
-    // threads reach this Uninitialize on every leaving()/shutdown exit (and
-    // since S6e that is the common path), so clearing them from a child
-    // would race the main thread's map usage and each other — heap
-    // corruption, not a controlled teardown. Only the main thread (no
-    // threadData, or the root RuntimeThreadData with no parent) may clear
-    // them; children only join their own sub-agents.
     const bool isMainThread = (threadData == nullptr || threadData->parent == nullptr);
-    // The global map clears run at the END of this function, after the
-    // child join below: live agent threads consume those maps (module
-    // loads resolve through them), so clearing them before the join
-    // raced child reads against the main thread's mutation.
 
     if (threadData && !threadData->children.empty())
     {
-        // Children are normally never unlinked before this point:
-        // LoadScriptCallback push_backs each child on THIS (the owning
-        // parent's) thread before CreateThread, leaving() only sets the
-        // child's own flag, and the only in-flight removal is the
-        // failed-spawn pop_back in that same LoadScriptCallback (which
-        // unlinks exactly the child whose CreateThread returned null,
-        // before any script ran on this thread) — so this list is mutated
-        // only on this thread and these passes need no lock. The clear()
-        // below is the sole removal on the normal path.
-        //
-        // Signal shutdown for ALL children BEFORE any waiting, then join
-        // each child's thread handle individually. WaitForMultipleObjects
-        // (PAL included, pal/src/synchmgr/wait.cpp) accepts at most
-        // MAXIMUM_WAIT_OBJECTS (64) handles, so the previous single call
-        // over every accumulated child failed outright once a process
-        // started more than 64 agents: debug profiles asserted at the
-        // waitRet check, and release/test profiles fell through to the
-        // delete loop with no thread having been observed exiting —
-        // freeing RuntimeThreadData objects their threads still touch.
-        for(auto i = threadData->children.begin(); i!= threadData->children.end(); i++)
+        for (auto i = threadData->children.begin(); i != threadData->children.end(); i++)
         {
             SetEvent((*i)->hevntShutdown);
         }
 
-        //Clang does not support "for each" yet
-        // Record each join result instead of Assert-ing it: profiles
-        // that compile Assert out must not delete a RuntimeThreadData
-        // whose thread was never observed exited (WaitForSingleObject
-        // fails outright on an invalid handle without waiting).
         std::vector<DWORD> waitResults;
         waitResults.reserve(threadData->children.size());
-        for(auto i = threadData->children.begin(); i!= threadData->children.end(); i++)
+        for (auto i = threadData->children.begin(); i != threadData->children.end(); i++)
         {
             waitResults.push_back(WaitForSingleObject((*i)->hThread, INFINITE));
         }
 
-        // Delete only children individually observed exited above. A
-        // child whose wait failed is deliberately leaked instead:
-        // freeing memory a possibly-live thread still touches is the
-        // exact failure this join exists to prevent, and teardown is
-        // process-final anyway.
         size_t waitIndex = 0;
         for (auto i = threadData->children.begin(); i != threadData->children.end(); i++)
         {
             if (waitResults[waitIndex++] == WAIT_OBJECT_0)
             {
+                // Release any unconsumed broadcast content handles if the child
+                // exited before creating a context (parent's context is active).
+                (*i)->DrainBroadcastQueue(false);
                 delete *i;
             }
         }
@@ -1553,14 +973,6 @@ bool WScriptJsrt::Uninitialize()
 
     if (isMainThread)
     {
-        // moduleRecordMap is a global std::map, its destructor may access overridden
-        // "operator delete" / global HeapAllocator::Instance. Clear it manually here
-        // to avoid worrying about global destructor order. Safe now:
-        // every agent thread that could read these maps has been joined
-        // above (a child whose join failed may still be live, but its
-        // RuntimeThreadData was leaked rather than freed, and process
-        // teardown is already under way). The clears still take the
-        // host-globals lock for uniformity with every other access site.
         HostGlobalsLock lock;
         moduleRecordMap.clear();
         moduleDirMap.clear();
@@ -1577,32 +989,6 @@ void CALLBACK WScriptJsrt::JsContextBeforeCollectCallback(JsRef contextRef, void
     ChakraRTInterface::JsTTDNotifyContextDestroy(contextRef);
 }
 #endif
-
-FileNode * SourceMap::root = nullptr;
-JsValueRef __stdcall WScriptJsrt::RegisterModuleSourceCallback(JsValueRef callee, bool isConstructCall,
-    JsValueRef *arguments, unsigned short argumentCount, void *callbackState)
-{
-    HRESULT hr = E_FAIL;
-    JsValueRef returnValue = JS_INVALID_REFERENCE;
-    JsErrorCode errorCode = JsNoError;
-
-    if (argumentCount < 3)
-    {
-        IfJsrtErrorSetGo(ChakraRTInterface::JsGetUndefinedValue(&returnValue));
-    }
-    else
-    {
-        AutoString fileName;
-        AutoString data;
-        IfJsrtErrorSetGo(fileName.Initialize(arguments[1]));
-        IfJsrtErrorSetGo(data.Initialize(arguments[2]));
-
-        SourceMap::Add(fileName, data);
-    }
-
-Error:
-    return returnValue;
-}
 
 JsValueRef __stdcall WScriptJsrt::LoadTextFileCallback(JsValueRef callee, bool isConstructCall, JsValueRef *arguments, unsigned short argumentCount, void *callbackState)
 {
@@ -1646,7 +1032,7 @@ Error:
     return returnValue;
 }
 
-int JsFgets(char* buf, int size, FILE* file)
+static int JsFgets(char* buf, int size, FILE* file)
 {
     int n = size - 1;
     if (n < 0)
@@ -1657,13 +1043,13 @@ int JsFgets(char* buf, int size, FILE* file)
 
     for (i = 0; i < n && (c = getc(file)) != EOF; i++) {
         buf[i] = (char)c;
-        if (c == '\n') {        // any \n ends a line
-            i++;                // keep the \n; we know there is room for \0
+        if (c == '\n') {
+            i++;
             break;
         }
-        if (crflag) {           // \r not followed by \n ends line at the \r
+        if (crflag) {
             ungetc(c, file);
-            break;              // and overwrite c in buf with \0
+            break;
         }
         crflag = (c == '\r');
     }
@@ -1691,41 +1077,39 @@ JsValueRef __stdcall WScriptJsrt::ReadLineStdinCallback(JsValueRef callee, bool 
         goto Error;
     }
 
-    while ((gotlength = JsFgets(buf + buflength, bufsize - buflength, from)) > 0) 
+    while ((gotlength = JsFgets(buf + buflength, bufsize - buflength, from)) > 0)
     {
         buflength += gotlength;
 
-        // are we done?
-        if (buf[buflength - 2] == '\r' && buf[buflength - 1] == '\n') 
+        if (buf[buflength - 2] == '\r' && buf[buflength - 1] == '\n')
         {
             buf[buflength - 1] = '\0';
             buf[buflength - 2] = '\0';
             buflength -= 2;
             break;
         }
-        else if (buf[buflength - 1] == '\n') 
+        else if (buf[buflength - 1] == '\n')
         {
             buf[buflength - 1] = '\0';
             buflength -= 1;
             break;
         }
-        else if (buflength < bufsize - 1) 
+        else if (buflength < bufsize - 1)
         {
             break;
         }
 
-        // Else, grow our buffer for another pass.
         bufsize *= 2;
-        if (bufsize > buflength) 
+        if (bufsize > buflength)
         {
             tmp = static_cast<char*>(realloc(buf, bufsize));
         }
-        else 
+        else
         {
             goto Error;
         }
 
-        if (!tmp) 
+        if (!tmp)
         {
             goto Error;
         }
@@ -1733,14 +1117,13 @@ JsValueRef __stdcall WScriptJsrt::ReadLineStdinCallback(JsValueRef callee, bool 
         buf = tmp;
     }
 
-    //Treat the empty string specially.
-    if (buflength == 0) 
+    if (buflength == 0)
     {
-        if (feof(from)) 
+        if (feof(from))
         {
             goto Error;
         }
-        else 
+        else
         {
             JsValueRef emptyStringObject;
             IfJsrtErrorSetGo(ChakraRTInterface::JsCreateString(buf, buflength, &emptyStringObject));
@@ -1749,8 +1132,6 @@ JsValueRef __stdcall WScriptJsrt::ReadLineStdinCallback(JsValueRef callee, bool 
         }
     }
 
-   
-    // Turn buf into a JSString. Note that buflength includes the trailing null character.
     JsValueRef stringObject;
     IfJsrtErrorSetGo(ChakraRTInterface::JsCreateString(buf, buflength, &stringObject));
     free(buf);
@@ -1846,250 +1227,6 @@ Error:
     return returnValue;
 }
 
-JsValueRef __stdcall WScriptJsrt::BroadcastCallback(JsValueRef callee, bool isConstructCall, JsValueRef *arguments, unsigned short argumentCount, void *callbackState)
-{
-    HRESULT hr = E_FAIL;
-    JsValueRef returnValue = JS_INVALID_REFERENCE;
-    JsErrorCode errorCode = JsNoError;
-    LPCWSTR errorMessage = _u("invalid call to WScript.Broadcast");
-
-    IfJsrtErrorSetGo(ChakraRTInterface::JsGetUndefinedValue(&returnValue));
-
-    if (argumentCount <= 1)
-    {
-        // A missing argument is the same host-usage error as an explicit
-        // non-SharedArrayBuffer below; without this check the old
-        // `argumentCount > 1` guard silently returned undefined for
-        // WScript.Broadcast() while WScript.Broadcast(undefined) threw.
-        errorCode = JsErrorInvalidArgument;
-        errorMessage = _u("WScript.Broadcast requires a SharedArrayBuffer");
-        goto Error;
-    }
-
-    if (argumentCount > 1)
-    {
-        // Validate the broadcast argument BEFORE signaling any child. On a
-        // non-SharedArrayBuffer the call below fails WITHOUT writing the out
-        // parameter (JsrtCore.cpp returns JsErrorInvalidArgument before the
-        // store), so signaling children anyway — as the old unchecked code
-        // did — made every live child consume a stale/null
-        // threadData->sharedContent handle and crash in its
-        // JsCreateSharedArrayBufferWithSharedContent. Stage the handle in a
-        // local and commit it to threadData->sharedContent only on success,
-        // so a rejected broadcast leaves host state and every child
-        // untouched. A JsErrorFatal (SAB without content) is rejected the
-        // same way: no child may be signaled for unusable content either.
-        JsSharedArrayBufferContentHandle sharedContent = nullptr;
-        if (ChakraRTInterface::JsGetSharedArrayBufferContent(arguments[1], &sharedContent) != JsNoError)
-        {
-            errorCode = JsErrorInvalidArgument;
-            errorMessage = _u("WScript.Broadcast requires a SharedArrayBuffer");
-            goto Error;
-        }
-
-        auto& threadData = GetRuntimeThreadLocalData().threadData;
-        if (threadData)
-        {
-            threadData->sharedContent = sharedContent;
-
-            // Signal every child, then wait for EACH live child to consume
-            // the content (its child-side wrapper AddRef'd it) before the
-            // handle is released and threadData->sharedContent may be
-            // overwritten by a later broadcast. The old code created a
-            // semaphore sized for all children but waited for a single
-            // release, then closed the handle: the remaining children
-            // signaled a closed handle (which the OS may have recycled) and
-            // a second broadcast could overwrite sharedContent while a slow
-            // child had not consumed it yet. The per-child consumed events
-            // are owned by each child for its whole lifetime, so no wait
-            // here can hit a recycled handle.
-            for (auto i = threadData->children.begin(); i != threadData->children.end(); i++)
-            {
-                auto child = *i;
-                SetEvent(child->hevntReceivedBroadcast);
-            }
-
-            for (auto i = threadData->children.begin(); i != threadData->children.end(); i++)
-            {
-                auto child = *i;
-                // Zero-timeout probe first, so the common case (child
-                // consumed immediately) and the departed-child case both
-                // resolve without paying a 50 ms slice.
-                DWORD waitRet = WaitForSingleObject(child->hevntBroadcastConsumed, 0);
-                DWORD waitedMs = 0;
-                bool departed = false;
-                while (waitRet != WAIT_OBJECT_0 && waitedMs < 5000)
-                {
-                    // A child that already exited (leaving/shutdown, or a
-                    // failed ThreadProc) never consumes this broadcast;
-                    // once its thread is dead there is nothing to wait for.
-                    // This is the expected state for agents that already
-                    // left, so it is not a warning.
-                    if (WaitForSingleObject(child->hThread, 0) == WAIT_OBJECT_0)
-                    {
-                        departed = true;
-                        break;
-                    }
-                    waitRet = WaitForSingleObject(child->hevntBroadcastConsumed, 50);
-                    waitedMs += 50;
-                }
-                if (waitRet != WAIT_OBJECT_0 && !departed)
-                {
-                    fwprintf(stderr, _u("live agent did not acknowledge broadcast (waited %u ms)\n"), waitedMs);
-                    fflush(stderr);
-                }
-            }
-
-            ChakraRTInterface::JsReleaseSharedArrayBufferContentHandle(threadData->sharedContent);
-        }
-        else
-        {
-            // Validation above extracted the content handle, which AddRefs
-            // on success (JsrtCore.cpp). With no agent children threadData
-            // is null (it is created only at the crossthread inject), so
-            // the handshake — including its release — never runs: drop the
-            // reference here. Without this, every agentless valid
-            // broadcast leaked one SharedContents reference, pinning its
-            // buffer until runtime disposal (pre-repair leak isolated by
-            // the host-broadcast-type review; probe:
-            // tools/host-broadcast-type/leakprobe.js).
-            ChakraRTInterface::JsReleaseSharedArrayBufferContentHandle(sharedContent);
-        }
-    }
-
-Error:
-    SetExceptionIf(errorCode, errorMessage);
-    return returnValue;
-}
-
-JsValueRef __stdcall WScriptJsrt::ReceiveBroadcastCallback(JsValueRef callee, bool isConstructCall, JsValueRef *arguments, unsigned short argumentCount, void *callbackState)
-{
-    HRESULT hr = E_FAIL;
-    JsValueRef returnValue = JS_INVALID_REFERENCE;
-    JsErrorCode errorCode = JsNoError;
-
-    IfJsrtErrorSetGo(ChakraRTInterface::JsGetUndefinedValue(&returnValue));
-
-    if (argumentCount > 1)
-    {
-        auto& threadData = GetRuntimeThreadLocalData().threadData;
-        if (threadData)
-        {
-            if (threadData->receiveBroadcastCallbackFunc)
-            {
-                ChakraRTInterface::JsRelease(threadData->receiveBroadcastCallbackFunc, nullptr);
-            }
-            threadData->receiveBroadcastCallbackFunc = arguments[1];
-            ChakraRTInterface::JsAddRef(threadData->receiveBroadcastCallbackFunc, nullptr);
-        }
-    }
-
-Error:
-    return returnValue;
-}
-
-JsValueRef __stdcall WScriptJsrt::ReportCallback(JsValueRef callee, bool isConstructCall, JsValueRef *arguments, unsigned short argumentCount, void *callbackState)
-{
-    HRESULT hr = E_FAIL;
-    JsValueRef returnValue = JS_INVALID_REFERENCE;
-    JsErrorCode errorCode = JsNoError;
-
-    IfJsrtErrorSetGo(ChakraRTInterface::JsGetUndefinedValue(&returnValue));
-
-    if (argumentCount > 1)
-    {
-        JsValueRef stringRef;
-        ChakraRTInterface::JsConvertValueToString(arguments[1], &stringRef);
-
-        AutoString autoStr(stringRef);
-
-        if (autoStr.GetError() == JsNoError)
-        {
-            std::string str(autoStr.GetString());
-            auto& threadData = GetRuntimeThreadLocalData().threadData;
-
-            if (threadData && threadData->parent)
-            {
-                EnterCriticalSection(&threadData->parent->csReportQ);
-                threadData->parent->reportQ.push_back(str);
-                LeaveCriticalSection(&threadData->parent->csReportQ);
-            }
-        }
-    }
-
-Error:
-    return returnValue;
-}
-
-JsValueRef __stdcall WScriptJsrt::GetReportCallback(JsValueRef callee, bool isConstructCall, JsValueRef *arguments, unsigned short argumentCount, void *callbackState)
-{
-    HRESULT hr = E_FAIL;
-    JsValueRef returnValue = JS_INVALID_REFERENCE;
-    JsErrorCode errorCode = JsNoError;
-
-    IfJsrtErrorSetGo(ChakraRTInterface::JsGetNullValue(&returnValue));
-
-    if (argumentCount > 0)
-    {
-        auto& threadData = GetRuntimeThreadLocalData().threadData;
-        if (threadData)
-        {
-            EnterCriticalSection(&threadData->csReportQ);
-
-            if (threadData->reportQ.size() > 0)
-            {
-                auto str = threadData->reportQ.front();
-                threadData->reportQ.pop_front();
-                ChakraRTInterface::JsCreateString(str.c_str(), str.size(), &returnValue);
-            }
-            LeaveCriticalSection(&threadData->csReportQ);
-        }
-    }
-
-Error:
-    return returnValue;
-}
-
-JsValueRef __stdcall WScriptJsrt::LeavingCallback(JsValueRef callee, bool isConstructCall, JsValueRef *arguments, unsigned short argumentCount, void *callbackState)
-{
-    HRESULT hr = E_FAIL;
-    JsValueRef returnValue = JS_INVALID_REFERENCE;
-    JsErrorCode errorCode = JsNoError;
-
-    IfJsrtErrorSetGo(ChakraRTInterface::JsGetUndefinedValue(&returnValue));
-
-    if (argumentCount > 0)
-    {
-        auto& threadData = GetRuntimeThreadLocalData().threadData;
-        if (threadData)
-        {
-            threadData->leaving = true;
-        }
-    }
-
-Error:
-    return returnValue;
-}
-
-JsValueRef __stdcall WScriptJsrt::SleepCallback(JsValueRef callee, bool isConstructCall, JsValueRef *arguments, unsigned short argumentCount, void *callbackState)
-{
-    HRESULT hr = E_FAIL;
-    JsValueRef returnValue = JS_INVALID_REFERENCE;
-    JsErrorCode errorCode = JsNoError;
-
-    IfJsrtErrorSetGo(ChakraRTInterface::JsGetUndefinedValue(&returnValue));
-
-    if (argumentCount > 1)
-    {
-        double timeout = 0.0;
-        ChakraRTInterface::JsNumberToDouble(arguments[1], &timeout);
-        Sleep((DWORD)timeout);
-    }
-
-Error:
-    return returnValue;
-}
-
 JsValueRef __stdcall WScriptJsrt::GetProxyPropertiesCallback(JsValueRef callee, bool isConstructCall, JsValueRef *arguments, unsigned short argumentCount, void *callbackState)
 {
     HRESULT hr = E_FAIL;
@@ -2113,7 +1250,7 @@ JsValueRef __stdcall WScriptJsrt::GetProxyPropertiesCallback(JsValueRef callee, 
             JsPropertyIdRef targetProperty;
             JsPropertyIdRef handlerProperty;
             JsPropertyIdRef revokedProperty;
-            
+
             IfJsrtErrorSetGo(CreatePropertyIdFromString("target", &targetProperty));
             IfJsrtErrorSetGo(CreatePropertyIdFromString("handler", &handlerProperty));
             IfJsrtErrorSetGo(CreatePropertyIdFromString("revoked", &revokedProperty));
@@ -2158,7 +1295,6 @@ bool WScriptJsrt::PrintException(LPCSTR fileName, JsErrorCode jsErrorCode, JsVal
         {
             IfJsrtErrorFail(ChakraRTInterface::JsGetAndClearException(&exception), false);
         }
-
     }
 
     if (HostConfigFlags::flags.MuteHostErrorMsgIsEnabled)
@@ -2198,13 +1334,12 @@ bool WScriptJsrt::PrintException(LPCSTR fileName, JsErrorCode jsErrorCode, JsVal
                     {
                         JsPropertyIdRef linePropertyId = JS_INVALID_REFERENCE;
                         JsValueRef lineProperty = JS_INVALID_REFERENCE;
-
                         JsPropertyIdRef columnPropertyId = JS_INVALID_REFERENCE;
                         JsValueRef columnProperty = JS_INVALID_REFERENCE;
-                        
+
                         int line;
                         int column;
-                        
+
                         IfJsrtErrorFail(CreatePropertyIdFromString("line", &linePropertyId), false);
                         IfJsrtErrorFail(ChakraRTInterface::JsGetProperty(metaData, linePropertyId, &lineProperty), false);
                         IfJsrtErrorFail(ChakraRTInterface::JsNumberToInt(lineProperty, &line), false);
@@ -2227,16 +1362,12 @@ bool WScriptJsrt::PrintException(LPCSTR fileName, JsErrorCode jsErrorCode, JsVal
             {
                 JsPropertyIdRef linePropertyId = JS_INVALID_REFERENCE;
                 JsValueRef lineProperty = JS_INVALID_REFERENCE;
-
                 JsPropertyIdRef columnPropertyId = JS_INVALID_REFERENCE;
                 JsValueRef columnProperty = JS_INVALID_REFERENCE;
 
                 int line;
                 int column;
 
-                // Link-phase failures (for example a rejected dependency
-                // fetch) carry no line/column position; report them without
-                // one instead of dropping them silently.
                 bool hasPosition =
                     CreatePropertyIdFromString("line", &linePropertyId) == JsNoError &&
                     ChakraRTInterface::JsGetProperty(exception, linePropertyId, &lineProperty) == JsNoError &&
@@ -2286,7 +1417,6 @@ bool WScriptJsrt::PrintException(LPCSTR fileName, JsErrorCode jsErrorCode, JsVal
                     CHAR ext[_MAX_EXT];
                     _splitpath_s(fName, nullptr, 0, nullptr, 0, shortFileName, _countof(shortFileName), ext, _countof(ext));
 
-                    // do not mix char/wchar. print them separately
                     fprintf(stderr, "thrown at %s%s:\n^\n", shortFileName, ext);
                     fwprintf(stderr, _u("%ls\n"), errorMessage.GetWideString());
                 }
@@ -2317,16 +1447,24 @@ void WScriptJsrt::AddMessageQueue(MessageQueue *_messageQueue)
     messageQueue = _messageQueue;
 }
 
-WScriptJsrt::CallbackMessage::CallbackMessage(unsigned int time, JsValueRef function) : MessageBase(time), m_function(function)
+WScriptJsrt::CallbackMessage::CallbackMessage(unsigned int time, JsValueRef function)
+    : MessageBase(time), m_function(function), m_hasRef(false), m_addRefError(JsNoError)
 {
+    if (m_function == JS_INVALID_REFERENCE)
+    {
+        m_addRefError = JsErrorNullArgument;
+        return;
+    }
+
     JsErrorCode error = ChakraRTInterface::JsAddRef(m_function, nullptr);
     if (error != JsNoError)
     {
-        // Simply report a fatal error and exit because continuing from this point would result in inconsistent state
-        // and FailFast telemetry would not be useful.
-        wprintf(_u("FATAL ERROR: ChakraRTInterface::JsAddRef failed in WScriptJsrt::CallbackMessage::`ctor`. error=0x%x\n"), error);
-        exit(1);
+        m_addRefError = error;
+        m_function = JS_INVALID_REFERENCE;
+        return;
     }
+
+    m_hasRef = true;
 }
 
 WScriptJsrt::CallbackMessage::~CallbackMessage()
@@ -2338,8 +1476,12 @@ WScriptJsrt::CallbackMessage::~CallbackMessage()
         ReportNegativePhaseMarker(false);
         WScriptJsrt::PrintException("", JsErrorScriptException);
     }
-    JsErrorCode errorCode = ChakraRTInterface::JsRelease(m_function, nullptr);
-    Assert(errorCode == JsNoError);
+    if (m_hasRef && m_function != JS_INVALID_REFERENCE)
+    {
+        JsErrorCode errorCode = ChakraRTInterface::JsRelease(m_function, nullptr);
+        Assert(errorCode == JsNoError);
+    }
+    m_hasRef = false;
     m_function = JS_INVALID_REFERENCE;
 }
 
@@ -2350,6 +1492,11 @@ HRESULT WScriptJsrt::CallbackMessage::Call(LPCSTR fileName)
 
 HRESULT WScriptJsrt::CallbackMessage::CallFunction(LPCSTR fileName)
 {
+    if (!m_hasRef || m_function == JS_INVALID_REFERENCE)
+    {
+        return E_FAIL;
+    }
+
     HRESULT hr = S_OK;
 
     JsValueRef global;
@@ -2367,7 +1514,6 @@ HRESULT WScriptJsrt::CallbackMessage::CallFunction(LPCSTR fileName)
 
         JsValueRef fname;
         ChakraRTInterface::JsCreateString("", strlen(""), &fname);
-        // Run the code
         errorCode = ChakraRTInterface::JsRun(stringValue, JS_SOURCE_CONTEXT_NONE,
           fname, JsParseScriptAttributeArrayBufferIsUtf16Encoded,
           nullptr /*no result needed*/);
@@ -2388,767 +1534,38 @@ Error:
     return hr;
 }
 
-// Forward declarations for the import-attributes host support below.
-static JsErrorCode ReadModuleAttributes(JsValueRef attributes, bool* hasAttributes, std::string* canonicalOut, std::string* typeOut);
-static char* WrapJsonModuleSource(LPCSTR jsonText);
-static char* BuildJsonParseSource(LPCSTR jsonText, const char* prefix, const char* suffix);
-static bool ValidateJsonModuleSource(JsModuleRecord moduleRecord, LPCSTR jsonParseSource);
-
-WScriptJsrt::ModuleMessage::ModuleMessage(JsModuleRecord module, JsValueRef specifier, std::string* filePathPtr, std::string* mapKeyPtr, bool isJson, bool direct)
-    : MessageBase(0), moduleRecord(module), specifier(specifier), isJsonModule(isJson), directParse(direct)
-{
-    filePath = nullptr;
-    mapKey = nullptr;
-    ChakraRTInterface::JsAddRef(module, nullptr);
-    if (specifier != nullptr)
-    {
-        if (filePathPtr != nullptr)
-        {
-            filePath = new std::string(*filePathPtr);
-        }
-        if (mapKeyPtr != nullptr)
-        {
-            mapKey = new std::string(*mapKeyPtr);
-        }
-        // nullptr specifier means a Promise to execute; non-nullptr means a "fetch" operation.
-        ChakraRTInterface::JsAddRef(specifier, nullptr);
-    }
-}
-
-WScriptJsrt::ModuleMessage::~ModuleMessage()
-{
-    ChakraRTInterface::JsRelease(moduleRecord, nullptr);
-    if (specifier != nullptr)
-    {
-        delete filePath;
-        delete mapKey;
-        ChakraRTInterface::JsRelease(specifier, nullptr);
-    }
-}
-
-// Parses module source directly on an already-registered record. Used for
-// attribute-bearing fetches whose map key embeds the attributes and therefore
-// cannot round-trip through LoadModuleFromString's path-keyed lookup.
-// Mirrors LoadModuleFromString's parse tail: fetch records are never root
-// modules, so a parse failure simply stays on the record for the engine link
-// phase, with no host exception raised here.
-static void ParseModuleSourceOnRecord(JsModuleRecord module, LPCSTR fileContent, unsigned int contentLength)
-{
-    JsValueRef errorObject = JS_INVALID_REFERENCE;
-    ChakraRTInterface::JsParseModuleSource(module, WScriptJsrt::GetNextSourceContext(),
-        (LPBYTE)fileContent, contentLength, JsParseModuleSourceFlags_DataIsUTF8, &errorObject);
-}
-
-HRESULT WScriptJsrt::ModuleMessage::Call(LPCSTR fileName)
-{
-    JsErrorCode errorCode = JsNoError;
-    JsValueRef result = JS_INVALID_REFERENCE;
-    HRESULT hr;
-    if (specifier == nullptr)
-    {
-        bool errored;
-        {
-            HostGlobalsLock lock;
-            errored = (moduleErrMap[moduleRecord] == ErroredModule);
-        }
-        if (!errored)
-        {
-            errorCode = ChakraRTInterface::JsModuleEvaluation(moduleRecord, &result);
-            if (errorCode != JsNoError)
-            {
-                ReportNegativePhaseMarker(false);
-                PrintException(fileName, errorCode); // this should not be called
-            }
-        }
-    }
-    else
-    {
-        LPCSTR fileContent = nullptr;
-        AutoString specifierStr(specifier);
-        errorCode = specifierStr.GetError();
-        if (errorCode == JsNoError)
-        {
-            hr = Helpers::LoadScriptFromFile(*specifierStr, fileContent, nullptr, filePath, true);
-
-            if (FAILED(hr))
-            {
-                // The host failed to load a dependency of the module graph
-                // while it was loading: witness the resolution stage.
-                NoteModuleGraphFailure();
-                if (!HostConfigFlags::flags.MuteHostErrorMsgIsEnabled)
-                {
-                    bool reportLoadFailure;
-                    {
-                        HostGlobalsLock lock;
-                        auto actualModuleRecord = moduleRecordMap.find(*mapKey);
-                        reportLoadFailure = (actualModuleRecord == moduleRecordMap.end() ||
-                                             moduleErrMap[actualModuleRecord->second] == RootModule);
-                    }
-                    if (reportLoadFailure)
-                    {
-                        fprintf(stderr, "Couldn't load file '%s'\n", specifierStr.GetString());
-                    }
-                }
-                if (directParse)
-                {
-                    // Mirror the legacy empty-module parse below, targeting
-                    // the stored record directly.
-                    ParseModuleSourceOnRecord(moduleRecord, nullptr, 0);
-                }
-                else
-                {
-                    LoadScript(nullptr, filePath == nullptr ? *specifierStr : filePath->c_str(), nullptr, "module", true, WScriptJsrt::FinalizeFree, false);
-                }
-                goto Error;
-            }
-            if (isJsonModule)
-            {
-                // JSON modules produce a namespace whose only export is
-                // "default" holding the parsed value
-                // (CreateDefaultExportSyntheticModule). The file text is
-                // evaluated through JSON.parse rather than pasted as an
-                // object literal, so keys such as "__proto__" keep their
-                // parsed-value semantics. Per the spec the document is
-                // parsed when the module is loaded (ParseJSONModule), so a
-                // malformed document is validated here — a resolution-stage
-                // load failure carrying JSON.parse's own SyntaxError —
-                // instead of surfacing at the synthetic body's evaluation.
-                char* jsonValidationSource = BuildJsonParseSource(fileContent, "JSON.parse('", "');");
-                bool jsonValid = (jsonValidationSource != nullptr) &&
-                    ValidateJsonModuleSource(moduleRecord, jsonValidationSource);
-                free((void*)jsonValidationSource);
-                char* jsonModuleSource = WrapJsonModuleSource(fileContent);
-                free((void*)fileContent);
-                fileContent = nullptr;
-                if (jsonModuleSource == nullptr || jsonValidationSource == nullptr)
-                {
-                    NoteModuleGraphFailure();
-                    hr = E_OUTOFMEMORY;
-                    if (directParse)
-                    {
-                        ParseModuleSourceOnRecord(moduleRecord, nullptr, 0);
-                    }
-                    else
-                    {
-                        LoadScript(nullptr, filePath == nullptr ? *specifierStr : filePath->c_str(), nullptr, "module", true, WScriptJsrt::FinalizeFree, false);
-                    }
-                    free((void*)jsonModuleSource);
-                    goto Error;
-                }
-                if (!jsonValid)
-                {
-                    // Invalid JSON document: ValidateJsonModuleSource
-                    // recorded JSON.parse's SyntaxError on the module
-                    // record; an empty parse drives the dependency-failure
-                    // notification while keeping that recorded error
-                    // identity. This is the module-graph load stage, so
-                    // witness resolution.
-                    NoteModuleGraphFailure();
-                    if (directParse)
-                    {
-                        ParseModuleSourceOnRecord(moduleRecord, nullptr, 0);
-                    }
-                    else
-                    {
-                        LoadScript(nullptr, filePath == nullptr ? *specifierStr : filePath->c_str(), nullptr, "module", true, WScriptJsrt::FinalizeFree, false);
-                    }
-                    free((void*)jsonModuleSource);
-                    goto Error;
-                }
-                fileContent = jsonModuleSource;
-            }
-            if (directParse)
-            {
-                unsigned int contentLength = (fileContent == nullptr) ? 0 : (unsigned int)strlen(fileContent);
-                ParseModuleSourceOnRecord(moduleRecord, fileContent, contentLength);
-                free((void*)fileContent);
-            }
-            else
-            {
-                LoadScript(nullptr, filePath == nullptr ? *specifierStr : filePath->c_str(), fileContent, "module", true, WScriptJsrt::FinalizeFree, true);
-            }
-        }
-    }
-Error:
-    return errorCode;
-}
-
-JsErrorCode WScriptJsrt::ReportModuleCompletionCallback(JsModuleRecord module, JsValueRef exception)
-{
-    if (exception != nullptr)
-    {
-        JsValueRef specifier = JS_INVALID_REFERENCE;
-        ChakraRTInterface::JsGetModuleHostInfo(module, JsModuleHostInfo_Url, &specifier);
-        ReportNegativePhaseMarker(false);
-        PrintException(AutoString(specifier).GetString(), JsErrorCode::JsErrorScriptException, exception);
-    }
-    return JsNoError;
-}
-
-// Reads the engine-created attributes object (string -> string) into a
-// canonical escaped "key=value" serialization plus the "type" value.
-// `attributes` may be undefined, meaning the request carries no attributes.
-static JsErrorCode ReadModuleAttributes(JsValueRef attributes, bool* hasAttributes, std::string* canonicalOut, std::string* typeOut)
-{
-    *hasAttributes = false;
-    canonicalOut->clear();
-    typeOut->clear();
-
-    JsValueType valueType = JsUndefined;
-    JsErrorCode valueTypeError = ChakraRTInterface::JsGetValueType(attributes, &valueType);
-    IfJsrtErrorFail(valueTypeError, valueTypeError);
-    if (valueType == JsUndefined)
-    {
-        return JsNoError;
-    }
-    *hasAttributes = true;
-
-    JsValueRef propertyNames = JS_INVALID_REFERENCE;
-    IfJsrtErrorFail(ChakraRTInterface::JsGetOwnPropertyNames(attributes, &propertyNames), JsErrorInvalidArgument);
-    JsPropertyIdRef lengthId = nullptr;
-    IfJsrtErrorFail(ChakraRTInterface::JsCreatePropertyId("length", 6, &lengthId), JsErrorInvalidArgument);
-    JsValueRef lengthValue = JS_INVALID_REFERENCE;
-    IfJsrtErrorFail(ChakraRTInterface::JsGetProperty(propertyNames, lengthId, &lengthValue), JsErrorInvalidArgument);
-    int length = 0;
-    IfJsrtErrorFail(ChakraRTInterface::JsNumberToInt(lengthValue, &length), JsErrorInvalidArgument);
-
-    auto escape = [](const char* text, std::string* out) {
-        for (const char* p = text; *p != '\0'; p++)
-        {
-            // '=' is the key/value delimiter, so it must be escaped too:
-            // otherwise {"a=b":"c"} and {a:"b=c"} serialize identically.
-            if (*p == '\\' || *p == '\n' || *p == '\x1e' || *p == '=')
-            {
-                out->push_back('\\');
-            }
-            out->push_back(*p);
-        }
-    };
-
-    for (int i = 0; i < length; i++)
-    {
-        JsValueRef indexValue = JS_INVALID_REFERENCE;
-        IfJsrtErrorFail(ChakraRTInterface::JsIntToNumber(i, &indexValue), JsErrorInvalidArgument);
-        JsValueRef keyValue = JS_INVALID_REFERENCE;
-        IfJsrtErrorFail(ChakraRTInterface::JsGetIndexedProperty(propertyNames, indexValue, &keyValue), JsErrorInvalidArgument);
-        AutoString keyString;
-        if (keyString.Initialize(keyValue) != JsNoError)
-        {
-            return keyString.GetError();
-        }
-        JsPropertyIdRef keyId = nullptr;
-        IfJsrtErrorFail(ChakraRTInterface::JsCreatePropertyId(keyString.GetString(), strlen(keyString.GetString()), &keyId), JsErrorInvalidArgument);
-        JsValueRef value = JS_INVALID_REFERENCE;
-        IfJsrtErrorFail(ChakraRTInterface::JsGetProperty(attributes, keyId, &value), JsErrorInvalidArgument);
-        AutoString valueString;
-        if (valueString.Initialize(value) != JsNoError)
-        {
-            return valueString.GetError();
-        }
-        if (i > 0)
-        {
-            canonicalOut->push_back('\x1e');
-        }
-        escape(keyString.GetString(), canonicalOut);
-        canonicalOut->push_back('=');
-        escape(valueString.GetString(), canonicalOut);
-        if (strcmp(keyString.GetString(), "type") == 0 && typeOut->empty())
-        {
-            *typeOut = valueString.GetString();
-        }
-    }
-    return JsNoError;
-}
-
-// Synthesizes `export default JSON.parse('<file text>');` for a JSON module.
-// Only the single-quote, backslash and JS line terminators are escaped;
-// every other byte passes through unchanged so JSON.parse observes the
-// exact file text.
-static char* WrapJsonModuleSource(LPCSTR jsonText)
-{
-    return BuildJsonParseSource(jsonText, "export default JSON.parse('", "');");
-}
-
-// Runs the JSON.parse expression built from the file text (the payload of
-// the synthesized module body) in the current context. Returns true when
-// the document is valid JSON (or validation cannot run, e.g. host-side OOM,
-// in which case the legacy evaluation-time behavior stands). On failure the
-// engine's own SyntaxError from JSON.parse is recorded on the module record
-// via JsModuleHostInfo_Exception, so the link phase propagates that exact
-// error identity: per the spec (ParseJSONModule during module loading), a
-// malformed JSON module fails to LOAD — a resolution-stage failure — rather
-// than failing later when the synthetic module's body would have evaluated.
-// The record is unparsed at this point, which is the state
-// JsModuleHostInfo_Exception requires; ParseModuleSourceOnRecord(nullptr)
-// then drives the existing dependency-failure notification while
-// SourceTextModuleRecord::ParseSource keeps the pre-recorded error object.
-static bool ValidateJsonModuleSource(JsModuleRecord moduleRecord, LPCSTR jsonParseSource)
-{
-    JsValueRef sourceRef = nullptr;
-    JsValueRef sourceName = nullptr;
-    if (ChakraRTInterface::JsCreateString(jsonParseSource, strlen(jsonParseSource), &sourceRef) != JsNoError ||
-        ChakraRTInterface::JsCreateString("json-module-parse", strlen("json-module-parse"), &sourceName) != JsNoError)
-    {
-        return true;
-    }
-    if (ChakraRTInterface::JsRun(sourceRef, JS_SOURCE_CONTEXT_NONE, sourceName,
-        JsParseScriptAttributeNone, nullptr) == JsNoError)
-    {
-        return true;
-    }
-    JsValueRef exception = nullptr;
-    if (ChakraRTInterface::JsGetAndClearException(&exception) != JsNoError || exception == nullptr)
-    {
-        return true;
-    }
-    ChakraRTInterface::JsSetModuleHostInfo(moduleRecord, JsModuleHostInfo_Exception, exception);
-    return false;
-}
-// Builds `<prefix><escaped file text><suffix>` where the escape rules keep
-// the file text byte-exact inside a single-quoted JS string literal: only
-// the single quote, backslash and JS line terminators (incl. U+2028/U+2029)
-// are escaped. Returns a malloc'd buffer (caller frees) or nullptr on OOM.
-static char* BuildJsonParseSource(LPCSTR jsonText, const char* prefix, const char* suffix)
-{
-    static const char lineSeparatorEscape[] = "\\u2028";
-    static const char paragraphSeparatorEscape[] = "\\u2029";
-    size_t length = strlen(jsonText);
-    // Worst case: every byte doubles, plus two 6-byte escapes per 3-byte
-    // sequence, plus prefix/suffix/NUL.
-    size_t capacity = strlen(prefix) + 2 * length + strlen(suffix) + 1;
-    char* out = (char*)malloc(capacity);
-    if (out == nullptr)
-    {
-        return nullptr;
-    }
-    char* cursor = out;
-    memcpy(cursor, prefix, strlen(prefix));
-    cursor += strlen(prefix);
-    for (size_t i = 0; i < length; i++)
-    {
-        unsigned char c = (unsigned char)jsonText[i];
-        if (c == '\\' || c == '\'')
-        {
-            *cursor++ = '\\';
-            *cursor++ = (char)c;
-        }
-        else if (c == '\n')
-        {
-            *cursor++ = '\\';
-            *cursor++ = 'n';
-        }
-        else if (c == '\r')
-        {
-            *cursor++ = '\\';
-            *cursor++ = 'r';
-        }
-        else if (c == 0xE2 && i + 2 < length &&
-            (unsigned char)jsonText[i + 1] == 0x80 &&
-            ((unsigned char)jsonText[i + 2] == 0xA8 || (unsigned char)jsonText[i + 2] == 0xA9))
-        {
-            const char* escape = ((unsigned char)jsonText[i + 2] == 0xA8) ? lineSeparatorEscape : paragraphSeparatorEscape;
-            memcpy(cursor, escape, 6);
-            cursor += 6;
-            i += 2;
-        }
-        else
-        {
-            *cursor++ = (char)c;
-        }
-    }
-    memcpy(cursor, suffix, strlen(suffix));
-    cursor += strlen(suffix);
-    *cursor = '\0';
-    return out;
-}
-
-// True for specifiers that already name a location from the filesystem root
-// ('/' or '\', or a Windows drive letter). The fetch helpers prepend the
-// referencing script/module directory to relative specifiers; concatenating
-// a directory onto an absolute path would only produce a wrong location.
-static bool IsAbsolutePath(LPCSTR specifier)
-{
-    if (specifier == nullptr || specifier[0] == '\0')
-    {
-        return false;
-    }
-    if (specifier[0] == '/' || specifier[0] == '\\')
-    {
-        return true;
-    }
-    return (isalpha((unsigned char)specifier[0]) && specifier[1] == ':');
-}
-
-JsErrorCode WScriptJsrt::FetchImportedModuleHelperWithAttributes(JsModuleRecord referencingModule,
-    JsValueRef specifier, JsValueRef attributes, _Out_ JsModuleRecord* dependentModuleRecord, LPCSTR refdir)
-{
-    JsModuleRecord moduleRecord = JS_INVALID_REFERENCE;
-    AutoString specifierStr;
-    *dependentModuleRecord = nullptr;
-
-    if (specifierStr.Initialize(specifier) != JsNoError)
-    {
-        NoteModuleGraphFailure();
-        return specifierStr.GetError();
-    }
-
-    bool hasAttributes = false;
-    std::string canonicalAttributes;
-    std::string attributeType;
-    JsErrorCode attributesError = ReadModuleAttributes(attributes, &hasAttributes, &canonicalAttributes, &attributeType);
-    if (attributesError != JsNoError)
-    {
-        NoteModuleGraphFailure();
-        return attributesError;
-    }
-
-    char fullPath[_MAX_PATH];
-    std::string specifierFullPath = (refdir != nullptr && !IsAbsolutePath(*specifierStr)) ? refdir : "";
-    specifierFullPath += *specifierStr;
-    if (_fullpath(fullPath, specifierFullPath.c_str(), _MAX_PATH) == nullptr)
-    {
-        NoteModuleGraphFailure();
-        return JsErrorInvalidArgument;
-    }
-
-    // Module identity: requests that differ in attributes resolve to distinct
-    // records. Attribute-less requests keep the legacy plain-path key so
-    // behavior for existing scenarios is unchanged.
-    std::string moduleKey(fullPath);
-    if (hasAttributes)
-    {
-        moduleKey += '\x1e';
-        moduleKey += canonicalAttributes;
-    }
-
-    // Identity lookup and record registration are atomic under the
-    // host-globals lock (same find-then-create race as LoadModuleFromString;
-    // JsInitializeModuleRecord does not re-enter host callbacks). The
-    // message creation/queueing runs after the lock is released.
-    {
-        HostGlobalsLock lock;
-        auto moduleEntry = moduleRecordMap.find(moduleKey);
-        if (moduleEntry != moduleRecordMap.end())
-        {
-            *dependentModuleRecord = moduleEntry->second;
-            return JsNoError;
-        }
-
-        bool isJsonModule = (attributeType == "json");
-        if (hasAttributes && !attributeType.empty() && !isJsonModule)
-        {
-            // Unsupported "type" values fail the load. The engine surfaces this
-            // as an import failure (a link error for static imports, a promise
-            // rejection for dynamic imports).
-            NoteModuleGraphFailure();
-            return JsErrorInvalidArgument;
-        }
-
-        JsErrorCode errorCode = ChakraRTInterface::JsInitializeModuleRecord(referencingModule, specifier, &moduleRecord);
-        if (errorCode == JsNoError)
-        {
-            GetDir(fullPath, &moduleDirMap[moduleRecord]);
-            std::string pathKey = moduleKey;
-            moduleRecordMap[pathKey] = moduleRecord;
-            moduleErrMap[moduleRecord] = ImportedModule;
-        }
-        else
-        {
-            // The fetch callback failed, so the module graph cannot finish
-            // loading: a resolution-stage failure.
-            NoteModuleGraphFailure();
-            return errorCode;
-        }
-    }
-
-    bool isJsonModule = (attributeType == "json");
-    std::string pathKey = moduleKey;
-    std::string filePathKey(fullPath);
-    // Note: unlike the legacy Create call above (which passes the
-    // referencing module and re-derives the record from the file path),
-    // the attributes-aware message must target the fetched record
-    // directly, since its map key embeds the attributes.
-    ModuleMessage* moduleMessage = WScriptJsrt::ModuleMessage::CreateWithAttributes(moduleRecord, specifier, &filePathKey, &pathKey, isJsonModule);
-    if (moduleMessage == nullptr)
-    {
-        NoteModuleGraphFailure();
-        return JsErrorOutOfMemory;
-    }
-    WScriptJsrt::PushMessage(moduleMessage);
-    *dependentModuleRecord = moduleRecord;
-    return JsNoError;
-}
-
-JsErrorCode WScriptJsrt::FetchImportedModuleHelper(JsModuleRecord referencingModule,
-    JsValueRef specifier, _Out_ JsModuleRecord* dependentModuleRecord, LPCSTR refdir)
-{
-    JsModuleRecord moduleRecord = JS_INVALID_REFERENCE;
-    AutoString specifierStr;
-    *dependentModuleRecord = nullptr;
-
-    if (specifierStr.Initialize(specifier) != JsNoError)
-    {
-        NoteModuleGraphFailure();
-        return specifierStr.GetError();
-    }
-
-    char fullPath[_MAX_PATH];
-    std::string specifierFullPath = (refdir != nullptr && !IsAbsolutePath(*specifierStr)) ? refdir : "";
-    specifierFullPath += *specifierStr;
-    if (_fullpath(fullPath, specifierFullPath.c_str(), _MAX_PATH) == nullptr)
-    {
-        NoteModuleGraphFailure();
-        return JsErrorInvalidArgument;
-    }
-
-    // Identity lookup and record registration are atomic under the
-    // host-globals lock (find-then-create race as above); the message
-    // creation/queueing runs after the lock is released.
-    {
-        HostGlobalsLock lock;
-        auto moduleEntry = moduleRecordMap.find(std::string(fullPath));
-        if (moduleEntry != moduleRecordMap.end())
-        {
-            *dependentModuleRecord = moduleEntry->second;
-            return JsNoError;
-        }
-
-        JsErrorCode errorCode = ChakraRTInterface::JsInitializeModuleRecord(referencingModule, specifier, &moduleRecord);
-        if (errorCode != JsNoError)
-        {
-            // The fetch callback failed, so the module graph cannot finish
-            // loading: a resolution-stage failure.
-            NoteModuleGraphFailure();
-            return errorCode;
-        }
-        GetDir(fullPath, &moduleDirMap[moduleRecord]);
-        std::string pathKey = std::string(fullPath);
-        moduleRecordMap[pathKey] = moduleRecord;
-        moduleErrMap[moduleRecord] = ImportedModule;
-    }
-
-    std::string pathKey = std::string(fullPath);
-    ModuleMessage* moduleMessage = WScriptJsrt::ModuleMessage::Create(referencingModule, specifier, &pathKey);
-    if (moduleMessage == nullptr)
-    {
-        NoteModuleGraphFailure();
-        return JsErrorOutOfMemory;
-    }
-    WScriptJsrt::PushMessage(moduleMessage);
-    *dependentModuleRecord = moduleRecord;
-    return JsNoError;
-}
-
-// Callback from chakracore to fetch dependent module. In the test harness,
-// we are not doing any translation, just treat the specifier as fileName.
-// While this call will come back directly from ParseModuleSource, the additional
-// task are treated as Promise that will be executed later.
-JsErrorCode WScriptJsrt::FetchImportedModule(_In_ JsModuleRecord referencingModule,
-    _In_ JsValueRef specifier, _Outptr_result_maybenull_ JsModuleRecord* dependentModuleRecord)
-{
-    // Copy the referencing module's directory out under the lock, then
-    // resolve without holding it (the helper re-takes the lock).
-    std::string dir;
-    bool hasDir = false;
-    {
-        HostGlobalsLock lock;
-        auto moduleDirEntry = moduleDirMap.find(referencingModule);
-        if (moduleDirEntry != moduleDirMap.end())
-        {
-            dir = moduleDirEntry->second;
-            hasDir = true;
-        }
-    }
-    if (hasDir)
-    {
-        return FetchImportedModuleHelper(referencingModule, specifier, dependentModuleRecord, dir.c_str());
-    }
-
-    return FetchImportedModuleHelper(referencingModule, specifier, dependentModuleRecord);
-}
-
-// Callback from chakracore to fetch module dynamically during runtime. In the test harness,
-// we are not doing any translation, just treat the specifier as fileName.
-// While this call will come back directly from runtime script or module code, the additional
-// task can be scheduled asynchronously that executed later.
-// A relative specifier must resolve against the importing script's own directory
-// (HostImportModuleDynamically hands the referencing script's source context to
-// the host): the harness materializes each test next to its fixtures and runs
-// the host from an unrelated CWD. scriptDirMap carries that directory for every
-// source context passed to JsRun (ch's RunScript entry points and
-// WScript.LoadScript's "self"/"samethread" paths, via RegisterScriptDir).
-// Unregistered contexts (e.g. synthetic sources) keep the legacy CWD fallback.
-JsErrorCode WScriptJsrt::FetchImportedModuleFromScript(_In_ JsSourceContext dwReferencingSourceContext,
-    _In_ JsValueRef specifier, _Outptr_result_maybenull_ JsModuleRecord* dependentModuleRecord)
-{
-    std::string dir;
-    bool hasDir = false;
-    {
-        HostGlobalsLock lock;
-        auto scriptDirEntry = scriptDirMap.find(static_cast<DWORD_PTR>(dwReferencingSourceContext));
-        if (scriptDirEntry != scriptDirMap.end())
-        {
-            dir = scriptDirEntry->second;
-            hasDir = true;
-        }
-    }
-    if (hasDir)
-    {
-        return FetchImportedModuleHelper(nullptr, specifier, dependentModuleRecord, dir.c_str());
-    }
-
-    return FetchImportedModuleHelper(nullptr, specifier, dependentModuleRecord);
-}
-
-// Attributes-capable fetch callbacks (ES2025 import attributes). The engine
-// routes every fetch through these once registered, including requests
-// without attributes (which arrive as undefined).
-JsErrorCode WScriptJsrt::FetchImportedModuleWithAttributes(_In_ JsModuleRecord referencingModule,
-    _In_ JsValueRef specifier, _In_ JsValueRef attributes, _Outptr_result_maybenull_ JsModuleRecord* dependentModuleRecord)
-{
-    std::string dir;
-    bool hasDir = false;
-    {
-        HostGlobalsLock lock;
-        auto moduleDirEntry = moduleDirMap.find(referencingModule);
-        if (moduleDirEntry != moduleDirMap.end())
-        {
-            dir = moduleDirEntry->second;
-            hasDir = true;
-        }
-    }
-    if (hasDir)
-    {
-        return FetchImportedModuleHelperWithAttributes(referencingModule, specifier, attributes, dependentModuleRecord, dir.c_str());
-    }
-
-    return FetchImportedModuleHelperWithAttributes(referencingModule, specifier, attributes, dependentModuleRecord);
-}
-
-JsErrorCode WScriptJsrt::FetchImportedModuleFromScriptWithAttributes(_In_ JsSourceContext dwReferencingSourceContext,
-    _In_ JsValueRef specifier, _In_ JsValueRef attributes, _Outptr_result_maybenull_ JsModuleRecord* dependentModuleRecord)
-{
-    // Same script-relative resolution as FetchImportedModuleFromScript above.
-    std::string dir;
-    bool hasDir = false;
-    {
-        HostGlobalsLock lock;
-        auto scriptDirEntry = scriptDirMap.find(static_cast<DWORD_PTR>(dwReferencingSourceContext));
-        if (scriptDirEntry != scriptDirMap.end())
-        {
-            dir = scriptDirEntry->second;
-            hasDir = true;
-        }
-    }
-    if (hasDir)
-    {
-        return FetchImportedModuleHelperWithAttributes(nullptr, specifier, attributes, dependentModuleRecord, dir.c_str());
-    }
-
-    return FetchImportedModuleHelperWithAttributes(nullptr, specifier, attributes, dependentModuleRecord);
-}
-
-// Callback from chakraCore when the module resolution is finished, either successfully or unsuccessfully.
-JsErrorCode WScriptJsrt::NotifyModuleReadyCallback(_In_opt_ JsModuleRecord referencingModule, _In_opt_ JsValueRef exceptionVar)
-{
-    if (exceptionVar != nullptr)
-    {
-        // The engine finished resolving this module graph unsuccessfully
-        // (link/instantiation error before any module-body evaluation —
-        // e.g. an unresolvable import/export). Witness the resolution
-        // stage for the negative-phase marker.
-        NoteModuleGraphFailure();
-
-        if (HostConfigFlags::flags.TraceHostCallbackIsEnabled)
-        {
-            JsValueRef specifier = JS_INVALID_REFERENCE;
-            ChakraRTInterface::JsGetModuleHostInfo(referencingModule, JsModuleHostInfo_Url, &specifier);
-            AutoString fileName;
-            if (specifier != JS_INVALID_REFERENCE)
-            {
-                fileName.Initialize(specifier);
-            }
-            wprintf(_u("NotifyModuleReadyCallback(exception) %S\n"), fileName.GetString());
-        }
-    }
-
-    bool errored;
-    {
-        HostGlobalsLock lock;
-        errored = (moduleErrMap[referencingModule] == ErroredModule);
-    }
-    if (!errored)
-    {
-        WScriptJsrt::ModuleMessage* moduleMessage =
-            WScriptJsrt::ModuleMessage::Create(referencingModule, nullptr);
-        if (moduleMessage == nullptr)
-        {
-            return JsErrorOutOfMemory;
-        }
-        WScriptJsrt::PushMessage(moduleMessage);
-    }
-    return JsNoError;
-}
-
-JsErrorCode __stdcall WScriptJsrt::InitializeImportMetaCallback(_In_opt_ JsModuleRecord referencingModule, _In_opt_ JsValueRef importMetaVar)
-{
-    if (importMetaVar != nullptr)
-    {
-        JsValueRef specifier = JS_INVALID_REFERENCE;
-        ChakraRTInterface::JsGetModuleHostInfo(referencingModule, JsModuleHostInfo_Url, &specifier);
-
-        JsPropertyIdRef urlPropId;
-        if (JsNoError == CreatePropertyIdFromString("url", &urlPropId))
-        {
-            ChakraRTInterface::JsSetProperty(importMetaVar, urlPropId, specifier, false);
-        }
-    }
-
-    return JsNoError;
-}
-
 void WScriptJsrt::PromiseContinuationCallback(JsValueRef task, void *callbackState)
 {
     Assert(task != JS_INVALID_REFERENCE);
     Assert(callbackState != JS_INVALID_REFERENCE);
-    MessageQueue * messageQueue = (MessageQueue *)callbackState;
+    MessageQueue * targetQueue = (MessageQueue *)callbackState;
 
-    // The task is a microtask: it must run before any pending timer
-    // message (InsertSorted(.., immediate=true) pins its due time ahead of
-    // every timed entry), matching the ES host contract that continuations
-    // queued by a completed callback drain before the next macrotask.
-    // The CallbackMessage ctor AddRefs the task so it stays rooted across
-    // GCs while queued; the dtor releases it after the call.
-    WScriptJsrt::CallbackMessage *msg = new WScriptJsrt::CallbackMessage(0, task);
-    messageQueue->InsertSorted(msg, /*immediate*/ true);
+    WScriptJsrt::CallbackMessage *msg = new (std::nothrow) WScriptJsrt::CallbackMessage(0, task);
+    if (msg == nullptr || !msg->HasValidRef())
+    {
+        fwprintf(stderr, _u("WARNING: failed to retain promise continuation task (err=0x%x)\n"),
+            msg ? msg->GetAddRefError() : JsErrorOutOfMemory);
+        delete msg;
+        return;
+    }
+    targetQueue->InsertSorted(msg, /*immediate*/ true);
 }
 
 void WScriptJsrt::TimerContinuationCallback(JsValueRef task, unsigned int delayMilliseconds, void *callbackState)
 {
     Assert(task != JS_INVALID_REFERENCE);
     Assert(callbackState != JS_INVALID_REFERENCE);
-    MessageQueue * messageQueue = (MessageQueue *)callbackState;
+    MessageQueue * targetQueue = (MessageQueue *)callbackState;
 
-    // Exactly the WScript.SetTimeout mechanism: the CallbackMessage
-    // constructor AddRefs the delayed task and its destructor releases it
-    // after the call or on queue teardown. InsertSorted stamps the absolute
-    // due time (now + delay, 64-bit), and ProcessAll drains the queue on the
-    // thread that ran the script, so a task never runs off the script thread
-    // and runs no earlier than requested within host clock/sleep granularity
-    // (a measured few-ms early fire remains: the ms-truncated tick source and
-    // the single CLOCK_REALTIME-served Sleep can wake just before the
-    // monotonic deadline; see MessageQueue.h).
-    //
-    // Review note (S6d): a delayed task is a one-shot with no cancellation
-    // handle. A notify that settles the waiter does NOT remove its host task
-    // from this queue — the stale task is a no-op when it finally runs, but
-    // ProcessAll still sleeps until its due time, so a queued far-future
-    // task (up to UINT32_MAX ms) delays process exit at shutdown. Hosts that
-    // need prompt shutdown require a future cancellation-handle extension to
-    // JsSetTimerContinuationCallback's task API; ch deliberately does not
-    // fake cancellation.
-    WScriptJsrt::CallbackMessage *msg = new WScriptJsrt::CallbackMessage(delayMilliseconds, task);
-    messageQueue->InsertSorted(msg);
+    WScriptJsrt::CallbackMessage *msg = new (std::nothrow) WScriptJsrt::CallbackMessage(delayMilliseconds, task);
+    if (msg == nullptr || !msg->HasValidRef())
+    {
+        fwprintf(stderr, _u("WARNING: failed to retain timer continuation task (err=0x%x)\n"),
+            msg ? msg->GetAddRefError() : JsErrorOutOfMemory);
+        delete msg;
+        return;
+    }
+    targetQueue->InsertSorted(msg);
 }
 
 void WScriptJsrt::PromiseRejectionTrackerCallback(JsValueRef promise, JsValueRef reason, bool handled, void *callbackState)
@@ -3165,7 +1582,7 @@ void WScriptJsrt::PromiseRejectionTrackerCallback(JsValueRef promise, JsValueRef
         wprintf(_u("Promise rejection handled\n"));
     }
 
-    JsPropertyIdRef stackPropertyID; 
+    JsPropertyIdRef stackPropertyID;
     JsErrorCode error = ChakraRTInterface::JsCreatePropertyId("stack", strlen("stack"), &stackPropertyID);
     if (error == JsNoError)
     {
@@ -3182,10 +1599,9 @@ void WScriptJsrt::PromiseRejectionTrackerCallback(JsValueRef promise, JsValueRef
             }
         }
     }
-    
+
     if (error != JsNoError)
     {
-        // weren't able to print stack, so just convert reason to a string
         JsValueRef strValue;
         error = ChakraRTInterface::JsConvertValueToString(reason, &strValue);
         if (error == JsNoError)
@@ -3197,4 +1613,3 @@ void WScriptJsrt::PromiseRejectionTrackerCallback(JsValueRef promise, JsValueRef
 
     fflush(stdout);
 }
-
