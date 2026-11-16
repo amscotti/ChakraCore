@@ -346,11 +346,11 @@ private:
 
 // Static tables that will be used by the GetArray* methods below
 private:
-    static const VTableValue VtableAddresses[static_cast<ValueType::TSize>(ObjectType::Count)];
-    static const uint32 OffsetsOfHeadSegment[static_cast<ValueType::TSize>(ObjectType::Count)];
-    static const uint32 OffsetsOfLength[static_cast<ValueType::TSize>(ObjectType::Count)];
-    static const IRType IndirTypes[static_cast<ValueType::TSize>(ObjectType::Count)];
-    static const BYTE IndirScales[static_cast<ValueType::TSize>(ObjectType::Count)];
+    static const VTableValue VtableAddresses[];
+    static const uint32 OffsetsOfHeadSegment[];
+    static const uint32 OffsetsOfLength[];
+    static const IRType IndirTypes[];
+    static const BYTE IndirScales[];
 
 private:
     static VTableValue GetArrayVtableAddress(const ValueType valueType, bool getVirtual = false);
@@ -738,6 +738,7 @@ private:
     IR::Opnd *          LoadScriptContextValueOpnd(IR::Instr * instr, ScriptContextValue valueType);
     IR::Opnd *          LoadLibraryValueOpnd(IR::Instr * instr, LibraryValue valueType);
     IR::Opnd *          LoadVTableValueOpnd(IR::Instr * instr, VTableValue vtableType);
+    IR::RegOpnd *       LoadTypedArrayLength(IR::RegOpnd *arrayOpnd, ValueType arrayValueType, IR::RegOpnd *lengthDstOpnd, IR::Instr *insertBeforeInstr);
     IR::Opnd *          LoadOptimizationOverridesValueOpnd(IR::Instr *instr, OptimizationOverridesValue valueType);
     IR::Opnd *          LoadNumberAllocatorValueOpnd(IR::Instr *instr, NumberAllocatorValue valueType);
     IR::Opnd *          LoadIsInstInlineCacheOpnd(IR::Instr *instr, uint inlineCacheIndex);

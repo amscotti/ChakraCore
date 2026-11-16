@@ -7,6 +7,7 @@
 //----------------------------------------------------------------------------
 
 #pragma once
+#include <atomic>
 namespace Js
 {
 
@@ -278,13 +279,21 @@ namespace Js
 
     template <> bool VarIsImpl<AtomicsWaitAsyncMonitorTaskFunction>(RecyclableObject* obj);
 
+    // Cross-runtime shared backing metadata for SharedArrayBuffer.
+    // Allocation domain: native C++ heap (HeapNew, untraced by Recycler).
+    // Ownership: intrusive refCount shared across all runtime
+    // SharedArrayBuffer wrappers; released in Finalize(), freed when
+    // refCount reaches 0. Thread contract: csGrow serializes Grow/GrowMemory
+    // backing zero-fill/commit with release-store to bufferLength; concurrent
+    // readers across runtimes load bufferLength with memory_order_acquire.
     class SharedContents
     {
     public:
         BYTE  *buffer;             // Points to a heap allocated RGBA buffer, can be null
         IndexToWaitersMap *indexToWaiterList;  // Map of agents waiting on a particular index.
-        uint32 bufferLength;       // Current [[ArrayBufferByteLength]]; growable buffers update this
+        std::atomic<uint32> bufferLength;       // Current [[ArrayBufferByteLength]]; growable buffers update this atomically
         uint32 maxBufferLength = 0; // Maximum number of bytes: growable limit or WebAssembly maximum
+        CriticalSection csGrow;    // Serializes backing zeroing/commit and bufferLength publication on Grow/GrowMemory
         bool isWebAssembly = false;
         bool isGrowable = false;   // Growable (ES2024) JS SharedArrayBuffer; capacity is maxBufferLength
 
@@ -315,7 +324,13 @@ namespace Js
         bool IsWebAssembly() const { return isWebAssembly; }
         void SetIsWebAssembly() { isWebAssembly = true; }
         static int GetBufferOffset() { return offsetof(SharedContents, buffer); }
-        static int GetBufferLengthOffset() { return offsetof(SharedContents, bufferLength); }
+        static int GetBufferLengthOffset()
+        {
+            CompileAssert(sizeof(std::atomic<uint32>) == sizeof(uint32));
+            CompileAssert(alignof(std::atomic<uint32>) == alignof(uint32));
+            static_assert(std::atomic<uint32>::is_always_lock_free, "SharedContents::bufferLength must be lock-free for JIT acquire loads");
+            return offsetof(SharedContents, bufferLength);
+        }
 
 #if DBG
         // This is mainly used for validation purpose as the wait/wake APIs should be used on the agents (Workers) among which this buffer is shared.
@@ -380,9 +395,9 @@ namespace Js
             {
                 return 0;
             }
-            return sharedContents->isGrowable ? sharedContents->maxBufferLength : sharedContents->bufferLength;
+            return sharedContents->isGrowable ? sharedContents->maxBufferLength : sharedContents->bufferLength.load(std::memory_order_acquire);
         }
-        void Grow(uint32 newByteLength);
+        bool Grow(uint32 newByteLength);
 
         static int GetByteLengthOffset() { Assert(false); return 0; }
         static int GetBufferOffset() { Assert(false); return 0; }

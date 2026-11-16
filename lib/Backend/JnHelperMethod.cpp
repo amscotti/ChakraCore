@@ -390,6 +390,9 @@ const char16 *GetVtableName(VTableValue value)
     case VtableUint64Array:
         return _u("vtable Uint64Array");
         break;
+    case VtableFloat16Array:
+        return _u("vtable Float16Array");
+        break;
     case VtableInt8VirtualArray:
         return _u("vtable Int8VirtualArray");
         break;

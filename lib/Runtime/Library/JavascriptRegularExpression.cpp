@@ -650,7 +650,14 @@ using namespace Js;
 
         thisRegularExpression->SetPattern(pattern);
         thisRegularExpression->SetSplitPattern(splitPattern);
-        thisRegularExpression->SetLastIndex(0);
+        if (!thisRegularExpression->IsWritable(PropertyIds::lastIndex))
+        {
+            SetLastIndexProperty(thisRegularExpression, TaggedInt::ToVarUnchecked(0), scriptContext);
+        }
+        else
+        {
+            thisRegularExpression->SetLastIndex(0);
+        }
         return thisRegularExpression;
     }
 
@@ -1624,7 +1631,7 @@ using namespace Js;
         switch (propertyId)
         {
         case PropertyIds::lastIndex:
-            if (scriptConfig->IsES6RegExSymbolsEnabled() && this->lastIndexNonWritable)
+            if (this->lastIndexNonWritable)
             {
                 if (!JavascriptError::ThrowCantAssign(flags, this->GetScriptContext(), PropertyIds::lastIndex))
                 {
@@ -1659,6 +1666,19 @@ using namespace Js;
     BOOL JavascriptRegExp::InitProperty(PropertyId propertyId, Var value, PropertyOperationFlags flags, PropertyValueInfo* info)
     {
         return SetProperty(propertyId, value, flags, info);
+    }
+
+    BOOL JavascriptRegExp::SetPropertyWithAttributes(PropertyId propertyId, Var value, PropertyAttributes attributes, PropertyValueInfo* info, PropertyOperationFlags flags, SideEffects possibleSideEffects)
+    {
+        if (propertyId == PropertyIds::lastIndex)
+        {
+            this->lastIndexVar = value;
+            this->lastIndexOrFlag = NotCachedValue;
+            this->lastIndexNonWritable = !(attributes & PropertyWritable);
+            PropertyValueInfo::SetNoCache(info, this);
+            return TRUE;
+        }
+        return DynamicObject::SetPropertyWithAttributes(propertyId, value, attributes, info, flags, possibleSideEffects);
     }
 
     BOOL JavascriptRegExp::DeleteProperty(PropertyId propertyId, PropertyOperationFlags propertyOperationFlags)
@@ -1879,12 +1899,9 @@ using namespace Js;
     {
         // "lastIndex" is a virtual own property, so the descriptor machinery
         // cannot store its attributes in a type handler slot. Honor the
-        // writability part of a redefine under ES6RegExSymbols (the flag-on
-        // RegExp symbol algorithms Set "lastIndex" through the observable
-        // [[Set]] and must throw on a non-writable one); everything else keeps
-        // the pre-existing no-op.
-        if (propertyId == PropertyIds::lastIndex
-            && this->GetScriptContext()->GetConfig()->IsES6RegExSymbolsEnabled())
+        // writability part of a redefine unconditionally so non-writable
+        // lastIndex is enforced in both default and ES6RegExSymbols modes.
+        if (propertyId == PropertyIds::lastIndex)
         {
             this->lastIndexNonWritable = !value;
             return TRUE;
@@ -1903,7 +1920,7 @@ using namespace Js;
         switch (propertyId)
         {
         case PropertyIds::lastIndex:
-            return !scriptConfig->IsES6RegExSymbolsEnabled() || !this->lastIndexNonWritable;
+            return !this->lastIndexNonWritable;
         case PropertyIds::global:
         case PropertyIds::multiline:
         case PropertyIds::ignoreCase:

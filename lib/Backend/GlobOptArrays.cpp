@@ -1821,6 +1821,14 @@ void GlobOpt::ArraySrcOpt::Optimize()
         (needsHeadSegmentLength || (!isLikelyJsArray && needsLength)) &&
         !headSegmentLengthIsAvailable;
 
+    if (!isLikelyJsArray && doHeadSegmentLengthLoad)
+    {
+        // Growable SharedArrayBuffer length-tracking views can grow from another
+        // runtime without refreshing cached TypedArrayBase::length; force a
+        // BailOnNotArray guard before hoisting segment length.
+        doArrayChecks = true;
+    }
+
     lengthIsAvailable =
         baseArrayValueInfo &&
         baseArrayValueInfo->LengthSym();

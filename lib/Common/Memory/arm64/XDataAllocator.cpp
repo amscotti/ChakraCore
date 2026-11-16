@@ -171,9 +171,15 @@ void XDataAllocator::Register(XDataAllocation * xdataInfo, ULONG_PTR functionSta
     {
         ::mac_fde_wrapper((const char*)xdataInfo->address, __register_frame);
     }
-#else
+#elif defined(__ELF__) && defined(CHAKRA_ARM64_DWARF_EH_FRAME)
     Assert(ReadHead(xdataInfo->address));  // should be non-empty .eh_frame
-    __REGISTER_FRAME(xdataInfo->address);
+    const void* fdeStart = ChakraEhFrameFdeStart(xdataInfo->address);
+    xdataInfo->registeredFde = fdeStart;
+    __REGISTER_FRAME(fdeStart);
+#else
+    // Non-Apple ELF ARM64 emits Windows .xdata (and DISABLE_JIT builds emit no
+    // native frames), which must not be passed to DWARF __register_frame.
+    (void)xdataInfo;
 #endif
 #endif
 }
@@ -187,9 +193,16 @@ void XDataAllocator::Unregister(XDataAllocation * xdataInfo)
     {
         ::mac_fde_wrapper((const char*)xdataInfo->address, __deregister_frame);
     }
-#else
+#elif defined(__ELF__) && defined(CHAKRA_ARM64_DWARF_EH_FRAME)
     Assert(ReadHead(xdataInfo->address));  // should be non-empty .eh_frame
-    __DEREGISTER_FRAME(xdataInfo->address);
+    const void* fdeStart = xdataInfo->registeredFde;
+    if (fdeStart != nullptr)
+    {
+        __DEREGISTER_FRAME(fdeStart);
+        xdataInfo->registeredFde = nullptr;
+    }
+#else
+    (void)xdataInfo;
 #endif
 #endif
 }

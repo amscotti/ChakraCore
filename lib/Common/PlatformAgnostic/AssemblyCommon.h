@@ -12,29 +12,39 @@
 extern "C" void __register_frame(const void* ehframe);
 extern "C" void __deregister_frame(const void* ehframe);
 
-// LLVM libunwind (linked by Zig's static libc++) implements the Darwin
-// __register_frame contract: the argument is a single FDE pointer. GCC's
-// libgcc instead expects the CIE at the start of a .eh_frame table. Our
-// EmitBuffer/EhFrame buffers are CIE + FDE, so on a libc++ build advance to
-// the FDE; a libstdc++ build keeps the CIE pointer.
+// LLVM libunwind (linked on Darwin and by Zig's static libc++ ELF builds)
+// implements the Darwin single-FDE __register_frame(fde) contract, whereas
+// GNU libgcc_eh expects the CIE at the start of a .eh_frame table. Builds may
+// explicitly define CHAKRA_UNWINDER_SINGLE_FDE (1 = single FDE, 0 = CIE table);
+// otherwise infer it from ELF+libc++/libunwind or Apple Mach-O.
+#ifndef CHAKRA_UNWINDER_SINGLE_FDE
+#if defined(__APPLE__) || defined(__LLVM_LIBUNWIND__) || (defined(__ELF__) && defined(_LIBCPP_VERSION))
+#define CHAKRA_UNWINDER_SINGLE_FDE 1
+#else
+#define CHAKRA_UNWINDER_SINGLE_FDE 0
+#endif
+#endif
+
+// Advance past a leading DWARF .eh_frame CIE to its single FDE when targeting
+// an ELF single-FDE unwinder. On __APPLE__ Mach-O, mac_fde_wrapper already
+// performs the CIE-to-FDE walk from the CIE pointer, so return ehframe as-is.
 inline const void* ChakraEhFrameFdeStart(const void* ehframe)
 {
-#if defined(_LIBCPP_VERSION) && !defined(__APPLE__) && (defined(_M_X64) || defined(__x86_64__))
+#if !defined(__APPLE__) && defined(__ELF__) && CHAKRA_UNWINDER_SINGLE_FDE
     const unsigned char* bytes = static_cast<const unsigned char*>(ehframe);
-    // DWARF frame entry: 4-byte little-endian length (excluding itself),
-    // followed by the CIE id. 64-bit .eh_frame is not emitted here; the
-    // 0xffffffff escape would make the skip below wrong, so fail loudly
-    // in debug builds.
+    // DWARF .eh_frame CIE header: 4-byte little-endian length (excluding
+    // itself), followed by 4-byte CIE_id == 0. Reject 0xffffffff escapes,
+    // non-CIE records (cieId != 0), and lengths outside XDATA_SIZE bounds so
+    // non-CIE/malformed inputs return ehframe untouched.
     uint32_t cieLength = static_cast<uint32_t>(bytes[0])
         | (static_cast<uint32_t>(bytes[1]) << 8)
         | (static_cast<uint32_t>(bytes[2]) << 16)
         | (static_cast<uint32_t>(bytes[3]) << 24);
-    // A CIE length outside this range cannot describe the CIE+FDE buffers we
-    // hand to __register_frame (XDATA_SIZE is 0x80). Do not derive a pointer
-    // past the buffer and do not abort the process on malformed input: fall
-    // back to the raw pointer so the caller's registration is at least
-    // bounded to the object it owns.
-    if (cieLength < 4 || cieLength > 0x100)
+    uint32_t cieId = static_cast<uint32_t>(bytes[4])
+        | (static_cast<uint32_t>(bytes[5]) << 8)
+        | (static_cast<uint32_t>(bytes[6]) << 16)
+        | (static_cast<uint32_t>(bytes[7]) << 24);
+    if (cieId != 0 || cieLength < 4 || cieLength > 0x100)
     {
         return ehframe;
     }
@@ -59,7 +69,9 @@ void mac_fde_wrapper(const char *dataStart, mac_fde_reg_op reg_op);
 #define __REGISTER_FRAME(addr) __register_frame(addr)
 #define __DEREGISTER_FRAME(addr) __deregister_frame(addr)
 #endif // __APPLE__
-#elif defined(_M_ARM64) // _AMD64_ && !DISABLE_JIT
+#elif defined(_M_ARM64) && !defined(DISABLE_JIT) && (defined(__APPLE__) || defined(CHAKRA_ARM64_DWARF_EH_FRAME))
+// Only Darwin Mach-O (and builds explicitly emitting ARM64 DWARF .eh_frame)
+// register DWARF unwind records; ELF ARM64 currently emits Windows .xdata.
 #define __REGISTER_FRAME(addr) __register_frame(addr)
 #define __DEREGISTER_FRAME(addr) __deregister_frame(addr)
 #else

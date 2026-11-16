@@ -94,8 +94,13 @@ void XDataAllocator::Register(XDataAllocation * xdataInfo, DWORD functionStart, 
     }
 
 #else  // !_WIN32
+#if defined(__ELF__) && defined(CHAKRA_ARM_DWARF_EH_FRAME)
     Assert(ReadHead(xdataInfo->address));  // should be non-empty .eh_frame
-    __REGISTER_FRAME(xdataInfo->address);
+    __REGISTER_FRAME(ChakraEhFrameFdeStart(xdataInfo->address));
+#else
+    // ARM32 Unix emits Windows .xdata rather than DWARF .eh_frame tables.
+    (void)xdataInfo;
+#endif
 #endif
 }
 
@@ -103,8 +108,12 @@ void XDataAllocator::Register(XDataAllocation * xdataInfo, DWORD functionStart, 
 void XDataAllocator::Unregister(XDataAllocation * xdataInfo)
 {
 #ifndef _WIN32
+#if defined(__ELF__) && defined(CHAKRA_ARM_DWARF_EH_FRAME)
     Assert(ReadHead(xdataInfo->address));  // should be non-empty .eh_frame
-    __DEREGISTER_FRAME(xdataInfo->address);
+    __DEREGISTER_FRAME(ChakraEhFrameFdeStart(xdataInfo->address));
+#else
+    (void)xdataInfo;
+#endif
 #endif
 }
 

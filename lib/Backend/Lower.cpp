@@ -13438,8 +13438,23 @@ IR::RegOpnd *Lowerer::LowerBailOnNotArray(IR::Instr *const instr)
     instr->InsertAfter(skipBailOutLabel);
 
     // Do the array tests and jump to bailOutLabel if it's not an array. Fall through if it is an array.
+    IR::RegOpnd *const srcOpnd = instr->UnlinkSrc1()->AsRegOpnd();
+    const ValueType srcValueType = srcOpnd->GetValueType();
     IR::RegOpnd *const arrayOpnd =
-        GenerateArrayTest(instr->UnlinkSrc1()->AsRegOpnd(), bailOutLabel, bailOutLabel, bailOutLabel, true);
+        GenerateArrayTest(srcOpnd, bailOutLabel, bailOutLabel, bailOutLabel, true);
+
+    if (srcValueType.IsLikelyTypedArray() && !srcValueType.IsLikelyOptimizedVirtualTypedArray())
+    {
+        // Bail out if the view tracks a SharedArrayBuffer length live so
+        // segment-length hoisting is disabled and each access loads the live
+        // atomic bufferLength.
+        InsertCompareBranch(
+            IR::IndirOpnd::New(arrayOpnd, Js::TypedArrayBase::GetOffsetOfTracksSharedLength(), TyInt8, func),
+            IR::IntConstOpnd::New(0, TyInt8, func, true),
+            Js::OpCode::BrNeq_A,
+            bailOutLabel,
+            bailOutLabel);
+    }
 
     // Skip bail-out when it is an array
     InsertBranch(Js::OpCode::Br, skipBailOutLabel, bailOutLabel);
@@ -15141,7 +15156,7 @@ void Lowerer::GenerateObjectTypeTest(IR::RegOpnd *srcReg, IR::Instr *instrInsert
     InsertObjectPoison(srcReg, branchInstr, instrInsert, false);
 }
 
-const VTableValue Lowerer::VtableAddresses[static_cast<ValueType::TSize>(ObjectType::Count)] =
+const VTableValue Lowerer::VtableAddresses[] =
 {
     /* ObjectType::UninitializedObject      */ VTableValue::VtableInvalid,
     /* ObjectType::Object                   */ VTableValue::VtableInvalid,
@@ -15177,12 +15192,12 @@ const VTableValue Lowerer::VtableAddresses[static_cast<ValueType::TSize>(ObjectT
     /* ObjectType::Float64MixedArray        */ VTableValue::VtableFloat64Array,
     /* ObjectType::Int64Array               */ VTableValue::VtableInt64Array,
     /* ObjectType::Uint64Array              */ VTableValue::VtableUint64Array,
+    /* ObjectType::Float16Array             */ VTableValue::VtableFloat16Array,
     /* ObjectType::BoolArray                */ VTableValue::VtableBoolArray,
     /* ObjectType::CharArray                */ VTableValue::VtableCharArray
-
 };
 
-const uint32 Lowerer::OffsetsOfHeadSegment[static_cast<ValueType::TSize>(ObjectType::Count)] =
+const uint32 Lowerer::OffsetsOfHeadSegment[] =
 {
     /* ObjectType::UninitializedObject        */ static_cast<uint32>(-1),
     /* ObjectType::Object                     */ static_cast<uint32>(-1),
@@ -15218,11 +15233,12 @@ const uint32 Lowerer::OffsetsOfHeadSegment[static_cast<ValueType::TSize>(ObjectT
     /* ObjectType::Float64MixedArray          */ Js::Float64Array::GetOffsetOfBuffer(),
     /* ObjectType::Int64Array                 */ Js::Int64Array::GetOffsetOfBuffer(),
     /* ObjectType::Uint64Array                */ Js::Uint64Array::GetOffsetOfBuffer(),
+    /* ObjectType::Float16Array               */ Js::Float16Array::GetOffsetOfBuffer(),
     /* ObjectType::BoolArray                  */ Js::BoolArray::GetOffsetOfBuffer(),
     /* ObjectType::CharArray                  */ Js::CharArray::GetOffsetOfBuffer()
 };
 
-const uint32 Lowerer::OffsetsOfLength[static_cast<ValueType::TSize>(ObjectType::Count)] =
+const uint32 Lowerer::OffsetsOfLength[] =
 {
     /* ObjectType::UninitializedObject      */ static_cast<uint32>(-1),
     /* ObjectType::Object                   */ static_cast<uint32>(-1),
@@ -15258,11 +15274,12 @@ const uint32 Lowerer::OffsetsOfLength[static_cast<ValueType::TSize>(ObjectType::
     /* ObjectType::Float64MixedArray        */ Js::Float64Array::GetOffsetOfLength(),
     /* ObjectType::Int64Array               */ Js::Int64Array::GetOffsetOfLength(),
     /* ObjectType::Uint64Array              */ Js::Uint64Array::GetOffsetOfLength(),
+    /* ObjectType::Float16Array             */ Js::Float16Array::GetOffsetOfLength(),
     /* ObjectType::BoolArray                */ Js::BoolArray::GetOffsetOfLength(),
     /* ObjectType::CharArray                */ Js::CharArray::GetOffsetOfLength()
 };
 
-const IRType Lowerer::IndirTypes[static_cast<ValueType::TSize>(ObjectType::Count)] =
+const IRType Lowerer::IndirTypes[] =
 {
     /* ObjectType::UninitializedObject      */ TyIllegal,
     /* ObjectType::Object                   */ TyIllegal,
@@ -15298,11 +15315,12 @@ const IRType Lowerer::IndirTypes[static_cast<ValueType::TSize>(ObjectType::Count
     /* ObjectType::Float64MixedArray        */ TyFloat64,
     /* ObjectType::Int64Array               */ TyInt64,
     /* ObjectType::Uint64Array              */ TyUint64,
+    /* ObjectType::Float16Array             */ TyUint16,
     /* ObjectType::BoolArray                */ TyUint8,
     /* ObjectType::CharArray                */ TyUint16
 };
 
-const BYTE Lowerer::IndirScales[static_cast<ValueType::TSize>(ObjectType::Count)] =
+const BYTE Lowerer::IndirScales[] =
 {
     /* ObjectType::UninitializedObject      */ static_cast<BYTE>(-1),
     /* ObjectType::Object                   */ static_cast<BYTE>(-1),
@@ -15338,12 +15356,18 @@ const BYTE Lowerer::IndirScales[static_cast<ValueType::TSize>(ObjectType::Count)
     /* ObjectType::Float64MixedArray        */ 3, // log2(sizeof(double))
     /* ObjectType::Int64Array               */ 3, // log2(sizeof(int64))
     /* ObjectType::Uint64Array              */ 3, // log2(sizeof(uint64))
+    /* ObjectType::Float16Array             */ 1, // log2(sizeof(uint16))
     /* ObjectType::BoolArray                */ 0, // log2(sizeof(bool))
     /* ObjectType::CharArray                */ 1  // log2(sizeof(char16))
 };
 
 VTableValue Lowerer::GetArrayVtableAddress(const ValueType valueType, bool getVirtual)
 {
+    CompileAssert(_countof(Lowerer::VtableAddresses) == static_cast<size_t>(ObjectType::Count));
+    CompileAssert(_countof(Lowerer::OffsetsOfHeadSegment) == static_cast<size_t>(ObjectType::Count));
+    CompileAssert(_countof(Lowerer::OffsetsOfLength) == static_cast<size_t>(ObjectType::Count));
+    CompileAssert(_countof(Lowerer::IndirTypes) == static_cast<size_t>(ObjectType::Count));
+    CompileAssert(_countof(Lowerer::IndirScales) == static_cast<size_t>(ObjectType::Count));
     Assert(valueType.IsLikelyAnyOptimizedArray());
     if(valueType.IsLikelyArrayOrObjectWithArray())
     {
@@ -15373,6 +15397,100 @@ uint32 Lowerer::GetArrayOffsetOfLength(const ValueType valueType)
 {
     Assert(valueType.IsLikelyAnyOptimizedArray());
     return OffsetsOfLength[static_cast<ValueType::TSize>(valueType.GetObjectType())];
+}
+
+IR::RegOpnd *Lowerer::LoadTypedArrayLength(
+    IR::RegOpnd *arrayOpnd,
+    ValueType arrayValueType,
+    IR::RegOpnd *lengthDstOpnd,
+    IR::Instr *insertBeforeInstr)
+{
+    Assert(arrayValueType.IsLikelyTypedArray());
+    Assert(!arrayValueType.IsLikelyOptimizedVirtualTypedArray());
+    Assert(lengthDstOpnd->GetType() == TyUint32);
+
+    IR::LabelInstr *const labelShared = IR::LabelInstr::New(Js::OpCode::Label, m_func);
+    IR::LabelInstr *const labelDone = IR::LabelInstr::New(Js::OpCode::Label, m_func);
+
+    // Fast path: non-shared or fixed-length views read cached effective length.
+    InsertCompareBranch(
+        IR::IndirOpnd::New(arrayOpnd, Js::TypedArrayBase::GetOffsetOfTracksSharedLength(), TyInt8, m_func),
+        IR::IntConstOpnd::New(0, TyInt8, m_func, true),
+        Js::OpCode::BrNeq_A,
+        labelShared,
+        insertBeforeInstr);
+
+    InsertMove(
+        lengthDstOpnd,
+        IR::IndirOpnd::New(arrayOpnd, GetArrayOffsetOfLength(arrayValueType), TyUint32, m_func),
+        insertBeforeInstr);
+    InsertBranch(Js::OpCode::Br, labelDone, insertBeforeInstr);
+
+    // Cross-runtime GSAB length-tracking path: acquire-load SharedContents::bufferLength
+    // and compute (bufferLength >= byteOffset) ? (bufferLength - byteOffset) >> elemShift : 0.
+    insertBeforeInstr->InsertBefore(labelShared);
+
+    IR::RegOpnd *const arrayBufferOpnd = IR::RegOpnd::New(TyMachPtr, m_func);
+    const IR::AutoReuseOpnd autoReuseArrayBufferOpnd(arrayBufferOpnd, m_func);
+    InsertMove(
+        arrayBufferOpnd,
+        IR::IndirOpnd::New(arrayOpnd, Js::ArrayBufferParent::GetOffsetOfArrayBuffer(), TyMachPtr, m_func),
+        insertBeforeInstr);
+
+    IR::RegOpnd *const sharedContentsOpnd = IR::RegOpnd::New(TyMachPtr, m_func);
+    const IR::AutoReuseOpnd autoReuseSharedContentsOpnd(sharedContentsOpnd, m_func);
+    InsertMove(
+        sharedContentsOpnd,
+        IR::IndirOpnd::New(arrayBufferOpnd, Js::SharedArrayBuffer::GetSharedContentsOffset(), TyMachPtr, m_func),
+        insertBeforeInstr);
+
+    IR::RegOpnd *const sharedByteLenOpnd = IR::RegOpnd::New(TyUint32, m_func);
+    const IR::AutoReuseOpnd autoReuseSharedByteLenOpnd(sharedByteLenOpnd, m_func);
+#if defined(_M_ARM64)
+    IR::RegOpnd *const lenAddrOpnd = IR::RegOpnd::New(TyMachPtr, m_func);
+    const IR::AutoReuseOpnd autoReuseLenAddrOpnd(lenAddrOpnd, m_func);
+    InsertLea(
+        lenAddrOpnd,
+        IR::IndirOpnd::New(sharedContentsOpnd, Js::SharedContents::GetBufferLengthOffset(), TyUint32, m_func),
+        insertBeforeInstr);
+    insertBeforeInstr->InsertBefore(
+        IR::Instr::New(Js::OpCode::LDAR, sharedByteLenOpnd, IR::IndirOpnd::New(lenAddrOpnd, 0, TyUint32, m_func), m_func));
+#else
+    InsertMove(
+        sharedByteLenOpnd,
+        IR::IndirOpnd::New(sharedContentsOpnd, Js::SharedContents::GetBufferLengthOffset(), TyUint32, m_func),
+        insertBeforeInstr);
+#endif
+
+    IR::RegOpnd *const byteOffsetOpnd = IR::RegOpnd::New(TyUint32, m_func);
+    const IR::AutoReuseOpnd autoReuseByteOffsetOpnd(byteOffsetOpnd, m_func);
+    InsertMove(
+        byteOffsetOpnd,
+        IR::IndirOpnd::New(arrayOpnd, Js::TypedArrayBase::GetOffsetOfByteOffset(), TyUint32, m_func),
+        insertBeforeInstr);
+
+    IR::LabelInstr *const labelZero = IR::LabelInstr::New(Js::OpCode::Label, m_func);
+    InsertCompareBranch(
+        sharedByteLenOpnd,
+        byteOffsetOpnd,
+        Js::OpCode::BrLt_A,
+        true /* isUnsigned */,
+        labelZero,
+        insertBeforeInstr);
+
+    InsertSub(false, lengthDstOpnd, sharedByteLenOpnd, byteOffsetOpnd, insertBeforeInstr);
+    const BYTE elemShift = GetArrayIndirScale(arrayValueType);
+    if (elemShift != 0)
+    {
+        InsertShift(Js::OpCode::ShrU_A, false, lengthDstOpnd, lengthDstOpnd, IR::IntConstOpnd::New(elemShift, TyInt8, m_func, true), insertBeforeInstr);
+    }
+    InsertBranch(Js::OpCode::Br, labelDone, insertBeforeInstr);
+
+    insertBeforeInstr->InsertBefore(labelZero);
+    InsertMove(lengthDstOpnd, IR::IntConstOpnd::New(0, TyUint32, m_func), insertBeforeInstr);
+
+    insertBeforeInstr->InsertBefore(labelDone);
+    return lengthDstOpnd;
 }
 
 IRType Lowerer::GetArrayIndirType(const ValueType valueType)
@@ -17306,10 +17424,19 @@ Lowerer::GenerateFastElemIIntIndexCommon(
         {
             if(!headSegmentLengthOpnd)
             {
-                // (headSegmentLength = [base + offset(length)])
-                int lengthOffset;
-                lengthOffset = Js::Float64Array::GetOffsetOfLength();
-                headSegmentLengthOpnd = IR::IndirOpnd::New(arrayOpnd, lengthOffset, TyUint32, m_func);
+                IR::RegOpnd *const typedArrayLengthOpnd = IR::RegOpnd::New(TyUint32, m_func);
+                if (!baseValueType.IsLikelyOptimizedVirtualTypedArray())
+                {
+                    LoadTypedArrayLength(arrayOpnd, baseValueType, typedArrayLengthOpnd, instr);
+                }
+                else
+                {
+                    InsertMove(
+                        typedArrayLengthOpnd,
+                        IR::IndirOpnd::New(arrayOpnd, Js::Float64Array::GetOffsetOfLength(), TyUint32, m_func),
+                        instr);
+                }
+                headSegmentLengthOpnd = typedArrayLengthOpnd;
                 autoReuseHeadSegmentLengthOpnd.Initialize(headSegmentLengthOpnd, m_func);
             }
 
@@ -18099,9 +18226,9 @@ Lowerer::GenerateFastElemIIntIndexCommon(
         {
             if (baseValueType.IsLikelyTypedArray())
             {
-                int lengthOffset;
-                lengthOffset = GetArrayOffsetOfLength(baseValueType);
-                headSegmentLengthOpnd = IR::IndirOpnd::New(arrayOpnd, lengthOffset, TyUint32, m_func);
+                IR::RegOpnd *const typedArrayLengthOpnd = IR::RegOpnd::New(TyUint32, m_func);
+                LoadTypedArrayLength(arrayOpnd, baseValueType, typedArrayLengthOpnd, instr);
+                headSegmentLengthOpnd = typedArrayLengthOpnd;
                 autoReuseHeadSegmentLengthOpnd.Initialize(headSegmentLengthOpnd, m_func);
             }
             else
@@ -19830,8 +19957,15 @@ Lowerer::GenerateFastLdLen(IR::Instr *ldLen, bool *instrIsInHelperBlockRef)
             {
                 //     MOV length, [array + offset(length)]     -- Load array length
                 EnsureLengthOpnd();
-                IR::IndirOpnd *const indirOpnd = IR::IndirOpnd::New(arrayOpnd, arrayOffsetOfLength, TyUint32, this->m_func);
-                InsertMove(lengthOpnd, indirOpnd, ldLen);
+                if (srcValueType.IsLikelyTypedArray() && !srcValueType.IsLikelyOptimizedVirtualTypedArray())
+                {
+                    LoadTypedArrayLength(arrayOpnd, srcValueType, lengthOpnd, ldLen);
+                }
+                else
+                {
+                    IR::IndirOpnd *const indirOpnd = IR::IndirOpnd::New(arrayOpnd, arrayOffsetOfLength, TyUint32, this->m_func);
+                    InsertMove(lengthOpnd, indirOpnd, ldLen);
+                }
             }
         }
 
@@ -20945,6 +21079,16 @@ Lowerer::GenerateFastInlineRegExpExec(IR::Instr * instr)
         InsertTestBranch(
             IR::IndirOpnd::New(opndProgram, offsetof(UnifiedRegex::Program, flags), TyUint8, m_func),
             IR::IntConstOpnd::New(UnifiedRegex::GlobalRegexFlag, TyUint8, m_func),
+            Js::OpCode::BrNeq_A,
+            labelFastHelper,
+            instr);
+
+        // Non-writable lastIndex must go through the helper so resetting
+        // lastIndex on no-match (or updating on match) throws TypeError
+        // instead of mutating cached lastIndex fields directly.
+        InsertCompareBranch(
+            IR::IndirOpnd::New(opndRegex->AsRegOpnd(), Js::JavascriptRegExp::GetOffsetOfLastIndexNonWritable(), TyInt8, m_func),
+            IR::IntConstOpnd::New(0, TyInt8, m_func, true),
             Js::OpCode::BrNeq_A,
             labelFastHelper,
             instr);

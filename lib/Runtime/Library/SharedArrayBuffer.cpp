@@ -138,7 +138,7 @@ namespace Js
     {
         Assert(refCount == 0);
         buffer = nullptr;
-        bufferLength = 0;
+        bufferLength.store(0, std::memory_order_release);
 #if DBG
         {
             AutoCriticalSection autoCS(&csAgent);
@@ -366,32 +366,44 @@ namespace Js
             JavascriptError::ThrowRangeError(scriptContext, JSERR_ArrayLengthConstructIncorrect);
         }
 
-        sharedArrayBuffer->Grow(newByteLength);
+        if (!sharedArrayBuffer->Grow(newByteLength))
+        {
+            JavascriptError::ThrowRangeError(scriptContext, JSERR_ArrayLengthConstructIncorrect);
+        }
         return scriptContext->GetLibrary()->GetUndefined();
     }
 
-    void SharedArrayBuffer::Grow(uint32 newByteLength)
+    bool SharedArrayBuffer::Grow(uint32 newByteLength)
     {
         Assert(sharedContents != nullptr);
         Assert(sharedContents->isGrowable);
-        Assert(newByteLength >= sharedContents->bufferLength);
-        Assert(newByteLength <= sharedContents->maxBufferLength);
 
-        uint32 oldByteLength = sharedContents->bufferLength;
+        uint32 oldByteLength = 0;
+        {
+            AutoCriticalSection autoCS(&sharedContents->csGrow);
+            oldByteLength = sharedContents->bufferLength.load(std::memory_order_acquire);
+            if (newByteLength < oldByteLength || newByteLength > sharedContents->maxBufferLength)
+            {
+                return false;
+            }
+            if (newByteLength > oldByteLength)
+            {
+                Assert(sharedContents->buffer != nullptr);
+                // Zero-fill newly exposed backing bytes before release-storing
+                // bufferLength so concurrent acquire readers observe zeroed memory.
+                ZeroMemory(sharedContents->buffer + oldByteLength, newByteLength - oldByteLength);
+                sharedContents->bufferLength.store(newByteLength, std::memory_order_release);
+            }
+        }
+
         if (newByteLength > oldByteLength)
         {
-            Assert(sharedContents->buffer != nullptr);
-            ZeroMemory(sharedContents->buffer + oldByteLength, newByteLength - oldByteLength);
-            sharedContents->bufferLength = newByteLength;
-
             // Views cache their effective length in the ArrayObject length
-            // field (read directly by JIT inline caches and bounds checks);
-            // refresh every live same-runtime view. Views register through
-            // ArrayBufferParent's constructor now that AddParent tracks them
-            // on the shared base. DataView needs no refresh: its getters
-            // compute the length live from GetByteLength().
+            // field; refresh same-runtime views here, while cross-runtime
+            // length-tracking views read SharedContents::bufferLength live.
             RefreshParentsEffectiveLength();
         }
+        return true;
     }
 
     // SharedArrayBuffer.prototype.slice
@@ -613,7 +625,7 @@ namespace Js
     SharedArrayBuffer::SharedArrayBuffer(SharedContents * contents, DynamicType * type) :
         ArrayBufferBase(type), sharedContents(nullptr)
     {
-        if (contents == nullptr || contents->bufferLength > MaxSharedArrayBufferLength)
+        if (contents == nullptr || contents->bufferLength.load(std::memory_order_acquire) > MaxSharedArrayBufferLength)
         {
             JavascriptError::ThrowTypeError(GetScriptContext(), JSERR_FunctionArgument_Invalid);
         }
@@ -667,7 +679,7 @@ namespace Js
 
     uint32 SharedArrayBuffer::GetByteLength() const
     {
-        return sharedContents != nullptr ? sharedContents->bufferLength : 0;
+        return sharedContents != nullptr ? sharedContents->bufferLength.load(std::memory_order_acquire) : 0;
     }
 
     BYTE* SharedArrayBuffer::GetBuffer() const
@@ -799,12 +811,13 @@ namespace Js
         uint ref = sharedContents->Release();
         if (ref == 0)
         {
-            this->FreeBuffer(sharedContents->buffer, sharedContents->bufferLength, sharedContents->maxBufferLength, sharedContents->isGrowable);
+            uint32 currentByteLength = sharedContents->bufferLength.load(std::memory_order_acquire);
+            this->FreeBuffer(sharedContents->buffer, currentByteLength, sharedContents->maxBufferLength, sharedContents->isGrowable);
 
             Recycler* recycler = GetType()->GetLibrary()->GetRecycler();
             // Growable JS buffers are charged for their whole capacity; fixed
             // and WebAssembly buffers keep the current-length accounting.
-            recycler->ReportExternalMemoryFree(sharedContents->isGrowable ? sharedContents->maxBufferLength : sharedContents->bufferLength);
+            recycler->ReportExternalMemoryFree(sharedContents->isGrowable ? sharedContents->maxBufferLength : currentByteLength);
 
             sharedContents->Cleanup();
             HeapDelete(sharedContents);
@@ -840,13 +853,14 @@ namespace Js
             MEMORY_BASIC_INFORMATION info = { 0 };
             size_t size = 0;
             size_t allocationSize = 0;
+            uint32 currentBufferLength = sharedContents->bufferLength.load(std::memory_order_acquire);
             // Make sure the beggining of the buffer is committed memory to the expected size
-            if (sharedContents->bufferLength > 0)
+            if (currentBufferLength > 0)
             {
                 size = VirtualQuery((LPCVOID)sharedContents->buffer, &info, sizeof(info));
                 Assert(size > 0);
                 allocationSize = info.RegionSize + ((uintptr_t)info.BaseAddress - (uintptr_t)info.AllocationBase);
-                Assert(allocationSize == sharedContents->bufferLength && info.State == MEM_COMMIT && info.Type == MEM_PRIVATE);
+                Assert(allocationSize == currentBufferLength && info.State == MEM_COMMIT && info.Type == MEM_PRIVATE);
             }
 
             // Make sure the end of the buffer is reserved memory to the expected size
@@ -858,9 +872,9 @@ namespace Js
             }
 #endif
             // If the whole buffer has been committed, no need to verify this
-            if (expectedAllocationSize > sharedContents->bufferLength)
+            if (expectedAllocationSize > currentBufferLength)
             {
-                size = VirtualQuery((LPCVOID)(sharedContents->buffer + sharedContents->bufferLength), &info, sizeof(info));
+                size = VirtualQuery((LPCVOID)(sharedContents->buffer + currentBufferLength), &info, sizeof(info));
                 Assert(size > 0);
                 allocationSize = info.RegionSize + ((uintptr_t)info.BaseAddress - (uintptr_t)info.AllocationBase);
                 Assert(allocationSize == expectedAllocationSize && info.State == MEM_RESERVE && info.Type == MEM_PRIVATE);
@@ -909,43 +923,47 @@ namespace Js
 
     _Must_inspect_result_ bool WebAssemblySharedArrayBuffer::GrowMemory(uint32 newBufferLength)
     {
-        uint32 bufferLength = sharedContents->bufferLength;
-        BYTE* buffer = sharedContents->buffer;
-        if (newBufferLength < bufferLength || newBufferLength > sharedContents->maxBufferLength)
+        uint32 growSize = 0;
         {
-            AssertMsg(newBufferLength <= sharedContents->maxBufferLength, "This shouldn't happen");
-            Assert(UNREACHED);
-            JavascriptError::ThrowTypeError(GetScriptContext(), WASMERR_BufferGrowOnly);
-        }
-
-        uint32 growSize = newBufferLength - bufferLength;
-
-        // We're not growing the buffer, do nothing
-        if (growSize == 0)
-        {
-            return true;
-        }
-
-        AssertOrFailFast(buffer);
-        if (IsValidVirtualBufferLength(newBufferLength))
-        {
-            auto virtualAllocFunc = [=]
+            AutoCriticalSection autoCS(&sharedContents->csGrow);
+            uint32 bufferLength = sharedContents->bufferLength.load(std::memory_order_acquire);
+            BYTE* buffer = sharedContents->buffer;
+            if (newBufferLength < bufferLength || newBufferLength > sharedContents->maxBufferLength)
             {
-                return !!VirtualAlloc(buffer + bufferLength, growSize, MEM_COMMIT, PAGE_READWRITE);
-            };
-            if (!this->GetRecycler()->DoExternalAllocation(growSize, virtualAllocFunc))
-            {
-                return false;
+                AssertMsg(newBufferLength <= sharedContents->maxBufferLength, "This shouldn't happen");
+                Assert(UNREACHED);
+                JavascriptError::ThrowTypeError(GetScriptContext(), WASMERR_BufferGrowOnly);
             }
 
-            this->GetRecycler()->AddExternalMemoryUsage(growSize);
+            growSize = newBufferLength - bufferLength;
+
+            // We're not growing the buffer, do nothing
+            if (growSize == 0)
+            {
+                return true;
+            }
+
+            AssertOrFailFast(buffer);
+            if (IsValidVirtualBufferLength(newBufferLength))
+            {
+                auto virtualAllocFunc = [=]
+                {
+                    return !!VirtualAlloc(buffer + bufferLength, growSize, MEM_COMMIT, PAGE_READWRITE);
+                };
+                if (!this->GetRecycler()->DoExternalAllocation(growSize, virtualAllocFunc))
+                {
+                    return false;
+                }
+
+                this->GetRecycler()->AddExternalMemoryUsage(growSize);
+            }
+            else
+            {
+                // We have already allocated maxLength in the heap if we're not using virtual alloc
+            }
+            ZeroMemory(buffer + bufferLength, growSize);
+            sharedContents->bufferLength.store(newBufferLength, std::memory_order_release);
         }
-        else
-        {
-            // We have already allocated maxLength in the heap if we're not using virtual alloc
-        }
-        ZeroMemory(buffer + bufferLength, growSize);
-        sharedContents->bufferLength = newBufferLength;
         // Same staleness contract as SharedArrayBuffer::Grow: refresh every
         // live same-runtime TypedArray view's cached effective length. This
         // covers JS TypedArray views created over the wasm shared memory's

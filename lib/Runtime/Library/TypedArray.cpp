@@ -267,6 +267,7 @@ namespace Js
         byteOffset(offSet),
         BYTES_PER_ELEMENT(elementSize),
         lengthTracking(lengthTracking),
+        tracksSharedLength(lengthTracking && arrayBuffer != nullptr && arrayBuffer->IsSharedArrayBuffer()),
         capturedLength(mappedLength)
     {
     }

@@ -1621,7 +1621,15 @@ namespace Js
         // If global = true, set lastIndex to 0 in case it is used in replacefn
         if (isGlobal)
         {
-            regularExpression->SetLastIndex(0);
+            if (scriptContext->GetConfig()->IsES6RegExSymbolsEnabled()
+                || !regularExpression->IsWritable(PropertyIds::lastIndex))
+            {
+                JavascriptRegExp::SetLastIndexProperty(regularExpression, TaggedInt::ToVarUnchecked(0), scriptContext);
+            }
+            else
+            {
+                regularExpression->SetLastIndex(0);
+            }
         }
 
         // If global = false and sticky = true, set offset = lastIndex, else set offset = 0
@@ -2603,13 +2611,34 @@ namespace Js
 
         if (lastActualMatch.IsUndefined())
         {
-            regularExpression->SetLastIndex(0);
+            if (isGlobal || isSticky)
+            {
+                if (!regularExpression->IsWritable(PropertyIds::lastIndex))
+                {
+                    JavascriptRegExp::SetLastIndexProperty(regularExpression, TaggedInt::ToVarUnchecked(0), scriptContext);
+                }
+                else
+                {
+                    regularExpression->SetLastIndex(0);
+                }
+            }
+            else if (regularExpression->IsWritable(PropertyIds::lastIndex))
+            {
+                regularExpression->SetLastIndex(0);
+            }
         }
         else if (isGlobal || isSticky)
         {
             CharCount lastIndex = lastActualMatch.EndOffset();
             Assert(lastIndex <= MaxCharCount);
-            regularExpression->SetLastIndex((int32)lastIndex);
+            if (!regularExpression->IsWritable(PropertyIds::lastIndex))
+            {
+                JavascriptRegExp::SetLastIndexProperty(regularExpression, (int32)lastIndex, scriptContext);
+            }
+            else
+            {
+                regularExpression->SetLastIndex((int32)lastIndex);
+            }
         }
     }
 
@@ -2663,7 +2692,8 @@ namespace Js
                 // (a non-writable "lastIndex" throws). A non-global,
                 // non-sticky regexp never takes this path, so its "lastIndex"
                 // is never touched here. Flag-off keeps the internal write.
-                if (scriptContext->GetConfig()->IsES6RegExSymbolsEnabled())
+                if (scriptContext->GetConfig()->IsES6RegExSymbolsEnabled()
+                    || !regularExpression->IsWritable(PropertyIds::lastIndex))
                 {
                     JavascriptRegExp::SetLastIndexProperty(regularExpression, TaggedInt::ToVarUnchecked(0), scriptContext);
                 }

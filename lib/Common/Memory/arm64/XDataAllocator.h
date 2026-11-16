@@ -23,6 +23,8 @@ namespace Memory
         XDataAllocation()
 #ifdef _WIN32
             :functionTable(nullptr)
+#else
+            :registeredFde(nullptr)
 #endif
         {}
 
@@ -38,6 +40,8 @@ namespace Memory
 #ifdef _WIN32
         RUNTIME_FUNCTION pdata;
         FunctionTableHandle functionTable;
+#else
+        const void* registeredFde;
 #endif
     };
 

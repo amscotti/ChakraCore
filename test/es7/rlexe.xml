@@ -673,4 +673,21 @@
       <compile-flags>-ESBigInt -args summary -endargs</compile-flags>
     </default>
   </test>
+  <test>
+    <default>
+      <files>float16-jit-bounds.js</files>
+      <compile-flags>-ESBigInt</compile-flags>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>regex-nonwritable-lastindex-jit.js</files>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>s6-growable-cross-agent.js</files>
+      <compile-flags>-ESBigInt -ESSharedArrayBuffer -Test262 -CollectGarbage</compile-flags>
+    </default>
+  </test>
 </regress-exe>

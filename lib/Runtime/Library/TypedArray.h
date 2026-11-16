@@ -274,17 +274,22 @@ namespace Js
         Field(uint32) byteOffset;
         FieldNoBarrier(BYTE*) buffer;   // beginning of mapped array.
         Field(bool) lengthTracking;     // No explicit length: follow the buffer
+        Field(bool) tracksSharedLength; // lengthTracking view backed by SharedArrayBuffer (must read SharedContents::bufferLength live)
         // Explicit length captured at construction (fixed views only).
         // The inherited ArrayObject length field always holds the
         // *effective* length instead: ArrayBuffer::Resize refreshes it
         // (RefreshEffectiveLength) so direct field readers - notably
         // JIT inline-cache length loads and bounds checks, which read
-        // the field without calling GetLength - observe current values.
+        // the field without calling GetLength - observe current values;
+        // cross-runtime shared length-tracking views bypass this cache via
+        // tracksSharedLength.
         Field(uint32) capturedLength;
 
     public:
         static uint32 GetOffsetOfBuffer()  { return offsetof(TypedArrayBase, buffer); }
         static uint32 GetOffsetOfLength()  { return offsetof(TypedArrayBase, length); }
+        static uint32 GetOffsetOfByteOffset() { return offsetof(TypedArrayBase, byteOffset); }
+        static uint32 GetOffsetOfTracksSharedLength() { return offsetof(TypedArrayBase, tracksSharedLength); }
 
 #if ENABLE_TTD
     public:

@@ -5,6 +5,7 @@
 //-------------------------------------------------------------------------------------------------------
 #include "RuntimeLibraryPch.h"
 #include "Math/JavascriptMath.h"
+#include "AtomicsOperations.h"
 
 #define ATOMICS_FUNCTION_ENTRY_CHECKS(length, methodName) \
         PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault); \
@@ -312,7 +313,7 @@ namespace Js
 
             if (isBigInt64)
             {
-                int64 w = ((int64*)typedArrayBase->GetByteBuffer())[accessIndex];
+                int64 w = AtomicsOperations::Load<int64>((int64*)typedArrayBase->GetByteBuffer() + accessIndex);
                 if (bigValue != w)
                 {
                     return scriptContext->GetLibrary()->CreateStringFromCppLiteral(_u("not-equal"));
@@ -320,7 +321,7 @@ namespace Js
             }
             else
             {
-                int32 w = JavascriptConversion::ToInt32(typedArrayBase->DirectGetItem(accessIndex), scriptContext);
+                int32 w = AtomicsOperations::Load<int32>((int32*)typedArrayBase->GetByteBuffer() + accessIndex);
                 if (value != w)
                 {
                     return scriptContext->GetLibrary()->CreateStringFromCppLiteral(_u("not-equal"));
@@ -460,7 +461,7 @@ namespace Js
 
             if (isBigInt64)
             {
-                int64 witness = ((int64*)typedArrayBase->GetByteBuffer())[accessIndex];
+                int64 witness = AtomicsOperations::Load<int64>((int64*)typedArrayBase->GetByteBuffer() + accessIndex);
                 if (bigValue != witness)
                 {
                     return CreateWaitAsyncResult(scriptContext, false,
@@ -469,7 +470,7 @@ namespace Js
             }
             else
             {
-                int32 witness = JavascriptConversion::ToInt32(typedArrayBase->DirectGetItem(accessIndex), scriptContext);
+                int32 witness = AtomicsOperations::Load<int32>((int32*)typedArrayBase->GetByteBuffer() + accessIndex);
                 if (value != witness)
                 {
                     return CreateWaitAsyncResult(scriptContext, false,

@@ -362,7 +362,7 @@ using namespace Js;
         RecyclableObject* cacheOwner;
         PropertyRecordUsageCache* propertyRecordUsageCache;
         TypeId instanceType = JavascriptOperators::GetTypeId(base);
-        bool isTypedArray = (instanceType >= TypeIds_Int8Array && instanceType <= TypeIds_Float64Array);
+        bool isTypedArray = TypedArrayBase::Is(instanceType);
         if (!isTypedArray && JavascriptOperators::GetPropertyRecordUsageCache(varIndex, scriptContext, &propertyRecordUsageCache, &cacheOwner))
         {
             RecyclableObject* object = nullptr;

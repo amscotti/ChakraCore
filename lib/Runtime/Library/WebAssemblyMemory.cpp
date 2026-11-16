@@ -333,7 +333,7 @@ WebAssemblyMemory * WebAssemblyMemory::CreateFromSharedContents(uint32 initial, 
     {
         JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_Invalid);
     }
-    CheckLimits(scriptContext, initial, maximum, sharedContents->bufferLength);
+    CheckLimits(scriptContext, initial, maximum, sharedContents->bufferLength.load(std::memory_order_acquire));
     ArrayBufferBase* buffer = scriptContext->GetLibrary()->CreateWebAssemblySharedArrayBuffer(sharedContents);
     return RecyclerNewFinalized(scriptContext->GetRecycler(), WebAssemblyMemory, buffer, initial, maximum, scriptContext->GetLibrary()->GetWebAssemblyMemoryType());
 }
