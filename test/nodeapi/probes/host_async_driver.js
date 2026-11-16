@@ -3,9 +3,14 @@
 const assert = require('assert');
 const addon = globalThis.__exports;
 
-if (typeof process !== 'undefined' && process.env &&
-    process.env.HOST_ASYNC_EXPECT_TIMEOUT === '1') {
+const mode = (typeof process !== 'undefined' && process.env)
+  ? process.env.HOST_ASYNC_EXPECT_TIMEOUT : '';
+if (mode === '1' || mode === 'ref') {
   addon.holdLoopRefForever();
+} else if (mode === 'work') {
+  addon.slowWorkTimeout();
+} else if (mode === 'limit') {
+  Promise.resolve().then(() => Promise.resolve().then(() => 1));
 } else {
   let completed = false;
   const seen = [];

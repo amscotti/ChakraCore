@@ -70,6 +70,7 @@
 #include <dlfcn.h>
 #include <map>
 #include <mutex>
+#include <new>
 #include <string>
 #include <thread>
 #include <unistd.h>
@@ -462,6 +463,19 @@ struct WorkItem {
   bool cancelled = false;
 };
 
+// HostLoopState ownership / invalidation record (see doc/memory-management.md):
+//   - Domain: host C++ heap (`new (std::nothrow) HostLoopState()` in main()).
+//   - Transfer: raw pointer passed to NodeApi host services (`host_ctx`) and
+//     spawned `worker_thread_main` threads.
+//   - Invalidation: `destroy_env(env)` invalidates all provider async/TSFN
+//     handles first so no further `post_work` calls happen; `shutdown_host_loop`
+//     sets `shutting_down = true` under `mutex`, drops unstarted `work_queue`
+//     entries, and joins workers when safe (`joined == true`).
+//   - Release: deleted (alongside `dlclose`) ONLY when `joined == true`. On a
+//     timeout/error exit with an active uncancellable `ExecuteWork` still
+//     running (`joined == false`), workers are detached and both `host_loop`
+//     and the dlopen handles stay alive until process exit so detached worker
+//     threads never dereference destroyed sync state or unmapped addon code.
 struct HostLoopState {
   std::mutex mutex;
   std::condition_variable cv;
@@ -484,7 +498,7 @@ void worker_thread_main(HostLoopState* st) {
         return st->shutting_down || !st->work_queue.empty();
       });
       st->idle_workers--;
-      if (st->shutting_down && st->work_queue.empty()) break;
+      if (st->shutting_down) break;
       item = st->work_queue.front();
       st->work_queue.pop_front();
     }
@@ -589,6 +603,10 @@ bool shutdown_host_loop(HostLoopState* st, bool wait_for_active) {
   {
     std::lock_guard<std::mutex> lk(st->mutex);
     st->shutting_down = true;
+    const size_t dropped = st->work_queue.size();
+    st->work_queue.clear();
+    st->active_works =
+        (st->active_works > dropped) ? (st->active_works - dropped) : 0;
     has_active = (st->active_works > 0);
     st->cv.notify_all();
     to_join.swap(st->workers);
@@ -702,6 +720,17 @@ int pump_until_quiet(PumpState* pump, HostLoopState* loop, long limit,
       }
     }
     if (!any) break;
+  }
+  bool remaining = !pump->tasks.empty();
+  if (!remaining && loop != nullptr) {
+    std::lock_guard<std::mutex> lk(loop->mutex);
+    remaining = !loop->task_queue.empty() ||
+                (allow_wait && (loop->active_works > 0 || loop->loop_refs > 0));
+  }
+  if (remaining) {
+    std::fprintf(stderr,
+                 "ch-nodeapi: pump exceeded limit %ld tasks (hang?)\n", limit);
+    return 1;
   }
   return 0;
 }
@@ -834,14 +863,12 @@ int main(int argc, char** argv) {
     }
   }
 
-  // Host promise-pump queue (PR-8). The install site is AFTER
-  // chakra_nodeapi_create_env (see below): the provider installs its
-  // own continuation trampoline at env create iff it has not already
-  // (N3.4 provider-side flag; host installs are undetectable through
-  // the public JsRT C API, so a pre-create host install would be
-  // clobbered by the provider). Host owns pumping either way
-  // (plan SS3.2): after any JsRun / between registration and teardown
-  // the host drains this queue until quiet.
+  // Host promise-pump queue (PR-8). Installed BEFORE chakra_nodeapi_create_env
+  // with `services.host_manages_promise_queue = true` so the provider knows
+  // the host owns the JsSetPromiseContinuationCallback slot and does not
+  // overwrite it with its own continuation trampoline. Host drains `pump`
+  // alongside `HostLoopState::task_queue` after each JsRun / between
+  // registration and teardown.
   PumpState pump;
 
   // --- Load provider RTLD_GLOBAL (PR-3) ---
@@ -925,13 +952,21 @@ int main(int argc, char** argv) {
     return 1;
   }
 
+  HostLoopState* host_loop = new (std::nothrow) HostLoopState();
+  if (!host_loop) {
+    std::fprintf(stderr, "ch-nodeapi: out of memory allocating HostLoopState\n");
+    dlclose(addon);
+    dlclose(provider);
+    dispose_runtime();
+    return 1;
+  }
+
   // Install the host continuation callback BEFORE env creation and mark
   // `host_manages_promise_queue = true` so the provider preserves the host
   // callback cleanly without clobbering it. Wire real off-thread post_work,
   // FIFO post_task, cancel_work, and ref_loop/unref_loop host services.
   JsSetPromiseContinuationCallback(promise_continuation, &pump);
 
-  HostLoopState host_loop;
   chakra_nodeapi_host_services services = {};
   services.post_task = host_post_task;
   services.post_work = host_post_work;
@@ -942,10 +977,12 @@ int main(int argc, char** argv) {
 
   // --- Create env (provider-owned) ---
   napi_env env = create_env(runtime, context, cfg.addon_path.c_str(),
-                            &services, &host_loop);
+                            &services, host_loop);
   if (!env) {
     std::fprintf(stderr, "ch-nodeapi: chakra_nodeapi_create_env failed\n");
-    shutdown_host_loop(&host_loop, true);
+    shutdown_host_loop(host_loop, true);
+    delete host_loop;
+    JsSetPromiseContinuationCallback(nullptr, nullptr);
     dlclose(addon);
     dlclose(provider);
     dispose_runtime();
@@ -956,14 +993,40 @@ int main(int argc, char** argv) {
   // The scope stays open until the result is bound to the global, so the
   // returned value stays rooted across JsRun (provider R1).
   RequireState req_state;
+  // Shared post-create_env teardown: releases host-held roots (R5), destroys
+  // env BEFORE shutting down host workers (§3.6), and only deletes `host_loop`
+  // / closes dlopen handles when all workers have cleanly joined.
+  auto shutdown_all = [&](int exit_code) -> int {
+    for (auto& kv : req_state.cache) {
+      if (kv.second != JS_INVALID_REFERENCE) JsRelease(kv.second, nullptr);
+    }
+    req_state.cache.clear();
+    if (req_state.pending_reg_error != JS_INVALID_REFERENCE) {
+      JsRelease(req_state.pending_reg_error, nullptr);
+      req_state.pending_reg_error = JS_INVALID_REFERENCE;
+    }
+    for (JsValueRef t : pump.tasks) {
+      if (t != JS_INVALID_REFERENCE) JsRelease(t, nullptr);
+    }
+    pump.tasks.clear();
+
+    destroy_env(env);
+    bool joined = shutdown_host_loop(host_loop, exit_code == 0);
+    JsSetPromiseContinuationCallback(nullptr, nullptr);
+    dispose_runtime();
+    if (joined) {
+      delete host_loop;
+      host_loop = nullptr;
+      dlclose(addon);
+      dlclose(provider);
+    }
+    return exit_code;
+  };
+
   napi_handle_scope scope = nullptr;
   if (napi_open_handle_scope(env, &scope) != napi_ok) {
     std::fprintf(stderr, "ch-nodeapi: napi_open_handle_scope failed\n");
-    destroy_env(env);
-    dlclose(addon);
-    dlclose(provider);
-    dispose_runtime();
-    return 1;
+    return shutdown_all(1);
   }
   napi_value exports = nullptr;
   napi_value result = nullptr;
@@ -1024,11 +1087,7 @@ int main(int argc, char** argv) {
     napi_close_handle_scope(env, scope);
   }
   if (!exported_ok) {
-    destroy_env(env);
-    dlclose(addon);
-    dlclose(provider);
-    dispose_runtime();
-    return 1;
+    return shutdown_all(1);
   }
   // Registration scope is closed; the global now roots the exports.
   // A pending exception from registration (vendored test_exception:
@@ -1159,11 +1218,7 @@ int main(int argc, char** argv) {
     if (!read_file(cfg.driver_path, &script)) {
       std::fprintf(stderr, "ch-nodeapi: cannot read driver %s\n",
                    cfg.driver_path.c_str());
-      destroy_env(env);
-      dlclose(addon);
-      dlclose(provider);
-      dispose_runtime();
-      return 1;
+      return shutdown_all(1);
     }
     // Run as a CommonJS module (module/exports/__filename/__dirname in
     // scope) so top-level `return` and module patterns work.
@@ -1195,11 +1250,7 @@ int main(int argc, char** argv) {
     if (JsCreateString(wrapped.c_str(), wrapped.size(), &script_val) != JsNoError ||
         JsCreateString(cfg.driver_path.c_str(), cfg.driver_path.size(), &url_val) != JsNoError) {
       std::fprintf(stderr, "ch-nodeapi: JsCreateString (driver) failed\n");
-      destroy_env(env);
-      dlclose(addon);
-      dlclose(provider);
-      dispose_runtime();
-      return 1;
+      return shutdown_all(1);
     }
     JsErrorCode err =
         JsRun(script_val, JS_SOURCE_CONTEXT_NONE, url_val,
@@ -1217,11 +1268,11 @@ int main(int argc, char** argv) {
     // while waiting on active works / TSFN loop refs up to --pump-timeout-ms.
     if (run_rc == 0) {
       // The pump itself reports and returns 1 on overflow/timeout/exception.
-      run_rc = pump_until_quiet(&pump, &host_loop, cfg.pump_limit,
+      run_rc = pump_until_quiet(&pump, host_loop, cfg.pump_limit,
                                 cfg.pump_timeout_ms, /*allow_wait=*/true);
     } else {
       // Driver failed: drain already-queued items without blocking on infinite refs.
-      pump_until_quiet(&pump, &host_loop, cfg.pump_limit, 0, /*allow_wait=*/false);
+      pump_until_quiet(&pump, host_loop, cfg.pump_limit, 0, /*allow_wait=*/false);
     }
     // mustCall verification: the test/common shim records unfulfilled
     // calls; Node fails at process exit. The host replicates that gate
@@ -1246,7 +1297,7 @@ int main(int argc, char** argv) {
       }
       // Finalizers may have queued promise/host tasks; pump again.
       if (run_rc == 0) {
-        run_rc = pump_until_quiet(&pump, &host_loop, cfg.pump_limit,
+        run_rc = pump_until_quiet(&pump, host_loop, cfg.pump_limit,
                                   cfg.pump_timeout_ms, /*allow_wait=*/true);
       }
       if (run_rc == 0) {
@@ -1279,44 +1330,16 @@ int main(int argc, char** argv) {
     if (script_val != JS_INVALID_REFERENCE) JsRelease(script_val, nullptr);
     if (url_val != JS_INVALID_REFERENCE) JsRelease(url_val, nullptr);
     if (run_result != JS_INVALID_REFERENCE) JsRelease(run_result, nullptr);
-    for (auto& kv : req_state.cache) {
-      if (kv.second != JS_INVALID_REFERENCE) JsRelease(kv.second, nullptr);
-    }
-    req_state.cache.clear();
-    if (req_state.pending_reg_error != JS_INVALID_REFERENCE) {
-      JsRelease(req_state.pending_reg_error, nullptr);
-      req_state.pending_reg_error = JS_INVALID_REFERENCE;
-    }
   } else {
     // Registration-only: still pump once so queued continuations / tasks from
     // the register call run before teardown.
-    run_rc = pump_until_quiet(&pump, &host_loop, cfg.pump_limit,
+    run_rc = pump_until_quiet(&pump, host_loop, cfg.pump_limit,
                               cfg.pump_timeout_ms, /*allow_wait=*/true);
     if (req_state.pending_reg_error != JS_INVALID_REFERENCE) {
       std::fprintf(stderr, "ch-nodeapi: registration threw with no driver\n");
-      JsRelease(req_state.pending_reg_error, nullptr);
       run_rc = 1;
     }
   }
 
-  // --- Teardown: destroy env BEFORE shutting down host workers / runtime (§3.6) ---
-  // Note: destroy_env tears down any remaining in-flight async_work / TSFN
-  // handles so post-destroy worker completions safely drop without touching JS.
-  // We also clear queued promise tasks first so no root survives disposal (R5).
-  for (JsValueRef t : pump.tasks) JsRelease(t, nullptr);
-  pump.tasks.clear();
-
-  destroy_env(env);
-  // Join all worker threads cleanly when no active ExecuteWork timed out; on
-  // timeout exit with an in-flight worker, detach and skip dlclose so exit
-  // returns immediately without unmapping active addon code.
-  bool joined = shutdown_host_loop(&host_loop, run_rc == 0);
-  // Clear host continuation callback BEFORE disposing runtime.
-  JsSetPromiseContinuationCallback(nullptr, nullptr);
-  dispose_runtime();
-  if (joined) {
-    dlclose(addon);
-    dlclose(provider);
-  }
-  return run_rc;
+  return shutdown_all(run_rc);
 }

@@ -161,6 +161,38 @@ napi_value HoldLoopRefForever(napi_env env, napi_callback_info) {
   return undef;
 }
 
+struct SlowWorkData {
+  napi_async_work work = nullptr;
+};
+
+void ExecuteSlowWork(napi_env, void*) {
+  std::this_thread::sleep_for(std::chrono::milliseconds(500));
+}
+
+void CompleteSlowWork(napi_env env, napi_status, void* raw) {
+  auto* d = static_cast<SlowWorkData*>(raw);
+  if (env != nullptr && d->work != nullptr) {
+    napi_delete_async_work(env, d->work);
+  }
+  delete d;
+}
+
+napi_value SlowWorkTimeout(napi_env env, napi_callback_info) {
+  auto* d = new SlowWorkData();
+  napi_value name = nullptr;
+  napi_create_string_utf8(env, "SlowWorkTimeout", NAPI_AUTO_LENGTH, &name);
+  if (napi_create_async_work(env, nullptr, name, ExecuteSlowWork,
+                             CompleteSlowWork, d, &d->work) != napi_ok ||
+      napi_queue_async_work(env, d->work) != napi_ok) {
+    if (d->work != nullptr) napi_delete_async_work(env, d->work);
+    delete d;
+    return nullptr;
+  }
+  napi_value undef = nullptr;
+  napi_get_undefined(env, &undef);
+  return undef;
+}
+
 napi_value Init(napi_env env, napi_value exports) {
   napi_property_descriptor descs[] = {
       {"asyncDouble", nullptr, AsyncDouble, nullptr, nullptr, nullptr,
@@ -169,6 +201,8 @@ napi_value Init(napi_env env, napi_value exports) {
        napi_default, nullptr},
       {"holdLoopRefForever", nullptr, HoldLoopRefForever, nullptr, nullptr,
        nullptr, napi_default, nullptr},
+      {"slowWorkTimeout", nullptr, SlowWorkTimeout, nullptr, nullptr, nullptr,
+       napi_default, nullptr},
   };
   napi_define_properties(env, exports, sizeof(descs) / sizeof(descs[0]), descs);
   return exports;

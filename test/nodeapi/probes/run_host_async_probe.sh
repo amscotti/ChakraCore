@@ -80,4 +80,33 @@ if [ "$RC" -eq 0 ]; then
 fi
 printf '%s\n' "$ERR_OUT" | grep -q "timed out"
 
+echo "===== case 3: --pump-timeout-ms on active ExecuteWork (detached worker exit) ====="
+set +e
+WORK_OUT=$(HOST_ASYNC_EXPECT_TIMEOUT=work "$HOST" --provider "$PROVIDER" \
+  --addon "$ADDON" --driver "$REPO/test/nodeapi/probes/host_async_driver.js" \
+  --pump-timeout-ms 80 2>&1)
+RC=$?
+set -e
+echo "$WORK_OUT"
+if [ "$RC" -eq 0 ]; then
+  echo "run_host_async_probe: expected non-zero exit on slow ExecuteWork timeout" >&2
+  exit 1
+fi
+printf '%s\n' "$WORK_OUT" | grep -q "timed out"
+printf '%s\n' "$WORK_OUT" | grep -q "active_works=1"
+
+echo "===== case 4: --pump-limit overflow returns non-zero ====="
+set +e
+LIM_OUT=$(HOST_ASYNC_EXPECT_TIMEOUT=limit "$HOST" --provider "$PROVIDER" \
+  --addon "$ADDON" --driver "$REPO/test/nodeapi/probes/host_async_driver.js" \
+  --pump-limit 1 2>&1)
+RC=$?
+set -e
+echo "$LIM_OUT"
+if [ "$RC" -eq 0 ]; then
+  echo "run_host_async_probe: expected non-zero exit on --pump-limit overflow" >&2
+  exit 1
+fi
+printf '%s\n' "$LIM_OUT" | grep -q "exceeded limit"
+
 echo "run_host_async_probe: ALL PASS"
