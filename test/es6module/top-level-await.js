@@ -284,6 +284,77 @@ const tests = [
             `);
             AddPromise(test, import('for-await-of').then (x => x.default), 9, false);
         }
+    },
+    {
+        name : "TLA cycle back-edge settlement waits for cycle root",
+        body (test) {
+            WScript.RegisterModuleSource("TlaCycleSetup", "export const log = [];");
+            WScript.RegisterModuleSource("TlaCycleRoot", `
+                import { log } from "TlaCycleSetup";
+                import "TlaCycleLeaf";
+                log.push("cycle root start");
+                await 0;
+                log.push("cycle root end");
+            `);
+            WScript.RegisterModuleSource("TlaCycleLeaf", `
+                import { log } from "TlaCycleSetup";
+                import "TlaCycleRoot";
+                log.push("cycle leaf start");
+                await 0;
+                log.push("cycle leaf end");
+            `);
+            WScript.RegisterModuleSource("TlaCycleDep", `
+                import { log } from "TlaCycleSetup";
+                import "TlaCycleLeaf";
+                log.push("importer of cycle leaf");
+            `);
+            WScript.RegisterModuleSource("TlaCycleEntry", `
+                import { log } from "TlaCycleSetup";
+                import "TlaCycleRoot";
+                import "TlaCycleDep";
+                export default log.join(",");
+            `);
+            AddPromise(
+                test,
+                import("TlaCycleEntry").then(x => x.default),
+                "cycle leaf start,cycle leaf end,cycle root start,cycle root end,importer of cycle leaf",
+                false
+            );
+        }
+    },
+    {
+        name : "Dynamic import of fulfilled member of errored cycle rejects with root error",
+        body (test) {
+            WScript.RegisterModuleSource("ErrCycleC", `
+                import "ErrCycleA";
+                await 0;
+            `);
+            WScript.RegisterModuleSource("ErrCycleA", `
+                import "ErrCycleB";
+                await 0;
+            `);
+            WScript.RegisterModuleSource("ErrCycleB", `
+                import "ErrCycleC";
+                await 0;
+                throw new Error("async error in ErrCycleB");
+            `);
+            WScript.RegisterModuleSource("ErrCycleX", `
+                import "ErrCycleA";
+                await 0;
+            `);
+            WScript.RegisterModuleSource("ErrCycleMain", `
+                import "ErrCycleB";
+                import "ErrCycleX";
+            `);
+            const p = import("ErrCycleMain").then(
+                () => "unexpected resolve",
+                errMain => import("ErrCycleC").then(
+                    () => "unexpected resolve C",
+                    errC => errMain === errC && errC instanceof Error && errC.message === "async error in ErrCycleB"
+                )
+            );
+            AddPromise(test, p, true, false);
+        }
     }
 ];
 

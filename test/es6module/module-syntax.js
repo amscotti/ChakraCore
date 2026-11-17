@@ -229,6 +229,25 @@ var tests = [
             testModuleScript("/* */ -->",  "HTML comment after delimited comment does not parse in module code", true);
             testModuleScript("/* */\n-->", "HTML comment after delimited comment does not parse in module code", true);
         }
+    },
+    {
+        name: "Module top-level duplicate function/var and labelled import/export early errors",
+        body: function () {
+            testModuleScript("function f() {} function f() {}", "Duplicate module top-level function declaration", true);
+            testModuleScript("function f() {} async function f() {}", "Duplicate module top-level function and async function", true);
+            testModuleScript("var f; function f() {}", "Module top-level var followed by function declaration", true);
+            testModuleScript("function f() {} var f;", "Module top-level function followed by var declaration", true);
+            testModuleScript("function f() {} { var f; }", "Module top-level function collides with hoisted block var", true);
+            testModuleScript("{ var f; } function f() {}", "Hoisted block var collides with module top-level function", true);
+            testModuleScript("export default function f() {} function f() {}", "Default exported named function collides with duplicate function", true);
+            testModuleScript("export default function f() {} var f;", "Default exported named function collides with var", true);
+            testModuleScript("{ function f() {} } function f() {}", "Block-scoped function does not collide with module top-level function", false);
+            testModuleScript("var f; { function f() {} }", "Top-level var does not collide with block-scoped function", false);
+
+            testModuleScript('lbl: import x from "ValidExportStatements.js";', "Label before import declaration is early SyntaxError", true);
+            testModuleScript("lbl: export var x = 1;", "Label before export declaration is early SyntaxError", true);
+            testModuleScript('lbl: import("ValidExportStatements.js"); lbl2: import.meta;', "Label before import() call or import.meta stays valid", false);
+        }
     }
 ];
 

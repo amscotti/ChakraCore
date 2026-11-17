@@ -316,13 +316,39 @@ namespace Js
         return enumerator->Initialize(moduleEnumerator, nullptr, nullptr, flags, requestContext, nullptr);
     }
 
+    BOOL ModuleNamespace::SetProperty(PropertyId propertyId, Var value, PropertyOperationFlags flags, PropertyValueInfo* info)
+    {
+        JavascriptError::ThrowCantAssignIfStrictMode(flags, GetScriptContext());
+        return FALSE;
+    }
+
+    BOOL ModuleNamespace::SetProperty(JavascriptString* propertyNameString, Var value, PropertyOperationFlags flags, PropertyValueInfo* info)
+    {
+        JavascriptError::ThrowCantAssignIfStrictMode(flags, GetScriptContext());
+        return FALSE;
+    }
+
+    BOOL ModuleNamespace::SetItem(uint32 index, Var value, PropertyOperationFlags flags)
+    {
+        JavascriptError::ThrowCantAssignIfStrictMode(flags, GetScriptContext());
+        return FALSE;
+    }
+
     BOOL ModuleNamespace::DeleteProperty(PropertyId propertyId, PropertyOperationFlags flags)
     {
         //Assert: IsPropertyKey(P) is true.
         //Let exports be O.[[Exports]].
         //If P is an element of exports, return false.
         //Return true.
-        return !HasProperty(propertyId);
+        if (HasProperty(propertyId))
+        {
+            JavascriptError::ThrowCantDeleteIfStrictModeOrNonconfigurable(
+                flags,
+                GetScriptContext(),
+                GetScriptContext()->GetThreadContext()->GetPropertyName(propertyId)->GetBuffer());
+            return FALSE;
+        }
+        return TRUE;
     }
 
     BOOL ModuleNamespace::DeleteProperty(JavascriptString *propertyNameString, PropertyOperationFlags flags)

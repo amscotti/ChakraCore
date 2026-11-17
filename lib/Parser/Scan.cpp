@@ -709,7 +709,25 @@ typename Scanner<EncodingPolicy>::EncodedCharPtr Scanner<EncodingPolicy>::FScanN
                 //            case 'e':
                 //            case 'E':
                 //            case '.':
-                m_OctOrLeadingZeroOnLastTKNumber = false;  //08...  or 09....
+                // NonOctalDecimalIntegerLiteral (08..., 09..., 078...) is disallowed in strict mode and module code.
+                m_OctOrLeadingZeroOnLastTKNumber = true;
+                // NumericLiteralSeparator (_) is forbidden inside NonOctalDecimalIntegerLiteral (ES2021 12.9.3).
+                if (m_scriptContext->GetConfig()->IsESNumericSeparatorEnabled())
+                {
+                    for (EncodedCharPtr q = pchT; q < last; ++q)
+                    {
+                        OLECHAR qc = *q;
+                        if (qc == '_')
+                        {
+                            this->RestoreMultiUnits(savedMultiUnits);
+                            Error(ERRbadNumber);
+                        }
+                        if (!Js::NumberUtilities::IsDigit(qc))
+                        {
+                            break;
+                        }
+                    }
+                }
                 goto LFloat;
             }
             goto LIdCheck;
@@ -1363,7 +1381,7 @@ LTwoHex:
                 if (stringTemplateMode)
                 {
                     c = this->PeekFirst(p, last);
-                    if (ch != 0 || (c >= '0' && c <= '7'))
+                    if (ch != 0 || (c >= '0' && c <= '9'))
                     {
                         errorType = (uint)ERRES5NoOctal;
                         m_tempChBufSecondary.template AppendCh<createRawString>(static_cast<OLECHAR>(ch + '0'));

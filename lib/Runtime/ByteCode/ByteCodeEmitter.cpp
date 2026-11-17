@@ -5376,7 +5376,7 @@ void ByteCodeGenerator::EmitPropStore(Js::RegSlot rhsLocation, Symbol *sym, Iden
 
     if (sym && sym->GetIsModuleExportStorage())
     {
-        if (!isConstDecl && sym->GetDecl() && sym->GetDecl()->nop == knopConstDecl)
+        if (!isConstDecl && (sym->GetIsConst() || sym->GetIsModuleImport() || (sym->GetDecl() && sym->GetDecl()->nop == knopConstDecl)))
         {
             this->m_writer.W1(Js::OpCode::RuntimeTypeError, SCODE_CODE(ERRAssignmentToConst));
         }

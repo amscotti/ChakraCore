@@ -36,9 +36,7 @@ namespace Js
         bool ModuleDeclarationInstantiation() override;
         void GenerateRootFunction();
         Var ModuleEvaluation() override;
-        void FinishModuleEvaluation(bool shouldIncrementAwait);
         bool ModuleEvaluationPrepass();
-        void DecrementAndEvaluateIfNothingAwaited();
         void PropogateRejection(Var reason);
         virtual ModuleNamespace* GetNamespace();
         virtual void SetNamespace(ModuleNamespace* moduleNamespace);
@@ -62,7 +60,18 @@ namespace Js
                 VarTo<JavascriptString>(this->normalizedSpecifier)->GetSz() : _u("module"); 
         }
 
-        Var GetErrorObject() const { return errorObject; }
+        Var GetErrorObject() const
+        {
+            if (errorObject != nullptr)
+            {
+                return errorObject;
+            }
+            if (cycleRoot != nullptr && cycleRoot != this)
+            {
+                return cycleRoot->errorObject;
+            }
+            return nullptr;
+        }
 
         bool WasParsed() const { return wasParsed; }
         void SetWasParsed() { wasParsed = true; }
@@ -70,8 +79,11 @@ namespace Js
         void SetEvaluationPrepassed() { wasPrepassed = true; }
         bool IsEvaluating() const { return evaluating; }
         void SetEvaluating(bool status) { evaluating = status; }
+        bool IsEvaluatingAsync() const { return evaluatingAsync; }
+        void SetEvaluatingAsync(bool status) { evaluatingAsync = status; }
         void IncrementAwaited() { ++awaitedModules; }
         bool DecrementAwaited() { return (--awaitedModules) == 0; }
+        SourceTextModuleRecord* GetCycleRoot() const { return cycleRoot; }
         bool WasDeclarationInitialized() const { return wasDeclarationInitialized; }
         void SetWasDeclarationInitialized() { wasDeclarationInitialized = true; }
         void SetIsRootModule() { isRootModule = true; }
@@ -161,6 +173,8 @@ namespace Js
         Field(bool) isRootModule = false;
         Field(bool) hadNotifyHostReady = false;
         Field(bool) evaluating = false;
+        Field(bool) evaluatingAsync = false;
+        Field(bool) requestedModulesReversed = false;
         Field(JavascriptGenerator*) generator;
         Field(ParseNodeProg *) parseTree; // This is the parsed tree resulted from compilation.
         Field(Utf8SourceInfo*) pSourceInfo;
@@ -174,6 +188,9 @@ namespace Js
         Field(ModuleImportOrExportEntryList*) starExportRecordList;
         Field(ChildModuleRecordSet*) childrenModuleSet;
         Field(ModuleRecordList*) parentModuleList;
+        Field(ModuleRecordList*) asyncParentModules;
+        Field(ModuleRecordList*) cycleMembers;
+        Field(SourceTextModuleRecord*) cycleRoot;
         Field(LocalExportMap*) localExportMapByExportName;  // from propertyId to index map: for bytecode gen.
         Field(LocalExportMap*) localExportMapByLocalName;  // from propertyId to index map: for bytecode gen.
         Field(LocalExportIndexList*) localExportIndexList; // from index to propertyId: for typehandler.
@@ -191,13 +208,25 @@ namespace Js
         Field(uint) localExportCount;
         Field(uint) moduleId;
 
-        // for Top level Await
+        // for Top level Await (ES2025 cyclic module evaluation)
         Field(uint) awaitedModules;
+        Field(uint) dfsIndex;
+        Field(uint) dfsAncestorIndex;
+        Field(uint64) asyncEvaluationOrder;
 
         Field(ModuleNameRecord) namespaceRecord;
         Field(JavascriptPromise*) promise;
 
         Field(Var) importMetaObject;
+
+        uint InnerModuleEvaluation(ModuleRecordList* stack, uint index);
+        void ExecuteSyncModule();
+        void ExecuteAsyncModule();
+        void AddAsyncParent(SourceTextModuleRecord* parentModule);
+        void AddCycleMember(SourceTextModuleRecord* member);
+        void SettleCycleIfComplete();
+        static void GatherAvailableAncestors(SourceTextModuleRecord* module, ModuleRecordList* execList);
+        static uint64 NextAsyncEvaluationOrder();
 
         HRESULT PostParseProcess();
         HRESULT PrepareForModuleDeclarationInitialization();

@@ -945,7 +945,7 @@ private:
 
     template<bool buildAST> void ParseComputedName(ParseNodePtr* ppnodeName, LPCOLESTR* ppNameHint, LPCOLESTR* ppFullNameHint = nullptr, uint32 *pNameLength = nullptr, uint32 *pShortNameOffset = nullptr);
     template<bool buildAST> ParseNodeBin * ParseMemberGetSet(OpCode nop, LPCOLESTR* ppNameHint,size_t iecpMin, charcount_t ichMin);
-    template<bool buildAST> ParseNode * ParseFncDeclCheckScope(ushort flags, bool fAllowIn = true);
+    template<bool buildAST> ParseNode * ParseFncDeclCheckScope(ushort flags, bool fAllowIn = true, LPCOLESTR pNameHint = nullptr);
     template<bool buildAST> ParseNodeFnc * ParseFncDeclNoCheckScope(ushort flags, SuperRestrictionState::State superRestrictionState = SuperRestrictionState::Disallowed, LPCOLESTR pNameHint = nullptr, const bool needsPIDOnRCurlyScan = false, bool fUnaryOrParen = false, bool fAllowIn = true);
     template<bool buildAST> ParseNodeFnc * ParseFncDeclInternal(ushort flags, LPCOLESTR pNameHint, const bool needsPIDOnRCurlyScan, bool fUnaryOrParen, bool noStmtContext, SuperRestrictionState::State superRestrictionState = SuperRestrictionState::Disallowed, bool fAllowIn = true);
     template<bool buildAST> void ParseFncName(ParseNodeFnc * pnodeFnc, ushort flags, IdentPtr* pFncNamePid = nullptr);
@@ -991,7 +991,7 @@ private:
     ParseNodeFnc * CreateClassFieldInitializerFastScanStub();
     template<bool buildAST> ParseNodeClass * ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint, uint32 *pHintLength, uint32 *pShortNameOffset);
 
-    template<bool buildAST> ParseNodePtr ParseStringTemplateDecl(ParseNodePtr pnodeTagFnc);
+    template<bool buildAST> ParseNodePtr ParseStringTemplateDecl(ParseNodePtr pnodeTagFnc, bool isTagged = false);
 
     // This is used in the es6 class pattern.
     LPCOLESTR ConstructFinalHintNode(IdentPtr pClassName, IdentPtr pMemberName, IdentPtr pGetSet, bool isStatic, uint32* nameLength, uint32* pShortNameOffset, bool isComputedName = false, LPCOLESTR pMemberNameHint = nullptr);
@@ -1068,15 +1068,15 @@ private:
         charcount_t ichMin,
         _Out_opt_ BOOL* pfCanAssign = nullptr);
 
-    void CheckIfImportOrExportStatementValidHere();
+    void CheckIfImportOrExportStatementValidHere(bool isLabelled = false);
     bool IsTopLevelModuleFunc();
     void MakeModuleAsync();
 
-    template<bool buildAST> ParseNodePtr ParseImport();
+    template<bool buildAST> ParseNodePtr ParseImport(bool isLabelled = false);
     template<bool buildAST> void ParseImportClause(ModuleImportOrExportEntryList* importEntryList, bool parsingAfterComma = false);
     template<bool buildAST> ParseNodePtr ParseImportCall();
 
-    template<bool buildAST> ParseNodePtr ParseExportDeclaration(bool *needTerminator = nullptr);
+    template<bool buildAST> ParseNodePtr ParseExportDeclaration(bool *needTerminator = nullptr, bool isLabelled = false);
     template<bool buildAST> ParseNodePtr ParseDefaultExportClause();
 
     template<bool buildAST> void ParseNamedImportOrExportClause(ModuleImportOrExportEntryList* importOrExportEntryList, bool isExportClause);

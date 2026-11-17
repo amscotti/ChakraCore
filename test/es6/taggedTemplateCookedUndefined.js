@@ -68,9 +68,41 @@ var tests = [
         }
     },
     {
-        name: "control: untagged `\\08` stays accepted (e7-R1 owns the compound spelling)",
+        name: "template \\08 and \\09: untagged rejects, tagged cooks undefined with raw preserved",
         body: function () {
-            assert.areEqual("\0" + "8", eval("`\\08`;"), "untagged \\08 still cooks NUL + 8");
+            assert.throws(function () { eval("`\\08`;"); }, SyntaxError, "untagged \\08 rejects");
+            assert.throws(function () { eval("`\\09`;"); }, SyntaxError, "untagged \\09 rejects");
+            assert.throws(function () { eval("\"use strict\"; `\\08`;"); }, SyntaxError, "strict untagged \\08 rejects");
+            assert.throws(function () { eval("`a\\08${1}b\\09`;"); }, SyntaxError, "untagged multi-piece \\08/\\09 rejects");
+
+            var r8 = tagIdentity`\08`;
+            assert.isTrue(r8[0] === undefined, "tagged \\08 cooked is undefined");
+            assert.areEqual("\\08", r8.raw[0], "tagged \\08 raw preserved");
+
+            var r9 = tagIdentity`x\09${1}y\08`;
+            assert.isTrue(r9[0] === undefined && r9[1] === undefined, "tagged \\09/\\08 pieces cook undefined");
+            assert.areEqual("x\\09", r9.raw[0], "tagged \\09 raw piece preserved");
+            assert.areEqual("y\\08", r9.raw[1], "tagged \\08 raw piece preserved");
+
+            assert.areEqual("\0" + "a", eval("`\\0a`;"), "untagged \\0 followed by non-digit stays NUL + a");
+        }
+    },
+    {
+        name: "strict 08/09 numerics reject while sloppy stays decimal",
+        body: function () {
+            assert.throws(function () { eval("\"use strict\"; 08;"); }, SyntaxError, "strict 08 rejects");
+            assert.throws(function () { eval("\"use strict\"; 09;"); }, SyntaxError, "strict 09 rejects");
+            assert.throws(function () { eval("\"use strict\"; 08.5;"); }, SyntaxError, "strict 08.5 rejects");
+            assert.throws(function () { eval("\"use strict\"; 08e1;"); }, SyntaxError, "strict 08e1 rejects");
+            assert.throws(function () { eval("\"use strict\"; 078;"); }, SyntaxError, "strict 078 rejects");
+            assert.throws(function () { eval("\"use strict\"; ({08: 1});"); }, SyntaxError, "strict {08:1} rejects");
+            assert.throws(function () { eval("class C { 08() {} }"); }, SyntaxError, "class method 08 rejects");
+            assert.throws(function () { eval("08_0;"); }, SyntaxError, "sloppy 08_0 separator rejects");
+            assert.throws(function () { eval("09_0;"); }, SyntaxError, "sloppy 09_0 separator rejects");
+            assert.throws(function () { eval("WScript.LoadScript('08;', 'module');"); }, SyntaxError, "module 08 rejects");
+            assert.areEqual(8, eval("08;"), "sloppy 08 stays 8");
+            assert.areEqual(9, eval("09;"), "sloppy 09 stays 9");
+            assert.areEqual(8.5, eval("08.5;"), "sloppy 08.5 stays 8.5");
         }
     },
 ];

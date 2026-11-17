@@ -9,6 +9,7 @@
 #include "Types/SimpleDictionaryTypeHandler.h"
 #include "ModuleNamespace.h"
 #include "Library/JavascriptPromise.h"
+#include <atomic>
 
 namespace Js
 {
@@ -28,6 +29,9 @@ namespace Js
         starExportRecordList(nullptr),
         childrenModuleSet(nullptr),
         parentModuleList(nullptr),
+        asyncParentModules(nullptr),
+        cycleMembers(nullptr),
+        cycleRoot(nullptr),
         localExportMapByExportName(nullptr),
         localExportMapByLocalName(nullptr),
         localExportIndexList(nullptr),
@@ -41,7 +45,11 @@ namespace Js
         localSlotCount(InvalidSlotCount),
         promise(nullptr),
         importMetaObject(nullptr),
-        localExportCount(0)
+        localExportCount(0),
+        awaitedModules(0),
+        dfsIndex(0),
+        dfsAncestorIndex(0),
+        asyncEvaluationOrder(0)
     {
         namespaceRecord.module = this;
         namespaceRecord.bindingName = PropertyIds::star_;
@@ -71,6 +79,9 @@ namespace Js
         indirectExportRecordList = nullptr;
         starExportRecordList = nullptr;
         parentModuleList = nullptr;
+        asyncParentModules = nullptr;
+        cycleMembers = nullptr;
+        cycleRoot = nullptr;
         if (!isShutdown)
         {
             AdeleteUnlessNull(scriptContext->GeneralAllocator(), parser);
@@ -772,11 +783,6 @@ namespace Js
             {
                 this->parentModuleList->Add(parentRecord);
             }
-
-            if (IsEvaluating())
-            {
-                parentRecord->IncrementAwaited();
-            }
         }
     }
 
@@ -901,7 +907,7 @@ namespace Js
     {
         // zero out fields is more a defense in depth as those fields are not needed anymore
         Assert(wasParsed);
-        Assert(evaluating);
+        Assert(evaluating || evaluatingAsync);
         Assert(wasDeclarationInitialized);
         // Debugger can reparse the source and generate the byte code again. Don't cleanup the
         // helper information for now.
@@ -1093,14 +1099,124 @@ namespace Js
     }
 
 
+    uint64 SourceTextModuleRecord::NextAsyncEvaluationOrder()
+    {
+        static std::atomic<uint64> s_nextOrder{ 1 };
+        return s_nextOrder.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    void SourceTextModuleRecord::AddAsyncParent(SourceTextModuleRecord* parentModule)
+    {
+        Recycler* recycler = GetScriptContext()->GetRecycler();
+        if (this->asyncParentModules == nullptr)
+        {
+            this->asyncParentModules = RecyclerNew(recycler, ModuleRecordList, recycler);
+        }
+        if (!this->asyncParentModules->Contains(parentModule))
+        {
+            this->asyncParentModules->Add(parentModule);
+            parentModule->IncrementAwaited();
+        }
+    }
+
+    void SourceTextModuleRecord::AddCycleMember(SourceTextModuleRecord* member)
+    {
+        Recycler* recycler = GetScriptContext()->GetRecycler();
+        if (this->cycleMembers == nullptr)
+        {
+            this->cycleMembers = RecyclerNew(recycler, ModuleRecordList, recycler);
+        }
+        if (!this->cycleMembers->Contains(member))
+        {
+            this->cycleMembers->Add(member);
+        }
+    }
+
+    void SourceTextModuleRecord::SettleCycleIfComplete()
+    {
+        // Non-root members of an active async cycle stay !WasEvaluated() until
+        // their [[CycleRoot]] settles so dynamic import() waits for the whole cycle.
+        if (this->cycleRoot != nullptr && this->cycleRoot != this && !this->cycleRoot->WasEvaluated())
+        {
+            return;
+        }
+
+        if (this->cycleMembers != nullptr)
+        {
+            for (int i = 0; i < this->cycleMembers->Count(); ++i)
+            {
+                SourceTextModuleRecord* member = this->cycleMembers->Item(i);
+                if (!member->WasEvaluated())
+                {
+                    member->SetWasEvaluated();
+                }
+                if (member->GetPromise() != nullptr)
+                {
+                    ResolveOrRejectDynamicImportPromise(true, member->GetNamespace(), member->scriptContext, member, false);
+                }
+                if (member->GetIsRootModule())
+                {
+                    ReportModuleCompletion(member, nullptr);
+                }
+            }
+            return;
+        }
+
+        if (!this->WasEvaluated())
+        {
+            this->SetWasEvaluated();
+        }
+        if (this->promise != nullptr)
+        {
+            ResolveOrRejectDynamicImportPromise(true, GetNamespace(), scriptContext, this, false);
+        }
+        if (isRootModule)
+        {
+            ReportModuleCompletion(this, nullptr);
+        }
+    }
+
+    void SourceTextModuleRecord::ExecuteSyncModule()
+    {
+        CleanupBeforeExecution();
+        JavascriptGenerator* gen = static_cast<JavascriptGenerator*>(this->generator);
+        SetEvaluatingAsync(false);
+        this->asyncEvaluationOrder = 0;
+        AUTO_NESTED_HANDLED_EXCEPTION_TYPE((ExceptionType)(ExceptionType_OutOfMemory | ExceptionType_JavascriptException));
+        BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+        {
+            gen->CallGenerator(scriptContext->GetLibrary()->GetUndefined(), ResumeYieldKind::Normal);
+        }
+        END_SAFE_REENTRANT_CALL
+    }
+
+    void SourceTextModuleRecord::ExecuteAsyncModule()
+    {
+        CleanupBeforeExecution();
+        JavascriptGenerator* gen = static_cast<JavascriptGenerator*>(this->generator);
+        AUTO_NESTED_HANDLED_EXCEPTION_TYPE((ExceptionType)(ExceptionType_OutOfMemory | ExceptionType_JavascriptException));
+        BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+        {
+            JavascriptPromise* prom = JavascriptAsyncFunction::BeginAsyncFunctionExecution(this->generator);
+            auto* fulfilled = scriptContext->GetLibrary()->CreateAsyncModuleCallbackFunction(EntryAsyncModuleFulfilled, this);
+            auto* rejected = scriptContext->GetLibrary()->CreateAsyncModuleCallbackFunction(EntryAsyncModuleRejected, this);
+            auto* unused = JavascriptPromise::UnusedPromiseCapability(scriptContext);
+            JavascriptPromise::PerformPromiseThen(prom, unused, fulfilled, rejected, scriptContext);
+        }
+        END_SAFE_REENTRANT_CALL
+    }
+
     Var SourceTextModuleRecord::ModuleEvaluation()
     {
         OUTPUT_TRACE_DEBUGONLY(Js::ModulePhase, _u("ModuleEvaluation(%s)\n"), this->GetSpecifierSz());
 
-        if (WasEvaluated() || IsEvaluating() || !scriptContext->GetConfig()->IsES6ModuleEnabled())
+        if (WasEvaluated() || IsEvaluating() || IsEvaluatingAsync() || cycleRoot != nullptr || !scriptContext->GetConfig()->IsES6ModuleEnabled())
         {
             return nullptr;
         }
+
+        Recycler* recycler = scriptContext->GetRecycler();
+        ModuleRecordList* stack = RecyclerNew(recycler, ModuleRecordList, recycler);
 
         try
         {
@@ -1113,53 +1229,45 @@ namespace Js
             }
 
             Assert(this->errorObject == nullptr);
-            SetEvaluating(true);
-            
-            if (requestedModuleList != nullptr)
-            {
-                requestedModuleList->Reverse();
-                requestedModuleList->Map([&](ModuleRequestEntry requestEntry) {
-                    SourceTextModuleRecord* childModuleRecord = nullptr;
-                    LPCOLESTR moduleRequestKey = SourceTextModuleRecord::GetModuleRequestKey(scriptContext->GeneralAllocator(), requestEntry.specifier, requestEntry.attributes);
-                    AssertOrFailFast(childrenModuleSet->TryGetValue(moduleRequestKey, &childModuleRecord));
-
-                    childModuleRecord->ModuleEvaluation();
-                    // if child module was evaluated before and threw need to re-throw now
-                    // if child module has been dynamically imported and has exception need to throw
-                    if (childModuleRecord->GetErrorObject() != nullptr)
-                    {
-                        this->ReleaseParserResourcesForHierarchy();
-
-                        JavascriptExceptionOperators::Throw(childModuleRecord->GetErrorObject(), this->scriptContext);
-                    }
-                });
-            }
-            if (awaitedModules == 0)
-            {
-                FinishModuleEvaluation(true);
-            }
-            else
-            {
-                if (this->parentModuleList != nullptr)
-                {
-                    parentModuleList->Map([=](uint i, SourceTextModuleRecord* parentModule)
-                    {
-                        parentModule->IncrementAwaited();
-                    });
-                }
-            }
+            InnerModuleEvaluation(stack, 0);
         }
         catch (const Js::JavascriptException &err)
         {
+            JavascriptExceptionObject *exception = err.GetAndClear();
+            Var errorObject = exception->GetThrownObject(scriptContext);
+            AssertOrFailFastMsg(errorObject != nullptr, "ModuleEvaluation: null error object thrown from root function");
+
+            for (int i = 0; i < stack->Count(); ++i)
+            {
+                SourceTextModuleRecord* member = stack->Item(i);
+                member->SetEvaluating(false);
+                member->SetEvaluatingAsync(false);
+                member->asyncEvaluationOrder = 0;
+                if (!member->WasEvaluated())
+                {
+                    member->SetWasEvaluated();
+                }
+                if (member->errorObject == nullptr)
+                {
+                    member->errorObject = errorObject;
+                }
+                if (member->GetPromise() != nullptr)
+                {
+                    ResolveOrRejectDynamicImportPromise(false, errorObject, member->scriptContext, member, false);
+                }
+            }
+
+            SetEvaluating(false);
+            SetEvaluatingAsync(false);
+            this->asyncEvaluationOrder = 0;
             if (!WasEvaluated())
             {
                 SetWasEvaluated();
             }
-            SetEvaluating(false);
-            JavascriptExceptionObject *exception = err.GetAndClear();
-            Var errorObject = exception->GetThrownObject(scriptContext);
-            AssertOrFailFastMsg(errorObject != nullptr, "ModuleEvaluation: null error object thrown from root function");
-            this->errorObject = errorObject;
+            if (this->errorObject == nullptr)
+            {
+                this->errorObject = errorObject;
+            }
             if (this->promise != nullptr)
             {
                 ResolveOrRejectDynamicImportPromise(false, errorObject, scriptContext, this, false);
@@ -1173,103 +1281,147 @@ namespace Js
         return scriptContext->GetLibrary()->GetUndefined();
     }
 
-    void SourceTextModuleRecord::FinishModuleEvaluation(bool shouldIncrementAwait)
+    uint SourceTextModuleRecord::InnerModuleEvaluation(ModuleRecordList* stack, uint index)
     {
-        if (WasEvaluated())
+        if (IsEvaluating() || IsEvaluatingAsync() || WasEvaluated() || cycleRoot != nullptr)
+        {
+            Var existingError = this->GetErrorObject();
+            if (existingError != nullptr)
+            {
+                this->ReleaseParserResourcesForHierarchy();
+                JavascriptExceptionOperators::Throw(existingError, this->scriptContext);
+            }
+            return index;
+        }
+
+        Assert(this->errorObject == nullptr);
+        SetEvaluating(true);
+        this->dfsIndex = index;
+        this->dfsAncestorIndex = index;
+        this->awaitedModules = 0;
+        ++index;
+        stack->Add(this);
+
+        if (requestedModuleList != nullptr)
+        {
+            if (!requestedModulesReversed)
+            {
+                requestedModuleList->Reverse();
+                requestedModulesReversed = true;
+            }
+            requestedModuleList->Map([&](ModuleRequestEntry requestEntry) {
+                SourceTextModuleRecord* requiredModule = nullptr;
+                LPCOLESTR moduleRequestKey = SourceTextModuleRecord::GetModuleRequestKey(scriptContext->GeneralAllocator(), requestEntry.specifier, requestEntry.attributes);
+                AssertOrFailFast(childrenModuleSet->TryGetValue(moduleRequestKey, &requiredModule));
+
+                index = requiredModule->InnerModuleEvaluation(stack, index);
+
+                if (requiredModule->IsEvaluating())
+                {
+                    if (requiredModule->dfsAncestorIndex < this->dfsAncestorIndex)
+                    {
+                        this->dfsAncestorIndex = requiredModule->dfsAncestorIndex;
+                    }
+                }
+                else
+                {
+                    if (requiredModule->cycleRoot != nullptr)
+                    {
+                        requiredModule = requiredModule->cycleRoot;
+                    }
+                    Var childError = requiredModule->GetErrorObject();
+                    if (childError != nullptr)
+                    {
+                        this->ReleaseParserResourcesForHierarchy();
+                        JavascriptExceptionOperators::Throw(childError, this->scriptContext);
+                    }
+                }
+
+                if (requiredModule->asyncEvaluationOrder > 0)
+                {
+                    requiredModule->AddAsyncParent(this);
+                }
+            });
+        }
+
+        JavascriptGenerator* gen = static_cast<JavascriptGenerator*>(this->generator);
+        bool isAsyncMod = (gen != nullptr && gen->IsAsyncModule());
+
+        if (this->awaitedModules > 0 || isAsyncMod)
+        {
+            this->asyncEvaluationOrder = NextAsyncEvaluationOrder();
+            if (this->awaitedModules == 0)
+            {
+                this->ExecuteAsyncModule();
+            }
+        }
+        else
+        {
+            this->ExecuteSyncModule();
+        }
+
+        if (this->dfsAncestorIndex == this->dfsIndex)
+        {
+            while (true)
+            {
+                Assert(stack->Count() > 0);
+                SourceTextModuleRecord* member = stack->RemoveAtEnd();
+                member->SetEvaluating(false);
+                member->cycleRoot = this;
+                if (member->asyncEvaluationOrder > 0)
+                {
+                    member->SetEvaluatingAsync(true);
+                }
+                if (this->asyncEvaluationOrder > 0)
+                {
+                    this->AddCycleMember(member);
+                }
+                else
+                {
+                    if (!member->WasEvaluated())
+                    {
+                        member->SetWasEvaluated();
+                    }
+                    if (member->GetPromise() != nullptr)
+                    {
+                        ResolveOrRejectDynamicImportPromise(true, member->GetNamespace(), member->scriptContext, member, false);
+                    }
+                    if (member->GetIsRootModule())
+                    {
+                        ReportModuleCompletion(member, nullptr);
+                    }
+                }
+                if (member == this)
+                {
+                    break;
+                }
+            }
+        }
+
+        return index;
+    }
+
+    void SourceTextModuleRecord::GatherAvailableAncestors(SourceTextModuleRecord* module, ModuleRecordList* execList)
+    {
+        if (module->asyncParentModules == nullptr)
         {
             return;
         }
-
-        CleanupBeforeExecution();
-
-        JavascriptGenerator* gen = static_cast<JavascriptGenerator*> (generator);
-
-        AUTO_NESTED_HANDLED_EXCEPTION_TYPE((ExceptionType)(ExceptionType_OutOfMemory | ExceptionType_JavascriptException));
-        BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+        for (int i = 0; i < module->asyncParentModules->Count(); ++i)
         {
-            if (gen->IsAsyncModule())
+            SourceTextModuleRecord* parent = module->asyncParentModules->Item(i);
+            if (!execList->Contains(parent) && (parent->cycleRoot == nullptr || parent->cycleRoot->GetErrorObject() == nullptr))
             {
-                JavascriptPromise* prom = JavascriptAsyncFunction::BeginAsyncFunctionExecution(this->generator);
-                if (this->parentModuleList != nullptr && shouldIncrementAwait)
+                if (parent->DecrementAwaited() && parent->IsEvaluatingAsync())
                 {
-                    parentModuleList->Map([=](uint i, SourceTextModuleRecord* parentModule)
+                    Assert(parent->asyncEvaluationOrder > 0);
+                    execList->Add(parent);
+                    JavascriptGenerator* gen = static_cast<JavascriptGenerator*>(parent->generator);
+                    if (gen == nullptr || !gen->IsAsyncModule())
                     {
-                        parentModule->IncrementAwaited();
-                    });
+                        GatherAvailableAncestors(parent, execList);
+                    }
                 }
-                auto* fulfilled = scriptContext->GetLibrary()->CreateAsyncModuleCallbackFunction(EntryAsyncModuleFulfilled, this);
-                auto* rejected = scriptContext->GetLibrary()->CreateAsyncModuleCallbackFunction(EntryAsyncModuleRejected, this);
-                auto* unused = JavascriptPromise::UnusedPromiseCapability(scriptContext);
-                JavascriptPromise::PerformPromiseThen(prom, unused, fulfilled, rejected, scriptContext);
-            }
-            else
-            {
-                SetWasEvaluated();
-                SetEvaluating(false);
-                gen->CallGenerator(scriptContext->GetLibrary()->GetUndefined(), ResumeYieldKind::Normal);
-                if (this->parentModuleList != nullptr && !shouldIncrementAwait)
-                {
-                    parentModuleList->Map([=](uint i, SourceTextModuleRecord* parentModule)
-                    {
-                        if (parentModule->DecrementAwaited())
-                        {
-                            if(parentModule->IsEvaluating())
-                            {
-                                parentModule->FinishModuleEvaluation(false);
-                            }
-                        }
-                    });
-                }
-                if (this->promise != nullptr)
-                {
-                    ResolveOrRejectDynamicImportPromise(true, GetNamespace(), scriptContext, this, false);
-                }
-                if (isRootModule)
-                {
-                    ReportModuleCompletion(this, nullptr);
-                }
-            }
-        }
-        END_SAFE_REENTRANT_CALL
-    }
-
-    void SourceTextModuleRecord::DecrementAndEvaluateIfNothingAwaited()
-    {
-        if (DecrementAwaited())
-        {
-            // A cyclic importer can receive this decrement from a child's
-            // async completion before its own evaluation has started (e.g.
-            // a dynamically imported module whose load message is still
-            // queued while a child it imports in a cycle already finished).
-            // FinishModuleEvaluation on a module that never began evaluating
-            // would dereference its null generator and tripped asserts on
-            // wasParsed/evaluating/declaration-initialized state. Mirrors the
-            // IsEvaluating() guard at the other DecrementAwaited call site
-            // in FinishModuleEvaluation. The awaited-count bookkeeping stays
-            // balanced: the module's own ModuleEvaluation later sees
-            // awaitedModules == 0 and evaluates normally.
-            if (!IsEvaluating())
-            {
-                return;
-            }
-            JavascriptExceptionObject *exception = nullptr;
-            try
-            {
-                FinishModuleEvaluation(false);
-            }
-            catch (const Js::JavascriptException &err)
-            {
-                if (!WasEvaluated())
-                {
-                    SetWasEvaluated();
-                }
-                SetEvaluating(false);
-                exception = err.GetAndClear();
-                Var errorObject = exception->GetThrownObject(scriptContext);
-                AssertOrFailFastMsg(errorObject != nullptr, "ModuleEvaluation: null error object thrown from root function");
-
-                PropogateRejection(errorObject);
-                return;
             }
         }
     }
@@ -1279,23 +1431,66 @@ namespace Js
         CallInfo callInfo, ...)
     {
         SourceTextModuleRecord* module = VarTo<AsyncModuleCallbackFunction>(function)->module;
-        module->SetEvaluating(false);
-        module->SetWasEvaluated();
-        if (module->parentModuleList != nullptr)
+        if (module->WasEvaluated() || module->asyncEvaluationOrder == 0)
         {
-            module->parentModuleList->Map([=](uint i, SourceTextModuleRecord* parentModule)
-            {
-                parentModule->DecrementAndEvaluateIfNothingAwaited();
-            });
+            return function->GetLibrary()->GetUndefined();
+        }
+        if (module->GetErrorObject() != nullptr)
+        {
+            return function->GetLibrary()->GetUndefined();
         }
 
-        if (module->GetPromise() != nullptr)
+        module->SetEvaluatingAsync(false);
+        module->asyncEvaluationOrder = 0;
+        module->SettleCycleIfComplete();
+
+        ModuleRecordList* execList = RecyclerNew(module->scriptContext->GetRecycler(), ModuleRecordList, module->scriptContext->GetRecycler());
+        GatherAvailableAncestors(module, execList);
+
+        for (int i = 1; i < execList->Count(); ++i)
         {
-            ResolveOrRejectDynamicImportPromise(true, module->GetNamespace(), module->scriptContext, module, false);
+            SourceTextModuleRecord* key = execList->Item(i);
+            int j = i - 1;
+            while (j >= 0 && execList->Item(j)->asyncEvaluationOrder > key->asyncEvaluationOrder)
+            {
+                execList->SetItem(j + 1, execList->Item(j));
+                --j;
+            }
+            execList->SetItem(j + 1, key);
         }
-        else if (module->GetIsRootModule())
+
+        for (int i = 0; i < execList->Count(); ++i)
         {
-            ReportModuleCompletion(module, nullptr);
+            SourceTextModuleRecord* m = execList->Item(i);
+            if (m->WasEvaluated() || m->GetErrorObject() != nullptr)
+            {
+                continue;
+            }
+            JavascriptGenerator* gen = static_cast<JavascriptGenerator*>(m->generator);
+            if (gen != nullptr && gen->IsAsyncModule())
+            {
+                m->ExecuteAsyncModule();
+            }
+            else
+            {
+                Var thrownError = nullptr;
+                try
+                {
+                    m->ExecuteSyncModule();
+                }
+                catch (const Js::JavascriptException& err)
+                {
+                    thrownError = err.GetAndClear()->GetThrownObject(m->scriptContext);
+                }
+                if (thrownError != nullptr)
+                {
+                    m->PropogateRejection(thrownError);
+                }
+                else
+                {
+                    m->SettleCycleIfComplete();
+                }
+            }
         }
 
         return function->GetLibrary()->GetUndefined();
@@ -1319,6 +1514,8 @@ namespace Js
     void SourceTextModuleRecord::PropogateRejection(Var reason)
     {
         SetEvaluating(false);
+        SetEvaluatingAsync(false);
+        asyncEvaluationOrder = 0;
         if (wasEvaluated)
         {
             return;
@@ -1327,17 +1524,6 @@ namespace Js
         SetWasEvaluated();
 
         this->errorObject = reason;
-        if (this->parentModuleList != nullptr)
-        {
-            parentModuleList->Map([=](uint i, SourceTextModuleRecord* parentModule)
-            {
-                if (parentModule->GetErrorObject() == nullptr)
-                {
-                    parentModule->PropogateRejection(reason);
-                }
-            });
-        }
-
         if (this->promise != nullptr)
         {
             ResolveOrRejectDynamicImportPromise(false, reason, scriptContext, this, false);
@@ -1345,6 +1531,44 @@ namespace Js
         if (isRootModule)
         {
             ReportModuleCompletion(this, errorObject);
+        }
+
+        if (this->cycleMembers != nullptr)
+        {
+            for (int i = 0; i < this->cycleMembers->Count(); ++i)
+            {
+                SourceTextModuleRecord* member = this->cycleMembers->Item(i);
+                if (member != this)
+                {
+                    member->SetEvaluating(false);
+                    member->SetEvaluatingAsync(false);
+                    member->asyncEvaluationOrder = 0;
+                    if (!member->WasEvaluated())
+                    {
+                        member->SetWasEvaluated();
+                    }
+                    if (member->GetPromise() != nullptr)
+                    {
+                        ResolveOrRejectDynamicImportPromise(false, reason, member->scriptContext, member, false);
+                    }
+                    if (member->GetIsRootModule())
+                    {
+                        ReportModuleCompletion(member, reason);
+                    }
+                }
+            }
+        }
+
+        if (this->asyncParentModules != nullptr)
+        {
+            for (int i = 0; i < this->asyncParentModules->Count(); ++i)
+            {
+                SourceTextModuleRecord* parentModule = this->asyncParentModules->Item(i);
+                if (parentModule->errorObject == nullptr)
+                {
+                    parentModule->PropogateRejection(reason);
+                }
+            }
         }
     }
 

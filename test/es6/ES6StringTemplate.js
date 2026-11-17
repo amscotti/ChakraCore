@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 
@@ -547,10 +548,11 @@ after`;
         }
     },
     {
-        name: "String template converts `\\0` into a null character - not an octal escape sequence",
+        name: "String template converts `\\0` into a null character while rejecting `\\08`/`\\09` untagged escapes",
         body: function() {
             assert.areEqual('\0', `\0`, "Simple null escape sequence in string template is treated the same as in a normal string");
-            assert.areEqual('\08', `\08`, "Null escape sequence followed by non-octal number is valid");
+            assert.throws(function() { eval("`\\08`"); }, SyntaxError, "Untagged \\08 rejects as invalid template escape (ES2018+)");
+            assert.throws(function() { eval("`\\09`"); }, SyntaxError, "Untagged \\09 rejects as invalid template escape (ES2018+)");
             assert.areEqual('\0abc', `\0abc`, "Null escape sequence followed by non-number is valid");
             assert.areEqual('\0\0', `\0\0`, "Null escape sequence followed by another null escape sequence is valid");
 

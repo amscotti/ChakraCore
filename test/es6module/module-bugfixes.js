@@ -198,6 +198,84 @@ var tests = [
 
             testRunner.LoadModule('import "test5236a";', undefined, false);
         }
+    },
+    {
+        name: "Deferred import reassignment TypeError, default binding update, anon default .name, and NamedEvaluation o[expr]",
+        body()
+        {
+            WScript.RegisterModuleSource("deferConstTarget", `
+                export var v = 1;
+                export function fn() {}
+                export function* gen() {}
+            `);
+            testRunner.LoadModule(`
+                import { v, fn, gen } from "deferConstTarget";
+                import * as ns from "deferConstTarget";
+                assert.throws(() => { v = 2; }, TypeError, "deferred import var reassignment throws");
+                assert.throws(() => { fn = null; }, TypeError, "deferred import fn reassignment throws");
+                assert.throws(() => { gen = null; }, TypeError, "deferred import gen reassignment throws");
+                assert.throws(() => { ns = null; }, TypeError, "deferred import namespace reassignment throws");
+            `);
+
+            WScript.RegisterModuleSource("dfltFnUpdate", `
+                export default function fn() {
+                    fn = 2;
+                    return 1;
+                }
+            `);
+            WScript.RegisterModuleSource("dfltClsUpdate", `
+                export default class Cls {}
+                Cls = 42;
+            `);
+            testRunner.LoadModule(`
+                import fnVal from "dfltFnUpdate";
+                import clsVal from "dfltClsUpdate";
+                assert.areEqual(1, fnVal());
+                assert.areEqual(2, fnVal, "default exported named function binding updates default export");
+                assert.areEqual(42, clsVal, "default exported named class outer binding updates default export");
+            `);
+
+            WScript.RegisterModuleSource("anonFn", "export default function() {}");
+            WScript.RegisterModuleSource("anonGen", "export default function*() {}");
+            WScript.RegisterModuleSource("anonAsync", "export default async function() {}");
+            WScript.RegisterModuleSource("anonParenFn", "export default (function() {});");
+            WScript.RegisterModuleSource("anonParenGen", "export default (function*() {});");
+            WScript.RegisterModuleSource("anonParenCls", "export default (class {});");
+            WScript.RegisterModuleSource("anonArrow", "export default () => {};");
+            WScript.RegisterModuleSource("namedParenFn", "export default (function named() {});");
+            testRunner.LoadModule(`
+                import fn from "anonFn";
+                import gen from "anonGen";
+                import afn from "anonAsync";
+                import pfn from "anonParenFn";
+                import pgen from "anonParenGen";
+                import pcls from "anonParenCls";
+                import arr from "anonArrow";
+                import nfn from "namedParenFn";
+                assert.areEqual("default", fn.name);
+                assert.areEqual("default", gen.name);
+                assert.areEqual("default", afn.name);
+                assert.areEqual("default", pfn.name);
+                assert.areEqual("default", pgen.name);
+                assert.areEqual("default", pcls.name);
+                assert.areEqual("default", arr.name);
+                assert.areEqual("named", nfn.name);
+            `);
+
+            function q() { return "xy"; }
+            var o = {};
+            o[q()] = class {};
+            o[q] = class {};
+            o[0] = class {};
+            o["ab"] = class {};
+            var o2 = {};
+            o2[q] = class NamedCls {};
+            assert.areEqual("", o.xy.name, "o[q()] = class {} has empty name");
+            assert.areEqual("", o[q].name, "o[q] = class {} has empty name");
+            assert.areEqual("", o[0].name, "o[0] = class {} has empty name");
+            assert.areEqual("", o.ab.name, "o['ab'] = class {} has empty name");
+            assert.areEqual("NamedCls", o2[q].name, "named class expression preserves its name");
+        }
     }
 ];
 

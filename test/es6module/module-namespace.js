@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 
@@ -314,6 +315,33 @@ var tests = [
                 `;
             testModuleScript(functionBody, "Test importing as different binding identifiers", false);
        }
+    },
+    {
+        name: "B1-4/B1-10: strict [[Set]], [[Delete]], and @@toStringTag on module namespace",
+        body: function () {
+            let functionBody =
+                `import * as ns from "ValidExportStatements.js";
+                assert.throws(() => { "use strict"; ns.var1 = 99; }, TypeError, "strict set on existing export throws");
+                assert.throws(() => { "use strict"; ns.var1 = ns.var1; }, TypeError, "strict set with same value throws");
+                assert.throws(() => { "use strict"; ns.non_existing = 1; }, TypeError, "strict set on non-exported key throws");
+                assert.throws(() => { "use strict"; ns[4] = 1; }, TypeError, "strict set on index throws");
+                assert.throws(() => { "use strict"; ns[Symbol.toStringTag] = "Other"; }, TypeError, "strict set on Symbol.toStringTag throws");
+                assert.throws(() => { "use strict"; ns[Symbol("s")] = 1; }, TypeError, "strict set on unknown symbol throws");
+
+                assert.throws(() => { "use strict"; delete ns.var1; }, TypeError, "strict delete on exported key throws");
+                assert.throws(() => { "use strict"; delete ns[Symbol.toStringTag]; }, TypeError, "strict delete on Symbol.toStringTag throws");
+                assert.isTrue((() => { "use strict"; return delete ns.non_existing; })(), "strict delete on non-exported key returns true");
+                assert.isTrue((() => { "use strict"; return delete ns[Symbol("s")]; })(), "strict delete on unknown symbol returns true");
+
+                const tagDesc = Object.getOwnPropertyDescriptor(ns, Symbol.toStringTag);
+                assert.areEqual("Module", tagDesc.value, "Symbol.toStringTag value");
+                assert.isFalse(tagDesc.writable, "Symbol.toStringTag writable");
+                assert.isFalse(tagDesc.enumerable, "Symbol.toStringTag enumerable");
+                assert.isFalse(tagDesc.configurable, "Symbol.toStringTag configurable");
+                assert.areEqual("[object Module]", Object.prototype.toString.call(ns), "Object.prototype.toString");
+                `;
+            testModuleScript(functionBody, "Strict namespace [[Set]]/[[Delete]] and @@toStringTag", false);
+        }
     },
 ];
 

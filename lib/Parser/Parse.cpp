@@ -1500,6 +1500,16 @@ Symbol* Parser::AddDeclForPid(ParseNodeVar * pnodeVar, IdentPtr pid, SymbolType 
                 // If !errorOnRedecl, (old) let/const hides the (new) var, so do nothing.
                 break;
             case knopVarDecl:
+                if (errorOnRedecl &&
+                    IsTopLevelModuleFunc() &&
+                    blockInfo->pnodeBlock == GetCurrentFunctionNode()->pnodeBodyScope &&
+                    (symbolType == STFunction || sym->GetSymbolType() == STFunction))
+                {
+                    // Module top-level LexicallyDeclaredNames (including hoisted
+                    // function declarations) cannot collide with each other or with
+                    // VarDeclaredNames (ES2025 16.2.1.1 Static Semantics: Early Errors).
+                    Error(ERRRedeclaration);
+                }
                 // Legal redeclaration. Who wins?
                 if (errorOnRedecl || sym->GetDecl()->AsParseNodeVar()->isBlockScopeFncDeclVar || sym->IsArguments())
                 {
@@ -3505,7 +3515,7 @@ void Parser::ParseImportClause(ModuleImportOrExportEntryList* importEntryList, b
     }
 }
 
-void Parser::CheckIfImportOrExportStatementValidHere()
+void Parser::CheckIfImportOrExportStatementValidHere(bool isLabelled)
 {
     ParseNodeFnc * curFunc = GetCurrentFunctionNode();
 
@@ -3517,7 +3527,8 @@ void Parser::CheckIfImportOrExportStatementValidHere()
     if (this->m_currentBlockInfo->pnodeBlock != curFunc->pnodeBodyScope
         || (this->m_grfscr & fscrEvalCode) == fscrEvalCode
         || this->m_tryCatchOrFinallyDepth != 0
-        || this->m_disallowImportExportStmt)
+        || this->m_disallowImportExportStmt
+        || isLabelled)
     {
         Error(ERRInvalidModuleImportOrExport);
     }
@@ -3575,7 +3586,7 @@ template<bool buildAST> ParseNodePtr Parser::ParseImportCall()
 }
 
 template<bool buildAST>
-ParseNodePtr Parser::ParseImport()
+ParseNodePtr Parser::ParseImport(bool isLabelled)
 {
     Assert(m_scriptContext->GetConfig()->IsES6ModuleEnabled());
     Assert(m_token.tk == tkIMPORT);
@@ -3608,7 +3619,7 @@ ParseNodePtr Parser::ParseImport()
 
     this->GetScanner()->SeekTo(parsedImport);
 
-    CheckIfImportOrExportStatementValidHere();
+    CheckIfImportOrExportStatementValidHere(isLabelled);
 
     // We just parsed an import token. Next valid token is *, {, string constant, or binding identifier.
     this->GetScanner()->Scan();
@@ -3708,6 +3719,9 @@ ParseNodePtr Parser::ParseDefaultExportClause()
     this->GetScanner()->Scan();
     ParseNodePtr pnode = nullptr;
     ushort flags = fFncNoFlgs;
+    IdentPtr localName = wellKnownPropertyPids._default;
+    const LPCOLESTR defaultNameHint = _u("default");
+    const uint32 defaultNameHintLength = 7;
 
     switch (m_token.tk)
     {
@@ -3732,8 +3746,8 @@ ParseNodePtr Parser::ParseDefaultExportClause()
         ParseNodeClass * pnodeClass;
         // An anonymous default-exported class is named "default" before its
         // static field initializers run (NamedEvaluation at export binding).
-        LPCOLESTR classNameHint = classHasName ? nullptr : _u("default");
-        uint32 classNameHintLength = classHasName ? 0 : 7;
+        LPCOLESTR classNameHint = classHasName ? nullptr : defaultNameHint;
+        uint32 classNameHintLength = classHasName ? 0 : defaultNameHintLength;
         uint32 classNameHintOffset = 0;
         pnode = pnodeClass = ParseClassDecl<buildAST>(
             classHasName, classNameHint,
@@ -3746,6 +3760,12 @@ ParseNodePtr Parser::ParseDefaultExportClause()
             Assert(pnode->nop == knopClassDecl);
 
             pnodeClass->SetIsDefaultModuleExport(true);
+            if (classHasName)
+            {
+                pnodeClass->pnodeDeclName->sym->SetIsModuleExportStorage(true);
+                localName = pnodeClass->pnodeName->pid;
+                localName->SetIsModuleExport();
+            }
         }
 
         break;
@@ -3803,21 +3823,37 @@ ParseNodePtr Parser::ParseDefaultExportClause()
 
         // Rewind back to the function token and let the helper handle the parsing.
         this->GetScanner()->SeekTo(parsedFunction);
-        pnode = ParseFncDeclCheckScope<buildAST>(flags);
+        LPCOLESTR fncNameHint = (flags & fFncNoName) ? defaultNameHint : nullptr;
+        pnode = ParseFncDeclCheckScope<buildAST>(flags, true, fncNameHint);
 
         if (buildAST)
         {
             AnalysisAssert(pnode != nullptr);
             Assert(pnode->nop == knopFncDecl);
 
-            pnode->AsParseNodeFnc()->SetIsDefaultModuleExport(true);
+            ParseNodeFnc * pnodeFnc = pnode->AsParseNodeFnc();
+            pnodeFnc->SetIsDefaultModuleExport(true);
+            if (flags & fFncNoName)
+            {
+                pnodeFnc->hint = defaultNameHint;
+                pnodeFnc->hintLength = defaultNameHintLength;
+                pnodeFnc->hintOffset = 0;
+            }
+            else if (flags & fFncDeclaration)
+            {
+                pnodeFnc->GetFuncSymbol()->SetIsModuleExportStorage(true);
+                localName = pnodeFnc->pid;
+                localName->SetIsModuleExport();
+            }
         }
         break;
     }
     default:
     LDefault:
     {
-        ParseNodePtr pnodeExpression = ParseExpr<buildAST>();
+        uint32 hintLength = defaultNameHintLength;
+        uint32 hintOffset = 0;
+        ParseNodePtr pnodeExpression = ParseExpr<buildAST>(koplNo, nullptr, TRUE, FALSE, defaultNameHint, &hintLength, &hintOffset);
 
         // Consider: Can we detect this syntax error earlier?
         if (pnodeExpression && pnodeExpression->nop == knopComma)
@@ -3828,6 +3864,27 @@ ParseNodePtr Parser::ParseDefaultExportClause()
         if (buildAST)
         {
             AnalysisAssert(pnodeExpression != nullptr);
+
+            if (pnodeExpression->nop == knopFncDecl)
+            {
+                ParseNodeFnc * pnodeFnc = pnodeExpression->AsParseNodeFnc();
+                if (pnodeFnc->pnodeName == nullptr && pnodeFnc->hint == nullptr)
+                {
+                    pnodeFnc->hint = defaultNameHint;
+                    pnodeFnc->hintLength = hintLength;
+                    pnodeFnc->hintOffset = hintOffset;
+                }
+            }
+            else if (pnodeExpression->nop == knopClassDecl)
+            {
+                ParseNodeClass * pnodeClass = pnodeExpression->AsParseNodeClass();
+                if (pnodeClass->pnodeName == nullptr && pnodeClass->pnodeConstructor != nullptr && pnodeClass->pnodeConstructor->hint == nullptr)
+                {
+                    pnodeClass->pnodeConstructor->hint = defaultNameHint;
+                    pnodeClass->pnodeConstructor->hintLength = hintLength;
+                    pnodeClass->pnodeConstructor->hintOffset = hintOffset;
+                }
+            }
 
             // Mark this node as the default module export. We need to make sure it is put into the correct
             // module export slot when we emit the node.
@@ -3840,18 +3897,18 @@ ParseNodePtr Parser::ParseDefaultExportClause()
     }
 
     IdentPtr exportName = wellKnownPropertyPids._default;
-    AddModuleImportOrExportEntry(EnsureModuleLocalExportEntryList(), nullptr, exportName, exportName, nullptr);
+    AddModuleImportOrExportEntry(EnsureModuleLocalExportEntryList(), nullptr, localName, exportName, nullptr);
 
     return pnode;
 }
 
 template<bool buildAST>
-ParseNodePtr Parser::ParseExportDeclaration(bool *needTerminator)
+ParseNodePtr Parser::ParseExportDeclaration(bool *needTerminator, bool isLabelled)
 {
     Assert(m_scriptContext->GetConfig()->IsES6ModuleEnabled());
     Assert(m_token.tk == tkEXPORT);
 
-    CheckIfImportOrExportStatementValidHere();
+    CheckIfImportOrExportStatementValidHere(isLabelled);
 
     ParseNodePtr pnode = nullptr;
     IdentPtr moduleIdentifier = nullptr;
@@ -5421,11 +5478,12 @@ ParseNodePtr Parser::ParsePostfixOperators(
             if (pnode != nullptr)
             {
                 AutoMarkInParsingArgs autoMarkInParsingArgs(this);
-                templateNode = ParseStringTemplateDecl<buildAST>(pnode);
+                templateNode = ParseStringTemplateDecl<buildAST>(pnode, true);
             }
             else
             {
-                templateNode = ParseStringTemplateDecl<buildAST>(pnode);
+                AutoMarkInParsingArgs autoMarkInParsingArgs(this);
+                templateNode = ParseStringTemplateDecl<buildAST>(pnode, true);
             }
 
             if (!buildAST)
@@ -6520,7 +6578,7 @@ BOOL Parser::IsDeferredFnc()
 }
 
 template<bool buildAST>
-ParseNode * Parser::ParseFncDeclCheckScope(ushort flags, bool fAllowIn)
+ParseNode * Parser::ParseFncDeclCheckScope(ushort flags, bool fAllowIn, LPCOLESTR pNameHint)
 {
     ParseNodeBlock * pnodeFncBlockScope = nullptr;
     ParseNodePtr *ppnodeScopeSave = nullptr;
@@ -6548,7 +6606,7 @@ ParseNode * Parser::ParseFncDeclCheckScope(ushort flags, bool fAllowIn)
         }
     }
 
-    ParseNodeFnc * pnodeFnc = ParseFncDeclInternal<buildAST>(flags, nullptr, /* needsPIDOnRCurlyScan */ false, /* fUnaryOrParen */ false, noStmtContext, SuperRestrictionState::Disallowed, fAllowIn);
+    ParseNodeFnc * pnodeFnc = ParseFncDeclInternal<buildAST>(flags, pNameHint, /* needsPIDOnRCurlyScan */ false, /* fUnaryOrParen */ false, noStmtContext, SuperRestrictionState::Disallowed, fAllowIn);
 
     if (pnodeFncBlockScope)
     {
@@ -11456,7 +11514,7 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
 }
 
 template<bool buildAST>
-ParseNodePtr Parser::ParseStringTemplateDecl(ParseNodePtr pnodeTagFnc)
+ParseNodePtr Parser::ParseStringTemplateDecl(ParseNodePtr pnodeTagFnc, bool isTagged)
 {
     ParseNodePtr pnodeStringLiterals = nullptr;
     ParseNodePtr* lastStringLiteralNodeRef = nullptr;
@@ -11471,7 +11529,7 @@ ParseNodePtr Parser::ParseStringTemplateDecl(ParseNodePtr pnodeTagFnc)
     ParseNodeStrTemplate * pnodeStringTemplate = nullptr;
     ParseNode * pnodeReturn = nullptr;
     bool templateClosed = false;
-    const bool isTagged = pnodeTagFnc != nullptr;
+    Assert(!isTagged || !buildAST || pnodeTagFnc != nullptr);
     uint16 stringConstantCount = 0;
     charcount_t ichMin = 0;
 
@@ -12642,7 +12700,7 @@ ParseNodePtr Parser::ParseExpr(int oplMin,
                         }
                     }
                 }
-                else if (pnode2->nop == knopClassDecl && pnode1->nop == knopDot)
+                else if (pnode2->nop == knopClassDecl && (pnode1->nop == knopDot || pnode1->nop == knopIndex))
                 {
                     Assert(pnode2->AsParseNodeClass()->pnodeConstructor);
 
@@ -14577,7 +14635,7 @@ LRestart:
         goto LNeedTerminator;
 
     case tkIMPORT:
-        pnode = ParseImport<buildAST>();
+        pnode = ParseImport<buildAST>(labelledStatement);
 
         goto LNeedTerminator;
 
@@ -14589,7 +14647,7 @@ LRestart:
         }
 
         bool needTerminator = false;
-        pnode = ParseExportDeclaration<buildAST>(&needTerminator);
+        pnode = ParseExportDeclaration<buildAST>(&needTerminator, labelledStatement);
 
         if (needTerminator)
         {
