@@ -17,6 +17,8 @@ Verification probes live in the sweep session log; the one-line evidence is
 quoted per card. Corpus runs used `tools/test262/run.py` on the pinned
 checkout (`out/test262`).
 
+> **Wave 3 sync (2026-11-17, `40c2fe5be`):** Test262 now stands at **Certified ES2025 edition conformance: 98.89% (79,648 passed / 896 failed / 80,544 scenarios)**; broad conformance **86.41% (80,486 / 12,655 / 93,141)**; failure buckets post-ES2025 `11,759`, `engine-defect-on-existing` `846`, `required-feature-missing` `34`, `host` `16`; negative phase `8,741` passed, `0` shape-suspects, `1` marker downgrade (`refresh-2026-11-17`, macOS ARM64, corpus `2e0a5676`, [baseline-register.json](../tools/test262/baseline-register.json)). This supersedes the 97.75% / 97.45% figures below, which are retained as history. Closures: §13.
+
 ## Counts by status (updated 2026-11-17 at `06d783c64`)
 
 Snapshot counts below preserve the `2026-11-05` audit ledger (`77,595 / 2,949`),
@@ -41,6 +43,7 @@ timeouts) plus post-review hardening (`193c95046..06d783c64`).
 | open, e12 fulljit SIGSEGV family (deterministic 109 + load-only crasher, below) | 2 | **109-test family closed by e14 (`LowerNewClassConstructor`); load-only crasher open** |
 | record-only, e12 (dynapogo variant needs jit-profile binary) | 1 | JIT profile verified on Mac (`-Dprofile=jit`) and Linux (`81be961a1`: `2868/0` interp, `2330/0` dynapogo) |
 | open, e13 swarm-triage disposition (below) | 4 | **T3 & `WScriptJsrt.cpp` split closed in Stage 2**; 2 low-severity items remain open |
+| closed, Tiers 1-5 pre-Linux (§13) | 8 families | see §13 |
 | closed, Stage 2/3 & Linux/post-review hardening (§11, §12) | 11+ | **Stage 2/3 receipts (`c24266598`), Linux bring-up (`4778b3a2b..c639e9f02`), & post-review fixes (`193c95046..06d783c64`)** |
 
 ---
@@ -290,3 +293,20 @@ Cards surfaced by the Stage 1 architecture audit (`arch-audit`) and resolved acr
 | Local Node `v26.12.1` vs pinned `v22.22.3` caveat on Linux Node-API matrix | Linux Phase 4 receipt (`c639e9f02`) | open (parity check, low) | Linux Phase 4 (`18/18` probes, `5x` stress, `46/23/0`, `52/61/6`) passed locally under Node `v26.12.1` and hosted CI `nodeapi` leg passed (`44054742113`), while canonical pinned Node is `v22.22.3`. |
 | `Octane/earley-boyer.js` 30x & `test/es7/class-private-methods.js` 50x Linux JIT flake checks | `doc/linux-handoff.md` Phase 5 | open (stress, low) | Linux bring-up verified full `2868/0` + `2330/0` regression and `65/65` JIT benchmarks (`5x`), but the dedicated 30x `earley-boyer` and 50x `class-private-methods` stress loops remain unrun on Linux x64. |
 | `linux_exports_{so,ch}.txt` vs legacy CMake comparison & `linux.zig` `check-wasm` target | `doc/linux-handoff.md` Phase 2/3, `check_metadata_linux.py` | open (tooling, low) | `release-shared` exports (`234`) vs `test` (`237`, +3 `JsPrivate*`) are verified against committed `linux_exports_so.txt`, which still lacks a fresh diff against a legacy CMake Ninja build; `tools/build/linux.zig` has no `check-wasm` step (Linux `66/66` debug WASM ran via `runtests.py`). |
+
+## 13. Tiers 1-5 pre-Linux closure (2026-11-17, `40c2fe5be`, macOS ARM64)
+
+Cards closed by Wave 1-3 work. Evidence: `check` 2064/0, `debug-static` 2116/0, `check-sanitize` 26/26 (`address`, `undefined`), `check-wasm` P1 382/382, `check-fulljit` 615/0, `check-gcstress` PASS, `check-package` PASS.
+
+| Card family | Tier | Status | Evidence / notes |
+|---|---|---|---|
+| Sanitizer lane (ASan/UBSan/TSan), `check-wasm`/`check-gcstress`/`check-fulljit` gates, `regenByteCode.py` create-on-refuse | 1 | **closed on macOS** (TSan: Linux-only, owed) | `-Dsanitize=` option in `build.zig`/`linux.zig`; supersedes the §12 "sanitizer lane" and `check-wasm` Linux-target residuals' build-side half. Linux execution still owed |
+| RegExp flag-block (`#40`): `ES6RegExSymbols`, `ES6RegExPrototypeProperties` | 2 | **closed: default ON** | `Lower.cpp` fast-path guards, stack regex boxing, legacy flag pinning; edition `disabled-flag` bucket eliminated |
+| Array/TypedArray `toLocaleString` forwarding, integer-index `configurable`, `Reflect.set`, `unshift` setter, `join` length | 3 | **closed** | engine fixes + tests |
+| Module semantics: namespace strict `[[Set]]`/`[[Delete]]`, duplicate lexical decls, labelled import/export, anonymous default export names, TLA Tarjan SCC | 3 | **closed** | parser/module fixes |
+| Strict `08`/`09`, template `\\08`/`\\09`, `o[expr] = class{}` NamedEvaluation | 3 | **closed** | parser/bytecode fixes |
+| `e3-R3` cross-realm derived ctor, `e3-R4` indirect eval; 4 UBSan/ASan engine fixes; signed-shift UB audit (`ToInt32Core`/`TryToInt64`) | 3 | **closed** | `check-sanitize` 26/26 clean for `address` and `undefined` |
+| WASM multi-value pop order / tuple return, `isBlockParam` pinning, ARM64 NEON SIMD stack layout, JIT tier-up | 4 | **closed** | `check-wasm` P1 382/382, `check-fulljit` 615/0 |
+| B5 release packaging (`package`, `check-package`, `MANIFEST.json`) | 5 | **closed on macOS** | [b5-package.md](b5-package.md); Linux packaging run owed |
+
+Remaining open after this section: Linux x64 revalidation ([linux-handoff.md](linux-handoff.md) §0), TSan, committed Linux benchmark JSON, pinned Node 22 matrix, historic stress runs, B6 Windows.

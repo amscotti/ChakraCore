@@ -12,6 +12,8 @@ the 2026-11-05 refresh delta reconciliation is [c4-refresh.md](c4-refresh.md).
 **This manifest records a measurement; it does not claim ES2025
 conformance** — 1,813 edition-selected failures remain (§2).
 
+> **Wave 3 refresh (`refresh-2026-11-17`, macOS ARM64, `40c2fe5be`, corpus `2e0a5676`):** edition-selected **98.89% (79,648 / 896 of 80,544)**; broad **86.41% (80,486 / 12,655 of 93,141)**. Failure buckets: post-ES2025 (excluded) `11,759`, `engine-defect-on-existing` `846`, `required-feature-missing` `34`, `host` `16` (`disabled-flag` `0`: `ES6RegExSymbols`/`ES6RegExPrototypeProperties`/`ESSharedArrayBuffer` all default-on). Negative phase: `8,741` passed, `0` shape-suspects, `1` marker downgrade. Prior: `refresh-2026-11-17-linux` `78,491 / 2,053`; `refresh-2026-11-16` `78,731 / 1,813`. The 2026-11-16 tables below are retained as history.
+
 ## 1. Engine, build and tool identity (refresh run, register `refresh-2026-11-16`)
 
 | Field | Value |
@@ -126,7 +128,8 @@ edition failure reductions between `4e9f95da7` and `c24266598`:
 | `c1-negative-phase` | 2026-11-01 | `b490dc6de+c1` | 77,257 / 15,884 | 76,453 / 4,091 | 94.92% |
 | `c4-cert` | 2026-11-02 | `ba796f74f` | 77,268 / 15,873 | 76,464 / 4,080 | 94.93% |
 | `refresh-2026-11-05` | 2026-11-05 | `4e9f95da7` | 78,399 / 14,742 | 77,595 / 2,949 | 96.34% |
-| **`refresh-2026-11-16`** | **2026-11-16** | **`c24266598`** | **79,569 / 13,572** | **78,731 / 1,813** | **97.75%** |
+| `refresh-2026-11-16` | 2026-11-16 | `c24266598` | 79,569 / 13,572 | 78,731 / 1,813 | 97.75% |
+| **`refresh-2026-11-17`** | **2026-11-17** | **`40c2fe5be`** | **80,486 / 12,655** | **79,648 / 896** | **98.89%** |
 
 Deltas `refresh-2026-11-05` -> `refresh-2026-11-16` (`4e9f95da7..c24266598`):
 **+1,136 passed / −1,136 failed** edition-selected (**+1,170 / −1,170**

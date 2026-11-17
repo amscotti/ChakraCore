@@ -1,5 +1,18 @@
 # ChakraCore Modernization Plan
 
+> **Wave 3 update (2026-11-17, `modernize/baseline`):** Tiers 1-5 pre-Linux work is **complete on macOS ARM64**. Gates at `40c2fe5be`: `check` **2064/0**, `debug-static` **2116/0**, `check-wasm` P1 **382/382**, `check-fulljit` **615/0**, sanitizers `address`/`undefined` **26/26** clean, `check-package` PASS. **Certified ES2025 edition conformance: 98.89% (79,648 passed / 896 failed / 80,544 scenarios)**;
+> broad conformance **86.41% (80,486 / 12,655 / 93,141)**; failure buckets post-ES2025 `11,759`,
+> `engine-defect-on-existing` `846`, `required-feature-missing` `34`, `host` `16`; negative phase
+> `8,741` passed, `0` shape-suspects, `1` marker downgrade (`refresh-2026-11-17`, macOS ARM64, corpus `2e0a5676`,
+> [baseline-register.json](../tools/test262/baseline-register.json)).
+> Remaining owed: single-pass Linux x64 revalidation ([linux-handoff.md](linux-handoff.md) §0).
+>
+> - **Tier 1 (sanitizers & gates):** `-Dsanitize=address|undefined|thread` lanes (`thread` Linux-only; `check-sanitize` 26/26 legs clean for `address` and `undefined` on macOS ARM64), gate targets `check-wasm` (P1 382/382), `check-gcstress` (in-thread + concurrent) and `check-fulljit` (615/0), and the `regenByteCode.py` create-on-refuse edge.
+> - **Tier 2 (RegExp):** `ES6RegExSymbols` and `ES6RegExPrototypeProperties` are now **default-on**; `Lower.cpp` JIT fast-path guards (`GenerateFastReplace`, `GenerateFastInlineStringSplitMatch`), stack regex boxing, and legacy test flag pinning.
+> - **Tier 3 (conformance/engine):** Array/%TypedArray% `toLocaleString(locales, options)` forwarding; integer-index `configurable: true`; `Reflect.set` canonical numeric conversion; `unshift` indexed setter; `join` length capture; `ModuleNamespace` strict `[[Set]]`/`[[Delete]]`; duplicate lexical declaration errors; labelled import/export early errors; anonymous default export names; Tarjan SCC TLA cycle settlement; strict `08`/`09` and template `\08`/`\09`; `NamedEvaluation` for `o[expr] = class{}`; cross-realm derived constructor (`e3-R3`); indirect `eval` (`e3-R4`); and the 4 UBSan/ASan engine fixes.
+> - **Tier 4 (WASM/JIT):** mixed-type multi-value pop order / tuple return; `isBlockParam` register pinning; ARM64 WASM NEON SIMD stack layout and JIT tier-up enablement.
+> - **Tier 5 (packaging):** release packaging (`tools/package/*`), `build.zig` / `tools/build/linux.zig` `package` and `check-package` targets, deterministic `MANIFEST.json` archive.
+
 > Status: **F0–B3 verified**, **Stage 2/3 architectural hardening & Test262
 > refresh complete on `modernize/baseline` (`c24266598`, 2026-11-16)** — all
 > four Mac Zig profiles are green (`test` **2063/0**, `debug-static`

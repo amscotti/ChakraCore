@@ -27,6 +27,8 @@ reconciliation).
 > default due to Stage 2 empirical blockers (`Lower.cpp` fast-paths +
 > 5 legacy failures). See section 3 for the re-ranked path to green.
 
+> **Wave 3 update (`refresh-2026-11-17`, `40c2fe5be`):** **Certified ES2025 edition conformance: 98.89% (79,648 passed / 896 failed / 80,544 scenarios)**; broad conformance **86.41% (80,486 / 12,655 / 93,141)**; failure buckets post-ES2025 `11,759`, `engine-defect-on-existing` `846`, `required-feature-missing` `34`, `host` `16`; negative phase `8,741` passed, `0` shape-suspects, `1` marker downgrade (`refresh-2026-11-17`, macOS ARM64, corpus `2e0a5676`, [baseline-register.json](../tools/test262/baseline-register.json)). Both RegExp substrate flags are now **default-on** (Tier 2), so clause 2 (required features in the claimed default) is satisfied on macOS ARM64; clause 1 remains short of green by `896` edition failures (`846` engine-defect, `34` required-feature-missing, `16` host). The verdict stays **BLOCKED-with-certified-baseline** pending those failures and Linux revalidation. The 2026-11-16 text below is retained as history.
+
 ## 1. C4 "Done when", clause by clause
 
 Plan §4.1 C4: *"the qualified, pinned required ES2025 suite is green on

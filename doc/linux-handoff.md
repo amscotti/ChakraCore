@@ -30,6 +30,31 @@
 5. **Historic flake & stress runs:** `Octane/earley-boyer.js` 30x under Linux JIT, `test/es7/class-private-methods.js` 50x, and an unbounded/completed `GCStress` matrix.
 6. **`check-wasm` target in `tools/build/linux.zig`:** `build.zig` defines `check-wasm`, whereas `tools/build/linux.zig` currently does not (Linux `66/66` debug WASM ran via `runtests.py`); optional `linux_exports_{so,ch}.txt` diff against legacy CMake also remains open.
 
+> [!IMPORTANT]
+> **Wave 3 update (2026-11-17, `modernize/baseline` at `40c2fe5be`).** Tiers 1-5 are complete on macOS ARM64 (see [modernization-plan.md](modernization-plan.md), [open-cards.md](open-cards.md) §13). Certified Mac Test262: **98.89% edition (79,648 / 896 of 80,544)**, **86.41% broad (80,486 / 12,655 of 93,141)**; buckets post-ES2025 `11,759`, engine-defect `846`, required-feature-missing `34`, host `16`; negative phase `8,741` passed / `0` shape-suspects / `1` marker downgrade. Mac gates: `check` 2064/0, `debug-static` 2116/0, `check-wasm` P1 382/382, `check-fulljit` 615/0, `check-sanitize` 26/26 (`address`, `undefined`), `check-package` PASS. Section 0 is the single-pass Linux x64 revalidation runbook and supersedes the "Remaining Open Items" list below.
+
+## 0. Single-Pass Linux x64 Revalidation Runbook (`40c2fe5be`)
+
+Run on Ubuntu 24.04 x86_64 (override flags: section 2). Stop at the first failure and record it in [b4-linux-run.md](b4-linux-run.md). Every step runs from the repo root; prefix `zig` with `mise exec --`.
+
+| # | Step | Commands | Expected |
+|---|---|---|---|
+| 1 | Pre-flight and StyleChecks | `git fetch origin master:refs/remotes/origin/master`; `STYLECHECK_BASE=8b073a4c3 bash tools/StyleChecks/{check_copyright,check_ascii,check_tabs,check_eol}.sh`; `python3 tools/StyleChecks/check_style_portable.py --self-test` | all exit 0, `NO PROBLEMS DETECTED` |
+| 2 | Tool unit suites | `python3 tools/build/test_build_tools.py`; `python3 tools/test262/test_edition_policy.py`; `python3 tools/test262/refresh_baseline.py --self-test`; `zig test tools/linux-gate-tests.zig`; `zig test doc/examples/owned-bytes.zig` | all OK; `linux-gate-tests` 9/9; `owned-bytes` 4/4; edition policy 7 tests |
+| 3 | Default `test` build + core gates | `zig build check` then `zig build check-selftest check-smoke check-jit check-native check-metadata verify-bytecode` | exit 0; `check_regression` interpreted/dynapogo 0 failures; if counts differ from `RECORDED_BASELINE` in `tools/build/check_regression_linux.py` (last pinned 2868/2330), audit against Mac 2064 and re-pin with `test_build_tools.py` |
+| 4 | Build variants | `zig build -Djit=false check-smoke check-metadata verify-bytecode check-native`; `zig build -Dprofile=release-shared check-smoke check-metadata check-jit check-native`; `zig build -Dprofile=debug-static -Doptimize=debug check` | all PASS; debug-static 8/8 static native suites |
+| 5 | WASM, fulljit, GCStress gates | `zig build -Dprofile=jit -Dwasm=true check-wasm check-fulljit`; `zig build check-gcstress`; `(cd test && python3 runtests.py --x64 --debug --variants=interpreted -b ../out/debug-static/bin/ch wasm)` | `check-wasm` P1 382/382 (x64 manifest may differ; list deltas), `check-fulljit` 0 failures, GCStress completes (no 300 s timeout), zero debug assertions |
+| 6 | ASan | `zig build -Dsanitize=address check-sanitize` | 26/26 legs clean, no LSan reports |
+| 7 | UBSan | `zig build -Dsanitize=undefined check-sanitize` | 26/26 legs clean (the 4 Tier 3 UB fixes hold on x64) |
+| 8 | TSan (Linux-only, never run) | `zig build -Dsanitize=thread check-sanitize`; then `bash test/nodeapi/probes/run_host_async_probe.sh`, `test/es7/s6-growable-cross-agent.js`, `WScript.Broadcast` multi-agent run | clean, or each report triaged into [open-cards.md](open-cards.md) |
+| 9 | Node-API stack | `zig build libChakraNodeApi ch-nodeapi check-nodeapi`; `export SKIP_BUILD=1`; `bash tools/nodeapi/run_probe.sh`; `for s in test/nodeapi/probes/run_*.sh; do bash "$s" \|\| exit 1; done`; `REPEATS=5 sh test/nodeapi/stress/run_stress.sh`; `python3 test/nodeapi/run_matrix.py --suite all --host ch-nodeapi`; `python3 test/nodeapi/run_node_addon_api_matrix.py --hosts both` under pinned Node `v22.22.3` | 150 exports, 18/18 probes, matrix 46/23/0, addon-api 52/61/6 (only the 6 PR-12 V8 error-text diffs) |
+| 10 | Stress and historic flakes | `Octane/earley-boyer.js` 30x under Linux JIT; `test/es7/class-private-methods.js` 50x; `AsyncSuspendedResume.js`/`AsyncSuspendedDetach.js` 20-30x interpreted; `(cd test && python3 runtests.py --x64 -t -b ../zig-out/bin/ch TryCatch StackTrace)` | zero crashes or hangs |
+| 11 | Packaging | `zig build -Dprofile=release-shared package check-package` | `MANIFEST.json` checksums verify, deterministic archive, packaged `ch`/`ch-nodeapi` run with `$ORIGIN/../lib`; `ALL PACKAGE TESTS PASSED` |
+| 12 | Certified Test262, benchmarks, hosted CI | `python3 tools/test262/refresh_baseline.py --binary "$PWD/zig-out/bin/ch" --jobs 8`; `python3 tools/bench/run.py --binary zig-out/bin/ch --tier jit --iterations 5 -o tools/bench/results/linux-x64-jit.json` (and `--tier interp` -> `linux-x64-interp.json`); push and confirm `zig-linux.yml` + `zig-macos.yml` green | Compare to Mac `98.89% (79,648 / 896)`; expect only ICU and futex-timing deltas (`Atomics/{notify,wait,waitAsync}` host bucket 16), `0` feature regressions, `0` shape-suspects; publish with `--publish` only after a clean run; commit benchmark JSONs |
+
+Exit criteria: all 12 steps green (or each deviation recorded as a card), `RECORDED_BASELINE` re-pinned if changed, Linux Test262 and benchmark artifacts committed, hosted CI green. Remaining out of scope: B6 Windows and `aarch64-linux-gnu` (section 4).
+
+
 ---
 
 ## Historical Pre-Execution Handoff Record (`526393e26`, 2026-11-16)

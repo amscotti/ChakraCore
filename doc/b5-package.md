@@ -4,6 +4,8 @@ This document records the architecture, directory structure, manifest schema,
 deterministic archive generation, and verification tooling for ChakraCore release
 packages (Wave 2 Slice B / Tier 5).
 
+> **Wave 3 status (2026-11-17, `40c2fe5be`):** Tier 5 is complete on macOS ARM64: `zig build package` / `check-package` (release-shared) PASS; `test_package_tools.py` ALL PASSED. `bc450f994` fixed the smoke test to fall back to a script file when `ch -e` prints nothing. Packaging in `build.zig` and `tools/build/linux.zig`; the Linux x64 run of `package` + `check-package` is step 11 of the [linux-handoff.md](linux-handoff.md) §0 runbook.
+
 ## 1. Overview and Architecture
 
 The release packaging pipeline packages ChakraCore into self-contained, reproducible
