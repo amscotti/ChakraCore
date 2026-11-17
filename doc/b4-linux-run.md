@@ -287,10 +287,26 @@ Test262 (`--nonative -Test262 -CollectGarbage -NegativePhaseReport`,
 
 The refresh adds the locale-correct `BigInt.prototype.toLocaleString`
 path and the boxed-BigInt normalization used by TypedArray element reads.
-Against `refresh-2026-11-16-linux-x64` the net result is **+6 broad passes**;
-the three residual `pass→fail` entries are host-level `SIGKILL` timeouts
-(two `decodeURI*` cases) and one `Atomics.waitAsync` timeout, not engine
-crashes or formatting regressions.
+The abort root cause was a boxed BigInt object from TypedArray element
+reads reaching the Intl wrapper, whose native argument check rejected it;
+`JavascriptBigInt::EntryToLocaleString` now normalizes `args[0]` to the
+primitive before forwarding. Against `refresh-2026-11-16-linux-x64` the
+net result is **+6 broad passes**; the three residual `pass→fail` entries
+are host-level `SIGKILL` timeouts (two `decodeURI*` cases) and one
+`Atomics.waitAsync` timeout, not engine crashes or formatting regressions.
+
+Hosted CI confirmation for this head: `zig-linux` run
+[`44054742113`](https://github.com/amscotti/ChakraCore/actions/runs/44054742113)
+is all-green (style, `zig test` full check, no-JIT, debug-static,
+release-shared, Node-API, record). `zig-macos` run
+[`44054742259`](https://github.com/amscotti/ChakraCore/actions/runs/44054742259)
+is all-green after rerunning the evidence-record job, which the first
+attempt lost to a macOS runner-queue cancellation.
+
+Environment caveat: the local Phase 4 Node-API matrix used host Node
+v26.12.1, while the handoff pins Node v22.22.3. The hosted Node-API leg
+is green, but equivalence of the local matrix to the pinned canonical
+Node version was not separately audited.
 
 Gate evidence on the same tree: default `check-smoke/metadata/jit/native/bytecode`
 PASS; `-Djit=false` PASS; `release-shared` smoke/metadata/native PASS with
