@@ -105,7 +105,7 @@ def run_package_smoke_tests(package_dir, repo_root, case_file=None):
         text=True,
         env=clean_env
     )
-    if res2.returncode != 0:
+    if res2.returncode != 0 or "package smoke" not in (res2.stdout or ""):
         # ch CLI requires a source file rather than -e; run snippet via temporary script
         with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as tf:
             tf.write("console.log('package smoke');\n")
