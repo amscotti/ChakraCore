@@ -130,6 +130,37 @@ var tests = [
             assert.isTrue(caught.constructor === TypeError, "TypeError from caller realm");
         }
     },
+    {
+        name: "Indirect eval realm scoping (e3-R4): cross-realm eval at direct-eval position evaluates in callee realm as indirect eval",
+        body() {
+            other.eval('var x = "outside";');
+            var otherEval = other.eval;
+            function test() {
+                var x = "inside";
+                return otherEval("x");
+            }
+            assert.areEqual("outside", test(), "cross-realm eval call syntax evaluates in callee realm without capturing caller scope");
+
+            // Also test when assigned to local 'eval' identifier (direct-eval syntax at call site)
+            function test2() {
+                var eval = otherEval;
+                var x = "inside2";
+                return eval("x");
+            }
+            assert.areEqual("outside", test2(), "direct-eval call syntax to cross-realm eval evaluates as indirect eval");
+        }
+    },
+    {
+        name: "Cross-realm derived constructor default prototype (e3-R3)",
+        body() {
+            class Base {}
+            var f = new other.Function();
+            f.prototype = null;
+            var p = new Proxy(f, {});
+            var d = Reflect.construct(Base, [], p);
+            assert.isTrue(Object.getPrototypeOf(d) === other.Object.prototype, "Proxy newTarget default proto from newTarget realm");
+        }
+    },
 ];
 
 testRunner.run(tests, { verbose: WScript.Arguments[0] != "summary" });

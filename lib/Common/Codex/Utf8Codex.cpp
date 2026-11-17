@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #include "Utf8Codex.h"
@@ -421,10 +422,11 @@ LSlowPath:
         __range(0, INT_MAX) charcount_t cchSource)
     {
         charcount_t cch = cchSource; // SAL analysis gets confused by EncodeTrueUtf8's dest buffer requirement unless we alias cchSource with a local
-        LPUTF8 dest = destBuffer;
-        utf8char_t *bufferEnd = &destBuffer[cbDest];
+        LPUTF8 const base = (destBuffer != nullptr) ? destBuffer : (LPUTF8)(uintptr_t)1024;
+        LPUTF8 dest = base;
+        utf8char_t *bufferEnd = (destBuffer != nullptr) ? &destBuffer[cbDest] : nullptr;
 
-        CodexAssertOrFailFast(dest <= bufferEnd);
+        CodexAssertOrFailFast(countBytesOnly || dest <= bufferEnd);
 
         if (!ShouldFastPath(dest, source)) goto LSlowPath;
 
@@ -441,7 +443,10 @@ LFastPath:
                 CodexAssertOrFailFast(dest + 4 <= bufferEnd);
                 *(uint32 *)dest = (first & 0x0000007F) | ((first & 0x007F0000) >> 8) | ((second & 0x0000007f) << 16) | ((second & 0x007F0000) << 8);
             }
-            dest += 4;
+            if (dest != nullptr)
+            {
+                dest += 4;
+            }
             source += 4;
             cch -= 4;
         }
@@ -468,7 +473,7 @@ LSlowPath:
             }
         }
 
-        return dest - destBuffer;
+        return dest - base;
     }
 
     template <Utf8EncodingKind encoding>

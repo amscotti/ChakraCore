@@ -7049,7 +7049,10 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
             if (!JavascriptOperators::PrototypeObject(prototypeValue, constructor, requestContext, &prototypeObject))
             {
                 // The value returned by the property lookup is not a valid prototype object, default to object prototype.
-                Assert(prototypeObject == constructor->GetLibrary()->GetObjectPrototype());
+#if DBG
+                ScriptContext* constructorRealm = JavascriptOperators::GetFunctionRealm(constructor, requestContext);
+                Assert(prototypeObject == ((constructorRealm != nullptr) ? constructorRealm->GetLibrary()->GetObjectPrototype() : constructor->GetLibrary()->GetObjectPrototype()));
+#endif
             }
 
             // For these scenarios, we do not want to populate the cache.
@@ -7061,7 +7064,10 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
         else
         {
             // It's ok to cache Object.prototype, because Object.prototype cannot be overwritten.
-            prototypeObject = constructor->GetLibrary()->GetObjectPrototype();
+            ScriptContext* constructorRealm = JavascriptOperators::GetFunctionRealm(constructor, requestContext);
+            prototypeObject = (constructorRealm != nullptr) ?
+                constructorRealm->GetLibrary()->GetObjectPrototype() :
+                constructor->GetLibrary()->GetObjectPrototype();
         }
 
         canBeCached = true;
@@ -7077,7 +7083,10 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
             *prototypeObject = VarTo<RecyclableObject>(prototypeProperty);
             return true;
         }
-        *prototypeObject = constructorFunction->GetLibrary()->GetObjectPrototype();
+        ScriptContext* constructorRealm = JavascriptOperators::GetFunctionRealm(constructorFunction, scriptContext);
+        *prototypeObject = (constructorRealm != nullptr) ?
+            constructorRealm->GetLibrary()->GetObjectPrototype() :
+            constructorFunction->GetLibrary()->GetObjectPrototype();
         return false;
     }
 

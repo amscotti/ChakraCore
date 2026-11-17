@@ -1303,10 +1303,10 @@ return_cleanup:
     }
     delete[] argv;
     argv = nullptr;
-#ifdef NO_SANITIZE_ADDRESS_CHECK
+#if defined(NO_SANITIZE_ADDRESS_CHECK) && !defined(__APPLE__)
     pthread_exit(&retval);
 #else
-    return retval;
+    exit(retval);
 #endif
 #else
     return retval;

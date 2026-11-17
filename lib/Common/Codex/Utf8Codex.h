@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #pragma once
@@ -53,19 +54,25 @@ extern "C++" {
     template <>
     struct _ENUM_FLAG_INTEGER_FOR_SIZE<1>
     {
-        typedef int8_t type;
+        typedef uint8_t type;
     };
 
     template <>
     struct _ENUM_FLAG_INTEGER_FOR_SIZE<2>
     {
-        typedef int16_t type;
+        typedef uint16_t type;
     };
 
     template <>
     struct _ENUM_FLAG_INTEGER_FOR_SIZE<4>
     {
-        typedef int32_t type;
+        typedef uint32_t type;
+    };
+
+    template <>
+    struct _ENUM_FLAG_INTEGER_FOR_SIZE<8>
+    {
+        typedef uint64_t type;
     };
 
     // used as an approximation of std::underlying_type<T>
@@ -137,7 +144,7 @@ namespace utf8
         return 3;
     }
 
-    enum DecodeOptions
+    enum DecodeOptions : uint32
     {
         doDefault                   = 0x00,
         doAllowThreeByteSurrogates  = 0x01, // Allow invalid 3 byte encodings as would be encoded by CSEU-8

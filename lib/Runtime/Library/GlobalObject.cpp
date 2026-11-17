@@ -497,7 +497,34 @@ using namespace Js;
         // TODO: Handle call from global scope, strict mode
         BOOL isIndirect = FALSE;
 
+        bool isDirect = false;
         if (args.IsDirectEvalCall())
+        {
+            // ES2025 13.3.6.1 / 19.2.1.1: Direct eval requires that the callee function
+            // is identical to the caller realm's %eval%. A direct-eval call syntax targeting
+            // a cross-realm eval or any other function must be treated as an indirect eval.
+            ScriptContext* callerContext = nullptr;
+            JavascriptFunction* pfuncCaller = nullptr;
+            if (JavascriptStackWalker::GetCaller(&pfuncCaller, scriptContext) && pfuncCaller != nullptr)
+            {
+                callerContext = pfuncCaller->GetScriptContext();
+            }
+            if (callerContext == nullptr)
+            {
+                callerContext = scriptContext->GetThreadContext()->GetCallerScriptContextForCallee(scriptContext);
+            }
+            if (callerContext == nullptr)
+            {
+                callerContext = scriptContext;
+            }
+
+            if (function == callerContext->GetLibrary()->GetEvalFunctionObject())
+            {
+                isDirect = true;
+            }
+        }
+
+        if (isDirect)
         {
             // This was recognized as an eval call at compile time. The last one or two args are internal to us.
             // Argcount will be one of the following when called from global code
@@ -511,7 +538,8 @@ using namespace Js;
         }
         else
         {
-            // This must be an indirect "eval" call that we didn't detect at compile time.
+            // This must be an indirect "eval" call that we didn't detect at compile time,
+            // or a direct-eval call syntax targeting a cross-realm eval.
             // Pass null as the environment, which will force all lookups in the eval code
             // to use the root for the current module.
             // Also pass "null" for "this", which will force the callee to use the current module root.
@@ -839,7 +867,7 @@ using namespace Js;
         if (pfuncScript->HasSuperReference())
         {
             // Indirect evals cannot have a super reference.
-            if (!(args.Info.Flags & CallFlags_ExtraArg))
+            if (isIndirect || !(args.Info.Flags & CallFlags_ExtraArg))
             {
                 JavascriptError::ThrowSyntaxError(scriptContext, ERRSuperInIndirectEval, _u("super"));
             }

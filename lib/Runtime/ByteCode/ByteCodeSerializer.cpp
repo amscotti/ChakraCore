@@ -2935,7 +2935,7 @@ public:
 
     const byte * ReadConstantSizedInt32NoSize(const byte * buffer, int * value)
     {
-        *value = *(int *)buffer;
+        memcpy(value, buffer, sizeof(int));
         return buffer + sizeof(int);
     }
 
