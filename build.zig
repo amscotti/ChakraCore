@@ -380,6 +380,52 @@ fn registerFailStep(b: *std.Build, python: []const u8, name: []const u8, desc: [
     step.dependOn(&cmd.step);
 }
 
+fn registerPackageSteps(
+    b: *std.Build,
+    python: []const u8,
+    is_supported: bool,
+    prefix_dir: []const u8,
+    artifacts_ready: *std.Build.Step,
+    nodeapi_step_opt: ?*std.Build.Step,
+) void {
+    if (!is_supported) {
+        registerFailStep(b, python, "package", "Not applicable on debug-static", "package requires a shared profile (test, jit, or release-shared) with dynamic libraries");
+        registerFailStep(b, python, "check-package", "Not applicable on debug-static", "check-package requires a shared profile (test, jit, or release-shared) with dynamic libraries");
+        return;
+    }
+
+    const pkg_cmd = b.addSystemCommand(&.{python});
+    pkg_cmd.addFileArg(b.path("tools/package/build_package.py"));
+    pkg_cmd.addArg("--prefix");
+    pkg_cmd.addArg(prefix_dir);
+    pkg_cmd.addArg("--out-dir");
+    pkg_cmd.addArg("out/package");
+    pkg_cmd.step.dependOn(artifacts_ready);
+    if (nodeapi_step_opt) |ns| pkg_cmd.step.dependOn(ns);
+    pkg_cmd.stdio = .inherit;
+    pkg_cmd.has_side_effects = true;
+
+    const pkg_top = b.step("package", "Build release archive (chakracore-<version>-<target>.tar.gz) and MANIFEST.json in out/package (not part of the default build)");
+    pkg_top.dependOn(&pkg_cmd.step);
+
+    const verify_cmd = b.addSystemCommand(&.{python});
+    verify_cmd.addFileArg(b.path("tools/package/verify_package.py"));
+    verify_cmd.addArg("out/package");
+    verify_cmd.step.dependOn(&pkg_cmd.step);
+    verify_cmd.stdio = .inherit;
+    verify_cmd.has_side_effects = true;
+
+    const test_cmd = b.addSystemCommand(&.{python});
+    test_cmd.addFileArg(b.path("tools/package/test_package.py"));
+    test_cmd.addArg("out/package");
+    test_cmd.step.dependOn(&verify_cmd.step);
+    test_cmd.stdio = .inherit;
+    test_cmd.has_side_effects = true;
+
+    const check_pkg_top = b.step("check-package", "Verify package creation, manifest integrity, and end-to-end execution of packaged binaries (not part of the default build)");
+    check_pkg_top.dependOn(&test_cmd.step);
+}
+
 fn createLibtoolArchive(b: *std.Build, name: []const u8, objs: []const std.Build.LazyPath) LinkedArtifact {
     const lt = b.addSystemCommand(&.{ "/usr/bin/env", "ZERO_AR_DATE=1", "/usr/bin/libtool", "-static", "-no_warning_for_no_symbols", "-o" });
     const out = lt.addOutputFileArg(b.fmt("lib{s}.a", .{name}));
@@ -1719,6 +1765,7 @@ pub fn build(b: *std.Build) void {
         no_verify_bc.stdio = .inherit;
         const no_verify_bc_top = b.step("verify-bytecode", "Not applicable: legacy Release check has no bytecode leg");
         no_verify_bc_top.dependOn(&no_verify_bc.step);
+        registerPackageSteps(b, python, true, rel_prefix_str, cp_step, nodeapi_step_opt);
         return;
     }
 
@@ -1818,6 +1865,7 @@ pub fn build(b: *std.Build) void {
         dbg_check_top.dependOn(&dbg_smoke.step);
         dbg_check_top.dependOn(&dbg_metadata.step);
         dbg_check_top.dependOn(selftest_top);
+        registerPackageSteps(b, python, false, "", cp_step, null);
         return;
     }
 
@@ -1871,6 +1919,7 @@ pub fn build(b: *std.Build) void {
         jit_check_top.dependOn(&jit_runtime.step);
         jit_check_top.dependOn(&jit_verify_bc.step);
         if (jit_wasm_step) |ws| jit_check_top.dependOn(ws);
+        registerPackageSteps(b, python, true, jit_ch_str[0 .. jit_ch_str.len - "/bin/ch".len], cp_step, nodeapi_step_opt);
         return;
     }
 
@@ -1991,4 +2040,7 @@ pub fn build(b: *std.Build) void {
     check_top.dependOn(&smoke.step);
     check_top.dependOn(&metadata.step);
     check_top.dependOn(selftest_top);
+
+    const test_prefix_str = if (side_name) |sname| b.fmt("out/{s}", .{sname}) else "zig-out";
+    registerPackageSteps(b, python, true, test_prefix_str, default_install_step, nodeapi_step_opt);
 }

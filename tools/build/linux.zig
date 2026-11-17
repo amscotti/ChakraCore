@@ -150,6 +150,10 @@ pub fn supportsFullJitGate(profile: Profile, jit: bool) bool {
     return !isReleaseProfile(profile) and jit;
 }
 
+pub fn supportsPackageGate(profile: Profile) bool {
+    return !isStaticProfile(profile);
+}
+
 pub fn isValidGlibcVersion(v: []const u8) bool {
     if (v.len == 0) return false;
     var parts: usize = 0;
@@ -1419,6 +1423,43 @@ pub fn build(b: *std.Build) void {
     check_top.dependOn(&smoke.step);
     if (jit_smoke_step) |s| check_top.dependOn(s);
     check_top.dependOn(&metadata.step);
+
+    // Release Packaging & verification (b5-package)
+    if (supportsPackageGate(profile)) {
+        const pkg_cmd = b.addSystemCommand(&.{python});
+        pkg_cmd.addFileArg(b.path("tools/package/build_package.py"));
+        pkg_cmd.addArg("--prefix");
+        pkg_cmd.addArg(prefix_dir);
+        pkg_cmd.addArg("--out-dir");
+        pkg_cmd.addArg("out/package");
+        pkg_cmd.step.dependOn(artifacts_ready);
+        if (nodeapi_step_opt) |ns| pkg_cmd.step.dependOn(ns);
+        pkg_cmd.stdio = .inherit;
+        pkg_cmd.has_side_effects = true;
+
+        const pkg_top = b.step("package", "Build release archive (chakracore-<version>-<target>.tar.gz) and MANIFEST.json in out/package (not part of the default build)");
+        pkg_top.dependOn(&pkg_cmd.step);
+
+        const verify_cmd = b.addSystemCommand(&.{python});
+        verify_cmd.addFileArg(b.path("tools/package/verify_package.py"));
+        verify_cmd.addArg("out/package");
+        verify_cmd.step.dependOn(&pkg_cmd.step);
+        verify_cmd.stdio = .inherit;
+        verify_cmd.has_side_effects = true;
+
+        const test_cmd = b.addSystemCommand(&.{python});
+        test_cmd.addFileArg(b.path("tools/package/test_package.py"));
+        test_cmd.addArg("out/package");
+        test_cmd.step.dependOn(&verify_cmd.step);
+        test_cmd.stdio = .inherit;
+        test_cmd.has_side_effects = true;
+
+        const check_pkg_top = b.step("check-package", "Verify package creation, manifest integrity, and end-to-end execution of packaged binaries (not part of the default build)");
+        check_pkg_top.dependOn(&test_cmd.step);
+    } else {
+        registerFailStep(b, python, "package", "Not applicable on debug-static", "-Dprofile=debug-static has no shared libChakraCore.so; package requires a shared profile (test or release-shared)");
+        registerFailStep(b, python, "check-package", "Not applicable on debug-static", "-Dprofile=debug-static has no shared libChakraCore.so; check-package requires a shared profile (test or release-shared)");
+    }
 }
 
 test "linux sanitizer and gate helper contracts" {
@@ -1446,6 +1487,10 @@ test "linux sanitizer and gate helper contracts" {
     try std.testing.expect(supportsFullJitGate(.@"test", true));
     try std.testing.expect(!supportsFullJitGate(.release_shared, true));
     try std.testing.expect(!supportsFullJitGate(.@"test", false));
+
+    try std.testing.expect(supportsPackageGate(.@"test"));
+    try std.testing.expect(supportsPackageGate(.release_shared));
+    try std.testing.expect(!supportsPackageGate(.debug_static));
 
     const arena = std.testing.allocator;
     try std.testing.expect(sideNameForConfig(arena, .@"test", .none) == null);
