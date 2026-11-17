@@ -906,6 +906,9 @@ namespace Js
 
         AssertMsg(args.HasArg(), "Should always have implicit 'this'");
         JavascriptBigInt* bigint = ThisBigIntValue(args[0], scriptContext);
+        // TypedArray element reads can hand us a boxed BigInt object; the Intl
+        // wrapper and platform.formatNumber require the primitive.
+        args.Values[0] = bigint;
 
 #ifdef ENABLE_INTL_OBJECT
         if (CONFIG_FLAG(IntlBuiltIns) && scriptContext->IsIntlEnabled())
