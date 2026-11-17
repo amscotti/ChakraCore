@@ -11,30 +11,7 @@
     "list_revision": "ee92ecf4754feca09a333fcf615b75422bf2c0f9",
     "note": "Latest commit touching finished-proposals.md at fetch time (commit dated 2026-09-29). The 13 year-based post-ES2025 exclusions rest solely on this list's expected publication years; the pinned corpus features.txt Standard section already lists them (it is stale) and is not used as required-evidence for that set."
   },
-  "disabled_by_default_flags": {
-    "ES6RegExPrototypeProperties": {
-      "features": [],
-      "rationale": "DEFAULT_CONFIG_ES6RegExPrototypeProperties is false (lib/Common/ConfigFlagsList.h:687-690; flag registered at lib/Common/ConfigFlagsList.h:1171); no dedicated feature tag exists, so failures surface under RegExp/Symbol tags and cannot be isolated by tag alone."
-    },
-    "ES6RegExSymbols": {
-      "features": [
-        "Symbol.match",
-        "Symbol.matchAll",
-        "Symbol.replace",
-        "Symbol.search",
-        "Symbol.split"
-      ],
-      "rationale": "DEFAULT_CONFIG_ES6RegExSymbols is false (lib/Common/ConfigFlagsList.h:692-696; flag registered at lib/Common/ConfigFlagsList.h:1180), so the RegExp.prototype[Symbol.*] protocol surface is off by default."
-    },
-    "ESSharedArrayBuffer": {
-      "features": [
-        "SharedArrayBuffer",
-        "Atomics",
-        "Atomics.waitAsync"
-      ],
-      "rationale": "DEFAULT_CONFIG_ESSharedArrayBuffer is false (lib/Common/ConfigFlagsList.h:709,1189); Atomics tests in the selected trees exercise the SAB-gated surface."
-    }
-  },
+  "disabled_by_default_flags": {},
   "features": {
     "AggregateError": {
       "category": "required-ES2025",
