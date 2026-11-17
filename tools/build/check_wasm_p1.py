@@ -54,6 +54,7 @@ command line and the join fails loudly (rerun with -v).
 
 import json
 import os
+import platform
 import re
 import subprocess
 import sys
@@ -503,6 +504,14 @@ def print_report(detail, total_parsed, total_err):
               % (n, total))
 
 
+def runtests_arch_flag(plat=None, machine=None):
+    plat = sys.platform if plat is None else plat
+    machine = platform.machine() if machine is None else machine
+    if plat == "darwin" and machine in ("arm64", "aarch64"):
+        return "--arm64"
+    return "--x64"
+
+
 def run_suite(runtests, ch, jit=False):
     """Run the gated P1 command with reporter flags; return (rc, lines).
 
@@ -524,7 +533,7 @@ def run_suite(runtests, ch, jit=False):
     else:
         variant_args = ["--variants=interpreted",
                         "--extra-flags=-nonative"]
-    cmd = ([sys.executable, abs_runtests, "--test", "--arm64"]
+    cmd = ([sys.executable, abs_runtests, "--test", runtests_arch_flag()]
            + variant_args
            + ["--include-slow", "-v", "-j", "3",
               "--binary=" + abs_ch] + P1_SUITES)

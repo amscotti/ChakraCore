@@ -50,3 +50,38 @@ test "linux parameterized profile, glibc, ICU, and no-jit contracts" {
     try std.testing.expectEqual(@as(u32, 682), linux.expectedCompileCount(.debug_static, true));
     try std.testing.expectEqual(@as(u32, 647), linux.expectedCompileCount(.release_shared, true));
 }
+
+test "linux sanitizer options, install prefixes, and gate applicability" {
+    try std.testing.expectEqual(linux.Sanitize.none, linux.parseSanitize("none").?);
+    try std.testing.expectEqual(linux.Sanitize.address, linux.parseSanitize("address").?);
+    try std.testing.expectEqual(linux.Sanitize.undefined, linux.parseSanitize("undefined").?);
+    try std.testing.expectEqual(linux.Sanitize.thread, linux.parseSanitize("thread").?);
+    try std.testing.expect(linux.parseSanitize("leak") == null);
+
+    try std.testing.expect(linux.defaultJitForSanitize(.none));
+    try std.testing.expect(!linux.defaultJitForSanitize(.address));
+    try std.testing.expect(!linux.defaultJitForSanitize(.undefined));
+    try std.testing.expect(!linux.defaultJitForSanitize(.thread));
+
+    try std.testing.expectEqualStrings("-fsanitize=address", linux.sanitizeCompileFlag(.address).?);
+    try std.testing.expectEqualStrings("-fsanitize=undefined", linux.sanitizeCompileFlag(.undefined).?);
+    try std.testing.expectEqualStrings("-fsanitize=thread", linux.sanitizeCompileFlag(.thread).?);
+    try std.testing.expect(linux.sanitizeCompileFlag(.none) == null);
+
+    try std.testing.expect(linux.supportsWasmGate(.@"test", true));
+    try std.testing.expect(linux.supportsWasmGate(.debug_static, true));
+    try std.testing.expect(!linux.supportsWasmGate(.release_shared, true));
+    try std.testing.expect(!linux.supportsWasmGate(.@"test", false));
+    try std.testing.expect(linux.supportsFullJitGate(.@"test", true));
+    try std.testing.expect(!linux.supportsFullJitGate(.release_shared, true));
+    try std.testing.expect(!linux.supportsFullJitGate(.@"test", false));
+
+    const arena = std.testing.allocator;
+    try std.testing.expectEqualStrings("zig-out", linux.installPrefixForConfig(arena, .@"test", .none));
+    const p_asan = linux.installPrefixForConfig(arena, .@"test", .address);
+    defer arena.free(p_asan);
+    try std.testing.expectEqualStrings("out/sanitize-address", p_asan);
+    const p_tsan = linux.installPrefixForConfig(arena, .debug_static, .thread);
+    defer arena.free(p_tsan);
+    try std.testing.expectEqualStrings("out/sanitize-thread", p_tsan);
+}

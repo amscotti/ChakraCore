@@ -89,6 +89,67 @@ pub fn expectedOptimize(p: Profile) std.builtin.Optimize {
     };
 }
 
+pub const Sanitize = enum {
+    none,
+    address,
+    undefined,
+    thread,
+
+    pub fn name(self: Sanitize) []const u8 {
+        return switch (self) {
+            .none => "none",
+            .address => "address",
+            .undefined => "undefined",
+            .thread => "thread",
+        };
+    }
+
+    pub fn fsanitizeFlag(self: Sanitize) []const u8 {
+        return switch (self) {
+            .none => "",
+            .address => "-fsanitize=address",
+            .undefined => "-fsanitize=undefined",
+            .thread => "-fsanitize=thread",
+        };
+    }
+};
+
+pub fn parseSanitize(raw: []const u8) ?Sanitize {
+    if (std.mem.eql(u8, raw, "none")) return .none;
+    if (std.mem.eql(u8, raw, "address")) return .address;
+    if (std.mem.eql(u8, raw, "undefined")) return .undefined;
+    if (std.mem.eql(u8, raw, "thread")) return .thread;
+    return null;
+}
+
+pub fn defaultJitForSanitize(s: Sanitize) bool {
+    return s == .none;
+}
+
+pub fn sanitizeCompileFlag(s: Sanitize) ?[]const u8 {
+    return if (s == .none) null else s.fsanitizeFlag();
+}
+
+pub fn sideNameForConfig(arena: std.mem.Allocator, profile: Profile, sanitize: Sanitize) ?[]const u8 {
+    if (sanitize != .none) return std.fmt.allocPrint(arena, "sanitize-{s}", .{sanitize.name()}) catch @panic("OOM");
+    if (profile != .@"test") return profile.name();
+    return null;
+}
+
+pub fn installPrefixForConfig(arena: std.mem.Allocator, profile: Profile, sanitize: Sanitize) []const u8 {
+    if (sanitize != .none) return std.fmt.allocPrint(arena, "out/sanitize-{s}", .{sanitize.name()}) catch @panic("OOM");
+    if (profile == .@"test") return "zig-out";
+    return std.fmt.allocPrint(arena, "out/{s}", .{profile.name()}) catch @panic("OOM");
+}
+
+pub fn supportsWasmGate(profile: Profile, jit: bool) bool {
+    return !isReleaseProfile(profile) and jit;
+}
+
+pub fn supportsFullJitGate(profile: Profile, jit: bool) bool {
+    return !isReleaseProfile(profile) and jit;
+}
+
 pub fn isValidGlibcVersion(v: []const u8) bool {
     if (v.len == 0) return false;
     var parts: usize = 0;
@@ -133,6 +194,25 @@ fn gateProfile(b: *std.Build) Profile {
     const raw = b.option([]const u8, "profile", "Build profile: test (default), debug-static, release-shared") orelse "test";
     return parseProfile(raw) orelse
         fail("unsupported -Dprofile={s} on Linux: expected test, debug-static, or release-shared", .{raw});
+}
+
+fn gateSanitize(b: *std.Build) Sanitize {
+    const raw = b.option([]const u8, "sanitize", "Sanitizer mode: none (default), address, undefined, thread") orelse "none";
+    return parseSanitize(raw) orelse
+        fail("unsupported -Dsanitize={s} on Linux: expected none, address, undefined, or thread", .{raw});
+}
+
+const HostCompilers = struct {
+    cc: []const u8,
+    cxx: []const u8,
+};
+
+fn gateHostCompilers(b: *std.Build) HostCompilers {
+    const cc = b.findProgram(.{ .names = &.{ "clang", "clang-18", "clang-19", "clang-17" } }) orelse
+        fail("-Dsanitize requires host clang on PATH", .{});
+    const cxx = b.findProgram(.{ .names = &.{ "clang++", "clang++-18", "clang++-19", "clang++-17" } }) orelse
+        fail("-Dsanitize requires host clang++ on PATH", .{});
+    return .{ .cc = cc, .cxx = cxx };
 }
 
 fn gateOptimize(b: *std.Build, profile: Profile) void {
@@ -267,7 +347,10 @@ fn gateIcu(b: *std.Build) struct { include: []const u8, libdir: []const u8, majo
 const Ctx = struct {
     b: *std.Build,
     zig_exe: []const u8,
+    host_cc: []const u8,
+    host_cxx: []const u8,
     profile: Profile,
+    sanitize: Sanitize,
     jit: bool,
     target_triple: []const u8,
     glibc: []const u8,
@@ -401,10 +484,13 @@ fn appendTuFlags(ctx: *const Ctx, run: *std.Build.Step.Run, g: *const tables.Gro
     // by default); `zig cc` searches only its bundled headers, so the
     // default dir is spelled explicitly. -isystem, not -I: /usr/include
     // carries the full C library, and -I would shadow the bundled
-    // headers (probed with a poisoned stdio.h); user -isystem does not
-    // shadow them. Honors -Dicu-include.
-    run.addArg("-isystem");
-    run.addArg(ctx.icu_include);
+    // headers; user -isystem does not shadow them for zig cc. System
+    // clang++ already searches /usr/include after libstdc++/libc++ headers
+    // and breaks #include_next if /usr/include is prepended via -isystem.
+    if (ctx.sanitize == .none or !std.mem.eql(u8, ctx.icu_include, "/usr/include")) {
+        run.addArg("-isystem");
+        run.addArg(ctx.icu_include);
+    }
 
     switch (lang) {
         .cxx => {
@@ -414,10 +500,20 @@ fn appendTuFlags(ctx: *const Ctx, run: *std.Build.Step.Run, g: *const tables.Gro
             }
             run.addArg("-fno-omit-frame-pointer");
             run.addArg("-fdelayed-template-parsing");
-            switch (ctx.profile) {
-                .@"test" => for ([_][]const u8{ "-O3", "-g" }) |f| run.addArg(f),
-                .debug_static => for ([_][]const u8{ "-g", "-fno-sanitize=undefined" }) |f| run.addArg(f),
-                .release_shared => for ([_][]const u8{ "-O3", "-DNDEBUG" }) |f| run.addArg(f),
+            if (ctx.sanitize != .none) {
+                if (ctx.profile == .debug_static) {
+                    run.addArg("-g");
+                } else {
+                    for ([_][]const u8{ "-O1", "-g" }) |f| run.addArg(f);
+                }
+                run.addArg(ctx.sanitize.fsanitizeFlag());
+                if (ctx.sanitize == .undefined) run.addArg("-fno-sanitize=enum,alignment,vptr,pointer-overflow");
+            } else {
+                switch (ctx.profile) {
+                    .@"test" => for ([_][]const u8{ "-O3", "-g" }) |f| run.addArg(f),
+                    .debug_static => for ([_][]const u8{ "-g", "-fno-sanitize=undefined" }) |f| run.addArg(f),
+                    .release_shared => for ([_][]const u8{ "-O3", "-DNDEBUG" }) |f| run.addArg(f),
+                }
             }
             run.addArg("-std=gnu++17");
             if (g.pic == .pie) run.addArg("-fPIE");
@@ -426,13 +522,23 @@ fn appendTuFlags(ctx: *const Ctx, run: *std.Build.Step.Run, g: *const tables.Gro
             if (g.pic == .pic) run.addArg("-fPIC");
         },
         .c, .asm_ => {
-            switch (ctx.profile) {
-                .@"test" => for ([_][]const u8{ "-O2", "-g", "-DNDEBUG" }) |f| run.addArg(f),
-                .debug_static => {
+            if (ctx.sanitize != .none) {
+                if (lang == .c) {
+                    if (ctx.profile != .debug_static) run.addArg("-O1");
+                    for ([_][]const u8{ "-g", "-fno-omit-frame-pointer", ctx.sanitize.fsanitizeFlag() }) |f| run.addArg(f);
+                    if (ctx.sanitize == .undefined) run.addArg("-fno-sanitize=enum,alignment,vptr,pointer-overflow");
+                } else {
                     run.addArg("-g");
-                    if (lang == .c) run.addArg("-fno-sanitize=undefined");
-                },
-                .release_shared => for ([_][]const u8{ "-O3", "-DNDEBUG" }) |f| run.addArg(f),
+                }
+            } else {
+                switch (ctx.profile) {
+                    .@"test" => for ([_][]const u8{ "-O2", "-g", "-DNDEBUG" }) |f| run.addArg(f),
+                    .debug_static => {
+                        run.addArg("-g");
+                        if (lang == .c) run.addArg("-fno-sanitize=undefined");
+                    },
+                    .release_shared => for ([_][]const u8{ "-O3", "-DNDEBUG" }) |f| run.addArg(f),
+                }
             }
             for ([_][]const u8{ "-msse4.2", "-fasm-blocks", "-fms-extensions", "-fwrapv" }) |f| run.addArg(f);
             if (g.pal) for ([_][]const u8{ "-fstack-protector", "-fno-builtin" }) |f| run.addArg(f);
@@ -449,9 +555,15 @@ fn appendTuFlags(ctx: *const Ctx, run: *std.Build.Step.Run, g: *const tables.Gro
 fn compileTu(ctx: *const Ctx, g: *const tables.Group, src: []const u8, lang: Lang, number: u32) std.Build.LazyPath {
     const b = ctx.b;
     std.debug.assert(number < 10000);
-    const run = b.addSystemCommand(&.{ ctx.zig_exe, if (lang == .cxx) "c++" else "cc" });
-    run.addArg("-target");
-    run.addArg(ctx.target_triple);
+    const run = if (ctx.sanitize != .none) blk: {
+        const drv = if (lang == .cxx) ctx.host_cxx else ctx.host_cc;
+        break :blk b.addSystemCommand(&.{drv});
+    } else blk: {
+        const cmd = b.addSystemCommand(&.{ ctx.zig_exe, if (lang == .cxx) "c++" else "cc" });
+        cmd.addArg("-target");
+        cmd.addArg(ctx.target_triple);
+        break :blk cmd;
+    };
     appendTuFlags(ctx, run, g, lang);
     // Toolchain-drift parity (documented deviation, B4.3): clang 22
     // emits -Wdate-time for this TU's __DATE__/__TIME__ use (reference
@@ -461,7 +573,7 @@ fn compileTu(ctx: *const Ctx, g: *const tables.Group, src: []const u8, lang: Lan
     // (verified by repo grep: the only other user,
     // bin/ChakraCore/ChakraCoreDllFunc.cpp, is not in the Linux
     // compile set); -Werror itself is untouched.
-    if (lang == .cxx and std.mem.eql(u8, src, "lib/Jsrt/JsrtHelper.cpp"))
+    if (lang == .cxx and (ctx.sanitize != .none or std.mem.eql(u8, src, "lib/Jsrt/JsrtHelper.cpp")))
         run.addArg("-Wno-date-time");
     var digits: [4]u8 = .{ '0', '0', '0', '0' };
     var n = number;
@@ -548,22 +660,22 @@ fn registerFailStep(b: *std.Build, python: []const u8, name: []const u8, desc: [
     step.dependOn(&cmd.step);
 }
 
-fn addChArg(b: *std.Build, cmd: *std.Build.Step.Run, profile: Profile, prefix_dir: []const u8, ch_bin: std.Build.LazyPath, dep_step: *std.Build.Step, prefixed_flag: ?[]const u8) void {
-    if (profile == .@"test") {
-        const installed_ch: std.Build.LazyPath = .{ .relative = .{ .base = .install_bin, .sub_path = "ch" } };
+fn addBinArg(b: *std.Build, cmd: *std.Build.Step.Run, side_name: ?[]const u8, prefix_dir: []const u8, sub_path: []const u8, bin_art: std.Build.LazyPath, dep_step: *std.Build.Step, prefixed_flag: ?[]const u8) void {
+    if (side_name == null) {
+        const installed_art: std.Build.LazyPath = .{ .relative = .{ .base = .install_prefix, .sub_path = sub_path } };
         if (prefixed_flag) |flag| {
-            cmd.addPrefixedFileArg(flag, installed_ch);
+            cmd.addPrefixedFileArg(flag, installed_art);
         } else {
-            cmd.addFileArg(installed_ch);
+            cmd.addFileArg(installed_art);
         }
     } else {
-        const ch_path = b.fmt("{s}/bin/ch", .{prefix_dir});
+        const bin_path = b.fmt("{s}/{s}", .{ prefix_dir, sub_path });
         if (prefixed_flag) |flag| {
-            cmd.addArg(b.fmt("{s}{s}", .{ flag, ch_path }));
+            cmd.addArg(b.fmt("{s}{s}", .{ flag, bin_path }));
         } else {
-            cmd.addArg(ch_path);
+            cmd.addArg(bin_path);
         }
-        cmd.addFileInput(ch_bin);
+        cmd.addFileInput(bin_art);
     }
     cmd.step.dependOn(dep_step);
 }
@@ -585,22 +697,35 @@ fn addSideCopy(b: *std.Build, python: []const u8, dest_rel: []const u8, src: std
 
 pub fn build(b: *std.Build) void {
     const profile = gateProfile(b);
+    const sanitize = gateSanitize(b);
+    if (sanitize != .none and isReleaseProfile(profile)) {
+        fail("-Dsanitize={s} is not supported with -Dprofile=release-shared on Linux; use test (default) or debug-static", .{sanitize.name()});
+    }
     gateOptimize(b, profile);
     gateTarget(b);
     const want_glibc = gateGlibc(b);
     const icu = gateIcu(b);
-    const jit = b.option(bool, "jit", "Enable JIT backend (default: true; false sets -DDISABLE_JIT=1 and omits lib/Backend)") orelse true;
+    const jit = b.option(bool, "jit", "Enable JIT backend (default: true unsanitized, false when -Dsanitize!=none)") orelse defaultJitForSanitize(sanitize);
     const python = b.findProgram(.{ .names = &.{ "python3", "python" } }) orelse
         fail("cannot find python3 or python on PATH; needed to run bin/ch/jstoc.py for DbgController.js.h", .{});
+    const host_compilers = if (sanitize != .none) gateHostCompilers(b) else HostCompilers{ .cc = "", .cxx = "" };
 
     const arena = b.graph.arena;
     const is_static = isStaticProfile(profile);
     const is_release = isReleaseProfile(profile);
     const target_triple = targetTripleForGlibc(arena, want_glibc);
+    const side_name = sideNameForConfig(arena, profile, sanitize);
+    const prefix_dir = installPrefixForConfig(arena, profile, sanitize);
 
-    std.debug.print("b4 profile={s}: target={s} glibc={s} icu={s},{s} (major {s}) jit={} zig={f} python={s}\n", .{
-        profile.name(), target_triple, want_glibc, icu.include, icu.libdir, icu.major, jit, builtin.zig_version, python,
-    });
+    if (sanitize != .none) {
+        std.debug.print("b4 sanitize={s} profile={s}: host-cxx={s} icu={s},{s} (major {s}) jit={} prefix={s}\n", .{
+            sanitize.name(), profile.name(), host_compilers.cxx, icu.include, icu.libdir, icu.major, jit, prefix_dir,
+        });
+    } else {
+        std.debug.print("b4 profile={s}: target={s} glibc={s} icu={s},{s} (major {s}) jit={} zig={f} python={s}\n", .{
+            profile.name(), target_triple, want_glibc, icu.include, icu.libdir, icu.major, jit, builtin.zig_version, python,
+        });
+    }
 
     // Build-owned pal/src/config.h: 95 real checks incl. native run
     // probes, fail-clearly on deviation.
@@ -646,7 +771,10 @@ pub fn build(b: *std.Build) void {
     const ctx = Ctx{
         .b = b,
         .zig_exe = b.graph.zig_exe,
+        .host_cc = host_compilers.cc,
+        .host_cxx = host_compilers.cxx,
         .profile = profile,
+        .sanitize = sanitize,
         .jit = jit,
         .target_triple = target_triple,
         .glibc = want_glibc,
@@ -740,11 +868,17 @@ pub fn build(b: *std.Build) void {
         }
     }
 
-    // Links via the `zig c++` driver.
-    const ch_link = b.addSystemCommand(&.{ctx.zig_exe});
-    ch_link.addArg("c++");
-    ch_link.addArg("-target");
-    ch_link.addArg(target_triple);
+    // Links via host clang++ (when -Dsanitize!=none) or the `zig c++` driver.
+    const ch_link = if (sanitize != .none) blk: {
+        const l = b.addSystemCommand(&.{ctx.host_cxx});
+        l.addArg(sanitize.fsanitizeFlag());
+        break :blk l;
+    } else blk: {
+        const l = b.addSystemCommand(&.{ ctx.zig_exe, "c++" });
+        l.addArg("-target");
+        l.addArg(target_triple);
+        break :blk l;
+    };
     for ([_][]const u8{ "-fPIE", "-pie", "-Wl,--export-dynamic", "-rdynamic" }) |f| ch_link.addArg(f);
     for (tables.ch_group.cxx) |src| ch_link.addFileArg(objs.get(src).?);
     if (is_static) {
@@ -768,10 +902,16 @@ pub fn build(b: *std.Build) void {
     ch_link.step.dependOn(&jstoc.step);
 
     const so_res: ?struct { bin: std.Build.LazyPath, link: *std.Build.Step.Run } = if (is_static) null else blk: {
-        const so_link = b.addSystemCommand(&.{ctx.zig_exe});
-        so_link.addArg("c++");
-        so_link.addArg("-target");
-        so_link.addArg(target_triple);
+        const so_link = if (sanitize != .none) cmd_blk: {
+            const l = b.addSystemCommand(&.{ctx.host_cxx});
+            l.addArg(sanitize.fsanitizeFlag());
+            break :cmd_blk l;
+        } else cmd_blk: {
+            const l = b.addSystemCommand(&.{ ctx.zig_exe, "c++" });
+            l.addArg("-target");
+            l.addArg(target_triple);
+            break :cmd_blk l;
+        };
         for ([_][]const u8{ "-fPIC", "-shared", "-Wl,-soname,libChakraCore.so" }) |f| so_link.addArg(f);
         for (tables.dylib_group.cxx) |src| so_link.addFileArg(objs.get(src).?);
         for (tables.static_order) |src| {
@@ -786,14 +926,21 @@ pub fn build(b: *std.Build) void {
         so_link.addArg("-Wl,--as-needed");
         for ([_][]const u8{ "-lpthread", "-ldl" }) |f| so_link.addArg(f);
         so_link.addPrefixedFileArg("-Wl,--version-script=", b.path("bin/ChakraCore/libChakraCoreLib.version"));
-        so_link.addArg("-Wl,--no-undefined");
+        // Sanitizer shared libs resolve __asan_*/__ubsan_* from the host executable's runtime.
+        if (sanitize == .none) so_link.addArg("-Wl,--no-undefined");
         break :blk .{ .bin = so_bin, .link = so_link };
     };
 
-    const gs_link = b.addSystemCommand(&.{ctx.zig_exe});
-    gs_link.addArg("c++");
-    gs_link.addArg("-target");
-    gs_link.addArg(target_triple);
+    const gs_link = if (sanitize != .none) blk: {
+        const l = b.addSystemCommand(&.{ctx.host_cxx});
+        l.addArg(sanitize.fsanitizeFlag());
+        break :blk l;
+    } else blk: {
+        const l = b.addSystemCommand(&.{ ctx.zig_exe, "c++" });
+        l.addArg("-target");
+        l.addArg(target_triple);
+        break :blk l;
+    };
     for ([_][]const u8{ "-Wl,--export-dynamic", "-rdynamic" }) |f| gs_link.addArg(f);
     for (tables.gcstress_group.cxx) |src| gs_link.addFileArg(objs.get(src).?);
     gs_link.addArg("-o");
@@ -804,13 +951,12 @@ pub fn build(b: *std.Build) void {
     gs_link.addArg("-Wl,--end-group");
     for ([_][]const u8{ "-ldl", "-lpthread" }) |f| gs_link.addArg(f);
 
-    // Install / side-prefix layout: test uses zig-out via native install
-    // steps; debug-static and release-shared isolate into out/<profile>
-    // via tools/build/install_profile.py.
-    const prefix_dir = if (profile == .@"test") "zig-out" else b.fmt("out/{s}", .{profile.name()});
+    // Install / side-prefix layout: unsanitized test uses zig-out via
+    // native install steps; debug-static, release-shared, and sanitizer
+    // lanes isolate into out/<side_name>/ via tools/build/install_profile.py.
     const install = b.getInstallStep();
     var copy_out: ?*std.Build.Step.Run = null;
-    if (profile == .@"test") {
+    if (side_name == null) {
         install.dependOn(&b.addInstallFile(ch_bin, "bin/ch").step);
         install.dependOn(&b.addInstallFile(gs_bin, "bin/GCStress").step);
         if (so_res) |sr| {
@@ -832,10 +978,11 @@ pub fn build(b: *std.Build) void {
         const marker = wf.add(".profile", arena.dupe(u8, "test\n") catch @panic("OOM"));
         install.dependOn(&b.addInstallFile(marker, ".profile").step);
     } else {
+        const sname = side_name.?;
         const cp = b.addSystemCommand(&.{python});
         cp.addFileArg(b.path("tools/build/install_profile.py"));
         cp.addArg("--profile");
-        cp.addArg(profile.name());
+        cp.addArg(sname);
         cp.addArg("--dest");
         cp.addArg(prefix_dir);
         cp.addPrefixedFileArg("--map=bin/ch=", ch_bin);
@@ -860,30 +1007,47 @@ pub fn build(b: *std.Build) void {
         cp.stdio = .inherit;
         install.dependOn(&cp.step);
         copy_out = cp;
+
+        const rm = b.addSystemCommand(&.{ python, "-c", "import shutil,sys; shutil.rmtree(sys.argv[1], ignore_errors=True); print('removed ' + sys.argv[1] + ' (or already absent)')" });
+        const root = b.root.root_dir.path orelse
+            fail("cannot resolve the build root path; refusing a CWD-relative uninstall", .{});
+        rm.addArg(b.fmt("{s}/{s}", .{ root, prefix_dir }));
+        rm.stdio = .inherit;
+        rm.has_side_effects = true;
+        b.getUninstallStep().dependOn(&rm.step);
     }
 
     const artifacts_ready: *std.Build.Step = if (copy_out) |cp| &cp.step else install;
 
     // Node-API provider, check-nodeapi, and ch-nodeapi (shared profiles only).
+    var nodeapi_step_opt: ?*std.Build.Step = null;
     if (so_res) |sr| {
         const so_bin = sr.bin;
         var prov_objs: std.ArrayList(std.Build.LazyPath) = .empty;
         for (mac_tables.nodeapi_provider_tus) |src| {
-            const tu = b.addSystemCommand(&.{ ctx.zig_exe, "c++" });
-            tu.addArg("-target");
-            tu.addArg(target_triple);
-            tu.addArg("-std=gnu++17");
-            for ([_][]const u8{ "-O3", "-g", "-fPIC" }) |f| tu.addArg(f);
+            const tu = if (sanitize != .none) cmd_blk: {
+                const c = b.addSystemCommand(&.{ctx.host_cxx});
+                c.addArg("-std=gnu++17");
+                if (profile != .debug_static) c.addArg("-O1");
+                for ([_][]const u8{ "-g", "-fno-omit-frame-pointer", sanitize.fsanitizeFlag(), "-fPIC" }) |f| c.addArg(f);
+                break :cmd_blk c;
+            } else cmd_blk: {
+                const c = b.addSystemCommand(&.{ ctx.zig_exe, "c++" });
+                c.addArg("-target");
+                c.addArg(target_triple);
+                c.addArg("-std=gnu++17");
+                for ([_][]const u8{ "-O3", "-g", "-fPIC" }) |f| c.addArg(f);
+                break :cmd_blk c;
+            };
             tu.addArg("-fvisibility=hidden");
             tu.addArg("-DNAPI_VERSION=8");
             tu.addArg("-Ilib/Jsrt");
             tu.addArg("-Iinclude/nodeapi");
             tu.addArg("-Ilib/NodeApi");
-            // Explicit-target zig cc searches only bundled headers; /usr/include
-            // is the system dir (engine section 3 -isystem over -I: the full C library
-            // must not shadow the bundled headers). Honors -Dicu-include.
-            tu.addArg("-isystem");
-            tu.addArg(ctx.icu_include);
+            if (sanitize == .none or !std.mem.eql(u8, ctx.icu_include, "/usr/include")) {
+                tu.addArg("-isystem");
+                tu.addArg(ctx.icu_include);
+            }
             tu.addArg("-Wno-date-time");
             tu.addArg("-o");
             const out = tu.addOutputFileArg(b.fmt("{s}.o", .{std.fs.path.basename(src)}));
@@ -891,10 +1055,16 @@ pub fn build(b: *std.Build) void {
             tu.addFileArg(b.path(src));
             prov_objs.append(arena, out) catch @panic("OOM");
         }
-        const prov_link = b.addSystemCommand(&.{ctx.zig_exe});
-        prov_link.addArg("c++");
-        prov_link.addArg("-target");
-        prov_link.addArg(target_triple);
+        const prov_link = if (sanitize != .none) cmd_blk: {
+            const l = b.addSystemCommand(&.{ctx.host_cxx});
+            l.addArg(sanitize.fsanitizeFlag());
+            break :cmd_blk l;
+        } else cmd_blk: {
+            const l = b.addSystemCommand(&.{ ctx.zig_exe, "c++" });
+            l.addArg("-target");
+            l.addArg(target_triple);
+            break :cmd_blk l;
+        };
         for ([_][]const u8{ "-fPIC", "-shared", "-Wl,-soname,libChakraNodeApi.so" }) |f| prov_link.addArg(f);
         prov_link.addArg("-Wl,-rpath,$ORIGIN");
         prov_link.addArg("-Wl,-rpath,$ORIGIN/../lib");
@@ -903,11 +1073,11 @@ pub fn build(b: *std.Build) void {
         prov_link.addArg("-o");
         const prov_so = prov_link.addOutputFileArg("libChakraNodeApi.so");
         for ([_][]const u8{ "-lpthread", "-ldl" }) |f| prov_link.addArg(f);
-        prov_link.addArg("-Wl,--no-undefined");
+        if (sanitize == .none) prov_link.addArg("-Wl,--no-undefined");
         prov_link.step.dependOn(&sr.link.step);
 
         const prov_step = b.step("libChakraNodeApi", "Build libChakraNodeApi (N1.1 provider) linked against libChakraCore (not part of the default build)");
-        if (profile == .@"test") {
+        if (side_name == null) {
             install.dependOn(&b.addInstallFile(prov_so, "lib/libChakraNodeApi.so").step);
             prov_step.dependOn(&b.addInstallFile(prov_so, "lib/libChakraNodeApi.so").step);
             for ([_][]const u8{ "js_native_api.h", "js_native_api_types.h", "node_api.h", "node_api_types.h" }) |hdr| {
@@ -945,18 +1115,33 @@ pub fn build(b: *std.Build) void {
         check_nodeapi_top.dependOn(&exports_gen_check.step);
         check_nodeapi_top.dependOn(&exports_check.step);
 
-        const nodeapi_host = b.addSystemCommand(&.{ctx.zig_exe});
-        nodeapi_host.addArg("c++");
-        nodeapi_host.addArg("-target");
-        nodeapi_host.addArg(target_triple);
-        nodeapi_host.addArg("-std=gnu++17");
-        for ([_][]const u8{ "-O3", "-g", "-fPIE", "-pie" }) |f| nodeapi_host.addArg(f);
+        const addNodeapiCompilePrefix = struct {
+            fn call(context: *const Ctx, cmd: *std.Build.Step.Run, extra: []const []const u8) void {
+                if (context.sanitize != .none) {
+                    cmd.addArg("-std=gnu++17");
+                    if (context.profile != .debug_static) cmd.addArg("-O1");
+                    cmd.addArgs(&.{ "-g", "-fno-omit-frame-pointer", context.sanitize.fsanitizeFlag() });
+                } else {
+                    cmd.addArgs(&.{ "-target", context.target_triple, "-std=gnu++17", "-O3", "-g" });
+                }
+                for (extra) |f| cmd.addArg(f);
+            }
+        }.call;
+
+        const nodeapi_host = if (sanitize != .none) b.addSystemCommand(&.{ctx.host_cxx}) else b.addSystemCommand(&.{ ctx.zig_exe, "c++" });
+        addNodeapiCompilePrefix(&ctx, nodeapi_host, &.{ "-fPIE", "-pie" });
+        if (sanitize != .none) {
+            nodeapi_host.addArg("-Wl,--export-dynamic");
+            nodeapi_host.addArg("-rdynamic");
+        }
         nodeapi_host.addArg("-DNAPI_VERSION=8");
         nodeapi_host.addArg("-Ilib/Jsrt");
         nodeapi_host.addArg("-Iinclude/nodeapi");
         nodeapi_host.addArg("-Ilib/NodeApi");
-        nodeapi_host.addArg("-isystem");
-        nodeapi_host.addArg(ctx.icu_include);
+        if (sanitize == .none or !std.mem.eql(u8, ctx.icu_include, "/usr/include")) {
+            nodeapi_host.addArg("-isystem");
+            nodeapi_host.addArg(ctx.icu_include);
+        }
         nodeapi_host.addArg("-Wno-date-time");
         nodeapi_host.addArg("-o");
         const nodeapi_host_bin = nodeapi_host.addOutputFileArg("ch-nodeapi");
@@ -969,25 +1154,24 @@ pub fn build(b: *std.Build) void {
         nodeapi_host.step.dependOn(&sr.link.step);
         nodeapi_host.step.dependOn(&prov_link.step);
 
-        const nodeapi_stub = b.addSystemCommand(&.{ctx.zig_exe});
-        nodeapi_stub.addArg("c++");
-        nodeapi_stub.addArg("-target");
-        nodeapi_stub.addArg(target_triple);
-        nodeapi_stub.addArg("-std=gnu++17");
-        for ([_][]const u8{ "-O3", "-g", "-fPIC", "-shared" }) |f| nodeapi_stub.addArg(f);
+        const nodeapi_stub = if (sanitize != .none) b.addSystemCommand(&.{ctx.host_cxx}) else b.addSystemCommand(&.{ ctx.zig_exe, "c++" });
+        addNodeapiCompilePrefix(&ctx, nodeapi_stub, &.{ "-fPIC", "-shared" });
         nodeapi_stub.addArg("-DNAPI_VERSION=8");
         nodeapi_stub.addArg("-Ilib/Jsrt");
         nodeapi_stub.addArg("-Iinclude/nodeapi");
         nodeapi_stub.addArg("-Ilib/NodeApi");
-        nodeapi_stub.addArg("-isystem");
-        nodeapi_stub.addArg(ctx.icu_include);
+        if (sanitize == .none or !std.mem.eql(u8, ctx.icu_include, "/usr/include")) {
+            nodeapi_stub.addArg("-isystem");
+            nodeapi_stub.addArg(ctx.icu_include);
+        }
         nodeapi_stub.addArg("-Wno-date-time");
         nodeapi_stub.addArg("-o");
         const nodeapi_stub_bin = nodeapi_stub.addOutputFileArg("libChakraNodeApiStub.so");
         nodeapi_stub.addFileArg(b.path("tools/nodeapi/stub/stub_provider.cpp"));
 
         const nodeapi_step = b.step("ch-nodeapi", "Build the Node-API test host (N0.3): ch-nodeapi + test-only stub provider + hello/negative addons (shared profiles only; not part of the default build)");
-        if (profile == .@"test") {
+        nodeapi_step_opt = nodeapi_step;
+        if (side_name == null) {
             nodeapi_step.dependOn(&b.addInstallFile(nodeapi_host_bin, "bin/ch-nodeapi").step);
             nodeapi_step.dependOn(&b.addInstallFile(prov_so, "lib/libChakraNodeApi.so").step);
             nodeapi_step.dependOn(&b.addInstallFile(nodeapi_stub_bin, "lib/libChakraNodeApiStub.so").step);
@@ -995,20 +1179,25 @@ pub fn build(b: *std.Build) void {
             nodeapi_step.dependOn(&addSideCopy(b, python, b.fmt("{s}/bin/ch-nodeapi", .{prefix_dir}), nodeapi_host_bin, artifacts_ready).step);
             nodeapi_step.dependOn(&addSideCopy(b, python, b.fmt("{s}/lib/libChakraNodeApi.so", .{prefix_dir}), prov_so, artifacts_ready).step);
             nodeapi_step.dependOn(&addSideCopy(b, python, b.fmt("{s}/lib/libChakraNodeApiStub.so", .{prefix_dir}), nodeapi_stub_bin, artifacts_ready).step);
+            for ([_][]const u8{ "js_native_api.h", "js_native_api_types.h", "node_api.h", "node_api_types.h" }) |hdr| {
+                nodeapi_step.dependOn(&addSideCopy(
+                    b,
+                    python,
+                    b.fmt("{s}/include/nodeapi/{s}", .{ prefix_dir, hdr }),
+                    b.path(b.fmt("include/nodeapi/{s}", .{hdr})),
+                    artifacts_ready,
+                ).step);
+            }
         }
         for ([_][]const u8{ "hello_world", "version_reject", "missing_register", "promise_probe", "return_replaces" }) |name| {
-            const addon = b.addSystemCommand(&.{ctx.zig_exe});
-            addon.addArg("c++");
-            addon.addArg("-target");
-            addon.addArg(target_triple);
-            addon.addArg("-std=gnu++17");
-            for ([_][]const u8{ "-O3", "-g", "-fPIC", "-shared" }) |f| addon.addArg(f);
+            const addon = if (sanitize != .none) b.addSystemCommand(&.{ctx.host_cxx}) else b.addSystemCommand(&.{ ctx.zig_exe, "c++" });
+            addNodeapiCompilePrefix(&ctx, addon, &.{ "-fPIC", "-shared" });
             addon.addArg("-DNAPI_VERSION=8");
             addon.addArg("-Iinclude/nodeapi");
             addon.addArg("-o");
             const addon_bin = addon.addOutputFileArg(b.fmt("{s}.node", .{name}));
             addon.addFileArg(b.path(b.fmt("tools/nodeapi/addons/{s}.cpp", .{name})));
-            if (profile == .@"test") {
+            if (side_name == null) {
                 nodeapi_step.dependOn(&b.addInstallFile(addon_bin, b.fmt("lib/nodeapi-addons/{s}.node", .{name})).step);
             } else {
                 nodeapi_step.dependOn(&addSideCopy(b, python, b.fmt("{s}/lib/nodeapi-addons/{s}.node", .{ prefix_dir, name }), addon_bin, artifacts_ready).step);
@@ -1016,7 +1205,7 @@ pub fn build(b: *std.Build) void {
         }
         for ([_][]const u8{ "hello_world", "promise_probe", "return_replaces" }) |name| {
             const src_js = b.path(b.fmt("tools/nodeapi/addons/{s}.js", .{name}));
-            if (profile == .@"test") {
+            if (side_name == null) {
                 nodeapi_step.dependOn(&b.addInstallFile(src_js, b.fmt("lib/nodeapi-addons/{s}.js", .{name})).step);
             } else {
                 nodeapi_step.dependOn(&addSideCopy(b, python, b.fmt("{s}/lib/nodeapi-addons/{s}.js", .{ prefix_dir, name }), src_js, artifacts_ready).step);
@@ -1030,7 +1219,7 @@ pub fn build(b: *std.Build) void {
 
     // Negative controls for the Linux gates (mirrors check-selftest).
     const selftest_top = b.step("check-selftest", "Negative controls for every Linux check gate (not part of the default build)");
-    for ([_][]const u8{ "check_regression_linux.py", "check_smoke_linux.py", "check_metadata_linux.py", "check_regression.py", "check_smoke.py", "check_native.py", "check_nodeapi.py", "gen_nodeapi_exports.py" }) |script| {
+    for ([_][]const u8{ "check_regression_linux.py", "check_smoke_linux.py", "check_metadata_linux.py", "check_regression.py", "check_smoke.py", "check_native.py", "check_nodeapi.py", "gen_nodeapi_exports.py", "check_wasm_p1.py", "check_gcstress.py", "check_fulljit.py", "check_sanitize.py" }) |script| {
         const st = b.addSystemCommand(&.{python});
         st.addFileArg(b.path(b.fmt("tools/build/{s}", .{script})));
         st.addArg("--self-test");
@@ -1072,7 +1261,7 @@ pub fn build(b: *std.Build) void {
         verify_bc.addFileArg(b.path("tools/regenByteCode.py"));
         verify_bc.addArg(if (jit) "--jit" else "--noJit");
         verify_bc.addArg("--verify");
-        addChArg(b, verify_bc, profile, prefix_dir, ch_bin, artifacts_ready, "--binary=");
+        addBinArg(b, verify_bc, side_name, prefix_dir, "bin/ch", ch_bin, artifacts_ready, "--binary=");
         verify_bc.stdio = .inherit;
         const verify_bc_top = b.step("verify-bytecode", "Verify checked-in built-in bytecode with the just-built ch (not part of the default build)");
         verify_bc_top.dependOn(&verify_bc.step);
@@ -1082,11 +1271,11 @@ pub fn build(b: *std.Build) void {
         if (profile == .@"test" and jit) {
             regression.addFileArg(b.path("tools/build/check_regression_linux.py"));
             regression.addFileArg(b.path("test/runtests.py"));
-            addChArg(b, regression, profile, prefix_dir, ch_bin, artifacts_ready, null);
+            addBinArg(b, regression, side_name, prefix_dir, "bin/ch", ch_bin, artifacts_ready, null);
         } else {
             regression.addFileArg(b.path("tools/build/check_regression.py"));
             regression.addFileArg(b.path("test/runtests.py"));
-            addChArg(b, regression, profile, prefix_dir, ch_bin, artifacts_ready, null);
+            addBinArg(b, regression, side_name, prefix_dir, "bin/ch", ch_bin, artifacts_ready, null);
             regression.addArg("--select");
             regression.addArg(if (is_static) "debug" else "test");
         }
@@ -1102,7 +1291,7 @@ pub fn build(b: *std.Build) void {
     const native = b.addSystemCommand(&.{python});
     native.addFileArg(b.path("tools/build/check_native.py"));
     native.addFileArg(b.path("test/native-tests/test_native.sh"));
-    addChArg(b, native, profile, prefix_dir, ch_bin, artifacts_ready, null);
+    addBinArg(b, native, side_name, prefix_dir, "bin/ch", ch_bin, artifacts_ready, null);
     native.addArg(if (is_static) b.fmt("{s} c++", .{ctx.zig_exe}) else cc);
     native.addArg(cxx);
     if (is_static) {
@@ -1122,10 +1311,10 @@ pub fn build(b: *std.Build) void {
     const smoke = b.addSystemCommand(&.{python});
     if (profile == .@"test") {
         smoke.addFileArg(b.path("tools/build/check_smoke_linux.py"));
-        addChArg(b, smoke, profile, prefix_dir, ch_bin, artifacts_ready, null);
+        addBinArg(b, smoke, side_name, prefix_dir, "bin/ch", ch_bin, artifacts_ready, null);
     } else {
         smoke.addFileArg(b.path("tools/build/check_smoke.py"));
-        addChArg(b, smoke, profile, prefix_dir, ch_bin, artifacts_ready, null);
+        addBinArg(b, smoke, side_name, prefix_dir, "bin/ch", ch_bin, artifacts_ready, null);
         smoke.addArg("--profile");
         smoke.addArg(profile.name());
     }
@@ -1138,7 +1327,7 @@ pub fn build(b: *std.Build) void {
     if (jit) {
         const jit_smoke = b.addSystemCommand(&.{python});
         jit_smoke.addFileArg(b.path("tools/build/check_jit.py"));
-        addChArg(b, jit_smoke, profile, prefix_dir, ch_bin, artifacts_ready, null);
+        addBinArg(b, jit_smoke, side_name, prefix_dir, "bin/ch", ch_bin, artifacts_ready, null);
         jit_smoke.stdio = .inherit;
         const jit_top = b.step("check-jit", "JIT smoke: NativeCodeGenerator present; -mic and dynapogo class/helper checks (not part of the default build)");
         jit_top.dependOn(&jit_smoke.step);
@@ -1147,10 +1336,67 @@ pub fn build(b: *std.Build) void {
         registerFailStep(b, python, "check-jit", "Not applicable when -Djit=false", "-Djit=false built without lib/Backend; check-jit requires JIT enabled");
     }
 
+    // (4c) Wasm P1 gate (requires JIT + non-release profile).
+    if (supportsWasmGate(profile, jit)) {
+        const wasm_gate = b.addSystemCommand(&.{python});
+        wasm_gate.addFileArg(b.path("tools/build/check_wasm_p1.py"));
+        wasm_gate.addFileArg(b.path("test/runtests.py"));
+        addBinArg(b, wasm_gate, side_name, prefix_dir, "bin/ch", ch_bin, artifacts_ready, null);
+        wasm_gate.stdio = .inherit;
+        const wasm_top = b.step("check-wasm", "Verify Wasm P1 suite against test/wasm-arm64-manifest.json (not part of the default build)");
+        wasm_top.dependOn(&wasm_gate.step);
+    } else {
+        registerFailStep(b, python, "check-wasm", "Not applicable without -Djit=true and a non-release profile", "check-wasm requires JIT enabled and -Dprofile=test or debug-static");
+    }
+
+    // (4d) Bounded GCStress heap-walk smoke gate.
+    {
+        const gc_step = b.addSystemCommand(&.{python});
+        gc_step.addFileArg(b.path("tools/build/check_gcstress.py"));
+        addBinArg(b, gc_step, side_name, prefix_dir, "bin/GCStress", gs_bin, artifacts_ready, null);
+        gc_step.stdio = .inherit;
+        const gc_top = b.step("check-gcstress", "Run bounded GCStress in-thread and concurrent heap walks (not part of the default build)");
+        gc_top.dependOn(&gc_step.step);
+    }
+
+    // (4e) No-profile FullJit gate (B4-JIT-05; requires JIT + non-release).
+    if (supportsFullJitGate(profile, jit)) {
+        const fj_step = b.addSystemCommand(&.{python});
+        fj_step.addFileArg(b.path("tools/build/check_fulljit.py"));
+        fj_step.addFileArg(b.path("test/runtests.py"));
+        addBinArg(b, fj_step, side_name, prefix_dir, "bin/ch", ch_bin, artifacts_ready, null);
+        fj_step.addArg("--select");
+        fj_step.addArg(if (is_static) "debug" else "test");
+        fj_step.stdio = .inherit;
+        const fj_top = b.step("check-fulljit", "Run no-profile FullJit regression suites (not part of the default build)");
+        fj_top.dependOn(&fj_step.step);
+    } else {
+        registerFailStep(b, python, "check-fulljit", "Not applicable without JIT enabled on test/debug-static", "check-fulljit requires -Djit=true and -Dprofile=test or debug-static");
+    }
+
+    // (4f) Sanitizer verification gate (requires -Dsanitize=address|undefined|thread).
+    if (sanitize != .none) {
+        const san_step = b.addSystemCommand(&.{python});
+        san_step.addFileArg(b.path("tools/build/check_sanitize.py"));
+        san_step.addArg(prefix_dir);
+        san_step.addArg("--mode");
+        san_step.addArg(sanitize.name());
+        san_step.addArg("--cxx");
+        san_step.addArg(ctx.host_cxx);
+        san_step.addFileInput(ch_bin);
+        san_step.step.dependOn(artifacts_ready);
+        if (nodeapi_step_opt) |ns| san_step.step.dependOn(ns);
+        san_step.stdio = .inherit;
+        const san_top = b.step("check-sanitize", b.fmt("Run sanitizer verification gate for -Dsanitize={s} (not part of the default build)", .{sanitize.name()}));
+        san_top.dependOn(&san_step.step);
+    } else {
+        registerFailStep(b, python, "check-sanitize", "Not applicable without -Dsanitize=address|undefined|thread", "check-sanitize requires -Dsanitize=address, undefined, or thread");
+    }
+
     // (5) Metadata gates: ELF, SONAME/NEEDED, exports, configs, headers, archives, .profile.
     const metadata = b.addSystemCommand(&.{python});
     metadata.addFileArg(b.path("tools/build/check_metadata_linux.py"));
-    if (profile == .@"test") {
+    if (side_name == null) {
         metadata.addDirectoryArg(.{ .relative = .{ .base = .install_prefix } });
     } else {
         metadata.addArg(prefix_dir);
@@ -1173,4 +1419,46 @@ pub fn build(b: *std.Build) void {
     check_top.dependOn(&smoke.step);
     if (jit_smoke_step) |s| check_top.dependOn(s);
     check_top.dependOn(&metadata.step);
+}
+
+test "linux sanitizer and gate helper contracts" {
+    try std.testing.expectEqual(Sanitize.none, parseSanitize("none").?);
+    try std.testing.expectEqual(Sanitize.address, parseSanitize("address").?);
+    try std.testing.expectEqual(Sanitize.undefined, parseSanitize("undefined").?);
+    try std.testing.expectEqual(Sanitize.thread, parseSanitize("thread").?);
+    try std.testing.expect(parseSanitize("memory") == null);
+
+    try std.testing.expect(defaultJitForSanitize(.none));
+    try std.testing.expect(!defaultJitForSanitize(.address));
+    try std.testing.expect(!defaultJitForSanitize(.undefined));
+    try std.testing.expect(!defaultJitForSanitize(.thread));
+
+    try std.testing.expect(sanitizeCompileFlag(.none) == null);
+    try std.testing.expectEqualStrings("-fsanitize=address", sanitizeCompileFlag(.address).?);
+    try std.testing.expectEqualStrings("-fsanitize=undefined", sanitizeCompileFlag(.undefined).?);
+    try std.testing.expectEqualStrings("-fsanitize=thread", sanitizeCompileFlag(.thread).?);
+
+    try std.testing.expect(supportsWasmGate(.@"test", true));
+    try std.testing.expect(supportsWasmGate(.debug_static, true));
+    try std.testing.expect(!supportsWasmGate(.release_shared, true));
+    try std.testing.expect(!supportsWasmGate(.@"test", false));
+
+    try std.testing.expect(supportsFullJitGate(.@"test", true));
+    try std.testing.expect(!supportsFullJitGate(.release_shared, true));
+    try std.testing.expect(!supportsFullJitGate(.@"test", false));
+
+    const arena = std.testing.allocator;
+    try std.testing.expect(sideNameForConfig(arena, .@"test", .none) == null);
+    try std.testing.expectEqualStrings("debug-static", sideNameForConfig(arena, .debug_static, .none).?);
+    const san_side = sideNameForConfig(arena, .@"test", .address).?;
+    defer arena.free(san_side);
+    try std.testing.expectEqualStrings("sanitize-address", san_side);
+
+    try std.testing.expectEqualStrings("zig-out", installPrefixForConfig(arena, .@"test", .none));
+    const dbg_pref = installPrefixForConfig(arena, .debug_static, .none);
+    defer arena.free(dbg_pref);
+    try std.testing.expectEqualStrings("out/debug-static", dbg_pref);
+    const san_pref = installPrefixForConfig(arena, .@"test", .undefined);
+    defer arena.free(san_pref);
+    try std.testing.expectEqualStrings("out/sanitize-undefined", san_pref);
 }

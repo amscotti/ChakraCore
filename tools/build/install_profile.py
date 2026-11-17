@@ -287,6 +287,16 @@ def symlink_if_changed(target, link):
     return True
 
 
+VALID_PROFILES = (
+    "debug-static",
+    "release-shared",
+    "jit",
+    "sanitize-address",
+    "sanitize-undefined",
+    "sanitize-thread",
+)
+
+
 def main(argv):
     args = list(argv[1:])
     profile = None
@@ -317,9 +327,9 @@ def main(argv):
             print("install_profile: bad arg %r" % args[i], file=sys.stderr)
             return 2
         i += 1
-    if profile not in ("debug-static", "release-shared", "jit"):
-        print("install_profile: --profile must be debug-static, "
-              "release-shared, or jit, got %r" % (profile,), file=sys.stderr)
+    if profile not in VALID_PROFILES:
+        print("install_profile: --profile must be one of %s, got %r"
+              % (", ".join(VALID_PROFILES), profile), file=sys.stderr)
         return 2
     if dest != "out/%s" % profile:
         print("install_profile: --dest must be exactly out/%s, got %r "

@@ -1,7 +1,10 @@
-//
-// Copyright (c) Microsoft. All rights reserved.
-// Licensed under the MIT license. See LICENSE file in the project root for full license information.
-//
+//-------------------------------------------------------------------------------------------------------
+// ChakraCore/Pal
+// Contains portions (c) copyright Microsoft, portions copyright (c) the .NET Foundation and Contributors
+// and edits (c) copyright the ChakraCore Contributors.
+// See THIRD-PARTY-NOTICES.txt in the project root for .NET Foundation license
+// Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
+//-------------------------------------------------------------------------------------------------------
 
 /*++
 
@@ -1258,10 +1261,14 @@ PAL_wmemcmp(
     if (string1 == string2) return diff;
 
     constexpr size_t blockSize = sizeof(size_t) / sizeof(char16_t);
-    const     size_t *num1     = (const size_t*)(string1);
-    const     size_t *num2     = (const size_t*)(string2);
 
-    while( (count > blockSize * (wi + 1)) && num1[wi] == num2[wi] ) ++wi;
+    if ((((uintptr_t)string1 | (uintptr_t)string2) % alignof(size_t)) == 0)
+    {
+        const size_t *num1 = (const size_t*)(string1);
+        const size_t *num2 = (const size_t*)(string2);
+
+        while ((count > blockSize * (wi + 1)) && num1[wi] == num2[wi]) ++wi;
+    }
 
     for (i = blockSize * wi; i < count; ++i)
     {

@@ -33,10 +33,14 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
 sys.path.insert(0, str(HERE))
 import common
+import check_fulljit
+import check_gcstress
 import check_jit
 import check_native
 import check_regression
 import check_regression_linux
+import check_sanitize
+import check_wasm_p1
 import install_profile
 import test_incremental
 
@@ -1066,6 +1070,22 @@ class RegenSingleVariantGuardTests(unittest.TestCase):
             self.assertNotEqual((js_dir / "JsBuiltIn.nojit.bc.64b.h").read_bytes(),
                                 b"original header\n")
 
+    def test_single_variant_refusal_deletes_newly_created_missing_header(self):
+        with tempfile.TemporaryDirectory(prefix="regen-guard-missing-test-") as tmp:
+            root = Path(tmp)
+            js_dir, stub = self.make_fixture(root)
+            missing = js_dir / "JsBuiltIn.nojit.bc.32b.h"
+            missing.unlink()
+            self.assertFalse(missing.exists())
+            proc = self.invoke(root, [])
+            self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+            self.assertIn("REFUSED", proc.stdout + proc.stderr)
+            self.assertFalse(missing.exists(),
+                             "newly created missing header must be deleted on refusal")
+            for name in ("JsBuiltIn.nojit.bc.64b.h", "JsBuiltIn.bc.64b.h", "JsBuiltIn.bc.32b.h"):
+                self.assertEqual((js_dir / name).read_bytes(), b"original header\n",
+                                 name + " restored byte-identical")
+
 
 class RegenGuidPathTests(unittest.TestCase):
     """The GUID mint path (swarm-trie mint-path fix, must-before-Linux): the
@@ -1376,6 +1396,88 @@ class BuildZigBackendOrderTests(unittest.TestCase):
         self.assertIn("const bg = &tables.backend_group;", bz)
         self.assertIn('b.step("check-wasm"', bz)
         self.assertIn('b.step("ch-nodeapi"', bz)
+
+
+class Tier1GateAndSanitizerTests(unittest.TestCase):
+    """Unit and negative-control tests for sanitizer lane and Tier 1 gates."""
+
+    def test_wasm_arch_flag_selects_platform(self):
+        with mock.patch.object(check_wasm_p1.sys, "platform", "darwin"), \
+             mock.patch.object(check_wasm_p1.platform, "machine", return_value="arm64"):
+            self.assertEqual(check_wasm_p1.runtests_arch_flag(), "--arm64")
+        with mock.patch.object(check_wasm_p1.sys, "platform", "linux"), \
+             mock.patch.object(check_wasm_p1.platform, "machine", return_value="x86_64"):
+            self.assertEqual(check_wasm_p1.runtests_arch_flag(), "--x64")
+
+    def test_install_profile_accepts_sanitize_profiles(self):
+        for name in ("sanitize-address", "sanitize-undefined", "sanitize-thread"):
+            self.assertIn(name, install_profile.VALID_PROFILES)
+        with tempfile.TemporaryDirectory(prefix="install-sanitize-test-") as tmp:
+            root = Path(tmp)
+            src = root / "src_ch"
+            src.write_bytes(b"fake-ch")
+            (root / "tools/build").mkdir(parents=True)
+            with mock.patch.object(install_profile, "__file__",
+                                   str(root / "tools/build/install_profile.py")):
+                rc = install_profile.main([
+                    "install_profile.py",
+                    "--profile", "sanitize-address",
+                    "--dest", "out/sanitize-address",
+                    "--map=bin/ch=" + str(src),
+                ])
+            dest = root / "out/sanitize-address"
+            self.assertEqual(rc, 0)
+            self.assertEqual((dest / ".profile").read_text(), "sanitize-address\n")
+            self.assertEqual((dest / "bin/ch").read_bytes(), b"fake-ch")
+
+    def test_check_gcstress_self_test_and_legs(self):
+        legs = check_gcstress.build_legs("out/test/bin/GCStress")
+        self.assertEqual(legs[0][0], "in-thread")
+        self.assertIn("-off:ConcurrentCollect", legs[0][1])
+        self.assertEqual(legs[1][0], "concurrent")
+        self.assertNotIn("-off:ConcurrentCollect", legs[1][1])
+        self.assertEqual(check_gcstress.self_test(), 0)
+
+    def test_check_fulljit_self_test_and_command_shape(self):
+        self.assertEqual(check_fulljit.self_test(), 0)
+        entry = {
+            "folder": "/tmp/fake",
+            "files": "foo.js",
+            "compile_flags": ["-WER"],
+            "baseline": None,
+            "timeout": None,
+            "tags": set(),
+            "eol_os": None,
+        }
+        cmd = check_fulljit.build_test_cmd("/tmp/ch", entry)
+        self.assertIn("-forceNative", cmd)
+        self.assertIn("-off:simpleJit", cmd)
+        self.assertIn("-bgJitDelay:0", cmd)
+        self.assertFalse(any("-dynamicprofile" in a for a in cmd))
+        self.assertEqual(check_fulljit.grade_test_output(0, b"pass\npass\n", None), None)
+        self.assertIsNotNone(check_fulljit.grade_test_output(0, b"boom\n", None))
+
+    def test_check_sanitize_self_test_and_env(self):
+        self.assertEqual(check_sanitize.self_test(), 0)
+        asan_env = check_sanitize.sanitizer_env("address")
+        self.assertIn("detect_leaks=0", asan_env["ASAN_OPTIONS"])
+        ubsan_env = check_sanitize.sanitizer_env("undefined")
+        self.assertIn("halt_on_error=1", ubsan_env["UBSAN_OPTIONS"])
+        self.assertIsNotNone(check_sanitize.find_sanitizer_diagnostic(
+            "SUMMARY: UndefinedBehaviorSanitizer: runtime error"))
+
+    def test_build_and_linux_zig_wire_tier1_targets(self):
+        bz = (ROOT / "build.zig").read_text()
+        lz = (ROOT / "tools/build/linux.zig").read_text()
+        for gate in ("check-gcstress", "check-fulljit", "check-sanitize", "check-wasm"):
+            self.assertIn(gate, bz, "missing in build.zig: " + gate)
+            self.assertIn(gate, lz, "missing in linux.zig: " + gate)
+        for script in ("check_gcstress.py", "check_fulljit.py", "check_sanitize.py"):
+            self.assertIn(script, bz)
+            self.assertIn(script, lz)
+        self.assertIn("check_wasm_p1.py", lz)
+        self.assertIn("sanitize", bz)
+        self.assertIn("sanitize", lz)
 
 
 if __name__ == "__main__":

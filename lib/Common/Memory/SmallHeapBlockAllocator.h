@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #pragma once
@@ -125,10 +126,10 @@ SmallHeapBlockAllocator<TBlockType>::InlinedAllocImpl(Recycler * recycler, DECLS
     }
 
     char * memBlock = (char *)freeObjectList;
-    char * nextCurrentAddress = memBlock + sizeCat;
     char * endAddress = this->endAddress;
+    char * nextCurrentAddress = (memBlock != nullptr) ? (memBlock + sizeCat) : nullptr;
 
-    if (nextCurrentAddress <= endAddress)
+    if (nextCurrentAddress != nullptr && nextCurrentAddress <= endAddress)
     {
         // Bump Allocation
         Assert(this->IsBumpAllocMode());

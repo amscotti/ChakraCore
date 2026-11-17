@@ -61,6 +61,7 @@ const pal_config = @import("tools/pal-config/check.zig");
 const tables = @import("tools/build/tables.zig");
 
 const profile_target = "aarch64-macos.26.0";
+const host_clang_target = "arm64-apple-macos26.0";
 const profile_sdk_version = "26.5";
 const default_icu_include = "/opt/homebrew/opt/icu4c/include";
 
@@ -147,6 +148,61 @@ fn gateProfile(b: *std.Build) Profile {
     if (std.mem.eql(u8, raw, "release-shared")) return .release_shared;
     if (std.mem.eql(u8, raw, "jit")) return .jit;
     fail("unsupported -Dprofile={s}: expected one of: test, debug-static, release-shared, jit", .{raw});
+}
+
+const Sanitize = enum {
+    none,
+    address,
+    undefined,
+    thread,
+
+    fn name(self: Sanitize) []const u8 {
+        return switch (self) {
+            .none => "none",
+            .address => "address",
+            .undefined => "undefined",
+            .thread => "thread",
+        };
+    }
+
+    fn fsanitizeFlag(self: Sanitize) []const u8 {
+        return switch (self) {
+            .none => unreachable,
+            .address => "-fsanitize=address",
+            .undefined => "-fsanitize=undefined",
+            .thread => "-fsanitize=thread",
+        };
+    }
+};
+
+fn gateSanitize(b: *std.Build) Sanitize {
+    const raw = b.option([]const u8, "sanitize", "Sanitizer mode: none (default), address, undefined, thread (Linux only)") orelse "none";
+    if (std.mem.eql(u8, raw, "none")) return .none;
+    if (std.mem.eql(u8, raw, "address")) return .address;
+    if (std.mem.eql(u8, raw, "undefined")) return .undefined;
+    if (std.mem.eql(u8, raw, "thread")) {
+        fail("unsupported -Dsanitize=thread on macOS: ChakraCore PAL Mach exception/thread-suspension hooks are not TSan-clean on Darwin; use -Dsanitize=address or -Dsanitize=undefined on macOS, or -Dsanitize=thread on Linux", .{});
+    }
+    fail("unsupported -Dsanitize={s}: expected one of: none, address, undefined, thread", .{raw});
+}
+
+const HostCompilers = struct {
+    cc: []const u8,
+    cxx: []const u8,
+};
+
+fn gateHostCompilers(b: *std.Build) HostCompilers {
+    const cc_res = b.runFallible(&.{ "xcrun", "--find", "clang" }, .{});
+    const cc = switch (cc_res) {
+        .success => |out| std.mem.trim(u8, out, " \t\r\n"),
+        else => fail("cannot resolve host clang via xcrun --find clang (required for -Dsanitize)", .{}),
+    };
+    const cxx_res = b.runFallible(&.{ "xcrun", "--find", "clang++" }, .{});
+    const cxx = switch (cxx_res) {
+        .success => |out| std.mem.trim(u8, out, " \t\r\n"),
+        else => fail("cannot resolve host clang++ via xcrun --find clang++ (required for -Dsanitize)", .{}),
+    };
+    return .{ .cc = cc, .cxx = cxx };
 }
 
 fn gateOptimize(b: *std.Build, profile: Profile) std.builtin.Optimize {
@@ -262,6 +318,7 @@ fn gateIcu(b: *std.Build) []const u8 {
 const Ctx = struct {
     b: *std.Build,
     profile: Profile,
+    sanitize: Sanitize,
     wasm: bool,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.Optimize,
@@ -271,6 +328,8 @@ const Ctx = struct {
     sdk_frameworks: []const u8,
     sdk_lib: []const u8,
     zig_exe: []const u8,
+    host_cc: []const u8,
+    host_cxx: []const u8,
     config_dir: std.Build.LazyPath,
     config_h: std.Build.LazyPath,
     // wabt config.h (generated only under -Dwasm=true; otherwise
@@ -279,6 +338,13 @@ const Ctx = struct {
     wabt_h: std.Build.LazyPath,
     gen_dir: std.Build.LazyPath,
     dbg_header: std.Build.LazyPath,
+};
+
+const LinkedArtifact = struct {
+    bin: std.Build.LazyPath,
+    step: *std.Build.Step,
+    compile: ?*std.Build.Step.Compile = null,
+    name: []const u8 = "",
 };
 
 const Lang = enum { cxx, c, asm_ };
@@ -293,6 +359,32 @@ const Lang = enum { cxx, c, asm_ };
 fn addSdkLinkPaths(ctx: *const Ctx, mod: *std.Build.Module) void {
     mod.addFrameworkPath(.{ .cwd_relative = ctx.sdk_frameworks });
     mod.addLibraryPath(.{ .cwd_relative = ctx.sdk_lib });
+}
+
+fn addSanitizeHostLinkPrefix(ctx: *const Ctx, cmd: *std.Build.Step.Run) void {
+    cmd.addArgs(&.{
+        "-target",
+        host_clang_target,
+        "-isysroot",
+        ctx.sdk_path,
+        "-mcpu=apple-m1",
+        ctx.sanitize.fsanitizeFlag(),
+        "-Wl,-headerpad_max_install_names",
+    });
+}
+
+fn registerFailStep(b: *std.Build, python: []const u8, name: []const u8, desc: []const u8, msg: []const u8) void {
+    const cmd = b.addSystemCommand(&.{ python, "-c", "import sys; sys.exit(sys.argv[1])", msg });
+    cmd.stdio = .inherit;
+    const step = b.step(name, desc);
+    step.dependOn(&cmd.step);
+}
+
+fn createLibtoolArchive(b: *std.Build, name: []const u8, objs: []const std.Build.LazyPath) LinkedArtifact {
+    const lt = b.addSystemCommand(&.{ "/usr/bin/env", "ZERO_AR_DATE=1", "/usr/bin/libtool", "-static", "-no_warning_for_no_symbols", "-o" });
+    const out = lt.addOutputFileArg(b.fmt("lib{s}.a", .{name}));
+    for (objs) |o| lt.addFileArg(o);
+    return .{ .bin = out, .step = &lt.step, .name = name };
 }
 
 fn createLinkModule(ctx: *const Ctx) *std.Build.Module {
@@ -379,18 +471,30 @@ fn appendTuFlags(ctx: *const Ctx, run: *std.Build.Step.Run, g: *const tables.Gro
         .cxx => {
             for (tables.warnings) |w| run.addArg(w);
             for ([_][]const u8{ "-fno-omit-frame-pointer", "-fdelayed-template-parsing" }) |f| run.addArg(f);
-            // Config flags in the CMAKE_CXX_FLAGS_<CONFIG> slot: test -O3
-            // -g (repo override), Debug -g (CMake builtin, no -O),
-            // Release -O3 -DNDEBUG (CMake builtin, no -g) plus an
-            // explicit -g0: `zig c++` emits DWARF unless told
-            // otherwise (probed: -O3 -DNDEBUG alone still ships 4
-            // __debug sections), while legacy AppleClang defaults
-            // to none - a driver-default correction in the same
-            // category as -UNDEBUG/-fno-sanitize below.
-            switch (ctx.profile) {
-                .@"test", .jit => for ([_][]const u8{ "-O3", "-g" }) |f| run.addArg(f),
-                .debug_static => run.addArg("-g"),
-                .release_shared => for ([_][]const u8{ "-O3", "-DNDEBUG", "-g0" }) |f| run.addArg(f),
+            if (ctx.sanitize != .none) {
+                if (ctx.profile == .debug_static) {
+                    run.addArg("-g");
+                } else {
+                    for ([_][]const u8{ "-O1", "-g" }) |f| run.addArg(f);
+                }
+                run.addArg(ctx.sanitize.fsanitizeFlag());
+                if (ctx.sanitize == .undefined) {
+                    run.addArg("-fno-sanitize=enum,alignment,vptr,pointer-overflow");
+                }
+            } else {
+                // Config flags in the CMAKE_CXX_FLAGS_<CONFIG> slot: test -O3
+                // -g (repo override), Debug -g (CMake builtin, no -O),
+                // Release -O3 -DNDEBUG (CMake builtin, no -g) plus an
+                // explicit -g0: `zig c++` emits DWARF unless told
+                // otherwise (probed: -O3 -DNDEBUG alone still ships 4
+                // __debug sections), while legacy AppleClang defaults
+                // to none - a driver-default correction in the same
+                // category as -UNDEBUG/-fno-sanitize below.
+                switch (ctx.profile) {
+                    .@"test", .jit => for ([_][]const u8{ "-O3", "-g" }) |f| run.addArg(f),
+                    .debug_static => run.addArg("-g"),
+                    .release_shared => for ([_][]const u8{ "-O3", "-DNDEBUG", "-g0" }) |f| run.addArg(f),
+                }
             }
             run.addArg("-std=gnu++17");
             // -fPIE sits mid-line on ch (target property); -fPIC sits
@@ -402,44 +506,69 @@ fn appendTuFlags(ctx: *const Ctx, run: *std.Build.Step.Run, g: *const tables.Gro
             } else if (g.pic == .pic) {
                 run.addArg("-fPIC");
             }
-            // Build-required additions: the SDK C++ headers
-            // (-isystem, absolute) and SDK frameworks (-F, sysroot-
-            // relative: the driver resolves -F against --sysroot, so an
-            // absolute -F would double the prefix - pilot finding), the
-            // pinned apple_m1 CPU, and -Wno-date-time (zig clang 22
-            // promotes __DATE__/__TIME__; pilot finding). The c++ driver
-            // injects no NDEBUG, matching the reference C++ (contract
-            // quirk Q4); -UNDEBUG is a defensive no-op, kept for every
-            // profile except release-shared (whose -DNDEBUG above is real).
-            // -fno-sanitize=undefined on debug-static: `zig c++` with no
-            // -O flag defaults to a UBSan-instrumented build (80 ubsan
-            // symbols observed in ch, trapping on engine null+offset
-            // arithmetic), while legacy AppleClang instruments nothing;
-            // -O3/-O2 on the other profiles already disable it (0
-            // symbols). Probed: the spelling removes all ubsan refs.
-            run.addArg("-isystem");
-            run.addArg(ctx.sdk_isystem);
-            run.addArg("-F");
-            run.addArg("/System/Library/Frameworks");
-            run.addArg("-mcpu=apple_m1");
-            if (ctx.profile != .release_shared) run.addArg("-UNDEBUG");
-            if (ctx.profile == .debug_static) run.addArg("-fno-sanitize=undefined");
+            if (ctx.sanitize != .none) {
+                // Host Apple clang with -isysroot handles SDK C++ stdlib and
+                // system framework resolution directly; -mcpu uses hyphen.
+                run.addArg("-mcpu=apple-m1");
+                if (ctx.profile != .release_shared) run.addArg("-UNDEBUG");
+                if (is_ch and ctx.sanitize == .address) {
+                    run.addArg("-include");
+                    run.addArg("tools/build/asan_apple_prefix.h");
+                }
+            } else {
+                // Build-required additions: the SDK C++ headers
+                // (-isystem, absolute) and SDK frameworks (-F, sysroot-
+                // relative: the driver resolves -F against --sysroot, so an
+                // absolute -F would double the prefix - pilot finding), the
+                // pinned apple_m1 CPU, and -Wno-date-time (zig clang 22
+                // promotes __DATE__/__TIME__; pilot finding). The c++ driver
+                // injects no NDEBUG, matching the reference C++ (contract
+                // quirk Q4); -UNDEBUG is a defensive no-op, kept for every
+                // profile except release-shared (whose -DNDEBUG above is real).
+                // -fno-sanitize=undefined on debug-static: `zig c++` with no
+                // -O flag defaults to a UBSan-instrumented build (80 ubsan
+                // symbols observed in ch, trapping on engine null+offset
+                // arithmetic), while legacy AppleClang instruments nothing;
+                // -O3/-O2 on the other profiles already disable it (0
+                // symbols). Probed: the spelling removes all ubsan refs.
+                run.addArg("-isystem");
+                run.addArg(ctx.sdk_isystem);
+                run.addArg("-F");
+                run.addArg("/System/Library/Frameworks");
+                run.addArg("-mcpu=apple_m1");
+                if (ctx.profile != .release_shared) run.addArg("-UNDEBUG");
+                if (ctx.profile == .debug_static) run.addArg("-fno-sanitize=undefined");
+            }
             run.addArg("-Wno-date-time");
         },
         .c, .asm_ => {
-            // CMAKE_C_FLAGS_<CONFIG> builtins (the repo overrides only the
-            // C++ RelWithDebInfo variant): test -O2 -g -DNDEBUG, Debug -g,
-            // Release -O3 -DNDEBUG. Same builtins cover ASM. Release
-            // takes an explicit -g0 (`zig cc` emits DWARF unless told
-            // otherwise - same driver-default correction as C++ above).
-            const opt_flag: ?[]const u8 = switch (ctx.profile) {
-                .@"test", .jit => "-O2",
-                .debug_static => null,
-                .release_shared => "-O3",
-            };
             if (lang == .c) run.addArg("-std=gnu99");
-            if (opt_flag) |f| run.addArg(f);
-            run.addArg(if (ctx.profile == .release_shared) "-g0" else "-g");
+            if (ctx.sanitize != .none) {
+                if (lang == .c) {
+                    if (ctx.profile != .debug_static) run.addArg("-O1");
+                    run.addArg("-g");
+                    run.addArg("-fno-omit-frame-pointer");
+                    run.addArg(ctx.sanitize.fsanitizeFlag());
+                if (ctx.sanitize == .undefined) {
+                    run.addArg("-fno-sanitize=enum,alignment,vptr,pointer-overflow");
+                }
+                } else {
+                    run.addArg("-g");
+                }
+            } else {
+                // CMAKE_C_FLAGS_<CONFIG> builtins (the repo overrides only the
+                // C++ RelWithDebInfo variant): test -O2 -g -DNDEBUG, Debug -g,
+                // Release -O3 -DNDEBUG. Same builtins cover ASM. Release
+                // takes an explicit -g0 (`zig cc` emits DWARF unless told
+                // otherwise - same driver-default correction as C++ above).
+                const opt_flag: ?[]const u8 = switch (ctx.profile) {
+                    .@"test", .jit => "-O2",
+                    .debug_static => null,
+                    .release_shared => "-O3",
+                };
+                if (opt_flag) |f| run.addArg(f);
+                run.addArg(if (ctx.profile == .release_shared) "-g0" else "-g");
+            }
             if (ctx.profile != .debug_static) run.addArg("-DNDEBUG");
             for ([_][]const u8{ "-fasm-blocks", "-fms-extensions", "-fwrapv" }) |f| run.addArg(f);
             if (g.pal) {
@@ -447,14 +576,18 @@ fn appendTuFlags(ctx: *const Ctx, run: *std.Build.Step.Run, g: *const tables.Gro
             } else if (g.pic == .pic) {
                 run.addArg("-fPIC");
             }
-            run.addArg("-isystem");
-            run.addArg(ctx.sdk_isystem);
-            run.addArg("-F");
-            run.addArg("/System/Library/Frameworks");
-            run.addArg("-mcpu=apple_m1");
-            // Same UBSan default-correction as C++ (see above), C only -
-            // assembler lines take no sanitizer flags.
-            if (lang == .c and ctx.profile == .debug_static) run.addArg("-fno-sanitize=undefined");
+            if (ctx.sanitize != .none) {
+                run.addArg("-mcpu=apple-m1");
+            } else {
+                run.addArg("-isystem");
+                run.addArg(ctx.sdk_isystem);
+                run.addArg("-F");
+                run.addArg("/System/Library/Frameworks");
+                run.addArg("-mcpu=apple_m1");
+                // Same UBSan default-correction as C++ (see above), C only -
+                // assembler lines take no sanitizer flags.
+                if (lang == .c and ctx.profile == .debug_static) run.addArg("-fno-sanitize=undefined");
+            }
             run.addArg("-Wno-date-time");
         },
     }
@@ -468,11 +601,21 @@ fn appendTuFlags(ctx: *const Ctx, run: *std.Build.Step.Run, g: *const tables.Gro
 fn compileTu(ctx: *const Ctx, g: *const tables.Group, src: []const u8, lang: Lang, number: u32) std.Build.LazyPath {
     const b = ctx.b;
     std.debug.assert(number < 10000);
-    const run = b.addSystemCommand(&.{ ctx.zig_exe, if (lang == .cxx) "c++" else "cc" });
-    run.addArg("-target");
-    run.addArg(profile_target);
-    run.addArg("--sysroot");
-    run.addArg(ctx.sdk_path);
+    const run = if (ctx.sanitize != .none) blk: {
+        const cmd = b.addSystemCommand(&.{if (lang == .cxx) ctx.host_cxx else ctx.host_cc});
+        cmd.addArg("-target");
+        cmd.addArg(host_clang_target);
+        cmd.addArg("-isysroot");
+        cmd.addArg(ctx.sdk_path);
+        break :blk cmd;
+    } else blk: {
+        const cmd = b.addSystemCommand(&.{ ctx.zig_exe, if (lang == .cxx) "c++" else "cc" });
+        cmd.addArg("-target");
+        cmd.addArg(profile_target);
+        cmd.addArg("--sysroot");
+        cmd.addArg(ctx.sdk_path);
+        break :blk cmd;
+    };
     appendTuFlags(ctx, run, g, lang);
     var digits: [4]u8 = .{ '0', '0', '0', '0' };
     var n = number;
@@ -580,6 +723,10 @@ pub fn build(b: *std.Build) void {
         return;
     }
     const profile = gateProfile(b);
+    const sanitize = gateSanitize(b);
+    if (sanitize != .none and profile == .release_shared) {
+        fail("-Dsanitize={s} is not supported with -Dprofile=release-shared; use test (default), debug-static, or jit", .{sanitize.name()});
+    }
     const target = gateTarget(b);
     const optimize = gateOptimize(b, profile);
     const sdk_path = gateSdk(b);
@@ -587,9 +734,21 @@ pub fn build(b: *std.Build) void {
     const python = b.findProgram(.{ .names = &.{ "python3", "python" } }) orelse
         fail("cannot find python3 or python on PATH; needed to run bin/ch/jstoc.py for DbgController.js.h", .{});
     const gates = loadGateCounts(b);
+    const host_compilers = if (sanitize != .none) gateHostCompilers(b) else HostCompilers{ .cc = "", .cxx = "" };
+    const side_name: ?[]const u8 = if (sanitize != .none)
+        b.fmt("sanitize-{s}", .{sanitize.name()})
+    else if (profile != .@"test")
+        profile.name()
+    else
+        null;
 
-    // The test line is byte-identical to B2; other profiles label themselves.
-    if (profile == .@"test") {
+    // The test line is byte-identical to B2; other profiles and sanitizer
+    // lanes label their isolated side prefixes.
+    if (sanitize != .none) {
+        std.debug.print("sanitize={s} profile={s}: target={s} sdk={s}@{s} icu-include={s} host-cxx={s} side prefix out/{s}\n", .{
+            sanitize.name(), profile.name(), host_clang_target, sdk_path, profile_sdk_version, icu_include, host_compilers.cxx, side_name.?,
+        });
+    } else if (profile == .@"test") {
         std.debug.print("b2 profile: target={s} sdk={s}@{s} icu-include={s} zig={f} python={s}\n", .{
             profile_target, sdk_path, profile_sdk_version, icu_include, builtin.zig_version, python,
         });
@@ -675,6 +834,7 @@ pub fn build(b: *std.Build) void {
     const ctx = Ctx{
         .b = b,
         .profile = profile,
+        .sanitize = sanitize,
         .wasm = wasm,
         .target = target,
         .optimize = optimize,
@@ -684,6 +844,8 @@ pub fn build(b: *std.Build) void {
         .sdk_frameworks = b.fmt("{s}/System/Library/Frameworks", .{sdk_path}),
         .sdk_lib = b.fmt("{s}/usr/lib", .{sdk_path}),
         .zig_exe = b.graph.zig_exe,
+        .host_cc = host_compilers.cc,
+        .host_cxx = host_compilers.cxx,
         .config_dir = wf.getDirectory(),
         .config_h = config_h,
         .wabt_dir = wabt_dir,
@@ -733,7 +895,7 @@ pub fn build(b: *std.Build) void {
     // Group.singular_name is set - a single loop, in object_groups order
     // (Pal, Codex, PlatformAgnostic), driving creation, ch linkage, and
     // install below.
-    var singular_libs: std.ArrayList(*std.Build.Step.Compile) = .empty;
+    var singular_libs: std.ArrayList(LinkedArtifact) = .empty;
     for (tables.static_src_group.cxx) |src| {
         static_objs.append(arena, compileTu(&ctx, &tables.static_src_group, src, .cxx, n)) catch @panic("OOM");
         n += 1;
@@ -757,9 +919,14 @@ pub fn build(b: *std.Build) void {
         // Singular archives exist only for shared builds (contract 5.3).
         if (!is_static) {
             if (g.singular_name) |name| {
-                const mod = createLinkModule(&ctx);
-                for (static_objs.items[start..]) |o| mod.addObjectFile(o);
-                singular_libs.append(arena, b.addLibrary(.{ .name = name, .root_module = mod })) catch @panic("OOM");
+                if (sanitize != .none) {
+                    singular_libs.append(arena, createLibtoolArchive(b, name, static_objs.items[start..])) catch @panic("OOM");
+                } else {
+                    const mod = createLinkModule(&ctx);
+                    for (static_objs.items[start..]) |o| mod.addObjectFile(o);
+                    const lib = b.addLibrary(.{ .name = name, .root_module = mod });
+                    singular_libs.append(arena, .{ .bin = lib.getEmittedBin(), .step = &lib.step, .compile = lib, .name = name }) catch @panic("OOM");
+                }
             }
         }
         // JIT-only: ARM64 backend objects join static_objs right after
@@ -827,20 +994,15 @@ pub fn build(b: *std.Build) void {
     // libChakraCoreStatic.a (contract section 5.2).
     // The jit profile's -g objects sum past 2GB. Zig's archiver then
     // fails with "failed to write: Unexpected" (the partial file is a
-    // zero-filled multi-gigabyte blob). libtool writes that archive.
-    // The dylib and ch do not consume it; they link the objects.
-    const static_lib: ?*std.Build.Step.Compile = if (profile == .jit) null else blk: {
+    // zero-filled multi-gigabyte blob). libtool writes that archive,
+    // and sanitizer lanes also use libtool directly.
+    const static_archive: LinkedArtifact = if (profile == .jit or sanitize != .none) blk: {
+        break :blk createLibtoolArchive(b, "ChakraCoreStatic", static_objs.items);
+    } else blk: {
         const static_mod = createLinkModule(&ctx);
         for (static_objs.items) |o| static_mod.addObjectFile(o);
-        break :blk b.addLibrary(.{ .name = "ChakraCoreStatic", .root_module = static_mod });
-    };
-    const static_archive: std.Build.LazyPath = if (static_lib) |lib| lib.getEmittedBin() else blk: {
-        // ZERO_AR_DATE makes libtool write the deterministic epoch/0:0
-        // member metadata that Zig's archiver uses for the no-JIT archive.
-        const lt = b.addSystemCommand(&.{ "/usr/bin/env", "ZERO_AR_DATE=1", "/usr/bin/libtool", "-static", "-o" });
-        const out = lt.addOutputFileArg("libChakraCoreStatic.a");
-        for (static_objs.items) |o| lt.addFileArg(o);
-        break :blk out;
+        const lib = b.addLibrary(.{ .name = "ChakraCoreStatic", .root_module = static_mod });
+        break :blk .{ .bin = lib.getEmittedBin(), .step = &lib.step, .compile = lib, .name = "ChakraCoreStatic" };
     };
 
     const icu_lib = b.fmt("{s}/../lib", .{icu_include});
@@ -850,7 +1012,24 @@ pub fn build(b: *std.Build) void {
     // linker has no force-load spelling; the pilot joins the flag
     // instead, doc/build.md section 14). ICU via -L + -l; pthread/dl
     // fold into libc (libSystem).
-    const dylib: ?*std.Build.Step.Compile = if (is_static) null else blk: {
+    const dylib: ?LinkedArtifact = if (is_static) null else if (sanitize != .none) blk: {
+        const link = b.addSystemCommand(&.{ctx.host_cxx});
+        addSanitizeHostLinkPrefix(&ctx, link);
+        link.addArgs(&.{
+            "-dynamiclib",
+            "-Wl,-compatibility_version,1.0.0",
+            "-Wl,-current_version,1.0.0",
+            "-install_name",
+            "@rpath/libChakraCore.dylib",
+        });
+        for (dylib_objs.items) |o| link.addFileArg(o);
+        for (static_objs.items) |o| link.addFileArg(o);
+        link.addArg(b.fmt("-L{s}", .{icu_lib}));
+        link.addArgs(&.{ "-licuuc", "-licui18n", "-licudata", "-framework", "CoreFoundation", "-framework", "Security" });
+        link.addArg("-o");
+        const out = link.addOutputFileArg("libChakraCore.dylib");
+        break :blk .{ .bin = out, .step = &link.step, .name = "ChakraCore" };
+    } else blk: {
         const dylib_mod = createLinkModule(&ctx);
         for (dylib_objs.items) |o| dylib_mod.addObjectFile(o);
         for (static_objs.items) |o| dylib_mod.addObjectFile(o);
@@ -874,7 +1053,7 @@ pub fn build(b: *std.Build) void {
         });
         lib.install_name = "@rpath/libChakraCore.dylib";
         lib.headerpad_max_install_names = true;
-        break :blk lib;
+        break :blk .{ .bin = lib.getEmittedBin(), .step = &lib.step, .compile = lib, .name = "ChakraCore" };
     };
 
     // ch (contract section 5.7): shared profiles link 8 objects plus
@@ -882,65 +1061,94 @@ pub fn build(b: *std.Build) void {
     // the dylib (loaded at runtime from the executable's own directory);
     // static profiles link 9 objects (TestHooks in ch) plus every engine
     // TU directly - the -force_load equivalent, same join as the dylib.
-    const ch_mod = createLinkModule(&ctx);
-    for (ch_objs.items) |o| ch_mod.addObjectFile(o);
-    addSdkLinkPaths(&ctx, ch_mod);
-    ch_mod.addLibraryPath(.{ .cwd_relative = icu_lib });
-    ch_mod.linkSystemLibrary("icuuc", .{});
-    ch_mod.linkSystemLibrary("icui18n", .{});
-    ch_mod.linkSystemLibrary("icudata", .{});
-    ch_mod.linkFramework("CoreFoundation", .{});
-    ch_mod.linkFramework("Security", .{});
-    if (is_static) {
-        for (static_objs.items) |o| ch_mod.addObjectFile(o);
-    } else {
-        for (singular_libs.items) |lib| ch_mod.linkLibrary(lib);
-    }
-    const ch = b.addExecutable(.{ .name = "ch", .root_module = ch_mod });
-    // ch DEFINES _OnChakraCoreLoadedEntry (bin/ch/ch.cpp:46, extern "C") for
-    // the dylib to import at runtime; retention in the executable comes from
-    // default Mach-O executable export of a defined global, not from -u.
-    // The call stays: verified effective and harmless (nm shows the as-built
-    // ch exporting T _OnChakraCoreLoadedEntry).
-    ch.forceUndefinedSymbol("_OnChakraCoreLoadedEntry");
-    ch.headerpad_max_install_names = true;
-    // LC_MAIN stacksize (U-B3.1-2): macOS makes RLIMIT_STACK immutable
-    // once LC_MAIN stacksize is nonzero - Apple-clang probes show EVERY
-    // setrlimit(RLIMIT_STACK) fails EINVAL (even a no-op set to the
-    // current value), while stacksize 0 allows any set. PAL_Initialize
-    // (pal/src/init/pal.cpp:140-155) lowers the inherited soft limit
-    // (32MB here) to 8MB; the Debug-only _ASSERTE(err == 0) therefore
-    // aborts any Debug ch linked with a nonzero stacksize, while
-    // non-Debug builds fail the call silently and run fine. Legacy
-    // links stacksize 0 on both executables, so debug-static sets an
-    // explicit 0 (Zig's default would be 16MB - null is NOT zero);
-    // test/release keep the B2 8MB contract (silent-failure path).
-    ch.stack_size = if (profile == .debug_static) 0 else 8 * 1024 * 1024;
-    ch.step.dependOn(&jstoc.step);
+    const ch: LinkedArtifact = if (sanitize != .none) blk: {
+        const link = b.addSystemCommand(&.{ctx.host_cxx});
+        addSanitizeHostLinkPrefix(&ctx, link);
+        if (profile != .debug_static) link.addArg("-Wl,-stack_size,0x800000");
+        link.addArg("-Wl,-u,_OnChakraCoreLoadedEntry");
+        for (ch_objs.items) |o| link.addFileArg(o);
+        if (is_static) {
+            for (static_objs.items) |o| link.addFileArg(o);
+        } else {
+            for (singular_libs.items) |lib| link.addFileArg(lib.bin);
+        }
+        link.addArg(b.fmt("-L{s}", .{icu_lib}));
+        link.addArgs(&.{ "-licuuc", "-licui18n", "-licudata", "-framework", "CoreFoundation", "-framework", "Security" });
+        link.addArg("-o");
+        const out = link.addOutputFileArg("ch");
+        link.step.dependOn(&jstoc.step);
+        break :blk .{ .bin = out, .step = &link.step, .name = "ch" };
+    } else blk: {
+        const ch_mod = createLinkModule(&ctx);
+        for (ch_objs.items) |o| ch_mod.addObjectFile(o);
+        addSdkLinkPaths(&ctx, ch_mod);
+        ch_mod.addLibraryPath(.{ .cwd_relative = icu_lib });
+        ch_mod.linkSystemLibrary("icuuc", .{});
+        ch_mod.linkSystemLibrary("icui18n", .{});
+        ch_mod.linkSystemLibrary("icudata", .{});
+        ch_mod.linkFramework("CoreFoundation", .{});
+        ch_mod.linkFramework("Security", .{});
+        if (is_static) {
+            for (static_objs.items) |o| ch_mod.addObjectFile(o);
+        } else {
+            for (singular_libs.items) |lib| ch_mod.addObjectFile(lib.bin);
+        }
+        const exe = b.addExecutable(.{ .name = "ch", .root_module = ch_mod });
+        // ch DEFINES _OnChakraCoreLoadedEntry (bin/ch/ch.cpp:46, extern "C") for
+        // the dylib to import at runtime; retention in the executable comes from
+        // default Mach-O executable export of a defined global, not from -u.
+        // The call stays: verified effective and harmless (nm shows the as-built
+        // ch exporting T _OnChakraCoreLoadedEntry).
+        exe.forceUndefinedSymbol("_OnChakraCoreLoadedEntry");
+        exe.headerpad_max_install_names = true;
+        // LC_MAIN stacksize (U-B3.1-2): macOS makes RLIMIT_STACK immutable
+        // once LC_MAIN stacksize is nonzero - Apple-clang probes show EVERY
+        // setrlimit(RLIMIT_STACK) fails EINVAL (even a no-op set to the
+        // current value), while stacksize 0 allows any set. PAL_Initialize
+        // (pal/src/init/pal.cpp:140-155) lowers the inherited soft limit
+        // (32MB here) to 8MB; the Debug-only _ASSERTE(err == 0) therefore
+        // aborts any Debug ch linked with a nonzero stacksize, while
+        // non-Debug builds fail the call silently and run fine. Legacy
+        // links stacksize 0 on both executables, so debug-static sets an
+        // explicit 0 (Zig's default would be 16MB - null is NOT zero);
+        // test/release keep the B2 8MB contract (silent-failure path).
+        exe.stack_size = if (profile == .debug_static) 0 else 8 * 1024 * 1024;
+        exe.step.dependOn(&jstoc.step);
+        break :blk .{ .bin = exe.getEmittedBin(), .step = &exe.step, .compile = exe, .name = "ch" };
+    };
 
     // GCStress (contract section 5.8): 4 objects plus the static archive.
     // 8 MiB stack matches the reference behavior (the pilot applied the
     // same stack contract to every Mach-O executable edge).
-    const gs_mod = createLinkModule(&ctx);
-    for (gs_objs.items) |o| gs_mod.addObjectFile(o);
-    addSdkLinkPaths(&ctx, gs_mod);
-    if (static_lib) |lib| {
-        gs_mod.linkLibrary(lib);
-    } else {
+    const gs: LinkedArtifact = if (sanitize != .none) blk: {
+        const link = b.addSystemCommand(&.{ctx.host_cxx});
+        addSanitizeHostLinkPrefix(&ctx, link);
+        if (profile != .debug_static) link.addArg("-Wl,-stack_size,0x800000");
+        for (gs_objs.items) |o| link.addFileArg(o);
+        link.addFileArg(static_archive.bin);
+        link.addArgs(&.{ "-framework", "CoreFoundation", "-framework", "Security" });
+        link.addArg("-o");
+        const out = link.addOutputFileArg("GCStress");
+        break :blk .{ .bin = out, .step = &link.step, .name = "GCStress" };
+    } else blk: {
+        const gs_mod = createLinkModule(&ctx);
+        for (gs_objs.items) |o| gs_mod.addObjectFile(o);
+        addSdkLinkPaths(&ctx, gs_mod);
         // Archive semantics: GCStress's stubs (StubExternalApi.cpp)
         // satisfy symbols that the engine also defines. Linking every
         // object would duplicate those symbols. A normal .a search
         // keeps the stubs and pulls the rest.
-        gs_mod.addObjectFile(static_archive);
-    }
-    gs_mod.linkFramework("CoreFoundation", .{});
-    gs_mod.linkFramework("Security", .{});
-    const gs = b.addExecutable(.{ .name = "GCStress", .root_module = gs_mod });
-    gs.headerpad_max_install_names = true;
-    // Same U-B3.1-2 contract as ch above: GCStress links the same Debug
-    // PAL_Initialize, so debug-static stamps LC_MAIN stacksize 0 like
-    // legacy; test/release keep 8MB.
-    gs.stack_size = if (profile == .debug_static) 0 else 8 * 1024 * 1024;
+        gs_mod.addObjectFile(static_archive.bin);
+        gs_mod.linkFramework("CoreFoundation", .{});
+        gs_mod.linkFramework("Security", .{});
+        const exe = b.addExecutable(.{ .name = "GCStress", .root_module = gs_mod });
+        exe.headerpad_max_install_names = true;
+        // Same U-B3.1-2 contract as ch above: GCStress links the same Debug
+        // PAL_Initialize, so debug-static stamps LC_MAIN stacksize 0 like
+        // legacy; test/release keep 8MB.
+        exe.stack_size = if (profile == .debug_static) 0 else 8 * 1024 * 1024;
+        break :blk .{ .bin = exe.getEmittedBin(), .step = &exe.step, .compile = exe, .name = "GCStress" };
+    };
 
     // Node-API provider (plan N1.1 / PR-3, Wave 1): libChakraNodeApi, a
     // standalone shared library built from lib/NodeApi provider TUs and
@@ -969,17 +1177,30 @@ pub fn build(b: *std.Build) void {
     // NodeApiObjects.cpp's napi_define_properties has no definition of
     // napi_create_function and the library does not link (landed wiring
     // by N2.6; N2.4 owns the TU, not this list).
-    const prov_lib: ?*std.Build.Step.Compile = if (is_static) null else blk: {
+    const prov_lib: ?LinkedArtifact = if (is_static) null else blk: {
         var prov_objs: std.ArrayList(std.Build.LazyPath) = .empty;
         for (tables.nodeapi_provider_tus) |src| {
-            const tu = b.addSystemCommand(&.{ ctx.zig_exe, "c++" });
-            tu.addArg("-target");
-            tu.addArg(profile_target);
-            tu.addArg("--sysroot");
-            tu.addArg(ctx.sdk_path);
-            tu.addArg("-std=gnu++17");
-            tu.addArg("-O3");
-            tu.addArg("-g");
+            const tu = if (sanitize != .none) cmd_blk: {
+                const c = b.addSystemCommand(&.{ctx.host_cxx});
+                c.addArg("-target");
+                c.addArg(host_clang_target);
+                c.addArg("-isysroot");
+                c.addArg(ctx.sdk_path);
+                c.addArg("-std=gnu++17");
+                if (profile != .debug_static) c.addArg("-O1");
+                c.addArgs(&.{ "-g", "-fno-omit-frame-pointer", sanitize.fsanitizeFlag() });
+                break :cmd_blk c;
+            } else cmd_blk: {
+                const c = b.addSystemCommand(&.{ ctx.zig_exe, "c++" });
+                c.addArg("-target");
+                c.addArg(profile_target);
+                c.addArg("--sysroot");
+                c.addArg(ctx.sdk_path);
+                c.addArg("-std=gnu++17");
+                c.addArg("-O3");
+                c.addArg("-g");
+                break :cmd_blk c;
+            };
             tu.addArg("-fPIC");
             // HIGH-5: hidden by default. The 145 napi_* declarations
             // already carry __attribute__((visibility("default")))
@@ -996,11 +1217,15 @@ pub fn build(b: *std.Build) void {
             tu.addArg("-Ilib/Jsrt");
             tu.addArg("-Iinclude/nodeapi");
             tu.addArg("-Ilib/NodeApi");
-            tu.addArg("-isystem");
-            tu.addArg(ctx.sdk_isystem);
-            tu.addArg("-F");
-            tu.addArg("/System/Library/Frameworks");
-            tu.addArg("-mcpu=apple_m1");
+            if (sanitize != .none) {
+                tu.addArg("-mcpu=apple-m1");
+            } else {
+                tu.addArg("-isystem");
+                tu.addArg(ctx.sdk_isystem);
+                tu.addArg("-F");
+                tu.addArg("/System/Library/Frameworks");
+                tu.addArg("-mcpu=apple_m1");
+            }
             tu.addArg("-Wno-date-time");
             tu.addArg("-o");
             const out = tu.addOutputFileArg(b.fmt("{s}.o", .{std.fs.path.basename(src)}));
@@ -1008,40 +1233,58 @@ pub fn build(b: *std.Build) void {
             tu.addFileArg(b.path(src));
             prov_objs.append(arena, out) catch @panic("OOM");
         }
-        const mod = createLinkModule(&ctx);
-        for (prov_objs.items) |o| mod.addObjectFile(o);
-        mod.linkLibrary(dylib.?);
-        addSdkLinkPaths(&ctx, mod);
-        // No direct ICU / CoreFoundation / Security edges: the
-        // provider references no ICU or framework symbols (verified
-        // via `nm -u` on the built dylib: only Js* + libc/libSystem),
-        // and the engine dylib already carries ICU as LC_LOAD_DYLIB.
-        // Linking ICU here would add hardcoded -L paths that cannot
-        // work under --sysroot (the ch-nodeapi host documents the
-        // same for its SystemCommand link) and would duplicate the
-        // engine's dependency. The Module link therefore keeps only
-        // the dependent-dylib edge to libChakraCore.
-        const lib = b.addLibrary(.{
-            .name = "ChakraNodeApi",
-            .root_module = mod,
-            .linkage = .dynamic,
-            .version = .{ .major = 1, .minor = 0, .patch = 0 },
-        });
-        lib.install_name = "@rpath/libChakraNodeApi.dylib";
-        lib.headerpad_max_install_names = true;
-        break :blk lib;
+        if (sanitize != .none) {
+            const link = b.addSystemCommand(&.{ctx.host_cxx});
+            addSanitizeHostLinkPrefix(&ctx, link);
+            link.addArgs(&.{
+                "-dynamiclib",
+                "-Wl,-compatibility_version,1.0.0",
+                "-Wl,-current_version,1.0.0",
+                "-install_name",
+                "@rpath/libChakraNodeApi.dylib",
+            });
+            for (prov_objs.items) |o| link.addFileArg(o);
+            link.addFileArg(dylib.?.bin);
+            link.addArg("-o");
+            const out = link.addOutputFileArg("libChakraNodeApi.dylib");
+            link.step.dependOn(dylib.?.step);
+            break :blk .{ .bin = out, .step = &link.step, .name = "ChakraNodeApi" };
+        } else {
+            const mod = createLinkModule(&ctx);
+            for (prov_objs.items) |o| mod.addObjectFile(o);
+            mod.linkLibrary(dylib.?.compile.?);
+            addSdkLinkPaths(&ctx, mod);
+            // No direct ICU / CoreFoundation / Security edges: the
+            // provider references no ICU or framework symbols (verified
+            // via `nm -u` on the built dylib: only Js* + libc/libSystem),
+            // and the engine dylib already carries ICU as LC_LOAD_DYLIB.
+            // Linking ICU here would add hardcoded -L paths that cannot
+            // work under --sysroot (the ch-nodeapi host documents the
+            // same for its SystemCommand link) and would duplicate the
+            // engine's dependency. The Module link therefore keeps only
+            // the dependent-dylib edge to libChakraCore.
+            const lib = b.addLibrary(.{
+                .name = "ChakraNodeApi",
+                .root_module = mod,
+                .linkage = .dynamic,
+                .version = .{ .major = 1, .minor = 0, .patch = 0 },
+            });
+            lib.install_name = "@rpath/libChakraNodeApi.dylib";
+            lib.headerpad_max_install_names = true;
+            break :blk .{ .bin = lib.getEmittedBin(), .step = &lib.step, .compile = lib, .name = "ChakraNodeApi" };
+        }
     };
 
-    // B3.4 isolation: the test profile owns the native install system
-    // (the exact B2 tree, honoring --prefix); non-test profiles
-    // install NOTHING natively and copy out to fixed out/<profile>/
-    // side prefixes instead (see copy_out below).
-    if (profile == .@"test") {
-        b.installArtifact(ch);
-        b.installArtifact(gs);
-        if (dylib) |lib| b.installArtifact(lib);
-        b.installArtifact(static_lib.?);
-        for (singular_libs.items) |lib| b.installArtifact(lib);
+    // B3.4 isolation: the unsanitized test profile owns the native install
+    // system (the exact B2 tree, honoring --prefix); non-test profiles and
+    // sanitizer lanes install NOTHING natively and copy out to fixed
+    // out/<side_name>/ side prefixes instead (see copy_out below).
+    if (side_name == null) {
+        b.installArtifact(ch.compile.?);
+        b.installArtifact(gs.compile.?);
+        if (dylib) |lib| b.installArtifact(lib.compile.?);
+        b.installArtifact(static_archive.compile.?);
+        for (singular_libs.items) |lib| b.installArtifact(lib.compile.?);
         // Co-location edge (contract sections 5.6-5.7, shared profiles only): the
         // reference POST_BUILD copies both ch and libChakraCore.dylib to the
         // build root so the loader finds the dylib beside the executable
@@ -1050,7 +1293,7 @@ pub fn build(b: *std.Build) void {
         // Without this, as-installed ch exits 5 (dlopen "no such file").
         // Static ch needs no dylib (the engine is linked in).
         if (dylib) |lib| {
-            b.getInstallStep().dependOn(&b.addInstallFile(lib.getEmittedBin(), "bin/libChakraCore.dylib").step);
+            b.getInstallStep().dependOn(&b.addInstallFile(lib.bin, "bin/libChakraCore.dylib").step);
         }
         b.getInstallStep().dependOn(&b.addInstallFile(config_h, "pal/src/config.h").step);
         // Staged public headers, unchanged (contract section 5.9).
@@ -1065,42 +1308,41 @@ pub fn build(b: *std.Build) void {
         b.getInstallStep().dependOn(&b.addInstallFile(marker, ".profile").step);
     }
 
-    // B3.4 copy-out (non-test profiles only): install_profile.py mirrors
-    // the B2 relative tree into out/<profile>/. The step runs on every
-    // build (has_side_effects) but writes only changed bytes, so no-op
-    // rebuilds change zero artifact bytes while manually deleted
-    // artifacts self-heal. `--map=` entries are prefixed file args, so
-    // every source artifact both orders and fingerprints this step.
-    // check steps depend on this step (ordering); their fingerprint
-    // inputs are the same pre-copy emitted artifacts (same bytes).
-    const copy_out: ?*std.Build.Step.Run = if (profile == .@"test") null else blk: {
+    // B3.4 copy-out (non-test profiles and sanitizer lanes): install_profile.py
+    // mirrors the B2 relative tree into out/<side_name>/. The step runs on
+    // every build (has_side_effects) but writes only changed bytes, so no-op
+    // rebuilds change zero artifact bytes while manually deleted artifacts
+    // self-heal. `--map=` entries are prefixed file args, so every source
+    // artifact both orders and fingerprints this step.
+    const copy_out: ?*std.Build.Step.Run = if (side_name == null) null else blk: {
+        const sname = side_name.?;
         const cp = b.addSystemCommand(&.{python});
         cp.addFileArg(b.path("tools/build/install_profile.py"));
         cp.addArg("--profile");
-        cp.addArg(profile.name());
+        cp.addArg(sname);
         cp.addArg("--dest");
-        cp.addArg(b.fmt("out/{s}", .{profile.name()}));
-        cp.addPrefixedFileArg("--map=bin/ch=", ch.getEmittedBin());
-        cp.addPrefixedFileArg("--map=bin/GCStress=", gs.getEmittedBin());
+        cp.addArg(b.fmt("out/{s}", .{sname}));
+        cp.addPrefixedFileArg("--map=bin/ch=", ch.bin);
+        cp.addPrefixedFileArg("--map=bin/GCStress=", gs.bin);
         if (dylib) |lib| {
-            cp.addPrefixedFileArg("--map=lib/libChakraCore.1.0.0.dylib=", lib.getEmittedBin());
-            cp.addPrefixedFileArg("--map=bin/libChakraCore.dylib=", lib.getEmittedBin());
+            cp.addPrefixedFileArg("--map=lib/libChakraCore.1.0.0.dylib=", lib.bin);
+            cp.addPrefixedFileArg("--map=bin/libChakraCore.dylib=", lib.bin);
             cp.addArg("--symlink=lib/libChakraCore.dylib=libChakraCore.1.dylib");
             cp.addArg("--symlink=lib/libChakraCore.1.dylib=libChakraCore.1.0.0.dylib");
         }
-        // Node-API provider (N1.1, N5.5): out/<profile>/lib/libChakraNodeApi.dylib
-        // plus the vendored N-API headers at out/<profile>/include/nodeapi/
+        // Node-API provider (N1.1, N5.5): out/<side_name>/lib/libChakraNodeApi.dylib
+        // plus the vendored N-API headers at out/<side_name>/include/nodeapi/
         // (consumer builds need both; the private host header
         // lib/NodeApi/NodeApiHostApi.h is intentionally NOT staged).
         if (prov_lib) |lib| {
-            cp.addPrefixedFileArg("--map=lib/libChakraNodeApi.dylib=", lib.getEmittedBin());
+            cp.addPrefixedFileArg("--map=lib/libChakraNodeApi.dylib=", lib.bin);
             for ([_][]const u8{ "include/nodeapi/js_native_api.h", "include/nodeapi/js_native_api_types.h", "include/nodeapi/node_api.h", "include/nodeapi/node_api_types.h" }) |hdr| {
                 cp.addPrefixedFileArg(b.fmt("--map={s}=", .{hdr}), b.path(b.fmt("include/nodeapi/{s}", .{std.fs.path.basename(hdr)})));
             }
         }
-        cp.addPrefixedFileArg("--map=lib/libChakraCoreStatic.a=", static_archive);
+        cp.addPrefixedFileArg("--map=lib/libChakraCoreStatic.a=", static_archive.bin);
         for (singular_libs.items) |lib| {
-            cp.addPrefixedFileArg(b.fmt("--map=lib/lib{s}.a=", .{lib.name}), lib.getEmittedBin());
+            cp.addPrefixedFileArg(b.fmt("--map=lib/lib{s}.a=", .{lib.name}), lib.bin);
         }
         cp.addPrefixedFileArg("--map=pal/src/config.h=", config_h);
         cp.addPrefixedFileArg("--map=include/ChakraCore.h=", b.path("lib/Jsrt/ChakraCore.h"));
@@ -1113,18 +1355,13 @@ pub fn build(b: *std.Build) void {
         break :blk cp;
     };
 
-    // Per-profile uninstall: test uses the native uninstall (installed
-    // files only); non-test profiles remove their whole side prefix.
-    // Repo-root-anchored like install_profile.py (which joins its
-    // --dest onto the root derived from its own path): the victim is
-    // an absolute path under the directory containing build.zig, so
-    // uninstall removes exactly this profile's side prefix no matter
-    // what cwd the step executes from.
-    if (profile != .@"test") {
+    // Per-profile / per-sanitizer uninstall: test uses the native uninstall
+    // (installed files only); side-prefix builds remove their whole side prefix.
+    if (side_name) |sname| {
         const rm = b.addSystemCommand(&.{ python, "-c", "import shutil,sys; shutil.rmtree(sys.argv[1], ignore_errors=True); print('removed ' + sys.argv[1] + ' (or already absent)')" });
         const root = b.root.root_dir.path orelse
             fail("cannot resolve the build root path; refusing a CWD-relative uninstall", .{});
-        rm.addArg(b.fmt("{s}/out/{s}", .{ root, profile.name() }));
+        rm.addArg(b.fmt("{s}/out/{s}", .{ root, sname }));
         rm.stdio = .inherit;
         rm.has_side_effects = true;
         b.getUninstallStep().dependOn(&rm.step);
@@ -1135,12 +1372,11 @@ pub fn build(b: *std.Build) void {
     // it to <prefix>/lib/libChakraNodeApi.dylib (beside the ch-nodeapi
     // host's default provider lookup) plus the vendored headers to
     // <prefix>/include/nodeapi/ (N5.5 consumer builds need both);
-    // jit copies dylib + headers to out/jit/ via the copy-out step
-    // above. Not part of the default build.
+    // side-prefix builds copy dylib + headers to out/<side_name>/ via copy_out.
     if (prov_lib) |lib| {
         const prov_step = b.step("libChakraNodeApi", "Build libChakraNodeApi (N1.1 provider) linked against libChakraCore (shared profiles test + jit; not part of the default build)");
-        if (profile == .@"test") {
-            prov_step.dependOn(&b.addInstallFile(lib.getEmittedBin(), "lib/libChakraNodeApi.dylib").step);
+        if (side_name == null) {
+            prov_step.dependOn(&b.addInstallFile(lib.bin, "lib/libChakraNodeApi.dylib").step);
             for ([_][]const u8{ "js_native_api.h", "js_native_api_types.h", "node_api.h", "node_api_types.h" }) |hdr| {
                 prov_step.dependOn(&b.addInstallFile(
                     b.path(b.fmt("include/nodeapi/{s}", .{hdr})),
@@ -1155,18 +1391,7 @@ pub fn build(b: *std.Build) void {
     // Node-API exports gate (N1.6/N5.5, HIGH-5): `zig build check-nodeapi`
     // verifies libChakraNodeApi exports EXACTLY the allowlist in
     // tools/build/nodeapi_exports.txt (full 145 napi_* + 5 host = 150)
-    // and that the allowlist
-    // matches its generator (tools/build/gen_nodeapi_exports.py
-    // --check, which builds it from doc/node-api-inventory.md +
-    // the section 3.2 host list). Missing or extra symbol = failure.
-    // Shared profiles only (prov_lib exists); debug-static has no
-    // provider and therefore no step (its build stays working).
-    // Kept separate from `check` (N5.5, PR-10): the provider is
-    // shared-profiles only and its gate couples engine verification
-    // to provider surface, so wiring it into the shared `check` tops
-    // would add provider failure surface to the regression gate
-    // without moving its gate_counts.json pins. Run it explicitly
-    // for both shared profiles (test + jit).
+    // and that the allowlist matches its generator.
     if (prov_lib) |lib| {
         const exports_gen_check = b.addSystemCommand(&.{python});
         exports_gen_check.addFileArg(b.path("tools/build/gen_nodeapi_exports.py"));
@@ -1174,10 +1399,10 @@ pub fn build(b: *std.Build) void {
         exports_gen_check.stdio = .inherit;
         const exports_check = b.addSystemCommand(&.{python});
         exports_check.addFileArg(b.path("tools/build/check_nodeapi.py"));
-        exports_check.addPrefixedFileArg("--dylib=", lib.getEmittedBin());
+        exports_check.addPrefixedFileArg("--dylib=", lib.bin);
         exports_check.addPrefixedFileArg("--exports=", b.path("tools/build/nodeapi_exports.txt"));
         exports_check.addPrefixedFileArg("--inventory=", b.path("doc/node-api-inventory.md"));
-        exports_check.step.dependOn(&lib.step);
+        exports_check.step.dependOn(lib.step);
         exports_check.step.dependOn(&exports_gen_check.step);
         exports_check.stdio = .inherit;
         const check_nodeapi_top = b.step("check-nodeapi", "Verify libChakraNodeApi exports exactly tools/build/nodeapi_exports.txt (full 145 + 5 = 150; not part of the default build or check)");
@@ -1187,11 +1412,11 @@ pub fn build(b: *std.Build) void {
 
     // N0.3 Node-API test host (doc/node-api-plan.md N0.3, shared profiles):
     // standalone ch-nodeapi executable + test-only stub provider + addons.
+    var nodeapi_step_opt: ?*std.Build.Step = null;
     if (dylib) |engine_compile| {
         const nodeapi_step = b.step("ch-nodeapi", "Build the Node-API test host (N0.3): ch-nodeapi + test-only stub provider + hello/negative addons (shared profiles only; not part of the default build)");
-        const engine_lib = engine_compile.getEmittedBin();
-        const nodeapi_target = profile_target;
-        const nodeapi_opt = [_][]const u8{ "-O3", "-g" };
+        nodeapi_step_opt = nodeapi_step;
+        const engine_lib = engine_compile.bin;
 
         const addSideCopy = struct {
             fn call(builder: *std.Build, py: []const u8, dest_rel: []const u8, src: std.Build.LazyPath, prereq: *std.Build.Step) *std.Build.Step.Run {
@@ -1208,23 +1433,39 @@ pub fn build(b: *std.Build) void {
             }
         }.call;
 
-        const nodeapi_host = b.addSystemCommand(&.{ ctx.zig_exe, "c++" });
-        nodeapi_host.addArg("-target");
-        nodeapi_host.addArg(nodeapi_target);
-        nodeapi_host.addArg("--sysroot");
-        nodeapi_host.addArg(ctx.sdk_path);
-        nodeapi_host.addArg("-std=gnu++17");
-        for (nodeapi_opt) |f| nodeapi_host.addArg(f);
+        const addNodeapiCompilePrefix = struct {
+            fn call(context: *const Ctx, cmd: *std.Build.Step.Run) void {
+                if (context.sanitize != .none) {
+                    cmd.addArgs(&.{ "-target", host_clang_target, "-isysroot", context.sdk_path, "-std=gnu++17" });
+                    if (context.profile != .debug_static) cmd.addArg("-O1");
+                    cmd.addArgs(&.{ "-g", "-fno-omit-frame-pointer", context.sanitize.fsanitizeFlag() });
+                } else {
+                    cmd.addArgs(&.{ "-target", profile_target, "--sysroot", context.sdk_path, "-std=gnu++17", "-O3", "-g" });
+                }
+            }
+        }.call;
+        const addNodeapiTail = struct {
+            fn call(context: *const Ctx, cmd: *std.Build.Step.Run) void {
+                if (context.sanitize != .none) {
+                    cmd.addArg("-mcpu=apple-m1");
+                } else {
+                    cmd.addArg("-isystem");
+                    cmd.addArg(context.sdk_isystem);
+                    cmd.addArg("-F");
+                    cmd.addArg("/System/Library/Frameworks");
+                    cmd.addArg("-mcpu=apple_m1");
+                }
+                cmd.addArg("-Wno-date-time");
+            }
+        }.call;
+
+        const nodeapi_host = if (sanitize != .none) b.addSystemCommand(&.{ctx.host_cxx}) else b.addSystemCommand(&.{ ctx.zig_exe, "c++" });
+        addNodeapiCompilePrefix(&ctx, nodeapi_host);
         nodeapi_host.addArg("-DNAPI_VERSION=8");
         nodeapi_host.addArg("-Ilib/Jsrt");
         nodeapi_host.addArg("-Iinclude/nodeapi");
         nodeapi_host.addArg("-Ilib/NodeApi");
-        nodeapi_host.addArg("-isystem");
-        nodeapi_host.addArg(ctx.sdk_isystem);
-        nodeapi_host.addArg("-F");
-        nodeapi_host.addArg("/System/Library/Frameworks");
-        nodeapi_host.addArg("-mcpu=apple_m1");
-        nodeapi_host.addArg("-Wno-date-time");
+        addNodeapiTail(&ctx, nodeapi_host);
         nodeapi_host.addArg("-o");
         const nodeapi_host_bin = nodeapi_host.addOutputFileArg("ch-nodeapi");
         nodeapi_host.addFileArg(b.path("tools/nodeapi/ch-nodeapi.cpp"));
@@ -1236,15 +1477,10 @@ pub fn build(b: *std.Build) void {
         nodeapi_host.addArg("-Wl,-undefined,dynamic_lookup");
         nodeapi_host.addArg("-Wl,-rpath,@executable_path");
         nodeapi_host.addArg("-Wl,-rpath,@executable_path/../lib");
-        nodeapi_host.step.dependOn(&engine_compile.step);
+        nodeapi_host.step.dependOn(engine_compile.step);
 
-        const nodeapi_stub = b.addSystemCommand(&.{ ctx.zig_exe, "c++" });
-        nodeapi_stub.addArg("-target");
-        nodeapi_stub.addArg(nodeapi_target);
-        nodeapi_stub.addArg("--sysroot");
-        nodeapi_stub.addArg(ctx.sdk_path);
-        nodeapi_stub.addArg("-std=gnu++17");
-        for (nodeapi_opt) |f| nodeapi_stub.addArg(f);
+        const nodeapi_stub = if (sanitize != .none) b.addSystemCommand(&.{ctx.host_cxx}) else b.addSystemCommand(&.{ ctx.zig_exe, "c++" });
+        addNodeapiCompilePrefix(&ctx, nodeapi_stub);
         nodeapi_stub.addArg("-fPIC");
         nodeapi_stub.addArg("-shared");
         nodeapi_stub.addArg("-Wl,-undefined,dynamic_lookup");
@@ -1252,61 +1488,46 @@ pub fn build(b: *std.Build) void {
         nodeapi_stub.addArg("-Ilib/Jsrt");
         nodeapi_stub.addArg("-Iinclude/nodeapi");
         nodeapi_stub.addArg("-Ilib/NodeApi");
-        nodeapi_stub.addArg("-isystem");
-        nodeapi_stub.addArg(ctx.sdk_isystem);
-        nodeapi_stub.addArg("-F");
-        nodeapi_stub.addArg("/System/Library/Frameworks");
-        nodeapi_stub.addArg("-mcpu=apple_m1");
-        nodeapi_stub.addArg("-Wno-date-time");
+        addNodeapiTail(&ctx, nodeapi_stub);
         nodeapi_stub.addArg("-o");
         const nodeapi_stub_bin = nodeapi_stub.addOutputFileArg("libChakraNodeApiStub.dylib");
         nodeapi_stub.addFileArg(b.path("tools/nodeapi/stub/stub_provider.cpp"));
 
-        if (profile == .@"test") {
+        if (side_name == null) {
             nodeapi_step.dependOn(&b.addInstallFile(nodeapi_host_bin, "bin/ch-nodeapi").step);
             nodeapi_step.dependOn(&b.addInstallFile(engine_lib, "bin/libChakraCore.dylib").step);
             nodeapi_step.dependOn(&b.addInstallFile(nodeapi_stub_bin, "lib/libChakraNodeApiStub.dylib").step);
         } else {
-            const side_root = b.fmt("out/{s}", .{profile.name()});
+            const side_root = b.fmt("out/{s}", .{side_name.?});
             const cp_step = &copy_out.?.step;
             nodeapi_step.dependOn(&addSideCopy(b, python, b.fmt("{s}/bin/ch-nodeapi", .{side_root}), nodeapi_host_bin, cp_step).step);
             nodeapi_step.dependOn(&addSideCopy(b, python, b.fmt("{s}/lib/libChakraNodeApiStub.dylib", .{side_root}), nodeapi_stub_bin, cp_step).step);
         }
         for ([_][]const u8{ "hello_world", "version_reject", "missing_register", "promise_probe", "return_replaces" }) |name| {
-            const addon = b.addSystemCommand(&.{ ctx.zig_exe, "c++" });
-            addon.addArg("-target");
-            addon.addArg(nodeapi_target);
-            addon.addArg("--sysroot");
-            addon.addArg(ctx.sdk_path);
-            addon.addArg("-std=gnu++17");
-            for (nodeapi_opt) |f| addon.addArg(f);
+            const addon = if (sanitize != .none) b.addSystemCommand(&.{ctx.host_cxx}) else b.addSystemCommand(&.{ ctx.zig_exe, "c++" });
+            addNodeapiCompilePrefix(&ctx, addon);
             addon.addArg("-fPIC");
             addon.addArg("-shared");
             addon.addArg("-Wl,-undefined,dynamic_lookup");
             addon.addArg("-DNAPI_VERSION=8");
             addon.addArg("-Iinclude/nodeapi");
-            addon.addArg("-isystem");
-            addon.addArg(ctx.sdk_isystem);
-            addon.addArg("-F");
-            addon.addArg("/System/Library/Frameworks");
-            addon.addArg("-mcpu=apple_m1");
-            addon.addArg("-Wno-date-time");
+            addNodeapiTail(&ctx, addon);
             addon.addArg("-o");
             const addon_bin = addon.addOutputFileArg(b.fmt("{s}.node", .{name}));
             addon.addFileArg(b.path(b.fmt("tools/nodeapi/addons/{s}.cpp", .{name})));
-            if (profile == .@"test") {
+            if (side_name == null) {
                 nodeapi_step.dependOn(&b.addInstallFile(addon_bin, b.fmt("lib/nodeapi-addons/{s}.node", .{name})).step);
             } else {
-                const side_root = b.fmt("out/{s}", .{profile.name()});
+                const side_root = b.fmt("out/{s}", .{side_name.?});
                 nodeapi_step.dependOn(&addSideCopy(b, python, b.fmt("{s}/lib/nodeapi-addons/{s}.node", .{ side_root, name }), addon_bin, &copy_out.?.step).step);
             }
         }
         for ([_][]const u8{ "hello_world", "promise_probe", "return_replaces" }) |name| {
             const src_js = b.path(b.fmt("tools/nodeapi/addons/{s}.js", .{name}));
-            if (profile == .@"test") {
+            if (side_name == null) {
                 nodeapi_step.dependOn(&b.addInstallFile(src_js, b.fmt("lib/nodeapi-addons/{s}.js", .{name})).step);
             } else {
-                const side_root = b.fmt("out/{s}", .{profile.name()});
+                const side_root = b.fmt("out/{s}", .{side_name.?});
                 nodeapi_step.dependOn(&addSideCopy(b, python, b.fmt("{s}/lib/nodeapi-addons/{s}.js", .{ side_root, name }), src_js, &copy_out.?.step).step);
             }
         }
@@ -1322,13 +1543,9 @@ pub fn build(b: *std.Build) void {
     // Negative controls: each check script's --self-test proves its
     // gates CAN fail (doctored logs rejected, tampered victims fail).
     // Hermetic (no install dependency, no profile dependence), so every
-    // profile registers it. Run `zig build check-selftest`. The Linux
-    // gate scripts are included here too: they are equally hermetic, and
-    // running them on Mac keeps the parked B4 gate logic from rotting
-    // (linux.zig registers the same list for Linux targets). Wired into
-    // every profile's `check` below so the merge gates exercise them.
+    // profile registers it. Run `zig build check-selftest`.
     const selftest_top = b.step("check-selftest", "Negative controls for every check gate (not part of the default build)");
-    for ([_][]const u8{ "check_regression.py", "check_native.py", "check_smoke.py", "check_metadata.py", "check_regression_linux.py", "check_smoke_linux.py", "check_metadata_linux.py", "check_nodeapi.py", "gen_nodeapi_exports.py", "check_wasm_p1.py" }) |script| {
+    for ([_][]const u8{ "check_regression.py", "check_native.py", "check_smoke.py", "check_metadata.py", "check_regression_linux.py", "check_smoke_linux.py", "check_metadata_linux.py", "check_nodeapi.py", "gen_nodeapi_exports.py", "check_wasm_p1.py", "check_gcstress.py", "check_fulljit.py", "check_sanitize.py" }) |script| {
         const st = b.addSystemCommand(&.{python});
         st.addFileArg(b.path(b.fmt("tools/build/{s}", .{script})));
         st.addArg("--self-test");
@@ -1340,9 +1557,7 @@ pub fn build(b: *std.Build) void {
     tools_test.stdio = .inherit;
     selftest_top.dependOn(&tools_test.step);
     // Native-owner example tests (doc/memory-management.md section 5):
-    // hermetic, host-only, no engine build required. Wired here so the
-    // sole checkAllAllocationFailures coverage cannot rot ungated; it
-    // proves the injected-allocator domain only, not Recycler/C OOM.
+    // hermetic, host-only, no engine build required.
     const owned_bytes_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("doc/examples/owned-bytes.zig"),
@@ -1360,20 +1575,68 @@ pub fn build(b: *std.Build) void {
         const jit_wasm = b.addSystemCommand(&.{python});
         jit_wasm.addFileArg(b.path("tools/build/check_wasm_p1.py"));
         jit_wasm.addFileArg(b.path("test/runtests.py"));
-        jit_wasm.addArg("out/jit/bin/ch");
-        jit_wasm.addFileInput(ch.getEmittedBin());
+        jit_wasm.addArg(b.fmt("out/{s}/bin/ch", .{side_name.?}));
+        jit_wasm.addFileInput(ch.bin);
         jit_wasm.step.dependOn(&copy_out.?.step);
         jit_wasm.stdio = .inherit;
         const wasm_top = b.step("check-wasm", "Verify Wasm P1 suite against test/wasm-arm64-manifest.json (-Dprofile=jit -Dwasm=true; not part of the default build)");
         wasm_top.dependOn(&jit_wasm.step);
         jit_wasm_step = &jit_wasm.step;
     } else {
-        const no_wasm = b.addSystemCommand(&.{python});
-        no_wasm.addArg("-c");
-        no_wasm.addArg("import sys; sys.exit('check-wasm requires -Dprofile=jit -Dwasm=true')");
-        no_wasm.stdio = .inherit;
-        const wasm_top = b.step("check-wasm", "Not applicable without -Dprofile=jit -Dwasm=true");
-        wasm_top.dependOn(&no_wasm.step);
+        registerFailStep(b, python, "check-wasm", "Not applicable without -Dprofile=jit -Dwasm=true", "check-wasm requires -Dprofile=jit -Dwasm=true");
+    }
+
+    // Bounded GCStress smoke gate (in-thread + concurrent full heap walks).
+    {
+        const gc_step = b.addSystemCommand(&.{python});
+        gc_step.addFileArg(b.path("tools/build/check_gcstress.py"));
+        if (side_name) |sname| {
+            gc_step.addArg(b.fmt("out/{s}/bin/GCStress", .{sname}));
+            gc_step.addFileInput(gs.bin);
+            gc_step.step.dependOn(&copy_out.?.step);
+        } else {
+            gc_step.addFileArg(.{ .relative = .{ .base = .install_bin, .sub_path = "GCStress" } });
+            gc_step.step.dependOn(b.getInstallStep());
+        }
+        gc_step.stdio = .inherit;
+        const gc_top = b.step("check-gcstress", "Run bounded GCStress in-thread and concurrent heap walks (not part of the default build)");
+        gc_top.dependOn(&gc_step.step);
+    }
+
+    // No-profile FullJit correctness gate (B4-JIT-05): requires JIT (-Dprofile=jit).
+    if (profile == .jit) {
+        const fj_step = b.addSystemCommand(&.{python});
+        fj_step.addFileArg(b.path("tools/build/check_fulljit.py"));
+        fj_step.addFileArg(b.path("test/runtests.py"));
+        fj_step.addArg(b.fmt("out/{s}/bin/ch", .{side_name.?}));
+        fj_step.addFileInput(ch.bin);
+        fj_step.step.dependOn(&copy_out.?.step);
+        fj_step.stdio = .inherit;
+        const fj_top = b.step("check-fulljit", "Run no-profile FullJit regression suites (-Dprofile=jit; not part of the default build)");
+        fj_top.dependOn(&fj_step.step);
+    } else {
+        registerFailStep(b, python, "check-fulljit", "Not applicable without -Dprofile=jit", "check-fulljit requires -Dprofile=jit (JIT must be enabled with debug/test flags)");
+    }
+
+    // Sanitizer verification gate: requires -Dsanitize=address|undefined.
+    if (sanitize != .none) {
+        const san_step = b.addSystemCommand(&.{python});
+        san_step.addFileArg(b.path("tools/build/check_sanitize.py"));
+        san_step.addArg(b.fmt("out/{s}", .{side_name.?}));
+        san_step.addArg("--mode");
+        san_step.addArg(sanitize.name());
+        san_step.addArg("--cxx");
+        san_step.addArg(ctx.host_cxx);
+        san_step.addArg("--sdk-path");
+        san_step.addArg(ctx.sdk_path);
+        san_step.addFileInput(ch.bin);
+        san_step.step.dependOn(&copy_out.?.step);
+        if (nodeapi_step_opt) |ns| san_step.step.dependOn(ns);
+        san_step.stdio = .inherit;
+        const san_top = b.step("check-sanitize", b.fmt("Run ASan/UBSan verification gate for -Dsanitize={s} (not part of the default build)", .{sanitize.name()}));
+        san_top.dependOn(&san_step.step);
+    } else {
+        registerFailStep(b, python, "check-sanitize", "Not applicable without -Dsanitize=address|undefined", "check-sanitize requires -Dsanitize=address or -Dsanitize=undefined");
     }
 
     // B3.3: release-shared checks (legacy baselines in
@@ -1402,7 +1665,7 @@ pub fn build(b: *std.Build) void {
         rel_native.addFileArg(b.path("tools/build/check_native.py"));
         rel_native.addFileArg(b.path("test/native-tests/test_native.sh"));
         rel_native.addArg(rel_ch_str);
-        rel_native.addFileInput(ch.getEmittedBin());
+        rel_native.addFileInput(ch.bin);
         rel_native.addArg(rel_cc);
         rel_native.addArg(rel_cxx);
         rel_native.addArg("--build-type");
@@ -1415,7 +1678,7 @@ pub fn build(b: *std.Build) void {
         const rel_smoke = b.addSystemCommand(&.{python});
         rel_smoke.addFileArg(b.path("tools/build/check_smoke.py"));
         rel_smoke.addArg(rel_ch_str);
-        rel_smoke.addFileInput(ch.getEmittedBin());
+        rel_smoke.addFileInput(ch.bin);
         rel_smoke.addArg("--profile");
         rel_smoke.addArg("release-shared");
         rel_smoke.step.dependOn(cp_step);
@@ -1426,7 +1689,7 @@ pub fn build(b: *std.Build) void {
         const rel_metadata = b.addSystemCommand(&.{python});
         rel_metadata.addFileArg(b.path("tools/build/check_metadata.py"));
         rel_metadata.addArg(rel_prefix_str);
-        rel_metadata.addFileInput(ch.getEmittedBin());
+        rel_metadata.addFileInput(ch.bin);
         rel_metadata.addFileInput(config_h);
         rel_metadata.addArg("--profile");
         rel_metadata.addArg("release-shared");
@@ -1475,9 +1738,10 @@ pub fn build(b: *std.Build) void {
     // is untouched.
     if (profile == .debug_static) {
         const cp_step = &copy_out.?.step;
-        const dbg_ch_str = "out/debug-static/bin/ch";
-        const dbg_archive_str = "out/debug-static/lib/libChakraCoreStatic.a";
-        const dbg_prefix_str = "out/debug-static";
+        const sname = side_name.?;
+        const dbg_ch_str = b.fmt("out/{s}/bin/ch", .{sname});
+        const dbg_archive_str = b.fmt("out/{s}/lib/libChakraCoreStatic.a", .{sname});
+        const dbg_prefix_str = b.fmt("out/{s}", .{sname});
         const dbg_cc = b.findProgram(.{ .names = &.{"clang"} }) orelse "clang";
         const dbg_cxx = b.findProgram(.{ .names = &.{"clang++"} }) orelse "clang++";
 
@@ -1487,7 +1751,7 @@ pub fn build(b: *std.Build) void {
         dbg_verify_bc.addArg("--noJit");
         dbg_verify_bc.addArg("--verify");
         dbg_verify_bc.addArg(b.fmt("--binary={s}", .{dbg_ch_str}));
-        dbg_verify_bc.addFileInput(ch.getEmittedBin());
+        dbg_verify_bc.addFileInput(ch.bin);
         dbg_verify_bc.step.dependOn(cp_step);
         dbg_verify_bc.stdio = .inherit;
         const dbg_verify_bc_top = b.step("verify-bytecode", "Verify checked-in built-in bytecode with the debug-static ch (contract 5.10; pure check; not part of the default build)");
@@ -1497,7 +1761,7 @@ pub fn build(b: *std.Build) void {
         dbg_regression.addFileArg(b.path("tools/build/check_regression.py"));
         dbg_regression.addFileArg(b.path("test/runtests.py"));
         dbg_regression.addArg(dbg_ch_str);
-        dbg_regression.addFileInput(ch.getEmittedBin());
+        dbg_regression.addFileInput(ch.bin);
         dbg_regression.addArg("--select");
         dbg_regression.addArg("debug");
         dbg_regression.addArg("--expected-passed");
@@ -1513,12 +1777,12 @@ pub fn build(b: *std.Build) void {
         dbg_native.addFileArg(b.path("tools/build/check_native.py"));
         dbg_native.addFileArg(b.path("test/native-tests/test_native.sh"));
         dbg_native.addArg(dbg_ch_str);
-        dbg_native.addFileInput(ch.getEmittedBin());
+        dbg_native.addFileInput(ch.bin);
         dbg_native.addArg(dbg_cc);
         dbg_native.addArg(dbg_cxx);
         dbg_native.addArg("--static");
         dbg_native.addArg(b.fmt("--archive={s}", .{dbg_archive_str}));
-        dbg_native.addFileInput(static_lib.?.getEmittedBin());
+        dbg_native.addFileInput(static_archive.bin);
         dbg_native.step.dependOn(cp_step);
         dbg_native.stdio = .inherit;
         const dbg_native_top = b.step("check-native", "Run the static embedding tests against debug-static artifacts, with linkage proof (not part of the default build)");
@@ -1527,7 +1791,7 @@ pub fn build(b: *std.Build) void {
         const dbg_smoke = b.addSystemCommand(&.{python});
         dbg_smoke.addFileArg(b.path("tools/build/check_smoke.py"));
         dbg_smoke.addArg(dbg_ch_str);
-        dbg_smoke.addFileInput(ch.getEmittedBin());
+        dbg_smoke.addFileInput(ch.bin);
         dbg_smoke.addArg("--profile");
         dbg_smoke.addArg("debug-static");
         dbg_smoke.step.dependOn(cp_step);
@@ -1538,7 +1802,7 @@ pub fn build(b: *std.Build) void {
         const dbg_metadata = b.addSystemCommand(&.{python});
         dbg_metadata.addFileArg(b.path("tools/build/check_metadata.py"));
         dbg_metadata.addArg(dbg_prefix_str);
-        dbg_metadata.addFileInput(ch.getEmittedBin());
+        dbg_metadata.addFileInput(ch.bin);
         dbg_metadata.addFileInput(config_h);
         dbg_metadata.addArg("--profile");
         dbg_metadata.addArg("debug-static");
@@ -1562,11 +1826,12 @@ pub fn build(b: *std.Build) void {
     // the regression suite is not a gate of this profile.
     if (profile == .jit) {
         const cp_step = &copy_out.?.step;
-        const jit_ch_str = "out/jit/bin/ch";
+        const sname = side_name.?;
+        const jit_ch_str = b.fmt("out/{s}/bin/ch", .{sname});
         const jit_smoke = b.addSystemCommand(&.{python});
         jit_smoke.addFileArg(b.path("tools/build/check_smoke.py"));
         jit_smoke.addArg(jit_ch_str);
-        jit_smoke.addFileInput(ch.getEmittedBin());
+        jit_smoke.addFileInput(ch.bin);
         jit_smoke.addArg("--profile");
         jit_smoke.addArg("test");
         jit_smoke.step.dependOn(cp_step);
@@ -1580,6 +1845,7 @@ pub fn build(b: *std.Build) void {
         const jit_runtime = b.addSystemCommand(&.{python});
         jit_runtime.addFileArg(b.path("tools/build/check_jit.py"));
         jit_runtime.addArg(jit_ch_str);
+        jit_runtime.addFileInput(ch.bin);
         jit_runtime.step.dependOn(cp_step);
         jit_runtime.stdio = .inherit;
         const jit_runtime_top = b.step("check-jit", "Require the ARM64 JIT backend symbol and run a JIT hot-call/rest/apply smoke (not part of the default build)");
@@ -1593,7 +1859,8 @@ pub fn build(b: *std.Build) void {
         jit_verify_bc.addFileArg(b.path("tools/regenByteCode.py"));
         jit_verify_bc.addArg("--jit");
         jit_verify_bc.addArg("--verify");
-        jit_verify_bc.addArg("--binary=out/jit/bin/ch");
+        jit_verify_bc.addArg(b.fmt("--binary={s}", .{jit_ch_str}));
+        jit_verify_bc.addFileInput(ch.bin);
         jit_verify_bc.step.dependOn(cp_step);
         jit_verify_bc.stdio = .inherit;
         const jit_verify_bc_top = b.step("verify-bytecode", "Verify checked-in JIT built-in bytecode with the just-built jit ch (pure scratch-tree check; not part of the default build)");
@@ -1621,13 +1888,19 @@ pub fn build(b: *std.Build) void {
     // tools/build/verify_bytecode_pure.py, which runs the script against
     // a private copy of its inputs and returns its verdict. The checked-in
     // headers are never overwritten, even temporarily or on interruption.
+    const default_install_step = if (copy_out) |cp| &cp.step else b.getInstallStep();
     const verify_bc = b.addSystemCommand(&.{python});
     verify_bc.addFileArg(b.path("tools/build/verify_bytecode_pure.py"));
     verify_bc.addFileArg(b.path("tools/regenByteCode.py"));
     verify_bc.addArg("--noJit");
     verify_bc.addArg("--verify");
-    verify_bc.addPrefixedFileArg("--binary=", .{ .relative = .{ .base = .install_bin, .sub_path = "ch" } });
-    verify_bc.step.dependOn(b.getInstallStep());
+    if (side_name) |sname| {
+        verify_bc.addArg(b.fmt("--binary=out/{s}/bin/ch", .{sname}));
+        verify_bc.addFileInput(ch.bin);
+    } else {
+        verify_bc.addPrefixedFileArg("--binary=", .{ .relative = .{ .base = .install_bin, .sub_path = "ch" } });
+    }
+    verify_bc.step.dependOn(default_install_step);
     verify_bc.stdio = .inherit;
     const verify_bc_top = b.step("verify-bytecode", "Verify checked-in built-in bytecode with the just-built ch (contract 5.10; pure scratch-tree check; not part of the default build)");
     verify_bc_top.dependOn(&verify_bc.step);
@@ -1646,6 +1919,16 @@ pub fn build(b: *std.Build) void {
     const cc = b.findProgram(.{ .names = &.{"clang"} }) orelse "clang";
     const cxx = b.findProgram(.{ .names = &.{"clang++"} }) orelse "clang++";
     const installed_ch: std.Build.LazyPath = .{ .relative = .{ .base = .install_bin, .sub_path = "ch" } };
+    const addDefaultCh = struct {
+        fn call(builder: *std.Build, cmd: *std.Build.Step.Run, sname_opt: ?[]const u8, ch_art: std.Build.LazyPath, inst_ch: std.Build.LazyPath) void {
+            if (sname_opt) |sname| {
+                cmd.addArg(builder.fmt("out/{s}/bin/ch", .{sname}));
+                cmd.addFileInput(ch_art);
+            } else {
+                cmd.addFileArg(inst_ch);
+            }
+        }
+    }.call;
 
     // (1) Regression suite: runtests.py --test --variants=disable_jit
     // --binary=<installed ch> - the legacy-exact selection for this
@@ -1656,8 +1939,8 @@ pub fn build(b: *std.Build) void {
     const regression = b.addSystemCommand(&.{python});
     regression.addFileArg(b.path("tools/build/check_regression.py"));
     regression.addFileArg(b.path("test/runtests.py"));
-    regression.addFileArg(installed_ch);
-    regression.step.dependOn(b.getInstallStep());
+    addDefaultCh(b, regression, side_name, ch.bin, installed_ch);
+    regression.step.dependOn(default_install_step);
     regression.stdio = .inherit;
     const regression_top = b.step("check-regression", b.fmt("Run the regression suite against the zig-built ch, require {d} passed / {d} failed (not part of the default build)", .{ gates.test_passed, gates.test_failed }));
     regression_top.dependOn(&regression.step);
@@ -1668,10 +1951,10 @@ pub fn build(b: *std.Build) void {
     const native = b.addSystemCommand(&.{python});
     native.addFileArg(b.path("tools/build/check_native.py"));
     native.addFileArg(b.path("test/native-tests/test_native.sh"));
-    native.addFileArg(installed_ch);
+    addDefaultCh(b, native, side_name, ch.bin, installed_ch);
     native.addArg(cc);
     native.addArg(cxx);
-    native.step.dependOn(b.getInstallStep());
+    native.step.dependOn(default_install_step);
     native.stdio = .inherit;
     const native_top = b.step("check-native", "Run the shared embedding test against zig artifacts (not part of the default build)");
     native_top.dependOn(&native.step);
@@ -1679,8 +1962,8 @@ pub fn build(b: *std.Build) void {
     // (4) Smoke/flag output assertions (ch -v, invalid flag, JS snippet).
     const smoke = b.addSystemCommand(&.{python});
     smoke.addFileArg(b.path("tools/build/check_smoke.py"));
-    smoke.addFileArg(installed_ch);
-    smoke.step.dependOn(b.getInstallStep());
+    addDefaultCh(b, smoke, side_name, ch.bin, installed_ch);
+    smoke.step.dependOn(default_install_step);
     smoke.stdio = .inherit;
     const smoke_top = b.step("check-smoke", "Assert ch version/flag/snippet output text (not part of the default build)");
     smoke_top.dependOn(&smoke.step);
@@ -1689,8 +1972,14 @@ pub fn build(b: *std.Build) void {
     // headers, dylib exports.
     const metadata = b.addSystemCommand(&.{python});
     metadata.addFileArg(b.path("tools/build/check_metadata.py"));
-    metadata.addDirectoryArg(.{ .relative = .{ .base = .install_prefix } });
-    metadata.step.dependOn(b.getInstallStep());
+    if (side_name) |sname| {
+        metadata.addArg(b.fmt("out/{s}", .{sname}));
+        metadata.addFileInput(ch.bin);
+        metadata.addFileInput(config_h);
+    } else {
+        metadata.addDirectoryArg(.{ .relative = .{ .base = .install_prefix } });
+    }
+    metadata.step.dependOn(default_install_step);
     metadata.stdio = .inherit;
     const metadata_top = b.step("check-metadata", "Assert artifact metadata: minos, stacks, headers, exports (not part of the default build)");
     metadata_top.dependOn(&metadata.step);
