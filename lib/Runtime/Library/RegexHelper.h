@@ -144,6 +144,9 @@ namespace Js
         static bool IsResultNotUsed(CallFlags flags);
 
     private:
+        static Var RegexMatchFromFastPath(ScriptContext* scriptContext, JavascriptRegExp* regularExpression, JavascriptString* input, bool noResult, void *const stackAllocationPointer = nullptr);
+        static Var RegexReplaceFromFastPath(ScriptContext* entryFunctionContext, JavascriptRegExp* regularExpression, JavascriptString* input, JavascriptString* replace, bool noResult);
+        static Var RegexSplitFromFastPath(ScriptContext* scriptContext, JavascriptRegExp* regularExpression, JavascriptString* input, CharCount limit, bool noResult, void *const stackAllocationPointer = nullptr);
         static void AppendSubString(ScriptContext* scriptContext, JavascriptArray* ary, JavascriptString* input, CharCount startInclusive, CharCount endExclusive);
         template <bool updateHistory>
         static Var RegexMatchImpl(ScriptContext* scriptContext, RecyclableObject* thisObj, JavascriptString* input, bool noResult, void *const stackAllocationPointer = nullptr);

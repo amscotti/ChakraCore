@@ -209,7 +209,7 @@
   <test>
     <default>
       <files>TempStrExpr.js</files>
-      <compile-flags>-debuglaunch -ES6 -ES6ObjectLiterals -dbgbaseline:TempStrExpr.js.dbg.baseline</compile-flags>
+      <compile-flags>-debuglaunch -ES6 -ES6ObjectLiterals -dbgbaseline:TempStrExpr.js.dbg.baseline -ES6RegExSymbols- -ES6RegExPrototypeProperties-</compile-flags>
       <baseline>TempStrExpr.js.baseline</baseline>
     </default>
   </test>
@@ -308,7 +308,7 @@
   <test>
     <default>
       <files>ES6_proto_invalidation.js</files>
-      <compile-flags>-debuglaunch -dbgbaseline:ES6_proto_invalidation.js.dbg.baseline</compile-flags>
+      <compile-flags>-debuglaunch -dbgbaseline:ES6_proto_invalidation.js.dbg.baseline -ES6RegExSymbols- -ES6RegExPrototypeProperties-</compile-flags>
     </default>
   </test>
   <test>
@@ -381,25 +381,25 @@
   <test>
     <default>
       <files>ES6_RegExp_specialproperties.js</files>
-      <compile-flags>-ES6Unicode- -ES2018RegExDotAll- -ES6RegExSticky- -debuglaunch -inspectmaxstringlength:100 -dbgbaseline:ES6_RegExp_specialproperties_default.js.dbg.baseline</compile-flags>
+      <compile-flags>-ES6Unicode- -ES2018RegExDotAll- -ES6RegExSticky- -debuglaunch -inspectmaxstringlength:100 -dbgbaseline:ES6_RegExp_specialproperties_default.js.dbg.baseline -ES6RegExSymbols- -ES6RegExPrototypeProperties-</compile-flags>
     </default>
   </test>
   <test>
     <default>
       <files>ES6_RegExp_specialproperties.js</files>
-      <compile-flags>-ES6Unicode -ES2018RegExDotAll- -ES6RegExSticky- -debuglaunch -inspectmaxstringlength:100 -dbgbaseline:ES6_RegExp_specialproperties_with_unicode.js.dbg.baseline</compile-flags>
+      <compile-flags>-ES6Unicode -ES2018RegExDotAll- -ES6RegExSticky- -debuglaunch -inspectmaxstringlength:100 -dbgbaseline:ES6_RegExp_specialproperties_with_unicode.js.dbg.baseline -ES6RegExSymbols- -ES6RegExPrototypeProperties-</compile-flags>
     </default>
   </test>
   <test>
     <default>
       <files>ES6_RegExp_specialproperties.js</files>
-      <compile-flags>-ES6Unicode- -ES2018RegExDotAll- -ES6RegExSticky -debuglaunch -inspectmaxstringlength:100 -dbgbaseline:ES6_RegExp_specialproperties_with_sticky.js.dbg.baseline</compile-flags>
+      <compile-flags>-ES6Unicode- -ES2018RegExDotAll- -ES6RegExSticky -debuglaunch -inspectmaxstringlength:100 -dbgbaseline:ES6_RegExp_specialproperties_with_sticky.js.dbg.baseline -ES6RegExSymbols- -ES6RegExPrototypeProperties-</compile-flags>
     </default>
   </test>
   <test>
     <default>
       <files>ES6_RegExp_specialproperties.js</files>
-      <compile-flags>-ES6Unicode -ES6RegExSticky -debuglaunch -inspectmaxstringlength:100 -dbgbaseline:ES6_RegExp_specialproperties_all.js.dbg.baseline</compile-flags>
+      <compile-flags>-ES6Unicode -ES6RegExSticky -debuglaunch -inspectmaxstringlength:100 -dbgbaseline:ES6_RegExp_specialproperties_all.js.dbg.baseline -ES6RegExSymbols- -ES6RegExPrototypeProperties-</compile-flags>
     </default>
   </test>
   <test>
@@ -478,7 +478,7 @@
   <test>
     <default>
       <files>indexprop.js</files>
-      <compile-flags>-debuglaunch -dbgbaseline:indexprop.js.dbg.baseline</compile-flags>
+      <compile-flags>-debuglaunch -dbgbaseline:indexprop.js.dbg.baseline -ES6RegExSymbols- -ES6RegExPrototypeProperties-</compile-flags>
     </default>
   </test>
   <test>
@@ -1090,7 +1090,7 @@
   <test>
     <default>
       <files>symbols.js</files>
-      <compile-flags>-debuglaunch -dbgbaseline:symbols.js.dbg.baseline</compile-flags>
+      <compile-flags>-debuglaunch -dbgbaseline:symbols.js.dbg.baseline -ES6RegExSymbols- -ES6RegExPrototypeProperties-</compile-flags>
       <tags>exclude_dynapogo</tags>
     </default>
   </test>

@@ -91,10 +91,14 @@ namespace Js
 
         static bool HasOriginalRegExType(RecyclableObject* instance);
         static bool HasObservableConstructor(DynamicObject* regexPrototype);
+        static bool HasObservableSpecies(DynamicObject* regexConstructor);
         static bool HasObservableExec(DynamicObject* regexPrototype);
         static bool HasObservableFlags(DynamicObject* regexPrototype);
         static bool HasObservableGlobalFlag(DynamicObject* regexPrototype);
         static bool HasObservableUnicodeFlag(DynamicObject* regexPrototype);
+        static bool HasOriginalPrototypeMethod(ScriptContext* scriptContext, PropertyId propertyId, FunctionInfo* expectedFuncInfo);
+        static RecyclableObject* BoxIfStackInstance(RecyclableObject* instance);
+        static Var BoxIfStackInstance(Var value);
 
         static Var CallExec(RecyclableObject* thisObj, JavascriptString* string, PCWSTR varName, ScriptContext* scriptContext);
         UnifiedRegex::RegexFlags SetRegexFlag(PropertyId propertyId, UnifiedRegex::RegexFlags flags, UnifiedRegex::RegexFlags flag, ScriptContext* scriptContext);

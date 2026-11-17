@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 
@@ -10,14 +11,17 @@ function createMessage(message, prefix) {
     return prefix + message;
 }
 
-function assertSplit(re, messagePrefix) {
+function assertSplit(re, messagePrefix, expectedLastIndex) {
+    if (expectedLastIndex === undefined) {
+        expectedLastIndex = 0;
+    }
     var str = "a,ab,ba,b,";
     var result = str.split(re);
     assert.areEqual(3, result.length, createMessage("Sticky = true, RegExp.split() result's length", messagePrefix));
     assert.areEqual("", result[0], createMessage("Sticky = true, RegExp.split() result[0]", messagePrefix));
     assert.areEqual("ab,b", result[1], createMessage("Sticky = true, RegExp.split() result[1]", messagePrefix));
     assert.areEqual("b,", result[2], createMessage("Sticky = true, RegExp.split() result[2]", messagePrefix));
-    assert.areEqual(0, re.lastIndex, createMessage("Sticky = true, lastIndex result on RegExp.split()", messagePrefix));
+    assert.areEqual(expectedLastIndex, re.lastIndex, createMessage("Sticky = true, lastIndex result on RegExp.split()", messagePrefix));
 }
 
 function assertSplitWithSingleCharacterPattern(re, messagePrefix) {
@@ -244,7 +248,8 @@ var tests = [
     body: function () {
         var re = /a,/y;
         re.lastIndex = 3;
-        assertSplit(re);
+        var expectedLastIndex = typeof RegExp.prototype[Symbol.split] === "function" ? 3 : 0;
+        assertSplit(re, undefined, expectedLastIndex);
     }
   }
 ];

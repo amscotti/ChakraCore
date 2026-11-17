@@ -21,7 +21,7 @@
   <test>
     <default>
       <files>regexSplitOptimization.js</files>
-      <compile-flags>-skipsplitonnoresult- -off:fieldcopyprop</compile-flags>
+      <compile-flags>-skipsplitonnoresult- -off:fieldcopyprop -ES6RegExSymbols-</compile-flags>
     </default>
   </test>
   <test>
@@ -150,6 +150,7 @@
       <files>crossContext.js</files>
       <baseline>crossContext.baseline</baseline>
       <tags>exclude_native</tags>
+      <compile-flags>-ES6RegExSymbols-</compile-flags>
     </default>
   </test>
   <test>

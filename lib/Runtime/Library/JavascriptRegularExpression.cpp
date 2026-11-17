@@ -139,6 +139,7 @@ using namespace Js;
         // exactly as the spec requires. Substrate-off deviation: a user
         // getter that RETURNS undefined also takes the internal-flag
         // fallback (documented in the receipt).
+        instance = BoxIfStackInstance(instance);
         Var flagsVar = JavascriptOperators::GetProperty(instance, PropertyIds::flags, scriptContext);
         if (JavascriptOperators::IsUndefined(flagsVar)
             && !scriptContext->GetConfig()->IsES6RegExPrototypePropertiesEnabled()
@@ -982,7 +983,7 @@ using namespace Js;
 
         PCWSTR const varName = _u("RegExp.prototype[Symbol.matchAll]");
 
-        RecyclableObject* R = GetThisObject(args, varName, scriptContext);
+        RecyclableObject* R = BoxIfStackInstance(GetThisObject(args, varName, scriptContext));
         JavascriptString* S = GetFirstStringArg(args, scriptContext);
 
         JavascriptFunction* defaultConstructor = scriptContext->GetLibrary()->GetRegExpConstructor();
@@ -1056,6 +1057,28 @@ using namespace Js;
         return regexPrototype->GetSlot(library->GetRegexConstructorSlotIndex()) != library->GetRegExpConstructor();
     }
 
+    bool JavascriptRegExp::HasObservableSpecies(DynamicObject* regexConstructor)
+    {
+        JavascriptLibrary* library = regexConstructor->GetLibrary();
+        if (regexConstructor->GetType() != library->GetRegExpConstructorType())
+        {
+            return true;
+        }
+
+        Var getter = nullptr;
+        Var setter = nullptr;
+        ScriptContext* scriptContext = regexConstructor->GetScriptContext();
+        if (!regexConstructor->GetAccessors(PropertyIds::_symbolSpecies, &getter, &setter, scriptContext)
+            || !VarIs<JavascriptFunction>(getter))
+        {
+            return true;
+        }
+
+        JavascriptFunction* getterFn = UnsafeVarTo<JavascriptFunction>(getter);
+        return getterFn->GetFunctionInfo() != &EntryInfo::GetterSymbolSpecies
+            || getterFn->GetScriptContext() != scriptContext;
+    }
+
     bool JavascriptRegExp::HasObservableExec(DynamicObject* regexPrototype)
     {
         JavascriptLibrary* library = regexPrototype->GetLibrary();
@@ -1083,6 +1106,61 @@ using namespace Js;
         return scriptConfig->IsES6UnicodeExtensionsEnabled()
             && scriptConfig->IsES6RegExPrototypePropertiesEnabled()
             && regexPrototype->GetSlot(library->GetRegexUnicodeGetterSlotIndex()) != library->GetRegexUnicodeGetterFunction();
+    }
+
+    bool JavascriptRegExp::HasOriginalPrototypeMethod(ScriptContext* scriptContext, PropertyId propertyId, FunctionInfo* expectedFuncInfo)
+    {
+        JavascriptLibrary* library = scriptContext->GetLibrary();
+        DynamicObject* regexPrototype = library->GetRegExpPrototype();
+        if (regexPrototype->GetType() != library->GetRegexPrototypeType())
+        {
+            return false;
+        }
+        if (!regexPrototype->HasOwnProperty(propertyId))
+        {
+            return false;
+        }
+
+        Var getter = nullptr;
+        Var setter = nullptr;
+        if (regexPrototype->GetAccessors(propertyId, &getter, &setter, scriptContext))
+        {
+            return false;
+        }
+
+        Var propVal = nullptr;
+        PropertyValueInfo info;
+        if (!JavascriptConversion::PropertyQueryFlagsToBoolean(
+                regexPrototype->DynamicObject::GetPropertyQuery(regexPrototype, propertyId, &propVal, &info, scriptContext)))
+        {
+            return false;
+        }
+
+        if (propVal == nullptr || !VarIs<JavascriptFunction>(propVal))
+        {
+            return false;
+        }
+
+        JavascriptFunction* fn = UnsafeVarTo<JavascriptFunction>(propVal);
+        return fn->GetFunctionInfo() == expectedFuncInfo && fn->GetScriptContext() == scriptContext;
+    }
+
+    RecyclableObject* JavascriptRegExp::BoxIfStackInstance(RecyclableObject* instance)
+    {
+        if (VarIs<JavascriptRegExp>(instance) && ThreadContext::IsOnStack(instance))
+        {
+            return BoxStackInstance(VarTo<JavascriptRegExp>(instance), false);
+        }
+        return instance;
+    }
+
+    Var JavascriptRegExp::BoxIfStackInstance(Var value)
+    {
+        if (VarIs<JavascriptRegExp>(value) && ThreadContext::IsOnStack(value))
+        {
+            return BoxStackInstance(VarTo<JavascriptRegExp>(value), false);
+        }
+        return value;
     }
 
     Var JavascriptRegExp::EntrySymbolReplace(RecyclableObject* function, CallInfo callInfo, ...)
@@ -1131,8 +1209,8 @@ using namespace Js;
 
         PCWSTR const varName = _u("RegExp.prototype[Symbol.search]");
 
-        RecyclableObject *thisObj = GetThisObject(args, varName, scriptContext);
-        Var regEx = args[0];
+        RecyclableObject *thisObj = BoxIfStackInstance(GetThisObject(args, varName, scriptContext));
+        Var regEx = thisObj;
 
         JavascriptString* string = GetFirstStringArg(args, scriptContext);
 
@@ -1195,6 +1273,7 @@ using namespace Js;
 
     Var JavascriptRegExp::CallExec(RecyclableObject* thisObj, JavascriptString* string, PCWSTR varName, ScriptContext* scriptContext)
     {
+        thisObj = BoxIfStackInstance(thisObj);
         Var exec = JavascriptOperators::GetProperty(thisObj, PropertyIds::exec, scriptContext);
         if (JavascriptConversion::IsCallable(exec))
         {
@@ -1374,7 +1453,8 @@ using namespace Js;
         Assert(!(callInfo.Flags & CallFlags_New));
 
         ScriptContext* scriptContext = function->GetScriptContext();
-        if (ShouldApplyPrototypeWebWorkaround(args, scriptContext))
+        if (ShouldApplyPrototypeWebWorkaround(args, scriptContext) ||
+            (args.Info.Count >= 1 && args[0] == scriptContext->GetLibrary()->GetRegExpPrototype()))
         {
             return JavascriptString::NewCopyBuffer(_u("(?:)"), 4, scriptContext);
         }
@@ -1390,7 +1470,7 @@ using namespace Js;
         Assert(!(callInfo.Flags & CallFlags_New)); \
         \
         ScriptContext* scriptContext = function->GetScriptContext(); \
-        if (ShouldApplyPrototypeWebWorkaround(args, scriptContext) || args[0] == scriptContext->GetLibrary()->GetRegExpPrototype()) \
+        if (ShouldApplyPrototypeWebWorkaround(args, scriptContext) || (args.Info.Count >= 1 && args[0] == scriptContext->GetLibrary()->GetRegExpPrototype())) \
         {\
             return scriptContext->GetLibrary()->GetUndefined(); \
         }\

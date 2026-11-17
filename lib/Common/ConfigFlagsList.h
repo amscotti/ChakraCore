@@ -686,17 +686,17 @@ PHASE(All)
     #define DEFAULT_CONFIG_JitES6Generators            (false)
 #endif
 
-#ifdef COMPILE_DISABLE_ES6RegExPrototypeProperties
+#if COMPILE_DISABLE_ES6RegExPrototypeProperties
     // If ES6RegExPrototypeProperties needs to be disabled by compile flag, DEFAULT_CONFIG_ES6RegExPrototypeProperties should be false
     #define DEFAULT_CONFIG_ES6RegExPrototypeProperties (false)
 #else
-    #define DEFAULT_CONFIG_ES6RegExPrototypeProperties (false)
+    #define DEFAULT_CONFIG_ES6RegExPrototypeProperties (true)
 #endif
-#ifdef COMPILE_DISABLE_ES6RegExSymbols
+#if COMPILE_DISABLE_ES6RegExSymbols
     // If ES6RegExSymbols needs to be disabled by compile flag, DEFAULT_CONFIG_ES6RegExSymbols should be false
     #define DEFAULT_CONFIG_ES6RegExSymbols         (false)
 #else
-    #define DEFAULT_CONFIG_ES6RegExSymbols         (false)
+    #define DEFAULT_CONFIG_ES6RegExSymbols         (true)
 #endif
 #define DEFAULT_CONFIG_ES7AsyncAwait           (true)
 #define DEFAULT_CONFIG_ES7ExponentionOperator  (true)

@@ -558,6 +558,7 @@ private:
     void            GenerateFastInlineRegExpExec(IR::Instr * instr);
     bool            GenerateFastPush(IR::Opnd *baseOpndParam, IR::Opnd *src, IR::Instr *callInstr, IR::Instr *insertInstr, IR::LabelInstr *labelHelper, IR::LabelInstr *doneLabel, IR::LabelInstr * bailOutLabelHelper, bool returnLength = false);
     bool            GenerateFastReplace(IR::Opnd* strOpnd, IR::Opnd* src1, IR::Opnd* src2, IR::Instr *callInstr, IR::Instr *insertInstr, IR::LabelInstr *labelHelper, IR::LabelInstr *doneLabel);
+    void            GenerateRegExpTypeOrVTableCheck(IR::Opnd*& regexOpnd, IR::LabelInstr* labelHelper, IR::Instr* insertInstr);
     bool            ShouldGenerateStringReplaceFastPath(IR::Instr * instr, IntConstType argCount);
     bool            GenerateFastPop(IR::Opnd *baseOpndParam, IR::Instr *callInstr, IR::LabelInstr *labelHelper, IR::LabelInstr *doneLabel, IR::LabelInstr * bailOutLabelHelper);
     bool            GenerateFastStringLdElem(IR::Instr * ldElem, IR::LabelInstr * labelHelper, IR::LabelInstr * labelFallThru);

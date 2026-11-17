@@ -21,6 +21,7 @@
   <test>
     <default>
       <files>initProto.js</files>
+      <compile-flags>-ES6RegExSymbols- -ES6RegExPrototypeProperties-</compile-flags>
       <baseline>initProto.baseline</baseline>
     </default>
   </test>

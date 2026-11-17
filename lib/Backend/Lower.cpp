@@ -12269,6 +12269,11 @@ Lowerer::LowerNewRegEx(IR::Instr * instr)
         InsertMove(tempObjectSymOpnd,
             LoadVTableValueOpnd(this->outerMostLoopLabel, VTableValue::VtableJavascriptRegExp),
             this->outerMostLoopLabel, false);
+        if (CONFIG_FLAG(ES6RegExSymbols))
+        {
+            // Clear the boxed-instance slot per iteration so ES6 symbol/exec callbacks cannot reuse a prior iteration's boxed object.
+            GenerateMemInit(dstOpnd, -(int)sizeof(void *), IR::AddrOpnd::NewNull(this->m_func), instr, false);
+        }
     }
     else
     {
@@ -20775,6 +20780,34 @@ Lowerer::ShouldGenerateStringReplaceFastPath(IR::Instr * callInstr, IntConstType
     return true;
 }
 
+void
+Lowerer::GenerateRegExpTypeOrVTableCheck(IR::Opnd*& regexOpnd, IR::LabelInstr* labelHelper, IR::Instr* insertInstr)
+{
+    regexOpnd = GetRegOpnd(regexOpnd, insertInstr, m_func, TyVar);
+    if (CONFIG_FLAG(ES6RegExSymbols))
+    {
+        // Require the exact unmutated local RegExp DynamicType so custom own properties,
+        // prototype overrides, subclasses, and cross-realm RegExps fall back to String.prototype[@@*].
+        IR::Opnd * regexTypeOpnd = LoadLibraryValueOpnd(insertInstr, LibraryValue::ValueRegexType);
+        InsertCompareBranch(
+            IR::IndirOpnd::New(regexOpnd->AsRegOpnd(), Js::RecyclableObject::GetOffsetOfType(), TyMachPtr, insertInstr->m_func),
+            regexTypeOpnd,
+            Js::OpCode::BrNeq_A,
+            labelHelper,
+            insertInstr);
+    }
+    else
+    {
+        IR::Opnd * vtableOpnd = LoadVTableValueOpnd(insertInstr, VTableValue::VtableJavascriptRegExp);
+        InsertCompareBranch(
+            IR::IndirOpnd::New(regexOpnd->AsRegOpnd(), 0, TyMachPtr, insertInstr->m_func),
+            vtableOpnd,
+            Js::OpCode::BrNeq_A,
+            labelHelper,
+            insertInstr);
+    }
+}
+
 bool
 Lowerer::GenerateFastReplace(IR::Opnd* strOpnd, IR::Opnd* src1, IR::Opnd* src2, IR::Instr *callInstr, IR::Instr *insertInstr, IR::LabelInstr *labelHelper, IR::LabelInstr *doneLabel)
 {
@@ -20801,17 +20834,7 @@ Lowerer::GenerateFastReplace(IR::Opnd* strOpnd, IR::Opnd* src1, IR::Opnd* src2, 
         m_lowererMD.GenerateObjectTest(src1, insertInstr, labelHelper);
     }
 
-    IR::Opnd * vtableOpnd = LoadVTableValueOpnd(insertInstr, VTableValue::VtableJavascriptRegExp);
-
-    // cmp  [regex], vtableAddress
-    // jne  $labelHelper
-    src1 = GetRegOpnd(src1, insertInstr, m_func, TyVar);
-    InsertCompareBranch(
-        IR::IndirOpnd::New(src1->AsRegOpnd(), 0, TyMachPtr, insertInstr->m_func),
-        vtableOpnd,
-        Js::OpCode::BrNeq_A,
-        labelHelper,
-        insertInstr);
+    GenerateRegExpTypeOrVTableCheck(src1, labelHelper, insertInstr);
 
     if(!src2->GetValueType().IsString())
     {
@@ -20898,17 +20921,7 @@ Lowerer::GenerateFastInlineStringSplitMatch(IR::Instr * instr)
         m_lowererMD.GenerateObjectTest(argsOpnd[1], instr, labelHelper);
     }
 
-    IR::Opnd * vtableOpnd = LoadVTableValueOpnd(instr, VTableValue::VtableJavascriptRegExp);
-
-    // cmp  [regex], vtableAddress
-    // jne  $labelHelper
-    argsOpnd[1] = GetRegOpnd(argsOpnd[1], instr, m_func, TyVar);
-    InsertCompareBranch(
-        IR::IndirOpnd::New(argsOpnd[1]->AsRegOpnd(), 0, TyMachPtr, instr->m_func),
-        vtableOpnd,
-        Js::OpCode::BrNeq_A,
-        labelHelper,
-        instr);
+    GenerateRegExpTypeOrVTableCheck(argsOpnd[1], labelHelper, instr);
 
     IR::Instr * helperCallInstr = IR::Instr::New(LowererMD::MDCallOpcode, instr->m_func);
     if (callDst)
@@ -26715,6 +26728,13 @@ Lowerer::LowerCoerseStr(IR::Instr* instr)
 void
 Lowerer::LowerCoerseStrOrRegex(IR::Instr* instr)
 {
+    if (CONFIG_FLAG(ES6RegExSymbols))
+    {
+        InsertMove(instr->GetDst(), instr->GetSrc1(), instr);
+        instr->Remove();
+        return;
+    }
+
     IR::RegOpnd * src1Opnd = instr->GetSrc1()->AsRegOpnd();
 
     IR::LabelInstr * helperLabel = IR::LabelInstr::New(Js::OpCode::Label, m_func, true);
@@ -26750,6 +26770,13 @@ Lowerer::LowerCoerseStrOrRegex(IR::Instr* instr)
 void
 Lowerer::LowerCoerseRegex(IR::Instr* instr)
 {
+    if (CONFIG_FLAG(ES6RegExSymbols))
+    {
+        InsertMove(instr->GetDst(), instr->GetSrc1(), instr);
+        instr->Remove();
+        return;
+    }
+
     IR::LabelInstr * helperLabel = IR::LabelInstr::New(Js::OpCode::Label, m_func, true);
     IR::LabelInstr * doneLabel = IR::LabelInstr::New(Js::OpCode::Label, m_func);
     IR::RegOpnd * src1Opnd = instr->UnlinkSrc1()->AsRegOpnd();

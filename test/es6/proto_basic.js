@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 
@@ -668,7 +669,12 @@ if (helpers.isVersion10OrLater) { // TODO: Change to _11_OrLater
             a.__proto__.__proto__ = /a_regex/;
             a.source = 1;
 
-            assert.areEqual("a_regex", a.source, "prototype chain should NOT has-only-writable-data-properties");
+            assert.isFalse(Object.prototype.hasOwnProperty.call(a, "source"), "prototype chain should NOT has-only-writable-data-properties");
+            if (Object.getOwnPropertyDescriptor(RegExp.prototype, "source")) {
+                assert.throws(function () { return a.source; }, TypeError, "RegExp.prototype.source requires a RegExp receiver in ES6+");
+            } else {
+                assert.areEqual("a_regex", a.source, "prototype chain should NOT has-only-writable-data-properties");
+            }
         }
     },
 

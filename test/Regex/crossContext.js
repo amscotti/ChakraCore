@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 
@@ -10,7 +11,7 @@ var tests = {
   test01: {
     name: "Make sure when called with -nonative, marshaling of results is correct (Win8 628808)",
     body: function() {
-      // Ñall this with -nonative
+      // Ã‘all this with -nonative
       // Win8 628808: the following cases used to cause an assertion.
       var str = "this is a sting";
 
@@ -56,7 +57,12 @@ var tests = {
       // TODO: re-enable when the bug is fixed.
       if (helpers.isVersion10OrLater) {
         "this".match(x.rep);
-        assert.areEqual("t", RegExp.$1, "RegExp.$1 in local context wasn't updated to the capture group");
+        if (typeof RegExp.prototype[Symbol.match] === 'function') {
+          assert.areEqual("t", x.RegExp.$1, "x.RegExp.$1 in x's context wasn't updated to the capture group");
+          assert.areEqual("", RegExp.$1, "RegExp.$1 in local context shouldn't be updated by cross-context [Symbol.match]");
+        } else {
+          assert.areEqual("t", RegExp.$1, "RegExp.$1 in local context wasn't updated to the capture group");
+        }
       }
     }
   },
@@ -65,8 +71,8 @@ var tests = {
     name: "Check in which context the results are created",
     body: function() {
       var result = "this".match(x.re);
-      var expected = helpers.isVersion10OrLater ? Array : x.Array;
-      assert.areEqual(expected, result.constructor, "The result should be created in local context");
+      var expected = (!helpers.isVersion10OrLater || typeof RegExp.prototype[Symbol.match] === 'function') ? x.Array : Array;
+      assert.areEqual(expected, result.constructor, "The result should be created in the expected context");
     }
   },
 }

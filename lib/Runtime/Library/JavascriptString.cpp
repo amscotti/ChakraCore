@@ -1474,6 +1474,7 @@ case_2:
             }
             else
             {
+                regExp = JavascriptRegExp::BoxIfStackInstance(regExp);
                 JavascriptRegExp * regExObj = JavascriptRegExp::CreateRegExNoCoerce(regExp, nullptr, scriptContext);
                 Var symbolFn = GetRegExSymbolFunction(regExObj, PropertyIds::_symbolMatch, scriptContext);
                 return CallRegExSymbolFunction<1>(symbolFn, regExObj, args, varName, scriptContext);
@@ -1791,7 +1792,8 @@ case_2:
         JavascriptString * pReplace = nullptr;
         RecyclableObject* replacefn = nullptr;
 
-        SearchValueHelper(scriptContext, ((args.Info.Count > 1)?args[1]:scriptContext->GetLibrary()->GetNull()), &pRegEx, &pMatch);
+        Var searchValArg = (args.Info.Count > 1) ? JavascriptRegExp::BoxIfStackInstance(args[1]) : scriptContext->GetLibrary()->GetNull();
+        SearchValueHelper(scriptContext, searchValArg, &pRegEx, &pMatch);
         ReplaceValueHelper(scriptContext, ((args.Info.Count > 2) ? args[2] : scriptContext->GetLibrary()->GetUndefined()), &replacefn, &pReplace);
 
         if (pRegEx != nullptr)
@@ -2387,11 +2389,46 @@ case_2:
                 // to the string path below, same as replaceAll.
                 if (JavascriptOperators::IsObject(regExp))
                 {
+                    FunctionInfo* expectedBuiltinInfo = nullptr;
+                    switch (symbolPropertyId)
+                    {
+                    case PropertyIds::_symbolMatch:
+                        expectedBuiltinInfo = &JavascriptRegExp::EntryInfo::SymbolMatch;
+                        break;
+                    case PropertyIds::_symbolReplace:
+                        expectedBuiltinInfo = &JavascriptRegExp::EntryInfo::SymbolReplace;
+                        break;
+                    case PropertyIds::_symbolSplit:
+                        expectedBuiltinInfo = &JavascriptRegExp::EntryInfo::SymbolSplit;
+                        break;
+                    case PropertyIds::_symbolSearch:
+                        expectedBuiltinInfo = &JavascriptRegExp::EntryInfo::SymbolSearch;
+                        break;
+                    default:
+                        Assert(false);
+                        break;
+                    }
+
+                    // Box stack-allocated RegExp literals before entering user getters/methods
+                    // unless both the instance and built-in RegExp.prototype[Symbol.*] are intact.
+                    if (VarIs<JavascriptRegExp>(regExp)
+                        && (!JavascriptRegExp::HasOriginalRegExType(VarTo<RecyclableObject>(regExp))
+                            || !JavascriptRegExp::HasOriginalPrototypeMethod(scriptContext, symbolPropertyId, expectedBuiltinInfo)))
+                    {
+                        regExp = JavascriptRegExp::BoxIfStackInstance(regExp);
+                    }
+
                     Var symbolFn = GetRegExSymbolFunction(regExp, symbolPropertyId, scriptContext);
                     if (!JavascriptOperators::IsUndefinedOrNull(symbolFn))
                     {
+                        if (!VarIs<JavascriptFunction>(symbolFn)
+                            || UnsafeVarTo<JavascriptFunction>(symbolFn)->GetFunctionInfo() != expectedBuiltinInfo)
+                        {
+                            regExp = JavascriptRegExp::BoxIfStackInstance(regExp);
+                        }
                         return CallRegExSymbolFunction<argCount>(symbolFn, regExp, args, varName, scriptContext);
                     }
+                    regExp = JavascriptRegExp::BoxIfStackInstance(regExp);
                 }
             }
         }
@@ -2407,6 +2444,82 @@ case_2:
             JavascriptOperators::ToObject(regExp, scriptContext),
             propertyId,
             scriptContext);
+    }
+
+    Var JavascriptString::CallRegExSymbolFunctionCore(Var fn, Var regExp, Var arg1, bool hasArg2, Var arg2, PCWSTR const varName, ScriptContext* scriptContext)
+    {
+        if (!JavascriptConversion::IsCallable(fn))
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_Invalid, varName);
+        }
+
+        RecyclableObject* fnObj = UnsafeVarTo<RecyclableObject>(fn);
+        ThreadContext* threadContext = scriptContext->GetThreadContext();
+        return threadContext->ExecuteImplicitCall(fnObj, ImplicitCall_Accessor, [=]() -> Js::Var
+        {
+            if (hasArg2)
+            {
+                return CALL_FUNCTION(threadContext, fnObj, CallInfo(CallFlags_Value, 3), regExp, arg1, arg2);
+            }
+            return CALL_FUNCTION(threadContext, fnObj, CallInfo(CallFlags_Value, 2), regExp, arg1);
+        });
+    }
+
+    Var JavascriptString::MatchSymbolFallback(ScriptContext* scriptContext, JavascriptString* input, JavascriptRegExp* regExp)
+    {
+        PCWSTR const varName = _u("String.prototype.match");
+        Var regExpVar = JavascriptRegExp::BoxIfStackInstance(static_cast<RecyclableObject*>(regExp));
+        Var symbolFn = GetRegExSymbolFunction(regExpVar, PropertyIds::_symbolMatch, scriptContext);
+        if (!JavascriptOperators::IsUndefinedOrNull(symbolFn))
+        {
+            return CallRegExSymbolFunctionCore(symbolFn, regExpVar, input, false, nullptr, varName, scriptContext);
+        }
+
+        JavascriptRegExp* regExObj = JavascriptRegExp::CreateRegExNoCoerce(regExpVar, nullptr, scriptContext);
+        Var fallbackFn = GetRegExSymbolFunction(regExObj, PropertyIds::_symbolMatch, scriptContext);
+        return CallRegExSymbolFunctionCore(fallbackFn, regExObj, input, false, nullptr, varName, scriptContext);
+    }
+
+    Var JavascriptString::ReplaceSymbolFallback(ScriptContext* scriptContext, JavascriptString* input, JavascriptRegExp* regExp, JavascriptString* replace, bool noResult)
+    {
+        PCWSTR const varName = _u("String.prototype.replace");
+        Var regExpVar = JavascriptRegExp::BoxIfStackInstance(static_cast<RecyclableObject*>(regExp));
+        Var symbolFn = GetRegExSymbolFunction(regExpVar, PropertyIds::_symbolReplace, scriptContext);
+        if (!JavascriptOperators::IsUndefinedOrNull(symbolFn))
+        {
+            return CallRegExSymbolFunctionCore(symbolFn, regExpVar, input, true, replace, varName, scriptContext);
+        }
+
+        JavascriptString* searchStr = JavascriptConversion::ToString(regExpVar, scriptContext);
+        if (noResult)
+        {
+            return scriptContext->GetLibrary()->GetEmptyString();
+        }
+        return RegexHelper::StringReplace(searchStr, input, replace);
+    }
+
+    Var JavascriptString::SplitSymbolFallback(ScriptContext* scriptContext, JavascriptString* input, JavascriptRegExp* regExp, CharCount limit, bool noResult)
+    {
+        PCWSTR const varName = _u("String.prototype.split");
+        Var regExpVar = JavascriptRegExp::BoxIfStackInstance(static_cast<RecyclableObject*>(regExp));
+        Var symbolFn = GetRegExSymbolFunction(regExpVar, PropertyIds::_symbolSplit, scriptContext);
+        if (!JavascriptOperators::IsUndefinedOrNull(symbolFn))
+        {
+            const bool hasLimit = (limit != UINT_MAX);
+            Var limitVar = hasLimit ? JavascriptNumber::ToVar(limit, scriptContext) : nullptr;
+            return CallRegExSymbolFunctionCore(symbolFn, regExpVar, input, hasLimit, limitVar, varName, scriptContext);
+        }
+
+        JavascriptString* separator = JavascriptConversion::ToString(regExpVar, scriptContext);
+        if (noResult)
+        {
+            return scriptContext->GetLibrary()->GetNull();
+        }
+        if (limit == 0)
+        {
+            return scriptContext->GetLibrary()->CreateArray(0);
+        }
+        return RegexHelper::StringSplit(separator, input, limit);
     }
 
     template<int argCount>
@@ -2425,11 +2538,7 @@ case_2:
     Var JavascriptString::CallRegExFunction<1>(RecyclableObject* fnObj, Var regExp, Arguments& args, ScriptContext *scriptContext)
     {
         // args[0]: String
-        ThreadContext * threadContext = scriptContext->GetThreadContext();
-        return threadContext->ExecuteImplicitCall(fnObj, ImplicitCall_Accessor, [=]()->Js::Var
-        {
-            return CALL_FUNCTION(threadContext, fnObj, CallInfo(CallFlags_Value, 2), regExp, args[0]);
-        });
+        return CallRegExSymbolFunctionCore(fnObj, regExp, args[0], false, nullptr, _u(""), scriptContext);
     }
 
     template<>
@@ -2444,11 +2553,7 @@ case_2:
             return CallRegExFunction<1>(fnObj, regExp, args, scriptContext);
         }
 
-        ThreadContext * threadContext = scriptContext->GetThreadContext();
-        return threadContext->ExecuteImplicitCall(fnObj, ImplicitCall_Accessor, [=]()->Js::Var
-        {
-            return CALL_FUNCTION(threadContext, fnObj, CallInfo(CallFlags_Value, 3), regExp, args[0], args[2]);
-        });
+        return CallRegExSymbolFunctionCore(fnObj, regExp, args[0], true, args[2], _u(""), scriptContext);
     }
 
     Var JavascriptString::EntrySlice(RecyclableObject* function, CallInfo callInfo, ...)
@@ -2556,7 +2661,8 @@ case_2:
             }
             else
             {
-                JavascriptString* separator = JavascriptConversion::ToString(args[1], scriptContext);
+                Var sepArg = JavascriptRegExp::BoxIfStackInstance(args[1]);
+                JavascriptString* separator = JavascriptConversion::ToString(sepArg, scriptContext);
 
                 if (callInfo.Flags & CallFlags_NotUsed)
                 {

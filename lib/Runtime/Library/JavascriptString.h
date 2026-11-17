@@ -365,6 +365,11 @@ namespace Js
         static Var CallRegExSymbolFunction(Var fn, Var regExp, Arguments& args, PCWSTR const varName, ScriptContext* scriptContext);
         template<int argCount> // The count is excluding 'this'
         static Var CallRegExFunction(RecyclableObject* fnObj, Var regExp, Arguments& args, ScriptContext *scriptContext);
+        static Var CallRegExSymbolFunctionCore(Var fn, Var regExp, Var arg1, bool hasArg2, Var arg2, PCWSTR const varName, ScriptContext* scriptContext);
+        static Var MatchSymbolFallback(ScriptContext* scriptContext, JavascriptString* input, JavascriptRegExp* regExp);
+        static Var ReplaceSymbolFallback(ScriptContext* scriptContext, JavascriptString* input, JavascriptRegExp* regExp, JavascriptString* replace, bool noResult);
+        static Var SplitSymbolFallback(ScriptContext* scriptContext, JavascriptString* input, JavascriptRegExp* regExp, CharCount limit, bool noResult);
+        friend class RegexHelper;
     };
 
     template <> bool VarIsImpl<JavascriptString>(RecyclableObject* obj);

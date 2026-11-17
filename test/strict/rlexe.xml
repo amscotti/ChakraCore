@@ -446,6 +446,7 @@
   <test>
     <default>
       <files>13.delete_sm.js</files>
+      <compile-flags>-ES6RegExSymbols- -ES6RegExPrototypeProperties-</compile-flags>
       <baseline>13.delete_sm.baseline</baseline>
     </default>
   </test>
