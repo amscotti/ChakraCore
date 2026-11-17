@@ -150,6 +150,22 @@ namespace WAsmJs
         {
             return false;
         }
+#ifdef ENABLE_WASM
+        // W7: the JIT single-return convention cannot carry N results
+        // (LowerRet/LowerAsmJsCallI still single-valued), so multi-value
+        // functions must never tier up (mirrors AsmJsUtils.cpp dispatch gate).
+        {
+            Js::AsmJsFunctionInfo* info = body->GetAsmJsFunctionInfo();
+            if (info != nullptr)
+            {
+                const Wasm::WasmSignature* wasmSig = info->GetWasmSignature();
+                if (wasmSig != nullptr && wasmSig->IsMultiValue())
+                {
+                    return false;
+                }
+            }
+        }
+#endif
 #if defined(_M_ARM64) && defined(ENABLE_WASM_SIMD)
         // W8 interim: ARM64 has no SIMD (NEON) lowering yet, so SIMD
         // functions must never tier up (WasmLibrary schedules JIT at

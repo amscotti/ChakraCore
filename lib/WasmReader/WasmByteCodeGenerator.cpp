@@ -1062,17 +1062,18 @@ void WasmBytecodeGenerator::EmitBlockCommon(BlockInfo* blockInfo, bool* endOnEls
 
 PolymorphicEmitInfo WasmBytecodeGenerator::EmitBlock()
 {
-    Js::ByteCodeLabel blockLabel = m_writer->DefineLabel();
-
     // A nested control frame starts reachable even when the surrounding code
-    // is unreachable; the outer flag is restored after the frame (without
-    // clearing the frame's yielded values).
+    // is unreachable; define labels on the writer that emits the body and
+    // restore the outer flag after the frame (without clearing the frame's
+    // yielded values).
     bool outerUnreachable = IsUnreachable();
     if (outerUnreachable)
     {
         isUnreachable = false;
         m_writer = m_originalWriter;
     }
+
+    Js::ByteCodeLabel blockLabel = m_writer->DefineLabel();
 
     BlockInfo* blockInfo = PushLabel(GetReader()->m_currentNode.block, blockLabel);
     EmitBlockCommon(blockInfo);
@@ -1091,17 +1092,18 @@ PolymorphicEmitInfo WasmBytecodeGenerator::EmitBlock()
 
 PolymorphicEmitInfo WasmBytecodeGenerator::EmitLoop()
 {
-    Js::ByteCodeLabel loopTailLabel = m_writer->DefineLabel();
-    Js::ByteCodeLabel loopHeadLabel = m_writer->DefineLabel();
-    Js::ByteCodeLabel loopLandingPadLabel = m_writer->DefineLabel();
-
-    // Loop is a nested control frame; start reachable, restore outer state.
+    // Loop is a nested control frame; start reachable, define labels on the
+    // emitting writer, and restore outer state after the frame.
     bool outerUnreachable = IsUnreachable();
     if (outerUnreachable)
     {
         isUnreachable = false;
         m_writer = m_originalWriter;
     }
+
+    Js::ByteCodeLabel loopTailLabel = m_writer->DefineLabel();
+    Js::ByteCodeLabel loopHeadLabel = m_writer->DefineLabel();
+    Js::ByteCodeLabel loopLandingPadLabel = m_writer->DefineLabel();
 
     // Push possibly yielding loop label before capturing all the yielding registers
     BlockInfo* implicitBlockInfo = PushLabel(GetReader()->m_currentNode.block, loopTailLabel);

@@ -118,18 +118,169 @@ class WasmFunctionBuilder {
     // WABT tests pass kExprEnd explicitly; a second end fails validation at
     // WebAssembly.Module construction. Only an end at block nesting depth 0
     // is the function end (a trailing end can close a block/loop/if).
-    var depth = 0;
-    var hasFunctionEnd = false;
-    for (var i = 0; i < this.body.length; ++i) {
-      var op = this.body[i];
-      if (op === 0x02 || op === 0x03 || op === 0x04) {
-        ++depth;
-      } else if (op === 0x0b) {
+    // Walk instructions and skip their immediates so immediate bytes equal to
+    // 0x02..0x04 or 0x0b never miscount block nesting depth.
+    const bytes = this.body;
+    const len = bytes.length;
+    let depth = 0;
+    let hasFunctionEnd = false;
+    let i = 0;
+    let truncated = false;
+
+    function skipLeb(maxBytes) {
+      for (let count = 0; count < maxBytes; ++count) {
+        if (i >= len) {
+          truncated = true;
+          return false;
+        }
+        if ((bytes[i++] & 0x80) === 0) {
+          return true;
+        }
+      }
+      truncated = true;
+      return false;
+    }
+
+    function readU32Leb() {
+      let val = 0;
+      let shift = 0;
+      for (let count = 0; count < 5; ++count) {
+        if (i >= len) {
+          truncated = true;
+          return -1;
+        }
+        const b = bytes[i++];
+        val |= (b & 0x7f) << shift;
+        if ((b & 0x80) === 0) {
+          return val >>> 0;
+        }
+        shift += 7;
+      }
+      truncated = true;
+      return -1;
+    }
+
+    while (i < len && !truncated) {
+      const op = bytes[i++];
+      if (op === 0x01 || (op >= 0x45 && op <= 0xc4) ||
+          op === 0x00 || op === 0x05 || op === 0x0f ||
+          op === 0x1a || op === 0x1b) {
+        continue;
+      }
+      if (op === 0x0b) {
         if (depth > 0) {
           --depth;
-        } else if (i === this.body.length - 1) {
+        } else if (i === len) {
           hasFunctionEnd = true;
         }
+        continue;
+      }
+      if (op === 0x02 || op === 0x03 || op === 0x04) {
+        ++depth;
+        skipLeb(5);
+      } else if (op === 0x0c || op === 0x0d || op === 0x10 ||
+                 (op >= 0x20 && op <= 0x24) ||
+                 op === 0x3f || op === 0x40 || op === 0x41) {
+        skipLeb(5);
+      } else if (op === 0x42) {
+        skipLeb(10);
+      } else if (op === 0x43) {
+        if (i + 4 > len) {
+          truncated = true;
+        } else {
+          i += 4;
+        }
+      } else if (op === 0x44) {
+        if (i + 8 > len) {
+          truncated = true;
+        } else {
+          i += 8;
+        }
+      } else if (op === 0x11 || (op >= 0x28 && op <= 0x3e)) {
+        if (skipLeb(5)) {
+          skipLeb(5);
+        }
+      } else if (op === 0x0e) {
+        const targetCount = readU32Leb();
+        if (targetCount < 0 || targetCount >= len - i) {
+          truncated = true;
+        } else {
+          for (let k = 0; k <= targetCount; ++k) {
+            if (!skipLeb(5)) break;
+          }
+        }
+      } else if (op === 0xfc) {
+        const subOp = readU32Leb();
+        if (subOp < 0) {
+          truncated = true;
+        } else if (subOp <= 0x07) {
+          // trunc_sat_*: no extra immediates
+        } else if (subOp === 0x08 || subOp === 0x0a || subOp === 0x0c || subOp === 0x0e) {
+          if (skipLeb(5)) {
+            skipLeb(5);
+          }
+        } else if (subOp === 0x09 || subOp === 0x0b || subOp === 0x0d ||
+                   (subOp >= 0x0f && subOp <= 0x11)) {
+          skipLeb(5);
+        } else {
+          truncated = true;
+        }
+      } else if (op === 0xfd) {
+        if (i >= len) {
+          truncated = true;
+        } else {
+          const subOp = bytes[i++];
+          if (subOp <= 0x0b || subOp === 0x5c || subOp === 0x5d) {
+            if (skipLeb(5)) {
+              skipLeb(5);
+            }
+          } else if (subOp === 0x0c || subOp === 0x0d) {
+            if (i + 16 > len) {
+              truncated = true;
+            } else {
+              i += 16;
+            }
+          } else if (subOp >= 0x15 && subOp <= 0x22) {
+            if (i >= len) {
+              truncated = true;
+            } else {
+              ++i;
+            }
+          } else if (subOp >= 0x54 && subOp <= 0x5b) {
+            if (skipLeb(5) && skipLeb(5)) {
+              if (i >= len) {
+                truncated = true;
+              } else {
+                ++i;
+              }
+            }
+          } else if (subOp > 0xfb) {
+            truncated = true;
+          }
+        }
+      } else if (op === 0xfe) {
+        if (i >= len) {
+          truncated = true;
+        } else {
+          const subOp = bytes[i++];
+          if (subOp === 0x03) {
+            if (i >= len) {
+              truncated = true;
+            } else {
+              ++i;
+            }
+          } else if (subOp <= 0x02 || (subOp >= 0x10 && subOp <= 0x4e)) {
+            if (skipLeb(5)) {
+              skipLeb(5);
+            }
+          } else {
+            truncated = true;
+          }
+        }
+      } else {
+        // Unknown/unhandled opcode (e.g., negative validation tests):
+        // fall back cleanly without throwing.
+        truncated = true;
       }
     }
     if (!hasFunctionEnd) {

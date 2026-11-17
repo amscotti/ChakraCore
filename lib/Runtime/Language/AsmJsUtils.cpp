@@ -350,6 +350,23 @@ namespace Js
         return info->GetArgsSizesArray();
     }
 
+#ifdef ENABLE_WASM
+    static size_t GetWasmMultiRetBufSize(const Wasm::WasmSignature* sig)
+    {
+        if (sig == nullptr || !sig->IsMultiValue())
+        {
+            return 0;
+        }
+        const uint32 resultCount = sig->GetResultCount();
+        if (resultCount > (SIZE_MAX - 15) / sizeof(uint64))
+        {
+            Js::Throw::OutOfMemory();
+        }
+        const size_t rawSize = static_cast<size_t>(resultCount) * sizeof(uint64);
+        return ::Math::Align<size_t>(rawSize, 16);
+    }
+#endif
+
     int GetStackSizeForAsmJsUnboxing(ScriptFunction* func)
     {
         AsmJsFunctionInfo* info = func->GetFunctionBody()->GetAsmJsFunctionInfo();
@@ -361,7 +378,21 @@ namespace Js
             argSize = 32; // convention is to always allocate spill space for rcx,rdx,r8,r9
         }
 
-        PROBE_STACK_CALL(func->GetScriptContext(), func, argSize + Js::Constants::MinStackDefault);
+        size_t probeSize = static_cast<size_t>(argSize) + Js::Constants::MinStackDefault;
+#ifdef ENABLE_WASM
+        // Multi-value callers allocate retBuf via _alloca right after argSize;
+        // include it in the stack probe before either _alloca runs.
+        const size_t retBufSize = GetWasmMultiRetBufSize(info->GetWasmSignature());
+        if (retBufSize > SIZE_MAX - probeSize)
+        {
+            probeSize = SIZE_MAX;
+        }
+        else
+        {
+            probeSize += retBufSize;
+        }
+#endif
+        PROBE_STACK_CALL(func->GetScriptContext(), func, probeSize);
         return argSize;
     }
 
@@ -521,8 +552,8 @@ namespace Js
         UnboxAsmJsArguments(func, args.Values + 1, (char*)buf, callInfo);
         layout->functionObject = func;
 
-        const uint32 resultCount = sig->GetResultCount();
-        uint64* retBuf = (uint64*)_alloca(::Math::Align<int32>((int32)(resultCount * sizeof(uint64)), 16));
+        const size_t retBufSize = GetWasmMultiRetBufSize(sig);
+        uint64* retBuf = (uint64*)_alloca(retBufSize);
         InterpreterStackFrame::AsmJsInterpreterMulti(layout, retBuf);
         return BoxWasmMultiResult(func, sig, retBuf);
     }
@@ -849,8 +880,8 @@ namespace Js
             const Wasm::WasmSignature* wasmSig = info->GetWasmSignature();
             if (wasmSig != nullptr && wasmSig->IsMultiValue())
             {
-                const uint32 resultCount = wasmSig->GetResultCount();
-                uint64* retBuf = (uint64*)_alloca(::Math::Align<int32>((int32)(resultCount * sizeof(uint64)), 16));
+                const size_t retBufSize = GetWasmMultiRetBufSize(wasmSig);
+                uint64* retBuf = (uint64*)_alloca(retBufSize);
                 InterpreterStackFrame::AsmJsInterpreterMulti(layout, retBuf);
                 return BoxWasmMultiResult(func, wasmSig, retBuf);
             }

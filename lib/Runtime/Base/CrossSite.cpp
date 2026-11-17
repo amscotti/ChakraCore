@@ -22,6 +22,41 @@
 
 namespace Js
 {
+#if defined(ENABLE_WASM) && defined(_M_AMD64)
+    Var AsmJsExternalEntryPointMulti(RecyclableObject* entryObject, CallInfo callInfo, ...);
+#endif
+
+#ifdef ENABLE_ASMJS
+    static JavascriptMethod GetAsmJsCrossSiteEntryPoint(JavascriptFunction* function)
+    {
+#if defined(ENABLE_WASM) && defined(_M_AMD64)
+        const Wasm::WasmSignature* sig = nullptr;
+        if (VarIs<WasmScriptFunction>(function))
+        {
+            sig = UnsafeVarTo<WasmScriptFunction>(function)->GetSignature();
+        }
+        if (sig == nullptr)
+        {
+            FunctionInfo* funcInfo = function->GetFunctionInfo();
+            if (funcInfo->HasBody() && funcInfo->GetFunctionProxy()->IsFunctionBody())
+            {
+                AsmJsFunctionInfo* asmInfo = funcInfo->GetFunctionBody()->GetAsmJsFunctionInfo();
+                if (asmInfo != nullptr)
+                {
+                    sig = asmInfo->GetWasmSignature();
+                }
+            }
+        }
+        if (sig != nullptr && sig->IsMultiValue())
+        {
+            return Js::AsmJsExternalEntryPointMulti;
+        }
+#else
+        (void)function;
+#endif
+        return Js::AsmJsExternalEntryPoint;
+    }
+#endif
 
     BOOL CrossSite::NeedMarshalVar(Var instance, ScriptContext * requestContext)
     {
@@ -391,7 +426,7 @@ namespace Js
 #ifdef ENABLE_WASM
         if (VarIs<WasmScriptFunction>(function))
         {
-            entryPoint = Js::AsmJsExternalEntryPoint;
+            entryPoint = GetAsmJsCrossSiteEntryPoint(function);
         } else
 #endif
         if (funcInfo->HasBody())
@@ -439,7 +474,7 @@ namespace Js
             if (funcInfo->GetFunctionProxy()->IsFunctionBody() &&
                 funcInfo->GetFunctionBody()->GetIsAsmJsFunction())
             {
-                entryPoint = Js::AsmJsExternalEntryPoint;
+                entryPoint = GetAsmJsCrossSiteEntryPoint(function);
             }
             else
 #endif
