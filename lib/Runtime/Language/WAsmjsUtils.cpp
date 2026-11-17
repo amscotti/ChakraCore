@@ -109,10 +109,12 @@ namespace WAsmJs
         {
             hasSimd = info->GetArgType(i).isSIMD();
         }
+#if !defined(_M_ARM64)
         hasSimd = hasSimd
             || info->GetSimdVarCount() > 0
             || info->GetSimdTmpCount() > 0
             || info->GetSimdConstCount() > 0;
+#endif
 #ifdef ENABLE_WASM
         {
             const Wasm::WasmSignature* wasmSig = info->GetWasmSignature();
@@ -167,10 +169,9 @@ namespace WAsmJs
         }
 #endif
 #if defined(_M_ARM64) && defined(ENABLE_WASM_SIMD)
-        // W8 interim: ARM64 has no SIMD (NEON) lowering yet, so SIMD
-        // functions must never tier up (WasmLibrary schedules JIT at
-        // parse time, independent of the AsmJsUtils dispatch gate).
-        // x86/x64 tier-up for SIMD is unchanged (LowerMDSharedSimd128).
+        // ARM64 NEON SIMD body opcodes tier up to JIT; FunctionUsesSimd is scoped
+        // on ARM64 to functions whose signature passes or returns v128
+        // (internal v128 call/return ABI is not lowered on ARM64).
         if (FunctionUsesSimd(body))
         {
             return false;

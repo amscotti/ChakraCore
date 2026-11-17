@@ -71,8 +71,15 @@ public:
     ULONG SavedRegistersOffset() const { return this->SavedSimdOffset() + this->SavedSimdSize(); }
     ULONG SavedRegistersSize() const { return this->m_savedRegisters.Count() * MachRegInt; }
 
-    // The argument slot and StackFunctionList entry come after the saved integer registers
-    ULONG ArgSlotOffset() const { return this->SavedRegistersOffset() + this->SavedRegistersSize(); }
+    // W8-NEON slice 1: homed 128-bit params (Q0-7, count*16). Placed below
+    // ArgSlot/FpLr/HomedParams so HomedParams stays adjacent to incoming SP
+    // (preserving BaseAndOffsetFromSym's +64 overflow-param distance for
+    // both SIMD frames and -wasmsimd non-SIMD frames).
+    ULONG HomedSimdOffset() const { return this->SavedRegistersOffset() + this->SavedRegistersSize(); }
+    ULONG HomedSimdSize() const { return this->m_homedSimd.Count() * MachRegSimd128; }
+
+    // The argument slot and StackFunctionList entry come after the saved/homed areas
+    ULONG ArgSlotOffset() const { return this->HomedSimdOffset() + this->HomedSimdSize(); }
     ULONG ArgSlotSize() const { return this->m_hasCalls ? (2 * MachRegInt) : 0; }
 
     // Next comes the frame chain
@@ -83,12 +90,8 @@ public:
     ULONG HomedParamsOffset() const { return this->FpLrOffset() + this->FpLrSize(); }
     ULONG HomedParamsSize() const { return this->m_homedParams.Count() * MachRegInt; }
 
-    // W8-NEON slice 1: homed 128-bit params (Q0-7, count*16) after int homes.
-    ULONG HomedSimdOffset() const { return this->HomedParamsOffset() + this->HomedParamsSize(); }
-    ULONG HomedSimdSize() const { return this->m_homedSimd.Count() * MachRegSimd128; }
-
     // And that's the total stack allocation
-    ULONG TotalStackSize() const { return this->HomedSimdOffset() + this->HomedSimdSize(); }
+    ULONG TotalStackSize() const { return this->HomedParamsOffset() + this->HomedParamsSize(); }
 
     // The register area is the area at the far end that doesn't include locals or arg slots
     ULONG RegisterAreaOffset() const { return this->SavedDoublesOffset(); }

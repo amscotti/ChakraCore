@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft Corporation and contributors. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #pragma once
@@ -15,13 +16,14 @@ namespace Wasm
     struct EmitInfo : WAsmJs::EmitInfoBase
     {
         EmitInfo(Js::RegSlot location_, const WasmTypes::WasmType& type_) :
-            WAsmJs::EmitInfoBase(location_), type(type_)
+            WAsmJs::EmitInfoBase(location_), type(type_), isBlockParam(false)
         {
         }
-        EmitInfo(const WasmTypes::WasmType& type_) : type(type_) {}
-        EmitInfo() : type(WasmTypes::Void) {}
+        EmitInfo(const WasmTypes::WasmType& type_) : type(type_), isBlockParam(false) {}
+        EmitInfo() : type(WasmTypes::Void), isBlockParam(false) {}
 
         WasmTypes::WasmType type;
+        bool isBlockParam;
     };
 
     struct PolymorphicEmitInfo
@@ -257,7 +259,8 @@ namespace Wasm
         void ReleaseLocation(PolymorphicEmitInfo* info);
 
         PolymorphicEmitInfo PopLabel(Js::ByteCodeLabel labelValidation);
-        BlockInfo* PushLabel(WasmBlock blockData, Js::ByteCodeLabel label, bool addBlockYieldInfo = true, bool checkInParams = true);
+        BlockInfo* PushLabel(WasmBlock blockData, Js::ByteCodeLabel label, bool addBlockYieldInfo = true, bool checkInParams = true, PolymorphicEmitInfo* outInParams = nullptr);
+        void EmitBlockParamCopies(PolymorphicEmitInfo inParams, PolymorphicEmitInfo paramInfo);
         void YieldToBlock(BlockInfo* blockInfo, PolymorphicEmitInfo expr);
         BlockInfo* GetBlockInfo(uint32 relativeDepth) const;
 

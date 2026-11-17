@@ -1063,19 +1063,22 @@ void WasmBytecodeGenerator::EmitBlockCommon(BlockInfo* blockInfo, bool* endOnEls
 PolymorphicEmitInfo WasmBytecodeGenerator::EmitBlock()
 {
     // A nested control frame starts reachable even when the surrounding code
-    // is unreachable; define labels on the writer that emits the body and
-    // restore the outer flag after the frame (without clearing the frame's
-    // yielded values).
+    // is unreachable; define labels on the writer that emits the body, pop
+    // block params before clearing outerUnreachable, and restore the outer flag
+    // after the frame (without clearing the frame's yielded values).
     bool outerUnreachable = IsUnreachable();
     if (outerUnreachable)
     {
-        isUnreachable = false;
         m_writer = m_originalWriter;
     }
 
     Js::ByteCodeLabel blockLabel = m_writer->DefineLabel();
 
     BlockInfo* blockInfo = PushLabel(GetReader()->m_currentNode.block, blockLabel);
+    if (outerUnreachable)
+    {
+        isUnreachable = false;
+    }
     EmitBlockCommon(blockInfo);
     m_writer->MarkAsmJsLabel(blockLabel);
     PolymorphicEmitInfo yieldInfo = PopLabel(blockLabel);
@@ -1093,11 +1096,11 @@ PolymorphicEmitInfo WasmBytecodeGenerator::EmitBlock()
 PolymorphicEmitInfo WasmBytecodeGenerator::EmitLoop()
 {
     // Loop is a nested control frame; start reachable, define labels on the
-    // emitting writer, and restore outer state after the frame.
+    // emitting writer, pop input params before clearing outerUnreachable, and
+    // restore outer state after the frame.
     bool outerUnreachable = IsUnreachable();
     if (outerUnreachable)
     {
-        isUnreachable = false;
         m_writer = m_originalWriter;
     }
 
@@ -1107,6 +1110,10 @@ PolymorphicEmitInfo WasmBytecodeGenerator::EmitLoop()
 
     // Push possibly yielding loop label before capturing all the yielding registers
     BlockInfo* implicitBlockInfo = PushLabel(GetReader()->m_currentNode.block, loopTailLabel);
+    if (outerUnreachable)
+    {
+        isUnreachable = false;
+    }
 
     // Save the first tmp (per type) of this loop to discern a yield outside the loop in jitloopbody scenario
     Js::RegSlot curRegs[WAsmJs::LIMIT];
@@ -1127,7 +1134,13 @@ PolymorphicEmitInfo WasmBytecodeGenerator::EmitLoop()
 
     // We don't want nested block to jump directly to the loop header
     // instead, jump to the landing pad and let it jump back to the loop header
-    PushLabel(GetReader()->m_currentNode.block, loopLandingPadLabel, false);
+    BlockInfo* loopLabelInfo = PushLabel(GetReader()->m_currentNode.block, loopLandingPadLabel, false);
+    if (implicitBlockInfo->paramInfo.Count() > 0)
+    {
+        // A branch to a loop targets its header, so its branch arity/types match input params.
+        loopLabelInfo->yieldInfo = implicitBlockInfo->paramInfo;
+        loopLabelInfo->didYield = true;
+    }
     EmitBlockCommon(implicitBlockInfo);
     PopLabel(loopLandingPadLabel);
 
@@ -1410,24 +1423,42 @@ PolymorphicEmitInfo WasmBytecodeGenerator::EmitIfElseExpr()
 
     // The if body is a nested control frame; it starts reachable even when
     // the surrounding code is unreachable. Define the labels on the writer
-    // that will actually emit the body, and do not branch on an Any condition
-    // (the whole if is unreachable in that case).
+    // that will actually emit the body, pop input params before clearing
+    // outerUnreachable, and do not branch on an Any condition.
     bool outerUnreachable = IsUnreachable();
     if (outerUnreachable)
     {
-        isUnreachable = false;
         m_writer = m_originalWriter;
     }
 
+    const WasmBlock& blockData = GetReader()->m_currentNode.block;
+    const bool hasParams = !blockData.IsSingleResult() && m_module->GetSignature(blockData.GetSignatureId())->GetParamCount() > 0;
     Js::ByteCodeLabel falseLabel = m_writer->DefineLabel();
     Js::ByteCodeLabel endLabel = m_writer->DefineLabel();
+    Js::ByteCodeLabel falseInitLabel = (hasParams && !outerUnreachable) ? m_writer->DefineLabel() : falseLabel;
 
     if (!outerUnreachable)
     {
-        m_writer->AsmBrReg1(Js::OpCodeAsmJs::BrFalse_Int, falseLabel, checkExpr.location);
+        m_writer->AsmBrReg1(Js::OpCodeAsmJs::BrFalse_Int, falseInitLabel, checkExpr.location);
     }
 
-    BlockInfo* blockInfo = PushLabel(GetReader()->m_currentNode.block, endLabel);
+    PolymorphicEmitInfo inParams;
+    BlockInfo* blockInfo = PushLabel(blockData, endLabel, true, true, &inParams);
+    if (outerUnreachable)
+    {
+        isUnreachable = false;
+    }
+    else if (hasParams)
+    {
+        // Route false conditions through falseInitLabel so the else path (or
+        // omitted-else pass-through) receives initialized block parameters.
+        Js::ByteCodeLabel thenLabel = m_writer->DefineLabel();
+        m_writer->AsmBr(thenLabel);
+        m_writer->MarkAsmJsLabel(falseInitLabel);
+        EmitBlockParamCopies(inParams, blockInfo->paramInfo);
+        m_writer->AsmBr(falseLabel);
+        m_writer->MarkAsmJsLabel(thenLabel);
+    }
     bool endOnElse = false;
     EmitBlockCommon(blockInfo, &endOnElse);
     EnsureYield(blockInfo);
@@ -1449,7 +1480,15 @@ PolymorphicEmitInfo WasmBytecodeGenerator::EmitIfElseExpr()
     }
     else if (blockInfo->HasYield())
     {
-        throw WasmCompilationException(_u("Expected an else block when 'if' returns a value"));
+        if (blockInfo->paramInfo.Count() == blockInfo->yieldInfo.Count() &&
+            blockInfo->paramInfo.IsEquivalent(blockInfo->yieldInfo))
+        {
+            YieldToBlock(blockInfo, blockInfo->paramInfo);
+        }
+        else
+        {
+            throw WasmCompilationException(_u("Expected an else block when 'if' returns a value"));
+        }
     }
     m_writer->MarkAsmJsLabel(endLabel);
 
@@ -1486,7 +1525,7 @@ void WasmBytecodeGenerator::EmitBrTable()
         BlockInfo* blockInfo = GetBlockInfo(target);
         if (!defaultBlockInfo->IsEquivalent(blockInfo))
         {
-            throw WasmCompilationException(_u("br_table target %u signature mismatch"));
+            throw WasmCompilationException(_u("br_table target %u signature mismatch"), target);
         }
         YieldToBlock(blockInfo, yieldValue);
         m_writer->AsmBrReg1Const1(Js::OpCodeAsmJs::Case_IntConst, blockInfo->label, scrutineeInfo.location, i);
@@ -1617,6 +1656,7 @@ EmitInfo WasmBytecodeGenerator::EmitReplaceLaneExpr(Js::OpCodeAsmJs op, const Wa
     Assert(resultType == WasmTypes::V128);
 
     EmitInfo indexInfo = EmitLaneIndex(op);
+    ReleaseLocation(&simdArg);
     Js::RegSlot resultReg = GetRegisterSpace(resultType)->AcquireTmpRegister();
     EmitInfo result(resultReg, resultType);
 
@@ -1774,35 +1814,17 @@ EmitInfo WasmBytecodeGenerator::EmitMemAccess(WasmOp wasmOp, const WasmTypes::Wa
 void WasmBytecodeGenerator::EmitReturnExpr(PolymorphicEmitInfo* explicitRetInfo)
 {
     PolymorphicEmitInfo retExprInfo = explicitRetInfo ? *explicitRetInfo : PopStackPolymorphic(m_funcBlock);
-    const bool explicitYield = explicitRetInfo != nullptr;
     for (uint32 i = 0; i < retExprInfo.Count(); ++i)
     {
         EmitInfo info = retExprInfo.GetInfo(i);
         Js::OpCodeAsmJs retOp = GetReturnOp(info.type);
-        // PopStackPolymorphic and explicit block yields are both top-first,
-        // so GetInfo(i) is result (Count-1-i) in signature order.
-        const uint32 resultIndex = retExprInfo.Count() - 1 - i;
-        m_writer->Conv(retOp, (Js::RegSlot)resultIndex, info.location);
+        // PopStackPolymorphic and explicit block yields both preserve signature
+        // order (index 0 deepest / result 0, Count - 1 top / last result).
+        m_writer->Conv(retOp, (Js::RegSlot)i, info.location);
     }
-    // Explicit yields were acquired in signature order, so release them in
-    // reverse allocation order to keep the temp stack LIFO. Popped operands
-    // are already top-first.
-    if (explicitYield)
-    {
-        for (uint32 i = retExprInfo.Count(); i > 0; --i)
-        {
-            EmitInfo info = retExprInfo.GetInfo(i - 1);
-            ReleaseLocation(&info);
-        }
-    }
-    else
-    {
-        for (uint32 i = 0; i < retExprInfo.Count(); ++i)
-        {
-            EmitInfo info = retExprInfo.GetInfo(i);
-            ReleaseLocation(&info);
-        }
-    }
+    // Signature order places higher-allocated temp registers at the tail, so
+    // ReleaseLocation releases them in reverse (LIFO) order.
+    ReleaseLocation(&retExprInfo);
     m_writer->AsmBr(m_funcInfo->GetExitLabel());
 
     SetUnreachableState(true);
@@ -1898,6 +1920,7 @@ PolymorphicEmitInfo WasmBytecodeGenerator::EmitBrIf()
         {
             Assert(IsUnreachable());
             Assert(info.Count() == blockInfo->yieldInfo.Count());
+            ReleaseLocation(&info);
             // Use the block's yield type to continue type check
             for (uint32 i = 0; i < info.Count(); ++i)
             {
@@ -1980,7 +2003,7 @@ Js::OpCodeAsmJs WasmBytecodeGenerator::GetReturnOp(WasmTypes::WasmType type)
 
 void WasmBytecodeGenerator::ReleaseLocation(EmitInfo* info)
 {
-    if (WasmTypes::IsLocalType(info->type))
+    if (!info->isBlockParam && WasmTypes::IsLocalType(info->type))
     {
         GetRegisterSpace(info->type)->ReleaseLocation(info);
     }
@@ -1988,9 +2011,9 @@ void WasmBytecodeGenerator::ReleaseLocation(EmitInfo* info)
 
 void WasmBytecodeGenerator::ReleaseLocation(PolymorphicEmitInfo* info)
 {
-    for (uint32 i = 0; i < info->Count(); ++i)
+    for (uint32 i = info->Count(); i > 0; --i)
     {
-        ReleaseLocation(&info->GetInfo(i));
+        ReleaseLocation(&info->GetInfo(i - 1));
     }
 }
 
@@ -2020,10 +2043,41 @@ PolymorphicEmitInfo WasmBytecodeGenerator::PopLabel(Js::ByteCodeLabel labelValid
     BlockInfo* blockInfo = m_blockInfos.Pop();
     UNREFERENCED_PARAMETER(labelValidation);
     Assert(blockInfo->label == labelValidation);
-    return EnsureYield(blockInfo);
+    PolymorphicEmitInfo yieldInfo = EnsureYield(blockInfo);
+    // Block params were acquired after yieldInfo; release them in reverse order
+    // so yieldInfo temps stay live on top of the temp stack.
+    for (uint32 i = blockInfo->paramInfo.Count(); i > 0; --i)
+    {
+        EmitInfo paramInfo = blockInfo->paramInfo.GetInfo(i - 1);
+        if (WasmTypes::IsLocalType(paramInfo.type))
+        {
+            GetRegisterSpace(paramInfo.type)->ReleaseLocation(&paramInfo);
+        }
+    }
+    return yieldInfo;
 }
 
-BlockInfo* WasmBytecodeGenerator::PushLabel(WasmBlock blockData, Js::ByteCodeLabel label, bool addBlockYieldInfo, bool checkInParams)
+void WasmBytecodeGenerator::EmitBlockParamCopies(PolymorphicEmitInfo inParams, PolymorphicEmitInfo paramInfo)
+{
+    // Copy incoming params in reverse order so overlapping register ranges shift cleanly.
+    const uint32 paramCount = paramInfo.Count();
+    for (uint32 i = paramCount; i > 0; --i)
+    {
+        const uint32 idx = i - 1;
+        EmitInfo info = inParams.GetInfo(idx);
+        EmitInfo newInfo = paramInfo.GetInfo(idx);
+        if (IsUnreachable() || info.type == WasmTypes::Any)
+        {
+            EmitLoadConst(newInfo, GetZeroCnst());
+        }
+        else
+        {
+            m_writer->AsmReg2(GetLoadOp(newInfo.type), newInfo.location, info.location);
+        }
+    }
+}
+
+BlockInfo* WasmBytecodeGenerator::PushLabel(WasmBlock blockData, Js::ByteCodeLabel label, bool addBlockYieldInfo, bool checkInParams, PolymorphicEmitInfo* outInParams)
 {
     BlockInfo* blockInfo = Anew(&m_alloc, BlockInfo);
     blockInfo->label = label;
@@ -2071,24 +2125,19 @@ BlockInfo* WasmBytecodeGenerator::PushLabel(WasmBlock blockData, Js::ByteCodeLab
             if (checkInParams)
             {
                 blockInfo->paramInfo.Init(paramCount, &m_alloc);
-                // Acquire tmp registers in order
+                // Acquire tmp registers in signature order and mark them pinned for the block's lifetime
                 for (uint32 i = 0; i < paramCount; ++i)
                 {
-                    EmitInfo info = inParams.GetInfo(i);
-                    EmitInfo newInfo = info;
-                    newInfo.location = GetRegisterSpace(info.type)->AcquireTmpRegister();
+                    WasmTypes::WasmType paramType = signature->GetParam(i);
+                    EmitInfo newInfo(GetRegisterSpace(paramType)->AcquireTmpRegister(), paramType);
+                    newInfo.isBlockParam = true;
                     blockInfo->paramInfo.SetInfo(newInfo, i);
                 }
-                // Todo:: Instead of moving inparams to new location,
-                // Treat inparams as local and bypass ReleaseLocation until we exit the scope
 
-                // Move in params to new location in reverse order
-                for (int i = paramCount - 1; i >= 0; --i)
+                EmitBlockParamCopies(inParams, blockInfo->paramInfo);
+                if (outInParams != nullptr)
                 {
-                    Js::ArgSlot iArg = (Js::ArgSlot)i;
-                    EmitInfo info = inParams.GetInfo(iArg);
-                    EmitInfo newInfo = blockInfo->paramInfo.GetInfo(iArg);
-                    m_writer->AsmReg2(GetLoadOp(newInfo.type), newInfo.location, info.location);
+                    *outInParams = inParams;
                 }
             }
         }
@@ -2115,7 +2164,10 @@ void WasmBytecodeGenerator::YieldToBlock(BlockInfo* blockInfo, PolymorphicEmitIn
             {
                 EmitInfo expr = polyExpr.GetInfo(i);
                 EmitInfo yieldInfo = polyYieldInfo.GetInfo(i);
-                m_writer->AsmReg2(GetReturnOp(expr.type), yieldInfo.location, expr.location);
+                if (yieldInfo.location != expr.location)
+                {
+                    m_writer->AsmReg2(GetReturnOp(expr.type), yieldInfo.location, expr.location);
+                }
             }
         }
     }
@@ -2169,16 +2221,20 @@ PolymorphicEmitInfo WasmBytecodeGenerator::PopStackPolymorphic(PolymorphicEmitIn
     uint32 count = expectedTypes.Count();
     info.Init(count, &m_alloc);
 
-    for (uint32 i = 0; i < count; ++i)
+    // Expected types follow signature order (index 0 deepest, count - 1 top).
+    // Pop top-down so mixed types validate against their matching slot and
+    // callers receive results in signature order.
+    for (uint32 i = count; i > 0; --i)
     {
+        const uint32 idx = i - 1;
         // Check the stack before popping, it is valid to yield nothing if we are Unreachable
-        if (IsUnreachable() && m_evalStack.Peek().type == WasmTypes::Limit)
+        if (IsUnreachable() && (m_evalStack.Empty() || m_evalStack.Peek().type == WasmTypes::Limit))
         {
-            info.SetInfo(EmitInfo(WasmTypes::Any), i);
+            info.SetInfo(EmitInfo(WasmTypes::Any), idx);
         }
         else
         {
-            info.SetInfo(PopEvalStack(expectedTypes.GetInfo(i).type, mismatchMessage), i);
+            info.SetInfo(PopEvalStack(expectedTypes.GetInfo(idx).type, mismatchMessage), idx);
         }
     }
     return info;

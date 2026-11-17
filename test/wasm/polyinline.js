@@ -410,5 +410,231 @@ else
       }
     })();
 
+    // Item #9: Mixed-type multi-value validation, stack/tuple order, and control flow.
+    (function testMixedTypeMultiValue() {
+      function f32Bytes(v) {
+        const buf = new ArrayBuffer(4);
+        new Float32Array(buf)[0] = v;
+        return Array.from(new Uint8Array(buf));
+      }
+      function f64Bytes(v) {
+        const buf = new ArrayBuffer(8);
+        new Float64Array(buf)[0] = v;
+        return Array.from(new Uint8Array(buf));
+      }
+      function assertTuple(actual, expected, msg) {
+        assert(Array.isArray(actual), msg + ": expected array, got " + typeof actual);
+        assert(actual.length === expected.length, msg + ": length " + actual.length + " != " + expected.length);
+        for (let i = 0; i < expected.length; i++) {
+          assert(Object.is(actual[i], expected[i]), msg + "[" + i + "]: got " + actual[i] + " expected " + expected[i]);
+        }
+      }
+
+      // 1. Mixed (i32, f64) implicit return & explicit return; swapped stack order rejected.
+      {
+        const b = new WasmModuleBuilder();
+        const sigI32F64 = makeSig([kWasmI32], [kWasmI32, kWasmF64]);
+        b.addFunction("retPair", sigI32F64)
+          .addBody([
+            kExprGetLocal, 0,
+            kExprIf, kWasmStmt,
+              kExprI32Const, 0x79, // -7 signed LEB128
+              kExprF64Const, ...f64Bytes(3.25),
+              kExprReturn,
+            kExprEnd,
+            kExprI32Const, 42,
+            kExprF64Const, ...f64Bytes(-1.5)
+          ])
+          .exportFunc();
+        const exp = b.instantiate().exports;
+        assertTuple(exp.retPair(1), [-7, 3.25], "mixed explicit return");
+        assertTuple(exp.retPair(0), [42, -1.5], "mixed implicit return");
+
+        // Swapped stack order (f64, i32) for (result i32 f64) must fail validation.
+        const bad = new WasmModuleBuilder();
+        bad.addFunction("badOrder", makeSig([], [kWasmI32, kWasmF64]))
+          .addBody([kExprF64Const, ...f64Bytes(1.0), kExprI32Const, 1]);
+        assert(!WebAssembly.validate(bad.toBuffer()), "swapped (f64, i32) must not validate as (i32, f64)");
+      }
+
+      // 2. 4-type mixed tuple (f32, i32, i64, f64) across block param/result & consumer ops.
+      {
+        const b = new WasmModuleBuilder();
+        const sigFourBlock = b.addType(makeSig([kWasmF32, kWasmI32, kWasmI64, kWasmF64], [kWasmF32, kWasmI32, kWasmF64]));
+        const sigOut = makeSig([], [kWasmF32, kWasmI32, kWasmF64]);
+        b.addFunction("fourTypes", sigOut)
+          .addLocals({ f64_count: 1 })
+          .addBody([
+            kExprF32Const, ...f32Bytes(1.5),
+            kExprI32Const, 42,
+            kExprI64Const, 5,
+            kExprF64Const, ...f64Bytes(9.25),
+            kExprBlock, sigFourBlock,
+              // stack inside block: [f32(1.5), i32(42), i64(5), f64(9.25)]
+              kExprSetLocal, 0,       // save f64
+              kExprI32ConvertI64,     // wrap i64 -> i32(5)
+              kExprI32Add,            // 42 + 5 = 47
+              kExprGetLocal, 0,       // restore f64(9.25)
+            kExprEnd
+          ])
+          .exportFunc();
+        const res = b.instantiate().exports.fourTypes();
+        assertTuple(res, [1.5, 47, 9.25], "4-type mixed block");
+      }
+
+      // 3. Mixed (i32, f64) block + br_if + br_table order preservation.
+      {
+        const b = new WasmModuleBuilder();
+        const sigBlock = b.addType(makeSig([], [kWasmI32, kWasmF64]));
+        b.addFunction("brIfMixed", makeSig([kWasmI32], [kWasmI32, kWasmF64]))
+          .addBody([
+            kExprBlock, sigBlock,
+              kExprI32Const, 11,
+              kExprF64Const, ...f64Bytes(2.5),
+              kExprGetLocal, 0,
+              kExprBrIf, 0,
+              kExprDrop,
+              kExprDrop,
+              kExprI32Const, 33,
+              kExprF64Const, ...f64Bytes(7.5),
+            kExprEnd
+          ])
+          .exportFunc();
+
+        b.addFunction("brTableMixed", makeSig([kWasmI32], [kWasmI32, kWasmF64]))
+          .addBody([
+            kExprBlock, sigBlock,
+              kExprBlock, sigBlock,
+                kExprI32Const, 20,
+                kExprF64Const, ...f64Bytes(4.25),
+                kExprGetLocal, 0,
+                kExprBrTable, 1, 0, 1, // 1 target (label 0), default label 1
+              kExprEnd,
+              kExprReturn,
+            kExprEnd
+          ])
+          .exportFunc();
+
+        const exp = b.instantiate().exports;
+        assertTuple(exp.brIfMixed(1), [11, 2.5], "br_if taken mixed");
+        assertTuple(exp.brIfMixed(0), [33, 7.5], "br_if untaken mixed");
+        assertTuple(exp.brTableMixed(0), [20, 4.25], "br_table target 0 mixed");
+        assertTuple(exp.brTableMixed(1), [20, 4.25], "br_table default mixed");
+      }
+
+      // 4. Mixed-type loop (param i32 f64) (result i32 f64) with back-edge br_if 0.
+      {
+        const b = new WasmModuleBuilder();
+        const sigLoop = b.addType(makeSig([kWasmI32, kWasmF64], [kWasmI32, kWasmF64]));
+        b.addFunction("loopMixed", makeSig([kWasmI32], [kWasmI32, kWasmF64]))
+          .addLocals({ i32_count: 1, f64_count: 1 })
+          .addBody([
+            kExprGetLocal, 0,
+            kExprF64Const, ...f64Bytes(0.0),
+            kExprLoop, sigLoop,
+              // locals: 0=init, 1=curI, 2=accF
+              kExprSetLocal, 2,
+              kExprTeeLocal, 1,
+              kExprI32Const, 1,
+              kExprI32Sub,                  // nextI = curI - 1
+              kExprGetLocal, 2,
+              kExprGetLocal, 1,
+              kExprF64SConvertI32,
+              kExprF64Add,                  // nextF = accF + double(curI)
+              kExprGetLocal, 1,
+              kExprI32Const, 1,
+              kExprI32GtS,                  // continue while curI > 1
+              kExprBrIf, 0,
+            kExprEnd
+          ])
+          .exportFunc();
+        const exp = b.instantiate().exports;
+        assertTuple(exp.loopMixed(5), [0, 15.0], "loop (param i32 f64) n=5");
+        assertTuple(exp.loopMixed(1), [0, 1.0], "loop (param i32 f64) n=1");
+      }
+
+      // 5. Mixed-type if (param i32 f64) (result i32 f64) with else and without else.
+      {
+        const b = new WasmModuleBuilder();
+        const sigIf = b.addType(makeSig([kWasmI32, kWasmF64], [kWasmI32, kWasmF64]));
+        b.addFunction("ifWithElse", makeSig([kWasmI32, kWasmF64, kWasmI32], [kWasmI32, kWasmF64]))
+          .addLocals({ f64_count: 1 })
+          .addBody([
+            kExprGetLocal, 0,
+            kExprGetLocal, 1,
+            kExprGetLocal, 2,
+            kExprIf, sigIf,
+              kExprSetLocal, 3,
+              kExprI32Const, 10,
+              kExprI32Add,
+              kExprGetLocal, 3,
+              kExprF64Const, ...f64Bytes(2.0),
+              kExprF64Mul,
+            kExprElse,
+              kExprSetLocal, 3,
+              kExprI32Const, 20,
+              kExprI32Add,
+              kExprGetLocal, 3,
+              kExprF64Const, ...f64Bytes(1.5),
+              kExprF64Add,
+            kExprEnd
+          ])
+          .exportFunc();
+
+        b.addFunction("ifNoElse", makeSig([kWasmI32, kWasmF64, kWasmI32], [kWasmI32, kWasmF64]))
+          .addLocals({ f64_count: 1 })
+          .addBody([
+            kExprGetLocal, 0,
+            kExprGetLocal, 1,
+            kExprGetLocal, 2,
+            kExprIf, sigIf,
+              kExprSetLocal, 3,
+              kExprI32Const, 1,
+              kExprI32Add,
+              kExprGetLocal, 3,
+              kExprF64Const, ...f64Bytes(0.5),
+              kExprF64Add,
+            kExprEnd
+          ])
+          .exportFunc();
+
+        const exp = b.instantiate().exports;
+        assertTuple(exp.ifWithElse(5, 3.5, 1), [15, 7.0], "if-else true");
+        assertTuple(exp.ifWithElse(5, 3.5, 0), [25, 5.0], "if-else false");
+        assertTuple(exp.ifNoElse(5, 3.5, 1), [6, 4.0], "if-no-else true");
+        assertTuple(exp.ifNoElse(5, 3.5, 0), [5, 3.5], "if-no-else false");
+      }
+
+      // 6. Unreachable polymorphic stack + mixed nested param block + partial br_if.
+      {
+        const b = new WasmModuleBuilder();
+        const sigBlock = b.addType(makeSig([kWasmI32, kWasmF64], [kWasmI32, kWasmF64]));
+        const sigRet = b.addType(makeSig([], [kWasmI32, kWasmF64]));
+        b.addFunction("unreachNested", sigRet)
+          .addBody([
+            kExprUnreachable,
+            kExprBlock, sigBlock,
+              kExprDrop,
+              kExprI32Const, 7,
+              kExprI32Add,
+              kExprF64Const, ...f64Bytes(2.5),
+            kExprEnd,
+            kExprDrop,
+            kExprDrop,
+            kExprF64Const, ...f64Bytes(1.0),
+            kExprI32Const, 1,
+            kExprBrIf, 0
+          ])
+          .exportFunc();
+        assert(WebAssembly.validate(b.toBuffer()), "unreachable nested mixed param block + partial br_if must validate");
+
+        // Negative: unreachable + wrong top-of-stack type (f32 instead of f64) must fail validation.
+        const bad = new WasmModuleBuilder();
+        bad.addFunction("badUnreach", makeSig([], [kWasmI32, kWasmF64]))
+          .addBody([kExprUnreachable, kExprF32Const, ...f32Bytes(1.0)]);
+        assert(!WebAssembly.validate(bad.toBuffer()), "unreachable with wrong f32 top-of-stack for (i32, f64) must fail");
+      }
+    })();
+
     print("Pass");
 }
