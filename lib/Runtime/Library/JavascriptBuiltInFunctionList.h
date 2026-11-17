@@ -89,7 +89,7 @@ BUILTIN(JavascriptBigInt, NewInstance, NewInstance, FunctionInfo::SkipDefaultNew
 BUILTIN(JavascriptBigInt, AsIntN, EntryAsIntN, FunctionInfo::ErrorOnNew)
 BUILTIN(JavascriptBigInt, AsUintN, EntryAsUintN, FunctionInfo::ErrorOnNew)
 BUILTIN(JavascriptBigInt, ToString, EntryToString, FunctionInfo::ErrorOnNew | FunctionInfo::HasNoSideEffect)
-BUILTIN(JavascriptBigInt, ToLocaleString, EntryToLocaleString, FunctionInfo::ErrorOnNew | FunctionInfo::HasNoSideEffect)
+BUILTIN(JavascriptBigInt, ToLocaleString, EntryToLocaleString, FunctionInfo::ErrorOnNew)
 BUILTIN(JavascriptBigInt, ValueOf, EntryValueOf, FunctionInfo::ErrorOnNew | FunctionInfo::HasNoSideEffect)
 BUILTIN(JavascriptDate, NewInstance, NewInstance, FunctionInfo::SkipDefaultNewObject)
 BUILTIN(JavascriptDate, GetDate, EntryGetDate, FunctionInfo::ErrorOnNew)

@@ -904,10 +904,16 @@ namespace Js
         ARGUMENTS(args, callInfo);
         ScriptContext* scriptContext = function->GetScriptContext();
 
-        AssertMsg(args.HasArg(), "Should always have implicit 'this'");
+        Assert(!(callInfo.Flags & CallFlags_New));
+
+        if (args.Info.Count == 0)
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NeedObject, _u("BigInt.prototype.toLocaleString"));
+        }
+
         JavascriptBigInt* bigint = ThisBigIntValue(args[0], scriptContext);
-        // TypedArray element reads can hand us a boxed BigInt object; the Intl
-        // wrapper and platform.formatNumber require the primitive.
+        // Normalize BigInt objects (e.g., Object(123n)) to the primitive BigInt
+        // required by the Intl wrapper and platform.formatNumber.
         args.Values[0] = bigint;
 
 #ifdef ENABLE_INTL_OBJECT
@@ -942,11 +948,10 @@ namespace Js
         }
 #endif
 
-        // Default-locale grouping mirrors Number.prototype.toLocaleString's
-        // non-Intl path (JavascriptNumber::ToLocaleString): group the decimal
-        // digit string through PlatformAgnostic::Numbers::Utility::NumberToDefaultLocaleString.
-        // Locale/options arguments are deliberately not forwarded (recorded
-        // B8-6 card; zero corpus coverage).
+        // Non-Intl fallback (!CONFIG_FLAG(IntlBuiltIns) || !scriptContext->IsIntlEnabled()):
+        // mirror Number.prototype.toLocaleString's non-Intl path by grouping the
+        // decimal digit string via PlatformAgnostic::Numbers::Utility::NumberToDefaultLocaleString
+        // (Intl builds forward locales and options through Intl.js above).
         static const int bufSize = 1280;
         WCHAR stackBuffer[bufSize];
         WCHAR* pszRes = stackBuffer;

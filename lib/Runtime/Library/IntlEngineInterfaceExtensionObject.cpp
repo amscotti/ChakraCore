@@ -861,6 +861,11 @@ PROJECTED_ENUMS(PROJECTED_ENUM)
                     globAdapter->ResetNumberFormatFactoryObjects();
 #endif
                     break;
+                case IntlInitializationType::BigIntPrototype:
+#ifdef INTL_WINGLOB
+                    globAdapter->ResetNumberFormatFactoryObjects();
+#endif
+                    break;
                 }
 
                 JavascriptExceptionOperators::DoThrowCheckClone(pExceptionObject, scriptContext);
