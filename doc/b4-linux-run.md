@@ -263,3 +263,48 @@ suite re-run on `modernize/baseline` (merge commit `694dfb701`):
 The x64-gated unwind helper (`ChakraEhFrameFdeStart`), the seven
 numeric-UB range guards and the speculative v-scan fix are
 cross-platform neutral as designed; Mac pins unchanged.
+
+## 10. Linux x64 bring-up receipt (2026-11-16)
+
+| Field | Value |
+|---|---|
+| Host | Ubuntu 24.04.5, x86_64, 4 vCPU, glibc 2.39, ICU 74.2, Node v26.12.1 |
+| Toolchain | Zig 0.17.0 via `mise exec --` |
+| Engine commit | `42a38047ca0b828605b286da89e1e2de4a68b5e0` (clean tree for the Test262 run) |
+| Test262 launcher SHA-256 | `80bde7a15a94680b5ac5f5eaafda3b0da780a959962fb5a4efaa660569f45f2a` |
+| Engine dylib SHA-256 | `ad89fdedeabea09b2d540ebcc5e90532b61eb7ab0656f822e85b146ab6b91e17` |
+| Test262 corpus | `2e0a56762801e275a9fdf96dc49d90ba0cddcf63`, 25 controls, 902 skipped scenarios |
+
+Test262 (`--nonative -Test262 -CollectGarbage -NegativePhaseReport`,
+8 jobs, 10 s timeout):
+
+- edition-selected **78,485 passed / 2,059 failed** of 80,544 (97.44%)
+- broad **79,323 passed / 13,818 failed** of 93,141 (85.16%)
+- failure buckets: post-ES2025 11,759; engine-defect-on-existing 1,114;
+  disabled-flag 633; required-feature-missing 276; host 36
+- register entry: `refresh-2026-11-16-linux-x64` in
+  `tools/test262/baseline-register.json`
+
+Gate evidence on the same tree: default `check-smoke/metadata/jit/native/bytecode`
+PASS; `-Djit=false` PASS; `release-shared` smoke/metadata/native PASS with
+234 exports (JIT runtime leg correctly reports inapplicable); `debug-static`
+smoke/metadata/bytecode/native PASS; debug WASM 66/66; regression interpreted
+**2868/0** and dynapogo **2330/0**. Node-API manifest OK, host matrix
+46/23/0, addon matrix 52/61/6 (six documented V8 error-text mismatches),
+all 18 probes and the 5-repeat stress PASS.
+
+Benchmarks (`tools/bench/run.py`, 120 s per-run timeout):
+
+- JIT tier, 5 iterations: **65/65** applicable tests scored, 0 unexpected
+  failures. This includes `JetStream/gcc-loops.cpp.js` and both asm.js
+  C++ cases.
+- Interpreter tier, SunSpider/Kraken/Octane, 1 iteration: **54/55**
+  scored; `Octane/zlib.js` hit the 120 s timeout. A 300 s single-test
+  probe then **passed** (score 593), so this is interpreter slowness,
+  not a hang. JetStream interpreter was not included in this bounded
+  receipt because its C++ cases exceed the interpreter timeout budget
+  on this 4 vCPU host.
+
+ASan/TSan/UBSan were not run: the Linux build has no sanitizer lane yet.
+The gap and the bounded-only GCStress campaign are tracked in
+[open-cards.md](open-cards.md) §12.

@@ -95,6 +95,26 @@
         "scenarios": 80544
       },
       "evidence": "doc/c4-manifest.md"
+    },
+    {
+      "id": "refresh-2026-11-16-linux-x64",
+      "date": "2026-11-16",
+      "engine_commit": "42a38047ca0b828605b286da89e1e2de4a68b5e0",
+      "binary_sha256": "80bde7a15a94680b5ac5f5eaafda3b0da780a959962fb5a4efaa660569f45f2a",
+      "engine_dylib_sha256": "ad89fdedeabea09b2d540ebcc5e90532b61eb7ab0656f822e85b146ab6b91e17",
+      "results_dir": "out/test262-refresh-20261116",
+      "results_retained": true,
+      "broad": {
+        "passed": 79323,
+        "failed": 13818,
+        "scenarios": 93141
+      },
+      "edition_selected": {
+        "passed": 78485,
+        "failed": 2059,
+        "scenarios": 80544
+      },
+      "evidence": "doc/b4-linux-run.md"
     }
   ]
 }
