@@ -5843,6 +5843,15 @@ namespace Js
         InitializeIntlForPrototypes(numberPrototypeInitializer);
     }
 
+    void JavascriptLibrary::InitializeIntlForBigIntPrototype()
+    {
+        auto bigIntPrototypeInitializer = [&](IntlEngineInterfaceExtensionObject* intlExtension, ScriptContext * scriptContext, DynamicObject* intlObject) ->void
+        {
+            intlExtension->InjectIntlLibraryCode(scriptContext, intlObject, IntlInitializationType::BigIntPrototype);
+        };
+        InitializeIntlForPrototypes(bigIntPrototypeInitializer);
+    }
+
     template <class Fn>
     void JavascriptLibrary::InitializeIntlForPrototypes(Fn fn)
     {

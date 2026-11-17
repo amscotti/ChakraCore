@@ -12,6 +12,7 @@ namespace Js
         StringPrototype,
         DatePrototype,
         NumberPrototype,
+        BigIntPrototype,
         Classifier
     };
 
@@ -26,6 +27,7 @@ namespace Js
         JavascriptFunction* GetDateToLocaleTimeString() { return dateToLocaleTimeString; }
         JavascriptFunction* GetDateToLocaleDateString() { return dateToLocaleDateString; }
         JavascriptFunction* GetNumberToLocaleString() { return numberToLocaleString; }
+        JavascriptFunction* GetBigIntToLocaleString() { return bigIntToLocaleString; }
         JavascriptFunction* GetStringLocaleCompare() { return stringLocaleCompare; }
         static bool __cdecl InitializeIntlNativeInterfaces(DynamicObject* intlNativeInterfaces, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode);
 
@@ -56,6 +58,7 @@ namespace Js
         Field(JavascriptFunction*) dateToLocaleTimeString;
         Field(JavascriptFunction*) dateToLocaleDateString;
         Field(JavascriptFunction*) numberToLocaleString;
+        Field(JavascriptFunction*) bigIntToLocaleString;
         Field(JavascriptFunction*) stringLocaleCompare;
         Field(JavascriptFunction*) dateToLocaleString;
 

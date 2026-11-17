@@ -4,6 +4,8 @@
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #include "RuntimeLibraryPch.h"
+#include "Library/EngineInterfaceObject.h"
+#include "Library/IntlEngineInterfaceExtensionObject.h"
 
 #include <cmath>
 #include <limits>
@@ -904,6 +906,38 @@ namespace Js
 
         AssertMsg(args.HasArg(), "Should always have implicit 'this'");
         JavascriptBigInt* bigint = ThisBigIntValue(args[0], scriptContext);
+
+#ifdef ENABLE_INTL_OBJECT
+        if (CONFIG_FLAG(IntlBuiltIns) && scriptContext->IsIntlEnabled())
+        {
+            EngineInterfaceObject* nativeEngineInterfaceObj = scriptContext->GetLibrary()->GetEngineInterfaceObject();
+            if (nativeEngineInterfaceObj)
+            {
+                IntlEngineInterfaceExtensionObject* intlExtensionObject = static_cast<IntlEngineInterfaceExtensionObject*>(nativeEngineInterfaceObj->GetEngineExtension(EngineInterfaceExtensionKind_Intl));
+                JavascriptFunction* func = intlExtensionObject->GetBigIntToLocaleString();
+                if (func)
+                {
+                    BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+                    {
+                        return VarTo<JavascriptString>(func->CallFunction(args));
+                    }
+                    END_SAFE_REENTRANT_CALL
+                }
+
+                // Initialize BigInt.prototype.toLocaleString through Intl.
+                scriptContext->GetLibrary()->InitializeIntlForBigIntPrototype();
+                func = intlExtensionObject->GetBigIntToLocaleString();
+                if (func)
+                {
+                    BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+                    {
+                        return VarTo<JavascriptString>(func->CallFunction(args));
+                    }
+                    END_SAFE_REENTRANT_CALL
+                }
+            }
+        }
+#endif
 
         // Default-locale grouping mirrors Number.prototype.toLocaleString's
         // non-Intl path (JavascriptNumber::ToLocaleString): group the decimal

@@ -91,13 +91,17 @@ VALUE(Calendar, ca, 3) \
 VALUE(NumberingSystem, nu, 4) \
 VALUE(HourCycle, hc, 5)
 
-//BuiltInFunctionID intentionally has no Default value
+// BuiltInFunctionID intentionally has no Default value.
+// BigIntToLocaleString reuses the existing `bigint` PropertyId: the checked-in
+// JsBuiltIn bytecode serializes the PropertyId table, so adding a new entry
+// invalidates it.
 #define BUILTINFUNCTIONID_VALUES(VALUE) \
 VALUE(DateToLocaleString, DateToLocaleString, 0) \
 VALUE(DateToLocaleDateString, DateToLocaleDateString, 1) \
 VALUE(DateToLocaleTimeString, DateToLocaleTimeString, 2) \
 VALUE(NumberToLocaleString, NumberToLocaleString, 3) \
-VALUE(StringLocaleCompare, StringLocaleCompare, 4)
+VALUE(StringLocaleCompare, StringLocaleCompare, 4) \
+VALUE(BigIntToLocaleString, bigint, 5)
 
 #define ENUM_VALUE(enumName, propId, value) enumName = value,
 #define PROJECTED_ENUM(ClassName, VALUES) \
@@ -479,6 +483,7 @@ namespace Js
         dateToLocaleTimeString(nullptr),
         dateToLocaleDateString(nullptr),
         numberToLocaleString(nullptr),
+        bigIntToLocaleString(nullptr),
         stringLocaleCompare(nullptr),
         intlNativeInterfaces(nullptr),
         intlByteCode(nullptr),
@@ -669,6 +674,7 @@ PROJECTED_ENUMS(PROJECTED_ENUM)
         this->dateToLocaleTimeString = nullptr;
         this->dateToLocaleDateString = nullptr;
         this->numberToLocaleString = nullptr;
+        this->bigIntToLocaleString = nullptr;
         this->stringLocaleCompare = nullptr;
 
         //Failed to setup Intl; Windows.Globalization.dll is most likely missing.
@@ -762,6 +768,12 @@ PROJECTED_ENUMS(PROJECTED_ENUM)
                     IfCOMFailIgnoreSilentlyAndReturn(globAdapter->EnsureNumberFormatObjectsInitialized(library));
 #endif
                     initType = scriptContext->GetPropertyString(PropertyIds::Number);
+                    break;
+                case IntlInitializationType::BigIntPrototype:
+#ifdef INTL_WINGLOB
+                    IfCOMFailIgnoreSilentlyAndReturn(globAdapter->EnsureNumberFormatObjectsInitialized(library));
+#endif
+                    initType = scriptContext->GetPropertyString(PropertyIds::BigInt);
                     break;
             }
 
@@ -3458,6 +3470,9 @@ DEFINE_ISXLOCALEAVAILABLE(PR, uloc)
             break;
         case BuiltInFunctionID::NumberToLocaleString:
             extensionObject->numberToLocaleString = func;
+            break;
+        case BuiltInFunctionID::BigIntToLocaleString:
+            extensionObject->bigIntToLocaleString = func;
             break;
         case BuiltInFunctionID::StringLocaleCompare:
             extensionObject->stringLocaleCompare = func;

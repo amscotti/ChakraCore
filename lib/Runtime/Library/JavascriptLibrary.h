@@ -731,6 +731,7 @@ namespace Js
         void InitializeIntlForStringPrototype();
         void InitializeIntlForDatePrototype();
         void InitializeIntlForNumberPrototype();
+        void InitializeIntlForBigIntPrototype();
 #endif
 
 #ifdef ENABLE_JS_BUILTINS

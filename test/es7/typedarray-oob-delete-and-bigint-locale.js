@@ -56,15 +56,20 @@ var tests = [
         name: "BigInt.prototype.toLocaleString groups digits in the default locale",
         body: function () {
             if (typeof BigInt === 'undefined') { return; }
-            const numberGrouped = (123456789).toLocaleString();
-            const bigintGrouped = (123456789n).toLocaleString();
-            assert.areEqual(numberGrouped, bigintGrouped, "BigInt groups exactly like Number in the default locale");
-            assert.areEqual((-123456789n).toLocaleString(), (-123456789).toLocaleString(), "negative grouped like Number");
+            const numberDefault = (123456789).toLocaleString();
+            const bigintDefault = (123456789n).toLocaleString();
+            assert.areEqual(numberDefault, bigintDefault, "BigInt matches Number in the default locale");
+            assert.areEqual((-123456789n).toLocaleString(), (-123456789).toLocaleString(), "negative matches Number in the default locale");
+
+            // Grouping is locale-dependent; pin en-US for the separator/length checks.
+            const numberGrouped = (123456789).toLocaleString("en-US");
+            const bigintGrouped = (123456789n).toLocaleString("en-US");
+            assert.areEqual(numberGrouped, bigintGrouped, "BigInt groups exactly like Number in en-US");
             const sep = numberGrouped.length > 3 ? numberGrouped[numberGrouped.length - 4] : "";
-            assert.areEqual((1n).toLocaleString(), "1", "no separator for short values");
+            assert.areEqual((1n).toLocaleString("en-US"), "1", "no separator for short values");
             // > bufSize (1280 chars) exercises the heap-buffer grouping path
             const big = 10n ** 1300n - 1n; // 1300 nines
-            const grouped = big.toLocaleString();
+            const grouped = big.toLocaleString("en-US");
             assert.areEqual(1300 + Math.floor(1300 / 3) - (((1300 % 3) === 0) ? 1 : 0), grouped.length, "grouped length accounts for separators");
             assert.areEqual(big.toString(), grouped.split(sep).join(""), "digits preserved through grouping");
         }
