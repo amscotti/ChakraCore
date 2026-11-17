@@ -115,6 +115,26 @@
         "scenarios": 80544
       },
       "evidence": "doc/b4-linux-run.md"
+    },
+    {
+      "id": "refresh-2026-11-17",
+      "date": "2026-11-17",
+      "engine_commit": "29230a5b7b72bbec0153babb3f9d63dc49e557fc",
+      "binary_sha256": "80bde7a15a94680b5ac5f5eaafda3b0da780a959962fb5a4efaa660569f45f2a",
+      "engine_dylib_sha256": "6f5cc7734a031ef2d8f0dffdcaab2ea461b550018b8932a32be0f5d629a7fcad",
+      "results_dir": "out/test262-refresh-20261117",
+      "results_retained": true,
+      "broad": {
+        "passed": 79329,
+        "failed": 13812,
+        "scenarios": 93141
+      },
+      "edition_selected": {
+        "passed": 78491,
+        "failed": 2053,
+        "scenarios": 80544
+      },
+      "evidence": "doc/b4-linux-run.md"
     }
   ]
 }

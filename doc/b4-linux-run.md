@@ -264,26 +264,33 @@ The x64-gated unwind helper (`ChakraEhFrameFdeStart`), the seven
 numeric-UB range guards and the speculative v-scan fix are
 cross-platform neutral as designed; Mac pins unchanged.
 
-## 10. Linux x64 bring-up receipt (2026-11-16)
+## 10. Linux x64 bring-up receipt (2026-11-17)
 
 | Field | Value |
 |---|---|
 | Host | Ubuntu 24.04.5, x86_64, 4 vCPU, glibc 2.39, ICU 74.2, Node v26.12.1 |
 | Toolchain | Zig 0.17.0 via `mise exec --` |
-| Engine commit | `42a38047ca0b828605b286da89e1e2de4a68b5e0` (clean tree for the Test262 run) |
+| Engine commit | `29230a5b7b72bbec0153babb3f9d63dc49e557fc` (clean tree for the Test262 run) |
 | Test262 launcher SHA-256 | `80bde7a15a94680b5ac5f5eaafda3b0da780a959962fb5a4efaa660569f45f2a` |
-| Engine dylib SHA-256 | `ad89fdedeabea09b2d540ebcc5e90532b61eb7ab0656f822e85b146ab6b91e17` |
+| Engine dylib SHA-256 | `6f5cc7734a031ef2d8f0dffdcaab2ea461b550018b8932a32be0f5d629a7fcad` |
 | Test262 corpus | `2e0a56762801e275a9fdf96dc49d90ba0cddcf63`, 25 controls, 902 skipped scenarios |
 
 Test262 (`--nonative -Test262 -CollectGarbage -NegativePhaseReport`,
 8 jobs, 10 s timeout):
 
-- edition-selected **78,485 passed / 2,059 failed** of 80,544 (97.44%)
-- broad **79,323 passed / 13,818 failed** of 93,141 (85.16%)
+- edition-selected **78,491 passed / 2,053 failed** of 80,544 (97.45%)
+- broad **79,329 passed / 13,812 failed** of 93,141 (85.17%)
 - failure buckets: post-ES2025 11,759; engine-defect-on-existing 1,114;
-  disabled-flag 633; required-feature-missing 276; host 36
-- register entry: `refresh-2026-11-16-linux-x64` in
+  disabled-flag 633; required-feature-missing 276; host 30
+- register entry: `refresh-2026-11-17` in
   `tools/test262/baseline-register.json`
+
+The refresh adds the locale-correct `BigInt.prototype.toLocaleString`
+path and the boxed-BigInt normalization used by TypedArray element reads.
+Against `refresh-2026-11-16-linux-x64` the net result is **+6 broad passes**;
+the three residual `pass→fail` entries are host-level `SIGKILL` timeouts
+(two `decodeURI*` cases) and one `Atomics.waitAsync` timeout, not engine
+crashes or formatting regressions.
 
 Gate evidence on the same tree: default `check-smoke/metadata/jit/native/bytecode`
 PASS; `-Djit=false` PASS; `release-shared` smoke/metadata/native PASS with
