@@ -331,3 +331,109 @@ Benchmarks (`tools/bench/run.py`, 120 s per-run timeout):
 ASan/TSan/UBSan were not run: the Linux build has no sanitizer lane yet.
 The gap and the bounded-only GCStress campaign are tracked in
 [open-cards.md](open-cards.md) §12.
+
+## 11. Post-Linux Review Fixes & macOS ARM64 Re-Verification (`c639e9f02..06d783c64`)
+
+Following review of the Linux bring-up arc (`4778b3a2b..c639e9f02`), three
+hardening commits were landed on `modernize/baseline` and re-verified on the
+macOS ARM64 host (`06d783c64`):
+
+### 11.1 Integrated Commits (`c639e9f02..06d783c64`)
+
+1. **`193c95046` — `build/ci/probes: tighten static Makefile, release JIT, and GC probe checks`:**
+   - `tools/build/check_native.py`: `check_makefile_links_static` now parses
+     `PLATFORM=<os>` (`^PLATFORM=(\S+)`) and requires `libChakraCoreStatic.a`;
+     enforces `-Wl,-force_load,` on `darwin` and `--whole-archive`,
+     `--no-whole-archive`, and `$(FORCE_STARTS) $(LDIR) $(FORCE_ENDS)` on
+     non-darwin (preventing Linux Makefiles from passing vacuously via the
+     inactive `ifeq (darwin, ...)` branch), with positive/negative tests for both
+     platforms in `self_test()` and `tools/build/test_build_tools.py`.
+   - `.github/workflows/zig-linux.yml` (`:149`): adds `check-native` to the
+     `debug-static` matrix `checks` (`"check-smoke check-metadata verify-bytecode check-native"`).
+   - `tools/build/check_jit.py`: when `not flaglist_supported(ch)` (Release
+     builds), writes `SCRIPT` and calls `check_run(ch, [], script_path)`
+     alongside `check_symbols(ch)` to verify default-flags Release JIT execution
+     instead of skipping; macOS `release-shared` sets `-DDISABLE_JIT=1`
+     (`tools/build/tables.zig:187`), keeping `check_jit.py` Linux/JIT-only for
+     `release-shared`. Pinned by `CheckJitTests` in `tools/build/test_build_tools.py`.
+   - `test/nodeapi/probes/{refs_probe,wrap_probe}.cpp`: adds portable
+     `PROBE_NOINLINE_OPTNONE` (`__attribute__((noinline, optnone))` /
+     `__attribute__((noinline, optimize("O0")))`), `ClearDeadRef` (`volatile`
+     write + compiler memory barrier), hardened `ClearStack()` (`kN = 512`),
+     and popped `optnone` helper frames isolating pre-GC `JsValueRef`/`napi_value`
+     handles; passes at `-O3` (`211/211` and `219/219` on both `test` and `jit`).
+2. **`8b0b0e6a8` — `intl/bigint: fix ImplicitCall flags, OOM cleanup, and Intl wrapper state`:**
+   - `lib/Runtime/Library/JavascriptBuiltInFunctionList.h:92`: removes
+     `FunctionInfo::HasNoSideEffect` from `JavascriptBigInt::ToLocaleString`
+     (retaining `FunctionInfo::ErrorOnNew`) so `ExecuteImplicitCall` honors
+     `IsDisableImplicitCall()` and propagates `ImplicitCallFlags` across
+     reentrant options getters/Proxies.
+   - `lib/Runtime/Library/IntlEngineInterfaceExtensionObject.cpp:864-868`: adds
+     `case IntlInitializationType::BigIntPrototype:` in the OOM/SOE cleanup
+     switch (`#ifdef INTL_WINGLOB globAdapter->ResetNumberFormatFactoryObjects(); #endif break;`),
+     preventing `AssertMsg(false, ...)` and fallthrough into `ResetIntlObject()`.
+   - `lib/Runtime/Library/JavascriptBigInt.cpp`: adds `Assert(!(callInfo.Flags & CallFlags_New))`,
+     Release-safe `args.Info.Count == 0` `TypeError` guard before `args[0]`,
+     `args.Values[0] = bigint` primitive normalization, and updated non-Intl
+     fallback comment (`!CONFIG_FLAG(IntlBuiltIns) || !scriptContext->IsIntlEnabled()`).
+   - `lib/Runtime/Library/InJavascript/Intl.js`: guards `NumberToLocaleString`
+     registration (`InitType !== "BigInt"`), checks `typeof this !== "bigint"`,
+     uses call-local null-prototype `const stateObject = _.create()`, and passes
+     `platform.BuiltInFunctionID.bigint` across both ICU and `INTL_WINGLOB` paths.
+   - Regenerates dual-variant bytecode headers (`JsBuiltIn.bc.{32b,64b}.h` and
+     `JsBuiltIn.nojit.bc.{32b,64b}.h`) and rotates
+     `lib/Runtime/ByteCode/ByteCodeCacheReleaseFileVersion.h` to GUID
+     `e46b32c9-98ac-42cc-8058-8b9a64dc9e5c`.
+   - `test/es7/typedarray-oob-delete-and-bigint-locale.js`: adds warmed JIT
+     `ImplicitCall` bailout, locale/options, invalid-option `RangeError`,
+     boxed `Object(123n)` + `delete globalThis.BigInt`, and
+     `BigInt64Array`/`BigUint64Array` tests (**10/10** on both `test` and `jit`).
+3. **`06d783c64` — `wasm: fix unreachable label-0 collision, multi-value dispatch/probe/JIT gate, and addBody decoding`:**
+   - `lib/WasmReader/WasmByteCodeGenerator.cpp` (`EmitBlock`, `EmitLoop`): sets
+     `m_writer = m_originalWriter` before `DefineLabel()` (matching
+     `EmitIfElseExpr`) so nested frames inside unreachable code never allocate
+     label `0` on `EmptyWasmByteCodeWriter` and collide with `exitLabel`.
+   - `lib/Runtime/Base/CrossSite.cpp`: adds `GetAsmJsCrossSiteEntryPoint` under
+     `ENABLE_ASMJS` (routing `sig != nullptr && sig->IsMultiValue()` through
+     `AsmJsExternalEntryPointMulti` under `ENABLE_WASM && _M_AMD64` in both
+     `CrossSite::ProfileThunk` and `CrossSite::DefaultThunk`).
+   - `lib/Runtime/Language/AsmJsUtils.cpp`: adds overflow-checked 16-byte-aligned
+     `GetWasmMultiRetBufSize`, includes `retBufSize` in
+     `GetStackSizeForAsmJsUnboxing`'s `PROBE_STACK_CALL` before `_alloca`, and
+     removes truncating `(int32)` `_alloca` size arithmetic in both entrypoints.
+   - `lib/Runtime/Language/WAsmjsUtils.cpp` (`ShouldJitFunction`): gates out
+     functions whose `AsmJsFunctionInfo::GetWasmSignature()` is multi-value
+     (`sig->IsMultiValue()`).
+   - `test/WasmSpec/testsuite/harness/wasm-module-builder.js`: updates `addBody()`
+     to decode opcode immediates safely instead of scanning raw bytes (CRLF
+     preserved).
+   - `test/wasm/polyinline.js`: adds live-compiled (`!IsValidating()`)
+     unreachable `block`/`loop`/`if` + early-`return` label-0 tests,
+     cross-realm (`WScript.LoadScript(..., "samethread")`) + hot/`-forceNative`
+     multi-value + 4096-result stack-probe tests, and `addBody()` immediate /
+     truncated negative tests (**382/382** P1 WASM).
+
+### 11.2 macOS ARM64 Re-Verification Tallies (`06d783c64`)
+
+| Gate / Suite | Result (`06d783c64`) | Notes |
+|---|---|---|
+| `test` (`zig build check libChakraNodeApi ch-nodeapi check-nodeapi`) | **PASS** | `2064/0` regression, `test-shared-basic`, `check-smoke`, `check-metadata`, `verify-bytecode`, `check-nodeapi` (`150/150`), `typedarray-oob-delete-and-bigint-locale.js` **10/10** |
+| `debug-static` (`zig build -Dprofile=debug-static check`) | **PASS** | `2116/0` regression, `8/8` static native suites + Makefile linkage proof, `check-smoke`, `check-metadata` (`526` archive members), `verify-bytecode` |
+| `release-shared` (`zig build -Dprofile=release-shared check ch-nodeapi`) | **PASS** | `check-smoke`, `check-native`, `check-metadata`, `ch-nodeapi` built; macOS `tables.zig:187` sets `DISABLE_JIT=1`, so `check_jit.py` is inapplicable here |
+| `jit` + `wasm` (`zig build -Dprofile=jit -Dwasm=true check check-wasm libChakraNodeApi ch-nodeapi check-nodeapi`) | **PASS** | `check-wasm` **382/382 P1** (`448` passed / `5` non-P1 failed), `check-jit` PASS, `check-smoke`, `verify-bytecode`, `check-nodeapi` (`150/150`), `typedarray-oob-delete-and-bigint-locale.js` **10/10**, `polyinline.js` PASS (`-wasm -forceNative -bgjit-`) |
+| Node-API probes & matrix | **PASS** | `refs_probe` **211/211** (`test`+`jit`, `-O3`), `wrap_probe` **219/219** (`test`+`jit`, `-O3`), `host_async_probe` **ALL PASS**, `run_matrix.py` **46/23/0** |
+| Build tools, Zig tests, & StyleChecks | **PASS** | `test_build_tools.py` **89/89**, `check_native.py --self-test` PASS, `linux-gate-tests.zig` **7/7**, `owned-bytes.zig` **4/4**, StyleChecks **5/5** |
+
+### 11.3 Unexercised Paths Awaiting Next Linux / Windows Run
+
+1. **Linux x64 re-run of `193c95046..06d783c64` & hosted CI confirmation:**
+   re-execute `zig build check`, `debug-static` `check-native` (`.github/workflows/zig-linux.yml:149`),
+   and `check_jit.py` default-flags runtime verification on Linux `release-shared`.
+2. **Debug WASM & x64 cross-site multi-value runtime paths:** macOS ARM64
+   `debug-static` sets `DISABLE_JIT=1` (disabling `ENABLE_WASM`) and `-Dprofile=jit`
+   runs `DBG=0`, so the `DBG=1` `MarkAsmJsLabel` assert check on
+   `EmitBlock`/`EmitLoop` and `_M_AMD64` `CrossSite` multi-value thunk runtime
+   dispatch await the next native Linux x64 / debug run.
+3. **Windows `INTL_WINGLOB` path:** updated in `Intl.js` and
+   `IntlEngineInterfaceExtensionObject.cpp` (compiled into `JsBuiltIn*.bc.*.h`),
+   awaiting Windows runtime execution on the B6 Windows port.

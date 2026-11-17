@@ -1,15 +1,43 @@
 # ChakraCore Modernization -- Linux Bring-Up and Testing Handoff
 
-> Date: 2026-11-16
-> Branch / Commit: `modernize/baseline` at `526393e26` (`8f4e85d62..526393e26` integrated)
+> Original Handoff: 2026-11-16 (`modernize/baseline` at `526393e26`, `8f4e85d62..526393e26`)
+> Synchronized: **2026-11-17** (`modernize/baseline` at `06d783c64`, including Linux bring-up `4778b3a2b..c639e9f02` and post-review fixes `193c95046..06d783c64`)
 > Companion Docs: [architecture-and-readiness-review.md](architecture-and-readiness-review.md),
-> [b4-d1-d4.md](b4-d1-d4.md), [build-contract-linux.md](build-contract-linux.md),
-> [open-cards.md](open-cards.md), [perf-baseline.md](perf-baseline.md)
+> [b4-linux-run.md](b4-linux-run.md), [b4-d1-d4.md](b4-d1-d4.md),
+> [build-contract-linux.md](build-contract-linux.md), [open-cards.md](open-cards.md),
+> [perf-baseline.md](perf-baseline.md)
+
+> [!NOTE]
+> **Execution Status & Closure Summary (2026-11-17, `06d783c64`)**
+> Phases 1–4 and Phase 6 of this handoff have been **executed on native `x86_64` Linux** (Ubuntu 24.04.5, 4 vCPU, glibc 2.39, ICU 74.2) in `4778b3a2b..c639e9f02` — see [b4-linux-run.md](b4-linux-run.md) §10 for full receipts and SHA-256 provenance — and both hosted GitHub Actions workflows (`zig-linux` [`44054742113`](https://github.com/amscotti/ChakraCore/actions/runs/44054742113) and `zig-macos` [`44054742259`](https://github.com/amscotti/ChakraCore/actions/runs/44054742259)) passed at `c639e9f02`. Post-review fixes (`193c95046`, `8b0b0e6a8`, `06d783c64`) are verified on macOS ARM64 ([b4-linux-run.md](b4-linux-run.md) §11) and await Linux x64 re-verification alongside the open items below. The historical pre-execution handoff checklist (`526393e26`) is preserved verbatim below this summary.
+
+### Phase 1–6 Execution Mapping (`4778b3a2b..c639e9f02`)
+
+| Phase | Scope | Linux Status (`c639e9f02`) | Receipt / Notes |
+|---|---|---|---|
+| **Phase 1** | Pre-flight tooling & portable StyleChecks | **Executed (PASS)** | Hosted CI [`44054742113`](https://github.com/amscotti/ChakraCore/actions/runs/44054742113) `style` + `zig` gate checks green; at `06d783c64` local Mac re-verify `5/5` StyleChecks, `89/89` `test_build_tools.py`, `7/7` `linux-gate-tests.zig`, `4/4` `owned-bytes.zig`. |
+| **Phase 2** | Default `test` profile, `RECORDED_BASELINE`, D1-D4 & ELF unwind | **Executed (PASS)** | `81be961a1` / [b4-linux-run.md](b4-linux-run.md) §10: `check-smoke`/`metadata`/`jit`/`native`/`bytecode` PASS; `RECORDED_BASELINE` re-pinned to **2868/0** interpreted and **2330/0** dynapogo (`AsyncSuspendedResume.js` enabled); `linux_exports_{so,ch}.txt` vs legacy CMake build remains uncompared. |
+| **Phase 3** | Linux build variants (`-Djit=false`, `release-shared`, `debug-static`) | **Executed (PASS)** | `81be961a1`, `42a38047c`: `-Djit=false` PASS; `release-shared` smoke/metadata/native PASS (`234` exports vs `237` on `test`, omitting 3 `ENABLE_DEBUG_CONFIG_OPTIONS` `JsPrivate*` symbols); `debug-static` smoke/metadata/bytecode/native (`8/8` static suites) + `66/66` debug WASM (zero assertions). |
+| **Phase 4** | Node-API stack (`libChakraNodeApi.so` & `ch-nodeapi`) | **Executed (PASS w/ caveat)** | `81be961a1`, `c639e9f02`: `check-nodeapi` (`150` exports), `18/18` probes, `5x` stress, `run_matrix.py` **46/23/0**, `run_node_addon_api_matrix.py` **52/61/6** (only the 6 documented PR-12 V8 error-text diffs). Local run used Node `v26.12.1` instead of pinned `v22.22.3`; hosted `nodeapi` CI job green. |
+| **Phase 5** | Sanitizers (`ASan`/`TSan`/`UBSan`), `GCStress` & historic flakes | **Partially executed / OPEN** | `GCStress -js -off:ConcurrentCollect -ForceBlockingConcurrentCollect` ran 300s without crashing (`timeout` rc=124 before completing full heap walk — bounded liveness check only). `ASan`/`TSan`/`UBSan` **not run** (`tools/build/linux.zig` has no sanitizer lane; `zig c++` lacks bundled ASan runtime). `earley-boyer` 30x & `class-private-methods` 50x stress unrun. |
+| **Phase 6** | Certified Linux Test262, benchmarks & hosted Actions CI | **Executed (PASS w/ open follow-ups)** | Test262 `refresh-2026-11-17` (`29230a5b7`): **78,491 / 2,053** (**97.45%** edition), **79,329 / 13,812** (**85.17%** broad). Benchmarks (`120 s` timeout): **65/65** JIT (5 iters), **54/55** Interp (`Octane/zlib.js` `593` at `300 s`, JetStream omitted); JSONs not yet committed. Hosted CI green (`44054742113`, `44054742259`). |
+
+### Remaining Open Items on Linux (`06d783c64`)
+1. **Linux re-verification of post-review fixes (`193c95046..06d783c64`):** native Linux + hosted CI confirmation of `.github/workflows/zig-linux.yml` `debug-static` `check-native`, `check_native.py` `--whole-archive` check, `check_jit.py` Release default-flags runtime execution on Linux `release-shared`, `refs_probe`/`wrap_probe` `PROBE_NOINLINE_OPTNONE` at `-O3`, `BigInt.prototype.toLocaleString` (`8b0b0e6a8`), DBG `EmitBlock`/`EmitLoop` `MarkAsmJsLabel`, and `_M_AMD64` `CrossSite` multi-value runtime dispatch (`06d783c64`).
+2. **Sanitizer lane (`ASan`/`TSan`/`UBSan`):** wire system `clang++` / sanitizer runtime linkage in `tools/build/linux.zig` and execute Phase 5 items 1–3.
+3. **Committed Linux benchmark JSON artifacts:** capture and commit `tools/bench/results/linux-x64-{jit,interp}.json` (currently only `*-darwin-arm64.json` exist in `tools/bench/results/`).
+4. **Pinned Node `v22.22.3` local matrix confirmation:** re-run local Linux Node-API matrix under pinned `v22.22.3` (local receipt [`c639e9f02`](b4-linux-run.md) used `v26.12.1`).
+5. **Historic flake & stress runs:** `Octane/earley-boyer.js` 30x under Linux JIT, `test/es7/class-private-methods.js` 50x, and an unbounded/completed `GCStress` matrix.
+6. **`check-wasm` target in `tools/build/linux.zig`:** `build.zig` defines `check-wasm`, whereas `tools/build/linux.zig` currently does not (Linux `66/66` debug WASM ran via `runtests.py`); optional `linux_exports_{so,ch}.txt` diff against legacy CMake also remains open.
+
+---
+
+## Historical Pre-Execution Handoff Record (`526393e26`, 2026-11-16)
 
 This document records the exact closure state reached on macOS ARM64 (`darwin-arm64`)
-and specifies everything that must be built, verified, re-pinned, stressed, and
-monitored when continuing the project on Linux (`x86_64-linux-gnu` first, with notes
-for future `aarch64-linux-gnu`).
+at `526393e26` and specifies everything that was queued to be built, verified,
+re-pinned, stressed, and monitored when executing the Linux x64 bring-up above
+(with §4 notes for future `aarch64-linux-gnu`).
 
 ---
 

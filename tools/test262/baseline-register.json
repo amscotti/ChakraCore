@@ -63,7 +63,7 @@
       "engine_commit": "4e9f95da7e8283bd7033cdbaf18ab9f2805b1f72",
       "binary_sha256": "5e210836f51f1a02453a2427836b224d99f7f4811163c53f1dd28ac9dfea7028",
       "results_dir": "out/test262-e12-refresh",
-      "results_retained": true,
+      "results_retained": false,
       "broad": {
         "passed": 78399,
         "failed": 14742,
@@ -103,7 +103,7 @@
       "binary_sha256": "80bde7a15a94680b5ac5f5eaafda3b0da780a959962fb5a4efaa660569f45f2a",
       "engine_dylib_sha256": "ad89fdedeabea09b2d540ebcc5e90532b61eb7ab0656f822e85b146ab6b91e17",
       "results_dir": "out/test262-refresh-20261116",
-      "results_retained": true,
+      "results_retained": false,
       "broad": {
         "passed": 79323,
         "failed": 13818,
@@ -123,7 +123,7 @@
       "binary_sha256": "80bde7a15a94680b5ac5f5eaafda3b0da780a959962fb5a4efaa660569f45f2a",
       "engine_dylib_sha256": "6f5cc7734a031ef2d8f0dffdcaab2ea461b550018b8932a32be0f5d629a7fcad",
       "results_dir": "out/test262-refresh-20261117",
-      "results_retained": true,
+      "results_retained": false,
       "broad": {
         "passed": 79329,
         "failed": 13812,

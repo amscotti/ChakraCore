@@ -1,50 +1,65 @@
 # ChakraCore Modernization -- Architecture and Readiness Review
 
-> Date: 2026-11-16
-> Branch / Commit: `modernize/baseline` at `526393e26` (`8f4e85d62..526393e26`
-> integrated: Stage 2/3 code, Test262 refresh, Stage 4 `Inline.cpp` fix & benchmarks)
+> Date: 2026-11-17
+> Branch / Commit: `modernize/baseline` at `06d783c64` (`8f4e85d62..06d783c64`
+> integrated: Stage 2/3/4 Mac closure, Linux x64 bring-up `4778b3a2b..c639e9f02`,
+> and post-review fixes `193c95046..06d783c64`)
 > Scope: Synthesis of the Stage 1 architecture audit (`arch-audit`), Stage 2/3
 > P0/P1 architectural and memory-safety fixes, current build/runtime/host
-> layout, verified Mac subsystem test-coverage matrix, explicit residuals and
-> API boundaries, and the Linux x64 bring-up readiness checklist.
+> layout, verified Mac ARM64 & Linux x64 test-coverage matrices, explicit
+> residuals and API boundaries, and remaining Linux/Windows follow-ups.
 
 ---
 
 ## 1. Executive Summary
 
-Following the Stage 1 read-only architectural review (`8f4e85d62`), Stage 2 and
-Stage 3 landed nine commits (`9d8d1817a..c24266598`) closing the identified P0/P1
-correctness, GC, JIT, concurrency, JsRT ABI, Node-API, build/CI, and StyleCheck
-findings, followed by Stage 3B's certified Test262 baseline refresh and
-documentation sync.
+Following the Stage 1 read-only architectural review (`8f4e85d62`), Stage 2/3
+and Stage 4 landed the Mac ARM64 baseline (`c24266598`, `526393e26`), the Linux
+x64 bring-up (`4778b3a2b..c639e9f02`, recorded in [b4-linux-run.md](b4-linux-run.md) §10),
+and three post-review hardening commits (`193c95046`, `8b0b0e6a8`, `06d783c64`,
+re-verified on macOS ARM64 in [b4-linux-run.md](b4-linux-run.md) §11).
 
-Key state on `modernize/baseline` (`c24266598` + Stage 3B `docs-cert`):
+Key state on `modernize/baseline` (`06d783c64`):
 
-- **All 4 Mac ARM64 Zig build profiles pass** (`test` **2064/0**, `debug-static`
-  **2116/0** + `8/8` static native suites, `release-shared` smoke/native/metadata,
-  and `jit` + `-Dwasm=true` `check-jit` + **382/382 P1** WASM).
-- **Node-API (`NAPI_VERSION=8`) passes** `tools/nodeapi/run_probe.sh` and
-  **18/18** `test/nodeapi/probes/run_*_probe.sh` on both `test` and `jit`
-  profiles (`BINARY_PROBE` `308/308` incl. `BigInt64Array`/`BigUint64Array`,
-  `run_host_async_probe` `4/4`), `REPEATS=5` stress across both profiles,
-  `run_matrix.py` **`46/23/0`**, and `run_node_addon_api_matrix.py --hosts both`
-  **`52/61/6`** (`node-direct` `29/0`, `ch-nodeapi` `23/6` with all `6` diffs
-  the documented PR-12 `test/object/*` V8 message checks).
-- **Certified ES2025 Test262 baseline refreshed (`refresh-2026-11-16` on
-  `zig-out/bin/ch`):** edition-selected **78,731 passed / 1,813 failed of
-  80,544 (97.75%)**, down **-1,136** failures from `refresh-2026-11-05`
-  (`77,595 / 2,949`, `96.34%`) with zero feature regressions; broad corpus
-  **79,569 passed / 13,572 failed of 93,141 (85.43%)**. Primary drivers:
-  `7412beb56` (`ESSharedArrayBuffer=true` default-on), B4 D1-D4 exact number
-  formatting, A1-A12/JITREG, and Stage 2/3 runtime/JIT fixes.
-- **StyleChecks vs `origin/master` (`97e68c917`) pass 5/5** using portable Python
-  verification (`check_style_portable.py --self-test` + all four shell scripts).
-- **Primary platform boundary:** Linux x64 Zig parameterization
-  (`tools/build/linux.zig`), metadata checks (`tools/build/check_metadata_linux.py`),
-  and `.github/workflows/zig-linux.yml` are locally verified via unit/format
-  checks (`test_build_tools.py` `81/81`, `linux-gate-tests.zig` `7/7`), but
-  post-Stage-2/3 native Linux x64 execution and hosted GitHub Actions runs remain
-  pending (Section 7).
+- **All 4 Mac ARM64 Zig build profiles pass (re-verified at `06d783c64`):**
+  `test` **2064/0** + `check-nodeapi` (`150/150`), `debug-static` **2116/0** +
+  `8/8` static native suites + static Makefile linkage proof, `release-shared`
+  smoke/native/metadata + `ch-nodeapi` (`-DDISABLE_JIT=1`), and `jit` +
+  `-Dwasm=true` `check-jit` + **382/382 P1** WASM + `check-nodeapi`.
+- **Linux x64 bring-up verified (`81be961a1..c639e9f02`, [b4-linux-run.md](b4-linux-run.md) §10):**
+  `test` (**2868/0** interpreted, **2330/0** dynapogo), `-Djit=false` PASS,
+  `release-shared` smoke/metadata/native PASS (`234` exports vs `237` on `test`),
+  and `debug-static` smoke/metadata/bytecode/native (`8/8` static) + `66/66`
+  debug WASM (zero assertions). Benchmarks: **65/65** JIT (5 iters) &
+  **54/55** Interp at `120 s` (`Octane/zlib` `593` at `300 s`).
+- **Node-API (`NAPI_VERSION=8`) passes on both Mac ARM64 and Linux x64:**
+  `tools/nodeapi/run_probe.sh` and **18/18** `test/nodeapi/probes/run_*_probe.sh`
+  (incl. hardened `refs_probe` `211/211`, `wrap_probe` `219/219` at `-O3`, and
+  `host_async_probe` on `06d783c64`), `REPEATS=5` stress, `run_matrix.py`
+  **`46/23/0`**, and `run_node_addon_api_matrix.py --hosts both` **`52/61/6`**
+  (`node-direct` `29/0`, `ch-nodeapi` `23/6` with only the 6 documented PR-12
+  `test/object/*` V8 message diffs). *Linux caveat:* local Phase 4 ran with Node
+  `v26.12.1` instead of pinned `v22.22.3`; hosted Actions `nodeapi` job passed.
+- **Certified ES2025 Test262 baselines refreshed on both platforms:**
+  - Mac ARM64 (`refresh-2026-11-16`, `c24266598`): edition-selected
+    **78,731 passed / 1,813 failed of 80,544 (97.75%)** (`-1,136` vs
+    `2026-11-05`); broad **79,569 / 13,572 of 93,141 (85.43%)**.
+  - Linux x64 (`refresh-2026-11-17`, `29230a5b7`): edition-selected
+    **78,491 passed / 2,053 failed of 80,544 (97.45%)**; broad
+    **79,329 / 13,812 of 93,141 (85.17%)** (adds locale-correct
+    `BigInt.prototype.toLocaleString` + boxed BigInt normalization).
+- **Hosted GitHub Actions & StyleChecks pass:**
+  Both `zig-linux` ([`44054742113`](https://github.com/amscotti/ChakraCore/actions/runs/44054742113))
+  and `zig-macos` ([`44054742259`](https://github.com/amscotti/ChakraCore/actions/runs/44054742259))
+  are all-green on `c639e9f02`. At `06d783c64`, StyleChecks vs `origin/master`
+  pass **5/5**, `test_build_tools.py` passes **89/89**, `linux-gate-tests.zig`
+  passes **7/7**, and `owned-bytes.zig` passes **4/4**.
+- **Remaining platform/review boundary:** Post-review fixes (`193c95046..06d783c64`)
+  await Linux x64 re-verification and CI confirmation (`debug-static`
+  `check-native`, Linux `release-shared` `check_jit.py`, DBG `EmitBlock`/`EmitLoop`,
+  `_M_AMD64` `CrossSite` multi-value dispatch), alongside Linux sanitizers
+  (`ASan`/`TSan`/`UBSan`), local pinned Node `v22.22.3` matrix confirmation,
+  and Windows `INTL_WINGLOB` execution (Section 7).
 
 ---
 
@@ -193,30 +208,51 @@ verified on `modernize/baseline` (`c24266598`):
 | Unwinder `_LIBCPP_VERSION` proxy & non-Apple ARM/ARM64 FDE registration | `35152953b` (`lib/Common/PlatformAgnostic/AssemblyCommon.h`, `lib/Common/Memory/arm/XDataAllocator.cpp`, `lib/Common/Memory/arm64/XDataAllocator.{h,cpp}`) | Separated `__APPLE__` Mach-O (`mac_fde_wrapper`) from `!__APPLE__ && __ELF__` `CHAKRA_UNWINDER_SINGLE_FDE` CIE-to-FDE walk; gated non-Apple ARM64 `.xdata` registration under `CHAKRA_ARM64_DWARF_EH_FRAME`. |
 | Build, Backend link order, Linux parameterization, WASM manifest, & StyleChecks | `9d8d1817a`, `83ab4d28e`, `c24266598` (`build.zig`, `tools/build/*`, `.github/workflows/*`, `tools/StyleChecks/*`, `doc/evidence/gc-async-continuation/`) | Aligned Backend link order between `Jsrt.Core` and `Common`; parameterized `tools/build/linux.zig` + updated `zig-linux.yml`/`zig-macos.yml`; resynced `wasm-arm64-manifest.json` (`EXPECTED_P1_TOTAL=382`); relocated `evidence/gc-async-continuation/`; replaced BSD `grep -P` false-greens and closed all EOL/copyright/ASCII diffs (`5/5` green). |
 | ARM64 `-Dwasm=true` (`ENABLE_ASMJS`) inlining `IRBuilder` null `constTableContent` SIGSEGV | Stage 4 (`lib/Backend/Inline.cpp`, `test/es7/asmjs-inline-const.js`, `test/es7/rlexe.xml`, `tools/build/gate_counts.json`) | Changed `#ifdef ASMJS_PLAT` to `#ifdef ENABLE_ASMJS` in `Inline::BuildIRForInlinee` (`:1517`) and `Inline::InlineFunctionCommon` (`:4104`) so ARM64 `-Dwasm=true` builds use `IRBuilderAsmJs` and `GetAsmJsInfo()->GetArgCount()` instead of JS `IRBuilder::BuildConstantLoads()` on null `constTableContent` (which SIGSEGV'd `JetStream/bigfib.cpp.js` and `JetStream/container.cpp.js`). Added `asmjs-inline-const.js` (`2064/2116`). |
+| Linux bring-up static/WASM/Node-API & BigInt locale fixes | `81be961a1`, `42a38047c`, `552e98442`, `29230a5b7` (`Lower.cpp`, `JavascriptOperators.cpp`, `WasmByteCodeGenerator.cpp`, `Intl.js`, `JavascriptBigInt.cpp`, `tsfn_teardown_stress.cpp`, `tools/build/*`) | Added Linux `debug-static` JIT helper instantiations & ICU links; fixed LIFO temp release in `WasmByteCodeGenerator.cpp` & `BailOnNotArray`; updated `check_metadata_linux.py` (`234` exports on `release-shared` omitting 3 `JsPrivate*` APIs) and `check_regression_linux.py` (`2868/0` & `2330/0`); sampled destroy state before TSFN calls; routed `BigInt.prototype.toLocaleString` through Intl `NumberFormat` and normalized boxed BigInts from TypedArray reads. |
+| Post-review build/CI, GC probe, BigInt Intl, & WASM multi-value hardening | `193c95046`, `8b0b0e6a8`, `06d783c64` (`check_native.py`, `check_jit.py`, `zig-linux.yml`, `refs/wrap_probe.cpp`, `Intl*`, `ByteCodeCacheReleaseFileVersion.h`, `CrossSite.cpp`, `AsmJsUtils.cpp`, `WAsmjsUtils.cpp`, `WasmByteCodeGenerator.cpp`, `wasm-module-builder.js`) | Enforced `PLATFORM=`-aware `--whole-archive` in `check_native.py` and added `check-native` to Linux `debug-static` CI; ran Release `check_jit.py` default-flags execution on JIT-enabled builds; added `PROBE_NOINLINE_OPTNONE` stack-clearing isolation in GC probes (`211/211` & `219/219` at `-O3`); removed `HasNoSideEffect` on `JavascriptBigInt::ToLocaleString`, added `BigIntPrototype` OOM cleanup, Release `Count == 0` guard, null-proto `Intl.js` state, & rotated cache GUID (`e46b32c9-98ac-42cc-8058-8b9a64dc9e5c`); fixed `EmitBlock`/`EmitLoop` `m_writer = m_originalWriter` before `DefineLabel()`, `_M_AMD64` `CrossSite` multi-value dispatch, `GetWasmMultiRetBufSize` `PROBE_STACK_CALL`, `ShouldJitFunction` multi-value gate, and immediate-aware `addBody()`. |
 
 ---
 
 ## 5. Subsystem Test-Coverage Matrix
 
-All checks below were observed passing after the code changes on committed
-`HEAD` (`c24266598`), with Test262 refreshed in Stage 3B against the `c24266598`
-`zig-out/bin/ch` binary and StyleChecks re-verified after all Stage 3B doc edits:
+### 5.1 Mac ARM64 Matrix (`c24266598`, re-verified at `06d783c64`)
 
-| Subsystem / Profile | Command / Gate | Result (`c24266598`) | Scope & Notes |
+Core gates and post-review fixes were re-verified on `HEAD` (`06d783c64`,
+details in [b4-linux-run.md](b4-linux-run.md) §11); Test262 `refresh-2026-11-16`
+(`c24266598`) and `node-addon-api` / `REPEATS=5` stress / `cdjs` runs stand from
+the `c24266598` / Stage 4 baseline:
+
+| Subsystem / Profile | Command / Gate | Result (`06d783c64` / `c24266598`) | Scope & Notes |
 |---|---|---|---|
-| **Mac `test` profile** (shared, no-JIT) | `zig build check libChakraNodeApi ch-nodeapi check-nodeapi` | **PASS** | `check_regression` **2064/0**; `check-native` (`test-shared-basic` incl. Phase-3 JsRT tests; 8 static ignored); `check-smoke`; `check-metadata` (minos 26.0, 8 MiB stacks, 4 headers identical, 8 JsRT exports); `verify-bytecode`; `check-nodeapi` (`150` symbols); `check-selftest` |
-| **Mac `debug-static` profile** | `zig build -Dprofile=debug-static check` | **PASS** | `check_regression` **2116/0**; `check-native` **8/8** static suites PASS; `check-smoke`; `check-metadata` (minos 26.0, stacksize 0, `526` archive members); `verify-bytecode`; `check-selftest` |
-| **Mac `release-shared` profile** | `zig build -Dprofile=release-shared check ch-nodeapi` | **PASS** | `check-smoke`; `check-native` (`test-shared-basic`); `check-metadata`; `check-selftest`; builds `ch-nodeapi` |
-| **Mac `jit` + `wasm` profile** | `zig build -Dprofile=jit -Dwasm=true check check-wasm libChakraNodeApi ch-nodeapi check-nodeapi` | **PASS** | `check-jit` PASS; `check-wasm` **382/382 P1 PASS** (`runtests` `438` passed / `15` non-P1 failed of `483` manifest total); `verify-bytecode`; `check-smoke`; `check-nodeapi` (`150`) |
-| **GCStress bounded smoke** | 6s runs on `./zig-out/bin/GCStress` & `./out/jit/bin/GCStress` (default + `-js -ForceBlockingConcurrentCollect`) | **PASS** | Reached gen `73`, `0` failures (bounded smoke, not an unbounded overnight soak) |
-| **Node-API probes (`test` + `jit`)** | `SKIP_BUILD=1 tools/nodeapi/run_probe.sh` & all `18` `test/nodeapi/probes/run_*_probe.sh` | **ALL PASS (18/18)** | `BINARY_PROBE` `308/308` (incl. `BigInt64`/`BigUint64` + `Float16Array` error check); `run_host_async_probe` `4/4` |
-| **Node-API stress (`test` + `jit`)** | `SKIP_BUILD=1 REPEATS=5 sh test/nodeapi/stress/run_stress.sh` | **ALL PASS** | 5 repeats each on both profiles: `gc_churn` (`78/78`), `env_churn` (`1208/1208`), `tsfn_teardown` (`252/252`), `gc_hook` |
-| **Node-API JS conformance matrix** | `python3 test/nodeapi/run_matrix.py --verify-manifest && ... --suite all --host ch-nodeapi` | **PASS (`46/23/0`)** | `46` pass, `23` documented skip, `0` fail (`async_work_promise`, `async_work_thread_safe_function`, `test_typedarray` now pass) |
-| **node-addon-api differential matrix** | `python3 test/nodeapi/run_node_addon_api_matrix.py --hosts both` | **52/61/6 (expected)** | `node-direct` `29/0`; `ch-nodeapi` `23/6` (`typedarray*.js` pass; remaining `6` are PR-12 `test/object/*` V8 error text diffs) |
-| **`cdjs` benchmark (Mac ARM64 JIT)** | `tools/bench/run.py --binary out/jit/bin/ch --test cdjs --iterations 5` | **PASS (0 fail)** | `interp` `22.1` (MAD `0.0`), `simplejit` `12.4` (MAD `0.0`), `jit` `202.0` (MAD `2.0`); `KNOWN_ISSUES = []` |
-| **Build tooling, incremental, & Zig tests** | `test_build_tools.py`, `zig test tools/linux-gate-tests.zig`, `zig test doc/examples/owned-bytes.zig`, `test_incremental.py --quick` | **PASS** | `81/81` `test_build_tools.py`; `7/7` `linux-gate-tests.zig`; `4/4` `owned-bytes.zig`; `0 FAIL` incremental |
-| **Certified Test262 (`refresh-2026-11-16`)** | `python3 tools/test262/refresh_baseline.py --binary "$PWD/zig-out/bin/ch" --publish` | **97.75% edition** | Broad `79,569 / 13,572` of `93,141` (`85.43%`, `-1,170` vs `2026-11-05`); Edition `78,731 / 1,813` of `80,544` (`97.75%`, `-1,136` vs `77,595 / 2,949`, `0` regressions); `25/25` controls; `902` skips; `8,751` negatives |
-| **StyleChecks vs `origin/master`** | `check_style_portable.py --self-test` + `check_{eol,copyright,tabs,ascii}.sh` | **PASS (5/5 exit 0)** | Portable across macOS and Linux against `97e68c917` |
+| **Mac `test` profile** (shared, no-JIT) | `zig build check libChakraNodeApi ch-nodeapi check-nodeapi` (`06d783c64`) | **PASS** | `check_regression` **2064/0**; `check-native` (`test-shared-basic` incl. Phase-3 JsRT tests; 8 static ignored); `check-smoke`; `check-metadata` (minos 26.0, 8 MiB stacks, 4 headers identical, 8 JsRT exports); `verify-bytecode`; `check-nodeapi` (`150` symbols); `check-selftest`; `typedarray-oob-delete-and-bigint-locale.js` **10/10** |
+| **Mac `debug-static` profile** | `zig build -Dprofile=debug-static check` (`06d783c64`) | **PASS** | `check_regression` **2116/0**; `check-native` **8/8** static suites + `force_load` Makefile check PASS; `check-smoke`; `check-metadata` (minos 26.0, stacksize 0, `526` archive members); `verify-bytecode`; `check-selftest` |
+| **Mac `release-shared` profile** | `zig build -Dprofile=release-shared check ch-nodeapi` (`06d783c64`) | **PASS** | `check-smoke`; `check-native` (`test-shared-basic`); `check-metadata`; `check-selftest`; builds `ch-nodeapi` (`tables.zig:187` sets `-DDISABLE_JIT=1`, so standalone `check_jit.py` is inapplicable on macOS) |
+| **Mac `jit` + `wasm` profile** | `zig build -Dprofile=jit -Dwasm=true check check-wasm libChakraNodeApi ch-nodeapi check-nodeapi` (`06d783c64`) | **PASS** | `check-jit` PASS; `check-wasm` **382/382 P1 PASS** (`runtests` `448` passed / `5` non-P1 failed); `verify-bytecode`; `check-smoke`; `check-nodeapi` (`150`); `typedarray-oob-delete-and-bigint-locale.js` **10/10**; `polyinline.js` PASS |
+| **GCStress bounded smoke** | 6s runs on `./zig-out/bin/GCStress` & `./out/jit/bin/GCStress` (`c24266598`) | **PASS** | Reached gen `73`, `0` failures (bounded smoke, not an unbounded overnight soak) |
+| **Node-API probes (`test` + `jit`)** | `tools/nodeapi/run_probe.sh` & `test/nodeapi/probes/run_*_probe.sh` | **ALL PASS** | At `06d783c64` (`-O3`): `refs_probe` **211/211**, `wrap_probe` **219/219**, `host_async_probe` **ALL PASS**; `18/18` suite (`BINARY_PROBE` `308/308`) at `c24266598` |
+| **Node-API stress (`test` + `jit`)** | `SKIP_BUILD=1 REPEATS=5 sh test/nodeapi/stress/run_stress.sh` (`c24266598`) | **ALL PASS** | 5 repeats each on both profiles: `gc_churn` (`78/78`), `env_churn` (`1208/1208`), `tsfn_teardown` (`252/252`), `gc_hook` |
+| **Node-API JS conformance matrix** | `python3 test/nodeapi/run_matrix.py` (`06d783c64`) | **PASS (`46/23/0`)** | `46` pass, `23` documented skip, `0` fail (`darwin-arm64`, `ch-nodeapi`) |
+| **node-addon-api differential matrix** | `python3 test/nodeapi/run_node_addon_api_matrix.py --hosts both` (`c24266598`) | **52/61/6 (expected)** | `node-direct` `29/0`; `ch-nodeapi` `23/6` (`typedarray*.js` pass; remaining `6` are PR-12 `test/object/*` V8 error text diffs) |
+| **`cdjs` benchmark (Mac ARM64 JIT)** | `tools/bench/run.py --binary out/jit/bin/ch --test cdjs --iterations 5` (Stage 4) | **PASS (0 fail)** | `interp` `22.1` (MAD `0.0`), `simplejit` `12.4` (MAD `0.0`), `jit` `202.0` (MAD `2.0`); `KNOWN_ISSUES = []` |
+| **Build tooling, incremental, & Zig tests** | `test_build_tools.py`, `zig test tools/linux-gate-tests.zig`, `zig test doc/examples/owned-bytes.zig` (`06d783c64`) | **PASS** | **89/89** `test_build_tools.py`; **7/7** `linux-gate-tests.zig`; **4/4** `owned-bytes.zig`; `0 FAIL` incremental (`c24266598`) |
+| **Certified Test262 (`refresh-2026-11-16`)** | `python3 tools/test262/refresh_baseline.py --binary "$PWD/zig-out/bin/ch" --publish` (`c24266598`) | **97.75% edition** | Broad `79,569 / 13,572` of `93,141` (`85.43%`, `-1,170` vs `2026-11-05`); Edition `78,731 / 1,813` of `80,544` (`97.75%`, `-1,136` vs `77,595 / 2,949`, `0` regressions); `25/25` controls; `902` skips; `8,751` negatives |
+| **StyleChecks vs `origin/master`** | `check_style_portable.py --self-test` + `check_{eol,copyright,tabs,ascii}.sh` (`06d783c64`) | **PASS (5/5 exit 0)** | Portable across macOS and Linux |
+
+### 5.2 Linux x64 Verified Matrix (`81be961a1..c639e9f02`)
+
+Executed natively on Ubuntu 24.04.5 x86_64 (`glibc 2.39`, `ICU 74.2`, Zig `0.17.0`)
+and confirmed on hosted GitHub Actions (`c639e9f02`); post-review commits
+`193c95046..06d783c64` await the next Linux x64 run:
+
+| Subsystem / Profile | Result (`81be961a1..c639e9f02`) | Scope & Notes |
+|---|---|---|
+| **Linux `test` profile** | **PASS** | `check-regression` **2868/0** interpreted & **2330/0** dynapogo (`AsyncSuspendedResume.js` enabled); `check-smoke`/`metadata` (`237` exports)/`jit`/`native`/`bytecode` PASS |
+| **Linux `-Djit=false` & `release-shared`** | **PASS** | `-Djit=false` PASS; `release-shared` smoke/metadata/native PASS (`234` exports omitting 3 `JsPrivate*` debug APIs; JIT runtime check re-enabled for JIT release builds in `193c95046`) |
+| **Linux `debug-static` profile** | **PASS** | `check-smoke`/`metadata`/`bytecode`/`native` (`8/8` static suites) PASS + debug WASM **66/66** (zero assertions) |
+| **Linux Node-API (`NAPI_VERSION=8`)** | **PASS (Node caveat)** | `18/18` probes, `5x` stress, `run_matrix.py` **46/23/0**, `run_node_addon_api_matrix.py` **52/61/6**; local host ran Node `v26.12.1` vs pinned `v22.22.3` (`nodeapi` CI leg green) |
+| **Certified Test262 (`refresh-2026-11-17`)** | **97.45% edition** | At `29230a5b7`: Edition **78,491 / 2,053** (`97.45%`); Broad **79,329 / 13,812** (`85.17%`); **+6** broad passes vs initial Linux run |
+| **Linux Benchmarks (`tools/bench/run.py`)** | **65/65 JIT; 54/55 Interp** | JIT 5 iters: **65/65** PASS (`gcc-loops` & asm.js C++ included); Interp 1 iter (`120 s`): **54/55** (`Octane/zlib` `593` at `300 s`; JetStream omitted; JSONs not committed) |
+| **Hosted GitHub Actions CI** | **ALL GREEN (`c639e9f02`)** | `zig-linux` [`44054742113`](https://github.com/amscotti/ChakraCore/actions/runs/44054742113) & `zig-macos` [`44054742259`](https://github.com/amscotti/ChakraCore/actions/runs/44054742259) green |
 
 ---
 
@@ -272,75 +308,67 @@ unverified claims. Known boundaries at `c24266598`:
    classified in `disabled-flag` under frozen `edition-policy.json` plus `16`
    `host` `Atomics/{notify,wait,waitAsync}` as `10 SIGKILL` + `6 Test timed out`).
 6. **Sanitizers, Full GCStress, Perf Gate, and Build/Tooling Leftovers:**
-   - Mac Zig profiles do not yet offer ASan/TSan/UBSan or `FAULT_INJECTION`
-     configs (`build.zig` omits sanitizer profiles and disables UBSan on
-     `debug-static`).
-   - Concurrent/full GC verification beyond the 6s bounded `GCStress` smoke,
-     targeted `WeakRef`/`FinalizationRegistry` stress, and `cdjs` runs remains
-     outside current automated CI.
+   - Neither Mac `build.zig` nor Linux `tools/build/linux.zig` offers
+     ASan/TSan/UBSan or `FAULT_INJECTION` configs yet (`debug-static` disables
+     UBSan, and `zig c++` compiles `-fsanitize=address` without linking the
+     ASan runtime), so Phase 5 Linux sanitizers remain **not run**.
+   - Concurrent/full GC verification beyond the 6s Mac `GCStress` smoke,
+     300s timeout-bounded Linux `GCStress` run (`rc=124`), targeted
+     `WeakRef`/`FinalizationRegistry` stress, and `cdjs` runs remains outside
+     current automated CI.
    - One pre-existing load-only fulljit crasher (`open-cards.md`) stays open
      (the 109-test `LowerNewClassConstructor` SIGSEGV family was closed by e14).
    - Stage 4 observed an intermittent `1/5` `rc=-11` (SIGSEGV) on
      `Octane/earley-boyer.js` run #4 of the pre-fix `c24266598` JIT benchmark
-     run (no `.ips` crash file generated; `15/15` subsequent standalone runs
-     on `c24266598` and `10/10` post-`Inline.cpp`-fix standalone runs passed,
-     while `lldb` process launch timed out under the macOS sandbox). Tracked in
-     [open-cards.md](open-cards.md).
-   - No formal multi-benchmark perf regression gate beyond `cdjs` 5x checks.
+     run (`15/15` standalone runs on `c24266598` and `10/10` post-`Inline.cpp`-fix
+     standalone runs passed; dedicated 30x Linux JIT stress + 50x
+     `class-private-methods.js` checks remain open).
+   - No formal multi-benchmark perf regression gate beyond `cdjs` 5x checks, and
+     Linux benchmark JSONs (`tools/bench/results/linux-x64-*.json`) are not yet
+     committed.
    - `CMakeLists.txt` does not build `lib/NodeApi` or `tools/nodeapi/ch-nodeapi`;
      `tools/RecyclerChecker/` (10 files, CMake-only) stays orphaned from Zig/CI;
-     `test/DebuggerCommon/AsyncSuspendedResume.js` stays `exclude_linux` pending
-     Linux dynamic debugger attach.
+     `tools/build/linux.zig` lacks a `check-wasm` step; and `test/DebuggerCommon/AsyncSuspendedResume.js`
+     now runs on Linux (`exclude_linux` removed in B4 D1, `2868/0` passing).
 
 ---
 
-## 7. Step-by-Step Linux x64 Bring-Up Readiness Checklist
+## 7. Linux x64 Bring-Up Status & Remaining Hand-Off Items
 
-For the complete Linux transfer procedure (build overrides, B4 D1-D4 handoff,
-Linux regression re-pin, Node-API Linux verification, sanitizers, Test262, and
-CI verification), see [linux-handoff.md](linux-handoff.md).
+Phases 1–4 and Phase 6 of [linux-handoff.md](linux-handoff.md) have been
+executed natively on `x86_64-linux-gnu` (`81be961a1..c639e9f02`) and confirmed
+in hosted GitHub Actions (`zig-linux` [`44054742113`](https://github.com/amscotti/ChakraCore/actions/runs/44054742113),
+`zig-macos` [`44054742259`](https://github.com/amscotti/ChakraCore/actions/runs/44054742259)):
+`test` (**2868/0** interpreted, **2330/0** dynapogo), `-Djit=false` PASS,
+`release-shared` (`234` exports vs `237` on `test`), `debug-static` (`8/8` static
+native + `66/66` debug WASM), Node-API `18/18` probes + `5x` stress + `46/23/0`
+& `52/61/6`, certified Test262 `refresh-2026-11-17` (**78,491 / 2,053** = **97.45%**
+edition / **79,329 / 13,812** = **85.17%** broad), and benchmarks (**65/65** JIT;
+**54/55** Interp at `120 s` / `Octane/zlib` `593` at `300 s`).
 
-Linux build parameterization and CI definitions (`tools/build/linux.zig`,
-`tools/build/check_metadata_linux.py`, `.github/workflows/zig-linux.yml`) are
-committed and locally validated (`81/81` `test_build_tools.py`, `7/7`
-`tools/linux-gate-tests.zig`), awaiting native `x86_64-linux-gnu` execution
-and hosted CI confirmation:
+Remaining Linux / Windows closure items as of `06d783c64`:
 
-1. **Pre-flight on native `x86_64-linux-gnu`:**
-   - Provision `zig 0.17.0` (`mise.toml`), `libicu-dev`, `binutils`, `clang`,
-     `make`, `python3` (defaults: `-Dglibc=2.39 -Dicu-major=74`; override
-     `-Dglibc`/`-Dicu-major` or explicit ICU paths if off Ubuntu 24.04).
-   - Run StyleChecks (`python3 tools/StyleChecks/check_style_portable.py --self-test`
-     + `check_{eol,copyright,tabs,ascii}.sh` vs `origin/master`),
-     `python3 tools/build/check_metadata_linux.py --self-test`,
-     `zig test tools/linux-gate-tests.zig` (`7/7`), and
-     `python3 tools/build/test_build_tools.py` (`81/81`).
-2. **Default `test` profile (`mise exec -- zig build && zig build check`):**
-   - Confirm `95/95` PAL tests, `check-selftest`, `check-smoke`, `check-jit`,
-     `check-native` (shared + Phase-3 JsRT tests), `check-metadata` (`237` `.so`
-     exports / `669` archive members on baseline pin), and `verify-bytecode`.
-   - Re-verify post-D1-D4 Linux runtime stability (`AsyncSuspendedResume.js` /
-     `AsyncSuspendedDetach.js` `20-30x`, `test/wasm/deferred-invalid-body.js`,
-     `WasmSpec/jsapi`, and A3 helper arg-order on x64).
-   - Update `RECORDED_BASELINE` in `tools/build/check_regression_linux.py`
-     from `2841/0` (interpreted) & `2305/0` (dynapogo) only after green native
-     runs; diff `linux_exports_{so,ch}.txt` if comparing against CMake artifacts.
-3. **Variant matrix (`.github/workflows/zig-linux.yml` `zig-variants`):**
-   - `-Djit=false`: `check-smoke`, `check-metadata`, `verify-bytecode`, `check-native`.
-   - `-Dprofile=release-shared`: `check-smoke`, `check-metadata`, `check-jit`, `check-native`.
-   - `-Dprofile=debug-static -Doptimize=debug`: `check-smoke`, `check-metadata`,
-     `verify-bytecode`, static `check-native`, and `runtests.py --debug --variants=interpreted test/wasm`.
-4. **Node-API Linux stack (`zig build libChakraNodeApi ch-nodeapi check-nodeapi`):**
-   - Verify `150` ELF dynamic symbols (`check-nodeapi`).
-   - Run `SKIP_BUILD=1 tools/nodeapi/run_probe.sh` and all `18/18`
-     `SKIP_BUILD=1 test/nodeapi/probes/run_*.sh`.
-   - Run `SKIP_BUILD=1 REPEATS=5 sh test/nodeapi/stress/run_stress.sh`.
-   - Run `python3 test/nodeapi/run_matrix.py --suite all --host ch-nodeapi` and
-     `python3 test/nodeapi/run_node_addon_api_matrix.py --hosts ch-nodeapi`
-     (confirming `0` unexpected failures outside the `6` `test/object/*` diffs).
-5. **Certified Linux Test262 & Hosted GitHub Actions Confirmation:**
-   - Run `python3 tools/test262/refresh_baseline.py --binary "$PWD/zig-out/bin/ch" --jobs 8`
-     on the Linux proof host to supersede the pre-D1-D4 `77,354/3,190` Linux
-     snapshot ([b4-linux-run.md](b4-linux-run.md)).
-   - Trigger and observe first green hosted GitHub Actions runs on both
-     `.github/workflows/zig-linux.yml` and `.github/workflows/zig-macos.yml`.
+1. **Linux x64 & CI re-verification of post-review fixes (`193c95046..06d783c64`):**
+   - Confirm hosted CI `debug-static` `check-native` (`.github/workflows/zig-linux.yml:149`),
+     `check_native.py` Linux `--whole-archive` check, and `check_jit.py`
+     Release default-flags execution on Linux `release-shared`.
+   - Re-verify `refs_probe`/`wrap_probe` (`PROBE_NOINLINE_OPTNONE` at `-O3`),
+     `typedarray-oob-delete-and-bigint-locale.js` (`8b0b0e6a8`), DBG
+     `EmitBlock`/`EmitLoop` `MarkAsmJsLabel` assert check, and `_M_AMD64`
+     `CrossSite` multi-value runtime dispatch (`06d783c64`) on Linux x64.
+   - Verify Windows `INTL_WINGLOB` runtime path for `8b0b0e6a8` on the B6 Windows port.
+2. **Linux sanitizer lane (`ASan`/`TSan`/`UBSan`):**
+   - Wire system `clang++` (or explicit sanitizer runtime linkage) in
+     `tools/build/linux.zig` because `zig c++` lacks a bundled ASan runtime, then
+     execute Phase 5 sanitizer checks across Node-API, `check-native`, `S6e`,
+     and `GCStress`.
+3. **Pinned Node `v22.22.3` local matrix confirmation:**
+   - Re-run local Linux `run_matrix.py` / `run_node_addon_api_matrix.py` against
+     pinned Node `v22.22.3` (receipt `c639e9f02` ran locally against `v26.12.1`;
+     hosted CI `nodeapi` leg passed).
+4. **Benchmarks, flake stress & tooling parity:**
+   - Capture and commit `tools/bench/results/linux-x64-{jit,interp}.json`, run
+     `Octane/earley-boyer.js` 30x (JIT) and `test/es7/class-private-methods.js`
+     50x, complete an unbounded `GCStress` matrix, optionally diff
+     `linux_exports_{so,ch}.txt` against a legacy CMake build, and consider
+     wiring `check-wasm` in `tools/build/linux.zig`.
