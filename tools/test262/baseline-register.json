@@ -135,6 +135,26 @@
         "scenarios": 80544
       },
       "evidence": "doc/b4-linux-run.md"
+    },
+    {
+      "id": "refresh-2026-11-17",
+      "date": "2026-11-17",
+      "engine_commit": "bc450f994f885cf17dc1b066fd2a07b86a15fff6",
+      "binary_sha256": "fb6d703eaaec2c9ca8bb7fe90e3a7ef1541c63eec63de5ca7fb2c4602d7aefad",
+      "engine_dylib_sha256": "115057879523ddc0622315dd6424327090d51924b40e307ac9273c297f661527",
+      "results_dir": "out/test262-refresh-20261117",
+      "results_retained": true,
+      "broad": {
+        "passed": 80486,
+        "failed": 12655,
+        "scenarios": 93141
+      },
+      "edition_selected": {
+        "passed": 79648,
+        "failed": 896,
+        "scenarios": 80544
+      },
+      "evidence": "doc/e12-testing-quality.md"
     }
   ]
 }
