@@ -728,13 +728,12 @@ namespace Js
         const PropertyRecord* propertyRecord = scriptContext->GetPropertyName(propertyId);
         if (propertyRecord->IsNumeric())
         {
-            this->DirectSetItem(propertyRecord->GetNumericValue(), value);
-            return true;
+            return this->DirectSetItem(propertyRecord->GetNumericValue(), value);
         }
 
         if (!propertyRecord->IsSymbol() && CanonicalNumericIndexString(propertyId, scriptContext))
         {
-            return FALSE;
+            return this->DirectSetItemNoSet(0, value);
         }
         else
         {
@@ -750,7 +749,7 @@ namespace Js
         ScriptContext *requestContext = GetScriptContext();
         if (CanonicalNumericIndexString(propertyNameString, requestContext))
         {
-            return FALSE; // Integer-index exotic object should not set property that is canonical numeric index string but came to this overload
+            return this->DirectSetItemNoSet(0, value);
         }
 
         return DynamicObject::SetProperty(propertyNameString, value, flags, info);
@@ -778,15 +777,9 @@ namespace Js
 
     DescriptorFlags TypedArrayBase::GetItemSetter(uint32 index, Var* setterValue, ScriptContext* requestContext)
     {
-#if ENABLE_COPYONACCESS_ARRAY
-        JavascriptLibrary::CheckAndConvertCopyOnAccessNativeIntArray<Var>(this);
-#endif
-        if (index >= this->GetLength())
-        {
-            return None_NoProto;
-        }
-
-        return __super::GetItemSetter(index, setterValue, requestContext);
+        // Integer-indexed exotic objects own all canonical numeric keys and
+        // never consult prototype setters (ES2025 10.4.5.5 [[Set]]).
+        return None_NoProto;
     }
 
     BOOL TypedArrayBase::GetEnumerator(JavascriptStaticEnumerator * enumerator, EnumeratorFlags flags, ScriptContext* requestContext, EnumeratorCache * enumeratorCache)
@@ -808,17 +801,7 @@ namespace Js
             return false;
         }
 
-        // BigInt element stores perform ToBigInt even when the index is out
-        // of bounds or the view is detached; the conversion and its side
-        // effects are observable (IntegerIndexedElementSet). Other element
-        // types keep the existing early-out optimization.
-        if (flags == PropertyOperation_None && index >= GetLength() && !IsBigIntElementType())
-        {
-            return false;
-        }
-
-        DirectSetItem(index, value);
-        return true;
+        return DirectSetItem(index, value);
     }
 
     BOOL TypedArrayBase::IsEnumerable(PropertyId propertyId)
@@ -836,7 +819,9 @@ namespace Js
         uint32 index = 0;
         if (GetScriptContext()->IsNumericPropertyId(propertyId, &index))
         {
-            return false;
+            // ES2020+/ES2025 10.4.5.1 TypedArrayGetOwnProperty: integer indices
+            // are configurable: true except on immutable-buffer views.
+            return !IsImmutableBuffer(GetArrayBuffer());
         }
         return DynamicObject::IsConfigurable(propertyId);
     }
@@ -903,13 +888,12 @@ namespace Js
         ScriptContext* scriptContext = GetScriptContext();
         uint32 index;
 
-        // default is not configurable
         if (scriptContext->IsNumericPropertyId(propertyId, &index))
         {
-            if (value)
+            if (IsImmutableBuffer(GetArrayBuffer()) ? value : !value)
             {
-            JavascriptError::ThrowTypeError(scriptContext, JSERR_DefineProperty_NotConfigurable,
-                scriptContext->GetThreadContext()->GetPropertyName(propertyId)->GetBuffer());
+                JavascriptError::ThrowTypeError(scriptContext, JSERR_DefineProperty_NotConfigurable,
+                    scriptContext->GetThreadContext()->GetPropertyName(propertyId)->GetBuffer());
             }
             return true;
         }
@@ -972,11 +956,29 @@ namespace Js
 
     BOOL TypedArrayBase::IsObjectArrayFrozen()
     {
-        if (GetLength() > 0)
+        if (GetLength() > 0 && !IsImmutableBuffer(GetArrayBuffer()))
         {
-            return false; // the backing buffer is always modifiable
+            return false; // the backing buffer is modifiable
         }
-        return IsSealed();
+        return __super::IsSealed();
+    }
+
+    BOOL TypedArrayBase::IsSealed()
+    {
+        if (GetLength() > 0 && !IsImmutableBuffer(GetArrayBuffer()))
+        {
+            return false;
+        }
+        return __super::IsSealed();
+    }
+
+    BOOL TypedArrayBase::IsFrozen()
+    {
+        if (GetLength() > 0 && !IsImmutableBuffer(GetArrayBuffer()))
+        {
+            return false;
+        }
+        return __super::IsFrozen();
     }
 
     BOOL TypedArrayBase::Is(TypeId typeId)
@@ -1547,7 +1549,10 @@ namespace Js
         Assert(!(callInfo.Flags & CallFlags_New));
 
         TypedArrayBase* typedArrayBase = ValidateTypedArray(args, scriptContext, _u("[TypedArray].prototype.toLocaleString"));
-        return JavascriptArray::ToLocaleString(static_cast<RecyclableObject*>(typedArrayBase), scriptContext);
+        Var locales = nullptr;
+        Var options = nullptr;
+        JavascriptArray::GetToLocaleStringArgs(args, scriptContext, &locales, &options);
+        return JavascriptArray::ToLocaleString(static_cast<RecyclableObject*>(typedArrayBase), scriptContext, locales, options);
     }
 
     // %TypedArray%.from as described in ES6.0 (draft 22) Section 22.2.2.1

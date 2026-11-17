@@ -681,12 +681,12 @@ CommonNumber:
         JIT_HELPER_END(Op_ConvString);
     }
 
-    JavascriptString *JavascriptConversion::ToLocaleString(Var aValue, ScriptContext* scriptContext)
+    JavascriptString *JavascriptConversion::ToLocaleString(Var aValue, ScriptContext* scriptContext, Var locales /* = nullptr */, Var options /* = nullptr */)
     {
         // Array.prototype.toLocaleString step 10.a / %TypedArray%.prototype.
         // toLocaleString: each element contributes ToString(Invoke(element,
-        // "toLocaleString")). The method is resolved through the element's
-        // prototype chain, so the primitive formatters
+        // "toLocaleString", << locales, options >>)). The method is resolved
+        // through the element's prototype chain, so the primitive formatters
         // (Number/Boolean/Symbol/BigInt.prototype.toLocaleString) are
         // user-observable and an override that throws propagates; the direct
         // primitive formatting this function used to perform skipped that
@@ -715,6 +715,11 @@ CommonNumber:
                     RecyclableObject* toLocaleStringFunction = VarTo<RecyclableObject>(value);
                     Var aResult = scriptContext->GetThreadContext()->ExecuteImplicitCall(toLocaleStringFunction, Js::ImplicitCall_ToPrimitive, [=]()->Js::Var
                     {
+                        if (locales != nullptr)
+                        {
+                            Var resolvedOptions = options != nullptr ? options : scriptContext->GetLibrary()->GetUndefined();
+                            return CALL_FUNCTION(scriptContext->GetThreadContext(), toLocaleStringFunction, CallInfo(CallFlags_Value, 3), aValue, locales, resolvedOptions);
+                        }
                         return CALL_FUNCTION(scriptContext->GetThreadContext(), toLocaleStringFunction, CallInfo(1), aValue);
                     });
                     if (VarIs<JavascriptString>(aResult))

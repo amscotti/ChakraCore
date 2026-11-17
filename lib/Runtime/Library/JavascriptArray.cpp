@@ -4514,16 +4514,21 @@ using namespace Js;
 
         // 23.1.3.18 Array.prototype.join step 2 reads `length` BEFORE the
         // separator ToString (step 4). The separator conversion can run user
-        // code that resizes a TypedArray's buffer or re-shapes an array-like,
-        // so the generic (non-Array) receiver path must capture the length
-        // first. The Array fast path reads its own segment lengths and cannot
-        // observe this ordering.
+        // code that resizes a TypedArray's buffer, changes an Array's own
+        // `.length`, or re-shapes an array-like, so capture the length before
+        // converting `separator`.
         int64 capturedLength = -1;
-        JavascriptArray* fastArray = JavascriptArray::TryVarToNonES5Array(args[0]);
-        if (!(fastArray != nullptr && fastArray->GetScriptContext() == scriptContext) &&
-            VarIs<RecyclableObject>(args[0]))
+        if (VarIs<RecyclableObject>(args[0]))
         {
-            JS_REENTRANT(jsReentLock, capturedLength = (int64)JavascriptArray::OP_GetLength(args[0], scriptContext));
+            JavascriptArray* fastArray = JavascriptArray::TryVarToNonES5Array(args[0]);
+            if (fastArray != nullptr && fastArray->GetScriptContext() == scriptContext)
+            {
+                capturedLength = static_cast<int64>(fastArray->GetLength());
+            }
+            else
+            {
+                JS_REENTRANT(jsReentLock, capturedLength = (int64)JavascriptArray::OP_GetLength(args[0], scriptContext));
+            }
         }
 
         JavascriptString* separator;
@@ -4616,13 +4621,13 @@ using namespace Js;
                 switch (arr->GetTypeId())
                 {
                 case Js::TypeIds_Array:
-                    JS_REENTRANT(jsReentLock, res = JoinArrayHelper(arr, separator, scriptContext));
+                    JS_REENTRANT(jsReentLock, res = JoinArrayHelper(arr, separator, scriptContext, capturedLength));
                     break;
                 case Js::TypeIds_NativeIntArray:
-                    JS_REENTRANT(jsReentLock, res = JoinArrayHelper(UnsafeVarTo<JavascriptNativeIntArray>(arr), separator, scriptContext));
+                    JS_REENTRANT(jsReentLock, res = JoinArrayHelper(UnsafeVarTo<JavascriptNativeIntArray>(arr), separator, scriptContext, capturedLength));
                     break;
                 case Js::TypeIds_NativeFloatArray:
-                    JS_REENTRANT(jsReentLock, res = JoinArrayHelper(UnsafeVarTo<JavascriptNativeFloatArray>(arr), separator, scriptContext));
+                    JS_REENTRANT(jsReentLock, res = JoinArrayHelper(UnsafeVarTo<JavascriptNativeFloatArray>(arr), separator, scriptContext, capturedLength));
                     break;
                 }
 
@@ -4660,13 +4665,13 @@ using namespace Js;
     static const charcount_t Join_MaxEstimatedAppendCount = static_cast<charcount_t>((64 << 20) / sizeof(void *)); // 64 MB worth of pointers
 
     template <typename T>
-    JavascriptString* JavascriptArray::JoinArrayHelper(T * arr, JavascriptString* separator, ScriptContext* scriptContext)
+    JavascriptString* JavascriptArray::JoinArrayHelper(T * arr, JavascriptString* separator, ScriptContext* scriptContext, int64 capturedLength /* = -1 */)
     {
         JS_REENTRANCY_LOCK(jsReentLock, scriptContext->GetThreadContext());
         SETOBJECT_FOR_MUTATION(jsReentLock, arr);
 
         Assert(VirtualTableInfo<T>::HasVirtualTable(arr) || VirtualTableInfo<CrossSiteObject<T>>::HasVirtualTable(arr));
-        const uint32 arrLength = arr->length;
+        const uint32 arrLength = (capturedLength >= 0) ? static_cast<uint32>(capturedLength) : arr->length;
         switch(arrLength)
         {
             default:
@@ -5642,6 +5647,7 @@ Case0:
 
                 if (!(DynamicObject::IsAnyArray(protoObj) || JavascriptOperators::IsObject(protoObj))
                     || VarIs<JavascriptProxy>(protoObj)
+                    || VarIs<TypedArrayBase>(protoObj)
                     || protoObj->IsExternal())
                 {
                     hasAnyES5Array = true;
@@ -7938,6 +7944,21 @@ Case0:
         return pNewObj;
     }
 
+    void JavascriptArray::GetToLocaleStringArgs(Arguments const& args, ScriptContext* scriptContext, Var* locales, Var* options)
+    {
+#ifdef ENABLE_INTL_OBJECT
+        if (CONFIG_FLAG(IntlBuiltIns) && scriptContext->IsIntlEnabled())
+        {
+            Var undef = scriptContext->GetLibrary()->GetUndefined();
+            *locales = args.Info.Count > 1 ? args[1] : undef;
+            *options = args.Info.Count > 2 ? args[2] : undef;
+            return;
+        }
+#endif
+        *locales = nullptr;
+        *options = nullptr;
+    }
+
     Var JavascriptArray::EntryToLocaleString(RecyclableObject* function, CallInfo callInfo, ...)
     {
         PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
@@ -7954,10 +7975,14 @@ Case0:
             JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NeedObject, _u("Array.prototype.toLocaleString"));
         }
 
+        Var locales = nullptr;
+        Var options = nullptr;
+        GetToLocaleStringArgs(args, scriptContext, &locales, &options);
+
         if (JavascriptArray::IsDirectAccessArray(args[0]))
         {
             JavascriptArray* arr = UnsafeVarTo<JavascriptArray>(args[0]);
-            JS_REENTRANT_UNLOCK(jsReentLock, return ToLocaleString(arr, scriptContext));
+            JS_REENTRANT_UNLOCK(jsReentLock, return ToLocaleString(arr, scriptContext, locales, options));
         }
         else
         {
@@ -7971,7 +7996,7 @@ Case0:
             {
                 JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NullOrUndefined, _u("Array.prototype.toLocaleString"));
             }
-            JS_REENTRANT_UNLOCK(jsReentLock, return ToLocaleString(obj, scriptContext));
+            JS_REENTRANT_UNLOCK(jsReentLock, return ToLocaleString(obj, scriptContext, locales, options));
         }
     }
 
@@ -8078,6 +8103,7 @@ Case0:
         uint32 unshiftElements = args.Info.Count - 1;
 
         JS_REENTRANT(jsReentLock, BigIndex length = OP_GetLength(dynamicObject, scriptContext));
+        ThrowTypeErrorOnFailureHelper h(scriptContext, _u("Array.prototype.unshift"));
         if (unshiftElements > 0)
         {
             // ES2025 23.1.3.37 Array.prototype.unshift, step 4.a: if
@@ -8114,11 +8140,10 @@ Case0:
             for (uint32 i = 0; i < unshiftElements; i++)
             {
                 JS_REENTRANT(jsReentLock,
-                    JavascriptOperators::SetItem(dynamicObject, dynamicObject, i, args[i + 1], scriptContext, PropertyOperation_ThrowIfNotExtensible, true));
+                    h.ThrowTypeErrorOnFailure(
+                        JavascriptOperators::SetItem(dynamicObject, dynamicObject, i, args[i + 1], scriptContext, PropertyOperation_ThrowIfNotExtensible)));
             }
         }
-
-        ThrowTypeErrorOnFailureHelper h(scriptContext, _u("Array.prototype.unshift"));
 
         //ES6 - update 'length' even if unshiftElements == 0;
         BigIndex newLen = length + unshiftElements;
@@ -8402,7 +8427,7 @@ Case0:
 #endif
 
     template <typename T>
-    JavascriptString* JavascriptArray::ToLocaleString(T* arr, ScriptContext* scriptContext)
+    JavascriptString* JavascriptArray::ToLocaleString(T* arr, ScriptContext* scriptContext, Var locales /* = nullptr */, Var options /* = nullptr */)
     {
         JS_REENTRANCY_LOCK(jsReentLock, scriptContext->GetThreadContext());
         SETOBJECT_FOR_MUTATION(jsReentLock, arr);
@@ -8437,7 +8462,7 @@ Case0:
             JS_REENTRANT(jsReentLock, BOOL gotItem = ItemTrace<T>::GetItem(arr, 0, &element, scriptContext));
             if (gotItem)
             {
-                JS_REENTRANT(jsReentLock, res = JavascriptArray::ToLocaleStringHelper(element, scriptContext));
+                JS_REENTRANT(jsReentLock, res = JavascriptArray::ToLocaleStringHelper(element, scriptContext, locales, options));
             }
 
             if (length > 1)
@@ -8464,7 +8489,7 @@ Case0:
                     JS_REENTRANT(jsReentLock, gotItem = ItemTrace<T>::GetItem(arr, i, &element, scriptContext));
                     if (gotItem)
                     {
-                        JS_REENTRANT(jsReentLock, res = JavascriptString::Concat(res, JavascriptArray::ToLocaleStringHelper(element, scriptContext)));
+                        JS_REENTRANT(jsReentLock, res = JavascriptString::Concat(res, JavascriptArray::ToLocaleStringHelper(element, scriptContext, locales, options)));
                     }
                 }
             }
@@ -11254,7 +11279,7 @@ Case0:
         return newObj;
     }
 
-    JavascriptString* JavascriptArray::ToLocaleStringHelper(Var value, ScriptContext* scriptContext)
+    JavascriptString* JavascriptArray::ToLocaleStringHelper(Var value, ScriptContext* scriptContext, Var locales /* = nullptr */, Var options /* = nullptr */)
     {
         TypeId typeId = JavascriptOperators::GetTypeId(value);
         if (typeId <= TypeIds_UndefinedOrNull)
@@ -11263,7 +11288,7 @@ Case0:
         }
         else
         {
-            return JavascriptConversion::ToLocaleString(value, scriptContext);
+            return JavascriptConversion::ToLocaleString(value, scriptContext, locales, options);
         }
     }
 

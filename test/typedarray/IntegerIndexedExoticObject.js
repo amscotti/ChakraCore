@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 
@@ -147,7 +148,8 @@ var tests = [
 
                     assert.areEqual(false, Reflect.has(a, prop), TA.name+" "+prop+" Reflect.has(a, prop)");
                     assert.areEqual(false, Reflect.defineProperty(a, prop, {value: 100, configurable: false, enumerable: true, writable: true}), TA.name+" "+prop+" Reflect.defineProperty");
-                    assert.areEqual(false, Reflect.set(a, prop), TA.name+" "+prop+" Reflect.set(a, prop)");
+                    // ES2025 10.4.5.5 [[Set]] -> TypedArraySetElement returns true for canonical numeric index writes without consulting prototype
+                    assert.areEqual(true, Reflect.set(a, prop), TA.name+" "+prop+" Reflect.set(a, prop)");
                     assert.areEqual(false, Reflect.hasOwnProperty(a, prop), TA.name+" "+prop+" Reflect.hasOwnProperty(a, prop)");
 
                     delete taProto[prop];

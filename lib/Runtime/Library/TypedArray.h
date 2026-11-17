@@ -249,6 +249,8 @@ namespace Js
         // objectArray support
         virtual BOOL SetItemWithAttributes(uint32 index, Var value, PropertyAttributes attributes) override;
         virtual BOOL IsObjectArrayFrozen() override;
+        virtual BOOL IsSealed() override;
+        virtual BOOL IsFrozen() override;
 
         Var FindMinOrMax(Js::ScriptContext * scriptContext, TypeId typeId, bool findMax);
         template<typename T, bool checkNaNAndNegZero> Var FindMinOrMax(Js::ScriptContext * scriptContext, bool findMax);
@@ -556,7 +558,9 @@ namespace Js
 
             if (index >= GetLength())
             {
-                return FALSE;
+                // IntegerIndexedElementSet returns a normal completion after
+                // running the observable value conversion above.
+                return TRUE;
             }
 
             AssertMsg(index < GetLength(), "Trying to set out of bound index for typed array.");
@@ -589,7 +593,9 @@ namespace Js
 
             if (index >= GetLength())
             {
-                return FALSE;
+                // IntegerIndexedElementSet returns a normal completion after
+                // running the observable value conversion above.
+                return TRUE;
             }
 
             Assert((index + 1)* sizeof(TypeName) + GetByteOffset() <= GetArrayBuffer()->GetByteLength());
@@ -598,23 +604,33 @@ namespace Js
             return TRUE;
         }
 
+        // Invalid canonical numeric indexes still run the observable
+        // ToBigInt / ToNumber conversion, then perform no store and return TRUE
+        // (unless backed by an immutable buffer).
         inline BOOL BaseTypedBigIntDirectSetItemNoSet(_In_ uint32 index, _In_ Js::Var value, TypeName (*convFunc)(Var value, ScriptContext* scriptContext))
         {
-            // Invalid canonical numeric indexes still run the observable
-            // ToBigInt conversion, then perform no store.
+            if (IsImmutableBuffer(GetArrayBuffer()))
+            {
+                return FALSE;
+            }
             convFunc(value, GetScriptContext());
-            return FALSE;
+            return TRUE;
         }
 
         inline BOOL BaseTypedDirectSetItemNoSet(_In_ uint32 index, _In_ Js::Var value, TypeName (*convFunc)(Var value, ScriptContext* scriptContext))
         {
+            if (IsImmutableBuffer(GetArrayBuffer()))
+            {
+                return FALSE;
+            }
+
             // This call can potentially invoke user code, and may end up detaching the underlying array (this).
             // Therefore it was brought out and above the IsDetached check
             convFunc(value, GetScriptContext());
 
             // The conversion above is observable; the store itself is skipped
-            // (OOB or detached index) without throwing.
-            return FALSE;
+            // (invalid canonical numeric index) with normal completion.
+            return TRUE;
         }
 
         inline BOOL BaseTypedDirectSetItemNoDetachCheck(_In_ uint32 index, _In_ Js::Var value, TypeName(*convFunc)(Var value, ScriptContext* scriptContext))

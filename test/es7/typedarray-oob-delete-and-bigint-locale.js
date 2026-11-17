@@ -285,6 +285,225 @@ var tests = [
                     "direct EntryToLocaleString ExecuteImplicitCall rejects non-BigInt at iter " + i);
             }
         }
+    },
+    {
+        name: "Array and TypedArray toLocaleString(locales, options) forwarding and warmed JIT bailout",
+        body: function () {
+            const optsBoth = { minimumIntegerDigits: 4, maximumSignificantDigits: 3 };
+            const optsMin4 = { minimumIntegerDigits: 4 };
+
+            assert.areEqual("1.230", [1234.5].toLocaleString("de-DE", optsBoth), "Array de-DE both options");
+            assert.areEqual("1.234,5,0.042", [1234.5, 42].toLocaleString("de-DE", optsMin4), "Array de-DE minimumIntegerDigits");
+            assert.areEqual("1.234,0.042", new Int32Array([1234, 42]).toLocaleString("de-DE", optsMin4), "Int32Array de-DE minimumIntegerDigits");
+            assert.areEqual("1.230", new Int32Array([1234]).toLocaleString("de-DE", optsBoth), "Int32Array de-DE both options");
+            assert.areEqual("123.456,-0.007", new BigInt64Array([123456n, -7n]).toLocaleString("de-DE", optsMin4), "BigInt64Array de-DE minimumIntegerDigits");
+            assert.areEqual("123.000", new BigInt64Array([123456n]).toLocaleString("de-DE", optsBoth), "BigInt64Array de-DE both options");
+            assert.areEqual("", [].toLocaleString("invalid-locale"), "empty Array skips invalid locale check");
+            assert.areEqual("", new Int32Array(0).toLocaleString("invalid-locale"), "empty TypedArray skips invalid locale check");
+
+            const observed = [];
+            const customArr = [
+                1234.5,
+                {
+                    toLocaleString(loc, opt) {
+                        observed.push([arguments.length, loc, opt]);
+                        return loc + ":" + opt.minimumIntegerDigits + "/" + opt.maximumSignificantDigits;
+                    }
+                }
+            ];
+            assert.areEqual("1.230,de-DE:4/3", customArr.toLocaleString("de-DE", optsBoth), "Array forwards locales and options to element");
+            assert.areEqual(2, observed[0][0], "Array element receives 2 arguments");
+            assert.areEqual("de-DE", observed[0][1], "Array element receives locales");
+            assert.areEqual(optsBoth, observed[0][2], "Array element receives options");
+
+            const argCountDefault = [{ toLocaleString() { return String(arguments.length); } }].toLocaleString();
+            assert.areEqual("2", argCountDefault, "ECMA-402 passes (undefined, undefined) when omitted");
+
+            // Warmed JIT bailout check on Array.prototype.toLocaleString & Int32Array.prototype.toLocaleString
+            const holder = { marker: 11, trigger: false };
+            const jitArr = [
+                {
+                    toLocaleString(loc, opt) {
+                        if (holder.trigger) {
+                            holder.marker = 444;
+                        }
+                        return (12345).toLocaleString(loc, opt);
+                    }
+                },
+                42
+            ];
+            const taSource = new Int32Array([12345, 42]);
+            const biSource = new BigInt64Array([123456n, -7n]);
+
+            function runLocaleWarm(arr, ta, bi, s) {
+                const before = s.marker;
+                const aOut = arr.toLocaleString("de-DE", optsMin4);
+                const tOut = ta.toLocaleString("de-DE", optsMin4);
+                const bOut = bi.toLocaleString("de-DE", optsMin4);
+                const after = s.marker;
+                return { before: before, after: after, aOut: aOut, tOut: tOut, bOut: bOut };
+            }
+
+            for (let i = 0; i < 400; i++) {
+                holder.trigger = (i === 190);
+                const res = runLocaleWarm(jitArr, taSource, biSource, holder);
+                const expBefore = i <= 190 ? 11 : 444;
+                const expAfter = i < 190 ? 11 : 444;
+                assert.areEqual("12.345,0.042", res.aOut, "Array warmed toLocaleString output at iter " + i);
+                assert.areEqual("12.345,0.042", res.tOut, "Int32Array warmed toLocaleString output at iter " + i);
+                assert.areEqual("123.456,-0.007", res.bOut, "BigInt64Array warmed toLocaleString output at iter " + i);
+                assert.areEqual(expBefore, res.before, "pre-call marker at iter " + i);
+                assert.areEqual(expAfter, res.after, "post-call marker at iter " + i);
+            }
+        }
+    },
+    {
+        name: "TypedArray descriptors, Set / Reflect.set, prototype bypass, and integrity checks",
+        body: function () {
+            const ta = new Int32Array([10, 20]);
+            const desc = Object.getOwnPropertyDescriptor(ta, 0);
+            assert.isTrue(desc.configurable, "valid index descriptor is configurable");
+            assert.isTrue(desc.writable, "valid index descriptor is writable");
+            assert.isTrue(desc.enumerable, "valid index descriptor is enumerable");
+            assert.areEqual(10, desc.value, "valid index descriptor value");
+            assert.isFalse(Reflect.defineProperty(ta, 0, { configurable: false }), "cannot make index non-configurable");
+
+            const taNonExt = new Int32Array([1]);
+            Object.preventExtensions(taNonExt);
+            assert.isFalse(Object.isExtensible(taNonExt), "preventExtensions succeeds");
+            assert.isFalse(Object.isSealed(taNonExt), "non-empty TypedArray is not sealed");
+            assert.isFalse(Object.isFrozen(taNonExt), "non-empty TypedArray is not frozen");
+
+            const taEmpty = new Int32Array(0);
+            Object.preventExtensions(taEmpty);
+            assert.isTrue(Object.isSealed(taEmpty), "empty non-extensible TypedArray is sealed");
+            assert.isTrue(Object.isFrozen(taEmpty), "empty non-extensible TypedArray is frozen");
+
+            const immTa = new Int32Array(new ArrayBuffer(8).transferToImmutable());
+            assert.isFalse(Object.getOwnPropertyDescriptor(immTa, 0).configurable, "immutable view index remains non-configurable");
+
+            let seCalls = 0;
+            const sideEffect = { valueOf() { seCalls++; return 99; } };
+
+            assert.isTrue(Reflect.set(ta, 5, sideEffect), "Reflect.set OOB same receiver returns true");
+            assert.areEqual(1, seCalls, "Reflect.set OOB evaluates ToNumber(V)");
+            assert.isTrue(Reflect.set(ta, "-0", sideEffect), "Reflect.set '-0' returns true");
+            assert.areEqual(2, seCalls, "Reflect.set '-0' evaluates ToNumber(V)");
+            assert.isTrue(Reflect.set(ta, "1.1", sideEffect), "Reflect.set '1.1' returns true");
+            assert.areEqual(3, seCalls, "Reflect.set '1.1' evaluates ToNumber(V)");
+            assert.isTrue(Reflect.set(ta, "NaN", sideEffect), "Reflect.set 'NaN' returns true");
+            assert.areEqual(4, seCalls, "Reflect.set 'NaN' evaluates ToNumber(V)");
+            assert.isTrue(Reflect.set(ta, "Infinity", sideEffect), "Reflect.set 'Infinity' returns true");
+            assert.areEqual(5, seCalls, "Reflect.set 'Infinity' evaluates ToNumber(V)");
+            assert.isTrue(Reflect.set(ta, "-1", sideEffect), "Reflect.set '-1' returns true");
+            assert.areEqual(6, seCalls, "Reflect.set '-1' evaluates ToNumber(V)");
+            assert.isTrue(Reflect.set(ta, new String("-0"), sideEffect), "Reflect.set new String('-0') returns true");
+            assert.areEqual(7, seCalls, "Reflect.set new String('-0') evaluates ToNumber(V)");
+
+            (function () {
+                "use strict";
+                const before = seCalls;
+                ta[5] = sideEffect;
+                ta["-0"] = sideEffect;
+                ta["1.1"] = sideEffect;
+                ta["NaN"] = sideEffect;
+                ta[new String("-0")] = sideEffect;
+                assert.areEqual(5, seCalls - before, "strict mode canonical numeric writes run side effects without throwing");
+            })();
+
+            // BigInt64Array OOB / canonical numeric index value conversion
+            const bi = new BigInt64Array([1n, 2n]);
+            let biCalls = 0;
+            const biSideEffect = { valueOf() { biCalls++; return 7n; } };
+            assert.isTrue(Reflect.set(bi, 5, biSideEffect), "BigInt64Array OOB returns true after ToBigInt");
+            assert.areEqual(1, biCalls, "BigInt64Array OOB converts value");
+            assert.isTrue(Reflect.set(bi, "-0", biSideEffect), "BigInt64Array '-0' returns true after ToBigInt");
+            assert.areEqual(2, biCalls, "BigInt64Array '-0' converts value");
+            assert.throws(function () { Reflect.set(bi, 5, 1); }, TypeError, "BigInt64Array OOB number throws TypeError");
+
+            // ES2025 10.4.5.5 [[Set]] step 1.b.ii: distinct receiver
+            const recvOob = {};
+            const beforeDistinct = seCalls;
+            assert.isTrue(Reflect.set(ta, 5, sideEffect, recvOob), "distinct receiver OOB returns true");
+            assert.isTrue(Reflect.set(ta, "-0", sideEffect, recvOob), "distinct receiver '-0' returns true");
+            assert.isTrue(Reflect.set(ta, "1.1", sideEffect, recvOob), "distinct receiver '1.1' returns true");
+            assert.isTrue(Reflect.set(bi, 5, 1, recvOob), "distinct receiver OOB BigInt skips ToBigInt");
+            assert.areEqual(beforeDistinct, seCalls, "distinct receiver invalid index skips ToNumber(V)");
+            assert.isFalse(Object.prototype.hasOwnProperty.call(recvOob, "5"), "distinct receiver OOB does not create property");
+            assert.isFalse(Object.prototype.hasOwnProperty.call(recvOob, "-0"), "distinct receiver '-0' does not create property");
+
+            const recvValid = {};
+            assert.isTrue(Reflect.set(ta, 0, "hello", recvValid), "distinct receiver valid index defines property on receiver");
+            assert.areEqual("hello", recvValid[0], "distinct receiver gets raw value");
+            assert.areEqual(10, ta[0], "TypedArray target unmodified when receiver differs");
+
+            const recvAcc = {};
+            Object.defineProperty(recvAcc, 0, { set() { throw new Error("setter must not run"); } });
+            assert.isFalse(Reflect.set(ta, 0, 123, recvAcc), "distinct receiver with accessor returns false");
+            assert.isFalse(Reflect.set(ta, 0, 123, 42), "distinct primitive receiver returns false");
+
+            // Prototype indexed setters must never be triggered by TypedArray [[Set]]
+            let protoSetCalls = 0;
+            try {
+                Object.defineProperty(Int32Array.prototype, 0, { set() { protoSetCalls++; }, configurable: true });
+                Object.defineProperty(Int32Array.prototype, 5, { set() { protoSetCalls++; }, configurable: true });
+                ta[0] = 55;
+                ta[5] = 66;
+                assert.isTrue(Reflect.set(ta, 0, 56));
+                assert.isTrue(Reflect.set(ta, 5, 67));
+                assert.areEqual(0, protoSetCalls, "TypedArray [[Set]] bypasses prototype setters");
+                assert.areEqual(56, ta[0], "in-bounds write updated element directly");
+            } finally {
+                delete Int32Array.prototype[0];
+                delete Int32Array.prototype[5];
+            }
+        }
+    },
+    {
+        name: "Array.prototype.unshift prototype setter and Array.prototype.join length capture",
+        body: function () {
+            let unshiftSetterLog = "";
+            try {
+                Object.defineProperty(Array.prototype, 0, {
+                    set(v) { unshiftSetterLog += "set0=" + v + ";"; },
+                    configurable: true
+                });
+                const a = [];
+                assert.areEqual(1, a.unshift(42), "unshift returns new length");
+                assert.areEqual("set0=42;", unshiftSetterLog, "unshift triggers Array.prototype[0] setter");
+                assert.isFalse(Object.prototype.hasOwnProperty.call(a, 0), "setter intercepted property creation");
+            } finally {
+                delete Array.prototype[0];
+            }
+
+            try {
+                Object.defineProperty(Array.prototype, 0, {
+                    get() { return 99; },
+                    configurable: true
+                });
+                assert.throws(function () { [].unshift(42); }, TypeError, "unshift throws on getter-only prototype[0]");
+            } finally {
+                delete Array.prototype[0];
+            }
+
+            try {
+                Object.defineProperty(Array.prototype, 0, {
+                    value: 99,
+                    writable: false,
+                    configurable: true
+                });
+                assert.throws(function () { [].unshift(42); }, TypeError, "unshift throws on non-writable prototype[0]");
+            } finally {
+                delete Array.prototype[0];
+            }
+
+            const j0 = [1, 2, 3];
+            assert.areEqual("..", j0.join({ toString() { j0.length = 0; return "."; } }), "join captures length before ToString(separator) when shrunk to 0");
+            const j1 = [1, 2, 3];
+            assert.areEqual("1..", j1.join({ toString() { j1.length = 1; return "."; } }), "join captures length before ToString(separator) when shrunk to 1");
+            const j2 = [];
+            assert.areEqual("", j2.join({ toString() { j2.push(8, 9); return "."; } }), "join captures length before ToString(separator) when grown");
+        }
     }
 ];
 

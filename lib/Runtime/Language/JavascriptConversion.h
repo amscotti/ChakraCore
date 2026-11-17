@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #pragma once
@@ -27,7 +28,7 @@ namespace Js {
         static BOOL PropertyQueryFlagsToBoolean(PropertyQueryFlags val) { return val == PropertyQueryFlags::Property_Found; }
 
         static JavascriptString* ToString(Var aValue, ScriptContext* scriptContext);
-        static JavascriptString* ToLocaleString(Var aValue, ScriptContext* scriptContext);
+        static JavascriptString* ToLocaleString(Var aValue, ScriptContext* scriptContext, Var locales = nullptr, Var options = nullptr);
 
         static BOOL ToObject(Var aValue, ScriptContext* scriptContext, RecyclableObject** object);
 

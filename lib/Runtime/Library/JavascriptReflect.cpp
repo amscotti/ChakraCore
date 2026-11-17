@@ -317,6 +317,93 @@ namespace Js
         Var value = args.Info.Count > 3 ? args[3] : undefinedValue;
         Var receiver = args.Info.Count > 4 ? args[4] : target;
 
+        TypedArrayBase* typedArray = JavascriptOperators::TryFromVar<TypedArrayBase>(target);
+        if (typedArray != nullptr && typedArray->GetTypeId() <= TypeIds_Uint64Array)
+        {
+            const PropertyRecord* propertyRecord = nullptr;
+            Var keyVar = JavascriptConversion::ToPropertyKey(propertyKey, scriptContext, &propertyRecord, nullptr);
+            BOOL result = FALSE;
+            if (!propertyRecord->IsSymbol())
+            {
+                double numericIndex = 0.0;
+                JavascriptString* keyStr = VarTo<JavascriptString>(keyVar);
+                if (JavascriptConversion::CanonicalNumericIndexString(keyStr, &numericIndex, scriptContext))
+                {
+                    // ES2025 10.4.5.5 TypedArray [[Set]] ( P, V, Receiver )
+                    if (target == receiver)
+                    {
+                        if (IsImmutableBuffer(typedArray->GetArrayBuffer()))
+                        {
+                            result = FALSE;
+                        }
+                        else if (propertyRecord->IsNumeric())
+                        {
+                            result = typedArray->DirectSetItem(propertyRecord->GetNumericValue(), value);
+                        }
+                        else
+                        {
+                            result = typedArray->DirectSetItemNoSet(0, value);
+                        }
+                    }
+                    else
+                    {
+                        bool isValid = !typedArray->IsDetachedBuffer()
+                            && !JavascriptNumber::IsNegZero(numericIndex)
+                            && propertyRecord->IsNumeric()
+                            && propertyRecord->GetNumericValue() < typedArray->GetLength();
+                        if (!isValid)
+                        {
+                            // Step 1.b.ii: !IsValidIntegerIndex returns true without converting V.
+                            result = TRUE;
+                        }
+                        else if (IsImmutableBuffer(typedArray->GetArrayBuffer()))
+                        {
+                            // Immutable buffer index descriptors have [[Writable]]: false.
+                            result = FALSE;
+                        }
+                        else if (!JavascriptOperators::IsObject(receiver))
+                        {
+                            result = FALSE;
+                        }
+                        else
+                        {
+                            RecyclableObject* receiverObj = VarTo<RecyclableObject>(receiver);
+                            PropertyId propId = propertyRecord->GetPropertyId();
+                            PropertyDescriptor existingDescriptor;
+                            if (JavascriptOperators::GetOwnPropertyDescriptor(receiverObj, propId, scriptContext, &existingDescriptor))
+                            {
+                                if (existingDescriptor.IsAccessorDescriptor()
+                                    || !existingDescriptor.WritableSpecified()
+                                    || !existingDescriptor.IsWritable())
+                                {
+                                    result = FALSE;
+                                }
+                                else
+                                {
+                                    PropertyDescriptor valueDesc;
+                                    valueDesc.SetValue(value);
+                                    result = JavascriptObject::DefineOwnPropertyHelper(receiverObj, propId, valueDesc, scriptContext, false);
+                                }
+                            }
+                            else
+                            {
+                                PropertyDescriptor createDesc;
+                                createDesc.SetValue(value);
+                                createDesc.SetWritable(true);
+                                createDesc.SetEnumerable(true);
+                                createDesc.SetConfigurable(true);
+                                result = JavascriptObject::DefineOwnPropertyHelper(receiverObj, propId, createDesc, scriptContext, false);
+                            }
+                        }
+                    }
+                    return scriptContext->GetLibrary()->GetTrueOrFalse(result);
+                }
+            }
+            // Non-numeric key: pass pre-converted keyVar so ToPropertyKey runs only once.
+            result = JavascriptOperators::SetElementIHelper(receiver, typedArray, keyVar, value, scriptContext, PropertyOperationFlags::PropertyOperation_None);
+            return scriptContext->GetLibrary()->GetTrueOrFalse(result);
+        }
+
         target = JavascriptOperators::ToObject(target, scriptContext);
         BOOL result = JavascriptOperators::SetElementIHelper(receiver, VarTo<RecyclableObject>(target), propertyKey, value, scriptContext, PropertyOperationFlags::PropertyOperation_None);
         return scriptContext->GetLibrary()->GetTrueOrFalse(result);

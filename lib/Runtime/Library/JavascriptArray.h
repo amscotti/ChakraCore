@@ -615,7 +615,7 @@ namespace Js
         static JavascriptString* JoinToString(Var value, ScriptContext* scriptContext);
         static JavascriptString* JoinHelper(Var thisArg, JavascriptString* separatorStr, ScriptContext* scriptContext, int64 capturedLength = -1);
         template <typename T>
-        static JavascriptString* JoinArrayHelper(T * arr, JavascriptString* separatorStr, ScriptContext* scriptContext);
+        static JavascriptString* JoinArrayHelper(T * arr, JavascriptString* separatorStr, ScriptContext* scriptContext, int64 capturedLength = -1);
         static JavascriptString* JoinOtherHelper(RecyclableObject *object, JavascriptString* separatorStr, ScriptContext* scriptContext, int64 capturedLength = -1);
 
         template <bool includesAlgorithm>
@@ -636,7 +636,7 @@ namespace Js
         template<typename T>
         static RecyclableObject* ObjectSpliceHelper(RecyclableObject* pObj, T len, T start, T deleteLen,
                                                     Var* insertArgs, uint32 insertLen, ScriptContext *scriptContext, RecyclableObject* pNewObj = nullptr);
-        static JavascriptString* ToLocaleStringHelper(Var value, ScriptContext* scriptContext);
+        static JavascriptString* ToLocaleStringHelper(Var value, ScriptContext* scriptContext, Var locales = nullptr, Var options = nullptr);
         static Js::JavascriptArray* CreateNewArrayHelper(uint32 len, bool isIntArray, bool isFloatArray, Js::JavascriptArray *baseArray, ScriptContext* scriptContext);
 
         static Var TryArraySplice(JavascriptArray* pArr, uint32 start, uint32 len, uint32 deleteLen,
@@ -920,8 +920,10 @@ namespace Js
             static BOOL GetItem(T* obj, uint32 index, Var* outVal, ScriptContext* scriptContext);
         };
 
+        static void GetToLocaleStringArgs(Arguments const& args, ScriptContext* scriptContext, Var* locales, Var* options);
+
         template <typename T>
-        static JavascriptString* ToLocaleString(T* obj, ScriptContext* scriptContext);
+        static JavascriptString* ToLocaleString(T* obj, ScriptContext* scriptContext, Var locales = nullptr, Var options = nullptr);
 
     public:
         static uint32 GetOffsetOfArrayFlags() { return offsetof(JavascriptArray, arrayFlags); }
