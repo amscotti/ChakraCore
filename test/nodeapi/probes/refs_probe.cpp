@@ -36,6 +36,23 @@
 
 namespace {
 
+#if defined(__clang__)
+#define PROBE_NOINLINE_OPTNONE __attribute__((noinline, optnone))
+#elif defined(__GNUC__)
+#define PROBE_NOINLINE_OPTNONE __attribute__((noinline, optimize("O0")))
+#else
+#define PROBE_NOINLINE_OPTNONE
+#endif
+
+template <typename T>
+inline void ClearDeadRef(T& ref, T invalid_val) {
+  volatile T* slot = &ref;
+  *slot = invalid_val;
+#if defined(__clang__) || defined(__GNUC__)
+  __asm__ volatile("" : : "r"(slot) : "memory");
+#endif
+}
+
 int g_total = 0;
 int g_pass = 0;
 
@@ -114,8 +131,8 @@ void collect(JsRuntimeHandle rt) {
  * then close (releasing the slot) and re-assert. Naive repeated gets
  * without close would accumulate in the default scope until destroy
  * (unbounded); the probe always bounds them with close. */
-__attribute__((noinline)) void ClearStack() {
-  constexpr int kN = 256;
+PROBE_NOINLINE_OPTNONE void ClearStack() {
+  constexpr int kN = 512;
   volatile void* dummy[kN];
   volatile unsigned char* bp =
       reinterpret_cast<volatile unsigned char*>(dummy);
@@ -123,18 +140,19 @@ __attribute__((noinline)) void ClearStack() {
              sizeof(dummy)) {
     *bp++ = 0;
   }
+#if defined(__clang__) || defined(__GNUC__)
+  __asm__ volatile("" : : "r"(dummy) : "memory");
+#endif
 }
 
 void force_gc(JsRuntimeHandle rt) {
   for (int i = 0; i < 10; i++) collect(rt);
 }
 
-/* HIGH-4 probe (task 4a): get in inner scope -> close inner scope ->
- * value collected (root released) while the weak ref stays alive.
- * optnone + ClearStack per the scopes probe (conservative scan). */
-__attribute__((noinline, optnone)) void Probe_ScopeCloseCollect(
-    napi_env env, JsRuntimeHandle rt, size_t baseline) {
-  std::fprintf(stdout, "-- case scope-close-collects --\n");
+/* Isolate weak ref + inner-scope get + close inside a popped optnone frame
+ * so no dead JsValueRef/napi_value survives in caller registers/stack. */
+PROBE_NOINLINE_OPTNONE napi_ref CreateWeakInScopeAndClose(
+    napi_env env, size_t baseline) {
   JsValueRef obj = make_object_assert();
   napi_ref ref = nullptr;
   expect_status(napi_create_reference(env, reinterpret_cast<napi_value>(obj), 0, &ref),
@@ -154,11 +172,22 @@ __attribute__((noinline, optnone)) void Probe_ScopeCloseCollect(
                 "scopcol: close inner releases root");
   expect(chakra_nodeapi_test_root_count(env) == baseline + 1,
          "scopcol: after close (handle only)");
+  ClearDeadRef(got, static_cast<napi_value>(nullptr));
+  ClearDeadRef(obj, JS_INVALID_REFERENCE);
+  return ref;
+}
+
+/* HIGH-4 probe (task 4a): get in inner scope -> close inner scope ->
+ * value collected (root released) while the weak ref stays alive.
+ * optnone + ClearStack per the scopes probe (conservative scan). */
+PROBE_NOINLINE_OPTNONE void Probe_ScopeCloseCollect(
+    napi_env env, JsRuntimeHandle rt, size_t baseline) {
+  std::fprintf(stdout, "-- case scope-close-collects --\n");
+  napi_ref ref = CreateWeakInScopeAndClose(env, baseline);
   /* The weak referent's only root was the scope root (now released).
-   * Drop every native slot holding it, then GC: it must collect while
+   * Every native local holding it lived in the popped optnone frame;
+   * ClearStack zeroes that frame before GC so it must collect while
    * the weak ref itself stays alive. */
-  got = nullptr;
-  obj = JS_INVALID_REFERENCE;
   ClearStack();
   force_gc(rt);
   napi_handle_scope check = nullptr;
@@ -185,7 +214,7 @@ __attribute__((noinline, optnone)) void Probe_ScopeCloseCollect(
  * level. Strong nesting proves per-level counter release; weak nesting
  * proves per-level collection (inner's object collects after inner
  * close while outer's object stays alive via outer's root). */
-__attribute__((noinline, optnone)) void Probe_NestedScopeGets(
+PROBE_NOINLINE_OPTNONE void Probe_NestedScopeGets(
     napi_env env, JsRuntimeHandle rt, size_t baseline) {
   std::fprintf(stdout, "-- case nested-scope-gets --\n");
   /* ---- Strong nesting: counter per level ---- */
@@ -279,12 +308,12 @@ __attribute__((noinline, optnone)) void Probe_NestedScopeGets(
      * roots): afterwards outer's root is the sole holder for a, nothing
      * holds b. Pointer-equality for a is therefore checked by non-null
      * below (saved copies would keep a alive and mask a missing root). */
-    gotB = nullptr;
-    b = JS_INVALID_REFERENCE;
-    savedB = 0;
-    gotA = nullptr;
-    a = JS_INVALID_REFERENCE;
-    savedA = 0;
+    ClearDeadRef(gotB, static_cast<napi_value>(nullptr));
+    ClearDeadRef(b, JS_INVALID_REFERENCE);
+    ClearDeadRef(savedB, std::uintptr_t{0});
+    ClearDeadRef(gotA, static_cast<napi_value>(nullptr));
+    ClearDeadRef(a, JS_INVALID_REFERENCE);
+    ClearDeadRef(savedA, std::uintptr_t{0});
     ClearStack();
     force_gc(rt);
     napi_handle_scope t1 = nullptr;
@@ -319,9 +348,9 @@ __attribute__((noinline, optnone)) void Probe_NestedScopeGets(
            "nested-weak: handles only after outer close");
     /* Drop every native slot for a (gotA/a/savedA already nulled before
      * the first GC; wa_check from the t2 check still holds it). */
-    gotA = nullptr;
-    a = JS_INVALID_REFERENCE;
-    wa_check = nullptr;
+    ClearDeadRef(gotA, static_cast<napi_value>(nullptr));
+    ClearDeadRef(a, JS_INVALID_REFERENCE);
+    ClearDeadRef(wa_check, static_cast<napi_value>(nullptr));
     ClearStack();
     force_gc(rt);
     napi_handle_scope t3 = nullptr;
@@ -340,6 +369,83 @@ __attribute__((noinline, optnone)) void Probe_NestedScopeGets(
            "nested-weak: counter at baseline");
   }
   (void)rt;
+}
+
+PROBE_NOINLINE_OPTNONE napi_ref CreateUnrefToZeroAndDrop(
+    napi_env env, size_t baseline) {
+  JsValueRef obj = make_object_assert();
+  napi_ref ref = nullptr;
+  expect_status(napi_create_reference(env, reinterpret_cast<napi_value>(obj), 1, &ref),
+                napi_ok, "weak: create (strong)");
+  ClearDeadRef(obj, JS_INVALID_REFERENCE);
+  uint32_t rc = 12345;
+  expect_status(napi_reference_unref(env, ref, &rc), napi_ok, "weak: unref to 0");
+  expect(rc == 0, "weak: unref reports 0");
+  expect(chakra_nodeapi_test_root_count(env) == baseline + 1,
+         "weak: handle root still counted at 0");
+  return ref;
+}
+
+PROBE_NOINLINE_OPTNONE void Probe_WeakCollects(
+    napi_env env, JsRuntimeHandle rt, size_t baseline) {
+  std::fprintf(stdout, "-- case weak-collects --\n");
+  napi_ref ref = CreateUnrefToZeroAndDrop(env, baseline);
+  ClearStack();
+  force_gc(rt);
+  napi_value sentinel =
+      reinterpret_cast<napi_value>(static_cast<std::uintptr_t>(0xdeadbeef));
+  napi_value got = sentinel;
+  expect_status(napi_get_reference_value(env, ref, &got), napi_ok,
+                "weak: get on collected");
+  expect(got == nullptr, "weak: collected get is ok+null (sentinel overwritten)");
+  uint32_t rc2 = 999;
+  expect_status(napi_reference_ref(env, ref, &rc2), napi_invalid_arg,
+                "weak: ref on collected is invalid_arg");
+  expect_status(napi_delete_reference(env, ref), napi_ok, "weak: delete");
+  expect(chakra_nodeapi_test_root_count(env) == baseline,
+         "weak: counter back to baseline after delete");
+}
+
+PROBE_NOINLINE_OPTNONE napi_ref CreateWeakFromBirthAndCheckLive(
+    napi_env env, size_t baseline) {
+  JsValueRef obj = make_object_assert();
+  napi_ref ref = nullptr;
+  expect_status(napi_create_reference(env, reinterpret_cast<napi_value>(obj), 0, &ref),
+                napi_ok, "weak0: create (weak)");
+  expect(chakra_nodeapi_test_root_count(env) == baseline + 1,
+         "weak0: handle root counted");
+  /* Referent still live: get returns it (and scope-roots it). */
+  napi_value got = nullptr;
+  napi_handle_scope live_scope = nullptr;
+  expect_status(napi_open_handle_scope(env, &live_scope), napi_ok,
+                "weak0: open scope for live get");
+  expect_status(napi_get_reference_value(env, ref, &got), napi_ok,
+                "weak0: get while live");
+  expect(got != nullptr, "weak0: live get non-null");
+  expect_status(napi_close_handle_scope(env, live_scope), napi_ok,
+                "weak0: close releases scope root");
+  /* Drop every native JsValueRef slot holding the referent before returning
+   * from this optnone frame so -O3 DCE/callee-saved registers in the caller
+   * cannot retain a dead pointer across ClearStack() + force_gc(). */
+  ClearDeadRef(got, static_cast<napi_value>(nullptr));
+  ClearDeadRef(obj, JS_INVALID_REFERENCE);
+  return ref;
+}
+
+PROBE_NOINLINE_OPTNONE void Probe_WeakFromBirth(
+    napi_env env, JsRuntimeHandle rt, size_t baseline) {
+  std::fprintf(stdout, "-- case weak-from-birth --\n");
+  napi_ref ref = CreateWeakFromBirthAndCheckLive(env, baseline);
+  ClearStack();
+  force_gc(rt);
+  napi_value got2 =
+      reinterpret_cast<napi_value>(static_cast<std::uintptr_t>(0xdeadbeef));
+  expect_status(napi_get_reference_value(env, ref, &got2), napi_ok,
+                "weak0: get after collect");
+  expect(got2 == nullptr, "weak0: collected get is ok+null");
+  expect_status(napi_delete_reference(env, ref), napi_ok, "weak0: delete");
+  expect(chakra_nodeapi_test_root_count(env) == baseline,
+         "weak0: counter back to baseline after delete");
 }
 
 } /* namespace */
@@ -433,67 +539,10 @@ int main() {
   }
 
   /* ---- 2. Unref-to-0, collect, get => ok+null; ref-on-collected ---- */
-  {
-    std::fprintf(stdout, "-- case weak-collects --\n");
-    JsValueRef obj = make_object_assert();
-    napi_ref ref = nullptr;
-    expect_status(napi_create_reference(env, reinterpret_cast<napi_value>(obj), 1, &ref),
-                  napi_ok, "weak: create (strong)");
-    obj = JS_INVALID_REFERENCE;
-    uint32_t rc = 12345;
-    expect_status(napi_reference_unref(env, ref, &rc), napi_ok, "weak: unref to 0");
-    expect(rc == 0, "weak: unref reports 0");
-    expect(chakra_nodeapi_test_root_count(env) == baseline + 1,
-           "weak: handle root still counted at 0");
-    collect(rt);
-    napi_value sentinel = reinterpret_cast<napi_value>(static_cast<std::uintptr_t>(0xdeadbeef));
-    napi_value got = sentinel;
-    expect_status(napi_get_reference_value(env, ref, &got), napi_ok,
-                  "weak: get on collected");
-    expect(got == nullptr, "weak: collected get is ok+null (sentinel overwritten)");
-    uint32_t rc2 = 999;
-    expect_status(napi_reference_ref(env, ref, &rc2), napi_invalid_arg,
-                  "weak: ref on collected is invalid_arg");
-    expect_status(napi_delete_reference(env, ref), napi_ok, "weak: delete");
-    expect(chakra_nodeapi_test_root_count(env) == baseline,
-           "weak: counter back to baseline after delete");
-  }
+  Probe_WeakCollects(env, rt, baseline);
 
   /* ---- 3. Weak from birth collects (P3-2 equivalent) ---- */
-  {
-    std::fprintf(stdout, "-- case weak-from-birth --\n");
-    JsValueRef obj = make_object_assert();
-    napi_ref ref = nullptr;
-    expect_status(napi_create_reference(env, reinterpret_cast<napi_value>(obj), 0, &ref),
-                  napi_ok, "weak0: create (weak)");
-    expect(chakra_nodeapi_test_root_count(env) == baseline + 1,
-           "weak0: handle root counted");
-    /* Referent still live: get returns it (and scope-roots it). */
-    napi_value got = nullptr;
-    napi_handle_scope live_scope = nullptr;
-    expect_status(napi_open_handle_scope(env, &live_scope), napi_ok,
-                  "weak0: open scope for live get");
-    expect_status(napi_get_reference_value(env, ref, &got), napi_ok,
-                  "weak0: get while live");
-    expect(got != nullptr, "weak0: live get non-null");
-    expect_status(napi_close_handle_scope(env, live_scope), napi_ok,
-                  "weak0: close releases scope root");
-    /* Drop every native JsValueRef slot holding the referent before GC:
-     * a native local holding the raw pointer must not act as an
-     * unintended root (header methodology). The scope root is already
-     * released above, so the weak referent is now collectable. */
-    got = nullptr;
-    obj = JS_INVALID_REFERENCE;
-    ClearStack();
-    force_gc(rt);
-    napi_value got2 = reinterpret_cast<napi_value>(static_cast<std::uintptr_t>(0xdeadbeef));
-    expect_status(napi_get_reference_value(env, ref, &got2), napi_ok,
-                  "weak0: get after collect");
-    expect(got2 == nullptr, "weak0: collected get is ok+null");
-    expect_status(napi_delete_reference(env, ref), napi_ok, "weak0: delete");
-    expect(chakra_nodeapi_test_root_count(env) == baseline,
-           "weak0: counter back to baseline after delete");
-  }
+  Probe_WeakFromBirth(env, rt, baseline);
 
   /* ---- 4. Double-delete => invalid_arg (P3-5) ---- */
   {

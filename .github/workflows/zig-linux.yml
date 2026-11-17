@@ -146,7 +146,7 @@ jobs:
             checks: "check-smoke check-metadata check-jit check-native"
           - name: debug-static
             flags: "-Dprofile=debug-static -Doptimize=debug"
-            checks: "check-smoke check-metadata verify-bytecode"
+            checks: "check-smoke check-metadata verify-bytecode check-native"
     outputs:
       tally: ${{ steps.tally.outputs.tally }}
     steps:

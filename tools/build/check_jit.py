@@ -11,10 +11,11 @@ it can run against every profile. This gate is JIT-specific:
   1. the installed ch and its sibling dylib contain the native backend
      (nm finds NativeCodeGenerator; a DISABLE_JIT build has no such symbol);
   2. a physical script runs under `-mic:1 -bgjit-` and under
-     `-forceNative -off:simpleJit -bgJitDelay:0`, producing the expected
-     output. The script exercises a hot call, rest arguments, apply, and
-     a class definition + instantiation, so the JIT-configured interpreter
-     and the native compiler both run. The class leg pins
+     `-forceNative -off:simpleJit -bgJitDelay:0` (or with default flags on
+     Release builds where the debug flaglist is disabled), producing the
+     expected output. The script exercises a hot call, rest arguments,
+     apply, and a class definition + instantiation, so the JIT-configured
+     interpreter and the native compiler both run. The class leg pins
      LowerNewClassConstructor's aux-slot stores: e14
      (doc/e14-fulljit-sigsegv.md) showed a byte-offset/slot-index mixup
      there reads a null prototype Var out of the class constructor and
@@ -89,13 +90,14 @@ def flaglist_supported(ch):
 
 
 def check_run(ch, flags, script_path):
+    label = " ".join(flags) if flags else "<default>"
     rc, out, err = common.run_capture([ch] + flags + [script_path])
     print("check_jit: %s -> rc=%d out=%r err=%r"
-          % (" ".join(flags), rc, out.strip(), err.strip()))
+          % (label, rc, out.strip(), err.strip()))
     if rc != 0:
-        return "%s exited %d (err=%r)" % (" ".join(flags), rc, err)
+        return "%s exited %d (err=%r)" % (label, rc, err)
     if out.splitlines() != WANT:
-        return "%s stdout %r != %r" % (" ".join(flags), out.splitlines(), WANT)
+        return "%s stdout %r != %r" % (label, out.splitlines(), WANT)
     return None
 
 
@@ -113,20 +115,19 @@ def main(argv):
         print("check_jit: FAIL: %s" % failure, file=sys.stderr)
         return 1
 
-    if not flaglist_supported(ch):
-        print("check_jit: SKIP: release build does not support the debug "
-              "flaglist; the JIT runtime leg is inapplicable")
-        return 0
+    has_flaglist = flaglist_supported(ch)
+    flag_sets = (
+        (["-mic:1", "-bgjit-"],
+         ["-forceNative", "-off:simpleJit", "-bgJitDelay:0"])
+        if has_flaglist else ([],)
+    )
 
     tmp = tempfile.mkdtemp(prefix="check-jit-")
     try:
         script_path = os.path.join(tmp, "smoke.js")
         with open(script_path, "w") as f:
             f.write(SCRIPT)
-        for flags in (
-            ["-mic:1", "-bgjit-"],
-            ["-forceNative", "-off:simpleJit", "-bgJitDelay:0"],
-        ):
+        for flags in flag_sets:
             failure = check_run(ch, flags, script_path)
             if failure:
                 print("check_jit: FAIL: %s" % failure, file=sys.stderr)
@@ -142,7 +143,11 @@ def main(argv):
         except OSError:
             pass
 
-    print("check_jit: PASS")
+    if not has_flaglist:
+        print("check_jit: PASS (release build: symbol + default-flags runtime "
+              "verified; debug flaglist skipped)")
+    else:
+        print("check_jit: PASS")
     return 0
 
 

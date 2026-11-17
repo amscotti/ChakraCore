@@ -37,7 +37,8 @@ proof, not assumption), `Ignoring test-shared-basic`, and no FAILED
 line. Static linkage is proven, not assumed: (a) `nm -g` on the
 archive shows the JsRT text symbols the samples bind; (b) a generated
 per-test Makefile is captured before cleanup and must reference
-libChakraCoreStatic.a via -force_load. The static samples link
+libChakraCoreStatic.a via -Wl,-force_load, on darwin or --whole-archive
+/ --no-whole-archive on non-darwin hosts. The static samples link
 <bindir>/lib/libChakraCoreStatic.a where <bindir> is ch's own
 realpath'd directory (Platform.js via GetBinaryLocation), so the gate
 stages a layout the script accepts: a COPY of ch plus a lib/ dir
@@ -182,13 +183,26 @@ def check_archive_symbols(archive):
 
 
 def check_makefile_links_static(makefile_text, suite):
-    """The generated Makefile must link the static archive via force_load."""
+    """The generated Makefile must link the static archive with whole-archive flags."""
     if "libChakraCoreStatic.a" not in makefile_text:
         return ("%s/Makefile: no libChakraCoreStatic.a reference "
                 "(samples would not bind the static archive)" % suite)
-    if "force_load" not in makefile_text:
-        return ("%s/Makefile: no -force_load join (static link shape)"
-                % suite)
+    plat_match = re.search(r"^PLATFORM=(\S+)", makefile_text, re.MULTILINE)
+    if not plat_match:
+        return ("%s/Makefile: missing PLATFORM=<os> line "
+                "(cannot verify static link shape)" % suite)
+    platform = plat_match.group(1)
+    if platform == "darwin":
+        if "-Wl,-force_load," not in makefile_text:
+            return ("%s/Makefile: no -Wl,-force_load, join "
+                    "(darwin static link shape)" % suite)
+    else:
+        for required in ("--whole-archive", "--no-whole-archive",
+                         "$(FORCE_STARTS) $(LDIR) $(FORCE_ENDS)"):
+            if required not in makefile_text:
+                return ("%s/Makefile: missing %r for PLATFORM=%s "
+                        "(non-darwin static link shape)"
+                        % (suite, required, platform))
     return None
 
 
@@ -245,18 +259,58 @@ def self_test():
     bad += report("static: shared log rejected",
                   check_output_static(
                       good_ignores + "\n" + SHARED_PASS + "\n") != [])
-    bad += report("makefile: archive + force_load accepted",
+    linux_makefile = (
+        "PLATFORM=linux\n"
+        "LDIR=$(LIB)/libChakraCoreStatic.a\n"
+        "ifeq (darwin, ${PLATFORM})\n"
+        "\tFORCE_STARTS=-Wl,-force_load,\n"
+        "else\n"
+        "\tFORCE_STARTS=-Wl,--whole-archive\n"
+        "\tFORCE_ENDS=-Wl,--no-whole-archive\n"
+        "endif\n"
+        "\t$(CC) sample.cpp $(CFLAGS) $(FORCE_STARTS) $(LDIR) $(FORCE_ENDS) $(LIBS)\n"
+    )
+    bad += report("makefile: darwin archive + force_load accepted",
                   check_makefile_links_static(
+                      "PLATFORM=darwin\n"
                       "LDIR=$(LIB)/libChakraCoreStatic.a\n"
                       "FORCE_STARTS=-Wl,-force_load,\n",
                       "test-static-char") is None)
+    bad += report("makefile: missing PLATFORM rejected",
+                  check_makefile_links_static(
+                      "LDIR=$(LIB)/libChakraCoreStatic.a\n"
+                      "FORCE_STARTS=-Wl,-force_load,\n",
+                      "test-static-char") is not None)
     bad += report("makefile: dylib link rejected",
                   check_makefile_links_static(
+                      "PLATFORM=darwin\n"
                       "LDIR=$(LIB)/libChakraCore.dylib\n", "test-static-char")
                   is not None)
-    bad += report("makefile: no force_load rejected",
+    bad += report("makefile: darwin no force_load rejected",
                   check_makefile_links_static(
+                      "PLATFORM=darwin\n"
                       "LDIR=$(LIB)/libChakraCoreStatic.a\n",
+                      "test-static-char") is not None)
+    bad += report("makefile: linux archive + whole-archive accepted",
+                  check_makefile_links_static(
+                      linux_makefile, "test-static-char") is None)
+    bad += report("makefile: linux inactive force_load only rejected",
+                  check_makefile_links_static(
+                      "PLATFORM=linux\n"
+                      "LDIR=$(LIB)/libChakraCoreStatic.a\n"
+                      "ifeq (darwin, ${PLATFORM})\n"
+                      "\tFORCE_STARTS=-Wl,-force_load,\n"
+                      "endif\n"
+                      "\t$(CC) sample.cpp $(FORCE_STARTS) $(LDIR) $(FORCE_ENDS)\n",
+                      "test-static-char") is not None)
+    bad += report("makefile: linux missing no-whole-archive rejected",
+                  check_makefile_links_static(
+                      linux_makefile.replace("--no-whole-archive", ""),
+                      "test-static-char") is not None)
+    bad += report("makefile: linux missing link order rejected",
+                  check_makefile_links_static(
+                      linux_makefile.replace(
+                          "$(FORCE_STARTS) $(LDIR) $(FORCE_ENDS)", "$(LDIR)"),
                       "test-static-char") is not None)
 
     # Bogus ch: the script must fail, not silently pass.
@@ -435,11 +489,16 @@ def main(argv):
                     makefile_err = ("cannot read generated %s: %s"
                                     % (witness, e))
                 else:
+                    plat_match = re.search(
+                        r"^PLATFORM=(\S+)", makefile_text, re.MULTILINE)
                     print("check_native: witness Makefile: %d bytes, "
-                          "archive=%s force_load=%s"
+                          "platform=%s archive=%s force_load=%s "
+                          "whole_archive=%s"
                           % (len(makefile_text),
+                             plat_match.group(1) if plat_match else "missing",
                              "libChakraCoreStatic.a" in makefile_text,
-                             "force_load" in makefile_text))
+                             "-Wl,-force_load," in makefile_text,
+                             "--whole-archive" in makefile_text))
                     makefile_err = check_makefile_links_static(
                         makefile_text, "test-static-char")
         finally:

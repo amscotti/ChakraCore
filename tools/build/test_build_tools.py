@@ -33,6 +33,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
 sys.path.insert(0, str(HERE))
 import common
+import check_jit
 import check_native
 import check_regression
 import check_regression_linux
@@ -435,6 +436,192 @@ class NativeVerdictTests(unittest.TestCase):
             self.assertNotEqual(proc.returncode, 0, proc.stdout + proc.stderr)
             self.assertNotIn("test-static-char : PASS", proc.stdout)
             self.assertIn("test-static-char FAILED", proc.stdout + proc.stderr)
+
+    def test_makefile_static_link_darwin_positive_and_negative(self):
+        good = (
+            "PLATFORM=darwin\n"
+            "LDIR=$(LIB)/libChakraCoreStatic.a\n"
+            "FORCE_STARTS=-Wl,-force_load,\n"
+        )
+        self.assertIsNone(
+            check_native.check_makefile_links_static(good, "test-static-char"))
+        self.assertIsNotNone(check_native.check_makefile_links_static(
+            "LDIR=$(LIB)/libChakraCoreStatic.a\nFORCE_STARTS=-Wl,-force_load,\n",
+            "test-static-char"))
+        self.assertIsNotNone(check_native.check_makefile_links_static(
+            "PLATFORM=darwin\nLDIR=$(LIB)/libChakraCore.dylib\nFORCE_STARTS=-Wl,-force_load,\n",
+            "test-static-char"))
+        self.assertIsNotNone(check_native.check_makefile_links_static(
+            "PLATFORM=darwin\nLDIR=$(LIB)/libChakraCoreStatic.a\n",
+            "test-static-char"))
+        # Bare force_load without -Wl,-force_load, is rejected on darwin.
+        self.assertIsNotNone(check_native.check_makefile_links_static(
+            "PLATFORM=darwin\nLDIR=$(LIB)/libChakraCoreStatic.a\n# force_load\n",
+            "test-static-char"))
+
+    def test_makefile_static_link_linux_positive_and_negative(self):
+        good_linux = (
+            "PLATFORM=linux\n"
+            "ARCH=AMD64\n"
+            "LDIR=$(LIBRARY_PATH)/libChakraCoreStatic.a \n"
+            "ifeq (darwin, ${PLATFORM})\n"
+            "\tFORCE_STARTS=-Wl,-force_load,\n"
+            "\tFORCE_ENDS=\n"
+            "else\n"
+            "\tFORCE_STARTS=-Wl,--whole-archive\n"
+            "\tFORCE_ENDS=-Wl,--no-whole-archive\n"
+            "endif\n"
+            "\t$(CC) sample.cpp $(CFLAGS) $(FORCE_STARTS) $(LDIR) $(FORCE_ENDS) $(LIBS)\n"
+        )
+        self.assertIsNone(check_native.check_makefile_links_static(
+            good_linux, "test-static-char"))
+        # Linux Makefile must not pass vacuously via the inactive darwin branch.
+        vacuous_linux = (
+            "PLATFORM=linux\n"
+            "LDIR=$(LIBRARY_PATH)/libChakraCoreStatic.a\n"
+            "ifeq (darwin, ${PLATFORM})\n"
+            "\tFORCE_STARTS=-Wl,-force_load,\n"
+            "endif\n"
+            "\t$(CC) sample.cpp $(FORCE_STARTS) $(LDIR) $(FORCE_ENDS)\n"
+        )
+        self.assertIsNotNone(check_native.check_makefile_links_static(
+            vacuous_linux, "test-static-char"))
+        self.assertIsNotNone(check_native.check_makefile_links_static(
+            good_linux.replace("--whole-archive", "--bogus"),
+            "test-static-char"))
+        self.assertIsNotNone(check_native.check_makefile_links_static(
+            good_linux.replace("--no-whole-archive", "--bogus"),
+            "test-static-char"))
+        self.assertIsNotNone(check_native.check_makefile_links_static(
+            good_linux.replace("$(FORCE_STARTS) $(LDIR) $(FORCE_ENDS)", "$(LDIR)"),
+            "test-static-char"))
+        self.assertIsNotNone(check_native.check_makefile_links_static(
+            good_linux.replace("libChakraCoreStatic.a", "libChakraCore.so"),
+            "test-static-char"))
+
+
+@unittest.skipUnless(os.name == "posix", "the check_jit stub binary is a POSIX shell script")
+class CheckJitTests(unittest.TestCase):
+    """Tests for tools/build/check_jit.py debug flaglist + Release fallback."""
+
+    def make_stub_ch(self, root, *, release=False, fail_run=False,
+                     wrong_stdout=False, fail_forcenative=False,
+                     with_dylib=True):
+        bindir = root / "bin"
+        bindir.mkdir(parents=True, exist_ok=True)
+        if with_dylib:
+            dylib_name = ("libChakraCore.dylib" if sys.platform == "darwin"
+                          else "libChakraCore.so")
+            (bindir / dylib_name).write_bytes(b"stub\n")
+        log_path = root / "invocations.log"
+        ch = bindir / "ch"
+        want_lines = "\\n".join(check_jit.WANT)
+        if release:
+            help_body = ("printf 'Note: [flaglist] is not supported in "
+                         "Release builds; try a Debug or Test build.\\n'")
+        else:
+            help_body = "printf 'Usage: ch [flaglist] <source file>\\n'"
+        if fail_run:
+            run_body = "printf 'simulated crash\\n' >&2\nexit 1"
+        elif wrong_stdout:
+            run_body = "printf 'wrong-line\\n'\nexit 0"
+        elif fail_forcenative:
+            run_body = (
+                "case \"$*\" in\n"
+                "  *-forceNative*) printf 'wrong-jit\\n'; exit 1 ;;\n"
+                "  *) printf '%s\\n' ; exit 0 ;;\n"
+                "esac" % want_lines
+            )
+        else:
+            run_body = "printf '%s\\n'\nexit 0" % want_lines
+        ch.write_text(
+            "#!/bin/sh\n"
+            "printf '%s\\n' \"$*\" >> " + repr(str(log_path)) + "\n"
+            "if [ \"$1\" = \"-?\" ]; then\n"
+            "  " + help_body + "\n"
+            "  exit 0\n"
+            "fi\n"
+            + run_body + "\n"
+        )
+        ch.chmod(0o755)
+        return ch, log_path
+
+    def run_check_jit(self, ch, *, symbol_err=None):
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with mock.patch.object(check_jit, "check_symbols", return_value=symbol_err), \
+                contextlib.redirect_stdout(stdout), \
+                contextlib.redirect_stderr(stderr):
+            rc = check_jit.main(["check_jit.py", str(ch)])
+        return rc, stdout.getvalue(), stderr.getvalue()
+
+    def test_release_fallback_executes_default_flags_and_passes(self):
+        with tempfile.TemporaryDirectory(prefix="check-jit-rel-pass-") as tmp:
+            root = Path(tmp)
+            ch, log_path = self.make_stub_ch(root, release=True)
+            rc, out, err = self.run_check_jit(ch)
+            self.assertEqual(rc, 0, out + err)
+            self.assertIn(
+                "check_jit: PASS (release build: symbol + default-flags runtime "
+                "verified; debug flaglist skipped)", out)
+            calls = log_path.read_text().splitlines()
+            self.assertEqual(len(calls), 2)
+            self.assertEqual(calls[0], "-?")
+            self.assertNotIn("-mic:1", calls[1])
+            self.assertNotIn("-forceNative", calls[1])
+
+    def test_release_fallback_detects_nonzero_exit(self):
+        with tempfile.TemporaryDirectory(prefix="check-jit-rel-rc-") as tmp:
+            root = Path(tmp)
+            ch, _ = self.make_stub_ch(root, release=True, fail_run=True)
+            rc, out, err = self.run_check_jit(ch)
+            self.assertEqual(rc, 1, out + err)
+            self.assertIn("check_jit: FAIL:", err)
+            self.assertIn("<default> exited 1", err)
+            self.assertNotIn("PASS", out)
+
+    def test_release_fallback_detects_wrong_stdout(self):
+        with tempfile.TemporaryDirectory(prefix="check-jit-rel-out-") as tmp:
+            root = Path(tmp)
+            ch, _ = self.make_stub_ch(root, release=True, wrong_stdout=True)
+            rc, out, err = self.run_check_jit(ch)
+            self.assertEqual(rc, 1, out + err)
+            self.assertIn("check_jit: FAIL:", err)
+            self.assertIn("stdout", err)
+            self.assertNotIn("PASS", out)
+
+    def test_debug_flaglist_runs_both_jit_legs(self):
+        with tempfile.TemporaryDirectory(prefix="check-jit-dbg-pass-") as tmp:
+            root = Path(tmp)
+            ch, log_path = self.make_stub_ch(root, release=False)
+            rc, out, err = self.run_check_jit(ch)
+            self.assertEqual(rc, 0, out + err)
+            self.assertIn("check_jit: PASS\n", out)
+            calls = log_path.read_text().splitlines()
+            self.assertEqual(len(calls), 3)
+            self.assertEqual(calls[0], "-?")
+            self.assertTrue(calls[1].startswith("-mic:1 -bgjit- "))
+            self.assertTrue(calls[2].startswith("-forceNative -off:simpleJit -bgJitDelay:0 "))
+
+    def test_debug_flaglist_detects_forcenative_failure(self):
+        with tempfile.TemporaryDirectory(prefix="check-jit-dbg-fail-") as tmp:
+            root = Path(tmp)
+            ch, _ = self.make_stub_ch(root, release=False, fail_forcenative=True)
+            rc, out, err = self.run_check_jit(ch)
+            self.assertEqual(rc, 1, out + err)
+            self.assertIn("check_jit: FAIL:", err)
+            self.assertNotIn("PASS", out)
+
+    def test_missing_sibling_dylib_fails_before_running_ch(self):
+        with tempfile.TemporaryDirectory(prefix="check-jit-nodll-") as tmp:
+            root = Path(tmp)
+            ch, log_path = self.make_stub_ch(root, release=True, with_dylib=False)
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(stdout), \
+                    contextlib.redirect_stderr(stderr):
+                rc = check_jit.main(["check_jit.py", str(ch)])
+            self.assertEqual(rc, 1)
+            self.assertIn("sibling dylib not found", stderr.getvalue())
+            self.assertFalse(log_path.exists())
 
 
 class EngineInitAbortTests(unittest.TestCase):

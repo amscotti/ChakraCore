@@ -71,6 +71,23 @@
 
 namespace {
 
+#if defined(__clang__)
+#define PROBE_NOINLINE_OPTNONE __attribute__((noinline, optnone))
+#elif defined(__GNUC__)
+#define PROBE_NOINLINE_OPTNONE __attribute__((noinline, optimize("O0")))
+#else
+#define PROBE_NOINLINE_OPTNONE
+#endif
+
+template <typename T>
+inline void ClearDeadRef(T& ref, T invalid_val) {
+  volatile T* slot = &ref;
+  *slot = invalid_val;
+#if defined(__clang__) || defined(__GNUC__)
+  __asm__ volatile("" : : "r"(slot) : "memory");
+#endif
+}
+
 int g_total = 0;
 int g_pass = 0;
 
@@ -182,7 +199,9 @@ void FinReentrant(napi_env env, void* data, void* /*hint*/) {
 
 /* Chained finalizer (P7-5): creates + collects a second external from
  * inside the first drain; drain-until-empty must run it too. */
-__attribute__((noinline)) void ClearStack();
+PROBE_NOINLINE_OPTNONE void ClearStack();
+PROBE_NOINLINE_OPTNONE bool CreateExternalThenDrop(
+    napi_env env, void* data, node_api_basic_finalize fin);
 
 struct ChainState {
   napi_env env = nullptr;
@@ -197,25 +216,18 @@ void FinChainedSecond(napi_env /*env*/, void* data, void* /*hint*/) {
   if (c) c->calls++;
 }
 
-void FinChainedFirst(napi_env env, void* data, void* /*hint*/) {
+PROBE_NOINLINE_OPTNONE void FinChainedFirst(
+    napi_env env, void* data, void* /*hint*/) {
   auto* cs = static_cast<ChainState*>(data);
   if (!cs) return;
   cs->first.calls++;
   if (!cs->armed) return;
   cs->armed = false;
-  /* Create a second external that becomes collectable, then GC it.
-   * The GC trampoline enqueues it; the running drain loop (released
-   * lock) must pick it up before returning. */
-  napi_handle_scope sc = nullptr;
-  if (napi_open_handle_scope(env, &sc) != napi_ok) return;
-  napi_value ext = nullptr;
-  if (napi_create_external(env, &cs->second, FinChainedSecond, nullptr,
-                           &ext) != napi_ok) {
-    (void)napi_close_handle_scope(env, sc);
-    return;
-  }
-  (void)napi_close_handle_scope(env, sc);
-  ext = nullptr;
+  /* Create a second external inside a popped optnone helper frame so no
+   * dead JS pointer remains in FinChainedFirst's stack/registers across
+   * ClearStack() + GC. The GC trampoline enqueues it; the running drain
+   * loop (released lock) must pick it up before returning. */
+  if (!CreateExternalThenDrop(env, &cs->second, FinChainedSecond)) return;
   ClearStack();
   bool prev_gc = g_in_gc;
   g_in_gc = true;
@@ -244,8 +256,8 @@ void Collect10x(JsRuntimeHandle rt) {
   g_in_gc = prev;
 }
 
-__attribute__((noinline)) void ClearStack() {
-  constexpr int kN = 256;
+PROBE_NOINLINE_OPTNONE void ClearStack() {
+  constexpr int kN = 512;
   volatile void* dummy[kN];
   volatile unsigned char* bp =
       reinterpret_cast<volatile unsigned char*>(dummy);
@@ -253,6 +265,9 @@ __attribute__((noinline)) void ClearStack() {
              sizeof(dummy)) {
     *bp++ = 0;
   }
+#if defined(__clang__) || defined(__GNUC__)
+  __asm__ volatile("" : : "r"(dummy) : "memory");
+#endif
 }
 
 /* Create a wrapped plain object, then make it collectable (the local is
@@ -260,34 +275,35 @@ __attribute__((noinline)) void ClearStack() {
  * so no JS pointer (or integer bit-pattern) remains in a live register/
  * stack slot in the caller, which conservative scanning would otherwise
  * treat as a root (refs-probe methodology). */
-__attribute__((noinline, optnone)) bool CreateWrappedThenDrop(
+PROBE_NOINLINE_OPTNONE bool CreateWrappedThenDrop(
     napi_env env, void* payload, Counter* /*cnt*/) {
   JsValueRef obj = make_object_assert();
   if (napi_wrap(env, reinterpret_cast<napi_value>(obj), payload, FinGeneric,
                 nullptr, nullptr) != napi_ok) {
+    ClearDeadRef(obj, JS_INVALID_REFERENCE);
     return false;
   }
-  obj = JS_INVALID_REFERENCE;
+  ClearDeadRef(obj, JS_INVALID_REFERENCE);
   return true;
 }
 
 /* Create one scoped external, close its scope (releasing the provider
  * root), and drop every local inside the helper frame so it is collectable
  * by the caller's GC. */
-__attribute__((noinline, optnone)) bool CreateExternalThenDrop(
+PROBE_NOINLINE_OPTNONE bool CreateExternalThenDrop(
     napi_env env, void* data, node_api_basic_finalize fin) {
   napi_handle_scope sc = nullptr;
   if (napi_open_handle_scope(env, &sc) != napi_ok) return false;
   napi_value ext = nullptr;
   napi_status s = napi_create_external(env, data, fin, nullptr, &ext);
+  ClearDeadRef(ext, static_cast<napi_value>(nullptr));
   if (napi_close_handle_scope(env, sc) != napi_ok) return false;
-  ext = nullptr;
   return s == napi_ok;
 }
 
 /* Create `n` scoped externals in one scope, close it, and drop them all
  * inside the helper frame (P7-11 batch: 100 per GC). */
-__attribute__((noinline, optnone)) bool CreateExternalBatch(
+PROBE_NOINLINE_OPTNONE bool CreateExternalBatch(
     napi_env env, void* data, int n) {
   napi_handle_scope sc = nullptr;
   if (napi_open_handle_scope(env, &sc) != napi_ok) return false;
@@ -298,7 +314,7 @@ __attribute__((noinline, optnone)) bool CreateExternalBatch(
         napi_ok) {
       ok = false;
     }
-    ext = nullptr;
+    ClearDeadRef(ext, static_cast<napi_value>(nullptr));
   }
   if (napi_close_handle_scope(env, sc) != napi_ok) ok = false;
   return ok;
@@ -307,46 +323,198 @@ __attribute__((noinline, optnone)) bool CreateExternalBatch(
 /* Wrap head (id 1) + two add_finalizer riders (ids 2, 3), then drop the
  * object inside the helper frame so it is collectable by the caller's GC.
  * Mirrors CreateWrappedThenDrop rooting discipline for Phase K. */
-__attribute__((noinline, optnone)) bool WrapThenAddRidersThenDrop(napi_env env) {
+PROBE_NOINLINE_OPTNONE bool WrapThenAddRidersThenDrop(napi_env env) {
   JsValueRef obj = make_object_assert();
   if (napi_wrap(env, reinterpret_cast<napi_value>(obj),
                 reinterpret_cast<void*>(static_cast<std::uintptr_t>(1)), FinOrdered, nullptr,
                 nullptr) != napi_ok) {
+    ClearDeadRef(obj, JS_INVALID_REFERENCE);
     return false;
   }
   if (napi_add_finalizer(env, reinterpret_cast<napi_value>(obj),
                          reinterpret_cast<void*>(static_cast<std::uintptr_t>(2)), FinOrdered,
                          nullptr, nullptr) != napi_ok) {
+    ClearDeadRef(obj, JS_INVALID_REFERENCE);
     return false;
   }
   if (napi_add_finalizer(env, reinterpret_cast<napi_value>(obj),
                          reinterpret_cast<void*>(static_cast<std::uintptr_t>(3)), FinOrdered,
                          nullptr, nullptr) != napi_ok) {
+    ClearDeadRef(obj, JS_INVALID_REFERENCE);
     return false;
   }
-  obj = JS_INVALID_REFERENCE;
+  ClearDeadRef(obj, JS_INVALID_REFERENCE);
   return true;
 }
 
 /* add_finalizer + unpin result ref + witness weak ref + drop, all inside
  * the helper frame. Returns the witness weak ref (caller deletes it). */
-__attribute__((noinline, optnone)) napi_ref AddFinalizeThenDropWitness(
+PROBE_NOINLINE_OPTNONE napi_ref AddFinalizeThenDropWitness(
     napi_env env, Counter* cnt) {
   JsValueRef obj = make_object_assert();
   napi_ref wit = nullptr;
   if (napi_create_reference(env, reinterpret_cast<napi_value>(obj), 0,
                             &wit) != napi_ok) {
+    ClearDeadRef(obj, JS_INVALID_REFERENCE);
     return nullptr;
   }
   napi_ref out_ref = nullptr;
   if (napi_add_finalizer(env, reinterpret_cast<napi_value>(obj), cnt,
                          FinGeneric, nullptr, &out_ref) != napi_ok) {
     napi_delete_reference(env, wit);
+    ClearDeadRef(obj, JS_INVALID_REFERENCE);
     return nullptr;
   }
   (void)napi_delete_reference(env, out_ref);
-  obj = JS_INVALID_REFERENCE;
+  ClearDeadRef(obj, JS_INVALID_REFERENCE);
   return wit;
+}
+
+PROBE_NOINLINE_OPTNONE void PhaseA_CreateExternalTestAndDrop(
+    napi_env env, Counter* cnt) {
+  napi_handle_scope sc = nullptr;
+  expect_status(napi_open_handle_scope(env, &sc), napi_ok, "A: open scope");
+  napi_value ext = nullptr;
+  expect_status(napi_create_external(env, cnt, FinGeneric,
+                                     (void*)(std::uintptr_t)0xABCD, &ext),
+                napi_ok, "A: create_external");
+  expect(chakra_nodeapi_test_wrap_live_count(env) == 1, "A: live 1 after create");
+  void* got = (void*)(std::uintptr_t)0xdeadbeef;
+  expect_status(napi_get_value_external(env, ext, &got), napi_ok, "A: get_value");
+  expect(got == (void*)cnt, "A: pointer round-trips");
+  /* Non-external + NULL out-param are invalid_arg (never object_expected). */
+  JsValueRef plain = make_object_assert();
+  void* tmpg = (void*)(std::uintptr_t)0xdead;
+  expect_status(napi_get_value_external(env, reinterpret_cast<napi_value>(plain), &tmpg),
+                napi_invalid_arg, "A: get on non-external invalid_arg");
+  expect_status(napi_get_value_external(env, ext, nullptr), napi_invalid_arg,
+                "A: get with null result invalid_arg");
+  expect_status(napi_create_external(env, cnt, nullptr, nullptr, nullptr),
+                napi_invalid_arg, "A: create with null result invalid_arg");
+  ClearDeadRef(plain, JS_INVALID_REFERENCE);
+  expect(chakra_nodeapi_test_wrap_live_count(env) == 1, "A: still live 1");
+  expect_status(napi_close_handle_scope(env, sc), napi_ok, "A: close scope releases root");
+  ClearDeadRef(ext, static_cast<napi_value>(nullptr));
+}
+
+PROBE_NOINLINE_OPTNONE void PhaseB_WrapSuppressTags(
+    napi_env env, JsRuntimeHandle rt, const napi_type_tag& kTagA,
+    const napi_type_tag& kTagB, const napi_type_tag& kTagC) {
+  Counter cnt;
+  JsValueRef obj = make_object_assert();
+  expect_status(napi_wrap(env, reinterpret_cast<napi_value>(obj), &cnt, FinGeneric, nullptr, nullptr),
+                napi_ok, "B: wrap");
+  void* un = nullptr;
+  expect_status(napi_unwrap(env, reinterpret_cast<napi_value>(obj), &un), napi_ok, "B: unwrap");
+  expect(un == (void*)&cnt, "B: unwrap pointer");
+  expect_status(napi_wrap(env, reinterpret_cast<napi_value>(obj), &cnt, FinGeneric, nullptr, nullptr),
+                napi_invalid_arg, "B: double wrap invalid_arg");
+  expect_status(napi_wrap(env, nullptr, &cnt, nullptr, nullptr, nullptr),
+                napi_invalid_arg, "B: wrap null object invalid_arg");
+  JsValueRef num = JS_INVALID_REFERENCE;
+  JsDoubleToNumber(3.0, &num);
+  napi_ref dummy_ref = nullptr;
+  expect_status(napi_wrap(env, reinterpret_cast<napi_value>(num), &cnt, nullptr, nullptr, &dummy_ref),
+                napi_invalid_arg, "B: wrap non-object invalid_arg");
+  ClearDeadRef(num, JS_INVALID_REFERENCE);
+
+  bool tagged = false;
+  expect_status(napi_type_tag_object(env, reinterpret_cast<napi_value>(obj), &kTagA), napi_ok, "B: tag A");
+  expect_status(napi_check_object_type_tag(env, reinterpret_cast<napi_value>(obj), &kTagA, &tagged), napi_ok, "B: check A ok");
+  expect(tagged, "B: check A true");
+  expect_status(napi_check_object_type_tag(env, reinterpret_cast<napi_value>(obj), &kTagB, &tagged), napi_ok, "B: check B ok");
+  expect(!tagged, "B: check B false (mismatch)");
+  expect_status(napi_type_tag_object(env, reinterpret_cast<napi_value>(obj), &kTagB),
+                napi_invalid_arg, "B: double tag invalid_arg");
+  /* Unwrapped object: check false (not an error). */
+  JsValueRef other = make_object_assert();
+  tagged = false;
+  expect_status(napi_check_object_type_tag(env, reinterpret_cast<napi_value>(other), &kTagA, &tagged), napi_ok, "B: check on unwrapped ok");
+  expect(!tagged, "B: check on unwrapped false");
+  expect_status(napi_unwrap(env, reinterpret_cast<napi_value>(other), &un), napi_invalid_arg, "B: unwrap of unwrapped invalid_arg");
+  ClearDeadRef(other, JS_INVALID_REFERENCE);
+
+  /* remove_wrap returns data and suppresses. */
+  void* removed = (void*)(std::uintptr_t)0xdead;
+  expect_status(napi_remove_wrap(env, reinterpret_cast<napi_value>(obj), &removed), napi_ok, "B: remove ok");
+  expect(removed == (void*)&cnt, "B: remove returns data");
+  expect_status(napi_unwrap(env, reinterpret_cast<napi_value>(obj), &un), napi_invalid_arg, "B: unwrap after remove invalid_arg");
+  expect_status(napi_remove_wrap(env, reinterpret_cast<napi_value>(obj), &removed), napi_invalid_arg, "B: second remove invalid_arg");
+  tagged = false;
+  expect_status(napi_check_object_type_tag(env, reinterpret_cast<napi_value>(obj), &kTagA, &tagged), napi_ok, "B: check after remove ok");
+  expect(!tagged, "B: tag dies with wrap (check false after remove)");
+
+  /* Tag-only record on a plain object (vendored TypeTaggedInstance). */
+  JsValueRef tagn = make_object_assert();
+  expect_status(napi_type_tag_object(env, reinterpret_cast<napi_value>(tagn), &kTagC), napi_ok, "B: tag-only (plain object)");
+  tagged = false;
+  expect_status(napi_check_object_type_tag(env, reinterpret_cast<napi_value>(tagn), &kTagC, &tagged), napi_ok, "B: tag-only check ok");
+  expect(tagged, "B: tag-only check true");
+  expect_status(napi_unwrap(env, reinterpret_cast<napi_value>(tagn), &un), napi_invalid_arg, "B: unwrap of tag-only invalid_arg");
+  expect_status(napi_wrap(env, reinterpret_cast<napi_value>(tagn), &cnt, FinGeneric, nullptr, nullptr), napi_ok, "B: wrap over tag-only upgrades");
+  expect_status(napi_unwrap(env, reinterpret_cast<napi_value>(tagn), &un), napi_ok, "B: unwrap upgraded ok");
+  expect(un == (void*)&cnt, "B: upgraded pointer");
+  tagged = false;
+  expect_status(napi_check_object_type_tag(env, reinterpret_cast<napi_value>(tagn), &kTagC, &tagged), napi_ok, "B: tag survives upgrade ok");
+  expect(tagged, "B: tag survives wrap upgrade");
+  /* NULL result allowed for remove. */
+  expect_status(napi_remove_wrap(env, reinterpret_cast<napi_value>(tagn), nullptr), napi_ok, "B: remove with null result ok");
+
+  ClearDeadRef(obj, JS_INVALID_REFERENCE);
+  ClearDeadRef(tagn, JS_INVALID_REFERENCE);
+  ClearStack();
+  Collect10x(rt);
+  chakra_nodeapi_test_drain_finalizers(env);
+  expect(cnt.calls == 0, "B: remove suppressed (zero finalizers across GC+destroy)");
+  expect(chakra_nodeapi_test_wrap_live_count(env) == 0, "B: live 0 after GC+destroy-less");
+  chakra_nodeapi_destroy_env(env);
+  expect(cnt.calls == 0, "B: still zero after destroy");
+}
+
+PROBE_NOINLINE_OPTNONE bool PhaseH_CheckFreshNotAliased(
+    napi_env env, Counter* cnt, const napi_type_tag& kTagA) {
+  bool aliased = false;
+  JsValueRef fresh = make_object_assert();
+  void* un = (void*)cnt; /* sentinel: must not be overwritten if miss */
+  napi_status s = napi_unwrap(env, reinterpret_cast<napi_value>(fresh), &un);
+  if (s == napi_ok || un != (void*)cnt) {
+    aliased = true;
+  }
+  bool tagged = true;
+  (void)napi_check_object_type_tag(env, reinterpret_cast<napi_value>(fresh),
+                                   &kTagA, &tagged);
+  if (tagged) aliased = true;
+  ClearDeadRef(fresh, JS_INVALID_REFERENCE);
+  return aliased;
+}
+
+PROBE_NOINLINE_OPTNONE void PhaseJ_PendingThenExternalAndDrop(
+    napi_env env, Counter* cnt) {
+  JsValueRef obj = make_object_assert();
+  JsValueRef exc = make_object_assert();
+  if (JsSetException(exc) != JsNoError) {
+    expect(false, "J: set exception (setup)");
+  }
+  ClearDeadRef(exc, JS_INVALID_REFERENCE);
+  /* Gated: napi_wrap must return pending_exception without executing. */
+  expect_status(napi_wrap(env, reinterpret_cast<napi_value>(obj), cnt, FinGeneric, nullptr, nullptr),
+                napi_pending_exception, "J: wrap gated with pending");
+  void* ext_got = (void*)(std::uintptr_t)0xdead;
+  napi_value ext = nullptr;
+  JsValueRef cleared = JS_INVALID_REFERENCE;
+  bool had = false;
+  expect(JsHasException(&had) == JsNoError && had, "J: exception still set after gated wrap");
+  expect(JsGetAndClearException(&cleared) == JsNoError, "J: clear exception");
+  ClearDeadRef(cleared, JS_INVALID_REFERENCE);
+  /* Now with no pending: create an external and prove get works. */
+  napi_handle_scope sc2 = nullptr;
+  expect_status(napi_open_handle_scope(env, &sc2), napi_ok, "J: open scope");
+  expect_status(napi_create_external(env, cnt, FinGeneric, nullptr, &ext), napi_ok, "J: create external (no pending)");
+  expect_status(napi_get_value_external(env, ext, &ext_got), napi_ok, "J: get works (no pending)");
+  expect(ext_got == (void*)cnt, "J: get pointer");
+  napi_close_handle_scope(env, sc2);
+  ClearDeadRef(ext, static_cast<napi_value>(nullptr));
+  ClearDeadRef(obj, JS_INVALID_REFERENCE);
 }
 
 } /* namespace */
@@ -381,29 +549,7 @@ int main() {
     napi_env env = chakra_nodeapi_create_env(rt, ctx, "wrapA", nullptr, nullptr);
     expect(env != nullptr, "A: create env");
     Counter cnt;
-    napi_handle_scope sc = nullptr;
-    expect_status(napi_open_handle_scope(env, &sc), napi_ok, "A: open scope");
-    napi_value ext = nullptr;
-    expect_status(napi_create_external(env, &cnt, FinGeneric,
-                                       (void*)(std::uintptr_t)0xABCD, &ext),
-                  napi_ok, "A: create_external");
-    expect(chakra_nodeapi_test_wrap_live_count(env) == 1, "A: live 1 after create");
-    void* got = (void*)(std::uintptr_t)0xdeadbeef;
-    expect_status(napi_get_value_external(env, ext, &got), napi_ok, "A: get_value");
-    expect(got == (void*)&cnt, "A: pointer round-trips");
-    /* Non-external + NULL out-param are invalid_arg (never object_expected). */
-    JsValueRef plain = make_object_assert();
-    void* tmpg = (void*)(std::uintptr_t)0xdead;
-    expect_status(napi_get_value_external(env, reinterpret_cast<napi_value>(plain), &tmpg),
-                  napi_invalid_arg, "A: get on non-external invalid_arg");
-    expect_status(napi_get_value_external(env, ext, nullptr), napi_invalid_arg,
-                  "A: get with null result invalid_arg");
-    expect_status(napi_create_external(env, &cnt, nullptr, nullptr, nullptr),
-                  napi_invalid_arg, "A: create with null result invalid_arg");
-    plain = JS_INVALID_REFERENCE;
-    expect(chakra_nodeapi_test_wrap_live_count(env) == 1, "A: still live 1");
-    expect_status(napi_close_handle_scope(env, sc), napi_ok, "A: close scope releases root");
-    ext = nullptr;
+    PhaseA_CreateExternalTestAndDrop(env, &cnt);
     ClearStack();
     Collect10x(rt);
     /* Deferred: no finalizer during GC, but exactly one queued record. */
@@ -418,7 +564,7 @@ int main() {
                                              &kTagB, &tagged),
                   napi_ok, "A: entry drain call (check)");
     expect(!tagged, "A: untagged probe false");
-    probe = JS_INVALID_REFERENCE;
+    ClearDeadRef(probe, JS_INVALID_REFERENCE);
     expect(cnt.calls == 1, "A: finalizer ran exactly once at entry drain");
     expect(chakra_nodeapi_test_wrap_queue_count(env) == 0, "A: queue empty after drain");
     expect(chakra_nodeapi_test_wrap_live_count(env) == 0, "A: live 0 after drain");
@@ -433,75 +579,7 @@ int main() {
     std::fprintf(stdout, "-- case wrap-suppress-tags (P7-6/P7-7) --\n");
     napi_env env = chakra_nodeapi_create_env(rt, ctx, "wrapB", nullptr, nullptr);
     expect(env != nullptr, "B: create env");
-    Counter cnt;
-    JsValueRef obj = make_object_assert();
-    expect_status(napi_wrap(env, reinterpret_cast<napi_value>(obj), &cnt, FinGeneric, nullptr, nullptr),
-                  napi_ok, "B: wrap");
-    void* un = nullptr;
-    expect_status(napi_unwrap(env, reinterpret_cast<napi_value>(obj), &un), napi_ok, "B: unwrap");
-    expect(un == (void*)&cnt, "B: unwrap pointer");
-    expect_status(napi_wrap(env, reinterpret_cast<napi_value>(obj), &cnt, FinGeneric, nullptr, nullptr),
-                  napi_invalid_arg, "B: double wrap invalid_arg");
-    expect_status(napi_wrap(env, nullptr, &cnt, nullptr, nullptr, nullptr),
-                  napi_invalid_arg, "B: wrap null object invalid_arg");
-    JsValueRef num = JS_INVALID_REFERENCE;
-    JsDoubleToNumber(3.0, &num);
-    napi_ref dummy_ref = nullptr;
-    expect_status(napi_wrap(env, reinterpret_cast<napi_value>(num), &cnt, nullptr, nullptr, &dummy_ref),
-                  napi_invalid_arg, "B: wrap non-object invalid_arg");
-    num = JS_INVALID_REFERENCE;
-
-    bool tagged = false;
-    expect_status(napi_type_tag_object(env, reinterpret_cast<napi_value>(obj), &kTagA), napi_ok, "B: tag A");
-    expect_status(napi_check_object_type_tag(env, reinterpret_cast<napi_value>(obj), &kTagA, &tagged), napi_ok, "B: check A ok");
-    expect(tagged, "B: check A true");
-    expect_status(napi_check_object_type_tag(env, reinterpret_cast<napi_value>(obj), &kTagB, &tagged), napi_ok, "B: check B ok");
-    expect(!tagged, "B: check B false (mismatch)");
-    expect_status(napi_type_tag_object(env, reinterpret_cast<napi_value>(obj), &kTagB),
-                  napi_invalid_arg, "B: double tag invalid_arg");
-    /* Unwrapped object: check false (not an error). */
-    JsValueRef other = make_object_assert();
-    tagged = false;
-    expect_status(napi_check_object_type_tag(env, reinterpret_cast<napi_value>(other), &kTagA, &tagged), napi_ok, "B: check on unwrapped ok");
-    expect(!tagged, "B: check on unwrapped false");
-    expect_status(napi_unwrap(env, reinterpret_cast<napi_value>(other), &un), napi_invalid_arg, "B: unwrap of unwrapped invalid_arg");
-    other = JS_INVALID_REFERENCE;
-
-    /* remove_wrap returns data and suppresses. */
-    void* removed = (void*)(std::uintptr_t)0xdead;
-    expect_status(napi_remove_wrap(env, reinterpret_cast<napi_value>(obj), &removed), napi_ok, "B: remove ok");
-    expect(removed == (void*)&cnt, "B: remove returns data");
-    expect_status(napi_unwrap(env, reinterpret_cast<napi_value>(obj), &un), napi_invalid_arg, "B: unwrap after remove invalid_arg");
-    expect_status(napi_remove_wrap(env, reinterpret_cast<napi_value>(obj), &removed), napi_invalid_arg, "B: second remove invalid_arg");
-    tagged = false;
-    expect_status(napi_check_object_type_tag(env, reinterpret_cast<napi_value>(obj), &kTagA, &tagged), napi_ok, "B: check after remove ok");
-    expect(!tagged, "B: tag dies with wrap (check false after remove)");
-
-    /* Tag-only record on a plain object (vendored TypeTaggedInstance). */
-    JsValueRef tagn = make_object_assert();
-    expect_status(napi_type_tag_object(env, reinterpret_cast<napi_value>(tagn), &kTagC), napi_ok, "B: tag-only (plain object)");
-    tagged = false;
-    expect_status(napi_check_object_type_tag(env, reinterpret_cast<napi_value>(tagn), &kTagC, &tagged), napi_ok, "B: tag-only check ok");
-    expect(tagged, "B: tag-only check true");
-    expect_status(napi_unwrap(env, reinterpret_cast<napi_value>(tagn), &un), napi_invalid_arg, "B: unwrap of tag-only invalid_arg");
-    expect_status(napi_wrap(env, reinterpret_cast<napi_value>(tagn), &cnt, FinGeneric, nullptr, nullptr), napi_ok, "B: wrap over tag-only upgrades");
-    expect_status(napi_unwrap(env, reinterpret_cast<napi_value>(tagn), &un), napi_ok, "B: unwrap upgraded ok");
-    expect(un == (void*)&cnt, "B: upgraded pointer");
-    tagged = false;
-    expect_status(napi_check_object_type_tag(env, reinterpret_cast<napi_value>(tagn), &kTagC, &tagged), napi_ok, "B: tag survives upgrade ok");
-    expect(tagged, "B: tag survives wrap upgrade");
-    /* NULL result allowed for remove. */
-    expect_status(napi_remove_wrap(env, reinterpret_cast<napi_value>(tagn), nullptr), napi_ok, "B: remove with null result ok");
-
-    obj = JS_INVALID_REFERENCE;
-    tagn = JS_INVALID_REFERENCE;
-    ClearStack();
-    Collect10x(rt);
-    chakra_nodeapi_test_drain_finalizers(env);
-    expect(cnt.calls == 0, "B: remove suppressed (zero finalizers across GC+destroy)");
-    expect(chakra_nodeapi_test_wrap_live_count(env) == 0, "B: live 0 after GC+destroy-less");
-    chakra_nodeapi_destroy_env(env);
-    expect(cnt.calls == 0, "B: still zero after destroy");
+    PhaseB_WrapSuppressTags(env, rt, kTagA, kTagB, kTagC);
   }
 
   /* ---- Phase C: wrap collect exactly-once (before-collect) ---- */
@@ -626,23 +704,7 @@ int main() {
     expect(cnt.calls == 1, "H: old finalizer once");
     bool aliased = false;
     for (int i = 0; i < 200; i++) {
-      JsValueRef fresh = make_object_assert();
-      void* un = (void*)&cnt; /* sentinel: must not be overwritten if miss */
-      napi_status s = napi_unwrap(env, reinterpret_cast<napi_value>(fresh), &un);
-      if (s == napi_ok || un != (void*)&cnt) {
-        /* A stale hit would either succeed or overwrite the sentinel.
-         * Correct behavior is invalid_arg with sentinel untouched. */
-        if (s == napi_ok || un != (void*)&cnt) aliased = true;
-      }
-      bool tagged = true;
-      (void)napi_check_object_type_tag(env, reinterpret_cast<napi_value>(fresh),
-                                       &kTagA, &tagged);
-      if (tagged) aliased = true;
-      /* Reused-address case is covered by the invalid_arg assertion
-       * above for every fresh object; pointer equality with the dead
-       * wrap is not tracked here (the integer is dropped to avoid
-       * conservative-root retention). */
-      fresh = JS_INVALID_REFERENCE;
+      if (PhaseH_CheckFreshNotAliased(env, &cnt, kTagA)) aliased = true;
       ClearStack();
     }
     expect(!aliased, "H: no stale alias across 200 recreations");
@@ -692,34 +754,7 @@ int main() {
     napi_env env = chakra_nodeapi_create_env(rt, ctx, "wrapJ", nullptr, nullptr);
     expect(env != nullptr, "J: create env");
     Counter cnt;
-    JsValueRef obj = make_object_assert();
-    JsValueRef exc = make_object_assert();
-    if (JsSetException(exc) != JsNoError) {
-      expect(false, "J: set exception (setup)");
-    }
-    exc = JS_INVALID_REFERENCE;
-    /* Gated: napi_wrap must return pending_exception without executing. */
-    expect_status(napi_wrap(env, reinterpret_cast<napi_value>(obj), &cnt, FinGeneric, nullptr, nullptr),
-                  napi_pending_exception, "J: wrap gated with pending");
-    /* The other get/create arms of the discipline are proven on their own
-     * without a pending exception below (a pending exception cannot pass
-     * JsCreateObject/JsSetException setup without contaminating the probe). */
-    void* ext_got = (void*)(std::uintptr_t)0xdead;
-    napi_value ext = nullptr;
-    JsValueRef cleared = JS_INVALID_REFERENCE;
-    bool had = false;
-    expect(JsHasException(&had) == JsNoError && had, "J: exception still set after gated wrap");
-    expect(JsGetAndClearException(&cleared) == JsNoError, "J: clear exception");
-    cleared = JS_INVALID_REFERENCE;
-    /* Now with no pending: create an external and prove get works. */
-    napi_handle_scope sc2 = nullptr;
-    expect_status(napi_open_handle_scope(env, &sc2), napi_ok, "J: open scope");
-    expect_status(napi_create_external(env, &cnt, FinGeneric, nullptr, &ext), napi_ok, "J: create external (no pending)");
-    expect_status(napi_get_value_external(env, ext, &ext_got), napi_ok, "J: get works (no pending)");
-    expect(ext_got == (void*)&cnt, "J: get pointer");
-    napi_close_handle_scope(env, sc2);
-    ext = nullptr;
-    obj = JS_INVALID_REFERENCE;
+    PhaseJ_PendingThenExternalAndDrop(env, &cnt);
     ClearStack();
     Collect10x(rt);
     chakra_nodeapi_test_drain_finalizers(env);
