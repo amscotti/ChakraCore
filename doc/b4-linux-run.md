@@ -472,10 +472,14 @@ macOS ARM64 host (`06d783c64`):
 - failure buckets: post-ES2025 11,759; engine-defect-on-existing 996;
   required-feature-missing 110; host 39
 - negative phase: 8,741 passed, **0 shape-suspects**, 1 marker downgrade
-- previous certified Mac run: 79,648 / 896 (98.89%); Linux delta is **+924
-  fail→pass / 16 pass→fail**, with the pass→fail set limited to
-  `decodeURI*` strict/default pairs, two Proxy/Realm cases, and one RegExp
-  literal — Linux ICU/glibc and host timing, not new engine semantics
+- previous certified Mac run: 79,648 / 896 (98.89%); the Linux delta was
+  **+924 fail→pass / 16 pass→fail**. After the `Reflect.set` fix below,
+  the pass→fail set is **two `Function/internals/Construct/base-ctor-revoked-proxy-realm.js`
+  scenarios** (cross-realm TypeError constructor); the other 14 were
+  parallel-run `decodeURI*` SIGKILLs that pass individually, and the two
+  Proxy `set/trap-is-missing-target-is-proxy.js` scenarios are fixed.
+  Linux ICU/glibc and host timing explain the decodeURI bucket, not new
+  engine semantics.
 - register: `refresh-2026-11-18` in
   `tools/test262/baseline-register.json`
 
@@ -508,3 +512,23 @@ macOS ARM64 host (`06d783c64`):
   promise continuation callback (UBSan function-type checks).
 - `lib/Common/Core/Api.cpp`: early-return zero-length `js_memcpy_s` copies
   (UBSan nonnull violation on an empty module table).
+
+### 12.5 Post-fix Test262 diagnostic (`28d3b585c`)
+
+`lib/Runtime/Language/JavascriptOperators.cpp` now returns `FALSE` from the
+compiled `[[Set]]` path when the property resolves to an accessor with no
+setter. This removes the two
+`Proxy/set/trap-is-missing-target-is-proxy.js` failures (`Reflect.set` had
+reported `true` for `RegExp.prototype.global`, which is getter-only).
+
+- `check-regression`: interpreted **2868/0**, dynapogo **2330/0**
+- Full Test262 diagnostic (dirty tree before the commit; **not published**):
+  broad **80,242 / 12,899** of 93,141; edition **79,404 / 1,140** of 80,544
+  (**98.58%**); 25 controls; **0 shape-suspects**
+- Remaining focused failure: two
+  `Function/internals/Construct/base-ctor-revoked-proxy-realm.js` scenarios,
+  where the revoked-proxy `TypeError` is constructed in the target realm.
+  Carded in [open-cards.md](open-cards.md) §12.
+- The register still points at the pre-fix `refresh-2026-11-18` run; no
+  post-fix entry was published because the two cross-realm scenarios remain
+  and the diagnostic ran on a dirty tree.
