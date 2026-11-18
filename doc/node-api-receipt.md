@@ -86,33 +86,33 @@ python3 tools/build/check_nodeapi.py --dylib zig-out/lib/libChakraNodeApi.dylib 
 # (node_api_symbol_for is v9-only/excluded and never enters the allowlist)
 ```
 
-Built-library check (both shared profiles):
+Built-library check (both shared profiles; `modernize/phase4` Q1.1):
 
 ```sh
-/tmp/opencode/cc-gate-lock.sh mise exec -- zig build libChakraNodeApi
-/tmp/opencode/cc-gate-lock.sh mise exec -- zig build check-nodeapi
-# inventory: 145 / exports: 150 / check ok
-# check_nodeapi: exports .../libChakraNodeApi.1.0.0.dylib -> 162 T symbols
-#   (150 provider + 12 runtime operator new/delete), allowlist 150
-# check_nodeapi: PASS: dylib exports exactly the allowlist (150 symbols)
+mise exec -- zig build libChakraNodeApi
+mise exec -- zig build check-nodeapi
+# inventory: 155 / exports: 161 (155 napi + 6 host) / check ok
+# check_nodeapi: exports .../libChakraNodeApi.1.0.0.dylib -> 173 T symbols
+#   (161 provider + 12 runtime operator new/delete), allowlist 161
+# check_nodeapi: PASS: dylib exports exactly the allowlist (161 symbols)
 
-/tmp/opencode/cc-gate-lock.sh mise exec -- zig build libChakraNodeApi -Dprofile=jit
-/tmp/opencode/cc-gate-lock.sh mise exec -- zig build check-nodeapi -Dprofile=jit
-# same 162 (150 + 12), PASS
+mise exec -- zig build libChakraNodeApi -Dprofile=jit
+mise exec -- zig build check-nodeapi -Dprofile=jit
+# same 173 (161 + 12), PASS
 ```
 
 The 12 runtime `T` symbols are Zig's static-libc++ replaceable
-`operator new/delete` family (`__Zdl/__Zda/__Zn/__Zna`), filtered by
-`check_nodeapi.py` (`RUNTIME_T_RE`) and reported separately. Every
-other `__Z*` (provider internals) would fail as extra. Visibility:
-provider builds with `-fvisibility=hidden`; the 145 `napi_*` export
-via `NAPI_EXTERN` default visibility, the 5 host entries carry an
-explicit `__attribute__((visibility("default")))` on their
-definitions (`lib/NodeApi/NodeApiEnv.cpp:485,582`,
-`lib/NodeApi/NodeApiHost.cpp:91,99,121`).
+`operator new/delete` family (`_ZdaPv`, `_ZdlPv`, `_Znam`, `_Znwm`, etc.),
+filtered by `check_nodeapi.py` (`RUNTIME_T_RE`) and reported separately.
+Every other `__Z*` (provider internals) would fail as extra. Visibility:
+provider builds with `-fvisibility=hidden`; the **155** `napi_*`/`node_api_*`
+symbols export via `NAPI_EXTERN` default visibility, and the **6** host entries
+carry an explicit `__attribute__((visibility("default")))` on their definitions
+(`lib/NodeApi/NodeApiEnv.cpp` and `lib/NodeApi/NodeApiHost.cpp`). (`modernize/baseline`
+had 145 + 5 = 150 exports / 162 T symbols.)
 
 Stubs: there are **no unconditional `napi_generic_failure` stubs**.
-Every one of the 145 exports a real implementation; the only
+Every one of the 155 exports a real implementation; the only
 `generic_failure` returns are conditional (OOM / stale / invalid
 state / host-less), and each such symbol still exports (proven by
 the `nm` match above). The conditional `generic_failure` paths are
@@ -1441,7 +1441,9 @@ conformance suites:
 | `mise exec -- zig build libChakraNodeApi ch-nodeapi check-nodeapi` (`test` & `jit`) | **PASS** | `161` allowlist symbols (`check-nodeapi` PASS on both profiles) |
 | `tools/nodeapi/run_probe.sh` | **ALL PASS** (`test` + `jit`) | Scopes driver at `NAPI_VERSION=10` |
 | `19/19` `test/nodeapi/probes/run_*_probe.sh` | **ALL PASS** (`test` + `jit`) | Adds `v10_multi_addon` (**266/266** + dynamic 3-addon `MULTI_ADDON_JS: PASS` + LIFO cleanup); updates `wrap` (**235/235**), `buffers` (**120/120**), `promise_script` (**218** checks), `binary` (**308/308**) |
-| `REPEATS=5 sh test/nodeapi/stress/run_stress.sh` | **ALL PASS** (`test` + `jit`) | `gc_churn` 78/78, `env_churn` 1208/1208 (`ver == 10`), `tsfn_teardown` 252 checks (0 fail), `gc_hook` `final=240` |
+| `REPEATS=5 sh test/nodeapi/stress/run_stress.sh` | **ALL PASS** (`test` + `jit`) | `gc_churn` 78/78 (`30/30` consecutive runs each on `test` & `jit` on a clean `std::thread` stack + `5/5` in `run_stress.sh`), `env_churn` 1208/1208 (`ver == 10`), `tsfn_teardown` 252 checks (0 fail), `gc_hook` `final=240` |
 | `python3 test/nodeapi/run_matrix.py --verify-manifest` | **PASS** | `manifest OK` |
 | `python3 test/nodeapi/run_matrix.py --suite all --host ch-nodeapi` | **`pass=52 skip=17 fail=0`** | `skip[needs-runtime-global]=10`, `skip[needs-node-api-version>10]=4`, `skip[provider-gap]=3` (`test_string/test.js` + 2 prior); newly PASSing: `test_error`, `test_general`, `test_reference`, `test_cannot_run_js`, `test_string/test_null`, `6_object_wrap` |
 | `python3 test/nodeapi/run_node_addon_api_matrix.py` | **`pass=52 skip=61 fail=6`** | `node-direct` 29/0; `ch-nodeapi` 23/6 (0 unexpected failures beyond the 6 PR-12 `test/object/*` V8 error text diffs) |
+| `mise exec -- zig build check` & `check-package` | **PASS** | `check` `2064 passed, 0 failed`; `check-package` deterministic tarball `5,293,501` bytes (`VERIFY PASS`) |
+| `mise exec -- zig build -Dsanitize={address,undefined} check-sanitize` | **PASS (27/27)** | ASan **27/27** & UBSan **27/27** legs clean (adds `nodeapi:v10_multi_addon_probe` alongside the 26 baseline legs) |

@@ -39,7 +39,7 @@ If you find a security issue in the Master branch of Chakracore but not in 1.11 
 
 ## Building ChakraCore
 
-> **This branch (`modernize/baseline`)** builds on macOS ARM64 with the Zig
+> **This branch (`modernize/phase4`, branched from `modernize/baseline` `35f53eae0` with `Q1.1` landed)** builds on macOS ARM64 with the Zig
 > 0.17.0 front end pinned in `mise.toml` (shared/no-JIT profiles plus the
 > ARM64 macOS `jit` profile merged 2026-10-31; see
 > [doc/modernization-plan.md](doc/modernization-plan.md) for status,

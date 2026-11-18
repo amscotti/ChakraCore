@@ -37,9 +37,27 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <thread>
 #include <vector>
 
 namespace {
+
+#if defined(__clang__)
+#define STRESS_NOINLINE_OPTNONE __attribute__((noinline, optnone))
+#elif defined(__GNUC__)
+#define STRESS_NOINLINE_OPTNONE __attribute__((noinline, optimize("O0")))
+#else
+#define STRESS_NOINLINE_OPTNONE
+#endif
+
+template <typename T>
+inline void ClearDeadRef(T& ref, T invalid_val) {
+  volatile T* slot = &ref;
+  *slot = invalid_val;
+#if defined(__clang__) || defined(__GNUC__)
+  __asm__ volatile("" : : "r"(slot) : "memory");
+#endif
+}
 
 int g_total = 0;
 int g_pass = 0;
@@ -97,8 +115,8 @@ void Collect10x(JsRuntimeHandle rt) {
   g_in_gc = prev;
 }
 
-__attribute__((noinline)) void ClearStack() {
-  constexpr int kN = 256;
+STRESS_NOINLINE_OPTNONE void ClearStack() {
+  constexpr int kN = 1024;
   volatile void* dummy[kN];
   volatile unsigned char* bp =
       reinterpret_cast<volatile unsigned char*>(dummy);
@@ -106,13 +124,16 @@ __attribute__((noinline)) void ClearStack() {
              sizeof(dummy)) {
     *bp++ = 0;
   }
+#if defined(__clang__) || defined(__GNUC__)
+  __asm__ volatile("" : : "r"(dummy) : "memory");
+#endif
 }
 
 /* --- optnone creation helpers (droppable locals die inside) --- */
 
-__attribute__((noinline, optnone)) bool CreateExternalBatch(napi_env env,
-                                                             Counter* c,
-                                                             int n) {
+STRESS_NOINLINE_OPTNONE bool CreateExternalBatch(napi_env env,
+                                                 Counter* c,
+                                                 int n) {
   napi_handle_scope sc = nullptr;
   if (napi_open_handle_scope(env, &sc) != napi_ok) return false;
   bool ok = true;
@@ -120,28 +141,28 @@ __attribute__((noinline, optnone)) bool CreateExternalBatch(napi_env env,
     napi_value ext = nullptr;
     if (napi_create_external(env, c, FinGeneric, nullptr, &ext) != napi_ok)
       ok = false;
-    ext = nullptr;
+    ClearDeadRef(ext, static_cast<napi_value>(nullptr));
   }
   if (napi_close_handle_scope(env, sc) != napi_ok) ok = false;
   return ok;
 }
 
-__attribute__((noinline, optnone)) bool CreateWrapBatch(napi_env env,
-                                                         Counter* c, int n) {
+STRESS_NOINLINE_OPTNONE bool CreateWrapBatch(napi_env env,
+                                             Counter* c, int n) {
   bool ok = true;
   for (int i = 0; i < n; i++) {
     JsValueRef obj = make_object_assert();
     if (napi_wrap(env, reinterpret_cast<napi_value>(obj), c, FinGeneric,
                   nullptr, nullptr) != napi_ok)
       ok = false;
-    obj = JS_INVALID_REFERENCE;
+    ClearDeadRef(obj, JS_INVALID_REFERENCE);
   }
   return ok;
 }
 
 /* Creates n objects + n refs (strength array: 1=strong, 0=weak),
  * drops the object locals inside this frame. Caller deletes refs. */
-__attribute__((noinline, optnone)) std::vector<napi_ref> CreateRefBatch(
+STRESS_NOINLINE_OPTNONE std::vector<napi_ref> CreateRefBatch(
     napi_env env, const std::vector<int>& strengths, bool* ok) {
   std::vector<napi_ref> refs;
   refs.reserve(strengths.size());
@@ -154,7 +175,7 @@ __attribute__((noinline, optnone)) std::vector<napi_ref> CreateRefBatch(
       if (ok) *ok = false;
     }
     refs.push_back(r);
-    obj = JS_INVALID_REFERENCE;
+    ClearDeadRef(obj, JS_INVALID_REFERENCE);
   }
   if (ok) {
     for (auto r : refs)
@@ -213,7 +234,7 @@ JsContextRef g_ctx = JS_INVALID_REFERENCE;
 
 } /* namespace */
 
-int main() {
+int RunGcChurnStress() {
   if (JsCreateRuntime(JsRuntimeAttributeNone, nullptr, &g_rt) != JsNoError) {
     std::fprintf(stderr, "FATAL: JsCreateRuntime failed\n");
     return 2;
@@ -241,31 +262,32 @@ int main() {
   }
   size_t base = chakra_nodeapi_test_root_count(env);
   expect(base == 0, "externals: baseline 0");
+  Counter ext_c;
   int ext_total = 0;
   for (int r = 0; r < kRepeats; r++) {
-    Counter c;
-    bool ok = CreateExternalBatch(env, &c, kBatch);
+    int calls_before = ext_c.calls;
+    bool ok = CreateExternalBatch(env, &ext_c, kBatch);
     ClearStack();
     Collect10x(g_rt);
-    bool pre = ok && c.calls == 0 && c.during_gc == 0 &&
+    int pre_delta = ext_c.calls - calls_before;
+    bool pre = ok && pre_delta == 0 && ext_c.during_gc == 0 &&
                chakra_nodeapi_test_wrap_queue_count(env) ==
                    static_cast<size_t>(kBatch) &&
                chakra_nodeapi_test_wrap_live_count(env) ==
                    static_cast<size_t>(kBatch);
     chakra_nodeapi_test_drain_finalizers(env);
-    ext_total += kBatch;
-    bool post = c.calls == kBatch && c.during_gc == 0 &&
+    int delta = ext_c.calls - calls_before;
+    ext_total += delta;
+    bool post = delta == kBatch && ext_c.during_gc == 0 &&
                 chakra_nodeapi_test_wrap_queue_count(env) == 0 &&
                 chakra_nodeapi_test_wrap_live_count(env) == 0 &&
                 chakra_nodeapi_test_root_count(env) == base;
     expect_repeat(pre && post, "externals", r);
     if (!(pre && post))
       std::fprintf(stderr,
-                   "  externals rep %d: pre ok=%d calls=%d queue=%zu live=%zu "
-                   "post calls=%d queue=%zu live=%zu roots=%zu base=%zu\n",
-                   r, (int)ok, c.calls,
-                   chakra_nodeapi_test_wrap_queue_count(env),
-                   chakra_nodeapi_test_wrap_live_count(env), c.calls,
+                   "  externals rep %d: pre ok=%d pre_delta=%d delta=%d "
+                   "total=%d queue=%zu live=%zu roots=%zu base=%zu\n",
+                   r, (int)ok, pre_delta, delta, ext_c.calls,
                    chakra_nodeapi_test_wrap_queue_count(env),
                    chakra_nodeapi_test_wrap_live_count(env),
                    chakra_nodeapi_test_root_count(env), base);
@@ -275,28 +297,32 @@ int main() {
   expect(ext_total == kRepeats * kBatch, "externals: total exact");
 
   /* ============ wraps: shared env, per-repeat exactness ============ */
+  Counter wrap_c;
   int wrap_total = 0;
   for (int r = 0; r < kRepeats; r++) {
-    Counter c;
-    bool ok = CreateWrapBatch(env, &c, kBatch);
+    int calls_before = wrap_c.calls;
+    bool ok = CreateWrapBatch(env, &wrap_c, kBatch);
     ClearStack();
     Collect10x(g_rt);
-    bool pre = ok && c.calls == 0 && c.during_gc == 0 &&
+    int pre_delta = wrap_c.calls - calls_before;
+    bool pre = ok && pre_delta == 0 && wrap_c.during_gc == 0 &&
                chakra_nodeapi_test_wrap_queue_count(env) ==
                    static_cast<size_t>(kBatch) &&
                chakra_nodeapi_test_wrap_live_count(env) ==
                    static_cast<size_t>(kBatch);
     chakra_nodeapi_test_drain_finalizers(env);
-    wrap_total += kBatch;
-    bool post = c.calls == kBatch && c.during_gc == 0 &&
+    int delta = wrap_c.calls - calls_before;
+    wrap_total += delta;
+    bool post = delta == kBatch && wrap_c.during_gc == 0 &&
                 chakra_nodeapi_test_wrap_queue_count(env) == 0 &&
                 chakra_nodeapi_test_wrap_live_count(env) == 0 &&
                 chakra_nodeapi_test_root_count(env) == base;
     expect_repeat(pre && post, "wraps", r);
     if (!(pre && post))
       std::fprintf(stderr,
-                   "  wraps rep %d: ok=%d calls=%d queue=%zu live=%zu roots=%zu\n",
-                   r, (int)ok, c.calls,
+                   "  wraps rep %d: ok=%d pre_delta=%d delta=%d total=%d "
+                   "queue=%zu live=%zu roots=%zu\n",
+                   r, (int)ok, pre_delta, delta, wrap_c.calls,
                    chakra_nodeapi_test_wrap_queue_count(env),
                    chakra_nodeapi_test_wrap_live_count(env),
                    chakra_nodeapi_test_root_count(env));
@@ -430,7 +456,7 @@ int main() {
               setup_ok = false;
               break;
             }
-            num = JS_INVALID_REFERENCE;
+            ClearDeadRef(num, JS_INVALID_REFERENCE);
           }
         }
         napi_close_handle_scope(denv, sc);
@@ -474,4 +500,14 @@ int main() {
     JsDisposeRuntime(g_rt);
   }
   return (g_pass == g_total) ? 0 : 1;
+}
+
+int main() {
+  /* Run on a fresh OS thread so dyld/CRT frames above main() on macOS ARM64
+   * cannot leave stale 16 KiB-aligned VM addresses above the conservative GC
+   * scan floor that alias the first SmallFinalizableHeapBlock page (rep 0). */
+  int rc = 1;
+  std::thread t([&rc]() { rc = RunGcChurnStress(); });
+  t.join();
+  return rc;
 }
