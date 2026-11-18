@@ -1,9 +1,10 @@
 # Zig integration strategy — incremental, C-ABI wedges only
 
-> **2026-11-17 update (`modernize/baseline` at `40c2fe5be`):** Since the 2026-11-09 snapshot below, `libChakraNodeApi` (`150` exports: `145` `NAPI_VERSION=8` + `5` host helpers) has landed in C++ over `JsRT`, host-`clang++` ASan/UBSan lanes (`26/26` legs clean) are wired in `build.zig`/`linux.zig`, `b5-package` creates deterministic `~5.3 MB` release tarballs, and certified ES2025 conformance stands at `98.89%`. See [vision-and-roadmap.md](vision-and-roadmap.md) for the two active Phase-4 Zig tracks that fulfill §4 cleanly without reaching into C++ GC/exception internals:
->
-> 1. **Engine-adjacent `Z1` pilot (`Q1.3`):** Implement ES2026 `Uint8Array` Base64/Hex encoding & decoding in Zig behind a flat C ABI (pure `[]const u8`/`[]u8` byte/SIMD codec; zero `Recycler` pointers, zero C++ exceptions).
+> **2026-11-18 update (`modernize/phase4` `Q1.3` landed; `modernize/baseline` stays at `35f53eae0`):**
+> 1. **Engine-adjacent `Z1` pilot (`Q1.3`) -- COMPLETED on `modernize/phase4`:** [lib/ZigCodec/u8a_codec.zig](../lib/ZigCodec/u8a_codec.zig) + [lib/ZigCodec/u8a_codec.h](../lib/ZigCodec/u8a_codec.h) (boundary contract and §3 ownership record in [z1-u8a-codec.md](z1-u8a-codec.md)) implements the freestanding Zig 0.17.0 C-ABI SIMD (`@Vector(16, u8)` / `@Vector(16, u16)`) Base64/Base64URL/Hex codec backing all 6 ES2026 `Uint8Array` methods (`fromBase64`, `fromHex`, `prototype.{toBase64,setFromBase64,toHex,setFromHex}`), compiled via `b.addObject` (`.optimize = .fast`, `.pic = true`, `.link_libc = false`, `.link_libcpp = false`) in `build.zig` & `tools/build/linux.zig` with `.visibility = .hidden` (`0` leaked `zig_u8a_*` exports in `libChakraCore.dylib`), `7/7` built-in Zig tests wired into `zig build check-selftest`, `527` Mac / `670` Linux static archive members, and `140/140` Test262 (`370/370` Q1.3 total) across interpreter and JIT.
 > 2. **Standalone Host (`H1`, "Option B"):** Build a lightweight standalone Zig + `libuv` runtime host consuming `JsRT` and [NodeApiHostApi.h](../lib/NodeApi/NodeApiHostApi.h) outside `libChakraCore`, superseding piecemeal translation of `bin/ch` as the primary host investment.
+>
+> *(Prior 2026-11-17 baseline snapshot at `40c2fe5be`: `libChakraNodeApi` `150` exports `NAPI_VERSION=8` in C++ over `JsRT`, host-`clang++` ASan/UBSan `26/26` legs clean, `b5-package` deterministic `~5.3 MB` tarballs, certified ES2025 conformance `98.89%`; `Q1.1` expanded `libChakraNodeApi` to `NAPI_VERSION=10` `161` exports and `Q1.2` lifted ES2025 to `99.06%` on `modernize/phase4`.)*
 
 Status: **recorded strategy (2026-11-09)**, following the B4 Linux x64
 completion and the five-lens swarm review. This doc records *whether,
@@ -151,3 +152,26 @@ Zig 0.17.0 (`class` input → translation failure); the N-API absence and
 translate-c/`@cImport` direction was checked against Zig documentation
 and community/issue discussion current as of this date. Re-validate the
 tooling facts when the Zig pin moves.
+
+## 10. Completed `Z1` Wedge Record (`Q1.3`, 2026-11-18, `modernize/phase4`)
+
+The first production `Z1` C-ABI SIMD wedge is landed and verified in
+`modernize/phase4`:
+
+- **Implementation & Contract:** [lib/ZigCodec/u8a_codec.zig](../lib/ZigCodec/u8a_codec.zig)
+  + [lib/ZigCodec/u8a_codec.h](../lib/ZigCodec/u8a_codec.h), with boundary
+  contract and [memory-management.md](memory-management.md) §3 ownership
+  record in [doc/z1-u8a-codec.md](z1-u8a-codec.md).
+- **Build & Symbol Isolation:** Compiled freestanding via `b.addObject`
+  (`.optimize = .fast`, `.pic = true`, `.link_libc = false`,
+  `.link_libcpp = false`) in `build.zig` and `tools/build/linux.zig`
+  outside C/C++ TU counts (`527` Mac / `670` Linux static archive members).
+  All six C-ABI exports (`zig_u8a_*`) use `.linkage = .strong, .visibility = .hidden`;
+  `nm -gU {zig-out,out/release-shared}/lib/libChakraCore.dylib | grep zig_u8a`
+  is empty (`0` leaked exports).
+- **Testing & Gates:** `7/7` built-in Zig unit tests run inside
+  `zig build check-selftest` (and standalone `zig test lib/ZigCodec/u8a_codec.zig`),
+  `test/typedarray/uint8array_base64_hex.js` passes inside `2072/0` (`test`)
+  and `2124/0` (`debug-static`), and Test262 `Uint8Array` Base64/Hex
+  passes `140/140` across both `./zig-out/bin/ch` and `./out/jit/bin/ch`
+  (default and `-maxinterpretcount:1`).

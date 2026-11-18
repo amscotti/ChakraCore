@@ -20,6 +20,8 @@ checkout (`out/test262`).
 > **Wave 3 sync (`modernize/baseline` at `35f53eae0`, code `40c2fe5be`, 2026-11-17):** Test262 on `modernize/baseline` stands at **Certified ES2025 edition conformance: 98.89% (79,648 passed / 896 failed / 80,544 scenarios)**; broad conformance **86.41% (80,486 / 12,655 / 93,141)**; failure buckets post-ES2025 `11,759`, `engine-defect-on-existing` `846`, `required-feature-missing` `34`, `host` `16`; negative phase `8,741` passed, `0` shape-suspects, `1` marker downgrade (`refresh-2026-11-17`, macOS ARM64, corpus `2e0a5676`, [baseline-register.json](../tools/test262/baseline-register.json)). This supersedes the 97.75% / 97.45% figures below, which are retained as history. Closures: §13.
 >
 > **Phase-4 `Q1.2` sync (`modernize/phase4`, 2026-11-18):** On `modernize/phase4` (macOS ARM64), `Q1.2` lifted **Certified ES2025 edition conformance to 99.06% (`79,786 passed / 758 failed / 80,544 scenarios`, `+138` net)** and **broad conformance to 86.56% (`80,624 / 12,517 / 93,141`)**; failure buckets post-ES2025 `11,759`, `engine-defect-on-existing` `717` (`-129`), `required-feature-missing` `25` (`-9`), `host` `16`; negative phase `8,741` passed, `0` shape-suspects, `1` marker downgrade; **`0` engine pass->fail regressions** (`out/test262-refresh-phase4-q12`, compared against `out/test262-refresh-20261117`). Closures: §14.
+>
+> **Phase-4 `Q1.3` sync (`modernize/phase4`, 2026-11-18):** On `modernize/phase4` (macOS ARM64), `Q1.3` shipped ES2026 Stage-4 `Error.isError` (`24/24`), `Math.sumPrecise` (`20/20`), `Array.fromAsync` (`186/186`), and `Uint8Array.{fromBase64,fromHex,prototype.{toBase64,setFromBase64,toHex,setFromHex}}` (`140/140`) backed by the first production `Z1` Zig 0.17.0 SIMD codec (`lib/ZigCodec/u8a_codec.zig`, [z1-u8a-codec.md](z1-u8a-codec.md)): **`370/370` targeted Test262** in both interpreter and JIT; full Test262 refresh (`out/test262-refresh-phase4-q13` vs `out/test262-refresh-phase4-q12`) lifted **broad conformance to 86.93% (`80,972 passed / 12,169 failed / 93,141 scenarios`, `+348` net)** (`post-ES2025` `11,759 -> 11,409`, `-350`), with **Certified ES2025 edition at 99.06% (`79,784 / 760 / 80,544`)** and **`0` ES2025 engine regressions** (`-2` strictly from `Atomics/waitAsync` `lapse >= TIMEOUT` parallel-scheduler variance re-verified at `--jobs 1`); `527` Mac / `670` Linux static archive members; gates **`2072/0`** (`test`) / **`2124/0`** (`debug-static`) / **`618/0`** (`check-fulljit`) / **`382/382`** (`check-wasm` P1). Closures: §15.
 
 ## Counts by status (updated 2026-11-17 at `06d783c64`)
 
@@ -190,7 +192,11 @@ and `modernize/phase4` `Q1.2` added `dataview_undefined_byteoffset.js`
 (`typedarray`), `q12_fn_name_order.js` (`Function`),
 `arbitrary_module_namespace_names.js` (`es6module`), and
 `regexp-q12-conformance.js` (`es7`) to **2068/2120** (`check-fulljit`
-`615 -> 617`).
+`615 -> 617`), and `Q1.3` added `error_iserror.js` (`Error`),
+`math_sumprecise.js` (`Number`), `array_fromasync.js` (`Array`), and
+`uint8array_base64_hex.js` (`typedarray`) (plus
+`ES6_proto_invalidation.js.dbg.baseline` for `Array.fromAsync`) to
+**2072/2124** (`check-fulljit` `617 -> 618`).
 - **Mac ARM64 (`c24266598` + Stage 4, re-verified at `06d783c64`):** all 4 Zig
   profiles pass (`test` **2064/0** + `check-nodeapi` `150/150`, `debug-static`
   **2116/0** + `8/8` static native suites, `release-shared` smoke+native+metadata
@@ -336,3 +342,38 @@ Closed on `modernize/phase4` only (`modernize/baseline` remains at `35f53eae0` [
 | String-literal `ModuleExportName` (`arbitrary-module-namespace-names`) | **closed on `modernize/phase4`** | **`7/16 -> 16/16`** (`+9`, `0` fails; `required-feature-missing` `34 -> 25`); `IsStringWellFormedUnicode` & `ParseModuleExportName`, `NamespaceBindingPropertyId` + `isNamespaceStar` removing `PropertyIds::star_` sentinel collision, `ModuleNamespace` integer-index + aliased re-export lookups, and ARM64 `JavascriptMath::ToInt32Core` double-space UBSan guard; pinned by `test/es6module/arbitrary_module_namespace_names.js` |
 | `RegExp` & Unicode conformance (`Symbol.replace`, `exec` `lastIndex`, `/ui` case folding, `/u`+`/v` surrogate sets) | **closed on `modernize/phase4`** | **`+10` scenarios**: `Symbol.replace` `186/4 -> 190/0`, `regexp-named-groups` `198/2 -> 200/0`, `exec/{failure,success}-lastindex-access` `4`, `unicode_full_case_folding` `2`; `MappingSource::CaseFolding` ICU 79.1 `C`+`S` + cross-plane `{0x00DF, 0x1E9E, 0x1DF95}`, `/u`+`/v` all-BMP negated `MatchCodePointSetNode`, `2^53-1` advance, raw `groups` to replacer, unconditional `ToLength(lastIndex)` under `ES6RegExSymbols`; pinned by `test/es7/regexp-q12-conformance.js` |
 | `RegExp/property-escapes/**` (`112` remaining edition fails = `56` files) | **audited (`ICU 79.1` Unicode 18.0 vs Test262 `2e0a5676` Unicode 17.0.0)** | Under `node` (`v26.5.0`, ICU `78.3` = Unicode 17.0): **56/0** pass; under `ch` (ICU `79.1` = Unicode 18.0): 100% of the `56` failing files (`112` scenarios) fail strictly on Unicode 18.0 data deltas (`49` `age=18.0` CPs `U+0558`, `U+05C8`, `U+0B53`, `U+0B54`, `U+1ADE`, `U+208F`, `U+209D`, `U+20C2`, `U+2E60`, `U+2E62`, `U+2E63`, `U+A7DD`, `U+1F1AE`; `3` `Changes_When_*` on `U+0277`; `3` `Script_Extensions_-_{Kannada,Malayalam,Telugu}` on `U+0B83`; `1` `Script_Extensions_-_Devanagari` on `U+1CF5..U+1CF6`), plus `34` astral-only Unicode 18.0 `nonMatchSymbols` additions masked by Option A's `\P{}` half-pair fallback (`90` total files differing from Unicode 17.0) |
+
+## 15. Phase-4 Q1.3 ES2026 built-ins & Z1 Zig codec closure (2026-11-18, `modernize/phase4`, macOS ARM64)
+
+Closed on `modernize/phase4` only (`modernize/baseline` remains at `35f53eae0`).
+- **Commits (`modernize/phase4`):**
+  - `639fc4748` (`feat(es2026): register Q1.3 built-in entry points`)
+  - `f0a88910f` (`feat(es2026): implement Error.isError and Math.sumPrecise`, cherry-picked from `7a651b2f1`)
+  - `a3c40f376` (`feat(es2026): implement Array.fromAsync`, cherry-picked from `fe24ec0be`)
+  - `83f894b1f` (`feat(es2026,zig): ship Uint8Array Base64/Hex with Z1 Zig SIMD codec`, cherry-picked from `16b45799f`)
+  - `7e3cdc9ae` (`test: update ES6_proto_invalidation.js.dbg.baseline for Array.fromAsync`)
+  - `d6509e13d` (`build: bump gate counts for Q1.3 tests`)
+- **Archive & build integration:** Static archive members `527` (`526` C/C++ + `u8a_codec.o`, verified on macOS `debug-static` `check-metadata`), Linux expected pins `670` (`test`/`debug-static` JIT), `579` (no-JIT), `633` (`release-shared` JIT), `542` (`release-shared` no-JIT) in `tools/build/check_metadata_linux.py` and `tools/build/test_build_tools.py` (Linux runtime execution queued in `G0`); hidden visibility verified (`nm -gU {zig-out,out/release-shared}/lib/libChakraCore.dylib | grep zig_u8a` empty).
+- **Multi-profile gates (`modernize/phase4`, macOS ARM64):**
+  - `mise exec -- zig test lib/ZigCodec/u8a_codec.zig`: `7/7` passed
+  - `mise exec -- zig build check-selftest` (includes `u8a_codec.zig` & `owned-bytes.zig`): PASS
+  - `mise exec -- zig build check-build-tools`: PASS (`96` tests OK)
+  - `mise exec -- zig build verify-bytecode`: PASS (`Bytecode is up to date`, source headers unchanged)
+  - `mise exec -- zig build check`: PASS (`2072/0` + `test-shared-basic` PASS + metadata + smoke)
+  - `mise exec -- zig build -Dprofile=debug-static check`: PASS (`2124/0` + `8/8` static native + `527` archive members + metadata + `verify-bytecode` + smoke)
+  - `mise exec -- zig build -Dprofile=release-shared check`: PASS (`test-shared-basic` + smoke + metadata)
+  - `mise exec -- zig build -Dprofile=jit check-fulljit`: PASS (`618/0`: `Basics 48/0`, `Array 123/0`, `Function 67/0`, `Regex 40/0`, `es6 224/0`, `es7 116/0`)
+  - `mise exec -- zig build -Dprofile=jit -Dwasm=true check-wasm`: PASS (`382/382` P1; `runtests` `448/5`)
+  - `mise exec -- zig build -Dprofile=jit -Dwasm=true check`: PASS (`check_wasm_p1` `382/382`, `check_jit` PASS, JIT `verify-bytecode` PASS, `check_smoke` PASS)
+- **Targeted Test262 (`370/370` PASS, `187` files, `25/25` controls):** `370/370` on BOTH `./zig-out/bin/ch` (default `-nonative` & `-maxinterpretcount:1`) AND `./out/jit/bin/ch` (default JIT & `-maxinterpretcount:1`).
+- **Full Test262 refresh (`out/test262-refresh-phase4-q13` vs `out/test262-refresh-phase4-q12`, frozen `edition-policy.json`, corpus `2e0a5676`):**
+  - Broad: `80,624 / 12,517` (`86.56%`) -> **`80,972 / 12,169` (`86.93%`)** of `93,141` scenarios (**`+348` net**: `351` `fail->pass` [`+350` Q1.3 + `1` `Atomics/waitAsync/no-spurious-wakeup-no-operation.js`] minus `3` `Atomics/waitAsync/*no-spurious-wakeup*` parallel-scheduler `lapse >= TIMEOUT` flakes).
+  - ES2025 edition: **`79,784 / 760` (`99.06%`)** of `80,544` scenarios (`79,786 / 758` in `Q1.2`; `-2` strictly from the `1` `fail->pass` vs `3` `pass->fail` `Atomics/waitAsync` `lapse >= TIMEOUT` variance under `--jobs 8` -- re-running all 4 files at `--jobs 1` passed `6/8` with all 3 new `pass->fail` files passing `6/6` in the paired run and `bigint/no-spurious-wakeup-no-operation.js` passing `2/2` standalone, confirming **`0` ES2025 edition regressions**).
+  - Buckets: `post-ES2025` `11,759 -> 11,409` (`-350`), `engine-defect-on-existing` `719`, `required-feature-missing` `25`, `host` `16`. Negative phase: `8,741` passed (`parse` `8,650`, `resolution` `33`, `runtime` `58`), **`0` shape suspects**, `1` marker downgrade.
+
+| Slice | Status | Evidence / notes |
+|---|---|---|
+| `Error.isError` | **closed on `modernize/phase4`** | **`24/24`** Test262 (`0/24 -> 24/0`); `JavascriptError::EntryIsError` (`lib/Runtime/Library/JavascriptError.cpp`); pinned by `test/Error/error_iserror.js` |
+| `Math.sumPrecise` | **closed on `modernize/phase4`** | **`20/20`** Test262 (`0/20 -> 20/0`); `Math::EntrySumPrecise` + `ExactSumAccumulator` / `FinalizeExactSum` (`lib/Runtime/Library/MathLibrary.cpp`); pinned by `test/Number/math_sumprecise.js` |
+| `Array.fromAsync` | **closed on `modernize/phase4`** | **`186/186`** Test262 (`0/186 -> 186/0`); GC-traced `ArrayFromAsyncState` / `ArrayFromAsyncCallbackFunction` (`Field(...)` barriers in `lib/Runtime/Library/JavascriptArray.{h,cpp}`); pinned by `test/Array/array_fromasync.js` + `ES6_proto_invalidation.js.dbg.baseline` |
+| `Uint8Array` Base64 & Hex (`Z1` Zig SIMD codec) | **closed on `modernize/phase4`** | **`140/140`** Test262 (`20/120 -> 140/0`; `+120` flips across all 6 methods: `fromBase64`, `fromHex`, `prototype.{toBase64,setFromBase64,toHex,setFromHex}`); freestanding Zig 0.17.0 SIMD codec `lib/ZigCodec/u8a_codec.{zig,h}` (`.visibility = .hidden`, `7/7` `zig test` in `check-selftest`, `ENTER_PINNED_SCOPE` C++ bridge in `lib/Runtime/Library/TypedArray.cpp`, contract in [z1-u8a-codec.md](z1-u8a-codec.md)); pinned by `test/typedarray/uint8array_base64_hex.js` |
