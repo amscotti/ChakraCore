@@ -239,6 +239,10 @@ namespace Js
 
             // This performs both steps 3 and 4
             time = JavascriptConversion::ToInteger(time);
+            if (time == 0.0)
+            {
+                time = +0.0;
+            }
         }
 
         // Step 2: If abs(time) > 8.64e15, return NaN.
@@ -1054,7 +1058,7 @@ namespace Js
 
         date->m_date.SetTvUtc(value);
 
-        return JavascriptNumber::ToVarNoCheck(value, scriptContext);
+        return JavascriptNumber::ToVarNoCheck(date->m_date.GetMilliSeconds(), scriptContext);
     }
 
     Var JavascriptDate::EntrySetUTCDate(RecyclableObject* function, CallInfo callInfo, ...)

@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #include "RuntimeLibraryPch.h"
@@ -330,7 +331,12 @@ namespace Js {
         {
             return JavascriptNumber::NaN;
         }
-        return CONFIG_FLAG(HighPrecisionDate)? tv : ConvertToInteger(tv);
+        tv = CONFIG_FLAG(HighPrecisionDate)? tv : ConvertToInteger(tv);
+        if (tv == 0.0)
+        {
+            tv = +0.0;
+        }
+        return tv;
     }
 
     ///----------------------------------------------------------------------------
@@ -1633,7 +1639,7 @@ LError:
         }
         else
         {
-            return tv;
+            return (tv == 0.0) ? +0.0 : tv;
         }
     }
 
@@ -1660,6 +1666,7 @@ LError:
         double tv = 0;
         DateTime::YMD *pymd = NULL;
         DateTime::YMD emptyYMD = {0};
+        DateTime::YMD origYmd = {0};
         uint count = 0;
 
         uint cvarMax;
@@ -1672,6 +1679,11 @@ LError:
             Js::JavascriptError::ThrowError(scriptContext, VBSERR_InternalError);
         }
 
+        // Capture [[DateValue]] before argument ToNumber coercions so side effects
+        // (e.g., dt.setTime(...) in valueOf()) cannot alter the initial base time.
+        double origTvUtc = m_tvUtc;
+        bool hasNonFinite = false;
+
         // Get the parameters.
         cvarMax = mpddcvar[dd];
 
@@ -1682,46 +1694,73 @@ LError:
         //
         for (ivar = 0; (ivar < (args.Info.Count-1)) && ivar < cvarMax; ++ivar)
         {
-            rgdbl[ivar] = JavascriptConversion::ToNumber(args[ivar+1],scriptContext);
+            double dbl = JavascriptConversion::ToNumber(args[ivar+1], scriptContext);
 
-            if (!Js::NumberUtilities::IsFinite(rgdbl[ivar]))
-                goto LSetNan;
-
-            rgdbl[ivar] = ConvertToInteger(rgdbl[ivar]);
+            if (!Js::NumberUtilities::IsFinite(dbl))
+            {
+                hasNonFinite = true;
+            }
+            else
+            {
+                dbl = ConvertToInteger(dbl);
+            }
+            rgdbl[ivar] = dbl;
         }
 
-        if ((count = ivar) < 1)
+        count = ivar;
+
+        if (JavascriptNumber::IsNan(origTvUtc))
         {
-            goto LSetNan;
-        }
-
-        if (JavascriptNumber::IsNan(m_tvUtc))
-        {
-
-
-            // If the current time is not finite, the only way we can end up
-            // with non-NaN is for setFullYear/setYear.
-            // See ES5 15.9.5.40, ES5 B.2.5.
+            // If the original time value is NaN, only setFullYear/setUTCFullYear/setYear
+            // use a +0 base (ES2025); all other set* methods return NaN without overwriting
+            // m_tvUtc/m_grfval (preserving any mutation made during ToNumber).
             if (!(DateData::FullYear == dd || DateData::Year == dd))
+            {
+                return JavascriptNumber::NaN;
+            }
+            if (count < 1 || hasNonFinite)
             {
                 goto LSetNan;
             }
             pymd = &emptyYMD;           // We need mon, mday, time to be 0.
-            // Fall through to DateData::Year and DataData::FullYear cases below.
+            // Fall through to DateData::Year and DateData::FullYear cases below.
         }
         else
         {
-            if (fUtc)
+            if (count < 1 || hasNonFinite)
             {
-                EnsureYmdUtc();
-                pymd = &m_ymdUtc;
-                tv = m_tvUtc;
+                goto LSetNan;
+            }
+
+            if (m_tvUtc == origTvUtc)
+            {
+                if (fUtc)
+                {
+                    EnsureYmdUtc();
+                    pymd = &m_ymdUtc;
+                    tv = m_tvUtc;
+                }
+                else
+                {
+                    EnsureYmdLcl(scriptContext);
+                    pymd = &m_ymdLcl;
+                    tv = m_tvLcl;
+                }
             }
             else
             {
-                EnsureYmdLcl(scriptContext);
-                pymd = &m_ymdLcl;
-                tv = m_tvLcl;
+                // valueOf() mutated this Date's [[DateValue]]; compute YMD/time from origTvUtc
+                // instead of reading the mutated m_tvUtc/m_ymdUtc/m_ymdLcl fields.
+                if (fUtc)
+                {
+                    tv = origTvUtc;
+                }
+                else
+                {
+                    tv = GetTvLcl(origTvUtc, scriptContext);
+                }
+                GetYmdFromTv(tv, &origYmd);
+                pymd = &origYmd;
             }
         }
 
