@@ -38,6 +38,7 @@ namespace Js
         // Below functions are used by debugger to identify and emit event handler information
         virtual bool IsBoundFunction() const { return true; }
         JavascriptFunction * GetTargetFunction() const;
+        RecyclableObject * GetDirectTargetFunction() const { return targetFunction; }
         // Below functions are used by heap enumerator
         uint GetArgsCountForHeapEnum() { return count;}
         Field(Var)* GetArgsForHeapEnum() { return boundArgs;}

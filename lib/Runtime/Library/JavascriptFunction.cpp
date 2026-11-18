@@ -483,6 +483,7 @@ using namespace Js;
         Arguments outArgs(CallInfo(callFlag, 0), nullptr);
 
         Var stackArgs[STACK_ARGS_ALLOCA_THRESHOLD];
+        Var combinedStackArgs[STACK_ARGS_ALLOCA_THRESHOLD];
 
         if (nullptr == argArray)
         {
@@ -572,7 +573,128 @@ using namespace Js;
 
         if (isConstruct)
         {
-            return JavascriptFunction::CallAsConstructor(pFunc, overridingNewTarget, outArgs, scriptContext);
+            RecyclableObject* effectiveTarget = pFunc;
+            Var effectiveNewTarget = overridingNewTarget;
+
+            if (VarIs<BoundFunction>(effectiveTarget))
+            {
+                // ES2025 10.4.1.2 BoundFunction [[Construct]]: unwrap bound
+                // targets, apply SameValue(boundFn, newTarget) -> targetFn
+                // substitution, and prepend bound arguments after argArray
+                // extraction (CreateListFromArrayLike).
+                uint32 totalBoundArgs = 0;
+                while (VarIs<BoundFunction>(effectiveTarget))
+                {
+                    BoundFunction* boundFunc = UnsafeVarTo<BoundFunction>(effectiveTarget);
+                    totalBoundArgs = UInt32Math::Add(totalBoundArgs, boundFunc->GetArgsCountForHeapEnum());
+                    if (totalBoundArgs >= USHORT_MAX)
+                    {
+                        JavascriptError::ThrowRangeError(scriptContext, JSERR_ArgListTooLarge);
+                    }
+                    RecyclableObject* nextTarget = boundFunc->GetDirectTargetFunction();
+                    if (nextTarget == nullptr)
+                    {
+                        AssertMsg(false, "BoundFunction without a target");
+                        break;
+                    }
+                    if (effectiveNewTarget != nullptr && JavascriptConversion::SameValue(boundFunc, effectiveNewTarget))
+                    {
+                        effectiveNewTarget = nextTarget;
+                    }
+                    effectiveTarget = nextTarget;
+                }
+
+                if (totalBoundArgs > 0)
+                {
+                    uint32 totalCount = UInt32Math::Add(totalBoundArgs, (uint32)outArgs.Info.Count);
+                    if (totalCount >= USHORT_MAX)
+                    {
+                        JavascriptError::ThrowRangeError(scriptContext, JSERR_ArgListTooLarge);
+                    }
+
+                    Var* combinedValues = nullptr;
+                    if (totalCount > STACK_ARGS_ALLOCA_THRESHOLD)
+                    {
+                        PROBE_STACK(scriptContext, totalCount * sizeof(Var) + Js::Constants::MinStackDefault);
+                        combinedValues = (Var*)_alloca(totalCount * sizeof(Var));
+                    }
+                    else
+                    {
+                        combinedValues = combinedStackArgs;
+                    }
+
+                    for (uint i = 1; i < outArgs.Info.Count; i++)
+                    {
+                        combinedValues[totalBoundArgs + i] = outArgs.Values[i];
+                    }
+
+                    // Fill right-to-left so innermost bound arguments precede outer ones.
+                    uint32 writePos = 1 + totalBoundArgs;
+                    RecyclableObject* cur = pFunc;
+                    while (VarIs<BoundFunction>(cur))
+                    {
+                        BoundFunction* boundFunc = UnsafeVarTo<BoundFunction>(cur);
+                        uint count = boundFunc->GetArgsCountForHeapEnum();
+                        if (count > 0)
+                        {
+                            writePos -= count;
+                            Field(Var)* boundArgs = boundFunc->GetArgsForHeapEnum();
+                            for (uint i = 0; i < count; i++)
+                            {
+                                combinedValues[writePos + i] = CrossSite::MarshalVar(scriptContext, boundArgs[i]);
+                            }
+                        }
+                        RecyclableObject* nextTarget = boundFunc->GetDirectTargetFunction();
+                        if (nextTarget == nullptr)
+                        {
+                            break;
+                        }
+                        cur = nextTarget;
+                    }
+                    Assert(writePos == 1);
+
+                    outArgs.Info.Count = totalCount;
+                    outArgs.Values = combinedValues;
+                }
+
+                effectiveTarget = VarTo<RecyclableObject>(CrossSite::MarshalVar(scriptContext, effectiveTarget));
+                if (effectiveNewTarget != nullptr)
+                {
+                    effectiveNewTarget = CrossSite::MarshalVar(scriptContext, effectiveNewTarget);
+                }
+            }
+
+            // Skip pre-creating the default object when the target constructor
+            // allocates its own instance and invokes OrdinaryCreateFromConstructor
+            // at its spec step (SkipDefaultNewObject built-ins, and class
+            // constructors whose CallAsConstructor path replaces slot 0 with
+            // newTarget). Leave JavascriptProxy pre-created here so the
+            // no-trap FunctionCallTrap receives the newTarget-derived object.
+            bool skipCreateFromConstructor = false;
+            if (VarIs<JavascriptFunction>(effectiveTarget))
+            {
+                FunctionInfo* funcInfo = UnsafeVarTo<JavascriptFunction>(effectiveTarget)->GetFunctionInfo();
+                if ((funcInfo->GetAttributes() & FunctionInfo::SkipDefaultNewObject) != 0 ||
+                    (UnsafeVarTo<JavascriptFunction>(effectiveTarget)->IsScriptFunction() && funcInfo->IsClassConstructor()))
+                {
+                    skipCreateFromConstructor = true;
+                }
+            }
+
+            if (skipCreateFromConstructor)
+            {
+                outArgs.Values[0] = scriptContext->GetLibrary()->GetUndefined();
+            }
+            else if (effectiveNewTarget != nullptr)
+            {
+                outArgs.Values[0] = JavascriptOperators::CreateFromConstructor(VarTo<RecyclableObject>(effectiveNewTarget), scriptContext);
+            }
+            else
+            {
+                outArgs.Values[0] = thisVar;
+            }
+
+            return JavascriptFunction::CallAsConstructor(effectiveTarget, effectiveNewTarget, outArgs, scriptContext);
         }
         else
         {
@@ -904,6 +1026,7 @@ using namespace Js;
 
         const unsigned STACK_ARGS_ALLOCA_THRESHOLD = 8; // Number of stack args we allow before using _alloca
         Var stackArgs[STACK_ARGS_ALLOCA_THRESHOLD];
+        Var combinedStackArgs[STACK_ARGS_ALLOCA_THRESHOLD];
         Var* newValues = args.Values;
         CallFlags newFlags = args.Info.Flags;
 
@@ -1154,6 +1277,7 @@ using namespace Js;
         // Allocate (if needed) space for the expanded arguments.
         Arguments outArgs(CallInfo(args.Info.Flags, spreadSize), nullptr);
         Var stackArgs[STACK_ARGS_ALLOCA_THRESHOLD];
+        Var combinedStackArgs[STACK_ARGS_ALLOCA_THRESHOLD];
         size_t outArgsSize = 0;
         if (actualLength > STACK_ARGS_ALLOCA_THRESHOLD)
         {

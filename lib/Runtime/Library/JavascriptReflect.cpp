@@ -508,12 +508,6 @@ namespace Js
             newTarget = target;
         }
 
-        RecyclableObject* thisArg = VarTo<RecyclableObject>(undefinedValue);
-        if (newTarget != nullptr)
-        {
-            thisArg = JavascriptOperators::CreateFromConstructor(VarTo<RecyclableObject>(newTarget), scriptContext);
-        }
-
         Var argArray = args.Info.Count > 2 ? args[2] : undefinedValue;
         AnalysisAssert(argArray != nullptr);
         if (!(JavascriptOperators::IsObjectType(JavascriptOperators::GetTypeId(argArray))))
@@ -521,6 +515,9 @@ namespace Js
             JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_NeedArrayLike, _u("Reflect.construct"));
         }
 
-        return JavascriptFunction::ConstructHelper(VarTo<RecyclableObject>(target), thisArg, newTarget, argArray, scriptContext);
+        // Defer OrdinaryCreateFromConstructor(newTarget) until after argArray
+        // element extraction (CreateListFromArrayLike) inside CalloutHelper<true>,
+        // and let SkipDefaultNewObject / class constructors run it at their spec step.
+        return JavascriptFunction::ConstructHelper(VarTo<RecyclableObject>(target), undefinedValue, newTarget, argArray, scriptContext);
     }
 }

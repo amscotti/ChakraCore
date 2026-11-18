@@ -121,6 +121,13 @@
   </test>
   <test>
     <default>
+      <files>dataview_undefined_byteoffset.js</files>
+      <tags>typedarray</tags>
+      <compile-flags>-args summary -endargs</compile-flags>
+    </default>
+  </test>
+  <test>
+    <default>
       <files>reflect_defineProperty.js</files>
       <tags>typedarray</tags>
     </default>

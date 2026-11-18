@@ -106,9 +106,7 @@ var tests = [
                 new ArrayBuffer(0, { get maxByteLength() { throw poison; } });
             }, Error, "maxByteLength getter abrupt completion");
 
-            // byteLength/maxByteLength validation is independent of newTarget
-            // prototype handling (Chakra's Reflect.construct pre-creates the
-            // result object and reads newTarget.prototype itself).
+            // byteLength/maxByteLength validation precedes OrdinaryCreateFromConstructor.
             var caught;
             try {
                 new ArrayBuffer(10, { maxByteLength: 0 });
@@ -529,38 +527,37 @@ var tests = [
             assert.throws(function () { fixed.byteOffset; }, TypeError, "fixed DataView byteOffset OOB");
             assert.throws(function () { fixed.getUint8(0); }, TypeError, "fixed DataView access OOB");
 
-            function secondReadTarget(action) {
-                var reads = 0;
+            function singleReadTarget(action) {
+                var state = { reads: 0 };
                 var target = function () { }.bind(null);
                 Object.defineProperty(target, "prototype", {
                     get: function () {
-                        reads++;
-                        if (reads === 1) {
-                            return {};
-                        }
+                        state.reads++;
                         return action();
                     }
                 });
-                return target;
+                return { target: target, state: state };
             }
 
             buffer = new ArrayBuffer(8, { maxByteLength: 16 });
-            var detachOnSecondRead = secondReadTarget(function () {
+            var detachOnRead = singleReadTarget(function () {
                 buffer.transfer();
                 return {};
             });
             assert.throws(function () {
-                Reflect.construct(DataView, [buffer, 0, 4], detachOnSecondRead);
+                Reflect.construct(DataView, [buffer, 0, 4], detachOnRead.target);
             }, TypeError, "DataView revalidates detach from the final prototype read");
+            assert.areEqual(1, detachOnRead.state.reads, "newTarget.prototype is read once");
 
             buffer = new ArrayBuffer(8, { maxByteLength: 16 });
-            var shrinkOnSecondRead = secondReadTarget(function () {
+            var shrinkOnRead = singleReadTarget(function () {
                 buffer.resize(2);
                 return {};
             });
             assert.throws(function () {
-                Reflect.construct(DataView, [buffer, 0, 4], shrinkOnSecondRead);
+                Reflect.construct(DataView, [buffer, 0, 4], shrinkOnRead.target);
             }, RangeError, "DataView revalidates shrink from the final prototype read");
+            assert.areEqual(1, shrinkOnRead.state.reads, "newTarget.prototype is read once");
 
             buffer = new ArrayBuffer(1);
             var detached = new DataView(buffer);
