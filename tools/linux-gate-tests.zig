@@ -45,10 +45,10 @@ test "linux parameterized profile, glibc, ICU, and no-jit contracts" {
     try std.testing.expect(linux.uvernumMatchesMajor("#define U_ICU_VERSION_SHORT \"72\"\n", "72"));
     try std.testing.expect(!linux.uvernumMatchesMajor("#define U_ICU_VERSION_SHORT \"72\"\n", "74"));
 
-    try std.testing.expectEqual(@as(u32, 684), linux.expectedCompileCount(.@"test", true));
-    try std.testing.expectEqual(@as(u32, 593), linux.expectedCompileCount(.@"test", false));
-    try std.testing.expectEqual(@as(u32, 682), linux.expectedCompileCount(.debug_static, true));
-    try std.testing.expectEqual(@as(u32, 647), linux.expectedCompileCount(.release_shared, true));
+    try std.testing.expectEqual(@as(u32, 690), linux.expectedCompileCount(.@"test", true));
+    try std.testing.expectEqual(@as(u32, 599), linux.expectedCompileCount(.@"test", false));
+    try std.testing.expectEqual(@as(u32, 688), linux.expectedCompileCount(.debug_static, true));
+    try std.testing.expectEqual(@as(u32, 653), linux.expectedCompileCount(.release_shared, true));
 }
 
 test "linux sanitizer options, install prefixes, and gate applicability" {

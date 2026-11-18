@@ -407,7 +407,7 @@ pub fn isExcludedStaticObj(src: []const u8, profile: Profile, jit: bool) bool {
 }
 
 pub fn expectedCompileCount(profile: Profile, jit: bool) u32 {
-    var count: u32 = 684;
+    var count: u32 = 690;
     if (!jit) count -= 91;
     if (isReleaseProfile(profile)) count -= 37;
     if (isStaticProfile(profile)) count = count - 3 + @as(u32, @intCast(mac_tables.ch_static_extra_cxx.len));
@@ -434,12 +434,12 @@ test "linux group, define, and compile-count filtering across profiles" {
     try std.testing.expect(isExcludedStaticObj("lib/wabt/src/ast.cc", .release_shared, true));
     try std.testing.expect(!isExcludedStaticObj("lib/wabt/src/ast.cc", .debug_static, true));
 
-    try std.testing.expectEqual(@as(u32, 684), expectedCompileCount(.@"test", true));
-    try std.testing.expectEqual(@as(u32, 593), expectedCompileCount(.@"test", false));
-    try std.testing.expectEqual(@as(u32, 647), expectedCompileCount(.release_shared, true));
-    try std.testing.expectEqual(@as(u32, 556), expectedCompileCount(.release_shared, false));
-    try std.testing.expectEqual(@as(u32, 682), expectedCompileCount(.debug_static, true));
-    try std.testing.expectEqual(@as(u32, 591), expectedCompileCount(.debug_static, false));
+    try std.testing.expectEqual(@as(u32, 690), expectedCompileCount(.@"test", true));
+    try std.testing.expectEqual(@as(u32, 599), expectedCompileCount(.@"test", false));
+    try std.testing.expectEqual(@as(u32, 653), expectedCompileCount(.release_shared, true));
+    try std.testing.expectEqual(@as(u32, 562), expectedCompileCount(.release_shared, false));
+    try std.testing.expectEqual(@as(u32, 688), expectedCompileCount(.debug_static, true));
+    try std.testing.expectEqual(@as(u32, 597), expectedCompileCount(.debug_static, false));
 }
 
 fn appendTuFlags(ctx: *const Ctx, run: *std.Build.Step.Run, g: *const tables.Group, lang: Lang) void {

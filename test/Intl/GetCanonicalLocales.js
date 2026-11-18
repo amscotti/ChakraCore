@@ -71,19 +71,27 @@ var tests = [
             assert.areEqual(Intl.getCanonicalLocales(['zh-hans-cn']), ['zh-Hans-CN'], "Chinese (zh) Han Simplified (Hans) as used in China (CN)");
             assert.areEqual(Intl.getCanonicalLocales(['zh-hant-hk']), ['zh-Hant-HK'], "Chinese (zh) Han Traditional (Hant) as used in Hong Kong (HK)");
 
-            // language-extlang form and other non-preferred forms normalize to preferred ISO 639-3
-            // This should be handled implicitly by canonicalization routine (no knowledge of language tags required),
-            // but we make sure it works for some actual languages in any case.
-            // RFC 5646 2.1:
-            //      language = 2-3ALPHA ["-" extlang]
-            //      extlang  = 2-3ALPHA *2("-" 3ALPHA)
-            // https://en.wikipedia.org/wiki/IETF_language_tag#ISO_639-3_and_ISO_639-1
-            let mandarinChinese = ['cmn', 'zh-cmn']; // Mandarin Chinese (language-extlang: zh-cmn; prefer ISO 639-3: cmn)
-            let minNanChinese = ['nan', 'zh-nan', 'zh-min-nan']; // Min-Nan Chinese (ISO 639-3: nan)
-            let hakkaChinese = ['hak', 'zh-hak', 'zh-hakka', 'i-hak']; // Hakka Chinese (ISO 639-3: hak)
-            let chineseIn = [].concat(mandarinChinese, minNanChinese, hakkaChinese);
-            let chineseOut = [].concat(mandarinChinese[0], minNanChinese[0], hakkaChinese[0]); // after de-dup should be only these three preferred codes
-            assert.areEqual(Intl.getCanonicalLocales(chineseIn), chineseOut, "Chinese language-extlang and other forms map to preferred ISO 639-3 codes");
+            if (WScript.Platform.INTL_LIBRARY === "icu") {
+                // UTS #35 section 3.2 & 3.2.1 canonicalization: grandfathered/deprecated tags map to CLDR aliases,
+                // while extlang and irregular grandfathered tags are not structurally valid Unicode locale IDs.
+                assert.areEqual(Intl.getCanonicalLocales(['cmn', 'zh-guoyu', 'nan', 'hak', 'zh-hakka']), ['zh', 'nan', 'hak'],
+                    "Chinese UTS #35 canonicalization and deduplication");
+                ['zh-cmn', 'zh-nan', 'zh-min-nan', 'zh-hak', 'i-hak'].forEach(testRangeError);
+            } else {
+                // language-extlang form and other non-preferred forms normalize to preferred ISO 639-3
+                // This should be handled implicitly by canonicalization routine (no knowledge of language tags required),
+                // but we make sure it works for some actual languages in any case.
+                // RFC 5646 2.1:
+                //      language = 2-3ALPHA ["-" extlang]
+                //      extlang  = 2-3ALPHA *2("-" 3ALPHA)
+                // https://en.wikipedia.org/wiki/IETF_language_tag#ISO_639-3_and_ISO_639-1
+                let mandarinChinese = ['cmn', 'zh-cmn']; // Mandarin Chinese (language-extlang: zh-cmn; prefer ISO 639-3: cmn)
+                let minNanChinese = ['nan', 'zh-nan', 'zh-min-nan']; // Min-Nan Chinese (ISO 639-3: nan)
+                let hakkaChinese = ['hak', 'zh-hak', 'zh-hakka', 'i-hak']; // Hakka Chinese (ISO 639-3: hak)
+                let chineseIn = [].concat(mandarinChinese, minNanChinese, hakkaChinese);
+                let chineseOut = [].concat(mandarinChinese[0], minNanChinese[0], hakkaChinese[0]); // after de-dup should be only these three preferred codes
+                assert.areEqual(Intl.getCanonicalLocales(chineseIn), chineseOut, "Chinese language-extlang and other forms map to preferred ISO 639-3 codes");
+            }
 
             // canonicalization of -u- extension keys
             // V8 and CC-ICU convert boolean keys (kn) to boolean string values (including giving them default values),
@@ -126,8 +134,11 @@ var tests = [
             assert.areEqual(Intl.getCanonicalLocales('xx-abcd-zz'), ['xx-Abcd-ZZ'],
                 "xx-Abcd-ZZ: [unsupported language xx] using [unsupported script Abcd] as used in [unsupported locale ZZ]");
 
-            // TODO (doilij): Investigate what is correct/allowable here (Microsoft/ChakraCore#2964)
-            equal("xx-zzz", "zzz", gcl("xx-zzz")[0]);
+            if (WScript.Platform.INTL_LIBRARY === "icu") {
+                testRangeError("xx-zzz");
+            } else {
+                equal("xx-zzz", "zzz", gcl("xx-zzz")[0]);
+            }
 
             // See discussion of defaulting above
             if (WScript.Platform.ICU_VERSION < 62) {

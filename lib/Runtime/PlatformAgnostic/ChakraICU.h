@@ -33,14 +33,26 @@
 #define U_HIDE_OBSOLETE_API 1
 #define U_HIDE_INTERNAL_API 1
 
+#include "unicode/ubrk.h"
 #include "unicode/ucal.h"
+#include "unicode/uchar.h"
 #include "unicode/uclean.h"
 #include "unicode/ucol.h"
+#include "unicode/ucurr.h"
 #include "unicode/udat.h"
 #include "unicode/udatpg.h"
+#include "unicode/udisplaycontext.h"
+#include "unicode/uformattedvalue.h"
+#include "unicode/uldnames.h"
+#include "unicode/ulistformatter.h"
 #include "unicode/uloc.h"
+#include "unicode/ulocale.h"
+#include "unicode/ulocbuilder.h"
 #include "unicode/ulocdata.h"
 #include "unicode/unumsys.h"
+#include "unicode/ureldatefmt.h"
+#include "unicode/ures.h"
+#include "unicode/uscript.h"
 #include "unicode/ustring.h"
 #include "unicode/unorm2.h"
 #include "unicode/upluralrules.h"
@@ -95,6 +107,16 @@ namespace PlatformAgnostic
         typedef ScopedICUObject<UNumberingSystem *, unumsys_close> ScopedUNumberingSystem;
         typedef ScopedICUObject<UDateTimePatternGenerator *, udatpg_close> ScopedUDateTimePatternGenerator;
         typedef ScopedICUObject<UFieldPositionIterator *, ufieldpositer_close> ScopedUFieldPositionIterator;
+        typedef ScopedICUObject<ULocale *, ulocale_close> ScopedULocale;
+        typedef ScopedICUObject<ULocaleBuilder *, ulocbld_close> ScopedULocaleBuilder;
+        typedef ScopedICUObject<UListFormatter *, ulistfmt_close> ScopedUListFormatter;
+        typedef ScopedICUObject<UFormattedList *, ulistfmt_closeResult> ScopedUFormattedList;
+        typedef ScopedICUObject<URelativeDateTimeFormatter *, ureldatefmt_close> ScopedURelativeDateTimeFormatter;
+        typedef ScopedICUObject<UFormattedRelativeDateTime *, ureldatefmt_closeResult> ScopedUFormattedRelativeDateTime;
+        typedef ScopedICUObject<UConstrainedFieldPosition *, ucfpos_close> ScopedUConstrainedFieldPosition;
+        typedef ScopedICUObject<ULocaleDisplayNames *, uldn_close> ScopedULocaleDisplayNames;
+        typedef ScopedICUObject<UBreakIterator *, ubrk_close> ScopedUBreakIterator;
+        typedef ScopedICUObject<UResourceBundle *, ures_close> ScopedUResourceBundle;
 
         inline int GetICUMajorVersion()
         {

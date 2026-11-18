@@ -4,6 +4,14 @@
 //-------------------------------------------------------------------------------------------------------
 #include "RuntimeLibraryPch.h"
 #include "EngineInterfaceObject.h"
+#ifdef INTL_ICU
+#include "Library/IntlModernShared.h"
+#include "Library/IntlLocale.h"
+#include "Library/IntlListFormat.h"
+#include "Library/IntlRelativeTimeFormat.h"
+#include "Library/IntlDisplayNames.h"
+#include "Library/IntlSegmenter.h"
+#endif
 
 namespace Js
 {

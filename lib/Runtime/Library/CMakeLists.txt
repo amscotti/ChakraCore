@@ -42,7 +42,13 @@ set(CRLIB_SOURCE_CODES
     ExternalLibraryBase.cpp
     ForInObjectEnumerator.cpp
     GlobalObject.cpp
+    IntlDisplayNames.cpp
     IntlEngineInterfaceExtensionObject.cpp
+    IntlListFormat.cpp
+    IntlLocale.cpp
+    IntlModernShared.cpp
+    IntlRelativeTimeFormat.cpp
+    IntlSegmenter.cpp
     JSON.cpp
     JSONParser.cpp
     JSONScanner.cpp

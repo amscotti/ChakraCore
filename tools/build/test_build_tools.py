@@ -148,7 +148,7 @@ class B1VerdictTests(unittest.TestCase):
                 [sys.executable, str(ROOT / "tools/build-contract/validate_contract.py"),
                  "--database", str(database)], capture_output=True, text=True,
                 timeout=30)
-            self.assertIn("MISSING from DB (540)", proc.stdout)
+            self.assertIn("MISSING from DB (546)", proc.stdout)
             self.assertEqual(proc.returncode, 1)
 
     @unittest.skipUnless(sys.platform == "darwin" and platform.machine() in ("arm64", "aarch64")
@@ -1353,21 +1353,21 @@ class CheckMetadataLinuxParamTests(unittest.TestCase):
         self.assertEqual(cml.want_icu_needed("76"),
                          ("libicuuc.so.76", "libicui18n.so.76"))
         self.assertEqual(cml.expected_archive_members("test", jit=True)[
-            "lib/libChakraCoreStatic.a"], 670)
+            "lib/libChakraCoreStatic.a"], 676)
         self.assertEqual(cml.expected_archive_members("test", jit=False)[
-            "lib/libChakraCoreStatic.a"], 579)
+            "lib/libChakraCoreStatic.a"], 585)
         self.assertEqual(
             cml.expected_archive_members("release-shared", jit=True)[
-                "lib/libChakraCoreStatic.a"], 633)
+                "lib/libChakraCoreStatic.a"], 639)
         self.assertEqual(
             cml.expected_archive_members("release-shared", jit=False)[
-                "lib/libChakraCoreStatic.a"], 542)
+                "lib/libChakraCoreStatic.a"], 548)
         self.assertEqual(
             cml.expected_archive_members("debug-static", jit=True),
-            {"lib/libChakraCoreStatic.a": 670})
+            {"lib/libChakraCoreStatic.a": 676})
         self.assertEqual(
             cml.expected_archive_members("debug-static", jit=False),
-            {"lib/libChakraCoreStatic.a": 579})
+            {"lib/libChakraCoreStatic.a": 585})
 
 
 class StyleChecksPortableTests(unittest.TestCase):

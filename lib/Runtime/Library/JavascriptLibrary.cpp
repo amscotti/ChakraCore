@@ -19,6 +19,14 @@
 #include "Library/ForInObjectEnumerator.h"
 #include "Library/EngineInterfaceObject.h"
 #include "Library/IntlEngineInterfaceExtensionObject.h"
+#ifdef INTL_ICU
+#include "Library/IntlModernShared.h"
+#include "Library/IntlLocale.h"
+#include "Library/IntlListFormat.h"
+#include "Library/IntlRelativeTimeFormat.h"
+#include "Library/IntlDisplayNames.h"
+#include "Library/IntlSegmenter.h"
+#endif
 #ifdef ENABLE_JS_BUILTINS
 #include "Library/JsBuiltInEngineInterfaceExtensionObject.h"
 #endif
@@ -5811,6 +5819,15 @@ namespace Js
 #ifdef ENABLE_INTL_OBJECT
     void JavascriptLibrary::ResetIntlObject()
     {
+#ifdef INTL_ICU
+        intlLocalePrototype = nullptr;
+        intlListFormatPrototype = nullptr;
+        intlRelativeTimeFormatPrototype = nullptr;
+        intlDisplayNamesPrototype = nullptr;
+        intlSegmenterPrototype = nullptr;
+        intlSegmentsPrototype = nullptr;
+        intlSegmentIteratorPrototype = nullptr;
+#endif
         IntlObject = DynamicObject::New(
             recycler,
             DynamicType::New(scriptContext,
@@ -5847,13 +5864,43 @@ namespace Js
 
     bool JavascriptLibrary::InitializeIntlObject(DynamicObject* IntlObject, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)
     {
-        typeHandler->Convert(IntlObject, mode,  /*initSlotCapacity*/ 2);
+        typeHandler->Convert(IntlObject, mode,  /*initSlotCapacity*/ 12);
 
         auto intlInitializer = [&](IntlEngineInterfaceExtensionObject* intlExtension, ScriptContext * scriptContext, DynamicObject* intlObject) ->void
         {
             intlExtension->InjectIntlLibraryCode(scriptContext, intlObject, IntlInitializationType::Intl);
         };
         IntlObject->GetLibrary()->InitializeIntlForPrototypes(intlInitializer);
+
+#ifdef INTL_ICU
+        ScriptContext* scriptContext = IntlObject->GetScriptContext();
+        JavascriptLibrary* library = IntlObject->GetLibrary();
+        if (scriptContext->IsIntlEnabled() && JavascriptOperators::HasProperty(IntlObject, PropertyIds::Collator))
+        {
+            library->AddMember(
+                IntlObject,
+                PropertyIds::_symbolToStringTag,
+                library->CreateStringFromCppLiteral(_u("Intl")),
+                PropertyConfigurable);
+
+            PropertyId gclPid = scriptContext->GetOrAddPropertyIdTracked(_u("getCanonicalLocales"), 19);
+            if (JavascriptOperators::HasProperty(IntlObject, gclPid))
+            {
+                IntlObject->DeleteProperty(gclPid, PropertyOperation_None);
+            }
+            library->AddFunctionToLibraryObject(
+                IntlObject,
+                gclPid,
+                &IntlModernBuiltIns::EntryInfo::GetCanonicalLocales,
+                1);
+
+            IntlLocale::Initialize(library, IntlObject);
+            IntlListFormat::Initialize(library, IntlObject);
+            IntlRelativeTimeFormat::Initialize(library, IntlObject);
+            IntlDisplayNames::Initialize(library, IntlObject);
+            IntlSegmenter::Initialize(library, IntlObject);
+        }
+#endif
 
         return true;
     }

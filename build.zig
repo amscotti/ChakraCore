@@ -1028,17 +1028,17 @@ pub fn build(b: *std.Build) void {
             }
         }
     }
-    // Static: 540 - 3 dylib TUs + TestHooks in ch = 538.
-    // jit adds the 89 backend TUs on top of the shared 540 => 629.
-    // jit+wasm adds 56 more => 685.
-    const expect_base: u32 = if (is_static) 538 else 540;
+    // Static: 546 - 3 dylib TUs + TestHooks in ch = 544.
+    // jit adds the 89 backend TUs on top of the shared 546 => 635.
+    // jit+wasm adds 56 more => 691.
+    const expect_base: u32 = if (is_static) 544 else 546;
     const expect_total: u32 = expect_base + backend_expected + wasm_expected;
     std.debug.assert(n == expect_total);
     const expect_singular: usize = if (is_static) 0 else 3;
     std.debug.assert(singular_libs.items.len == expect_singular);
 
     // Z1 leaf Zig SIMD codec (doc/zig-strategy.md section 5.3). Built outside C/C++ TU count
-    // (`n`) so compile_commands / contract TU count remains 540.
+    // (`n`) so compile_commands / contract TU count remains 546.
     const u8a_codec_obj = b.addObject(.{
         .name = "u8a_codec",
         .root_module = b.createModule(.{

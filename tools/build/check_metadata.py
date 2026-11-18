@@ -65,10 +65,9 @@ WANT_STACK_BY_PROFILE = {"test": 8388608, "debug-static": 0,
                          "release-shared": 8388608}
 # Static archive member count, legacy-exact on both sides
 # (ar t: 524 members in build-legacy-debug and out/debug-static at the
-# B3 baseline; C2-S13 added JavascriptWeakRef.cpp and
-# JavascriptFinalizationRegistry.cpp to BOTH build lists, so the
-# legacy-exact count is 526 C/C++ + 1 Z1 Zig codec object = 527).
-WANT_STATIC_MEMBERS = 527
+# B3 baseline; C2-S13 added 2 TUs; I1 added 6 TUs => 532 C/C++ + 1 Z1
+# Zig codec object = 533).
+WANT_STATIC_MEMBERS = 533
 STATIC_ARCHIVE = "lib/libChakraCoreStatic.a"
 
 EXECUTABLES = ("bin/ch", "bin/GCStress")
@@ -343,8 +342,8 @@ def self_test():
         bad += report("release-shared wants stacksize 8388608",
                       WANT_STACK_BY_PROFILE.get("release-shared")
                       == 8388608)
-        bad += report("static archive wants 527 members",
-                      WANT_STATIC_MEMBERS == 527)
+        bad += report("static archive wants 533 members",
+                      WANT_STATIC_MEMBERS == 533)
     finally:
         import shutil
         shutil.rmtree(tmp, ignore_errors=True)

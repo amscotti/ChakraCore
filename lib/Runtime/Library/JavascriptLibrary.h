@@ -173,6 +173,14 @@ namespace Js
         friend class ExternalLibraryBase;
         friend class ActiveScriptExternalLibrary;
         friend class IntlEngineInterfaceExtensionObject;
+#if defined(ENABLE_INTL_OBJECT) && defined(INTL_ICU)
+        friend class IntlModernBuiltIns;
+        friend class IntlLocale;
+        friend class IntlListFormat;
+        friend class IntlRelativeTimeFormat;
+        friend class IntlDisplayNames;
+        friend class IntlSegmenter;
+#endif
 #ifdef ENABLE_JS_BUILTINS
         friend class JsBuiltInEngineInterfaceExtensionObject;
 #endif
@@ -438,6 +446,15 @@ namespace Js
         Field(DynamicObject*) iteratorHelperPrototype;
         Field(DynamicObject*) wrapForValidIteratorPrototype;
         Field(DynamicObject*) regExpStringIteratorPrototype;
+#if defined(ENABLE_INTL_OBJECT) && defined(INTL_ICU)
+        Field(DynamicObject*) intlLocalePrototype;
+        Field(DynamicObject*) intlListFormatPrototype;
+        Field(DynamicObject*) intlRelativeTimeFormatPrototype;
+        Field(DynamicObject*) intlDisplayNamesPrototype;
+        Field(DynamicObject*) intlSegmenterPrototype;
+        Field(DynamicObject*) intlSegmentsPrototype;
+        Field(DynamicObject*) intlSegmentIteratorPrototype;
+#endif
         Field(DynamicObject*) atomicsObject;
 
         Field(DynamicObject*) webAssemblyCompileErrorPrototype;
@@ -615,6 +632,15 @@ namespace Js
             bindRefChunkCurrent(nullptr),
             bindRefChunkEnd(nullptr),
             dynamicFunctionReference(nullptr),
+#if defined(ENABLE_INTL_OBJECT) && defined(INTL_ICU)
+            intlLocalePrototype(nullptr),
+            intlListFormatPrototype(nullptr),
+            intlRelativeTimeFormatPrototype(nullptr),
+            intlDisplayNamesPrototype(nullptr),
+            intlSegmenterPrototype(nullptr),
+            intlSegmentsPrototype(nullptr),
+            intlSegmentIteratorPrototype(nullptr),
+#endif
             typesWithOnlyWritablePropertyProtoChain(recycler),
             typesWithNoSpecialPropertyProtoChain(recycler)
         {
@@ -1004,6 +1030,22 @@ namespace Js
         DynamicObject* GetIteratorHelperPrototype() const { return iteratorHelperPrototype; }
         DynamicObject* GetWrapForValidIteratorPrototype() const { return wrapForValidIteratorPrototype; }
         DynamicObject* GetRegExpStringIteratorPrototype() const { return regExpStringIteratorPrototype; }
+#if defined(ENABLE_INTL_OBJECT) && defined(INTL_ICU)
+        DynamicObject* GetIntlLocalePrototype() const { return intlLocalePrototype; }
+        void SetIntlLocalePrototype(DynamicObject* proto) { intlLocalePrototype = proto; }
+        DynamicObject* GetIntlListFormatPrototype() const { return intlListFormatPrototype; }
+        void SetIntlListFormatPrototype(DynamicObject* proto) { intlListFormatPrototype = proto; }
+        DynamicObject* GetIntlRelativeTimeFormatPrototype() const { return intlRelativeTimeFormatPrototype; }
+        void SetIntlRelativeTimeFormatPrototype(DynamicObject* proto) { intlRelativeTimeFormatPrototype = proto; }
+        DynamicObject* GetIntlDisplayNamesPrototype() const { return intlDisplayNamesPrototype; }
+        void SetIntlDisplayNamesPrototype(DynamicObject* proto) { intlDisplayNamesPrototype = proto; }
+        DynamicObject* GetIntlSegmenterPrototype() const { return intlSegmenterPrototype; }
+        void SetIntlSegmenterPrototype(DynamicObject* proto) { intlSegmenterPrototype = proto; }
+        DynamicObject* GetIntlSegmentsPrototype() const { return intlSegmentsPrototype; }
+        void SetIntlSegmentsPrototype(DynamicObject* proto) { intlSegmentsPrototype = proto; }
+        DynamicObject* GetIntlSegmentIteratorPrototype() const { return intlSegmentIteratorPrototype; }
+        void SetIntlSegmentIteratorPrototype(DynamicObject* proto) { intlSegmentIteratorPrototype = proto; }
+#endif
         JavascriptRegExpStringIterator* CreateRegExpStringIterator(RecyclableObject* matchingRegExp, JavascriptString* iteratedString, bool global, bool fullUnicode);
         JavascriptFunction* CreateNonProfiledFunction(FunctionInfo * functionInfo);
         template <class MethodType>

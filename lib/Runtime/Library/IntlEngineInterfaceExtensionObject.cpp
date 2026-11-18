@@ -690,6 +690,30 @@ PROJECTED_ENUMS(PROJECTED_ENUM)
         {
             intlObject->DeleteProperty(Js::PropertyIds::DateTimeFormat, Js::PropertyOperationFlags::PropertyOperation_None);
         }
+#ifdef INTL_ICU
+        if (Js::JavascriptOperators::HasProperty(intlObject, Js::PropertyIds::_symbolToStringTag))
+        {
+            intlObject->DeleteProperty(Js::PropertyIds::_symbolToStringTag, Js::PropertyOperationFlags::PropertyOperation_None);
+        }
+        static const char16* const modernIntlProps[] = {
+            _u("getCanonicalLocales"),
+            _u("Locale"),
+            _u("ListFormat"),
+            _u("RelativeTimeFormat"),
+            _u("DisplayNames"),
+            _u("Segmenter")
+        };
+        for (size_t i = 0; i < _countof(modernIntlProps); ++i)
+        {
+            PropertyId pid = scriptContext->GetOrAddPropertyIdTracked(
+                modernIntlProps[i],
+                static_cast<charcount_t>(PAL_wcslen(modernIntlProps[i])));
+            if (Js::JavascriptOperators::HasProperty(intlObject, pid))
+            {
+                intlObject->DeleteProperty(pid, Js::PropertyOperationFlags::PropertyOperation_None);
+            }
+        }
+#endif
     }
 
     void IntlEngineInterfaceExtensionObject::EnsureIntlByteCode(_In_ ScriptContext * scriptContext)

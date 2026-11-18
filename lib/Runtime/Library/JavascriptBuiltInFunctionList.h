@@ -630,4 +630,57 @@ BUILTIN(TypedArrayBase, SetFromBase64, EntrySetFromBase64, FunctionInfo::ErrorOn
 BUILTIN(TypedArrayBase, ToHex, EntryToHex, FunctionInfo::ErrorOnNew)
 BUILTIN(TypedArrayBase, SetFromHex, EntrySetFromHex, FunctionInfo::ErrorOnNew)
 
+#ifdef INTL_ICU
+BUILTIN(IntlModernBuiltIns, GetCanonicalLocales, EntryGetCanonicalLocales, FunctionInfo::ErrorOnNew)
+
+BUILTIN(IntlLocale, NewInstance, EntryNewInstance, FunctionInfo::SkipDefaultNewObject)
+BUILTIN(IntlLocale, ToString, EntryToString, FunctionInfo::ErrorOnNew)
+BUILTIN(IntlLocale, Maximize, EntryMaximize, FunctionInfo::ErrorOnNew)
+BUILTIN(IntlLocale, Minimize, EntryMinimize, FunctionInfo::ErrorOnNew)
+BUILTIN(IntlLocale, GetterBaseName, EntryGetterBaseName, FunctionInfo::ErrorOnNew)
+BUILTIN(IntlLocale, GetterCalendar, EntryGetterCalendar, FunctionInfo::ErrorOnNew)
+BUILTIN(IntlLocale, GetterCaseFirst, EntryGetterCaseFirst, FunctionInfo::ErrorOnNew)
+BUILTIN(IntlLocale, GetterCollation, EntryGetterCollation, FunctionInfo::ErrorOnNew)
+BUILTIN(IntlLocale, GetterFirstDayOfWeek, EntryGetterFirstDayOfWeek, FunctionInfo::ErrorOnNew)
+BUILTIN(IntlLocale, GetterHourCycle, EntryGetterHourCycle, FunctionInfo::ErrorOnNew)
+BUILTIN(IntlLocale, GetterLanguage, EntryGetterLanguage, FunctionInfo::ErrorOnNew)
+BUILTIN(IntlLocale, GetterNumberingSystem, EntryGetterNumberingSystem, FunctionInfo::ErrorOnNew)
+BUILTIN(IntlLocale, GetterNumeric, EntryGetterNumeric, FunctionInfo::ErrorOnNew)
+BUILTIN(IntlLocale, GetterRegion, EntryGetterRegion, FunctionInfo::ErrorOnNew)
+BUILTIN(IntlLocale, GetterScript, EntryGetterScript, FunctionInfo::ErrorOnNew)
+BUILTIN(IntlLocale, GetterVariants, EntryGetterVariants, FunctionInfo::ErrorOnNew)
+BUILTIN(IntlLocale, GetCalendars, EntryGetCalendars, FunctionInfo::ErrorOnNew)
+BUILTIN(IntlLocale, GetCollations, EntryGetCollations, FunctionInfo::ErrorOnNew)
+BUILTIN(IntlLocale, GetHourCycles, EntryGetHourCycles, FunctionInfo::ErrorOnNew)
+BUILTIN(IntlLocale, GetNumberingSystems, EntryGetNumberingSystems, FunctionInfo::ErrorOnNew)
+BUILTIN(IntlLocale, GetTimeZones, EntryGetTimeZones, FunctionInfo::ErrorOnNew)
+BUILTIN(IntlLocale, GetTextInfo, EntryGetTextInfo, FunctionInfo::ErrorOnNew)
+BUILTIN(IntlLocale, GetWeekInfo, EntryGetWeekInfo, FunctionInfo::ErrorOnNew)
+
+BUILTIN(IntlListFormat, NewInstance, EntryNewInstance, FunctionInfo::SkipDefaultNewObject)
+BUILTIN(IntlListFormat, SupportedLocalesOf, EntrySupportedLocalesOf, FunctionInfo::ErrorOnNew)
+BUILTIN(IntlListFormat, Format, EntryFormat, FunctionInfo::ErrorOnNew)
+BUILTIN(IntlListFormat, FormatToParts, EntryFormatToParts, FunctionInfo::ErrorOnNew)
+BUILTIN(IntlListFormat, ResolvedOptions, EntryResolvedOptions, FunctionInfo::ErrorOnNew)
+
+BUILTIN(IntlRelativeTimeFormat, NewInstance, EntryNewInstance, FunctionInfo::SkipDefaultNewObject)
+BUILTIN(IntlRelativeTimeFormat, SupportedLocalesOf, EntrySupportedLocalesOf, FunctionInfo::ErrorOnNew)
+BUILTIN(IntlRelativeTimeFormat, Format, EntryFormat, FunctionInfo::ErrorOnNew)
+BUILTIN(IntlRelativeTimeFormat, FormatToParts, EntryFormatToParts, FunctionInfo::ErrorOnNew)
+BUILTIN(IntlRelativeTimeFormat, ResolvedOptions, EntryResolvedOptions, FunctionInfo::ErrorOnNew)
+
+BUILTIN(IntlDisplayNames, NewInstance, EntryNewInstance, FunctionInfo::SkipDefaultNewObject)
+BUILTIN(IntlDisplayNames, SupportedLocalesOf, EntrySupportedLocalesOf, FunctionInfo::ErrorOnNew)
+BUILTIN(IntlDisplayNames, Of, EntryOf, FunctionInfo::ErrorOnNew)
+BUILTIN(IntlDisplayNames, ResolvedOptions, EntryResolvedOptions, FunctionInfo::ErrorOnNew)
+
+BUILTIN(IntlSegmenter, NewInstance, EntryNewInstance, FunctionInfo::SkipDefaultNewObject)
+BUILTIN(IntlSegmenter, SupportedLocalesOf, EntrySupportedLocalesOf, FunctionInfo::ErrorOnNew)
+BUILTIN(IntlSegmenter, Segment, EntrySegment, FunctionInfo::ErrorOnNew)
+BUILTIN(IntlSegmenter, ResolvedOptions, EntryResolvedOptions, FunctionInfo::ErrorOnNew)
+BUILTIN(IntlSegmenter, SegmentsContaining, EntrySegmentsContaining, FunctionInfo::ErrorOnNew)
+BUILTIN(IntlSegmenter, SegmentsIterator, EntrySegmentsIterator, FunctionInfo::ErrorOnNew)
+BUILTIN(IntlSegmenter, SegmentIteratorNext, EntrySegmentIteratorNext, FunctionInfo::ErrorOnNew)
+#endif
+
 #undef BUILTIN_TEMPLATE
