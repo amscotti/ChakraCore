@@ -311,7 +311,8 @@
               "name": "string Array",
               "isArray": "function <large string>",
               "from": "function <large string>",
-              "of": "function <large string>"
+              "of": "function <large string>",
+              "fromAsync": "function <large string>"
             },
             "at": {
               "#__proto__": "function <large string>",
@@ -581,7 +582,8 @@
               "name": "string Array",
               "isArray": "function <large string>",
               "from": "function <large string>",
-              "of": "function <large string>"
+              "of": "function <large string>",
+              "fromAsync": "function <large string>"
             },
             "at": {
               "#__proto__": "function <large string>",
