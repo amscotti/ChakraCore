@@ -88,7 +88,7 @@
 #ifndef CHAKRA_NODEAPI_WRAP_H_
 #define CHAKRA_NODEAPI_WRAP_H_
 
-#include "js_native_api.h" /* napi_env, napi_value, napi_ref, NAPI_VERSION=8 */
+#include "js_native_api.h" /* napi_env, napi_value, napi_ref, NAPI_VERSION=10 */
 #include "ChakraCommon.h"  /* JsRuntimeHandle, JsContextRef */
 
 #ifdef __cplusplus
@@ -111,6 +111,12 @@ void nodeapi_wrap_drain(napi_env env);
  * (step 6, R-ENV-7). Null/dead env is a no-op. After return the env's
  * wrap state is freed and unregistered. */
 void nodeapi_wrap_teardown(napi_env env);
+
+/* Cancel a wrap/finalizer record bound to an optional napi_ref returned
+ * by napi_wrap or napi_add_finalizer (if any). Called by
+ * napi_delete_reference (NodeApiRefs.cpp) right after marking the ref
+ * dead. No-op if env has no wrap state or ref is absent from by_ref. */
+void nodeapi_wrap_cancel_by_ref(napi_env env, napi_ref ref);
 
 /* Test-hook helpers (semantics P7-*). Declared only when
  * CHAKRA_NODEAPI_TEST_HOOKS is defined (probe runners define it),

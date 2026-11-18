@@ -87,6 +87,7 @@
 #include "NodeApiEnv.h"
 #include "NodeApiHostApi.h"
 #include "NodeApiScopes.h" /* HIGH-4: RootIntoInnermost for get values */
+#include "NodeApiWrap.h"   /* Q1.1: cancel optional wrap/finalizer on delete */
 #include "ChakraCore.h" /* JsWeakRef, JsCreateWeakReference */
 
 #include <cassert>
@@ -665,6 +666,7 @@ napi_status NAPI_CDECL napi_delete_reference(node_api_basic_env env_raw,
   rec->count = 0;
   rec->strong_value = JS_INVALID_REFERENCE;
   rec->weak_handle = JS_INVALID_REFERENCE;
+  nodeapi_wrap_cancel_by_ref(env, ref);
   nodeapi::ClearLastError(env);
   return napi_ok;
 }

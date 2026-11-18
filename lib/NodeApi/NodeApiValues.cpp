@@ -140,7 +140,7 @@ napi_status check_create_string(napi_env env, const void* str, size_t length,
                           "create_string: length exceeds INT_MAX");
     return napi_invalid_arg;
   }
-  if (length > 0 && str == nullptr) {
+  if ((length == NAPI_AUTO_LENGTH || length > 0) && str == nullptr) {
     nodeapi::SetLastError(env, napi_invalid_arg,
                           "create_string: str is NULL with non-zero length");
     return napi_invalid_arg;
@@ -152,6 +152,104 @@ napi_status check_create_string(napi_env env, const void* str, size_t length,
   }
   return napi_ok;
 }
+
+napi_status CreateUtf8StringValue(napi_env env, const char* str, size_t length,
+                                  napi_value* result, const char* what) {
+  size_t len = 0;
+  napi_status vs = check_create_string(env, str, length, &len);
+  if (vs != napi_ok) return vs;
+  JsValueRef v = JS_INVALID_REFERENCE;
+  JsErrorCode ec = (len == 0) ? JsCreateString("", 0, &v)
+                              : JsCreateString(str, len, &v);
+  if (ec != JsNoError) return map_js(env, ec, "JsCreateString");
+  return root_publish(env, v, result, what);
+}
+
+napi_status CreateUtf16StringValue(napi_env env, const char16_t* str,
+                                   size_t length, napi_value* result,
+                                   const char* what) {
+  if (length != NAPI_AUTO_LENGTH && length > static_cast<size_t>(INT_MAX)) {
+    nodeapi::SetLastError(env, napi_invalid_arg,
+                          "create_string_utf16: length exceeds INT_MAX");
+    return napi_invalid_arg;
+  }
+  if ((length == NAPI_AUTO_LENGTH || length > 0) && str == nullptr) {
+    nodeapi::SetLastError(env, napi_invalid_arg,
+                          "create_string_utf16: str is NULL");
+    return napi_invalid_arg;
+  }
+  size_t len = (length == NAPI_AUTO_LENGTH) ? utf16_auto_len(str) : length;
+  JsValueRef v = JS_INVALID_REFERENCE;
+  JsErrorCode ec = (len == 0)
+      ? JsCreateString("", 0, &v)
+      : JsCreateStringUtf16(reinterpret_cast<const uint16_t*>(str), len, &v);
+  if (ec != JsNoError) return map_js(env, ec, "JsCreateStringUtf16");
+  return root_publish(env, v, result, what);
+}
+
+napi_status CreateLatin1StringValue(napi_env env, const char* str,
+                                    size_t length, napi_value* result,
+                                    const char* what) {
+  size_t len = 0;
+  napi_status vs = check_create_string(env, str, length, &len);
+  if (vs != napi_ok) return vs;
+  JsValueRef v = JS_INVALID_REFERENCE;
+  JsErrorCode ec;
+  if (len == 0) {
+    ec = JsCreateString("", 0, &v);
+  } else {
+    std::vector<uint16_t> tmp;
+    try {
+      tmp.resize(len);
+    } catch (...) {
+      nodeapi::SetLastError(env, napi_generic_failure,
+                            "create_string_latin1: transcode OOM");
+      return napi_generic_failure;
+    }
+    for (size_t i = 0; i < len; ++i) {
+      tmp[i] = static_cast<uint16_t>(static_cast<unsigned char>(str[i]));
+    }
+    ec = JsCreateStringUtf16(tmp.data(), len, &v);
+  }
+  if (ec != JsNoError) return map_js(env, ec, "JsCreateStringUtf16 (latin1)");
+  return root_publish(env, v, result, what);
+}
+
+/* RAII guard preserving any pre-existing pending JS exception across a
+ * C-Yes JS call (such as node_api_symbol_for calling Symbol.for).
+ * Restores the saved exception on exit unless the inner call raised a
+ * new exception. */
+class PendingExceptionPreserver {
+ public:
+  PendingExceptionPreserver() noexcept {
+    bool has = false;
+    if (JsHasException(&has) == JsNoError && has) {
+      JsValueRef exc = JS_INVALID_REFERENCE;
+      if (JsGetAndClearException(&exc) == JsNoError &&
+          exc != JS_INVALID_REFERENCE) {
+        if (JsAddRef(exc, nullptr) == JsNoError) {
+          saved_ = exc;
+        } else {
+          (void)JsSetException(exc);
+        }
+      }
+    }
+  }
+  ~PendingExceptionPreserver() {
+    if (saved_ != JS_INVALID_REFERENCE) {
+      bool now_pending = false;
+      if (JsHasException(&now_pending) == JsNoError && !now_pending) {
+        (void)JsSetException(saved_);
+      }
+      (void)JsRelease(saved_, nullptr);
+    }
+  }
+  PendingExceptionPreserver(const PendingExceptionPreserver&) = delete;
+  PendingExceptionPreserver& operator=(const PendingExceptionPreserver&) = delete;
+
+ private:
+  JsValueRef saved_ = JS_INVALID_REFERENCE;
+};
 
 /* --- N2.6 helpers: transient roots, intrinsics, date/bigint pieces --- */
 
@@ -652,8 +750,8 @@ napi_status NAPI_CDECL napi_get_undefined(napi_env env, napi_value* result) {
     }
     return napi_invalid_arg;
   }
-  nodeapi::EntryGuard guard(env, /*allowClosing=*/false,
-                             /*allowPending=*/true, /*needContext=*/true);
+  nodeapi::EntryGuard guard(env, /*allowClosing=*/true,
+                            /*allowPending=*/true, /*needContext=*/true);
   if (!guard.ok()) return guard.status();
   JsValueRef v = JS_INVALID_REFERENCE;
   JsErrorCode ec = JsGetUndefinedValue(&v);
@@ -668,7 +766,8 @@ napi_status NAPI_CDECL napi_get_null(napi_env env, napi_value* result) {
     }
     return napi_invalid_arg;
   }
-  nodeapi::EntryGuard guard(env, false, true, true);
+  nodeapi::EntryGuard guard(env, /*allowClosing=*/true,
+                            /*allowPending=*/true, /*needContext=*/true);
   if (!guard.ok()) return guard.status();
   JsValueRef v = JS_INVALID_REFERENCE;
   JsErrorCode ec = JsGetNullValue(&v);
@@ -683,7 +782,8 @@ napi_status NAPI_CDECL napi_get_global(napi_env env, napi_value* result) {
     }
     return napi_invalid_arg;
   }
-  nodeapi::EntryGuard guard(env, false, true, true);
+  nodeapi::EntryGuard guard(env, /*allowClosing=*/true,
+                            /*allowPending=*/true, /*needContext=*/true);
   if (!guard.ok()) return guard.status();
   JsValueRef v = JS_INVALID_REFERENCE;
   JsErrorCode ec = JsGetGlobalObject(&v);
@@ -699,7 +799,8 @@ napi_status NAPI_CDECL napi_get_boolean(napi_env env, bool value,
     }
     return napi_invalid_arg;
   }
-  nodeapi::EntryGuard guard(env, false, true, true);
+  nodeapi::EntryGuard guard(env, /*allowClosing=*/true,
+                            /*allowPending=*/true, /*needContext=*/true);
   if (!guard.ok()) return guard.status();
   JsValueRef v = JS_INVALID_REFERENCE;
   JsErrorCode ec = value ? JsGetTrueValue(&v) : JsGetFalseValue(&v);
@@ -923,18 +1024,8 @@ napi_status NAPI_CDECL napi_create_string_utf8(napi_env env, const char* str,
   }
   nodeapi::EntryGuard guard(env, false, true, true);
   if (!guard.ok()) return guard.status();
-  size_t len = 0;
-  napi_status vs = check_create_string(env, str, length, &len);
-  if (vs != napi_ok) return vs;
-  JsValueRef v = JS_INVALID_REFERENCE;
-  JsErrorCode ec;
-  if (len == 0) {
-    ec = JsCreateString("", 0, &v);
-  } else {
-    ec = JsCreateString(str, len, &v);
-  }
-  if (ec != JsNoError) return map_js(env, ec, "JsCreateString");
-  return root_publish(env, v, result, "napi_create_string_utf8: root failed");
+  return CreateUtf8StringValue(env, str, length, result,
+                               "napi_create_string_utf8: root failed");
 }
 
 napi_status NAPI_CDECL napi_create_string_utf16(napi_env env,
@@ -949,32 +1040,8 @@ napi_status NAPI_CDECL napi_create_string_utf16(napi_env env,
   }
   nodeapi::EntryGuard guard(env, false, true, true);
   if (!guard.ok()) return guard.status();
-  if (length != NAPI_AUTO_LENGTH && length > static_cast<size_t>(INT_MAX)) {
-    nodeapi::SetLastError(env, napi_invalid_arg,
-                          "napi_create_string_utf16: length exceeds INT_MAX");
-    return napi_invalid_arg;
-  }
-  if (length > 0 && str == nullptr) {
-    nodeapi::SetLastError(env, napi_invalid_arg,
-                          "napi_create_string_utf16: str is NULL");
-    return napi_invalid_arg;
-  }
-  size_t len = 0;
-  if (length == NAPI_AUTO_LENGTH) {
-    len = utf16_auto_len(str);
-  } else {
-    len = length;
-  }
-  JsValueRef v = JS_INVALID_REFERENCE;
-  JsErrorCode ec;
-  if (len == 0) {
-    JsErrorCode e0 = JsCreateString("", 0, &v);
-    ec = e0;
-  } else {
-    ec = JsCreateStringUtf16(reinterpret_cast<const uint16_t*>(str), len, &v);
-  }
-  if (ec != JsNoError) return map_js(env, ec, "JsCreateStringUtf16");
-  return root_publish(env, v, result, "napi_create_string_utf16: root failed");
+  return CreateUtf16StringValue(env, str, length, result,
+                                "napi_create_string_utf16: root failed");
 }
 
 napi_status NAPI_CDECL napi_create_string_latin1(napi_env env, const char* str,
@@ -988,29 +1055,125 @@ napi_status NAPI_CDECL napi_create_string_latin1(napi_env env, const char* str,
   }
   nodeapi::EntryGuard guard(env, false, true, true);
   if (!guard.ok()) return guard.status();
-  size_t len = 0;
-  napi_status vs = check_create_string(env, str, length, &len);
-  if (vs != napi_ok) return vs;
-  JsValueRef v = JS_INVALID_REFERENCE;
-  JsErrorCode ec;
-  if (len == 0) {
-    ec = JsCreateString("", 0, &v);
-  } else {
-    std::vector<uint16_t> tmp;
-    try {
-      tmp.resize(len);
-    } catch (...) {
-      nodeapi::SetLastError(env, napi_generic_failure,
-                            "napi_create_string_latin1: transcode OOM");
-      return napi_generic_failure;
+  return CreateLatin1StringValue(env, str, length, result,
+                                 "napi_create_string_latin1: root failed");
+}
+
+NAPI_EXTERN napi_status NAPI_CDECL node_api_create_external_string_latin1(
+    napi_env env, char* str, size_t length,
+    node_api_basic_finalize finalize_callback, void* finalize_hint,
+    napi_value* result, bool* copied) {
+  if (env == nullptr || result == nullptr) {
+    if (env != nullptr) {
+      nodeapi::SetLastError(
+          env, napi_invalid_arg,
+          "node_api_create_external_string_latin1: null arg");
     }
-    for (size_t i = 0; i < len; ++i) {
-      tmp[i] = static_cast<uint16_t>(static_cast<unsigned char>(str[i]));
-    }
-    ec = JsCreateStringUtf16(tmp.data(), len, &v);
+    return napi_invalid_arg;
   }
-  if (ec != JsNoError) return map_js(env, ec, "JsCreateStringUtf16 (latin1)");
-  return root_publish(env, v, result, "napi_create_string_latin1: root failed");
+  nodeapi::EntryGuard guard(env, /*allowClosing=*/false,
+                            /*allowPending=*/true, /*needContext=*/true);
+  if (!guard.ok()) return guard.status();
+  napi_status rs = CreateLatin1StringValue(
+      env, str, length, result,
+      "node_api_create_external_string_latin1: root failed");
+  if (rs != napi_ok) return rs;
+  if (copied != nullptr) {
+    *copied = true;
+  }
+  if (finalize_callback != nullptr) {
+    try {
+      finalize_callback(reinterpret_cast<node_api_basic_env>(env), str,
+                        finalize_hint);
+    } catch (...) {
+    }
+  }
+  nodeapi::ClearLastError(env);
+  return napi_ok;
+}
+
+NAPI_EXTERN napi_status NAPI_CDECL node_api_create_external_string_utf16(
+    napi_env env, char16_t* str, size_t length,
+    node_api_basic_finalize finalize_callback, void* finalize_hint,
+    napi_value* result, bool* copied) {
+  if (env == nullptr || result == nullptr) {
+    if (env != nullptr) {
+      nodeapi::SetLastError(
+          env, napi_invalid_arg,
+          "node_api_create_external_string_utf16: null arg");
+    }
+    return napi_invalid_arg;
+  }
+  nodeapi::EntryGuard guard(env, /*allowClosing=*/false,
+                            /*allowPending=*/true, /*needContext=*/true);
+  if (!guard.ok()) return guard.status();
+  napi_status rs = CreateUtf16StringValue(
+      env, str, length, result,
+      "node_api_create_external_string_utf16: root failed");
+  if (rs != napi_ok) return rs;
+  if (copied != nullptr) {
+    *copied = true;
+  }
+  if (finalize_callback != nullptr) {
+    try {
+      finalize_callback(reinterpret_cast<node_api_basic_env>(env), str,
+                        finalize_hint);
+    } catch (...) {
+    }
+  }
+  nodeapi::ClearLastError(env);
+  return napi_ok;
+}
+
+NAPI_EXTERN napi_status NAPI_CDECL node_api_create_property_key_latin1(
+    napi_env env, const char* str, size_t length, napi_value* result) {
+  if (env == nullptr || result == nullptr) {
+    if (env != nullptr) {
+      nodeapi::SetLastError(env, napi_invalid_arg,
+                            "node_api_create_property_key_latin1: null arg");
+    }
+    return napi_invalid_arg;
+  }
+  nodeapi::EntryGuard guard(env, /*allowClosing=*/false,
+                            /*allowPending=*/true, /*needContext=*/true);
+  if (!guard.ok()) return guard.status();
+  return CreateLatin1StringValue(
+      env, str, length, result,
+      "node_api_create_property_key_latin1: root failed");
+}
+
+NAPI_EXTERN napi_status NAPI_CDECL node_api_create_property_key_utf8(
+    napi_env env, const char* str, size_t length, napi_value* result) {
+  if (env == nullptr || result == nullptr) {
+    if (env != nullptr) {
+      nodeapi::SetLastError(env, napi_invalid_arg,
+                            "node_api_create_property_key_utf8: null arg");
+    }
+    return napi_invalid_arg;
+  }
+  nodeapi::EntryGuard guard(env, /*allowClosing=*/false,
+                            /*allowPending=*/true, /*needContext=*/true);
+  if (!guard.ok()) return guard.status();
+  return CreateUtf8StringValue(
+      env, str, length, result,
+      "node_api_create_property_key_utf8: root failed");
+}
+
+NAPI_EXTERN napi_status NAPI_CDECL node_api_create_property_key_utf16(
+    napi_env env, const char16_t* str, size_t length, napi_value* result) {
+  if (env == nullptr || result == nullptr) {
+    if (env != nullptr) {
+      nodeapi::SetLastError(env, napi_invalid_arg,
+                            "node_api_create_property_key_utf16: null arg");
+    }
+    return napi_invalid_arg;
+  }
+  nodeapi::EntryGuard guard(env, /*allowClosing=*/false,
+                            /*allowPending=*/true, /*needContext=*/true);
+  if (!guard.ok()) return guard.status();
+  return CreateUtf16StringValue(
+      env, str, length, result,
+      "node_api_create_property_key_utf16: root failed");
 }
 
 /* --- Get strings --- */
@@ -1542,6 +1705,72 @@ napi_status NAPI_CDECL napi_create_symbol(napi_env env, napi_value description,
     if (ec != JsNoError) return map_js(env, ec, "JsCreateSymbol");
   }
   return root_publish(env, v, result, "napi_create_symbol: root failed");
+}
+
+/* --- node_api_symbol_for (v9, C Yes: executes with pending) --- */
+
+NAPI_EXTERN napi_status NAPI_CDECL node_api_symbol_for(
+    napi_env env, const char* utf8description, size_t length,
+    napi_value* result) {
+  if (env == nullptr || result == nullptr) {
+    if (env != nullptr) {
+      nodeapi::SetLastError(env, napi_invalid_arg,
+                            "node_api_symbol_for: null arg");
+    }
+    return napi_invalid_arg;
+  }
+  nodeapi::EntryGuard guard(env, /*allowClosing=*/false,
+                            /*allowPending=*/true, /*needContext=*/true);
+  if (!guard.ok()) return guard.status();
+  size_t len = 0;
+  napi_status vs = check_create_string(env, utf8description, length, &len);
+  if (vs != napi_ok) return vs;
+
+  PendingExceptionPreserver excGuard;
+  JsValueRef descStr = JS_INVALID_REFERENCE;
+  JsErrorCode ec = (len == 0) ? JsCreateString("", 0, &descStr)
+                              : JsCreateString(utf8description, len, &descStr);
+  if (ec != JsNoError) return map_js(env, ec, "node_api_symbol_for: description");
+  TmpRoot descRoot(descStr);
+
+  JsValueRef symObj = JS_INVALID_REFERENCE;
+  napi_status s = GetGlobalProp(env, "Symbol", &symObj,
+                                "node_api_symbol_for: Symbol");
+  if (s != napi_ok) return s;
+  TmpRoot symObjRoot(symObj);
+
+  JsPropertyIdRef forPid = JS_INVALID_REFERENCE;
+  s = MakePid(env, "for", &forPid, "node_api_symbol_for: for id");
+  if (s != napi_ok) return s;
+  JsValueRef forFn = JS_INVALID_REFERENCE;
+  ec = JsGetProperty(symObj, forPid, &forFn);
+  if (ec != JsNoError) return map_js(env, ec, "node_api_symbol_for: Symbol.for");
+  TmpRoot forFnRoot(forFn);
+
+  JsValueType ft = JsUndefined;
+  ec = JsGetValueType(forFn, &ft);
+  if (ec != JsNoError) return map_js(env, ec, "node_api_symbol_for: for type");
+  if (ft != JsFunction) {
+    nodeapi::SetLastError(env, napi_generic_failure,
+                          "node_api_symbol_for: Symbol.for not a function");
+    return napi_generic_failure;
+  }
+
+  JsValueRef args[2] = {symObj, descStr};
+  JsValueRef sym = JS_INVALID_REFERENCE;
+  ec = JsCallFunction(forFn, args, 2, &sym);
+  if (ec != JsNoError) return map_js(env, ec, "node_api_symbol_for: Symbol.for call");
+  TmpRoot symRoot(sym);
+
+  JsValueType st = JsUndefined;
+  ec = JsGetValueType(sym, &st);
+  if (ec != JsNoError) return map_js(env, ec, "node_api_symbol_for: result type");
+  if (st != JsSymbol) {
+    nodeapi::SetLastError(env, napi_generic_failure,
+                          "node_api_symbol_for: Symbol.for did not return symbol");
+    return napi_generic_failure;
+  }
+  return root_publish(env, sym, result, "node_api_symbol_for: root failed");
 }
 
 /* --- napi_create_date (A1, C No: gated) --- */

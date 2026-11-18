@@ -136,49 +136,59 @@
 //     OOM: ScratchRoot JsAddRef never throws; vector OOM (scratch
 //       buffers) maps to generic_failure.
 //
-//   Per-env marker Symbol state (BufferState):
-//     Resource / creation call: BufferState heap allocation (new) in
-//       NodeApiBuffers.cpp GetOrCreateState, transferred to the global
-//       g_states map keyed by env generation.
-//     Domain and allocator: provider native heap (C++ new/delete).
-//       Never Recycler.
-//     Physical allocation: one BufferState per env that has ever
-//       created/checked a Buffer (plus one JsValueRef Symbol value
-//       (Recycler) created via JsCreateSymbol, rooted via JsAddRef).
-//     Owner; transfer point: The provider (this TU) owns the state;
-//       published to g_states after the Symbol + property id are
-//       created. The Symbol itself is owned by the state (the
-//       JsAddRef count is the state's root).
+//   Per-context shared marker Symbol (ContextBufferSymbol) & per-env
+//   lease (BufferState):
+//     Resource / creation call:
+//       (a) ContextBufferSymbol heap allocation (new) in
+//           NodeApiBuffers.cpp GetOrCreateState, inserted into
+//           g_context_symbols[nenv->context]. Holds the shared Recycler
+//           JsValueRef Symbol ("chakra-nodeapi-buffer", rooted once via
+//           JsAddRef), its cached JsPropertyIdRef, and `ref_count`.
+//       (b) BufferState heap allocation (new) per env generation in
+//           GetOrCreateState, inserted into g_env_states[nenv->generation],
+//           holding that env's single lease on its context's
+//           ContextBufferSymbol (`ref_count` += 1).
+//     Domain and allocator: provider native heap (C++ new/delete) for
+//       both ContextBufferSymbol and BufferState; Recycler heap for the
+//       single shared Symbol JsValueRef (never freed directly; released
+//       only via JsRelease).
+//     Physical allocation: at most one ContextBufferSymbol + one rooted
+//       Symbol per active JsContextRef that uses Buffers; one BufferState
+//       lease per env generation that uses Buffers.
+//     Owner; transfer/publication point; remaining aliases:
+//       The provider (this TU) owns g_context_symbols and g_env_states
+//       under g_buf_mutex. ContextBufferSymbol is published to
+//       g_context_symbols[ctx] outside any JS call; BufferState is
+//       published to g_env_states[gen] and registered with the env's
+//       step-3 cleanup hook (BuffersCleanupHook). Sibling envs sharing
+//       the same JsContextRef increment `ctx_sym->ref_count` and borrow
+//       the same Symbol/PropertyIdRef without creating a second Symbol.
 //     Borrow invalidation: env destroy (per-env sync cleanup hook
-//       installed on first Buffer use via napi_add_env_cleanup_hook,
-//       step 3; also the idempotent nodeapi_buffers_teardown helper
-//       for explicit step-6 wiring; both JsRelease + delete).
-//       Generation keying survives address reuse (a dead generation
-//       never aliases a new env at the same address).
-//     Potential user-code/reentrancy: GetOrCreateState runs JS (string
-//       + symbol creation) with the env context entered and NO global
-//       lock held across the JS calls (lock is only for map lookup/
-//       insert).
-//     Thread/context: GetOrCreateState / MarkBuffer / IsBufferMarker
-//       on owner thread with env context entered (JS calls require
-//       it). Teardown on owner thread with env context entered
-//       (destroy's guard).
+//       BuffersCleanupHook at step 3, or idempotent explicit
+//       nodeapi_buffers_teardown which also unregisters the hook).
+//       Generation keying survives env address reuse.
+//     Potential user-code/reentrancy: GetOrCreateState creates the JS
+//       string/Symbol outside g_buf_mutex with the env context entered;
+//       no lock is held across any JS/JsRT call.
+//     Thread/context allowed: GetOrCreateState / MarkBuffer /
+//       IsBufferMarker run on the owner thread with the env context
+//       entered. ReleaseBufferState runs on the owner thread; when
+//       ref_count hits 0, ContextGuard enters the last env's context
+//       and verifies JsGetCurrentContext() == cs->context before
+//       JsRelease(cs->symbol) and removing g_context_symbols[ctx].
 //     Release on success/partial failure/exception/OOM/cancel/shutdown:
-//       Creation failure before map insertion deletes the BufferState
-//       and releases its Symbol root inline (nothing published).
-//       After insertion, the state lives until teardown. Teardown
-//       removes from the map, JsRelease's the Symbol, deletes the
-//       state. If teardown is never called (should not happen via
-//       NodeApiEnv.cpp wiring), the state leaks until process exit
-//       (bounded: one entry per env generation ever created).
-//     Memory accounting/capacity: one BufferState per live env (tiny
-//       native memory + one rooted Symbol). Map size <= live envs
-//       that have used Buffers.
-//     Tests: buffers_probe marker hidden (enumerable false) + plain
-//       Uint8Array not a Buffer.
-//     Residual uncertainty: a forged marker on a non-view object would
-//       be reported as a Buffer (marker-only check per section 3.9); not
-//       exercised by probes.
+//       Creation/map/hook-registration failure rolls back g_env_states,
+//       decrements ref_count (releasing Symbol + ContextBufferSymbol if
+//       0), and deletes the BufferState inline (nothing leaked).
+//       On shutdown, each sibling env releases its lease independently;
+//       the Symbol root stays alive while >= 1 sibling env uses that
+//       context and is JsRelease'd exactly once when the final sibling
+//       tears down (while its context is still entered, before
+//       JsDisposeRuntime).
+//     Memory accounting/capacity: O(1) per live env + O(1) per live
+//       context using Buffers.
+//     Tests: cross-addon Buffer sharing + multi-env teardown on shared
+//       context (v10_multi_addon_probe / buffers_probe).
 //
 //   Returned napi_values (create_* Buffers):
 //     Rooted into innermost scope via NodeApiScopes_RootIntoInnermost
@@ -311,46 +321,80 @@ napi_status ValidateSizeToUInt(napi_env env, size_t v, unsigned int* out,
   return napi_ok;
 }
 
-// --- Per-env marker Symbol state (section 3.9) ---
+// --- Per-context shared marker Symbol + per-env lease (section 3.9) ---
 //
-// The Symbol is created per env (via JsCreateSymbol, never Symbol.for,
-// never exposed) and cached here. Keyed by env generation (not by env
-// pointer value) to survive address reuse: a trampoline for a dead env
-// enqueues under its dead generation; a new env at the same address has
-// a fresh generation and never aliases the stale entry. Stale entries
-// are removed by the step-3 cleanup hook (and idempotently by
-// nodeapi_buffers_teardown); an entry that is never torn down leaks
-// until process exit (bounded).
+// The hidden marker Symbol is created once per JsContextRef (via
+// JsCreateSymbol, never Symbol.for, never exposed) and refcount-shared
+// across sibling napi_env instances bound to that JsContextRef, so a
+// Buffer created by one addon is recognized by sibling addons. Each env
+// holds one BufferState lease keyed by env generation in g_env_states;
+// BuffersCleanupHook (step 3) and nodeapi_buffers_teardown release that
+// lease idempotently, and the last lease on a context JsRelease's the
+// Symbol while that env's context is current.
+
+struct ContextBufferSymbol {
+  JsContextRef context = JS_INVALID_REFERENCE;
+  JsValueRef symbol = JS_INVALID_REFERENCE;
+  JsPropertyIdRef symPid = JS_INVALID_REFERENCE;
+  size_t ref_count = 0;
+};
 
 struct BufferState {
   napi_env env = nullptr;
   uint64_t generation = 0;
-  JsValueRef symbol = JS_INVALID_REFERENCE;
-  JsPropertyIdRef symPid = JS_INVALID_REFERENCE;
+  ContextBufferSymbol* ctx_sym = nullptr;
 };
 
 std::mutex g_buf_mutex;
-std::unordered_map<uint64_t, BufferState*> g_states;
+std::unordered_map<JsContextRef, ContextBufferSymbol*> g_context_symbols;
+std::unordered_map<uint64_t, BufferState*> g_env_states;
+
+void ReleaseBufferState(BufferState* st) {
+  if (st == nullptr) return;
+  ContextBufferSymbol* cs_to_release = nullptr;
+  {
+    std::lock_guard<std::mutex> lk(g_buf_mutex);
+    auto it = g_env_states.find(st->generation);
+    if (it != g_env_states.end() && it->second == st) {
+      g_env_states.erase(it);
+    }
+    ContextBufferSymbol* cs = st->ctx_sym;
+    st->ctx_sym = nullptr;
+    if (cs != nullptr) {
+      if (cs->ref_count > 0) cs->ref_count--;
+      if (cs->ref_count == 0) {
+        auto cit = g_context_symbols.find(cs->context);
+        if (cit != g_context_symbols.end() && cit->second == cs) {
+          g_context_symbols.erase(cit);
+        }
+        cs_to_release = cs;
+      }
+    }
+  }
+  if (cs_to_release != nullptr) {
+    nodeapi::ContextGuard guard(st->env);
+    (void)guard.entered();
+    JsContextRef cur = JS_INVALID_REFERENCE;
+    if (cs_to_release->symbol != JS_INVALID_REFERENCE &&
+        JsGetCurrentContext(&cur) == JsNoError &&
+        cur == cs_to_release->context) {
+      (void)JsRelease(cs_to_release->symbol, nullptr);
+    }
+    delete cs_to_release;
+  }
+  delete st;
+}
 
 // Destroy step 3 cleanup hook (self-contained teardown, no
 // NodeApiEnv.cpp edit needed): installed on first Buffer use per env
 // via napi_add_env_cleanup_hook. Runs with the env context entered
-// (destroy's ContextGuard) in Closing state, so JsRelease of the
-// Symbol is legal. Removes the generation entry and frees the state.
-// Idempotent with nodeapi_buffers_teardown (both erase the same
-// entry; the second finds nothing).
+// (destroy's ContextGuard) in Closing state, releasing the env's lease
+// (and JsRelease'ing the Symbol when the last sibling env on that
+// context tears down).
 void BuffersCleanupHook(void* arg) {
   auto* st = static_cast<BufferState*>(arg);
   if (st == nullptr) return;
-  {
-    std::lock_guard<std::mutex> lk(g_buf_mutex);
-    auto it = g_states.find(st->generation);
-    if (it != g_states.end() && it->second == st) g_states.erase(it);
-  }
-  if (st->symbol != JS_INVALID_REFERENCE) {
-    (void)JsRelease(st->symbol, nullptr);
-  }
-  delete st;
+  ReleaseBufferState(st);
 }
 
 napi_status GetOrCreateState(napi_env env, BufferState** out) {
@@ -360,15 +404,52 @@ napi_status GetOrCreateState(napi_env env, BufferState** out) {
     return napi_invalid_arg;
   }
   uint64_t gen = nenv->generation;
+  JsContextRef ctx = nenv->context;
+  bool has_context_symbol = false;
+  BufferState* reused_st = nullptr;
   {
     std::lock_guard<std::mutex> lk(g_buf_mutex);
-    auto it = g_states.find(gen);
-    if (it != g_states.end()) {
+    auto it = g_env_states.find(gen);
+    if (it != g_env_states.end()) {
       *out = it->second;
       return napi_ok;
     }
+    auto cit = g_context_symbols.find(ctx);
+    if (cit != g_context_symbols.end() && cit->second != nullptr) {
+      has_context_symbol = true;
+      reused_st = new (std::nothrow) BufferState();
+      if (reused_st == nullptr) {
+        nodeapi::SetLastError(env, napi_generic_failure, "buffers: state OOM");
+        return napi_generic_failure;
+      }
+      reused_st->env = env;
+      reused_st->generation = gen;
+      reused_st->ctx_sym = cit->second;
+      try {
+        g_env_states[gen] = reused_st;
+      } catch (...) {
+        delete reused_st;
+        nodeapi::SetLastError(env, napi_generic_failure,
+                              "buffers: state map OOM");
+        return napi_generic_failure;
+      }
+      cit->second->ref_count++;
+    }
   }
-  // Slow path: create outside the lock (JS calls must not hold it).
+  if (has_context_symbol) {
+    napi_status hs = napi_add_env_cleanup_hook(
+        reinterpret_cast<node_api_basic_env>(env), BuffersCleanupHook,
+        reused_st);
+    if (hs != napi_ok) {
+      ReleaseBufferState(reused_st);
+      return hs;
+    }
+    *out = reused_st;
+    return napi_ok;
+  }
+
+  // Slow path: first Buffer use on this JsContextRef. Create the Symbol
+  // outside g_buf_mutex (JS calls must not hold the lock).
   BufferState* st = new (std::nothrow) BufferState();
   if (st == nullptr) {
     nodeapi::SetLastError(env, napi_generic_failure, "buffers: state OOM");
@@ -391,13 +472,11 @@ napi_status GetOrCreateState(napi_env env, BufferState** out) {
     return MapJsError(env, ec, "buffers: create symbol");
   }
   ScratchRoot symRoot(sym);
-  // Persistent root for this env (R1).
   ec = JsAddRef(sym, nullptr);
   if (ec != JsNoError) {
     delete st;
     return MapJsError(env, ec, "buffers: root symbol");
   }
-  st->symbol = sym;
   JsPropertyIdRef pid = JS_INVALID_REFERENCE;
   ec = JsGetPropertyIdFromSymbol(sym, &pid);
   if (ec != JsNoError) {
@@ -405,45 +484,101 @@ napi_status GetOrCreateState(napi_env env, BufferState** out) {
     delete st;
     return MapJsError(env, ec, "buffers: symbol property id");
   }
-  st->symPid = pid;
+  ContextBufferSymbol* new_cs = new (std::nothrow) ContextBufferSymbol();
+  if (new_cs == nullptr) {
+    (void)JsRelease(sym, nullptr);
+    delete st;
+    nodeapi::SetLastError(env, napi_generic_failure,
+                          "buffers: context symbol OOM");
+    return napi_generic_failure;
+  }
+  new_cs->context = ctx;
+  new_cs->symbol = sym;
+  new_cs->symPid = pid;
+  new_cs->ref_count = 0;
+
+  bool drop_new_cs = false;
+  bool map_oom = false;
   {
     std::lock_guard<std::mutex> lk(g_buf_mutex);
-    auto it = g_states.find(gen);
-    if (it != g_states.end()) {
-      // Another creation won (should not happen on the single env
-      // thread, but defensively clean up ours).
-      (void)JsRelease(st->symbol, nullptr);
+    auto it = g_env_states.find(gen);
+    if (it != g_env_states.end()) {
       delete st;
       *out = it->second;
-      return napi_ok;
-    }
-    try {
-      g_states[gen] = st;
-    } catch (...) {
-      (void)JsRelease(st->symbol, nullptr);
-      delete st;
-      nodeapi::SetLastError(env, napi_generic_failure, "buffers: state map OOM");
-      return napi_generic_failure;
+      drop_new_cs = true;
+    } else {
+      auto cit = g_context_symbols.find(ctx);
+      if (cit != g_context_symbols.end() && cit->second != nullptr) {
+        drop_new_cs = true;
+        st->ctx_sym = cit->second;
+        try {
+          g_env_states[gen] = st;
+        } catch (...) {
+          map_oom = true;
+        }
+        if (!map_oom) cit->second->ref_count++;
+      } else {
+        try {
+          g_context_symbols[ctx] = new_cs;
+          g_env_states[gen] = st;
+        } catch (...) {
+          auto cit2 = g_context_symbols.find(ctx);
+          if (cit2 != g_context_symbols.end() && cit2->second == new_cs) {
+            g_context_symbols.erase(cit2);
+          }
+          map_oom = true;
+          drop_new_cs = true;
+        }
+        if (!map_oom) {
+          new_cs->ref_count = 1;
+          st->ctx_sym = new_cs;
+        }
+      }
     }
   }
-  // Install the destroy cleanup hook (step 3). If it fails, roll
-  // back the map insertion so the state does not leak.
-  {
-    // napi_add_env_cleanup_hook is a basic_env API (no context
-    // required); it appends to NodeEnv::cleanup_hooks. It may fail
-    // with generic_failure on OOM.
-    napi_status hs = napi_add_env_cleanup_hook(
-        reinterpret_cast<node_api_basic_env>(env), BuffersCleanupHook, st);
-    if (hs != napi_ok) {
-      std::lock_guard<std::mutex> lk(g_buf_mutex);
-      auto it = g_states.find(gen);
-      if (it != g_states.end() && it->second == st) g_states.erase(it);
-      (void)JsRelease(st->symbol, nullptr);
-      delete st;
-      return hs;
-    }
+  if (drop_new_cs) {
+    (void)JsRelease(new_cs->symbol, nullptr);
+    delete new_cs;
+  }
+  if (map_oom) {
+    delete st;
+    nodeapi::SetLastError(env, napi_generic_failure, "buffers: state map OOM");
+    return napi_generic_failure;
+  }
+  if (*out != nullptr) {
+    return napi_ok;
+  }
+  napi_status hs = napi_add_env_cleanup_hook(
+      reinterpret_cast<node_api_basic_env>(env), BuffersCleanupHook, st);
+  if (hs != napi_ok) {
+    ReleaseBufferState(st);
+    return hs;
   }
   *out = st;
+  return napi_ok;
+}
+
+napi_status IsArrayBufferDetached(napi_env env, JsValueRef ab, bool* out) {
+  *out = false;
+  JsPropertyIdRef pid = JS_INVALID_REFERENCE;
+  JsErrorCode ec = JsCreatePropertyId("detached", 8, &pid);
+  if (ec != JsNoError) return MapJsError(env, ec, "is_detached: id");
+  JsValueRef val = JS_INVALID_REFERENCE;
+  ec = JsGetProperty(ab, pid, &val);
+  if (ec != JsNoError) return MapJsError(env, ec, "is_detached: get");
+  ScratchRoot valRoot(val);
+  JsValueType t = JsUndefined;
+  ec = JsGetValueType(val, &t);
+  if (ec != JsNoError) return MapJsError(env, ec, "is_detached: type");
+  if (t != JsBoolean) {
+    nodeapi::SetLastError(env, napi_generic_failure,
+                          "is_detached: detached not boolean");
+    return napi_generic_failure;
+  }
+  bool b = false;
+  ec = JsBooleanToBool(val, &b);
+  if (ec != JsNoError) return MapJsError(env, ec, "is_detached: bool");
+  *out = b;
   return napi_ok;
 }
 
@@ -482,7 +617,7 @@ napi_status MarkBuffer(napi_env env, BufferState* st, JsValueRef ta) {
   ec = JsSetProperty(desc, id_conf, falseVal, false);
   if (ec != JsNoError) return MapJsError(env, ec, "mark: set configurable");
   bool defined = false;
-  ec = JsObjectDefineProperty(ta, st->symbol, desc, &defined);
+  ec = JsObjectDefineProperty(ta, st->ctx_sym->symbol, desc, &defined);
   if (ec != JsNoError) return MapJsError(env, ec, "mark: define");
   if (!defined) {
     nodeapi::SetLastError(env, napi_generic_failure, "mark: define failed");
@@ -512,7 +647,7 @@ napi_status IsBufferMarker(napi_env env, BufferState* st, JsValueRef value,
                      t == JsDataView || t == JsError);
   if (!object_like) return napi_ok;  // primitives: never Buffers
   JsValueRef val = JS_INVALID_REFERENCE;
-  ec = JsGetProperty(value, st->symPid, &val);
+  ec = JsGetProperty(value, st->ctx_sym->symPid, &val);
   if (ec != JsNoError) return MapJsError(env, ec, "is_buffer: get");
   if (val == JS_INVALID_REFERENCE) return napi_ok;
   JsValueType vt = JsUndefined;
@@ -536,17 +671,15 @@ void nodeapi_buffers_teardown(napi_env env) {
   BufferState* st = nullptr;
   {
     std::lock_guard<std::mutex> lk(g_buf_mutex);
-    auto it = g_states.find(gen);
-    if (it != g_states.end()) {
+    auto it = g_env_states.find(gen);
+    if (it != g_env_states.end()) {
       st = it->second;
-      g_states.erase(it);
     }
   }
   if (st == nullptr) return;
-  if (st->symbol != JS_INVALID_REFERENCE) {
-    (void)JsRelease(st->symbol, nullptr);
-  }
-  delete st;
+  (void)napi_remove_env_cleanup_hook(
+      reinterpret_cast<node_api_basic_env>(env), BuffersCleanupHook, st);
+  ReleaseBufferState(st);
 }
 
 extern "C" {
@@ -740,6 +873,86 @@ napi_status NAPI_CDECL napi_create_external_buffer(
                                         finalize_hint, nullptr);
     if (fs != napi_ok) return fs;
   }
+  napi_status rs = RootAndPublish(env, ta, result);
+  if (rs != napi_ok) return rs;
+  nodeapi::ClearLastError(env);
+  return napi_ok;
+}
+
+// ---------------------------------------------------------------------
+// node_api_create_buffer_from_arraybuffer (v10, C No: gated)
+// ---------------------------------------------------------------------
+
+NAPI_EXTERN napi_status NAPI_CDECL node_api_create_buffer_from_arraybuffer(
+    napi_env env, napi_value arraybuffer, size_t byte_offset,
+    size_t byte_length, napi_value* result) {
+  if (arraybuffer == nullptr || result == nullptr) {
+    if (env) {
+      nodeapi::SetLastError(env, napi_invalid_arg,
+                            "create_buffer_from_arraybuffer: null arg");
+    }
+    return napi_invalid_arg;
+  }
+  nodeapi::EntryGuard guard(env, /*allowClosing=*/false,
+                            /*allowPending=*/false, /*needContext=*/true);
+  if (!guard.ok()) return guard.status();
+  ::nodeapi_wrap_drain(env);
+
+  JsValueRef ab = ToJs(arraybuffer);
+  JsValueType t = JsUndefined;
+  JsErrorCode ec = JsGetValueType(ab, &t);
+  if (ec != JsNoError) return MapJsError(env, ec, "JsGetValueType");
+  if (t != JsArrayBuffer) {
+    nodeapi::SetLastError(
+        env, napi_arraybuffer_expected,
+        "create_buffer_from_arraybuffer: not an ArrayBuffer");
+    return napi_arraybuffer_expected;
+  }
+  ScratchRoot abRoot(ab);
+
+  bool detached = false;
+  napi_status ds = IsArrayBufferDetached(env, ab, &detached);
+  if (ds != napi_ok) return ds;
+
+  BYTE* abStor = nullptr;
+  unsigned int abLen32 = 0;
+  ec = JsGetArrayBufferStorage(ab, &abStor, &abLen32);
+  if (ec != JsNoError) return MapJsError(env, ec, "JsGetArrayBufferStorage");
+  size_t ab_byte_len = detached ? 0 : static_cast<size_t>(abLen32);
+
+  if ((detached && (byte_offset > 0 || byte_length > 0)) ||
+      byte_offset > ab_byte_len ||
+      byte_length > ab_byte_len - byte_offset) {
+    napi_status ts = napi_throw_range_error(
+        env, "ERR_BUFFER_OUT_OF_BOUNDS",
+        "The byte offset or length is outside buffer bounds");
+    if (ts != napi_ok) return ts;
+    nodeapi::SetLastError(env, napi_pending_exception,
+                          "create_buffer_from_arraybuffer: out of bounds");
+    return napi_pending_exception;
+  }
+
+  unsigned int off32 = 0;
+  napi_status vs = ValidateSizeToUInt(
+      env, byte_offset, &off32,
+      "create_buffer_from_arraybuffer: offset too large");
+  if (vs != napi_ok) return vs;
+  unsigned int len32 = 0;
+  vs = ValidateSizeToUInt(
+      env, byte_length, &len32,
+      "create_buffer_from_arraybuffer: length too large");
+  if (vs != napi_ok) return vs;
+
+  JsValueRef ta = JS_INVALID_REFERENCE;
+  ec = JsCreateTypedArray(JsArrayTypeUint8, ab, off32, len32, &ta);
+  if (ec != JsNoError) return MapJsError(env, ec, "JsCreateTypedArray");
+  ScratchRoot taRoot(ta);
+
+  BufferState* st = nullptr;
+  napi_status ss = GetOrCreateState(env, &st);
+  if (ss != napi_ok) return ss;
+  napi_status ms = MarkBuffer(env, st, ta);
+  if (ms != napi_ok) return ms;
   napi_status rs = RootAndPublish(env, ta, result);
   if (rs != napi_ok) return rs;
   nodeapi::ClearLastError(env);

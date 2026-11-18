@@ -20,15 +20,17 @@
 //   3. Sync cleanup hooks, LIFO (NodeApiLifetime).
 //   4. Async cleanup hooks (NodeApiLifetime; completion pump = N4.3).
 //   5. Instance-data finalizer (NodeApiLifetime).
-//   6. (a) Delete refs (N1.3, real: nodeapi_refs_teardown_all +
-//      NodeApiRefs_FreeState), (b) close scopes (N1.2, real:
-//      NodeApiScopes_DestroyForEnv + FreeState), (c) promise/script
-//      (N3.4/N3.5) + async-context/scope bookkeeping (N4.3,
-//      NodeApiAsyncContext_DestroyForEnv, native-only), (d) remaining
-//      wrap finalizers exactly once + free records (N3.3, real:
-//      nodeapi_wrap_teardown). The "refs_scopes_release" marker is
-//      emitted by TeardownRefs so the P1-1 ordering probe still
-//      compares the whole sequence verbatim (R-ENV-7 a-d).
+//   6. (a) Run remaining wrap finalizers exactly once + free wrap records
+//      (N3.3, real: nodeapi_wrap_teardown) while refs_state and
+//      scope_state are still live so finalizer callbacks can call
+//      napi_delete_reference and singleton getters during shutdown.
+//      (b) Delete refs (N1.3, real: nodeapi_refs_teardown_all +
+//      NodeApiRefs_FreeState); emits "refs_scopes_release" via
+//      TeardownRefs so the P1-1 ordering probe compares verbatim.
+//      (c) Close scopes (N1.2, real: NodeApiScopes_DestroyForEnv +
+//      FreeState), (d) promise/script (N3.4/N3.5) + async-context/
+//      scope bookkeeping (N4.3, NodeApiAsyncContext_DestroyForEnv),
+//      then instance-data finalizer (NodeApiLifetime).
 //   7. state -> Dead (+ log "dead"), free hook state, unregister,
 //      delete NodeEnv. Only now may the host dispose runtime/context.
 //
@@ -145,6 +147,35 @@ namespace nodeapi {
 namespace {
 size_t TidHash(std::thread::id id) {
   return std::hash<std::thread::id>{}(id);
+}
+
+// Convert a module_filename string into a Node file:// URL once at env
+// creation. Empty -> ""; already "file://" -> verbatim; otherwise
+// normalize '\' to '/', prepend "file://" (plus '/' when path does not
+// start with '/' or '\'), and percent-encode %, space, #, ?, \r, \n, \t.
+std::string FormatModuleFileUrl(const std::string& filename) {
+  if (filename.empty()) return "";
+  if (filename.compare(0, 7, "file://") == 0) return filename;
+  std::string out;
+  out.reserve(filename.size() + 16);
+  out.append("file://");
+  if (filename[0] != '/' && filename[0] != '\\') {
+    out.push_back('/');
+  }
+  for (unsigned char c : filename) {
+    switch (c) {
+      case '\\': out.push_back('/'); break;
+      case '%':  out.append("%25"); break;
+      case ' ':  out.append("%20"); break;
+      case '#':  out.append("%23"); break;
+      case '?':  out.append("%3F"); break;
+      case '\r': out.append("%0D"); break;
+      case '\n': out.append("%0A"); break;
+      case '\t': out.append("%09"); break;
+      default:   out.push_back(static_cast<char>(c)); break;
+    }
+  }
+  return out;
 }
 } /* namespace */
 
@@ -389,6 +420,17 @@ EntryGuard::EntryGuard(napi_env env_value, bool allowClosing,
     return;
   }
   if (!allowClosing && env->state != EnvState::Alive) {
+    if (env->state == EnvState::Closing && !allowPending && needContext &&
+        env->module_api_version >= 9) {
+      if (env->module_api_version >= 10) {
+        SetLastError(env_value, napi_cannot_run_js, "Cannot run JS");
+        status_ = napi_cannot_run_js;
+        return;
+      }
+      SetLastError(env_value, napi_pending_exception, "Cannot run JS");
+      status_ = napi_pending_exception;
+      return;
+    }
     SetLastError(env_value, napi_generic_failure,
                  "generic failure: env is closing or dead");
     status_ = napi_generic_failure;
@@ -511,13 +553,13 @@ void TeardownPromiseScript(NodeEnv* env) {
 }
 
 void TeardownWraps(NodeEnv* env) {
-  // Steps 6c-d (N3.2/N3.3, real): drain any already-enqueued finalizers,
-  // run every remaining live wrap/external finalizer exactly once,
-  // then free the wrap state (nodeapi_wrap_teardown in NodeApiWrap.cpp).
-  // Tick order (R-ENV-7) is refs -> scopes -> promise/script -> wraps;
-  // the wrap backstop runs last within step 6 with the env context
-  // still current. State lookup is by env pointer value (lazy state in
-  // the Wrap TU); a null env is a no-op.
+  // Step 6 wrap backstop (N3.2/N3.3, real): drain any already-enqueued
+  // finalizers, run every remaining live wrap/external finalizer
+  // exactly once, then free the wrap state (nodeapi_wrap_teardown in
+  // NodeApiWrap.cpp). Runs before refs/scopes teardown so wrap/finalizer
+  // callbacks can delete references and call singleton getters while the
+  // context is current. State lookup is by env pointer value (lazy state
+  // in the Wrap TU); a null env is a no-op.
   if (env == nullptr) return;
   ::nodeapi_wrap_teardown(reinterpret_cast<napi_env>(env));
 }
@@ -571,6 +613,7 @@ napi_env chakra_nodeapi_create_env(
     if (module_filename != nullptr) {
       env->module_filename = module_filename;
     }
+    env->module_file_url = nodeapi::FormatModuleFileUrl(env->module_filename);
     if (services != nullptr) {
       env->services = *services;
     } else {
@@ -636,6 +679,40 @@ napi_env chakra_nodeapi_create_env(
    * never fails the create. */
   NodeApiPromise_EnsureContinuationInstalled(published);
   return published;
+}
+
+#if defined(__GNUC__)
+__attribute__((visibility("default")))
+#endif
+napi_status chakra_nodeapi_set_module_api_version(napi_env env_value,
+                                                   int32_t version) {
+  if (!env_value) return napi_invalid_arg;
+  nodeapi::NodeEnv* env = nullptr;
+  if (!nodeapi::LookupLiveEnv(static_cast<void*>(env_value), &env)) {
+    return napi_invalid_arg;
+  }
+  std::thread::id cur = std::this_thread::get_id();
+  if (cur != env->owner_thread) {
+#if !defined(NDEBUG)
+    std::fprintf(stderr,
+                 "nodeapi: wrong-thread set_module_api_version env=%p\n",
+                 static_cast<void*>(env_value));
+    assert(false);
+#endif
+    return napi_invalid_arg;
+  }
+  if (env->state != nodeapi::EnvState::Alive || version < 1 || version > 10) {
+    if (env->state == nodeapi::EnvState::Alive ||
+        env->state == nodeapi::EnvState::Closing) {
+      nodeapi::SetLastError(
+          env_value, napi_invalid_arg,
+          "chakra_nodeapi_set_module_api_version: invalid state or version");
+    }
+    return napi_invalid_arg;
+  }
+  env->module_api_version = static_cast<std::uint32_t>(version);
+  nodeapi::ClearLastError(env_value);
+  return napi_ok;
 }
 
 #if defined(__GNUC__)
@@ -737,13 +814,14 @@ void chakra_nodeapi_destroy_env(napi_env env_value) {
     nodeapi::Lifetime_RunSyncCleanupHooks(env);
     nodeapi::Lifetime_RunAsyncCleanupHooks(env);
 
-    // Step 6 (R-ENV-7 sub-order a-d): (a) refs real, (b) scopes
-    // real, (c) promise/script real (N3.4/N3.5), (d) wraps
-    // placeholder.
+    // Step 6: wraps backstop runs BEFORE refs/scopes teardown so wrap and
+    // add_finalizer callbacks can call napi_delete_reference and singleton
+    // getters during shutdown; TeardownRefs + TeardownScopes release any
+    // remaining refs/roots and emit "refs_scopes_release" verbatim.
+    nodeapi::TeardownWraps(env);
     nodeapi::TeardownRefs(env);
     nodeapi::TeardownScopes(env);
     nodeapi::TeardownPromiseScript(env);
-    nodeapi::TeardownWraps(env);
     nodeapi::Lifetime_RunInstanceFinalizer(env);
   }
 
@@ -884,7 +962,7 @@ napi_status NAPI_CDECL napi_get_version(node_api_basic_env env_raw,
   }
   napi_status v = nodeapi::CheckAlive(env);
   if (v != napi_ok) return v;
-  *result = 8;
+  *result = 10;
   nodeapi::ClearLastError(env);
   return napi_ok;
 }
@@ -911,6 +989,32 @@ napi_status NAPI_CDECL napi_get_node_version(
   return napi_ok;
 }
 
+NAPI_EXTERN napi_status NAPI_CDECL node_api_get_module_file_name(
+    node_api_basic_env env_raw, const char** result) {
+  napi_env env = const_cast<napi_env>(env_raw);
+  if (result == nullptr) {
+    nodeapi::NodeEnv* te = nullptr;
+    if (env &&
+        nodeapi::LookupLiveEnv(static_cast<void*>(env), &te) &&
+        te->owner_thread == std::this_thread::get_id() &&
+        (te->state == nodeapi::EnvState::Alive ||
+         te->state == nodeapi::EnvState::Closing)) {
+      nodeapi::SetLastError(env, napi_invalid_arg,
+                            "node_api_get_module_file_name: result is NULL");
+    }
+    return napi_invalid_arg;
+  }
+  napi_status v = nodeapi::CheckAliveAllowClosing(env);
+  if (v != napi_ok) return v;
+  nodeapi::NodeEnv* te = nullptr;
+  if (!nodeapi::LookupLiveEnv(static_cast<void*>(env), &te) || te == nullptr) {
+    return napi_invalid_arg;
+  }
+  *result = te->module_file_url.c_str();
+  nodeapi::ClearLastError(env);
+  return napi_ok;
+}
+
 napi_status NAPI_CDECL napi_get_last_error_info(
     node_api_basic_env env_raw,
     const napi_extended_error_info** result) {
@@ -918,26 +1022,14 @@ napi_status NAPI_CDECL napi_get_last_error_info(
   if (!result) return napi_invalid_arg;
   // Teardown-compatible: finalizers running during Closing legitimately
   // call get_last_error_info (vendored common-inl.h error path inside
-  // NODE_API_CALL_RETURN_VOID in a wrap finalizer). Alive-only would
-  // return generic_failure WITHOUT setting *result, leaving the
-  // addon's error_info uninitialized (the double-free crash at destroy).
-  // Allow Alive or Closing on the owner thread (Dead fails).
+  // NODE_API_CALL_RETURN_VOID in a wrap finalizer). Use
+  // CheckAliveAllowClosing so Closing does not overwrite last_error with
+  // napi_generic_failure before returning &te->last_error.info.
+  napi_status vs = nodeapi::CheckAliveAllowClosing(env);
+  if (vs != napi_ok) return vs;
   nodeapi::NodeEnv* te = nullptr;
-  {
-    napi_status vs = nodeapi::CheckAlive(env);
-    if (vs != napi_ok) {
-      // Re-check Closing-tolerant (same live/thread/state test as
-      // CheckAlive but Closing allowed).
-      if (!env || !nodeapi::LookupLiveEnv(static_cast<void*>(env), &te) ||
-          te->owner_thread != std::this_thread::get_id() ||
-          (te->state != nodeapi::EnvState::Alive &&
-           te->state != nodeapi::EnvState::Closing)) {
-        return vs;
-      }
-    } else {
-      nodeapi::LookupLiveEnv(static_cast<void*>(env), &te);
-    }
-    if (!te) return napi_invalid_arg;
+  if (!nodeapi::LookupLiveEnv(static_cast<void*>(env), &te) || !te) {
+    return napi_invalid_arg;
   }
   // Reading last_error does NOT clear it (AMB-STATUS-1 exception).
   // The returned info stays valid until the next API call; the

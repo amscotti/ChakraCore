@@ -28,10 +28,20 @@
 //        rooted into the innermost N1.2 scope via
 //        NodeApiScopes_RootIntoInnermost (R-SC-1). Owned by the scope
 //        stack, released by scope close / destroy step 6b, never by
-//        this TU. Wrap/add_finalizer return no JsValueRef (the
-//        optional napi_ref out-param, when provided, is a strong ref
-//        from the N1.3 refs lane, owned by that lane until the addon
-//        deletes it).
+//        this TU. Wrap/add_finalizer return no JsValueRef; the
+//        optional napi_ref out-param, when provided, is a WEAK ref
+//        (initial_refcount = 0) from the N1.3 refs lane.
+//     5) Optional ref binding (Q1.1): WrapRecord::bound_ref (napi_ref)
+//        and WrapState::by_ref (std::unordered_map<napi_ref, WrapRecord*>,
+//        owner-thread only). Recorded in CreateOptionalRef only after
+//        napi_create_reference succeeds; OOM rolls back the ref.
+//        Erased before deleting any record or rider in RollbackWrap,
+//        napi_remove_wrap, DrainState, nodeapi_wrap_teardown, and
+//        nodeapi_wrap_cancel_by_ref (called by napi_delete_reference).
+//        In DrainState / teardown, a head's bound_ref is unbound before
+//        its RunFinalizer while each rider stays in by_ref until its
+//        own iteration so a head finalizer can cancel pending riders
+//        via napi_delete_reference (nested_wrap).
 //   Domain and allocator instance (including backing allocator):
 //     (1) and (2) live in provider native memory (C++ new/delete).
 //     Never Recycler memory (plan section 3.3) and never freed across the
@@ -199,6 +209,7 @@ struct WrapRecord {
                               * GC trampoline (externals + clear-failed
                               * wraps). Trampolines check state first and
                               * never touch st once DONE/SUPPRESSED+leak. */
+  napi_ref bound_ref = nullptr; /* optional weak ref in WrapState::by_ref */
   // N5.1 multi-finalizer chain (Node allows multiple add_finalizer /
   // wrap+add on one object; JsRT allows ONE before-collect callback per
   // object via JsSetObjectBeforeCollectCallback, so the head record owns
@@ -229,6 +240,10 @@ struct WrapState {
    * checks in get_value_external. */
   std::unordered_map<JsValueRef, WrapRecord*> external_by_obj;
   std::unordered_set<WrapRecord*> externals;
+  /* Optional weak-ref cancellation index (owner thread only): maps an
+   * active napi_ref returned by napi_wrap/napi_add_finalizer to its
+   * owning WrapRecord (head or rider). */
+  std::unordered_map<napi_ref, WrapRecord*> by_ref;
 };
 
 /* Provider-global state map: env pointer value -> state. Keyed by
@@ -488,6 +503,17 @@ void RemoveContainers(WrapState* st, WrapRecord* rec) {
   }
 }
 
+/* Remove a record's optional napi_ref binding from st->by_ref before
+ * running its finalizer or deleting it (env thread only). */
+void UnbindRef(WrapState* st, WrapRecord* rec) {
+  if (!st || !rec || rec->bound_ref == nullptr) return;
+  auto it = st->by_ref.find(rec->bound_ref);
+  if (it != st->by_ref.end() && it->second == rec) {
+    st->by_ref.erase(it);
+  }
+  rec->bound_ref = nullptr;
+}
+
 /* Run one drained record's user finalizer (env thread, no lock held).
  * Captures fields first so a reentrant finalizer cannot mutate the
  * record out from under the call. */
@@ -529,6 +555,7 @@ void DrainState(napi_env env, WrapState* st) {
         expected, kDone, std::memory_order_acq_rel,
         std::memory_order_relaxed);
     RemoveContainers(st, rec);
+    UnbindRef(st, rec);
     ReleaseHandle(rec);
     // N5.1: move chained rider finalizers with the head (same
     // collection event) so transfer is noexcept.
@@ -536,11 +563,12 @@ void DrainState(napi_env env, WrapState* st) {
     if (own) RunFinalizer(env, rec);
     delete rec;
     for (WrapRecord* rider : riders) {
+      UnbindRef(st, rider);
       int wexp = kQueued;
       // Riders were never queued (no callback of their own); they
       // were LIVE and are claimed here to DONE (exactly-once with
-      // the head's collection). A rider already claimed (e.g. by a
-      // teardown race) is skipped.
+      // the head's collection). A rider already claimed or suppressed
+      // (e.g. by napi_delete_reference inside head finalizer) is skipped.
       bool rownd = rider->state.compare_exchange_strong(
           wexp, kDone, std::memory_order_acq_rel,
           std::memory_order_relaxed);
@@ -563,20 +591,26 @@ void MaybeDrain(napi_env env, WrapState* st) {
   DrainState(env, st);
 }
 
-/* Create the optional napi_ref result for wrap/add_finalizer. On
- * failure the caller rolls the wrap back. */
+/* Create the optional weak napi_ref result (initial_refcount = 0) for
+ * wrap/add_finalizer and register it in st->by_ref for cancellation on
+ * napi_delete_reference. On failure the caller rolls the wrap back. */
 napi_status CreateOptionalRef(napi_env env, napi_value value,
-                              napi_ref* result) {
+                              napi_ref* result, WrapState* st,
+                              WrapRecord* target_rec) {
   if (result == nullptr) return napi_ok;
-  /* Pre-validated object: create_reference will succeed barring OOM.
-   * It re-validates (Alive + owner thread) and roots the object; the
-   * ref keeps the object alive until the addon deletes it, delaying
-   * any GC finalizer -- exactly the documented result semantics.
-   * Note (status-mapping wrap row): examples pass both finalize_cb
-   * and result non-NULL, so both are accepted here despite the
-   * mapping's tentative "finalize_cb==NULL required when result!=NULL"
-   * note, which the vendored addons contradict. */
-  return napi_create_reference(env, value, 1, result);
+  napi_ref created = nullptr;
+  napi_status rs = napi_create_reference(env, value, 0, &created);
+  if (rs != napi_ok) return rs;
+  try {
+    st->by_ref[created] = target_rec;
+    target_rec->bound_ref = created;
+  } catch (...) {
+    (void)napi_delete_reference(env, created);
+    nodeapi::SetLastError(env, napi_generic_failure, "wrap: OOM (by_ref)");
+    return napi_generic_failure;
+  }
+  *result = created;
+  return napi_ok;
 }
 
 /* Roll back a just-created wrap record (env thread, before publication
@@ -584,6 +618,7 @@ napi_status CreateOptionalRef(napi_env env, napi_value value,
  * then deletes the record. Safe only before any queued delivery for
  * this record can be pending (true on the env thread creation path). */
 void RollbackWrap(WrapState* st, JsValueRef obj, WrapRecord* rec) {
+  UnbindRef(st, rec);
   if (rec->before_collect) (void)ClearBeforeCollect(obj);
   RemoveContainers(st, rec);
   ReleaseHandle(rec);
@@ -814,6 +849,7 @@ napi_status NAPI_CDECL napi_wrap(napi_env env, napi_value js_object,
   node_api_basic_finalize saved_fin = rec->finalize;
   void* saved_hint = rec->hint;
   bool saved_has = rec->has_data_wrap;
+  bool saved_has_wrap = rec->has_wrap;
   rec->user_data = native_object;
   rec->finalize = finalize_cb;
   rec->hint = finalize_hint;
@@ -836,17 +872,17 @@ napi_status NAPI_CDECL napi_wrap(napi_env env, napi_value js_object,
     }
   }
 
-  napi_status refs = CreateOptionalRef(env, js_object, result);
+  napi_status refs = CreateOptionalRef(env, js_object, result, st, rec);
   if (refs != napi_ok) {
     if (fresh) {
       RollbackWrap(st, obj, rec);
     } else {
-      /* Restore the tag-only state. */
+      /* Restore the tag-only / rider-carrier state. */
       rec->user_data = saved_data;
       rec->finalize = saved_fin;
       rec->hint = saved_hint;
       rec->has_data_wrap = saved_has;
-      rec->has_wrap = false;
+      rec->has_wrap = saved_has_wrap;
     }
     return refs;
   }
@@ -917,6 +953,23 @@ napi_status NAPI_CDECL napi_remove_wrap(napi_env env, napi_value js_object,
    * LIVE->QUEUED already, so the wrap is already gone from the side
    * table's perspective -- report as unwrapped rather than silently
    * suppressing an in-flight finalizer. */
+  if (rec->state.load(std::memory_order_acquire) != kLive) {
+    nodeapi::SetLastError(env, napi_invalid_arg, "remove_wrap: already collected");
+    return napi_invalid_arg;
+  }
+  void* data = rec->user_data;
+  UnbindRef(st, rec);
+  if (!rec->chained.empty()) {
+    rec->user_data = nullptr;
+    rec->finalize = nullptr;
+    rec->hint = nullptr;
+    rec->has_data_wrap = false;
+    rec->has_wrap = false;
+    rec->has_tag = false;
+    if (result != nullptr) *result = data;
+    nodeapi::ClearLastError(env);
+    return napi_ok;
+  }
   int expected = kLive;
   if (!rec->state.compare_exchange_strong(expected, kSuppressed,
                                           std::memory_order_acq_rel,
@@ -924,7 +977,6 @@ napi_status NAPI_CDECL napi_remove_wrap(napi_env env, napi_value js_object,
     nodeapi::SetLastError(env, napi_invalid_arg, "remove_wrap: already collected");
     return napi_invalid_arg;
   }
-  void* data = rec->user_data;
   JsErrorCode cleared = ClearBeforeCollect(obj);
   RemoveContainers(st, rec);
   ReleaseHandle(rec);
@@ -982,8 +1034,6 @@ napi_status NAPI_CDECL napi_add_finalizer(napi_env env, napi_value js_object,
    * upgraded in place (no chain needed). */
   WrapRecord* rec = nullptr;
   bool fresh = false;
-  bool chained = false;
-  WrapRecord* chained_head = nullptr;
   if (existing) {
     if (existing->has_data_wrap) {
       // Chain: allocate a rider record, no handle/callback of its own.
@@ -1005,7 +1055,7 @@ napi_status NAPI_CDECL napi_add_finalizer(napi_env env, napi_value js_object,
         nodeapi::SetLastError(env, napi_generic_failure, "add_finalizer: OOM (containers)");
         return napi_generic_failure;
       }
-      napi_status refs = CreateOptionalRef(env, js_object, result);
+      napi_status refs = CreateOptionalRef(env, js_object, result, st, rider);
       if (refs != napi_ok) {
         // Roll back the chain append.
         for (auto it = existing->chained.begin(); it != existing->chained.end(); ++it) {
@@ -1054,7 +1104,7 @@ napi_status NAPI_CDECL napi_add_finalizer(napi_env env, napi_value js_object,
     }
   }
 
-  napi_status refs = CreateOptionalRef(env, js_object, result);
+  napi_status refs = CreateOptionalRef(env, js_object, result, st, rec);
   if (refs != napi_ok) {
     if (fresh) {
       RollbackWrap(st, obj, rec);
@@ -1238,11 +1288,13 @@ void nodeapi_wrap_teardown(napi_env env) {
       cleared = ClearBeforeCollect(obj);
     }
     RemoveContainers(st, rec);
+    UnbindRef(st, rec);
     ReleaseHandle(rec);
     // N5.1: move riders out before running the head finalizer (noexcept).
     std::vector<WrapRecord*> riders = std::move(rec->chained);
     RunFinalizer(env, rec);
     for (WrapRecord* rider : riders) {
+      UnbindRef(st, rider);
       int rexp = kLive;
       if (rider->state.compare_exchange_strong(rexp, kDone,
               std::memory_order_acq_rel, std::memory_order_relaxed)) {
@@ -1347,6 +1399,79 @@ void nodeapi_wrap_teardown(napi_env env) {
    * self-delete path without touching this state). */
   ForgetState(nenv);
   delete st;
+}
+
+void nodeapi_wrap_cancel_by_ref(napi_env env, napi_ref ref) {
+  if (!env || !ref) return;
+  nodeapi::NodeEnv* nenv = ToNodeEnv(env);
+  if (!nenv) return;
+  WrapState* st = LookupState(nenv, false);
+  if (!st) return;
+  auto it = st->by_ref.find(ref);
+  if (it == st->by_ref.end()) return;
+  WrapRecord* target = it->second;
+  st->by_ref.erase(it);
+  if (!target) return;
+  target->bound_ref = nullptr;
+
+  JsValueRef head_obj = JS_INVALID_REFERENCE;
+  bool in_wraps = false;
+  for (const auto& kv : st->wraps) {
+    if (kv.second == target) {
+      head_obj = kv.first;
+      in_wraps = true;
+      break;
+    }
+  }
+
+  if (in_wraps &&
+      target->state.load(std::memory_order_acquire) == kLive) {
+    target->finalize = nullptr;
+    target->user_data = nullptr;
+    target->hint = nullptr;
+    target->has_data_wrap = false;
+    target->has_wrap = false;
+    if (!target->has_tag && target->chained.empty()) {
+      int expected = kLive;
+      if (target->state.compare_exchange_strong(
+              expected, kSuppressed, std::memory_order_acq_rel,
+              std::memory_order_relaxed)) {
+        JsErrorCode cleared = JsNoError;
+        if (target->before_collect && head_obj != JS_INVALID_REFERENCE) {
+          cleared = ClearBeforeCollect(head_obj);
+        }
+        RemoveContainers(st, target);
+        ReleaseHandle(target);
+        if (cleared == JsNoError || !target->before_collect) {
+          delete target;
+        } else {
+          target->leak_to_gc = true;
+        }
+        return;
+      }
+      /* GC raced to kQueued between load and CAS: fall through to suppress
+       * so DrainState skips RunFinalizer and frees target. */
+    } else {
+      return;
+    }
+  }
+
+  /* Rider (not in st->wraps) or already queued/draining head: suppress
+   * finalizer invocation while DrainState / teardown frees the record. */
+  target->finalize = nullptr;
+  target->user_data = nullptr;
+  target->hint = nullptr;
+  target->has_data_wrap = false;
+  target->has_wrap = false;
+  int expected = kLive;
+  if (!target->state.compare_exchange_strong(
+          expected, kSuppressed, std::memory_order_acq_rel,
+          std::memory_order_relaxed)) {
+    expected = kQueued;
+    (void)target->state.compare_exchange_strong(
+        expected, kSuppressed, std::memory_order_acq_rel,
+        std::memory_order_relaxed);
+  }
 }
 
 #ifdef CHAKRA_NODEAPI_TEST_HOOKS

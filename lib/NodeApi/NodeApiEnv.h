@@ -73,7 +73,7 @@
 #define CHAKRA_NODEAPI_ENV_H_
 
 #include "NodeApiHostApi.h" /* napi_env, hook/finalize types, host services */
-#include "js_native_api.h" /* napi_status, napi_finalize (NAPI_VERSION=8) */
+#include "js_native_api.h" /* napi_status, napi_finalize (NAPI_VERSION=10) */
 #include "js_native_api_types.h" /* napi_extended_error_info */
 
 #include <cstdint>
@@ -145,6 +145,19 @@ struct NodeEnv {
   EnvState state = EnvState::Alive;
   std::uint32_t module_api_version = 8;
   std::string module_filename; /* provider-owned copy */
+  // Ownership record (memory-management.md section 3) for module_file_url:
+  //   Resource: NodeEnv::module_file_url (std::string, normalized file:// URL
+  //     formatted once at chakra_nodeapi_create_env from module_filename).
+  //   Domain/allocator: provider native heap via std::string inside NodeEnv;
+  //     backing lifetime == NodeEnv lifetime (never Recycler memory).
+  //   Owner/transfer: owned by NodeEnv; borrowed read-only pointer returned via
+  //     node_api_get_module_file_name(env, &result) (never mutated after create).
+  //   Borrow invalidation: invalidated only at chakra_nodeapi_destroy_env step 7
+  //     (delete env). Valid throughout Alive and Closing.
+  //   Thread/context: owner thread only; no context needed (native-only).
+  //   Release: freed automatically when ~NodeEnv runs at destroy step 7 (or on
+  //     create OOM rollback).
+  std::string module_file_url;
   chakra_nodeapi_host_services services{};
   void* host_ctx = nullptr;
 
@@ -385,20 +398,15 @@ class EntryGuard {
 };
 
 /* Teardown entry points (plan section 3.6 steps 2-6). Destroy calls
- * these in section 3.6 order; later tasks fill the bodies without
- * reordering. Steps 3-5 are Lifetime (N1.4). Step 2 (finalizer
- * drain, N3.2) is wired in chakra_nodeapi_destroy_env and step
- * 6c-d (wraps, N3.3) via TeardownWraps; step 6a/6b are real:
- *   - scopes: real (NodeApiScopes, N1.2) via TeardownScopes;
- *   - refs: real (NodeApiRefs, N1.3) via TeardownRefs +
- *     nodeapi_refs_teardown_all.
- *   - promise/script: real (N3.4/N3.5) via TeardownPromiseScript.
- *   - wraps: real (NodeApiWrap, N3.2/N3.3) via TeardownWraps ->
- *     nodeapi_wrap_teardown. */
+ * these in step-6 order: wraps (6d backstop while refs/scopes remain
+ * live so wrap finalizers can delete references and get singletons) ->
+ * refs (6a) -> scopes (6b) -> promise/script (6c) -> instance finalizer.
+ * Steps 3-5 are Lifetime (N1.4). Step 2 (finalizer drain, N3.2) is wired
+ * in chakra_nodeapi_destroy_env. */
 void TeardownScopes(NodeEnv* env); /* step 6b */
 void TeardownRefs(NodeEnv* env); /* step 6a (real, N1.3) */
 void TeardownPromiseScript(NodeEnv* env); /* step 6 (real, N3.4/N3.5) */
-void TeardownWraps(NodeEnv* env); /* steps 6c-d (real, N3.2/N3.3) */
+void TeardownWraps(NodeEnv* env); /* steps 6d backstop (real, N3.2/N3.3) */
 
 /* Provider allocator accounting (N1.1, semantics P1-6).
  * Hidden visibility: NOT exported from release

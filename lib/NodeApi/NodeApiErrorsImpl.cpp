@@ -10,8 +10,8 @@
 // Vendored oracles (do not edit planning docs; these are the citations):
 //   - Declarations: include/nodeapi/js_native_api.h:121-136 (create_*),
 //     :381-405 (throw/is_error/pending/clear), node_api.h:92-96
-//     (fatal_error), :185-186 (fatal_exception). NAPI_VERSION=8 includes
-//     all of these; the v9 syntax pair (:133-136, :392-396) is excluded.
+//     (fatal_error), :185-186 (fatal_exception). NAPI_VERSION=10 includes
+//     the v9 syntax pair (:133-136, :392-396).
 //   - code-property semantics: test/nodeapi/vendor/js-native-api/
 //     test_error/test_error.c createErrorCode/throwErrorCode etc. pass a
 //     caller-supplied string value ("ERR_TEST_CODE") as `code` and
@@ -58,7 +58,12 @@
 
 namespace {
 
-enum class ErrorKind : int { Error = 0, TypeError = 1, RangeError = 2 };
+enum class ErrorKind : int {
+  Error = 0,
+  TypeError = 1,
+  RangeError = 2,
+  SyntaxError = 3,
+};
 
 /* JsErrorCode -> napi_status per plan section 3.10 table (semantics section 6).
  * Records last_error (provider-owned buffer) and returns the mapped status.
@@ -167,6 +172,7 @@ napi_status CreateErrorObject(napi_env env, ErrorKind kind,
     case ErrorKind::Error: ec = JsCreateError(msgJs, &err); break;
     case ErrorKind::TypeError: ec = JsCreateTypeError(msgJs, &err); break;
     case ErrorKind::RangeError: ec = JsCreateRangeError(msgJs, &err); break;
+    case ErrorKind::SyntaxError: ec = JsCreateSyntaxError(msgJs, &err); break;
     default:
       nodeapi::SetLastError(env, napi_generic_failure,
                             "create_error: unknown kind");
@@ -394,8 +400,7 @@ napi_status IsErrorImpl(napi_env env, napi_value value, bool* isErr) {
 extern "C" {
 
 // --- napi_create_error family (A4, C Yes: execute with pending) ---
-// Vendored declarations: js_native_api.h:121-132. Syntax variant (v9) is
-// intentionally absent (plan section 1.2).
+// Vendored declarations: js_native_api.h:121-136.
 
 napi_status NAPI_CDECL napi_create_error(napi_env env, napi_value code,
                                           napi_value msg,
@@ -445,11 +450,26 @@ napi_status NAPI_CDECL napi_create_range_error(napi_env env, napi_value code,
   return CreateErrorCommon(env, ErrorKind::RangeError, code, msg, result);
 }
 
+NAPI_EXTERN napi_status NAPI_CDECL node_api_create_syntax_error(
+    napi_env env, napi_value code, napi_value msg, napi_value* result) {
+  if (result == nullptr) {
+    if (env != nullptr) {
+      nodeapi::SetLastError(env, napi_invalid_arg,
+                            "node_api_create_syntax_error: result is NULL");
+    }
+    return napi_invalid_arg;
+  }
+  nodeapi::EntryGuard guard(env, /*allowClosing=*/false,
+                            /*allowPending=*/true, /*needContext=*/true);
+  if (!guard.ok()) return guard.status();
+  return CreateErrorCommon(env, ErrorKind::SyntaxError, code, msg, result);
+}
+
 // --- napi_throw family (A4, C No: gated) ---
-// Vendored declarations: js_native_api.h:382-391. On success sets pending
+// Vendored declarations: js_native_api.h:382-396. On success sets pending
 // via JsSetException and returns napi_ok; if already pending returns
 // napi_pending_exception and preserves the original (plan section 3.10,
-// status-mapping throw rows). Syntax throw (v9) intentionally absent.
+// status-mapping throw rows).
 
 napi_status NAPI_CDECL napi_throw(napi_env env, napi_value error) {
   if (error == nullptr) {
@@ -495,6 +515,15 @@ napi_status NAPI_CDECL napi_throw_range_error(napi_env env, const char* code,
                             /*allowPending=*/false, /*needContext=*/true);
   if (!guard.ok()) return guard.status();
   return ThrowErrorCommon(env, ErrorKind::RangeError, code, msg);
+}
+
+NAPI_EXTERN napi_status NAPI_CDECL node_api_throw_syntax_error(napi_env env,
+                                                               const char* code,
+                                                               const char* msg) {
+  nodeapi::EntryGuard guard(env, /*allowClosing=*/false,
+                            /*allowPending=*/false, /*needContext=*/true);
+  if (!guard.ok()) return guard.status();
+  return ThrowErrorCommon(env, ErrorKind::SyntaxError, code, msg);
 }
 
 // --- napi_is_error (A4 also A2, C Yes: execute with pending) ---

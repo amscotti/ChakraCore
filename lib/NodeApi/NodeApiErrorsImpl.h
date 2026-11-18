@@ -12,15 +12,13 @@
 // napi_is_exception_pending, napi_get_and_clear_last_exception, N1.5) is
 // NOT reimplemented here.
 //
-// V8 surface implemented here (verify against include/nodeapi/js_native_api.h
-// and include/nodeapi/node_api.h at NAPI_VERSION=8):
-//   napi_create_error, napi_create_type_error, napi_create_range_error
-//   napi_throw, napi_throw_error, napi_throw_type_error, napi_throw_range_error
+// Surface implemented here (verify against include/nodeapi/js_native_api.h
+// and include/nodeapi/node_api.h at NAPI_VERSION=10):
+//   napi_create_error, napi_create_type_error, napi_create_range_error,
+//   node_api_create_syntax_error
+//   napi_throw, napi_throw_error, napi_throw_type_error,
+//   napi_throw_range_error, node_api_throw_syntax_error
 //   napi_is_error, napi_fatal_exception, napi_fatal_error
-// NodeApiErrorsImpl does NOT implement the v9 syntax-error pair
-// (node_api_create_syntax_error / node_api_throw_syntax_error, js_native_api.h
-// NAPI_VERSION>=9): adding v9 symbols without the v9 semantics is a
-// conformance bug (plan section 1.2). No syntax-error symbol is defined here.
 //
 // Ownership record (memory-management.md section 3; plan N2.5 "not required"):
 //   Resource: error JsValueRefs created by napi_create_* (returned to the
@@ -54,7 +52,7 @@
 #ifndef CHAKRA_NODEAPI_ERRORS_IMPL_H_
 #define CHAKRA_NODEAPI_ERRORS_IMPL_H_
 
-#include "js_native_api.h" /* napi_env, napi_value, NAPI_VERSION=8 */
+#include "js_native_api.h" /* napi_env, napi_value, NAPI_VERSION=10 */
 #include "node_api.h" /* napi_fatal_error / napi_fatal_exception (B1) */
 
 #endif /* CHAKRA_NODEAPI_ERRORS_IMPL_H_ */

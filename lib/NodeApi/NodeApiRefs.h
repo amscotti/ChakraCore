@@ -191,7 +191,7 @@
 #ifndef CHAKRA_NODEAPI_REFS_H_
 #define CHAKRA_NODEAPI_REFS_H_
 
-#include "js_native_api.h" /* napi_env, napi_value, napi_ref, NAPI_VERSION=8 */
+#include "js_native_api.h" /* napi_env, napi_value, napi_ref, NAPI_VERSION=10 */
 #include "ChakraCommon.h"  /* JsRuntimeHandle, JsContextRef */
 
 #include <cstddef>

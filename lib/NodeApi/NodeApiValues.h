@@ -24,12 +24,20 @@
 //   napi_get_value_bigint_words.
 // N2.6 notes: napi_is_error is implemented in NodeApiErrorsImpl.*
 // (N2.5) and napi_instanceof in NodeApiObjects.* (N2.3); neither is
-// duplicated here. napi_symbol_for / napi_create_named_function do not
-// exist at v8 (plan section 4.1 note) and are not implemented.
+// duplicated here.
 //
-// All napi_* symbols are declared in the vendored include/nodeapi/js_native_api.h
-// (NAPI_VERSION=8); this header only records the lane's contract. The provider
-// calls only the public JsRT C API (ChakraCommon.h / ChakraCore.h).
+// Q1.1 additions (NAPI_VERSION=9 / NAPI_VERSION=10):
+//   node_api_symbol_for,
+//   node_api_create_external_string_latin1 /
+//   node_api_create_external_string_utf16,
+//   node_api_create_property_key_latin1 /
+//   node_api_create_property_key_utf8 /
+//   node_api_create_property_key_utf16.
+//
+// All napi_* / node_api_* symbols are declared in the vendored
+// include/nodeapi/js_native_api.h (NAPI_VERSION=10); this header only
+// records the lane's contract. The provider calls only the public JsRT
+// C API (ChakraCommon.h / ChakraCore.h).
 //
 // Conversion semantics (Node v22.22.3 doc/api/n-api.md + src/js_native_api_v8.cc,
 // which doc/node-api-status-mapping.md columns B/C cite; vendored headers are
@@ -212,6 +220,24 @@
 //   (d) napi_create_bigint_words over-cap RangeError: created and
 //     JsSetException'd inside the call (TmpRoot'd across the set; the
 //     engine holds it as the pending exception afterwards).
+//   (e) Q1.1 node_api_create_external_string_{latin1,utf16}:
+//     ChakraCore JsString cannot carry an external backing pointer or
+//     before-collect callback, so the provider copies into a Recycler
+//     string (`*copied = true` when non-null) and roots the string in
+//     the caller's innermost scope. Domain: Recycler string (owned by
+//     the scope stack until scope close / destroy step 6b); caller's
+//     `str` buffer is borrowed only during the copy and never retained.
+//     Potential user-code / reentrancy: `finalize_callback` runs
+//     synchronously on the owner thread ONLY after `*result` is rooted;
+//     it is guarded with try/catch so C++ exceptions never cross the ABI.
+//     Release on error: on any validation/OOM/rooting failure, `*result`
+//     and `*copied` are untouched and `finalize_callback` is NEVER
+//     invoked (caller retains ownership of `str`).
+//   (f) Q1.1 node_api_symbol_for: fetches global `Symbol.for` via
+//     TmpRoot'd lookups, preserves any pre-existing pending JS exception
+//     via RAII save/clear/restore across the `Symbol.for` call, verifies
+//     the returned value is JsSymbol, and roots it into the innermost
+//     scope before returning.
 //   Tests: test/nodeapi/probes/values_probe.cpp (run_values_probe.sh)
 //   and test/nodeapi/probes/coerce_probe.cpp (run_coerce_probe.sh).
 //   Node-differential receipts (lossless/wrap/words/coerce-null) are
@@ -225,6 +251,6 @@
 #ifndef CHAKRA_NODEAPI_VALUES_H_
 #define CHAKRA_NODEAPI_VALUES_H_
 
-#include "js_native_api.h" /* napi_status, napi_value, NAPI_VERSION=8 */
+#include "js_native_api.h" /* napi_status, napi_value, NAPI_VERSION=10 */
 
 #endif /* CHAKRA_NODEAPI_VALUES_H_ */

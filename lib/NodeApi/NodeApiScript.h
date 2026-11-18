@@ -7,23 +7,21 @@
 // (plan doc/node-api-plan.md task N3.5, A6 script/version + B7;
 // status rows in doc/node-api-status-mapping.md C column).
 //
-// V8 surface implemented here:
+// Surface implemented here:
 //   napi_run_script / napi_adjust_external_memory
 // napi_get_version / napi_get_node_version are NOT reimplemented here:
 //   they already landed in NodeApiEnv.cpp (Wave 1, N1.1) and are
 //   registered in the exports inventory. Their shapes were verified
 //   against N3.5 (see below); duplicating them would cause a
-//   duplicate-symbol link break. This TU only records their shapes in
-//   the probe (promise_script_probe.cpp asserts version==8 and the
-//   provider version struct).
+//   duplicate-symbol link break. Q1.1 updated napi_get_version to
+//   report provider version 10.
 //
-// Verified landed shapes (Wave 1, NodeApiEnv.cpp:700-743):
-//   - napi_get_version(node_api_basic_env, uint32_t*) -> 8. Matches
-//     N3.5 ("8, from N1.1") and plan SS4 A6. Delta: none. It is a
-//     basic_env entry that validates (CheckAlive) but issues no Js*
-//     call, executes with pending (C-Yes), and clears last_error on
-//     success (AMB-STATUS-1). The basic_env spelling (same pointer
-//     type as napi_env) is header-correct for GC-safe entries.
+// Verified landed shapes (Wave 1, NodeApiEnv.cpp, updated in Q1.1):
+//   - napi_get_version(node_api_basic_env, uint32_t*) -> 10 (was 8 in
+//     N1.1/N3.5). It is a basic_env entry that validates (CheckAlive)
+//     but issues no Js* call, executes with pending (C-Yes), and clears
+//     last_error on success (AMB-STATUS-1). The basic_env spelling (same
+//     pointer type as napi_env) is header-correct for GC-safe entries.
 //   - napi_get_node_version(node_api_basic_env,
 //     const napi_node_version**) -> &{1,0,0,"libChakraNodeApi/1.0.0"}.
 //     Matches N3.5 + B7 ("provider truth, not a Node runtime claim;
@@ -163,7 +161,7 @@
 #ifndef CHAKRA_NODEAPI_SCRIPT_H_
 #define CHAKRA_NODEAPI_SCRIPT_H_
 
-#include "js_native_api.h" /* napi_env, napi_value, NAPI_VERSION=8 */
+#include "js_native_api.h" /* napi_env, napi_value, NAPI_VERSION=10 */
 
 #ifdef __cplusplus
 extern "C" {

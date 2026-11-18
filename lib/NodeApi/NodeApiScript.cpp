@@ -25,7 +25,7 @@
 //     NULL adjusted_value => napi_invalid_arg with no mutation.
 //     Allows Closing (teardown-compatible for external finalizers).
 //   - napi_get_version / napi_get_node_version: NOT here (landed in
-//     NodeApiEnv.cpp Wave 1; verified shapes in NodeApiScript.h).
+//     NodeApiEnv.cpp; provider version updated to 10 in Q1.1).
 
 #include "NodeApiScript.h"
 

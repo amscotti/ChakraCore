@@ -11,7 +11,7 @@
 // (lib/Jsrt/Chakra*.h), and must NOT collide with napi_*/node_api_* symbols.
 // It is compiled by the host and the provider with:
 //
-//   -I include/nodeapi -I lib/Jsrt -I lib/NodeApi -DNAPI_VERSION=8
+//   -I include/nodeapi -I lib/Jsrt -I lib/NodeApi -DNAPI_VERSION=10
 //
 // and is required to compile standalone against the vendored Node-API headers
 // (include/nodeapi/, Node 22.22.3, PR-2) and the JsRT headers
@@ -36,10 +36,10 @@
 //     No napi_env / napi_value / napi_ref use from worker threads (R3).
 //   Release on success / failure / shutdown: destroy_env is the sole release
 //     authority; it runs the section 3.6 sequence (finalizer drain -> sync cleanup
-//     hooks LIFO -> async hooks + host pump -> instance finalizer -> refs /
-//     scopes / wrap backstop -> free NodeEnv) before the host may dispose the
-//     Chakra context/runtime. Double destroy is a host error (assert in debug,
-//     no-op in release; the void signature cannot return a status).
+//     hooks LIFO -> async hooks + host pump -> wrap backstop -> refs / scopes ->
+//     promise/script -> instance finalizer -> free NodeEnv) before the host may
+//     dispose the Chakra context/runtime. Double destroy is a host error (assert
+//     in debug, no-op in release; the void signature cannot return a status).
 //   Tests: N1.1 (1000x create/destroy, wrong-thread / Closing / Dead probes
 //     P1-* in doc/node-api-semantics.md section 1.5); host loader proof in N0.3.
 //   Remaining uncertainty: exact section 3.6 step order is checked against vendored
@@ -87,7 +87,7 @@
 #ifndef CHAKRA_NODEAPI_HOST_API_H_
 #define CHAKRA_NODEAPI_HOST_API_H_
 
-#include "js_native_api.h" /* napi_env, napi_value (NAPI_VERSION=8) */
+#include "js_native_api.h" /* napi_env, napi_value (NAPI_VERSION=10) */
 #include "node_api_types.h" /* napi_addon_register_func (register ABI) */
 #include "ChakraCommon.h" /* JsRuntimeHandle, JsContextRef */
 
@@ -123,9 +123,11 @@ typedef struct chakra_nodeapi_host_services {
 /* Create an env for (runtime, context) owned by the calling thread.
  * `module_filename` may be NULL (the provider keeps its own copy).
  * `services` may be NULL (equivalent to all-NULL fields).
- * The env records the negotiated API version (provider max = 8 in v1):
- * the host resolves the addon's node_api_module_get_api_version_v1 (absent
- * => 8) and rejects requests > 8 before calling this (plan section 1.3, D1).
+ * The env defaults `module_api_version` to 8 (for direct C++ probes without
+ * negotiation); the provider supports up to version 10 and the host
+ * resolves the addon's node_api_module_get_api_version_v1 (absent => 8),
+ * rejects requests < 1 or > 10 before calling this, and calls
+ * chakra_nodeapi_set_module_api_version(env, version) after create.
  * Returns NULL on failure (host must treat as fatal, not pass onward).
  * The runtime/context must outlive the env; the env never disposes them. */
 napi_env chakra_nodeapi_create_env(JsRuntimeHandle runtime,
@@ -133,6 +135,13 @@ napi_env chakra_nodeapi_create_env(JsRuntimeHandle runtime,
                                    const char* module_filename,
                                    const chakra_nodeapi_host_services* services,
                                    void* host_ctx);
+
+/* Record the negotiated Node-API module API version (1 <= version <= 10)
+ * on a live Alive env on the owner thread. Returns napi_invalid_arg on
+ * NULL/dead/wrong-thread/non-Alive env or out-of-range version (recording
+ * SetLastError when live on the owner thread in Alive/Closing). */
+napi_status chakra_nodeapi_set_module_api_version(napi_env env,
+                                                   int32_t version);
 
 /* Destroy per the section 3.6 state machine. Must be called on the env thread,
  * before JsDisposeRuntime, with no provider call in flight. Runs cleanup
