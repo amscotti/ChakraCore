@@ -96,13 +96,17 @@ handling have been validated before its results are used as a completion gate.
 | B2 | Source-only Mac `zig build` and `zig build check` | B1 | Verified |
 | B3 | Mac build profiles, incremental correctness and CI | B2 | Verified* |
 | B4 | Native x64 Linux JIT/WASM/WABT proof and Zig build | B2; B3 before default rollout | **Proven on proof host** (native run + certified baseline recorded; post-D1–D4 Linux handoff §5 and hosted-CI green still owed before default rollout) |
-| B5 | First release package with controlled dependencies | B3; B4 for a two-platform package | Planned |
+| B5 | First release package with controlled dependencies | B3; B4 for a two-platform package | **Verified on macOS** (`check-package`, [b5-package.md](b5-package.md); Linux run owed in G0) |
 | B6 | Windows feasibility and rollout; later target extensions | Stable build contracts | Separate expansion |
-| Z1 | One useful mixed C++/Zig unit behind a tested C ABI | B3; B4 if the unit ships on Linux | Optional pilot |
+| Z1 | One useful mixed C++/Zig unit behind a tested C ABI | B3; B4 if the unit ships on Linux | **Scheduled in Q1.3** (`Uint8Array` Base64/Hex C-ABI codec; [vision-and-roadmap.md](vision-and-roadmap.md)) |
 | C1 | Qualified ES2025 test policy and triaged failures | Stable Mac build at B3 | Recorded (CONDITIONAL) |
 | C2 | Bounded compatibility batches and partial releases | C1; B4 before JIT-wide enablement | In progress (S4/S5/S10/S11/S7-matchAll/S9 named-groups + d-flag + duplicate named groups + lookbehind + ES2025 modifiers; S1 class elements complete: public/private instance+static fields, private methods/accessors incl. async/generator and statics, computed field names, `super` in field initializers, static blocks and direct-eval `super` early errors (integrated elements corpus now 5,892/5,897 after default BigInt; eval-code 454/0); S6a–S6e growable/cross-agent SAB, `Atomics.pause`, `Atomics.waitAsync` (single-thread + finite timeouts + cross-agent native wake latch), and BigInt64Array/BigUint64Array Atomics — **`ESSharedArrayBuffer=true` now default-on (`7412beb56`)**, verified in `refresh-2026-11-16` and cross-agent Stage 2 hardenings; S8 immutable/resizable ArrayBuffer + TypedArray tracking + Float16 (`DataView`/`Math.f16round`/`Float16Array` + JIT `Lower.cpp` table/stride/bounds hardening); S3-a Unicode property escapes on ICU 79.1; S3-b RegExp `v` mode; S9 u-mode/S9-b/RegExp non-writable `lastIndex` JIT+slow guards; S2 BigInt default-on; S12 import attributes + JSON modules; S13 symbol keys, WeakRef, FinalizationRegistry; S14 P1–P7; Node-API `libChakraNodeApi` + `ch-nodeapi` async host services. All 4 Mac Zig profiles green (`test` **2063/0**, `debug-static` **2115/0**, `jit` + `wasm` **382/382 P1**); post-Stage-2/3 native Linux run still gated in §6) |
-| C3 | Larger runtime/object-model feature projects | C1 and their feature prerequisites | Separate projects |
-| C4 | Verified full ES2025 core-language result | Required C2/C3 work and qualified runner | Long-term objective |
+| C3 | Larger runtime/object-model feature projects | C1 and their feature prerequisites | Separate projects (`Explicit Resource Management`, C-ABI `Temporal`, WASM 2.0) |
+| C4 | Verified full ES2025 core-language result | Required C2/C3 work and qualified runner | **98.89% certified on macOS** (`79,648/80,544` at `40c2fe5be`); Linux re-verify owed in G0 |
+| G0 | Single-pass Linux x64 revalidation & matched two-platform `b5` release | B4, B5, C4 | Next gate ([linux-handoff.md](linux-handoff.md) §0) |
+| Q1 | High-ROI quick wins: Node-API v9/v10 (`Q1.1`), ES2025 `~99.3%` tail (`Q1.2`), ES2026 small built-ins + `Z1` Base64/Hex (`Q1.3`) | G0 (or branch) | Planned ([vision-and-roadmap.md](vision-and-roadmap.md) §3) |
+| I1 | Modern ECMA-402 `Intl` wrappers over linked `icu4c` (`Locale`, `ListFormat`, `RelativeTimeFormat`, `DisplayNames`, `Segmenter`) | B3/B4 ICU contracts | Planned ([vision-and-roadmap.md](vision-and-roadmap.md) §3) |
+| H1 | Standalone Zig + `libuv` + `libChakraNodeApi` lightweight runtime host ("Option B") | `JsRT` + `libChakraNodeApi` + `Q1.1` | Planned separate host ([vision-and-roadmap.md](vision-and-roadmap.md) §3) |
 
 **Default execution order:** F0 → B1 → B2 → B3 → B4. Start C1 after B3;
 release/dependency work at B5 and an approved Z1 pilot can then be scheduled without
@@ -138,6 +142,31 @@ Boundaries:
   Their entire future feature sets do not gate ES2025 core-language completion.
 - Modern OS/tool floors may be raised deliberately. A supported-platform claim
   requires a declared contract and testing on the relevant platform/floor.
+
+### 0.0 Strategic Positioning — The Embeddable JIT Sweet Spot
+
+This fork intentionally targets the **embeddable JIT sweet spot** between tiny
+interpreter-only engines (fast to compile and small, but lacking a full
+optimizing JIT + concurrent collector) and heavyweight browser engines
+(maximum peak speed, but multi-tens-of-MB binaries, sprawling builds, and
+volatile C++ embedding APIs):
+
+- **Small package, fast hermetic build:** `~5.3 MB` deterministic
+  `zig build package` archives (`darwin-arm64` verified; `linux-x64` queued in
+  `G0`) built in under a minute from a single `zig build` front end (`Zig 0.17.0`).
+- **Dual flat C ABIs:** Embedders use versioned `JsRT` (`237` exports) while
+  native addons use `libChakraNodeApi` (`150` exports, `NAPI_VERSION=8`), with
+  explicit **non-goals** against `v8.h` C++ shims, upstream `nodejs/node` forks,
+  or C++->Zig core rewrites ([zig-strategy.md](zig-strategy.md)).
+- **Modern ES2025 + Multi-Tier JIT + WASM SIMD:** `98.89%` certified ES2025
+  (`79,648/80,544`), 3-tier x64/ARM64 JIT with concurrent GC, and `382/382` P1
+  WASM (plus bulk-memory, multi-value, and NEON/SSE SIMD).
+- **Phase-4 expansion tracks (`G0` → `Q1` → `I1` / `H1`):** Ordered in
+  [vision-and-roadmap.md](vision-and-roadmap.md) — Linux gate (`G0`), quick
+  Node-API v9/v10 + ES2025/ES2026 + `Z1` Base64/Hex Zig wedge (`Q1`), ICU
+  `Intl` wrappers (`I1`), and a standalone Zig + `libuv` + `libChakraNodeApi`
+  runtime host (`H1`, strictly external over `JsRT` + `NodeApiHostApi.h` so
+  Phase 1–3 engine boundaries remain untouched).
 
 ### 0.1 Phase-3 JsRT Additive API Versioning Contract
 

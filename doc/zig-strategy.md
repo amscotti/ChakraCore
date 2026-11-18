@@ -1,5 +1,10 @@
 # Zig integration strategy — incremental, C-ABI wedges only
 
+> **2026-11-17 update (`modernize/baseline` at `40c2fe5be`):** Since the 2026-11-09 snapshot below, `libChakraNodeApi` (`150` exports: `145` `NAPI_VERSION=8` + `5` host helpers) has landed in C++ over `JsRT`, host-`clang++` ASan/UBSan lanes (`26/26` legs clean) are wired in `build.zig`/`linux.zig`, `b5-package` creates deterministic `~5.3 MB` release tarballs, and certified ES2025 conformance stands at `98.89%`. See [vision-and-roadmap.md](vision-and-roadmap.md) for the two active Phase-4 Zig tracks that fulfill §4 cleanly without reaching into C++ GC/exception internals:
+>
+> 1. **Engine-adjacent `Z1` pilot (`Q1.3`):** Implement ES2026 `Uint8Array` Base64/Hex encoding & decoding in Zig behind a flat C ABI (pure `[]const u8`/`[]u8` byte/SIMD codec; zero `Recycler` pointers, zero C++ exceptions).
+> 2. **Standalone Host (`H1`, "Option B"):** Build a lightweight standalone Zig + `libuv` runtime host consuming `JsRT` and [NodeApiHostApi.h](../lib/NodeApi/NodeApiHostApi.h) outside `libChakraCore`, superseding piecemeal translation of `bin/ch` as the primary host investment.
+
 Status: **recorded strategy (2026-11-09)**, following the B4 Linux x64
 completion and the five-lens swarm review. This doc records *whether,
 where and how* Zig should replace parts of the codebase over time. It is

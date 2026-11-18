@@ -4,11 +4,15 @@
 [![Licensed under the MIT License](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/Microsoft/ChakraCore/blob/master/LICENSE.txt)
 [![PR's Welcome](https://img.shields.io/badge/PRs%20-welcome-brightgreen.svg)](#contribute)
 
-ChakraCore is a JavaScript engine with a C API you can use to add support for JavaScript to any C or C compatible project. It can be compiled for x64 processors on Linux macOS and Windows. And x86 and ARM for Windows only. It is a future goal to support x86 and ARM processors on Linux and ARM on macOS. 
+ChakraCore is a compact, embeddable JavaScript and WebAssembly engine with a flat C API (`JsRT`) and a separate Node-API v8 addon provider (`libChakraNodeApi`). On `modernize/baseline`, it builds hermetically with Zig `0.17.0` on **macOS ARM64** and **Linux x64** (`~5.3 MB` release package, `98.89%` certified ES2025 edition conformance on macOS ARM64, 3-tier JIT + concurrent GC, WASM multi-value + SIMD JIT).
 
-## Future of ChakraCore
+## Project Direction: The Embeddable JIT Sweet Spot
 
-As you may have heard Microsoft Edge no longer uses Chakra. Microsoft will continue to provide security updates for ChakraCore 1.11 until 9th March 2021 but do not intend to support it after that.
+This fork targets the middle ground between interpreter-only embeds and heavyweight browser engines: sub-minute Zig builds, compact binaries, flat C ABIs (`JsRT` + `libChakraNodeApi`) with zero `v8.h` shims, multi-tier x64/ARM64 JIT + WASM SIMD, and optional Zig leaf/host integrations outside the C++ engine core. See [doc/vision-and-roadmap.md](doc/vision-and-roadmap.md) for the Phase-4 roadmap (Node-API v9/v10, ES2025/ES2026 quick wins, `Z1` Base64/Hex Zig C-ABI wedge, modern `Intl`, and a standalone Zig + `libuv` runtime host) and [doc/modernization-plan.md](doc/modernization-plan.md) for verified gates.
+
+## Upstream History
+
+As you may have heard Microsoft Edge no longer uses Chakra. Microsoft stopped actively maintaining upstream ChakraCore 1.11 after March 2021.
 
 ChakraCore is planned to continue as a community project targeted primarily at embedded use cases. We hope to produce future releases with new features and enhancements to support such use cases. We also would like to invite any interested parties to be involved in this project. For further details please see the following draft planning documents:
 [Overall plan](https://github.com/chakra-core/org/blob/master/ChakraCore%20Future%20Plan.md)
@@ -46,13 +50,15 @@ If you find a security issue in the Master branch of Chakracore but not in 1.11 
 > mise exec -- zig build                 # default (test) profile
 > mise exec -- zig build check           # regression + bytecode + native + smoke + metadata gates
 > mise exec -- zig build check -Dprofile=debug-static
-> mise exec -- zig build check -Dprofile=release-shared
-> mise exec -- zig build check -Dprofile=jit   # ARM64 macOS JIT smoke + bytecode gates
+> mise exec -- zig build -Dprofile=release-shared check-package
+> mise exec -- zig build -Dprofile=jit -Dwasm=true check-wasm check-fulljit
+> mise exec -- zig build -Dsanitize=address check-sanitize
+> mise exec -- zig build -Dsanitize=undefined check-sanitize
 > ```
 >
-> The legacy CMake/MSBuild instructions below remain the reference for the
-> upstream `master` build and for platforms the Zig build does not cover yet
-> (Linux behavior is gated on the B4 milestone; Windows is B6).
+> Linux x64 builds via `tools/build/linux.zig` ([doc/linux-handoff.md](doc/linux-handoff.md) §0);
+> legacy CMake/MSBuild instructions below remain the reference for Windows (B6)
+> and upstream comparisons.
 
 You can build ChakraCore on Windows 7 SP1 or above, and Windows Server 2008 R2 or above, with either Visual Studio 2015 or 2017 with C++ support installed.  Once you have Visual Studio installed:
 
@@ -91,7 +97,10 @@ contract**. This does not provide a Node.js runtime: there is no
 `require`/CommonJS resolution, `process`, Node built-ins, timers, a
 `node` executable, or npm, and the provider must never be described as
 Node runtime compatibility. Addons requesting `NAPI_VERSION` >
-8 are rejected at load; v9/v10 symbols are absent.
+8 are rejected at load; v9/v10 symbols are absent. (Planned Phase-4 tracks for
+additive `NAPI_VERSION=9/10` exports [`Q1.1`] and a separate Zig + `libuv` host
+runtime [`H1`] are documented in
+[doc/vision-and-roadmap.md](doc/vision-and-roadmap.md).)
 
 Known non-conformances (see [doc/node-api-receipt.md](doc/node-api-receipt.md) for the
 probe-backed record):

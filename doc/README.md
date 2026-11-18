@@ -2,7 +2,9 @@
 
 In-repo documentation for the ChakraCore modernization effort. Engine and legacy
 build references are pinned to baseline `97e68c917`; execution results and
-modernization decisions are updated through 2026-11-16 (`526393e26`). See
+modernization decisions are updated through 2026-11-17 (Tiers 1–5 completion and
+Phase-4 roadmap). See [vision-and-roadmap.md](vision-and-roadmap.md) for
+strategic positioning and Phase-4 expansion tracks (`G0`, `Q1`, `I1`, `H1`),
 [current-state.md](current-state.md) Section 7 for historical activity context, and
 [architecture-and-readiness-review.md](architecture-and-readiness-review.md) /
 [linux-handoff.md](linux-handoff.md) for current readiness. The complete
@@ -12,6 +14,9 @@ foundational documents, readiness reviews, and primary receipts.
 
 | Document | Contents |
 |---|---|
+| [vision-and-roadmap.md](vision-and-roadmap.md) | **Embeddable JIT Sweet Spot** vision & Phase-4 expansion tracks (`G0` Linux gate, `Q1` Node-API v9/10 + ES2025/ES2026 + `Z1`, `I1` `Intl`, `H1` Zig runtime host) |
+| [b5-package.md](b5-package.md) | Release packaging (`zig build package` / `check-package`), deterministic tarballs, and SHA-256 `MANIFEST.json` verification |
+| [zig-strategy.md](zig-strategy.md) | Incremental C-ABI Zig wedge strategy (`Z1` boundaries vs keeping C++ core intact) |
 | [architecture-and-readiness-review.md](architecture-and-readiness-review.md) | System architecture, layout, P0/P1 Mac fixes, 4-profile test matrix, Test262 `refresh-2026-11-16`, residuals, and Linux readiness |
 | [linux-handoff.md](linux-handoff.md) | Linux bring-up and testing handoff: build overrides, B4 D1-D4 handoff, Linux Node-API/variant gates, sanitizers, CI checklist |
 | [perf-baseline.md](perf-baseline.md) | Darwin ARM64 quiet-machine benchmark receipts (`baseline` vs `HEAD` `526393e26` JIT/Interpreter across SunSpider, Kraken, Octane, JetStream) |
