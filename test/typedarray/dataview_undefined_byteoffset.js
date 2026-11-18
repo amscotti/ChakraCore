@@ -323,6 +323,39 @@ const tests = [
             const P = new Proxy(function () { }, {});
             const proxyRes = Reflect.construct(P, [], Array);
             assert.areEqual(Array.prototype, Object.getPrototypeOf(proxyRes), "Proxy without construct trap uses newTarget.prototype");
+
+            // Proxy wrapping DataView / class / nested Proxy defers newTarget.prototype.
+            const dvProxyNoTrap = new Proxy(DataView, {});
+            assert.throws(() => {
+                Reflect.construct(dvProxyNoTrap, [new ArrayBuffer(0), 10], throwingNewTarget);
+            }, RangeError, "Proxy(DataView, {}) validates byteOffset before newTarget.prototype");
+
+            const dvProxyRes = Reflect.construct(dvProxyNoTrap, [new ArrayBuffer(8)], Array);
+            assert.isTrue(dvProxyRes instanceof Array, "Proxy(DataView, {}) uses newTarget.prototype");
+            assert.areEqual(8, Object.getOwnPropertyDescriptor(DataView.prototype, "byteLength").get.call(dvProxyRes), "Proxy(DataView, {}) constructs valid DataView");
+
+            const dvNestedProxy = new Proxy(dvProxyNoTrap, {});
+            assert.throws(() => {
+                Reflect.construct(dvNestedProxy, [new ArrayBuffer(0), 10], throwingNewTarget);
+            }, RangeError, "nested Proxy(Proxy(DataView, {}), {}) defers newTarget.prototype");
+
+            const derivedProxy = new Proxy(DerivedNoSuper, {});
+            assert.isTrue(Reflect.construct(derivedProxy, [], throwingNewTarget).ok, "Proxy(DerivedNoSuper, {}) skips newTarget.prototype");
+
+            let trapSawNewTarget;
+            const trappedOrdinary = new Proxy(Ordinary, {
+                construct: function (t, a, nt) {
+                    trapSawNewTarget = nt;
+                    return { ok: true };
+                }
+            });
+            assert.isTrue(Reflect.construct(trappedOrdinary, [], throwingNewTarget).ok, "Proxy with construct trap does not touch newTarget.prototype");
+            assert.areEqual(throwingNewTarget, trapSawNewTarget, "construct trap receives original newTarget");
+
+            const proxiedBound = new Proxy(Target.bind(null, "p"), {});
+            const proxiedBoundRes = Reflect.construct(proxiedBound, ["q", "r"], Target);
+            assert.areEqual(Target.prototype, Object.getPrototypeOf(proxiedBoundRes), "Proxy(boundFn, {}) sets Target.prototype");
+            assert.areEqual(["p", "q", "r"], observedArgs, "Proxy(boundFn, {}) preserves bound + forwarded args");
         }
     }
 ];

@@ -668,8 +668,9 @@ using namespace Js;
             // allocates its own instance and invokes OrdinaryCreateFromConstructor
             // at its spec step (SkipDefaultNewObject built-ins, and class
             // constructors whose CallAsConstructor path replaces slot 0 with
-            // newTarget). Leave JavascriptProxy pre-created here so the
-            // no-trap FunctionCallTrap receives the newTarget-derived object.
+            // newTarget), or when the unwrapped target is a JavascriptProxy
+            // (ES2025 10.5.13: construct traps must run without touching
+            // newTarget.prototype; no-trap proxies defer to FunctionCallTrap).
             bool skipCreateFromConstructor = false;
             if (VarIs<JavascriptFunction>(effectiveTarget))
             {
@@ -684,6 +685,10 @@ using namespace Js;
             if (skipCreateFromConstructor)
             {
                 outArgs.Values[0] = scriptContext->GetLibrary()->GetUndefined();
+            }
+            else if (VarIs<JavascriptProxy>(effectiveTarget))
+            {
+                outArgs.Values[0] = nullptr;
             }
             else if (effectiveNewTarget != nullptr)
             {

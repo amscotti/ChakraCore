@@ -2183,6 +2183,7 @@ namespace Js
 
             // in [[construct]] case, we don't need to check if the function is a constructor: the function should throw there.
             Var newThisObject = nullptr;
+            Var effectiveNewTarget = newTarget;
             if (args.Info.Flags & CallFlags_New)
             {
                 if (!JavascriptOperators::IsConstructor(targetObj))
@@ -2193,11 +2194,58 @@ namespace Js
                 // args.Values[0] will be null in the case where NewTarget is initially provided by proxy.
                 if (!isCtorSuperCall || !args.Values[0])
                 {
-                    BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+                    if (isCtorSuperCall && newTarget != nullptr)
                     {
-                        newThisObject = JavascriptOperators::NewScObjectNoCtorCommon(proxy, scriptContext, false);
+                        // Walk BoundFunction chains to inspect the unwrapped constructor
+                        // (deferring CreateFromConstructor for nested Proxy, SkipDefaultNewObject
+                        // built-ins, and class constructors) and substitute
+                        // SameValue(boundFn, newTarget) -> targetFn.
+                        RecyclableObject* unwrapped = targetObj;
+                        while (VarIs<BoundFunction>(unwrapped))
+                        {
+                            BoundFunction* bf = UnsafeVarTo<BoundFunction>(unwrapped);
+                            RecyclableObject* nextTarget = bf->GetDirectTargetFunction();
+                            if (nextTarget == nullptr)
+                            {
+                                AssertMsg(false, "BoundFunction without a target");
+                                break;
+                            }
+                            if (effectiveNewTarget != nullptr && JavascriptConversion::SameValue(bf, effectiveNewTarget))
+                            {
+                                effectiveNewTarget = nextTarget;
+                            }
+                            unwrapped = nextTarget;
+                        }
+
+                        bool skipCreateFromConstructor = VarIs<JavascriptProxy>(unwrapped);
+                        if (!skipCreateFromConstructor)
+                        {
+                            FunctionInfo* unwrappedInfo = JavascriptOperators::GetConstructorFunctionInfo(unwrapped, requestContext);
+                            if (unwrappedInfo && ((unwrappedInfo->GetAttributes() & FunctionInfo::SkipDefaultNewObject) != 0 || unwrappedInfo->IsClassConstructor()))
+                            {
+                                skipCreateFromConstructor = true;
+                            }
+                        }
+
+                        if (!skipCreateFromConstructor)
+                        {
+                            Var marshaledNewTarget = CrossSite::MarshalVar(requestContext, effectiveNewTarget);
+                            BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+                            {
+                                newThisObject = JavascriptOperators::CreateFromConstructor(VarTo<RecyclableObject>(marshaledNewTarget), requestContext);
+                            }
+                            END_SAFE_REENTRANT_CALL
+                            newThisObject = CrossSite::MarshalVar(scriptContext, newThisObject);
+                        }
                     }
-                    END_SAFE_REENTRANT_CALL
+                    else
+                    {
+                        BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+                        {
+                            newThisObject = JavascriptOperators::NewScObjectNoCtorCommon(proxy, scriptContext, false);
+                        }
+                        END_SAFE_REENTRANT_CALL
+                    }
                     // ES2025 10.1.14 GetPrototypeFromConstructor step 4 via
                     // 7.3.24 GetFunctionRealm: after a non-object
                     // newTarget.prototype, a proxy newTarget revoked by that
@@ -2258,16 +2306,18 @@ namespace Js
             if (isNewCall)
             {
                 AnalysisAssert(newCount == ((ushort)args.Info.Count) + 1);
-                newValues[args.Info.Count] = newTarget;
+                Var forwardedNewTarget = CrossSite::MarshalVar(scriptContext, effectiveNewTarget);
+                newValues[args.Info.Count] = forwardedNewTarget;
 
                 // If the function we're calling is a class constructor, it expects newTarget
                 // as the first arg so it knows how to construct "this". (We can leave the
                 // extra copy of newTarget at the end of the arguments; it's harmless so
                 // there's no need to introduce additional complexity here.)
                 FunctionInfo* functionInfo = JavascriptOperators::GetConstructorFunctionInfo(targetObj, scriptContext);
-                if (functionInfo && functionInfo->IsClassConstructor())
+                if ((functionInfo && functionInfo->IsClassConstructor()) ||
+                    (newValues[0] == nullptr && VarIs<BoundFunction>(targetObj)))
                 {
-                    newValues[0] = newTarget;
+                    newValues[0] = forwardedNewTarget;
                 }
             }
 

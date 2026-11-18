@@ -75,7 +75,6 @@ get trap name
 get trap name
 constructor trap
 constructor trap
-get trap prototype
 constructor trap
 true
 get trap m
