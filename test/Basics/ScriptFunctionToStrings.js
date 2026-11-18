@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 
@@ -96,8 +97,8 @@ var tests = [
 
             var oGet = Object.getOwnPropertyDescriptor(qux.prototype, "getter");
             var oSet = Object.getOwnPropertyDescriptor(qux.prototype, "setter");
-            assert.areEqual("getter(){}", oGet.get.toString(), "the name should be getter");
-            assert.areEqual("setter(v){}", oSet.set.toString(), "the name should be setter");
+            assert.areEqual("get getter(){}", oGet.get.toString(), "the name should be getter");
+            assert.areEqual("set setter(v){}", oSet.set.toString(), "the name should be setter");
         }
     },
     {

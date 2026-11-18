@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 
@@ -172,10 +173,10 @@ var tests = [
             assert.areEqual(asyncFunctionPrototype, Object.getPrototypeOf(af), "Async function created by %AsyncFunction% should have the same prototype as syntax declared async functions");
 
             assert.areEqual("anonymous", af.name, "AsyncFunction constructed async function's name is 'anonymous'");
-            assert.areEqual("async function anonymous(\n) {return await 1;\n}", af.toString(), "toString of AsyncFunction constructed function is named 'anonymous'");
+            assert.areEqual("async function anonymous(\n) {\nreturn await 1;\n}", af.toString(), "toString of AsyncFunction constructed function is named 'anonymous'");
 
             af = new AsyncFunction('a', 'b', 'c', 'await a; await b; await c;');
-            assert.areEqual("async function anonymous(a,b,c\n) {await a; await b; await c;\n}", af.toString(), "toString of AsyncFunction constructed function is named 'anonymous' with specified parameters");
+            assert.areEqual("async function anonymous(a,b,c\n) {\nawait a; await b; await c;\n}", af.toString(), "toString of AsyncFunction constructed function is named 'anonymous' with specified parameters");
 
             // Cannot verify behavior of async functions in conjunction with UnitTestFramework.js
             // due to callback nature of their execution. Instead, verification of behavior is

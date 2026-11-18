@@ -1452,6 +1452,10 @@ Symbol* Parser::AddDeclForPid(ParseNodeVar * pnodeVar, IdentPtr pid, SymbolType 
     {
         refForUse = this->PushPidRef(pid);
     }
+    if (refForUse == nullptr)
+    {
+        Error(ERRnoMemory);
+    }
     pnodeVar->symRef = refForUse->GetSymRef();
     Symbol *sym = refForDecl->GetSym();
     if (sym != nullptr)
@@ -6111,9 +6115,12 @@ ParseNodePtr Parser::ParseMemberList(LPCOLESTR pNameHint, uint32* pNameHintLengt
                 Error(ERRExperimental);
             }
 
-            // Include star character in the function extents
-            ichMin = this->GetScanner()->IchMinTok();
-            iecpMin = this->GetScanner()->IecpMinTok();
+            if (!isAsyncMethod)
+            {
+                // Include star character in the function extents when not preceded by `async`.
+                ichMin = this->GetScanner()->IchMinTok();
+                iecpMin = this->GetScanner()->IecpMinTok();
+            }
 
             this->GetScanner()->ScanForcingPid();
             fncDeclFlags |= fFncGenerator;
@@ -10785,8 +10792,12 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
         if (m_token.tk == tkPrivateName)
         {
             isPrivateField = true;
-            ichMin = this->GetScanner()->IchMinTok();
-            iecpMin = this->GetScanner()->IecpMinTok();
+            charcount_t privateIchMin = this->GetScanner()->IchMinTok();
+            if (!isAsyncMethod && !isGenerator)
+            {
+                ichMin = privateIchMin;
+                iecpMin = this->GetScanner()->IecpMinTok();
+            }
             privateSource = m_token.GetIdentifier(this->GetHashTbl());
             if (privateSource == wellKnownPropertyPids.constructor)
             {
@@ -10801,7 +10812,7 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
             {
                 PidRefStack * hiddenRef = Anew(&m_nodeAllocator, PidRefStack);
                 hiddenRef->SetSym(privateEntry->sym);
-                ParseNodeName * pnodePrivate = CreateNameNode(privateSource, hiddenRef, ichMin, this->GetScanner()->IchLimTok());
+                ParseNodeName * pnodePrivate = CreateNameNode(privateSource, hiddenRef, privateIchMin, this->GetScanner()->IchLimTok());
                 pnodePrivate->SetIsPrivateName();
                 pnodePrivate->sym = privateEntry->sym;
                 pnodeMemberName = pnodePrivate;
@@ -11299,6 +11310,9 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
                     fncDeclFlags | (isGetter ? fFncNoArg : fFncOneArg),
                     SuperRestrictionState::PropertyAllowed, nullptr, /* needsPIDOnRCurlyScan */ true);
 
+                pnodeFnc->cbStringMin = iecpMin;
+                pnodeFnc->cbStringLim = pnodeFnc->cbLim;
+
                 pnodeFnc->SetIsStaticMember(isStatic);
                 pnodeFnc->SetHasHomeObj();
 
@@ -11346,6 +11360,8 @@ ParseNodeClass * Parser::ParseClassDecl(BOOL isDeclaration, LPCOLESTR pNameHint,
                 {
                     pnodeFnc = ParseFncDeclNoCheckScope<buildAST>(fncDeclFlags | (isGetter ? fFncNoArg : fFncOneArg),
                         SuperRestrictionState::PropertyAllowed, pidHint ? pidHint->Psz() : nullptr, /* needsPIDOnRCurlyScan */ true);
+                    pnodeFnc->cbStringMin = iecpMin;
+                    pnodeFnc->cbStringLim = pnodeFnc->cbLim;
                 }
 
                 pnodeFnc->SetIsStaticMember(isStatic);
@@ -12916,7 +12932,7 @@ PidRefStack* Parser::PushPidRef(IdentPtr pid)
         // NOTE: the phase check is here to protect perf. See OSG 1020424.
         // In some LS AST-rewrite cases we lose a lot of perf searching the PID ref stack rather
         // than just pushing on the top. This hasn't shown up as a perf issue in non-LS benchmarks.
-        return pid->FindOrAddPidRef(&m_nodeAllocator, GetCurrentBlock()->blockId, currentFnc->functionId);
+        return this->FindOrAddPidRef(pid, GetCurrentBlock()->blockId, currentFnc->functionId);
     }
 
     Assert(GetCurrentBlock() != nullptr);
@@ -15194,6 +15210,10 @@ void Parser::FinishDeferredFunction(ParseNodeBlock * pnodeScopeList)
                     // Set up the named function expression symbol so references inside the function can be bound.
                     pnodeFncExprBlock = this->StartParseBlock<true>(PnodeBlockType::Function, ScopeType_FuncExpr);
                     PidRefStack *ref = this->PushPidRef(pnodeVarName->pid);
+                    if (ref == nullptr)
+                    {
+                        Error(ERRnoMemory);
+                    }
                     pnodeVarName->symRef = ref->GetSymRef();
                     ref->SetSym(pnodeVarName->sym);
 
@@ -15231,6 +15251,10 @@ void Parser::FinishDeferredFunction(ParseNodeBlock * pnodeScopeList)
                     ParseNodeVar * pnodeVarArg = pnodeArg->AsParseNodeVar();
 
                     PidRefStack *ref = this->FindOrAddPidRef(pnodeVarArg->pid, blockId, funcId);
+                    if (ref == nullptr)
+                    {
+                        Error(ERRnoMemory);
+                    }
                     pnodeVarArg->symRef = ref->GetSymRef();
                     if (ref->GetSym() != nullptr)
                     {

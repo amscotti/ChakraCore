@@ -93,7 +93,7 @@ namespace Js
 #endif
         };
 
-        static const int numberLinesPrependedToAnonymousFunction = 1;
+        static const int numberLinesPrependedToAnonymousFunction = 2;
 
         static DWORD GetFunctionInfoOffset() { return offsetof(JavascriptFunction, functionInfo); }
 

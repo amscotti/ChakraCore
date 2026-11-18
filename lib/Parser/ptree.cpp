@@ -387,7 +387,7 @@ ParseNodeName::ParseNodeName(charcount_t ichMin, charcount_t ichLim, IdentPtr na
 void ParseNodeName::SetSymRef(PidRefStack * ref)
 {
     Assert(this->symRef == nullptr);
-    this->symRef = ref->GetSymRef();
+    this->symRef = ref != nullptr ? ref->GetSymRef() : nullptr;
 }
 
 Js::PropertyId ParseNodeName::PropertyIdFromNameNode() const

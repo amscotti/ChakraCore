@@ -12,6 +12,7 @@ encodeURIComponent = undefined
 Object = [object Object]
 Function = function anonymous(
 ) {
+
 }
 Array = 
 String = 

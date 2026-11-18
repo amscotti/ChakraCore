@@ -1,7 +1,7 @@
 Error: My Error!
    at foo (FunctionName.js:24:9)
    at func (FunctionName.js:28:9)
-   at Function code (Function code:1:4)
+   at Function code (Function code:1:1)
    at eval code (eval code:1:1)
    at Anonymous function (FunctionName.js:35:13)
    at bar (FunctionName.js:34:10)

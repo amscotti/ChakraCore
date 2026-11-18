@@ -110,7 +110,11 @@ function
 [object Object]
 [object Object]
 *** proxied function and Function.prototype.toString.call
-function a() { }
-function a() { }
+function() {
+    [native code]
+}
+function() {
+    [native code]
+}
 *** deeply nested proxy and typeof
 pass

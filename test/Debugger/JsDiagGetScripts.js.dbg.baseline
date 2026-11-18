@@ -36,8 +36,8 @@
       },
       {
         "scriptType": "Function code",
-        "lineCount": 3,
-        "sourceLength": 41,
+        "lineCount": 4,
+        "sourceLength": 42,
         "scriptId": 8,
         "parentScriptId": 3
       }

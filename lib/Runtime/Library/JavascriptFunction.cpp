@@ -170,8 +170,9 @@ using namespace Js;
             0 + // "function anonymous" GetFunctionAnonymousString
             0 + // "("   GetOpenRBracketString
             1 + // "\n)" GetNewLineCloseRBracketString
-            0 // " {"  GetSpaceOpenBracketString
-            == numberLinesPrependedToAnonymousFunction); // Be sure to add exactly one line to anonymous function
+            0 + // " {"  GetSpaceOpenBracketString
+            1   // "\n"  GetNewLineString
+            == numberLinesPrependedToAnonymousFunction); // Be sure to add exactly two lines to anonymous function
 
         JavascriptString *bs = functionKind == FunctionKind::Async ?
             library->GetAsyncFunctionAnonymousString() :
@@ -183,6 +184,7 @@ using namespace Js;
 
         bs = JavascriptString::Concat(bs, formals);
         bs = JavascriptString::Concat(bs, library->GetSpaceOpenBracketString());
+        bs = JavascriptString::Concat(bs, library->GetNewLineString());
         if (fnBody != NULL)
         {
             bs = JavascriptString::Concat(bs, fnBody);
@@ -1895,26 +1897,31 @@ dbl_align:
 
         Assert(!(callInfo.Flags & CallFlags_New));
 
-        Var arg0 = args[0];
-
-        // callable proxy is considered as having [[Call]] internal method
-        // and should behave here like a function.
-        // we will defer to the underlying target.
-        while (VarIs<JavascriptProxy>(arg0) && JavascriptConversion::IsCallable(arg0))
-        {
-            arg0 = VarTo<JavascriptProxy>(arg0)->GetTarget();
-        }
-
         AssertMsg(args.Info.Count > 0, "Should always have implicit 'this'");
-        if (args.Info.Count == 0 || !VarIs<JavascriptFunction>(arg0))
+        if (args.Info.Count == 0)
         {
             JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NeedFunction, _u("Function.prototype.toString"));
         }
-        JavascriptFunction *pFunc = VarTo<JavascriptFunction>(arg0);
 
-        // pFunc can be from a different script context if Function.prototype.toString is invoked via .call/.apply.
-        // Marshal the resulting string to the current script context (that of the toString)
-        return CrossSite::MarshalVar(scriptContext, pFunc->EnsureSourceString());
+        Var arg0 = args[0];
+        if (VarIs<JavascriptFunction>(arg0))
+        {
+            JavascriptFunction *pFunc = VarTo<JavascriptFunction>(arg0);
+
+            // pFunc can be from a different script context if Function.prototype.toString is invoked via .call/.apply.
+            // Marshal the resulting string to the current script context (that of the toString)
+            return CrossSite::MarshalVar(scriptContext, pFunc->EnsureSourceString());
+        }
+
+        // ES2025 20.2.3.5 step 4: callable objects without [[SourceText]] (including
+        // callable Proxies, whether active or revoked, and callable host objects)
+        // return a NativeFunction representation without unwrapping the target.
+        if (JavascriptConversion::IsCallable(arg0))
+        {
+            return scriptContext->GetLibrary()->GetFunctionDisplayString();
+        }
+
+        JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NeedFunction, _u("Function.prototype.toString"));
     }
 
     JavascriptString* JavascriptFunction::GetNativeFunctionDisplayString(ScriptContext *scriptContext, JavascriptString *name)
