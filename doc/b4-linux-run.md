@@ -437,3 +437,74 @@ macOS ARM64 host (`06d783c64`):
 3. **Windows `INTL_WINGLOB` path:** updated in `Intl.js` and
    `IntlEngineInterfaceExtensionObject.cpp` (compiled into `JsBuiltIn*.bc.*.h`),
    awaiting Windows runtime execution on the B6 Windows port.
+
+## 12. Linux x64 G0 single-pass revalidation (2026-11-18)
+
+| Field | Value |
+|---|---|
+| Host | Ubuntu 24.04.5, x86_64, 4 vCPU, glibc 2.39, ICU 74.2 |
+| Toolchain | Zig 0.17.0 via `mise exec --`; system `clang++` 18.1.3 for sanitizers |
+| Engine commit | `8b447ac4823acc3463c588a98ae807e2a6822b87` (clean tree for the Test262 run) |
+| Test262 launcher SHA-256 | `04b564c4b7c971bed48be74bc194137ea72cd8ab4c3b1e682f2fbc406c4ae09c` |
+| Engine dylib SHA-256 | `75a8634cf44624f33d3f573123f1415316eafc36e34cbe4f56b6c960ee9f4853` |
+| Test262 corpus | `2e0a56762801e275a9fdf96dc49d90ba0cddcf63`, 25 controls, 902 skipped scenarios |
+
+### 12.1 Step results
+
+| Step | Result |
+|---|---|
+| 1–2 | StyleChecks green; `test_build_tools.py` 96/96; package tools 9 tests; edition policy 7 tests; `linux-gate-tests` 9/9; `owned-bytes` 4/4 |
+| 3 | `check`: interpreted **2868/0**, dynapogo **2330/0**; smoke/metadata/JIT/native/bytecode PASS |
+| 4 | `-Djit=false` PASS; `release-shared` PASS; `debug-static` PASS (8/8 static suites) |
+| 5 | `check-fulljit` **615/0**; `check-gcstress` in-thread + concurrent PASS; `check-wasm` P1 **382/382**; debug WASM **66/66** |
+| 6 | ASan `check-sanitize` **26/26** clean |
+| 7 | UBSan `check-sanitize` **26/26** clean |
+| 8 | TSan **25/26 fail** on one startup race family; triaged in [open-cards.md](open-cards.md) §12 |
+| 9 | Node-API **150** exports; probes **18/18**; stress **5x**; `run_matrix.py` **46/23/0**; addon matrix **52/61/6** (six documented PR-12 V8 error-text diffs; runner returns 1) |
+| 10 | earley-boyer **30x**, class-private-methods **50x**, AsyncSuspendedResume/Detach **30x each**, TryCatch/StackTrace PASS |
+| 11 | `package check-package` PASS; deterministic tarball and packaged `ch`/`ch-nodeapi` smoke tests |
+| 12 | Test262 + benchmarks below; hosted CI awaits the push |
+
+### 12.2 Test262 certified refresh (`refresh-2026-11-18`)
+
+- edition-selected **79,399 passed / 1,145 failed** of 80,544 (**98.58%**)
+- broad **80,237 passed / 12,904 failed** of 93,141 (**86.15%**)
+- failure buckets: post-ES2025 11,759; engine-defect-on-existing 996;
+  required-feature-missing 110; host 39
+- negative phase: 8,741 passed, **0 shape-suspects**, 1 marker downgrade
+- previous certified Mac run: 79,648 / 896 (98.89%); Linux delta is **+924
+  fail→pass / 16 pass→fail**, with the pass→fail set limited to
+  `decodeURI*` strict/default pairs, two Proxy/Realm cases, and one RegExp
+  literal — Linux ICU/glibc and host timing, not new engine semantics
+- register: `refresh-2026-11-18` in
+  `tools/test262/baseline-register.json`
+
+### 12.3 Benchmarks
+
+`tools/bench/run.py --iterations 5` on `zig-out/bin/ch`:
+
+- JIT: **65/65** applicable tests scored; JSON
+  `tools/bench/results/linux-x64-jit.json`
+- interp: **58/65** applicable tests scored; eight 60 s host timeouts
+  (`Octane/typescript.js`, `Octane/zlib.js`, `Octane/mandreel.js` FLAKY,
+  JetStream `container.cpp`, `dry.c`, `float-mm.c`, `gcc-loops.cpp`,
+  `n-body.c`); JSON `tools/bench/results/linux-x64-interp.json`.
+  This is a host-speed/timeout delta, not a JIT or engine crash.
+
+### 12.4 Fixes made during G0
+
+- `pal/src/cruntime/wchar.cpp`: include `<stdint.h>` for `uintptr_t`.
+- `test/bailout/implicit_nosideeffect.baseline`: align the post-`ES6RegExPrototypeProperties`
+  default with the observed/Node-compatible `ReferenceError`.
+- `tools/build/check_jit.py`: inspect `ch` itself when a static profile has
+  no sibling dylib; fail closed for non-ELF/Mach-O stubs.
+- `test/{es6,es7,Function}/rlexe.xml`: 120–300 s per-test debug/FullJit
+  timeouts for tests that take 52–214 s on this 4-vCPU host.
+- `tools/build/linux.zig`: omit the `ch` version script under sanitizers so
+  the executable's ASan/UBSan runtime symbols resolve into the instrumented
+  `libChakraCore.so`.
+- `lib/Jsrt/Jsrt.cpp` / `lib/Runtime/Library/JavascriptLibrary.h`: exact
+  `StdCallJavascriptMethodInfo` callback adapters and public-shaped `void`
+  promise continuation callback (UBSan function-type checks).
+- `lib/Common/Core/Api.cpp`: early-return zero-length `js_memcpy_s` copies
+  (UBSan nonnull violation on an empty module table).
