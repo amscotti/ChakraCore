@@ -51,13 +51,13 @@ namespace Js
 #if ENABLE_FIXED_FIELDS
         virtual BOOL IsFixedProperty(PropertyId propertyId) override { return false; }
 #endif
-        virtual PropertyQueryFlags HasItemQuery(uint32 index) override { return PropertyQueryFlags::Property_NotFound; }
-        virtual BOOL HasOwnItem(uint32 index) override { return false; }
-        virtual PropertyQueryFlags GetItemQuery(Var originalInstance, uint32 index, Var* value, ScriptContext * requestContext) override { return PropertyQueryFlags::Property_NotFound; }
-        virtual PropertyQueryFlags GetItemReferenceQuery(Var originalInstance, uint32 index, Var* value, ScriptContext * requestContext) override { return PropertyQueryFlags::Property_NotFound; }
+        virtual PropertyQueryFlags HasItemQuery(uint32 index) override;
+        virtual BOOL HasOwnItem(uint32 index) override;
+        virtual PropertyQueryFlags GetItemQuery(Var originalInstance, uint32 index, Var* value, ScriptContext * requestContext) override;
+        virtual PropertyQueryFlags GetItemReferenceQuery(Var originalInstance, uint32 index, Var* value, ScriptContext * requestContext) override;
         virtual DescriptorFlags GetItemSetter(uint32 index, Var* setterValue, ScriptContext* requestContext) override { *setterValue = nullptr; return DescriptorFlags::None; }
         virtual BOOL SetItem(uint32 index, Var value, PropertyOperationFlags flags) override;
-        virtual BOOL DeleteItem(uint32 index, PropertyOperationFlags flags) override { return true; }
+        virtual BOOL DeleteItem(uint32 index, PropertyOperationFlags flags) override;
         virtual BOOL GetEnumerator(JavascriptStaticEnumerator * enumerator, EnumeratorFlags flags, ScriptContext* requestContext, EnumeratorCache * enumeratorCache = nullptr);
         virtual BOOL SetAccessors(PropertyId propertyId, Var getter, Var setter, PropertyOperationFlags flags = PropertyOperation_None) override { return false; }
         _Check_return_ _Success_(return) virtual BOOL GetAccessors(PropertyId propertyId, _Outptr_result_maybenull_ Var* getter, _Outptr_result_maybenull_ Var* setter, ScriptContext* requestContext) override { return FALSE; };
@@ -91,6 +91,7 @@ namespace Js
 
         void SetNSSlotsForModuleNS(Field(Var)* nsSlot) { this->nsSlots = nsSlot; }
         Var GetNSSlot(BigPropertyIndex propertyIndex);
+        bool TryFindPropertyRecordForIndex(uint32 index, const PropertyRecord** propertyRecord) const;
         void AddUnambiguousNonLocalExport(PropertyId exportId, ModuleNameRecord* nonLocalExportNameRecord);
         UnambiguousExportMap* GetUnambiguousNonLocalExports() const { return unambiguousNonLocalExports; }
 

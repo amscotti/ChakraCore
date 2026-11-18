@@ -208,7 +208,7 @@ var tests = [
         body: function () {
             testModuleScript(`import * as fooComplex from "ModuleComplexReexports.js";
             assert.areEqual("function bar() { return 'bar'; }", fooComplex.ModuleComplexReexports_foo.toString(), "ModuleComplexReexports_foo");
-            assert.areEqual(undefined, fooComplex.switch, "switch");
+            assert.areEqual("ModuleComplexExports", fooComplex.switch, "switch");
             assert.areEqual("function foo() { return 'foo'; }", fooComplex.bar2.toString(), "bar2");
             assert.areEqual("function foo() { return 'foo'; }", fooComplex.localfoo2.toString(), "localfoo2");
             assert.areEqual("function foo() { return 'foo'; }", fooComplex.bar.toString(), "bar");

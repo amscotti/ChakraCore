@@ -3014,6 +3014,48 @@ IdentPtr Parser::ParseMetaProperty(tokens metaParentKeyword, charcount_t ichMin,
     }
 }
 
+bool Parser::IsStringWellFormedUnicode(LPCOLESTR psz, charcount_t cch)
+{
+    for (charcount_t i = 0; i < cch; i++)
+    {
+        char16 ch = psz[i];
+        if (ch >= 0xD800 && ch <= 0xDBFF)
+        {
+            // High (leading) surrogate must be followed by a low (trailing) surrogate.
+            if (i + 1 >= cch || psz[i + 1] < 0xDC00 || psz[i + 1] > 0xDFFF)
+            {
+                return false;
+            }
+            i++;
+        }
+        else if (ch >= 0xDC00 && ch <= 0xDFFF)
+        {
+            // Unpaired low (trailing) surrogate.
+            return false;
+        }
+    }
+    return true;
+}
+
+IdentPtr Parser::ParseModuleExportName()
+{
+    if (m_token.tk == tkStrCon)
+    {
+        if (IsStrictMode() && this->GetScanner()->IsOctOrLeadingZeroOnLastTKNumber())
+        {
+            Error(ERRES5NoOctal);
+        }
+        IdentPtr exportName = m_token.GetStr();
+        if (exportName != nullptr && !IsStringWellFormedUnicode(exportName->Psz(), exportName->Cch()))
+        {
+            Error(ERRInvalidCodePoint);
+        }
+        return exportName;
+    }
+    Assert(m_token.IsIdentifier() || m_token.IsReservedWord());
+    return m_token.GetIdentifier(this->GetHashTbl());
+}
+
 template<bool buildAST>
 void Parser::ParseNamedImportOrExportClause(ModuleImportOrExportEntryList* importOrExportEntryList, bool isExportClause)
 {
@@ -3025,13 +3067,14 @@ void Parser::ParseNamedImportOrExportClause(ModuleImportOrExportEntryList* impor
     while (m_token.tk != tkRCurly && m_token.tk != tkEOF)
     {
         tokens firstToken = m_token.tk;
+        bool firstIsStringLiteral = (firstToken == tkStrCon);
 
-        if (!(m_token.IsIdentifier() || m_token.IsReservedWord()))
+        if (!(m_token.IsIdentifier() || m_token.IsReservedWord() || firstIsStringLiteral))
         {
             Error(ERRTokenAfter, GetTokenString(m_token.tk), GetTokenString(GetScanner()->GetPrevious()));
         }
 
-        IdentPtr identifierName = m_token.GetIdentifier(this->GetHashTbl());
+        IdentPtr identifierName = ParseModuleExportName();
         IdentPtr identifierAs = identifierName;
         charcount_t offsetForError = this->GetScanner()->IchMinTok();
 
@@ -3039,7 +3082,7 @@ void Parser::ParseNamedImportOrExportClause(ModuleImportOrExportEntryList* impor
 
         if (m_token.tk == tkID)
         {
-            // We have the pattern "IdentifierName as"
+            // We have the pattern "ModuleExportName as"
             if (!CheckContextualKeyword(wellKnownPropertyPids.as))
             {
                 Error(ERRInvalidIdentifier, m_token.GetIdentifier(this->GetHashTbl())->Psz(), identifierName->Psz());
@@ -3053,12 +3096,12 @@ void Parser::ParseNamedImportOrExportClause(ModuleImportOrExportEntryList* impor
                 ChkCurTokNoScan(tkID, ERRValidIfFollowedBy, _u("'as'"), _u("an identifier."));
             }
 
-            if (!(m_token.IsIdentifier() || m_token.IsReservedWord()))
+            if (!(m_token.IsIdentifier() || m_token.IsReservedWord() || (isExportClause && m_token.tk == tkStrCon)))
             {
                 Error(ERRValidIfFollowedBy, _u("'as'"), _u("an identifier."));
             }
 
-            identifierAs = m_token.GetIdentifier(this->GetHashTbl());
+            identifierAs = ParseModuleExportName();
 
             // Scan to the next token.
             this->GetScanner()->Scan();
@@ -3070,22 +3113,28 @@ void Parser::ParseNamedImportOrExportClause(ModuleImportOrExportEntryList* impor
             Error(ERRnoIdent);
         }
 
-        if (m_token.tk == tkComma)
-        {
-            // Consume a trailing comma
-            this->GetScanner()->Scan();
-        }
-
         if (isExportClause)
         {
-            identifierName->SetIsModuleExport();
-            AddModuleImportOrExportEntry(importOrExportEntryList, nullptr, identifierName, identifierAs, nullptr, offsetForError);
+            // Defer SetIsModuleExport() and PushPidRef() until ParseExportDeclaration knows whether
+            // a FromClause follows: `export { x } from "m"` must not mark a local `x` as exported,
+            // and `export { "a" }` without `from` is an early SyntaxError.
+            AddModuleImportOrExportEntry(importOrExportEntryList, nullptr, identifierName, identifierAs, nullptr, offsetForError, nullptr, false, firstIsStringLiteral);
         }
         else if (buildAST)
         {
             // The name we will use 'as' this import/export is a binding identifier in import statements.
             CreateModuleImportDeclNode(identifierAs);
             AddModuleImportOrExportEntry(importOrExportEntryList, identifierName, identifierAs, nullptr, nullptr);
+        }
+
+        if (m_token.tk == tkComma)
+        {
+            // Consume a trailing comma
+            this->GetScanner()->Scan();
+        }
+        else
+        {
+            break;
         }
     }
 
@@ -3263,7 +3312,7 @@ ModuleImportOrExportEntry* Parser::AddModuleImportOrExportEntry(ModuleImportOrEx
     return importOrExportEntry;
 }
 
-ModuleImportOrExportEntry* Parser::AddModuleImportOrExportEntry(ModuleImportOrExportEntryList* importOrExportEntryList, IdentPtr importName, IdentPtr localName, IdentPtr exportName, IdentPtr moduleRequest, charcount_t offsetForError, ModuleAttributeList* attributes)
+ModuleImportOrExportEntry* Parser::AddModuleImportOrExportEntry(ModuleImportOrExportEntryList* importOrExportEntryList, IdentPtr importName, IdentPtr localName, IdentPtr exportName, IdentPtr moduleRequest, charcount_t offsetForError, ModuleAttributeList* attributes, bool isNamespaceStar, bool isLocalStringLiteral)
 {
     ModuleImportOrExportEntry* importOrExportEntry = Anew(&m_nodeAllocator, ModuleImportOrExportEntry);
 
@@ -3271,12 +3320,14 @@ ModuleImportOrExportEntry* Parser::AddModuleImportOrExportEntry(ModuleImportOrEx
     importOrExportEntry->localName = localName;
     importOrExportEntry->exportName = exportName;
     importOrExportEntry->moduleRequest = moduleRequest;
-    importOrExportEntry->pidRefStack = offsetForError == 0 ? nullptr : PushPidRef(localName);
+    importOrExportEntry->pidRefStack = nullptr;
     importOrExportEntry->offset = offsetForError;
     // The list stores a by-value copy (SList::Prepend copies the struct), so
-    // attributes must be attached here, before the copy. Assigning through
+    // attributes and flags must be attached here, before the copy. Assigning through
     // the returned pointer afterwards would only mutate the orphan temp.
     importOrExportEntry->attributes = attributes;
+    importOrExportEntry->isNamespaceStar = isNamespaceStar;
+    importOrExportEntry->isLocalStringLiteral = isLocalStringLiteral;
 
     return AddModuleImportOrExportEntry(importOrExportEntryList, importOrExportEntry);
 }
@@ -3485,10 +3536,9 @@ void Parser::ParseImportClause(ModuleImportOrExportEntryList* importEntryList, b
         if (buildAST)
         {
             IdentPtr localName = m_token.GetIdentifier(this->GetHashTbl());
-            IdentPtr importName = wellKnownPropertyPids._star;
 
             CreateModuleImportDeclNode(localName);
-            AddModuleImportOrExportEntry(importEntryList, importName, localName, nullptr, nullptr);
+            AddModuleImportOrExportEntry(importEntryList, nullptr, localName, nullptr, nullptr, 0, nullptr, /*isNamespaceStar=*/true);
         }
 
         parsedNamespaceOrNamedImport = true;
@@ -3937,13 +3987,13 @@ ParseNodePtr Parser::ParseExportDeclaration(bool *needTerminator, bool isLabelle
                 // scan to the next token
                 this->GetScanner()->Scan();
 
-                // token after as must be an identifier
-                if (!(m_token.IsIdentifier() || m_token.IsReservedWord()))
+                // token after as must be a ModuleExportName (IdentifierName or StringLiteral)
+                if (!(m_token.IsIdentifier() || m_token.IsReservedWord() || m_token.tk == tkStrCon))
                 {
                     Error(ERRValidIfFollowedBy, _u("'as'"), _u("an identifier."));
                 }
 
-                exportName = m_token.GetIdentifier(this->GetHashTbl());
+                exportName = ParseModuleExportName();
 
                 // scan to next token
                 this->GetScanner()->Scan();
@@ -3962,12 +4012,12 @@ ParseNodePtr Parser::ParseExportDeclaration(bool *needTerminator, bool isLabelle
 
             if (!exportName)
             {
-                AddModuleImportOrExportEntry(EnsureModuleStarExportEntryList(), wellKnownPropertyPids._star, nullptr, nullptr, moduleIdentifier, 0, attributes);
+                AddModuleImportOrExportEntry(EnsureModuleStarExportEntryList(), nullptr, nullptr, nullptr, moduleIdentifier, 0, attributes, /*isNamespaceStar=*/true);
             }
             else
             {
                 CheckForDuplicateExportEntry(exportName);
-                AddModuleImportOrExportEntry(EnsureModuleIndirectExportEntryList(), wellKnownPropertyPids._star, nullptr, exportName, moduleIdentifier, 0, attributes);
+                AddModuleImportOrExportEntry(EnsureModuleIndirectExportEntryList(), nullptr, nullptr, exportName, moduleIdentifier, 0, attributes, /*isNamespaceStar=*/true);
             }
         }
 
@@ -4012,6 +4062,12 @@ ParseNodePtr Parser::ParseExportDeclaration(bool *needTerminator, bool isLabelle
                 }
                 else
                 {
+                    if (exportEntry.isLocalStringLiteral)
+                    {
+                        Error(ERRnoIdent);
+                    }
+                    exportEntry.localName->SetIsModuleExport();
+                    exportEntry.pidRefStack = PushPidRef(exportEntry.localName);
                     AddModuleImportOrExportEntry(EnsureModuleLocalExportEntryList(), &exportEntry);
                 }
             });
@@ -15286,7 +15342,6 @@ void Parser::InitPids()
     wellKnownPropertyPids.as = this->GetHashTbl()->PidHashNameLen(_u("as"), sizeof("as") - 1);
     wellKnownPropertyPids.from = this->GetHashTbl()->PidHashNameLen(_u("from"), sizeof("from") - 1);
     wellKnownPropertyPids._default = this->GetHashTbl()->PidHashNameLen(_u("default"), sizeof("default") - 1);
-    wellKnownPropertyPids._star = this->GetHashTbl()->PidHashNameLen(_u("*"), sizeof("*") - 1);
     wellKnownPropertyPids._this = this->GetHashTbl()->PidHashNameLen(_u("*this*"), sizeof("*this*") - 1);
     wellKnownPropertyPids._newTarget = this->GetHashTbl()->PidHashNameLen(_u("*new.target*"), sizeof("*new.target*") - 1);
     wellKnownPropertyPids._super = this->GetHashTbl()->PidHashNameLen(_u("*super*"), sizeof("*super*") - 1);

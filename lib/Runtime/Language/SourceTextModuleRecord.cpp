@@ -52,7 +52,7 @@ namespace Js
         asyncEvaluationOrder(0)
     {
         namespaceRecord.module = this;
-        namespaceRecord.bindingName = PropertyIds::star_;
+        namespaceRecord.bindingName = ModuleRecordBase::NamespaceBindingPropertyId;
     }
 
     SourceTextModuleRecord* SourceTextModuleRecord::Create(ScriptContext* scriptContext)
@@ -575,13 +575,13 @@ namespace Js
             if (localNamePid == localName)
             {
                 SourceTextModuleRecord* childModule = this->GetChildModuleRecord(importEntry.moduleRequest, importEntry.attributes);
-                Js::PropertyId importName = EnsurePropertyIdForIdentifier(importEntry.importName);
-                if (importName == Js::PropertyIds::star_)
+                if (importEntry.isNamespaceStar)
                 {
                     *importRecord = childModule->GetNamespaceNameRecord();
                 }
                 else
                 {
+                    Js::PropertyId importName = EnsurePropertyIdForIdentifier(importEntry.importName);
                     childModule->ResolveExport(importName, nullptr, importRecord);
                 }
                 return true;
@@ -671,7 +671,6 @@ namespace Js
                     return false;
                 }
 
-                PropertyId importNameId = EnsurePropertyIdForIdentifier(exportEntry.importName);
                 SourceTextModuleRecord* childModuleRecord = GetChildModuleRecord(exportEntry.moduleRequest, exportEntry.attributes);
                 if (childModuleRecord == nullptr)
                 {
@@ -679,13 +678,14 @@ namespace Js
                     JavascriptError::ThrowReferenceError(scriptContext, JSERR_CannotResolveModule, exportEntry.moduleRequest->Psz());
                 }
 
-                if (exportEntry.importName->GetPropertyId() == PropertyIds::star_)
+                if (exportEntry.isNamespaceStar)
                 {
                     // export * as someName from "foo"
                     *exportRecord = childModuleRecord->GetNamespaceNameRecord();
                     return true;
                 }
 
+                PropertyId importNameId = EnsurePropertyIdForIdentifier(exportEntry.importName);
                 isAmbiguous = !childModuleRecord->ResolveExport(importNameId, resolveSet, exportRecord);
                 if (isAmbiguous)
                 {
@@ -1709,13 +1709,12 @@ namespace Js
         if (importRecordList != nullptr)
         {
             importRecordList->Map([&](ModuleImportOrExportEntry& importEntry) {
-                Js::PropertyId importName = EnsurePropertyIdForIdentifier(importEntry.importName);
-
                 SourceTextModuleRecord* childModule = this->GetChildModuleRecord(importEntry.moduleRequest, importEntry.attributes);
                 ModuleNameRecord* importRecord = nullptr;
                 // We don't need to initialize anything for * import.
-                if (importName != Js::PropertyIds::star_)
+                if (!importEntry.isNamespaceStar)
                 {
+                    Js::PropertyId importName = EnsurePropertyIdForIdentifier(importEntry.importName);
                     if (!childModule->ResolveExport(importName, nullptr, &importRecord)
                         || importRecord == nullptr)
                     {
@@ -1847,7 +1846,6 @@ namespace Js
         {
             indirectExportRecordList->Map([&](ModuleImportOrExportEntry exportEntry)
             {
-                PropertyId propertyId = EnsurePropertyIdForIdentifier(exportEntry.importName);
                 SourceTextModuleRecord* childModuleRecord = GetChildModuleRecord(exportEntry.moduleRequest, exportEntry.attributes);
                 if (childModuleRecord == nullptr)
                 {
@@ -1856,14 +1854,17 @@ namespace Js
                     this->errorObject = errorObj;
                     return;
                 }
-                if (propertyId != PropertyIds::star_ &&
-                    (!childModuleRecord->ResolveExport(propertyId, nullptr, &exportRecord) ||
-                    (exportRecord == nullptr)))
+                if (!exportEntry.isNamespaceStar)
                 {
-                    JavascriptError* errorObj = scriptContext->GetLibrary()->CreateSyntaxError();
-                    JavascriptError::SetErrorMessage(errorObj, JSERR_ModuleResolveExport, exportEntry.exportName->Psz(), scriptContext);
-                    this->errorObject = errorObj;
-                    return;
+                    PropertyId propertyId = EnsurePropertyIdForIdentifier(exportEntry.importName);
+                    if (!childModuleRecord->ResolveExport(propertyId, nullptr, &exportRecord) ||
+                        (exportRecord == nullptr))
+                    {
+                        JavascriptError* errorObj = scriptContext->GetLibrary()->CreateSyntaxError();
+                        JavascriptError::SetErrorMessage(errorObj, JSERR_ModuleResolveExport, exportEntry.exportName->Psz(), scriptContext);
+                        this->errorObject = errorObj;
+                        return;
+                    }
                 }
             });
         }
@@ -1887,10 +1888,10 @@ namespace Js
 
     uint SourceTextModuleRecord::GetLocalExportSlotIndexByLocalName(PropertyId localNameId)
     {
-        Assert(localSlotCount != 0 || localNameId == PropertyIds::star_);
+        Assert(localSlotCount != 0 || localNameId == ModuleRecordBase::NamespaceBindingPropertyId);
         Assert(localExportSlots != nullptr);
         uint slotIndex = InvalidSlotIndex;
-        if (localNameId == PropertyIds::star_)
+        if (localNameId == ModuleRecordBase::NamespaceBindingPropertyId)
         {
             return localSlotCount;  // namespace is put on the last slot.
         } else if (!localExportMapByLocalName->TryGetValue(localNameId, &slotIndex))

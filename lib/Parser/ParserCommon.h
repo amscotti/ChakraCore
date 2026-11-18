@@ -50,6 +50,8 @@ struct ModuleImportOrExportEntry
     PidRefStack* pidRefStack;
     charcount_t  offset;
     struct ModuleAttributeList* attributes;
+    bool         isNamespaceStar;
+    bool         isLocalStringLiteral;
 };
 
 // A single `with { key: "value", ... }` entry. Both key and value are

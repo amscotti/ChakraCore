@@ -218,4 +218,11 @@
       <tags>exclude_sanitize_address</tags>
     </default>
   </test>
+  <test>
+    <default>
+      <files>arbitrary_module_namespace_names.js</files>
+      <compile-flags>-ES6Module -ESDynamicImport -Es6ToStringTag -MuteHostErrorMsg -args summary -endargs</compile-flags>
+      <tags>exclude_sanitize_address</tags>
+    </default>
+  </test>
 </regress-exe>

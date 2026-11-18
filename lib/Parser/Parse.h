@@ -557,7 +557,6 @@ private:
         IdentPtr as;
         IdentPtr meta;
         IdentPtr _default;
-        IdentPtr _star; // Special '*' identifier for modules
         IdentPtr _this; // Special 'this' identifier
         IdentPtr _newTarget; // Special new.target identifier
         IdentPtr _super; // Special super identifier
@@ -721,7 +720,9 @@ protected:
     static int CompareModuleAttributeKeys(IdentPtr left, IdentPtr right);
     template<bool buildAST> ModuleAttributeList* ParseOptionalWithClause();
     template<bool buildAST> ModuleAttributeList* ParseWithClause();
-    ModuleImportOrExportEntry* AddModuleImportOrExportEntry(ModuleImportOrExportEntryList* importOrExportEntryList, IdentPtr importName, IdentPtr localName, IdentPtr exportName, IdentPtr moduleRequest, charcount_t offsetForError = 0, ModuleAttributeList* attributes = nullptr);
+    static bool IsStringWellFormedUnicode(LPCOLESTR psz, charcount_t cch);
+    IdentPtr ParseModuleExportName();
+    ModuleImportOrExportEntry* AddModuleImportOrExportEntry(ModuleImportOrExportEntryList* importOrExportEntryList, IdentPtr importName, IdentPtr localName, IdentPtr exportName, IdentPtr moduleRequest, charcount_t offsetForError = 0, ModuleAttributeList* attributes = nullptr, bool isNamespaceStar = false, bool isLocalStringLiteral = false);
     ModuleImportOrExportEntry* AddModuleImportOrExportEntry(ModuleImportOrExportEntryList* importOrExportEntryList, ModuleImportOrExportEntry* importOrExportEntry);
     void AddModuleLocalExportEntry(ParseNodePtr varDeclNode);
     void CheckForDuplicateExportEntry(IdentPtr exportName);

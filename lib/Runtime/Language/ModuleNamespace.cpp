@@ -278,12 +278,26 @@ namespace Js
             if (unambiguousNonLocalExports->TryGetValue(propertyId, &moduleNameRecord))
             {
                 // special case for export * as ns
-                if (moduleNameRecord.bindingName == Js::PropertyIds::star_)
+                if (moduleNameRecord.bindingName == ModuleRecordBase::NamespaceBindingPropertyId)
                 {
-                    *value = static_cast<Var>(moduleNameRecord.module->GetNamespace());
+                    ModuleNamespace* targetNs = ModuleNamespace::GetModuleNamespace(moduleNameRecord.module);
+                    *value = static_cast<Var>(targetNs);
+                    if (targetNs->GetScriptContext() != requestContext)
+                    {
+                        *value = CrossSite::MarshalVar(requestContext, *value, targetNs->GetScriptContext());
+                    }
                     return PropertyQueryFlags::Property_Found;
                 }
-                return JavascriptConversion::BooleanToPropertyQueryFlags(moduleNameRecord.module->GetNamespace()->GetProperty(originalInstance, moduleNameRecord.bindingName, value, info, requestContext));
+                Assert(moduleNameRecord.module->IsSourceTextModuleRecord());
+                SourceTextModuleRecord* targetModule = SourceTextModuleRecord::FromHost(moduleNameRecord.module);
+                uint slotIndex = targetModule->GetLocalExportSlotIndexByLocalName(moduleNameRecord.bindingName);
+                ModuleNamespace* targetNs = ModuleNamespace::GetModuleNamespace(targetModule);
+                *value = targetNs->GetNSSlot(slotIndex);
+                if (targetNs->GetScriptContext() != requestContext)
+                {
+                    *value = CrossSite::MarshalVar(requestContext, *value, targetNs->GetScriptContext());
+                }
+                return PropertyQueryFlags::Property_Found;
             }
         }
         return PropertyQueryFlags::Property_NotFound;
@@ -328,10 +342,63 @@ namespace Js
         return FALSE;
     }
 
+    bool ModuleNamespace::TryFindPropertyRecordForIndex(uint32 index, const PropertyRecord** propertyRecord) const
+    {
+        char16 buffer[20];
+        ::_ui64tow_s(static_cast<uint64>(index), buffer, _countof(buffer), 10);
+        GetScriptContext()->FindPropertyRecord(buffer, JavascriptString::GetBufferLength(buffer), propertyRecord);
+        return *propertyRecord != nullptr;
+    }
+
+    PropertyQueryFlags ModuleNamespace::HasItemQuery(uint32 index)
+    {
+        const PropertyRecord* propertyRecord = nullptr;
+        if (TryFindPropertyRecordForIndex(index, &propertyRecord))
+        {
+            return HasPropertyQuery(propertyRecord->GetPropertyId(), nullptr);
+        }
+        return PropertyQueryFlags::Property_NotFound;
+    }
+
+    BOOL ModuleNamespace::HasOwnItem(uint32 index)
+    {
+        const PropertyRecord* propertyRecord = nullptr;
+        if (TryFindPropertyRecordForIndex(index, &propertyRecord))
+        {
+            return HasOwnProperty(propertyRecord->GetPropertyId());
+        }
+        return FALSE;
+    }
+
+    PropertyQueryFlags ModuleNamespace::GetItemQuery(Var originalInstance, uint32 index, Var* value, ScriptContext* requestContext)
+    {
+        const PropertyRecord* propertyRecord = nullptr;
+        if (TryFindPropertyRecordForIndex(index, &propertyRecord))
+        {
+            return GetPropertyQuery(originalInstance, propertyRecord->GetPropertyId(), value, nullptr, requestContext);
+        }
+        return PropertyQueryFlags::Property_NotFound;
+    }
+
+    PropertyQueryFlags ModuleNamespace::GetItemReferenceQuery(Var originalInstance, uint32 index, Var* value, ScriptContext* requestContext)
+    {
+        return GetItemQuery(originalInstance, index, value, requestContext);
+    }
+
     BOOL ModuleNamespace::SetItem(uint32 index, Var value, PropertyOperationFlags flags)
     {
         JavascriptError::ThrowCantAssignIfStrictMode(flags, GetScriptContext());
         return FALSE;
+    }
+
+    BOOL ModuleNamespace::DeleteItem(uint32 index, PropertyOperationFlags flags)
+    {
+        const PropertyRecord* propertyRecord = nullptr;
+        if (TryFindPropertyRecordForIndex(index, &propertyRecord))
+        {
+            return DeleteProperty(propertyRecord->GetPropertyId(), flags);
+        }
+        return TRUE;
     }
 
     BOOL ModuleNamespace::DeleteProperty(PropertyId propertyId, PropertyOperationFlags flags)

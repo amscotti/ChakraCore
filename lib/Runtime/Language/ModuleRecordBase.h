@@ -29,6 +29,10 @@ namespace Js
     {
     public:
         static const uint32 ModuleMagicNumber;
+        // Non-string sentinel stored in ModuleNameRecord::bindingName for namespace
+        // bindings (`import * as ns` / `export * as ns`). Never collides with any
+        // literal string export name (including `"*"` or `""`).
+        static const PropertyId NamespaceBindingPropertyId = Constants::NoProperty;
         ModuleRecordBase(JavascriptLibrary* library) :
             namespaceObject(nullptr), wasEvaluated(false),
             javascriptLibrary(library),  magicNumber(ModuleMagicNumber){};
