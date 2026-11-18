@@ -67,7 +67,7 @@ if [ "$(uname -s)" = "Linux" ]; then
   ENGINE_TEST="zig-out/bin/libChakraCore.so"
   LINK_SYSTEM="-ldl -lpthread"
   RPATH_FLAG="-Wl,-rpath,\$ORIGIN"
-  CXXFLAGS="-target $TARGET -std=gnu++17 -O3 -g -Wno-date-time -DNAPI_VERSION=8 -DCHAKRA_NODEAPI_TEST_HOOKS -Ilib/Jsrt -Iinclude/nodeapi -Ilib/NodeApi -Itest/nodeapi/probes -isystem /usr/include"
+  CXXFLAGS="-target $TARGET -std=gnu++17 -O3 -g -Wno-date-time -DNAPI_VERSION=10 -DCHAKRA_NODEAPI_TEST_HOOKS -Ilib/Jsrt -Iinclude/nodeapi -Ilib/NodeApi -Itest/nodeapi/probes -isystem /usr/include"
 else
   TARGET="${NODEAPI_TARGET:-aarch64-macos.26.0}"
   SDK="${NODEAPI_SDK:-$(xcrun --show-sdk-path 2>/dev/null || true)}"
@@ -79,7 +79,7 @@ else
   ENGINE_TEST="zig-out/bin/libChakraCore.dylib"
   LINK_SYSTEM="-framework CoreFoundation -framework Security"
   RPATH_FLAG="-Wl,-rpath,@executable_path"
-  CXXFLAGS="-target $TARGET --sysroot $SDK -std=gnu++17 -O3 -g -mcpu=apple_m1 -Wno-date-time -DNAPI_VERSION=8 -DCHAKRA_NODEAPI_TEST_HOOKS -Ilib/Jsrt -Iinclude/nodeapi -Ilib/NodeApi -Itest/nodeapi/probes -isystem $SDK/usr/include -F/System/Library/Frameworks"
+  CXXFLAGS="-target $TARGET --sysroot $SDK -std=gnu++17 -O3 -g -mcpu=apple_m1 -Wno-date-time -DNAPI_VERSION=10 -DCHAKRA_NODEAPI_TEST_HOOKS -Ilib/Jsrt -Iinclude/nodeapi -Ilib/NodeApi -Itest/nodeapi/probes -isystem $SDK/usr/include -F/System/Library/Frameworks"
 fi
 
 run_profile() {

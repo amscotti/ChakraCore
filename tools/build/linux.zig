@@ -1044,7 +1044,7 @@ pub fn build(b: *std.Build) void {
                 break :cmd_blk c;
             };
             tu.addArg("-fvisibility=hidden");
-            tu.addArg("-DNAPI_VERSION=8");
+            tu.addArg("-DNAPI_VERSION=10");
             tu.addArg("-Ilib/Jsrt");
             tu.addArg("-Iinclude/nodeapi");
             tu.addArg("-Ilib/NodeApi");
@@ -1115,7 +1115,7 @@ pub fn build(b: *std.Build) void {
         exports_check.step.dependOn(&prov_link.step);
         exports_check.step.dependOn(&exports_gen_check.step);
         exports_check.stdio = .inherit;
-        const check_nodeapi_top = b.step("check-nodeapi", "Verify libChakraNodeApi exports exactly tools/build/nodeapi_exports.txt (full 145 + 5 = 150; not part of the default build or check)");
+        const check_nodeapi_top = b.step("check-nodeapi", "Verify libChakraNodeApi exports exactly tools/build/nodeapi_exports.txt (full 155 + 6 = 161; not part of the default build or check)");
         check_nodeapi_top.dependOn(&exports_gen_check.step);
         check_nodeapi_top.dependOn(&exports_check.step);
 
@@ -1138,7 +1138,7 @@ pub fn build(b: *std.Build) void {
             nodeapi_host.addArg("-Wl,--export-dynamic");
             nodeapi_host.addArg("-rdynamic");
         }
-        nodeapi_host.addArg("-DNAPI_VERSION=8");
+        nodeapi_host.addArg("-DNAPI_VERSION=10");
         nodeapi_host.addArg("-Ilib/Jsrt");
         nodeapi_host.addArg("-Iinclude/nodeapi");
         nodeapi_host.addArg("-Ilib/NodeApi");
@@ -1160,7 +1160,7 @@ pub fn build(b: *std.Build) void {
 
         const nodeapi_stub = if (sanitize != .none) b.addSystemCommand(&.{ctx.host_cxx}) else b.addSystemCommand(&.{ ctx.zig_exe, "c++" });
         addNodeapiCompilePrefix(&ctx, nodeapi_stub, &.{ "-fPIC", "-shared" });
-        nodeapi_stub.addArg("-DNAPI_VERSION=8");
+        nodeapi_stub.addArg("-DNAPI_VERSION=10");
         nodeapi_stub.addArg("-Ilib/Jsrt");
         nodeapi_stub.addArg("-Iinclude/nodeapi");
         nodeapi_stub.addArg("-Ilib/NodeApi");
@@ -1196,7 +1196,7 @@ pub fn build(b: *std.Build) void {
         for ([_][]const u8{ "hello_world", "version_reject", "missing_register", "promise_probe", "return_replaces" }) |name| {
             const addon = if (sanitize != .none) b.addSystemCommand(&.{ctx.host_cxx}) else b.addSystemCommand(&.{ ctx.zig_exe, "c++" });
             addNodeapiCompilePrefix(&ctx, addon, &.{ "-fPIC", "-shared" });
-            addon.addArg("-DNAPI_VERSION=8");
+            addon.addArg("-DNAPI_VERSION=10");
             addon.addArg("-Iinclude/nodeapi");
             addon.addArg("-o");
             const addon_bin = addon.addOutputFileArg(b.fmt("{s}.node", .{name}));

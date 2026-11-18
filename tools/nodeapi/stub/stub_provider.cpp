@@ -11,7 +11,7 @@
 // exports, global binding, JsRun, promise pumping, and env-before-runtime
 // teardown, without waiting for the full N1 provider.
 //
-// Scope: exports napi_get_version (=8) + a tiny JsRT-backed subset sufficient
+// Scope: exports napi_get_version (=10) + a tiny JsRT-backed subset sufficient
 // to register the hello-world addon (create_string_utf8 / create_object /
 // create_function / get_cb_info / set_named_property / get_named_property /
 // create_double/int32/uint32 / get_global/undefined/null/boolean / handle
@@ -21,7 +21,7 @@
 // dummies), and ignores host services. It is NOT the real provider and must
 // never be shipped as one.
 //
-// License/ABI: it implements the vendored Node-API v8 C ABI (NAPI_VERSION=8)
+// License/ABI: it implements the vendored Node-API v10 C ABI (NAPI_VERSION=10)
 // declarations by including the vendored headers. Do not add <v8.h>/<node.h>/uv.h.
 
 #include "node_api.h"
@@ -152,12 +152,21 @@ void chakra_nodeapi_destroy_env(napi_env env) {
   delete e;
 }
 
+#if defined(__GNUC__)
+__attribute__((visibility("default")))
+#endif
+napi_status chakra_nodeapi_set_module_api_version(napi_env env,
+                                                  int32_t version) {
+  if (!env) return napi_invalid_arg;
+  return (version >= 1 && version <= 10) ? napi_ok : napi_invalid_arg;
+}
+
 // ---- Stubbed napi_* subset ----
 
 napi_status NAPI_CDECL napi_get_version(node_api_basic_env env,
                                         uint32_t* result) {
   if (!env || !result) return napi_invalid_arg;
-  *result = 8;
+  *result = 10;
   return napi_ok;
 }
 

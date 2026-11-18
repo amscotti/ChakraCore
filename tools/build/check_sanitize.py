@@ -73,6 +73,9 @@ NODEAPI_PROVIDER_TUS = (
     "lib/NodeApi/NodeApiFunctions.cpp",
     "lib/NodeApi/NodeApiValues.cpp",
     "lib/NodeApi/NodeApiErrorsImpl.cpp",
+    "lib/NodeApi/NodeApiBuffers.cpp",
+    "lib/NodeApi/NodeApiAsync.cpp",
+    "lib/NodeApi/NodeApiHost.cpp",
 )
 
 VERSION_RE = re.compile(r"^ch version \d+\.\d+")
@@ -246,7 +249,7 @@ def run_probe_binary(label, probe_src, cxx, mode, engine_lib, sdk_path,
     if mode == "undefined":
         cmd += ["-fno-sanitize=enum,alignment,vptr,pointer-overflow"]
     cmd += [
-        "-Wno-date-time", "-DNAPI_VERSION=8", "-DCHAKRA_NODEAPI_TEST_HOOKS",
+        "-Wno-date-time", "-DNAPI_VERSION=10", "-DCHAKRA_NODEAPI_TEST_HOOKS",
         "-I" + os.path.join(root, "lib", "Jsrt"),
         "-I" + os.path.join(root, "include", "nodeapi"),
         "-I" + os.path.join(root, "lib", "NodeApi"),
@@ -430,10 +433,14 @@ def run_all(prefix_or_ch, mode="address", cxx=None, sdk_path=None,
 
         engine_lib = os.path.join(prefix, "bin", "libChakraCore." + ext)
         if cxx and os.path.isfile(engine_lib):
-            for label, src in (
+            probe_specs = [
                 ("nodeapi:refs_probe", "test/nodeapi/probes/refs_probe.cpp"),
                 ("nodeapi:wrap_probe", "test/nodeapi/probes/wrap_probe.cpp"),
-            ):
+            ]
+            v10_probe = "test/nodeapi/probes/v10_multi_addon_probe.cpp"
+            if os.path.isfile(os.path.join(root, v10_probe)):
+                probe_specs.append(("nodeapi:v10_multi_addon_probe", v10_probe))
+            for label, src in probe_specs:
                 ok, msg, out = run_probe_binary(
                     label, src, cxx, mode, engine_lib, sdk_path,
                     env, tmp_dir, root=root)

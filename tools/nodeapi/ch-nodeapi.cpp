@@ -3,57 +3,102 @@
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 //
-// Test host for the Node-API provider (plan doc/node-api-plan.md N0.3).
+// Test host for the Node-API provider (plan doc/node-api-plan.md N0.3 / Q1.1).
 //
-// Loads a provider shared library RTLD_GLOBAL, creates a napi_env via the
-// private API (lib/NodeApi/NodeApiHostApi.h), dlopens a .node addon,
-// negotiates its API version, calls its napi_register_module_v1 inside a
-// registration handle scope, binds the result to globalThis.__exports,
-// runs a .js driver, pumps promise continuations (PR-8), then destroys the
-// env before disposing the runtime.
+// Loads a provider shared library RTLD_GLOBAL, creates isolated per-addon
+// napi_env handles via the private API (lib/NodeApi/NodeApiHostApi.h),
+// dlopens one or more .node addons (CLI --addon preloads and/or dynamic
+// CommonJS require('./foo.node')), negotiates each addon's API version
+// (v1..v10 via chakra_nodeapi_set_module_api_version when exported), runs
+// napi_register_module_v1 (or deprecated napi_module_register pending
+// entries captured around dlopen) inside a registration handle scope, binds
+// the first CLI addon's exports to globalThis.__exports, runs an optional .js
+// driver, pumps promise continuations (PR-8), drains finalizers on all
+// loaded envs, then destroys envs in reverse LIFO order before disposing the
+// runtime.
 //
 // Test-host-only globals (never part of the provider): `print` (stdout),
 // `gc` (N5.1: runs JsCollectGarbage on the host runtime so JS drivers
 // and the N5.1 common/gc shim can drive collection deterministically),
-// `console`, `require` (minimal CommonJS over shims + __exports),
-// `process` (env/cwd/argv only), `global` (alias), and per-driver
+// `console`, `require` (CommonJS over shims + dynamic .node loader),
+// `process` (env/cwd/argv/platform only), `global` (alias), and per-driver
 // `module`/`exports`/`__filename`/`__dirname`.
 //
 // Usage:
 //   ch-nodeapi [--provider PATH] [--exports NAME] [--pump-limit N]
-//              [--pump-timeout-ms N] [--addon PATH.node] [--driver PATH.js]
+//              [--pump-timeout-ms N] [--addon PATH.node]... [--driver PATH.js]
 //              [addon.node] [driver.js]
 //   Provider path: --provider, else $CHAKRA_NODEAPI_PROVIDER, else beside
-//   the host binary (libChakraNodeApi, then the test-only stub). The
-//   --addon/--driver spellings are the test/nodeapi/run_matrix.py
-//   contract; positionals are equivalent. Driver omitted: registration
-//   only (still pumps, then tears down).
+//   the host binary (libChakraNodeApi, then the test-only stub). --addon is
+//   repeatable; --driver alone (zero --addon flags) is valid for drivers that
+//   dynamically require('./foo.node'). Driver omitted: registration only
+//   (still pumps, then tears down).
 //
 // Exit codes: 0 = registered + driver ran + pump quiet; 1 = clean host
-// error (bad args, missing symbol, version > 8, dlopen failure, JS
+// error (bad args, missing symbol, version > 10 or < 1, dlopen failure, JS
 // exception, pump overflow). The host never crashes on addons that
-// request >8 or lack registration: it prints one line to stderr and exits 1.
+// request >10 or lack registration: it prints one line to stderr (or throws
+// a JS Error inside require()) and exits 1.
 //
-// Host ownership record (memory-management.md §3):
+// Host ownership record (doc/memory-management.md section 3):
 //   - JsRuntimeHandle / JsContextRef: host-owned, created on the host thread
-//     (JsCreateRuntime / JsCreateContext), disposed after destroy_env
-//     (JsSetCurrentContext(null) + JsDisposeRuntime). No provider ownership.
-//   - napi_env: provider-owned (NodeEnv in provider memory); destroyed via
-//     chakra_nodeapi_destroy_env on the host thread before runtime disposal.
-//   - Every JsValueRef the host keeps across a call that can run JS or GC
-//     (exports, script, result, promise tasks) is JsAddRef'd at store and
-//     JsRelease'd before disposal (R1/R5). Promise tasks are rooted in the
-//     host queue until their JsCallFunction returns.
-//   - dlopen handles: provider is dlopen'd RTLD_GLOBAL|RTLD_NOW before the
-//     addon (plan §1.3: addons import napi_* as undefined symbols resolved
-//     from the provider). The addon is dlopen'd RTLD_LOCAL|RTLD_NOW. Both
-//     are dlclose'd after env destroy + runtime disposal (addon first,
-//     provider second); on macOS RTLD_GLOBAL symbols may survive dlclose,
-//     so the host exits immediately after and treats the process as torn
-//     down. Symbol resolution is dlsym on the provider handle for the
-//     private create/destroy entry points (the host never links the
-//     provider), and dlsym on the addon handle for the version + register
-//     exports.
+//     (JsCreateRuntime / JsCreateContext), disposed after all destroy_env
+//     calls (JsSetCurrentContext(null) + JsDisposeRuntime).
+//   - AddonRecord / AddonRegistry:
+//     * Resource / creation call: AddonRecord heap objects owned via
+//       std::vector<std::unique_ptr<AddonRecord>> addon_order and indexed by
+//       canonical path in std::map<std::string, AddonRecord*> registry_by_path
+//       in tools/nodeapi/ch-nodeapi.cpp (load_and_register_addon).
+//     * Domain and allocator: host C++ heap (new (std::nothrow) AddonRecord
+//       + std::string/vector/map using default host C++ allocator; backing
+//       lifetime == host process). Never Recycler memory.
+//     * Physical allocation & release authority: one AddonRecord per unique
+//       canonical .node path; holds dl_handle (dlopen RTLD_NOW|RTLD_LOCAL),
+//       provider-owned napi_env (create_env / destroy_env), and host-rooted
+//       JsValueRef fields (exports, pending_reg_error). Sole release authority
+//       is shutdown_all() in main().
+//     * Logical views / aliases: registry_by_path values and addon_order[0]
+//       borrow AddonRecord* from addon_order; std::unique_ptr guarantees
+//       pointer stability across vector growth (including reentrant require()).
+//       RequireState::registry borrows the stack-allocated AddonRegistry*.
+//     * Borrow invalidation: AddonRecord* stays valid from publication until
+//       shutdown_all() clears registry_by_path/addon_order after runtime
+//       disposal. Reentrant require() inside an addon's Init cannot
+//       invalidate in-flight AddonRecord* pointers.
+//     * Reentrancy / user code: dlopen static constructors, Init
+//       (napi_register_module_v1 / nm_register_func), drain scopes, and JS
+//       require() can invoke user JS, trigger GC, or reenter
+//       load_and_register_addon. Records are published to addon_order +
+//       registry_by_path only after registration completes, and drain loops
+//       index addon_order by integer index rather than holding iterators.
+//     * Thread/context allowed: main/host thread only with host context
+//       current for creation, JS root changes, drains, and destroy_env.
+//     * Release on success, partial failure, exception, OOM, shutdown:
+//       - Partial failure before publication: local cur_js /
+//         pending_reg_error roots released (if acquired), registration scope
+//         closed, env destroyed via destroy_env, and dl_handle closed via
+//         dlclose unless a static constructor registered a deprecated module
+//         via napi_module_register (in which case dl_handle is parked in
+//         orphan_dl_handles until shutdown_all so provider pending-module
+//         code pointers remain valid across later envs).
+//       - Registration JS exception: captured via JsGetAndClearException,
+//         JsAddRef'd into rec->pending_reg_error, and re-thrown once on first
+//         JS require() (or reported as error in registration-only mode).
+//       - Shutdown (shutdown_all): releases req_state.cache, pump.tasks, and
+//         every AddonRecord's exports + pending_reg_error roots via JsRelease;
+//         destroys every rec->env in reverse addon_order (LIFO); shuts down
+//         host_loop; clears promise callback; releases any late pump.tasks
+//         queued during teardown; disposes runtime; and when joined == true,
+//         deletes host_loop, dlcloses every rec->dl_handle in reverse order,
+//         dlcloses orphan_dl_handles, and dlcloses provider. If joined == false
+//         (timeout/error with uncancellable worker running), dl_handles and
+//         host_loop stay alive until immediate process exit.
+//     * Memory accounting & bound: bounded by distinct .node files loaded in
+//       the process; OOM during AddonRecord/container push rolls back all
+//       roots, env, and dl_handle cleanly without publishing partial state.
+//   - dlopen handles: provider is dlopen'd RTLD_GLOBAL|RTLD_NOW before any
+//     addon (plan section 1.3: addons import napi_* as undefined symbols
+//     resolved from the provider). Addons are dlopen'd RTLD_LOCAL|RTLD_NOW.
 
 #include "NodeApiHostApi.h"
 #include "node_api.h"
@@ -69,9 +114,11 @@
 #include <deque>
 #include <dlfcn.h>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <new>
 #include <string>
+#include <sys/stat.h>
 #include <thread>
 #include <unistd.h>
 #include <vector>
@@ -84,7 +131,7 @@ namespace {
 
 struct Config {
   std::string provider_path;
-  std::string addon_path;
+  std::vector<std::string> addon_paths;
   std::string driver_path;
   std::string exports_name = "__exports";
   long pump_limit = 100000;
@@ -185,15 +232,14 @@ JsValueRef host_gc_cb(JsValueRef, bool, JsValueRef*, unsigned short,
   return u;
 }
 
-// ---- Host console / process / require (test-host only, N5.1) ----
+// ---- Host console / process / require / multi-addon registry ----
 //
 // Minimal CommonJS + Node-ish globals so vendored drivers run through
-// ch-nodeapi without a Node runtime (offline, no npm). This is a test
-// harness shim, not Node compatibility: require resolves assert/bindings
-// via NODE_PATH (runner-injected shims dir), relative .js via the driver
-// dir, and any *.node or */build/* request to the already-registered
-// addon exports (the host dlopens one addon; Node would dlopen a fresh
-// copy per require path -- same registration, same behavior here).
+// ch-nodeapi without a Node runtime (offline, no npm). Require resolves
+// assert/bindings via NODE_PATH (runner-injected shims dir), relative .js
+// via active_module_dir, concrete .node files via load_and_register_addon
+// (cached by canonical path), and falls back to addon_order[0] for
+// synthetic *.node or */build/* requests when no concrete file matches.
 // Filesystem (fs), Buffer, child_process, worker_threads are NOT
 // provided: drivers needing them stay skipped needs-runtime-global.
 
@@ -202,6 +248,17 @@ std::string host_dirname(const std::string& p) {
   if (s == std::string::npos) return ".";
   if (s == 0) return "/";
   return p.substr(0, s);
+}
+
+std::string host_basename(const std::string& p) {
+  size_t s = p.find_last_of('/');
+  if (s == std::string::npos) return p;
+  return p.substr(s + 1);
+}
+
+bool host_ends_with(const std::string& s, const char* suf) {
+  size_t slen = std::strlen(suf);
+  return s.size() >= slen && s.compare(s.size() - slen, slen, suf) == 0;
 }
 
 std::string host_normalize(const std::string& p) {
@@ -231,24 +288,323 @@ std::string host_normalize(const std::string& p) {
   return out;
 }
 
-bool host_file_exists(const std::string& p) {
-  std::FILE* f = std::fopen(p.c_str(), "rb");
-  if (f) { std::fclose(f); return true; }
-  return false;
+std::string host_resolve_abs(const std::string& base_dir,
+                             const std::string& raw) {
+  if (!raw.empty() && raw[0] == '/') return host_normalize(raw);
+  return host_normalize(base_dir + "/" + raw);
 }
 
-struct RequireState {
-  std::string driver_dir;   /* absolute dir of the driver file */
-  std::string driver_path;  /* absolute driver path */
-  std::string cwd_dir;      /* getcwd at startup (== driver dir under runner) */
-  JsValueRef exports = JS_INVALID_REFERENCE; /* addon exports, borrowed
-                                                (rooted by global) */
-  std::map<std::string, JsValueRef> cache;   /* abs path -> module.exports
-                                                (host-rooted, R1) */
-  JsValueRef pending_reg_error = JS_INVALID_REFERENCE; /* registration
-    exception (host-rooted), thrown one-shot by the first *.node require */
-  bool pending_reg_thrown = false;
+std::string host_canonicalize(const std::string& abs_path) {
+  char* rp = ::realpath(abs_path.c_str(), nullptr);
+  if (rp != nullptr) {
+    std::string out(rp);
+    std::free(rp);
+    return out;
+  }
+  return host_normalize(abs_path);
+}
+
+bool host_file_exists(const std::string& p) {
+  struct stat st;
+  if (::stat(p.c_str(), &st) != 0) return false;
+  return S_ISREG(st.st_mode);
+}
+
+struct chakra_nodeapi_pending_module_info_compat {
+  int nm_version;
+  unsigned int nm_flags;
+  const char* nm_filename;
+  napi_addon_register_func nm_register_func;
+  const char* nm_modname;
+  void* nm_priv;
 };
+
+typedef napi_env (*CreateEnvFn)(JsRuntimeHandle, JsContextRef, const char*,
+                                const chakra_nodeapi_host_services*, void*);
+typedef void (*DestroyEnvFn)(napi_env);
+typedef napi_status (*SetModuleApiVersionFn)(napi_env, int32_t);
+typedef size_t (*PendingModuleCountFn)(void);
+typedef napi_status (*GetPendingModuleFn)(
+    size_t, chakra_nodeapi_pending_module_info_compat*);
+typedef napi_value (*RegisterFn)(napi_env, napi_value);
+typedef int32_t (*GetVersionFn)(void);
+
+struct HostLoopState;
+
+struct AddonRecord {
+  std::string canonical_path;
+  void* dl_handle = nullptr;
+  napi_env env = nullptr;
+  int32_t api_version = 8;
+  JsValueRef exports = JS_INVALID_REFERENCE;           /* JsAddRef'd until shutdown */
+  JsValueRef pending_reg_error = JS_INVALID_REFERENCE; /* JsAddRef'd if Init threw */
+  bool pending_reg_thrown = false;
+  bool used_deprecated_register = false;
+};
+
+struct AddonRegistry {
+  std::string cwd_dir;
+  JsRuntimeHandle runtime = JS_INVALID_RUNTIME_HANDLE;
+  JsContextRef context = JS_INVALID_REFERENCE;
+  chakra_nodeapi_host_services services{};
+  HostLoopState* host_loop = nullptr;
+
+  CreateEnvFn create_env = nullptr;
+  DestroyEnvFn destroy_env = nullptr;
+  SetModuleApiVersionFn set_ver_fn = nullptr;
+  PendingModuleCountFn pending_count_fn = nullptr;
+  GetPendingModuleFn get_pending_fn = nullptr;
+
+  std::vector<std::unique_ptr<AddonRecord>> addon_order;
+  std::map<std::string, AddonRecord*> registry_by_path;
+  std::vector<void*> orphan_dl_handles;
+  bool has_cli_addon = false;
+};
+
+struct RequireState {
+  std::string driver_dir;        /* absolute dir of the driver file */
+  std::string driver_path;       /* absolute driver path */
+  std::string cwd_dir;           /* getcwd at startup */
+  std::string active_module_dir; /* dir of currently loading JS module */
+  std::map<std::string, JsValueRef> cache; /* abs path -> module.exports
+                                              (host-rooted, R1) */
+  AddonRegistry* registry = nullptr;       /* borrowed from main() */
+};
+
+void host_throw_error(const std::string& msg) {
+  JsValueRef msg_val = JS_INVALID_REFERENCE;
+  JsValueRef err_val = JS_INVALID_REFERENCE;
+  if (JsCreateString(msg.c_str(), msg.size(), &msg_val) == JsNoError &&
+      JsCreateError(msg_val, &err_val) == JsNoError) {
+    (void)JsSetException(err_val);
+  }
+}
+
+bool load_and_register_addon(AddonRegistry* reg, const std::string& raw_path,
+                             AddonRecord** out, std::string* err_out) {
+  if (out) *out = nullptr;
+  if (!reg || raw_path.empty()) {
+    if (err_out) *err_out = "invalid addon load request";
+    return false;
+  }
+
+  std::string resolved = host_resolve_abs(reg->cwd_dir, raw_path);
+  std::string canon = host_canonicalize(resolved);
+
+  auto existing = reg->registry_by_path.find(canon);
+  if (existing != reg->registry_by_path.end()) {
+    if (out) *out = existing->second;
+    return true;
+  }
+
+  size_t pending_before = reg->pending_count_fn ? reg->pending_count_fn() : 0;
+  dlerror();
+  void* handle = dlopen(canon.c_str(), RTLD_NOW | RTLD_LOCAL);
+  if (!handle) {
+    const char* e = dlerror();
+    if (err_out) {
+      *err_out = "dlopen addon " + raw_path + ": " + (e ? e : "(unknown)");
+    }
+    return false;
+  }
+  size_t pending_after = reg->pending_count_fn ? reg->pending_count_fn() : 0;
+  bool has_deprecated =
+      (pending_after > pending_before && reg->get_pending_fn != nullptr);
+
+  auto retire_handle = [&]() {
+    // If deprecated napi_module_register ran at dlopen, do not dlclose early
+    // if the process may still create new envs; shutdown_all closes all
+    // handles after all envs are destroyed.
+    if (!has_deprecated) {
+      dlclose(handle);
+    } else {
+      try {
+        reg->orphan_dl_handles.push_back(handle);
+      } catch (...) {
+      }
+    }
+  };
+
+  dlerror();
+  auto get_ver = reinterpret_cast<GetVersionFn>(
+      dlsym(handle, "node_api_module_get_api_version_v1"));
+  int32_t version = 8;
+  if (get_ver) {
+    version = get_ver();
+    if (version > 10) {
+      if (err_out) {
+        char buf[64];
+        std::snprintf(buf, sizeof(buf), "%d", static_cast<int>(version));
+        *err_out = "addon " + raw_path + " requests N-API v" + buf +
+                   " > v10 (unsupported)";
+      }
+      retire_handle();
+      return false;
+    }
+    if (version < 1) {
+      if (err_out) {
+        char buf[64];
+        std::snprintf(buf, sizeof(buf), "%d", static_cast<int>(version));
+        *err_out = "addon " + raw_path + " reports invalid N-API v" + buf;
+      }
+      retire_handle();
+      return false;
+    }
+  }
+
+  dlerror();
+  auto register_fn = reinterpret_cast<RegisterFn>(
+      dlsym(handle, "napi_register_module_v1"));
+  if (!register_fn && !has_deprecated) {
+    const char* e = dlerror();
+    if (err_out) {
+      *err_out = "addon " + raw_path + " lacks napi_register_module_v1: " +
+                 (e ? e : "(unknown)");
+    }
+    retire_handle();
+    return false;
+  }
+
+  std::unique_ptr<AddonRecord> rec(new (std::nothrow) AddonRecord());
+  if (!rec) {
+    if (err_out) *err_out = "out of memory allocating AddonRecord";
+    retire_handle();
+    return false;
+  }
+
+  napi_env env = reg->create_env(reg->runtime, reg->context, canon.c_str(),
+                                 &reg->services, reg->host_loop);
+  if (!env) {
+    if (err_out) *err_out = "chakra_nodeapi_create_env failed for " + raw_path;
+    retire_handle();
+    return false;
+  }
+
+  rec->canonical_path = canon;
+  rec->dl_handle = handle;
+  rec->env = env;
+  rec->api_version = version;
+  rec->used_deprecated_register = (!register_fn && has_deprecated);
+
+  if (reg->set_ver_fn) {
+    napi_status vs = reg->set_ver_fn(env, version);
+    if (vs != napi_ok) {
+      if (err_out) {
+        *err_out = "chakra_nodeapi_set_module_api_version failed for " +
+                   raw_path;
+      }
+      reg->destroy_env(env);
+      retire_handle();
+      return false;
+    }
+  }
+
+  napi_handle_scope scope = nullptr;
+  if (napi_open_handle_scope(env, &scope) != napi_ok) {
+    if (err_out) *err_out = "napi_open_handle_scope failed for " + raw_path;
+    reg->destroy_env(env);
+    retire_handle();
+    return false;
+  }
+
+  napi_value exports = nullptr;
+  if (napi_create_object(env, &exports) != napi_ok || !exports) {
+    napi_close_handle_scope(env, scope);
+    if (err_out) *err_out = "napi_create_object failed for " + raw_path;
+    reg->destroy_env(env);
+    retire_handle();
+    return false;
+  }
+
+  JsValueRef cur_js = reinterpret_cast<JsValueRef>(exports);
+  if (JsAddRef(cur_js, nullptr) != JsNoError) {
+    napi_close_handle_scope(env, scope);
+    if (err_out) *err_out = "JsAddRef(exports) failed for " + raw_path;
+    reg->destroy_env(env);
+    retire_handle();
+    return false;
+  }
+
+  auto capture_pending_reg_error = [&]() -> bool {
+    bool has = false;
+    if (JsHasException(&has) == JsNoError && has) {
+      JsValueRef ex = JS_INVALID_REFERENCE;
+      if (JsGetAndClearException(&ex) == JsNoError &&
+          ex != JS_INVALID_REFERENCE) {
+        if (rec->pending_reg_error == JS_INVALID_REFERENCE) {
+          if (JsAddRef(ex, nullptr) == JsNoError) {
+            rec->pending_reg_error = ex;
+          }
+        }
+      }
+      return true;
+    }
+    return false;
+  };
+
+  if (register_fn) {
+    napi_value result = register_fn(env, exports);
+    if (result != nullptr && result != exports) {
+      JsValueRef new_js = reinterpret_cast<JsValueRef>(result);
+      if (JsAddRef(new_js, nullptr) == JsNoError) {
+        JsRelease(cur_js, nullptr);
+        cur_js = new_js;
+      }
+    }
+    (void)capture_pending_reg_error();
+  } else {
+    for (size_t i = pending_before; i < pending_after; ++i) {
+      chakra_nodeapi_pending_module_info_compat info{};
+      if (reg->get_pending_fn(i, &info) != napi_ok ||
+          info.nm_register_func == nullptr) {
+        continue;
+      }
+      napi_value cur_napi = reinterpret_cast<napi_value>(cur_js);
+      napi_value ret = info.nm_register_func(env, cur_napi);
+      if (ret != nullptr && ret != cur_napi) {
+        JsValueRef new_js = reinterpret_cast<JsValueRef>(ret);
+        if (JsAddRef(new_js, nullptr) == JsNoError) {
+          JsRelease(cur_js, nullptr);
+          cur_js = new_js;
+        }
+      }
+      if (capture_pending_reg_error()) {
+        break;
+      }
+    }
+  }
+
+  rec->exports = cur_js;
+  napi_close_handle_scope(env, scope);
+
+  AddonRecord* raw_rec = rec.get();
+  bool pushed = false;
+  try {
+    reg->addon_order.push_back(std::move(rec));
+    pushed = true;
+    reg->registry_by_path.emplace(raw_rec->canonical_path, raw_rec);
+  } catch (...) {
+    if (raw_rec->exports != JS_INVALID_REFERENCE) {
+      JsRelease(raw_rec->exports, nullptr);
+      raw_rec->exports = JS_INVALID_REFERENCE;
+    }
+    if (raw_rec->pending_reg_error != JS_INVALID_REFERENCE) {
+      JsRelease(raw_rec->pending_reg_error, nullptr);
+      raw_rec->pending_reg_error = JS_INVALID_REFERENCE;
+    }
+    reg->destroy_env(raw_rec->env);
+    raw_rec->env = nullptr;
+    if (pushed) {
+      reg->addon_order.pop_back();
+    }
+    retire_handle();
+    if (err_out) *err_out = "out of memory registering addon";
+    return false;
+  }
+
+  if (out) *out = raw_rec;
+  return true;
+}
 
 JsValueRef console_log_cb(JsValueRef, bool, JsValueRef* args,
                           unsigned short count, void* state) {
@@ -296,8 +652,8 @@ JsValueRef host_get_global(const char* name) {
 
 // Execute one .js file as a CommonJS module and return module.exports.
 // Sets __nodeapi_module__/__nodeapi_exports__ globals so the wrapper can
-// reference them; saves/restores for nesting. Returns JS_INVALID_REFERENCE
-// on failure (exception already printed).
+// reference them; saves/restores active_module_dir and wrapper globals for
+// nesting. Returns JS_INVALID_REFERENCE on failure (exception already printed).
 JsValueRef load_commonjs_module(RequireState* rs,
                                 const std::string& abs_path) {
   auto it = rs->cache.find(abs_path);
@@ -320,6 +676,8 @@ JsValueRef load_commonjs_module(RequireState* rs,
     JsCreatePropertyId("exports", 7, &pid);
     JsSetProperty(module_obj, pid, exports_obj, false);
   }
+  std::string prev_active_dir = rs->active_module_dir;
+  rs->active_module_dir = host_dirname(abs_path);
   JsValueRef prev_mod = host_get_global("__nodeapi_module__");
   JsValueRef prev_exp = host_get_global("__nodeapi_exports__");
   JsValueRef prev_fn = host_get_global("__filename__");
@@ -352,6 +710,7 @@ JsValueRef load_commonjs_module(RequireState* rs,
   if (prev_exp != JS_INVALID_REFERENCE) host_set_global("__nodeapi_exports__", prev_exp);
   if (prev_fn != JS_INVALID_REFERENCE) host_set_global("__filename__", prev_fn);
   if (prev_dn != JS_INVALID_REFERENCE) host_set_global("__dirname__", prev_dn);
+  rs->active_module_dir = prev_active_dir;
   if (err != JsNoError) {
     clear_exception(("require: " + abs_path + " threw").c_str());
     return JS_INVALID_REFERENCE;
@@ -379,68 +738,162 @@ JsValueRef host_require_cb(JsValueRef, bool, JsValueRef* args,
   if (req.empty()) return undef;
   const char* bpath = getenv("NODEAPI_BUILD_DIR");
   const char* npath = getenv("NODE_PATH");
-  // Builtin-ish shims via NODE_PATH.
+
+  auto split_node_path = [](const char* np) -> std::vector<std::string> {
+    std::vector<std::string> dirs;
+    if (!np || !np[0]) return dirs;
+    std::string s(np);
+    size_t start = 0;
+    while (start <= s.size()) {
+      size_t colon = s.find(':', start);
+      std::string seg = (colon == std::string::npos)
+                            ? s.substr(start)
+                            : s.substr(start, colon - start);
+      if (!seg.empty()) dirs.push_back(seg);
+      if (colon == std::string::npos) break;
+      start = colon + 1;
+    }
+    return dirs;
+  };
+
+  // 1. Builtin-ish shims via NODE_PATH.
   if (req == "assert" || req == "node:assert" || req == "bindings") {
     std::string shim = (req == "bindings") ? "bindings.js" : "assert.js";
-    if (npath && npath[0]) {
-      std::string base = npath;
-      size_t semi = base.find(':');
-      if (semi != std::string::npos) base = base.substr(0, semi);
-      std::string cand = host_normalize(base + "/" + shim);
-      JsValueRef m = load_commonjs_module(rs, cand);
-      if (m != JS_INVALID_REFERENCE) return m;
-      std::fprintf(stderr, "ch-nodeapi: require: cannot load shim %s\n", cand.c_str());
+    std::vector<std::string> dirs = split_node_path(npath);
+    if (!dirs.empty()) {
+      for (const std::string& base : dirs) {
+        std::string cand = host_normalize(base + "/" + shim);
+        if (!host_file_exists(cand)) continue;
+        JsValueRef m = load_commonjs_module(rs, cand);
+        if (m != JS_INVALID_REFERENCE) return m;
+        return undef;
+      }
+      std::fprintf(stderr, "ch-nodeapi: require: cannot load shim %s\n",
+                   shim.c_str());
       return undef;
     }
     std::fprintf(stderr, "ch-nodeapi: require('%s') needs NODE_PATH (shims dir)\n", req.c_str());
     return undef;
   }
-  // Any .node request or */build/* path resolves to the live addon
-  // exports (host dlopened exactly one addon; Node would dlopen fresh).
-  // If registration threw (vendored test_exception), the first such
-  // require re-throws the stored exception (Node loader semantics:
-  // the exception propagates through require() and the driver recovers
-  // exports via error.binding); later requires return the exports.
-  size_t dotnode = req.rfind(".node");
-  bool is_node = (dotnode != std::string::npos &&
-                  dotnode + 5 == req.size());
-  if (is_node || req.find("/build/") != std::string::npos) {
-    if (rs->pending_reg_error != JS_INVALID_REFERENCE &&
-        !rs->pending_reg_thrown) {
-      rs->pending_reg_thrown = true;
-      (void)JsSetException(rs->pending_reg_error);
+
+  auto return_addon_record = [&](AddonRecord* rec) -> JsValueRef {
+    if (rec->pending_reg_error != JS_INVALID_REFERENCE &&
+        !rec->pending_reg_thrown) {
+      rec->pending_reg_thrown = true;
+      (void)JsSetException(rec->pending_reg_error);
       return undef;
     }
-    if (rs->exports != JS_INVALID_REFERENCE) return rs->exports;
-    std::fprintf(stderr, "ch-nodeapi: require('%s'): no addon exports\n", req.c_str());
+    return (rec->exports != JS_INVALID_REFERENCE) ? rec->exports : undef;
+  };
+
+  auto load_concrete_node = [&](const std::string& node_path) -> JsValueRef {
+    AddonRecord* rec = nullptr;
+    std::string err;
+    if (!load_and_register_addon(rs->registry, node_path, &rec, &err)) {
+      host_throw_error("ch-nodeapi: " + err);
+      return undef;
+    }
+    return return_addon_record(rec);
+  };
+
+  // 2. Check if req resolves to a real .node file on disk.
+  bool is_node = host_ends_with(req, ".node");
+  bool has_build = (req.find("/build/") != std::string::npos);
+  bool is_abs = (!req.empty() && req[0] == '/');
+  bool is_rel = (req == "." || req == ".." ||
+                 req.rfind("./", 0) == 0 || req.rfind("../", 0) == 0);
+
+  std::string cand_node;
+  if (is_abs || is_rel || has_build) {
+    std::string base = is_abs
+                           ? host_normalize(req)
+                           : host_normalize(rs->active_module_dir + "/" + req);
+    if (is_node) {
+      if (host_file_exists(base)) cand_node = base;
+    } else if (has_build && !host_ends_with(base, ".js")) {
+      if (host_file_exists(base + ".node")) cand_node = base + ".node";
+      else if (host_file_exists(base)) cand_node = base;
+    }
+    if (cand_node.empty() && has_build && bpath && bpath[0]) {
+      std::string bname = host_basename(req);
+      if (!bname.empty()) {
+        std::string bcand = host_normalize(std::string(bpath) + "/" + bname);
+        if (is_node) {
+          if (host_file_exists(bcand)) cand_node = bcand;
+        } else {
+          if (host_file_exists(bcand + ".node")) cand_node = bcand + ".node";
+          else if (host_file_exists(bcand) && host_ends_with(bcand, ".node")) {
+            cand_node = bcand;
+          }
+        }
+      }
+    }
+  } else if (is_node) {
+    for (const std::string& dir : split_node_path(npath)) {
+      std::string cand = host_normalize(dir + "/" + req);
+      if (host_file_exists(cand)) {
+        cand_node = cand;
+        break;
+      }
+    }
+  }
+
+  // 3. Concrete .node file on disk: load & register (throw JS Error on fail).
+  if (!cand_node.empty()) {
+    return load_concrete_node(cand_node);
+  }
+
+  // 4. Fallback to addon_order[0] for CLI-preloaded runs when drivers issue
+  // synthetic */build/* or bare *.node requests (e.g. node-addon-api drivers
+  // requiring ./build/Release/binding.node when --addon points to a
+  // differently named binary). Explicit ./ or / missing .node files and
+  // --driver-only runs throw a JS Error instead of aliasing another addon.
+  if (is_node || has_build) {
+    if (rs->registry != nullptr && rs->registry->has_cli_addon &&
+        !rs->registry->addon_order.empty() &&
+        (has_build || (!is_abs && !is_rel))) {
+      return return_addon_record(rs->registry->addon_order[0].get());
+    }
+    host_throw_error("ch-nodeapi: cannot load addon '" + req + "'");
     return undef;
   }
-  // Relative .js (./ ../../) or NODE_PATH file.
+
+  // 5. Relative .js, absolute .js, or NODE_PATH file (falling back to .node
+  // for extensionless relative/NODE_PATH addon requires).
   std::string abs;
-  if (!req.empty() && req[0] == '/') {
-    abs = host_normalize(req);
-  } else if (req.size() >= 2 && req[0] == '.' && req[1] == '/') {
-    abs = host_normalize(rs->driver_dir + "/" + req);
-  } else if (req.rfind("../", 0) == 0 || req == "..") {
-    abs = host_normalize(rs->driver_dir + "/" + req);
-  } else if (npath && npath[0]) {
-    std::string base = npath;
-    size_t semi = base.find(':');
-    if (semi != std::string::npos) base = base.substr(0, semi);
-    abs = host_normalize(base + "/" + req);
+  bool found = false;
+  if (is_abs || is_rel) {
+    abs = is_abs ? host_normalize(req)
+                 : host_normalize(rs->active_module_dir + "/" + req);
+    if (host_file_exists(abs + ".js")) { abs += ".js"; found = true; }
+    else if (host_file_exists(abs)) { found = true; }
+    else if (host_file_exists(abs + "/index.js")) { abs += "/index.js"; found = true; }
+    else if (host_file_exists(abs + ".node")) {
+      return load_concrete_node(abs + ".node");
+    }
   } else {
-    std::fprintf(stderr, "ch-nodeapi: require('%s'): unsupported (no ./ or NODE_PATH)\n", req.c_str());
+    std::vector<std::string> dirs = split_node_path(npath);
+    if (dirs.empty()) {
+      std::fprintf(stderr, "ch-nodeapi: require('%s'): unsupported (no ./ or NODE_PATH)\n", req.c_str());
+      return undef;
+    }
+    for (const std::string& dir : dirs) {
+      std::string cand = host_normalize(dir + "/" + req);
+      if (host_file_exists(cand + ".js")) { abs = cand + ".js"; found = true; break; }
+      if (host_file_exists(cand)) { abs = cand; found = true; break; }
+      if (host_file_exists(cand + "/index.js")) { abs = cand + "/index.js"; found = true; break; }
+      if (host_file_exists(cand + ".node")) {
+        return load_concrete_node(cand + ".node");
+      }
+    }
+    if (!found) abs = host_normalize(dirs[0] + "/" + req);
+  }
+
+  if (found) {
+    JsValueRef m = load_commonjs_module(rs, abs);
+    if (m != JS_INVALID_REFERENCE) return m;
     return undef;
   }
-  if (host_file_exists(abs + ".js")) abs += ".js";
-  else if (host_file_exists(abs)) { /* as-is */ }
-  else if (host_file_exists(abs + "/index.js")) abs += "/index.js";
-  else if (host_file_exists(abs + ".node")) {
-    if (rs->exports != JS_INVALID_REFERENCE) return rs->exports;
-    return undef;
-  }
-  JsValueRef m = load_commonjs_module(rs, abs);
-  if (m != JS_INVALID_REFERENCE) return m;
   std::fprintf(stderr, "ch-nodeapi: require('%s'): cannot resolve (tried %s)\n", req.c_str(), abs.c_str());
   return undef;
 }
@@ -735,20 +1188,13 @@ int pump_until_quiet(PumpState* pump, HostLoopState* loop, long limit,
   return 0;
 }
 
-// ---- Symbol types ----
-
-typedef napi_env (*CreateEnvFn)(JsRuntimeHandle, JsContextRef, const char*,
-                                const chakra_nodeapi_host_services*, void*);
-typedef void (*DestroyEnvFn)(napi_env);
-typedef napi_value (*RegisterFn)(napi_env, napi_value);
-typedef int32_t (*GetVersionFn)(void);
-
 } /* namespace */
 
 int main(int argc, char** argv) {
   Config cfg;
   std::vector<std::string> positional;
-  std::string flag_addon, flag_driver;
+  std::vector<std::string> flag_addons;
+  std::string flag_driver;
   for (int i = 1; i < argc; i++) {
     std::string a = argv[i];
     auto need = [&](const char* opt) -> std::string {
@@ -759,14 +1205,14 @@ int main(int argc, char** argv) {
       return argv[++i];
     };
     if (a == "--provider") cfg.provider_path = need(a.c_str());
-    else if (a == "--addon") flag_addon = need(a.c_str());
+    else if (a == "--addon") flag_addons.push_back(need(a.c_str()));
     else if (a == "--driver") flag_driver = need(a.c_str());
     else if (a == "--exports") cfg.exports_name = need(a.c_str());
     else if (a == "--pump-limit") cfg.pump_limit = std::atol(need(a.c_str()).c_str());
     else if (a == "--pump-timeout-ms")
       cfg.pump_timeout_ms = std::atol(need(a.c_str()).c_str());
     else if (a == "-h" || a == "--help") {
-      std::printf("usage: ch-nodeapi [--provider PATH] [--exports NAME] [--pump-limit N] [--pump-timeout-ms N] [--addon PATH.node] [--driver PATH.js] [addon.node] [driver.js]\n");
+      std::printf("usage: ch-nodeapi [--provider PATH] [--exports NAME] [--pump-limit N] [--pump-timeout-ms N] [--addon PATH.node]... [--driver PATH.js] [addon.node] [driver.js]\n");
       std::printf("  provider: --provider, else $CHAKRA_NODEAPI_PROVIDER, else beside the host\n");
       return 0;
     } else if (!a.empty() && a[0] == '-') {
@@ -807,15 +1253,37 @@ int main(int argc, char** argv) {
       }
     }
   }
-  cfg.addon_path = flag_addon;
+  cfg.addon_paths = flag_addons;
   cfg.driver_path = flag_driver;
-  if (positional.size() >= 1 && cfg.addon_path.empty()) cfg.addon_path = positional[0];
-  if (positional.size() >= 2 && cfg.driver_path.empty()) cfg.driver_path = positional[1];
-  if (cfg.addon_path.empty()) {
+  if (flag_addons.empty() && flag_driver.empty()) {
+    if (positional.size() >= 1) cfg.addon_paths.push_back(positional[0]);
+    if (positional.size() >= 2) cfg.driver_path = positional[1];
+    if (positional.size() > 2) {
+      std::fprintf(stderr, "ch-nodeapi: unexpected positional argument %s\n",
+                   positional[2].c_str());
+      return 1;
+    }
+  } else {
+    for (const std::string& p : positional) {
+      if (cfg.driver_path.empty() && !host_ends_with(p, ".node")) {
+        cfg.driver_path = p;
+      } else {
+        cfg.addon_paths.push_back(p);
+      }
+    }
+  }
+  if (cfg.addon_paths.empty() && cfg.driver_path.empty()) {
     std::fprintf(stderr,
-                 "usage: ch-nodeapi [--provider PATH] [--addon PATH.node] [--driver PATH.js] [addon.node] [driver.js]\n"
+                 "usage: ch-nodeapi [--provider PATH] [--addon PATH.node]... [--driver PATH.js] [addon.node] [driver.js]\n"
                  "  provider: --provider or $CHAKRA_NODEAPI_PROVIDER\n");
     return 1;
+  }
+
+  std::string startup_cwd;
+  {
+    char cwdbuf[4096];
+    if (getcwd(cwdbuf, sizeof(cwdbuf))) startup_cwd = cwdbuf;
+    else startup_cwd = ".";
   }
 
   // --- Runtime + context (host-owned) ---
@@ -902,60 +1370,20 @@ int main(int argc, char** argv) {
     dispose_runtime();
     return 1;
   }
-
-  // --- Load addon RTLD_LOCAL, resolve version + register ---
+  // Optional provider symbols (NULL-tolerated for minimal stubs).
   dlerror();
-  void* addon = dlopen(cfg.addon_path.c_str(), RTLD_NOW | RTLD_LOCAL);
-  if (!addon) {
-    std::fprintf(stderr, "ch-nodeapi: dlopen addon %s: %s\n",
-                 cfg.addon_path.c_str(), dlerror());
-    dlclose(provider);
-    dispose_runtime();
-    return 1;
-  }
+  auto set_ver_fn = reinterpret_cast<SetModuleApiVersionFn>(
+      dlsym(provider, "chakra_nodeapi_set_module_api_version"));
   dlerror();
-  auto get_ver = reinterpret_cast<GetVersionFn>(
-      dlsym(addon, "node_api_module_get_api_version_v1"));
-  int version = 8;
-  if (get_ver) {
-    version = get_ver();
-    if (version > 8) {
-      std::fprintf(stderr,
-                   "ch-nodeapi: addon %s requests N-API v%d > v8 (unsupported)\n",
-                   cfg.addon_path.c_str(), version);
-      dlclose(addon);
-      dlclose(provider);
-      dispose_runtime();
-      return 1;
-    }
-    if (version < 1) {
-      std::fprintf(stderr,
-                   "ch-nodeapi: addon %s reports invalid N-API v%d\n",
-                   cfg.addon_path.c_str(), version);
-      dlclose(addon);
-      dlclose(provider);
-      dispose_runtime();
-      return 1;
-    }
-  }
+  auto pending_count_fn = reinterpret_cast<PendingModuleCountFn>(
+      dlsym(provider, "chakra_nodeapi_pending_module_count"));
   dlerror();
-  auto register_fn = reinterpret_cast<RegisterFn>(
-      dlsym(addon, "napi_register_module_v1"));
-  if (!register_fn) {
-    const char* e = dlerror();
-    std::fprintf(stderr,
-                 "ch-nodeapi: addon %s lacks napi_register_module_v1: %s\n",
-                 cfg.addon_path.c_str(), e ? e : "(unknown)");
-    dlclose(addon);
-    dlclose(provider);
-    dispose_runtime();
-    return 1;
-  }
+  auto get_pending_fn = reinterpret_cast<GetPendingModuleFn>(
+      dlsym(provider, "chakra_nodeapi_get_pending_module"));
 
   HostLoopState* host_loop = new (std::nothrow) HostLoopState();
   if (!host_loop) {
     std::fprintf(stderr, "ch-nodeapi: out of memory allocating HostLoopState\n");
-    dlclose(addon);
     dlclose(provider);
     dispose_runtime();
     return 1;
@@ -975,155 +1403,106 @@ int main(int argc, char** argv) {
   services.unref_loop = host_unref_loop;
   services.host_manages_promise_queue = true;
 
-  // --- Create env (provider-owned) ---
-  napi_env env = create_env(runtime, context, cfg.addon_path.c_str(),
-                            &services, host_loop);
-  if (!env) {
-    std::fprintf(stderr, "ch-nodeapi: chakra_nodeapi_create_env failed\n");
-    shutdown_host_loop(host_loop, true);
-    delete host_loop;
-    JsSetPromiseContinuationCallback(nullptr, nullptr);
-    dlclose(addon);
-    dlclose(provider);
-    dispose_runtime();
-    return 1;
-  }
+  AddonRegistry registry;
+  registry.cwd_dir = startup_cwd;
+  registry.runtime = runtime;
+  registry.context = context;
+  registry.services = services;
+  registry.host_loop = host_loop;
+  registry.create_env = create_env;
+  registry.destroy_env = destroy_env;
+  registry.set_ver_fn = set_ver_fn;
+  registry.pending_count_fn = pending_count_fn;
+  registry.get_pending_fn = get_pending_fn;
+  registry.has_cli_addon = !cfg.addon_paths.empty();
 
-  // --- Registration scope + exports + register call (plan §1.3/§3.5) ---
-  // The scope stays open until the result is bound to the global, so the
-  // returned value stays rooted across JsRun (provider R1).
   RequireState req_state;
-  // Shared post-create_env teardown: releases host-held roots (R5), destroys
-  // env BEFORE shutting down host workers (§3.6), and only deletes `host_loop`
-  // / closes dlopen handles when all workers have cleanly joined.
+  req_state.cwd_dir = startup_cwd;
+  req_state.registry = &registry;
+
+  // Shared teardown: releases host-held roots (R5), destroys every addon's
+  // env in reverse addon_order (LIFO) BEFORE shutting down host workers, and
+  // only deletes `host_loop` / closes dlopen handles when joined == true.
   auto shutdown_all = [&](int exit_code) -> int {
     for (auto& kv : req_state.cache) {
       if (kv.second != JS_INVALID_REFERENCE) JsRelease(kv.second, nullptr);
     }
     req_state.cache.clear();
-    if (req_state.pending_reg_error != JS_INVALID_REFERENCE) {
-      JsRelease(req_state.pending_reg_error, nullptr);
-      req_state.pending_reg_error = JS_INVALID_REFERENCE;
-    }
     for (JsValueRef t : pump.tasks) {
       if (t != JS_INVALID_REFERENCE) JsRelease(t, nullptr);
     }
     pump.tasks.clear();
+    for (auto& rec_ptr : registry.addon_order) {
+      if (rec_ptr->exports != JS_INVALID_REFERENCE) {
+        JsRelease(rec_ptr->exports, nullptr);
+        rec_ptr->exports = JS_INVALID_REFERENCE;
+      }
+      if (rec_ptr->pending_reg_error != JS_INVALID_REFERENCE) {
+        JsRelease(rec_ptr->pending_reg_error, nullptr);
+        rec_ptr->pending_reg_error = JS_INVALID_REFERENCE;
+      }
+    }
 
-    destroy_env(env);
+    for (size_t i = registry.addon_order.size(); i > 0; --i) {
+      AddonRecord* rec = registry.addon_order[i - 1].get();
+      if (rec->env != nullptr) {
+        destroy_env(rec->env);
+        rec->env = nullptr;
+      }
+    }
+
     bool joined = shutdown_host_loop(host_loop, exit_code == 0);
     JsSetPromiseContinuationCallback(nullptr, nullptr);
+    for (JsValueRef t : pump.tasks) {
+      if (t != JS_INVALID_REFERENCE) JsRelease(t, nullptr);
+    }
+    pump.tasks.clear();
     dispose_runtime();
     if (joined) {
       delete host_loop;
       host_loop = nullptr;
-      dlclose(addon);
+      for (size_t i = registry.addon_order.size(); i > 0; --i) {
+        AddonRecord* rec = registry.addon_order[i - 1].get();
+        if (rec->dl_handle != nullptr) {
+          dlclose(rec->dl_handle);
+          rec->dl_handle = nullptr;
+        }
+      }
+      for (size_t i = registry.orphan_dl_handles.size(); i > 0; --i) {
+        if (registry.orphan_dl_handles[i - 1] != nullptr) {
+          dlclose(registry.orphan_dl_handles[i - 1]);
+        }
+      }
+      registry.orphan_dl_handles.clear();
+      registry.registry_by_path.clear();
+      registry.addon_order.clear();
       dlclose(provider);
+      provider = nullptr;
     }
     return exit_code;
   };
 
-  napi_handle_scope scope = nullptr;
-  if (napi_open_handle_scope(env, &scope) != napi_ok) {
-    std::fprintf(stderr, "ch-nodeapi: napi_open_handle_scope failed\n");
-    return shutdown_all(1);
-  }
-  napi_value exports = nullptr;
-  napi_value result = nullptr;
-  bool exported_ok = true;
-  if (napi_create_object(env, &exports) != napi_ok || !exports) {
-    std::fprintf(stderr, "ch-nodeapi: napi_create_object failed\n");
-    exported_ok = false;
-  }
-  if (exported_ok) {
-    // Host root on the exports JS value across the register call.
-    JsAddRef(reinterpret_cast<JsValueRef>(exports), nullptr);
-    result = register_fn(env, exports);
-    // Return-replaces-exports: non-null and != passed object replaces.
-    bool replaced = (result != nullptr && result != exports);
-    if (result == nullptr) {
-      // NULL return: keep original exports (some addons return null).
-      bool has = false;
-      if (JsHasException(&has) == JsNoError && has) {
-        // Registration threw with no return (vendored test_exception
-        // shape: Init throws; the error carries error.binding). Store
-        // the exception for the driver's require() to re-throw (see
-        // host_require_cb); keep the original exports as the binding.
-        JsValueRef ex = JS_INVALID_REFERENCE;
-        if (JsGetAndClearException(&ex) == JsNoError &&
-            ex != JS_INVALID_REFERENCE) {
-          JsAddRef(ex, nullptr);
-          req_state.pending_reg_error = ex;
-        }
-        result = exports;
-        replaced = false;
-      } else {
-        result = exports;
-        replaced = false;
-      }
+  // --- Preload CLI addons ---
+  for (const std::string& apath : cfg.addon_paths) {
+    AddonRecord* rec = nullptr;
+    std::string err;
+    if (!load_and_register_addon(&registry, apath, &rec, &err)) {
+      std::fprintf(stderr, "ch-nodeapi: %s\n", err.c_str());
+      return shutdown_all(1);
     }
-    if (replaced) {
-      // Keep the replacement rooted by the host across binding.
-      JsAddRef(reinterpret_cast<JsValueRef>(result), nullptr);
-    }
-    napi_value final_exports = result;
-    // Bind to globalThis.<exports_name>.
-    JsValueRef global = JS_INVALID_REFERENCE;
-    JsGetGlobalObject(&global);
-    JsPropertyIdRef pid = JS_INVALID_REFERENCE;
-    JsCreatePropertyId(cfg.exports_name.c_str(), cfg.exports_name.size(), &pid);
-    JsSetProperty(global, pid,
-                  reinterpret_cast<JsValueRef>(final_exports), false);
-    if (replaced) {
-      JsRelease(reinterpret_cast<JsValueRef>(exports), nullptr);
-      JsRelease(reinterpret_cast<JsValueRef>(final_exports), nullptr);
-    } else {
-      JsRelease(reinterpret_cast<JsValueRef>(exports), nullptr);
-    }
-    // Abort the scope rooting the original exports if replaced; the bound
-    // replacement is held by the global.
-    napi_close_handle_scope(env, scope);
-  } else {
-    napi_close_handle_scope(env, scope);
   }
-  if (!exported_ok) {
-    return shutdown_all(1);
-  }
-  // Registration scope is closed; the global now roots the exports.
-  // A pending exception from registration (vendored test_exception:
-  // Init throws "Error during Init" and attaches error.binding) is
-  // stored for the driver's require() to re-throw, rather than exiting
-  // here (JsRun would fail with InExceptionState anyway).
-  {
-    bool has = false;
-    if (JsHasException(&has) == JsNoError && has) {
-      JsValueRef ex = JS_INVALID_REFERENCE;
-      if (JsGetAndClearException(&ex) == JsNoError &&
-          ex != JS_INVALID_REFERENCE &&
-          req_state.pending_reg_error == JS_INVALID_REFERENCE) {
-        JsAddRef(ex, nullptr);
-        req_state.pending_reg_error = ex;
-      } else {
-        clear_exception("pending exception after registration");
-        if (ex != JS_INVALID_REFERENCE) JsRelease(ex, nullptr);
-      }
-    }
+  if (!registry.addon_order.empty() &&
+      registry.addon_order[0]->exports != JS_INVALID_REFERENCE) {
+    host_set_global(cfg.exports_name.c_str(), registry.addon_order[0]->exports);
   }
 
   // --- Run driver (if given) + pump ---
   int run_rc = 0;
   if (!cfg.driver_path.empty()) {
-    // Install test-host globals used by vendored drivers (console,
-    // process, require, global alias). require returns the live addon
-    // exports for *.node / */build/* paths (see host_require_cb).
-    req_state.driver_dir = host_dirname(cfg.driver_path);
-    req_state.driver_path = cfg.driver_path;
-    {
-      char cwdbuf[4096];
-      if (getcwd(cwdbuf, sizeof(cwdbuf))) req_state.cwd_dir = cwdbuf;
-      else req_state.cwd_dir = req_state.driver_dir;
-    }
-    req_state.exports = host_get_global(cfg.exports_name.c_str());
+    std::string abs_driver = host_resolve_abs(startup_cwd, cfg.driver_path);
+    req_state.driver_dir = host_dirname(abs_driver);
+    req_state.driver_path = abs_driver;
+    req_state.active_module_dir = req_state.driver_dir;
     // console object: log/info/warn/debug -> stdout, error -> stderr.
     {
       JsValueRef console_obj = JS_INVALID_REFERENCE;
@@ -1144,7 +1523,7 @@ int main(int argc, char** argv) {
       JsGetGlobalObject(&global);
       host_set_global("global", global);
     }
-    // process: env (from OS environ) + cwd() + argv. No `on`/`exit`:
+    // process: env (from OS environ) + cwd() + argv + platform. No `on`/`exit`:
     // mustCall verification is done explicitly by the host below.
     {
       JsValueRef proc = JS_INVALID_REFERENCE;
@@ -1182,7 +1561,7 @@ int main(int argc, char** argv) {
         JsValueRef a0 = JS_INVALID_REFERENCE, a1 = JS_INVALID_REFERENCE;
         const char* argv0 = "ch-nodeapi";
         JsCreateString(argv0, std::strlen(argv0), &a0);
-        JsCreateString(cfg.driver_path.c_str(), cfg.driver_path.size(), &a1);
+        JsCreateString(abs_driver.c_str(), abs_driver.size(), &a1);
         JsPropertyIdRef pid0 = JS_INVALID_REFERENCE;
         JsPropertyIdRef pid1 = JS_INVALID_REFERENCE;
         JsCreatePropertyId("0", 1, &pid0);
@@ -1215,7 +1594,7 @@ int main(int argc, char** argv) {
       host_set_global("require", fn);
     }
     std::string script;
-    if (!read_file(cfg.driver_path, &script)) {
+    if (!read_file(abs_driver, &script)) {
       std::fprintf(stderr, "ch-nodeapi: cannot read driver %s\n",
                    cfg.driver_path.c_str());
       return shutdown_all(1);
@@ -1235,7 +1614,7 @@ int main(int argc, char** argv) {
     host_set_global("exports", driver_exports);
     {
       JsValueRef s = JS_INVALID_REFERENCE;
-      JsCreateString(cfg.driver_path.c_str(), cfg.driver_path.size(), &s);
+      JsCreateString(abs_driver.c_str(), abs_driver.size(), &s);
       host_set_global("__filename__", s);
       JsValueRef d = JS_INVALID_REFERENCE;
       JsCreateString(req_state.driver_dir.c_str(), req_state.driver_dir.size(), &d);
@@ -1248,7 +1627,7 @@ int main(int argc, char** argv) {
     JsValueRef url_val = JS_INVALID_REFERENCE;
     JsValueRef run_result = JS_INVALID_REFERENCE;
     if (JsCreateString(wrapped.c_str(), wrapped.size(), &script_val) != JsNoError ||
-        JsCreateString(cfg.driver_path.c_str(), cfg.driver_path.size(), &url_val) != JsNoError) {
+        JsCreateString(abs_driver.c_str(), abs_driver.size(), &url_val) != JsNoError) {
       std::fprintf(stderr, "ch-nodeapi: JsCreateString (driver) failed\n");
       return shutdown_all(1);
     }
@@ -1278,21 +1657,25 @@ int main(int argc, char** argv) {
     // calls; Node fails at process exit. The host replicates that gate
     // here (no process/exit events on this host).
     if (run_rc == 0) {
-      // Drain GC-enqueued finalizers before checking mustCall: the
-      // driver may have just run global.gc() with no later napi call.
-      // One JS-calling provider entry triggers the EntryGuard drain.
-      {
+      // Drain GC-enqueued finalizers on every loaded addon env before
+      // checking mustCall: the driver may have run global.gc() with no
+      // later napi call. Indexed loop avoids iterator invalidation if a
+      // finalizer triggers JS require().
+      for (size_t i = 0; i < registry.addon_order.size(); ++i) {
+        napi_env addon_env = registry.addon_order[i]->env;
+        if (!addon_env) continue;
         napi_handle_scope drain_scope = nullptr;
         napi_value tmp = nullptr;
-        if (napi_open_handle_scope(env, &drain_scope) == napi_ok &&
-            napi_create_object(env, &tmp) == napi_ok) {
+        if (napi_open_handle_scope(addon_env, &drain_scope) == napi_ok &&
+            napi_create_object(addon_env, &tmp) == napi_ok) {
           (void)tmp;
         }
-        if (drain_scope) napi_close_handle_scope(env, drain_scope);
+        if (drain_scope) napi_close_handle_scope(addon_env, drain_scope);
         bool has = false;
         if (JsHasException(&has) == JsNoError && has) {
           clear_exception("drain threw");
           run_rc = 1;
+          break;
         }
       }
       // Finalizers may have queued promise/host tasks; pump again.
@@ -1302,27 +1685,27 @@ int main(int argc, char** argv) {
       }
       if (run_rc == 0) {
         for (auto& kv : req_state.cache) {
-        JsValueRef c = JS_INVALID_REFERENCE;
-        {
-          JsPropertyIdRef pid = JS_INVALID_REFERENCE;
-          JsCreatePropertyId("_checkMustCall", 14, &pid);
-          JsGetProperty(kv.second, pid, &c);
-        }
-        JsValueType ty = JsUndefined;
-        if (c == JS_INVALID_REFERENCE ||
-            JsGetValueType(c, &ty) != JsNoError || ty != JsFunction) {
-          continue;
-        }
-        JsValueRef undef = JS_INVALID_REFERENCE;
-        JsGetUndefinedValue(&undef);
-        JsValueRef arr[1] = {undef};
-        JsValueRef out = JS_INVALID_REFERENCE;
-        JsErrorCode ce = JsCallFunction(c, arr, 1, &out);
-        if (ce != JsNoError) {
-          clear_exception("mustCall check failed");
-          run_rc = 1;
-        }
-        break;
+          JsValueRef c = JS_INVALID_REFERENCE;
+          {
+            JsPropertyIdRef pid = JS_INVALID_REFERENCE;
+            JsCreatePropertyId("_checkMustCall", 14, &pid);
+            JsGetProperty(kv.second, pid, &c);
+          }
+          JsValueType ty = JsUndefined;
+          if (c == JS_INVALID_REFERENCE ||
+              JsGetValueType(c, &ty) != JsNoError || ty != JsFunction) {
+            continue;
+          }
+          JsValueRef undef = JS_INVALID_REFERENCE;
+          JsGetUndefinedValue(&undef);
+          JsValueRef arr[1] = {undef};
+          JsValueRef out = JS_INVALID_REFERENCE;
+          JsErrorCode ce = JsCallFunction(c, arr, 1, &out);
+          if (ce != JsNoError) {
+            clear_exception("mustCall check failed");
+            run_rc = 1;
+          }
+          break;
         }
       }
     }
@@ -1335,9 +1718,12 @@ int main(int argc, char** argv) {
     // the register call run before teardown.
     run_rc = pump_until_quiet(&pump, host_loop, cfg.pump_limit,
                               cfg.pump_timeout_ms, /*allow_wait=*/true);
-    if (req_state.pending_reg_error != JS_INVALID_REFERENCE) {
-      std::fprintf(stderr, "ch-nodeapi: registration threw with no driver\n");
-      run_rc = 1;
+    for (const auto& rec_ptr : registry.addon_order) {
+      if (rec_ptr->pending_reg_error != JS_INVALID_REFERENCE) {
+        std::fprintf(stderr, "ch-nodeapi: registration threw with no driver\n");
+        run_rc = 1;
+        break;
+      }
     }
   }
 

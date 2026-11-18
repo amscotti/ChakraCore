@@ -1,20 +1,20 @@
 # Node-API inventory (generated)
 
 Generated from the vendored Node 22.22.3 headers in
-`include/nodeapi/` at `NAPI_VERSION=8` by
+`include/nodeapi/` at `NAPI_VERSION=10` by
 `tools/nodeapi/gen_inventory.py`. Do not edit by hand —
 regenerate with `python3 tools/nodeapi/gen_inventory.py`.
-Normative source: `doc/node-api-plan.md` §4 (plan §1.1 counts).
+Normative source: `doc/node-api-plan.md` §4 (Q1.1 v10 counts).
 
 ## Summary
 
-- `js_native_api.h`: 115 symbols visible at `NAPI_VERSION=8` (126 total declarations; 11 excluded: 3 experimental, 3 v9-only, 5 v10-only).
-- `node_api.h`: 30 symbols visible at `NAPI_VERSION=8` (32 total declarations; 2 excluded: 1 v9-only, 1 v10-only).
-- Provider target at v8: **145 symbols** (expected 115 + 30 = 145).
+- `js_native_api.h`: 123 symbols visible at `NAPI_VERSION=10` (126 total declarations; 3 excluded: 3 experimental).
+- `node_api.h`: 32 symbols visible at `NAPI_VERSION=10` (32 total declarations; 0 excluded: none).
+- Provider target at v10: **155 symbols** (expected 123 + 32 = 155).
 
-Visibility rule: a declaration is listed iff it is outside `NAPI_EXPERIMENTAL` blocks and outside `#if NAPI_VERSION >= 9/10` blocks, with `NAPI_EXPERIMENTAL` undefined and `NODE_API_NO_EXTERNAL_BUFFERS_ALLOWED` undefined (the provider never defines it, so `napi_create_external_arraybuffer` and `napi_create_external_buffer` are included). `#if NAPI_VERSION >= 2/3/4/5/6/7/8` blocks are included at v8.
+Visibility rule: a declaration is listed iff it is outside `NAPI_EXPERIMENTAL` blocks, with `NAPI_EXPERIMENTAL` undefined and `NODE_API_NO_EXTERNAL_BUFFERS_ALLOWED` undefined (the provider never defines it, so `napi_create_external_arraybuffer` and `napi_create_external_buffer` are included). `#if NAPI_VERSION >= 2/3/4/5/6/7/8/9/10` blocks are included at v10.
 
-## Inventory (145 symbols at `NAPI_VERSION=8`)
+## Inventory (155 symbols at `NAPI_VERSION=10`)
 
 | Symbol | Header | Group |
 |---|---|---|
@@ -163,21 +163,21 @@ Visibility rule: a declaration is listed iff it is outside `NAPI_EXPERIMENTAL` b
 | `napi_unref_threadsafe_function` | `node_api.h` | B5 |
 | `napi_unwrap` | `js_native_api.h` | A3 |
 | `napi_wrap` | `js_native_api.h` | A3 |
+| `node_api_create_buffer_from_arraybuffer` | `node_api.h` | B2 |
+| `node_api_create_external_string_latin1` | `js_native_api.h` | A1 |
+| `node_api_create_external_string_utf16` | `js_native_api.h` | A1 |
+| `node_api_create_property_key_latin1` | `js_native_api.h` | A1 |
+| `node_api_create_property_key_utf16` | `js_native_api.h` | A1 |
+| `node_api_create_property_key_utf8` | `js_native_api.h` | A1 |
+| `node_api_create_syntax_error` | `js_native_api.h` | A4 |
+| `node_api_get_module_file_name` | `node_api.h` | B1 |
+| `node_api_symbol_for` | `js_native_api.h` | A1 |
+| `node_api_throw_syntax_error` | `js_native_api.h` | A4 |
 
-## Excluded at `NAPI_VERSION=8` (for audit)
+## Excluded at `NAPI_VERSION=10` (for audit)
 
 | Symbol | Header | Reason |
 |---|---|---|
-| `node_api_create_buffer_from_arraybuffer` | `node_api.h` | v10-only (#if NAPI_VERSION >= 10) |
-| `node_api_create_external_string_latin1` | `js_native_api.h` | v10-only (#if NAPI_VERSION >= 10) |
-| `node_api_create_external_string_utf16` | `js_native_api.h` | v10-only (#if NAPI_VERSION >= 10) |
-| `node_api_create_property_key_latin1` | `js_native_api.h` | v10-only (#if NAPI_VERSION >= 10) |
-| `node_api_create_property_key_utf16` | `js_native_api.h` | v10-only (#if NAPI_VERSION >= 10) |
-| `node_api_create_property_key_utf8` | `js_native_api.h` | v10-only (#if NAPI_VERSION >= 10) |
 | `node_api_create_sharedarraybuffer` | `js_native_api.h` | #ifdef NAPI_EXPERIMENTAL |
-| `node_api_create_syntax_error` | `js_native_api.h` | v9-only (#if NAPI_VERSION >= 9) |
-| `node_api_get_module_file_name` | `node_api.h` | v9-only (#if NAPI_VERSION >= 9) |
 | `node_api_is_sharedarraybuffer` | `js_native_api.h` | #ifdef NAPI_EXPERIMENTAL |
 | `node_api_post_finalizer` | `js_native_api.h` | #ifdef NAPI_EXPERIMENTAL |
-| `node_api_symbol_for` | `js_native_api.h` | v9-only (#if NAPI_VERSION >= 9) |
-| `node_api_throw_syntax_error` | `js_native_api.h` | v9-only (#if NAPI_VERSION >= 9) |

@@ -9,23 +9,23 @@ Compares the dylib's exported PROVIDER text symbols (nm -gU, type
 T, normalized by stripping one leading underscore on Mach-O)
 against tools/build/nodeapi_exports.txt. Fails on any missing or
 extra PROVIDER symbol. Also verifies every allowlisted symbol is in
-the normative inventory (doc/node-api-inventory.md, 145 at
-NAPI_VERSION=8) or the private host API (plan §3.2). The
+the normative inventory (doc/node-api-inventory.md, 155 at
+NAPI_VERSION=10) or the private host API (plan §3.2). The
 exports-file-vs-generator check
 (tools/build/gen_nodeapi_exports.py --check) is a separate step
 owned by `zig build check-nodeapi`, not run by this script.
 
 Full coverage (HIGH-5): the allowlist is the full surface.
-All 145 inventory symbols are landed and must appear in the dylib;
-landing or removing a napi_* requires updating the generator's
+All 155 inventory symbols are landed and must appear in the dylib;
+landing or removing a napi_*/node_api_* requires updating the generator's
 landed list, regenerating the allowlist, and rebuilding -- this
 check then fails until all three happen together. The allowlist is
-145 napi_* + 5 host = 150 symbols.
+155 napi_*/node_api_* + 6 host = 161 symbols.
 
 Visibility: the provider builds with -fvisibility=hidden. The
-145 napi_* declarations already carry __attribute__((visibility
+155 napi_*/node_api_* declarations already carry __attribute__((visibility
 ("default"))) via NAPI_EXTERN in the vendored headers, and the
-5 host entries carry it on their definitions (create/destroy in
+6 host entries carry it on their definitions (create/destroy/set_version in
 NodeApiEnv.cpp, pending-module helpers in NodeApiHost.cpp), so
 exactly those survive. Everything else provider-owned
 (nodeapi::* C++ internals, NodeApi* helpers,
@@ -61,7 +61,14 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common
 
-HOST_API = {"chakra_nodeapi_create_env", "chakra_nodeapi_destroy_env", "chakra_nodeapi_get_pending_module", "chakra_nodeapi_pending_module_count", "chakra_nodeapi_run_pending_registrations"}
+HOST_API = {
+    "chakra_nodeapi_create_env",
+    "chakra_nodeapi_destroy_env",
+    "chakra_nodeapi_get_pending_module",
+    "chakra_nodeapi_pending_module_count",
+    "chakra_nodeapi_run_pending_registrations",
+    "chakra_nodeapi_set_module_api_version",
+}
 # Replaceable operator new/delete family bundled by Zig's static
 # libc++ (see module docstring). Only this family is filtered; every
 # other __Z* (nodeapi::*, NodeApiScopes::*) still counts as extra.
@@ -182,8 +189,8 @@ def self_test() -> int:
     # Inventory parser sees only the Inventory section.
     import gen_nodeapi_exports as gen
     from pathlib import Path
-    bad += report("inventory parse sees 145",
-                  len(gen.parse_inventory(Path(repo_root()) / "doc" / "node-api-inventory.md")) == 145)
+    bad += report("inventory parse sees 155",
+                  len(gen.parse_inventory(Path(repo_root()) / "doc" / "node-api-inventory.md")) == 155)
 
     print("check_nodeapi self-test: %s"
           % ("ALL NEGATIVE CONTROLS BEHAVE" if bad == 0

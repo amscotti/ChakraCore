@@ -8,12 +8,11 @@
 Parses every ``NAPI_EXTERN`` declaration whose name matches
 ``(napi_|node_api_)*`` in the vendored headers under ``include/nodeapi/``
 (excluding the ``NAPI_EXTERN`` macro definitions themselves), filters to
-``NAPI_VERSION=8`` visibility (excluding ``#ifdef NAPI_EXPERIMENTAL``
-and ``#if NAPI_VERSION >= 9/10`` blocks), and writes
-``doc/node-api-inventory.md``.
+``NAPI_VERSION=10`` visibility (excluding ``#ifdef NAPI_EXPERIMENTAL``
+blocks), and writes ``doc/node-api-inventory.md``.
 
-Plan: doc/node-api-plan.md N0.1. Expected counts re-derived here:
-115 symbols from ``js_native_api.h`` + 30 from ``node_api.h`` = 145 at v8.
+Plan: doc/node-api-plan.md N0.1 / Q1.1. Expected counts re-derived here:
+123 symbols from ``js_native_api.h`` + 32 from ``node_api.h`` = 155 at v10.
 
 Usage:
     python3 tools/nodeapi/gen_inventory.py          # regenerate inventory
@@ -53,10 +52,16 @@ GROUP_MAP = {
     "napi_create_string_utf8": "A1",
     "napi_create_string_utf16": "A1",
     "napi_create_string_latin1": "A1",
+    "node_api_create_external_string_latin1": "A1",
+    "node_api_create_external_string_utf16": "A1",
+    "node_api_create_property_key_latin1": "A1",
+    "node_api_create_property_key_utf8": "A1",
+    "node_api_create_property_key_utf16": "A1",
     "napi_get_value_string_utf8": "A1",
     "napi_get_value_string_utf16": "A1",
     "napi_get_value_string_latin1": "A1",
     "napi_create_symbol": "A1",
+    "node_api_symbol_for": "A1",
     "napi_create_date": "A1",
     "napi_get_date_value": "A1",
     "napi_create_bigint_int64": "A1",
@@ -131,9 +136,11 @@ GROUP_MAP = {
     "napi_throw_error": "A4",
     "napi_throw_type_error": "A4",
     "napi_throw_range_error": "A4",
+    "node_api_throw_syntax_error": "A4",
     "napi_create_error": "A4",
     "napi_create_type_error": "A4",
     "napi_create_range_error": "A4",
+    "node_api_create_syntax_error": "A4",
     "napi_get_and_clear_last_exception": "A4",
     "napi_is_exception_pending": "A4",
     # A5 Binary
@@ -161,9 +168,11 @@ GROUP_MAP = {
     "napi_module_register": "B1",
     "napi_fatal_error": "B1",
     "napi_fatal_exception": "B1",
+    "node_api_get_module_file_name": "B1",
     # B2 Buffer
     "napi_create_buffer": "B2",
     "napi_create_external_buffer": "B2",
+    "node_api_create_buffer_from_arraybuffer": "B2",
     "napi_create_buffer_copy": "B2",
     "napi_is_buffer": "B2",
     "napi_get_buffer_info": "B2",
@@ -201,15 +210,15 @@ HEADER_FILES = ["js_native_api.h", "js_native_api_types.h", "node_api.h", "node_
 # they contribute 0 declarations (and to keep "every header" literal).
 API_HEADERS = ["js_native_api.h", "node_api.h"]
 
-# Plan expectation (§1.1): 115 + 30 = 145 at NAPI_VERSION=8.
-EXPECTED_JS = 115
-EXPECTED_NODE = 30
+# Plan expectation (§1.1 / Q1.1): 123 + 32 = 155 at NAPI_VERSION=10.
+EXPECTED_JS = 123
+EXPECTED_NODE = 32
 
-# Macros considered defined when evaluating visibility at NAPI_VERSION=8
+# Macros considered defined when evaluating visibility at NAPI_VERSION=10
 # with NAPI_EXPERIMENTAL undefined and NODE_API_NO_EXTERNAL_BUFFERS_ALLOWED
 # undefined (provider never defines either; see plan §1.1/PR-2).
 DEFINED_TRUE = {"NAPI_VERSION", "NAPI_VERSION_EXPERIMENTAL"}
-NAPI_VERSION = 8
+NAPI_VERSION = 10
 
 _DECL_RE = re.compile(
     r"NAPI_EXTERN\s+(?:NAPI_NO_RETURN\s+)?[\w\*]+\s+NAPI_CDECL\s+"
@@ -223,7 +232,7 @@ def _eval_ifdef(macro: str) -> bool:
 
 
 def _eval_if_expr(expr: str) -> bool:
-    """Evaluate a ``#if`` expression at NAPI_VERSION=8.
+    """Evaluate a ``#if`` expression at NAPI_VERSION=10.
 
     Unknown identifiers evaluate to 0. If evaluation fails, default to
     True (visible) so an unrecognised guard never silently drops a
@@ -396,33 +405,32 @@ def render_inventory(visible, excluded, totals):
     out.append("# Node-API inventory (generated)")
     out.append("")
     out.append("Generated from the vendored Node 22.22.3 headers in")
-    out.append("`include/nodeapi/` at `NAPI_VERSION=8` by")
+    out.append(f"`include/nodeapi/` at `NAPI_VERSION={NAPI_VERSION}` by")
     out.append("`tools/nodeapi/gen_inventory.py`. Do not edit by hand —")
     out.append("regenerate with `python3 tools/nodeapi/gen_inventory.py`.")
-    out.append("Normative source: `doc/node-api-plan.md` §4 (plan §1.1 counts).")
+    out.append("Normative source: `doc/node-api-plan.md` §4 (Q1.1 v10 counts).")
     out.append("")
     out.append("## Summary")
     out.append("")
     out.append(f"- `js_native_api.h`: {js_visible} symbols visible at "
-               f"`NAPI_VERSION=8` ({js_total} total declarations; "
+               f"`NAPI_VERSION={NAPI_VERSION}` ({js_total} total declarations; "
                f"{len(js_excl)} excluded: {breakdown(js_excl)}).")
     out.append(f"- `node_api.h`: {node_visible} symbols visible at "
-               f"`NAPI_VERSION=8` ({node_total} total declarations; "
+               f"`NAPI_VERSION={NAPI_VERSION}` ({node_total} total declarations; "
                f"{len(node_excl)} excluded: {breakdown(node_excl)}).")
-    out.append(f"- Provider target at v8: **{js_visible + node_visible} symbols** "
+    out.append(f"- Provider target at v{NAPI_VERSION}: **{js_visible + node_visible} symbols** "
                f"(expected {EXPECTED_JS} + {EXPECTED_NODE} = "
                f"{EXPECTED_JS + EXPECTED_NODE}).")
     out.append("")
     out.append("Visibility rule: a declaration is listed iff it is outside "
-               "`NAPI_EXPERIMENTAL` blocks and outside `#if NAPI_VERSION >= 9/10` "
-               "blocks, with `NAPI_EXPERIMENTAL` undefined and "
+               "`NAPI_EXPERIMENTAL` blocks, with `NAPI_EXPERIMENTAL` undefined and "
                "`NODE_API_NO_EXTERNAL_BUFFERS_ALLOWED` undefined "
                "(the provider never defines it, so "
                "`napi_create_external_arraybuffer` and "
                "`napi_create_external_buffer` are included). "
-               "`#if NAPI_VERSION >= 2/3/4/5/6/7/8` blocks are included at v8.")
+               "`#if NAPI_VERSION >= 2/3/4/5/6/7/8/9/10` blocks are included at v10.")
     out.append("")
-    out.append(f"## Inventory ({len(visible_sorted)} symbols at `NAPI_VERSION=8`)")
+    out.append(f"## Inventory ({len(visible_sorted)} symbols at `NAPI_VERSION={NAPI_VERSION}`)")
     out.append("")
     out.append("| Symbol | Header | Group |")
     out.append("|---|---|---|")
@@ -430,7 +438,7 @@ def render_inventory(visible, excluded, totals):
         group = GROUP_MAP.get(name, "?unmapped?")
         out.append(f"| `{name}` | `{header}` | {group} |")
     out.append("")
-    out.append("## Excluded at `NAPI_VERSION=8` (for audit)")
+    out.append(f"## Excluded at `NAPI_VERSION={NAPI_VERSION}` (for audit)")
     out.append("")
     out.append("| Symbol | Header | Reason |")
     out.append("|---|---|---|")
@@ -530,10 +538,10 @@ def main():
 
     js_visible = totals["js_native_api.h"][1]
     node_visible = totals["node_api.h"][1]
-    print(f"js_native_api.h: {js_visible} visible at NAPI_VERSION=8 "
+    print(f"js_native_api.h: {js_visible} visible at NAPI_VERSION={NAPI_VERSION} "
           f"({totals['js_native_api.h'][0]} total, "
           f"{len(totals['js_native_api.h'][2])} excluded)")
-    print(f"node_api.h: {node_visible} visible at NAPI_VERSION=8 "
+    print(f"node_api.h: {node_visible} visible at NAPI_VERSION={NAPI_VERSION} "
           f"({totals['node_api.h'][0]} total, "
           f"{len(totals['node_api.h'][2])} excluded)")
     print(f"total: {len(visible)} symbols "
