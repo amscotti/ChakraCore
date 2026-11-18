@@ -4,11 +4,11 @@
 [![Licensed under the MIT License](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/Microsoft/ChakraCore/blob/master/LICENSE.txt)
 [![PR's Welcome](https://img.shields.io/badge/PRs%20-welcome-brightgreen.svg)](#contribute)
 
-ChakraCore is a compact, embeddable JavaScript and WebAssembly engine with a flat C API (`JsRT`) and a separate Node-API v8 addon provider (`libChakraNodeApi`). On `modernize/baseline`, it builds hermetically with Zig `0.17.0` on **macOS ARM64** and **Linux x64** (`~5.3 MB` release package, `98.89%` certified ES2025 edition conformance on macOS ARM64, 3-tier JIT + concurrent GC, WASM multi-value + SIMD JIT).
+ChakraCore is a compact, embeddable JavaScript and WebAssembly engine with a flat C API (`JsRT`) and a separate Node-API v10 addon provider (`libChakraNodeApi` on `modernize/phase4`; v8 on `modernize/baseline`). On `modernize/baseline`, it builds hermetically with Zig `0.17.0` on **macOS ARM64** and **Linux x64** (`~5.3 MB` release package, `98.89%` certified ES2025 edition conformance on macOS ARM64, 3-tier JIT + concurrent GC, WASM multi-value + SIMD JIT).
 
 ## Project Direction: The Embeddable JIT Sweet Spot
 
-This fork targets the middle ground between interpreter-only embeds and heavyweight browser engines: sub-minute Zig builds, compact binaries, flat C ABIs (`JsRT` + `libChakraNodeApi`) with zero `v8.h` shims, multi-tier x64/ARM64 JIT + WASM SIMD, and optional Zig leaf/host integrations outside the C++ engine core. See [doc/vision-and-roadmap.md](doc/vision-and-roadmap.md) for the Phase-4 roadmap (Node-API v9/v10, ES2025/ES2026 quick wins, `Z1` Base64/Hex Zig C-ABI wedge, modern `Intl`, and a standalone Zig + `libuv` runtime host) and [doc/modernization-plan.md](doc/modernization-plan.md) for verified gates.
+This fork targets the middle ground between interpreter-only embeds and heavyweight browser engines: sub-minute Zig builds, compact binaries, flat C ABIs (`JsRT` + `libChakraNodeApi`) with zero `v8.h` shims, multi-tier x64/ARM64 JIT + WASM SIMD, and optional Zig leaf/host integrations outside the C++ engine core. See [doc/vision-and-roadmap.md](doc/vision-and-roadmap.md) for the Phase-4 roadmap (`Q1.1` Node-API v9/v10 + multi-addon support landed on `modernize/phase4`; remaining tracks cover ES2025/ES2026 quick wins, `Z1` Base64/Hex Zig C-ABI wedge, modern `Intl`, and a standalone Zig + `libuv` runtime host) and [doc/modernization-plan.md](doc/modernization-plan.md) for verified gates.
 
 ## Upstream History
 
@@ -89,29 +89,37 @@ Alternatively, if you are using the [vcpkg](https://github.com/Microsoft/vcpkg/)
 
 ## Node-API provider (`libChakraNodeApi`)
 
-ChakraCore on this branch can host Node-API addons through a separate
-shared library, `libChakraNodeApi`, implemented on ChakraCore's JsRT C
-API. The provider **implements the Node-API v8 engine surface
-(`js_native_api.h`) plus the plan §4 Table B functions under the §3.2 host
+ChakraCore on this branch can host multiple Node-API addons in one
+process through a separate shared library, `libChakraNodeApi`,
+implemented on ChakraCore's JsRT C API. The provider **implements the
+Node-API v10 engine surface (`js_native_api.h`, 123 symbols) plus the
+plan §4 Table B functions (`node_api.h`, 32 symbols) under the §3.2 host
 contract**. This does not provide a Node.js runtime: there is no
 `require`/CommonJS resolution, `process`, Node built-ins, timers, a
 `node` executable, or npm, and the provider must never be described as
 Node runtime compatibility. Addons requesting `NAPI_VERSION` >
-8 are rejected at load; v9/v10 symbols are absent. (Planned Phase-4 tracks for
-additive `NAPI_VERSION=9/10` exports [`Q1.1`] and a separate Zig + `libuv` host
-runtime [`H1`] are documented in
+10 (including `NAPI_VERSION_EXPERIMENTAL`) are rejected at load.
+(`Q1.1` additive `NAPI_VERSION=9/10` exports and multi-addon registry
+support landed on `modernize/phase4`; a separate Zig + `libuv` host
+runtime [`H1`] is documented in
 [doc/vision-and-roadmap.md](doc/vision-and-roadmap.md).)
 
 Known non-conformances (see [doc/node-api-receipt.md](doc/node-api-receipt.md) for the
 probe-backed record):
 
 - No JS `Buffer` global. Provider Buffers are `Uint8Array` views
-  marked by a provider-private symbol (`napi_is_buffer` checks the
-  marker); `typeof Buffer === 'undefined'`.
+  marked by a per-context provider-private symbol (shared across
+  coexisting `napi_env` instances on the same `(runtime, context)` so
+  cross-addon `napi_is_buffer` checks pass); `typeof Buffer ===
+  'undefined'`.
 - `Float16Array` (JS-created) returns `napi_generic_failure` in
-  `napi_get_typedarray_info` because `NAPI_VERSION=8` defines no float16
+  `napi_get_typedarray_info` because `NAPI_VERSION=10` defines no float16
   typed-array enum value. (`BigInt64Array` / `BigUint64Array` are wired
   directly through Phase-3 JsRT.)
+- External Latin-1 / UTF-16 string creation
+  (`node_api_create_external_string_{latin1,utf16}`) always copies into
+  ChakraCore's Recycler string heap (`*copied = true`) and invokes the
+  finalizer synchronously.
 - Async work / thread-safe functions / `napi_get_uv_event_loop`
   return `napi_generic_failure` unless the host injects the §3.2
   scheduling/uv services (the tree's `tools/nodeapi/ch-nodeapi` test host
@@ -126,7 +134,7 @@ Build and gate the provider on macOS arm64 (Zig 0.17.0 via mise):
 mise exec -- zig build libChakraNodeApi
 # installs lib/libChakraNodeApi.dylib + include/nodeapi/ (test profile)
 mise exec -- zig build check-nodeapi
-# verifies exactly 145 napi_* + 5 host = 150 exports (fails on missing/extra)
+# verifies exactly 155 napi_* + 6 host = 161 exports (fails on missing/extra)
 mise exec -- zig build check-nodeapi -Dprofile=jit
 ```
 
@@ -134,9 +142,9 @@ The exports gate (`check-nodeapi`) is a separate step on purpose
 (plan PR-10): it runs for the shared profiles (`test`, `jit`, and
 `release-shared`) and is not part of `zig build check`, so engine regression
 pins in `tools/build/gate_counts.json` are untouched. A from-scratch consumer
-(`zig cc -DNAPI_VERSION=8 -I<installed>/include/nodeapi`, linking the
+(`zig cc -DNAPI_VERSION=10 -I<installed>/include/nodeapi`, linking the
 built provider, run through `tools/nodeapi/ch-nodeapi` — no Node
-executable) is the packaging proof; macOS arm64 probe tallies (18 probes +
+executable) is the packaging proof; macOS arm64 probe tallies (19 probes +
 `tools/nodeapi/run_probe.sh`, stress, and conformance matrices), the consumer
 proof log, and the Linux x64 status (wired in `tools/build/linux.zig` and
 `.github/workflows/zig-linux.yml`, awaiting native Linux execution) live in

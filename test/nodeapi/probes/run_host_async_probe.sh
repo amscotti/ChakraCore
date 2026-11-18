@@ -26,7 +26,7 @@ run_zig() {
 
 if [ "$(uname -s)" = "Linux" ]; then
   TARGET="x86_64-linux-gnu"
-  CXXFLAGS="-target $TARGET -std=gnu++17 -O2 -fPIC -shared -DNAPI_VERSION=8 -Iinclude/nodeapi -isystem /usr/include"
+  CXXFLAGS="-target $TARGET -std=gnu++17 -O2 -fPIC -shared -DNAPI_VERSION=10 -Iinclude/nodeapi -isystem /usr/include"
   PROVIDER="$REPO/zig-out/lib/libChakraNodeApi.so"
   HOST="$REPO/zig-out/bin/ch-nodeapi"
 else
@@ -36,7 +36,7 @@ else
     echo "run_host_async_probe: cannot locate macOS SDK (xcrun failed)" >&2
     exit 1
   fi
-  CXXFLAGS="-target $TARGET --sysroot $SDK -std=gnu++17 -O2 -fPIC -shared -DNAPI_VERSION=8 -Iinclude/nodeapi -undefined dynamic_lookup"
+  CXXFLAGS="-target $TARGET --sysroot $SDK -std=gnu++17 -O2 -fPIC -shared -DNAPI_VERSION=10 -Iinclude/nodeapi -undefined dynamic_lookup"
   PROVIDER="$REPO/zig-out/lib/libChakraNodeApi.dylib"
   HOST="$REPO/zig-out/bin/ch-nodeapi"
 fi

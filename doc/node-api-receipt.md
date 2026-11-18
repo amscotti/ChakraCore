@@ -3,11 +3,11 @@
 > §9 is the N5.4 stress/teardown campaign (owner: N5.4). §§1–8 are
 > the N5.5 packaging slice (owner: N5.5).
 
-Owner: N5.5 (updated 2026-11-16 at Stage 3 integration `c24266598`).
-Status: **G5 + Stage 2/3 hardening green on macOS arm64 (18/18 probe runners +
-`tools/nodeapi/run_probe.sh`, stress 5x, `run_matrix.py` 46/23/0,
+Owner: N5.5 / Q1.1 (updated for `modernize/phase4` Node-API v9/v10 + multi-addon expansion; baseline history at `c24266598` preserved in §§1-13).
+Status: **Q1.1 v10 + multi-addon green on macOS arm64 (`161` exports, 19/19 probe runners +
+`tools/nodeapi/run_probe.sh`, stress 5x, `run_matrix.py` 52/17/0,
 `run_node_addon_api_matrix.py` 52/61/6); Linux x64 WIRED (`.github/workflows/zig-linux.yml`
-+ `tools/build/linux.zig`), NOT RUN locally** (see §12 and §13). This receipt
++ `tools/build/linux.zig`), NOT RUN locally** (see §12, §13, and §14). This receipt
 satisfies the PR-1 wording gate (PR-1 in `doc/node-api-plan.md` §2.2): the only
 public claim is the engine surface plus Table B under the §3.2 host contract.
 It never claims a Node runtime.
@@ -23,15 +23,19 @@ Toolchain (recorded 2026-11-12, macOS arm64 host):
 - Target `aarch64-macos.26.0` (`apple_m1` CPU model), MacOSX SDK `26.5`
   via `xcrun --show-sdk-path`, system ICU `/opt/homebrew/opt/icu4c/include`.
 - Vendored headers: Node `22.22.3` (`include/nodeapi/`,
-  `include/nodeapi/MANIFEST.md`), provider and addons built with
-  `-DNAPI_VERSION=8` explicitly (PR-2). `NODE_API_NO_EXTERNAL_BUFFERS_ALLOWED`
-  is never defined, so `napi_create_external_arraybuffer` and
-  `napi_create_external_buffer` are in the surface.
+  `include/nodeapi/MANIFEST.md`), provider and v10 probes/addons built with
+  `-DNAPI_VERSION=10` explicitly (`modernize/baseline` / pre-Q1.1 baseline used
+  `-DNAPI_VERSION=8`; `run_matrix.py` preserves explicit per-target `NAPI_VERSION`
+  overrides such as `test_pending_exception`'s `NAPI_VERSION=9`).
+  `NODE_API_NO_EXTERNAL_BUFFERS_ALLOWED` is never defined, so
+  `napi_create_external_arraybuffer` and `napi_create_external_buffer` remain in
+  the surface.
 - Provider: `libChakraNodeApi` (plan PR-3), shared profiles only
   (`test`, `jit`; `release-shared` also carries the library; `debug-static`
   has no provider step by design). Private host API:
-  `lib/NodeApi/NodeApiHostApi.h` §3.2 (create/destroy env) plus the
-  N4.1 pending-module helpers in `lib/NodeApi/NodeApiHost.h`.
+  `lib/NodeApi/NodeApiHostApi.h` §3.2 (create/destroy env, host services, and
+  `chakra_nodeapi_set_module_api_version`) plus the N4.1/Q1.1 pending-module
+  helpers in `lib/NodeApi/NodeApiHost.h`.
 
 ---
 
@@ -40,23 +44,20 @@ Toolchain (recorded 2026-11-12, macOS arm64 host):
 The allowlist is generated, not hand-maintained:
 
 - Normative inventory: `doc/node-api-inventory.md`, parsed by
-  `tools/build/gen_nodeapi_exports.py` — exactly **145** symbols at
-  `NAPI_VERSION=8` (115 `js_native_api.h` + 30 `node_api.h`; generator
-  exits 1 on any other count).
-- `tools/build/gen_nodeapi_exports.py` `WAVE1_LANDED` now holds all
-  **145** inventory symbols (the name is historical; the list is the
-  full 145, Waves 1–4). Verified: `inventory 145`, `WAVE1_LANDED 145
-  unique`, `landed − inventory = []`, `inventory − landed = []`.
-- Host entries (`HOST_API`, 5): `chakra_nodeapi_create_env`,
-  `chakra_nodeapi_destroy_env` (plan §3.2 core) plus
-  `chakra_nodeapi_get_pending_module`,
-  `chakra_nodeapi_pending_module_count`,
-  `chakra_nodeapi_run_pending_registrations` (N4.1 §3.2 extension).
-  The older "full 145 + 2" wording is stale: the final surface is
-  **145 napi_* + 5 host = 150** exported symbols, not 147. The
-  generator/checker comment headers were updated to say so (no list
-  change: `nodeapi_exports.txt` regenerates byte-identical apart from
-  its header comment, still 150 symbols).
+  `tools/build/gen_nodeapi_exports.py` — **155** symbols on `modernize/phase4` Q1.1 at
+  `NAPI_VERSION=10` (`123` `js_native_api.h` + `32` `node_api.h`; up from the
+  historical `145` v8 baseline = `115` + `30`; generator exits 1 on any other
+  count).
+- `tools/build/gen_nodeapi_exports.py` `WAVE1_LANDED` holds all
+  **155** inventory symbols (the name is historical; the list is the
+  full `NAPI_VERSION=10` surface across Waves 1–4 + Q1.1).
+- Host entries (`HOST_API`, 6 on `modernize/phase4` Q1.1):
+  `chakra_nodeapi_create_env`, `chakra_nodeapi_destroy_env` (plan §3.2 core),
+  `chakra_nodeapi_get_pending_module`, `chakra_nodeapi_pending_module_count`,
+  `chakra_nodeapi_run_pending_registrations` (N4.1 §3.2 extension), plus
+  `chakra_nodeapi_set_module_api_version` (Q1.1 per-addon version negotiation).
+  Current `modernize/phase4` allowlist: **155 napi_*/node_api_* + 6 host = 161**
+  exported symbols (`modernize/baseline` historical snapshot below stays `145 + 5 = 150`).
 
 Commands (gate-locked, run 2026-11-12):
 
@@ -245,9 +246,10 @@ scope → `napi_register_module_v1` → driver + host pump).
 
 ## 4. PR-1 claim (what IS supported)
 
-**The provider implements the Node-API v8 engine surface
-(`js_native_api.h`) plus the plan §4 Table B functions under the
-§3.2 host contract.**
+**The provider implements the Node-API v10 engine surface
+(`js_native_api.h`, 123 symbols) plus the plan §4 Table B functions
+(`node_api.h`, 32 symbols) under the §3.2 host contract.** (On
+`modernize/baseline`, this was the v8 115 + 30 = 145 surface.)
 
 Never claim Node runtime compatibility. In particular the provider
 does **not** provide `require`/CommonJS resolution, `process`, Node
@@ -257,21 +259,25 @@ are real exactly where the host injects the §3.2 services, and
 `napi_generic_failure` (with a recorded last error) where they
 do not (D7 — never fake success).
 
-Table A (`js_native_api.h`, 115 at v8): value creation/getters,
-coercion/type checks, symbols, Date and BigInt (string-mediated
-per PR-9, §4.3 below), objects/arrays/properties/descriptors,
-functions/callbacks, errors, binary (ArrayBuffer/TypedArray/DataView),
-promises, script, version, external memory, scopes/refs/wrap/tags/
-instance data. All 115 export and are probed (probe tallies in §5).
+Table A (`js_native_api.h`, 123 at v10): value creation/getters,
+coercion/type checks, symbols (`napi_create_symbol`, `node_api_symbol_for`),
+Date and BigInt (string-mediated per PR-9, §4.3 below),
+objects/arrays/properties/descriptors/property keys (`node_api_create_property_key_*`),
+functions/callbacks, errors & syntax errors (`node_api_{create,throw}_syntax_error`),
+external strings (`node_api_create_external_string_{latin1,utf16}` via Recycler copy),
+binary (ArrayBuffer/TypedArray/DataView), promises, script, version,
+external memory, scopes/refs/wrap/tags/instance data. All 123 export
+and are probed (probe tallies in §5 and §14).
 
-Table B (`node_api.h`, 30 at v8) under the §3.2 host contract:
-registration/fatal (pending-module registry, fatal routing),
-Buffer (PR-6 marker design, §4), async context/callback scopes
-(bookkeeping + `make_callback`), async work + uv (services-gated),
-thread-safe functions (services-gated), cleanup hooks (sync in the
-lifetime kernel; async completion via host pump), `napi_get_node_version`
-(provider version struct, NOT a Node runtime version). At Stage 2/3,
-`tools/nodeapi/ch-nodeapi` now injects real async host scheduling
+Table B (`node_api.h`, 32 at v10) under the §3.2 host contract:
+registration/fatal (indexed pending-module registry, module filename URL
+`node_api_get_module_file_name`, fatal routing),
+Buffer (PR-6 + Q1.1 per-context marker design + `node_api_create_buffer_from_arraybuffer`),
+async context/callback scopes (bookkeeping + `make_callback`), async work + uv
+(services-gated), thread-safe functions (services-gated), cleanup hooks (sync in
+the lifetime kernel; async completion via host pump), `napi_get_node_version`
+(provider version struct, NOT a Node runtime version). At Stage 2/3 + Q1.1,
+`tools/nodeapi/ch-nodeapi` injects real async host scheduling
 services (`post_task`, `post_work`, `cancel_work`, `ref_loop`,
 `unref_loop`, and `host_manages_promise_queue = true`) and enforces
 `--pump-timeout-ms` (`uv_loop` remains `NULL`, so `napi_get_uv_event_loop`
@@ -280,25 +286,28 @@ services (`run_async_probe.sh`) still verify that async-work/TSFN/uv
 return `napi_generic_failure` when services are absent (§5).
 
 Test host: `tools/nodeapi/ch-nodeapi` (provider `RTLD_GLOBAL`,
-addon `RTLD_LOCAL`, version > 8 rejected, fresh exports object,
-return-replaces-exports, `__exports` global, host `print`,
-bounded promise + host-task pump — PR-8 `host_manages_promise_queue`
-handshake prevents provider clobbering, and the provider reclaims its
-own per-context `PromiseQueue*` on last env destroy).
+addon `RTLD_LOCAL`, repeatable `--addon` multi-addon loading across v1..v10
+plus `napi_module_register`, version > 10 / `NAPI_VERSION_EXPERIMENTAL`
+rejected, fresh exports object per addon, return-replaces-exports,
+`__exports` global, host `print`, bounded promise + host-task pump — PR-8
+`host_manages_promise_queue` handshake prevents provider clobbering, and
+the provider reclaims its own per-context `PromiseQueue*` on last env destroy).
 
 ---
 
 ## 5. Known non-conformances (all probed; NOT "0 failures with
 unexplained skips")
 
-- **No JS `Buffer` global (PR-6).** `napi_create_buffer*` produce
-  `Uint8Array` views marked Buffer via a provider-private per-env
-  Symbol; `napi_is_buffer` is the marker check. `typeof Buffer ===
-  'undefined'` and `instanceof Buffer` throws `ReferenceError` on
-  the provider. No pooling, no `Buffer.prototype` methods. Addons
-  needing `require('buffer')` are runtime scope (§0 C). Probed:
-  `run_buffers_probe.sh` (per profile, incl. the two `ReferenceError`
-  checks).
+- **No JS `Buffer` global (PR-6 + Q1.1 cross-addon marker).**
+  `napi_create_buffer*` and `node_api_create_buffer_from_arraybuffer` produce
+  `Uint8Array` views marked Buffer via a per-context provider-private Symbol
+  (shared across coexisting `napi_env` instances on the same `(runtime, context)`
+  so cross-addon `napi_is_buffer` / `napi_get_buffer_info` checks succeed);
+  `napi_is_buffer` is the marker check. `typeof Buffer === 'undefined'` and
+  `instanceof Buffer` throws `ReferenceError` on the provider. No pooling, no
+  `Buffer.prototype` methods. Addons needing `require('buffer')` are runtime
+  scope (§0 C). Probed: `run_buffers_probe.sh` and `run_v10_multi_addon_probe.sh`
+  (per profile, incl. the `ReferenceError` checks and cross-env teardown).
 - **BigInt64/BigUint64 typed arrays: SUPPORTED in Stage 3 (`c24266598`); `Float16Array` stays `napi_generic_failure`.**
   Phase-3 JsRT exposes `JsArrayTypeBigInt64`, `JsArrayTypeBigUint64`, and
   `JsArrayTypeFloat16` (`lib/Jsrt/ChakraCommon.h:533-541`). At `c24266598`,
@@ -307,10 +316,19 @@ unexplained skips")
   `JsCreateTypedArray`, `JsGetTypedArrayInfo`, and `JsGetTypedArrayStorage`
   (removing the old v1 rejection). Only JS-created `Float16Array`
   (`JsArrayTypeFloat16`) still returns `napi_generic_failure` from
-  `napi_get_typedarray_info` because `NAPI_VERSION=8` defines no float16
+  `napi_get_typedarray_info` because `NAPI_VERSION=10` still defines no float16
   `napi_typedarray_type` enum member. Probed: `run_binary_probe.sh`
   (`BINARY_PROBE: PASS (308/308)` per profile), `test_typedarray/test.js`,
   and `node-addon-api` `test/typedarray*.js` (all PASS).
+- **External strings (`node_api_create_external_string_{latin1,utf16}`) always copy (`*copied = true`).**
+  ChakraCore's `JsCreateString*` copies characters into the Recycler string heap
+  rather than pinning an external Latin-1/UTF-16 C buffer, so both v10 helpers
+  copy the string, set `*copied = true` when non-NULL, and invoke
+  `finalize_callback` synchronously once before returning `napi_ok` (0 calls on
+  invalid arguments). Vendored `js-native-api/test_string/test.js` explicitly
+  asserts `!copied` on its external-string check (`test_string.c:112`) and is
+  honestly classified `provider-gap`; `js-native-api/test_string/test_null.js`
+  PASSes, and `v10_multi_addon_probe.cpp` verifies both string helpers end-to-end.
 - **Async without host services → `napi_generic_failure` (while `ch-nodeapi` now supplies services).**
   `napi_create_async_work`, `napi_queue/cancel/delete_async_work`,
   `napi_get_uv_event_loop`, `napi_create_threadsafe_function`,
@@ -333,17 +351,15 @@ unexplained skips")
   `napi_bigint`, boxed `Object(1n)` → `napi_object` (tag alone is
   ambiguous, identity splits it); bigint getters on a boxed value
   return `napi_bigint_expected`. Probed: `run_coerce_probe.sh`
-  430/430 includes the boxed table and the three boxed-getter
+  434/434 includes the boxed table and the three boxed-getter
   rejections. Earlier "documented divergence" wording in that
   probe is now the fixed expectation.
-- **v9/v10 symbols absent by design (D1).** The host rejects addons
-  requesting `NAPI > 8` before registration; v9/v10/experimental
-  (`node_api_symbol_for`, syntax-error pair,
-  `node_api_get_module_file_name`, external-string/property-key
-  creators, `node_api_create_buffer_from_arraybuffer`, SAB pair,
-  `node_api_post_finalizer`) never enter the inventory or the
-  allowlist (generator parses the Inventory section only; adding a
-  v9 symbol to the allowlist fails the inventory gate, §1).
+- **Experimental symbols remain excluded (`NAPI_EXPERIMENTAL` not enabled); v9/v10 landed in Q1.1.**
+  Pre-Q1.1 (`modernize/baseline`, `NAPI_VERSION=8`) excluded v9/v10 symbols by
+  design. In `modernize/phase4` Q1.1 (§14), all 10 `NAPI_VERSION=9/10` exports
+  landed and addons requesting `1..10` are accepted, while versions `> 10`
+  (including `NAPI_VERSION_EXPERIMENTAL = 0x7fffffff`) and the 3 experimental
+  declarations in `js_native_api.h` stay rejected/excluded.
 - **`napi_get_node_version` returns the provider version**, not a
   Node runtime version (B7). **`napi_run_script`** is a single
   `JsRun` (global scope, not module scope) per N3.5. Node error
@@ -382,12 +398,13 @@ Tallies (checks per profile; `test` and `jit` identical where PASS):
 | wrap (N3.2/N3.3) | 211 | PASS | PASS |
 
 Total (historical 2026-11-12 14-probe table above): 3117 checks per profile
-(6234 across both). **Current HEAD (`c24266598`, 2026-11-16) runs 18 probe
-runners in `test/nodeapi/probes/run_*_probe.sh` plus `tools/nodeapi/run_probe.sh`
-— all 18 + `run_probe.sh` PASS across both `test` and `jit` profiles** (adding
-`scopes`, `teardown`, `env_addr_reuse`, and `host_async`, plus expanding
-`binary` to `308/308` with `BigInt64Array`/`BigUint64Array` + `Float16Array`
-and expanding `promise_script` for A8-3 `PromiseQueue*` reclamation; see §13).
+(6234 across both). Historical Stage 3 (`c24266598`) ran 18 probe runners;
+**current `modernize/phase4` Q1.1 runs 19 probe runners in
+`test/nodeapi/probes/run_*_probe.sh` plus `tools/nodeapi/run_probe.sh`
+— all 19 + `run_probe.sh` PASS across both `test` and `jit` profiles**
+(adding `v10_multi_addon_probe` `266/266` + multi-addon `.node` driver verification,
+and expanding `wrap_probe` to `235/235`, `buffers_probe` to `120/120`, and
+`promise_script_probe` to `218` checks at `NAPI_VERSION=10`; see §14).
 
 Runner note (fixed 2026-11-14, F2 lane; was pre-existing, NOT an N5.5
 regression): `run_errors_probe.sh` and `run_host_probe.sh` shared one
@@ -1357,3 +1374,74 @@ Node-API and host boundary findings from the `arch-audit` review:
 | `python3 test/nodeapi/run_matrix.py --verify-manifest` | **PASS** | `manifest OK` |
 | `python3 test/nodeapi/run_matrix.py --suite all --host ch-nodeapi` | **`pass=46 skip=23 fail=0`** | `async_work_promise`, `async_work_thread_safe_function`, `test_typedarray` now PASS |
 | `python3 test/nodeapi/run_node_addon_api_matrix.py --hosts both` | **`pass=52 skip=61 fail=6`** | `node-direct` 29/0; `ch-nodeapi` 23/6 (`typedarray*.js` now PASS; remaining 6 are the PR-12 `test/object/*` V8 error text assertions) |
+
+---
+
+## 14. Q1.1 Node-API v9/v10 & Multi-Addon Expansion (`modernize/phase4`)
+
+Q1.1 promotes `libChakraNodeApi` from `NAPI_VERSION=8` (`150` exports) to
+`NAPI_VERSION=10` (**161 exports**: `155` `napi_*`/`node_api_*` + `6` host),
+upgrades single-addon globals into an indexed multi-addon registry with
+per-context shared `Buffer` markers, and unlocks the vendored Node-API v9/v10
+conformance suites:
+
+1. **Exports gate (`NAPI_VERSION=10`, `161` symbols):**
+   - `doc/node-api-inventory.md` & `tools/build/gen_nodeapi_exports.py`:
+     `123` `js_native_api.h` + `32` `node_api.h` = **`155`** engine/table-B
+     symbols plus **`6`** `HOST_API` entries (adding
+     `chakra_nodeapi_set_module_api_version`).
+   - Added 4 v9 symbols (`node_api_symbol_for`, `node_api_create_syntax_error`,
+     `node_api_throw_syntax_error`, `node_api_get_module_file_name`) and 6 v10
+     symbols (`node_api_create_external_string_latin1`,
+     `node_api_create_external_string_utf16`,
+     `node_api_create_property_key_latin1`,
+     `node_api_create_property_key_utf16`, `node_api_create_property_key_utf8`,
+     `node_api_create_buffer_from_arraybuffer`), while preserving exclusions for
+     the 3 `NAPI_EXPERIMENTAL` declarations.
+2. **Per-addon module API version negotiation & versioned `Closing` status:**
+   - `chakra_nodeapi_set_module_api_version` accepts `1..10` and rejects `0`,
+     `> 10` (including `NAPI_VERSION_EXPERIMENTAL`), `NULL`, and `Closing` envs.
+   - During `Closing`, JS-touching calls return `napi_cannot_run_js` (`v10`),
+     `napi_pending_exception` (`v9`), or `napi_generic_failure` (`<= v8`).
+3. **Weak optional `napi_ref` & finalizer cancellation (`NestedWrap`):**
+   - Optional `out_ref` returned by `napi_wrap` and `napi_add_finalizer` starts
+     weak (`refcount == 0`, does not pin the wrapped object across GC) and
+     `napi_delete_reference(env, out_ref)` before GC cancels the pending
+     finalizer (`wrap_probe` Phase F + Phase L, **235/235**; `v10_multi_addon_probe`
+     NestedWrap suite).
+4. **External strings (`*copied = true` Recycler fallback):**
+   - `node_api_create_external_string_latin1` and
+     `node_api_create_external_string_utf16` copy data into ChakraCore's
+     Recycler string heap, set `*copied = true` when requested, and invoke
+     `finalize_callback` synchronously once on `napi_ok` (0 invocations on invalid
+     arguments). `js-native-api/test_string/test_null.js` PASSes;
+     `js-native-api/test_string/test.js` (`test_string.c:112` asserting
+     `!copied`) is classified `provider-gap`.
+5. **Multi-addon `ch-nodeapi` + cross-addon `Buffer` marker sharing:**
+   - `tools/nodeapi/ch-nodeapi.cpp` supports repeatable `--addon` loading across
+     v9/v10 `NAPI_MODULE_INIT` and deprecated `napi_module_register`, per-env
+     `node_api_get_module_file_name` (`file:///...` URL encoding) and
+     `instance_data`, and LIFO cleanup hooks across envs.
+   - `ContextBufferSymbol` is shared per `(runtime, context)` across coexisting
+     `napi_env` instances so Buffers created in one addon pass `napi_is_buffer`,
+     `napi_get_buffer_info`, and `node_api_create_buffer_from_arraybuffer` in
+     another, and remain valid across partial env teardown until the last env on
+     that context is destroyed.
+6. **Multi-target C matrix runner (`test/nodeapi/run_matrix.py`):**
+   - Bumped `NAPI_VERSION = 10` (`needs-node-api-version>10`), removed v9/v10
+     symbol and v10 driver skips, added `driver_required_targets` + repeatable
+     `--addon` invocation (`test_cannot_run_js`, `nested_wrap`, `test_reference`),
+     and preserved explicit per-target `NAPI_VERSION` defines (`test_pending_exception`).
+
+### 14.1 Verified Q1.1 tallies (`modernize/phase4`, macOS arm64, `NAPI_VERSION=10`)
+
+| Suite / Command | Result | Notes |
+|---|---|---|
+| `python3 tools/build/gen_nodeapi_exports.py --check` | **PASS** | `155` inventory (`123` + `32`), `161` exports (`155` + `6`) |
+| `mise exec -- zig build libChakraNodeApi ch-nodeapi check-nodeapi` (`test` & `jit`) | **PASS** | `161` allowlist symbols (`check-nodeapi` PASS on both profiles) |
+| `tools/nodeapi/run_probe.sh` | **ALL PASS** (`test` + `jit`) | Scopes driver at `NAPI_VERSION=10` |
+| `19/19` `test/nodeapi/probes/run_*_probe.sh` | **ALL PASS** (`test` + `jit`) | Adds `v10_multi_addon` (**266/266** + dynamic 3-addon `MULTI_ADDON_JS: PASS` + LIFO cleanup); updates `wrap` (**235/235**), `buffers` (**120/120**), `promise_script` (**218** checks), `binary` (**308/308**) |
+| `REPEATS=5 sh test/nodeapi/stress/run_stress.sh` | **ALL PASS** (`test` + `jit`) | `gc_churn` 78/78, `env_churn` 1208/1208 (`ver == 10`), `tsfn_teardown` 252 checks (0 fail), `gc_hook` `final=240` |
+| `python3 test/nodeapi/run_matrix.py --verify-manifest` | **PASS** | `manifest OK` |
+| `python3 test/nodeapi/run_matrix.py --suite all --host ch-nodeapi` | **`pass=52 skip=17 fail=0`** | `skip[needs-runtime-global]=10`, `skip[needs-node-api-version>10]=4`, `skip[provider-gap]=3` (`test_string/test.js` + 2 prior); newly PASSing: `test_error`, `test_general`, `test_reference`, `test_cannot_run_js`, `test_string/test_null`, `6_object_wrap` |
+| `python3 test/nodeapi/run_node_addon_api_matrix.py` | **`pass=52 skip=61 fail=6`** | `node-direct` 29/0; `ch-nodeapi` 23/6 (0 unexpected failures beyond the 6 PR-12 `test/object/*` V8 error text diffs) |

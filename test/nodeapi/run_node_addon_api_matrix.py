@@ -10,7 +10,7 @@ Builds a selected subset of the upstream ``node-addon-api`` C++ test suite
 ``2faf3294972dfcb3707fd5e28d451485f19e3dad``; vendored subset under
 ``test/nodeapi/vendor/node-addon-api/``) as per-test addons with
 ``zig c++`` against the vendored Node-API headers at explicit
-``NAPI_VERSION=8`` (no network, no node-gyp), then runs each JS driver
+``NAPI_VERSION=10`` (no network, no node-gyp), then runs each JS driver
 through the ``ch-nodeapi`` provider host (real provider, not differential)
 plus a ``node-direct`` (real Node) differential for comparison.
 
@@ -25,8 +25,8 @@ are no silent skips. Skip taxonomy:
 - ``needs-runtime-global`` — driver needs Node runtime surfaces
   (``child_process`` / ``async_hooks`` / ``worker_threads`` / ``Buffer``
   global / ``semver`` / ``fs-extra`` / ``process.version(s)`` gating).
-- ``needs-node-api-version>8`` — target needs ``NAPI_EXPERIMENTAL`` /
-  SharedArrayBuffer (absent from the v8 provider set).
+- ``needs-node-api-version>10`` — target needs ``NAPI_EXPERIMENTAL`` /
+  SharedArrayBuffer (absent from the v10 provider set).
 - ``provider-gap`` — provider/host surface absent (async-work / TSFN /
   host loop services, build variants, async test bodies whose failure
   cannot be attributed through the host promise pump, upstream harness).
@@ -106,13 +106,13 @@ PROVIDER_PATH = (REPO_ROOT / "zig-out" / "lib" / "libChakraNodeApi.so"
 RESULTS_DIR = NODEAPI_TEST_DIR / "results"
 DEFAULT_RESULTS = RESULTS_DIR / "node-addon-api.json"
 
-NAPI_VERSION = 8
+NAPI_VERSION = 10
 NA_TAG = "v8.9.2"
 NA_COMMIT = "2faf3294972dfcb3707fd5e28d451485f19e3dad"
 
 NEEDS_GC = "needs-gc"
 NEEDS_RUNTIME = "needs-runtime-global"
-NEEDS_VERSION = "needs-node-api-version>8"
+NEEDS_VERSION = "needs-node-api-version>10"
 PROVIDER_GAP = "provider-gap"
 
 # ---------------------------------------------------------------------------
@@ -364,10 +364,10 @@ SKIPS: dict[str, tuple[str, str]] = {
         NEEDS_RUNTIME, "driver is a child-process worker entry"),
     "test/threadsafe_function/threadsafe_function_unref.js": (
         NEEDS_RUNTIME, "driver requires ../napi_child (spawns child node)"),
-    # needs-node-api-version>8: experimental SharedArrayBuffer.
+    # needs-node-api-version>10: experimental SharedArrayBuffer.
     "test/shared_array_buffer.js": (
         NEEDS_VERSION, "SharedArrayBuffer API is NAPI_EXPERIMENTAL "
-        "(node_api_*sharedarraybuffer*), absent at NAPI_VERSION=8"),
+        "(node_api_*sharedarraybuffer*), absent at NAPI_VERSION=10"),
     # provider-gap / sources not vendored: async_worker / TSFN suites.
     # (ch-nodeapi provides post_work/post_task host services; these entries
     # remain skipped here because upstream test sources are not vendored at

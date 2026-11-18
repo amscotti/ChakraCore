@@ -209,7 +209,7 @@ int main() {
                  chakra_nodeapi_test_is_live(env);
       {
         uint32_t ver = 0;
-        if (napi_get_version(env, &ver) != napi_ok || ver != 8)
+        if (napi_get_version(env, &ver) != napi_ok || ver != 10)
           cycle_ok = false;
       }
       if (!stale_ok && stale == nullptr) stale_checks_passed++;

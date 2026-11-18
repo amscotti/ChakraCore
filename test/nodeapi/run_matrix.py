@@ -10,9 +10,10 @@ What this runs
 Every vendored addon target (Node ``test/js-native-api`` at the pinned
 Node release + node-addon-examples ``napi/`` variants) is built with
 ``zig cc`` / ``zig c++`` against the vendored headers in
-``include/nodeapi/`` at explicit ``NAPI_VERSION=8`` (no network, no
-node-gyp, no npm). The built addon (``.node``) is then loaded and its
-JS driver executed, and the outcome is recorded as one JSON record
+``include/nodeapi/`` at explicit ``NAPI_VERSION=10`` (honoring explicit
+per-target/source ``NAPI_VERSION=<n>`` overrides, no network, no
+node-gyp, no npm). The built addon(s) (``.node``) are then loaded and
+the JS driver executed, and the outcome is recorded as one JSON record
 ``{test, platform, status, reason, ...}`` in the results file.
 
 Hosts (in preference order, ``--host auto``)
@@ -49,11 +50,10 @@ Skip taxonomy (plan N0.5, Wave-5 reclassification)
 - ``needs-runtime-global`` — driver needs Node runtime surfaces
   (child_process, worker_threads, require-as, process.*); nothing
   requiring fs/Buffer/process is in the runnable subset (plan task).
-- ``needs-node-api-version>8`` — target needs ``NAPI_VERSION`` 9/10 or
-  ``NAPI_EXPERIMENTAL`` symbols (not in the v8 provider set), including
-  source-level ``#define NAPI_VERSION 9/10`` and v9/v10-only symbols
-  (``node_api_symbol_for``, syntax-error, external-string,
-  property-key), and drivers asserting ``napi_get_version()==10``.
+- ``needs-node-api-version>10`` — target needs ``NAPI_VERSION`` > 10 or
+  ``NAPI_EXPERIMENTAL`` symbols (absent from the v10 provider set),
+  including ``NAPI_EXPERIMENTAL`` SharedArrayBuffer / basic-finalizer /
+  ``node_api_post_finalizer`` targets.
 - ``provider-gap`` — provider/host surface absent (libuv ``<uv.h>`` /
   CMake-only example / unmapped driver).
 - ``needs-gc`` — retained for history; post-N5.1 the host provides
@@ -116,7 +116,7 @@ DEFAULT_RESULTS = RESULTS_DIR / "results.json"
 NODE_VERSION = "22.22.3"
 NODE_COMMIT = "fdfa0ff0dbaf0fbf4d7d6d89a2ab807f3177fa5c"
 EXAMPLES_COMMIT = "1e4f284f30ed0ac40ec216bdf93ab12f726039a3"
-NAPI_VERSION = 8
+NAPI_VERSION = 10
 
 
 def _resolve_tool(env_vars: tuple[str, ...], cmd_name: str) -> str:
@@ -153,7 +153,7 @@ def _resolve_tool(env_vars: tuple[str, ...], cmd_name: str) -> str:
 
 NEEDS_GC = "needs-gc"
 NEEDS_RUNTIME_GLOBAL = "needs-runtime-global"
-NEEDS_VERSION = "needs-node-api-version>8"
+NEEDS_VERSION = "needs-node-api-version>10"
 PROVIDER_GAP = "provider-gap"
 
 # Source-text signals used by the classifier.
@@ -161,22 +161,8 @@ _VERSION_SAB = re.compile(
     r"node_api_(create|is|get)_sharedarraybuffer|"
     r"node_api_create_get_sharedarraybuffer_info")
 _VERSION_SAB_DRIVER = re.compile(r"SharedArrayBuffer")
-# v9/v10-only symbols (present in vendored headers only at NAPI_VERSION>=9/10;
-# absent from the v8 provider set). Sources that reference any of these
-# cannot build or link at NAPI_VERSION=8 even when binding.gyp omits the
-# define (e.g. test_error/test_properties/test_reference use
-# `#define NAPI_VERSION 9` in the .c file itself).
-_VERSION_SYM = re.compile(
-    r"node_api_(symbol_for|create_syntax_error|throw_syntax_error|"
-    r"get_module_file_name|create_external_string|"
-    r"create_property_key|create_buffer_from_arraybuffer)")
 _VERSION_DEFINE_SRC = re.compile(r'#define\s+NAPI_VERSION\s+(\d+)')
 _VERSION_POST_FINALIZER = re.compile(r"node_api_post_finalizer")
-# Driver asserts napi_get_version() == 10 (Node 22's version); the v8
-# provider correctly returns 8 (plan N1.1), so this driver cannot pass
-# without claiming v10. Only test_general/test.js does this.
-_VERSION10_DRIVER = re.compile(
-    r"testGetVersion\(\)[^;\n]*10|getVersion[^;\n]*10")
 # Engine-message / Proxy-invariant divergences (N5.1 triage, not
 # fixable in the provider without editing the engine): drivers that
 # assert exact V8 TypeError text or rely on V8's lenient Proxy
@@ -220,8 +206,16 @@ class Target:
         self.sources = sources  # relative source paths within the test dir
         self.defines = defines  # raw define strings from binding.gyp
 
+    def explicit_napi_version(self) -> int | None:
+        """Return explicit NAPI_VERSION=<n> from binding.gyp defines, if any."""
+        for define in self.defines:
+            m = re.match(r"NAPI_VERSION\s*=\s*(\d+)", define.strip())
+            if m:
+                return int(m.group(1))
+        return None
+
     def needs_version(self) -> bool:
-        """True when a define requests NAPI_VERSION>8 or EXPERIMENTAL."""
+        """True when a define requests NAPI_VERSION>10 or EXPERIMENTAL."""
         for define in self.defines:
             if define.strip() == "NAPI_EXPERIMENTAL":
                 return True
@@ -232,14 +226,15 @@ class Target:
 
 
 class Entry:
-    """One matrix row: a (target, driver) pair with its verdict."""
+    """One matrix row: a (targets, driver) entry with its verdict."""
 
-    def __init__(self, suite, test_id, test_dir, target, driver, skip_reason,
-                 skip_detail, cpp, work_rel):
+    def __init__(self, suite, test_id, test_dir, target, targets, driver,
+                 skip_reason, skip_detail, cpp, work_rel):
         self.suite = suite
         self.test_id = test_id  # e.g. js-native-api/test_number/test.js
         self.test_dir = test_dir  # Path to vendored test dir (hermetic copy root)
-        self.target = target  # target name string
+        self.target = target  # target name(s) string for display/JSON
+        self.targets = targets  # ordered list of required target names
         self.driver = driver  # driver filename within test_dir
         self.skip_reason = skip_reason  # taxonomy string or None (runnable)
         self.skip_detail = skip_detail  # human detail / None
@@ -291,60 +286,65 @@ def read_sources_text(test_dir: Path, sources: list[str]) -> str:
     return "\n".join(parts)
 
 
-def driver_required_target(driver_text: str) -> str | None:
-    """Addon target a driver requires (js-native-api or examples style)."""
-    m = re.search(
-        r"require\(\s*`?\./build/\$\{[^}]+\}/([^`')\s]+)`?\)", driver_text)
-    if m:
-        return m.group(1)
-    m = re.search(
-        r"require\(\s*`?\./build/(?:Release|Debug)/([^`')\s]+)`?\)",
-        driver_text)
-    if m:
-        return m.group(1)
-    m = re.search(r"bindings[^\n]*?\(\s*['\"]([^'\"]+)['\"]\s*\)", driver_text)
-    if m:
-        name = m.group(1)
-        return name[:-5] if name.endswith(".node") else name
-    return None
+def driver_required_targets(driver_text: str) -> list[str]:
+    """Addon targets a driver requires in source order (deduplicated)."""
+    hits: list[tuple[int, str]] = []
+    patterns = (
+        re.compile(r"require\(\s*`?\./build/\$\{[^}]+\}/([^`')\s]+)`?\)"),
+        re.compile(r"require\(\s*`?\./build/(?:Release|Debug)/([^`')\s]+)`?\)"),
+        re.compile(r"require\(\s*['\"]bindings['\"]\s*\)\s*\(\s*['\"]([^'\"]+)['\"]\s*\)"),
+        re.compile(r"\bbindings\s*\(\s*['\"]([^'\"]+)['\"]\s*\)"),
+    )
+    for pat in patterns:
+        for m in pat.finditer(driver_text):
+            name = m.group(1)
+            if name.endswith(".node"):
+                name = name[:-5]
+            hits.append((m.start(), name))
+    hits.sort(key=lambda item: item[0])
+    seen: set[str] = set()
+    out: list[str] = []
+    for _, name in hits:
+        if name not in seen:
+            seen.add(name)
+            out.append(name)
+    return out
 
 
-def classify(target: Target | None, src_text: str, driver_text: str,
-             has_binding_gyp: bool, suite: str) -> tuple[str | None, str | None]:
+def classify(targets: list[Target], src_text: str, driver_text: str,
+             has_binding_gyp: bool, suite: str,
+             test_id: str) -> tuple[str | None, str | None]:
     """Return (skip_reason, skip_detail). reason None means runnable."""
-    if target is None or not has_binding_gyp:
+    if not targets or not has_binding_gyp:
         return PROVIDER_GAP, (
             "no binding.gyp target mapping (CMake-only tooling example; "
             "zig cc/c++ runner does not consume CMakeLists)")
-    if target.needs_version():
-        detail = ", ".join(target.defines)
-        return NEEDS_VERSION, (
-            f"binding.gyp defines [{detail}] require NAPI_VERSION>8 / "
-            "experimental symbols absent from the v8 provider set")
-    # Source-level version signals: #define NAPI_VERSION 9/10 in the .c
-    # file itself, or direct use of a v9/v10-only symbol (absent at v8).
-    mver = _VERSION_DEFINE_SRC.search(src_text)
-    if mver and int(mver.group(1)) > NAPI_VERSION:
-        return NEEDS_VERSION, (
-            f"source #defines NAPI_VERSION={mver.group(1)} (requires >8); "
-            "v9/v10 symbols are absent from the v8 provider set")
-    msym = _VERSION_SYM.search(src_text)
-    if msym:
-        return NEEDS_VERSION, (
-            f"source uses {msym.group(0)} (Node-API v9/v10-only), "
-            "absent from the v8 provider set")
+    for target in targets:
+        if target.needs_version():
+            detail = ", ".join(target.defines)
+            return NEEDS_VERSION, (
+                f"binding.gyp defines [{detail}] require NAPI_VERSION>{NAPI_VERSION} / "
+                f"experimental symbols absent from the v{NAPI_VERSION} provider set")
+    # Source-level version signals: #define NAPI_VERSION > 10 in the .c
+    # file itself, or NAPI_EXPERIMENTAL symbols.
+    for mver in _VERSION_DEFINE_SRC.finditer(src_text):
+        if int(mver.group(1)) > NAPI_VERSION:
+            return NEEDS_VERSION, (
+                f"source #defines NAPI_VERSION={mver.group(1)} (requires >{NAPI_VERSION}); "
+                f"symbols above v{NAPI_VERSION} are absent from the provider set")
     if _VERSION_POST_FINALIZER.search(src_text):
         return NEEDS_VERSION, (
             "source uses node_api_post_finalizer (NAPI_EXPERIMENTAL), "
-            "absent from the v8 provider set")
+            f"absent from the v{NAPI_VERSION} provider set")
     if _VERSION_SAB.search(src_text) or _VERSION_SAB_DRIVER.search(driver_text):
         return NEEDS_VERSION, (
             "SharedArrayBuffer API is NAPI_EXPERIMENTAL "
-            "(node_api_*sharedarraybuffer*), absent at NAPI_VERSION=8")
-    if _VERSION10_DRIVER.search(driver_text):
-        return NEEDS_VERSION, (
-            "driver asserts napi_get_version()==10 (Node 22); the v8 "
-            "provider correctly returns 8 (plan N1.1)")
+            f"(node_api_*sharedarraybuffer*), absent at NAPI_VERSION={NAPI_VERSION}")
+    if test_id == "js-native-api/test_string/test.js":
+        return PROVIDER_GAP, (
+            "test_string.c:112 asserts !copied on "
+            "node_api_create_external_string_latin1; ChakraCore copies into "
+            "Recycler string heap (copied=true) per Node-API fallback")
     # N5.1 engine-message divergence (V8 vs Chakra text, PR-12):
     # drivers assert exact V8 TypeError strings for readonly/getter/
     # non-extensible assignments. The provider correctly defines the
@@ -391,23 +391,43 @@ def discover_entries() -> list[Entry]:
         by_name = {t.name: t for t in targets}
         drivers = sorted(test_dir.glob("*.js"))
         for driver in drivers:
+            test_id = f"{test_id_prefix}/{driver.name}"
             dtext = driver.read_text(encoding="utf-8", errors="replace")
-            want = driver_required_target(dtext)
-            target = by_name.get(want) if want else None
-            if target is None and len(targets) == 1:
-                # Single-target dir: fall back to the only target.
-                target = targets[0]
-            src_text = ""
-            if target is not None:
-                src_text = read_sources_text(test_dir, target.sources)
+            wants = driver_required_targets(dtext)
+            resolved_targets: list[Target] = []
+            missing_target = False
+            if wants:
+                for w in wants:
+                    t = by_name.get(w)
+                    if t is None:
+                        missing_target = True
+                        break
+                    resolved_targets.append(t)
+            elif len(targets) == 1:
+                resolved_targets = [targets[0]]
+            if missing_target:
+                resolved_targets = []
+
+            src_sources: list[str] = []
+            seen_src: set[str] = set()
+            for t in resolved_targets:
+                for s in t.sources:
+                    if s not in seen_src:
+                        seen_src.add(s)
+                        src_sources.append(s)
+            src_text = read_sources_text(test_dir, src_sources) if resolved_targets else ""
             reason, detail = classify(
-                target, src_text, dtext, gyp.is_file(), suite)
-            cpp = any(s.endswith(".cc") for s in (target.sources if target else []))
+                resolved_targets, src_text, dtext, gyp.is_file(), suite, test_id)
+            target_names = [t.name for t in resolved_targets]
+            target_label = ", ".join(target_names) if target_names else (
+                ", ".join(wants) if wants else "?")
+            cpp = any(s.endswith(".cc") for s in src_sources)
             entries.append(Entry(
                 suite=suite,
-                test_id=f"{test_id_prefix}/{driver.name}",
+                test_id=test_id,
                 test_dir=test_dir,
-                target=target.name if target else (want or "?"),
+                target=target_label,
+                targets=target_names,
                 driver=driver.name,
                 skip_reason=reason,
                 skip_detail=detail,
@@ -458,44 +478,62 @@ def work_test_dir(work_root: Path, entry: Entry) -> Path:
 
 
 def build_target(work_root: Path, entry: Entry, zig: str,
-                 headers_inc: Path) -> tuple[bool, str, Path]:
-    """Build one entry's addon. Returns (ok, build_log, addon_path)."""
-    # Locate the work copy of the test dir for this entry.
+                 headers_inc: Path) -> tuple[bool, str, list[Path]]:
+    """Build all required targets for an entry. Returns (ok, build_log, addon_paths)."""
     work_test = work_test_dir(work_root, entry)
     gyp = work_test / "binding.gyp"
     targets = parse_binding_gyp(gyp) if gyp.is_file() else []
     by_name = {t.name: t for t in targets}
-    target = by_name.get(entry.target, targets[0] if targets else None)
-    sources = [str(work_test / s) for s in (target.sources if target else [])
-               if s.endswith(".c") or s.endswith(".cc")]
-    if not sources:
-        return False, "no compilable (.c/.cc) sources for target", work_test / "build/Release" / f"{entry.target}.node"
+    target_names = entry.targets or ([entry.target] if entry.target != "?" else [])
+    if not target_names:
+        return False, "no target name for entry", []
 
     build_rel = work_test / "build" / "Release"
     build_rel.mkdir(parents=True, exist_ok=True)
-    addon = build_rel / f"{entry.target}.node"
+    built_addons: list[Path] = []
+    logs: list[str] = []
 
-    compiler = "c++" if entry.cpp else "cc"
-    cmd = [zig, compiler, "-shared", "-fPIC", "-O2",
-           f"-DNAPI_VERSION={NAPI_VERSION}",
-           f"-DNODE_GYP_MODULE_NAME={entry.target}",
-           f"-I{headers_inc}"]
-    if sys.platform == "darwin":
-        cmd.append("-undefined")
-        cmd.append("dynamic_lookup")
-    cmd += ["-o", str(addon)] + sources
-    # -O2 (Release-like): matches node-gyp Release (the vendored runners
-    # require() ./build/Release/...). At -O0 `zig cc` inserts array
-    # bounds checks that abort on test_object's intentional OOB read
-    # (TypeTaggedInstance with index 39), which upstream Release silently
-    # tolerates.
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-    log = (proc.stdout or "") + (proc.stderr or "")
-    ok = proc.returncode == 0 and addon.is_file() and addon.stat().st_size > 0
-    return ok, log, addon
+    for tname in target_names:
+        target = by_name.get(tname, targets[0] if len(targets) == 1 else None)
+        rel_sources = target.sources if target else []
+        sources = [str(work_test / s) for s in rel_sources
+                   if s.endswith(".c") or s.endswith(".cc")]
+        addon = build_rel / f"{tname}.node"
+        if not sources:
+            return False, f"no compilable (.c/.cc) sources for target {tname}", built_addons
+
+        is_cpp = any(s.endswith(".cc") for s in rel_sources)
+        compiler = "c++" if is_cpp else "cc"
+        cmd = [zig, compiler, "-shared", "-fPIC", "-O2"]
+        explicit_ver = target.explicit_napi_version() if target else None
+        if explicit_ver is not None:
+            cmd.append(f"-DNAPI_VERSION={explicit_ver}")
+        else:
+            src_text = read_sources_text(work_test, rel_sources)
+            if not _VERSION_DEFINE_SRC.search(src_text):
+                cmd.append(f"-DNAPI_VERSION={NAPI_VERSION}")
+        cmd += [f"-DNODE_GYP_MODULE_NAME={tname}", f"-I{headers_inc}"]
+        if sys.platform == "darwin":
+            cmd.append("-undefined")
+            cmd.append("dynamic_lookup")
+        cmd += ["-o", str(addon)] + sources
+        # -O2 (Release-like): matches node-gyp Release (the vendored runners
+        # require() ./build/Release/...). At -O0 `zig cc` inserts array
+        # bounds checks that abort on test_object's intentional OOB read
+        # (TypeTaggedInstance with index 39), which upstream Release silently
+        # tolerates.
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        log = (proc.stdout or "") + (proc.stderr or "")
+        if log:
+            logs.append(log)
+        if proc.returncode != 0 or not addon.is_file() or addon.stat().st_size == 0:
+            return False, "\n".join(logs), built_addons
+        built_addons.append(addon)
+
+    return True, "\n".join(logs), built_addons
 
 
-def run_entry(entry: Entry, work_root: Path, addon: Path,
+def run_entry(entry: Entry, work_root: Path, addons: list[Path],
               host: str, host_bin: str, node_bin: str,
               timeout: int) -> tuple[int, str, str]:
     """Execute the JS driver. Returns (exit_code, stdout, stderr)."""
@@ -507,8 +545,10 @@ def run_entry(entry: Entry, work_root: Path, addon: Path,
     env["NODEAPI_BUILD_DIR"] = (work_test / "build" / "Release").as_posix()
     if host == "ch-nodeapi":
         timeout_ms = max(1000, int(timeout) * 1000)
-        cmd = [host_bin, "--pump-timeout-ms", str(timeout_ms),
-               "--addon", str(addon), "--driver", str(driver)]
+        cmd = [host_bin, "--pump-timeout-ms", str(timeout_ms)]
+        for addon in addons:
+            cmd += ["--addon", str(addon)]
+        cmd += ["--driver", str(driver)]
     else:
         cmd = [node_bin, str(driver)]
     proc = subprocess.run(cmd, capture_output=True, text=True,
@@ -607,7 +647,7 @@ def _run_entries(entries, work_root, args, plat, used_host,
                             "node not found on PATH/mise pin)",
                             "host": "none", "build": "skipped"})
             continue
-        ok, log, addon = build_target(work_root, entry, zig, HEADERS_INC)
+        ok, log, addons = build_target(work_root, entry, zig, HEADERS_INC)
         if not ok:
             results.append({**base, "status": "fail",
                             "reason": "build failed",
@@ -621,7 +661,7 @@ def _run_entries(entries, work_root, args, plat, used_host,
                          else args.timeout)
         try:
             code, out, err = run_entry(
-                entry, work_root, addon, used_host,
+                entry, work_root, addons, used_host,
                 host_bin, node_bin, entry_timeout)
         except subprocess.TimeoutExpired:
             results.append({**base, "status": "fail",

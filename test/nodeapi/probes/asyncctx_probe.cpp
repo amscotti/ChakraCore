@@ -54,7 +54,7 @@
 //
 // Build (repo root, via gate lock — see run_asyncctx_probe.sh):
 //   zig c++ \
-//     -std=gnu++17 -DNAPI_VERSION=8 -DCHAKRA_NODEAPI_TEST_HOOKS \
+//     -std=gnu++17 -DNAPI_VERSION=10 -DCHAKRA_NODEAPI_TEST_HOOKS \
 //     -Iinclude/nodeapi -Ilib/Jsrt -Ilib/NodeApi \
 //     test/nodeapi/probes/asyncctx_probe.cpp \
 //     lib/NodeApi/* (all provider TUs incl. NodeApiAsyncContext.cpp) \

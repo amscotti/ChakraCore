@@ -48,7 +48,7 @@
 //         run_script => napi_pending_exception without running
 //         (global unchanged).
 //   Version/memory (N3.5 Done-when):
-//     V1. napi_get_version => 8; NULL result => invalid_arg.
+//     V1. napi_get_version => 10; NULL result => invalid_arg.
 //     V2. napi_get_node_version => {1,0,0,"libChakraNodeApi/1.0.0"}
 //         (provider truth per B7, already landed Wave 1 -- shape
 //         verification only, no duplicate implementation).
@@ -58,7 +58,7 @@
 //
 // Build (repo root, via gate lock — see run_promise_script_probe.sh):
 //   zig c++ \
-//     -std=gnu++17 -DNAPI_VERSION=8 -DCHAKRA_NODEAPI_TEST_HOOKS \
+//     -std=gnu++17 -DNAPI_VERSION=10 -DCHAKRA_NODEAPI_TEST_HOOKS \
 //     -Iinclude/nodeapi -Ilib/Jsrt -Ilib/NodeApi \
 //     test/nodeapi/probes/promise_script_probe.cpp \
 //     lib/NodeApi/NodeApiEnv.cpp lib/NodeApi/NodeApiLifetime.cpp \
@@ -973,7 +973,7 @@ int main() {
     Check(env != nullptr, "V create env");
     uint32_t ver = 0;
     CheckStatus(napi_get_version(env, &ver), napi_ok, "V get_version ok");
-    Check(ver == 8, "V version == 8");
+    Check(ver == 10, "V version == 10");
     CheckStatus(napi_get_version(env, nullptr), napi_invalid_arg,
                 "V NULL result => invalid_arg");
     const napi_node_version* nv = nullptr;

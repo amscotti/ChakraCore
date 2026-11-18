@@ -46,8 +46,8 @@ if [ "$(uname -s)" = "Linux" ]; then
   PROVIDER_NAME="libChakraNodeApi.so"
   LINK_SYSTEM="-ldl -lpthread"
   RPATH_FLAG="-Wl,-rpath,\$ORIGIN"
-  CXXFLAGS="-target $TARGET -std=gnu++17 -O3 -g -Wno-date-time -DNAPI_VERSION=8 -DCHAKRA_NODEAPI_TEST_HOOKS -Ilib/Jsrt -Iinclude/nodeapi -Ilib/NodeApi -isystem /usr/include"
-  ADDON_FLAGS="-target $TARGET -std=gnu++17 -O3 -g -Wno-date-time -DNAPI_VERSION=8 -fPIC -shared -Iinclude/nodeapi -Ilib/Jsrt -isystem /usr/include"
+  CXXFLAGS="-target $TARGET -std=gnu++17 -O3 -g -Wno-date-time -DNAPI_VERSION=10 -DCHAKRA_NODEAPI_TEST_HOOKS -Ilib/Jsrt -Iinclude/nodeapi -Ilib/NodeApi -isystem /usr/include"
+  ADDON_FLAGS="-target $TARGET -std=gnu++17 -O3 -g -Wno-date-time -DNAPI_VERSION=10 -fPIC -shared -Iinclude/nodeapi -Ilib/Jsrt -isystem /usr/include"
 else
   TARGET="aarch64-macos.26.0"
   SDK=$(xcrun --show-sdk-path 2>/dev/null || true)
@@ -60,8 +60,8 @@ else
   PROVIDER_NAME="libChakraNodeApi.dylib"
   LINK_SYSTEM="-framework CoreFoundation -framework Security"
   RPATH_FLAG="-Wl,-rpath,@executable_path"
-  CXXFLAGS="-target $TARGET --sysroot $SDK -std=gnu++17 -O3 -g -mcpu=apple_m1 -Wno-date-time -DNAPI_VERSION=8 -DCHAKRA_NODEAPI_TEST_HOOKS -Ilib/Jsrt -Iinclude/nodeapi -Ilib/NodeApi -isystem $SDK/usr/include -F/System/Library/Frameworks"
-  ADDON_FLAGS="-target $TARGET --sysroot $SDK -std=gnu++17 -O3 -g -mcpu=apple_m1 -Wno-date-time -DNAPI_VERSION=8 -fPIC -shared -Iinclude/nodeapi -Ilib/Jsrt -isystem $SDK/usr/include -F/System/Library/Frameworks -Wl,-undefined,dynamic_lookup"
+  CXXFLAGS="-target $TARGET --sysroot $SDK -std=gnu++17 -O3 -g -mcpu=apple_m1 -Wno-date-time -DNAPI_VERSION=10 -DCHAKRA_NODEAPI_TEST_HOOKS -Ilib/Jsrt -Iinclude/nodeapi -Ilib/NodeApi -isystem $SDK/usr/include -F/System/Library/Frameworks"
+  ADDON_FLAGS="-target $TARGET --sysroot $SDK -std=gnu++17 -O3 -g -mcpu=apple_m1 -Wno-date-time -DNAPI_VERSION=10 -fPIC -shared -Iinclude/nodeapi -Ilib/Jsrt -isystem $SDK/usr/include -F/System/Library/Frameworks -Wl,-undefined,dynamic_lookup"
 fi
 
 PROVIDER_TUS="

@@ -21,7 +21,7 @@
 // Build (from repo root, via the shared gate lock), mirroring
 // teardown_probe.cpp:
 //   sh zig c++ \
-//     -std=gnu++17 -DNAPI_VERSION=8 -DNDEBUG \
+//     -std=gnu++17 -DNAPI_VERSION=10 -DNDEBUG \
 //     -Iinclude/nodeapi -Ilib/Jsrt -Ilib/NodeApi \
 //     test/nodeapi/probes/env_addr_reuse_probe.cpp \
 //     lib/NodeApi/NodeApiEnv.cpp lib/NodeApi/NodeApiLifetime.cpp \
@@ -201,8 +201,8 @@ int main() {
           "reuse: current-generation lookup succeeds");
     // A live napi_* (get_version) still works on the new env.
     uint32_t ver = 0;
-    Check(napi_get_version(envB, &ver) == napi_ok && ver == 8,
-          "reuse: new env usable (napi_get_version == 8)");
+    Check(napi_get_version(envB, &ver) == napi_ok && ver == 10,
+          "reuse: new env usable (napi_get_version == 10)");
   } else {
     // Allocator never reused in 200 tries: the displacement path was
     // not exercised, but generation monotonicity was. Still verify

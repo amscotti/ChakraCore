@@ -29,7 +29,7 @@
 //        check false, get_and_clear with no pending returns ok+null.
 // Build (repo root, via gate lock — see run_gate_probe.sh):
 //   zig c++ \
-//     -std=gnu++17 -DNAPI_VERSION=8 -DCHAKRA_NODEAPI_TEST_HOOKS \
+//     -std=gnu++17 -DNAPI_VERSION=10 -DCHAKRA_NODEAPI_TEST_HOOKS \
 //     -Iinclude/nodeapi -Ilib/Jsrt -Ilib/NodeApi \
 //     test/nodeapi/probes/gate_probe.cpp \
 //     lib/NodeApi/NodeApiEnv.cpp lib/NodeApi/NodeApiLifetime.cpp \

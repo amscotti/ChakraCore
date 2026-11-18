@@ -187,7 +187,7 @@ void FinReentrant(napi_env env, void* data, void* /*hint*/) {
   /* Reentrant reads must work while the drain is running (no lock held). */
   uint32_t ver = 0;
   napi_status s = napi_get_version(env, &ver);
-  if (s != napi_ok || ver != 8) c->wrong_thread += 1000;
+  if (s != napi_ok || ver != 10) c->wrong_thread += 1000;
   bool tag_ok = false;
   napi_type_tag dummy{0, 0};
   /* The dummy object must be live: use the global object (no wrap). */
@@ -347,10 +347,12 @@ PROBE_NOINLINE_OPTNONE bool WrapThenAddRidersThenDrop(napi_env env) {
   return true;
 }
 
-/* add_finalizer + unpin result ref + witness weak ref + drop, all inside
- * the helper frame. Returns the witness weak ref (caller deletes it). */
+/* add_finalizer + witness weak ref + optional weak out_ref + drop, all inside
+ * the helper frame. Keeps out_ref weak (caller deletes it after drain or
+ * before GC to test cancellation). */
 PROBE_NOINLINE_OPTNONE napi_ref AddFinalizeThenDropWitness(
-    napi_env env, Counter* cnt) {
+    napi_env env, Counter* cnt, napi_ref* out_ref_p) {
+  if (out_ref_p) *out_ref_p = nullptr;
   JsValueRef obj = make_object_assert();
   napi_ref wit = nullptr;
   if (napi_create_reference(env, reinterpret_cast<napi_value>(obj), 0,
@@ -365,7 +367,7 @@ PROBE_NOINLINE_OPTNONE napi_ref AddFinalizeThenDropWitness(
     ClearDeadRef(obj, JS_INVALID_REFERENCE);
     return nullptr;
   }
-  (void)napi_delete_reference(env, out_ref);
+  if (out_ref_p) *out_ref_p = out_ref;
   ClearDeadRef(obj, JS_INVALID_REFERENCE);
   return wit;
 }
@@ -636,18 +638,20 @@ int main() {
     expect(cnt.calls == 1, "E: exactly once via destroy step 2");
   }
 
-  /* ---- Phase F: add_finalizer + ref (P7-9) ---- */
+  /* ---- Phase F: add_finalizer + weak optional out_ref (P7-9) ---- */
   {
     std::fprintf(stdout, "-- case add-finalizer (P7-9) --\n");
     napi_env env = chakra_nodeapi_create_env(rt, ctx, "wrapF", nullptr, nullptr);
     expect(env != nullptr, "F: create env");
     Counter cnt;
-    /* Helper creates the object + witness weak ref + add_finalizer +
-     * unpin inside an optnone frame, so no live register or stack slot
-     * in main keeps the object alive across the GC (conservative-scan
-     * methodology from the refs probe). */
-    napi_ref witness = AddFinalizeThenDropWitness(env, &cnt);
-    expect(witness != nullptr, "F: witness + add_finalizer setup");
+    /* Helper creates the object + witness weak ref + add_finalizer(..., &out_ref)
+     * inside an optnone frame and keeps out_ref alive across GC so Phase F
+     * proves optional out_ref starts WEAK (refcount == 0) and does NOT pin
+     * the object across collection. */
+    napi_ref out_ref = nullptr;
+    napi_ref witness = AddFinalizeThenDropWitness(env, &cnt, &out_ref);
+    expect(witness != nullptr && out_ref != nullptr,
+           "F: witness + add_finalizer out_ref setup");
     ClearStack();
     Collect10x(rt);
     {
@@ -657,14 +661,20 @@ int main() {
       napi_status vs = napi_get_reference_value(env, witness, &gotw);
       expect_status(vs, napi_ok, "F: witness get after GC");
       expect(gotw == nullptr, "F: witness collected (probe rooting is clean)");
+      napi_value goto_ref = reinterpret_cast<napi_value>(static_cast<std::uintptr_t>(0xdeadbeef));
+      napi_status os = napi_get_reference_value(env, out_ref, &goto_ref);
+      expect_status(os, napi_ok, "F: optional out_ref get after GC");
+      expect(goto_ref == nullptr, "F: optional out_ref is weak (did not pin object)");
       napi_close_handle_scope(env, vsc);
-      napi_delete_reference(env, witness);
+      expect_status(napi_delete_reference(env, witness), napi_ok, "F: delete witness");
     }
     expect(cnt.calls == 0, "F: no finalizer during GC");
     expect(chakra_nodeapi_test_wrap_queue_count(env) == 1, "F: queued 1");
     chakra_nodeapi_test_drain_finalizers(env);
     expect(cnt.calls == 1, "F: exactly once at drain");
     expect(chakra_nodeapi_test_wrap_live_count(env) == 0, "F: live 0");
+    expect_status(napi_delete_reference(env, out_ref), napi_ok,
+                  "F: delete optional out_ref after drain");
     chakra_nodeapi_destroy_env(env);
   }
 
@@ -790,6 +800,42 @@ int main() {
     chakra_nodeapi_test_drain_finalizers(env);
     expect(g_drain_order == want, "K: re-drain does not re-fire");
     chakra_nodeapi_destroy_env(env);
+  }
+
+  /* ---- Phase L: napi_delete_reference(out_ref) before GC cancels finalizer ---- */
+  {
+    std::fprintf(stdout, "-- case delete-out-ref-cancels-finalizer --\n");
+    napi_env env = chakra_nodeapi_create_env(rt, ctx, "wrapL", nullptr, nullptr);
+    expect(env != nullptr, "L: create env");
+    Counter cnt;
+    napi_ref out_ref = nullptr;
+    napi_ref witness = AddFinalizeThenDropWitness(env, &cnt, &out_ref);
+    expect(witness != nullptr && out_ref != nullptr,
+           "L: witness + add_finalizer out_ref setup");
+    expect(chakra_nodeapi_test_wrap_live_count(env) == 1,
+           "L: live 1 before delete_reference(out_ref)");
+    expect_status(napi_delete_reference(env, out_ref), napi_ok,
+                  "L: delete_reference(out_ref) before GC");
+    expect(chakra_nodeapi_test_wrap_live_count(env) == 0,
+           "L: live 0 immediately after pre-GC cancel");
+    ClearStack();
+    Collect10x(rt);
+    {
+      napi_handle_scope vsc = nullptr;
+      napi_open_handle_scope(env, &vsc);
+      napi_value gotw = reinterpret_cast<napi_value>(static_cast<std::uintptr_t>(0xdeadbeef));
+      napi_status vs = napi_get_reference_value(env, witness, &gotw);
+      expect_status(vs, napi_ok, "L: witness get after GC");
+      expect(gotw == nullptr, "L: witness collected");
+      napi_close_handle_scope(env, vsc);
+      expect_status(napi_delete_reference(env, witness), napi_ok, "L: delete witness");
+    }
+    expect(cnt.calls == 0, "L: zero finalizers during GC after cancel");
+    expect(chakra_nodeapi_test_wrap_queue_count(env) == 0, "L: queue 0 after GC");
+    chakra_nodeapi_test_drain_finalizers(env);
+    expect(cnt.calls == 0, "L: zero finalizers at drain after cancel");
+    chakra_nodeapi_destroy_env(env);
+    expect(cnt.calls == 0, "L: zero finalizers at destroy after cancel");
   }
 
   std::fprintf(stdout, "WRAP_PROBE: %s (%d/%d)\n",
