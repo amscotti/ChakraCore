@@ -1833,28 +1833,41 @@ namespace Js
 
             RecyclableObject* newTargetObj = VarTo<RecyclableObject>(newTarget);
             Var proto = JavascriptOperators::GetPropertyNoCache(newTargetObj, PropertyIds::prototype, scriptContext);
+            RecyclableObject* targetProto = nullptr;
             if (JavascriptOperators::IsObject(proto))
             {
-                return scriptContext->GetLibrary()->CreateObject(VarTo<RecyclableObject>(proto));
+                targetProto = VarTo<RecyclableObject>(proto);
+            }
+            else
+            {
+                ScriptContext* realmCtx = JavascriptOperators::GetFunctionRealm(newTargetObj, scriptContext);
+                if (realmCtx == nullptr)
+                {
+                    realmCtx = scriptContext;
+                }
+
+                JavascriptLibrary* realmLib = realmCtx->GetLibrary();
+                realmLib->EnsureIntlObjectReady();
+                DynamicObject* defaultProto = (realmLib->*getProto)();
+                if (defaultProto == nullptr)
+                {
+                    JavascriptLibrary* curLib = scriptContext->GetLibrary();
+                    curLib->EnsureIntlObjectReady();
+                    defaultProto = (curLib->*getProto)();
+                }
+                Assert(defaultProto != nullptr);
+                targetProto = defaultProto;
             }
 
-            ScriptContext* realmCtx = JavascriptOperators::GetFunctionRealm(newTargetObj, scriptContext);
-            if (realmCtx == nullptr)
+            if (CrossSite::NeedMarshalVar(targetProto, scriptContext))
             {
-                realmCtx = scriptContext;
+                Var marshaled = CrossSite::MarshalVar(scriptContext, targetProto);
+                if (JavascriptOperators::IsObject(marshaled))
+                {
+                    targetProto = VarTo<RecyclableObject>(marshaled);
+                }
             }
-
-            JavascriptLibrary* realmLib = realmCtx->GetLibrary();
-            realmLib->EnsureIntlObjectReady();
-            DynamicObject* defaultProto = (realmLib->*getProto)();
-            if (defaultProto == nullptr)
-            {
-                JavascriptLibrary* curLib = scriptContext->GetLibrary();
-                curLib->EnsureIntlObjectReady();
-                defaultProto = (curLib->*getProto)();
-            }
-            Assert(defaultProto != nullptr);
-            return scriptContext->GetLibrary()->CreateObject(defaultProto);
+            return scriptContext->GetLibrary()->CreateObject(targetProto);
         }
 
         DynamicObject* RegisterIntlClass(
