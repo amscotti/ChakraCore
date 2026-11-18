@@ -1369,6 +1369,38 @@ class CheckMetadataLinuxParamTests(unittest.TestCase):
             cml.expected_archive_members("debug-static", jit=False),
             {"lib/libChakraCoreStatic.a": 585})
 
+    def test_tables_linux_has_no_duplicate_sources_and_matches_compile_count(self):
+        import re
+        tables_text = (HERE / "tables_linux.zig").read_text()
+        linux_text = (HERE / "linux.zig").read_text()
+        groups = {}
+        for m in re.finditer(r"pub const (\w+_group) = Group\{(.*?)\n\};",
+                             tables_text, re.S):
+            name, body = m.group(1), m.group(2)
+            files = []
+            for field in ("cxx", "c", "asm_files"):
+                fm = re.search(rf"\.{field} = &\.\{{(.*?)\}}", body, re.S)
+                if fm:
+                    files.extend(re.findall(r'"([^"]+)"', fm.group(1)))
+            self.assertEqual(len(files), len(set(files)),
+                             f"duplicate source in {name}")
+            groups[name] = files
+        all_match = re.search(
+            r"(?:pub\s+)?const all_groups = \[_\]\*const tables\.Group\{(.*?)\n\};",
+            linux_text, re.S)
+        self.assertIsNotNone(all_match)
+        referenced = re.findall(r"&tables\.(\w+_group)", all_match.group(1))
+        total = 0
+        seen = set()
+        for g in referenced:
+            self.assertIn(g, groups)
+            for src in groups[g]:
+                self.assertNotIn(src, seen,
+                                 f"duplicate source across groups: {src}")
+                seen.add(src)
+                total += 1
+        self.assertEqual(total, 690)
+
 
 class StyleChecksPortableTests(unittest.TestCase):
     """Contracts for portable Python StyleChecks and vendored exclusions."""

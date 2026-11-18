@@ -6,7 +6,7 @@ Status: Completed on `modernize/phase4` (macOS ARM64; Linux x64 revalidation que
 ## 1. Architecture and Files
 
 - Shared ECMA-402 scaffold and UTS-35 helpers: [lib/Runtime/Library/IntlModernShared.h](../lib/Runtime/Library/IntlModernShared.h), [lib/Runtime/Library/IntlModernShared.cpp](../lib/Runtime/Library/IntlModernShared.cpp) (plus `Intl.getCanonicalLocales` via `IntlModernBuiltIns::EntryGetCanonicalLocales`)
-- Built-in implementations (ICU C APIs only; zero `icu::*` C++ classes and zero `std::` ICU imports):
+- Built-in implementations (strictly C ICU4C APIs under `U_SHOW_CPLUSPLUS_API 0` across `IntlModernShared.cpp` and all 5 `Intl<Class>.cpp` files; zero `icu::Locale` or other `icu::*` C++ calls and zero `std::` symbols):
   - `Intl.Locale` + Locale Info methods (`getCalendars`, `getCollations`, `getHourCycles`, `getNumberingSystems`, `getTimeZones`, `getTextInfo`, `getWeekInfo`): [lib/Runtime/Library/IntlLocale.cpp](../lib/Runtime/Library/IntlLocale.cpp), [test/Intl/IntlLocaleTest.js](../test/Intl/IntlLocaleTest.js)
   - `Intl.ListFormat`: [lib/Runtime/Library/IntlListFormat.cpp](../lib/Runtime/Library/IntlListFormat.cpp), [test/Intl/IntlListRelativeTimeTest.js](../test/Intl/IntlListRelativeTimeTest.js)
   - `Intl.RelativeTimeFormat`: [lib/Runtime/Library/IntlRelativeTimeFormat.cpp](../lib/Runtime/Library/IntlRelativeTimeFormat.cpp), [test/Intl/IntlListRelativeTimeTest.js](../test/Intl/IntlListRelativeTimeTest.js)
@@ -57,12 +57,12 @@ Instance becomes unreachable -> Recycler sweep / runtime shutdown
 
 ### `Field(...)` Write-Barrier & Finalization Audit
 
-All 8 state types inherit from `IntlModern::IntlModernState : public FinalizableObject` (`lib/Runtime/Library/IntlModernShared.h`) and are allocated with `RecyclerNewWithBarrierFinalized(...)`:
+All 8 state types inherit from `IntlModern::IntlModernState : public FinalizableObject` (`lib/Runtime/Library/IntlModernShared.h`) and are allocated with `RecyclerNewWithBarrierFinalized(...)`; `IntlModernShared.cpp` and all 5 `Intl<Class>.cpp` files use strictly C ICU4C APIs (`U_SHOW_CPLUSPLUS_API 0`, zero `icu::Locale` C++ calls, and zero `std::` symbols):
 
 | State class | `IntlModernKind` | Traced GC slots (`Field(...)`) | Non-GC / ICU slots (`FieldNoBarrier(...)` / inline) | `Dispose(bool)` teardown |
 |---|---|---|---|---|
 | `IntlModernState` (base) | base | none (`Mark()` asserts unreachable; scanned directly as barriered finalized object) | `FieldNoBarrier(const void*) magic`, `FieldNoBarrier(IntlModernKind) kind` | `InvalidateMagic()` (`magic = nullptr`) |
-| `IntlLocaleState` | `Locale` | `Field(JavascriptString*) tag` | none (ICU `ULocale*` / `ULocaleBuilder*` / `UEnumeration*` are call-local `ScopedICUObject`) | `InvalidateMagic()` (empty `Mark()` no-op) |
+| `IntlLocaleState` | `Locale` | `Field(JavascriptString*) tag` | none (ICU `UResourceBundle*` / `UEnumeration*` / `UDateTimePatternGenerator*` / `UNumberingSystem*` handles are call-local `ScopedICUObject`) | `InvalidateMagic()` (empty `Mark()` no-op) |
 | `IntlListFormatState` | `ListFormat` | `Field(JavascriptString*) locale`, `type`, `style` | `FieldNoBarrier(UListFormatter*) formatter` | If non-null: `ulistfmt_close(formatter); formatter = nullptr;` + `InvalidateMagic()` |
 | `IntlRelativeTimeFormatState` | `RelativeTimeFormat` | `Field(JavascriptString*) locale`, `style`, `numeric`, `numberingSystem` | `FieldNoBarrier(URelativeDateTimeFormatter*) formatter` (owns adopted `UNumberFormat*` inside ICU) | If non-null: `ureldatefmt_close(formatter); formatter = nullptr;` + `InvalidateMagic()` |
 | `IntlDisplayNamesState` | `DisplayNames` | `Field(JavascriptString*) locale`, `style`, `type`, `fallback`, `languageDisplay` | `FieldNoBarrier(DisplayNamesType) typeKind`, `styleKind`, `fallbackKind`, `FieldNoBarrier(ULocaleDisplayNames*) displayNames`, `FieldNoBarrier(UDateTimePatternGenerator*) patternGenerator`, `char icuLocaleId[ULOC_FULLNAME_CAPACITY]` | Closes non-null `displayNames` (`uldn_close`), closes non-null `patternGenerator` (`udatpg_close`), nulls both, + `InvalidateMagic()` |
@@ -88,8 +88,8 @@ Resource / creation call / source location:
      - `URelativeDateTimeFormatter*` via `ureldatefmt_open` adopting a `UNumberFormat*` from `unum_open` (`IntlRelativeTimeFormat.cpp`)
      - `ULocaleDisplayNames*` via `uldn_openForContext` and `UDateTimePatternGenerator*` via `udatpg_open` (`IntlDisplayNames.cpp`)
      - `UBreakIterator*` via `ubrk_open` or `ubrk_clone` (ICU >= 69) (`IntlSegmenter.cpp`)
-  3) Call-local ICU handles & results (`ChakraICU.h` `ScopedICUObject`):
-     - `ScopedULocale`, `ScopedULocaleBuilder`, `ScopedUEnumeration` (`IntlLocale.cpp`, `IntlModernShared.cpp`)
+  3) Call-local ICU handles & results (`ChakraICU.h` `ScopedICUObject`; `IntlModernShared.cpp` and all 5 `Intl<Class>.cpp` use strictly C ICU4C APIs under `U_SHOW_CPLUSPLUS_API 0`, with zero `icu::Locale` C++ calls and zero `std::` symbols):
+     - `ScopedUResourceBundle`, `ScopedUEnumeration`, `ScopedUDateTimePatternGenerator`, `ScopedUNumberingSystem` (`IntlLocale.cpp`, `IntlModernShared.cpp`; `ScopedULocale` and `ScopedULocaleBuilder` are only typedef'd in `ChakraICU.h:110-111` and unused in `.cpp`)
      - `ScopedUFormattedList`, `ScopedUConstrainedFieldPosition` (`IntlListFormat.cpp`)
      - `ScopedUFormattedRelativeDateTime`, `ScopedUNumberFormatter`, `ScopedUFormattedNumber`, `ScopedUConstrainedFieldPosition` (`IntlRelativeTimeFormat.cpp`)
   4) Native scratch buffers:
@@ -176,19 +176,24 @@ Memory accounting, capacity/retention bound and exhaustion behavior:
   - ICU `U_MEMORY_ALLOCATION_ERROR` and `NoCheckHeap` OOM propagate as ChakraCore `JavascriptError::ThrowOutOfMemoryError`.
 
 Tests / commands / measured results / remaining uncertainty:
-  - ABI symbol check (`nm -u {zig-out,out/release-shared,out/jit}/lib/libChakraCore.dylib | grep icu | grep std`): empty across all three dylibs (zero `std::` ICU imports).
-  - Unit & tooling checks: `python3 -m unittest discover -s tools/test262 -v` (`10` tests OK, covering `test_edition_policy.py` and `--intl402` in `test_run.py`); `mise exec -- zig build check-selftest` (PASS); `mise exec -- zig build check-build-tools` (`96` tests OK); `mise exec -- zig build verify-bytecode` (`Bytecode is up to date`, `Intl.js` & `JsBuiltIn*.bc.*.h` untouched vs `7519836ab3a302289f980e4396c6837ad33914bd`).
+  - ABI symbol check: `nm -u zig-out/lib/libChakraCore.dylib | grep icu | grep std` empty post-fix (and Wave 2 `out/release-shared` & `out/jit` dylibs clean prior to comment-only copyright edits; zero `std::` ICU imports and zero `icu::Locale` C++ calls across `IntlModernShared.cpp` and all 5 `Intl<Class>.cpp`).
+  - StyleChecks & Linux table pins:
+    - `tools/StyleChecks/{check_copyright,check_eol,check_tabs,check_ascii}.sh` all PASS (`exit 0`, 0 errors) across `origin/master..HEAD`, `7519836ab3a302289f980e4396c6837ad33914bd..HEAD`, and `35f53eae0a3599ea7e9c0baa6cf9331f7df3c351..HEAD` (added `// Copyright (c) ChakraCore Project Contributors. All rights reserved.` to `lib/Runtime/Library/JavascriptBuiltInFunctions.cpp` and `lib/Runtime/PlatformAgnostic/ChakraICU.h`).
+    - `tools/build/tables_linux.zig` `rt_library_group.cxx` deduplicated from `696` to `690` TUs to match `tools/build/linux.zig` `expectedCompileCount(.@"test", true) == 690`, pinned by `mise exec -- zig test tools/linux-gate-tests.zig` (`9/9` passed) and `test_tables_linux_has_no_duplicate_sources_and_matches_compile_count` in `tools/build/test_build_tools.py`.
+  - Unit & tooling checks: `python3 -m unittest discover -s tools/test262 -v` (`10` tests OK, covering `test_edition_policy.py` and `--intl402` in `test_run.py`); `mise exec -- zig build check-selftest` (PASS); `mise exec -- zig build check-build-tools` (`97` tests OK); `mise exec -- zig build verify-bytecode` (`Bytecode is up to date`, `Intl.js` & `JsBuiltIn*.bc.*.h` untouched vs `7519836ab3a302289f980e4396c6837ad33914bd`).
   - Multi-profile macOS ARM64 regression gates:
     - `mise exec -- zig build check`: `2076` passed / `0` failed (`+4`: `IntlLocaleTest.js`, `IntlListRelativeTimeTest.js`, `IntlDisplayNamesTest.js`, `IntlSegmenterTest.js`), `test-shared-basic` PASS, `check_metadata` PASS, `check_smoke` PASS.
     - `mise exec -- zig build -Dprofile=debug-static check`: `2128` passed / `0` failed (`+4`), `8/8` static native PASS, `533` archive members in `libChakraCoreStatic.a`, `check_metadata` PASS, `check_smoke` PASS.
-    - `mise exec -- zig build -Dprofile=release-shared check`: `test-shared-basic` PASS, `check_metadata` PASS, `check_smoke` PASS.
-    - `mise exec -- zig build -Dprofile=jit -Dwasm=true -p out/jit check-wasm` (`382/382` P1, `448/5` runtests), `check-fulljit` (`618/0`), `check` (`check_jit` PASS, JIT bytecode verify PASS, `check_smoke` PASS).
-  - Test262 `I1` targeted suites (527 files, 1054 scenarios, 25/25 controls; ICU 79.1):
+    - Wave 2 pre-comment-edit `release-shared` & `jit` profiles (macOS ARM64): `zig build -Dprofile=release-shared check` (`test-shared-basic` PASS, `check_metadata` PASS, `check_smoke` PASS); `zig build -Dprofile=jit -Dwasm=true -p out/jit` `check-wasm` (`382/382` P1, `448/5` runtests), `check-fulljit` (`618/0`), `check` (`check_jit` PASS, JIT bytecode verify PASS, `check_smoke` PASS).
+  - macOS ASan & UBSan sanitizer verification (`clang++` `-Dsanitize=address|undefined`, `ASAN_OPTIONS=detect_leaks=0`, `UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1`, `TZ=America/Los_Angeles`):
+    - ASan (`mise exec -- zig build -Dsanitize=address check-sanitize`): `27/27` legs PASS; individual `-CollectGarbage` runs (`IntlLocaleTest.js`, `IntlListRelativeTimeTest.js`, `IntlDisplayNamesTest.js`, `IntlSegmenterTest.js`, `GetCanonicalLocales.js`) all `pass` (`rc=0`, zero ASan findings).
+    - UBSan (`mise exec -- zig build -Dsanitize=undefined check-sanitize`): `27/27` legs PASS; individual `-CollectGarbage` runs on all 5 suites (plus `-noDeferParse -CollectGarbage` on `IntlListRelativeTimeTest.js`) all `pass` (`rc=0`, zero UBSan findings). Note: `test/Intl/IntlListRelativeTimeTest.js:210` replaced `p => ...` with `function (p) { ... }` to avoid pre-existing parser UB on unparenthesized single-argument `tkDArrow` (`lib/Parser/ptree.cpp:390` `PidRefStack::GetSymRef` with `ref == nullptr`, tracked separately in [open-cards.md](open-cards.md) §16).
+  - Test262 `I1` targeted suites (527 files, 1054 scenarios, 25/25 controls; ICU 79.1, measured prior to comment-only copyright and test-arrow edits):
     - Interpreter (`./zig-out/bin/ch`, `-nonative -Test262 -CollectGarbage -NegativePhaseReport`): `1052 passed / 2 failed` (`DisplayNames` `114/0`, `Segmenter` `158/0`, `ListFormat` `162/0`, `RelativeTimeFormat` `160/0`, `Intl/getCanonicalLocales` `76/0`, `Intl/toStringTag` `4/0`, `Locale` `378/2`).
     - JIT (`./out/jit/bin/ch`, `-ForceJITLoopBody -maxinterpretcount:1 -Test262 -CollectGarbage -NegativePhaseReport`): `1052 passed / 2 failed` (identical per-directory results across all 527 files).
     - Sole 2 failures (`collations-supported-by-collator.js`, default + strict): pre-existing legacy `Intl.js` `Collator` ignores `{collation:"emoji"}` and returns `"default"`.
   - Full opt-in `test/intl402/**/*.js` (`./zig-out/bin/ch --intl402`): `1704 passed / 5060 failed` across `6764` scenarios (`3382` files, 25/25 controls).
-  - Remaining uncertainty: Linux x64 and ASan/UBSan dedicated runs for the `I1` slice are queued in `G0`/sanitizer verification; JS GC churn tests (`-CollectGarbage`) verify finalization survival/no-crash rather than directly observing Recycler finalizer execution counts.
+  - Remaining uncertainty: Linux x64 build and test revalidation remain queued in Track `G0` (`tables_linux.zig` is deduplicated to `690` TUs and pinned locally by `linux-gate-tests.zig` `9/9` and `test_build_tools.py` `97/97`, awaiting native Linux execution); JS GC churn tests (`-CollectGarbage`) verify finalization survival/no-crash rather than directly observing Recycler finalizer execution counts.
 ```
 
 ---

@@ -406,6 +406,23 @@ pub fn isExcludedStaticObj(src: []const u8, profile: Profile, jit: bool) bool {
     return false;
 }
 
+pub const all_groups = [_]*const tables.Group{
+    &tables.pal_group,              &tables.codex_group,
+    &tables.common_group,           &tables.core_group,
+    &tables.datastructures_group,   &tables.exceptions_group,
+    &tables.memory_group,           &tables.util_group,
+    &tables.backend_group,          &tables.parser_group,
+    &tables.scacore_group,          &tables.wasmreader_group,
+    &tables.rt_base_group,          &tables.rt_bytecode_group,
+    &tables.rt_debug_group,         &tables.rt_language_group,
+    &tables.rt_library_group,       &tables.rt_math_group,
+    &tables.platformagnostic_group, &tables.rt_types_group,
+    &tables.jsrt_group,             &tables.jsrt_core_group,
+    &tables.wabt_group,             &tables.static_src_group,
+    &tables.dylib_group,            &tables.ch_group,
+    &tables.gcstress_group,
+};
+
 pub fn expectedCompileCount(profile: Profile, jit: bool) u32 {
     var count: u32 = 690;
     if (!jit) count -= 91;
@@ -440,6 +457,28 @@ test "linux group, define, and compile-count filtering across profiles" {
     try std.testing.expectEqual(@as(u32, 562), expectedCompileCount(.release_shared, false));
     try std.testing.expectEqual(@as(u32, 688), expectedCompileCount(.debug_static, true));
     try std.testing.expectEqual(@as(u32, 597), expectedCompileCount(.debug_static, false));
+
+    var seen: std.StringHashMap(void) = .init(std.testing.allocator);
+    defer seen.deinit();
+    var total: u32 = 0;
+    for (all_groups) |g| {
+        for (g.cxx) |src| {
+            try std.testing.expect(!seen.contains(src));
+            try seen.put(src, {});
+            total += 1;
+        }
+        for (g.c) |src| {
+            try std.testing.expect(!seen.contains(src));
+            try seen.put(src, {});
+            total += 1;
+        }
+        for (g.asm_files) |src| {
+            try std.testing.expect(!seen.contains(src));
+            try seen.put(src, {});
+            total += 1;
+        }
+    }
+    try std.testing.expectEqual(expectedCompileCount(.@"test", true), total);
 }
 
 fn appendTuFlags(ctx: *const Ctx, run: *std.Build.Step.Run, g: *const tables.Group, lang: Lang) void {
@@ -799,22 +838,6 @@ pub fn build(b: *std.Build) void {
     // singular_orders), which carry the initializer order.
     var n: u32 = 0;
     var objs: std.StringHashMap(std.Build.LazyPath) = .init(arena);
-    const all_groups = [_]*const tables.Group{
-        &tables.pal_group,              &tables.codex_group,
-        &tables.common_group,           &tables.core_group,
-        &tables.datastructures_group,   &tables.exceptions_group,
-        &tables.memory_group,           &tables.util_group,
-        &tables.backend_group,          &tables.parser_group,
-        &tables.scacore_group,          &tables.wasmreader_group,
-        &tables.rt_base_group,          &tables.rt_bytecode_group,
-        &tables.rt_debug_group,         &tables.rt_language_group,
-        &tables.rt_library_group,       &tables.rt_math_group,
-        &tables.platformagnostic_group, &tables.rt_types_group,
-        &tables.jsrt_group,             &tables.jsrt_core_group,
-        &tables.wabt_group,             &tables.static_src_group,
-        &tables.dylib_group,            &tables.ch_group,
-        &tables.gcstress_group,
-    };
     for (all_groups) |g| {
         if (!shouldCompileGroup(g, profile, jit)) continue;
         for (g.cxx) |src| {

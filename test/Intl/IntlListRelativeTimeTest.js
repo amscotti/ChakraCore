@@ -207,7 +207,7 @@ const tests = [
             const parts = rtf.formatToParts(-1234.5, "week");
             assert.areEqual(
                 "integer:1:week|group:,:week|integer:234:week|decimal:.:week|fraction:5:week|literal: weeks ago:",
-                parts.map(p => `${p.type}:${p.value}:${p.unit === undefined ? "" : p.unit}`).join("|"));
+                parts.map(function (p) { return `${p.type}:${p.value}:${p.unit === undefined ? "" : p.unit}`; }).join("|"));
 
             const autoParts = new Intl.RelativeTimeFormat("en-US", { numeric: "auto" }).formatToParts(1, "day");
             assert.areEqual(1, autoParts.length);
