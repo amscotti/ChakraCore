@@ -1901,15 +1901,333 @@ namespace Js
         return JavascriptNumber::ToVarNoCheck(Float16::Round(value), scriptContext);
     }
 
+    namespace
+    {
+        // Fixed-point superaccumulator spanning bits 2^-1074 .. 2^+1229 (2304 bits).
+        // Every finite binary64 term is an integer multiple of 2^-1074 with MSB <= 2097,
+        // leaving over 200 bits of carry headroom with zero dynamic heap allocation.
+        constexpr uint32 kSumPreciseAccumWords = 36;
+
+        uint32 FindHighestSetBit64(uint64 value)
+        {
+            Assert(value != 0);
+            DWORD index = 0;
+#if defined(TARGET_64)
+            _BitScanReverse64(&index, value);
+#else
+            if (_BitScanReverse(&index, static_cast<uint32>(value >> 32)))
+            {
+                index += 32;
+            }
+            else
+            {
+                _BitScanReverse(&index, static_cast<uint32>(value));
+            }
+#endif
+            return static_cast<uint32>(index);
+        }
+
+        struct ExactSumAccumulator
+        {
+            uint64 pos[kSumPreciseAccumWords] = {};
+            uint64 neg[kSumPreciseAccumWords] = {};
+            bool seenNotMinusZero = false;
+            bool seenNaN = false;
+            bool seenPosInf = false;
+            bool seenNegInf = false;
+
+            /// Accumulate one IEEE-754 double exactly into pos/neg or special state flags.
+            void AddDouble(double value)
+            {
+                uint64 bits = 0;
+                static_assert(sizeof(bits) == sizeof(value), "IEEE-754 binary64 expected");
+                memcpy(&bits, &value, sizeof(bits));
+
+                const bool sign = (bits >> 63) != 0;
+                const uint32 biasedExp = static_cast<uint32>((bits >> 52) & 0x7FFu);
+                const uint64 frac = bits & 0x000FFFFFFFFFFFFFULL;
+
+                if (biasedExp == 0x7FFu)
+                {
+                    seenNotMinusZero = true;
+                    if (frac != 0)
+                    {
+                        seenNaN = true;
+                    }
+                    else if (sign)
+                    {
+                        seenNegInf = true;
+                    }
+                    else
+                    {
+                        seenPosInf = true;
+                    }
+                    return;
+                }
+
+                if (biasedExp == 0 && frac == 0)
+                {
+                    if (!sign)
+                    {
+                        seenNotMinusZero = true;
+                    }
+                    return;
+                }
+
+                seenNotMinusZero = true;
+
+                const uint32 shift = (biasedExp == 0) ? 0u : (biasedExp - 1u);
+                const uint64 sig = (biasedExp == 0) ? frac : ((1ULL << 52) | frac);
+                AddMagnitude(sign ? neg : pos, shift, sig);
+            }
+
+            static void AddMagnitude(uint64* acc, uint32 shift, uint64 sig)
+            {
+                const uint32 wordIdx = shift / 64u;
+                const uint32 bitOffset = shift % 64u;
+                const uint64 lo = sig << bitOffset;
+                const uint64 hi = (bitOffset == 0u) ? 0ULL : (sig >> (64u - bitOffset));
+
+                const uint64 prev0 = acc[wordIdx];
+                const uint64 next0 = prev0 + lo;
+                acc[wordIdx] = next0;
+                uint64 addVal = hi + ((next0 < prev0) ? 1ULL : 0ULL);
+
+                uint32 idx = wordIdx + 1u;
+                while (addVal != 0 && idx < kSumPreciseAccumWords)
+                {
+                    const uint64 prev = acc[idx];
+                    const uint64 next = prev + addVal;
+                    acc[idx] = next;
+                    addVal = (next < prev) ? 1ULL : 0ULL;
+                    ++idx;
+                }
+                AssertMsg(addVal == 0, "SumPrecise superaccumulator overflow");
+            }
+        };
+
+        /// Round exact accumulated sum to nearest IEEE-754 binary64 (ties to even).
+        Var FinalizeExactSum(ExactSumAccumulator& acc, ScriptContext* scriptContext)
+        {
+            JavascriptLibrary* library = scriptContext->GetLibrary();
+            if (!acc.seenNotMinusZero)
+            {
+                return library->GetNegativeZero();
+            }
+            if (acc.seenNaN || (acc.seenPosInf && acc.seenNegInf))
+            {
+                return library->GetNaN();
+            }
+            if (acc.seenPosInf)
+            {
+                return library->GetPositiveInfinite();
+            }
+            if (acc.seenNegInf)
+            {
+                return library->GetNegativeInfinite();
+            }
+
+            int cmp = 0;
+            for (int32 i = static_cast<int32>(kSumPreciseAccumWords) - 1; i >= 0; --i)
+            {
+                if (acc.pos[i] != acc.neg[i])
+                {
+                    cmp = (acc.pos[i] > acc.neg[i]) ? 1 : -1;
+                    break;
+                }
+            }
+            if (cmp == 0)
+            {
+                return TaggedInt::ToVarUnchecked(0);
+            }
+
+            const bool resultSign = (cmp < 0);
+            uint64* major = resultSign ? acc.neg : acc.pos;
+            const uint64* minor = resultSign ? acc.pos : acc.neg;
+
+            uint64 borrow = 0;
+            for (uint32 i = 0; i < kSumPreciseAccumWords; ++i)
+            {
+                const uint64 a = major[i];
+                const uint64 b = minor[i];
+                const uint64 sub1 = a - b;
+                const uint64 borrow1 = (a < b) ? 1ULL : 0ULL;
+                const uint64 sub2 = sub1 - borrow;
+                const uint64 borrow2 = (sub1 < borrow) ? 1ULL : 0ULL;
+                major[i] = sub2;
+                borrow = borrow1 | borrow2;
+            }
+            Assert(borrow == 0);
+
+            int32 topWord = static_cast<int32>(kSumPreciseAccumWords) - 1;
+            while (topWord > 0 && major[topWord] == 0)
+            {
+                --topWord;
+            }
+            Assert(major[topWord] != 0);
+
+            const uint32 msb = static_cast<uint32>(topWord) * 64u + FindHighestSetBit64(major[topWord]);
+            const uint64 signBit = resultSign ? (1ULL << 63) : 0ULL;
+
+            if (msb < 52u)
+            {
+                // Every finite binary64 input is an integer multiple of 2^-1074, so
+                // any sum below 2^-1022 is already exact as a subnormal double.
+                const uint64 outBits = signBit | major[0];
+                double result = 0.0;
+                memcpy(&result, &outBits, sizeof(result));
+                return JavascriptNumber::ToVarNoCheck(result, scriptContext);
+            }
+
+            uint32 shift = msb - 52u;
+            const uint32 w = shift / 64u;
+            const uint32 b = shift % 64u;
+
+            uint64 sig53 = major[w] >> b;
+            if (b > 11u)
+            {
+                Assert(w + 1u < kSumPreciseAccumWords);
+                sig53 |= major[w + 1u] << (64u - b);
+            }
+            sig53 &= ((1ULL << 53) - 1ULL);
+
+            if (shift > 0u)
+            {
+                const uint32 rw = (b > 0u) ? w : (w - 1u);
+                const uint32 rb = (b > 0u) ? (b - 1u) : 63u;
+                const bool roundBit = ((major[rw] >> rb) & 1ULL) != 0;
+                const uint64 lowMask = (1ULL << rb) - 1ULL;
+                bool sticky = (major[rw] & lowMask) != 0;
+                for (uint32 i = 0; i < rw && !sticky; ++i)
+                {
+                    if (major[i] != 0)
+                    {
+                        sticky = true;
+                    }
+                }
+
+                if (roundBit && (sticky || (sig53 & 1ULL) != 0))
+                {
+                    ++sig53;
+                    if (sig53 == (1ULL << 53))
+                    {
+                        sig53 >>= 1;
+                        ++shift;
+                    }
+                }
+            }
+
+            const uint64 biasedExp = static_cast<uint64>(shift) + 1ULL;
+            if (biasedExp >= 0x7FFULL)
+            {
+                return resultSign ? library->GetNegativeInfinite() : library->GetPositiveInfinite();
+            }
+
+            const uint64 outBits = signBit | (biasedExp << 52) | (sig53 & 0x000FFFFFFFFFFFFFULL);
+            double result = 0.0;
+            memcpy(&result, &outBits, sizeof(result));
+            return JavascriptNumber::ToVarNoCheck(result, scriptContext);
+        }
+
+        RecyclableObject* SumPreciseGetIterator(Var items, ScriptContext* scriptContext)
+        {
+            JS_REENTRANCY_LOCK(jsReentLock, scriptContext->GetThreadContext());
+            RecyclableObject* iterator = nullptr;
+            JS_REENTRANT(jsReentLock,
+                BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+                {
+                    iterator = JavascriptOperators::GetIterator(items, scriptContext);
+                }
+                END_SAFE_REENTRANT_CALL);
+            return iterator;
+        }
+
+        RecyclableObject* SumPreciseCacheIteratorNext(RecyclableObject* iterator, ScriptContext* scriptContext)
+        {
+            JS_REENTRANCY_LOCK(jsReentLock, scriptContext->GetThreadContext());
+            RecyclableObject* next = nullptr;
+            JS_REENTRANT(jsReentLock,
+                BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+                {
+                    next = JavascriptOperators::CacheIteratorNext(iterator, scriptContext);
+                }
+                END_SAFE_REENTRANT_CALL);
+            return next;
+        }
+
+        bool SumPreciseIteratorStepAndValue(RecyclableObject* iterator, RecyclableObject* next, Var* valueOut, ScriptContext* scriptContext)
+        {
+            JS_REENTRANCY_LOCK(jsReentLock, scriptContext->GetThreadContext());
+            bool hasValue = false;
+            JS_REENTRANT(jsReentLock,
+                BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+                {
+                    hasValue = JavascriptOperators::IteratorStepAndValue(iterator, scriptContext, next, valueOut);
+                }
+                END_SAFE_REENTRANT_CALL);
+            return hasValue;
+        }
+
+        void SumPreciseIteratorClose(RecyclableObject* iterator, ScriptContext* scriptContext)
+        {
+            JS_REENTRANCY_LOCK(jsReentLock, scriptContext->GetThreadContext());
+            JS_REENTRANT(jsReentLock,
+                BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+                {
+                    JavascriptOperators::IteratorClose(iterator, scriptContext);
+                }
+                END_SAFE_REENTRANT_CALL);
+        }
+    }
+
     Var Math::EntrySumPrecise(RecyclableObject* function, CallInfo callInfo, ...)
     {
         PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
 
-        RUNTIME_ARGUMENTS(args, callInfo);
+        ARGUMENTS(args, callInfo);
         ScriptContext* scriptContext = function->GetScriptContext();
         AssertOrFailFast(!(callInfo.Flags & CallFlags_New));
         AssertOrFailFast(args.Info.Count > 0);
 
-        return scriptContext->GetLibrary()->GetUndefined();
+        AUTO_TAG_NATIVE_LIBRARY_ENTRY(function, callInfo, _u("Math.sumPrecise"));
+
+        Var items = args.Info.Count > 1 ? args[1] : scriptContext->GetLibrary()->GetUndefined();
+        if (!JavascriptConversion::CheckObjectCoercible(items, scriptContext))
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_NullOrUndefined, _u("Math.sumPrecise"));
+        }
+
+        RecyclableObject* iterator = SumPreciseGetIterator(items, scriptContext);
+        RecyclableObject* next = SumPreciseCacheIteratorNext(iterator, scriptContext);
+
+        ExactSumAccumulator acc;
+        uint64 count = 0;
+        Var value = nullptr;
+        while (SumPreciseIteratorStepAndValue(iterator, next, &value, scriptContext))
+        {
+            if (count != 0 && (count & 0x3FFULL) == 0)
+            {
+                PROBE_STACK(scriptContext, Js::Constants::MinStackDefault);
+                scriptContext->GetThreadContext()->CheckInterruptPoll();
+            }
+
+            if (value != nullptr && TaggedInt::Is(value))
+            {
+                acc.AddDouble(TaggedInt::ToDouble(value));
+            }
+            else if (value != nullptr && JavascriptNumber::Is(value))
+            {
+                acc.AddDouble(JavascriptNumber::GetValue(value));
+            }
+            else
+            {
+                SumPreciseIteratorClose(iterator, scriptContext);
+                JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedNumber, _u("Math.sumPrecise"));
+            }
+
+            ++count;
+        }
+
+        return FinalizeExactSum(acc, scriptContext);
     }
 } // namespace Js

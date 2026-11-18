@@ -245,12 +245,19 @@ namespace Js
     {
         PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
 
-        RUNTIME_ARGUMENTS(args, callInfo);
+        ARGUMENTS(args, callInfo);
         ScriptContext* scriptContext = function->GetScriptContext();
         AssertOrFailFast(!(callInfo.Flags & CallFlags_New));
         AssertOrFailFast(args.Info.Count > 0);
 
-        return scriptContext->GetLibrary()->GetUndefined();
+        if (args.Info.Count < 2)
+        {
+            return scriptContext->GetLibrary()->GetFalse();
+        }
+
+        Var arg = args[1];
+        bool isError = arg != nullptr && VarIs<JavascriptError>(arg) && !UnsafeVarTo<JavascriptError>(arg)->IsPrototype();
+        return JavascriptBoolean::ToVar(isError, scriptContext);
     }
 
     void __declspec(noreturn) JavascriptError::MapAndThrowError(ScriptContext* scriptContext, HRESULT hr)

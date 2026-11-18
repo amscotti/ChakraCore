@@ -69,4 +69,10 @@
       <compile-flags>-ESNumericSeparator -args summary -endargs</compile-flags>
     </default>
   </test>
+  <test>
+    <default>
+      <files>math_sumprecise.js</files>
+      <compile-flags>-args summary -endargs</compile-flags>
+    </default>
+  </test>
 </regress-exe>
