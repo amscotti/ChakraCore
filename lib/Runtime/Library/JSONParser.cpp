@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #include "RuntimeLibraryPch.h"
@@ -46,149 +47,218 @@ namespace JSON
         return Parse(input->GetSz(), input->GetLength());
     }
 
+    /*
+     * Memory ownership record (doc/memory-management.md section 3) for JSONParser::Walk / WalkProperty:
+     * - Resource / creation call: Recycler-managed JS values (holder, val, newElement, propName,
+     *   reviver), enumerable key snapshot array (keys = GetOwnEnumerablePropertyNames), and interned
+     *   PropertyRecord* instances (scriptContext->GetOrAddPropertyRecord).
+     * - Domain and allocator: ChakraCore Recycler GC heap (conservative stack scan); no untraced
+     *   native C++ heap/arena arrays store Var or object pointers across WalkProperty / reviver calls.
+     * - Physical allocation / release: Recycler owns allocation and collection of JS objects, strings,
+     *   keys arrays, and finalizable PropertyRecord entries; C++ stack frames hold no owning native buffers.
+     * - Logical views: uint64 array length len is captured once per array walk; keys snapshot array
+     *   is never exposed to JS user code.
+     * - Owner / transfer / aliases: Each recursive WalkProperty stack frame holds stack-scanned locals
+     *   (holder, val, keys, keyStr, keyRecord, newElement) across child walks and reviver calls.
+     *   Keeping keyStr and keyRecord live across WalkProperty prevents PropertyRecord finalization on GC.
+     * - Borrow invalidation: Reentrant reviver/getter/Proxy traps can run GC, mutate elements/properties,
+     *   change array length, freeze/seal/preventExtensions, convert JavascriptArray to ES5Array or
+     *   CopyOnAccessNativeIntArray, or revoke Proxies. Non-ES5 array fast-path is re-checked after
+     *   WalkProperty returns, and CopyOnAccess arrays are converted before DeleteItem/DefineOwnProperty.
+     * - Reentrancy points: GetItem/GetProperty, IsArray (revoked Proxy), OP_GetLength + ToLength,
+     *   GetOwnEnumerablePropertyNames (ownKeys / getOwnPropertyDescriptor), WalkProperty recursion,
+     *   DeleteItem/DeleteProperty, DefineOwnPropertyHelper (defineProperty), and CallFunction(reviver).
+     * - Thread/context: Bound script thread with active ScriptContext (BEGIN_SAFE_REENTRANT_CALL for CallFunction).
+     * - Release / exit: Stack frames unwind normally on return or JS exception; Recycler reclaims
+     *   unreferenced wrapper/keys objects and PropertyRecords on subsequent GC cycles.
+     * - Bounds / exhaustion: PROBE_STACK guards recursion depth; len is bounded by ES2025 ToLength
+     *   ([0, 2^53 - 1]) using uint64 indices so indices >= InvalidIndex use GetProperty/DeleteProperty.
+     */
+    static Js::JavascriptString* UInt64ToPropertyString(uint64 index, Js::ScriptContext* scriptContext)
+    {
+        if (index <= UINT_MAX)
+        {
+            return scriptContext->GetIntegerString(static_cast<uint>(index));
+        }
+        char16 buffer[24];
+        ::_ui64tow_s(index, buffer, _countof(buffer), 10);
+        return Js::JavascriptString::NewCopyBuffer(buffer, Js::JavascriptString::GetBufferLength(buffer), scriptContext);
+    }
+
+    static bool IsArrayOrThrowIfRevoked(Js::RecyclableObject* valObj, Js::ScriptContext* scriptContext)
+    {
+        Js::RecyclableObject* cur = valObj;
+        while (Js::VarIs<Js::JavascriptProxy>(cur))
+        {
+            Js::JavascriptProxy* proxy = Js::VarTo<Js::JavascriptProxy>(cur);
+            if (proxy->IsRevoked())
+            {
+                // Throw revoked-proxy TypeError in the caller's realm per ES2025 7.2.2 IsArray step 3a.
+                Js::JavascriptError::ThrowTypeError(scriptContext, JSERR_ErrorOnRevokedProxy, _u(""));
+            }
+            cur = proxy->GetTarget();
+        }
+        return Js::JavascriptOperators::IsArray(cur);
+    }
+
+    static void CreateDataProperty(Js::RecyclableObject* obj, Js::PropertyId propId, Js::Var value, Js::ScriptContext* scriptContext)
+    {
+#if ENABLE_COPYONACCESS_ARRAY
+        Js::JavascriptLibrary::CheckAndConvertCopyOnAccessNativeIntArray<Js::Var>(obj);
+#endif
+        Js::PropertyDescriptor desc;
+        desc.SetValue(value);
+        desc.SetWritable(true);
+        desc.SetEnumerable(true);
+        desc.SetConfigurable(true);
+        Js::JavascriptObject::DefineOwnPropertyHelper(obj, propId, desc, scriptContext, false);
+    }
+
     Js::Var JSONParser::Walk(Js::JavascriptString* name, Js::PropertyId id, Js::Var holder, uint32 index)
     {
         AssertMsg(reviver, "JSON post parse walk with null reviver");
+        AssertMsg(Js::JavascriptOperators::IsObject(holder),
+            "The holder argument in a JSON::Walk function must be an object or an array");
+        Js::RecyclableObject* holderObj = Js::VarTo<Js::RecyclableObject>(holder);
+        bool hasIndex = (index != Js::JavascriptArray::InvalidIndex);
+        return WalkProperty(name, holderObj, id, index, hasIndex);
+    }
+
+    Js::Var JSONParser::WalkProperty(Js::JavascriptString* name, Js::RecyclableObject* holder, Js::PropertyId id, uint64 index, bool hasIndex)
+    {
+        AssertMsg(reviver, "JSON post parse walk with null reviver");
         PROBE_STACK(scriptContext, Js::Constants::MinStackDefault);
-        Js::Var value;
-        Js::Var values[3];
-        Js::Arguments args(0, values);
-        Js::RecyclableObject *undefined = scriptContext->GetLibrary()->GetUndefined();
 
-        if (Js::DynamicObject::IsAnyArray(holder))
+        // ES2025 25.5.1.1 InternalizeJSONProperty ( holder, name, reviver )
+        // 1. Let val be ? Get(holder, name).
+        Js::Var val = nullptr;
+        if (hasIndex)
         {
-            // when called from an array the key is NULL and the keyId is the index.
-            value = Js::JavascriptArray::FromAnyArray(holder)->DirectGetItem(id);
-            name = scriptContext->GetIntegerString(id);
-
-        }
-        else
-        {
-            AssertMsg(Js::JavascriptOperators::GetTypeId(holder) == Js::TypeIds_Object || Js::JavascriptOperators::GetTypeId(holder) == Js::TypeIds_Arguments,
-                "The holder argument in a JSON::Walk function must be an object or an array");
-            if (id == Constants::NoProperty)
+            if (!Js::JavascriptOperators::GetItem(holder, index, &val, scriptContext))
             {
-                if (!Js::VarTo<Js::RecyclableObject>(holder)->GetItem(holder, index, &value, scriptContext))
-                {
-                    value = undefined;
-                }
-            }
-            else
-            {
-                if (!Js::VarTo<Js::RecyclableObject>(holder)->GetProperty(holder, id, &value, NULL, scriptContext))
-                {
-                    value = undefined;
-                }
-            }
-        }
-
-        // this is a post order walk. Visit the children before calling walk on this object
-        if (Js::DynamicObject::IsAnyArray(value))
-        {
-            Js::JavascriptArray* arrayVal = JavascriptArray::EnsureNonNativeArray(Js::JavascriptArray::FromAnyArray(value));
-            Assert(!Js::VarIs<Js::JavascriptNativeIntArray>(arrayVal) && !Js::VarIs<Js::JavascriptNativeFloatArray>(arrayVal));
-            uint length = arrayVal->GetLength();
-            if (!arrayVal->IsCrossSiteObject())
-            {
-                for(uint k = 0; k < length; k++)
-                {
-                    Js::Var newElement = Walk(0, k, value);
-                    if(Js::JavascriptOperators::IsUndefinedObject(newElement, undefined))
-                    {
-                        arrayVal->DirectDeleteItemAt<Js::Var>(k);
-                    }
-                    else
-                    {
-                        arrayVal->DirectSetItemAt(k, newElement);
-                    }
-                }
-            }
-            else
-            {
-                for(uint k = 0; k < length; k++)
-                {
-                    Js::Var newElement = Walk(0, k, value);
-                    if(Js::JavascriptOperators::IsUndefinedObject(newElement, undefined))
-                    {
-                        arrayVal->DirectDeleteItemAt<Js::Var>(k);
-                    }
-                    else
-                    {
-                        arrayVal->SetItem(k, newElement, Js::PropertyOperation_None);
-                    }
-                }
+                val = scriptContext->GetLibrary()->GetUndefined();
             }
         }
         else
         {
-            Js::TypeId typeId = Js::JavascriptOperators::GetTypeId(value);
-            if (typeId == Js::TypeIds_Object || typeId == Js::TypeIds_Arguments)
+            Assert(id != Js::Constants::NoProperty);
+            if (!Js::JavascriptOperators::GetProperty(holder, id, &val, scriptContext, nullptr))
             {
-                Js::JavascriptStaticEnumerator enumerator;
+                val = scriptContext->GetLibrary()->GetUndefined();
+            }
+        }
 
-                // normally we should have a JSON object here and the enumerator should be always be successful. However, the objects can be
-                // modified by user code. It is better to skip a damaged object. ES5 spec doesn't specify an error here.
-                if(Js::VarTo<Js::RecyclableObject>(value)->GetEnumerator(&enumerator, EnumeratorFlags::SnapShotSemantics, scriptContext))
+        // 2. If val is an Object, then
+        if (Js::JavascriptOperators::IsObject(val))
+        {
+            Js::RecyclableObject* valObj = Js::VarTo<Js::RecyclableObject>(val);
+            // a. Let isArray be ? IsArray(val).
+            if (IsArrayOrThrowIfRevoked(valObj, scriptContext))
+            {
+                // b. If isArray is true, then
+                //    i. Let len be ? LengthOfArrayLike(val).
+                uint64 len = static_cast<uint64>(
+                    Js::JavascriptConversion::ToLength(
+                        Js::JavascriptOperators::OP_GetLength(valObj, scriptContext),
+                        scriptContext));
+
+                // ii. Let I be 0. iii. Repeat, while I < len,
+                for (uint64 i = 0; i < len; i++)
                 {
-                    Js::JavascriptString * propertyName;
-
-                    while (true)
+                    Js::JavascriptString* propName = UInt64ToPropertyString(i, scriptContext);
+                    Js::Var newElement = WalkProperty(propName, valObj, Js::Constants::NoProperty, i, true);
+                    if (Js::JavascriptOperators::IsUndefined(newElement))
                     {
-                        Js::PropertyId idMember = Js::Constants::NoProperty;
-                        propertyName = enumerator.MoveAndGetNext(idMember);
-                        if (propertyName == nullptr)
+#if ENABLE_COPYONACCESS_ARRAY
+                        Js::JavascriptLibrary::CheckAndConvertCopyOnAccessNativeIntArray<Js::Var>(valObj);
+#endif
+                        if (i < Js::JavascriptArray::InvalidIndex)
                         {
-                            break;
+                            Js::JavascriptOperators::DeleteItem(valObj, static_cast<uint32>(i), Js::PropertyOperation_None);
                         }
-
-                        //NOTE: If testing key value call enumerator->GetCurrentValue() to confirm value is correct;
-
-                        if (idMember != Js::Constants::NoProperty)
-                        {
-                            Js::Var newElement = Walk(propertyName, idMember, value);
-                            if (Js::JavascriptOperators::IsUndefinedObject(newElement, undefined))
-                            {
-                                Js::JavascriptOperators::DeleteProperty(Js::VarTo<Js::RecyclableObject>(value), idMember);
-                            }
-                            else
-                            {
-                                Js::JavascriptOperators::SetProperty(value, Js::VarTo<Js::RecyclableObject>(value), idMember, newElement, scriptContext);
-                            }
-                        }
-                        // For the numeric cases the enumerator is set to a NullEnumerator (see class in ForInObjectEnumerator.h)
-                        // Numerals do not have property Ids so we need to set and delete items
                         else
                         {
-                            uint32 propertyIndex = enumerator.GetCurrentItemIndex();
-                            AssertMsg(Js::JavascriptArray::InvalidIndex != propertyIndex, "Not a numeric type");
-                            Js::Var newElement = Walk(propertyName, idMember, value, propertyIndex);
-                            if (Js::JavascriptOperators::IsUndefinedObject(newElement, undefined))
-                            {
-                                Js::JavascriptOperators::DeleteItem(Js::VarTo<Js::RecyclableObject>(value), propertyIndex);
+                            Js::JavascriptOperators::DeleteItem(valObj, i, Js::PropertyOperation_None);
+                        }
+                    }
+                    else
+                    {
+#if ENABLE_COPYONACCESS_ARRAY
+                        Js::JavascriptLibrary::CheckAndConvertCopyOnAccessNativeIntArray<Js::Var>(valObj);
+#endif
+                        Js::JavascriptArray* nonES5Array = Js::JavascriptArray::TryVarToNonES5Array(valObj);
+                        if (nonES5Array != nullptr && !nonES5Array->IsCrossSiteObject() && i < Js::JavascriptArray::InvalidIndex)
+                        {
+                            nonES5Array->SetItem(static_cast<uint32>(i), newElement, Js::PropertyOperation_None);
+                        }
+                        else
+                        {
+                            const Js::PropertyRecord* elemRecord = nullptr;
+                            scriptContext->GetOrAddPropertyRecord(propName, &elemRecord);
+                            CreateDataProperty(valObj, elemRecord->GetPropertyId(), newElement, scriptContext);
+                        }
+                    }
+                }
+            }
+            else
+            {
+                // c. Else,
+                //    i. Let keys be ? EnumerableOwnProperties(val, KEY).
+                Js::JavascriptArray* keys = Js::JavascriptOperators::GetOwnEnumerablePropertyNames(valObj, scriptContext);
+                uint32 keyCount = keys->GetLength();
+                for (uint32 k = 0; k < keyCount; k++)
+                {
+                    Js::Var keyVar = keys->DirectGetItem(k);
+                    Assert(Js::VarIs<Js::JavascriptString>(keyVar));
+                    Js::JavascriptString* keyStr = Js::UnsafeVarTo<Js::JavascriptString>(keyVar);
+                    const Js::PropertyRecord* keyRecord = nullptr;
+                    scriptContext->GetOrAddPropertyRecord(keyStr, &keyRecord);
 
-                            }
-                            else
-                            {
-                                Js::JavascriptOperators::SetItem(value, Js::VarTo<Js::RecyclableObject>(value), propertyIndex, newElement, scriptContext);
-                            }
-
+                    if (keyRecord->IsNumeric())
+                    {
+                        uint32 propIndex = keyRecord->GetNumericValue();
+                        Js::Var newElement = WalkProperty(keyStr, valObj, Js::Constants::NoProperty, propIndex, true);
+                        if (Js::JavascriptOperators::IsUndefined(newElement))
+                        {
+#if ENABLE_COPYONACCESS_ARRAY
+                            Js::JavascriptLibrary::CheckAndConvertCopyOnAccessNativeIntArray<Js::Var>(valObj);
+#endif
+                            Js::JavascriptOperators::DeleteItem(valObj, propIndex, Js::PropertyOperation_None);
+                        }
+                        else
+                        {
+                            CreateDataProperty(valObj, keyRecord->GetPropertyId(), newElement, scriptContext);
+                        }
+                    }
+                    else
+                    {
+                        Js::Var newElement = WalkProperty(keyStr, valObj, keyRecord->GetPropertyId(), 0, false);
+                        if (Js::JavascriptOperators::IsUndefined(newElement))
+                        {
+                            Js::JavascriptOperators::DeleteProperty(valObj, keyRecord->GetPropertyId(), Js::PropertyOperation_None);
+                        }
+                        else
+                        {
+                            CreateDataProperty(valObj, keyRecord->GetPropertyId(), newElement, scriptContext);
                         }
                     }
                 }
             }
         }
 
-        // apply reviver on this node now
+        // 3. Return ? Call(reviver, holder, << name, val >>).
+        Js::Var values[3];
+        Js::Arguments args(0, values);
         args.Info.Count = 3;
         args.Values[0] = holder;
         args.Values[1] = name;
-        args.Values[2] = value;
+        args.Values[2] = val;
         BEGIN_SAFE_REENTRANT_CALL(reviver->GetScriptContext()->GetThreadContext())
         {
-            value = Js::JavascriptFunction::CallFunction<true>(reviver, reviver->GetEntryPoint(), args);
+            val = Js::JavascriptFunction::CallFunction<true>(reviver, reviver->GetEntryPoint(), args);
         }
         END_SAFE_REENTRANT_CALL
-        return value;
+        return val;
     }
 
     Js::Var JSONParser::ParseObject()
