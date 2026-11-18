@@ -50,6 +50,7 @@
 #include "unicode/ulocale.h"
 #include "unicode/ulocbuilder.h"
 #include "unicode/ulocdata.h"
+#include "unicode/unumberformatter.h"
 #include "unicode/unumsys.h"
 #include "unicode/ureldatefmt.h"
 #include "unicode/ures.h"
@@ -118,6 +119,8 @@ namespace PlatformAgnostic
         typedef ScopedICUObject<ULocaleDisplayNames *, uldn_close> ScopedULocaleDisplayNames;
         typedef ScopedICUObject<UBreakIterator *, ubrk_close> ScopedUBreakIterator;
         typedef ScopedICUObject<UResourceBundle *, ures_close> ScopedUResourceBundle;
+        typedef ScopedICUObject<UNumberFormatter *, unumf_close> ScopedUNumberFormatter;
+        typedef ScopedICUObject<UFormattedNumber *, unumf_closeResult> ScopedUFormattedNumber;
 
         inline int GetICUMajorVersion()
         {

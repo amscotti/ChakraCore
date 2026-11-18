@@ -84,7 +84,9 @@
     <ClCompile Include="$(MSBuildThisFileDirectory)MathLibrary.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)ExternalLibraryBase.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)IntlDisplayNames.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)IntlDurationFormat.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)IntlEngineInterfaceExtensionObject.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)IntlEnumeration.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)IntlListFormat.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)IntlLocale.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)IntlModernShared.cpp" />
@@ -218,7 +220,9 @@
     <ClInclude Include="RuntimeLibraryPch.h" />
     <ClInclude Include="ExternalLibraryBase.h" />
     <ClInclude Include="IntlDisplayNames.h" />
+    <ClInclude Include="IntlDurationFormat.h" />
     <ClInclude Include="IntlEngineInterfaceExtensionObject.h" />
+    <ClInclude Include="IntlEnumeration.h" />
     <ClInclude Include="IntlListFormat.h" />
     <ClInclude Include="IntlLocale.h" />
     <ClInclude Include="IntlModernShared.h" />

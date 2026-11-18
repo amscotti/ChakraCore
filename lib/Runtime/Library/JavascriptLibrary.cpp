@@ -26,6 +26,8 @@
 #include "Library/IntlRelativeTimeFormat.h"
 #include "Library/IntlDisplayNames.h"
 #include "Library/IntlSegmenter.h"
+#include "Library/IntlEnumeration.h"
+#include "Library/IntlDurationFormat.h"
 #endif
 #ifdef ENABLE_JS_BUILTINS
 #include "Library/JsBuiltInEngineInterfaceExtensionObject.h"
@@ -5827,6 +5829,7 @@ namespace Js
         intlSegmenterPrototype = nullptr;
         intlSegmentsPrototype = nullptr;
         intlSegmentIteratorPrototype = nullptr;
+        intlDurationFormatPrototype = nullptr;
 #endif
         IntlObject = DynamicObject::New(
             recycler,
@@ -5864,7 +5867,7 @@ namespace Js
 
     bool JavascriptLibrary::InitializeIntlObject(DynamicObject* IntlObject, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)
     {
-        typeHandler->Convert(IntlObject, mode,  /*initSlotCapacity*/ 12);
+        typeHandler->Convert(IntlObject, mode,  /*initSlotCapacity*/ 16);
 
         auto intlInitializer = [&](IntlEngineInterfaceExtensionObject* intlExtension, ScriptContext * scriptContext, DynamicObject* intlObject) ->void
         {
@@ -5899,6 +5902,8 @@ namespace Js
             IntlRelativeTimeFormat::Initialize(library, IntlObject);
             IntlDisplayNames::Initialize(library, IntlObject);
             IntlSegmenter::Initialize(library, IntlObject);
+            IntlEnumeration::Initialize(library, IntlObject);
+            IntlDurationFormat::Initialize(library, IntlObject);
         }
 #endif
 

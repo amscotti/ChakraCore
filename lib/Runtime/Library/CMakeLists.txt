@@ -43,7 +43,9 @@ set(CRLIB_SOURCE_CODES
     ForInObjectEnumerator.cpp
     GlobalObject.cpp
     IntlDisplayNames.cpp
+    IntlDurationFormat.cpp
     IntlEngineInterfaceExtensionObject.cpp
+    IntlEnumeration.cpp
     IntlListFormat.cpp
     IntlLocale.cpp
     IntlModernShared.cpp

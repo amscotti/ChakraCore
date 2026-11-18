@@ -12,6 +12,8 @@
 #include "Library/IntlRelativeTimeFormat.h"
 #include "Library/IntlDisplayNames.h"
 #include "Library/IntlSegmenter.h"
+#include "Library/IntlEnumeration.h"
+#include "Library/IntlDurationFormat.h"
 #endif
 
 namespace Js

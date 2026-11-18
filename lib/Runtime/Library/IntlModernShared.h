@@ -55,7 +55,8 @@ namespace Js
             DisplayNames,
             Segmenter,
             Segments,
-            SegmentIterator
+            SegmentIterator,
+            DurationFormat
         };
 
         class IntlModernState : public FinalizableObject

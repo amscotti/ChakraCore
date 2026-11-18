@@ -681,6 +681,14 @@ BUILTIN(IntlSegmenter, ResolvedOptions, EntryResolvedOptions, FunctionInfo::Erro
 BUILTIN(IntlSegmenter, SegmentsContaining, EntrySegmentsContaining, FunctionInfo::ErrorOnNew)
 BUILTIN(IntlSegmenter, SegmentsIterator, EntrySegmentsIterator, FunctionInfo::ErrorOnNew)
 BUILTIN(IntlSegmenter, SegmentIteratorNext, EntrySegmentIteratorNext, FunctionInfo::ErrorOnNew)
+
+BUILTIN(IntlEnumeration, SupportedValuesOf, EntrySupportedValuesOf, FunctionInfo::ErrorOnNew)
+
+BUILTIN(IntlDurationFormat, NewInstance, EntryNewInstance, FunctionInfo::SkipDefaultNewObject)
+BUILTIN(IntlDurationFormat, SupportedLocalesOf, EntrySupportedLocalesOf, FunctionInfo::ErrorOnNew)
+BUILTIN(IntlDurationFormat, Format, EntryFormat, FunctionInfo::ErrorOnNew)
+BUILTIN(IntlDurationFormat, FormatToParts, EntryFormatToParts, FunctionInfo::ErrorOnNew)
+BUILTIN(IntlDurationFormat, ResolvedOptions, EntryResolvedOptions, FunctionInfo::ErrorOnNew)
 #endif
 
 #undef BUILTIN_TEMPLATE

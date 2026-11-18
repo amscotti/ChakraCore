@@ -701,7 +701,9 @@ PROJECTED_ENUMS(PROJECTED_ENUM)
             _u("ListFormat"),
             _u("RelativeTimeFormat"),
             _u("DisplayNames"),
-            _u("Segmenter")
+            _u("Segmenter"),
+            _u("supportedValuesOf"),
+            _u("DurationFormat")
         };
         for (size_t i = 0; i < _countof(modernIntlProps); ++i)
         {

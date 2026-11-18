@@ -180,6 +180,8 @@ namespace Js
         friend class IntlRelativeTimeFormat;
         friend class IntlDisplayNames;
         friend class IntlSegmenter;
+        friend class IntlEnumeration;
+        friend class IntlDurationFormat;
 #endif
 #ifdef ENABLE_JS_BUILTINS
         friend class JsBuiltInEngineInterfaceExtensionObject;
@@ -454,6 +456,7 @@ namespace Js
         Field(DynamicObject*) intlSegmenterPrototype;
         Field(DynamicObject*) intlSegmentsPrototype;
         Field(DynamicObject*) intlSegmentIteratorPrototype;
+        Field(DynamicObject*) intlDurationFormatPrototype;
 #endif
         Field(DynamicObject*) atomicsObject;
 
@@ -640,6 +643,7 @@ namespace Js
             intlSegmenterPrototype(nullptr),
             intlSegmentsPrototype(nullptr),
             intlSegmentIteratorPrototype(nullptr),
+            intlDurationFormatPrototype(nullptr),
 #endif
             typesWithOnlyWritablePropertyProtoChain(recycler),
             typesWithNoSpecialPropertyProtoChain(recycler)
@@ -1045,6 +1049,8 @@ namespace Js
         void SetIntlSegmentsPrototype(DynamicObject* proto) { intlSegmentsPrototype = proto; }
         DynamicObject* GetIntlSegmentIteratorPrototype() const { return intlSegmentIteratorPrototype; }
         void SetIntlSegmentIteratorPrototype(DynamicObject* proto) { intlSegmentIteratorPrototype = proto; }
+        DynamicObject* GetIntlDurationFormatPrototype() const { return intlDurationFormatPrototype; }
+        void SetIntlDurationFormatPrototype(DynamicObject* proto) { intlDurationFormatPrototype = proto; }
 #endif
         JavascriptRegExpStringIterator* CreateRegExpStringIterator(RecyclableObject* matchingRegExp, JavascriptString* iteratedString, bool global, bool fullUnicode);
         JavascriptFunction* CreateNonProfiledFunction(FunctionInfo * functionInfo);
