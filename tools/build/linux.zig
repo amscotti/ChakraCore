@@ -228,7 +228,7 @@ fn gateOptimize(b: *std.Build, profile: Profile) void {
         fail("unsupported -Doptimize={t} for -Dprofile={s} on Linux: requires {t}", .{ choice, profile.name(), want });
 }
 
-fn gateTarget(b: *std.Build) void {
+fn gateTarget(b: *std.Build) std.Build.ResolvedTarget {
     const rt = b.standardTargetOptions(.{ .default_target = .{
         .cpu_arch = .x86_64,
         .os_tag = .linux,
@@ -251,6 +251,7 @@ fn gateTarget(b: *std.Build) void {
         fail("unsupported ABI {t}: this profile builds only x86_64-linux-gnu", .{t.abi});
     if (t.ofmt != .elf)
         fail("unsupported object format {t}: this profile builds only ELF", .{t.ofmt});
+    return rt;
 }
 
 pub fn glibcFirstLineMatches(first: []const u8, want_glibc: []const u8) bool {
@@ -706,7 +707,7 @@ pub fn build(b: *std.Build) void {
         fail("-Dsanitize={s} is not supported with -Dprofile=release-shared on Linux; use test (default) or debug-static", .{sanitize.name()});
     }
     gateOptimize(b, profile);
-    gateTarget(b);
+    const target = gateTarget(b);
     const want_glibc = gateGlibc(b);
     const icu = gateIcu(b);
     const jit = b.option(bool, "jit", "Enable JIT backend (default: true unsanitized, false when -Dsanitize!=none)") orelse defaultJitForSanitize(sanitize);
@@ -839,6 +840,20 @@ pub fn build(b: *std.Build) void {
     std.debug.assert(n == want_n);
     std.debug.assert(objs.count() == want_n);
 
+    // Z1 leaf Zig SIMD codec (doc/zig-strategy.md section 5.3). Built outside C/C++ TU count
+    // (`want_n`) so compile_commands / contract TU count remains unchanged.
+    const u8a_codec_obj = b.addObject(.{
+        .name = "u8a_codec",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("lib/ZigCodec/u8a_codec.zig"),
+            .target = target,
+            .optimize = .fast,
+            .pic = true,
+            .link_libc = false,
+            .link_libcpp = false,
+        }),
+    });
+
     // Archives via `zig ar` (reference: cmake `ar qc` + ranlib; member
     // order is the reference edge order).
     var archives: std.StringHashMap(std.Build.LazyPath) = .init(arena);
@@ -850,6 +865,7 @@ pub fn build(b: *std.Build) void {
             const o = objs.get(src) orelse fail("archive ChakraCoreStatic: no object for {s}", .{src});
             ar.addFileArg(o);
         }
+        ar.addFileArg(u8a_codec_obj.getEmittedBin());
         archives.put("ChakraCoreStatic", out) catch @panic("OOM");
     }
     if (!is_static) {
@@ -922,6 +938,7 @@ pub fn build(b: *std.Build) void {
             if (isExcludedStaticObj(src, profile, jit)) continue;
             so_link.addFileArg(objs.get(src).?);
         }
+        so_link.addFileArg(u8a_codec_obj.getEmittedBin());
         so_link.addArg("-o");
         const so_bin = so_link.addOutputFileArg("libChakraCore.so");
         so_link.addArg(b.fmt("-L{s}", .{ctx.icu_libdir}));
@@ -1250,6 +1267,14 @@ pub fn build(b: *std.Build) void {
         }),
     });
     selftest_top.dependOn(&b.addRunArtifact(owned_bytes_tests).step);
+    const u8a_codec_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("lib/ZigCodec/u8a_codec.zig"),
+            .target = b.graph.host,
+            .optimize = .debug,
+        }),
+    });
+    selftest_top.dependOn(&b.addRunArtifact(u8a_codec_tests).step);
     const tools_test_top = b.step("check-build-tools", "Failure-path tests for the verification tools (no engine build required)");
     tools_test_top.dependOn(&tools_test.step);
 

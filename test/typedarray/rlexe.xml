@@ -453,4 +453,10 @@ Below test fails with difference in space. Investigate the cause and re-enable t
       <compile-flags>-args summary -endargs</compile-flags>
     </default>
   </test>
+  <test>
+    <default>
+      <files>uint8array_base64_hex.js</files>
+      <compile-flags>-CollectGarbage -args summary -endargs</compile-flags>
+    </default>
+  </test>
 </regress-exe>

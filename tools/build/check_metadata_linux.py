@@ -66,7 +66,7 @@ out/<profile> for debug-static / release-shared):
      to their lib/ sources; on shared profiles, bin/ and lib/ .so copies
      identical; on debug-static, no .so and no singular archives, plus
      required JsRT symbols defined in libChakraCoreStatic.a; archives
-     present with parameterized member counts (base static 669 minus
+     present with parameterized member counts (base static 670 minus
      91 when --no-jit and minus 37 on release-shared; Pal 90, Codex 1,
      PlatformAgnostic 11 on shared profiles; `ar t`).
   6. The `.profile` marker reads `<profile>`.
@@ -107,7 +107,7 @@ PROFILES = ("test", "debug-static", "release-shared")
 DEFAULT_ICU_MAJOR = "74"
 BACKEND_TU_COUNT = 91
 WABT_TU_COUNT = 37
-STATIC_ARCHIVE_BASE = 669
+STATIC_ARCHIVE_BASE = 670
 
 WANT_SONAME = "libChakraCore.so"
 WANT_ICU_NEEDED = ("libicuuc.so.74", "libicui18n.so.74")
@@ -634,25 +634,25 @@ def self_test():
                       and not validate_icu_major("abc"))
 
         # Archive member parameterization across profiles and --no-jit.
-        bad += report("test JIT expects 669 static + 3 singular archives",
+        bad += report("test JIT expects 670 static + 3 singular archives",
                       expected_archive_members("test", jit=True) == WANT_MEMBERS)
-        bad += report("test --no-jit expects 578 static + 3 singular",
+        bad += report("test --no-jit expects 579 static + 3 singular",
                       expected_archive_members("test", jit=False)[
-                          "lib/libChakraCoreStatic.a"] == 578
+                          "lib/libChakraCoreStatic.a"] == 579
                       and len(expected_archive_members("test", jit=False)) == 4)
-        bad += report("release-shared JIT expects 632 static + 3 singular",
+        bad += report("release-shared JIT expects 633 static + 3 singular",
                       expected_archive_members("release-shared", jit=True)[
-                          "lib/libChakraCoreStatic.a"] == 632
+                          "lib/libChakraCoreStatic.a"] == 633
                       and len(expected_archive_members("release-shared", jit=True)) == 4)
-        bad += report("release-shared --no-jit expects 541 static",
+        bad += report("release-shared --no-jit expects 542 static",
                       expected_archive_members("release-shared", jit=False)[
-                          "lib/libChakraCoreStatic.a"] == 541)
-        bad += report("debug-static JIT expects 669 static, no singulars",
+                          "lib/libChakraCoreStatic.a"] == 542)
+        bad += report("debug-static JIT expects 670 static, no singulars",
                       expected_archive_members("debug-static", jit=True)
-                      == {"lib/libChakraCoreStatic.a": 669})
-        bad += report("debug-static --no-jit expects 578 static, no singulars",
+                      == {"lib/libChakraCoreStatic.a": 670})
+        bad += report("debug-static --no-jit expects 579 static, no singulars",
                       expected_archive_members("debug-static", jit=False)
-                      == {"lib/libChakraCoreStatic.a": 578})
+                      == {"lib/libChakraCoreStatic.a": 579})
 
         # Static no-so & self-contained controls.
         static_dir = os.path.join(tmp, "static-clean")

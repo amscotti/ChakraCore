@@ -1037,6 +1037,21 @@ pub fn build(b: *std.Build) void {
     const expect_singular: usize = if (is_static) 0 else 3;
     std.debug.assert(singular_libs.items.len == expect_singular);
 
+    // Z1 leaf Zig SIMD codec (doc/zig-strategy.md section 5.3). Built outside C/C++ TU count
+    // (`n`) so compile_commands / contract TU count remains 540.
+    const u8a_codec_obj = b.addObject(.{
+        .name = "u8a_codec",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("lib/ZigCodec/u8a_codec.zig"),
+            .target = target,
+            .optimize = .fast,
+            .pic = true,
+            .link_libc = false,
+            .link_libcpp = false,
+        }),
+    });
+    static_objs.append(arena, u8a_codec_obj.getEmittedBin()) catch @panic("OOM");
+
     // libChakraCoreStatic.a (contract section 5.2).
     // The jit profile's -g objects sum past 2GB. Zig's archiver then
     // fails with "failed to write: Unexpected" (the partial file is a
@@ -1612,6 +1627,14 @@ pub fn build(b: *std.Build) void {
         }),
     });
     selftest_top.dependOn(&b.addRunArtifact(owned_bytes_tests).step);
+    const u8a_codec_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("lib/ZigCodec/u8a_codec.zig"),
+            .target = b.graph.host,
+            .optimize = .debug,
+        }),
+    });
+    selftest_top.dependOn(&b.addRunArtifact(u8a_codec_tests).step);
     const tools_test_top = b.step("check-build-tools", "Failure-path tests for the B1-B3 verification tools (no engine build required)");
     tools_test_top.dependOn(&tools_test.step);
 

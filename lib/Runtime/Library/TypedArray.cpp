@@ -9,6 +9,7 @@
 //----------------------------------------------------------------------------
 #include "RuntimeLibraryPch.h"
 #include "AtomicsOperations.h"
+#include "../../ZigCodec/u8a_codec.h"
 
 #define INSTANTIATE_BUILT_IN_ENTRYPOINTS(typeName) \
     template Var typeName::NewInstance(RecyclableObject* function, CallInfo callInfo, ...); \
@@ -2853,6 +2854,407 @@ namespace Js
         return GetKeysEntriesValuesHelper(args, scriptContext, _u("[TypedArray].prototype.values"), JavascriptArrayIteratorKind::Value);
     }
 
+    namespace
+    {
+        bool EqualsAsciiLiteral(JavascriptString* str, const char16* literal, charcount_t literalLen)
+        {
+            if (str->GetLength() != literalLen)
+            {
+                return false;
+            }
+            const char16* chars = str->GetString();
+            for (charcount_t i = 0; i < literalLen; ++i)
+            {
+                if (chars[i] != literal[i])
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        // ES2026 ValidateUint8Array + mutability gate for setFrom* methods.
+        // Does NOT check detached/OOB yet so options property getters run first per spec.
+        TypedArrayBase* ValidateUint8ArrayReceiver(
+            Var thisArg,
+            ScriptContext* scriptContext,
+            const char16* apiName,
+            bool requireMutable)
+        {
+            TypedArrayBase* ta = JavascriptOperators::TryFromVar<TypedArrayBase>(thisArg);
+            if (ta == nullptr || ta->GetTypeId() != TypeIds_Uint8Array)
+            {
+                JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NeedTypedArray);
+            }
+            if (requireMutable && IsImmutableBuffer(ta->GetArrayBuffer()))
+            {
+                JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedArrayBufferObject, apiName);
+            }
+            return ta;
+        }
+
+        RecyclableObject* GetCodecOptionsObject(
+            Var optionsArg,
+            ScriptContext* scriptContext,
+            const char16* apiName)
+        {
+            if (JavascriptOperators::IsUndefined(optionsArg))
+            {
+                return nullptr;
+            }
+            if (!JavascriptOperators::IsObject(optionsArg))
+            {
+                JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_NeedObject, apiName);
+            }
+            return VarTo<RecyclableObject>(optionsArg);
+        }
+
+        uint8_t ReadAlphabetOption(
+            RecyclableObject* opts,
+            ScriptContext* scriptContext,
+            const char16* apiName)
+        {
+            if (opts == nullptr)
+            {
+                return 0;
+            }
+            PropertyId propId = scriptContext->GetOrAddPropertyIdTracked(_u("alphabet"));
+            Var val = JavascriptOperators::GetProperty(opts, propId, scriptContext);
+            if (JavascriptOperators::IsUndefined(val))
+            {
+                return 0;
+            }
+            if (!VarIs<JavascriptString>(val))
+            {
+                JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_Invalid, apiName);
+            }
+            JavascriptString* str = UnsafeVarTo<JavascriptString>(val);
+            if (EqualsAsciiLiteral(str, _u("base64"), 6))
+            {
+                return 0;
+            }
+            if (EqualsAsciiLiteral(str, _u("base64url"), 9))
+            {
+                return 1;
+            }
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_Invalid, apiName);
+        }
+
+        uint8_t ReadOmitPaddingOption(RecyclableObject* opts, ScriptContext* scriptContext)
+        {
+            if (opts == nullptr)
+            {
+                return 0;
+            }
+            PropertyId propId = scriptContext->GetOrAddPropertyIdTracked(_u("omitPadding"));
+            Var val = JavascriptOperators::GetProperty(opts, propId, scriptContext);
+            return JavascriptConversion::ToBoolean(val, scriptContext) ? 1 : 0;
+        }
+
+        uint8_t ReadLastChunkHandlingOption(
+            RecyclableObject* opts,
+            ScriptContext* scriptContext,
+            const char16* apiName)
+        {
+            if (opts == nullptr)
+            {
+                return ZIG_U8A_LAST_LOOSE;
+            }
+            PropertyId propId = scriptContext->GetOrAddPropertyIdTracked(_u("lastChunkHandling"));
+            Var val = JavascriptOperators::GetProperty(opts, propId, scriptContext);
+            if (JavascriptOperators::IsUndefined(val))
+            {
+                return ZIG_U8A_LAST_LOOSE;
+            }
+            if (!VarIs<JavascriptString>(val))
+            {
+                JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_Invalid, apiName);
+            }
+            JavascriptString* str = UnsafeVarTo<JavascriptString>(val);
+            if (EqualsAsciiLiteral(str, _u("loose"), 5))
+            {
+                return ZIG_U8A_LAST_LOOSE;
+            }
+            if (EqualsAsciiLiteral(str, _u("strict"), 6))
+            {
+                return ZIG_U8A_LAST_STRICT;
+            }
+            if (EqualsAsciiLiteral(str, _u("stop-before-partial"), 19))
+            {
+                return ZIG_U8A_LAST_STOP_BEFORE_PARTIAL;
+            }
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_Invalid, apiName);
+        }
+
+        Var SizeToNumberVar(size_t value, ScriptContext* scriptContext)
+        {
+            if (value <= MAXUINT32)
+            {
+                return JavascriptNumber::ToVar(static_cast<uint32>(value), scriptContext);
+            }
+            return JavascriptNumber::ToVar(static_cast<uint64>(value), scriptContext);
+        }
+
+        Var CreateDecodeResultObject(
+            ScriptContext* scriptContext,
+            size_t readCount,
+            size_t writtenCount)
+        {
+            DynamicObject* result = scriptContext->GetLibrary()->CreateObject();
+            PropertyId readId = scriptContext->GetOrAddPropertyIdTracked(_u("read"));
+            PropertyId writtenId = scriptContext->GetOrAddPropertyIdTracked(_u("written"));
+            PropertyDescriptor descriptor;
+            descriptor.SetWritable(true);
+            descriptor.SetEnumerable(true);
+            descriptor.SetConfigurable(true);
+
+            descriptor.SetValue(SizeToNumberVar(readCount, scriptContext));
+            if (!JavascriptObject::DefineOwnPropertyHelper(result, readId, descriptor, scriptContext))
+            {
+                JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_Invalid, _u("CreateDataProperty"));
+            }
+            descriptor.SetValue(SizeToNumberVar(writtenCount, scriptContext));
+            if (!JavascriptObject::DefineOwnPropertyHelper(result, writtenId, descriptor, scriptContext))
+            {
+                JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_Invalid, _u("CreateDataProperty"));
+            }
+            return result;
+        }
+
+        uint8_t InvokeDecode(
+            bool isHex,
+            const char16* srcPtr,
+            size_t srcLen,
+            uint8_t* dstPtr,
+            size_t dstCap,
+            uint8_t urlAlphabet,
+            uint8_t lastChunkMode,
+            size_t* outRead,
+            size_t* outWritten)
+        {
+            const uint16_t* u16Ptr = reinterpret_cast<const uint16_t*>(srcPtr);
+            if (isHex)
+            {
+                return zig_u8a_decode_hex(u16Ptr, srcLen, dstPtr, dstCap, outRead, outWritten);
+            }
+            return zig_u8a_decode_base64(
+                u16Ptr,
+                srcLen,
+                dstPtr,
+                dstCap,
+                urlAlphabet,
+                lastChunkMode,
+                outRead,
+                outWritten);
+        }
+
+        Var DecodeToNewUint8Array(
+            ScriptContext* scriptContext,
+            JavascriptString* inputStr,
+            bool isHex,
+            uint8_t urlAlphabet,
+            uint8_t lastChunkMode,
+            const char16* syntaxErrMsg)
+        {
+            Var created = nullptr;
+            ENTER_PINNED_SCOPE(JavascriptString, str);
+            str = inputStr;
+
+            const char16* srcPtr = str->GetString();
+            size_t srcLen = str->GetLength();
+            size_t maxDecoded = isHex ? (srcLen / 2) : zig_u8a_decode_base64_max_len(srcLen);
+
+            uint8_t stackBuf[1024];
+            if (maxDecoded <= sizeof(stackBuf))
+            {
+                size_t readCount = 0;
+                size_t writtenCount = 0;
+                uint8_t status = InvokeDecode(
+                    isHex,
+                    srcPtr,
+                    srcLen,
+                    stackBuf,
+                    sizeof(stackBuf),
+                    urlAlphabet,
+                    lastChunkMode,
+                    &readCount,
+                    &writtenCount);
+                if (status != ZIG_U8A_OK)
+                {
+                    JavascriptError::ThrowSyntaxError(scriptContext, JSERR_UnicodeRegExpRangeContainsCharClass, syntaxErrMsg);
+                }
+                if (writtenCount > ArrayBuffer::MaxArrayBufferLength)
+                {
+                    JavascriptError::ThrowRangeError(scriptContext, JSERR_InvalidTypedArrayLength);
+                }
+                ENTER_PINNED_SCOPE(ArrayBuffer, ab);
+                ab = scriptContext->GetLibrary()->CreateArrayBuffer(static_cast<uint32>(writtenCount));
+                if (writtenCount > 0)
+                {
+                    memcpy(ab->GetBuffer(), stackBuf, writtenCount);
+                }
+                created = Uint8Array::Create(ab, 0, static_cast<uint32>(writtenCount), scriptContext->GetLibrary());
+                LEAVE_PINNED_SCOPE();
+            }
+            else
+            {
+                size_t readCount = 0;
+                size_t writtenCount = 0;
+                uint8_t status = InvokeDecode(
+                    isHex,
+                    srcPtr,
+                    srcLen,
+                    nullptr,
+                    SIZE_MAX,
+                    urlAlphabet,
+                    lastChunkMode,
+                    &readCount,
+                    &writtenCount);
+                if (status != ZIG_U8A_OK)
+                {
+                    JavascriptError::ThrowSyntaxError(scriptContext, JSERR_UnicodeRegExpRangeContainsCharClass, syntaxErrMsg);
+                }
+                if (writtenCount > ArrayBuffer::MaxArrayBufferLength)
+                {
+                    JavascriptError::ThrowRangeError(scriptContext, JSERR_InvalidTypedArrayLength);
+                }
+                ENTER_PINNED_SCOPE(ArrayBuffer, ab);
+                ab = scriptContext->GetLibrary()->CreateArrayBuffer(static_cast<uint32>(writtenCount));
+                // Re-read srcPtr after CreateArrayBuffer (which may run GC; str is pinned).
+                srcPtr = str->GetString();
+                size_t readCount2 = 0;
+                size_t writtenCount2 = 0;
+                uint8_t* dstPtr = (writtenCount > 0) ? ab->GetBuffer() : nullptr;
+                uint8_t status2 = InvokeDecode(
+                    isHex,
+                    srcPtr,
+                    srcLen,
+                    dstPtr,
+                    writtenCount,
+                    urlAlphabet,
+                    lastChunkMode,
+                    &readCount2,
+                    &writtenCount2);
+                AssertOrFailFast(status2 == ZIG_U8A_OK && writtenCount2 == writtenCount);
+                created = Uint8Array::Create(ab, 0, static_cast<uint32>(writtenCount), scriptContext->GetLibrary());
+                LEAVE_PINNED_SCOPE();
+            }
+
+            LEAVE_PINNED_SCOPE();
+            return created;
+        }
+
+        Var EncodeFromUint8Array(
+            TypedArrayBase* typedArray,
+            ScriptContext* scriptContext,
+            bool isHex,
+            uint8_t urlAlphabet,
+            uint8_t omitPadding,
+            const char16* apiName)
+        {
+            if (typedArray->IsDetachedBuffer() || typedArray->IsOutOfBounds())
+            {
+                JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, apiName);
+            }
+
+            uint32 byteLen = typedArray->GetByteLength();
+            if (byteLen == 0)
+            {
+                return scriptContext->GetLibrary()->GetEmptyString();
+            }
+
+            size_t outLen = isHex
+                ? (static_cast<size_t>(byteLen) * 2)
+                : zig_u8a_encode_base64_len(byteLen, omitPadding);
+            if (!IsValidCharCount(outLen))
+            {
+                JavascriptError::ThrowRangeError(scriptContext, JSERR_OutOfBoundString);
+            }
+
+            Var result = nullptr;
+            ENTER_PINNED_SCOPE(TypedArrayBase, pinnedTa);
+            pinnedTa = typedArray;
+            BufferStringBuilder builder(static_cast<charcount_t>(outLen), scriptContext);
+            uint16_t* dstPtr = reinterpret_cast<uint16_t*>(builder.DangerousGetWritableBuffer());
+            const uint8_t* srcPtr = pinnedTa->GetByteBuffer();
+            if (isHex)
+            {
+                zig_u8a_encode_hex(srcPtr, byteLen, dstPtr);
+            }
+            else
+            {
+                size_t writtenChars = zig_u8a_encode_base64(srcPtr, byteLen, dstPtr, urlAlphabet, omitPadding);
+                AssertOrFailFast(writtenChars == outLen);
+            }
+            result = builder.ToString();
+            LEAVE_PINNED_SCOPE();
+            return result;
+        }
+
+        Var SetFromStringToUint8Array(
+            ScriptContext* scriptContext,
+            const Arguments& args,
+            bool hasOptions,
+            bool isHex,
+            const char16* apiName,
+            const char16* syntaxErrMsg)
+        {
+            Var result = nullptr;
+            ENTER_PINNED_SCOPE(TypedArrayBase, ta);
+            ta = ValidateUint8ArrayReceiver(args[0], scriptContext, apiName, /*requireMutable*/ true);
+
+            if (args.Info.Count < 2 || !VarIs<JavascriptString>(args[1]))
+            {
+                JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_Invalid, apiName);
+            }
+
+            ENTER_PINNED_SCOPE(JavascriptString, str);
+            str = UnsafeVarTo<JavascriptString>(args[1]);
+
+            uint8_t urlAlphabet = 0;
+            uint8_t lastChunkMode = ZIG_U8A_LAST_LOOSE;
+            if (hasOptions)
+            {
+                Var optionsArg = (args.Info.Count > 2) ? args[2] : scriptContext->GetLibrary()->GetUndefined();
+                RecyclableObject* opts = GetCodecOptionsObject(optionsArg, scriptContext, apiName);
+                urlAlphabet = ReadAlphabetOption(opts, scriptContext, apiName);
+                lastChunkMode = ReadLastChunkHandlingOption(opts, scriptContext, apiName);
+            }
+
+            if (ta->IsDetachedBuffer() || ta->IsOutOfBounds())
+            {
+                JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, apiName);
+            }
+
+            const char16* srcPtr = str->GetString();
+            size_t srcLen = str->GetLength();
+            uint32 dstCap = ta->GetByteLength();
+            uint8_t* dstPtr = (dstCap > 0) ? ta->GetByteBuffer() : nullptr;
+
+            size_t readCount = 0;
+            size_t writtenCount = 0;
+            uint8_t status = InvokeDecode(
+                isHex,
+                srcPtr,
+                srcLen,
+                dstPtr,
+                dstCap,
+                urlAlphabet,
+                lastChunkMode,
+                &readCount,
+                &writtenCount);
+            if (status != ZIG_U8A_OK)
+            {
+                JavascriptError::ThrowSyntaxError(scriptContext, JSERR_UnicodeRegExpRangeContainsCharClass, syntaxErrMsg);
+            }
+
+            result = CreateDecodeResultObject(scriptContext, readCount, writtenCount);
+            LEAVE_PINNED_SCOPE();
+            LEAVE_PINNED_SCOPE();
+            return result;
+        }
+    }
+
     Var TypedArrayBase::EntryFromBase64(RecyclableObject* function, CallInfo callInfo, ...)
     {
         PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
@@ -2862,7 +3264,28 @@ namespace Js
         AssertOrFailFast(!(callInfo.Flags & CallFlags_New));
         AssertOrFailFast(args.Info.Count > 0);
 
-        return scriptContext->GetLibrary()->GetUndefined();
+        const char16* apiName = _u("Uint8Array.fromBase64");
+        if (args.Info.Count < 2 || !VarIs<JavascriptString>(args[1]))
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_Invalid, apiName);
+        }
+
+        Var result = nullptr;
+        ENTER_PINNED_SCOPE(JavascriptString, str);
+        str = UnsafeVarTo<JavascriptString>(args[1]);
+        Var optionsArg = (args.Info.Count > 2) ? args[2] : scriptContext->GetLibrary()->GetUndefined();
+        RecyclableObject* opts = GetCodecOptionsObject(optionsArg, scriptContext, apiName);
+        uint8_t urlAlphabet = ReadAlphabetOption(opts, scriptContext, apiName);
+        uint8_t lastChunkMode = ReadLastChunkHandlingOption(opts, scriptContext, apiName);
+        result = DecodeToNewUint8Array(
+            scriptContext,
+            str,
+            /*isHex*/ false,
+            urlAlphabet,
+            lastChunkMode,
+            _u("Uint8Array.fromBase64: invalid base64 input"));
+        LEAVE_PINNED_SCOPE();
+        return result;
     }
 
     Var TypedArrayBase::EntryFromHex(RecyclableObject* function, CallInfo callInfo, ...)
@@ -2874,7 +3297,19 @@ namespace Js
         AssertOrFailFast(!(callInfo.Flags & CallFlags_New));
         AssertOrFailFast(args.Info.Count > 0);
 
-        return scriptContext->GetLibrary()->GetUndefined();
+        const char16* apiName = _u("Uint8Array.fromHex");
+        if (args.Info.Count < 2 || !VarIs<JavascriptString>(args[1]))
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_Invalid, apiName);
+        }
+
+        return DecodeToNewUint8Array(
+            scriptContext,
+            UnsafeVarTo<JavascriptString>(args[1]),
+            /*isHex*/ true,
+            /*urlAlphabet*/ 0,
+            /*lastChunkMode*/ 0,
+            _u("Uint8Array.fromHex: invalid hex input"));
     }
 
     Var TypedArrayBase::EntryToBase64(RecyclableObject* function, CallInfo callInfo, ...)
@@ -2886,7 +3321,17 @@ namespace Js
         AssertOrFailFast(!(callInfo.Flags & CallFlags_New));
         AssertOrFailFast(args.Info.Count > 0);
 
-        return scriptContext->GetLibrary()->GetUndefined();
+        const char16* apiName = _u("Uint8Array.prototype.toBase64");
+        Var result = nullptr;
+        ENTER_PINNED_SCOPE(TypedArrayBase, ta);
+        ta = ValidateUint8ArrayReceiver(args[0], scriptContext, apiName, /*requireMutable*/ false);
+        Var optionsArg = (args.Info.Count > 1) ? args[1] : scriptContext->GetLibrary()->GetUndefined();
+        RecyclableObject* opts = GetCodecOptionsObject(optionsArg, scriptContext, apiName);
+        uint8_t urlAlphabet = ReadAlphabetOption(opts, scriptContext, apiName);
+        uint8_t omitPadding = ReadOmitPaddingOption(opts, scriptContext);
+        result = EncodeFromUint8Array(ta, scriptContext, /*isHex*/ false, urlAlphabet, omitPadding, apiName);
+        LEAVE_PINNED_SCOPE();
+        return result;
     }
 
     Var TypedArrayBase::EntrySetFromBase64(RecyclableObject* function, CallInfo callInfo, ...)
@@ -2898,7 +3343,13 @@ namespace Js
         AssertOrFailFast(!(callInfo.Flags & CallFlags_New));
         AssertOrFailFast(args.Info.Count > 0);
 
-        return scriptContext->GetLibrary()->GetUndefined();
+        return SetFromStringToUint8Array(
+            scriptContext,
+            args,
+            /*hasOptions*/ true,
+            /*isHex*/ false,
+            _u("Uint8Array.prototype.setFromBase64"),
+            _u("Uint8Array.prototype.setFromBase64: invalid base64 input"));
     }
 
     Var TypedArrayBase::EntryToHex(RecyclableObject* function, CallInfo callInfo, ...)
@@ -2910,7 +3361,9 @@ namespace Js
         AssertOrFailFast(!(callInfo.Flags & CallFlags_New));
         AssertOrFailFast(args.Info.Count > 0);
 
-        return scriptContext->GetLibrary()->GetUndefined();
+        const char16* apiName = _u("Uint8Array.prototype.toHex");
+        TypedArrayBase* ta = ValidateUint8ArrayReceiver(args[0], scriptContext, apiName, /*requireMutable*/ false);
+        return EncodeFromUint8Array(ta, scriptContext, /*isHex*/ true, 0, 0, apiName);
     }
 
     Var TypedArrayBase::EntrySetFromHex(RecyclableObject* function, CallInfo callInfo, ...)
@@ -2922,7 +3375,13 @@ namespace Js
         AssertOrFailFast(!(callInfo.Flags & CallFlags_New));
         AssertOrFailFast(args.Info.Count > 0);
 
-        return scriptContext->GetLibrary()->GetUndefined();
+        return SetFromStringToUint8Array(
+            scriptContext,
+            args,
+            /*hasOptions*/ false,
+            /*isHex*/ true,
+            _u("Uint8Array.prototype.setFromHex"),
+            _u("Uint8Array.prototype.setFromHex: invalid hex input"));
     }
 
     BOOL TypedArrayBase::GetDiagValueString(StringBuilder<ArenaAllocator>* stringBuilder, ScriptContext* requestContext)

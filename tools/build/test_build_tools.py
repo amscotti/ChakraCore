@@ -1353,21 +1353,21 @@ class CheckMetadataLinuxParamTests(unittest.TestCase):
         self.assertEqual(cml.want_icu_needed("76"),
                          ("libicuuc.so.76", "libicui18n.so.76"))
         self.assertEqual(cml.expected_archive_members("test", jit=True)[
-            "lib/libChakraCoreStatic.a"], 669)
+            "lib/libChakraCoreStatic.a"], 670)
         self.assertEqual(cml.expected_archive_members("test", jit=False)[
-            "lib/libChakraCoreStatic.a"], 578)
+            "lib/libChakraCoreStatic.a"], 579)
         self.assertEqual(
             cml.expected_archive_members("release-shared", jit=True)[
-                "lib/libChakraCoreStatic.a"], 632)
+                "lib/libChakraCoreStatic.a"], 633)
         self.assertEqual(
             cml.expected_archive_members("release-shared", jit=False)[
-                "lib/libChakraCoreStatic.a"], 541)
+                "lib/libChakraCoreStatic.a"], 542)
         self.assertEqual(
             cml.expected_archive_members("debug-static", jit=True),
-            {"lib/libChakraCoreStatic.a": 669})
+            {"lib/libChakraCoreStatic.a": 670})
         self.assertEqual(
             cml.expected_archive_members("debug-static", jit=False),
-            {"lib/libChakraCoreStatic.a": 578})
+            {"lib/libChakraCoreStatic.a": 579})
 
 
 class StyleChecksPortableTests(unittest.TestCase):

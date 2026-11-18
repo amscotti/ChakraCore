@@ -32,7 +32,7 @@ prefixes, doc/b3-profiles.md section 10):
      libChakraCore.dylib, with a sanity floor on the total
      exported-symbol count. Static profiles: no dylib beside ch or
      in lib/; libChakraCoreStatic.a present with the legacy-exact
-     526 members and the key JsRT text symbols (`nm -g`); ch links
+     527 members (526 C/C++ + u8a_codec.o) and the key JsRT text symbols (`nm -g`); ch links
      no libChakraCore (self-contained static executable).
   5. The `.profile` marker names this profile (B3.4 isolation pin:
      a prefix holding another profile's artifacts fails here, not
@@ -67,8 +67,8 @@ WANT_STACK_BY_PROFILE = {"test": 8388608, "debug-static": 0,
 # (ar t: 524 members in build-legacy-debug and out/debug-static at the
 # B3 baseline; C2-S13 added JavascriptWeakRef.cpp and
 # JavascriptFinalizationRegistry.cpp to BOTH build lists, so the
-# legacy-exact count is now 526).
-WANT_STATIC_MEMBERS = 526
+# legacy-exact count is 526 C/C++ + 1 Z1 Zig codec object = 527).
+WANT_STATIC_MEMBERS = 527
 STATIC_ARCHIVE = "lib/libChakraCoreStatic.a"
 
 EXECUTABLES = ("bin/ch", "bin/GCStress")
@@ -343,8 +343,8 @@ def self_test():
         bad += report("release-shared wants stacksize 8388608",
                       WANT_STACK_BY_PROFILE.get("release-shared")
                       == 8388608)
-        bad += report("static archive wants 526 members",
-                      WANT_STATIC_MEMBERS == 526)
+        bad += report("static archive wants 527 members",
+                      WANT_STATIC_MEMBERS == 527)
     finally:
         import shutil
         shutil.rmtree(tmp, ignore_errors=True)
