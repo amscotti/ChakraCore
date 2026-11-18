@@ -752,6 +752,39 @@ namespace UnifiedRegex
         }
     }
 
+    static bool TryBuildCrossPlaneEquivSet(ArenaAllocator* alloc, codepoint_t cp, CharSet<codepoint_t>& outSet)
+    {
+        uint tableIndex = 0;
+        uint actualHigh = 0;
+        codepoint_t equivClass[CaseInsensitive::EquivClassSize];
+        if (!CaseInsensitive::RangeToEquivClass(tableIndex, cp, cp, actualHigh, equivClass))
+        {
+            return false;
+        }
+        bool hasBMP = false;
+        bool hasSupplementary = false;
+        for (int i = 0; i < CaseInsensitive::EquivClassSize; i++)
+        {
+            if (Js::NumberUtilities::IsInSupplementaryPlane(equivClass[i]))
+            {
+                hasSupplementary = true;
+            }
+            else
+            {
+                hasBMP = true;
+            }
+        }
+        if (!hasBMP || !hasSupplementary)
+        {
+            return false;
+        }
+        for (int i = 0; i < CaseInsensitive::EquivClassSize; i++)
+        {
+            outSet.Set(alloc, equivClass[i]);
+        }
+        return true;
+    }
+
     template <typename P, const bool IsLiteral>
     Node* Parser<P, IsLiteral>::TranslateCodePointSet(CharSet<codepoint_t>& codePointSet, bool isNegation,
         bool noHalfPairFallback)
@@ -765,7 +798,8 @@ namespace UnifiedRegex
         }
 
         // If a singleton, return a simple character (or surrogate pair atom)
-        bool isSingleton = !this->caseInsensitiveFlagPresent && !isNegation && codePointSet.IsSingleton();
+        bool isSingleton = !this->caseInsensitiveFlagPresent && !isNegation &&
+            !(noHalfPairFallback && codePointSet.ContainSurrogateCodeUnits()) && codePointSet.IsSingleton();
         if (isSingleton)
         {
             codepoint_t singleton = codePointSet.Singleton();
@@ -788,7 +822,8 @@ namespace UnifiedRegex
 
         const uint totalCodePointsCount = codePointSet.Count();
         const uint simpleCharsCount = codePointSet.SimpleCharCount();
-        if (totalCodePointsCount == simpleCharsCount)
+        if (totalCodePointsCount == simpleCharsCount &&
+            !(noHalfPairFallback && codePointSet.ContainSurrogateCodeUnits()))
         {
             // Every u-mode caller of this helper hands in an
             // already-complemented set when isNegation is set
@@ -2633,10 +2668,10 @@ namespace UnifiedRegex
 
         if (!set.cp.IsEmpty() || (set.numStrings == 0 && !set.containsEmptyString))
         {
-            // TranslateCodePointSet clears the set body. A negated v class
-            // (pure code points: contents that may contain strings are
-            // rejected earlier) keeps the negated-class half-pair rule.
-            appendArm(TranslateCodePointSet(set.cp, /*isNegation*/ false, /*noHalfPairFallback*/ negation));
+            // TranslateCodePointSet clears the set body. Under /v (negated,
+            // difference, or nested classes) a complete surrogate pair is
+            // tested as one code point without lone-unit fallback.
+            appendArm(TranslateCodePointSet(set.cp, /*isNegation*/ false, /*noHalfPairFallback*/ true));
         }
         else
         {
@@ -4512,6 +4547,15 @@ namespace UnifiedRegex
 
         Assert(node != 0);
 
+        if (node == deferredCharNode && this->unicodeFlagPresent && this->caseInsensitiveFlagPresent)
+        {
+            CharSet<codepoint_t> crossPlaneSet;
+            if (TryBuildCrossPlaneEquivSet(ctAllocator, (codepoint_t)deferredCharNode->cs[0], crossPlaneSet))
+            {
+                node = TranslateCodePointSet(crossPlaneSet, /*isNegation*/ false, /*noHalfPairFallback*/ true);
+            }
+        }
+
         if (AtQuantifier())
         {
             switch (ECLookahead())
@@ -5137,7 +5181,12 @@ namespace UnifiedRegex
             uint tableIndex = 0, actualHigh = 0;
             codepoint_t equivClass[CaseInsensitive::EquivClassSize];
 
-            if (caseInsensitiveFlagPresent && CaseInsensitive::RangeToEquivClass(tableIndex, this->currentSurrogatePairNode->value, this->currentSurrogatePairNode->value, actualHigh, equivClass))
+            CharSet<codepoint_t> crossPlaneSet;
+            if (caseInsensitiveFlagPresent && TryBuildCrossPlaneEquivSet(ctAllocator, this->currentSurrogatePairNode->value, crossPlaneSet))
+            {
+                node = TranslateCodePointSet(crossPlaneSet, /*isNegation*/ false, /*noHalfPairFallback*/ true);
+            }
+            else if (caseInsensitiveFlagPresent && CaseInsensitive::RangeToEquivClass(tableIndex, this->currentSurrogatePairNode->value, this->currentSurrogatePairNode->value, actualHigh, equivClass))
             {
                 Node *equivNode[CaseInsensitive::EquivClassSize];
                 int indexForNextNode = 0;

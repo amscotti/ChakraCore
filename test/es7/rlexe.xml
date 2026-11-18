@@ -695,4 +695,10 @@
       <files>asmjs-inline-const.js</files>
     </default>
   </test>
+  <test>
+    <default>
+      <files>regexp-q12-conformance.js</files>
+      <compile-flags>-args summary -endargs</compile-flags>
+    </default>
+  </test>
 </regress-exe>

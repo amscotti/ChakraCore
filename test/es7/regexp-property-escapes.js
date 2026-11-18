@@ -459,13 +459,15 @@ var tests = [
                 "member pair = exactly one iteration");
             assert.areEqual(2, /^([^\u{10428}])$/u.exec("\ud800\udc00")[0].length,
                 "single-iteration capture spans both units");
-            // NOTE (documented divergence, not asserted here because it
-            // differs from Node): when the pair itself is NOT a member but
-            // its lone units are (e.g. /^[^\u{10400}]+$/u over the pair
-            // "\ud801\udc00" OF U+10400), this engine's pre-existing
-            // lone-surrogate fallback still matches the lone units, while
-            // Node/spec advance by code point and fail. See the receipt's
-            // residual section.
+            // When the pair itself is NOT a member but its lone units are
+            // (e.g. \ud801\udc00 == U+10400 vs [^\u{10400}]), u/v advance by
+            // decoded code point and fail instead of matching lone units.
+            assert.isFalse(/^[^\u{10400}]+$/u.test("\ud801\udc00"),
+                "excluded surrogate pair never matches as lone units");
+            assert.areEqual(null, /^[^\u{10400}]$/u.exec("\ud801\udc00"),
+                "single negated class atom rejects excluded pair");
+            assert.isFalse(/^[^\u{10000}-\u{10FFFF}]+$/u.test("\ud800\udc00"),
+                "all-BMP complement still rejects valid surrogate pairs");
         }
     },
     {

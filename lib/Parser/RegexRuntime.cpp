@@ -3162,7 +3162,13 @@ namespace UnifiedRegex
     inline bool Matcher::MatchBackrefText(const Char* const input, const CharCount inputLength, CharCount& inputOffset, const GroupInfo* const info, bool isCaseInsensitive)
     {
         Assert(!info->IsUndefined() && info->length > 0);
-        if (info->length > inputLength - inputOffset)
+
+        const bool isCaseInsensitiveMatch = isCaseInsensitive;
+        const bool isCodePointList = (program->flags & (UnicodeRegexFlag | UnicodeSetsRegexFlag)) != 0;
+        // Under /ui and /vi, cross-plane equivalence classes (e.g. U+1DF95 <-> U+00DF/U+1E9E)
+        // can match code points with different UTF-16 lengths (2 units vs 1 unit),
+        // so per-code-point decoding enforces input bounds directly.
+        if (!(isCaseInsensitiveMatch && isCodePointList) && info->length > inputLength - inputOffset)
         {
             return false;
         }
@@ -3171,83 +3177,70 @@ namespace UnifiedRegex
         const CharCount groupEndOffset = groupOffset + info->length;
         const Char* const groupText = this->realInput != nullptr ? this->realInput : input;
 
-        bool isCaseInsensitiveMatch = isCaseInsensitive;
-        bool isCodePointList = (program->flags & (UnicodeRegexFlag | UnicodeSetsRegexFlag)) != 0;
+        auto getNextCodePoint = [](const Char* const buf, CharCount& offset, CharCount endOffset, codepoint_t& codePoint) {
+            if (endOffset <= offset)
+            {
+                return false;
+            }
+
+            Char lowerPart = buf[offset];
+            if (!Js::NumberUtilities::IsSurrogateLowerPart(lowerPart) || offset + 1 == endOffset)
+            {
+                codePoint = lowerPart;
+                offset += 1;
+                return true;
+            }
+
+            Char upperPart = buf[offset + 1];
+            if (!Js::NumberUtilities::IsSurrogateUpperPart(upperPart))
+            {
+                codePoint = lowerPart;
+                offset += 1;
+            }
+            else
+            {
+                codePoint = Js::NumberUtilities::SurrogatePairAsCodePoint(lowerPart, upperPart);
+                offset += 2;
+            }
+
+            return true;
+        };
+
+        auto codePointsFoldEqual = [&](codepoint_t groupCp, codepoint_t inputCp) -> bool {
+            if (groupCp == inputCp)
+            {
+                return true;
+            }
+            if (!Js::NumberUtilities::IsInSupplementaryPlane(groupCp) &&
+                !Js::NumberUtilities::IsInSupplementaryPlane(inputCp))
+            {
+                return standardChars->ToCanonical(CaseInsensitive::MappingSource::CaseFolding, static_cast<char16>(groupCp))
+                    == standardChars->ToCanonical(CaseInsensitive::MappingSource::CaseFolding, static_cast<char16>(inputCp));
+            }
+            uint tblidx = 0;
+            uint acth = 0;
+            codepoint_t equivs[CaseInsensitive::EquivClassSize];
+            CaseInsensitive::RangeToEquivClass(tblidx, groupCp, groupCp, acth, equivs);
+            CompileAssert(CaseInsensitive::EquivClassSize == 4);
+            return inputCp == equivs[0] || inputCp == equivs[1] || inputCp == equivs[2] || inputCp == equivs[3];
+        };
 
         if (!frameReversed)
         {
         // This is the only place in the runtime machinery we need to convert characters to their equivalence class
         if (isCaseInsensitiveMatch && isCodePointList)
         {
-            auto getNextCodePoint = [](const Char* const buf, CharCount &offset, CharCount endOffset, codepoint_t &codePoint) {
-                if (endOffset <= offset)
-                {
-                    return false;
-                }
-
-                Char lowerPart = buf[offset];
-                if (!Js::NumberUtilities::IsSurrogateLowerPart(lowerPart) || offset + 1 == endOffset)
-                {
-                    codePoint = lowerPart;
-                    offset += 1;
-                    return true;
-                }
-
-                Char upperPart = buf[offset + 1];
-                if (!Js::NumberUtilities::IsSurrogateUpperPart(upperPart))
-                {
-                    codePoint = lowerPart;
-                    offset += 1;
-                }
-                else
-                {
-                    codePoint = Js::NumberUtilities::SurrogatePairAsCodePoint(lowerPart, upperPart);
-                    offset += 2;
-                }
-
-                return true;
-            };
-
-            codepoint_t equivs[CaseInsensitive::EquivClassSize];
             while (true)
             {
                 codepoint_t groupCodePoint;
-                bool hasGroupCodePoint = getNextCodePoint(groupText, groupOffset, groupEndOffset, groupCodePoint);
-                if (!hasGroupCodePoint)
+                if (!getNextCodePoint(groupText, groupOffset, groupEndOffset, groupCodePoint))
                 {
                     break;
                 }
 
-                // We don't need to verify that there is a valid input code point since at the beginning
-                // of the function, we make sure that the length of the input is at least as long as
-                // the length of the group.
                 codepoint_t inputCodePoint;
-                getNextCodePoint(input, inputOffset, inputLength, inputCodePoint);
-
-                bool doesMatch = false;
-                if (!Js::NumberUtilities::IsInSupplementaryPlane(groupCodePoint))
-                {
-                    auto toCanonical = [&](codepoint_t c) {
-                        return standardChars->ToCanonical(
-                            CaseInsensitive::MappingSource::CaseFolding,
-                            static_cast<char16>(c));
-                    };
-                    doesMatch = (toCanonical(groupCodePoint) == toCanonical(inputCodePoint));
-                }
-                else
-                {
-                    uint tblidx = 0;
-                    uint acth = 0;
-                    CaseInsensitive::RangeToEquivClass(tblidx, groupCodePoint, groupCodePoint, acth, equivs);
-                    CompileAssert(CaseInsensitive::EquivClassSize == 4);
-                    doesMatch =
-                        inputCodePoint == equivs[0]
-                        || inputCodePoint == equivs[1]
-                        || inputCodePoint == equivs[2]
-                        || inputCodePoint == equivs[3];
-                }
-
-                if (!doesMatch)
+                if (!getNextCodePoint(input, inputOffset, inputLength, inputCodePoint) ||
+                    !codePointsFoldEqual(groupCodePoint, inputCodePoint))
                 {
                     return false;
                 }
@@ -3302,35 +3295,6 @@ namespace UnifiedRegex
             // code-point-oriented because the u-mode reversed window keeps
             // surrogate pairs intact; non-u frames are unit-reversed and use
             // the unit-wise walks below.
-            auto getNextCodePoint = [](const Char* const buf, CharCount &offset, CharCount endOffset, codepoint_t &codePoint) {
-                if (endOffset <= offset)
-                {
-                    return false;
-                }
-
-                Char lowerPart = buf[offset];
-                if (!Js::NumberUtilities::IsSurrogateLowerPart(lowerPart) || offset + 1 == endOffset)
-                {
-                    codePoint = lowerPart;
-                    offset += 1;
-                    return true;
-                }
-
-                Char upperPart = buf[offset + 1];
-                if (!Js::NumberUtilities::IsSurrogateUpperPart(upperPart))
-                {
-                    codePoint = lowerPart;
-                    offset += 1;
-                }
-                else
-                {
-                    codePoint = Js::NumberUtilities::SurrogatePairAsCodePoint(lowerPart, upperPart);
-                    offset += 2;
-                }
-
-                return true;
-            };
-
             // Decode the code point that ENDS at offset (bounded below by startOffset).
             auto getPrevCodePoint = [](const Char* const buf, CharCount &offset, CharCount startOffset, codepoint_t &codePoint) {
                 if (offset <= startOffset)
@@ -3363,44 +3327,18 @@ namespace UnifiedRegex
 
             if (isCaseInsensitiveMatch && isCodePointList)
             {
-                codepoint_t equivs[CaseInsensitive::EquivClassSize];
                 CharCount groupCursor = groupEndOffset;
                 while (true)
                 {
                     codepoint_t groupCodePoint;
-                    bool hasGroupCodePoint = getPrevCodePoint(groupText, groupCursor, groupOffset, groupCodePoint);
-                    if (!hasGroupCodePoint)
+                    if (!getPrevCodePoint(groupText, groupCursor, groupOffset, groupCodePoint))
                     {
                         break;
                     }
 
                     codepoint_t inputCodePoint;
-                    getNextCodePoint(input, inputOffset, inputLength, inputCodePoint);
-
-                    bool doesMatch = false;
-                    if (!Js::NumberUtilities::IsInSupplementaryPlane(groupCodePoint))
-                    {
-                        auto toCanonical = [&](codepoint_t c) {
-                            return standardChars->ToCanonical(
-                                CaseInsensitive::MappingSource::CaseFolding,
-                                static_cast<char16>(c));
-                        };
-                        doesMatch = (toCanonical(groupCodePoint) == toCanonical(inputCodePoint));
-                    }
-                    else
-                    {
-                        uint tblidx = 0;
-                        uint acth = 0;
-                        CaseInsensitive::RangeToEquivClass(tblidx, groupCodePoint, groupCodePoint, acth, equivs);
-                        CompileAssert(CaseInsensitive::EquivClassSize == 4);
-                        doesMatch =
-                            inputCodePoint == equivs[0]
-                            || inputCodePoint == equivs[1]
-                            || inputCodePoint == equivs[2]
-                            || inputCodePoint == equivs[3];
-                    }
-
-                    if (!doesMatch)
+                    if (!getNextCodePoint(input, inputOffset, inputLength, inputCodePoint) ||
+                        !codePointsFoldEqual(groupCodePoint, inputCodePoint))
                     {
                         return false;
                     }

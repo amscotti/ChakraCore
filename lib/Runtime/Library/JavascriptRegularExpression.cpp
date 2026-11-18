@@ -2181,9 +2181,13 @@ using namespace Js;
             JavascriptString* matchStr = RegexHelper::GetMatchStrFromResult(matchObj, scriptContext);
             if (matchStr->GetLength() == 0)
             {
-                CharCount thisIndex = JavascriptRegExp::GetLastIndexProperty(R, scriptContext);
-                CharCount nextIndex = RegexHelper::AdvanceStringIndex(S, thisIndex, iterator->m_fullUnicode);
-                JavascriptRegExp::SetLastIndexProperty(R, nextIndex, scriptContext);
+                int64 thisIndex = JavascriptConversion::ToLength(
+                    JavascriptOperators::GetProperty(R, PropertyIds::lastIndex, scriptContext),
+                    scriptContext);
+                int64 nextIndex = thisIndex < (int64)S->GetLength()
+                    ? (int64)RegexHelper::AdvanceStringIndex(S, (CharCount)thisIndex, iterator->m_fullUnicode)
+                    : thisIndex + 1;
+                JavascriptRegExp::SetLastIndexProperty(R, JavascriptNumber::ToVar(nextIndex, scriptContext), scriptContext);
             }
         }
         else

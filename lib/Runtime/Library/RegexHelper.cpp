@@ -430,6 +430,51 @@ namespace Js
         return index + 1;
     }
 
+    static int64 AdvanceStringIndexLength(JavascriptString* string, int64 index, bool isUnicode)
+    {
+        if (!isUnicode)
+        {
+            return index + 1;
+        }
+        const int64 length = (int64)string->GetLength();
+        if (index >= length)
+        {
+            return index + 1;
+        }
+        return (int64)RegexAdvanceStringIndexUnicode(string->GetString(), (CharCount)length, (CharCount)index);
+    }
+
+    template <typename SetFn>
+    static bool AdvanceLastIndexLength(
+        RecyclableObject* instance,
+        JavascriptString* input,
+        JavascriptString* matchStr,
+        bool unicode,
+        ScriptContext* scriptContext,
+        int64& startedFrom,
+        SetFn setLastIndex)
+    {
+        if (matchStr->GetLength() != 0)
+        {
+            return false;
+        }
+        int64 lastIndex = JavascriptConversion::ToLength(
+            JavascriptOperators::GetProperty(instance, PropertyIds::lastIndex, scriptContext),
+            scriptContext);
+        startedFrom = lastIndex;
+        int64 nextIndex = AdvanceStringIndexLength(input, lastIndex, unicode);
+        setLastIndex(JavascriptNumber::ToVar(nextIndex, scriptContext));
+        return true;
+    }
+
+    static bool IsObservableLastIndexValue(ScriptContext* scriptContext, Var lastIndexVar)
+    {
+        return scriptContext->GetConfig()->IsES6RegExSymbolsEnabled()
+            && lastIndexVar != nullptr
+            && !TaggedInt::Is(lastIndexVar)
+            && !JavascriptNumber::Is(lastIndexVar);
+    }
+
     static bool RegexIsUnicodePattern(UnifiedRegex::RegexPattern* pattern)
     {
         return pattern->IsUnicode() || pattern->IsUnicodeSets();
@@ -557,7 +602,7 @@ namespace Js
             // empty-match start index means the advance never landed (an
             // observable receiver dropped the "lastIndex" write), so the
             // walk terminates without another match instead of hanging.
-            CharCount previousEmptyStart = CharCountFlag;
+            int64 previousEmptyStart = -1;
 
             do
             {
@@ -577,8 +622,11 @@ namespace Js
 
                 arrayResult->DirectAppendItem(matchStr);
 
-                CharCount const emptyStart = AdvanceLastIndex(thisObj, input, matchStr, fullUnicode, scriptContext);
-                if (emptyStart != CharCountFlag)
+                int64 emptyStart = -1;
+                auto setLastIndex = [&](Var nextVar) {
+                    JavascriptRegExp::SetLastIndexProperty(thisObj, nextVar, scriptContext);
+                };
+                if (AdvanceLastIndexLength(thisObj, input, matchStr, fullUnicode, scriptContext, emptyStart, setLastIndex))
                 {
                     if (emptyStart == previousEmptyStart)
                     {
@@ -857,7 +905,8 @@ namespace Js
 
         const bool isGlobal = pattern->IsGlobal();
         const bool isSticky = pattern->IsSticky();
-        const bool useCache = !isGlobal && !isSticky;
+        const bool useCache = !isGlobal && !isSticky
+            && !IsObservableLastIndexValue(scriptContext, regularExpression->lastIndexVar);
 
         UnifiedRegex::RegExpTestCache* cache = nullptr;
         JavascriptString * cachedInput = nullptr;
@@ -1158,13 +1207,16 @@ namespace Js
             auto getGroup = [&](int captureIndex, Var nonMatchValue) {
                 return captureIndex <= numberOfCaptures ? PointerValue(captures[captureIndex]) : nonMatchValue;
             };
-            // GetSubstitution receives the coerced "groups" value: when
-            // undefined (pattern without named captures, or an exec result
-            // without a groups property), $<name> stays literal.
-            const bool namedSubstitutionEnabled = !JavascriptOperators::IsUndefined(namedCaptures);
-            RecyclableObject* namedCapturesObject = namedSubstitutionEnabled
-                ? VarTo<RecyclableObject>(namedCaptures)
-                : nullptr;
+            // GetSubstitution coerces a non-undefined "groups" via ToObject
+            // (a null "groups" throws TypeError here, not on functional replacers);
+            // when undefined, $<name> stays literal.
+            RecyclableObject* namedCapturesObject = nullptr;
+            if (!JavascriptOperators::IsUndefined(namedCaptures) &&
+                !JavascriptConversion::ToObject(namedCaptures, scriptContext, &namedCapturesObject))
+            {
+                JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_NeedObject, _u("RegExp.prototype[Symbol.replace]"));
+            }
+            const bool namedSubstitutionEnabled = namedCapturesObject != nullptr;
             auto getNamedGroup = [=](const char16* name, CharCount nameLen) -> Var {
                 PropertyId propertyId = scriptContext->GetOrAddPropertyIdTracked(name, static_cast<int>(nameLen));
                 return JavascriptOperators::GetProperty(namedCapturesObject, propertyId, scriptContext);
@@ -1268,7 +1320,7 @@ namespace Js
         JsUtil::List<RecyclableObject*>* results = RecyclerNew(recycler, JsUtil::List<RecyclableObject*>, recycler);
 
         // Non-progress guard start index for the collection loop (see below).
-        CharCount previousEmptyStart = CharCountFlag;
+        int64 previousEmptyStart = -1;
 
         while (true)
         {
@@ -1289,13 +1341,16 @@ namespace Js
             }
 
             JavascriptString* matchStr = GetMatchStrFromResult(resultObj, scriptContext);
-            CharCount const emptyStart = AdvanceLastIndex(thisObj, input, matchStr, unicode, scriptContext);
+            int64 emptyStart = -1;
             // Non-progress guard (see AdvanceLastIndex): a repeating
             // empty-match start index means the advance never landed (an
             // observable receiver dropped the "lastIndex" write), so the
             // collection loop stops instead of hanging; the already
             // collected results are then substituted as usual.
-            if (emptyStart != CharCountFlag)
+            auto setLastIndex = [&](Var nextVar) {
+                JavascriptRegExp::SetLastIndexProperty(thisObj, nextVar, scriptContext);
+            };
+            if (AdvanceLastIndexLength(thisObj, input, matchStr, unicode, scriptContext, emptyStart, setLastIndex))
             {
                 if (emptyStart == previousEmptyStart)
                 {
@@ -1365,24 +1420,13 @@ namespace Js
                     }
                 }
 
-                // ES2021 @@replace: "groups" is read after the captures and,
-                // when not undefined, coerced through ToObject (a null
-                // "groups" throws TypeError). The coerced value feeds the
-                // $<name> substitutions and, when not undefined, is passed to
-                // a replacement function as the final argument.
+                // ES2025 @@replace: "groups" is read after captures and passed
+                // directly to functional replacers when not undefined; string
+                // substitutions apply ToObject inside appendReplacement.
                 Var namedCaptures = scriptContext->GetLibrary()->GetUndefined();
                 if (groupsPropertyId != Constants::NoProperty)
                 {
-                    Var namedCapturesValue = JavascriptOperators::GetProperty(resultObj, groupsPropertyId, scriptContext);
-                    if (!JavascriptOperators::IsUndefined(namedCapturesValue))
-                    {
-                        RecyclableObject* namedCapturesObject = nullptr;
-                        if (!JavascriptConversion::ToObject(namedCapturesValue, scriptContext, &namedCapturesObject))
-                        {
-                            JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_NeedObject, _u("RegExp.prototype[Symbol.replace]"));
-                        }
-                        namedCaptures = namedCapturesObject;
-                    }
+                    namedCaptures = JavascriptOperators::GetProperty(resultObj, groupsPropertyId, scriptContext);
                 }
 
                 if (position >= nextSourcePosition)
@@ -2713,6 +2757,13 @@ namespace Js
         }
         else
         {
+            if (IsObservableLastIndexValue(scriptContext, regularExpression->lastIndexVar))
+            {
+                // ES2025 RegExpBuiltinExec step 4: perform ToLength(? Get(R, "lastIndex"))
+                // unconditionally even when !global && !sticky, without caching or writing
+                // R.lastIndex (local index remains 0).
+                JavascriptConversion::ToLength(regularExpression->lastIndexVar, scriptContext);
+            }
             offset = 0;
             return true;
         }
@@ -2981,13 +3032,13 @@ namespace Js
         bool unicode,
         ScriptContext* scriptContext)
     {
-        if (matchStr->GetLength() == 0)
+        int64 startedFrom = -1;
+        auto setLastIndex = [&](Var nextVar) {
+            JavascriptRegExp::SetLastIndexProperty(instance, nextVar, scriptContext);
+        };
+        if (AdvanceLastIndexLength(instance, input, matchStr, unicode, scriptContext, startedFrom, setLastIndex))
         {
-            CharCount lastIndex = JavascriptRegExp::GetLastIndexProperty(instance, scriptContext);
-            const CharCount startedFrom = lastIndex;
-            lastIndex = AdvanceStringIndex(input, lastIndex, unicode);
-            JavascriptRegExp::SetLastIndexProperty(instance, lastIndex, scriptContext);
-            return startedFrom;
+            return JavascriptRegExp::GetIndexOrMax(startedFrom);
         }
         return CharCountFlag;
     }
