@@ -167,4 +167,9 @@
       <tags>slow,exclude_xplat</tags>
     </default>
   </test>
+  <test>
+    <default>
+      <files>date_set_es2025.js</files>
+    </default>
+  </test>
 </regress-exe>

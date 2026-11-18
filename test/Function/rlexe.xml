@@ -525,4 +525,10 @@
       <files>q12_fn_name_order.js</files>
     </default>
   </test>
+  <test>
+    <default>
+      <files>toString_es2025_and_arrow_ub.js</files>
+      <compile-flags>-CollectGarbage</compile-flags>
+    </default>
+  </test>
 </regress-exe>

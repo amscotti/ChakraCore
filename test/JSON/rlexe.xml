@@ -116,4 +116,10 @@
       <files>jsonerrorbuffer.js</files>
     </default>
   </test>
+  <test>
+    <default>
+      <files>json_parse_reviver_es2025.js</files>
+      <compile-flags>-CollectGarbage</compile-flags>
+    </default>
+  </test>
 </regress-exe>
