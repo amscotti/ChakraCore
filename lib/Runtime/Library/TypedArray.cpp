@@ -2853,6 +2853,78 @@ namespace Js
         return GetKeysEntriesValuesHelper(args, scriptContext, _u("[TypedArray].prototype.values"), JavascriptArrayIteratorKind::Value);
     }
 
+    Var TypedArrayBase::EntryFromBase64(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+        RUNTIME_ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+        AssertOrFailFast(!(callInfo.Flags & CallFlags_New));
+        AssertOrFailFast(args.Info.Count > 0);
+
+        return scriptContext->GetLibrary()->GetUndefined();
+    }
+
+    Var TypedArrayBase::EntryFromHex(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+        RUNTIME_ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+        AssertOrFailFast(!(callInfo.Flags & CallFlags_New));
+        AssertOrFailFast(args.Info.Count > 0);
+
+        return scriptContext->GetLibrary()->GetUndefined();
+    }
+
+    Var TypedArrayBase::EntryToBase64(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+        RUNTIME_ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+        AssertOrFailFast(!(callInfo.Flags & CallFlags_New));
+        AssertOrFailFast(args.Info.Count > 0);
+
+        return scriptContext->GetLibrary()->GetUndefined();
+    }
+
+    Var TypedArrayBase::EntrySetFromBase64(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+        RUNTIME_ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+        AssertOrFailFast(!(callInfo.Flags & CallFlags_New));
+        AssertOrFailFast(args.Info.Count > 0);
+
+        return scriptContext->GetLibrary()->GetUndefined();
+    }
+
+    Var TypedArrayBase::EntryToHex(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+        RUNTIME_ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+        AssertOrFailFast(!(callInfo.Flags & CallFlags_New));
+        AssertOrFailFast(args.Info.Count > 0);
+
+        return scriptContext->GetLibrary()->GetUndefined();
+    }
+
+    Var TypedArrayBase::EntrySetFromHex(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+        RUNTIME_ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+        AssertOrFailFast(!(callInfo.Flags & CallFlags_New));
+        AssertOrFailFast(args.Info.Count > 0);
+
+        return scriptContext->GetLibrary()->GetUndefined();
+    }
+
     BOOL TypedArrayBase::GetDiagValueString(StringBuilder<ArenaAllocator>* stringBuilder, ScriptContext* requestContext)
     {
         ENTER_PINNED_SCOPE(JavascriptString, toStringResult);

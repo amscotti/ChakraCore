@@ -618,5 +618,16 @@ BUILTIN(AtomicsObject, WaitAsync, EntryWaitAsync, FunctionInfo::ErrorOnNew)
 BUILTIN(ArrayBuffer, SliceToImmutable, EntrySliceToImmutable, FunctionInfo::ErrorOnNew)
 BUILTIN(ArrayBuffer, TransferToImmutable, EntryTransferToImmutable, FunctionInfo::ErrorOnNew)
 BUILTIN(ArrayBuffer, GetterImmutable, EntryGetterImmutable, FunctionInfo::ErrorOnNew | FunctionInfo::HasNoSideEffect)
+// ES2026 Q1.3 built-ins (Error.isError, Math.sumPrecise, Array.fromAsync, Uint8Array Base64/Hex).
+// Appended after the existing entries so every pre-existing BuiltInEnum value stays stable.
+BUILTIN(JavascriptError, IsError, EntryIsError, FunctionInfo::ErrorOnNew | FunctionInfo::HasNoSideEffect)
+BUILTIN(Math, SumPrecise, EntrySumPrecise, FunctionInfo::ErrorOnNew)
+BUILTIN(JavascriptArray, FromAsync, EntryFromAsync, FunctionInfo::ErrorOnNew)
+BUILTIN(TypedArrayBase, FromBase64, EntryFromBase64, FunctionInfo::ErrorOnNew)
+BUILTIN(TypedArrayBase, FromHex, EntryFromHex, FunctionInfo::ErrorOnNew)
+BUILTIN(TypedArrayBase, ToBase64, EntryToBase64, FunctionInfo::ErrorOnNew)
+BUILTIN(TypedArrayBase, SetFromBase64, EntrySetFromBase64, FunctionInfo::ErrorOnNew)
+BUILTIN(TypedArrayBase, ToHex, EntryToHex, FunctionInfo::ErrorOnNew)
+BUILTIN(TypedArrayBase, SetFromHex, EntrySetFromHex, FunctionInfo::ErrorOnNew)
 
 #undef BUILTIN_TEMPLATE

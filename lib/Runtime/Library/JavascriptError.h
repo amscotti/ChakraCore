@@ -58,6 +58,7 @@ namespace Js
             static FunctionInfo NewWebAssemblyRuntimeErrorInstance;
             static FunctionInfo NewWebAssemblyLinkErrorInstance;
             static FunctionInfo ToString;
+            static FunctionInfo IsError;
         };
 
         static Var NewErrorInstance(RecyclableObject* function, CallInfo callInfo, ...);
@@ -72,6 +73,7 @@ namespace Js
         static Var NewWebAssemblyLinkErrorInstance(RecyclableObject* function, CallInfo callInfo, ...);
 
         static Var EntryToString(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryIsError(RecyclableObject* function, CallInfo callInfo, ...);
 
         static void __declspec(noreturn) MapAndThrowError(ScriptContext* scriptContext, HRESULT hr);
         static void __declspec(noreturn) MapAndThrowError(ScriptContext* scriptContext, HRESULT hr, ErrorTypeEnum errorType, EXCEPINFO *ei);

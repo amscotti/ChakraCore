@@ -72,6 +72,12 @@ namespace Js
             static FunctionInfo Sort;
             static FunctionInfo Values;
             static FunctionInfo ToLocaleString;
+            static FunctionInfo FromBase64;
+            static FunctionInfo FromHex;
+            static FunctionInfo ToBase64;
+            static FunctionInfo SetFromBase64;
+            static FunctionInfo ToHex;
+            static FunctionInfo SetFromHex;
 
             static FunctionInfo GetterBuffer;
             static FunctionInfo GetterByteLength;
@@ -117,6 +123,12 @@ namespace Js
         static Var EntrySome(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntrySort(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryValues(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryFromBase64(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryFromHex(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryToBase64(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntrySetFromBase64(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryToHex(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntrySetFromHex(RecyclableObject* function, CallInfo callInfo, ...);
 
         static Var EntryGetterBuffer(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryGetterByteLength(RecyclableObject* function, CallInfo callInfo, ...);

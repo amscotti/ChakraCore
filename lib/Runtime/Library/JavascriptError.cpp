@@ -241,6 +241,18 @@ namespace Js
         return outputStr;
     }
 
+    Var JavascriptError::EntryIsError(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+        RUNTIME_ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+        AssertOrFailFast(!(callInfo.Flags & CallFlags_New));
+        AssertOrFailFast(args.Info.Count > 0);
+
+        return scriptContext->GetLibrary()->GetUndefined();
+    }
+
     void __declspec(noreturn) JavascriptError::MapAndThrowError(ScriptContext* scriptContext, HRESULT hr)
     {
         ErrorTypeEnum errorType;

@@ -1900,4 +1900,16 @@ namespace Js
 
         return JavascriptNumber::ToVarNoCheck(Float16::Round(value), scriptContext);
     }
+
+    Var Math::EntrySumPrecise(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+        RUNTIME_ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+        AssertOrFailFast(!(callInfo.Flags & CallFlags_New));
+        AssertOrFailFast(args.Info.Count > 0);
+
+        return scriptContext->GetLibrary()->GetUndefined();
+    }
 } // namespace Js

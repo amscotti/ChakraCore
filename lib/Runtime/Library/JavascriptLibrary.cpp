@@ -2029,7 +2029,7 @@ namespace Js
 
     bool JavascriptLibrary::InitializeArrayConstructor(DynamicObject* arrayConstructor, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)
     {
-        typeHandler->Convert(arrayConstructor, mode, 6);
+        typeHandler->Convert(arrayConstructor, mode, 7);
         // Note: Any new function addition/deletion/modification should also be updated in JavascriptLibrary::ProfilerRegisterArray
         // so that the update is in sync with profiler
         ScriptContext* scriptContext = arrayConstructor->GetScriptContext();
@@ -2049,6 +2049,7 @@ namespace Js
 
         library->AddFunctionToLibraryObject(arrayConstructor, PropertyIds::from, &JavascriptArray::EntryInfo::From, 1);
         library->AddFunctionToLibraryObject(arrayConstructor, PropertyIds::of, &JavascriptArray::EntryInfo::Of, 0);
+        library->AddFunctionToLibraryObjectWithPropertyName(arrayConstructor, _u("fromAsync"), &JavascriptArray::EntryInfo::FromAsync, 1);
 
         DebugOnly(CheckRegisteredBuiltIns(builtinFuncs, scriptContext));
 
@@ -2599,7 +2600,20 @@ namespace Js
     } \
 
     INIT_TYPEDARRAY_CONSTRUCTOR(Int8Array, Int8ArrayPrototype, int8);
-    INIT_TYPEDARRAY_CONSTRUCTOR(Uint8Array, Uint8ArrayPrototype, uint8);
+    bool JavascriptLibrary::InitializeUint8ArrayConstructor(DynamicObject* typedArrayConstructor, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)
+    {
+        typeHandler->Convert(typedArrayConstructor, mode, 6);
+        ScriptContext* scriptContext = typedArrayConstructor->GetScriptContext();
+        JavascriptLibrary* library = typedArrayConstructor->GetLibrary();
+        library->AddMember(typedArrayConstructor, PropertyIds::length, TaggedInt::ToVarUnchecked(3), PropertyConfigurable);
+        library->AddMember(typedArrayConstructor, PropertyIds::name, library->CreateStringFromCppLiteral(_u("Uint8Array")), PropertyConfigurable);
+        library->AddMember(typedArrayConstructor, PropertyIds::BYTES_PER_ELEMENT, TaggedInt::ToVarUnchecked(sizeof(uint8)), PropertyNone);
+        library->AddMember(typedArrayConstructor, PropertyIds::prototype, scriptContext->GetLibrary()->Uint8ArrayPrototype, PropertyNone);
+        library->AddFunctionToLibraryObjectWithPropertyName(typedArrayConstructor, _u("fromBase64"), &TypedArrayBase::EntryInfo::FromBase64, 1);
+        library->AddFunctionToLibraryObjectWithPropertyName(typedArrayConstructor, _u("fromHex"), &TypedArrayBase::EntryInfo::FromHex, 1);
+        typedArrayConstructor->SetHasNoEnumerableProperties(true);
+        return true;
+    }
     INIT_TYPEDARRAY_CONSTRUCTOR(Uint8ClampedArray, Uint8ClampedArrayPrototype, uint8);
     INIT_TYPEDARRAY_CONSTRUCTOR(Int16Array, Int16ArrayPrototype, int16);
     INIT_TYPEDARRAY_CONSTRUCTOR(Uint16Array, Uint16ArrayPrototype, uint16);
@@ -2638,7 +2652,19 @@ namespace Js
     } \
 
     INIT_TYPEDARRAY_PROTOTYPE(Int8Array, Int8ArrayPrototype, int8);
-    INIT_TYPEDARRAY_PROTOTYPE(Uint8Array, Uint8ArrayPrototype, uint8);
+    bool JavascriptLibrary::InitializeUint8ArrayPrototype(DynamicObject* typedarrayPrototype, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)
+    {
+        typeHandler->Convert(typedarrayPrototype, mode, 6);
+        JavascriptLibrary* library = typedarrayPrototype->GetLibrary();
+        library->AddMember(typedarrayPrototype, PropertyIds::constructor, library->Uint8ArrayConstructor);
+        library->AddMember(typedarrayPrototype, PropertyIds::BYTES_PER_ELEMENT, TaggedInt::ToVarUnchecked(sizeof(uint8)), PropertyNone);
+        library->AddFunctionToLibraryObjectWithPropertyName(typedarrayPrototype, _u("toBase64"), &TypedArrayBase::EntryInfo::ToBase64, 0);
+        library->AddFunctionToLibraryObjectWithPropertyName(typedarrayPrototype, _u("setFromBase64"), &TypedArrayBase::EntryInfo::SetFromBase64, 1);
+        library->AddFunctionToLibraryObjectWithPropertyName(typedarrayPrototype, _u("toHex"), &TypedArrayBase::EntryInfo::ToHex, 0);
+        library->AddFunctionToLibraryObjectWithPropertyName(typedarrayPrototype, _u("setFromHex"), &TypedArrayBase::EntryInfo::SetFromHex, 1);
+        typedarrayPrototype->SetHasNoEnumerableProperties(true);
+        return true;
+    }
     INIT_TYPEDARRAY_PROTOTYPE(Uint8ClampedArray, Uint8ClampedArrayPrototype, uint8);
     INIT_TYPEDARRAY_PROTOTYPE(Int16Array, Int16ArrayPrototype, int16);
     INIT_TYPEDARRAY_PROTOTYPE(Uint16Array, Uint16ArrayPrototype, uint16);
@@ -2704,7 +2730,7 @@ namespace Js
 
     bool JavascriptLibrary::InitializeErrorConstructor(DynamicObject* constructor, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)
     {
-        typeHandler->Convert(constructor, mode, 4);
+        typeHandler->Convert(constructor, mode, 5);
 
         ScriptContext* scriptContext = constructor->GetScriptContext();
         JavascriptLibrary* library = constructor->GetLibrary();
@@ -2712,6 +2738,7 @@ namespace Js
         library->AddMember(constructor, PropertyIds::prototype, library->errorPrototype, PropertyNone);
         library->AddMember(constructor, PropertyIds::length, TaggedInt::ToVarUnchecked(1), PropertyConfigurable);
         library->AddMember(constructor, PropertyIds::name, scriptContext->GetPropertyString(PropertyIds::Error), PropertyConfigurable);
+        library->AddFunctionToLibraryObjectWithPropertyName(constructor, _u("isError"), &JavascriptError::EntryInfo::IsError, 1);
 
         if (scriptContext->GetConfig()->IsErrorStackTraceEnabled())
         {
@@ -3475,7 +3502,7 @@ namespace Js
 
     bool JavascriptLibrary::InitializeMathObject(DynamicObject* mathObject, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)
     {
-        typeHandler->Convert(mathObject, mode, 42);
+        typeHandler->Convert(mathObject, mode, 43);
         // Note: Any new function addition/deletion/modification should also be updated in JavascriptLibrary::ProfilerRegisterMath
         // so that the update is in sync with profiler
         ScriptContext* scriptContext = mathObject->GetScriptContext();
@@ -3521,6 +3548,7 @@ namespace Js
         builtinFuncs[BuiltinFunction::Math_Sqrt]   = library->AddFunctionToLibraryObject(mathObject, PropertyIds::sqrt,   &Math::EntryInfo::Sqrt,   1);
         builtinFuncs[BuiltinFunction::Math_Tan]    = library->AddFunctionToLibraryObject(mathObject, PropertyIds::tan,    &Math::EntryInfo::Tan,    1);
         library->AddFunctionToLibraryObjectWithPropertyName(mathObject, _u("f16round"), &Math::EntryInfo::F16round, 1);
+        library->AddFunctionToLibraryObjectWithPropertyName(mathObject, _u("sumPrecise"), &Math::EntryInfo::SumPrecise, 1);
 
         if (scriptContext->GetConfig()->IsES6MathExtensionsEnabled())
         {
@@ -8147,6 +8175,10 @@ namespace Js
 
         // Error Constructors and prototypes
         REGISTER_ERROR_OBJECT(Error);
+        {
+            DEFINE_OBJECT_NAME(Error);
+            REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("isError"), 7, JavascriptError::EntryIsError);
+        }
         REGISTER_ERROR_OBJECT(EvalError);
         REGISTER_ERROR_OBJECT(RangeError);
         REGISTER_ERROR_OBJECT(ReferenceError);
@@ -8270,6 +8302,7 @@ namespace Js
         REG_OBJECTS_LIB_FUNC(copyWithin, JavascriptArray::EntryCopyWithin)
         REG_OBJECTS_LIB_FUNC(from, JavascriptArray::EntryFrom);
         REG_OBJECTS_LIB_FUNC(of, JavascriptArray::EntryOf);
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("fromAsync"), 9, JavascriptArray::EntryFromAsync);
 
         REG_OBJECTS_LIB_FUNC(includes, JavascriptArray::EntryIncludes);
 
@@ -8416,6 +8449,7 @@ namespace Js
         REG_OBJECTS_LIB_FUNC(sqrt, Math::Sqrt);
         REG_OBJECTS_LIB_FUNC(tan, Math::Tan);
         REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("f16round"), 8, Math::F16round);
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("sumPrecise"), 10, Math::EntrySumPrecise);
 
         if (scriptContext->GetConfig()->IsES6MathExtensionsEnabled())
         {
@@ -8861,6 +8895,12 @@ namespace Js
         REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("toReversed"), 10, TypedArrayBase::EntryToReversed);
         REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("toSorted"), 8, TypedArrayBase::EntryToSorted);
         REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("with"), 4, TypedArrayBase::EntryWith);
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("fromBase64"), 10, TypedArrayBase::EntryFromBase64);
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("fromHex"), 7, TypedArrayBase::EntryFromHex);
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("toBase64"), 8, TypedArrayBase::EntryToBase64);
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("setFromBase64"), 13, TypedArrayBase::EntrySetFromBase64);
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("toHex"), 5, TypedArrayBase::EntryToHex);
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("setFromHex"), 10, TypedArrayBase::EntrySetFromHex);
 
 
         return hr;

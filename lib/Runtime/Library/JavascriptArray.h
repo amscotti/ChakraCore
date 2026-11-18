@@ -273,6 +273,7 @@ namespace Js
             static FunctionInfo CopyWithin;
             static FunctionInfo Fill;
             static FunctionInfo From;
+            static FunctionInfo FromAsync;
             static FunctionInfo Of;
             static FunctionInfo GetterSymbolSpecies;
         };
@@ -318,6 +319,7 @@ namespace Js
         static Var EntryCopyWithin(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryFill(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryFrom(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryFromAsync(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryOf(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryGetterSymbolSpecies(RecyclableObject* function, CallInfo callInfo, ...);
 

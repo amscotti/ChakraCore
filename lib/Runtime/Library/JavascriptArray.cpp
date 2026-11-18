@@ -11165,6 +11165,18 @@ Case0:
         JS_REENTRANT_UNLOCK(jsReentLock, return JavascriptArray::OfHelper(false, args, scriptContext));
     }
 
+    Var JavascriptArray::EntryFromAsync(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+        RUNTIME_ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+        AssertOrFailFast(!(callInfo.Flags & CallFlags_New));
+        AssertOrFailFast(args.Info.Count > 0);
+
+        return scriptContext->GetLibrary()->GetUndefined();
+    }
+
     Var JavascriptArray::EntryGetterSymbolSpecies(RecyclableObject* function, CallInfo callInfo, ...)
     {
         ARGUMENTS(args, callInfo);
