@@ -146,6 +146,20 @@
       <tags>Intl,exclude_windows</tags>
     </default>
   </test>
+  <test>
+    <default>
+      <files>IntlSupportedValuesOfTest.js</files>
+      <compile-flags>-args summary -endargs</compile-flags>
+      <tags>Intl,exclude_windows</tags>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>IntlDurationFormatTest.js</files>
+      <compile-flags>-args summary -endargs</compile-flags>
+      <tags>Intl,exclude_windows</tags>
+    </default>
+  </test>
 
   <!-- Slow Tests -->
 
