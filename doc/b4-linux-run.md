@@ -463,7 +463,7 @@ macOS ARM64 host (`06d783c64`):
 | 9 | Node-API **150** exports; probes **18/18**; stress **5x**; `run_matrix.py` **46/23/0**; addon matrix **52/61/6** (six documented PR-12 V8 error-text diffs; runner returns 1) |
 | 10 | earley-boyer **30x**, class-private-methods **50x**, AsyncSuspendedResume/Detach **30x each**, TryCatch/StackTrace PASS |
 | 11 | `package check-package` PASS; deterministic tarball and packaged `ch`/`ch-nodeapi` smoke tests |
-| 12 | Test262 + benchmarks below; hosted CI awaits the push |
+| 12 | Test262 + benchmarks below; Linux CI **44341460795** green; macOS jobs were partially cancelled by the runner queue |
 
 ### 12.2 Test262 certified refresh (`refresh-2026-11-18`)
 
