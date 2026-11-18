@@ -118,6 +118,34 @@
       <tags>Intl,exclude_windows</tags>
     </default>
   </test>
+  <test>
+    <default>
+      <files>IntlLocaleTest.js</files>
+      <compile-flags>-args summary -endargs</compile-flags>
+      <tags>Intl,exclude_windows</tags>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>IntlListRelativeTimeTest.js</files>
+      <compile-flags>-args summary -endargs</compile-flags>
+      <tags>Intl,exclude_windows</tags>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>IntlDisplayNamesTest.js</files>
+      <compile-flags>-args summary -endargs</compile-flags>
+      <tags>Intl,exclude_windows</tags>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>IntlSegmenterTest.js</files>
+      <compile-flags>-args summary -endargs</compile-flags>
+      <tags>Intl,exclude_windows</tags>
+    </default>
+  </test>
 
   <!-- Slow Tests -->
 

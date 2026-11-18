@@ -12,7 +12,9 @@ repeatable upstream baseline **before** feature implementation.
   integrity hashes in `package-lock.json`. Node 22+ and Python 3.11+ are required
   for this development tool, not for building or embedding the engine.
 - Default selection: `test/language`, `test/built-ins`, `test/annexB`. Intl402 and
-  staging can be selected explicitly with quoted patterns.
+  staging can be selected explicitly with quoted patterns, or opt-in `--intl402`
+  can be passed to append `test/intl402/**/*.js` to the default patterns (when
+  omitted, default patterns are unchanged).
 - Default host flags: `-nonative -Test262 -CollectGarbage -NegativePhaseReport`
   (the last one enables the host's negative-phase marker; see
   [doc/c1-negative-phase.md](../../doc/c1-negative-phase.md)). Language flags
@@ -57,9 +59,14 @@ separate output directories to retain comparisons:
 python3 tools/test262/run.py --binary build-xplat/ch --output out/test262-legacy
 python3 tools/test262/run.py --binary build-zigpilot/ch --output out/test262-zig
 python3 tools/test262/run.py --binary build-zigpilot/ch --controls-only
+python3 tools/test262/run.py --binary build-zigpilot/ch --intl402 --output out/test262-intl402
 python3 tools/test262/run.py --binary build-zigpilot/ch --output out/test262-regex \
   'test/built-ins/RegExp/**/*.js' 'test/language/literals/regexp/**/*.js'
 ```
+
+Passing `--intl402` without positional globs runs `test/language`, `test/built-ins`,
+`test/annexB`, plus `test/intl402/**/*.js`; explicit positional globs always
+override the default pattern list.
 
 `--jobs` defaults to 8; `--timeout` is per-scenario milliseconds (default 10000).
 Both are recorded in `summary.json` (`jobs`, `timeout_ms`). Each agent writes

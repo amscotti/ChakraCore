@@ -21,6 +21,17 @@ import tempfile
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 LOCK = json.loads((HERE / 'test262.lock.json').read_text())
+DEFAULT_PATTERNS = ('test/language/**/*.js', 'test/built-ins/**/*.js', 'test/annexB/**/*.js')
+INTL402_PATTERN = 'test/intl402/**/*.js'
+
+
+def resolve_patterns(patterns, intl402=False):
+    if patterns:
+        return list(patterns)
+    resolved = list(DEFAULT_PATTERNS)
+    if intl402:
+        resolved.append(INTL402_PATTERN)
+    return resolved
 
 
 def digest(path):
@@ -293,18 +304,25 @@ def negative_phase_judgement(record):
                 else 'shape:marker-displaced'}
 
 
-def main():
+def build_parser():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', type=Path, required=True)
     parser.add_argument('--checkout', type=Path, default=ROOT / 'out/test262')
     parser.add_argument('--output', type=Path, default=ROOT / 'out/test262-results')
     parser.add_argument('--prepare', action='store_true', help='fetch/check out the lockfile revision')
     parser.add_argument('--controls-only', action='store_true')
+    parser.add_argument('--intl402', action='store_true',
+                        help="append 'test/intl402/**/*.js' to default patterns when no globs are given")
     parser.add_argument('--node', default='node')
     parser.add_argument('--jobs', type=int, default=8)
     parser.add_argument('--timeout', type=int, default=10000, help='per-scenario timeout, milliseconds')
     parser.add_argument('--host-flags', default='-nonative -Test262 -CollectGarbage -NegativePhaseReport')
     parser.add_argument('patterns', nargs='*', help='quoted test262-relative globs')
+    return parser
+
+
+def main():
+    parser = build_parser()
     args = parser.parse_args()
     args.binary, args.checkout, args.output = (path.resolve() for path in (args.binary, args.checkout, args.output))
     if args.jobs <= 0 or args.timeout <= 0:
@@ -349,7 +367,7 @@ def main():
         if artifact_identity(args.binary) != identity:
             raise ValueError('binary/library/harness inputs changed during controls')
         return 0
-    patterns = args.patterns or ['test/language/**/*.js', 'test/built-ins/**/*.js', 'test/annexB/**/*.js']
+    patterns = resolve_patterns(args.patterns, args.intl402)
     records, command, skips = harness(args.binary, args.checkout, patterns,
                                       args.output / 'results.json', args)
     checkout(args.checkout, prepare=False)
