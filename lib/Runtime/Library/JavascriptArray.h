@@ -10,6 +10,8 @@
 
 namespace Js
 {
+    struct ArrayFromAsyncState;
+    enum class ArrayFromAsyncCallbackKind : uint8;
 
     class SegmentBTree
     {
@@ -909,6 +911,21 @@ namespace Js
         template<typename T>
         static void TryGetArrayAndLength(Var arg, ScriptContext *scriptContext, PCWSTR methodName, _Out_ JavascriptArray** array, _Out_ RecyclableObject** obj, _Out_ T * length);
         static uint64 OP_GetLength(Var obj, ScriptContext *scriptContext);
+
+        static Var EntryFromAsyncCallback(RecyclableObject* function, CallInfo callInfo, ...);
+        static RecyclableObject* FromAsyncGetMethod(Var target, PropertyId propertyId, ScriptContext* scriptContext);
+        static RecyclableObject* FromAsyncCreateCallback(ArrayFromAsyncState* state, ArrayFromAsyncCallbackKind kind, ScriptContext* scriptContext);
+        static void FromAsyncAwait(Var value, ArrayFromAsyncState* state, ArrayFromAsyncCallbackKind onFulfilledKind, ArrayFromAsyncCallbackKind onRejectedKind, ScriptContext* scriptContext);
+        static void FromAsyncCreateTargetObject(Var constructor, bool hasLengthArg, uint64 len, ArrayFromAsyncState* state, ScriptContext* scriptContext);
+        static void FromAsyncDefineElementOrThrow(ArrayFromAsyncState* state, uint64 index, Var value, ScriptContext* scriptContext);
+        static void FromAsyncSetLengthAndResolve(ArrayFromAsyncState* state, uint64 length, ScriptContext* scriptContext);
+        static void FromAsyncRejectWithException(ArrayFromAsyncState* state, JavascriptExceptionObject* exception, ScriptContext* scriptContext);
+        static void FromAsyncSyncIteratorClose(RecyclableObject* syncIterator, ScriptContext* scriptContext);
+        static void FromAsyncStartAsyncIteratorClose(ArrayFromAsyncState* state, Var errorReason, ScriptContext* scriptContext);
+        static void FromAsyncStepIterator(ArrayFromAsyncState* state, ScriptContext* scriptContext);
+        static void FromAsyncInvokeMapFn(ArrayFromAsyncState* state, Var value, ArrayFromAsyncCallbackKind onFulfilledKind, ArrayFromAsyncCallbackKind onRejectedKind, ScriptContext* scriptContext);
+        static void FromAsyncOnIterValueReady(ArrayFromAsyncState* state, Var nextValue, ScriptContext* scriptContext);
+        static void FromAsyncStepArrayLike(ArrayFromAsyncState* state, ScriptContext* scriptContext);
 
     public:
         template<typename T, typename P = uint32>

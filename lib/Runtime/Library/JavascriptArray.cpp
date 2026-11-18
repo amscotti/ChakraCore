@@ -11165,16 +11165,928 @@ Case0:
         JS_REENTRANT_UNLOCK(jsReentLock, return JavascriptArray::OfHelper(false, args, scriptContext));
     }
 
+namespace Js
+{
+    enum class ArrayFromAsyncMode : uint8
+    {
+        AsyncIterator,
+        SyncIterator,
+        ArrayLike
+    };
+
+    enum class ArrayFromAsyncCallbackKind : uint8
+    {
+        SyncNextUnwrapNotDone,
+        SyncNextUnwrapDone,
+        SyncNextCloseOnReject,
+        IterNextFulfilled,
+        IterMappedFulfilled,
+        IterCloseOnReject,
+        IterFinishClose,
+        ArrayLikeElemFulfilled,
+        ArrayLikeMappedFulfilled,
+        RejectDirect
+    };
+
+    // GC-traced state for Array.fromAsync. Every retained JS object/Var uses
+    // Field(...) so Recycler conservative scanning and write barriers keep all
+    // live targets rooted across microtasks and GC inside user callbacks.
+    struct ArrayFromAsyncState
+    {
+        Field(JavascriptPromiseCapability*) promiseCapability;
+        Field(RecyclableObject*) resultObj;
+        Field(JavascriptArray*) internalResultArr;
+        Field(RecyclableObject*) mapfn;
+        Field(Var) thisArg;
+        Field(RecyclableObject*) sourceObj;
+        Field(Var) nextMethod;
+        Field(Var) pendingError;
+        Field(uint64) k;
+        Field(uint64) len;
+        Field(ArrayFromAsyncMode) mode;
+
+        ArrayFromAsyncState(JavascriptPromiseCapability* promiseCapability) :
+            promiseCapability(promiseCapability),
+            resultObj(nullptr),
+            internalResultArr(nullptr),
+            mapfn(nullptr),
+            thisArg(nullptr),
+            sourceObj(nullptr),
+            nextMethod(nullptr),
+            pendingError(nullptr),
+            k(0),
+            len(0),
+            mode(ArrayFromAsyncMode::ArrayLike)
+        {
+        }
+    };
+
+    class ArrayFromAsyncCallbackFunction : public RuntimeFunction
+    {
+    protected:
+        DEFINE_VTABLE_CTOR(ArrayFromAsyncCallbackFunction, RuntimeFunction);
+        DEFINE_MARSHAL_OBJECT_TO_SCRIPT_CONTEXT(ArrayFromAsyncCallbackFunction);
+
+    public:
+        ArrayFromAsyncCallbackFunction(
+            DynamicType* type,
+            FunctionInfo* functionInfo,
+            ArrayFromAsyncState* state,
+            ArrayFromAsyncCallbackKind kind) :
+            RuntimeFunction(type, functionInfo),
+            state(state),
+            kind(kind)
+        {
+        }
+
+        Field(ArrayFromAsyncState*) state;
+        Field(ArrayFromAsyncCallbackKind) kind;
+    };
+
+    template <>
+    bool VarIsImpl<ArrayFromAsyncCallbackFunction>(RecyclableObject* obj)
+    {
+        return VarIs<JavascriptFunction>(obj) && (
+            VirtualTableInfo<ArrayFromAsyncCallbackFunction>::HasVirtualTable(obj) ||
+            VirtualTableInfo<CrossSiteObject<ArrayFromAsyncCallbackFunction>>::HasVirtualTable(obj));
+    }
+}
+
+    RecyclableObject* JavascriptArray::FromAsyncGetMethod(Var target, PropertyId propertyId, ScriptContext* scriptContext)
+    {
+        RecyclableObject* receiverObj = nullptr;
+        if (!JavascriptConversion::ToObject(target, scriptContext, &receiverObj))
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_NeedObject, _u("Array.fromAsync"));
+        }
+
+        Var methodVar = nullptr;
+        BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+        {
+            methodVar = JavascriptOperators::GetPropertyNoCache(target, receiverObj, propertyId, scriptContext);
+        }
+        END_SAFE_REENTRANT_CALL
+
+        if (JavascriptOperators::IsUndefinedOrNull(methodVar))
+        {
+            return nullptr;
+        }
+        if (!JavascriptConversion::IsCallable(methodVar))
+        {
+            JavascriptError::ThrowTypeError(
+                scriptContext,
+                JSERR_Property_NeedFunction,
+                scriptContext->GetPropertyName(propertyId)->GetBuffer());
+        }
+        return VarTo<RecyclableObject>(methodVar);
+    }
+
+    RecyclableObject* JavascriptArray::FromAsyncCreateCallback(ArrayFromAsyncState* state, ArrayFromAsyncCallbackKind kind, ScriptContext* scriptContext)
+    {
+        static FunctionInfo s_fromAsyncCallbackInfo(
+            FORCE_NO_WRITE_BARRIER_TAG(&JavascriptArray::EntryFromAsyncCallback),
+            FunctionInfo::ErrorOnNew);
+        JavascriptLibrary* library = scriptContext->GetLibrary();
+        DynamicType* type = library->CreateFunctionWithLengthAndNameType(&s_fromAsyncCallbackInfo);
+        ArrayFromAsyncCallbackFunction* callback = RecyclerNewEnumClass(
+            scriptContext->GetRecycler(),
+            JavascriptLibrary::EnumFunctionClass,
+            ArrayFromAsyncCallbackFunction,
+            type,
+            &s_fromAsyncCallbackInfo,
+            state,
+            kind);
+        callback->SetPropertyWithAttributes(PropertyIds::length, TaggedInt::ToVarUnchecked(1), PropertyConfigurable, nullptr);
+        callback->SetPropertyWithAttributes(PropertyIds::name, library->GetEmptyString(), PropertyConfigurable, nullptr);
+        return callback;
+    }
+
+    void JavascriptArray::FromAsyncAwait(Var value, ArrayFromAsyncState* state, ArrayFromAsyncCallbackKind onFulfilledKind, ArrayFromAsyncCallbackKind onRejectedKind, ScriptContext* scriptContext)
+    {
+        JavascriptPromise* promise = nullptr;
+        BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+        {
+            promise = JavascriptPromise::InternalPromiseResolve(value, scriptContext);
+        }
+        END_SAFE_REENTRANT_CALL
+        JavascriptPromiseCapability* unused = JavascriptPromise::UnusedPromiseCapability(scriptContext);
+        RecyclableObject* onFulfilled = FromAsyncCreateCallback(state, onFulfilledKind, scriptContext);
+        RecyclableObject* onRejected = FromAsyncCreateCallback(state, onRejectedKind, scriptContext);
+        JavascriptPromise::PerformPromiseThen(promise, unused, onFulfilled, onRejected, scriptContext);
+    }
+
+    void JavascriptArray::FromAsyncCreateTargetObject(Var constructor, bool hasLengthArg, uint64 len, ArrayFromAsyncState* state, ScriptContext* scriptContext)
+    {
+        if (JavascriptOperators::IsConstructor(constructor))
+        {
+            RecyclableObject* ctorObj = UnsafeVarTo<RecyclableObject>(constructor);
+            Var newObjVar = nullptr;
+            BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+            {
+                if (hasLengthArg)
+                {
+                    Var ctorArgs[] = { constructor, JavascriptNumber::ToVar(len, scriptContext) };
+                    CallInfo ctorCallInfo(CallFlags_New, _countof(ctorArgs));
+                    Arguments ctorArguments(ctorCallInfo, ctorArgs);
+                    newObjVar = JavascriptFunction::CallAsConstructor(ctorObj, nullptr, ctorArguments, scriptContext);
+                }
+                else
+                {
+                    Var ctorArgs[] = { constructor };
+                    CallInfo ctorCallInfo(CallFlags_New, _countof(ctorArgs));
+                    Arguments ctorArguments(ctorCallInfo, ctorArgs);
+                    newObjVar = JavascriptFunction::CallAsConstructor(ctorObj, nullptr, ctorArguments, scriptContext);
+                }
+            }
+            END_SAFE_REENTRANT_CALL
+
+            if (!JavascriptOperators::IsObject(newObjVar))
+            {
+                JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedObject);
+            }
+            state->resultObj = UnsafeVarTo<RecyclableObject>(newObjVar);
+            state->internalResultArr = nullptr;
+        }
+        else
+        {
+            JavascriptArray* newArr = nullptr;
+            if (hasLengthArg)
+            {
+                newArr = ArrayCreateOrThrow(len, scriptContext);
+            }
+            else
+            {
+                newArr = scriptContext->GetLibrary()->CreateArray(0);
+            }
+            newArr->EnsureHead<Var>();
+            state->internalResultArr = newArr;
+            state->resultObj = newArr;
+        }
+    }
+
+    void JavascriptArray::FromAsyncDefineElementOrThrow(ArrayFromAsyncState* state, uint64 index, Var value, ScriptContext* scriptContext)
+    {
+        Var marshaledValue = CrossSite::MarshalVar(state->resultObj->GetScriptContext(), value);
+        if (state->internalResultArr != nullptr && index < JavascriptArray::MaxArrayLength)
+        {
+            state->internalResultArr->DirectSetItemAt(static_cast<uint32>(index), marshaledValue);
+            return;
+        }
+
+        BOOL defined = FALSE;
+        BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+        {
+            defined = JavascriptArray::SetArrayLikeObjects(state->resultObj, BigIndex(index), marshaledValue);
+        }
+        END_SAFE_REENTRANT_CALL
+        JavascriptArray::ThrowErrorOnFailure(defined, scriptContext, BigIndex(index));
+    }
+
+    void JavascriptArray::FromAsyncSetLengthAndResolve(ArrayFromAsyncState* state, uint64 length, ScriptContext* scriptContext)
+    {
+        Var lenVar = JavascriptNumber::ToVar(length, scriptContext);
+        Var marshaledLen = CrossSite::MarshalVar(state->resultObj->GetScriptContext(), lenVar);
+        BOOL setSucceeded = FALSE;
+        BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+        {
+            setSucceeded = JavascriptOperators::SetProperty(
+                state->resultObj,
+                state->resultObj,
+                PropertyIds::length,
+                marshaledLen,
+                scriptContext,
+                static_cast<PropertyOperationFlags>(PropertyOperation_StrictMode | PropertyOperation_ThrowIfNonWritable | PropertyOperation_ThrowIfNotExtensible));
+        }
+        END_SAFE_REENTRANT_CALL
+
+        if (!setSucceeded)
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_CantAssignToReadOnly);
+        }
+
+        JavascriptPromise::TryCallResolveOrRejectHandler(
+            state->promiseCapability->GetResolve(),
+            CrossSite::MarshalVar(scriptContext, state->resultObj),
+            scriptContext);
+    }
+
+    void JavascriptArray::FromAsyncRejectWithException(ArrayFromAsyncState* state, JavascriptExceptionObject* exception, ScriptContext* scriptContext)
+    {
+        if (exception != nullptr)
+        {
+            JavascriptPromise::TryRejectWithExceptionObject(exception, state->promiseCapability->GetReject(), scriptContext);
+        }
+        else
+        {
+            JavascriptPromise::TryCallResolveOrRejectHandler(
+                state->promiseCapability->GetReject(),
+                scriptContext->GetLibrary()->GetUndefined(),
+                scriptContext);
+        }
+    }
+
+    void JavascriptArray::FromAsyncSyncIteratorClose(RecyclableObject* syncIterator, ScriptContext* scriptContext)
+    {
+        try
+        {
+            Var returnVar = nullptr;
+            BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+            {
+                returnVar = JavascriptOperators::GetPropertyNoCache(syncIterator, PropertyIds::return_, scriptContext);
+            }
+            END_SAFE_REENTRANT_CALL
+
+            if (JavascriptOperators::IsUndefinedOrNull(returnVar) || !JavascriptConversion::IsCallable(returnVar))
+            {
+                return;
+            }
+
+            RecyclableObject* returnFn = VarTo<RecyclableObject>(returnVar);
+            BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+            {
+                CALL_FUNCTION(scriptContext->GetThreadContext(), returnFn, CallInfo(CallFlags_Value, 1), syncIterator);
+            }
+            END_SAFE_REENTRANT_CALL
+        }
+        catch (const JavascriptException& err)
+        {
+            err.GetAndClear();
+        }
+    }
+
+    void JavascriptArray::FromAsyncStartAsyncIteratorClose(ArrayFromAsyncState* state, Var errorReason, ScriptContext* scriptContext)
+    {
+        state->pendingError = CrossSite::MarshalVar(scriptContext, errorReason);
+
+        if (state->mode == ArrayFromAsyncMode::SyncIterator)
+        {
+            JavascriptPromise* returnPromise = nullptr;
+            try
+            {
+                RecyclableObject* returnMethod = FromAsyncGetMethod(state->sourceObj, PropertyIds::return_, scriptContext);
+                if (returnMethod == nullptr)
+                {
+                    Var iterResult = scriptContext->GetLibrary()->CreateIteratorResultObject(
+                        scriptContext->GetLibrary()->GetUndefined(),
+                        true);
+                    returnPromise = UnsafeVarTo<JavascriptPromise>(
+                        JavascriptPromise::CreateResolvedPromise(iterResult, scriptContext));
+                }
+                else
+                {
+                    Var resultVar = nullptr;
+                    RecyclableObject* sourceObj = state->sourceObj;
+                    BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+                    {
+                        resultVar = CALL_FUNCTION(
+                            scriptContext->GetThreadContext(),
+                            returnMethod,
+                            CallInfo(CallFlags_Value, 1),
+                            sourceObj);
+                    }
+                    END_SAFE_REENTRANT_CALL
+
+                    if (!JavascriptOperators::IsObject(resultVar))
+                    {
+                        JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedObject);
+                    }
+
+                    RecyclableObject* resultObj = UnsafeVarTo<RecyclableObject>(resultVar);
+                    bool done = false;
+                    Var value = nullptr;
+                    BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+                    {
+                        done = JavascriptOperators::IteratorComplete(resultObj, scriptContext);
+                        value = JavascriptOperators::IteratorValue(resultObj, scriptContext);
+                    }
+                    END_SAFE_REENTRANT_CALL
+
+                    JavascriptPromise* valueWrapper = nullptr;
+                    BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+                    {
+                        valueWrapper = JavascriptPromise::InternalPromiseResolve(value, scriptContext);
+                    }
+                    END_SAFE_REENTRANT_CALL
+
+                    JavascriptPromiseCapability* returnCap = JavascriptPromise::NewPromiseCapability(
+                        scriptContext->GetLibrary()->GetPromiseConstructor(),
+                        scriptContext);
+                    RecyclableObject* unwrap = FromAsyncCreateCallback(
+                        state,
+                        done ? ArrayFromAsyncCallbackKind::SyncNextUnwrapDone : ArrayFromAsyncCallbackKind::SyncNextUnwrapNotDone,
+                        scriptContext);
+                    JavascriptPromise::PerformPromiseThen(
+                        valueWrapper,
+                        returnCap,
+                        unwrap,
+                        scriptContext->GetLibrary()->GetThrowerFunction(),
+                        scriptContext);
+                    returnPromise = UnsafeVarTo<JavascriptPromise>(returnCap->GetPromise());
+                }
+            }
+            catch (const JavascriptException& err)
+            {
+                JavascriptExceptionObject* exception = err.GetAndClear();
+                Var thrown = exception != nullptr
+                    ? exception->GetThrownObject(scriptContext)
+                    : scriptContext->GetLibrary()->GetUndefined();
+                returnPromise = UnsafeVarTo<JavascriptPromise>(
+                    JavascriptPromise::CreateRejectedPromise(thrown, scriptContext));
+            }
+
+            JavascriptPromiseCapability* unused = JavascriptPromise::UnusedPromiseCapability(scriptContext);
+            RecyclableObject* finishClose = FromAsyncCreateCallback(
+                state,
+                ArrayFromAsyncCallbackKind::IterFinishClose,
+                scriptContext);
+            JavascriptPromise::PerformPromiseThen(returnPromise, unused, finishClose, finishClose, scriptContext);
+            return;
+        }
+
+        try
+        {
+            RecyclableObject* returnMethod = FromAsyncGetMethod(state->sourceObj, PropertyIds::return_, scriptContext);
+            if (returnMethod == nullptr)
+            {
+                JavascriptPromise::TryCallResolveOrRejectHandler(
+                    state->promiseCapability->GetReject(),
+                    state->pendingError,
+                    scriptContext);
+                return;
+            }
+
+            Var innerResult = nullptr;
+            RecyclableObject* sourceObj = state->sourceObj;
+            BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+            {
+                innerResult = CALL_FUNCTION(
+                    scriptContext->GetThreadContext(),
+                    returnMethod,
+                    CallInfo(CallFlags_Value, 1),
+                    sourceObj);
+            }
+            END_SAFE_REENTRANT_CALL
+
+            FromAsyncAwait(
+                innerResult,
+                state,
+                ArrayFromAsyncCallbackKind::IterFinishClose,
+                ArrayFromAsyncCallbackKind::IterFinishClose,
+                scriptContext);
+        }
+        catch (const JavascriptException& err)
+        {
+            err.GetAndClear();
+            JavascriptPromise::TryCallResolveOrRejectHandler(
+                state->promiseCapability->GetReject(),
+                state->pendingError,
+                scriptContext);
+        }
+    }
+
+    void JavascriptArray::FromAsyncStepIterator(ArrayFromAsyncState* state, ScriptContext* scriptContext)
+    {
+        if (state->k >= JavascriptArray::FiftyThirdPowerOfTwoMinusOne)
+        {
+            JavascriptError* typeError = scriptContext->GetLibrary()->CreateTypeError();
+            JavascriptError::SetErrorMessage(typeError, JSERR_IllegalArraySizeAndLength, _u(""), scriptContext);
+            FromAsyncStartAsyncIteratorClose(state, typeError, scriptContext);
+            return;
+        }
+
+        JavascriptExceptionObject* exception = nullptr;
+        try
+        {
+            if (!JavascriptConversion::IsCallable(state->nextMethod))
+            {
+                JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedFunction);
+            }
+
+            RecyclableObject* nextFn = VarTo<RecyclableObject>(state->nextMethod);
+            RecyclableObject* sourceObj = state->sourceObj;
+            Var nextResult = nullptr;
+            BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+            {
+                nextResult = CALL_FUNCTION(
+                    scriptContext->GetThreadContext(),
+                    nextFn,
+                    CallInfo(CallFlags_Value, 1),
+                    sourceObj);
+            }
+            END_SAFE_REENTRANT_CALL
+
+            if (state->mode == ArrayFromAsyncMode::AsyncIterator)
+            {
+                FromAsyncAwait(
+                    nextResult,
+                    state,
+                    ArrayFromAsyncCallbackKind::IterNextFulfilled,
+                    ArrayFromAsyncCallbackKind::RejectDirect,
+                    scriptContext);
+                return;
+            }
+
+            if (!JavascriptOperators::IsObject(nextResult))
+            {
+                JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedObject);
+            }
+
+            RecyclableObject* syncResultObj = UnsafeVarTo<RecyclableObject>(nextResult);
+            bool done = false;
+            Var value = nullptr;
+            BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+            {
+                done = JavascriptOperators::IteratorComplete(syncResultObj, scriptContext);
+                value = JavascriptOperators::IteratorValue(syncResultObj, scriptContext);
+            }
+            END_SAFE_REENTRANT_CALL
+
+            JavascriptPromise* valueWrapper = nullptr;
+            JavascriptExceptionObject* resolveErr = nullptr;
+            try
+            {
+                BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+                {
+                    valueWrapper = JavascriptPromise::InternalPromiseResolve(value, scriptContext);
+                }
+                END_SAFE_REENTRANT_CALL
+            }
+            catch (const JavascriptException& innerErr)
+            {
+                resolveErr = innerErr.GetAndClear();
+            }
+
+            if (resolveErr != nullptr)
+            {
+                if (!done)
+                {
+                    FromAsyncSyncIteratorClose(state->sourceObj, scriptContext);
+                }
+                FromAsyncRejectWithException(state, resolveErr, scriptContext);
+                return;
+            }
+
+            JavascriptPromiseCapability* nextCap = JavascriptPromise::NewPromiseCapability(
+                scriptContext->GetLibrary()->GetPromiseConstructor(),
+                scriptContext);
+            RecyclableObject* onFulfilled = FromAsyncCreateCallback(
+                state,
+                done ? ArrayFromAsyncCallbackKind::SyncNextUnwrapDone : ArrayFromAsyncCallbackKind::SyncNextUnwrapNotDone,
+                scriptContext);
+            RecyclableObject* onRejected = done
+                ? static_cast<RecyclableObject*>(scriptContext->GetLibrary()->GetThrowerFunction())
+                : FromAsyncCreateCallback(state, ArrayFromAsyncCallbackKind::SyncNextCloseOnReject, scriptContext);
+
+            JavascriptPromise::PerformPromiseThen(valueWrapper, nextCap, onFulfilled, onRejected, scriptContext);
+
+            FromAsyncAwait(
+                nextCap->GetPromise(),
+                state,
+                ArrayFromAsyncCallbackKind::IterNextFulfilled,
+                ArrayFromAsyncCallbackKind::RejectDirect,
+                scriptContext);
+            return;
+        }
+        catch (const JavascriptException& err)
+        {
+            exception = err.GetAndClear();
+        }
+
+        if (exception != nullptr)
+        {
+            FromAsyncRejectWithException(state, exception, scriptContext);
+        }
+    }
+
+    void JavascriptArray::FromAsyncInvokeMapFn(ArrayFromAsyncState* state, Var value, ArrayFromAsyncCallbackKind onFulfilledKind, ArrayFromAsyncCallbackKind onRejectedKind, ScriptContext* scriptContext)
+    {
+        RecyclableObject* mapfn = state->mapfn;
+        Var thisArg = state->thisArg;
+        Var kVar = JavascriptNumber::ToVar(state->k, scriptContext);
+        Var mappedValue = nullptr;
+        BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+        {
+            mappedValue = CALL_FUNCTION(
+                scriptContext->GetThreadContext(),
+                mapfn,
+                CallInfo(CallFlags_Value, 3),
+                thisArg,
+                value,
+                kVar);
+        }
+        END_SAFE_REENTRANT_CALL
+
+        FromAsyncAwait(mappedValue, state, onFulfilledKind, onRejectedKind, scriptContext);
+    }
+
+    void JavascriptArray::FromAsyncOnIterValueReady(ArrayFromAsyncState* state, Var nextValue, ScriptContext* scriptContext)
+    {
+        JavascriptExceptionObject* exception = nullptr;
+        try
+        {
+            if (state->mapfn != nullptr)
+            {
+                FromAsyncInvokeMapFn(
+                    state,
+                    nextValue,
+                    ArrayFromAsyncCallbackKind::IterMappedFulfilled,
+                    ArrayFromAsyncCallbackKind::IterCloseOnReject,
+                    scriptContext);
+                return;
+            }
+
+            FromAsyncDefineElementOrThrow(state, state->k, nextValue, scriptContext);
+        }
+        catch (const JavascriptException& err)
+        {
+            exception = err.GetAndClear();
+        }
+
+        if (exception != nullptr)
+        {
+            Var thrown = exception->GetThrownObject(scriptContext);
+            if (thrown == nullptr)
+            {
+                thrown = scriptContext->GetLibrary()->GetUndefined();
+            }
+            FromAsyncStartAsyncIteratorClose(state, thrown, scriptContext);
+            return;
+        }
+
+        state->k++;
+        FromAsyncStepIterator(state, scriptContext);
+    }
+
+    void JavascriptArray::FromAsyncStepArrayLike(ArrayFromAsyncState* state, ScriptContext* scriptContext)
+    {
+        JavascriptExceptionObject* exception = nullptr;
+        try
+        {
+            if (state->k >= state->len)
+            {
+                FromAsyncSetLengthAndResolve(state, state->len, scriptContext);
+                return;
+            }
+
+            Var kValue = nullptr;
+            BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+            {
+                kValue = JavascriptOperators::GetItem(state->sourceObj, state->k, scriptContext);
+            }
+            END_SAFE_REENTRANT_CALL
+
+            FromAsyncAwait(
+                kValue,
+                state,
+                ArrayFromAsyncCallbackKind::ArrayLikeElemFulfilled,
+                ArrayFromAsyncCallbackKind::RejectDirect,
+                scriptContext);
+            return;
+        }
+        catch (const JavascriptException& err)
+        {
+            exception = err.GetAndClear();
+        }
+
+        if (exception != nullptr)
+        {
+            FromAsyncRejectWithException(state, exception, scriptContext);
+        }
+    }
+
+    Var JavascriptArray::EntryFromAsyncCallback(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        ScriptContext* scriptContext = function->GetScriptContext();
+        PROBE_STACK(scriptContext, Js::Constants::MinStackDefault);
+        ARGUMENTS(args, callInfo);
+        Assert(!(callInfo.Flags & CallFlags_New));
+
+        JavascriptLibrary* library = scriptContext->GetLibrary();
+        Var undefinedVar = library->GetUndefined();
+        Var arg = args.Info.Count > 1 ? CrossSite::MarshalVar(scriptContext, args[1]) : undefinedVar;
+
+        ArrayFromAsyncCallbackFunction* callback = VarTo<ArrayFromAsyncCallbackFunction>(function);
+        ArrayFromAsyncState* state = callback->state;
+
+        switch (callback->kind)
+        {
+        case ArrayFromAsyncCallbackKind::SyncNextUnwrapNotDone:
+            return library->CreateIteratorResultObject(arg, false);
+
+        case ArrayFromAsyncCallbackKind::SyncNextUnwrapDone:
+            return library->CreateIteratorResultObject(arg, true);
+
+        case ArrayFromAsyncCallbackKind::SyncNextCloseOnReject:
+            FromAsyncSyncIteratorClose(state->sourceObj, scriptContext);
+            JavascriptExceptionOperators::Throw(arg, scriptContext);
+
+        case ArrayFromAsyncCallbackKind::IterNextFulfilled:
+        {
+            JavascriptExceptionObject* exception = nullptr;
+            bool done = false;
+            Var nextValue = nullptr;
+            try
+            {
+                if (!JavascriptOperators::IsObject(arg))
+                {
+                    JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedObject);
+                }
+
+                RecyclableObject* nextObj = UnsafeVarTo<RecyclableObject>(arg);
+                BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+                {
+                    done = JavascriptOperators::IteratorComplete(nextObj, scriptContext);
+                }
+                END_SAFE_REENTRANT_CALL
+
+                if (done)
+                {
+                    FromAsyncSetLengthAndResolve(state, state->k, scriptContext);
+                    return undefinedVar;
+                }
+
+                BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+                {
+                    nextValue = JavascriptOperators::IteratorValue(nextObj, scriptContext);
+                }
+                END_SAFE_REENTRANT_CALL
+            }
+            catch (const JavascriptException& err)
+            {
+                exception = err.GetAndClear();
+            }
+
+            if (exception != nullptr)
+            {
+                FromAsyncRejectWithException(state, exception, scriptContext);
+                return undefinedVar;
+            }
+
+            FromAsyncOnIterValueReady(state, nextValue, scriptContext);
+            return undefinedVar;
+        }
+
+        case ArrayFromAsyncCallbackKind::IterMappedFulfilled:
+        {
+            JavascriptExceptionObject* exception = nullptr;
+            try
+            {
+                FromAsyncDefineElementOrThrow(state, state->k, arg, scriptContext);
+            }
+            catch (const JavascriptException& err)
+            {
+                exception = err.GetAndClear();
+            }
+
+            if (exception != nullptr)
+            {
+                Var thrown = exception->GetThrownObject(scriptContext);
+                if (thrown == nullptr)
+                {
+                    thrown = undefinedVar;
+                }
+                FromAsyncStartAsyncIteratorClose(state, thrown, scriptContext);
+                return undefinedVar;
+            }
+
+            state->k++;
+            FromAsyncStepIterator(state, scriptContext);
+            return undefinedVar;
+        }
+
+        case ArrayFromAsyncCallbackKind::IterCloseOnReject:
+            FromAsyncStartAsyncIteratorClose(state, arg, scriptContext);
+            return undefinedVar;
+
+        case ArrayFromAsyncCallbackKind::IterFinishClose:
+            JavascriptPromise::TryCallResolveOrRejectHandler(
+                state->promiseCapability->GetReject(),
+                state->pendingError,
+                scriptContext);
+            return undefinedVar;
+
+        case ArrayFromAsyncCallbackKind::ArrayLikeElemFulfilled:
+        {
+            JavascriptExceptionObject* exception = nullptr;
+            try
+            {
+                if (state->mapfn != nullptr)
+                {
+                    FromAsyncInvokeMapFn(
+                        state,
+                        arg,
+                        ArrayFromAsyncCallbackKind::ArrayLikeMappedFulfilled,
+                        ArrayFromAsyncCallbackKind::RejectDirect,
+                        scriptContext);
+                    return undefinedVar;
+                }
+
+                FromAsyncDefineElementOrThrow(state, state->k, arg, scriptContext);
+            }
+            catch (const JavascriptException& err)
+            {
+                exception = err.GetAndClear();
+            }
+
+            if (exception != nullptr)
+            {
+                FromAsyncRejectWithException(state, exception, scriptContext);
+                return undefinedVar;
+            }
+
+            state->k++;
+            FromAsyncStepArrayLike(state, scriptContext);
+            return undefinedVar;
+        }
+
+        case ArrayFromAsyncCallbackKind::ArrayLikeMappedFulfilled:
+        {
+            JavascriptExceptionObject* exception = nullptr;
+            try
+            {
+                FromAsyncDefineElementOrThrow(state, state->k, arg, scriptContext);
+            }
+            catch (const JavascriptException& err)
+            {
+                exception = err.GetAndClear();
+            }
+
+            if (exception != nullptr)
+            {
+                FromAsyncRejectWithException(state, exception, scriptContext);
+                return undefinedVar;
+            }
+
+            state->k++;
+            FromAsyncStepArrayLike(state, scriptContext);
+            return undefinedVar;
+        }
+
+        case ArrayFromAsyncCallbackKind::RejectDirect:
+            JavascriptPromise::TryCallResolveOrRejectHandler(
+                state->promiseCapability->GetReject(),
+                arg,
+                scriptContext);
+            return undefinedVar;
+
+        default:
+            AssertMsg(false, "Unexpected Array.fromAsync callback kind");
+            return undefinedVar;
+        }
+    }
+
     Var JavascriptArray::EntryFromAsync(RecyclableObject* function, CallInfo callInfo, ...)
     {
         PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
 
         RUNTIME_ARGUMENTS(args, callInfo);
         ScriptContext* scriptContext = function->GetScriptContext();
+        AUTO_TAG_NATIVE_LIBRARY_ENTRY(function, callInfo, _u("Array.fromAsync"));
+
         AssertOrFailFast(!(callInfo.Flags & CallFlags_New));
         AssertOrFailFast(args.Info.Count > 0);
 
-        return scriptContext->GetLibrary()->GetUndefined();
+        JavascriptLibrary* library = scriptContext->GetLibrary();
+        Var constructor = args[0];
+        Var asyncItems = args.Info.Count > 1 ? args[1] : library->GetUndefined();
+        Var mapfnArg = args.Info.Count > 2 ? args[2] : library->GetUndefined();
+        Var thisArg = args.Info.Count > 3 ? args[3] : library->GetUndefined();
+
+        JavascriptPromiseCapability* promiseCapability = JavascriptPromise::NewPromiseCapability(
+            library->GetPromiseConstructor(),
+            scriptContext);
+        ArrayFromAsyncState* state = RecyclerNew(
+            scriptContext->GetRecycler(),
+            ArrayFromAsyncState,
+            promiseCapability);
+
+        JavascriptExceptionObject* exception = nullptr;
+        try
+        {
+            if (!JavascriptOperators::IsUndefinedObject(mapfnArg))
+            {
+                if (!JavascriptConversion::IsCallable(mapfnArg))
+                {
+                    JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_NeedFunction, _u("Array.fromAsync"));
+                }
+                state->mapfn = VarTo<RecyclableObject>(mapfnArg);
+                state->thisArg = thisArg;
+            }
+
+            RecyclableObject* usingAsyncIterator = FromAsyncGetMethod(asyncItems, PropertyIds::_symbolAsyncIterator, scriptContext);
+            RecyclableObject* usingSyncIterator = nullptr;
+            if (usingAsyncIterator == nullptr)
+            {
+                usingSyncIterator = FromAsyncGetMethod(asyncItems, PropertyIds::_symbolIterator, scriptContext);
+            }
+
+            if (usingAsyncIterator != nullptr || usingSyncIterator != nullptr)
+            {
+                RecyclableObject* method = usingAsyncIterator != nullptr ? usingAsyncIterator : usingSyncIterator;
+                Var iterVar = nullptr;
+                BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+                {
+                    iterVar = CALL_FUNCTION(scriptContext->GetThreadContext(), method, CallInfo(CallFlags_Value, 1), asyncItems);
+                }
+                END_SAFE_REENTRANT_CALL
+
+                if (!JavascriptOperators::IsObject(iterVar))
+                {
+                    JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedObject);
+                }
+
+                RecyclableObject* iterator = UnsafeVarTo<RecyclableObject>(iterVar);
+                Var nextMethod = nullptr;
+                BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+                {
+                    nextMethod = JavascriptOperators::GetPropertyNoCache(iterator, PropertyIds::next, scriptContext);
+                }
+                END_SAFE_REENTRANT_CALL
+
+                state->sourceObj = iterator;
+                state->nextMethod = nextMethod;
+                state->mode = usingAsyncIterator != nullptr ? ArrayFromAsyncMode::AsyncIterator : ArrayFromAsyncMode::SyncIterator;
+                state->k = 0;
+
+                FromAsyncCreateTargetObject(constructor, false, 0, state, scriptContext);
+                FromAsyncStepIterator(state, scriptContext);
+                return promiseCapability->GetPromise();
+            }
+
+            RecyclableObject* arrayLike = nullptr;
+            if (!JavascriptConversion::ToObject(asyncItems, scriptContext, &arrayLike))
+            {
+                JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_NeedObject, _u("Array.fromAsync"));
+            }
+
+            uint64 len = 0;
+            BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+            {
+                Var lenVar = JavascriptOperators::OP_GetLength(arrayLike, scriptContext);
+                len = static_cast<uint64>(JavascriptConversion::ToLength(lenVar, scriptContext));
+            }
+            END_SAFE_REENTRANT_CALL
+
+            state->sourceObj = arrayLike;
+            state->len = len;
+            state->mode = ArrayFromAsyncMode::ArrayLike;
+            state->k = 0;
+
+            FromAsyncCreateTargetObject(constructor, true, len, state, scriptContext);
+            FromAsyncStepArrayLike(state, scriptContext);
+            return promiseCapability->GetPromise();
+        }
+        catch (const JavascriptException& err)
+        {
+            exception = err.GetAndClear();
+        }
+
+        if (exception != nullptr)
+        {
+            FromAsyncRejectWithException(state, exception, scriptContext);
+        }
+
+        return promiseCapability->GetPromise();
     }
 
     Var JavascriptArray::EntryGetterSymbolSpecies(RecyclableObject* function, CallInfo callInfo, ...)
