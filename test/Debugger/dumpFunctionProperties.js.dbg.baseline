@@ -29,7 +29,8 @@
           "#__proto__": "Object {...}",
           "constructor": "function <large string>"
         },
-        "length": "number 0"
+        "length": "number 0",
+        "name": "string "
       }
     ]
   },
@@ -37,7 +38,8 @@
     "functionProperties": [
       {
         "#__proto__": "function <large string>",
-        "length": "number 1"
+        "length": "number 1",
+        "name": "string "
       }
     ]
   },
