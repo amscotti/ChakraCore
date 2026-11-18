@@ -922,10 +922,37 @@ using namespace Js;
         SetHasInlineCaches(false);
     }
 
+    static void UpdateComputedFunctionName(ScriptFunction * func)
+    {
+        if (func->GetFunctionInfo()->IsClassConstructor())
+        {
+            // For class with computed name, we wait until now to set the name property.
+            // Class constructor slot layout: length(0), name(1), prototype(2).
+            JavascriptString * functionName = nullptr;
+            bool result = func->GetFunctionName(&functionName);
+            Assert(result);
+            func->SetSlot(SetSlotArguments(Constants::NoProperty, 1, functionName));
+            return;
+        }
+
+        JavascriptFunction * targetFunc = func->GetRealFunctionObject();
+        if (targetFunc != nullptr &&
+            !targetFunc->GetTypeHandler()->IsDeferredTypeHandler() &&
+            !func->GetFunctionProxy()->EnsureDeserialized()->GetIsStaticNameFunction())
+        {
+            JavascriptString * functionName = nullptr;
+            if (func->GetFunctionName(&functionName))
+            {
+                targetFunc->SetPropertyWithAttributes(PropertyIds::name, functionName, PropertyConfigurable, nullptr);
+            }
+        }
+    }
+
     template <> 
     void FunctionWithComputedName<ScriptFunction>::SetComputedNameVar(Var computedNameVar)
     {
         this->computedNameVar = computedNameVar;
+        UpdateComputedFunctionName(this);
     }
 
     template <> 
@@ -938,48 +965,35 @@ using namespace Js;
     void FunctionWithComputedName<ScriptFunctionWithInlineCache>::SetComputedNameVar(Var computedNameVar)
     {
         this->computedNameVar = computedNameVar;
+        UpdateComputedFunctionName(this);
     }
 
     template <> 
     void FunctionWithComputedName<GeneratorVirtualScriptFunction>::SetComputedNameVar(Var computedNameVar)
     {
         this->computedNameVar = computedNameVar;
+        UpdateComputedFunctionName(this);
     }
 
     template <> 
     void FunctionWithComputedName<FunctionWithHomeObj<GeneratorVirtualScriptFunction>>::SetComputedNameVar(Var computedNameVar)
     {
         this->computedNameVar = computedNameVar;
+        UpdateComputedFunctionName(this);
     }
 
     template <>
     void FunctionWithComputedName<FunctionWithHomeObj<ScriptFunction>>::SetComputedNameVar(Var computedNameVar)
     {
         this->computedNameVar = computedNameVar; 
-        if (GetFunctionInfo()->IsClassConstructor())
-        {
-            // For class with computed name, we wait until now to set the name property.
-            // Class constructor slot layout: length(0), name(1), prototype(2).
-            JavascriptString * functionName = nullptr;
-            bool result = GetFunctionName(&functionName);
-            Assert(result);
-            SetSlot(SetSlotArguments(Constants::NoProperty, 1, functionName));
-        }
+        UpdateComputedFunctionName(this);
     }
 
     template <>
     void FunctionWithComputedName<FunctionWithHomeObj<ScriptFunctionWithInlineCache>>::SetComputedNameVar(Var computedNameVar)
     {
         this->computedNameVar = computedNameVar; 
-        if (GetFunctionInfo()->IsClassConstructor())
-        {
-            // For class with computed name, we wait until now to set the name property.
-            // Class constructor slot layout: length(0), name(1), prototype(2).
-            JavascriptString * functionName = nullptr;
-            bool result = GetFunctionName(&functionName);
-            Assert(result);
-            SetSlot(SetSlotArguments(Constants::NoProperty, 1, functionName));
-        }
+        UpdateComputedFunctionName(this);
     }
 
     template <> VTableValue Js::FunctionWithComputedName<Js::AsmJsScriptFunction>::DummyVirtualFunctionToHinderLinkerICF() const

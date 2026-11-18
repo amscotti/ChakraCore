@@ -126,12 +126,13 @@ namespace Js
 
         JavascriptProxy* proxy = JavascriptProxy::Create(scriptContext, args);
         JavascriptLibrary* library = scriptContext->GetLibrary();
-        DynamicType* type = library->CreateFunctionWithConfigurableLengthType(&EntryInfo::Revoke);
+        DynamicType* type = library->CreateFunctionWithLengthAndNameType(&EntryInfo::Revoke);
         RuntimeFunction* revoker = RecyclerNewEnumClass(scriptContext->GetRecycler(),
             JavascriptLibrary::EnumFunctionClass, RuntimeFunction,
             type, &EntryInfo::Revoke);
 
-        revoker->SetPropertyWithAttributes(Js::PropertyIds::length, Js::TaggedInt::ToVarUnchecked(2), PropertyConfigurable, NULL);
+        revoker->SetPropertyWithAttributes(Js::PropertyIds::length, Js::TaggedInt::ToVarUnchecked(0), PropertyConfigurable, nullptr);
+        revoker->SetPropertyWithAttributes(Js::PropertyIds::name, library->GetEmptyString(), PropertyConfigurable, nullptr);
         revoker->SetInternalProperty(Js::InternalPropertyIds::RevocableProxy, proxy, PropertyOperationFlags::PropertyOperation_Force, nullptr);
 
         DynamicObject* obj = scriptContext->GetLibrary()->CreateObject(true, 2);

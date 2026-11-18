@@ -56,17 +56,20 @@ var tests = [
             f.name = "foo";
             assert.areEqual("f", f.name, "function names are read only");
             assert.areEqual(undefined, (function (){}).prototype.name, "function.prototype.name is undefined");
-            assert.isFalse(Object.hasOwnProperty.call((function(){}), 'name'), "[hasPropertyCheck]: anonymous function does not have a name property");
+            assert.isTrue(Object.hasOwnProperty.call((function(){}), 'name'), "[hasPropertyCheck]: anonymous function has a name property");
+            assert.areEqual("", (function(){}).name, "[hasPropertyCheck]: anonymous function name is empty string");
             assert.areEqual("", (function(){}).name);
             assert.areEqual("", (function(){})["name"]);
 
             //lambdas () => {}
-            assert.isFalse(Object.hasOwnProperty.call((() => {}), 'name'), "[hasPropertyCheck]: anonymous lambda function does not have a name property");
+            assert.isTrue(Object.hasOwnProperty.call((() => {}), 'name'), "[hasPropertyCheck]: anonymous lambda function has a name property");
+            assert.areEqual("", (() => {}).name, "[hasPropertyCheck]: anonymous lambda function name is empty string");
             assert.areEqual("", (() => {}).name);
             assert.areEqual("", (() => {})["name"]);
 
             //generators
-            assert.isFalse(Object.hasOwnProperty.call((function*(){}), 'name'), "[hasPropertyCheck]: anonymous generator function does not have name property");
+            assert.isTrue(Object.hasOwnProperty.call((function*(){}), 'name'), "[hasPropertyCheck]: anonymous generator function has a name property");
+            assert.areEqual("", (function*(){}).name, "[hasPropertyCheck]: anonymous generator function name is empty string");
             assert.areEqual("", (function*(){}).name);
             assert.areEqual("", (function*(){})["name"]);
 

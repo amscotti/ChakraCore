@@ -664,8 +664,8 @@ namespace Js
 
         //  Initialize function types
 
-        anonymousFunctionTypeHandler = &SharedFunctionWithConfigurableLengthTypeHandler;
-        anonymousFunctionWithPrototypeTypeHandler = &SharedFunctionWithPrototypeAndLengthTypeHandler;
+        anonymousFunctionTypeHandler = &SharedFunctionWithLengthAndNameTypeHandler;
+        anonymousFunctionWithPrototypeTypeHandler = &SharedFunctionWithPrototypeLengthAndNameTypeHandler;
 
         functionTypeHandler = &SharedFunctionWithoutPrototypeTypeHandler;
         functionTypeHandlerWithLength = &SharedFunctionWithLengthAndNameTypeHandler;
@@ -916,13 +916,13 @@ namespace Js
         }
         function->SetPropertyWithAttributes(PropertyIds::length, varLength, PropertyConfigurable, nullptr, PropertyOperation_None, SideEffects_None);
 
-        if (!isAnonymousFunction)
+        JavascriptString * functionName = javascriptLibrary->GetEmptyString();
+        if (!isAnonymousFunction || scriptFunction->GetComputedNameVar() != nullptr)
         {
-            JavascriptString * functionName = nullptr;
             DebugOnly(bool status = ) ((Js::JavascriptFunction*)function)->GetFunctionName(&functionName);
             Assert(status);
-            function->SetPropertyWithAttributes(PropertyIds::name,functionName, PropertyConfigurable, nullptr);
         }
+        function->SetPropertyWithAttributes(PropertyIds::name, functionName, PropertyConfigurable, nullptr);
 
         return true;
     }
@@ -947,13 +947,13 @@ namespace Js
         }
         function->SetPropertyWithAttributes(PropertyIds::length, varLength, PropertyConfigurable, nullptr, PropertyOperation_None, SideEffects_None);
 
-        if (!isAnonymousFunction)
+        JavascriptString * functionName = javascriptLibrary->GetEmptyString();
+        if (!isAnonymousFunction || scriptFunction->GetComputedNameVar() != nullptr)
         {
-            JavascriptString * functionName = nullptr;
             DebugOnly(bool status = ) ((Js::JavascriptFunction*)scriptFunction)->GetFunctionName(&functionName);
             Assert(status);
-            function->SetPropertyWithAttributes(PropertyIds::name,functionName, PropertyConfigurable, nullptr);
         }
+        function->SetPropertyWithAttributes(PropertyIds::name, functionName, PropertyConfigurable, nullptr);
 
         return true;
     }
@@ -962,19 +962,7 @@ namespace Js
     {
         // Async function instances do not have a prototype property as they are not constructable
         JavascriptAsyncFunction* asyncFunction = VarTo<JavascriptAsyncFunction>(function);
-
-        if (!asyncFunction->IsAnonymousFunction())
-        {
-            typeHandler->Convert(function, mode, 2);
-            JavascriptString * functionName = nullptr;
-            DebugOnly(bool status = ) ((Js::JavascriptFunction*)function)->GetFunctionName(&functionName);
-            Assert(status);
-            function->SetPropertyWithAttributes(PropertyIds::name, functionName, PropertyConfigurable, nullptr);
-        }
-        else
-        {
-            typeHandler->Convert(function, mode, 1);
-        }
+        typeHandler->Convert(function, mode, 2);
 
         Var varLength;
         GeneratorVirtualScriptFunction* scriptFunction = asyncFunction->GetGeneratorVirtualScriptFunction();
@@ -986,6 +974,14 @@ namespace Js
             varLength = TaggedInt::ToVarUnchecked(0);
         }
         function->SetPropertyWithAttributes(PropertyIds::length, varLength, PropertyConfigurable, nullptr, PropertyOperation_None, SideEffects_None);
+
+        JavascriptString * functionName = function->GetType()->GetLibrary()->GetEmptyString();
+        if (!asyncFunction->IsAnonymousFunction() || scriptFunction->GetComputedNameVar() != nullptr)
+        {
+            DebugOnly(bool status = ) ((Js::JavascriptFunction*)function)->GetFunctionName(&functionName);
+            Assert(status);
+        }
+        function->SetPropertyWithAttributes(PropertyIds::name, functionName, PropertyConfigurable, nullptr);
 
         return true;
     }
@@ -1053,8 +1049,13 @@ namespace Js
                 function->SetPropertyWithAttributes(PropertyIds::length, TaggedInt::ToVarUnchecked(funcInfo->GetReportedInParamsCount() - 1), PropertyConfigurable, nullptr, PropertyOperation_None, SideEffects_None);
             }
 
-            if (useAnonymous || funcInfo->GetIsStaticNameFunction())
+            if (funcInfo->GetIsStaticNameFunction())
             {
+                return true;
+            }
+            if (useAnonymous && scriptFunction->GetComputedNameVar() == nullptr)
+            {
+                function->SetPropertyWithAttributes(PropertyIds::name, javascriptLibrary->GetEmptyString(), PropertyConfigurable, nullptr);
                 return true;
             }
         }
@@ -1159,17 +1160,17 @@ namespace Js
 
     DynamicTypeHandler * JavascriptLibrary::GetDeferredAnonymousPrototypeGeneratorFunctionTypeHandler()
     {
-        return JavascriptLibrary::GetDeferredGeneratorFunctionTypeHandlerBase</*isNameAvailable*/ false>();
+        return JavascriptLibrary::GetDeferredGeneratorFunctionTypeHandlerBase</*isNameAvailable*/ true>();
     }
 
     DynamicTypeHandler * JavascriptLibrary::GetDeferredAnonymousPrototypeAsyncGeneratorFunctionTypeHandler()
     {
-        return JavascriptLibrary::GetDeferredAsyncGeneratorFunctionTypeHandlerBase</*isNameAvailable*/ false>();
+        return JavascriptLibrary::GetDeferredAsyncGeneratorFunctionTypeHandlerBase</*isNameAvailable*/ true>();
     }
 
     DynamicTypeHandler * JavascriptLibrary::GetDeferredAnonymousPrototypeAsyncFunctionTypeHandler()
     {
-        return JavascriptLibrary::GetDeferredAsyncFunctionTypeHandlerBase</*isNameAvailable*/ false>();
+        return JavascriptLibrary::GetDeferredAsyncFunctionTypeHandlerBase</*isNameAvailable*/ true>();
     }
 
     DynamicTypeHandler * JavascriptLibrary::GetDeferredPrototypeGeneratorFunctionTypeHandler(ScriptContext* scriptContext)
@@ -1189,7 +1190,7 @@ namespace Js
 
     DynamicTypeHandler * JavascriptLibrary::GetDeferredAnonymousPrototypeFunctionWithLengthTypeHandler()
     {
-        return JavascriptLibrary::GetDeferredFunctionTypeHandlerBase</*isNameAvailable*/ false, /* isPrototypeAvailable */ true, /* isLengthAvailable */ true>();
+        return JavascriptLibrary::GetDeferredFunctionTypeHandlerBase</*isNameAvailable*/ true, /* isPrototypeAvailable */ true, /* isLengthAvailable */ true>();
     }
 
     DynamicTypeHandler * JavascriptLibrary::GetDeferredPrototypeFunctionTypeHandler(ScriptContext* scriptContext)
@@ -1223,7 +1224,7 @@ namespace Js
 
     DynamicTypeHandler * JavascriptLibrary::GetDeferredAnonymousFunctionWithLengthTypeHandler()
     {
-        return JavascriptLibrary::GetDeferredFunctionTypeHandlerBase</* isNameAvailable */ false, /* isPrototypeAvailable */ false, /* isLengthAvailable */ true>();
+        return JavascriptLibrary::GetDeferredFunctionTypeHandlerBase</* isNameAvailable */ true, /* isPrototypeAvailable */ false, /* isLengthAvailable */ true>();
     }
 
     DynamicTypeHandler * JavascriptLibrary::GetDeferredAnonymousFunctionTypeHandler()
@@ -1511,8 +1512,21 @@ namespace Js
             stackTraceAccessorFunction->SetPropertyWithAttributes(PropertyIds::length, TaggedInt::ToVarUnchecked(0), PropertyConfigurable, nullptr);
         }
 
-        throwTypeErrorRestrictedPropertyAccessorFunction = CreateNonProfiledFunction(&JavascriptExceptionOperators::EntryInfo::ThrowTypeErrorRestrictedPropertyAccessor);
+        Assert(JavascriptExceptionOperators::EntryInfo::ThrowTypeErrorRestrictedPropertyAccessor.GetAttributes() & FunctionInfo::DoNotProfile);
+        DynamicType* throwTypeErrorType = DynamicType::New(
+            scriptContext,
+            TypeIds_Function,
+            functionPrototype,
+            JavascriptExceptionOperators::EntryInfo::ThrowTypeErrorRestrictedPropertyAccessor.GetOriginalEntryPoint(),
+            &SharedFunctionWithLengthAndNameTypeHandler);
+        throwTypeErrorRestrictedPropertyAccessorFunction = RecyclerNew(
+            this->GetRecycler(),
+            RuntimeFunction,
+            throwTypeErrorType,
+            &JavascriptExceptionOperators::EntryInfo::ThrowTypeErrorRestrictedPropertyAccessor);
         throwTypeErrorRestrictedPropertyAccessorFunction->SetPropertyWithAttributes(PropertyIds::length, TaggedInt::ToVarUnchecked(0), PropertyConfigurable, nullptr);
+        throwTypeErrorRestrictedPropertyAccessorFunction->SetPropertyWithAttributes(PropertyIds::name, this->GetEmptyString(), PropertyConfigurable, nullptr);
+        throwTypeErrorRestrictedPropertyAccessorFunction->Freeze();
 
         __proto__getterFunction = CreateNonProfiledFunction(&ObjectPrototypeObject::EntryInfo::__proto__getter);
         __proto__getterFunction->SetPropertyWithAttributes(PropertyIds::length, TaggedInt::ToVarUnchecked(0), PropertyConfigurable, nullptr);
@@ -2897,9 +2911,9 @@ namespace Js
         JavascriptLibrary* library = promiseConstructor->GetLibrary();
         ScriptContext* scriptContext = promiseConstructor->GetScriptContext();
         library->AddMember(promiseConstructor, PropertyIds::length, TaggedInt::ToVarUnchecked(1), PropertyConfigurable);
+        library->AddMember(promiseConstructor, PropertyIds::name, scriptContext->GetPropertyString(PropertyIds::Promise), PropertyConfigurable);
         library->AddMember(promiseConstructor, PropertyIds::prototype, library->promisePrototype, PropertyNone);
         library->AddSpeciesAccessorsToLibraryObject(promiseConstructor, &JavascriptPromise::EntryInfo::GetterSymbolSpecies);
-        library->AddMember(promiseConstructor, PropertyIds::name, scriptContext->GetPropertyString(PropertyIds::Promise), PropertyConfigurable);
 
         library->AddFunctionToLibraryObject(promiseConstructor, PropertyIds::all, &JavascriptPromise::EntryInfo::All, 1);
         library->AddFunctionToLibraryObject(promiseConstructor, PropertyIds::allSettled, &JavascriptPromise::EntryInfo::AllSettled, 1);
@@ -4386,8 +4400,8 @@ namespace Js
         typeHandler->Convert(objectConstructor, mode, propertyCount);
 
         library->AddMember(objectConstructor, PropertyIds::length, TaggedInt::ToVarUnchecked(1), PropertyConfigurable);
-        library->AddMember(objectConstructor, PropertyIds::prototype, library->objectPrototype, PropertyNone);
         library->AddMember(objectConstructor, PropertyIds::name, scriptContext->GetPropertyString(PropertyIds::Object), PropertyConfigurable);
+        library->AddMember(objectConstructor, PropertyIds::prototype, library->objectPrototype, PropertyNone);
 
         scriptContext->SetBuiltInLibraryFunction(JavascriptObject::EntryInfo::DefineProperty.GetOriginalEntryPoint(),
             library->AddFunctionToLibraryObject(objectConstructor, PropertyIds::defineProperty, &JavascriptObject::EntryInfo::DefineProperty, 3));
@@ -7077,6 +7091,12 @@ namespace Js
     }
 
 
+    static void InitAnonymousFunctionLengthAndName(JavascriptFunction* function, uint32 length, JavascriptLibrary* library)
+    {
+        function->SetPropertyWithAttributes(PropertyIds::length, TaggedInt::ToVarUnchecked(length), PropertyConfigurable, nullptr);
+        function->SetPropertyWithAttributes(PropertyIds::name, library->GetEmptyString(), PropertyConfigurable, nullptr);
+    }
+
     RuntimeFunction* JavascriptLibrary::EnsureAsyncFromSyncIteratorValueUnwrapFalseFunction()
     {
         Assert(scriptContext->GetConfig()->IsES2018AsyncIterationEnabled());
@@ -7084,9 +7104,10 @@ namespace Js
         {
             JavascriptMethod entryPoint = JavascriptAsyncFromSyncIterator::EntryAsyncFromSyncIteratorValueUnwrapFalseFunction;
             FunctionInfo* functionInfo = RecyclerNew(this->GetRecycler(), FunctionInfo, entryPoint);
-            DynamicType* type = DynamicType::New(scriptContext, TypeIds_Function, functionPrototype, entryPoint, GetDeferredAnonymousFunctionTypeHandler());
+            DynamicType* type = DynamicType::New(scriptContext, TypeIds_Function, functionPrototype, entryPoint, &SharedFunctionWithLengthAndNameTypeHandler);
 
             asyncFromSyncIteratorValueUnwrapFalseFunction = RecyclerNewEnumClass(this->GetRecycler(), EnumFunctionClass, RuntimeFunction, type, functionInfo);
+            InitAnonymousFunctionLengthAndName(asyncFromSyncIteratorValueUnwrapFalseFunction, 1, this);
         }
 
         return asyncFromSyncIteratorValueUnwrapFalseFunction;
@@ -7099,9 +7120,10 @@ namespace Js
         {
             JavascriptMethod entryPoint = JavascriptAsyncFromSyncIterator::EntryAsyncFromSyncIteratorValueUnwrapTrueFunction;
             FunctionInfo* functionInfo = RecyclerNew(this->GetRecycler(), FunctionInfo, entryPoint);
-            DynamicType* type = DynamicType::New(scriptContext, TypeIds_Function, functionPrototype, entryPoint, GetDeferredAnonymousFunctionTypeHandler());
+            DynamicType* type = DynamicType::New(scriptContext, TypeIds_Function, functionPrototype, entryPoint, &SharedFunctionWithLengthAndNameTypeHandler);
 
             asyncFromSyncIteratorValueUnwrapTrueFunction = RecyclerNewEnumClass(this->GetRecycler(), EnumFunctionClass, RuntimeFunction, type, functionInfo);
+            InitAnonymousFunctionLengthAndName(asyncFromSyncIteratorValueUnwrapTrueFunction, 1, this);
         }
 
         return asyncFromSyncIteratorValueUnwrapTrueFunction;
@@ -7120,15 +7142,17 @@ namespace Js
             TypeIds_Function,
             functionPrototype,
             entryPoint,
-            GetDeferredAnonymousFunctionTypeHandler());
+            &SharedFunctionWithLengthAndNameTypeHandler);
 
-        return RecyclerNewEnumClass(
+        AsyncGeneratorCallbackFunction* function = RecyclerNewEnumClass(
             GetRecycler(),
             EnumFunctionClass,
             AsyncGeneratorCallbackFunction,
             type,
             functionInfo,
             generator);
+        InitAnonymousFunctionLengthAndName(function, 1, this);
+        return function;
     }
 
     RuntimeFunction* JavascriptLibrary::CreateAsyncModuleCallbackFunction(
@@ -7144,15 +7168,17 @@ namespace Js
             TypeIds_Function,
             functionPrototype,
             entryPoint,
-            GetDeferredAnonymousFunctionTypeHandler());
+            &SharedFunctionWithLengthAndNameTypeHandler);
 
-        return RecyclerNewEnumClass(
+        RuntimeFunction* function = RecyclerNewEnumClass(
             GetRecycler(),
             EnumFunctionClass,
             AsyncModuleCallbackFunction,
             type,
             functionInfo,
             module);
+        InitAnonymousFunctionLengthAndName(function, 1, this);
+        return function;
     }
 
     JavascriptAsyncGeneratorFunction* JavascriptLibrary::CreateAsyncGeneratorFunction(JavascriptMethod entryPoint, GeneratorVirtualScriptFunction* scriptFunction)
@@ -7216,10 +7242,10 @@ namespace Js
     JavascriptPromiseCapabilitiesExecutorFunction* JavascriptLibrary::CreatePromiseCapabilitiesExecutorFunction(JavascriptMethod entryPoint, JavascriptPromiseCapability* capability)
     {
         FunctionInfo* functionInfo = &Js::JavascriptPromise::EntryInfo::CapabilitiesExecutorFunction;
-        DynamicType* type = DynamicType::New(scriptContext, TypeIds_Function, functionPrototype, entryPoint, GetDeferredAnonymousFunctionTypeHandler());
+        DynamicType* type = DynamicType::New(scriptContext, TypeIds_Function, functionPrototype, entryPoint, &SharedFunctionWithLengthAndNameTypeHandler);
         JavascriptPromiseCapabilitiesExecutorFunction* function = RecyclerNewEnumClass(this->GetRecycler(), EnumFunctionClass, JavascriptPromiseCapabilitiesExecutorFunction, type, functionInfo, capability);
 
-        function->SetPropertyWithAttributes(PropertyIds::length, TaggedInt::ToVarUnchecked(2), PropertyConfigurable, nullptr);
+        InitAnonymousFunctionLengthAndName(function, 2, this);
 
         return function;
     }
@@ -7227,10 +7253,10 @@ namespace Js
     JavascriptPromiseResolveOrRejectFunction* JavascriptLibrary::CreatePromiseResolveOrRejectFunction(JavascriptMethod entryPoint, JavascriptPromise* promise, bool isReject, JavascriptPromiseResolveOrRejectFunctionAlreadyResolvedWrapper* alreadyResolvedRecord)
     {
         FunctionInfo* functionInfo = &Js::JavascriptPromise::EntryInfo::ResolveOrRejectFunction;
-        DynamicType* type = DynamicType::New(scriptContext, TypeIds_Function, functionPrototype, entryPoint, GetDeferredAnonymousFunctionTypeHandler());
+        DynamicType* type = DynamicType::New(scriptContext, TypeIds_Function, functionPrototype, entryPoint, &SharedFunctionWithLengthAndNameTypeHandler);
         JavascriptPromiseResolveOrRejectFunction* function = RecyclerNewEnumClass(this->GetRecycler(), EnumFunctionClass, JavascriptPromiseResolveOrRejectFunction, type, functionInfo, promise, isReject, alreadyResolvedRecord);
 
-        function->SetPropertyWithAttributes(PropertyIds::length, TaggedInt::ToVarUnchecked(1), PropertyConfigurable, nullptr);
+        InitAnonymousFunctionLengthAndName(function, 1, this);
 
         return function;
     }
@@ -7254,10 +7280,10 @@ namespace Js
     JavascriptPromiseAllResolveElementFunction* JavascriptLibrary::CreatePromiseAllResolveElementFunction(JavascriptMethod entryPoint, uint32 index, JavascriptArray* values, JavascriptPromiseCapability* capabilities, JavascriptPromiseAllResolveElementFunctionRemainingElementsWrapper* remainingElements)
     {
         FunctionInfo* functionInfo = &Js::JavascriptPromise::EntryInfo::AllResolveElementFunction;
-        DynamicType* type = DynamicType::New(scriptContext, TypeIds_Function, functionPrototype, entryPoint, GetDeferredAnonymousFunctionTypeHandler());
+        DynamicType* type = DynamicType::New(scriptContext, TypeIds_Function, functionPrototype, entryPoint, &SharedFunctionWithLengthAndNameTypeHandler);
         JavascriptPromiseAllResolveElementFunction* function = RecyclerNewEnumClass(this->GetRecycler(), EnumFunctionClass, JavascriptPromiseAllResolveElementFunction, type, functionInfo, index, values, capabilities, remainingElements);
 
-        function->SetPropertyWithAttributes(PropertyIds::length, TaggedInt::ToVarUnchecked(1), PropertyConfigurable, nullptr);
+        InitAnonymousFunctionLengthAndName(function, 1, this);
 
         return function;
     }
@@ -7265,19 +7291,21 @@ namespace Js
     JavascriptPromiseAnyRejectElementFunction* JavascriptLibrary::CreatePromiseAnyRejectElementFunction(JavascriptMethod entryPoint, uint32 index, JavascriptArray* errors, JavascriptPromiseCapability* capabilities, JavascriptPromiseAllResolveElementFunctionRemainingElementsWrapper* remainingElements, JavascriptPromiseResolveOrRejectFunctionAlreadyResolvedWrapper* alreadyCalledWrapper)
     {
         FunctionInfo* functionInfo = &Js::JavascriptPromise::EntryInfo::AnyRejectElementFunction;
-        DynamicType* type = DynamicType::New(scriptContext, TypeIds_Function, functionPrototype, entryPoint, GetDeferredAnonymousFunctionTypeHandler());
+        DynamicType* type = DynamicType::New(scriptContext, TypeIds_Function, functionPrototype, entryPoint, &SharedFunctionWithLengthAndNameTypeHandler);
         JavascriptPromiseAnyRejectElementFunction* function = RecyclerNewEnumClass(this->GetRecycler(), EnumFunctionClass, JavascriptPromiseAnyRejectElementFunction, type, functionInfo, index, errors, capabilities, remainingElements, alreadyCalledWrapper);
-        // Length should be 1 but not accessible from script.
+
+        InitAnonymousFunctionLengthAndName(function, 1, this);
+
         return function;
     }
 
     JavascriptPromiseAllSettledResolveOrRejectElementFunction* JavascriptLibrary::CreatePromiseAllSettledResolveOrRejectElementFunction(JavascriptMethod entryPoint, uint32 index, JavascriptArray* values, JavascriptPromiseCapability* capabilities, JavascriptPromiseAllResolveElementFunctionRemainingElementsWrapper* remainingElements, JavascriptPromiseResolveOrRejectFunctionAlreadyResolvedWrapper* alreadyCalledWrapper, bool isRejecting)
     {
         FunctionInfo* functionInfo = &Js::JavascriptPromise::EntryInfo::AllSettledResolveOrRejectElementFunction;
-        DynamicType* type = DynamicType::New(scriptContext, TypeIds_Function, functionPrototype, entryPoint, GetDeferredAnonymousFunctionTypeHandler());
+        DynamicType* type = DynamicType::New(scriptContext, TypeIds_Function, functionPrototype, entryPoint, &SharedFunctionWithLengthAndNameTypeHandler);
         JavascriptPromiseAllSettledResolveOrRejectElementFunction* function = RecyclerNewEnumClass(this->GetRecycler(), EnumFunctionClass, JavascriptPromiseAllSettledResolveOrRejectElementFunction, type, functionInfo, index, values, capabilities, remainingElements, alreadyCalledWrapper, isRejecting);
 
-        function->SetPropertyWithAttributes(PropertyIds::length, TaggedInt::ToVarUnchecked(1), PropertyConfigurable, nullptr);
+        InitAnonymousFunctionLengthAndName(function, 1, this);
 
         return function;
     }
@@ -7285,10 +7313,10 @@ namespace Js
     JavascriptPromiseThenFinallyFunction* JavascriptLibrary::CreatePromiseThenFinallyFunction(JavascriptMethod entryPoint, RecyclableObject* OnFinally, RecyclableObject* Constructor, bool shouldThrow)
     {
         FunctionInfo* functionInfo = RecyclerNew(this->GetRecycler(), FunctionInfo, entryPoint, FunctionInfo::Attributes::ErrorOnNew);
-        DynamicType* type = DynamicType::New(scriptContext, TypeIds_Function, functionPrototype, entryPoint, GetDeferredAnonymousFunctionTypeHandler());
+        DynamicType* type = DynamicType::New(scriptContext, TypeIds_Function, functionPrototype, entryPoint, &SharedFunctionWithLengthAndNameTypeHandler);
 
         JavascriptPromiseThenFinallyFunction* function = RecyclerNewEnumClass(this->GetRecycler(), EnumFunctionClass, JavascriptPromiseThenFinallyFunction, type, functionInfo, OnFinally, Constructor, shouldThrow);
-        function->SetPropertyWithAttributes(PropertyIds::length, TaggedInt::ToVarUnchecked(1), PropertyConfigurable, nullptr);
+        InitAnonymousFunctionLengthAndName(function, 1, this);
 
         return function;
     }
@@ -7296,9 +7324,12 @@ namespace Js
     JavascriptPromiseThunkFinallyFunction* JavascriptLibrary::CreatePromiseThunkFinallyFunction(JavascriptMethod entryPoint, Var value, bool shouldThrow)
     {
         FunctionInfo* functionInfo = RecyclerNew(this->GetRecycler(), FunctionInfo, entryPoint, FunctionInfo::Attributes::ErrorOnNew);
-        DynamicType* type = CreateDeferredPrototypeFunctionType(entryPoint);
+        DynamicType* type = DynamicType::New(scriptContext, TypeIds_Function, functionPrototype, entryPoint, &SharedFunctionWithLengthAndNameTypeHandler);
 
-        return RecyclerNewEnumClass(this->GetRecycler(), EnumFunctionClass, JavascriptPromiseThunkFinallyFunction, type, functionInfo, value, shouldThrow);
+        JavascriptPromiseThunkFinallyFunction* function = RecyclerNewEnumClass(this->GetRecycler(), EnumFunctionClass, JavascriptPromiseThunkFinallyFunction, type, functionInfo, value, shouldThrow);
+        InitAnonymousFunctionLengthAndName(function, 0, this);
+
+        return function;
     }
 
     JavascriptExternalFunction* JavascriptLibrary::CreateWrappedExternalFunction(JavascriptExternalFunction* wrappedFunction)

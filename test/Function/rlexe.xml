@@ -520,4 +520,9 @@
       <compile-flags>-off:deferparse -force:redeferral -collectgarbage -parserstatecache -useparserstatecache</compile-flags>
     </default>
   </test>
+  <test>
+    <default>
+      <files>q12_fn_name_order.js</files>
+    </default>
+  </test>
 </regress-exe>

@@ -283,7 +283,8 @@ var tests = [
             assert.areEqual(Object.getPrototypeOf(resolveFunction), Function.prototype, "Resolve function has __proto__ set to Function.prototype");
             assert.throws(() => { new resolveFunction(); }, TypeError, "Resolve function is an anonymous built-in but not a constructor", "Function is not a constructor");
             assert.isFalse(Object.prototype.hasOwnProperty.call(resolveFunction, "prototype"), "Resolve function does not have 'prototype' own property");
-            assert.isFalse(Object.prototype.hasOwnProperty.call(resolveFunction, "name"), "Resolve function does not have 'name' own property");
+            assert.isTrue(Object.prototype.hasOwnProperty.call(resolveFunction, "name"), "Resolve function has 'name' own property");
+            assert.areEqual("", resolveFunction.name, "Resolve function name is empty string");
             
             assert.areEqual(1, rejectFunction.length, "Reject function should have length 1");
             assert.areEqual('function', typeof rejectFunction, "Reject function is a function type");
@@ -291,7 +292,8 @@ var tests = [
             assert.areEqual(Object.getPrototypeOf(rejectFunction), Function.prototype, "Reject function has __proto__ set to Function.prototype");
             assert.throws(() => { new rejectFunction(); }, TypeError, "Reject function is an anonymous built-in but not a constructor", "Function is not a constructor");
             assert.isFalse(Object.prototype.hasOwnProperty.call(rejectFunction, "prototype"), "Reject function does not have 'prototype' own property");
-            assert.isFalse(Object.prototype.hasOwnProperty.call(rejectFunction, "name"), "Reject function does not have 'name' own property");
+            assert.isTrue(Object.prototype.hasOwnProperty.call(rejectFunction, "name"), "Reject function has 'name' own property");
+            assert.areEqual("", rejectFunction.name, "Reject function name is empty string");
         }
     },
     {
@@ -428,7 +430,8 @@ var tests = [
             assert.areEqual(Object.getPrototypeOf(resolveElementFunction), Function.prototype, "Resolve function has __proto__ set to Function.prototype");
             assert.throws(() => { new resolveElementFunction(); }, TypeError, "Resolve function is an anonymous built-in but not a constructor", "Function is not a constructor");
             assert.isFalse(Object.prototype.hasOwnProperty.call(resolveElementFunction, "prototype"), "Resolve function does not have 'prototype' own property");
-            assert.isFalse(Object.prototype.hasOwnProperty.call(resolveElementFunction, "name"), "Resolve function does not have 'name' own property");
+            assert.isTrue(Object.prototype.hasOwnProperty.call(resolveElementFunction, "name"), "Resolve function has 'name' own property");
+            assert.areEqual("", resolveElementFunction.name, "Resolve function name is empty string");
         }
     },
     {
@@ -449,7 +452,8 @@ var tests = [
             assert.areEqual(Object.getPrototypeOf(executorFunction), Function.prototype, "Executor function has __proto__ set to Function.prototype");
             assert.throws(() => { new executorFunction(); }, TypeError, "Executor function is an anonymous built-in but not a constructor", "Function is not a constructor");
             assert.isFalse(Object.prototype.hasOwnProperty.call(executorFunction, "prototype"), "Executor function does not have 'prototype' own property");
-            assert.isFalse(Object.prototype.hasOwnProperty.call(executorFunction, "name"), "Executor function does not have 'name' own property");
+            assert.isTrue(Object.prototype.hasOwnProperty.call(executorFunction, "name"), "Executor function has 'name' own property");
+            assert.areEqual("", executorFunction.name, "Executor function name is empty string");
         }
     },
     {
