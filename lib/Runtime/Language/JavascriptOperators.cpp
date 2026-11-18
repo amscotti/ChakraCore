@@ -2738,6 +2738,12 @@ CommonNumber:
                     {
                         return TRUE;
                     }
+                    if (JavascriptOperators::IsUndefinedAccessor(setterValueOrProxy, requestContext))
+                    {
+                        // Reflect.set observes the [[Set]] result; an accessor
+                        // without a setter is a failure, not a successful no-op.
+                        return FALSE;
+                    }
                     if (setterValueOrProxy)
                     {
                         if (VarIs<UnscopablesWrapperObject>(receiver))
