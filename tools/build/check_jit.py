@@ -9,7 +9,8 @@ The generic check_smoke.py intentionally uses interpreter-only snippets so
 it can run against every profile. This gate is JIT-specific:
 
   1. the installed ch and its sibling dylib contain the native backend
-     (nm finds NativeCodeGenerator; a DISABLE_JIT build has no such symbol);
+     (nm finds NativeCodeGenerator; a DISABLE_JIT build has no such symbol).
+     Static profiles have no sibling dylib; inspect the executable itself.
   2. a physical script runs under `-mic:1 -bgjit-` and under
      `-forceNative -off:simpleJit -bgJitDelay:0` (or with default flags on
      Release builds where the debug flaglist is disabled), producing the
@@ -66,20 +67,40 @@ WANT = ["jit-add 5", "jit-rest 2", "jit-apply 28",
         "jit-class-new 7,true", "jit-class-derived true,true,Anon"]
 
 
+def _is_native_binary(path):
+    """True for an ELF or Mach-O executable; false for test stubs/scripts."""
+    try:
+        with open(path, "rb") as f:
+            magic = f.read(4)
+    except OSError:
+        return False
+    # ELF, Mach-O 32/64 little-endian, and universal/fat Mach-O.
+    return magic in (b"\x7fELF", b"\xcf\xfa\xed\xfe", b"\xce\xfa\xed\xfe",
+                     b"\xca\xfe\xba\xbe")
+
+
 def check_symbols(ch):
     dylib_name = ("libChakraCore.dylib" if sys.platform == "darwin"
                   else "libChakraCore.so")
     dylib = os.path.join(os.path.dirname(os.path.abspath(ch)), dylib_name)
-    if not os.path.isfile(dylib):
+    # Static profiles link the backend into ch and have no sibling dylib.
+    # Inspect the executable itself in that case; a stripped binary without
+    # the symbol still fails closed.
+    if os.path.isfile(dylib):
+        target = dylib
+    elif _is_native_binary(ch):
+        target = ch
+    else:
         return "sibling dylib not found: %s" % dylib
     nm = shutil.which("nm") or "/usr/bin/nm"
-    rc, out, err = common.run_capture([nm, dylib])
+    rc, out, err = common.run_capture([nm, target])
     if rc != 0:
-        return "nm %s exited %d: %s" % (dylib, rc, err.strip())
+        return "nm %s exited %d: %s" % (target, rc, err.strip())
     if "NativeCodeGenerator" not in out:
         return ("%s has no NativeCodeGenerator symbol; the JIT was compiled out"
-                % dylib)
-    print("check_jit: NativeCodeGenerator symbol present")
+                % target)
+    print("check_jit: NativeCodeGenerator symbol present (%s)"
+          % os.path.basename(target))
     return None
 
 

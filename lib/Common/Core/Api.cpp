@@ -20,6 +20,8 @@ int IsInAssert = false;
 
 void __stdcall js_memcpy_s(__bcount(sizeInBytes) void *dst, size_t sizeInBytes, __in_bcount(count) const void *src, size_t count)
 {
+    if (count == 0)
+        return;
     Assert((count) <= (sizeInBytes));
     if ((count) <= (sizeInBytes))
         memcpy((dst), (src), (count));

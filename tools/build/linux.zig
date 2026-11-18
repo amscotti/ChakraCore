@@ -901,7 +901,9 @@ pub fn build(b: *std.Build) void {
     ch_link.addArg("-Wl,--no-as-needed");
     for ([_][]const u8{ "-licuuc", "-licui18n" }) |f| ch_link.addArg(f);
     ch_link.addArg("-Wl,--as-needed");
-    ch_link.addPrefixedFileArg("-Wl,--version-script=", b.path("bin/ch/ch.version"));
+    if (sanitize == .none) {
+        ch_link.addPrefixedFileArg("-Wl,--version-script=", b.path("bin/ch/ch.version"));
+    }
     for ([_][]const u8{ "-lpthread", "-ldl" }) |f| ch_link.addArg(f);
     ch_link.step.dependOn(&jstoc.step);
 

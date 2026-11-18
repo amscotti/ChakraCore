@@ -606,6 +606,7 @@
     <default>
       <files>float16.js</files>
       <compile-flags>-args summary -endargs</compile-flags>
+      <timeout>120</timeout> <!-- debug-static on 4 vCPU exceeds 60 s -->
     </default>
   </test>
   <test>

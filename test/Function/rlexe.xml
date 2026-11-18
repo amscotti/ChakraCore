@@ -360,6 +360,7 @@
       <files>FuncBody.bug232281.js</files>
       <baseline>FuncBody.bug232281.baseline</baseline>
       <compile-flags>-off:deferparse</compile-flags>
+      <timeout>300</timeout> <!-- FullJit on 4 vCPU exceeds 180 s -->
     </default>
   </test>
   <test>
