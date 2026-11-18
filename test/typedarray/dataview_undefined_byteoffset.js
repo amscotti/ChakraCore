@@ -356,6 +356,42 @@ const tests = [
             const proxiedBoundRes = Reflect.construct(proxiedBound, ["q", "r"], Target);
             assert.areEqual(Target.prototype, Object.getPrototypeOf(proxiedBoundRes), "Proxy(boundFn, {}) sets Target.prototype");
             assert.areEqual(["p", "q", "r"], observedArgs, "Proxy(boundFn, {}) preserves bound + forwarded args");
+
+            // Bound targets inside Proxy: single prototype lookup, SkipDefaultNewObject, nested Proxy, SameValue(bf, newTarget).
+            let boundOrdReads = 0;
+            const boundOrdNT = new Proxy(function () { }, {
+                get: function (t, p) {
+                    if (p === "prototype") boundOrdReads++;
+                    return Reflect.get(t, p);
+                }
+            });
+            const boundOrdRes = Reflect.construct(new Proxy(Ordinary.bind(null), {}), [], boundOrdNT);
+            assert.areEqual(1, boundOrdReads, "Reflect.construct(Proxy(Ord.bind(), {}), [], nt) reads nt.prototype exactly once");
+            assert.areEqual(boundOrdNT.prototype, Object.getPrototypeOf(boundOrdRes), "Proxy(Ord.bind(), {}) inherits nt.prototype");
+
+            assert.throws(() => {
+                Reflect.construct(new Proxy(DataView.bind(null), {}), [new ArrayBuffer(0), 10], throwingNewTarget);
+            }, RangeError, "Proxy(DataView.bind(), {}) validates byteOffset before newTarget.prototype");
+
+            const trappedBoundTarget = new Proxy(Ordinary, {
+                construct: function () {
+                    throw new RangeError("inner-trap");
+                }
+            });
+            assert.throws(() => {
+                Reflect.construct(new Proxy(trappedBoundTarget.bind(null), {}), [], throwingNewTarget);
+            }, RangeError, "Proxy(trappedProxy.bind(), {}) runs inner construct trap without reading newTarget.prototype");
+
+            const selfBound = Target.bind(null, "s");
+            const selfBoundProxyRes = Reflect.construct(new Proxy(selfBound, {}), ["t", "u"], selfBound);
+            assert.areEqual(Target, observedNewTarget, "Proxy(selfBound, {}) with newTarget=selfBound sets new.target = Target");
+            assert.areEqual(Target.prototype, Object.getPrototypeOf(selfBoundProxyRes), "Proxy(selfBound, {}) uses Target.prototype");
+
+            const chainedBound = selfBound.bind(null, "v");
+            const chainedBoundRes = Reflect.construct(new Proxy(chainedBound, {}), ["w"], chainedBound);
+            assert.areEqual(Target, observedNewTarget, "Proxy(chainedBound, {}) with newTarget=chainedBound sets new.target = Target");
+            assert.areEqual(["s", "v", "w"], observedArgs, "Proxy(chainedBound, {}) preserves chained bound args");
+            assert.areEqual(Target.prototype, Object.getPrototypeOf(chainedBoundRes), "Proxy(chainedBound, {}) uses Target.prototype");
         }
     }
 ];

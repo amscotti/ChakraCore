@@ -268,7 +268,17 @@ namespace Js
             JIT_HELPER_NOT_REENTRANT_NOLOCK_HEADER(Conv_ToInt32Core);
             // Try the int32 conversion first and only do the more expensive (& closer to spec)
             // i64 conversion if it fails.
-            __int32 i32 = (__int32)T1;
+            // Guard in double space: double->int32 cast outside [-2147483648, 2147483647]
+            // (or NaN) is UB and UBSan traps (plus clang can fold the sentinel test below).
+            __int32 i32;
+            if (T1 >= -2147483648.0 && T1 <= 2147483647.0)
+            {
+                i32 = static_cast<__int32>(T1);
+            }
+            else
+            {
+                i32 = 0x80000000;
+            }
             if ((i32 != 0x80000000) && (i32 != 0x7fffffff))
                 return i32;     //No overflow so just return i32
 

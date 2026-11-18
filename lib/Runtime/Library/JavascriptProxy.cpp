@@ -2183,7 +2183,6 @@ namespace Js
 
             // in [[construct]] case, we don't need to check if the function is a constructor: the function should throw there.
             Var newThisObject = nullptr;
-            Var effectiveNewTarget = newTarget;
             if (args.Info.Flags & CallFlags_New)
             {
                 if (!JavascriptOperators::IsConstructor(targetObj))
@@ -2196,32 +2195,14 @@ namespace Js
                 {
                     if (isCtorSuperCall && newTarget != nullptr)
                     {
-                        // Walk BoundFunction chains to inspect the unwrapped constructor
-                        // (deferring CreateFromConstructor for nested Proxy, SkipDefaultNewObject
-                        // built-ins, and class constructors) and substitute
-                        // SameValue(boundFn, newTarget) -> targetFn.
-                        RecyclableObject* unwrapped = targetObj;
-                        while (VarIs<BoundFunction>(unwrapped))
-                        {
-                            BoundFunction* bf = UnsafeVarTo<BoundFunction>(unwrapped);
-                            RecyclableObject* nextTarget = bf->GetDirectTargetFunction();
-                            if (nextTarget == nullptr)
-                            {
-                                AssertMsg(false, "BoundFunction without a target");
-                                break;
-                            }
-                            if (effectiveNewTarget != nullptr && JavascriptConversion::SameValue(bf, effectiveNewTarget))
-                            {
-                                effectiveNewTarget = nextTarget;
-                            }
-                            unwrapped = nextTarget;
-                        }
-
-                        bool skipCreateFromConstructor = VarIs<JavascriptProxy>(unwrapped);
+                        // Defer CreateFromConstructor when forwarding to a nested Proxy,
+                        // BoundFunction (whose NewInstance handles SameValue + target
+                        // classification), SkipDefaultNewObject built-in, or class ctor.
+                        bool skipCreateFromConstructor = VarIs<JavascriptProxy>(targetObj) || VarIs<BoundFunction>(targetObj);
                         if (!skipCreateFromConstructor)
                         {
-                            FunctionInfo* unwrappedInfo = JavascriptOperators::GetConstructorFunctionInfo(unwrapped, requestContext);
-                            if (unwrappedInfo && ((unwrappedInfo->GetAttributes() & FunctionInfo::SkipDefaultNewObject) != 0 || unwrappedInfo->IsClassConstructor()))
+                            FunctionInfo* targetInfo = JavascriptOperators::GetConstructorFunctionInfo(targetObj, requestContext);
+                            if (targetInfo && ((targetInfo->GetAttributes() & FunctionInfo::SkipDefaultNewObject) != 0 || targetInfo->IsClassConstructor()))
                             {
                                 skipCreateFromConstructor = true;
                             }
@@ -2229,7 +2210,7 @@ namespace Js
 
                         if (!skipCreateFromConstructor)
                         {
-                            Var marshaledNewTarget = CrossSite::MarshalVar(requestContext, effectiveNewTarget);
+                            Var marshaledNewTarget = CrossSite::MarshalVar(requestContext, newTarget);
                             BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
                             {
                                 newThisObject = JavascriptOperators::CreateFromConstructor(VarTo<RecyclableObject>(marshaledNewTarget), requestContext);
@@ -2306,7 +2287,7 @@ namespace Js
             if (isNewCall)
             {
                 AnalysisAssert(newCount == ((ushort)args.Info.Count) + 1);
-                Var forwardedNewTarget = CrossSite::MarshalVar(scriptContext, effectiveNewTarget);
+                Var forwardedNewTarget = CrossSite::MarshalVar(scriptContext, newTarget);
                 newValues[args.Info.Count] = forwardedNewTarget;
 
                 // If the function we're calling is a class constructor, it expects newTarget

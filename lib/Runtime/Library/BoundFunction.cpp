@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #include "RuntimeLibraryPch.h"
@@ -120,25 +121,63 @@ namespace Js
         {
             if (args.HasNewTarget())
             {
-                // target has an overridden new target make a new object from the newTarget
+                // ES2025 10.4.1.2 BoundFunction [[Construct]]:
+                // 5. If SameValue(F, newTarget) is true, set newTarget to target.
                 Var newTargetVar = args.GetNewTarget();
                 AssertOrFailFastMsg(JavascriptOperators::IsConstructor(newTargetVar), "newTarget must be a constructor");
+                if (JavascriptConversion::SameValue(boundFunction, newTargetVar))
+                {
+                    newTargetVar = CrossSite::MarshalVar(scriptContext, targetFunction);
+                    args.Values[args.Info.Count] = newTargetVar;
+                }
                 RecyclableObject* newTarget = UnsafeVarTo<RecyclableObject>(newTargetVar);
 
-                // Class constructors expect newTarget to be in args slot 0 (usually "this"),
-                // because "this" is not constructed until we reach the most-super superclass.
-                FunctionInfo* functionInfo = JavascriptOperators::GetConstructorFunctionInfo(targetFunction, scriptContext);
-                if (functionInfo && functionInfo->IsClassConstructor())
+                if (VarIs<JavascriptProxy>(targetFunction))
                 {
-                    args.Values[0] = newVarInstance = newTarget;
+                    // Proxy [[Construct]] invokes handler.construct without reading
+                    // newTarget.prototype (or handles OrdinaryCreateFromConstructor if no trap).
+                    args.Values[0] = newVarInstance = nullptr;
+                }
+                else if (VarIs<BoundFunction>(targetFunction))
+                {
+                    // Inner BoundFunction handles SameValue(innerF, newTarget) and instance creation.
+                    newVarInstance = nullptr;
+                    if (args.Values[0] == nullptr || JavascriptOperators::IsUndefinedObject(args.Values[0]) ||
+                        JavascriptOperators::IsConstructor(args.Values[0]))
+                    {
+                        args.Values[0] = newTarget;
+                    }
                 }
                 else
                 {
-                    BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+                    FunctionInfo* functionInfo = JavascriptOperators::GetConstructorFunctionInfo(targetFunction, scriptContext);
+                    if (functionInfo && functionInfo->IsClassConstructor())
                     {
-                        args.Values[0] = newVarInstance = JavascriptOperators::CreateFromConstructor(newTarget, scriptContext);
+                        // Class constructors expect newTarget to be in args slot 0 (usually "this"),
+                        // because "this" is not constructed until we reach the most-super superclass.
+                        args.Values[0] = newVarInstance = newTarget;
                     }
-                    END_SAFE_REENTRANT_CALL
+                    else if (functionInfo && (functionInfo->GetAttributes() & FunctionInfo::SkipDefaultNewObject) != 0)
+                    {
+                        // Built-ins with SkipDefaultNewObject call OrdinaryCreateFromConstructor
+                        // at their spec step after validating arguments.
+                        args.Values[0] = newVarInstance = nullptr;
+                    }
+                    else if (args.Values[0] != nullptr && !JavascriptOperators::IsUndefinedObject(args.Values[0]) &&
+                             !JavascriptOperators::IsConstructor(args.Values[0]))
+                    {
+                        // Reuse caller-allocated instance (e.g. super() OP_NewScObjectNoCtorFull
+                        // or non-super Proxy NewScObjectNoCtorCommon) without reading newTarget.prototype twice.
+                        newVarInstance = args.Values[0];
+                    }
+                    else
+                    {
+                        BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+                        {
+                            args.Values[0] = newVarInstance = JavascriptOperators::CreateFromConstructor(newTarget, scriptContext);
+                        }
+                        END_SAFE_REENTRANT_CALL
+                    }
                 }
             }
             else if (!VarIs<JavascriptProxy>(targetFunction))
