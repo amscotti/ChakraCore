@@ -70,6 +70,27 @@ public:
     PREVENT_COPY(AutoRestoreVal);
 };
 
+static bool
+AllowOptForInstr(bool topEnabled, Func const * topFunc, IR::Instr const * const instr, bool (*funcCheck)(Func const *))
+{
+    return topEnabled && (!instr || instr->m_func == topFunc || funcCheck(instr->m_func));
+}
+
+static bool
+CanLossyIntTypeSpecForInstr(
+    bool doLossyIntTypeSpec,
+    bool doAggressiveIntTypeSpec,
+    bool doFloatTypeSpec,
+    Func const * topFunc,
+    IR::Instr const * const instr)
+{
+    return
+        AllowOptForInstr(doLossyIntTypeSpec, topFunc, instr, &GlobOpt::DoLossyIntTypeSpec) &&
+        (!CONFIG_FLAG(ESBigInt) ||
+         AllowOptForInstr(doAggressiveIntTypeSpec, topFunc, instr, &GlobOpt::DoAggressiveIntTypeSpec) ||
+         AllowOptForInstr(doFloatTypeSpec, topFunc, instr, &GlobOpt::DoFloatTypeSpec));
+}
+
 GlobOpt::GlobOpt(Func * func)
     : func(func),
     intConstantToStackSymMap(nullptr),
@@ -291,9 +312,13 @@ ValueType GlobOpt::GetDivValueType(IR::Instr* instr, Value* src1Val, Value* src2
         ValueType resultType = instr->m_func->GetReadOnlyProfileInfo()->GetDivProfileInfo(static_cast<Js::ProfileId>(instr->AsProfiledInstr()->u.profileId));
         if (resultType.IsLikelyInt())
         {
-            if (specialize && src1ValueInfo && src2ValueInfo
+            const bool allowDivIntTypeSpec =
+                this->DoDivIntTypeSpec() &&
+                (!this->func->HasProfileInfo() || !this->func->GetReadOnlyProfileInfo()->IsDivIntTypeSpecDisabled(this->func->IsLoopBody())) &&
+                (instr->m_func == this->func || !instr->m_func->GetReadOnlyProfileInfo()->IsDivIntTypeSpecDisabled(false));
+            if (specialize && allowDivIntTypeSpec && src1ValueInfo && src2ValueInfo
                 && ((src1ValueInfo->IsInt() && src2ValueInfo->IsInt()) ||
-                (this->DoDivIntTypeSpec() && src1ValueInfo->IsLikelyInt() && src2ValueInfo->IsLikelyInt())))
+                (src1ValueInfo->IsLikelyInt() && src2ValueInfo->IsLikelyInt())))
             {
                 return ValueType::GetInt(true);
             }
@@ -8225,7 +8250,7 @@ GlobOpt::TypeSpecializeIntUnary(
         break;
 
     case Js::OpCode::Not_A:
-        if(!DoLossyIntTypeSpec())
+        if (!CanLossyIntTypeSpecForInstr(DoLossyIntTypeSpec(), DoAggressiveIntTypeSpec(), DoFloatTypeSpec(), func, instr))
         {
             return false;
         }
@@ -8777,10 +8802,15 @@ GlobOpt::TypeSpecializeBinary(IR::Instr **pInstr, Value **pSrc1Val, Value **pSrc
     bool needsBoolConv = false;
     AddSubConstantInfo addSubConstantInfo;
 
+    const auto CanLossyIntTypeSpec = [&]()
+    {
+        return CanLossyIntTypeSpecForInstr(DoLossyIntTypeSpec(), DoAggressiveIntTypeSpec(), DoFloatTypeSpec(), func, instr);
+    };
+
     switch (instr->m_opcode)
     {
     case Js::OpCode::Or_A:
-        if (!DoLossyIntTypeSpec())
+        if (!CanLossyIntTypeSpec())
         {
             return false;
         }
@@ -8789,7 +8819,7 @@ GlobOpt::TypeSpecializeBinary(IR::Instr **pInstr, Value **pSrc1Val, Value **pSrc
         break;
 
     case Js::OpCode::And_A:
-        if (!DoLossyIntTypeSpec())
+        if (!CanLossyIntTypeSpec())
         {
             return false;
         }
@@ -8798,7 +8828,7 @@ GlobOpt::TypeSpecializeBinary(IR::Instr **pInstr, Value **pSrc1Val, Value **pSrc
         break;
 
     case Js::OpCode::Xor_A:
-        if (!DoLossyIntTypeSpec())
+        if (!CanLossyIntTypeSpec())
         {
             return false;
         }
@@ -8807,7 +8837,7 @@ GlobOpt::TypeSpecializeBinary(IR::Instr **pInstr, Value **pSrc1Val, Value **pSrc
         break;
 
     case Js::OpCode::Shl_A:
-        if (!DoLossyIntTypeSpec())
+        if (!CanLossyIntTypeSpec())
         {
             return false;
         }
@@ -8816,7 +8846,7 @@ GlobOpt::TypeSpecializeBinary(IR::Instr **pInstr, Value **pSrc1Val, Value **pSrc
         break;
 
     case Js::OpCode::Shr_A:
-        if (!DoLossyIntTypeSpec())
+        if (!CanLossyIntTypeSpec())
         {
             return false;
         }
@@ -8825,7 +8855,7 @@ GlobOpt::TypeSpecializeBinary(IR::Instr **pInstr, Value **pSrc1Val, Value **pSrc
         break;
 
     case Js::OpCode::ShrU_A:
-        if (!DoLossyIntTypeSpec())
+        if (!CanLossyIntTypeSpec())
         {
             return false;
         }
@@ -8865,7 +8895,7 @@ GlobOpt::TypeSpecializeBinary(IR::Instr **pInstr, Value **pSrc1Val, Value **pSrc
             UpdateIntBoundsForLessThanOrEqualBranch(src1Val, src2Val);
         }
 
-        if (!DoLossyIntTypeSpec())
+        if (!CanLossyIntTypeSpec())
         {
             return false;
         }
@@ -8897,7 +8927,7 @@ GlobOpt::TypeSpecializeBinary(IR::Instr **pInstr, Value **pSrc1Val, Value **pSrc
             UpdateIntBoundsForLessThanBranch(src1Val, src2Val);
         }
 
-        if (!DoLossyIntTypeSpec())
+        if (!CanLossyIntTypeSpec())
         {
             return false;
         }
@@ -8929,7 +8959,7 @@ GlobOpt::TypeSpecializeBinary(IR::Instr **pInstr, Value **pSrc1Val, Value **pSrc
             UpdateIntBoundsForGreaterThanOrEqualBranch(src1Val, src2Val);
         }
 
-        if (!DoLossyIntTypeSpec())
+        if (!CanLossyIntTypeSpec())
         {
             return false;
         }
@@ -8961,7 +8991,7 @@ GlobOpt::TypeSpecializeBinary(IR::Instr **pInstr, Value **pSrc1Val, Value **pSrc
             UpdateIntBoundsForGreaterThanBranch(src1Val, src2Val);
         }
 
-        if (!DoLossyIntTypeSpec())
+        if (!CanLossyIntTypeSpec())
         {
             return false;
         }
@@ -8970,7 +9000,7 @@ GlobOpt::TypeSpecializeBinary(IR::Instr **pInstr, Value **pSrc1Val, Value **pSrc
         break;
 
     case Js::OpCode::CmUnLe_A:
-        if (!DoLossyIntTypeSpec())
+        if (!CanLossyIntTypeSpec())
         {
             return false;
         }
@@ -8981,7 +9011,7 @@ GlobOpt::TypeSpecializeBinary(IR::Instr **pInstr, Value **pSrc1Val, Value **pSrc
         break;
 
     case Js::OpCode::CmUnLt_A:
-        if (!DoLossyIntTypeSpec())
+        if (!CanLossyIntTypeSpec())
         {
             return false;
         }
@@ -8992,7 +9022,7 @@ GlobOpt::TypeSpecializeBinary(IR::Instr **pInstr, Value **pSrc1Val, Value **pSrc
         break;
 
     case Js::OpCode::CmUnGe_A:
-        if (!DoLossyIntTypeSpec())
+        if (!CanLossyIntTypeSpec())
         {
             return false;
         }
@@ -9003,7 +9033,7 @@ GlobOpt::TypeSpecializeBinary(IR::Instr **pInstr, Value **pSrc1Val, Value **pSrc
         break;
 
     case Js::OpCode::CmUnGt_A:
-        if (!DoLossyIntTypeSpec())
+        if (!CanLossyIntTypeSpec())
         {
             return false;
         }
@@ -11124,8 +11154,15 @@ GlobOpt::TypeSpecializeStElem(IR::Instr ** pInstr, Value *src1Val, Value **pDstV
     case ObjectType::Uint16MixedArray:
     case ObjectType::Int32MixedArray:
     Int32Array:
-        if (this->DoAggressiveIntTypeSpec() || this->DoFloatTypeSpec())
+        if ((this->DoAggressiveIntTypeSpec() || this->DoFloatTypeSpec()) &&
+            (!isLossyAllowed ||
+             CanLossyIntTypeSpecForInstr(DoLossyIntTypeSpec(), DoAggressiveIntTypeSpec(), DoFloatTypeSpec(), this->func, instr) ||
+             (src1Val && src1Val->GetValueInfo()->IsInt())))
         {
+            if (isLossyAllowed && !CanLossyIntTypeSpecForInstr(DoLossyIntTypeSpec(), DoAggressiveIntTypeSpec(), DoFloatTypeSpec(), this->func, instr))
+            {
+                isLossyAllowed = false;
+            }
             toType = TyInt32;
         }
         break;
@@ -11585,6 +11622,7 @@ GlobOpt::ToTypeSpecUse(IR::Instr *instr, IR::Opnd *opnd, BasicBlock *block, Valu
 {
     Assert(bailOutKind != IR::BailOutInvalid);
     IR::Instr *newInstr;
+    IR::Instr * const origInsertBeforeInstr = insertBeforeInstr;
 
     if (!val && opnd->IsRegOpnd())
     {
@@ -11699,9 +11737,67 @@ GlobOpt::ToTypeSpecUse(IR::Instr *instr, IR::Opnd *opnd, BasicBlock *block, Valu
 
             if (!isLive)
             {
+                IR::Instr * const contextInstr = instr ? instr : origInsertBeforeInstr;
+                if (lossy &&
+                    opnd->IsVar() &&
+                    !indir &&
+                    valueInfo &&
+                    !valueInfo->IsPrimitive() &&
+                    !block->globOptData.IsTypeSpecialized(varSym) &&
+                    !block->globOptData.liveFloat64Syms->Test(varSym->m_id) &&
+                    block->globOptData.liveVarSyms->Test(varSym->m_id) &&
+                    CONFIG_FLAG(ESBigInt) &&
+                    !AllowOptForInstr(this->DoAggressiveIntTypeSpec(), this->func, contextInstr, &GlobOpt::DoAggressiveIntTypeSpec) &&
+                    AllowOptForInstr(this->DoFloatTypeSpec(), this->func, contextInstr, &GlobOpt::DoFloatTypeSpec))
+                {
+                    const bool isSrc1 = (needReplaceSrc && instr->GetSrc1() == opnd);
+                    const bool isSrc2 = (needReplaceSrc && !isSrc1 && instr->GetSrc2() == opnd);
+
+                    this->ToTypeSpecUse(
+                        needReplaceSrc ? instr : nullptr,
+                        opnd,
+                        block,
+                        val,
+                        nullptr,
+                        TyFloat64,
+                        IR::BailOutNumberOnly,
+                        false,
+                        origInsertBeforeInstr);
+
+                    if (block->globOptData.liveFloat64Syms->Test(varSym->m_id))
+                    {
+                        IR::Opnd * floatOpnd = nullptr;
+                        IR::Instr * convInsertBeforeInstr = origInsertBeforeInstr;
+                        if (needReplaceSrc)
+                        {
+                            floatOpnd = isSrc1 ? instr->GetSrc1() : (isSrc2 ? instr->GetSrc2() : nullptr);
+                            Assert(floatOpnd && floatOpnd->IsFloat64());
+                        }
+                        else
+                        {
+                            floatOpnd = IR::RegOpnd::New(varSym->GetFloat64EquivSym(this->func), TyFloat64, this->func);
+                            if (block->next && !block->next->isDeleted && block->next->isLoopHeader &&
+                                block->next->loop->bailOutInfo && block->next->loop->bailOutInfo->bailOutInstr)
+                            {
+                                convInsertBeforeInstr = block->next->loop->bailOutInfo->bailOutInstr;
+                            }
+                        }
+                        return this->ToTypeSpecUse(
+                            needReplaceSrc ? instr : nullptr,
+                            floatOpnd,
+                            block,
+                            block->globOptData.FindValue(varSym),
+                            indir,
+                            toType,
+                            bailOutKind,
+                            lossy,
+                            convInsertBeforeInstr);
+                    }
+                }
+
                 if (!opnd->IsVar() ||
                     !block->globOptData.liveVarSyms->Test(varSym->m_id) ||
-                    (block->globOptData.liveFloat64Syms->Test(varSym->m_id) && valueInfo && valueInfo->IsLikelyFloat()))
+                    (block->globOptData.liveFloat64Syms->Test(varSym->m_id) && valueInfo && (valueInfo->IsLikelyFloat() || (lossy && !valueInfo->IsPrimitive()))))
                 {
                     Assert(block->globOptData.liveFloat64Syms->Test(varSym->m_id));
 
@@ -15231,7 +15327,7 @@ GlobOpt::OptHoistInvariant(
                         if ((src1ValueInfo->IsPrimitive() || block->globOptData.IsTypeSpecialized(src1StackSym)) &&                // didn't need a lossy type spec bailout in the source block
                             (!landingPadSrc1ValueInfo->IsPrimitive() && !landingPad->globOptData.IsTypeSpecialized(src1StackSym))) // needs a lossy type spec bailout in the landing pad
                         {
-                            bailoutKind = IR::BailOutOnNotPrimitive;
+                            bailoutKind = CONFIG_FLAG(ESBigInt) ? IR::BailOutIntOnly : IR::BailOutOnNotPrimitive;
                             AddBailOutToFromVar();
                         }
                     }
@@ -15642,6 +15738,30 @@ GlobOpt::TryHoistInvariant(
             loop = loop->parent;
         }
 
+        if (instr->m_opcode == Js::OpCode::FromVar &&
+            !instr->HasBailOutInfo() &&
+            bailoutKind != IR::BailOutInvalid &&
+            lossy &&
+            CONFIG_FLAG(ESBigInt) &&
+            instr->GetDst() &&
+            instr->GetDst()->GetType() == TyInt32 &&
+            !AllowOptForInstr(DoAggressiveIntTypeSpec(), func, instr, &GlobOpt::DoAggressiveIntTypeSpec))
+        {
+            StackSym * const src1StackSym = IR::RegOpnd::TryGetStackSym(instr->GetSrc1());
+            if (src1StackSym)
+            {
+                Value * const landingPadSrc1Val = loop->landingPad->globOptData.FindValue(src1StackSym);
+                if (src1Val &&
+                    landingPadSrc1Val &&
+                    (src1Val->GetValueInfo()->IsPrimitive() || block->globOptData.IsTypeSpecialized(src1StackSym)) &&
+                    !landingPadSrc1Val->GetValueInfo()->IsPrimitive() &&
+                    !loop->landingPad->globOptData.IsTypeSpecialized(src1StackSym))
+                {
+                    return false;
+                }
+            }
+        }
+
         // Record the byte code use here since we are going to move this instruction up
         if (isNotTypeSpecConv)
         {
@@ -15870,7 +15990,10 @@ GlobOpt::DoAggressiveIntTypeSpec(Func const * func)
     return
         !PHASE_OFF(Js::AggressiveIntTypeSpecPhase, func) &&
         !IsTypeSpecPhaseOff(func) &&
-        !func->IsAggressiveIntTypeSpecDisabled();
+        !func->IsAggressiveIntTypeSpecDisabled() &&
+        (!func->HasProfileInfo() ||
+         !func->GetJITFunctionBody()->HasLoops() ||
+         !func->GetReadOnlyProfileInfo()->IsAggressiveIntTypeSpecDisabled(true));
 }
 
 bool
@@ -15898,7 +16021,8 @@ GlobOpt::DoLossyIntTypeSpec(Func const * func)
     return
         !PHASE_OFF(Js::LossyIntTypeSpecPhase, func) &&
         !IsTypeSpecPhaseOff(func) &&
-        (!func->HasProfileInfo() || !func->GetReadOnlyProfileInfo()->IsLossyIntTypeSpecDisabled());
+        (!func->HasProfileInfo() || !func->GetReadOnlyProfileInfo()->IsLossyIntTypeSpecDisabled()) &&
+        (!CONFIG_FLAG(ESBigInt) || DoAggressiveIntTypeSpec(func) || DoFloatTypeSpec(func));
 }
 
 bool
@@ -15974,7 +16098,10 @@ GlobOpt::DoArrayCheckHoist() const
 bool
 GlobOpt::DoArrayCheckHoist(const ValueType baseValueType, Loop* loop, IR::Instr const * const instr) const
 {
-    if(!DoArrayCheckHoist() || (instr && !IsLoopPrePass() && instr->DoStackArgsOpt()))
+    if(!DoArrayCheckHoist() ||
+       (loop && func->HasProfileInfo() && func->GetReadOnlyProfileInfo()->IsArrayCheckHoistDisabled(true)) ||
+       (instr && instr->m_func != func && instr->m_func->IsArrayCheckHoistDisabled()) ||
+       (instr && !IsLoopPrePass() && instr->DoStackArgsOpt()))
     {
         return false;
     }
@@ -16108,6 +16235,7 @@ GlobOpt::DoLdLenIntSpec(IR::Instr * const instr, const ValueType baseValueType)
     if(PHASE_OFF(Js::LdLenIntSpecPhase, func) ||
         IsTypeSpecPhaseOff(func) ||
         (func->HasProfileInfo() && func->GetReadOnlyProfileInfo()->IsLdLenIntSpecDisabled()) ||
+        (instr && instr->m_func != func && instr->m_func->HasProfileInfo() && instr->m_func->GetReadOnlyProfileInfo()->IsLdLenIntSpecDisabled()) ||
         (instr && !IsLoopPrePass() && instr->DoStackArgsOpt()))
     {
         return false;
@@ -16124,9 +16252,24 @@ GlobOpt::DoLdLenIntSpec(IR::Instr * const instr, const ValueType baseValueType)
     }
 
     Assert(!instr || baseValueType == instr->GetSrc1()->GetValueType());
-    return
-        baseValueType.HasBeenString() ||
-        (baseValueType.IsLikelyAnyOptimizedArray() && baseValueType.GetObjectType() != ObjectType::ObjectWithArray);
+    if (baseValueType.HasBeenString())
+    {
+        return true;
+    }
+    if (!baseValueType.IsLikelyAnyOptimizedArray() || baseValueType.GetObjectType() == ObjectType::ObjectWithArray)
+    {
+        return false;
+    }
+    if (!baseValueType.IsAnyOptimizedArray() &&
+        ((func->HasProfileInfo() &&
+          (func->GetReadOnlyProfileInfo()->IsArrayCheckHoistDisabled(func->IsLoopBody()) ||
+           (this->currentBlock && this->currentBlock->loop && func->GetReadOnlyProfileInfo()->IsArrayCheckHoistDisabled(true)))) ||
+         (instr && instr->m_func != func && instr->m_func->HasProfileInfo() &&
+          instr->m_func->GetReadOnlyProfileInfo()->IsArrayCheckHoistDisabled(false))))
+    {
+        return false;
+    }
+    return true;
 }
 
 bool

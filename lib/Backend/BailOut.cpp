@@ -1384,6 +1384,28 @@ BailOutRecord::BailOutFromLoopBodyHelper(Js::JavascriptCallStackLayout * layout,
     // Restore bailout values
     bailOutRecord->RestoreValues(bailOutKind, layout, interpreterFrame, functionScriptContext, true, registerSaves, bailOutReturnValue, layout->GetArgumentsObjectLocation(), branchValue);
 
+    const Js::OpCode bailOutOpcode = bailOutRecord->bailOutOpcode;
+    const bool resumesAtArrayOp =
+        bailOutOpcode == Js::OpCode::BailOut ||
+        bailOutOpcode == Js::OpCode::BoundCheck ||
+        bailOutOpcode == Js::OpCode::LdElemI_A ||
+        bailOutOpcode == Js::OpCode::StElemI_A ||
+        bailOutOpcode == Js::OpCode::StElemI_A_Strict ||
+        bailOutOpcode == Js::OpCode::StElemC ||
+        bailOutOpcode == Js::OpCode::LdLen_A;
+    if (resumesAtArrayOp)
+    {
+        if ((bailOutKind & IR::BailOutOnArrayAccessHelperCall) != 0)
+        {
+            interpreterFrame->OrFlags(Js::InterpreterStackFrameFlags_ProcessingBailOutOnArrayAccessHelperCall);
+        }
+        if ((bailOutKind & ~IR::BailOutKindBits) == IR::BailOutOnNotNativeArray ||
+            (bailOutKind & (IR::BailOutConventionalNativeArrayAccessOnly | IR::BailOutConvertedNativeArray)) != 0)
+        {
+            interpreterFrame->OrFlags(Js::InterpreterStackFrameFlags_ProcessingBailOutOnArraySpecialization);
+        }
+    }
+
     BAILOUT_FLUSH(executeFunction);
 
     UpdatePolymorphicFieldAccess(function, bailOutRecord);
@@ -1630,11 +1652,12 @@ BailOutRecord::BailOutHelper(Js::JavascriptCallStackLayout * layout, Js::ScriptF
 
     newInstance->ehBailoutData = bailOutRecord->ehBailoutData;
     newInstance->OrFlags(Js::InterpreterStackFrameFlags_FromBailOut);
-    if (bailOutKind == IR::BailOutOnArrayAccessHelperCall)
+    if ((bailOutKind & IR::BailOutOnArrayAccessHelperCall) != 0)
     {
         newInstance->OrFlags(Js::InterpreterStackFrameFlags_ProcessingBailOutOnArrayAccessHelperCall);
     }
-    else if (bailOutKind == IR::BailOutOnNotNativeArray)
+    if ((bailOutKind & ~IR::BailOutKindBits) == IR::BailOutOnNotNativeArray ||
+        (bailOutKind & (IR::BailOutConventionalNativeArrayAccessOnly | IR::BailOutConvertedNativeArray)) != 0)
     {
         newInstance->OrFlags(Js::InterpreterStackFrameFlags_ProcessingBailOutOnArraySpecialization);
     }
@@ -1844,6 +1867,188 @@ BailOutRecord::BailOutHelper(Js::JavascriptCallStackLayout * layout, Js::ScriptF
 
 // actualBailOutOffset - bail out offset in the function, inlinee or otherwise, that had the bailout.
 
+static bool TryHandleBailOutProfileFlag(
+    Js::DynamicProfileInfo * profileInfo,
+    bool isLoopBody,
+    IR::BailOutKind bailOutKind,
+    bool applyDisable,
+    RejitReason * outRejitReason,
+    bool * outWasAlreadyDisabled)
+{
+    Assert(profileInfo != nullptr);
+
+    const auto HandleFlag = [&](bool isDisabled, auto disableFn, RejitReason reason) -> bool
+    {
+        if (outWasAlreadyDisabled)
+        {
+            *outWasAlreadyDisabled = isDisabled;
+        }
+        if (outRejitReason)
+        {
+            *outRejitReason = reason;
+        }
+        if (!isDisabled && applyDisable)
+        {
+            disableFn();
+        }
+        return true;
+    };
+
+    if ((bailOutKind & (IR::BailOutOnResultConditions | IR::BailOutOnDivSrcConditions)) ||
+        bailOutKind == IR::BailOutIntOnly ||
+        bailOutKind == IR::BailOnIntMin ||
+        bailOutKind == IR::BailOnDivResultNotInt)
+    {
+        if (bailOutKind & IR::BailOutOnMulOverflow)
+        {
+            return HandleFlag(
+                profileInfo->IsAggressiveMulIntTypeSpecDisabled(isLoopBody),
+                [&]() { profileInfo->DisableAggressiveMulIntTypeSpec(isLoopBody); },
+                RejitReason::AggressiveMulIntTypeSpecDisabled);
+        }
+        if ((bailOutKind & (IR::BailOutOnDivByZero | IR::BailOutOnDivOfMinInt)) ||
+            bailOutKind == IR::BailOnDivResultNotInt)
+        {
+            return HandleFlag(
+                profileInfo->IsDivIntTypeSpecDisabled(isLoopBody),
+                [&]() { profileInfo->DisableDivIntTypeSpec(isLoopBody); },
+                RejitReason::DivIntTypeSpecDisabled);
+        }
+        return HandleFlag(
+            profileInfo->IsAggressiveIntTypeSpecDisabled(isLoopBody),
+            [&]() { profileInfo->DisableAggressiveIntTypeSpec(isLoopBody); },
+            RejitReason::AggressiveIntTypeSpecDisabled);
+    }
+
+    if (bailOutKind & IR::BailOutForDebuggerBits)
+    {
+        return false;
+    }
+
+    switch (bailOutKind)
+    {
+    case IR::BailOutOnNotPrimitive:
+        return HandleFlag(
+            profileInfo->IsLossyIntTypeSpecDisabled(),
+            [&]() { profileInfo->DisableLossyIntTypeSpec(); },
+            RejitReason::LossyIntTypeSpecDisabled);
+
+    case IR::BailOutOnMemOpError:
+        return HandleFlag(
+            profileInfo->IsMemOpDisabled(),
+            [&]() { profileInfo->DisableMemOp(); },
+            RejitReason::MemOpDisabled);
+
+    case IR::BailOutPrimitiveButString:
+    case IR::BailOutNumberOnly:
+        return HandleFlag(
+            profileInfo->IsFloatTypeSpecDisabled(),
+            [&]() { profileInfo->DisableFloatTypeSpec(); },
+            RejitReason::FloatTypeSpecDisabled);
+
+    case IR::BailOutOnNotArray:
+        return HandleFlag(
+            profileInfo->IsArrayCheckHoistDisabled(isLoopBody),
+            [&]() { profileInfo->DisableArrayCheckHoist(isLoopBody); },
+            RejitReason::ArrayCheckHoistDisabled);
+
+    case IR::BailOutConventionalTypedArrayAccessOnly:
+        return HandleFlag(
+            profileInfo->IsTypedArrayTypeSpecDisabled(isLoopBody),
+            [&]() { profileInfo->DisableTypedArrayTypeSpec(isLoopBody); },
+            RejitReason::TypedArrayTypeSpecDisabled);
+
+    case IR::BailOutOnMissingValue:
+        return HandleFlag(
+            profileInfo->IsArrayMissingValueCheckHoistDisabled(isLoopBody),
+            [&]() { profileInfo->DisableArrayMissingValueCheckHoist(isLoopBody); },
+            RejitReason::ArrayMissingValueCheckHoistDisabled);
+
+    case IR::BailOutOnInvalidatedArrayHeadSegment:
+        return HandleFlag(
+            profileInfo->IsJsArraySegmentHoistDisabled(isLoopBody),
+            [&]() { profileInfo->DisableJsArraySegmentHoist(isLoopBody); },
+            RejitReason::JsArraySegmentHoistDisabled);
+
+    case IR::BailOutOnIrregularLength:
+        return HandleFlag(
+            profileInfo->IsLdLenIntSpecDisabled(),
+            [&]() { profileInfo->DisableLdLenIntSpec(); },
+            RejitReason::LdLenIntSpecDisabled);
+
+    case IR::BailOutOnFailedHoistedBoundCheck:
+        return HandleFlag(
+            profileInfo->IsBoundCheckHoistDisabled(isLoopBody),
+            [&]() { profileInfo->DisableBoundCheckHoist(isLoopBody); },
+            RejitReason::BoundCheckHoistDisabled);
+
+    case IR::BailOutOnFailedHoistedLoopCountBasedBoundCheck:
+        return HandleFlag(
+            profileInfo->IsLoopCountBasedBoundCheckHoistDisabled(isLoopBody),
+            [&]() { profileInfo->DisableLoopCountBasedBoundCheckHoist(isLoopBody); },
+            RejitReason::LoopCountBasedBoundCheckHoistDisabled);
+
+    case IR::BailOutExpectingInteger:
+        return HandleFlag(
+            profileInfo->IsSwitchOptDisabled(),
+            [&]() { profileInfo->DisableSwitchOpt(); },
+            RejitReason::DisableSwitchOptExpectingInteger);
+
+    case IR::BailOutExpectingString:
+        return HandleFlag(
+            profileInfo->IsSwitchOptDisabled(),
+            [&]() { profileInfo->DisableSwitchOpt(); },
+            RejitReason::DisableSwitchOptExpectingString);
+
+    case IR::BailOnStackArgsOutOfActualsRange:
+        if (isLoopBody)
+        {
+            return false;
+        }
+        return HandleFlag(
+            profileInfo->IsStackArgOptDisabled(),
+            [&]() { profileInfo->DisableStackArgOpt(); },
+            RejitReason::DisableStackArgOpt);
+
+    case IR::BailOutCheckThis:
+        return HandleFlag(
+            profileInfo->IsCheckThisDisabled(),
+            [&]() { profileInfo->DisableCheckThis(); },
+            RejitReason::CheckThisDisabled);
+
+    case IR::BailOutOnTaggedValue:
+        return HandleFlag(
+            profileInfo->IsTagCheckDisabled(),
+            [&]() { profileInfo->DisableTagCheck(); },
+            RejitReason::FailedTagCheck);
+
+    case IR::BailOutOnFloor:
+        return HandleFlag(
+            profileInfo->IsFloorInliningDisabled(),
+            [&]() { profileInfo->DisableFloorInlining(); },
+            RejitReason::FloorInliningDisabled);
+
+    case IR::BailOutOnPowIntIntOverflow:
+        return HandleFlag(
+            profileInfo->IsPowIntIntTypeSpecDisabled(),
+            [&]() { profileInfo->DisablePowIntIntTypeSpec(); },
+            RejitReason::PowIntIntTypeSpecDisabled);
+
+    case IR::BailOutOnEarlyExit:
+        if (isLoopBody)
+        {
+            return false;
+        }
+        return HandleFlag(
+            profileInfo->IsOptimizeTryFinallyDisabled(),
+            [&]() { profileInfo->DisableOptimizeTryFinally(); },
+            RejitReason::OptimizeTryFinallyDisabled);
+
+    default:
+        return false;
+    }
+}
+
 void BailOutRecord::ScheduleFunctionCodeGen(Js::ScriptFunction * function, Js::ScriptFunction * innerMostInlinee,
     BailOutRecord const * bailOutRecord, IR::BailOutKind bailOutKind, uint32 actualBailOutOffset, Js::ImplicitCallFlags savedImplicitCallFlags, void * returnAddress)
 {
@@ -1895,54 +2100,64 @@ void BailOutRecord::ScheduleFunctionCodeGen(Js::ScriptFunction * function, Js::S
 
     CheckPreemptiveRejit(executeFunction, bailOutKind, bailOutRecordNotConst, callsCount, -1);
 
-    entryPointInfo->callsCount = callsCount;
-
     Assert(bailOutKind != IR::BailOutInvalid);
 
     Js::DynamicProfileInfo * profileInfo = executeFunction->HasDynamicProfileInfo() ? executeFunction->GetAnyDynamicProfileInfo() : nullptr;
+    Js::FunctionBody * inlineeBody = innerMostInlinee ? innerMostInlinee->GetFunctionBody() : nullptr;
+    Js::DynamicProfileInfo * inlineeProfileInfo = (inlineeBody && inlineeBody != executeFunction && inlineeBody->HasDynamicProfileInfo())
+        ? inlineeBody->GetAnyDynamicProfileInfo()
+        : nullptr;
+
+    if (callsCount > 0 && profileInfo)
+    {
+        bool callerAlreadyDisabled = false;
+        if (executeFunction->DontRethunkAfterBailout() &&
+            TryHandleBailOutProfileFlag(profileInfo, false, bailOutKind, false, nullptr, &callerAlreadyDisabled) &&
+            callerAlreadyDisabled)
+        {
+            callsCount = 0;
+        }
+        else if (inlineeProfileInfo)
+        {
+            bool inlineeAlreadyDisabled = false;
+            if (TryHandleBailOutProfileFlag(inlineeProfileInfo, false, bailOutKind, false, nullptr, &inlineeAlreadyDisabled) &&
+                inlineeAlreadyDisabled &&
+                TryHandleBailOutProfileFlag(profileInfo, false, bailOutKind, false, nullptr, &callerAlreadyDisabled) &&
+                !callerAlreadyDisabled)
+            {
+                // Inlinee already disabled this optimization while this caller still has stale inlined code.
+                callsCount = 0;
+            }
+        }
+    }
+
+    entryPointInfo->callsCount = callsCount;
+
     if ((profileInfo && callsCount == 0) ||
         PHASE_FORCE(Js::ReJITPhase, executeFunction))
     {
-        if ((bailOutKind & (IR::BailOutOnResultConditions | IR::BailOutOnDivSrcConditions)) || bailOutKind == IR::BailOutIntOnly || bailOutKind == IR::BailOnIntMin || bailOutKind == IR::BailOnDivResultNotInt)
+        if (inlineeProfileInfo)
         {
-            // Note WRT BailOnIntMin: it wouldn't make sense to re-jit without changing anything here, as interpreter will not change the (int) type,
-            // so the options are: (1) rejit with disabling int type spec, (2) don't rejit, always bailout.
-            // It seems to be better to rejit.
-            if (bailOutKind & IR::BailOutOnMulOverflow)
+            bool inlineeWasDisabled = false;
+            if (TryHandleBailOutProfileFlag(inlineeProfileInfo, false, bailOutKind, true, nullptr, &inlineeWasDisabled) &&
+                !inlineeWasDisabled &&
+                inlineeBody->GetDefaultFunctionEntryPointInfo()->IsCodeGenDone())
             {
-                if (profileInfo->IsAggressiveMulIntTypeSpecDisabled(false))
-                {
-                    reThunk = true;
-                }
-                else
-                {
-                    profileInfo->DisableAggressiveMulIntTypeSpec(false);
-                    rejitReason = RejitReason::AggressiveMulIntTypeSpecDisabled;
-                }
+                inlineeBody->SetDontRethunkAfterBailout();
             }
-            else if ((bailOutKind & (IR::BailOutOnDivByZero | IR::BailOutOnDivOfMinInt)) || bailOutKind == IR::BailOnDivResultNotInt)
+        }
+
+        bool wasDisabled = false;
+        RejitReason disabledReason = RejitReason::None;
+        if (profileInfo && TryHandleBailOutProfileFlag(profileInfo, false, bailOutKind, true, &disabledReason, &wasDisabled))
+        {
+            if (wasDisabled)
             {
-                if (profileInfo->IsDivIntTypeSpecDisabled(false))
-                {
-                    reThunk = true;
-                }
-                else
-                {
-                    profileInfo->DisableDivIntTypeSpec(false);
-                    rejitReason = RejitReason::DivIntTypeSpecDisabled;
-                }
+                reThunk = true;
             }
             else
             {
-                if (profileInfo->IsAggressiveIntTypeSpecDisabled(false))
-                {
-                    reThunk = true;
-                }
-                else
-                {
-                    profileInfo->DisableAggressiveIntTypeSpec(false);
-                    rejitReason = RejitReason::AggressiveIntTypeSpecDisabled;
-                }
+                rejitReason = disabledReason;
             }
         }
         else if (bailOutKind & IR::BailOutForDebuggerBits)
@@ -1951,42 +2166,6 @@ void BailOutRecord::ScheduleFunctionCodeGen(Js::ScriptFunction * function, Js::S
         }
         else switch(bailOutKind)
         {
-            case IR::BailOutOnNotPrimitive:
-                if (profileInfo->IsLossyIntTypeSpecDisabled())
-                {
-                    reThunk = true;
-                }
-                else
-                {
-                    profileInfo->DisableLossyIntTypeSpec();
-                    rejitReason = RejitReason::LossyIntTypeSpecDisabled;
-                }
-                break;
-            case IR::BailOutOnMemOpError:
-                if (profileInfo->IsMemOpDisabled())
-                {
-                    reThunk = true;
-                }
-                else
-                {
-                    profileInfo->DisableMemOp();
-                    rejitReason = RejitReason::MemOpDisabled;
-                }
-                break;
-
-            case IR::BailOutPrimitiveButString:
-            case IR::BailOutNumberOnly:
-                if (profileInfo->IsFloatTypeSpecDisabled())
-                {
-                    reThunk = true;
-                }
-                else
-                {
-                    profileInfo->DisableFloatTypeSpec();
-                    rejitReason = RejitReason::FloatTypeSpecDisabled;
-                }
-                break;
-
             case IR::BailOutOnImplicitCalls:
             case IR::BailOutOnImplicitCallsPreOp:
                 // Check if the implicit call flags in the profile have changed since we last JITed this
@@ -2008,18 +2187,6 @@ void BailOutRecord::ScheduleFunctionCodeGen(Js::ScriptFunction * function, Js::S
                 rejitReason = RejitReason::ModByPowerOf2;
                 break;
 
-            case IR::BailOutOnNotArray:
-                if(profileInfo->IsArrayCheckHoistDisabled(false))
-                {
-                    reThunk = true;
-                }
-                else
-                {
-                    profileInfo->DisableArrayCheckHoist(false);
-                    rejitReason = RejitReason::ArrayCheckHoistDisabled;
-                }
-                break;
-
             case IR::BailOutOnNotNativeArray:
 
                 // REVIEW: We have an issue with array profile info.  The info on the type of array we have won't
@@ -2038,32 +2205,8 @@ void BailOutRecord::ScheduleFunctionCodeGen(Js::ScriptFunction * function, Js::S
                 rejitReason = RejitReason::ConvertedNativeArray;
                 break;
 
-            case IR::BailOutConventionalTypedArrayAccessOnly:
-                if(profileInfo->IsTypedArrayTypeSpecDisabled(false))
-                {
-                    reThunk = true;
-                }
-                else
-                {
-                    profileInfo->DisableTypedArrayTypeSpec(false);
-                    rejitReason = RejitReason::TypedArrayTypeSpecDisabled;
-                }
-                break;
-
             case IR::BailOutConventionalNativeArrayAccessOnly:
                 rejitReason = RejitReason::ExpectingConventionalNativeArrayAccess;
-                break;
-
-            case IR::BailOutOnMissingValue:
-                if(profileInfo->IsArrayMissingValueCheckHoistDisabled(false))
-                {
-                    reThunk = true;
-                }
-                else
-                {
-                    profileInfo->DisableArrayMissingValueCheckHoist(false);
-                    rejitReason = RejitReason::ArrayMissingValueCheckHoistDisabled;
-                }
                 break;
 
             case IR::BailOutOnArrayAccessHelperCall:
@@ -2072,92 +2215,8 @@ void BailOutRecord::ScheduleFunctionCodeGen(Js::ScriptFunction * function, Js::S
                 rejitReason = RejitReason::ArrayAccessNeededHelperCall;
                 break;
 
-            case IR::BailOutOnInvalidatedArrayHeadSegment:
-                if(profileInfo->IsJsArraySegmentHoistDisabled(false))
-                {
-                    reThunk = true;
-                }
-                else
-                {
-                    profileInfo->DisableJsArraySegmentHoist(false);
-                    rejitReason = RejitReason::JsArraySegmentHoistDisabled;
-                }
-                break;
-
-            case IR::BailOutOnIrregularLength:
-                if(profileInfo->IsLdLenIntSpecDisabled())
-                {
-                    reThunk = true;
-                }
-                else
-                {
-                    profileInfo->DisableLdLenIntSpec();
-                    rejitReason = RejitReason::LdLenIntSpecDisabled;
-                }
-                break;
-
-            case IR::BailOutOnFailedHoistedBoundCheck:
-                if(profileInfo->IsBoundCheckHoistDisabled(false))
-                {
-                    reThunk = true;
-                }
-                else
-                {
-                    profileInfo->DisableBoundCheckHoist(false);
-                    rejitReason = RejitReason::BoundCheckHoistDisabled;
-                }
-                break;
-
-            case IR::BailOutOnFailedHoistedLoopCountBasedBoundCheck:
-                if(profileInfo->IsLoopCountBasedBoundCheckHoistDisabled(false))
-                {
-                    reThunk = true;
-                }
-                else
-                {
-                    profileInfo->DisableLoopCountBasedBoundCheckHoist(false);
-                    rejitReason = RejitReason::LoopCountBasedBoundCheckHoistDisabled;
-                }
-                break;
-
-            case IR::BailOutExpectingInteger:
-                if (profileInfo->IsSwitchOptDisabled())
-                {
-                    reThunk = true;
-                }
-                else
-                {
-                    profileInfo->DisableSwitchOpt();
-                    rejitReason = RejitReason::DisableSwitchOptExpectingInteger;
-                }
-                break;
-
-            case IR::BailOutExpectingString:
-                if (profileInfo->IsSwitchOptDisabled())
-                {
-                    reThunk = true;
-                }
-                else
-                {
-                    profileInfo->DisableSwitchOpt();
-                    rejitReason = RejitReason::DisableSwitchOptExpectingString;
-                }
-                break;
-
             case IR::BailOutOnFailedPolymorphicInlineTypeCheck:
                 rejitReason = RejitReason::FailedPolymorphicInlineeTypeCheck;
-                break;
-
-            case IR::BailOnStackArgsOutOfActualsRange:
-                if (profileInfo->IsStackArgOptDisabled())
-                {
-                    reThunk = true;
-                }
-                else
-                {
-                    profileInfo->DisableStackArgOpt();
-                    rejitReason = RejitReason::DisableStackArgOpt;
-                }
                 break;
             case IR::BailOutOnPolymorphicInlineFunction:
             case IR::BailOutFailedInlineTypeCheck:
@@ -2197,31 +2256,6 @@ void BailOutRecord::ScheduleFunctionCodeGen(Js::ScriptFunction * function, Js::S
                 {
                     executeFunction->ResetBailOnMisingProfileCount();
                     rejitReason = RejitReason::NoProfile;
-                }
-                break;
-
-            case IR::BailOutCheckThis:
-                // Presumably we've started passing a different "this" pointer to callees.
-                if (profileInfo->IsCheckThisDisabled())
-                {
-                    reThunk = true;
-                }
-                else
-                {
-                    profileInfo->DisableCheckThis();
-                    rejitReason = RejitReason::CheckThisDisabled;
-                }
-                break;
-
-            case IR::BailOutOnTaggedValue:
-                if (profileInfo->IsTagCheckDisabled())
-                {
-                    reThunk = true;
-                }
-                else
-                {
-                    profileInfo->DisableTagCheck();
-                    rejitReason = RejitReason::FailedTagCheck;
                 }
                 break;
 
@@ -2293,46 +2327,6 @@ void BailOutRecord::ScheduleFunctionCodeGen(Js::ScriptFunction * function, Js::S
                 // to protect that property operation.
                 rejitReason = RejitReason::CtorGuardInvalidated;
                 break;
-
-            case IR::BailOutOnFloor:
-            {
-                if (profileInfo->IsFloorInliningDisabled())
-                {
-                    reThunk = true;
-                }
-                else
-                {
-                    profileInfo->DisableFloorInlining();
-                    rejitReason = RejitReason::FloorInliningDisabled;
-                }
-                break;
-            }
-            case IR::BailOutOnPowIntIntOverflow:
-            {
-                if (profileInfo->IsPowIntIntTypeSpecDisabled())
-                {
-                    reThunk = true;
-                }
-                else
-                {
-                    profileInfo->DisablePowIntIntTypeSpec();
-                    rejitReason = RejitReason::PowIntIntTypeSpecDisabled;
-                }
-                break;
-            }
-            case IR::BailOutOnEarlyExit:
-            {
-                if (profileInfo->IsOptimizeTryFinallyDisabled())
-                {
-                    reThunk = true;
-                }
-                else
-                {
-                    profileInfo->DisableOptimizeTryFinally();
-                    rejitReason = RejitReason::OptimizeTryFinallyDisabled;
-                }
-                break;
-            }
         }
 
         Assert(!(rejitReason != RejitReason::None && reThunk));
@@ -2343,11 +2337,13 @@ void BailOutRecord::ScheduleFunctionCodeGen(Js::ScriptFunction * function, Js::S
         rejitReason = RejitReason::Forced;
     }
 
+    bool rejitCapped = false;
     if (!reThunk && rejitReason != RejitReason::None)
     {
         // REVIEW: Temporary fix for RS1.  Disable Rejiting if it looks like it is not fixing the problem.
         //         For RS2, turn the rejitCount check into an assert and let's fix all these issues.
-        if (profileInfo->GetRejitCount() >= 100 ||
+        if (!profileInfo ||
+            profileInfo->GetRejitCount() >= 100 ||
             (profileInfo->GetBailOutOffsetForLastRejit() == actualBailOutOffset && function->IsNewEntryPointAvailable()))
         {
 #ifdef REJIT_STATS
@@ -2357,6 +2353,7 @@ void BailOutRecord::ScheduleFunctionCodeGen(Js::ScriptFunction * function, Js::S
                 scriptContext->rejitReasonCountsCap[static_cast<byte>(rejitReason)]++;
             }
 #endif
+            rejitCapped = (!profileInfo || profileInfo->GetRejitCount() >= 100);
             reThunk = true;
             rejitReason = RejitReason::None;
         }
@@ -2399,11 +2396,20 @@ void BailOutRecord::ScheduleFunctionCodeGen(Js::ScriptFunction * function, Js::S
 
     if (reThunk && executeFunction->DontRethunkAfterBailout())
     {
-        // This function is marked for rethunking, but the last ReJIT we've done was for a JIT loop body
-        // So the latest rejitted version of this function may not have the right optimization disabled.
-        // Rejit just to be safe.
-        reThunk = false;
-        rejitReason = RejitReason::AfterLoopBodyRejit;
+        if (!profileInfo || profileInfo->GetRejitCount() >= 100 || rejitCapped)
+        {
+            executeFunction->ClearDontRethunkAfterBailout();
+        }
+        else
+        {
+            // This function is marked for rethunking, but the last ReJIT we've done was for a JIT loop body
+            // So the latest rejitted version of this function may not have the right optimization disabled.
+            // Rejit just to be safe.
+            reThunk = false;
+            rejitReason = RejitReason::AfterLoopBodyRejit;
+            profileInfo->IncRejitCount();
+            profileInfo->SetBailOutOffsetForLastRejit(actualBailOutOffset);
+        }
     }
     if (reThunk)
     {
@@ -2495,68 +2501,75 @@ void BailOutRecord::ScheduleLoopBodyCodeGen(Js::ScriptFunction * function, Js::S
 
     CheckPreemptiveRejit(executeFunction, bailOutKind, bailOutRecordNotConst, totalJittedLoopIterations, interpreterFrame->GetCurrentLoopNum());
 
+    Js::DynamicProfileInfo * profileInfo = executeFunction->HasDynamicProfileInfo() ? executeFunction->GetAnyDynamicProfileInfo() : nullptr;
+    Js::FunctionBody * inlineeBody = innerMostInlinee ? innerMostInlinee->GetFunctionBody() : nullptr;
+    Js::DynamicProfileInfo * inlineeProfileInfo = (inlineeBody && inlineeBody != executeFunction && inlineeBody->HasDynamicProfileInfo())
+        ? inlineeBody->GetAnyDynamicProfileInfo()
+        : nullptr;
+
+    if (totalJittedLoopIterations > 0 && profileInfo)
+    {
+        bool loopAlreadyDisabled = false;
+        if (inlineeProfileInfo)
+        {
+            bool inlineeAlreadyDisabled = false;
+            if (TryHandleBailOutProfileFlag(inlineeProfileInfo, false, bailOutKind, false, nullptr, &inlineeAlreadyDisabled) &&
+                inlineeAlreadyDisabled &&
+                TryHandleBailOutProfileFlag(profileInfo, true, bailOutKind, false, nullptr, &loopAlreadyDisabled) &&
+                !loopAlreadyDisabled)
+            {
+                // Inlinee already disabled this optimization while this loop body still has stale inlined code.
+                totalJittedLoopIterations = 0;
+            }
+        }
+        if (totalJittedLoopIterations > 0 &&
+            bailOutRecordNotConst->bailOutCount == 1 &&
+            loopHeader->GetRejitCount() < 4 &&
+            TryHandleBailOutProfileFlag(profileInfo, true, bailOutKind, false, nullptr, &loopAlreadyDisabled) &&
+            loopAlreadyDisabled)
+        {
+            // Another loop or caller already disabled this shared loop-body optimization while this loop entry point has stale code.
+            totalJittedLoopIterations = 0;
+        }
+    }
+
     entryPointInfo->totalJittedLoopIterations = totalJittedLoopIterations;
 
-    if ((executeFunction->HasDynamicProfileInfo() && totalJittedLoopIterations == 0) ||
+    bool profileFlagChanged = false;
+    if ((profileInfo && totalJittedLoopIterations == 0) ||
         PHASE_FORCE(Js::ReJITPhase, executeFunction))
     {
-        Js::DynamicProfileInfo * profileInfo = executeFunction->GetAnyDynamicProfileInfo();
-
-        if ((bailOutKind & (IR::BailOutOnResultConditions | IR::BailOutOnDivSrcConditions)) || bailOutKind == IR::BailOutIntOnly || bailOutKind == IR::BailOnIntMin)
+        if (inlineeProfileInfo)
         {
-            if (bailOutKind & IR::BailOutOnMulOverflow)
+            bool inlineeWasDisabled = false;
+            if (TryHandleBailOutProfileFlag(inlineeProfileInfo, false, bailOutKind, true, nullptr, &inlineeWasDisabled) &&
+                !inlineeWasDisabled &&
+                inlineeBody->GetDefaultFunctionEntryPointInfo()->IsCodeGenDone())
             {
-                profileInfo->DisableAggressiveMulIntTypeSpec(true);
-                rejitReason = RejitReason::AggressiveMulIntTypeSpecDisabled;
+                inlineeBody->SetDontRethunkAfterBailout();
             }
-            else if ((bailOutKind & (IR::BailOutOnDivByZero | IR::BailOutOnDivOfMinInt)) || bailOutKind == IR::BailOnDivResultNotInt)
+        }
+
+        bool wasDisabled = false;
+        RejitReason disabledReason = RejitReason::None;
+        if (profileInfo && TryHandleBailOutProfileFlag(profileInfo, true, bailOutKind, true, &disabledReason, &wasDisabled))
+        {
+            if (!wasDisabled)
             {
-                profileInfo->DisableDivIntTypeSpec(true);
-                rejitReason = RejitReason::DivIntTypeSpecDisabled;
+                rejitReason = disabledReason;
+                profileFlagChanged = true;
             }
-            else
+            else if (bailOutRecordNotConst->bailOutCount <= 6 && loopHeader->GetRejitCount() < 4)
             {
-                profileInfo->DisableAggressiveIntTypeSpec(true);
-                rejitReason = RejitReason::AggressiveIntTypeSpecDisabled;
+                // ReJIT stale loop entry point once so it picks up the already-disabled flag.
+                rejitReason = disabledReason;
             }
-            executeFunction->SetDontRethunkAfterBailout();
         }
         else switch(bailOutKind)
         {
-            case IR::BailOutOnNotPrimitive:
-                profileInfo->DisableLossyIntTypeSpec();
-                executeFunction->SetDontRethunkAfterBailout();
-                rejitReason = RejitReason::LossyIntTypeSpecDisabled;
-                break;
-
-            case IR::BailOutOnMemOpError:
-                profileInfo->DisableMemOp();
-                executeFunction->SetDontRethunkAfterBailout();
-                rejitReason = RejitReason::MemOpDisabled;
-                break;
-
-            case IR::BailOutPrimitiveButString:
-            case IR::BailOutNumberOnly:
-                profileInfo->DisableFloatTypeSpec();
-                executeFunction->SetDontRethunkAfterBailout();
-                rejitReason = RejitReason::FloatTypeSpecDisabled;
-                break;
-
             case IR::BailOutOnImplicitCalls:
             case IR::BailOutOnImplicitCallsPreOp:
                 rejitReason = RejitReason::ImplicitCallFlagsChanged;
-                break;
-
-            case IR::BailOutExpectingInteger:
-                profileInfo->DisableSwitchOpt();
-                executeFunction->SetDontRethunkAfterBailout();
-                rejitReason = RejitReason::DisableSwitchOptExpectingInteger;
-                break;
-
-            case IR::BailOutExpectingString:
-                profileInfo->DisableSwitchOpt();
-                executeFunction->SetDontRethunkAfterBailout();
-                rejitReason = RejitReason::DisableSwitchOptExpectingString;
                 break;
 
             case IR::BailOnStackArgsOutOfActualsRange:
@@ -2565,12 +2578,6 @@ void BailOutRecord::ScheduleLoopBodyCodeGen(Js::ScriptFunction * function, Js::S
 
             case IR::BailOnModByPowerOf2:
                 rejitReason = RejitReason::ModByPowerOf2;
-                break;
-
-            case IR::BailOutOnNotArray:
-                profileInfo->DisableArrayCheckHoist(true);
-                executeFunction->SetDontRethunkAfterBailout();
-                rejitReason = RejitReason::ArrayCheckHoistDisabled;
                 break;
 
             case IR::BailOutOnNotNativeArray:
@@ -2590,49 +2597,14 @@ void BailOutRecord::ScheduleLoopBodyCodeGen(Js::ScriptFunction * function, Js::S
                 rejitReason = RejitReason::ConvertedNativeArray;
                 break;
 
-            case IR::BailOutConventionalTypedArrayAccessOnly:
-                profileInfo->DisableTypedArrayTypeSpec(true);
-                executeFunction->SetDontRethunkAfterBailout();
-                rejitReason = RejitReason::TypedArrayTypeSpecDisabled;
-                break;
-
             case IR::BailOutConventionalNativeArrayAccessOnly:
                 rejitReason = RejitReason::ExpectingConventionalNativeArrayAccess;
-                break;
-
-            case IR::BailOutOnMissingValue:
-                profileInfo->DisableArrayMissingValueCheckHoist(true);
-                rejitReason = RejitReason::ArrayMissingValueCheckHoistDisabled;
                 break;
 
             case IR::BailOutOnArrayAccessHelperCall:
                 // This is a pre-op bailout, so the interpreter will update the profile data for this byte-code instruction to
                 // prevent excessive bailouts here in the future
                 rejitReason = RejitReason::ArrayAccessNeededHelperCall;
-                break;
-
-            case IR::BailOutOnInvalidatedArrayHeadSegment:
-                profileInfo->DisableJsArraySegmentHoist(true);
-                executeFunction->SetDontRethunkAfterBailout();
-                rejitReason = RejitReason::JsArraySegmentHoistDisabled;
-                break;
-
-            case IR::BailOutOnIrregularLength:
-                profileInfo->DisableLdLenIntSpec();
-                executeFunction->SetDontRethunkAfterBailout();
-                rejitReason = RejitReason::LdLenIntSpecDisabled;
-                break;
-
-            case IR::BailOutOnFailedHoistedBoundCheck:
-                profileInfo->DisableBoundCheckHoist(true);
-                executeFunction->SetDontRethunkAfterBailout();
-                rejitReason = RejitReason::BoundCheckHoistDisabled;
-                break;
-
-            case IR::BailOutOnFailedHoistedLoopCountBasedBoundCheck:
-                profileInfo->DisableLoopCountBasedBoundCheckHoist(true);
-                executeFunction->SetDontRethunkAfterBailout();
-                rejitReason = RejitReason::LoopCountBasedBoundCheckHoistDisabled;
                 break;
 
             case IR::BailOutOnInlineFunction:
@@ -2646,12 +2618,6 @@ void BailOutRecord::ScheduleLoopBodyCodeGen(Js::ScriptFunction * function, Js::S
                 executeFunction->ResetBailOnMisingProfileCount();
                 break;
 
-            case IR::BailOutCheckThis:
-                profileInfo->DisableCheckThis();
-                executeFunction->SetDontRethunkAfterBailout();
-                rejitReason = RejitReason::CheckThisDisabled;
-                break;
-
             case IR::BailOutFailedTypeCheck:
                 // An inline cache must have gone from monomorphic to polymorphic.
                 // This is already noted in the profile data, so optimization of the given ld/st will
@@ -2660,7 +2626,7 @@ void BailOutRecord::ScheduleLoopBodyCodeGen(Js::ScriptFunction * function, Js::S
 
                 // Disable ObjTypeSpec in a large loop body after the first rejit itself.
                 // Rejitting a large loop body takes more time and the fact that loop bodies are prioritized ahead of functions to be jitted only augments the problem.
-                if(executeFunction->GetByteCodeInLoopCount() > (uint)CONFIG_FLAG(LoopBodySizeThresholdToDisableOpts))
+                if (profileInfo && executeFunction->GetByteCodeInLoopCount() > (uint)CONFIG_FLAG(LoopBodySizeThresholdToDisableOpts))
                 {
                     profileInfo->DisableObjTypeSpecInJitLoopBody();
                     if(PHASE_TRACE1(Js::DisabledObjTypeSpecPhase))
@@ -2702,27 +2668,8 @@ void BailOutRecord::ScheduleLoopBodyCodeGen(Js::ScriptFunction * function, Js::S
                 rejitReason = RejitReason::CtorGuardInvalidated;
                 break;
 
-            case IR::BailOutOnFloor:
-            {
-                profileInfo->DisableFloorInlining();
-                rejitReason = RejitReason::FloorInliningDisabled;
-                break;
-            }
-
             case IR::BailOutFailedFixedFieldCheck:
                 rejitReason = RejitReason::FailedFixedFieldCheck;
-                break;
-
-            case IR::BailOutOnTaggedValue:
-                profileInfo->DisableTagCheck();
-                executeFunction->SetDontRethunkAfterBailout();
-                rejitReason = RejitReason::FailedTagCheck;
-                break;
-
-            case IR::BailOutOnPowIntIntOverflow:
-                profileInfo->DisablePowIntIntTypeSpec();
-                executeFunction->SetDontRethunkAfterBailout();
-                rejitReason = RejitReason::PowIntIntTypeSpecDisabled;
                 break;
         }
 
@@ -2735,6 +2682,11 @@ void BailOutRecord::ScheduleLoopBodyCodeGen(Js::ScriptFunction * function, Js::S
     if (PHASE_FORCE(Js::ReJITPhase, executeFunction) && rejitReason == RejitReason::None)
     {
         rejitReason = RejitReason::Forced;
+    }
+
+    if (rejitReason != RejitReason::None && loopHeader->GetRejitCount() >= 50)
+    {
+        rejitReason = RejitReason::None;
     }
 
     REJIT_KIND_TESTTRACE(bailOutKind, _u("Bailout from loop: function: %s, loopNumber: %d, bailOutKindName: (%S), reJitReason: %S\r\n"),
@@ -2752,6 +2704,10 @@ void BailOutRecord::ScheduleLoopBodyCodeGen(Js::ScriptFunction * function, Js::S
 
     if (rejitReason != RejitReason::None)
     {
+        if (profileFlagChanged)
+        {
+            executeFunction->SetDontRethunkAfterBailout();
+        }
 #ifdef REJIT_STATS
         executeFunction->GetScriptContext()->LogRejit(executeFunction, rejitReason);
 #endif
