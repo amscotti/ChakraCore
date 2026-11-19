@@ -62,16 +62,19 @@ namespace Js
         Take,
         Drop,
         FlatMap,
+        Concat,
         Wrap,
     };
 
     // Iterator Helper and WrapForValidIterator objects. Both hold an
     // underlying Iterator Record ([[Iterator]], cached [[NextMethod]],
     // [[Done]]) and, for helpers, the callback and the inner record used
-    // by flatMap. All JS references are held in Field() members of this
-    // Recycler-allocated DynamicObject subclass, following the
-    // JavascriptAsyncFromSyncIterator pattern, so the recycler traces the
-    // underlying iterator(s) and callback for exactly the helper's life.
+    // by flatMap (or concatIterables/concatIndex for Iterator.concat,
+    // which has no outer underlying iterator). All JS references are held
+    // in Field() members of this Recycler-allocated DynamicObject subclass,
+    // following the JavascriptAsyncFromSyncIterator pattern, so the recycler
+    // traces the underlying iterator(s), callback, and concat iterables for
+    // the helper's active lifetime.
     // `started` stays false until the first next() (suspended-start).
     // `executing` mirrors the generator brand while a started helper runs:
     // reentrant next/return then throws TypeError. A suspended-start
@@ -86,8 +89,10 @@ namespace Js
         Field(Var) callback;
         Field(RecyclableObject*) innerIterator;
         Field(Var) innerNextMethod;
+        Field(JavascriptArray*) concatIterables;
         Field(double) counter;
         Field(double) remaining;
+        Field(uint32) concatIndex;
         Field(IteratorHelperKind) kind;
         Field(bool) iteratorDone;
         Field(bool) innerDone;
@@ -130,6 +135,7 @@ namespace Js
         void CloseUnderlyingNormal(ScriptContext* scriptContext);
         void CloseInnerNormal(ScriptContext* scriptContext);
         void CloseAllSwallow(ScriptContext* scriptContext);
+        void ClearConcatState();
 
         friend class JavascriptIterator;
     };

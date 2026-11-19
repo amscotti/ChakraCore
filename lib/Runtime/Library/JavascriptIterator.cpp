@@ -328,9 +328,40 @@ namespace
 
         ARGUMENTS(args, callInfo);
         ScriptContext* scriptContext = function->GetScriptContext();
+        JavascriptLibrary* library = scriptContext->GetLibrary();
         Assert(!(callInfo.Flags & CallFlags_New));
 
-        return scriptContext->GetLibrary()->GetUndefined();
+        // ECMA-2026 Iterator.concat ( ...items ): validate every argument
+        // left-to-right before creating the helper, storing { [[OpenMethod]],
+        // [[Iterable]] } pairs in a Recycler-managed array without invoking
+        // [[OpenMethod]] until iteration begins.
+        uint32 itemCount = args.Info.Count > 1 ? static_cast<uint32>(args.Info.Count - 1) : 0;
+        if (itemCount > UINT32_MAX / 2)
+        {
+            JavascriptError::ThrowRangeError(scriptContext, JSERR_FunctionArgument_Invalid);
+        }
+        JavascriptArray* concatIterables = itemCount > 0 ? library->CreateArray(itemCount * 2) : nullptr;
+        for (uint32 i = 0; i < itemCount; i++)
+        {
+            Var item = args[i + 1];
+            if (!JavascriptOperators::IsObject(item))
+            {
+                JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedObject);
+            }
+            RecyclableObject* itemObj = VarTo<RecyclableObject>(CrossSite::MarshalVar(scriptContext, item));
+            Var method = JavascriptOperators::GetPropertyNoCache(itemObj, PropertyIds::_symbolIterator, scriptContext);
+            if (JavascriptOperators::IsUndefinedOrNull(method) || !JavascriptConversion::IsCallable(method))
+            {
+                JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedFunction);
+            }
+            concatIterables->GenericDirectSetItemAt(i * 2, method);
+            concatIterables->GenericDirectSetItemAt(i * 2 + 1, itemObj);
+        }
+
+        // Pass concatIterables via CreateIteratorHelper's callback slot so
+        // JavascriptLibrary's factory signature remains unchanged; the helper
+        // constructor moves it into concatIterables and clears callback.
+        return library->CreateIteratorHelper(IteratorHelperKind::Concat, nullptr, nullptr, concatIterables, 0.0);
     }
 
     namespace
@@ -647,13 +678,15 @@ namespace
         : DynamicObject(type),
           iterator(iteratorValue),
           nextMethod(nextMethodValue),
-          callback(callbackValue),
+          callback(kindValue == IteratorHelperKind::Concat ? nullptr : callbackValue),
           innerIterator(nullptr),
           innerNextMethod(nullptr),
+          concatIterables(kindValue == IteratorHelperKind::Concat && callbackValue != nullptr ? VarTo<JavascriptArray>(callbackValue) : nullptr),
           counter(0),
           remaining(remainingValue),
+          concatIndex(0),
           kind(kindValue),
-          iteratorDone(false),
+          iteratorDone(kindValue == IteratorHelperKind::Concat),
           innerDone(false),
           hasInner(false),
           completed(false),
@@ -691,8 +724,8 @@ namespace
     bool JavascriptIteratorHelper::StepInner(ScriptContext* scriptContext, Var* outValue)
     {
         IterRecord record;
-        record.iterator = this->innerIterator;
-        record.nextMethod = this->innerNextMethod;
+        record.iterator = VarTo<RecyclableObject>(CrossSite::MarshalVar(scriptContext, this->innerIterator));
+        record.nextMethod = CrossSite::MarshalVar(scriptContext, this->innerNextMethod);
         record.done = this->innerDone;
         bool hasValue = false;
         try
@@ -727,12 +760,12 @@ namespace
 
     void JavascriptIteratorHelper::CloseInnerNormal(ScriptContext* scriptContext)
     {
-        if (!this->hasInner)
+        if (!this->hasInner || this->innerIterator == nullptr)
         {
             return;
         }
         IterRecord record;
-        record.iterator = this->innerIterator;
+        record.iterator = VarTo<RecyclableObject>(CrossSite::MarshalVar(scriptContext, this->innerIterator));
         record.done = this->innerDone;
         try
         {
@@ -748,10 +781,10 @@ namespace
 
     void JavascriptIteratorHelper::CloseAllSwallow(ScriptContext* scriptContext)
     {
-        if (this->hasInner)
+        if (this->hasInner && this->innerIterator != nullptr)
         {
             IterRecord innerRecord;
-            innerRecord.iterator = this->innerIterator;
+            innerRecord.iterator = VarTo<RecyclableObject>(CrossSite::MarshalVar(scriptContext, this->innerIterator));
             innerRecord.done = this->innerDone;
             CloseRecordSwallow(innerRecord, scriptContext);
             this->innerDone = innerRecord.done;
@@ -761,6 +794,19 @@ namespace
         record.done = this->iteratorDone;
         CloseRecordSwallow(record, scriptContext);
         this->iteratorDone = record.done;
+    }
+
+    void JavascriptIteratorHelper::ClearConcatState()
+    {
+        this->concatIterables = nullptr;
+        this->concatIndex = 0;
+        if (this->kind == IteratorHelperKind::Concat)
+        {
+            this->hasInner = false;
+            this->innerIterator = nullptr;
+            this->innerNextMethod = nullptr;
+            this->innerDone = false;
+        }
     }
 
     bool JavascriptIteratorHelper::Advance(ScriptContext* scriptContext, Var* outValue)
@@ -875,6 +921,50 @@ namespace
                 this->hasInner = true;
             }
         }
+        case IteratorHelperKind::Concat:
+        {
+            for (;;)
+            {
+                if (this->hasInner)
+                {
+                    Var innerValue = nullptr;
+                    if (StepInner(scriptContext, &innerValue))
+                    {
+                        *outValue = innerValue;
+                        return true;
+                    }
+                    this->hasInner = false;
+                    this->innerIterator = nullptr;
+                    this->innerNextMethod = nullptr;
+                    this->innerDone = false;
+                    continue;
+                }
+                if (this->concatIterables == nullptr || this->concatIndex >= this->concatIterables->GetLength())
+                {
+                    return false;
+                }
+                Var openMethod = CrossSite::MarshalVar(scriptContext, this->concatIterables->DirectGetItem(this->concatIndex));
+                Var iterable = CrossSite::MarshalVar(scriptContext, this->concatIterables->DirectGetItem(this->concatIndex + 1));
+                this->concatIndex += 2;
+                if (this->concatIndex >= this->concatIterables->GetLength())
+                {
+                    this->concatIterables = nullptr;
+                    this->concatIndex = 0;
+                }
+                Var iterVar = CallVar(scriptContext, openMethod, iterable);
+                if (!JavascriptOperators::IsObject(iterVar))
+                {
+                    JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedObject);
+                }
+                iterVar = CrossSite::MarshalVar(scriptContext, iterVar);
+                IterRecord innerRecord;
+                GetIteratorDirect(innerRecord, VarTo<RecyclableObject>(iterVar), scriptContext);
+                this->innerIterator = innerRecord.iterator;
+                this->innerNextMethod = innerRecord.nextMethod;
+                this->innerDone = false;
+                this->hasInner = true;
+            }
+        }
         case IteratorHelperKind::Wrap:
         default:
             AssertMsg(false, "Advance must not be called on a WrapForValidIterator object");
@@ -939,9 +1029,11 @@ namespace
             }
             catch (...)
             {
+                helper->ClearConcatState();
                 helper->executing = false;
                 throw;
             }
+            helper->ClearConcatState();
             helper->executing = false;
             JavascriptExceptionOperators::DoThrowCheckClone(exception, scriptContext);
         }
@@ -954,6 +1046,7 @@ namespace
         if (!hasValue)
         {
             helper->completed = true;
+            helper->ClearConcatState();
             return library->CreateIteratorResultObject(library->GetUndefined(), library->GetTrue());
         }
         return library->CreateIteratorResultObject(value, library->GetFalse());
@@ -985,6 +1078,7 @@ namespace
         if (!helper->started)
         {
             helper->completed = true;
+            helper->ClearConcatState();
             try
             {
                 helper->CloseInnerNormal(scriptContext);
@@ -1013,17 +1107,21 @@ namespace
             }
             catch (...)
             {
+                helper->ClearConcatState();
                 helper->executing = false;
                 throw;
             }
+            helper->ClearConcatState();
             helper->executing = false;
             JavascriptExceptionOperators::DoThrowCheckClone(exception, scriptContext);
         }
         catch (...)
         {
+            helper->ClearConcatState();
             helper->executing = false;
             throw;
         }
+        helper->ClearConcatState();
         helper->executing = false;
         return library->CreateIteratorResultObject(library->GetUndefined(), library->GetTrue());
     }
