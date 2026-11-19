@@ -1646,4 +1646,16 @@
       <files>StackArgumentsOptNegativeIndex.js</files>
     </default>
   </test>
+  <test>
+    <default>
+      <files>p1_loop_liveness_and_abort.js</files>
+      <compile-flags>-CollectGarbage</compile-flags>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>p1_bailout_rejit_storm.js</files>
+      <compile-flags>-CollectGarbage</compile-flags>
+    </default>
+  </test>
 </regress-exe>

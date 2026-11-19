@@ -216,3 +216,39 @@ provenance and pre-Stage-2/3 reference:
 - No CI gate reads this file yet. The measured-perf-gate card in
   `doc/open-cards.md` tracks adding one (fast subset, same-host A/B
   threshold, no absolute score gates).
+
+---
+
+## Post-P1 Addendum (2026-11-19, `modernize/phase4`)
+
+On `modernize/phase4` (Apple M1 Max, `darwin/arm64`, built with `mise exec -- zig build -Dprofile=jit -Dwasm=true`; `out/jit/bin/ch` SHA-256 `e43f7e87126b79dadbb97a11f2409e8af699b6e70a04d6bbd768092ef3a6c798`, `out/jit/lib/libChakraCore.dylib` SHA-256 `14eda23edff2f611a9ebe5f738c8d13493934942e750d4282c05a8b0234fb8d3`), Track `P1` (`a6d3a6fe8`, `628cf5391`, `7723bd804` -- full write-up & invariants in [p1-jit-bailouts.md](p1-jit-bailouts.md)) eliminated the pathological JIT bailout, loop-body abort retry storm, and ARM64 asm.js BGJIT tier-up stalls.
+
+`tools/bench/results/head-jit-darwin-arm64.json` was refreshed with the 3-iteration post-P1 `--tier jit` run (`64/64` applicable PASS, `Octane/zlib.js` excluded on arm64, `0` unexpected failures). Historical `4b2077687` JIT (`2026-11-16`, `7afbc2509d65`, predating `Q1.4`/`I1`/`I2`/`Q2`) and `head-interp-darwin-arm64.json` baselines remain listed above/in-table for A/B reference.
+
+### Focused 5-Iteration P1 Improvements (`--timeout 120`, same host)
+
+| Test | Unit | Pre-P1 JIT (`4b2077687`) | Post-P1 JIT | Post-P1 Interp (`-nonative`) | Speedup vs Pre-P1 | Speedup vs Interp | Post-P1 `-bgjit-` (5x med) |
+|---|---|---|---|---|---|---|---|
+| `Kraken/audio-fft.js` | ms | `5539.0` | **`84.0`** (`mad 0.0`) | `2287.0` (`mad 4.0`) | **`65.94x`** | **`27.23x`** | **`89.0`** ms |
+| `Kraken/audio-beat-detection.js` | ms | `5594.0` | **`110.0`** (`mad 0.0`) | `2391.0` (`mad 14.0`) | **`50.85x`** | **`21.74x`** | -- |
+| `Kraken/audio-oscillator.js` | ms | `1672.0` | **`202.0`** (`mad 4.0`) | `1836.0` (`mad 1.0`) | **`8.28x`** | **`9.09x`** | -- |
+| `Kraken/stanford-crypto-aes.js` | ms | `625.0` | **`89.0`** (`mad 1.0`) | `627.0` (`mad 3.0`) | **`7.02x`** | **`7.04x`** | -- |
+| `SunSpider/bitops-nsieve-bits.js` | ms | `96.0` | **`6.0`** (`mad 0.0`) | `55.0` (`mad 0.0`) | **`16.00x`** | **`9.17x`** | **`6.0`** ms |
+| `JetStream/container.cpp.js` | score | `120.2` | **`364.8`** (`mad 2.1`) | `12.2` (`mad 0.0`) | **`3.03x`** | **`29.92x`** | -- |
+
+- `-trace:BailOut,ReJIT` on `Kraken/stanford-crypto-aes.js`: `59` `BailOut` lines + `17` `Rejit` lines, finishing in `90 ms`.
+
+### 4-Suite Geomean & Total Comparison (`tools/bench/results/head-jit-darwin-arm64.json`, 3 iterations)
+
+| Suite | Metric (`n`) | Pre-P1 JIT (`4b2077687`) | Post-P1 JIT | Interp (`head-interp`) | Ratio vs Pre-P1 | Ratio vs Interp |
+|---|---|---|---|---|---|---|
+| `SunSpider` | sum ms (`26`) | `286.0` ms (`gm 6.59`) | **`172.0` ms** (`gm 5.30`) | `844.0` ms (`gm 28.85`) | **`1.66x`** sum (`1.244x` gm) | **`4.91x`** sum (`5.45x` gm) |
+| `Kraken` | sum ms (`14`) | `15054.0` ms (`gm 207.79`) | **`2081.0` ms** (`gm 86.58`) | `36509.0` ms (`gm 980.93`) | **`7.23x`** sum (`2.400x` gm) | **`17.54x`** sum (`11.33x` gm) |
+| `Octane` | geomean score (`14`) | `22786.6` | **`32382.1`** | `1550.2` | **`1.421x`** | **`20.89x`** |
+| `JetStream` | geomean score (`10`/`9`) | `311.5` | **`346.5`** | `8.5` | **`1.112x`** | **`40.12x`** |
+| **Overall** | geomean (`64` / `63` tests) | -- | -- | -- | **`1.453x`** (`64` tests) | **`11.49x`** (`63` tests) |
+
+Notable deltas & notes:
+- `Octane/navier-stokes.js` jumped `3262.0 -> 31990.0` (**`9.81x`**); `Octane/crypto.js` jumped `2654.0 -> 24830.0` (**`9.36x`**); `SunSpider/crypto-aes.js` dropped `23.0 -> 8.0 ms` (**`2.88x`**); `Octane/splay.js` `22090 -> 31295` (**`1.42x`**); `Octane/pdfjs.js` `29867 -> 35402` (**`1.19x`**); `Kraken/stanford-crypto-pbkdf2.js` `217 -> 147 ms` (**`1.48x`**).
+- Two benchmarks scored lower than the Nov 16 `4b2077687` baseline: `Octane/regexp.js` (`6903 -> 5513` 3-iter / `5551` 5-iter, `3.78x` vs interp, `28` bailout/rejit trace lines total) and `Kraken/stanford-crypto-ccm.js` (`169 -> 205` ms 3-iter / `210` ms 5-iter, `1.98x` vs interp; runs in `61.0 ms` with `-ESBigInt-` when `LossyIntTypeSpec` is not inhibited after `AggressiveIntTypeSpec`+`FloatTypeSpec` disablement under `ESBigInt`).
+

@@ -4725,6 +4725,17 @@
         "mvp"
       ],
       "phase": "P2",
+      "runnerTags": [
+        "exclude_interpreted"
+      ],
+      "suite": "AsmJs",
+      "test-id": "AsmJs[146]"
+    },
+    {
+      "features": [
+        "mvp"
+      ],
+      "phase": "P2",
       "runnerTags": [],
       "suite": "AsmJSFloat",
       "test-id": "AsmJSFloat[0]"
@@ -4888,10 +4899,11 @@
         "rlexe": "test/AsmJSFloat/rlexe.xml"
       },
       "AsmJs": {
-        "entries": 146,
+        "entries": 147,
         "p1": 122,
         "phases": {
           "P1": 122,
+          "P2": 1,
           "P2-pending": 23,
           "excluded": 1
         },
@@ -4938,6 +4950,6 @@
       }
     },
     "test-id": "<suite>[<0-based rlexe entry ordinal>]",
-    "total": 483
+    "total": 484
   }
 }

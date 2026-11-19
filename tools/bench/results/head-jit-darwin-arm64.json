@@ -1,11 +1,11 @@
 {
  "binary": "/Users/ascotti/Documents/code/ChakraCore/out/jit/bin/ch",
- "binarySha256": "7afbc2509d654c3ade1c5b84724b11e9b0db8defe27ce316b26c5864cbc6af1a",
+ "binarySha256": "e43f7e87126b79dadbb97a11f2409e8af699b6e70a04d6bbd768092ef3a6c798",
  "platform": "darwin",
  "machine": "arm64",
  "tier": "jit",
  "flags": [],
- "iterations": 5,
+ "iterations": 3,
  "timeoutSec": 120.0,
  "results": [
   {
@@ -17,9 +17,9 @@
    "runs": [
     {
      "rc": 0,
-     "wallSec": 0.05,
+     "wallSec": 0.052,
      "marker": "TIME",
-     "value": 8.0
+     "value": 9.0
     },
     {
      "rc": 0,
@@ -29,19 +29,7 @@
     },
     {
      "rc": 0,
-     "wallSec": 0.05,
-     "marker": "TIME",
-     "value": 9.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.05,
-     "marker": "TIME",
-     "value": 9.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.05,
+     "wallSec": 0.051,
      "marker": "TIME",
      "value": 9.0
     }
@@ -56,7 +44,7 @@
    "runs": [
     {
      "rc": 0,
-     "wallSec": 0.036,
+     "wallSec": 0.038,
      "marker": "TIME",
      "value": 2.0
     },
@@ -68,19 +56,7 @@
     },
     {
      "rc": 0,
-     "wallSec": 0.037,
-     "marker": "TIME",
-     "value": 3.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.036,
-     "marker": "TIME",
-     "value": 3.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.036,
+     "wallSec": 0.038,
      "marker": "TIME",
      "value": 3.0
     }
@@ -95,21 +71,9 @@
    "runs": [
     {
      "rc": 0,
-     "wallSec": 0.048,
+     "wallSec": 0.05,
      "marker": "TIME",
      "value": 13.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.049,
-     "marker": "TIME",
-     "value": 14.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.049,
-     "marker": "TIME",
-     "value": 14.0
     },
     {
      "rc": 0,
@@ -129,38 +93,26 @@
    "test": "SunSpider/access-binary-trees.js",
    "status": "pass",
    "kind": "time",
-   "median": 4.0,
+   "median": 3.0,
    "mad": 0.0,
    "runs": [
     {
      "rc": 0,
-     "wallSec": 0.038,
-     "marker": "TIME",
-     "value": 4.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.038,
-     "marker": "TIME",
-     "value": 4.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.036,
+     "wallSec": 0.037,
      "marker": "TIME",
      "value": 3.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.038,
-     "marker": "TIME",
-     "value": 4.0
     },
     {
      "rc": 0,
      "wallSec": 0.037,
      "marker": "TIME",
      "value": 3.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.037,
+     "marker": "TIME",
+     "value": 4.0
     }
    ]
   },
@@ -173,33 +125,21 @@
    "runs": [
     {
      "rc": 0,
+     "wallSec": 0.039,
+     "marker": "TIME",
+     "value": 5.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.04,
+     "marker": "TIME",
+     "value": 6.0
+    },
+    {
+     "rc": 0,
      "wallSec": 0.041,
      "marker": "TIME",
-     "value": 7.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.039,
-     "marker": "TIME",
      "value": 6.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.04,
-     "marker": "TIME",
-     "value": 6.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.04,
-     "marker": "TIME",
-     "value": 6.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.039,
-     "marker": "TIME",
-     "value": 7.0
     }
    ]
   },
@@ -207,18 +147,12 @@
    "test": "SunSpider/access-nbody.js",
    "status": "pass",
    "kind": "time",
-   "median": 4.0,
+   "median": 3.0,
    "mad": 0.0,
    "runs": [
     {
      "rc": 0,
-     "wallSec": 0.036,
-     "marker": "TIME",
-     "value": 4.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.037,
+     "wallSec": 0.038,
      "marker": "TIME",
      "value": 3.0
     },
@@ -226,19 +160,13 @@
      "rc": 0,
      "wallSec": 0.037,
      "marker": "TIME",
-     "value": 3.0
+     "value": 4.0
     },
     {
      "rc": 0,
      "wallSec": 0.036,
      "marker": "TIME",
-     "value": 4.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.037,
-     "marker": "TIME",
-     "value": 4.0
+     "value": 3.0
     }
    ]
   },
@@ -246,18 +174,12 @@
    "test": "SunSpider/access-nsieve.js",
    "status": "pass",
    "kind": "time",
-   "median": 3.0,
+   "median": 2.0,
    "mad": 0.0,
    "runs": [
     {
      "rc": 0,
      "wallSec": 0.036,
-     "marker": "TIME",
-     "value": 3.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.037,
      "marker": "TIME",
      "value": 2.0
     },
@@ -269,15 +191,9 @@
     },
     {
      "rc": 0,
-     "wallSec": 0.036,
+     "wallSec": 0.037,
      "marker": "TIME",
-     "value": 3.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.036,
-     "marker": "TIME",
-     "value": 3.0
+     "value": 2.0
     }
    ]
   },
@@ -290,25 +206,13 @@
    "runs": [
     {
      "rc": 0,
-     "wallSec": 0.034,
-     "marker": "TIME",
-     "value": 2.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.034,
+     "wallSec": 0.035,
      "marker": "TIME",
      "value": 1.0
     },
     {
      "rc": 0,
-     "wallSec": 0.033,
-     "marker": "TIME",
-     "value": 2.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.034,
+     "wallSec": 0.036,
      "marker": "TIME",
      "value": 2.0
     },
@@ -316,7 +220,7 @@
      "rc": 0,
      "wallSec": 0.035,
      "marker": "TIME",
-     "value": 1.0
+     "value": 2.0
     }
    ]
   },
@@ -329,21 +233,9 @@
    "runs": [
     {
      "rc": 0,
-     "wallSec": 0.037,
-     "marker": "TIME",
-     "value": 2.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.036,
+     "wallSec": 0.035,
      "marker": "TIME",
      "value": 1.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.036,
-     "marker": "TIME",
-     "value": 2.0
     },
     {
      "rc": 0,
@@ -353,7 +245,7 @@
     },
     {
      "rc": 0,
-     "wallSec": 0.036,
+     "wallSec": 0.035,
      "marker": "TIME",
      "value": 2.0
     }
@@ -374,25 +266,13 @@
     },
     {
      "rc": 0,
-     "wallSec": 0.038,
-     "marker": "TIME",
-     "value": 3.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.036,
-     "marker": "TIME",
-     "value": 3.0
-    },
-    {
-     "rc": 0,
      "wallSec": 0.035,
      "marker": "TIME",
      "value": 3.0
     },
     {
      "rc": 0,
-     "wallSec": 0.036,
+     "wallSec": 0.034,
      "marker": "TIME",
      "value": 3.0
     }
@@ -402,38 +282,26 @@
    "test": "SunSpider/bitops-nsieve-bits.js",
    "status": "pass",
    "kind": "time",
-   "median": 96.0,
-   "mad": 1.0,
+   "median": 5.0,
+   "mad": 0.0,
    "runs": [
     {
      "rc": 0,
-     "wallSec": 0.127,
+     "wallSec": 0.037,
      "marker": "TIME",
-     "value": 94.0
+     "value": 5.0
     },
     {
      "rc": 0,
-     "wallSec": 0.129,
+     "wallSec": 0.039,
      "marker": "TIME",
-     "value": 95.0
+     "value": 5.0
     },
     {
      "rc": 0,
-     "wallSec": 0.129,
+     "wallSec": 0.038,
      "marker": "TIME",
-     "value": 96.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.133,
-     "marker": "TIME",
-     "value": 97.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.131,
-     "marker": "TIME",
-     "value": 97.0
+     "value": 5.0
     }
    ]
   },
@@ -446,31 +314,19 @@
    "runs": [
     {
      "rc": 0,
-     "wallSec": 0.038,
+     "wallSec": 0.039,
+     "marker": "TIME",
+     "value": 6.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.039,
      "marker": "TIME",
      "value": 5.0
     },
     {
      "rc": 0,
      "wallSec": 0.039,
-     "marker": "TIME",
-     "value": 6.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.039,
-     "marker": "TIME",
-     "value": 6.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.038,
-     "marker": "TIME",
-     "value": 6.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.038,
      "marker": "TIME",
      "value": 6.0
     }
@@ -480,38 +336,26 @@
    "test": "SunSpider/crypto-aes.js",
    "status": "pass",
    "kind": "time",
-   "median": 23.0,
+   "median": 8.0,
    "mad": 0.0,
    "runs": [
     {
      "rc": 0,
-     "wallSec": 0.057,
+     "wallSec": 0.041,
      "marker": "TIME",
-     "value": 23.0
+     "value": 8.0
     },
     {
      "rc": 0,
-     "wallSec": 0.057,
+     "wallSec": 0.042,
      "marker": "TIME",
-     "value": 23.0
+     "value": 8.0
     },
     {
      "rc": 0,
-     "wallSec": 0.056,
+     "wallSec": 0.044,
      "marker": "TIME",
-     "value": 22.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.058,
-     "marker": "TIME",
-     "value": 24.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.059,
-     "marker": "TIME",
-     "value": 23.0
+     "value": 8.0
     }
    ]
   },
@@ -519,38 +363,26 @@
    "test": "SunSpider/crypto-md5.js",
    "status": "pass",
    "kind": "time",
-   "median": 11.0,
+   "median": 7.0,
    "mad": 0.0,
    "runs": [
     {
      "rc": 0,
-     "wallSec": 0.049,
+     "wallSec": 0.047,
      "marker": "TIME",
-     "value": 11.0
+     "value": 7.0
     },
     {
      "rc": 0,
-     "wallSec": 0.048,
+     "wallSec": 0.045,
      "marker": "TIME",
-     "value": 11.0
+     "value": 7.0
     },
     {
      "rc": 0,
-     "wallSec": 0.049,
+     "wallSec": 0.047,
      "marker": "TIME",
-     "value": 11.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.048,
-     "marker": "TIME",
-     "value": 11.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.048,
-     "marker": "TIME",
-     "value": 11.0
+     "value": 7.0
     }
    ]
   },
@@ -558,38 +390,26 @@
    "test": "SunSpider/crypto-sha1.js",
    "status": "pass",
    "kind": "time",
-   "median": 7.0,
+   "median": 5.0,
    "mad": 0.0,
    "runs": [
     {
      "rc": 0,
      "wallSec": 0.041,
      "marker": "TIME",
-     "value": 7.0
+     "value": 5.0
     },
     {
      "rc": 0,
      "wallSec": 0.041,
      "marker": "TIME",
-     "value": 7.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.041,
-     "marker": "TIME",
-     "value": 7.0
+     "value": 5.0
     },
     {
      "rc": 0,
      "wallSec": 0.042,
      "marker": "TIME",
-     "value": 7.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.041,
-     "marker": "TIME",
-     "value": 8.0
+     "value": 5.0
     }
    ]
   },
@@ -597,38 +417,26 @@
    "test": "SunSpider/date-format-tofte.js",
    "status": "pass",
    "kind": "time",
-   "median": 13.0,
+   "median": 15.0,
    "mad": 0.0,
    "runs": [
     {
      "rc": 0,
-     "wallSec": 0.045,
+     "wallSec": 0.051,
      "marker": "TIME",
-     "value": 13.0
+     "value": 15.0
     },
     {
      "rc": 0,
-     "wallSec": 0.047,
+     "wallSec": 0.05,
      "marker": "TIME",
-     "value": 14.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.046,
-     "marker": "TIME",
-     "value": 13.0
+     "value": 15.0
     },
     {
      "rc": 0,
      "wallSec": 0.049,
      "marker": "TIME",
      "value": 15.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.046,
-     "marker": "TIME",
-     "value": 13.0
     }
    ]
   },
@@ -636,38 +444,26 @@
    "test": "SunSpider/date-format-xparb.js",
    "status": "pass",
    "kind": "time",
-   "median": 22.0,
-   "mad": 1.0,
+   "median": 21.0,
+   "mad": 0.0,
    "runs": [
-    {
-     "rc": 0,
-     "wallSec": 0.054,
-     "marker": "TIME",
-     "value": 21.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.054,
-     "marker": "TIME",
-     "value": 21.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.057,
-     "marker": "TIME",
-     "value": 23.0
-    },
     {
      "rc": 0,
      "wallSec": 0.056,
      "marker": "TIME",
-     "value": 22.0
+     "value": 21.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.054,
+     "marker": "TIME",
+     "value": 21.0
     },
     {
      "rc": 0,
      "wallSec": 0.057,
      "marker": "TIME",
-     "value": 22.0
+     "value": 21.0
     }
    ]
   },
@@ -678,12 +474,6 @@
    "median": 5.0,
    "mad": 0.0,
    "runs": [
-    {
-     "rc": 0,
-     "wallSec": 0.036,
-     "marker": "TIME",
-     "value": 5.0
-    },
     {
      "rc": 0,
      "wallSec": 0.037,
@@ -698,13 +488,7 @@
     },
     {
      "rc": 0,
-     "wallSec": 0.036,
-     "marker": "TIME",
-     "value": 5.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.036,
+     "wallSec": 0.037,
      "marker": "TIME",
      "value": 5.0
     }
@@ -719,25 +503,13 @@
    "runs": [
     {
      "rc": 0,
+     "wallSec": 0.039,
+     "marker": "TIME",
+     "value": 4.0
+    },
+    {
+     "rc": 0,
      "wallSec": 0.038,
-     "marker": "TIME",
-     "value": 4.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.037,
-     "marker": "TIME",
-     "value": 3.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.037,
-     "marker": "TIME",
-     "value": 4.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.036,
      "marker": "TIME",
      "value": 4.0
     },
@@ -745,7 +517,7 @@
      "rc": 0,
      "wallSec": 0.039,
      "marker": "TIME",
-     "value": 3.0
+     "value": 4.0
     }
    ]
   },
@@ -758,31 +530,19 @@
    "runs": [
     {
      "rc": 0,
-     "wallSec": 0.037,
-     "marker": "TIME",
-     "value": 2.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.038,
-     "marker": "TIME",
-     "value": 2.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.037,
-     "marker": "TIME",
-     "value": 2.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.037,
+     "wallSec": 0.036,
      "marker": "TIME",
      "value": 2.0
     },
     {
      "rc": 0,
      "wallSec": 0.036,
+     "marker": "TIME",
+     "value": 2.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.035,
      "marker": "TIME",
      "value": 2.0
     }
@@ -803,25 +563,13 @@
     },
     {
      "rc": 0,
-     "wallSec": 0.037,
-     "marker": "TIME",
-     "value": 3.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.037,
+     "wallSec": 0.039,
      "marker": "TIME",
      "value": 4.0
     },
     {
      "rc": 0,
-     "wallSec": 0.037,
-     "marker": "TIME",
-     "value": 4.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.037,
+     "wallSec": 0.039,
      "marker": "TIME",
      "value": 4.0
     }
@@ -836,31 +584,19 @@
    "runs": [
     {
      "rc": 0,
-     "wallSec": 0.037,
+     "wallSec": 0.039,
      "marker": "TIME",
      "value": 5.0
     },
     {
      "rc": 0,
-     "wallSec": 0.036,
+     "wallSec": 0.038,
      "marker": "TIME",
      "value": 4.0
     },
     {
      "rc": 0,
-     "wallSec": 0.04,
-     "marker": "TIME",
-     "value": 4.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.046,
-     "marker": "TIME",
-     "value": 5.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.046,
+     "wallSec": 0.039,
      "marker": "TIME",
      "value": 5.0
     }
@@ -875,31 +611,19 @@
    "runs": [
     {
      "rc": 0,
-     "wallSec": 0.046,
-     "marker": "TIME",
-     "value": 7.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.047,
+     "wallSec": 0.041,
      "marker": "TIME",
      "value": 6.0
     },
     {
      "rc": 0,
-     "wallSec": 0.046,
+     "wallSec": 0.04,
      "marker": "TIME",
      "value": 6.0
     },
     {
      "rc": 0,
-     "wallSec": 0.046,
-     "marker": "TIME",
-     "value": 6.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.047,
+     "wallSec": 0.039,
      "marker": "TIME",
      "value": 6.0
     }
@@ -914,25 +638,13 @@
    "runs": [
     {
      "rc": 0,
-     "wallSec": 0.053,
+     "wallSec": 0.046,
      "marker": "TIME",
-     "value": 12.0
+     "value": 10.0
     },
     {
      "rc": 0,
-     "wallSec": 0.054,
-     "marker": "TIME",
-     "value": 11.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.052,
-     "marker": "TIME",
-     "value": 12.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.047,
+     "wallSec": 0.045,
      "marker": "TIME",
      "value": 11.0
     },
@@ -953,25 +665,13 @@
    "runs": [
     {
      "rc": 0,
-     "wallSec": 0.05,
-     "marker": "TIME",
-     "value": 15.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.049,
+     "wallSec": 0.051,
      "marker": "TIME",
      "value": 15.0
     },
     {
      "rc": 0,
      "wallSec": 0.05,
-     "marker": "TIME",
-     "value": 16.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.049,
      "marker": "TIME",
      "value": 15.0
     },
@@ -992,33 +692,21 @@
    "runs": [
     {
      "rc": 0,
-     "wallSec": 0.04,
-     "marker": "TIME",
-     "value": 7.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.04,
-     "marker": "TIME",
-     "value": 7.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.04,
-     "marker": "TIME",
-     "value": 6.0
-    },
-    {
-     "rc": 0,
      "wallSec": 0.042,
      "marker": "TIME",
-     "value": 6.0
+     "value": 7.0
     },
     {
      "rc": 0,
-     "wallSec": 0.041,
+     "wallSec": 0.04,
      "marker": "TIME",
      "value": 7.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.05,
+     "marker": "TIME",
+     "value": 6.0
     }
    ]
   },
@@ -1026,38 +714,26 @@
    "test": "Kraken/ai-astar.js",
    "status": "pass",
    "kind": "time",
-   "median": 889.0,
-   "mad": 1.0,
+   "median": 888.0,
+   "mad": 5.0,
    "runs": [
     {
      "rc": 0,
-     "wallSec": 0.937,
+     "wallSec": 0.953,
      "marker": "TIME",
-     "value": 890.0
+     "value": 902.0
     },
     {
      "rc": 0,
-     "wallSec": 0.936,
+     "wallSec": 0.939,
      "marker": "TIME",
-     "value": 887.0
+     "value": 888.0
     },
     {
      "rc": 0,
-     "wallSec": 0.938,
+     "wallSec": 0.931,
      "marker": "TIME",
-     "value": 890.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.935,
-     "marker": "TIME",
-     "value": 887.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.936,
-     "marker": "TIME",
-     "value": 889.0
+     "value": 883.0
     }
    ]
   },
@@ -1065,38 +741,26 @@
    "test": "Kraken/audio-beat-detection.js",
    "status": "pass",
    "kind": "time",
-   "median": 5594.0,
-   "mad": 32.0,
+   "median": 115.0,
+   "mad": 1.0,
    "runs": [
     {
      "rc": 0,
-     "wallSec": 5.629,
+     "wallSec": 0.157,
      "marker": "TIME",
-     "value": 5594.0
+     "value": 116.0
     },
     {
      "rc": 0,
-     "wallSec": 5.572,
+     "wallSec": 0.153,
      "marker": "TIME",
-     "value": 5539.0
+     "value": 115.0
     },
     {
      "rc": 0,
-     "wallSec": 5.653,
+     "wallSec": 0.152,
      "marker": "TIME",
-     "value": 5619.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 5.738,
-     "marker": "TIME",
-     "value": 5702.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 5.599,
-     "marker": "TIME",
-     "value": 5562.0
+     "value": 110.0
     }
    ]
   },
@@ -1109,31 +773,19 @@
    "runs": [
     {
      "rc": 0,
-     "wallSec": 0.069,
+     "wallSec": 0.07,
      "marker": "TIME",
      "value": 29.0
     },
     {
      "rc": 0,
-     "wallSec": 0.071,
+     "wallSec": 0.066,
      "marker": "TIME",
-     "value": 30.0
+     "value": 28.0
     },
     {
      "rc": 0,
-     "wallSec": 0.076,
-     "marker": "TIME",
-     "value": 30.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.069,
-     "marker": "TIME",
-     "value": 29.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.067,
+     "wallSec": 0.068,
      "marker": "TIME",
      "value": 29.0
     }
@@ -1143,38 +795,26 @@
    "test": "Kraken/audio-fft.js",
    "status": "pass",
    "kind": "time",
-   "median": 5539.0,
-   "mad": 16.0,
+   "median": 84.0,
+   "mad": 0.0,
    "runs": [
     {
      "rc": 0,
-     "wallSec": 5.552,
+     "wallSec": 0.124,
      "marker": "TIME",
-     "value": 5513.0
+     "value": 83.0
     },
     {
      "rc": 0,
-     "wallSec": 5.609,
+     "wallSec": 0.124,
      "marker": "TIME",
-     "value": 5569.0
+     "value": 84.0
     },
     {
      "rc": 0,
-     "wallSec": 5.577,
+     "wallSec": 0.124,
      "marker": "TIME",
-     "value": 5539.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 5.562,
-     "marker": "TIME",
-     "value": 5523.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 5.579,
-     "marker": "TIME",
-     "value": 5541.0
+     "value": 84.0
     }
    ]
   },
@@ -1182,38 +822,26 @@
    "test": "Kraken/audio-oscillator.js",
    "status": "pass",
    "kind": "time",
-   "median": 1672.0,
-   "mad": 4.0,
+   "median": 199.0,
+   "mad": 0.0,
    "runs": [
     {
      "rc": 0,
-     "wallSec": 1.716,
+     "wallSec": 0.238,
      "marker": "TIME",
-     "value": 1676.0
+     "value": 199.0
     },
     {
      "rc": 0,
-     "wallSec": 1.711,
+     "wallSec": 0.237,
      "marker": "TIME",
-     "value": 1672.0
+     "value": 199.0
     },
     {
      "rc": 0,
-     "wallSec": 1.683,
+     "wallSec": 0.241,
      "marker": "TIME",
-     "value": 1645.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 1.714,
-     "marker": "TIME",
-     "value": 1676.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 1.695,
-     "marker": "TIME",
-     "value": 1655.0
+     "value": 201.0
     }
    ]
   },
@@ -1221,38 +849,26 @@
    "test": "Kraken/imaging-darkroom.js",
    "status": "pass",
    "kind": "time",
-   "median": 67.0,
+   "median": 73.0,
    "mad": 0.0,
    "runs": [
     {
      "rc": 0,
-     "wallSec": 0.133,
+     "wallSec": 0.141,
      "marker": "TIME",
-     "value": 68.0
+     "value": 73.0
     },
     {
      "rc": 0,
-     "wallSec": 0.132,
+     "wallSec": 0.14,
      "marker": "TIME",
-     "value": 67.0
+     "value": 74.0
     },
     {
      "rc": 0,
-     "wallSec": 0.133,
+     "wallSec": 0.139,
      "marker": "TIME",
-     "value": 67.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.132,
-     "marker": "TIME",
-     "value": 67.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.132,
-     "marker": "TIME",
-     "value": 67.0
+     "value": 73.0
     }
    ]
   },
@@ -1260,9 +876,15 @@
    "test": "Kraken/imaging-desaturate.js",
    "status": "pass",
    "kind": "time",
-   "median": 91.0,
+   "median": 90.0,
    "mad": 0.0,
    "runs": [
+    {
+     "rc": 0,
+     "wallSec": 0.157,
+     "marker": "TIME",
+     "value": 90.0
+    },
     {
      "rc": 0,
      "wallSec": 0.155,
@@ -1271,27 +893,9 @@
     },
     {
      "rc": 0,
-     "wallSec": 0.155,
+     "wallSec": 0.156,
      "marker": "TIME",
-     "value": 91.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.154,
-     "marker": "TIME",
-     "value": 91.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.153,
-     "marker": "TIME",
-     "value": 91.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.153,
-     "marker": "TIME",
-     "value": 91.0
+     "value": 90.0
     }
    ]
   },
@@ -1299,24 +903,18 @@
    "test": "Kraken/imaging-gaussian-blur.js",
    "status": "pass",
    "kind": "time",
-   "median": 74.0,
+   "median": 73.0,
    "mad": 0.0,
    "runs": [
     {
      "rc": 0,
-     "wallSec": 0.138,
+     "wallSec": 0.14,
      "marker": "TIME",
      "value": 73.0
     },
     {
      "rc": 0,
-     "wallSec": 0.139,
-     "marker": "TIME",
-     "value": 74.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.138,
+     "wallSec": 0.136,
      "marker": "TIME",
      "value": 73.0
     },
@@ -1324,13 +922,7 @@
      "rc": 0,
      "wallSec": 0.138,
      "marker": "TIME",
-     "value": 74.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.137,
-     "marker": "TIME",
-     "value": 74.0
+     "value": 73.0
     }
    ]
   },
@@ -1338,38 +930,26 @@
    "test": "Kraken/json-parse-financial.js",
    "status": "pass",
    "kind": "time",
-   "median": 25.0,
+   "median": 27.0,
    "mad": 0.0,
    "runs": [
     {
      "rc": 0,
-     "wallSec": 0.06,
+     "wallSec": 0.062,
      "marker": "TIME",
-     "value": 26.0
+     "value": 27.0
     },
     {
      "rc": 0,
-     "wallSec": 0.06,
+     "wallSec": 0.061,
      "marker": "TIME",
-     "value": 25.0
+     "value": 27.0
     },
     {
      "rc": 0,
-     "wallSec": 0.058,
+     "wallSec": 0.061,
      "marker": "TIME",
-     "value": 25.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.059,
-     "marker": "TIME",
-     "value": 26.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.06,
-     "marker": "TIME",
-     "value": 25.0
+     "value": 27.0
     }
    ]
   },
@@ -1377,36 +957,24 @@
    "test": "Kraken/json-stringify-tinderbox.js",
    "status": "pass",
    "kind": "time",
-   "median": 18.0,
+   "median": 17.0,
    "mad": 0.0,
    "runs": [
     {
      "rc": 0,
      "wallSec": 0.058,
      "marker": "TIME",
-     "value": 18.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.056,
-     "marker": "TIME",
-     "value": 18.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.056,
-     "marker": "TIME",
-     "value": 18.0
+     "value": 17.0
     },
     {
      "rc": 0,
      "wallSec": 0.058,
      "marker": "TIME",
-     "value": 18.0
+     "value": 17.0
     },
     {
      "rc": 0,
-     "wallSec": 0.056,
+     "wallSec": 0.058,
      "marker": "TIME",
      "value": 18.0
     }
@@ -1416,38 +984,26 @@
    "test": "Kraken/stanford-crypto-aes.js",
    "status": "pass",
    "kind": "time",
-   "median": 625.0,
-   "mad": 4.0,
+   "median": 88.0,
+   "mad": 0.0,
    "runs": [
     {
      "rc": 0,
-     "wallSec": 0.667,
+     "wallSec": 0.138,
      "marker": "TIME",
-     "value": 613.0
+     "value": 90.0
     },
     {
      "rc": 0,
-     "wallSec": 0.682,
+     "wallSec": 0.135,
      "marker": "TIME",
-     "value": 629.0
+     "value": 88.0
     },
     {
      "rc": 0,
-     "wallSec": 0.676,
+     "wallSec": 0.134,
      "marker": "TIME",
-     "value": 622.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.689,
-     "marker": "TIME",
-     "value": 635.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.68,
-     "marker": "TIME",
-     "value": 625.0
+     "value": 88.0
     }
    ]
   },
@@ -1455,38 +1011,26 @@
    "test": "Kraken/stanford-crypto-ccm.js",
    "status": "pass",
    "kind": "time",
-   "median": 169.0,
-   "mad": 0.0,
+   "median": 205.0,
+   "mad": 7.0,
    "runs": [
     {
      "rc": 0,
-     "wallSec": 0.217,
+     "wallSec": 0.25,
      "marker": "TIME",
-     "value": 170.0
+     "value": 205.0
     },
     {
      "rc": 0,
-     "wallSec": 0.214,
+     "wallSec": 0.256,
      "marker": "TIME",
-     "value": 169.0
+     "value": 213.0
     },
     {
      "rc": 0,
-     "wallSec": 0.214,
+     "wallSec": 0.242,
      "marker": "TIME",
-     "value": 170.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.213,
-     "marker": "TIME",
-     "value": 169.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.213,
-     "marker": "TIME",
-     "value": 169.0
+     "value": 198.0
     }
    ]
   },
@@ -1494,38 +1038,26 @@
    "test": "Kraken/stanford-crypto-pbkdf2.js",
    "status": "pass",
    "kind": "time",
-   "median": 217.0,
-   "mad": 3.0,
+   "median": 147.0,
+   "mad": 1.0,
    "runs": [
     {
      "rc": 0,
-     "wallSec": 0.253,
+     "wallSec": 0.187,
      "marker": "TIME",
-     "value": 214.0
+     "value": 147.0
     },
     {
      "rc": 0,
-     "wallSec": 0.255,
+     "wallSec": 0.184,
      "marker": "TIME",
-     "value": 218.0
+     "value": 148.0
     },
     {
      "rc": 0,
-     "wallSec": 0.252,
+     "wallSec": 0.183,
      "marker": "TIME",
-     "value": 214.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.272,
-     "marker": "TIME",
-     "value": 234.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.253,
-     "marker": "TIME",
-     "value": 217.0
+     "value": 146.0
     }
    ]
   },
@@ -1533,21 +1065,9 @@
    "test": "Kraken/stanford-crypto-sha256-iterative.js",
    "status": "pass",
    "kind": "time",
-   "median": 45.0,
+   "median": 46.0,
    "mad": 0.0,
    "runs": [
-    {
-     "rc": 0,
-     "wallSec": 0.081,
-     "marker": "TIME",
-     "value": 45.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.083,
-     "marker": "TIME",
-     "value": 46.0
-    },
     {
      "rc": 0,
      "wallSec": 0.084,
@@ -1556,15 +1076,15 @@
     },
     {
      "rc": 0,
-     "wallSec": 0.08,
+     "wallSec": 0.081,
      "marker": "TIME",
      "value": 45.0
     },
     {
      "rc": 0,
-     "wallSec": 0.08,
+     "wallSec": 0.081,
      "marker": "TIME",
-     "value": 45.0
+     "value": 46.0
     }
    ]
   },
@@ -1572,38 +1092,26 @@
    "test": "Octane/box2d.js",
    "status": "pass",
    "kind": "score",
-   "median": 65410.0,
-   "mad": 1081.0,
+   "median": 66757.0,
+   "mad": 408.0,
    "runs": [
     {
      "rc": 0,
-     "wallSec": 1.057,
+     "wallSec": 1.059,
      "marker": "SCORE",
-     "value": 65606.0
+     "value": 66757.0
     },
     {
      "rc": 0,
-     "wallSec": 1.054,
+     "wallSec": 1.056,
      "marker": "SCORE",
-     "value": 64107.0
+     "value": 66280.0
     },
     {
      "rc": 0,
-     "wallSec": 1.057,
+     "wallSec": 1.059,
      "marker": "SCORE",
-     "value": 67098.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 1.058,
-     "marker": "SCORE",
-     "value": 65410.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 1.062,
-     "marker": "SCORE",
-     "value": 64329.0
+     "value": 67165.0
     }
    ]
   },
@@ -1611,38 +1119,26 @@
    "test": "Octane/code-load.js",
    "status": "pass",
    "kind": "score",
-   "median": 28566.0,
-   "mad": 251.0,
+   "median": 28981.0,
+   "mad": 30.0,
    "runs": [
     {
      "rc": 0,
-     "wallSec": 2.071,
+     "wallSec": 2.077,
      "marker": "SCORE",
-     "value": 28315.0
+     "value": 28951.0
     },
     {
      "rc": 0,
      "wallSec": 2.07,
      "marker": "SCORE",
-     "value": 28510.0
+     "value": 28981.0
     },
     {
      "rc": 0,
-     "wallSec": 2.068,
+     "wallSec": 2.074,
      "marker": "SCORE",
-     "value": 28566.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 2.073,
-     "marker": "SCORE",
-     "value": 29025.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 2.068,
-     "marker": "SCORE",
-     "value": 29086.0
+     "value": 29345.0
     }
    ]
   },
@@ -1650,38 +1146,26 @@
    "test": "Octane/crypto.js",
    "status": "pass",
    "kind": "score",
-   "median": 2654.0,
-   "mad": 15.0,
+   "median": 24830.0,
+   "mad": 39.0,
    "runs": [
     {
      "rc": 0,
-     "wallSec": 5.134,
+     "wallSec": 4.051,
      "marker": "SCORE",
-     "value": 2639.0
+     "value": 24830.0
     },
     {
      "rc": 0,
-     "wallSec": 5.139,
+     "wallSec": 4.044,
      "marker": "SCORE",
-     "value": 2654.0
+     "value": 24869.0
     },
     {
      "rc": 0,
-     "wallSec": 5.125,
+     "wallSec": 4.052,
      "marker": "SCORE",
-     "value": 2635.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 5.112,
-     "marker": "SCORE",
-     "value": 2700.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 5.119,
-     "marker": "SCORE",
-     "value": 2659.0
+     "value": 24650.0
     }
    ]
   },
@@ -1689,38 +1173,26 @@
    "test": "Octane/deltablue.js",
    "status": "pass",
    "kind": "score",
-   "median": 39704.0,
-   "mad": 582.0,
+   "median": 39671.0,
+   "mad": 106.0,
    "runs": [
     {
      "rc": 0,
      "wallSec": 2.042,
      "marker": "SCORE",
-     "value": 39968.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 2.037,
-     "marker": "SCORE",
-     "value": 39704.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 2.04,
-     "marker": "SCORE",
-     "value": 38640.0
+     "value": 39671.0
     },
     {
      "rc": 0,
      "wallSec": 2.039,
      "marker": "SCORE",
-     "value": 40669.0
+     "value": 39988.0
     },
     {
      "rc": 0,
-     "wallSec": 2.044,
+     "wallSec": 2.04,
      "marker": "SCORE",
-     "value": 39122.0
+     "value": 39565.0
     }
    ]
   },
@@ -1728,38 +1200,26 @@
    "test": "Octane/earley-boyer.js",
    "status": "pass",
    "kind": "score",
-   "median": 10971.0,
-   "mad": 32.0,
+   "median": 11546.0,
+   "mad": 21.0,
    "runs": [
     {
      "rc": 0,
-     "wallSec": 5.13,
+     "wallSec": 5.081,
      "marker": "SCORE",
-     "value": 10971.0
+     "value": 11546.0
     },
     {
      "rc": 0,
-     "wallSec": 5.136,
+     "wallSec": 5.102,
      "marker": "SCORE",
-     "value": 11046.0
+     "value": 11524.0
     },
     {
      "rc": 0,
-     "wallSec": 5.1,
+     "wallSec": 5.099,
      "marker": "SCORE",
-     "value": 10939.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 5.152,
-     "marker": "SCORE",
-     "value": 11022.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 5.114,
-     "marker": "SCORE",
-     "value": 10959.0
+     "value": 11567.0
     }
    ]
   },
@@ -1767,38 +1227,26 @@
    "test": "Octane/gbemu.js",
    "status": "pass",
    "kind": "score",
-   "median": 72663.0,
-   "mad": 144.0,
+   "median": 72023.0,
+   "mad": 559.0,
    "runs": [
     {
      "rc": 0,
-     "wallSec": 1.085,
+     "wallSec": 1.099,
      "marker": "SCORE",
-     "value": 73023.0
+     "value": 72023.0
     },
     {
      "rc": 0,
-     "wallSec": 1.087,
+     "wallSec": 1.08,
      "marker": "SCORE",
-     "value": 72663.0
+     "value": 73169.0
     },
     {
      "rc": 0,
-     "wallSec": 1.09,
+     "wallSec": 1.103,
      "marker": "SCORE",
-     "value": 72520.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 1.085,
-     "marker": "SCORE",
-     "value": 72807.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 1.09,
-     "marker": "SCORE",
-     "value": 72448.0
+     "value": 71464.0
     }
    ]
   },
@@ -1806,38 +1254,26 @@
    "test": "Octane/mandreel.js",
    "status": "pass",
    "kind": "score",
-   "median": 33922.0,
-   "mad": 258.0,
+   "median": 33987.0,
+   "mad": 99.0,
    "runs": [
     {
      "rc": 0,
-     "wallSec": 1.329,
+     "wallSec": 1.374,
      "marker": "SCORE",
-     "value": 33530.0
+     "value": 33987.0
     },
     {
      "rc": 0,
-     "wallSec": 1.359,
+     "wallSec": 1.366,
      "marker": "SCORE",
-     "value": 34384.0
+     "value": 34086.0
     },
     {
      "rc": 0,
-     "wallSec": 1.32,
+     "wallSec": 1.324,
      "marker": "SCORE",
-     "value": 33664.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 1.369,
-     "marker": "SCORE",
-     "value": 33922.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 1.367,
-     "marker": "SCORE",
-     "value": 34152.0
+     "value": 33630.0
     }
    ]
   },
@@ -1845,38 +1281,26 @@
    "test": "Octane/navier-stokes.js",
    "status": "pass",
    "kind": "score",
-   "median": 3262.0,
-   "mad": 10.0,
+   "median": 31990.0,
+   "mad": 31.0,
    "runs": [
     {
      "rc": 0,
-     "wallSec": 2.131,
+     "wallSec": 2.046,
      "marker": "SCORE",
-     "value": 3272.0
+     "value": 31959.0
     },
     {
      "rc": 0,
-     "wallSec": 2.081,
+     "wallSec": 2.039,
      "marker": "SCORE",
-     "value": 3262.0
+     "value": 31990.0
     },
     {
      "rc": 0,
-     "wallSec": 2.094,
+     "wallSec": 2.048,
      "marker": "SCORE",
-     "value": 3269.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 2.06,
-     "marker": "SCORE",
-     "value": 3239.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 2.057,
-     "marker": "SCORE",
-     "value": 3252.0
+     "value": 32139.0
     }
    ]
   },
@@ -1884,38 +1308,26 @@
    "test": "Octane/pdfjs.js",
    "status": "pass",
    "kind": "score",
-   "median": 29867.0,
-   "mad": 88.0,
+   "median": 35402.0,
+   "mad": 211.0,
    "runs": [
     {
      "rc": 0,
      "wallSec": 1.183,
      "marker": "SCORE",
-     "value": 29605.0
+     "value": 35402.0
     },
     {
      "rc": 0,
-     "wallSec": 1.173,
+     "wallSec": 1.192,
      "marker": "SCORE",
-     "value": 29896.0
+     "value": 35770.0
     },
     {
      "rc": 0,
-     "wallSec": 1.162,
+     "wallSec": 1.181,
      "marker": "SCORE",
-     "value": 30194.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 1.175,
-     "marker": "SCORE",
-     "value": 29779.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 1.174,
-     "marker": "SCORE",
-     "value": 29867.0
+     "value": 35191.0
     }
    ]
   },
@@ -1923,38 +1335,26 @@
    "test": "Octane/raytrace.js",
    "status": "pass",
    "kind": "score",
-   "median": 69041.0,
-   "mad": 666.0,
+   "median": 69929.0,
+   "mad": 74.0,
    "runs": [
     {
      "rc": 0,
-     "wallSec": 2.046,
+     "wallSec": 2.047,
      "marker": "SCORE",
-     "value": 69041.0
+     "value": 69929.0
     },
     {
      "rc": 0,
-     "wallSec": 2.045,
+     "wallSec": 2.051,
      "marker": "SCORE",
-     "value": 68523.0
+     "value": 70003.0
     },
     {
      "rc": 0,
      "wallSec": 2.043,
      "marker": "SCORE",
-     "value": 69707.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 2.045,
-     "marker": "SCORE",
-     "value": 63871.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 2.041,
-     "marker": "SCORE",
-     "value": 70299.0
+     "value": 67931.0
     }
    ]
   },
@@ -1962,38 +1362,26 @@
    "test": "Octane/regexp.js",
    "status": "pass",
    "kind": "score",
-   "median": 6903.0,
-   "mad": 49.0,
+   "median": 5513.0,
+   "mad": 11.0,
    "runs": [
     {
      "rc": 0,
-     "wallSec": 2.106,
+     "wallSec": 2.11,
      "marker": "SCORE",
-     "value": 6938.0
+     "value": 5513.0
     },
     {
      "rc": 0,
-     "wallSec": 2.097,
+     "wallSec": 2.118,
      "marker": "SCORE",
-     "value": 6952.0
+     "value": 5502.0
     },
     {
      "rc": 0,
-     "wallSec": 2.092,
+     "wallSec": 2.111,
      "marker": "SCORE",
-     "value": 6903.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 2.091,
-     "marker": "SCORE",
-     "value": 6819.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 2.102,
-     "marker": "SCORE",
-     "value": 6758.0
+     "value": 5576.0
     }
    ]
   },
@@ -2001,38 +1389,26 @@
    "test": "Octane/richards.js",
    "status": "pass",
    "kind": "score",
-   "median": 24489.0,
-   "mad": 39.0,
+   "median": 24602.0,
+   "mad": 11.0,
    "runs": [
     {
      "rc": 0,
      "wallSec": 2.035,
      "marker": "SCORE",
-     "value": 24443.0
+     "value": 24602.0
     },
     {
      "rc": 0,
      "wallSec": 2.033,
      "marker": "SCORE",
-     "value": 24436.0
+     "value": 24613.0
     },
     {
      "rc": 0,
-     "wallSec": 2.033,
+     "wallSec": 2.032,
      "marker": "SCORE",
-     "value": 24489.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 2.033,
-     "marker": "SCORE",
-     "value": 24528.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 2.033,
-     "marker": "SCORE",
-     "value": 24514.0
+     "value": 24577.0
     }
    ]
   },
@@ -2040,38 +1416,26 @@
    "test": "Octane/splay.js",
    "status": "pass",
    "kind": "score",
-   "median": 22090.0,
-   "mad": 247.0,
+   "median": 31295.0,
+   "mad": 5.0,
    "runs": [
     {
      "rc": 0,
-     "wallSec": 2.11,
+     "wallSec": 2.077,
      "marker": "SCORE",
-     "value": 22270.0
+     "value": 31295.0
     },
     {
      "rc": 0,
-     "wallSec": 2.121,
+     "wallSec": 2.097,
      "marker": "SCORE",
-     "value": 22090.0
+     "value": 31290.0
     },
     {
      "rc": 0,
-     "wallSec": 2.119,
+     "wallSec": 2.083,
      "marker": "SCORE",
-     "value": 21699.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 2.104,
-     "marker": "SCORE",
-     "value": 22337.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 2.089,
-     "marker": "SCORE",
-     "value": 21831.0
+     "value": 31491.0
     }
    ]
   },
@@ -2079,38 +1443,26 @@
    "test": "Octane/typescript.js",
    "status": "pass",
    "kind": "score",
-   "median": 76077.0,
-   "mad": 2544.0,
+   "median": 76996.0,
+   "mad": 1373.0,
    "runs": [
     {
      "rc": 0,
-     "wallSec": 1.747,
+     "wallSec": 1.742,
      "marker": "SCORE",
-     "value": 76950.0
+     "value": 76996.0
     },
     {
      "rc": 0,
-     "wallSec": 1.851,
+     "wallSec": 1.713,
      "marker": "SCORE",
-     "value": 72282.0
+     "value": 78369.0
     },
     {
      "rc": 0,
-     "wallSec": 1.7,
+     "wallSec": 1.789,
      "marker": "SCORE",
-     "value": 79000.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 1.765,
-     "marker": "SCORE",
-     "value": 76077.0
-    },
-    {
-     "rc": 0,
-     "wallSec": 1.82,
-     "marker": "SCORE",
-     "value": 73533.0
+     "value": 75092.0
     }
    ]
   },
@@ -2123,38 +1475,26 @@
    "test": "JetStream/bigfib.cpp.js",
    "status": "pass",
    "kind": "score",
-   "median": 469.1056910569106,
-   "mad": 1.2678532190727765,
+   "median": 467.8378378378378,
+   "mad": 2.542596944770878,
    "runs": [
     {
      "rc": 0,
-     "wallSec": 0.45,
+     "wallSec": 0.451,
      "marker": "SCORE",
      "value": 467.8378378378378
     },
     {
      "rc": 0,
+     "wallSec": 0.459,
+     "marker": "SCORE",
+     "value": 462.83422459893046
+    },
+    {
+     "rc": 0,
      "wallSec": 0.452,
      "marker": "SCORE",
-     "value": 469.1056910569106
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.447,
-     "marker": "SCORE",
-     "value": 471.66212534059946
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.449,
-     "marker": "SCORE",
-     "value": 469.1056910569106
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.456,
-     "marker": "SCORE",
-     "value": 464.0750670241287
+     "value": 470.3804347826087
     }
    ]
   },
@@ -2162,38 +1502,26 @@
    "test": "JetStream/cdjs.js",
    "status": "pass",
    "kind": "score",
-   "median": 202.02020202020202,
-   "mad": 2.0202020202020208,
+   "median": 200.0,
+   "mad": 0.0,
    "runs": [
     {
      "rc": 0,
-     "wallSec": 1.432,
+     "wallSec": 1.476,
      "marker": "SCORE",
      "value": 200.0
     },
     {
      "rc": 0,
-     "wallSec": 1.424,
-     "marker": "SCORE",
-     "value": 202.02020202020202
-    },
-    {
-     "rc": 0,
-     "wallSec": 1.438,
+     "wallSec": 1.468,
      "marker": "SCORE",
      "value": 200.0
     },
     {
      "rc": 0,
-     "wallSec": 1.435,
+     "wallSec": 1.469,
      "marker": "SCORE",
-     "value": 202.02020202020202
-    },
-    {
-     "rc": 0,
-     "wallSec": 1.437,
-     "marker": "SCORE",
-     "value": 204.0816326530612
+     "value": 200.0
     }
    ]
   },
@@ -2201,38 +1529,26 @@
    "test": "JetStream/container.cpp.js",
    "status": "pass",
    "kind": "score",
-   "median": 120.23431512098982,
-   "mad": 0.7977260411551441,
+   "median": 361.81219110378913,
+   "mad": 0.47748227133456567,
    "runs": [
     {
      "rc": 0,
-     "wallSec": 9.129,
+     "wallSec": 3.163,
      "marker": "SCORE",
-     "value": 121.37725212777717
+     "value": 356.641766807405
     },
     {
      "rc": 0,
-     "wallSec": 9.216,
+     "wallSec": 3.111,
      "marker": "SCORE",
-     "value": 120.23431512098982
+     "value": 362.2896733751237
     },
     {
      "rc": 0,
-     "wallSec": 9.274,
+     "wallSec": 3.118,
      "marker": "SCORE",
-     "value": 119.43658907983468
-    },
-    {
-     "rc": 0,
-     "wallSec": 9.241,
-     "marker": "SCORE",
-     "value": 119.87991266375546
-    },
-    {
-     "rc": 0,
-     "wallSec": 9.098,
-     "marker": "SCORE",
-     "value": 121.79458740017746
+     "value": 361.81219110378913
     }
    ]
   },
@@ -2240,38 +1556,26 @@
    "test": "JetStream/dry.c.js",
    "status": "pass",
    "kind": "score",
-   "median": 447.10526315789474,
-   "mad": 1.1796972642688388,
+   "median": 439.01808785529715,
+   "mad": 4.585045303971754,
    "runs": [
     {
      "rc": 0,
-     "wallSec": 0.42,
+     "wallSec": 0.43,
      "marker": "SCORE",
-     "value": 448.2849604221636
+     "value": 439.01808785529715
     },
     {
      "rc": 0,
-     "wallSec": 0.431,
+     "wallSec": 0.422,
      "marker": "SCORE",
-     "value": 434.52685421994886
+     "value": 443.6031331592689
     },
     {
      "rc": 0,
-     "wallSec": 0.423,
+     "wallSec": 0.436,
      "marker": "SCORE",
-     "value": 444.76439790575915
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.419,
-     "marker": "SCORE",
-     "value": 448.2849604221636
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.42,
-     "marker": "SCORE",
-     "value": 447.10526315789474
+     "value": 429.04040404040404
     }
    ]
   },
@@ -2279,38 +1583,26 @@
    "test": "JetStream/float-mm.c.js",
    "status": "pass",
    "kind": "score",
-   "median": 507.41444866920153,
-   "mad": 0.9628357659757398,
+   "median": 505.49242424242425,
+   "mad": 0.0,
    "runs": [
     {
      "rc": 0,
-     "wallSec": 0.564,
-     "marker": "SCORE",
-     "value": 508.3809523809524
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.564,
-     "marker": "SCORE",
-     "value": 507.41444866920153
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.567,
+     "wallSec": 0.568,
      "marker": "SCORE",
      "value": 505.49242424242425
     },
     {
      "rc": 0,
-     "wallSec": 0.566,
+     "wallSec": 0.57,
      "marker": "SCORE",
-     "value": 506.4516129032258
+     "value": 502.63653483992465
     },
     {
      "rc": 0,
-     "wallSec": 0.564,
+     "wallSec": 0.565,
      "marker": "SCORE",
-     "value": 507.41444866920153
+     "value": 505.49242424242425
     }
    ]
   },
@@ -2318,38 +1610,26 @@
    "test": "JetStream/gcc-loops.cpp.js",
    "status": "pass",
    "kind": "score",
-   "median": 385.5921333903378,
-   "mad": 0.6605432691911233,
+   "median": 385.18043988896005,
+   "mad": 0.6568841439163293,
    "runs": [
     {
      "rc": 0,
-     "wallSec": 4.76,
+     "wallSec": 4.768,
      "marker": "SCORE",
-     "value": 385.5921333903378
+     "value": 384.5235557450437
     },
     {
      "rc": 0,
-     "wallSec": 4.751,
+     "wallSec": 4.744,
      "marker": "SCORE",
-     "value": 386.2526766595289
+     "value": 386.3354037267081
     },
     {
      "rc": 0,
-     "wallSec": 4.772,
+     "wallSec": 4.759,
      "marker": "SCORE",
-     "value": 384.27780144865784
-    },
-    {
-     "rc": 0,
-     "wallSec": 4.741,
-     "marker": "SCORE",
-     "value": 386.4181662382177
-    },
-    {
-     "rc": 0,
-     "wallSec": 4.761,
-     "marker": "SCORE",
-     "value": 385.34501174962617
+     "value": 385.18043988896005
     }
    ]
   },
@@ -2357,38 +1637,26 @@
    "test": "JetStream/hash-map.js",
    "status": "pass",
    "kind": "score",
-   "median": 338.32335329341316,
+   "median": 332.3529411764706,
    "mad": 0.0,
    "runs": [
     {
      "rc": 0,
-     "wallSec": 0.201,
+     "wallSec": 0.207,
      "marker": "SCORE",
-     "value": 340.3614457831325
+     "value": 332.3529411764706
     },
     {
      "rc": 0,
-     "wallSec": 0.202,
+     "wallSec": 0.204,
      "marker": "SCORE",
-     "value": 338.32335329341316
+     "value": 334.3195266272189
     },
     {
      "rc": 0,
-     "wallSec": 0.203,
+     "wallSec": 0.207,
      "marker": "SCORE",
-     "value": 336.3095238095238
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.202,
-     "marker": "SCORE",
-     "value": 338.32335329341316
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.203,
-     "marker": "SCORE",
-     "value": 338.32335329341316
+     "value": 332.3529411764706
     }
    ]
   },
@@ -2396,38 +1664,26 @@
    "test": "JetStream/n-body.c.js",
    "status": "pass",
    "kind": "score",
-   "median": 299.1432068543452,
-   "mad": 0.7340937591517331,
+   "median": 302.85006195786866,
+   "mad": 0.7524225141810348,
    "runs": [
     {
      "rc": 0,
-     "wallSec": 0.853,
+     "wallSec": 0.843,
      "marker": "SCORE",
-     "value": 299.8773006134969
+     "value": 302.85006195786866
     },
     {
      "rc": 0,
      "wallSec": 0.851,
      "marker": "SCORE",
-     "value": 299.1432068543452
+     "value": 299.5098039215686
     },
     {
      "rc": 0,
-     "wallSec": 0.862,
+     "wallSec": 0.843,
      "marker": "SCORE",
-     "value": 296.96233292831107
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.857,
-     "marker": "SCORE",
-     "value": 298.0487804878049
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.854,
-     "marker": "SCORE",
-     "value": 299.8773006134969
+     "value": 303.6024844720497
     }
    ]
   },
@@ -2435,38 +1691,26 @@
    "test": "JetStream/quicksort.c.js",
    "status": "pass",
    "kind": "score",
-   "median": 312.62626262626264,
-   "mad": 0.7874716942727105,
+   "median": 316.62404092071614,
+   "mad": 0.8077143901039108,
    "runs": [
     {
      "rc": 0,
-     "wallSec": 0.438,
+     "wallSec": 0.433,
      "marker": "SCORE",
-     "value": 312.62626262626264
+     "value": 316.62404092071614
     },
     {
      "rc": 0,
-     "wallSec": 0.436,
+     "wallSec": 0.432,
      "marker": "SCORE",
-     "value": 311.83879093198993
+     "value": 315.81632653061223
     },
     {
      "rc": 0,
-     "wallSec": 0.435,
+     "wallSec": 0.421,
      "marker": "SCORE",
-     "value": 313.4177215189873
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.435,
-     "marker": "SCORE",
-     "value": 313.4177215189873
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.438,
-     "marker": "SCORE",
-     "value": 311.83879093198993
+     "value": 322.3958333333333
     }
    ]
   },
@@ -2474,38 +1718,26 @@
    "test": "JetStream/towers.c.js",
    "status": "pass",
    "kind": "score",
-   "median": 272.9824561403509,
-   "mad": 0.961205831480072,
+   "median": 270.1388888888889,
+   "mad": 0.9347366397539645,
    "runs": [
+    {
+     "rc": 0,
+     "wallSec": 0.327,
+     "marker": "SCORE",
+     "value": 272.02797202797206
+    },
     {
      "rc": 0,
      "wallSec": 0.329,
      "marker": "SCORE",
-     "value": 271.0801393728223
+     "value": 269.20415224913495
     },
     {
      "rc": 0,
-     "wallSec": 0.324,
+     "wallSec": 0.328,
      "marker": "SCORE",
-     "value": 273.943661971831
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.322,
-     "marker": "SCORE",
-     "value": 275.88652482269504
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.325,
-     "marker": "SCORE",
-     "value": 272.9824561403509
-    },
-    {
-     "rc": 0,
-     "wallSec": 0.324,
-     "marker": "SCORE",
-     "value": 272.9824561403509
+     "value": 270.1388888888889
     }
    ]
   }

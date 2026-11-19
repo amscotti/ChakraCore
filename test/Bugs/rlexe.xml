@@ -640,4 +640,10 @@
       <files>cdjs-mediumblock-interior-gc.js</files>
     </default>
   </test>
+  <test>
+    <default>
+      <files>p1_jit_bailout_and_tiering.js</files>
+      <compile-flags>-CollectGarbage</compile-flags>
+    </default>
+  </test>
 </regress-exe>

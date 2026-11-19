@@ -1108,4 +1108,11 @@
       <files>emit_recursive.js</files>
     </default>
   </test>
+  <test>
+    <default>
+      <files>p1_asmjs_bgjit_tierup.js</files>
+      <compile-flags>-CollectGarbage</compile-flags>
+      <tags>exclude_interpreted</tags>
+    </default>
+  </test>
 </regress-exe>
