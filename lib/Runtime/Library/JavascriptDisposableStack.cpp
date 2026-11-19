@@ -160,7 +160,7 @@ namespace
         StackType* stack = RequireUndisposedStack<StackType>(args, scriptContext, methodName, typeName, disposedMsg);
         Var value = args.Info.Count > 1 ? args[1] : scriptContext->GetLibrary()->GetUndefined();
         stack->GetCapability()->AddResource(value, Hint, scriptContext);
-        return value;
+        return CrossSite::MarshalVar(scriptContext, value);
     }
 
     template <typename StackType, DisposeHint Hint>
@@ -171,7 +171,7 @@ namespace
         Var value = args.Info.Count > 1 ? args[1] : undefinedVar;
         Var onDispose = args.Info.Count > 2 ? args[2] : undefinedVar;
         stack->GetCapability()->AddAdoptResource(value, onDispose, Hint, scriptContext);
-        return value;
+        return CrossSite::MarshalVar(scriptContext, value);
     }
 
     template <typename StackType, DisposeHint Hint>
@@ -200,7 +200,7 @@ namespace
         }
 
         Var newTarget = args.HasNewTarget() ? args.GetNewTarget() : function;
-        if (newTarget == nullptr || JavascriptOperators::IsUndefinedObject(newTarget))
+        if (newTarget == nullptr || JavascriptOperators::IsUndefined(newTarget))
         {
             JavascriptError::ThrowTypeError(scriptContext, JSERR_ClassConstructorCannotBeCalledWithoutNew, typeName);
         }
@@ -220,6 +220,8 @@ namespace
         , pendingError(nullptr)
         , currentAwaitValue(nullptr)
         , hasPendingError(false)
+        , needsAwait(false)
+        , hasAwaited(false)
     {
     }
 
@@ -300,6 +302,7 @@ namespace
 
     void DisposeCapability::RecordError(Var caughtError, ScriptContext* scriptContext)
     {
+        caughtError = CrossSite::MarshalVar(scriptContext, caughtError);
         if (!hasPendingError)
         {
             hasPendingError = true;
@@ -308,7 +311,7 @@ namespace
         }
 
         // Most recent error is `error`; previously pending error becomes `suppressed`.
-        Var prevError = pendingError;
+        Var prevError = CrossSite::MarshalVar(scriptContext, pendingError);
         pendingError = JavascriptError::CreateSuppressedError(scriptContext, caughtError, prevError);
     }
 
@@ -316,20 +319,20 @@ namespace
     {
         JavascriptLibrary* library = scriptContext->GetLibrary();
         Var undefinedVar = library->GetUndefined();
-        RecyclableObject* callable = VarTo<RecyclableObject>(record->disposeMethod);
+        RecyclableObject* callable = VarTo<RecyclableObject>(CrossSite::MarshalVar(scriptContext, record->disposeMethod));
+        Var resourceVal = CrossSite::MarshalVar(scriptContext, record->resource);
 
         return scriptContext->GetThreadContext()->ExecuteImplicitCall(callable, ImplicitCall_Accessor, [&]() -> Var
         {
             if (record->passResourceAsArgument)
             {
-                Var argsArr[2] = { undefinedVar, record->resource };
+                Var argsArr[2] = { undefinedVar, resourceVal };
                 CallInfo callInfo(CallFlags_Value, 2);
                 return JavascriptFunction::CallFunction<true>(callable, callable->GetEntryPoint(), Arguments(callInfo, argsArr));
             }
             else
             {
-                Var resourceVal = record->resource;
-                Var thisArg = (record->disposeMethod != nullptr && JavascriptOperators::IsUndefined(resourceVal))
+                Var thisArg = JavascriptOperators::IsUndefined(resourceVal)
                     ? undefinedVar
                     : resourceVal;
                 Var argsArr[1] = { thisArg };
@@ -372,51 +375,64 @@ namespace
 
     int32 DisposeCapability::StepAsyncOrSync(ScriptContext* scriptContext)
     {
-        if (head == nullptr)
+        JavascriptLibrary* library = scriptContext->GetLibrary();
+
+        while (head != nullptr)
         {
-            return 0;
+            DisposableResourceRecord* record = head;
+            head = record->next;
+
+            if (record->disposeMethod == nullptr)
+            {
+                // ECMA-262 DisposeResources step 3.f:
+                // null/undefined async-dispose records defer a single Await(undefined)
+                // to the end of disposal if no other await occurred.
+                needsAwait = true;
+                continue;
+            }
+
+            Var result = library->GetUndefined();
+            JavascriptExceptionObject* exception = nullptr;
+            try
+            {
+                result = InvokeDisposeMethod(record, scriptContext);
+            }
+            catch (const JavascriptException& err)
+            {
+                exception = err.GetAndClear();
+            }
+
+            if (exception != nullptr)
+            {
+                Var thrown = ExtractThrownObject(exception, scriptContext);
+                if (record->needsSyncToAsyncWrap)
+                {
+                    hasAwaited = true;
+                    currentAwaitValue = JavascriptPromise::CreateRejectedPromise(thrown, scriptContext);
+                    return 2;
+                }
+                RecordError(thrown, scriptContext);
+                return 1;
+            }
+
+            if (record->hint == DisposeHint::AsyncDispose)
+            {
+                hasAwaited = true;
+                currentAwaitValue = record->needsSyncToAsyncWrap ? library->GetUndefined() : result;
+                return 2;
+            }
+
+            return 1;
         }
 
-        DisposableResourceRecord* record = head;
-        head = record->next;
-
-        JavascriptLibrary* library = scriptContext->GetLibrary();
-        if (record->disposeMethod == nullptr)
+        if (needsAwait && !hasAwaited)
         {
+            hasAwaited = true;
             currentAwaitValue = library->GetUndefined();
             return 2;
         }
 
-        Var result = library->GetUndefined();
-        JavascriptExceptionObject* exception = nullptr;
-        try
-        {
-            result = InvokeDisposeMethod(record, scriptContext);
-        }
-        catch (const JavascriptException& err)
-        {
-            exception = err.GetAndClear();
-        }
-
-        if (exception != nullptr)
-        {
-            Var thrown = ExtractThrownObject(exception, scriptContext);
-            if (record->needsSyncToAsyncWrap)
-            {
-                currentAwaitValue = JavascriptPromise::CreateRejectedPromise(thrown, scriptContext);
-                return 2;
-            }
-            RecordError(thrown, scriptContext);
-            return 1;
-        }
-
-        if (record->hint == DisposeHint::AsyncDispose)
-        {
-            currentAwaitValue = record->needsSyncToAsyncWrap ? library->GetUndefined() : result;
-            return 2;
-        }
-
-        return 1;
+        return 0;
     }
 
     Var DisposeCapability::TakeAwaitValue(ScriptContext* scriptContext)

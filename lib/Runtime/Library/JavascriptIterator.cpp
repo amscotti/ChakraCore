@@ -268,7 +268,7 @@ namespace
             JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NeedObject, _u("[Symbol.dispose]"));
         }
 
-        Var returnMethod = JavascriptOperators::GetPropertyNoCache(obj, PropertyIds::return_, scriptContext);
+        Var returnMethod = JavascriptOperators::GetPropertyNoCache(thisVar, obj, PropertyIds::return_, scriptContext);
         if (!JavascriptOperators::IsUndefinedOrNull(returnMethod))
         {
             CallVar(scriptContext, returnMethod, thisVar);
@@ -298,7 +298,7 @@ namespace
                 JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NeedObject, _u("[Symbol.asyncDispose]"));
             }
 
-            Var returnMethod = JavascriptOperators::GetPropertyNoCache(obj, PropertyIds::return_, scriptContext);
+            Var returnMethod = JavascriptOperators::GetPropertyNoCache(thisVar, obj, PropertyIds::return_, scriptContext);
             if (JavascriptOperators::IsUndefinedOrNull(returnMethod))
             {
                 JavascriptPromise::TryCallResolveOrRejectHandler(promiseCapability->GetResolve(), undefinedVar, scriptContext);
@@ -309,7 +309,12 @@ namespace
             JavascriptPromise* resultWrapper = JavascriptPromise::InternalPromiseResolve(result, scriptContext);
             JavascriptPromiseThunkFinallyFunction* onFulfilled = library->CreatePromiseThunkFinallyFunction(
                 JavascriptPromise::EntryThunkFinallyFunction, undefinedVar, false);
-            JavascriptPromise::PerformPromiseThen(resultWrapper, promiseCapability, onFulfilled, nullptr, scriptContext);
+            JavascriptPromise::PerformPromiseThen(
+                resultWrapper,
+                promiseCapability,
+                onFulfilled,
+                library->GetThrowerFunction(),
+                scriptContext);
         }
         catch (const JavascriptException& err)
         {

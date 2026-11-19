@@ -173,6 +173,11 @@ namespace Js
     {
         JavascriptError* pError = scriptContext->GetLibrary()->CreateSuppressedError();
         SetSuppressedErrorFields(pError, error, suppressed, scriptContext);
+
+        JavascriptExceptionContext exceptionContext;
+        JavascriptExceptionOperators::WalkStackForExceptionContext(*scriptContext, exceptionContext, pError,
+            JavascriptExceptionOperators::StackCrawlLimitOnThrow(pError, *scriptContext), /*returnAddress=*/ nullptr, /*isThrownException=*/ false, /*resetSatck=*/ false);
+        JavascriptExceptionOperators::AddStackTraceToObject(pError, exceptionContext.GetStackTrace(), *scriptContext, /*isThrownException=*/ false, /*resetSatck=*/ false);
         return pError;
     }
 
@@ -182,15 +187,48 @@ namespace Js
         ARGUMENTS(args, callInfo);
         ScriptContext* scriptContext = function->GetScriptContext();
         JavascriptLibrary* library = scriptContext->GetLibrary();
-        JavascriptError* pError = library->CreateSuppressedError();
-        Var newTarget = args.GetNewTarget();
+
+        // SuppressedError ( error, suppressed, message ):
+        // 1. If NewTarget is undefined, let newTarget be the active function object, else let newTarget be NewTarget.
+        Var newTarget = args.HasNewTarget() ? args.GetNewTarget() : function;
+        if (newTarget == nullptr || JavascriptOperators::IsUndefined(newTarget))
+        {
+            newTarget = function;
+        }
+
         Var error = args.Info.Count > 1 ? args[1] : library->GetUndefined();
         Var suppressed = args.Info.Count > 2 ? args[2] : library->GetUndefined();
         Var message = args.Info.Count > 3 ? args[3] : library->GetUndefined();
-        Var options = args.Info.Count > 4 ? args[4] : library->GetUndefined();
 
-        Var result = JavascriptError::NewInstance(function, pError, callInfo, newTarget, message, options);
+        // 2. Let O be ? OrdinaryCreateFromConstructor(newTarget, "%SuppressedError.prototype%", << [[ErrorData]] >>).
+        // Must execute before ToString(message).
+        JavascriptError* pError = library->CreateSuppressedError();
+        RecyclableObject* result = JavascriptOperators::OrdinaryCreateFromConstructor(
+            VarTo<RecyclableObject>(newTarget),
+            pError,
+            library->GetSuppressedErrorPrototype(),
+            scriptContext);
+
+        // 3. If message is not undefined, ToString(message) and CreateNonEnumerableDataPropertyOrThrow(O, "message", ...).
+        if (JavascriptOperators::GetTypeId(message) != TypeIds_Undefined)
+        {
+            JavascriptString* messageString = JavascriptConversion::ToString(message, scriptContext);
+            pError->SetPropertyWithAttributes(
+                PropertyIds::message,
+                messageString,
+                PropertyWritable | PropertyConfigurable,
+                nullptr);
+        }
+
+        // 4-5. Define non-enumerable "error" then "suppressed" contiguously after "message".
         SetSuppressedErrorFields(pError, error, suppressed, scriptContext);
+
+        // Attach .stack after "suppressed" so own property key order stays "message", "error", "suppressed".
+        JavascriptExceptionContext exceptionContext;
+        JavascriptExceptionOperators::WalkStackForExceptionContext(*scriptContext, exceptionContext, pError,
+            JavascriptExceptionOperators::StackCrawlLimitOnThrow(pError, *scriptContext), /*returnAddress=*/ nullptr, /*isThrownException=*/ false, /*resetSatck=*/ false);
+        JavascriptExceptionOperators::AddStackTraceToObject(pError, exceptionContext.GetStackTrace(), *scriptContext, /*isThrownException=*/ false, /*resetSatck=*/ false);
+
         return result;
     }
 

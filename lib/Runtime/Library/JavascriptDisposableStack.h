@@ -39,14 +39,26 @@ namespace Js
         bool passResourceAsArgument;
     };
 
-    // Ownership & GC lifetime record (see doc/memory-management.md):
-    // - Allocation domain: Recycler heap (DynamicObject subclass with Field() barriers).
-    // - Owner / lifetime root: active JS frame register (`using`/`await using`) or a
-    //   JavascriptDisposableStack / JavascriptAsyncDisposableStack / active async dispose
-    //   step function closure.
-    // - Lifecycle / invalidation: resource records are popped LIFO on disposal or
-    //   transferred wholesale in move(); pendingError and currentAwaitValue are cleared
-    //   as they are consumed/thrown. No unmanaged resources or finalizers exist.
+    // Ownership & GC lifetime record (see doc/memory-management.md section 3):
+    // - Resource / creation: DisposeCapability + DisposableResourceRecord list allocated
+    //   via RecyclerNew in DisposeCapability::New / PushRecord (JavascriptDisposableStack.cpp).
+    // - Domain & allocator: Recycler heap (DynamicObject subclass; all pointer/Var/state
+    //   fields use Field(...) write barriers, traced by Recycler).
+    // - Physical layout / views: singly-linked LIFO stack of DisposableResourceRecord nodes
+    //   (no borrowed native buffers or unmanaged pointers).
+    // - Owner & transfer: active JS frame register (`using` / `await using` opcodes),
+    //   JavascriptDisposableStack, JavascriptAsyncDisposableStack, or an active
+    //   JavascriptAsyncDisposableStackStepFunction closure stored in Promise reactions.
+    //   MoveToNew transfers `head` ownership to a fresh DisposeCapability and clears `head`
+    //   on the source capability; `disposed` transitions to true before disposal/move.
+    // - Invalidation & reentrancy: `InvokeDisposeMethod` and promise resolution can reenter
+    //   arbitrary JS and trigger GC; `disposed` is already true before disposal starts, and
+    //   each step pops `head` before calling user code, keeping all remaining records,
+    //   `pendingError`, and `promiseCapability` rooted via stack/step closure.
+    // - Thread / context: bound to a single ScriptContext/ThreadContext; cross-realm values
+    //   are marshaled with CrossSite::MarshalVar at call/return boundaries.
+    // - Release / teardown: GC-collected once frame/stack/promise chain completes; no
+    //   finalizers, native locks, or manual free paths exist.
     class DisposeCapability : public DynamicObject
     {
     private:
@@ -57,6 +69,8 @@ namespace Js
         Field(Var) pendingError;
         Field(Var) currentAwaitValue;
         Field(bool) hasPendingError;
+        Field(bool) needsAwait;
+        Field(bool) hasAwaited;
 
         void PushRecord(
             Var resource,
