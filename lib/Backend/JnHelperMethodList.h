@@ -601,8 +601,8 @@ HELPERCALLCHK(Op_AddAsyncDisposableResource, Js::JavascriptOperators::OP_AddAsyn
 HELPERCALLCHK(Op_RecordDisposeError,         Js::JavascriptOperators::OP_RecordDisposeError,         AttrCanThrow)
 HELPERCALLCHK(Op_DisposeResourcesSync,       Js::JavascriptOperators::OP_DisposeResourcesSync,       AttrCanThrow)
 HELPERCALLCHK(Op_StepDisposableResource,     Js::JavascriptOperators::OP_StepDisposableResource,     AttrCanThrow)
-HELPERCALLCHK(Op_TakeDisposeAwaitValue,      Js::JavascriptOperators::OP_TakeDisposeAwaitValue,      AttrCanThrow)
-HELPERCALLCHK(Op_FinalizeDisposeResources,   Js::JavascriptOperators::OP_FinalizeDisposeResources,   AttrCanThrow)
+HELPERCALLCHK(Op_TakeDisposeAwaitValue,      Js::JavascriptOperators::OP_TakeDisposeAwaitValue,      AttrCanNotBeReentrant)
+HELPERCALLCHK(Op_FinalizeDisposeResources,   Js::JavascriptOperators::OP_FinalizeDisposeResources,   AttrCanThrow | AttrCanNotBeReentrant)
 
 HELPERCALL(CreateInterpreterStackFrameForGenerator, Js::InterpreterStackFrame::CreateInterpreterStackFrameForGenerator, AttrCanNotBeReentrant)
 

@@ -1191,7 +1191,8 @@ static void BeginDisposalScope(
     state.isAsync = pnodeBlock->HasAwaitUsing();
     state.hasYield = byteCodeGenerator->GetHasYield(pnodeBlock);
     state.prevDispStackReg = byteCodeGenerator->GetCurrentDisposalStackReg();
-    state.dispStackReg = funcInfo->AcquireTmpRegister();
+    state.dispStackReg = pnodeBlock->disposalStackReg;
+    Assert(state.dispStackReg != Js::Constants::NoRegister);
     byteCodeGenerator->SetCurrentDisposalStackReg(state.dispStackReg);
     writer->Reg1(Js::OpCode::LdUndef, state.dispStackReg);
 
@@ -1339,7 +1340,6 @@ static void EndDisposalScope(
     writer->RecordCrossFrameEntryExitRecord(false);
     writer->Empty(Js::OpCode::LeaveNull);
     writer->MarkLabel(state.breakLabel);
-    funcInfo->ReleaseTmpRegister(state.dispStackReg);
 }
 
 void EmitBlock(ParseNodeBlock *pnodeBlock, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo, BOOL fReturnValue)

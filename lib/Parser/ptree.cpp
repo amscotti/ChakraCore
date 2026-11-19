@@ -554,6 +554,7 @@ ParseNodeBlock::ParseNodeBlock(charcount_t ichMin, charcount_t ichLim, int block
     this->hasAwaitUsing = false;
     this->blockType = blockType;
     this->blockId = blockId;
+    this->disposalStackReg = Js::Constants::NoRegister;
 
     if (blockType != PnodeBlockType::Regular)
     {

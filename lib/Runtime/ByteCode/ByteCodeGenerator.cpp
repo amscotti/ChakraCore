@@ -214,6 +214,12 @@ static void MarkBlockDisposableResources(ParseNodeBlock *pnodeBlock, ByteCodeGen
     byteCodeGenerator->SetHasFinally(true);
     byteCodeGenerator->TopFuncInfo()->byteCodeFunction->SetDontInline(true);
     byteCodeGenerator->AssignUndefinedConstRegister();
+    if (pnodeBlock->disposalStackReg == Js::Constants::NoRegister)
+    {
+        // Allocate a non-temp frame register so EH/SimpleJIT/LoopBody share one
+        // StackSym and write-through slot across TryCatch/TryFinally paths.
+        pnodeBlock->disposalStackReg = byteCodeGenerator->NextVarRegister();
+    }
     if (pnodeBlock->HasAwaitUsing())
     {
         Assert(byteCodeGenerator->TopFuncInfo()->byteCodeFunction->IsCoroutine());

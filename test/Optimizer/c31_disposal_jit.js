@@ -288,7 +288,7 @@ function testAsyncStackWarm() {
         });
     }
 
-    for (var i = 0; i < 5; i++) {
+    for (var i = 0; i < 25; i++) {
         tasks.push(runAsyncBatch(i));
     }
 
@@ -310,11 +310,65 @@ function testAsyncStackWarm() {
     return Promise.all(tasks);
 }
 
+// 7. Warmed syntax-level `using` and `for (using ... of ...)` across SimpleJIT/FullJIT/EH
+function testSyncUsingInJit() {
+    function runUsingInitThrow(mode, log) {
+        using a = { [Symbol.dispose]: function () { log.push("a:" + mode); } };
+        if (mode === 1) {
+            using b = (function () { throw new Error("init-fail"); })();
+            log.push("unreachable:" + b);
+        } else {
+            using c = { [Symbol.dispose]: function () { log.push("c:" + mode); } };
+            log.push("body:" + mode);
+        }
+        return log.length;
+    }
+
+    function runUsingForOf(items, log) {
+        var acc = 0;
+        for (using item of items) {
+            if (item.skip) {
+                continue;
+            }
+            acc += item.v;
+            if (item.stop) {
+                break;
+            }
+        }
+        return acc;
+    }
+
+    for (var i = 0; i < 300; i++) {
+        var log = [];
+        assertEqual(runUsingInitThrow(0, log), 2, "using normal length before outer disposal");
+        assertEqual(log.join(","), "body:0,c:0,a:0", "using normal LIFO");
+
+        var errLog = [];
+        var caught = assertThrows(function () { runUsingInitThrow(1, errLog); }, Error, "using init throw");
+        assertEqual(caught.message, "init-fail", "using init throw message");
+        assertEqual(errLog.join(","), "a:1", "earlier using disposed on later init throw");
+
+        var fLog = [];
+        var arr = [
+            { v: 1, skip: true, [Symbol.dispose]: function () { fLog.push("d0"); } },
+            { v: 10, stop: false, [Symbol.dispose]: function () { fLog.push("d1"); } },
+            { v: 20, stop: true, [Symbol.dispose]: function () { fLog.push("d2"); } },
+            { v: 99, [Symbol.dispose]: function () { fLog.push("d3"); } }
+        ];
+        assertEqual(runUsingForOf(arr, fLog), 30, "for-using-of sum");
+        assertEqual(fLog.join(","), "d0,d1,d2", "for-using-of per-iteration disposal");
+        if (i === 150) {
+            gc();
+        }
+    }
+}
+
 testSyncStackWarm();
 testSuppressedErrorAndTryRegions();
 testImplicitCallAndBailout();
 testLoopTryFinallyDisposal();
 testIteratorDisposeWarm();
+testSyncUsingInJit();
 
 testAsyncStackWarm().then(
     function () {

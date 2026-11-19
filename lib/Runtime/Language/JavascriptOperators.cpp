@@ -11682,7 +11682,7 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
 
     Var JavascriptOperators::OP_TakeDisposeAwaitValue(Var curStack, ScriptContext* scriptContext)
     {
-        JIT_HELPER_REENTRANT_HEADER(Op_TakeDisposeAwaitValue);
+        JIT_HELPER_NOT_REENTRANT_NOLOCK_HEADER(Op_TakeDisposeAwaitValue);
         if (curStack != nullptr && VarIs<DisposeCapability>(curStack))
         {
             return UnsafeVarTo<DisposeCapability>(curStack)->TakeAwaitValue(scriptContext);
@@ -11693,7 +11693,7 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
 
     Var JavascriptOperators::OP_FinalizeDisposeResources(Var curStack, ScriptContext* scriptContext)
     {
-        JIT_HELPER_REENTRANT_HEADER(Op_FinalizeDisposeResources);
+        JIT_HELPER_NOT_REENTRANT_NOLOCK_HEADER(Op_FinalizeDisposeResources);
         if (curStack != nullptr && VarIs<DisposeCapability>(curStack))
         {
             UnsafeVarTo<DisposeCapability>(curStack)->Finalize(scriptContext);
@@ -12745,7 +12745,8 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
             DynamicObject* realmProto = JavascriptOperators::GetRealmIntrinsicPrototype(currentIntrinsic, constructorRealm, scriptContext);
             if (realmProto != nullptr && realmProto != currentIntrinsic)
             {
-                JavascriptObject::ChangePrototype(obj, realmProto, /*validate*/true, scriptContext);
+                RecyclableObject* marshaledProto = VarTo<RecyclableObject>(CrossSite::MarshalVar(scriptContext, realmProto));
+                JavascriptObject::ChangePrototype(obj, marshaledProto, /*validate*/true, scriptContext);
             }
         }
         return obj;

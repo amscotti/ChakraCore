@@ -932,6 +932,7 @@ public:
 
     ParseNodeBlock * enclosingBlock;
     int blockId;
+    Js::RegSlot disposalStackReg;
     PnodeBlockType blockType:2;
     BYTE         callsEval:1;
     BYTE         childCallsEval:1;

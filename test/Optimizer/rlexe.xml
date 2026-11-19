@@ -1658,4 +1658,10 @@
       <compile-flags>-CollectGarbage</compile-flags>
     </default>
   </test>
+  <test>
+    <default>
+      <files>c31_disposal_jit.js</files>
+      <compile-flags>-CollectGarbage</compile-flags>
+    </default>
+  </test>
 </regress-exe>

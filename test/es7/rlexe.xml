@@ -720,4 +720,16 @@
       <compile-flags>-CollectGarbage</compile-flags>
     </default>
   </test>
+  <test>
+    <default>
+      <files>explicit_resource_management_builtins.js</files>
+      <compile-flags>-CollectGarbage</compile-flags>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>using_and_await_using.js</files>
+      <compile-flags>-CollectGarbage</compile-flags>
+    </default>
+  </test>
 </regress-exe>
