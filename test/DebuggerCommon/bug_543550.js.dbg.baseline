@@ -54,6 +54,16 @@
           "length": "number 2",
           "name": "string set"
         },
+        "getOrInsert": {
+          "#__proto__": "function function() {\n    [native code]\n}",
+          "length": "number 2",
+          "name": "string getOrInsert"
+        },
+        "getOrInsertComputed": {
+          "#__proto__": "function function() {\n    [native code]\n}",
+          "length": "number 2",
+          "name": "string getOrInsertComputed"
+        },
         "size": {
           "#__proto__": "Object {...}",
           "message": "string Map.prototype.size: 'this' is not a Map object",

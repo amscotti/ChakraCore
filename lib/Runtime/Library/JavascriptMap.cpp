@@ -258,6 +258,28 @@ Var JavascriptMap::EntrySet(RecyclableObject* function, CallInfo callInfo, ...)
     return map;
 }
 
+Var JavascriptMap::EntryGetOrInsert(RecyclableObject* function, CallInfo callInfo, ...)
+{
+    PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+    ARGUMENTS(args, callInfo);
+    ScriptContext* scriptContext = function->GetScriptContext();
+    Assert(!(callInfo.Flags & CallFlags_New));
+
+    return scriptContext->GetLibrary()->GetUndefined();
+}
+
+Var JavascriptMap::EntryGetOrInsertComputed(RecyclableObject* function, CallInfo callInfo, ...)
+{
+    PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+    ARGUMENTS(args, callInfo);
+    ScriptContext* scriptContext = function->GetScriptContext();
+    Assert(!(callInfo.Flags & CallFlags_New));
+
+    return scriptContext->GetLibrary()->GetUndefined();
+}
+
 Var JavascriptMap::EntrySizeGetter(RecyclableObject* function, CallInfo callInfo, ...)
 {
     PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);

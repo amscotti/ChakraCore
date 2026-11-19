@@ -109,6 +109,8 @@ namespace Js
             static FunctionInfo Get;
             static FunctionInfo Has;
             static FunctionInfo Set;
+            static FunctionInfo GetOrInsert;
+            static FunctionInfo GetOrInsertComputed;
         };
 
         static Var NewInstance(RecyclableObject* function, CallInfo callInfo, ...);
@@ -116,6 +118,8 @@ namespace Js
         static Var EntryGet(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryHas(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntrySet(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryGetOrInsert(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryGetOrInsertComputed(RecyclableObject* function, CallInfo callInfo, ...);
 
     public:
         // For diagnostics and heap enum provide size and allow enumeration of key value pairs

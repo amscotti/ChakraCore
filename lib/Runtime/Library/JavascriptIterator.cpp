@@ -322,6 +322,17 @@ namespace
         return library->CreateWrapForValidIterator(record.iterator, record.nextMethod);
     }
 
+    Var JavascriptIterator::EntryConcat(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+        ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+        Assert(!(callInfo.Flags & CallFlags_New));
+
+        return scriptContext->GetLibrary()->GetUndefined();
+    }
+
     namespace
     {
         Var SetterThatIgnoresPrototypeProperties(Var thisValue, DynamicObject* home, PropertyId propertyId, Var value, ScriptContext* scriptContext)

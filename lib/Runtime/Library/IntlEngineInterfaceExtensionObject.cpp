@@ -3528,7 +3528,18 @@ DEFINE_ISXLOCALEAVAILABLE(PR, uloc)
 
         DynamicObject* obj = VarTo<DynamicObject>(args.Values[1]);
         Var hiddenObject = nullptr;
-        if (!obj->GetInternalProperty(obj, Js::InternalPropertyIds::HiddenObject, &hiddenObject, NULL, scriptContext))
+        if (!obj->GetInternalProperty(obj, Js::InternalPropertyIds::HiddenObject, &hiddenObject, NULL, scriptContext) ||
+            hiddenObject == nullptr ||
+            TaggedInt::Is(hiddenObject) ||
+#if FLOATVAR
+            JavascriptNumber::Is_NoTaggedIntCheck(hiddenObject) ||
+#endif
+            (!VirtualTableInfo<DynamicObject>::HasVirtualTable(hiddenObject)
+#if !defined(USED_IN_STATIC_LIB)
+                && !VirtualTableInfo<CrossSiteObject<DynamicObject>>::HasVirtualTable(hiddenObject)
+#endif
+            ) ||
+            !DynamicObject::IsBaseDynamicObject(hiddenObject))
         {
             return scriptContext->GetLibrary()->GetUndefined();
         }

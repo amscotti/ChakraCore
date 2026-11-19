@@ -629,6 +629,14 @@ BUILTIN(TypedArrayBase, ToBase64, EntryToBase64, FunctionInfo::ErrorOnNew)
 BUILTIN(TypedArrayBase, SetFromBase64, EntrySetFromBase64, FunctionInfo::ErrorOnNew)
 BUILTIN(TypedArrayBase, ToHex, EntryToHex, FunctionInfo::ErrorOnNew)
 BUILTIN(TypedArrayBase, SetFromHex, EntrySetFromHex, FunctionInfo::ErrorOnNew)
+// ES2026 Q2 built-ins (Map/WeakMap getOrInsert*, Iterator.concat).
+// Appended after the existing non-INTL entries so prior BuiltInEnum values stay stable.
+// (JSON.rawJSON / JSON.isRawJSON define EntryInfo directly in JSON.cpp because JSON is a top-level namespace.)
+BUILTIN(JavascriptMap, GetOrInsert, EntryGetOrInsert, FunctionInfo::ErrorOnNew)
+BUILTIN(JavascriptMap, GetOrInsertComputed, EntryGetOrInsertComputed, FunctionInfo::ErrorOnNew)
+BUILTIN(JavascriptWeakMap, GetOrInsert, EntryGetOrInsert, FunctionInfo::ErrorOnNew)
+BUILTIN(JavascriptWeakMap, GetOrInsertComputed, EntryGetOrInsertComputed, FunctionInfo::ErrorOnNew)
+BUILTIN(JavascriptIterator, Concat, EntryConcat, FunctionInfo::ErrorOnNew)
 
 #ifdef INTL_ICU
 BUILTIN(IntlModernBuiltIns, GetCanonicalLocales, EntryGetCanonicalLocales, FunctionInfo::ErrorOnNew)

@@ -4843,7 +4843,7 @@ namespace Js
 
     bool JavascriptLibrary::InitializeMapPrototype(DynamicObject* mapPrototype, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)
     {
-        typeHandler->Convert(mapPrototype, mode, 13, true);
+        typeHandler->Convert(mapPrototype, mode, 15, true);
         // Note: Any new function addition/deletion/modification should also be updated in JavascriptLibrary::ProfilerRegisterMap
         // so that the update is in sync with profiler
         ScriptContext* scriptContext = mapPrototype->GetScriptContext();
@@ -4856,6 +4856,8 @@ namespace Js
         library->AddFunctionToLibraryObject(mapPrototype, PropertyIds::get, &JavascriptMap::EntryInfo::Get, 1);
         library->AddFunctionToLibraryObject(mapPrototype, PropertyIds::has, &JavascriptMap::EntryInfo::Has, 1);
         library->AddFunctionToLibraryObject(mapPrototype, PropertyIds::set, &JavascriptMap::EntryInfo::Set, 2);
+        library->AddFunctionToLibraryObjectWithPropertyName(mapPrototype, _u("getOrInsert"), &JavascriptMap::EntryInfo::GetOrInsert, 2);
+        library->AddFunctionToLibraryObjectWithPropertyName(mapPrototype, _u("getOrInsertComputed"), &JavascriptMap::EntryInfo::GetOrInsertComputed, 2);
 
         library->AddAccessorsToLibraryObject(mapPrototype, PropertyIds::size, &JavascriptMap::EntryInfo::SizeGetter, nullptr);
 
@@ -4952,7 +4954,7 @@ namespace Js
 
     bool JavascriptLibrary::InitializeWeakMapPrototype(DynamicObject* weakMapPrototype, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)
     {
-        typeHandler->Convert(weakMapPrototype, mode, 6);
+        typeHandler->Convert(weakMapPrototype, mode, 8);
         // Note: Any new function addition/deletion/modification should also be updated in JavascriptLibrary::ProfilerRegisterWeakMap
         // so that the update is in sync with profiler
         ScriptContext* scriptContext = weakMapPrototype->GetScriptContext();
@@ -4963,6 +4965,8 @@ namespace Js
         library->AddFunctionToLibraryObject(weakMapPrototype, PropertyIds::get, &JavascriptWeakMap::EntryInfo::Get, 1);
         library->AddFunctionToLibraryObject(weakMapPrototype, PropertyIds::has, &JavascriptWeakMap::EntryInfo::Has, 1);
         library->AddFunctionToLibraryObject(weakMapPrototype, PropertyIds::set, &JavascriptWeakMap::EntryInfo::Set, 2);
+        library->AddFunctionToLibraryObjectWithPropertyName(weakMapPrototype, _u("getOrInsert"), &JavascriptWeakMap::EntryInfo::GetOrInsert, 2);
+        library->AddFunctionToLibraryObjectWithPropertyName(weakMapPrototype, _u("getOrInsertComputed"), &JavascriptWeakMap::EntryInfo::GetOrInsertComputed, 2);
 
         if (scriptContext->GetConfig()->IsES6ToStringTagEnabled())
         {
@@ -5131,7 +5135,7 @@ namespace Js
 
     bool JavascriptLibrary::InitializeIteratorConstructor(DynamicObject* iteratorConstructor, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)
     {
-        typeHandler->Convert(iteratorConstructor, mode, 4);
+        typeHandler->Convert(iteratorConstructor, mode, 5);
 
         JavascriptLibrary* library = iteratorConstructor->GetLibrary();
 
@@ -5139,6 +5143,7 @@ namespace Js
         library->AddMember(iteratorConstructor, PropertyIds::prototype, library->iteratorPrototype, PropertyNone);
         library->AddMember(iteratorConstructor, PropertyIds::name, library->CreateStringFromCppLiteral(_u("Iterator")), PropertyConfigurable);
         library->AddFunctionToLibraryObject(iteratorConstructor, PropertyIds::from, &JavascriptIterator::EntryInfo::From, 1);
+        library->AddFunctionToLibraryObject(iteratorConstructor, PropertyIds::concat, &JavascriptIterator::EntryInfo::Concat, 0);
 
         iteratorConstructor->SetHasNoEnumerableProperties(true);
 
@@ -5588,11 +5593,13 @@ namespace Js
 
     bool JavascriptLibrary::InitializeJSONObject(DynamicObject* JSONObject, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)
     {
-        typeHandler->Convert(JSONObject, mode, 3);
+        typeHandler->Convert(JSONObject, mode, 5);
         JavascriptLibrary* library = JSONObject->GetLibrary();
         library->AddMember(JSONObject, PropertyIds::stringify, library->EnsureJSONStringifyFunction());
         JSONObject->GetScriptContext()->SetBuiltInLibraryFunction(JSON::EntryInfo::Stringify.GetOriginalEntryPoint(), library->EnsureJSONStringifyFunction());
         library->AddFunctionToLibraryObject(JSONObject, PropertyIds::parse, &JSON::EntryInfo::Parse, 2);
+        library->AddFunctionToLibraryObjectWithPropertyName(JSONObject, _u("rawJSON"), &JSON::EntryInfo::RawJSON, 1);
+        library->AddFunctionToLibraryObjectWithPropertyName(JSONObject, _u("isRawJSON"), &JSON::EntryInfo::IsRawJSON, 1);
 
         if (JSONObject->GetScriptContext()->GetConfig()->IsES6ToStringTagEnabled())
         {
@@ -8659,6 +8666,8 @@ namespace Js
 
         REG_OBJECTS_LIB_FUNC(stringify, JSON::Stringify);
         REG_OBJECTS_LIB_FUNC(parse, JSON::Parse);
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("rawJSON"), 7, JSON::RawJSON);
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("isRawJSON"), 9, JSON::IsRawJSON);
         return hr;
     }
 
@@ -8697,6 +8706,8 @@ namespace Js
         REG_OBJECTS_LIB_FUNC(get, JavascriptWeakMap::EntryGet);
         REG_OBJECTS_LIB_FUNC(has, JavascriptWeakMap::EntryHas);
         REG_OBJECTS_LIB_FUNC(set, JavascriptWeakMap::EntrySet);
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("getOrInsert"), 11, JavascriptWeakMap::EntryGetOrInsert);
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("getOrInsertComputed"), 19, JavascriptWeakMap::EntryGetOrInsertComputed);
 
         return hr;
     }
@@ -8768,6 +8779,8 @@ namespace Js
         REG_OBJECTS_LIB_FUNC(get, JavascriptMap::EntryGet);
         REG_OBJECTS_LIB_FUNC(has, JavascriptMap::EntryHas);
         REG_OBJECTS_LIB_FUNC(set, JavascriptMap::EntrySet);
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("getOrInsert"), 11, JavascriptMap::EntryGetOrInsert);
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("getOrInsertComputed"), 19, JavascriptMap::EntryGetOrInsertComputed);
 
         REG_OBJECTS_LIB_FUNC(entries, JavascriptMap::EntryEntries);
         REG_OBJECTS_LIB_FUNC(keys, JavascriptMap::EntryKeys);
@@ -8845,6 +8858,7 @@ namespace Js
         REG_OBJECTS_LIB_FUNC(every, JavascriptIterator::EntryEvery);
         REG_OBJECTS_LIB_FUNC(find, JavascriptIterator::EntryFind);
         REG_OBJECTS_LIB_FUNC(from, JavascriptIterator::EntryFrom);
+        REG_OBJECTS_LIB_FUNC(concat, JavascriptIterator::EntryConcat);
         {
             const char16 *pwszObjectName = _u("Iterator Helper");
             REG_OBJECTS_LIB_FUNC(next, JavascriptIteratorHelper::EntryNext);

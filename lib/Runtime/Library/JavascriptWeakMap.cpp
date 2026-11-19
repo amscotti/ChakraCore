@@ -329,6 +329,28 @@ namespace Js
         return weakMap;
     }
 
+    Var JavascriptWeakMap::EntryGetOrInsert(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+        ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+        Assert(!(callInfo.Flags & CallFlags_New));
+
+        return scriptContext->GetLibrary()->GetUndefined();
+    }
+
+    Var JavascriptWeakMap::EntryGetOrInsertComputed(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+        ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+        Assert(!(callInfo.Flags & CallFlags_New));
+
+        return scriptContext->GetLibrary()->GetUndefined();
+    }
+
     void JavascriptWeakMap::Clear()
     {
         keySet.Map([&](RecyclableObject* key, bool value, WeakType weakRef) {

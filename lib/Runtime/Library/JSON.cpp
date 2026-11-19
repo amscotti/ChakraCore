@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #include "RuntimeLibraryPch.h"
@@ -14,6 +15,8 @@ namespace JSON
 {
     Js::FunctionInfo EntryInfo::Stringify(FORCE_NO_WRITE_BARRIER_TAG(JSON::Stringify), Js::FunctionInfo::ErrorOnNew);
     Js::FunctionInfo EntryInfo::Parse(FORCE_NO_WRITE_BARRIER_TAG(JSON::Parse), Js::FunctionInfo::ErrorOnNew);
+    Js::FunctionInfo EntryInfo::RawJSON(FORCE_NO_WRITE_BARRIER_TAG(JSON::RawJSON), Js::FunctionInfo::ErrorOnNew);
+    Js::FunctionInfo EntryInfo::IsRawJSON(FORCE_NO_WRITE_BARRIER_TAG(JSON::IsRawJSON), Js::FunctionInfo::ErrorOnNew);
 
     Js::Var Parse(Js::JavascriptString* input, Js::RecyclableObject* reviver, Js::ScriptContext* scriptContext);
 
@@ -144,6 +147,28 @@ namespace JSON
             return library->GetUndefined();
         }
         return lazy;
+    }
+
+    Js::Var RawJSON(Js::RecyclableObject* function, Js::CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+        ARGUMENTS(args, callInfo);
+        Js::ScriptContext* scriptContext = function->GetScriptContext();
+        Assert(!(callInfo.Flags & Js::CallFlags_New));
+
+        return scriptContext->GetLibrary()->GetUndefined();
+    }
+
+    Js::Var IsRawJSON(Js::RecyclableObject* function, Js::CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+
+        ARGUMENTS(args, callInfo);
+        Js::ScriptContext* scriptContext = function->GetScriptContext();
+        Assert(!(callInfo.Flags & Js::CallFlags_New));
+
+        return scriptContext->GetLibrary()->GetUndefined();
     }
 
 } // namespace JSON

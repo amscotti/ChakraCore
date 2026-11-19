@@ -55,6 +55,16 @@
             "length": "number 2",
             "name": "string set"
           },
+          "getOrInsert": {
+            "#__proto__": "function <large string>",
+            "length": "number 2",
+            "name": "string getOrInsert"
+          },
+          "getOrInsertComputed": {
+            "#__proto__": "function <large string>",
+            "length": "number 2",
+            "name": "string <large string>"
+          },
           "size": "number 1",
           "entries": {
             "#__proto__": "function <large string>",
@@ -99,6 +109,8 @@
           "get": "function <large string>",
           "has": "function <large string>",
           "set": "function <large string>",
+          "getOrInsert": "function <large string>",
+          "getOrInsertComputed": "function <large string>",
           "size": "number 1",
           "entries": "function <large string>",
           "keys": "function <large string>",
@@ -199,6 +211,16 @@
             "#__proto__": "function <large string>",
             "length": "number 2",
             "name": "string set"
+          },
+          "getOrInsert": {
+            "#__proto__": "function <large string>",
+            "length": "number 2",
+            "name": "string getOrInsert"
+          },
+          "getOrInsertComputed": {
+            "#__proto__": "function <large string>",
+            "length": "number 2",
+            "name": "string <large string>"
           },
           "size": "number 0",
           "entries": {
@@ -283,6 +305,16 @@
             "length": "number 2",
             "name": "string set"
           },
+          "getOrInsert": {
+            "#__proto__": "function <large string>",
+            "length": "number 2",
+            "name": "string getOrInsert"
+          },
+          "getOrInsertComputed": {
+            "#__proto__": "function <large string>",
+            "length": "number 2",
+            "name": "string <large string>"
+          },
           "size": "number 1",
           "entries": {
             "#__proto__": "function <large string>",
@@ -327,6 +359,8 @@
           "get": "function <large string>",
           "has": "function <large string>",
           "set": "function <large string>",
+          "getOrInsert": "function <large string>",
+          "getOrInsertComputed": "function <large string>",
           "size": "number 1",
           "entries": "function <large string>",
           "keys": "function <large string>",
@@ -427,6 +461,16 @@
             "#__proto__": "function <large string>",
             "length": "number 2",
             "name": "string set"
+          },
+          "getOrInsert": {
+            "#__proto__": "function <large string>",
+            "length": "number 2",
+            "name": "string getOrInsert"
+          },
+          "getOrInsertComputed": {
+            "#__proto__": "function <large string>",
+            "length": "number 2",
+            "name": "string <large string>"
           },
           "size": "number 0",
           "entries": {

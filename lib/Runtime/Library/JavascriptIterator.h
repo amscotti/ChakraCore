@@ -16,6 +16,7 @@ namespace Js
             static FunctionInfo SymbolIterator;
             static FunctionInfo NewInstance;
             static FunctionInfo From;
+            static FunctionInfo Concat;
             static FunctionInfo Map;
             static FunctionInfo Filter;
             static FunctionInfo Take;
@@ -36,6 +37,7 @@ namespace Js
         static Var EntrySymbolIterator(RecyclableObject* function, CallInfo callInfo, ...);
         static Var NewInstance(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryFrom(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryConcat(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryMap(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryFilter(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryTake(RecyclableObject* function, CallInfo callInfo, ...);
