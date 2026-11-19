@@ -258,6 +258,26 @@ Var JavascriptMap::EntrySet(RecyclableObject* function, CallInfo callInfo, ...)
     return map;
 }
 
+static JavascriptMap* RequireMapReceiver(const Arguments& args, PCWSTR methodName, ScriptContext* scriptContext)
+{
+    JavascriptMap* map = (args.Info.Count > 0) ? JavascriptOperators::TryFromVar<JavascriptMap>(args[0]) : nullptr;
+    if (map == nullptr)
+    {
+        JavascriptError::ThrowTypeErrorVar(scriptContext, JSERR_NeedObjectOfType, methodName, _u("Map"));
+    }
+    return map;
+}
+
+static Var CanonicalizeMapKey(Var key, ScriptContext* scriptContext)
+{
+    if (JavascriptNumber::Is(key) && JavascriptNumber::IsNegZero(JavascriptNumber::GetValue(key)))
+    {
+        // Normalize -0 to +0
+        return JavascriptNumber::New(0.0, scriptContext);
+    }
+    return key;
+}
+
 Var JavascriptMap::EntryGetOrInsert(RecyclableObject* function, CallInfo callInfo, ...)
 {
     PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
@@ -266,7 +286,21 @@ Var JavascriptMap::EntryGetOrInsert(RecyclableObject* function, CallInfo callInf
     ScriptContext* scriptContext = function->GetScriptContext();
     Assert(!(callInfo.Flags & CallFlags_New));
 
-    return scriptContext->GetLibrary()->GetUndefined();
+    JavascriptMap* map = RequireMapReceiver(args, _u("Map.prototype.getOrInsert"), scriptContext);
+
+    Var key = (args.Info.Count > 1) ? args[1] : scriptContext->GetLibrary()->GetUndefined();
+    Var value = (args.Info.Count > 2) ? args[2] : scriptContext->GetLibrary()->GetUndefined();
+
+    key = CanonicalizeMapKey(key, scriptContext);
+
+    Var existing = nullptr;
+    if (map->Get(key, &existing))
+    {
+        return CrossSite::MarshalVar(scriptContext, existing);
+    }
+
+    map->Set(key, value);
+    return CrossSite::MarshalVar(scriptContext, value);
 }
 
 Var JavascriptMap::EntryGetOrInsertComputed(RecyclableObject* function, CallInfo callInfo, ...)
@@ -275,9 +309,40 @@ Var JavascriptMap::EntryGetOrInsertComputed(RecyclableObject* function, CallInfo
 
     ARGUMENTS(args, callInfo);
     ScriptContext* scriptContext = function->GetScriptContext();
+    AUTO_TAG_NATIVE_LIBRARY_ENTRY(function, callInfo, _u("Map.prototype.getOrInsertComputed"));
     Assert(!(callInfo.Flags & CallFlags_New));
 
-    return scriptContext->GetLibrary()->GetUndefined();
+    JavascriptMap* map = RequireMapReceiver(args, _u("Map.prototype.getOrInsertComputed"), scriptContext);
+
+    // Check IsCallable(callbackfn) before looking up key in map (ES2026 step 3).
+    if (args.Info.Count < 3 || !JavascriptConversion::IsCallable(args[2]))
+    {
+        JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_NeedFunction, _u("Map.prototype.getOrInsertComputed"));
+    }
+    RecyclableObject* callbackfn = VarTo<RecyclableObject>(args[2]);
+
+    Var key = (args.Info.Count > 1) ? args[1] : scriptContext->GetLibrary()->GetUndefined();
+    // Canonicalize -0 to +0 before both map lookup and callbackfn invocation.
+    key = CanonicalizeMapKey(key, scriptContext);
+
+    Var existing = nullptr;
+    if (map->Get(key, &existing))
+    {
+        return CrossSite::MarshalVar(scriptContext, existing);
+    }
+
+    Var undefined = scriptContext->GetLibrary()->GetUndefined();
+    Var value = nullptr;
+    BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+    {
+        value = CALL_FUNCTION(scriptContext->GetThreadContext(), callbackfn, CallInfo(CallFlags_Value, 2), undefined, key);
+    }
+    END_SAFE_REENTRANT_CALL
+
+    // Commit via Set after callbackfn: overwrites in place if callbackfn inserted key,
+    // or appends if absent/deleted/cleared during callbackfn.
+    map->Set(key, value);
+    return CrossSite::MarshalVar(scriptContext, value);
 }
 
 Var JavascriptMap::EntrySizeGetter(RecyclableObject* function, CallInfo callInfo, ...)

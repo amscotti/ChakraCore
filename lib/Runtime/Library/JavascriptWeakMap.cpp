@@ -329,6 +329,88 @@ namespace Js
         return weakMap;
     }
 
+    static JavascriptWeakMap* RequireWeakMapReceiver(const Arguments& args, PCWSTR methodName, ScriptContext* scriptContext)
+    {
+        if (args.Info.Count == 0 || !VarIs<JavascriptWeakMap>(args[0]))
+        {
+            JavascriptError::ThrowTypeErrorVar(scriptContext, JSERR_NeedObjectOfType, methodName, _u("WeakMap"));
+        }
+        return VarTo<JavascriptWeakMap>(args[0]);
+    }
+
+    static bool TryExtractWeakMapKey(Var key, JavascriptSymbol** keySymOut, RecyclableObject** keyObjOut)
+    {
+        if (VarIs<JavascriptSymbol>(key) && !VarTo<JavascriptSymbol>(key)->IsRegistered())
+        {
+            *keySymOut = VarTo<JavascriptSymbol>(key);
+            *keyObjOut = nullptr;
+            return true;
+        }
+        if (JavascriptOperators::IsObject(key))
+        {
+            *keySymOut = nullptr;
+            *keyObjOut = VarTo<RecyclableObject>(key);
+            return true;
+        }
+        return false;
+    }
+
+    static bool SyncWeakMapContainsTTD(ScriptContext* scriptContext, bool loaded)
+    {
+#if ENABLE_TTD
+        if (scriptContext->IsTTDRecordOrReplayModeEnabled())
+        {
+            if (scriptContext->IsTTDRecordModeEnabled())
+            {
+                scriptContext->GetThreadContext()->TTDLog->RecordWeakCollectionContainsEvent(loaded);
+            }
+            else
+            {
+                loaded = scriptContext->GetThreadContext()->TTDLog->ReplayWeakCollectionContainsEvent();
+            }
+        }
+#else
+        (void)scriptContext;
+#endif
+        return loaded;
+    }
+
+    static bool WeakMapGetEntry(
+        JavascriptWeakMap* weakMap,
+        ScriptContext* scriptContext,
+        JavascriptSymbol* keySym,
+        RecyclableObject* keyObj,
+        Var* existing)
+    {
+        bool loaded = (keySym != nullptr) ? weakMap->Get(keySym, existing) : weakMap->Get(keyObj, existing);
+        return SyncWeakMapContainsTTD(scriptContext, loaded);
+    }
+
+    static void WeakMapSetEntry(
+        JavascriptWeakMap* weakMap,
+        ScriptContext* scriptContext,
+        JavascriptSymbol* keySym,
+        RecyclableObject* keyObj,
+        Var value)
+    {
+        if (keySym != nullptr)
+        {
+            weakMap->Set(keySym, value);
+            return;
+        }
+
+#if ENABLE_TTD
+        // In replay we need to pin the object (and will release at snapshot points)
+        if (scriptContext->IsTTDReplayModeEnabled())
+        {
+            scriptContext->TTDContextInfo->TTDWeakReferencePinSet->AddNew(keyObj);
+        }
+#else
+        (void)scriptContext;
+#endif
+        weakMap->Set(keyObj, value);
+    }
+
     Var JavascriptWeakMap::EntryGetOrInsert(RecyclableObject* function, CallInfo callInfo, ...)
     {
         PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
@@ -337,7 +419,25 @@ namespace Js
         ScriptContext* scriptContext = function->GetScriptContext();
         Assert(!(callInfo.Flags & CallFlags_New));
 
-        return scriptContext->GetLibrary()->GetUndefined();
+        JavascriptWeakMap* weakMap = RequireWeakMapReceiver(args, _u("WeakMap.prototype.getOrInsert"), scriptContext);
+        Var key = (args.Info.Count > 1) ? args[1] : scriptContext->GetLibrary()->GetUndefined();
+        Var value = (args.Info.Count > 2) ? args[2] : scriptContext->GetLibrary()->GetUndefined();
+
+        JavascriptSymbol* keySym = nullptr;
+        RecyclableObject* keyObj = nullptr;
+        if (!TryExtractWeakMapKey(key, &keySym, &keyObj))
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_WeakMapSetKeyNotAnObject, _u("WeakMap.prototype.getOrInsert"));
+        }
+
+        Var existing = nullptr;
+        if (WeakMapGetEntry(weakMap, scriptContext, keySym, keyObj, &existing))
+        {
+            return CrossSite::MarshalVar(scriptContext, existing);
+        }
+
+        WeakMapSetEntry(weakMap, scriptContext, keySym, keyObj, value);
+        return CrossSite::MarshalVar(scriptContext, value);
     }
 
     Var JavascriptWeakMap::EntryGetOrInsertComputed(RecyclableObject* function, CallInfo callInfo, ...)
@@ -346,9 +446,44 @@ namespace Js
 
         ARGUMENTS(args, callInfo);
         ScriptContext* scriptContext = function->GetScriptContext();
+        AUTO_TAG_NATIVE_LIBRARY_ENTRY(function, callInfo, _u("WeakMap.prototype.getOrInsertComputed"));
         Assert(!(callInfo.Flags & CallFlags_New));
 
-        return scriptContext->GetLibrary()->GetUndefined();
+        JavascriptWeakMap* weakMap = RequireWeakMapReceiver(args, _u("WeakMap.prototype.getOrInsertComputed"), scriptContext);
+
+        // Check IsCallable(callbackfn) before CanBeHeldWeakly(key) (ES2026 steps 3-4).
+        if (args.Info.Count < 3 || !JavascriptConversion::IsCallable(args[2]))
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_NeedFunction, _u("WeakMap.prototype.getOrInsertComputed"));
+        }
+        RecyclableObject* callbackfn = VarTo<RecyclableObject>(args[2]);
+
+        Var key = (args.Info.Count > 1) ? args[1] : scriptContext->GetLibrary()->GetUndefined();
+        JavascriptSymbol* keySym = nullptr;
+        RecyclableObject* keyObj = nullptr;
+        if (!TryExtractWeakMapKey(key, &keySym, &keyObj))
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_WeakMapSetKeyNotAnObject, _u("WeakMap.prototype.getOrInsertComputed"));
+        }
+
+        Var existing = nullptr;
+        if (WeakMapGetEntry(weakMap, scriptContext, keySym, keyObj, &existing))
+        {
+            return CrossSite::MarshalVar(scriptContext, existing);
+        }
+
+        Var undefined = scriptContext->GetLibrary()->GetUndefined();
+        Var value = nullptr;
+        BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+        {
+            value = CALL_FUNCTION(scriptContext->GetThreadContext(), callbackfn, CallInfo(CallFlags_Value, 2), undefined, key);
+        }
+        END_SAFE_REENTRANT_CALL
+
+        // Re-commit unconditionally: callbackfn may have set/deleted/cleared key or
+        // triggered GC/rehash; WeakMap::Set re-acquires WeakMapKeyMap/symbolMap fresh.
+        WeakMapSetEntry(weakMap, scriptContext, keySym, keyObj, value);
+        return CrossSite::MarshalVar(scriptContext, value);
     }
 
     void JavascriptWeakMap::Clear()
