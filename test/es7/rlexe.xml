@@ -708,4 +708,16 @@
       <compile-flags>-CollectGarbage</compile-flags>
     </default>
   </test>
+  <test>
+    <default>
+      <files>iterator_concat.js</files>
+      <compile-flags>-CollectGarbage</compile-flags>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>map_weakmap_getorinsert.js</files>
+      <compile-flags>-CollectGarbage</compile-flags>
+    </default>
+  </test>
 </regress-exe>

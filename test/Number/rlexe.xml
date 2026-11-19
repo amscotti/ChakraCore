@@ -75,4 +75,10 @@
       <compile-flags>-args summary -endargs</compile-flags>
     </default>
   </test>
+  <test>
+    <default>
+      <files>numeric_separator_strtod_and_proxy_realm.js</files>
+      <compile-flags>-CollectGarbage</compile-flags>
+    </default>
+  </test>
 </regress-exe>

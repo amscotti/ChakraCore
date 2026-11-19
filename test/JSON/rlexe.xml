@@ -122,4 +122,10 @@
       <compile-flags>-CollectGarbage</compile-flags>
     </default>
   </test>
+  <test>
+    <default>
+      <files>json_rawjson_and_source.js</files>
+      <compile-flags>-CollectGarbage</compile-flags>
+    </default>
+  </test>
 </regress-exe>
