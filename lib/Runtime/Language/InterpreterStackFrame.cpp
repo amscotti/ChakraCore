@@ -6501,6 +6501,7 @@ skipThunk:
         Js::LoopEntryPointInfo * entryPointInfo = loopHeader->GetCurrentEntryPointInfo();
 
         if (fn->ForceJITLoopBody() && loopHeader->interpretCount == 0 && loopHeader->hasYield == false &&
+            !loopHeader->isUnjittable &&
             (entryPointInfo != NULL && entryPointInfo->IsNotScheduled()))
         {
 #if ENABLE_PROFILE_INFO
@@ -6715,7 +6716,7 @@ skipThunk:
             // NotScheduled state. Since transitions from NotScheduled can only occur on the main thread,
             // by checking the state we are safe from racing with the JIT thread when looking at the other fields
             // of the entry point.
-            if (entryPointInfo != NULL && entryPointInfo->IsNotScheduled())
+            if (!loopHeader->isUnjittable && entryPointInfo != NULL && entryPointInfo->IsNotScheduled())
             {
                 GenerateLoopBody(scriptContext->GetNativeCodeGenerator(), fn, loopHeader, entryPointInfo, fn->GetLocalsCount(), this->m_localSlots);
             }

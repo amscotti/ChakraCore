@@ -247,7 +247,7 @@ NativeCodeGenerator::GenerateAllFunctions(Js::FunctionBody * fn)
             for (uint i = 0; i < fn->GetLoopCount(); i++)
             {
                 Js::LoopHeader * loopHeader = fn->GetLoopHeader(i);
-                if (loopHeader->hasYield == false)
+                if (loopHeader->hasYield == false && !loopHeader->isUnjittable)
                 {
                     Js::EntryPointInfo * entryPointInfo = loopHeader->GetCurrentEntryPointInfo();
                     this->GenerateLoopBody(fn, loopHeader, entryPointInfo);
@@ -634,6 +634,10 @@ void NativeCodeGenerator::GenerateLoopBody(Js::FunctionBody * fn, Js::LoopHeader
 {
     ASSERT_THREAD();
     Assert(fn->GetScriptContext()->GetNativeCodeGenerator() == this);
+    if (loopHeader->isUnjittable)
+    {
+        return;
+    }
     Assert(entryPoint->jsMethod == nullptr);
     Assert(!loopHeader->hasYield);
 
@@ -1897,8 +1901,24 @@ NativeCodeGenerator::Process(JsUtil::Job *const job, JsUtil::ParallelThreadData 
         // Unless we're in a ForceNative configuration, ignore this workitem if it exceeds JIT limits
         if (fn->ForceJITLoopBody() || !WorkItemExceedsJITLimits(codeGenWork))
         {
-            CodeGen(pageAllocator, codeGenWork, foreground);
-            return true;
+            try
+            {
+                CodeGen(pageAllocator, codeGenWork, foreground);
+                return true;
+            }
+            catch (const Js::OperationAbortedException&)
+            {
+                // A permanent backend abort (while the script context and code generator
+                // are still open and in-proc/connected) means this loop slice cannot be
+                // JIT-compiled; mark the loop header unjittable to prevent retry storms.
+                if (!this->IsClosed() && !fn->GetScriptContext()->IsClosed() &&
+                    (!JITManager::GetJITManager()->IsOOPJITEnabled() || JITManager::GetJITManager()->IsConnected()) &&
+                    loopBodyCodeGenWorkItem->loopHeader != nullptr)
+                {
+                    loopBodyCodeGenWorkItem->loopHeader->isUnjittable = true;
+                }
+                throw;
+            }
         }
         Js::EntryPointInfo * entryPoint = loopBodyCodeGenWorkItem->GetEntryPoint();
         entryPoint->SetJITCapReached();
@@ -2131,6 +2151,10 @@ NativeCodeGenerator::JobProcessed(JsUtil::Job *const job, const bool succeeded)
             // in which case we don't want to reset it.
             if (entryPoint && !entryPoint->IsCleanedUp())
             {
+                if (loopBodyCodeGen->loopHeader != nullptr && loopBodyCodeGen->loopHeader->isUnjittable)
+                {
+                    entryPoint->SetJITCapReached();
+                }
                 entryPoint->Reset(!entryPoint->IsJITCapReached()); // reset state to NotScheduled if JIT cap hasn't been reached
             }
             loopBodyCodeGen->OnWorkItemProcessFail(this);

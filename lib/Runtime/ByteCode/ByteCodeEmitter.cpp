@@ -8760,14 +8760,21 @@ void EmitLoad(
                 // raw representation so the element-load/store fast paths and
                 // the element register conventions are unchanged.
                 Js::RegSlot keyTmp = funcInfo->AcquireTmpRegister();
-                byteCodeGenerator->Writer()->Reg2(Js::OpCode::Ld_A, keyTmp, keyLocation);
+                Js::RegSlot convTmp = funcInfo->AcquireTmpRegister();
                 Js::ByteCodeLabel convertKey = byteCodeGenerator->Writer()->DefineLabel();
                 Js::ByteCodeLabel keyDone = byteCodeGenerator->Writer()->DefineLabel();
                 byteCodeGenerator->Writer()->BrReg1(Js::OpCode::BrOnObject_A, convertKey, keyLocation);
+                // Keep BrOnObject_A followed by a real op (not an unconditional
+                // Br) so Peeps::PeepBranch never calls BranchInstr::Invert() on
+                // BrOnObject_A, and assign the other arm with Ld_A_ReuseLoc so
+                // IRBuilder keeps one StackSym for keyTmp across the join.
+                byteCodeGenerator->Writer()->Reg2(Js::OpCode::Ld_A, keyTmp, keyLocation);
                 byteCodeGenerator->Writer()->Br(keyDone);
                 byteCodeGenerator->Writer()->MarkLabel(convertKey);
-                byteCodeGenerator->Writer()->Reg2(Js::OpCode::Conv_Prop, keyTmp, keyTmp);
+                byteCodeGenerator->Writer()->Reg2(Js::OpCode::Conv_Prop, convTmp, keyLocation);
+                byteCodeGenerator->Writer()->Reg2(Js::OpCode::Ld_A_ReuseLoc, keyTmp, convTmp);
                 byteCodeGenerator->Writer()->MarkLabel(keyDone);
+                funcInfo->ReleaseTmpRegister(convTmp);
                 keyLocation = keyTmp;
                 *convertedKeyLocation = keyTmp;
             }

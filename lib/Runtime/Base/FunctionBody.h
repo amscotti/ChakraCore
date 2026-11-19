@@ -731,6 +731,7 @@ namespace Js
         Field(bool) isNested;
         Field(bool) isInTry;
         Field(bool) isInTryFinally;
+        Field(bool) isUnjittable;
         Field(FunctionBody *) functionBody;
 
 #if DBG_DUMP

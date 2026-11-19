@@ -313,6 +313,10 @@ Func::Codegen(JitArenaAllocator *alloc, JITTimeWorkItem * workItem,
     do
     {
         Assert(rejitCounter < 25);
+        if (rejitCounter >= 25)
+        {
+            throw Js::OperationAbortedException();
+        }
         Func func(alloc, workItem, threadContextInfo,
             scriptContextInfo, outputData, epInfo, runtimeInfo,
             polymorphicInlineCacheInfo, codeGenAllocators, 
@@ -375,6 +379,7 @@ Func::Codegen(JitArenaAllocator *alloc, JITTimeWorkItem * workItem,
                     workItem->GetJITFunctionBody()->GetDisplayName(),
                     workItem->GetJITTimeInfo()->GetDebugNumberSet(debugStringBuffer),
                     ex.ReasonName());
+                Output::Flush();
             }
 
             rejit = true;
