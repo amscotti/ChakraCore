@@ -15,6 +15,8 @@ namespace JSON
     // -------- Parser implementation ------------//
     void JSONParser::Finalizer()
     {
+        this->rootParseNode = nullptr;
+        this->inputString = nullptr;
         m_scanner.Finalizer();
         if(arenaAllocatorObject)
         {
@@ -34,7 +36,8 @@ namespace JSON
         }
         m_scanner.Init(str, length, &m_token, scriptContext, str, this->arenaAllocator);
         Scan();
-        Js::Var ret = ParseObject();
+        JsonParseNode** rootOut = (this->reviver != nullptr && this->inputString != nullptr) ? &this->rootParseNode : nullptr;
+        Js::Var ret = ParseObject(rootOut);
         if (m_token.tk != tkEOF)
         {
             m_scanner.ThrowSyntaxError(JSERR_JsonSyntax);
@@ -44,35 +47,46 @@ namespace JSON
 
     Js::Var JSONParser::Parse(Js::JavascriptString* input)
     {
+        this->inputString = input;
+        this->rootParseNode = nullptr;
         return Parse(input->GetSz(), input->GetLength());
     }
 
     /*
-     * Memory ownership record (doc/memory-management.md section 3) for JSONParser::Walk / WalkProperty:
+     * Memory ownership record (doc/memory-management.md section 3) for JSONParser::Parse / Walk / WalkProperty:
      * - Resource / creation call: Recycler-managed JS values (holder, val, newElement, propName,
-     *   reviver), enumerable key snapshot array (keys = GetOwnEnumerablePropertyNames), and interned
-     *   PropertyRecord* instances (scriptContext->GetOrAddPropertyRecord).
-     * - Domain and allocator: ChakraCore Recycler GC heap (conservative stack scan); no untraced
-     *   native C++ heap/arena arrays store Var or object pointers across WalkProperty / reviver calls.
+     *   reviver, inputString, context, sourceStr), enumerable key snapshot array (keys = GetOwnEnumerablePropertyNames),
+     *   interned PropertyRecord* instances (scriptContext->GetOrAddPropertyRecord), and when reviver != nullptr,
+     *   the Recycler-allocated JsonParseNode snapshot tree (RecyclerNew JsonParseNode with JsonParsePropertyMap
+     *   [BaseDictionary<PropertyId, JsonParseNode*, Recycler>] and JsonParseElementList [JsUtil::List<JsonParseNode*, Recycler>]).
+     * - Domain and allocator: ChakraCore Recycler GC heap with Field(...) write barriers on all GC pointers
+     *   inside JsonParseNode / BaseDictionary / List, plus conservative stack scan of stack-allocated JSONParser
+     *   and WalkProperty frames. No untraced native C++ heap/arena container stores Var or JsonParseNode* across
+     *   ParseObject / WalkProperty / reviver calls (ArenaAllocator holds only non-GC JsonTypeCache and scanner unescape pairs).
      * - Physical allocation / release: Recycler owns allocation and collection of JS objects, strings,
-     *   keys arrays, and finalizable PropertyRecord entries; C++ stack frames hold no owning native buffers.
-     * - Logical views: uint64 array length len is captured once per array walk; keys snapshot array
-     *   is never exposed to JS user code.
-     * - Owner / transfer / aliases: Each recursive WalkProperty stack frame holds stack-scanned locals
-     *   (holder, val, keys, keyStr, keyRecord, newElement) across child walks and reviver calls.
-     *   Keeping keyStr and keyRecord live across WalkProperty prevents PropertyRecord finalization on GC.
+     *   keys arrays, PropertyRecord entries, and JsonParseNode trees; JSONParser::Finalizer clears rootParseNode
+     *   and inputString and releases guest ArenaAllocators.
+     * - Logical views: uint64 array length len is captured once per array walk; keys snapshot array is never
+     *   exposed to JS user code; JsonParseNode stores uint32 (sourceStart, sourceLength) byte-safe char16 spans
+     *   sliced via JavascriptString::NewCopyBuffer(this->inputString->GetSz() + sourceStart, sourceLength, scriptContext)
+     *   only when creating context.source.
+     * - Owner / transfer / aliases: Stack-allocated JSONParser holds inputString and rootParseNode across Parse
+     *   and Walk; each recursive WalkProperty frame holds stack-scanned locals (holder, val, parseNode, keys,
+     *   keyStr, keyRecord, newElement, context) across child walks and reviver calls. Keeping inputString live
+     *   keeps its GetSz() flattened buffer valid; keeping keyStr and keyRecord live prevents PropertyRecord finalization.
      * - Borrow invalidation: Reentrant reviver/getter/Proxy traps can run GC, mutate elements/properties,
      *   change array length, freeze/seal/preventExtensions, convert JavascriptArray to ES5Array or
      *   CopyOnAccessNativeIntArray, or revoke Proxies. Non-ES5 array fast-path is re-checked after
-     *   WalkProperty returns, and CopyOnAccess arrays are converted before DeleteItem/DefineOwnProperty.
+     *   WalkProperty returns, CopyOnAccess arrays are converted before DeleteItem/DefineOwnProperty, and
+     *   parseNode children are matched by object identity (parseNode->parsedValue == val) or primitive SameValue.
      * - Reentrancy points: GetItem/GetProperty, IsArray (revoked Proxy), OP_GetLength + ToLength,
      *   GetOwnEnumerablePropertyNames (ownKeys / getOwnPropertyDescriptor), WalkProperty recursion,
      *   DeleteItem/DeleteProperty, DefineOwnPropertyHelper (defineProperty), and CallFunction(reviver).
      * - Thread/context: Bound script thread with active ScriptContext (BEGIN_SAFE_REENTRANT_CALL for CallFunction).
-     * - Release / exit: Stack frames unwind normally on return or JS exception; Recycler reclaims
-     *   unreferenced wrapper/keys objects and PropertyRecords on subsequent GC cycles.
+     * - Release / exit: Stack frames unwind normally on return or JS exception; Finalizer clears parser roots and
+     *   releases temporary guest allocators; Recycler reclaims unreferenced wrapper/keys/context/JsonParseNode objects.
      * - Bounds / exhaustion: PROBE_STACK guards recursion depth; len is bounded by ES2025 ToLength
-     *   ([0, 2^53 - 1]) using uint64 indices so indices >= InvalidIndex use GetProperty/DeleteProperty.
+     *   ([0, 2^53 - 1]) using uint64 indices; sourceStart + sourceLength <= inputString->GetLength() (<= INT_MAX - 1).
      */
     static Js::JavascriptString* UInt64ToPropertyString(uint64 index, Js::ScriptContext* scriptContext)
     {
@@ -121,10 +135,10 @@ namespace JSON
             "The holder argument in a JSON::Walk function must be an object or an array");
         Js::RecyclableObject* holderObj = Js::VarTo<Js::RecyclableObject>(holder);
         bool hasIndex = (index != Js::JavascriptArray::InvalidIndex);
-        return WalkProperty(name, holderObj, id, index, hasIndex);
+        return WalkProperty(name, holderObj, id, index, hasIndex, this->rootParseNode);
     }
 
-    Js::Var JSONParser::WalkProperty(Js::JavascriptString* name, Js::RecyclableObject* holder, Js::PropertyId id, uint64 index, bool hasIndex)
+    Js::Var JSONParser::WalkProperty(Js::JavascriptString* name, Js::RecyclableObject* holder, Js::PropertyId id, uint64 index, bool hasIndex, JsonParseNode* parseNode)
     {
         AssertMsg(reviver, "JSON post parse walk with null reviver");
         PROBE_STACK(scriptContext, Js::Constants::MinStackDefault);
@@ -152,6 +166,8 @@ namespace JSON
         if (Js::JavascriptOperators::IsObject(val))
         {
             Js::RecyclableObject* valObj = Js::VarTo<Js::RecyclableObject>(val);
+            bool matchesParseNode = (parseNode != nullptr && !parseNode->isPrimitive && parseNode->parsedValue == val);
+
             // a. Let isArray be ? IsArray(val).
             if (IsArrayOrThrowIfRevoked(valObj, scriptContext))
             {
@@ -166,7 +182,12 @@ namespace JSON
                 for (uint64 i = 0; i < len; i++)
                 {
                     Js::JavascriptString* propName = UInt64ToPropertyString(i, scriptContext);
-                    Js::Var newElement = WalkProperty(propName, valObj, Js::Constants::NoProperty, i, true);
+                    JsonParseNode* childNode = nullptr;
+                    if (matchesParseNode && parseNode->elements != nullptr && i < static_cast<uint64>(parseNode->elements->Count()))
+                    {
+                        childNode = parseNode->elements->Item(static_cast<int>(i));
+                    }
+                    Js::Var newElement = WalkProperty(propName, valObj, Js::Constants::NoProperty, i, true, childNode);
                     if (Js::JavascriptOperators::IsUndefined(newElement))
                     {
 #if ENABLE_COPYONACCESS_ARRAY
@@ -214,10 +235,16 @@ namespace JSON
                     const Js::PropertyRecord* keyRecord = nullptr;
                     scriptContext->GetOrAddPropertyRecord(keyStr, &keyRecord);
 
+                    JsonParseNode* childNode = nullptr;
+                    if (matchesParseNode && parseNode->properties != nullptr)
+                    {
+                        parseNode->properties->TryGetValue(keyRecord->GetPropertyId(), &childNode);
+                    }
+
                     if (keyRecord->IsNumeric())
                     {
                         uint32 propIndex = keyRecord->GetNumericValue();
-                        Js::Var newElement = WalkProperty(keyStr, valObj, Js::Constants::NoProperty, propIndex, true);
+                        Js::Var newElement = WalkProperty(keyStr, valObj, Js::Constants::NoProperty, propIndex, true, childNode);
                         if (Js::JavascriptOperators::IsUndefined(newElement))
                         {
 #if ENABLE_COPYONACCESS_ARRAY
@@ -232,7 +259,7 @@ namespace JSON
                     }
                     else
                     {
-                        Js::Var newElement = WalkProperty(keyStr, valObj, keyRecord->GetPropertyId(), 0, false);
+                        Js::Var newElement = WalkProperty(keyStr, valObj, keyRecord->GetPropertyId(), 0, false, childNode);
                         if (Js::JavascriptOperators::IsUndefined(newElement))
                         {
                             Js::JavascriptOperators::DeleteProperty(valObj, keyRecord->GetPropertyId(), Js::PropertyOperation_None);
@@ -246,13 +273,31 @@ namespace JSON
             }
         }
 
-        // 3. Return ? Call(reviver, holder, << name, val >>).
-        Js::Var values[3];
+        // 3. Let context be OrdinaryObjectCreate(%Object.prototype%).
+        // 4. If val is not an Object and parseNode matches, CreateDataProperty(context, "source", slice).
+        Js::DynamicObject* context = scriptContext->GetLibrary()->CreateObject();
+        if (!Js::JavascriptOperators::IsObject(val) &&
+            parseNode != nullptr &&
+            parseNode->isPrimitive &&
+            Js::JavascriptConversion::SameValue(val, parseNode->parsedValue))
+        {
+            Assert(this->inputString != nullptr);
+            Assert(parseNode->sourceStart + parseNode->sourceLength <= this->inputString->GetLength());
+            Js::JavascriptString* sourceStr = Js::JavascriptString::NewCopyBuffer(
+                this->inputString->GetSz() + parseNode->sourceStart,
+                parseNode->sourceLength,
+                scriptContext);
+            Js::JavascriptOperators::InitProperty(context, Js::PropertyIds::source, sourceStr);
+        }
+
+        // 5. Return ? Call(reviver, holder, << name, val, context >>).
+        Js::Var values[4];
         Js::Arguments args(0, values);
-        args.Info.Count = 3;
+        args.Info.Count = 4;
         args.Values[0] = holder;
         args.Values[1] = name;
         args.Values[2] = val;
+        args.Values[3] = context;
         BEGIN_SAFE_REENTRANT_CALL(reviver->GetScriptContext()->GetThreadContext())
         {
             val = Js::JavascriptFunction::CallFunction<true>(reviver, reviver->GetEntryPoint(), args);
@@ -261,7 +306,17 @@ namespace JSON
         return val;
     }
 
-    Js::Var JSONParser::ParseObject()
+    JsonParseNode* JSONParser::CreatePrimitiveParseNode(Js::Var parsedValue, uint32 sourceStart, uint32 sourceLength)
+    {
+        JsonParseNode* node = RecyclerNew(scriptContext->GetRecycler(), JsonParseNode);
+        node->parsedValue = parsedValue;
+        node->sourceStart = sourceStart;
+        node->sourceLength = sourceLength;
+        node->isPrimitive = true;
+        return node;
+    }
+
+    Js::Var JSONParser::ParseObject(JsonParseNode** outNode)
     {
         PROBE_STACK(scriptContext, Js::Constants::MinStackDefault);
 
@@ -271,51 +326,113 @@ namespace JSON
         {
 
         case tkFltCon:
-            retVal = Js::JavascriptNumber::ToVarIntCheck(m_token.GetDouble(), scriptContext);
-            Scan();
-            return retVal;
+            {
+                uint start = m_scanner.GetTokenStartOffset();
+                uint end = m_scanner.GetTokenEndOffset();
+                retVal = Js::JavascriptNumber::ToVarIntCheck(m_token.GetDouble(), scriptContext);
+                if (outNode != nullptr)
+                {
+                    *outNode = CreatePrimitiveParseNode(retVal, start, end - start);
+                }
+                Scan();
+                return retVal;
+            }
 
         case tkStrCon:
             {
+                uint start = m_scanner.GetTokenStartOffset();
+                uint end = m_scanner.GetTokenEndOffset();
                 // will auto-null-terminate the string (as length=len+1)
                 uint len = m_scanner.GetCurrentStringLen();
                 retVal = Js::JavascriptString::NewCopyBuffer(m_scanner.GetCurrentString(), len, scriptContext);
+                if (outNode != nullptr)
+                {
+                    *outNode = CreatePrimitiveParseNode(retVal, start, end - start);
+                }
                 Scan();
                 return retVal;
             }
 
         case tkTRUE:
-            retVal = scriptContext->GetLibrary()->GetTrue();
-            Scan();
-            return retVal;
-
-        case tkFALSE:
-            retVal = scriptContext->GetLibrary()->GetFalse();
-            Scan();
-            return retVal;
-
-        case tkNULL:
-            retVal = scriptContext->GetLibrary()->GetNull();
-            Scan();
-            return retVal;
-
-        case tkSub:  // unary minus
-
-            if (Scan() == tkFltCon)
             {
-                retVal = Js::JavascriptNumber::ToVarIntCheck(-m_token.GetDouble(), scriptContext);
+                uint start = m_scanner.GetTokenStartOffset();
+                uint end = m_scanner.GetTokenEndOffset();
+                retVal = scriptContext->GetLibrary()->GetTrue();
+                if (outNode != nullptr)
+                {
+                    *outNode = CreatePrimitiveParseNode(retVal, start, end - start);
+                }
                 Scan();
                 return retVal;
             }
-            else
+
+        case tkFALSE:
             {
-                m_scanner.ThrowSyntaxError(JSERR_JsonBadNumber);
+                uint start = m_scanner.GetTokenStartOffset();
+                uint end = m_scanner.GetTokenEndOffset();
+                retVal = scriptContext->GetLibrary()->GetFalse();
+                if (outNode != nullptr)
+                {
+                    *outNode = CreatePrimitiveParseNode(retVal, start, end - start);
+                }
+                Scan();
+                return retVal;
+            }
+
+        case tkNULL:
+            {
+                uint start = m_scanner.GetTokenStartOffset();
+                uint end = m_scanner.GetTokenEndOffset();
+                retVal = scriptContext->GetLibrary()->GetNull();
+                if (outNode != nullptr)
+                {
+                    *outNode = CreatePrimitiveParseNode(retVal, start, end - start);
+                }
+                Scan();
+                return retVal;
+            }
+
+        case tkSub:  // unary minus
+            {
+                uint subStart = m_scanner.GetTokenStartOffset();
+                uint subEnd = m_scanner.GetTokenEndOffset();
+                if (Scan() == tkFltCon)
+                {
+                    if (m_scanner.GetTokenStartOffset() != subEnd)
+                    {
+                        m_scanner.ThrowSyntaxError(JSERR_JsonBadNumber);
+                    }
+                    uint numEnd = m_scanner.GetTokenEndOffset();
+                    retVal = Js::JavascriptNumber::ToVarIntCheck(-m_token.GetDouble(), scriptContext);
+                    if (outNode != nullptr)
+                    {
+                        *outNode = CreatePrimitiveParseNode(retVal, subStart, numEnd - subStart);
+                    }
+                    Scan();
+                    return retVal;
+                }
+                else
+                {
+                    m_scanner.ThrowSyntaxError(JSERR_JsonBadNumber);
+                }
             }
 
         case tkLBrack:
             {
 
                 Js::JavascriptArray* arrayObj = scriptContext->GetLibrary()->CreateArray(0);
+                JsonParseNode* arrayNode = nullptr;
+                JsonParseElementList* elementNodes = nullptr;
+                if (outNode != nullptr)
+                {
+                    Recycler* recycler = scriptContext->GetRecycler();
+                    arrayNode = RecyclerNew(recycler, JsonParseNode);
+                    arrayNode->parsedValue = arrayObj;
+                    arrayNode->isPrimitive = false;
+                    elementNodes = JsonParseElementList::New(recycler);
+                    arrayNode->elements = elementNodes;
+                    *outNode = arrayNode;
+                }
 
                 //skip '['
                 Scan();
@@ -328,8 +445,13 @@ namespace JSON
                     {
                         break;
                     }
-                    Js::Var value = ParseObject();
+                    JsonParseNode* elemNode = nullptr;
+                    Js::Var value = ParseObject(outNode != nullptr ? &elemNode : nullptr);
                     arrayObj->SetItem(k++, value, Js::PropertyOperation_None);
+                    if (elementNodes != nullptr)
+                    {
+                        elementNodes->Add(elemNode);
+                    }
 
                     // if next token is not a comma consider the end of the array member list.
                     if (tkComma != m_token.tk)
@@ -367,6 +489,19 @@ namespace JSON
                     object = VarTo<DynamicObject>(JavascriptProxy::AutoProxyWrapper(object));
                 }
 #endif
+
+                JsonParseNode* objNode = nullptr;
+                JsonParsePropertyMap* propNodes = nullptr;
+                if (outNode != nullptr)
+                {
+                    Recycler* recycler = scriptContext->GetRecycler();
+                    objNode = RecyclerNew(recycler, JsonParseNode);
+                    objNode->parsedValue = object;
+                    objNode->isPrimitive = false;
+                    propNodes = RecyclerNew(recycler, JsonParsePropertyMap, recycler);
+                    objNode->properties = propNodes;
+                    *outNode = objNode;
+                }
 
                 //next token after '{'
                 Scan();
@@ -424,8 +559,13 @@ namespace JSON
                             object->EnsureSlots(typeWithoutProperty->GetTypeHandler()->GetSlotCapacity(),
                                 typeWithProperty->GetTypeHandler()->GetSlotCapacity(), scriptContext, typeWithProperty->GetTypeHandler());
                             object->ReplaceType(typeWithProperty);
-                            Js::Var value = ParseObject();
+                            JsonParseNode* propNode = nullptr;
+                            Js::Var value = ParseObject(outNode != nullptr ? &propNode : nullptr);
                             object->SetSlot(SetSlotArguments(propertyId, propertyIndex, value));
+                            if (propNodes != nullptr)
+                            {
+                                propNodes->Item(propertyId, propNode);
+                            }
 
                             // if the next token is not a comma consider the list of members done.
                             if (tkComma != m_token.tk)
@@ -445,9 +585,14 @@ namespace JSON
                         m_scanner.ThrowSyntaxError(JSERR_JsonNoColon);
                     }
                     Scan();
-                    Js::Var value = ParseObject();
+                    JsonParseNode* propNode = nullptr;
+                    Js::Var value = ParseObject(outNode != nullptr ? &propNode : nullptr);
                     PropertyValueInfo info;
                     object->SetProperty(propertyRecord->GetPropertyId(), value, PropertyOperation_None, &info);
+                    if (propNodes != nullptr)
+                    {
+                        propNodes->Item(propertyRecord->GetPropertyId(), propNode);
+                    }
 
                     DynamicType* typeWithProperty = object->GetDynamicType();
                     if(IsCaching() && !propertyRecord->IsNumeric() && !info.IsNoCache() && typeWithProperty->GetIsShared() && typeWithProperty->GetTypeHandler()->IsPathTypeHandler())

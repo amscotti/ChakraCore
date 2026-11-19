@@ -21,7 +21,8 @@ enum class JSONContentType : uint8
     True,
     False,
     Number,
-    String
+    String,
+    RawJSON
 };
 
 typedef SListCounted<JSONObjectProperty, Recycler> JSONObject;
@@ -84,6 +85,7 @@ private:
     Field(charcount_t) gapLength;
     Field(JSONProperty*) jsonContent;
     Field(const char16*) gap;
+    Field(bool) hasRawJSON;
 
     DynamicObject* ReconstructObject(_In_ JSONObject* valueList) const;
     JavascriptArray* ReconstructArray(_In_ JSONArray* valueArray) const;
@@ -98,7 +100,7 @@ protected:
     DEFINE_VTABLE_CTOR(LazyJSONString, JavascriptString);
 
 public:
-    LazyJSONString(_In_ JSONProperty* content, charcount_t length, _In_opt_ const char16* gap, charcount_t gapLength, _In_ StaticType* type);
+    LazyJSONString(_In_ JSONProperty* content, charcount_t length, _In_opt_ const char16* gap, charcount_t gapLength, _In_ StaticType* type, bool hasRawJSON = false);
     Var TryParse() const;
 
     // Tells if the string has a gap with characters that might impact JSON.parse

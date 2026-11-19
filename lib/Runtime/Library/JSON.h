@@ -24,4 +24,5 @@ namespace JSON
     Js::Var Parse(Js::RecyclableObject* function, Js::CallInfo callInfo, ...);
     Js::Var RawJSON(Js::RecyclableObject* function, Js::CallInfo callInfo, ...);
     Js::Var IsRawJSON(Js::RecyclableObject* function, Js::CallInfo callInfo, ...);
+    bool IsRawJSONObject(Js::Var val, Js::ScriptContext* scriptContext, Js::JavascriptString** outRawString = nullptr);
 } // namespace JSON

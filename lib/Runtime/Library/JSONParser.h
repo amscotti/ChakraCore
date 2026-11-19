@@ -10,6 +10,30 @@ namespace JSON
 {
     class JSONDeferredParserRootNode;
 
+    struct JsonParseNode;
+    typedef JsUtil::BaseDictionary<Js::PropertyId, JsonParseNode*, Recycler, PowerOf2SizePolicy> JsonParsePropertyMap;
+    typedef JsUtil::List<JsonParseNode*, Recycler> JsonParseElementList;
+
+    struct JsonParseNode
+    {
+        Field(Js::Var) parsedValue;
+        Field(JsonParsePropertyMap*) properties;
+        Field(JsonParseElementList*) elements;
+        Field(uint32) sourceStart;
+        Field(uint32) sourceLength;
+        Field(bool) isPrimitive;
+
+        JsonParseNode()
+            : parsedValue(nullptr),
+              properties(nullptr),
+              elements(nullptr),
+              sourceStart(0),
+              sourceLength(0),
+              isPrimitive(false)
+        {
+        }
+    };
+
     struct JsonTypeCache
     {
         const Js::PropertyRecord* propertyRecord;
@@ -51,7 +75,7 @@ namespace JSON
     {
     public:
         JSONParser(Js::ScriptContext* sc, Js::RecyclableObject* rv) : scriptContext(sc),
-            reviver(rv),  arenaAllocatorObject(nullptr), arenaAllocator(nullptr), typeCacheList(nullptr)
+            reviver(rv), inputString(nullptr), rootParseNode(nullptr), arenaAllocatorObject(nullptr), arenaAllocator(nullptr), typeCacheList(nullptr)
         {
         };
         void Finalizer();
@@ -66,8 +90,9 @@ namespace JSON
             return m_scanner.Scan();
         }
 
-        Js::Var ParseObject();
-        Js::Var WalkProperty(Js::JavascriptString* name, Js::RecyclableObject* holder, Js::PropertyId id, uint64 index, bool hasIndex);
+        Js::Var ParseObject(JsonParseNode** outNode = nullptr);
+        JsonParseNode* CreatePrimitiveParseNode(Js::Var parsedValue, uint32 sourceStart, uint32 sourceLength);
+        Js::Var WalkProperty(Js::JavascriptString* name, Js::RecyclableObject* holder, Js::PropertyId id, uint64 index, bool hasIndex, JsonParseNode* parseNode);
 
         void CheckCurrentToken(int tk, int wErr)
         {
@@ -85,6 +110,8 @@ namespace JSON
         JSONScanner m_scanner;
         Js::ScriptContext* scriptContext;
         Js::RecyclableObject* reviver;
+        Js::JavascriptString* inputString;
+        JsonParseNode* rootParseNode;
         Js::TempGuestArenaAllocatorObject* arenaAllocatorObject;
         ArenaAllocator* arenaAllocator;
         typedef JsUtil::BaseDictionary<const Js::PropertyRecord *, JsonTypeCache*, ArenaAllocator, PowerOf2SizePolicy, Js::PropertyRecordStringHashComparer>  JsonTypeCacheList;

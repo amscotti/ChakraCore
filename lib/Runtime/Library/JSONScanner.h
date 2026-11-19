@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #pragma once
@@ -23,6 +24,8 @@ namespace JSON
         char16* GetCurrentString() { return currentString; } 
         uint GetCurrentStringLen() { return currentIndex; }
         uint GetScanPosition() { return uint(currentChar - inputText); }
+        uint GetTokenStartOffset() const { return tokenStartOffset; }
+        uint GetTokenEndOffset() const { return tokenEndOffset; }
 
         void __declspec(noreturn) ThrowSyntaxError(int wErr)
         {
@@ -75,6 +78,8 @@ namespace JSON
         ::Js::ScriptContext* scriptContext;
 
         uint     currentIndex;
+        uint     tokenStartOffset;
+        uint     tokenEndOffset;
         char16* currentString;
         __field_ecount(stringBufferLength) char16* stringBuffer;
         int      stringBufferLength;

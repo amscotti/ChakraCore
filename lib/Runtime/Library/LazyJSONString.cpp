@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 
@@ -53,11 +54,12 @@ namespace Js
     , 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
     , 0, 0, 0, 0, 0, 0, 0, 0 };
 
-LazyJSONString::LazyJSONString(_In_ JSONProperty* jsonContent, charcount_t length, _In_opt_ const char16* gap, charcount_t gapLength, _In_ StaticType* type) :
+LazyJSONString::LazyJSONString(_In_ JSONProperty* jsonContent, charcount_t length, _In_opt_ const char16* gap, charcount_t gapLength, _In_ StaticType* type, bool hasRawJSON) :
     JavascriptString(type),
     jsonContent(jsonContent),
     gap(gap),
-    gapLength(gapLength)
+    gapLength(gapLength),
+    hasRawJSON(hasRawJSON)
 {
     // Use SetLength to ensure length is valid
     SetLength(length);
@@ -157,6 +159,13 @@ LazyJSONString::TryParse() const
 {
     // If we have thrown away our metadata, we won't be able to Parse
     if (this->jsonContent == nullptr)
+    {
+        return nullptr;
+    }
+
+    // RawJSON fragments must be parsed from the serialized JSON text rather than
+    // reconstructed from cached property values.
+    if (this->hasRawJSON)
     {
         return nullptr;
     }

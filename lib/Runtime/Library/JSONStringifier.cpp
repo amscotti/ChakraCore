@@ -5,6 +5,7 @@
 //-------------------------------------------------------------------------------------------------------
 
 #include "RuntimeLibraryPch.h"
+#include "Library/JSON.h"
 
 namespace Js
 {
@@ -18,7 +19,8 @@ JSONStringifier::JSONStringifier(_In_ ScriptContext* scriptContext) :
     indentLength(0),
     gapLength(0),
     gap(nullptr),
-    propertyList(nullptr)
+    propertyList(nullptr),
+    hasRawJSON(false)
 {
 }
 
@@ -222,7 +224,8 @@ JSONStringifier::Stringify(_In_ ScriptContext* scriptContext, _In_ Var value, _I
             stringifier.totalStringLength,
             stringifier.GetGap(),
             stringifier.GetGapLength(),
-            library->GetStringTypeStatic());
+            library->GetStringTypeStatic(),
+            stringifier.HasRawJSON());
     }
 }
 
@@ -909,6 +912,15 @@ JSONStringifier::ReadProperty(
 
         if (isObject)
         {
+            JavascriptString* rawString = nullptr;
+            if (JSON::IsRawJSONObject(valueObj, this->scriptContext, &rawString))
+            {
+                prop->type = JSONContentType::RawJSON;
+                prop->stringValue = rawString;
+                this->totalStringLength = UInt32Math::Add(this->totalStringLength, rawString->GetLength());
+                this->hasRawJSON = true;
+                return;
+            }
             prop->type = JSONContentType::Object;
             prop->obj = this->ReadObject(valueObj, objectStack);
             return;

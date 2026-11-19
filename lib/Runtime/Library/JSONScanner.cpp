@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #include "RuntimeLibraryPch.h"
@@ -12,7 +13,8 @@ namespace JSON
     // -------- Scanner implementation ------------//
     JSONScanner::JSONScanner()
         : inputText(0), inputLen(0), pToken(0), stringBuffer(0), allocator(0), allocatorObject(0),
-        currentRangeCharacterPairList(0), stringBufferLength(0), currentIndex(0)
+        currentRangeCharacterPairList(0), stringBufferLength(0), currentIndex(0),
+        tokenStartOffset(0), tokenEndOffset(0)
     {
     }
 
@@ -37,6 +39,8 @@ namespace JSON
         pToken = pOutToken;
         scriptContext = sc;
         this->allocator = allocator;
+        this->tokenStartOffset = 0;
+        this->tokenEndOffset = 0;
     }
 
     tokens JSONScanner::Scan()
@@ -50,6 +54,7 @@ namespace JSON
             case 0:
                 //EOF
                 currentChar--;
+                tokenStartOffset = tokenEndOffset = uint(currentChar - inputText);
                 return (pToken->tk = tkEOF);
 
             case '\t':
@@ -61,6 +66,7 @@ namespace JSON
 
             case '"':
                 //check for string
+                tokenStartOffset = uint((currentChar - 1) - inputText);
                 return ScanString();
 
             case '0':
@@ -76,6 +82,7 @@ namespace JSON
                 //decimal digit starts a number
                 {
                     currentChar--;
+                    tokenStartOffset = uint(currentChar - inputText);
 
                     // we use StrToDbl() here for compat with the rest of the engine. StrToDbl() accept a larger syntax.
                     // Verify first the JSON grammar.
@@ -96,29 +103,42 @@ namespace JSON
                     pToken->tk = tkFltCon;
                     pToken->SetDouble(val, false);
                     currentChar = end;
+                    tokenEndOffset = uint(currentChar - inputText);
                     return tkFltCon;
                 }
 
             case ',':
+                tokenStartOffset = uint((currentChar - 1) - inputText);
+                tokenEndOffset = uint(currentChar - inputText);
                 return (pToken->tk = tkComma);
 
             case ':':
+                tokenStartOffset = uint((currentChar - 1) - inputText);
+                tokenEndOffset = uint(currentChar - inputText);
                 return (pToken->tk = tkColon);
 
             case '[':
+                tokenStartOffset = uint((currentChar - 1) - inputText);
+                tokenEndOffset = uint(currentChar - inputText);
                 return (pToken->tk = tkLBrack);
 
             case ']':
+                tokenStartOffset = uint((currentChar - 1) - inputText);
+                tokenEndOffset = uint(currentChar - inputText);
                 return (pToken->tk = tkRBrack);
 
             case '-':
+                tokenStartOffset = uint((currentChar - 1) - inputText);
+                tokenEndOffset = uint(currentChar - inputText);
                 return (pToken->tk = tkSub);
 
             case 'n':
                 //check for 'null'
                 if (currentChar + 2 < inputText + inputLen  && currentChar[0] == 'u' && currentChar[1] == 'l' && currentChar[2] == 'l')
                 {
+                    tokenStartOffset = uint((currentChar - 1) - inputText);
                     currentChar += 3;
+                    tokenEndOffset = uint(currentChar - inputText);
                     return (pToken->tk = tkNULL);
                 }
                ThrowSyntaxError(JSERR_JsonIllegalChar);
@@ -127,7 +147,9 @@ namespace JSON
                 //check for 'true'
                 if (currentChar + 2 < inputText + inputLen  && currentChar[0] == 'r' && currentChar[1] == 'u' && currentChar[2] == 'e')
                 {
+                    tokenStartOffset = uint((currentChar - 1) - inputText);
                     currentChar += 3;
+                    tokenEndOffset = uint(currentChar - inputText);
                     return (pToken->tk = tkTRUE);
                 }
                ThrowSyntaxError(JSERR_JsonIllegalChar);
@@ -136,15 +158,21 @@ namespace JSON
                 //check for 'false'
                 if (currentChar + 3 < inputText + inputLen  && currentChar[0] == 'a' && currentChar[1] == 'l' && currentChar[2] == 's' && currentChar[3] == 'e')
                 {
+                    tokenStartOffset = uint((currentChar - 1) - inputText);
                     currentChar += 4;
+                    tokenEndOffset = uint(currentChar - inputText);
                     return (pToken->tk = tkFALSE);
                 }
                ThrowSyntaxError(JSERR_JsonIllegalChar);
 
             case '{':
+                tokenStartOffset = uint((currentChar - 1) - inputText);
+                tokenEndOffset = uint(currentChar - inputText);
                 return (pToken->tk = tkLCurly);
 
             case '}':
+                tokenStartOffset = uint((currentChar - 1) - inputText);
+                tokenEndOffset = uint(currentChar - inputText);
                 return (pToken->tk = tkRCurly);
 
             default:
@@ -153,6 +181,7 @@ namespace JSON
 
         }
 
+        tokenStartOffset = tokenEndOffset = uint(currentChar - inputText);
         return (pToken->tk = tkEOF);
     }
 
@@ -401,6 +430,7 @@ namespace JSON
                 GetCurrentStringLen(), GetCurrentString());
         }
 
+        tokenEndOffset = uint(currentChar - inputText);
         return (pToken->tk = tkStrCon);
     }
 

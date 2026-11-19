@@ -63,12 +63,15 @@ namespace JSON
 
         TryFinally([&]()
         {
-            LazyJSONString* lazyString = JavascriptOperators::TryFromVar<LazyJSONString>(input);
-            if (lazyString)
+            if (reviver == nullptr)
             {
-                // Try to reconstruct object based on the data collected during stringify
-                // In case of semantically important gap, this call may fail and we will need to do real parse
-                result = lazyString->TryParse();
+                LazyJSONString* lazyString = JavascriptOperators::TryFromVar<LazyJSONString>(input);
+                if (lazyString)
+                {
+                    // Try to reconstruct object based on the data collected during stringify
+                    // In case of semantically important gap, this call may fail and we will need to do real parse
+                    result = lazyString->TryParse();
+                }
             }
             if (result == nullptr)
             {
@@ -149,15 +152,118 @@ namespace JSON
         return lazy;
     }
 
+    static bool IsJSONWhitespace(char16 ch)
+    {
+        return ch == 0x0009 || ch == 0x000A || ch == 0x000D || ch == 0x0020;
+    }
+
+    bool IsRawJSONObject(Js::Var val, Js::ScriptContext* scriptContext, Js::JavascriptString** outRawString)
+    {
+        if (val == nullptr || JavascriptOperators::GetTypeId(val) != TypeIds_Object)
+        {
+            return false;
+        }
+
+        if (!VirtualTableInfo<DynamicObject>::HasVirtualTable(val) &&
+            !VirtualTableInfo<CrossSiteObject<DynamicObject>>::HasVirtualTable(val))
+        {
+            return false;
+        }
+
+        DynamicObject* dynObj = UnsafeVarTo<DynamicObject>(val);
+        Var hidden = nullptr;
+        if (!dynObj->GetInternalProperty(dynObj, InternalPropertyIds::HiddenObject, &hidden, nullptr, dynObj->GetScriptContext()) ||
+            hidden != TaggedInt::ToVarUnchecked(kRawJsonHiddenSentinel))
+        {
+            return false;
+        }
+
+        if (outRawString != nullptr)
+        {
+            const PropertyRecord* propRecord = nullptr;
+            scriptContext->GetOrAddPropertyRecord(_u("rawJSON"), 7, &propRecord);
+            Var rawVar = nullptr;
+            BOOL found = dynObj->GetProperty(dynObj, propRecord->GetPropertyId(), &rawVar, nullptr, scriptContext);
+            AssertOrFailFast(found && rawVar != nullptr);
+            rawVar = CrossSite::MarshalVar(scriptContext, rawVar);
+            AssertOrFailFast(VarIs<JavascriptString>(rawVar));
+            *outRawString = UnsafeVarTo<JavascriptString>(rawVar);
+        }
+
+        return true;
+    }
+
     Js::Var RawJSON(Js::RecyclableObject* function, Js::CallInfo callInfo, ...)
     {
         PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
 
         ARGUMENTS(args, callInfo);
         Js::ScriptContext* scriptContext = function->GetScriptContext();
+        Js::JavascriptLibrary* library = scriptContext->GetLibrary();
+        AUTO_TAG_NATIVE_LIBRARY_ENTRY(function, callInfo, _u("JSON.rawJSON"));
         Assert(!(callInfo.Flags & Js::CallFlags_New));
 
-        return scriptContext->GetLibrary()->GetUndefined();
+        Js::Var textArg = (args.Info.Count > 1) ? args[1] : library->GetUndefined();
+        Js::JavascriptString* jsonString = JavascriptOperators::TryFromVar<Js::JavascriptString>(textArg);
+        if (!jsonString)
+        {
+            jsonString = Js::JavascriptConversion::ToString(textArg, scriptContext);
+        }
+
+        const char16* str = jsonString->GetSz();
+        charcount_t len = jsonString->GetLength();
+
+        if (len == 0 || IsJSONWhitespace(str[0]) || IsJSONWhitespace(str[len - 1]))
+        {
+            Js::JavascriptError::ThrowSyntaxError(scriptContext, JSERR_JsonSyntax);
+        }
+
+        Token token;
+        JSONScanner scanner;
+        TryFinally([&]()
+        {
+            scanner.Init(str, len, &token, scriptContext, str, nullptr);
+            tokens tk = scanner.Scan();
+            switch (tk)
+            {
+            case tkStrCon:
+            case tkFltCon:
+            case tkTRUE:
+            case tkFALSE:
+            case tkNULL:
+                break;
+            case tkSub:
+            {
+                uint subEnd = scanner.GetTokenEndOffset();
+                if (scanner.Scan() != tkFltCon || scanner.GetTokenStartOffset() != subEnd)
+                {
+                    scanner.ThrowSyntaxError(JSERR_JsonBadNumber);
+                }
+                break;
+            }
+            default:
+                scanner.ThrowSyntaxError(JSERR_JsonSyntax);
+            }
+
+            if (scanner.Scan() != tkEOF || scanner.GetScanPosition() != len)
+            {
+                scanner.ThrowSyntaxError(JSERR_JsonSyntax);
+            }
+        },
+            [&](bool /*hasException*/)
+        {
+            scanner.Finalizer();
+        });
+
+        Js::DynamicObject* obj = library->CreateObject(library->GetNull());
+        obj->SetInternalProperty(Js::InternalPropertyIds::HiddenObject, Js::TaggedInt::ToVarUnchecked(kRawJsonHiddenSentinel), Js::PropertyOperation_Force, nullptr);
+
+        const Js::PropertyRecord* propRecord = nullptr;
+        scriptContext->GetOrAddPropertyRecord(_u("rawJSON"), 7, &propRecord);
+        obj->InitProperty(propRecord->GetPropertyId(), jsonString);
+        obj->Freeze();
+
+        return obj;
     }
 
     Js::Var IsRawJSON(Js::RecyclableObject* function, Js::CallInfo callInfo, ...)
@@ -166,9 +272,10 @@ namespace JSON
 
         ARGUMENTS(args, callInfo);
         Js::ScriptContext* scriptContext = function->GetScriptContext();
+        AUTO_TAG_NATIVE_LIBRARY_ENTRY(function, callInfo, _u("JSON.isRawJSON"));
         Assert(!(callInfo.Flags & Js::CallFlags_New));
 
-        return scriptContext->GetLibrary()->GetUndefined();
+        return scriptContext->GetLibrary()->CreateBoolean(args.Info.Count > 1 && IsRawJSONObject(args[1], scriptContext, nullptr));
     }
 
 } // namespace JSON

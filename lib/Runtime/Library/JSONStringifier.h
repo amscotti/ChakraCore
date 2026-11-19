@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 
@@ -55,6 +56,7 @@ private:
     charcount_t indentLength;
     charcount_t gapLength;
     char16* gap;
+    bool hasRawJSON;
 
     Var TryConvertPrimitiveObject(_In_ RecyclableObject* value);
     Var ToJSON(_In_ JavascriptString* key, _In_ RecyclableObject* valueObject);
@@ -113,6 +115,7 @@ public:
     const char16* GetGap() const { return this->gap; };
     charcount_t GetGapLength() const { return this->gapLength; }
     bool HasReplacerFunction() const { return this->replacerFunction != nullptr; }
+    bool HasRawJSON() const { return this->hasRawJSON; }
 
     bool HasComplexGap() const;
 
