@@ -1034,8 +1034,22 @@ LGetRight:
     pch++;
     if (NULL == pchMinDig)
     {
-        for ( ; *pch == '0'; pch++)
-            lwAdj--;
+        for ( ; ; pch++)
+        {
+            if (*pch == '0')
+            {
+                lwAdj--;
+                continue;
+            }
+            if (*pch == '_' && isNumericSeparatorEnabled &&
+                Js::NumberUtilities::IsDigit(*(pch - 1)) &&
+                Js::NumberUtilities::IsDigit(*(pch + 1)))
+            {
+                hasNumericSeparators = true;
+                continue;
+            }
+            break;
+        }
         pchMinDig = pch;
     }
 LGetRightDigit:
@@ -1141,17 +1155,18 @@ LEnd:
         // digits with a '0' to make them insignificant, as the spec requests). So, the following need to be done:
         const int32 numExcessiveDigits = cchDig - kcchMaxSig;
 
-        // Move pchLimDig to the left over numExcessiveDigits digits. Note that it needs to move over digits; the decimal point
-        // does not count as a digit. We determine if pchLimDig would jump over the decimal point by using the lwAdj value and
-        // if so, jump over one more character. Note also that if lwAdj is zero, there may or may not be a decimal point, and
-        // pchLimDig would only need to jump over a decimal point if it exists.
-        if (-lwAdj <= numExcessiveDigits &&
-            (lwAdj != 0 || pchLimDig[-1] == _u('.')))
+        // Move pchLimDig to the left over numExcessiveDigits actual digits,
+        // skipping any decimal point or numeric separator characters.
+        int32 digitsToDrop = numExcessiveDigits;
+        while (digitsToDrop > 0)
         {
-            // Need to jump over the decimal point
             --pchLimDig;
+            if (*pchLimDig != '.' && *pchLimDig != '_')
+            {
+                Assert(Js::NumberUtilities::IsDigit(*pchLimDig));
+                --digitsToDrop;
+            }
         }
-        pchLimDig -= numExcessiveDigits;
 
         // We previously considered that the decimal point is initially after the last digit in the input, and is moved to the
         // right by lwAdj digits. Now, we're going to consider that the decimal point is initially after the kcchMaxSig'th

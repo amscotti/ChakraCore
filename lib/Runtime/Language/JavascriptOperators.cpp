@@ -7334,10 +7334,8 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
 
     Var JavascriptOperators::NewScObjectHostDispatchOrProxy(RecyclableObject * function, ScriptContext * requestContext)
     {
-        ScriptContext* functionScriptContext = function->GetScriptContext();
-
-        RecyclableObject * prototype = JavascriptOperators::GetPrototypeObject(function, functionScriptContext);
-        prototype = VarTo<RecyclableObject>(CrossSite::MarshalVar(requestContext, prototype, functionScriptContext));
+        RecyclableObject * prototype = JavascriptOperators::GetPrototypeObject(function, requestContext);
+        prototype = VarTo<RecyclableObject>(CrossSite::MarshalVar(requestContext, prototype));
 
         Var object = requestContext->GetLibrary()->CreateObject(prototype);
         JS_ETW(EventWriteJSCRIPT_RECYCLER_ALLOCATE_OBJECT(object));
@@ -12539,18 +12537,23 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
         // ES2025 7.3.24 GetFunctionRealm. A Proxy or bound function does not
         // necessarily carry its target's ScriptContext, so follow the spec's
         // target chain instead of using function->GetScriptContext(). A revoked
-        // Proxy target throws JSERR_ErrorOnRevokedProxy from GetTarget().
+        // Proxy throws JSERR_ErrorOnRevokedProxy in the caller's realm.
         while (true)
         {
             if (VarIs<JavascriptProxy>(function))
             {
-                function = VarTo<JavascriptProxy>(function)->GetTarget();
+                JavascriptProxy* proxy = VarTo<JavascriptProxy>(function);
+                if (proxy->IsRevoked())
+                {
+                    JavascriptError::ThrowTypeError(requestContext != nullptr ? requestContext : proxy->GetScriptContext(), JSERR_ErrorOnRevokedProxy, _u(""));
+                }
+                function = proxy->GetTarget();
                 continue;
             }
 
             if (VarIs<BoundFunction>(function))
             {
-                JavascriptFunction* target = VarTo<BoundFunction>(function)->GetTargetFunction();
+                RecyclableObject* target = VarTo<BoundFunction>(function)->GetDirectTargetFunction();
                 if (target == nullptr)
                 {
                     AssertMsg(false, "BoundFunction without a callable target");
