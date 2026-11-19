@@ -27,6 +27,7 @@ enum ErrorTypeEnum
     kjstTypeError,
     kjstURIError,
     kjstAggregateError,
+    kjstSuppressedError,
     kjstWebAssemblyCompileError,
     kjstWebAssemblyRuntimeError,
     kjstWebAssemblyLinkError,

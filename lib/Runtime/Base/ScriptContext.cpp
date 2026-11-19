@@ -1059,6 +1059,8 @@ namespace Js
         Output::Print(_u("    WeakSet                        %8d   %8d\n"), typeCount[TypeIds_WeakSet], instanceCount[TypeIds_WeakSet]);
         Output::Print(_u("    WeakRef                        %8d   %8d\n"), typeCount[TypeIds_WeakRef], instanceCount[TypeIds_WeakRef]);
         Output::Print(_u("    FinalizationRegistry           %8d   %8d\n"), typeCount[TypeIds_FinalizationRegistry], instanceCount[TypeIds_FinalizationRegistry]);
+        Output::Print(_u("    DisposableStack                %8d   %8d\n"), typeCount[TypeIds_DisposableStack], instanceCount[TypeIds_DisposableStack]);
+        Output::Print(_u("    AsyncDisposableStack           %8d   %8d\n"), typeCount[TypeIds_AsyncDisposableStack], instanceCount[TypeIds_AsyncDisposableStack]);
         Output::Print(_u("    ArrayIterator                  %8d   %8d\n"), typeCount[TypeIds_ArrayIterator], instanceCount[TypeIds_ArrayIterator]);
         Output::Print(_u("    MapIterator                    %8d   %8d\n"), typeCount[TypeIds_MapIterator], instanceCount[TypeIds_MapIterator]);
         Output::Print(_u("    SetIterator                    %8d   %8d\n"), typeCount[TypeIds_SetIterator], instanceCount[TypeIds_SetIterator]);

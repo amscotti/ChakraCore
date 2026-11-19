@@ -11,8 +11,8 @@
               "constructor": {
                 "#__proto__": "function <large string>",
                 "length": "number 1",
-                "prototype": "Object {...}",
                 "name": "string Object",
+                "prototype": "Object {...}",
                 "defineProperty": "function <large string>",
                 "getOwnPropertyDescriptor": "function <large string>",
                 "getOwnPropertyDescriptors": "function <large string>",
@@ -118,6 +118,8 @@
               "isConcatSpreadable": "symbol <large string>",
               "iterator": "symbol <large string>",
               "asyncIterator": "symbol <large string>",
+              "dispose": "symbol <large string>",
+              "asyncDispose": "symbol <large string>",
               "species": "symbol <large string>",
               "toPrimitive": "symbol <large string>",
               "toStringTag": "symbol <large string>",

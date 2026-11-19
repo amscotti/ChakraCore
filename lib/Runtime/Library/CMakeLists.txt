@@ -107,6 +107,7 @@ set(CRLIB_SOURCE_CODES
     JavascriptWeakSet.cpp
     JavascriptWeakRef.cpp
     JavascriptFinalizationRegistry.cpp
+    JavascriptDisposableStack.cpp
     JsBuiltInEngineInterfaceExtensionObject.cpp
     LazyJSONString.cpp
     LiteralString.cpp

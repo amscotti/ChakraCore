@@ -54,6 +54,7 @@ namespace Js
             static FunctionInfo NewTypeErrorInstance;
             static FunctionInfo NewURIErrorInstance;
             static FunctionInfo NewAggregateErrorInstance;
+            static FunctionInfo NewSuppressedErrorInstance;
             static FunctionInfo NewWebAssemblyCompileErrorInstance;
             static FunctionInfo NewWebAssemblyRuntimeErrorInstance;
             static FunctionInfo NewWebAssemblyLinkErrorInstance;
@@ -150,6 +151,9 @@ namespace Js
         static JavascriptError* CreateFromCompileScriptException(ScriptContext* scriptContext, CompileScriptException* cse, const WCHAR * sourceUrl = nullptr);
 
         static Var NewAggregateErrorInstance(RecyclableObject* function, CallInfo callinfo, ...);
+        static Var NewSuppressedErrorInstance(RecyclableObject* function, CallInfo callinfo, ...);
+        static JavascriptError* CreateSuppressedError(ScriptContext* scriptContext, Var error, Var suppressed);
+        static void SetSuppressedErrorFields(JavascriptError* pError, Var error, Var suppressed, ScriptContext* scriptContext);
 
         static void SetErrorsList(JavascriptError* pError, SList<Var, Recycler>* errorsList, ScriptContext* scriptContext);
         static void SetErrorsList(JavascriptError* pError, JavascriptArray* errors, ScriptContext* scriptContext);

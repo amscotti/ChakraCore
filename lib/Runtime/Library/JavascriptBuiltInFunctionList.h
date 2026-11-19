@@ -699,4 +699,25 @@ BUILTIN(IntlDurationFormat, FormatToParts, EntryFormatToParts, FunctionInfo::Err
 BUILTIN(IntlDurationFormat, ResolvedOptions, EntryResolvedOptions, FunctionInfo::ErrorOnNew)
 #endif
 
+BUILTIN(JavascriptError, NewSuppressedErrorInstance, NewSuppressedErrorInstance, FunctionInfo::None)
+
+BUILTIN(JavascriptIterator, SymbolDispose, EntrySymbolDispose, FunctionInfo::ErrorOnNew)
+BUILTIN(JavascriptIterator, SymbolAsyncDispose, EntrySymbolAsyncDispose, FunctionInfo::ErrorOnNew)
+
+BUILTIN(JavascriptDisposableStack, NewInstance, NewInstance, FunctionInfo::SkipDefaultNewObject)
+BUILTIN(JavascriptDisposableStack, Use, EntryUse, FunctionInfo::ErrorOnNew)
+BUILTIN(JavascriptDisposableStack, Adopt, EntryAdopt, FunctionInfo::ErrorOnNew)
+BUILTIN(JavascriptDisposableStack, Defer, EntryDefer, FunctionInfo::ErrorOnNew)
+BUILTIN(JavascriptDisposableStack, Dispose, EntryDispose, FunctionInfo::ErrorOnNew)
+BUILTIN(JavascriptDisposableStack, Move, EntryMove, FunctionInfo::ErrorOnNew)
+BUILTIN(JavascriptDisposableStack, GetterDisposed, EntryGetterDisposed, FunctionInfo::ErrorOnNew)
+
+BUILTIN(JavascriptAsyncDisposableStack, NewInstance, NewInstance, FunctionInfo::SkipDefaultNewObject)
+BUILTIN(JavascriptAsyncDisposableStack, Use, EntryUse, FunctionInfo::ErrorOnNew)
+BUILTIN(JavascriptAsyncDisposableStack, Adopt, EntryAdopt, FunctionInfo::ErrorOnNew)
+BUILTIN(JavascriptAsyncDisposableStack, Defer, EntryDefer, FunctionInfo::ErrorOnNew)
+BUILTIN(JavascriptAsyncDisposableStack, DisposeAsync, EntryDisposeAsync, FunctionInfo::ErrorOnNew)
+BUILTIN(JavascriptAsyncDisposableStack, Move, EntryMove, FunctionInfo::ErrorOnNew)
+BUILTIN(JavascriptAsyncDisposableStack, GetterDisposed, EntryGetterDisposed, FunctionInfo::ErrorOnNew)
+
 #undef BUILTIN_TEMPLATE

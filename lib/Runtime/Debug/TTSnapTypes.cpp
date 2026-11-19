@@ -41,7 +41,21 @@ namespace TTD
             {
                 TTDAssert(pRecord->PropertyId == threadContext->GetNextPropertyId(), "We need to do these in the appropriate order!!!");
 
-                newPropertyRecord = threadContext->UncheckedAddPropertyId(pname, plen, /*bind*/false, /*isSymbol*/true);
+                if(pRecord->IsBound)
+                {
+                    if(plen == (int32)(_countof(_u("Symbol.dispose")) - 1) && wmemcmp(pname, _u("Symbol.dispose"), plen) == 0)
+                    {
+                        newPropertyRecord = threadContext->GetSymbolDisposePropertyRecord();
+                    }
+                    else if(plen == (int32)(_countof(_u("Symbol.asyncDispose")) - 1) && wmemcmp(pname, _u("Symbol.asyncDispose"), plen) == 0)
+                    {
+                        newPropertyRecord = threadContext->GetSymbolAsyncDisposePropertyRecord();
+                    }
+                }
+                if(newPropertyRecord == nullptr)
+                {
+                    newPropertyRecord = threadContext->UncheckedAddPropertyId(pname, plen, /*bind*/false, /*isSymbol*/true);
+                }
             }
             else
             {

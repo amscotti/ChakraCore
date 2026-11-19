@@ -197,6 +197,10 @@ namespace Js
     class JavascriptWeakRef;
     class JavascriptFinalizationRegistry;
     class JavascriptFinalizationRegistryCleanupTaskFunction;
+    class DisposeCapability;
+    class JavascriptDisposableStack;
+    class JavascriptAsyncDisposableStack;
+    class JavascriptAsyncDisposableStackStepFunction;
     class DynamicObject;
     class HostObjectBase;
     class RootObjectBase;

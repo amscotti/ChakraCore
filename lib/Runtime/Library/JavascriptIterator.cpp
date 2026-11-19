@@ -250,6 +250,79 @@ namespace
         return args[0];
     }
 
+    Var JavascriptIterator::EntrySymbolDispose(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+        ARGUMENTS(args, callInfo);
+        Assert(!(callInfo.Flags & CallFlags_New));
+
+        ScriptContext* scriptContext = function->GetScriptContext();
+        JavascriptLibrary* library = scriptContext->GetLibrary();
+        Var undefinedVar = library->GetUndefined();
+        Var thisVar = args.Info.Count > 0 ? args[0] : undefinedVar;
+
+        // %Iterator.prototype%[@@dispose]() step 2: Let return be ? GetMethod(O, "return").
+        RecyclableObject* obj = nullptr;
+        if (!JavascriptConversion::ToObject(thisVar, scriptContext, &obj))
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NeedObject, _u("[Symbol.dispose]"));
+        }
+
+        Var returnMethod = JavascriptOperators::GetPropertyNoCache(obj, PropertyIds::return_, scriptContext);
+        if (!JavascriptOperators::IsUndefinedOrNull(returnMethod))
+        {
+            CallVar(scriptContext, returnMethod, thisVar);
+        }
+
+        return undefinedVar;
+    }
+
+    Var JavascriptIterator::EntrySymbolAsyncDispose(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+        ARGUMENTS(args, callInfo);
+        Assert(!(callInfo.Flags & CallFlags_New));
+
+        ScriptContext* scriptContext = function->GetScriptContext();
+        JavascriptLibrary* library = scriptContext->GetLibrary();
+        JavascriptPromiseCapability* promiseCapability = JavascriptPromise::NewPromiseCapability(library->GetPromiseConstructor(), scriptContext);
+
+        Var undefinedVar = library->GetUndefined();
+        JavascriptExceptionObject* exception = nullptr;
+        try
+        {
+            Var thisVar = args.Info.Count > 0 ? args[0] : undefinedVar;
+            RecyclableObject* obj = nullptr;
+            if (!JavascriptConversion::ToObject(thisVar, scriptContext, &obj))
+            {
+                JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NeedObject, _u("[Symbol.asyncDispose]"));
+            }
+
+            Var returnMethod = JavascriptOperators::GetPropertyNoCache(obj, PropertyIds::return_, scriptContext);
+            if (JavascriptOperators::IsUndefinedOrNull(returnMethod))
+            {
+                JavascriptPromise::TryCallResolveOrRejectHandler(promiseCapability->GetResolve(), undefinedVar, scriptContext);
+                return promiseCapability->GetPromise();
+            }
+
+            Var result = CallVar(scriptContext, returnMethod, thisVar);
+            JavascriptPromise* resultWrapper = JavascriptPromise::InternalPromiseResolve(result, scriptContext);
+            JavascriptPromiseThunkFinallyFunction* onFulfilled = library->CreatePromiseThunkFinallyFunction(
+                JavascriptPromise::EntryThunkFinallyFunction, undefinedVar, false);
+            JavascriptPromise::PerformPromiseThen(resultWrapper, promiseCapability, onFulfilled, nullptr, scriptContext);
+        }
+        catch (const JavascriptException& err)
+        {
+            exception = err.GetAndClear();
+        }
+        if (exception != nullptr)
+        {
+            JavascriptPromise::TryRejectWithExceptionObject(exception, promiseCapability->GetReject(), scriptContext);
+        }
+
+        return promiseCapability->GetPromise();
+    }
+
     Var JavascriptIterator::NewInstance(RecyclableObject* function, CallInfo callInfo, ...)
     {
         PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);

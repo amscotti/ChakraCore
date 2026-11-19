@@ -65,6 +65,24 @@
         "prototype": "Object {...}",
         "name": "string <large string>"
       },
+      "DisposableStack": {
+        "#__proto__": "function <large string>",
+        "length": "number 0",
+        "prototype": "Object {...}",
+        "name": "string DisposableStack"
+      },
+      "AsyncDisposableStack": {
+        "#__proto__": "function <large string>",
+        "length": "number 0",
+        "prototype": "Object {...}",
+        "name": "string <large string>"
+      },
+      "SuppressedError": {
+        "#__proto__": "function <large string>",
+        "prototype": "Object {...}",
+        "length": "number 3",
+        "name": "string SuppressedError"
+      },
       "foo": {
         "#__proto__": "function <large string>",
         "prototype": "Object {...}",

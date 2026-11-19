@@ -596,6 +596,13 @@ HELPERCALLCHK(LdPrivateDynamic,         Js::JavascriptOperators::OP_LdPrivateDyn
 HELPERCALLCHK(StPrivateDynamic,         Js::JavascriptOperators::OP_StPrivateDynamic, AttrCanThrow)
 HELPERCALLCHK(NewAsyncFromSyncIterator, Js::JavascriptOperators::OP_NewAsyncFromSyncIterator, AttrCanNotBeReentrant)
 HELPERCALLCHK(NewAwaitObject,           Js::JavascriptOperators::OP_NewAwaitObject, AttrCanNotBeReentrant)
+HELPERCALLCHK(Op_AddSyncDisposableResource,  Js::JavascriptOperators::OP_AddSyncDisposableResource,  AttrCanThrow)
+HELPERCALLCHK(Op_AddAsyncDisposableResource, Js::JavascriptOperators::OP_AddAsyncDisposableResource, AttrCanThrow)
+HELPERCALLCHK(Op_RecordDisposeError,         Js::JavascriptOperators::OP_RecordDisposeError,         AttrCanThrow)
+HELPERCALLCHK(Op_DisposeResourcesSync,       Js::JavascriptOperators::OP_DisposeResourcesSync,       AttrCanThrow)
+HELPERCALLCHK(Op_StepDisposableResource,     Js::JavascriptOperators::OP_StepDisposableResource,     AttrCanThrow)
+HELPERCALLCHK(Op_TakeDisposeAwaitValue,      Js::JavascriptOperators::OP_TakeDisposeAwaitValue,      AttrCanThrow)
+HELPERCALLCHK(Op_FinalizeDisposeResources,   Js::JavascriptOperators::OP_FinalizeDisposeResources,   AttrCanThrow)
 
 HELPERCALL(CreateInterpreterStackFrameForGenerator, Js::InterpreterStackFrame::CreateInterpreterStackFrameForGenerator, AttrCanNotBeReentrant)
 

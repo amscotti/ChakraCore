@@ -687,6 +687,14 @@ namespace Js
         static Var OP_NewAwaitObject(ScriptContext* scriptContext);
         static Var OP_NewAsyncFromSyncIterator(Var syncIterator, ScriptContext* scriptContext);
 
+        static Var OP_AddSyncDisposableResource(Var curStack, Var val, ScriptContext* scriptContext);
+        static Var OP_AddAsyncDisposableResource(Var curStack, Var val, ScriptContext* scriptContext);
+        static Var OP_RecordDisposeError(Var curStack, Var caughtError, ScriptContext* scriptContext);
+        static Var OP_DisposeResourcesSync(Var curStack, ScriptContext* scriptContext);
+        static Var OP_StepDisposableResource(Var curStack, ScriptContext* scriptContext);
+        static Var OP_TakeDisposeAwaitValue(Var curStack, ScriptContext* scriptContext);
+        static Var OP_FinalizeDisposeResources(Var curStack, ScriptContext* scriptContext);
+
         template <typename T>
         static void * JitRecyclerAlloc(DECLSPEC_GUARD_OVERFLOW size_t size, Recycler* recycler)
         {

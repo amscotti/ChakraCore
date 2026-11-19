@@ -45,6 +45,10 @@ namespace Js
         JavascriptSymbol* GetSymbolToPrimitive() { return symbolToPrimitive; }
         JavascriptSymbol* GetSymbolToStringTag() { return symbolToStringTag; }
         JavascriptSymbol* GetSymbolUnscopables() { return symbolUnscopables; }
+        JavascriptSymbol* GetSymbolDispose() { return symbolDispose; }
+        JavascriptSymbol* GetSymbolAsyncDispose() { return symbolAsyncDispose; }
+        PropertyId GetSymbolDisposePropertyId();
+        PropertyId GetSymbolAsyncDisposePropertyId();
 
         JavascriptFunction* GetObjectConstructor() { return objectConstructor; }
         JavascriptFunction* GetArrayConstructor() { return arrayConstructor; }
@@ -76,6 +80,8 @@ namespace Js
         JavascriptFunction* GetWeakSetConstructor() { return weakSetConstructor; }
         JavascriptFunction* GetWeakRefConstructor() { return weakRefConstructor; }
         JavascriptFunction* GetFinalizationRegistryConstructor() { return finalizationRegistryConstructor; }
+        JavascriptFunction* GetDisposableStackConstructor() { return disposableStackConstructor; }
+        JavascriptFunction* GetAsyncDisposableStackConstructor() { return asyncDisposableStackConstructor; }
         JavascriptFunction* GetSymbolConstructor() { return symbolConstructor; }
         JavascriptFunction* GetProxyConstructor() const { return proxyConstructor; }
         JavascriptFunction* GetPromiseConstructor() const { return promiseConstructor; }
@@ -91,6 +97,7 @@ namespace Js
         JavascriptFunction* GetTypeErrorConstructor() const { return typeErrorConstructor; }
         JavascriptFunction* GetURIErrorConstructor() const { return uriErrorConstructor; }
         JavascriptFunction* GetAggregateErrorConstructor() const { return aggregateErrorConstructor;  }
+        JavascriptFunction* GetSuppressedErrorConstructor() const { return suppressedErrorConstructor; }
         JavascriptFunction* GetPromiseResolve() const { return promiseResolveFunction; }
         JavascriptFunction* GetPromiseThen() const { return promiseThenFunction; }
         JavascriptFunction* GetJSONStringify() const { return jsonStringifyFunction; }
@@ -142,6 +149,8 @@ namespace Js
         DynamicObject* GetWeakSetPrototype() { return weakSetPrototype; }
         DynamicObject* GetWeakRefPrototype() { return weakRefPrototype; }
         DynamicObject* GetFinalizationRegistryPrototype() { return finalizationRegistryPrototype; }
+        DynamicObject* GetDisposableStackPrototype() { return disposableStackPrototype; }
+        DynamicObject* GetAsyncDisposableStackPrototype() { return asyncDisposableStackPrototype; }
         DynamicObject* GetSymbolPrototype() { return symbolPrototype; }
         DynamicObject* GetAsyncIteratorPrototype() const { return asyncIteratorPrototype; }
         DynamicObject* GetArrayIteratorPrototype() const { return arrayIteratorPrototype; }
@@ -182,6 +191,7 @@ namespace Js
         DynamicObject* GetTypeErrorPrototype() const { return typeErrorPrototype; }
         DynamicObject* GetURIErrorPrototype() const { return uriErrorPrototype; }
         DynamicObject* GetAggregateErrorPrototype() const { return aggregateErrorPrototype;  }
+        DynamicObject* GetSuppressedErrorPrototype() const { return suppressedErrorPrototype; }
         PropertyId GetPropertyIdSymbolIterator() { return PropertyIds::_symbolIterator; };
         PropertyId GetPropertyIdSymbolToStringTag() { return PropertyIds::_symbolToStringTag; };
         PropertyId GetPropertyIdSymbolUnscopables() { return PropertyIds::_symbolUnscopables; };
@@ -196,6 +206,8 @@ namespace Js
         Field(RuntimeFunction*) weakSetConstructor;
         Field(RuntimeFunction*) weakRefConstructor;
         Field(RuntimeFunction*) finalizationRegistryConstructor;
+        Field(RuntimeFunction*) disposableStackConstructor;
+        Field(RuntimeFunction*) asyncDisposableStackConstructor;
         Field(RuntimeFunction*) arrayConstructor;
         Field(RuntimeFunction*) typedArrayConstructor;
         Field(RuntimeFunction*) Int8ArrayConstructor;
@@ -231,6 +243,7 @@ namespace Js
         Field(RuntimeFunction*) typeErrorConstructor;
         Field(RuntimeFunction*) uriErrorConstructor;
         Field(RuntimeFunction*) aggregateErrorConstructor;
+        Field(RuntimeFunction*) suppressedErrorConstructor;
         Field(RuntimeFunction*) proxyConstructor;
         Field(RuntimeFunction*) promiseConstructor;
         Field(RuntimeFunction*) generatorFunctionConstructor;
@@ -299,6 +312,8 @@ namespace Js
         Field(DynamicObject*) weakSetPrototype;
         Field(DynamicObject*) weakRefPrototype;
         Field(DynamicObject*) finalizationRegistryPrototype;
+        Field(DynamicObject*) disposableStackPrototype;
+        Field(DynamicObject*) asyncDisposableStackPrototype;
         Field(DynamicObject*) symbolPrototype;
         Field(DynamicObject*) asyncIteratorPrototype;           // aka %AsyncIteratorPrototype%
         Field(DynamicObject*) iteratorPrototype;           // aka %IteratorPrototype%
@@ -322,6 +337,7 @@ namespace Js
         Field(DynamicObject*) typeErrorPrototype;
         Field(DynamicObject*) uriErrorPrototype;
         Field(DynamicObject*) aggregateErrorPrototype;
+        Field(DynamicObject*) suppressedErrorPrototype;
 
         //SIMD Prototypes
         Field(DynamicObject*) simdBool8x16Prototype;
@@ -357,6 +373,8 @@ namespace Js
         Field(JavascriptSymbol*) symbolToPrimitive;
         Field(JavascriptSymbol*) symbolToStringTag;
         Field(JavascriptSymbol*) symbolUnscopables;
+        Field(JavascriptSymbol*) symbolDispose;
+        Field(JavascriptSymbol*) symbolAsyncDispose;
 
     public:
         typedef void (CALLBACK *HostPromiseRejectionTrackerCallback)(Var promise, Var reason, bool handled, void *callbackState);

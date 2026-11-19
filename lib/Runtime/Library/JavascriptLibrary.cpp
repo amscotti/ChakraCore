@@ -349,6 +349,7 @@ namespace Js
         INIT_ERROR_PROTO(typeErrorPrototype, InitializeTypeErrorPrototype);
         INIT_ERROR_PROTO(uriErrorPrototype, InitializeURIErrorPrototype);
         INIT_ERROR_PROTO(aggregateErrorPrototype, InitializeAggregateErrorPrototype);
+        INIT_ERROR_PROTO(suppressedErrorPrototype, InitializeSuppressedErrorPrototype);
 
 #ifdef ENABLE_WASM
         if (CONFIG_FLAG(Wasm) && PHASE_ENABLED1(WasmPhase))
@@ -399,6 +400,14 @@ namespace Js
         finalizationRegistryPrototype = DynamicObject::New(recycler,
             DynamicType::New(scriptContext, TypeIds_Object, objectPrototype, nullptr,
             DeferredTypeHandler<InitializeFinalizationRegistryPrototype, DefaultDeferredTypeFilter, true>::GetDefaultInstance()));
+
+        disposableStackPrototype = DynamicObject::New(recycler,
+            DynamicType::New(scriptContext, TypeIds_Object, objectPrototype, nullptr,
+            DeferredTypeHandler<InitializeDisposableStackPrototype, DefaultDeferredTypeFilter, true>::GetDefaultInstance()));
+
+        asyncDisposableStackPrototype = DynamicObject::New(recycler,
+            DynamicType::New(scriptContext, TypeIds_Object, objectPrototype, nullptr,
+            DeferredTypeHandler<InitializeAsyncDisposableStackPrototype, DefaultDeferredTypeFilter, true>::GetDefaultInstance()));
 
         if (scriptContext->GetConfig()->IsES2018AsyncIterationEnabled())
         {
@@ -614,6 +623,7 @@ namespace Js
         INIT_SIMPLE_TYPE(typeErrorType, TypeIds_Error, typeErrorPrototype);
         INIT_SIMPLE_TYPE(uriErrorType, TypeIds_Error, uriErrorPrototype);
         INIT_SIMPLE_TYPE(aggregateErrorType, TypeIds_Error, aggregateErrorPrototype);
+        INIT_SIMPLE_TYPE(suppressedErrorType, TypeIds_Error, suppressedErrorPrototype);
 
 #ifdef ENABLE_WASM
         if (CONFIG_FLAG(Wasm) && PHASE_ENABLED1(WasmPhase))
@@ -818,6 +828,15 @@ namespace Js
 
         finalizationRegistryType = DynamicType::New(scriptContext, TypeIds_FinalizationRegistry, finalizationRegistryPrototype, nullptr,
             PathTypeHandlerNoAttr::New(scriptContext, this->GetRootPath(), 0, 0, 0, true, true), true, true);
+
+        disposableStackType = DynamicType::New(scriptContext, TypeIds_DisposableStack, disposableStackPrototype, nullptr,
+            PathTypeHandlerNoAttr::New(scriptContext, this->GetRootPath(), 0, 0, 0, true, true), true, true);
+
+        asyncDisposableStackType = DynamicType::New(scriptContext, TypeIds_AsyncDisposableStack, asyncDisposableStackPrototype, nullptr,
+            PathTypeHandlerNoAttr::New(scriptContext, this->GetRootPath(), 0, 0, 0, true, true), true, true);
+
+        disposeCapabilityType = DynamicType::New(scriptContext, TypeIds_Object, GetNull(), nullptr,
+            NullTypeHandler<false>::GetDefaultInstance(), true, true);
 
         TypePath *const iteratorResultPath = TypePath::New(recycler);
         iteratorResultPath->Add(BuiltInPropertyRecords::value);
@@ -1109,6 +1128,9 @@ namespace Js
 
         case kjstAggregateError:
             return GetAggregateErrorType();
+
+        case kjstSuppressedError:
+            return GetSuppressedErrorType();
 
         case kjstWebAssemblyCompileError:
             return GetWebAssemblyCompileErrorType();
@@ -1415,6 +1437,16 @@ namespace Js
         return GetObjectPrototypeObject();
     }
 
+    PropertyId JavascriptLibraryBase::GetSymbolDisposePropertyId()
+    {
+        return scriptContext->GetThreadContext()->GetSymbolDisposePropertyId();
+    }
+
+    PropertyId JavascriptLibraryBase::GetSymbolAsyncDisposePropertyId()
+    {
+        return scriptContext->GetThreadContext()->GetSymbolAsyncDisposePropertyId();
+    }
+
     void JavascriptLibraryBase::Finalize(bool isShutdown)
     {
         if (scriptContext)
@@ -1495,6 +1527,8 @@ namespace Js
         symbolToPrimitive = CreateSymbol(BuiltInPropertyRecords::_symbolToPrimitive);
         symbolToStringTag = CreateSymbol(BuiltInPropertyRecords::_symbolToStringTag);
         symbolUnscopables = CreateSymbol(BuiltInPropertyRecords::_symbolUnscopables);
+        symbolDispose = scriptContext->GetSymbol(scriptContext->GetThreadContext()->GetSymbolDisposePropertyRecord());
+        symbolAsyncDispose = scriptContext->GetSymbol(scriptContext->GetThreadContext()->GetSymbolAsyncDisposePropertyRecord());
 
         if (scriptContext->GetConfig()->IsES6RegExSymbolsEnabled())
         {
@@ -1870,6 +1904,14 @@ namespace Js
             DeferredTypeHandler<InitializeFinalizationRegistryConstructor>::GetDefaultInstance());
         AddFunction(globalObject, scriptContext->GetOrAddPropertyIdTracked(_u("FinalizationRegistry")), finalizationRegistryConstructor);
 
+        disposableStackConstructor = CreateBuiltinConstructor(&JavascriptDisposableStack::EntryInfo::NewInstance,
+            DeferredTypeHandler<InitializeDisposableStackConstructor>::GetDefaultInstance());
+        AddFunction(globalObject, scriptContext->GetOrAddPropertyIdTracked(_u("DisposableStack")), disposableStackConstructor);
+
+        asyncDisposableStackConstructor = CreateBuiltinConstructor(&JavascriptAsyncDisposableStack::EntryInfo::NewInstance,
+            DeferredTypeHandler<InitializeAsyncDisposableStackConstructor>::GetDefaultInstance());
+        AddFunction(globalObject, scriptContext->GetOrAddPropertyIdTracked(_u("AsyncDisposableStack")), asyncDisposableStackConstructor);
+
         if (scriptContext->GetConfig()->IsESIteratorHelpersEnabled())
         {
             iteratorConstructor = CreateBuiltinConstructor(&JavascriptIterator::EntryInfo::NewInstance,
@@ -1954,6 +1996,11 @@ namespace Js
                 nativeErrorPrototype);
             AddFunction(globalObject, PropertyIds::AggregateError, aggregateErrorConstructor);
         }
+
+        suppressedErrorConstructor = CreateBuiltinConstructor(&JavascriptError::EntryInfo::NewSuppressedErrorInstance,
+            DeferredTypeHandler<InitializeSuppressedErrorConstructor>::GetDefaultInstance(),
+            errorConstructor);
+        AddFunction(globalObject, scriptContext->GetOrAddPropertyIdTracked(_u("SuppressedError")), suppressedErrorConstructor);
 
 #ifdef ENABLE_WASM
         if (CONFIG_FLAG(Wasm) && PHASE_ENABLED1(WasmPhase))
@@ -2813,6 +2860,7 @@ namespace Js
     INIT_ERROR(TypeError);
     INIT_ERROR(URIError);
     INIT_ERROR_IMPL(AggregateError, AggregateError, 2);
+    INIT_ERROR_IMPL(SuppressedError, SuppressedError, 3);
     INIT_ERROR_IMPL(WebAssemblyCompileError, CompileError, 1);
     INIT_ERROR_IMPL(WebAssemblyRuntimeError, RuntimeError, 1);
     INIT_ERROR_IMPL(WebAssemblyLinkError, LinkError, 1);
@@ -2854,7 +2902,7 @@ namespace Js
 
     bool JavascriptLibrary::InitializeSymbolConstructor(DynamicObject* symbolConstructor, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)
     {
-        typeHandler->Convert(symbolConstructor, mode, 17);
+        typeHandler->Convert(symbolConstructor, mode, 19);
         // Note: Any new function addition/deletion/modification should also be updated in JavascriptLibrary::ProfilerRegisterSymbol
         // so that the update is in sync with profiler
         JavascriptLibrary* library = symbolConstructor->GetLibrary();
@@ -2872,6 +2920,9 @@ namespace Js
         {
             library->AddMember(symbolConstructor, PropertyIds::asyncIterator, library->GetSymbolAsyncIterator(), PropertyNone);
         }
+
+        library->AddMember(symbolConstructor, scriptContext->GetOrAddPropertyIdTracked(_u("dispose")), library->GetSymbolDispose(), PropertyNone);
+        library->AddMember(symbolConstructor, scriptContext->GetOrAddPropertyIdTracked(_u("asyncDispose")), library->GetSymbolAsyncDispose(), PropertyNone);
 
         library->AddMember(symbolConstructor, PropertyIds::species, library->GetSymbolSpecies(), PropertyNone);
 
@@ -5054,6 +5105,108 @@ namespace Js
         return true;
     }
 
+    template <size_t N>
+    bool JavascriptLibrary::InitDisposableStackConstructor(
+        DynamicObject* constructor,
+        DeferredTypeHandlerBase* typeHandler,
+        DeferredInitializeMode mode,
+        DynamicObject* prototype,
+        const char16(&name)[N])
+    {
+        typeHandler->Convert(constructor, mode, 3);
+        this->AddMember(constructor, PropertyIds::length, TaggedInt::ToVarUnchecked(0), PropertyConfigurable);
+        this->AddMember(constructor, PropertyIds::prototype, prototype, PropertyNone);
+        this->AddMember(constructor, PropertyIds::name, this->CreateStringFromCppLiteral(name), PropertyConfigurable);
+        constructor->SetHasNoEnumerableProperties(true);
+        return true;
+    }
+
+    template <size_t NMethod, size_t NTag>
+    bool JavascriptLibrary::InitDisposableStackPrototype(
+        DynamicObject* prototype,
+        DeferredTypeHandlerBase* typeHandler,
+        DeferredInitializeMode mode,
+        DynamicObject* constructor,
+        FunctionInfo* useInfo,
+        FunctionInfo* adoptInfo,
+        FunctionInfo* deferInfo,
+        FunctionInfo* disposeInfo,
+        const char16(&disposeMethodName)[NMethod],
+        PropertyId disposeSymbolId,
+        FunctionInfo* moveInfo,
+        FunctionInfo* disposedGetterInfo,
+        const char16(&toStringTag)[NTag])
+    {
+        typeHandler->Convert(prototype, mode, 9);
+        ScriptContext* scriptContext = this->GetScriptContext();
+        this->AddMember(prototype, PropertyIds::constructor, constructor);
+        this->AddFunctionToLibraryObjectWithPropertyName(prototype, _u("use"), useInfo, 1);
+        this->AddFunctionToLibraryObjectWithPropertyName(prototype, _u("adopt"), adoptInfo, 2);
+        this->AddFunctionToLibraryObjectWithPropertyName(prototype, _u("defer"), deferInfo, 1);
+        JavascriptFunction* disposeFunc = this->AddFunctionToLibraryObjectWithPropertyName(prototype, disposeMethodName, disposeInfo, 0);
+        this->AddMember(prototype, disposeSymbolId, disposeFunc, PropertyBuiltInMethodDefaults);
+        this->AddFunctionToLibraryObjectWithPropertyName(prototype, _u("move"), moveInfo, 0);
+        this->AddGetterToLibraryObject(prototype, scriptContext->GetOrAddPropertyIdTracked(_u("disposed")), disposedGetterInfo);
+
+        if (scriptContext->GetConfig()->IsES6ToStringTagEnabled())
+        {
+            this->AddMember(prototype, PropertyIds::_symbolToStringTag, this->CreateStringFromCppLiteral(toStringTag), PropertyConfigurable);
+        }
+
+        prototype->SetHasNoEnumerableProperties(true);
+        return true;
+    }
+
+    bool JavascriptLibrary::InitializeDisposableStackConstructor(DynamicObject* constructor, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)
+    {
+        JavascriptLibrary* library = constructor->GetLibrary();
+        return library->InitDisposableStackConstructor(constructor, typeHandler, mode, library->disposableStackPrototype, _u("DisposableStack"));
+    }
+
+    bool JavascriptLibrary::InitializeDisposableStackPrototype(DynamicObject* prototype, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)
+    {
+        JavascriptLibrary* library = prototype->GetLibrary();
+        return library->InitDisposableStackPrototype(
+            prototype,
+            typeHandler,
+            mode,
+            library->disposableStackConstructor,
+            &JavascriptDisposableStack::EntryInfo::Use,
+            &JavascriptDisposableStack::EntryInfo::Adopt,
+            &JavascriptDisposableStack::EntryInfo::Defer,
+            &JavascriptDisposableStack::EntryInfo::Dispose,
+            _u("dispose"),
+            library->GetSymbolDisposePropertyId(),
+            &JavascriptDisposableStack::EntryInfo::Move,
+            &JavascriptDisposableStack::EntryInfo::GetterDisposed,
+            _u("DisposableStack"));
+    }
+
+    bool JavascriptLibrary::InitializeAsyncDisposableStackConstructor(DynamicObject* constructor, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)
+    {
+        JavascriptLibrary* library = constructor->GetLibrary();
+        return library->InitDisposableStackConstructor(constructor, typeHandler, mode, library->asyncDisposableStackPrototype, _u("AsyncDisposableStack"));
+    }
+
+    bool JavascriptLibrary::InitializeAsyncDisposableStackPrototype(DynamicObject* prototype, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)
+    {
+        JavascriptLibrary* library = prototype->GetLibrary();
+        return library->InitDisposableStackPrototype(
+            prototype,
+            typeHandler,
+            mode,
+            library->asyncDisposableStackConstructor,
+            &JavascriptAsyncDisposableStack::EntryInfo::Use,
+            &JavascriptAsyncDisposableStack::EntryInfo::Adopt,
+            &JavascriptAsyncDisposableStack::EntryInfo::Defer,
+            &JavascriptAsyncDisposableStack::EntryInfo::DisposeAsync,
+            _u("disposeAsync"),
+            library->GetSymbolAsyncDisposePropertyId(),
+            &JavascriptAsyncDisposableStack::EntryInfo::Move,
+            &JavascriptAsyncDisposableStack::EntryInfo::GetterDisposed,
+            _u("AsyncDisposableStack"));
+    }
+
     bool JavascriptLibrary::InitializeWeakSetConstructor(DynamicObject* weakSetConstructor, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)
     {
         typeHandler->Convert(weakSetConstructor, mode, 3);
@@ -5099,12 +5252,15 @@ namespace Js
         ScriptContext* scriptContext = library->GetScriptContext();
         bool iteratorHelpersEnabled = scriptContext->GetConfig()->IsESIteratorHelpersEnabled();
 
-        typeHandler->Convert(iteratorPrototype, mode, iteratorHelpersEnabled ? 16 : 1);
+        typeHandler->Convert(iteratorPrototype, mode, iteratorHelpersEnabled ? 17 : 2);
         // Note: Any new function addition/deletion/modification should also be updated in JavascriptLibrary::ProfilerRegisterIterator
         // so that the update is in sync with profiler
 
         library->AddFunctionToLibraryObjectWithName(iteratorPrototype, PropertyIds::_symbolIterator, PropertyIds::_RuntimeFunctionNameId_iterator,
             &JavascriptIterator::EntryInfo::SymbolIterator, 0);
+        library->AddFunctionToLibraryObjectWithName(iteratorPrototype, library->GetSymbolDisposePropertyId(),
+            scriptContext->GetOrAddPropertyIdTracked(_u("[Symbol.dispose]")),
+            &JavascriptIterator::EntryInfo::SymbolDispose, 0);
 
         if (iteratorHelpersEnabled)
         {
@@ -5219,14 +5375,18 @@ namespace Js
 
     bool JavascriptLibrary::InitializeAsyncIteratorPrototype(DynamicObject* asyncIteratorPrototype, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)
     {
-        typeHandler->Convert(asyncIteratorPrototype, mode, 1);
+        typeHandler->Convert(asyncIteratorPrototype, mode, 2);
         // Note: Any new function addition/deletion/modification should also be updated in JavascriptLibrary::ProfilerRegisterIterator
         // so that the update is in sync with profiler
 
         JavascriptLibrary* library = asyncIteratorPrototype->GetLibrary();
+        ScriptContext* scriptContext = library->GetScriptContext();
 
         library->AddFunctionToLibraryObjectWithName(asyncIteratorPrototype, PropertyIds::_symbolAsyncIterator, PropertyIds::_RuntimeFunctionNameId_asyncIterator,
             &JavascriptIterator::EntryInfo::SymbolIterator, 0);
+        library->AddFunctionToLibraryObjectWithName(asyncIteratorPrototype, library->GetSymbolAsyncDisposePropertyId(),
+            scriptContext->GetOrAddPropertyIdTracked(_u("[Symbol.asyncDispose]")),
+            &JavascriptIterator::EntryInfo::SymbolAsyncDispose, 0);
 
         return true;
     }
@@ -6856,6 +7016,40 @@ namespace Js
             JavascriptFinalizationRegistryCleanupTaskFunction, type, functionInfo, registry);
     }
 
+    JavascriptDisposableStack* JavascriptLibrary::CreateDisposableStack(DisposeCapability* capability)
+    {
+        AssertMsg(disposableStackType, "Where's disposableStackType?");
+        DisposeCapability* cap = capability != nullptr ? capability : DisposeCapability::New(scriptContext);
+        return RecyclerNew(this->GetRecycler(), JavascriptDisposableStack, disposableStackType, cap);
+    }
+
+    JavascriptAsyncDisposableStack* JavascriptLibrary::CreateAsyncDisposableStack(DisposeCapability* capability)
+    {
+        AssertMsg(asyncDisposableStackType, "Where's asyncDisposableStackType?");
+        DisposeCapability* cap = capability != nullptr ? capability : DisposeCapability::New(scriptContext);
+        return RecyclerNew(this->GetRecycler(), JavascriptAsyncDisposableStack, asyncDisposableStackType, cap);
+    }
+
+    JavascriptAsyncDisposableStackStepFunction* JavascriptLibrary::CreateAsyncDisposableStackStepFunction(
+        DisposeCapability* capability,
+        JavascriptPromiseCapability* promiseCapability,
+        bool isReject)
+    {
+        JavascriptMethod entryPoint = &JavascriptAsyncDisposableStackStepFunction::EntryStep;
+        FunctionInfo* functionInfo = RecyclerNew(this->GetRecycler(), FunctionInfo, entryPoint, FunctionInfo::Attributes::ErrorOnNew);
+        DynamicType* type = CreateDeferredPrototypeFunctionType(entryPoint);
+
+        return RecyclerNewEnumClass(
+            this->GetRecycler(),
+            EnumFunctionClass,
+            JavascriptAsyncDisposableStackStepFunction,
+            type,
+            functionInfo,
+            capability,
+            promiseCapability,
+            isReject);
+    }
+
     AtomicsWaitAsyncTimeoutTaskFunction* JavascriptLibrary::CreateAtomicsWaitAsyncTimeoutTaskFunction(AtomicsAsyncWaiter* waiter)
     {
         JavascriptMethod entryPoint = &AtomicsAsyncWaiter::EntryTimeoutTask;
@@ -7006,6 +7200,9 @@ namespace Js
         case kjstAggregateError:
             baseErrorType = aggregateErrorType;
             break;
+        case kjstSuppressedError:
+            baseErrorType = suppressedErrorType;
+            break;
         case kjstWebAssemblyCompileError:
             baseErrorType = webAssemblyCompileErrorType;
             break;
@@ -7038,6 +7235,7 @@ namespace Js
     CREATE_ERROR(TypeError, typeErrorType, kjstTypeError);
     CREATE_ERROR(URIError, uriErrorType, kjstURIError);
     CREATE_ERROR(AggregateError, aggregateErrorType, kjstAggregateError);
+    CREATE_ERROR(SuppressedError, suppressedErrorType, kjstSuppressedError);
     CREATE_ERROR(WebAssemblyCompileError, webAssemblyCompileErrorType, kjstWebAssemblyCompileError);
     CREATE_ERROR(WebAssemblyRuntimeError, webAssemblyRuntimeErrorType, kjstWebAssemblyRuntimeError);
     CREATE_ERROR(WebAssemblyLinkError, webAssemblyLinkErrorType, kjstWebAssemblyLinkError);
@@ -8199,6 +8397,8 @@ namespace Js
         REGISTER_OBJECT(WeakSet);
         REGISTER_OBJECT(WeakRef);
         REGISTER_OBJECT(FinalizationRegistry);
+        REGISTER_OBJECT(DisposableStack);
+        REGISTER_OBJECT(AsyncDisposableStack);
 
         REGISTER_OBJECT(Symbol);
 
@@ -8245,6 +8445,7 @@ namespace Js
         REGISTER_ERROR_OBJECT(TypeError);
         REGISTER_ERROR_OBJECT(URIError);
         REGISTER_ERROR_OBJECT(AggregateError);
+        REGISTER_ERROR_OBJECT(SuppressedError);
 
         return hr;
     }
@@ -8766,6 +8967,46 @@ namespace Js
         return hr;
     }
 
+    HRESULT JavascriptLibrary::ProfilerRegisterDisposableStack()
+    {
+        HRESULT hr = S_OK;
+        ScriptContext* scriptContext = this->GetScriptContext();
+
+        PropertyId stackId = scriptContext->GetOrAddPropertyIdTracked(_u("DisposableStack"));
+        REG_LIB_FUNC_CORE(NULL, _u("DisposableStack"), stackId, JavascriptDisposableStack::EntryInfo::NewInstance);
+
+        DEFINE_OBJECT_NAME(DisposableStack);
+
+        REG_LIB_FUNC_CORE(pwszObjectName, _u("use"), scriptContext->GetOrAddPropertyIdTracked(_u("use")), JavascriptDisposableStack::EntryInfo::Use);
+        REG_LIB_FUNC_CORE(pwszObjectName, _u("adopt"), scriptContext->GetOrAddPropertyIdTracked(_u("adopt")), JavascriptDisposableStack::EntryInfo::Adopt);
+        REG_LIB_FUNC_CORE(pwszObjectName, _u("defer"), scriptContext->GetOrAddPropertyIdTracked(_u("defer")), JavascriptDisposableStack::EntryInfo::Defer);
+        REG_LIB_FUNC_CORE(pwszObjectName, _u("dispose"), scriptContext->GetOrAddPropertyIdTracked(_u("dispose")), JavascriptDisposableStack::EntryInfo::Dispose);
+        REG_LIB_FUNC_CORE(pwszObjectName, _u("move"), scriptContext->GetOrAddPropertyIdTracked(_u("move")), JavascriptDisposableStack::EntryInfo::Move);
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("get disposed"), 12, JavascriptDisposableStack::EntryGetterDisposed);
+
+        return hr;
+    }
+
+    HRESULT JavascriptLibrary::ProfilerRegisterAsyncDisposableStack()
+    {
+        HRESULT hr = S_OK;
+        ScriptContext* scriptContext = this->GetScriptContext();
+
+        PropertyId stackId = scriptContext->GetOrAddPropertyIdTracked(_u("AsyncDisposableStack"));
+        REG_LIB_FUNC_CORE(NULL, _u("AsyncDisposableStack"), stackId, JavascriptAsyncDisposableStack::EntryInfo::NewInstance);
+
+        DEFINE_OBJECT_NAME(AsyncDisposableStack);
+
+        REG_LIB_FUNC_CORE(pwszObjectName, _u("use"), scriptContext->GetOrAddPropertyIdTracked(_u("use")), JavascriptAsyncDisposableStack::EntryInfo::Use);
+        REG_LIB_FUNC_CORE(pwszObjectName, _u("adopt"), scriptContext->GetOrAddPropertyIdTracked(_u("adopt")), JavascriptAsyncDisposableStack::EntryInfo::Adopt);
+        REG_LIB_FUNC_CORE(pwszObjectName, _u("defer"), scriptContext->GetOrAddPropertyIdTracked(_u("defer")), JavascriptAsyncDisposableStack::EntryInfo::Defer);
+        REG_LIB_FUNC_CORE(pwszObjectName, _u("disposeAsync"), scriptContext->GetOrAddPropertyIdTracked(_u("disposeAsync")), JavascriptAsyncDisposableStack::EntryInfo::DisposeAsync);
+        REG_LIB_FUNC_CORE(pwszObjectName, _u("move"), scriptContext->GetOrAddPropertyIdTracked(_u("move")), JavascriptAsyncDisposableStack::EntryInfo::Move);
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("get disposed"), 12, JavascriptAsyncDisposableStack::EntryGetterDisposed);
+
+        return hr;
+    }
+
     HRESULT JavascriptLibrary::ProfilerRegisterMap()
     {
         HRESULT hr = S_OK;
@@ -8842,6 +9083,7 @@ namespace Js
         DEFINE_OBJECT_NAME(Iterator);
 
         REG_OBJECTS_LIB_FUNC2(_symbolIterator, _u("[Symbol.iterator]"), JavascriptIterator::EntrySymbolIterator);
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("[Symbol.dispose]"), 16, JavascriptIterator::EntrySymbolDispose);
         REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("get constructor"), 15, JavascriptIterator::EntryGetterConstructor);
         REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("set constructor"), 15, JavascriptIterator::EntrySetterConstructor);
         REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("get [Symbol.toStringTag]"), 24, JavascriptIterator::EntryGetterToStringTag);

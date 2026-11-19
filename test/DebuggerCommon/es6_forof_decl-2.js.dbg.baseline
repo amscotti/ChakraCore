@@ -15,6 +15,9 @@
       "BigUint64Array": "function <large string>",
       "WeakRef": "function <large string>",
       "FinalizationRegistry": "function <large string>",
+      "DisposableStack": "function <large string>",
+      "AsyncDisposableStack": "function <large string>",
+      "SuppressedError": "function <large string>",
       "x": "number 1"
     },
     "locals": {
@@ -33,6 +36,9 @@
       "BigUint64Array": "function <large string>",
       "WeakRef": "function <large string>",
       "FinalizationRegistry": "function <large string>",
+      "DisposableStack": "function <large string>",
+      "AsyncDisposableStack": "function <large string>",
+      "SuppressedError": "function <large string>",
       "x": "number 1"
     },
     "locals": {

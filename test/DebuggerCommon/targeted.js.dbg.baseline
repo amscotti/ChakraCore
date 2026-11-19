@@ -81,6 +81,24 @@
         "prototype": "Object {...}",
         "name": "string <large string>"
       },
+      "DisposableStack": {
+        "#__proto__": "function <large string>",
+        "length": "number 0",
+        "prototype": "Object {...}",
+        "name": "string DisposableStack"
+      },
+      "AsyncDisposableStack": {
+        "#__proto__": "function <large string>",
+        "length": "number 0",
+        "prototype": "Object {...}",
+        "name": "string <large string>"
+      },
+      "SuppressedError": {
+        "#__proto__": "function <large string>",
+        "prototype": "Object {...}",
+        "length": "number 3",
+        "name": "string SuppressedError"
+      },
       "i": "number 0",
       "g": {
         "#__proto__": "function <large string>",
@@ -272,6 +290,24 @@
         "length": "number 1",
         "prototype": "Object {...}",
         "name": "string <large string>"
+      },
+      "DisposableStack": {
+        "#__proto__": "function <large string>",
+        "length": "number 0",
+        "prototype": "Object {...}",
+        "name": "string DisposableStack"
+      },
+      "AsyncDisposableStack": {
+        "#__proto__": "function <large string>",
+        "length": "number 0",
+        "prototype": "Object {...}",
+        "name": "string <large string>"
+      },
+      "SuppressedError": {
+        "#__proto__": "function <large string>",
+        "prototype": "Object {...}",
+        "length": "number 3",
+        "name": "string SuppressedError"
       },
       "i": "number 1",
       "g": {
@@ -465,6 +501,24 @@
         "prototype": "Object {...}",
         "name": "string <large string>"
       },
+      "DisposableStack": {
+        "#__proto__": "function <large string>",
+        "length": "number 0",
+        "prototype": "Object {...}",
+        "name": "string DisposableStack"
+      },
+      "AsyncDisposableStack": {
+        "#__proto__": "function <large string>",
+        "length": "number 0",
+        "prototype": "Object {...}",
+        "name": "string <large string>"
+      },
+      "SuppressedError": {
+        "#__proto__": "function <large string>",
+        "prototype": "Object {...}",
+        "length": "number 3",
+        "name": "string SuppressedError"
+      },
       "i": "number 2",
       "g": {
         "#__proto__": "function <large string>",
@@ -657,6 +711,24 @@
         "prototype": "Object {...}",
         "name": "string <large string>"
       },
+      "DisposableStack": {
+        "#__proto__": "function <large string>",
+        "length": "number 0",
+        "prototype": "Object {...}",
+        "name": "string DisposableStack"
+      },
+      "AsyncDisposableStack": {
+        "#__proto__": "function <large string>",
+        "length": "number 0",
+        "prototype": "Object {...}",
+        "name": "string <large string>"
+      },
+      "SuppressedError": {
+        "#__proto__": "function <large string>",
+        "prototype": "Object {...}",
+        "length": "number 3",
+        "name": "string SuppressedError"
+      },
       "i": "number 3",
       "g": {
         "#__proto__": "function <large string>",
@@ -848,6 +920,24 @@
         "length": "number 1",
         "prototype": "Object {...}",
         "name": "string <large string>"
+      },
+      "DisposableStack": {
+        "#__proto__": "function <large string>",
+        "length": "number 0",
+        "prototype": "Object {...}",
+        "name": "string DisposableStack"
+      },
+      "AsyncDisposableStack": {
+        "#__proto__": "function <large string>",
+        "length": "number 0",
+        "prototype": "Object {...}",
+        "name": "string <large string>"
+      },
+      "SuppressedError": {
+        "#__proto__": "function <large string>",
+        "prototype": "Object {...}",
+        "length": "number 3",
+        "name": "string SuppressedError"
       },
       "i": "number 4",
       "g": {
@@ -968,6 +1058,9 @@
       "BigUint64Array": "function <large string>",
       "WeakRef": "function <large string>",
       "FinalizationRegistry": "function <large string>",
+      "DisposableStack": "function <large string>",
+      "AsyncDisposableStack": "function <large string>",
+      "SuppressedError": "function <large string>",
       "i": "number 5",
       "g": "function <large string>",
       "f": "function <large string>",
@@ -1004,6 +1097,9 @@
       "BigUint64Array": "function <large string>",
       "WeakRef": "function <large string>",
       "FinalizationRegistry": "function <large string>",
+      "DisposableStack": "function <large string>",
+      "AsyncDisposableStack": "function <large string>",
+      "SuppressedError": "function <large string>",
       "i": "number 5",
       "g": "function <large string>",
       "f": "function <large string>",

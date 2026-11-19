@@ -8,6 +8,9 @@
       "BigUint64Array": "function <large string>",
       "WeakRef": "function <large string>",
       "FinalizationRegistry": "function <large string>",
+      "DisposableStack": "function <large string>",
+      "AsyncDisposableStack": "function <large string>",
+      "SuppressedError": "function <large string>",
       "x": "undefined undefined",
       "Run": "function <large string>"
     },
@@ -42,8 +45,8 @@
             "constructor": {
               "#__proto__": "function <large string>",
               "length": "number 1",
-              "prototype": "Object {...}",
               "name": "string Object",
+              "prototype": "Object {...}",
               "defineProperty": "function <large string>",
               "getOwnPropertyDescriptor": "function <large string>",
               "getOwnPropertyDescriptors": "function <large string>",
@@ -193,8 +196,8 @@
             "constructor": {
               "#__proto__": "function <large string>",
               "length": "number 1",
-              "prototype": "Object {...}",
               "name": "string Object",
+              "prototype": "Object {...}",
               "defineProperty": "function <large string>",
               "getOwnPropertyDescriptor": "function <large string>",
               "getOwnPropertyDescriptors": "function <large string>",
@@ -362,8 +365,8 @@
             "constructor": {
               "#__proto__": "function <large string>",
               "length": "number 1",
-              "prototype": "Object {...}",
               "name": "string Object",
+              "prototype": "Object {...}",
               "defineProperty": "function <large string>",
               "getOwnPropertyDescriptor": "function <large string>",
               "getOwnPropertyDescriptors": "function <large string>",

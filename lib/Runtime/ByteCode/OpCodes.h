@@ -951,6 +951,13 @@ MACRO_EXTEND_WMS(       ImportCallWithOptions, Reg3,          OpSideEffect|OpHas
 // the temp and orphaned the default path's def (interpreter-safe,
 // JIT-wrong). Appended last so no established opcode value shifts.
 MACRO_EXTEND_WMS(       LdUndef_ReuseLoc,    Reg1,           OpByteCodeOnly|OpCanCSE)       // Load 'undefined'
+MACRO_EXTEND_WMS(       AddSyncDisposableResource,  Reg3, OpSideEffect|OpHasImplicitCall|OpPostOpDbgBailOut)
+MACRO_EXTEND_WMS(       AddAsyncDisposableResource, Reg3, OpSideEffect|OpHasImplicitCall|OpPostOpDbgBailOut)
+MACRO_EXTEND_WMS(       RecordDisposeError,         Reg3, OpSideEffect|OpHasImplicitCall|OpPostOpDbgBailOut)
+MACRO_EXTEND_WMS(       DisposeResourcesSync,       Reg2, OpSideEffect|OpHasImplicitCall|OpPostOpDbgBailOut)
+MACRO_EXTEND_WMS(       StepDisposableResource,     Reg2, OpSideEffect|OpHasImplicitCall|OpPostOpDbgBailOut)
+MACRO_EXTEND_WMS(       TakeDisposeAwaitValue,      Reg2, OpSideEffect)
+MACRO_EXTEND_WMS(       FinalizeDisposeResources,   Reg2, OpSideEffect|OpPostOpDbgBailOut)
 
 #undef MACRO_WMS_PROFILED
 #undef MACRO_WMS_PROFILED2

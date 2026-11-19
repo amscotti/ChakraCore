@@ -212,6 +212,8 @@ ThreadContext::ThreadContext(AllocationPolicyManager * allocationPolicyManager, 
     , noJsReentrancy(false)
 #endif
     , emptyStringPropertyRecord(nullptr)
+    , symbolDisposePropertyRecord(nullptr)
+    , symbolAsyncDisposePropertyRecord(nullptr)
     , recyclerTelemetryHostInterface(this)
     , reentrancySafeOrHandled(false)
     , isInReentrancySafeRegion(false)

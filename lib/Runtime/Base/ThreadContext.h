@@ -425,8 +425,38 @@ public:
         return GetEmptyStringPropertyRecord()->GetPropertyId();
     }
 
+    Js::PropertyRecord const * GetSymbolDisposePropertyRecord()
+    {
+        if (!symbolDisposePropertyRecord)
+        {
+            symbolDisposePropertyRecord = this->UncheckedAddPropertyId(_u("Symbol.dispose"), _countof(_u("Symbol.dispose")) - 1, true, true);
+        }
+        return symbolDisposePropertyRecord;
+    }
+
+    Js::PropertyId GetSymbolDisposePropertyId()
+    {
+        return GetSymbolDisposePropertyRecord()->GetPropertyId();
+    }
+
+    Js::PropertyRecord const * GetSymbolAsyncDisposePropertyRecord()
+    {
+        if (!symbolAsyncDisposePropertyRecord)
+        {
+            symbolAsyncDisposePropertyRecord = this->UncheckedAddPropertyId(_u("Symbol.asyncDispose"), _countof(_u("Symbol.asyncDispose")) - 1, true, true);
+        }
+        return symbolAsyncDisposePropertyRecord;
+    }
+
+    Js::PropertyId GetSymbolAsyncDisposePropertyId()
+    {
+        return GetSymbolAsyncDisposePropertyRecord()->GetPropertyId();
+    }
+
 private:
     const Js::PropertyRecord * emptyStringPropertyRecord;
+    const Js::PropertyRecord * symbolDisposePropertyRecord;
+    const Js::PropertyRecord * symbolAsyncDisposePropertyRecord;
     bool noScriptScope;
 
 #ifdef ENABLE_SCRIPT_DEBUGGING

@@ -132,17 +132,19 @@ namespace Js
       // does not treat them as internal or host-only object types.
       TypeIds_WeakRef = 81,
       TypeIds_FinalizationRegistry = 82,
-      TypeIds_LastBuiltinDynamicObject = TypeIds_FinalizationRegistry,
-      TypeIds_GlobalObject = 83,
-      TypeIds_ModuleRoot = 84,
+      TypeIds_DisposableStack = 83,
+      TypeIds_AsyncDisposableStack = 84,
+      TypeIds_LastBuiltinDynamicObject = TypeIds_AsyncDisposableStack,
+      TypeIds_GlobalObject = 85,
+      TypeIds_ModuleRoot = 86,
       TypeIds_LastTrueJavascriptObjectType = TypeIds_ModuleRoot,
 
-      TypeIds_HostObject = 85,
-      TypeIds_ActivationObject = 86,
-      TypeIds_SpreadArgument = 87,
-      TypeIds_ModuleNamespace = 88,
-      TypeIds_ListIterator = 89,
-      TypeIds_ExternalIterator = 90,
+      TypeIds_HostObject = 87,
+      TypeIds_ActivationObject = 88,
+      TypeIds_SpreadArgument = 89,
+      TypeIds_ModuleNamespace = 90,
+      TypeIds_ListIterator = 91,
+      TypeIds_ExternalIterator = 92,
       TypeIds_Limit //add a new TypeId before TypeIds_Limit or before TypeIds_LastTrueJavascriptObjectType
   };
 }

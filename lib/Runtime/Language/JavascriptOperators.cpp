@@ -16,6 +16,7 @@
 #include "Library/JavascriptGeneratorFunction.h"
 #include "Library/JavascriptAsyncFunction.h"
 #include "Library/JavascriptWeakMap.h"
+#include "Library/JavascriptDisposableStack.h"
 #include "Library/JavascriptProxy.h"
 #include "Library/BoundFunction.h"
 
@@ -6412,6 +6413,8 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
             case TypeIds_WeakSet:
             case TypeIds_WeakRef:
             case TypeIds_FinalizationRegistry:
+            case TypeIds_DisposableStack:
+            case TypeIds_AsyncDisposableStack:
             case TypeIds_ArrayIterator:
             case TypeIds_MapIterator:
             case TypeIds_SetIterator:
@@ -11627,6 +11630,78 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
         JIT_HELPER_END(NewAsyncFromSyncIterator);
     }
 
+    Var JavascriptOperators::OP_AddSyncDisposableResource(Var curStack, Var val, ScriptContext* scriptContext)
+    {
+        JIT_HELPER_REENTRANT_HEADER(Op_AddSyncDisposableResource);
+        DisposeCapability* cap = DisposeCapability::FromVarOrNew(curStack, scriptContext);
+        cap->AddResource(val, DisposeHint::SyncDispose, scriptContext);
+        return cap;
+        JIT_HELPER_END(Op_AddSyncDisposableResource);
+    }
+
+    Var JavascriptOperators::OP_AddAsyncDisposableResource(Var curStack, Var val, ScriptContext* scriptContext)
+    {
+        JIT_HELPER_REENTRANT_HEADER(Op_AddAsyncDisposableResource);
+        DisposeCapability* cap = DisposeCapability::FromVarOrNew(curStack, scriptContext);
+        cap->AddResource(val, DisposeHint::AsyncDispose, scriptContext);
+        return cap;
+        JIT_HELPER_END(Op_AddAsyncDisposableResource);
+    }
+
+    Var JavascriptOperators::OP_RecordDisposeError(Var curStack, Var caughtError, ScriptContext* scriptContext)
+    {
+        JIT_HELPER_REENTRANT_HEADER(Op_RecordDisposeError);
+        DisposeCapability* cap = DisposeCapability::FromVarOrNew(curStack, scriptContext);
+        cap->RecordError(caughtError, scriptContext);
+        return cap;
+        JIT_HELPER_END(Op_RecordDisposeError);
+    }
+
+    Var JavascriptOperators::OP_DisposeResourcesSync(Var curStack, ScriptContext* scriptContext)
+    {
+        JIT_HELPER_REENTRANT_HEADER(Op_DisposeResourcesSync);
+        if (curStack != nullptr && VarIs<DisposeCapability>(curStack))
+        {
+            UnsafeVarTo<DisposeCapability>(curStack)->DisposeSync(scriptContext);
+        }
+        return scriptContext->GetLibrary()->GetUndefined();
+        JIT_HELPER_END(Op_DisposeResourcesSync);
+    }
+
+    Var JavascriptOperators::OP_StepDisposableResource(Var curStack, ScriptContext* scriptContext)
+    {
+        JIT_HELPER_REENTRANT_HEADER(Op_StepDisposableResource);
+        int32 stepResult = 0;
+        if (curStack != nullptr && VarIs<DisposeCapability>(curStack))
+        {
+            stepResult = UnsafeVarTo<DisposeCapability>(curStack)->StepAsyncOrSync(scriptContext);
+        }
+        return TaggedInt::ToVarUnchecked(stepResult);
+        JIT_HELPER_END(Op_StepDisposableResource);
+    }
+
+    Var JavascriptOperators::OP_TakeDisposeAwaitValue(Var curStack, ScriptContext* scriptContext)
+    {
+        JIT_HELPER_REENTRANT_HEADER(Op_TakeDisposeAwaitValue);
+        if (curStack != nullptr && VarIs<DisposeCapability>(curStack))
+        {
+            return UnsafeVarTo<DisposeCapability>(curStack)->TakeAwaitValue(scriptContext);
+        }
+        return scriptContext->GetLibrary()->GetUndefined();
+        JIT_HELPER_END(Op_TakeDisposeAwaitValue);
+    }
+
+    Var JavascriptOperators::OP_FinalizeDisposeResources(Var curStack, ScriptContext* scriptContext)
+    {
+        JIT_HELPER_REENTRANT_HEADER(Op_FinalizeDisposeResources);
+        if (curStack != nullptr && VarIs<DisposeCapability>(curStack))
+        {
+            UnsafeVarTo<DisposeCapability>(curStack)->Finalize(scriptContext);
+        }
+        return scriptContext->GetLibrary()->GetUndefined();
+        JIT_HELPER_END(Op_FinalizeDisposeResources);
+    }
+
     Js::Var
     JavascriptOperators::BoxStackInstance(Js::Var instance, ScriptContext * scriptContext, bool allowStackFunction, bool deepCopy)
     {
@@ -12594,12 +12669,15 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
         [](JavascriptLibraryBase* library) { return library->GetTypeErrorPrototype(); },
         [](JavascriptLibraryBase* library) { return library->GetURIErrorPrototype(); },
         [](JavascriptLibraryBase* library) { return library->GetAggregateErrorPrototype(); },
+        [](JavascriptLibraryBase* library) { return library->GetSuppressedErrorPrototype(); },
         [](JavascriptLibraryBase* library) { return library->GetMapPrototype(); },
         [](JavascriptLibraryBase* library) { return library->GetSetPrototype(); },
         [](JavascriptLibraryBase* library) { return library->GetWeakMapPrototype(); },
         [](JavascriptLibraryBase* library) { return library->GetWeakSetPrototype(); },
         [](JavascriptLibraryBase* library) { return library->GetWeakRefPrototype(); },
         [](JavascriptLibraryBase* library) { return library->GetFinalizationRegistryPrototype(); },
+        [](JavascriptLibraryBase* library) { return library->GetDisposableStackPrototype(); },
+        [](JavascriptLibraryBase* library) { return library->GetAsyncDisposableStackPrototype(); },
         [](JavascriptLibraryBase* library) { return library->GetPromisePrototype(); },
         [](JavascriptLibraryBase* library) { return library->GetArrayBufferPrototype(); },
         [](JavascriptLibraryBase* library) { return static_cast<JavascriptLibrary*>(library)->GetSharedArrayBufferPrototype(); },

@@ -114,6 +114,9 @@
         "BigUint64Array": "function function BigUint64Array() { [native code] }",
         "WeakRef": "function function WeakRef() { [native code] }",
         "FinalizationRegistry": "function function FinalizationRegistry() { [native code] }",
+        "DisposableStack": "function function DisposableStack() { [native code] }",
+        "AsyncDisposableStack": "function function AsyncDisposableStack() { [native code] }",
+        "SuppressedError": "function function SuppressedError() { [native code] }",
         "not_used": "number 0"
       }
     }
@@ -173,6 +176,9 @@
         "BigUint64Array": "function function BigUint64Array() { [native code] }",
         "WeakRef": "function function WeakRef() { [native code] }",
         "FinalizationRegistry": "function function FinalizationRegistry() { [native code] }",
+        "DisposableStack": "function function DisposableStack() { [native code] }",
+        "AsyncDisposableStack": "function function AsyncDisposableStack() { [native code] }",
+        "SuppressedError": "function function SuppressedError() { [native code] }",
         "not_used": "number 0"
       }
     }

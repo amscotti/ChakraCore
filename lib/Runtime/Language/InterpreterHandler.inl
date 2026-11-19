@@ -448,6 +448,14 @@ EXDEF2_WMS(A1toA1Mem, Conv_Numeric, JavascriptOperators::ToNumeric)
 EXDEF2_WMS(A1toA1Mem, Incr_Num_A, JavascriptMath::Increment_Numeric)
 EXDEF2_WMS(A1toA1Mem, Decr_Num_A, JavascriptMath::Decrement_Numeric)
 
+EXDEF2_WMS(A2toA1Mem, AddSyncDisposableResource,  JavascriptOperators::OP_AddSyncDisposableResource)
+EXDEF2_WMS(A2toA1Mem, AddAsyncDisposableResource, JavascriptOperators::OP_AddAsyncDisposableResource)
+EXDEF2_WMS(A2toA1Mem, RecordDisposeError,         JavascriptOperators::OP_RecordDisposeError)
+EXDEF2_WMS(A1toA1Mem, DisposeResourcesSync,       JavascriptOperators::OP_DisposeResourcesSync)
+EXDEF2_WMS(A1toA1Mem, StepDisposableResource,     JavascriptOperators::OP_StepDisposableResource)
+EXDEF2_WMS(A1toA1Mem, TakeDisposeAwaitValue,      JavascriptOperators::OP_TakeDisposeAwaitValue)
+EXDEF2_WMS(A1toA1Mem, FinalizeDisposeResources,   JavascriptOperators::OP_FinalizeDisposeResources)
+
 #endif
 
 // help the caller to undefine all the macros

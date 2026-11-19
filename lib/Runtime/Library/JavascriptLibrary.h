@@ -281,6 +281,7 @@ namespace Js
         Field(DynamicType *) iteratorResultType;
         Field(DynamicType *) awaitObjectType;
         Field(DynamicType *) resumeYieldObjectType;
+        Field(DynamicType *) disposeCapabilityType;
         Field(DynamicType *) arrayIteratorType;
         Field(DynamicType *) mapIteratorType;
         Field(DynamicType *) setIteratorType;
@@ -328,6 +329,7 @@ namespace Js
         Field(DynamicType *) typeErrorType;
         Field(DynamicType *) uriErrorType;
         Field(DynamicType *) aggregateErrorType;
+        Field(DynamicType *) suppressedErrorType;
         Field(DynamicType *) webAssemblyCompileErrorType;
         Field(DynamicType *) webAssemblyRuntimeErrorType;
         Field(DynamicType *) webAssemblyLinkErrorType;
@@ -365,6 +367,8 @@ namespace Js
         Field(DynamicType *) weakSetType;
         Field(DynamicType *) weakRefType;
         Field(DynamicType *) finalizationRegistryType;
+        Field(DynamicType *) disposableStackType;
+        Field(DynamicType *) asyncDisposableStackType;
         Field(DynamicType *) proxyType;
         Field(StaticType  *) withType;
         Field(DynamicType *) SpreadArgumentType;
@@ -795,6 +799,7 @@ namespace Js
         DynamicType * GetTypeErrorType() const { return typeErrorType; }
         DynamicType * GetURIErrorType() const { return uriErrorType; }
         DynamicType * GetAggregateErrorType() const { return aggregateErrorType; }
+        DynamicType * GetSuppressedErrorType() const { return suppressedErrorType; }
         DynamicType * GetWebAssemblyCompileErrorType() const { return webAssemblyCompileErrorType; }
         DynamicType * GetWebAssemblyRuntimeErrorType() const { return webAssemblyRuntimeErrorType; }
         DynamicType * GetWebAssemblyLinkErrorType() const { return webAssemblyLinkErrorType; }
@@ -813,6 +818,7 @@ namespace Js
         DynamicType * GetAsyncGeneratorConstructorPrototypeObjectType() const { return asyncGeneratorConstructorPrototypeObjectType; }
         DynamicType * GetResumeYieldObjectType() const { return resumeYieldObjectType; }
         DynamicType * GetAwaitObjectType() const { return awaitObjectType; }
+        DynamicType * GetDisposeCapabilityType() const { return disposeCapabilityType; }
 
 #ifdef ENABLE_WASM
         JavascriptFunction* GetWebAssemblyQueryResponseFunction() const { return webAssemblyQueryResponseFunction; }
@@ -927,6 +933,7 @@ namespace Js
         // while TTD is recording or replaying.
         void EnqueueDelayedTask(Var taskVar, unsigned int delayMilliseconds);
         JavascriptFinalizationRegistryCleanupTaskFunction* CreateFinalizationRegistryCleanupTaskFunction(JavascriptFinalizationRegistry* registry);
+        JavascriptAsyncDisposableStackStepFunction* CreateAsyncDisposableStackStepFunction(DisposeCapability* capability, JavascriptPromiseCapability* promiseCapability, bool isReject);
         AtomicsWaitAsyncTimeoutTaskFunction* CreateAtomicsWaitAsyncTimeoutTaskFunction(AtomicsAsyncWaiter* waiter);
         AtomicsWaitAsyncMonitorTaskFunction* CreateAtomicsWaitAsyncMonitorTaskFunction(AtomicsAsyncWaiter* waiter);
 
@@ -1006,6 +1013,8 @@ namespace Js
         JavascriptWeakSet* CreateWeakSet();
         JavascriptWeakRef* CreateWeakRef(RecyclableObject* target);
         JavascriptFinalizationRegistry* CreateFinalizationRegistry(Var cleanupCallback);
+        JavascriptDisposableStack* CreateDisposableStack(DisposeCapability* capability = nullptr);
+        JavascriptAsyncDisposableStack* CreateAsyncDisposableStack(DisposeCapability* capability = nullptr);
         JavascriptError* CreateError();
         JavascriptError* CreateError(DynamicType* errorType, BOOL isExternal = FALSE);
         JavascriptError* CreateExternalError(ErrorTypeEnum errorTypeEnum);
@@ -1016,6 +1025,7 @@ namespace Js
         JavascriptError* CreateTypeError();
         JavascriptError* CreateURIError();
         JavascriptError* CreateAggregateError();
+        JavascriptError* CreateSuppressedError();
         JavascriptError* CreateStackOverflowError();
         JavascriptError* CreateOutOfMemoryError();
         JavascriptError* CreateWebAssemblyCompileError();
@@ -1348,6 +1358,7 @@ namespace Js
         STANDARD_INIT(TypeError);
         STANDARD_INIT(URIError);
         STANDARD_INIT(AggregateError);
+        STANDARD_INIT(SuppressedError);
         STANDARD_INIT(RuntimeError);
         STANDARD_INIT(TypedArray);
         STANDARD_INIT(Int8Array);
@@ -1376,6 +1387,8 @@ namespace Js
         STANDARD_INIT(WeakSet);
         STANDARD_INIT(WeakRef);
         STANDARD_INIT(FinalizationRegistry);
+        STANDARD_INIT(DisposableStack);
+        STANDARD_INIT(AsyncDisposableStack);
         STANDARD_INIT(Promise);
         STANDARD_INIT(GeneratorFunction);
         STANDARD_INIT(AsyncFunction);
@@ -1439,6 +1452,30 @@ namespace Js
         void AddMember(DynamicObject* object, PropertyId propertyId, Var value, PropertyAttributes attributes);
         JavascriptString* CreateEmptyString();
 
+        template <size_t N>
+        bool InitDisposableStackConstructor(
+            DynamicObject* constructor,
+            DeferredTypeHandlerBase* typeHandler,
+            DeferredInitializeMode mode,
+            DynamicObject* prototype,
+            const char16(&name)[N]);
+
+        template <size_t NMethod, size_t NTag>
+        bool InitDisposableStackPrototype(
+            DynamicObject* prototype,
+            DeferredTypeHandlerBase* typeHandler,
+            DeferredInitializeMode mode,
+            DynamicObject* constructor,
+            FunctionInfo* useInfo,
+            FunctionInfo* adoptInfo,
+            FunctionInfo* deferInfo,
+            FunctionInfo* disposeInfo,
+            const char16(&disposeMethodName)[NMethod],
+            PropertyId disposeSymbolId,
+            FunctionInfo* moveInfo,
+            FunctionInfo* disposedGetterInfo,
+            const char16(&toStringTag)[NTag]);
+
         template<uint cacheSlotCount> EnumeratorCache* GetEnumeratorCache(Type* type, Field(EnumeratorCache*)* cacheSlots);
 
         static bool __cdecl InitializeAsyncGeneratorFunction(DynamicObject* function, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode);
@@ -1495,6 +1532,8 @@ namespace Js
         HRESULT ProfilerRegisterWeakSet();
         HRESULT ProfilerRegisterWeakRef();
         HRESULT ProfilerRegisterFinalizationRegistry();
+        HRESULT ProfilerRegisterDisposableStack();
+        HRESULT ProfilerRegisterAsyncDisposableStack();
         HRESULT ProfilerRegisterSymbol();
         HRESULT ProfilerRegisterIterator();
         HRESULT ProfilerRegisterArrayIterator();

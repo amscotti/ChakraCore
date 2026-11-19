@@ -161,6 +161,39 @@ namespace Js
             pError;
     }
 
+    void JavascriptError::SetSuppressedErrorFields(JavascriptError* pError, Var error, Var suppressed, ScriptContext* scriptContext)
+    {
+        PropertyId errorPropId = scriptContext->GetOrAddPropertyIdTracked(_u("error"));
+        PropertyId suppressedPropId = scriptContext->GetOrAddPropertyIdTracked(_u("suppressed"));
+        pError->SetPropertyWithAttributes(errorPropId, error, PropertyWritable | PropertyConfigurable, nullptr);
+        pError->SetPropertyWithAttributes(suppressedPropId, suppressed, PropertyWritable | PropertyConfigurable, nullptr);
+    }
+
+    JavascriptError* JavascriptError::CreateSuppressedError(ScriptContext* scriptContext, Var error, Var suppressed)
+    {
+        JavascriptError* pError = scriptContext->GetLibrary()->CreateSuppressedError();
+        SetSuppressedErrorFields(pError, error, suppressed, scriptContext);
+        return pError;
+    }
+
+    Var JavascriptError::NewSuppressedErrorInstance(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+        ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+        JavascriptLibrary* library = scriptContext->GetLibrary();
+        JavascriptError* pError = library->CreateSuppressedError();
+        Var newTarget = args.GetNewTarget();
+        Var error = args.Info.Count > 1 ? args[1] : library->GetUndefined();
+        Var suppressed = args.Info.Count > 2 ? args[2] : library->GetUndefined();
+        Var message = args.Info.Count > 3 ? args[3] : library->GetUndefined();
+        Var options = args.Info.Count > 4 ? args[4] : library->GetUndefined();
+
+        Var result = JavascriptError::NewInstance(function, pError, callInfo, newTarget, message, options);
+        SetSuppressedErrorFields(pError, error, suppressed, scriptContext);
+        return result;
+    }
+
     void JavascriptError::SetErrorsList(JavascriptError* pError, SList<Var, Recycler>* errorsList, ScriptContext* scriptContext)
     {
         JavascriptArray* errors = scriptContext->GetLibrary()->CreateArray(errorsList->Count());
@@ -357,6 +390,8 @@ namespace Js
           return CreateReferenceError(scriptContext);
         case kjstURIError:
           return CreateURIError(scriptContext);
+        case kjstSuppressedError:
+          return scriptContext->GetLibrary()->CreateSuppressedError();
         case kjstWebAssemblyCompileError:
           return CreateWebAssemblyCompileError(scriptContext);
         case kjstWebAssemblyRuntimeError:
@@ -893,6 +928,9 @@ namespace Js
             break;
         case kjstAggregateError:
             jsNewError = targetJavascriptLibrary->CreateAggregateError();
+            break;
+        case kjstSuppressedError:
+            jsNewError = targetJavascriptLibrary->CreateSuppressedError();
             break;
         case kjstWebAssemblyCompileError:
             jsNewError = targetJavascriptLibrary->CreateWebAssemblyCompileError();

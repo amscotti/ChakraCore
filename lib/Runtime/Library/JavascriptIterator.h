@@ -14,6 +14,8 @@ namespace Js
         {
         public:
             static FunctionInfo SymbolIterator;
+            static FunctionInfo SymbolDispose;
+            static FunctionInfo SymbolAsyncDispose;
             static FunctionInfo NewInstance;
             static FunctionInfo From;
             static FunctionInfo Concat;
@@ -35,6 +37,8 @@ namespace Js
         };
 
         static Var EntrySymbolIterator(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntrySymbolDispose(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntrySymbolAsyncDispose(RecyclableObject* function, CallInfo callInfo, ...);
         static Var NewInstance(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryFrom(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryConcat(RecyclableObject* function, CallInfo callInfo, ...);

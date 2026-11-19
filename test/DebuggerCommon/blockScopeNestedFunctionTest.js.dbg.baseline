@@ -28,6 +28,9 @@
       "BigUint64Array": "function <large string>",
       "WeakRef": "function <large string>",
       "FinalizationRegistry": "function <large string>",
+      "DisposableStack": "function <large string>",
+      "AsyncDisposableStack": "function <large string>",
+      "SuppressedError": "function <large string>",
       "blockScopeNestedFunctionTestFunc": "function <large string>"
     },
     "arguments": {
@@ -64,6 +67,9 @@
       "BigUint64Array": "function <large string>",
       "WeakRef": "function <large string>",
       "FinalizationRegistry": "function <large string>",
+      "DisposableStack": "function <large string>",
+      "AsyncDisposableStack": "function <large string>",
+      "SuppressedError": "function <large string>",
       "blockScopeNestedFunctionTestFunc": "function <large string>"
     },
     "arguments": {
@@ -100,6 +106,9 @@
       "BigUint64Array": "function <large string>",
       "WeakRef": "function <large string>",
       "FinalizationRegistry": "function <large string>",
+      "DisposableStack": "function <large string>",
+      "AsyncDisposableStack": "function <large string>",
+      "SuppressedError": "function <large string>",
       "blockScopeNestedFunctionTestFunc": "function <large string>"
     },
     "arguments": {
@@ -134,6 +143,9 @@
       "BigUint64Array": "function <large string>",
       "WeakRef": "function <large string>",
       "FinalizationRegistry": "function <large string>",
+      "DisposableStack": "function <large string>",
+      "AsyncDisposableStack": "function <large string>",
+      "SuppressedError": "function <large string>",
       "blockScopeNestedFunctionTestFunc": "function <large string>"
     },
     "arguments": {
@@ -168,6 +180,9 @@
       "BigUint64Array": "function <large string>",
       "WeakRef": "function <large string>",
       "FinalizationRegistry": "function <large string>",
+      "DisposableStack": "function <large string>",
+      "AsyncDisposableStack": "function <large string>",
+      "SuppressedError": "function <large string>",
       "blockScopeNestedFunctionTestFunc": "function <large string>"
     },
     "arguments": {
