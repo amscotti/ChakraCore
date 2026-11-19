@@ -123,6 +123,11 @@ Js::JavascriptMethod GetCheckAsmJsCodeGenThunk()
 {
     return NativeCodeGenerator::CheckAsmJsCodeGenThunk;
 }
+
+Js::JavascriptMethod CheckAsmJsCodeGen(Js::ScriptFunction * function)
+{
+    return NativeCodeGenerator::CheckAsmJsCodeGen(function);
+}
 #endif
 
 uint GetBailOutRegisterSaveSlotCount()

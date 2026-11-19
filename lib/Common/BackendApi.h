@@ -79,6 +79,7 @@ CheckCodeGenFunction GetCheckCodeGenFunction(Js::JavascriptMethod codeAddress);
 Js::JavascriptMethod GetCheckCodeGenThunk();
 #ifdef ENABLE_ASMJS
 Js::JavascriptMethod GetCheckAsmJsCodeGenThunk();
+Js::JavascriptMethod CheckAsmJsCodeGen(Js::ScriptFunction * function);
 #endif
 
 uint GetBailOutRegisterSaveSlotCount();

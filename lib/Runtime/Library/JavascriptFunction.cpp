@@ -1726,51 +1726,46 @@ dbl_align:
     // The entryPoint (jsMethod) is the delay thunk for the interpreter
     // tier; it is not register-punned here -- the interpreter is invoked
     // directly. Traps propagate as C++ exceptions to the frame.
-    extern "C" void AsmJsJitCall(void* entry, void* layout, void* outRet);
+    // Shared helpers in AsmJsUtils.cpp enforcing doc/memory-management.md section 3
+    // stack-reserve and JIT entrypoint invariants.
+    namespace Js
+    {
+        JavascriptMethod ResolveAsmJsJitEntryPoint(ScriptFunction* func);
+        void InvokeAsmJsJitSlotImage(
+            ScriptFunction* func,
+            JavascriptMethod jsMethod,
+            bool unboxExternalArgs,
+            Var* origArgs,
+            CallInfo callInfo,
+            const Var* internalArgv,
+            uint internalArgBytes,
+            byte* outRet);
+    }
+
     // W4/W5: interpreter -> JIT internal call. Build the args slot image
     // [function][gap][gap][args...] (wasm param k at slot 3+k) from
     // m_outParams ([function][args...]) and bridge-call the JIT entrypoint
     // (ABI sections 2-3,6). Returns false when the callee is still
-    // interpreter-tier (caller interprets). outRet: x0 at +0, d0 at +8.
+    // interpreter-tier or ineligible (caller interprets). outRet: x0 at +0, d0 at +8.
     static bool TryCallAsmJsJit(ScriptFunction* func, Var* argv, uint argsSize, byte* outRet)
     {
-        JavascriptMethod jsMethod = ((Js::FunctionEntryPointInfo*)func->GetEntryPointInfo())->jsMethod;
-        // Defense in depth: the Var-convention external entry serves JS
-        // dispatch only and can never drive a slot-image call. If one is
-        // ever resolved here, interpret instead of bridging into it.
-        if (jsMethod == nullptr ||
-            jsMethod == InterpreterStackFrame::AsmJsDelayDynamicInterpreterThunk ||
-            jsMethod == InterpreterStackFrame::DelayDynamicInterpreterThunk ||
-            jsMethod == GetCheckAsmJsCodeGenThunk()
-#if defined(_M_ARM64)
-            || jsMethod == (JavascriptMethod)&Js::AsmJsExternalEntryPoint
-#endif
-            )
+        (void)argsSize;
+        JavascriptMethod jsMethod = ResolveAsmJsJitEntryPoint(func);
+        if (jsMethod == nullptr)
         {
-            // Interpreter-tier (DelayThunks) or codegen-pending (thunk jumps to
-            // the Var-convention original): caller interprets (W4 slices 1+2).
             return false;
         }
         AsmJsFunctionInfo* info = func->GetFunctionBody()->GetAsmJsFunctionInfo();
         uint byteSize = info->GetArgByteSize();
-        // Free reserve BELOW the args slot image for the JIT callee frame
-        // (see Thunks.S AsmJsJitCall); 64KB covers realistic asm.js/wasm
-        // frames (register area + spill slots) with margin. Image layout:
-        // [func][gap][gap][args...] (wasm param k at arg slot 3+k).
-        const uint reserve = 65536;
-        byte* raw = (byte*)_alloca(byteSize + 3 * sizeof(Var) + 16 + reserve);
-        byte* base = (byte*)(((uintptr_t)raw + 15) & ~(uintptr_t)15) + reserve;
-        *(ScriptFunction**)base = func;
-        *(uint64*)(base + sizeof(Var)) = 0;
-        *(uint64*)(base + 2 * sizeof(Var)) = 0;
-        memcpy(base + 3 * sizeof(Var), (byte*)argv + sizeof(Var), byteSize);
-        {
-            // Bound JIT frames to the alloca reserve (see AsmJsExternalEntryPoint):
-            // deeper recursion throws StackOverflow via the prolog floor check.
-            ThreadContext::WasmStackReserveFloorGuard floorGuard(
-                func->GetScriptContext()->GetThreadContext(), (uintptr_t)raw);
-            AsmJsJitCall((void*)jsMethod, (void*)base, outRet);
-        }
+        InvokeAsmJsJitSlotImage(
+            func,
+            jsMethod,
+            false,
+            nullptr,
+            CallInfo(),
+            argv,
+            byteSize,
+            outRet);
         return true;
     }
     template <> int JavascriptFunction::CallAsmJsFunction<int>(RecyclableObject * function, JavascriptMethod entryPoint, Var * argv, uint argsSize, byte* reg)

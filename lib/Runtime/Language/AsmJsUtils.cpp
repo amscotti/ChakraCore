@@ -704,6 +704,131 @@ namespace Js
     // Loads the slot image from the layout buffer (x0-x7 + [sp] overflow),
     // calls the entrypoint, writes x0/d0 to outRet (16 bytes).
     extern "C" void AsmJsJitCall(void* entry, void* layout, void* outRet);
+
+    // doc/memory-management.md section 3 Stack-reserve & JIT entrypoint invariant:
+    // - Domain / owner: per-call _alloca slot-image + reserve buffer on the
+    //   executing script thread stack, bracketed by ThreadContext::WasmStackReserveFloorGuard.
+    //   No heap/Recycler retention; valid strictly for the dynamic extent of AsmJsJitCall.
+    // - JIT entrypoint contract: ResolveAsmJsJitEntryPoint polls CheckAsmJsCodeGen(func)
+    //   only when jsMethod == GetCheckAsmJsCodeGenThunk() (never on DelayThunks), and
+    //   verifies IsCodeGenDone() && jsMethod == entryPointInfo->GetNativeEntrypoint()
+    //   plus exclusion of all Var-convention/trap/intermediate thunks, multi-value
+    //   returns, and v128 SIMD signatures before bridging into AsmJsJitCall.
+    // - Stack-reserve & C++ unwind invariant: AsmJsJitCall saves its bridge frame
+    //   (fp/lr/callee-saved regs, 144B) immediately below `raw`. Setting
+    //   wasmStackReserveFloor to (uintptr_t)raw + unwindHeadroom (32KB, matching
+    //   MinStackRuntime) keeps the full 64KB JIT recursion budget above `floor`
+    //   while guaranteeing >= 32KB + MinStackJIT below `ProbeWasmReserveFloor` so
+    //   Throw::StackOverflow / __cxa_throw / libunwind cannot descend into and
+    //   clobber AsmJsJitCall's bridge frame. Nested calls restore prior floor on unwind.
+    JavascriptMethod ResolveAsmJsJitEntryPoint(ScriptFunction* func)
+    {
+        if (func == nullptr)
+        {
+            return nullptr;
+        }
+        FunctionBody* body = func->GetFunctionBody();
+        AsmJsFunctionInfo* info = body != nullptr ? body->GetAsmJsFunctionInfo() : nullptr;
+        if (info == nullptr)
+        {
+            return nullptr;
+        }
+#ifdef ENABLE_WASM
+        // W7: the JIT single-return convention cannot carry N results
+        // (LowerRet/LowerAsmJsCallI still single-valued), so multi-value
+        // functions always take the interpreter path. JIT-tier runs thus
+        // stay correct; the x8 area is a later step.
+        const Wasm::WasmSignature* wasmSig = info->GetWasmSignature();
+        if (wasmSig != nullptr && wasmSig->IsMultiValue())
+        {
+            return nullptr;
+        }
+#endif
+#if defined(ENABLE_WASM_SIMD)
+        // ARM64 NEON SIMD body opcodes tier up to JIT; FunctionUsesSimd is
+        // scoped on ARM64 to functions with v128 signature params/results.
+        if (WAsmJs::FunctionUsesSimd(body))
+        {
+            return nullptr;
+        }
+#endif
+        Js::FunctionEntryPointInfo* entryPointInfo = (Js::FunctionEntryPointInfo*)func->GetEntryPointInfo();
+        JavascriptMethod jsMethod = entryPointInfo != nullptr ? entryPointInfo->jsMethod : nullptr;
+        if (jsMethod == GetCheckAsmJsCodeGenThunk())
+        {
+            jsMethod = CheckAsmJsCodeGen(func);
+            entryPointInfo = (Js::FunctionEntryPointInfo*)func->GetEntryPointInfo();
+        }
+        // Defense in depth: only compiled slot-image JIT code
+        // (IsCodeGenDone() && jsMethod == entryPointInfo->GetNativeEntrypoint())
+        // may enter AsmJsJitCall; Var-convention entries and all thunks stay
+        // on the interpreter path.
+        if (entryPointInfo == nullptr ||
+            !entryPointInfo->IsCodeGenDone() ||
+            jsMethod == nullptr ||
+            jsMethod != entryPointInfo->GetNativeEntrypoint() ||
+            jsMethod == InterpreterStackFrame::AsmJsDelayDynamicInterpreterThunk ||
+            jsMethod == InterpreterStackFrame::DelayDynamicInterpreterThunk ||
+            jsMethod == GetCheckAsmJsCodeGenThunk() ||
+            jsMethod == GetCheckCodeGenThunk() ||
+            jsMethod == (JavascriptMethod)&Js::AsmJsExternalEntryPoint ||
+#ifdef ENABLE_WASM
+            jsMethod == (JavascriptMethod)&WasmLibrary::WasmLazyTrapCallback ||
+#endif
+            IsIntermediateCodeGenThunk(jsMethod) ||
+            IsAsmJsCodeGenThunk(jsMethod))
+        {
+            return nullptr;
+        }
+        return jsMethod;
+    }
+
+    void InvokeAsmJsJitSlotImage(
+        ScriptFunction* func,
+        JavascriptMethod jsMethod,
+        bool unboxExternalArgs,
+        Var* origArgs,
+        CallInfo callInfo,
+        const Var* internalArgv,
+        uint internalArgBytes,
+        byte* outRet)
+    {
+        AsmJsFunctionInfo* info = func->GetFunctionBody()->GetAsmJsFunctionInfo();
+        uint slotImageBytes = info->GetArgByteSize() + (uint)(3 * MachPtr);
+        if (slotImageBytes < (uint)(8 * MachPtr))
+        {
+            // AsmJsJitCall loads x0-x7 (64 bytes) from `base`.
+            slotImageBytes = (uint)(8 * MachPtr);
+        }
+        // W6 + unwind safety: 64KB JIT recursion budget from `base` down to
+        // `floor`, plus 32KB unwind headroom below `floor` so ProbeWasmReserveFloor
+        // + __cxa_throw + libunwind cannot overwrite AsmJsJitCall's bridge frame.
+        const uint jitStackBudget = 65536;
+        const uint unwindHeadroom = 32768;
+        const uint reserve = jitStackBudget + unwindHeadroom;
+        ScriptContext* scriptContext = func->GetScriptContext();
+        PROBE_STACK_CALL(scriptContext, func, slotImageBytes + 16 + reserve + Js::Constants::MinStackDefault);
+        byte* raw = (byte*)_alloca(slotImageBytes + 16 + reserve);
+        byte* base = (byte*)(((uintptr_t)raw + 15) & ~(uintptr_t)15) + reserve;
+        *(ScriptFunction**)base = func;
+        *(uint64*)(base + MachPtr) = 0;
+        *(uint64*)(base + 2 * MachPtr) = 0;
+        if (unboxExternalArgs)
+        {
+            // UnboxAsmJsArguments skips one MachPtr slot (argDst + MachPtr);
+            // pass base + 2*MachPtr so arg k lands at [base + 24 + 8*k] (slot 3+k).
+            UnboxAsmJsArguments(func, origArgs, (char*)base + 2 * MachPtr, callInfo);
+        }
+        else if (internalArgBytes > 0)
+        {
+            Assert(internalArgv != nullptr);
+            memcpy(base + 3 * MachPtr, (const byte*)internalArgv + MachPtr, internalArgBytes);
+        }
+        ThreadContext::WasmStackReserveFloorGuard floorGuard(
+            scriptContext->GetThreadContext(), (uintptr_t)raw + unwindHeadroom);
+        AsmJsJitCall((void*)jsMethod, (void*)base, outRet);
+    }
+
     // ARM64 external (JS -> wasm/asm.js) entry, W3 interpreter-only
     // (doc/wasm-arm64-abi.md sections 2-3,6). Pure C++: probe, unbox,
     // interpret via AsmJsInterpreter<T>, box. Matches the x64 shape
@@ -761,73 +886,20 @@ namespace Js
         // (wasm param k at arg slot 3+k, matching the codegen param layout;
         // AsmJsJitCall loads x0-x7 from the image and sets sp = base, so
         // overflow slot s is at [sp + 8*s]) per ABI sections 2-3,6.
-        // CheckAsmJsCodeGenThunk (codegen pending)
-        // interprets this call: the thunk would jump to the Var-convention
-        // original, which cannot consume the AAPCS64 image (W4 slices 1+2).
         {
-            JavascriptMethod jsMethod = ((Js::FunctionEntryPointInfo*)func->GetEntryPointInfo())->jsMethod;
-            // Defense in depth: the Var-convention external entry serves JS
-            // dispatch only and can never drive a slot-image call. Treat it
-            // as interpreter-tier like the delay thunks.
-            bool useJit = (jsMethod != nullptr &&
-                           jsMethod != InterpreterStackFrame::AsmJsDelayDynamicInterpreterThunk &&
-                           jsMethod != InterpreterStackFrame::DelayDynamicInterpreterThunk &&
-                           jsMethod != GetCheckAsmJsCodeGenThunk() &&
-#if defined(_M_ARM64)
-                           jsMethod != (JavascriptMethod)&Js::AsmJsExternalEntryPoint &&
-#endif
-                           true);
-#ifdef ENABLE_WASM
-            // W7: the JIT single-return convention cannot carry N results
-            // (LowerRet/LowerAsmJsCallI still single-valued), so multi-value
-            // functions always take the interpreter path. JIT-tier runs thus
-            // stay correct; the x8 area is a later step.
+            JavascriptMethod jsMethod = ResolveAsmJsJitEntryPoint(func);
+            if (jsMethod != nullptr)
             {
-                const Wasm::WasmSignature* wasmSig = info->GetWasmSignature();
-                if (wasmSig != nullptr && wasmSig->IsMultiValue())
-                {
-                    useJit = false;
-                }
-            }
-#endif
-#if defined(ENABLE_WASM_SIMD) && defined(_M_ARM64)
-            // ARM64 NEON SIMD body opcodes tier up to JIT; FunctionUsesSimd is
-            // scoped on ARM64 to functions with v128 signature params/results.
-            if (WAsmJs::FunctionUsesSimd(func->GetFunctionBody()))
-            {
-                useJit = false;
-            }
-#endif
-            if (useJit)
-            {
-                int unboxSize = GetStackSizeForAsmJsUnboxing(func);
-                // Free reserve BELOW the args image for the JIT callee frame:
-                // AsmJsJitCall sets sp = base and the prologue sub's sp
-                // by the frame size. Without the reserve the frame lands on
-                // the bridge frame below and corrupts its saved fp/lr.
-                // Realistic asm.js/wasm frames are a few KB (register area +
-                // spill slots); 64KB covers ~8K spill slots with margin.
-                // W6: bound JIT frames to the 64KB alloca reserve; deeper
-                // recursion throws StackOverflow via the prolog floor check.
-                const int reserve = 65536;
-                byte* raw = (byte*)_alloca(unboxSize + 16 + reserve);
-                byte* base = (byte*)(((uintptr_t)raw + 15) & ~(uintptr_t)15) + reserve;
-                *(ScriptFunction**)base = func;
-                *(uint64*)(base + MachPtr) = 0;
-                *(uint64*)(base + 2 * MachPtr) = 0;
-                // UnboxAsmJsArguments skips one MachPtr slot (argDst + MachPtr);
-                // pass base + 2*MachPtr so arg k lands at [base + 24 + 8*k]
-                // (slot 3+k).
-                UnboxAsmJsArguments(func, args.Values + 1, (char*)base + 2 * MachPtr, callInfo);
                 byte outRet[16];
-                {
-                    // Bound JIT frames to the alloca reserve: raw is the post-alloca
-                    // stack bottom. Deeper recursion throws StackOverflow via the
-                    // prolog floor check instead of clobbering the bridge frame.
-                    ThreadContext::WasmStackReserveFloorGuard floorGuard(
-                        func->GetScriptContext()->GetThreadContext(), (uintptr_t)raw);
-                    AsmJsJitCall((void*)jsMethod, (void*)base, outRet);
-                }
+                InvokeAsmJsJitSlotImage(
+                    func,
+                    jsMethod,
+                    true,
+                    args.Values + 1,
+                    callInfo,
+                    nullptr,
+                    0,
+                    outRet);
                 AsmJsSIMDValue zeroSimd2;
                 zeroSimd2.Zero();
                 switch (info->GetReturnType().which())
