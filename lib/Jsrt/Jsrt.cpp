@@ -2969,11 +2969,27 @@ typedef struct JsNativeFunctionWrapperHolder
     FieldNoBarrier(JsNativeFunction) nativeFunction;
 }JsNativeFunctionWrapperHolder;
 
-JsValueRef CALLBACK JsNativeFunctionWrapper(JsValueRef callee, JsValueRef *arguments, unsigned short argumentCount, JsNativeFunctionInfo *info, void *wrapperData)
+typedef struct JsEnhancedNativeFunctionWrapperHolder
+{
+    FieldNoBarrier(void *) callbackState;
+    FieldNoBarrier(JsEnhancedNativeFunction) nativeFunction;
+}JsEnhancedNativeFunctionWrapperHolder;
+
+JsValueRef CALLBACK JsNativeFunctionWrapper(JsValueRef callee, JsValueRef *arguments, unsigned short argumentCount, Js::StdCallJavascriptMethodInfo *info, void *wrapperData)
 {
     JsNativeFunctionWrapperHolder *wrapperHolder = static_cast<JsNativeFunctionWrapperHolder*>(wrapperData);
     JsValueRef result = wrapperHolder->nativeFunction(callee, info->isConstructCall, arguments, argumentCount, wrapperHolder->callbackState);
     return result;
+}
+
+JsValueRef CALLBACK JsEnhancedNativeFunctionWrapper(JsValueRef callee, JsValueRef *arguments, unsigned short argumentCount, Js::StdCallJavascriptMethodInfo *info, void *wrapperData)
+{
+    JsEnhancedNativeFunctionWrapperHolder *wrapperHolder = static_cast<JsEnhancedNativeFunctionWrapperHolder*>(wrapperData);
+    JsNativeFunctionInfo nativeInfo;
+    nativeInfo.thisArg = info->thisArg;
+    nativeInfo.newTargetArg = info->newTargetArg;
+    nativeInfo.isConstructCall = info->isConstructCall;
+    return wrapperHolder->nativeFunction(callee, arguments, argumentCount, &nativeInfo, wrapperHolder->callbackState);
 }
 
 template <bool wrapNativeFunction, class T>
@@ -2997,7 +3013,11 @@ JsErrorCode JsCreateEnhancedFunctionHelper(_In_ T nativeFunction, _In_opt_ JsVal
         }
         else
         {
-            method = (Js::StdCallJavascriptMethod)nativeFunction;
+            JsEnhancedNativeFunctionWrapperHolder *wrapperHolder = RecyclerNewStruct(scriptContext->GetRecycler(), JsEnhancedNativeFunctionWrapperHolder);
+            wrapperHolder->callbackState = callbackState;
+            wrapperHolder->nativeFunction = (JsEnhancedNativeFunction)nativeFunction;
+            callbackState = wrapperHolder;
+            method = (Js::StdCallJavascriptMethod)JsEnhancedNativeFunctionWrapper;
         }
 
         if (metadata != JS_INVALID_REFERENCE)

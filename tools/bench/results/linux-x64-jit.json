@@ -1,0 +1,2547 @@
+{
+ "binary": "/home/ubuntu/code/ChakraCore/zig-out/bin/ch",
+ "binarySha256": "04b564c4b7c971bed48be74bc194137ea72cd8ab4c3b1e682f2fbc406c4ae09c",
+ "platform": "linux",
+ "machine": "x86_64",
+ "tier": "jit",
+ "flags": [],
+ "iterations": 5,
+ "timeoutSec": 60.0,
+ "results": [
+  {
+   "test": "SunSpider/3d-cube.js",
+   "status": "pass",
+   "kind": "time",
+   "median": 42.0,
+   "mad": 4.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 0.123,
+     "marker": "TIME",
+     "value": 59.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.097,
+     "marker": "TIME",
+     "value": 38.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.103,
+     "marker": "TIME",
+     "value": 42.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.11,
+     "marker": "TIME",
+     "value": 46.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.091,
+     "marker": "TIME",
+     "value": 37.0
+    }
+   ]
+  },
+  {
+   "test": "SunSpider/3d-morph.js",
+   "status": "pass",
+   "kind": "time",
+   "median": 7.0,
+   "mad": 0.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 0.029,
+     "marker": "TIME",
+     "value": 8.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.029,
+     "marker": "TIME",
+     "value": 7.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.03,
+     "marker": "TIME",
+     "value": 7.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.03,
+     "marker": "TIME",
+     "value": 7.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.03,
+     "marker": "TIME",
+     "value": 8.0
+    }
+   ]
+  },
+  {
+   "test": "SunSpider/3d-raytrace.js",
+   "status": "pass",
+   "kind": "time",
+   "median": 57.0,
+   "mad": 2.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 0.082,
+     "marker": "TIME",
+     "value": 53.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.086,
+     "marker": "TIME",
+     "value": 60.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.089,
+     "marker": "TIME",
+     "value": 57.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.083,
+     "marker": "TIME",
+     "value": 55.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.083,
+     "marker": "TIME",
+     "value": 57.0
+    }
+   ]
+  },
+  {
+   "test": "SunSpider/access-binary-trees.js",
+   "status": "pass",
+   "kind": "time",
+   "median": 14.0,
+   "mad": 1.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 0.036,
+     "marker": "TIME",
+     "value": 12.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.038,
+     "marker": "TIME",
+     "value": 15.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.038,
+     "marker": "TIME",
+     "value": 16.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.038,
+     "marker": "TIME",
+     "value": 14.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.038,
+     "marker": "TIME",
+     "value": 14.0
+    }
+   ]
+  },
+  {
+   "test": "SunSpider/access-fannkuch.js",
+   "status": "pass",
+   "kind": "time",
+   "median": 17.0,
+   "mad": 1.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 0.04,
+     "marker": "TIME",
+     "value": 17.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.041,
+     "marker": "TIME",
+     "value": 18.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.04,
+     "marker": "TIME",
+     "value": 18.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.038,
+     "marker": "TIME",
+     "value": 15.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.041,
+     "marker": "TIME",
+     "value": 16.0
+    }
+   ]
+  },
+  {
+   "test": "SunSpider/access-nbody.js",
+   "status": "pass",
+   "kind": "time",
+   "median": 13.0,
+   "mad": 1.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 0.038,
+     "marker": "TIME",
+     "value": 13.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.045,
+     "marker": "TIME",
+     "value": 19.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.033,
+     "marker": "TIME",
+     "value": 11.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.037,
+     "marker": "TIME",
+     "value": 14.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.036,
+     "marker": "TIME",
+     "value": 12.0
+    }
+   ]
+  },
+  {
+   "test": "SunSpider/access-nsieve.js",
+   "status": "pass",
+   "kind": "time",
+   "median": 6.0,
+   "mad": 0.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 0.029,
+     "marker": "TIME",
+     "value": 6.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.028,
+     "marker": "TIME",
+     "value": 6.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.032,
+     "marker": "TIME",
+     "value": 7.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.029,
+     "marker": "TIME",
+     "value": 6.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.03,
+     "marker": "TIME",
+     "value": 5.0
+    }
+   ]
+  },
+  {
+   "test": "SunSpider/bitops-3bit-bits-in-byte.js",
+   "status": "pass",
+   "kind": "time",
+   "median": 3.0,
+   "mad": 0.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 0.026,
+     "marker": "TIME",
+     "value": 3.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.025,
+     "marker": "TIME",
+     "value": 3.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.027,
+     "marker": "TIME",
+     "value": 3.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.024,
+     "marker": "TIME",
+     "value": 3.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.024,
+     "marker": "TIME",
+     "value": 3.0
+    }
+   ]
+  },
+  {
+   "test": "SunSpider/bitops-bits-in-byte.js",
+   "status": "pass",
+   "kind": "time",
+   "median": 4.0,
+   "mad": 0.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 0.027,
+     "marker": "TIME",
+     "value": 4.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.027,
+     "marker": "TIME",
+     "value": 4.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.028,
+     "marker": "TIME",
+     "value": 4.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.024,
+     "marker": "TIME",
+     "value": 3.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.029,
+     "marker": "TIME",
+     "value": 5.0
+    }
+   ]
+  },
+  {
+   "test": "SunSpider/bitops-bitwise-and.js",
+   "status": "pass",
+   "kind": "time",
+   "median": 4.0,
+   "mad": 0.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 0.029,
+     "marker": "TIME",
+     "value": 5.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.026,
+     "marker": "TIME",
+     "value": 4.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.025,
+     "marker": "TIME",
+     "value": 4.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.027,
+     "marker": "TIME",
+     "value": 4.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.025,
+     "marker": "TIME",
+     "value": 4.0
+    }
+   ]
+  },
+  {
+   "test": "SunSpider/bitops-nsieve-bits.js",
+   "status": "pass",
+   "kind": "time",
+   "median": 361.0,
+   "mad": 33.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 0.385,
+     "marker": "TIME",
+     "value": 361.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.389,
+     "marker": "TIME",
+     "value": 363.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.481,
+     "marker": "TIME",
+     "value": 451.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.334,
+     "marker": "TIME",
+     "value": 311.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.35,
+     "marker": "TIME",
+     "value": 328.0
+    }
+   ]
+  },
+  {
+   "test": "SunSpider/controlflow-recursive.js",
+   "status": "pass",
+   "kind": "time",
+   "median": 21.0,
+   "mad": 1.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 0.042,
+     "marker": "TIME",
+     "value": 21.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.047,
+     "marker": "TIME",
+     "value": 20.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.045,
+     "marker": "TIME",
+     "value": 21.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.045,
+     "marker": "TIME",
+     "value": 22.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.043,
+     "marker": "TIME",
+     "value": 20.0
+    }
+   ]
+  },
+  {
+   "test": "SunSpider/crypto-aes.js",
+   "status": "pass",
+   "kind": "time",
+   "median": 105.0,
+   "mad": 2.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 0.153,
+     "marker": "TIME",
+     "value": 127.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.159,
+     "marker": "TIME",
+     "value": 131.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.134,
+     "marker": "TIME",
+     "value": 105.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.128,
+     "marker": "TIME",
+     "value": 105.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.129,
+     "marker": "TIME",
+     "value": 103.0
+    }
+   ]
+  },
+  {
+   "test": "SunSpider/crypto-md5.js",
+   "status": "pass",
+   "kind": "time",
+   "median": 44.0,
+   "mad": 1.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 0.104,
+     "marker": "TIME",
+     "value": 44.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.092,
+     "marker": "TIME",
+     "value": 45.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.087,
+     "marker": "TIME",
+     "value": 43.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.087,
+     "marker": "TIME",
+     "value": 41.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.089,
+     "marker": "TIME",
+     "value": 47.0
+    }
+   ]
+  },
+  {
+   "test": "SunSpider/crypto-sha1.js",
+   "status": "pass",
+   "kind": "time",
+   "median": 26.0,
+   "mad": 1.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 0.056,
+     "marker": "TIME",
+     "value": 27.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.06,
+     "marker": "TIME",
+     "value": 27.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.057,
+     "marker": "TIME",
+     "value": 26.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.051,
+     "marker": "TIME",
+     "value": 23.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.057,
+     "marker": "TIME",
+     "value": 26.0
+    }
+   ]
+  },
+  {
+   "test": "SunSpider/date-format-tofte.js",
+   "status": "pass",
+   "kind": "time",
+   "median": 83.0,
+   "mad": 5.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 0.113,
+     "marker": "TIME",
+     "value": 88.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.099,
+     "marker": "TIME",
+     "value": 76.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.101,
+     "marker": "TIME",
+     "value": 75.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.116,
+     "marker": "TIME",
+     "value": 88.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.108,
+     "marker": "TIME",
+     "value": 83.0
+    }
+   ]
+  },
+  {
+   "test": "SunSpider/date-format-xparb.js",
+   "status": "pass",
+   "kind": "time",
+   "median": 78.0,
+   "mad": 2.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 0.108,
+     "marker": "TIME",
+     "value": 82.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.103,
+     "marker": "TIME",
+     "value": 78.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.103,
+     "marker": "TIME",
+     "value": 73.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.103,
+     "marker": "TIME",
+     "value": 80.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.108,
+     "marker": "TIME",
+     "value": 77.0
+    }
+   ]
+  },
+  {
+   "test": "SunSpider/math-cordic.js",
+   "status": "pass",
+   "kind": "time",
+   "median": 11.0,
+   "mad": 4.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 0.043,
+     "marker": "TIME",
+     "value": 19.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.03,
+     "marker": "TIME",
+     "value": 11.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.029,
+     "marker": "TIME",
+     "value": 7.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.028,
+     "marker": "TIME",
+     "value": 12.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.029,
+     "marker": "TIME",
+     "value": 7.0
+    }
+   ]
+  },
+  {
+   "test": "SunSpider/math-partial-sums.js",
+   "status": "pass",
+   "kind": "time",
+   "median": 14.0,
+   "mad": 1.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 0.038,
+     "marker": "TIME",
+     "value": 14.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.036,
+     "marker": "TIME",
+     "value": 13.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.036,
+     "marker": "TIME",
+     "value": 15.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.035,
+     "marker": "TIME",
+     "value": 14.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.036,
+     "marker": "TIME",
+     "value": 13.0
+    }
+   ]
+  },
+  {
+   "test": "SunSpider/math-spectral-norm.js",
+   "status": "pass",
+   "kind": "time",
+   "median": 6.0,
+   "mad": 0.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 0.036,
+     "marker": "TIME",
+     "value": 9.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.032,
+     "marker": "TIME",
+     "value": 6.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.031,
+     "marker": "TIME",
+     "value": 6.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.032,
+     "marker": "TIME",
+     "value": 5.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.032,
+     "marker": "TIME",
+     "value": 6.0
+    }
+   ]
+  },
+  {
+   "test": "SunSpider/regexp-dna.js",
+   "status": "pass",
+   "kind": "time",
+   "median": 10.0,
+   "mad": 1.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 0.034,
+     "marker": "TIME",
+     "value": 11.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.042,
+     "marker": "TIME",
+     "value": 14.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.032,
+     "marker": "TIME",
+     "value": 9.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.036,
+     "marker": "TIME",
+     "value": 10.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.034,
+     "marker": "TIME",
+     "value": 10.0
+    }
+   ]
+  },
+  {
+   "test": "SunSpider/string-base64.js",
+   "status": "pass",
+   "kind": "time",
+   "median": 15.0,
+   "mad": 0.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 0.039,
+     "marker": "TIME",
+     "value": 15.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.039,
+     "marker": "TIME",
+     "value": 15.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.038,
+     "marker": "TIME",
+     "value": 14.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.04,
+     "marker": "TIME",
+     "value": 15.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.037,
+     "marker": "TIME",
+     "value": 14.0
+    }
+   ]
+  },
+  {
+   "test": "SunSpider/string-fasta.js",
+   "status": "pass",
+   "kind": "time",
+   "median": 17.0,
+   "mad": 1.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 0.04,
+     "marker": "TIME",
+     "value": 18.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.041,
+     "marker": "TIME",
+     "value": 17.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.04,
+     "marker": "TIME",
+     "value": 16.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.04,
+     "marker": "TIME",
+     "value": 17.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.045,
+     "marker": "TIME",
+     "value": 21.0
+    }
+   ]
+  },
+  {
+   "test": "SunSpider/string-tagcloud.js",
+   "status": "pass",
+   "kind": "time",
+   "median": 39.0,
+   "mad": 0.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 0.066,
+     "marker": "TIME",
+     "value": 40.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.069,
+     "marker": "TIME",
+     "value": 39.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.063,
+     "marker": "TIME",
+     "value": 39.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.068,
+     "marker": "TIME",
+     "value": 44.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.066,
+     "marker": "TIME",
+     "value": 39.0
+    }
+   ]
+  },
+  {
+   "test": "SunSpider/string-unpack-code.js",
+   "status": "pass",
+   "kind": "time",
+   "median": 62.0,
+   "mad": 0.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 0.096,
+     "marker": "TIME",
+     "value": 67.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.091,
+     "marker": "TIME",
+     "value": 62.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.087,
+     "marker": "TIME",
+     "value": 62.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.088,
+     "marker": "TIME",
+     "value": 62.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.087,
+     "marker": "TIME",
+     "value": 60.0
+    }
+   ]
+  },
+  {
+   "test": "SunSpider/string-validate-input.js",
+   "status": "pass",
+   "kind": "time",
+   "median": 23.0,
+   "mad": 2.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 0.05,
+     "marker": "TIME",
+     "value": 23.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.048,
+     "marker": "TIME",
+     "value": 23.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.052,
+     "marker": "TIME",
+     "value": 26.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.044,
+     "marker": "TIME",
+     "value": 21.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.045,
+     "marker": "TIME",
+     "value": 20.0
+    }
+   ]
+  },
+  {
+   "test": "Kraken/ai-astar.js",
+   "status": "pass",
+   "kind": "time",
+   "median": 2787.0,
+   "mad": 31.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 2.857,
+     "marker": "TIME",
+     "value": 2782.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 2.871,
+     "marker": "TIME",
+     "value": 2787.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 2.924,
+     "marker": "TIME",
+     "value": 2840.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 2.949,
+     "marker": "TIME",
+     "value": 2849.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 2.828,
+     "marker": "TIME",
+     "value": 2756.0
+    }
+   ]
+  },
+  {
+   "test": "Kraken/audio-beat-detection.js",
+   "status": "pass",
+   "kind": "time",
+   "median": 24517.0,
+   "mad": 547.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 23.93,
+     "marker": "TIME",
+     "value": 23893.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 25.293,
+     "marker": "TIME",
+     "value": 25255.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 24.555,
+     "marker": "TIME",
+     "value": 24517.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 24.005,
+     "marker": "TIME",
+     "value": 23970.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 24.991,
+     "marker": "TIME",
+     "value": 24951.0
+    }
+   ]
+  },
+  {
+   "test": "Kraken/audio-dft.js",
+   "status": "pass",
+   "kind": "time",
+   "median": 204.0,
+   "mad": 6.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 0.241,
+     "marker": "TIME",
+     "value": 198.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.242,
+     "marker": "TIME",
+     "value": 204.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.248,
+     "marker": "TIME",
+     "value": 198.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.273,
+     "marker": "TIME",
+     "value": 232.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.265,
+     "marker": "TIME",
+     "value": 227.0
+    }
+   ]
+  },
+  {
+   "test": "Kraken/audio-fft.js",
+   "status": "pass",
+   "kind": "time",
+   "median": 23685.0,
+   "mad": 399.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 23.726,
+     "marker": "TIME",
+     "value": 23685.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 21.773,
+     "marker": "TIME",
+     "value": 21736.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 24.125,
+     "marker": "TIME",
+     "value": 24084.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 24.025,
+     "marker": "TIME",
+     "value": 23985.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 23.013,
+     "marker": "TIME",
+     "value": 22975.0
+    }
+   ]
+  },
+  {
+   "test": "Kraken/audio-oscillator.js",
+   "status": "pass",
+   "kind": "time",
+   "median": 6677.0,
+   "mad": 6.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 6.717,
+     "marker": "TIME",
+     "value": 6673.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 6.715,
+     "marker": "TIME",
+     "value": 6677.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 6.71,
+     "marker": "TIME",
+     "value": 6671.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 7.073,
+     "marker": "TIME",
+     "value": 7034.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 6.74,
+     "marker": "TIME",
+     "value": 6699.0
+    }
+   ]
+  },
+  {
+   "test": "Kraken/imaging-darkroom.js",
+   "status": "pass",
+   "kind": "time",
+   "median": 163.0,
+   "mad": 13.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 0.294,
+     "marker": "TIME",
+     "value": 148.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.283,
+     "marker": "TIME",
+     "value": 150.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.32,
+     "marker": "TIME",
+     "value": 176.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.313,
+     "marker": "TIME",
+     "value": 163.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.331,
+     "marker": "TIME",
+     "value": 188.0
+    }
+   ]
+  },
+  {
+   "test": "Kraken/imaging-desaturate.js",
+   "status": "pass",
+   "kind": "time",
+   "median": 159.0,
+   "mad": 2.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 0.303,
+     "marker": "TIME",
+     "value": 167.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.293,
+     "marker": "TIME",
+     "value": 159.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.282,
+     "marker": "TIME",
+     "value": 151.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.275,
+     "marker": "TIME",
+     "value": 157.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.307,
+     "marker": "TIME",
+     "value": 159.0
+    }
+   ]
+  },
+  {
+   "test": "Kraken/imaging-gaussian-blur.js",
+   "status": "pass",
+   "kind": "time",
+   "median": 158.0,
+   "mad": 4.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 0.293,
+     "marker": "TIME",
+     "value": 156.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.296,
+     "marker": "TIME",
+     "value": 162.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.325,
+     "marker": "TIME",
+     "value": 158.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.3,
+     "marker": "TIME",
+     "value": 173.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.284,
+     "marker": "TIME",
+     "value": 154.0
+    }
+   ]
+  },
+  {
+   "test": "Kraken/json-parse-financial.js",
+   "status": "pass",
+   "kind": "time",
+   "median": 91.0,
+   "mad": 8.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 0.125,
+     "marker": "TIME",
+     "value": 93.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.109,
+     "marker": "TIME",
+     "value": 83.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.122,
+     "marker": "TIME",
+     "value": 91.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.128,
+     "marker": "TIME",
+     "value": 101.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.125,
+     "marker": "TIME",
+     "value": 83.0
+    }
+   ]
+  },
+  {
+   "test": "Kraken/json-stringify-tinderbox.js",
+   "status": "pass",
+   "kind": "time",
+   "median": 63.0,
+   "mad": 6.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 0.1,
+     "marker": "TIME",
+     "value": 59.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.098,
+     "marker": "TIME",
+     "value": 57.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.105,
+     "marker": "TIME",
+     "value": 63.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.146,
+     "marker": "TIME",
+     "value": 92.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.136,
+     "marker": "TIME",
+     "value": 83.0
+    }
+   ]
+  },
+  {
+   "test": "Kraken/stanford-crypto-aes.js",
+   "status": "pass",
+   "kind": "time",
+   "median": 2947.0,
+   "mad": 102.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 3.191,
+     "marker": "TIME",
+     "value": 3089.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 3.049,
+     "marker": "TIME",
+     "value": 2947.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 2.938,
+     "marker": "TIME",
+     "value": 2845.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 2.908,
+     "marker": "TIME",
+     "value": 2815.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 3.052,
+     "marker": "TIME",
+     "value": 2958.0
+    }
+   ]
+  },
+  {
+   "test": "Kraken/stanford-crypto-ccm.js",
+   "status": "pass",
+   "kind": "time",
+   "median": 878.0,
+   "mad": 55.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 0.954,
+     "marker": "TIME",
+     "value": 878.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.887,
+     "marker": "TIME",
+     "value": 823.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.886,
+     "marker": "TIME",
+     "value": 819.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.957,
+     "marker": "TIME",
+     "value": 894.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 1.033,
+     "marker": "TIME",
+     "value": 962.0
+    }
+   ]
+  },
+  {
+   "test": "Kraken/stanford-crypto-pbkdf2.js",
+   "status": "pass",
+   "kind": "time",
+   "median": 844.0,
+   "mad": 85.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 0.991,
+     "marker": "TIME",
+     "value": 941.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 1.173,
+     "marker": "TIME",
+     "value": 1127.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.883,
+     "marker": "TIME",
+     "value": 840.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.805,
+     "marker": "TIME",
+     "value": 759.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.887,
+     "marker": "TIME",
+     "value": 844.0
+    }
+   ]
+  },
+  {
+   "test": "Kraken/stanford-crypto-sha256-iterative.js",
+   "status": "pass",
+   "kind": "time",
+   "median": 95.0,
+   "mad": 3.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 0.131,
+     "marker": "TIME",
+     "value": 98.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.12,
+     "marker": "TIME",
+     "value": 87.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.129,
+     "marker": "TIME",
+     "value": 95.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.127,
+     "marker": "TIME",
+     "value": 92.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.143,
+     "marker": "TIME",
+     "value": 113.0
+    }
+   ]
+  },
+  {
+   "test": "Octane/box2d.js",
+   "status": "pass",
+   "kind": "score",
+   "median": 4808.0,
+   "mad": 47.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 1.096,
+     "marker": "SCORE",
+     "value": 4865.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 1.097,
+     "marker": "SCORE",
+     "value": 4827.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 1.107,
+     "marker": "SCORE",
+     "value": 4216.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 1.118,
+     "marker": "SCORE",
+     "value": 4761.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 1.101,
+     "marker": "SCORE",
+     "value": 4808.0
+    }
+   ]
+  },
+  {
+   "test": "Octane/code-load.js",
+   "status": "pass",
+   "kind": "score",
+   "median": 7686.0,
+   "mad": 104.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 2.123,
+     "marker": "SCORE",
+     "value": 7366.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 2.119,
+     "marker": "SCORE",
+     "value": 7686.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 2.118,
+     "marker": "SCORE",
+     "value": 7582.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 2.121,
+     "marker": "SCORE",
+     "value": 7759.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 2.123,
+     "marker": "SCORE",
+     "value": 7837.0
+    }
+   ]
+  },
+  {
+   "test": "Octane/crypto.js",
+   "status": "pass",
+   "kind": "score",
+   "median": 596.0,
+   "mad": 14.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 10.92,
+     "marker": "SCORE",
+     "value": 578.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 10.672,
+     "marker": "SCORE",
+     "value": 610.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 9.517,
+     "marker": "SCORE",
+     "value": 614.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 10.455,
+     "marker": "SCORE",
+     "value": 596.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 10.589,
+     "marker": "SCORE",
+     "value": 595.0
+    }
+   ]
+  },
+  {
+   "test": "Octane/deltablue.js",
+   "status": "pass",
+   "kind": "score",
+   "median": 12828.0,
+   "mad": 217.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 2.092,
+     "marker": "SCORE",
+     "value": 12828.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 2.089,
+     "marker": "SCORE",
+     "value": 13045.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 2.087,
+     "marker": "SCORE",
+     "value": 12920.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 2.075,
+     "marker": "SCORE",
+     "value": 11848.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 2.102,
+     "marker": "SCORE",
+     "value": 8884.0
+    }
+   ]
+  },
+  {
+   "test": "Octane/earley-boyer.js",
+   "status": "pass",
+   "kind": "score",
+   "median": 3839.0,
+   "mad": 19.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 7.374,
+     "marker": "SCORE",
+     "value": 3761.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 7.272,
+     "marker": "SCORE",
+     "value": 3743.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 7.355,
+     "marker": "SCORE",
+     "value": 3839.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 7.388,
+     "marker": "SCORE",
+     "value": 3851.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 7.338,
+     "marker": "SCORE",
+     "value": 3858.0
+    }
+   ]
+  },
+  {
+   "test": "Octane/gbemu.js",
+   "status": "pass",
+   "kind": "score",
+   "median": 17936.0,
+   "mad": 105.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 1.189,
+     "marker": "SCORE",
+     "value": 17831.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 1.18,
+     "marker": "SCORE",
+     "value": 17936.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 1.215,
+     "marker": "SCORE",
+     "value": 17393.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 1.184,
+     "marker": "SCORE",
+     "value": 17953.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 1.258,
+     "marker": "SCORE",
+     "value": 19509.0
+    }
+   ]
+  },
+  {
+   "test": "Octane/mandreel.js",
+   "status": "pass",
+   "kind": "score",
+   "median": 14211.0,
+   "mad": 299.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 2.049,
+     "marker": "SCORE",
+     "value": 14510.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 2.059,
+     "marker": "SCORE",
+     "value": 14211.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 1.989,
+     "marker": "SCORE",
+     "value": 13425.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 2.011,
+     "marker": "SCORE",
+     "value": 13061.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 2.059,
+     "marker": "SCORE",
+     "value": 14441.0
+    }
+   ]
+  },
+  {
+   "test": "Octane/navier-stokes.js",
+   "status": "pass",
+   "kind": "score",
+   "median": 962.0,
+   "mad": 31.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 4.321,
+     "marker": "SCORE",
+     "value": 962.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 4.493,
+     "marker": "SCORE",
+     "value": 931.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 4.447,
+     "marker": "SCORE",
+     "value": 928.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 4.388,
+     "marker": "SCORE",
+     "value": 993.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 4.203,
+     "marker": "SCORE",
+     "value": 991.0
+    }
+   ]
+  },
+  {
+   "test": "Octane/pdfjs.js",
+   "status": "pass",
+   "kind": "score",
+   "median": 6250.0,
+   "mad": 147.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 1.371,
+     "marker": "SCORE",
+     "value": 6397.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 1.425,
+     "marker": "SCORE",
+     "value": 6250.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 1.351,
+     "marker": "SCORE",
+     "value": 5548.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 1.433,
+     "marker": "SCORE",
+     "value": 6294.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 1.244,
+     "marker": "SCORE",
+     "value": 6039.0
+    }
+   ]
+  },
+  {
+   "test": "Octane/raytrace.js",
+   "status": "pass",
+   "kind": "score",
+   "median": 19610.0,
+   "mad": 666.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 2.105,
+     "marker": "SCORE",
+     "value": 19610.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 2.115,
+     "marker": "SCORE",
+     "value": 15567.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 2.135,
+     "marker": "SCORE",
+     "value": 19330.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 2.114,
+     "marker": "SCORE",
+     "value": 20276.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 2.102,
+     "marker": "SCORE",
+     "value": 20531.0
+    }
+   ]
+  },
+  {
+   "test": "Octane/regexp.js",
+   "status": "pass",
+   "kind": "score",
+   "median": 1155.0,
+   "mad": 20.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 3.505,
+     "marker": "SCORE",
+     "value": 1330.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 3.367,
+     "marker": "SCORE",
+     "value": 1153.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 3.462,
+     "marker": "SCORE",
+     "value": 1155.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 3.293,
+     "marker": "SCORE",
+     "value": 1135.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 3.364,
+     "marker": "SCORE",
+     "value": 1199.0
+    }
+   ]
+  },
+  {
+   "test": "Octane/richards.js",
+   "status": "pass",
+   "kind": "score",
+   "median": 16182.0,
+   "mad": 318.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 2.054,
+     "marker": "SCORE",
+     "value": 16182.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 2.027,
+     "marker": "SCORE",
+     "value": 15665.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 2.027,
+     "marker": "SCORE",
+     "value": 16244.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 2.025,
+     "marker": "SCORE",
+     "value": 16500.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 2.053,
+     "marker": "SCORE",
+     "value": 15801.0
+    }
+   ]
+  },
+  {
+   "test": "Octane/splay.js",
+   "status": "pass",
+   "kind": "score",
+   "median": 6065.0,
+   "mad": 67.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 2.29,
+     "marker": "SCORE",
+     "value": 5998.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 2.297,
+     "marker": "SCORE",
+     "value": 6065.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 2.309,
+     "marker": "SCORE",
+     "value": 5685.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 2.309,
+     "marker": "SCORE",
+     "value": 6242.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 2.32,
+     "marker": "SCORE",
+     "value": 6089.0
+    }
+   ]
+  },
+  {
+   "test": "Octane/typescript.js",
+   "status": "pass",
+   "kind": "score",
+   "median": 14544.0,
+   "mad": 439.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 8.911,
+     "marker": "SCORE",
+     "value": 14644.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 8.777,
+     "marker": "SCORE",
+     "value": 14983.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 10.041,
+     "marker": "SCORE",
+     "value": 12995.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 8.984,
+     "marker": "SCORE",
+     "value": 14544.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 10.958,
+     "marker": "SCORE",
+     "value": 11966.0
+    }
+   ]
+  },
+  {
+   "test": "Octane/zlib.js",
+   "status": "pass",
+   "kind": "score",
+   "median": 35415.0,
+   "mad": 331.0,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 4.384,
+     "marker": "SCORE",
+     "value": 35260.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 4.328,
+     "marker": "SCORE",
+     "value": 35746.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 4.421,
+     "marker": "SCORE",
+     "value": 35415.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 4.504,
+     "marker": "SCORE",
+     "value": 34574.0
+    },
+    {
+     "rc": 0,
+     "wallSec": 4.33,
+     "marker": "SCORE",
+     "value": 35755.0
+    }
+   ]
+  },
+  {
+   "test": "JetStream/bigfib.cpp.js",
+   "status": "pass",
+   "kind": "score",
+   "median": 267.1296296296296,
+   "mad": 8.069098510275012,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 0.887,
+     "marker": "SCORE",
+     "value": 249.06474820143885
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.854,
+     "marker": "SCORE",
+     "value": 266.3076923076923
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.808,
+     "marker": "SCORE",
+     "value": 275.19872813990463
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.828,
+     "marker": "SCORE",
+     "value": 277.40384615384613
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.843,
+     "marker": "SCORE",
+     "value": 267.1296296296296
+    }
+   ]
+  },
+  {
+   "test": "JetStream/cdjs.js",
+   "status": "pass",
+   "kind": "score",
+   "median": 56.49717514124294,
+   "mad": 0.317399860344068,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 4.247,
+     "marker": "SCORE",
+     "value": 56.17977528089887
+    },
+    {
+     "rc": 0,
+     "wallSec": 4.236,
+     "marker": "SCORE",
+     "value": 56.49717514124294
+    },
+    {
+     "rc": 0,
+     "wallSec": 4.412,
+     "marker": "SCORE",
+     "value": 56.49717514124294
+    },
+    {
+     "rc": 0,
+     "wallSec": 4.387,
+     "marker": "SCORE",
+     "value": 58.30903790087464
+    },
+    {
+     "rc": 0,
+     "wallSec": 4.298,
+     "marker": "SCORE",
+     "value": 54.49591280653951
+    }
+   ]
+  },
+  {
+   "test": "JetStream/container.cpp.js",
+   "status": "pass",
+   "kind": "score",
+   "median": 172.4674100832417,
+   "mad": 2.1401260751759423,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 6.541,
+     "marker": "SCORE",
+     "value": 172.4674100832417
+    },
+    {
+     "rc": 0,
+     "wallSec": 6.532,
+     "marker": "SCORE",
+     "value": 172.8474736345034
+    },
+    {
+     "rc": 0,
+     "wallSec": 6.735,
+     "marker": "SCORE",
+     "value": 167.4954240390482
+    },
+    {
+     "rc": 0,
+     "wallSec": 6.425,
+     "marker": "SCORE",
+     "value": 175.75224071702945
+    },
+    {
+     "rc": 0,
+     "wallSec": 6.653,
+     "marker": "SCORE",
+     "value": 170.32728400806576
+    }
+   ]
+  },
+  {
+   "test": "JetStream/dry.c.js",
+   "status": "pass",
+   "kind": "score",
+   "median": 213.17440401505647,
+   "mad": 2.7086963661379286,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 0.847,
+     "marker": "SCORE",
+     "value": 212.375
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.837,
+     "marker": "SCORE",
+     "value": 215.8831003811944
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.922,
+     "marker": "SCORE",
+     "value": 194.39359267734554
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.872,
+     "marker": "SCORE",
+     "value": 213.17440401505647
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.824,
+     "marker": "SCORE",
+     "value": 217.5416133162612
+    }
+   ]
+  },
+  {
+   "test": "JetStream/float-mm.c.js",
+   "status": "pass",
+   "kind": "score",
+   "median": 276.2939958592132,
+   "mad": 2.8901045591968,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 1.012,
+     "marker": "SCORE",
+     "value": 273.7435897435897
+    },
+    {
+     "rc": 0,
+     "wallSec": 1.052,
+     "marker": "SCORE",
+     "value": 263.9960435212661
+    },
+    {
+     "rc": 0,
+     "wallSec": 1.004,
+     "marker": "SCORE",
+     "value": 276.2939958592132
+    },
+    {
+     "rc": 0,
+     "wallSec": 1.017,
+     "marker": "SCORE",
+     "value": 279.18410041841
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.944,
+     "marker": "SCORE",
+     "value": 294.2668136714443
+    }
+   ]
+  },
+  {
+   "test": "JetStream/gcc-loops.cpp.js",
+   "status": "pass",
+   "kind": "score",
+   "median": 239.86702127659575,
+   "mad": 1.3006940711996435,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 7.742,
+     "marker": "SCORE",
+     "value": 238.5663272053961
+    },
+    {
+     "rc": 0,
+     "wallSec": 7.777,
+     "marker": "SCORE",
+     "value": 239.86702127659575
+    },
+    {
+     "rc": 0,
+     "wallSec": 7.646,
+     "marker": "SCORE",
+     "value": 241.6019287436378
+    },
+    {
+     "rc": 0,
+     "wallSec": 7.689,
+     "marker": "SCORE",
+     "value": 239.9627510975123
+    },
+    {
+     "rc": 0,
+     "wallSec": 7.83,
+     "marker": "SCORE",
+     "value": 236.50190114068442
+    }
+   ]
+  },
+  {
+   "test": "JetStream/hash-map.js",
+   "status": "pass",
+   "kind": "score",
+   "median": 124.44933920704845,
+   "mad": 1.6667322215229774,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 0.486,
+     "marker": "SCORE",
+     "value": 124.44933920704845
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.482,
+     "marker": "SCORE",
+     "value": 126.11607142857143
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.493,
+     "marker": "SCORE",
+     "value": 122.2943722943723
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.489,
+     "marker": "SCORE",
+     "value": 123.36244541484716
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.476,
+     "marker": "SCORE",
+     "value": 127.82805429864253
+    }
+   ]
+  },
+  {
+   "test": "JetStream/n-body.c.js",
+   "status": "pass",
+   "kind": "score",
+   "median": 125.14080901177675,
+   "mad": 0.903543747377455,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 2.068,
+     "marker": "SCORE",
+     "value": 120.75098814229248
+    },
+    {
+     "rc": 0,
+     "wallSec": 1.974,
+     "marker": "SCORE",
+     "value": 126.04435275915421
+    },
+    {
+     "rc": 0,
+     "wallSec": 2.029,
+     "marker": "SCORE",
+     "value": 124.56676860346585
+    },
+    {
+     "rc": 0,
+     "wallSec": 1.934,
+     "marker": "SCORE",
+     "value": 129.31216931216932
+    },
+    {
+     "rc": 0,
+     "wallSec": 1.993,
+     "marker": "SCORE",
+     "value": 125.14080901177675
+    }
+   ]
+  },
+  {
+   "test": "JetStream/quicksort.c.js",
+   "status": "pass",
+   "kind": "score",
+   "median": 221.86379928315412,
+   "mad": 4.28910684027187,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 0.599,
+     "marker": "SCORE",
+     "value": 221.86379928315412
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.607,
+     "marker": "SCORE",
+     "value": 217.57469244288225
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.589,
+     "marker": "SCORE",
+     "value": 227.9926335174954
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.612,
+     "marker": "SCORE",
+     "value": 223.46570397111913
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.622,
+     "marker": "SCORE",
+     "value": 215.30434782608697
+    }
+   ]
+  },
+  {
+   "test": "JetStream/towers.c.js",
+   "status": "pass",
+   "kind": "score",
+   "median": 173.2739420935412,
+   "mad": 1.951283131684022,
+   "runs": [
+    {
+     "rc": 0,
+     "wallSec": 0.501,
+     "marker": "SCORE",
+     "value": 171.36563876651982
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.476,
+     "marker": "SCORE",
+     "value": 185.23809523809524
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.5,
+     "marker": "SCORE",
+     "value": 170.24070021881838
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.488,
+     "marker": "SCORE",
+     "value": 173.2739420935412
+    },
+    {
+     "rc": 0,
+     "wallSec": 0.483,
+     "marker": "SCORE",
+     "value": 175.22522522522522
+    }
+   ]
+  }
+ ]
+}

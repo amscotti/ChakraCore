@@ -228,7 +228,7 @@ namespace Js
         static DWORD GetRandSeed0Offset() { return offsetof(JavascriptLibrary, randSeed0); }
         static DWORD GetRandSeed1Offset() { return offsetof(JavascriptLibrary, randSeed1); }
         static DWORD GetTypeDisplayStringsOffset() { return offsetof(JavascriptLibrary, typeDisplayStrings); }
-        typedef bool (CALLBACK *PromiseContinuationCallback)(Var task, void *callbackState);
+        typedef void (CALLBACK *PromiseContinuationCallback)(Var task, void *callbackState);
         typedef void (CALLBACK *TimerContinuationCallback)(Var task, unsigned int delayMilliseconds, void *callbackState);
 
         Var GetUndeclBlockVar() const { return undeclBlockVarSentinel; }

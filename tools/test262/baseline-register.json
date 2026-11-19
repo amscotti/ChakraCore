@@ -155,6 +155,26 @@
         "scenarios": 80544
       },
       "evidence": "doc/e12-testing-quality.md"
+    },
+    {
+      "id": "refresh-2026-11-18",
+      "date": "2026-11-18",
+      "engine_commit": "8b447ac4823acc3463c588a98ae807e2a6822b87",
+      "binary_sha256": "04b564c4b7c971bed48be74bc194137ea72cd8ab4c3b1e682f2fbc406c4ae09c",
+      "engine_dylib_sha256": "75a8634cf44624f33d3f573123f1415316eafc36e34cbe4f56b6c960ee9f4853",
+      "results_dir": "out/test262-refresh-20261118",
+      "results_retained": true,
+      "broad": {
+        "passed": 80237,
+        "failed": 12904,
+        "scenarios": 93141
+      },
+      "edition_selected": {
+        "passed": 79399,
+        "failed": 1145,
+        "scenarios": 80544
+      },
+      "evidence": "doc/e12-testing-quality.md"
     }
   ]
 }
