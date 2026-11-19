@@ -430,6 +430,8 @@ public:
     ParseNodePtr pnodeInit;
     BOOLEAN isSwitchStmtDecl;
     BOOLEAN isBlockScopeFncDeclVar;
+    bool isUsing : 1;
+    bool isAwaitUsing : 1;
 
     DISABLE_SELF_CAST(ParseNodeVar);
 };
@@ -933,12 +935,22 @@ public:
     PnodeBlockType blockType:2;
     BYTE         callsEval:1;
     BYTE         childCallsEval:1;
+    BYTE         hasUsing:1;
+    BYTE         hasAwaitUsing:1;
 
     void SetCallsEval(bool does) { callsEval = does; }
     bool GetCallsEval() const { return callsEval; }
 
     void SetChildCallsEval(bool does) { childCallsEval = does; }
     bool GetChildCallsEval() const { return childCallsEval; }
+
+    void SetHasUsing(bool has = true) { hasUsing = has; }
+    bool HasUsing() const { return hasUsing; }
+
+    void SetHasAwaitUsing(bool has = true) { hasAwaitUsing = has; }
+    bool HasAwaitUsing() const { return hasAwaitUsing; }
+
+    bool HasDisposableResources() const { return hasUsing || hasAwaitUsing; }
 
     void SetEnclosingBlock(ParseNodeBlock * pnode) { enclosingBlock = pnode; }
     ParseNodeBlock * GetEnclosingBlock() const { return enclosingBlock; }

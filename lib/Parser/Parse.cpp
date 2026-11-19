@@ -13018,6 +13018,44 @@ Parse a variable declaration.
 'fAllowIn' indicates if the 'in' operator should be allowed in the initializing
 expression ( it is not allowed in the context of the first expression in a  'for' loop).
 ***************************************************************************/
+void Parser::ValidateUsingPlacement()
+{
+    if (m_pstmtCur == nullptr ||
+        m_pstmtCur->GetNop() != knopBlock ||
+        (m_pstmtCur->pstmtOuter != nullptr && m_pstmtCur->pstmtOuter->GetNop() == knopSwitch))
+    {
+        Error(ERRDeclOutOfStmt);
+    }
+
+    BlockInfoStack * blockInfo = GetCurrentBlockInfo();
+    Scope * scope = blockInfo != nullptr && blockInfo->pnodeBlock != nullptr ? blockInfo->pnodeBlock->scope : nullptr;
+    if (scope != nullptr &&
+        (scope->GetScopeType() == ScopeType_Global || scope->GetScopeType() == ScopeType_GlobalEvalBlock))
+    {
+        Error(ERRDeclOutOfStmt);
+    }
+}
+
+void Parser::ValidateAwaitUsingContext()
+{
+    ParseNodeFnc * currentFuncForAwait = GetCurrentFunctionNode();
+    bool inStaticClassHelper = m_inStaticClassFieldInitializer &&
+        !(currentFuncForAwait != nullptr && currentFuncForAwait->IsAsync() &&
+          currentFuncForAwait != m_staticInitEnclosingFunc);
+    if (!this->GetScanner()->AwaitIsKeywordRegion() || inStaticClassHelper ||
+        m_currentScope->AncestorScopeIsParameter())
+    {
+        if (IsTopLevelModuleFunc())
+        {
+            MakeModuleAsync();
+        }
+        else
+        {
+            Error(ERRBadAwait);
+        }
+    }
+}
+
 template<bool buildAST>
 ParseNodePtr Parser::ParseVariableDeclaration(
     tokens declarationType, charcount_t ichMin,
@@ -13028,7 +13066,9 @@ ParseNodePtr Parser::ParseVariableDeclaration(
     BOOL isTopVarParse/* = TRUE*/,
     BOOL isFor/* = FALSE*/,
     BOOL* nativeForOk /*= nullptr*/,
-    BOOL* pfForOfOk /*= nullptr*/)
+    BOOL* pfForOfOk /*= nullptr*/,
+    bool isUsing /*= false*/,
+    bool isAwaitUsing /*= false*/)
 {
     ParseNodePtr pnodeThis = nullptr;
     ParseNodePtr pnodeInit;
@@ -13038,10 +13078,12 @@ ParseNodePtr Parser::ParseVariableDeclaration(
     uint32     nameHintLength = 0;
     uint32     nameHintOffset = 0;
     Assert(declarationType == tkVAR || declarationType == tkCONST || declarationType == tkLET);
+    Assert(!(isUsing && isAwaitUsing));
+    Assert(!(isUsing || isAwaitUsing) || declarationType == tkCONST);
 
     for (;;)
     {
-        if (IsPossiblePatternStart())
+        if (!isUsing && !isAwaitUsing && IsPossiblePatternStart())
         {
             pnodeThis = ParseDestructuredLiteral<buildAST>(declarationType, true, !!isTopVarParse, DIC_None, !!fAllowIn, pfForInOk, nativeForOk);
             if (pnodeThis != nullptr)
@@ -13075,7 +13117,30 @@ ParseNodePtr Parser::ParseVariableDeclaration(
             else if (declarationType == tkCONST)
             {
                 pnodeThis = CreateBlockScopedDeclNode(pid, knopConstDecl);
-                CHAKRATEL_LANGSTATS_INC_LANGFEATURECOUNT(ES6, Const, m_scriptContext);
+                if (pnodeThis)
+                {
+                    pnodeThis->AsParseNodeVar()->isUsing = isUsing;
+                    pnodeThis->AsParseNodeVar()->isAwaitUsing = isAwaitUsing;
+                }
+                if (isUsing || isAwaitUsing)
+                {
+                    BlockInfoStack * blockInfo = GetCurrentBlockInfo();
+                    if (blockInfo != nullptr && blockInfo->pnodeBlock != nullptr)
+                    {
+                        if (isUsing)
+                        {
+                            blockInfo->pnodeBlock->SetHasUsing();
+                        }
+                        if (isAwaitUsing)
+                        {
+                            blockInfo->pnodeBlock->SetHasAwaitUsing();
+                        }
+                    }
+                }
+                else
+                {
+                    CHAKRATEL_LANGSTATS_INC_LANGFEATURECOUNT(ES6, Const, m_scriptContext);
+                }
             }
             else
             {
@@ -13796,7 +13861,73 @@ LRestart:
             }
             this->GetScanner()->SeekTo(parsedAsync);
         }
+        else if (CheckContextualKeyword(wellKnownPropertyPids._using))
+        {
+            RestorePoint parsedUsing;
+            this->GetScanner()->Capture(&parsedUsing);
+            ichMin = this->GetScanner()->IchMinTok();
+
+            this->GetScanner()->Scan();
+            if (!this->GetScanner()->FHadNewLine() && this->NextTokenConfirmsUsingDecl())
+            {
+                if (labelledStatement)
+                {
+                    Error(ERRLabelBeforeLexicalDeclaration);
+                }
+                ValidateUsingPlacement();
+                pnode = ParseVariableDeclaration<buildAST>(tkCONST, ichMin,
+                    /*fAllowIn = */TRUE,
+                    /*pfForInOk = */nullptr,
+                    /*singleDefOnly = */FALSE,
+                    /*allowInit = */TRUE,
+                    /*isTopVarParse = */TRUE,
+                    /*isFor = */FALSE,
+                    /*nativeForOk = */nullptr,
+                    /*pfForOfOk = */nullptr,
+                    /*isUsing = */true,
+                    /*isAwaitUsing = */false);
+                goto LNeedTerminator;
+            }
+            this->GetScanner()->SeekTo(parsedUsing);
+        }
         goto LDefaultToken;
+
+    case tkAWAIT:
+    {
+        RestorePoint parsedAwait;
+        this->GetScanner()->Capture(&parsedAwait);
+        ichMin = this->GetScanner()->IchMinTok();
+
+        this->GetScanner()->Scan();
+        if (!this->GetScanner()->FHadNewLine() &&
+            CheckContextualKeyword(wellKnownPropertyPids._using))
+        {
+            this->GetScanner()->Scan();
+            if (!this->GetScanner()->FHadNewLine() && this->NextTokenConfirmsUsingDecl())
+            {
+                if (labelledStatement)
+                {
+                    Error(ERRLabelBeforeLexicalDeclaration);
+                }
+                ValidateAwaitUsingContext();
+                ValidateUsingPlacement();
+                pnode = ParseVariableDeclaration<buildAST>(tkCONST, ichMin,
+                    /*fAllowIn = */TRUE,
+                    /*pfForInOk = */nullptr,
+                    /*singleDefOnly = */FALSE,
+                    /*allowInit = */TRUE,
+                    /*isTopVarParse = */TRUE,
+                    /*isFor = */FALSE,
+                    /*nativeForOk = */nullptr,
+                    /*pfForOfOk = */nullptr,
+                    /*isUsing = */false,
+                    /*isAwaitUsing = */true);
+                goto LNeedTerminator;
+            }
+        }
+        this->GetScanner()->SeekTo(parsedAwait);
+        goto LDefaultToken;
+    }
 
     case tkCONST:
         if (labelledStatement)
@@ -13865,6 +13996,7 @@ LRestart:
         BOOL fForOfHeadOk = TRUE;
         tok = m_token.tk;
         BOOL nativeForOkay = TRUE;
+        bool isForUsingOrAwaitUsing = false;
 
         ParseNodePtr pnodeT;
         switch (tok)
@@ -13898,7 +14030,83 @@ LRestart:
                 }
                 this->GetScanner()->SeekTo(parsedLet);
             }
+            else if (CheckContextualKeyword(wellKnownPropertyPids._using))
+            {
+                RestorePoint parsedUsing;
+                this->GetScanner()->Capture(&parsedUsing);
+                auto ichMinInner = this->GetScanner()->IchMinTok();
+
+                this->GetScanner()->Scan();
+                if (!this->GetScanner()->FHadNewLine() && this->NextTokenConfirmsUsingDecl())
+                {
+                    bool parseAsForUsing = true;
+                    if (CheckContextualKeyword(wellKnownPropertyPids.of))
+                    {
+                        RestorePoint afterOf;
+                        this->GetScanner()->Capture(&afterOf);
+                        this->GetScanner()->Scan();
+                        if (m_token.tk == tkAsg || m_token.tk == tkComma)
+                        {
+                            this->GetScanner()->SeekTo(afterOf);
+                        }
+                        else
+                        {
+                            parseAsForUsing = false;
+                        }
+                    }
+
+                    if (parseAsForUsing)
+                    {
+                        isForUsingOrAwaitUsing = true;
+                        pnodeT = ParseVariableDeclaration<buildAST>(tkCONST, ichMinInner
+                            , /*fAllowIn = */FALSE
+                            , /*pfForInOk = */&fForInOrOfOkay
+                            , /*singleDefOnly*/FALSE
+                            , /*allowInit*/TRUE
+                            , /*isTopVarParse*/TRUE
+                            , /*isFor*/TRUE
+                            , &nativeForOkay
+                            , &fForOfHeadOk
+                            , /*isUsing*/true
+                            , /*isAwaitUsing*/false);
+                        break;
+                    }
+                }
+                this->GetScanner()->SeekTo(parsedUsing);
+            }
             goto LDefaultTokenFor;
+        case tkAWAIT:
+        {
+            RestorePoint parsedAwait;
+            this->GetScanner()->Capture(&parsedAwait);
+            auto ichMinInner = this->GetScanner()->IchMinTok();
+
+            this->GetScanner()->Scan();
+            if (!this->GetScanner()->FHadNewLine() &&
+                CheckContextualKeyword(wellKnownPropertyPids._using))
+            {
+                this->GetScanner()->Scan();
+                if (!this->GetScanner()->FHadNewLine() && this->NextTokenConfirmsUsingDecl())
+                {
+                    ValidateAwaitUsingContext();
+                    isForUsingOrAwaitUsing = true;
+                    pnodeT = ParseVariableDeclaration<buildAST>(tkCONST, ichMinInner
+                        , /*fAllowIn = */FALSE
+                        , /*pfForInOk = */&fForInOrOfOkay
+                        , /*singleDefOnly*/FALSE
+                        , /*allowInit*/TRUE
+                        , /*isTopVarParse*/TRUE
+                        , /*isFor*/TRUE
+                        , &nativeForOkay
+                        , &fForOfHeadOk
+                        , /*isUsing*/false
+                        , /*isAwaitUsing*/true);
+                    break;
+                }
+            }
+            this->GetScanner()->SeekTo(parsedAwait);
+            goto LDefaultTokenFor;
+        }
         case tkLET:
         case tkCONST:
         case tkVAR:
@@ -13986,6 +14194,10 @@ LRestart:
             if (isForAwait && !isForOf)
             {
                 Error(ERRTokenAfter, _u("in"), _u("for await"));
+            }
+            if (isForUsingOrAwaitUsing && !isForOf)
+            {
+                Error(ERRsyntax);
             }
 
             if ((buildAST && nullptr == pnodeT) || !fForInOrOfOkay || (isForOf && !fForOfHeadOk))
@@ -15365,6 +15577,7 @@ void Parser::InitPids()
     wellKnownPropertyPids.meta = this->GetHashTbl()->PidHashNameLen(_u("meta"), sizeof("meta") - 1);
     wellKnownPropertyPids.as = this->GetHashTbl()->PidHashNameLen(_u("as"), sizeof("as") - 1);
     wellKnownPropertyPids.from = this->GetHashTbl()->PidHashNameLen(_u("from"), sizeof("from") - 1);
+    wellKnownPropertyPids._using = this->GetHashTbl()->PidHashNameLen(_u("using"), sizeof("using") - 1);
     wellKnownPropertyPids._default = this->GetHashTbl()->PidHashNameLen(_u("default"), sizeof("default") - 1);
     wellKnownPropertyPids._this = this->GetHashTbl()->PidHashNameLen(_u("*this*"), sizeof("*this*") - 1);
     wellKnownPropertyPids._newTarget = this->GetHashTbl()->PidHashNameLen(_u("*new.target*"), sizeof("*new.target*") - 1);

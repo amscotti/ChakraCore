@@ -89,6 +89,7 @@ private:
     bool funcEscapes;
     bool inPrologue;
     bool inDestructuredPattern;
+    Js::RegSlot currentDisposalStackReg;
     Parser* parser; // currently active parser (used for AST transformation)
 
     Js::Utf8SourceInfo *m_utf8SourceInfo;
@@ -520,6 +521,9 @@ public:
     bool ByteCodeGenerator::GetHasYield(ParseNode* node);
     void ByteCodeGenerator::PopTrackForYield(ParseNode* node);
     void ByteCodeGenerator::PushTrackForYield(ParseNode* node);
+
+    Js::RegSlot GetCurrentDisposalStackReg() const { return currentDisposalStackReg; }
+    void SetCurrentDisposalStackReg(Js::RegSlot reg) { currentDisposalStackReg = reg; }
 
 private:
     bool NeedCheckBlockVar(Symbol* sym, Scope* scope, FuncInfo* funcInfo) const;

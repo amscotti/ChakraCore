@@ -556,6 +556,7 @@ private:
         IdentPtr from;
         IdentPtr as;
         IdentPtr meta;
+        IdentPtr _using;
         IdentPtr _default;
         IdentPtr _this; // Special 'this' identifier
         IdentPtr _newTarget; // Special new.target identifier
@@ -607,6 +608,9 @@ private:
     ParseNodeFnc *GetCurrentNonLambdaFunctionNode();
 
     bool NextTokenConfirmsLetDecl() const { return m_token.tk == tkID || m_token.tk == tkLBrack || m_token.tk == tkLCurly || m_token.IsReservedWord(); }
+    bool NextTokenConfirmsUsingDecl() const { return m_token.tk == tkID; }
+    void ValidateUsingPlacement();
+    void ValidateAwaitUsingContext();
     bool NextTokenIsPropertyNameStart() const { return m_token.tk == tkID || m_token.tk == tkStrCon || m_token.tk == tkIntCon || m_token.tk == tkFltCon || m_token.tk == tkBigIntCon || m_token.tk == tkLBrack || m_token.IsReservedWord(); }
 
     template<bool buildAST>
@@ -874,7 +878,9 @@ private:
         BOOL isTopVarParse = TRUE,
         BOOL isFor = FALSE,
         BOOL* nativeForOk = nullptr,
-        BOOL* pfForOfOk = nullptr);
+        BOOL* pfForOfOk = nullptr,
+        bool isUsing = false,
+        bool isAwaitUsing = false);
     BOOL TokIsForInOrForOf();
 
     template<bool buildAST>

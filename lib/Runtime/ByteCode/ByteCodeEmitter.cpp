@@ -1153,6 +1153,195 @@ void EmitLoadUndefinedToReturnRegister(ByteCodeGenerator *byteCodeGenerator)
     byteCodeGenerator->Writer()->Reg1(Js::OpCode::LdUndef, ByteCodeGenerator::ReturnRegister);
 }
 
+void EmitAwait(
+    Js::RegSlot resultReg,
+    Js::RegSlot inputReg,
+    ByteCodeGenerator* byteCodeGenerator,
+    FuncInfo* funcInfo);
+
+struct DisposalScopeState
+{
+    bool active;
+    bool isAsync;
+    bool hasYield;
+    Js::RegSlot prevDispStackReg;
+    Js::RegSlot dispStackReg;
+    Js::RegSlot regException;
+    Js::RegSlot regOffset;
+    Js::ByteCodeLabel finallyLabel;
+    Js::ByteCodeLabel catchLabel;
+    Js::ByteCodeLabel afterCatchLabel;
+    Js::ByteCodeLabel breakLabel;
+};
+
+static void BeginDisposalScope(
+    DisposalScopeState &state,
+    ParseNodeBlock *pnodeBlock,
+    ByteCodeGenerator *byteCodeGenerator,
+    FuncInfo *funcInfo)
+{
+    if (pnodeBlock == nullptr || !pnodeBlock->HasDisposableResources())
+    {
+        state.active = false;
+        return;
+    }
+
+    auto *writer = byteCodeGenerator->Writer();
+    state.active = true;
+    state.isAsync = pnodeBlock->HasAwaitUsing();
+    state.hasYield = byteCodeGenerator->GetHasYield(pnodeBlock);
+    state.prevDispStackReg = byteCodeGenerator->GetCurrentDisposalStackReg();
+    state.dispStackReg = funcInfo->AcquireTmpRegister();
+    byteCodeGenerator->SetCurrentDisposalStackReg(state.dispStackReg);
+    writer->Reg1(Js::OpCode::LdUndef, state.dispStackReg);
+
+    state.regException = Js::Constants::NoRegister;
+    state.regOffset = Js::Constants::NoRegister;
+    state.finallyLabel = writer->DefineLabel();
+    state.catchLabel = writer->DefineLabel();
+    state.afterCatchLabel = writer->DefineLabel();
+    state.breakLabel = writer->DefineLabel();
+
+    writer->RecordCrossFrameEntryExitRecord(true);
+    if (state.hasYield)
+    {
+        Assert(funcInfo->byteCodeFunction->IsCoroutine());
+        state.regException = funcInfo->AcquireTmpRegister();
+        state.regOffset = funcInfo->AcquireTmpRegister();
+        writer->BrReg2(Js::OpCode::TryFinallyWithYield, state.finallyLabel, state.regException, state.regOffset);
+        byteCodeGenerator->PushJumpCleanupForTry(
+            Js::OpCode::TryFinallyWithYield,
+            state.finallyLabel,
+            state.regException,
+            state.regOffset);
+    }
+    else
+    {
+        writer->Br(Js::OpCode::TryFinally, state.finallyLabel);
+        byteCodeGenerator->PushJumpCleanupForTry(Js::OpCode::TryFinally, state.finallyLabel);
+    }
+
+    funcInfo->StartRecordingOutArgs(1);
+
+    writer->Br(Js::OpCode::TryCatch, state.catchLabel);
+    byteCodeGenerator->PushJumpCleanupForTry(Js::OpCode::TryCatch, state.catchLabel);
+}
+
+static void EndDisposalScope(
+    const DisposalScopeState &state,
+    ByteCodeGenerator *byteCodeGenerator,
+    FuncInfo *funcInfo)
+{
+    if (!state.active)
+    {
+        return;
+    }
+
+    auto *writer = byteCodeGenerator->Writer();
+
+    byteCodeGenerator->SetCurrentDisposalStackReg(state.prevDispStackReg);
+
+    byteCodeGenerator->PopJumpCleanup();
+    writer->Empty(Js::OpCode::Leave);
+    writer->Br(state.afterCatchLabel);
+
+    writer->MarkLabel(state.catchLabel);
+    {
+        Js::RegSlot catchReg = funcInfo->AcquireTmpRegister();
+        writer->Reg1(Js::OpCode::Catch, catchReg);
+        writer->Reg3(Js::OpCode::RecordDisposeError, state.dispStackReg, state.dispStackReg, catchReg);
+        funcInfo->ReleaseTmpRegister(catchReg);
+    }
+    writer->Empty(Js::OpCode::Leave);
+    writer->MarkLabel(state.afterCatchLabel);
+
+    byteCodeGenerator->PopJumpCleanup();
+    writer->Empty(Js::OpCode::Leave);
+    writer->RecordCrossFrameEntryExitRecord(false);
+    writer->RecordCrossFrameEntryExitRecord(true);
+    writer->Br(state.breakLabel);
+
+    writer->MarkLabel(state.finallyLabel);
+    writer->Empty(Js::OpCode::Finally);
+    byteCodeGenerator->PushJumpCleanupForTry(
+        Js::OpCode::ResumeFinally,
+        state.finallyLabel,
+        state.regException,
+        state.regOffset);
+
+    if (state.isAsync)
+    {
+        Js::RegSlot zeroConst = funcInfo->constantToRegister.Lookup(0, Js::Constants::NoRegister);
+        Js::RegSlot twoConst = funcInfo->constantToRegister.Lookup(2, Js::Constants::NoRegister);
+        Assert(zeroConst != Js::Constants::NoRegister);
+        Assert(twoConst != Js::Constants::NoRegister);
+
+        Js::ByteCodeLabel stepLoopLabel = writer->DefineLabel();
+        Js::ByteCodeLabel stepDoneLabel = writer->DefineLabel();
+        Js::ByteCodeLabel stepAwaitLabel = writer->DefineLabel();
+
+        Js::RegSlot statusReg = funcInfo->AcquireTmpRegister();
+        writer->MarkLabel(stepLoopLabel);
+        writer->Reg2(Js::OpCode::StepDisposableResource, statusReg, state.dispStackReg);
+        writer->BrReg2(Js::OpCode::BrSrEq_A, stepDoneLabel, statusReg, zeroConst);
+        writer->BrReg2(Js::OpCode::BrSrEq_A, stepAwaitLabel, statusReg, twoConst);
+        writer->Br(stepLoopLabel);
+
+        writer->MarkLabel(stepAwaitLabel);
+        {
+            Js::RegSlot awaitValReg = funcInfo->AcquireTmpRegister();
+            Js::ByteCodeLabel awaitCatchLabel = writer->DefineLabel();
+            Js::ByteCodeLabel awaitAfterLabel = writer->DefineLabel();
+
+            writer->Br(Js::OpCode::TryCatch, awaitCatchLabel);
+            byteCodeGenerator->PushJumpCleanupForTry(Js::OpCode::TryCatch, awaitCatchLabel);
+            writer->Reg2(Js::OpCode::TakeDisposeAwaitValue, awaitValReg, state.dispStackReg);
+            EmitAwait(awaitValReg, awaitValReg, byteCodeGenerator, funcInfo);
+            byteCodeGenerator->PopJumpCleanup();
+            writer->Empty(Js::OpCode::Leave);
+            writer->Br(awaitAfterLabel);
+
+            writer->MarkLabel(awaitCatchLabel);
+            {
+                Js::RegSlot awaitErrReg = funcInfo->AcquireTmpRegister();
+                writer->Reg1(Js::OpCode::Catch, awaitErrReg);
+                writer->Reg3(Js::OpCode::RecordDisposeError, state.dispStackReg, state.dispStackReg, awaitErrReg);
+                funcInfo->ReleaseTmpRegister(awaitErrReg);
+            }
+            writer->Empty(Js::OpCode::Leave);
+            writer->MarkLabel(awaitAfterLabel);
+            funcInfo->ReleaseTmpRegister(awaitValReg);
+            writer->Br(stepLoopLabel);
+        }
+
+        writer->MarkLabel(stepDoneLabel);
+        funcInfo->ReleaseTmpRegister(statusReg);
+
+        Js::RegSlot finTmpReg = funcInfo->AcquireTmpRegister();
+        writer->Reg2(Js::OpCode::FinalizeDisposeResources, finTmpReg, state.dispStackReg);
+        funcInfo->ReleaseTmpRegister(finTmpReg);
+    }
+    else
+    {
+        Js::RegSlot tmpReg = funcInfo->AcquireTmpRegister();
+        writer->Reg2(Js::OpCode::DisposeResourcesSync, tmpReg, state.dispStackReg);
+        funcInfo->ReleaseTmpRegister(tmpReg);
+    }
+
+    if (state.hasYield)
+    {
+        funcInfo->ReleaseTmpRegister(state.regOffset);
+        funcInfo->ReleaseTmpRegister(state.regException);
+    }
+
+    byteCodeGenerator->PopJumpCleanup();
+    funcInfo->EndRecordingOutArgs(1);
+    writer->RecordCrossFrameEntryExitRecord(false);
+    writer->Empty(Js::OpCode::LeaveNull);
+    writer->MarkLabel(state.breakLabel);
+    funcInfo->ReleaseTmpRegister(state.dispStackReg);
+}
+
 void EmitBlock(ParseNodeBlock *pnodeBlock, ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo, BOOL fReturnValue)
 {
     Assert(pnodeBlock->nop == knopBlock);
@@ -1163,6 +1352,9 @@ void EmitBlock(ParseNodeBlock *pnodeBlock, ByteCodeGenerator *byteCodeGenerator,
     }
 
     BeginEmitBlock(pnodeBlock, byteCodeGenerator, funcInfo);
+
+    DisposalScopeState disposalState;
+    BeginDisposalScope(disposalState, pnodeBlock, byteCodeGenerator, funcInfo);
 
     ParseNode *pnodeLastValStmt = pnodeBlock->pnodeLastValStmt;
 
@@ -1184,6 +1376,8 @@ void EmitBlock(ParseNodeBlock *pnodeBlock, ByteCodeGenerator *byteCodeGenerator,
         pnodeLastValStmt = nullptr;
     }
     byteCodeGenerator->EmitTopLevelStatement(pnode, funcInfo, fReturnValue && (pnodeLastValStmt == nullptr));
+
+    EndDisposalScope(disposalState, byteCodeGenerator, funcInfo);
 
     EndEmitBlock(pnodeBlock, byteCodeGenerator, funcInfo);
 }
@@ -3156,6 +3350,10 @@ void ByteCodeGenerator::EmitFunctionBody(FuncInfo *funcInfo)
     // Emit a function body. Only explicit returns and the implicit "undef" at the bottom
     // get copied to the return register.
     ParseNode *pnodeBody = funcInfo->root->pnodeBody;
+    ParseNodeBlock *pnodeBodyScope = funcInfo->root->pnodeBodyScope;
+    DisposalScopeState disposalState;
+    BeginDisposalScope(disposalState, pnodeBodyScope, this, funcInfo);
+
     ParseNode *pnode = pnodeBody;
     while (pnode->nop == knopList)
     {
@@ -3192,7 +3390,18 @@ void ByteCodeGenerator::EmitFunctionBody(FuncInfo *funcInfo)
         pnode = pnode->AsParseNodeBin()->pnode2;
     }
     Assert(!pnode->CapturesSyms());
-    EmitTopLevelStatement(pnode, funcInfo, false);
+    if (disposalState.active && pnode->nop == knopEndCode)
+    {
+        // End disposal before knopEndCode so fallthrough disposal precedes
+        // ret/result setup and singleExit stays outside the try/finally.
+        EndDisposalScope(disposalState, this, funcInfo);
+        EmitTopLevelStatement(pnode, funcInfo, false);
+    }
+    else
+    {
+        EmitTopLevelStatement(pnode, funcInfo, false);
+        EndDisposalScope(disposalState, this, funcInfo);
+    }
 }
 
 void ByteCodeGenerator::EmitProgram(ParseNodeProg *pnodeProg)
@@ -3372,6 +3581,20 @@ void ByteCodeGenerator::EmitOneFunction(ParseNodeFnc *pnodeFnc)
     {
         return;
     }
+
+    struct AutoResetDisposalReg
+    {
+        ByteCodeGenerator *bg;
+        Js::RegSlot prev;
+        AutoResetDisposalReg(ByteCodeGenerator *bg) : bg(bg), prev(bg->GetCurrentDisposalStackReg())
+        {
+            bg->SetCurrentDisposalStackReg(Js::Constants::NoRegister);
+        }
+        ~AutoResetDisposalReg()
+        {
+            bg->SetCurrentDisposalStackReg(prev);
+        }
+    } resetDisposalReg(this);
 
     Js::ParseableFunctionInfo* deferParseFunction = funcInfo->byteCodeFunction;
     deferParseFunction->SetGrfscr(deferParseFunction->GetGrfscr() | (this->flags & ~fscrDeferredFncExpression));
@@ -11504,6 +11727,11 @@ void EmitForInOfLoopBody(ParseNodeForInOrForOf *loopNode,
     FuncInfo *funcInfo,
     BOOL fReturnValue)
 {
+    BeginEmitBlock(loopNode->pnodeBlock, byteCodeGenerator, funcInfo);
+
+    DisposalScopeState disposalState;
+    BeginDisposalScope(disposalState, loopNode->pnodeBlock, byteCodeGenerator, funcInfo);
+
     if (loopNode->pnodeLval->nop != knopVarDecl &&
         loopNode->pnodeLval->nop != knopLetDecl &&
         loopNode->pnodeLval->nop != knopConstDecl)
@@ -11516,7 +11744,20 @@ void EmitForInOfLoopBody(ParseNodeForInOrForOf *loopNode,
         sym->SetNeedDeclaration(false);
     }
 
-    BeginEmitBlock(loopNode->pnodeBlock, byteCodeGenerator, funcInfo);
+    if (loopNode->pnodeLval->nop == knopConstDecl &&
+        (loopNode->pnodeLval->AsParseNodeVar()->isUsing ||
+         loopNode->pnodeLval->AsParseNodeVar()->isAwaitUsing))
+    {
+        Js::RegSlot dispStackReg = byteCodeGenerator->GetCurrentDisposalStackReg();
+        Assert(dispStackReg != Js::Constants::NoRegister);
+        byteCodeGenerator->Writer()->Reg3(
+            loopNode->pnodeLval->AsParseNodeVar()->isAwaitUsing
+                ? Js::OpCode::AddAsyncDisposableResource
+                : Js::OpCode::AddSyncDisposableResource,
+            dispStackReg,
+            dispStackReg,
+            loopNode->itemLocation);
+    }
 
     EmitAssignment(nullptr, loopNode->pnodeLval, loopNode->itemLocation, byteCodeGenerator, funcInfo);
 
@@ -11527,6 +11768,8 @@ void EmitForInOfLoopBody(ParseNodeForInOrForOf *loopNode,
 
     Emit(loopNode->pnodeBody, byteCodeGenerator, funcInfo, fReturnValue);
     funcInfo->ReleaseLoc(loopNode->pnodeBody);
+
+    EndDisposalScope(disposalState, byteCodeGenerator, funcInfo);
 
     EndEmitBlock(loopNode->pnodeBlock, byteCodeGenerator, funcInfo);
 
@@ -14267,6 +14510,20 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
                 byteCodeGenerator->Writer()->Reg1(Js::OpCode::LdUndef, rhsLocation);
             }
 
+            if (pnode->nop == knopConstDecl &&
+                (pnode->AsParseNodeVar()->isUsing || pnode->AsParseNodeVar()->isAwaitUsing))
+            {
+                Js::RegSlot dispStackReg = byteCodeGenerator->GetCurrentDisposalStackReg();
+                Assert(dispStackReg != Js::Constants::NoRegister);
+                byteCodeGenerator->Writer()->Reg3(
+                    pnode->AsParseNodeVar()->isAwaitUsing
+                        ? Js::OpCode::AddAsyncDisposableResource
+                        : Js::OpCode::AddSyncDisposableResource,
+                    dispStackReg,
+                    dispStackReg,
+                    rhsLocation);
+            }
+
             if (pnode->nop != knopVarDecl)
             {
                 Assert(sym->GetDecl() == pnode || (sym->IsArguments() && !funcInfo->GetHasArguments()));
@@ -14363,6 +14620,10 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
         else
         {
             BeginEmitBlock(pnodeFor->pnodeBlock, byteCodeGenerator, funcInfo);
+
+            DisposalScopeState disposalState;
+            BeginDisposalScope(disposalState, pnodeFor->pnodeBlock, byteCodeGenerator, funcInfo);
+
             Emit(pnodeFor->pnodeInit, byteCodeGenerator, funcInfo, false);
             funcInfo->ReleaseLoc(pnodeFor->pnodeInit);
 
@@ -14384,6 +14645,8 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
                 fReturnValue,
                 FALSE,
                 pnodeFor->pnodeBlock);
+
+            EndDisposalScope(disposalState, byteCodeGenerator, funcInfo);
             EndEmitBlock(pnodeFor->pnodeBlock, byteCodeGenerator, funcInfo);
         }
         break;
@@ -14533,7 +14796,7 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
         // Derived class constructors emit no return-value processing here: the
         // checks run once at the single exit (see knopEndCode), after finally
         // blocks and iterator close handlers have completed.
-        if (pnodeReturn->grfnop & fnopCleanup)
+        if ((pnodeReturn->grfnop & fnopCleanup) || byteCodeGenerator->HasJumpCleanup())
         {
             byteCodeGenerator->EmitJumpCleanup(nullptr, funcInfo);
         }
@@ -14618,7 +14881,7 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
         ParseNodeJump * pnodeJump = pnode->AsParseNodeJump();
         Assert(pnodeJump->pnodeTarget->emitLabels);
         byteCodeGenerator->StartStatement(pnodeJump);
-        if (pnodeJump->grfnop & fnopCleanup)
+        if ((pnodeJump->grfnop & fnopCleanup) || byteCodeGenerator->HasJumpCleanup())
         {
             byteCodeGenerator->EmitJumpCleanup(pnodeJump->pnodeTarget, funcInfo);
         }
@@ -14635,7 +14898,7 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
         ParseNodeJump * pnodeJump = pnode->AsParseNodeJump();
         Assert(pnodeJump->pnodeTarget->emitLabels);
         byteCodeGenerator->StartStatement(pnodeJump);
-        if (pnodeJump->grfnop & fnopCleanup)
+        if ((pnodeJump->grfnop & fnopCleanup) || byteCodeGenerator->HasJumpCleanup())
         {
             byteCodeGenerator->EmitJumpCleanup(pnodeJump->pnodeTarget, funcInfo);
         }

@@ -205,6 +205,23 @@ bool EmitAsConstantArray(ParseNode *pnodeArr, ByteCodeGenerator *byteCodeGenerat
 }
 
 void PropagateFlags(ParseNode *pnodeChild, ParseNode *pnodeParent);
+void AssignAwaitRegisters(ByteCodeGenerator *byteCodeGenerator);
+
+static void MarkBlockDisposableResources(ParseNodeBlock *pnodeBlock, ByteCodeGenerator *byteCodeGenerator)
+{
+    Assert(pnodeBlock != nullptr && pnodeBlock->HasDisposableResources());
+    byteCodeGenerator->SetHasTry(true);
+    byteCodeGenerator->SetHasFinally(true);
+    byteCodeGenerator->TopFuncInfo()->byteCodeFunction->SetDontInline(true);
+    byteCodeGenerator->AssignUndefinedConstRegister();
+    if (pnodeBlock->HasAwaitUsing())
+    {
+        Assert(byteCodeGenerator->TopFuncInfo()->byteCodeFunction->IsCoroutine());
+        AssignAwaitRegisters(byteCodeGenerator);
+        byteCodeGenerator->EnregisterConstant(0);
+        byteCodeGenerator->EnregisterConstant(2);
+    }
+}
 
 template<class PrefixFn, class PostfixFn>
 void Visit(ParseNode *pnode, ByteCodeGenerator* byteCodeGenerator, PrefixFn prefix, PostfixFn postfix, ParseNode *pnodeParent)
@@ -406,15 +423,31 @@ void Visit(ParseNode *pnode, ByteCodeGenerator* byteCodeGenerator, PrefixFn pref
         break;
     }
     case knopFor:
-        BeginVisitBlock(pnode->AsParseNodeFor()->pnodeBlock, byteCodeGenerator);
+    {
+        ParseNodeBlock *pnodeForBlock = pnode->AsParseNodeFor()->pnodeBlock;
+        BeginVisitBlock(pnodeForBlock, byteCodeGenerator);
+        if (pnodeForBlock != nullptr && pnodeForBlock->HasDisposableResources())
+        {
+            MarkBlockDisposableResources(pnodeForBlock, byteCodeGenerator);
+            byteCodeGenerator->PushTrackForYield(pnodeForBlock);
+            if (pnodeForBlock->HasAwaitUsing())
+            {
+                byteCodeGenerator->SetHasYield();
+            }
+        }
         Visit(pnode->AsParseNodeFor()->pnodeInit, byteCodeGenerator, prefix, postfix);
         byteCodeGenerator->EnterLoop();
         Visit(pnode->AsParseNodeFor()->pnodeCond, byteCodeGenerator, prefix, postfix);
         Visit(pnode->AsParseNodeFor()->pnodeIncr, byteCodeGenerator, prefix, postfix);
         Visit(pnode->AsParseNodeFor()->pnodeBody, byteCodeGenerator, prefix, postfix, pnode);
         byteCodeGenerator->ExitLoop();
-        EndVisitBlock(pnode->AsParseNodeFor()->pnodeBlock, byteCodeGenerator);
+        if (pnodeForBlock != nullptr && pnodeForBlock->HasDisposableResources())
+        {
+            byteCodeGenerator->PopTrackForYield(pnodeForBlock);
+        }
+        EndVisitBlock(pnodeForBlock, byteCodeGenerator);
         break;
+    }
     // PTNODE(knopIf         , "if"        ,None    ,If   ,fnopNone)
     case knopIf:
         Visit(pnode->AsParseNodeIf()->pnodeCond, byteCodeGenerator, prefix, postfix);
@@ -437,16 +470,32 @@ void Visit(ParseNode *pnode, ByteCodeGenerator* byteCodeGenerator, PrefixFn pref
     case knopForIn:
     case knopForOf:
     case knopForAwaitOf:
-        BeginVisitBlock(pnode->AsParseNodeForInOrForOf()->pnodeBlock, byteCodeGenerator);
+    {
+        ParseNodeBlock *pnodeForBlock = pnode->AsParseNodeForInOrForOf()->pnodeBlock;
+        BeginVisitBlock(pnodeForBlock, byteCodeGenerator);
         byteCodeGenerator->PushTrackForYield(pnode);
+        if (pnodeForBlock != nullptr && pnodeForBlock->HasDisposableResources())
+        {
+            MarkBlockDisposableResources(pnodeForBlock, byteCodeGenerator);
+            byteCodeGenerator->PushTrackForYield(pnodeForBlock);
+            if (pnodeForBlock->HasAwaitUsing())
+            {
+                byteCodeGenerator->SetHasYield();
+            }
+        }
         Visit(pnode->AsParseNodeForInOrForOf()->pnodeLval, byteCodeGenerator, prefix, postfix);
         Visit(pnode->AsParseNodeForInOrForOf()->pnodeObj, byteCodeGenerator, prefix, postfix);
         byteCodeGenerator->EnterLoop();
         Visit(pnode->AsParseNodeForInOrForOf()->pnodeBody, byteCodeGenerator, prefix, postfix, pnode);
         byteCodeGenerator->ExitLoop();
+        if (pnodeForBlock != nullptr && pnodeForBlock->HasDisposableResources())
+        {
+            byteCodeGenerator->PopTrackForYield(pnodeForBlock);
+        }
         byteCodeGenerator->PopTrackForYield(pnode);
-        EndVisitBlock(pnode->AsParseNodeForInOrForOf()->pnodeBlock, byteCodeGenerator);
+        EndVisitBlock(pnodeForBlock, byteCodeGenerator);
         break;
+    }
     // PTNODE(knopReturn     , "return"    ,None    ,Uni  ,fnopNone)
     case knopReturn:
         if (pnode->AsParseNodeReturn()->pnodeExpr != nullptr)
@@ -459,7 +508,20 @@ void Visit(ParseNode *pnode, ByteCodeGenerator* byteCodeGenerator, PrefixFn pref
         if (pnodeBlock->pnodeStmt != nullptr)
         {
             BeginVisitBlock(pnodeBlock, byteCodeGenerator);
+            if (pnodeBlock->HasDisposableResources())
+            {
+                MarkBlockDisposableResources(pnodeBlock, byteCodeGenerator);
+                byteCodeGenerator->PushTrackForYield(pnodeBlock);
+                if (pnodeBlock->HasAwaitUsing())
+                {
+                    byteCodeGenerator->SetHasYield();
+                }
+            }
             pnodeBlock->pnodeLastValStmt = VisitBlock(pnodeBlock->pnodeStmt, byteCodeGenerator, prefix, postfix, pnode);
+            if (pnodeBlock->HasDisposableResources())
+            {
+                byteCodeGenerator->PopTrackForYield(pnodeBlock);
+            }
             EndVisitBlock(pnodeBlock, byteCodeGenerator);
         }
         else
@@ -808,7 +870,8 @@ ByteCodeGenerator::ByteCodeGenerator(Js::ScriptContext* scriptContext, Js::Scope
     parentScopeInfo(parentScopeInfo),
     dynamicScopeCount(0),
     isBinding(false),
-    inDestructuredPattern(false)
+    inDestructuredPattern(false),
+    currentDisposalStackReg(Js::Constants::NoRegister)
 {
     m_writer.Create();
 }
@@ -2367,6 +2430,7 @@ void ByteCodeGenerator::Begin(
     this->funcInfosToFinalize = nullptr;
     this->nodesToTrackForYield = nullptr;
     this->nodesWithYield = nullptr;
+    this->currentDisposalStackReg = Js::Constants::NoRegister;
 
     this->funcInfoStack = Anew(alloc, SList<FuncInfo*>, alloc);
     this->jumpCleanupList = Anew(alloc, JumpCleanupList, alloc);
@@ -3661,6 +3725,16 @@ void VisitNestedScopes(ParseNode* pnodeScopeList, ParseNode* pnodeParent, ByteCo
 
                 BeginVisitBlock(pnodeFnc->pnodeBodyScope, byteCodeGenerator);
 
+                if (pnodeFnc->pnodeBodyScope != nullptr && pnodeFnc->pnodeBodyScope->HasDisposableResources())
+                {
+                    MarkBlockDisposableResources(pnodeFnc->pnodeBodyScope, byteCodeGenerator);
+                    byteCodeGenerator->PushTrackForYield(pnodeFnc->pnodeBodyScope);
+                    if (pnodeFnc->pnodeBodyScope->HasAwaitUsing())
+                    {
+                        byteCodeGenerator->SetHasYield();
+                    }
+                }
+
                 ParseNode* pnode = pnodeFnc->pnodeBody;
                 while (pnode->nop == knopList)
                 {
@@ -3732,6 +3806,11 @@ void VisitNestedScopes(ParseNode* pnodeScopeList, ParseNode* pnodeParent, ByteCo
                         }
                         pnodeFields = pnodeFields->AsParseNodeBin()->pnode2;
                     }
+                }
+
+                if (pnodeFnc->pnodeBodyScope != nullptr && pnodeFnc->pnodeBodyScope->HasDisposableResources())
+                {
+                    byteCodeGenerator->PopTrackForYield(pnodeFnc->pnodeBodyScope);
                 }
 
                 EndVisitBlock(pnodeFnc->pnodeBodyScope, byteCodeGenerator);
@@ -5490,6 +5569,7 @@ void AssignRegisters(ParseNode *pnode, ByteCodeGenerator *byteCodeGenerator)
         if ((pnode->AsParseNodeFor()->pnodeBody != nullptr) && (pnode->AsParseNodeFor()->pnodeBody->nop == knopBlock) &&
             (pnode->AsParseNodeFor()->pnodeBody->AsParseNodeBlock()->pnodeStmt != nullptr) &&
             (pnode->AsParseNodeFor()->pnodeBody->AsParseNodeBlock()->pnodeStmt->nop == knopFor) &&
+            !pnode->AsParseNodeFor()->pnodeBlock->HasDisposableResources() &&
             (!byteCodeGenerator->IsInDebugMode()))
         {
                 FuncInfo *funcInfo = byteCodeGenerator->TopFuncInfo();

@@ -416,6 +416,8 @@ ParseNodeVar::ParseNodeVar(OpCode nop, charcount_t ichMin, charcount_t ichLim, I
     this->symRef = nullptr;
     this->isSwitchStmtDecl = false;
     this->isBlockScopeFncDeclVar = false;
+    this->isUsing = false;
+    this->isAwaitUsing = false;
 }
 
 ParseNodeArrLit::ParseNodeArrLit(OpCode nop, charcount_t ichMin, charcount_t ichLim)
@@ -548,6 +550,8 @@ ParseNodeBlock::ParseNodeBlock(charcount_t ichMin, charcount_t ichLim, int block
 
     this->callsEval = false;
     this->childCallsEval = false;
+    this->hasUsing = false;
+    this->hasAwaitUsing = false;
     this->blockType = blockType;
     this->blockId = blockId;
 
