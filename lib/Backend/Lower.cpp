@@ -3060,6 +3060,41 @@ Lowerer::LowerRange(IR::Instr *instrStart, IR::Instr *instrEnd, bool defaultDoFa
             break;
         }
 
+        // C3.1 Explicit Resource Management disposal opcodes, each lowered to
+        // its runtime helper call: Reg3 shapes take (curStack, arg2,
+        // ScriptContext*) and Reg2 shapes take (curStack, ScriptContext*).
+        case Js::OpCode::AddSyncDisposableResource:
+        case Js::OpCode::AddAsyncDisposableResource:
+        case Js::OpCode::RecordDisposeError:
+        {
+            IR::JnHelperMethod helperMethod;
+            switch (instr->m_opcode)
+            {
+                case Js::OpCode::AddSyncDisposableResource:  helperMethod = IR::HelperOp_AddSyncDisposableResource; break;
+                case Js::OpCode::AddAsyncDisposableResource: helperMethod = IR::HelperOp_AddAsyncDisposableResource; break;
+                default:                                     helperMethod = IR::HelperOp_RecordDisposeError; break;
+            }
+            this->LowerBinaryHelperMem(instr, helperMethod);
+            break;
+        }
+
+        case Js::OpCode::DisposeResourcesSync:
+        case Js::OpCode::StepDisposableResource:
+        case Js::OpCode::TakeDisposeAwaitValue:
+        case Js::OpCode::FinalizeDisposeResources:
+        {
+            IR::JnHelperMethod helperMethod;
+            switch (instr->m_opcode)
+            {
+                case Js::OpCode::DisposeResourcesSync:       helperMethod = IR::HelperOp_DisposeResourcesSync; break;
+                case Js::OpCode::StepDisposableResource:     helperMethod = IR::HelperOp_StepDisposableResource; break;
+                case Js::OpCode::TakeDisposeAwaitValue:      helperMethod = IR::HelperOp_TakeDisposeAwaitValue; break;
+                default:                                     helperMethod = IR::HelperOp_FinalizeDisposeResources; break;
+            }
+            this->LowerUnaryHelperMem(instr, helperMethod);
+            break;
+        }
+
         case Js::OpCode::Yield:
         {
             this->m_lowerGeneratorHelper.LowerYield(instr);
