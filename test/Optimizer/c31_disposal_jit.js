@@ -288,7 +288,7 @@ function testAsyncStackWarm() {
         });
     }
 
-    for (var i = 0; i < 25; i++) {
+    for (var i = 0; i < 200; i++) {
         tasks.push(runAsyncBatch(i));
     }
 

@@ -1664,4 +1664,9 @@
       <compile-flags>-CollectGarbage</compile-flags>
     </default>
   </test>
+  <test>
+    <default>
+      <files>arm64_write_barrier_jit.js</files>
+    </default>
+  </test>
 </regress-exe>

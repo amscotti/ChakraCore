@@ -19,9 +19,9 @@
 
 ---
 
-## 2. Pre-existing ARM64 JIT Write-Barrier Card
+## 2. Pre-existing ARM64 JIT Write-Barrier Card (Resolved)
 
-Stress testing `testAsyncStackWarm()` at `n = 100..300` concurrent `AsyncDisposableStack` chains uncovered a **pre-existing, non-C3.1 ARM64 JIT software write-barrier bug** in `lib/Backend/arm64/LowerMD.cpp:4557-4567` (`LowererMD::ChangeToWriteBarrierAssign`). Per coordinator guidance (`modernize/phase4` strict C3.1 scoping), `LowerMD.cpp` was left untouched here, `testAsyncStackWarm()` remains at `n = 25` (verified green across all JIT, GCStress, ASan, and UBSan modes), and the bug + standalone pure-JS reproducer (`Array.push` + `Promise.then` + `join` crashing with `Type::GetTypeId(this=0x0)` under default `ConcurrentCollect` while passing `0` under `-off:InlineBuiltIn` or `-ForceBlockingConcurrentCollect`) are logged as a high-priority engine card in [open-cards.md](open-cards.md) section 2 and section 21.
+Stress testing `testAsyncStackWarm()` at `n = 100..300` concurrent `AsyncDisposableStack` chains uncovered a **pre-existing, non-C3.1 ARM64 JIT software write-barrier bug** in `lib/Backend/arm64/LowerMD.cpp` (`LowererMD::ChangeToWriteBarrierAssign`). Per coordinator guidance (`modernize/phase4` strict C3.1 scoping), `LowerMD.cpp` was left untouched in `410d4a198` with `testAsyncStackWarm()` scoped to `n = 25`. That card is now **resolved** on `modernize/phase4` ([arm64-write-barrier-jit.md](arm64-write-barrier-jit.md); [open-cards.md](open-cards.md) §2 & §22) and `testAsyncStackWarm()` in [c31_disposal_jit.js](../test/Optimizer/c31_disposal_jit.js) is restored to `n = 200` (`20/20` clean across default, ForceJITLoopBody, ForceNative, simpleJit-only, fullJit-only, `-CollectGarbage`, ASan, and UBSan).
 
 ---
 

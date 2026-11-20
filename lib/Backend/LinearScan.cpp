@@ -4881,7 +4881,10 @@ IR::Instr* LinearScan::InsertMove(IR::Opnd *dst, IR::Opnd *src, IR::Instr *const
 {
     IR::Instr *instrPrev = insertBeforeInstr->m_prev;
 
-    IR::Instr *instrRet = Lowerer::InsertMove(dst, src, insertBeforeInstr);
+    // LinearScan runs after Lowerer and register allocation does not allocate new virtual RegOpnds
+    // introduced by GenerateWriteBarrier (on ARM64, RegNOREG encodes as x15); LinearScan stores
+    // only spill/save into non-GC ThreadContext save buffers or stack slots already covered by OnThreadInit/stack roots.
+    IR::Instr *instrRet = Lowerer::InsertMove(dst, src, insertBeforeInstr, false);
 
     for (IR::Instr *instr = instrPrev->m_next; instr != insertBeforeInstr; instr = instr->m_next)
     {

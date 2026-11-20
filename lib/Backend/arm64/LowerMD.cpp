@@ -4453,7 +4453,7 @@ LowererMD::ChangeToAssignNoBarrierCheck(IR::Instr * instr)
 IR::Instr *
 LowererMD::ChangeToAssign(IR::Instr * instr)
 {
-    return ChangeToAssign(instr, instr->GetDst()->GetType());
+    return ChangeToWriteBarrierAssign(instr, instr->m_func);
 }
 
 IR::Instr *
@@ -4524,12 +4524,15 @@ LowererMD::ChangeToWriteBarrierAssign(IR::Instr * assignInstr, const Func* func)
     // missing barrier historically, which is why the ARM stub went unnoticed.
 #ifdef RECYCLER_WRITE_BARRIER_JIT
     IR::Opnd* dest = assignInstr->GetDst();
+    IR::Opnd* src = assignInstr->GetSrc1();
 
     auto threadContextInfo = func->GetTopFunc()->GetThreadContextInfo();
     void* destAddr = nullptr;
     bool isPossibleBarrieredDest = false;
 
-    if (TySize[dest->GetType()] == sizeof(void*))
+    if (TySize[dest->GetType()] == sizeof(void*)
+        && !IRType_IsFloat(dest->GetType())
+        && !IRType_IsSimd128(dest->GetType()))
     {
         if (dest->IsIndirOpnd())
         {
@@ -4552,17 +4555,35 @@ LowererMD::ChangeToWriteBarrierAssign(IR::Instr * assignInstr, const Func* func)
             }
         }
     }
+
+    // Check triggerability before ChangeToAssignNoBarrierCheck: SinkDst
+    // replaces a non-reg source (SymOpnd/AddrOpnd) with a fresh temp RegOpnd
+    // that loses the original source's ValueType/IsAddrOpnd metadata.
+    const bool needsWriteBarrier = isPossibleBarrieredDest && src->IsWriteBarrierTriggerableValue();
+    IR::Instr * prevInstr = assignInstr->m_prev;
+    IR::Instr * nextInstr = assignInstr->m_next;
 #endif
 
     IR::Instr * instr = ChangeToAssignNoBarrierCheck(assignInstr);
 
     // Now insert write barrier if necessary
 #ifdef RECYCLER_WRITE_BARRIER_JIT
-    if (isPossibleBarrieredDest
-        && assignInstr->m_opcode == Js::OpCode::MOV // ignore SSE instructions like MOVSD
-        && assignInstr->GetSrc1()->IsWriteBarrierTriggerableValue())
+    if (needsWriteBarrier)
     {
-        instr = LowererMD::GenerateWriteBarrier(assignInstr);
+        // LegalizeDst lowers RegOpnd-source MOVs to STR in-place and sinks
+        // non-reg sources via SinkDst(STR) right after assignInstr. Locate
+        // the emitted STR rather than testing assignInstr->m_opcode == MOV.
+        IR::Instr * storeInstr = nextInstr != nullptr ? nextInstr->m_prev : assignInstr;
+        if (nextInstr == nullptr)
+        {
+            while (storeInstr->m_next != nullptr)
+            {
+                storeInstr = storeInstr->m_next;
+            }
+        }
+        Assert(storeInstr != nullptr && storeInstr->m_opcode == Js::OpCode::STR && storeInstr->GetDst()->IsIndirOpnd());
+        IR::Instr * barrierStart = LowererMD::GenerateWriteBarrier(storeInstr);
+        return prevInstr ? prevInstr->m_next : (storeInstr == assignInstr ? barrierStart : instr);
     }
 #endif
 
@@ -4578,13 +4599,20 @@ LowererMD::ChangeToWriteBarrierAssign(IR::Instr * assignInstr, const Func* func)
 static IR::Instr * GenerateWriteBarrierAddress(IR::RegOpnd * dstReg, IR::Opnd * opnd, IR::Instr * insertBeforeInstr)
 {
     Func * func = insertBeforeInstr->m_func;
+    IR::Instr * prevBefore = insertBeforeInstr->m_prev;
     IR::Instr * firstInstr = nullptr;
     auto insert = [&](IR::Instr * instr)
     {
+        IR::Instr * slotPrev = insertBeforeInstr->m_prev;
         insertBeforeInstr->InsertBefore(instr);
+        LegalizeMD::LegalizeInstr(instr);
         if (firstInstr == nullptr)
         {
-            firstInstr = instr;
+            firstInstr = slotPrev ? slotPrev->m_next : insertBeforeInstr->m_prev;
+            while (slotPrev == nullptr && firstInstr->m_prev != nullptr)
+            {
+                firstInstr = firstInstr->m_prev;
+            }
         }
     };
 
@@ -4592,7 +4620,7 @@ static IR::Instr * GenerateWriteBarrierAddress(IR::RegOpnd * dstReg, IR::Opnd * 
     {
         insert(IR::Instr::New(Js::OpCode::LDIMM, dstReg,
             IR::AddrOpnd::New((void *)opnd->AsMemRefOpnd()->GetMemLoc(), IR::AddrOpndKindDynamicMisc, func), func));
-        return firstInstr;
+        return prevBefore ? prevBefore->m_next : firstInstr;
     }
 
     IR::IndirOpnd * indirOpnd = opnd->AsIndirOpnd();
@@ -4605,11 +4633,31 @@ static IR::Instr * GenerateWriteBarrierAddress(IR::RegOpnd * dstReg, IR::Opnd * 
     {
         if (offset == 0)
         {
-            return Lowerer::InsertMove(dstReg, baseOpnd, insertBeforeInstr, false);
+            if (baseOpnd->GetReg() == RegSP)
+            {
+                // ARM64 ORR-based MOV encodes register 31 as XZR, not SP;
+                // ADD Xd, SP, #0 preserves the stack pointer value.
+                insert(IR::Instr::New(Js::OpCode::ADD, dstReg, baseOpnd,
+                    IR::IntConstOpnd::New(0, TyMachReg, func, true), func));
+                return prevBefore ? prevBefore->m_next : firstInstr;
+            }
+            IR::Instr * movInstr = Lowerer::InsertMove(dstReg, baseOpnd, insertBeforeInstr, false);
+            return prevBefore ? prevBefore->m_next : movInstr;
         }
         insert(IR::Instr::New(Js::OpCode::ADD, dstReg, baseOpnd,
             IR::IntConstOpnd::New(offset, TyMachReg, func), func));
-        return firstInstr;
+        return prevBefore ? prevBefore->m_next : firstInstr;
+    }
+
+    if (indexOpnd->GetSize() < TySize[TyMachReg])
+    {
+        // EncoderMD::EmitOp3Immediate/EmitOp3Register require 64-bit operand
+        // sizes to match dstReg/baseOpnd; widen narrow indices (e.g. TyUint16
+        // inline-cache slotIndex or TyUint32 array length) first.
+        IRType wideTy = IRType_IsSignedInt(indexOpnd->GetType()) ? TyInt64 : TyUint64;
+        IR::RegOpnd * wideIndex = IR::RegOpnd::New(wideTy, func);
+        firstInstr = Lowerer::InsertMove(wideIndex, indexOpnd, insertBeforeInstr, false);
+        indexOpnd = wideIndex;
     }
 
     IR::RegOpnd * scaledIndex = indexOpnd;
@@ -4625,30 +4673,86 @@ static IR::Instr * GenerateWriteBarrierAddress(IR::RegOpnd * dstReg, IR::Opnd * 
         insert(IR::Instr::New(Js::OpCode::ADD, dstReg, dstReg,
             IR::IntConstOpnd::New(offset, TyMachReg, func), func));
     }
-    return firstInstr;
+    return prevBefore ? prevBefore->m_next : firstInstr;
 }
+
+#if defined(RECYCLER_WRITE_BARRIER_BYTE)
+static void EmitWriteBarrierAfterStore(IR::RegOpnd * addrRegOpnd, IR::Instr * storeInstr)
+{
+    Func * func = storeInstr->m_func;
+    PHASE_PRINT_TRACE(Js::JitWriteBarrierPhase, func, _u("Generating write barrier\n"));
+    // ARM64 uses LSR where the shared x86/x64 lowering uses SHR. The shift
+    // is log2(s_BytesPerCard): 14 on Apple ARM64 (16K cards), not the x64
+    // hardcoded 12 -- with 12 the index is 4x too large and the card store
+    // lands in uncommitted card-table reservation (SIGBUS).
+    const uint32 cardShift = RecyclerWriteBarrierManager::s_BitArrayCardTableShift + 5;
+    IR::Instr * shiftBitInstr = IR::Instr::New(Js::OpCode::LSR, addrRegOpnd, addrRegOpnd,
+        IR::IntConstOpnd::New(cardShift, TyUint8, func, true), func);
+    // Card byte is set AFTER the assign, matching WriteBarrierPtr::
+    // WriteBarrierSet ("set the barrier bit after updating the reference
+    // to prevent a race issue that background thread is resetting all
+    // the dirty pages") and the shared x86/x64 sequence.
+    storeInstr->InsertAfter(shiftBitInstr);
+    LegalizeMD::LegalizeInstr(shiftBitInstr);
+
+    // The cardtable address is likely 64 bits already so we have to load it to a register
+    //  ADD/LSL reg1, targetOfWrite
+    //  LSR reg1, cardShift
+    //  LDIMM reg2, cardTableAddress
+    //  LDIMM reg3, #1
+    //  STRB [reg2 + reg1], reg3
+    IR::RegOpnd * cardTableRegOpnd = IR::RegOpnd::New(TyMachReg, func);
+    // LDIMM (not MOV): ARM64 legalizes LDIMM of a 64-bit address into the
+    // MOVZ/MOVK chunk sequence; a raw MOV with an AddrOpnd source encodes
+    // truncated and the card store lands near address zero.
+    IR::Instr * cardTableAddrInstr = IR::Instr::New(Js::OpCode::LDIMM, cardTableRegOpnd,
+        IR::AddrOpnd::New(RecyclerWriteBarrierManager::GetAddressOfCardTable(), IR::AddrOpndKindWriteBarrierCardTable, func),
+        func);
+    shiftBitInstr->InsertAfter(cardTableAddrInstr);
+    LegalizeMD::LegalizeInstr(cardTableAddrInstr);
+
+    IR::IndirOpnd * cardTableEntryOpnd = IR::IndirOpnd::New(cardTableRegOpnd, addrRegOpnd,
+        TyInt8, func);
+    // Store the card byte with an explicit STR from a full-width temp
+    // holding 1. A MOV with a TyInt8 immediate instead legalizes through
+    // a TyInt8 sink temp whose live range the register allocator aliased
+    // onto the card-table base register under pressure (strb w15,[x15,x30]
+    // with x15==1), corrupting the card address.
+    IR::RegOpnd * oneRegOpnd = IR::RegOpnd::New(TyMachReg, func);
+    IR::Instr * oneInstr = IR::Instr::New(Js::OpCode::LDIMM, oneRegOpnd,
+        IR::IntConstOpnd::New(1, TyMachReg, func), func);
+    cardTableAddrInstr->InsertAfter(oneInstr);
+    LegalizeMD::LegalizeInstr(oneInstr);
+    IR::Instr * movInstr = IR::Instr::New(Js::OpCode::STR, cardTableEntryOpnd, oneRegOpnd, func);
+    oneInstr->InsertAfter(movInstr);
+    LegalizeMD::LegalizeInstr(movInstr);
+}
+#endif
 #endif
 
 void
 LowererMD::GenerateWriteBarrierAssign(IR::MemRefOpnd * opndDst, IR::Opnd * opndSrc, IR::Instr * insertBeforeInstr)
 {
-    Lowerer::InsertMove(opndDst, opndSrc, insertBeforeInstr);
+    Lowerer::InsertMove(opndDst, opndSrc, insertBeforeInstr, false);
 #ifdef RECYCLER_WRITE_BARRIER_JIT
     if (opndSrc->IsWriteBarrierTriggerableValue())
     {
         void * address = (void *)opndDst->AsMemRefOpnd()->GetMemLoc();
 #ifdef RECYCLER_WRITE_BARRIER_BYTE
+        PHASE_PRINT_TRACE(Js::JitWriteBarrierPhase, insertBeforeInstr->m_func, _u("Generating write barrier\n"));
         IR::MemRefOpnd * cardTableEntry = IR::MemRefOpnd::New(
             &RecyclerWriteBarrierManager::GetAddressOfCardTable()[RecyclerWriteBarrierManager::GetCardTableIndex(address)], TyInt8, insertBeforeInstr->m_func);
 
-        // Explicit STR from a full-width temp; see GenerateWriteBarrier
+        // Explicit STR from a full-width temp; see EmitWriteBarrierAfterStore
         // for why a TyInt8-immediate MOV is unsafe on ARM64.
         IR::RegOpnd * oneRegOpnd = IR::RegOpnd::New(TyMachReg, insertBeforeInstr->m_func);
         IR::Instr * oneInstr = IR::Instr::New(Js::OpCode::LDIMM, oneRegOpnd,
             IR::IntConstOpnd::New(1, TyMachReg, insertBeforeInstr->m_func), insertBeforeInstr->m_func);
         insertBeforeInstr->InsertBefore(oneInstr);
+        LegalizeMD::LegalizeInstr(oneInstr);
         IR::Instr * movInstr = IR::Instr::New(Js::OpCode::STR, cardTableEntry, oneRegOpnd, insertBeforeInstr->m_func);
         insertBeforeInstr->InsertBefore(movInstr);
+        LegalizeMD::LegalizeInstr(movInstr);
 #else
         CompileAssert(false); // non-byte card table is x86 bitmask code in LowerMDShared; ARM64 builds define RECYCLER_WRITE_BARRIER_BYTE
 #endif
@@ -4662,19 +4766,25 @@ LowererMD::GenerateWriteBarrierAssign(IR::IndirOpnd * opndDst, IR::Opnd * opndSr
 #ifdef RECYCLER_WRITE_BARRIER_JIT
     if (opndSrc->IsWriteBarrierTriggerableValue())
     {
+#if defined(RECYCLER_WRITE_BARRIER_BYTE)
         IR::RegOpnd * writeBarrierAddrRegOpnd = IR::RegOpnd::New(TyMachPtr, insertBeforeInstr->m_func);
         GenerateWriteBarrierAddress(writeBarrierAddrRegOpnd, opndDst, insertBeforeInstr);
 
-        IR::Instr* movInstr = IR::Instr::New(Js::OpCode::MOV,
-            IR::IndirOpnd::New(writeBarrierAddrRegOpnd, 0, TyMachReg, insertBeforeInstr->m_func), opndSrc, insertBeforeInstr->m_func);
-        insertBeforeInstr->InsertBefore(movInstr);
-        GenerateWriteBarrier(movInstr);
+        Lowerer::InsertMove(
+            IR::IndirOpnd::New(writeBarrierAddrRegOpnd, 0, TyMachReg, insertBeforeInstr->m_func),
+            opndSrc,
+            insertBeforeInstr,
+            false);
+        EmitWriteBarrierAfterStore(writeBarrierAddrRegOpnd, insertBeforeInstr->m_prev);
 
-        // The mov happens above, and it's slightly faster doing it that way since we've already calculated the address we're writing to
+        // The move happens above, and it's slightly faster doing it that way since we've already calculated the address we're writing to
         return;
+#else
+        CompileAssert(false); // non-byte card table is x86 bitmask code in LowerMDShared; ARM64 builds define RECYCLER_WRITE_BARRIER_BYTE
+#endif
     }
 #endif
-    Lowerer::InsertMove(opndDst, opndSrc, insertBeforeInstr);
+    Lowerer::InsertMove(opndDst, opndSrc, insertBeforeInstr, false);
     return;
 }
 
@@ -4683,49 +4793,9 @@ IR::Instr*
 LowererMD::GenerateWriteBarrier(IR::Instr * assignInstr)
 {
 #if defined(RECYCLER_WRITE_BARRIER_BYTE)
-    PHASE_PRINT_TRACE(Js::JitWriteBarrierPhase, assignInstr->m_func, _u("Generating write barrier\n"));
     IR::RegOpnd * indexOpnd = IR::RegOpnd::New(TyMachPtr, assignInstr->m_func);
     IR::Instr * loadIndexInstr = GenerateWriteBarrierAddress(indexOpnd, assignInstr->GetDst(), assignInstr);
-    // ARM64 uses LSR where the shared x86/x64 lowering uses SHR. The shift
-    // is log2(s_BytesPerCard): 14 on Apple ARM64 (16K cards), not the x64
-    // hardcoded 12 -- with 12 the index is 4x too large and the card store
-    // lands in uncommitted card-table reservation (SIGBUS).
-    const uint32 cardShift = RecyclerWriteBarrierManager::s_BitArrayCardTableShift + 5;
-    IR::Instr * shiftBitInstr = IR::Instr::New(Js::OpCode::LSR, indexOpnd, indexOpnd,
-        IR::IntConstOpnd::New(cardShift, TyUint8, assignInstr->m_func, true), assignInstr->m_func);
-    // Card byte is set AFTER the assign, matching WriteBarrierPtr::
-    // WriteBarrierSet ("set the barrier bit after updating the reference
-    // to prevent a race issue that background thread is resetting all
-    // the dirty pages") and the shared x86/x64 sequence.
-    assignInstr->InsertAfter(shiftBitInstr);
-
-    // The cardtable address is likely 64 bits already so we have to load it to a register
-    //  LEA reg1, targetOfWrite
-    //  LSR reg1, 12
-    //  MOV reg2, cardTableAddress
-    //  MOV [reg2 + reg1], 1
-    IR::RegOpnd * cardTableRegOpnd = IR::RegOpnd::New(TyMachReg, assignInstr->m_func);
-    // LDIMM (not MOV): ARM64 legalizes LDIMM of a 64-bit address into the
-    // MOVZ/MOVK chunk sequence; a raw MOV with an AddrOpnd source encodes
-    // truncated and the card store lands near address zero.
-    IR::Instr * cardTableAddrInstr = IR::Instr::New(Js::OpCode::LDIMM, cardTableRegOpnd,
-        IR::AddrOpnd::New(RecyclerWriteBarrierManager::GetAddressOfCardTable(), IR::AddrOpndKindWriteBarrierCardTable, assignInstr->m_func),
-        assignInstr->m_func);
-    shiftBitInstr->InsertAfter(cardTableAddrInstr);
-
-    IR::IndirOpnd * cardTableEntryOpnd = IR::IndirOpnd::New(cardTableRegOpnd, indexOpnd,
-        TyInt8, assignInstr->m_func);
-    // Store the card byte with an explicit STR from a full-width temp
-    // holding 1. A MOV with a TyInt8 immediate instead legalizes through
-    // a TyInt8 sink temp whose live range the register allocator aliased
-    // onto the card-table base register under pressure (strb w15,[x15,x30]
-    // with x15==1), corrupting the card address.
-    IR::RegOpnd * oneRegOpnd = IR::RegOpnd::New(TyMachReg, assignInstr->m_func);
-    IR::Instr * oneInstr = IR::Instr::New(Js::OpCode::LDIMM, oneRegOpnd,
-        IR::IntConstOpnd::New(1, TyMachReg, assignInstr->m_func), assignInstr->m_func);
-    cardTableAddrInstr->InsertAfter(oneInstr);
-    IR::Instr * movInstr = IR::Instr::New(Js::OpCode::STR, cardTableEntryOpnd, oneRegOpnd, assignInstr->m_func);
-    oneInstr->InsertAfter(movInstr);
+    EmitWriteBarrierAfterStore(indexOpnd, assignInstr);
     return loadIndexInstr;
 #else
     CompileAssert(false); // non-byte card table is x86 bitmask code in LowerMDShared; ARM64 builds define RECYCLER_WRITE_BARRIER_BYTE
