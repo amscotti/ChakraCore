@@ -603,9 +603,9 @@ using namespace Js;
             pattern = source->GetPattern();
             splitPattern = source->GetSplitPattern();
             // second arg must be undefined if a reg expression is passed
-            if(callInfo.Count > 2 &&  JavascriptOperators::GetTypeId(args[2]) != TypeIds_Undefined)
+            if (args.Info.Count > 2 && JavascriptOperators::GetTypeId(args[2]) != TypeIds_Undefined)
             {
-                JavascriptError::ThrowSyntaxError(scriptContext, JSERR_RegExpSyntax);
+                JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_Invalid, _u("RegExp.prototype.compile"));
             }
         }
         else
@@ -1249,25 +1249,19 @@ using namespace Js;
         RecyclableObject *thisObj = GetThisObject(args, _u("RegExp.prototype[Symbol.match]"), scriptContext);
         JavascriptString* string = GetFirstStringArg(args, scriptContext);
 
-        // TODO: SPEC DEVIATION
-        //
-        // In RegexHelper::RegexSplit, we check if RegExp properties are overridden in order to determine
-        // if the algorithm is observable. If it is, we go through the new ES6 algorithm, but otherwise, we
-        // run the faster ES5 version.
-        //
-        // According to the spec, we're supposed to process "limit" after we use some of the RegExp properties.
-        // However, there doesn't seem to be any reason why "limit" processing can't be pulled above the rest
-        // in the spec. Therefore, we should see if such a spec update is OK. If not, this would have to be
-        // moved to its correct place in the code.
-        uint32 limit = (args.Info.Count < 3 || JavascriptOperators::IsUndefinedObject(args[2]))
-            ? UINT_MAX
-            : JavascriptConversion::ToUInt32(args[2], scriptContext);
+        // ES2025 22.2.5.13 RegExp.prototype[Symbol.split] evaluates ToUint32(limit)
+        // after SpeciesConstructor/flags/Construct(splitter) (and after capturing
+        // splitPattern on the ES5 fast path) so side effects like regExp.compile()
+        // during limit coercion cannot change the pattern used to split.
+        const bool hasLimitVar = args.Info.Count >= 3;
+        Var limitVar = hasLimitVar ? args[2] : nullptr;
 
-        return RegexHelper::RegexSplit(
+        return RegexHelper::RegexSplitWithLimitVar(
             scriptContext,
             thisObj,
             string,
-            limit,
+            hasLimitVar,
+            limitVar,
             RegexHelper::IsResultNotUsed(callInfo.Flags));
     }
 

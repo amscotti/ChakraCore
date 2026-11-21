@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #include "RuntimeLibraryPch.h"
@@ -18,7 +19,9 @@ namespace Js
         RuntimeFunction(type, &JavascriptRegExp::EntryInfo::NewInstance, cache),
         reset(false),
         invalidatedLastMatch(false),
+        frozenSpecialMask(0),
         lastPattern(nullptr),
+        frozenLastInput(nullptr),
         lastMatch() // undefined
     {
         DebugOnly(VerifyEntryPoint());
@@ -70,6 +73,60 @@ namespace Js
         this->invalidatedLastMatch = true;
     }
 
+    enum RegExpSpecialFreezeBit : uint32
+    {
+        FreezeBit_Capture0     = 1u << 0,
+        FreezeBit_Capture1     = 1u << 1,
+        FreezeBit_Capture2     = 1u << 2,
+        FreezeBit_Capture3     = 1u << 3,
+        FreezeBit_Capture4     = 1u << 4,
+        FreezeBit_Capture5     = 1u << 5,
+        FreezeBit_Capture6     = 1u << 6,
+        FreezeBit_Capture7     = 1u << 7,
+        FreezeBit_Capture8     = 1u << 8,
+        FreezeBit_Capture9     = 1u << 9,
+        FreezeBit_Input        = 1u << 10,
+        FreezeBit_LastParen    = 1u << 11,
+        FreezeBit_LeftContext  = 1u << 12,
+        FreezeBit_RightContext = 1u << 13,
+        FreezeBit_Index        = 1u << 14,
+    };
+
+    uint32 JavascriptRegExpConstructor::GetSpecialFreezeMask(PropertyId propertyId)
+    {
+        switch (propertyId)
+        {
+        case PropertyIds::lastMatch:
+        case PropertyIds::$Ampersand:
+            return FreezeBit_Capture0;
+        case PropertyIds::$1: return FreezeBit_Capture1;
+        case PropertyIds::$2: return FreezeBit_Capture2;
+        case PropertyIds::$3: return FreezeBit_Capture3;
+        case PropertyIds::$4: return FreezeBit_Capture4;
+        case PropertyIds::$5: return FreezeBit_Capture5;
+        case PropertyIds::$6: return FreezeBit_Capture6;
+        case PropertyIds::$7: return FreezeBit_Capture7;
+        case PropertyIds::$8: return FreezeBit_Capture8;
+        case PropertyIds::$9: return FreezeBit_Capture9;
+        case PropertyIds::input:
+        case PropertyIds::$_:
+            return FreezeBit_Input;
+        case PropertyIds::lastParen:
+        case PropertyIds::$Plus:
+            return FreezeBit_LastParen;
+        case PropertyIds::leftContext:
+        case PropertyIds::$BackTick:
+            return FreezeBit_LeftContext;
+        case PropertyIds::rightContext:
+        case PropertyIds::$Tick:
+            return FreezeBit_RightContext;
+        case PropertyIds::index:
+            return FreezeBit_Index;
+        default:
+            return 0;
+        }
+    }
+
     void JavascriptRegExpConstructor::EnsureValues()
     {
         if (reset)
@@ -93,13 +150,25 @@ namespace Js
             Assert(!lastMatch.IsUndefined());
             JavascriptString* emptyString = scriptContext->GetLibrary()->GetEmptyString();
             CharCount lastIndexVal = lastMatch.EndOffset();
-            this->index = JavascriptNumber::ToVar(lastMatch.offset, scriptContext);
+            if (!(frozenSpecialMask & FreezeBit_Index))
+            {
+                this->index = JavascriptNumber::ToVar(lastMatch.offset, scriptContext);
+            }
             this->lastIndex = JavascriptNumber::ToVar(lastIndexVal, scriptContext);
-            this->leftContext = lastMatch.offset > 0 ? SubString::New(lastInput, 0, lastMatch.offset) : emptyString;
-            this->rightContext = lastIndexVal > 0 && lastIndexVal < lastInputLen ? SubString::New(lastInput, lastIndexVal, lastInputLen - lastIndexVal) : emptyString;
+            if (!(frozenSpecialMask & FreezeBit_LeftContext))
+            {
+                this->leftContext = lastMatch.offset > 0 ? SubString::New(lastInput, 0, lastMatch.offset) : emptyString;
+            }
+            if (!(frozenSpecialMask & FreezeBit_RightContext))
+            {
+                this->rightContext = lastIndexVal > 0 && lastIndexVal < lastInputLen ? SubString::New(lastInput, lastIndexVal, lastInputLen - lastIndexVal) : emptyString;
+            }
 
             Var nonMatchValue = RegexHelper::NonMatchValue(scriptContext, true);
-            captures[0] = RegexHelper::GetString(scriptContext, lastInput, nonMatchValue, lastMatch);
+            if (!(frozenSpecialMask & FreezeBit_Capture0))
+            {
+                captures[0] = RegexHelper::GetString(scriptContext, lastInput, nonMatchValue, lastMatch);
+            }
             int numGroups = pattern->NumGroups();
             if (numGroups > 1)
             {
@@ -112,19 +181,38 @@ namespace Js
                     RegexHelper::SimpleMatch(scriptContext, pattern, lastInputStr, lastInputLen, lastMatch.offset);
                 }
                 Assert(pattern->WasLastMatchSuccessful());
+                Var computedLastParen = nullptr;
                 for (int groupId = 1; groupId < min(numGroups, NumCtorCaptures); groupId++)
-                    captures[groupId] = RegexHelper::GetGroup(scriptContext, pattern, lastInput, nonMatchValue, groupId);
+                {
+                    Var groupVal = RegexHelper::GetGroup(scriptContext, pattern, lastInput, nonMatchValue, groupId);
+                    if (!(frozenSpecialMask & (1u << groupId)))
+                    {
+                        captures[groupId] = groupVal;
+                    }
+                    if (groupId == numGroups - 1)
+                    {
+                        computedLastParen = groupVal;
+                    }
+                }
 
-                this->lastParen = numGroups <= NumCtorCaptures ?
-                    PointerValue(captures[numGroups - 1]) :
-                    RegexHelper::GetGroup(scriptContext, pattern, lastInput, nonMatchValue, numGroups - 1);
+                if (!(frozenSpecialMask & FreezeBit_LastParen))
+                {
+                    this->lastParen = numGroups <= NumCtorCaptures ?
+                        computedLastParen :
+                        RegexHelper::GetGroup(scriptContext, pattern, lastInput, nonMatchValue, numGroups - 1);
+                }
             }
-            else
+            else if (!(frozenSpecialMask & FreezeBit_LastParen))
             {
                 this->lastParen = emptyString;
             }
             for (int groupId = numGroups; groupId < NumCtorCaptures; groupId++)
-                captures[groupId] = emptyString;
+            {
+                if (!(frozenSpecialMask & (1u << groupId)))
+                {
+                    captures[groupId] = emptyString;
+                }
+            }
             reset = false;
         }
         else
@@ -240,7 +328,7 @@ namespace Js
         case PropertyIds::input:
         case PropertyIds::$_:
             this->EnsureValues();
-            *value = this->lastInput;
+            *value = (frozenSpecialMask & FreezeBit_Input) ? this->frozenLastInput : this->lastInput;
             *result = true;
             return true;
         case PropertyIds::lastMatch:
@@ -354,6 +442,11 @@ namespace Js
         case PropertyIds::input:
         case PropertyIds::$_:
             //TODO: review: although the 'input' property is marked as readonly, it has a set on V5.8. There is no spec on this.
+            if (frozenSpecialMask & FreezeBit_Input)
+            {
+                *result = false;
+                return true;
+            }
             {
                 auto tempInput = JavascriptConversion::ToString(value, this->GetScriptContext());
                 // Above toString call can cause user code to be called, which may call .match to invalidate our state, ensure that we have proper values in case that happens.
@@ -539,6 +632,60 @@ namespace Js
         default:
             return JavascriptFunction::IsConfigurable(propertyId);
         }
+    }
+
+    BOOL JavascriptRegExpConstructor::IsWritable(PropertyId propertyId)
+    {
+        uint32 mask = GetSpecialFreezeMask(propertyId);
+        if (mask != 0)
+        {
+            return (frozenSpecialMask & mask) == 0;
+        }
+        return JavascriptFunction::IsWritable(propertyId);
+    }
+
+    BOOL JavascriptRegExpConstructor::SetWritable(PropertyId propertyId, BOOL value)
+    {
+        uint32 mask = GetSpecialFreezeMask(propertyId);
+        if (mask != 0)
+        {
+            if (!value)
+            {
+                this->EnsureValues();
+                if ((mask & FreezeBit_Input) && !(frozenSpecialMask & FreezeBit_Input))
+                {
+                    this->frozenLastInput = this->lastInput;
+                }
+                frozenSpecialMask |= mask;
+                return TRUE;
+            }
+            return (frozenSpecialMask & mask) == 0;
+        }
+        return JavascriptFunction::SetWritable(propertyId, value);
+    }
+
+    BOOL JavascriptRegExpConstructor::SetPropertyWithAttributes(PropertyId propertyId, Var value, PropertyAttributes attributes, PropertyValueInfo* info, PropertyOperationFlags flags, SideEffects possibleSideEffects)
+    {
+        uint32 mask = GetSpecialFreezeMask(propertyId);
+        if (mask != 0)
+        {
+            this->EnsureValues();
+            if ((mask & FreezeBit_Input) && !(frozenSpecialMask & FreezeBit_Input))
+            {
+                this->lastInput = JavascriptConversion::ToString(value, this->GetScriptContext());
+            }
+            if (!(attributes & PropertyWritable))
+            {
+                if ((mask & FreezeBit_Input) && !(frozenSpecialMask & FreezeBit_Input))
+                {
+                    this->frozenLastInput = this->lastInput;
+                }
+                frozenSpecialMask |= mask;
+            }
+            PropertyValueInfo::SetNoCache(info, this);
+            return TRUE;
+        }
+        return JavascriptFunction::SetPropertyWithAttributes(propertyId, value, attributes, info, flags, possibleSideEffects);
     }
 
     BOOL JavascriptRegExpConstructor::GetSpecialNonEnumerablePropertyName(uint32 index, Var *propertyName, ScriptContext * requestContext)

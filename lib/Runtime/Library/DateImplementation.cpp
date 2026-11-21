@@ -987,6 +987,14 @@ Error:
             // This was corrected in an ES5.1 errata note. Moreover, the ES6 draft now follows ISO8601.
             timeValue = GetTvUtc(timeValue, scriptContext);
         }
+        if (JavascriptNumber::IsNan(timeValue) || timeValue < ktvMin || timeValue > ktvMax)
+        {
+            timeValue = JavascriptNumber::NaN;
+        }
+        else if (timeValue == 0.0)
+        {
+            timeValue = +0.0;
+        }
         return true;
     }
 
@@ -1577,6 +1585,14 @@ Error:
         {
             tv = GetTvUtc(tv, scriptContext);
         }
+        if (JavascriptNumber::IsNan(tv) || tv < ktvMin || tv > ktvMax)
+        {
+            tv = JavascriptNumber::NaN;
+        }
+        else if (tv == 0.0)
+        {
+            tv = +0.0;
+        }
 
 LError:
         END_TEMP_ALLOCATOR(tempAllocator, scriptContext);
@@ -1586,6 +1602,9 @@ LError:
 
     double DateImplementation::DateFncUTC(ScriptContext* scriptContext, Arguments args)
     {
+#if defined(__clang__) || defined(__STDC_VERSION__)
+#pragma STDC FP_CONTRACT OFF
+#endif
         const int kcvarMax = 7;
         double rgdbl[kcvarMax];
         double tv;

@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #pragma once
@@ -37,6 +38,9 @@ namespace Js
         virtual BOOL GetDiagTypeString(StringBuilder<ArenaAllocator>* stringBuilder, ScriptContext* requestContext) override;
         virtual BOOL IsEnumerable(PropertyId propertyId) override;
         virtual BOOL IsConfigurable(PropertyId propertyId) override;
+        virtual BOOL IsWritable(PropertyId propertyId) override;
+        virtual BOOL SetWritable(PropertyId propertyId, BOOL value) override;
+        virtual BOOL SetPropertyWithAttributes(PropertyId propertyId, Var value, PropertyAttributes attributes, PropertyValueInfo* info, PropertyOperationFlags flags = PropertyOperation_None, SideEffects possibleSideEffects = SideEffects_Any) override;
         virtual BOOL GetEnumerator(JavascriptStaticEnumerator * enumerator, EnumeratorFlags flags, ScriptContext* requestContext, EnumeratorCache * enumeratorCache = nullptr) override;
         BOOL GetSpecialNonEnumerablePropertyName(uint32 index, Var *propertyName, ScriptContext * requestContext);
         uint GetSpecialNonEnumerablePropertyCount() const;
@@ -56,12 +60,15 @@ namespace Js
         void InvalidateLastMatch(UnifiedRegex::RegexPattern* lastPattern, JavascriptString* lastInput);
 
         void EnsureValues();
+        static uint32 GetSpecialFreezeMask(PropertyId propertyId);
 
         Field(UnifiedRegex::RegexPattern*) lastPattern;
         Field(JavascriptString*) lastInput;
+        Field(JavascriptString*) frozenLastInput;
         Field(UnifiedRegex::GroupInfo) lastMatch;
         Field(bool) invalidatedLastMatch; // true if last match must be recalculated before use
         Field(bool) reset; // true if following fields must be recalculated from above before first use
+        Field(uint32) frozenSpecialMask; // bitmask of special properties frozen via SetWritable(..., FALSE)
         Field(Var) lastParen;
         Field(Var) lastIndex;
         Field(Var) index;

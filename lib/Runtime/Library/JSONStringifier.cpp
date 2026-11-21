@@ -610,6 +610,10 @@ JSONStringifier::ReadObject(_In_ RecyclableObject* obj, _In_ JSONObjectStack* ob
             EnumeratorCache* cache = this->scriptContext->GetLibrary()->GetStringifyCache(obj->GetType());
             if (obj->GetEnumerator(&enumerator, EnumeratorFlags::SnapShotSemantics | EnumeratorFlags::EphemeralReference | EnumeratorFlags::UseCache, this->scriptContext, cache))
             {
+                // ES2025 SerializeJSONObject: snapshot all enumerable own string keys
+                // upfront before invoking getters/toJSON/replacer so properties deleted
+                // during stringification are still visited with Get(value, P).
+                ObjectKeyList* keyList = RecyclerNew(recycler, ObjectKeyList, recycler);
                 JavascriptString* propertyName = nullptr;
                 PropertyId nextKey = Constants::NoProperty;
                 while ((propertyName = enumerator.MoveAndGetNext(nextKey)) != nullptr)
@@ -617,7 +621,7 @@ JSONStringifier::ReadObject(_In_ RecyclableObject* obj, _In_ JSONObjectStack* ob
                     const uint32 numericIndex = enumerator.GetCurrentItemIndex();
                     if (numericIndex != Constants::InvalidSourceIndex)
                     {
-                        this->ReadObjectElement(propertyName, numericIndex, obj, jsonObject, &stack);
+                        keyList->Push(ObjectKeyElement(propertyName, nullptr, numericIndex));
                     }
                     else
                     {
@@ -625,11 +629,23 @@ JSONStringifier::ReadObject(_In_ RecyclableObject* obj, _In_ JSONObjectStack* ob
                         if (nextKey == Constants::NoProperty)
                         {
                             this->scriptContext->GetOrAddPropertyRecord(propertyName, &propertyRecord);
-                            nextKey = propertyRecord->GetPropertyId();
                         }
-                        this->ReadObjectElement(propertyName, propertyRecord, obj, jsonObject, &stack);
+                        keyList->Push(ObjectKeyElement(propertyName, propertyRecord, Constants::InvalidSourceIndex));
                     }
                 }
+                keyList->Reverse();
+                FOREACH_SLIST_ENTRY(ObjectKeyElement, entry, keyList)
+                {
+                    if (entry.numericIndex != Constants::InvalidSourceIndex)
+                    {
+                        this->ReadObjectElement(entry.propertyName, entry.numericIndex, obj, jsonObject, &stack);
+                    }
+                    else
+                    {
+                        this->ReadObjectElement(entry.propertyName, entry.propertyRecord, obj, jsonObject, &stack);
+                    }
+                }
+                NEXT_SLIST_ENTRY;
             }
         }
     }

@@ -44,7 +44,8 @@ namespace Js
             , UnifiedRegex::GroupInfo lastActualMatch
             , bool updateRegex
             , bool updateCtor
-            , bool useSplitPattern = false );
+            , bool useSplitPattern = false
+            , UnifiedRegex::RegexPattern* overrideCtorPattern = nullptr );
         static void PropagateLastMatchToRegex
             ( ScriptContext* scriptContext
             , bool isGlobal
@@ -57,7 +58,8 @@ namespace Js
             , JavascriptRegExp* regularExpression
             , JavascriptString* lastInput
             , UnifiedRegex::GroupInfo lastSuccessfulMatch
-            , bool useSplitPattern );
+            , bool useSplitPattern
+            , UnifiedRegex::RegexPattern* overrideCtorPattern = nullptr );
 
         static void InvalidateLastMatchOnCtor(ScriptContext* scriptContext, JavascriptRegExp* regularExpression, JavascriptString* lastInput, bool useSplitPattern = false);
 
@@ -139,6 +141,7 @@ namespace Js
         static Var RegexSplitResultUsedAndMayBeTemp(void *const stackAllocationPointer, ScriptContext* scriptContext, JavascriptRegExp* regularExpression, JavascriptString* input, CharCount limit);
         static Var RegexSplitResultNotUsed(ScriptContext* scriptContext, JavascriptRegExp* regularExpression, JavascriptString* input, CharCount limit);
         static Var RegexSplit(ScriptContext* scriptContext, RecyclableObject* thisObj, JavascriptString* input, CharCount limit, bool noResult, void *const stackAllocationPointer = nullptr);
+        static Var RegexSplitWithLimitVar(ScriptContext* scriptContext, RecyclableObject* thisObj, JavascriptString* input, bool hasLimitVar, Var limitVar, bool noResult, void *const stackAllocationPointer = nullptr);
         static Var RegexSearch(ScriptContext* scriptContext, JavascriptRegExp* regularExpression, JavascriptString* input);
         static Var StringSplit(JavascriptString* regularExpression, JavascriptString* input, CharCount limit);
         static bool IsResultNotUsed(CallFlags flags);
@@ -168,10 +171,10 @@ namespace Js
         static Var RegexSearchImpl(ScriptContext* scriptContext, JavascriptRegExp* regularExpression, JavascriptString* input);
         inline static UnifiedRegex::RegexPattern *GetSplitPattern(ScriptContext* scriptContext, JavascriptRegExp *regularExpression);
         static bool IsRegexSymbolSplitObservable(RecyclableObject* instance, ScriptContext* scriptContext);
-        static Var RegexSplitImpl(ScriptContext* scriptContext, RecyclableObject* thisObj, JavascriptString* input, CharCount limit, bool noResult, void *const stackAllocationPointer = nullptr);
-        static Var RegexEs6SplitImpl(ScriptContext* scriptContext, RecyclableObject* thisObj, JavascriptString* input, CharCount limit, bool noResult, void *const stackAllocationPointer = nullptr);
+        static Var RegexSplitImpl(ScriptContext* scriptContext, RecyclableObject* thisObj, JavascriptString* input, CharCount limit, bool noResult, void *const stackAllocationPointer = nullptr, bool hasLimitVar = false, Var limitVar = nullptr);
+        static Var RegexEs6SplitImpl(ScriptContext* scriptContext, RecyclableObject* thisObj, JavascriptString* input, CharCount limit, bool noResult, void *const stackAllocationPointer = nullptr, bool hasLimitVar = false, Var limitVar = nullptr);
         static JavascriptString* AppendStickyToFlagsIfNeeded(JavascriptString* flags, ScriptContext* scriptContext);
-        static Var RegexEs5SplitImpl(ScriptContext* scriptContext, JavascriptRegExp* regularExpression, JavascriptString* input, CharCount limit, bool noResult, void *const stackAllocationPointer = nullptr);
+        static Var RegexEs5SplitImpl(ScriptContext* scriptContext, JavascriptRegExp* regularExpression, JavascriptString* input, CharCount limit, bool noResult, void *const stackAllocationPointer = nullptr, bool hasLimitVar = false, Var limitVar = nullptr);
         static bool IsRegexTestObservable(RecyclableObject* instance, ScriptContext* scriptContext);
         static Var RegexEs6TestImpl(ScriptContext* scriptContext, RecyclableObject* thisObj, JavascriptString* input);
         static Var RegexEs5TestImpl(ScriptContext* scriptContext, JavascriptRegExp* regularExpression, JavascriptString* input);

@@ -133,6 +133,11 @@ namespace Js
     double
     DateUtilities::TvFromDate(double year, double mon, double day, double time)
     {
+        // Preserve IEEE-754 intermediate rounding in MakeDate (day * 86400000 + time)
+        // by disabling FMA contraction.
+#if defined(__clang__) || defined(__STDC_VERSION__)
+#pragma STDC FP_CONTRACT OFF
+#endif
         // For positive month, use fast path: '/' and '%' rather than 'floor()' and 'fmod()'.
         // But make sure there is no overflow when casting double -> int -- WOOB 1142298.
         if (mon >= 0 && mon <= INT_MAX)

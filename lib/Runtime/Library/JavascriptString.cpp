@@ -1344,7 +1344,15 @@ case_2:
                 pSearch = JavascriptOperators::TryFromVar<JavascriptString>(args[1]);
                 if (!pSearch)
                 {
-                    pSearch = JavascriptConversion::ToString(args[1], scriptContext);
+                    if (VarIs<JavascriptSymbolObject>(args[1]))
+                    {
+                        Var prim = JavascriptConversion::ToPrimitive<JavascriptHint::HintString>(args[1], scriptContext);
+                        pSearch = JavascriptConversion::ToString(prim, scriptContext);
+                    }
+                    else
+                    {
+                        pSearch = JavascriptConversion::ToString(args[1], scriptContext);
+                    }
                 }
             }
         }

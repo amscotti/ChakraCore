@@ -1619,24 +1619,33 @@ namespace Js
     {
         // CRT does not have a multiple version of hypot, so we implement it here ourselves.
         bool foundNaN = false;
+        bool foundInf = false;
         double scale = 0;
         double sum = 0;
 
-        //Ignore first argument which is this pointer
+        // Ignore first argument which is this pointer.
+        // Coerce all arguments to Number before returning +/-Infinity or NaN so
+        // later abrupt completions in ToNumber are observed (ES2025 sec-math.hypot).
         for (uint counter = 1; counter < args.Info.Count; counter++)
         {
             double doubleVal = JavascriptConversion::ToNumber(args[counter], scriptContext);
 
+            if (foundInf)
+            {
+                continue;
+            }
+
             if (JavascriptNumber::IsPosInf(doubleVal) || JavascriptNumber::IsNegInf(doubleVal))
             {
-                return JavascriptNumber::POSITIVE_INFINITY;
+                foundInf = true;
+                continue;
             }
 
             if (!foundNaN)
             {
                 if (JavascriptNumber::IsNan(doubleVal))
                 {
-                    //Even though we found NaN, we still need to validate none of the other arguments are +Infinity or -Infinity
+                    // Even though we found NaN, we still need to validate none of the other arguments are +Infinity or -Infinity
                     foundNaN = true;
                 }
                 else
@@ -1654,6 +1663,11 @@ namespace Js
                     }
                 }
             }
+        }
+
+        if (foundInf)
+        {
+            return JavascriptNumber::POSITIVE_INFINITY;
         }
 
         if (foundNaN)

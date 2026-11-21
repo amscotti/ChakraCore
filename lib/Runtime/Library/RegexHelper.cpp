@@ -1978,14 +1978,14 @@ namespace Js
         return splitPattern;
     }
 
-    Var RegexHelper::RegexSplitImpl(ScriptContext* scriptContext, RecyclableObject* thisObj, JavascriptString* input, CharCount limit, bool noResult, void *const stackAllocationPointer)
+    Var RegexHelper::RegexSplitImpl(ScriptContext* scriptContext, RecyclableObject* thisObj, JavascriptString* input, CharCount limit, bool noResult, void *const stackAllocationPointer, bool hasLimitVar, Var limitVar)
     {
         ScriptConfiguration const * scriptConfig = scriptContext->GetConfig();
 
         if (scriptConfig->IsES6RegExSymbolsEnabled()
             && IsRegexSymbolSplitObservable(thisObj, scriptContext))
         {
-            return RegexEs6SplitImpl(scriptContext, thisObj, input, limit, noResult, stackAllocationPointer);
+            return RegexEs6SplitImpl(scriptContext, thisObj, input, limit, noResult, stackAllocationPointer, hasLimitVar, limitVar);
         }
         else
         {
@@ -1993,7 +1993,7 @@ namespace Js
                 ? _u("RegExp.prototype[Symbol.split]")
                 : _u("String.prototype.split");
             JavascriptRegExp* regularExpression = JavascriptRegExp::ToRegExp(thisObj, varName, scriptContext);
-            return RegexEs5SplitImpl(scriptContext, regularExpression, input, limit, noResult, stackAllocationPointer);
+            return RegexEs5SplitImpl(scriptContext, regularExpression, input, limit, noResult, stackAllocationPointer, hasLimitVar, limitVar);
         }
     }
 
@@ -2008,7 +2008,7 @@ namespace Js
             || JavascriptRegExp::HasObservableExec(regexPrototype);
     }
 
-    Var RegexHelper::RegexEs6SplitImpl(ScriptContext* scriptContext, RecyclableObject* thisObj, JavascriptString* input, CharCount limit, bool noResult, void *const stackAllocationPointer)
+    Var RegexHelper::RegexEs6SplitImpl(ScriptContext* scriptContext, RecyclableObject* thisObj, JavascriptString* input, CharCount limit, bool noResult, void *const stackAllocationPointer, bool hasLimitVar, Var limitVar)
     {
         PCWSTR const varName = _u("RegExp.prototype[Symbol.split]");
         thisObj = JavascriptRegExp::BoxIfStackInstance(thisObj);
@@ -2044,6 +2044,13 @@ namespace Js
         RecyclableObject* splitter = UnsafeVarTo<RecyclableObject>(regEx);
 
         JavascriptArray* arrayResult = scriptContext->GetLibrary()->CreateArray();
+
+        if (hasLimitVar)
+        {
+            limit = JavascriptOperators::IsUndefinedObject(limitVar)
+                ? UINT_MAX
+                : JavascriptConversion::ToUInt32(limitVar, scriptContext);
+        }
 
         if (limit == 0)
         {
@@ -2137,12 +2144,26 @@ namespace Js
     }
 
     // String.prototype.split (ES5 15.5.4.14)
-    Var RegexHelper::RegexEs5SplitImpl(ScriptContext* scriptContext, JavascriptRegExp* regularExpression, JavascriptString* input, CharCount limit, bool noResult, void *const stackAllocationPointer)
+    Var RegexHelper::RegexEs5SplitImpl(ScriptContext* scriptContext, JavascriptRegExp* regularExpression, JavascriptString* input, CharCount limit, bool noResult, void *const stackAllocationPointer, bool hasLimitVar, Var limitVar)
     {
-        if (noResult && scriptContext->GetConfig()->SkipSplitOnNoResult())
+        if (!hasLimitVar && noResult && scriptContext->GetConfig()->SkipSplitOnNoResult())
         {
             // TODO: Fix this so that the side effect for PropagateLastMatch is done
             return scriptContext->GetLibrary()->GetNull();
+        }
+
+        UnifiedRegex::RegexPattern *splitPattern = GetSplitPattern(scriptContext, regularExpression);
+
+        if (hasLimitVar)
+        {
+            limit = JavascriptOperators::IsUndefinedObject(limitVar)
+                ? UINT_MAX
+                : JavascriptConversion::ToUInt32(limitVar, scriptContext);
+
+            if (noResult && scriptContext->GetConfig()->SkipSplitOnNoResult())
+            {
+                return scriptContext->GetLibrary()->GetNull();
+            }
         }
 
 #if ENABLE_REGEX_CONFIG_OPTIONS
@@ -2157,7 +2178,6 @@ namespace Js
             return ary;
         }
 
-        UnifiedRegex::RegexPattern *splitPattern = GetSplitPattern(scriptContext, regularExpression);
         // Hoisted out of the split loop (the empty-match advance reads it per match).
         const bool isUnicodeSplitPattern = RegexIsUnicodePattern(splitPattern);
 
@@ -2244,7 +2264,8 @@ namespace Js
             , UnifiedRegex::GroupInfo()
             , /* updateRegex */ !scriptContext->GetConfig()->IsES6RegExSymbolsEnabled()
             , /* updateCtor */ true
-            , /* useSplitPattern */ true );
+            , /* useSplitPattern */ true
+            , splitPattern );
 
         return ary;
     }
@@ -2617,7 +2638,8 @@ namespace Js
         , UnifiedRegex::GroupInfo lastActualMatch
         , bool updateRegex
         , bool updateCtor
-        , bool useSplitPattern )
+        , bool useSplitPattern
+        , UnifiedRegex::RegexPattern* overrideCtorPattern )
     {
         if (updateRegex)
         {
@@ -2625,7 +2647,7 @@ namespace Js
         }
         if (updateCtor)
         {
-            PropagateLastMatchToCtor(scriptContext, regularExpression, lastInput, lastSuccessfulMatch, useSplitPattern);
+            PropagateLastMatchToCtor(scriptContext, regularExpression, lastInput, lastSuccessfulMatch, useSplitPattern, overrideCtorPattern);
         }
     }
 
@@ -2698,7 +2720,8 @@ namespace Js
         , JavascriptRegExp* regularExpression
         , JavascriptString* lastInput
         , UnifiedRegex::GroupInfo lastSuccessfulMatch
-        , bool useSplitPattern )
+        , bool useSplitPattern
+        , UnifiedRegex::RegexPattern* overrideCtorPattern )
     {
         Assert(lastInput);
 
@@ -2711,9 +2734,11 @@ namespace Js
             //   So, if you call the function with remoteContext.regexInstance.exec.call(localRegexInstance, "match string"),
             //   we will update stats in the context related to the exec function, i.e. remoteContext.
             //   This is consistent with other browsers
-            UnifiedRegex::RegexPattern* pattern = useSplitPattern
-                ? regularExpression->GetSplitPattern()
-                : regularExpression->GetPattern();
+            UnifiedRegex::RegexPattern* pattern = overrideCtorPattern != nullptr
+                ? overrideCtorPattern
+                : (useSplitPattern
+                    ? regularExpression->GetSplitPattern()
+                    : regularExpression->GetPattern());
             scriptContext->GetLibrary()->GetRegExpConstructor()->SetLastMatch(pattern, lastInput, lastSuccessfulMatch);
         }
     }
@@ -2998,6 +3023,12 @@ namespace Js
     Var RegexHelper::RegexSplit(ScriptContext* entryFunctionContext, RecyclableObject* thisObj, JavascriptString* input, CharCount limit, bool noResult, void *const stackAllocationPointer)
     {
         Var result = RegexHelper::RegexSplitImpl(entryFunctionContext, thisObj, input, limit, noResult, stackAllocationPointer);
+        return RegexHelper::CheckCrossContextAndMarshalResult(result, entryFunctionContext);
+    }
+
+    Var RegexHelper::RegexSplitWithLimitVar(ScriptContext* entryFunctionContext, RecyclableObject* thisObj, JavascriptString* input, bool hasLimitVar, Var limitVar, bool noResult, void *const stackAllocationPointer)
+    {
+        Var result = RegexHelper::RegexSplitImpl(entryFunctionContext, thisObj, input, UINT_MAX, noResult, stackAllocationPointer, hasLimitVar, limitVar);
         return RegexHelper::CheckCrossContextAndMarshalResult(result, entryFunctionContext);
     }
 

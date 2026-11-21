@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #include "RuntimeLibraryPch.h"
@@ -366,7 +367,10 @@ namespace Js
 
                     uint32 uVal = UriHelper::FromUTF8( bOctets, n );
 
-                    if( uVal >= 0xD800 && uVal <= 0xDFFF)
+                    // ES2025 Decode: reject overlong UTF-8 encodings, surrogates, and out-of-range code points.
+                    static const uint32 minCodePoint[] = { 0, 0, 0x80, 0x800, 0x10000 };
+                    Assert(n >= 2 && n <= static_cast<int>(UriHelper::MaxUTF8Len));
+                    if (uVal < minCodePoint[n] || (uVal >= 0xD800 && uVal <= 0xDFFF))
                     {
                         JavascriptError::ThrowURIError(scriptContext, JSERR_URIDecodeError /* TODO-ERROR: _u("NEED MESSAGE") */);
                     }
@@ -509,8 +513,11 @@ namespace Js
                     uint32 uVal = UriHelper::FromUTF8( bOctets, n );
 
 #if DBG
+                    static const uint32 minCodePoint[] = { 0, 0, 0x80, 0x800, 0x10000 };
+                    Assert(n >= 2 && n <= static_cast<int>(UriHelper::MaxUTF8Len));
+                    Assert(uVal >= minCodePoint[n]);
                     Assert(!(uVal >= 0xD800 && uVal <= 0xDFFF));
-                    if( uVal >= 0xD800 && uVal <= 0xDFFF)
+                    if( uVal < minCodePoint[n] || (uVal >= 0xD800 && uVal <= 0xDFFF) )
                     {
                         JavascriptError::ThrowURIError(scriptContext, VBSERR_InternalError /* TODO-ERROR: _u("NEED MESSAGE") */);
                     }

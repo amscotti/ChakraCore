@@ -49,6 +49,23 @@ private:
 
     typedef SList<PropertyListElement, Recycler> PropertyList;
 
+    struct ObjectKeyElement
+    {
+        Field(JavascriptString*) propertyName;
+        Field(PropertyRecord const*) propertyRecord;
+        Field(uint32) numericIndex;
+
+        ObjectKeyElement() {}
+        ObjectKeyElement(const ObjectKeyElement& other)
+            : propertyName(other.propertyName), propertyRecord(other.propertyRecord), numericIndex(other.numericIndex)
+        {}
+        ObjectKeyElement(JavascriptString* propertyName, PropertyRecord const* propertyRecord, uint32 numericIndex)
+            : propertyName(propertyName), propertyRecord(propertyRecord), numericIndex(numericIndex)
+        {}
+    };
+
+    typedef SList<ObjectKeyElement, Recycler> ObjectKeyList;
+
     ScriptContext* scriptContext;
     RecyclableObject* replacerFunction;
     PropertyList* propertyList;
