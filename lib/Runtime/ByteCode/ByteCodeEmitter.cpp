@@ -13955,11 +13955,28 @@ void Emit(ParseNode* pnode, ByteCodeGenerator* byteCodeGenerator, FuncInfo* func
         }
         case knopIndex:
         {
-            EmitBinaryOpnds(pexpr->AsParseNodeBin()->pnode1, pexpr->AsParseNodeBin()->pnode2, byteCodeGenerator, funcInfo);
-            funcInfo->ReleaseLoc(pexpr->AsParseNodeBin()->pnode2);
-            funcInfo->ReleaseLoc(pexpr->AsParseNodeBin()->pnode1);
-            funcInfo->AcquireLoc(pnode);
-            byteCodeGenerator->Writer()->Element(Js::OpCode::DeleteElemI_A, pnode->location, pexpr->AsParseNodeBin()->pnode1->location, pexpr->AsParseNodeBin()->pnode2->location);
+            ParseNodeBin *pnodeIndex = pexpr->AsParseNodeBin();
+            if (ByteCodeGenerator::IsSuper(pnodeIndex->pnode1))
+            {
+                // ES2025 13.3.7.1 + 13.5.1.2: GetThisBinding runs before the key
+                // expression; the key is evaluated without ToPropertyKey, then
+                // deleting a super reference throws ReferenceError.
+                EmitSuperPropertyReferenceOperands(pnodeIndex, byteCodeGenerator, funcInfo, /* captureBaseInPlace */ false);
+                funcInfo->ReleaseLoc(pnodeIndex->pnode2);
+                funcInfo->ReleaseLoc(pnodeIndex->pnode1);
+                byteCodeGenerator->Writer()->W1(Js::OpCode::RuntimeReferenceError, SCODE_CODE(JSERR_DeletePropertyWithSuper));
+
+                funcInfo->AcquireLoc(pnode);
+                byteCodeGenerator->Writer()->Reg1(Js::OpCode::LdUndef, pnode->location);
+            }
+            else
+            {
+                EmitBinaryOpnds(pnodeIndex->pnode1, pnodeIndex->pnode2, byteCodeGenerator, funcInfo);
+                funcInfo->ReleaseLoc(pnodeIndex->pnode2);
+                funcInfo->ReleaseLoc(pnodeIndex->pnode1);
+                funcInfo->AcquireLoc(pnode);
+                byteCodeGenerator->Writer()->Element(Js::OpCode::DeleteElemI_A, pnode->location, pnodeIndex->pnode1->location, pnodeIndex->pnode2->location);
+            }
             break;
         }
         case knopOptChain:

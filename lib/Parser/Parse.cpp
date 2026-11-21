@@ -170,6 +170,7 @@ Parser::Parser(Js::ScriptContext* scriptContext, BOOL strictMode, PageAllocator 
     m_isInParsingArgList(false),
     m_hasDestructuringPattern(false),
     m_hasDeferredShorthandInitError(false),
+    m_hasDeferredProtoDupError(false),
     m_deferCommaError(false),
     m_inClassFieldInitializer(false),
     m_inStaticClassFieldInitializer(false),
@@ -505,6 +506,7 @@ HRESULT Parser::ValidateSyntax(LPCUTF8 pszSrc, size_t encodedCharCount, bool isG
         this->GetScanner()->SetText(pszSrc, 0, encodedCharCount, 0, false, grfscr);
         this->GetScanner()->SetYieldIsKeywordRegion(isGenerator);
         this->GetScanner()->SetAwaitIsKeywordRegion(isAsync);
+        this->GetScanner()->SetAllowFirstLineHtmlClose(validateFunction != &Parser::ValidateFormals);
         this->GetScanner()->Scan();
 
         uint nestedCount = 0;
@@ -1458,6 +1460,19 @@ Symbol* Parser::AddDeclForPid(ParseNodeVar * pnodeVar, IdentPtr pid, SymbolType 
     }
     pnodeVar->symRef = refForUse->GetSymRef();
     Symbol *sym = refForDecl->GetSym();
+    if (sym != nullptr &&
+        (pnodeVar->nop == knopLetDecl || pnodeVar->nop == knopConstDecl) &&
+        sym->IsArguments() &&
+        GetCurrentFunctionNode()->HasNonSimpleParameterList() &&
+        blockInfo->pnodeBlock->scope != nullptr &&
+        sym->GetScope() != blockInfo->pnodeBlock->scope)
+    {
+        // In a non-simple parameter list function whose param and body scopes
+        // are provisionally merged, ParseFncDeclHelper pushed paramScope's
+        // built-in `arguments` symbol onto bodyScope. Keep lexical body
+        // `arguments` declarations on a separate symbol in bodyScope.
+        sym = nullptr;
+    }
     if (sym != nullptr)
     {
         // Multiple declarations in the same scope. 3 possibilities: error, existing one wins, new one wins.
@@ -2934,7 +2949,8 @@ void Parser::ThrowNewTargetSyntaxErrForGlobalScope()
         return;
     }
 
-    if (GetCurrentNonLambdaFunctionNode() != nullptr)
+    ParseNodeFnc * nonLambdaFunc = GetCurrentNonLambdaFunctionNode();
+    if (nonLambdaFunc != nullptr && !nonLambdaFunc->IsModule())
     {
         return;
     }
@@ -4211,8 +4227,13 @@ ParseNodePtr Parser::ParseTerm(BOOL fAllowCall,
     _Out_opt_ bool* looseCoalesce /*= nullptr*/,
     _Out_opt_ bool* pfHasOptChain /*= nullptr*/,
     _Out_opt_ bool* pfIsCallResult /*= nullptr*/,
-    BOOL fAllowIn /*= TRUE*/)
+    BOOL fAllowIn /*= TRUE*/,
+    _Out_opt_ bool* pfIsParen /*= nullptr*/)
 {
+    if (pfIsParen != nullptr)
+    {
+        *pfIsParen = false;
+    }
     ParseNodePtr pnode = nullptr;
     PidRefStack *savedTopAsyncRef = nullptr;
     charcount_t ichMin = 0;
@@ -4476,6 +4497,10 @@ ParseNodePtr Parser::ParseTerm(BOOL fAllowCall,
             }
         }
 
+        if (pfIsParen != nullptr)
+        {
+            *pfIsParen = true;
+        }
         break;
     }
 
@@ -6074,6 +6099,7 @@ ParseNodePtr Parser::ParseMemberList(LPCOLESTR pNameHint, uint32* pNameHintLengt
     ArenaAllocator tempAllocator(_u("MemberNames"), m_nodeAllocator.GetPageAllocator(), Parser::OutOfMemory);
 
     bool hasDeferredInitError = false;
+    bool hasDeferredProtoDupError = false;
 
     for (;;)
     {
@@ -6260,12 +6286,15 @@ ParseNodePtr Parser::ParseMemberList(LPCOLESTR pNameHint, uint32* pNameHintLengt
         if (tkColon == m_token.tk)
         {
             // It is a syntax error if the production of the form __proto__ : <> occurs more than once. From B.3.1 in spec.
-            // Note that previous scan is important because only after that we can determine we have a variable.
-            if (!isComputedName && pidHint == wellKnownPropertyPids.__proto__)
+            // Object assignment/binding patterns are exempt, and __proto__: expr does not perform NamedEvaluation.
+            if (!isObjectPattern && !isComputedName && pidHint == wellKnownPropertyPids.__proto__)
             {
+                pFullNameHint = nullptr;
+                fullNameHintLength = 0;
+                shortNameOffset = 0;
                 if (isProtoDeclared)
                 {
-                    Error(ERRsyntax);
+                    hasDeferredProtoDupError = true;
                 }
                 else
                 {
@@ -6288,10 +6317,13 @@ ParseNodePtr Parser::ParseMemberList(LPCOLESTR pNameHint, uint32* pNameHintLengt
                     this->GetScanner()->Capture(&atExpression);
 
                     int saveNextBlockId = m_nextBlockId;
+                    uint saveNextFunctionId = m_nextFunctionId ? *m_nextFunctionId : 0;
 
-                    // It is possible that we might encounter the shorthand init error. Lets find that out.
+                    // It is possible that we might encounter the shorthand init or proto dup error. Lets find that out.
                     bool savedDeferredInitError = m_hasDeferredShorthandInitError;
+                    bool savedDeferredProtoDupError = m_hasDeferredProtoDupError;
                     m_hasDeferredShorthandInitError = false;
+                    m_hasDeferredProtoDupError = false;
 
                     IdentToken token;
                     BOOL fLikelyPattern = false;
@@ -6301,7 +6333,11 @@ ParseNodePtr Parser::ParseMemberList(LPCOLESTR pNameHint, uint32* pNameHintLengt
                     ParseTerm<buildAST>(/* fAllowCall */ m_token.tk != tkSUPER, nullptr /*pNameHint*/, nullptr /*pHintLength*/, nullptr /*pShortNameOffset*/, &token, false /*fUnaryOrParen*/,
                         TRUE, nullptr /*pfCanAssign*/, &fLikelyPattern);
 
-                     m_nextBlockId = saveNextBlockId;
+                    m_nextBlockId = saveNextBlockId;
+                    if (m_nextFunctionId)
+                    {
+                        *m_nextFunctionId = saveNextFunctionId;
+                    }
 
                     this->GetScanner()->SeekTo(atExpression);
 
@@ -6323,11 +6359,16 @@ ParseNodePtr Parser::ParseMemberList(LPCOLESTR pNameHint, uint32* pNameHintLengt
                         {
                             Error(ERRnoColon);
                         }
+                        if (m_hasDeferredProtoDupError)
+                        {
+                            Error(ERRsyntax);
+                        }
 
                         pnodeExpr = ParseExpr<buildAST>(koplCma, nullptr/*pfCantAssign*/, TRUE/*fAllowIn*/, FALSE/*fAllowEllipsis*/, pFullNameHint, &fullNameHintLength, &shortNameOffset);
                     }
 
                     m_hasDeferredShorthandInitError = savedDeferredInitError;
+                    m_hasDeferredProtoDupError = savedDeferredProtoDupError;
                 }
                 else
                 {
@@ -6579,6 +6620,7 @@ ParseNodePtr Parser::ParseMemberList(LPCOLESTR pNameHint, uint32* pNameHintLengt
     }
 
     m_hasDeferredShorthandInitError = m_hasDeferredShorthandInitError || hasDeferredInitError;
+    m_hasDeferredProtoDupError = m_hasDeferredProtoDupError || hasDeferredProtoDupError;
 
     if (buildAST)
     {
@@ -7624,8 +7666,9 @@ void Parser::ParseFncDeclHelper(ParseNodeFnc * pnodeFnc, LPCOLESTR pNameHint, us
         // over-report there is the tracked residual.
         if (pnodeFnc->HasNonSimpleParameterList() &&
             pnodeFnc->IsBodyAndParamScopeMerged() &&
-            pnodeFnc->CallsEval() &&
-            !BodyRedeclaresParameter(pnodeFnc, pnodeInnerBlock))
+            ((pnodeFnc->grfpn & PNodeFlags::fpnArguments_overriddenByDecl) ||
+             (pnodeFnc->CallsEval() &&
+              !BodyRedeclaresParameter(pnodeFnc, pnodeInnerBlock))))
         {
             pnodeFnc->ResetBodyAndParamScopeMerged();
         }
@@ -8697,6 +8740,8 @@ void Parser::ParseFncFormals(ParseNodeFnc * pnodeFnc, ParseNodeFnc * pnodeParent
 
                     this->GetScanner()->Scan();
 
+                    bool savedDeferredProtoDupError = m_hasDeferredProtoDupError;
+                    m_hasDeferredProtoDupError = false;
                     ParseNodePtr pnodeInit;
                     if (isTopLevelDeferredFunc)
                     {
@@ -8709,6 +8754,11 @@ void Parser::ParseFncFormals(ParseNodeFnc * pnodeFnc, ParseNodeFnc * pnodeParent
                     {
                         pnodeInit = ParseExpr<buildAST>(koplCma, nullptr, TRUE, FALSE, pNameHint, &nameHintLength, &nameHintOffset);
                     }
+                    if (m_hasDeferredProtoDupError)
+                    {
+                        Error(ERRsyntax);
+                    }
+                    m_hasDeferredProtoDupError = savedDeferredProtoDupError;
 
                     if (buildAST && pnodeInit && pnodeInit->nop == knopFncDecl)
                     {
@@ -12204,7 +12254,10 @@ ParseNodePtr Parser::ParseExpr(int oplMin,
     this->GetScanner()->Capture(&termStart);
 
     bool savedDeferredInitError = m_hasDeferredShorthandInitError;
+    bool savedDeferredProtoDupError = m_hasDeferredProtoDupError;
     m_hasDeferredShorthandInitError = false;
+    m_hasDeferredProtoDupError = false;
+    bool fIsParen = false;
 
     // Is the current token a unary operator?
     if (this->GetHashTbl()->TokIsUnop(m_token.tk, &opl, &nop) && nop != knopNone)
@@ -12442,7 +12495,7 @@ ParseNodePtr Parser::ParseExpr(int oplMin,
     else
     {
         ichMin = this->GetScanner()->IchMinTok();
-        pnode = ParseTerm<buildAST>(TRUE, pNameHint, &hintLength, &hintOffset, &term, fUnaryOrParen, TRUE, &fCanAssign, &fLikelyPattern, &fIsDotOrIndex, plastRParen, &localCoalesce, nullptr, &fIsCallResult, fAllowIn);
+        pnode = ParseTerm<buildAST>(TRUE, pNameHint, &hintLength, &hintOffset, &term, fUnaryOrParen, TRUE, &fCanAssign, &fLikelyPattern, &fIsDotOrIndex, plastRParen, &localCoalesce, nullptr, &fIsCallResult, fAllowIn, &fIsParen);
         if (looseCoalesce != nullptr)
         {
             *looseCoalesce = localCoalesce;
@@ -12454,10 +12507,11 @@ ParseNodePtr Parser::ParseExpr(int oplMin,
         }
 
         if (m_token.tk == tkDArrow
-            // If we have introduced shorthand error above in the ParseExpr, we need to reset if next token is the assignment.
+            // If we have introduced shorthand/proto errors above in the ParseExpr, we need to reset if next token is assignment/arrow.
             || (m_token.tk == tkAsg && oplMin <= koplAsg))
         {
             m_hasDeferredShorthandInitError = false;
+            m_hasDeferredProtoDupError = false;
         }
 
         if (m_token.tk == tkAsg && oplMin <= koplAsg && fLikelyPattern)
@@ -12487,7 +12541,9 @@ ParseNodePtr Parser::ParseExpr(int oplMin,
         if (buildAST)
         {
             pNameHint = NULL;
-            if (pnode->nop == knopName)
+            hintLength = 0;
+            hintOffset = 0;
+            if (pnode->nop == knopName && !fIsParen)
             {
                 IdentPtr pid = pnode->AsParseNodeName()->pid;
                 pNameHint = pid->Psz();
@@ -12757,7 +12813,7 @@ ParseNodePtr Parser::ParseExpr(int oplMin,
                     pnode2->AsParseNodeFnc()->hintLength = hintLength;
                     pnode2->AsParseNodeFnc()->hintOffset = hintOffset;
 
-                    if (pnode1->nop == knopDot)
+                    if (pnode1->nop == knopDot || (pnode1->nop == knopName && fIsParen))
                     {
                         pnode2->AsParseNodeFnc()->isNameIdentifierRef = false;
                     }
@@ -12772,7 +12828,8 @@ ParseNodePtr Parser::ParseExpr(int oplMin,
                         }
                     }
                 }
-                else if (pnode2->nop == knopClassDecl && (pnode1->nop == knopDot || pnode1->nop == knopIndex))
+                else if (pnode2->nop == knopClassDecl &&
+                         (pnode1->nop == knopDot || pnode1->nop == knopIndex || (pnode1->nop == knopName && fIsParen)))
                 {
                     Assert(pnode2->AsParseNodeClass()->pnodeConstructor);
 
@@ -12836,6 +12893,7 @@ ParseNodePtr Parser::ParseExpr(int oplMin,
     }
 
     m_hasDeferredShorthandInitError = m_hasDeferredShorthandInitError || savedDeferredInitError;
+    m_hasDeferredProtoDupError = m_hasDeferredProtoDupError || savedDeferredProtoDupError;
 
     if (NULL != pfCanAssign)
     {
@@ -14144,7 +14202,54 @@ LRestart:
                 this->GetScanner()->Capture(&startExprOrIdentifier);
             }
             bool fLikelyPattern = false;
-            if (beforeToken == tkLBrack || beforeToken == tkLCurly)
+            bool isAsyncForOfLhs = false;
+            if (isForAwait && beforeToken == tkID &&
+                m_token.GetIdentifier(this->GetHashTbl()) == wellKnownPropertyPids.async &&
+                !this->GetScanner()->LastIdentifierHasEscape())
+            {
+                // ES2025 14.7.5.1: for-await has no [lookahead != async of] restriction,
+                // so `for await (async of expr)` treats `async` as an IdentifierReference
+                // unless `of => ...` begins an async arrow.
+                IdentToken asyncToken;
+                charcount_t ichMinAsync = this->GetScanner()->IchMinTok();
+                size_t iecpMinAsync = this->GetScanner()->IecpMinTok();
+                charcount_t ichLimAsync = this->GetScanner()->IchLimTok();
+                size_t iecpLimAsync = this->GetScanner()->IecpLimTok();
+                asyncToken.tk = tkID;
+                asyncToken.pid = wellKnownPropertyPids.async;
+                asyncToken.ichMin = static_cast<charcount_t>(iecpMinAsync);
+                asyncToken.ichLim = static_cast<charcount_t>(iecpLimAsync);
+
+                this->GetScanner()->Scan();
+                if (m_token.tk == tkID && m_token.GetIdentifier(this->GetHashTbl()) == wellKnownPropertyPids.of)
+                {
+                    RestorePoint atOf;
+                    this->GetScanner()->Capture(&atOf);
+                    this->GetScanner()->Scan();
+                    if (m_token.tk != tkDArrow || this->GetScanner()->FHadNewLine())
+                    {
+                        this->GetScanner()->SeekTo(atOf);
+                        isAsyncForOfLhs = true;
+                        CheckArgumentsUse(wellKnownPropertyPids.async, GetCurrentFunctionNode());
+                        PidRefStack *ref = this->PushPidRef(wellKnownPropertyPids.async);
+                        if (buildAST)
+                        {
+                            pnodeT = CreateNameNode(wellKnownPropertyPids.async, ref, ichMinAsync, ichLimAsync);
+                        }
+                        fCanAssign = TRUE;
+                        TrackAssignment<buildAST>(pnodeT, &asyncToken);
+                    }
+                }
+                if (!isAsyncForOfLhs)
+                {
+                    this->GetScanner()->SeekTo(exprStart);
+                }
+            }
+            if (isAsyncForOfLhs)
+            {
+                // Handled above as `for await (async of ...)`
+            }
+            else if (beforeToken == tkLBrack || beforeToken == tkLCurly)
             {
                 pnodeT = ParseExpr<buildAST>(koplNo,
                     &fCanAssign,
@@ -14168,6 +14273,8 @@ LRestart:
             // has already converted them appropriately.
             if (fLikelyPattern && TokIsForInOrForOf())
             {
+                m_hasDeferredShorthandInitError = false;
+                m_hasDeferredProtoDupError = false;
                 this->GetScanner()->SeekTo(exprStart);
                 ParseDestructuredLiteralWithScopeSave(tkNone, false/*isDecl*/, false /*topLevel*/, DIC_None, false /*allowIn*/);
                 fCanAssign = TRUE;
@@ -14176,6 +14283,14 @@ LRestart:
                 {
                     pnodeT = ConvertToPattern(pnodeT);
                 }
+            }
+            if (m_hasDeferredShorthandInitError)
+            {
+                Error(ERRnoColon);
+            }
+            if (m_hasDeferredProtoDupError)
+            {
+                Error(ERRsyntax);
             }
             if (buildAST)
             {
@@ -15005,6 +15120,10 @@ LDefaultToken:
         {
             Error(ERRnoColon);
         }
+        if (m_hasDeferredProtoDupError)
+        {
+            Error(ERRsyntax);
+        }
 
         if (buildAST)
         {
@@ -15051,6 +15170,10 @@ LNeedTerminator:
     if (m_hasDeferredShorthandInitError)
     {
         Error(ERRnoColon);
+    }
+    if (m_hasDeferredProtoDupError)
+    {
+        Error(ERRsyntax);
     }
 
     if (buildAST)
@@ -17004,8 +17127,16 @@ void Parser::ParseDestructuredLiteralWithScopeSave(tokens declarationType,
 
     // we need to reset this as we are going to parse the grammar again.
     m_hasDeferredShorthandInitError = false;
+    m_hasDeferredProtoDupError = false;
+
+    uint functionIdSave = m_nextFunctionId ? *m_nextFunctionId : 0;
 
     ParseDestructuredLiteral<false>(declarationType, isDecl, topLevel, initializerContext, allowIn);
+
+    if (m_nextFunctionId)
+    {
+        *m_nextFunctionId = functionIdSave;
+    }
 
     m_currentNodeFunc = pnodeFncSave;
     m_currentNodeDeferredFunc = pnodeDeferredFncSave;
@@ -17087,6 +17218,8 @@ ParseNodePtr Parser::ParseDestructuredInitializer(ParseNodeUni * lhsNode,
 
 
     bool alreadyHasInitError = m_hasDeferredShorthandInitError;
+    bool savedDeferredProtoDupError = m_hasDeferredProtoDupError;
+    m_hasDeferredProtoDupError = false;
 
     ParseNodePtr pnodeDefault = ParseExpr<buildAST>(koplCma, nullptr, allowIn);
 
@@ -17094,6 +17227,11 @@ ParseNodePtr Parser::ParseDestructuredInitializer(ParseNodeUni * lhsNode,
     {
         Error(ERRnoColon);
     }
+    if (m_hasDeferredProtoDupError)
+    {
+        Error(ERRsyntax);
+    }
+    m_hasDeferredProtoDupError = savedDeferredProtoDupError;
 
     ParseNodeBin * pnodeDestructAsg = nullptr;
     if (buildAST)
@@ -17201,13 +17339,69 @@ ParseNodePtr Parser::ParseDestructuredVarDecl(tokens declarationType, bool isDec
             Error(ERRDestructIDRef);
         }
 
-        // Go recursively
-        pnodeElem = ParseDestructuredLiteral<buildAST>(declarationType, isDecl, false /*topLevel*/, seenRest ? DIC_ShouldNotParseInitializer : DIC_None);
+        bool parseAsPattern = true;
         if (!isDecl)
         {
-            BOOL fCanAssign;
-            // Look for postfix operator
-            pnodeElem = ParsePostfixOperators<buildAST>(pnodeElem, TRUE, FALSE, FALSE, TRUE, &fCanAssign, &token);
+            RestorePoint atExpression;
+            this->GetScanner()->Capture(&atExpression);
+            int saveNextBlockId = m_nextBlockId;
+            uint saveNextFunctionId = m_nextFunctionId ? *m_nextFunctionId : 0;
+            bool savedDeferredInitError = m_hasDeferredShorthandInitError;
+            bool savedDeferredProtoDupError = m_hasDeferredProtoDupError;
+            m_hasDeferredShorthandInitError = false;
+            m_hasDeferredProtoDupError = false;
+
+            BOOL fLikelyPattern = FALSE;
+            ParseTerm<false>(/* fAllowCall */ m_token.tk != tkSUPER, nullptr, nullptr, nullptr, &token, false,
+                TRUE, nullptr, &fLikelyPattern);
+
+            m_nextBlockId = saveNextBlockId;
+            if (m_nextFunctionId)
+            {
+                *m_nextFunctionId = saveNextFunctionId;
+            }
+            this->GetScanner()->SeekTo(atExpression);
+
+            if (!fLikelyPattern)
+            {
+                if (m_hasDeferredShorthandInitError)
+                {
+                    Error(ERRnoColon);
+                }
+                if (m_hasDeferredProtoDupError)
+                {
+                    Error(ERRsyntax);
+                }
+                parseAsPattern = false;
+            }
+            m_hasDeferredShorthandInitError = savedDeferredInitError;
+            m_hasDeferredProtoDupError = savedDeferredProtoDupError;
+        }
+
+        if (parseAsPattern)
+        {
+            // Go recursively
+            pnodeElem = ParseDestructuredLiteral<buildAST>(declarationType, isDecl, false /*topLevel*/, seenRest ? DIC_ShouldNotParseInitializer : DIC_None);
+            if (!isDecl)
+            {
+                BOOL fCanAssign;
+                // Look for postfix operator
+                pnodeElem = ParsePostfixOperators<buildAST>(pnodeElem, TRUE, FALSE, FALSE, TRUE, &fCanAssign, &token);
+            }
+        }
+        else
+        {
+            BOOL fCanAssign = FALSE;
+            pnodeElem = ParseTerm<buildAST>(/* fAllowCall */ true, nullptr, nullptr, nullptr, &token, false,
+                FALSE, &fCanAssign);
+            if (!fCanAssign)
+            {
+                Error(ERRInvalidAssignmentTarget);
+            }
+            if (buildAST)
+            {
+                TrackAssignment<buildAST>(pnodeElem, nullptr);
+            }
         }
     }
     else if (m_token.tk == tkSUPER || m_token.tk == tkID || m_token.tk == tkTHIS)
@@ -17297,15 +17491,58 @@ ParseNodePtr Parser::ParseDestructuredVarDecl(tokens declarationType, bool isDec
         this->GetScanner()->Scan();
 
         bool alreadyHasInitError = m_hasDeferredShorthandInitError;
-        ParseNodePtr pnodeInit = ParseExpr<buildAST>(koplCma);
+        bool savedDeferredProtoDupError = m_hasDeferredProtoDupError;
+        m_hasDeferredProtoDupError = false;
+
+        LPCOLESTR pNameHint = nullptr;
+        uint32 hintLength = 0;
+        uint32 hintOffset = 0;
+        if (buildAST && !isDecl && parenCount == 0 && pnodeElem != nullptr && pnodeElem->nop == knopName)
+        {
+            IdentPtr pid = pnodeElem->AsParseNodeName()->pid;
+            pNameHint = pid->Psz();
+            hintLength = pid->Cch();
+        }
+
+        ParseNodePtr pnodeInit = ParseExpr<buildAST>(koplCma, nullptr, TRUE, FALSE, pNameHint, &hintLength, &hintOffset);
 
         if (m_hasDeferredShorthandInitError && !alreadyHasInitError)
         {
             Error(ERRnoColon);
         }
+        if (m_hasDeferredProtoDupError)
+        {
+            Error(ERRsyntax);
+        }
+        m_hasDeferredProtoDupError = savedDeferredProtoDupError;
 
         if (buildAST)
         {
+            if (pNameHint != nullptr && pnodeInit != nullptr)
+            {
+                if (pnodeInit->nop == knopFncDecl)
+                {
+                    ParseNodeFnc * pnodeFncInit = pnodeInit->AsParseNodeFnc();
+                    if (pnodeFncInit->pnodeName == nullptr && pnodeFncInit->hint == nullptr)
+                    {
+                        Assert(hintLength >= hintOffset);
+                        pnodeFncInit->hint = pNameHint;
+                        pnodeFncInit->hintLength = hintLength;
+                        pnodeFncInit->hintOffset = hintOffset;
+                    }
+                }
+                else if (pnodeInit->nop == knopClassDecl)
+                {
+                    ParseNodeClass * pnodeClassInit = pnodeInit->AsParseNodeClass();
+                    if (pnodeClassInit->pnodeName == nullptr && pnodeClassInit->pnodeConstructor != nullptr && pnodeClassInit->pnodeConstructor->hint == nullptr)
+                    {
+                        Assert(hintLength >= hintOffset);
+                        pnodeClassInit->pnodeConstructor->hint = pNameHint;
+                        pnodeClassInit->pnodeConstructor->hintLength = hintLength;
+                        pnodeClassInit->pnodeConstructor->hintOffset = hintOffset;
+                    }
+                }
+            }
             pnodeElem = CreateBinNode(knopAsg, pnodeElem, pnodeInit);
         }
     }

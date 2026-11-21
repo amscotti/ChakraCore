@@ -489,6 +489,7 @@ private:
     bool m_hasDestructuringPattern;
     // This bool is used for deferring the shorthand initializer error ( {x = 1}) - as it is allowed in the destructuring grammar.
     bool m_hasDeferredShorthandInitError;
+    bool m_hasDeferredProtoDupError;
     bool m_deferEllipsisError;
     bool m_deferCommaError;
     // S1 public class field parsing: helper functions for instance field
@@ -1054,7 +1055,8 @@ private:
         _Out_opt_ bool* looseCoalesce = nullptr,
         _Out_opt_ bool* pfHasOptChain = nullptr,
         _Out_opt_ bool* pfIsCallResult = nullptr,
-        BOOL fAllowIn = TRUE);
+        BOOL fAllowIn = TRUE,
+        _Out_opt_ bool* pfIsParen = nullptr);
 
     template<bool buildAST> ParseNodePtr ParsePostfixOperators(
         ParseNodePtr pnode,
@@ -1125,6 +1127,7 @@ private:
         return m_token.tk == tkLParen ||
             m_token.tk == tkLBrack ||
             m_token.tk == tkDot ||
+            m_token.tk == tkOptChain ||
             m_token.tk == tkStrTmplBasic ||
             m_token.tk == tkStrTmplBegin;
     }

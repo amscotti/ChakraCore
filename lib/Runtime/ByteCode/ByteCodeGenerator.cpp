@@ -4725,6 +4725,23 @@ void Bind(ParseNode *pnode, ByteCodeGenerator *byteCodeGenerator)
     case knopContinue:
         byteCodeGenerator->AddTargetStmt(pnode->AsParseNodeJump()->pnodeTarget);
         break;
+    case knopForIn:
+    case knopForOf:
+    case knopForAwaitOf:
+    {
+        ParseNode *pnodeLval = pnode->AsParseNodeForInOrForOf()->pnodeLval;
+        if (pnodeLval != nullptr &&
+            pnodeLval->nop == knopVarDecl &&
+            pnodeLval->AsParseNodeVar()->sym != nullptr &&
+            !pnodeLval->AsParseNodeVar()->sym->IsArguments() &&
+            !pnodeLval->AsParseNodeVar()->sym->IsSpecialSymbol())
+        {
+            // Clear AddVarsToScope's eager function-scope binding so Bind
+            // resolves symRef against enclosing catch/with scopes (ES2025 B.3.5).
+            pnodeLval->AsParseNodeVar()->sym = nullptr;
+        }
+        break;
+    }
     case knopProg:
         {
             FuncInfo* globFuncInfo = byteCodeGenerator->StartBindGlobalStatements(pnode->AsParseNodeProg());

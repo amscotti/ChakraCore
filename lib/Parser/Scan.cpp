@@ -111,6 +111,7 @@ void Scanner<EncodingPolicy>::ClearStates()
     m_OctOrLeadingZeroOnLastTKNumber = false;
     m_EscapeOnLastTkStrCon = false;
     m_hadInvalidEscapeOnLastTemplate = false;
+    m_allowFirstLineHtmlClose = false;
     m_DeferredParseFlags = ScanFlagNone;
 
     m_fYieldIsKeywordRegion = false;
@@ -178,6 +179,7 @@ void Scanner<EncodingPolicy>::SetText(EncodedCharPtr pszSrc, size_t offset, size
     m_ptoken->tk = tkNone;
     m_fIsModuleCode = (grfscr & fscrIsModuleCode) != 0;
     m_fHadEol = FALSE;
+    m_allowFirstLineHtmlClose = false;
     m_DeferredParseFlags = ScanFlagNone;
 
     this->SetIsUtf8(isUtf8);
@@ -1239,35 +1241,39 @@ LMainDefault:
                 m_tempChBufSecondary.template AppendCh<createRawString>(ch);
 
                 ch = 0;
-                if (Js::NumberUtilities::FHexDigit(c = this->ReadFirst(p, last), &wT))
+                c = this->PeekFirst(p, last);
+                if (Js::NumberUtilities::FHexDigit(c, &wT))
+                {
+                    this->ReadFirst(p, last);
                     goto LFourHex;
+                }
                 else if (c != '{' || !this->es6UnicodeMode)
                 {
-                    // No cooked value in templates: record the source char in
-                    // the raw string and resume scanning at ReturnScanError.
-                    m_tempChBufSecondary.template AppendCh<createRawString>(c);
+                    // Do not consume non-hex/non-brace characters so template
+                    // boundaries (`, ${, newline, \) still terminate/resume.
                     goto ReturnScanError;
                 }
 
+                c = this->ReadFirst(p, last);
                 Assert(c == '{');
                 // c should definitely be a '{' which should be appended to the raw string.
                 m_tempChBufSecondary.template AppendCh<createRawString>(c);
 
-                //At least one digit is expected
-                if (!Js::NumberUtilities::FHexDigit(c = this->ReadFirst(p, last), &wT))
+                // At least one digit is expected
+                c = this->PeekFirst(p, last);
+                if (!Js::NumberUtilities::FHexDigit(c, &wT))
                 {
-                    // No cooked value in templates: record the source char in
-                    // the raw string and resume scanning at ReturnScanError.
-                    m_tempChBufSecondary.template AppendCh<createRawString>(c);
                     goto ReturnScanError;
                 }
 
+                this->ReadFirst(p, last);
                 m_tempChBufSecondary.template AppendCh<createRawString>(c);
 
                 codePoint = static_cast<codepoint_t>(wT);
 
-                while(Js::NumberUtilities::FHexDigit(c = this->ReadFirst(p, last), &wT))
+                while (Js::NumberUtilities::FHexDigit(c = this->PeekFirst(p, last), &wT))
                 {
+                    this->ReadFirst(p, last);
                     m_tempChBufSecondary.template AppendCh<createRawString>(c);
                     codePoint <<= 4;
                     codePoint += static_cast<codepoint_t>(wT);
@@ -1283,12 +1289,11 @@ LMainDefault:
 
                 if (c != '}')
                 {
-                    // No cooked value in templates: record the source char in
-                    // the raw string and resume scanning at ReturnScanError.
                     errorType = (uint)ERRMissingCurlyBrace;
-                    m_tempChBufSecondary.template AppendCh<createRawString>(c);
                     goto ReturnScanError;
                 }
+
+                this->ReadFirst(p, last);
 
                 Assert(codePoint <= 0x10FFFF);
 
@@ -1314,14 +1319,13 @@ LFourHex:
                 m_tempChBufSecondary.template AppendCh<createRawString>(c);
 
                 codePoint += static_cast<codepoint_t>(wT * 0x1000);
-                if (!Js::NumberUtilities::FHexDigit(c = this->ReadFirst(p, last), &wT))
+                c = this->PeekFirst(p, last);
+                if (!Js::NumberUtilities::FHexDigit(c, &wT))
                 {
-                    // No cooked value in templates: record the source char in
-                    // the raw string and resume scanning at ReturnScanError.
-                    m_tempChBufSecondary.template AppendCh<createRawString>(c);
                     goto ReturnScanError;
                 }
 
+                this->ReadFirst(p, last);
                 // Append fourth (or second) hex digit character to the raw string.
                 m_tempChBufSecondary.template AppendCh<createRawString>(c);
 
@@ -1329,26 +1333,25 @@ LFourHex:
 
 LTwoHex:
                 // This code path doesn't expect curly.
-                if (!Js::NumberUtilities::FHexDigit(c = this->ReadFirst(p, last), &wT))
+                c = this->PeekFirst(p, last);
+                if (!Js::NumberUtilities::FHexDigit(c, &wT))
                 {
-                    // No cooked value in templates: record the source char in
-                    // the raw string and resume scanning at ReturnScanError.
-                    m_tempChBufSecondary.template AppendCh<createRawString>(c);
                     goto ReturnScanError;
                 }
 
+                this->ReadFirst(p, last);
                 // Append first hex digit character to the raw string.
                 m_tempChBufSecondary.template AppendCh<createRawString>(c);
 
                 codePoint += static_cast<codepoint_t>(wT * 0x0010);
 
-                if (!Js::NumberUtilities::FHexDigit(c = this->ReadFirst(p, last), &wT))
+                c = this->PeekFirst(p, last);
+                if (!Js::NumberUtilities::FHexDigit(c, &wT))
                 {
-                    // No cooked value in templates: record the source char in
-                    // the raw string and resume scanning at ReturnScanError.
-                    m_tempChBufSecondary.template AppendCh<createRawString>(c);
                     goto ReturnScanError;
                 }
+
+                this->ReadFirst(p, last);
 
                 codePoint += static_cast<codepoint_t>(wT);
 
@@ -2105,8 +2108,8 @@ LIdentifier:
                 if (!m_fIsModuleCode)
                 {
                     // https://tc39.github.io/ecma262/#prod-annexB-MultiLineComment
-                    // If there was a new line in the multi-line comment, the text after --> is a comment.
-                    if ('>' == this->PeekFirst(p, last) && m_fHadEol)
+                    // If there was a new line in the multi-line comment (or line 1 in script/eval/fn-body before the first real token), the text after --> is a comment.
+                    if ('>' == this->PeekFirst(p, last) && (m_fHadEol || m_allowFirstLineHtmlClose))
                     {
                         goto LSkipLineComment;
                     }
@@ -2413,6 +2416,7 @@ LCommentLineBreak:
     }
 
 LDone:
+    m_allowFirstLineHtmlClose = false;
     m_currentCharacter = p;
     return (m_ptoken->tk = token);
 }

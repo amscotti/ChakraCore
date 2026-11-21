@@ -513,6 +513,11 @@ public:
         return m_hadInvalidEscapeOnLastTemplate;
     }
 
+    void SetAllowFirstLineHtmlClose(bool allow)
+    {
+        m_allowFirstLineHtmlClose = allow;
+    }
+
     // Returns the character offset of the first token. The character offset is the offset the first character of the token would
     // have if the entire file was converted to Unicode (UTF16-LE).
     charcount_t IchMinTok(void) const
@@ -747,6 +752,7 @@ private:
     bool m_EscapeOnLastTkStrCon:1;
     bool m_lastIdentifierHasEscape:1;
     bool m_hadInvalidEscapeOnLastTemplate :1; // last template piece had an escape with no cooked value (cooked=undefined)
+    bool m_allowFirstLineHtmlClose :1;      // Annex B --> allowed on line 1 before the first real token in script/eval/fn-body
     BYTE m_DeferredParseFlags:2;            // suppressStrPid and suppressIdPid    
     bool es6UnicodeMode;                // True if ES6Unicode Extensions are enabled.
     bool m_fYieldIsKeywordRegion;       // Whether to treat 'yield' as an identifier or keyword
