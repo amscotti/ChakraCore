@@ -329,6 +329,20 @@ namespace Js
     }
 
     ///----------------------------------------------------------------------------
+    /// Box or tag an already-rounded integer-valued double without invoking
+    /// undefined behavior on out-of-range or non-finite values.
+    ///----------------------------------------------------------------------------
+    static inline Var IntegerDoubleToVar(double result, ScriptContext* scriptContext)
+    {
+        int32 intResult;
+        if (JavascriptNumber::TryGetInt32Value(result, &intResult))
+        {
+            return JavascriptNumber::ToVar(intResult, scriptContext);
+        }
+        return JavascriptNumber::ToVarNoCheck(result, scriptContext);
+    }
+
+    ///----------------------------------------------------------------------------
     /// Ceil() returns the smallest (closest to -Inf) number value that is not less
     /// than x and is equal to an integer, as described in (ES5.0: S15.8.2.6).
     ///----------------------------------------------------------------------------
@@ -394,18 +408,7 @@ namespace Js
             else
 #endif
             {
-                double result = ::ceil(x);
-
-                intptr_t intResult = (intptr_t)result;
-
-                if (TaggedInt::IsOverflow(intResult) || JavascriptNumber::IsNegZero(result))
-                {
-                    return JavascriptNumber::ToVarNoCheck(result, scriptContext);
-                }
-                else
-                {
-                    return JavascriptNumber::ToVar(intResult, scriptContext);
-                }
+                return IntegerDoubleToVar(::ceil(x), scriptContext);
             }
         }
         else
@@ -609,26 +612,12 @@ namespace Js
 #endif
 #endif
         {
-            intptr_t intResult;
-
-            if (d >= 0.0)
+            if (d > 0.0 && d < 2147483648.0)
             {
-                intResult = (intptr_t)d;
-            }
-            else
-            {
-                d = ::floor(d);
-                intResult = (intptr_t)d;
+                return JavascriptNumber::ToVar(static_cast<int32>(d), scriptContext);
             }
 
-            if (TaggedInt::IsOverflow(intResult) || JavascriptNumber::IsNegZero(d))
-            {
-                return JavascriptNumber::ToVarNoCheck(::floor(d), scriptContext);
-            }
-            else
-            {
-                return JavascriptNumber::ToVar(intResult, scriptContext);
-            }
+            return IntegerDoubleToVar(::floor(d), scriptContext);
         }
     }
 #pragma warning(pop)
