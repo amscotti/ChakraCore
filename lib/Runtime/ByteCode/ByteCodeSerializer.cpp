@@ -446,6 +446,16 @@ class ByteCodeBufferBuilder
         return (dwFlags & GENERATE_BYTE_CODE_ALLOC_ANEW);
     }
 
+    void PrependNode(BufferBuilderList & builder, BufferBuilder * entry)
+    {
+        builder.list = regex::ImmutableList<Js::BufferBuilder*>::Prepend(builder.list, entry, alloc);
+    }
+
+    void ReverseList(BufferBuilderList & builder)
+    {
+        builder.list = regex::ImmutableList<Js::BufferBuilder*>::ReverseCurrentList(builder.list);
+    }
+
 public:
 
     ByteCodeBufferBuilder(uint32 sourceSize, uint32 sourceCharLength, LPCUTF8 utf8Source, Utf8SourceInfo* sourceInfo, ScriptContext * scriptContext, ArenaAllocator * alloc, DWORD dwFlags, int builtInPropertyCount)
@@ -570,44 +580,44 @@ public:
         BufferBuilderList all(_u("Final"));
 
         // Reverse the lists
-        string16IndexTable.list = string16IndexTable.list->ReverseCurrentList();
-        string16Table.list = string16Table.list->ReverseCurrentList();
-        scopeInfoTable.list = scopeInfoTable.list->ReverseCurrentList();
-        scopeInfoRelativeOffsets.list = scopeInfoRelativeOffsets.list->ReverseCurrentList();
+        ReverseList(string16IndexTable);
+        ReverseList(string16Table);
+        ReverseList(scopeInfoTable);
+        ReverseList(scopeInfoRelativeOffsets);
 
         // Prepend all sections (in reverse order because of prepend)
         all.list = regex::ImmutableList<Js::BufferBuilder*>::OfSingle(&scopeInfoTable, alloc);
-        all.list = all.list->Prepend(&scopeInfoRelativeOffsets, alloc);
-        all.list = all.list->Prepend(&scopeInfoCount, alloc);
-        all.list = all.list->Prepend(&functionsTable, alloc);
-        all.list = all.list->Prepend(&functionCount, alloc);
+        PrependNode(all, &scopeInfoRelativeOffsets);
+        PrependNode(all, &scopeInfoCount);
+        PrependNode(all, &functionsTable);
+        PrependNode(all, &functionCount);
         if (lineByteOffsetCacheBuffer.raw != nullptr)
         {
-            all.list = all.list->Prepend(&lineByteOffsetCacheBuffer, alloc);
+            PrependNode(all, &lineByteOffsetCacheBuffer);
         }
-        all.list = all.list->Prepend(&lineInfoHasByteCache, alloc);
-        all.list = all.list->Prepend(&lineCharacterOffsetCacheBuffer, alloc);
-        all.list = all.list->Prepend(&lineInfoCacheCount, alloc);
-        all.list = all.list->Prepend(&alignedString16Table, alloc);
-        all.list = all.list->Prepend(&string16IndexTable, alloc);
-        all.list = all.list->Prepend(&string16Count, alloc);
-        all.list = all.list->Prepend(&scopeInfoOffset, alloc);
-        all.list = all.list->Prepend(&functionsOffset, alloc);
-        all.list = all.list->Prepend(&lineInfoCacheOffset, alloc);
-        all.list = all.list->Prepend(&string16sOffset, alloc);
-        all.list = all.list->Prepend(&originalCharLength, alloc);
-        all.list = all.list->Prepend(&originalSourceSize, alloc);
-        all.list = all.list->Prepend(&expectedOpCodeCount, alloc);
-        all.list = all.list->Prepend(&expectedBuildInPropertyCount, alloc);
-        all.list = all.list->Prepend(&expectedFunctionBodySize, alloc);
-        all.list = all.list->Prepend(&architecture, alloc);
-        all.list = all.list->Prepend(&V4, alloc);
-        all.list = all.list->Prepend(&V3, alloc);
-        all.list = all.list->Prepend(&V2, alloc);
-        all.list = all.list->Prepend(&V1, alloc);
-        all.list = all.list->Prepend(&fileVersionKind, alloc);
-        all.list = all.list->Prepend(&totalSize, alloc);
-        all.list = all.list->Prepend(&magic, alloc);
+        PrependNode(all, &lineInfoHasByteCache);
+        PrependNode(all, &lineCharacterOffsetCacheBuffer);
+        PrependNode(all, &lineInfoCacheCount);
+        PrependNode(all, &alignedString16Table);
+        PrependNode(all, &string16IndexTable);
+        PrependNode(all, &string16Count);
+        PrependNode(all, &scopeInfoOffset);
+        PrependNode(all, &functionsOffset);
+        PrependNode(all, &lineInfoCacheOffset);
+        PrependNode(all, &string16sOffset);
+        PrependNode(all, &originalCharLength);
+        PrependNode(all, &originalSourceSize);
+        PrependNode(all, &expectedOpCodeCount);
+        PrependNode(all, &expectedBuildInPropertyCount);
+        PrependNode(all, &expectedFunctionBodySize);
+        PrependNode(all, &architecture);
+        PrependNode(all, &V4);
+        PrependNode(all, &V3);
+        PrependNode(all, &V2);
+        PrependNode(all, &V1);
+        PrependNode(all, &fileVersionKind);
+        PrependNode(all, &totalSize);
+        PrependNode(all, &magic);
 
         // Get the string count.
         string16Count.value = nextString16Id - this->builtInPropertyCount;
@@ -684,7 +694,7 @@ public:
         {
             auto sizeInBytes = bb->byteCount;
             auto stringEntry = Anew(alloc, BufferBuilderRaw, _u("String16"), sizeInBytes, (const byte *)bb->pv); // Writing the terminator even though it is computable so that this memory can be used as-is when deserialized
-            string16Table.list = string16Table.list->Prepend(stringEntry, alloc);
+            PrependNode(string16Table, stringEntry);
             if (string16IndexTable.list == nullptr)
             {
                 // First item in the list is the first string.
@@ -698,7 +708,7 @@ public:
 
             // Subsequent strings indexes point one past the end. This way, the size is always computable by subtracting indexes.
             auto stringIndexEntry = Anew(alloc, BufferBuilderRelativeOffset, _u("String16 Index"), stringEntry, sizeInBytes);
-            string16IndexTable.list = string16IndexTable.list->Prepend(stringIndexEntry, alloc);
+            PrependNode(string16IndexTable, stringIndexEntry);
 
             // By default, mark the next string to be not a property record.
             PrependByte(string16IndexTable, _u("isPropertyRecord"), (BYTE)false);
@@ -719,14 +729,14 @@ public:
     uint32 PrependRelativeOffset(BufferBuilderList & builder, LPCWSTR clue, BufferBuilder * pointedTo)
     {
         auto entry = Anew(alloc, BufferBuilderRelativeOffset, clue, pointedTo, 0);
-        builder.list = builder.list->Prepend(entry, alloc);
+        PrependNode(builder, entry);
         return sizeof(int32);
     }
 
     uint32 PrependInt16(BufferBuilderList & builder, LPCWSTR clue, int16 value, BufferBuilderInt16 ** entryOut = nullptr)
     {
         auto entry = Anew(alloc, BufferBuilderInt16, clue, value);
-        builder.list = builder.list->Prepend(entry, alloc);
+        PrependNode(builder, entry);
         if (entryOut)
         {
             *entryOut = entry;
@@ -737,7 +747,7 @@ public:
     uint32 PrependInt32(BufferBuilderList & builder, LPCWSTR clue, int value, BufferBuilderInt32 ** entryOut = nullptr)
     {
         auto entry = Anew(alloc, BufferBuilderInt32, clue, value);
-        builder.list = builder.list->Prepend(entry, alloc);
+        PrependNode(builder, entry);
         if (entryOut)
         {
             *entryOut = entry;
@@ -748,7 +758,7 @@ public:
     uint32 PrependConstantInt16(BufferBuilderList & builder, LPCWSTR clue, int16 value, ConstantSizedBufferBuilderOf<int16> ** entryOut = nullptr)
     {
         auto entry = Anew(alloc, ConstantSizedBufferBuilderOf<int16>, clue, value);
-        builder.list = builder.list->Prepend(entry, alloc);
+        PrependNode(builder, entry);
         if (entryOut)
         {
             *entryOut = entry;
@@ -759,7 +769,7 @@ public:
     uint32 PrependConstantInt32(BufferBuilderList & builder, LPCWSTR clue, int value, ConstantSizedBufferBuilderOf<int> ** entryOut = nullptr)
     {
         auto entry = Anew(alloc, ConstantSizedBufferBuilderOf<int>, clue, value);
-        builder.list = builder.list->Prepend(entry, alloc);
+        PrependNode(builder, entry);
         if (entryOut)
         {
             *entryOut = entry;
@@ -770,7 +780,7 @@ public:
     uint32 PrependConstantInt64(BufferBuilderList & builder, LPCWSTR clue, int64 value, ConstantSizedBufferBuilderOf<int64> ** entryOut = nullptr)
     {
         auto entry = Anew(alloc, ConstantSizedBufferBuilderOf<int64>, clue, value);
-        builder.list = builder.list->Prepend(entry, alloc);
+        PrependNode(builder, entry);
         if (entryOut)
         {
             *entryOut = entry;
@@ -781,7 +791,7 @@ public:
     uint32 PrependByte(BufferBuilderList & builder, LPCWSTR clue, byte value)
     {
         auto entry = Anew(alloc, BufferBuilderByte, clue, value);
-        builder.list = builder.list->Prepend(entry, alloc);
+        PrependNode(builder, entry);
         return sizeof(byte);
     }
 
@@ -798,21 +808,21 @@ public:
     uint32 PrependFloat(BufferBuilderList & builder, LPCWSTR clue, float value)
     {
         auto entry = Anew(alloc, BufferBuilderFloat, clue, value);
-        builder.list = builder.list->Prepend(entry, alloc);
+        PrependNode(builder, entry);
         return sizeof(float);
     }
 
     uint32 PrependDouble(BufferBuilderList & builder, LPCWSTR clue, double value)
     {
         auto entry = Anew(alloc, BufferBuilderDouble, clue, value);
-        builder.list = builder.list->Prepend(entry, alloc);
+        PrependNode(builder, entry);
         return sizeof(double);
     }
 
     uint32 PrependSIMDValue(BufferBuilderList & builder, LPCWSTR clue, SIMDValue value)
     {
         auto entry = Anew(alloc, BufferBuilderSIMD, clue, value);
-        builder.list = builder.list->Prepend(entry, alloc);
+        PrependNode(builder, entry);
         return sizeof(SIMDValue);
     }
 
@@ -873,7 +883,7 @@ public:
     uint32 Prepend(BufferBuilderList & builder, LPCWSTR clue, T * t)
     {
         auto block = Anew(alloc, BufferBuilderRaw, clue, sizeof(serialization_alignment T), (const byte*)t);
-        builder.list = builder.list->Prepend(block, alloc);
+        PrependNode(builder, block);
         return sizeof(serialization_alignment T);
     }
 
@@ -889,7 +899,7 @@ public:
         SListCounted<AuxRecord> auxRecords(alloc);
 
         auto finalSize = Anew(alloc, BufferBuilderInt32, _u("Final Byte Code Size"), 0); // Initially set to zero
-        builder.list = builder.list->Prepend(finalSize, alloc);
+        PrependNode(builder, finalSize);
 
         ByteCodeReader reader;
         reader.Create(function);
@@ -905,7 +915,7 @@ public:
                 if (!GenerateByteCodeForNative())
                 {
                     auto block = Anew(alloc, BufferBuilderRaw, clue, byteCount, (const byte*)opStart);
-                    builder.list = builder.list->Prepend(block, alloc);
+                    PrependNode(builder, block);
                     size += byteCount;
                 }
             }
@@ -988,7 +998,7 @@ public:
         SListCounted<AuxRecord> auxRecords(alloc);
 
         auto finalSize = Anew(alloc, BufferBuilderInt32, _u("Final Byte Code Size"), 0); // Initially set to zero
-        builder.list = builder.list->Prepend(finalSize, alloc);
+        PrependNode(builder, finalSize);
 
         ByteCodeReader reader;
         reader.Create(function);
@@ -1004,7 +1014,7 @@ public:
                 if (!GenerateByteCodeForNative())
                 {
                     auto block = Anew(alloc, BufferBuilderRaw, clue, byteCount, (const byte*) opStart);
-                    builder.list = builder.list->Prepend(block, alloc);
+                    PrependNode(builder, block);
                     size += byteCount;
                 }
             }
@@ -1319,7 +1329,7 @@ public:
             typedef serialization_alignment SerializedVarArray T;
             T header(offset, isVarCount, count);
             auto block = Anew(alloc, ConstantSizedBufferBuilderOf<T>, _u("Var Array"), header);
-            builder.list = builder.list->Prepend(block, alloc);
+            PrependNode(builder, block);
 
             for (int i=0;i<count; i++)
             {
@@ -1351,7 +1361,7 @@ public:
             typedef serialization_alignment SerializedIntArray T;
             T header(offset, count);
             auto block = Anew(alloc, ConstantSizedBufferBuilderOf<T>, _u("Int Array"), header);
-            builder.list = builder.list->Prepend(block, alloc);
+            PrependNode(builder, block);
 
             for (int i=0;i<count; i++)
             {
@@ -1373,7 +1383,7 @@ public:
             typedef serialization_alignment SerializedFloatArray T;
             T header(offset, count);
             auto block = Anew(alloc, ConstantSizedBufferBuilderOf<T>, _u("Float Array"), header);
-            builder.list = builder.list->Prepend(block, alloc);
+            PrependNode(builder, block);
 
             for (int i=0;i<count; i++)
             {
@@ -1393,7 +1403,7 @@ public:
             typedef serialization_alignment SerializedPropertyIdArray T;
             T header(offset, propIds->count, extraSlots, propIds->hadDuplicates, propIds->has__proto__);
             auto block = Anew(alloc, ConstantSizedBufferBuilderOf<T>, _u("Property Id Array"), header);
-            builder.list = builder.list->Prepend(block, alloc);
+            PrependNode(builder, block);
 
             for (uint32 i=0; i<propIds->count; i++)
             {
@@ -1419,7 +1429,7 @@ public:
             typedef serialization_alignment SerializedFuncInfoArray T;
             T header(offset, funcInfos->count);
             auto block = Anew(alloc, ConstantSizedBufferBuilderOf<T>, _u("Funcinfo Array"), header);
-            builder.list = builder.list->Prepend(block, alloc);
+            PrependNode(builder, block);
 
             for (uint32 i=0; i<funcInfos->count; i++)
             {
@@ -1932,7 +1942,7 @@ public:
     uint32 PrependStruct(BufferBuilderList & builder, LPCWSTR clue, TStructType * value)
     {
         auto entry = Anew(alloc, ConstantSizedBufferBuilderOf<TStructType>, clue, *value);
-        builder.list = builder.list->Prepend(entry, alloc);
+        PrependNode(builder, entry);
 
         return sizeof(serialization_alignment TStructType);
     }
@@ -2437,9 +2447,9 @@ public:
                 else
                 {
                     auto nestedFunctionBuilder = Anew(alloc, BufferBuilderList, _u("Nested Function"));
-                    nestedBodyList->list = nestedBodyList->list->Prepend(nestedFunctionBuilder, alloc);
+                    PrependNode(*nestedBodyList, nestedFunctionBuilder);
                     auto offsetToNested = Anew(alloc, BufferBuilderRelativeOffset, _u("Offset To Nested Function"), nestedFunctionBuilder);
-                    builder.list = builder.list->Prepend(offsetToNested, alloc);
+                    PrependNode(builder, offsetToNested);
                     AddFunction(*nestedFunctionBuilder, nestedFunction->GetParseableFunctionInfo(), srcInfo, cache);
                 }
             }
@@ -2448,7 +2458,7 @@ public:
             PrependInt32(builder, _u("End Function Body"), magicEndOfFunctionBody);
 #endif
 
-            builder.list = builder.list->Prepend(nestedBodyList, alloc);
+            PrependNode(builder, nestedBodyList);
         }
         else
         {
@@ -2458,7 +2468,7 @@ public:
         }
 
         // Reverse to put prepended items in correct order
-        builder.list = builder.list->ReverseCurrentList();
+        ReverseList(builder);
         PrependStruct<SerializedFieldList>(builder, _u("Serialized Field List"), &definedFields);
 
         return S_OK;
@@ -2477,7 +2487,7 @@ public:
         PrependInt32(builder, _u("ScopeInfo symbol count"), scopeInfo->symbolCount, &startOfScopeInfo);
 
         BufferBuilderRelativeOffset* offsetToScopeInfo = Anew(alloc, BufferBuilderRelativeOffset, _u("Offset To ScopeInfo"), startOfScopeInfo);
-        this->scopeInfoRelativeOffsets.list = this->scopeInfoRelativeOffsets.list->Prepend(offsetToScopeInfo, alloc);
+        PrependNode(this->scopeInfoRelativeOffsets, offsetToScopeInfo);
 
         FunctionInfo* functionInfo = scopeInfo->functionInfo;
         uint relativeFunctionId = 0;
@@ -2537,7 +2547,7 @@ public:
         {
             // Prepend an int32 here as a placeholder in case we need to add more bytes into builder for the parent
             auto entry = Anew(alloc, BufferBuilderInt32, _u("ScopeInfo parent LocalId"), InvalidLocalScopeInfoId);
-            builder.list = builder.list->Prepend(entry, alloc);
+            PrependNode(builder, entry);
 
             // If we were not passed a valid pointer id, try and look it up in the map
             if (parentId == InvalidLocalScopeInfoId)

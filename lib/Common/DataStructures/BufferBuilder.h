@@ -243,14 +243,14 @@ namespace Js
         uint32 FixOffset(uint32 offset) override
         {
             this->offset = offset;
-            return list->Accumulate(offset,[](uint32 size, BufferBuilder * builder)->uint32 {
+            return regex::ImmutableList<BufferBuilder*>::Accumulate(list, offset, [](uint32 size, BufferBuilder * builder)->uint32 {
                 return builder->FixOffset(size);
             });
         }
 
         void Write(__in_bcount(bufferSize) byte * buffer, _In_ uint32 bufferSize) const
         {
-            return list->Iterate([&](BufferBuilder * builder) {
+            regex::ImmutableList<BufferBuilder*>::Iterate(list, [&](BufferBuilder * builder) {
                 builder->Write(buffer, bufferSize);
             });
         }

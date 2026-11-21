@@ -20,6 +20,16 @@ namespace regex
 
     public:
         // Delete all the nodes in the list (if any).
+        static void FreeList(ImmutableList<T> * list, ArenaAllocator * a)
+        {
+            while (!IsEmpty(list))
+            {
+                auto nextToDelete = list->next;
+                Adelete(a, list);
+                list = nextToDelete;
+            }
+        }
+
         void FreeList(ArenaAllocator * a)
         {
             if (this == nullptr)
@@ -29,14 +39,52 @@ namespace regex
 
             auto nextToDelete = this->next;
             Adelete(a, this);
-            nextToDelete->FreeList(a);
+            FreeList(nextToDelete, a);
+        }
+
+        // Info:        Return a list with the given value prepended to list (null-safe).
+        // Parameters:  list - the list (may be Empty() / nullptr)
+        //              value - the value to prepend
+        static ImmutableList<T> * Prepend(ImmutableList<T> * list, T value, ArenaAllocator * a)
+        {
+            return Anew(a, ImmutableList, value, list);
         }
 
         // Info:        Return a list with the given value prepended to this one.
         // Parameters:  value - the value to prepend
         ImmutableList<T> * Prepend(T value, ArenaAllocator * a)
         {
-            return Anew(a, ImmutableList, value, this);
+            return Prepend(this, value, a);
+        }
+
+        // Info:        Return a list with the given value appended to list <Note this modifies existing list>
+        //              It is required that the tail passed is empty if list is empty otherwise its the last node of list
+        static ImmutableList<T> * Append(ImmutableList<T> * list, T value, ArenaAllocator * a, ImmutableList<T> **tail)
+        {
+#if DBG
+            Assert(tail != nullptr);
+            Assert((IsEmpty(list) && IsEmpty(*tail)) || IsEmpty((*tail)->next));
+
+            if (!IsEmpty(list))
+            {
+                auto current = list;
+                while(!IsEmpty(current->next))
+                {
+                    current = current->next;
+                }
+                Assert(current == (*tail));
+            }
+#endif
+
+            if (IsEmpty(list))
+            {
+                *tail = Anew(a, ImmutableList, value, ImmutableList<T>::Empty());
+                return *tail;
+            }
+
+            (*tail)->next = Anew(a, ImmutableList, value, ImmutableList<T>::Empty());
+            *tail = (*tail)->next;
+            return list;
         }
 
         // Info:        Return a list with the given value appended to this one <Note this modifies existing list>
@@ -45,30 +93,7 @@ namespace regex
         //              tail - last node of the new list
         ImmutableList<T> * Append(T value, ArenaAllocator * a, ImmutableList<T> **tail)
         {
-#if DBG
-            Assert(tail != nullptr);
-            Assert((this->IsEmpty() && (*tail)->IsEmpty()) || (*tail)->next->IsEmpty());
-
-            if (!this->IsEmpty())
-            {
-                auto current = this;
-                while(!current->next->IsEmpty())
-                {
-                    current = current->next;
-                }
-                Assert(current == (*tail));
-            }
-#endif
-
-            if (IsEmpty())
-            {
-                *tail = Anew(a, ImmutableList, value, ImmutableList<T>::Empty());
-                return *tail;
-            }
-
-            (*tail)->next =  Anew(a, ImmutableList, value, ImmutableList<T>::Empty());
-            *tail = (*tail)->next;
-            return this;
+            return Append(this, value, a, tail);
         }
 
         // Info:        Return a list with the given array prepended to this one.
@@ -82,11 +107,22 @@ namespace regex
             // Using Append here instead of prepend so that we dont need to make another pass just to get the tail and attach the current list at the end of array list
             auto out = ImmutableList<T>::Empty();
             auto tail = out;
-            out = out->AppendArrayToCurrentList(arr, count, a, &tail);
+            out = AppendArrayToList(out, arr, count, a, &tail);
 
-            Assert(!tail->IsEmpty());
-            Assert(tail->next->IsEmpty());
+            Assert(!IsEmpty(tail));
+            Assert(IsEmpty(tail->next));
             tail->next = this;
+            return out;
+        }
+
+        // Info:        Return the list which is resulted by appending array to list <Note this modifies existing list>
+        static ImmutableList<T> * AppendArrayToList(ImmutableList<T> * list, T * arr, size_t count, ArenaAllocator * a, ImmutableList<T> **tail)
+        {
+            auto out = list;
+            for(size_t i=0; i<count; i++)
+            {
+                out = Append(out, arr[i], a, tail);
+            }
             return out;
         }
 
@@ -97,12 +133,7 @@ namespace regex
         //              tail - last node of the new list
         ImmutableList<T> * AppendArrayToCurrentList(T * arr, size_t count, ArenaAllocator * a, ImmutableList<T> **tail)
         {
-            auto out = this;
-            for(size_t i=0; i<count; i++)
-            {
-                out = out->Append(arr[i],a,tail);
-            }
-            return out;
+            return AppendArrayToList(this, arr, count, a, tail);
         }
 
         // Info:        Return a list with the given list appended to this one <Note this modifies existing lists>
@@ -111,41 +142,41 @@ namespace regex
         //              tail - optional end ptr so we dont need to traverse the list to find the tail node
         ImmutableList<T> * AppendListToCurrentList(ImmutableList<T> * list, ImmutableList<T> * tail = ImmutableList<T>::Empty()) // TODO : figure out all the tail scenarios
         {
-            if (list->IsEmpty())
+            if (IsEmpty(list))
             {
                 return this;
             }
 
             auto out = this;
-            if (out->IsEmpty())
+            if (IsEmpty(out))
             {
                 return list;
             }
 
-            if (tail->IsEmpty())
+            if (IsEmpty(tail))
             {
                 // We dont have tail node, find it
                 tail = this;
                 auto current = this;
-                while(!current->IsEmpty())
+                while(!IsEmpty(current))
                 {
                     tail = current;
                     current = current->next;
                 }
-                Assert(tail->next->IsEmpty());
+                Assert(IsEmpty(tail->next));
             }
 #if DBG
             else
             {
                 auto current = this;
-                while(!current->next->IsEmpty())
+                while(!IsEmpty(current->next))
                 {
                     current = current->next;
                 }
                 Assert(current == tail);
             }
 #endif
-            Assert(!tail->IsEmpty() && tail->next->IsEmpty());
+            Assert(!IsEmpty(tail) && IsEmpty(tail->next));
             tail->next = list;
             return out;
         }
@@ -158,9 +189,9 @@ namespace regex
             auto out = ImmutableList<TOut>::Empty();
             auto tail = out;
             auto current = this;
-            while(!current->IsEmpty())
+            while(!IsEmpty(current))
             {
-                out = out->Append(f(current->First()), a, &tail);
+                out = ImmutableList<TOut>::Append(out, f(current->First()), a, &tail);
                 current = current->next;
             }
             return out;
@@ -172,7 +203,7 @@ namespace regex
         ImmutableList<T> * SelectInPlace(F f)
         {
             auto current = this;
-            while(!current->IsEmpty())
+            while(!IsEmpty(current))
             {
                 current->value = f(current->First());
                 current = current->next;
@@ -196,12 +227,12 @@ namespace regex
             auto out = ImmutableList<TOut>::Empty();
             auto tail = out;
             auto current = this;
-            while(!current->IsEmpty())
+            while(!IsEmpty(current))
             {
                 auto result = f(current->First());
                 if (result!=nullptr)
                 {
-                    out = out->Append(result, a, &tail);
+                    out = ImmutableList<TOut>::Append(out, result, a, &tail);
                 }
                 current = current->next;
             }
@@ -221,17 +252,26 @@ namespace regex
             return reinterpret_cast<ImmutableList<TOut>*>(this);
         }
 
+        // Info:        Call function f for each element of list (null-safe)
+        // Parameters:  list - the list (may be Empty() / nullptr)
+        //              f - the function to call
+        template<class F>
+        static void Iterate(ImmutableList<T> * list, F f)
+        {
+            auto current = list;
+            while(!IsEmpty(current))
+            {
+                f(current->First());
+                current = current->next;
+            }
+        }
+
         // Info:        Call function f for each element of the list
         // Parameters:  f - the function to call
         template<class F>
         void Iterate(F f)
         {
-            auto current = this;
-            while(!current->IsEmpty())
-            {
-                f(current->First());
-                current = current->next;
-            }
+            Iterate(this, f);
         }
 
         // Info:        Call function f for each element of the list with an index for each
@@ -241,7 +281,7 @@ namespace regex
         void IterateWhile(F f)
         {
             auto current = this;
-            while(!current->IsEmpty())
+            while(!IsEmpty(current))
             {
                 bool shouldContinue = f(current->First());
                 if (!shouldContinue)
@@ -259,7 +299,7 @@ namespace regex
         {
             auto current = this;
             auto index = 0;
-            while(!current->IsEmpty())
+            while(!IsEmpty(current))
             {
                 f(index, current->First());
                 current = current->next;
@@ -315,7 +355,7 @@ namespace regex
         {
             auto en1 = this;
             auto en2 = e2;
-            while(!en1->IsEmpty() && !en2->IsEmpty())
+            while(!IsEmpty(en1) && !ImmutableList<T2>::IsEmpty(en2))
             {
                 f(en1->First(),en2->First());
                 en1 = en1->GetTail();
@@ -323,18 +363,28 @@ namespace regex
             }
         }
 
-        // Info:        Iterate over the elements of the enumerable and accumulate a result
-        // Parameters:  f - the function to call for each element
-        template <class TAccumulator, class F> TAccumulator Accumulate(TAccumulator seed, F f)
+        // Info:        Iterate over the elements of list and accumulate a result (null-safe)
+        // Parameters:  list - the list (may be Empty() / nullptr)
+        //              seed - initial accumulator value
+        //              f - the function to call for each element
+        template <class TAccumulator, class F>
+        static TAccumulator Accumulate(ImmutableList<T> * list, TAccumulator seed, F f)
         {
-            auto current = this;
+            auto current = list;
             auto accumulated = seed;
-            while(!current->IsEmpty())
+            while(!IsEmpty(current))
             {
                 accumulated = f(accumulated, current->value);
                 current = current->next;
             }
             return accumulated;
+        }
+
+        // Info:        Iterate over the elements of the enumerable and accumulate a result
+        // Parameters:  f - the function to call for each element
+        template <class TAccumulator, class F> TAccumulator Accumulate(TAccumulator seed, F f)
+        {
+            return Accumulate(this, seed, f);
         }
 
         // Info:        Sum the elements of the list using values returned from the given function
@@ -343,7 +393,7 @@ namespace regex
         {
             TSize sum = TSize();
             auto current = this;
-            while(!current->IsEmpty())
+            while(!IsEmpty(current))
             {
                 sum += f(current->value);
                 current = current->next;
@@ -357,7 +407,7 @@ namespace regex
         {
             auto current = this;
             auto stillTrue = true;
-            while(!current->IsEmpty() && stillTrue)
+            while(!IsEmpty(current) && stillTrue)
             {
                 stillTrue = stillTrue && f(current->value);
                 current = current->next;
@@ -365,25 +415,31 @@ namespace regex
             return stillTrue;
         }
 
-        // Info:        Return this list reversed
-        ImmutableList<T> * Reverse(ArenaAllocator * a)
+        // Info:        Return list reversed (null-safe)
+        static ImmutableList<T> * Reverse(ImmutableList<T> * list, ArenaAllocator * a)
         {
             auto out = ImmutableList<T>::Empty();
-            auto current = this;
-            while(!current->IsEmpty())
+            auto current = list;
+            while(!IsEmpty(current))
             {
-                out = out->Prepend(current->First(),a);
+                out = Prepend(out, current->First(), a);
                 current = current->next;
             }
             return out;
         }
 
-        // Info:        Return this list reversed <Reverses the current list>
-        ImmutableList<T> * ReverseCurrentList()
+        // Info:        Return this list reversed
+        ImmutableList<T> * Reverse(ArenaAllocator * a)
+        {
+            return Reverse(this, a);
+        }
+
+        // Info:        Return list reversed in-place (null-safe)
+        static ImmutableList<T> * ReverseCurrentList(ImmutableList<T> * list)
         {
             auto out = ImmutableList<T>::Empty();
-            auto current = this;
-            while(!current->IsEmpty())
+            auto current = list;
+            while(!IsEmpty(current))
             {
                 auto next = current->next;
                 current->next = out;
@@ -391,6 +447,12 @@ namespace regex
                 current = next;
             }
             return out;
+        }
+
+        // Info:        Return this list reversed <Reverses the current list>
+        ImmutableList<T> * ReverseCurrentList()
+        {
+            return ReverseCurrentList(this);
         }
 
         // Info:        Filter this list by removing the elements where function f returns false
@@ -401,12 +463,12 @@ namespace regex
             auto out = ImmutableList<T>::Empty();
             auto tail = out;
             auto current = this;
-            while(!current->IsEmpty())
+            while(!IsEmpty(current))
             {
                 auto head = current->First();
                 if (f(head))
                 {
-                    out = out->Append(head, a, &tail);
+                    out = Append(out, head, a, &tail);
                 }
                 current = current->next;
             }
@@ -421,12 +483,12 @@ namespace regex
             auto out = ImmutableList<T>::Empty();
             auto tail = out;
             auto current = this;
-            while(!current->IsEmpty())
+            while(!IsEmpty(current))
             {
                 auto head = current->First();
                 if (f(head))
                 {
-                    if (out->IsEmpty())
+                    if (IsEmpty(out))
                     {
                         // Need to add to the head
                         out = current;
@@ -434,7 +496,7 @@ namespace regex
                     else
                     {
                         // Add to the tail
-                        Assert(!tail->IsEmpty());
+                        Assert(!IsEmpty(tail));
                         tail->next = current;
                     }
                     tail = current;
@@ -442,7 +504,7 @@ namespace regex
                 current = current->next;
             }
 
-            if (!tail->IsEmpty())
+            if (!IsEmpty(tail))
             {
                 tail->next = ImmutableList<T>::Empty();
             }
@@ -458,12 +520,12 @@ namespace regex
             auto out = ImmutableList<TOut>::Empty();
             auto tail = out;
             auto current = this;
-            while(!current->IsEmpty())
+            while(!IsEmpty(current))
             {
                 auto head = current->First();
                 if (wf(head))
                 {
-                    out = out->Append(sf(current->First()), a, &tail);
+                    out = ImmutableList<TOut>::Append(out, sf(current->First()), a, &tail);
                 }
                 current = current->next;
             }
@@ -479,12 +541,12 @@ namespace regex
         {
             auto out = ImmutableList<T>::Empty();
             auto current = this;
-            while(!current->IsEmpty())
+            while(!IsEmpty(current))
             {
                 auto head = current->First();
                 if (f(head))
                 {
-                    if (out->IsEmpty())
+                    if (IsEmpty(out))
                     {
                         out = current;
                     }
@@ -497,7 +559,7 @@ namespace regex
                 current = current->next;
             }
 
-            if (out->IsEmpty())
+            if (IsEmpty(out))
             {
                 return nullptr;
             }
@@ -512,7 +574,7 @@ namespace regex
         {
             auto current = this;
             T * result = nullptr;
-            while(!current->IsEmpty())
+            while(!IsEmpty(current))
             {
                 auto head = current->First();
                 if (f(head))
@@ -532,7 +594,7 @@ namespace regex
         Option<T> WhereFirst(F f)
         {
             auto current = this;
-            while(!current->IsEmpty())
+            while(!IsEmpty(current))
             {
                 auto head = current->First();
                 if (f(head))
@@ -551,7 +613,7 @@ namespace regex
         {
             auto current = this;
             size_t count = 0;
-            while(!current->IsEmpty())
+            while(!IsEmpty(current))
             {
                 auto head = current->First();
                 if (f(head))
@@ -601,15 +663,15 @@ namespace regex
         // Info:        Return the first element
         T& First()
         {
-            Js::VerifyCatastrophic(!IsEmpty());
+            Js::VerifyCatastrophic(!IsEmpty(this));
             return value;
         }
 
         // Info:        Return the last item. Throw if there are none.
         T& Last()
         {
-            Js::VerifyCatastrophic(!IsEmpty());
-            if (next->IsEmpty())
+            Js::VerifyCatastrophic(!IsEmpty(this));
+            if (IsEmpty(next))
             {
                 return value;
             }
@@ -619,7 +681,7 @@ namespace regex
         // Info:        Return the nth item from the list. Throw if this list isn't long enough.
         T& Nth(size_t n)
         {
-            Js::VerifyCatastrophic(!IsEmpty());
+            Js::VerifyCatastrophic(!IsEmpty(this));
             if(n==0)
             {
                 return value;
@@ -661,18 +723,24 @@ namespace regex
             }
         }
 
-        // Info:        Return the size of the list
-        size_t Count()
+        // Info:        Return the size of list (null-safe)
+        static size_t Count(const ImmutableList<T> * list)
         {
             size_t count = 0;
-            auto current = this;
-            while(!current->IsEmpty())
+            auto current = list;
+            while(!IsEmpty(current))
             {
                 ++count;
                 current = current->next;
             }
 
             return count;
+        }
+
+        // Info:        Return the size of the list
+        size_t Count()
+        {
+            return Count(this);
         }
 
         // Info:        Return this list converted to an array in the heap. Get the size by calling Count().
@@ -691,7 +759,7 @@ namespace regex
 #pragma warning(pop)
                 current = current->next;
             }
-            Js::VerifyCatastrophic(current->IsEmpty());
+            Js::VerifyCatastrophic(IsEmpty(current));
             return result;
         }
 
@@ -755,6 +823,12 @@ namespace regex
 #define CheckEq(a, b) (a) == (b)
 #endif
 
+        // Info:        Return true if the list is empty (null-safe).
+        static bool IsEmpty(const ImmutableList<T> * list)
+        {
+            return list == Empty();
+        }
+
         // Info:        Return true if the list is empty.
         bool IsEmpty()
         {
@@ -779,18 +853,18 @@ namespace regex
             auto out = ImmutableList<ImmutableList<T>*>::Empty();
 
             auto currentIn = this;
-            while(!currentIn->IsEmpty())
+            while(!IsEmpty(currentIn))
             {
                 auto currentOut = out;
                 bool found = false;
-                while(!currentOut->IsEmpty())
+                while(!ImmutableList<ImmutableList<T>*>::IsEmpty(currentOut))
                 {
                     ImmutableList<T>* currentOutValue = currentOut->First();
 
                     if (equals(currentOutValue->First(),currentIn->value))
                     {
                         found = true;
-                        currentOut->First() = currentOutValue->Prepend(currentIn->First(),a);
+                        currentOut->First() = Prepend(currentOutValue, currentIn->First(), a);
                         break;
                     }
 
@@ -798,7 +872,7 @@ namespace regex
                 }
                 if (!found)
                 {
-                    out = out->Prepend(OfSingle(currentIn->value,a),a);
+                    out = ImmutableList<ImmutableList<T>*>::Prepend(out, OfSingle(currentIn->value, a), a);
                 }
                 currentIn = currentIn->next;
             }
@@ -813,7 +887,7 @@ namespace regex
         {
             auto out = ImmutableList<ImmutableList<T>*>::Empty();
             auto tail = out;
-            if(!IsEmpty())
+            if(!IsEmpty(this))
             {
                 auto current = this;
                 auto set = current;
@@ -822,18 +896,18 @@ namespace regex
                 {
                     if (!equals(current->First(), set->First()))
                     {
-                        Assert(!set->IsEmpty() && !setTail->IsEmpty());
+                        Assert(!IsEmpty(set) && !IsEmpty(setTail));
                         setTail->next = nullptr;
-                        out = out->Append(set, a, &tail);
+                        out = ImmutableList<ImmutableList<T>*>::Append(out, set, a, &tail);
 
                         set = current;
                     }
                     setTail = current;
                     current = current->GetTail();
                 }
-                Assert(!set->IsEmpty() && !setTail->IsEmpty());
+                Assert(!IsEmpty(set) && !IsEmpty(setTail));
                 setTail->next = nullptr;
-                out = out->Append(set, a, &tail);
+                out = ImmutableList<ImmutableList<T>*>::Append(out, set, a, &tail);
             }
             return out;
         }

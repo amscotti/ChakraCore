@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 
@@ -90,16 +91,16 @@ public:
         m_data.id = id;
         m_data.typeId = typeId;
         m_data.typeSet = nullptr;
-        m_data.initialType = initialType->GetData();
+        m_data.initialType = initialType ? initialType->GetData() : nullptr;
         m_data.slotIndex = slotIndex;
         m_data.polymorphicInfoCount = 0;
         m_data.propertyId = propertyId;
         m_data.protoObjectAddr = protoObject;
-        m_data.propertyGuardValueAddr = (void*)propertyGuard->GetAddressOfValue();
-        m_data.ctorCache = ctorCache->GetData();
+        m_data.propertyGuardValueAddr = propertyGuard ? (void*)propertyGuard->GetAddressOfValue() : nullptr;
+        m_data.ctorCache = ctorCache ? ctorCache->GetData() : nullptr;
         m_data.fixedFieldCount = 1;
         m_data.fixedFieldInfoArraySize = 1;
-        m_data.fixedFieldInfoArray = fixedFieldInfoArray->GetRaw();
+        m_data.fixedFieldInfoArray = fixedFieldInfoArray ? fixedFieldInfoArray->GetRaw() : nullptr;
         m_data.polymorphicInfoArray = nullptr;
     }
 
@@ -124,17 +125,17 @@ public:
         m_data.id = id;
         m_data.typeId = typeId;
         m_data.typeSet = (EquivalentTypeSetIDL*)typeSet;
-        m_data.initialType = initialType->GetData();
+        m_data.initialType = initialType ? initialType->GetData() : nullptr;
         m_data.slotIndex = slotIndex;
         m_data.polymorphicInfoCount = polymorphicInfoCount;
         m_data.propertyId = propertyId;
         m_data.protoObjectAddr = protoObject;
-        m_data.propertyGuardValueAddr = (void*)propertyGuard->GetAddressOfValue();
-        m_data.ctorCache = ctorCache->GetData();
+        m_data.propertyGuardValueAddr = propertyGuard ? (void*)propertyGuard->GetAddressOfValue() : nullptr;
+        m_data.ctorCache = ctorCache ? ctorCache->GetData() : nullptr;
         m_data.fixedFieldCount = fixedFieldCount;
         m_data.fixedFieldInfoArraySize = fixedFieldCount > 0 ? fixedFieldCount : 1;
-        m_data.fixedFieldInfoArray = fixedFieldInfoArray->GetRaw();
-        m_data.polymorphicInfoArray = polymorphicInfoArray->GetRaw();
+        m_data.fixedFieldInfoArray = fixedFieldInfoArray ? fixedFieldInfoArray->GetRaw() : nullptr;
+        m_data.polymorphicInfoArray = polymorphicInfoArray ? polymorphicInfoArray->GetRaw() : nullptr;
     }
 
     void SetUsesAuxSlot(bool usesAuxSlot);
