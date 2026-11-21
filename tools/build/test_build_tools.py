@@ -1086,6 +1086,36 @@ class RegenSingleVariantGuardTests(unittest.TestCase):
                 self.assertEqual((js_dir / name).read_bytes(), b"original header\n",
                                  name + " restored byte-identical")
 
+    def test_single_variant_refusal_when_only_change_is_missing_header(self):
+        with tempfile.TemporaryDirectory(prefix="regen-guard-only-missing-test-") as tmp:
+            root = Path(tmp)
+            js_dir, stub = self.make_fixture(root)
+            # Generate baseline matching content for --jit first so the only
+            # difference on the guarded run is a deleted checked-in header.
+            jit_args = ["--skip-build", "--jit", "--binary=" + str(stub)]
+            prep = subprocess.run(
+                [sys.executable, str(root / "tools/regenByteCode.py")]
+                + jit_args + ["--allow-single-variant-write"],
+                capture_output=True, text=True, timeout=60)
+            self.assertEqual(prep.returncode, 0, prep.stdout + prep.stderr)
+            hdr64 = js_dir / "JsBuiltIn.bc.64b.h"
+            hdr32 = js_dir / "JsBuiltIn.bc.32b.h"
+            hdr64_bytes = hdr64.read_bytes()
+            hdr32.unlink()
+            self.assertFalse(hdr32.exists())
+
+            proc = subprocess.run(
+                [sys.executable, str(root / "tools/regenByteCode.py")] + jit_args,
+                capture_output=True, text=True, timeout=60)
+            self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+            self.assertIn("REFUSED", proc.stdout + proc.stderr)
+            self.assertFalse(hdr32.exists(),
+                             "refused --jit run must delete newly created missing header")
+            self.assertEqual(hdr64.read_bytes(), hdr64_bytes)
+            for name in ("JsBuiltIn.nojit.bc.64b.h", "JsBuiltIn.nojit.bc.32b.h"):
+                self.assertEqual((js_dir / name).read_bytes(), b"original header\n",
+                                 name + " untouched")
+
 
 class RegenGuidPathTests(unittest.TestCase):
     """The GUID mint path (swarm-trie mint-path fix, must-before-Linux): the

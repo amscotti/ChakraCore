@@ -9234,40 +9234,50 @@ LowererMD::GenerateFastInlineBuiltInMathFloorCeil(IR::Instr* instr)
     IR::LabelInstr * bailoutLabel = IR::LabelInstr::New(Js::OpCode::Label, this->m_func, true);;
     bool sharedBailout = (instr->GetBailOutInfo()->bailOutInstr != instr) ? true : false;
 
-    // MSR FPSR, xzr
-    IR::Instr* setFPSRInstr = IR::Instr::New(Js::OpCode::MSR_FPSR, instr->m_func);
-    setFPSRInstr->SetSrc1(IR::RegOpnd::New(nullptr, RegZR, TyUint32, instr->m_func));
-    instr->InsertBefore(setFPSRInstr);
-
-    // FMOV_GEN negZeroReg, floatOpnd (note this is done before the 0.5 add below)
+    // FMOV_GEN negZeroReg, floatOpnd (captured before FCVTM/FCVTP)
     if (negZeroReg)
     {
         instr->InsertBefore(IR::Instr::New(Js::OpCode::FMOV_GEN, negZeroReg, floatOpnd, instr->m_func));
     }
 
+    // MSR FPSR, xzr
+    IR::Instr* setFPSRInstr = IR::Instr::New(Js::OpCode::MSR_FPSR, instr->m_func);
+    setFPSRInstr->SetSrc1(IR::RegOpnd::New(nullptr, RegZR, TyUint32, instr->m_func));
+    instr->InsertBefore(setFPSRInstr);
+
     // FCVTM/FCVTP intOpnd, floatOpnd
     IR::Opnd * intOpnd = IR::RegOpnd::New(TyInt32, this->m_func);
     instr->InsertBefore(IR::Instr::New((instr->m_opcode == Js::OpCode::InlineMathCeil) ? Js::OpCode::FCVTP : Js::OpCode::FCVTM, intOpnd, floatOpnd, instr->m_func));
 
-    // EOR negZeroReg, #0x8000000000000000
-    if (negZeroReg)
-    {
-        instr->InsertBefore(IR::Instr::New(Js::OpCode::EOR, negZeroReg, negZeroReg, IR::IntConstOpnd::New(0x8000000000000000ULL, IRType::TyInt64, this->m_func), instr->m_func));
-    }
-
-    // FCVTM would set FPSR.IOC (0th bit in FPSR) if the source cannot be represented within the destination register
+    // FCVTM/FCVTP would set FPSR.IOC (0th bit in FPSR) if the source cannot be represented within the destination register
 
     // MRS exceptReg, FPSR
     IR::Opnd * exceptReg = IR::RegOpnd::New(TyUint32, this->m_func);
     instr->InsertBefore(IR::Instr::New(Js::OpCode::MRS_FPSR, exceptReg, instr->m_func));
 
-    // CBZ negZeroReg, bailout
+    IR::LabelInstr* checkOverflowLabel = IR::LabelInstr::New(Js::OpCode::Label, this->m_func);
+
+    // CBNZ intOpnd, checkOverflowLabel
+    IR::BranchInstr * cbnzInstr = IR::BranchInstr::New(Js::OpCode::CBNZ, checkOverflowLabel, instr->m_func);
+    cbnzInstr->SetSrc1(intOpnd);
+    instr->InsertBefore(cbnzInstr);
+
     if (negZeroReg)
     {
-        IR::BranchInstr * cbzInstr = IR::BranchInstr::New(Js::OpCode::CBZ, bailoutLabel, instr->m_func);
-        cbzInstr->SetSrc1(negZeroReg);
-        instr->InsertBefore(cbzInstr);
+        // TBZ negZeroReg, #63, checkOverflowLabel. Any negative input yielding
+        // intOpnd == 0 (-0.0, or (-1.0, -0.0) under Math.ceil) must bail out
+        // to preserve -0; non-negative inputs yielding intOpnd == 0 still need
+        // the FPSR.IOC check below so +NaN falls into the bailout instead of
+        // wrongly returning 0.
+        IR::BranchInstr * tbzNegZeroInstr = IR::BranchInstr::New(Js::OpCode::TBZ, checkOverflowLabel, instr->m_func);
+        tbzNegZeroInstr->SetSrc1(negZeroReg);
+        tbzNegZeroInstr->SetSrc2(IR::IntConstOpnd::New(63, TyMachReg, instr->m_func));
+        instr->InsertBefore(tbzNegZeroInstr);
+
+        Lowerer::InsertBranch(LowererMD::MDUncondBranchOpcode, bailoutLabel, instr);
     }
+
+    instr->InsertBefore(checkOverflowLabel);
 
     // TBZ exceptReg, #0, done
     IR::BranchInstr * tbzInstr = IR::BranchInstr::New(Js::OpCode::TBZ, doneLabel, instr->m_func);
@@ -9277,7 +9287,7 @@ LowererMD::GenerateFastInlineBuiltInMathFloorCeil(IR::Instr* instr)
 
     IR::Opnd * dst = instr->UnlinkDst();
     instr->InsertAfter(doneLabel);
-    if(!sharedBailout)
+    if (!sharedBailout)
     {
         instr->InsertBefore(bailoutLabel);
     }

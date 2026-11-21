@@ -1669,4 +1669,9 @@
       <files>arm64_write_barrier_jit.js</files>
     </default>
   </test>
+  <test>
+    <default>
+      <files>arm64_math_floor_ceil_negzero.js</files>
+    </default>
+  </test>
 </regress-exe>

@@ -350,14 +350,16 @@ def self_test():
         ok, detail, _ = run_gcstress_leg("exitafter", [exit_after_walks], timeout=5.0, min_walks=2)
         bad += report("early rc=0 exit after walks is rejected", not ok, detail)
 
+        # Use SIGUSR1 rather than SIGSEGV so the stub dies with rc < 0 without
+        # triggering macOS CrashReporter Python-*.ips logs / crash dialogs.
         crash = write_stub(
             "crash.py",
             "import os, signal\n"
             "print('Initialization complete', flush=True)\n"
-            "os.kill(os.getpid(), signal.SIGSEGV)\n",
+            "os.kill(os.getpid(), signal.SIGUSR1)\n",
         )
         ok, detail, _ = run_gcstress_leg("crash", [crash], timeout=5.0, min_walks=2)
-        bad += report("crash SIGSEGV is rejected", not ok, detail)
+        bad += report("fatal signal SIGUSR1 is rejected", not ok, detail)
 
         fail_marker = write_stub(
             "marker.py",
