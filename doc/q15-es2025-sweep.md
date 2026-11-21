@@ -1,6 +1,6 @@
 # Track Q1.5: ES2025 Conformance Sweep III (`99.56%` Edition Conformance)
 
-> **Status:** **COMPLETED (`modernize/phase4`)** on macOS ARM64 (`267f9321c` code commit + this docs commit; Linux x64 revalidation queued in Track `G0-phase4`).
+> **Status:** **COMPLETED (`modernize/phase4`)** on macOS ARM64 (`267f9321c` code commit + `2731e69b7` docs receipt + follow-up doc-fix commit; Linux x64 revalidation queued in Track `G0-phase4`).
 > **Scope invariants:** `modernize/baseline` remains untouched at `1bf42d1f63e3f09b13ac782504b8cb59479890db`. Bytecode-header purity is preserved (`lib/Runtime/Base/JnDirectFields.h`, `lib/Runtime/InternalPropertyList.h`, `lib/Runtime/Library/InJavascript/Intl.js`, and `lib/Runtime/Library/InJavascript/JsBuiltIn*.bc.*.h` are completely unchanged vs. `modernize/baseline`, and `verify-bytecode` exits `0` in both `test` and `jit -Dwasm=true` profiles).
 
 ---
@@ -241,7 +241,7 @@ Run via `python3 tools/test262/refresh_baseline.py --binary "$PWD/out/jit/bin/ch
   - `built-ins/AsyncGeneratorPrototype/` (`+6` -> **`96/0`**), `built-ins/Function/internals/` (`+4` -> `derived-*` **`8/0`**), `built-ins/Function/prototype/` (`+6` -> `bind/` **`200/0`**)
   - `built-ins/Object/` (`+26` -> **`6,792/10`**): `assign`, `freeze`, `getOwnPropertyDescriptors`, `getOwnPropertyNames`, `internals`, `prototype/{__proto__,hasOwnProperty,setPrototypeOf*,toString}`, `seal`
   - `built-ins/Proxy/` (`+14` -> **`591/16`**), `built-ins/Reflect/` (`+6` -> **`306/0`**), `built-ins/TypedArray*` (`+4` -> **`4,326/10`** broad, `4,306/10` edition)
-  - `built-ins/Date/` (`+4` -> **`1,220/0`** edition, `1,220/16` broad w/ `Temporal`), `built-ins/JSON/` (`+2` -> **`332/0`**), `built-ins/Math/hypot/` (`+2` -> **`24/0`**), `built-ins/String/prototype/` (`+2`), `built-ins/decodeURIComponent/` (`+2` -> `decodeURI*` **`222/0`**)
+  - `test/built-ins/Date/` (`+4` -> **`1,172/0`** edition, `1,172/16` broad w/ `Temporal`) + `test/annexB/built-ins/Date/` (**`48/0`**) (**`1,220/0`** edition / `1,220/16` broad combined), `built-ins/JSON/` (`+2` -> **`332/0`**), `built-ins/Math/hypot/` (`+2` -> **`24/0`**), `built-ins/String/prototype/` (`+2`), `built-ins/decodeURIComponent/` (`+2` -> `decodeURI*` **`222/0`**)
   - `language/statements/for-await-of/` (`+22` -> **`2,431/0`**), `language/statements/for-of/` (`+16` -> `for-of/dstr/` **`1,095/0`**), `language/expressions/assignment/` (`+20` -> `assignment/dstr/` **`640/0`**)
   - `language/arguments-object/` (`+8` -> **`460/0`**), `language/expressions/{delete,function,generators,object,tagged-template,typeof}/` (`+12`), `language/module-code/` (`+5`: `early-new-target.js` `1` + `namespace/` `4`), `language/statements/{function,generators,with}/` (`+4` -> `with/set-mutable-binding-idref*` **`2/0`**), `language/types/reference/` (`+4` -> `put-value-prop-base-primitive*` **`4/0`**)
   - `annexB/` (`+10`: `Function/createdynfn-no-line-terminator-html-close-comment-body.js` `2`, `RegExp/prototype/{compile,Symbol.split}` `4`, `try/catch-redeclared-for-{in,of}-var.js` `4`)
@@ -289,12 +289,12 @@ Items explicitly left untouched in `Q1.5` (either conflicting with mandatory leg
 
 ---
 
-## 6. Full macOS ARM64 Certification Matrix (`267f9321c` + Final `HEAD`)
+## 6. Full macOS ARM64 Certification Matrix (`267f9321c` Code Commit + `2731e69b7` Docs Receipt / Doc-Fix)
 
 | Gate | Command / Scope | Result |
 |---|---|---|
-| Bytecode-header purity | `mise exec -- zig build verify-bytecode` & `-Dprofile=jit -Dwasm=true verify-bytecode` | **PASS** (exit `0` on `267f9321c` and final `HEAD`; `JnDirectFields.h`, `InternalPropertyList.h`, `Intl.js`, `JsBuiltIn*.bc.*.h` unchanged vs. `modernize/baseline`) |
-| StyleChecks | `STYLECHECK_BASE={origin/master,modernize/baseline}` `tools/StyleChecks/check_{eol,tabs,ascii,copyright}.sh` | **PASS** (`8/8` `NO PROBLEMS DETECTED` on `267f9321c` and final `HEAD`) |
+| Bytecode-header purity | `mise exec -- zig build verify-bytecode` & `-Dprofile=jit -Dwasm=true verify-bytecode` | **PASS** (exit `0` on `267f9321c`, `2731e69b7`, and follow-up doc-fix; `JnDirectFields.h`, `InternalPropertyList.h`, `Intl.js`, `JsBuiltIn*.bc.*.h` unchanged vs. `modernize/baseline`) |
+| StyleChecks | `STYLECHECK_BASE={origin/master,modernize/baseline}` `tools/StyleChecks/check_{eol,tabs,ascii,copyright}.sh` | **PASS** (`8/8` `NO PROBLEMS DETECTED` on `267f9321c`, `2731e69b7`, and follow-up doc-fix) |
 | Build & gate unit tests | `zig test tools/linux-gate-tests.zig`; `check-selftest`; `check-build-tools` | **PASS** (`9/9` Linux gate tests; `check-selftest` `pal-config 95/95` & negative-control self-tests PASS; **`98` tests OK**) |
 | `test` profile | `mise exec -- zig build check` | **PASS** (**`2094/0`** [`es7: 125/0`]; `check_smoke` PASS; `check_metadata` `18,571` `T` symbols `8/8` JsRT exports; `test-shared-basic` PASS) |
 | `debug-static` profile | `mise exec -- zig build -Dprofile=debug-static check` | **PASS** (**`2146/0`** [`es7: 125/0`]; `536` archive members; `62,449` `T` symbols `8/8` JsRT; `8/8` static native suites PASS; no dylib) |
@@ -304,4 +304,4 @@ Items explicitly left untouched in `Q1.5` (either conflicting with mandatory leg
 | `GCStress` & `Node-API` | `mise exec -- zig build check-gcstress && mise exec -- zig build check-nodeapi` | **PASS** (`GCStress`: `in-thread` `0.99s` / `concurrent` `0.76s`, `walks=2` each; `Node-API`: **`161`** allowlisted exports = `155` napi + `6` host) |
 | ASan (`profile=test` & `jit -Dwasm=true`) | `-Dsanitize=address check-sanitize` + `ASAN_OPTIONS=detect_leaks=0 ./out/sanitize-address/bin/ch -ForceJITLoopBody -maxinterpretcount:1 -CollectGarbage` (`5` `q15_*.js`) | **PASS** (`profile=test`: **`27/27`**; `jit -Dwasm=true`: **`29/29`**; **`5/5`** `q15_*.js` JIT/GC runs clean) |
 | UBSan (`profile=test` & `jit -Dwasm=true`, `halt_on_error=1`) | `UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1` `-Dsanitize=undefined check-sanitize` + `./out/sanitize-undefined/bin/ch -ForceJITLoopBody -maxinterpretcount:1 -CollectGarbage` (`5` `q15_*.js`) | **PASS** (`profile=test`: **`27/27`**; `jit -Dwasm=true`: **`29/29`**; **`5/5`** `q15_*.js` JIT/GC runs clean) |
-| Clean rebuild & package | Clean non-sanitized `zig build -Dprofile=jit -Dwasm=true` + `zig build` + `zig build check-package` | **PASS** (`267f9321c`: `chakracore-267f9321c-darwin-arm64.tar.gz`, **`5,483,568`** bytes, `sha256: e3fe0e12ea6f53c42b5cdac4386e94500d1c6679bd37bfd1aea8608504a393bb`, `VERIFY PASS`, `ALL PACKAGE TESTS PASSED SUCCESSFULLY!`; re-verified on final docs `HEAD`) |
+| Clean rebuild & package | Clean non-sanitized `zig build -Dprofile=jit -Dwasm=true` + `zig build` + `zig build check-package` | **PASS** (code commit `267f9321c`: `chakracore-267f9321c-darwin-arm64.tar.gz`, **`5,483,568`** bytes, `sha256: e3fe0e12ea6f53c42b5cdac4386e94500d1c6679bd37bfd1aea8608504a393bb`; docs commit `2731e69b7`: `chakracore-2731e69b7-darwin-arm64.tar.gz`, **`5,483,565`** bytes, `sha256: 7ad19282f8de34f60ea06adb570b19a6c3961f39b1cd81c6e2b981f1e1e0e5dc`; both `VERIFY PASS`, `ALL PACKAGE TESTS PASSED SUCCESSFULLY!`; follow-up doc-fix touches `doc/` only) |
