@@ -1311,9 +1311,6 @@ using namespace Js;
         return JavascriptFunction::CallFunction<true>(this, this->GetEntryPoint(), args);
     }
 
-    template Var JavascriptFunction::CallFunction<true>(RecyclableObject* function, JavascriptMethod entryPoint, Arguments args, bool useLargeArgCount);
-    template Var JavascriptFunction::CallFunction<false>(RecyclableObject* function, JavascriptMethod entryPoint, Arguments args, bool useLargeArgCount);
-
 #if _M_IX86
     extern "C" Var BreakSpeculation(Var passthrough)
     {
@@ -1491,7 +1488,7 @@ dbl_align:
     // clang fails to create the labels,
     // when __asm op is under a template function
     template <bool doStackProbe>
-    Var JavascriptFunction::CallFunction(RecyclableObject* function,
+    Var JavascriptFunction::CallFunctionRaw(RecyclableObject* function,
         JavascriptMethod entryPoint, Arguments args, bool useLargeArgCount)
     {
         return LocalCallFunction(function, entryPoint, args, doStackProbe, useLargeArgCount);
@@ -1499,7 +1496,7 @@ dbl_align:
 
 #elif _M_X64
     template <bool doStackProbe>
-    Var JavascriptFunction::CallFunction(RecyclableObject *function, JavascriptMethod entryPoint, Arguments args, bool useLargeArgCount)
+    Var JavascriptFunction::CallFunctionRaw(RecyclableObject *function, JavascriptMethod entryPoint, Arguments args, bool useLargeArgCount)
     {
         // compute size of stack to reserve and make sure we have enough stack.
         uint argCount = useLargeArgCount ? args.GetLargeArgCountWithExtraArgs() : args.GetArgCountWithExtraArgs();
@@ -1528,7 +1525,7 @@ dbl_align:
     }
 
     template <bool doStackProbe>
-    Var JavascriptFunction::CallFunction(RecyclableObject* function, JavascriptMethod entryPoint, Arguments args, bool useLargeArgCount)
+    Var JavascriptFunction::CallFunctionRaw(RecyclableObject* function, JavascriptMethod entryPoint, Arguments args, bool useLargeArgCount)
     {
         // compute size of stack to reserve and make sure we have enough stack.
         uint argCount = useLargeArgCount ? args.GetLargeArgCountWithExtraArgs() : args.GetArgCountWithExtraArgs();
@@ -1568,7 +1565,7 @@ dbl_align:
     }
 
     template <bool doStackProbe>
-    Var JavascriptFunction::CallFunction(RecyclableObject* function, JavascriptMethod entryPoint, Arguments args, bool useLargeArgCount)
+    Var JavascriptFunction::CallFunctionRaw(RecyclableObject* function, JavascriptMethod entryPoint, Arguments args, bool useLargeArgCount)
     {
         // compute size of stack to reserve and make sure we have enough stack.
         uint argCount = useLargeArgCount ? args.GetLargeArgCountWithExtraArgs() : args.GetArgCountWithExtraArgs();
@@ -1716,6 +1713,263 @@ dbl_align:
         return varResult;
     }
 #endif
+
+    static bool AdvanceByteCodeReader(ByteCodeReader& reader, Js::OpCode op, LayoutSize layoutSize)
+    {
+        Js::OpLayoutType nType = Js::OpCodeUtil::GetOpCodeLayout(op);
+        switch (layoutSize * Js::OpLayoutType::Count + nType)
+        {
+#define LAYOUT_TYPE(layout) \
+            case Js::OpLayoutType::layout: \
+                reader.layout(); \
+                return true;
+
+#define LAYOUT_SCHEMA(type, layout) \
+            case type##Layout * Js::OpLayoutType::Count + Js::OpLayoutType::layout: \
+                reader.layout##_##type(); \
+                return true;
+
+#define LAYOUT_TYPE_WMS(layout) \
+            LAYOUT_SCHEMA(Small, layout); \
+            LAYOUT_SCHEMA(Medium, layout); \
+            LAYOUT_SCHEMA(Large, layout);
+
+#define LAYOUT_TYPE_PROFILED_WMS(layout) \
+            LAYOUT_TYPE_WMS(Profiled##layout) \
+            LAYOUT_TYPE_WMS(layout)
+
+#include "ByteCode/LayoutTypes.h"
+#undef LAYOUT_SCHEMA
+
+            default:
+                return false;
+        }
+    }
+
+    static bool StatementSpanCanThrowUndecl(FunctionBody* body, uint32 byteCodeOffset, uint32 chkStart)
+    {
+        if (byteCodeOffset >= chkStart)
+        {
+            return false;
+        }
+
+        uint32 scanStart = byteCodeOffset;
+        uint32 scanEnd = chkStart;
+
+        if (SmallSpanSequence* seq = body->GetStatementMapSpanSequence())
+        {
+            SmallSpanSequenceIter iter;
+            seq->Reset(iter);
+            StatementData data;
+            uint32 count = seq->Count();
+            for (uint32 i = 0; i < count; i++)
+            {
+                if (!seq->Item((int)i, iter, data))
+                {
+                    break;
+                }
+                uint32 stmtBegin = (uint32)data.bytecodeBegin;
+                if (stmtBegin > byteCodeOffset)
+                {
+                    if (stmtBegin < scanEnd)
+                    {
+                        scanEnd = stmtBegin;
+                    }
+                    break;
+                }
+                scanStart = stmtBegin;
+            }
+        }
+        else if (FunctionBody::StatementMapList* maps = body->GetStatementMaps())
+        {
+            uint32 bestLen = UINT32_MAX;
+            for (int i = 0; i < maps->Count(); i++)
+            {
+                FunctionBody::StatementMap* map = maps->Item(i);
+                uint32 b = (uint32)map->byteCodeSpan.begin;
+                uint32 e = (uint32)map->byteCodeSpan.end;
+                if (b <= byteCodeOffset && byteCodeOffset <= e && (e - b) < bestLen)
+                {
+                    bestLen = e - b;
+                    scanStart = b;
+                    scanEnd = e < chkStart ? e : chkStart;
+                }
+            }
+        }
+
+        if (scanStart >= scanEnd)
+        {
+            return false;
+        }
+
+        ByteCodeReader reader;
+        reader.Create(body, scanStart);
+        while (reader.GetCurrentOffset() < scanEnd)
+        {
+            LayoutSize layoutSize;
+            Js::OpCode op = reader.ReadOp(layoutSize);
+            if (op == Js::OpCode::EndOfBlock)
+            {
+                break;
+            }
+            switch (op)
+            {
+                case Js::OpCode::ChkUndecl:
+                case Js::OpCode::RuntimeReferenceError:
+                case Js::OpCode::InlineRuntimeReferenceError:
+                case Js::OpCode::StSlotChkUndecl:
+                case Js::OpCode::StEnvSlotChkUndecl:
+                case Js::OpCode::StInnerSlotChkUndecl:
+                case Js::OpCode::StLocalSlotChkUndecl:
+                case Js::OpCode::StParamSlotChkUndecl:
+                case Js::OpCode::StLocalObjSlotChkUndecl:
+                case Js::OpCode::StParamObjSlotChkUndecl:
+                case Js::OpCode::StObjSlotChkUndecl:
+                case Js::OpCode::StInnerObjSlotChkUndecl:
+                case Js::OpCode::StEnvObjSlotChkUndecl:
+                    return true;
+                default:
+                    break;
+            }
+            if (!AdvanceByteCodeReader(reader, op, layoutSize))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    static bool IsDerivedClassConstructorExitUndecl(JavascriptFunction* throwingFunc, uint32 byteCodeOffset, bool isNative)
+    {
+        if (throwingFunc == nullptr || !throwingFunc->IsScriptFunction())
+        {
+            return false;
+        }
+
+        FunctionBody* body = throwingFunc->GetFunctionBody();
+        if (body == nullptr || !body->IsClassConstructor() || body->IsBaseClassConstructor())
+        {
+            return false;
+        }
+
+        ByteBlock* byteCode = body->GetByteCode();
+        if (byteCode == nullptr)
+        {
+            return false;
+        }
+
+        uint32 pos = byteCode->GetLength();
+        const byte* bytes = byteCode->GetBuffer();
+        if (pos == 0 || bytes == nullptr)
+        {
+            return false;
+        }
+
+        if (bytes[pos - 1] == (byte)Js::OpCode::EndOfBlock)
+        {
+            pos--;
+        }
+        if (pos == 0 || bytes[pos - 1] != (byte)Js::OpCode::Ret)
+        {
+            return false;
+        }
+        pos--;
+        if (pos >= 1 && bytes[pos - 1] == (byte)Js::OpCode::CommitScope)
+        {
+            pos--;
+        }
+
+        // Match the trailing ChkUndecl ReturnRegister(0) emitted by EmitClassConstructorEndCode.
+        uint32 chkStart = 0;
+        uint32 chkEnd = pos;
+        if (pos >= 2 && bytes[pos - 2] == (byte)Js::OpCode::ChkUndecl && bytes[pos - 1] == 0)
+        {
+            chkStart = pos - 2;
+        }
+        else if (pos >= 4 && bytes[pos - 4] == (byte)Js::OpCode::MediumLayoutPrefix && bytes[pos - 3] == (byte)Js::OpCode::ChkUndecl && bytes[pos - 2] == 0 && bytes[pos - 1] == 0)
+        {
+            chkStart = pos - 4;
+        }
+        else if (pos >= 6 && bytes[pos - 6] == (byte)Js::OpCode::LargeLayoutPrefix && bytes[pos - 5] == (byte)Js::OpCode::ChkUndecl && bytes[pos - 4] == 0 && bytes[pos - 3] == 0 && bytes[pos - 2] == 0 && bytes[pos - 1] == 0)
+        {
+            chkStart = pos - 6;
+        }
+        else
+        {
+            return false;
+        }
+
+        if (byteCodeOffset >= chkStart && byteCodeOffset < chkEnd)
+        {
+            return true;
+        }
+        if (!isNative)
+        {
+            return false;
+        }
+        return !StatementSpanCanThrowUndecl(body, byteCodeOffset, chkStart);
+    }
+
+    template <bool doStackProbe>
+    Var JavascriptFunction::CallCrossSiteNewFunction(RecyclableObject* function, JavascriptMethod entryPoint, Arguments args, bool useLargeArgCount)
+    {
+        ScriptContext* calleeContext = function->GetScriptContext();
+        try
+        {
+            return CallFunctionRaw<doStackProbe>(function, entryPoint, args, useLargeArgCount);
+        }
+        catch (const JavascriptException& err)
+        {
+            JavascriptExceptionObject* exceptionObject = err.GetAndClear();
+            ScriptContext* callerContext = calleeContext->GetThreadContext()->GetCallerScriptContextForCallee(calleeContext);
+            Var thrownObject = exceptionObject->GetThrownObject(nullptr);
+            if (callerContext != nullptr && callerContext != calleeContext && VarIs<JavascriptError>(thrownObject))
+            {
+                RecyclableObject* target = function;
+                while (target != nullptr && target->GetScriptContext() == calleeContext && VarIs<BoundFunction>(target))
+                {
+                    target = VarTo<BoundFunction>(target)->GetTargetFunction();
+                }
+
+                JavascriptFunction* targetFunc = VarIs<JavascriptFunction>(target) ? VarTo<JavascriptFunction>(target) : nullptr;
+                JavascriptFunction* throwingFunc = exceptionObject->GetFunction();
+                int32 errNum = (int32)JavascriptError::GetRuntimeError(VarTo<RecyclableObject>(thrownObject), nullptr);
+
+                if (errNum == JavascriptError::GetErrorNumberFromResourceID(JSERR_ClassDerivedConstructorInvalidReturnType) &&
+                    (throwingFunc == nullptr || throwingFunc == targetFunc))
+                {
+                    JavascriptError::ThrowTypeError(callerContext, JSERR_ClassDerivedConstructorInvalidReturnType);
+                }
+                else if (errNum == JavascriptError::GetErrorNumberFromResourceID(JSERR_UseBeforeDeclaration) &&
+                    targetFunc != nullptr &&
+                    throwingFunc == targetFunc)
+                {
+                    bool isNative = JavascriptFunction::IsNativeAddress(calleeContext, (void*)entryPoint) ||
+                                    JavascriptFunction::IsNativeAddress(throwingFunc->GetScriptContext(), (void*)throwingFunc->GetEntryPoint());
+                    if (IsDerivedClassConstructorExitUndecl(throwingFunc, exceptionObject->GetByteCodeOffset(), isNative))
+                    {
+                        JavascriptError::ThrowReferenceError(callerContext, JSERR_UseBeforeDeclaration);
+                    }
+                }
+            }
+            JavascriptExceptionOperators::DoThrow(exceptionObject, calleeContext);
+        }
+    }
+
+    template <bool doStackProbe>
+    Var JavascriptFunction::CallFunction(RecyclableObject* function, JavascriptMethod entryPoint, Arguments args, bool useLargeArgCount)
+    {
+        if ((args.Info.Flags & CallFlags_New) &&
+            CrossSite::IsThunk(function->GetEntryPoint()) &&
+            !CrossSite::IsThunk(entryPoint))
+        {
+            return CallCrossSiteNewFunction<doStackProbe>(function, entryPoint, args, useLargeArgCount);
+        }
+        return CallFunctionRaw<doStackProbe>(function, entryPoint, args, useLargeArgCount);
+    }
+
+    template Var JavascriptFunction::CallFunction<true>(RecyclableObject* function, JavascriptMethod entryPoint, Arguments args, bool useLargeArgCount);
+    template Var JavascriptFunction::CallFunction<false>(RecyclableObject* function, JavascriptMethod entryPoint, Arguments args, bool useLargeArgCount);
 
 #if defined(_M_ARM64) && defined(ENABLE_ASMJS)
     // ARM64 internal (wasm -> wasm / asm.js -> asm.js) calls, W3

@@ -139,7 +139,12 @@
     case OpCode::name: \
     { \
         PROCESS_READ_LAYOUT(name, Reg1, suffix); \
-        func(GetRegAllowStackVar(playout->R0)); \
+        Var aValue = GetRegAllowStackVar(playout->R0); \
+        if (this->scriptContext->IsUndeclBlockVar(aValue)) \
+        { \
+            m_reader.SetIP(ip); \
+        } \
+        func(aValue); \
         break; \
     }
 

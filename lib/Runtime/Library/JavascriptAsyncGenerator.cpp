@@ -319,9 +319,27 @@ void JavascriptAsyncGenerator::UnwrapValue(Var value, PendingState pendingState)
     this->pendingState = pendingState;
 
     auto* scriptContext = GetScriptContext();
-    auto* promise = JavascriptPromise::InternalPromiseResolve(value, scriptContext);
-    auto* unused = JavascriptPromise::UnusedPromiseCapability(scriptContext);
+    JavascriptPromise* promise = nullptr;
+    try
+    {
+        promise = JavascriptPromise::InternalPromiseResolve(value, scriptContext);
+    }
+    catch (const JavascriptException& err)
+    {
+        Var reason = err.GetAndClear()->GetThrownObject(nullptr);
+        this->pendingState = PendingState::None;
+        if (pendingState == PendingState::Yield)
+        {
+            RejectNext(reason);
+        }
+        else
+        {
+            ResumeCoroutine(reason, ResumeYieldKind::Throw);
+        }
+        return;
+    }
 
+    auto* unused = JavascriptPromise::UnusedPromiseCapability(scriptContext);
     JavascriptPromise::PerformPromiseThen(promise, unused, onFulfilled, onRejected, scriptContext);
 }
 

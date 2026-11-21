@@ -231,6 +231,10 @@ namespace Js
         static bool IsBuiltinProperty(Var objectWithProperty, PropertyIds propertyId);
 #endif
         private:
+            template <bool doStackProbe>
+            static Var CallFunctionRaw(RecyclableObject* obj, JavascriptMethod entryPoint, Arguments args, bool useLargeArgCount = false);
+            template <bool doStackProbe>
+            static Var CallCrossSiteNewFunction(RecyclableObject* function, JavascriptMethod entryPoint, Arguments args, bool useLargeArgCount);
             static int CallRootEventFilter(int exceptionCode, PEXCEPTION_POINTERS exceptionInfo);
     };
 

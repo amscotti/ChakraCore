@@ -478,6 +478,7 @@ namespace Js
 
     private :
         bool WillRejectionBeUnhandled();
+        static RecyclableObject* GetPromiseResolve(RecyclableObject* constructor, ScriptContext* scriptContext);
 
 #if ENABLE_TTD
     public:

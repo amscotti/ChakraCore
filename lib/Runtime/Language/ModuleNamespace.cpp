@@ -171,7 +171,17 @@ namespace Js
 
     BOOL ModuleNamespace::HasOwnProperty(PropertyId propertyId)
     {
-        return HasProperty(propertyId);
+        const Js::PropertyRecord* propertyRecord = GetScriptContext()->GetThreadContext()->GetPropertyName(propertyId);
+        if (propertyRecord->IsSymbol())
+        {
+            return this->DynamicObject::HasOwnProperty(propertyId);
+        }
+        if (!HasProperty(propertyId))
+        {
+            return FALSE;
+        }
+        Var value = nullptr;
+        return GetProperty(this, propertyId, &value, nullptr, GetScriptContext());
     }
 
     BOOL ModuleNamespace::IsConfigurable(PropertyId propertyId)
@@ -322,6 +332,15 @@ namespace Js
 
     BOOL ModuleNamespace::GetEnumerator(JavascriptStaticEnumerator * enumerator, EnumeratorFlags flags, ScriptContext* requestContext, EnumeratorCache * enumeratorCache)
     {
+        if (!(flags & EnumeratorFlags::EnumNonEnumerable) && sortedExportedNames != nullptr)
+        {
+            auto count = sortedExportedNames->Count();
+            for (decltype(count) i = 0; i < count; i++)
+            {
+                Var value = nullptr;
+                GetProperty(this, VarTo<JavascriptString>(sortedExportedNames->Item(i)), &value, nullptr, requestContext);
+            }
+        }
         ModuleNamespaceEnumerator* moduleEnumerator = ModuleNamespaceEnumerator::New(this, flags, requestContext, enumeratorCache);
         if (moduleEnumerator == nullptr)
         {

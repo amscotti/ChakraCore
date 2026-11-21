@@ -45,7 +45,7 @@ namespace Js
             type->SetPrototype(proto);
         }
 
-        int len = 0;
+        double len = 0.0;
         // If targetFunction is proxy, need to make sure that traps are called in right order as per 19.2.3.2 in RC#4 dated April 3rd 2015.
         // additionally need to get the correct length value for the boundFunctions' length property
         if (JavascriptOperators::HasOwnProperty(targetFunction, PropertyIds::length, scriptContext, nullptr) == TRUE)
@@ -53,7 +53,20 @@ namespace Js
             Var varLength;
             if (targetFunction->GetProperty(targetFunction, PropertyIds::length, &varLength, nullptr, scriptContext))
             {
-                len = JavascriptConversion::ToInt32(varLength, scriptContext);
+                if (TaggedNumber::Is(varLength))
+                {
+                    double targetLen = TaggedInt::Is(varLength)
+                        ? static_cast<double>(TaggedInt::ToInt32(varLength))
+                        : JavascriptNumber::GetValue(varLength);
+                    if (JavascriptNumber::IsPosInf(targetLen))
+                    {
+                        len = targetLen;
+                    }
+                    else if (!JavascriptNumber::IsNegInf(targetLen) && !JavascriptNumber::IsNan(targetLen))
+                    {
+                        len = JavascriptConversion::ToInteger(targetLen);
+                    }
+                }
             }
         }
         GetTypeHandler()->EnsureObjectReady(this);
@@ -84,10 +97,16 @@ namespace Js
         }
 
         // Reduce length number of bound args
-        len = len - this->count;
-        len = max(len, 0);
+        if (!JavascriptNumber::IsPosInf(len))
+        {
+            len = len - static_cast<double>(this->count);
+        }
+        if (!(len > 0.0))
+        {
+            len = 0.0;
+        }
 
-        SetPropertyWithAttributes(PropertyIds::length, TaggedInt::ToVarUnchecked(len), PropertyConfigurable, nullptr, PropertyOperation_None, SideEffects_None);
+        SetPropertyWithAttributes(PropertyIds::length, JavascriptNumber::ToVarIntCheck(len, scriptContext), PropertyConfigurable, nullptr, PropertyOperation_None, SideEffects_None);
     }
 
     BoundFunction* BoundFunction::New(ScriptContext* scriptContext, ArgumentReader args)

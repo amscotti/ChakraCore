@@ -189,16 +189,13 @@ namespace Js
         JavascriptExceptionObject* exception = nullptr;
         try
         {
-            // 4. Let iterator be GetIterator(iterable).
+            // 3. Let promiseResolve be GetPromiseResolve(C).
+            // 4. IfAbruptRejectPromise(promiseResolve, promiseCapability).
+            RecyclableObject* resolveFunc = GetPromiseResolve(constructorObject, scriptContext);
+
+            // 5. Let iterator be GetIterator(iterable).
             RecyclableObject* iterator = JavascriptOperators::GetIterator(iterable, scriptContext);
 
-            Var resolveVar = JavascriptOperators::GetProperty(constructorObject, Js::PropertyIds::resolve, scriptContext);
-            if (!JavascriptConversion::IsCallable(resolveVar))
-            {
-                JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedFunction);
-            }
-
-            RecyclableObject* resolveFunc = VarTo<RecyclableObject>(resolveVar);
             values = library->CreateArray(0);
 
             JavascriptOperators::DoIteratorStepAndValue(iterator, scriptContext, [&](Var next)
@@ -291,12 +288,7 @@ namespace Js
         try {
             // 3. Let promiseResolve be GetPromiseResolve(C).
             // 4. IfAbruptRejectPromise(promiseResolve, promiseCapability).
-            Var resolveVar = JavascriptOperators::GetProperty(constructor, Js::PropertyIds::resolve, scriptContext);
-            if (!JavascriptConversion::IsCallable(resolveVar))
-            {
-                JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedFunction);
-            }
-            promiseResolve = UnsafeVarTo<RecyclableObject>(resolveVar);
+            promiseResolve = GetPromiseResolve(constructor, scriptContext);
 
             // 5. Let iteratorRecord be GetIterator(iterable).
             // 6. IfAbruptRejectPromise(iteratorRecord, promiseCapability).
@@ -306,7 +298,8 @@ namespace Js
         catch (const JavascriptException& err)
         {
             JavascriptExceptionObject* exception = err.GetAndClear();
-            return JavascriptPromise::CreateRejectedPromise(exception->GetThrownObject(scriptContext), scriptContext);
+            TryRejectWithExceptionObject(exception, promiseCapability->GetReject(), scriptContext);
+            return promiseCapability->GetPromise();
         }
 
         // Abstract operation PerformPromiseAny
@@ -518,17 +511,14 @@ namespace Js
         JavascriptExceptionObject* exception = nullptr;
         try
         {
-            // 4. Let iterator be GetIterator(iterable).
+            // 3. Let promiseResolve be GetPromiseResolve(C).
+            // 4. IfAbruptRejectPromise(promiseResolve, promiseCapability).
+            RecyclableObject* resolveFunc = GetPromiseResolve(constructorObject, scriptContext);
+
+            // 5. Let iterator be GetIterator(iterable).
             RecyclableObject* iterator = JavascriptOperators::GetIterator(iterable, scriptContext);
 
             // Abstract operation PerformPromiseAllSettled
-            Var resolveVar = JavascriptOperators::GetProperty(constructorObject, Js::PropertyIds::resolve, scriptContext);
-            if (!JavascriptConversion::IsCallable(resolveVar))
-            {
-                JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedFunction);
-            }
-
-            RecyclableObject* resolveFunc = VarTo<RecyclableObject>(resolveVar);
             values = library->CreateArray(0);
 
             JavascriptOperators::DoIteratorStepAndValue(iterator, scriptContext, [&](Var next)
@@ -694,16 +684,12 @@ namespace Js
 
         try
         {
-            // 4. Let iterator be GetIterator(iterable).
+            // 3. Let promiseResolve be GetPromiseResolve(C).
+            // 4. IfAbruptRejectPromise(promiseResolve, promiseCapability).
+            RecyclableObject* resolveFunc = GetPromiseResolve(constructorObject, scriptContext);
+
+            // 5. Let iterator be GetIterator(iterable).
             RecyclableObject* iterator = JavascriptOperators::GetIterator(iterable, scriptContext);
-
-            Var resolveVar = JavascriptOperators::GetProperty(constructorObject, Js::PropertyIds::resolve, scriptContext);
-            if (!JavascriptConversion::IsCallable(resolveVar))
-            {
-                JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedFunction);
-            }
-
-            RecyclableObject* resolveFunc = VarTo<RecyclableObject>(resolveVar);
 
             JavascriptOperators::DoIteratorStepAndValue(iterator, scriptContext, [&](Var next)
             {
@@ -983,6 +969,17 @@ namespace Js
         return CreateResolvedPromise(value, scriptContext, constructor);
     }
 
+    RecyclableObject* JavascriptPromise::GetPromiseResolve(RecyclableObject* constructor, ScriptContext* scriptContext)
+    {
+        Var resolveVar = JavascriptOperators::GetProperty(constructor, Js::PropertyIds::resolve, scriptContext);
+        if (!JavascriptConversion::IsCallable(resolveVar))
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedFunction);
+        }
+
+        return VarTo<RecyclableObject>(resolveVar);
+    }
+
     // Promise.prototype.then as described in ES 2015 Section 25.4.5.3
     Var JavascriptPromise::EntryThen(RecyclableObject* function, CallInfo callInfo, ...)
     {
@@ -1135,7 +1132,7 @@ namespace Js
         Assert(JavascriptOperators::IsConstructor(thenFinallyFunction->GetConstructor()));
 
         // 6. Let promise be ? PromiseResolve(c, result)
-        Var promiseVar = CreateResolvedPromise(result, scriptContext, thenFinallyFunction->GetConstructor());
+        Var promiseVar = PromiseResolve(thenFinallyFunction->GetConstructor(), result, scriptContext);
 
         // 7. Let valueThunk be equivalent to a function that returns value
         // OR 7. Let thrower be equivalent to a function that throws reason
