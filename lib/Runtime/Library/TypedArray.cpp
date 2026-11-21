@@ -293,30 +293,49 @@ namespace Js
     {
         TypedArrayBase *newArr = nullptr;
 
-        DECLARE_TEMP_GUEST_ALLOCATOR(tempAlloc);
-
-        ACQUIRE_TEMP_GUEST_ALLOCATOR(tempAlloc, scriptContext, _u("Runtime"));
+        // RAII guard ensures the registered external guest arena is always
+        // released/unregistered even if IteratorToList, allocation, or SetItem throws.
+        struct GuestArenaScratch
         {
-            JsUtil::List<Var, ArenaAllocator>* tempList = IteratorToList(iterator, scriptContext, tempAlloc);
-
-            uint32 len = tempList->Count();
-            uint32 byteLen;
-
-            if (UInt32Math::Mul(len, elementSize, &byteLen))
+            ScriptContext* scriptContext;
+            TempGuestArenaAllocatorObject* tempGuest;
+            ArenaAllocator* alloc;
+            GuestArenaScratch(ScriptContext* sc)
+                : scriptContext(sc)
+                , tempGuest(sc->GetTemporaryGuestAllocator(_u("Runtime")))
+                , alloc(tempGuest->GetAllocator())
             {
-                JavascriptError::ThrowRangeError(scriptContext, JSERR_InvalidTypedArrayLength);
             }
-
-            ArrayBufferBase *arrayBuffer = scriptContext->GetLibrary()->CreateArrayBuffer(byteLen);
-            newArr = static_cast<TypedArrayBase*>(pfnCreateTypedArray(arrayBuffer, 0, len, scriptContext->GetLibrary(), false));
-
-            for (uint32 k = 0; k < len; k++)
+            ~GuestArenaScratch()
             {
-                Var kValue = tempList->Item(k);
-                newArr->SetItem(k, kValue);
+                if (tempGuest != nullptr)
+                {
+                    scriptContext->ReleaseTemporaryGuestAllocator(tempGuest);
+                }
             }
+            GuestArenaScratch(const GuestArenaScratch&) = delete;
+            GuestArenaScratch& operator=(const GuestArenaScratch&) = delete;
+        };
+
+        GuestArenaScratch scratch(scriptContext);
+        JsUtil::List<Var, ArenaAllocator>* tempList = IteratorToList(iterator, scriptContext, scratch.alloc);
+
+        uint32 len = tempList->Count();
+        uint32 byteLen;
+
+        if (UInt32Math::Mul(len, elementSize, &byteLen))
+        {
+            JavascriptError::ThrowRangeError(scriptContext, JSERR_InvalidTypedArrayLength);
         }
-        RELEASE_TEMP_GUEST_ALLOCATOR(tempAlloc, scriptContext);
+
+        ArrayBufferBase *arrayBuffer = scriptContext->GetLibrary()->CreateArrayBuffer(byteLen);
+        newArr = static_cast<TypedArrayBase*>(pfnCreateTypedArray(arrayBuffer, 0, len, scriptContext->GetLibrary(), false));
+
+        for (uint32 k = 0; k < len; k++)
+        {
+            Var kValue = tempList->Item(k);
+            newArr->SetItem(k, kValue);
+        }
 
         return newArr;
     }
@@ -378,11 +397,17 @@ namespace Js
                 }
                 else
                 {
-                    // Use GetIteratorFunction instead of GetIterator to check if it is the built-in array iterator
+                    // Use GetIteratorFunction instead of GetIterator to check if it is the built-in array iterator.
+                    // Only skip IteratorToList for contiguous, hole-free primitive arrays where reading
+                    // elements and converting values cannot mutate the source array.
                     RecyclableObject* iteratorFn = JavascriptOperators::GetIteratorFunction(firstArgument, scriptContext, true /* optional */);
+                    bool isDensePrimitiveArray = JavascriptArray::IsNonES5Array(firstArgument) &&
+                        !UnsafeVarTo<JavascriptArray>(firstArgument)->IsCrossSiteObject() &&
+                        (VarIs<JavascriptNativeIntArray>(firstArgument) || VarIs<JavascriptNativeFloatArray>(firstArgument)) &&
+                        !UnsafeVarTo<JavascriptArray>(firstArgument)->IsFillFromPrototypes();
                     if (iteratorFn != nullptr &&
                         (iteratorFn != scriptContext->GetLibrary()->EnsureArrayPrototypeValuesFunction() ||
-                            !JavascriptArray::IsNonES5Array(firstArgument) || JavascriptLibrary::ArrayIteratorPrototypeHasUserDefinedNext(scriptContext)))
+                            !isDensePrimitiveArray || JavascriptLibrary::ArrayIteratorPrototypeHasUserDefinedNext(scriptContext)))
                     {
                         Var iterator = scriptContext->GetThreadContext()->ExecuteImplicitCall(iteratorFn, Js::ImplicitCall_Accessor, [=]()->Js::Var
                         {
@@ -2393,9 +2418,16 @@ namespace Js
         }
         else // simple comparison when no user method provided
         {
-            // `<` treats -0 and +0 as equal. The spec's default comparator
-            // orders -0 first. Shared with TypedArray.prototype.sort; see doc/c2-s10.md.
-            return x < y;
+            if (x < y)
+            {
+                return true;
+            }
+            if (x == 0 && y == 0)
+            {
+                return JavascriptNumber::IsNegZero(static_cast<double>(x)) &&
+                    !JavascriptNumber::IsNegZero(static_cast<double>(y));
+            }
+            return false;
         }
     }
 
@@ -2516,8 +2548,15 @@ namespace Js
         }
         else // simple comparison when no user method is provided
         {
-            // `<` treats -0 and +0 as equal, matching the other float kinds.
-            return x < y;
+            if (x < y)
+            {
+                return true;
+            }
+            if (x == 0 && y == 0)
+            {
+                return JavascriptNumber::IsNegZero(x) && !JavascriptNumber::IsNegZero(y);
+            }
+            return false;
         }
     }
 

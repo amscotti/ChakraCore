@@ -476,6 +476,7 @@ namespace Js
         bool HasNoMissingValues() const; // if true, the head segment has no missing values
         bool HasNoMissingValues_Unchecked() const; // do not use except in extreme circumstances
         void SetHasNoMissingValues(const bool hasNoMissingValues = true);
+        bool IsFillFromPrototypes();
 
         template<typename T>
         bool IsMissingItemAt(uint32 index) const;
@@ -521,7 +522,8 @@ namespace Js
         static Var ReverseHelper(JavascriptArray* pArr, Js::TypedArrayBase* typedArrayBase, RecyclableObject* obj, T length, ScriptContext* scriptContext);
         template <typename T = uint32>
         static Var SliceHelper(JavascriptArray* pArr, Js::TypedArrayBase* typedArrayBase, RecyclableObject* obj, T length, Arguments& args, ScriptContext* scriptContext);
-        static Var SliceObjectHelper(RecyclableObject* obj, uint32 sliceStart, uint32 start, JavascriptArray* newArr, RecyclableObject* newObj, uint32 newLen, ScriptContext* scriptContext);
+        template <typename T = uint32>
+        static Var SliceObjectHelper(RecyclableObject* obj, T sliceStart, T start, JavascriptArray* newArr, RecyclableObject* newObj, T newLen, ScriptContext* scriptContext, bool isBuiltinArrayCtor = true);
         template <typename T = uint32>
         static Var AtHelper(JavascriptArray* pArr, Js::TypedArrayBase* typedArrayBase, RecyclableObject* obj, T length, Arguments& args, ScriptContext* scriptContext);
         template <typename T = uint32>
@@ -647,7 +649,6 @@ namespace Js
             Var* insertArgs, uint32 insertLen, ScriptContext *scriptContext);
 
         void FillFromPrototypes(uint32 startIndex, uint32 endIndex);
-        bool IsFillFromPrototypes();
         void GetArrayTypeAndConvert(bool* isIntArray, bool* isFloatArray);
         template<typename T> void EnsureHeadStartsFromZero(Recycler * recycler);
 
@@ -679,8 +680,15 @@ namespace Js
         template<typename T, typename P>
         static BOOL TryTemplatedGetItem(RecyclableObject* arr, P index, Var *element, ScriptContext *scriptContext, bool checkHasItem = true)
         {
-            return VarIsWithoutES5Array<T>(arr) ? JavascriptArray::TemplatedGetItem(static_cast<T*>(arr), index, element, scriptContext, checkHasItem) :
-                JavascriptOperators::GetItem(arr, index, element, scriptContext);
+            if (VarIsWithoutES5Array<T>(arr))
+            {
+                return JavascriptArray::TemplatedGetItem(static_cast<T*>(arr), index, element, scriptContext, checkHasItem);
+            }
+            if (checkHasItem && !JavascriptOperators::HasItem(arr, index))
+            {
+                return FALSE;
+            }
+            return JavascriptOperators::GetItem(arr, index, element, scriptContext);
         }
 
         template <bool hasSideEffect, typename T, typename Fn>

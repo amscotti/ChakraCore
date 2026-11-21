@@ -2930,6 +2930,19 @@ using namespace Js;
             // Conversion can change the type (e.g. from String), invalidating assumptions made by the JIT
             scriptContext->GetThreadContext()->AddImplicitCallFlags(ImplicitCall_Accessor);
 
+            // Coercing newLength (ToUInt32 / ToNumber) can invoke user code that transitions
+            // this array to ES5Array, freezes/makes length non-writable, or defines non-configurable items.
+            if (VarIs<ES5Array>(this))
+            {
+                ES5Array* es5Arr = UnsafeVarTo<ES5Array>(this);
+                if (!es5Arr->IsLengthWritable())
+                {
+                    return FALSE;
+                }
+                uint32 assignedLen = es5Arr->GetTypeHandler()->SetLength(es5Arr, uintValue, PropertyOperation_None);
+                return assignedLen == uintValue;
+            }
+
             this->SetLength(uintValue);
         }
         else
@@ -3174,7 +3187,7 @@ using namespace Js;
 
     BOOL JavascriptArray::SetArrayLikeObjects(RecyclableObject* pDestObj, uint32 idxDest, Var aItem)
     {
-        return pDestObj->SetItem(idxDest, aItem, Js::PropertyOperation_ThrowIfNotExtensible);
+        return SetArrayLikeObjects(pDestObj, BigIndex(idxDest), aItem);
     }
 
     uint64 JavascriptArray::OP_GetLength(Var obj, ScriptContext *scriptContext)
@@ -3360,6 +3373,10 @@ using namespace Js;
                     {
                         JS_REENTRANT(jsReentLock, subItem = JavascriptOperators::GetItem(itemObject, idxSubItem, scriptContext));
 
+                        if (pDestArray && !JavascriptArray::IsNonES5Array(pDestArray))
+                        {
+                            pDestArray = nullptr;
+                        }
                         if (pDestArray)
                         {
                             pDestArray->GenericDirectSetItemAt(idxDest, subItem);
@@ -3380,13 +3397,17 @@ using namespace Js;
                     if (hasProp)
                     {
                         JS_REENTRANT(jsReentLock, subItem = JavascriptOperators::GetProperty(itemObject, propertyRecord->GetPropertyId(), scriptContext));
+                        if (pDestArray && !JavascriptArray::IsNonES5Array(pDestArray))
+                        {
+                            pDestArray = nullptr;
+                        }
                         if (pDestArray)
                         {
                             pDestArray->GenericDirectSetItemAt(idxDest, subItem);
                         }
                         else
                         {
-                            JS_REENTRANT(jsReentLock, ThrowErrorOnFailure(SetArrayLikeObjects(pDestObj, idxDest, subItem), scriptContext, idxSubItem));
+                            JS_REENTRANT(jsReentLock, ThrowErrorOnFailure(SetArrayLikeObjects(pDestObj, idxDest, subItem), scriptContext, idxDest));
                         }
                     }
                     ++idxDest;
@@ -3865,6 +3886,10 @@ using namespace Js;
     template<typename T>
     /* static */ void JavascriptArray::SetConcatItem(Var aItem, uint idxArg, JavascriptArray* pDestArray, RecyclableObject* pDestObj, T idxDest, ScriptContext *scriptContext)
     {
+        if (pDestArray && !JavascriptArray::IsNonES5Array(pDestArray))
+        {
+            pDestArray = nullptr;
+        }
         if (BoxConcatItem(aItem, idxArg, scriptContext))
         {
             // bug# 725784: ES5: not calling ToObject in Step 1 of 15.4.4.4
@@ -3879,7 +3904,7 @@ using namespace Js;
             }
             else
             {
-                SetArrayLikeObjects(pDestObj, idxDest, pObj);
+                ThrowErrorOnFailure(SetArrayLikeObjects(pDestObj, idxDest, pObj), scriptContext, idxDest);
             }
         }
         else
@@ -3890,7 +3915,7 @@ using namespace Js;
             }
             else
             {
-                SetArrayLikeObjects(pDestObj, idxDest, aItem);
+                ThrowErrorOnFailure(SetArrayLikeObjects(pDestObj, idxDest, aItem), scriptContext, idxDest);
             }
         }
     }
@@ -4161,7 +4186,19 @@ using namespace Js;
     {
         Assert(VirtualTableInfo<JavascriptArray>::HasVirtualTable(pArr)
             || VirtualTableInfo<CrossSiteObject<JavascriptArray>>::HasVirtualTable(pArr));
-        return pArr->JavascriptArray::DirectGetItemAtFull(index, element);
+        if (!checkHasItem)
+        {
+            return pArr->JavascriptArray::DirectGetItemAtFull(index, element);
+        }
+        if (pArr->DirectGetItemAt(index, element))
+        {
+            return TRUE;
+        }
+        if (!JavascriptOperators::HasItem(pArr->GetPrototype(), index))
+        {
+            return FALSE;
+        }
+        return JavascriptOperators::GetItem(pArr, index, element, scriptContext);
     }
     template <>
     BOOL JavascriptArray::TemplatedGetItem(JavascriptArray *pArr, uint64 index, Var * element, ScriptContext * scriptContext, bool checkHasItem)
@@ -4176,7 +4213,20 @@ using namespace Js;
     {
         Assert(VirtualTableInfo<JavascriptNativeIntArray>::HasVirtualTable(pArr)
             || VirtualTableInfo<CrossSiteObject<JavascriptNativeIntArray>>::HasVirtualTable(pArr));
-        return pArr->JavascriptNativeIntArray::DirectGetItemAtFull(index, element);
+        if (!checkHasItem)
+        {
+            return pArr->JavascriptNativeIntArray::DirectGetItemAtFull(index, element);
+        }
+        ScriptContext* requestContext = pArr->GetType()->GetScriptContext();
+        if (JavascriptConversion::PropertyQueryFlagsToBoolean(pArr->JavascriptNativeIntArray::GetItemQuery(pArr, index, element, requestContext)))
+        {
+            return TRUE;
+        }
+        if (!JavascriptOperators::HasItem(pArr->GetPrototype(), index))
+        {
+            return FALSE;
+        }
+        return JavascriptOperators::GetItem(pArr, index, element, scriptContext);
     }
 
     template <>
@@ -4192,7 +4242,20 @@ using namespace Js;
     {
         Assert(VirtualTableInfo<JavascriptNativeFloatArray>::HasVirtualTable(pArr)
             || VirtualTableInfo<CrossSiteObject<JavascriptNativeFloatArray>>::HasVirtualTable(pArr));
-        return pArr->JavascriptNativeFloatArray::DirectGetItemAtFull(index, element);
+        if (!checkHasItem)
+        {
+            return pArr->JavascriptNativeFloatArray::DirectGetItemAtFull(index, element);
+        }
+        ScriptContext* requestContext = pArr->GetType()->GetScriptContext();
+        if (JavascriptConversion::PropertyQueryFlagsToBoolean(pArr->JavascriptNativeFloatArray::GetItemQuery(pArr, index, element, requestContext)))
+        {
+            return TRUE;
+        }
+        if (!JavascriptOperators::HasItem(pArr->GetPrototype(), index))
+        {
+            return FALSE;
+        }
+        return JavascriptOperators::GetItem(pArr, index, element, scriptContext);
     }
 
     template <>
@@ -5143,7 +5206,18 @@ Case0:
         {
             element = CrossSite::MarshalVar(scriptContext, element, arr->GetScriptContext());
         }
-        arr->SetLength(index); // SetLength will clear element at index
+        if (!JavascriptArray::IsNonES5Array(arr))
+        {
+            // DirectGetItemAtFull may have frozen the array or made length non-writable (transitioning to ES5Array).
+            ThrowTypeErrorOnFailureHelper h(scriptContext, _u("Array.prototype.pop"));
+            JS_REENTRANT(jsReentLock,
+                h.ThrowTypeErrorOnFailure(JavascriptOperators::DeleteItem(arr, index, PropertyOperation_ThrowOnDeleteIfNotConfig)),
+                h.ThrowTypeErrorOnFailure(JavascriptOperators::SetProperty(arr, arr, PropertyIds::length, JavascriptNumber::ToVar(index, scriptContext), scriptContext, PropertyOperation_ThrowIfNotExtensible)));
+        }
+        else
+        {
+            arr->SetLength(index); // SetLength will clear element at index
+        }
 
 #ifdef VALIDATE_ARRAY
         arr->ValidateArray();
@@ -6536,14 +6610,11 @@ Case0:
             }
         }
 
-        uint32 start  = (uint32) startT;
-        uint32 newLen = (uint32) newLenT;
-
         // We at least have to have newObj as a valid object
         Assert(newObj);
 
         // Bail out early if the new object will have zero length.
-        if (newLen == 0)
+        if (newLenT == 0)
         {
             return newObj;
         }
@@ -6567,9 +6638,12 @@ Case0:
 
         if (pArr)
         {
+            uint32 start  = (uint32) startT;
+            uint32 newLen = (uint32) newLenT;
+
             if (HasAnyES5ArrayInPrototypeChain(pArr))
             {
-                JS_REENTRANT_UNLOCK(jsReentLock, return JavascriptArray::SliceObjectHelper(obj, start, 0u, newArr, newObj, newLen, scriptContext));
+                JS_REENTRANT_UNLOCK(jsReentLock, return JavascriptArray::SliceObjectHelper<uint32>(obj, start, 0u, newArr, newObj, newLen, scriptContext, isBuiltinArrayCtor));
             }
 
             // If we constructed a new Array object, we have some nice helpers here
@@ -6627,7 +6701,7 @@ Case0:
                         if (!JavascriptArray::IsNonES5Array(obj))
                         {
                             AssertOrFailFastMsg(VarIs<ES5Array>(obj), "The array should have been converted to an ES5Array");
-                            JS_REENTRANT_UNLOCK(jsReentLock, return JavascriptArray::SliceObjectHelper(obj, start, i + 1, newArr, newObj, newLen, scriptContext));
+                            JS_REENTRANT_UNLOCK(jsReentLock, return JavascriptArray::SliceObjectHelper<uint32>(obj, start, i + 1, newArr, newObj, newLen, scriptContext, isBuiltinArrayCtor));
                         }
                     }
                 }
@@ -6652,7 +6726,7 @@ Case0:
                     if (!JavascriptArray::IsNonES5Array(obj))
                     {
                         AssertOrFailFastMsg(VarIs<ES5Array>(obj), "The array should have been converted to an ES5Array");
-                        JS_REENTRANT_UNLOCK(jsReentLock, return JavascriptArray::SliceObjectHelper(obj, start, i + 1, newArr, newObj, newLen, scriptContext));
+                        JS_REENTRANT_UNLOCK(jsReentLock, return JavascriptArray::SliceObjectHelper<uint32>(obj, start, i + 1, newArr, newObj, newLen, scriptContext, isBuiltinArrayCtor));
                     }
                 }
             }
@@ -6669,6 +6743,8 @@ Case0:
                 AssertAndFailFast(newArr != nullptr);
             }
 
+            uint32 start  = (uint32) startT;
+            uint32 newLen = (uint32) newLenT;
             Var element;
 
             for (uint32 i = 0; i < newLen; i++)
@@ -6705,12 +6781,12 @@ Case0:
         }
         else
         {
-            JS_REENTRANT_UNLOCK(jsReentLock, return JavascriptArray::SliceObjectHelper(obj, start, 0u, newArr, newObj, newLen, scriptContext));;
+            JS_REENTRANT_UNLOCK(jsReentLock, return JavascriptArray::SliceObjectHelper<T>(obj, startT, static_cast<T>(0), newArr, newObj, newLenT, scriptContext, isBuiltinArrayCtor));
         }
 
         if (!isTypedArrayEntryPoint)
         {
-            JS_REENTRANT(jsReentLock, JavascriptOperators::SetProperty(newObj, newObj, Js::PropertyIds::length, JavascriptNumber::ToVar(newLen, scriptContext), scriptContext, PropertyOperation_ThrowIfNotExtensible));
+            JS_REENTRANT(jsReentLock, JavascriptOperators::SetProperty(newObj, newObj, Js::PropertyIds::length, JavascriptNumber::ToVar(newLenT, scriptContext), scriptContext, PropertyOperation_ThrowIfNotExtensible));
         }
 
 #ifdef VALIDATE_ARRAY
@@ -6724,24 +6800,31 @@ Case0:
         return newObj;
     }
 
-    Var JavascriptArray::SliceObjectHelper(RecyclableObject* obj, uint32 sliceStart, uint32 start, JavascriptArray* newArr, RecyclableObject* newObj, uint32 newLen, ScriptContext* scriptContext)
+    template <typename T>
+    Var JavascriptArray::SliceObjectHelper(RecyclableObject* obj, T sliceStart, T start, JavascriptArray* newArr, RecyclableObject* newObj, T newLen, ScriptContext* scriptContext, bool isBuiltinArrayCtor)
     {
         JS_REENTRANCY_LOCK(jsReentLock, scriptContext->GetThreadContext());
         SETOBJECT_FOR_MUTATION(jsReentLock, obj);
 
-        for (uint32 i = start; i < newLen; i++)
+        for (T i = start; i < newLen; i++)
         {
-            JS_REENTRANT(jsReentLock, BOOL hasItem = JavascriptOperators::HasItem(obj, i + sliceStart));
+            uint64 srcIndex = static_cast<uint64>(sliceStart) + static_cast<uint64>(i);
+            JS_REENTRANT(jsReentLock, BOOL hasItem = (srcIndex <= UINT32_MAX) ?
+                JavascriptOperators::HasItem(obj, static_cast<uint32>(srcIndex)) :
+                JavascriptOperators::HasItem(obj, srcIndex));
             if (hasItem)
             {
-                JS_REENTRANT(jsReentLock, Var element = JavascriptOperators::GetItem(obj, i + sliceStart, scriptContext));
-                if (newArr != nullptr)
+                JS_REENTRANT(jsReentLock, Var element = (srcIndex <= UINT32_MAX) ?
+                    JavascriptOperators::GetItem(obj, static_cast<uint32>(srcIndex), scriptContext) :
+                    JavascriptOperators::GetItem(obj, srcIndex, scriptContext));
+                if (newArr != nullptr && isBuiltinArrayCtor && JavascriptArray::IsNonES5Array(newArr) && i <= UINT32_MAX)
                 {
-                    newArr->SetItem(i, element, PropertyOperation_None);
+                    newArr->SetItem(static_cast<uint32>(i), element, PropertyOperation_None);
                 }
                 else
                 {
-                    JS_REENTRANT(jsReentLock, ThrowErrorOnFailure(JavascriptArray::SetArrayLikeObjects(newObj, i, element), scriptContext, i));
+                    BigIndex destIdx(static_cast<uint64>(i));
+                    JS_REENTRANT(jsReentLock, ThrowErrorOnFailure(JavascriptArray::SetArrayLikeObjects(newObj, destIdx, element), scriptContext, destIdx));
                 }
             }
         }
@@ -7013,17 +7096,22 @@ Case0:
             JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NullOrUndefined, _u("Array.prototype.sort"));
         }
 
-        // Get the Length
+        // Get the Length (ToLength per ES2025 LengthOfArrayLike)
         JS_REENTRANT(jsReentLock,
-            uint32 len = JavascriptConversion::ToUInt32(JavascriptOperators::OP_GetLength(obj, scriptContext), scriptContext));
+            uint64 len64 = OP_GetLength(obj, scriptContext));
 
         // Early return if length = 0
         // Note cannot return early for length = 1 without further checks
         // As per spec we must use HasItem() and GetItem() on each element
-        if (len == 0)
+        if (len64 == 0)
         {
             return obj;
         }
+        if (len64 > MaxArrayLength)
+        {
+            JavascriptError::ThrowRangeError(scriptContext, JSERR_ArrayLengthAssignIncorrect);
+        }
+        uint32 len = static_cast<uint32>(len64);
 
         BEGIN_TEMP_ALLOCATOR(tempAlloc, scriptContext, _u("Runtime"))
         {
@@ -8000,6 +8088,54 @@ Case0:
         }
     }
 
+    // Object-literal numeric getters ({ get 0() {} }) store Setter == nullptr in
+    // ES5ArrayTypeHandler, so SetItem returns TRUE without throwing. Walk non-Proxy
+    // prototypes to detect a getter-only accessor and report failure for Set(..., Throw = true).
+    static bool HasReadOnlyAccessorOnNonProxyProto(RecyclableObject* obj, const JavascriptArray::BigIndex& index, ScriptContext* scriptContext)
+    {
+        if (VarIs<JavascriptProxy>(obj))
+        {
+            return false;
+        }
+        PropertyRecord const* propertyRecord = nullptr;
+        if (index.IsSmallIndex())
+        {
+            JavascriptOperators::GetPropertyIdForInt(index.GetSmallIndex(), scriptContext, &propertyRecord);
+        }
+        else
+        {
+            JavascriptOperators::GetPropertyIdForInt(index.GetBigIndex(), scriptContext, &propertyRecord);
+        }
+        RecyclableObject* cur = obj;
+        while (cur != nullptr && !JavascriptOperators::IsNull(cur) && !VarIs<JavascriptProxy>(cur))
+        {
+            PropertyDescriptor desc;
+            if (JavascriptOperators::GetOwnPropertyDescriptor(cur, propertyRecord->GetPropertyId(), scriptContext, &desc))
+            {
+                return desc.IsAccessorDescriptor() &&
+                    (!desc.SetterSpecified() ||
+                     JavascriptOperators::IsUndefinedObject(desc.GetSetter()) ||
+                     JavascriptOperators::IsUndefinedAccessor(desc.GetSetter(), scriptContext));
+            }
+            cur = cur->GetPrototype();
+        }
+        return false;
+    }
+
+    template <typename T>
+    static BOOL UnshiftSetItem(RecyclableObject* obj, const T& index, Var value, ScriptContext* scriptContext)
+    {
+        if (HasReadOnlyAccessorOnNonProxyProto(obj, JavascriptArray::BigIndex(index), scriptContext))
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_DefineProperty_NotExtensible);
+        }
+        if (!JavascriptArray::IndexTrace<T>::SetItem(obj, index, value, PropertyOperation_ThrowIfNotExtensible))
+        {
+            return FALSE;
+        }
+        return TRUE;
+    }
+
     //
     // Unshift object elements [start, end) to toIndex, asserting toIndex > start.
     //
@@ -8023,7 +8159,7 @@ Case0:
                 {
                     Var element = nullptr;
                     JS_REENTRANT(jsReentLock, element = JavascriptOperators::GetItem(obj, i - 1, scriptContext),
-                        h.ThrowTypeErrorOnFailure(index_trace::SetItem(obj, dst, element, PropertyOperation_ThrowIfNotExtensible)));
+                        h.ThrowTypeErrorOnFailure(UnshiftSetItem(obj, dst, element, scriptContext)));
                 }
                 else
                 {
@@ -8141,7 +8277,7 @@ Case0:
             {
                 JS_REENTRANT(jsReentLock,
                     h.ThrowTypeErrorOnFailure(
-                        JavascriptOperators::SetItem(dynamicObject, dynamicObject, i, args[i + 1], scriptContext, PropertyOperation_ThrowIfNotExtensible)));
+                        UnshiftSetItem(dynamicObject, i, args[i + 1], scriptContext)));
             }
         }
 
@@ -8608,18 +8744,18 @@ Case0:
         CallFlags flags = CallFlags_Value;
         Var element = nullptr;
         Var testResult = nullptr;
-        uint32 loopStart = reversed ? (uint32)length - 1 : 0;
-        int8 loopDelta = reversed ? -1 : 1;
+        int64 loopStart = reversed ? (length - 1) : 0;
+        int64 loopDelta = reversed ? -1 : 1;
 
         if (pArr)
         {
             Var undefined = scriptContext->GetLibrary()->GetUndefined();
 
             Assert(length <= UINT_MAX);
-            for (uint32 k = loopStart; k < length; k += loopDelta)
+            for (int64 k = loopStart; reversed ? (k >= 0) : (k < length); k += loopDelta)
             {
                 element = undefined;
-                JS_REENTRANT(jsReentLock, pArr->DirectGetItemAtFull(k, &element));
+                JS_REENTRANT(jsReentLock, pArr->DirectGetItemAtFull(static_cast<uint32>(k), &element));
 
                 Var index = JavascriptNumber::ToVar(k, scriptContext);
 
@@ -8644,18 +8780,18 @@ Case0:
                 if (!JavascriptArray::IsNonES5Array(obj))
                 {
                     AssertOrFailFastMsg(VarIs<ES5Array>(obj), "The array should have been converted to an ES5Array");
-                    JS_REENTRANT_UNLOCK(jsReentLock, return JavascriptArray::FindObjectHelper<findIndex, reversed>(obj, length, k + 1, callBackFn, thisArg, scriptContext));
+                    JS_REENTRANT_UNLOCK(jsReentLock, return JavascriptArray::FindObjectHelper<findIndex, reversed>(obj, length, k + loopDelta, callBackFn, thisArg, scriptContext));
                 }
             }
         }
         else if (typedArrayBase)
         {
             Assert(length <= UINT_MAX);
-            for (uint32 k = loopStart; k < length; k+= loopDelta)
+            for (int64 k = loopStart; reversed ? (k >= 0) : (k < length); k += loopDelta)
             {
                 // Spec does not ask to call HasItem, so we need to go to visit the whole length
 
-                element = typedArrayBase->DirectGetItem(k);
+                element = typedArrayBase->DirectGetItem(static_cast<uint32>(k));
 
                 Var index = JavascriptNumber::ToVar(k, scriptContext);
 
@@ -8678,7 +8814,7 @@ Case0:
         }
         else
         {
-            JS_REENTRANT_UNLOCK(jsReentLock, return JavascriptArray::FindObjectHelper<findIndex, reversed>(obj, length, 0u, callBackFn, thisArg, scriptContext));
+            JS_REENTRANT_UNLOCK(jsReentLock, return JavascriptArray::FindObjectHelper<findIndex, reversed>(obj, length, loopStart, callBackFn, thisArg, scriptContext));
         }
 
         return findIndex ? JavascriptNumber::ToVar(-1, scriptContext) : scriptContext->GetLibrary()->GetUndefined();
@@ -8692,12 +8828,14 @@ Case0:
 
         Var element = nullptr;
         Var testResult = nullptr;
-        uint32 loopStart = reversed ? (uint32)length - 1 : (uint32)start;
-        int8 loopDelta = reversed ? -1 : 1;
+        int64 loopDelta = reversed ? -1 : 1;
 
-        for (uint32 k = loopStart; k < length; k += loopDelta)
+        for (int64 k = start; reversed ? (k >= 0) : (k < length); k += loopDelta)
         {
-            JS_REENTRANT(jsReentLock, element = JavascriptOperators::GetItem(obj, k, scriptContext));
+            JS_REENTRANT(jsReentLock,
+                element = (k <= UINT_MAX)
+                    ? JavascriptOperators::GetItem(obj, static_cast<uint32>(k), scriptContext)
+                    : JavascriptOperators::GetItem(obj, static_cast<uint64>(k), scriptContext));
             Var index = JavascriptNumber::ToVar(k, scriptContext);
 
             JS_REENTRANT(jsReentLock,
@@ -10267,7 +10405,7 @@ Case0:
                 );
 
                 // If newArr is a valid pointer, then we constructed an array to return. Otherwise we need to do generic object operations
-                if (newArr && isBuiltinArrayCtor)
+                if (newArr && isBuiltinArrayCtor && JavascriptArray::IsNonES5Array(newArr))
                 {
                     newArr->DirectSetItemAt(k, mappedValue);
                 }
@@ -10392,7 +10530,7 @@ Case0:
                     END_SAFE_REENTRANT_CALL
                 );
 
-                    if (newArr && isBuiltinArrayCtor)
+                    if (newArr && isBuiltinArrayCtor && JavascriptArray::IsNonES5Array(newArr) && k <= UINT_MAX)
                     {
                         newArr->SetItem((uint32)k, mappedValue, PropertyOperation_None);
                     }
@@ -11001,19 +11139,19 @@ Case0:
 
         RecyclableObject* newObj = nullptr;
         JavascriptArray* newArr = nullptr;
+        bool isBuiltinArrayCtor = (constructor == nullptr || constructor == scriptContext->GetLibrary()->GetArrayConstructor());
 
-        JS_REENTRANT(jsReentLock, RecyclableObject* iterator = JavascriptOperators::GetIterator(items, scriptContext, true /* optional */));
+        JS_REENTRANT(jsReentLock, RecyclableObject* iteratorFn = JavascriptOperators::GetIteratorFunction(items, scriptContext, true /* optional */));
 
-        if (iterator != nullptr)
+        if (iteratorFn != nullptr)
         {
             if (constructor)
             {
                 Js::Var constructorArgs[] = { constructor };
                 Js::CallInfo constructorCallInfo(Js::CallFlags_New, _countof(constructorArgs));
                 Js::Arguments arguments(constructorCallInfo, constructorArgs);
-                bool isDefaultConstructor = constructor == scriptContext->GetLibrary()->GetArrayConstructor();
                 JS_REENTRANT(jsReentLock,
-                    newObj = VarTo<RecyclableObject>(JavascriptOperators::NewObjectCreationHelper_ReentrancySafe(constructor, isDefaultConstructor, scriptContext->GetThreadContext(), [=]()->Js::Var
+                    newObj = VarTo<RecyclableObject>(JavascriptOperators::NewObjectCreationHelper_ReentrancySafe(constructor, isBuiltinArrayCtor, scriptContext->GetThreadContext(), [=]()->Js::Var
                     {
                         return JavascriptOperators::NewScObject(constructor, arguments, scriptContext);
                     }))
@@ -11034,9 +11172,27 @@ Case0:
                 newObj = newArr;
             }
 
-            uint32 k = 0;
+            Var iteratorVar = nullptr;
+            JS_REENTRANT(jsReentLock,
+                iteratorVar = scriptContext->GetThreadContext()->ExecuteImplicitCall(iteratorFn, Js::ImplicitCall_Accessor, [=]()->Js::Var
+                {
+                    return CALL_FUNCTION(scriptContext->GetThreadContext(), iteratorFn, CallInfo(Js::CallFlags_Value, 1), items);
+                })
+            );
+            if (!JavascriptOperators::IsObject(iteratorVar))
+            {
+                JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedObject);
+            }
+            RecyclableObject* iterator = VarTo<RecyclableObject>(iteratorVar);
+
+            uint64 k = 0;
 
             JS_REENTRANT(jsReentLock, JavascriptOperators::DoIteratorStepAndValue(iterator, scriptContext, [&](Var nextValue) {
+                if (k >= FiftyThirdPowerOfTwoMinusOne)
+                {
+                    JavascriptError::ThrowTypeError(scriptContext, JSERR_IllegalArraySizeAndLength);
+                }
+
                 if (mapping)
                 {
                     Assert(mapFn != nullptr);
@@ -11049,13 +11205,14 @@ Case0:
                     });
                 }
 
-                if (newArr)
+                if (newArr && isBuiltinArrayCtor && JavascriptArray::IsNonES5Array(newArr) && k <= UINT_MAX)
                 {
-                    newArr->SetItem(k, nextValue, PropertyOperation_None);
+                    newArr->SetItem(static_cast<uint32>(k), nextValue, PropertyOperation_None);
                 }
                 else
                 {
-                    ThrowErrorOnFailure(JavascriptArray::SetArrayLikeObjects(newObj, k, nextValue), scriptContext, k);
+                    BigIndex kIdx(k);
+                    ThrowErrorOnFailure(JavascriptArray::SetArrayLikeObjects(newObj, kIdx, nextValue), scriptContext, kIdx);
                 }
 
                 k++;
@@ -11072,9 +11229,8 @@ Case0:
                 Js::Var constructorArgs[] = { constructor, JavascriptNumber::ToVar(len, scriptContext) };
                 Js::CallInfo constructorCallInfo(Js::CallFlags_New, _countof(constructorArgs));
                 Js::Arguments arguments(constructorCallInfo, constructorArgs);
-                bool isDefaultConstructor = constructor == scriptContext->GetLibrary()->GetArrayConstructor();
                 JS_REENTRANT(jsReentLock,
-                    newObj = VarTo<RecyclableObject>(JavascriptOperators::NewObjectCreationHelper_ReentrancySafe(constructor, isDefaultConstructor, scriptContext->GetThreadContext(), [=]()->Js::Var
+                    newObj = VarTo<RecyclableObject>(JavascriptOperators::NewObjectCreationHelper_ReentrancySafe(constructor, isBuiltinArrayCtor, scriptContext->GetThreadContext(), [=]()->Js::Var
                     {
                         return JavascriptOperators::NewScObject(constructor, arguments, scriptContext);
                     }))
@@ -11102,19 +11258,21 @@ Case0:
                 newObj = newArr;
             }
 
-            uint32 k = 0;
+            uint64 k = 0;
 
-            for ( ; k < len; k++)
+            for ( ; k < static_cast<uint64>(len); k++)
             {
                 Var kValue;
 
-                if (itemsArr)
+                if (itemsArr && k <= UINT_MAX)
                 {
-                    JS_REENTRANT(jsReentLock, kValue = itemsArr->DirectGetItem(k));
+                    JS_REENTRANT(jsReentLock, kValue = itemsArr->DirectGetItem(static_cast<uint32>(k)));
                 }
                 else
                 {
-                    JS_REENTRANT(jsReentLock, kValue = JavascriptOperators::OP_GetElementI_UInt32(items, k, scriptContext));
+                    JS_REENTRANT(jsReentLock, kValue = (k <= UINT_MAX)
+                        ? JavascriptOperators::OP_GetElementI_UInt32(items, static_cast<uint32>(k), scriptContext)
+                        : JavascriptOperators::GetItem(items, k, scriptContext));
                 }
 
                 if (mapping)
@@ -11131,13 +11289,14 @@ Case0:
                     );
                 }
 
-                if (newArr)
+                if (newArr && isBuiltinArrayCtor && JavascriptArray::IsNonES5Array(newArr) && k <= UINT_MAX)
                 {
-                    newArr->SetItem(k, kValue, PropertyOperation_None);
+                    newArr->SetItem(static_cast<uint32>(k), kValue, PropertyOperation_None);
                 }
                 else
                 {
-                    JS_REENTRANT(jsReentLock, ThrowErrorOnFailure(JavascriptArray::SetArrayLikeObjects(newObj, k, kValue), scriptContext, k));
+                    BigIndex kIdx(k);
+                    JS_REENTRANT(jsReentLock, ThrowErrorOnFailure(JavascriptArray::SetArrayLikeObjects(newObj, kIdx, kValue), scriptContext, kIdx));
                 }
             }
 
@@ -14375,7 +14534,13 @@ namespace Js
         uint32 indexValue;
         if (propertyId == PropertyIds::length)
         {
-            return this->SetLength(value);
+            if (!this->SetLength(value))
+            {
+                JavascriptError::ThrowCantAssign(flags, GetScriptContext(), PropertyIds::length);
+                JavascriptError::ThrowCantAssignIfStrictMode(flags, GetScriptContext());
+                return FALSE;
+            }
+            return TRUE;
         }
         else if (GetScriptContext()->IsNumericPropertyId(propertyId, &indexValue))
         {
@@ -14401,7 +14566,13 @@ namespace Js
 
         if (propertyRecord != nullptr && propertyRecord->GetPropertyId() == PropertyIds::length)
         {
-            return this->SetLength(value);
+            if (!this->SetLength(value))
+            {
+                JavascriptError::ThrowCantAssign(flags, GetScriptContext(), PropertyIds::length);
+                JavascriptError::ThrowCantAssignIfStrictMode(flags, GetScriptContext());
+                return FALSE;
+            }
+            return TRUE;
         }
 
         return DynamicObject::SetProperty(propertyNameString, value, flags, info);
