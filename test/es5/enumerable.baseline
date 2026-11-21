@@ -61,6 +61,7 @@
   125: undefined
   126: undefined enumerable
   127: undefined enumerable configurable
+  length: 128 writable
   xx10: value 10
   xx11: value 11 enumerable
   xx12: value 12 enumerable configurable
@@ -71,7 +72,6 @@
   xx25: undefined
   xx26: undefined enumerable
   xx27: undefined enumerable configurable
-  length: 128 writable
   --- for-in enumerate ---
   0: -12
   1: hello
@@ -124,8 +124,8 @@
   2: SHOULD_NOT_enumerate_prototype enumerable
   3: 3
   5: 5 enumerable
-  name: SHOULD_NOT_enumerate_prototype
   length: 6 writable
+  name: SHOULD_NOT_enumerate_prototype
 *** Object ***
   10: get 10
   11: get 11 enumerable

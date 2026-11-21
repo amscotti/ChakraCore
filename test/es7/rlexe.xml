@@ -732,4 +732,34 @@
       <compile-flags>-CollectGarbage</compile-flags>
     </default>
   </test>
+  <test>
+    <default>
+      <files>q15_builtins_core.js</files>
+      <compile-flags>-CollectGarbage</compile-flags>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>q15_promise_async_mod.js</files>
+      <compile-flags>-CollectGarbage</compile-flags>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>q15_array_ta.js</files>
+      <compile-flags>-CollectGarbage -args summary -endargs</compile-flags>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>q15_parser_dstr.js</files>
+      <compile-flags>-CollectGarbage</compile-flags>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>q15_proxy_object.js</files>
+      <compile-flags>-CollectGarbage</compile-flags>
+    </default>
+  </test>
 </regress-exe>

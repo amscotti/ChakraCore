@@ -1816,8 +1816,10 @@ dbl_align:
             {
                 case Js::OpCode::ChkUndecl:
                 case Js::OpCode::RuntimeReferenceError:
+#if ENABLE_NATIVE_CODEGEN
                 case Js::OpCode::InlineRuntimeReferenceError:
                 case Js::OpCode::StSlotChkUndecl:
+#endif
                 case Js::OpCode::StEnvSlotChkUndecl:
                 case Js::OpCode::StInnerSlotChkUndecl:
                 case Js::OpCode::StLocalSlotChkUndecl:
