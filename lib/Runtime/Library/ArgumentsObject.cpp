@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #include "RuntimeLibraryPch.h"
@@ -447,6 +448,27 @@ namespace Js
         return DynamicObject::DeleteItem(index, flags);
     }
 
+    BOOL HeapArgumentsObject::DeleteProperty(PropertyId propertyId, PropertyOperationFlags flags)
+    {
+        uint32 index;
+        if (this->GetScriptContext()->IsNumericPropertyId(propertyId, &index))
+        {
+            return this->DeleteItem(index, flags);
+        }
+        return DynamicObject::DeleteProperty(propertyId, flags);
+    }
+
+    BOOL HeapArgumentsObject::DeleteProperty(JavascriptString *propertyNameString, PropertyOperationFlags flags)
+    {
+        PropertyRecord const *propertyRecord = nullptr;
+        if (JavascriptOperators::ShouldTryDeleteProperty(this, propertyNameString, &propertyRecord) &&
+            propertyRecord->IsNumeric())
+        {
+            return this->DeleteItem(propertyRecord->GetNumericValue(), flags);
+        }
+        return DynamicObject::DeleteProperty(propertyNameString, flags);
+    }
+
     BOOL HeapArgumentsObject::SetConfigurable(PropertyId propertyId, BOOL value)
     {
         // Try to set a numbered property that maps to an actual argument.
@@ -628,20 +650,30 @@ namespace Js
             __super::SetItemAt(index, value);
     }
 
+    BOOL ES5HeapArgumentsObject::DeleteItem(uint32 index, PropertyOperationFlags flags)
+    {
+        if (IsFormalArgument(index) && !IsFormalDisconnectedFromNamedArgument(index))
+        {
+            if (this->HasObjectArrayItem(index) && !this->DeleteObjectArrayItem(index, flags))
+            {
+                return FALSE;
+            }
+            __super::DeleteItemAt(index);
+            return TRUE;
+        }
+        return DynamicObject::DeleteItem(index, flags);
+    }
+
     BOOL ES5HeapArgumentsObject::DeleteItemAt(uint32 index)
     {
-        BOOL result = __super::DeleteItemAt(index);
-        if (result && IsFormalArgument(index))
+        if (IsFormalArgument(index) && !IsFormalDisconnectedFromNamedArgument(index) && this->HasObjectArrayItem(index))
         {
-            AssertMsg(this->IsFormalDisconnectedFromNamedArgument(index), "__super::DeleteItemAt must perform the disconnect.");
-            // Make sure that objectArray does not have the item ().
-            if (this->HasObjectArrayItem(index))
+            if (!this->DeleteObjectArrayItem(index, PropertyOperation_None))
             {
-                this->DeleteObjectArrayItem(index, PropertyOperation_None);
+                return FALSE;
             }
         }
-
-        return result;
+        return __super::DeleteItemAt(index);
     }
 
     //

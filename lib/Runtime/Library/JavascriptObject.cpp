@@ -73,17 +73,17 @@ Var JavascriptObject::EntryHasOwnProperty(RecyclableObject* function, CallInfo c
 
     AssertMsg(args.Info.Count > 0, "Should always have implicit 'this'");
 
-    RecyclableObject* dynamicObject = nullptr;
-    if (FALSE == JavascriptConversion::ToObject(args[0], scriptContext, &dynamicObject))
-    {
-        JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NullOrUndefined, _u("Object.prototype.hasOwnProperty"));
-    }
-
     Var propertyName = args.Info.Count == 1 ? scriptContext->GetLibrary()->GetUndefined() : args[1];
 
     const PropertyRecord* propertyRecord;
     PropertyString* propertyString;
     JavascriptConversion::ToPropertyKey(propertyName, scriptContext, &propertyRecord, &propertyString);
+
+    RecyclableObject* dynamicObject = nullptr;
+    if (FALSE == JavascriptConversion::ToObject(args[0], scriptContext, &dynamicObject))
+    {
+        JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NullOrUndefined, _u("Object.prototype.hasOwnProperty"));
+    }
 
     if (JavascriptOperators::HasOwnProperty(dynamicObject, propertyRecord->GetPropertyId(), scriptContext, propertyString))
     {
@@ -204,7 +204,11 @@ BOOL JavascriptObject::ChangePrototype(RecyclableObject* object, RecyclableObjec
         // The Object prototype object is an immutable prototype exotic object.
         // ES2016 9.4.7:
         // An immutable prototype exotic object is an exotic object that has an immutable [[Prototype]] internal slot.
-        JavascriptError::ThrowTypeError(scriptContext, JSERR_ImmutablePrototypeSlot);
+        if (shouldThrow)
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_ImmutablePrototypeSlot);
+        }
+        return FALSE;
     }
 
     // 6.   If V is not null, then
@@ -245,6 +249,20 @@ BOOL JavascriptObject::ChangePrototype(RecyclableObject* object, RecyclableObjec
         isInvalidationOfInlineCacheNeeded = false;
     }
 
+    // Examine new prototype chain before updating caches or prototype.
+    // Arrays inheriting from a Proxy or non-writable/accessor chain must not bypass prototype [[Set]] traps.
+    bool objectAndPrototypeChainHasOnlyWritableDataProperties =
+        JavascriptOperators::CheckIfObjectAndPrototypeChainHasOnlyWritableDataProperties(newPrototype);
+
+    if (!objectAndPrototypeChainHasOnlyWritableDataProperties)
+    {
+        object->GetScriptContext()->optimizationOverrides.DisableArraySetElementFastPath();
+        if (scriptContext != object->GetScriptContext())
+        {
+            scriptContext->optimizationOverrides.DisableArraySetElementFastPath();
+        }
+    }
+
     if (isInvalidationOfInlineCacheNeeded)
     {
         bool allProtoCachesInvalidated = false;
@@ -278,10 +296,6 @@ BOOL JavascriptObject::ChangePrototype(RecyclableObject* object, RecyclableObjec
             // we clear the cache here instead.
             object->GetLibrary()->GetTypesWithNoSpecialPropertyProtoChainCache()->Clear();
         }
-
-        // Examine new prototype chain. If it brings in any non-WritableData property, we need to invalidate related caches.
-        bool objectAndPrototypeChainHasOnlyWritableDataProperties =
-            JavascriptOperators::CheckIfObjectAndPrototypeChainHasOnlyWritableDataProperties(newPrototype);
 
         if (!objectAndPrototypeChainHasOnlyWritableDataProperties
             || object->GetScriptContext() != newPrototype->GetScriptContext())
@@ -476,6 +490,11 @@ JavascriptString* JavascriptObject::ToStringTagHelper(Var thisArg, ScriptContext
     // 3. Let O be ToObject(this value).
     RecyclableObject *thisArgAsObject = JavascriptOperators::ToObject(thisArg, scriptContext);
 
+    // 4. Let isArray be ? IsArray(O).
+    // Check IsArray before Get(O, @@toStringTag) so a Proxy revoked during that Get
+    // still observes its pre-revocation builtinTag.
+    BOOL isArray = JavascriptOperators::IsArray(thisArgAsObject);
+
     // 15. Let tag be ? Get(O, @@toStringTag).
     Var tag = JavascriptObject::GetToStringTagValue(thisArgAsObject, scriptContext);
 
@@ -497,10 +516,6 @@ JavascriptString* JavascriptObject::ToStringTagHelper(Var thisArg, ScriptContext
     {
         return buildToString(tag);
     }
-
-    // 4. Let isArray be ? IsArray(O).
-    // There is an implicit check for a null proxy handler in IsArray, so use the operator.
-    BOOL isArray = JavascriptOperators::IsArray(thisArgAsObject);
 
     // If we don't have a tag or it's not a string, use the 'built in tag'.
     if (isArray)
@@ -935,7 +950,10 @@ Var JavascriptObject::EntrySeal(RecyclableObject* function, CallInfo callInfo, .
         globalObject->Seal();
     }
 
-    object->Seal();
+    if (!object->Seal())
+    {
+        JavascriptError::ThrowTypeError(scriptContext, JSERR_NonExtensibleObject);
+    }
     return object;
 }
 
@@ -969,7 +987,10 @@ Var JavascriptObject::EntryFreeze(RecyclableObject* function, CallInfo callInfo,
         globalObject->Freeze();
     }
 
-    object->Freeze();
+    if (!object->Freeze())
+    {
+        JavascriptError::ThrowTypeError(scriptContext, JSERR_NonExtensibleObject);
+    }
     return object;
 }
 
@@ -1451,9 +1472,22 @@ JavascriptArray* JavascriptObject::CreateKeysHelper(RecyclableObject* object, Sc
         return newArr;  // Return an empty array if we don't have an enumerator
     }
 
+    uint32 propertyIndex = 0;
+    const bool specialBeforeNonIndexStrings = includeSpecialProperties && includeStringProperties &&
+        (DynamicObject::IsAnyArray(object) || object->GetTypeId() == TypeIds_RegEx || object->GetTypeId() == TypeIds_StringObject);
+    bool specialPropertiesEmitted = false;
+    auto emitSpecialProperties = [&]() {
+        uint32 index = 0;
+        JavascriptString* specialName = nullptr;
+        while (object->GetSpecialPropertyName(index, &specialName, scriptContext))
+        {
+            newArr->DirectSetItemAt(propertyIndex++, specialName);
+            index++;
+        }
+    };
+
     JavascriptString * propertyName = nullptr;
     PropertyId propertyId;
-    uint32 propertyIndex = 0;
     uint32 symbolIndex = 0;
     const PropertyRecord* propertyRecord;
     JavascriptSymbol* symbol;
@@ -1462,38 +1496,42 @@ JavascriptArray* JavascriptObject::CreateKeysHelper(RecyclableObject* object, Sc
     {
         if (propertyName)
         {
-            if (includeSymbolProperties)
+            propertyRecord = (propertyId != Constants::NoProperty) ? scriptContext->GetPropertyName(propertyId) : nullptr;
+            if (includeSymbolProperties && propertyRecord != nullptr && propertyRecord->IsSymbol())
             {
-                propertyRecord = scriptContext->GetPropertyName(propertyId);
-
-                if (propertyRecord->IsSymbol())
+                symbol = scriptContext->GetSymbol(propertyRecord);
+                // no need to marshal symbol because it is created from scriptContext
+                if (!newArrForSymbols)
                 {
-                    symbol = scriptContext->GetSymbol(propertyRecord);
-                    // no need to marshal symbol because it is created from scriptContext
-                    if (!newArrForSymbols)
-                    {
-                        newArrForSymbols = scriptContext->GetLibrary()->CreateArray(0);
-                    }
-                    newArrForSymbols->DirectSetItemAt(symbolIndex++, symbol);
-                    continue;
+                    newArrForSymbols = scriptContext->GetLibrary()->CreateArray(0);
                 }
+                newArrForSymbols->DirectSetItemAt(symbolIndex++, symbol);
+                continue;
             }
             if (includeStringProperties)
             {
+                if (specialBeforeNonIndexStrings && !specialPropertiesEmitted)
+                {
+                    uint32 numericValue = 0;
+                    bool isArrayIndex = (propertyRecord != nullptr)
+                        ? propertyRecord->IsNumeric()
+                        : (JavascriptOperators::TryConvertToUInt32(propertyName->GetString(), propertyName->GetLength(), &numericValue) &&
+                            numericValue != JavascriptArray::InvalidIndex);
+                    if (!isArrayIndex)
+                    {
+                        emitSpecialProperties();
+                        specialPropertiesEmitted = true;
+                    }
+                }
                 newArr->DirectSetItemAt(propertyIndex++, CrossSite::MarshalVar(scriptContext, propertyName, propertyName->GetScriptContext()));
             }
         }
     }
 
     // Special properties
-    if (includeSpecialProperties && includeStringProperties)
+    if (includeSpecialProperties && includeStringProperties && !specialPropertiesEmitted)
     {
-        uint32 index = 0;
-        while (object->GetSpecialPropertyName(index, &propertyName, scriptContext))
-        {
-            newArr->DirectSetItemAt(propertyIndex++, propertyName);
-            index++;
-        }
+        emitSpecialProperties();
     }
 
     if (newArrForSymbols)
@@ -1902,8 +1940,47 @@ void JavascriptObject::CopyDataPropertiesForGenericObjects(RecyclableObject* fro
     }
 
     PropertyId nextKey = Constants::NoProperty;
-    Var propValue = nullptr;
     JavascriptString * propertyName = nullptr;
+    JavascriptArray* symbolList = nullptr;
+    uint32 symbolCount = 0;
+
+    auto copySingleProperty = [&](PropertyId keyId, PropertyString* propertyString) {
+        Var propValue = nullptr;
+        // If propertyName is a PropertyString* we can try getting the property from the inline cache to avoid having a full property lookup
+        //
+        // Whenever possible, our enumerator populates the cache, so we should generally get a cache hit here
+        PropertyValueInfo getPropertyInfo;
+        if (propertyString == nullptr || !propertyString->TryGetPropertyFromCache<true /* OwnPropertyOnly */, false /* OutputExistence */>(from, from, &propValue, scriptContext, &getPropertyInfo))
+        {
+            if (!JavascriptOperators::GetOwnProperty(from, keyId, &propValue, scriptContext, &getPropertyInfo))
+            {
+                // The source key list is a snapshot. User code (a getter or a target setter) can remove a
+                // key before we reach it; the spec's descriptor check skips it rather than failing.
+                return;
+            }
+        }
+
+        if (assign)
+        {
+            // Similarly, try to set the property using our cache to avoid having to do the full work of SetProperty
+            PropertyValueInfo setPropertyInfo;
+            if (propertyString == nullptr || !propertyString->TrySetPropertyFromCache(to, propValue, scriptContext, PropertyOperation_ThrowIfNonWritable, &setPropertyInfo))
+            {
+                if (!JavascriptOperators::SetProperty(to, to, keyId, propValue, &setPropertyInfo, scriptContext, PropertyOperation_ThrowIfNonWritable))
+                {
+                    JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_NeedObject, GetCopyDataPropertiesEntryName<assign>());
+                }
+            }
+        }
+        else
+        {
+            //TODO[t-huyan]: potentially use caching to improve efficiency? (see AssignForGenericObjects implementation)
+            if (!CreateDataProperty(to, keyId, propValue, scriptContext))
+            {
+                JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_NeedObject, GetCopyDataPropertiesEntryName<assign>());
+            }
+        }
+    };
 
     // Enumerate through each property of properties and fetch the property descriptor
     while ((propertyName = enumerator.MoveAndGetNext(nextKey)) != NULL)
@@ -1917,49 +1994,33 @@ void JavascriptObject::CopyDataPropertiesForGenericObjects(RecyclableObject* fro
             nextKey = propertyRecord->GetPropertyId();
         }
 
-        bool found = false;
-        if (excluded)
+        if (excluded && excluded->Test(nextKey))
         {
-            found = excluded->Test(nextKey);
+            continue;
         }
-        if (!found)
+
+        const PropertyRecord* propertyRecord = scriptContext->GetPropertyName(nextKey);
+        if (propertyRecord->IsSymbol())
         {
-            PropertyString * propertyString = JavascriptOperators::TryFromVar<PropertyString>(propertyName);
+            // ES2025 CopyDataProperties / OrdinaryOwnPropertyKeys: Symbols follow all String keys.
+            if (!symbolList)
+            {
+                symbolList = scriptContext->GetLibrary()->CreateArray(0);
+            }
+            symbolList->DirectSetItemAt(symbolCount++, scriptContext->GetSymbol(propertyRecord));
+            continue;
+        }
 
-            // If propertyName is a PropertyString* we can try getting the property from the inline cache to avoid having a full property lookup
-            //
-            // Whenever possible, our enumerator populates the cache, so we should generally get a cache hit here
-            PropertyValueInfo getPropertyInfo;
-            if (propertyString == nullptr || !propertyString->TryGetPropertyFromCache<true /* OwnPropertyOnly */, false /* OutputExistence */>(from, from, &propValue, scriptContext, &getPropertyInfo))
-            {
-                if (!JavascriptOperators::GetOwnProperty(from, nextKey, &propValue, scriptContext, &getPropertyInfo))
-                {
-                    // The source key list is a snapshot. User code (a getter or a target setter) can remove a
-                    // key before we reach it; the spec's descriptor check skips it rather than failing.
-                    continue;
-                }
-            }
+        PropertyString * propertyString = JavascriptOperators::TryFromVar<PropertyString>(propertyName);
+        copySingleProperty(nextKey, propertyString);
+    }
 
-            if (assign)
-            {
-                // Similarly, try to set the property using our cache to avoid having to do the full work of SetProperty
-                PropertyValueInfo setPropertyInfo;
-                if (propertyString == nullptr || !propertyString->TrySetPropertyFromCache(to, propValue, scriptContext, PropertyOperation_ThrowIfNonWritable, &setPropertyInfo))
-                {
-                    if (!JavascriptOperators::SetProperty(to, to, nextKey, propValue, &setPropertyInfo, scriptContext, PropertyOperation_ThrowIfNonWritable))
-                    {
-                        JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_NeedObject, GetCopyDataPropertiesEntryName<assign>());
-                    }
-                }
-            }
-            else
-            {
-                //TODO[t-huyan]: potentially use caching to improve efficiency? (see AssignForGenericObjects implementation)
-                if (!CreateDataProperty(to, nextKey, propValue, scriptContext))
-                {
-                    JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_NeedObject, GetCopyDataPropertiesEntryName<assign>());
-                }
-            }
+    if (symbolList != nullptr)
+    {
+        for (uint32 i = 0; i < symbolCount; i++)
+        {
+            JavascriptSymbol* symbol = UnsafeVarTo<JavascriptSymbol>(symbolList->DirectGetItem(i));
+            copySingleProperty(symbol->GetValue()->GetPropertyId(), nullptr);
         }
     }
 }

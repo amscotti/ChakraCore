@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
+// Copyright (c) ChakraCore Project Contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #pragma once
@@ -89,6 +90,8 @@ namespace Js
         virtual PropertyQueryFlags GetItemReferenceQuery(Var originalInstance, uint32 index, Var* value, ScriptContext * requestContext) override;
         virtual BOOL SetItem(uint32 index, Var value, PropertyOperationFlags flags) override;
         virtual BOOL DeleteItem(uint32 index, PropertyOperationFlags flags) override;
+        virtual BOOL DeleteProperty(PropertyId propertyId, PropertyOperationFlags flags) override;
+        virtual BOOL DeleteProperty(JavascriptString *propertyNameString, PropertyOperationFlags flags) override;
 
         virtual uint32 GetNumberOfArguments() const override;
         virtual uint32 GetNextFormalArgIndex(uint32 index, BOOL enumNonEnumerable = FALSE, PropertyAttributes* attributes = nullptr) const override;
@@ -201,6 +204,7 @@ namespace Js
         virtual uint32 GetNextFormalArgIndex(uint32 index, BOOL enumNonEnumerable = FALSE, PropertyAttributes* attributes = nullptr) const override;
         virtual BOOL GetItemAt(uint32 index, Var *value, ScriptContext * scriptContext) override;
         virtual BOOL SetItemAt(uint32 index, Var value) override;
+        virtual BOOL DeleteItem(uint32 index, PropertyOperationFlags flags) override;
         virtual BOOL DeleteItemAt(uint32 index) override;
 
         void DisconnectFormalFromNamedArgument(uint32 index);

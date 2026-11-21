@@ -2791,13 +2791,14 @@ CommonNumber:
             }
 
             RecyclableObject* receiverObject = VarTo<RecyclableObject>(receiver);
-            if (receiver != object)
+            if (receiver != object && !VarIs<JavascriptProxy>(receiverObject))
             {
-                // If the receiver object has the property and it is an accessor then return false
+                // If the receiver object has the property and it is an accessor or non-writable data property then return false
                 PropertyDescriptor existingDesc;
-                if (JavascriptOperators::GetOwnPropertyDescriptor(receiverObject, propertyKey, requestContext, &existingDesc)
-                    && existingDesc.IsAccessorDescriptor())
+                if (JavascriptOperators::GetOwnPropertyDescriptor(receiverObject, propertyKey, requestContext, &existingDesc) &&
+                    (existingDesc.IsAccessorDescriptor() || (existingDesc.WritableSpecified() && !existingDesc.IsWritable())))
                 {
+                    JavascriptError::ThrowCantAssignIfStrictMode(propertyOperationFlags, requestContext);
                     return FALSE;
                 }
             }
@@ -2828,42 +2829,40 @@ CommonNumber:
     {
         Assert(TaggedNumber::Is(receiver));
 
-        if (requestContext->optimizationOverrides.GetSideEffects() & SideEffects_Accessor)
+        Var setterValueOrProxy = nullptr;
+        DescriptorFlags flags = None;
+        if (object == nullptr)
         {
-            Var setterValueOrProxy = nullptr;
-            DescriptorFlags flags = None;
-            if (object == nullptr)
+            GetPropertyObject(receiver, requestContext, &object);
+        }
+        if (JavascriptOperators::CheckPrototypesForAccessorOrNonWritableItem(object, index, &setterValueOrProxy, &flags, requestContext))
+        {
+            if ((flags & Accessor) == Accessor)
             {
-                GetPropertyObject(receiver, requestContext, &object);
+                if (JavascriptError::ThrowIfStrictModeUndefinedSetter(propertyOperationFlags, setterValueOrProxy, requestContext))
+                {
+                    return TRUE;
+                }
+                if (setterValueOrProxy)
+                {
+                    RecyclableObject* func = VarTo<RecyclableObject>(setterValueOrProxy);
+                    JavascriptOperators::CallSetter(func, receiver, newValue, requestContext);
+                    return TRUE;
+                }
             }
-            if (JavascriptOperators::CheckPrototypesForAccessorOrNonWritableItem(object, index, &setterValueOrProxy, &flags, requestContext))
+            else if ((flags & Proxy) == Proxy)
             {
-                if ((flags & Accessor) == Accessor)
-                {
-                    if (JavascriptError::ThrowIfStrictModeUndefinedSetter(propertyOperationFlags, setterValueOrProxy, requestContext))
-                    {
-                        return TRUE;
-                    }
-                    if (setterValueOrProxy)
-                    {
-                        RecyclableObject* func = VarTo<RecyclableObject>(setterValueOrProxy);
-                        JavascriptOperators::CallSetter(func, receiver, newValue, requestContext);
-                        return TRUE;
-                    }
-                }
-                else if ((flags & Proxy) == Proxy)
-                {
-                    Assert(VarIs<JavascriptProxy>(setterValueOrProxy));
-                    JavascriptProxy* proxy = VarTo<JavascriptProxy>(setterValueOrProxy);
-                    const PropertyRecord* propertyRecord = nullptr;
-                    proxy->PropertyIdFromInt(index, &propertyRecord);
-                    return proxy->SetPropertyTrap(receiver, JavascriptProxy::SetPropertyTrapKind::SetItemOnTaggedNumberKind, propertyRecord->GetPropertyId(), newValue, requestContext, propertyOperationFlags);
-                }
-                else
-                {
-                    Assert((flags & Data) == Data && (flags & Writable) == None);
-                    JavascriptError::ThrowCantAssignIfStrictMode(propertyOperationFlags, requestContext);
-                }
+                Assert(VarIs<JavascriptProxy>(setterValueOrProxy));
+                JavascriptProxy* proxy = VarTo<JavascriptProxy>(setterValueOrProxy);
+                const PropertyRecord* propertyRecord = nullptr;
+                proxy->PropertyIdFromInt(index, &propertyRecord);
+                return proxy->SetPropertyTrap(receiver, JavascriptProxy::SetPropertyTrapKind::SetItemOnTaggedNumberKind, propertyRecord->GetPropertyId(), newValue, requestContext, propertyOperationFlags);
+            }
+            else
+            {
+                Assert((flags & Data) == Data && (flags & Writable) == None);
+                JavascriptError::ThrowCantAssignIfStrictMode(propertyOperationFlags, requestContext);
+                return FALSE;
             }
         }
 
@@ -2876,42 +2875,40 @@ CommonNumber:
     {
         Assert (TaggedNumber::Is(receiver));
 
-        if (requestContext->optimizationOverrides.GetSideEffects() & SideEffects_Accessor)
+        Var setterValueOrProxy = nullptr;
+        PropertyValueInfo info;
+        DescriptorFlags flags = None;
+        if (object == nullptr)
         {
-            Var setterValueOrProxy = nullptr;
-            PropertyValueInfo info;
-            DescriptorFlags flags = None;
-            if (object == nullptr)
+            GetPropertyObject(receiver, requestContext, &object);
+        }
+        if (JavascriptOperators::CheckPrototypesForAccessorOrNonWritableProperty(object, propertyId, &setterValueOrProxy, &flags, &info, requestContext))
+        {
+            if ((flags & Accessor) == Accessor)
             {
-                GetPropertyObject(receiver, requestContext, &object);
+                if (JavascriptError::ThrowIfStrictModeUndefinedSetter(propertyOperationFlags, setterValueOrProxy, requestContext))
+                {
+                    return TRUE;
+                }
+                if (setterValueOrProxy)
+                {
+                    RecyclableObject* func = VarTo<RecyclableObject>(setterValueOrProxy);
+                    Assert(info.GetFlags() == InlineCacheSetterFlag || info.GetPropertyIndex() == Constants::NoSlot);
+                    JavascriptOperators::CallSetter(func, receiver, newValue, requestContext);
+                    return TRUE;
+                }
             }
-            if (JavascriptOperators::CheckPrototypesForAccessorOrNonWritableProperty(object, propertyId, &setterValueOrProxy, &flags, &info, requestContext))
+            else if ((flags & Proxy) == Proxy)
             {
-                if ((flags & Accessor) == Accessor)
-                {
-                    if (JavascriptError::ThrowIfStrictModeUndefinedSetter(propertyOperationFlags, setterValueOrProxy, requestContext))
-                    {
-                        return TRUE;
-                    }
-                    if (setterValueOrProxy)
-                    {
-                        RecyclableObject* func = VarTo<RecyclableObject>(setterValueOrProxy);
-                        Assert(info.GetFlags() == InlineCacheSetterFlag || info.GetPropertyIndex() == Constants::NoSlot);
-                        JavascriptOperators::CallSetter(func, receiver, newValue, requestContext);
-                        return TRUE;
-                    }
-                }
-                else if ((flags & Proxy) == Proxy)
-                {
-                    Assert(VarIs<JavascriptProxy>(setterValueOrProxy));
-                    JavascriptProxy* proxy = VarTo<JavascriptProxy>(setterValueOrProxy);
-                    return proxy->SetPropertyTrap(receiver, JavascriptProxy::SetPropertyTrapKind::SetPropertyOnTaggedNumberKind, propertyId, newValue, requestContext, propertyOperationFlags);
-                }
-                else
-                {
-                    Assert((flags & Data) == Data && (flags & Writable) == None);
-                    JavascriptError::ThrowCantAssignIfStrictMode(propertyOperationFlags, requestContext);
-                }
+                Assert(VarIs<JavascriptProxy>(setterValueOrProxy));
+                JavascriptProxy* proxy = VarTo<JavascriptProxy>(setterValueOrProxy);
+                return proxy->SetPropertyTrap(receiver, JavascriptProxy::SetPropertyTrapKind::SetPropertyOnTaggedNumberKind, propertyId, newValue, requestContext, propertyOperationFlags);
+            }
+            else
+            {
+                Assert((flags & Data) == Data && (flags & Writable) == None);
+                JavascriptError::ThrowCantAssignIfStrictMode(propertyOperationFlags, requestContext);
+                return FALSE;
             }
         }
 
@@ -3265,6 +3262,10 @@ CommonNumber:
         if (!TaggedNumber::Is(instance) && !TaggedNumber::Is(thisInstance))
         {
             return JavascriptOperators::SetProperty(UnsafeVarTo<RecyclableObject>(thisInstance), UnsafeVarTo<RecyclableObject>(instance), propertyId, newValue, info, scriptContext, flags);
+        }
+        if (TaggedNumber::Is(instance) && TaggedNumber::Is(thisInstance))
+        {
+            return JavascriptOperators::SetPropertyOnTaggedNumber(thisInstance, nullptr, propertyId, newValue, scriptContext, flags);
         }
 
         JavascriptError::ThrowCantAssignIfStrictMode(flags, scriptContext);
@@ -5568,7 +5569,8 @@ CommonNumber:
                 case TypeIds_Array: // fast path for array
                 {
                     int indexInt = TaggedInt::ToInt32(index);
-                    if (indexInt >= 0 && scriptContext->optimizationOverrides.IsEnabledArraySetElementFastPath())
+                    if (indexInt >= 0 && scriptContext->optimizationOverrides.IsEnabledArraySetElementFastPath() &&
+                        CheckIfObjectAndPrototypeChainHasOnlyWritableDataProperties(UnsafeVarTo<RecyclableObject>(instance)))
                     {
                         UnsafeVarTo<JavascriptArray>(instance)->SetItem((uint32)indexInt, value, flags);
                         return TRUE;
@@ -5789,7 +5791,8 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
         if (TaggedInt::Is(aElementIndex))
         {
             int32 indexInt = TaggedInt::ToInt32(aElementIndex);
-            if (indexInt >= 0 && scriptContext->optimizationOverrides.IsEnabledArraySetElementFastPath())
+            if (indexInt >= 0 && scriptContext->optimizationOverrides.IsEnabledArraySetElementFastPath() &&
+                CheckIfObjectAndPrototypeChainHasOnlyWritableDataProperties(UnsafeVarTo<RecyclableObject>(instance)))
             {
                 JavascriptNativeIntArray *arr = VarTo<JavascriptNativeIntArray>(instance);
                 if (!(arr->TryGrowHeadSegmentAndSetItem<int32, JavascriptNativeIntArray>((uint32)indexInt, iValue)))
@@ -5858,7 +5861,8 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
         if (TaggedInt::Is(aElementIndex))
         {
             int32 indexInt = TaggedInt::ToInt32(aElementIndex);
-            if (indexInt >= 0 && scriptContext->optimizationOverrides.IsEnabledArraySetElementFastPath())
+            if (indexInt >= 0 && scriptContext->optimizationOverrides.IsEnabledArraySetElementFastPath() &&
+                CheckIfObjectAndPrototypeChainHasOnlyWritableDataProperties(UnsafeVarTo<RecyclableObject>(instance)))
             {
                 JavascriptNativeFloatArray *arr = VarTo<JavascriptNativeFloatArray>(instance);
                 if (!(arr->TryGrowHeadSegmentAndSetItem<double, JavascriptNativeFloatArray>((uint32)indexInt, dValue)))
@@ -5999,7 +6003,8 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
             // Upper bounds check for source array
             JavascriptArray* srcArray = UnsafeVarTo<JavascriptArray>(srcInstance);
             JavascriptArray* dstArray = VarTo<JavascriptArray>(dstInstance);
-            if (scriptContext->optimizationOverrides.IsEnabledArraySetElementFastPath())
+            if (scriptContext->optimizationOverrides.IsEnabledArraySetElementFastPath() &&
+                CheckIfObjectAndPrototypeChainHasOnlyWritableDataProperties(dstArray))
             {
                 INT_PTR vt = VirtualTableInfoBase::GetVirtualTable(dstInstance);
                 if (instanceType == TypeIds_Array)
@@ -6088,7 +6093,8 @@ SetElementIHelper_INDEX_TYPE_IS_NUMBER:
                     }
                 }
             }
-            if (scriptContext->optimizationOverrides.IsEnabledArraySetElementFastPath())
+            if (scriptContext->optimizationOverrides.IsEnabledArraySetElementFastPath() &&
+                CheckIfObjectAndPrototypeChainHasOnlyWritableDataProperties(UnsafeVarTo<RecyclableObject>(instance)))
             {
                 INT_PTR vt = VirtualTableInfoBase::GetVirtualTable(instance);
                 if (instanceType == TypeIds_Array)

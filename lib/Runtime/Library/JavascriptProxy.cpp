@@ -310,6 +310,11 @@ namespace Js
             {
                 JavascriptError::ThrowTypeError(requestContext, JSERR_InconsistentTrapResult, _u("getOwnPropertyDescriptor"));
             }
+            if (resultDescriptor->WritableSpecified() && !resultDescriptor->IsWritable() &&
+                targetDescriptor.IsDataDescriptor() && targetDescriptor.WritableSpecified() && targetDescriptor.IsWritable())
+            {
+                JavascriptError::ThrowTypeError(requestContext, JSERR_InconsistentTrapResult, _u("getOwnPropertyDescriptor"));
+            }
         }
         resultDescriptor->SetFromProxy(true);
         return toProperty;
@@ -671,6 +676,7 @@ namespace Js
         Js::ImplicitCallFlags saveImplicitCallFlags = threadContext->GetImplicitCallFlags();
         threadContext->SetImplicitCallFlags((Js::ImplicitCallFlags)(saveImplicitCallFlags | ImplicitCall_Accessor));
 
+        bool throwOnError = (flags & PropertyOperation_StrictMode) != 0;
         if (!JavascriptOperators::GetOwnPropertyDescriptor(this, propertyId, requestContext, &proxyPropertyDescriptor))
         {
             PropertyDescriptor resultDescriptor;
@@ -678,7 +684,7 @@ namespace Js
             resultDescriptor.SetWritable(true);
             resultDescriptor.SetEnumerable(true);
             resultDescriptor.SetValue(value);
-            return Js::JavascriptOperators::DefineOwnPropertyDescriptor(this, propertyId, resultDescriptor, true, requestContext, flags);
+            return Js::JavascriptOperators::DefineOwnPropertyDescriptor(this, propertyId, resultDescriptor, throwOnError, requestContext, flags);
         }
         else
         {
@@ -687,19 +693,16 @@ namespace Js
             //    If IsAccessorDescriptor(existingDescriptor) is true, return false.
             //    If existingDescriptor.[[Writable]] is false, return false.
 
-            if (proxyPropertyDescriptor.IsAccessorDescriptor())
+            if (proxyPropertyDescriptor.IsAccessorDescriptor() ||
+                (proxyPropertyDescriptor.WritableSpecified() && !proxyPropertyDescriptor.IsWritable()))
             {
+                JavascriptError::ThrowCantAssignIfStrictMode(flags, requestContext);
                 return FALSE;
             }
 
-            if (proxyPropertyDescriptor.WritableSpecified() && !proxyPropertyDescriptor.IsWritable())
-            {
-                return FALSE;
-            }
-
-            proxyPropertyDescriptor.SetValue(value);
-            proxyPropertyDescriptor.SetOriginal(nullptr);
-            return Js::JavascriptOperators::DefineOwnPropertyDescriptor(this, propertyId, proxyPropertyDescriptor, true, requestContext, flags);
+            PropertyDescriptor valueDesc;
+            valueDesc.SetValue(value);
+            return Js::JavascriptOperators::DefineOwnPropertyDescriptor(this, propertyId, valueDesc, throwOnError, requestContext, flags);
         }
     }
 
@@ -848,7 +851,7 @@ namespace Js
         {
             return TRUE;
         }
-        if (!targetPropertyDescriptor.IsConfigurable())
+        if (!targetPropertyDescriptor.IsConfigurable() || !targetObj->IsExtensible())
         {
             JavascriptError::ThrowTypeError(requestContext, JSERR_InconsistentTrapResult, _u("deleteProperty"));
         }
@@ -1549,12 +1552,9 @@ namespace Js
         if (handlerObj == nullptr)
         {
             // the proxy has been revoked; TypeError.
-            if (shouldThrow)
-            {
-                if (!threadContext->RecordImplicitException())
-                    return FALSE;
-                JavascriptError::ThrowTypeError(GetScriptContext(), JSERR_ErrorOnRevokedProxy, _u("setPrototypeOf"));
-            }
+            if (!threadContext->RecordImplicitException())
+                return FALSE;
+            JavascriptError::ThrowTypeError(requestContext, JSERR_ErrorOnRevokedProxy, _u("setPrototypeOf"));
         }
 
         //4. Let target be the value of the[[ProxyTarget]] internal slot of O.
@@ -1568,8 +1568,7 @@ namespace Js
         Assert(!GetScriptContext()->IsHeapEnumInProgress());
         if (nullptr == setPrototypeOfMethod)
         {
-            JavascriptObject::ChangePrototype(targetObj, newPrototype, shouldThrow, requestContext);
-            return TRUE;
+            return JavascriptObject::ChangePrototype(targetObj, newPrototype, shouldThrow, requestContext);
         }
         //8. Let trapResult be the result of calling the[[Call]] internal method of trap with handler as the this value and a new List containing target and V.
 
@@ -1580,31 +1579,30 @@ namespace Js
 
         //9. Let booleanTrapResult be ToBoolean(trapResult).
         //10. ReturnIfAbrupt(booleanTrapResult).
-        //11. Let extensibleTarget be the result of IsExtensible(target).
-        //12. ReturnIfAbrupt(extensibleTarget).
-        //13. If extensibleTarget is true, then return booleanTrapResult.
-        //14. Let targetProto be the result of calling the[[GetPrototypeOf]] internal method of target.
-        //15. ReturnIfAbrupt(targetProto).
-        //16. If booleanTrapResult is true and SameValue(V, targetProto) is false, then throw a TypeError exception.
-        //17. Return booleanTrapResult.
+        //11. If booleanTrapResult is false, return false.
+        //12. Let extensibleTarget be ? IsExtensible(target).
+        //13. If extensibleTarget is true, return true.
+        //14. Let targetProto be ? target.[[GetPrototypeOf]]().
+        //15. If SameValue(V, targetProto) is false, throw a TypeError exception.
+        //16. Return true.
         BOOL prototypeSetted = JavascriptConversion::ToBoolean(setPrototypeResult, requestContext);
-        BOOL isExtensible = targetObj->IsExtensible();
-        if (isExtensible)
-        {
-            if (!prototypeSetted && shouldThrow)
-            {
-                JavascriptError::ThrowTypeError(requestContext, JSERR_ProxyTrapReturnedFalse, _u("setPrototypeOf"));
-            }
-            return prototypeSetted;
-        }
-        Var targetProto = targetObj->GetPrototype();
-        if (!JavascriptConversion::SameValue(targetProto, newPrototype))
+        if (!prototypeSetted)
         {
             if (shouldThrow)
             {
-                JavascriptError::ThrowTypeError(requestContext, JSERR_InconsistentTrapResult, _u("setPrototypeOf"));
+                JavascriptError::ThrowTypeError(requestContext, JSERR_ProxyTrapReturnedFalse, _u("setPrototypeOf"));
             }
             return FALSE;
+        }
+        BOOL isExtensible = targetObj->IsExtensible();
+        if (isExtensible)
+        {
+            return TRUE;
+        }
+        Var targetProto = JavascriptObject::GetPrototypeOf(targetObj, requestContext);
+        if (!JavascriptConversion::SameValue(targetProto, newPrototype))
+        {
+            JavascriptError::ThrowTypeError(requestContext, JSERR_InconsistentTrapResult, _u("setPrototypeOf"));
         }
         return TRUE;
     }
@@ -1675,23 +1673,21 @@ namespace Js
 
     Var JavascriptProxy::GetTypeOfString(ScriptContext* requestContext)
     {
+        if (JavascriptConversion::IsCallable(this))
+        {
+            return requestContext->GetLibrary()->GetFunctionTypeDisplayString();
+        }
+
         const JavascriptProxy* proxy = UnwrapNestedProxies(this);
 
         if (proxy->handler == nullptr)
         {
-            // even if handler is nullptr, return typeof as "object"
+            // Non-callable revoked proxy has typeof "object"
             return requestContext->GetLibrary()->GetObjectTypeDisplayString();
         }
-        // if exotic object has [[Call]] we should return "function", otherwise return "object"
-        if (VarIs<JavascriptFunction>(this->target))
-        {
-            return requestContext->GetLibrary()->GetFunctionTypeDisplayString();
-        }
-        else
-        {
-            // handle nested cases recursively
-            return proxy->target->GetTypeOfString(requestContext);
-        }
+
+        // handle nested cases recursively
+        return proxy->target->GetTypeOfString(requestContext);
     }
 
     BOOL JavascriptProxy::GetOwnPropertyDescriptor(RecyclableObject* obj, PropertyId propertyId, ScriptContext* requestContext, PropertyDescriptor* propertyDescriptor)
@@ -1801,6 +1797,12 @@ namespace Js
                 JavascriptError::ThrowTypeError(requestContext, JSERR_InconsistentTrapResult, _u("defineProperty"));
             }
             if (settingConfigFalse && targetDescriptor.IsConfigurable())
+            {
+                JavascriptError::ThrowTypeError(requestContext, JSERR_InconsistentTrapResult, _u("defineProperty"));
+            }
+            if (targetDescriptor.IsDataDescriptor() && !targetDescriptor.IsConfigurable() &&
+                targetDescriptor.WritableSpecified() && targetDescriptor.IsWritable() &&
+                descriptor.WritableSpecified() && !descriptor.IsWritable())
             {
                 JavascriptError::ThrowTypeError(requestContext, JSERR_InconsistentTrapResult, _u("defineProperty"));
             }

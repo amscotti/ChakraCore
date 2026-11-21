@@ -1574,9 +1574,11 @@ namespace Js
 
         __proto__getterFunction = CreateNonProfiledFunction(&ObjectPrototypeObject::EntryInfo::__proto__getter);
         __proto__getterFunction->SetPropertyWithAttributes(PropertyIds::length, TaggedInt::ToVarUnchecked(0), PropertyConfigurable, nullptr);
+        __proto__getterFunction->SetPropertyWithAttributes(PropertyIds::name, CreateStringFromCppLiteral(_u("get __proto__")), PropertyConfigurable, nullptr);
 
         __proto__setterFunction = CreateNonProfiledFunction(&ObjectPrototypeObject::EntryInfo::__proto__setter);
         __proto__setterFunction->SetPropertyWithAttributes(PropertyIds::length, TaggedInt::ToVarUnchecked(1), PropertyConfigurable, nullptr);
+        __proto__setterFunction->SetPropertyWithAttributes(PropertyIds::name, CreateStringFromCppLiteral(_u("set __proto__")), PropertyConfigurable, nullptr);
 
 
         identityFunction = CreateNonProfiledFunction(&JavascriptPromise::EntryInfo::Identity);
@@ -3834,7 +3836,7 @@ namespace Js
 
     bool JavascriptLibrary::InitializeReflectObject(DynamicObject* reflectObject, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)
     {
-        typeHandler->Convert(reflectObject, mode, 12);
+        typeHandler->Convert(reflectObject, mode, 14);
         // Note: Any new function addition/deletion/modification should also be updated in JavascriptLibrary::ProfilerRegisterReflect
         // so that the update is in sync with profiler
         ScriptContext* scriptContext = reflectObject->GetScriptContext();
@@ -3865,6 +3867,7 @@ namespace Js
             library->AddFunctionToLibraryObject(reflectObject, PropertyIds::apply, &JavascriptReflect::EntryInfo::Apply, 3));
         scriptContext->SetBuiltInLibraryFunction(JavascriptReflect::EntryInfo::Construct.GetOriginalEntryPoint(),
             library->AddFunctionToLibraryObject(reflectObject, PropertyIds::construct, &JavascriptReflect::EntryInfo::Construct, 2));
+        library->AddMember(reflectObject, PropertyIds::_symbolToStringTag, library->CreateStringFromCppLiteral(_u("Reflect")), PropertyConfigurable);
 
         return true;
     }
