@@ -1,6 +1,6 @@
 # Track Q3: ES2026 Wave 3 Built-ins (`+578` Broad Test262, `0` Engine Regressions)
 
-> **Status:** **COMPLETED (`modernize/phase4`)** on macOS ARM64 (`af68716c8` code commit + docs receipt commit; Linux x64 revalidation queued in Track `G0-phase4`).
+> **Status:** **COMPLETED (`modernize/phase4`)** on macOS ARM64 (`af68716c8` code commit + `f11175a06` initial docs receipt + follow-up doc-fix commit; Linux x64 revalidation queued in Track `G0-phase4`).
 > **Scope invariants:** `modernize/baseline` remains untouched at `1bf42d1f63e3f09b13ac782504b8cb59479890db`. Bytecode-header purity is preserved (`lib/Runtime/Base/JnDirectFields.h`, `lib/Runtime/InternalPropertyList.h`, `lib/Runtime/Library/InJavascript/Intl.js`, and `lib/Runtime/Library/InJavascript/JsBuiltIn*.bc.*.h` are completely unchanged vs. `modernize/baseline`, and `verify-bytecode` exits `0` in both `test` and `jit -Dwasm=true` profiles).
 
 ---
@@ -15,7 +15,7 @@ Built directly on Wave 0 (`87e7629ce`, layered over `Q1.5` `267f9321c`), all fou
 | **1. `Iterator.prototype.{includes,join}`** | `f44189769` (`q3-iter-includes-join`) | `3420a008b` | `lib/Runtime/Library/JavascriptIterator.cpp`, `test/es7/q3_iterator_includes_join.js` | **`+112`** scenarios (`iterator-includes` **`88/0`**, `Iterator.prototype.join` **`36/0`**; `SameValueZero`, strict `skippedElements` validation + `CloseRecordSwallow` before `GetIteratorDirect`, immediate `CloseRecordNormal` on match, `CompoundString` accumulator) |
 | **2. `Iterator.prototype.{chunks,windows}`** | `5853b7914` (`q3-iter-chunking`) | `068711379` | `lib/Runtime/Library/JavascriptIteratorChunking.{h,cpp}`, `test/es7/q3_iterator_chunking.js` | **`+138`** scenarios (`iterator-chunking` **`156/0`**; strict receiver/integer/`[1, 2^32 - 1]`/`undersized` validation with `CloseIteratorSwallow` before `next` lookup, lazy geometric ring buffer `JavascriptIteratorChunkState`, distinct `CreateArray` outputs) |
 | **3. `Promise.{allKeyed,allSettledKeyed}`** | `62b9184a2` (`q3-promise-keyed`) | `72cb8c000` | `lib/Runtime/Library/JavascriptPromise.{h,cpp}`, `test/es7/q3_promise_keyed.js` | **`+174`** scenarios (`await-dictionary` **`178/0`**; `Promise` **`1,458/0`**; `GetPromiseResolve` ordering, `OwnPropertyKeys` + enumerable `GetOwnPropertyDescriptorHelper` + `GetProperty`, `OrdinaryObjectCreate(null)` result + own `__proto__` preservation, `ENABLE_TTD` visitor) |
-| **4. `Iterator.{zip,zipKeyed}`** | `b0071c5d4` (`q3-iter-zip`) | `f676f838b` | `lib/Runtime/Library/JavascriptIteratorZip.{h,cpp}`, `test/es7/q3_iterator_zip.js` | **`+154`** scenarios (`joint-iteration` **`164/0`**; `zip` `74/0` + `zipKeyed` `90/0`; `GetOptionsObject`, `mode`/`padding` evaluation order, `GetIteratorFlattenableRejectPrimitives`, `shortest`/`longest`/`strict`, reverse-order `CloseZipEntriesNormal` preserving first abrupt completion) |
+| **4. `Iterator.{zip,zipKeyed}`** | `b0071c5d4` (`q3-iter-zip`) | `f676f838b` | `lib/Runtime/Library/JavascriptIteratorZip.{h,cpp}`, `test/es7/q3_iterator_zip.js` | **`+154`** scenarios (`joint-iteration` **`164/0`**; `zip` `76/0` + `zipKeyed` `88/0`; `GetOptionsObject`, `mode`/`padding` evaluation order, `GetIteratorFlattenableRejectPrimitives`, `shortest`/`longest`/`strict`, reverse-order `CloseZipEntriesNormal` preserving first abrupt completion) |
 | **Wave 2. Test Wiring & Gate Pin Bump** | -- | `af68716c8` | `test/es7/rlexe.xml`, `tools/build/gate_counts.json` | Wired `q3_iterator_includes_join.js` (`-CollectGarbage -args summary -endargs`) and `q3_{iterator_chunking,promise_keyed,iterator_zip}.js` (`-CollectGarbage`) into `test/es7/rlexe.xml`; bumped `tools/build/gate_counts.json` (`2094/2146 -> 2098/2150`) |
 
 ---
@@ -69,7 +69,7 @@ Built directly on Wave 0 (`87e7629ce`, layered over `Q1.5` `267f9321c`), all fou
 Resource / creation call / source location:
   1. Stack `IterRecord` (`placeholder` / `record`: `RecyclableObject* iterator`, `Var nextMethod`,
      `bool done`), `searchElement`, `skippedElements`, `value`, `separator`, and `firstString` in
-     `JavascriptIterator::{EntryIncludes, EntryJoin}` (`lib/Runtime/Library/JavascriptIterator.cpp:759-930`).
+     `JavascriptIterator::{EntryIncludes, EntryJoin}` (`lib/Runtime/Library/JavascriptIterator.cpp:759-931`).
   2. Lazy `CompoundString* resultBuilder = CompoundString::NewWithPointerCapacity(8, library)`
      (`JavascriptIterator.cpp:893`) allocated only when `EntryJoin` sees `>= 2` elements.
 Domain and allocator instance (including backing allocator lifetime):
@@ -215,7 +215,8 @@ Tests / commands / measured results / remaining uncertainty:
 ```text
 Resource / creation call / source location:
   - `JavascriptIteratorZipState` (`RecyclerNew`, `JavascriptIteratorZip.cpp:469,604`), `ZipIterList`
-    (`JsUtil::List<ZipIterEntry*, Recycler>`, `JavascriptIteratorZip.h:55`), `ZipIterEntry` elements
+    (`JsUtil::List<ZipIterEntry*, Recycler>`, `JavascriptIteratorZip.h:39`, initialized in
+    constructor at `:55`), `ZipIterEntry` elements
     (`RecyclerNew`, `JavascriptIteratorZip.cpp:506,634`), and `resultsScratch`
     (`RecyclerNewArrayZ(scriptContext->GetRecycler(), Field(Var), count)` when `count > 0`, `:409`),
     transferred to `JavascriptIteratorHelper::zipState` (`JavascriptIterator.h:131`).
@@ -284,8 +285,8 @@ Run via `python3 tools/test262/refresh_baseline.py --binary "$PWD/out/jit/bin/ch
 ### 4.1 Per-Scenario Delta & `Atomics/waitAsync` Verification (`93,141` Joined Scenarios)
 - **`fail -> pass`: `587` scenarios:**
   - **`578` deterministic `Q3` proposal passes** (`post-ES2025` `10,504 -> 9,926`):
-    - `test/built-ins/Iterator/zip/` (`+70` -> **`74/0`**) and `test/built-ins/Iterator/zipKeyed/` (`+84` -> **`90/0`**) (`joint-iteration` **`164/0`**)
-    - `test/built-ins/Iterator/prototype/chunks/` (`+68` -> **`78/0`**) and `test/built-ins/Iterator/prototype/windows/` (`+70` -> **`78/0`**) (`iterator-chunking` **`156/0`**)
+    - `test/built-ins/Iterator/zip/` (`+70` -> **`76/0`**) and `test/built-ins/Iterator/zipKeyed/` (`+84` -> **`88/0`**) (`joint-iteration` **`164/0`**)
+    - `test/built-ins/Iterator/prototype/chunks/` (`+68` -> **`76/0`**) and `test/built-ins/Iterator/prototype/windows/` (`+70` -> **`80/0`**) (`iterator-chunking` **`156/0`**)
     - `test/built-ins/Iterator/prototype/includes/` (`+80` -> **`88/0`**) (`iterator-includes` **`88/0`**)
     - `test/built-ins/Iterator/prototype/join/` (`+32` -> **`36/0`**) (`Iterator.prototype.join` **`36/0`**)
     - `test/built-ins/Promise/allKeyed/` (`+88` -> **`90/0`**) and `test/built-ins/Promise/allSettledKeyed/` (`+86` -> **`88/0`**) (`await-dictionary` **`178/0`**; full `test/built-ins/Promise/**/*.js` **`1,458/0`**)
@@ -304,12 +305,12 @@ Ran all `311` `Q3` Test262 files (`622` scenarios, `25/25` controls) across `tes
 
 ---
 
-## 5. Full macOS ARM64 Certification Matrix (`af68716c8` Code Commit)
+## 5. Full macOS ARM64 Certification Matrix (`af68716c8` Code Commit + `f11175a06` Initial Docs Receipt / Doc-Fix)
 
 | Gate | Command / Scope | Result |
 |---|---|---|
-| Bytecode-header purity | `mise exec -- zig build verify-bytecode` & `-Dprofile=jit -Dwasm=true verify-bytecode` | **PASS** (exit `0` on `af68716c8` and final `HEAD`; `JnDirectFields.h`, `InternalPropertyList.h`, `Intl.js`, `JsBuiltIn*.bc.*.h` unchanged vs. `modernize/baseline`) |
-| StyleChecks | `STYLECHECK_BASE={origin/master,modernize/baseline}` `tools/StyleChecks/check_{eol,tabs,ascii,copyright}.sh` | **PASS** (`8/8` `NO PROBLEMS DETECTED`) |
+| Bytecode-header purity | `mise exec -- zig build verify-bytecode` & `-Dprofile=jit -Dwasm=true verify-bytecode` | **PASS** (exit `0` on `af68716c8`, `f11175a06`, and follow-up doc-fix; `JnDirectFields.h`, `InternalPropertyList.h`, `Intl.js`, `JsBuiltIn*.bc.*.h` unchanged vs. `modernize/baseline`) |
+| StyleChecks | `STYLECHECK_BASE={origin/master,modernize/baseline}` `tools/StyleChecks/check_{eol,tabs,ascii,copyright}.sh` | **PASS** (`8/8` `NO PROBLEMS DETECTED` on `af68716c8`, `f11175a06`, and follow-up doc-fix) |
 | Build & gate unit tests | `zig test tools/linux-gate-tests.zig`; `check-selftest`; `check-build-tools`; `check_regression.py --self-test` | **PASS** (`9/9` Linux gate tests; `check-selftest` `pal-config 95/95` & negative controls PASS; **`98` tests OK**) |
 | `test` profile | `mise exec -- zig build check` | **PASS** (**`2098/0`** [`es7: 129/0`]; `check_smoke` PASS; `check_metadata` `18,606` `T` symbols `8/8` JsRT exports; `test-shared-basic` PASS) |
 | `debug-static` profile | `mise exec -- zig build -Dprofile=debug-static check` | **PASS** (**`2150/0`** [`es7: 129/0`]; **`538`** archive members [`1,881,731,376` bytes]; `62,624` `T` symbols `8/8` JsRT; `8/8` static native suites PASS; no dylib) |
@@ -319,4 +320,4 @@ Ran all `311` `Q3` Test262 files (`622` scenarios, `25/25` controls) across `tes
 | `GCStress` & `Node-API` | `mise exec -- zig build check-gcstress && mise exec -- zig build check-nodeapi` | **PASS** (`GCStress`: `in-thread` `0.98s` / `concurrent` `0.76s`, `walks=2` each; `Node-API`: **`161`** allowlisted exports = `155` napi + `6` host) |
 | ASan (`profile=test` & `jit -Dwasm=true`) | `-Dsanitize=address check-sanitize` + `ASAN_OPTIONS=detect_leaks=0 ./out/sanitize-address/bin/ch -ForceJITLoopBody -maxinterpretcount:1 -CollectGarbage` (`4` `q3_*.js`) | **PASS** (`profile=test`: **`27/27`**; `jit -Dwasm=true`: **`29/29`**; **`4/4`** `q3_*.js` JIT/GC runs clean) |
 | UBSan (`profile=test` & `jit -Dwasm=true`, `halt_on_error=1`) | `UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1` `-Dsanitize=undefined check-sanitize` + `./out/sanitize-undefined/bin/ch -ForceJITLoopBody -maxinterpretcount:1 -CollectGarbage` (`4` `q3_*.js`) | **PASS** (`profile=test`: **`27/27`**; `jit -Dwasm=true`: **`29/29`**; **`4/4`** `q3_*.js` JIT/GC runs clean) |
-| Clean rebuild & package | Clean non-sanitized `zig build -Dprofile=jit -Dwasm=true` + `zig build` + `zig build check-package` | **PASS** (code commit `af68716c8`: `chakracore-af68716c8-darwin-arm64.tar.gz`, **`5,505,065`** bytes, `sha256: be9af70dbf2fadbff0f5f43f430bb601b3c10fdcb8d45ca8199015d987bfbb68`; final docs commit re-verified with `check-package` `VERIFY PASS`, `ALL PACKAGE TESTS PASSED SUCCESSFULLY!`) |
+| Clean rebuild & package | Clean non-sanitized `zig build -Dprofile=jit -Dwasm=true` + `zig build` + `zig build check-package` | **PASS** (code commit `af68716c8`: `chakracore-af68716c8-darwin-arm64.tar.gz`, **`5,505,065`** bytes, `sha256: be9af70dbf2fadbff0f5f43f430bb601b3c10fdcb8d45ca8199015d987bfbb68`; initial docs commit `f11175a06`: `chakracore-f11175a06-darwin-arm64.tar.gz`, **`5,505,092`** bytes, `sha256: 14756993a6839a04cd09a1493339f7b1d935f4b4315ee5791a84276d2f30e764`; both `VERIFY PASS`, `ALL PACKAGE TESTS PASSED SUCCESSFULLY!`; follow-up doc-fix touches `doc/` only) |
