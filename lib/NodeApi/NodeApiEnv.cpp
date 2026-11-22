@@ -587,9 +587,7 @@ extern "C" {
 // on their vendored declarations, while these two host entries need
 // an explicit default on the definition because NodeApiHostApi.h
 // carries no visibility macro.
-#if defined(__GNUC__)
-__attribute__((visibility("default")))
-#endif
+CHAKRA_NODEAPI_EXPORT
 napi_env chakra_nodeapi_create_env(
     JsRuntimeHandle runtime, JsContextRef context,
     const char* module_filename,
@@ -681,9 +679,7 @@ napi_env chakra_nodeapi_create_env(
   return published;
 }
 
-#if defined(__GNUC__)
-__attribute__((visibility("default")))
-#endif
+CHAKRA_NODEAPI_EXPORT
 napi_status chakra_nodeapi_set_module_api_version(napi_env env_value,
                                                    int32_t version) {
   if (!env_value) return napi_invalid_arg;
@@ -715,9 +711,7 @@ napi_status chakra_nodeapi_set_module_api_version(napi_env env_value,
   return napi_ok;
 }
 
-#if defined(__GNUC__)
-__attribute__((visibility("default")))
-#endif
+CHAKRA_NODEAPI_EXPORT
 void chakra_nodeapi_destroy_env(napi_env env_value) {
   if (env_value == nullptr) {
     assert(false && "chakra_nodeapi_destroy_env(null)");

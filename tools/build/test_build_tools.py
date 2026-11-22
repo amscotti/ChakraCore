@@ -36,11 +36,15 @@ import common
 import check_fulljit
 import check_gcstress
 import check_jit
+import check_metadata_windows
 import check_native
+import check_nodeapi
 import check_regression
 import check_regression_linux
 import check_sanitize
+import check_smoke_windows
 import check_wasm_p1
+import gen_nodeapi_exports
 import install_profile
 import test_incremental
 
@@ -1540,6 +1544,157 @@ class Tier1GateAndSanitizerTests(unittest.TestCase):
         self.assertIn("check_wasm_p1.py", lz)
         self.assertIn("sanitize", bz)
         self.assertIn("sanitize", lz)
+
+
+class WindowsToolsAndNodeApiPeTests(unittest.TestCase):
+    """Cross-platform tests for Windows .def, PE32+ checkers, and installer paths."""
+
+    def test_gen_nodeapi_exports_def_writes_exact_161_order(self):
+        exports_path = HERE / "nodeapi_exports.txt"
+        expected_syms = gen_nodeapi_exports.parse_exports_file(exports_path)
+        self.assertEqual(len(expected_syms), 161)
+        with tempfile.TemporaryDirectory(prefix="def-gen-test-") as tmp:
+            def_out = Path(tmp) / "sub" / "libChakraNodeApi.def"
+            proc = subprocess.run(
+                [sys.executable, str(HERE / "gen_nodeapi_exports.py"),
+                 "--def", str(def_out)],
+                capture_output=True, text=True, timeout=30)
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            lines = def_out.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(lines[0], "LIBRARY libChakraNodeApi")
+            self.assertEqual(lines[1], "EXPORTS")
+            self.assertEqual(lines[2:], expected_syms)
+
+    def test_gen_nodeapi_exports_def_rejects_stale_exports_file(self):
+        with tempfile.TemporaryDirectory(prefix="def-stale-test-") as tmp:
+            fake_root = Path(tmp) / "repo"
+            (fake_root / "doc").mkdir(parents=True)
+            (fake_root / "tools/build").mkdir(parents=True)
+            shutil.copy2(ROOT / "doc/node-api-inventory.md",
+                         fake_root / "doc/node-api-inventory.md")
+            (fake_root / "tools/build/nodeapi_exports.txt").write_text(
+                "napi_get_version\n", encoding="utf-8")
+            def_out = Path(tmp) / "out.def"
+            proc = subprocess.run(
+                [sys.executable, str(HERE / "gen_nodeapi_exports.py"),
+                 "--root", str(fake_root), "--def", str(def_out)],
+                capture_output=True, text=True, timeout=30)
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertFalse(def_out.exists())
+
+    def test_check_nodeapi_synthetic_pe32plus_exports(self):
+        expected_syms = gen_nodeapi_exports.parse_exports_file(
+            HERE / "nodeapi_exports.txt")
+        with tempfile.TemporaryDirectory(prefix="nodeapi-pe-test-") as tmp:
+            dll_ok = Path(tmp) / "libChakraNodeApi.dll"
+            dll_ok.write_bytes(check_metadata_windows.build_synthetic_pe(
+                exports=expected_syms, is_dll=True))
+            self.assertEqual(check_nodeapi.read_pe_exports(str(dll_ok)),
+                             expected_syms)
+            self.assertEqual(check_nodeapi.main([
+                "check_nodeapi.py", "--dll", str(dll_ok),
+                "--exports", str(HERE / "nodeapi_exports.txt"),
+                "--inventory", str(ROOT / "doc/node-api-inventory.md"),
+            ]), 0)
+
+            # Missing one export fails.
+            dll_missing = Path(tmp) / "missing.dll"
+            dll_missing.write_bytes(check_metadata_windows.build_synthetic_pe(
+                exports=expected_syms[:-1], is_dll=True))
+            self.assertEqual(check_nodeapi.main([
+                "check_nodeapi.py", "--dll", str(dll_missing),
+                "--exports", str(HERE / "nodeapi_exports.txt"),
+                "--inventory", str(ROOT / "doc/node-api-inventory.md"),
+            ]), 1)
+
+            # Leaked internal hook fails.
+            dll_extra = Path(tmp) / "extra.dll"
+            dll_extra.write_bytes(check_metadata_windows.build_synthetic_pe(
+                exports=expected_syms + ["chakra_nodeapi_test_is_live"],
+                is_dll=True))
+            self.assertEqual(check_nodeapi.main([
+                "check_nodeapi.py", "--dll", str(dll_extra),
+                "--exports", str(HERE / "nodeapi_exports.txt"),
+                "--inventory", str(ROOT / "doc/node-api-inventory.md"),
+            ]), 1)
+
+            # Corrupt PE fails loudly.
+            bad_dll = Path(tmp) / "bad.dll"
+            bad_dll.write_bytes(b"MZ" + b"\x00" * 128)
+            with self.assertRaises(ValueError):
+                check_nodeapi.read_pe_exports(str(bad_dll))
+            self.assertEqual(check_nodeapi.main([
+                "check_nodeapi.py", "--dll", str(bad_dll),
+            ]), 1)
+
+    def test_check_metadata_windows_self_test_and_cli(self):
+        proc = subprocess.run(
+            [sys.executable, str(HERE / "check_metadata_windows.py"),
+             "--self-test"],
+            capture_output=True, text=True, timeout=30)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("ALL NEGATIVE CONTROLS BEHAVE", proc.stdout)
+
+    def test_check_smoke_windows_self_test(self):
+        proc = subprocess.run(
+            [sys.executable, str(HERE / "check_smoke_windows.py"),
+             "--self-test"],
+            capture_output=True, text=True, timeout=30)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("ALL NEGATIVE CONTROLS BEHAVE", proc.stdout)
+
+    def test_install_profile_windows_paths_and_crlf_trailing_slash(self):
+        with tempfile.TemporaryDirectory(prefix="install-win-paths-") as tmp:
+            root = Path(tmp)
+            (root / "tools/build").mkdir(parents=True)
+            script = root / "tools/build/install_profile.py"
+            script.write_text("# fixture\n")
+            src_exe = root / "src/ch.exe"
+            src_dll = root / "src/ChakraCore.dll"
+            src_lib = root / "src/ChakraCore.lib"
+            src_exe.parent.mkdir()
+            for p, data in ((src_exe, b"MZexe"), (src_dll, b"MZdll"),
+                            (src_lib, b"!<arch>\n")):
+                p.write_bytes(data)
+
+            # Trailing slash on --dest and CRLF pre-existing marker/manifest.
+            dest = root / "out/release-shared"
+            dest.mkdir(parents=True)
+            (dest / ".profile").write_bytes(b"release-shared\r\n")
+            (dest / ".manifest").write_bytes(b".profile\r\nbin/stale.exe\r\n")
+            (dest / "bin").mkdir()
+            (dest / "bin/stale.exe").write_bytes(b"stale")
+
+            with mock.patch.object(install_profile, "__file__", str(script)):
+                rc = install_profile.main([
+                    "install_profile.py",
+                    "--profile", "release-shared",
+                    "--dest", "out/release-shared/",
+                    "--map=bin/ch.exe=" + str(src_exe),
+                    "--map=bin\\ChakraCore.dll=" + str(src_dll),
+                    "--map=lib/ChakraCore.lib=" + str(src_lib),
+                ])
+            self.assertEqual(rc, 0)
+            self.assertFalse((dest / "bin/stale.exe").exists())
+            self.assertEqual((dest / "bin/ch.exe").read_bytes(), b"MZexe")
+            self.assertEqual((dest / "bin/ChakraCore.dll").read_bytes(), b"MZdll")
+            self.assertEqual((dest / "lib/ChakraCore.lib").read_bytes(), b"!<arch>\n")
+            self.assertEqual((dest / ".profile").read_bytes(), b"release-shared\n")
+            self.assertNotIn(b"\r\n", (dest / ".manifest").read_bytes())
+
+            # Traversal via backslash or trailing slash on --map dest fails.
+            with mock.patch.object(install_profile, "__file__", str(script)):
+                rc_bad = install_profile.main([
+                    "install_profile.py",
+                    "--profile", "release-shared",
+                    "--dest", "out/release-shared",
+                    "--map=bin\\..\\escape.exe=" + str(src_exe),
+                ])
+            self.assertEqual(rc_bad, 1)
+            with self.assertRaises(ValueError):
+                install_profile.safe_rel("bin/ch.exe/", "dest")
+            with self.assertRaises(ValueError):
+                install_profile.safe_rel("C:foo.exe", "dest")
 
 
 if __name__ == "__main__":

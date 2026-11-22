@@ -25,6 +25,7 @@ must edit WAVE1_LANDED (or HOST_API) here and regenerate the file.
 Usage:
   python3 tools/build/gen_nodeapi_exports.py          # regenerate
   python3 tools/build/gen_nodeapi_exports.py --check  # verify (no writes)
+  python3 tools/build/gen_nodeapi_exports.py --def <path>  # emit .def file
   python3 tools/build/gen_nodeapi_exports.py --self-test
 
 Exit 1 on drift, on an inventory count other than 155, or if a landed
@@ -275,6 +276,25 @@ def render(landed, host) -> str:
     return "\n".join(lines)
 
 
+def parse_exports_file(path: Path) -> list:
+    """Read symbol names from nodeapi_exports.txt in exact file order."""
+    syms = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        syms.append(s)
+    return syms
+
+
+def render_def(exports) -> str:
+    """Render a Windows module-definition (.def) file for libChakraNodeApi."""
+    lines = ["LIBRARY libChakraNodeApi", "EXPORTS"]
+    lines.extend(exports)
+    lines.append("")
+    return "\n".join(lines)
+
+
 def self_test() -> int:
     bad = 0
 
@@ -306,6 +326,15 @@ def self_test() -> int:
     exports_path = root / "tools" / "build" / "nodeapi_exports.txt"
     bad += report("exports file matches generation",
                   exports_path.read_text() == expected)
+    # .def rendering preserves header and exact order of all 161 exports.
+    ordered = parse_exports_file(exports_path)
+    def_text = render_def(ordered)
+    def_lines = def_text.splitlines()
+    bad += report("def renders LIBRARY + EXPORTS + 161 symbols",
+                  len(ordered) == 161
+                  and def_lines[0] == "LIBRARY libChakraNodeApi"
+                  and def_lines[1] == "EXPORTS"
+                  and def_lines[2:] == ordered)
 
     print("gen_nodeapi_exports self-test: %s"
           % ("ALL NEGATIVE CONTROLS BEHAVE" if bad == 0
@@ -317,6 +346,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--check", action="store_true",
                     help="exit 1 if nodeapi_exports.txt is stale")
+    ap.add_argument("--def", dest="def_path", type=Path, default=None,
+                    help="write Windows .def file (LIBRARY libChakraNodeApi) to PATH")
     ap.add_argument("--self-test", action="store_true",
                     help="negative controls for the generator gates")
     ap.add_argument("--root", type=Path, default=None)
@@ -346,16 +377,23 @@ def main() -> int:
     print(f"exports: {len(exports)} symbols "
           f"({len(WAVE1_LANDED)} napi + {len(HOST_API)} host)")
 
-    if args.check:
+    if args.check or args.def_path is not None:
         if not exports_path.exists():
             print(f"error: missing {exports_path}", file=sys.stderr)
             return 1
-        actual = exports_path.read_text()
+        actual = exports_path.read_text(encoding="utf-8")
         if actual != expected:
             print("error: nodeapi_exports.txt differs from generation; "
                   "regenerate with `python3 tools/build/gen_nodeapi_exports.py`",
                   file=sys.stderr)
             return 1
+        if args.def_path is not None:
+            ordered = parse_exports_file(exports_path)
+            def_text = render_def(ordered)
+            args.def_path.parent.mkdir(parents=True, exist_ok=True)
+            args.def_path.write_text(def_text, encoding="utf-8", newline="\n")
+            print(f"wrote {args.def_path} ({len(ordered)} exports)")
+            return 0
         print("check ok: nodeapi_exports.txt matches generation")
         return 0
     exports_path.parent.mkdir(parents=True, exist_ok=True)

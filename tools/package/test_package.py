@@ -16,6 +16,7 @@ Extracts a package tarball (or verifies an extracted package directory) and test
 from __future__ import print_function
 
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -55,25 +56,62 @@ def run_package_smoke_tests(package_dir, repo_root, case_file=None):
     bin_dir = os.path.join(package_dir, "bin")
     lib_dir = os.path.join(package_dir, "lib")
 
-    ch_bin = os.path.join(bin_dir, "ch")
-    ch_nodeapi_bin = os.path.join(bin_dir, "ch-nodeapi")
+    pkg_target = ""
+    if os.path.isfile(os.path.join(package_dir, "MANIFEST.json")):
+        try:
+            with open(os.path.join(package_dir, "MANIFEST.json"), "r", encoding="utf-8") as mf:
+                pkg_target = json.load(mf).get("target", "") or ""
+        except Exception:
+            pkg_target = ""
 
-    is_darwin = sys.platform == "darwin"
-    core_lib_name = "libChakraCore.dylib" if is_darwin else "libChakraCore.so"
-    nodeapi_lib_name = "libChakraNodeApi.dylib" if is_darwin else "libChakraNodeApi.so"
+    is_windows = (
+        pkg_target.startswith("windows-")
+        or (not pkg_target and sys.platform == "win32")
+        or os.path.isfile(os.path.join(bin_dir, "ch.exe"))
+    )
 
-    core_lib = os.path.join(lib_dir, core_lib_name)
-    nodeapi_lib = os.path.join(lib_dir, nodeapi_lib_name)
+    if is_windows:
+        ch_bin = os.path.join(bin_dir, "ch.exe")
+        ch_nodeapi_bin = os.path.join(bin_dir, "ch-nodeapi.exe")
+        core_dll = os.path.join(bin_dir, "ChakraCore.dll")
+        nodeapi_dll = os.path.join(bin_dir, "libChakraNodeApi.dll")
+        core_lib = os.path.join(lib_dir, "ChakraCore.lib")
+        nodeapi_lib = os.path.join(lib_dir, "libChakraNodeApi.lib")
 
-    # 0. Check artifacts exist
-    for path, desc in (
-        (ch_bin, "ch binary"),
-        (ch_nodeapi_bin, "ch-nodeapi binary"),
-        (core_lib, "ChakraCore shared library"),
-        (nodeapi_lib, "ChakraNodeApi shared library"),
-    ):
-        if not os.path.isfile(path):
-            raise RuntimeError("Required package artifact '{}' not found at {}".format(desc, path))
+        # 0. Check artifacts exist
+        for path, desc in (
+            (ch_bin, "ch binary"),
+            (ch_nodeapi_bin, "ch-nodeapi binary"),
+            (core_dll, "ChakraCore DLL"),
+            (nodeapi_dll, "ChakraNodeApi DLL"),
+            (core_lib, "ChakraCore import library"),
+            (nodeapi_lib, "ChakraNodeApi import library"),
+        ):
+            if not os.path.isfile(path):
+                raise RuntimeError("Required package artifact '{}' not found at {}".format(desc, path))
+    else:
+        ch_bin = os.path.join(bin_dir, "ch")
+        ch_nodeapi_bin = os.path.join(bin_dir, "ch-nodeapi")
+
+        is_darwin = (
+            pkg_target.startswith("darwin-")
+            or (not pkg_target.startswith("linux-") and sys.platform == "darwin")
+        )
+        core_lib_name = "libChakraCore.dylib" if is_darwin else "libChakraCore.so"
+        nodeapi_lib_name = "libChakraNodeApi.dylib" if is_darwin else "libChakraNodeApi.so"
+
+        core_lib = os.path.join(lib_dir, core_lib_name)
+        nodeapi_lib = os.path.join(lib_dir, nodeapi_lib_name)
+
+        # 0. Check artifacts exist
+        for path, desc in (
+            (ch_bin, "ch binary"),
+            (ch_nodeapi_bin, "ch-nodeapi binary"),
+            (core_lib, "ChakraCore shared library"),
+            (nodeapi_lib, "ChakraNodeApi shared library"),
+        ):
+            if not os.path.isfile(path):
+                raise RuntimeError("Required package artifact '{}' not found at {}".format(desc, path))
 
     # Clean environment: ensure DYLD_LIBRARY_PATH and LD_LIBRARY_PATH are unset
     # so we strictly test rpath resolution relative to the binary!
@@ -185,9 +223,12 @@ def run_package_smoke_tests(package_dir, repo_root, case_file=None):
             cmd3 = [ch_nodeapi_bin, case_file]
             print("Running: {}".format(" ".join(cmd3)))
             res3 = subprocess.run(cmd3, capture_output=True, text=True, env=clean_env)
-            # Verify dynamic linker succeeded (no dyld / dlopen error on libChakraCore or libChakraNodeApi)
+            # Verify dynamic linker succeeded (no dyld / dlopen / Win32 DLL loader error)
             stderr_out = res3.stderr or ""
-            if "dyld: Library not loaded" in stderr_out or "error while loading shared libraries" in stderr_out:
+            if ("dyld: Library not loaded" in stderr_out
+                    or "error while loading shared libraries" in stderr_out
+                    or "Unable to load" in stderr_out
+                    or res3.returncode in (-1073741515, 3221225781, -1073741511)):
                 raise RuntimeError("Dynamic library resolution failed for ch-nodeapi:\n{}".format(stderr_out))
             if res3.returncode == 0:
                 print("ch-nodeapi ran case cleanly (exit code 0).")
@@ -258,7 +299,11 @@ def main(argv=None):
             run_package_smoke_tests(tmpdir, repo_root, args.case)
     elif os.path.isdir(target_path):
         tb = find_tarball_in_dir(target_path)
-        if tb and not os.path.isfile(os.path.join(target_path, "bin", "ch")):
+        has_ch = (
+            os.path.isfile(os.path.join(target_path, "bin", "ch"))
+            or os.path.isfile(os.path.join(target_path, "bin", "ch.exe"))
+        )
+        if tb and not has_ch:
             print("Found package tarball in directory: {}".format(tb))
             with tempfile.TemporaryDirectory(prefix="chakra-test-pkg-") as tmpdir:
                 with tarfile.open(tb, "r:*") as tar:

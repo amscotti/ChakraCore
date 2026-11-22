@@ -87,17 +87,13 @@ NAPI_EXTERN void NAPI_CDECL napi_module_register(napi_module* mod) {
   }
 }
 
-#if defined(__GNUC__)
-__attribute__((visibility("default")))
-#endif
+CHAKRA_NODEAPI_EXPORT
 size_t chakra_nodeapi_pending_module_count(void) {
   std::lock_guard<std::mutex> lk(g_pending_mutex);
   return g_pending.size();
 }
 
-#if defined(__GNUC__)
-__attribute__((visibility("default")))
-#endif
+CHAKRA_NODEAPI_EXPORT
 napi_status chakra_nodeapi_get_pending_module(
     size_t index, chakra_nodeapi_pending_module_info* out) {
   if (out == nullptr) {
@@ -117,9 +113,7 @@ napi_status chakra_nodeapi_get_pending_module(
   return napi_ok;
 }
 
-#if defined(__GNUC__)
-__attribute__((visibility("default")))
-#endif
+CHAKRA_NODEAPI_EXPORT
 napi_status chakra_nodeapi_run_pending_registrations(napi_env env,
                                                      napi_value exports,
                                                      napi_value* result) {

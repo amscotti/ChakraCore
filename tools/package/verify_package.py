@@ -118,19 +118,20 @@ def verify_extracted_dir(target_dir):
             errors.append("SHA-256 mismatch for '{}': expected {}, got {}".format(
                 norm_rel, exp_sha, actual_sha))
 
-        # Verify permissions: binaries in bin/ and libraries in lib/ require 0755
-        st_mode = os.stat(actual_path).st_mode
-        if norm_rel.startswith("bin/") or norm_rel.startswith("lib/"):
-            # Check executable bits
-            if not (st_mode & stat.S_IXUSR):
-                errors.append("File '{}' missing user executable permission (expected 0755, mode: {:o})".format(
-                    norm_rel, st_mode & 0o777))
-            if not (st_mode & stat.S_IXGRP):
-                errors.append("File '{}' missing group executable permission (expected 0755, mode: {:o})".format(
-                    norm_rel, st_mode & 0o777))
-            if not (st_mode & stat.S_IXOTH):
-                errors.append("File '{}' missing others executable permission (expected 0755, mode: {:o})".format(
-                    norm_rel, st_mode & 0o777))
+        # Verify permissions: binaries in bin/ and libraries in lib/ require 0755 on POSIX
+        if os.name != "nt":
+            st_mode = os.stat(actual_path).st_mode
+            if norm_rel.startswith("bin/") or norm_rel.startswith("lib/"):
+                # Check executable bits
+                if not (st_mode & stat.S_IXUSR):
+                    errors.append("File '{}' missing user executable permission (expected 0755, mode: {:o})".format(
+                        norm_rel, st_mode & 0o777))
+                if not (st_mode & stat.S_IXGRP):
+                    errors.append("File '{}' missing group executable permission (expected 0755, mode: {:o})".format(
+                        norm_rel, st_mode & 0o777))
+                if not (st_mode & stat.S_IXOTH):
+                    errors.append("File '{}' missing others executable permission (expected 0755, mode: {:o})".format(
+                        norm_rel, st_mode & 0o777))
 
     # Check for unexpected files
     actual_files = set()
@@ -186,15 +187,34 @@ def verify_package(source_path):
     if os.path.isfile(source_path):
         print("Verifying package tarball: {}".format(source_path))
         with tempfile.TemporaryDirectory(prefix="chakra-verify-") as tmpdir:
+            tar_mode_errors = []
             try:
                 with tarfile.open(source_path, "r:*") as tar:
+                    for ti in tar.getmembers():
+                        if ti.isreg():
+                            arc = ti.name.replace("\\", "/")
+                            while arc.startswith("./"):
+                                arc = arc[2:]
+                            parts = [p for p in arc.split("/") if p]
+                            is_bin_or_lib = (
+                                (len(parts) >= 2 and parts[0] in ("bin", "lib"))
+                                or (len(parts) >= 3 and parts[1] in ("bin", "lib"))
+                            )
+                            if is_bin_or_lib and (ti.mode & 0o755) != 0o755:
+                                tar_mode_errors.append(
+                                    "Tar entry '{}' missing 0755 permission (mode: {:o})".format(
+                                        arc, ti.mode & 0o777))
                     if hasattr(tarfile, "data_filter"):
                         tar.extractall(path=tmpdir, filter="data")
                     else:
                         tar.extractall(path=tmpdir)
             except Exception as e:
                 return False, ["Failed to extract tarball '{}': {}".format(source_path, e)]
-            return verify_extracted_dir(tmpdir)
+            ok, errs = verify_extracted_dir(tmpdir)
+            if tar_mode_errors:
+                errs = tar_mode_errors + errs
+                ok = False
+            return ok, errs
 
     return False, ["Unknown source path type: {}".format(source_path)]
 

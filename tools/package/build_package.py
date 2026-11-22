@@ -138,9 +138,11 @@ def stage_package(prefix, staging_dir, repo_root, version, target):
         if not os.path.isdir(d):
             os.makedirs(d)
 
-    is_darwin = sys.platform == "darwin"
-    core_dylib_name = "libChakraCore.dylib" if is_darwin else "libChakraCore.so"
-    nodeapi_dylib_name = "libChakraNodeApi.dylib" if is_darwin else "libChakraNodeApi.so"
+    is_windows = target.startswith("windows-")
+    is_darwin = (not is_windows) and (
+        target.startswith("darwin-")
+        or (not target.startswith("linux-") and sys.platform == "darwin")
+    )
 
     bin_search_paths = [
         os.path.join(prefix, "bin"),
@@ -162,40 +164,87 @@ def stage_package(prefix, staging_dir, repo_root, version, target):
         os.path.join(repo_root, "out", "test", "bin"),
     ]
 
-    # Stage bin/ch
-    ch_src = find_file(bin_search_paths, "ch")
-    if not ch_src:
-        raise RuntimeError("Could not find 'ch' executable in search paths: {}".format(bin_search_paths))
-    copy_with_mode(ch_src, os.path.join(bin_dir, "ch"), 0o755)
+    if is_windows:
+        dll_search_paths = [
+            os.path.join(prefix, "bin"),
+            os.path.join(prefix, "lib"),
+            os.path.join(prefix),
+            os.path.join(repo_root, "zig-out", "bin"),
+            os.path.join(repo_root, "zig-out", "lib"),
+            os.path.join(repo_root, "out", "release-shared", "bin"),
+            os.path.join(repo_root, "out", "release-shared", "lib"),
+            os.path.join(repo_root, "out", "test", "bin"),
+            os.path.join(repo_root, "out", "test", "lib"),
+        ]
 
-    # Stage bin/ch-nodeapi
-    ch_nodeapi_src = find_file(bin_search_paths, "ch-nodeapi")
-    if not ch_nodeapi_src:
-        raise RuntimeError("Could not find 'ch-nodeapi' executable in search paths: {}".format(bin_search_paths))
-    copy_with_mode(ch_nodeapi_src, os.path.join(bin_dir, "ch-nodeapi"), 0o755)
+        ch_src = find_file(bin_search_paths, "ch.exe")
+        if not ch_src:
+            raise RuntimeError("Could not find 'ch.exe' executable in search paths: {}".format(bin_search_paths))
+        copy_with_mode(ch_src, os.path.join(bin_dir, "ch.exe"), 0o755)
 
-    # Stage lib/libChakraCore.*
-    core_lib_src = find_file(lib_search_paths, core_dylib_name)
-    if not core_lib_src:
-        raise RuntimeError("Could not find '{}' in search paths: {}".format(core_dylib_name, lib_search_paths))
-    copy_with_mode(core_lib_src, os.path.join(lib_dir, core_dylib_name), 0o755)
+        ch_nodeapi_src = find_file(bin_search_paths, "ch-nodeapi.exe")
+        if not ch_nodeapi_src:
+            raise RuntimeError("Could not find 'ch-nodeapi.exe' executable in search paths: {}".format(bin_search_paths))
+        copy_with_mode(ch_nodeapi_src, os.path.join(bin_dir, "ch-nodeapi.exe"), 0o755)
 
-    # Stage lib/libChakraNodeApi.*
-    nodeapi_lib_src = find_file(lib_search_paths, nodeapi_dylib_name)
-    if not nodeapi_lib_src:
-        raise RuntimeError("Could not find '{}' in search paths: {}".format(nodeapi_dylib_name, lib_search_paths))
-    copy_with_mode(nodeapi_lib_src, os.path.join(lib_dir, nodeapi_dylib_name), 0o755)
+        # Copy DLLs directly beside bin/ on Windows (no symlinks).
+        core_dll_src = find_file(dll_search_paths, "ChakraCore.dll")
+        if not core_dll_src:
+            raise RuntimeError("Could not find 'ChakraCore.dll' in search paths: {}".format(dll_search_paths))
+        copy_with_mode(core_dll_src, os.path.join(bin_dir, "ChakraCore.dll"), 0o755)
 
-    # Co-location link: ch dynamically dlopens libChakraCore from its own executable dir
-    # via GetBinaryPathWithFileNameA. Stage relative symlink bin/libChakraCore.* -> ../lib/libChakraCore.*
-    # so that bin/ch runs out-of-the-box while canonical shared libraries reside in lib/.
-    bin_core_link = os.path.join(bin_dir, core_dylib_name)
-    if os.path.islink(bin_core_link) or os.path.isfile(bin_core_link):
-        os.remove(bin_core_link)
-    try:
-        os.symlink(os.path.join("..", "lib", core_dylib_name), bin_core_link)
-    except OSError:
-        copy_with_mode(core_lib_src, bin_core_link, 0o755)
+        nodeapi_dll_src = find_file(dll_search_paths, "libChakraNodeApi.dll")
+        if not nodeapi_dll_src:
+            raise RuntimeError("Could not find 'libChakraNodeApi.dll' in search paths: {}".format(dll_search_paths))
+        copy_with_mode(nodeapi_dll_src, os.path.join(bin_dir, "libChakraNodeApi.dll"), 0o755)
+
+        core_imp_src = find_file(lib_search_paths, "ChakraCore.lib")
+        if not core_imp_src:
+            raise RuntimeError("Could not find 'ChakraCore.lib' in search paths: {}".format(lib_search_paths))
+        copy_with_mode(core_imp_src, os.path.join(lib_dir, "ChakraCore.lib"), 0o755)
+
+        nodeapi_imp_src = find_file(lib_search_paths, "libChakraNodeApi.lib")
+        if not nodeapi_imp_src:
+            raise RuntimeError("Could not find 'libChakraNodeApi.lib' in search paths: {}".format(lib_search_paths))
+        copy_with_mode(nodeapi_imp_src, os.path.join(lib_dir, "libChakraNodeApi.lib"), 0o755)
+    else:
+        core_dylib_name = "libChakraCore.dylib" if is_darwin else "libChakraCore.so"
+        nodeapi_dylib_name = "libChakraNodeApi.dylib" if is_darwin else "libChakraNodeApi.so"
+
+        # Stage bin/ch
+        ch_src = find_file(bin_search_paths, "ch")
+        if not ch_src:
+            raise RuntimeError("Could not find 'ch' executable in search paths: {}".format(bin_search_paths))
+        copy_with_mode(ch_src, os.path.join(bin_dir, "ch"), 0o755)
+
+        # Stage bin/ch-nodeapi
+        ch_nodeapi_src = find_file(bin_search_paths, "ch-nodeapi")
+        if not ch_nodeapi_src:
+            raise RuntimeError("Could not find 'ch-nodeapi' executable in search paths: {}".format(bin_search_paths))
+        copy_with_mode(ch_nodeapi_src, os.path.join(bin_dir, "ch-nodeapi"), 0o755)
+
+        # Stage lib/libChakraCore.*
+        core_lib_src = find_file(lib_search_paths, core_dylib_name)
+        if not core_lib_src:
+            raise RuntimeError("Could not find '{}' in search paths: {}".format(core_dylib_name, lib_search_paths))
+        copy_with_mode(core_lib_src, os.path.join(lib_dir, core_dylib_name), 0o755)
+
+        # Stage lib/libChakraNodeApi.*
+        nodeapi_lib_src = find_file(lib_search_paths, nodeapi_dylib_name)
+        if not nodeapi_lib_src:
+            raise RuntimeError("Could not find '{}' in search paths: {}".format(nodeapi_dylib_name, lib_search_paths))
+        copy_with_mode(nodeapi_lib_src, os.path.join(lib_dir, nodeapi_dylib_name), 0o755)
+
+        # Co-location link: ch dynamically dlopens libChakraCore from its own executable dir
+        # via GetBinaryPathWithFileNameA. Stage relative symlink bin/libChakraCore.* -> ../lib/libChakraCore.*
+        # so that bin/ch runs out-of-the-box while canonical shared libraries reside in lib/.
+        bin_core_link = os.path.join(bin_dir, core_dylib_name)
+        if os.path.islink(bin_core_link) or os.path.isfile(bin_core_link):
+            os.remove(bin_core_link)
+        try:
+            os.symlink(os.path.join("..", "lib", core_dylib_name), bin_core_link)
+        except OSError:
+            copy_with_mode(core_lib_src, bin_core_link, 0o755)
 
     # Stage include headers:
     # 1) ChakraCore.h & ChakraCommon.h
@@ -272,7 +321,7 @@ def stage_package(prefix, staging_dir, repo_root, version, target):
     }
 
     manifest_path = os.path.join(staging_dir, "MANIFEST.json")
-    with open(manifest_path, "w", encoding="utf-8") as f:
+    with open(manifest_path, "w", encoding="utf-8", newline="\n") as f:
         json.dump(manifest_data, f, indent=2, sort_keys=True)
         f.write("\n")
     os.chmod(manifest_path, 0o644)
@@ -356,13 +405,17 @@ def main(argv=None):
     # Prefix resolution
     prefix = args.prefix
     if not prefix:
+        ch_exe_name = "ch.exe" if target.startswith("windows-") else "ch"
         candidates = [
             os.path.join(repo_root, "out", "release-shared"),
             os.path.join(repo_root, "zig-out"),
             os.path.join(repo_root, "out", "test"),
         ]
         for c in candidates:
-            if os.path.isdir(c) and (os.path.isfile(os.path.join(c, "bin", "ch")) or os.path.isfile(os.path.join(c, "ch"))):
+            if os.path.isdir(c) and (
+                os.path.isfile(os.path.join(c, "bin", ch_exe_name))
+                or os.path.isfile(os.path.join(c, ch_exe_name))
+            ):
                 prefix = c
                 break
         if not prefix:

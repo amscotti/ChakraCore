@@ -45,6 +45,7 @@ report as "runtime T symbols".
 
 Usage:
   python3 tools/build/check_nodeapi.py --dylib <libChakraNodeApi.dylib>
+  python3 tools/build/check_nodeapi.py --dll <libChakraNodeApi.dll>
   python3 tools/build/check_nodeapi.py --self-test
 
 Exit 0 iff exact match (plus documented runtime). Wired as
@@ -54,6 +55,7 @@ Exit 0 iff exact match (plus documented runtime). Wired as
 import argparse
 import os
 import re
+import struct
 import subprocess
 import sys
 import tempfile
@@ -107,7 +109,93 @@ def parse_inventory(path: str) -> set:
     return set(gen.parse_inventory(Path(path)))
 
 
-def exported_t_symbols(dylib: str) -> set:
+def read_pe_exports(path: str) -> list:
+    """Parse named exports from a PE32/PE32+ image's Export Directory."""
+    with open(path, "rb") as f:
+        data = f.read()
+    if len(data) < 64 or data[:2] != b"MZ":
+        raise ValueError("not a PE/MZ image")
+    e_lfanew = struct.unpack_from("<I", data, 0x3C)[0]
+    if e_lfanew < 64 or e_lfanew + 24 > len(data):
+        raise ValueError("invalid PE e_lfanew 0x%x" % e_lfanew)
+    if data[e_lfanew:e_lfanew + 4] != b"PE\x00\x00":
+        raise ValueError("missing PE signature")
+    coff_off = e_lfanew + 4
+    _machine, num_sections, _ts, _sym_ptr, _num_syms, opt_size, _chars = (
+        struct.unpack_from("<HHIIIHH", data, coff_off)
+    )
+    opt_off = coff_off + 20
+    if opt_size < 2 or opt_off + opt_size > len(data):
+        raise ValueError("invalid PE optional header size %d" % opt_size)
+    magic = struct.unpack_from("<H", data, opt_off)[0]
+    if magic == 0x20B:  # PE32+
+        rva_count_rel = 108
+        dd_rel = 112
+    elif magic == 0x10B:  # PE32
+        rva_count_rel = 92
+        dd_rel = 96
+    else:
+        raise ValueError("unsupported PE optional magic 0x%x" % magic)
+    if opt_size < dd_rel + 8:
+        raise ValueError("PE optional header lacks DataDirectory[0]")
+    num_rva = struct.unpack_from("<I", data, opt_off + rva_count_rel)[0]
+    if num_rva < 1:
+        return []
+    export_rva, export_size = struct.unpack_from("<II", data, opt_off + dd_rel)
+    if export_rva == 0 or export_size == 0:
+        return []
+
+    sec_off = opt_off + opt_size
+    if sec_off + num_sections * 40 > len(data):
+        raise ValueError("truncated PE section table")
+    sections = []
+    for i in range(num_sections):
+        vsize, va, raw_size, raw_ptr = struct.unpack_from(
+            "<IIII", data, sec_off + i * 40 + 8
+        )
+        sections.append((vsize, va, raw_size, raw_ptr))
+
+    def rva_to_offset(rva: int) -> int:
+        for vsize, va, raw_size, raw_ptr in sections:
+            span = max(vsize, raw_size)
+            if va <= rva < va + span:
+                delta = rva - va
+                if delta >= raw_size or raw_ptr + delta >= len(data):
+                    raise ValueError("RVA 0x%x outside section raw data" % rva)
+                return raw_ptr + delta
+        if rva < sec_off + num_sections * 40 and rva < len(data):
+            return rva
+        raise ValueError("RVA 0x%x not mapped to any PE section" % rva)
+
+    exp_off = rva_to_offset(export_rva)
+    if exp_off + 40 > len(data):
+        raise ValueError("truncated IMAGE_EXPORT_DIRECTORY")
+    (_chars, _ts, _maj, _min, _name_rva, _base, _num_funcs, num_names,
+     _addr_funcs, addr_names, _addr_ords) = struct.unpack_from(
+        "<IIHHIIIIIII", data, exp_off
+    )
+    if num_names == 0:
+        return []
+    names_off = rva_to_offset(addr_names)
+    if names_off + num_names * 4 > len(data):
+        raise ValueError("truncated export AddressOfNames table")
+    exports = []
+    for i in range(num_names):
+        name_rva = struct.unpack_from("<I", data, names_off + i * 4)[0]
+        name_off = rva_to_offset(name_rva)
+        nul = data.find(b"\x00", name_off)
+        if nul == -1:
+            raise ValueError("unterminated export name at 0x%x" % name_off)
+        exports.append(data[name_off:nul].decode("utf-8", errors="strict"))
+    return exports
+
+
+def exported_t_symbols(dylib: str, force_pe: bool = False) -> set:
+    if force_pe or dylib.lower().endswith(".dll"):
+        try:
+            return set(read_pe_exports(dylib))
+        except (OSError, ValueError, UnicodeDecodeError) as e:
+            raise RuntimeError("PE export parse failed for %s: %s" % (dylib, e))
     rc, out, err = common.run_capture(["nm", "-gU", dylib])
     if rc != 0:
         # Linux fallback: nm -g without -U (no underscore prefix).
@@ -163,7 +251,7 @@ def self_test() -> int:
     # Runtime operator new is filtered, other __Z is not.
     prov, rt = provider_symbols({"napi_a", "__Znwm", "__ZN7nodeapi13LookupLiveEnvEPvPPNS_7NodeEnvE"})
     bad += report("runtime operator filtered", prov == {"napi_a", "__ZN7nodeapi13LookupLiveEnvEPvPPNS_7NodeEnvE"} and rt == {"__Znwm"})
-    # Garbage dylib fails (nm rejects non-Mach-O).
+    # Garbage dylib/dll fails (nm rejects non-Mach-O; PE parser rejects non-MZ).
     tmp = tempfile.mkdtemp(prefix="check-nodeapi-selftest-")
     try:
         garbage = os.path.join(tmp, "garbage.dylib")
@@ -174,6 +262,62 @@ def self_test() -> int:
             bad += report("garbage victim raises", False)
         except RuntimeError:
             bad += report("garbage victim raises", True)
+        garbage_dll = os.path.join(tmp, "garbage.dll")
+        with open(garbage_dll, "wb") as f:
+            f.write(b"not a PE file, just tampered bytes\n" * 16)
+        try:
+            read_pe_exports(garbage_dll)
+            bad += report("garbage dll raises ValueError", False)
+        except ValueError:
+            bad += report("garbage dll raises ValueError", True)
+        try:
+            exported_t_symbols(garbage_dll)
+            bad += report("garbage dll raises RuntimeError", False)
+        except RuntimeError:
+            bad += report("garbage dll raises RuntimeError", True)
+        # Minimal valid synthetic PE32+ DLL with .edata exports.
+        names_blob = b""
+        name_offsets = []
+        for s in (b"chakra_nodeapi_create_env", b"napi_get_version"):
+            name_offsets.append(len(names_blob))
+            names_blob += s + b"\x00"
+        sec_va = 0x1000
+        sec_raw = 0x200
+        exp_dir_rel = 0
+        addr_names_rel = 40
+        strings_rel = addr_names_rel + 8
+        name_rvas = [sec_va + strings_rel + off for off in name_offsets]
+        edata = bytearray(strings_rel + len(names_blob))
+        struct.pack_into("<IIHHIIIIIII", edata, exp_dir_rel,
+                         0, 0, 0, 0, 0, 1, 2, 2,
+                         sec_va + addr_names_rel, sec_va + addr_names_rel,
+                         sec_va + addr_names_rel)
+        for idx, nrva in enumerate(name_rvas):
+            struct.pack_into("<I", edata, addr_names_rel + idx * 4, nrva)
+        edata[strings_rel:] = names_blob
+        pe = bytearray(sec_raw + len(edata))
+        pe[0:2] = b"MZ"
+        e_lfanew = 0x40
+        struct.pack_into("<I", pe, 0x3C, e_lfanew)
+        pe[e_lfanew:e_lfanew + 4] = b"PE\x00\x00"
+        opt_size = 240
+        struct.pack_into("<HHIIIHH", pe, e_lfanew + 4,
+                         0x8664, 1, 0, 0, 0, opt_size, 0x2022)
+        opt_off = e_lfanew + 24
+        struct.pack_into("<H", pe, opt_off, 0x20B)
+        struct.pack_into("<I", pe, opt_off + 108, 16)
+        struct.pack_into("<II", pe, opt_off + 112, sec_va, len(edata))
+        sec_off = opt_off + opt_size
+        pe[sec_off:sec_off + 8] = b".edata\x00\x00"
+        struct.pack_into("<IIII", pe, sec_off + 8,
+                         len(edata), sec_va, len(edata), sec_raw)
+        pe[sec_raw:] = edata
+        pe_dll = os.path.join(tmp, "synthetic.dll")
+        with open(pe_dll, "wb") as f:
+            f.write(bytes(pe))
+        got_pe = exported_t_symbols(pe_dll)
+        bad += report("synthetic PE32+ DLL parses exports",
+                      got_pe == {"chakra_nodeapi_create_env", "napi_get_version"})
     finally:
         import shutil
         shutil.rmtree(tmp, ignore_errors=True)
@@ -203,10 +347,14 @@ def main(argv) -> int:
     if "--self-test" in args:
         return self_test()
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--dylib", required=True)
+    ap.add_argument("--dylib", default=None)
+    ap.add_argument("--dll", default=None)
     ap.add_argument("--exports", default=None)
     ap.add_argument("--inventory", default=None)
     ns = ap.parse_args(args)
+    if bool(ns.dylib) == bool(ns.dll):
+        ap.error("pass exactly one of --dylib or --dll")
+    target = ns.dll or ns.dylib
     root = repo_root()
     exports_path = ns.exports or os.path.join(root, "tools", "build", "nodeapi_exports.txt")
     inventory_path = ns.inventory or os.path.join(root, "doc", "node-api-inventory.md")
@@ -233,14 +381,14 @@ def main(argv) -> int:
               % ", ".join(unknown), file=sys.stderr)
         return 1
     try:
-        actual = exported_t_symbols(ns.dylib)
+        actual = exported_t_symbols(target, force_pe=bool(ns.dll))
     except RuntimeError as e:
         print("check_nodeapi: FAIL: %s" % e, file=sys.stderr)
         return 1
     provider, runtime = provider_symbols(actual)
     print("check_nodeapi: exports %s -> %d T symbols "
           "(%d provider + %d runtime operator new/delete), allowlist %d"
-          % (ns.dylib, len(actual), len(provider), len(runtime),
+          % (target, len(actual), len(provider), len(runtime),
              len(expected)))
     if runtime:
         print("check_nodeapi: runtime (filtered): %s"

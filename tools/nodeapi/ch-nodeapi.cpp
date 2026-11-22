@@ -100,11 +100,22 @@
 //     addon (plan section 1.3: addons import napi_* as undefined symbols
 //     resolved from the provider). Addons are dlopen'd RTLD_LOCAL|RTLD_NOW.
 
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 #include "NodeApiHostApi.h"
 #include "node_api.h"
 #include "ChakraCommon.h"
 #include "ChakraCore.h"
 
+#include <cctype>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
@@ -112,18 +123,20 @@
 #include <cstdlib>
 #include <cstring>
 #include <deque>
-#include <dlfcn.h>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <new>
 #include <string>
-#include <sys/stat.h>
 #include <thread>
-#include <unistd.h>
 #include <vector>
+#ifndef _WIN32
+#include <dlfcn.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 extern char** environ;
+#endif
 
 namespace {
 
@@ -243,6 +256,178 @@ JsValueRef host_gc_cb(JsValueRef, bool, JsValueRef*, unsigned short,
 // Filesystem (fs), Buffer, child_process, worker_threads are NOT
 // provided: drivers needing them stay skipped needs-runtime-global.
 
+#ifdef _WIN32
+bool host_is_sep(char c) { return c == '/' || c == '\\'; }
+
+bool host_has_drive_prefix(const std::string& p) {
+  return p.size() >= 2 &&
+         std::isalpha(static_cast<unsigned char>(p[0])) != 0 &&
+         p[1] == ':';
+}
+
+bool host_is_abs(const std::string& p) {
+  if (p.empty()) return false;
+  if (host_is_sep(p[0])) return true;
+  return host_has_drive_prefix(p) && p.size() >= 3 && host_is_sep(p[2]);
+}
+
+std::string host_dirname(const std::string& p) {
+  size_t s = p.find_last_of("/\\");
+  if (s == std::string::npos) return ".";
+  if (s == 0) {
+    if (p.size() >= 2 && host_is_sep(p[1])) return p.substr(0, 2);
+    return p.substr(0, 1);
+  }
+  if (s == 2 && host_has_drive_prefix(p)) return p.substr(0, 3);
+  return p.substr(0, s);
+}
+
+std::string host_basename(const std::string& p) {
+  size_t s = p.find_last_of("/\\");
+  if (s == std::string::npos) return p;
+  return p.substr(s + 1);
+}
+
+bool host_ends_with(const std::string& s, const char* suf) {
+  size_t slen = std::strlen(suf);
+  return s.size() >= slen && s.compare(s.size() - slen, slen, suf) == 0;
+}
+
+std::string host_normalize(const std::string& p) {
+  std::string prefix;
+  bool abs = false;
+  size_t i = 0;
+  if (p.size() >= 2 && host_is_sep(p[0]) && host_is_sep(p[1])) {
+    prefix = "//";
+    abs = true;
+    i = 2;
+  } else if (host_has_drive_prefix(p)) {
+    if (p.size() >= 3 && host_is_sep(p[2])) {
+      prefix = std::string(1, p[0]) + ":/";
+      abs = true;
+      i = 3;
+    } else {
+      prefix = p.substr(0, 2);
+      i = 2;
+    }
+  } else if (!p.empty() && host_is_sep(p[0])) {
+    prefix = "/";
+    abs = true;
+    i = 1;
+  }
+  std::vector<std::string> parts;
+  while (i < p.size()) {
+    while (i < p.size() && host_is_sep(p[i])) i++;
+    size_t j = i;
+    while (j < p.size() && !host_is_sep(p[j])) j++;
+    std::string seg = p.substr(i, j - i);
+    i = j;
+    if (seg.empty() || seg == ".") continue;
+    if (seg == "..") {
+      if (!parts.empty() && parts.back() != "..") parts.pop_back();
+      else if (!abs) parts.push_back("..");
+      continue;
+    }
+    parts.push_back(seg);
+  }
+  std::string out = prefix;
+  for (size_t k = 0; k < parts.size(); k++) {
+    if (k) out += "/";
+    out += parts[k];
+  }
+  if (out.empty()) out = abs ? "/" : ".";
+  return out;
+}
+
+std::string host_resolve_abs(const std::string& base_dir,
+                             const std::string& raw) {
+  if (host_is_abs(raw)) return host_normalize(raw);
+  return host_normalize(base_dir + "/" + raw);
+}
+
+std::string host_canonicalize(const std::string& abs_path) {
+  char* fp = ::_fullpath(nullptr, abs_path.c_str(), 0);
+  if (fp != nullptr) {
+    std::string out(fp);
+    std::free(fp);
+    return out;
+  }
+  return host_normalize(abs_path);
+}
+
+bool host_file_exists(const std::string& p) {
+  DWORD attr = GetFileAttributesA(p.c_str());
+  return (attr != INVALID_FILE_ATTRIBUTES) &&
+         ((attr & FILE_ATTRIBUTE_DIRECTORY) == 0);
+}
+
+std::string host_win32_error(DWORD err) {
+  if (err == 0) return "(unknown)";
+  char* msg_buf = nullptr;
+  DWORD len = FormatMessageA(
+      FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
+          FORMAT_MESSAGE_IGNORE_INSERTS,
+      nullptr, err, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+      reinterpret_cast<LPSTR>(&msg_buf), 0, nullptr);
+  std::string out;
+  if (len > 0 && msg_buf != nullptr) {
+    out.assign(msg_buf, len);
+    while (!out.empty() && (out.back() == '\n' || out.back() == '\r')) {
+      out.pop_back();
+    }
+  } else {
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), "Win32 error %lu",
+                  static_cast<unsigned long>(err));
+    out = buf;
+  }
+  if (msg_buf != nullptr) LocalFree(msg_buf);
+  return out;
+}
+
+void* host_dlopen(const std::string& path, bool global, std::string* err_out) {
+  (void)global;
+  std::string win_path = path;
+  for (char& ch : win_path) {
+    if (ch == '/') ch = '\\';
+  }
+  HMODULE h = nullptr;
+  if (win_path.find('\\') != std::string::npos) {
+    char* full = ::_fullpath(nullptr, win_path.c_str(), 0);
+    if (full != nullptr) {
+      h = LoadLibraryExA(full, nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+      std::free(full);
+    } else {
+      h = LoadLibraryExA(win_path.c_str(), nullptr,
+                         LOAD_WITH_ALTERED_SEARCH_PATH);
+    }
+  } else {
+    h = LoadLibraryA(win_path.c_str());
+  }
+  if (!h && err_out) {
+    *err_out = host_win32_error(GetLastError());
+  }
+  return reinterpret_cast<void*>(h);
+}
+
+void* host_dlsym(void* handle, const char* sym, std::string* err_out) {
+  if (!handle) {
+    if (err_out) *err_out = "null module handle";
+    return nullptr;
+  }
+  FARPROC p = GetProcAddress(reinterpret_cast<HMODULE>(handle), sym);
+  if (!p && err_out) {
+    *err_out = host_win32_error(GetLastError());
+  }
+  return reinterpret_cast<void*>(p);
+}
+
+void host_dlclose(void* handle) {
+  if (handle) {
+    FreeLibrary(reinterpret_cast<HMODULE>(handle));
+  }
+}
+#else
 std::string host_dirname(const std::string& p) {
   size_t s = p.find_last_of('/');
   if (s == std::string::npos) return ".";
@@ -310,6 +495,33 @@ bool host_file_exists(const std::string& p) {
   return S_ISREG(st.st_mode);
 }
 
+void* host_dlopen(const std::string& path, bool global, std::string* err_out) {
+  dlerror();
+  void* h = dlopen(path.c_str(), RTLD_NOW | (global ? RTLD_GLOBAL : RTLD_LOCAL));
+  if (!h && err_out) {
+    const char* e = dlerror();
+    *err_out = e ? e : "(unknown)";
+  }
+  return h;
+}
+
+void* host_dlsym(void* handle, const char* sym, std::string* err_out) {
+  dlerror();
+  void* p = dlsym(handle, sym);
+  if (!p && err_out) {
+    const char* e = dlerror();
+    *err_out = e ? e : "(unknown)";
+  }
+  return p;
+}
+
+void host_dlclose(void* handle) {
+  if (handle) {
+    dlclose(handle);
+  }
+}
+#endif
+
 struct chakra_nodeapi_pending_module_info_compat {
   int nm_version;
   unsigned int nm_flags;
@@ -326,8 +538,13 @@ typedef napi_status (*SetModuleApiVersionFn)(napi_env, int32_t);
 typedef size_t (*PendingModuleCountFn)(void);
 typedef napi_status (*GetPendingModuleFn)(
     size_t, chakra_nodeapi_pending_module_info_compat*);
-typedef napi_value (*RegisterFn)(napi_env, napi_value);
-typedef int32_t (*GetVersionFn)(void);
+typedef napi_value (NAPI_CDECL *RegisterFn)(napi_env, napi_value);
+typedef int32_t (NAPI_CDECL *GetVersionFn)(void);
+typedef napi_status (NAPI_CDECL *OpenHandleScopeFn)(napi_env,
+                                                    napi_handle_scope*);
+typedef napi_status (NAPI_CDECL *CloseHandleScopeFn)(napi_env,
+                                                     napi_handle_scope);
+typedef napi_status (NAPI_CDECL *CreateObjectFn)(napi_env, napi_value*);
 
 struct HostLoopState;
 
@@ -354,6 +571,11 @@ struct AddonRegistry {
   SetModuleApiVersionFn set_ver_fn = nullptr;
   PendingModuleCountFn pending_count_fn = nullptr;
   GetPendingModuleFn get_pending_fn = nullptr;
+#ifdef _WIN32
+  OpenHandleScopeFn open_scope_fn = nullptr;
+  CloseHandleScopeFn close_scope_fn = nullptr;
+  CreateObjectFn create_object_fn = nullptr;
+#endif
 
   std::vector<std::unique_ptr<AddonRecord>> addon_order;
   std::map<std::string, AddonRecord*> registry_by_path;
@@ -398,12 +620,11 @@ bool load_and_register_addon(AddonRegistry* reg, const std::string& raw_path,
   }
 
   size_t pending_before = reg->pending_count_fn ? reg->pending_count_fn() : 0;
-  dlerror();
-  void* handle = dlopen(canon.c_str(), RTLD_NOW | RTLD_LOCAL);
+  std::string dl_err;
+  void* handle = host_dlopen(canon, false, &dl_err);
   if (!handle) {
-    const char* e = dlerror();
     if (err_out) {
-      *err_out = "dlopen addon " + raw_path + ": " + (e ? e : "(unknown)");
+      *err_out = "dlopen addon " + raw_path + ": " + dl_err;
     }
     return false;
   }
@@ -416,7 +637,7 @@ bool load_and_register_addon(AddonRegistry* reg, const std::string& raw_path,
     // if the process may still create new envs; shutdown_all closes all
     // handles after all envs are destroyed.
     if (!has_deprecated) {
-      dlclose(handle);
+      host_dlclose(handle);
     } else {
       try {
         reg->orphan_dl_handles.push_back(handle);
@@ -425,9 +646,8 @@ bool load_and_register_addon(AddonRegistry* reg, const std::string& raw_path,
     }
   };
 
-  dlerror();
   auto get_ver = reinterpret_cast<GetVersionFn>(
-      dlsym(handle, "node_api_module_get_api_version_v1"));
+      host_dlsym(handle, "node_api_module_get_api_version_v1", nullptr));
   int32_t version = 8;
   if (get_ver) {
     version = get_ver();
@@ -452,14 +672,13 @@ bool load_and_register_addon(AddonRegistry* reg, const std::string& raw_path,
     }
   }
 
-  dlerror();
+  std::string sym_err;
   auto register_fn = reinterpret_cast<RegisterFn>(
-      dlsym(handle, "napi_register_module_v1"));
+      host_dlsym(handle, "napi_register_module_v1", &sym_err));
   if (!register_fn && !has_deprecated) {
-    const char* e = dlerror();
     if (err_out) {
       *err_out = "addon " + raw_path + " lacks napi_register_module_v1: " +
-                 (e ? e : "(unknown)");
+                 sym_err;
     }
     retire_handle();
     return false;
@@ -499,8 +718,30 @@ bool load_and_register_addon(AddonRegistry* reg, const std::string& raw_path,
     }
   }
 
+  auto open_scope = [&](napi_env e, napi_handle_scope* s) -> napi_status {
+#ifdef _WIN32
+    return reg->open_scope_fn(e, s);
+#else
+    return napi_open_handle_scope(e, s);
+#endif
+  };
+  auto close_scope = [&](napi_env e, napi_handle_scope s) -> napi_status {
+#ifdef _WIN32
+    return reg->close_scope_fn(e, s);
+#else
+    return napi_close_handle_scope(e, s);
+#endif
+  };
+  auto create_obj = [&](napi_env e, napi_value* v) -> napi_status {
+#ifdef _WIN32
+    return reg->create_object_fn(e, v);
+#else
+    return napi_create_object(e, v);
+#endif
+  };
+
   napi_handle_scope scope = nullptr;
-  if (napi_open_handle_scope(env, &scope) != napi_ok) {
+  if (open_scope(env, &scope) != napi_ok) {
     if (err_out) *err_out = "napi_open_handle_scope failed for " + raw_path;
     reg->destroy_env(env);
     retire_handle();
@@ -508,8 +749,8 @@ bool load_and_register_addon(AddonRegistry* reg, const std::string& raw_path,
   }
 
   napi_value exports = nullptr;
-  if (napi_create_object(env, &exports) != napi_ok || !exports) {
-    napi_close_handle_scope(env, scope);
+  if (create_obj(env, &exports) != napi_ok || !exports) {
+    close_scope(env, scope);
     if (err_out) *err_out = "napi_create_object failed for " + raw_path;
     reg->destroy_env(env);
     retire_handle();
@@ -518,7 +759,7 @@ bool load_and_register_addon(AddonRegistry* reg, const std::string& raw_path,
 
   JsValueRef cur_js = reinterpret_cast<JsValueRef>(exports);
   if (JsAddRef(cur_js, nullptr) != JsNoError) {
-    napi_close_handle_scope(env, scope);
+    close_scope(env, scope);
     if (err_out) *err_out = "JsAddRef(exports) failed for " + raw_path;
     reg->destroy_env(env);
     retire_handle();
@@ -575,7 +816,7 @@ bool load_and_register_addon(AddonRegistry* reg, const std::string& raw_path,
   }
 
   rec->exports = cur_js;
-  napi_close_handle_scope(env, scope);
+  close_scope(env, scope);
 
   AddonRecord* raw_rec = rec.get();
   bool pushed = false;
@@ -742,16 +983,21 @@ JsValueRef host_require_cb(JsValueRef, bool, JsValueRef* args,
   auto split_node_path = [](const char* np) -> std::vector<std::string> {
     std::vector<std::string> dirs;
     if (!np || !np[0]) return dirs;
+#ifdef _WIN32
+    const char path_sep = ';';
+#else
+    const char path_sep = ':';
+#endif
     std::string s(np);
     size_t start = 0;
     while (start <= s.size()) {
-      size_t colon = s.find(':', start);
-      std::string seg = (colon == std::string::npos)
+      size_t sep = s.find(path_sep, start);
+      std::string seg = (sep == std::string::npos)
                             ? s.substr(start)
-                            : s.substr(start, colon - start);
+                            : s.substr(start, sep - start);
       if (!seg.empty()) dirs.push_back(seg);
-      if (colon == std::string::npos) break;
-      start = colon + 1;
+      if (sep == std::string::npos) break;
+      start = sep + 1;
     }
     return dirs;
   };
@@ -798,10 +1044,19 @@ JsValueRef host_require_cb(JsValueRef, bool, JsValueRef* args,
 
   // 2. Check if req resolves to a real .node file on disk.
   bool is_node = host_ends_with(req, ".node");
+#ifdef _WIN32
+  bool has_build = (req.find("/build/") != std::string::npos ||
+                    req.find("\\build\\") != std::string::npos);
+  bool is_abs = host_is_abs(req);
+  bool is_rel = (req == "." || req == ".." ||
+                 req.rfind("./", 0) == 0 || req.rfind("../", 0) == 0 ||
+                 req.rfind(".\\", 0) == 0 || req.rfind("..\\", 0) == 0);
+#else
   bool has_build = (req.find("/build/") != std::string::npos);
   bool is_abs = (!req.empty() && req[0] == '/');
   bool is_rel = (req == "." || req == ".." ||
                  req.rfind("./", 0) == 0 || req.rfind("../", 0) == 0);
+#endif
 
   std::string cand_node;
   if (is_abs || is_rel || has_build) {
@@ -1211,7 +1466,10 @@ int main(int argc, char** argv) {
     else if (a == "--pump-limit") cfg.pump_limit = std::atol(need(a.c_str()).c_str());
     else if (a == "--pump-timeout-ms")
       cfg.pump_timeout_ms = std::atol(need(a.c_str()).c_str());
-    else if (a == "-h" || a == "--help") {
+    else if (a == "-v" || a == "--version") {
+      std::printf("ch-nodeapi 1.0.0\n");
+      return 0;
+    } else if (a == "-h" || a == "--help") {
       std::printf("usage: ch-nodeapi [--provider PATH] [--exports NAME] [--pump-limit N] [--pump-timeout-ms N] [--addon PATH.node]... [--driver PATH.js] [addon.node] [driver.js]\n");
       std::printf("  provider: --provider, else $CHAKRA_NODEAPI_PROVIDER, else beside the host\n");
       return 0;
@@ -1229,6 +1487,38 @@ int main(int argc, char** argv) {
   // Default provider: beside the host binary (same dir, then ../lib).
   // Prefers the real provider over the test-only stub.
   if (cfg.provider_path.empty()) {
+#ifdef _WIN32
+    std::vector<char> exe_buf(4096, '\0');
+    DWORD exe_len = 0;
+    for (;;) {
+      exe_len = GetModuleFileNameA(
+          nullptr, exe_buf.data(), static_cast<DWORD>(exe_buf.size()));
+      if (exe_len == 0) break;
+      if (exe_len < exe_buf.size() - 1) break;
+      if (exe_buf.size() >= 32768) break;
+      exe_buf.resize(exe_buf.size() * 2, '\0');
+    }
+    if (exe_len > 0) {
+      std::string exe(exe_buf.data(), exe_len);
+      size_t slash = exe.find_last_of("/\\");
+      if (slash != std::string::npos) {
+        std::string dir = exe.substr(0, slash);
+        static const char* cands[] = {
+            "libChakraNodeApi.dll", "ChakraNodeApi.dll",
+            "libChakraNodeApiStub.dll", "ChakraNodeApiStub.dll", nullptr};
+        static const char* subdirs[] = {"\\", "\\..\\lib\\", "\\..\\bin\\", nullptr};
+        for (int s = 0; subdirs[s] && cfg.provider_path.empty(); s++) {
+          for (int k = 0; cands[k]; k++) {
+            std::string p = dir + subdirs[s] + cands[k];
+            if (host_file_exists(p)) {
+              cfg.provider_path = p;
+              break;
+            }
+          }
+        }
+      }
+    }
+#else
     Dl_info info;
     if (dladdr(reinterpret_cast<void*>(main), &info) && info.dli_fname) {
       std::string exe = info.dli_fname;
@@ -1252,6 +1542,7 @@ int main(int argc, char** argv) {
         }
       }
     }
+#endif
   }
   cfg.addon_paths = flag_addons;
   cfg.driver_path = flag_driver;
@@ -1281,9 +1572,21 @@ int main(int argc, char** argv) {
 
   std::string startup_cwd;
   {
+#ifdef _WIN32
+    DWORD needed = GetCurrentDirectoryA(0, nullptr);
+    if (needed > 0) {
+      std::vector<char> cwdbuf(needed, '\0');
+      DWORD got = GetCurrentDirectoryA(needed, cwdbuf.data());
+      if (got > 0 && got < needed) startup_cwd.assign(cwdbuf.data(), got);
+      else startup_cwd = ".";
+    } else {
+      startup_cwd = ".";
+    }
+#else
     char cwdbuf[4096];
     if (getcwd(cwdbuf, sizeof(cwdbuf))) startup_cwd = cwdbuf;
     else startup_cwd = ".";
+#endif
   }
 
   // --- Runtime + context (host-owned) ---
@@ -1347,44 +1650,57 @@ int main(int argc, char** argv) {
     dispose_runtime();
     return 1;
   }
-  dlerror();
-  void* provider = dlopen(cfg.provider_path.c_str(),
-                          RTLD_NOW | RTLD_GLOBAL);
+  std::string prov_err;
+  void* provider = host_dlopen(cfg.provider_path, true, &prov_err);
   if (!provider) {
     std::fprintf(stderr, "ch-nodeapi: dlopen provider %s: %s\n",
-                 cfg.provider_path.c_str(), dlerror());
+                 cfg.provider_path.c_str(), prov_err.c_str());
     dispose_runtime();
     return 1;
   }
-  dlerror();
+  std::string sym_err;
   auto create_env = reinterpret_cast<CreateEnvFn>(
-      dlsym(provider, "chakra_nodeapi_create_env"));
+      host_dlsym(provider, "chakra_nodeapi_create_env", &sym_err));
   auto destroy_env = reinterpret_cast<DestroyEnvFn>(
-      dlsym(provider, "chakra_nodeapi_destroy_env"));
+      host_dlsym(provider, "chakra_nodeapi_destroy_env", &sym_err));
   if (!create_env || !destroy_env) {
-    const char* e = dlerror();
     std::fprintf(stderr,
                  "ch-nodeapi: provider %s lacks private host API: %s\n",
-                 cfg.provider_path.c_str(), e ? e : "(unknown)");
-    dlclose(provider);
+                 cfg.provider_path.c_str(),
+                 sym_err.empty() ? "(unknown)" : sym_err.c_str());
+    host_dlclose(provider);
     dispose_runtime();
     return 1;
   }
   // Optional provider symbols (NULL-tolerated for minimal stubs).
-  dlerror();
   auto set_ver_fn = reinterpret_cast<SetModuleApiVersionFn>(
-      dlsym(provider, "chakra_nodeapi_set_module_api_version"));
-  dlerror();
+      host_dlsym(provider, "chakra_nodeapi_set_module_api_version", nullptr));
   auto pending_count_fn = reinterpret_cast<PendingModuleCountFn>(
-      dlsym(provider, "chakra_nodeapi_pending_module_count"));
-  dlerror();
+      host_dlsym(provider, "chakra_nodeapi_pending_module_count", nullptr));
   auto get_pending_fn = reinterpret_cast<GetPendingModuleFn>(
-      dlsym(provider, "chakra_nodeapi_get_pending_module"));
+      host_dlsym(provider, "chakra_nodeapi_get_pending_module", nullptr));
+#ifdef _WIN32
+  auto open_scope_fn = reinterpret_cast<OpenHandleScopeFn>(
+      host_dlsym(provider, "napi_open_handle_scope", &sym_err));
+  auto close_scope_fn = reinterpret_cast<CloseHandleScopeFn>(
+      host_dlsym(provider, "napi_close_handle_scope", &sym_err));
+  auto create_object_fn = reinterpret_cast<CreateObjectFn>(
+      host_dlsym(provider, "napi_create_object", &sym_err));
+  if (!open_scope_fn || !close_scope_fn || !create_object_fn) {
+    std::fprintf(stderr,
+                 "ch-nodeapi: provider %s lacks Node-API scope/object API: %s\n",
+                 cfg.provider_path.c_str(),
+                 sym_err.empty() ? "(unknown)" : sym_err.c_str());
+    host_dlclose(provider);
+    dispose_runtime();
+    return 1;
+  }
+#endif
 
   HostLoopState* host_loop = new (std::nothrow) HostLoopState();
   if (!host_loop) {
     std::fprintf(stderr, "ch-nodeapi: out of memory allocating HostLoopState\n");
-    dlclose(provider);
+    host_dlclose(provider);
     dispose_runtime();
     return 1;
   }
@@ -1414,6 +1730,11 @@ int main(int argc, char** argv) {
   registry.set_ver_fn = set_ver_fn;
   registry.pending_count_fn = pending_count_fn;
   registry.get_pending_fn = get_pending_fn;
+#ifdef _WIN32
+  registry.open_scope_fn = open_scope_fn;
+  registry.close_scope_fn = close_scope_fn;
+  registry.create_object_fn = create_object_fn;
+#endif
   registry.has_cli_addon = !cfg.addon_paths.empty();
 
   RequireState req_state;
@@ -1464,19 +1785,19 @@ int main(int argc, char** argv) {
       for (size_t i = registry.addon_order.size(); i > 0; --i) {
         AddonRecord* rec = registry.addon_order[i - 1].get();
         if (rec->dl_handle != nullptr) {
-          dlclose(rec->dl_handle);
+          host_dlclose(rec->dl_handle);
           rec->dl_handle = nullptr;
         }
       }
       for (size_t i = registry.orphan_dl_handles.size(); i > 0; --i) {
         if (registry.orphan_dl_handles[i - 1] != nullptr) {
-          dlclose(registry.orphan_dl_handles[i - 1]);
+          host_dlclose(registry.orphan_dl_handles[i - 1]);
         }
       }
       registry.orphan_dl_handles.clear();
       registry.registry_by_path.clear();
       registry.addon_order.clear();
-      dlclose(provider);
+      host_dlclose(provider);
       provider = nullptr;
     }
     return exit_code;
@@ -1530,19 +1851,32 @@ int main(int argc, char** argv) {
       JsCreateObject(&proc);
       JsValueRef env_obj = JS_INVALID_REFERENCE;
       JsCreateObject(&env_obj);
+      auto add_env_entry = [&](const std::string& s) {
+        size_t eq = s.find('=');
+        if (eq == std::string::npos || eq == 0) return;
+        std::string k = s.substr(0, eq), v = s.substr(eq + 1);
+        JsValueRef vv = JS_INVALID_REFERENCE;
+        JsCreateString(v.c_str(), v.size(), &vv);
+        JsPropertyIdRef pid = JS_INVALID_REFERENCE;
+        JsCreatePropertyId(k.c_str(), k.size(), &pid);
+        JsSetProperty(env_obj, pid, vv, false);
+      };
+#ifdef _WIN32
+      LPCH env_block = GetEnvironmentStringsA();
+      if (env_block) {
+        for (const char* cur = env_block; *cur != '\0';
+             cur += std::strlen(cur) + 1) {
+          add_env_entry(std::string(cur));
+        }
+        FreeEnvironmentStringsA(env_block);
+      }
+#else
       if (environ) {
         for (char** e = environ; *e; e++) {
-          std::string s(*e);
-          size_t eq = s.find('=');
-          if (eq == std::string::npos) continue;
-          std::string k = s.substr(0, eq), v = s.substr(eq + 1);
-          JsValueRef vv = JS_INVALID_REFERENCE;
-          JsCreateString(v.c_str(), v.size(), &vv);
-          JsPropertyIdRef pid = JS_INVALID_REFERENCE;
-          JsCreatePropertyId(k.c_str(), k.size(), &pid);
-          JsSetProperty(env_obj, pid, vv, false);
+          add_env_entry(std::string(*e));
         }
       }
+#endif
       {
         JsPropertyIdRef pid = JS_INVALID_REFERENCE;
         JsCreatePropertyId("env", 3, &pid);
@@ -1576,7 +1910,9 @@ int main(int argc, char** argv) {
         JsPropertyIdRef pid = JS_INVALID_REFERENCE;
         JsCreatePropertyId("platform", 8, &pid);
         JsValueRef pl = JS_INVALID_REFERENCE;
-#ifdef __linux__
+#ifdef _WIN32
+        const char* pl_s = "win32";
+#elif defined(__linux__)
         const char* pl_s = "linux";
 #else
         const char* pl_s = "darwin";
@@ -1666,11 +2002,19 @@ int main(int argc, char** argv) {
         if (!addon_env) continue;
         napi_handle_scope drain_scope = nullptr;
         napi_value tmp = nullptr;
+#ifdef _WIN32
+        if (registry.open_scope_fn(addon_env, &drain_scope) == napi_ok &&
+            registry.create_object_fn(addon_env, &tmp) == napi_ok) {
+          (void)tmp;
+        }
+        if (drain_scope) registry.close_scope_fn(addon_env, drain_scope);
+#else
         if (napi_open_handle_scope(addon_env, &drain_scope) == napi_ok &&
             napi_create_object(addon_env, &tmp) == napi_ok) {
           (void)tmp;
         }
         if (drain_scope) napi_close_handle_scope(addon_env, drain_scope);
+#endif
         bool has = false;
         if (JsHasException(&has) == JsNoError && has) {
           clear_exception("drain threw");

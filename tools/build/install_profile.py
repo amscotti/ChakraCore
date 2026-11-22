@@ -74,6 +74,7 @@ Exit code: 0 iff the prefix holds exactly the managed set.
 
 import hashlib
 import os
+import re
 import shutil
 import stat
 import sys
@@ -97,10 +98,17 @@ def md5_of(path):
 
 
 def safe_rel(value, what):
-    if not value or os.path.isabs(value) or ".." in value.split(os.sep):
+    if (not value or os.path.isabs(value) or value.startswith(("/", "\\"))
+            or value.endswith(("/", "\\"))
+            or os.path.splitdrive(value)[0]
+            or (len(value) >= 2 and value[1] == ":")):
         raise ValueError("%s must be a clean relative path, got %r"
                          % (what, value))
-    return value
+    parts = re.split(r"[/\\]", value)
+    if any(part in ("", ".", "..") for part in parts):
+        raise ValueError("%s must be a clean relative path, got %r"
+                         % (what, value))
+    return "/".join(parts)
 
 
 def safe_link_target(target):
@@ -150,11 +158,10 @@ def guarded_parent(dest_abs, dest_real, profile, rel, what):
     depth. Call this before os.makedirs or any write/remove.
     """
     checked_root(dest_abs, profile)
-    parent = os.path.dirname(os.path.join(dest_abs, rel)) or dest_abs
+    parts = [p for p in re.split(r"[/\\]", rel)[:-1] if p not in ("", ".")]
+    parent = os.path.join(dest_abs, *parts) if parts else dest_abs
     current = dest_abs
-    for part in os.path.dirname(rel).split(os.sep):
-        if part in ("", "."):
-            continue
+    for part in parts:
         current = os.path.join(current, part)
         if os.path.islink(current):
             raise ValueError(
@@ -185,6 +192,11 @@ def replace_atomically(src, dest):
         # but remove an empty stray directory so the install can heal.
         if os.path.isdir(dest) and not os.path.islink(dest):
             os.rmdir(dest)
+        if os.name == "nt" and os.path.isfile(dest):
+            try:
+                os.chmod(dest, 0o666)
+            except OSError:
+                pass
         os.replace(tmp, dest)
         tmp = None
     finally:
@@ -217,9 +229,14 @@ def write_atomically(path, data, mode=None):
     fd, tmp = tempfile.mkstemp(prefix=".%s." % os.path.basename(path),
                                suffix=".tmp", dir=parent)
     try:
-        with os.fdopen(fd, "w") as f:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
             f.write(data)
         os.chmod(tmp, default_file_mode() if mode is None else mode)
+        if os.name == "nt" and os.path.isfile(path):
+            try:
+                os.chmod(path, 0o666)
+            except OSError:
+                pass
         os.replace(tmp, path)
         tmp = None
     finally:
@@ -331,7 +348,8 @@ def main(argv):
         print("install_profile: --profile must be one of %s, got %r"
               % (", ".join(VALID_PROFILES), profile), file=sys.stderr)
         return 2
-    if dest != "out/%s" % profile:
+    dest_norm = (dest or "").replace("\\", "/").rstrip("/")
+    if dest_norm != "out/%s" % profile:
         print("install_profile: --dest must be exactly out/%s, got %r "
               "(this script never writes to the test prefix)"
               % (profile, dest), file=sys.stderr)
@@ -341,7 +359,7 @@ def main(argv):
                     "(refusing to run with an empty managed set)")
     root = os.path.dirname(os.path.dirname(
         os.path.dirname(os.path.abspath(__file__))))
-    dest_abs = os.path.join(root, dest)
+    dest_abs = os.path.join(root, *dest_norm.split("/"))
 
     managed = []
     copied = repaired = skipped = 0
@@ -355,8 +373,10 @@ def main(argv):
         # component must not leave a half-installed tree behind.
         parsed_maps = []
         for m in maps:
-            rel, _, src = m.partition("=")
-            safe_rel(rel, "--map dest")
+            rel, sep, src = m.partition("=")
+            if not sep:
+                return fail("--map missing '=' separator: %r" % (m,))
+            rel = safe_rel(rel, "--map dest")
             if not src or not os.path.isfile(src):
                 return fail("source missing for %s: %r" % (rel, src))
             parent = guarded_parent(dest_abs, dest_real, profile, rel,
@@ -364,8 +384,10 @@ def main(argv):
             parsed_maps.append((rel, src, parent))
         parsed_symlinks = []
         for s in symlinks:
-            rel, _, target = s.partition("=")
-            safe_rel(rel, "--symlink link")
+            rel, sep, target = s.partition("=")
+            if not sep:
+                return fail("--symlink missing '=' separator: %r" % (s,))
+            rel = safe_rel(rel, "--symlink link")
             safe_link_target(target)
             parent = guarded_parent(dest_abs, dest_real, profile, rel,
                                     "--symlink link")
@@ -376,15 +398,17 @@ def main(argv):
 
         manifest_path = os.path.join(dest_abs, MANIFEST)
         try:
-            with open(manifest_path) as f:
+            with open(manifest_path, "r", encoding="utf-8", newline="") as f:
                 previous = [line.strip() for line in f if line.strip()]
         except OSError:
             previous = []
         orphans = []
         for rel in previous:
-            if rel in (MARKER, MANIFEST) or rel in managed_now:
+            if rel in (MARKER, MANIFEST):
                 continue
-            safe_rel(rel, "manifest entry")
+            rel = safe_rel(rel, "manifest entry")
+            if rel in managed_now:
+                continue
             guarded_parent(dest_abs, dest_real, profile, rel,
                            "manifest entry")
             orphans.append(rel)
@@ -397,7 +421,7 @@ def main(argv):
             parent = guarded_parent(dest_abs, dest_real, profile, rel,
                                     "--map dest")
             os.makedirs(parent, exist_ok=True)
-            result = copy_if_changed(src, os.path.join(dest_abs, rel))
+            result = copy_if_changed(src, os.path.join(dest_abs, *rel.split("/")))
             if result == "copied":
                 copied += 1
             elif result == "repaired":
@@ -409,7 +433,7 @@ def main(argv):
             parent = guarded_parent(dest_abs, dest_real, profile, rel,
                                     "--symlink link")
             os.makedirs(parent, exist_ok=True)
-            if symlink_if_changed(target, os.path.join(dest_abs, rel)):
+            if symlink_if_changed(target, os.path.join(dest_abs, *rel.split("/"))):
                 copied += 1
             else:
                 skipped += 1
@@ -421,7 +445,7 @@ def main(argv):
     marker = os.path.join(dest_abs, MARKER)
     want = profile + "\n"
     try:
-        with open(marker, "r") as f:
+        with open(marker, "r", encoding="utf-8", newline="") as f:
             have = f.read()
     except OSError:
         have = None
@@ -446,7 +470,7 @@ def main(argv):
                                     "manifest entry")
         except (OSError, ValueError) as e:
             return fail(str(e))
-        victim = os.path.join(dest_abs, rel)
+        victim = os.path.join(dest_abs, *rel.split("/"))
         try:
             if os.path.islink(victim) or os.path.isfile(victim):
                 os.remove(victim)
@@ -462,7 +486,7 @@ def main(argv):
     managed_sorted = sorted(set(managed))
     new_manifest = "\n".join(managed_sorted) + "\n"
     try:
-        with open(manifest_path) as f:
+        with open(manifest_path, "r", encoding="utf-8", newline="") as f:
             old_manifest = f.read()
     except OSError:
         old_manifest = None

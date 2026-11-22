@@ -22,6 +22,7 @@ import stat
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 # Ensure tools/package is on sys.path
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -237,6 +238,103 @@ class PackagingToolsTest(unittest.TestCase):
         # Run smoke tests via test_package.main
         rc = test_package.main(["--tarball", tb, "--repo-root", self.repo_root])
         self.assertEqual(rc, 0)
+
+    def test_windows_x64_target_autodetect(self):
+        with mock.patch.object(build_package.sys, "platform", "win32"), \
+                mock.patch.object(build_package.platform, "machine", return_value="AMD64"):
+            self.assertEqual(build_package.get_default_target(), "windows-x64")
+
+    def test_windows_x64_staging_manifest_and_verify(self):
+        win_prefix = os.path.join(self.tmpdir, "win_prefix")
+        make_dummy_file(os.path.join(win_prefix, "bin", "ch.exe"), b"MZch", 0o755)
+        make_dummy_file(os.path.join(win_prefix, "bin", "ch-nodeapi.exe"), b"MZchnodeapi", 0o755)
+        make_dummy_file(os.path.join(win_prefix, "bin", "ChakraCore.dll"), b"MZcore", 0o755)
+        make_dummy_file(os.path.join(win_prefix, "lib", "libChakraNodeApi.dll"), b"MZnodeapi", 0o755)
+        make_dummy_file(os.path.join(win_prefix, "lib", "ChakraCore.lib"), b"!<arch>\ncore", 0o755)
+        make_dummy_file(os.path.join(win_prefix, "lib", "libChakraNodeApi.lib"), b"!<arch>\nnodeapi", 0o755)
+
+        out_pkg = os.path.join(self.out_dir, "win_pkg")
+        rc = build_package.main([
+            "--prefix", win_prefix,
+            "--out-dir", out_pkg,
+            "--version", "1.13.0",
+            "--target", "windows-x64",
+            "--repo-root", self.repo_root,
+        ])
+        self.assertEqual(rc, 0)
+
+        staging_dir = os.path.join(out_pkg, "chakracore-1.13.0-windows-x64")
+        tarball = os.path.join(out_pkg, "chakracore-1.13.0-windows-x64.tar.gz")
+        self.assertTrue(os.path.isfile(tarball))
+
+        # DLLs must be regular copied files in bin/, never symlinks.
+        for rel in (
+            "bin/ch.exe",
+            "bin/ch-nodeapi.exe",
+            "bin/ChakraCore.dll",
+            "bin/libChakraNodeApi.dll",
+            "lib/ChakraCore.lib",
+            "lib/libChakraNodeApi.lib",
+            "include/ChakraCore.h",
+            "include/ChakraCommon.h",
+            "include/nodeapi/js_native_api.h",
+            "include/nodeapi/node_api.h",
+            "LICENSE.txt",
+            "THIRD-PARTY-NOTICES.txt",
+            "README.md",
+            "MANIFEST.json",
+        ):
+            full = os.path.join(staging_dir, *rel.split("/"))
+            self.assertTrue(os.path.isfile(full), "missing staged Windows file: " + rel)
+            self.assertFalse(os.path.islink(full), "unexpected symlink on Windows: " + rel)
+
+        ok, errs = verify_package.verify_extracted_dir(staging_dir)
+        self.assertTrue(ok, "Windows staging dir verify failed: {}".format(errs))
+        ok_tb, errs_tb = verify_package.verify_package(tarball)
+        self.assertTrue(ok_tb, "Windows tarball verify failed: {}".format(errs_tb))
+
+        # Deterministic tarball reproducibility for windows-x64.
+        tb2 = os.path.join(self.out_dir, "win_pkg2.tar.gz")
+        build_package.create_deterministic_tarball(staging_dir, tb2, mtime=1767225600)
+        self.assertEqual(
+            build_package.compute_sha256(tarball),
+            build_package.compute_sha256(tb2),
+        )
+
+        # Negative controls on Windows staging.
+        os.remove(os.path.join(staging_dir, "bin", "ChakraCore.dll"))
+        ok_miss, errs_miss = verify_package.verify_extracted_dir(staging_dir)
+        self.assertFalse(ok_miss)
+        self.assertTrue(any("bin/ChakraCore.dll" in e for e in errs_miss))
+
+    def test_windows_x64_smoke_runner_mocked(self):
+        win_prefix = os.path.join(self.tmpdir, "win_smoke_prefix")
+        make_dummy_file(os.path.join(win_prefix, "bin", "ch.exe"), b"MZch", 0o755)
+        make_dummy_file(os.path.join(win_prefix, "bin", "ch-nodeapi.exe"), b"MZchnodeapi", 0o755)
+        make_dummy_file(os.path.join(win_prefix, "bin", "ChakraCore.dll"), b"MZcore", 0o755)
+        make_dummy_file(os.path.join(win_prefix, "bin", "libChakraNodeApi.dll"), b"MZnodeapi", 0o755)
+        make_dummy_file(os.path.join(win_prefix, "lib", "ChakraCore.lib"), b"!<arch>\ncore", 0o755)
+        make_dummy_file(os.path.join(win_prefix, "lib", "libChakraNodeApi.lib"), b"!<arch>\nnodeapi", 0o755)
+
+        staging_dir = os.path.join(self.out_dir, "chakracore-1.13.0-windows-x64-smoke")
+        build_package.stage_package(win_prefix, staging_dir, self.repo_root, "1.13.0", "windows-x64")
+
+        def fake_subprocess_run(cmd, **kwargs):
+            _ = kwargs
+            exe = os.path.basename(cmd[0])
+            if exe == "ch.exe":
+                if cmd[1:] == ["--version"]:
+                    return mock.Mock(returncode=0, stdout="ch.exe version 1.13.0.0-beta\n", stderr="")
+                if cmd[1] == "-e":
+                    return mock.Mock(returncode=0, stdout="package smoke\n", stderr="")
+            elif exe == "ch-nodeapi.exe":
+                if cmd[1:] == ["--help"]:
+                    return mock.Mock(returncode=0, stdout="usage: ch-nodeapi\n", stderr="")
+                return mock.Mock(returncode=1, stdout="", stderr="ch-nodeapi: dlopen addon missing\n")
+            raise AssertionError("unexpected command: %r" % (cmd,))
+
+        with mock.patch.object(test_package.subprocess, "run", side_effect=fake_subprocess_run):
+            self.assertTrue(test_package.run_package_smoke_tests(staging_dir, self.repo_root))
 
 
 if __name__ == "__main__":

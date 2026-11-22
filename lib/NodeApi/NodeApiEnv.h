@@ -83,6 +83,26 @@
 #include <thread>
 #include <vector>
 
+#ifndef CHAKRA_NODEAPI_EXPORT
+#if defined(_WIN32)
+#define CHAKRA_NODEAPI_EXPORT __declspec(dllexport)
+#elif defined(__GNUC__)
+#define CHAKRA_NODEAPI_EXPORT __attribute__((visibility("default")))
+#else
+#define CHAKRA_NODEAPI_EXPORT
+#endif
+#endif
+
+#ifndef CHAKRA_NODEAPI_HIDDEN
+#if defined(_WIN32)
+#define CHAKRA_NODEAPI_HIDDEN
+#elif defined(__GNUC__)
+#define CHAKRA_NODEAPI_HIDDEN __attribute__((visibility("hidden")))
+#else
+#define CHAKRA_NODEAPI_HIDDEN
+#endif
+#endif
+
 /* Opaque scope-state pointer (defined by NodeApiScopes.*, N1.2).
  * Env stores it without including NodeApiScopes.h in this header
  * (avoids a header cycle); NodeApiEnv.cpp includes it to call
@@ -260,9 +280,7 @@ bool LookupLiveEnv(void* env_value, NodeEnv** out);
 // DETECTABLE for callers/probes that remembered the generation.
 // Hidden visibility: not exported from the release dylib; probes
 // link NodeApiEnv.cpp directly.
-#if defined(__GNUC__)
-__attribute__((visibility("hidden")))
-#endif
+CHAKRA_NODEAPI_HIDDEN
 bool LookupLiveEnvWithGeneration(void* env_value,
                                  std::uint64_t expected_generation,
                                  NodeEnv** out);
@@ -413,19 +431,13 @@ void TeardownWraps(NodeEnv* env); /* steps 6d backstop (real, N3.2/N3.3) */
  * libChakraNodeApi (mirrors R-REF-14 for the debug hook).
  * Probes that need accounting link NodeApiEnv.cpp directly
  * (same binary) or query via the private test hook build. */
-#if defined(__GNUC__)
-__attribute__((visibility("hidden")))
-#endif
+CHAKRA_NODEAPI_HIDDEN
 size_t DebugLiveEnvCount() noexcept;
-#if defined(__GNUC__)
-__attribute__((visibility("hidden")))
-#endif
+CHAKRA_NODEAPI_HIDDEN
 size_t DebugTotalEnvCount() noexcept;
 // Dead-registry size (tombstones retained, <= kDeadEnvCap).
 // Hidden visibility: not exported from the release dylib.
-#if defined(__GNUC__)
-__attribute__((visibility("hidden")))
-#endif
+CHAKRA_NODEAPI_HIDDEN
 size_t DebugDeadEnvCount() noexcept;
 
 } /* namespace nodeapi */
