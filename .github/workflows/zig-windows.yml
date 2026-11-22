@@ -1,0 +1,361 @@
+# Windows x86_64 Zig build CI (windows-latest + MSVC/WinSDK + vcpkg icu:x64-windows).
+# Uses -DENABLE_OOP_NATIVE_CODEGEN=0 (no midl.exe) and -DDISABLE_JS_ETW (no mc.exe),
+# leaving ml64.exe as the sole external MSVC binary required by zig build.
+#
+# What this workflow proves on every push/PR:
+#   - preflight: Zig unit tests (tools/windows-gate-tests.zig, owned-bytes.zig,
+#     u8a_codec.zig) + Python build/package tool unit tests & gate self-tests;
+#   - zig (test): default native x86_64-windows-msvc build (`zig build`) +
+#     check-build-tools, check-metadata (PE32+ & COFF .lib), verify-bytecode,
+#     libChakraNodeApi (`161` PE32+ exports), ch-nodeapi, check-nodeapi,
+#     check-smoke (`ch.exe` + `ch-nodeapi.exe`), and check-package;
+#   - zig-variants: parameterized Windows build matrix (-Djit=false,
+#     -Dprofile=release-shared, -Dprofile=debug-static);
+#   - record: assembles per-leg tallies and inputs into windows-evidence.
+
+name: zig-windows (x86_64 Windows build + check + Node-API + package)
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  preflight:
+    name: preflight (windows-gate-tests + build/package tools)
+    runs-on: windows-latest
+    timeout-minutes: 25
+    outputs:
+      tally: ${{ steps.tally.outputs.tally }}
+    steps:
+      - &checkout
+        name: Checkout
+        uses: actions/checkout@v5
+      - &mise
+        name: Setup mise (Zig 0.17.0 from mise.toml)
+        uses: jdx/mise-action@v4
+        with:
+          install: true
+          cache: true
+      - &assert-zig
+        name: Assert Zig 0.17.0 and export zig to PATH
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zigVer = (& mise exec -- zig version).Trim()
+          if ($LASTEXITCODE -ne 0) { throw "mise exec -- zig version failed ($LASTEXITCODE)" }
+          if ($zigVer -ne '0.17.0') { throw "Expected Zig 0.17.0, got '$zigVer'" }
+          $zigBin = (& mise which zig).Trim()
+          if ($LASTEXITCODE -ne 0) { throw "mise which zig failed ($LASTEXITCODE)" }
+          (Split-Path -Parent $zigBin) | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          Write-Host "Using zig $zigVer at $zigBin"
+      - name: Run Zig gate/unit tests and Python tool suites
+        id: tally
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path ci-evidence | Out-Null
+          function Invoke-Logged {
+            param([string]$Log, [string]$Exe, [string[]]$Args)
+            Write-Host "=== $Exe $($Args -join ' ') ==="
+            $prevPref = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
+              $PSNativeCommandUseErrorActionPreference = $false
+            }
+            try {
+              & $Exe @Args 2>&1 | ForEach-Object { "$_" } | Tee-Object -FilePath $Log -Append
+              $rc = $LASTEXITCODE
+            } finally {
+              $ErrorActionPreference = $prevPref
+            }
+            if ($rc -ne 0) { throw "Command failed ($rc): $Exe $($Args -join ' ')" }
+          }
+          Invoke-Logged "ci-evidence/preflight.log" "zig" @("test", "tools/windows-gate-tests.zig")
+          Invoke-Logged "ci-evidence/preflight.log" "zig" @("test", "doc/examples/owned-bytes.zig")
+          Invoke-Logged "ci-evidence/preflight.log" "zig" @("test", "lib/ZigCodec/u8a_codec.zig")
+          Invoke-Logged "ci-evidence/preflight.log" "python" @("tools/build/test_build_tools.py")
+          Invoke-Logged "ci-evidence/preflight.log" "python" @("tools/package/test_package_tools.py")
+          Invoke-Logged "ci-evidence/preflight.log" "python" @("tools/build/check_metadata_windows.py", "--self-test")
+          Invoke-Logged "ci-evidence/preflight.log" "python" @("tools/build/check_smoke_windows.py", "--self-test")
+          Invoke-Logged "ci-evidence/preflight.log" "python" @("tools/build/check_nodeapi.py", "--self-test")
+          Invoke-Logged "ci-evidence/preflight.log" "python" @("tools/build/gen_nodeapi_exports.py", "--check")
+          Invoke-Logged "ci-evidence/preflight.log" "python" @("tools/test262/test_edition_policy.py")
+          Invoke-Logged "ci-evidence/preflight.log" "python" @("tools/test262/refresh_baseline.py", "--self-test")
+          $line = "windows-preflight: gate-tests=PASS build-tools=PASS package-tools=PASS selftests=PASS"
+          $line | Out-File -FilePath ci-evidence/tally.txt -Encoding utf8
+          "tally=$line" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "- $line" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+      - name: Upload windows-preflight evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: windows-preflight
+          path: ci-evidence/
+
+  zig:
+    name: zig windows test (build + gates + Node-API + package)
+    runs-on: windows-latest
+    timeout-minutes: 90
+    outputs:
+      tally: ${{ steps.tally.outputs.tally }}
+    steps:
+      - *checkout
+      - *mise
+      - *assert-zig
+      - &msvc
+        name: Setup MSVC x64 developer environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - &vcpkg-probe
+        name: Resolve vcpkg root
+        id: vcpkg
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = if ($env:VCPKG_ROOT) { $env:VCPKG_ROOT } elseif ($env:VCPKG_INSTALLATION_ROOT) { $env:VCPKG_INSTALLATION_ROOT } else { "C:\vcpkg" }
+          if (-not (Test-Path "$root\vcpkg.exe")) {
+            throw "vcpkg.exe not found under '$root'"
+          }
+          "VCPKG_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "vcpkg_root=$root" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "archives_dir=$(Join-Path $env:LOCALAPPDATA 'vcpkg\archives')" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+      - &vcpkg-cache
+        name: Cache vcpkg icu:x64-windows
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ steps.vcpkg.outputs.vcpkg_root }}\installed\x64-windows
+            ${{ steps.vcpkg.outputs.archives_dir }}
+          key: windows-x64-vcpkg-icu-v1
+          restore-keys: |
+            windows-x64-vcpkg-icu-
+      - &vcpkg-icu
+        name: Install icu:x64-windows and expose ICU DLLs on PATH
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vcpkgExe = Join-Path $env:VCPKG_ROOT "vcpkg.exe"
+          $icuDir = Join-Path $env:VCPKG_ROOT "installed\x64-windows"
+          if (-not (Test-Path "$icuDir\include\unicode\uchar.h")) {
+            & $vcpkgExe install icu:x64-windows
+            if ($LASTEXITCODE -ne 0) { throw "vcpkg install icu:x64-windows failed ($LASTEXITCODE)" }
+          }
+          if (-not (Test-Path "$icuDir\include\unicode\uchar.h")) { throw "Missing $icuDir\include\unicode\uchar.h" }
+          if (-not (Test-Path "$icuDir\lib\icuuc.lib")) { throw "Missing $icuDir\lib\icuuc.lib" }
+          if (-not (Get-ChildItem "$icuDir\bin\icuuc*.dll" -ErrorAction SilentlyContinue)) {
+            throw "Missing icuuc*.dll under $icuDir\bin"
+          }
+          "CHAKRA_ICU_DIR=$icuDir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "$icuDir\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+      - &record-inputs
+        name: Record Windows inputs
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path ci-evidence | Out-Null
+          zig version | Out-File -FilePath ci-evidence/zig-version.txt -Encoding utf8
+          zig env | Out-File -FilePath ci-evidence/zig-env.txt -Encoding utf8
+          @(
+            "VCToolsInstallDir=$env:VCToolsInstallDir"
+            "WindowsSdkDir=$env:WindowsSdkDir"
+            "WindowsSDKVersion=$env:WindowsSDKVersion"
+            "VCPKG_ROOT=$env:VCPKG_ROOT"
+            "CHAKRA_ICU_DIR=$env:CHAKRA_ICU_DIR"
+            "ml64=$((Get-Command ml64.exe).Source)"
+            "python=$((Get-Command python).Source) ($(python --version 2>&1))"
+          ) | Out-File -FilePath ci-evidence/inputs.txt -Encoding utf8
+      - name: zig build check-build-tools
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
+            $PSNativeCommandUseErrorActionPreference = $false
+          }
+          zig build check-build-tools 2>&1 | ForEach-Object { "$_" } | Tee-Object -FilePath ci-evidence/check-build-tools.log
+          if ($LASTEXITCODE -ne 0) { throw "zig build check-build-tools failed ($LASTEXITCODE)" }
+      - name: zig build (default test profile)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
+            $PSNativeCommandUseErrorActionPreference = $false
+          }
+          zig build 2>&1 | ForEach-Object { "$_" } | Tee-Object -FilePath ci-evidence/build.log
+          if ($LASTEXITCODE -ne 0) { throw "zig build failed ($LASTEXITCODE)" }
+      - name: Core PE32+ metadata & bytecode gates (check-metadata, verify-bytecode)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
+            $PSNativeCommandUseErrorActionPreference = $false
+          }
+          foreach ($step in @("check-metadata", "verify-bytecode")) {
+            Write-Host "=== zig build $step ==="
+            zig build $step 2>&1 | ForEach-Object { "$_" } | Tee-Object -FilePath "ci-evidence/$step.log"
+            if ($LASTEXITCODE -ne 0) { throw "zig build $step failed ($LASTEXITCODE)" }
+          }
+      - name: Node-API stack, Windows smoke, & package gate (libChakraNodeApi, ch-nodeapi, check-nodeapi, check-smoke, check-package)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
+            $PSNativeCommandUseErrorActionPreference = $false
+          }
+          foreach ($step in @("libChakraNodeApi", "ch-nodeapi", "check-nodeapi", "check-smoke", "check-package")) {
+            Write-Host "=== zig build $step ==="
+            zig build $step 2>&1 | ForEach-Object { "$_" } | Tee-Object -FilePath "ci-evidence/$step.log"
+            if ($LASTEXITCODE -ne 0) { throw "zig build $step failed ($LASTEXITCODE)" }
+          }
+      - name: Tally gate outputs
+        id: tally
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not (Select-String -Path ci-evidence/check-nodeapi.log -Pattern 'check_nodeapi: PASS' -SimpleMatch -Quiet)) {
+            throw "Missing 'check_nodeapi: PASS' in ci-evidence/check-nodeapi.log"
+          }
+          if (-not (Select-String -Path ci-evidence/check-package.log -Pattern 'VERIFY PASS' -SimpleMatch -Quiet)) {
+            throw "Missing 'VERIFY PASS' in ci-evidence/check-package.log"
+          }
+          if (-not (Select-String -Path ci-evidence/check-package.log -Pattern 'ALL PACKAGE TESTS PASSED SUCCESSFULLY!' -SimpleMatch -Quiet)) {
+            throw "Missing 'ALL PACKAGE TESTS PASSED SUCCESSFULLY!' in ci-evidence/check-package.log"
+          }
+          $line = "windows-test: build=PASS smoke=PASS metadata=PASS bytecode=PASS nodeapi=PASS package=PASS"
+          $line | Out-File -FilePath ci-evidence/tally.txt -Encoding utf8
+          "tally=$line" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "- $line" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+      - name: Upload zig-windows-test evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: zig-windows-test
+          path: ci-evidence/
+
+  zig-variants:
+    name: zig windows ${{ matrix.name }}
+    runs-on: windows-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: nojit
+            flags: "-Djit=false"
+            checks: "check-smoke check-metadata verify-bytecode"
+          - name: release-shared
+            flags: "-Dprofile=release-shared"
+            checks: "check-metadata libChakraNodeApi ch-nodeapi check-nodeapi check-smoke check-package"
+          - name: debug-static
+            flags: "-Dprofile=debug-static"
+            checks: "check-smoke check-metadata verify-bytecode"
+    outputs:
+      tally: ${{ steps.tally.outputs.tally }}
+    steps:
+      - *checkout
+      - *mise
+      - *assert-zig
+      - *msvc
+      - *vcpkg-probe
+      - *vcpkg-cache
+      - *vcpkg-icu
+      - *record-inputs
+      - name: zig build ${{ matrix.flags }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
+            $PSNativeCommandUseErrorActionPreference = $false
+          }
+          $flagList = '${{ matrix.flags }}'.Split(' ', [System.StringSplitOptions]::RemoveEmptyEntries)
+          zig build @flagList 2>&1 | ForEach-Object { "$_" } | Tee-Object -FilePath ci-evidence/build.log
+          if ($LASTEXITCODE -ne 0) { throw "zig build ${{ matrix.flags }} failed ($LASTEXITCODE)" }
+      - name: Run variant checks (${{ matrix.checks }})
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
+            $PSNativeCommandUseErrorActionPreference = $false
+          }
+          $flagList = '${{ matrix.flags }}'.Split(' ', [System.StringSplitOptions]::RemoveEmptyEntries)
+          $checkList = '${{ matrix.checks }}'.Split(' ', [System.StringSplitOptions]::RemoveEmptyEntries)
+          foreach ($step in $checkList) {
+            Write-Host "=== zig build ${{ matrix.flags }} $step ==="
+            zig build @flagList $step 2>&1 | ForEach-Object { "$_" } | Tee-Object -FilePath ci-evidence/checks.log -Append
+            if ($LASTEXITCODE -ne 0) { throw "zig build ${{ matrix.flags }} $step failed ($LASTEXITCODE)" }
+          }
+      - name: Tally gate outputs
+        id: tally
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $line = "windows-${{ matrix.name }}: build=PASS checks=PASS"
+          $line | Out-File -FilePath ci-evidence/tally.txt -Encoding utf8
+          "tally=$line" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "- $line" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+      - name: Upload zig-windows-${{ matrix.name }} evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: zig-windows-${{ matrix.name }}
+          path: ci-evidence/
+
+  record:
+    name: record (assemble Windows evidence bundle)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    needs: [preflight, zig, zig-variants]
+    if: ${{ !cancelled() }}
+    steps:
+      - name: Download all leg evidence
+        uses: actions/download-artifact@v6
+        with:
+          path: evidence-in
+      - name: Assemble windows-evidence bundle
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path windows-evidence/tallies | Out-Null
+          $summary = @(
+            "# Windows CI evidence bundle"
+            ""
+            "run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }} (attempt ${{ github.run_attempt }})"
+            "ref: ${{ github.ref }} sha: ${{ github.sha }}"
+            ""
+            "## Tallies"
+            ""
+          )
+          $dirs = Get-ChildItem -Path evidence-in -Directory | Sort-Object Name
+          foreach ($d in $dirs) {
+            $leg = $d.Name
+            $summary += "### $leg"
+            $tallyPath = Join-Path $d.FullName "tally.txt"
+            if (Test-Path $tallyPath) {
+              $t = (Get-Content $tallyPath -Raw).Trim()
+              $summary += $t
+              Copy-Item $tallyPath "windows-evidence/tallies/$leg.txt"
+              "- $t" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+            } else {
+              $summary += "(no tally.txt)"
+            }
+            $summary += ""
+          }
+          $summary | Out-File -FilePath windows-evidence/SUMMARY.md -Encoding utf8
+          Get-Content windows-evidence/SUMMARY.md
+      - name: Upload windows-evidence bundle
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: windows-evidence
+          path: windows-evidence/

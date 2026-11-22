@@ -2,26 +2,42 @@
 
 In-repo documentation for the ChakraCore modernization effort. Engine and legacy
 build references are pinned to baseline `97e68c917`; execution results and
-modernization decisions are updated through 2026-11-17 (Tiers 1–5 completion and
-Phase-4 roadmap). See [vision-and-roadmap.md](vision-and-roadmap.md) for
-strategic positioning and Phase-4 expansion tracks (`G0`, `Q1`, `I1`, `H1`),
-[current-state.md](current-state.md) Section 7 for historical activity context, and
-[architecture-and-readiness-review.md](architecture-and-readiness-review.md) /
-[linux-handoff.md](linux-handoff.md) for current readiness. The complete
-per-batch C2 receipt ledger (S1-S14, E1, host slices) lives in
-[modernization-plan.md](modernization-plan.md) Section 6; the table below indexes the
-foundational documents, readiness reviews, and primary receipts.
+modernization decisions are updated through **2026-11-22** (`modernize/phase4`,
+including `G0` Linux baseline sync, `Q1.1`-`Q1.5`, `I1`/`I2`, `Q2`, `Q3`, `P1`,
+`C3.1`, `ARM64 WB`, `Pre-Q1.5`, and Windows x64 `B6` `zig build` prep). See
+[vision-and-roadmap.md](vision-and-roadmap.md) for strategic positioning and
+Phase-4 expansion tracks (`G0-phase4`, `Q1`, `I1`/`I2`, `P1`, `C3.1`, `Q3`, `H1`),
+[current-state.md](current-state.md) Section 7 for historical activity context,
+and [architecture-and-readiness-review.md](architecture-and-readiness-review.md) /
+[linux-handoff.md](linux-handoff.md) / [windows-handoff.md](windows-handoff.md)
+for platform readiness. The complete per-batch C2 receipt ledger (S1-S14, E1,
+host slices) lives in [modernization-plan.md](modernization-plan.md) Section 6;
+the table below indexes the foundational documents, readiness reviews, and
+primary receipts.
 
 | Document | Contents |
 |---|---|
-| [vision-and-roadmap.md](vision-and-roadmap.md) | **Embeddable JIT Sweet Spot** vision & Phase-4 expansion tracks (`G0` Linux gate, `Q1` Node-API v9/10 + ES2025/ES2026 + `Z1`, `I1` `Intl`, `H1` Zig runtime host) |
+| [vision-and-roadmap.md](vision-and-roadmap.md) | **Embeddable JIT Sweet Spot** vision & Phase-4 expansion tracker (`G0`, `G0-phase4`, `Q1.1`-`Q1.5`, `I1`/`I2`, `Q2`, `Q3`, `P1`, `C3.1`, `ARM64 WB`, `Pre-Q1.5`, `H1`) |
 | [b5-package.md](b5-package.md) | Release packaging (`zig build package` / `check-package`), deterministic tarballs, and SHA-256 `MANIFEST.json` verification |
 | [zig-strategy.md](zig-strategy.md) | Incremental C-ABI Zig wedge strategy (`Z1` boundaries vs keeping C++ core intact) |
 | [architecture-and-readiness-review.md](architecture-and-readiness-review.md) | System architecture, layout, P0/P1 Mac fixes, 4-profile test matrix, Test262 `refresh-2026-11-16`, residuals, and Linux readiness |
-| [linux-handoff.md](linux-handoff.md) | Linux bring-up and testing handoff: build overrides, B4 D1-D4 handoff, Linux Node-API/variant gates, sanitizers, CI checklist |
-| [perf-baseline.md](perf-baseline.md) | Darwin ARM64 quiet-machine benchmark receipts (`baseline` vs `HEAD` `526393e26` JIT/Interpreter across SunSpider, Kraken, Octane, JetStream) |
-| [node-api-receipt.md](node-api-receipt.md) | Node-API (`NAPI_VERSION=8`) provider/host verification: 150 exports, 18 probes, stress, CMake/matrix results, known diffs |
-| [open-cards.md](open-cards.md) | Residual tracker: open engine/JIT/conformance items, closed cards ledger, and Linux handoff items |
+| [linux-handoff.md](linux-handoff.md) | Linux x64 bring-up and revalidation handoff: Phase-4 (`G0-phase4`) 10-step runbook (§0A), `G0` baseline runbook (§0), build overrides, sanitizers, Node-API, and CI checklist |
+| [windows-handoff.md](windows-handoff.md) | **B6 Windows x64 `zig build` bring-up and certification handoff**: VS 2022 / WinSDK / `vcpkg` ICU4C prerequisites, 10-step runbook, troubleshooting, and `b6-windows-run.md` receipt template |
+| [b4-linux-run.md](b4-linux-run.md) | Native Linux x64 behavior proofs and `G0` single-pass revalidation receipt (`8b447ac48..1bf42d1f6`) |
+| [perf-baseline.md](perf-baseline.md) | Darwin ARM64 quiet-machine benchmark receipts (`baseline` vs `HEAD` JIT/Interpreter across SunSpider, Kraken, Octane, JetStream) |
+| [node-api-receipt.md](node-api-receipt.md) | Node-API provider/host verification (`NAPI_VERSION=10` `161` exports in §14 on `modernize/phase4`; `NAPI_VERSION=8` `150` exports historical baseline in §§1-13) |
+| [z1-u8a-codec.md](z1-u8a-codec.md) | `Z1` Zig 0.17.0 SIMD `Uint8Array` Base64/Hex C-ABI codec boundary contract and ownership record (`Q1.3`) |
+| [i1-modern-intl.md](i1-modern-intl.md) | Track `I1` modern ECMA-402 C++ wrappers over C ICU4C (`Locale`, `ListFormat`, `RelativeTimeFormat`, `DisplayNames`, `Segmenter`, `getCanonicalLocales`) |
+| [i2-duration-enumeration.md](i2-duration-enumeration.md) | Track `I2` `Intl.supportedValuesOf` and `Intl.DurationFormat` C++ implementation over C ICU4C |
+| [q14-es2025-sweep.md](q14-es2025-sweep.md) | Track `Q1.4` ES2025 Conformance Sweep II (`Date.prototype.set*`, `Function.prototype.toString`, `JSON.parse` `Walk`, `AsyncFromSyncIterator`) |
+| [q2-es2026-wave2.md](q2-es2026-wave2.md) | Track `Q2` ES2026 Wave 2 (`Iterator.concat`, `Map`/`WeakMap` `getOrInsert*`, `JSON.rawJSON`/`isRawJSON`/`context.source`) |
+| [p1-jit-bailouts.md](p1-jit-bailouts.md) | Track `P1` pathological JIT bailout, loop-liveness, ReJIT storm, and ARM64 asm.js BGJIT tier-up fixes (`1.453x` 64-test geomean) |
+| [c31-explicit-resource-management.md](c31-explicit-resource-management.md) | Track `C3.1` Explicit Resource Management (`Symbol.{dispose,asyncDispose}`, `SuppressedError`, `DisposableStack`, `AsyncDisposableStack`, `using`/`await using` + JIT lowering, `947/0` Test262) |
+| [arm64-write-barrier-jit.md](arm64-write-barrier-jit.md) | ARM64 JIT software write-barrier fix (`LowerMD.cpp` + `LinearScan::InsertMove` under `ConcurrentCollect`) |
+| [pre-q15-cleanup.md](pre-q15-cleanup.md) | Pre-Q1.5 Hardening & Cleanup (`29/29` JIT+WASM ASan & UBSan under `halt_on_error=1`, `-ParserStateCache` `ImmutableList` UB, ARM64 `Math.{ceil,floor}` `-0` `44/0`, `98` build-tool tests) |
+| [q15-es2025-sweep.md](q15-es2025-sweep.md) | Track `Q1.5` ES2025 Conformance Sweep III (`99.56%` ES2025 edition / `88.34%` broad, `+247` non-`waitAsync` fixes across `133` files, `0` JIT diffs) |
+| [q3-es2026-wave3.md](q3-es2026-wave3.md) | Track `Q3` ES2026 Wave 3 (`Iterator.{zip,zipKeyed}`, `Iterator.prototype.{chunks,windows,includes,join}`, `Promise.{allKeyed,allSettledKeyed}`, `88.97%` broad / `99.57%` edition, `622/0` JIT parity) |
+| [open-cards.md](open-cards.md) | Residual tracker: open engine/JIT/conformance items, closed cards ledger, and Phase-4 receipts (`Q1.1`-`Q3`, `P1`, `C3.1`, `ARM64 WB`, `Pre-Q1.5`) |
 | [current-state.md](current-state.md) | Baseline repository inventory, architecture/build/test summaries, platforms, activity, constraints, gaps |
 | [arm64-macos-jit.md](arm64-macos-jit.md) | ARM64 macOS JIT (`9004b3ed7`; M1 tag `jit-arm64-macos-m1`) bring-up record |
 | [architecture.md](architecture.md) | Engine architecture: component map, execution pipeline, JIT tiers, JsRT API, threading, GC, Intl/WASM, with a Mermaid diagram |

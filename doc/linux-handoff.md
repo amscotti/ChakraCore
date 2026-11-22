@@ -1,11 +1,143 @@
 # ChakraCore Modernization -- Linux Bring-Up and Testing Handoff
 
+> Phase-4 Handoff (`G0-phase4`): **2026-11-22** (`modernize/phase4` at `29542edb4`+ prep; `modernize/baseline` at `1bf42d1f6`)
 > Original Handoff: 2026-11-16 (`modernize/baseline` at `526393e26`, `8f4e85d62..526393e26`)
 > Synchronized: **2026-11-17** (`modernize/baseline` at `06d783c64`, including Linux bring-up `4778b3a2b..c639e9f02` and post-review fixes `193c95046..06d783c64`)
 > Companion Docs: [architecture-and-readiness-review.md](architecture-and-readiness-review.md),
 > [b4-linux-run.md](b4-linux-run.md), [b4-d1-d4.md](b4-d1-d4.md),
 > [build-contract-linux.md](build-contract-linux.md), [open-cards.md](open-cards.md),
-> [perf-baseline.md](perf-baseline.md)
+> [perf-baseline.md](perf-baseline.md), [windows-handoff.md](windows-handoff.md)
+
+> [!IMPORTANT]
+> **Active Branch (`modernize/phase4`):** `G0` baseline revalidation (`8b447ac48..1bf42d1f6`) is complete on `modernize/baseline` and merged into `modernize/phase4` ([b4-linux-run.md](b4-linux-run.md) §12). Use **§0A below** for the **`G0-phase4`** single-pass Linux x64 revalidation covering `Q1.1` (Node-API v10 `161` exports), `Z1` (`lib/ZigCodec/u8a_codec.zig`), `I1`/`I2` (modern C-ICU4C `Intl`), `C3.1` (Explicit Resource Management), `P1` (JIT bailout/tier-up), `Pre-Q1.5` (UBSan/Math hardening), and `Q1.2`–`Q3` (ES2025 `99.57%` / broad `88.97%` on macOS ARM64). Existing `G0` baseline receipts (§0, Phase 1–6 summary, and §§1–4) remain preserved verbatim below §0A.
+
+## 0A. Phase-4 (`G0-phase4`) Single-Pass Linux x64 Revalidation Runbook
+
+Run from the repository root on **Ubuntu 24.04 x86_64** (`x86_64-linux-gnu`, glibc `2.39`, ICU `74`, `libicu-dev binutils clang make`, pinned Node `v22.22.3`, Zig `0.17.0` via `mise exec --`; on non-Ubuntu-24.04 hosts add `-Dglibc=<M.m> -Dicu-major=<N> -Dicu-include=<dir> -Dicu-libdir=<dir>` per §2). Stop at the first unexpected failure and record all results in [b4-linux-run.md](b4-linux-run.md).
+
+1. **Step 1 — Portable `StyleChecks` & Bytecode-Header Purity:**
+   ```sh
+   git fetch origin master:refs/remotes/origin/master
+   python3 tools/StyleChecks/check_style_portable.py --self-test
+   for base in origin/master modernize/baseline; do
+     STYLECHECK_BASE="$base" bash tools/StyleChecks/check_eol.sh
+     STYLECHECK_BASE="$base" bash tools/StyleChecks/check_tabs.sh
+     STYLECHECK_BASE="$base" bash tools/StyleChecks/check_ascii.sh
+     STYLECHECK_BASE="$base" bash tools/StyleChecks/check_copyright.sh
+   done
+   git diff --exit-code modernize/baseline -- \
+     lib/Runtime/Base/JnDirectFields.h \
+     lib/Runtime/InternalPropertyList.h \
+     lib/Runtime/Library/InJavascript/Intl.js \
+     'lib/Runtime/Library/InJavascript/JsBuiltIn*.bc.*.h'
+   ```
+   Expected: `8/8` `--- NO PROBLEMS DETECTED ---`, `check_style_portable.py --self-test` clean, empty bytecode-header diff (`exit 0`).
+
+2. **Step 2 — Build-Tool Unit Suites, `linux-gate-tests.zig`, & Zig Unit Tests (No Engine Build Required):**
+   ```sh
+   mise exec -- zig build check-build-tools
+   python3 tools/package/test_package_tools.py
+   python3 tools/test262/test_edition_policy.py
+   python3 tools/test262/refresh_baseline.py --self-test
+   python3 tools/build/check_metadata_linux.py --self-test
+   python3 tools/build/check_regression_linux.py --self-test
+   mise exec -- zig test tools/linux-gate-tests.zig
+   mise exec -- zig test doc/examples/owned-bytes.zig
+   mise exec -- zig test lib/ZigCodec/u8a_codec.zig
+   ```
+   Expected: `check-build-tools` (`test_build_tools.py`) `>=98` tests OK; `test_package_tools.py`, `test_edition_policy.py`, and `--self-test` scripts all PASS; `linux-gate-tests.zig` (`>=9` tests incl. Phase-4 TU completeness checks for `u8a_codec.zig`, `I1`/`I2` `Intl*.cpp`, `C3.1` `JavascriptDisposableStack.cpp` & `JavascriptSuppressedError.cpp`, `Q3` `JavascriptIterator{Zip,Chunking}.cpp`, and `lib/NodeApi` v10 TUs), `owned-bytes.zig` (`4/4`), and `u8a_codec.zig` (`7/7`) all PASS.
+
+3. **Step 3 — Default `test` Build, Core Gates, Phase-4 Slices, & `RECORDED_BASELINE` Re-Pin:**
+   ```sh
+   mise exec -- zig build
+   mise exec -- zig build check-selftest check-smoke check-jit check-native check-metadata verify-bytecode
+   mise exec -- zig build check-regression
+   ```
+   - Verify Phase-4 feature slices explicitly under `./zig-out/bin/ch`:
+     - `Z1` Zig SIMD codec (`u8a_codec.zig`): `./zig-out/bin/ch test/typedarray/uint8array_base64_hex.js`
+     - `I1` / `I2` modern C-ICU4C `Intl`:
+       ```sh
+       for f in test/Intl/Intl{Locale,ListRelativeTime,DisplayNames,Segmenter,SupportedValuesOf,DurationFormat}Test.js; do
+         ./zig-out/bin/ch -args summary -endargs "$f" || exit 1
+       done
+       ```
+     - `C3.1` Explicit Resource Management & `Q1.2`–`Q3`:
+       ```sh
+       (cd test && python3 runtests.py --x64 -t -b ../zig-out/bin/ch \
+         es7/explicit_resource_management_builtins.js es7/using_and_await_using.js \
+         Optimizer/c31_disposal_jit.js es7/q15_*.js es7/q3_*.js \
+         es7/iterator_concat.js es7/map_weakmap_getorinsert.js \
+         JSON/json_rawjson_and_source.js JSON/json_parse_reviver_es2025.js \
+         Number/numeric_separator_strtod_and_proxy_realm.js Number/math_sumprecise.js \
+         Date/date_set_es2025.js Function/toString_es2025_and_arrow_ub.js)
+       ```
+   - **How to audit & re-pin `RECORDED_BASELINE` in `tools/build/check_regression_linux.py`:**
+     - `G0` (`modernize/baseline`) pinned `RECORDED_BASELINE = {"interpreted": (2868, 0), "dynapogo": (2330, 0)}` (`tools/build/check_regression_linux.py:66`).
+     - `modernize/phase4` adds new `Q1.1`–`Q3`, `I1`/`I2` (`Intl,exclude_windows`, eligible on Linux!), `P1`, and `C3.1` tests across `test/*/rlexe.xml` (macOS `gate_counts.json` moved `2064/2116 -> 2098/2150`, `+34` non-JIT tests; Linux also executes JIT/AsmJs suites).
+     - Run `mise exec -- zig build check-regression`: confirm **`0` failures** in both `interpreted` and `dynapogo`, reconcile the exact `passed` delta against `git diff modernize/baseline -- 'test/*/rlexe.xml'`, update `RECORDED_BASELINE` and its docstring in `tools/build/check_regression_linux.py` (plus any matching `test_build_tools.py` pin tests), and run full `mise exec -- zig build check` to confirm exit `0`.
+   - Confirm `check_metadata_linux` passes cleanly with zero leaked `zig_u8a_*` symbols and `verify-bytecode` exits `0`.
+
+4. **Step 4 — Linux Build Variants (`-Djit=false`, `debug-static`, `release-shared`):**
+   ```sh
+   mise exec -- zig build -Djit=false check-smoke check-metadata verify-bytecode check-native
+   mise exec -- zig build -Dprofile=release-shared check-smoke check-metadata check-jit check-native
+   mise exec -- zig build -Dprofile=debug-static check
+   ```
+   Expected: all PASS (`release-shared` omits debug-only `JsPrivate*` exports and passes `check-jit`; `debug-static` builds `libChakraCoreStatic.a` under `out/debug-static/`, passes `8/8` static native suites, `verify-bytecode`, `check-smoke`, `check-metadata`, and `check-regression` with zero debug assertions).
+
+5. **Step 5 — FullJit, WASM P1, Debug WASM, & Bounded `GCStress`:**
+   ```sh
+   mise exec -- zig build check-fulljit check-wasm check-gcstress
+   (cd test && python3 runtests.py --x64 --debug --variants=interpreted -b ../out/debug-static/bin/ch wasm)
+   ```
+   Expected: `check-fulljit` `0` failures across `Basics/Array/Function/Regex/es6/es7` (superseding `G0`'s `615/0`); `check-wasm` P1 **`382/382`** (record any x64 manifest deltas); `check-gcstress` completes both `in-thread` and `concurrent` legs (`>=2` walks each, `0` errors); debug `wasm` triggers zero assertions.
+
+6. **Step 6 — Linux Sanitizers (`ASan`, `UBSan`, & `TSan`):**
+   ```sh
+   ASAN_OPTIONS=detect_leaks=0 mise exec -- zig build -Dsanitize=address check-sanitize
+   UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1 mise exec -- zig build -Dsanitize=undefined check-sanitize
+   mise exec -- zig build -Dsanitize=thread check-sanitize
+   ```
+   Also run `I1`/`I2`/`C3.1`/`Q1.5`/`Q3` tests under `./out/sanitize-{address,undefined}/bin/ch -CollectGarbage`, and under TSan run `bash test/nodeapi/probes/run_host_async_probe.sh` and `./out/sanitize-thread/bin/ch test/es7/s6-growable-cross-agent.js`.
+   Expected: ASan & UBSan **`27/27`** (or higher; clean incl. `nodeapi:v10_multi_addon_probe` and all Phase-4 legs); verify whether TSan reproduces only the `G0`-triaged PAL startup lock-count read (`cs.cpp:723` vs `cs.cpp:775/907`, [open-cards.md](open-cards.md) §12) or surfaces any new race.
+
+7. **Step 7 — Node-API v10 Stack (`161` Exports, `19/19` Probes, `--addon`, `52/17/0` C Matrix):**
+   ```sh
+   mise exec -- zig build libChakraNodeApi ch-nodeapi check-nodeapi
+   export SKIP_BUILD=1
+   bash tools/nodeapi/run_probe.sh
+   for s in test/nodeapi/probes/run_*.sh; do
+     echo "=== $s ==="
+     bash "$s" || exit 1
+   done
+   REPEATS=5 sh test/nodeapi/stress/run_stress.sh
+   python3 test/nodeapi/run_matrix.py --verify-manifest
+   python3 test/nodeapi/run_matrix.py --suite all --host ch-nodeapi
+   python3 test/nodeapi/run_node_addon_api_matrix.py --hosts both
+   ```
+   (Verify `node --version` is pinned `v22.22.3`; smoke repeatable multi-addon `--addon` loading via `tools/nodeapi/addons/hello_world.node` + `promise_probe.node` or `run_v10_multi_addon_probe.sh`.)
+   Expected: `check-nodeapi` **`161`** exports (`155` `napi_*`/`node_api_*` + `6` host); `19/19` `run_*_probe.sh` + `run_probe.sh` ALL PASS; `REPEATS=5` stress ALL PASS; `run_matrix.py` **`52 pass / 17 skip / 0 fail`**; `run_node_addon_api_matrix.py` **`52 pass / 61 skip / 6 fail`** (only the 6 documented PR-12 `test/object/*` V8 error-text diffs).
+
+8. **Step 8 — Deterministic Release Packaging (`package` & `check-package`):**
+   ```sh
+   mise exec -- zig build -Dprofile=release-shared package check-package
+   ```
+   Expected: `out/package/chakracore-<ver>-linux-x64.tar.gz` + `MANIFEST.json` built deterministically, `VERIFY PASS` (`0` errors), packaged `ch` and `ch-nodeapi` execute using `$ORIGIN/../lib`, `ALL PACKAGE TESTS PASSED SUCCESSFULLY!`.
+
+9. **Step 9 — Certified Linux Test262 (`refresh_baseline.py`) & Benchmarks (`tools/bench/run.py`):**
+   ```sh
+   python3 tools/test262/refresh_baseline.py --binary "$PWD/zig-out/bin/ch" --jobs 8 --output out/test262-refresh-phase4-linux
+   python3 tools/test262/run.py --checkout "$PWD/out/test262" --binary "$PWD/zig-out/bin/ch" --intl402 --jobs 8 --output out/test262-intl402-phase4-linux -- 'test/intl402/**/*.js'
+   python3 tools/bench/run.py --binary zig-out/bin/ch --tier jit --iterations 5 -o tools/bench/results/linux-x64-jit.json
+   python3 tools/bench/run.py --binary zig-out/bin/ch --tier interp --iterations 5 -o tools/bench/results/linux-x64-interp.json
+   ```
+   Expected: Compare against macOS ARM64 `modernize/phase4` (**`99.57%` ES2025 = `80,195 / 349`**, **`88.97%` broad = `82,866 / 10,275`**, `--intl402` `1,886 / 6,764`) and Linux `G0` (`98.58%` / `86.15%`): expect only Ubuntu ICU `74` Unicode/CLDR deltas (e.g., `RegExp/property-escapes` Unicode 15.1 vs macOS ICU 79.1 Unicode 18.0) and futex/parallel scheduling variance (`Atomics/{notify,wait,waitAsync}`, re-checking any parallel flakes standalone with `--jobs 1`), **`0` shape suspects**, **`0` engine regressions**. Publish (`--publish`) only on a clean tree after auditing flips.
+
+10. **Step 10 — Hosted CI Confirmation & Receipt Recording in `doc/b4-linux-run.md`:**
+    - Confirm [.github/workflows/zig-linux.yml](../.github/workflows/zig-linux.yml) (`style`, `zig`, `zig-variants`, `nodeapi`, `record`) and [.github/workflows/zig-macos.yml](../.github/workflows/zig-macos.yml) are green on hosted runners.
+    - Append a dated **`G0-phase4` Revalidation Receipt** section in [b4-linux-run.md](b4-linux-run.md) (preserving `G0` §12 intact above) capturing host/toolchain details, binary and tarball SHA-256 hashes, updated `RECORDED_BASELINE` counts, variant/sanitizer outcomes, Node-API v10 tallies, Test262 edition/broad/bucket numbers, benchmark medians, and any new cards in [open-cards.md](open-cards.md).
+
+---
 
 > [!NOTE]
 > **Execution Status & Closure Summary (2026-11-17, `06d783c64`)**

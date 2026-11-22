@@ -4,11 +4,19 @@
 [![Licensed under the MIT License](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/Microsoft/ChakraCore/blob/master/LICENSE.txt)
 [![PR's Welcome](https://img.shields.io/badge/PRs%20-welcome-brightgreen.svg)](#contribute)
 
-ChakraCore is a compact, embeddable JavaScript and WebAssembly engine with a flat C API (`JsRT`) and a separate Node-API v10 addon provider (`libChakraNodeApi` on `modernize/phase4`; v8 on `modernize/baseline`). On `modernize/baseline`, it builds hermetically with Zig `0.17.0` on **macOS ARM64** and **Linux x64** (`~5.3 MB` release package, `98.89%` certified ES2025 edition conformance on macOS ARM64, 3-tier JIT + concurrent GC, WASM multi-value + SIMD JIT).
+ChakraCore is a compact, embeddable JavaScript and WebAssembly engine with a flat C API (`JsRT`) and a separate Node-API v10 addon provider (`libChakraNodeApi` on `modernize/phase4` with `161` exports; v8 / `150` exports on `modernize/baseline`). On `modernize/phase4`, it builds with a single Zig `0.17.0` front end across **macOS ARM64** (certified), **Linux x64** (`G0` baseline verified; `G0-phase4` revalidation queued), and **Windows x64** (`B6` native `x86_64-windows-msvc` `zig build` wired, awaiting native certification), delivering a `~5.5 MB` release package (`~5.3 MB` on `modernize/baseline`), **`99.57%`** certified ES2025 edition conformance (**`80,195 / 80,544`**) and **`88.97%`** broad conformance (**`82,866 / 93,141`**) on macOS ARM64, 3-tier JIT + concurrent `Recycler` GC, and WebAssembly multi-value + SIMD JIT (`382/382` P1).
 
 ## Project Direction: The Embeddable JIT Sweet Spot
 
-This fork targets the middle ground between interpreter-only embeds and heavyweight browser engines: sub-minute Zig builds, compact binaries, flat C ABIs (`JsRT` + `libChakraNodeApi`) with zero `v8.h` shims, multi-tier x64/ARM64 JIT + WASM SIMD, and optional Zig leaf/host integrations outside the C++ engine core. See [doc/vision-and-roadmap.md](doc/vision-and-roadmap.md) for the Phase-4 roadmap (`Q1.1` Node-API v9/v10 + multi-addon support landed on `modernize/phase4`; remaining tracks cover ES2025/ES2026 quick wins, `Z1` Base64/Hex Zig C-ABI wedge, modern `Intl`, and a standalone Zig + `libuv` runtime host) and [doc/modernization-plan.md](doc/modernization-plan.md) for verified gates.
+This fork targets the middle ground between interpreter-only embeds and heavyweight browser engines: sub-minute Zig builds, compact binaries, flat C ABIs (`JsRT` `237` exports + `libChakraNodeApi` `161` exports) with zero `v8.h` shims, multi-tier x64/ARM64 JIT + WASM SIMD, and narrow Zig C-ABI leaf wedges outside the C++ engine core. Highlights landed on `modernize/phase4`:
+
+- **`Q1.1` Node-API v9/v10 + Multi-Addon (`161` exports):** `155` `napi_*`/`node_api_*` + `6` host helpers, `--addon` multi-addon registry, per-context shared `Buffer` marker, `19/19` probes, `52/17/0` C matrix.
+- **`Q1.2`–`Q1.5` ES2025 Conformance Sweeps I–III:** Lifted certified ES2025 edition conformance from `98.89%` (`modernize/baseline`) through `99.06%` (`Q1.2`), `99.25%` (`Q1.4`), `99.26%` (`Q2`/`C3.1`), and `99.56%` (`Q1.5`, `+247` non-`waitAsync` fixes across `133` files with `0` JIT diffs) to **`99.57%`** (`Q3`).
+- **`Q1.3` / `Q2` / `Q3` ES2026 Waves 1–3 & `Z1` Zig Codec:** `Error.isError`, `Math.sumPrecise`, `Array.fromAsync`, `Uint8Array` Base64/Hex backed by `lib/ZigCodec/u8a_codec.zig` (`Z1`), `Iterator.concat`, `Map`/`WeakMap` `getOrInsert*`, `JSON.rawJSON`/`isRawJSON`/`context.source`, `Iterator.{zip,zipKeyed}`, `Iterator.prototype.{chunks,windows,includes,join}`, and `Promise.{allKeyed,allSettledKeyed}` (`+578` broad Test262 in `Q3` with `622/0` JIT parity).
+- **`I1` / `I2` Modern ECMA-402 over C ICU4C:** `Intl.{Locale,ListFormat,RelativeTimeFormat,DisplayNames,Segmenter,getCanonicalLocales,supportedValuesOf,DurationFormat}` implemented strictly in C++ over C ICU4C APIs (`Intl.js` and `JsBuiltIn*.bc.*.h` untouched).
+- **`P1`, `C3.1`, `ARM64 WB`, & `Pre-Q1.5` Hardening:** Pathological JIT bailout/ReJIT and ARM64 asm.js tier-up fixes (`1.453x` 64-test geomean vs baseline JIT; `Kraken/audio-fft.js` `65.94x`), Explicit Resource Management (`Symbol.{dispose,asyncDispose}`, `SuppressedError`, `DisposableStack`, `AsyncDisposableStack`, `using`/`await using` + JIT lowering, `947/0` Test262), ARM64 JIT software write-barrier fix under `ConcurrentCollect`, and `Pre-Q1.5` hardening (`29/29` JIT+WASM ASan & UBSan clean under `halt_on_error=1`, `-ParserStateCache` `ImmutableList` UB, ARM64 `Math.{ceil,floor}` `-0` `44/0`, `98` build-tool tests).
+
+See [doc/vision-and-roadmap.md](doc/vision-and-roadmap.md) for Phase-4 tracking (`G0-phase4`, `B6`, `I3`, `H1`) and [doc/modernization-plan.md](doc/modernization-plan.md) for verified gates.
 
 ## Upstream History
 
@@ -37,55 +45,69 @@ If you find a security issue in the Master branch of Chakracore but not in 1.11 
 * [Blogs, talks and other resources](https://github.com/chakra-core/ChakraCore/wiki/Resources)
 * [Modernization documentation and verified baselines](doc/README.md)
 
-## Building ChakraCore
+## Zig `0.17.0` Build & Test Quickstarts (`modernize/phase4`)
 
-> **This branch (`modernize/phase4`, branched from `modernize/baseline` `35f53eae0` with `Q1.1` landed)** builds on macOS ARM64 with the Zig
-> 0.17.0 front end pinned in `mise.toml` (shared/no-JIT profiles plus the
-> ARM64 macOS `jit` profile merged 2026-10-31; see
-> [doc/modernization-plan.md](doc/modernization-plan.md) for status,
-> [doc/arm64-macos-jit.md](doc/arm64-macos-jit.md) for the JIT record and
-> coverage limits, and [doc/README.md](doc/README.md) for the doc index):
->
-> ```sh
-> mise exec -- zig build                 # default (test) profile
-> mise exec -- zig build check           # regression + bytecode + native + smoke + metadata gates
-> mise exec -- zig build check -Dprofile=debug-static
-> mise exec -- zig build -Dprofile=release-shared check-package
-> mise exec -- zig build -Dprofile=jit -Dwasm=true check-wasm check-fulljit
-> mise exec -- zig build -Dsanitize=address check-sanitize
-> mise exec -- zig build -Dsanitize=undefined check-sanitize
-> ```
->
-> Linux x64 builds via `tools/build/linux.zig` ([doc/linux-handoff.md](doc/linux-handoff.md) §0);
-> legacy CMake/MSBuild instructions below remain the reference for Windows (B6)
-> and upstream comparisons.
+All active platform builds use the Zig `0.17.0` front end pinned in [mise.toml](mise.toml) (`zig` on `PATH` or `mise exec -- zig ...`).
 
-You can build ChakraCore on Windows 7 SP1 or above, and Windows Server 2008 R2 or above, with either Visual Studio 2015 or 2017 with C++ support installed.  Once you have Visual Studio installed:
+| Platform | Target / Toolchain | Default Install | Verification & Handoff |
+|---|---|---|---|
+| **macOS ARM64** | `aarch64-macos.26.0`, Xcode 26.5 SDK, Homebrew `icu4c` | `zig-out/` (`out/<profile>/`) | Certified on `modernize/phase4`; CI [.github/workflows/zig-macos.yml](.github/workflows/zig-macos.yml) |
+| **Linux x64** | `x86_64-linux-gnu` (Ubuntu 24.04: `glibc 2.39`, `ICU 74`, `clang` for sanitizers) | `zig-out/` (`out/<profile>/`) | `G0` verified; Phase-4 runbook [doc/linux-handoff.md](doc/linux-handoff.md) §0A; CI [.github/workflows/zig-linux.yml](.github/workflows/zig-linux.yml) |
+| **Windows x64** | `x86_64-windows-msvc`, VS 2022 Build Tools + Win10/11 SDK (`ml64.exe` only; no `midl.exe`/`mc.exe`), `vcpkg` `icu:x64-windows` | `zig-out\` (`out\<profile>\`) | `B6` wired, awaiting native certification; runbook [doc/windows-handoff.md](doc/windows-handoff.md); CI [.github/workflows/zig-windows.yml](.github/workflows/zig-windows.yml) |
 
-* Clone ChakraCore through ```git clone https://github.com/Microsoft/ChakraCore.git```
-* Open `Build\Chakra.Core.sln` in Visual Studio
-* Build Solution
+### macOS ARM64
 
-On macOS you can build ChakraCore with the xcode command line tools and `cmake`.
-On Linux you can build ChakraCore with `cmake` and `ninja`.
+```sh
+mise exec -- zig build                              # default (test) profile -> zig-out/
+mise exec -- zig build check                        # regression (2098/0) + bytecode + native + smoke + metadata + selftest
+mise exec -- zig build -Dprofile=debug-static check # static Debug archive + 8/8 native suites (2150/0)
+mise exec -- zig build -Dprofile=release-shared check-package
+mise exec -- zig build -Dprofile=jit -Dwasm=true check-wasm check-fulljit
+mise exec -- zig build -Dsanitize=address check-sanitize
+mise exec -- zig build -Dsanitize=undefined check-sanitize
+```
 
-More details in [Building ChakraCore](https://github.com/chakra-core/ChakraCore/wiki/Building-ChakraCore).
+### Linux x64
 
-Alternatively, see [Getting ChakraCore binaries](https://github.com/Microsoft/ChakraCore/wiki/Getting-ChakraCore-binaries) for pre-built ChakraCore binaries.
+See [doc/linux-handoff.md](doc/linux-handoff.md) §0A for the Phase-4 (`G0-phase4`) 10-step revalidation runbook and non-Ubuntu-24.04 override flags (`-Dglibc=<M.m>`, `-Dicu-major=<N>`, `-Dicu-include=<dir>`, `-Dicu-libdir=<dir>`):
+
+```sh
+mise exec -- zig build                              # default (test) profile w/ x64 JIT + WASM
+mise exec -- zig build check                        # regression + bytecode + native + smoke + jit + metadata + selftest
+mise exec -- zig build -Djit=false check-smoke check-metadata verify-bytecode check-native
+mise exec -- zig build -Dprofile=debug-static check
+mise exec -- zig build -Dprofile=release-shared package check-package
+mise exec -- zig build check-fulljit check-wasm check-gcstress
+mise exec -- zig build -Dsanitize=address check-sanitize   # also undefined, thread
+mise exec -- zig build libChakraNodeApi ch-nodeapi check-nodeapi
+```
+
+### Windows x64 (`x86_64-windows-msvc`)
+
+Run from an **x64 Native Tools Command Prompt for VS 2022** with Zig `0.17.0` and `vcpkg` `icu:x64-windows` (`VCPKG_ROOT` or `CHAKRA_ICU_DIR`, with its `bin` directory on `PATH`). The Windows graph passes `-DENABLE_OOP_NATIVE_CODEGEN=0` (no `midl.exe`) and `-DDISABLE_JS_ETW` (no `mc.exe`), leaving `ml64.exe` as the sole external MSVC binary required by `zig build`. See [doc/windows-handoff.md](doc/windows-handoff.md) for prerequisites, the 10-step bring-up runbook, and troubleshooting:
+
+```powershell
+zig test tools/windows-gate-tests.zig
+zig build                                           # ChakraCore.dll/.lib + ch.exe + GCStress.exe -> zig-out\
+zig build check-smoke check-metadata verify-bytecode check-jit check-selftest
+zig build check
+zig build -Djit=false check-smoke check-metadata verify-bytecode
+zig build -Dprofile=debug-static check-smoke check-metadata verify-bytecode
+zig build -Dprofile=release-shared libChakraNodeApi ch-nodeapi check-nodeapi check-package
+zig build check-wasm check-fulljit check-gcstress
+```
+
+Windows x64 options: `-Dprofile=test|debug-static|release-shared` (`test` -> `zig-out/`, `debug-static` -> `out/debug-static/`, `release-shared` -> `out/release-shared/`), `-Djit=true|false` (`false` sets `-DDISABLE_JIT=1`), `-Dicu=icu4c|windows|none` (default `icu4c` for full `I1`/`I2` ECMA-402 parity; `windows` selects `WINDOWS10_ICU`; `none` omits ICU), `-Dicu-include=<dir>`, `-Dicu-libdir=<dir>`, `-Dml64=<path>`, and `-Dwin-sdk-um=<dir>`.
+
+> **Legacy MSBuild & CMake (Historical Reference):** Legacy `Build\Chakra.Core.sln` (`test\ci.buildone.cmd`) on Windows and `build.sh` / `cmake` on Unix remain in the tree solely as historical references for upstream comparisons (see [doc/build.md](doc/build.md); legacy scripts do not build `libChakraNodeApi` or `ch-nodeapi` and do not include all Phase-4 Zig tooling).
 
 ## Using ChakraCore
 
 Once built, you have a few options for how you can use ChakraCore:
 
-* The most basic is to test the engine is running correctly with the application *ch.exe* (ch on linux or macOS).  This app is a lightweight host of ChakraCore that you can use to run small applications.  After building, you can find this binary in:
-  * Windows: `Build\VcBuild\bin\${platform}_${configuration}` (e.g. `Build\VcBuild\bin\x64_debug`)
-  * macOS/Linux: `buildFolder/config/ch` (e.g. `out/Release/ch`)
-* You can [embed ChakraCore](https://github.com/chakra-core/ChakraCore/wiki/Embedding-ChakraCore) in your applications - see [documentation](https://github.com/chakra-core/ChakraCore/wiki/Embedding-ChakraCore) and [samples](https://aka.ms/chakracoresamples).
-
-_A note about using ChakraCore_: ChakraCore is a JavaScript engine, it does not include the external APIs that are provided by a Web Browser or Node.js.  For example, DOM APIs like ```document.write()``` are additional APIs that are not provided by ChakraCore, when embedding ChakraCore in an application you will need to implement your own input and output APIs. For debugging, in `ch` you can use ```print()``` to put text to the terminal.
-
-Alternatively, if you are using the [vcpkg](https://github.com/Microsoft/vcpkg/) dependency manager you can download and install ChakraCore with CMake integration in a single command:
-* vcpkg install chakracore
+* Run JavaScript directly with the `ch` (`ch.exe` on Windows) host binary in `zig-out/bin/ch` (or `out/<profile>/bin/ch`), for example `zig-out/bin/ch hello.js` (with `print()` available for console output).
+* Embed ChakraCore via the flat `JsRT` C API (`zig-out/include/ChakraCore.h` and `ChakraCommon.h`) — see [Embedding ChakraCore](https://github.com/chakra-core/ChakraCore/wiki/Embedding-ChakraCore) and [API Reference](https://github.com/chakra-core/ChakraCore/wiki/JavaScript-Runtime-%28JSRT%29-Reference).
+* Note: ChakraCore is a JavaScript and WebAssembly engine, not a browser or Node.js runtime; DOM APIs (`document.write()`) and Node built-ins are not provided by the engine.
 
 ## Node-API provider (`libChakraNodeApi`)
 
@@ -128,27 +150,15 @@ probe-backed record):
 - `napi_async_init`/`napi_async_destroy` bookkeeping only:
   async_hooks propagation is a documented no-op.
 
-Build and gate the provider on macOS arm64 (Zig 0.17.0 via mise):
+Build and gate the provider (`libChakraNodeApi` + `ch-nodeapi` + `check-nodeapi` verifying exactly `155` `napi_*`/`node_api_*` + `6` host = `161` exports on shared profiles `test`, `jit`, and `release-shared`):
 
 ```sh
-mise exec -- zig build libChakraNodeApi
-# installs lib/libChakraNodeApi.dylib + include/nodeapi/ (test profile)
-mise exec -- zig build check-nodeapi
-# verifies exactly 155 napi_* + 6 host = 161 exports (fails on missing/extra)
-mise exec -- zig build check-nodeapi -Dprofile=jit
+mise exec -- zig build libChakraNodeApi ch-nodeapi check-nodeapi
+# installs lib/libChakraNodeApi.{dylib,so} (or bin/libChakraNodeApi.dll + lib/libChakraNodeApi.lib on Windows)
+# plus include/nodeapi/{js_native_api,js_native_api_types,node_api,node_api_types}.h
 ```
 
-The exports gate (`check-nodeapi`) is a separate step on purpose
-(plan PR-10): it runs for the shared profiles (`test`, `jit`, and
-`release-shared`) and is not part of `zig build check`, so engine regression
-pins in `tools/build/gate_counts.json` are untouched. A from-scratch consumer
-(`zig cc -DNAPI_VERSION=10 -I<installed>/include/nodeapi`, linking the
-built provider, run through `tools/nodeapi/ch-nodeapi` — no Node
-executable) is the packaging proof; macOS arm64 probe tallies (19 probes +
-`tools/nodeapi/run_probe.sh`, stress, and conformance matrices), the consumer
-proof log, and the Linux x64 status (wired in `tools/build/linux.zig` and
-`.github/workflows/zig-linux.yml`, awaiting native Linux execution) live in
-[doc/node-api-receipt.md](doc/node-api-receipt.md).
+The exports gate (`check-nodeapi`) stays separate from `zig build check` so engine regression pins in `tools/build/gate_counts.json` remain decoupled. A from-scratch consumer (`zig cc -DNAPI_VERSION=10 -I<installed>/include/nodeapi`, linking the built provider, run through `tools/nodeapi/ch-nodeapi` -- no Node executable) is the packaging proof. macOS ARM64 v10 verification (`19/19` probes, stress, `52/17/0` C matrix, `52/61/6` `node-addon-api` matrix) is recorded in [doc/node-api-receipt.md](doc/node-api-receipt.md) §14; Linux x64 (`G0-phase4`) and Windows x64 (`B6`) validation queues live in [doc/linux-handoff.md](doc/linux-handoff.md) §0A and [doc/windows-handoff.md](doc/windows-handoff.md).
 
 ## Contribute
 
