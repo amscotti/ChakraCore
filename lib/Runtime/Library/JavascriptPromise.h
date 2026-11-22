@@ -343,6 +343,9 @@ namespace Js
 
     typedef SList<Js::JavascriptPromiseReactionPair, Recycler> JavascriptPromiseReactionList;
 
+    struct JavascriptPromiseAllKeyedState;
+    class JavascriptPromiseAllKeyedElementFunction;
+
     class JavascriptPromise : public DynamicObject
     {
     private:
@@ -412,6 +415,7 @@ namespace Js
         static Var EntryAllResolveElementFunction(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryAllSettledResolveOrRejectElementFunction(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryAnyRejectElementFunction(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryAllKeyedElementFunction(RecyclableObject* function, CallInfo callInfo, ...);
 
         static Var EntryGetterSymbolSpecies(RecyclableObject* function, CallInfo callInfo, ...);
 
@@ -483,6 +487,14 @@ namespace Js
     private :
         bool WillRejectionBeUnhandled();
         static RecyclableObject* GetPromiseResolve(RecyclableObject* constructor, ScriptContext* scriptContext);
+        static Var AllKeyedHelper(Var constructor, Var promises, bool isAllSettled, ScriptContext* scriptContext);
+        static DynamicObject* CreateKeyedPromiseCombinatorResultObject(JavascriptPromiseAllKeyedState* state, ScriptContext* scriptContext);
+        static JavascriptPromiseAllKeyedElementFunction* CreateAllKeyedElementFunction(
+            JavascriptPromiseAllKeyedState* state,
+            JavascriptPromiseResolveOrRejectFunctionAlreadyResolvedWrapper* alreadyCalledWrapper,
+            uint32 index,
+            bool isRejecting,
+            ScriptContext* scriptContext);
 
 #if ENABLE_TTD
     public:
@@ -522,4 +534,101 @@ namespace Js
     };
 
     template <> bool VarIsImpl<JavascriptPromiseAnyRejectElementFunction>(RecyclableObject* obj);
+
+    struct JavascriptPromiseAllKeyedState
+    {
+        JavascriptPromiseAllKeyedState(
+            JavascriptPromiseCapability* capability,
+            JsUtil::List<const PropertyRecord*, Recycler>* keys,
+            JsUtil::List<Var, Recycler>* values,
+            bool isAllSettled)
+            : capability(capability),
+              keys(keys),
+              values(values),
+              remainingElements(1),
+              isAllSettled(isAllSettled)
+        {
+        }
+
+        Field(JavascriptPromiseCapability*) capability;
+        Field(JsUtil::List<const PropertyRecord*, Recycler>*) keys;
+        Field(JsUtil::List<Var, Recycler>*) values;
+        Field(uint32) remainingElements;
+        Field(bool) isAllSettled;
+    };
+
+    /*
+     * Ownership record (doc/memory-management.md section 3) for
+     * JavascriptPromiseAllKeyedElementFunction and JavascriptPromiseAllKeyedState:
+     * - Resource / creation call: JavascriptPromiseAllKeyedState (RecyclerNew),
+     *   JsUtil::List<const PropertyRecord*, Recycler> / JsUtil::List<Var, Recycler>
+     *   (List::New), JavascriptPromiseResolveOrRejectFunctionAlreadyResolvedWrapper
+     *   (RecyclerNewStructZ), and JavascriptPromiseAllKeyedElementFunction
+     *   (RecyclerNewEnumClass(..., EnumFunctionClass, ...)) created in
+     *   JavascriptPromise::AllKeyedHelper.
+     * - Domain / allocator: ScriptContext Recycler GC heap (lifetime bound to ScriptContext).
+     * - Physical descriptor: Recycler-managed objects/lists; DynamicType from
+     *   JavascriptLibrary::CreateFunctionWithLengthAndNameType with static FunctionInfo
+     *   (ErrorOnNew). No native heap allocations, custom finalizers, or external roots.
+     * - Logical fields: Field(JavascriptPromiseAllKeyedState*) state,
+     *   Field(JavascriptPromiseResolveOrRejectFunctionAlreadyResolvedWrapper*)
+     *   alreadyCalledWrapper, Field(uint32) index, Field(bool) isRejecting. State retains
+     *   Field-traced capability, keys (pinning PropertyRecord* across GC), and values.
+     * - Owner / publication / aliases: Stack-pinned during AllKeyedHelper, then published as
+     *   onFulfilled/onRejected callbacks passed to nextPromise.then(...). For
+     *   allSettledKeyed, onFulfilled and onRejected for the same key share alreadyCalledWrapper.
+     * - Borrow invalidation: Recycler tracing keeps capability, PropertyRecord* keys, and
+     *   resolved values alive across GC/microtasks until settlement; ScriptContext disposal
+     *   destroys all.
+     * - Reentrancy / user code: OwnPropertyKeys, GetOwnPropertyDescriptor, GetProperty,
+     *   C.resolve, and nextPromise.then may reenter JS or trigger GC before AllKeyedHelper
+     *   returns; remainingElements starts at 1 and decrements after loop exit so sync
+     *   callbacks cannot resolve early, and alreadyCalledWrapper guards duplicate calls.
+     * - Thread/context: Single bound ScriptContext execution thread; cross-realm arguments
+     *   marshaled via DEFINE_MARSHAL_OBJECT_TO_SCRIPT_CONTEXT and CrossSite::MarshalVar.
+     * - Failure / cleanup: Abrupt completions inside AllKeyedHelper reject capability while
+     *   leaving remainingElements > 0; unreachable graphs are swept by Recycler.
+     * - Accounting / bound: Bounded by enumerable own property count under Recycler policy.
+     */
+    class JavascriptPromiseAllKeyedElementFunction : public RuntimeFunction
+    {
+    protected:
+        DEFINE_VTABLE_CTOR(JavascriptPromiseAllKeyedElementFunction, RuntimeFunction);
+        DEFINE_MARSHAL_OBJECT_TO_SCRIPT_CONTEXT(JavascriptPromiseAllKeyedElementFunction);
+
+    public:
+        JavascriptPromiseAllKeyedElementFunction(
+            DynamicType* type,
+            FunctionInfo* functionInfo,
+            JavascriptPromiseAllKeyedState* state,
+            JavascriptPromiseResolveOrRejectFunctionAlreadyResolvedWrapper* alreadyCalledWrapper,
+            uint32 index,
+            bool isRejecting)
+            : RuntimeFunction(type, functionInfo),
+              state(state),
+              alreadyCalledWrapper(alreadyCalledWrapper),
+              index(index),
+              isRejecting(isRejecting)
+        {
+        }
+
+        JavascriptPromiseAllKeyedState* GetState() const { return this->state; }
+        bool IsAlreadyCalled() const;
+        void SetAlreadyCalled(const bool is);
+        uint32 GetIndex() const { return this->index; }
+        bool IsRejectFunction() const { return this->isRejecting; }
+
+    private:
+        Field(JavascriptPromiseAllKeyedState*) state;
+        Field(JavascriptPromiseResolveOrRejectFunctionAlreadyResolvedWrapper*) alreadyCalledWrapper;
+        Field(uint32) index;
+        Field(bool) isRejecting;
+
+#if ENABLE_TTD
+    public:
+        virtual void MarkVisitKindSpecificPtrs(TTD::SnapshotExtractor* extractor) override;
+#endif
+    };
+
+    template <> bool VarIsImpl<JavascriptPromiseAllKeyedElementFunction>(RecyclableObject* obj);
 }

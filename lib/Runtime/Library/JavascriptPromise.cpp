@@ -2674,19 +2674,305 @@ namespace Js
     {
         PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
         ARGUMENTS(args, callInfo);
-        ScriptContext* scriptContext = function->GetScriptContext();
         Assert(!(callInfo.Flags & CallFlags_New));
-        (void)args;
-        JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_Invalid, _u("Promise.allKeyed is not yet implemented"));
+
+        ScriptContext* scriptContext = function->GetScriptContext();
+
+        AUTO_TAG_NATIVE_LIBRARY_ENTRY(function, callInfo, _u("Promise.allKeyed"));
+
+        Var constructor = args[0];
+        if (!JavascriptOperators::IsObject(constructor))
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NeedObject, _u("Promise.allKeyed"));
+        }
+
+        Var promises = args.Info.Count > 1 ? args[1] : scriptContext->GetLibrary()->GetUndefined();
+        return AllKeyedHelper(constructor, promises, false /*isAllSettled*/, scriptContext);
     }
 
     Var JavascriptPromise::EntryAllSettledKeyed(RecyclableObject* function, CallInfo callInfo, ...)
     {
         PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
         ARGUMENTS(args, callInfo);
-        ScriptContext* scriptContext = function->GetScriptContext();
         Assert(!(callInfo.Flags & CallFlags_New));
-        (void)args;
-        JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_Invalid, _u("Promise.allSettledKeyed is not yet implemented"));
+
+        ScriptContext* scriptContext = function->GetScriptContext();
+
+        AUTO_TAG_NATIVE_LIBRARY_ENTRY(function, callInfo, _u("Promise.allSettledKeyed"));
+
+        Var constructor = args[0];
+        if (!JavascriptOperators::IsObject(constructor))
+        {
+            JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NeedObject, _u("Promise.allSettledKeyed"));
+        }
+
+        Var promises = args.Info.Count > 1 ? args[1] : scriptContext->GetLibrary()->GetUndefined();
+        return AllKeyedHelper(constructor, promises, true /*isAllSettled*/, scriptContext);
     }
+
+    Var JavascriptPromise::AllKeyedHelper(Var constructor, Var promises, bool isAllSettled, ScriptContext* scriptContext)
+    {
+        JavascriptLibrary* library = scriptContext->GetLibrary();
+        Recycler* recycler = scriptContext->GetRecycler();
+
+        JavascriptPromiseCapability* promiseCapability = NewPromiseCapability(constructor, scriptContext);
+        RecyclableObject* constructorObject = VarTo<RecyclableObject>(constructor);
+
+        JavascriptExceptionObject* exception = nullptr;
+        try
+        {
+            RecyclableObject* resolveFunc = GetPromiseResolve(constructorObject, scriptContext);
+
+            if (!JavascriptOperators::IsObject(promises))
+            {
+                JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedObject);
+            }
+
+            RecyclableObject* promisesObj = VarTo<RecyclableObject>(promises);
+            JavascriptArray* allKeys = JavascriptOperators::GetOwnPropertyKeys(promisesObj, scriptContext);
+            uint32 keyCount = allKeys->GetLength();
+
+            JsUtil::List<const PropertyRecord*, Recycler>* keys = JsUtil::List<const PropertyRecord*, Recycler>::New(recycler);
+            JsUtil::List<Var, Recycler>* values = JsUtil::List<Var, Recycler>::New(recycler);
+            JavascriptPromiseAllKeyedState* state = RecyclerNew(recycler, JavascriptPromiseAllKeyedState, promiseCapability, keys, values, isAllSettled);
+
+            Var undefinedVar = library->GetUndefined();
+            ThreadContext* threadContext = scriptContext->GetThreadContext();
+
+            for (uint32 i = 0; i < keyCount; i++)
+            {
+                Var propKey = allKeys->DirectGetItem(i);
+                const PropertyRecord* propertyRecord = nullptr;
+                JavascriptConversion::ToPropertyKey(propKey, scriptContext, &propertyRecord, nullptr);
+                PropertyId propertyId = propertyRecord->GetPropertyId();
+
+                PropertyDescriptor propDesc;
+                if (!JavascriptObject::GetOwnPropertyDescriptorHelper(promisesObj, propertyId, scriptContext, propDesc) ||
+                    !propDesc.IsEnumerable())
+                {
+                    continue;
+                }
+
+                Var nextValue = JavascriptOperators::GetProperty(promisesObj, propertyId, scriptContext);
+
+                uint32 index = static_cast<uint32>(state->keys->Count());
+                state->keys->Add(propertyRecord);
+                state->values->Add(undefinedVar);
+
+                Var nextPromise = nullptr;
+                BEGIN_SAFE_REENTRANT_CALL(threadContext)
+                {
+                    nextPromise = CALL_FUNCTION(threadContext,
+                        resolveFunc, Js::CallInfo(CallFlags_Value, 2),
+                        constructorObject,
+                        nextValue);
+                }
+                END_SAFE_REENTRANT_CALL
+
+                JavascriptPromiseResolveOrRejectFunctionAlreadyResolvedWrapper* alreadyCalledWrapper =
+                    RecyclerNewStructZ(recycler, JavascriptPromiseResolveOrRejectFunctionAlreadyResolvedWrapper);
+                alreadyCalledWrapper->alreadyResolved = false;
+
+                Var onFulfilled = CreateAllKeyedElementFunction(state, alreadyCalledWrapper, index, false /*isRejecting*/, scriptContext);
+                Var onRejected = isAllSettled
+                    ? CreateAllKeyedElementFunction(state, alreadyCalledWrapper, index, true /*isRejecting*/, scriptContext)
+                    : promiseCapability->GetReject();
+
+                state->remainingElements++;
+
+                RecyclableObject* nextPromiseObject = nullptr;
+                if (!JavascriptConversion::ToObject(nextPromise, scriptContext, &nextPromiseObject))
+                {
+                    JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedObject);
+                }
+
+                Var thenVar = JavascriptOperators::GetProperty(nextPromise, nextPromiseObject, Js::PropertyIds::then, scriptContext);
+                if (!JavascriptConversion::IsCallable(thenVar))
+                {
+                    JavascriptError::ThrowTypeError(scriptContext, JSERR_NeedFunction);
+                }
+
+                RecyclableObject* thenFunc = VarTo<RecyclableObject>(thenVar);
+
+                BEGIN_SAFE_REENTRANT_CALL(threadContext)
+                {
+                    CALL_FUNCTION(threadContext,
+                        thenFunc, Js::CallInfo(CallFlags_Value, 3),
+                        nextPromise,
+                        onFulfilled,
+                        onRejected);
+                }
+                END_SAFE_REENTRANT_CALL
+            }
+
+            state->remainingElements--;
+            if (state->remainingElements == 0)
+            {
+                DynamicObject* result = CreateKeyedPromiseCombinatorResultObject(state, scriptContext);
+                TryCallResolveOrRejectHandler(promiseCapability->GetResolve(), result, scriptContext);
+            }
+        }
+        catch (const JavascriptException& err)
+        {
+            exception = err.GetAndClear();
+        }
+
+        if (exception != nullptr)
+        {
+            TryRejectWithExceptionObject(exception, promiseCapability->GetReject(), scriptContext);
+        }
+
+        return promiseCapability->GetPromise();
+    }
+
+    static void DefineDataProperty(RecyclableObject* obj, PropertyId propId, Var value, ScriptContext* scriptContext)
+    {
+        PropertyDescriptor desc;
+        desc.SetValue(value);
+        desc.SetWritable(true);
+        desc.SetEnumerable(true);
+        desc.SetConfigurable(true);
+        DebugOnly(BOOL defined =) JavascriptObject::DefineOwnPropertyHelper(obj, propId, desc, scriptContext);
+        Assert(defined);
+    }
+
+    DynamicObject* JavascriptPromise::CreateKeyedPromiseCombinatorResultObject(JavascriptPromiseAllKeyedState* state, ScriptContext* scriptContext)
+    {
+        JavascriptLibrary* library = scriptContext->GetLibrary();
+        DynamicObject* result = library->CreateObject(library->GetNull());
+        int count = state->keys->Count();
+        for (int i = 0; i < count; i++)
+        {
+            PropertyId propId = state->keys->Item(i)->GetPropertyId();
+            Var value = state->values->Item(i);
+            DefineDataProperty(result, propId, value, scriptContext);
+        }
+        return result;
+    }
+
+    JavascriptPromiseAllKeyedElementFunction* JavascriptPromise::CreateAllKeyedElementFunction(
+        JavascriptPromiseAllKeyedState* state,
+        JavascriptPromiseResolveOrRejectFunctionAlreadyResolvedWrapper* alreadyCalledWrapper,
+        uint32 index,
+        bool isRejecting,
+        ScriptContext* scriptContext)
+    {
+        static FunctionInfo s_allKeyedElementFunctionInfo(
+            FORCE_NO_WRITE_BARRIER_TAG(&JavascriptPromise::EntryAllKeyedElementFunction),
+            FunctionInfo::ErrorOnNew);
+
+        JavascriptLibrary* library = scriptContext->GetLibrary();
+        DynamicType* type = library->CreateFunctionWithLengthAndNameType(&s_allKeyedElementFunctionInfo);
+        JavascriptPromiseAllKeyedElementFunction* elementFunction = RecyclerNewEnumClass(
+            scriptContext->GetRecycler(),
+            JavascriptLibrary::EnumFunctionClass,
+            JavascriptPromiseAllKeyedElementFunction,
+            type,
+            &s_allKeyedElementFunctionInfo,
+            state,
+            alreadyCalledWrapper,
+            index,
+            isRejecting);
+        elementFunction->SetPropertyWithAttributes(PropertyIds::length, TaggedInt::ToVarUnchecked(1), PropertyConfigurable, nullptr);
+        elementFunction->SetPropertyWithAttributes(PropertyIds::name, library->GetEmptyString(), PropertyConfigurable, nullptr);
+        return elementFunction;
+    }
+
+    Var JavascriptPromise::EntryAllKeyedElementFunction(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        ScriptContext* scriptContext = function->GetScriptContext();
+        PROBE_STACK(scriptContext, Js::Constants::MinStackDefault);
+        ARGUMENTS(args, callInfo);
+        Assert(!(callInfo.Flags & CallFlags_New));
+
+        JavascriptLibrary* library = scriptContext->GetLibrary();
+        Var undefinedVar = library->GetUndefined();
+        Var x = args.Info.Count > 1 ? CrossSite::MarshalVar(scriptContext, args[1]) : undefinedVar;
+
+        JavascriptPromiseAllKeyedElementFunction* elementFunction = VarTo<JavascriptPromiseAllKeyedElementFunction>(function);
+
+        if (elementFunction->IsAlreadyCalled())
+        {
+            return undefinedVar;
+        }
+
+        elementFunction->SetAlreadyCalled(true);
+
+        JavascriptPromiseAllKeyedState* state = elementFunction->GetState();
+        uint32 index = elementFunction->GetIndex();
+        Var entryValue = x;
+
+        if (state->isAllSettled)
+        {
+            bool isRejecting = elementFunction->IsRejectFunction();
+            DynamicObject* obj = library->CreateObject();
+            Var statusString = isRejecting
+                ? scriptContext->GetPropertyString(PropertyIds::rejected)
+                : scriptContext->GetPropertyString(PropertyIds::fulfilled);
+            PropertyIds valuePropId = isRejecting ? PropertyIds::reason : PropertyIds::value;
+            DefineDataProperty(obj, PropertyIds::status, statusString, scriptContext);
+            DefineDataProperty(obj, valuePropId, x, scriptContext);
+            entryValue = obj;
+        }
+
+        state->values->Item(static_cast<int>(index), entryValue);
+
+        if (--state->remainingElements == 0)
+        {
+            DynamicObject* result = CreateKeyedPromiseCombinatorResultObject(state, scriptContext);
+            return TryCallResolveOrRejectHandler(state->capability->GetResolve(), result, scriptContext);
+        }
+
+        return undefinedVar;
+    }
+
+    bool JavascriptPromiseAllKeyedElementFunction::IsAlreadyCalled() const
+    {
+        Assert(this->alreadyCalledWrapper);
+        return this->alreadyCalledWrapper->alreadyResolved;
+    }
+
+    void JavascriptPromiseAllKeyedElementFunction::SetAlreadyCalled(const bool is)
+    {
+        Assert(this->alreadyCalledWrapper);
+        this->alreadyCalledWrapper->alreadyResolved = is;
+    }
+
+    template <> bool VarIsImpl<JavascriptPromiseAllKeyedElementFunction>(RecyclableObject* obj)
+    {
+        if (VarIs<JavascriptFunction>(obj))
+        {
+            return VirtualTableInfo<JavascriptPromiseAllKeyedElementFunction>::HasVirtualTable(obj)
+                || VirtualTableInfo<CrossSiteObject<JavascriptPromiseAllKeyedElementFunction>>::HasVirtualTable(obj);
+        }
+
+        return false;
+    }
+
+#if ENABLE_TTD
+    void JavascriptPromiseAllKeyedElementFunction::MarkVisitKindSpecificPtrs(TTD::SnapshotExtractor* extractor)
+    {
+        RuntimeFunction::MarkVisitKindSpecificPtrs(extractor);
+
+        if (this->state != nullptr)
+        {
+            if (this->state->capability != nullptr)
+            {
+                this->state->capability->MarkVisitPtrs(extractor);
+            }
+
+            if (this->state->values != nullptr)
+            {
+                for (int i = 0; i < this->state->values->Count(); i++)
+                {
+                    Var value = this->state->values->Item(i);
+                    if (value != nullptr)
+                    {
+                        extractor->MarkVisitVar(value);
+                    }
+                }
+            }
+        }
+    }
+#endif
 } // namespace Js
