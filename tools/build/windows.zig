@@ -723,10 +723,12 @@ fn addBinArg(
 }
 
 fn addSideCopy(b: *std.Build, python: []const u8, dest_rel: []const u8, src: std.Build.LazyPath, prereq: *std.Build.Step) *std.Build.Step.Run {
+    // Copy into out/<profile>/ atomically without disturbing install_profile.py's
+    // .manifest (so base rebuilds do not purge ch-nodeapi outputs).
     const cp = b.addSystemCommand(&.{
         python,
         "-c",
-        "import os, shutil, sys; os.makedirs(os.path.dirname(sys.argv[2]), exist_ok=True); shutil.copyfile(sys.argv[1], sys.argv[2])",
+        "import os, shutil, sys, tempfile; src, dst = sys.argv[1], sys.argv[2]; d = os.path.dirname(os.path.abspath(dst)); os.makedirs(d, exist_ok=True); fd, tmp = tempfile.mkstemp(dir=d, prefix='.tmp.'); os.close(fd); shutil.copy2(src, tmp); (os.chmod(dst, 0o666) if (os.name == 'nt' and os.path.isfile(dst)) else None); os.replace(tmp, dst)",
     });
     cp.addFileArg(src);
     cp.addArg(dest_rel);
@@ -1174,6 +1176,7 @@ pub fn build(b: *std.Build) void {
         });
         nodeapi_host.addFileArg(b.path("tools/nodeapi/ch-nodeapi.cpp"));
         nodeapi_host.addFileArg(dr.implib);
+        addWinLibs(nodeapi_host, tables.nodeapi_win_libs);
         const nodeapi_host_bin = nodeapi_host.addPrefixedOutputFileArg("-o", "ch-nodeapi.exe");
         nodeapi_host.step.dependOn(&dr.link.step);
         nodeapi_host_bin_opt = nodeapi_host_bin;
@@ -1194,8 +1197,13 @@ pub fn build(b: *std.Build) void {
             "-Wno-date-time",
         });
         nodeapi_stub.addFileArg(b.path("tools/nodeapi/stub/stub_provider.cpp"));
-        nodeapi_stub.addFileArg(nodeapi_def);
+        // Stub provider exports only its minimal subset (via NAPI_EXTERN and
+        // STUB_HOST_EXPORT) and resolves Js* symbols against ChakraCore.lib;
+        // never link the full 161-symbol libChakraNodeApi.def here.
+        nodeapi_stub.addFileArg(dr.implib);
+        addWinLibs(nodeapi_stub, tables.nodeapi_win_libs);
         const nodeapi_stub_bin = nodeapi_stub.addPrefixedOutputFileArg("-o", "libChakraNodeApiStub.dll");
+        nodeapi_stub.step.dependOn(&dr.link.step);
 
         const nodeapi_step = b.step("ch-nodeapi", "Build ch-nodeapi.exe + libChakraNodeApiStub.dll + Node-API .node addons");
         nodeapi_step_opt = nodeapi_step;

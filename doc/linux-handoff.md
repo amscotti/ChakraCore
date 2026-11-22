@@ -1,6 +1,6 @@
 # ChakraCore Modernization -- Linux Bring-Up and Testing Handoff
 
-> Phase-4 Handoff (`G0-phase4`): **2026-11-22** (`modernize/phase4` at `29542edb4`+ prep; `modernize/baseline` at `1bf42d1f6`)
+> Phase-4 Handoff (`G0-phase4`): **2026-11-22** (`modernize/phase4` prep landed: SimpleJIT cross-site `IsThrowingFunctionNative`, `check_metadata_linux.py` `681` static members + `u8a_codec.o` + `161` Node-API / `0` `zig_u8a_*`, `check_regression_linux.py --allow-higher`, `linux-gate-tests.zig` `10/10`, `.github/workflows/zig-linux.yml`; `modernize/baseline` at `1bf42d1f6`)
 > Original Handoff: 2026-11-16 (`modernize/baseline` at `526393e26`, `8f4e85d62..526393e26`)
 > Synchronized: **2026-11-17** (`modernize/baseline` at `06d783c64`, including Linux bring-up `4778b3a2b..c639e9f02` and post-review fixes `193c95046..06d783c64`)
 > Companion Docs: [architecture-and-readiness-review.md](architecture-and-readiness-review.md),
@@ -45,7 +45,7 @@ Run from the repository root on **Ubuntu 24.04 x86_64** (`x86_64-linux-gnu`, gli
    mise exec -- zig test doc/examples/owned-bytes.zig
    mise exec -- zig test lib/ZigCodec/u8a_codec.zig
    ```
-   Expected: `check-build-tools` (`test_build_tools.py`) `>=98` tests OK; `test_package_tools.py`, `test_edition_policy.py`, and `--self-test` scripts all PASS; `linux-gate-tests.zig` (`>=9` tests incl. Phase-4 TU completeness checks for `u8a_codec.zig`, `I1`/`I2` `Intl*.cpp`, `C3.1` `JavascriptDisposableStack.cpp` & `JavascriptSuppressedError.cpp`, `Q3` `JavascriptIterator{Zip,Chunking}.cpp`, and `lib/NodeApi` v10 TUs), `owned-bytes.zig` (`4/4`), and `u8a_codec.zig` (`7/7`) all PASS.
+   Expected: `check-build-tools` (`test_build_tools.py`) `104` tests OK; `test_package_tools.py` (`12/12`), `test_edition_policy.py`, and `--self-test` scripts all PASS; `linux-gate-tests.zig` (`10/10` tests incl. Phase-4 TU completeness checks for `u8a_codec.zig`, `I1`/`I2` `Intl*.cpp`, `C3.1` `JavascriptDisposableStack.cpp` & `JavascriptError.cpp` [`SuppressedError`], `Q3` `JavascriptIterator{Zip,Chunking}.cpp`, and `lib/NodeApi` v10 TUs), `owned-bytes.zig` (`4/4`), and `u8a_codec.zig` (`7/7`) all PASS.
 
 3. **Step 3 — Default `test` Build, Core Gates, Phase-4 Slices, & `RECORDED_BASELINE` Re-Pin:**
    ```sh

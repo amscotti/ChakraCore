@@ -135,8 +135,17 @@ JsValueRef js_cb(JsValueRef callee, bool is_construct, JsValueRef* args,
 
 extern "C" {
 
+#if defined(_WIN32)
+#define STUB_HOST_EXPORT __declspec(dllexport)
+#elif defined(__GNUC__)
+#define STUB_HOST_EXPORT __attribute__((visibility("default")))
+#else
+#define STUB_HOST_EXPORT
+#endif
+
 // ---- Private host API (this stub's create/destroy) ----
 
+STUB_HOST_EXPORT
 napi_env chakra_nodeapi_create_env(JsRuntimeHandle runtime,
                                    JsContextRef context,
                                    const char*,
@@ -147,14 +156,13 @@ napi_env chakra_nodeapi_create_env(JsRuntimeHandle runtime,
   return reinterpret_cast<napi_env>(e);
 }
 
+STUB_HOST_EXPORT
 void chakra_nodeapi_destroy_env(napi_env env) {
   auto* e = to_stub(env);
   delete e;
 }
 
-#if defined(__GNUC__)
-__attribute__((visibility("default")))
-#endif
+STUB_HOST_EXPORT
 napi_status chakra_nodeapi_set_module_api_version(napi_env env,
                                                   int32_t version) {
   if (!env) return napi_invalid_arg;

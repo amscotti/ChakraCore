@@ -305,3 +305,16 @@ test "windows.build entry point compiles and typechecks completely" {
         _ = &windows.build;
     }
 }
+
+test "libChakraNodeApiStub links ChakraCore.lib without full 161-export .def" {
+    const win_src = @embedFile("build/windows.zig");
+    const stub_idx = std.mem.indexOf(u8, win_src, "nodeapi_stub.addFileArg(b.path(\"tools/nodeapi/stub/stub_provider.cpp\"));") orelse return error.MissingStubLink;
+    const out_idx = std.mem.indexOfPos(u8, win_src, stub_idx, "libChakraNodeApiStub.dll") orelse return error.MissingStubOutput;
+    const stub_block = win_src[stub_idx..out_idx];
+    try std.testing.expect(std.mem.indexOf(u8, stub_block, "dr.implib") != null);
+    try std.testing.expect(std.mem.indexOf(u8, stub_block, "nodeapi_def") == null);
+
+    const stub_src = @embedFile("nodeapi/stub/stub_provider.cpp");
+    try std.testing.expect(std.mem.indexOf(u8, stub_src, "STUB_HOST_EXPORT") != null);
+    try std.testing.expect(std.mem.indexOf(u8, stub_src, "__declspec(dllexport)") != null);
+}
