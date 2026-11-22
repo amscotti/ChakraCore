@@ -754,14 +754,78 @@ namespace
         return EntrySomeEveryFind(function, args, 2);
     }
 
+    namespace
+    {
+        double ValidateSkippedElementsOrClose(RecyclableObject* thisObject, Var skippedElements, ScriptContext* scriptContext)
+        {
+            if (JavascriptOperators::GetTypeId(skippedElements) == TypeIds_Undefined)
+            {
+                return 0.0;
+            }
+
+            IterRecord placeholder;
+            placeholder.iterator = thisObject;
+
+            if (!JavascriptOperators::IsAnyNumberValue(skippedElements))
+            {
+                CloseRecordSwallow(placeholder, scriptContext);
+                JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_Invalid);
+            }
+
+            double toSkip = JavascriptConversion::ToNumber(skippedElements, scriptContext);
+            if (JavascriptNumber::IsNan(toSkip) ||
+                (NumberUtilities::IsFinite(toSkip) && JavascriptConversion::ToInteger(toSkip) != toSkip))
+            {
+                CloseRecordSwallow(placeholder, scriptContext);
+                JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_Invalid);
+            }
+            if (toSkip < 0.0)
+            {
+                CloseRecordSwallow(placeholder, scriptContext);
+                JavascriptError::ThrowRangeError(scriptContext, JSERR_FunctionArgument_Invalid);
+            }
+            const double maxSafeInteger = 9007199254740991.0; // 2^53 - 1
+            if (NumberUtilities::IsFinite(toSkip) && toSkip > maxSafeInteger)
+            {
+                CloseRecordSwallow(placeholder, scriptContext);
+                JavascriptError::ThrowRangeError(scriptContext, JSERR_FunctionArgument_Invalid);
+            }
+            return toSkip;
+        }
+    } // namespace
+
     Var JavascriptIterator::EntryIncludes(RecyclableObject* function, CallInfo callInfo, ...)
     {
         PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
         ARGUMENTS(args, callInfo);
         ScriptContext* scriptContext = function->GetScriptContext();
+        JavascriptLibrary* library = scriptContext->GetLibrary();
         Assert(!(callInfo.Flags & CallFlags_New));
-        (void)args;
-        JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_Invalid, _u("Iterator.prototype.includes is not yet implemented"));
+
+        RecyclableObject* thisObject = ValidateIteratorThis(args, scriptContext);
+        Var searchElement = ArgOrUndefined(args, 1, scriptContext);
+        Var skippedElements = ArgOrUndefined(args, 2, scriptContext);
+
+        double toSkip = ValidateSkippedElementsOrClose(thisObject, skippedElements, scriptContext);
+
+        IterRecord record;
+        GetIteratorDirect(record, thisObject, scriptContext);
+
+        double skipped = 0.0;
+        Var value = nullptr;
+        while (StepValue(record, scriptContext, &value))
+        {
+            if (skipped < toSkip)
+            {
+                skipped += 1.0;
+            }
+            else if (JavascriptConversion::SameValueZero(value, searchElement))
+            {
+                CloseRecordNormal(record, scriptContext);
+                return library->GetTrue();
+            }
+        }
+        return library->GetFalse();
     }
 
     Var JavascriptIterator::EntryJoin(RecyclableObject* function, CallInfo callInfo, ...)
@@ -769,9 +833,101 @@ namespace
         PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
         ARGUMENTS(args, callInfo);
         ScriptContext* scriptContext = function->GetScriptContext();
+        JavascriptLibrary* library = scriptContext->GetLibrary();
         Assert(!(callInfo.Flags & CallFlags_New));
-        (void)args;
-        JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_Invalid, _u("Iterator.prototype.join is not yet implemented"));
+
+        RecyclableObject* thisObject = ValidateIteratorThis(args, scriptContext);
+        Var separatorArg = ArgOrUndefined(args, 1, scriptContext);
+
+        JavascriptString* separator = nullptr;
+        if (JavascriptOperators::GetTypeId(separatorArg) == TypeIds_Undefined)
+        {
+            separator = library->GetCommaDisplayString();
+        }
+        else
+        {
+            IterRecord placeholder;
+            placeholder.iterator = thisObject;
+            try
+            {
+                separator = JavascriptConversion::ToString(separatorArg, scriptContext);
+            }
+            catch (const JavascriptException& err)
+            {
+                JavascriptExceptionObject* exception = err.GetAndClear();
+                CloseRecordSwallow(placeholder, scriptContext);
+                JavascriptExceptionOperators::DoThrowCheckClone(exception, scriptContext);
+            }
+        }
+
+        IterRecord record;
+        GetIteratorDirect(record, thisObject, scriptContext);
+
+        bool hasFirst = false;
+        JavascriptString* firstString = nullptr;
+        CompoundString* resultBuilder = nullptr;
+        const bool hasSeparator = (separator->GetLength() != 0);
+
+        Var value = nullptr;
+        while (StepValue(record, scriptContext, &value))
+        {
+            try
+            {
+                JavascriptString* itemString = JavascriptOperators::IsUndefinedOrNull(value)
+                    ? library->GetEmptyString()
+                    : JavascriptConversion::ToString(value, scriptContext);
+
+                if (!hasFirst)
+                {
+                    hasFirst = true;
+                    firstString = itemString;
+                }
+                else
+                {
+                    if (resultBuilder == nullptr)
+                    {
+                        if (hasSeparator && VarIs<CompoundString>(separator))
+                        {
+                            separator->GetString();
+                        }
+                        resultBuilder = CompoundString::NewWithPointerCapacity(8, library);
+                        if (firstString->GetLength() != 0)
+                        {
+                            resultBuilder->Append(firstString);
+                        }
+                        firstString = nullptr;
+                    }
+                    if (hasSeparator)
+                    {
+                        resultBuilder->Append(separator);
+                    }
+                    if (itemString->GetLength() != 0)
+                    {
+                        resultBuilder->Append(itemString);
+                    }
+                }
+            }
+            catch (const JavascriptException& err)
+            {
+                JavascriptExceptionObject* exception = err.GetAndClear();
+                CloseRecordSwallow(record, scriptContext);
+                JavascriptExceptionOperators::DoThrowCheckClone(exception, scriptContext);
+            }
+        }
+
+        if (!hasFirst)
+        {
+            return library->GetEmptyString();
+        }
+        if (resultBuilder == nullptr)
+        {
+            return firstString;
+        }
+        if (resultBuilder->GetLength() == 0)
+        {
+            return library->GetEmptyString();
+        }
+        return resultBuilder;
     }
 
     JavascriptIteratorHelper::JavascriptIteratorHelper(DynamicType* type, IteratorHelperKind kindValue, RecyclableObject* iteratorValue, Var nextMethodValue, Var callbackValue, double remainingValue)
