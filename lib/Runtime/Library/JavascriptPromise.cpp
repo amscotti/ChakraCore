@@ -2669,4 +2669,24 @@ namespace Js
 
         return promise;
     }
+
+    Var JavascriptPromise::EntryAllKeyed(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+        ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+        Assert(!(callInfo.Flags & CallFlags_New));
+        (void)args;
+        JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_Invalid, _u("Promise.allKeyed is not yet implemented"));
+    }
+
+    Var JavascriptPromise::EntryAllSettledKeyed(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+        ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+        Assert(!(callInfo.Flags & CallFlags_New));
+        (void)args;
+        JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_Invalid, _u("Promise.allSettledKeyed is not yet implemented"));
+    }
 } // namespace Js

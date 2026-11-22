@@ -63,6 +63,8 @@
     <ClCompile Include="$(MSBuildThisFileDirectory)JavascriptGenerator.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)JavascriptGeneratorFunction.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)JavascriptIterator.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)JavascriptIteratorZip.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)JavascriptIteratorChunking.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)JavascriptMap.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)JavascriptMapIterator.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)JavascriptPromise.cpp" />
@@ -227,6 +229,8 @@
     <ClInclude Include="JavascriptGenerator.h" />
     <ClInclude Include="JavascriptGeneratorFunction.h" />
     <ClInclude Include="JavascriptIterator.h" />
+    <ClInclude Include="JavascriptIteratorZip.h" />
+    <ClInclude Include="JavascriptIteratorChunking.h" />
     <ClInclude Include="JavascriptMap.h" />
     <ClInclude Include="JavascriptMapIterator.h" />
     <ClInclude Include="JavascriptPromise.h" />

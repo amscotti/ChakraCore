@@ -637,6 +637,16 @@ BUILTIN(JavascriptMap, GetOrInsertComputed, EntryGetOrInsertComputed, FunctionIn
 BUILTIN(JavascriptWeakMap, GetOrInsert, EntryGetOrInsert, FunctionInfo::ErrorOnNew)
 BUILTIN(JavascriptWeakMap, GetOrInsertComputed, EntryGetOrInsertComputed, FunctionInfo::ErrorOnNew)
 BUILTIN(JavascriptIterator, Concat, EntryConcat, FunctionInfo::ErrorOnNew)
+// ES2026 Q3 built-ins (Iterator.zip, Iterator.zipKeyed, Iterator.prototype.{chunks,windows,includes,join}, Promise.{allKeyed,allSettledKeyed}).
+// Appended after the existing non-INTL entries so prior BuiltInEnum values stay stable.
+BUILTIN(JavascriptIterator, Zip, EntryZip, FunctionInfo::ErrorOnNew)
+BUILTIN(JavascriptIterator, ZipKeyed, EntryZipKeyed, FunctionInfo::ErrorOnNew)
+BUILTIN(JavascriptIterator, Chunks, EntryChunks, FunctionInfo::ErrorOnNew)
+BUILTIN(JavascriptIterator, Windows, EntryWindows, FunctionInfo::ErrorOnNew)
+BUILTIN(JavascriptIterator, Includes, EntryIncludes, FunctionInfo::ErrorOnNew)
+BUILTIN(JavascriptIterator, Join, EntryJoin, FunctionInfo::ErrorOnNew)
+BUILTIN(JavascriptPromise, AllKeyed, EntryAllKeyed, FunctionInfo::ErrorOnNew)
+BUILTIN(JavascriptPromise, AllSettledKeyed, EntryAllSettledKeyed, FunctionInfo::ErrorOnNew)
 
 #ifdef INTL_ICU
 BUILTIN(IntlModernBuiltIns, GetCanonicalLocales, EntryGetCanonicalLocales, FunctionInfo::ErrorOnNew)

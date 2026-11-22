@@ -366,6 +366,8 @@ namespace Js
             static FunctionInfo Any;
             static FunctionInfo Try;
             static FunctionInfo WithResolvers;
+            static FunctionInfo AllKeyed;
+            static FunctionInfo AllSettledKeyed;
 
             static FunctionInfo Identity;
             static FunctionInfo Thrower;
@@ -396,6 +398,8 @@ namespace Js
         static Var EntryAny(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryTry(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryWithResolvers(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryAllKeyed(RecyclableObject* function, CallInfo callInfo, ...);
+        static Var EntryAllSettledKeyed(RecyclableObject* function, CallInfo callInfo, ...);
 
         static Var EntryThunkFinallyFunction(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryThenFinallyFunction(RecyclableObject* function, CallInfo callInfo, ...);

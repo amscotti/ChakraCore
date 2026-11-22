@@ -940,6 +940,8 @@ pub const library_group = Group{
         "lib/Runtime/Library/JavascriptGenerator.cpp",
         "lib/Runtime/Library/JavascriptGeneratorFunction.cpp",
         "lib/Runtime/Library/JavascriptIterator.cpp",
+        "lib/Runtime/Library/JavascriptIteratorZip.cpp",
+        "lib/Runtime/Library/JavascriptIteratorChunking.cpp",
         "lib/Runtime/Library/JavascriptLibrary.cpp",
         "lib/Runtime/Library/JavascriptListIterator.cpp",
         "lib/Runtime/Library/JavascriptMap.cpp",

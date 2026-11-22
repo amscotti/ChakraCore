@@ -424,7 +424,7 @@ pub const all_groups = [_]*const tables.Group{
 };
 
 pub fn expectedCompileCount(profile: Profile, jit: bool) u32 {
-    var count: u32 = 693;
+    var count: u32 = 695;
     if (!jit) count -= 91;
     if (isReleaseProfile(profile)) count -= 37;
     if (isStaticProfile(profile)) count = count - 3 + @as(u32, @intCast(mac_tables.ch_static_extra_cxx.len));
@@ -451,12 +451,12 @@ test "linux group, define, and compile-count filtering across profiles" {
     try std.testing.expect(isExcludedStaticObj("lib/wabt/src/ast.cc", .release_shared, true));
     try std.testing.expect(!isExcludedStaticObj("lib/wabt/src/ast.cc", .debug_static, true));
 
-    try std.testing.expectEqual(@as(u32, 693), expectedCompileCount(.@"test", true));
-    try std.testing.expectEqual(@as(u32, 602), expectedCompileCount(.@"test", false));
-    try std.testing.expectEqual(@as(u32, 656), expectedCompileCount(.release_shared, true));
-    try std.testing.expectEqual(@as(u32, 565), expectedCompileCount(.release_shared, false));
-    try std.testing.expectEqual(@as(u32, 691), expectedCompileCount(.debug_static, true));
-    try std.testing.expectEqual(@as(u32, 600), expectedCompileCount(.debug_static, false));
+    try std.testing.expectEqual(@as(u32, 695), expectedCompileCount(.@"test", true));
+    try std.testing.expectEqual(@as(u32, 604), expectedCompileCount(.@"test", false));
+    try std.testing.expectEqual(@as(u32, 658), expectedCompileCount(.release_shared, true));
+    try std.testing.expectEqual(@as(u32, 567), expectedCompileCount(.release_shared, false));
+    try std.testing.expectEqual(@as(u32, 693), expectedCompileCount(.debug_static, true));
+    try std.testing.expectEqual(@as(u32, 602), expectedCompileCount(.debug_static, false));
 
     var seen: std.StringHashMap(void) = .init(std.testing.allocator);
     defer seen.deinit();

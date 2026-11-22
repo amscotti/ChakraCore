@@ -2995,11 +2995,11 @@ namespace Js
 
     bool JavascriptLibrary::InitializePromiseConstructor(DynamicObject* promiseConstructor, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)
     {
-        typeHandler->Convert(promiseConstructor, mode, 9);
-        // Note: Any new function addition/deletion/modification should also be updated in JavascriptLibrary::ProfilerRegisterPromise
-        // so that the update is in sync with profiler
         JavascriptLibrary* library = promiseConstructor->GetLibrary();
         ScriptContext* scriptContext = promiseConstructor->GetScriptContext();
+        typeHandler->Convert(promiseConstructor, mode, scriptContext->GetConfig()->IsESPromiseAnyEnabled() ? 14 : 13);
+        // Note: Any new function addition/deletion/modification should also be updated in JavascriptLibrary::ProfilerRegisterPromise
+        // so that the update is in sync with profiler
         library->AddMember(promiseConstructor, PropertyIds::length, TaggedInt::ToVarUnchecked(1), PropertyConfigurable);
         library->AddMember(promiseConstructor, PropertyIds::name, scriptContext->GetPropertyString(PropertyIds::Promise), PropertyConfigurable);
         library->AddMember(promiseConstructor, PropertyIds::prototype, library->promisePrototype, PropertyNone);
@@ -3016,6 +3016,8 @@ namespace Js
         library->AddMember(promiseConstructor, PropertyIds::resolve, library->EnsurePromiseResolveFunction(), PropertyBuiltInMethodDefaults);
         library->AddFunctionToLibraryObjectWithPropertyName(promiseConstructor, _u("try"), &JavascriptPromise::EntryInfo::Try, 1);
         library->AddFunctionToLibraryObjectWithPropertyName(promiseConstructor, _u("withResolvers"), &JavascriptPromise::EntryInfo::WithResolvers, 0);
+        library->AddFunctionToLibraryObjectWithPropertyName(promiseConstructor, _u("allKeyed"), &JavascriptPromise::EntryInfo::AllKeyed, 1);
+        library->AddFunctionToLibraryObjectWithPropertyName(promiseConstructor, _u("allSettledKeyed"), &JavascriptPromise::EntryInfo::AllSettledKeyed, 1);
 
         promiseConstructor->SetHasNoEnumerableProperties(true);
 
@@ -5255,7 +5257,7 @@ namespace Js
         ScriptContext* scriptContext = library->GetScriptContext();
         bool iteratorHelpersEnabled = scriptContext->GetConfig()->IsESIteratorHelpersEnabled();
 
-        typeHandler->Convert(iteratorPrototype, mode, iteratorHelpersEnabled ? 17 : 2);
+        typeHandler->Convert(iteratorPrototype, mode, iteratorHelpersEnabled ? 21 : 2);
         // Note: Any new function addition/deletion/modification should also be updated in JavascriptLibrary::ProfilerRegisterIterator
         // so that the update is in sync with profiler
 
@@ -5287,6 +5289,10 @@ namespace Js
             library->AddFunctionToLibraryObject(iteratorPrototype, PropertyIds::some, &JavascriptIterator::EntryInfo::Some, 1);
             library->AddFunctionToLibraryObject(iteratorPrototype, PropertyIds::every, &JavascriptIterator::EntryInfo::Every, 1);
             library->AddFunctionToLibraryObject(iteratorPrototype, PropertyIds::find, &JavascriptIterator::EntryInfo::Find, 1);
+            library->AddFunctionToLibraryObjectWithPropertyName(iteratorPrototype, _u("chunks"), &JavascriptIterator::EntryInfo::Chunks, 1);
+            library->AddFunctionToLibraryObjectWithPropertyName(iteratorPrototype, _u("windows"), &JavascriptIterator::EntryInfo::Windows, 1);
+            library->AddFunctionToLibraryObject(iteratorPrototype, PropertyIds::includes, &JavascriptIterator::EntryInfo::Includes, 1);
+            library->AddFunctionToLibraryObject(iteratorPrototype, PropertyIds::join, &JavascriptIterator::EntryInfo::Join, 1);
         }
 
         return true;
@@ -5294,7 +5300,9 @@ namespace Js
 
     bool JavascriptLibrary::InitializeIteratorConstructor(DynamicObject* iteratorConstructor, DeferredTypeHandlerBase * typeHandler, DeferredInitializeMode mode)
     {
-        typeHandler->Convert(iteratorConstructor, mode, 5);
+        typeHandler->Convert(iteratorConstructor, mode, 7);
+        // Note: Any new function addition/deletion/modification should also be updated in JavascriptLibrary::ProfilerRegisterIterator
+        // so that the update is in sync with profiler
 
         JavascriptLibrary* library = iteratorConstructor->GetLibrary();
 
@@ -5303,6 +5311,8 @@ namespace Js
         library->AddMember(iteratorConstructor, PropertyIds::name, library->CreateStringFromCppLiteral(_u("Iterator")), PropertyConfigurable);
         library->AddFunctionToLibraryObject(iteratorConstructor, PropertyIds::from, &JavascriptIterator::EntryInfo::From, 1);
         library->AddFunctionToLibraryObject(iteratorConstructor, PropertyIds::concat, &JavascriptIterator::EntryInfo::Concat, 0);
+        library->AddFunctionToLibraryObjectWithPropertyName(iteratorConstructor, _u("zip"), &JavascriptIterator::EntryInfo::Zip, 1);
+        library->AddFunctionToLibraryObjectWithPropertyName(iteratorConstructor, _u("zipKeyed"), &JavascriptIterator::EntryInfo::ZipKeyed, 1);
 
         iteratorConstructor->SetHasNoEnumerableProperties(true);
 
@@ -9102,8 +9112,14 @@ namespace Js
         REG_OBJECTS_LIB_FUNC(some, JavascriptIterator::EntrySome);
         REG_OBJECTS_LIB_FUNC(every, JavascriptIterator::EntryEvery);
         REG_OBJECTS_LIB_FUNC(find, JavascriptIterator::EntryFind);
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("chunks"), 6, JavascriptIterator::EntryChunks);
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("windows"), 7, JavascriptIterator::EntryWindows);
+        REG_OBJECTS_LIB_FUNC(includes, JavascriptIterator::EntryIncludes);
+        REG_OBJECTS_LIB_FUNC(join, JavascriptIterator::EntryJoin);
         REG_OBJECTS_LIB_FUNC(from, JavascriptIterator::EntryFrom);
         REG_OBJECTS_LIB_FUNC(concat, JavascriptIterator::EntryConcat);
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("zip"), 3, JavascriptIterator::EntryZip);
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("zipKeyed"), 8, JavascriptIterator::EntryZipKeyed);
         {
             const char16 *pwszObjectName = _u("Iterator Helper");
             REG_OBJECTS_LIB_FUNC(next, JavascriptIteratorHelper::EntryNext);
@@ -9232,6 +9248,8 @@ namespace Js
 
         REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("try"), 3, JavascriptPromise::EntryTry);
         REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("withResolvers"), 13, JavascriptPromise::EntryWithResolvers);
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("allKeyed"), 8, JavascriptPromise::EntryAllKeyed);
+        REG_OBJECTS_DYNAMIC_LIB_FUNC(_u("allSettledKeyed"), 15, JavascriptPromise::EntryAllSettledKeyed);
 
         return hr;
     }

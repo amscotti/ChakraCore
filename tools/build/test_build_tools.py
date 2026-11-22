@@ -148,7 +148,7 @@ class B1VerdictTests(unittest.TestCase):
                 [sys.executable, str(ROOT / "tools/build-contract/validate_contract.py"),
                  "--database", str(database)], capture_output=True, text=True,
                 timeout=30)
-            self.assertIn("MISSING from DB (549)", proc.stdout)
+            self.assertIn("MISSING from DB (551)", proc.stdout)
             self.assertEqual(proc.returncode, 1)
 
     @unittest.skipUnless(sys.platform == "darwin" and platform.machine() in ("arm64", "aarch64")
@@ -1383,21 +1383,21 @@ class CheckMetadataLinuxParamTests(unittest.TestCase):
         self.assertEqual(cml.want_icu_needed("76"),
                          ("libicuuc.so.76", "libicui18n.so.76"))
         self.assertEqual(cml.expected_archive_members("test", jit=True)[
-            "lib/libChakraCoreStatic.a"], 679)
+            "lib/libChakraCoreStatic.a"], 681)
         self.assertEqual(cml.expected_archive_members("test", jit=False)[
-            "lib/libChakraCoreStatic.a"], 588)
+            "lib/libChakraCoreStatic.a"], 590)
         self.assertEqual(
             cml.expected_archive_members("release-shared", jit=True)[
-                "lib/libChakraCoreStatic.a"], 642)
+                "lib/libChakraCoreStatic.a"], 644)
         self.assertEqual(
             cml.expected_archive_members("release-shared", jit=False)[
-                "lib/libChakraCoreStatic.a"], 551)
+                "lib/libChakraCoreStatic.a"], 553)
         self.assertEqual(
             cml.expected_archive_members("debug-static", jit=True),
-            {"lib/libChakraCoreStatic.a": 679})
+            {"lib/libChakraCoreStatic.a": 681})
         self.assertEqual(
             cml.expected_archive_members("debug-static", jit=False),
-            {"lib/libChakraCoreStatic.a": 588})
+            {"lib/libChakraCoreStatic.a": 590})
 
     def test_tables_linux_has_no_duplicate_sources_and_matches_compile_count(self):
         import re
@@ -1429,7 +1429,7 @@ class CheckMetadataLinuxParamTests(unittest.TestCase):
                                  f"duplicate source across groups: {src}")
                 seen.add(src)
                 total += 1
-        self.assertEqual(total, 693)
+        self.assertEqual(total, 695)
 
 
 class StyleChecksPortableTests(unittest.TestCase):

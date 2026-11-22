@@ -78,6 +78,8 @@ set(CRLIB_SOURCE_CODES
     JavascriptGenerator.cpp
     JavascriptGeneratorFunction.cpp
     JavascriptIterator.cpp
+    JavascriptIteratorZip.cpp
+    JavascriptIteratorChunking.cpp
     JavascriptLibrary.cpp
     JavascriptListIterator.cpp
     JavascriptMap.cpp

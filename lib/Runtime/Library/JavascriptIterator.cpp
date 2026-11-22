@@ -4,6 +4,8 @@
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #include "RuntimeLibraryPch.h"
+#include "Library/JavascriptIteratorZip.h"
+#include "Library/JavascriptIteratorChunking.h"
 
 namespace Js
 {
@@ -752,6 +754,26 @@ namespace
         return EntrySomeEveryFind(function, args, 2);
     }
 
+    Var JavascriptIterator::EntryIncludes(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+        ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+        Assert(!(callInfo.Flags & CallFlags_New));
+        (void)args;
+        JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_Invalid, _u("Iterator.prototype.includes is not yet implemented"));
+    }
+
+    Var JavascriptIterator::EntryJoin(RecyclableObject* function, CallInfo callInfo, ...)
+    {
+        PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
+        ARGUMENTS(args, callInfo);
+        ScriptContext* scriptContext = function->GetScriptContext();
+        Assert(!(callInfo.Flags & CallFlags_New));
+        (void)args;
+        JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_Invalid, _u("Iterator.prototype.join is not yet implemented"));
+    }
+
     JavascriptIteratorHelper::JavascriptIteratorHelper(DynamicType* type, IteratorHelperKind kindValue, RecyclableObject* iteratorValue, Var nextMethodValue, Var callbackValue, double remainingValue)
         : DynamicObject(type),
           iterator(iteratorValue),
@@ -760,11 +782,13 @@ namespace
           innerIterator(nullptr),
           innerNextMethod(nullptr),
           concatIterables(kindValue == IteratorHelperKind::Concat && callbackValue != nullptr ? VarTo<JavascriptArray>(callbackValue) : nullptr),
+          zipState(nullptr),
+          chunkState(nullptr),
           counter(0),
           remaining(remainingValue),
           concatIndex(0),
           kind(kindValue),
-          iteratorDone(kindValue == IteratorHelperKind::Concat),
+          iteratorDone(kindValue == IteratorHelperKind::Concat || kindValue == IteratorHelperKind::Zip || kindValue == IteratorHelperKind::ZipKeyed),
           innerDone(false),
           hasInner(false),
           completed(false),
@@ -772,6 +796,22 @@ namespace
           started(false)
     {
         Assert(type->GetTypeId() == TypeIds_IteratorHelper);
+    }
+
+    JavascriptIteratorHelper* JavascriptIteratorHelper::CreateZipHelper(ScriptContext* scriptContext, IteratorHelperKind kind, JavascriptIteratorZipState* zipState)
+    {
+        Assert(kind == IteratorHelperKind::Zip || kind == IteratorHelperKind::ZipKeyed);
+        JavascriptIteratorHelper* helper = scriptContext->GetLibrary()->CreateIteratorHelper(kind, nullptr, nullptr, nullptr, 0.0);
+        helper->zipState = zipState;
+        return helper;
+    }
+
+    JavascriptIteratorHelper* JavascriptIteratorHelper::CreateChunkHelper(ScriptContext* scriptContext, IteratorHelperKind kind, RecyclableObject* iterator, Var nextMethod, JavascriptIteratorChunkState* chunkState)
+    {
+        Assert(kind == IteratorHelperKind::Chunks || kind == IteratorHelperKind::Windows);
+        JavascriptIteratorHelper* helper = scriptContext->GetLibrary()->CreateIteratorHelper(kind, iterator, nextMethod, nullptr, 0.0);
+        helper->chunkState = chunkState;
+        return helper;
     }
 
     template <> bool VarIsImpl<JavascriptIteratorHelper>(RecyclableObject* obj)
@@ -859,6 +899,15 @@ namespace
 
     void JavascriptIteratorHelper::CloseAllSwallow(ScriptContext* scriptContext)
     {
+        if (this->kind == IteratorHelperKind::Zip || this->kind == IteratorHelperKind::ZipKeyed)
+        {
+            CloseZipSwallow(scriptContext);
+            return;
+        }
+        if (this->kind == IteratorHelperKind::Chunks || this->kind == IteratorHelperKind::Windows)
+        {
+            CloseChunkingSwallow(scriptContext);
+        }
         if (this->hasInner && this->innerIterator != nullptr)
         {
             IterRecord innerRecord;
@@ -885,6 +934,13 @@ namespace
             this->innerNextMethod = nullptr;
             this->innerDone = false;
         }
+    }
+
+    void JavascriptIteratorHelper::ClearHelperState()
+    {
+        ClearConcatState();
+        this->zipState = nullptr;
+        this->chunkState = nullptr;
     }
 
     bool JavascriptIteratorHelper::Advance(ScriptContext* scriptContext, Var* outValue)
@@ -1043,6 +1099,12 @@ namespace
                 this->hasInner = true;
             }
         }
+        case IteratorHelperKind::Zip:
+        case IteratorHelperKind::ZipKeyed:
+            return AdvanceZip(scriptContext, outValue);
+        case IteratorHelperKind::Chunks:
+        case IteratorHelperKind::Windows:
+            return AdvanceChunking(scriptContext, outValue);
         case IteratorHelperKind::Wrap:
         default:
             AssertMsg(false, "Advance must not be called on a WrapForValidIterator object");
@@ -1107,16 +1169,17 @@ namespace
             }
             catch (...)
             {
-                helper->ClearConcatState();
+                helper->ClearHelperState();
                 helper->executing = false;
                 throw;
             }
-            helper->ClearConcatState();
+            helper->ClearHelperState();
             helper->executing = false;
             JavascriptExceptionOperators::DoThrowCheckClone(exception, scriptContext);
         }
         catch (...)
         {
+            helper->ClearHelperState();
             helper->executing = false;
             throw;
         }
@@ -1124,7 +1187,7 @@ namespace
         if (!hasValue)
         {
             helper->completed = true;
-            helper->ClearConcatState();
+            helper->ClearHelperState();
             return library->CreateIteratorResultObject(library->GetUndefined(), library->GetTrue());
         }
         return library->CreateIteratorResultObject(value, library->GetFalse());
@@ -1159,13 +1222,35 @@ namespace
             helper->ClearConcatState();
             try
             {
-                helper->CloseInnerNormal(scriptContext);
-                helper->CloseUnderlyingNormal(scriptContext);
+                if (helper->kind == IteratorHelperKind::Zip || helper->kind == IteratorHelperKind::ZipKeyed)
+                {
+                    helper->ReturnZip(scriptContext);
+                }
+                else if (helper->kind == IteratorHelperKind::Chunks || helper->kind == IteratorHelperKind::Windows)
+                {
+                    helper->CloseChunkingNormal(scriptContext);
+                    helper->CloseUnderlyingNormal(scriptContext);
+                }
+                else
+                {
+                    helper->CloseInnerNormal(scriptContext);
+                    helper->CloseUnderlyingNormal(scriptContext);
+                }
             }
             catch (const JavascriptException& err)
             {
+                helper->zipState = nullptr;
+                helper->chunkState = nullptr;
                 JavascriptExceptionOperators::DoThrowCheckClone(err.GetAndClear(), scriptContext);
             }
+            catch (...)
+            {
+                helper->zipState = nullptr;
+                helper->chunkState = nullptr;
+                throw;
+            }
+            helper->zipState = nullptr;
+            helper->chunkState = nullptr;
             return library->CreateIteratorResultObject(library->GetUndefined(), library->GetTrue());
         }
 
@@ -1173,8 +1258,20 @@ namespace
         helper->completed = true;
         try
         {
-            helper->CloseInnerNormal(scriptContext);
-            helper->CloseUnderlyingNormal(scriptContext);
+            if (helper->kind == IteratorHelperKind::Zip || helper->kind == IteratorHelperKind::ZipKeyed)
+            {
+                helper->CloseZipNormal(scriptContext);
+            }
+            else if (helper->kind == IteratorHelperKind::Chunks || helper->kind == IteratorHelperKind::Windows)
+            {
+                helper->CloseChunkingNormal(scriptContext);
+                helper->CloseUnderlyingNormal(scriptContext);
+            }
+            else
+            {
+                helper->CloseInnerNormal(scriptContext);
+                helper->CloseUnderlyingNormal(scriptContext);
+            }
         }
         catch (const JavascriptException& err)
         {
@@ -1185,21 +1282,21 @@ namespace
             }
             catch (...)
             {
-                helper->ClearConcatState();
+                helper->ClearHelperState();
                 helper->executing = false;
                 throw;
             }
-            helper->ClearConcatState();
+            helper->ClearHelperState();
             helper->executing = false;
             JavascriptExceptionOperators::DoThrowCheckClone(exception, scriptContext);
         }
         catch (...)
         {
-            helper->ClearConcatState();
+            helper->ClearHelperState();
             helper->executing = false;
             throw;
         }
-        helper->ClearConcatState();
+        helper->ClearHelperState();
         helper->executing = false;
         return library->CreateIteratorResultObject(library->GetUndefined(), library->GetTrue());
     }
